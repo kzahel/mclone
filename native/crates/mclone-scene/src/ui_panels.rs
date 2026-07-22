@@ -619,6 +619,7 @@ impl McloneSceneHost {
             crosshair_visible: None,
             frame_pipeline_overlay_visible: self.diagnostic_panel.frame_metrics_visible(),
             debug_diagnostics_visible: self.diagnostic_panel.debug_diagnostics_visible(),
+            auxiliary_split_mode: None,
             player_model: self.active_world.player_model,
             movement_mode: game_movement_mode(self.active_world.camera.movement_mode()),
             collision_mode: Some(game_collision_mode(

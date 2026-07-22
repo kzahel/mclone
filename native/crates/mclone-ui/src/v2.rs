@@ -2781,6 +2781,7 @@ impl GameUiHost {
             | GameUiAction::ToggleCrosshair
             | GameUiAction::ToggleFramePipelineOverlay
             | GameUiAction::ToggleDebugDiagnostics
+            | GameUiAction::SetAuxiliarySplitMode(_)
             | GameUiAction::SetPlayerModel(_)
             | GameUiAction::SetMovementMode(_)
             | GameUiAction::SetCollisionMode(_)
@@ -2988,6 +2989,7 @@ const UI_V2_OPTIONS_FRAME_PIPELINE_OVERLAY: UiWidgetId = UiWidgetId(121);
 const UI_V2_OPTIONS_COLLISION_MODE: UiWidgetId = UiWidgetId(122);
 const UI_V2_OPTIONS_TRAVEL_ASSIST: UiWidgetId = UiWidgetId(123);
 const UI_V2_OPTIONS_DEBUG_DIAGNOSTICS: UiWidgetId = UiWidgetId(124);
+const UI_V2_OPTIONS_AUXILIARY_SPLIT: UiWidgetId = UiWidgetId(143);
 const UI_V2_OPTIONS_CAT_GRAPHICS: UiWidgetId = UiWidgetId(125);
 const UI_V2_OPTIONS_CAT_MOVEMENT: UiWidgetId = UiWidgetId(126);
 const UI_V2_OPTIONS_CAT_DISPLAY: UiWidgetId = UiWidgetId(127);
@@ -3604,7 +3606,7 @@ const fn options_category_row_count(category: GameOptionsCategory) -> usize {
         GameOptionsCategory::Graphics => 8,
         GameOptionsCategory::Movement => 8,
         GameOptionsCategory::Display => 3,
-        GameOptionsCategory::Debug => 4,
+        GameOptionsCategory::Debug => 5,
         GameOptionsCategory::StorageProfile => 8,
     }
 }
@@ -3896,6 +3898,16 @@ fn options_category_rows(
             }),
         ],
         GameOptionsCategory::Debug => vec![
+            (
+                20.0,
+                optional_cycle(
+                    UI_V2_OPTIONS_AUXILIARY_SPLIT,
+                    "Auxiliary View",
+                    state.auxiliary_split_mode,
+                    |mode| mode.label(),
+                    |mode| GameUiAction::SetAuxiliarySplitMode(mode.next()),
+                ),
+            ),
             (
                 18.0,
                 UiWidget::checkbox(

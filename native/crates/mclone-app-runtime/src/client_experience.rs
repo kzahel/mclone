@@ -10,9 +10,10 @@ use crate::far_lod::{
 };
 use mclone_input::TouchControlsMode;
 use mclone_ui::{
-    DebugActorTool, GameCollisionMode, GameFarLodDetailMode, GameFramePacingMode, GameMovementMode,
-    GamePlayerModel, GameScenarioId, GameSimulationCadence, GameStorageAction, GameTouchSettings,
-    GameTravelAssistMode, GameTurnMode, GameUiAction, GameUiRenderState, GameXrTurnMode,
+    DebugActorTool, GameAuxiliarySplitMode, GameCollisionMode, GameFarLodDetailMode,
+    GameFramePacingMode, GameMovementMode, GamePlayerModel, GameScenarioId, GameSimulationCadence,
+    GameStorageAction, GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameUiAction,
+    GameUiRenderState, GameXrTurnMode,
 };
 
 use crate::asset_pack_ui::{ClientAssetPackController, ClientAssetPackEffect};
@@ -159,6 +160,7 @@ impl ClientExperienceController {
             | GameUiAction::ToggleCrosshair
             | GameUiAction::ToggleFramePipelineOverlay
             | GameUiAction::ToggleDebugDiagnostics
+            | GameUiAction::SetAuxiliarySplitMode(_)
             | GameUiAction::SetPlayerModel(_)
             | GameUiAction::SetMovementMode(_)
             | GameUiAction::SetCollisionMode(_)
@@ -807,6 +809,21 @@ impl ClientExperienceSettingsController {
                     ),
                 );
             }
+            GameUiAction::SetAuxiliarySplitMode(mode) => {
+                let Some(current) = self.state.auxiliary_split_mode.as_mut() else {
+                    effects.capability_projection.push(
+                        kind,
+                        ClientExperienceCapabilityStatus::Unsupported(
+                            "Auxiliary split presentation is unavailable for this profile",
+                        ),
+                    );
+                    return effects;
+                };
+                *current = mode;
+                effects
+                    .setting_effects
+                    .push(ClientExperienceSettingEffect::SetAuxiliarySplitMode(mode));
+            }
             GameUiAction::SetPlayerModel(model) => {
                 self.state.player_model = model;
                 effects
@@ -1053,6 +1070,14 @@ impl ClientExperienceSettingsController {
                 ),
             );
         }
+        if self.state.auxiliary_split_mode.is_none() {
+            projection.push(
+                ClientExperienceActionKind::SetAuxiliarySplitMode,
+                ClientExperienceCapabilityStatus::Unsupported(
+                    "Auxiliary split presentation is unavailable for this profile",
+                ),
+            );
+        }
         if profile.xr_turn.is_supported() && self.state.xr_turn_mode.is_none() {
             projection.push(
                 ClientExperienceActionKind::SetXrTurnMode,
@@ -1130,6 +1155,7 @@ pub struct ClientExperienceSettingsState {
     pub crosshair_visible: Option<bool>,
     pub frame_pipeline_overlay_visible: bool,
     pub debug_diagnostics_visible: bool,
+    pub auxiliary_split_mode: Option<GameAuxiliarySplitMode>,
     pub player_model: GamePlayerModel,
     pub movement_mode: GameMovementMode,
     pub collision_mode: GameCollisionMode,
@@ -1173,6 +1199,7 @@ impl From<GameUiRenderState> for ClientExperienceSettingsState {
             crosshair_visible: state.crosshair_visible,
             frame_pipeline_overlay_visible: state.frame_pipeline_overlay_visible,
             debug_diagnostics_visible: state.debug_diagnostics_visible,
+            auxiliary_split_mode: state.auxiliary_split_mode,
             player_model: state.player_model,
             movement_mode: state.movement_mode,
             collision_mode: state
@@ -1217,6 +1244,7 @@ impl ClientExperienceSettingsState {
         state.crosshair_visible = self.crosshair_visible;
         state.frame_pipeline_overlay_visible = self.frame_pipeline_overlay_visible;
         state.debug_diagnostics_visible = self.debug_diagnostics_visible;
+        state.auxiliary_split_mode = self.auxiliary_split_mode;
         state.player_model = self.player_model;
         state.movement_mode = self.movement_mode;
         state.collision_mode = Some(self.collision_mode);
@@ -1469,6 +1497,7 @@ pub enum ClientExperienceSettingEffect {
     SetCrosshairVisible(bool),
     SetFramePipelineOverlayVisible(bool),
     SetDebugDiagnosticsVisible(bool),
+    SetAuxiliarySplitMode(GameAuxiliarySplitMode),
     SetPlayerModel(GamePlayerModel),
     SyncPlayerAppearance,
     SetMovementMode(GameMovementMode),
@@ -1554,6 +1583,7 @@ pub enum ClientExperienceActionKind {
     ToggleCrosshair,
     ToggleFramePipelineOverlay,
     ToggleDebugDiagnostics,
+    SetAuxiliarySplitMode,
     SetPlayerModel,
     SetMovementMode,
     SetCollisionMode,
@@ -1633,6 +1663,7 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
             ClientExperienceActionKind::ToggleFramePipelineOverlay
         }
         GameUiAction::ToggleDebugDiagnostics => ClientExperienceActionKind::ToggleDebugDiagnostics,
+        GameUiAction::SetAuxiliarySplitMode(_) => ClientExperienceActionKind::SetAuxiliarySplitMode,
         GameUiAction::SetPlayerModel(_) => ClientExperienceActionKind::SetPlayerModel,
         GameUiAction::SetMovementMode(_) => ClientExperienceActionKind::SetMovementMode,
         GameUiAction::SetCollisionMode(_) => ClientExperienceActionKind::SetCollisionMode,
@@ -1703,6 +1734,7 @@ pub const fn classify_client_experience_action_kind(
         | ClientExperienceActionKind::ToggleCrosshair
         | ClientExperienceActionKind::ToggleFramePipelineOverlay
         | ClientExperienceActionKind::ToggleDebugDiagnostics
+        | ClientExperienceActionKind::SetAuxiliarySplitMode
         | ClientExperienceActionKind::SetTurnMode
         | ClientExperienceActionKind::SetXrTurnMode
         | ClientExperienceActionKind::CycleFramePacing
@@ -2293,6 +2325,46 @@ mod tests {
                 ]
             );
         }
+    }
+
+    #[test]
+    fn flat_auxiliary_split_setting_is_explicit_and_state_gated() {
+        let mut state = ClientExperienceSettingsState::default();
+        state.auxiliary_split_mode = Some(GameAuxiliarySplitMode::Off);
+        let mut settings = ClientExperienceSettingsController::new(state);
+
+        for mode in [
+            GameAuxiliarySplitMode::Horizontal,
+            GameAuxiliarySplitMode::Vertical,
+            GameAuxiliarySplitMode::Off,
+        ] {
+            let effects = settings.apply_ui_action(
+                GameUiAction::SetAuxiliarySplitMode(mode),
+                ClientExperienceSettingsProfile::default(),
+            );
+            assert_eq!(settings.state().auxiliary_split_mode, Some(mode));
+            assert_eq!(
+                effects.setting_effects,
+                vec![ClientExperienceSettingEffect::SetAuxiliarySplitMode(mode)]
+            );
+        }
+
+        let mut unavailable = ClientExperienceSettingsController::default();
+        let effects = unavailable.apply_ui_action(
+            GameUiAction::SetAuxiliarySplitMode(GameAuxiliarySplitMode::Horizontal),
+            ClientExperienceSettingsProfile::default(),
+        );
+        assert!(effects.setting_effects.is_empty());
+        assert_eq!(unavailable.state().auxiliary_split_mode, None);
+        assert_eq!(
+            effects.capability_projection.actions,
+            vec![ClientExperienceActionAvailability {
+                kind: ClientExperienceActionKind::SetAuxiliarySplitMode,
+                status: ClientExperienceCapabilityStatus::Unsupported(
+                    "Auxiliary split presentation is unavailable for this profile"
+                ),
+            }]
+        );
     }
 
     #[test]

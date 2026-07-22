@@ -54,6 +54,9 @@ pub struct MonoUiContext {
     pub touch_overlay: TouchOverlay,
     pub touch_controls_mode: Option<TouchControlsMode>,
     pub touch_settings: Option<GameTouchSettings>,
+    /// Shared flat presentation topology. Platform callers update the other
+    /// context facts every frame; the scene preserves this menu-owned value.
+    pub auxiliary_split_mode: GameAuxiliarySplitMode,
 }
 
 impl Default for MonoUiContext {
@@ -76,6 +79,7 @@ impl Default for MonoUiContext {
             touch_overlay: TouchOverlay::hidden(),
             touch_controls_mode: None,
             touch_settings: None,
+            auxiliary_split_mode: GameAuxiliarySplitMode::Off,
         }
     }
 }
@@ -242,7 +246,16 @@ impl McloneSceneHost {
     }
 
     pub fn set_mono_ui_context(&mut self, context: MonoUiContext) {
-        self.mono_ui_context = Some(context);
+        let auxiliary_split_mode = self
+            .mono_ui_context
+            .as_ref()
+            .map_or(context.auxiliary_split_mode, |current| {
+                current.auxiliary_split_mode
+            });
+        self.mono_ui_context = Some(MonoUiContext {
+            auxiliary_split_mode,
+            ..context
+        });
     }
 
     pub fn enter_mono_title(&mut self, device: &wgpu::Device, queue: &wgpu::Queue) -> Result<()> {
@@ -605,6 +618,50 @@ impl McloneSceneHost {
             self.current_render_distance(),
         )
         .render_view(size[0].max(1), size[1].max(1))
+    }
+
+    pub fn auxiliary_split_mode(&self) -> GameAuxiliarySplitMode {
+        self.mono_ui_context
+            .as_ref()
+            .map_or(GameAuxiliarySplitMode::Off, |context| {
+                context.auxiliary_split_mode
+            })
+    }
+
+    /// Menus remain full-surface. This avoids silently deciding future couch
+    /// pause/menu ownership while making the debug mode directly reversible.
+    pub fn auxiliary_split_gameplay_active(&self) -> bool {
+        self.auxiliary_split_mode().is_split() && !self.mono_ui_is_active()
+    }
+
+    /// Primary participant view plus a non-authoritative elevated follow view.
+    /// The auxiliary camera consumes only already-resident presentation facts;
+    /// this method does not move the scene camera or contribute interest.
+    pub fn auxiliary_split_render_views(
+        &self,
+        primary_size: [u32; 2],
+        auxiliary_size: [u32; 2],
+    ) -> Result<[ChunkRenderView; 2]> {
+        let primary = self.mono_render_view(primary_size)?;
+        let horizontal_forward =
+            Vec3::new(primary.camera_forward.x, 0.0, primary.camera_forward.z).normalize_or_zero();
+        let horizontal_forward = if horizontal_forward.length_squared() > 0.0 {
+            horizontal_forward
+        } else {
+            Vec3::NEG_Z
+        };
+        let focus = primary.camera_position + horizontal_forward * 5.0;
+        let eye = focus - horizontal_forward * 14.0 + primary.camera_right * 8.0 + Vec3::Y * 22.0;
+        let auxiliary = ChunkCamera {
+            eye: eye.to_array(),
+            target: focus.to_array(),
+            up: Vec3::Y.to_array(),
+            fov_y_radians: 58.0_f32.to_radians(),
+            z_near: 0.1,
+            z_far: primary.z_far.max(256.0),
+        }
+        .render_view(auxiliary_size[0], auxiliary_size[1]);
+        Ok([primary, auxiliary])
     }
 
     /// Apply flat input and advance local-player publication from one shared
@@ -1100,6 +1157,13 @@ impl McloneSceneHost {
     where
         H: HostEffects,
     {
+        for effect in &effects.settings.setting_effects {
+            if let ClientExperienceSettingEffect::SetAuxiliarySplitMode(mode) = effect {
+                self.mono_ui_context
+                    .get_or_insert_with(MonoUiContext::default)
+                    .auxiliary_split_mode = *mode;
+            }
+        }
         let catalog_scene_replaced =
             self.apply_xr_catalog_effects(effects.catalog, device, queue)?;
         let session_scene_replaced =
@@ -2324,6 +2388,7 @@ impl McloneSceneHost {
         state.fps_cap = context.frame_pacing.fps_cap;
         state.touch_controls_mode = context.touch_controls_mode;
         state.touch_settings = context.touch_settings;
+        state.auxiliary_split_mode = Some(context.auxiliary_split_mode);
         state.server_cadence = self.active_world.runtime.as_ref().and_then(|runtime| {
             runtime
                 .simulation_cadence()

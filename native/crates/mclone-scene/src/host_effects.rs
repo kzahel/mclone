@@ -97,6 +97,9 @@ where
             ClientExperienceSettingEffect::SetDebugDiagnosticsVisible(visible) => {
                 target.set_debug_diagnostics_visible(visible)?;
             }
+            // Flat presentation topology is retained by `MonoUiContext` and
+            // applied before this generic engine/platform dispatcher.
+            ClientExperienceSettingEffect::SetAuxiliarySplitMode(_) => {}
             ClientExperienceSettingEffect::SetPlayerModel(model) => {
                 target.set_player_model(model)?;
             }

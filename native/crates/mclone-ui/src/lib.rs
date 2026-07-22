@@ -1674,6 +1674,39 @@ pub enum GamePlayerModel {
     UprightBear,
 }
 
+/// Session-local flat presentation topology for the optional single-player
+/// auxiliary world view. `Horizontal` means left/right panes; `Vertical`
+/// means top/bottom panes. XR eye topology is intentionally unrelated.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameAuxiliarySplitMode {
+    #[default]
+    Off,
+    Horizontal,
+    Vertical,
+}
+
+impl GameAuxiliarySplitMode {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Horizontal => "Left / Right",
+            Self::Vertical => "Top / Bottom",
+        }
+    }
+
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Off => Self::Horizontal,
+            Self::Horizontal => Self::Vertical,
+            Self::Vertical => Self::Off,
+        }
+    }
+
+    pub const fn is_split(self) -> bool {
+        !matches!(self, Self::Off)
+    }
+}
+
 impl GamePlayerModel {
     pub const fn label(self) -> &'static str {
         match self {
@@ -1865,6 +1898,7 @@ pub enum GameUiAction {
     ToggleCrosshair,
     ToggleFramePipelineOverlay,
     ToggleDebugDiagnostics,
+    SetAuxiliarySplitMode(GameAuxiliarySplitMode),
     SetPlayerModel(GamePlayerModel),
     SetMovementMode(GameMovementMode),
     SetCollisionMode(GameCollisionMode),
@@ -1998,6 +2032,8 @@ pub struct GameUiRenderState {
     pub crosshair_visible: Option<bool>,
     pub frame_pipeline_overlay_visible: bool,
     pub debug_diagnostics_visible: bool,
+    /// `None` projects this flat-only setting as unavailable (for example XR).
+    pub auxiliary_split_mode: Option<GameAuxiliarySplitMode>,
     pub player_model: GamePlayerModel,
     pub movement_mode: GameMovementMode,
     pub collision_mode: Option<GameCollisionMode>,
@@ -2040,6 +2076,7 @@ impl Default for GameUiRenderState {
             crosshair_visible: Some(true),
             frame_pipeline_overlay_visible: false,
             debug_diagnostics_visible: false,
+            auxiliary_split_mode: None,
             player_model: GamePlayerModel::Player,
             movement_mode: GameMovementMode::Walk,
             collision_mode: None,

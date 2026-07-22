@@ -1,4 +1,5 @@
 use super::*;
+use crate::GameAuxiliarySplitMode;
 
 #[test]
 fn game_ui_host_has_title_and_ingame_start_modes() {
@@ -227,6 +228,50 @@ fn options_categories_show_unavailable_rows_disabled() {
     assert!(
         !crosshair.enabled,
         "unavailable crosshair should be disabled"
+    );
+
+    let mut debug = UiSurface::new();
+    debug.set_screen(Some(UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::Debug,
+    }));
+    debug.set_scale(GuiScale::from_pixels(960, 540));
+    debug.set_render_state(GameUiRenderState::default());
+    assert!(
+        !debug
+            .layout()
+            .widget(UI_V2_OPTIONS_AUXILIARY_SPLIT)
+            .expect("auxiliary view row present even when unavailable")
+            .enabled
+    );
+}
+
+#[test]
+fn debug_options_cycles_the_flat_auxiliary_view_mode() {
+    let mut surface = UiSurface::new();
+    surface.set_screen(Some(UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::Debug,
+    }));
+    surface.set_scale(GuiScale::from_pixels(960, 540));
+    let state = GameUiRenderState {
+        auxiliary_split_mode: Some(GameAuxiliarySplitMode::Off),
+        ..GameUiRenderState::default()
+    };
+    surface.set_render_state(state);
+    let row = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_AUXILIARY_SPLIT)
+        .expect("flat auxiliary view row")
+        .clone();
+    assert!(row.enabled);
+    assert_eq!(row.value.as_deref(), Some("Off"));
+    assert!(surface.pointer_down(point_in(row.rect), state));
+    assert_eq!(
+        surface.pointer_up(point_in(row.rect), state).1,
+        Some(GameUiAction::SetAuxiliarySplitMode(
+            GameAuxiliarySplitMode::Horizontal
+        ))
     );
 }
 

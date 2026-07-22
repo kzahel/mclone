@@ -26,7 +26,7 @@ use mclone_app_runtime::client_experience::{
     ClientExperienceGameplayEffect, ClientExperienceLocalDataEffect,
     ClientExperienceMovementSettingChange, ClientExperienceProfile,
     ClientExperienceProjectionEffect, ClientExperienceScenarioEffect,
-    ClientExperienceSettingsEffects, ClientExperienceSettingsState,
+    ClientExperienceSettingEffect, ClientExperienceSettingsEffects, ClientExperienceSettingsState,
     client_experience_should_apply_ui_projection, desktop_native_client_experience_profile,
 };
 use mclone_app_runtime::client_session_policy::client_session_failed_start_ui_effects;
@@ -121,8 +121,8 @@ use mclone_protocol::{DebugActorKind, DebugHotbarItem, EntitySnapshot, RemotePla
 use mclone_render::actor_assets::ActorTextureAssets;
 use mclone_render::actor_assets::ActorTextureImage;
 use mclone_render::chunk::{
-    ChunkDepthTarget, ChunkMultiviewDepthTarget, ChunkMultiviewRenderTarget, ChunkProjectionKind,
-    ChunkRenderTarget, ChunkRenderView, PreparedTexturedSectionStereoDraw,
+    ChunkCamera, ChunkDepthTarget, ChunkMultiviewDepthTarget, ChunkMultiviewRenderTarget,
+    ChunkProjectionKind, ChunkRenderTarget, ChunkRenderView, PreparedTexturedSectionStereoDraw,
     TexturedSectionDrawResources, TexturedSectionRecordCacheStats,
     TexturedSectionRecordPrepareStats, TexturedSectionRenderOptions, TexturedSectionRenderPhase,
     TexturedSectionRenderStats, TexturedSectionTranslucentRecord, TexturedSectionUploadReport,
@@ -166,12 +166,13 @@ use mclone_render_session::{
 use mclone_server::{SimulationCadenceConfig, WorkerFrameMetrics};
 use mclone_ui::{
     Color, DEFAULT_JOIN_REMOTE_ADDR, DebugActorTool, DebugOverlay, FlatHotbarOverlay, FlatHud,
-    FlatHudDebugOverlay, GameCollisionMode, GameDeathCause, GameFramePacingMode, GameMovementMode,
-    GamePlayerModel, GameScreen, GameSimulationCadence, GameTouchSettings, GameTravelAssistMode,
-    GameTurnMode, GameUiAction, GameUiHost, GameUiRenderState, GameXrTurnMode, GamepadHudOverlay,
-    GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay, Point, Rect, StatusOverlay,
-    StorageProfileBackend, StorageProfileUiState, TouchOverlay, UiDebugSnapshot, UiDrawCacheStats,
-    UiPanelRevision, WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
+    FlatHudDebugOverlay, GameAuxiliarySplitMode, GameCollisionMode, GameDeathCause,
+    GameFramePacingMode, GameMovementMode, GamePlayerModel, GameScreen, GameSimulationCadence,
+    GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameUiAction, GameUiHost,
+    GameUiRenderState, GameXrTurnMode, GamepadHudOverlay, GuiDrawList, GuiKey, GuiScale,
+    LoadingProgressOverlay, Point, Rect, StatusOverlay, StorageProfileBackend,
+    StorageProfileUiState, TouchOverlay, UiDebugSnapshot, UiDrawCacheStats, UiPanelRevision,
+    WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
 };
 
 mod asset_replacement;
