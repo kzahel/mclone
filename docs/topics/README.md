@@ -138,8 +138,9 @@ series implements the same concern, normally reuse the document slug in its
 - [`distribution-go-to-market.md`](distribution-go-to-market.md): current
   commercial-channel and launch direction — Steam as the preferred PC surface,
   a supported no-Steam direct edition, paid/demo/full-free model options,
-  Quest as a differentiation wedge, competitive landscape, positioning,
-  launch sequencing, metrics, and unresolved store-policy decisions.
+  web as a first-class no-install client and acquisition surface, Quest as a
+  differentiation wedge, competitive landscape, positioning, launch
+  sequencing, metrics, and unresolved store-policy decisions.
 - [`web-scene-host-adoption.md`](web-scene-host-adoption.md): completed browser
   adoption of the shared `McloneSceneHost`, including landed service and
   typed-async boundaries, preserved worker/compiler topology, production

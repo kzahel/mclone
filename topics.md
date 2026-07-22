@@ -132,5 +132,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   a stable direct-desktop launcher, signed manifests, transactional version
   slots, whole-artifact-first updates, and measured later delta optimization
 - `distribution-go-to-market` — Steam-preferred PC distribution with a real
-  no-Steam edition, paid/demo/full-free commercial options, Quest and Deck
-  positioning, competitive landscape, launch sequencing, and success measures
+  no-Steam edition, first-class no-install web play, paid/demo/full-free
+  commercial options, Quest and Deck positioning, competitive landscape,
+  launch sequencing, and success measures

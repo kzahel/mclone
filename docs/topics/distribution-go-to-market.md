@@ -7,8 +7,10 @@ pricing, launch order, and storefront approvals remain open.** Steam should be
 the preferred PC purchase and discovery surface, not a channel from which
 Mclone steers customers away. A first-party direct edition should provide a
 real no-Steam option. The leading commercial candidate is a free trial or demo
-plus paid ownership in each channel, while a complete free direct edition with
-paid supporter/store editions remains an explicit alternative.
+plus paid ownership in channels that use entitlements, while a complete free
+direct edition with paid supporter/store editions remains an explicit
+alternative. Web's commercial access model remains open without reducing its
+full-client product scope.
 
 Last reconciled: **2026-07-22**.
 
@@ -58,6 +60,7 @@ feature:
 
 - one shared game and world model across desktop, Steam Deck, web, flat
   Android, desktop OpenXR, and standalone Quest;
+- instant no-install entry into the full game through the web client;
 - first-class flat, ordinary-controller, touch, and tracked-controller
   experiences instead of a flat game wrapped after the fact;
 - local integrated play, dedicated remote play, and a path to cross-platform
@@ -87,10 +90,25 @@ gap than on Steam Deck, but the smaller market, store review, performance,
 comfort, and youth-safety requirements make it a high-quality bar rather than
 an automatic win.
 
-Web is primarily the lowest-friction acquisition and trial surface at first.
-It can become a complete product surface when persistence, performance,
-networking, and browser deployment are ready for that promise, but the GTM plan
-must not imply that readiness prematurely.
+Web is a first-class full client and the lowest-friction distribution surface.
+Its ability to enter the game from a link with no installation is a core
+product advantage, not evidence that it is a preview. The same web client can
+also provide guest or trial entry if the commercial model needs one, but that
+is an entitlement/content state of the full client rather than a reduced
+browser product.
+
+Browser capabilities still create honest platform trade-offs. A browser
+cannot listen as a native socket server, uses browser transports and storage,
+may have tighter memory/performance budgets, and must work within browser
+lifecycle and security rules. Those are platform-adapter constraints. They do
+not lower the target from the same full player-facing game supported by other
+clients.
+
+This is the product contract already recorded in
+[`../platforms.md`](../platforms.md#current-direction) and
+[`platform-parity.md`](platform-parity.md#flat-class--desktop-flat-offscreen-flat-flat-android-webwasm):
+web/WASM is an equal product surface in the flat class, whose target is the
+full game client.
 
 The direct desktop edition is a durable accessibility and independence lane.
 It should be easy to find on the first-party website, receive the same gameplay
@@ -103,7 +121,7 @@ the default call to action.
 |---|---|---|---|
 | Steam desktop flat/OpenXR | Preferred PC purchase, discovery, community, and Steam Deck surface | Paid base game plus a proper Steam demo; optional supporter DLC only if it has honest independent value | Steam owns the payload. Avoid an extra launcher in the normal Steam path, especially on Deck. |
 | First-party desktop | Supported no-Steam choice for Windows, macOS, and Linux | Free direct trial followed by a first-party one-time purchase is the leading candidate | First-party launcher owns install, repair, channels, and updates. |
-| Web/WASM | Instant try-before-install funnel, share links, catalogue/world previews, and possibly a later full client | Free bounded demo initially; full free or entitled play remains open | Web deployment owns activation and caching. |
+| Web/WASM | First-class full client, instant no-install play, share links, and the uniquely low-friction acquisition/trial surface | Full-client access model remains open: free play, entitled play, or guest/trial entry that upgrades in place are all possible; preview-only positioning is rejected | Web deployment and browser cache lifecycle own delivery; browser adapters own storage, transport, lifecycle, and capability constraints. |
 | Meta Horizon Store / Quest | High-differentiation standalone-XR purchase surface | Paid premium app, with a platform-native trial/demo only if the current store program supports the intended shape | Meta owns store installation and updates. |
 | Direct Quest APK | Enthusiast, tester, archival, and no-store lane | Signed trial or entitled direct build; a complete free build remains an option | Android package installation and user confirmation own upgrades. |
 | Flat Android store/direct | Broad mobile reach after touch UX and product readiness | Undecided; avoid assuming the Quest offer transfers cleanly | Store or Android package owner controls executable updates. |
@@ -118,7 +136,7 @@ differ. Cross-play and behavioral parity do not imply cross-buy.
 
 | Model | Shape | Benefits | Main problems | Current posture |
 |---|---|---|---|---|
-| Channel-native paid game with free demos | Steam, direct, and Quest each sell the full game; Steam/browser/direct trials are free | Conventional customer expectation, clear value, straightforward store ownership, and no appearance that one buyer subsidized an identical free product | Requires direct checkout, entitlement, tax/refund support, and a genuinely persuasive demo | **Leading candidate** |
+| Channel-native paid game with trial entry | Steam, direct, and Quest each sell the full game; Steam/direct trials are free; the full web client may offer guest/trial and entitled play or remain free | Conventional customer expectation, clear value, straightforward store ownership, and no appearance that one buyer subsidized an identical free product | Requires direct checkout, entitlement, tax/refund support, and a genuinely persuasive trial | **Leading candidate** |
 | Full game free direct; paid store editions as support/convenience | First-party desktop/APK/web remain complete and free; Steam/Quest purchases are voluntary support with store convenience | Maximizes access and preserves a strong no-gate principle | Paid store value can be confusing, conversion may be weak, and store policy/price treatment needs written confirmation | Preserve as an explicit alternative, not the current default |
 | Free base everywhere plus supporter products | Same free game on all channels, with soundtrack, cosmetic acknowledgement, supporter badge, or other add-ons | Clean gameplay parity and broad reach | Creates ongoing monetization/content operations and can weaken a premium-game launch | Fallback if premium conversion is rejected by audience evidence |
 | Paid store game with a free direct build deliberately kept obscure | Store is marketed; direct is technically available but hidden | May reduce immediate channel conflict | Violates the goal of supporting no-store players and creates distrust if discovered | Rejected |
@@ -129,7 +147,9 @@ The leading offer is therefore:
 1. Buy on Steam as the primary PC call to action.
 2. Use a Steam demo to try the Steam edition.
 3. Offer “buy direct / no Steam required” as a clear secondary website choice.
-4. Let the browser or direct launcher provide a corresponding free trial.
+4. Let players enter the full web client instantly; if the commercial model
+   uses a guest/trial state, let that state upgrade in place rather than hand
+   users off to a different browser product.
 5. Sell the Quest build through the Meta Horizon Store, with a signed direct
    APK path for testers and users who knowingly choose sideloading.
 6. Keep the game, public assets, worlds, networking, and update compatibility
@@ -209,9 +229,12 @@ full build. Prefer a bounded experience over a countdown timer:
   paid edition.
 
 The Steam demo should be a real Steam demo App ID, not the paid app in an
-externally licensed state. The website can offer instant web play and/or a
-direct-launcher trial. The Quest trial shape must be chosen from the platform
-program actually available at submission time rather than assumed now.
+externally licensed state. The website should offer instant entry into the full
+web client and may place that client in a clearly described guest/trial state.
+Full access should remain the same web product and upgrade in place when the
+commercial model requires entitlement. A direct-launcher trial may exist
+alongside it. The Quest trial shape must be chosen from the platform program
+actually available at submission time rather than assumed now.
 
 ## Competitive Landscape Snapshot
 
@@ -289,16 +312,21 @@ Quest should be treated as a potential beachhead for differentiation, not
 necessarily the largest revenue channel. Steam can remain the preferred PC
 channel while Quest supplies the clearest “why this game?” story.
 
-### Direct And Web
+### Web And Direct
 
-The website should not be a generic brochure. It can be a working funnel:
+The web client turns the website from a generic brochure into both a complete
+play surface and a working funnel. “Play now” should enter the first-class game
+client without an install; whether that session begins with full, guest, or
+trial entitlement is a commercial policy rather than a different client:
 
 ```text
 search / creator video / shared build / store discovery
                          |
                          v
                 first-party landing page
-                 +-- play web demo
+                 +-- play now in full web client
+                 |     +-- guest/trial state if the offer uses one
+                 |     +-- full play when free or entitled
                  +-- download direct trial
                  +-- wishlist / buy on Steam (primary PC purchase)
                  +-- buy direct, no Steam required
@@ -316,6 +344,14 @@ walk-through previews, deterministic guides, and “open in Mclone” experience
 but catalogue traffic should not be counted as game demand until users cross
 into a playable experience.
 
+No-install entry does not erase platform differences. The browser host may use
+Web Workers rather than native threads, WebSocket rather than raw TCP, browser
+persistence rather than native SQLite/files, and remote or integrated sessions
+that do not expose a native listening socket. Performance and available
+features must be measured and disclosed honestly. These adaptations preserve
+the full-client contract; they do not justify relabeling web as a viewer,
+preview, or demo target.
+
 ## Target Audiences
 
 Initial messaging should distinguish audiences rather than collapse them into
@@ -327,17 +363,21 @@ Initial messaging should distinguish audiences rather than collapse them into
    installing a community launcher or control mod.
 3. **Standalone Quest players** who currently choose between sideloaded
    Minecraft Java and much narrower store-native block builders.
-4. **No-store and Linux-first players** who deliberately value direct
+4. **Web-first and no-install players** who want a link to enter the complete
+   game immediately, including on machines where they cannot or will not
+   install a native application.
+5. **No-store and Linux-first players** who deliberately value direct
    ownership, offline capability, dedicated servers, and supported downloads.
-5. **Builders and creators** entering through structures, seeds, screenshots,
+6. **Builders and creators** entering through structures, seeds, screenshots,
    videos, build guides, and eventually shareable worlds.
-6. **Mixed-device groups** for whom one person can play flat while another
+7. **Mixed-device groups** for whom one person can play flat while another
    joins from XR, mobile, or web.
 
-The launch campaign need not address all six equally. Steam survival/building
+The launch campaign need not address all seven equally. Steam survival/building
 players are the broad commercial audience; standalone Quest is the sharpest
-differentiation wedge; direct/Linux users are an important trust and advocacy
-audience; web and catalogue users form the acquisition surface.
+differentiation wedge; web players are both a product audience and the
+lowest-friction acquisition path; direct/Linux users are an important trust
+and advocacy audience; catalogue users form an additional acquisition surface.
 
 ## Positioning And Message Hierarchy
 
@@ -346,10 +386,11 @@ Provisional message hierarchy:
 1. **A living voxel survival world built for screen and headset.**
 2. **Play the same game flat or immersive, locally or with friends.**
 3. **Native on the devices where voxel sandboxes are currently awkward.**
-4. **Buy on your preferred store, or use the supported direct edition.**
+4. **Play instantly on web, buy on your preferred store, or use direct.**
 
 Proof in trailers and demos should lead with player-visible facts:
 
+- enter and play the full game from a browser link without installation;
 - start or resume a beautiful first-party world quickly;
 - gather, craft, build, explore, fight, and encounter living actors;
 - move the same world or session between meaningful device classes;
@@ -367,8 +408,8 @@ developer-story material after the product fantasy is clear.
 
 - Settle the public name, trademark search, first-party visual identity,
   ratings strategy, privacy surface, and releasable asset audit.
-- Define the paid-game boundary and one trial contract shared by Steam, direct,
-  and web where platform rules permit.
+- Define the paid-game boundary and one trial/guest-state contract shared by
+  Steam, direct, and the full web client where platform rules permit.
 - Establish support, refund, tax, payment, entitlement, crash-reporting, and
   account-recovery ownership.
 - Capture representative real-device footage only after first-session UX,
@@ -379,8 +420,8 @@ developer-story material after the product fantasy is clear.
 - Publish the Steam Coming Soon page once the capsule, trailer, screenshots,
   tags, and description represent a product that can survive long-term public
   comparison.
-- Provide a focused website with Steam as the primary PC call to action and a
-  visible no-Steam alternative.
+- Provide a focused website with first-class actions for instant web play,
+  Steam wishlist/purchase, and the visible no-Steam direct alternative.
 - Use the public first-party web/catalogue surfaces, short gameplay clips,
   development updates, and creator outreach to test which message actually
   earns play and return behavior.
@@ -394,8 +435,8 @@ release, but the useful audience-building period is normally much longer:
 ### Stage 2 — public demo
 
 - Release a high-quality Steam demo associated with the paid app.
-- Offer the corresponding direct and/or browser trial without steering users
-  out of the Steam demo.
+- Offer the corresponding direct trial and, if applicable, open the full web
+  client in a guest/trial state without steering users out of the Steam demo.
 - Preserve demo worlds into the full product where practical.
 - Measure first-world completion, return, wishlist, purchase intent, crash
   rate, and target-specific friction before declaring launch readiness.
@@ -408,6 +449,9 @@ release, but the useful audience-building period is normally much longer:
 
 - Launch Steam and direct desktop close enough together that neither audience
   receives a stale or materially inferior product.
+- Treat web as a full public client launch lane with its own browser,
+  persistence, transport, performance, and deployment gates. Its commercial
+  access may differ, but its gameplay promise must not be preview-only.
 - Launch Quest in the same campaign only if its onboarding, comfort,
   persistence, multiplayer, and frame pacing meet the native store promise.
   A later Quest launch is better than treating headset owners as beta testers
@@ -438,7 +482,7 @@ advertising assumptions:
 - **World loop:** memorable seed/settlement/challenge -> player attempts it ->
   screenshot, video, or world share -> another player starts.
 - **Build loop:** searchable structure/build guide -> interactive preview ->
-  open in web demo or game -> modify and share.
+  open in the full web client or another client -> modify and share.
 - **Cross-device loop:** one world shown on flat desktop, Deck, and Quest ->
   concrete differentiation -> group purchase or invitation.
 - **Server loop:** free dedicated server -> durable community world -> player
@@ -452,20 +496,23 @@ or headset sensor data. Sharing must be explicit and privacy-scoped.
 Track a small funnel by channel rather than celebrating aggregate downloads:
 
 - landing-page source -> Steam wishlist, direct trial, web play, or Quest page;
-- demo/trial install -> successful first launch;
+- demo/trial entry or install -> successful first launch;
 - first launch -> first world entered and first meaningful build/craft action;
 - first world -> second session, D1, D7, and four-week return;
 - demo -> paid conversion by channel and campaign;
 - purchase -> refund, crash-free sessions, support contacts, and review score;
 - multiplayer invitation -> successful join and later return;
+- web entry -> first persistent world, successful later return, and parity-gap
+  attribution rather than dismissal as preview traffic;
 - Steam Deck sessions with no manual configuration;
 - Quest sessions meeting comfort and frame-pacing gates; and
 - direct-channel share, bandwidth/support cost, and entitlement failures.
 
 A useful product north star is **players who return to a persistent world in a
 later week**, segmented by solo and multiplayer. Raw launcher downloads,
-catalogue page views, and one-off web sessions are acquisition signals, not
-proof of a durable sandbox.
+catalogue page views, and one-off trial sessions are acquisition signals, not
+proof of a durable sandbox. Returning web players count as product retention
+on the same terms as returning native players.
 
 ## Release And Marketing Gates
 
@@ -480,8 +527,10 @@ Do not open a public paid offer until the promised flavor has:
 - release signing, crash handling, update recovery, and support diagnostics;
 - privacy policy, ratings/content disclosure, refund/support workflow, and
   store data declarations;
-- representative clean-machine installation and previous-release update
-  evidence; and
+- representative clean-machine native installation and previous-release
+  update evidence;
+- supported-browser deployment, persistence, lifecycle, transport, input, and
+  performance evidence for web claims; and
 - device-native performance evidence for Deck and Quest claims.
 
 Paid Early Access can ship an incomplete game, but it cannot substitute
@@ -529,7 +578,7 @@ Five first-class engine targets do not require five simultaneous commercial
 launches. Product behavior stays shared, while marketing and support can stage
 channels according to evidence. Do not degrade the architecture to stage the
 business, and do not overextend support merely to advertise every build at
-once.
+once. Staging a web commercial offer does not change its full-client target.
 
 ### Youth, UGC, and privacy
 
@@ -546,13 +595,16 @@ design before they become marketing features.
   desktop option.
 - Quest Store distribution and platform updates are desirable, with signed
   sideload access retained for users/testers who knowingly choose it.
-- The game should remain behaviorally the same across paid/store/direct
-  flavors; monetization is not a gameplay fork.
+- The game should remain behaviorally the same across all public client and
+  distribution flavors, including web; monetization is not a gameplay fork.
 - A direct free trial plus first-party payment is a serious and currently
   cleaner candidate than charging on Steam while making the entire direct game
   free.
 - Steam should use its own paid entitlement and demo shape rather than an
   external lightweight license/paywall inside the Steam build.
+- Web is a first-class full client. Its no-install entry is both a core product
+  advantage and an acquisition/trial opportunity; browser constraints do not
+  make it a preview target.
 - Standalone Quest is a strategic differentiation wedge because official
   Minecraft VR support ended and the remaining routes are workaround or
   narrower-competitor products.
@@ -573,6 +625,11 @@ design before they become marketing features.
   launch?
 - What bounded trial content best predicts purchase without misrepresenting
   the open-ended game?
+- Is full web play free, account-entitled, or guest/trial before entitlement,
+  and how does a player upgrade in place without changing clients?
+- Which browser limitations require capability-specific UX while preserving
+  the full-client contract—for example no native listening socket, browser
+  storage, worker lifecycle, and lower performance ceilings?
 - Should Steam/direct PC launch before Quest, or can Quest meet the same
   campaign window without compromising native quality?
 - Which Meta trial, testing, IAP, external-entitlement, and package-identity
@@ -595,8 +652,9 @@ Before settling price or launch order:
    platforms, controller quality, update cadence, and recurring complaints.
 3. Obtain written Steam and Meta answers for the exact direct/store pricing,
    entitlement, and external-account model under consideration.
-4. Prototype the same bounded first-session demo in web, direct desktop, and
-   Steam packaging, then measure completion and return behavior.
+4. Prototype the same bounded first-session trial state in the full web client,
+   direct desktop, and Steam demo packaging, then measure completion, upgrade,
+   and return behavior without reducing the web client itself.
 5. Run moderated onboarding tests on ordinary PC, Steam Deck, and Quest with
    players who did not install or build the game.
 6. Estimate direct-channel economics: payment/tax fees, bandwidth, support,
@@ -620,4 +678,5 @@ Before settling price or launch order:
   packs and provenance boundary.
 - [`structure-catalogue-product.md`](structure-catalogue-product.md) —
   catalogue-led acquisition and product-economy exploration.
-- [`../native-web.md`](../native-web.md) — web build and deployment mechanics.
+- [`../native-web.md`](../native-web.md) — full web-client build, smoke, and
+  deployment mechanics.
