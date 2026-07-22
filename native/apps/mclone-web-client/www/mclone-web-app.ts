@@ -174,8 +174,7 @@ class WebFrameDriver {
       }
     }
     const startup = startupOptionsFromLocation(module);
-    runtime.state.generationProfile = String(startup.generationProfile);
-    runtime.state.worldTopology = String(startup.worldTopology);
+    smokeObserver?.observeStartup(startup);
 
     publishRuntimeState(runtime.state);
     const resources = await fetchBootstrapResources(module, startup.browserPlan());

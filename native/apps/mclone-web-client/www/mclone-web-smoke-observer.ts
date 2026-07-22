@@ -95,6 +95,7 @@ interface SmokeBridge {
 
 export interface WebSmokeObserver {
   observePlatformState(runtime: { ready: boolean; state: Record<string, any> }): void;
+  observeStartup(startup: Record<string, any>): void;
   observeReport(report: WasmReport | null | undefined): void;
   latestReport(): WasmReport | null;
   observeTarget(target: WasmReport | null | undefined): void;
@@ -158,6 +159,10 @@ export function installWebSmokeObserver(
       if (touch) {
         runtime.state.touchPointerActiveCount = touch.activePointerCount;
       }
+    },
+    observeStartup(startup): void {
+      runtime.state.generationProfile = String(startup.generationProfile);
+      runtime.state.worldTopology = String(startup.worldTopology);
     },
     observeReport(report): void {
       if (!report?.ok) {
