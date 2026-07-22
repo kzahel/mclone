@@ -1,6 +1,7 @@
 # Tactical 216: Controller Input Foundation
 
-Status: active 2026-07-22.
+Status: unattended implementation complete 2026-07-22; hardware-only
+acceptance remains open.
 
 Topic: [`controller-input`](../topics/controller-input.md).
 
@@ -496,7 +497,43 @@ The first Android XR cross-compile exposed and then closed a missing direct
 shared-input dependency plus an incorrect startup-scope load. The rerun built
 the real Android-only code and release package successfully. No host advertises
 haptic output; real-device bindings, feel, and tactile acceptance remain in the
-hardware-only ledger. Final automated cross-target closeout is still active.
+hardware-only ledger. Slice 7c records the completed automated closeout.
+
+### Slice 7c — automated foundation closeout
+
+Completed on 2026-07-22. The first full-workspace run found two stale
+source-shape assertions that still named the pre-convergence XR fields. The
+contract now requires `latest_xr_input` and `latest_xr_head_gaze_stage` in the
+scene host and its physical reset. The focused contract and complete workspace
+rerun pass.
+
+Final unattended evidence:
+
+```text
+cargo fmt --all -- --check: passed
+cargo test --manifest-path native/Cargo.toml: passed
+cargo check -p mclone-input -p mclone-scene -p mclone-web-client
+  --target wasm32-unknown-unknown: passed
+pnpm native:thin-adapters:purity: passed
+pnpm native:scene-host:purity: passed
+pnpm native:xr:frame-driver:purity: passed
+pnpm native:desktop-offscreen:smoke: passed; pixels inspected
+pnpm native:xr-emulation:smoke: passed; stereo pixels inspected
+pnpm host:check: headed Wayland WebGPU lane available
+pnpm native:web:app-smoke: passed; canvas inspected
+pnpm native:web:mobile-smoke: passed; schema-1 profile and pixels inspected
+pnpm native:xr:check: passed
+pnpm native:android:apk:avd: arm64 + x86_64 debug APK passed
+pnpm native:android-xr:apk: arm64 release APK passed
+flat Android AVD smoke: passed; pixels inspected
+```
+
+The repository's default asset-lock check is independently stale for
+`mclone-game-1.17.1`, so the otherwise standard AVD rerun staged the current
+local reference pack with `MCLONE_ANDROID_ASSET_LOCK_CHECK=0`. No controller
+code or provenance file was changed to bypass that unrelated baseline issue.
+The automated foundation is complete; all entries in the hardware-only
+acceptance ledger intentionally remain open.
 
 ## Completion Bar
 

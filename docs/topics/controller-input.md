@@ -2,9 +2,10 @@
 
 Topic: `controller-input`
 
-Status: active implementation; shared source/assignment, semantic controller
-session, scene routing, controller-complete menu navigation, and layout-aware
-text prompt foundations implemented as of 2026-07-22. Desktop flat now polls
+Status: unattended foundation complete as of 2026-07-22; real-device product
+acceptance remains open. Shared source/assignment, semantic controller session,
+scene routing, controller-complete menu navigation, and layout-aware text
+prompt foundations are implemented. Desktop flat polls
 ordinary controllers through GilRs and browser Rust polls the W3C standard
 Gamepad mapping near its animation-frame boundary. Flat Android now routes a
 shared source-aware Java/Rust collector through the semantic scene input path;
@@ -12,19 +13,20 @@ desktop and Android XR now merge the same ordinary-controller facts with
 semantic OpenXR actions. Tracked poses and XR-only mechanics remain typed
 extensions, while pose-less Attack/Use use a shared head-gaze fallback. A
 versioned shared preference profile and neutral haptic output contract are
-implemented and consumed by every interactive host; automated closeout is in
-progress. This topic owns the durable all-target controller direction across
-desktop flat, web, flat Android, desktop XR, Android XR, offscreen/test hosts,
-Steam Deck, and a future native Steam Input integration. Tactical
+implemented and consumed by every interactive host. The automated workspace,
+WASM, desktop, browser, Android build, AVD, and XR-emulation closeout is
+recorded below. This topic owns the durable all-target controller direction
+across desktop flat, web, flat Android, desktop XR, Android XR, offscreen/test
+hosts, Steam Deck, and a future native Steam Input integration. Tactical
 [`098`](../tactical/098-flat-input-capability-convergence.md) remains the
 bounded execution record for the existing flat-input slices.
 [`Tactical 215`](../tactical/215-preliminary-couch-readiness.md) owns the
 bounded session-local source identity and scripted 1-4-source assignment proof;
 it deliberately does not add a physical gamepad collector.
-[`Tactical 216`](../tactical/216-controller-input-foundation.md) owns the active
-unattended implementation series through shared semantics, UI, physical
-collectors, XR convergence, preferences, and automated validation. Real-device
-acceptance remains a separate recorded gate.
+[`Tactical 216`](../tactical/216-controller-input-foundation.md) owns the
+completed unattended implementation series through shared semantics, UI,
+physical collectors, XR convergence, preferences, and automated validation.
+Real-device acceptance remains a separate recorded gate.
 
 ## Top-Level Decision
 
@@ -578,7 +580,7 @@ standard snapshot or make the shared gameplay path conditional on a vendor.
    ordinary gamepad actions, and the shared scene owns head-gaze fallback.
 8. **Preferences and rebinding.** Shared policy, schema-1 codec, legacy web
    migration, atomic native storage, all interactive host application, and
-   neutral haptics are implemented. Automated closeout remains active.
+   neutral haptics are implemented. Automated closeout passed.
 9. **Optional advanced backends.** Add Steam Input, haptics, exact glyph
    origins, gyro/touchpads, accessibility extensions, and durable
    source-to-profile/participant association beyond the preliminary seat
@@ -590,7 +592,7 @@ Tactical 215 completed source identity/descriptor, canonical snapshots, and
 bounded scripted assignment. Tactical 216 Slices 1–7 completed semantic input,
 shared scene and UI routing, desktop/browser/Android collectors, XR action
 convergence, versioned preferences, rebinding, and neutral haptics. Automated
-closeout validation and the recorded real-device ledger remain.
+closeout validation is complete; the recorded real-device ledger remains.
 
 Do not wire a platform backend before Slices 1–3 provide the complete shared
 gameplay and UI destination. Otherwise the first platform will accidentally
@@ -710,6 +712,33 @@ layouts require device testing.
   XR-plus-flat consumer of this input foundation.
 - [`../tactical/098-flat-input-capability-convergence.md`](../tactical/098-flat-input-capability-convergence.md)
   — existing flat capability/gamepad foundation and bounded execution record.
+
+## Automated Foundation Closeout
+
+Completed on 2026-07-22 without controller or headset hardware attached:
+
+- the complete native Rust workspace passed, including the updated structural
+  lock that requires typed XR input and head-gaze state to reset together;
+- `mclone-input`, `mclone-scene`, and `mclone-web-client` compiled for
+  `wasm32-unknown-unknown`, and all thin-adapter, scene-host, and XR-frame-driver
+  ownership gates passed;
+- desktop offscreen and headset-free stereo smokes passed; their mono world and
+  two distinct eye views with world-panel UI were captured under `/tmp` and
+  visually inspected;
+- headed-Wayland desktop and mobile browser app smokes passed. The mobile probe
+  stored schema 1 with the complete controller profile while changing touch
+  sensitivity, and its world, touch HUD, and options captures were inspected;
+- desktop OpenXR compiled, flat Android built for arm64 and x86_64, and Android
+  XR built its arm64 release APK through the supported NDK/Gradle scripts; and
+- the flat Android AVD installed and ran the dual-ABI APK, produced live
+  terrain/HUD pixels, and passed its lifecycle/render sentinel.
+
+The default AVD command first stopped at an unrelated stale
+`mclone-game-1.17.1` asset-pack lock. The standalone lock check reproduces that
+baseline drift. The controller closeout did not rewrite provenance data; the
+successful AVD rerun staged the current local reference pack with
+`MCLONE_ANDROID_ASSET_LOCK_CHECK=0`. This exception does not replace the open
+physical-controller, headset, Steam Deck, or haptic acceptance ledger.
 
 ## Definition Of Done
 
