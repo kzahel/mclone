@@ -2,8 +2,8 @@
 
 Topic: `figure-transparency-materials`
 
-Status: accepted for implementation on 2026-07-22. The first production slice
-extends the completed binary-cutout contract with explicit material modes,
+Status: implemented and validated on 2026-07-22. The production slice extends
+the completed binary-cutout contract with explicit material modes,
 whole-figure opacity, and dithered versus smoothly blended Ghost proofs. Exact
 order-independent transparency remains deferred.
 
@@ -100,6 +100,62 @@ semantic-versus-native prepared comparison.
    boundary independently.
 3. Add per-instance opacity and paired Ghost proofs, run every affected gate,
    inspect pixels in motion, and commit the visual acceptance closeout.
+
+All three checkpoints are complete. The implementation landed as the following
+reviewable series:
+
+- `11a0f565` defines this contract;
+- `a7a7d2e6` adds Asset Lab semantics, preview, and catalogue facts;
+- `2b08857d` compiles exact faces into prepared alpha pass ranges;
+- `de095e15` renders all prepared review paths;
+- `355d6299` renders production actors and adds per-instance opacity;
+- `1dda5b13` adds both shared-rig Ghost proofs; and
+- `8d7d61a8` closes the browser and catalogue sentinels.
+
+## Implemented Result
+
+- Schema-v1 figures retain their old defaults while material validation accepts
+  the four modes, fractional opacity, mask cutoff/coverage, and RGBA palette
+  entries. Only texture characters that are actually used can imply a mask.
+- The v2 compiler preserves exact face diagnostics, adds alpha cutoff to the
+  prepared vertex, and groups indices into at most five semantic pass ranges.
+- Review and production renderers own six physical pipelines: opaque,
+  threshold mask, dither mask, blend depth, blend color, and additive. Ordinary,
+  placed, clipped, per-eye, and multiview actor paths share the same ordering.
+- `ActorInstance::with_opacity` clamps a per-instance fade. Solid passes turn a
+  fractional instance value into depth-writing dither; blend and additive
+  passes multiply alpha or energy.
+- Asset Lab uses a matching Three.js depth prepass and exposes the effective
+  used alpha modes as searchable catalogue facts. `ghost_dither` and
+  `ghost_translucent` share one 15-box rig, texture, and two-clip motion set.
+
+## Validation Evidence
+
+The closeout used generated output under `/tmp`; no review captures are tracked
+as source assets.
+
+- Asset Lab typecheck and all 28 unit tests pass. Geometry, ground, and surface
+  gates report zero failures across 176 canonical figures. Catalogue Playwright
+  coverage passes all four desktop/mobile/classification/action tests and shows
+  176 figures, 238 clips, and exact `Blend` plus `Additive` facts for the smooth
+  Ghost.
+- Clean static sheets and 24 FPS MP4s were inspected for both Ghosts. Each
+  native animation comparison captured 44 frames with all 43 transitions
+  changing, six exact synchronized sample times, four immutable topology
+  uploads, and the production selector unchanged. Static and animated native
+  panels preserve the semantic silhouettes in front, side, and three-quarter
+  review.
+- Full `mclone-assets` and `mclone-render` tests passed during the series; the
+  final focused prepared-figure test run passes all six shader/layout tests.
+  Full native workspace checking and the production remote-player visual smoke
+  also passed.
+- Headed-Wayland browser WebGPU reports compiler v2, six pipelines, one draw for
+  the opaque player fixture, 52,757 figure pixels, 20 distinct figure colors,
+  and no page errors. The captured canvas was inspected.
+- Desktop synthetic stereo produced distinct, valid per-eye pixels. The flat
+  Android debug APK and Android XR release APK both build successfully through
+  the repository scripts, covering mobile Vulkan and the packaged multiview
+  boundary.
 
 ## Deferred Direction
 
