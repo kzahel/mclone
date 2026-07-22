@@ -392,7 +392,8 @@ should be a high-value early wave for a Minecraft-style mob set.
 |---|---|---|---|---|
 | Skeleton | P1 | ✅ | plain, dark/wither, frost/stray, armored | `examples/skeleton` — 24-box graveyard skeleton with layered ribs, articulated jaw, grounded march, and separate bone-rattle action |
 | Cutout Skeleton | P1 | ✅ | vanilla-shaped binary-alpha demo | `examples/cutout_skeleton` — full torso cuboid carved into ribs by transparent palette texels, with hollow march and rattle action |
-| Zombie | P1 | ☐ | plain, husk (desert), drowned (water) | shambling walk variant |
+| Zombie | P1 | ✅ | plain, husk (desert), drowned (water) | `examples/zombie` — lopsided 17-box graveyard shambler with loose jaw, mismatched exposed limbs, dragging locomotion, and a separate hungry-lunge action |
+| Scarecrow | P2 | ✅ | harvest, haunted, ember-lit | `examples/scarecrow` — rooted 18-box field construct with a stitched sack face, broad crossbar silhouette, binary-cutout torn poncho and hat, wind-creak idle, and crow-startle action |
 | **Humanoid pig (pigman / orc)** | P1 | ☐ | piglin-style, zombified, brute, armored, tusked | **the one you asked for** — pig snout/ears on the folk biped + weapon |
 | Goblin | P2 | ☐ | scout, shaman | small biped |
 | Orc / Ogre / Troll | P2 | ☐ | orc (medium), ogre/troll (oversized) | big-biped scale of the rig |
@@ -416,7 +417,7 @@ should be a high-value early wave for a Minecraft-style mob set.
 | Golem | P2 | ☐ | B | stone, iron, clay | heavy biped; can be friendly too |
 | Gargoyle | P3 | ✅ | W/B | — | `examples/gargoyle` — 27-box stone biped with horns, raised two-stage wings, shortened tucked arms, barbed tail, grounded stalk, glide, and awakening action |
 | Bat swarm | P3 | ☐ | W | — | hostile build of Bat (`wingFlap`) |
-| Mimic (chest monster) | P3 | ☐ | ST | — | block that sprouts teeth; fun gag |
+| Mimic (chest monster) | P3 | ✅ | ST | — | `examples/mimic` — locked 24-box treasure chest at rest, with hidden eyes, two tooth rows, extending tongue, patient-breath idle, and a separate double-snap attack |
 | Will-o-wisp / floating eye | P3 | ☐ | ST | — | tiny floater |
 
 ### Bosses (large effort, stretch)
@@ -432,8 +433,8 @@ should be a high-value early wave for a Minecraft-style mob set.
 
 ## Coverage snapshot
 
-- **Canonical box-only figures:** 176 sources and 238 clips after the paired
-  dithered and smoothly blended Ghost transparency proofs.
+- **Canonical box-only figures:** 179 sources and 244 clips after the Zombie,
+  Mimic, and binary-cutout Scarecrow scary-creature batch.
 - **First hostile fantasy wave:** Skeleton, Slime, and Gargoyle, each with
   explicit typed catalogue classification and a separate special action.
 - **Binary-alpha proof:** Cutout Skeleton keeps a full torso cuboid and forms
@@ -441,6 +442,9 @@ should be a high-value early wave for a Minecraft-style mob set.
 - **Fractional-alpha proofs:** paired Ghosts share geometry and motion while
   contrasting stable depth-writing dither with smooth depth-prepass blending
   and additive accents.
+- **Second hostile fantasy wave:** Zombie, Mimic, and Scarecrow add an undead
+  shambler, deceptive prop monster, and rooted construct with six independently
+  reviewed continuous/action clips.
 - **Rounded-to-box migration complete (13):** piglet, sheep, dog, cat,
   bearfolk, lionfolk, cow, horse, goat, wolf, fox, bear, and lion.
 - **Retained rounded A/B archive:** all 18 former mixed-primitive sources live

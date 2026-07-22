@@ -111,7 +111,7 @@ test("filters and inspects typed creature classifications", async ({ page }) => 
 
   const groupFilter = page.getByRole("combobox", { name: "Group" });
   await groupFilter.selectOption("monster");
-  await expect(page.locator(".resultCount")).toHaveText("6 figures");
+  await expect(page.locator(".resultCount")).toHaveText("9 figures");
   await expect(page.locator("[data-catalog-name='skeleton']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='cutout_skeleton']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='slime']")).toBeVisible();
@@ -137,18 +137,18 @@ test("filters and inspects typed creature classifications", async ({ page }) => 
 
   const dispositionFilter = page.getByRole("combobox", { name: "Disposition" });
   await dispositionFilter.selectOption("hostile");
-  await expect(page.locator(".resultCount")).toHaveText("6 figures");
+  await expect(page.locator(".resultCount")).toHaveText("9 figures");
   await dispositionFilter.selectOption("all");
   await groupFilter.selectOption("all");
 
   const search = page.getByRole("searchbox", { name: "Search" });
   await search.fill("undead");
-  await expect(page.locator(".resultCount")).toHaveText("4 figures");
+  await expect(page.locator(".resultCount")).toHaveText("5 figures");
   await expect(page.locator("[data-catalog-name='skeleton']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='cutout_skeleton']")).toBeVisible();
 
   await search.fill("alpha-cutout");
-  await expect(page.locator(".resultCount")).toHaveText("1 figure");
+  await expect(page.locator(".resultCount")).toHaveText("2 figures");
   await page.locator("[data-catalog-name='cutout_skeleton']").click();
   await expect(page.locator("canvas[data-figure='cutout_skeleton']")).toBeVisible();
   await expect(classification).toContainText("Alpha cutout");
@@ -174,6 +174,24 @@ test("filters and inspects typed creature classifications", async ({ page }) => 
   await page.locator("[data-catalog-name='ghost_dither']").click();
   await expect(page.locator("canvas[data-figure='ghost_dither']")).toBeVisible();
   await expect(rendering).toContainText("Mask");
+
+  await search.fill("harvest");
+  await expect(page.locator(".resultCount")).toHaveText("1 figure");
+  await page.locator("[data-catalog-name='scarecrow']").click();
+  await expect(page.locator("canvas[data-figure='scarecrow']")).toBeVisible();
+  await expect(classification).toContainText("Construct");
+  await expect(rendering).toContainText("Mask");
+  await page.screenshot({
+    path: "/tmp/mclone-scary-three/catalogue-scarecrow.png",
+    fullPage: true,
+  });
+
+  await search.fill("dungeon");
+  await expect(page.locator(".resultCount")).toHaveText("1 figure");
+  await expect(page.locator("[data-catalog-name='mimic']")).toBeVisible();
+  await search.fill("decay");
+  await expect(page.locator(".resultCount")).toHaveText("1 figure");
+  await expect(page.locator("[data-catalog-name='zombie']")).toBeVisible();
   expect(browserErrors).toEqual([]);
 });
 
