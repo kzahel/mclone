@@ -2,10 +2,10 @@
 
 Topic: `controller-input`
 
-Status: accepted design; shared source/assignment foundation partially
-implemented as of 2026-07-21. The existing capability, binding, prompt, and
-first-pass gamepad adapter foundation is retained, but no product target
-currently polls a real gamepad. This topic
+Status: active implementation; shared source/assignment and semantic controller
+session foundations implemented as of 2026-07-22. The existing capability,
+binding, prompt, and first-pass gamepad adapter foundation is retained, but no
+product target currently polls a real gamepad. This topic
 owns the durable all-target controller direction across desktop flat, web,
 flat Android, desktop XR, Android XR, offscreen/test hosts, Steam Deck, and a
 future native Steam Input integration. Tactical
@@ -100,17 +100,18 @@ source seam, but not yet the complete semantic or physical-input contract:
   scripted 1-4-seat assignment/reconnect reducer. Snapshot controls feed the
   existing shared bindings. This preliminary reducer deliberately stops before
   durable participants, profiles, or product joining.
+- `ControllerInputSession` now owns Gameplay/Menu/TextEntry contexts,
+  per-source semantic held/pressed/released actions, movement and look-rate
+  axes, dead-zone/curve policy, trigger hysteresis, controller navigation
+  repeat, lifecycle clearing, and active-source/layout arbitration. A bounded
+  flat-frame projection applies look rate with `dt` while hosts migrate.
 - No desktop, browser, or Android product adapter currently advertises a real
   gamepad or feeds that adapter. The repository explicitly records this in
   [`platforms.md`](../platforms.md) and Tactical 098.
-- The current gameplay adapter is still one controller at a time. Source
-  identity, descriptor, connection lifecycle, triggers, stick clicks,
-  Select/Guide, analog-button values, and deterministic seat assignment exist
-  at the canonical snapshot boundary, but semantic per-source action state,
-  mixed-device arbitration, and participant-scoped routing remain pending.
-- Right-stick input is currently converted to `FlatInputFrame.look_delta` once
-  per frame. A stick is a rate control, not a motion delta; the current shape
-  can therefore make rotation depend on presentation frequency.
+- The legacy `GamepadInputAdapter` remains one controller at a time and still
+  projects right-stick state directly into `FlatInputFrame`. The new semantic
+  session fixes those constraints, but shipping hosts have not adopted it yet;
+  participant-scoped routing also remains downstream couch work.
 - `MonoInteractiveInputRouter` owns the shared keyboard/mouse resolver but
   receives touch as a supplemental frame and does not own gamepad state.
   Desktop, Android, and web separately retain capability/preference facts.
@@ -547,10 +548,12 @@ standard snapshot or make the shared gameplay path conditional on a vendor.
    [`local-couch-multiplayer.md`](local-couch-multiplayer.md) rather than
    introducing a controller-local player model.
 
-Tactical 215 completed the source identity/descriptor, canonical snapshot, and
-bounded scripted-assignment portions of Step 1. Semantic per-source action
-state, look-rate semantics, input contexts, UI navigation, and mixed-device
-arbitration remain the next shared-contract work before a physical collector.
+Tactical 215 completed source identity/descriptor, canonical snapshots, and
+bounded scripted assignment. Tactical 216 Slice 1 completed semantic
+per-source action state, look-rate semantics, input contexts, controller
+navigation repeat, lifecycle clearing, and controller-to-controller
+arbitration. Shared scene adoption, cross-class mixing, and UI traversal remain
+before a physical collector.
 
 Do not wire a platform backend before Slices 1–3 provide the complete shared
 gameplay and UI destination. Otherwise the first platform will accidentally
@@ -639,6 +642,9 @@ layouts require device testing.
 - [`../../native/crates/mclone-input/src/lib.rs`](../../native/crates/mclone-input/src/lib.rs)
   — current capabilities, preferences, bindings, flat frames, gamepad adapter,
   and neutral XR snapshots.
+- [`../../native/crates/mclone-input/src/controller_session.rs`](../../native/crates/mclone-input/src/controller_session.rs)
+  — semantic contexts/actions, per-source reduction, look-rate projection,
+  hysteresis, navigation repeat, lifecycle clearing, and arbitration.
 - [`../../native/crates/mclone-scene/src/interactive_input.rs`](../../native/crates/mclone-scene/src/interactive_input.rs)
   — shared mono input/context/action router.
 - [`../../native/crates/mclone-scene/src/locomotion.rs`](../../native/crates/mclone-scene/src/locomotion.rs)

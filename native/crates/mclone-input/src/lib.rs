@@ -2,6 +2,13 @@ use glam::{Quat, Vec2, Vec3};
 use serde::{Deserialize, Serialize};
 use std::{collections::BTreeMap, num::NonZeroU64, time::Duration};
 
+mod controller_session;
+
+pub use controller_session::{
+    ControllerInputError, ControllerInputSession, ControllerSessionSettings, InputContext,
+    PlayerAction, PlayerActionFrame,
+};
+
 pub const FLAT_HOTBAR_SLOT_COUNT: u8 = 9;
 /// Mouse-delta units per second for held keyboard turning; intentionally slower than mouselook.
 pub const KEYBOARD_TURN_MOUSE_DELTA_PER_SECOND: f64 = 270.0;
@@ -1802,10 +1809,16 @@ impl Default for GamepadBindings {
                 GamepadBinding::new(GamepadControl::LeftStick, InputBindingAction::MoveAnalog),
                 GamepadBinding::new(GamepadControl::RightStick, InputBindingAction::Look),
                 GamepadBinding::new(GamepadControl::SouthButton, InputBindingAction::Jump),
-                GamepadBinding::new(GamepadControl::WestButton, InputBindingAction::Attack),
-                GamepadBinding::new(GamepadControl::EastButton, InputBindingAction::Use),
+                GamepadBinding::new(GamepadControl::EastButton, InputBindingAction::Sneak),
                 GamepadBinding::new(GamepadControl::NorthButton, InputBindingAction::OpenMenu),
+                GamepadBinding::new(GamepadControl::RightTrigger, InputBindingAction::Attack),
+                GamepadBinding::new(GamepadControl::LeftTrigger, InputBindingAction::Use),
+                GamepadBinding::new(GamepadControl::LeftStickButton, InputBindingAction::Sprint),
                 GamepadBinding::new(GamepadControl::StartButton, InputBindingAction::OpenMenu),
+                GamepadBinding::new(
+                    GamepadControl::SelectButton,
+                    InputBindingAction::OpenBlockPalette,
+                ),
                 GamepadBinding::new(
                     GamepadControl::LeftShoulder,
                     InputBindingAction::PreviousHotbarSlot,
@@ -1858,6 +1871,12 @@ pub enum GamepadControl {
     DPadUp,
     DPadDown,
     StartButton,
+    SelectButton,
+    LeftTrigger,
+    RightTrigger,
+    LeftStickButton,
+    RightStickButton,
+    GuideButton,
 }
 
 /// Maximum number of independently assigned humans/roles on one host.
@@ -2063,7 +2082,7 @@ impl StandardGamepadButtons {
         }
     }
 
-    fn mapped_controls(self) -> [(GamepadControl, bool); 11] {
+    fn mapped_controls(self) -> [(GamepadControl, bool); 17] {
         [
             (GamepadControl::SouthButton, self.south.pressed),
             (GamepadControl::EastButton, self.east.pressed),
@@ -2071,11 +2090,17 @@ impl StandardGamepadButtons {
             (GamepadControl::NorthButton, self.north.pressed),
             (GamepadControl::LeftShoulder, self.left_shoulder.pressed),
             (GamepadControl::RightShoulder, self.right_shoulder.pressed),
+            (GamepadControl::LeftTrigger, self.left_trigger.pressed),
+            (GamepadControl::RightTrigger, self.right_trigger.pressed),
+            (GamepadControl::SelectButton, self.select.pressed),
+            (GamepadControl::StartButton, self.start.pressed),
+            (GamepadControl::LeftStickButton, self.left_stick.pressed),
+            (GamepadControl::RightStickButton, self.right_stick.pressed),
             (GamepadControl::DPadLeft, self.dpad_left.pressed),
             (GamepadControl::DPadRight, self.dpad_right.pressed),
             (GamepadControl::DPadUp, self.dpad_up.pressed),
             (GamepadControl::DPadDown, self.dpad_down.pressed),
-            (GamepadControl::StartButton, self.start.pressed),
+            (GamepadControl::GuideButton, self.guide.pressed),
         ]
     }
 }
@@ -3437,23 +3462,23 @@ mod tests {
         let mut adapter = GamepadInputAdapter::new();
 
         let attack = adapter
-            .handle_button(GamepadControl::WestButton, true)
+            .handle_button(GamepadControl::RightTrigger, true)
             .frame
-            .expect("west button should emit attack");
+            .expect("right trigger should emit attack");
         assert!(attack.attack);
         assert!(
             adapter
-                .handle_button(GamepadControl::WestButton, true)
+                .handle_button(GamepadControl::RightTrigger, true)
                 .frame
                 .is_none()
         );
         assert!(
             adapter
-                .handle_button(GamepadControl::WestButton, false)
+                .handle_button(GamepadControl::RightTrigger, false)
                 .handled
         );
         let attack_again = adapter
-            .handle_button(GamepadControl::WestButton, true)
+            .handle_button(GamepadControl::RightTrigger, true)
             .frame
             .expect("new press should emit attack again");
         assert!(attack_again.attack);
@@ -3513,7 +3538,7 @@ mod tests {
             left_stick: Vec2::new(3.0, 4.0),
             right_stick: Vec2::new(f32::NAN, -0.5),
             buttons: StandardGamepadButtons {
-                west: StandardGamepadButtonState::pressed(),
+                right_trigger: StandardGamepadButtonState::pressed(),
                 left_trigger: StandardGamepadButtonState {
                     value: 2.0,
                     pressed: true,

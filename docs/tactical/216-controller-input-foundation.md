@@ -195,6 +195,37 @@ device becomes available and evidence is recorded:
 - ordinary gamepad plus tracked controllers on Quest/Android XR;
 - haptic strength/feel and vendor-specific layout/glyph correctness.
 
+## Progress Evidence
+
+### Slice 1 — semantic controller session
+
+Implemented on 2026-07-22. `mclone-input::ControllerInputSession` now owns
+Gameplay/Menu/TextEntry contexts, per-source normalized snapshots, semantic
+held/pressed/released sets, continuous movement and look rate, active source
+and layout projection, radial dead zones with response curves, trigger
+hysteresis, navigation threshold/repeat state, lifecycle clearing, and
+deterministic multi-source arbitration. `PlayerActionFrame::to_flat_frame`
+provides the bounded migration projection and integrates look rate using
+clamped frame `dt`; mouse/touch pointer delta remains separately represented.
+
+The standard control vocabulary now covers all seventeen standard buttons.
+Defaults use right/left trigger for Attack/Use, south for Jump, east for Sneak,
+left-stick click for Sprint, shoulders/D-pad for hotbar stepping, Start for
+Menu, and Select for the block palette. Existing keyboard, touch, XR-emulation,
+assignment, and legacy adapter tests remain green.
+
+Focused evidence:
+
+```text
+cargo test -p mclone-input: 34 passed
+cargo check -p mclone-input --target wasm32-unknown-unknown: passed
+```
+
+Tests cover 60/120 Hz look invariance, drift filtering, exact action edges,
+trigger hysteresis, context-change non-replay, monotonic navigation repeat,
+meaningful-source arbitration, and disconnect release generation. Shipping
+hosts do not consume this session yet; Slice 2 owns adoption.
+
 ## Completion Bar
 
 - Every product host consumes one shared semantic action and UI-navigation
