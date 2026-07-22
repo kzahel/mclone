@@ -5,8 +5,9 @@ Topic: `animal-catalogue`
 Status: complete and live-accepted 2026-07-21, then extended locally on
 2026-07-22 with typed creature classification, classification filters, three
 fantasy/monster waves, a first living-growth wave, binary and fractional alpha
-proofs, and fixed planar cards. The current local inventory contains 185
-canonical figures and 256 clips. The read-only,
+proofs, fixed planar cards, and a two-figure fantasy-fauna follow-up. The
+current local inventory contains 187 canonical figures and 260 clips. The
+read-only,
 production-built Asset Lab
 catalogue is available at
 `https://mclone.kzahel.com/animals/`, delivered by the existing native-web
@@ -185,6 +186,8 @@ occur.
     disposition and searchable theme metadata.
 12. [x] Add Plant/Fungus groups and Rooted/Colony body plans, then prove them
     with Walking Banyan, Maw Orchid, and Lantern Mycelium.
+13. [x] Add Book Mimic and Ceiling Angler with explicit fantasy/monster tags,
+    independent idle/action clips, and searchable catalogue coverage.
 
 ## Local Acceptance Evidence
 
@@ -281,6 +284,17 @@ card category: cards remain a geometry fact, while Plant, Monster, Hostile,
 Rooted, and `scary` continue to describe what the figure is. Final Orchid
 sheets, videos, and native comparisons are under
 `/tmp/mclone-living-growths/card-final/`.
+
+The fantasy-fauna follow-up builds 187 canonical figures, 260 clips, and 4,051
+parts. Book Mimic is a 23-part enchanted grimoire whose three ragged page cards
+flutter independently before its cover snaps shut around a rear edge that now
+meets the spine at the actual hinge. Ceiling Angler is a 35-box underground
+animal authored upright with a grounded four-pad procedural walk. Gameplay is
+expected to roll the complete actor 180 degrees onto a ceiling, turning its
+local upward lure strike into a downward ambush without maintaining an
+inverted semantic rig. Monster, Hostile, and `scary` results each increase to
+15; searching `mimic` returns the chest and book variants. Clean sheets and
+four MP4 reviews are under `/tmp/mclone-fantasy-two/`.
 
 ## Live Acceptance Evidence
 

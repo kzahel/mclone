@@ -111,11 +111,13 @@ test("filters and inspects typed creature classifications", async ({ page }) => 
 
   const groupFilter = page.getByRole("combobox", { name: "Group" });
   await groupFilter.selectOption("monster");
-  await expect(page.locator(".resultCount")).toHaveText("13 figures");
+  await expect(page.locator(".resultCount")).toHaveText("15 figures");
   await expect(page.locator("[data-catalog-name='skeleton']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='cutout_skeleton']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='slime']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='gargoyle']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='book_mimic']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='ceiling_angler']")).toBeVisible();
 
   const classification = page.locator(".classificationSection");
   await expect(classification).toContainText("Fantasy");
@@ -137,19 +139,23 @@ test("filters and inspects typed creature classifications", async ({ page }) => 
 
   const dispositionFilter = page.getByRole("combobox", { name: "Disposition" });
   await dispositionFilter.selectOption("hostile");
-  await expect(page.locator(".resultCount")).toHaveText("13 figures");
+  await expect(page.locator(".resultCount")).toHaveText("15 figures");
   await expect(page.locator("[data-catalog-name='witch']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='werewolf']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='grave_crawler']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='book_mimic']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='ceiling_angler']")).toBeVisible();
   await dispositionFilter.selectOption("all");
   await groupFilter.selectOption("all");
 
   const search = page.getByRole("searchbox", { name: "Search" });
   await search.fill("scary");
-  await expect(page.locator(".resultCount")).toHaveText("13 figures");
+  await expect(page.locator(".resultCount")).toHaveText("15 figures");
   await expect(page.locator("[data-catalog-name='witch']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='werewolf']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='grave_crawler']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='book_mimic']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='ceiling_angler']")).toBeVisible();
   await page.locator("[data-catalog-name='witch']").click();
   await expect(page.locator("canvas[data-figure='witch']")).toBeVisible();
   await page.screenshot({
@@ -204,6 +210,13 @@ test("filters and inspects typed creature classifications", async ({ page }) => 
   await search.fill("dungeon");
   await expect(page.locator(".resultCount")).toHaveText("1 figure");
   await expect(page.locator("[data-catalog-name='mimic']")).toBeVisible();
+  await search.fill("mimic");
+  await expect(page.locator(".resultCount")).toHaveText("2 figures");
+  await expect(page.locator("[data-catalog-name='mimic']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='book_mimic']")).toBeVisible();
+  await search.fill("ceiling angler");
+  await expect(page.locator(".resultCount")).toHaveText("1 figure");
+  await expect(page.locator("[data-catalog-name='ceiling_angler']")).toBeVisible();
   await search.fill("decay");
   await expect(page.locator(".resultCount")).toHaveText("1 figure");
   await expect(page.locator("[data-catalog-name='zombie']")).toBeVisible();

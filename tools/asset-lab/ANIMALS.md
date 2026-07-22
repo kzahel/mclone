@@ -389,7 +389,7 @@ hostile growths.
 | Figure | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
 | Walking Banyan | P1 | ✅ | C/R | mossy, autumn, blossom | `examples/walking_banyan` — giant 23-box mobile tree with six alternating stilt roots, cutout canopy, root stride, and separate replant action |
-| Maw Orchid | P1 | ✅ | R | jungle, cave, ember | `examples/maw_orchid` — large 21-box carnivorous flower with four cutout jaw-petals, luminous lure, searching tendrils, and separate snap-trap action |
+| Maw Orchid | P1 | ✅ | R | jungle, cave, ember | `examples/maw_orchid` — large 21-part carnivorous flower with 17 boxes, four exact cutout jaw-petal cards, a luminous lure, searching tendrils, and separate snap-trap action |
 | Lantern Mycelium | P1 | ✅ | R/COL | teal, violet, toxic | `examples/lantern_mycelium` — connected 28-box five-mushroom colony with out-of-phase cap pulses, additive gills, and smooth blended spore-bloom action |
 | Walking cactus | P2 | ☐ | B/R | desert, flowering | drops roots and waddles between water sources |
 | Sundew carpet | P2 | ☐ | R/COL | bog, giant | many independently folding adhesive pads |
@@ -442,6 +442,8 @@ should be a high-value early wave for a Minecraft-style mob set.
 | Gargoyle | P3 | ✅ | W/B | — | `examples/gargoyle` — 27-box stone biped with horns, raised two-stage wings, shortened tucked arms, barbed tail, grounded stalk, glide, and awakening action |
 | Bat swarm | P3 | ☐ | W | — | hostile build of Bat (`wingFlap`) |
 | Mimic (chest monster) | P3 | ✅ | ST | — | `examples/mimic` — locked 24-box treasure chest at rest, with hidden eyes, two tooth rows, extending tongue, patient-breath idle, and a separate double-snap attack |
+| Book Mimic | P2 | ✅ | ST | scroll, frost grimoire, herbarium | `examples/book_mimic` — 23-part enchanted grimoire with three ragged exact-page cards, a watching cover eye, page-whisper idle, and separate snap-shut action |
+| Ceiling Angler | P2 | ✅ | C/Q | pale cave, mossy, ember lure | `examples/ceiling_angler` — 35-box cave animal authored upright with a four-pad procedural walk, broad toothed head, additive lure, and upward strike that become ceiling locomotion and a downward ambush when gameplay rolls the whole actor 180 degrees |
 | Will-o-wisp / floating eye | P3 | ☐ | ST | — | tiny floater |
 
 ### Bosses (large effort, stretch)
@@ -457,8 +459,8 @@ should be a high-value early wave for a Minecraft-style mob set.
 
 ## Coverage snapshot
 
-- **Canonical box-and-card figures:** 185 sources and 256 clips after the first
-  Walking Banyan, Maw Orchid, and Lantern Mycelium living-growth batch.
+- **Canonical box-and-card figures:** 187 sources and 260 clips after Book
+  Mimic and Ceiling Angler extend the fantasy fauna.
 - **First hostile fantasy wave:** Skeleton, Slime, and Gargoyle, each with
   explicit typed catalogue classification and a separate special action.
 - **Binary-alpha proof:** Cutout Skeleton keeps a full torso cuboid and forms
@@ -476,6 +478,10 @@ should be a high-value early wave for a Minecraft-style mob set.
   Mycelium establish filterable Plant/Fungus groups and Rooted/Colony body
   plans while exercising six-contact gait, cutout foliage, additive light,
   and a smooth blended spore veil.
+- **Fantasy fauna follow-up:** Book Mimic adds animated exact-page cards to a
+  recognizable enchanted object, while Ceiling Angler adds an upside-down cave
+  animal authored as a reusable upright quadruped. Gameplay should roll the
+  complete actor onto the ceiling instead of inverting its semantic skeleton.
 - **Rounded-to-box migration complete (13):** piglet, sheep, dog, cat,
   bearfolk, lionfolk, cow, horse, goat, wolf, fox, bear, and lion.
 - **Retained rounded A/B archive:** all 18 former mixed-primitive sources live
