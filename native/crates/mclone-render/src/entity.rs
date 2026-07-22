@@ -70,6 +70,7 @@ pub struct ActorInstance {
     pub body_color: [f32; 4],
     pub accent_color: [f32; 4],
     pub packed_light: u32,
+    pub opacity: f32,
     pub animation: Option<ActorAnimation>,
     pub chicken_wing_flap_radians: Option<f32>,
 }
@@ -126,6 +127,7 @@ impl ActorInstance {
             body_color: [0.18, 0.38, 0.82, 1.0],
             accent_color: [0.92, 0.70, 0.54, 1.0],
             packed_light: FULL_BRIGHT,
+            opacity: 1.0,
             animation: None,
             chicken_wing_flap_radians: None,
         }
@@ -146,6 +148,7 @@ impl ActorInstance {
             body_color: [0.10, 0.58, 0.68, 1.0],
             accent_color: [0.95, 0.80, 0.24, 1.0],
             packed_light: FULL_BRIGHT,
+            opacity: 1.0,
             animation: None,
             chicken_wing_flap_radians: None,
         }
@@ -182,6 +185,7 @@ impl ActorInstance {
             body_color: [0.33, 0.19, 0.10, 1.0],
             accent_color: [0.92, 0.86, 0.74, 1.0],
             packed_light: FULL_BRIGHT,
+            opacity: 1.0,
             animation: None,
             chicken_wing_flap_radians: None,
         }
@@ -202,6 +206,7 @@ impl ActorInstance {
             body_color: [0.28, 0.17, 0.10, 1.0],
             accent_color: [0.90, 0.86, 0.72, 1.0],
             packed_light: FULL_BRIGHT,
+            opacity: 1.0,
             animation: None,
             chicken_wing_flap_radians: None,
         }
@@ -227,6 +232,7 @@ impl ActorInstance {
             body_color: [0.92, 0.90, 0.82, 1.0],
             accent_color: [0.92, 0.18, 0.12, 1.0],
             packed_light: FULL_BRIGHT,
+            opacity: 1.0,
             animation: None,
             chicken_wing_flap_radians: None,
         }
@@ -254,6 +260,7 @@ impl ActorInstance {
             body_color: [0.13, 0.48, 0.72, 1.0],
             accent_color: [0.95, 0.78, 0.22, 1.0],
             packed_light: FULL_BRIGHT,
+            opacity: 1.0,
             animation: None,
             chicken_wing_flap_radians: None,
         }
@@ -274,6 +281,7 @@ impl ActorInstance {
             body_color: [0.92, 0.89, 0.78, 1.0],
             accent_color: [0.74, 0.58, 0.24, 1.0],
             packed_light: FULL_BRIGHT,
+            opacity: 1.0,
             animation: None,
             chicken_wing_flap_radians: None,
         }
@@ -281,6 +289,13 @@ impl ActorInstance {
 
     pub fn with_packed_light(mut self, packed_light: u32) -> Self {
         self.packed_light = packed_light;
+        self
+    }
+
+    pub fn with_opacity(mut self, opacity: f32) -> Self {
+        if opacity.is_finite() {
+            self.opacity = opacity.clamp(0.0, 1.0);
+        }
         self
     }
 
@@ -2025,6 +2040,7 @@ fn append_actor(
     actor_figures: &ActorFigureSet,
     scratch: &mut ActorMeshBuildScratch,
 ) {
+    let first_vertex = mesh.vertices.len();
     match actor.shape {
         ActorInstanceShape::Figure(figure) => append_asset_lab_figure_model(
             mesh,
@@ -2043,6 +2059,14 @@ fn append_actor(
         ActorInstanceShape::CowModel => append_cow_model(mesh, actor, texture_layout, atlas_size),
         ActorInstanceShape::DebugCube => append_debug_cube(mesh, actor, texture_layout, atlas_size),
         ActorInstanceShape::ItemEgg => append_item_egg(mesh, actor, texture_layout, atlas_size),
+    }
+    let opacity = if actor.opacity.is_finite() {
+        actor.opacity.clamp(0.0, 1.0)
+    } else {
+        1.0
+    };
+    for vertex in &mut mesh.vertices[first_vertex..] {
+        vertex.color[3] *= opacity;
     }
 }
 
@@ -3973,6 +3997,60 @@ mod tests {
         let world = actor_world_position(actor, Vec3::new(0.0, 1.8, 0.0));
 
         assert_eq!(world, Vec3::new(10.0, 65.8, -4.0));
+    }
+
+    #[test]
+    fn legacy_actor_mesh_carries_whole_instance_opacity() {
+        let actor =
+            ActorInstance::debug_cube(Vec3::ZERO, 0.0, 0.0, None, 1.0, 1.0).with_opacity(0.35);
+        let mesh = actor_mesh(
+            &[actor],
+            test_actor_texture_layout(),
+            test_actor_texture_atlas_size(),
+            &ActorFigureSet::default(),
+        );
+
+        assert!(!mesh.vertices.is_empty());
+        assert!(
+            mesh.vertices
+                .iter()
+                .all(|vertex| (vertex.color[3] - 0.35).abs() < 1.0e-6)
+        );
+        assert_eq!(ActorInstance::remote_player(Vec3::ZERO, 0.0).opacity, 1.0);
+        assert_eq!(
+            ActorInstance::remote_player(Vec3::ZERO, 0.0)
+                .with_opacity(2.0)
+                .opacity,
+            1.0
+        );
+    }
+
+    #[test]
+    fn legacy_actor_dither_shaders_validate_for_all_view_paths() {
+        for (source, capabilities) in [
+            (
+                include_str!("shaders/entity_actor.wgsl"),
+                naga::valid::Capabilities::empty(),
+            ),
+            (
+                include_str!("shaders/entity_actor_placed.wgsl"),
+                naga::valid::Capabilities::empty(),
+            ),
+            (
+                include_str!("shaders/entity_actor_multiview.wgsl"),
+                naga::valid::Capabilities::MULTIVIEW,
+            ),
+            (
+                include_str!("shaders/entity_actor_placed_multiview.wgsl"),
+                naga::valid::Capabilities::MULTIVIEW,
+            ),
+        ] {
+            let module = naga::front::wgsl::parse_str(source).expect("actor WGSL parses");
+            naga::valid::Validator::new(naga::valid::ValidationFlags::all(), capabilities)
+                .validate(&module)
+                .expect("actor WGSL validates");
+            assert!(source.contains("coverage_hash"));
+        }
     }
 
     #[derive(Clone, Copy, Debug)]

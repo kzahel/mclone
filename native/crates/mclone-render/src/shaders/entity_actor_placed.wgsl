@@ -86,12 +86,19 @@ fn apply_fog(color: vec4<f32>, composition_position: vec3<f32>) -> vec4<f32> {
     return vec4<f32>(lerp_vec3(color.rgb, uniforms.fog_color.rgb, fog_factor), color.a);
 }
 
+fn coverage_hash(uv: vec2<f32>) -> f32 {
+    let cell = floor(uv * 128.0);
+    var value = fract(vec3<f32>(cell.x, cell.y, cell.x + cell.y) * 0.1031);
+    value = value + dot(value, value.yzx + 33.33);
+    return fract((value.x + value.y) * value.z);
+}
+
 fn shaded_actor(input: VertexOutput) -> vec4<f32> {
     let texel = textureSample(actor_texture, actor_sampler, input.uv);
-    if (texel.a < 0.1) {
+    if (texel.a < 0.1 || input.color.a <= coverage_hash(input.uv)) {
         discard;
     }
-    let color = vec4<f32>(texel.rgb * input.color.rgb * input.light, texel.a * input.color.a);
+    let color = vec4<f32>(texel.rgb * input.color.rgb * input.light, 1.0);
     return apply_fog(color, input.composition_position);
 }
 

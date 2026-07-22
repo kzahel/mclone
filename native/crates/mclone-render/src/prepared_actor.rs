@@ -4,8 +4,9 @@ use std::num::{NonZeroU32, NonZeroU64};
 use anyhow::{Context, Result, bail};
 use glam::{Mat4, Quat, Vec3};
 use mclone_assets::{
-    ActorFigureId, PreparedFigure, PreparedFigurePartRotationOverride, PreparedFigureVertex,
-    chicken_figure_id, default_player_figure_id, evaluate_prepared_figure_clip_into,
+    ActorFigureId, PreparedFigure, PreparedFigurePartRotationOverride, PreparedFigurePass,
+    PreparedFigurePassRange, PreparedFigureVertex, chicken_figure_id, default_player_figure_id,
+    evaluate_prepared_figure_clip_into,
     evaluate_prepared_figure_clip_with_part_rotation_overrides_into,
     evaluate_prepared_figure_rest_pose_into,
 };
@@ -21,7 +22,7 @@ use crate::target::RenderFrameTarget;
 use crate::uniform::{PER_VIEW_UNIFORM_SLOT_COUNT, PerViewSlot, PerViewUniformBuffer};
 
 const MAX_PREPARED_ACTOR_PARTS: usize = 64;
-const VERTEX_BYTE_LEN: usize = 52;
+const VERTEX_BYTE_LEN: usize = 56;
 const VERTEX_BYTE_SIZE: wgpu::BufferAddress = VERTEX_BYTE_LEN as wgpu::BufferAddress;
 const VIEW_FLOAT_COUNT: usize = 48;
 const VIEW_BYTE_LEN: usize = VIEW_FLOAT_COUNT * std::mem::size_of::<f32>();
@@ -62,8 +63,8 @@ pub struct PreparedActorDrawSnapshot {
 }
 
 pub(crate) struct PreparedActorSharedResources {
-    pipeline: wgpu::RenderPipeline,
-    multiview_pipeline: Option<wgpu::RenderPipeline>,
+    pipelines: PreparedActorPipelines,
+    multiview_pipelines: Option<PreparedActorPipelines>,
     view_layout: wgpu::BindGroupLayout,
     multiview_view_layout: Option<wgpu::BindGroupLayout>,
     actor_layout: wgpu::BindGroupLayout,
@@ -82,6 +83,7 @@ struct PreparedActorFigureResources {
     texture_bind_group: wgpu::BindGroup,
     vertex_count: u32,
     index_count: u32,
+    pass_ranges: Vec<PreparedFigurePassRange>,
     wing_part_ids: Option<[u16; 2]>,
 }
 
@@ -109,6 +111,15 @@ struct PreparedActorRecord {
     actor_bind_group: wgpu::BindGroup,
     pose_palette: Vec<[[f32; 4]; 4]>,
     palette_upload_scratch: Vec<u8>,
+}
+
+struct PreparedActorPipelines {
+    opaque: wgpu::RenderPipeline,
+    mask_threshold: wgpu::RenderPipeline,
+    mask_dither: wgpu::RenderPipeline,
+    blend_depth: wgpu::RenderPipeline,
+    blend_color: wgpu::RenderPipeline,
+    additive: wgpu::RenderPipeline,
 }
 
 impl PreparedActorSharedResources {
@@ -163,15 +174,8 @@ impl PreparedActorSharedResources {
             ],
             push_constant_ranges: &[],
         });
-        let pipeline = create_pipeline(
-            device,
-            &pipeline_layout,
-            &shader,
-            color_format,
-            "mclone_prepared_actor_pipeline",
-            None,
-        );
-        let multiview_pipeline = multiview_view_layout.as_ref().map(|multiview_view_layout| {
+        let pipelines = create_pipelines(device, &pipeline_layout, &shader, color_format, None);
+        let multiview_pipelines = multiview_view_layout.as_ref().map(|multiview_view_layout| {
             let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("mclone_prepared_actor_multiview_shader"),
                 source: wgpu::ShaderSource::Wgsl(
@@ -188,19 +192,12 @@ impl PreparedActorSharedResources {
                 ],
                 push_constant_ranges: &[],
             });
-            create_pipeline(
-                device,
-                &layout,
-                &shader,
-                color_format,
-                "mclone_prepared_actor_multiview_pipeline",
-                NonZeroU32::new(2),
-            )
+            create_pipelines(device, &layout, &shader, color_format, NonZeroU32::new(2))
         });
 
         let mut gpu_figures = BTreeMap::new();
         let mut snapshot = PreparedActorSharedSnapshot {
-            multiview_pipeline_count: usize::from(multiview_pipeline.is_some()),
+            multiview_pipeline_count: if multiview_pipelines.is_some() { 6 } else { 0 },
             ..PreparedActorSharedSnapshot::default()
         };
         for (id, figure) in figures
@@ -219,8 +216,8 @@ impl PreparedActorSharedResources {
         }
         snapshot.figure_count = gpu_figures.len();
         Ok(Self {
-            pipeline,
-            multiview_pipeline,
+            pipelines,
+            multiview_pipelines,
             view_layout,
             multiview_view_layout,
             actor_layout,
@@ -258,6 +255,7 @@ impl PreparedActorFigureResources {
                 MAX_PREPARED_ACTOR_PARTS
             );
         }
+        validate_pass_ranges(&figure.pass_ranges, figure.indices.len() as u32)?;
         let expected_atlas_bytes = figure.atlas.width as usize * figure.atlas.height as usize * 4;
         if figure.atlas.width == 0
             || figure.atlas.height == 0
@@ -367,6 +365,7 @@ impl PreparedActorFigureResources {
             texture_bind_group,
             vertex_count: figure.vertices.len() as u32,
             index_count: figure.indices.len() as u32,
+            pass_ranges: figure.pass_ranges.clone(),
             wing_part_ids,
         })
     }
@@ -509,9 +508,14 @@ impl PreparedActorDrawResources {
             timestamp_writes: target.gpu_timestamp_writes(GpuPassId::Actor),
             ..Default::default()
         });
-        pass.set_pipeline(&shared.pipeline);
         pass.set_bind_group(0, &self.view_bind_group, &[offset]);
-        let stats = draw_records(&mut pass, &self.draw_order, &self.records, &shared.figures);
+        let stats = draw_records(
+            &mut pass,
+            &shared.pipelines,
+            &self.draw_order,
+            &self.records,
+            &shared.figures,
+        );
         self.snapshot.draw_count = self.snapshot.draw_count.saturating_add(stats.draw_count);
         Ok(stats.actor_stats())
     }
@@ -533,8 +537,8 @@ impl PreparedActorDrawResources {
         let depth_view = target
             .depth_view
             .context("prepared actor multiview pass requires a depth attachment")?;
-        let pipeline = shared
-            .multiview_pipeline
+        let pipelines = shared
+            .multiview_pipelines
             .as_ref()
             .context("prepared actor multiview requires wgpu MULTIVIEW")?;
         let multiview = self
@@ -569,9 +573,14 @@ impl PreparedActorDrawResources {
             timestamp_writes: target.gpu_timestamp_writes(GpuPassId::Actor),
             ..Default::default()
         });
-        pass.set_pipeline(pipeline);
         pass.set_bind_group(0, &multiview.bind_group, &[]);
-        let stats = draw_records(&mut pass, &self.draw_order, &self.records, &shared.figures);
+        let stats = draw_records(
+            &mut pass,
+            pipelines,
+            &self.draw_order,
+            &self.records,
+            &shared.figures,
+        );
         self.snapshot.draw_count = self.snapshot.draw_count.saturating_add(stats.draw_count);
         Ok(stats.actor_stats())
     }
@@ -709,6 +718,9 @@ impl PreparedActorRecord {
             }
         }
         let model = actor_model_matrix(actor).context("prepared actor has invalid transform")?;
+        if !actor.opacity.is_finite() || !(0.0..=1.0).contains(&actor.opacity) {
+            bail!("prepared actor has invalid opacity");
+        }
         self.palette_upload_scratch.clear();
         for matrix in &self.pose_palette {
             for column in matrix {
@@ -716,7 +728,11 @@ impl PreparedActorRecord {
             }
         }
         queue.write_buffer(&self.palette, 0, &self.palette_upload_scratch);
-        queue.write_buffer(&self.actor, 0, &actor_bytes(model, actor.packed_light));
+        queue.write_buffer(
+            &self.actor,
+            0,
+            &actor_bytes(model, actor.packed_light, actor.opacity),
+        );
         snapshot.pose_evaluation_count = snapshot.pose_evaluation_count.saturating_add(1);
         snapshot.palette_write_count = snapshot.palette_write_count.saturating_add(1);
         snapshot.palette_written_bytes = snapshot
@@ -752,6 +768,7 @@ impl EncodedPreparedActorDraws {
 
 fn draw_records<'pass>(
     pass: &mut wgpu::RenderPass<'pass>,
+    pipelines: &'pass PreparedActorPipelines,
     order: &[ActorInstanceId],
     records: &'pass BTreeMap<ActorInstanceId, PreparedActorRecord>,
     figures: &'pass BTreeMap<ActorFigureId, PreparedActorFigureResources>,
@@ -764,18 +781,88 @@ fn draw_records<'pass>(
         let Some(figure) = figures.get(&record.figure_id) else {
             continue;
         };
+        stats.actor_count += 1;
+        stats.vertex_count = stats.vertex_count.saturating_add(figure.vertex_count);
+        stats.index_count = stats.index_count.saturating_add(figure.index_count);
+    }
+
+    for (prepared_pass, pipeline) in [
+        (PreparedFigurePass::Opaque, &pipelines.opaque),
+        (PreparedFigurePass::MaskThreshold, &pipelines.mask_threshold),
+        (PreparedFigurePass::MaskDither, &pipelines.mask_dither),
+    ] {
+        pass.set_pipeline(pipeline);
+        stats.draw_count = stats.draw_count.saturating_add(draw_record_pass(
+            pass,
+            prepared_pass,
+            order,
+            records,
+            figures,
+        ));
+    }
+
+    pass.set_pipeline(&pipelines.blend_depth);
+    stats.draw_count = stats.draw_count.saturating_add(draw_record_pass(
+        pass,
+        PreparedFigurePass::Blend,
+        order,
+        records,
+        figures,
+    ));
+    pass.set_pipeline(&pipelines.blend_color);
+    stats.draw_count = stats.draw_count.saturating_add(draw_record_pass(
+        pass,
+        PreparedFigurePass::Blend,
+        order,
+        records,
+        figures,
+    ));
+    pass.set_pipeline(&pipelines.additive);
+    stats.draw_count = stats.draw_count.saturating_add(draw_record_pass(
+        pass,
+        PreparedFigurePass::Additive,
+        order,
+        records,
+        figures,
+    ));
+    stats
+}
+
+fn draw_record_pass<'pass>(
+    pass: &mut wgpu::RenderPass<'pass>,
+    prepared_pass: PreparedFigurePass,
+    order: &[ActorInstanceId],
+    records: &'pass BTreeMap<ActorInstanceId, PreparedActorRecord>,
+    figures: &'pass BTreeMap<ActorFigureId, PreparedActorFigureResources>,
+) -> u64 {
+    let mut draw_count = 0;
+    for id in order {
+        let Some(record) = records.get(id) else {
+            continue;
+        };
+        let Some(figure) = figures.get(&record.figure_id) else {
+            continue;
+        };
+        let Some(range) = figure
+            .pass_ranges
+            .iter()
+            .find(|range| range.pass == prepared_pass)
+        else {
+            continue;
+        };
         pass.set_bind_group(1, &record.actor_bind_group, &[]);
         pass.set_bind_group(2, &record.palette_bind_group, &[]);
         pass.set_bind_group(3, &figure.texture_bind_group, &[]);
         pass.set_vertex_buffer(0, figure.vertex_buffer.slice(..));
         pass.set_index_buffer(figure.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-        pass.draw_indexed(0..figure.index_count, 0, 0..1);
-        stats.draw_count = stats.draw_count.saturating_add(1);
-        stats.actor_count += 1;
-        stats.vertex_count = stats.vertex_count.saturating_add(figure.vertex_count);
-        stats.index_count = stats.index_count.saturating_add(figure.index_count);
+        pass.draw_indexed(
+            range.first_index..range.first_index + range.index_count,
+            0,
+            0..1,
+        );
+        draw_count += 1;
     }
-    stats
+    draw_count
 }
 
 fn prepared_actor_key(actor: ActorInstance) -> Option<(ActorInstanceId, ActorFigureId)> {
@@ -813,7 +900,7 @@ fn actor_model_matrix(actor: ActorInstance) -> Option<Mat4> {
     matrix.is_finite().then_some(matrix)
 }
 
-fn actor_bytes(model: Mat4, packed_light: u32) -> [u8; ACTOR_BYTE_LEN] {
+fn actor_bytes(model: Mat4, packed_light: u32, opacity: f32) -> [u8; ACTOR_BYTE_LEN] {
     let mut bytes = [0_u8; ACTOR_BYTE_LEN];
     let mut offset = 0;
     for value in model.to_cols_array() {
@@ -821,6 +908,7 @@ fn actor_bytes(model: Mat4, packed_light: u32) -> [u8; ACTOR_BYTE_LEN] {
         offset += 4;
     }
     bytes[offset..offset + 4].copy_from_slice(&packed_light.to_ne_bytes());
+    bytes[offset + 4..offset + 8].copy_from_slice(&opacity.to_ne_bytes());
     bytes
 }
 
@@ -950,6 +1038,78 @@ fn texture_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
     })
 }
 
+fn validate_pass_ranges(ranges: &[PreparedFigurePassRange], index_count: u32) -> Result<()> {
+    let mut next_index = 0;
+    let mut previous_pass = None;
+    for range in ranges {
+        if range.index_count == 0 || range.first_index != next_index {
+            bail!("prepared actor figure has invalid or non-contiguous pass ranges");
+        }
+        if previous_pass.is_some_and(|previous| previous >= range.pass) {
+            bail!("prepared actor figure pass ranges are not in canonical order");
+        }
+        next_index = next_index
+            .checked_add(range.index_count)
+            .context("prepared actor pass range overflow")?;
+        previous_pass = Some(range.pass);
+    }
+    if next_index != index_count {
+        bail!(
+            "prepared actor pass ranges cover {} indices; expected {}",
+            next_index,
+            index_count
+        );
+    }
+    Ok(())
+}
+
+#[derive(Clone, Copy)]
+enum PreparedActorPipelineKind {
+    Opaque,
+    MaskThreshold,
+    MaskDither,
+    BlendDepth,
+    BlendColor,
+    Additive,
+}
+
+fn create_pipelines(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    color_format: wgpu::TextureFormat,
+    multiview: Option<NonZeroU32>,
+) -> PreparedActorPipelines {
+    let create =
+        |kind, label| create_pipeline(device, layout, shader, color_format, label, multiview, kind);
+    PreparedActorPipelines {
+        opaque: create(
+            PreparedActorPipelineKind::Opaque,
+            "mclone_prepared_actor_opaque",
+        ),
+        mask_threshold: create(
+            PreparedActorPipelineKind::MaskThreshold,
+            "mclone_prepared_actor_mask_threshold",
+        ),
+        mask_dither: create(
+            PreparedActorPipelineKind::MaskDither,
+            "mclone_prepared_actor_mask_dither",
+        ),
+        blend_depth: create(
+            PreparedActorPipelineKind::BlendDepth,
+            "mclone_prepared_actor_blend_depth",
+        ),
+        blend_color: create(
+            PreparedActorPipelineKind::BlendColor,
+            "mclone_prepared_actor_blend_color",
+        ),
+        additive: create(
+            PreparedActorPipelineKind::Additive,
+            "mclone_prepared_actor_additive",
+        ),
+    }
+}
+
 fn create_pipeline(
     device: &wgpu::Device,
     layout: &wgpu::PipelineLayout,
@@ -957,7 +1117,59 @@ fn create_pipeline(
     color_format: wgpu::TextureFormat,
     label: &'static str,
     multiview: Option<NonZeroU32>,
+    kind: PreparedActorPipelineKind,
 ) -> wgpu::RenderPipeline {
+    let (fragment_entry, blend, write_mask, depth_write_enabled, depth_compare) = match kind {
+        PreparedActorPipelineKind::Opaque => (
+            "fs_opaque",
+            None,
+            wgpu::ColorWrites::ALL,
+            true,
+            wgpu::CompareFunction::GreaterEqual,
+        ),
+        PreparedActorPipelineKind::MaskThreshold => (
+            "fs_mask_threshold",
+            None,
+            wgpu::ColorWrites::ALL,
+            true,
+            wgpu::CompareFunction::GreaterEqual,
+        ),
+        PreparedActorPipelineKind::MaskDither => (
+            "fs_mask_dither",
+            None,
+            wgpu::ColorWrites::ALL,
+            true,
+            wgpu::CompareFunction::GreaterEqual,
+        ),
+        PreparedActorPipelineKind::BlendDepth => (
+            "fs_blend_depth",
+            None,
+            wgpu::ColorWrites::empty(),
+            true,
+            wgpu::CompareFunction::GreaterEqual,
+        ),
+        PreparedActorPipelineKind::BlendColor => (
+            "fs_blend_color",
+            Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+            wgpu::ColorWrites::ALL,
+            false,
+            wgpu::CompareFunction::Equal,
+        ),
+        PreparedActorPipelineKind::Additive => (
+            "fs_additive",
+            Some(wgpu::BlendState {
+                color: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::One,
+                    dst_factor: wgpu::BlendFactor::One,
+                    operation: wgpu::BlendOperation::Add,
+                },
+                alpha: wgpu::BlendComponent::OVER,
+            }),
+            wgpu::ColorWrites::ALL,
+            false,
+            wgpu::CompareFunction::GreaterEqual,
+        ),
+    };
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(label),
         layout: Some(layout),
@@ -994,17 +1206,22 @@ fn create_pipeline(
                         shader_location: 4,
                         format: wgpu::VertexFormat::Uint32,
                     },
+                    wgpu::VertexAttribute {
+                        offset: 52,
+                        shader_location: 5,
+                        format: wgpu::VertexFormat::Float32,
+                    },
                 ],
             }],
         },
         fragment: Some(wgpu::FragmentState {
             module: shader,
-            entry_point: Some("fs_main"),
+            entry_point: Some(fragment_entry),
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: color_format,
-                blend: None,
-                write_mask: wgpu::ColorWrites::ALL,
+                blend,
+                write_mask,
             })],
         }),
         primitive: wgpu::PrimitiveState {
@@ -1014,8 +1231,8 @@ fn create_pipeline(
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::GreaterEqual,
+            depth_write_enabled,
+            depth_compare,
             stencil: Default::default(),
             bias: Default::default(),
         }),
@@ -1050,6 +1267,7 @@ fn vertex_bytes(vertices: &[PreparedFigureVertex]) -> Vec<u8> {
         push_f32s(&mut bytes, &vertex.uv);
         push_f32s(&mut bytes, &vertex.color);
         bytes.extend_from_slice(&vertex.part_id.to_ne_bytes());
+        bytes.extend_from_slice(&vertex.alpha_cutoff.to_ne_bytes());
     }
     bytes
 }
@@ -1204,9 +1422,32 @@ mod tests {
     }
 
     #[test]
+    fn prepared_actor_vertex_and_uniform_bytes_carry_alpha_fields() {
+        let figure = prepared_chicken();
+        let vertex_bytes = vertex_bytes(&figure.vertices[..1]);
+        assert_eq!(vertex_bytes.len(), VERTEX_BYTE_LEN);
+        assert_eq!(
+            &vertex_bytes[52..56],
+            &figure.vertices[0].alpha_cutoff.to_ne_bytes()
+        );
+
+        let bytes = actor_bytes(Mat4::IDENTITY, 0x00f0_00f0, 0.42);
+        assert_eq!(&bytes[64..68], &0x00f0_00f0_u32.to_ne_bytes());
+        assert_eq!(&bytes[68..72], &0.42_f32.to_ne_bytes());
+    }
+
+    #[test]
     #[ignore = "GPU scale characterization; run explicitly on a host with a wgpu adapter"]
     fn thousand_chicken_non_instanced_baseline_and_residency() -> Result<()> {
         const ACTOR_COUNT: usize = 1_000;
+        let chicken = prepared_chicken();
+        let draws_per_actor = chicken.pass_ranges.len() as u64
+            + u64::from(
+                chicken
+                    .pass_ranges
+                    .iter()
+                    .any(|range| range.pass == PreparedFigurePass::Blend),
+            );
         let (device, queue) = crate::headless::create_headless_device()?;
         let figures = prepared_actor_figures();
         let shared = PreparedActorSharedResources::new(
@@ -1336,7 +1577,10 @@ mod tests {
             .or_else(|_| device.poll(wgpu::PollType::Wait))?;
         let encode_submit_wait_ms = encode_submit_start.elapsed().as_secs_f64() * 1_000.0;
         assert_eq!(stats.drawn_actor_count, ACTOR_COUNT);
-        assert_eq!(world.snapshot().draw_count, ACTOR_COUNT as u64);
+        assert_eq!(
+            world.snapshot().draw_count,
+            ACTOR_COUNT as u64 * draws_per_actor
+        );
         assert_eq!(shared.snapshot(), immutable);
 
         world.prepare(&device, &queue, &shared, &actors[..ACTOR_COUNT / 2]);
