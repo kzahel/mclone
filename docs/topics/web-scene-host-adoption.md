@@ -647,3 +647,21 @@ mobile, catalog, asset-pack, IndexedDB, lobby-runtime, desktop-lobby, and
 mobile-touch lobby pixel gates; the captures were inspected. Keep headed
 Wayland as the Linux browser render-validation lane rather than treating
 headless transparent canvases as product output.
+
+## Fly-Speed Initialization Correction (2026-07-22)
+
+The production cutover had reused `scene.movement_speed_multiplier` as the
+absolute speed argument while repositioning the browser camera. The default
+walking multiplier `1.0` was consequently clamped to the camera minimum of 2
+blocks/s instead of preserving the shared 32 blocks/s fly default. This was a
+web host-initialization regression, not a touch-joystick scaling problem.
+
+Browser startup and the smoke observer's player-camera aiming now read back and
+preserve the shared host's existing fly speed. A source-boundary regression
+test keeps walking and fly speed distinct, while desktop-shaped and
+CPU-throttled mobile browser smokes require an exact 32 blocks/s report. Both
+headed-Wayland gates passed; the app smoke toggled FLY/NOCLIP and streamed
+across chunk boundaries, and the mobile touch movement/look/button/menu path
+remained green. The final desktop and portrait frames plus the active-joystick
+capture were inspected under `/tmp`. The browser's existing 50 ms frame-delta
+cap remains a separate low-frame-rate cadence policy.

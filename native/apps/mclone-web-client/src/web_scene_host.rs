@@ -2167,7 +2167,6 @@ async fn create_scene_host(
 ) -> Result<WebSceneHost, JsValue> {
     let render_color_profile = render_options.color_profile.as_str().to_owned();
     let initial_center = scene.center();
-    let initial_speed = f64::from(scene.movement_speed_multiplier);
     let input_preference_store = WebPreferenceKeyValueStore;
     let (input_preferences, input_preference_error) =
         match ClientInputPreferences::load(&input_preference_store) {
@@ -2234,6 +2233,10 @@ async fn create_scene_host(
     .map_err(js_error)?;
     host.configure_asset_pack_preference_storage(Box::new(WebAssetPackPreferenceStorage))
         .map_err(js_error)?;
+    // Reposition the browser camera without confusing the walking multiplier
+    // with the camera's absolute fly speed. The shared host has already
+    // applied both launch settings to their distinct camera fields.
+    let initial_fly_speed = host.mono_camera_speed_blocks_per_second();
     host.set_mono_player_camera(
         Vec3d::new(
             f64::from(initial_center.x) * 16.0 + 8.0,
@@ -2242,7 +2245,7 @@ async fn create_scene_host(
         ),
         0.0,
         -0.35,
-        initial_speed,
+        initial_fly_speed,
     );
     let depth = ChunkDepthTarget::new(&context.device, context.width, context.height);
     let mut input_capability_state = InputCapabilityState::new(InputCapabilities {
@@ -4353,11 +4356,12 @@ fn aim_player_host_at_block(host: &mut McloneSceneHost, block: BlockPos) {
     let direction = (target - eye).normalize_or_zero();
     let yaw = direction.x.atan2(direction.z);
     let pitch = direction.y.clamp(-1.0, 1.0).asin();
+    let fly_speed = host.mono_camera_speed_blocks_per_second();
     host.set_mono_player_camera(
         Vec3d::new(f64::from(eye.x), f64::from(eye.y), f64::from(eye.z)),
         f64::from(yaw),
         f64::from(pitch),
-        4.3,
+        fly_speed,
     );
 }
 

@@ -7815,6 +7815,9 @@ function assertAppLoopResult(
   ) {
     throw new Error(`native web app did not keep FLY/NOCLIP as a toggleable streaming fallback:\n${JSON.stringify(result, null, 2)}`);
   }
+  if (result.cameraSpeedBlocksPerSecond !== 32) {
+    throw new Error(`native web app did not preserve the shared 32 blocks/s fly speed:\n${JSON.stringify(result, null, 2)}`);
+  }
   if (!result.pointerLockAttempted || (!result.pointerLocked && !result.pointerLockFallback)) {
     throw new Error(`native web app did not exercise pointer-lock or fallback state:\n${JSON.stringify(result, null, 2)}`);
   }
@@ -7926,6 +7929,9 @@ function assertMobileAppLoopResult(
   }
   if (!Number.isFinite(result.cameraX) || !Number.isFinite(result.cameraY) || !Number.isFinite(result.cameraZ)) {
     throw new Error(`native web mobile app did not report a finite camera pose:\n${JSON.stringify(result, null, 2)}`);
+  }
+  if (result.cameraSpeedBlocksPerSecond !== 32) {
+    throw new Error(`native web mobile app did not preserve the shared 32 blocks/s fly speed:\n${JSON.stringify(result, null, 2)}`);
   }
   if (
     result.startupReady !== true

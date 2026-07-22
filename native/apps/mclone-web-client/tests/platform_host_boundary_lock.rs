@@ -56,6 +56,27 @@ fn browser_scene_host_owns_the_shared_raw_input_route() {
 }
 
 #[test]
+fn browser_initial_pose_preserves_the_shared_fly_speed() {
+    let create_scene_host = braced_item(WEB_SCENE_HOST, "async fn create_scene_host(");
+    let aim_player_host = braced_item(WEB_SCENE_HOST, "fn aim_player_host_at_block(");
+    assert!(
+        create_scene_host
+            .contains("let initial_fly_speed = host.mono_camera_speed_blocks_per_second();"),
+        "browser camera repositioning no longer preserves the shared fly speed"
+    );
+    assert!(create_scene_host.contains("initial_fly_speed,"));
+    assert!(
+        !create_scene_host.contains("f64::from(scene.movement_speed_multiplier)"),
+        "browser camera initialization confused walking and fly speed again"
+    );
+    assert!(aim_player_host.contains("host.mono_camera_speed_blocks_per_second()"));
+    assert!(
+        !aim_player_host.contains("4.3"),
+        "browser smoke aiming replaced the active fly speed"
+    );
+}
+
+#[test]
 fn coarse_operation_reentry_and_currentness_stay_ledger_owned() {
     for required in [
         "pending_external_asset_pack_preparation_count",
