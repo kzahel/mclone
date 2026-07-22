@@ -6,8 +6,8 @@ Status: complete and live-accepted 2026-07-21, then extended locally on
 2026-07-22 with typed creature classification, classification filters, three
 fantasy/monster waves, a first living-growth wave, binary and fractional alpha
 proofs, fixed planar cards, a two-figure fantasy-fauna follow-up, and a gentler
-recognizable-folklore wave followed by an anatomy-led trio. The current local
-inventory contains 193 canonical figures and 272 clips. The
+recognizable-folklore wave followed by two anatomy-led trios. The current local
+inventory contains 196 canonical figures and 278 clips. The
 read-only,
 production-built Asset Lab
 catalogue is available at
@@ -193,6 +193,8 @@ occur.
     plant/animal, fantasy, rooted/winged, habitat, and theme classification.
 15. [x] Add Jackalope, Walking Sunflower, and Mossback Tortoise as
     anatomy-led designs without clothing, held props, or accessory concepts.
+16. [x] Add Owlbear, Cockatrice, and Young Dryad as a second anatomy-led
+    fantasy trio with explicit typed classification and paired motion clips.
 
 ## Local Acceptance Evidence
 
@@ -316,6 +318,15 @@ whose lichen is integrated into shell texture rather than attached decoration.
 Searches for `jackalope`, `sunflower`, and `mossback` each resolve exactly one
 figure. Six clean action/locomotion sheets and MP4 reviews are under
 `/tmp/mclone-natural-fantasy-three/`.
+
+The second anatomy-led follow-up builds 196 canonical figures, 278 clips, and
+4,233 parts. Owlbear combines an owl facial disc and feather mantle with a
+heavy grounded bear frame; Cockatrice combines rooster anatomy with scaled
+feet and an articulated reptile tail; Young Dryad increases the Plant result
+from five to six and Rooted from six to seven through bark, branches, roots,
+and double-sided leaves. Searches for `owlbear`, `cockatrice`, and `dryad` each
+resolve exactly one figure. Six clean action/locomotion sheets and MP4 reviews
+are under `/tmp/mclone-anatomy-fantasy-two/`.
 
 ## Live Acceptance Evidence
 

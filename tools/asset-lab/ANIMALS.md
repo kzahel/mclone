@@ -376,6 +376,8 @@ extensions — all **B** (`bipedWalk`), so no new tooling.
 | Unicorn / Pegasus | P3 | ☐ | horse rig + horn / wings |
 | Griffin | P3 | ☐ | eagle + lion |
 | Jackalope | P2 | ✅ | `examples/jackalope` — anatomy-led antlered hare with high haunches, long ears and rear feet, grounded bound, and separate listening action |
+| Owlbear | P2 | ✅ | `examples/owlbear` — heavy bear quadruped with a broad owl facial disc, hooked beak, feathered shoulder mantle, grounded lumber, and separate ruffle display |
+| Cockatrice | P2 | ✅ | `examples/cockatrice` — rooster/reptile biped with comb, wattles, wings, scaled feet, a long articulated tail, grounded strut, and separate threat display |
 | Slime / blob | P3 | ✅ | `examples/slime` — six-box acid slime with textured gel layers, a grounded squash idle, and a separate leap-and-slam action (also a baddie — see below) |
 | Owl Scholar | P2 | ✅ | `examples/owl_scholar` — recognizable spectacled owl with folded wings, satchel, two exact cutout book-page cards, grounded perch-hop, and separate page-turn action |
 
@@ -396,6 +398,7 @@ hostile growths.
 | Mandrake | P2 | ✅ | B/R | folklore, woodland | `examples/mandrake` — small knotted humanoid root with five double-sided cutout leaf cards, grounded root-waddle, and separate full-bodied scream action |
 | Walking cactus | P2 | ✅ | B/R | desert, flowering | `examples/walking_cactus` — friendly saguaro whose branches remain its arms, with short root feet, grounded cactus-waddle, and separate rain-bloom action |
 | Walking Sunflower | P2 | ✅ | B/R | flowering, field | `examples/walking_sunflower` — anatomy-led sunflower with eight double-sided ray-floret cards, leaf limbs, root feet, grounded root-step, and sun-follow idle |
+| Young Dryad | P2 | ✅ | B/R | sapling, woodland | `examples/young_dryad` — slender bark-and-branch humanoid with rooted feet, a double-sided leaf crown, grounded root-walk, and separate light-unfurl action |
 | Sundew carpet | P2 | ☐ | R/COL | bog, giant | many independently folding adhesive pads |
 | Tumble grove | P3 | ☐ | R | dry, thorned | uproots, rolls, and unfolds into a small tree |
 
@@ -463,9 +466,8 @@ should be a high-value early wave for a Minecraft-style mob set.
 
 ## Coverage snapshot
 
-- **Canonical box-and-card figures:** 193 sources and 272 clips after
-  Jackalope, Walking Sunflower, and Mossback Tortoise extend the anatomy-led
-  roster.
+- **Canonical box-and-card figures:** 196 sources and 278 clips after Owlbear,
+  Cockatrice, and Young Dryad extend the anatomy-led fantasy roster.
 - **First hostile fantasy wave:** Skeleton, Slime, and Gargoyle, each with
   explicit typed catalogue classification and a separate special action.
 - **Binary-alpha proof:** Cutout Skeleton keeps a full torso cuboid and forms
@@ -493,6 +495,9 @@ should be a high-value early wave for a Minecraft-style mob set.
 - **Anatomy-led follow-up:** Jackalope, Walking Sunflower, and Mossback Tortoise
   avoid clothing, held props, occupations, and detachable decoration. Antlers,
   petals, roots, lichen texture, and natural behaviors carry their designs.
+- **Second anatomy-led follow-up:** Owlbear, Cockatrice, and Young Dryad build
+  their fantasy read from hybrid anatomy, bark, branches, roots, and foliage;
+  none relies on clothing, held props, occupations, or accessory concepts.
 - **Rounded-to-box migration complete (13):** piglet, sheep, dog, cat,
   bearfolk, lionfolk, cow, horse, goat, wolf, fox, bear, and lion.
 - **Retained rounded A/B archive:** all 18 former mixed-primitive sources live
