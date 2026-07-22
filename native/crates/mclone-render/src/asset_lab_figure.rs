@@ -365,6 +365,12 @@ fn primitive_cuboid_size<'a>(
             require_positive_size(asset, part, size)?;
             return Ok((size, primitive.faces.as_ref()));
         }
+        "plane" => {
+            let width = required_positive_primitive_field(asset, part, "width", primitive.width)?;
+            let height =
+                required_positive_primitive_field(asset, part, "height", primitive.height)?;
+            Vec3::new(width, height, TEXTURE_OVERLAY_DEPTH)
+        }
         "sphere" => {
             let radius =
                 required_positive_primitive_field(asset, part, "radius", primitive.radius)?;
@@ -757,6 +763,9 @@ fn append_texture_overlay_cuboids(
                     texture_name, symbol
                 )
             })?;
+            if color_string == "transparent" {
+                continue;
+            }
             let color = parse_hex_color(color_string).with_context(|| {
                 format!(
                     "asset-lab texture '{}' palette symbol '{}' has invalid color '{}'",

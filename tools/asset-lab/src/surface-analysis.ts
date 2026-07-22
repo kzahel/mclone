@@ -1,6 +1,7 @@
 import * as THREE from "three";
 import type {
   BoxFaceName,
+  FigureFaceName,
   FigureAsset,
   PartSpec,
   SurfaceExceptionSpec,
@@ -21,7 +22,7 @@ export type FigureSurfaceRule =
 
 export interface FigureFaceRef {
   part: string;
-  face: BoxFaceName;
+  face: FigureFaceName;
 }
 
 export interface FigureSurfaceIssue {
@@ -83,7 +84,7 @@ const DEFAULT_PARALLEL_DOT_THRESHOLD = 0.99999;
 const ARTICULATED_MARGIN_SCALE = 0.0075;
 const MINIMUM_ARTICULATED_MARGIN = 0.02;
 
-/** Finds same-facing, coplanar box faces with meaningful projected overlap. */
+/** Finds same-facing, coplanar box and plane faces with meaningful projected overlap. */
 export function analyzeFigureSurfaces(
   asset: FigureAsset,
   options: FigureSurfaceAnalysisOptions = {},
@@ -99,9 +100,7 @@ export function analyzeFigureSurfaces(
   for (const pose of poses) {
     const matrices = evaluateFigurePose(asset, pose);
     const faces = asset.parts.flatMap((part) =>
-      part.primitive.kind === "box"
-        ? transformedFaces(asset, part, matrices.get(part.name)!)
-        : []
+      transformedFaces(asset, part, matrices.get(part.name)!)
     );
     const boxes = asset.parts.flatMap((part) =>
       part.primitive.kind === "box"
@@ -128,11 +127,11 @@ export function analyzeFigureSurfaces(
         }
         const gap = Math.abs(right.center.clone().sub(left.center).dot(left.normal));
         const exactCandidate = gap <= exactPlaneEpsilon;
-        const articulatedAxis = left.face === right.face
-          && faceAxis(left.face) === "x"
+        const sharedAxis = left.face === right.face ? faceAxis(left.face) : undefined;
+        const articulatedAxis = sharedAxis === "x"
           && articulatedPartPairs.has(partPairKey(left.part, right.part))
           && gap < articulatedMargin
-          ? faceAxis(left.face)
+          ? sharedAxis
           : undefined;
         if (!exactCandidate && articulatedAxis === undefined) {
           continue;
@@ -159,7 +158,7 @@ export function analyzeFigureSurfaces(
           const groupKey = `${partPairKey(left.part, right.part)}:${articulatedAxis}`;
           const issuesByFace = articulatedGroups.get(groupKey) ?? new Map();
           articulatedGroups.set(groupKey, issuesByFace);
-          recordIssue(issuesByFace, left.face, {
+          recordIssue(issuesByFace, left.face as BoxFaceName, {
             rule: ARTICULATED_SEAM_MARGIN_RULE,
             faces: pair,
             pose,
@@ -232,14 +231,17 @@ function recordIssue<Key extends string>(
   }
 }
 
-function faceAxis(face: BoxFaceName): "x" | "y" | "z" {
+function faceAxis(face: FigureFaceName): "x" | "y" | "z" | undefined {
   if (face === "east" || face === "west") {
     return "x";
   }
   if (face === "up" || face === "down") {
     return "y";
   }
-  return "z";
+  if (face === "north" || face === "south" || face === "front" || face === "back") {
+    return "z";
+  }
+  return undefined;
 }
 
 function animatedHeadSocketPairs(asset: FigureAsset): Set<string> {
@@ -361,6 +363,9 @@ function transformedFaces(
   part: PartSpec,
   matrix: THREE.Matrix4,
 ): TransformedFace[] {
+  if (part.primitive.kind === "plane") {
+    return transformedPlaneFaces(asset, part, matrix);
+  }
   if (part.primitive.kind !== "box") {
     return [];
   }
@@ -395,15 +400,52 @@ function transformedFaces(
   });
 }
 
+function transformedPlaneFaces(
+  asset: FigureAsset,
+  part: PartSpec,
+  matrix: THREE.Matrix4,
+): TransformedFace[] {
+  if (part.primitive.kind !== "plane") {
+    return [];
+  }
+  const halfWidth = part.primitive.width / 2;
+  const halfHeight = part.primitive.height / 2;
+  const definitions: Array<["front" | "back", Vec3, Vec3]> = [
+    ["front", [halfWidth, 0, 0], [0, halfHeight, 0]],
+  ];
+  if (part.primitive.sidedness === "double") {
+    definitions.push(["back", [-halfWidth, 0, 0], [0, halfHeight, 0]]);
+  }
+  return definitions.map(([face, uValue, vValue]) => {
+    const center = new THREE.Vector3().applyMatrix4(matrix);
+    const u = vector(uValue).applyMatrix4(matrix).sub(center);
+    const v = vector(vValue).applyMatrix4(matrix).sub(center);
+    const normal = u.clone().cross(v).normalize();
+    const vertices = [
+      center.clone().sub(u).sub(v),
+      center.clone().add(u).sub(v),
+      center.clone().add(u).add(v),
+      center.clone().sub(u).add(v),
+    ] as TransformedFace["vertices"];
+    return {
+      part: part.name,
+      face,
+      appearance: faceAppearance(asset, part, face),
+      center,
+      normal,
+      vertices,
+    };
+  });
+}
+
 function faceAppearance(
   asset: FigureAsset,
   part: PartSpec,
-  face: BoxFaceName,
+  face: FigureFaceName,
 ): string {
-  if (part.primitive.kind !== "box") {
-    return "";
-  }
-  const faceSpec = part.primitive.faces?.[face];
+  const faceSpec = part.primitive.kind === "box" && face !== "front" && face !== "back"
+    ? part.primitive.faces?.[face]
+    : undefined;
   const materialName = faceSpec?.material ?? part.material;
   const textureName = faceSpec?.texture ?? part.texture;
   return JSON.stringify({

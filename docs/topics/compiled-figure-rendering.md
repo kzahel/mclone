@@ -26,6 +26,13 @@ only canonical/promotable vocabulary and migrates the current catalog while
 retaining explicit schema-v1 legacy compatibility. Instancing, box-part LOD,
 GPU pose evaluation, and a disk cache remain deferred.
 
+The 2026-07-22 card follow-up deliberately broadens that completed policy to
+boxes plus fixed finite planes for genuinely planar details. Two-sided cards
+compile as coincident opposing geometry while every prepared render pipeline
+keeps back-face culling. The exact contract and Maw Orchid proof live in
+[`figure-card-primitives.md`](figure-card-primitives.md); this does not reopen
+rounded canonical geometry.
+
 All source, generated-asset, pack, shared-workspace, thin-adapter, and WASM
 build gates passed at Tactical 200 closeout. Canonical/legacy Asset Lab sheets
 and movies were inspected throughout the migration. The 2026-07-20 Linux
@@ -100,7 +107,8 @@ tools/asset-lab/examples/<figure>/figure.ts
 ```
 
 The authoring/export side preserves semantic primitives for schema-v1 legacy
-compatibility, but canonical `figure()` sources now admit boxes only.
+compatibility, but canonical `figure()` sources now admit boxes and fixed
+finite planes only.
 Deprecated `legacyFigure()` sources under `legacy-examples/` retain the rounded
 A/B evidence. TypeScript is the only authored representation for promoted
 figures. Every Asset Lab display
@@ -115,15 +123,16 @@ was an orphaned, directly edited JSON asset; it now has a DSL source, with its
 geometry and explicit animation keys preserved and only obsolete locomotion
 metadata normalized. `asset-lab:figures:check` covers all three promoted
 figures, rejects stale output, rejects any promoted figure JSON without a
-declared source, and rejects non-box promoted parts. All 20 canonical and 18
-legacy Asset Lab examples also pass a discovered source-to-canonical-JSON
-round-trip test; the other 17 canonical figures are authoring examples, not
-checked runtime assets, so they have no second file to drift against.
+declared source, and rejects promoted parts outside the box-and-card
+vocabulary. All 185 canonical and 18 legacy Asset Lab examples pass a
+discovered source-to-canonical-JSON round-trip test; examples that are not
+promoted are authoring sources and have no second file to drift against.
 
-Three.js uses `BoxGeometry` for canonical sources. Explicit legacy sources
-still use `SphereGeometry`, `CapsuleGeometry`, and `CylinderGeometry`, including
-their historical authored/default segment counts. Export writes semantic JSON;
-it does not write the preview's final vertex/index data.
+Three.js uses `BoxGeometry` and `PlaneGeometry` for canonical sources. Explicit
+legacy sources still use `SphereGeometry`, `CapsuleGeometry`, and
+`CylinderGeometry`, including their historical authored/default segment
+counts. Export writes semantic JSON; it does not write the preview's final
+vertex/index data.
 
 The native bridge was intentionally narrower:
 
@@ -1522,7 +1531,8 @@ Closed 2026-07-16 during the pre-landing design review.
 7. **Sparse texture policy.** The initial campaign supports solid materials
    plus automatic planar mapping for explicit box-face decals. It does not
    introduce whole-character unwraps or cross-part continuity. Curved-surface
-   UV controls are closed with the box-only production policy.
+   UV controls remain closed for rounded legacy primitives; canonical planes
+   use one full rectangular texture per side.
 8. **Cross-renderer visual oracle.** Tactical 181 adds one command that renders
    corresponding semantic Three.js and prepared engine views and emits a
    labeled side-by-side sheet under `/tmp`. Both sides use one renderer-neutral
@@ -1530,8 +1540,9 @@ Closed 2026-07-16 during the pre-landing design review.
    persisted figure representation. Initial acceptance is human review of
    projection, silhouette, grounding, face placement, and UV orientation;
    exact RGB equality is not required across different lighting pipelines.
-9. **Box-only production policy.** Canonical `figure()` sources and every
-   promoted first-party figure use boxes exclusively. Deprecated
+9. **Box-and-card production policy.** Canonical `figure()` sources and every
+   promoted first-party figure use boxes plus fixed finite planes for details
+   that are intrinsically planar. Deprecated
    `legacyFigure()` sources may retain sphere, capsule, and cylinder records
    for A/B and schema-v1 compatibility review. The shared compiler continues
    translating those legacy records to explicitly diagnosed cuboid bounds;

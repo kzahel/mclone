@@ -4,8 +4,9 @@ Topic: `animal-catalogue`
 
 Status: complete and live-accepted 2026-07-21, then extended locally on
 2026-07-22 with typed creature classification, classification filters, three
-fantasy/monster waves, and binary and fractional alpha proofs. The current
-local inventory contains 182 canonical figures and 250 clips. The read-only,
+fantasy/monster waves, a first living-growth wave, binary and fractional alpha
+proofs, and fixed planar cards. The current local inventory contains 185
+canonical figures and 256 clips. The read-only,
 production-built Asset Lab
 catalogue is available at
 `https://mclone.kzahel.com/animals/`, delivered by the existing native-web
@@ -27,7 +28,7 @@ preparation remain owned by
 ## Product Contract
 
 - The public entry point is `/animals/` on the existing mclone site.
-- The catalogue is read-only and contains canonical box-only sources discovered
+- The catalogue is read-only and contains canonical box-and-card sources discovered
   from `tools/asset-lab/examples/*/figure.ts` at build time. Deprecated rounded
   compatibility sources under `legacy-examples/` are excluded.
 - Visitors can search and select figures, inspect semantic facts, choose an
@@ -45,7 +46,8 @@ preparation remain owned by
 - Classification is multi-valued where the creature demands it: amphibious
   creatures can be land and water, while a Gargoyle can be fantasy, monster,
   construct, biped, winged, land, and air without flattening those facts into
-  one category.
+  one category. Plants and fungi remain distinct groups, and rooted or colony
+  body plans do not imply animal or monster membership.
 - Figure selection and clip selection are shareable through URL query
   parameters without requiring a Worker-side single-page-app fallback.
 - The layout is responsive and keyboard accessible, supports light and dark
@@ -107,11 +109,12 @@ The manifest records at least:
 - the total runtime-promoted figure count; and
 - for promoted entries, the runtime figure ID and packed semantic JSON path.
 
-Generation fails on duplicate names, invalid JSON round trips, non-box
-canonical parts, missing clips, unsafe output names, duplicate promotion IDs or
-paths, unsafe runtime paths, or promotion-summary drift. The source directory
-is the inventory authority. `ANIMALS.md` remains a human roadmap whose
-cross-listed rows and narrative summaries are not parsed as deployed data.
+Generation fails on duplicate names, invalid JSON round trips, canonical parts
+outside the box-and-card vocabulary, missing clips, unsafe output names,
+duplicate promotion IDs or paths, unsafe runtime paths, or promotion-summary
+drift. The source directory is the inventory authority. `ANIMALS.md` remains a
+human roadmap whose cross-listed rows and narrative summaries are not parsed as
+deployed data.
 
 ## Deployment Contract
 
@@ -180,6 +183,8 @@ occur.
 11. [x] Continue the hostile/scary roster through Zombie, Mimic, Scarecrow,
     Witch, Werewolf, and Grave Crawler while retaining explicit typed
     disposition and searchable theme metadata.
+12. [x] Add Plant/Fungus groups and Rooted/Colony body plans, then prove them
+    with Walking Banyan, Maw Orchid, and Lantern Mycelium.
 
 ## Local Acceptance Evidence
 
@@ -249,15 +254,33 @@ variants. The catalogue capture is
 and the semantic-versus-native prepared comparison are under
 `/tmp/mclone-asset-lab/binary-cutout/`.
 
-The current scary-creature follow-ups build 182 canonical figures, 250 clips,
-and 3,921 parts. Every new figure authors `hostile` disposition and the
+The scary-creature follow-ups established 182 canonical figures, 250 clips,
+and 3,921 parts. Every new figure authored `hostile` disposition and the
 `scary` theme instead of relying on inferred catalogue classification.
-Production-subpath Playwright proves that the Monster and Hostile filters each
-return all 12 intended figures, that searching `scary` returns the same 12,
-and that Witch, Werewolf, and Grave Crawler are visible through both routes.
+Production-subpath Playwright proved that the Monster and Hostile filters each
+returned all 12 intended figures, that searching `scary` returned the same 12,
+and that Witch, Werewolf, and Grave Crawler were visible through both routes.
 The focused catalogue capture is
 `/tmp/mclone-scary-four/catalogue-scary-filter.png`; clean sheets and six MP4
 reviews for the latest three figures are under `/tmp/mclone-scary-four/`.
+
+The first living-growth batch builds 185 canonical figures, 256 clips, and
+3,993 parts. Walking Banyan and Maw Orchid are the two Plant results; Lantern
+Mycelium is the single Fungus and Colony result; all three are Rooted. The Maw
+Orchid also increases Monster, Hostile, and `scary` results to 13. The
+Mycelium inspector proves its explicit neutral classification and its opaque,
+mask, blend, and additive rendering facts. Production-subpath Playwright
+passes all four tests, including exact group/body-plan filtering. The focused
+capture is `/tmp/mclone-living-growths/catalogue-colony-filter.png`; clean
+sheets and six MP4 reviews are under `/tmp/mclone-living-growths/`.
+
+The card follow-up keeps that inventory and clip count stable while replacing
+Maw Orchid's four thin petal boxes with explicit double-sided planes. Catalogue
+generation accepts the expanded canonical vocabulary without adding a special
+card category: cards remain a geometry fact, while Plant, Monster, Hostile,
+Rooted, and `scary` continue to describe what the figure is. Final Orchid
+sheets, videos, and native comparisons are under
+`/tmp/mclone-living-growths/card-final/`.
 
 ## Live Acceptance Evidence
 

@@ -44,7 +44,7 @@ const DEFAULT_TOLERANCE = 0.02;
 const LAND_LOCOMOTION_KINDS = new Set(["biped-walk", "quadruped-walk", "slither"]);
 
 /**
- * Finds non-contact box geometry that passes below the authoring ground plane
+ * Finds non-contact box or plane geometry that passes below the authoring ground plane
  * in rest, land-locomotion, idle, or action poses. Swim and flight clips are
  * excluded even when the same figure also has a land clip.
  */
@@ -64,10 +64,13 @@ export function analyzeFigureGrounding(
   for (const pose of poses) {
     const matrices = evaluateFigurePose(asset, pose);
     for (const part of asset.parts) {
-      if (part.primitive.kind !== "box" || supportParts.has(part.name)) {
+      if (
+        (part.primitive.kind !== "box" && part.primitive.kind !== "plane")
+        || supportParts.has(part.name)
+      ) {
         continue;
       }
-      const bottomY = transformedBoxBottom(part, matrices.get(part.name)!);
+      const bottomY = transformedPrimitiveBottom(part, matrices.get(part.name)!);
       if (bottomY >= groundY - tolerance) {
         continue;
       }
@@ -194,11 +197,15 @@ function landContactParts(asset: FigureAsset): Set<string> {
   );
 }
 
-function transformedBoxBottom(part: PartSpec, matrix: THREE.Matrix4): number {
-  if (part.primitive.kind !== "box") {
+function transformedPrimitiveBottom(part: PartSpec, matrix: THREE.Matrix4): number {
+  const half = part.primitive.kind === "box"
+    ? part.primitive.size.map((value) => value / 2)
+    : part.primitive.kind === "plane"
+      ? [part.primitive.width / 2, part.primitive.height / 2, 0]
+      : undefined;
+  if (!half) {
     return Number.POSITIVE_INFINITY;
   }
-  const half = part.primitive.size.map((value) => value / 2);
   let bottomY = Number.POSITIVE_INFINITY;
   for (const x of [-half[0]!, half[0]!]) {
     for (const y of [-half[1]!, half[1]!]) {

@@ -34,12 +34,14 @@ export interface FigureGeometryEvaluation {
 }
 
 const DEFAULT_CONNECTION_GAP_THRESHOLD = 0.06;
+const PLANE_ANALYSIS_THICKNESS = 1e-4;
 
 /**
- * Finds rest-pose box components that do not connect to the figure's largest
- * component. This is intentionally a bounded authoring check: transformed
- * oriented boxes catch conspicuous floating pieces without treating the rig
- * parent as proof of attachment or pretending to provide general collision.
+ * Finds rest-pose primitive components that do not connect to the figure's
+ * largest component. This is intentionally a bounded authoring check:
+ * transformed oriented bounds catch conspicuous floating pieces without
+ * treating the rig parent as proof of attachment or pretending to provide
+ * general collision. Planes receive analysis-only epsilon thickness.
  */
 export function analyzeFigureGeometry(
   asset: FigureAsset,
@@ -81,13 +83,11 @@ export function analyzeFigureGeometry(
   };
 
   for (const part of asset.parts) {
-    if (part.primitive.kind !== "box") {
+    const bound = transformedPrimitiveBound(part, resolveContentMatrix(part));
+    if (!bound) {
       continue;
     }
-    bounds.set(
-      part.name,
-      transformedBox(part.primitive.size, resolveContentMatrix(part)),
-    );
+    bounds.set(part.name, bound);
   }
 
   const names = [...bounds.keys()];
@@ -216,6 +216,19 @@ function samePartSet(left: readonly string[], right: readonly string[]): boolean
 function transformedBox(size: Vec3, matrix: THREE.Matrix4): OBB {
   const half = new THREE.Vector3(size[0] / 2, size[1] / 2, size[2] / 2);
   return new OBB(new THREE.Vector3(), half).applyMatrix4(matrix);
+}
+
+function transformedPrimitiveBound(part: PartSpec, matrix: THREE.Matrix4): OBB | undefined {
+  if (part.primitive.kind === "box") {
+    return transformedBox(part.primitive.size, matrix);
+  }
+  if (part.primitive.kind === "plane") {
+    return transformedBox(
+      [part.primitive.width, part.primitive.height, PLANE_ANALYSIS_THICKNESS],
+      matrix,
+    );
+  }
+  return undefined;
 }
 
 function boxGap(left: OBB, right: OBB): number {

@@ -1,5 +1,7 @@
 export const CREATURE_GROUPS = [
   "animal",
+  "plant",
+  "fungus",
   "fantasy",
   "monster",
   "humanoid",
@@ -14,6 +16,8 @@ export const CREATURE_BODY_PLANS = [
   "serpentine",
   "crawler",
   "blob",
+  "rooted",
+  "colony",
   "other",
 ] as const;
 

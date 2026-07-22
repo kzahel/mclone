@@ -4,7 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import test from "node:test";
 import {
-  assertBoxOnlyFigure,
+  assertCanonicalFigure,
   figure,
   legacyFigure,
   type FigureAsset,
@@ -47,6 +47,27 @@ test("round-trips typed creature metadata and rejects invalid tags", () => {
     habitats: ["land", "water"],
     scale: "medium",
     themes: ["amphibious"],
+  });
+
+  const growth = figure("growth", ({ box, mat, metadata, part }) => {
+    metadata({
+      bodyPlans: ["rooted", "colony"],
+      disposition: "neutral",
+      groups: ["plant", "fungus"],
+      habitats: ["land", "underground"],
+      scale: "large",
+      themes: ["living-growth"],
+    });
+    mat("stem", "#668855");
+    part("body", box({ at: [0, 0.5, 0], size: [1, 1, 1], material: "stem" }));
+  });
+  assert.deepEqual(roundTripFigureAsset(growth, "growth source").asset.metadata, {
+    bodyPlans: ["rooted", "colony"],
+    disposition: "neutral",
+    groups: ["plant", "fungus"],
+    habitats: ["land", "underground"],
+    scale: "large",
+    themes: ["living-growth"],
   });
 
   const invalid = tinyFigure();
@@ -173,13 +194,80 @@ test("canonical figure rejects deprecated curved primitives", () => {
       figure("curved", ({ part }) => {
         part("orb", { primitive: { kind: "sphere", radius: 1 } });
       }),
-    /canonical figures may use only box primitives/,
+    /canonical figures may use only box and plane primitives/,
   );
 
   const legacy = legacyFigure("curved_legacy", ({ part, sphere }) => {
     part("orb", sphere({ radius: 1 }));
   });
   assert.equal(legacy.parts[0]?.primitive.kind, "sphere");
+});
+
+test("canonical planes round-trip with explicit fixed sidedness", () => {
+  const card = figure("card", ({ box, mat, part, plane }) => {
+    mat("leaf", { color: "#55aa66", alphaMode: "mask", alphaCutoff: 0.1 });
+    part("stem", box({ at: [0, 0.5, 0], size: [0.2, 1, 0.2], material: "leaf" }));
+    part("leaf", plane({
+      parent: "stem",
+      at: [0, 0.35, 0.1],
+      size: [0.8, 0.5],
+      sidedness: "double",
+      material: "leaf",
+    }));
+  });
+
+  const primitive = card.parts.find((part) => part.name === "leaf")?.primitive;
+  assert.deepEqual(primitive, {
+    kind: "plane",
+    width: 0.8,
+    height: 0.5,
+    sidedness: "double",
+  });
+  assert.deepEqual(roundTripFigureAsset(card, "card source").asset, card);
+  assert.doesNotThrow(() => assertCanonicalFigure(card));
+});
+
+test("plane faces participate in coplanar surface analysis", () => {
+  assert.throws(
+    () => figure("card_surface", ({ box, mat, part, plane }) => {
+      mat("body", "#667766");
+      mat("mark", "#aa6655");
+      part("body", box({ size: [1, 1, 1], material: "body" }));
+      part("mark", plane({
+        parent: "body",
+        at: [0, 0, 0.5],
+        size: [0.8, 0.8],
+        sidedness: "front",
+        material: "mark",
+      }));
+    }),
+    /coplanar-overlap body\.south \/ mark\.front.*surfaceException/s,
+  );
+});
+
+test("plane corners participate in land-figure ground analysis", () => {
+  assert.throws(
+    () => figure("grounded_card", ({ box, mat, metadata, part, plane }) => {
+      metadata({
+        bodyPlans: ["rooted"],
+        disposition: "neutral",
+        groups: ["plant"],
+        habitats: ["land"],
+        scale: "small",
+        themes: ["card-test"],
+      });
+      mat("green", "#557744");
+      part("body", box({ at: [0, 0.5, 0], size: [1, 1, 1], material: "green" }));
+      part("leaf", plane({
+        parent: "body",
+        at: [0, -0.54, 0.51],
+        size: [0.5, 0.1],
+        sidedness: "double",
+        material: "green",
+      }));
+    }),
+    /ground-penetration part 'leaf'/,
+  );
 });
 
 test("canonical geometry requires reasoned disconnected-component exceptions", () => {
@@ -869,7 +957,7 @@ test("canonical and legacy examples cross the canonical JSON boundary", async ()
 
   for (const sourcePath of canonicalSources) {
     const document = await loadFigureJsonDocument(sourcePath);
-    assert.doesNotThrow(() => assertBoxOnlyFigure(document.asset), sourcePath);
+    assert.doesNotThrow(() => assertCanonicalFigure(document.asset), sourcePath);
   }
 });
 

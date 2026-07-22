@@ -173,6 +173,9 @@ function createGeometry(part: PartSpec): THREE.BufferGeometry {
   if (primitive.kind === "box") {
     return new THREE.BoxGeometry(primitive.size[0], primitive.size[1], primitive.size[2]);
   }
+  if (primitive.kind === "plane") {
+    return new THREE.PlaneGeometry(primitive.width, primitive.height);
+  }
   if (primitive.kind === "sphere") {
     return new THREE.SphereGeometry(
       primitive.radius,
@@ -237,6 +240,9 @@ function createMaterial(
     metalness: spec?.metalness ?? 0,
     opacity,
     roughness: spec?.roughness ?? 0.85,
+    side: part.primitive.kind === "plane" && part.primitive.sidedness === "double"
+      ? THREE.DoubleSide
+      : THREE.FrontSide,
   });
 
   if (mode === "mask") {

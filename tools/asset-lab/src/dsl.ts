@@ -18,6 +18,7 @@ export type {
 } from "./creature-metadata";
 
 export type Vec3 = readonly [number, number, number];
+export type Vec2 = readonly [number, number];
 export type EulerDeg = Vec3;
 
 export interface FigureAsset {
@@ -41,7 +42,7 @@ export interface GeometryExceptionSpec {
 
 export interface SurfaceFaceSpec {
   part: string;
-  face: BoxFaceName;
+  face: FigureFaceName;
 }
 
 export interface SurfaceExceptionSpec {
@@ -74,8 +75,14 @@ export interface AsciiTextureSpec {
 export const TRANSPARENT_PALETTE_COLOR = "transparent";
 
 export type BoxFaceName = "north" | "south" | "east" | "west" | "up" | "down";
+export type PlaneFaceName = "front" | "back";
+export type FigureFaceName = BoxFaceName | PlaneFaceName;
 
 export const BOX_FACE_NAMES: readonly BoxFaceName[] = ["north", "south", "east", "west", "up", "down"];
+export const PLANE_FACE_NAMES: readonly PlaneFaceName[] = ["front", "back"];
+
+export const PLANE_SIDEDNESS = ["front", "double"] as const;
+export type PlaneSidedness = typeof PLANE_SIDEDNESS[number];
 
 export interface FaceSpec {
   material?: string;
@@ -86,6 +93,7 @@ export type BoxFaceMap = Partial<Record<BoxFaceName, FaceSpec>>;
 
 export type PrimitiveSpec =
   | { kind: "box"; size: Vec3; faces?: BoxFaceMap }
+  | { kind: "plane"; width: number; height: number; sidedness: PlaneSidedness }
   | { kind: "sphere"; radius: number; widthSegments?: number; heightSegments?: number }
   | { kind: "capsule"; radius: number; length: number; capSegments?: number; radialSegments?: number }
   | { kind: "cylinder"; radiusTop: number; radiusBottom: number; length: number; radialSegments?: number };
@@ -120,6 +128,11 @@ export interface PartOptions {
 export interface BoxOptions extends PartOptions {
   size: Vec3;
   faces?: BoxFaceMap;
+}
+
+export interface PlaneOptions extends PartOptions {
+  size: Vec2;
+  sidedness: PlaneSidedness;
 }
 
 /** @deprecated Legacy rounded-comparison input only. Use `box`. */
@@ -394,12 +407,14 @@ export interface FigureApi {
   bob(part: string, options: BobOptions): CycleTrack;
   followThrough(part: string, options: FollowThroughOptions): CycleTrack;
   box(options: BoxOptions): PartDraft;
+  plane(options: PlaneOptions): PartDraft;
 }
 
 /**
  * Compatibility API for retained rounded A/B sources.
  *
- * @deprecated Canonical and promoted figures must use `figure()` and boxes.
+ * @deprecated Canonical and promoted figures must use `figure()` with boxes
+ * and planes.
  */
 export interface LegacyFigureApi extends FigureApi {
   /** @deprecated Legacy rounded-comparison input only. Use `box`. */
@@ -412,7 +427,7 @@ export interface LegacyFigureApi extends FigureApi {
 
 export function figure(name: string, build: (api: FigureApi) => void): FigureAsset {
   const asset = buildFigureAsset(name, build);
-  assertBoxOnlyFigure(asset);
+  assertCanonicalFigure(asset);
   assertFigureGeometry(asset);
   assertFigureGrounding(asset);
   assertFigureSurfaces(asset);
@@ -422,7 +437,8 @@ export function figure(name: string, build: (api: FigureApi) => void): FigureAss
 /**
  * Builds a retained rounded comparison source without making it canonical.
  *
- * @deprecated Canonical and promoted figures must use `figure()` and boxes.
+ * @deprecated Canonical and promoted figures must use `figure()` with boxes
+ * and planes.
  */
 export function legacyFigure(
   name: string,
@@ -449,8 +465,8 @@ export function assertValidFigure(asset: FigureAsset): void {
   }
 }
 
-export function assertBoxOnlyFigure(asset: FigureAsset): void {
-  const errors = validateBoxOnlyFigure(asset);
+export function assertCanonicalFigure(asset: FigureAsset): void {
+  const errors = validateCanonicalFigure(asset);
   if (errors.length > 0) {
     throw new Error(
       `Invalid canonical figure '${asset.name}':\n${errors.map((error) => `- ${error}`).join("\n")}`,
@@ -458,12 +474,12 @@ export function assertBoxOnlyFigure(asset: FigureAsset): void {
   }
 }
 
-export function validateBoxOnlyFigure(asset: FigureAsset): string[] {
+export function validateCanonicalFigure(asset: FigureAsset): string[] {
   return asset.parts
-    .filter((part) => part.primitive.kind !== "box")
+    .filter((part) => part.primitive.kind !== "box" && part.primitive.kind !== "plane")
     .map(
       (part) =>
-        `part '${part.name}' uses deprecated '${part.primitive.kind}'; canonical figures may use only box primitives`,
+        `part '${part.name}' uses deprecated '${part.primitive.kind}'; canonical figures may use only box and plane primitives`,
     );
 }
 
@@ -523,11 +539,10 @@ export function validateFigure(asset: FigureAsset): string[] {
         const part = asset.parts.find((candidate) => candidate.name === face.part);
         if (!part) {
           errors.push(`surface exception ${index} face ${faceIndex} references missing part '${face.part}'`);
-        } else if (part.primitive.kind !== "box") {
-          errors.push(`surface exception ${index} face ${faceIndex} references non-box part '${face.part}'`);
-        }
-        if (!BOX_FACE_NAMES.includes(face.face)) {
-          errors.push(`surface exception ${index} face ${faceIndex} uses invalid face '${String(face.face)}'`);
+        } else if (!primitiveFaceNames(part).includes(face.face)) {
+          errors.push(
+            `surface exception ${index} face ${faceIndex} uses invalid ${part.primitive.kind} face '${String(face.face)}'`,
+          );
         }
       }
       const faceKeys = exception.faces.map((face) => `${face.part}.${face.face}`).sort();
@@ -705,6 +720,7 @@ class FigureBuilder {
       bob,
       followThrough,
       box,
+      plane,
       sphere,
       capsule,
       cylinder,
@@ -789,6 +805,14 @@ function box(options: BoxOptions): PartDraft {
     primitive.faces = faces;
   }
   return { ...rest, primitive };
+}
+
+function plane(options: PlaneOptions): PartDraft {
+  const { size: [width, height], sidedness, ...rest } = options;
+  return {
+    ...rest,
+    primitive: { kind: "plane", width, height, sidedness },
+  };
 }
 
 function sphere(options: SphereOptions): PartDraft {
@@ -1983,6 +2007,14 @@ function validatePrimitive(part: PartSpec, errors: string[]): void {
   const primitive = part.primitive;
   if (primitive.kind === "box") {
     validatePositiveVec(`part '${part.name}' box size`, primitive.size, errors);
+  } else if (primitive.kind === "plane") {
+    validatePositive(`part '${part.name}' plane width`, primitive.width, errors);
+    validatePositive(`part '${part.name}' plane height`, primitive.height, errors);
+    if (!PLANE_SIDEDNESS.includes(primitive.sidedness)) {
+      errors.push(
+        `part '${part.name}' plane sidedness '${String(primitive.sidedness)}' is invalid`,
+      );
+    }
   } else if (primitive.kind === "sphere") {
     validatePositive(`part '${part.name}' sphere radius`, primitive.radius, errors);
   } else if (primitive.kind === "capsule") {
@@ -1993,6 +2025,16 @@ function validatePrimitive(part: PartSpec, errors: string[]): void {
     validatePositive(`part '${part.name}' cylinder radiusBottom`, primitive.radiusBottom, errors);
     validatePositive(`part '${part.name}' cylinder length`, primitive.length, errors);
   }
+}
+
+function primitiveFaceNames(part: PartSpec): readonly FigureFaceName[] {
+  if (part.primitive.kind === "box") {
+    return BOX_FACE_NAMES;
+  }
+  if (part.primitive.kind === "plane") {
+    return part.primitive.sidedness === "double" ? PLANE_FACE_NAMES : ["front"];
+  }
+  return [];
 }
 
 function validateBoxFaces(part: PartSpec, asset: FigureAsset, errors: string[]): void {

@@ -17,8 +17,9 @@ sampled animation poses, authoring exceptions, the existing-warning ratchet,
 and visual evidence. General texture filtering, renderer depth precision, and
 mesh compilation remain separate concerns.
 
-The broader canonical box-only policy remains in
-[`compiled-figure-rendering.md`](compiled-figure-rendering.md). Disconnected
+The broader canonical box-and-card policy remains in
+[`compiled-figure-rendering.md`](compiled-figure-rendering.md), with exact
+plane semantics in [`figure-card-primitives.md`](figure-card-primitives.md). Disconnected
 part components are checked separately by
 [`figure-geometry-analysis.md`](figure-geometry-analysis.md).
 
@@ -75,7 +76,7 @@ a pure authoring-side scan:
    midpoints, and a bounded uniform cadence of at most 24 intervals.
 2. Reconstruct each part's exact preview hierarchy, pivot compensation,
    additive translation, quaternion-interpolated rotation, and scale.
-3. Transform all six box faces to figure space.
+3. Transform all six box faces and every emitted plane side to figure space.
 4. Compare faces from different parts when they are same-facing within a
    `0.99999` normal dot threshold and have different effective material or
    texture appearances.
@@ -159,8 +160,8 @@ whole parts, and parent-child categories cannot be suppressed.
   reason fails, a stale exception fails, and a defect appearing only at an
   animation key is detected.
 - The current required scan reports zero failures, zero acknowledged source
-  exceptions, and 146 ratcheted warnings across 174 canonical figures.
-- The 25-test semantic suite, connectivity scan, first-party drift check, and
+  exceptions, and 146 ratcheted warnings across 185 canonical figures.
+- The 31-test semantic suite, connectivity scan, first-party drift check, and
   typecheck pass.
 
 ## Authoring Contract

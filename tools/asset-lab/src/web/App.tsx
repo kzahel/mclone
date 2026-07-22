@@ -33,6 +33,8 @@ const promotionOptions: Array<{ label: string; value: PromotionFilter }> = [
 const groupOptions: Array<{ label: string; value: GroupFilter }> = [
   { label: "All groups", value: "all" },
   { label: "Animals", value: "animal" },
+  { label: "Plants", value: "plant" },
+  { label: "Fungi", value: "fungus" },
   { label: "Fantasy", value: "fantasy" },
   { label: "Monsters", value: "monster" },
   { label: "Humanoids", value: "humanoid" },
@@ -48,6 +50,8 @@ const bodyPlanOptions: Array<{ label: string; value: BodyPlanFilter }> = [
   { label: "Serpentine", value: "serpentine" },
   { label: "Crawlers", value: "crawler" },
   { label: "Blobs", value: "blob" },
+  { label: "Rooted", value: "rooted" },
+  { label: "Colonies", value: "colony" },
   { label: "Other", value: "other" },
 ];
 
@@ -357,7 +361,7 @@ function FigureInspector({
       <section className="inspectorSection">
         <h3>Semantic source</h3>
         <p>
-          Generated from the canonical box-only TypeScript source, serialized,
+          Generated from the canonical box-and-card TypeScript source, serialized,
           reparsed, validated, and hash-checked before this viewer displays it.
         </p>
         <code className="hashLine">{figure.semanticSha256}</code>

@@ -16,14 +16,19 @@ const args = parseArgs(process.argv.slice(2));
 const input = path.isAbsolute(args.input)
   ? args.input
   : path.resolve(repoRoot, args.input);
-const relativeAssetPath = path.relative(repoRoot, input).split(path.sep).join("/");
-if (relativeAssetPath.startsWith("../") || !relativeAssetPath.endsWith(".json")) {
+const relativeInputPath = path.relative(repoRoot, input).split(path.sep).join("/");
+if (
+  relativeInputPath.startsWith("../")
+  || (!relativeInputPath.endsWith(".json") && !relativeInputPath.endsWith(".ts"))
+) {
   throw new Error(
-    "Engine animation comparison requires a promoted figure JSON beneath the repository root",
+    "Engine animation comparison requires a figure TypeScript or JSON source beneath the repository root",
   );
 }
 await assertFfmpeg();
 await fs.mkdir(args.outDir, { recursive: true });
+const document = await loadFigureJsonDocument(input);
+const nativeInput = await prepareNativeInput(input, document.asset.name, document.json, args.outDir);
 
 await run(
   pnpmCommand(),
@@ -62,9 +67,9 @@ await run(
     "mclone-figure-review",
     "--",
     "--asset-root",
-    repoRoot,
+    nativeInput.assetRoot,
     "--figure",
-    relativeAssetPath,
+    nativeInput.assetPath,
     "--out-dir",
     args.outDir,
     "--review-contract",
@@ -84,7 +89,6 @@ const preparedReceipt = JSON.parse(
   await fs.readFile(path.join(args.outDir, "engine-receipt.json"), "utf8"),
 ) as EngineFigureReceipt;
 const animation = validateReceipts(threeReceipt, engineReceipt, preparedReceipt);
-const document = await loadFigureJsonDocument(input);
 const keyTimes = (document.asset.clips[args.clip]?.keys ?? []).map((key) => key[1]);
 
 const sheetPath = path.join(args.outDir, `${args.clip}-comparison-sheet.png`);
@@ -239,6 +243,26 @@ function parseArgs(argv: string[]): CompareArgs {
     sampleTimes,
     width,
   };
+}
+
+async function prepareNativeInput(
+  inputPath: string,
+  figureName: string,
+  json: string,
+  outDir: string,
+): Promise<{ assetRoot: string; assetPath: string }> {
+  if (inputPath.endsWith(".json")) {
+    return {
+      assetRoot: repoRoot,
+      assetPath: path.relative(repoRoot, inputPath).split(path.sep).join("/"),
+    };
+  }
+  const assetRoot = path.join(outDir, "native-asset-root");
+  const assetPath = `assets/mclone/figures/${figureName}.figure.json`;
+  const stagedPath = path.join(assetRoot, ...assetPath.split("/"));
+  await fs.mkdir(path.dirname(stagedPath), { recursive: true });
+  await fs.writeFile(stagedPath, json, "utf8");
+  return { assetRoot, assetPath };
 }
 
 function validateReceipts(

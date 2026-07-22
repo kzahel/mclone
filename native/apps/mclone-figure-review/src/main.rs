@@ -872,6 +872,7 @@ struct ReviewReceipt<'a> {
     draw_range_count: usize,
     pass_range_count: usize,
     box_primitive_count: usize,
+    plane_primitive_count: usize,
     sphere_cuboid_proxy_count: usize,
     capsule_cuboid_proxy_count: usize,
     cylinder_cuboid_proxy_count: usize,
@@ -912,6 +913,8 @@ impl<'a> ReviewReceipt<'a> {
                 .any(|part| part.primitive_kind.is_cuboid_proxy())
             {
                 "cuboid-proxy"
+            } else if figure.diagnostics.plane_primitive_count > 0 {
+                "exact-box-card"
             } else {
                 "exact-box"
             },
@@ -928,6 +931,7 @@ impl<'a> ReviewReceipt<'a> {
             draw_range_count: figure.draw_ranges.len(),
             pass_range_count: figure.pass_ranges.len(),
             box_primitive_count: figure.diagnostics.box_primitive_count,
+            plane_primitive_count: figure.diagnostics.plane_primitive_count,
             sphere_cuboid_proxy_count: figure.diagnostics.sphere_cuboid_proxy_count,
             capsule_cuboid_proxy_count: figure.diagnostics.capsule_cuboid_proxy_count,
             cylinder_cuboid_proxy_count: figure.diagnostics.cylinder_cuboid_proxy_count,

@@ -3,6 +3,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 import { chromium } from "@playwright/test";
+import { loadFigureJsonDocument } from "./load";
 import { assetLabRoot } from "./vite-figure-path";
 
 const execFileAsync = promisify(execFile);
@@ -12,13 +13,18 @@ const args = parseArgs(process.argv.slice(2));
 const input = path.isAbsolute(args.input)
   ? args.input
   : path.resolve(repoRoot, args.input);
-const relativeAssetPath = path.relative(repoRoot, input).split(path.sep).join("/");
-if (relativeAssetPath.startsWith("../") || !relativeAssetPath.endsWith(".json")) {
+const relativeInputPath = path.relative(repoRoot, input).split(path.sep).join("/");
+if (
+  relativeInputPath.startsWith("../")
+  || (!relativeInputPath.endsWith(".json") && !relativeInputPath.endsWith(".ts"))
+) {
   throw new Error(
-    "Engine comparison requires a promoted figure JSON beneath the repository root",
+    "Engine comparison requires a figure TypeScript or JSON source beneath the repository root",
   );
 }
 await fs.mkdir(args.outDir, { recursive: true });
+const document = await loadFigureJsonDocument(input);
+const nativeInput = await prepareNativeInput(input, document.asset.name, document.json, args.outDir);
 
 await run(
   pnpmCommand(),
@@ -48,9 +54,9 @@ await run(
     "mclone-figure-review",
     "--",
     "--asset-root",
-    repoRoot,
+    nativeInput.assetRoot,
     "--figure",
-    relativeAssetPath,
+    nativeInput.assetPath,
     "--out-dir",
     args.outDir,
     "--review-contract",
@@ -65,7 +71,7 @@ const threeReceipt = JSON.parse(
 const engineReceipt = JSON.parse(
   await fs.readFile(path.join(args.outDir, "engine-receipt.json"), "utf8"),
 ) as EngineReceipt;
-validateReceipts(threeReceipt, engineReceipt, args.width, args.height);
+validateReceipts(threeReceipt, engineReceipt, document.asset, args.width, args.height);
 const comparisonPath = path.join(args.outDir, "comparison.png");
 await writeComparisonSheet(comparisonPath, args.outDir, threeReceipt, engineReceipt);
 const comparisonReceipt = {
@@ -81,6 +87,7 @@ const comparisonReceipt = {
   review: engineReceipt.review,
   geometry: {
     parts: engineReceipt.partCount,
+    planes: engineReceipt.planePrimitiveCount,
     vertices: engineReceipt.vertexCount,
     indices: engineReceipt.indexCount,
     drawRanges: engineReceipt.drawRangeCount,
@@ -136,7 +143,7 @@ interface EngineReceipt {
   figure: string;
   assetPath: string;
   compilerId: string;
-  geometryVariant: "exact-box" | "cuboid-proxy";
+  geometryVariant: "exact-box" | "exact-box-card" | "cuboid-proxy";
   semanticCrc32?: string;
   preparationMs: number;
   partCount: number;
@@ -144,6 +151,7 @@ interface EngineReceipt {
   indexCount: number;
   drawRangeCount: number;
   boxPrimitiveCount: number;
+  planePrimitiveCount: number;
   sphereCuboidProxyCount: number;
   capsuleCuboidProxyCount: number;
   cylinderCuboidProxyCount: number;
@@ -221,9 +229,30 @@ function cargoCommand(): string {
   return process.platform === "win32" ? "cargo.exe" : "cargo";
 }
 
+async function prepareNativeInput(
+  inputPath: string,
+  figureName: string,
+  json: string,
+  outDir: string,
+): Promise<{ assetRoot: string; assetPath: string }> {
+  if (inputPath.endsWith(".json")) {
+    return {
+      assetRoot: repoRoot,
+      assetPath: path.relative(repoRoot, inputPath).split(path.sep).join("/"),
+    };
+  }
+  const assetRoot = path.join(outDir, "native-asset-root");
+  const assetPath = `assets/mclone/figures/${figureName}.figure.json`;
+  const stagedPath = path.join(assetRoot, ...assetPath.split("/"));
+  await fs.mkdir(path.dirname(stagedPath), { recursive: true });
+  await fs.writeFile(stagedPath, json, "utf8");
+  return { assetRoot, assetPath };
+}
+
 function validateReceipts(
   three: ThreeReceipt,
   engine: EngineReceipt,
+  asset: Awaited<ReturnType<typeof loadFigureJsonDocument>>["asset"],
   width: number,
   height: number,
 ): void {
@@ -239,13 +268,26 @@ function validateReceipts(
   if (three.contract.panelWidth !== width || three.contract.panelHeight !== height) {
     throw new Error("Figure review output dimensions differ from the requested dimensions");
   }
+  const expected = asset.parts.reduce((total, part) => {
+    if (part.primitive.kind === "plane") {
+      const sides = part.primitive.sidedness === "double" ? 2 : 1;
+      total.vertices += sides * 4;
+      total.indices += sides * 6;
+      total.drawRanges += sides;
+    } else {
+      total.vertices += 24;
+      total.indices += 36;
+      total.drawRanges += 6;
+    }
+    return total;
+  }, { vertices: 0, indices: 0, drawRanges: 0 });
   if (
-    engine.vertexCount !== engine.partCount * 24
-    || engine.indexCount !== engine.partCount * 36
-    || engine.drawRangeCount !== engine.partCount * 6
+    engine.vertexCount !== expected.vertices
+    || engine.indexCount !== expected.indices
+    || engine.drawRangeCount !== expected.drawRanges
   ) {
     throw new Error(
-      `Prepared ${engine.figure} reported inconsistent cuboid geometry: `
+      `Prepared ${engine.figure} reported inconsistent semantic geometry: `
       + `${engine.partCount} parts, ${engine.vertexCount} vertices, `
       + `${engine.indexCount} indices, and ${engine.drawRangeCount} ranges`,
     );
@@ -253,10 +295,14 @@ function validateReceipts(
   const proxyCount = engine.sphereCuboidProxyCount
     + engine.capsuleCuboidProxyCount
     + engine.cylinderCuboidProxyCount;
-  if (engine.boxPrimitiveCount + proxyCount !== engine.partCount) {
+  if (engine.boxPrimitiveCount + engine.planePrimitiveCount + proxyCount !== engine.partCount) {
     throw new Error("Prepared primitive accounting does not match the part count");
   }
-  const expectedVariant = proxyCount === 0 ? "exact-box" : "cuboid-proxy";
+  const expectedVariant = proxyCount > 0
+    ? "cuboid-proxy"
+    : engine.planePrimitiveCount > 0
+      ? "exact-box-card"
+      : "exact-box";
   if (engine.geometryVariant !== expectedVariant) {
     throw new Error(
       `Prepared geometry variant '${engine.geometryVariant}' should be '${expectedVariant}'`,
@@ -354,6 +400,9 @@ function engineCaption(engine: EngineReceipt): string {
       + engine.capsuleCuboidProxyCount
       + engine.cylinderCuboidProxyCount;
     return `Mclone prepared cuboid proxy (${proxies} approximated parts, view-aligned)`;
+  }
+  if (engine.geometryVariant === "exact-box-card") {
+    return `Mclone prepared exact boxes + cards (${engine.planePrimitiveCount} cards, view-aligned)`;
   }
   return "Mclone prepared exact boxes (view-aligned)";
 }

@@ -99,6 +99,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `figure-transparency-materials` — explicit figure alpha modes, compiler pass
   buckets, whole-actor opacity, and paired dithered/smooth Ghost proofs without
   prematurely adopting general OIT
+- `figure-card-primitives` — fixed planar figure surfaces, explicit one- or
+  two-sided rendering, box-and-card canonical authoring, and card-aware asset
+  analysis across semantic preview and native prepared rendering
 - `animal-catalogue` — shared Asset Lab semantic viewer, generated canonical
   figure catalogue, and production `/animals/` deployment
 - `platform-boundary-convergence` — parent ledger for the shared/platform

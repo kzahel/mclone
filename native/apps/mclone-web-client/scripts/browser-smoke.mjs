@@ -841,7 +841,7 @@ async function run() {
         if (
           preparedFigureProbeResult?.ok !== true
           || preparedFigureProbeResult?.backend !== "browser-webgpu"
-          || preparedFigureProbeResult?.compilerId !== "mclone-prepared-figure-cuboid-proxy-v2"
+          || preparedFigureProbeResult?.compilerId !== "mclone-prepared-figure-box-card-v3"
           || Number(preparedFigureProbeResult?.partCount) !== 12
           || Number(preparedFigureProbeResult?.vertexCount) !== 288
           || Number(preparedFigureProbeResult?.indexCount) !== 432

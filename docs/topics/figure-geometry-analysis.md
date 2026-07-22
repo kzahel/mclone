@@ -2,12 +2,12 @@
 
 Topic: `figure-geometry-analysis`
 
-Status: implemented as a required canonical Asset Lab gate. The 174-figure
+Status: implemented as a required canonical Asset Lab gate. The 185-figure
 baseline has zero unacknowledged and zero acknowledged disconnected components.
 
 ## Scope
 
-This topic owns conspicuously disconnected box components in canonical Asset
+This topic owns conspicuously disconnected box-and-card components in canonical Asset
 Lab figures and the narrow exception contract for intentionally floating
 geometry. Same-facing coplanar surfaces and animated depth instability remain
 owned by [`figure-surface-stability.md`](figure-surface-stability.md), while
@@ -32,12 +32,13 @@ were inspected after each correction.
 ## Implemented Contract
 
 [`geometry-analysis.ts`](../../tools/asset-lab/src/geometry-analysis.ts)
-reconstructs every canonical box's rest-pose world transform with the same
+reconstructs every canonical primitive's rest-pose world transform with the same
 `at + pivot`, Euler rotation, and parent-content hierarchy used by the Three.js
-scene. Each box becomes an oriented bounding box. Pairwise boxes count as
-connected when they intersect after sharing a total `0.06` figure-unit margin.
-The resulting graph is split into components; every component outside the one
-with the greatest total box volume is a diagnostic.
+scene. Each box becomes an oriented bounding box; each plane uses an
+analysis-only epsilon-thick oriented bound without gaining render thickness.
+Pairwise bounds count as connected when they intersect after sharing a total
+`0.06` figure-unit margin. The resulting graph is split into components; every
+component outside the one with the greatest total bound volume is a diagnostic.
 
 Unacknowledged diagnostics fail canonical `figure()` construction, catalogue
 builds, and `pnpm asset-lab:test`. The direct catalogue command is:
@@ -74,11 +75,12 @@ reviewers and future authoring agents see them.
   exact exception with a reason round-trips through JSON, a stale exception
   fails, and an empty reason fails.
 - The required scan currently reports zero unacknowledged and zero acknowledged
-  components across 174 canonical figures.
+  components across 185 canonical figures, including the four-card Maw Orchid.
 
 ## Limits And Next Direction
 
-This is a deterministic rest-pose authoring heuristic. The small margin allows
+This is a deterministic rest-pose authoring heuristic. Plane thickness exists
+only in analysis. The small margin allows
 ordinary seams and near contact; it is not a collision skin or proof of exact
 mesh continuity. Oriented-box expansion can still conservatively connect
 geometry at corners. The scan deliberately excludes rounded legacy sources and

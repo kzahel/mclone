@@ -16,7 +16,7 @@ import {
 } from "./catalog-model";
 import { creatureMetadataForCatalog } from "./catalog-classification";
 import { discoverCanonicalFigureSources } from "./discover-figures";
-import { assertBoxOnlyFigure, figureAlphaModes } from "./dsl";
+import { assertCanonicalFigure, figureAlphaModes } from "./dsl";
 import { assertFigureGeometry } from "./geometry-analysis";
 import { assertFigureGrounding } from "./ground-analysis";
 import { assertFigureSurfaces } from "./surface-analysis";
@@ -56,7 +56,7 @@ export async function buildWebCatalog(
   for (const sourcePath of sourcePaths) {
     const document = await loadFigureJsonDocument(sourcePath);
     const asset = document.asset;
-    assertBoxOnlyFigure(asset);
+    assertCanonicalFigure(asset);
     assertFigureGeometry(asset);
     assertFigureGrounding(asset);
     assertFigureSurfaces(asset);

@@ -6,10 +6,10 @@ use glam::{EulerRot, Mat3, Mat4, Quat, Vec3};
 
 use crate::{
     AssetError, AssetPath, AssetResult, AssetSource, FigureAlphaCoverage, FigureAlphaMode,
-    FigureAsset, FigureClipRole, FigurePart,
+    FigureAsset, FigureClipRole, FigurePart, FigurePlaneSidedness,
 };
 
-pub const PREPARED_FIGURE_COMPILER_ID: &str = "mclone-prepared-figure-cuboid-proxy-v2";
+pub const PREPARED_FIGURE_COMPILER_ID: &str = "mclone-prepared-figure-box-card-v3";
 
 const MAX_PARTS: usize = 256;
 const MAX_VERTICES: usize = u16::MAX as usize;
@@ -63,6 +63,7 @@ pub struct PreparedFigurePart {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PreparedFigurePrimitiveKind {
     Box,
+    Plane,
     SphereCuboidProxy,
     CapsuleCuboidProxy,
     CylinderCuboidProxy,
@@ -72,6 +73,7 @@ impl PreparedFigurePrimitiveKind {
     pub const fn source_kind(self) -> &'static str {
         match self {
             Self::Box => "box",
+            Self::Plane => "plane",
             Self::SphereCuboidProxy => "sphere",
             Self::CapsuleCuboidProxy => "capsule",
             Self::CylinderCuboidProxy => "cylinder",
@@ -79,7 +81,10 @@ impl PreparedFigurePrimitiveKind {
     }
 
     pub const fn is_cuboid_proxy(self) -> bool {
-        !matches!(self, Self::Box)
+        matches!(
+            self,
+            Self::SphereCuboidProxy | Self::CapsuleCuboidProxy | Self::CylinderCuboidProxy
+        )
     }
 }
 
@@ -198,6 +203,7 @@ pub struct PreparedFigureDiagnostics {
     pub draw_range_count: usize,
     pub pass_range_count: usize,
     pub box_primitive_count: usize,
+    pub plane_primitive_count: usize,
     pub sphere_cuboid_proxy_count: usize,
     pub capsule_cuboid_proxy_count: usize,
     pub cylinder_cuboid_proxy_count: usize,
@@ -558,7 +564,12 @@ fn prepare_figure_asset_with_crc(
     let mut indices = Vec::with_capacity(asset.parts.len() * 36);
     let mut draw_ranges = Vec::with_capacity(asset.parts.len() * 6);
     for (part_index, part) in asset.parts.iter().enumerate() {
-        append_prepared_cuboid(
+        let append = if raw_parts[part_index].primitive_kind == PreparedFigurePrimitiveKind::Plane {
+            append_prepared_plane
+        } else {
+            append_prepared_cuboid
+        };
+        append(
             asset,
             part,
             raw_parts[part_index].prepared_size,
@@ -608,6 +619,10 @@ fn prepare_figure_asset_with_crc(
         box_primitive_count: raw_parts
             .iter()
             .filter(|part| part.primitive_kind == PreparedFigurePrimitiveKind::Box)
+            .count(),
+        plane_primitive_count: raw_parts
+            .iter()
+            .filter(|part| part.primitive_kind == PreparedFigurePrimitiveKind::Plane)
             .count(),
         sphere_cuboid_proxy_count: raw_parts
             .iter()
@@ -958,6 +973,12 @@ fn build_raw_parts(
                 primitive_kind.source_kind()
             )));
         }
+        if primitive_kind == PreparedFigurePrimitiveKind::Plane && part.primitive.faces.is_some() {
+            return Err(FigurePrepareError::new(format!(
+                "figure '{}' plane part '{}' cannot declare box face overrides",
+                asset.name, part.name
+            )));
+        }
         if let Some(faces) = &part.primitive.faces {
             for face in faces.keys() {
                 BoxFace::from_name(face).ok_or_else(|| {
@@ -1026,6 +1047,20 @@ fn prepared_primitive_size(
             PreparedFigurePrimitiveKind::Box,
             finite_positive_vec3(part.primitive.size, asset, part, "size")?,
         ),
+        "plane" => {
+            let width = finite_positive_scalar(part.primitive.width, asset, part, "width")?;
+            let height = finite_positive_scalar(part.primitive.height, asset, part, "height")?;
+            if part.primitive.sidedness.is_none() {
+                return Err(FigurePrepareError::new(format!(
+                    "figure '{}' plane part '{}' is missing sidedness",
+                    asset.name, part.name
+                )));
+            }
+            (
+                PreparedFigurePrimitiveKind::Plane,
+                Vec3::new(width, height, 0.0),
+            )
+        }
         "sphere" => {
             let radius = finite_positive_scalar(part.primitive.radius, asset, part, "radius")?;
             (
@@ -1060,9 +1095,14 @@ fn prepared_primitive_size(
             )));
         }
     };
-    if size.min_element() <= 0.0 || !size.is_finite() {
+    let invalid_size = if kind == PreparedFigurePrimitiveKind::Plane {
+        size.x <= 0.0 || size.y <= 0.0 || size.z != 0.0
+    } else {
+        size.min_element() <= 0.0
+    };
+    if invalid_size || !size.is_finite() {
         return Err(FigurePrepareError::new(format!(
-            "figure '{}' {} part '{}' has invalid prepared cuboid size {:?}",
+            "figure '{}' {} part '{}' has invalid prepared size {:?}",
             asset.name,
             kind.source_kind(),
             part.name,
@@ -1611,6 +1651,101 @@ fn append_prepared_cuboid(
     Ok(())
 }
 
+#[allow(clippy::too_many_arguments)]
+fn append_prepared_plane(
+    asset: &FigureAsset,
+    part: &FigurePart,
+    size: Vec3,
+    part_id: u16,
+    materials: &HashMap<String, PreparedMaterial>,
+    atlas_regions: &BTreeMap<String, AtlasRegion>,
+    texture_transparency: &BTreeMap<String, bool>,
+    atlas_width: u32,
+    atlas_height: u32,
+    vertices: &mut Vec<PreparedFigureVertex>,
+    indices: &mut Vec<u16>,
+    draw_ranges: &mut Vec<PreparedFigureDrawRange>,
+) -> Result<(), FigurePrepareError> {
+    let material_name = part.material.as_deref();
+    let texture_name = part.texture.as_deref();
+    let material = match material_name {
+        Some(name) => *materials.get(name).ok_or_else(|| {
+            FigurePrepareError::new(format!(
+                "figure '{}' part '{}' references unknown material '{}'",
+                asset.name, part.name, name
+            ))
+        })?,
+        None if texture_name.is_some() => PreparedMaterial {
+            color: [1.0, 1.0, 1.0, 1.0],
+            pass: PreparedFigurePass::Opaque,
+            alpha_cutoff: 0.1,
+        },
+        None => PreparedMaterial {
+            color: rgba8_to_float(parse_hex_color("#d7dde2").expect("default color")),
+            pass: PreparedFigurePass::Opaque,
+            alpha_cutoff: 0.1,
+        },
+    };
+    let region = texture_name
+        .map(|name| {
+            atlas_regions.get(name).copied().ok_or_else(|| {
+                FigurePrepareError::new(format!(
+                    "figure '{}' part '{}' references unknown texture '{}'",
+                    asset.name, part.name, name
+                ))
+            })
+        })
+        .transpose()?;
+    let pass = if material.pass == PreparedFigurePass::Opaque
+        && texture_name
+            .and_then(|name| texture_transparency.get(name))
+            .copied()
+            .unwrap_or(false)
+    {
+        PreparedFigurePass::MaskThreshold
+    } else {
+        material.pass
+    };
+    let sidedness = part.primitive.sidedness.ok_or_else(|| {
+        FigurePrepareError::new(format!(
+            "figure '{}' plane part '{}' is missing sidedness",
+            asset.name, part.name
+        ))
+    })?;
+    let sides = [("front", true), ("back", false)];
+    let side_count = if sidedness == FigurePlaneSidedness::Double {
+        2
+    } else {
+        1
+    };
+    for &(face, front) in &sides[..side_count] {
+        let first_index = indices.len() as u32;
+        append_plane_face(
+            size.x,
+            size.y,
+            front,
+            part_id,
+            material.color,
+            material.alpha_cutoff,
+            region,
+            atlas_width,
+            atlas_height,
+            vertices,
+            indices,
+        )?;
+        draw_ranges.push(PreparedFigureDrawRange {
+            part_id,
+            face: face.to_owned(),
+            material: material_name.map(str::to_owned),
+            texture: texture_name.map(str::to_owned),
+            pass,
+            first_index,
+            index_count: 6,
+        });
+    }
+    Ok(())
+}
+
 fn bucket_prepared_indices(
     original_indices: Vec<u16>,
     draw_ranges: &mut [PreparedFigureDrawRange],
@@ -1686,6 +1821,63 @@ fn append_box_face(
         base_vertex + 1,
         base_vertex + 3,
     ]);
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_plane_face(
+    width: f32,
+    height: f32,
+    front: bool,
+    part_id: u16,
+    color: [f32; 4],
+    alpha_cutoff: f32,
+    region: Option<AtlasRegion>,
+    atlas_width: u32,
+    atlas_height: u32,
+    vertices: &mut Vec<PreparedFigureVertex>,
+    indices: &mut Vec<u16>,
+) -> Result<(), FigurePrepareError> {
+    let base_vertex = u16::try_from(vertices.len())
+        .map_err(|_| FigurePrepareError::new("prepared figure exceeds u16 vertex index range"))?;
+    for iy in 0..=1 {
+        let y = height * (0.5 - iy as f32);
+        for ix in 0..=1 {
+            let x = width * (ix as f32 - 0.5);
+            vertices.push(PreparedFigureVertex {
+                position: [x, y, 0.0],
+                normal: [0.0, 0.0, if front { 1.0 } else { -1.0 }],
+                uv: atlas_uv(
+                    region,
+                    [ix as f32, 1.0 - iy as f32],
+                    atlas_width,
+                    atlas_height,
+                ),
+                color,
+                part_id: u32::from(part_id),
+                alpha_cutoff,
+            });
+        }
+    }
+    if front {
+        indices.extend_from_slice(&[
+            base_vertex,
+            base_vertex + 2,
+            base_vertex + 1,
+            base_vertex + 2,
+            base_vertex + 3,
+            base_vertex + 1,
+        ]);
+    } else {
+        indices.extend_from_slice(&[
+            base_vertex,
+            base_vertex + 1,
+            base_vertex + 2,
+            base_vertex + 2,
+            base_vertex + 1,
+            base_vertex + 3,
+        ]);
+    }
     Ok(())
 }
 
@@ -1961,6 +2153,111 @@ mod tests {
                 .unwrap()
                 .pass,
             PreparedFigurePass::MaskThreshold
+        );
+    }
+
+    #[test]
+    fn prepares_double_sided_plane_as_opposing_masked_geometry() {
+        let asset: FigureAsset = serde_json::from_value(serde_json::json!({
+            "schemaVersion": 1,
+            "name": "petal-card",
+            "materials": { "petal": { "color": "#cc6699" } },
+            "textures": {
+                "cutout": {
+                    "palette": { ".": "transparent", "p": "#cc6699" },
+                    "pixels": [".p", "pp"]
+                }
+            },
+            "parts": [{
+                "name": "petal",
+                "material": "petal",
+                "texture": "cutout",
+                "primitive": {
+                    "kind": "plane",
+                    "width": 0.75,
+                    "height": 1.25,
+                    "sidedness": "double"
+                }
+            }],
+            "clips": {}
+        }))
+        .unwrap();
+
+        let prepared = prepare_figure_asset(&asset).unwrap();
+
+        assert_eq!(
+            prepared.parts[0].primitive_kind,
+            PreparedFigurePrimitiveKind::Plane
+        );
+        assert_eq!(prepared.vertices.len(), 8);
+        assert_eq!(prepared.indices.len(), 12);
+        assert_eq!(prepared.draw_ranges.len(), 2);
+        assert_eq!(prepared.draw_ranges[0].face, "front");
+        assert_eq!(prepared.draw_ranges[1].face, "back");
+        assert!(prepared.draw_ranges.iter().all(|range| {
+            range.pass == PreparedFigurePass::MaskThreshold && range.index_count == 6
+        }));
+        assert_eq!(prepared.diagnostics.box_primitive_count, 0);
+        assert_eq!(prepared.diagnostics.plane_primitive_count, 1);
+        assert!(
+            prepared.vertices[..4]
+                .iter()
+                .all(|vertex| vertex.normal == [0.0, 0.0, 1.0])
+        );
+        assert!(
+            prepared.vertices[4..]
+                .iter()
+                .all(|vertex| vertex.normal == [0.0, 0.0, -1.0])
+        );
+        assert!(
+            prepared
+                .vertices
+                .iter()
+                .all(|vertex| vertex.position[2] == 0.0)
+        );
+        assert_eq!(
+            prepared.pass_ranges,
+            vec![PreparedFigurePassRange {
+                pass: PreparedFigurePass::MaskThreshold,
+                first_index: 0,
+                index_count: 12,
+            }]
+        );
+
+        for range in &prepared.draw_ranges {
+            let start = range.first_index as usize;
+            let a = Vec3::from_array(prepared.vertices[prepared.indices[start] as usize].position);
+            let b =
+                Vec3::from_array(prepared.vertices[prepared.indices[start + 1] as usize].position);
+            let c =
+                Vec3::from_array(prepared.vertices[prepared.indices[start + 2] as usize].position);
+            let triangle_normal = (b - a).cross(c - a).normalize();
+            let vertex_normal =
+                Vec3::from_array(prepared.vertices[prepared.indices[start] as usize].normal);
+            assert!(triangle_normal.dot(vertex_normal) > 0.999);
+        }
+    }
+
+    #[test]
+    fn rejects_plane_without_explicit_sidedness() {
+        let asset: FigureAsset = serde_json::from_value(serde_json::json!({
+            "schemaVersion": 1,
+            "name": "invalid-card",
+            "materials": {},
+            "textures": {},
+            "parts": [{
+                "name": "card",
+                "primitive": { "kind": "plane", "width": 1, "height": 1 }
+            }],
+            "clips": {}
+        }))
+        .unwrap();
+
+        assert!(
+            prepare_figure_asset(&asset)
+                .unwrap_err()
+                .to_string()
+                .contains("missing sidedness")
         );
     }
 

@@ -103,6 +103,9 @@ pub struct FigureJoint {
 pub struct FigurePrimitive {
     pub kind: String,
     pub size: Option<[f32; 3]>,
+    pub width: Option<f32>,
+    pub height: Option<f32>,
+    pub sidedness: Option<FigurePlaneSidedness>,
     pub radius: Option<f32>,
     #[serde(rename = "radiusTop")]
     pub radius_top: Option<f32>,
@@ -118,6 +121,13 @@ pub struct FigurePrimitive {
     #[serde(rename = "radialSegments")]
     pub radial_segments: Option<u32>,
     pub faces: Option<HashMap<String, FigureFace>>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum FigurePlaneSidedness {
+    Front,
+    Double,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -280,6 +290,42 @@ mod tests {
         assert!((locomotion.cycle_distance - 0.86).abs() < 1.0e-6);
         assert_eq!(locomotion.contacts.len(), 2);
         assert_eq!(locomotion.contacts[0].part, "foot_l");
+    }
+
+    #[test]
+    fn loads_double_sided_plane_primitive() {
+        let mut source = MemoryAssetSource::new();
+        source.insert_text(
+            default_player_figure_path(),
+            r##"
+            {
+              "schemaVersion": 1,
+              "name": "card",
+              "materials": { "petal": { "color": "#ffffff" } },
+              "textures": {},
+              "parts": [
+                {
+                  "name": "petal",
+                  "material": "petal",
+                  "primitive": {
+                    "kind": "plane",
+                    "width": 0.75,
+                    "height": 1.25,
+                    "sidedness": "double"
+                  }
+                }
+              ],
+              "clips": {}
+            }
+            "##,
+        );
+
+        let asset = load_figure_asset(&source, &default_player_figure_path()).unwrap();
+        let primitive = &asset.parts[0].primitive;
+        assert_eq!(primitive.kind, "plane");
+        assert_eq!(primitive.width, Some(0.75));
+        assert_eq!(primitive.height, Some(1.25));
+        assert_eq!(primitive.sidedness, Some(FigurePlaneSidedness::Double));
     }
 
     #[test]

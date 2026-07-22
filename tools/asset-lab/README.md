@@ -1,8 +1,8 @@
 # Mclone Asset Lab
 
-Disposable TypeScript/Three.js lab for AI-authored box-only figures. Rounded
-primitive sources are retained only under `legacy-examples/` for explicit A/B
-and schema-compatibility review.
+Disposable TypeScript/Three.js lab for AI-authored box-and-card figures.
+Rounded primitive sources are retained only under `legacy-examples/` for
+explicit A/B and schema-compatibility review.
 
 Install once:
 
@@ -67,6 +67,9 @@ sets; `disposition` and `scale` are single typed values; and optional `themes`
 are lowercase search tags. Multiple values are intentional: a Gargoyle can be
 both `fantasy` and `monster`, both `biped` and `winged`, and both `land` and
 `air`. The semantic JSON round-trip validates and preserves explicit metadata.
+Living growths use the same contract: `plant` and `fungus` are groups, while
+`rooted` and `colony` describe body plans without forcing a growth to be an
+animal or monster.
 
 Catalogue generation deterministically infers conservative metadata for older
 sources that do not yet declare it, so classification did not require a
@@ -97,12 +100,15 @@ current creature roadmap and conversion queue. The deprecated rounded sources
 in `legacy-examples/` are deliberately excluded unless passed to a command by
 their explicit path.
 
-The compare command renders the same canonical semantic JSON through Three.js
-and the shared native startup-prepared renderer. It writes corresponding raw
-panels, an unscaled labeled sheet, the shared review contract, and diagnostic
-receipts under `/tmp/mclone-figure-compare/` by default. The receipts record
-source/compiler identity, framing, topology, atlas, preparation, and immutable
-upload counts; they are review output, not a persisted asset format.
+The compare command accepts a canonical TypeScript source or semantic JSON and
+renders the same serialized asset through Three.js and the shared native
+startup-prepared renderer. TypeScript inputs are exported into a temporary
+asset root under the review output; they are never written into the repository.
+The command writes corresponding raw panels, an unscaled labeled sheet, the
+shared review contract, and diagnostic receipts under
+`/tmp/mclone-figure-compare/` by default. The receipts record source/compiler
+identity, framing, topology, atlas, preparation, and immutable upload counts;
+they are review output, not a persisted asset format.
 
 ## Source and generated JSON
 
@@ -110,10 +116,14 @@ Asset files use the DSL from `src/dsl.ts`. A `figure.ts` file is the only
 human- or AI-authored source for a promoted figure. Its schema-v1 JSON is a
 generated semantic snapshot and must not be edited directly.
 
-Canonical sources use `figure()` and boxes exclusively. `legacyFigure()` plus
-its sphere, capsule, and cylinder helpers exist only so retained rounded A/B
-sources and schema-v1 compatibility fixtures remain executable. The
-first-party drift gate rejects any promoted source containing a non-box part.
+Canonical sources use `figure()` with boxes and fixed finite planes. Boxes
+remain the ordinary volumetric vocabulary. `plane({ size: [width, height],
+sidedness: "front" | "double" })` is reserved for genuinely planar details
+such as petals, leaves, fins, wings, or cloth; it is fixed in the part rig and
+is not a camera-facing sprite. `legacyFigure()` plus its sphere, capsule, and
+cylinder helpers exist only so retained rounded A/B sources and schema-v1
+compatibility fixtures remain executable. The first-party drift gate rejects
+any promoted source containing a primitive other than a box or plane.
 
 Every Asset Lab display path crosses that snapshot boundary. When previewing a
 `figure.ts`, the tool executes the DSL, serializes canonical JSON, reparses and
@@ -137,9 +147,10 @@ the serialize/reparse boundary, including examples that are not promoted into
 checked runtime JSON.
 
 Canonical figures also pass a rest-pose geometry connectivity gate. The check
-transforms every box into figure space, expands pairs by a small `0.06`-unit
-attachment tolerance, builds connected components, and rejects every component
-outside the largest one. It runs while `figure()` constructs a canonical
+transforms every box and an analysis-only epsilon-thick bound for every plane
+into figure space, expands pairs by a small `0.06`-unit attachment tolerance,
+builds connected components, and rejects every component outside the largest
+one. It runs while `figure()` constructs a canonical
 source, during catalogue builds, and from `asset-lab:test`; run it directly
 with `pnpm asset-lab:geometry:check` for a catalogue summary.
 
@@ -163,11 +174,12 @@ figure("wisp", ({ box, geometryException, mat, part }) => {
 The reason must be nonempty, the part set must exactly match the reported
 component, and an exception becomes an error when later geometry reconnects or
 changes the component. This keeps exceptions narrow, reviewed, and removable.
-The gate is an oriented-box rest-pose check, not collision detection or an
+The gate is an oriented-bound rest-pose check, not collision detection or an
 animated-pose proof; visual sheet/video review remains required.
 
 Land figures also pass a sampled-pose ground-penetration gate. It evaluates
-rest, land locomotion, idle, and action poses; transforms every box corner; and
+rest, land locomotion, idle, and action poses; transforms every box or plane
+corner; and
 reports non-contact parts more than `0.02` units below figure-space `y=0`.
 Explicit `metadata.habitats` containing `land` admits a figure even when its
 motion is entirely custom; older sources remain admitted through land
@@ -194,8 +206,9 @@ quality remains a separate procedural-animation concern.
 
 Canonical figures also pass a sampled-pose surface-stability gate. It evaluates
 rest, clip keys, key midpoints, and a bounded uniform cadence; transforms every
-box face; and reports differently rendered, same-facing planes with meaningful
-projected overlap that is not immediately covered by another box. Animated
+box and plane face; and reports differently rendered, same-facing surfaces
+with meaningful projected overlap that is not immediately covered by another
+box. Animated
 heads also require a safe lateral margin from a `neck`, `neck_*`, `throat`, or
 `body` socket throughout the sampled motion. Run
 `pnpm asset-lab:surface:check -- --verbose` to see the retained catalog warning

@@ -10,7 +10,7 @@ corrected.
 
 ## Scope
 
-This topic owns authored box geometry crossing below the figure-space ground
+This topic owns authored box or plane geometry crossing below the figure-space ground
 plane during rest, land locomotion, idle, or action clips. It covers pose
 sampling, land-clip admission, declared locomotion contacts, exact-part
 exceptions, and the existing-warning ratchet.
@@ -43,9 +43,9 @@ evidence.
 2. Samples rest plus land-locomotion, idle, and action poses at the same keys,
    midpoints, and bounded uniform cadence used by surface analysis.
 3. Excludes `swim` and `wing-flap` poses, even for hybrid figures.
-4. Reconstructs every sampled box through the complete parent, pivot,
+4. Reconstructs every sampled box or plane through the complete parent, pivot,
    translation, quaternion-interpolated rotation, and scale hierarchy.
-5. Finds the lowest transformed corner of every non-contact box.
+5. Finds the lowest transformed corner of every non-contact primitive.
 6. Reports a part when that corner passes more than `0.02` figure units below
    `y=0`.
 
@@ -98,14 +98,14 @@ multi-part groups, and arbitrary depth allowances cannot be suppressed.
   declared locomotion contacts are excluded, explicit land metadata admits
   custom idle/action figures, and swim-only figures are outside the land gate.
 - The required scan reports zero failures, zero acknowledged source
-  exceptions, and 36 baseline warnings across 174 canonical figures.
-- The 25-test semantic suite, connectivity and surface scans, typecheck, and
+  exceptions, and 36 baseline warnings across 185 canonical figures.
+- The 31-test semantic suite, connectivity and surface scans, typecheck, and
   production catalogue build pass.
 
 ## Limits And Next Direction
 
 The ground plane is the authoring convention `y=0`; this is not a terrain
-query. Corner sampling is exact for the rigid boxes at each sampled pose but
+query. Corner sampling is exact for rigid boxes and planes at each sampled pose but
 does not prove that no crossing occurs between samples. A declared contact pad
 is exempt as a whole, so its own excessive penetration remains separate debt
 for the procedural contact system.

@@ -3,8 +3,9 @@
 Planning / tracking / prioritization doc for figures authored in the
 [Asset Lab](README.md). The main inventory is **recognizable real-world
 animals** — the ones a player would name on sight — plus sensible variants
-(breed, color morph, age, sex). Fantasy, anthro, and hostile creatures extend
-that same canonical figure system near the end of the document.
+(breed, color morph, age, sex). Fantasy, anthro, hostile creatures, and living
+plant/fungus growths extend that same canonical figure system near the end of
+the document.
 
 > **Scope:** real animals first, organized by family/type, then fantasy/anthro
 > `-folk` figures and a **Monsters & baddies** cast (skeletons, zombies, the
@@ -35,6 +36,8 @@ that same canonical figure system near the end of the document.
 | **H** | Hop (rabbit/frog, synchronized hind legs) | ⚠️ approximate with `contactSwing`; a `hop` macro would be cleaner |
 | **C** | Crawl, many legs (insects/arachnids) | ⚠️ hand-author or generalize `quadrupedWalk` to N legs |
 | **ST** | Static / minimal motion (idle sway only) | ✅ plain `walkCycle`/`clip` |
+| **R** | Rooted plant or fungus | ✅ plain `walkCycle`/`clip`; movement is optional |
+| **COL** | Multi-body colony | ✅ ordinary parts and independently phased clip keys |
 
 ### Tooling gaps to schedule alongside content
 
@@ -50,8 +53,10 @@ These unlock whole families, so they should be prioritized as their own slices:
 
 ## Figure style direction
 
-Use a **box-only Minecraft-style vocabulary** for every canonical and promoted
-figure. Start with a sparse cuboid rig and pixel face textures. Spheres,
+Use a **box-led Minecraft-style vocabulary** for every canonical and promoted
+figure. Start with a sparse cuboid rig and pixel face textures. Fixed finite
+planes are allowed only for genuinely planar details such as petals, leaves,
+fins, wings, or cloth; explicit double-sided cards do not billboard. Spheres,
 capsules, and cylinders are deprecated authoring inputs; do not spend curved
 geometry on whiskers or other tiny surface details that a pixel texture can
 express—or that can simply be omitted.
@@ -374,6 +379,24 @@ extensions — all **B** (`bipedWalk`), so no new tooling.
 
 ---
 
+## Living growths
+
+Plants and fungi are first-class catalogue groups rather than animals or
+automatic monsters. `rooted` and `colony` body plans describe their animation
+shape, while ordinary disposition still distinguishes passive, neutral, and
+hostile growths.
+
+| Figure | Pri | Status | Body | Variants to consider | Notes |
+|---|---|---|---|---|---|
+| Walking Banyan | P1 | ✅ | C/R | mossy, autumn, blossom | `examples/walking_banyan` — giant 23-box mobile tree with six alternating stilt roots, cutout canopy, root stride, and separate replant action |
+| Maw Orchid | P1 | ✅ | R | jungle, cave, ember | `examples/maw_orchid` — large 21-box carnivorous flower with four cutout jaw-petals, luminous lure, searching tendrils, and separate snap-trap action |
+| Lantern Mycelium | P1 | ✅ | R/COL | teal, violet, toxic | `examples/lantern_mycelium` — connected 28-box five-mushroom colony with out-of-phase cap pulses, additive gills, and smooth blended spore-bloom action |
+| Walking cactus | P2 | ☐ | B/R | desert, flowering | drops roots and waddles between water sources |
+| Sundew carpet | P2 | ☐ | R/COL | bog, giant | many independently folding adhesive pads |
+| Tumble grove | P3 | ☐ | R | dry, thorned | uproots, rolls, and unfolds into a small tree |
+
+---
+
 ## Monsters & baddies
 
 The hostile/enemy cast. **Most are humanoid bipeds** → they reuse the `player` /
@@ -434,8 +457,8 @@ should be a high-value early wave for a Minecraft-style mob set.
 
 ## Coverage snapshot
 
-- **Canonical box-only figures:** 182 sources and 250 clips after the Witch,
-  Werewolf, and Grave Crawler scary-creature batch.
+- **Canonical box-and-card figures:** 185 sources and 256 clips after the first
+  Walking Banyan, Maw Orchid, and Lantern Mycelium living-growth batch.
 - **First hostile fantasy wave:** Skeleton, Slime, and Gargoyle, each with
   explicit typed catalogue classification and a separate special action.
 - **Binary-alpha proof:** Cutout Skeleton keeps a full torso cuboid and forms
@@ -449,6 +472,10 @@ should be a high-value early wave for a Minecraft-style mob set.
 - **Third hostile fantasy wave:** Witch, Werewolf, and Grave Crawler add a
   cutout-clothed caster, digitigrade beast, and low non-humanoid horror. All
   three declare hostile disposition and the searchable `scary` theme.
+- **First living-growth wave:** Walking Banyan, Maw Orchid, and Lantern
+  Mycelium establish filterable Plant/Fungus groups and Rooted/Colony body
+  plans while exercising six-contact gait, cutout foliage, additive light,
+  and a smooth blended spore veil.
 - **Rounded-to-box migration complete (13):** piglet, sheep, dog, cat,
   bearfolk, lionfolk, cow, horse, goat, wolf, fox, bear, and lion.
 - **Retained rounded A/B archive:** all 18 former mixed-primitive sources live

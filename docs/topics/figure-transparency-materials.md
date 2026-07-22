@@ -149,7 +149,8 @@ as source assets.
   final focused prepared-figure test run passes all six shader/layout tests.
   Full native workspace checking and the production remote-player visual smoke
   also passed.
-- Headed-Wayland browser WebGPU reports compiler v2, six pipelines, one draw for
+- Headed-Wayland browser WebGPU reports the current box-card v3 compiler, six
+  pipelines, one draw for
   the opaque player fixture, 52,757 figure pixels, 20 distinct figure colors,
   and no page errors. The captured canvas was inspected.
 - Desktop synthetic stereo produced distinct, valid per-eye pixels. The flat

@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { assertBoxOnlyFigure } from "./dsl";
+import { assertCanonicalFigure } from "./dsl";
 import { FIRST_PARTY_FIGURES } from "./first-party-figures";
 import { loadFigureJsonDocument } from "./load";
 import { repositoryRoot } from "./vite-figure-path";
@@ -11,7 +11,7 @@ await assertNoUnownedOutputs();
 const stale: string[] = [];
 for (const figure of FIRST_PARTY_FIGURES) {
   const document = await loadFigureJsonDocument(figure.sourcePath);
-  assertBoxOnlyFigure(document.asset);
+  assertCanonicalFigure(document.asset);
   if (document.asset.name !== figure.name) {
     throw new Error(
       `First-party source '${relative(figure.sourcePath)}' exports '${document.asset.name}', expected '${figure.name}'`,
