@@ -205,7 +205,11 @@ series implements the same concern, normally reuse the document slug in its
 - [`figure-alpha-cutout.md`](figure-alpha-cutout.md): implemented binary
   transparent-palette contract across semantic validation, Asset Lab preview,
   prepared atlases, mono/stereo/multiview shaders, and the Cutout Skeleton
-  visual proof; partial alpha and ghost materials remain deferred.
+  visual proof.
+- [`figure-transparency-materials.md`](figure-transparency-materials.md):
+  accepted explicit opaque/mask/blend/additive material contract, prepared
+  pass bucketing, whole-figure opacity, and dithered versus smooth Ghost proofs;
+  exact OIT remains deferred.
 - [`figure-animation-actions.md`](figure-animation-actions.md): accepted
   extensible clip contract for authored defaults, locomotion/idle/action roles,
   one-shot completion, catalogue action controls, and later general runtime

@@ -94,9 +94,11 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `figure-ground-penetration` — sampled land-figure ground-plane analysis,
   declared-contact exclusion, exact reasoned exceptions, ratcheted warning
   inventory, and corrected Chameleon tail evidence
-- `figure-alpha-cutout` — binary transparent ASCII palette texels across the
-  semantic preview and native prepared/actor paths, with partial alpha and
-  translucent ghost materials deliberately deferred
+- `figure-alpha-cutout` — completed binary transparent ASCII palette texels
+  across the semantic preview and native prepared/actor paths
+- `figure-transparency-materials` — explicit figure alpha modes, compiler pass
+  buckets, whole-actor opacity, and paired dithered/smooth Ghost proofs without
+  prematurely adopting general OIT
 - `animal-catalogue` — shared Asset Lab semantic viewer, generated canonical
   figure catalogue, and production `/animals/` deployment
 - `platform-boundary-convergence` — parent ledger for the shared/platform

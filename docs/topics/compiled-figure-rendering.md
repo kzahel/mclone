@@ -1559,9 +1559,12 @@ Closed 2026-07-16 during the pre-landing design review.
    replacement-pack compatibility decision would justify removing sphere,
    capsule, and cylinder parsing after the first-party migration is complete?
    Do not conflate zero canonical use with permission to break schema-v1 input.
-4. **Material expansion beyond cutout.** After the closed binary-alpha slice,
-   which of partial alpha/translucent ordering, roughness, metalness, emissive
-   behavior, and face shading belong in the shared shader contract?
+4. **Material expansion beyond cutout.** Partial alpha and translucent
+   ordering are now selected in
+   [`figure-transparency-materials.md`](figure-transparency-materials.md):
+   explicit mask/blend/additive modes, character depth prepass, and deferred
+   OIT. Roughness, metalness, emissive behavior beyond additive color, and face
+   shading remain open independently.
 5. **Palette storage and evaluator threshold.** Uniform, storage-buffer, or
    texture-backed part matrices; how are alignment, browser limits, frames in
    flight, and many instances handled, and when does GPU expansion beat CPU

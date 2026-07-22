@@ -3,8 +3,9 @@
 Topic: `figure-alpha-cutout`
 
 Status: implemented and visually approved on 2026-07-22 across Asset Lab and
-the shared native prepared-figure path. Partial alpha and ghost rendering are
-deliberately deferred.
+the shared native prepared-figure path. The accepted follow-up for partial
+alpha and Ghost rendering is
+[`figure-transparency-materials.md`](figure-transparency-materials.md).
 
 ## Scope
 
@@ -68,7 +69,8 @@ not depend on alpha.
 
 ## Deferred Direction
 
-Before adding a ghost, decide whether the desired style is dithered binary
-cutout, ordinary sorted blending, or a dedicated ghost effect/pass. Fractional
-alpha affects draw bucketing, depth writes, ordering, shadows, browser/native
-parity, and XR multiview; it should not be smuggled into this palette literal.
+The follow-up selected dithered mask coverage, a bounded character blend
+depth-prepass, additive layers, and explicit material/pass bucketing. Its
+contract and evidence now live in
+[`figure-transparency-materials.md`](figure-transparency-materials.md); exact
+order-independent transparency remains deferred there.
