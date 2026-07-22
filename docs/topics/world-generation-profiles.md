@@ -418,6 +418,12 @@ owns the next bounded mountain/valley family. Tactical
 accepted Tactical 192 field set and must complete before rivers, hydrology,
 climate breadth, or major structure work.
 
+The selected project campaign is therefore Tactical 192 mountains/valleys,
+Tactical 196 periodic production fields, a bounded rivers/wetlands family, and
+then coherent stream/cascade/waterfall reaches. True structure infrastructure
+remains ready as a separate concern but is parked while this terrain campaign
+advances.
+
 True native structure infrastructure and original mclone structures remain a
 separate follow-up. Before adding it, extend the typed artifact vocabulary for
 whatever structure metadata actually crosses planning/execution; do not encode

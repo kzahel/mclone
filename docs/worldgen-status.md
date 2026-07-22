@@ -23,6 +23,9 @@ The finite/periodic runtime proof is complete in
 genuinely periodic Mclone fields and features are planned in
 [`tactical/196-periodic-mclone-terrain-fields.md`](tactical/196-periodic-mclone-terrain-fields.md)
 after the first accepted Tactical 192 field set.
+This is now the selected project campaign: mountains/valleys, periodic fields,
+rivers/wetlands, then coherent stream, cascade, and waterfall reaches. Caves
+and structures remain parked while those terrain families advance.
 
 Compatibility safety is recorded in the
 [`world-generation-profiles` ledger](topics/world-generation-profiles.md#compatibility-safety-ledger).
@@ -156,3 +159,4 @@ Current native tacticals live under [`docs/tactical/`](tactical/README.md). Star
 - [`187-generator-profile-flat-grass-and-seeded-island.md`](tactical/187-generator-profile-flat-grass-and-seeded-island.md) for the accepted multi-generator refactor and first original terrain proof.
 - [`188-mclone-overworld-v1-terrain-foundation.md`](tactical/188-mclone-overworld-v1-terrain-foundation.md) for the first original continuous-terrain profile and its explicit reuse/refactor reviews.
 - [`192-mclone-overworld-mountains-and-valleys.md`](tactical/192-mclone-overworld-mountains-and-valleys.md) for the next original relief family.
+- [`196-periodic-mclone-terrain-fields.md`](tactical/196-periodic-mclone-terrain-fields.md) for the required seam-safe field phase before rivers and wetlands.

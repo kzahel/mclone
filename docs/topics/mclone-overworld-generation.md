@@ -12,7 +12,9 @@ Minecraft Java 1.17.1 reference path. Tactical
 next mountain/valley content family. The shared Flat Grass cylinder proof is
 complete; [`196`](../tactical/196-periodic-mclone-terrain-fields.md) is planned
 after the first accepted Tactical 192 field set and before rivers, climate
-breadth, or structures.
+breadth, or structures. As of 2026-07-22, this terrain sequence is the selected
+project focus: mountains and valleys, periodic production fields, rivers and
+wetlands, then coherent streams, cascades, and waterfall reaches.
 
 ## Scope
 
@@ -246,7 +248,7 @@ pure island landform sampler or a concrete terrain-modifier specification. Do
 not invoke the complete `SmallIslandV1` profile inside another profile: a
 profile owns complete missing-chunk behavior and is not a composable landmark.
 
-## Long-Term Development Sequence
+## Numbered Terrain Development Sequence
 
 Develop recognizable vertical terrain families instead of completing every
 subsystem horizontally.
@@ -259,20 +261,36 @@ subsystem horizontally.
    - Independent ridge and ruggedness/erosion composition.
    - Terrain creates relief; biome choice reacts to altitude, climate, and
      exposure rather than being the sole source of geometry.
-3. **Rivers and wetlands**
+3. **Periodic production-field contract**
+   - Route every accepted Mclone terrain, biome, surface, spawn, and decoration
+     caller through explicit periodic sampling and coherent work lifts.
+   - This is an enabling terrain phase rather than a new visual family; it
+     prevents rivers and later fields from accumulating hidden planar-only
+     assumptions.
+4. **Rivers and wetlands**
    - Deterministic river influence applied before surface recipes.
    - Begin with an inspectable field; true rainfall/flow accumulation can be a
      later refinement.
-4. **Biome, surface, and decoration language**
+   - Expose water surface, width/depth, banks, downstream direction,
+     continuity, wetland, headwater, confluence, and outlet facts through the
+     production sampler as each fact gains a real caller.
+5. **Streams, cascades, and waterfall reaches**
+   - Realize continuous watercourses against the accepted relief and river
+     facts, with stable upstream and downstream destinations.
+   - Classify calm, riffle, cascade, fall, and later mill-compatible reaches;
+     never place an isolated falling-water decoration without a watercourse.
+   - Keep sound, mist, splash particles, animation, and functional machinery
+     as separate presentation or gameplay slices.
+6. **Biome, surface, and decoration language**
    - Temperature/moisture/altitude combinations and original regional
      recipes.
    - Reuse configured feature implementations while owning selection,
      density, and seed domains.
-5. **Caves and geology**
+7. **Caves and geology**
    - Independently seeded 3D subtractive fields or carvers.
    - Reuse geometric helpers only after the first concrete mclone cave rule
      proves the shared shape.
-6. **Landmarks and structures**
+8. **Landmarks and structures**
    - Keep bounded local content in placed features when honest.
    - Add true starts, references, pieces, bounding boxes, and persistence when
      the first cross-chunk landmark requires them.
@@ -373,7 +391,13 @@ re-audit every live field scale, select the explicit periodic sampler and
 circumference, then route terrain and decoration through canonical outputs plus
 coherent seam work lifts. Do not add rivers or climate breadth before that
 contract is demonstrated through the production browser Worker and persistence
-paths.
+paths. After Tactical 196, prefer a bounded rivers-and-wetlands tactical over
+caves, structures, or broad biome expansion. Its first result should be one
+inspectable production river influence with coherent water level, banks,
+downstream direction, and wetland/headwater/outlet facts shared by terrain and
+biome/surface selection. Follow that with a separate stream/cascade/waterfall
+reach slice; waterfall placement must consume continuous watercourse and grade
+facts rather than decorate arbitrary cliffs.
 
 ## Related
 

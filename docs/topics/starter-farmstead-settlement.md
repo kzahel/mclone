@@ -9,12 +9,14 @@ length/lean-to compositions over shared templates, themes, transforms, a small
 full-cube plus glass/stair/slab palette, normal persisted chunks, SQLite reopen,
 and inspected production renders. Tactical 214 externalizes those families
 through the completed Structure Lab and adds a Lab-native coop. Full settlement
-placement remains staged
-behind its own structure, overlay, site-plan, and content work. Original terrain
-and hydrology are quality upgrades, not blockers for continued standalone
-building art.**
+placement remains staged behind its own structure, overlay, site-plan, and
+content work. As of 2026-07-22, the selected project focus is original terrain:
+mountains and valleys, the periodic-field seam, then rivers, wetlands, streams,
+and coherent waterfall reaches. The ready structure-lifecycle work remains the
+first farmstead materialization blocker, but is intentionally paused while this
+terrain campaign advances.**
 
-Last reconciled: **2026-07-21**.
+Last reconciled: **2026-07-22**.
 
 ## Scope
 
@@ -700,9 +702,10 @@ standalone building iteration:
 
 | Upstream ID | Capability | State | Farmstead effect |
 |---|---|---|---|
-| `UP-WG-192` | original mountains and valleys | `ready` | improves scenic seed scouting and natural grade choices |
-| `UP-WG-196` | periodic original terrain fields | `waiting` | required only before claiming periodic Mclone-terrain placement |
-| `UP-HYDROLOGY` | original rivers, wetlands, waterfall reaches, and flow facts | `waiting` | upgrades authored pond/channel fallback into natural-water attachment and mill-site selection |
+| `UP-WG-192` | original mountains and valleys | `ready`, selected next | creates the macro relief and traversable valley language that later water consumes |
+| `UP-WG-196` | periodic original terrain fields | `waiting` on `UP-WG-192` | prevents rivers and later terrain fields from baking in another planar-only assumption |
+| `UP-HYDROLOGY` | original rivers and wetlands | `waiting` on `UP-WG-196` | adds continuous corridors, water levels, banks, downstream direction, and natural-water attachment facts |
+| `UP-WATER-REACHES` | streams, cascades, and waterfalls | `waiting` on `UP-HYDROLOGY` | classifies and realizes coherent descending reaches for scenery and later mill-site selection |
 
 ### Progress Ledger
 
@@ -714,7 +717,7 @@ approved; do not reserve a block of numbers in advance.
 |---|---|---|---|---|
 | `FS-00` | vision, vocabulary, staging, and cross-profile contract | `accepted` | this topic and reviewed Java 1.17.1 template/jigsaw/structure sources | keep reconciled as implementation changes facts |
 | `FS-01` | standalone structure-authoring lab | `proven` | Tactical 214: strict TypeScript source graph, generated JSON drift gate, Rust loader/compiler, twelve promoted family members, Lab-native coop, and inspected read-only catalogue | add buildings through finite source-first recipes; do not broaden into arbitrary dimensions or browser editing |
-| `FS-02` | coherent farm block/material/collision kit | `active` | fourteen original farmstead materials now cover cottage, barn, and coop presentation; glass and transform/collision-aware stairs/slabs are proven; doors, fences/gates, farmland, crops, and props remain | choose the next coherent family from visual or settlement-layout need rather than growing an undirected palette |
+| `FS-02` | coherent farm block/material/collision kit | `ready` | fourteen original farmstead materials now cover cottage, barn, and coop presentation; glass and transform/collision-aware stairs/slabs are proven; doors, fences/gates, farmland, crops, and props remain | resume with the next composition-driven family after the terrain campaign or when an active terrain review needs it |
 | `FS-03` | template records, semantic roles, transforms, markers, bounds, and touched chunks | `proven` | Tactical 208 pure kernel tests and persisted cross-chunk lab receipts | extend only when a caller needs processors, codecs, alternate palettes, entities, or block data |
 | `FS-04` | true structure statuses, starts, references, pieces, clipping, and persistence | `ready` | architecture and vanilla reference map exist; standalone templates deliberately do not claim this lifecycle | bounded structure-foundation tactical proves a small original cross-chunk structure |
 | `FS-05` | starter-content overlay and realized-instance identity | `waiting` | conceptual identity accepted; live descriptor has only profile, seed, and topology | persisted overlay/blueprint/instance version contract lands without changing pure Overworld output |
@@ -768,27 +771,51 @@ the east lean-to independently. [`structure-lab.md`](structure-lab.md) now owns
 the proven authoring path: agent-authored TypeScript DSL sources generate
 drift-checked canonical JSON and Rust-baked static preview meshes for a polished
 read-only catalogue. The Rosehip coop proves new content needs no Rust authoring
-body. In-browser editing is indefinitely deferred. This lane can pause while
-`FS-04` proves the true structure lifecycle. If the next composition slice
-needs enclosures first, resume `FS-02` with the fence/gate family; do not add
-doors, props, crops, and fences as one undirected content batch.
+body. In-browser editing is indefinitely deferred. Standalone building and
+farm-kit work now pause unless a terrain review exposes a specific content
+need.
 
-`FS-04`, the true cross-chunk structure lifecycle, remains the first hard
-blocker for materializing the eventual settlement during normal generation. It
-may advance independently and should follow [`../structures.md`](../structures.md):
-status and persisted metadata foundation, per-chunk clipped placement, and one
-small original proof structure. It should not begin by making the maximal
-farmstead its test case.
+The selected next work is the original-terrain campaign owned by
+[`mclone-overworld-generation.md`](mclone-overworld-generation.md):
 
-Tactical 192, Tactical 196, and later hydrology work remain independent terrain
-quality lanes. They should advance for Mclone Overworld quality and before a
-durable showcase seed is selected, but neither they nor `FS-04` should pause
-standalone building art, material work, or reference-driven iteration.
+1. execute Tactical 192 and visually accept coherent mountain ranges,
+   shoulders, foothills, and traversable valleys;
+2. execute Tactical 196 so every accepted terrain field and decoration caller
+   has an explicit periodic sampling and work-lift contract before more planar
+   field ownership accumulates;
+3. open a bounded river/wetland tactical that adds one production river
+   influence shared by terrain, biome, surface, and neutral site-survey facts;
+4. follow with coherent stream/reach realization, including downstream grade,
+   cascades, and waterfalls that connect valid upstream and downstream water;
+   and
+5. only then treat a natural-water farmstead or mill site as scoutable.
+
+Rivers need not begin with rainfall simulation. The first accepted slice may
+use a deterministic inspectable corridor field, but it must establish water
+surface, width/depth, banks, downstream direction, continuity, and wetland or
+outlet classification before waterfalls are added. A waterfall is a reach of a
+continuous watercourse crossing meaningful terrain drop, not an isolated cliff
+decoration.
+
+`FS-04`, the true cross-chunk structure lifecycle, remains `ready` and remains
+the first hard blocker for materializing the eventual settlement during normal
+generation. It is paused by priority, not by missing prerequisites. When the
+terrain campaign reaches an accepted stopping point, it should follow
+[`../structures.md`](../structures.md): status and persisted metadata
+foundation, per-chunk clipped placement, and one small original proof
+structure. It should not begin by making the maximal farmstead its test case.
+
+Do not select a durable showcase seed during this campaign. Production-backed
+maps and landscape cards should drive human review at the mountain/valley,
+river/wetland, and waterfall-reach milestones; seed scouting for the farmstead
+begins only after the relevant macro fields are accepted.
 
 ## Staged Direction
 
 ### Stage 0 — research and readiness
 
+- Treat the terrain campaign above as the current Stage 0 implementation
+  priority; `FS-04` and the composed settlement remain deliberately parked.
 - Keep this topic current while original mountains/valleys, periodic fields,
   rivers, structure foundations, block content, and entities advance.
 - Re-audit the concrete tree, terrain, structure, and persistence owners before
@@ -849,8 +876,9 @@ plan. It does not need recursive jigsaw assembly.
 
 ## Remaining Validation Contract
 
-Tacticals 208–210 prove only the standalone template, first detail family,
-bounded building-family selection, and persisted-gallery loop.
+Tacticals 208–210 and 214 prove only the standalone template, first detail
+family, bounded building-family selection, source-first authoring/preview
+pipeline, and persisted-gallery loop.
 Settlement tacticals should additionally plan for:
 
 - deterministic receipts for candidate scores, chosen anchor/rotation, grade
@@ -918,9 +946,6 @@ each composition expansion before moving on.
 
 - Which original terrain milestone is stable enough for the first meaningful
   seed scout and selected demo seed?
-- When should the proven code-authored template builder gain a textual or
-  captured voxel source format and compiler, and what stable identity should
-  that format carry?
 - Which semantic farm material roles should be content prerequisites versus
   temporary mappings?
 - Does the first watercourse terminate in the pond, leave it, or adapt a later

@@ -1,7 +1,8 @@
 # Tactical 192: Mclone Overworld Mountains And Valleys
 
-Status: planned next after Tactical 188 completed 2026-07-18. Begin with the
-product/reuse inventory; no field or terrain output has landed yet.
+Status: selected next 2026-07-22 after Tactical 188 completed 2026-07-18.
+Begin with the product/reuse inventory; no field or terrain output has landed
+yet.
 
 Topic: `mclone-overworld-generation`
 
@@ -164,8 +165,9 @@ terrain framework exists without real callers.
 - [ ] Update the topic, safety ledger, worldgen status, tactical execution
   record, accepted defects, and next content decision.
 
-Gate: the range/valley family is accepted and the next tactical is explicitly
-rivers/wetlands, another bounded terrain tune, or a demonstrated refactor.
+Gate: the range/valley family is accepted and Tactical 196 can freeze the live
+field inventory before rivers/wetlands add another field family. If geometry
+still needs a bounded tune, record that exception explicitly.
 
 ## Evidence
 
@@ -189,11 +191,15 @@ also re-runs the Small Island card and exact reference Overworld locks.
 
 ## Follow-Up Boundary
 
-Rivers and wetlands are the preferred next family after accepted mountains and
-valleys because they can consume the newly reviewed macro relief. Caves and
-structures remain later. If mountain geometry demonstrates that a columnar
-heightfield is insufficient, record the exact overhang/cliff requirement and
-open a separate 3D-density tactical rather than growing this one implicitly.
+Tactical 196 is the required technical interleave after accepted mountains and
+valleys: it makes every live field periodic before another field family lands.
+Rivers and wetlands are the preferred next visual family after that contract
+because they can consume the newly reviewed macro relief. Streams, cascades,
+and waterfalls follow coherent river direction and grade facts rather than
+appearing as isolated decorations. Caves and structures remain later. If
+mountain geometry demonstrates that a columnar heightfield is insufficient,
+record the exact overhang/cliff requirement and open a separate 3D-density
+tactical rather than growing this one implicitly.
 
 ## Related
 

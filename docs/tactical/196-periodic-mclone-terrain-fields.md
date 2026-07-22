@@ -3,6 +3,8 @@
 Status: planned after the first accepted Tactical 192 mountain/valley field
 set. Tactical 195's cylinder runtime contract is complete; Mclone Overworld
 remains explicitly unsupported on periodic topology until this tactical lands.
+This is the selected enabling phase between mountain/valley acceptance and the
+first river/wetland field.
 
 Topic: `bounded-world-topology`
 
@@ -227,10 +229,15 @@ periodic and deterministic.
 - [ ] Run workspace, native pixel, production browser Worker, Android proxy,
   and available XR gates.
 - [ ] Update topology and Mclone support matrices with exact unsupported
-  families and the next river/climate boundary.
+  families and the next river/wetland boundary.
 
 Gate: periodic Mclone terrain is a supported persisted profile/topology pair
 and later content work consumes its sampler contract.
+
+The preferred next content tactical is rivers and wetlands. It should add one
+inspectable production river influence and the minimum water-level, bank,
+direction, continuity, and reach facts required by terrain and biome/surface
+callers. Stream, cascade, and waterfall realization remains a following slice.
 
 ## Evidence
 
