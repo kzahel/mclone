@@ -125,3 +125,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   authored-world relaunch: ephemeral runtime IDs and generic tick counters,
   durable UUID-equivalent identity and per-kind gameplay state, corrected
   lifecycle evidence, and shared cross-backend proof
+- `release-distribution-and-updates` — first-party and store release ownership,
+  a stable direct-desktop launcher, signed manifests, transactional version
+  slots, whole-artifact-first updates, and measured later delta optimization
