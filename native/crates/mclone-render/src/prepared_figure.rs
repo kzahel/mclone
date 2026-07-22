@@ -1,7 +1,9 @@
 use std::num::{NonZeroU32, NonZeroU64};
 
 use anyhow::{Context, Result, bail};
-use mclone_assets::{PreparedFigure, PreparedFigureVertex};
+use mclone_assets::{
+    PreparedFigure, PreparedFigurePass, PreparedFigurePassRange, PreparedFigureVertex,
+};
 
 use crate::GpuPassId;
 use crate::chunk::{ChunkRenderView, DEPTH_FORMAT, REVERSED_Z_DEPTH_CLEAR};
@@ -11,7 +13,7 @@ use crate::uniform::{
 };
 
 const MAX_PREPARED_FIGURE_PARTS: usize = 64;
-const VERTEX_BYTE_LEN: usize = 52;
+const VERTEX_BYTE_LEN: usize = 56;
 const VERTEX_BYTE_SIZE: wgpu::BufferAddress = VERTEX_BYTE_LEN as wgpu::BufferAddress;
 const VIEW_UNIFORM_BYTE_LEN: usize = 16 * std::mem::size_of::<f32>();
 const VIEW_UNIFORM_BYTE_SIZE: wgpu::BufferAddress = VIEW_UNIFORM_BYTE_LEN as wgpu::BufferAddress;
@@ -50,7 +52,7 @@ pub struct PreparedFigureGpuSnapshot {
 /// stereo uses one two-view uniform and a multiview pipeline. Actor records,
 /// instancing, and GPU clip evaluation remain later contracts.
 pub struct PreparedFigureDrawResources {
-    pipeline: wgpu::RenderPipeline,
+    pipelines: PreparedFigurePipelines,
     view_uniforms: PerViewUniformBuffer,
     view_bind_group: wgpu::BindGroup,
     multiview: Option<PreparedFigureMultiviewResources>,
@@ -63,6 +65,7 @@ pub struct PreparedFigureDrawResources {
     texture_bind_group: wgpu::BindGroup,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
+    pass_ranges: Vec<PreparedFigurePassRange>,
     vertex_count: u32,
     index_count: u32,
     part_count: usize,
@@ -70,9 +73,18 @@ pub struct PreparedFigureDrawResources {
 }
 
 struct PreparedFigureMultiviewResources {
-    pipeline: wgpu::RenderPipeline,
+    pipelines: PreparedFigurePipelines,
     view_uniform: wgpu::Buffer,
     view_bind_group: wgpu::BindGroup,
+}
+
+struct PreparedFigurePipelines {
+    opaque: wgpu::RenderPipeline,
+    mask_threshold: wgpu::RenderPipeline,
+    mask_dither: wgpu::RenderPipeline,
+    blend_depth: wgpu::RenderPipeline,
+    blend_color: wgpu::RenderPipeline,
+    additive: wgpu::RenderPipeline,
 }
 
 impl PreparedFigureDrawResources {
@@ -85,6 +97,7 @@ impl PreparedFigureDrawResources {
         if figure.parts.is_empty() || figure.vertices.is_empty() || figure.indices.is_empty() {
             bail!("prepared figure '{}' has no drawable geometry", figure.name);
         }
+        validate_pass_ranges(&figure.pass_ranges, figure.indices.len() as u32)?;
         if figure.parts.len() > MAX_PREPARED_FIGURE_PARTS {
             bail!(
                 "prepared figure '{}' has {} parts; proof renderer limit is {}",
@@ -160,14 +173,8 @@ impl PreparedFigureDrawResources {
             bind_group_layouts: &[&view_layout, &palette_layout, &texture_layout],
             push_constant_ranges: &[],
         });
-        let pipeline = create_prepared_figure_pipeline(
-            device,
-            &pipeline_layout,
-            &shader,
-            color_format,
-            "mclone_prepared_figure_pipeline",
-            None,
-        );
+        let pipelines =
+            create_prepared_figure_pipelines(device, &pipeline_layout, &shader, color_format, None);
         let multiview = if device.features().contains(wgpu::Features::MULTIVIEW) {
             let multiview_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("mclone_prepared_figure_multiview_shader"),
@@ -208,12 +215,11 @@ impl PreparedFigureDrawResources {
                 push_constant_ranges: &[],
             });
             Some(PreparedFigureMultiviewResources {
-                pipeline: create_prepared_figure_pipeline(
+                pipelines: create_prepared_figure_pipelines(
                     device,
                     &pipeline_layout,
                     &multiview_shader,
                     color_format,
-                    "mclone_prepared_figure_multiview_pipeline",
                     NonZeroU32::new(2),
                 ),
                 view_uniform,
@@ -321,7 +327,7 @@ impl PreparedFigureDrawResources {
         });
 
         Ok(Self {
-            pipeline,
+            pipelines,
             view_uniforms,
             view_bind_group,
             multiview,
@@ -334,6 +340,7 @@ impl PreparedFigureDrawResources {
             texture_bind_group,
             vertex_buffer,
             index_buffer,
+            pass_ranges: figure.pass_ranges.clone(),
             vertex_count: figure.vertices.len() as u32,
             index_count: figure.indices.len() as u32,
             part_count: figure.parts.len(),
@@ -347,9 +354,11 @@ impl PreparedFigureDrawResources {
                 palette_written_bytes: 0,
                 view_uniform_write_count: 0,
                 multiview_uniform_write_count: 0,
-                multiview_pipeline_count: u64::from(
-                    device.features().contains(wgpu::Features::MULTIVIEW),
-                ),
+                multiview_pipeline_count: if device.features().contains(wgpu::Features::MULTIVIEW) {
+                    6
+                } else {
+                    0
+                },
             },
         })
     }
@@ -422,15 +431,14 @@ impl PreparedFigureDrawResources {
             timestamp_writes: target.gpu_timestamp_writes(GpuPassId::Actor),
             ..Default::default()
         });
-        pass.set_pipeline(&self.pipeline);
         pass.set_bind_group(0, &self.view_bind_group, &[uniform_offset]);
         pass.set_bind_group(1, &self.palette_bind_group, &[]);
         pass.set_bind_group(2, &self.texture_bind_group, &[]);
         pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-        pass.draw_indexed(0..self.index_count, 0, 0..1);
+        let draw_count = draw_prepared_figure_ranges(&mut pass, &self.pipelines, &self.pass_ranges);
         Ok(PreparedFigureRenderStats {
-            draw_count: 1,
+            draw_count,
             vertex_count: self.vertex_count,
             index_count: self.index_count,
         })
@@ -489,15 +497,15 @@ impl PreparedFigureDrawResources {
             timestamp_writes: target.gpu_timestamp_writes(GpuPassId::Actor),
             ..Default::default()
         });
-        pass.set_pipeline(&multiview.pipeline);
         pass.set_bind_group(0, &multiview.view_bind_group, &[]);
         pass.set_bind_group(1, &self.palette_bind_group, &[]);
         pass.set_bind_group(2, &self.texture_bind_group, &[]);
         pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
         pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
-        pass.draw_indexed(0..self.index_count, 0, 0..1);
+        let draw_count =
+            draw_prepared_figure_ranges(&mut pass, &multiview.pipelines, &self.pass_ranges);
         Ok(PreparedFigureRenderStats {
-            draw_count: 1,
+            draw_count,
             vertex_count: self.vertex_count,
             index_count: self.index_count,
         })
@@ -559,6 +567,113 @@ pub fn clear_prepared_figure_target(
     });
 }
 
+fn validate_pass_ranges(ranges: &[PreparedFigurePassRange], index_count: u32) -> Result<()> {
+    let mut next_index = 0;
+    let mut previous_pass = None;
+    for range in ranges {
+        if range.index_count == 0 || range.first_index != next_index {
+            bail!("prepared figure has invalid or non-contiguous pass ranges");
+        }
+        if previous_pass.is_some_and(|previous| previous >= range.pass) {
+            bail!("prepared figure pass ranges are not in canonical order");
+        }
+        next_index = next_index
+            .checked_add(range.index_count)
+            .context("prepared figure pass range overflow")?;
+        previous_pass = Some(range.pass);
+    }
+    if next_index != index_count {
+        bail!(
+            "prepared figure pass ranges cover {} indices; expected {}",
+            next_index,
+            index_count
+        );
+    }
+    Ok(())
+}
+
+fn draw_prepared_figure_ranges<'pass>(
+    pass: &mut wgpu::RenderPass<'pass>,
+    pipelines: &'pass PreparedFigurePipelines,
+    ranges: &[PreparedFigurePassRange],
+) -> u32 {
+    let mut draw_count = 0;
+    for range in ranges {
+        let indices = range.first_index..range.first_index + range.index_count;
+        match range.pass {
+            PreparedFigurePass::Opaque => pass.set_pipeline(&pipelines.opaque),
+            PreparedFigurePass::MaskThreshold => pass.set_pipeline(&pipelines.mask_threshold),
+            PreparedFigurePass::MaskDither => pass.set_pipeline(&pipelines.mask_dither),
+            PreparedFigurePass::Blend => {
+                pass.set_pipeline(&pipelines.blend_depth);
+                pass.draw_indexed(indices.clone(), 0, 0..1);
+                draw_count += 1;
+                pass.set_pipeline(&pipelines.blend_color);
+            }
+            PreparedFigurePass::Additive => pass.set_pipeline(&pipelines.additive),
+        }
+        pass.draw_indexed(indices, 0, 0..1);
+        draw_count += 1;
+    }
+    draw_count
+}
+
+#[derive(Clone, Copy)]
+enum PreparedFigurePipelineKind {
+    Opaque,
+    MaskThreshold,
+    MaskDither,
+    BlendDepth,
+    BlendColor,
+    Additive,
+}
+
+fn create_prepared_figure_pipelines(
+    device: &wgpu::Device,
+    layout: &wgpu::PipelineLayout,
+    shader: &wgpu::ShaderModule,
+    color_format: wgpu::TextureFormat,
+    multiview: Option<NonZeroU32>,
+) -> PreparedFigurePipelines {
+    let create = |kind, label| {
+        create_prepared_figure_pipeline(
+            device,
+            layout,
+            shader,
+            color_format,
+            label,
+            multiview,
+            kind,
+        )
+    };
+    PreparedFigurePipelines {
+        opaque: create(
+            PreparedFigurePipelineKind::Opaque,
+            "mclone_prepared_figure_opaque",
+        ),
+        mask_threshold: create(
+            PreparedFigurePipelineKind::MaskThreshold,
+            "mclone_prepared_figure_mask_threshold",
+        ),
+        mask_dither: create(
+            PreparedFigurePipelineKind::MaskDither,
+            "mclone_prepared_figure_mask_dither",
+        ),
+        blend_depth: create(
+            PreparedFigurePipelineKind::BlendDepth,
+            "mclone_prepared_figure_blend_depth",
+        ),
+        blend_color: create(
+            PreparedFigurePipelineKind::BlendColor,
+            "mclone_prepared_figure_blend_color",
+        ),
+        additive: create(
+            PreparedFigurePipelineKind::Additive,
+            "mclone_prepared_figure_additive",
+        ),
+    }
+}
+
 fn create_prepared_figure_pipeline(
     device: &wgpu::Device,
     layout: &wgpu::PipelineLayout,
@@ -566,7 +681,59 @@ fn create_prepared_figure_pipeline(
     color_format: wgpu::TextureFormat,
     label: &'static str,
     multiview: Option<NonZeroU32>,
+    kind: PreparedFigurePipelineKind,
 ) -> wgpu::RenderPipeline {
+    let (fragment_entry, blend, write_mask, depth_write_enabled, depth_compare) = match kind {
+        PreparedFigurePipelineKind::Opaque => (
+            "fs_opaque",
+            None,
+            wgpu::ColorWrites::ALL,
+            true,
+            wgpu::CompareFunction::GreaterEqual,
+        ),
+        PreparedFigurePipelineKind::MaskThreshold => (
+            "fs_mask_threshold",
+            None,
+            wgpu::ColorWrites::ALL,
+            true,
+            wgpu::CompareFunction::GreaterEqual,
+        ),
+        PreparedFigurePipelineKind::MaskDither => (
+            "fs_mask_dither",
+            None,
+            wgpu::ColorWrites::ALL,
+            true,
+            wgpu::CompareFunction::GreaterEqual,
+        ),
+        PreparedFigurePipelineKind::BlendDepth => (
+            "fs_blend_depth",
+            None,
+            wgpu::ColorWrites::empty(),
+            true,
+            wgpu::CompareFunction::GreaterEqual,
+        ),
+        PreparedFigurePipelineKind::BlendColor => (
+            "fs_blend_color",
+            Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING),
+            wgpu::ColorWrites::ALL,
+            false,
+            wgpu::CompareFunction::Equal,
+        ),
+        PreparedFigurePipelineKind::Additive => (
+            "fs_additive",
+            Some(wgpu::BlendState {
+                color: wgpu::BlendComponent {
+                    src_factor: wgpu::BlendFactor::One,
+                    dst_factor: wgpu::BlendFactor::One,
+                    operation: wgpu::BlendOperation::Add,
+                },
+                alpha: wgpu::BlendComponent::OVER,
+            }),
+            wgpu::ColorWrites::ALL,
+            false,
+            wgpu::CompareFunction::GreaterEqual,
+        ),
+    };
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
         label: Some(label),
         layout: Some(layout),
@@ -603,17 +770,22 @@ fn create_prepared_figure_pipeline(
                         shader_location: 4,
                         format: wgpu::VertexFormat::Uint32,
                     },
+                    wgpu::VertexAttribute {
+                        offset: 52,
+                        shader_location: 5,
+                        format: wgpu::VertexFormat::Float32,
+                    },
                 ],
             }],
         },
         fragment: Some(wgpu::FragmentState {
             module: shader,
-            entry_point: Some("fs_main"),
+            entry_point: Some(fragment_entry),
             compilation_options: Default::default(),
             targets: &[Some(wgpu::ColorTargetState {
                 format: color_format,
-                blend: None,
-                write_mask: wgpu::ColorWrites::ALL,
+                blend,
+                write_mask,
             })],
         }),
         primitive: wgpu::PrimitiveState {
@@ -623,8 +795,8 @@ fn create_prepared_figure_pipeline(
         },
         depth_stencil: Some(wgpu::DepthStencilState {
             format: DEPTH_FORMAT,
-            depth_write_enabled: true,
-            depth_compare: wgpu::CompareFunction::GreaterEqual,
+            depth_write_enabled,
+            depth_compare,
             stencil: Default::default(),
             bias: Default::default(),
         }),
@@ -671,6 +843,7 @@ fn prepared_vertex_bytes(vertices: &[PreparedFigureVertex]) -> Vec<u8> {
         push_f32s(&mut bytes, &vertex.uv);
         push_f32s(&mut bytes, &vertex.color);
         bytes.extend_from_slice(&vertex.part_id.to_ne_bytes());
+        bytes.extend_from_slice(&vertex.alpha_cutoff.to_ne_bytes());
     }
     bytes
 }
@@ -720,17 +893,19 @@ mod tests {
     use crate::chunk::ChunkCamera;
 
     #[test]
-    fn prepared_vertex_layout_is_52_bytes() {
+    fn prepared_vertex_layout_is_56_bytes() {
         let vertex = PreparedFigureVertex {
             position: [1.0, 2.0, 3.0],
             normal: [0.0, 1.0, 0.0],
             uv: [0.25, 0.75],
             color: [1.0, 0.5, 0.25, 1.0],
             part_id: 7,
+            alpha_cutoff: 0.35,
         };
         let bytes = prepared_vertex_bytes(&[vertex]);
         assert_eq!(bytes.len(), VERTEX_BYTE_LEN);
         assert_eq!(&bytes[48..52], &7_u32.to_ne_bytes());
+        assert_eq!(&bytes[52..56], &0.35_f32.to_ne_bytes());
     }
 
     #[test]
@@ -779,13 +954,35 @@ mod tests {
     }
 
     #[test]
-    fn prepared_figure_shaders_discard_transparent_atlas_texels() {
+    fn prepared_mono_shader_validates_all_material_entries() {
+        let source = include_str!("shaders/prepared_figure.wgsl");
+        let module = naga::front::wgsl::parse_str(source).expect("mono WGSL parses");
+        naga::valid::Validator::new(
+            naga::valid::ValidationFlags::all(),
+            naga::valid::Capabilities::empty(),
+        )
+        .validate(&module)
+        .expect("mono WGSL validates");
+    }
+
+    #[test]
+    fn prepared_figure_shaders_define_every_alpha_pass_for_mono_and_multiview() {
         for source in [
             include_str!("shaders/prepared_figure.wgsl"),
             include_str!("shaders/prepared_figure_multiview.wgsl"),
         ] {
-            assert!(source.contains("if (texel.a < 0.1)"));
-            assert!(source.contains("discard;"));
+            for entry in [
+                "fs_opaque",
+                "fs_mask_threshold",
+                "fs_mask_dither",
+                "fs_blend_depth",
+                "fs_blend_color",
+                "fs_additive",
+            ] {
+                assert!(source.contains(entry));
+            }
+            assert!(source.contains("coverage_hash"));
+            assert!(source.contains("input.local_position"));
         }
     }
 }

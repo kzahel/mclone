@@ -6,7 +6,7 @@ use std::time::Instant;
 use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_assets::{
-    AssetPath, FilesystemAssetSource, PreparedFigure, PreparedFigurePoseSample,
+    AssetPath, FilesystemAssetSource, PreparedFigure, PreparedFigurePass, PreparedFigurePoseSample,
     default_player_figure_path, evaluate_prepared_figure_clip_into, load_prepared_figure,
 };
 use mclone_render::chunk::{ChunkCamera, ChunkDepthTarget};
@@ -26,6 +26,16 @@ use serde::{Deserialize, Serialize};
 const DEFAULT_PANEL_WIDTH: u32 = 360;
 const DEFAULT_PANEL_HEIGHT: u32 = 480;
 const REVIEW_FOV_DEGREES: f32 = 35.0;
+
+fn expected_draw_count(figure: &PreparedFigure) -> u32 {
+    figure.pass_ranges.len() as u32
+        + u32::from(
+            figure
+                .pass_ranges
+                .iter()
+                .any(|range| range.pass == PreparedFigurePass::Blend),
+        )
+}
 
 fn main() -> Result<()> {
     let options = Options::parse(env::args().skip(1))?;
@@ -102,7 +112,7 @@ fn main() -> Result<()> {
     for ((view, pixels), stats) in views.iter().zip(&pixels).zip(&state.stats) {
         if stats.vertex_count != figure.vertices.len() as u32
             || stats.index_count != figure.indices.len() as u32
-            || stats.draw_count != 1
+            || stats.draw_count != expected_draw_count(&figure)
         {
             bail!(
                 "prepared figure view '{}' reported unexpected draw counts",
@@ -250,7 +260,7 @@ fn write_portability_review(
     let (multiview, multiview_unavailable_reason, pixel_identical) = match multiview_result {
         Ok((multiview_report, multiview_gpu)) => {
             if multiview_gpu.immutable_upload_count != 4
-                || multiview_gpu.multiview_pipeline_count != 1
+                || multiview_gpu.multiview_pipeline_count != 6
                 || multiview_gpu.multiview_uniform_write_count != 1
                 || multiview_report.eye_pixel_difference_count == 0
             {
@@ -389,7 +399,7 @@ fn write_animation_proof(
     {
         if stats.vertex_count != figure.vertices.len() as u32
             || stats.index_count != figure.indices.len() as u32
-            || stats.draw_count != 1
+            || stats.draw_count != expected_draw_count(figure)
         {
             bail!("prepared animation frame reported unexpected draw counts");
         }
@@ -860,6 +870,7 @@ struct ReviewReceipt<'a> {
     vertex_count: usize,
     index_count: usize,
     draw_range_count: usize,
+    pass_range_count: usize,
     box_primitive_count: usize,
     sphere_cuboid_proxy_count: usize,
     capsule_cuboid_proxy_count: usize,
@@ -915,6 +926,7 @@ impl<'a> ReviewReceipt<'a> {
             vertex_count: figure.vertices.len(),
             index_count: figure.indices.len(),
             draw_range_count: figure.draw_ranges.len(),
+            pass_range_count: figure.pass_ranges.len(),
             box_primitive_count: figure.diagnostics.box_primitive_count,
             sphere_cuboid_proxy_count: figure.diagnostics.sphere_cuboid_proxy_count,
             capsule_cuboid_proxy_count: figure.diagnostics.capsule_cuboid_proxy_count,
