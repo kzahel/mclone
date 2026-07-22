@@ -16,7 +16,8 @@ response on 2026-07-22. Human Review 1 accepted the geometry, but Human Review
 large-scale. A measurement-only terrain-characteristics checkpoint confirms
 that finding against exact undecorated Minecraft Java 1.17.1 terrain. Field
 revision 5 closed much of the scale gap but human review rejected its aligned
-diagonal terrace pattern; a directionally varied revision remains before
+diagonal terrace pattern. Field revision 6 replaces it with periodic-ready
+warped gradient detail and is the current human-review candidate before
 host-equivalence closeout. The shared
 Flat Grass cylinder proof is complete;
 [`196`](../tactical/196-periodic-mclone-terrain-fields.md) is planned after the
@@ -374,6 +375,17 @@ independent gentle domain warps derived from existing relief/ruggedness
 components. Do not add volumetric density merely to solve a two-dimensional
 orientation artifact.
 
+Field revision 6 implements that replacement behind the same semantic value.
+A deterministic 16-direction `GradientNoise2d` uses quintic interpolation and
+has a periodic constructor that validates a block period divisible by its
+lattice scale. The 32- and 8-block domains remain independent, now weighted
+`0.70` and `0.30`, and use different gentle two-axis warps derived from the
+already-sampled relief-detail, relief-fine, and ruggedness-detail components.
+No warp-only field, macro semantic fact, or larger chunk dependency is added.
+The mountain gate, reduced broad lift, and exact ocean/ordinary-lowland
+exclusion remain unchanged. Tactical 196 still owns making every live field
+periodic and proving canonical seam work.
+
 A separate
 `McloneOverworldLandformSample` pairs one raw terrain sample with the exact
 four-block slope used by production. Its exposure relation combines accepted
@@ -630,6 +642,8 @@ vocabulary is:
 - five-point curvature for block-scale direction changes;
 - local plane-fit residual roughness over radii 2-32, which removes smooth
   grade before measuring bumps and secondary forms;
+- local gradient structure-tensor coherence and diagonal alignment over the
+  same radii;
 - the 1-32-block log/log roughness exponent; and
 - fine-detail residual-energy share between radius-4 and radius-32 fits.
 
@@ -661,10 +675,23 @@ distribution.
 The first field-revision-5 card review exposed a measurement blind spot:
 global X/Z anisotropy is about 1.06-1.26 across the mountain sites even though
 local diagonal herringbone is visually dominant. Opposing `/` and `\` patches
-cancel in a global axis ratio. Add local gradient structure tensors or an
-equivalent windowed orientation measure, report coherence and diagonal bias,
-and compare the same masks/sites against vanilla. Roughness magnitude remains
-necessary but is no longer sufficient for accepting a detail recipe.
+cancel in a global axis ratio. The analyzer now reports windowed gradient
+structure-tensor coherence and diagonal alignment. It improves the vocabulary
+but does not automatically detect the rejected defect: revision 5's mean
+diagonal values are below the vanilla medians at radii 4 and 8. The missing
+fact is closer to repeated contour straightness or lattice spectral energy.
+Roughness and orientation aggregates remain supporting constraints, while
+inspected pixels retain veto authority.
+
+Field revision 6 restores a more useful visual/numerical balance without
+fitting vanilla output. Its mountain medians are `0.518x` and `0.557x` vanilla
+for lag-1 and lag-4 changes, `0.523x` and `0.527x` for radius-8 and radius-16
+detrended roughness, `1.192x` for lag-64 change, and `0.915x` for fine-detail
+energy share. The first warped-gradient weighting overshot the latter at
+`1.977x`; shifting the 32/8 weights from `0.55/0.45` to `0.70/0.30` removed
+uniform fine bustle while retaining varied local peaks. The exact lowland
+control is unchanged. The full RD16 matrix removes the repeated chevrons and
+is now awaiting human review.
 
 ## Acceptance Themes
 
@@ -681,14 +708,9 @@ necessary but is no longer sufficient for accepting a detail recipe.
 
 ## Next Work
 
-Replace Tactical 192 field revision 5's rejected aligned detail with
-periodic-ready warped gradient detail behind the same `mountain_detail`
-contract. First extend the characteristic analyzer so local diagonal coherence
-is visible, then repeat the exact mountain/lowland suite and complete
-maximum-view-distance matrix. Keep the change within the 32/8-block detail
-composition and accepted broad-lift response unless evidence requires a
-bounded amplitude adjustment. Once human review accepts the result, complete
-native/browser Worker equivalence and unchanged-host-contract closeout. Do not
+Review Tactical 192 field revision 6's warped-gradient maximum-view-distance
+matrix. If human review accepts it, complete native/browser Worker equivalence
+and unchanged-host-contract closeout. Do not
 fold rivers, climate breadth, caves, or structures into that tactical. After
 its field set and terrain language are accepted, execute
 [`Tactical 196`](../tactical/196-periodic-mclone-terrain-fields.md):

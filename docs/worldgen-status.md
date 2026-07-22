@@ -77,8 +77,11 @@ Landed native coverage:
   reduces broad ridge lift; the multiscale benchmark places it substantially
   closer to undecorated Java 1.17.1 terrain without changing the lowland
   control. Human review rejected its diagonal lattice-terrace artifact;
-  periodic-ready warped gradient detail and a local directionality metric are
-  the active replacement direction.
+  field revision 6 replaces it with periodic-ready 32/8-block gradient detail,
+  gentle independent domain warps, and a 0.70/0.30 band balance. The full RD16
+  matrix removes the repeated chevrons while preserving the exact lowland
+  control and is the current human-review candidate. A local structure-tensor
+  metric now supplements, but does not replace, pixel review.
 - Production-backed broad field maps and fully warmed seed/region/spawn cards;
   the first review accepted macro scale and coast variation after adding one
   fine relief octave to break up concentric local contour bands. The second

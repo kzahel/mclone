@@ -10,8 +10,9 @@ current geometry as too smooth and too large-scale. A production-backed
 terrain-characteristics checkpoint now measures that finding against exact
 Minecraft Java 1.17.1 terrain. Field revision 5 applies the first bounded
 multiscale response, but human pixel review rejected its strong diagonal
-terrace pattern. Revision 6 must replace the aligned value-noise detail before
-host-equivalence closeout and Tactical 196.
+terrace pattern. Field revision 6 replaces that aligned detail with warped
+gradient noise and is the current human-review candidate. Host-equivalence
+closeout remains before Tactical 196.
 
 Topic: `mclone-overworld-generation`
 
@@ -318,7 +319,7 @@ boundaries.
   reference envelope, then repeat maps and landscape review.
 - [x] Reject field revision 5 from the complete high-view-distance landscape
   matrix because of its coherent diagonal terrace artifact.
-- [ ] Replace aligned value-noise detail with directionally varied,
+- [x] Replace aligned value-noise detail with directionally varied,
   periodic-ready detail and repeat characteristic and pixel review.
 - [ ] Prove native thread and production browser Worker equivalence.
 - [ ] Re-run SQLite/IndexedDB only if identity, persistence, or startup behavior
@@ -356,6 +357,8 @@ The reusable height-raster analyzer records:
   signal;
 - least-squares local plane-fit residual RMSE at radii 2, 4, 8, 16, and 32,
   which removes the broad local slope before measuring surface structure;
+- local gradient structure-tensor coherence and diagonal alignment over the
+  same window radii;
 - a log/log roughness exponent over 1-32 blocks, where a value nearer one
   describes smooth ramp-like scale growth; and
 - the share of radius-32 residual energy already present at radius 4.
@@ -469,19 +472,80 @@ diagonal contour steps. Neighboring cells reverse gradient direction, so the
 steps form visible chevrons. The existing global X/Z anisotropy measure stays
 near one because opposing diagonal orientations cancel across a site.
 
-Revision 6 should not mask this defect with another aligned octave. Extend the
-characteristic analyzer with local structure-tensor coherence, diagonal
-alignment, and/or diagonal lag evidence so locally ordered terrain cannot hide
-inside a globally isotropic aggregate. Then replace both detail bands with a
-periodic-ready gradient-noise primitive. Sample each band through a gentle,
-independent two-axis domain warp derived from existing independent relief and
-ruggedness components; this bends lattice organization without adding a new
-macro semantic field. Preserve the accepted mountain/shoulder amplitude gate,
-the exact lowland/ocean exclusion, and the reduced broad lift unless new
-measurements justify a bounded adjustment.
+The analyzer now reports local structure-tensor coherence and diagonal
+alignment at every plane-fit radius. This closes the global-cancellation blind
+spot in the report shape, but the first result is also a useful warning against
+turning one metric into an acceptance oracle: revision 5's mean radius-4 and
+radius-8 diagonal alignment is `0.280` and `0.188`, below the vanilla medians
+of `0.363` and `0.279`, despite the obvious rejected pattern. Those aggregates
+do not measure contour straightness or lattice repetition directly. They
+remain supporting evidence; an inspected maximum-view-distance card can veto
+a numerically plausible candidate.
+
+#### Field revision 6 review candidate
+
+Field revision 6 adds a deterministic two-dimensional `GradientNoise2d` for
+original Mclone content. Lattice hashes select among 16 evenly distributed
+gradient directions, corner dot products use quintic interpolation, and the
+public periodic constructor wraps lattice identity at a block period divisible
+by its scale. Tests cover signed/fractional coordinates and exact repetition at
+the provisional 6,144-block period. This is periodic-ready infrastructure;
+Tactical 196 still owns conversion of every live field and canonical seam
+sampling.
+
+The live terrain keeps the same independent 32- and 8-block mountain-detail
+domains but changes their implementation and weights. The 32-block band now
+contributes `0.70` and the 8-block band `0.30`. Their coordinates are bent by
+already-sampled relief and ruggedness components:
+
+```text
+large x += 18 * relief_detail + 4 * relief_fine
+large z += 18 * ruggedness_detail - 4 * relief_fine
+fine  x += -7 * ruggedness_detail + 3 * relief_detail
+fine  z +=  7 * relief_fine + 3 * relief_detail
+```
+
+The two different gentle warps break repeated lattice organization without a
+new macro semantic field or extra warp-field samples. `mountain_detail`, its
+mountain/shoulder amplitude gate, the reduced broad lift, exact ocean/lowland
+exclusion, and all chunk dependency footprints are unchanged. A first
+`0.55/0.45` gradient candidate removed the herringbone but produced excessive
+uniform bustle: fine-detail energy share rose to `0.119` against vanilla's
+`0.060`. The selected review weighting corrects that before pixel closeout.
+
+The final candidate measures:
+
+| Characteristic | Field rev. 6 | Vanilla | Rev. 6 / vanilla |
+|---|---:|---:|---:|
+| Lag-1 RMS height delta | 0.664 | 1.282 | 0.518x |
+| Lag-4 RMS height delta | 2.007 | 3.602 | 0.557x |
+| Lag-16 RMS height delta | 5.887 | 8.022 | 0.734x |
+| Lag-64 RMS height delta | 15.469 | 12.977 | 1.192x |
+| Curvature RMS | 1.273 | 2.379 | 0.535x |
+| Plane-fit radius-4 RMSE | 0.728 | 1.365 | 0.534x |
+| Plane-fit radius-8 RMSE | 1.193 | 2.279 | 0.523x |
+| Plane-fit radius-16 RMSE | 2.059 | 3.904 | 0.527x |
+| Plane-fit radius-32 RMSE | 3.834 | 5.569 | 0.688x |
+| Roughness exponent | 0.768 | 0.659 | 1.165x |
+| Fine-detail energy share | 0.055 | 0.060 | 0.915x |
+
+The full inspected matrix is under
+`/tmp/mclone-overworld-fields6-candidate2-{range-negative,valley,range-positive,range-edge,lowland}`.
+Every card uses render distance 16 and 800-by-500 source panels. The repeated
+chevrons are absent across both seeds; mountain interiors have varied local
+peaks, the valley remains open, the range edge has no wall, and the lowland
+control is visually and numerically unchanged. This is ready for human review,
+not yet human acceptance.
+
+On the same three-iteration release lane, revision 6 measured 3,127.978
+surface chunks/s, 515.157 cold decorated targets/s, and 4,693.731 warm
+decorated targets/s. Those are 18.5, 18.1, and 4.0 percent below revision 5,
+respectively, and remain inside the existing 25 percent review threshold.
+The shared worldgen/server/app-runtime suites and browser WASM build pass;
+native-thread versus production browser-Worker equivalence remains open.
 
 This remains a two-dimensional heightfield correction. Gradient direction and
-coordinate warping are sufficient to remove the planar lattice signature;
+coordinate warping removed the demonstrated planar lattice signature;
 volumetric density is reserved for a later demonstrated need for overhangs,
 arches, or undercut cliffs. The new noise must retain stable seed domains,
 signed-coordinate continuity, scales compatible with the planned 6,144-block
