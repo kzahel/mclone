@@ -1,135 +1,186 @@
-# Persistent Actor Identity Across World Relaunch
+# Vanilla Actor Persistence Across World Relaunch
 
 Topic: `persistent-actor-identity`
 
-Status: open; unowned defect adopted into its own topic on 2026-07-22. No
-implementation has started. This concern was repeatedly reproduced and then
-explicitly deferred by the platform-boundary campaign (Tacticals 197, 202,
-207, 212, 213 — each recorded it as "separate baseline debt, route a
-separate owner"), and until this document no owner existed. The
-platform-boundary topic is closed; this defect is not a boundary problem
+Status: open; the contract was classified against Minecraft Java 1.17.1 on
+2026-07-22. The original finding was real test evidence, but it was
+misclassified as a persistent-identity defect: the fixture requires stable
+runtime entity IDs and a monotonic generic chicken tick counter across a world
+relaunch, neither of which is a vanilla invariant. No implementation has
+started. The remaining work is to correct the fixture and prove that authored
+destination worlds restore the vanilla-persistent identity and per-kind state
+described below.
+
+This concern was repeatedly reproduced and then explicitly deferred by the
+platform-boundary campaign (Tacticals 197, 202, 207, 212, and 213). The
+platform-boundary topic is closed; this is a shared entity/persistence contract
 and must not reopen that concern.
 
-## Symptom
+## Decision: Follow Vanilla's Identity and Save Semantics
 
-Relaunching a previously opened authored/embedded destination world
-restores terrain correctly (a mined block reopens as air), but the
-persisted actors come back wrong:
+Mclone uses Minecraft Java 1.17.1 semantics for actor identity and state across
+save/load:
 
-- reopened actors receive **new entity IDs** — observed identities changed
-  from `3`/`4` on first launch to `5`/`6` on relaunch (Tactical 202); the
-  IDs are valid and later, which is what implicates a non-restored ID
-  allocation rather than corruption; and
-- actor **age ticks reset** — the compared chicken's age did not advance
-  across the relaunch even though it had aged before quitting.
+- **Runtime entity IDs are ephemeral.** Vanilla's numeric `Entity.id` is
+  allocated from a process-local counter when an entity object is constructed
+  (`Entity.java`, `ENTITY_COUNTER` and the `id` field). Loading NBT constructs
+  a fresh entity and then applies the saved data (`EntityType.create`), while
+  base entity save/load does not serialize or restore the numeric ID. An actor
+  may therefore be `3` during one world session and `5` after relaunch. Equality
+  or inequality across relaunch has no contract; only uniqueness within the
+  live runtime matters. Mclone must not persist `next_entity_id` merely to make
+  a relaunch fixture retain these numbers.
+- **Persistent identity is the UUID-equivalent.** Vanilla writes `UUID` in
+  `Entity.saveWithoutId` and restores it in `Entity.load`. Mclone's
+  `EntityPersistentId` is the corresponding durable identity. The same saved
+  actor must retain that identity even when it receives a fresh runtime
+  `EntityId`.
+- **A generic runtime tick counter is not persistent.** Vanilla's base
+  `Entity.tickCount` advances while the entity is ticked but is not part of the
+  base entity NBT. It normally restarts when the entity is reconstructed. A
+  generic animation or observation clock must not be used as evidence that a
+  chicken retained its saved identity.
+- **Gameplay-semantic state is persistent where vanilla saves it.** Base entity
+  state includes UUID, position, movement, rotation, ground state, fire/air,
+  portal cooldown, names, flags, tags, and passengers. Subtypes add the state
+  that affects their behavior. `AgeableMob` saves baby/breeding `Age` and
+  `ForcedAge`; `Chicken` saves `EggLayTime`; `ItemEntity` saves item age,
+  health, pickup delay, owner/thrower, and its stack. Health, equipment,
+  effects, AI state, and other subtype data follow their vanilla owners as
+  those systems are implemented.
+- **Closed worlds do not receive wall-clock catch-up.** Saved semantic values
+  resume from their stored values when the world runs again. They do not
+  advance according to how long the application was closed.
+- **Authored content seeds a persistent destination only once.** Once an
+  authored destination has a saved world instance, subsequent launches load
+  its entity records. They must not silently re-author the template actors,
+  resurrect actors that were removed, or duplicate actors. A deliberately
+  transient lobby may have separate re-authoring semantics, but those semantics
+  must not leak into its persistent destinations.
 
-Player identity, remote-player identity, terrain mutations, world instance
-identity, and observation counts all persist correctly through the same
-relaunch; the defect is specific to non-player actor identity/age.
+Relevant vanilla reference points, all under
+`reference/minecraft-1.17.1/src/net/minecraft/world/entity/`, are:
 
-## Reproduction and Fixture
+- `Entity.java`: runtime `ENTITY_COUNTER`/`id`, base `saveWithoutId`, and
+  `load`/`UUID`;
+- `EntityType.java`: construct-then-load behavior in `create(CompoundTag,
+  Level)`;
+- `AgeableMob.java`: `Age` and `ForcedAge` save/load;
+- `animal/Chicken.java`: `EggLayTime` save/load; and
+- `item/ItemEntity.java`: item `Age`, health, pickup delay, ownership, and stack
+  save/load.
 
-The defect is pinned by the browser lobby lifecycle aggregate in
-`native/apps/mclone-web-client/scripts/browser-smoke.mjs`. The
-`relaunchedPersistenceOk` conjunction (defined near line 1893 as of
-2026-07-22) launches a lobby destination, records first/second actor
-entity IDs and age ticks, mutates terrain, waits for
-`runnerPendingPersistenceSaves === 0`, quits to title, relaunches, and
-then requires among other things:
+## Reclassified Lifecycle Evidence
 
-- `embeddedPreviewFirstActorEntityId` /
-  `embeddedPreviewSecondActorEntityId` equal to their first-launch values
-  (fails: IDs advance), and
-- relaunched actor age ticks advancing from their pre-quit values
-  (fails: ages reset).
+The browser lobby lifecycle aggregate in
+`native/apps/mclone-web-client/scripts/browser-smoke.mjs` launches an authored
+destination, observes its actors, mutates terrain, waits for persistence to
+drain, quits to title, relaunches, and reopens the destination. It established
+that:
 
-Everything else in the aggregate passes; the aggregate verdict is false
-solely because of this fixture. Run it under the headed Wayland lane
-(`pnpm host:check` first; see `docs/native-web.md`):
+- the terrain mutation survives relaunch;
+- actors are present and observable after relaunch;
+- actor runtime IDs observed as `3`/`4` on the first launch appeared as `5`/`6`
+  on relaunch; and
+- the compared chicken's generic `age_ticks` did not continue from the prior
+  session.
+
+The last two observations are vanilla-compatible by themselves. They do not
+show whether the actors were correctly loaded or incorrectly re-authored. The
+aggregate is red because it currently asserts that both runtime IDs remain
+equal and the chicken's generic `age_ticks` remains monotonic. Those assertions
+must be replaced with the vanilla-persistent invariants; preserving them would
+encode the wrong product contract.
+
+The fixture therefore leaves these important questions unanswered:
+
+- does each actor retain its `EntityPersistentId` across the full destination
+  relaunch, not merely a server-level codec round trip;
+- do saved position, movement, and implemented subtype fields resume correctly;
+- does a removed actor remain removed rather than being restored from the
+  authored template;
+- are there no duplicate loaded-plus-authored actors; and
+- do the browser IndexedDB and native SQLite paths produce the same result?
+
+Run the existing observation under the headed Wayland lane (`pnpm host:check`
+first; see `docs/native-web.md`):
 
 ```bash
 pnpm native:web:lobby-scenario-lifecycle-smoke
 ```
 
-Tactical 202 additionally confirmed the failure on pre-cutover controls,
-so the defect predates the Tactical 207 operation-boundary cutover and is
-not caused by the operation machinery.
+Until the fixture is corrected, its combined false verdict is expected and is
+not evidence that runtime identity or generic chicken age should be persisted.
+Tactical 202 confirmed the same result on pre-cutover controls, so the result
+predates the Tactical 207 operation-boundary cutover.
 
-Unknown and worth establishing first: whether the same defect reproduces
-on the native SQLite path. If it does, the fault is in shared server-side
-persistence (expected); if it does not, the browser IndexedDB record path
-becomes the suspect.
+## Current Mclone Shape and Mismatch
 
-## Code Map (starting points, verified 2026-07-22)
+The shared server already has most of the intended identity shape:
 
-- `native/crates/mclone-server/src/entity/store.rs` — entity store owns
-  `next_entity_id` (field at :49; allocation at :700). Whether this
-  counter is persisted and restored on world reopen is the first question.
-- `native/crates/mclone-server/src/persistence.rs` and
-  `persistence/record_executor.rs` — `save_entity_chunk` /
-  `load_entity_chunk` record paths.
-- `native/crates/mclone-server/src/entity/state.rs` — per-entity state,
-  including age; check what the entity-chunk codec actually serializes.
-- `native/crates/mclone-scene/src/session.rs` — lobby launch and
-  authored-destination startup (`begin_lobby_launch` cluster); relevant if
-  authored worlds re-author actors on launch instead of loading persisted
-  records.
-- Background: Tactical 185 (realm/dimension runtime and qualified
-  persistence), Tactical 189 (placeable persistent prepared actors),
-  [`unified-persistence-interface.md`](unified-persistence-interface.md)
-  (the typed persistence port these records flow through),
-  [`embedded-worlds.md`](embedded-worlds.md) (lobby/destination product
-  shape).
+- `native/crates/mclone-server/src/persistence.rs` defines
+  `EntityPersistentId` and stores it in `EntitySaveRecord`;
+- `native/crates/mclone-server/src/entity/store.rs` deliberately allocates a
+  fresh runtime `EntityId` when hydrating a saved entity, then associates the
+  restored `EntityPersistentId` with it;
+- the store round-trip test explicitly requires a persistent ID to survive a
+  fresh runtime-ID assignment; and
+- the save record currently contains position, movement, orientation,
+  `age_ticks`, chicken egg time, item pickup delay, and item stack state.
 
-## Hypotheses To Classify (not yet investigated)
+`age_ticks` currently combines concepts that vanilla keeps separate: it is a
+generic actor tick/animation value for mobs, but it is also the dropped-item
+lifetime used for despawning. Applying one persistence rule to that field for
+every entity kind is not a faithful long-term model. Alignment should separate
+the meanings when necessary:
 
-The fix tactical's first slice should classify the failure before writing
-any fix:
+- a generic runtime tick or animation clock resets on reconstruction;
+- `AgeableMob` baby/breeding age persists once implemented;
+- chicken egg time persists;
+- dropped-item age and pickup delay persist; and
+- other semantic timers follow the corresponding vanilla subtype save data.
 
-1. **ID allocator not persisted.** Entity records restore, but
-   `next_entity_id` (or the load path) assigns fresh runtime IDs instead
-   of restoring persisted identities.
-2. **Authored destinations re-author instead of load.** The
-   transient-authored lobby semantics may leak into persistent
-   destination worlds: on relaunch the world re-runs actor authoring
-   (fresh spawns with fresh IDs and zero age) even though persisted
-   entity-chunk records exist.
-3. **Age not serialized.** Entity identity aside, `age_ticks` may simply
-   be missing from the entity-chunk codec or reset on load.
-4. **Fixture expectation wrong.** If the intended product contract is
-   that authored worlds re-author their actors on each launch, the fix is
-   a deliberate contract decision plus a fixture change — but then actor
-   persistence for authored destinations must be explicitly declared
-   out of scope somewhere durable, not silently tolerated as a red
-   aggregate.
-
-Hypotheses 1–3 can coexist. The observed "valid later IDs" pattern is
-most consistent with 2 (re-authoring after the persisted actors already
-consumed IDs 3/4) but that is inference, not evidence.
+The existing server codec already writes and restores `age_ticks`; that proves
+the field is not simply absent from serialization. It does not prove that an
+authored destination used the loaded record, nor does it make a generic chicken
+tick counter a vanilla-persistent field.
 
 ## Constraints
 
-- Fix in the shared owner (`mclone-server` entity/persistence), not in a
-  platform adapter; validate both native SQLite and browser IndexedDB
-  paths per the shared-first policy.
-- Do not weaken the smoke assertion to make the aggregate pass; Tacticals
-  202 and 207 deliberately preserved it. The end state is the assertion
-  passing (or a recorded contract decision under hypothesis 4).
-- Vanilla reference: entities in Minecraft 1.17.1 persist UUID and age
-  through save/load (`reference/minecraft-1.17.1/src/`, entity NBT
-  save/load). Read the reference before designing the persisted identity
-  shape.
+- Keep runtime `EntityId` and durable `EntityPersistentId` distinct. Never
+  persist the runtime allocator to manufacture cross-relaunch numeric-ID
+  stability.
+- Fix shared entity, persistence, authoring, or session ownership as indicated
+  by the evidence; do not patch a browser platform adapter.
+- Correcting invalid fixture assertions is not weakening the smoke. Replace
+  them with positive UUID-equivalent and semantic-state assertions so the test
+  detects re-authoring, resurrection, duplication, and state loss.
+- Validate native SQLite and browser IndexedDB paths. A shared server-level
+  round trip is necessary but not sufficient for the authored-destination
+  lifecycle.
+- Do not add offline wall-clock aging.
+- Read the relevant Minecraft 1.17.1 source before adding each subtype's saved
+  state.
 
 ## Recommended Next Work
 
 Open a bounded tactical:
 
-1. Reproduce on browser and attempt a native SQLite control; classify
-   against the hypotheses above with file:line evidence.
-2. If 1–3: decide the persisted actor-identity contract (IDs, age, and
-   what else must survive relaunch), fix in the shared owner, and cover
-   with a server-level persistence round-trip test — not only the
-   browser smoke.
-3. Flip the lifecycle aggregate to required-pass and delete the
-   "separate baseline debt" carve-out language from active validation
-   docs so this cannot be silently re-deferred.
+1. Update the lifecycle probe so it can correlate actors by
+   `EntityPersistentId`, or by an equally direct shared diagnostic if exposing
+   persistent identity in the product protocol is deferred. Do not correlate
+   actors by runtime `EntityId` or vector/order position.
+2. Replace the runtime-ID equality and generic chicken-`age_ticks` continuation
+   assertions with vanilla invariants: stable persistent identity, saved
+   position/behavior state, no resurrection, and no duplication. Use a
+   subtype-specific persisted value such as chicken egg time or dropped-item
+   age when testing timer persistence.
+3. Reproduce through browser IndexedDB and native SQLite, then classify any
+   remaining failure as record loading, destination re-authoring, save timing,
+   or subtype codec loss with file-and-line evidence.
+4. If needed, split generic runtime ticks from per-kind semantic age/timers in
+   the shared entity/protocol/persistence model and add server-level round-trip
+   coverage.
+5. Make the corrected lifecycle aggregate a required pass and replace active
+   "separate baseline debt" descriptions with the classified result. Preserve
+   completed tacticals as historical execution records.

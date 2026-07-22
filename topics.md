@@ -121,7 +121,7 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `local-couch-multiplayer` — 1-4 local participants, ordinary realm player
   endpoints, shared multi-presentation residency, split/auxiliary views,
   helper-builder roles, and mixed XR-plus-flat couch play
-- `persistent-actor-identity` — actor entity IDs and ages resetting across
-  authored-world relaunch while terrain persists; classification, persisted
-  identity contract, shared-owner fix, and flipping the lifecycle fixture to
-  required-pass
+- `persistent-actor-identity` — vanilla actor save/load semantics across
+  authored-world relaunch: ephemeral runtime IDs and generic tick counters,
+  durable UUID-equivalent identity and per-kind gameplay state, corrected
+  lifecycle evidence, and shared cross-backend proof
