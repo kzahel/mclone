@@ -23,7 +23,7 @@ use mclone_render::selection_outline::{SelectionOutline, SelectionOutlineRendere
 use mclone_render::sky_render::SkyRenderer;
 use mclone_render::target::{RenderFrameContext, RenderFrameTarget};
 use mclone_render::uniform::{PerViewSlot, SINGLE_VIEW_SLOT, StereoEye};
-use mclone_render_session::RenderSectionCacheUpdate;
+use mclone_render_session::{FlatSurfaceLayout, PixelRect, RenderSectionCacheUpdate};
 use mclone_ui::{GuiDrawList, UiDrawCacheStats};
 
 use crate::monotonic::{MonotonicClockHandle, MonotonicInstant};
@@ -647,7 +647,9 @@ impl FlatScaledColorTarget {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let view = texture.create_view(&Default::default());
@@ -705,6 +707,141 @@ pub struct FlatScalePresentation {
     scaled: FlatScaledColorTarget,
     presenter: FlatScalePresenter,
     format: wgpu::TextureFormat,
+}
+
+struct FlatSurfacePaneTarget {
+    color: FlatScaledColorTarget,
+    depth: ChunkDepthTarget,
+    rect: PixelRect,
+}
+
+/// Borrowed render attachments for one validated flat-surface pane.
+#[derive(Clone, Copy)]
+pub struct FlatSurfacePane<'a> {
+    pub target: RenderFrameTarget<'a>,
+    pub depth: &'a ChunkDepthTarget,
+    pub rect: PixelRect,
+}
+
+/// Shared GPU presentation owner for one through four independently rendered
+/// flat panes. Platform hosts retain surface acquisition/presentation; this
+/// owner allocates pane-local color/depth attachments and composites them into
+/// the caller's output using the validated layout rectangles.
+pub struct FlatSurfacePresentation {
+    layout: FlatSurfaceLayout,
+    panes: Vec<FlatSurfacePaneTarget>,
+    presenter: FlatScalePresenter,
+    format: wgpu::TextureFormat,
+}
+
+impl FlatSurfacePresentation {
+    pub fn new(
+        device: &wgpu::Device,
+        format: wgpu::TextureFormat,
+        layout: FlatSurfaceLayout,
+    ) -> Self {
+        let presenter = FlatScalePresenter::new(device, format);
+        let panes = flat_surface_pane_targets(device, format, &presenter, &layout);
+        Self {
+            layout,
+            panes,
+            presenter,
+            format,
+        }
+    }
+
+    pub fn resize(&mut self, device: &wgpu::Device, layout: FlatSurfaceLayout) {
+        if self.layout == layout {
+            return;
+        }
+        self.panes = flat_surface_pane_targets(device, self.format, &self.presenter, &layout);
+        self.layout = layout;
+    }
+
+    pub fn layout(&self) -> &FlatSurfaceLayout {
+        &self.layout
+    }
+
+    pub fn pane_count(&self) -> usize {
+        self.panes.len()
+    }
+
+    pub fn pane(&self, index: usize) -> Option<FlatSurfacePane<'_>> {
+        self.panes.get(index).map(|pane| FlatSurfacePane {
+            target: pane.color.render_target(),
+            depth: &pane.depth,
+            rect: pane.rect,
+        })
+    }
+
+    /// Expose a pane color texture for offscreen validation readback. Live
+    /// surface drivers only consume [`Self::pane`] and [`Self::present`].
+    pub fn pane_color_texture(&self, index: usize) -> Option<(&wgpu::Texture, [u32; 2])> {
+        self.panes
+            .get(index)
+            .map(|pane| (&pane.color._texture, pane.color.size))
+    }
+
+    pub fn present(&self, encoder: &mut wgpu::CommandEncoder, output: RenderFrameTarget<'_>) {
+        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: Some("mclone_flat_surface_present_pass"),
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                view: output.color_view,
+                resolve_target: None,
+                ops: wgpu::Operations {
+                    load: wgpu::LoadOp::Clear(mclone_render::default_clear_color()),
+                    store: wgpu::StoreOp::Store,
+                },
+            })],
+            depth_stencil_attachment: None,
+            ..Default::default()
+        });
+        pass.set_pipeline(&self.presenter.pipeline);
+        for pane in &self.panes {
+            pass.set_viewport(
+                pane.rect.x as f32,
+                pane.rect.y as f32,
+                pane.rect.width as f32,
+                pane.rect.height as f32,
+                0.0,
+                1.0,
+            );
+            pass.set_scissor_rect(pane.rect.x, pane.rect.y, pane.rect.width, pane.rect.height);
+            pass.set_bind_group(0, &pane.color.bind_group, &[]);
+            pass.draw(0..3, 0..1);
+        }
+    }
+}
+
+fn flat_surface_pane_targets(
+    device: &wgpu::Device,
+    format: wgpu::TextureFormat,
+    presenter: &FlatScalePresenter,
+    layout: &FlatSurfaceLayout,
+) -> Vec<FlatSurfacePaneTarget> {
+    flat_surface_pane_specs(layout)
+        .into_iter()
+        .map(|(rect, size)| FlatSurfacePaneTarget {
+            color: FlatScaledColorTarget::new(
+                device,
+                size,
+                format,
+                &presenter.bind_group_layout,
+                &presenter.sampler,
+            ),
+            depth: ChunkDepthTarget::new(device, size[0], size[1]),
+            rect,
+        })
+        .collect()
+}
+
+fn flat_surface_pane_specs(layout: &FlatSurfaceLayout) -> Vec<(PixelRect, [u32; 2])> {
+    layout
+        .panes()
+        .iter()
+        .copied()
+        .map(|rect| (rect, [rect.width, rect.height]))
+        .collect()
 }
 
 impl FlatScalePresentation {
@@ -2756,6 +2893,7 @@ fn clear_frame_color(
 mod tests {
     use super::*;
     use mclone_render::uniform::{PresentationViewIndex, RIGHT_EYE_VIEW_SLOT};
+    use mclone_render_session::{PixelExtent, SafeAreaInsets};
 
     #[test]
     fn actor_preparation_reuse_requires_explicit_stereo_right_eye_context() {
@@ -2821,6 +2959,42 @@ mod tests {
                 RenderConfig::default().with_render_scale(1.0)
             ),
             [16_384, 16_384]
+        );
+    }
+
+    #[test]
+    fn flat_surface_pane_specs_preserve_one_to_four_validated_panes() {
+        let surface = PixelExtent::new(641, 481);
+        let one = FlatSurfaceLayout::new(
+            surface,
+            SafeAreaInsets::NONE,
+            [PixelRect::new(0, 0, 641, 481)],
+        )
+        .unwrap();
+        assert_eq!(
+            flat_surface_pane_specs(&one),
+            vec![(PixelRect::new(0, 0, 641, 481), [641, 481])]
+        );
+
+        let four = FlatSurfaceLayout::new(
+            surface,
+            SafeAreaInsets::NONE,
+            [
+                PixelRect::new(0, 0, 320, 240),
+                PixelRect::new(320, 0, 321, 240),
+                PixelRect::new(0, 240, 320, 241),
+                PixelRect::new(320, 240, 321, 241),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            flat_surface_pane_specs(&four),
+            vec![
+                (PixelRect::new(0, 0, 320, 240), [320, 240]),
+                (PixelRect::new(320, 0, 321, 240), [321, 240]),
+                (PixelRect::new(0, 240, 320, 241), [320, 241]),
+                (PixelRect::new(320, 240, 321, 241), [321, 241]),
+            ]
         );
     }
 }

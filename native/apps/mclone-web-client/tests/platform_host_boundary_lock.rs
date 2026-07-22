@@ -122,6 +122,30 @@ fn production_typescript_input_modules_are_game_semantic_free() {
 }
 
 #[test]
+fn production_typescript_does_not_own_split_presentation_semantics() {
+    for (label, source) in [
+        ("app", WEB_APP),
+        ("keyboard/mouse", WEB_INPUT),
+        ("touch", WEB_TOUCH),
+    ] {
+        for forbidden in [
+            "auxiliarySplit",
+            "splitPresentation",
+            "splitMode",
+            "FlatSurfaceLayout",
+            "paneCount",
+        ] {
+            assert!(
+                !source.contains(forbidden),
+                "{label} TypeScript regained split semantics through {forbidden}"
+            );
+        }
+    }
+    assert!(WEB_SCENE_HOST.contains("FlatSurfacePresentation"));
+    assert!(WEB_SCENE_HOST.contains("auxiliary_split_layout"));
+}
+
+#[test]
 fn flat_android_and_browser_share_touch_control_selection() {
     assert!(FLAT_ANDROID.contains("touch_control_at(scale, point)"));
     assert!(WEB_SCENE_HOST.contains("touch_control_at(scale, point)"));

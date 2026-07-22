@@ -697,9 +697,10 @@ impl OffscreenDriver {
         frame: RenderFrameContext<'_>,
         camera: ChunkCamera,
         ui: MonoUiPresentation,
+        hud_visible: bool,
     ) -> Result<MonoSceneFrameSummary> {
         let view = camera.render_view(frame.target.size[0], frame.target.size[1]);
-        let summary = self.render_view_inner(frame, view, ui, false, true)?;
+        let summary = self.render_view_inner(frame, view, ui, hud_visible, true)?;
         Ok(summary)
     }
 

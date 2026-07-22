@@ -3,7 +3,9 @@
 
 use anyhow::Result;
 use mclone_app_runtime::frame_pipeline_accounting::FramePipelineAccountant;
-use mclone_app_runtime::frame_render::{FlatScalePresentation, scaled_frame_size};
+use mclone_app_runtime::frame_render::{
+    FlatScalePresentation, FlatSurfacePresentation, scaled_frame_size,
+};
 use mclone_audio::AudioEngine;
 use mclone_diagnostics::FrameHostKind;
 use mclone_input::{
@@ -93,6 +95,7 @@ pub(crate) struct WinitFrameDriver {
     frame_pipeline_accounting: FramePipelineAccountant,
     render_config: RenderConfig,
     scale_presentation: Option<FlatScalePresentation>,
+    split_presentation: Option<FlatSurfacePresentation>,
     arm_mouse_lock_after_start: bool,
     deferred_mouse_lock_request: Option<bool>,
 }
@@ -163,6 +166,7 @@ impl WinitFrameDriver {
                 render_config.color_format,
                 render_config.render_scale,
             ),
+            split_presentation: None,
             render_config,
             arm_mouse_lock_after_start: false,
             deferred_mouse_lock_request: None,
@@ -257,6 +261,7 @@ impl WinitFrameDriver {
             render_config.color_format,
             render_config.render_scale,
         );
+        self.split_presentation = None;
     }
 
     pub(crate) fn resize(&mut self, device: &wgpu::Device, size: [u32; 2]) {
@@ -285,21 +290,6 @@ impl WinitFrameDriver {
             encoder,
             target: output_target,
         } = frame;
-        if let Some(scale) = &mut self.scale_presentation {
-            scale.resize(device, output_target.size, self.render_config.render_scale);
-        }
-        let (world_size, ui_size) = winit_frame_sizes(
-            output_target.size,
-            self.scale_presentation.is_some(),
-            self.render_config.render_scale,
-        );
-        self.resize_depth(device, world_size);
-        self.host
-            .set_mono_ui_scale(GuiScale::from_pixels(ui_size[0], ui_size[1]));
-        let world_target = self
-            .scale_presentation
-            .as_ref()
-            .map_or(output_target, |scale| scale.render_target(output_target));
         self.host.set_display_refresh_hz(
             self.adaptive_render_admission_budget
                 .then_some(context.pacing_debug.target_frame_ms)
@@ -312,31 +302,78 @@ impl WinitFrameDriver {
             .active_controller_layout
             .unwrap_or(mclone_input::ControllerLayoutFamily::Unknown);
         self.host.set_mono_ui_context(context);
-        let view = self.host.mono_render_view(world_target.size)?;
-        let split_native_ui = self.scale_presentation.is_some();
-        let mut summary = self.host.render_mono_scene_frame(
-            RenderFrameContext::new(device, queue, encoder, world_target),
-            &self.depth,
-            view,
-            if split_native_ui {
-                MonoUiPresentation::None
-            } else {
-                MonoUiPresentation::ScreenSpaceHud
-            },
-        )?;
-        if let Some(scale) = &self.scale_presentation {
-            scale.present(encoder, output_target);
-            let (gui_command_count, retained_cache) =
-                self.host
-                    .render_mono_screen_space_ui(RenderFrameContext::new(
+        let summary = if let Some(layout) = self.host.auxiliary_split_layout(output_target.size)? {
+            let primary = layout.panes()[0];
+            self.host
+                .set_mono_ui_scale(GuiScale::from_pixels(primary.width, primary.height));
+            match &mut self.split_presentation {
+                Some(presentation) => presentation.resize(device, layout),
+                slot @ None => {
+                    *slot = Some(FlatSurfacePresentation::new(
                         device,
-                        queue,
-                        encoder,
-                        output_target,
-                    ))?;
-            summary.render.gui_command_count = gui_command_count;
-            summary.render.flat_hud_retained_cache = retained_cache;
-        }
+                        self.render_config.color_format,
+                        layout,
+                    ));
+                }
+            }
+            let presentation = self
+                .split_presentation
+                .as_ref()
+                .expect("split presentation initialized from active layout");
+            let summary = self.host.render_auxiliary_split_surface_frame(
+                device,
+                queue,
+                encoder,
+                presentation,
+            )?;
+            presentation.present(encoder, output_target);
+            summary
+        } else {
+            if !self.host.auxiliary_split_mode().is_split() {
+                self.split_presentation = None;
+            }
+            if let Some(scale) = &mut self.scale_presentation {
+                scale.resize(device, output_target.size, self.render_config.render_scale);
+            }
+            let (world_size, ui_size) = winit_frame_sizes(
+                output_target.size,
+                self.scale_presentation.is_some(),
+                self.render_config.render_scale,
+            );
+            self.resize_depth(device, world_size);
+            self.host
+                .set_mono_ui_scale(GuiScale::from_pixels(ui_size[0], ui_size[1]));
+            let world_target = self
+                .scale_presentation
+                .as_ref()
+                .map_or(output_target, |scale| scale.render_target(output_target));
+            let view = self.host.mono_render_view(world_target.size)?;
+            let split_native_ui = self.scale_presentation.is_some();
+            let mut summary = self.host.render_mono_scene_frame(
+                RenderFrameContext::new(device, queue, encoder, world_target),
+                &self.depth,
+                view,
+                if split_native_ui {
+                    MonoUiPresentation::None
+                } else {
+                    MonoUiPresentation::ScreenSpaceHud
+                },
+            )?;
+            if let Some(scale) = &self.scale_presentation {
+                scale.present(encoder, output_target);
+                let (gui_command_count, retained_cache) =
+                    self.host
+                        .render_mono_screen_space_ui(RenderFrameContext::new(
+                            device,
+                            queue,
+                            encoder,
+                            output_target,
+                        ))?;
+                summary.render.gui_command_count = gui_command_count;
+                summary.render.flat_hud_retained_cache = retained_cache;
+            }
+            summary
+        };
         if self.arm_mouse_lock_after_start
             && self.host.has_runtime()
             && self.host.local_startup_complete()

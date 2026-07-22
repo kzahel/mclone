@@ -115,6 +115,7 @@
     "native:web:movement-perf": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --movement-perf",
     "native:web:block-edit-probe": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --block-edit-probe",
     "native:web:death-ui-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --death-ui-probe",
+    "native:web:auxiliary-split-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --auxiliary-split-probe",
     "native:web:indexeddb-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --indexeddb-reload-probe",
     "native:web:generator-smoke": "node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --app-loop --generation-profile flat-grass-v1 && node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --indexeddb-reload-probe --generation-profile small-island-v1 && node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --app-loop --generation-profile mclone-overworld-v1 && node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --indexeddb-reload-probe --generation-profile mclone-overworld-v1 && node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --app-loop --generation-profile beta-v1 && node ./native/apps/mclone-web-client/scripts/browser-smoke.mjs --indexeddb-reload-probe --generation-profile beta-v1",
     "native:web:scene-host-adoption": "node ./scripts/check-web-scene-host-adoption.mjs",

@@ -5,8 +5,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::{Context, Result, bail};
 use glam::{Quat, Vec3, Vec4};
 use mclone_app_runtime::frame_render::{
-    FlatRenderResources, FullFrameGui, FullFrameRenderSummary, RenderStreamStats,
-    record_render_section_update_stats,
+    FlatRenderResources, FlatSurfacePresentation, FullFrameGui, FullFrameRenderSummary,
+    RenderStreamStats, record_render_section_update_stats,
 };
 use mclone_app_runtime::local_participant_input::LocalParticipantInputGroup;
 use mclone_app_runtime::native_remote_session::NativeRemoteServerSession;
@@ -823,10 +823,9 @@ pub(crate) fn write_headless_dual_view(
     let vertical_layout = FlatSurfaceLayout::two_vertical(surface, SafeAreaInsets::NONE)?;
     let horizontal_target_layout = horizontal_layout.clone();
     let vertical_target_layout = vertical_layout.clone();
-
     // Render a mono control and two independently sized split plans over one
     // warmed resident scene. Each split plan is one prepare-once/render-twice
-    // frame; the CPU compositor only places the already-rendered panes.
+    // frame composed through the same GPU presenter used by live flat hosts.
     let (loop_report, mono_frames, split_frames, state) = run_headless_capture_loop_with_aux(
         HeadlessFrameLoopOptions {
             width: surface.width,
@@ -852,8 +851,18 @@ pub(crate) fn write_headless_dual_view(
             Ok(HeadlessSplitPresentationState {
                 driver,
                 cameras,
-                horizontal_targets: pane_targets(device, format, &horizontal_target_layout),
-                vertical_targets: pane_targets(device, format, &vertical_target_layout),
+                horizontal_presentation: FlatSurfacePresentation::new(
+                    device,
+                    format,
+                    horizontal_target_layout.clone(),
+                ),
+                vertical_presentation: FlatSurfacePresentation::new(
+                    device,
+                    format,
+                    vertical_target_layout.clone(),
+                ),
+                horizontal_output: HeadlessCompositeTarget::new(device, format, size),
+                vertical_output: HeadlessCompositeTarget::new(device, format, size),
                 mono_summary: None,
                 horizontal_summary: None,
                 vertical_summary: None,
@@ -870,13 +879,15 @@ pub(crate) fn write_headless_dual_view(
                 RenderFrameContext::new(device, queue, encoder, target),
                 state.cameras[0],
                 ui,
+                options.hud,
             )?);
             state.horizontal_summary = Some(render_split_plan(
                 &mut state.driver,
                 device,
                 queue,
                 encoder,
-                &state.horizontal_targets,
+                &state.horizontal_presentation,
+                state.horizontal_output.render_target(),
                 state.cameras,
                 ui,
                 options.hud,
@@ -886,7 +897,8 @@ pub(crate) fn write_headless_dual_view(
                 device,
                 queue,
                 encoder,
-                &state.vertical_targets,
+                &state.vertical_presentation,
+                state.vertical_output.render_target(),
                 state.cameras,
                 ui,
                 options.hud,
@@ -895,8 +907,25 @@ pub(crate) fn write_headless_dual_view(
         },
         |_index, device, queue, state| {
             Ok(HeadlessSplitPixels {
-                horizontal: read_pane_targets(device, queue, &state.horizontal_targets)?,
-                vertical: read_pane_targets(device, queue, &state.vertical_targets)?,
+                horizontal_composite: read_headless_rgba8_texture(
+                    device,
+                    queue,
+                    &state.horizontal_output.texture,
+                    state.horizontal_output.size[0],
+                    state.horizontal_output.size[1],
+                )?,
+                vertical_composite: read_headless_rgba8_texture(
+                    device,
+                    queue,
+                    &state.vertical_output.texture,
+                    state.vertical_output.size[0],
+                    state.vertical_output.size[1],
+                )?,
+                horizontal_panes: read_presentation_panes(
+                    device,
+                    queue,
+                    &state.horizontal_presentation,
+                )?,
             })
         },
     )?;
@@ -928,28 +957,14 @@ pub(crate) fn write_headless_dual_view(
     let split_pixels = split_frames
         .first()
         .context("split presentation capture produced no pane pixels")?;
-    let paired_pixel_difference_count = split_pixels.horizontal[0]
+    let paired_pixel_difference_count = split_pixels.horizontal_panes[0]
         .chunks_exact(4)
-        .zip(split_pixels.horizontal[1].chunks_exact(4))
+        .zip(split_pixels.horizontal_panes[1].chunks_exact(4))
         .filter(|(left, right)| left != right)
         .count();
     if paired_pixel_difference_count == 0 {
         bail!("scripted participant captures are pixel-identical");
     }
-    let horizontal_pixels = compose_rgba_layout(
-        &horizontal_layout,
-        &[
-            split_pixels.horizontal[0].as_slice(),
-            split_pixels.horizontal[1].as_slice(),
-        ],
-    )?;
-    let vertical_pixels = compose_rgba_layout(
-        &vertical_layout,
-        &[
-            split_pixels.vertical[0].as_slice(),
-            split_pixels.vertical[1].as_slice(),
-        ],
-    )?;
     let auxiliary_rect = horizontal_layout.panes()[1];
     let outputs = [
         (
@@ -967,7 +982,7 @@ pub(crate) fn write_headless_dual_view(
             options.directory.join("auxiliary.png"),
             auxiliary_rect.width,
             auxiliary_rect.height,
-            split_pixels.horizontal[1].as_slice(),
+            split_pixels.horizontal_panes[1].as_slice(),
             &horizontal_summary.views[1].render,
             horizontal_summary.shared_preparation_count,
             horizontal_summary.rendered_view_count,
@@ -977,7 +992,7 @@ pub(crate) fn write_headless_dual_view(
             options.directory.join("horizontal.png"),
             surface.width,
             surface.height,
-            horizontal_pixels.as_slice(),
+            split_pixels.horizontal_composite.as_slice(),
             &horizontal_summary.views[0].render,
             horizontal_summary.shared_preparation_count,
             horizontal_summary.rendered_view_count,
@@ -987,7 +1002,7 @@ pub(crate) fn write_headless_dual_view(
             options.directory.join("vertical.png"),
             surface.width,
             surface.height,
-            vertical_pixels.as_slice(),
+            split_pixels.vertical_composite.as_slice(),
             &vertical_summary.views[0].render,
             vertical_summary.shared_preparation_count,
             vertical_summary.rendered_view_count,
@@ -1029,27 +1044,28 @@ pub(crate) fn write_headless_dual_view(
 struct HeadlessSplitPresentationState {
     driver: OffscreenDriver,
     cameras: [ChunkCamera; 2],
-    horizontal_targets: Vec<HeadlessPaneTarget>,
-    vertical_targets: Vec<HeadlessPaneTarget>,
+    horizontal_presentation: FlatSurfacePresentation,
+    vertical_presentation: FlatSurfacePresentation,
+    horizontal_output: HeadlessCompositeTarget,
+    vertical_output: HeadlessCompositeTarget,
     mono_summary: Option<MonoSceneFrameSummary>,
     horizontal_summary: Option<FlatPresentationFrameSummary>,
     vertical_summary: Option<FlatPresentationFrameSummary>,
 }
 
-struct HeadlessPaneTarget {
+struct HeadlessCompositeTarget {
     texture: wgpu::Texture,
     view: wgpu::TextureView,
-    depth: ChunkDepthTarget,
     size: [u32; 2],
 }
 
-impl HeadlessPaneTarget {
-    fn new(device: &wgpu::Device, format: wgpu::TextureFormat, extent: PixelExtent) -> Self {
+impl HeadlessCompositeTarget {
+    fn new(device: &wgpu::Device, format: wgpu::TextureFormat, size: [u32; 2]) -> Self {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("mclone_split_presentation_pane"),
+            label: Some("mclone_split_presentation_composite"),
             size: wgpu::Extent3d {
-                width: extent.width,
-                height: extent.height,
+                width: size[0],
+                height: size[1],
                 depth_or_array_layers: 1,
             },
             mip_level_count: 1,
@@ -1063,8 +1079,7 @@ impl HeadlessPaneTarget {
         Self {
             texture,
             view,
-            depth: ChunkDepthTarget::new(device, extent.width, extent.height),
-            size: [extent.width, extent.height],
+            size,
         }
     }
 
@@ -1074,20 +1089,9 @@ impl HeadlessPaneTarget {
 }
 
 struct HeadlessSplitPixels {
-    horizontal: [Vec<u8>; 2],
-    vertical: [Vec<u8>; 2],
-}
-
-fn pane_targets(
-    device: &wgpu::Device,
-    format: wgpu::TextureFormat,
-    layout: &FlatSurfaceLayout,
-) -> Vec<HeadlessPaneTarget> {
-    layout
-        .panes()
-        .iter()
-        .map(|rect| HeadlessPaneTarget::new(device, format, rect.extent()))
-        .collect()
+    horizontal_composite: Vec<u8>,
+    vertical_composite: Vec<u8>,
+    horizontal_panes: [Vec<u8>; 2],
 }
 
 fn render_split_plan(
@@ -1095,47 +1099,56 @@ fn render_split_plan(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     encoder: &mut wgpu::CommandEncoder,
-    targets: &[HeadlessPaneTarget],
+    presentation: &FlatSurfacePresentation,
+    output: RenderFrameTarget<'_>,
     cameras: [ChunkCamera; 2],
     primary_ui: mclone_scene::MonoUiPresentation,
     hud_visible: bool,
 ) -> Result<FlatPresentationFrameSummary> {
-    let [first, second] = targets else {
-        bail!("scripted split presentation requires exactly two panes");
-    };
+    let first = presentation
+        .pane(0)
+        .context("scripted split presentation requires a primary pane")?;
+    let second = presentation
+        .pane(1)
+        .context("scripted split presentation requires an auxiliary pane")?;
     let views = [
         FlatPresentationView::new(
-            first.render_target(),
-            &first.depth,
-            cameras[0].render_view(first.size[0], first.size[1]),
+            first.target,
+            first.depth,
+            cameras[0].render_view(first.target.size[0], first.target.size[1]),
             primary_ui,
         ),
         FlatPresentationView::new(
-            second.render_target(),
-            &second.depth,
-            cameras[1].render_view(second.size[0], second.size[1]),
+            second.target,
+            second.depth,
+            cameras[1].render_view(second.target.size[0], second.target.size[1]),
             mclone_scene::MonoUiPresentation::None,
         ),
     ];
-    driver.render_flat_views_frozen(device, queue, encoder, &views, hud_visible)
+    let summary = driver.render_flat_views_frozen(device, queue, encoder, &views, hud_visible)?;
+    presentation.present(encoder, output);
+    Ok(summary)
 }
 
-fn read_pane_targets(
+fn read_presentation_panes(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
-    targets: &[HeadlessPaneTarget],
+    presentation: &FlatSurfacePresentation,
 ) -> Result<[Vec<u8>; 2]> {
-    let [first, second] = targets else {
-        bail!("scripted split presentation requires exactly two pane readbacks");
-    };
+    let (first_texture, first_size) = presentation
+        .pane_color_texture(0)
+        .context("scripted split presentation requires a primary pane readback")?;
+    let (second_texture, second_size) = presentation
+        .pane_color_texture(1)
+        .context("scripted split presentation requires an auxiliary pane readback")?;
     Ok([
-        read_headless_rgba8_texture(device, queue, &first.texture, first.size[0], first.size[1])?,
+        read_headless_rgba8_texture(device, queue, first_texture, first_size[0], first_size[1])?,
         read_headless_rgba8_texture(
             device,
             queue,
-            &second.texture,
-            second.size[0],
-            second.size[1],
+            second_texture,
+            second_size[0],
+            second_size[1],
         )?,
     ])
 }
@@ -1226,6 +1239,7 @@ fn scripted_participant_cameras(
     })
 }
 
+#[cfg(test)]
 fn compose_rgba_layout(layout: &FlatSurfaceLayout, panes: &[&[u8]]) -> Result<Vec<u8>> {
     if panes.len() != layout.panes().len() {
         bail!(

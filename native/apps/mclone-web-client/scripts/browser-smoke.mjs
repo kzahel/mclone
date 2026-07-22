@@ -63,6 +63,8 @@ const blockEditProbe = process.argv.includes("--block-edit-probe")
   || process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE === "1";
 const deathUiProbe = process.argv.includes("--death-ui-probe")
   || process.env.MCLONE_NATIVE_WEB_DEATH_UI_PROBE === "1";
+const auxiliarySplitProbe = process.argv.includes("--auxiliary-split-probe")
+  || process.env.MCLONE_NATIVE_WEB_AUXILIARY_SPLIT_PROBE === "1";
 const indexedDbReloadProbe = process.argv.includes("--indexeddb-reload-probe")
   || process.env.MCLONE_NATIVE_WEB_INDEXEDDB_RELOAD_PROBE === "1";
 const catalogUiProbe = process.argv.includes("--catalog-ui-probe")
@@ -118,6 +120,7 @@ const remoteWebSocket = process.argv.includes("--remote-websocket")
 const appLoop = movementPerf
   || blockEditProbe
   || deathUiProbe
+  || auxiliarySplitProbe
   || indexedDbReloadProbe
   || catalogUiProbe
   || assetPackUiProbe
@@ -210,6 +213,15 @@ const blockEditProbeReportPath = process.env.MCLONE_NATIVE_WEB_BLOCK_EDIT_PROBE_
   ?? "/tmp/mclone-native-web-block-edit-probe.json";
 const deathUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_DEATH_UI_PROBE_REPORT
   ?? "/tmp/mclone-native-web-death-screen.json";
+const auxiliarySplitHorizontalCanvasScreenshotPath =
+  process.env.MCLONE_NATIVE_WEB_AUXILIARY_SPLIT_HORIZONTAL_SCREENSHOT
+    ?? "/tmp/mclone-native-web-auxiliary-split-horizontal.png";
+const auxiliarySplitMenuCanvasScreenshotPath =
+  process.env.MCLONE_NATIVE_WEB_AUXILIARY_SPLIT_MENU_SCREENSHOT
+    ?? "/tmp/mclone-native-web-auxiliary-split-menu.png";
+const auxiliarySplitProbeReportPath =
+  process.env.MCLONE_NATIVE_WEB_AUXILIARY_SPLIT_REPORT
+    ?? "/tmp/mclone-native-web-auxiliary-split.json";
 const indexedDbReloadProbeReportPath = process.env.MCLONE_NATIVE_WEB_INDEXEDDB_RELOAD_PROBE_REPORT
   ?? "/tmp/mclone-native-web-indexeddb-reload-probe.json";
 const catalogUiProbeReportPath = process.env.MCLONE_NATIVE_WEB_CATALOG_UI_PROBE_REPORT
@@ -604,6 +616,25 @@ async function run() {
         throw new Error(`native web app failed to boot:\n${JSON.stringify(bootState, null, 2)}`);
       }
       const canvas = page.locator("#mclone-canvas");
+      if (auxiliarySplitProbe) {
+        const auxiliarySplitProbeResult = await runAuxiliarySplitProbe(page, canvas);
+        const report = {
+          url: appUrl,
+          auxiliarySplitHorizontalCanvasScreenshotPath,
+          auxiliarySplitMenuCanvasScreenshotPath,
+          auxiliarySplitProbeReportPath,
+          auxiliarySplitProbeResult,
+          pageErrors,
+        };
+        await writeFile(auxiliarySplitProbeReportPath, `${JSON.stringify(report, null, 2)}\n`);
+        if (!auxiliarySplitProbeResult.ok || pageErrors.length > 0) {
+          throw new Error(
+            `browser auxiliary split probe failed:\n${JSON.stringify(report, null, 2)}`,
+          );
+        }
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
       if (deathUiProbe) {
         await page.evaluate(() => globalThis.__mcloneWebApp.pauseRendering?.());
         await page.waitForTimeout(50);
@@ -4905,6 +4936,79 @@ async function runFarLodProbe(page, canvas) {
   };
 }
 
+/** @param {Page} page @param {Locator} canvas */
+async function runAuxiliarySplitProbe(page, canvas) {
+  const geometry = await nativeUiGeometry(page);
+  const captures = [];
+  for (const [orientation, path] of [
+    ["horizontal", auxiliarySplitHorizontalCanvasScreenshotPath],
+  ]) {
+    await page.evaluate(() => globalThis.__mcloneWebApp?.openNativePauseUi?.());
+    await waitForNativeUiScreen(page, "pause");
+    await page.waitForTimeout(100);
+    await clickNativeUiPoint(page, {
+      x: geometry.width * 0.5,
+      y: geometry.height * 0.5 + 12.0,
+    });
+    await waitForNativeUiScreen(page, "options");
+    await page.waitForTimeout(100);
+    await clickNativeUiPoint(page, debugOptionsButtonPoint(geometry));
+    await waitForNativeUiScreen(page, "optionsCategory");
+    await page.waitForTimeout(100);
+    const cycleReport = await clickNativeUiPoint(page, auxiliarySplitRowPoint(geometry));
+    try {
+      await page.waitForFunction(
+        () => globalThis.__mcloneWebApp?.state?.action === "setAuxiliarySplitMode",
+        undefined,
+        { timeout: 10_000 },
+      );
+    } catch (error) {
+      const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
+      await canvas.screenshot({
+        path: `/tmp/mclone-native-web-auxiliary-split-${orientation}-menu-failure.png`,
+        timeout: 60_000,
+      });
+      throw new Error(
+        `auxiliary split menu row did not cycle: ${error instanceof Error ? error.message : String(error)}`
+        + `\ngeometry=${JSON.stringify(geometry)}`
+        + `\npoint=${JSON.stringify(auxiliarySplitRowPoint(geometry))}`
+        + `\ncycleReport=${JSON.stringify(cycleReport)}`
+        + `\nstate=${JSON.stringify(state)}`,
+      );
+    }
+    const settingState = await page.evaluate(() => ({
+      action: globalThis.__mcloneWebApp?.state?.action ?? null,
+      screen: globalThis.__mcloneWebApp?.state?.nativeUiScreen ?? null,
+    }));
+    await page.waitForTimeout(100);
+    await canvas.screenshot({
+      path: auxiliarySplitMenuCanvasScreenshotPath,
+      timeout: 60_000,
+    });
+    await page.evaluate(() => globalThis.__mcloneWebApp?.closeNativeUi?.());
+    await waitForNativeUiScreen(page, "none");
+    await page.waitForTimeout(500);
+    const png = await canvas.screenshot({ path, timeout: 60_000 });
+    captures.push({
+      orientation,
+      path,
+      cycleReport,
+      settingState,
+      pixels: analyzePng(png),
+      pairedDifferentPixels: countSplitPanePixelDifferences(png, orientation),
+    });
+  }
+  return {
+    ok: captures.every((capture) =>
+      capture.settingState.action === "setAuxiliarySplitMode"
+      && capture.settingState.screen === "optionsCategory"
+      && capture.pixels.nonClearInteriorPixelCount > 128
+      && capture.pixels.transparentInteriorPixelCount === 0
+      && capture.pairedDifferentPixels > 128),
+    captures,
+  };
+}
+
 /** @param {Page} page */
 async function runFarLodMovementProbe(page) {
   const start = await page.evaluate(() => {
@@ -5347,6 +5451,31 @@ function graphicsOptionsButtonPoint(geometry) {
     Math.min(238.0, Math.max(geometry.height - 4.0, 1.0)),
   );
   return { x: panel.x + panel.width * 0.5, y: panel.y + 40.0 };
+}
+
+/** @param {{ width: number, height: number }} geometry */
+function debugOptionsButtonPoint(geometry) {
+  const panel = centeredPanel(
+    geometry,
+    Math.min(Math.max(geometry.width - 18.0, 242.0), 360.0),
+    Math.min(238.0, Math.max(geometry.height - 4.0, 1.0)),
+  );
+  return { x: panel.x + panel.width * 0.5, y: panel.y + 30.0 + 3.0 * 24.0 + 10.0 };
+}
+
+/** @param {{ width: number, height: number }} geometry */
+function auxiliarySplitRowPoint(geometry) {
+  const rowCount = 5;
+  const panel = centeredPanel(
+    geometry,
+    Math.min(Math.max(geometry.width - 18.0, 242.0), 420.0),
+    Math.min(30.0 + Math.ceil(rowCount / 2.0) * 24.0 + 34.0, Math.max(geometry.height - 4.0, 1.0)),
+  );
+  const columnWidth = Math.max((panel.width - 36.0 - 10.0) / 2.0, 110.0);
+  return {
+    x: panel.x + 18.0 + columnWidth * 0.5,
+    y: panel.y + 30.0 + 10.0,
+  };
 }
 
 /** @param {{ width: number, height: number }} geometry */
@@ -8585,6 +8714,36 @@ function analyzePng(bytes) {
     transparentInteriorPixelCount,
     expectedClearColor: expected,
   };
+}
+
+/** @param {Buffer} bytes @param {string} orientation */
+function countSplitPanePixelDifferences(bytes, orientation) {
+  const png = decodePngRgba(bytes);
+  const horizontal = orientation === "horizontal";
+  const firstWidth = horizontal ? Math.ceil(png.width / 2) : png.width;
+  const firstHeight = horizontal ? png.height : Math.ceil(png.height / 2);
+  const secondWidth = horizontal ? png.width - firstWidth : png.width;
+  const secondHeight = horizontal ? png.height : png.height - firstHeight;
+  const width = Math.min(firstWidth, secondWidth);
+  const height = Math.min(firstHeight, secondHeight);
+  let different = 0;
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const firstOffset = (y * png.width + x) * 4;
+      const secondX = horizontal ? firstWidth + x : x;
+      const secondY = horizontal ? y : firstHeight + y;
+      const secondOffset = (secondY * png.width + secondX) * 4;
+      if (
+        png.rgba[firstOffset] !== png.rgba[secondOffset]
+        || png.rgba[firstOffset + 1] !== png.rgba[secondOffset + 1]
+        || png.rgba[firstOffset + 2] !== png.rgba[secondOffset + 2]
+        || png.rgba[firstOffset + 3] !== png.rgba[secondOffset + 3]
+      ) {
+        different += 1;
+      }
+    }
+  }
+  return different;
 }
 
 /** @param {Buffer} bytes */

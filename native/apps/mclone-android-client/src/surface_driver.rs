@@ -11,6 +11,7 @@ use mclone_app_runtime::frame_pacing::{
     FramePacingDebugStats, FramePacingMode, FramePacingUiState, FrameTimingStats,
 };
 use mclone_app_runtime::frame_pipeline_accounting::FramePipelineAccountant;
+use mclone_app_runtime::frame_render::FlatSurfacePresentation;
 use mclone_app_runtime::host_mode::SingleViewHostOptions;
 use mclone_app_runtime::input_preferences::ClientInputPreferences;
 use mclone_app_runtime::native_remote_session::{
@@ -41,8 +42,9 @@ use mclone_scene::{
     record_mono_frame_pipeline, xr_frame_pipeline_accounting_config,
 };
 use mclone_ui::{
-    DEFAULT_JOIN_REMOTE_ADDR, EMPTY_HOTBAR_ICONS, GameTouchSettings, GameUiHost, GuiScale, Point,
-    TouchJoystickOverlay, TouchOverlay, touch_control_at, touch_menu_button_rect,
+    DEFAULT_JOIN_REMOTE_ADDR, EMPTY_HOTBAR_ICONS, GameAuxiliarySplitMode, GameTouchSettings,
+    GameUiHost, GuiScale, Point, TouchJoystickOverlay, TouchOverlay, touch_control_at,
+    touch_menu_button_rect,
 };
 use winit::application::ApplicationHandler;
 use winit::dpi::{PhysicalPosition, PhysicalSize};
@@ -355,6 +357,7 @@ struct AndroidGpuState {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     depth: ChunkDepthTarget,
+    split_presentation: Option<FlatSurfacePresentation>,
     host: AndroidSceneHost,
     input_capabilities: InputCapabilityState,
     input_preferences: InputPreferences,
@@ -521,6 +524,7 @@ impl AndroidGpuState {
             device,
             queue,
             depth,
+            split_presentation: None,
             config,
             host,
             input_capabilities: InputCapabilityState::new(InputCapabilities {
@@ -615,6 +619,7 @@ impl AndroidGpuState {
                 TouchInputSettings::MIN_LOOK_SENSITIVITY,
                 TouchInputSettings::MAX_LOOK_SENSITIVITY,
             )),
+            auxiliary_split_mode: GameAuxiliarySplitMode::Off,
         }
     }
 
@@ -644,25 +649,60 @@ impl AndroidGpuState {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("mclone_android_frame_encoder"),
             });
-        let render_view = self
-            .host
-            .mono_render_view([self.config.width, self.config.height])
-            .map_err(AndroidRenderError::Render)?;
         let encode_start = Instant::now();
-        let summary = self
+        let output_target =
+            RenderFrameTarget::color(&view, [self.config.width, self.config.height]);
+        let split_layout = self
             .host
-            .render_mono_scene_frame(
-                RenderFrameContext::new(
+            .auxiliary_split_layout(output_target.size)
+            .map_err(AndroidRenderError::Render)?;
+        let summary = if let Some(layout) = split_layout {
+            let primary = layout.panes()[0];
+            self.host
+                .set_mono_ui_scale(GuiScale::from_pixels(primary.width, primary.height));
+            match &mut self.split_presentation {
+                Some(presentation) => presentation.resize(&self.device, layout),
+                slot @ None => {
+                    *slot = Some(FlatSurfacePresentation::new(
+                        &self.device,
+                        self.config.format,
+                        layout,
+                    ));
+                }
+            }
+            let presentation = self
+                .split_presentation
+                .as_ref()
+                .expect("split presentation initialized from active layout");
+            let summary = self
+                .host
+                .render_auxiliary_split_surface_frame(
                     &self.device,
                     &self.queue,
                     &mut encoder,
-                    RenderFrameTarget::color(&view, [self.config.width, self.config.height]),
-                ),
-                &self.depth,
-                render_view,
-                MonoUiPresentation::ScreenSpaceHud,
-            )
-            .map_err(AndroidRenderError::Render)?;
+                    presentation,
+                )
+                .map_err(AndroidRenderError::Render)?;
+            presentation.present(&mut encoder, output_target);
+            summary
+        } else {
+            if !self.host.auxiliary_split_mode().is_split() {
+                self.split_presentation = None;
+            }
+            self.host.set_mono_ui_scale(self.gui_scale());
+            let render_view = self
+                .host
+                .mono_render_view(output_target.size)
+                .map_err(AndroidRenderError::Render)?;
+            self.host
+                .render_mono_scene_frame(
+                    RenderFrameContext::new(&self.device, &self.queue, &mut encoder, output_target),
+                    &self.depth,
+                    render_view,
+                    MonoUiPresentation::ScreenSpaceHud,
+                )
+                .map_err(AndroidRenderError::Render)?
+        };
         let encode_ms = encode_start.elapsed().as_secs_f64() * 1_000.0;
         let submit_start = Instant::now();
         self.queue.submit(std::iter::once(encoder.finish()));

@@ -2878,6 +2878,7 @@ pub(super) fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::ToggleFirstPersonPlayer => "toggleFirstPersonPlayer",
         GameUiAction::ToggleFramePipelineOverlay => "toggleFramePipelineOverlay",
         GameUiAction::ToggleDebugDiagnostics => "toggleDebugDiagnostics",
+        GameUiAction::SetAuxiliarySplitMode(_) => "setAuxiliarySplitMode",
         GameUiAction::SetPlayerModel(_) => "setPlayerModel",
         GameUiAction::SetMovementMode(_) => "setMovementMode",
         GameUiAction::SetCollisionMode(_) => "setCollisionMode",

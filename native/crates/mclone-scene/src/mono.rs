@@ -631,7 +631,26 @@ impl McloneSceneHost {
     /// Menus remain full-surface. This avoids silently deciding future couch
     /// pause/menu ownership while making the debug mode directly reversible.
     pub fn auxiliary_split_gameplay_active(&self) -> bool {
-        self.auxiliary_split_mode().is_split() && !self.mono_ui_is_active()
+        self.auxiliary_split_mode().is_split()
+            && !self.mono_ui_is_active()
+            && !self
+                .embedded_world_preview
+                .as_ref()
+                .is_some_and(|preview| preview.phase == EmbeddedWorldPreviewPhase::Visible)
+    }
+
+    /// Resolve the menu-owned split selection into the same validated flat
+    /// surface layout contract on every flat host. A dimension too narrow to
+    /// hold two non-empty panes temporarily falls back to one full-surface view.
+    pub fn auxiliary_split_layout(
+        &self,
+        surface_size: [u32; 2],
+    ) -> Result<Option<FlatSurfaceLayout>> {
+        auxiliary_split_layout_for_mode(
+            self.auxiliary_split_mode(),
+            self.auxiliary_split_gameplay_active(),
+            surface_size,
+        )
     }
 
     /// Primary participant view plus a non-authoritative elevated follow view.
@@ -643,25 +662,59 @@ impl McloneSceneHost {
         auxiliary_size: [u32; 2],
     ) -> Result<[ChunkRenderView; 2]> {
         let primary = self.mono_render_view(primary_size)?;
-        let horizontal_forward =
-            Vec3::new(primary.camera_forward.x, 0.0, primary.camera_forward.z).normalize_or_zero();
-        let horizontal_forward = if horizontal_forward.length_squared() > 0.0 {
-            horizontal_forward
-        } else {
-            Vec3::NEG_Z
-        };
-        let focus = primary.camera_position + horizontal_forward * 5.0;
-        let eye = focus - horizontal_forward * 14.0 + primary.camera_right * 8.0 + Vec3::Y * 22.0;
-        let auxiliary = ChunkCamera {
-            eye: eye.to_array(),
-            target: focus.to_array(),
-            up: Vec3::Y.to_array(),
-            fov_y_radians: 58.0_f32.to_radians(),
-            z_near: 0.1,
-            z_far: primary.z_far.max(256.0),
-        }
-        .render_view(auxiliary_size[0], auxiliary_size[1]);
+        let auxiliary = auxiliary_follow_render_view(primary, auxiliary_size);
         Ok([primary, auxiliary])
+    }
+
+    /// Render the live two-pane debug topology into shared pane attachments.
+    /// The primary view owns ordinary HUD, simulation, uploads, and interest;
+    /// the auxiliary view only reuses prepared resident scene data.
+    pub fn render_auxiliary_split_surface_frame(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        presentation: &FlatSurfacePresentation,
+    ) -> Result<MonoSceneFrameSummary> {
+        if presentation.pane_count() != 2 {
+            bail!(
+                "live auxiliary split requires exactly two panes, got {}",
+                presentation.pane_count()
+            );
+        }
+        let primary = presentation
+            .pane(0)
+            .context("live auxiliary split is missing its primary pane")?;
+        let auxiliary = presentation
+            .pane(1)
+            .context("live auxiliary split is missing its auxiliary pane")?;
+        let render_views =
+            self.auxiliary_split_render_views(primary.target.size, auxiliary.target.size)?;
+        let views = [
+            FlatPresentationView::new(
+                primary.target,
+                primary.depth,
+                render_views[0],
+                MonoUiPresentation::ScreenSpaceHud,
+            ),
+            FlatPresentationView::new(
+                auxiliary.target,
+                auxiliary.depth,
+                render_views[1],
+                MonoUiPresentation::None,
+            ),
+        ];
+        let summary = self.render_flat_presentation_frame(device, queue, encoder, &views)?;
+        let primary_render = summary
+            .views
+            .first()
+            .context("live auxiliary split rendered no primary view")?
+            .render;
+        Ok(MonoSceneFrameSummary {
+            render: primary_render,
+            timing: summary.timing,
+            upload: summary.upload,
+        })
     }
 
     /// Apply flat input and advance local-player publication from one shared
@@ -2414,6 +2467,50 @@ impl McloneSceneHost {
     }
 }
 
+fn auxiliary_split_layout_for_mode(
+    mode: GameAuxiliarySplitMode,
+    gameplay_unobscured: bool,
+    surface_size: [u32; 2],
+) -> Result<Option<FlatSurfaceLayout>> {
+    if !gameplay_unobscured {
+        return Ok(None);
+    }
+    let surface = PixelExtent::new(surface_size[0].max(1), surface_size[1].max(1));
+    let layout = match mode {
+        GameAuxiliarySplitMode::Off => return Ok(None),
+        GameAuxiliarySplitMode::Horizontal if surface.width < 2 => return Ok(None),
+        GameAuxiliarySplitMode::Horizontal => {
+            FlatSurfaceLayout::two_horizontal(surface, SafeAreaInsets::NONE)?
+        }
+        GameAuxiliarySplitMode::Vertical if surface.height < 2 => return Ok(None),
+        GameAuxiliarySplitMode::Vertical => {
+            FlatSurfaceLayout::two_vertical(surface, SafeAreaInsets::NONE)?
+        }
+    };
+    Ok(Some(layout))
+}
+
+fn auxiliary_follow_render_view(primary: ChunkRenderView, size: [u32; 2]) -> ChunkRenderView {
+    let horizontal_forward =
+        Vec3::new(primary.camera_forward.x, 0.0, primary.camera_forward.z).normalize_or_zero();
+    let horizontal_forward = if horizontal_forward.length_squared() > 0.0 {
+        horizontal_forward
+    } else {
+        Vec3::NEG_Z
+    };
+    let focus = primary.camera_position + horizontal_forward * 5.0;
+    let eye = focus - horizontal_forward * 14.0 + primary.camera_right * 8.0 + Vec3::Y * 22.0;
+    ChunkCamera {
+        eye: eye.to_array(),
+        target: focus.to_array(),
+        up: Vec3::Y.to_array(),
+        fov_y_radians: 58.0_f32.to_radians(),
+        z_near: 0.1,
+        z_far: primary.z_far.max(256.0),
+    }
+    .render_view(size[0], size[1])
+}
+
 fn engine_camera_input_from_flat_frame(
     frame: FlatInputFrame,
     dt_seconds: f64,
@@ -2614,5 +2711,64 @@ mod tests {
                 .to_string()
                 .contains("maximum is 4")
         );
+    }
+
+    #[test]
+    fn auxiliary_split_layout_requires_an_unobscured_selected_mode() {
+        assert_eq!(
+            auxiliary_split_layout_for_mode(GameAuxiliarySplitMode::Horizontal, false, [801, 601])
+                .unwrap(),
+            None
+        );
+        assert_eq!(
+            auxiliary_split_layout_for_mode(GameAuxiliarySplitMode::Off, true, [801, 601]).unwrap(),
+            None
+        );
+
+        let horizontal =
+            auxiliary_split_layout_for_mode(GameAuxiliarySplitMode::Horizontal, true, [801, 601])
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            horizontal.panes()[0],
+            mclone_render_session::PixelRect::new(0, 0, 401, 601)
+        );
+        assert_eq!(
+            horizontal.panes()[1],
+            mclone_render_session::PixelRect::new(401, 0, 400, 601)
+        );
+
+        let vertical =
+            auxiliary_split_layout_for_mode(GameAuxiliarySplitMode::Vertical, true, [801, 601])
+                .unwrap()
+                .unwrap();
+        assert_eq!(
+            vertical.panes()[0],
+            mclone_render_session::PixelRect::new(0, 0, 801, 301)
+        );
+        assert_eq!(
+            vertical.panes()[1],
+            mclone_render_session::PixelRect::new(0, 301, 801, 300)
+        );
+    }
+
+    #[test]
+    fn auxiliary_follow_view_is_independently_posed_and_aspect_correct() {
+        let primary = ChunkCamera {
+            eye: [10.0, 70.0, 20.0],
+            target: [10.0, 70.0, 10.0],
+            up: Vec3::Y.to_array(),
+            fov_y_radians: 70.0_f32.to_radians(),
+            z_near: 0.1,
+            z_far: 192.0,
+        }
+        .render_view(960, 640);
+        let auxiliary = auxiliary_follow_render_view(primary, [480, 640]);
+
+        assert!(auxiliary.is_finite());
+        assert_ne!(auxiliary.camera_position, primary.camera_position);
+        assert!((auxiliary.aspect - 0.75).abs() < f32::EPSILON);
+        assert!((auxiliary.fov_y_radians - 58.0_f32.to_radians()).abs() < f32::EPSILON);
+        assert_eq!(auxiliary.z_far, 256.0);
     }
 }

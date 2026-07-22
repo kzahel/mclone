@@ -12,6 +12,7 @@ use anyhow::Result;
 use glam::{Vec2, Vec3};
 use mclone_app_runtime::chunk_tracking_radius_for_render_distance;
 use mclone_app_runtime::client_experience::web_client_experience_profile;
+use mclone_app_runtime::frame_render::FlatSurfacePresentation;
 use mclone_app_runtime::input_preferences::{
     ClientInputPreferences, PreferenceKeyValueStore, parse_touch_controls_mode,
     touch_controls_mode_label,
@@ -450,6 +451,7 @@ async fn execute_web_asset_pack_preparation(
 pub struct WebSceneHost {
     context: WebCanvasContext,
     depth: ChunkDepthTarget,
+    split_presentation: Option<FlatSurfacePresentation>,
     host: Option<McloneSceneHost>,
     platform: WebScenePlatformServices,
     frame_policy: WebSceneFrameDriverPolicy,
@@ -998,22 +1000,62 @@ impl WebSceneHost {
                 .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("mclone_web_scene_host_encoder"),
                 });
-        let render_view = host
-            .mono_render_view([self.context.width, self.context.height])
+        let output_target =
+            RenderFrameTarget::color(&view, [self.context.width, self.context.height]);
+        let split_layout = host
+            .auxiliary_split_layout(output_target.size)
             .map_err(js_error)?;
-        let summary = host
-            .render_mono_scene_frame(
+        let summary = if let Some(layout) = split_layout {
+            let primary = layout.panes()[0];
+            host.set_mono_ui_scale(GuiScale::from_pixels(primary.width, primary.height));
+            match &mut self.split_presentation {
+                Some(presentation) => presentation.resize(&self.context.device, layout),
+                slot @ None => {
+                    *slot = Some(FlatSurfacePresentation::new(
+                        &self.context.device,
+                        self.context.format,
+                        layout,
+                    ));
+                }
+            }
+            let presentation = self
+                .split_presentation
+                .as_ref()
+                .expect("split presentation initialized from active layout");
+            let summary = host
+                .render_auxiliary_split_surface_frame(
+                    &self.context.device,
+                    &self.context.queue,
+                    &mut encoder,
+                    presentation,
+                )
+                .map_err(js_error)?;
+            presentation.present(&mut encoder, output_target);
+            summary
+        } else {
+            if !host.auxiliary_split_mode().is_split() {
+                self.split_presentation = None;
+            }
+            host.set_mono_ui_scale(GuiScale::from_pixels(
+                output_target.size[0],
+                output_target.size[1],
+            ));
+            let render_view = host
+                .mono_render_view(output_target.size)
+                .map_err(js_error)?;
+            host.render_mono_scene_frame(
                 RenderFrameContext::new(
                     &self.context.device,
                     &self.context.queue,
                     &mut encoder,
-                    RenderFrameTarget::color(&view, [self.context.width, self.context.height]),
+                    output_target,
                 ),
                 &self.depth,
                 render_view,
                 MonoUiPresentation::ScreenSpaceHud,
             )
-            .map_err(js_error)?;
+            .map_err(js_error)?
+        };
         self.context.queue.submit(std::iter::once(encoder.finish()));
         surface_texture.present();
         self.rendered_frame_count = self.rendered_frame_count.saturating_add(1);
@@ -2218,6 +2260,7 @@ async fn create_scene_host(
     let mut web_host = WebSceneHost {
         context,
         depth,
+        split_presentation: None,
         host: Some(host),
         platform,
         frame_policy: WebSceneFrameDriverPolicy::default(),

@@ -45,9 +45,9 @@ use mclone_app_runtime::frame_pacing::{
     FramePacingDebugStats, FramePacingUiState, FrameTimingStats,
 };
 use mclone_app_runtime::frame_render::{
-    FrameActorPreparation, FullFrameGui, FullFrameRenderSummary, PlacedActorFrame,
-    PlacedTerrainFrame, PlacedTerrainPrepared, RenderStreamStats, TerrainCompositionFrame,
-    TerrainCompositionSource, TerrainTranslucentSubmission,
+    FlatSurfacePresentation, FrameActorPreparation, FullFrameGui, FullFrameRenderSummary,
+    PlacedActorFrame, PlacedTerrainFrame, PlacedTerrainPrepared, RenderStreamStats,
+    TerrainCompositionFrame, TerrainCompositionSource, TerrainTranslucentSubmission,
     render_full_frame_for_view_with_far_lod_and_opaque_gate,
     render_full_frame_for_view_with_far_lod_and_placed_terrain_timed,
     render_full_frame_for_view_with_far_lod_and_prepared_records_in_slot,
@@ -157,11 +157,12 @@ use mclone_render_session::{
     EngineCameraFrameState, EngineCameraInput, EngineCameraMovementImpulse,
     EngineCameraMovementMode, EngineCameraSnapshot, EngineCameraViewMode, EngineDebugVisualOptions,
     EngineHandPushInput, EngineRoomScaleReconciliation, EngineThrusterHand, EngineThrusterInput,
-    RenderSectionCacheUpdate, RenderSectionUploadCoordinator, RenderSectionUploadFramePolicy,
-    RenderSectionUploadPhaseReport, XrFov, XrRenderView, XrView, XrViewPose,
-    actor_instances_from_presentations, actor_instances_from_presentations_near_observer,
-    engine_debug_world_lines, local_player_actor_instance_for_view,
-    render_pose_from_snapshot_with_view_mode, render_view_from_world_pose,
+    FlatSurfaceLayout, PixelExtent, RenderSectionCacheUpdate, RenderSectionUploadCoordinator,
+    RenderSectionUploadFramePolicy, RenderSectionUploadPhaseReport, SafeAreaInsets, XrFov,
+    XrRenderView, XrView, XrViewPose, actor_instances_from_presentations,
+    actor_instances_from_presentations_near_observer, engine_debug_world_lines,
+    local_player_actor_instance_for_view, render_pose_from_snapshot_with_view_mode,
+    render_view_from_world_pose,
 };
 use mclone_server::{SimulationCadenceConfig, WorkerFrameMetrics};
 use mclone_ui::{

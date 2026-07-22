@@ -728,7 +728,7 @@ impl OffscreenFlatClientHost {
     ) -> Result<FullFrameRenderSummary> {
         Ok(self
             .driver
-            .render_detached_chunk_camera_frozen(frame, camera, MonoUiPresentation::None)?
+            .render_detached_chunk_camera_frozen(frame, camera, MonoUiPresentation::None, false)?
             .render)
     }
 
