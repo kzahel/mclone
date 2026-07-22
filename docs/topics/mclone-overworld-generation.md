@@ -9,10 +9,11 @@ internal-mutable `mclone-overworld-v1` profile while `overworld` remains the
 Minecraft Java 1.17.1 reference path. Tactical
 [`188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md) is complete.
 Tactical [`192`](../tactical/192-mclone-overworld-mountains-and-valleys.md)
-landed its first two-field mountain geometry and a human-requested shorter
-traversal-scale tune on 2026-07-22. It is paused at the renewed Review 1 for
-human judgment before terrain-language rules change. The shared Flat Grass
-cylinder proof is complete;
+landed its first two-field mountain geometry, a human-requested shorter
+traversal-scale tune, and the slope/exposure-aware surface and vegetation
+response on 2026-07-22. Human Review 1 accepted the geometry; the tactical is
+paused at Review 2 for judgment of the final terrain-language matrix before
+host-equivalence closeout. The shared Flat Grass cylinder proof is complete;
 [`196`](../tactical/196-periodic-mclone-terrain-fields.md) is planned after the
 first accepted Tactical 192 field set and before rivers, climate breadth, or
 structures. The selected terrain sequence is mountains and valleys, periodic
@@ -154,9 +155,11 @@ stacks applied everywhere.
 
 Slope and curvature are derived facts. They should be computed at the smallest
 spacing needed by a real caller and should not require a neighborhood chunk
-dependency. The first implementation may keep them local to surface or review
-code; promote them into the public sample only when more than one production
-consumer needs identical semantics.
+dependency. Tactical 192 promoted a four-block central-difference slope into a
+profile-owned landform sample once both biome and surface selection needed the
+same semantics. It remains separate from the raw terrain sample, and the
+production chunk path derives it from a bounded 20-by-20 sample halo rather
+than adding a chunk dependency or five independent queries per column.
 
 ## Water-System Direction
 
@@ -229,6 +232,16 @@ twofold regression blocks a visual slice unless the tactical records an
 explicit product tradeoff and optimization follow-up. Field-map time and
 surface-only throughput remain diagnostic attribution gates even when full
 generation stays within budget.
+
+Tactical 192's landed terrain-language path uses a 20-by-20 sample halo for
+each 16-by-16 chunk. On the same release command it measured 3,730.502 surface
+chunks/s, 596.967 cold decorated targets/s, and 5,267.459 warm decorated
+targets/s. Cold generation is 5.1 percent below the preceding field-revision-4
+measurement and effectively equal to the Slice 0 baseline, so the shared
+slope/exposure response does not consume the river slice's performance budget.
+The review tool's exact five-point landform maps take about 69 ms for 148,225
+points; that intentionally simple diagnostic path is not the production chunk
+sampling strategy.
 
 Quality-versus-speed controls divide into two categories:
 
@@ -334,7 +347,21 @@ remain traversable valley floors and ordinary lowland regions retain their
 character. No additional field, point-sampling cost, neighborhood search, or
 generation dependency footprint is involved.
 
-`pnpm native:worldgen:fields` now writes all five production-backed maps,
+The raw field inventory remains revision 4. A separate
+`McloneOverworldLandformSample` pairs one raw terrain sample with the exact
+four-block slope used by production. Its exposure relation combines accepted
+altitude, ridge, and mountain-region facts without adding another seed domain.
+Biome selection keeps moderate sheltered uplands wooded but makes strong
+valleys, transitional ridge shoulders, steep faces, and strongly exposed high
+ground open. Surface selection keeps dry land grassy unless it is at least Y80
+and has slope `>=0.80` or exposure `>=0.76`; those columns expose stone. The
+existing open and wooded placed-feature tables then make vegetation eligibility
+follow the same biome and substrate facts. Decoration revision 3 records the
+intentional output change.
+
+`pnpm native:worldgen:fields` now writes all five production-backed raw/height
+maps plus derived slope, biome, and surface-recipe maps; receipts include
+separate raw and landform timings, slope/exposure ranges and percentiles,
 foundation/new-field fingerprints, landform counts, and selected range,
 valley, edge, and lowland review sites. The fully warmed card tool writes
 rendered review views from those production-selected centers. Each card eye
@@ -375,16 +402,26 @@ another real caller proves a smaller mechanism boundary. Reference Overworld
 keeps its distinct three-dimensional biome source and Java-owned
 surface/ordering path.
 
-The first terrain-language slice now classifies ocean, beach, open lowland,
-and wooded upland, then selects separate gravel-floor, sand-beach, grass-soil,
-and sparse exposed-stone recipes. Decoration uses an independent Mclone seed
-domain and profile-owned oak/grass/flower tables through the existing placed
-features, `FeatureRegion`, and ordered executor. Its plan declares a 3-by-3
-feature work band and 5-by-5 Surface prerequisite band. The second checkpoint
-extracted the identical seed/reset/input/reuse/retention lifecycle shared by
-Mclone and Small Island into `SurfaceDependencyCache`. Their surface
-generators, feature tables, biome assembly, target post-processing, public
-reports, and spawn rules remain concrete.
+The terrain language classifies ocean, beach, open land, and wooded upland,
+then selects separate gravel-floor, sand-beach, grass-soil, and exposed-stone
+recipes. Its second pass makes open versus wooded land and grass versus stone
+react to the shared landform sample, preserving open valleys and ridge
+shoulders while keeping the lowland control wooded. Decoration uses an
+independent Mclone seed domain and profile-owned oak/grass/flower tables
+through the existing placed features, `FeatureRegion`, and ordered executor.
+Its plan declares a 3-by-3 feature work band and 5-by-5 Surface prerequisite
+band. The earlier checkpoint extracted the identical
+seed/reset/input/reuse/retention lifecycle shared by Mclone and Small Island
+into `SurfaceDependencyCache`. Their surface generators, feature tables,
+biome assembly, target post-processing, public reports, and spawn rules remain
+concrete.
+
+The mountain checkpoint deliberately did not extract a generic slope trait,
+exposure formula, surface-rule DSL, or mountain-biome classifier. Small Island
+has no slope caller, and reference Overworld owns different density,
+three-dimensional biome, and surface-builder semantics. The profile-owned
+landform value is the smallest real two-consumer boundary; the private halo is
+an optimization of its one chunk caller.
 
 Reference Overworld deliberately retains its existing cache. It reuses a
 heavyweight generator and biome source, creates liquid-carved inputs, records
@@ -566,12 +603,11 @@ Do not create a debug-only approximation of the terrain formula.
 
 ## Next Work
 
-Review Tactical 192's field maps and first geometry matrix before changing its
-surface and vegetation language. If accepted, make the existing biome,
-surface, and decoration rules react to the landed relief, then reserve a
-dedicated reuse/refactor checkpoint. Do not fold rivers, climate breadth,
-caves, or structures into that tactical. After its field set and terrain
-language are accepted, execute
+Review Tactical 192's final slope/biome/surface maps and terrain-language card
+matrix. If accepted, complete its native/browser Worker equivalence and
+unchanged-host-contract closeout; do not fold rivers, climate breadth, caves,
+or structures into that tactical. After its field set and terrain language are
+accepted, execute
 [`Tactical 196`](../tactical/196-periodic-mclone-terrain-fields.md):
 re-audit every live field scale, select the explicit periodic sampler and
 circumference, then route terrain and decoration through canonical outputs plus

@@ -1,13 +1,12 @@
 # Tactical 192: Mclone Overworld Mountains And Valleys
 
-Status: Slice 1 and a human-requested shorter-traversal tune landed 2026-07-22;
-the renewed Review 1 is ready for human judgment. Production maps and the
-maximum-view-distance geometry matrix show shorter connected mountain crests,
-traversable valleys, bounded range transitions, and an unchanged lowland
-control. Every camera eye is proven above loaded terrain and canopy. Existing
-height-only forest selection still blankets some relief; surface and
-vegetation response remains intentionally unimplemented until this geometry
-review is accepted.
+Status: Slice 1, the human-requested shorter-traversal tune, Slice 2's
+terrain-language response, and the dedicated no-extraction checkpoint landed
+2026-07-22. Human Review 1 accepted the revised geometry before surface rules
+changed. Production maps and the maximum-view-distance Review 2 matrix now
+show open valleys and transitional shoulders, grass below coherent rocky high
+ground, and an unchanged wooded lowland control. Review 2 is ready for human
+judgment before host-equivalence closeout and Tactical 196.
 
 Topic: `mclone-overworld-generation`
 
@@ -144,7 +143,7 @@ Gate: the terrain geometry alone reads as a range and valley system.
   transition, foundation preservation, and spawn quality.
 - [x] Record height percentiles, highland fraction, slope bands, connected
   ridge/valley measures where useful, and generation cost.
-- [ ] Accept the geometry, tune existing composition, or add at most one field
+- [x] Accept the geometry, tune existing composition, or add at most one field
   whose absence is demonstrated by the review.
 
 Gate: obtain human review before extracting helpers or changing content rules.
@@ -193,36 +192,119 @@ attribution baseline for periodic fields and rivers.
 
 ### Slice 2: terrain-language response
 
-- [ ] Make existing biome choice react to the landed altitude/exposure facts
+- [x] Make existing biome choice react to the landed altitude/exposure facts
   without adding unused climate dimensions or custom registry content.
-- [ ] Make grass/soil, exposed stone, and vegetation eligibility respond to
+- [x] Make grass/soil, exposed stone, and vegetation eligibility respond to
   altitude and slope through Mclone-owned rules.
-- [ ] Preserve readable valley routes and avoid trees or grass on clearly
+- [x] Preserve readable valley routes and avoid trees or grass on clearly
   unsuitable faces.
-- [ ] Re-prove safe spawn and decoration order/partition independence.
-- [ ] Pin biome/surface distributions and final decorated payloads.
+- [x] Re-prove safe spawn and decoration order/partition independence.
+- [x] Pin biome/surface distributions and final decorated payloads.
 
 Gate: blocks and vegetation reinforce the relief instead of hiding it.
 
+Slice 2 adds `McloneOverworldLandformSample`, which keeps the accepted raw
+terrain sample intact and adds one derived slope in blocks risen per horizontal
+block. The slope is a central difference over a two-block radius: east minus
+west and south minus north are each divided by the four-block sample diameter,
+then combined as a two-dimensional gradient magnitude. Production chunk fill
+samples a 20-by-20 terrain halo once and derives all 256 column gradients from
+those 400 samples. A naive five-point query per column would require 1,280
+samples. The bounded halo is internal to the chunk and does not enlarge the
+existing 3-by-3 feature work or 5-by-5 Surface dependency footprints.
+
+Exposure is a bounded relation of accepted facts rather than another noise
+field. It combines altitude from Y=82 through Y=130 with ridge strength above
+`0.35`, then gates that result by mountain-region strength. The landed rules
+are:
+
+| Response | Rule |
+|---|---|
+| Wooded upland | Y>=75, slope `<0.45`, exposure `<0.44`, and not a mountain valley or open shoulder |
+| Mountain valley | dry land, mountain strength `>=0.35`, and ridge `<=0.28` |
+| Open shoulder | dry land, mountain strength `>=0.15`, and ridge `>=0.65` |
+| Exposed stone | Y>=80 and either slope `>=0.80` or exposure `>=0.76` |
+| Grass/soil | remaining dry land |
+
+Open regions reuse the existing sparse oak/grass/flower table and wooded
+regions reuse the existing denser oak table. Stone cannot satisfy the shared
+grass-substrate placement gates, so trees, grass, and flowers do not need a
+second terrain-specific exclusion path. No biome registry content or climate
+field was added. Raw field revision 4 is unchanged; decoration revision 3
+records the intentional biome/table selection change.
+
+The first drawable threshold attempt exposed 154,917 of 263,169 block-scale
+columns around the range interior and read as one bare stone bowl. The accepted
+tune exposes 81,475 columns, or 31.0 percent, at that deliberately mountainous
+site. It preserves continuous faces and crests while returning the lower
+shoulders and valley floor to grass. The final 385-by-385 production maps at
+16-block stride report:
+
+| Seed and center | Open land | Wooded upland | Exposed stone |
+|---|---:|---:|---:|
+| `12345`, chunk `(0,0)` | 32,508 | 28,479 | 210 |
+| `-98765`, chunk `(-96,72)` | 28,710 | 62,844 | 857 |
+| `8675309`, chunk `(128,-96)` | 26,982 | 23,487 | 0 |
+
+The final card matrix is under `/tmp/mclone-overworld-language-v3/` at range
+interior `(-186,25)`, mountain valley `(-204,22)`, range edge `(-142,-51)`,
+positive-seed range `(-133,-66)`, and lowland control `(122,-96)`. Every card
+uses the supported maximum render distance 16 and 800-by-500 panels. Every
+receipt proves 1,225/1,225 target chunks ready and 24, 128, and 315 blocks of
+camera clearance. The positive-seed card retained 69 extra background chunks;
+capture acceptance now correctly keys on the exact target set while recording
+unrelated background work separately.
+
+On the same Linux release command used by the earlier slices, the landed path
+measured 3,730.502 surface chunks/s, 596.967 cold decorated targets/s, and
+5,267.459 warm decorated targets/s. Cold decorated throughput is 5.1 percent
+below field revision 4's measurement and effectively equal to the 600.997
+foundation baseline, well inside the 25 percent review threshold. Raw
+148,225-point map sampling took 14.091-27.970 ms under variable host load; the
+separate exact five-point landform diagnostic took 68.626-69.853 ms. Production
+generation uses the 400-sample chunk halo rather than that diagnostic path.
+
+`cargo test -p mclone-worldgen --lib` passes 270 tests with the existing one
+ignored gauntlet. The locks cover broad language distributions, selected
+surface chunks, reviewed final decorated mountain payloads, safe spawn,
+neighbor partition independence, cache reuse, Small Island, and reference
+Overworld fixtures. Six native-client showcase tests also pass.
+
 ### Slice 3: dedicated reuse/refactor checkpoint
 
-- [ ] Compare the working mountain path with foundation relief, Small Island,
+- [x] Compare the working mountain path with foundation relief, Small Island,
   and reference Overworld mechanisms.
-- [ ] Extract only mechanisms with two concrete callers or an already frozen
+- [x] Extract only mechanisms with two concrete callers or an already frozen
   data boundary.
-- [ ] Keep rule composition, domains, thresholds, and tables profile-owned.
-- [ ] Land behavior-preserving extraction separately from any aesthetic tune.
-- [ ] Re-run exact reference locks, Small Island locks/cards, Mclone maps/cards,
+- [x] Keep rule composition, domains, thresholds, and tables profile-owned.
+- [x] Land behavior-preserving extraction separately from any aesthetic tune.
+- [x] Re-run exact reference locks, Small Island locks/cards, Mclone maps/cards,
   typed-plan facts, cache reports, and performance after each extraction.
-- [ ] Explicitly record rejected abstractions and why they obscure policy or
+- [x] Explicitly record rejected abstractions and why they obscure policy or
   add cost.
 
 Gate: the next river slice will not copy a proven mechanism, and no generic
 terrain framework exists without real callers.
 
+The checkpoint keeps the only new shared value inside the concrete Mclone
+profile: biome and surface policy both consume the same
+`McloneOverworldLandformSample`, while review tooling observes it. The
+20-by-20 cache remains a private Mclone chunk-fill optimization because Small
+Island has no slope caller and reference Overworld owns density interpolation
+and biome surface builders with different semantics. No reusable extraction
+was justified, so there is no separate behavior-preserving code commit.
+
+Rejected abstractions are a generic slope/noise trait, a cross-profile
+exposure formula, a universal surface-rule DSL, and a shared mountain-biome
+classifier. Each would either have only one profile family, move thresholds
+out of their owner, or make reference output riskier without removing a second
+implementation. The existing column-biome payload traversal, placed-feature
+executor, typed plan, and Surface dependency cache remain the proven reuse
+boundaries.
+
 ### Review 2 and closeout
 
-- [ ] Re-run all production field maps and the complete landscape matrix.
+- [x] Re-run all production field maps and the complete landscape matrix.
 - [ ] Review mountain frequency, silhouette variety, valley connectivity,
   surface exposure, vegetation, coast readability, repetition, and cost.
 - [ ] Prove native thread and production browser Worker equivalence.
