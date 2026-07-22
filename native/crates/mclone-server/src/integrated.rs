@@ -1800,6 +1800,12 @@ impl RealmServer {
         self.players.get(player_id).map(|player| &player.statistics)
     }
 
+    pub fn player_selected_hotbar_slot(&self, player_id: ServerPlayerId) -> Option<u8> {
+        self.players
+            .get(player_id)
+            .map(|player| player.inventory.selected_hotbar_slot())
+    }
+
     pub fn player_vitals(
         &self,
         player_id: ServerPlayerId,
@@ -5098,26 +5104,7 @@ fn raw_block_id_from_block_state(block_state: BlockStateId) -> Option<RawBlockId
 }
 
 fn player_record_key(profile_id: PlayerProfileId) -> PlayerRecordKey {
-    let bytes = profile_id.bytes();
-    PlayerRecordKey::Uuid(format!(
-        "{:02x}{:02x}{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}-{:02x}{:02x}{:02x}{:02x}{:02x}{:02x}",
-        bytes[0],
-        bytes[1],
-        bytes[2],
-        bytes[3],
-        bytes[4],
-        bytes[5],
-        bytes[6],
-        bytes[7],
-        bytes[8],
-        bytes[9],
-        bytes[10],
-        bytes[11],
-        bytes[12],
-        bytes[13],
-        bytes[14],
-        bytes[15],
-    ))
+    PlayerRecordKey::from_profile_id(profile_id)
 }
 
 fn chunk_pos_for_player_position(position: Vec3d) -> ChunkPos {

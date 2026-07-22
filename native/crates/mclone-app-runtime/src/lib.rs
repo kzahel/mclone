@@ -18,6 +18,7 @@ pub mod frame_pipeline_presentation;
 pub mod frame_render;
 pub mod host_mode;
 pub mod input_preferences;
+pub mod local_client_group;
 pub mod local_participant;
 pub mod local_participant_input;
 pub mod local_profile;

@@ -217,6 +217,28 @@ The focused app-runtime tests, complete `mclone-input` suite, formatting, and
 the app-runtime Wasm check pass. The Wasm check retains only pre-existing
 target-conditional unused warnings.
 
+### Slice 3 — ordinary local logical clients
+
+Implemented on 2026-07-22. `LocalClientGroup` now maps 1-4 existing participant
+admissions to distinct ordinary `ServerPlayerId` and `SingleViewRuntime`
+endpoints while retaining one `RealmServer`. Join accepts explicit identities
+and rejects a duplicate live profile before realm admission. Commands use the
+ordinary per-player handler; global scheduler and simulation methods advance
+once and then drain every ordered player stream separately. Initial position
+acknowledgement, view changes, and one-participant leave stay participant
+addressed.
+
+Synthetic in-memory records give the two endpoints deliberately different
+selected slots, experience, statistics, and life state without selecting a
+product guest policy. Tests prove configuration/world-info delivery, distinct
+client replicas, mutual remote-player visibility, owner-only command updates,
+overlapping then separated interest, one-step global simulation progression,
+four distinct ordinary player mappings, duplicate-profile rejection, and one
+participant leaving without tearing down the survivor. `PlayerRecordKey` now
+owns its public profile-ID projection and `RealmServer` exposes the selected
+hotbar slot for neutral ownership evidence. The focused app-runtime tests and
+all 536 `mclone-server` tests pass.
+
 ## Stop Conditions
 
 Stop and ask for direction if implementation requires choosing:
