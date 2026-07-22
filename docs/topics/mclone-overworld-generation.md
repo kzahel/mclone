@@ -720,7 +720,9 @@ Human Review 3 accepted the result as more natural and less geometric.
 
 ## Next Work
 
-Open and execute a bounded rivers-and-wetlands tactical before caves,
+Execute
+[`Tactical 220`](../tactical/220-mclone-overworld-rivers-and-wetlands.md)
+before caves,
 structures, or broad biome expansion. Its first result should be one
 inspectable production river influence with coherent water level, bed, banks,
 width, downstream direction, and low-gradient wetland response shared by

@@ -26,6 +26,8 @@ for the plane and exact 384-chunk X cylinder.
 This is now the selected project campaign: mountains/valleys, periodic fields,
 rivers/wetlands, then coherent stream, cascade, and waterfall reaches. Caves
 and structures remain parked while those terrain families advance.
+The active water slice is
+[`tactical/220-mclone-overworld-rivers-and-wetlands.md`](tactical/220-mclone-overworld-rivers-and-wetlands.md).
 
 Compatibility safety is recorded in the
 [`world-generation-profiles` ledger](topics/world-generation-profiles.md#compatibility-safety-ledger).
@@ -176,3 +178,4 @@ Current native tacticals live under [`docs/tactical/`](tactical/README.md). Star
 - [`188-mclone-overworld-v1-terrain-foundation.md`](tactical/188-mclone-overworld-v1-terrain-foundation.md) for the first original continuous-terrain profile and its explicit reuse/refactor reviews.
 - [`192-mclone-overworld-mountains-and-valleys.md`](tactical/192-mclone-overworld-mountains-and-valleys.md) for the accepted original relief family.
 - [`196-periodic-mclone-terrain-fields.md`](tactical/196-periodic-mclone-terrain-fields.md) for the completed seam-safe field phase before rivers and wetlands.
+- [`220-mclone-overworld-rivers-and-wetlands.md`](tactical/220-mclone-overworld-rivers-and-wetlands.md) for the active bounded watercourse field and human visual gate.
