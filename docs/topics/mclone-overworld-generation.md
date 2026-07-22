@@ -9,9 +9,10 @@ internal-mutable `mclone-overworld-v1` profile while `overworld` remains the
 Minecraft Java 1.17.1 reference path. Tactical
 [`188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md) is complete.
 Tactical [`192`](../tactical/192-mclone-overworld-mountains-and-valleys.md)
-landed its first two-field mountain geometry on 2026-07-22 and is paused at
-Review 1 for human judgment of geometry and scale before terrain-language
-rules change. The shared Flat Grass cylinder proof is complete;
+landed its first two-field mountain geometry and a human-requested shorter
+traversal-scale tune on 2026-07-22. It is paused at the renewed Review 1 for
+human judgment before terrain-language rules change. The shared Flat Grass
+cylinder proof is complete;
 [`196`](../tactical/196-periodic-mclone-terrain-fields.md) is planned after the
 first accepted Tactical 192 field set and before rivers, climate breadth, or
 structures. The selected terrain sequence is mountains and valleys, periodic
@@ -322,20 +323,25 @@ scales and relief at 384, 128, and a low-weight 48-block scale. Review 1 added
 the fine relief octave after initial cards exposed concentric contour bands;
 it did not add a new public semantic field.
 
-Field revision 3 preserves those raw fields and adds broad ruggedness at 1,536
-and 512 blocks plus a ridged crest source at 768 and 256 blocks. Every new
-scale divides the provisional 6,144-block periodic circumference. The terrain
-formula narrows the signed ridge source into connected crest bands, gates
-their lift by inland continentalness and ruggedness, and leaves ocean-floor
-height independent from the new fields. Strong interior crests can reach
-Y=160, while low ridge values within the same region remain traversable valley
-floors. No neighborhood search or new generation dependency footprint is
-involved.
+Field revision 3 preserved those raw fields and added broad ruggedness at
+1,536 and 512 blocks plus a ridged crest source at 768 and 256 blocks. Review 1
+found that the coherent result still took too long to traverse. Field revision
+4 therefore keeps broad ruggedness unchanged, halves the ridge source scales
+to 384 and 128 blocks, and narrows the lift response around crests. Every scale
+still divides the provisional 6,144-block periodic circumference. Strong
+interior crests can reach Y=160, while low ridge values within the same region
+remain traversable valley floors and ordinary lowland regions retain their
+character. No additional field, point-sampling cost, neighborhood search, or
+generation dependency footprint is involved.
 
 `pnpm native:worldgen:fields` now writes all five production-backed maps,
 foundation/new-field fingerprints, landform counts, and selected range,
 valley, edge, and lowland review sites. The fully warmed card tool writes
-rendered review views from those production-selected centers.
+rendered review views from those production-selected centers. Each card eye
+queries actual loaded terrain and canopy height at its own horizontal
+position, requires at least 24 blocks of clearance, and records that clearance
+in receipt schema 5. Review cards use render distance 16, the current shared
+scene maximum, with 1,225 target chunks fully ready before capture.
 
 ## Reuse Boundary
 

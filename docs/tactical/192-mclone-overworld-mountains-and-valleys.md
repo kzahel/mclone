@@ -1,11 +1,13 @@
 # Tactical 192: Mclone Overworld Mountains And Valleys
 
-Status: Slice 1 landed 2026-07-22 and Review 1 is ready for human judgment.
-The production maps and geometry matrix show connected mountain crests,
-traversable valleys, bounded coast transitions, and an unchanged lowland
-control. Existing height-only forest selection visibly blankets the relief;
-surface and vegetation response remains intentionally unimplemented until the
-geometry/scale review is accepted.
+Status: Slice 1 and a human-requested shorter-traversal tune landed 2026-07-22;
+the renewed Review 1 is ready for human judgment. Production maps and the
+maximum-view-distance geometry matrix show shorter connected mountain crests,
+traversable valleys, bounded range transitions, and an unchanged lowland
+control. Every camera eye is proven above loaded terrain and canopy. Existing
+height-only forest selection still blankets some relief; surface and
+vegetation response remains intentionally unimplemented until this geometry
+review is accepted.
 
 Topic: `mclone-overworld-generation`
 
@@ -147,36 +149,47 @@ Gate: the terrain geometry alone reads as a range and valley system.
 
 Gate: obtain human review before extracting helpers or changing content rules.
 
-Field revision 3 uses ruggedness scales 1,536 and 512 plus ridge-source scales
-768 and 256; all divide the planned 6,144-block periodic circumference. The
-ridge source is narrowed into connected crest bands and gated by inland
-continentalness and ruggedness. Ocean-floor composition is unchanged, and
-the dependency plan remains the existing 3-by-3 work/5-by-5 Surface footprint.
+Field revision 3 used ruggedness scales 1,536 and 512 plus ridge-source scales
+768 and 256. Human Review 1 found the slopes coherent but too gradual and slow
+to traverse. Field revision 4 retains the broad ruggedness region, halves only
+the ridge scales to 384 and 128, and narrows the lift response from a `0.12`
+to a `0.22` ridge threshold. All scales still divide the planned 6,144-block
+periodic circumference. Ocean-floor composition is unchanged, and the
+dependency plan remains the existing 3-by-3 work/5-by-5 Surface footprint.
 
 The 385-by-385, 16-block-stride production maps reported:
 
 | Seed and center | Surface range | Mountain region | Valleys | Crests | Y>=105 | Y>=135 |
 |---|---:|---:|---:|---:|---:|---:|
-| `12345`, chunk `(0,0)` | 45-109 | 5,481 | 2,897 | 408 | 158 | 0 |
-| `-98765`, chunk `(-96,72)` | 47-152 | 12,904 | 4,110 | 3,207 | 3,685 | 623 |
-| `8675309`, chunk `(128,-96)` | 45-88 | 0 | 0 | 0 | 0 | 0 |
+| `12345`, chunk `(0,0)` | 45-147 | 5,481 | 1,361 | 1,166 | 585 | 52 |
+| `-98765`, chunk `(-96,72)` | 47-153 | 12,904 | 2,857 | 3,066 | 2,874 | 525 |
+| `8675309`, chunk `(128,-96)` | 45-91 | 0 | 0 | 0 | 0 | 0 |
 
-The first matrix covers seed `12345` range interior `(-67,-120)`, seed
-`-98765` range interior `(-183,23)`, valley `(-199,32)`, and range edge
-`(-243,18)`, plus seed `8675309` lowland control `(122,-96)`. Internal review
-found no isolated cone field, unbroken wall, coordinate-axis discontinuity, or
-global uplift. Connected crest bands and broad valley routes are visible. The
-current card's low camera can be hidden by trees or rising terrain, and the
-height-only wooded-upland rule blankets many shoulders; those are presentation
-and terrain-language findings rather than demonstrated reasons for a third
-geometry field.
+The revised matrix covers seed `12345` range interior `(-133,-66)` and range
+edge `(-142,-51)`, seed `-98765` range interior `(-186,25)` and valley
+`(-204,22)`, plus seed `8675309` lowland control `(122,-96)`. All cards use the
+current maximum render distance 16 at 800 by 500 pixels per panel. Each receipt
+reports 1,225/1,225 target chunks ready and at least 24 blocks of clearance
+above actual terrain/canopy at every eye. The landscape view can no longer
+spawn underground merely because terrain at the displaced eye is higher than
+terrain at the review center.
 
-On the same Linux host and command as Slice 0, the release Mclone surface path
-measured 3,007.452 chunks/s (8.3 percent below baseline), cold decorated
-targets 624.704 chunks/s, and warm decorated targets 4,095.526 chunks/s. Broad
-map sampling rose to roughly 19-22 ms for 148,225 points. Full cold throughput
-is inside the 25 percent review threshold, while the isolated sampler increase
-remains an attribution baseline for periodic fields and rivers.
+Internal review found no isolated cone field, unbroken wall, coordinate-axis
+discontinuity, or global uplift. Connected crests, multiple neighboring peaks,
+and valley-to-crest changes now fit inside the 256-block loaded radius. At
+16-block review stride, edges changing by at least three blocks increased from
+2,092 to 5,878 for seed `12345` and from 8,476 to 12,642 for seed `-98765`;
+the lowland control moved only from 1,821 to 1,845. This is the intended
+shorter traversal signal rather than a global roughness increase. The
+height-only wooded-upland rule still blankets some shoulders, which remains a
+terrain-language finding rather than a reason for a third geometry field.
+
+On the same Linux host and command as Slice 0, revision 4 measured 3,029.299
+Mclone surface chunks/s (7.6 percent below the six-lattice-field foundation),
+628.933 cold decorated targets/s, and 4,217.298 warm decorated targets/s. The
+three 148,225-point maps sampled in 14.801-18.493 ms. The tune changes no field
+count and is inside the 25 percent review threshold; this remains the
+attribution baseline for periodic fields and rivers.
 
 ### Slice 2: terrain-language response
 
