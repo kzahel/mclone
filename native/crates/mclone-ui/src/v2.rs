@@ -409,7 +409,20 @@ pub struct UiDebugSnapshot {
     pub pointer: Option<Point>,
     pub hovered: Option<UiWidgetId>,
     pub captured: Option<UiWidgetId>,
+    pub focused: Option<UiWidgetId>,
     pub widgets: Vec<UiDebugWidget>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum GuiNavigation {
+    Up,
+    Down,
+    Left,
+    Right,
+    Confirm,
+    Back,
+    PreviousPage,
+    NextPage,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -450,6 +463,7 @@ pub struct UiSurface {
     pointer: Option<Point>,
     hovered: Option<UiWidgetId>,
     captured: Option<UiWidgetId>,
+    focused: Option<UiWidgetId>,
     font: Font,
     debug_overlay: bool,
     block_palette_grid: Option<CachedBlockPaletteGridLayer>,
@@ -479,6 +493,7 @@ impl UiSurface {
             pointer: None,
             hovered: None,
             captured: None,
+            focused: None,
             font: Font::default(),
             debug_overlay: false,
             block_palette_grid: None,
@@ -502,6 +517,7 @@ impl UiSurface {
         self.frame_revision = self.frame_revision.wrapping_add(1);
         self.layout_dirty = true;
         self.set_interaction_state(None, None, None);
+        self.set_focus(None);
     }
 
     pub fn set_scale(&mut self, scale: GuiScale) {
@@ -554,6 +570,7 @@ impl UiSurface {
 
     pub fn clear_input(&mut self) {
         self.set_interaction_state(None, None, None);
+        self.set_focus(None);
     }
 
     pub fn frame_state(&self) -> Option<UiFrameState> {
@@ -583,6 +600,7 @@ impl UiSurface {
             pointer: self.pointer,
             hovered: self.hovered,
             captured: self.captured,
+            focused: self.focused,
             widgets: self
                 .layout
                 .widgets()
@@ -611,6 +629,7 @@ impl UiSurface {
         self.ensure_layout();
         let hovered = self.layout.hit_test(point);
         self.set_interaction_state(Some(point), hovered, self.captured);
+        self.set_focus(None);
         let action = self
             .captured
             .and_then(|id| self.layout.widget(id))
@@ -627,6 +646,7 @@ impl UiSurface {
         self.ensure_layout();
         let hovered = self.layout.hit_test(point);
         self.set_interaction_state(Some(point), hovered, hovered);
+        self.set_focus(None);
         true
     }
 
@@ -643,6 +663,7 @@ impl UiSurface {
         let hovered = self.layout.hit_test(point);
         let captured = self.captured;
         self.set_interaction_state(Some(point), hovered, None);
+        self.set_focus(None);
         let action = captured
             .and_then(|captured| self.layout.widget(captured))
             .and_then(|widget| match widget.action {
@@ -656,6 +677,46 @@ impl UiSurface {
                 _ => None,
             });
         (true, action)
+    }
+
+    pub fn navigate(
+        &mut self,
+        navigation: GuiNavigation,
+        render_state: GameUiRenderState,
+    ) -> (bool, Option<GameUiAction>) {
+        if !self.is_active() {
+            return (false, None);
+        }
+        self.set_render_state(render_state);
+        self.ensure_layout();
+        self.set_interaction_state(None, None, None);
+        match navigation {
+            GuiNavigation::Back => self.key_pressed(GuiKey::Escape),
+            GuiNavigation::Confirm => (true, self.activate_focused()),
+            GuiNavigation::PreviousPage => {
+                self.move_focus_linear(-1);
+                (true, None)
+            }
+            GuiNavigation::NextPage => {
+                self.move_focus_linear(1);
+                (true, None)
+            }
+            GuiNavigation::Left | GuiNavigation::Right if self.focused_widget_is_slider() => {
+                let direction = if navigation == GuiNavigation::Left {
+                    -1.0
+                } else {
+                    1.0
+                };
+                (true, self.adjust_focused_slider(direction))
+            }
+            GuiNavigation::Up
+            | GuiNavigation::Down
+            | GuiNavigation::Left
+            | GuiNavigation::Right => {
+                self.move_focus_spatial(navigation);
+                (true, None)
+            }
+        }
     }
 
     pub fn key_pressed(&mut self, key: GuiKey) -> (bool, Option<GameUiAction>) {
@@ -871,6 +932,13 @@ impl UiSurface {
         {
             self.set_interaction_state(self.pointer, self.hovered, None);
         }
+        if self.focused.is_some_and(|focused| {
+            self.layout
+                .widget(focused)
+                .is_none_or(|widget| !widget_is_focusable(widget))
+        }) {
+            self.set_focus(None);
+        }
     }
 
     fn interaction(&self) -> Interaction {
@@ -884,7 +952,7 @@ impl UiSurface {
         Interaction {
             pointer,
             pressed: self.captured.map(UiWidgetId::legacy_widget_id),
-            focused: None,
+            focused: self.focused.map(UiWidgetId::legacy_widget_id),
         }
     }
 
@@ -904,6 +972,132 @@ impl UiSurface {
         if visual_changed {
             self.interaction_revision = self.interaction_revision.wrapping_add(1);
         }
+    }
+
+    fn set_focus(&mut self, focused: Option<UiWidgetId>) {
+        if self.focused == focused {
+            return;
+        }
+        self.focused = focused;
+        self.interaction_revision = self.interaction_revision.wrapping_add(1);
+    }
+
+    fn focusable_widgets(&self) -> Vec<(UiWidgetId, Rect)> {
+        self.layout
+            .widgets()
+            .iter()
+            .filter(|widget| widget_is_focusable(widget))
+            .map(|widget| (widget.id, widget.rect))
+            .collect()
+    }
+
+    fn move_focus_linear(&mut self, step: isize) {
+        let widgets = self.focusable_widgets();
+        if widgets.is_empty() {
+            self.set_focus(None);
+            return;
+        }
+        let current = self
+            .focused
+            .and_then(|focused| widgets.iter().position(|(id, _)| *id == focused));
+        let next = match current {
+            Some(index) => (index as isize + step).rem_euclid(widgets.len() as isize) as usize,
+            None if step < 0 => widgets.len() - 1,
+            None => 0,
+        };
+        self.set_focus(Some(widgets[next].0));
+    }
+
+    fn move_focus_spatial(&mut self, navigation: GuiNavigation) {
+        let widgets = self.focusable_widgets();
+        if widgets.is_empty() {
+            self.set_focus(None);
+            return;
+        }
+        let Some((_, current_rect)) = self
+            .focused
+            .and_then(|focused| widgets.iter().find(|(id, _)| *id == focused).copied())
+        else {
+            let index = if matches!(navigation, GuiNavigation::Up | GuiNavigation::Left) {
+                widgets.len() - 1
+            } else {
+                0
+            };
+            self.set_focus(Some(widgets[index].0));
+            return;
+        };
+        let current = Point {
+            x: current_rect.center_x(),
+            y: current_rect.y + current_rect.height * 0.5,
+        };
+        let mut best: Option<(f32, UiWidgetId)> = None;
+        for (id, rect) in &widgets {
+            if Some(*id) == self.focused {
+                continue;
+            }
+            let dx = rect.center_x() - current.x;
+            let dy = rect.y + rect.height * 0.5 - current.y;
+            let (primary, secondary) = match navigation {
+                GuiNavigation::Up => (-dy, dx.abs()),
+                GuiNavigation::Down => (dy, dx.abs()),
+                GuiNavigation::Left => (-dx, dy.abs()),
+                GuiNavigation::Right => (dx, dy.abs()),
+                _ => unreachable!("only spatial navigation reaches this helper"),
+            };
+            if primary <= 0.5 {
+                continue;
+            }
+            let score = primary + secondary * 3.0;
+            if best.is_none_or(|(best_score, _)| score < best_score) {
+                best = Some((score, *id));
+            }
+        }
+        if let Some((_, id)) = best {
+            self.set_focus(Some(id));
+        } else {
+            self.move_focus_linear(match navigation {
+                GuiNavigation::Up | GuiNavigation::Left => -1,
+                GuiNavigation::Down | GuiNavigation::Right => 1,
+                _ => unreachable!("only spatial navigation reaches this helper"),
+            });
+        }
+    }
+
+    fn focused_widget_is_slider(&self) -> bool {
+        self.focused
+            .and_then(|focused| self.layout.widget(focused))
+            .is_some_and(|widget| matches!(widget.kind, UiWidgetKind::Slider { .. }))
+    }
+
+    fn activate_focused(&mut self) -> Option<GameUiAction> {
+        if self.focused.is_none() {
+            self.move_focus_linear(1);
+        }
+        let widget = self
+            .focused
+            .and_then(|focused| self.layout.widget(focused))?
+            .clone();
+        if matches!(widget.kind, UiWidgetKind::Slider { .. }) {
+            return None;
+        }
+        self.action_for_widget(
+            &widget,
+            Point {
+                x: widget.rect.center_x(),
+                y: widget.rect.y + widget.rect.height * 0.5,
+            },
+        )
+    }
+
+    fn adjust_focused_slider(&self, direction: f32) -> Option<GameUiAction> {
+        let widget = self
+            .focused
+            .and_then(|focused| self.layout.widget(focused))?;
+        let UiWidgetKind::Slider { value } = widget.kind else {
+            return None;
+        };
+        let slider = Slider::new(widget.id.legacy_widget_id(), widget.rect, "", value);
+        self.action_for_widget(widget, slider.point_for_value(value + direction * 0.05))
     }
 
     fn render_title(&self, draw: &mut GuiDrawList) {
@@ -1798,6 +1992,17 @@ impl UiSurface {
             .enabled(widget.enabled)
             .render_atlas_text(draw, &self.font, interaction),
         }
+        if widget.enabled
+            && interaction.is_focused(widget.id.legacy_widget_id())
+            && matches!(
+                widget.kind,
+                UiWidgetKind::WorldRow { .. }
+                    | UiWidgetKind::AssetPackRow { .. }
+                    | UiWidgetKind::PaletteSlot { .. }
+            )
+        {
+            draw.outline(widget.rect.inset(1.0), Color::rgba(255, 255, 225, 255));
+        }
     }
 
     fn render_debug_overlay(&self, draw: &mut GuiDrawList) {
@@ -1853,6 +2058,10 @@ impl UiSurface {
             }
         }
     }
+}
+
+fn widget_is_focusable(widget: &UiWidget) -> bool {
+    widget.enabled && widget.action.is_some()
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -2455,6 +2664,15 @@ impl GameUiHost {
     pub fn key_pressed(&mut self, key: GuiKey) -> (bool, Option<GameUiAction>) {
         if self.sync_surface_screen() {
             self.surface.key_pressed(key)
+        } else {
+            (false, None)
+        }
+    }
+
+    pub fn navigate(&mut self, navigation: GuiNavigation) -> (bool, Option<GameUiAction>) {
+        let state = self.committed_render_state;
+        if self.sync_surface_screen() {
+            self.surface.navigate(navigation, state)
         } else {
             (false, None)
         }

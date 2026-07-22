@@ -691,7 +691,10 @@ fn resolve_navigation(
             PlayerAction::UiConfirm,
             state.snapshot.buttons.south.pressed,
         ),
-        (PlayerAction::UiBack, state.snapshot.buttons.east.pressed),
+        (
+            PlayerAction::UiBack,
+            state.snapshot.buttons.east.pressed || state.snapshot.buttons.start.pressed,
+        ),
         (
             PlayerAction::UiPreviousPage,
             state.snapshot.buttons.left_shoulder.pressed,

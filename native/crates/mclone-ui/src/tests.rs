@@ -670,6 +670,39 @@ fn gamepad_prompt_rects_stay_inside_gui_space() {
 }
 
 #[test]
+fn gamepad_prompts_follow_layout_family_and_semantic_bindings() {
+    let bindings = GamepadBindings::default();
+    assert_eq!(
+        gamepad_prompt_for_action(
+            ControllerLayoutFamily::XboxLike,
+            &bindings,
+            InputBindingAction::Jump,
+        ),
+        Some("A")
+    );
+    assert_eq!(
+        gamepad_prompt_for_action(
+            ControllerLayoutFamily::NintendoLike,
+            &bindings,
+            InputBindingAction::Jump,
+        ),
+        Some("B")
+    );
+    assert_eq!(
+        gamepad_prompt_for_action(
+            ControllerLayoutFamily::PlayStationLike,
+            &bindings,
+            InputBindingAction::Attack,
+        ),
+        Some("R2")
+    );
+    assert_eq!(
+        gamepad_control_label(ControllerLayoutFamily::Unknown, GamepadControl::SouthButton,),
+        "S"
+    );
+}
+
+#[test]
 fn touch_overlay_renders_native_controls_when_visible() {
     let mut draw = GuiDrawList::new();
     let overlay = TouchOverlay {

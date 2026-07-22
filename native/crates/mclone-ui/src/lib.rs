@@ -1,16 +1,18 @@
 #![forbid(unsafe_code)]
 
 use mclone_input::{
-    FLAT_HOTBAR_SLOT_COUNT, InputPromptKind, ResolvedFlatInput, TouchControl, TouchControlsMode,
+    ControllerLayoutFamily, FLAT_HOTBAR_SLOT_COUNT, GamepadBindings, GamepadControl,
+    InputBindingAction, InputPromptKind, ResolvedFlatInput, TouchControl, TouchControlsMode,
 };
 
 mod frame_pipeline_overlay;
 mod v2;
 pub use frame_pipeline_overlay::{FramePipelineHudOverlay, render_frame_pipeline_overlay};
 pub use v2::{
-    FlatHudDrawList, GameUiHost, LoadingProgressDrawList, LoadingProgressOverlayLayer,
-    UiDebugSnapshot, UiDebugWidget, UiDrawCacheStats, UiFrameState, UiLayout, UiPanelDrawList,
-    UiPanelRevision, UiScreenId, UiSurface, UiWidget, UiWidgetId, UiWidgetKind,
+    FlatHudDrawList, GameUiHost, GuiNavigation, LoadingProgressDrawList,
+    LoadingProgressOverlayLayer, UiDebugSnapshot, UiDebugWidget, UiDrawCacheStats, UiFrameState,
+    UiLayout, UiPanelDrawList, UiPanelRevision, UiScreenId, UiSurface, UiWidget, UiWidgetId,
+    UiWidgetKind,
 };
 
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = FLAT_HOTBAR_SLOT_COUNT as usize;
@@ -767,6 +769,14 @@ impl Slider {
     pub fn value_from_point(&self, point: Point) -> f32 {
         let track = self.track_rect();
         ((point.x - track.x) / track.width.max(1.0)).clamp(0.0, 1.0)
+    }
+
+    pub fn point_for_value(&self, value: f32) -> Point {
+        let track = self.track_rect();
+        Point {
+            x: track.x + value.clamp(0.0, 1.0) * track.width,
+            y: track.y + track.height * 0.5,
+        }
     }
 
     fn track_rect(&self) -> Rect {
@@ -2692,6 +2702,7 @@ pub struct GamepadHudOverlay {
     pub visible: bool,
     pub hotbar_hints_visible: bool,
     pub action_hints_visible: bool,
+    pub controller_layout: ControllerLayoutFamily,
 }
 
 impl GamepadHudOverlay {
@@ -2700,14 +2711,20 @@ impl GamepadHudOverlay {
             visible: false,
             hotbar_hints_visible: false,
             action_hints_visible: false,
+            controller_layout: ControllerLayoutFamily::Unknown,
         }
     }
 
     pub fn visible() -> Self {
+        Self::visible_for_layout(ControllerLayoutFamily::Unknown)
+    }
+
+    pub fn visible_for_layout(controller_layout: ControllerLayoutFamily) -> Self {
         Self {
             visible: true,
             hotbar_hints_visible: true,
             action_hints_visible: true,
+            controller_layout,
         }
     }
 }
@@ -3677,12 +3694,27 @@ fn render_gamepad_hud(
             28.0,
             16.0,
         );
-        render_gamepad_prompt_chip(draw, &font, left, "LB");
-        render_gamepad_prompt_chip(draw, &font, right, "RB");
+        render_gamepad_prompt_chip(
+            draw,
+            &font,
+            left,
+            gamepad_control_label(overlay.controller_layout, GamepadControl::LeftShoulder),
+        );
+        render_gamepad_prompt_chip(
+            draw,
+            &font,
+            right,
+            gamepad_control_label(overlay.controller_layout, GamepadControl::RightShoulder),
+        );
     }
     if overlay.action_hints_visible {
-        for (rect, label) in gamepad_action_prompt_rects(scale) {
-            render_gamepad_prompt_chip(draw, &font, rect, label);
+        for (rect, control) in gamepad_action_prompt_rects(scale) {
+            render_gamepad_prompt_chip(
+                draw,
+                &font,
+                rect,
+                gamepad_control_label(overlay.controller_layout, control),
+            );
         }
     }
 }
@@ -3700,7 +3732,7 @@ fn render_gamepad_prompt_chip(draw: &mut GuiDrawList, font: &Font, rect: Rect, l
     );
 }
 
-fn gamepad_action_prompt_rects(scale: GuiScale) -> [(Rect, &'static str); 4] {
+fn gamepad_action_prompt_rects(scale: GuiScale) -> [(Rect, GamepadControl); 4] {
     let size = 18.0;
     let gap = 4.0;
     let right = 12.0;
@@ -3710,11 +3742,88 @@ fn gamepad_action_prompt_rects(scale: GuiScale) -> [(Rect, &'static str); 4] {
     let y1 = (scale.height - bottom - size).max(4.0);
     let y0 = (y1 - gap - size).max(4.0);
     [
-        (Rect::new(x0, y0, size, size), "Y"),
-        (Rect::new(x0, y1, size, size), "X"),
-        (Rect::new(x1, y0, size, size), "B"),
-        (Rect::new(x1, y1, size, size), "A"),
+        (Rect::new(x0, y0, size, size), GamepadControl::NorthButton),
+        (Rect::new(x0, y1, size, size), GamepadControl::WestButton),
+        (Rect::new(x1, y0, size, size), GamepadControl::EastButton),
+        (Rect::new(x1, y1, size, size), GamepadControl::SouthButton),
     ]
+}
+
+pub fn gamepad_prompt_for_action(
+    controller_layout: ControllerLayoutFamily,
+    bindings: &GamepadBindings,
+    action: InputBindingAction,
+) -> Option<&'static str> {
+    bindings
+        .bindings
+        .iter()
+        .find_map(|binding| (binding.action == action).then_some(binding.control))
+        .map(|control| gamepad_control_label(controller_layout, control))
+}
+
+pub const fn gamepad_control_label(
+    controller_layout: ControllerLayoutFamily,
+    control: GamepadControl,
+) -> &'static str {
+    use ControllerLayoutFamily as Layout;
+    use GamepadControl as Control;
+    match control {
+        Control::LeftStick => "LS",
+        Control::RightStick => "RS",
+        Control::SouthButton => match controller_layout {
+            Layout::XboxLike | Layout::SteamDeckLike => "A",
+            Layout::PlayStationLike => "CR",
+            Layout::NintendoLike => "B",
+            Layout::Generic | Layout::Unknown => "S",
+        },
+        Control::EastButton => match controller_layout {
+            Layout::XboxLike | Layout::SteamDeckLike => "B",
+            Layout::PlayStationLike => "CI",
+            Layout::NintendoLike => "A",
+            Layout::Generic | Layout::Unknown => "E",
+        },
+        Control::WestButton => match controller_layout {
+            Layout::XboxLike | Layout::SteamDeckLike => "X",
+            Layout::PlayStationLike => "SQ",
+            Layout::NintendoLike => "Y",
+            Layout::Generic | Layout::Unknown => "W",
+        },
+        Control::NorthButton => match controller_layout {
+            Layout::XboxLike | Layout::SteamDeckLike => "Y",
+            Layout::PlayStationLike => "TR",
+            Layout::NintendoLike => "X",
+            Layout::Generic | Layout::Unknown => "N",
+        },
+        Control::LeftShoulder => match controller_layout {
+            Layout::PlayStationLike => "L1",
+            Layout::NintendoLike => "L",
+            _ => "LB",
+        },
+        Control::RightShoulder => match controller_layout {
+            Layout::PlayStationLike => "R1",
+            Layout::NintendoLike => "R",
+            _ => "RB",
+        },
+        Control::LeftTrigger => match controller_layout {
+            Layout::PlayStationLike => "L2",
+            Layout::NintendoLike => "ZL",
+            _ => "LT",
+        },
+        Control::RightTrigger => match controller_layout {
+            Layout::PlayStationLike => "R2",
+            Layout::NintendoLike => "ZR",
+            _ => "RT",
+        },
+        Control::DPadLeft => "D<",
+        Control::DPadRight => "D>",
+        Control::DPadUp => "D^",
+        Control::DPadDown => "Dv",
+        Control::StartButton => "+",
+        Control::SelectButton => "-",
+        Control::LeftStickButton => "L3",
+        Control::RightStickButton => "R3",
+        Control::GuideButton => "SYS",
+    }
 }
 
 fn render_touch_panel(draw: &mut GuiDrawList, rect: Rect, pressed: bool) {

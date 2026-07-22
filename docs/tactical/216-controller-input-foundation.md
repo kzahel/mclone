@@ -249,9 +249,50 @@ cargo test -p mclone-input -p mclone-scene: 34 + 128 passed
 cargo check -p mclone-scene --target wasm32-unknown-unknown: passed
 ```
 
-No platform collector calls the new route yet. Controller UI actions are
-recognized in Menu context but intentionally await Slice 3's shared focus and
-activation implementation before product adoption.
+No platform collector calls the new route yet. Slice 3 completes the shared
+focus and activation consumer required before product adoption.
+
+### Slice 3 — controller-complete shared UI
+
+Implemented on 2026-07-22. `mclone-ui::GuiNavigation` now provides directional,
+confirm, back, and previous/next-page input over the retained UI surface.
+Navigation uses committed widget geometry, stable wraparound order, skips
+disabled or non-actionable widgets, adjusts focused sliders in bounded steps,
+and delegates Back to the exact existing Escape policy. Pointer activity clears
+controller focus so mouse hover and controller focus cannot leave competing
+visual states.
+
+`MonoInteractiveInputRouter` maps semantic menu actions through that contract
+and applies returned `GameUiAction` values through the same scene owner as
+pointer and keyboard input. Keyboard arrows and Space also reuse navigation;
+controller repeat remains owned by `ControllerInputSession` rather than OS key
+repeat. The covered surfaces include every non-text menu surface with an
+available committed action, while populated world, asset-pack, and block-palette
+rows retain their dynamic action ownership.
+
+Gamepad HUD prompts now resolve semantic bindings through
+`ControllerLayoutFamily`, with Xbox-like, PlayStation-like, Nintendo-like,
+Steam/Deck-like, generic, and unknown text projections. The hidden/visible HUD
+API no longer silently assumes Xbox labels. A narrow
+`--screenshot-controller-focus` diagnostic establishes controller focus before
+an offscreen UI capture.
+
+Focused evidence:
+
+```text
+cargo test -p mclone-ui: 95 passed
+cargo test -p mclone-scene: 128 passed plus integration suites
+cargo test -p mclone-native-client
+  cli_parses_full_frame_screenshot_options: passed
+cargo check -p mclone-ui -p mclone-scene -p mclone-web-client
+  --target wasm32-unknown-unknown: passed
+controller-focus screenshot: 960x540, 97 GUI commands, visually inspected
+```
+
+The inspected `/tmp/mclone-controller-focus.png` capture showed a clear focused
+outline on the first enabled Options row with the remaining menu geometry and
+world composition intact. The capture remains outside the repository. Physical
+device navigation and prompt-family acceptance remain in the hardware ledger.
 
 ## Completion Bar
 

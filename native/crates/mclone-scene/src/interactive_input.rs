@@ -4,7 +4,7 @@ use mclone_input::{
     InputSourceDescriptor, InputSourceId, KeyboardKey, KeyboardMouseInputAdapter,
     MouseWheelDirection, PlayerActionFrame, PointerButton, StandardGamepadSnapshot, TouchLookDelta,
 };
-use mclone_ui::{GameHelpParent, GameUiAction, GuiKey, Point};
+use mclone_ui::{GameHelpParent, GameUiAction, GuiKey, GuiNavigation, Point};
 use std::time::Duration;
 
 use crate::{
@@ -148,10 +148,28 @@ impl MonoInteractiveInputRouter {
         };
         let actions = self.sample_controller_actions(context, now, samples)?;
         if context != InputContext::Gameplay {
-            return Ok(MonoInputDisposition {
+            let mut disposition = MonoInputDisposition {
                 handled: !actions.pressed.is_empty() || !actions.released.is_empty(),
                 ..MonoInputDisposition::default()
-            });
+            };
+            for action in actions.pressed {
+                let Some(navigation) = gui_navigation_from_player_action(action) else {
+                    continue;
+                };
+                let (handled, ui_action) = host.mono_ui_navigate(navigation);
+                disposition.handled |= handled;
+                disposition.scene_changed |= handled;
+                if let Some(ui_action) = ui_action {
+                    disposition.merge(Self::apply_ui_action(
+                        host, ui_action, false, device, queue, effects,
+                    )?);
+                }
+                if disposition.clear_transient_input {
+                    break;
+                }
+            }
+            self.clear_if_requested(disposition);
+            return Ok(disposition);
         }
         // Continuous movement/look is applied exactly once by
         // `advance_held_frame`. The immediate route consumes only action edges
@@ -211,6 +229,21 @@ impl MonoInteractiveInputRouter {
                     handled: true,
                     ..MonoInputDisposition::default()
                 });
+            }
+            if let Some(navigation) = gui_navigation_from_keyboard_key(key) {
+                let (handled, action) = host.mono_ui_navigate(navigation);
+                let mut disposition = MonoInputDisposition {
+                    handled,
+                    scene_changed: handled,
+                    ..MonoInputDisposition::default()
+                };
+                if let Some(action) = action {
+                    disposition.merge(Self::apply_ui_action(
+                        host, action, false, device, queue, effects,
+                    )?);
+                }
+                self.clear_if_requested(disposition);
+                return Ok(disposition);
             }
             let Some(gui_key) = gui_key_from_keyboard_key(key) else {
                 return Ok(MonoInputDisposition {
@@ -529,6 +562,31 @@ fn gui_key_from_keyboard_key(key: KeyboardKey) -> Option<GuiKey> {
     match key {
         KeyboardKey::Escape => Some(GuiKey::Escape),
         KeyboardKey::F1 => Some(GuiKey::F1),
+        _ => None,
+    }
+}
+
+fn gui_navigation_from_keyboard_key(key: KeyboardKey) -> Option<GuiNavigation> {
+    match key {
+        KeyboardKey::ArrowUp => Some(GuiNavigation::Up),
+        KeyboardKey::ArrowDown => Some(GuiNavigation::Down),
+        KeyboardKey::ArrowLeft => Some(GuiNavigation::Left),
+        KeyboardKey::ArrowRight => Some(GuiNavigation::Right),
+        KeyboardKey::Space => Some(GuiNavigation::Confirm),
+        _ => None,
+    }
+}
+
+fn gui_navigation_from_player_action(action: mclone_input::PlayerAction) -> Option<GuiNavigation> {
+    match action {
+        mclone_input::PlayerAction::UiNavigateUp => Some(GuiNavigation::Up),
+        mclone_input::PlayerAction::UiNavigateDown => Some(GuiNavigation::Down),
+        mclone_input::PlayerAction::UiNavigateLeft => Some(GuiNavigation::Left),
+        mclone_input::PlayerAction::UiNavigateRight => Some(GuiNavigation::Right),
+        mclone_input::PlayerAction::UiConfirm => Some(GuiNavigation::Confirm),
+        mclone_input::PlayerAction::UiBack => Some(GuiNavigation::Back),
+        mclone_input::PlayerAction::UiNextPage => Some(GuiNavigation::NextPage),
+        mclone_input::PlayerAction::UiPreviousPage => Some(GuiNavigation::PreviousPage),
         _ => None,
     }
 }

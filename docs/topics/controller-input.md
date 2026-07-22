@@ -2,8 +2,9 @@
 
 Topic: `controller-input`
 
-Status: active implementation; shared source/assignment and semantic controller
-session foundations implemented as of 2026-07-22. The existing capability,
+Status: active implementation; shared source/assignment, semantic controller
+session, scene routing, controller-complete menu navigation, and layout-aware
+text prompt foundations implemented as of 2026-07-22. The existing capability,
 binding, prompt, and first-pass gamepad adapter foundation is retained, but no
 product target currently polls a real gamepad. This topic
 owns the durable all-target controller direction across desktop flat, web,
@@ -118,12 +119,17 @@ source seam, but not yet the complete semantic or physical-input contract:
   remains a supplemental shared frame, and no platform collector calls the
   controller route yet. Desktop, Android, and web still separately retain
   capability/preference facts.
-- `mclone-ui::GuiKey` currently exposes only Escape and F1. There is no shared
-  directional navigation, confirm/back, focus traversal, or deterministic
-  controller repeat policy.
-- The current gamepad HUD renders literal Xbox-style `A/B/X/Y/LB/RB` labels.
-  It does not resolve prompts from controller family, active binding, or an
-  action origin.
+- `mclone-ui::GuiNavigation` now owns directional traversal, confirm/back,
+  page navigation, disabled-widget skipping, slider adjustment, and focus
+  visuals. The scene maps semantic menu actions through it, and deterministic
+  controller repeat remains in `ControllerInputSession`. Dynamic rows are
+  navigable when their committed action-bearing widgets exist. Text-entry
+  editing remains keyboard/touch oriented and is intentionally not treated as
+  complete controller text entry.
+- The gamepad HUD now resolves text labels from semantic bindings and Xbox-like,
+  PlayStation-like, Nintendo-like, Steam/Deck-like, generic, or unknown layout
+  families. Exact vendor glyph assets and backend action-origin glyphs remain
+  future work; text fallback is the supported foundation.
 - `XrControllerSnapshot` is correctly host-neutral, but it combines spatial
   tracking with physically named controls such as `a_pressed`, `b_pressed`,
   `y_pressed`, trigger, squeeze, and thumbstick. The OpenXR host similarly

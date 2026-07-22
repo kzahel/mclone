@@ -15,7 +15,7 @@ use mclone_scene::{
     WarmWorldStandbySnapshot,
 };
 use mclone_server::initial_spawn_center_for_seed;
-use mclone_ui::{GameTravelAssistMode, Point};
+use mclone_ui::{GameTravelAssistMode, GuiNavigation, Point};
 
 use crate::camera::SpectatorCamera;
 use crate::cli::{
@@ -2073,6 +2073,18 @@ fn configure_screenshot_scene(
         host.force_day_time(day_time);
     }
     host.settle_remote_session(options.remote_settle_ms)?;
+    if options.controller_focus {
+        let (handled, action) = host
+            .driver
+            .host_mut()
+            .mono_ui_navigate(GuiNavigation::NextPage);
+        if !handled {
+            bail!("controller-focus screenshot requires an active UI screen");
+        }
+        if action.is_some() {
+            bail!("initial controller focus unexpectedly activated a UI action");
+        }
+    }
     if options.scripted_interaction {
         host.apply_scripted_interaction(device, queue)?;
     } else {

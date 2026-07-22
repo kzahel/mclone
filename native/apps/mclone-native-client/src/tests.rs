@@ -22,6 +22,7 @@ fn screenshot_cli(
             debug_pane: false,
             player_collision_box: false,
             blink_debug: false,
+            controller_focus: false,
             scripted_interaction: false,
             remote_settle_ms: 0,
             eye: None,

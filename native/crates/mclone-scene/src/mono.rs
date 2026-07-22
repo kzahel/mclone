@@ -961,6 +961,13 @@ impl McloneSceneHost {
         self.ui.key_pressed(key)
     }
 
+    pub fn mono_ui_navigate(
+        &mut self,
+        navigation: mclone_ui::GuiNavigation,
+    ) -> (bool, Option<GameUiAction>) {
+        self.ui.navigate(navigation)
+    }
+
     pub fn mono_ui_pointer_down(&mut self, point: Point) -> bool {
         self.ui.pointer_down(point)
     }
