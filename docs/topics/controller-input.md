@@ -10,10 +10,12 @@ Gamepad mapping near its animation-frame boundary. Flat Android now routes a
 shared source-aware Java/Rust collector through the semantic scene input path;
 desktop and Android XR now merge the same ordinary-controller facts with
 semantic OpenXR actions. Tracked poses and XR-only mechanics remain typed
-extensions, while pose-less Attack/Use use a shared head-gaze fallback. This
-topic owns the durable all-target controller direction across desktop flat,
-web, flat Android, desktop XR, Android XR, offscreen/test hosts, Steam Deck,
-and a future native Steam Input integration. Tactical
+extensions, while pose-less Attack/Use use a shared head-gaze fallback. A
+versioned shared preference profile and neutral haptic output contract are
+implemented; web storage migration is live and native host adoption remains in
+progress. This topic owns the durable all-target controller direction across
+desktop flat, web, flat Android, desktop XR, Android XR, offscreen/test hosts,
+Steam Deck, and a future native Steam Input integration. Tactical
 [`098`](../tactical/098-flat-input-capability-convergence.md) remains the
 bounded execution record for the existing flat-input slices.
 [`Tactical 215`](../tactical/215-preliminary-couch-readiness.md) owns the
@@ -145,6 +147,16 @@ source seam, but not yet the complete semantic or physical-input contract:
   Android XR merge ordinary gamepad actions through one stateful aggregate,
   preserving correct edges when two sources overlap. Remaining XR work is
   real headset/gamepad feel and regression acceptance, not another input path.
+- `ControllerInputPreferences` now carries preferred input, controller layout
+  override, dead zones, response curves, look rate, horizontal/vertical
+  inversion, thresholds/repeat, and schema-name-based bindings. The shared
+  runtime wraps it with touch preferences in schema 1, migrates legacy browser
+  keys, rejects unknown future schemas, writes native files atomically, and
+  includes the file in explicit factory reset. Browser applies the profile;
+  native flat/XR host loading is the next bounded adoption step.
+- `HapticRequest`, neutral gamepad/source/XR-hand targets, normalized dual-motor
+  amplitudes, source capability counts, and an explicit no-op output establish
+  the shared output seam. No physical backend claims haptic support yet.
 
 These are foundation gaps, not reasons to add platform-local gameplay maps.
 
@@ -562,9 +574,9 @@ standard snapshot or make the shared gameplay path conditional on a vendor.
 7. **XR action convergence.** Implemented: OpenXR application actions produce
    semantic action state plus typed tracked/XR extensions, both XR hosts accept
    ordinary gamepad actions, and the shared scene owns head-gaze fallback.
-8. **Preferences and rebinding.** Persist controller sensitivity, inversion,
-   dead zones, layout override, preferred input, and schema-versioned bindings
-   through shared preference codecs and platform storage executors.
+8. **Preferences and rebinding.** Shared policy, schema-1 codec, legacy web
+   migration, atomic native storage, browser application, and neutral haptics
+   are implemented. Native flat/XR application and closeout remain active.
 9. **Optional advanced backends.** Add Steam Input, haptics, exact glyph
    origins, gyro/touchpads, accessibility extensions, and durable
    source-to-profile/participant association beyond the preliminary seat

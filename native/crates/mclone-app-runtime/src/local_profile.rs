@@ -270,6 +270,16 @@ pub fn factory_reset_native_local_preferences(
             }
         }
     }
+    if let Some(path) = crate::input_preferences::native_input_preference_path(Some(world_root)) {
+        match std::fs::remove_file(&path) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(error)
+                    .with_context(|| format!("delete input preference {}", path.display()));
+            }
+        }
+    }
     let scenario_root = world_root.parent().unwrap_or(world_root).join("scenarios");
     match std::fs::remove_dir_all(&scenario_root) {
         Ok(()) => {}
@@ -462,6 +472,11 @@ mod tests {
             "preference",
         )
         .unwrap();
+        std::fs::write(
+            preferences.join(crate::input_preferences::INPUT_PREFERENCE_FILE_NAME),
+            "input preference",
+        )
+        .unwrap();
         std::fs::write(scenario_root.join("private.bin"), "private").unwrap();
         std::fs::write(&unrelated, "preserve").unwrap();
 
@@ -476,6 +491,11 @@ mod tests {
         assert!(
             !preferences
                 .join(crate::asset_pack_preferences::ASSET_PACK_PREFERENCE_FILE_NAME)
+                .exists()
+        );
+        assert!(
+            !preferences
+                .join(crate::input_preferences::INPUT_PREFERENCE_FILE_NAME)
                 .exists()
         );
         assert!(!scenario_root.exists());

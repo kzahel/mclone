@@ -1,9 +1,9 @@
 use anyhow::Result;
 use mclone_input::{
-    ControllerInputError, ControllerInputSession, FlatInputAction, FlatInputFrame, InputContext,
-    InputSourceDescriptor, InputSourceId, KeyboardKey, KeyboardMouseInputAdapter,
-    MouseWheelDirection, PlayerActionFrame, PlayerActionFrameCombiner, PointerButton,
-    StandardGamepadSnapshot, TouchLookDelta, XrInputFrame,
+    ControllerInputError, ControllerInputPreferences, ControllerInputSession, FlatInputAction,
+    FlatInputFrame, InputContext, InputSourceDescriptor, InputSourceId, KeyboardKey,
+    KeyboardMouseInputAdapter, MouseWheelDirection, PlayerActionFrame, PlayerActionFrameCombiner,
+    PointerButton, StandardGamepadSnapshot, TouchLookDelta, XrInputFrame,
 };
 use mclone_ui::{GameHelpParent, GameUiAction, GuiKey, GuiNavigation, Point};
 use std::time::Duration;
@@ -48,6 +48,19 @@ pub struct XrControllerInputRouter {
 impl XrControllerInputRouter {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_controller_preferences(preferences: &ControllerInputPreferences) -> Self {
+        Self {
+            controller: ControllerInputSession::with_preferences(preferences),
+            ..Self::default()
+        }
+    }
+
+    pub fn apply_controller_preferences(&mut self, preferences: &ControllerInputPreferences) {
+        self.controller.apply_preferences(preferences);
+        self.combiner.clear();
+        self.latest_actions = PlayerActionFrame::default();
     }
 
     pub fn clear_transient_input(&mut self) {
@@ -175,6 +188,18 @@ pub struct MonoInteractiveInputRouter {
 impl MonoInteractiveInputRouter {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn with_controller_preferences(preferences: &ControllerInputPreferences) -> Self {
+        Self {
+            controller: ControllerInputSession::with_preferences(preferences),
+            ..Self::default()
+        }
+    }
+
+    pub fn apply_controller_preferences(&mut self, preferences: &ControllerInputPreferences) {
+        self.controller.apply_preferences(preferences);
+        self.latest_controller_actions = PlayerActionFrame::default();
     }
 
     pub fn clear_transient_input(&mut self) {

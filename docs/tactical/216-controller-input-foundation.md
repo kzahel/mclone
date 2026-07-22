@@ -426,6 +426,48 @@ build boundaries, and rendered stereo continuity. It does not validate button
 feel, controller profiles, mixed-source ergonomics, or headset runtime behavior;
 those remain explicitly open in the hardware ledger.
 
+### Slice 7a — versioned preferences and neutral haptics
+
+Implemented on 2026-07-22. `ControllerInputPreferences` is the persistable,
+backend-neutral runtime profile for preferred input, layout override, dead
+zones, response curves, look rate, horizontal/vertical inversion, controller
+threshold/repeat tuning, and semantic `GamepadBindings`. Both the ordinary
+controller session and XR action assembler consume the same normalized tuning;
+changing a live profile clears and suppresses held input until neutral.
+
+`mclone-app-runtime::ClientInputPreferences` now wraps controller and touch
+policy in schema 1. The codec defaults fields added within the schema, rejects
+unknown future schemas, reads the two legacy browser touch keys when no
+document exists, and synchronizes those keys during migration. Browser Rust
+loads and applies the complete profile. A native file executor writes
+`preferences/input-preferences.v1.json` through an atomic temporary rename, and
+factory reset removes only this newly registered preference beside the existing
+registered files.
+
+The shared haptic seam now has neutral active-gamepad, source, and XR-hand
+targets, normalized low/high-frequency amplitudes, a bounded duration, source
+capability counts, and an explicit unsupported no-op output. GilRs, Android,
+OpenXR, and future Steam executors remain intentionally unadvertised until a
+backend can compile and physical behavior can be accepted.
+
+Focused evidence:
+
+```text
+cargo test -p mclone-input --lib: 43 passed
+cargo test -p mclone-app-runtime input_preferences: 5 passed
+native factory-reset preference test: passed
+cargo test -p mclone-scene --lib: 127 passed
+cargo test -p mclone-web-client: 38 passed plus integration suites
+cargo check -p mclone-web-client --target wasm32-unknown-unknown: passed
+pnpm native:thin-adapters:purity: passed
+pnpm native:web:typecheck: passed
+pnpm native:web:app-smoke: passed; live canvas pixels inspected
+```
+
+Slice 7b applies the native file profile in desktop flat/XR and Android flat/XR,
+then closes the automated ledger without claiming real-device tuning or haptic
+quality.
+
 ## Completion Bar
 
 - Every product host consumes one shared semantic action and UI-navigation

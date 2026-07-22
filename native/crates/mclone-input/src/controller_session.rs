@@ -8,9 +8,10 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    ControllerLayoutFamily, FlatInputAction, FlatInputFrame, GamepadBindings, GamepadControl,
-    InputBindingAction, InputSourceDescriptor, InputSourceId, KeyboardTurnDirection, LookDelta,
-    MovementDirection, MovementImpulse, StandardGamepadButtonState, StandardGamepadSnapshot,
+    ControllerInputPreferences, ControllerLayoutFamily, FlatInputAction, FlatInputFrame,
+    GamepadBindings, GamepadControl, InputBindingAction, InputSourceDescriptor, InputSourceId,
+    KeyboardTurnDirection, LookDelta, MovementDirection, MovementImpulse,
+    StandardGamepadButtonState, StandardGamepadSnapshot,
 };
 
 /// Shared binding context selected by scene/UI state rather than a platform
@@ -179,13 +180,15 @@ impl PlayerActionFrameCombiner {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase")]
 pub struct ControllerSessionSettings {
     pub movement_deadzone: f32,
     pub look_deadzone: f32,
     pub movement_response_exponent: f32,
     pub look_response_exponent: f32,
     pub look_rate_per_second: f32,
+    pub invert_look_horizontal: bool,
+    pub invert_look_vertical: bool,
     pub trigger_press_threshold: f32,
     pub trigger_release_threshold: f32,
     pub navigation_press_threshold: f32,
@@ -205,7 +208,7 @@ impl ControllerSessionSettings {
     pub const DEFAULT_NAVIGATION_INITIAL_REPEAT_MS: u64 = 350;
     pub const DEFAULT_NAVIGATION_REPEAT_MS: u64 = 90;
 
-    fn normalized(self) -> Self {
+    pub fn normalized(self) -> Self {
         let trigger_press_threshold = unit_interval(self.trigger_press_threshold, 0.55);
         let trigger_release_threshold =
             unit_interval(self.trigger_release_threshold, 0.45).min(trigger_press_threshold);
@@ -221,6 +224,8 @@ impl ControllerSessionSettings {
                 self.look_rate_per_second,
                 Self::DEFAULT_LOOK_RATE_PER_SECOND,
             ),
+            invert_look_horizontal: self.invert_look_horizontal,
+            invert_look_vertical: self.invert_look_vertical,
             trigger_press_threshold,
             trigger_release_threshold,
             navigation_press_threshold,
@@ -239,6 +244,8 @@ impl Default for ControllerSessionSettings {
             movement_response_exponent: 1.0,
             look_response_exponent: 1.0,
             look_rate_per_second: Self::DEFAULT_LOOK_RATE_PER_SECOND,
+            invert_look_horizontal: false,
+            invert_look_vertical: false,
             trigger_press_threshold: Self::DEFAULT_TRIGGER_PRESS_THRESHOLD,
             trigger_release_threshold: Self::DEFAULT_TRIGGER_RELEASE_THRESHOLD,
             navigation_press_threshold: Self::DEFAULT_NAVIGATION_PRESS_THRESHOLD,
@@ -323,6 +330,7 @@ pub struct ControllerInputSession {
     context: InputContext,
     settings: ControllerSessionSettings,
     bindings: GamepadBindings,
+    layout_override: Option<ControllerLayoutFamily>,
     sources: BTreeMap<InputSourceId, ControllerSourceState>,
     active_source: Option<InputSourceId>,
     pending_released: BTreeSet<PlayerAction>,
@@ -334,6 +342,7 @@ impl Default for ControllerInputSession {
             context: InputContext::Gameplay,
             settings: ControllerSessionSettings::default(),
             bindings: GamepadBindings::default(),
+            layout_override: None,
             sources: BTreeMap::new(),
             active_source: None,
             pending_released: BTreeSet::new(),
@@ -358,6 +367,25 @@ impl ControllerInputSession {
             bindings,
             ..Self::default()
         }
+    }
+
+    pub fn with_preferences(preferences: &ControllerInputPreferences) -> Self {
+        Self {
+            settings: preferences.settings.normalized(),
+            bindings: preferences.bindings.clone(),
+            layout_override: preferences.layout_override,
+            ..Self::default()
+        }
+    }
+
+    /// Replace shared tuning and bindings at a presentation boundary.
+    /// Physically held controls must return to neutral before the new map can
+    /// emit actions, preventing a settings change from manufacturing an edge.
+    pub fn apply_preferences(&mut self, preferences: &ControllerInputPreferences) {
+        self.clear_held();
+        self.settings = preferences.settings.normalized();
+        self.bindings = preferences.bindings.clone();
+        self.layout_override = preferences.layout_override;
     }
 
     pub const fn context(&self) -> InputContext {
@@ -550,9 +578,11 @@ impl ControllerInputSession {
             activity_source,
             active_source: self.active_source,
             active_controller_layout: self.active_source.and_then(|source_id| {
-                self.sources
-                    .get(&source_id)
-                    .map(|state| state.descriptor.controller_layout)
+                self.layout_override.or_else(|| {
+                    self.sources
+                        .get(&source_id)
+                        .map(|state| state.descriptor.controller_layout)
+                })
             }),
             ..PlayerActionFrame::default()
         };
@@ -643,6 +673,12 @@ fn resolve_source(
                     }
                     _ => {}
                 }
+            }
+            if settings.invert_look_horizontal {
+                look_rate.x = -look_rate.x;
+            }
+            if settings.invert_look_vertical {
+                look_rate.y = -look_rate.y;
             }
             ResolvedSource {
                 movement,
@@ -1212,5 +1248,58 @@ mod tests {
             .expect("rearmed press");
         assert!(rearmed.pressed.contains(&PlayerAction::Jump));
         assert_eq!(rearmed.activity_source, Some(source_id));
+    }
+
+    #[test]
+    fn controller_preferences_drive_bindings_inversion_and_layout() {
+        let (source_id, descriptor) = source();
+        let preferences = ControllerInputPreferences {
+            layout_override: Some(ControllerLayoutFamily::PlayStationLike),
+            settings: ControllerSessionSettings {
+                look_rate_per_second: 100.0,
+                invert_look_horizontal: true,
+                invert_look_vertical: true,
+                ..ControllerSessionSettings::default()
+            },
+            bindings: GamepadBindings {
+                bindings: vec![
+                    crate::GamepadBinding::new(
+                        GamepadControl::RightStick,
+                        InputBindingAction::Look,
+                    ),
+                    crate::GamepadBinding::new(
+                        GamepadControl::EastButton,
+                        InputBindingAction::Jump,
+                    ),
+                ],
+            },
+            ..ControllerInputPreferences::default()
+        };
+        let mut session = ControllerInputSession::with_preferences(&preferences);
+        session.connect_source(source_id, descriptor);
+        let frame = session
+            .sample_frame(
+                Duration::ZERO,
+                [(
+                    source_id,
+                    StandardGamepadSnapshot {
+                        right_stick: Vec2::new(1.0, 1.0),
+                        buttons: StandardGamepadButtons {
+                            east: StandardGamepadButtonState::pressed(),
+                            ..StandardGamepadButtons::default()
+                        },
+                        ..StandardGamepadSnapshot::default()
+                    },
+                )],
+            )
+            .expect("custom preference sample");
+
+        assert!(frame.look_rate.x < 0.0);
+        assert!(frame.look_rate.y > 0.0);
+        assert!(frame.pressed.contains(&PlayerAction::Jump));
+        assert_eq!(
+            frame.active_controller_layout,
+            Some(ControllerLayoutFamily::PlayStationLike)
+        );
     }
 }

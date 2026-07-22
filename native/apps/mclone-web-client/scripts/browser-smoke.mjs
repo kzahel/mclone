@@ -6452,10 +6452,18 @@ async function exerciseMobileNativeOptionsSensitivity(page, canvas) {
     await page.waitForFunction(
       () => {
         const state = globalThis.__mcloneWebApp?.state;
+        let document = null;
+        try {
+          document = JSON.parse(
+            globalThis.localStorage?.getItem("mclone.input.preferences.v1") ?? "null",
+          );
+        } catch {}
         return state?.uiActive === true
           && state.nativeUiScreen === "optionsCategory"
           && Number(state.lookSensitivity) >= 4.9
-          && Number(globalThis.localStorage?.getItem("mclone.web.lookSensitivity")) >= 4.9;
+          && Number(globalThis.localStorage?.getItem("mclone.web.lookSensitivity")) >= 4.9
+          && document?.schema === 1
+          && Number(document?.preferences?.touchLookSensitivity) >= 4.9;
       },
       undefined,
       { timeout: 10_000 },
@@ -6464,6 +6472,7 @@ async function exerciseMobileNativeOptionsSensitivity(page, canvas) {
     const state = await page.evaluate(() => ({
       state: globalThis.__mcloneWebApp?.state ?? null,
       stored: globalThis.localStorage?.getItem("mclone.web.lookSensitivity") ?? null,
+      storedDocument: globalThis.localStorage?.getItem("mclone.input.preferences.v1") ?? null,
     }));
     throw new Error(`mobile touch-look slider did not update: ${error instanceof Error ? error.message : String(error)}\n${JSON.stringify(state, null, 2)}`);
   }
@@ -6474,6 +6483,7 @@ async function exerciseMobileNativeOptionsSensitivity(page, canvas) {
       touchLookSensitivityAvailable: state.touchLookSensitivityAvailable,
       lastUiAction: state.lastUiAction,
       storedLookSensitivity: globalThis.localStorage?.getItem("mclone.web.lookSensitivity") ?? null,
+      storedInputPreferences: globalThis.localStorage?.getItem("mclone.input.preferences.v1") ?? null,
     };
   });
   const optionsCanvasPng = await canvas.screenshot({

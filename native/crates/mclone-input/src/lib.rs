@@ -101,6 +101,18 @@ impl XrInputFrameAssembler {
         Self::default()
     }
 
+    pub fn with_settings(settings: ControllerSessionSettings) -> Self {
+        Self {
+            settings: settings.normalized(),
+            ..Self::default()
+        }
+    }
+
+    pub fn apply_settings(&mut self, settings: ControllerSessionSettings) {
+        self.clear();
+        self.settings = settings.normalized();
+    }
+
     pub fn clear(&mut self) {
         self.held.clear();
         self.attack_down = false;
@@ -129,11 +141,17 @@ impl XrInputFrameAssembler {
             self.settings.movement_deadzone,
             self.settings.movement_response_exponent,
         );
-        let turn = controller_session::adjusted_stick(
+        let mut turn = controller_session::adjusted_stick(
             raw.turn_axis,
             self.settings.look_deadzone,
             self.settings.look_response_exponent,
         );
+        if self.settings.invert_look_horizontal {
+            turn.x = -turn.x;
+        }
+        if self.settings.invert_look_vertical {
+            turn.y = -turn.y;
+        }
         self.attack_down = hysteretic_xr_action(
             self.attack_down,
             raw.attack_value,
@@ -1961,17 +1979,44 @@ fn is_one_shot_touch_action(action: InputBindingAction) -> bool {
     )
 }
 
-/// Reserved shared gamepad contract (reviewed 2026-07-10 for tactical 168
-/// Slice 10). It is intentionally retained because preferences, prompt
-/// projection, remappable bindings, dead-zone policy, and HUD presentation
-/// already share this vocabulary. No live platform adapter currently supplies
-/// gamepad events or advertises the capability; adoption requires a real
-/// desktop/browser/Android event source and device validation, not synthetic
-/// enablement in one client lane.
+/// Shared ordinary-gamepad binding contract consumed by every physical
+/// collector through the semantic controller session.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(default, rename_all = "camelCase")]
 pub struct GamepadBindings {
     pub bindings: Vec<GamepadBinding>,
+}
+
+/// Persistable ordinary-controller policy shared by every client target.
+///
+/// Backend handles and per-device IDs are intentionally absent. A platform
+/// preference document may wrap this value with a schema version, while this
+/// type remains the runtime projection consumed by input reducers.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(default, rename_all = "camelCase")]
+pub struct ControllerInputPreferences {
+    pub preferred_input: InputSchemePreset,
+    pub layout_override: Option<ControllerLayoutFamily>,
+    pub settings: ControllerSessionSettings,
+    pub bindings: GamepadBindings,
+}
+
+impl ControllerInputPreferences {
+    pub fn normalized(mut self) -> Self {
+        self.settings = self.settings.normalized();
+        self
+    }
+}
+
+impl Default for ControllerInputPreferences {
+    fn default() -> Self {
+        Self {
+            preferred_input: InputSchemePreset::Auto,
+            layout_override: None,
+            settings: ControllerSessionSettings::default(),
+            bindings: GamepadBindings::default(),
+        }
+    }
 }
 
 impl Default for GamepadBindings {
@@ -2107,7 +2152,8 @@ pub enum InputSourceClass {
     ScriptedTest,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
 pub enum ControllerLayoutFamily {
     XboxLike,
     PlayStationLike,
@@ -2115,6 +2161,88 @@ pub enum ControllerLayoutFamily {
     SteamDeckLike,
     Generic,
     Unknown,
+}
+
+/// Device-neutral target for one haptic request.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HapticTarget {
+    ActiveGamepad,
+    Source(InputSourceId),
+    XrHand(XrHand),
+}
+
+/// Device-neutral dual-motor haptic envelope.
+///
+/// Scene/gameplay code owns why feedback occurs. Platform executors decide
+/// whether the selected source can realize the request.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct HapticRequest {
+    pub target: HapticTarget,
+    pub low_frequency_amplitude: f32,
+    pub high_frequency_amplitude: f32,
+    pub duration: Duration,
+}
+
+impl HapticRequest {
+    pub const MAX_DURATION: Duration = Duration::from_secs(5);
+
+    pub fn new(
+        target: HapticTarget,
+        low_frequency_amplitude: f32,
+        high_frequency_amplitude: f32,
+        duration: Duration,
+    ) -> Self {
+        Self {
+            target,
+            low_frequency_amplitude,
+            high_frequency_amplitude,
+            duration,
+        }
+        .normalized()
+    }
+
+    pub fn normalized(self) -> Self {
+        Self {
+            target: self.target,
+            low_frequency_amplitude: normalized_haptic_amplitude(self.low_frequency_amplitude),
+            high_frequency_amplitude: normalized_haptic_amplitude(self.high_frequency_amplitude),
+            duration: self.duration.min(Self::MAX_DURATION),
+        }
+    }
+
+    pub fn is_silent(self) -> bool {
+        self.duration.is_zero()
+            || (self.low_frequency_amplitude == 0.0 && self.high_frequency_amplitude == 0.0)
+    }
+}
+
+fn normalized_haptic_amplitude(value: f32) -> f32 {
+    if value.is_finite() {
+        value.clamp(0.0, 1.0)
+    } else {
+        0.0
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum HapticSubmission {
+    Accepted,
+    Unsupported,
+}
+
+/// Narrow output seam implemented by future GilRs, Android, OpenXR, and Steam
+/// backends. Capability absence is represented by the standard no-op output.
+pub trait HapticOutput {
+    fn submit(&mut self, request: HapticRequest) -> HapticSubmission;
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub struct NoopHapticOutput;
+
+impl HapticOutput for NoopHapticOutput {
+    fn submit(&mut self, _request: HapticRequest) -> HapticSubmission {
+        HapticSubmission::Unsupported
+    }
 }
 
 /// Best-effort presentation family classification from session-local backend
@@ -3598,6 +3726,57 @@ mod tests {
 
         let released = combiner.combine(PlayerActionFrame::default(), PlayerActionFrame::default());
         assert!(released.released.contains(&PlayerAction::Attack));
+    }
+
+    #[test]
+    fn xr_settings_apply_inversion_and_require_neutral_when_replaced() {
+        let inverted = ControllerSessionSettings {
+            invert_look_horizontal: true,
+            invert_look_vertical: true,
+            ..ControllerSessionSettings::default()
+        };
+        let mut assembler = XrInputFrameAssembler::with_settings(inverted);
+        let raw = XrActionSnapshot {
+            turn_axis: Vec2::new(1.0, 1.0),
+            ..XrActionSnapshot::default()
+        };
+        let first = assembler.sample(raw, Vec::new(), XrSpecificInput::default());
+        assert!(first.actions.look_rate.x < 0.0);
+        assert!(first.actions.look_rate.y > 0.0);
+
+        assembler.apply_settings(ControllerSessionSettings::default());
+        assert!(
+            assembler
+                .sample(raw, Vec::new(), XrSpecificInput::default())
+                .actions
+                .is_idle()
+        );
+        assembler.sample(
+            XrActionSnapshot::default(),
+            Vec::new(),
+            XrSpecificInput::default(),
+        );
+        let rearmed = assembler.sample(raw, Vec::new(), XrSpecificInput::default());
+        assert!(rearmed.actions.look_rate.x > 0.0);
+        assert!(rearmed.actions.look_rate.y < 0.0);
+    }
+
+    #[test]
+    fn haptic_requests_normalize_and_noop_output_is_explicit() {
+        let request = HapticRequest::new(
+            HapticTarget::ActiveGamepad,
+            f32::NAN,
+            2.0,
+            Duration::from_secs(30),
+        );
+        assert_eq!(request.low_frequency_amplitude, 0.0);
+        assert_eq!(request.high_frequency_amplitude, 1.0);
+        assert_eq!(request.duration, HapticRequest::MAX_DURATION);
+        assert!(!request.is_silent());
+        assert_eq!(
+            NoopHapticOutput.submit(request),
+            HapticSubmission::Unsupported
+        );
     }
 
     #[test]

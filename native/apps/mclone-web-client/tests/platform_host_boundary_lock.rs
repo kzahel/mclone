@@ -187,6 +187,9 @@ fn browser_input_preferences_have_one_rust_policy_owner() {
     for required in [
         "pub trait PreferenceKeyValueStore",
         "ClientInputPreferences",
+        "ControllerInputPreferences",
+        "INPUT_PREFERENCE_STORAGE_KEY",
+        "INPUT_PREFERENCE_SCHEMA",
         "TOUCH_LOOK_SENSITIVITY_STORAGE_KEY",
         "TOUCH_CONTROLS_MODE_STORAGE_KEY",
         "TouchInputSettings::DEFAULT_LOOK_SENSITIVITY",

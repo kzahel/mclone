@@ -2242,11 +2242,13 @@ async fn create_scene_host(
         touch_look_sensitivity: input_preferences.touch_look_sensitivity,
         touch_settings_available: capabilities.touch_input_available(),
         touch_controls_mode: input_preferences.touch_controls_mode,
-        input_preferences,
+        input_preferences: input_preferences.clone(),
         input_preference_error,
         input_capability_state,
         touch_overlay: TouchOverlay::hidden(),
-        interactive_input: MonoInteractiveInputRouter::new(),
+        interactive_input: MonoInteractiveInputRouter::with_controller_preferences(
+            &input_preferences.controller,
+        ),
         gamepad_collector: BrowserGamepadCollector::new(),
         frame_input_effects: WebFrameInputEffects::default(),
         touch_input: TouchInputAdapter::with_settings(TouchInputSettings {
@@ -2567,6 +2569,7 @@ impl WebSceneHost {
     fn refresh_mono_ui_context(&mut self) -> Result<(), JsValue> {
         let mut context = MonoUiContext::default();
         let mut preferences = InputPreferences::AUTO;
+        preferences.preferred_scheme = self.input_preferences.controller.preferred_input;
         preferences.touch_controls = self.touch_controls_mode;
         context.resolved_input = self.input_capability_state.resolve(preferences);
         context.resolved_input.touch_controls_visible = self.touch_overlay.visible;
@@ -2589,11 +2592,10 @@ impl WebSceneHost {
     }
 
     fn persist_input_preferences_if_changed(&mut self) {
-        let current = ClientInputPreferences {
-            touch_look_sensitivity: self.touch_look_sensitivity,
-            touch_controls_mode: self.touch_controls_mode,
-        }
-        .normalized();
+        let mut current = self.input_preferences.clone();
+        current.touch_look_sensitivity = self.touch_look_sensitivity;
+        current.touch_controls_mode = self.touch_controls_mode;
+        let current = current.normalized();
         if current == self.input_preferences {
             return;
         }
