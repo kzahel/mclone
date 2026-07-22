@@ -24,7 +24,13 @@ Flat Grass cylinder proof and
 entire accepted terrain, biome, surface, spawn, and vegetation pipeline now
 supports either the ordinary plane or the exact 6,144-block / 384-chunk
 X-periodic cylinder. The selected terrain sequence is now at rivers and
-wetlands, followed by coherent streams, cascades, and waterfall reaches.
+wetlands: Tactical
+[`220`](../tactical/220-mclone-overworld-rivers-and-wetlands.md) has landed its
+bounded broad-river field, graded channels and banks, local water level, river
+biome and substrate language, sparse shallow wetland pools, production maps,
+and periodic seam proof. Human Review 1 is open before platform closeout or a
+choice between network semantics, streams/cascades/falls, and further visual
+tuning.
 
 ## Scope
 
@@ -87,8 +93,10 @@ direct finite-difference gradient attenuation experiment, preserved raw versus
 processed relief, one river field shared by terrain and biome classification,
 and relative overburden for later caves. Its 2,096-block height, registry
 replacement model, and literal JSON spline tables are not implementation
-targets. The study does not change the current tactical order: mountains and
-valleys remain next, with rivers and caves deferred to their own slices.
+targets. The study does not justify importing its literal implementation.
+Mountains and periodic fields are now complete; the first bounded
+river/wetland family is at human review, while caves remain deferred to their
+own slice.
 
 ## Reference Vocabulary And Deliberate Divergence
 
@@ -169,26 +177,34 @@ than adding a chunk dependency or five independent queries per column.
 
 ## Water-System Direction
 
-Rivers and wetlands follow Tactical 196 so their fields are periodic and
-seam-correct from their first production revision. Water is a macro terrain
-input, not a biome decal or a post-surface trench. The eventual shared sample
-may expose these facts as each gains a real caller:
+Rivers and wetlands followed Tactical 196, so every live water field is
+periodic and seam-correct from its first production revision. Water is a macro
+terrain input, not a biome decal or a post-surface trench.
 
-- channel distance or influence;
-- stable water-surface and bed elevation;
-- half-width and depth;
-- downstream direction and grade;
-- network and reach identity;
-- headwater, tributary, main-stem, wetland, confluence, outlet, and later
-  stream-order or discharge classification.
+Tactical 220's first implementation uses a warped zero-contour corridor whose
+broad, detail, width, and wetland-pool scales are 768, 192, 384, and 96 blocks.
+An analytic gradient-noise derivative supplies bounded centerline distance and
+tangent estimates. The shared production sample now owns:
 
-The first version may use deterministic bounded corridor planning rather than
-a scientific rainfall simulation. Terrain carves from the same facts that
-biomes, bank materials, wetlands, structures, and review tools query. No
-column sampler may trace arbitrarily far upstream, run an unbounded flood fill,
-or search until it finds an ocean. Coarse network construction belongs in
-canonical macro tiles with an explicit finite halo and a descriptor-keyed
-cache; point queries consume bounded reach facts.
+- base terrain elevation before water carving;
+- channel distance, influence, half-width, bed, and local water surface;
+- graded-bank and low-gradient floodplain influence;
+- tangent, provisional flow orientation, and local grade; and
+- wetland and sparse shallow-pool influence.
+
+Terrain, biome, surface material, spawn, review maps, and feature exclusion
+consume those facts. Riverbeds use gravel, wetland pools use clay, inland banks
+remain grassy, and coastal banks inherit sand. A reviewed coarse-dirt marsh
+band was rejected because it made floodplains look engineered.
+
+This corridor family is fixed-work and visually continuous, but it is not yet
+a drainage network. Generic zero contours may form closed loops and do not
+provide tributaries, confluences, accumulated discharge, named reaches, or
+true downstream identity. If human review requires true drainage before
+smaller streams, coarse network construction belongs in canonical macro tiles
+with an explicit finite halo and a descriptor-keyed cache; point queries
+consume bounded reach facts. No column sampler may trace arbitrarily far
+upstream, run an unbounded flood fill, or search until it finds an ocean.
 
 Reach grade later distinguishes calm water, riffles, rapids, cascades, falls,
 and plunge pools. A waterfall must have continuous upstream and downstream
@@ -259,6 +275,14 @@ an optimization signal even though full cold generation stays well inside the
 the cold pass and hitting all on the warm pass. The first browser Worker
 request was about 1 KiB and its generated render-distance payload about 23
 MiB; periodicity does not claim to solve payload size or compression.
+
+At the same seed, radius, and iteration count, Tactical 220's reviewed plane
+measured 2,911.666 surface chunks/s, 986.434 cold decorated targets/s, and
+5,339.303 warm targets/s. Those are 13.8, 12.9, and 12.2 percent below the
+Tactical 196 plane result and remain inside the 25-percent gate. The cylinder
+measured 2,777.558, 896.640, and 4,777.684 respectively. Analytic derivatives
+replaced an initial finite-difference centerline estimate whose surface-only
+path was about 42 percent below the baseline.
 
 Quality-versus-speed controls divide into two categories:
 
@@ -543,11 +567,10 @@ subsystem horizontally.
    - Completed 2026-07-22 for the plane and exact 384-chunk X cylinder.
 4. **Rivers and wetlands**
    - Deterministic river influence applied before surface recipes.
-   - Begin with an inspectable field; true rainfall/flow accumulation can be a
-     later refinement.
-   - Expose water surface, width/depth, banks, downstream direction,
-     continuity, wetland, headwater, confluence, and outlet facts through the
-     production sampler as each fact gains a real caller.
+   - Human Review 1 is open on the bounded warped-contour implementation.
+   - Water surface, width/depth, banks, provisional flow, grade, and wetland
+     facts are live. Headwater, confluence, outlet, discharge, and true reach
+     continuity await a network-semantic slice if review calls for one.
 5. **Streams, cascades, and waterfall reaches**
    - Realize continuous watercourses against the accepted relief and river
      facts, with stable upstream and downstream destinations.
@@ -720,17 +743,15 @@ Human Review 3 accepted the result as more natural and less geometric.
 
 ## Next Work
 
-Execute
-[`Tactical 220`](../tactical/220-mclone-overworld-rivers-and-wetlands.md)
-before caves,
-structures, or broad biome expansion. Its first result should be one
-inspectable production river influence with coherent water level, bed, banks,
-width, downstream direction, and low-gradient wetland response shared by
-terrain and biome/surface selection. It must use the same plane/periodic
-sampler contract from its first revision and retain bounded point-query cost.
-Follow it with a separate stream/cascade/waterfall reach slice; waterfall
-placement must consume continuous watercourse and grade facts rather than
-decorate arbitrary cliffs.
+Human Review 1 is open on
+[`Tactical 220`](../tactical/220-mclone-overworld-rivers-and-wetlands.md).
+Review should decide whether to accept the bounded broad corridor for platform
+closeout and then add streams/cascades/waterfalls, or first add canonical
+macro-tile drainage and reach identity. Width, banks, wetlands, and vegetation
+can receive a smaller charm tune without changing that architecture.
+Waterfall placement must consume continuous watercourse and grade facts rather
+than decorate arbitrary cliffs. Caves, structures, and broad biome expansion
+remain parked until that decision.
 
 ## Related
 

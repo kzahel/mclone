@@ -1,8 +1,10 @@
 # Tactical 220: Mclone Overworld Rivers And Wetlands
 
-Status: active 2026-07-22 after Tactical 196 completed the plane and exact
-384-chunk X-periodic terrain contract. Stop the first implementation at a
-multi-seed rendered human-review gate before expanding the water vocabulary.
+Status: Human Review 1 open 2026-07-22. Slices 0-2 produced field revision 7
+and decoration revision 4 on the plane and exact 384-chunk X cylinder. Broad
+rivers, graded banks, coast transitions, local river levels, river biomes, and
+sparse shallow inland wetland pools are live and inspected. Slice 3 platform
+closeout remains intentionally paused until the visual/architecture decision.
 
 Topic: `mclone-overworld-generation`
 
@@ -63,8 +65,9 @@ paths.
 Begin with an inspectable warped zero-contour corridor, not a global drainage
 graph. A low-frequency periodic gradient field supplies continuous centerlines.
 Independent periodic width and gentle warp fields prevent uniform canals and
-axis-aligned contours. A bounded finite difference converts field magnitude
-and gradient into an approximate distance in blocks.
+axis-aligned contours. An analytic gradient-noise derivative converts field
+magnitude and gradient into an approximate distance in blocks without four
+extra field samples per column.
 
 This is intentionally a first visual watercourse family:
 
@@ -96,42 +99,109 @@ future refinements can distinguish accepted natural relief from river carving.
 - [x] Read the exact vanilla river-layer, lake, spring, and pipeline sources.
 - [x] Select the bounded corridor model and record why it does not yet claim a
   drainage network.
-- [ ] Add independent river domains/scales through both sampling topologies.
-- [ ] Expose base surface, distance, influence, width, bed, water, tangent,
+- [x] Add independent river domains/scales through both sampling topologies.
+- [x] Expose base surface, distance, influence, width, bed, water, tangent,
   grade, and wetland facts from one production sampler.
-- [ ] Prove point/region identity, signed coordinates, exact periodic seam and
+- [x] Prove point/region identity, signed coordinates, exact periodic seam and
   slope continuity, bounded values, and deterministic controls.
 
 Gate: a review map shows continuous, varied corridors without any block writes.
 
+Execution record 2026-07-22:
+
+- the broad/detail/width/pool scales are `768`, `192`, `384`, and `96` blocks;
+  each divides the existing 6,144-block circumference. All four use new stable
+  domains and explicit plane/periodic constructors;
+- the production terrain sample retains `base_surface_y` and adds channel
+  distance/influence, bank influence, half-width, bed, water surface, tangent,
+  locally oriented provisional flow, grade, floodplain strength, and shallow
+  pool influence;
+- `GradientNoise2d::sample_with_derivative` returns analytic world-block X/Z
+  derivatives. Centered-difference and periodic-derivative tests lock the
+  shared primitive; and
+- point/region, signed-lift, field/seam-slope, chunk seam, feature partition,
+  canonical lift, bounded-range, channel/wetland presence, and existing
+  foundation fingerprints pass. The reference Overworld and other profiles
+  do not consume any new rule.
+
 ### Slice 1: terrain and language
 
-- [ ] Carve the channel and grade banks before surface material selection.
-- [ ] Fill river water to the sampled local water surface without changing
+- [x] Carve the channel and grade banks before surface material selection.
+- [x] Fill river water to the sampled local water surface without changing
   ordinary ocean fill.
-- [ ] Add river biome and riverbed/bank surface language; keep trees and land
+- [x] Add river biome and riverbed/bank surface language; keep trees and land
   patches out of channel water through the ordinary biome/substrate rules.
-- [ ] Make spawn continue to choose a dry safe column from final terrain facts.
-- [ ] Lock adjacent chunks, seam chunks, order/partition, canonical lifts, and
+- [x] Make spawn continue to choose a dry safe column from final terrain facts.
+- [x] Lock adjacent chunks, seam chunks, order/partition, canonical lifts, and
   current feature dependency behavior.
 
 Gate: packed generated chunks contain one continuous river rather than a
 debug-only visualization.
 
+Execution record 2026-07-22:
+
+- the channel lowers accepted natural terrain to a two-to-four-block bed and
+  fills source water to its local hydraulic surface. Banks blend from the
+  water edge back into the original column rather than using a fixed terrace;
+- channel and shallow-pool columns use river biome `7`; riverbeds use gravel,
+  sparse wetland pools use clay, inland banks remain grassy, and coastal banks
+  inherit sand instead of drawing green levees through beaches;
+- low-grade, low-mountain, inland floodplains can widen and receive sparse
+  shallow pools. A coarse-dirt marsh-bank experiment was inspected and removed
+  because its parallel brown bands looked more engineered than natural; and
+- spawn rejects channel and pool water. Current vegetation avoids actual
+  water through ordinary biome/substrate rules. Rich wetland plants and a
+  finer per-column vegetation exclusion are review-driven follow-ups, not
+  silently claimed here.
+
 ### Slice 2: maps, tuning, and performance
 
-- [ ] Extend the production review command with watercourse maps, ranges,
+- [x] Extend the production review command with watercourse maps, ranges,
   percentiles, coverage, and selected river/wetland review sites.
-- [ ] Compare several positive and negative seeds at lowlands, mountains,
+- [x] Compare several positive and negative seeds at lowlands, mountains,
   coasts, and the periodic seam.
-- [ ] Capture fully warmed render-distance-16 top-down, landscape, and elevated
+- [x] Capture fully warmed render-distance-16 top-down, landscape, and elevated
   cards from above terrain.
-- [ ] Measure field-only, surface, cold decorated, and warm decorated cost
+- [x] Measure field-only, surface, cold decorated, and warm decorated cost
   against Tactical 196's plane baseline.
-- [ ] Tune spacing, meander, width, bank grade, level, bed, and wetland response
+- [x] Tune spacing, meander, width, bank grade, level, bed, and wetland response
   until remaining disagreement is subjective.
 
 Gate: present the best multi-seed pixels and map evidence for human judgment.
+
+Execution record 2026-07-22:
+
+- receipt schema 7 maps base versus carved terrain, channel distance and
+  influence, local water level, grade, wetland/pool response, biome and surface
+  language, coverage, and selected river, mountain, coast, wetland, pool, and
+  periodic-seam sites from the production sampler;
+- inspected RD16 cards include ordinary lowland river
+  `/tmp/mclone-river-card-second/mclone-overworld-v1-seed-neg98765-chunk-neg183-neg30-card.png`,
+  coast/floodplain
+  `/tmp/mclone-wetland-card-second/mclone-overworld-v1-seed-neg98765-chunk-neg25-72-card.png`,
+  mountain river
+  `/tmp/mclone-mountain-river-card/mclone-overworld-v1-seed-neg98765-chunk-neg190-21-card.png`,
+  sand-bank coast
+  `/tmp/mclone-coastal-river-card/mclone-overworld-v1-seed-12345-chunk-141-100-card.png`,
+  and the actual cylinder seam
+  `/tmp/mclone-periodic-river-seam-card/mclone-overworld-v1-seed-neg98765-chunk-0-neg100-card.png`;
+- the strongest broad map evidence is
+  `/tmp/mclone-river-review-neg98765/mclone-overworld-v1-plane-seed--98765-chunk--96-72-watercourses.png`;
+  field maps for seeds `12345` and `8675309` were also inspected; and
+- at seed `-98765`, radius three, and three release iterations, the final plane
+  measured 2,911.666 surface chunks/s, 986.434 cold decorated targets/s, and
+  5,339.303 warm targets/s. The cylinder measured 2,777.558, 896.640, and
+  4,777.684 respectively. Against Tactical 196's plane result, the decreases
+  are 13.8, 12.9, and 12.2 percent. They remain below the 25-percent gate.
+  Analytic derivatives replaced an initial finite-difference version whose
+  isolated surface path was about 42 percent slower than the baseline.
+
+Human Review 1 now owns the remaining questions. The strongest current result
+is the mountain/valley integration and seamless broad meander. The known
+architectural limitation is equally visible in the maps: zero contours may
+close into loops and do not produce tributary, confluence, discharge, or true
+downstream network identity. Sparse pools make the wetland fact physical, but
+wetland vegetation and material character remain deliberately minimal.
 
 ### Slice 3: reuse and platform closeout after human acceptance
 
@@ -149,10 +219,11 @@ Gate: close only after human acceptance and shared-host evidence.
 
 ## Performance Budget
 
-Point sampling remains `O(live field count)` with fixed finite differences.
-Chunk generation should batch a bounded halo and must not trace a channel,
-walk downstream, flood fill, or acquire a process-global cache. Use the same
-Tactical 196 release command and host for comparison.
+Point sampling remains `O(live field count)` with an analytic gradient
+derivative and a fixed number of bounded grade probes. Chunk generation should
+batch a bounded halo and must not trace a channel, walk downstream, flood fill,
+or acquire a process-global cache. Use the same Tactical 196 release command
+and host for comparison.
 
 - more than 25 percent cold decorated-target regression requires focused
   attribution and an explicit tradeoff;

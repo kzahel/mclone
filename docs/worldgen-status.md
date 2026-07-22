@@ -28,6 +28,9 @@ rivers/wetlands, then coherent stream, cascade, and waterfall reaches. Caves
 and structures remain parked while those terrain families advance.
 The active water slice is
 [`tactical/220-mclone-overworld-rivers-and-wetlands.md`](tactical/220-mclone-overworld-rivers-and-wetlands.md).
+Its broad periodic river corridor, terrain carving, banks, local water levels,
+river biome/substrate, and sparse shallow wetland pools are live; Human Review
+1 is open before platform closeout and selection of the next water family.
 
 Compatibility safety is recorded in the
 [`world-generation-profiles` ledger](topics/world-generation-profiles.md#compatibility-safety-ledger).
@@ -86,6 +89,14 @@ Landed native coverage:
   control. Human Review 3 accepted the result as more natural and less
   geometric, and production browser Worker closeout passed. A local
   structure-tensor metric supplements, but does not replace, pixel review.
+- Its first watercourse family adds a periodic warped-contour river field,
+  analytic centerline distance/tangent sampling, locally graded beds and
+  banks, a smooth hydraulic surface, river biome `7`, gravel beds, coastal
+  sand transitions, dry-spawn exclusion, and sparse clay-bottomed wetland
+  pools. Production maps and actual 384-chunk cylinder-seam cards agree with
+  chunk output. The reviewed fixed-work implementation remains deliberately
+  short of drainage-network, tributary, confluence, discharge, and true
+  downstream-reach semantics.
 - Production-backed broad field maps and fully warmed seed/region/spawn cards;
   the first review accepted macro scale and coast variation after adding one
   fine relief octave to break up concentric local contour bands. The second
@@ -141,12 +152,13 @@ Still not full vanilla parity:
   engine
 - the first original island generator remains intentionally bounded; the
   continuous mclone overworld now exists but has only a deliberately narrow
-  terrain/material/biome/vegetation palette; its first mountain family remains
-  under review, and it has no rivers, caves, or structures
-- Mclone Overworld terrain, biome, surface, spawn, and existing vegetation are
-  periodic for the exact 384-chunk X cylinder. Rivers and all later content
-  must join that sampler contract explicitly; canonical chunk wrapping alone
-  remains intentionally insufficient
+  terrain/material/biome/vegetation palette. Its first broad river and sparse
+  wetland family is at Human Review 1, and it still has no small streams,
+  cascades, waterfalls, caves, or structures
+- Mclone Overworld terrain, biome, surface, spawn, existing vegetation, broad
+  rivers, and wetland pools are periodic for the exact 384-chunk X cylinder.
+  All later content must join that sampler contract explicitly; canonical
+  chunk wrapping alone remains intentionally insufficient
 - full entity/natural-spawn parity is incomplete
 - block-state breadth is intentionally narrower than exhaustive vanilla state coverage
 - Caves & Cliffs Part 1 systems disabled in 1.17.1 vanilla overworld remain out of scope unless the target changes
