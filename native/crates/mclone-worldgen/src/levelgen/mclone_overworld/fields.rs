@@ -4,6 +4,7 @@ use crate::noise::{SeedDomain, ValueNoise2d};
 
 pub const MCLONE_OVERWORLD_SEA_LEVEL: i32 = 63;
 pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-4";
+pub const MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS: i32 = 2;
 
 const CONTINENT_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_636f_6e31);
 const CONTINENT_MEDIUM_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_636f_6e32);
@@ -42,6 +43,52 @@ pub struct McloneOverworldTerrainSample {
 impl McloneOverworldTerrainSample {
     pub fn mountain_strength(self) -> f64 {
         mountain_strength(self.continentalness, self.ruggedness)
+    }
+
+    pub fn exposure(self) -> f64 {
+        let altitude = smoothstep((f64::from(self.surface_y - 82) / 48.0).clamp(0.0, 1.0));
+        let crest = smoothstep(((self.ridges - 0.35) / 0.65).clamp(0.0, 1.0));
+        self.mountain_strength() * (altitude * 0.35 + crest * 0.65)
+    }
+
+    pub fn is_mountain_valley(self) -> bool {
+        self.surface_y > MCLONE_OVERWORLD_SEA_LEVEL
+            && self.mountain_strength() >= 0.35
+            && self.ridges <= 0.28
+    }
+
+    pub fn is_open_mountain_shoulder(self) -> bool {
+        self.surface_y > MCLONE_OVERWORLD_SEA_LEVEL
+            && self.mountain_strength() >= 0.15
+            && self.ridges >= 0.65
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct McloneOverworldLandformSample {
+    pub terrain: McloneOverworldTerrainSample,
+    pub slope: f64,
+}
+
+impl McloneOverworldLandformSample {
+    pub fn from_cardinal_samples(
+        terrain: McloneOverworldTerrainSample,
+        west: McloneOverworldTerrainSample,
+        east: McloneOverworldTerrainSample,
+        north: McloneOverworldTerrainSample,
+        south: McloneOverworldTerrainSample,
+    ) -> Self {
+        let diameter = f64::from(MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS * 2);
+        let gradient_x = f64::from(east.surface_y - west.surface_y) / diameter;
+        let gradient_z = f64::from(south.surface_y - north.surface_y) / diameter;
+        Self {
+            terrain,
+            slope: gradient_x.hypot(gradient_z),
+        }
+    }
+
+    pub fn exposure(self) -> f64 {
+        self.terrain.exposure()
     }
 }
 
@@ -140,6 +187,17 @@ impl McloneOverworldSampler {
             ridges,
             surface_y: surface_height(continentalness, relief, ruggedness, ridges),
         }
+    }
+
+    pub fn sample_landform(self, world_x: i32, world_z: i32) -> McloneOverworldLandformSample {
+        let radius = MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS;
+        McloneOverworldLandformSample::from_cardinal_samples(
+            self.sample(world_x, world_z),
+            self.sample(world_x - radius, world_z),
+            self.sample(world_x + radius, world_z),
+            self.sample(world_x, world_z - radius),
+            self.sample(world_x, world_z + radius),
+        )
     }
 
     pub fn sample_region(

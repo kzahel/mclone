@@ -20,11 +20,13 @@ pub use feature_batch::{
 };
 pub use generator::NoiseBasedChunkGenerator;
 pub use mclone_overworld::{
-    MCLONE_OVERWORLD_DECORATION_REVISION, MCLONE_OVERWORLD_EXPOSED_STONE_MIN_RELIEF,
-    MCLONE_OVERWORLD_EXPOSED_STONE_MIN_Y, MCLONE_OVERWORLD_FIELD_REVISION,
-    MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_SEA_LEVEL,
-    MCLONE_OVERWORLD_WOODED_UPLAND_MIN_Y, McloneOverworldFeatureBatchResult,
-    McloneOverworldFeatureDependencyCache, McloneOverworldFeatureDependencyCacheReport,
+    MCLONE_OVERWORLD_DECORATION_REVISION, MCLONE_OVERWORLD_EXPOSED_STONE_MIN_EXPOSURE,
+    MCLONE_OVERWORLD_EXPOSED_STONE_MIN_SLOPE, MCLONE_OVERWORLD_EXPOSED_STONE_MIN_Y,
+    MCLONE_OVERWORLD_FIELD_REVISION, MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_SEA_LEVEL,
+    MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS, MCLONE_OVERWORLD_WOODED_MAX_EXPOSURE,
+    MCLONE_OVERWORLD_WOODED_MAX_SLOPE, MCLONE_OVERWORLD_WOODED_UPLAND_MIN_Y,
+    McloneOverworldFeatureBatchResult, McloneOverworldFeatureDependencyCache,
+    McloneOverworldFeatureDependencyCacheReport, McloneOverworldLandformSample,
     McloneOverworldSampleRegion, McloneOverworldSampleRegionRequest, McloneOverworldSampler,
     McloneOverworldSurfaceRecipe, McloneOverworldTerrainSample, generate_mclone_overworld_chunk,
     generate_mclone_overworld_surface_chunk, mclone_overworld_biome_id,

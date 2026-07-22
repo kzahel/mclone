@@ -1,10 +1,11 @@
 use crate::block::{DIRT, GRASS_BLOCK, GRAVEL, SAND, STONE, WATER};
 use crate::levelgen::MutableChunkBlockBuffer;
 
-use super::fields::{MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldTerrainSample};
+use super::fields::{MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldLandformSample};
 
 pub const MCLONE_OVERWORLD_EXPOSED_STONE_MIN_Y: i32 = 80;
-pub const MCLONE_OVERWORLD_EXPOSED_STONE_MIN_RELIEF: f64 = 0.50;
+pub const MCLONE_OVERWORLD_EXPOSED_STONE_MIN_SLOPE: f64 = 0.80;
+pub const MCLONE_OVERWORLD_EXPOSED_STONE_MIN_EXPOSURE: f64 = 0.76;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum McloneOverworldSurfaceRecipe {
@@ -15,14 +16,16 @@ pub enum McloneOverworldSurfaceRecipe {
 }
 
 pub fn mclone_overworld_surface_recipe(
-    sample: McloneOverworldTerrainSample,
+    sample: McloneOverworldLandformSample,
 ) -> McloneOverworldSurfaceRecipe {
-    if sample.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL - 4 {
+    let terrain = sample.terrain;
+    if terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL - 4 {
         McloneOverworldSurfaceRecipe::OceanFloor
-    } else if sample.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 3 {
+    } else if terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 3 {
         McloneOverworldSurfaceRecipe::Beach
-    } else if sample.surface_y >= MCLONE_OVERWORLD_EXPOSED_STONE_MIN_Y
-        && sample.relief >= MCLONE_OVERWORLD_EXPOSED_STONE_MIN_RELIEF
+    } else if terrain.surface_y >= MCLONE_OVERWORLD_EXPOSED_STONE_MIN_Y
+        && (sample.slope >= MCLONE_OVERWORLD_EXPOSED_STONE_MIN_SLOPE
+            || sample.exposure() >= MCLONE_OVERWORLD_EXPOSED_STONE_MIN_EXPOSURE)
     {
         McloneOverworldSurfaceRecipe::ExposedStone
     } else {
@@ -34,10 +37,10 @@ pub(super) fn write_surface_column(
     buffer: &mut MutableChunkBlockBuffer,
     local_x: i32,
     local_z: i32,
-    sample: McloneOverworldTerrainSample,
+    sample: McloneOverworldLandformSample,
 ) {
     buffer.set_block_at_y(local_x, 0, local_z, crate::block::BEDROCK);
-    let surface_y = sample.surface_y;
+    let surface_y = sample.terrain.surface_y;
     match mclone_overworld_surface_recipe(sample) {
         McloneOverworldSurfaceRecipe::OceanFloor => {
             write_subsurface(buffer, local_x, local_z, surface_y, GRAVEL, 3)
@@ -80,14 +83,18 @@ fn write_subsurface(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::levelgen::mclone_overworld::fields::McloneOverworldTerrainSample;
 
-    fn sample(surface_y: i32, relief: f64) -> McloneOverworldTerrainSample {
-        McloneOverworldTerrainSample {
-            continentalness: 0.25,
-            relief,
-            ruggedness: 0.0,
-            ridges: 0.0,
-            surface_y,
+    fn sample(surface_y: i32, slope: f64) -> McloneOverworldLandformSample {
+        McloneOverworldLandformSample {
+            terrain: McloneOverworldTerrainSample {
+                continentalness: 0.25,
+                relief: 0.0,
+                ruggedness: 0.0,
+                ridges: 0.0,
+                surface_y,
+            },
+            slope,
         }
     }
 
@@ -102,11 +109,11 @@ mod tests {
             McloneOverworldSurfaceRecipe::Beach
         );
         assert_eq!(
-            mclone_overworld_surface_recipe(sample(79, 0.8)),
+            mclone_overworld_surface_recipe(sample(79, 1.0)),
             McloneOverworldSurfaceRecipe::GrassSoil
         );
         assert_eq!(
-            mclone_overworld_surface_recipe(sample(80, 0.50)),
+            mclone_overworld_surface_recipe(sample(80, MCLONE_OVERWORLD_EXPOSED_STONE_MIN_SLOPE)),
             McloneOverworldSurfaceRecipe::ExposedStone
         );
     }

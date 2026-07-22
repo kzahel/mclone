@@ -209,4 +209,38 @@ mod tests {
         assert_eq!(decoration_counts, [57, 3_326, 383, 223]);
         assert_eq!(hash, 6_043_725_934_403_648_447);
     }
+
+    #[test]
+    fn reviewed_landforms_pin_final_decorated_payloads() {
+        let receipts = [
+            (-98_765, ChunkPos::new(-186, 25)),
+            (-98_765, ChunkPos::new(-204, 22)),
+            (12_345, ChunkPos::new(-142, -51)),
+        ]
+        .map(|(seed, target)| {
+            let chunk = generate_mclone_overworld_chunk(seed, target.x, target.z);
+            let decoration_counts = [OAK_LOG, GRASS, DANDELION, POPPY]
+                .map(|block| chunk.block_count(block));
+            let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+            for byte in chunk
+                .blocks()
+                .iter()
+                .copied()
+                .chain(chunk.biomes().iter().flat_map(|id| id.to_le_bytes()))
+            {
+                hash ^= u64::from(byte);
+                hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+            }
+            (decoration_counts, hash)
+        });
+
+        assert_eq!(
+            receipts,
+            [
+                ([0, 0, 0, 0], 2_529_348_086_221_640_421),
+                ([0, 37, 14, 0], 2_408_144_454_363_863_056),
+                ([0, 51, 13, 0], 16_381_266_261_649_702_635),
+            ]
+        );
+    }
 }

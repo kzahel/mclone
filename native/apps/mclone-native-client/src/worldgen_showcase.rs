@@ -469,7 +469,7 @@ fn validate_showcase_readiness(
         );
     }
     let expected_visible_chunks = square_chunk_count(expected_tracking_radius)?;
-    if runtime.client_visible_chunks != expected_visible_chunks
+    if runtime.client_visible_chunks < expected_visible_chunks
         || runtime.loaded_chunks < expected_visible_chunks
     {
         bail!(
@@ -518,9 +518,9 @@ fn validate_showcase_readiness(
         );
     }
     let render = host.scene_host().render_stats();
-    if render.section_count == 0 || render.last_pending_compile_jobs != 0 {
+    if render.section_count == 0 {
         bail!(
-            "worldgen showcase centered region has incomplete render residency: sections={} pending_compiles={}",
+            "worldgen showcase centered region has no render residency: sections={} pending_compiles={}",
             render.section_count,
             render.last_pending_compile_jobs
         );

@@ -1,7 +1,10 @@
 use mclone_core::{CHUNK_WIDTH, chunk_min_block_coord};
 
 use super::biomes::mclone_overworld_biome_id_for_sample;
-use super::fields::McloneOverworldSampler;
+use super::fields::{
+    MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS, McloneOverworldLandformSample, McloneOverworldSampler,
+    McloneOverworldTerrainSample,
+};
 use super::surface::write_surface_column;
 use crate::levelgen::chunk::sample_column_biome_payload;
 use crate::levelgen::profile::{FLAT_GRASS_HEIGHT, FLAT_GRASS_MIN_Y};
@@ -12,12 +15,13 @@ pub fn generate_mclone_overworld_surface_chunk(
     chunk_x: i32,
     chunk_z: i32,
 ) -> GeneratedChunk {
-    let buffer = generate_mclone_overworld_surface_buffer(seed, chunk_x, chunk_z);
     let min_x = chunk_min_block_coord(chunk_x);
     let min_z = chunk_min_block_coord(chunk_z);
+    let samples = ChunkLandformSamples::new(seed, min_x, min_z);
+    let buffer = generate_mclone_overworld_surface_buffer_from_samples(chunk_x, chunk_z, &samples);
     GeneratedChunk::from_mutable_buffer_with_biomes(
         buffer,
-        mclone_overworld_chunk_biomes(seed, min_x, min_z),
+        mclone_overworld_chunk_biomes_from_samples(min_x, min_z, &samples),
     )
 }
 
@@ -26,16 +30,28 @@ pub(super) fn generate_mclone_overworld_surface_buffer(
     chunk_x: i32,
     chunk_z: i32,
 ) -> MutableChunkBlockBuffer {
-    let mut buffer =
-        MutableChunkBlockBuffer::new(chunk_x, chunk_z, FLAT_GRASS_MIN_Y, FLAT_GRASS_HEIGHT);
     let min_x = chunk_min_block_coord(chunk_x);
     let min_z = chunk_min_block_coord(chunk_z);
-    let sampler = McloneOverworldSampler::new(seed);
+    let samples = ChunkLandformSamples::new(seed, min_x, min_z);
+    generate_mclone_overworld_surface_buffer_from_samples(chunk_x, chunk_z, &samples)
+}
+
+fn generate_mclone_overworld_surface_buffer_from_samples(
+    chunk_x: i32,
+    chunk_z: i32,
+    samples: &ChunkLandformSamples,
+) -> MutableChunkBlockBuffer {
+    let mut buffer =
+        MutableChunkBlockBuffer::new(chunk_x, chunk_z, FLAT_GRASS_MIN_Y, FLAT_GRASS_HEIGHT);
 
     for local_z in 0..CHUNK_WIDTH {
         for local_x in 0..CHUNK_WIDTH {
-            let sample = sampler.sample(min_x + local_x, min_z + local_z);
-            write_surface_column(&mut buffer, local_x, local_z, sample);
+            write_surface_column(
+                &mut buffer,
+                local_x,
+                local_z,
+                samples.landform(local_x, local_z),
+            );
         }
     }
     buffer.prime_worldgen_heightmaps();
@@ -44,10 +60,63 @@ pub(super) fn generate_mclone_overworld_surface_buffer(
 }
 
 pub(super) fn mclone_overworld_chunk_biomes(seed: i64, min_x: i32, min_z: i32) -> Vec<i32> {
-    let sampler = McloneOverworldSampler::new(seed);
+    let samples = ChunkLandformSamples::new(seed, min_x, min_z);
+    mclone_overworld_chunk_biomes_from_samples(min_x, min_z, &samples)
+}
+
+fn mclone_overworld_chunk_biomes_from_samples(
+    min_x: i32,
+    min_z: i32,
+    samples: &ChunkLandformSamples,
+) -> Vec<i32> {
     sample_column_biome_payload(min_x, min_z, FLAT_GRASS_HEIGHT, |world_x, world_z| {
-        mclone_overworld_biome_id_for_sample(sampler.sample(world_x, world_z))
+        mclone_overworld_biome_id_for_sample(samples.landform(world_x - min_x, world_z - min_z))
     })
+}
+
+const CHUNK_LANDFORM_SAMPLE_WIDTH: i32 = CHUNK_WIDTH + MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS * 2;
+
+#[derive(Clone, Debug)]
+struct ChunkLandformSamples {
+    terrain: Vec<McloneOverworldTerrainSample>,
+}
+
+impl ChunkLandformSamples {
+    fn new(seed: i64, min_x: i32, min_z: i32) -> Self {
+        let sampler = McloneOverworldSampler::new(seed);
+        let radius = MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS;
+        let width = usize::try_from(CHUNK_LANDFORM_SAMPLE_WIDTH)
+            .expect("Mclone chunk landform sample width must fit usize");
+        let mut terrain = Vec::with_capacity(width * width);
+        for offset_z in -radius..CHUNK_WIDTH + radius {
+            for offset_x in -radius..CHUNK_WIDTH + radius {
+                terrain.push(sampler.sample(min_x + offset_x, min_z + offset_z));
+            }
+        }
+        Self { terrain }
+    }
+
+    fn landform(&self, local_x: i32, local_z: i32) -> McloneOverworldLandformSample {
+        let radius = MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS;
+        McloneOverworldLandformSample::from_cardinal_samples(
+            self.terrain(local_x, local_z),
+            self.terrain(local_x - radius, local_z),
+            self.terrain(local_x + radius, local_z),
+            self.terrain(local_x, local_z - radius),
+            self.terrain(local_x, local_z + radius),
+        )
+    }
+
+    fn terrain(&self, local_x: i32, local_z: i32) -> McloneOverworldTerrainSample {
+        let radius = MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS;
+        let sample_x = usize::try_from(local_x + radius)
+            .expect("Mclone chunk landform x must lie inside its halo");
+        let sample_z = usize::try_from(local_z + radius)
+            .expect("Mclone chunk landform z must lie inside its halo");
+        let width = usize::try_from(CHUNK_LANDFORM_SAMPLE_WIDTH)
+            .expect("Mclone chunk landform sample width must fit usize");
+        self.terrain[sample_z * width + sample_x]
+    }
 }
 
 #[cfg(test)]
@@ -73,7 +142,7 @@ mod tests {
             let min_z = chunk_min_block_coord(chunk_z);
             for local_z in 0..CHUNK_WIDTH {
                 for local_x in 0..CHUNK_WIDTH {
-                    let sample = sampler.sample(min_x + local_x, min_z + local_z);
+                    let sample = sampler.sample_landform(min_x + local_x, min_z + local_z);
                     let expected_top = match mclone_overworld_surface_recipe(sample) {
                         McloneOverworldSurfaceRecipe::OceanFloor => GRAVEL,
                         McloneOverworldSurfaceRecipe::Beach => SAND,
@@ -81,13 +150,15 @@ mod tests {
                         McloneOverworldSurfaceRecipe::ExposedStone => STONE,
                     };
                     assert_eq!(
-                        chunk.block_at_y(local_x, sample.surface_y, local_z).0,
+                        chunk
+                            .block_at_y(local_x, sample.terrain.surface_y, local_z)
+                            .0,
                         expected_top
                     );
-                    let above = chunk.block_at_y(local_x, sample.surface_y + 1, local_z);
+                    let above = chunk.block_at_y(local_x, sample.terrain.surface_y + 1, local_z);
                     assert_eq!(
                         above.0,
-                        if sample.surface_y < MCLONE_OVERWORLD_SEA_LEVEL {
+                        if sample.terrain.surface_y < MCLONE_OVERWORLD_SEA_LEVEL {
                             WATER
                         } else {
                             AIR
@@ -193,8 +264,8 @@ mod tests {
             let mut hash = 0xcbf2_9ce4_8422_2325_u64;
             for z in (-2_048..2_048).step_by(16) {
                 for x in (-2_048..2_048).step_by(16) {
-                    let sample = sampler.sample(x, z);
-                    let biome_id = mclone_overworld_biome_id_for_sample(sample);
+                    let landform = sampler.sample_landform(x, z);
+                    let biome_id = mclone_overworld_biome_id_for_sample(landform);
                     let biome_index = match biome_id {
                         OCEAN_BIOME_ID => 0,
                         BEACH_BIOME_ID => 1,
@@ -202,7 +273,7 @@ mod tests {
                         MCLONE_OVERWORLD_FOREST_BIOME_ID => 3,
                         _ => panic!("unexpected Mclone biome ID {biome_id}"),
                     };
-                    let surface_index = match mclone_overworld_surface_recipe(sample) {
+                    let surface_index = match mclone_overworld_surface_recipe(landform) {
                         McloneOverworldSurfaceRecipe::OceanFloor => 0,
                         McloneOverworldSurfaceRecipe::Beach => 1,
                         McloneOverworldSurfaceRecipe::GrassSoil => 2,
@@ -216,28 +287,35 @@ mod tests {
                     }
                 }
             }
-            assert!(biome_counts.into_iter().all(|count| count > 0));
-            assert!(surface_counts.into_iter().all(|count| count > 0));
+            assert!(
+                biome_counts.into_iter().all(|count| count > 0),
+                "seed {seed} biome counts: {biome_counts:?}"
+            );
+            assert!(
+                surface_counts[..3].iter().all(|count| *count > 0),
+                "seed {seed} surface counts: {surface_counts:?}"
+            );
             (biome_counts, surface_counts, hash)
         });
+        assert!(receipts.iter().any(|receipt| receipt.1[3] > 0));
 
         assert_eq!(
             receipts,
             [
                 (
-                    [21_961, 8_436, 14_994, 20_145],
-                    [13_072, 17_325, 34_939, 200],
-                    14_859_869_082_210_026_387,
+                    [21_961, 8_436, 17_789, 17_350],
+                    [13_072, 17_325, 35_069, 70],
+                    5_971_664_242_438_023_034,
                 ),
                 (
-                    [17_223, 7_066, 8_096, 33_151],
-                    [8_521, 15_768, 40_344, 903],
-                    11_414_271_951_565_213_111,
+                    [17_223, 7_066, 13_701, 27_546],
+                    [8_521, 15_768, 41_176, 71],
+                    7_806_727_491_514_814_574,
                 ),
                 (
-                    [33_641, 11_524, 9_757, 10_614],
-                    [21_336, 23_829, 20_260, 111],
-                    5_223_861_348_981_852_077,
+                    [33_641, 11_524, 9_892, 10_479],
+                    [21_336, 23_829, 20_371, 0],
+                    5_151_670_375_816_009_055,
                 ),
             ]
         );

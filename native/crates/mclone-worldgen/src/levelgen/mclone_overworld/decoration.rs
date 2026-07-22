@@ -14,7 +14,7 @@ use crate::placement::ConfiguredDecorator;
 
 use super::biomes::{MCLONE_OVERWORLD_FOREST_BIOME_ID, mclone_overworld_biome_id};
 
-pub const MCLONE_OVERWORLD_DECORATION_REVISION: &str = "mclone-overworld-v1-decoration-2";
+pub const MCLONE_OVERWORLD_DECORATION_REVISION: &str = "mclone-overworld-v1-decoration-3";
 
 const MCLONE_OVERWORLD_DECORATION_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6465_6331);
 

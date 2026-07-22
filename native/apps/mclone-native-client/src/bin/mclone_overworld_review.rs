@@ -7,7 +7,7 @@ use anyhow::{Context, Result, bail};
 use image::RgbaImage;
 use mclone_worldgen::levelgen::{
     BEACH_BIOME_ID, MCLONE_OVERWORLD_DECORATION_REVISION, MCLONE_OVERWORLD_FIELD_REVISION,
-    MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_SEA_LEVEL,
+    MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldLandformSample,
     McloneOverworldSampleRegionRequest, McloneOverworldSampler, McloneOverworldSurfaceRecipe,
     McloneOverworldTerrainSample, OCEAN_BIOME_ID, PLAINS_BIOME_ID,
     mclone_overworld_biome_id_for_sample, mclone_overworld_spawn_chunk,
@@ -69,13 +69,25 @@ fn run() -> Result<()> {
     let sample_start = Instant::now();
     let region = sampler.sample_region(request).map_err(anyhow::Error::msg)?;
     let sample_elapsed_ms = sample_start.elapsed().as_secs_f64() * 1_000.0;
-    let facts = RegionFacts::from_samples(&region.samples, request.width, request.depth);
-    let review_sites = select_review_sites(&region.samples, request);
-    let center_sample = sampler.sample(center_x, center_z);
+    let landform_start = Instant::now();
+    let landforms = (0..request.depth)
+        .flat_map(|offset_z| {
+            (0..request.width).map(move |offset_x| {
+                sampler.sample_landform(
+                    request.min_x + offset_x as i32 * request.step as i32,
+                    request.min_z + offset_z as i32 * request.step as i32,
+                )
+            })
+        })
+        .collect::<Vec<_>>();
+    let landform_elapsed_ms = landform_start.elapsed().as_secs_f64() * 1_000.0;
+    let facts = RegionFacts::from_samples(&landforms, request.width, request.depth);
+    let review_sites = select_review_sites(&landforms, request);
+    let center_sample = sampler.sample_landform(center_x, center_z);
     let spawn_chunk = mclone_overworld_spawn_chunk(config.seed);
     let spawn_x = spawn_chunk.min_block_x() + 8;
     let spawn_z = spawn_chunk.min_block_z() + 8;
-    let spawn_sample = sampler.sample(spawn_x, spawn_z);
+    let spawn_sample = sampler.sample_landform(spawn_x, spawn_z);
 
     let prefix = format!(
         "mclone-overworld-v1-seed-{}-chunk-{}-{}",
@@ -88,6 +100,7 @@ fn run() -> Result<()> {
     let ruggedness_path = config.output_dir.join(format!("{prefix}-ruggedness.png"));
     let ridges_path = config.output_dir.join(format!("{prefix}-ridges.png"));
     let surface_path = config.output_dir.join(format!("{prefix}-surface-y.png"));
+    let slope_path = config.output_dir.join(format!("{prefix}-slope.png"));
     let fields_path = config.output_dir.join(format!("{prefix}-fields.png"));
     let biome_path = config.output_dir.join(format!("{prefix}-biomes.png"));
     let surface_recipe_path = config
@@ -103,8 +116,9 @@ fn run() -> Result<()> {
     let ruggedness = render_map(&region.samples, ruggedness_color);
     let ridges = render_map(&region.samples, ridges_color);
     let surface = render_map(&region.samples, surface_color);
-    let biomes = render_map(&region.samples, biome_color);
-    let surface_recipes = render_map(&region.samples, surface_recipe_color);
+    let slope = render_landform_map(&landforms, slope_color);
+    let biomes = render_landform_map(&landforms, biome_color);
+    let surface_recipes = render_landform_map(&landforms, surface_recipe_color);
     save_rgba(
         &continentalness_path,
         request.width,
@@ -115,6 +129,7 @@ fn run() -> Result<()> {
     save_rgba(&ruggedness_path, request.width, request.depth, &ruggedness)?;
     save_rgba(&ridges_path, request.width, request.depth, &ridges)?;
     save_rgba(&surface_path, request.width, request.depth, &surface)?;
+    save_rgba(&slope_path, request.width, request.depth, &slope)?;
     let combined = combine_maps(
         request.width,
         request.depth,
@@ -133,17 +148,21 @@ fn run() -> Result<()> {
         request.depth,
         &surface_recipes,
     )?;
-    let terrain_language = combine_maps(request.width, request.depth, [&biomes, &surface_recipes]);
+    let terrain_language = combine_maps(
+        request.width,
+        request.depth,
+        [&slope, &biomes, &surface_recipes],
+    );
     save_rgba(
         &language_path,
-        request.width * 2 + MAP_GAP_PIXELS,
+        request.width * 3 + MAP_GAP_PIXELS * 2,
         request.depth,
         &terrain_language,
     )?;
 
     let (commit, dirty) = git_state();
     let receipt = serde_json::json!({
-        "schema": 3,
+        "schema": 4,
         "profile": "mclone-overworld-v1",
         "fieldRevision": MCLONE_OVERWORLD_FIELD_REVISION,
         "decorationRevision": MCLONE_OVERWORLD_DECORATION_REVISION,
@@ -171,6 +190,7 @@ fn run() -> Result<()> {
             "stepBlocks": request.step,
             "count": region.samples.len(),
             "sampleElapsedMs": sample_elapsed_ms,
+            "landformSampleElapsedMs": landform_elapsed_ms,
         },
         "ranges": {
             "continentalness": [facts.min_continentalness, facts.max_continentalness],
@@ -178,11 +198,18 @@ fn run() -> Result<()> {
             "ruggedness": [facts.min_ruggedness, facts.max_ruggedness],
             "ridges": [facts.min_ridges, facts.max_ridges],
             "surfaceY": [facts.min_surface_y, facts.max_surface_y],
+            "slope": [facts.min_slope, facts.max_slope],
+            "exposure": [facts.min_exposure, facts.max_exposure],
         },
         "surfaceYPercentiles": {
             "p10": facts.surface_y_p10,
             "p50": facts.surface_y_p50,
             "p90": facts.surface_y_p90,
+        },
+        "slopePercentiles": {
+            "p50": facts.slope_p50,
+            "p90": facts.slope_p90,
+            "p99": facts.slope_p99,
         },
         "columnCounts": {
             "water": facts.water_columns,
@@ -225,8 +252,9 @@ fn run() -> Result<()> {
             "ruggedness": ruggedness_path,
             "ridges": ridges_path,
             "surfaceY": surface_path,
-            "terrainLanguageOrder": ["biomes", "surfaceRecipes"],
+            "terrainLanguageOrder": ["slope", "biomes", "surfaceRecipes"],
             "terrainLanguage": language_path,
+            "slope": slope_path,
             "biomes": biome_path,
             "surfaceRecipes": surface_recipe_path,
         },
@@ -249,37 +277,38 @@ fn run() -> Result<()> {
 }
 
 fn select_review_sites(
-    samples: &[McloneOverworldTerrainSample],
+    samples: &[McloneOverworldLandformSample],
     request: McloneOverworldSampleRegionRequest,
 ) -> serde_json::Value {
     let highest = samples
         .iter()
         .enumerate()
-        .filter(|(_, sample)| sample.mountain_strength() >= 0.35)
-        .max_by_key(|(_, sample)| sample.surface_y)
+        .filter(|(_, sample)| sample.terrain.mountain_strength() >= 0.35)
+        .max_by_key(|(_, sample)| sample.terrain.surface_y)
         .map(|(index, _)| index);
     let mountain_valley = samples
         .iter()
         .enumerate()
         .filter(|(_, sample)| {
-            sample.surface_y > MCLONE_OVERWORLD_SEA_LEVEL
-                && sample.mountain_strength() >= 0.45
-                && sample.ridges <= 0.25
+            sample.terrain.surface_y > MCLONE_OVERWORLD_SEA_LEVEL
+                && sample.terrain.mountain_strength() >= 0.45
+                && sample.terrain.ridges <= 0.25
         })
         .max_by(|(_, left), (_, right)| {
-            left.mountain_strength()
-                .total_cmp(&right.mountain_strength())
+            left.terrain
+                .mountain_strength()
+                .total_cmp(&right.terrain.mountain_strength())
         })
         .map(|(index, _)| index);
     let range_edge = samples
         .iter()
         .enumerate()
         .filter(|(_, sample)| {
-            sample.surface_y > MCLONE_OVERWORLD_SEA_LEVEL
-                && (0.15..=0.35).contains(&sample.mountain_strength())
-                && sample.ridges >= 0.70
+            sample.terrain.surface_y > MCLONE_OVERWORLD_SEA_LEVEL
+                && (0.15..=0.35).contains(&sample.terrain.mountain_strength())
+                && sample.terrain.ridges >= 0.70
         })
-        .max_by_key(|(_, sample)| sample.surface_y)
+        .max_by_key(|(_, sample)| sample.terrain.surface_y)
         .map(|(index, _)| index);
     let center_x = request.width as i64 / 2;
     let center_z = request.depth as i64 / 2;
@@ -287,7 +316,8 @@ fn select_review_sites(
         .iter()
         .enumerate()
         .filter(|(_, sample)| {
-            (67..=78).contains(&sample.surface_y) && sample.mountain_strength() <= 0.05
+            (67..=78).contains(&sample.terrain.surface_y)
+                && sample.terrain.mountain_strength() <= 0.05
         })
         .min_by_key(|(index, _)| {
             let x = *index as i64 % i64::from(request.width);
@@ -306,7 +336,7 @@ fn select_review_sites(
 
 fn review_site_json(
     index: Option<usize>,
-    samples: &[McloneOverworldTerrainSample],
+    samples: &[McloneOverworldLandformSample],
     request: McloneOverworldSampleRegionRequest,
 ) -> serde_json::Value {
     let Some(index) = index else {
@@ -323,14 +353,17 @@ fn review_site_json(
     })
 }
 
-fn sample_json(sample: McloneOverworldTerrainSample) -> serde_json::Value {
+fn sample_json(sample: McloneOverworldLandformSample) -> serde_json::Value {
+    let terrain = sample.terrain;
     serde_json::json!({
-        "continentalness": sample.continentalness,
-        "relief": sample.relief,
-        "ruggedness": sample.ruggedness,
-        "ridges": sample.ridges,
-        "mountainStrength": sample.mountain_strength(),
-        "surfaceY": sample.surface_y,
+        "continentalness": terrain.continentalness,
+        "relief": terrain.relief,
+        "ruggedness": terrain.ruggedness,
+        "ridges": terrain.ridges,
+        "mountainStrength": terrain.mountain_strength(),
+        "surfaceY": terrain.surface_y,
+        "slope": sample.slope,
+        "exposure": sample.exposure(),
     })
 }
 
@@ -410,9 +443,16 @@ struct RegionFacts {
     max_ridges: f64,
     min_surface_y: i32,
     max_surface_y: i32,
+    min_slope: f64,
+    max_slope: f64,
+    min_exposure: f64,
+    max_exposure: f64,
     surface_y_p10: i32,
     surface_y_p50: i32,
     surface_y_p90: i32,
+    slope_p50: f64,
+    slope_p90: f64,
+    slope_p99: f64,
     water_columns: usize,
     shore_columns: usize,
     dry_land_columns: usize,
@@ -438,7 +478,7 @@ struct RegionFacts {
 }
 
 impl RegionFacts {
-    fn from_samples(samples: &[McloneOverworldTerrainSample], width: u32, depth: u32) -> Self {
+    fn from_samples(samples: &[McloneOverworldLandformSample], width: u32, depth: u32) -> Self {
         let mut min_continentalness = f64::INFINITY;
         let mut max_continentalness = f64::NEG_INFINITY;
         let mut min_relief = f64::INFINITY;
@@ -447,7 +487,12 @@ impl RegionFacts {
         let mut max_ruggedness = f64::NEG_INFINITY;
         let mut min_ridges = f64::INFINITY;
         let mut max_ridges = f64::NEG_INFINITY;
+        let mut min_slope = f64::INFINITY;
+        let mut max_slope = f64::NEG_INFINITY;
+        let mut min_exposure = f64::INFINITY;
+        let mut max_exposure = f64::NEG_INFINITY;
         let mut heights = Vec::with_capacity(samples.len());
+        let mut slopes = Vec::with_capacity(samples.len());
         let mut water_columns = 0;
         let mut shore_columns = 0;
         let mut dry_land_columns = 0;
@@ -467,7 +512,8 @@ impl RegionFacts {
         let mut fingerprint = 0xcbf2_9ce4_8422_2325_u64;
         let mut foundation_field_fingerprint = 0xcbf2_9ce4_8422_2325_u64;
         let mut terrain_language_fingerprint = 0xcbf2_9ce4_8422_2325_u64;
-        for sample in samples {
+        for landform in samples {
+            let sample = landform.terrain;
             min_continentalness = min_continentalness.min(sample.continentalness);
             max_continentalness = max_continentalness.max(sample.continentalness);
             min_relief = min_relief.min(sample.relief);
@@ -476,7 +522,12 @@ impl RegionFacts {
             max_ruggedness = max_ruggedness.max(sample.ruggedness);
             min_ridges = min_ridges.min(sample.ridges);
             max_ridges = max_ridges.max(sample.ridges);
+            min_slope = min_slope.min(landform.slope);
+            max_slope = max_slope.max(landform.slope);
+            min_exposure = min_exposure.min(landform.exposure());
+            max_exposure = max_exposure.max(landform.exposure());
             heights.push(sample.surface_y);
+            slopes.push(landform.slope);
             let mountain_strength = sample.mountain_strength();
             if mountain_strength >= 0.35 && sample.surface_y > MCLONE_OVERWORLD_SEA_LEVEL {
                 mountain_region_columns += 1;
@@ -500,7 +551,7 @@ impl RegionFacts {
             } else {
                 dry_land_columns += 1;
             }
-            let biome_id = mclone_overworld_biome_id_for_sample(*sample);
+            let biome_id = mclone_overworld_biome_id_for_sample(*landform);
             match biome_id {
                 OCEAN_BIOME_ID => ocean_biome_columns += 1,
                 BEACH_BIOME_ID => beach_biome_columns += 1,
@@ -508,7 +559,7 @@ impl RegionFacts {
                 MCLONE_OVERWORLD_FOREST_BIOME_ID => wooded_upland_biome_columns += 1,
                 _ => {}
             }
-            let surface_recipe = mclone_overworld_surface_recipe(*sample);
+            let surface_recipe = mclone_overworld_surface_recipe(*landform);
             match surface_recipe {
                 McloneOverworldSurfaceRecipe::OceanFloor => ocean_floor_columns += 1,
                 McloneOverworldSurfaceRecipe::Beach => beach_surface_columns += 1,
@@ -550,6 +601,7 @@ impl RegionFacts {
             }
         }
         heights.sort_unstable();
+        slopes.sort_by(f64::total_cmp);
 
         let mut slope_edges = 0;
         let mut slope_at_least_one = 0;
@@ -561,8 +613,8 @@ impl RegionFacts {
                 let index = z * width + x;
                 if x + 1 < width {
                     add_slope(
-                        samples[index].surface_y,
-                        samples[index + 1].surface_y,
+                        samples[index].terrain.surface_y,
+                        samples[index + 1].terrain.surface_y,
                         &mut slope_edges,
                         &mut slope_at_least_one,
                         &mut slope_at_least_three,
@@ -570,8 +622,8 @@ impl RegionFacts {
                 }
                 if z + 1 < depth {
                     add_slope(
-                        samples[index].surface_y,
-                        samples[index + width].surface_y,
+                        samples[index].terrain.surface_y,
+                        samples[index + width].terrain.surface_y,
                         &mut slope_edges,
                         &mut slope_at_least_one,
                         &mut slope_at_least_three,
@@ -591,9 +643,16 @@ impl RegionFacts {
             max_ridges,
             min_surface_y: heights[0],
             max_surface_y: heights[heights.len() - 1],
+            min_slope,
+            max_slope,
+            min_exposure,
+            max_exposure,
             surface_y_p10: percentile(&heights, 10),
             surface_y_p50: percentile(&heights, 50),
             surface_y_p90: percentile(&heights, 90),
+            slope_p50: percentile_f64(&slopes, 50),
+            slope_p90: percentile_f64(&slopes, 90),
+            slope_p99: percentile_f64(&slopes, 99),
             water_columns,
             shore_columns,
             dry_land_columns,
@@ -642,9 +701,21 @@ fn percentile(sorted: &[i32], percentile: usize) -> i32 {
     sorted[index]
 }
 
+fn percentile_f64(sorted: &[f64], percentile: usize) -> f64 {
+    let index = (sorted.len() - 1) * percentile / 100;
+    sorted[index]
+}
+
 fn render_map(
     samples: &[McloneOverworldTerrainSample],
     color: fn(McloneOverworldTerrainSample) -> [u8; 4],
+) -> Vec<u8> {
+    samples.iter().copied().flat_map(color).collect::<Vec<_>>()
+}
+
+fn render_landform_map(
+    samples: &[McloneOverworldLandformSample],
+    color: fn(McloneOverworldLandformSample) -> [u8; 4],
 ) -> Vec<u8> {
     samples.iter().copied().flat_map(color).collect::<Vec<_>>()
 }
@@ -709,7 +780,11 @@ fn surface_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
     }
 }
 
-fn biome_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+fn slope_color(sample: McloneOverworldLandformSample) -> [u8; 4] {
+    lerp_color([32, 65, 84, 255], [239, 223, 190, 255], sample.slope / 1.5)
+}
+
+fn biome_color(sample: McloneOverworldLandformSample) -> [u8; 4] {
     match mclone_overworld_biome_id_for_sample(sample) {
         OCEAN_BIOME_ID => [25, 76, 145, 255],
         BEACH_BIOME_ID => [222, 207, 143, 255],
@@ -719,7 +794,7 @@ fn biome_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
     }
 }
 
-fn surface_recipe_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+fn surface_recipe_color(sample: McloneOverworldLandformSample) -> [u8; 4] {
     match mclone_overworld_surface_recipe(sample) {
         McloneOverworldSurfaceRecipe::OceanFloor => [104, 111, 119, 255],
         McloneOverworldSurfaceRecipe::Beach => [222, 207, 143, 255],
