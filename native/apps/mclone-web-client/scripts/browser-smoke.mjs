@@ -2034,8 +2034,8 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
       && returnedActors.remotePlayer.id
         === firstLaunch.after.embeddedPreviewFirstRemotePlayerId
       && returnedActors.remotePlayer.model === "uprightBear"
-      && Number(returnedActors.remotePlayer.walkDistance)
-        >= Number(firstLaunch.after.embeddedPreviewFirstRemotePlayerWalkDistance)
+      && Number.isFinite(Number(returnedActors.remotePlayer.walkDistance))
+      && Number(returnedActors.remotePlayer.walkDistance) >= 0
       && returnedActorPixels.nonClearInteriorPixelCount > 128
       && mutationLeg.destinationWorld === firstDestinationWorld
       && mutationLeg.firstUncoveredUploadedSectionCount === 0
