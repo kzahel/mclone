@@ -167,7 +167,8 @@ mod tests {
 
     use super::*;
     use crate::levelgen::mclone_overworld::biomes::{
-        MCLONE_OVERWORLD_FOREST_BIOME_ID, mclone_overworld_biome_id_for_sample,
+        MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_RIVER_BIOME_ID,
+        mclone_overworld_biome_id_for_sample,
     };
     use crate::levelgen::mclone_overworld::fields::MCLONE_OVERWORLD_SEA_LEVEL;
     use crate::levelgen::mclone_overworld::surface::{
@@ -188,6 +189,13 @@ mod tests {
                     let expected_top = match mclone_overworld_surface_recipe(sample) {
                         McloneOverworldSurfaceRecipe::OceanFloor => GRAVEL,
                         McloneOverworldSurfaceRecipe::Beach => SAND,
+                        McloneOverworldSurfaceRecipe::RiverBed => GRAVEL,
+                        McloneOverworldSurfaceRecipe::RiverBank
+                            if sample.terrain.base_surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 5 =>
+                        {
+                            SAND
+                        }
+                        McloneOverworldSurfaceRecipe::RiverBank => GRASS_BLOCK,
                         McloneOverworldSurfaceRecipe::GrassSoil => GRASS_BLOCK,
                         McloneOverworldSurfaceRecipe::ExposedStone => STONE,
                     };
@@ -200,7 +208,9 @@ mod tests {
                     let above = chunk.block_at_y(local_x, sample.terrain.surface_y + 1, local_z);
                     assert_eq!(
                         above.0,
-                        if sample.terrain.surface_y < MCLONE_OVERWORLD_SEA_LEVEL {
+                        if sample.terrain.watercourse.is_channel()
+                            || sample.terrain.surface_y < MCLONE_OVERWORLD_SEA_LEVEL
+                        {
                             WATER
                         } else {
                             AIR
@@ -291,9 +301,9 @@ mod tests {
         assert_eq!(
             fingerprints,
             [
-                (2_868_103_274_762_373_580, 540_454_697_130_909_605),
-                (11_018_219_340_342_296_831, 3_995_179_115_581_767_979),
-                (13_634_306_022_857_650_453, 14_722_381_067_837_031_305),
+                (11_783_861_094_925_128_346, 540_454_697_130_909_605),
+                (3_727_374_364_347_381_080, 3_995_179_115_581_767_979),
+                (2_903_393_598_174_869_434, 14_722_381_067_837_031_305),
             ]
         );
     }
@@ -302,8 +312,8 @@ mod tests {
     fn selected_regions_exercise_and_pin_biome_and_surface_language() {
         let receipts = [12_345, -98_765, 8_675_309].map(|seed| {
             let sampler = McloneOverworldSampler::new(seed);
-            let mut biome_counts = [0_u32; 4];
-            let mut surface_counts = [0_u32; 4];
+            let mut biome_counts = [0_u32; 5];
+            let mut surface_counts = [0_u32; 6];
             let mut hash = 0xcbf2_9ce4_8422_2325_u64;
             for z in (-2_048..2_048).step_by(16) {
                 for x in (-2_048..2_048).step_by(16) {
@@ -314,13 +324,16 @@ mod tests {
                         BEACH_BIOME_ID => 1,
                         PLAINS_BIOME_ID => 2,
                         MCLONE_OVERWORLD_FOREST_BIOME_ID => 3,
+                        MCLONE_OVERWORLD_RIVER_BIOME_ID => 4,
                         _ => panic!("unexpected Mclone biome ID {biome_id}"),
                     };
                     let surface_index = match mclone_overworld_surface_recipe(landform) {
                         McloneOverworldSurfaceRecipe::OceanFloor => 0,
                         McloneOverworldSurfaceRecipe::Beach => 1,
-                        McloneOverworldSurfaceRecipe::GrassSoil => 2,
-                        McloneOverworldSurfaceRecipe::ExposedStone => 3,
+                        McloneOverworldSurfaceRecipe::RiverBed => 2,
+                        McloneOverworldSurfaceRecipe::RiverBank => 3,
+                        McloneOverworldSurfaceRecipe::GrassSoil => 4,
+                        McloneOverworldSurfaceRecipe::ExposedStone => 5,
                     };
                     biome_counts[biome_index] += 1;
                     surface_counts[surface_index] += 1;
@@ -346,19 +359,19 @@ mod tests {
             receipts,
             [
                 (
-                    [21_961, 8_471, 18_118, 16_986],
-                    [13_072, 17_360, 35_028, 76],
-                    9_605_294_974_632_605_740,
+                    [21_961, 7_997, 17_911, 15_834, 1_833],
+                    [13_072, 16_618, 1_833, 1_248, 32_669, 96],
+                    13_260_929_152_795_437_084,
                 ),
                 (
-                    [17_223, 7_086, 13_974, 27_253],
-                    [8_521, 15_788, 41_127, 100],
-                    2_575_682_790_653_436_724,
+                    [17_223, 6_584, 14_679, 24_907, 2_143],
+                    [8_521, 15_026, 2_143, 1_993, 37_751, 102],
+                    15_893_539_249_671_903_039,
                 ),
                 (
-                    [33_641, 11_587, 9_948, 10_360],
-                    [21_336, 23_892, 20_308, 0],
-                    18_147_185_874_678_003_368,
+                    [33_641, 10_733, 10_373, 9_553, 1_236],
+                    [21_336, 22_725, 1_236, 1_306, 18_933, 0],
+                    12_940_564_294_704_804_890,
                 ),
             ]
         );
@@ -387,7 +400,7 @@ mod tests {
             fingerprints,
             [
                 9_298_043_774_959_183_043,
-                11_087_554_102_491_393_574,
+                15_150_032_425_197_556_476,
                 9_064_488_643_018_196_967,
             ]
         );

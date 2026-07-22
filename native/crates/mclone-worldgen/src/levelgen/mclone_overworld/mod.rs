@@ -6,10 +6,10 @@ mod surface;
 mod terrain;
 
 pub use biomes::{
-    MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_WOODED_MAX_EXPOSURE,
-    MCLONE_OVERWORLD_WOODED_MAX_SLOPE, MCLONE_OVERWORLD_WOODED_UPLAND_MIN_Y,
-    mclone_overworld_biome_id, mclone_overworld_biome_id_for_sample,
-    mclone_overworld_biome_id_with_topology,
+    MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_RIVER_BIOME_ID,
+    MCLONE_OVERWORLD_WOODED_MAX_EXPOSURE, MCLONE_OVERWORLD_WOODED_MAX_SLOPE,
+    MCLONE_OVERWORLD_WOODED_UPLAND_MIN_Y, mclone_overworld_biome_id,
+    mclone_overworld_biome_id_for_sample, mclone_overworld_biome_id_with_topology,
 };
 pub use decoration::MCLONE_OVERWORLD_DECORATION_REVISION;
 pub use feature_batch::{
@@ -22,7 +22,8 @@ pub use fields::{
     MCLONE_OVERWORLD_PERIOD_CHUNKS, MCLONE_OVERWORLD_SEA_LEVEL,
     MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS, McloneOverworldLandformSample,
     McloneOverworldSampleRegion, McloneOverworldSampleRegionRequest, McloneOverworldSampler,
-    McloneOverworldSamplingTopology, McloneOverworldTerrainSample, mclone_overworld_spawn_chunk,
+    McloneOverworldSamplingTopology, McloneOverworldTerrainSample,
+    McloneOverworldWatercourseSample, mclone_overworld_spawn_chunk,
     mclone_overworld_spawn_chunk_with_topology,
 };
 pub use surface::{

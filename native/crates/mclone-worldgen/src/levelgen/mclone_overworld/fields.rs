@@ -3,7 +3,7 @@ use mclone_core::{AxisTopology, ChunkPos, HorizontalTopology};
 use crate::noise::{GradientNoise2d, SeedDomain, ValueNoise2d};
 
 pub const MCLONE_OVERWORLD_SEA_LEVEL: i32 = 63;
-pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-6";
+pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-7";
 pub const MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS: i32 = 2;
 pub const MCLONE_OVERWORLD_PERIOD_BLOCKS: i32 = 6_144;
 pub const MCLONE_OVERWORLD_PERIOD_CHUNKS: u32 = 384;
@@ -20,6 +20,9 @@ const RIDGE_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_6431);
 const RIDGE_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_6432);
 const MOUNTAIN_DETAIL_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6d64_7431);
 const MOUNTAIN_DETAIL_FINE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6d64_7432);
+const RIVER_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_7631);
+const RIVER_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_7632);
+const RIVER_WIDTH_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_7633);
 
 const CONTINENT_LARGE_SCALE: i32 = 2_048;
 const CONTINENT_MEDIUM_SCALE: i32 = 1_024;
@@ -33,6 +36,11 @@ const RIDGE_LARGE_SCALE: i32 = 384;
 const RIDGE_DETAIL_SCALE: i32 = 128;
 const MOUNTAIN_DETAIL_LARGE_SCALE: i32 = 32;
 const MOUNTAIN_DETAIL_FINE_SCALE: i32 = 8;
+const RIVER_LARGE_SCALE: i32 = 768;
+const RIVER_DETAIL_SCALE: i32 = 192;
+const RIVER_WIDTH_SCALE: i32 = 384;
+const RIVER_GRADE_SAMPLE_DISTANCE: f64 = 16.0;
+const RIVER_MAX_RELEVANT_DISTANCE: f64 = 48.0;
 const MAX_REGION_SAMPLE_COUNT: usize = 16 * 1024 * 1024;
 const SPAWN_SEARCH_RADIUS_CHUNKS: i32 = 128;
 const SPAWN_MIN_SURFACE_Y: i32 = MCLONE_OVERWORLD_SEA_LEVEL + 5;
@@ -113,12 +121,40 @@ impl McloneOverworldSamplingTopology {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub struct McloneOverworldWatercourseSample {
+    pub distance: f64,
+    pub channel_influence: f64,
+    pub bank_influence: f64,
+    pub half_width: f64,
+    pub water_surface_y: i32,
+    pub bed_y: i32,
+    pub tangent_x: f64,
+    pub tangent_z: f64,
+    pub flow_x: f64,
+    pub flow_z: f64,
+    pub grade: f64,
+    pub wetland_influence: f64,
+}
+
+impl McloneOverworldWatercourseSample {
+    pub fn is_channel(self) -> bool {
+        self.channel_influence > 0.0
+    }
+
+    pub fn is_bank(self) -> bool {
+        self.bank_influence > 0.0 && !self.is_channel()
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct McloneOverworldTerrainSample {
     pub continentalness: f64,
     pub relief: f64,
     pub ruggedness: f64,
     pub ridges: f64,
     pub mountain_detail: f64,
+    pub base_surface_y: i32,
+    pub watercourse: McloneOverworldWatercourseSample,
     pub surface_y: i32,
 }
 
@@ -214,6 +250,9 @@ pub struct McloneOverworldSampler {
     ridge_detail: ValueNoise2d,
     mountain_detail_large: GradientNoise2d,
     mountain_detail_fine: GradientNoise2d,
+    river_large: GradientNoise2d,
+    river_detail: GradientNoise2d,
+    river_width: ValueNoise2d,
 }
 
 impl McloneOverworldSampler {
@@ -263,6 +302,9 @@ impl McloneOverworldSampler {
                 MOUNTAIN_DETAIL_FINE_DOMAIN,
                 MOUNTAIN_DETAIL_FINE_SCALE,
             ),
+            river_large: topology.gradient_noise(seed, RIVER_LARGE_DOMAIN, RIVER_LARGE_SCALE),
+            river_detail: topology.gradient_noise(seed, RIVER_DETAIL_DOMAIN, RIVER_DETAIL_SCALE),
+            river_width: topology.value_noise(seed, RIVER_WIDTH_DOMAIN, RIVER_WIDTH_SCALE),
         }
     }
 
@@ -298,14 +340,188 @@ impl McloneOverworldSampler {
                 .sample_at(world_x + fine_warp_x, world_z + fine_warp_z)
                 * 0.30)
             .clamp(-1.0, 1.0);
+        let base_surface_y =
+            surface_height(continentalness, relief, ruggedness, ridges, mountain_detail);
+        let broad_surface_y = surface_height(continentalness, relief, ruggedness, ridges, 0.0);
+        let river_warp_x = relief_detail * 72.0 + ruggedness_detail * 24.0;
+        let river_warp_z = ruggedness_detail * 72.0 - relief_large * 24.0;
+        let river_geometry =
+            self.sample_river_geometry(world_x, world_z, river_warp_x, river_warp_z);
+        let (watercourse, surface_y) = self.complete_watercourse(
+            world_x,
+            world_z,
+            continentalness,
+            ruggedness,
+            broad_surface_y,
+            base_surface_y,
+            river_geometry,
+        );
         McloneOverworldTerrainSample {
             continentalness,
             relief,
             ruggedness,
             ridges,
             mountain_detail,
-            surface_y: surface_height(continentalness, relief, ruggedness, ridges, mountain_detail),
+            base_surface_y,
+            watercourse,
+            surface_y,
         }
+    }
+
+    fn sample_river_geometry(
+        self,
+        world_x: f64,
+        world_z: f64,
+        warp_x: f64,
+        warp_z: f64,
+    ) -> RiverGeometry {
+        let large = self
+            .river_large
+            .sample_with_derivative(world_x + warp_x, world_z + warp_z);
+        let detail = self
+            .river_detail
+            .sample_with_derivative(world_x + warp_x * 0.35, world_z + warp_z * 0.35);
+        let center = (large.0 * 0.82 + detail.0 * 0.18).clamp(-1.0, 1.0);
+        let gradient_x = large.1 * 0.82 + detail.1 * 0.18;
+        let gradient_z = large.2 * 0.82 + detail.2 * 0.18;
+        let gradient_length = gradient_x.hypot(gradient_z).max(1.0 / 2_048.0);
+        let distance = (center.abs() / gradient_length).min(512.0);
+        let mut tangent_x = -gradient_z / gradient_length;
+        let mut tangent_z = gradient_x / gradient_length;
+        if tangent_z < 0.0 || (tangent_z == 0.0 && tangent_x < 0.0) {
+            tangent_x = -tangent_x;
+            tangent_z = -tangent_z;
+        }
+        let width_noise = self.river_width.sample(world_x as i32, world_z as i32) * 0.5 + 0.5;
+        RiverGeometry {
+            distance,
+            half_width: 4.5 + width_noise * 4.0,
+            tangent_x,
+            tangent_z,
+            width_noise,
+        }
+    }
+
+    fn complete_watercourse(
+        self,
+        world_x: f64,
+        world_z: f64,
+        continentalness: f64,
+        ruggedness: f64,
+        broad_surface_y: i32,
+        base_surface_y: i32,
+        geometry: RiverGeometry,
+    ) -> (McloneOverworldWatercourseSample, i32) {
+        let inland = smoothstep((continentalness / 0.45).clamp(0.0, 1.0));
+        let water_surface_y = (MCLONE_OVERWORLD_SEA_LEVEL as f64 * (1.0 - inland)
+            + f64::from(broad_surface_y - 3) * inland)
+            .round()
+            .clamp(
+                f64::from(MCLONE_OVERWORLD_SEA_LEVEL),
+                f64::from((base_surface_y - 1).max(MCLONE_OVERWORLD_SEA_LEVEL)),
+            ) as i32;
+        let depth = (2.0 + geometry.half_width * 0.24).round() as i32;
+        let bed_y = water_surface_y - depth;
+
+        let relevant = continentalness > 0.0
+            && base_surface_y > MCLONE_OVERWORLD_SEA_LEVEL
+            && geometry.distance <= RIVER_MAX_RELEVANT_DISTANCE;
+        let (flow_x, flow_z, grade) = if relevant {
+            let offset_x = geometry.tangent_x * RIVER_GRADE_SAMPLE_DISTANCE;
+            let offset_z = geometry.tangent_z * RIVER_GRADE_SAMPLE_DISTANCE;
+            let backward = self.sample_broad_surface_y(
+                (world_x - offset_x).round() as i32,
+                (world_z - offset_z).round() as i32,
+            );
+            let forward = self.sample_broad_surface_y(
+                (world_x + offset_x).round() as i32,
+                (world_z + offset_z).round() as i32,
+            );
+            let direction = if forward <= backward { 1.0 } else { -1.0 };
+            (
+                geometry.tangent_x * direction,
+                geometry.tangent_z * direction,
+                f64::from((forward - backward).abs()) / (RIVER_GRADE_SAMPLE_DISTANCE * 2.0),
+            )
+        } else {
+            (geometry.tangent_x, geometry.tangent_z, 0.0)
+        };
+        let mountain_region = mountain_strength(continentalness, ruggedness);
+        let low_grade = 1.0 - smoothstep(((grade - 0.02) / 0.16).clamp(0.0, 1.0));
+        let low_mountain = 1.0 - smoothstep((mountain_region / 0.55).clamp(0.0, 1.0));
+        let wetland_selector = smoothstep(((geometry.width_noise - 0.42) / 0.58).clamp(0.0, 1.0));
+        let wetland_influence = if relevant {
+            low_grade * low_mountain * wetland_selector
+        } else {
+            0.0
+        };
+        let bank_span = 8.0 + wetland_influence * 16.0;
+        let channel_influence = if relevant {
+            1.0 - smoothstep(
+                ((geometry.distance - geometry.half_width + 1.5) / 3.0).clamp(0.0, 1.0),
+            )
+        } else {
+            0.0
+        };
+        let bank_influence = if relevant {
+            1.0 - smoothstep(
+                ((geometry.distance - geometry.half_width) / bank_span).clamp(0.0, 1.0),
+            )
+        } else {
+            0.0
+        };
+        let surface_y = if channel_influence > 0.0 {
+            let channel_depth = 1.0 + channel_influence * f64::from(depth - 1);
+            base_surface_y.min((f64::from(water_surface_y) - channel_depth).round() as i32)
+        } else if bank_influence > 0.0 {
+            let bank_target = (f64::from(base_surface_y) * (1.0 - bank_influence)
+                + f64::from(water_surface_y + 1) * bank_influence)
+                .round() as i32;
+            base_surface_y.min(bank_target)
+        } else {
+            base_surface_y
+        };
+        (
+            McloneOverworldWatercourseSample {
+                distance: geometry.distance,
+                channel_influence,
+                bank_influence,
+                half_width: geometry.half_width,
+                water_surface_y,
+                bed_y,
+                tangent_x: geometry.tangent_x,
+                tangent_z: geometry.tangent_z,
+                flow_x,
+                flow_z,
+                grade,
+                wetland_influence,
+            },
+            surface_y,
+        )
+    }
+
+    fn sample_broad_surface_y(self, world_x: i32, world_z: i32) -> i32 {
+        let continentalness = (self.continent_large.sample(world_x, world_z) * 0.55
+            + self.continent_medium.sample(world_x, world_z) * 0.30
+            + self.continent_detail.sample(world_x, world_z) * 0.15)
+            .clamp(-1.0, 1.0);
+        let relief = (self.relief_large.sample(world_x, world_z) * 0.50
+            + self.relief_detail.sample(world_x, world_z) * 0.30
+            + self.relief_fine.sample(world_x, world_z) * 0.20)
+            .clamp(-1.0, 1.0);
+        let ruggedness = (self.ruggedness_large.sample(world_x, world_z) * 0.72
+            + self.ruggedness_detail.sample(world_x, world_z) * 0.28)
+            .clamp(-1.0, 1.0);
+        let ridge_source = self.ridge_large.sample(world_x, world_z) * 0.78
+            + self.ridge_detail.sample(world_x, world_z) * 0.22;
+        let ridge_linear = (1.0 - ridge_source.abs()).clamp(0.0, 1.0);
+        surface_height(
+            continentalness,
+            relief,
+            ruggedness,
+            ridge_linear * ridge_linear,
+            0.0,
+        )
     }
 
     pub fn sample_landform(self, world_x: i32, world_z: i32) -> McloneOverworldLandformSample {
@@ -399,7 +615,8 @@ pub fn mclone_overworld_spawn_chunk_with_topology(
                 }
                 let world_x = x * 16 + 8;
                 let world_z = z * 16 + 8;
-                if sampler.sample(world_x, world_z).surface_y >= SPAWN_MIN_SURFACE_Y {
+                let sample = sampler.sample(world_x, world_z);
+                if sample.surface_y >= SPAWN_MIN_SURFACE_Y && !sample.watercourse.is_channel() {
                     return ChunkPos::new(topology.canonical_chunk_x(x), z);
                 }
             }
@@ -444,6 +661,15 @@ fn smoothstep(value: f64) -> f64 {
     value * value * (3.0 - 2.0 * value)
 }
 
+#[derive(Clone, Copy, Debug)]
+struct RiverGeometry {
+    distance: f64,
+    half_width: f64,
+    tangent_x: f64,
+    tangent_z: f64,
+    width_noise: f64,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -457,6 +683,30 @@ mod tests {
         assert!((left.ruggedness - right.ruggedness).abs() < 1.0e-12);
         assert!((left.ridges - right.ridges).abs() < 1.0e-12);
         assert!((left.mountain_detail - right.mountain_detail).abs() < 1.0e-12);
+        assert_eq!(left.base_surface_y, right.base_surface_y);
+        assert!((left.watercourse.distance - right.watercourse.distance).abs() < 1.0e-9);
+        assert!(
+            (left.watercourse.channel_influence - right.watercourse.channel_influence).abs()
+                < 1.0e-9
+        );
+        assert!(
+            (left.watercourse.bank_influence - right.watercourse.bank_influence).abs() < 1.0e-9
+        );
+        assert!((left.watercourse.half_width - right.watercourse.half_width).abs() < 1.0e-12);
+        assert_eq!(
+            left.watercourse.water_surface_y,
+            right.watercourse.water_surface_y
+        );
+        assert_eq!(left.watercourse.bed_y, right.watercourse.bed_y);
+        assert!((left.watercourse.tangent_x - right.watercourse.tangent_x).abs() < 1.0e-9);
+        assert!((left.watercourse.tangent_z - right.watercourse.tangent_z).abs() < 1.0e-9);
+        assert!((left.watercourse.flow_x - right.watercourse.flow_x).abs() < 1.0e-9);
+        assert!((left.watercourse.flow_z - right.watercourse.flow_z).abs() < 1.0e-9);
+        assert!((left.watercourse.grade - right.watercourse.grade).abs() < 1.0e-12);
+        assert!(
+            (left.watercourse.wetland_influence - right.watercourse.wetland_influence).abs()
+                < 1.0e-12
+        );
         assert_eq!(left.surface_y, right.surface_y);
     }
 
@@ -675,6 +925,36 @@ mod tests {
             let sample = McloneOverworldSampler::new(seed)
                 .sample(spawn.min_block_x() + 8, spawn.min_block_z() + 8);
             assert!(sample.surface_y >= SPAWN_MIN_SURFACE_Y, "{seed}: {spawn:?}");
+        }
+    }
+
+    #[test]
+    fn watercourse_facts_are_bounded_and_exercise_channels_and_wetlands() {
+        for seed in [12_345, -98_765, 8_675_309] {
+            let sampler = McloneOverworldSampler::new(seed);
+            let mut channels = 0;
+            let mut wetlands = 0;
+            for z in (-2_048..2_048).step_by(8) {
+                for x in (-2_048..2_048).step_by(8) {
+                    let sample = sampler.sample(x, z);
+                    let river = sample.watercourse;
+                    assert!((0.0..=512.0).contains(&river.distance));
+                    assert!((0.0..=1.0).contains(&river.channel_influence));
+                    assert!((0.0..=1.0).contains(&river.bank_influence));
+                    assert!((4.5..=8.5).contains(&river.half_width));
+                    assert!(river.bed_y < river.water_surface_y);
+                    assert!((0.0..=1.0).contains(&river.wetland_influence));
+                    if river.is_channel() {
+                        channels += 1;
+                        assert!(sample.surface_y < river.water_surface_y);
+                    }
+                    if river.wetland_influence > 0.25 && river.bank_influence > 0.0 {
+                        wetlands += 1;
+                    }
+                }
+            }
+            assert!(channels > 0, "seed {seed} had no river channels");
+            assert!(wetlands > 0, "seed {seed} had no wetland margins");
         }
     }
 }

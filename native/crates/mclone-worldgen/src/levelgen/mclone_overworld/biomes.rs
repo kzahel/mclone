@@ -5,6 +5,7 @@ use super::fields::{
 use crate::levelgen::profile::{BEACH_BIOME_ID, OCEAN_BIOME_ID, PLAINS_BIOME_ID};
 
 pub const MCLONE_OVERWORLD_FOREST_BIOME_ID: i32 = 4;
+pub const MCLONE_OVERWORLD_RIVER_BIOME_ID: i32 = 7;
 pub const MCLONE_OVERWORLD_WOODED_UPLAND_MIN_Y: i32 = 75;
 pub const MCLONE_OVERWORLD_WOODED_MAX_SLOPE: f64 = 0.45;
 pub const MCLONE_OVERWORLD_WOODED_MAX_EXPOSURE: f64 = 0.44;
@@ -31,7 +32,13 @@ pub fn mclone_overworld_biome_id_with_topology(
 
 pub fn mclone_overworld_biome_id_for_sample(sample: McloneOverworldLandformSample) -> i32 {
     let terrain = sample.terrain;
-    if terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL - 2 {
+    if terrain.watercourse.is_channel() {
+        MCLONE_OVERWORLD_RIVER_BIOME_ID
+    } else if terrain.watercourse.bank_influence > 0.0
+        && terrain.watercourse.wetland_influence > 0.25
+    {
+        PLAINS_BIOME_ID
+    } else if terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL - 2 {
         OCEAN_BIOME_ID
     } else if terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 3 {
         BEACH_BIOME_ID
@@ -50,7 +57,9 @@ pub fn mclone_overworld_biome_id_for_sample(sample: McloneOverworldLandformSampl
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::levelgen::mclone_overworld::fields::McloneOverworldTerrainSample;
+    use crate::levelgen::mclone_overworld::fields::{
+        McloneOverworldTerrainSample, McloneOverworldWatercourseSample,
+    };
 
     fn sample(surface_y: i32, slope: f64) -> McloneOverworldLandformSample {
         McloneOverworldLandformSample {
@@ -60,6 +69,21 @@ mod tests {
                 ruggedness: 0.0,
                 ridges: 0.0,
                 mountain_detail: 0.0,
+                base_surface_y: surface_y,
+                watercourse: McloneOverworldWatercourseSample {
+                    distance: 512.0,
+                    channel_influence: 0.0,
+                    bank_influence: 0.0,
+                    half_width: 6.0,
+                    water_surface_y: MCLONE_OVERWORLD_SEA_LEVEL,
+                    bed_y: MCLONE_OVERWORLD_SEA_LEVEL - 3,
+                    tangent_x: 1.0,
+                    tangent_z: 0.0,
+                    flow_x: 1.0,
+                    flow_z: 0.0,
+                    grade: 0.0,
+                    wetland_influence: 0.0,
+                },
                 surface_y,
             },
             slope,

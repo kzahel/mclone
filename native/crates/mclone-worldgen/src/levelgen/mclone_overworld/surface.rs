@@ -11,6 +11,8 @@ pub const MCLONE_OVERWORLD_EXPOSED_STONE_MIN_EXPOSURE: f64 = 0.76;
 pub enum McloneOverworldSurfaceRecipe {
     OceanFloor,
     Beach,
+    RiverBed,
+    RiverBank,
     GrassSoil,
     ExposedStone,
 }
@@ -19,7 +21,13 @@ pub fn mclone_overworld_surface_recipe(
     sample: McloneOverworldLandformSample,
 ) -> McloneOverworldSurfaceRecipe {
     let terrain = sample.terrain;
-    if terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL - 4 {
+    if terrain.watercourse.is_channel() {
+        McloneOverworldSurfaceRecipe::RiverBed
+    } else if terrain.watercourse.is_bank()
+        && terrain.surface_y <= terrain.watercourse.water_surface_y + 3
+    {
+        McloneOverworldSurfaceRecipe::RiverBank
+    } else if terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL - 4 {
         McloneOverworldSurfaceRecipe::OceanFloor
     } else if terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 3 {
         McloneOverworldSurfaceRecipe::Beach
@@ -48,6 +56,17 @@ pub(super) fn write_surface_column(
         McloneOverworldSurfaceRecipe::Beach => {
             write_subsurface(buffer, local_x, local_z, surface_y, SAND, 4)
         }
+        McloneOverworldSurfaceRecipe::RiverBed => {
+            write_subsurface(buffer, local_x, local_z, surface_y, GRAVEL, 3)
+        }
+        McloneOverworldSurfaceRecipe::RiverBank => {
+            if sample.terrain.base_surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 5 {
+                write_subsurface(buffer, local_x, local_z, surface_y, SAND, 4);
+            } else {
+                write_subsurface(buffer, local_x, local_z, surface_y - 1, DIRT, 3);
+                buffer.set_block_at_y(local_x, surface_y, local_z, GRASS_BLOCK);
+            }
+        }
         McloneOverworldSurfaceRecipe::GrassSoil => {
             write_subsurface(buffer, local_x, local_z, surface_y - 1, DIRT, 2);
             buffer.set_block_at_y(local_x, surface_y, local_z, GRASS_BLOCK);
@@ -58,7 +77,12 @@ pub(super) fn write_surface_column(
             }
         }
     }
-    for y in surface_y + 1..=MCLONE_OVERWORLD_SEA_LEVEL {
+    let water_fill_y = if sample.terrain.watercourse.is_channel() {
+        sample.terrain.watercourse.water_surface_y
+    } else {
+        MCLONE_OVERWORLD_SEA_LEVEL
+    };
+    for y in surface_y + 1..=water_fill_y {
         buffer.set_block_at_y(local_x, y, local_z, WATER);
     }
 }
@@ -83,7 +107,9 @@ fn write_subsurface(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::levelgen::mclone_overworld::fields::McloneOverworldTerrainSample;
+    use crate::levelgen::mclone_overworld::fields::{
+        McloneOverworldTerrainSample, McloneOverworldWatercourseSample,
+    };
 
     fn sample(surface_y: i32, slope: f64) -> McloneOverworldLandformSample {
         McloneOverworldLandformSample {
@@ -93,6 +119,21 @@ mod tests {
                 ruggedness: 0.0,
                 ridges: 0.0,
                 mountain_detail: 0.0,
+                base_surface_y: surface_y,
+                watercourse: McloneOverworldWatercourseSample {
+                    distance: 512.0,
+                    channel_influence: 0.0,
+                    bank_influence: 0.0,
+                    half_width: 6.0,
+                    water_surface_y: MCLONE_OVERWORLD_SEA_LEVEL,
+                    bed_y: MCLONE_OVERWORLD_SEA_LEVEL - 3,
+                    tangent_x: 1.0,
+                    tangent_z: 0.0,
+                    flow_x: 1.0,
+                    flow_z: 0.0,
+                    grade: 0.0,
+                    wetland_influence: 0.0,
+                },
                 surface_y,
             },
             slope,

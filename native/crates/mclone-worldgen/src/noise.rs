@@ -212,6 +212,11 @@ impl GradientNoise2d {
     }
 
     pub fn sample_at(self, world_x: f64, world_z: f64) -> f64 {
+        self.sample_with_derivative(world_x, world_z).0
+    }
+
+    /// Returns the value and its X/Z derivatives in world-block units.
+    pub fn sample_with_derivative(self, world_x: f64, world_z: f64) -> (f64, f64, f64) {
         assert!(
             world_x.is_finite() && world_z.is_finite(),
             "gradient-noise coordinates must be finite"
@@ -224,25 +229,42 @@ impl GradientNoise2d {
         let fraction_z = scaled_z - lattice_z as f64;
         let blend_x = gradient_noise_fade(fraction_x);
         let blend_z = gradient_noise_fade(fraction_z);
-        let top = value_noise_lerp(
-            self.corner(lattice_x, lattice_z, fraction_x, fraction_z),
-            self.corner(lattice_x + 1, lattice_z, fraction_x - 1.0, fraction_z),
-            blend_x,
-        );
-        let bottom = value_noise_lerp(
-            self.corner(lattice_x, lattice_z + 1, fraction_x, fraction_z - 1.0),
-            self.corner(
-                lattice_x + 1,
-                lattice_z + 1,
-                fraction_x - 1.0,
-                fraction_z - 1.0,
-            ),
-            blend_x,
-        );
-        (value_noise_lerp(top, bottom, blend_z) * std::f64::consts::SQRT_2).clamp(-1.0, 1.0)
+        let blend_dx = gradient_noise_fade_derivative(fraction_x);
+        let blend_dz = gradient_noise_fade_derivative(fraction_z);
+        let gradient_00 = self.corner_gradient(lattice_x, lattice_z);
+        let gradient_10 = self.corner_gradient(lattice_x + 1, lattice_z);
+        let gradient_01 = self.corner_gradient(lattice_x, lattice_z + 1);
+        let gradient_11 = self.corner_gradient(lattice_x + 1, lattice_z + 1);
+        let corner_00 = gradient_00[0] * fraction_x + gradient_00[1] * fraction_z;
+        let corner_10 = gradient_10[0] * (fraction_x - 1.0) + gradient_10[1] * fraction_z;
+        let corner_01 = gradient_01[0] * fraction_x + gradient_01[1] * (fraction_z - 1.0);
+        let corner_11 = gradient_11[0] * (fraction_x - 1.0) + gradient_11[1] * (fraction_z - 1.0);
+        let top = value_noise_lerp(corner_00, corner_10, blend_x);
+        let bottom = value_noise_lerp(corner_01, corner_11, blend_x);
+        let top_dx = value_noise_lerp(gradient_00[0], gradient_10[0], blend_x)
+            + (corner_10 - corner_00) * blend_dx;
+        let bottom_dx = value_noise_lerp(gradient_01[0], gradient_11[0], blend_x)
+            + (corner_11 - corner_01) * blend_dx;
+        let scaled_value = value_noise_lerp(top, bottom, blend_z);
+        let scaled_dx = value_noise_lerp(top_dx, bottom_dx, blend_z);
+        let top_dz = value_noise_lerp(gradient_00[1], gradient_10[1], blend_x);
+        let bottom_dz = value_noise_lerp(gradient_01[1], gradient_11[1], blend_x);
+        let scaled_dz = value_noise_lerp(top_dz, bottom_dz, blend_z) + (bottom - top) * blend_dz;
+        let normalization = std::f64::consts::SQRT_2;
+        let unclamped = scaled_value * normalization;
+        if !(-1.0..=1.0).contains(&unclamped) {
+            (unclamped.clamp(-1.0, 1.0), 0.0, 0.0)
+        } else {
+            let derivative_scale = normalization / f64::from(self.scale);
+            (
+                unclamped,
+                scaled_dx * derivative_scale,
+                scaled_dz * derivative_scale,
+            )
+        }
     }
 
-    fn corner(self, lattice_x: i64, lattice_z: i64, offset_x: f64, offset_z: f64) -> f64 {
+    fn corner_gradient(self, lattice_x: i64, lattice_z: i64) -> [f64; 2] {
         let lattice_x = self
             .lattice_period_x
             .map_or(lattice_x, |period| lattice_x.rem_euclid(period));
@@ -250,8 +272,7 @@ impl GradientNoise2d {
             .lattice_period_z
             .map_or(lattice_z, |period| lattice_z.rem_euclid(period));
         let hash = original_lattice_hash(self.seed, self.domain, lattice_x, lattice_z);
-        let gradient = ORIGINAL_GRADIENTS_2D[hash as usize & (ORIGINAL_GRADIENTS_2D.len() - 1)];
-        gradient[0] * offset_x + gradient[1] * offset_z
+        ORIGINAL_GRADIENTS_2D[hash as usize & (ORIGINAL_GRADIENTS_2D.len() - 1)]
     }
 }
 
@@ -275,6 +296,10 @@ fn value_noise_smoothstep(value: f64) -> f64 {
 
 fn gradient_noise_fade(value: f64) -> f64 {
     value * value * value * (value * (value * 6.0 - 15.0) + 10.0)
+}
+
+fn gradient_noise_fade_derivative(value: f64) -> f64 {
+    30.0 * value * value * (value - 1.0) * (value - 1.0)
 }
 
 fn value_noise_lerp(from: f64, to: f64, amount: f64) -> f64 {
@@ -1179,6 +1204,30 @@ mod tests {
             assert!((noise.sample_at(x + 6_144.0, z) - expected).abs() < 1.0e-12);
         }
         assert!((noise.sample_at(17.25, 9.5) - noise.sample_at(17.25, 6_153.5)).abs() > 1.0e-6);
+    }
+
+    #[test]
+    fn gradient_noise_derivatives_match_centered_differences_and_repeat() {
+        let noise = GradientNoise2d::new_periodic_x(
+            -98_765,
+            SeedDomain::new(0x6d63_6f76_7269_7631),
+            192,
+            6_144,
+        );
+        let epsilon = 1.0e-3;
+        for (x, z) in [(-6_145.25, -317.5), (-23.75, 41.5), (913.25, 2_047.5)] {
+            let (value, derivative_x, derivative_z) = noise.sample_with_derivative(x, z);
+            let numeric_x = (noise.sample_at(x + epsilon, z) - noise.sample_at(x - epsilon, z))
+                / (epsilon * 2.0);
+            let numeric_z = (noise.sample_at(x, z + epsilon) - noise.sample_at(x, z - epsilon))
+                / (epsilon * 2.0);
+            assert!((derivative_x - numeric_x).abs() < 1.0e-8);
+            assert!((derivative_z - numeric_z).abs() < 1.0e-8);
+            let repeated = noise.sample_with_derivative(x + 6_144.0, z);
+            assert!((value - repeated.0).abs() < 1.0e-12);
+            assert!((derivative_x - repeated.1).abs() < 1.0e-12);
+            assert!((derivative_z - repeated.2).abs() < 1.0e-12);
+        }
     }
 
     #[derive(Debug, Deserialize)]
