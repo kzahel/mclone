@@ -72,9 +72,11 @@ Landed native coverage:
   partition, cache, codec, native, and browser regression evidence.
 - Its first mountain/valley family adds coherent ridge and ruggedness fields,
   derived slope/exposure, open valley and shoulder language, and exposed-stone
-  treatment. Human review found the current result too smooth and too
-  large-scale; a production-backed multiscale characteristic benchmark now
-  quantifies the pending tune against undecorated Java 1.17.1 terrain.
+  treatment. Human review found field revision 4 too smooth and too
+  large-scale. Field revision 5 adds mountain-gated 32/8-block detail and
+  reduces broad ridge lift; the multiscale benchmark places it substantially
+  closer to undecorated Java 1.17.1 terrain without changing the lowland
+  control. Its high-view-distance matrix awaits human acceptance.
 - Production-backed broad field maps and fully warmed seed/region/spawn cards;
   the first review accepted macro scale and coast variation after adding one
   fine relief octave to break up concentric local contour bands. The second

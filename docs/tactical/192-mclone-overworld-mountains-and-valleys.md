@@ -8,8 +8,9 @@ show open valleys and transitional shoulders, grass below coherent rocky high
 ground, and an unchanged wooded lowland control. Human Review 2 rejected the
 current geometry as too smooth and too large-scale. A production-backed
 terrain-characteristics checkpoint now measures that finding against exact
-Minecraft Java 1.17.1 terrain. The bounded geometry tune remains before
-host-equivalence closeout and Tactical 196.
+Minecraft Java 1.17.1 terrain. Field revision 5 applies the first bounded
+multiscale response and is ready for human pixel review before host-equivalence
+closeout and Tactical 196.
 
 Topic: `mclone-overworld-generation`
 
@@ -312,8 +313,10 @@ boundaries.
   surface exposure, vegetation, coast readability, repetition, and cost.
 - [x] Measure the rejected smoothness/scale finding against undecorated
   Minecraft Java 1.17.1 terrain at shared block resolution.
-- [ ] Rebalance fine, middle, and broad terrain scales against the measured
+- [x] Rebalance fine, middle, and broad terrain scales against the measured
   reference envelope, then repeat maps and landscape review.
+- [ ] Accept or revise field revision 5 from the complete high-view-distance
+  landscape matrix.
 - [ ] Prove native thread and production browser Worker equivalence.
 - [ ] Re-run SQLite/IndexedDB only if identity, persistence, or startup behavior
   changed; otherwise cite Tactical 188's unchanged host contract.
@@ -384,6 +387,72 @@ tables for constant-time plane windows and is offline review tooling, so it
 adds no chunk-generation work. The JSON receipt is written to
 `/tmp/mclone-terrain-characteristics.json`; custom sites, radius, land mask,
 and output path are CLI arguments.
+
+#### Field revision 5 tuning candidate
+
+Field revision 5 keeps continentalness, relief, ruggedness, and both ridge
+domains byte-identical. It adds one live `mountain_detail` value composed from
+independent 32- and 8-block `ValueNoise2d` domains at weights `0.55` and
+`0.45`. Both scales divide Tactical 196's provisional 6,144-block period. The
+detail enters height only through:
+
+```text
+mountain_detail * mountain_strength * (6 + 14 * ridge_shoulder)
+```
+
+This gives strong crests and shoulders more secondary form while retaining a
+smaller response in traversable mountain valleys. Oceans and non-mountain
+lowlands multiply the detail by zero. A direct unit test locks that boundary,
+and the lowland characteristic control retains its exact previous fingerprint
+and every measured value.
+
+The same revision reduces the broad mountain lift from
+`4 + 16s + 54s^2` to `4 + 12s + 38s^2`, where `s` is the accepted smoothed
+ridge shoulder. This is a reallocation of height variation from broad lift to
+coherent local form, not a global amplitude increase. The existing 20-by-20
+landform halo and 3-by-3 work/5-by-5 Surface dependency footprints are
+unchanged. Production and review use the same sampler. Receipt schema 5 adds
+the detail range, map, and fingerprint contribution.
+
+The measurement suite reports:
+
+| Characteristic | Field rev. 4 | Field rev. 5 | Vanilla | Rev. 5 / vanilla |
+|---|---:|---:|---:|---:|
+| Lag-1 RMS height delta | 0.523 | 0.726 | 1.282 | 0.567x |
+| Lag-4 RMS height delta | 1.520 | 2.351 | 3.602 | 0.653x |
+| Lag-16 RMS height delta | 5.889 | 6.344 | 8.022 | 0.791x |
+| Lag-64 RMS height delta | 20.819 | 15.495 | 12.977 | 1.194x |
+| Curvature RMS | 1.128 | 1.259 | 2.379 | 0.529x |
+| Plane-fit radius-4 RMSE | 0.279 | 0.839 | 1.365 | 0.615x |
+| Plane-fit radius-8 RMSE | 0.361 | 1.619 | 2.279 | 0.711x |
+| Plane-fit radius-16 RMSE | 0.859 | 2.441 | 3.904 | 0.625x |
+| Plane-fit radius-32 RMSE | 2.692 | 4.341 | 5.569 | 0.779x |
+| Roughness exponent | 0.919 | 0.748 | 0.659 | 1.135x |
+| Fine-detail energy share | 0.011 | 0.063 | 0.060 | 1.055x |
+
+The tune closes the demonstrated gap without fitting every vanilla number.
+The remaining lower block curvature and lag-1 change preserve some original
+Mclone smoothness, while middle-scale residuals and broad change now sit much
+closer to the reference envelope. The ordinary lowland stays intentionally
+calmer than vanilla rather than receiving global detail.
+
+The final review matrix is under
+`/tmp/mclone-overworld-fields5-candidate2-{range-negative,valley,positive,range-edge,lowland}`.
+Every card uses render distance 16 and 800-by-500 source panels. The inspected
+range interior, mountain valley, positive-seed range, range edge, and lowland
+control retain 24, 128, and 315 blocks of camera clearance in their three
+views. The range cards show secondary peaks, saddles, shelves, and gullies;
+the valley remains a connected broad route, and the wooded lowland control is
+visually and numerically unchanged. Human acceptance remains open.
+
+On the same three-iteration release lane used by prior slices, field revision
+5 measured 3,836.042 surface chunks/s, 628.990 cold decorated targets/s, and
+4,891.668 warm decorated targets/s. Relative to the field-revision-4 language
+baseline, those are +2.8, +5.4, and -7.1 percent respectively and remain well
+inside the 25 percent review threshold. The two added lattice samples are not
+an observable generation-cost concern in this run. Broad 148,225-point maps
+sampled in 16.7 ms and exact landforms in about 80-82 ms; the latter remains a
+diagnostic path rather than production's cached halo.
 
 ## Evidence
 

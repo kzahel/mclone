@@ -329,7 +329,8 @@ sampling. Small Island may remain columnar if forcing it through a density
 pipeline adds no value.
 
 The live request/response type contains `continentalness: f64`, `relief: f64`,
-`ruggedness: f64`, normalized `ridges: f64`, and derived `surface_y: i32`.
+`ruggedness: f64`, normalized `ridges: f64`, `mountain_detail: f64`, and
+derived `surface_y: i32`.
 Point and bounded row-major region requests call the same production sampler
 used by chunk generation. The region form is deliberately an in-process
 worldgen inspection seam, not a second scheduler/Worker protocol.
@@ -350,7 +351,18 @@ remain traversable valley floors and ordinary lowland regions retain their
 character. No additional field, point-sampling cost, neighborhood search, or
 generation dependency footprint is involved.
 
-The raw field inventory remains revision 4. A separate
+Human Review 2 found revision 4 too smooth and dominated by broad relief.
+Field revision 5 preserves every existing raw domain and adds independent
+32- and 8-block mountain-detail domains, weighted `0.55` and `0.45`. Their
+combined value is gated by mountain-region and ridge-shoulder strength, so
+oceans and ordinary lowlands retain their previous height exactly. At the same
+time, the broad ridge lift changes from `4 + 16s + 54s^2` to
+`4 + 12s + 38s^2`. This moves variation from broad ramps into secondary peaks,
+saddles, shelves, and gullies without changing a generation dependency
+footprint. Both new scales divide the provisional 6,144-block periodic
+circumference.
+
+A separate
 `McloneOverworldLandformSample` pairs one raw terrain sample with the exact
 four-block slope used by production. Its exposure relation combines accepted
 altitude, ridge, and mountain-region facts without adding another seed domain.
@@ -362,7 +374,7 @@ existing open and wooded placed-feature tables then make vegetation eligibility
 follow the same biome and substrate facts. Decoration revision 3 records the
 intentional output change.
 
-`pnpm native:worldgen:fields` now writes all five production-backed raw/height
+`pnpm native:worldgen:fields` now writes all six production-backed raw/height
 maps plus derived slope, biome, and surface-recipe maps; receipts include
 separate raw and landform timings, slope/exposure ranges and percentiles,
 foundation/new-field fingerprints, landform counts, and selected range,
@@ -625,6 +637,15 @@ production generation cost. Keep future characteristic extraction in shared
 Rust so the same code can later serve a Terrain Lab or automated visual-review
 report without moving terrain semantics into TypeScript.
 
+Field revision 5 uses that benchmark as a directional constraint rather than
+an optimization target. Radius-8 detrended roughness moved from 0.158x to
+0.711x vanilla, radius-16 from 0.220x to 0.625x, and lag-64 height change from
+1.604x to 1.194x. The roughness exponent fell from 0.919 to 0.748 against the
+0.659 reference median; fine-detail energy share is 0.063 versus 0.060. The
+lowland control remains fingerprint-identical. This is sufficient for a new
+human pixel review without forcing Mclone to copy vanilla's exact terrain
+distribution.
+
 ## Acceptance Themes
 
 - distinct profile identity without any reference Overworld output change;
@@ -640,15 +661,15 @@ report without moving terrain semantics into TypeScript.
 
 ## Next Work
 
-Tune Tactical 192's mountain scale composition against the new multiscale
-terrain-characteristics baseline, then repeat its production maps and
-maximum-view-distance landscape matrix. The present result needs more
-coherent 4-32-block structure and less dominance from broad 64-block change;
-do not merely increase global height or add unmodulated noise everywhere. Once
-human review accepts that bounded tune, complete native/browser Worker
-equivalence and unchanged-host-contract closeout. Do not fold rivers, climate
-breadth, caves, or structures into that tactical. After its field set and
-terrain language are accepted, execute
+Review Tactical 192 field revision 5's production maps and complete
+maximum-view-distance landscape matrix. If its measured secondary form reads
+as coherent terrain rather than busy noise, accept the bounded tune and
+complete native/browser Worker equivalence and unchanged-host-contract
+closeout. If it still needs adjustment, keep that change within the landed
+32/8-block detail composition and broad-lift response rather than adding
+another field family. Do not fold rivers, climate breadth, caves, or structures
+into that tactical. After its field set and terrain language are accepted,
+execute
 [`Tactical 196`](../tactical/196-periodic-mclone-terrain-fields.md):
 re-audit every live field scale, select the explicit periodic sampler and
 circumference, then route terrain and decoration through canonical outputs plus
