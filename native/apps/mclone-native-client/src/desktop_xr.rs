@@ -13,15 +13,15 @@ use anyhow::{Result, bail};
 use glam::Vec3;
 #[cfg(not(target_os = "android"))]
 use mclone_scene::{
-    McloneSceneHost, McloneSceneHostOptions, XrDebugUiScreen as SceneXrDebugUiScreen,
-    XrFramePipelineHostTiming, XrSceneFrameTarget, XrStartupViewPose, XrTerrainEyeTarget,
-    XrTerrainFrameSummary, XrUnderwaterDetectionMode, record_xr_frame_pipeline,
-    xr_frame_pipeline_accounting_config,
+    McloneSceneHost, McloneSceneHostOptions, XrControllerInputRouter,
+    XrDebugUiScreen as SceneXrDebugUiScreen, XrFramePipelineHostTiming, XrSceneFrameTarget,
+    XrStartupViewPose, XrTerrainEyeTarget, XrTerrainFrameSummary, XrUnderwaterDetectionMode,
+    record_xr_frame_pipeline, xr_frame_pipeline_accounting_config,
 };
 #[cfg(not(target_os = "android"))]
 use mclone_xr_host::{
-    OpenXrControllerActions, OpenXrHostEvent, PRIMARY_STEREO_VIEW_TYPE, XrControllerSnapshot,
-    XrHand, XrStereoConfig,
+    OpenXrControllerActions, OpenXrHostEvent, PRIMARY_STEREO_VIEW_TYPE, TrackedControllerState,
+    XrHand, XrInputFrame, XrStereoConfig,
 };
 #[cfg(not(target_os = "android"))]
 use openxr as xr;
@@ -325,15 +325,15 @@ struct XrControllerInputSummary {
     select_pressed_frames: u32,
     a_pressed_frames: u32,
     b_pressed_frames: u32,
-    latest_left: Option<XrControllerSnapshot>,
-    latest_right: Option<XrControllerSnapshot>,
+    latest_left: Option<TrackedControllerState>,
+    latest_right: Option<TrackedControllerState>,
 }
 
 #[cfg(not(target_os = "android"))]
 impl XrControllerInputSummary {
-    fn record(&mut self, snapshots: &[XrControllerSnapshot]) {
+    fn record(&mut self, input: &XrInputFrame) {
         self.frames_polled += 1;
-        for snapshot in snapshots {
+        for snapshot in &input.tracked {
             let tracked = snapshot.aim_position.is_some() || snapshot.grip_position.is_some();
             match snapshot.hand {
                 XrHand::Left => {
@@ -347,13 +347,33 @@ impl XrControllerInputSummary {
                     self.latest_right = Some(*snapshot);
                 }
             }
-            self.max_trigger = self.max_trigger.max(snapshot.trigger);
-            self.max_squeeze = self.max_squeeze.max(snapshot.squeeze);
-            self.max_thumbstick = self.max_thumbstick.max(snapshot.thumbstick.length());
-            self.select_pressed_frames += u32::from(snapshot.select_pressed);
-            self.a_pressed_frames += u32::from(snapshot.a_pressed);
-            self.b_pressed_frames += u32::from(snapshot.b_pressed);
+            if let Some(specific) = input.xr_specific.controller(snapshot.hand) {
+                self.max_trigger = self.max_trigger.max(specific.pointer_select_value);
+                self.max_squeeze = self.max_squeeze.max(specific.squeeze_value);
+                self.max_thumbstick = self
+                    .max_thumbstick
+                    .max(specific.locomotion_axis.length())
+                    .max(specific.turn_axis.length());
+            }
         }
+        self.select_pressed_frames += u32::from(
+            input
+                .actions
+                .held
+                .contains(&mclone_input::PlayerAction::OpenMenu),
+        );
+        self.a_pressed_frames += u32::from(
+            input
+                .actions
+                .held
+                .contains(&mclone_input::PlayerAction::Jump),
+        );
+        self.b_pressed_frames += u32::from(
+            input
+                .actions
+                .held
+                .contains(&mclone_input::PlayerAction::Descend),
+        );
     }
 
     fn print_summary(&self) {
@@ -381,20 +401,12 @@ impl XrControllerInputSummary {
 }
 
 #[cfg(not(target_os = "android"))]
-fn format_snapshot(snapshot: XrControllerSnapshot) -> String {
+fn format_snapshot(snapshot: TrackedControllerState) -> String {
     format!(
-        "aim={} aim_dir={} grip={} trigger={:.3} squeeze={:.3} select={} a={} b={} thumbstick=({:.3}, {:.3}) thumbstick_pressed={}",
+        "aim={} aim_dir={} grip={}",
         format_position(snapshot.aim_position),
         format_direction(snapshot.aim_direction),
-        format_position(snapshot.grip_position),
-        snapshot.trigger,
-        snapshot.squeeze,
-        snapshot.select_pressed,
-        snapshot.a_pressed,
-        snapshot.b_pressed,
-        snapshot.thumbstick.x,
-        snapshot.thumbstick.y,
-        snapshot.thumbstick_pressed
+        format_position(snapshot.grip_position)
     )
 }
 
@@ -431,7 +443,9 @@ struct DesktopXrFrameLoop<'a> {
     left_eye: &'a mut platform_graphics::OpenXrEyeState,
     right_eye: &'a mut platform_graphics::OpenXrEyeState,
     mclone: &'a mut Option<DesktopXrSceneHost>,
-    controller_actions: &'a OpenXrControllerActions,
+    controller_actions: &'a mut OpenXrControllerActions,
+    ordinary_gamepad: Option<crate::desktop_gamepad::DesktopGamepadCollector>,
+    ordinary_gamepad_input: XrControllerInputRouter,
     controller_summary: XrControllerInputSummary,
     frame_pipeline_accountant: FramePipelineAccountant,
     companion: &'a mut Option<CompanionWindow>,
@@ -467,6 +481,17 @@ impl mclone_xr_host::OpenXrFrameLoopHandler<platform_graphics::AppGraphics>
         println!("{event}");
         if matches!(
             event,
+            OpenXrHostEvent::SessionStateChanged(
+                xr::SessionState::STOPPING
+                    | xr::SessionState::LOSS_PENDING
+                    | xr::SessionState::EXITING
+            )
+        ) {
+            self.controller_actions.clear_transient_input();
+            self.ordinary_gamepad_input.clear_transient_input();
+        }
+        if matches!(
+            event,
             OpenXrHostEvent::SessionStateChanged(xr::SessionState::READY)
         ) && !self.companion_running_announced
         {
@@ -482,14 +507,32 @@ impl mclone_xr_host::OpenXrFrameLoopHandler<platform_graphics::AppGraphics>
         frame: &mut mclone_xr_host::OpenXrRenderFrame<'_, platform_graphics::AppGraphics>,
     ) -> Result<Self::RenderOutput> {
         let controller_poll_start = Instant::now();
-        let controllers = self.controller_actions.poll(
+        let mut input = self.controller_actions.poll(
             frame.session(),
             self.stage,
             frame.predicted_display_time(),
         )?;
         let controller_poll_ms = elapsed_ms(controller_poll_start.elapsed());
-        self.controller_summary.record(&controllers);
+        self.controller_summary.record(&input);
         let summary = if let Some(mclone) = self.mclone.as_mut() {
+            if let Some(collector) = self.ordinary_gamepad.as_mut() {
+                let poll = collector.poll()?;
+                for source_id in poll.disconnected {
+                    self.ordinary_gamepad_input.disconnect_source(source_id)?;
+                }
+                for (source_id, descriptor) in poll.connected {
+                    self.ordinary_gamepad_input
+                        .connect_source(source_id, descriptor);
+                }
+                self.ordinary_gamepad_input.route_samples(
+                    mclone,
+                    poll.sample_time,
+                    poll.samples,
+                    self.device,
+                    self.queue,
+                )?;
+            }
+            self.ordinary_gamepad_input.merge_into_frame(&mut input);
             Some(render_desktop_xr_frame(
                 self.device,
                 self.queue,
@@ -498,7 +541,7 @@ impl mclone_xr_host::OpenXrFrameLoopHandler<platform_graphics::AppGraphics>
                 self.left_eye,
                 self.right_eye,
                 mclone,
-                &controllers,
+                &input,
             )?)
         } else {
             render_clear_frame(
@@ -652,7 +695,7 @@ fn run_smoke_frames(
     } else {
         None
     };
-    let controller_actions = OpenXrControllerActions::create_with_binding_logger(
+    let mut controller_actions = OpenXrControllerActions::create_with_binding_logger(
         graphics.session.instance(),
         &graphics.session,
         |profile, err| println!("OpenXR binding suggestion unavailable for {profile}: {err:?}"),
@@ -661,6 +704,13 @@ fn run_smoke_frames(
     println!(
         "OpenXR controller actions: requested binding profiles=simple_controller, oculus_touch, valve_index, htc_vive, microsoft_motion_controller"
     );
+    let ordinary_gamepad = match crate::desktop_gamepad::DesktopGamepadCollector::new() {
+        Ok(collector) => Some(collector),
+        Err(error) => {
+            println!("desktop XR ordinary gamepad collector unavailable: {error:#}");
+            None
+        }
+    };
     let policy = mclone_xr_host::OpenXrFrameLoopPolicy {
         view_type: VIEW_TYPE,
         environment_blend_mode,
@@ -677,7 +727,9 @@ fn run_smoke_frames(
         left_eye: &mut left_eye,
         right_eye: &mut right_eye,
         mclone: &mut mclone,
-        controller_actions: &controller_actions,
+        controller_actions: &mut controller_actions,
+        ordinary_gamepad,
+        ordinary_gamepad_input: XrControllerInputRouter::new(),
         controller_summary: XrControllerInputSummary::default(),
         frame_pipeline_accountant: FramePipelineAccountant::new(
             xr_frame_pipeline_accounting_config(display_refresh.current_rate.map(f64::from)),
@@ -913,7 +965,7 @@ fn render_desktop_xr_frame(
     left_eye: &mut platform_graphics::OpenXrEyeState,
     right_eye: &mut platform_graphics::OpenXrEyeState,
     mclone: &mut DesktopXrSceneHost,
-    controllers: &[XrControllerSnapshot],
+    input: &XrInputFrame,
 ) -> Result<XrTerrainFrameSummary> {
     let stereo_views =
         mclone_xr_host::locate_stereo_views(frame.session(), stage, frame.predicted_display_time())
@@ -922,7 +974,7 @@ fn render_desktop_xr_frame(
         mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
         mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
     ];
-    mclone.apply_frame_locomotion(controllers, scene_views, None)?;
+    mclone.apply_frame_locomotion(input, scene_views, None)?;
 
     let left_target = acquire_eye_target(left_eye).context("acquire left-eye OpenXR image")?;
     let right_target = match acquire_eye_target(right_eye).context("acquire right-eye OpenXR image")

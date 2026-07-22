@@ -1,10 +1,14 @@
 use anyhow::{Context, Result};
 use glam::{Quat, Vec2, Vec3};
-use mclone_input::{XrControllerSnapshot, XrHand};
+use mclone_input::{
+    TrackedControllerState, XrActionSnapshot, XrControllerSpecificState, XrHand, XrInputFrame,
+    XrInputFrameAssembler, XrSpecificInput,
+};
 use openxr as xr;
 
 pub struct OpenXrControllerActions {
     action_set: xr::ActionSet,
+    input_assembler: XrInputFrameAssembler,
     left_aim: xr::Action<xr::Posef>,
     right_aim: xr::Action<xr::Posef>,
     left_grip: xr::Action<xr::Posef>,
@@ -13,24 +17,28 @@ pub struct OpenXrControllerActions {
     right_aim_space: xr::Space,
     left_grip_space: xr::Space,
     right_grip_space: xr::Space,
-    left_trigger: xr::Action<f32>,
-    right_trigger: xr::Action<f32>,
-    left_squeeze: xr::Action<f32>,
-    right_squeeze: xr::Action<f32>,
-    left_select: xr::Action<bool>,
-    right_select: xr::Action<bool>,
-    right_a_click: xr::Action<bool>,
-    right_b_click: xr::Action<bool>,
-    left_y_click: xr::Action<bool>,
-    left_thumbstick_x: xr::Action<f32>,
-    left_thumbstick_y: xr::Action<f32>,
-    right_thumbstick_x: xr::Action<f32>,
-    right_thumbstick_y: xr::Action<f32>,
-    left_thumbstick_click: xr::Action<bool>,
-    right_thumbstick_click: xr::Action<bool>,
+    left_pointer_select_value: xr::Action<f32>,
+    right_attack_value: xr::Action<f32>,
+    left_squeeze_value: xr::Action<f32>,
+    right_use_value: xr::Action<f32>,
+    open_menu: xr::Action<bool>,
+    right_simple_attack: xr::Action<bool>,
+    jump: xr::Action<bool>,
+    descend: xr::Action<bool>,
+    sprint: xr::Action<bool>,
+    move_x: xr::Action<f32>,
+    move_y: xr::Action<f32>,
+    turn_x: xr::Action<f32>,
+    turn_y: xr::Action<f32>,
+    open_block_palette: xr::Action<bool>,
+    sneak: xr::Action<bool>,
 }
 
 impl OpenXrControllerActions {
+    pub fn clear_transient_input(&mut self) {
+        self.input_assembler.clear();
+    }
+
     pub fn create<G: xr::Graphics>(
         instance: &xr::Instance,
         session: &xr::Session<G>,
@@ -54,38 +62,25 @@ impl OpenXrControllerActions {
         let right_aim = action_set.create_action::<xr::Posef>("right_aim", "Right Aim", &[])?;
         let left_grip = action_set.create_action::<xr::Posef>("left_grip", "Left Grip", &[])?;
         let right_grip = action_set.create_action::<xr::Posef>("right_grip", "Right Grip", &[])?;
-        let left_trigger = action_set.create_action::<f32>("left_trigger", "Left Trigger", &[])?;
-        let right_trigger =
-            action_set.create_action::<f32>("right_trigger", "Right Trigger", &[])?;
-        let left_squeeze = action_set.create_action::<f32>("left_squeeze", "Left Squeeze", &[])?;
-        let right_squeeze =
-            action_set.create_action::<f32>("right_squeeze", "Right Squeeze", &[])?;
-        let left_select = action_set.create_action::<bool>("left_select", "Left Select", &[])?;
-        let right_select = action_set.create_action::<bool>("right_select", "Right Select", &[])?;
-        let right_a_click =
-            action_set.create_action::<bool>("right_a_click", "Right A Button", &[])?;
-        let right_b_click =
-            action_set.create_action::<bool>("right_b_click", "Right B Button", &[])?;
-        let left_y_click =
-            action_set.create_action::<bool>("left_y_click", "Left Y Button", &[])?;
-        let left_thumbstick_x =
-            action_set.create_action::<f32>("left_thumbstick_x", "Left Thumbstick X", &[])?;
-        let left_thumbstick_y =
-            action_set.create_action::<f32>("left_thumbstick_y", "Left Thumbstick Y", &[])?;
-        let right_thumbstick_x =
-            action_set.create_action::<f32>("right_thumbstick_x", "Right Thumbstick X", &[])?;
-        let right_thumbstick_y =
-            action_set.create_action::<f32>("right_thumbstick_y", "Right Thumbstick Y", &[])?;
-        let left_thumbstick_click = action_set.create_action::<bool>(
-            "left_thumbstick_click",
-            "Left Thumbstick Click",
-            &[],
-        )?;
-        let right_thumbstick_click = action_set.create_action::<bool>(
-            "right_thumbstick_click",
-            "Right Thumbstick Click",
-            &[],
-        )?;
+        let left_pointer_select_value =
+            action_set.create_action::<f32>("left_pointer_select", "Left Pointer Select", &[])?;
+        let right_attack_value = action_set.create_action::<f32>("attack", "Attack", &[])?;
+        let left_squeeze_value =
+            action_set.create_action::<f32>("left_hand_squeeze", "Left Hand Squeeze", &[])?;
+        let right_use_value = action_set.create_action::<f32>("use", "Use", &[])?;
+        let open_menu = action_set.create_action::<bool>("open_menu", "Open Menu", &[])?;
+        let right_simple_attack =
+            action_set.create_action::<bool>("simple_attack", "Attack", &[])?;
+        let jump = action_set.create_action::<bool>("jump", "Jump", &[])?;
+        let descend = action_set.create_action::<bool>("descend", "Descend", &[])?;
+        let sprint = action_set.create_action::<bool>("sprint", "Sprint", &[])?;
+        let move_x = action_set.create_action::<f32>("move_x", "Move X", &[])?;
+        let move_y = action_set.create_action::<f32>("move_y", "Move Y", &[])?;
+        let turn_x = action_set.create_action::<f32>("turn_x", "Turn X", &[])?;
+        let turn_y = action_set.create_action::<f32>("turn_y", "Turn Y", &[])?;
+        let open_block_palette =
+            action_set.create_action::<bool>("open_block_palette", "Open Block Palette", &[])?;
+        let sneak = action_set.create_action::<bool>("sneak", "Sneak", &[])?;
 
         Self::suggest_simple_controller_bindings(
             instance,
@@ -93,8 +88,8 @@ impl OpenXrControllerActions {
             &right_aim,
             &left_grip,
             &right_grip,
-            &left_select,
-            &right_select,
+            &open_menu,
+            &right_simple_attack,
             &mut on_binding_warning,
         )?;
         Self::suggest_touch_controller_bindings(
@@ -103,20 +98,20 @@ impl OpenXrControllerActions {
             &right_aim,
             &left_grip,
             &right_grip,
-            &left_trigger,
-            &right_trigger,
-            &left_squeeze,
-            &right_squeeze,
-            &left_select,
-            &right_a_click,
-            &right_b_click,
-            &left_y_click,
-            &left_thumbstick_x,
-            &left_thumbstick_y,
-            &right_thumbstick_x,
-            &right_thumbstick_y,
-            &left_thumbstick_click,
-            &right_thumbstick_click,
+            &left_pointer_select_value,
+            &right_attack_value,
+            &left_squeeze_value,
+            &right_use_value,
+            &open_menu,
+            &jump,
+            &descend,
+            &sprint,
+            &move_x,
+            &move_y,
+            &turn_x,
+            &turn_y,
+            &open_block_palette,
+            &sneak,
             &mut on_binding_warning,
         )?;
 
@@ -133,6 +128,7 @@ impl OpenXrControllerActions {
 
         Ok(Self {
             action_set,
+            input_assembler: XrInputFrameAssembler::new(),
             left_aim,
             right_aim,
             left_grip,
@@ -141,41 +137,88 @@ impl OpenXrControllerActions {
             right_aim_space,
             left_grip_space,
             right_grip_space,
-            left_trigger,
-            right_trigger,
-            left_squeeze,
-            right_squeeze,
-            left_select,
-            right_select,
-            right_a_click,
-            right_b_click,
-            left_y_click,
-            left_thumbstick_x,
-            left_thumbstick_y,
-            right_thumbstick_x,
-            right_thumbstick_y,
-            left_thumbstick_click,
-            right_thumbstick_click,
+            left_pointer_select_value,
+            right_attack_value,
+            left_squeeze_value,
+            right_use_value,
+            open_menu,
+            right_simple_attack,
+            jump,
+            descend,
+            sprint,
+            move_x,
+            move_y,
+            turn_x,
+            turn_y,
+            open_block_palette,
+            sneak,
         })
     }
 
     pub fn poll<G: xr::Graphics>(
-        &self,
+        &mut self,
         session: &xr::Session<G>,
         stage: &xr::Space,
         time: xr::Time,
-    ) -> Result<Vec<XrControllerSnapshot>> {
+    ) -> Result<XrInputFrame> {
         session
             .sync_actions(&[(&self.action_set).into()])
             .context("sync OpenXR controller actions")?;
-        let mut snapshots = Vec::with_capacity(2);
-        if let Some(snapshot) = self.read_hand(session, stage, time, XrHand::Left) {
-            snapshots.push(snapshot);
+        let mut tracked = Vec::with_capacity(2);
+        if let Some(state) = self.read_tracked_hand(session, stage, time, XrHand::Left) {
+            tracked.push(state);
         }
-        if let Some(snapshot) = self.read_hand(session, stage, time, XrHand::Right) {
-            snapshots.push(snapshot);
+        if let Some(state) = self.read_tracked_hand(session, stage, time, XrHand::Right) {
+            tracked.push(state);
         }
-        Ok(snapshots)
+        let movement_axis = Vec2::new(
+            Self::read_float_action(session, &self.move_x),
+            Self::read_float_action(session, &self.move_y),
+        );
+        let turn_axis = Vec2::new(
+            Self::read_float_action(session, &self.turn_x),
+            Self::read_float_action(session, &self.turn_y),
+        );
+        let left_pointer_select_value =
+            Self::read_float_action(session, &self.left_pointer_select_value);
+        let right_attack_value = Self::read_float_action(session, &self.right_attack_value).max(
+            f32::from(Self::read_bool_action(session, &self.right_simple_attack)),
+        );
+        let left_squeeze_value = Self::read_float_action(session, &self.left_squeeze_value);
+        let right_use_value = Self::read_float_action(session, &self.right_use_value);
+        Ok(self.input_assembler.sample(
+            XrActionSnapshot {
+                movement_axis,
+                turn_axis,
+                attack_value: right_attack_value,
+                use_value: right_use_value,
+                jump: Self::read_bool_action(session, &self.jump),
+                sprint: Self::read_bool_action(session, &self.sprint),
+                sneak: Self::read_bool_action(session, &self.sneak),
+                descend: Self::read_bool_action(session, &self.descend),
+                open_menu: Self::read_bool_action(session, &self.open_menu),
+                open_block_palette: Self::read_bool_action(session, &self.open_block_palette),
+            },
+            tracked,
+            XrSpecificInput {
+                controllers: vec![
+                    XrControllerSpecificState {
+                        hand: Some(XrHand::Left),
+                        pointer_select_value: left_pointer_select_value,
+                        squeeze_value: left_squeeze_value,
+                        locomotion_axis: movement_axis,
+                        turn_axis: Vec2::ZERO,
+                    },
+                    XrControllerSpecificState {
+                        hand: Some(XrHand::Right),
+                        pointer_select_value: right_attack_value,
+                        squeeze_value: right_use_value,
+                        locomotion_axis: Vec2::ZERO,
+                        turn_axis,
+                    },
+                ],
+            },
+        ))
     }
 
     fn suggest_simple_controller_bindings<F>(
@@ -184,8 +227,8 @@ impl OpenXrControllerActions {
         right_aim: &xr::Action<xr::Posef>,
         left_grip: &xr::Action<xr::Posef>,
         right_grip: &xr::Action<xr::Posef>,
-        left_select: &xr::Action<bool>,
-        right_select: &xr::Action<bool>,
+        open_menu: &xr::Action<bool>,
+        right_simple_attack: &xr::Action<bool>,
         on_binding_warning: &mut F,
     ) -> Result<()>
     where
@@ -209,11 +252,11 @@ impl OpenXrControllerActions {
                 instance.string_to_path("/user/hand/right/input/grip/pose")?,
             ),
             xr::Binding::new(
-                left_select,
+                open_menu,
                 instance.string_to_path("/user/hand/left/input/select/click")?,
             ),
             xr::Binding::new(
-                right_select,
+                right_simple_attack,
                 instance.string_to_path("/user/hand/right/input/select/click")?,
             ),
         ];
@@ -233,20 +276,20 @@ impl OpenXrControllerActions {
         right_aim: &xr::Action<xr::Posef>,
         left_grip: &xr::Action<xr::Posef>,
         right_grip: &xr::Action<xr::Posef>,
-        left_trigger: &xr::Action<f32>,
-        right_trigger: &xr::Action<f32>,
-        left_squeeze: &xr::Action<f32>,
-        right_squeeze: &xr::Action<f32>,
-        left_select: &xr::Action<bool>,
-        right_a_click: &xr::Action<bool>,
-        right_b_click: &xr::Action<bool>,
-        left_y_click: &xr::Action<bool>,
-        left_thumbstick_x: &xr::Action<f32>,
-        left_thumbstick_y: &xr::Action<f32>,
-        right_thumbstick_x: &xr::Action<f32>,
-        right_thumbstick_y: &xr::Action<f32>,
-        left_thumbstick_click: &xr::Action<bool>,
-        right_thumbstick_click: &xr::Action<bool>,
+        left_pointer_select_value: &xr::Action<f32>,
+        right_attack_value: &xr::Action<f32>,
+        left_squeeze_value: &xr::Action<f32>,
+        right_use_value: &xr::Action<f32>,
+        open_menu: &xr::Action<bool>,
+        jump: &xr::Action<bool>,
+        descend: &xr::Action<bool>,
+        sprint: &xr::Action<bool>,
+        move_x: &xr::Action<f32>,
+        move_y: &xr::Action<f32>,
+        turn_x: &xr::Action<f32>,
+        turn_y: &xr::Action<f32>,
+        open_block_palette: &xr::Action<bool>,
+        sneak: &xr::Action<bool>,
         on_binding_warning: &mut F,
     ) -> Result<()>
     where
@@ -270,59 +313,59 @@ impl OpenXrControllerActions {
                 instance.string_to_path("/user/hand/right/input/grip/pose")?,
             ),
             xr::Binding::new(
-                left_trigger,
+                left_pointer_select_value,
                 instance.string_to_path("/user/hand/left/input/trigger/value")?,
             ),
             xr::Binding::new(
-                right_trigger,
+                right_attack_value,
                 instance.string_to_path("/user/hand/right/input/trigger/value")?,
             ),
             xr::Binding::new(
-                left_squeeze,
+                left_squeeze_value,
                 instance.string_to_path("/user/hand/left/input/squeeze/value")?,
             ),
             xr::Binding::new(
-                right_squeeze,
+                right_use_value,
                 instance.string_to_path("/user/hand/right/input/squeeze/value")?,
             ),
             xr::Binding::new(
-                left_select,
+                open_menu,
                 instance.string_to_path("/user/hand/left/input/x/click")?,
             ),
             xr::Binding::new(
-                left_y_click,
+                sprint,
                 instance.string_to_path("/user/hand/left/input/y/click")?,
             ),
             xr::Binding::new(
-                right_a_click,
+                jump,
                 instance.string_to_path("/user/hand/right/input/a/click")?,
             ),
             xr::Binding::new(
-                right_b_click,
+                descend,
                 instance.string_to_path("/user/hand/right/input/b/click")?,
             ),
             xr::Binding::new(
-                left_thumbstick_x,
+                move_x,
                 instance.string_to_path("/user/hand/left/input/thumbstick/x")?,
             ),
             xr::Binding::new(
-                left_thumbstick_y,
+                move_y,
                 instance.string_to_path("/user/hand/left/input/thumbstick/y")?,
             ),
             xr::Binding::new(
-                right_thumbstick_x,
+                turn_x,
                 instance.string_to_path("/user/hand/right/input/thumbstick/x")?,
             ),
             xr::Binding::new(
-                right_thumbstick_y,
+                turn_y,
                 instance.string_to_path("/user/hand/right/input/thumbstick/y")?,
             ),
             xr::Binding::new(
-                left_thumbstick_click,
+                open_block_palette,
                 instance.string_to_path("/user/hand/left/input/thumbstick/click")?,
             ),
             xr::Binding::new(
-                right_thumbstick_click,
+                sneak,
                 instance.string_to_path("/user/hand/right/input/thumbstick/click")?,
             ),
         ];
@@ -352,57 +395,25 @@ impl OpenXrControllerActions {
         }
     }
 
-    fn read_hand<G: xr::Graphics>(
+    fn read_tracked_hand<G: xr::Graphics>(
         &self,
         session: &xr::Session<G>,
         stage: &xr::Space,
         time: xr::Time,
         hand: XrHand,
-    ) -> Option<XrControllerSnapshot> {
-        let (
-            aim_action,
-            aim_space,
-            grip_action,
-            grip_space,
-            trigger_action,
-            squeeze_action,
-            select_action,
-            thumbstick_x_action,
-            thumbstick_y_action,
-            thumbstick_click_action,
-            a_click_action,
-            b_click_action,
-            y_click_action,
-        ) = match hand {
+    ) -> Option<TrackedControllerState> {
+        let (aim_action, aim_space, grip_action, grip_space) = match hand {
             XrHand::Left => (
                 &self.left_aim,
                 &self.left_aim_space,
                 &self.left_grip,
                 &self.left_grip_space,
-                &self.left_trigger,
-                &self.left_squeeze,
-                &self.left_select,
-                &self.left_thumbstick_x,
-                &self.left_thumbstick_y,
-                &self.left_thumbstick_click,
-                None,
-                None,
-                Some(&self.left_y_click),
             ),
             XrHand::Right => (
                 &self.right_aim,
                 &self.right_aim_space,
                 &self.right_grip,
                 &self.right_grip_space,
-                &self.right_trigger,
-                &self.right_squeeze,
-                &self.right_select,
-                &self.right_thumbstick_x,
-                &self.right_thumbstick_y,
-                &self.right_thumbstick_click,
-                Some(&self.right_a_click),
-                Some(&self.right_b_click),
-                None,
             ),
         };
 
@@ -422,29 +433,12 @@ impl OpenXrControllerActions {
             return None;
         }
 
-        Some(XrControllerSnapshot {
+        Some(TrackedControllerState {
             hand,
             aim_position: aim_pose.map(|pose| pose.position),
             aim_direction: aim_pose.map(|pose| pose.forward),
             grip_position: grip_pose.map(|pose| pose.position),
             grip_orientation: grip_pose.map(|pose| pose.orientation),
-            trigger: Self::read_float_action(session, trigger_action),
-            squeeze: Self::read_float_action(session, squeeze_action),
-            select_pressed: Self::read_bool_action(session, select_action),
-            a_pressed: a_click_action
-                .map(|action| Self::read_bool_action(session, action))
-                .unwrap_or(false),
-            b_pressed: b_click_action
-                .map(|action| Self::read_bool_action(session, action))
-                .unwrap_or(false),
-            y_pressed: y_click_action
-                .map(|action| Self::read_bool_action(session, action))
-                .unwrap_or(false),
-            thumbstick: Vec2::new(
-                Self::read_float_action(session, thumbstick_x_action),
-                Self::read_float_action(session, thumbstick_y_action),
-            ),
-            thumbstick_pressed: Self::read_bool_action(session, thumbstick_click_action),
         })
     }
 

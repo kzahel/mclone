@@ -5,7 +5,10 @@ mod interactive_input;
 mod pose_sync;
 
 pub use far_lod_settle::{FarLodChunkLedgerRow, FarLodSettleSnapshot};
-pub use interactive_input::{MonoInputDisposition, MonoInteractiveInputRouter};
+pub use interactive_input::{
+    MonoInputDisposition, MonoInteractiveInputRouter, XrControllerInputDisposition,
+    XrControllerInputRouter,
+};
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -109,8 +112,8 @@ use mclone_diagnostics::{
 };
 use mclone_input::{
     ControllerLayoutFamily, FLAT_HOTBAR_SLOT_COUNT, FlatInputAction, FlatInputFrame,
-    InputPromptKind, ResolvedFlatInput, TouchControlsMode, TouchLookDelta, XrControllerSnapshot,
-    XrHand, keyboard_turn_mouse_delta,
+    InputPromptKind, PlayerAction, PlayerActionFrame, ResolvedFlatInput, TouchControlsMode,
+    TouchLookDelta, TrackedControllerState, XrHand, XrInputFrame, keyboard_turn_mouse_delta,
 };
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh, quad_face_count_from_indices};
 use mclone_protocol::{DebugActorKind, DebugHotbarItem, EntitySnapshot, RemotePlayerUpdate};
@@ -212,7 +215,6 @@ pub const MAX_XR_RENDER_DISTANCE: u32 = 16;
 pub const XR_NEAR: f32 = 0.05;
 pub const XR_FAR: f32 = 700.0;
 pub const XR_JOYPAD_DEAD_ZONE: f32 = 0.18;
-pub const XR_JOYPAD_YAW_SPEED_RADIANS_PER_SECOND: f64 = 1.6;
 pub const XR_DEFAULT_SNAP_TURN_DEGREES: f32 = 15.0;
 pub const XR_SNAP_TURN_ENGAGE_THRESHOLD: f32 = 0.65;
 pub const XR_SNAP_TURN_RECENTER_THRESHOLD: f32 = 0.25;
@@ -220,7 +222,6 @@ pub const XR_LOCOMOTION_MAX_FRAME_SECONDS: f64 = 0.1;
 pub const XR_BLINK_TELEPORT_STICK_THRESHOLD: f32 = 0.75;
 pub const XR_BLINK_TELEPORT_HEADING_STICK_THRESHOLD: f32 = 0.9;
 pub const XR_AUTOMATED_ORBIT_RADIUS_BLOCKS: f64 = 16.0;
-pub const XR_MENU_TOGGLE_HAND: XrHand = XrHand::Left;
 pub const XR_UI_FPS_CAP: u32 = 90;
 pub const XR_MENU_PANEL_PIXELS: [u32; 2] = [1024, 576];
 pub const XR_MENU_PANEL_DISTANCE_BLOCKS: f32 = 2.2;
@@ -234,7 +235,6 @@ pub const XR_MENU_CONTROLLER_RAY_LENGTH_BLOCKS: f32 = 6.0;
 pub const XR_MENU_POINTER_TRIGGER_PRESS: f32 = 0.55;
 pub const XR_MENU_POINTER_TRIGGER_RELEASE: f32 = 0.35;
 pub const XR_GAMEPLAY_INTERACTION_HAND: XrHand = XrHand::Right;
-pub const XR_GAME_UI_TOGGLE_HAND: XrHand = XrHand::Left;
 pub const XR_GAME_UI_PANEL_HAND: XrHand = XrHand::Left;
 pub const XR_GAME_UI_PANEL_WIDTH_BLOCKS: f32 = 1.35;
 pub const XR_GAME_UI_PANEL_UP_OFFSET_BLOCKS: f32 = 0.18;
@@ -659,11 +659,11 @@ pub struct McloneSceneHost {
     menu_toggle_down: bool,
     game_ui_toggle_down: bool,
     menu_pointer_down: bool,
-    gameplay_interaction_buttons: XrGameplayInteractionButtons,
     menu_panel_pose: Option<WorldGuiPanel>,
     menu_panel_anchor: XrUiPanelAnchor,
     menu_panel_recenter_pending: bool,
-    latest_controllers: Vec<XrControllerSnapshot>,
+    latest_xr_input: XrInputFrame,
+    latest_xr_head_gaze_stage: Option<(Vec3, Vec3)>,
     first_eye_summary: Option<FullFrameRenderSummary>,
     last_ui_panel_stats: WorldGuiPanelRenderStats,
     last_ui_draw_cache_stats: UiDrawCacheStats,
@@ -4449,9 +4449,7 @@ mod tests {
         LocalWorldId, LocalWorldSummary, WorldCatalogCapabilities, WorldCatalogRequest,
         WorldCatalogResponse,
     };
-    use mclone_render_session::{
-        ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND, ENGINE_CAMERA_MOUSE_SENSITIVITY,
-    };
+    use mclone_render_session::ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND;
 
     #[test]
     fn authoritative_entity_motion_requires_one_stable_id_and_changed_position() {
@@ -4985,14 +4983,8 @@ mod tests {
 
     #[test]
     fn xr_locomotion_maps_left_stick_and_right_a_to_engine_input() {
-        let input = xr_locomotion_input_from_controllers(
-            &[
-                test_controller(XrHand::Left, Vec2::new(0.0, 1.0), false),
-                test_controller(XrHand::Right, Vec2::ZERO, true),
-            ],
-            1.0 / 72.0,
-            Some(0.25),
-        );
+        let frame = test_xr_input(Vec2::new(0.0, 1.0), Vec2::ZERO, [PlayerAction::Jump]);
+        let input = xr_locomotion_input_from_controllers(&frame, 1.0 / 72.0, Some(0.25));
 
         assert_eq!(input.dt_seconds, 1.0 / 72.0);
         assert!(input.jump);
@@ -5007,11 +4999,8 @@ mod tests {
 
     #[test]
     fn xr_locomotion_maps_left_stick_lateral_axis_to_strafe() {
-        let input = xr_locomotion_input_from_controllers(
-            &[test_controller(XrHand::Left, Vec2::new(1.0, 0.0), false)],
-            1.0 / 72.0,
-            None,
-        );
+        let frame = test_xr_input(Vec2::new(1.0, 0.0), Vec2::ZERO, []);
+        let input = xr_locomotion_input_from_controllers(&frame, 1.0 / 72.0, None);
 
         assert_eq!(
             input.movement_impulse,
@@ -5022,18 +5011,12 @@ mod tests {
 
     #[test]
     fn xr_locomotion_dead_zone_filters_small_thumbstick_noise() {
-        let input = xr_locomotion_input_from_controllers(
-            &[
-                test_controller(XrHand::Left, Vec2::splat(XR_JOYPAD_DEAD_ZONE * 0.25), false),
-                test_controller(
-                    XrHand::Right,
-                    Vec2::splat(XR_JOYPAD_DEAD_ZONE * 0.25),
-                    false,
-                ),
-            ],
-            1.0,
-            None,
+        let frame = test_xr_input(
+            Vec2::splat(XR_JOYPAD_DEAD_ZONE * 0.25),
+            Vec2::splat(XR_JOYPAD_DEAD_ZONE * 0.25),
+            [],
         );
+        let input = xr_locomotion_input_from_controllers(&frame, 1.0, None);
 
         assert_eq!(input.movement_impulse, None);
         assert_eq!(input.mouse_delta_x, 0.0);
@@ -5042,38 +5025,36 @@ mod tests {
     #[test]
     fn xr_blink_teleport_engages_only_past_left_stick_threshold() {
         assert_eq!(XR_BLINK_TELEPORT_STICK_THRESHOLD, 0.75);
-        assert!(!xr_left_stick_blink_engaged(&[test_controller(
-            XrHand::Left,
+        assert!(!xr_left_stick_blink_engaged(&test_xr_input(
             Vec2::new(XR_BLINK_TELEPORT_STICK_THRESHOLD, 0.0),
-            false,
-        )]));
-        assert!(xr_left_stick_blink_engaged(&[test_controller(
-            XrHand::Left,
+            Vec2::ZERO,
+            [],
+        )));
+        assert!(xr_left_stick_blink_engaged(&test_xr_input(
             Vec2::new(XR_BLINK_TELEPORT_STICK_THRESHOLD + 0.01, 0.0),
-            false,
-        )]));
-        assert!(xr_left_stick_blink_engaged(&[test_controller(
-            XrHand::Left,
+            Vec2::ZERO,
+            [],
+        )));
+        assert!(xr_left_stick_blink_engaged(&test_xr_input(
             Vec2::new(0.0, -(XR_BLINK_TELEPORT_STICK_THRESHOLD + 0.01)),
-            false,
-        )]));
+            Vec2::ZERO,
+            [],
+        )));
     }
 
     #[test]
     fn xr_travel_assist_off_does_not_suppress_left_stick_movement() {
-        let controllers = [test_controller(
-            XrHand::Left,
+        let input = test_xr_input(
             Vec2::new(XR_BLINK_TELEPORT_STICK_THRESHOLD + 0.01, 0.0),
-            false,
-        )];
+            Vec2::ZERO,
+            [],
+        );
 
-        let frame = xr_blink_teleport_disabled_frame(GameTravelAssistMode::Off, &controllers)
+        let frame = xr_blink_teleport_disabled_frame(GameTravelAssistMode::Off, &input)
             .expect("travel assist off disables Blink");
 
         assert!(!frame.suppress_left_stick_movement);
-        assert!(
-            xr_blink_teleport_disabled_frame(GameTravelAssistMode::Blink, &controllers).is_none()
-        );
+        assert!(xr_blink_teleport_disabled_frame(GameTravelAssistMode::Blink, &input).is_none());
     }
 
     #[test]
@@ -5133,7 +5114,8 @@ mod tests {
             ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND,
         );
 
-        let intent = xr_blink_teleport_intent(&camera, &[left], transform, 37.0).expect("intent");
+        let input = test_xr_tracked_input([left]);
+        let intent = xr_blink_teleport_intent(&camera, &input, transform, 37.0).expect("intent");
 
         assert_eq!(intent.start_feet, camera.player().pose().position);
         assert_vec3d_close(intent.aim_origin, Vec3d::new(9.5, 65.2, -4.25));
@@ -5226,11 +5208,8 @@ mod tests {
 
     #[test]
     fn xr_locomotion_default_snap_turn_does_not_emit_mouse_delta() {
-        let input = xr_locomotion_input_from_controllers(
-            &[test_controller(XrHand::Right, Vec2::new(1.0, 0.0), false)],
-            0.05,
-            None,
-        );
+        let frame = test_xr_input(Vec2::ZERO, Vec2::X, []);
+        let input = xr_locomotion_input_from_controllers(&frame, 0.05, None);
 
         assert_eq!(input.mouse_delta_x, 0.0);
         assert_eq!(input.movement_impulse, None);
@@ -5239,14 +5218,15 @@ mod tests {
 
     #[test]
     fn xr_locomotion_smooth_turn_policy_uses_mouse_turn_path() {
+        let frame = test_xr_input(Vec2::ZERO, Vec2::X, []);
         let input = xr_locomotion_input_from_controllers_with_turn_policy(
-            &[test_controller(XrHand::Right, Vec2::new(1.0, 0.0), false)],
+            &frame,
             0.05,
             None,
             XrTurnPolicy::Smooth,
         );
         let expected_mouse_delta =
-            XR_JOYPAD_YAW_SPEED_RADIANS_PER_SECOND * 0.05 / ENGINE_CAMERA_MOUSE_SENSITIVITY;
+            mclone_input::ControllerSessionSettings::DEFAULT_LOOK_RATE_PER_SECOND as f64 * 0.05;
 
         assert!((input.mouse_delta_x - expected_mouse_delta).abs() < 1.0e-6);
         assert_eq!(input.movement_impulse, None);
@@ -5255,8 +5235,8 @@ mod tests {
 
     #[test]
     fn xr_locomotion_maps_right_a_to_jump() {
-        let right = test_controller(XrHand::Right, Vec2::ZERO, true);
-        let input = xr_locomotion_input_from_controllers(&[right], 1.0 / 72.0, None);
+        let frame = test_xr_input(Vec2::ZERO, Vec2::ZERO, [PlayerAction::Jump]);
+        let input = xr_locomotion_input_from_controllers(&frame, 1.0 / 72.0, None);
 
         assert!(input.jump);
         assert!(!input.descend);
@@ -5264,9 +5244,8 @@ mod tests {
 
     #[test]
     fn xr_locomotion_maps_right_b_to_descend() {
-        let mut right = test_controller(XrHand::Right, Vec2::ZERO, false);
-        right.b_pressed = true;
-        let input = xr_locomotion_input_from_controllers(&[right], 1.0 / 72.0, None);
+        let frame = test_xr_input(Vec2::ZERO, Vec2::ZERO, [PlayerAction::Descend]);
+        let input = xr_locomotion_input_from_controllers(&frame, 1.0 / 72.0, None);
 
         assert!(input.descend);
         assert!(!input.jump);
@@ -5274,8 +5253,8 @@ mod tests {
 
     #[test]
     fn xr_locomotion_right_stick_up_no_longer_maps_to_jump() {
-        let right = test_controller(XrHand::Right, Vec2::new(0.0, 1.0), false);
-        let input = xr_locomotion_input_from_controllers(&[right], 1.0 / 72.0, None);
+        let frame = test_xr_input(Vec2::ZERO, Vec2::Y, []);
+        let input = xr_locomotion_input_from_controllers(&frame, 1.0 / 72.0, None);
 
         assert!(!input.jump);
         assert!(!input.descend);
@@ -5283,8 +5262,8 @@ mod tests {
 
     #[test]
     fn xr_locomotion_right_stick_down_no_longer_maps_to_descend() {
-        let right = test_controller(XrHand::Right, Vec2::new(0.0, -1.0), false);
-        let input = xr_locomotion_input_from_controllers(&[right], 1.0 / 72.0, None);
+        let frame = test_xr_input(Vec2::ZERO, Vec2::NEG_Y, []);
+        let input = xr_locomotion_input_from_controllers(&frame, 1.0 / 72.0, None);
 
         assert!(!input.descend);
         assert!(!input.jump);
@@ -5292,8 +5271,8 @@ mod tests {
 
     #[test]
     fn xr_locomotion_pure_yaw_does_not_trigger_vertical_movement() {
-        let right = test_controller(XrHand::Right, Vec2::new(1.0, 0.0), false);
-        let input = xr_locomotion_input_from_controllers(&[right], 1.0 / 72.0, None);
+        let frame = test_xr_input(Vec2::ZERO, Vec2::X, []);
+        let input = xr_locomotion_input_from_controllers(&frame, 1.0 / 72.0, None);
 
         assert!(!input.jump);
         assert!(!input.descend);
@@ -5412,28 +5391,16 @@ mod tests {
 
     #[test]
     fn xr_menu_toggle_uses_left_select_only() {
-        let mut left = test_controller(XrHand::Left, Vec2::ZERO, false);
-        left.select_pressed = true;
-        let mut right = test_controller(XrHand::Right, Vec2::ZERO, false);
-        right.select_pressed = true;
-
-        assert!(xr_menu_toggle_pressed(&[left]));
-        assert!(!xr_menu_toggle_pressed(&[right]));
-        assert!(xr_menu_toggle_pressed(&[right, left]));
-        assert!(!xr_menu_toggle_pressed(&[]));
+        let active = test_xr_input(Vec2::ZERO, Vec2::ZERO, [PlayerAction::OpenMenu]);
+        assert!(xr_menu_toggle_pressed(&active.actions));
+        assert!(!xr_menu_toggle_pressed(&PlayerActionFrame::default()));
     }
 
     #[test]
     fn xr_game_ui_toggle_uses_left_thumbstick_click_only() {
-        let mut left = test_controller(XrHand::Left, Vec2::ZERO, false);
-        left.thumbstick_pressed = true;
-        let mut right = test_controller(XrHand::Right, Vec2::ZERO, false);
-        right.thumbstick_pressed = true;
-
-        assert!(xr_game_ui_toggle_pressed(&[left]));
-        assert!(!xr_game_ui_toggle_pressed(&[right]));
-        assert!(xr_game_ui_toggle_pressed(&[right, left]));
-        assert!(!xr_game_ui_toggle_pressed(&[]));
+        let active = test_xr_input(Vec2::ZERO, Vec2::ZERO, [PlayerAction::OpenBlockPalette]);
+        assert!(xr_game_ui_toggle_pressed(&active.actions));
+        assert!(!xr_game_ui_toggle_pressed(&PlayerActionFrame::default()));
     }
 
     #[test]
@@ -5534,13 +5501,12 @@ mod tests {
         let mut left = test_controller(XrHand::Left, Vec2::ZERO, false);
         left.aim_position = Some(Vec3::new(-0.25, 64.0, 0.0));
         left.aim_direction = Some(Vec3::NEG_Z);
-        left.trigger = 0.25;
         let mut right = test_controller(XrHand::Right, Vec2::ZERO, false);
         right.aim_position = Some(Vec3::new(0.25, 64.0, 0.0));
         right.aim_direction = Some(Vec3::NEG_Z);
-        right.trigger = 0.75;
+        let input = test_xr_pointer_input([left, right], 0.25, 0.75);
 
-        let hit = xr_menu_pointer_hit_from_controllers(&[left, right], transform, panel, scale)
+        let hit = xr_menu_pointer_hit_from_controllers(&input, transform, panel, scale)
             .expect("right controller hit");
 
         assert_eq!(hit.hand, XrHand::Right);
@@ -5556,7 +5522,8 @@ mod tests {
         right.aim_position = Some(Vec3::new(0.25, 64.0, 0.0));
         right.aim_direction = Some(Vec3::NEG_Z);
 
-        let lines = xr_menu_controller_ray_lines_from_controllers(&[right], transform, panel);
+        let input = test_xr_pointer_input([right], 0.0, 0.0);
+        let lines = xr_menu_controller_ray_lines_from_controllers(&input, transform, panel);
 
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].start, Vec3::new(0.25, 64.0, 0.0));
@@ -5572,7 +5539,8 @@ mod tests {
         left.aim_position = Some(Vec3::new(2.0, 64.0, 0.0));
         left.aim_direction = Some(Vec3::NEG_Z);
 
-        let lines = xr_menu_controller_ray_lines_from_controllers(&[left], transform, panel);
+        let input = test_xr_pointer_input([left], 0.0, 0.0);
+        let lines = xr_menu_controller_ray_lines_from_controllers(&input, transform, panel);
 
         assert_eq!(lines.len(), 1);
         assert_eq!(lines[0].start, Vec3::new(2.0, 64.0, 0.0));
@@ -5585,15 +5553,13 @@ mod tests {
 
     #[test]
     fn xr_menu_controller_ray_color_highlights_trigger_press() {
-        let mut controller = test_controller(XrHand::Right, Vec2::ZERO, false);
         assert_eq!(
-            xr_menu_controller_ray_color(&controller),
+            xr_menu_controller_ray_color(XrHand::Right, 0.0),
             XR_MENU_RIGHT_RAY_COLOR
         );
 
-        controller.trigger = XR_MENU_POINTER_TRIGGER_PRESS;
         assert_eq!(
-            xr_menu_controller_ray_color(&controller),
+            xr_menu_controller_ray_color(XrHand::Right, XR_MENU_POINTER_TRIGGER_PRESS),
             XR_MENU_TRIGGER_RAY_COLOR
         );
     }
@@ -5816,7 +5782,7 @@ mod tests {
                 .profile
                 .controller_for_gui_point(point, XR_MENU_POINTER_TRIGGER_PRESS);
             let press_hit = xr_menu_pointer_hit_from_controllers(
-                &[pressed],
+                &pressed,
                 self.profile.transform,
                 self.profile.panel,
                 self.profile.gui_scale,
@@ -5826,7 +5792,7 @@ mod tests {
             assert!(xr_menu_pointer_trigger_down(press_hit.trigger, false));
             assert_point_close(press_hit.point, point);
             let rays = xr_menu_controller_ray_lines_from_controllers(
-                &[pressed],
+                &pressed,
                 self.profile.transform,
                 self.profile.panel,
             );
@@ -5838,7 +5804,7 @@ mod tests {
 
             let released = self.profile.controller_for_gui_point(point, 0.0);
             let release_hit = xr_menu_pointer_hit_from_controllers(
-                &[released],
+                &released,
                 self.profile.transform,
                 self.profile.panel,
                 self.profile.gui_scale,
@@ -6032,7 +5998,7 @@ mod tests {
             self.panel.center + self.panel.right * x + self.panel.up * y
         }
 
-        fn controller_for_gui_point(self, point: Point, trigger: f32) -> XrControllerSnapshot {
+        fn controller_for_gui_point(self, point: Point, trigger: f32) -> XrInputFrame {
             let target = self.world_point_for_gui_point(point);
             let normal = self.panel.right.cross(self.panel.up).normalize();
             let origin = target + normal * 0.75;
@@ -6040,8 +6006,7 @@ mod tests {
             controller.aim_position = Some(origin);
             controller.aim_direction = Some((target - origin).normalize());
             controller.grip_position = Some(origin + Vec3::new(0.0, -0.12, 0.0));
-            controller.trigger = trigger;
-            controller
+            test_xr_pointer_input([controller], 0.0, trigger)
         }
     }
 
@@ -6050,78 +6015,6 @@ mod tests {
             (actual.x - expected.x).abs() < 1.0e-4 && (actual.y - expected.y).abs() < 1.0e-4,
             "expected point {actual:?} to be close to {expected:?}"
         );
-    }
-
-    #[test]
-    fn xr_gameplay_interaction_buttons_use_right_trigger_and_squeeze() {
-        let mut left = test_controller(XrHand::Left, Vec2::ZERO, false);
-        left.trigger = 1.0;
-        left.squeeze = 1.0;
-        let mut right = test_controller(XrHand::Right, Vec2::ZERO, false);
-        right.trigger = XR_MENU_POINTER_TRIGGER_PRESS;
-        right.squeeze = XR_MENU_POINTER_TRIGGER_PRESS - 0.01;
-
-        let buttons = xr_gameplay_interaction_buttons_from_controllers(
-            &[left, right],
-            XrGameplayInteractionButtons::default(),
-        );
-
-        assert_eq!(
-            buttons,
-            XrGameplayInteractionButtons {
-                attack: true,
-                use_item: false
-            }
-        );
-    }
-
-    #[test]
-    fn xr_gameplay_interaction_buttons_use_hysteresis() {
-        let mut right = test_controller(XrHand::Right, Vec2::ZERO, false);
-        right.trigger = XR_MENU_POINTER_TRIGGER_PRESS;
-        right.squeeze = XR_MENU_POINTER_TRIGGER_PRESS;
-        let pressed = xr_gameplay_interaction_buttons_from_controllers(
-            &[right],
-            XrGameplayInteractionButtons::default(),
-        );
-        assert_eq!(
-            pressed,
-            XrGameplayInteractionButtons {
-                attack: true,
-                use_item: true
-            }
-        );
-
-        right.trigger = XR_MENU_POINTER_TRIGGER_RELEASE + 0.01;
-        right.squeeze = XR_MENU_POINTER_TRIGGER_RELEASE + 0.01;
-        let held = xr_gameplay_interaction_buttons_from_controllers(&[right], pressed);
-        assert_eq!(held, pressed);
-
-        right.trigger = XR_MENU_POINTER_TRIGGER_RELEASE - 0.01;
-        right.squeeze = XR_MENU_POINTER_TRIGGER_RELEASE - 0.01;
-        let released = xr_gameplay_interaction_buttons_from_controllers(&[right], held);
-        assert_eq!(released, XrGameplayInteractionButtons::default());
-    }
-
-    #[test]
-    fn xr_gameplay_interaction_edges_fire_on_press_only() {
-        let previous = XrGameplayInteractionButtons {
-            attack: false,
-            use_item: true,
-        };
-        let current = XrGameplayInteractionButtons {
-            attack: true,
-            use_item: true,
-        };
-
-        assert_eq!(
-            previous.press_edges(current),
-            XrGameplayInteractionEdges {
-                attack: true,
-                use_item: false
-            }
-        );
-        assert!(!current.press_edges(current).any());
     }
 
     #[test]
@@ -6137,6 +6030,39 @@ mod tests {
 
         assert_eq!(origin, Vec3::new(1.0, 0.0, 0.0));
         assert_eq!(direction, Vec3::NEG_Z);
+    }
+
+    #[test]
+    fn xr_pose_less_actions_use_head_gaze_and_tracked_ray_wins() {
+        let gaze = Some((Vec3::new(0.0, 65.6, 0.0), Vec3::NEG_Z));
+        let empty = XrInputFrame::default();
+        assert_eq!(
+            xr_interaction_ray_with_head_fallback(&empty, test_stage_to_world(), gaze),
+            gaze
+        );
+
+        let mut right = test_controller(XrHand::Right, Vec2::ZERO, false);
+        right.aim_position = Some(Vec3::new(1.0, 64.0, 0.0));
+        right.aim_direction = Some(Vec3::NEG_X);
+        let tracked = test_xr_tracked_input([right]);
+        assert_eq!(
+            xr_interaction_ray_with_head_fallback(&tracked, test_stage_to_world(), gaze),
+            Some((Vec3::new(1.0, 64.0, 0.0), Vec3::NEG_X))
+        );
+
+        let transformed = XrStageToWorld {
+            origin_stage: Vec3::ZERO,
+            origin_world: Vec3::new(10.0, 64.0, 5.0),
+            stage_to_world_rotation: Quat::from_rotation_y(std::f32::consts::FRAC_PI_2),
+        };
+        let (origin, direction) = xr_interaction_ray_with_head_fallback(
+            &empty,
+            transformed,
+            Some((Vec3::Y, Vec3::NEG_Z)),
+        )
+        .expect("transformed head-gaze fallback");
+        assert!((origin - Vec3::new(10.0, 65.0, 5.0)).length() < 1.0e-5);
+        assert!((direction - Vec3::NEG_X).length() < 1.0e-5);
     }
 
     #[test]
@@ -6163,10 +6089,16 @@ mod tests {
         let mut right = test_controller(XrHand::Right, Vec2::ZERO, false);
         right.aim_position = Some(Vec3::new(1.0, 64.0, 0.0));
         right.aim_direction = Some(Vec3::NEG_Z);
-        right.squeeze = XR_MENU_POINTER_TRIGGER_PRESS;
-
+        let mut input = test_xr_pointer_input([right], 0.0, 0.0);
+        input
+            .xr_specific
+            .controllers
+            .iter_mut()
+            .find(|controller| controller.hand == Some(XrHand::Right))
+            .expect("right XR extension")
+            .squeeze_value = XR_MENU_POINTER_TRIGGER_PRESS;
         let line = xr_gameplay_controller_ray_line_from_controllers(
-            &[right],
+            &input,
             test_stage_to_world(),
             Some(2.5),
             5.0,
@@ -6360,21 +6292,89 @@ mod tests {
         assert!((yaw + std::f32::consts::FRAC_PI_2).abs() < 1.0e-6);
     }
 
-    fn test_controller(hand: XrHand, thumbstick: Vec2, a_pressed: bool) -> XrControllerSnapshot {
-        XrControllerSnapshot {
+    fn test_controller(
+        hand: XrHand,
+        _thumbstick: Vec2,
+        _jump_pressed: bool,
+    ) -> TrackedControllerState {
+        TrackedControllerState {
             hand,
             aim_position: Some(Vec3::ZERO),
             aim_direction: Some(Vec3::NEG_Z),
             grip_position: Some(Vec3::ZERO),
             grip_orientation: Some(Quat::IDENTITY),
-            trigger: 0.0,
-            squeeze: 0.0,
-            select_pressed: false,
-            a_pressed,
-            b_pressed: false,
-            y_pressed: false,
-            thumbstick,
-            thumbstick_pressed: false,
+        }
+    }
+
+    fn test_xr_input(
+        movement_axis: Vec2,
+        turn_axis: Vec2,
+        held: impl IntoIterator<Item = PlayerAction>,
+    ) -> XrInputFrame {
+        let held = held.into_iter().collect::<std::collections::BTreeSet<_>>();
+        let mut assembler = mclone_input::XrInputFrameAssembler::new();
+        assembler.sample(
+            mclone_input::XrActionSnapshot {
+                movement_axis,
+                turn_axis,
+                attack_value: f32::from(held.contains(&PlayerAction::Attack)),
+                use_value: f32::from(held.contains(&PlayerAction::Use)),
+                jump: held.contains(&PlayerAction::Jump),
+                sprint: held.contains(&PlayerAction::Sprint),
+                sneak: held.contains(&PlayerAction::Sneak),
+                descend: held.contains(&PlayerAction::Descend),
+                open_menu: held.contains(&PlayerAction::OpenMenu),
+                open_block_palette: held.contains(&PlayerAction::OpenBlockPalette),
+            },
+            Vec::new(),
+            mclone_input::XrSpecificInput {
+                controllers: vec![
+                    mclone_input::XrControllerSpecificState {
+                        hand: Some(XrHand::Left),
+                        locomotion_axis: movement_axis,
+                        ..Default::default()
+                    },
+                    mclone_input::XrControllerSpecificState {
+                        hand: Some(XrHand::Right),
+                        turn_axis,
+                        ..Default::default()
+                    },
+                ],
+            },
+        )
+    }
+
+    fn test_xr_tracked_input(
+        tracked: impl IntoIterator<Item = TrackedControllerState>,
+    ) -> XrInputFrame {
+        XrInputFrame {
+            tracked: tracked.into_iter().collect(),
+            ..Default::default()
+        }
+    }
+
+    fn test_xr_pointer_input(
+        tracked: impl IntoIterator<Item = TrackedControllerState>,
+        left_select: f32,
+        right_select: f32,
+    ) -> XrInputFrame {
+        XrInputFrame {
+            tracked: tracked.into_iter().collect(),
+            xr_specific: mclone_input::XrSpecificInput {
+                controllers: vec![
+                    mclone_input::XrControllerSpecificState {
+                        hand: Some(XrHand::Left),
+                        pointer_select_value: left_select,
+                        ..Default::default()
+                    },
+                    mclone_input::XrControllerSpecificState {
+                        hand: Some(XrHand::Right),
+                        pointer_select_value: right_select,
+                        ..Default::default()
+                    },
+                ],
+            },
+            ..Default::default()
         }
     }
 

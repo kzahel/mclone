@@ -1,12 +1,16 @@
 use glam::{Quat, Vec2, Vec3};
 use serde::{Deserialize, Serialize};
-use std::{collections::BTreeMap, num::NonZeroU64, time::Duration};
+use std::{
+    collections::{BTreeMap, BTreeSet},
+    num::NonZeroU64,
+    time::Duration,
+};
 
 mod controller_session;
 
 pub use controller_session::{
     ControllerInputError, ControllerInputSession, ControllerSessionSettings, InputContext,
-    PlayerAction, PlayerActionFrame,
+    PlayerAction, PlayerActionFrame, PlayerActionFrameCombiner,
 };
 
 pub const FLAT_HOTBAR_SLOT_COUNT: u8 = 9;
@@ -22,29 +26,197 @@ pub enum XrHand {
     Right,
 }
 
-/// Host-neutral tracked-controller input/pose snapshot.
-///
-/// Platform adapters translate their controller APIs into this shared input
-/// contract; scene locomotion and interaction consume it.
+/// Host-neutral tracked pose facts with no button or gameplay meaning.
 #[derive(Clone, Copy, Debug)]
-pub struct XrControllerSnapshot {
+pub struct TrackedControllerState {
     pub hand: XrHand,
     pub aim_position: Option<Vec3>,
     pub aim_direction: Option<Vec3>,
     pub grip_position: Option<Vec3>,
     /// Full palm-relative grip orientation used by thruster/repulsor input.
     pub grip_orientation: Option<Quat>,
-    pub trigger: f32,
-    pub squeeze: f32,
-    pub select_pressed: bool,
-    pub a_pressed: bool,
-    pub b_pressed: bool,
-    pub y_pressed: bool,
-    pub thumbstick: Vec2,
-    pub thumbstick_pressed: bool,
 }
 
-/// Translate a flat input frame into the neutral controller facts consumed by
+/// Per-hand analog facts retained only for spatial XR mechanics.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct XrControllerSpecificState {
+    pub hand: Option<XrHand>,
+    pub pointer_select_value: f32,
+    pub squeeze_value: f32,
+    pub locomotion_axis: Vec2,
+    pub turn_axis: Vec2,
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct XrSpecificInput {
+    pub controllers: Vec<XrControllerSpecificState>,
+}
+
+impl XrSpecificInput {
+    pub fn controller(&self, hand: XrHand) -> Option<&XrControllerSpecificState> {
+        self.controllers
+            .iter()
+            .find(|controller| controller.hand == Some(hand))
+    }
+}
+
+/// One XR presentation-boundary input sample.
+///
+/// Ordinary gamepad, Steam-style, and OpenXR controls converge in `actions`;
+/// tracked and XR-only extensions remain typed and separate.
+#[derive(Clone, Debug, Default)]
+pub struct XrInputFrame {
+    pub actions: PlayerActionFrame,
+    pub tracked: Vec<TrackedControllerState>,
+    pub xr_specific: XrSpecificInput,
+}
+
+/// Raw semantic values supplied by an action-based XR backend.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct XrActionSnapshot {
+    pub movement_axis: Vec2,
+    pub turn_axis: Vec2,
+    pub attack_value: f32,
+    pub use_value: f32,
+    pub jump: bool,
+    pub sprint: bool,
+    pub sneak: bool,
+    pub descend: bool,
+    pub open_menu: bool,
+    pub open_block_palette: bool,
+}
+
+/// Shared edge/dead-zone assembler for OpenXR-style semantic action sources.
+#[derive(Clone, Debug, Default)]
+pub struct XrInputFrameAssembler {
+    held: BTreeSet<PlayerAction>,
+    attack_down: bool,
+    use_down: bool,
+    suppress_until_neutral: bool,
+    settings: ControllerSessionSettings,
+}
+
+impl XrInputFrameAssembler {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn clear(&mut self) {
+        self.held.clear();
+        self.attack_down = false;
+        self.use_down = false;
+        self.suppress_until_neutral = true;
+    }
+
+    pub fn sample(
+        &mut self,
+        raw: XrActionSnapshot,
+        tracked: Vec<TrackedControllerState>,
+        xr_specific: XrSpecificInput,
+    ) -> XrInputFrame {
+        if self.suppress_until_neutral {
+            if !xr_action_snapshot_is_neutral(raw, self.settings) {
+                return XrInputFrame {
+                    actions: PlayerActionFrame::default(),
+                    tracked,
+                    xr_specific,
+                };
+            }
+            self.suppress_until_neutral = false;
+        }
+        let movement = controller_session::adjusted_stick(
+            raw.movement_axis,
+            self.settings.movement_deadzone,
+            self.settings.movement_response_exponent,
+        );
+        let turn = controller_session::adjusted_stick(
+            raw.turn_axis,
+            self.settings.look_deadzone,
+            self.settings.look_response_exponent,
+        );
+        self.attack_down = hysteretic_xr_action(
+            self.attack_down,
+            raw.attack_value,
+            self.settings.trigger_press_threshold,
+            self.settings.trigger_release_threshold,
+        );
+        self.use_down = hysteretic_xr_action(
+            self.use_down,
+            raw.use_value,
+            self.settings.trigger_press_threshold,
+            self.settings.trigger_release_threshold,
+        );
+
+        let mut held = BTreeSet::new();
+        for (action, active) in [
+            (PlayerAction::Attack, self.attack_down),
+            (PlayerAction::Use, self.use_down),
+            (PlayerAction::Jump, raw.jump),
+            (PlayerAction::Sprint, raw.sprint),
+            (PlayerAction::Sneak, raw.sneak),
+            (PlayerAction::Descend, raw.descend),
+            (PlayerAction::OpenMenu, raw.open_menu),
+            (PlayerAction::OpenBlockPalette, raw.open_block_palette),
+        ] {
+            if active {
+                held.insert(action);
+            }
+        }
+        let pressed = held.difference(&self.held).copied().collect();
+        let released = self.held.difference(&held).copied().collect();
+        self.held = held.clone();
+
+        XrInputFrame {
+            actions: PlayerActionFrame {
+                movement: MovementImpulse {
+                    left: -movement.x,
+                    forward: movement.y,
+                },
+                look_rate: LookDelta {
+                    x: turn.x * self.settings.look_rate_per_second,
+                    y: -turn.y * self.settings.look_rate_per_second,
+                },
+                held,
+                pressed,
+                released,
+                ..PlayerActionFrame::default()
+            },
+            tracked,
+            xr_specific,
+        }
+    }
+}
+
+fn xr_action_snapshot_is_neutral(
+    raw: XrActionSnapshot,
+    settings: ControllerSessionSettings,
+) -> bool {
+    raw.movement_axis.length() <= settings.movement_deadzone
+        && raw.turn_axis.length() <= settings.look_deadzone
+        && raw.attack_value <= settings.trigger_release_threshold
+        && raw.use_value <= settings.trigger_release_threshold
+        && !raw.jump
+        && !raw.sprint
+        && !raw.sneak
+        && !raw.descend
+        && !raw.open_menu
+        && !raw.open_block_palette
+}
+
+fn hysteretic_xr_action(was_down: bool, value: f32, press: f32, release: f32) -> bool {
+    let value = if value.is_finite() {
+        value.clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+    if was_down {
+        value >= release
+    } else {
+        value >= press
+    }
+}
+
+/// Translate a flat input frame into the neutral XR input consumed by
 /// XR scene policy. This is intentionally an emulation adapter rather than a
 /// second locomotion implementation: desktop headset-free tools can feed
 /// keyboard input through the same stick/button semantics as a real headset.
@@ -53,44 +225,44 @@ pub struct XrControllerSnapshot {
 /// the configured turn policy owns yaw; desktop emulation drives the synthetic
 /// head from the engine camera and maps held keyboard turn bindings to the
 /// right stick so snap-turn remains exercisable.
-pub fn xr_emulation_controllers_from_flat_frame(
-    frame: FlatInputFrame,
-) -> [XrControllerSnapshot; 2] {
-    let mut left = empty_xr_controller(XrHand::Left);
-    left.thumbstick = Vec2::new(
+pub fn xr_emulation_input_from_flat_frame(frame: FlatInputFrame) -> XrInputFrame {
+    let mut assembler = XrInputFrameAssembler::new();
+    let movement_axis = Vec2::new(
         clamp_axis(-frame.movement.left),
         clamp_axis(frame.movement.forward),
     );
-    left.select_pressed = frame.open_menu;
-    left.thumbstick_pressed = frame.open_block_palette;
-    left.y_pressed = frame.sprint;
-
-    let mut right = empty_xr_controller(XrHand::Right);
-    right.thumbstick = Vec2::new(clamp_axis(frame.keyboard_turn), 0.0);
-    right.a_pressed = frame.jump;
-    right.b_pressed = frame.descend;
-    right.thumbstick_pressed = frame.sneak;
-    right.trigger = f32::from(frame.attack);
-    right.squeeze = f32::from(frame.use_item);
-    [left, right]
-}
-
-fn empty_xr_controller(hand: XrHand) -> XrControllerSnapshot {
-    XrControllerSnapshot {
-        hand,
-        aim_position: None,
-        aim_direction: None,
-        grip_position: None,
-        grip_orientation: None,
-        trigger: 0.0,
-        squeeze: 0.0,
-        select_pressed: false,
-        a_pressed: false,
-        b_pressed: false,
-        y_pressed: false,
-        thumbstick: Vec2::ZERO,
-        thumbstick_pressed: false,
-    }
+    let turn_axis = Vec2::new(clamp_axis(frame.keyboard_turn), 0.0);
+    assembler.sample(
+        XrActionSnapshot {
+            movement_axis,
+            turn_axis,
+            attack_value: f32::from(frame.attack),
+            use_value: f32::from(frame.use_item),
+            jump: frame.jump,
+            sprint: frame.sprint,
+            sneak: frame.sneak,
+            descend: frame.descend,
+            open_menu: frame.open_menu,
+            open_block_palette: frame.open_block_palette,
+        },
+        Vec::new(),
+        XrSpecificInput {
+            controllers: vec![
+                XrControllerSpecificState {
+                    hand: Some(XrHand::Left),
+                    locomotion_axis: movement_axis,
+                    ..XrControllerSpecificState::default()
+                },
+                XrControllerSpecificState {
+                    hand: Some(XrHand::Right),
+                    pointer_select_value: f32::from(frame.attack),
+                    squeeze_value: f32::from(frame.use_item),
+                    turn_axis,
+                    ..XrControllerSpecificState::default()
+                },
+            ],
+        },
+    )
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -3247,22 +3419,33 @@ mod tests {
         adapter.handle_key(KeyboardKey::Space, true, false);
         adapter.handle_key(KeyboardKey::ControlLeft, true, false);
         adapter.handle_key(KeyboardKey::ShiftLeft, true, false);
-        let controllers = xr_emulation_controllers_from_flat_frame(
-            adapter.held_frame().expect("held keyboard frame"),
-        );
+        let input =
+            xr_emulation_input_from_flat_frame(adapter.held_frame().expect("held keyboard frame"));
 
-        assert_eq!(controllers[0].hand, XrHand::Left);
-        assert_eq!(controllers[0].thumbstick, Vec2::new(-1.0, 1.0));
-        assert!(controllers[0].y_pressed);
-        assert_eq!(controllers[1].hand, XrHand::Right);
-        assert_eq!(controllers[1].thumbstick, Vec2::X);
-        assert!(controllers[1].a_pressed);
-        assert!(controllers[1].thumbstick_pressed);
+        assert_eq!(
+            input
+                .xr_specific
+                .controller(XrHand::Left)
+                .expect("left XR extension")
+                .locomotion_axis,
+            Vec2::new(-1.0, 1.0)
+        );
+        assert!(input.actions.held.contains(&PlayerAction::Sprint));
+        assert_eq!(
+            input
+                .xr_specific
+                .controller(XrHand::Right)
+                .expect("right XR extension")
+                .turn_axis,
+            Vec2::X
+        );
+        assert!(input.actions.held.contains(&PlayerAction::Jump));
+        assert!(input.actions.held.contains(&PlayerAction::Sneak));
     }
 
     #[test]
     fn xr_emulation_projects_menu_and_world_actions() {
-        let controllers = xr_emulation_controllers_from_flat_frame(FlatInputFrame {
+        let input = xr_emulation_input_from_flat_frame(FlatInputFrame {
             open_menu: true,
             open_block_palette: true,
             attack: true,
@@ -3271,11 +3454,150 @@ mod tests {
             ..FlatInputFrame::default()
         });
 
-        assert!(controllers[0].select_pressed);
-        assert!(controllers[0].thumbstick_pressed);
-        assert_eq!(controllers[1].trigger, 1.0);
-        assert_eq!(controllers[1].squeeze, 1.0);
-        assert!(controllers[1].b_pressed);
+        assert!(input.actions.held.contains(&PlayerAction::OpenMenu));
+        assert!(input.actions.held.contains(&PlayerAction::OpenBlockPalette));
+        assert!(input.actions.held.contains(&PlayerAction::Attack));
+        assert!(input.actions.held.contains(&PlayerAction::Use));
+        assert!(input.actions.held.contains(&PlayerAction::Descend));
+    }
+
+    #[test]
+    fn xr_action_assembler_owns_edges_dead_zones_and_trigger_hysteresis() {
+        let mut assembler = XrInputFrameAssembler::new();
+        let pressed = assembler.sample(
+            XrActionSnapshot {
+                movement_axis: Vec2::new(0.1, 0.0),
+                attack_value: 0.56,
+                use_value: 0.54,
+                jump: true,
+                ..XrActionSnapshot::default()
+            },
+            Vec::new(),
+            XrSpecificInput::default(),
+        );
+        assert_eq!(pressed.actions.movement, MovementImpulse::default());
+        assert!(pressed.actions.held.contains(&PlayerAction::Attack));
+        assert!(pressed.actions.pressed.contains(&PlayerAction::Attack));
+        assert!(pressed.actions.pressed.contains(&PlayerAction::Jump));
+        assert!(!pressed.actions.held.contains(&PlayerAction::Use));
+
+        let held = assembler.sample(
+            XrActionSnapshot {
+                attack_value: 0.46,
+                jump: true,
+                ..XrActionSnapshot::default()
+            },
+            Vec::new(),
+            XrSpecificInput::default(),
+        );
+        assert!(held.actions.held.contains(&PlayerAction::Attack));
+        assert!(!held.actions.pressed.contains(&PlayerAction::Attack));
+
+        let released = assembler.sample(
+            XrActionSnapshot {
+                attack_value: 0.44,
+                ..XrActionSnapshot::default()
+            },
+            Vec::new(),
+            XrSpecificInput::default(),
+        );
+        assert!(released.actions.released.contains(&PlayerAction::Attack));
+        assert!(released.actions.released.contains(&PlayerAction::Jump));
+    }
+
+    #[test]
+    fn xr_frame_keeps_pose_and_xr_extensions_outside_merged_actions() {
+        let tracked = TrackedControllerState {
+            hand: XrHand::Right,
+            aim_position: Some(Vec3::ONE),
+            aim_direction: Some(Vec3::NEG_Z),
+            grip_position: None,
+            grip_orientation: None,
+        };
+        let mut frame = XrInputFrameAssembler::new().sample(
+            XrActionSnapshot {
+                jump: true,
+                ..XrActionSnapshot::default()
+            },
+            vec![tracked],
+            XrSpecificInput {
+                controllers: vec![XrControllerSpecificState {
+                    hand: Some(XrHand::Right),
+                    pointer_select_value: 0.75,
+                    ..XrControllerSpecificState::default()
+                }],
+            },
+        );
+        let mut ordinary = PlayerActionFrame::default();
+        ordinary.held.insert(PlayerAction::Sprint);
+        ordinary.pressed.insert(PlayerAction::Sprint);
+        frame.actions = PlayerActionFrameCombiner::new().combine(frame.actions, ordinary);
+
+        assert_eq!(frame.tracked.len(), 1);
+        assert_eq!(
+            frame
+                .xr_specific
+                .controller(XrHand::Right)
+                .expect("right XR extension")
+                .pointer_select_value,
+            0.75
+        );
+        assert!(frame.actions.held.contains(&PlayerAction::Jump));
+        assert!(frame.actions.held.contains(&PlayerAction::Sprint));
+    }
+
+    #[test]
+    fn xr_action_assembler_requires_neutral_after_lifecycle_clear() {
+        let mut assembler = XrInputFrameAssembler::new();
+        let held_raw = XrActionSnapshot {
+            movement_axis: Vec2::Y,
+            jump: true,
+            ..XrActionSnapshot::default()
+        };
+        assert!(
+            assembler
+                .sample(held_raw, Vec::new(), XrSpecificInput::default())
+                .actions
+                .pressed
+                .contains(&PlayerAction::Jump)
+        );
+
+        assembler.clear();
+        let suppressed = assembler.sample(held_raw, Vec::new(), XrSpecificInput::default());
+        assert!(suppressed.actions.is_idle());
+
+        let neutral = assembler.sample(
+            XrActionSnapshot::default(),
+            Vec::new(),
+            XrSpecificInput::default(),
+        );
+        assert!(neutral.actions.is_idle());
+        let rearmed = assembler.sample(held_raw, Vec::new(), XrSpecificInput::default());
+        assert!(rearmed.actions.pressed.contains(&PlayerAction::Jump));
+        assert!(rearmed.actions.movement.forward > 0.99);
+    }
+
+    #[test]
+    fn action_combiner_aggregates_edges_across_overlapping_sources() {
+        let mut combiner = PlayerActionFrameCombiner::new();
+        let mut tracked = PlayerActionFrame::default();
+        tracked.held.insert(PlayerAction::Attack);
+        tracked.pressed.insert(PlayerAction::Attack);
+        let first = combiner.combine(tracked, PlayerActionFrame::default());
+        assert!(first.pressed.contains(&PlayerAction::Attack));
+
+        let mut tracked_release = PlayerActionFrame::default();
+        tracked_release.released.insert(PlayerAction::Attack);
+        let mut ordinary_hold = PlayerActionFrame::default();
+        ordinary_hold.held.insert(PlayerAction::Attack);
+        ordinary_hold.pressed.insert(PlayerAction::Attack);
+        let overlap = combiner.combine(tracked_release, ordinary_hold);
+        assert!(overlap.held.contains(&PlayerAction::Attack));
+        assert!(!overlap.pressed.contains(&PlayerAction::Attack));
+        assert!(!overlap.released.contains(&PlayerAction::Attack));
+
+        let released = combiner.combine(PlayerActionFrame::default(), PlayerActionFrame::default());
+        assert!(released.released.contains(&PlayerAction::Attack));
     }
 
     #[test]

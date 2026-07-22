@@ -381,6 +381,51 @@ The AVD proves packaging, lifecycle, JNI linkage, and unchanged rendered
 output, but has no physical controller. Wired/Bluetooth flat-Android and Quest
 ordinary-gamepad acceptance therefore remain in the hardware ledger.
 
+### Slice 6 — XR semantic convergence
+
+Implemented on 2026-07-22. `mclone-input::XrInputFrame` now has three explicit
+channels: shared `PlayerActionFrame`, pose-only tracked controller state, and
+XR-specific spatial analog extensions. `XrInputFrameAssembler` owns shared
+stick policy, trigger hysteresis, edges, and lifecycle re-arming. A separate
+stateful action combiner derives aggregate edges after simultaneous tracked and
+ordinary sources are composed, so one source cannot release an action another
+source still holds.
+
+`mclone-xr-host::OpenXrControllerActions` now creates semantic application
+actions. Physical controller paths appear only in suggested OpenXR interaction
+profile bindings. Desktop XR polls its existing GilRs collector and Android XR
+polls the shared Android collector beside OpenXR; both feed one
+`XrControllerInputRouter` before the same shared scene frame path.
+
+The scene consumes common movement, turn, jump, sprint, sneak, descend, menu,
+palette, attack, and use semantics without physical button names. It retains
+tracked teleport, hand-push, thruster, poses, and controller pointer selection
+as XR-only facts. Pose-less ordinary Attack/Use use the latest stereo head gaze,
+while an available tracked aim ray remains preferred. Focus/session loss clears
+both tracked and ordinary reducers and requires neutral before re-arming.
+
+Focused evidence:
+
+```text
+cargo test -p mclone-input --lib: 40 passed
+cargo test -p mclone-scene --lib: 127 passed
+cargo check -p mclone-xr-host: passed
+cargo check -p mclone-native-client --features xr: passed
+cargo check -p mclone-input -p mclone-scene
+  --target wasm32-unknown-unknown: passed
+pnpm native:android-xr:apk: arm64 release APK passed
+pnpm native:xr-emulation:smoke: 1280x640 stereo capture passed
+XR emulation capture: world/menu pixels and per-eye parallax inspected
+pnpm native:xr:frame-driver:purity: passed
+pnpm native:thin-adapters:purity: passed
+pnpm native:scene-host:purity: passed
+```
+
+The automated lane proves shared semantics, typed spatial separation, both app
+build boundaries, and rendered stereo continuity. It does not validate button
+feel, controller profiles, mixed-source ergonomics, or headset runtime behavior;
+those remain explicitly open in the hardware ledger.
+
 ## Completion Bar
 
 - Every product host consumes one shared semantic action and UI-navigation

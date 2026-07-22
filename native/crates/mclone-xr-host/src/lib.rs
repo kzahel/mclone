@@ -12,7 +12,9 @@ use std::sync::mpsc;
 
 pub use actions::OpenXrControllerActions;
 pub use frame_driver::*;
-pub use mclone_input::{XrControllerSnapshot, XrHand};
+pub use mclone_input::{
+    TrackedControllerState, XrControllerSpecificState, XrHand, XrInputFrame, XrSpecificInput,
+};
 pub use mclone_render_session::{
     XrFov, XrRenderView, XrView, XrViewPose, render_view_from_world_pose, xr_fov_aspect,
     xr_fov_to_projection_rh,

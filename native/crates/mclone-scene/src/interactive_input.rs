@@ -2,7 +2,8 @@ use anyhow::Result;
 use mclone_input::{
     ControllerInputError, ControllerInputSession, FlatInputAction, FlatInputFrame, InputContext,
     InputSourceDescriptor, InputSourceId, KeyboardKey, KeyboardMouseInputAdapter,
-    MouseWheelDirection, PlayerActionFrame, PointerButton, StandardGamepadSnapshot, TouchLookDelta,
+    MouseWheelDirection, PlayerActionFrame, PlayerActionFrameCombiner, PointerButton,
+    StandardGamepadSnapshot, TouchLookDelta, XrInputFrame,
 };
 use mclone_ui::{GameHelpParent, GameUiAction, GuiKey, GuiNavigation, Point};
 use std::time::Duration;
@@ -22,6 +23,121 @@ pub struct MonoInputDisposition {
     pub clear_transient_input: bool,
     pub request_pointer_capture_when_ready: bool,
     pub meaningful_controller_activity: bool,
+}
+
+/// Mechanical result of routing an ordinary gamepad beside tracked XR input.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct XrControllerInputDisposition {
+    pub scene_changed: bool,
+    pub meaningful_controller_activity: bool,
+}
+
+/// Shared ordinary-gamepad state for XR hosts.
+///
+/// Platform collectors supply canonical snapshots. This owner selects the
+/// shared gameplay/menu context, retains continuous semantic actions for the
+/// next XR scene frame, and sends focused world-panel navigation through the
+/// same UI model as flat hosts. It never manufactures a tracked pose.
+#[derive(Clone, Debug, Default)]
+pub struct XrControllerInputRouter {
+    controller: ControllerInputSession,
+    combiner: PlayerActionFrameCombiner,
+    latest_actions: PlayerActionFrame,
+}
+
+impl XrControllerInputRouter {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn clear_transient_input(&mut self) {
+        self.controller.clear_held();
+        self.combiner.clear();
+        self.latest_actions = PlayerActionFrame::default();
+    }
+
+    pub fn connect_source(
+        &mut self,
+        source_id: InputSourceId,
+        descriptor: InputSourceDescriptor,
+    ) -> bool {
+        self.controller.connect_source(source_id, descriptor)
+    }
+
+    pub fn disconnect_source(
+        &mut self,
+        source_id: InputSourceId,
+    ) -> std::result::Result<bool, ControllerInputError> {
+        let changed = self.controller.disconnect_source(source_id)?;
+        if self.latest_actions.active_source == Some(source_id) {
+            self.latest_actions = PlayerActionFrame::default();
+        }
+        Ok(changed)
+    }
+
+    pub fn source_count(&self) -> usize {
+        self.controller.source_count()
+    }
+
+    pub fn latest_actions(&self) -> &PlayerActionFrame {
+        &self.latest_actions
+    }
+
+    /// Compose ordinary and tracked-controller semantics without allowing one
+    /// source's release edge to cancel another source's continuing hold.
+    pub fn merge_into_frame(&mut self, frame: &mut XrInputFrame) {
+        frame.actions = self.combiner.combine(
+            std::mem::take(&mut frame.actions),
+            self.latest_actions.clone(),
+        );
+    }
+
+    pub fn route_samples(
+        &mut self,
+        host: &mut McloneSceneHost,
+        now: Duration,
+        samples: impl IntoIterator<Item = (InputSourceId, StandardGamepadSnapshot)>,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<XrControllerInputDisposition> {
+        let context = if host.mono_ui_is_active() {
+            InputContext::Menu
+        } else {
+            InputContext::Gameplay
+        };
+        let actions = self.sample_actions(context, now, samples)?;
+        let mut disposition = XrControllerInputDisposition {
+            meaningful_controller_activity: actions.activity_source.is_some(),
+            ..XrControllerInputDisposition::default()
+        };
+        if context != InputContext::Gameplay {
+            for action in actions.pressed.iter().copied() {
+                let Some(navigation) = gui_navigation_from_player_action(action) else {
+                    continue;
+                };
+                let (handled, ui_action) = host.mono_ui_navigate(navigation);
+                disposition.scene_changed |= handled;
+                if let Some(ui_action) = ui_action {
+                    disposition.scene_changed |=
+                        host.apply_xr_ui_action(ui_action, device, queue)?;
+                }
+            }
+        }
+        self.latest_actions = actions;
+        Ok(disposition)
+    }
+
+    fn sample_actions(
+        &mut self,
+        context: InputContext,
+        now: Duration,
+        samples: impl IntoIterator<Item = (InputSourceId, StandardGamepadSnapshot)>,
+    ) -> std::result::Result<PlayerActionFrame, ControllerInputError> {
+        self.controller.set_context(context);
+        let actions = self.controller.sample_frame(now, samples)?;
+        self.latest_actions = actions.clone();
+        Ok(actions)
+    }
 }
 
 impl MonoInputDisposition {
@@ -687,5 +803,42 @@ mod tests {
 
         router.clear_transient_input();
         assert!(router.held_frame().is_none());
+    }
+
+    #[test]
+    fn xr_router_keeps_pose_less_gamepad_actions_in_shared_semantics() {
+        let mut allocator = InputSourceIdAllocator::new();
+        let source = allocator.allocate().unwrap();
+        let mut router = XrControllerInputRouter::new();
+        router.connect_source(
+            source,
+            InputSourceDescriptor::scripted_gamepad("XR test pad"),
+        );
+
+        let actions = router
+            .sample_actions(
+                InputContext::Gameplay,
+                Duration::from_millis(16),
+                [(
+                    source,
+                    StandardGamepadSnapshot {
+                        left_stick: Vec2::Y,
+                        buttons: StandardGamepadButtons {
+                            south: StandardGamepadButtonState::pressed(),
+                            ..StandardGamepadButtons::default()
+                        },
+                        ..StandardGamepadSnapshot::default()
+                    },
+                )],
+            )
+            .unwrap();
+        assert!(actions.movement.forward > 0.99);
+        assert!(actions.held.contains(&mclone_input::PlayerAction::Jump));
+        assert_eq!(router.source_count(), 1);
+
+        router.clear_transient_input();
+        assert!(router.latest_actions().is_idle());
+        router.disconnect_source(source).unwrap();
+        assert_eq!(router.source_count(), 0);
     }
 }

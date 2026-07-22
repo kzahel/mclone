@@ -80,6 +80,26 @@ impl PlayerActionFrame {
             && self.released.is_empty()
     }
 
+    /// Merge simultaneous action-based sources at one presentation boundary.
+    pub fn merge_from(&mut self, other: Self) {
+        self.movement.left = (self.movement.left + other.movement.left).clamp(-1.0, 1.0);
+        self.movement.forward = (self.movement.forward + other.movement.forward).clamp(-1.0, 1.0);
+        self.look_rate.x += other.look_rate.x;
+        self.look_rate.y += other.look_rate.y;
+        self.pointer_delta.x += other.pointer_delta.x;
+        self.pointer_delta.y += other.pointer_delta.y;
+        self.held.extend(other.held);
+        self.pressed.extend(other.pressed);
+        self.released.extend(other.released);
+        if other.activity_source.is_some() {
+            self.activity_source = other.activity_source;
+        }
+        if other.active_source.is_some() {
+            self.active_source = other.active_source;
+            self.active_controller_layout = other.active_controller_layout;
+        }
+    }
+
     /// Compatibility projection used while scene/application call sites move
     /// from `FlatInputFrame` to semantic action state.
     pub fn to_flat_frame(&self, dt_seconds: f64) -> FlatInputFrame {
@@ -122,6 +142,39 @@ impl PlayerActionFrame {
             }
         }
         frame
+    }
+}
+
+/// Stateful aggregate for simultaneous semantic action sources.
+///
+/// Continuous values are composed at the presentation boundary, while button
+/// edges are derived from the aggregate held set. This prevents a release from
+/// one controller from cancelling the same action while another controller is
+/// still holding it.
+#[derive(Clone, Debug, Default)]
+pub struct PlayerActionFrameCombiner {
+    held: BTreeSet<PlayerAction>,
+}
+
+impl PlayerActionFrameCombiner {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn clear(&mut self) {
+        self.held.clear();
+    }
+
+    pub fn combine(
+        &mut self,
+        mut primary: PlayerActionFrame,
+        secondary: PlayerActionFrame,
+    ) -> PlayerActionFrame {
+        primary.merge_from(secondary);
+        primary.pressed = primary.held.difference(&self.held).copied().collect();
+        primary.released = self.held.difference(&primary.held).copied().collect();
+        self.held = primary.held.clone();
+        primary
     }
 }
 
@@ -817,7 +870,7 @@ fn hysteretic_trigger(
         }
 }
 
-fn adjusted_stick(value: glam::Vec2, deadzone: f32, exponent: f32) -> glam::Vec2 {
+pub(crate) fn adjusted_stick(value: glam::Vec2, deadzone: f32, exponent: f32) -> glam::Vec2 {
     let value = glam::Vec2::new(finite(value.x), finite(value.y)).clamp_length_max(1.0);
     let magnitude = value.length();
     if magnitude <= deadzone || magnitude == 0.0 {

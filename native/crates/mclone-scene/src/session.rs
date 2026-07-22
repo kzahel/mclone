@@ -466,11 +466,11 @@ impl McloneSceneHost {
             menu_toggle_down: false,
             game_ui_toggle_down: false,
             menu_pointer_down: false,
-            gameplay_interaction_buttons: XrGameplayInteractionButtons::default(),
             menu_panel_pose: None,
             menu_panel_anchor: XrUiPanelAnchor::Head,
             menu_panel_recenter_pending: true,
-            latest_controllers: Vec::new(),
+            latest_xr_input: XrInputFrame::default(),
+            latest_xr_head_gaze_stage: None,
             first_eye_summary: None,
             last_ui_panel_stats: WorldGuiPanelRenderStats::default(),
             last_ui_draw_cache_stats: UiDrawCacheStats::default(),
@@ -663,11 +663,11 @@ impl McloneSceneHost {
             menu_toggle_down: false,
             game_ui_toggle_down: false,
             menu_pointer_down: false,
-            gameplay_interaction_buttons: XrGameplayInteractionButtons::default(),
             menu_panel_pose: None,
             menu_panel_anchor: XrUiPanelAnchor::Head,
             menu_panel_recenter_pending: false,
-            latest_controllers: Vec::new(),
+            latest_xr_input: XrInputFrame::default(),
+            latest_xr_head_gaze_stage: None,
             first_eye_summary: None,
             last_ui_panel_stats: WorldGuiPanelRenderStats::default(),
             last_ui_draw_cache_stats: UiDrawCacheStats::default(),
@@ -863,11 +863,11 @@ impl McloneSceneHost {
             menu_toggle_down: false,
             game_ui_toggle_down: false,
             menu_pointer_down: false,
-            gameplay_interaction_buttons: XrGameplayInteractionButtons::default(),
             menu_panel_pose: None,
             menu_panel_anchor: XrUiPanelAnchor::Head,
             menu_panel_recenter_pending: false,
-            latest_controllers: Vec::new(),
+            latest_xr_input: XrInputFrame::default(),
+            latest_xr_head_gaze_stage: None,
             first_eye_summary: None,
             last_ui_panel_stats: WorldGuiPanelRenderStats::default(),
             last_ui_draw_cache_stats: UiDrawCacheStats::default(),
@@ -5385,7 +5385,8 @@ impl McloneSceneHost {
         self.head_comfort.reset();
         self.clear_xr_blink_teleport();
         self.clear_mono_blink_debug();
-        self.latest_controllers.clear();
+        self.latest_xr_input = XrInputFrame::default();
+        self.latest_xr_head_gaze_stage = None;
         self.first_eye_summary = None;
         self.last_ui_panel_stats = WorldGuiPanelRenderStats::default();
         self.last_ui_draw_cache_stats = UiDrawCacheStats::default();

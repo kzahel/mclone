@@ -97,12 +97,12 @@ impl XrSnapTurnState {
 }
 
 pub fn xr_locomotion_input_from_controllers(
-    controllers: &[XrControllerSnapshot],
+    input: &XrInputFrame,
     dt_seconds: f64,
     movement_yaw_radians: Option<f64>,
 ) -> EngineCameraInput {
     xr_locomotion_input_from_controllers_with_turn_policy(
-        controllers,
+        input,
         dt_seconds,
         movement_yaw_radians,
         XrTurnPolicy::default(),
@@ -110,7 +110,7 @@ pub fn xr_locomotion_input_from_controllers(
 }
 
 pub fn xr_locomotion_input_from_controllers_with_turn_policy(
-    controllers: &[XrControllerSnapshot],
+    input: &XrInputFrame,
     dt_seconds: f64,
     movement_yaw_radians: Option<f64>,
     turn_policy: XrTurnPolicy,
@@ -120,22 +120,19 @@ pub fn xr_locomotion_input_from_controllers_with_turn_policy(
     } else {
         0.0
     };
-    let left_axis = xr_left_stick_axis(controllers);
-    let right_axis = xr_right_stick_axis(controllers);
-    let jump = xr_right_a_pressed(controllers);
-    let descend = xr_right_b_pressed(controllers);
-    let sprint = xr_sprint_pressed(controllers);
-    let shift = xr_sneak_pressed(controllers);
-    let movement_impulse = (left_axis.length_squared() > f32::EPSILON)
-        .then(|| xr_left_stick_movement_impulse(left_axis));
-    let mouse_delta_x =
-        if matches!(turn_policy, XrTurnPolicy::Smooth) && ENGINE_CAMERA_MOUSE_SENSITIVITY > 0.0 {
-            let yaw_delta =
-                -f64::from(right_axis.x) * XR_JOYPAD_YAW_SPEED_RADIANS_PER_SECOND * dt_seconds;
-            -yaw_delta / ENGINE_CAMERA_MOUSE_SENSITIVITY
-        } else {
-            0.0
-        };
+    let actions = &input.actions;
+    let jump = actions.held.contains(&PlayerAction::Jump);
+    let descend = actions.held.contains(&PlayerAction::Descend);
+    let sprint = actions.held.contains(&PlayerAction::Sprint);
+    let shift = actions.held.contains(&PlayerAction::Sneak);
+    let movement_impulse = (actions.movement.left.abs() > f32::EPSILON
+        || actions.movement.forward.abs() > f32::EPSILON)
+        .then(|| EngineCameraMovementImpulse::new(actions.movement.left, actions.movement.forward));
+    let mouse_delta_x = if matches!(turn_policy, XrTurnPolicy::Smooth) {
+        actions.look_rate.x as f64 * dt_seconds
+    } else {
+        0.0
+    };
 
     // Spell every field explicitly: this is a gameplay-semantic constructor and a
     // bare `..default()` here is exactly how sprint/sneak were silently dropped
@@ -162,21 +159,13 @@ pub fn xr_locomotion_input_from_controllers_with_turn_policy(
     }
 }
 
-pub(crate) fn xr_left_stick_axis(controllers: &[XrControllerSnapshot]) -> Vec2 {
-    controllers
-        .iter()
-        .find(|controller| controller.hand == XrHand::Left)
-        .map(|controller| joypad_axis_after_dead_zone(controller.thumbstick))
-        .unwrap_or(Vec2::ZERO)
-}
-
-pub(crate) fn xr_left_stick_raw_axis(controllers: &[XrControllerSnapshot]) -> Vec2 {
-    controllers
-        .iter()
-        .find(|controller| controller.hand == XrHand::Left)
+pub(crate) fn xr_left_stick_raw_axis(input: &XrInputFrame) -> Vec2 {
+    input
+        .xr_specific
+        .controller(XrHand::Left)
         .map(|controller| {
-            if controller.thumbstick.is_finite() {
-                controller.thumbstick
+            if controller.locomotion_axis.is_finite() {
+                controller.locomotion_axis
             } else {
                 Vec2::ZERO
             }
@@ -184,52 +173,12 @@ pub(crate) fn xr_left_stick_raw_axis(controllers: &[XrControllerSnapshot]) -> Ve
         .unwrap_or(Vec2::ZERO)
 }
 
-pub(crate) fn xr_left_stick_blink_engaged(controllers: &[XrControllerSnapshot]) -> bool {
-    xr_left_stick_raw_axis(controllers).length() > XR_BLINK_TELEPORT_STICK_THRESHOLD
-}
-
-pub(crate) fn xr_right_stick_axis(controllers: &[XrControllerSnapshot]) -> Vec2 {
-    controllers
-        .iter()
-        .find(|controller| controller.hand == XrHand::Right)
-        .map(|controller| joypad_axis_after_dead_zone(controller.thumbstick))
-        .unwrap_or(Vec2::ZERO)
-}
-
-pub(crate) fn xr_right_a_pressed(controllers: &[XrControllerSnapshot]) -> bool {
-    controllers
-        .iter()
-        .any(|controller| controller.hand == XrHand::Right && controller.a_pressed)
-}
-
-pub(crate) fn xr_right_b_pressed(controllers: &[XrControllerSnapshot]) -> bool {
-    controllers
-        .iter()
-        .any(|controller| controller.hand == XrHand::Right && controller.b_pressed)
-}
-
-/// Sprint binding for XR locomotion (tactical 168 Slice 0). The left thumbstick
-/// click is already the game-UI toggle (`XR_GAME_UI_TOGGLE_HAND`), so sprint —
-/// a movement modifier — maps to the left-hand Y button, next to the movement
-/// stick. The shared player already fully supports sprint; only the XR input
-/// assembly was dropping it.
-pub(crate) fn xr_sprint_pressed(controllers: &[XrControllerSnapshot]) -> bool {
-    controllers
-        .iter()
-        .any(|controller| controller.hand == XrHand::Left && controller.y_pressed)
-}
-
-/// Sneak binding for XR locomotion (tactical 168 Slice 0). Mapped to the right
-/// thumbstick *click*, which does not collide with snap-turn (the right stick
-/// *axis*). Jump/descend already occupy the right A/B buttons.
-pub(crate) fn xr_sneak_pressed(controllers: &[XrControllerSnapshot]) -> bool {
-    controllers
-        .iter()
-        .any(|controller| controller.hand == XrHand::Right && controller.thumbstick_pressed)
+pub(crate) fn xr_left_stick_blink_engaged(input: &XrInputFrame) -> bool {
+    xr_left_stick_raw_axis(input).length() > XR_BLINK_TELEPORT_STICK_THRESHOLD
 }
 
 pub fn xr_hand_push_input_from_controllers(
-    controllers: &[XrControllerSnapshot],
+    controllers: &[TrackedControllerState],
     views: &[XrView],
     transform: XrStageToWorld,
 ) -> Result<Option<EngineHandPushInput>> {
@@ -254,7 +203,7 @@ pub fn xr_hand_push_input_from_controllers(
 }
 
 pub(crate) fn xr_controller_hand_position(
-    controllers: &[XrControllerSnapshot],
+    controllers: &[TrackedControllerState],
     hand: XrHand,
 ) -> Option<Vec3> {
     controllers
@@ -269,30 +218,35 @@ pub(crate) fn xr_controller_hand_position(
 /// `EngineThrusterHand::NONE`. The Slice 2 integrator consumes this; in Slice 1
 /// the camera only retains it.
 pub fn xr_thruster_input_from_controllers(
-    controllers: &[XrControllerSnapshot],
+    input: &XrInputFrame,
     transform: XrStageToWorld,
 ) -> EngineThrusterInput {
     EngineThrusterInput::new(
-        xr_thruster_hand(controllers, XrHand::Left, transform),
-        xr_thruster_hand(controllers, XrHand::Right, transform),
+        xr_thruster_hand(input, XrHand::Left, transform),
+        xr_thruster_hand(input, XrHand::Right, transform),
     )
 }
 
 fn xr_thruster_hand(
-    controllers: &[XrControllerSnapshot],
+    input: &XrInputFrame,
     hand: XrHand,
     transform: XrStageToWorld,
 ) -> EngineThrusterHand {
-    let Some(controller) = controllers.iter().find(|c| c.hand == hand) else {
+    let Some(controller) = input
+        .tracked
+        .iter()
+        .find(|controller| controller.hand == hand)
+    else {
         return EngineThrusterHand::NONE;
     };
+    let throttle = input
+        .xr_specific
+        .controller(hand)
+        .map_or(0.0, |controller| controller.pointer_select_value);
     let Some(world_palm_normal) = xr_thruster_world_palm_normal(controller, transform) else {
         return EngineThrusterHand::NONE;
     };
-    EngineThrusterHand::new(
-        vec3d_from_glam(world_palm_normal),
-        controller.trigger.clamp(0.0, 1.0),
-    )
+    EngineThrusterHand::new(vec3d_from_glam(world_palm_normal), throttle.clamp(0.0, 1.0))
 }
 
 /// World-space unit palm normal for one controller's grip pose (the direction
@@ -301,7 +255,7 @@ fn xr_thruster_hand(
 /// orientation into stage space, then into world space. Shared by the thruster
 /// input builder and the on-device calibration aid.
 pub fn xr_thruster_world_palm_normal(
-    controller: &XrControllerSnapshot,
+    controller: &TrackedControllerState,
     transform: XrStageToWorld,
 ) -> Option<Vec3> {
     let grip_orientation = controller.grip_orientation?;
@@ -354,13 +308,13 @@ fn thruster_palm_calibration_logging_enabled() -> bool {
 /// Emit a throttled calibration line per hand (grip quaternion -> world palm
 /// normal + throttle) so the grip-local palm axis can be confirmed on real
 /// hardware per the [`touch_palm_axis`] procedure.
-fn log_thruster_palm_calibration(controllers: &[XrControllerSnapshot], transform: XrStageToWorld) {
+fn log_thruster_palm_calibration(input: &XrInputFrame, transform: XrStageToWorld) {
     static FRAME: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
     let frame = FRAME.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     if frame % XR_THRUSTER_PALM_CAL_LOG_EVERY_FRAMES != 0 {
         return;
     }
-    for controller in controllers {
+    for controller in &input.tracked {
         let Some(grip) = controller.grip_orientation else {
             continue;
         };
@@ -377,7 +331,11 @@ fn log_thruster_palm_calibration(controllers: &[XrControllerSnapshot], transform
             normal.x,
             normal.y,
             normal.z,
-            controller.trigger.clamp(0.0, 1.0),
+            input
+                .xr_specific
+                .controller(controller.hand)
+                .map_or(0.0, |specific| specific.pointer_select_value)
+                .clamp(0.0, 1.0),
         );
     }
 }
@@ -463,23 +421,6 @@ pub(crate) fn engine_movement_yaw_from_forward(forward: Vec3) -> Option<f32> {
     Some(horizontal.x.atan2(horizontal.z))
 }
 
-pub(crate) fn xr_left_stick_movement_impulse(axis: Vec2) -> EngineCameraMovementImpulse {
-    EngineCameraMovementImpulse::new(-axis.x, axis.y)
-}
-
-pub(crate) fn joypad_axis_after_dead_zone(axis: Vec2) -> Vec2 {
-    if !axis.is_finite() {
-        return Vec2::ZERO;
-    }
-    let length = axis.length();
-    if length <= XR_JOYPAD_DEAD_ZONE {
-        return Vec2::ZERO;
-    }
-    let normalized = axis / length;
-    let adjusted = ((length.min(1.0) - XR_JOYPAD_DEAD_ZONE) / (1.0 - XR_JOYPAD_DEAD_ZONE)).max(0.0);
-    normalized * adjusted
-}
-
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum XrFrameLocomotionAutomation {
     Flight {
@@ -507,7 +448,7 @@ pub struct XrFrameLocomotionOutcome {
 impl McloneSceneHost {
     pub fn apply_frame_locomotion(
         &mut self,
-        controllers: &[XrControllerSnapshot],
+        input: &XrInputFrame,
         views: [XrView; 2],
         automation: Option<XrFrameLocomotionAutomation>,
     ) -> Result<XrFrameLocomotionOutcome> {
@@ -532,7 +473,7 @@ impl McloneSceneHost {
                 self.apply_automated_chunk_view_churn(center_x, center_z)?,
                 false,
             ),
-            None => (self.apply_locomotion_input(controllers, views)?, false),
+            None => (self.apply_locomotion_input(input, views)?, false),
         };
         let commit_start = self.services.clock.now();
         if !self.embedded_world_activation.phase.active()
@@ -551,13 +492,13 @@ impl McloneSceneHost {
 
     fn apply_locomotion_input(
         &mut self,
-        controllers: &[XrControllerSnapshot],
+        input: &XrInputFrame,
         views: [XrView; 2],
     ) -> Result<XrLocomotionTiming> {
         let mut timing = XrLocomotionTiming::default();
         let input_start = self.services.clock.now();
-        self.latest_controllers.clear();
-        self.latest_controllers.extend_from_slice(controllers);
+        self.latest_xr_input = input.clone();
+        self.latest_xr_head_gaze_stage = None;
         let now = self.services.clock.now();
         let dt_seconds = self
             .last_locomotion_update
@@ -565,10 +506,13 @@ impl McloneSceneHost {
             .map(|last| now.saturating_duration_since(last).as_secs_f64())
             .unwrap_or(0.0);
         let ui_was_active = self.ui.is_active();
-        self.apply_menu_toggle_input(controllers);
-        self.apply_game_ui_toggle_input(controllers);
+        self.apply_menu_toggle_input(&input.actions);
+        self.apply_game_ui_toggle_input(&input.actions);
         let ui_active = self.ui.is_active();
-        let gameplay_interaction_edges = self.update_gameplay_interaction_buttons(controllers);
+        let gameplay_interaction_edges = XrGameplayInteractionEdges {
+            attack: input.actions.pressed.contains(&PlayerAction::Attack),
+            use_item: input.actions.pressed.contains(&PlayerAction::Use),
+        };
         let suppress_gameplay_interaction = ui_was_active != ui_active;
         if self.active_world.runtime.is_none() {
             self.head_comfort.reset();
@@ -582,6 +526,15 @@ impl McloneSceneHost {
         let mut transform = self
             .reconcile_room_scale_body_to_headset(&views)
             .context("reconcile XR room-scale body pose")?;
+        let head_stage_position = xr_headset_stage_position_from_views(&views)?;
+        let head_stage_forward = average_unit_direction(
+            views[0].pose.orientation * Vec3::NEG_Z,
+            views[1].pose.orientation * Vec3::NEG_Z,
+            Vec3::NEG_Z,
+        );
+        if head_stage_forward.is_finite() && head_stage_forward.length_squared() > f32::EPSILON {
+            self.latest_xr_head_gaze_stage = Some((head_stage_position, head_stage_forward));
+        }
         self.update_head_comfort_state(transform, &views, dt_seconds)
             .context("update XR head comfort fade state")?;
         if self.ui.is_active() {
@@ -597,19 +550,19 @@ impl McloneSceneHost {
             timing.input_ms = elapsed_ms(self.services.clock.elapsed_since(input_start));
             return Ok(timing);
         }
-        if let Some(yaw_delta_radians) = self.snap_turn_delta_from_controllers(controllers) {
+        if let Some(yaw_delta_radians) = self.snap_turn_delta_from_controllers(input) {
             transform = self
                 .apply_snap_turn_preserving_headset(&views, transform, yaw_delta_radians)
                 .context("apply XR snap turn")?;
         }
         let blink_frame = self
-            .update_xr_blink_teleport(controllers, &views, transform)
+            .update_xr_blink_teleport(input, &views, transform)
             .context("update XR Blink teleport")?;
         let movement_yaw_radians = self
             .locomotion_movement_yaw_radians_with_transform(&views, transform)
             .context("resolve XR locomotion frame")?;
         let mut input = xr_locomotion_input_from_controllers_with_turn_policy(
-            controllers,
+            input,
             dt_seconds,
             movement_yaw_radians,
             self.turn_policy,
@@ -617,13 +570,17 @@ impl McloneSceneHost {
         if blink_frame.suppress_left_stick_movement {
             input.movement_impulse = None;
         }
-        input.hand_push = xr_hand_push_input_from_controllers(controllers, &views, transform)
-            .context("resolve XR hand-push input")?;
-        input.thruster = Some(xr_thruster_input_from_controllers(controllers, transform));
+        input.hand_push =
+            xr_hand_push_input_from_controllers(&self.latest_xr_input.tracked, &views, transform)
+                .context("resolve XR hand-push input")?;
+        input.thruster = Some(xr_thruster_input_from_controllers(
+            &self.latest_xr_input,
+            transform,
+        ));
         if thruster_palm_calibration_logging_enabled()
             && self.active_world.camera.movement_mode() == EngineCameraMovementMode::Thruster
         {
-            log_thruster_palm_calibration(controllers, transform);
+            log_thruster_palm_calibration(&self.latest_xr_input, transform);
         }
         timing.input_ms = elapsed_ms(self.services.clock.elapsed_since(input_start));
         let camera_apply_start = self.services.clock.now();
@@ -661,7 +618,8 @@ impl McloneSceneHost {
     ) -> Result<XrLocomotionTiming> {
         let mut timing = XrLocomotionTiming::default();
         let input_start = self.services.clock.now();
-        self.latest_controllers.clear();
+        self.latest_xr_input = XrInputFrame::default();
+        self.latest_xr_head_gaze_stage = None;
         if self.active_world.local_startup.is_some() || self.active_world.runtime.is_none() {
             timing.input_ms = elapsed_ms(self.services.clock.elapsed_since(input_start));
             return Ok(timing);
@@ -669,7 +627,6 @@ impl McloneSceneHost {
         self.ui.close();
         self.ui.clear_input();
         self.menu_pointer_down = false;
-        self.gameplay_interaction_buttons = XrGameplayInteractionButtons::default();
         self.menu_panel_pose = None;
         self.menu_panel_anchor = XrUiPanelAnchor::Head;
         self.menu_panel_recenter_pending = false;
@@ -715,7 +672,8 @@ impl McloneSceneHost {
     ) -> Result<XrLocomotionTiming> {
         let mut timing = XrLocomotionTiming::default();
         let input_start = self.services.clock.now();
-        self.latest_controllers.clear();
+        self.latest_xr_input = XrInputFrame::default();
+        self.latest_xr_head_gaze_stage = None;
         if self.active_world.local_startup.is_some() || self.active_world.runtime.is_none() {
             timing.input_ms = elapsed_ms(self.services.clock.elapsed_since(input_start));
             return Ok(timing);
@@ -723,7 +681,6 @@ impl McloneSceneHost {
         self.ui.close();
         self.ui.clear_input();
         self.menu_pointer_down = false;
-        self.gameplay_interaction_buttons = XrGameplayInteractionButtons::default();
         self.menu_panel_pose = None;
         self.menu_panel_anchor = XrUiPanelAnchor::Head;
         self.menu_panel_recenter_pending = false;
@@ -762,7 +719,8 @@ impl McloneSceneHost {
     fn apply_automated_stationary_input(&mut self) -> XrLocomotionTiming {
         let mut timing = XrLocomotionTiming::default();
         let input_start = self.services.clock.now();
-        self.latest_controllers.clear();
+        self.latest_xr_input = XrInputFrame::default();
+        self.latest_xr_head_gaze_stage = None;
         if self.active_world.local_startup.is_some() || self.active_world.runtime.is_none() {
             timing.input_ms = elapsed_ms(self.services.clock.elapsed_since(input_start));
             return timing;
@@ -816,12 +774,10 @@ impl McloneSceneHost {
         Ok(timing)
     }
 
-    pub(crate) fn snap_turn_delta_from_controllers(
-        &mut self,
-        controllers: &[XrControllerSnapshot],
-    ) -> Option<f64> {
-        let right_axis = xr_right_stick_axis(controllers);
-        self.snap_turn_state.update(right_axis.x, self.turn_policy)
+    pub(crate) fn snap_turn_delta_from_controllers(&mut self, input: &XrInputFrame) -> Option<f64> {
+        let axis_x = input.actions.look_rate.x
+            / mclone_input::ControllerSessionSettings::DEFAULT_LOOK_RATE_PER_SECOND;
+        self.snap_turn_state.update(axis_x, self.turn_policy)
     }
 
     pub(crate) fn apply_snap_turn_preserving_headset(
@@ -877,6 +833,7 @@ impl McloneSceneHost {
 #[cfg(test)]
 mod thruster_calibration_tests {
     use super::*;
+    use mclone_input::XrSpecificInput;
     use std::f32::consts::FRAC_PI_2;
 
     fn identity_transform() -> XrStageToWorld {
@@ -887,25 +844,13 @@ mod thruster_calibration_tests {
         }
     }
 
-    fn controller(
-        hand: XrHand,
-        grip_orientation: Option<Quat>,
-        trigger: f32,
-    ) -> XrControllerSnapshot {
-        XrControllerSnapshot {
+    fn controller(hand: XrHand, grip_orientation: Option<Quat>) -> TrackedControllerState {
+        TrackedControllerState {
             hand,
             aim_position: None,
             aim_direction: None,
             grip_position: None,
             grip_orientation,
-            trigger,
-            squeeze: 0.0,
-            select_pressed: false,
-            a_pressed: false,
-            b_pressed: false,
-            y_pressed: false,
-            thumbstick: Vec2::ZERO,
-            thumbstick_pressed: false,
         }
     }
 
@@ -916,7 +861,7 @@ mod thruster_calibration_tests {
         // "palm flat, facing down" calibration pose — must produce a world palm
         // normal of (0,-1,0), so the body thrusts straight up along -palm_normal.
         let left_grip = Quat::from_rotation_z(-FRAC_PI_2); // +X -> (0,-1,0)
-        let left = controller(XrHand::Left, Some(left_grip), 1.0);
+        let left = controller(XrHand::Left, Some(left_grip));
         let left_normal =
             xr_thruster_world_palm_normal(&left, identity_transform()).expect("left palm normal");
         assert!(
@@ -925,7 +870,7 @@ mod thruster_calibration_tests {
         );
 
         let right_grip = Quat::from_rotation_z(FRAC_PI_2); // -X -> (0,-1,0)
-        let right = controller(XrHand::Right, Some(right_grip), 1.0);
+        let right = controller(XrHand::Right, Some(right_grip));
         let right_normal =
             xr_thruster_world_palm_normal(&right, identity_transform()).expect("right palm normal");
         assert!(
@@ -936,7 +881,7 @@ mod thruster_calibration_tests {
 
     #[test]
     fn missing_grip_orientation_yields_no_palm_normal() {
-        let hand = controller(XrHand::Left, None, 1.0);
+        let hand = controller(XrHand::Left, None);
         assert!(xr_thruster_world_palm_normal(&hand, identity_transform()).is_none());
     }
 
@@ -944,11 +889,28 @@ mod thruster_calibration_tests {
     fn thruster_input_builder_carries_throttle_and_downward_thrust() {
         // Palm-down grip + full trigger -> the engine hand should thrust the body
         // upward (accel along -palm_normal, palm_normal ~ (0,-1,0)) at throttle 1.
-        let controllers = [
-            controller(XrHand::Left, Some(Quat::from_rotation_z(-FRAC_PI_2)), 0.75),
-            controller(XrHand::Right, Some(Quat::from_rotation_z(FRAC_PI_2)), 0.25),
-        ];
-        let input = xr_thruster_input_from_controllers(&controllers, identity_transform());
+        let frame = XrInputFrame {
+            tracked: vec![
+                controller(XrHand::Left, Some(Quat::from_rotation_z(-FRAC_PI_2))),
+                controller(XrHand::Right, Some(Quat::from_rotation_z(FRAC_PI_2))),
+            ],
+            xr_specific: XrSpecificInput {
+                controllers: vec![
+                    mclone_input::XrControllerSpecificState {
+                        hand: Some(XrHand::Left),
+                        pointer_select_value: 0.75,
+                        ..Default::default()
+                    },
+                    mclone_input::XrControllerSpecificState {
+                        hand: Some(XrHand::Right),
+                        pointer_select_value: 0.25,
+                        ..Default::default()
+                    },
+                ],
+            },
+            ..Default::default()
+        };
+        let input = xr_thruster_input_from_controllers(&frame, identity_transform());
         assert!((input.left.throttle - 0.75).abs() < 1.0e-5);
         assert!((input.right.throttle - 0.25).abs() < 1.0e-5);
         assert!(
@@ -968,13 +930,9 @@ mod thruster_calibration_tests {
         // Sprint is the left-hand Y button (the left thumbstick click is the
         // game-UI toggle). Tactical 168 Slice 0: sprint was previously dropped by
         // a `..default()` and unreachable on both XR surfaces.
-        let mut left = controller(XrHand::Left, None, 0.0);
-        left.y_pressed = true;
-        let input = xr_locomotion_input_from_controllers(
-            &[left, controller(XrHand::Right, None, 0.0)],
-            0.016,
-            None,
-        );
+        let mut frame = XrInputFrame::default();
+        frame.actions.held.insert(PlayerAction::Sprint);
+        let input = xr_locomotion_input_from_controllers(&frame, 0.016, None);
         assert!(input.sprint, "left Y button should engage sprint");
         assert!(!input.shift, "left Y button should not engage sneak");
     }
@@ -983,13 +941,9 @@ mod thruster_calibration_tests {
     fn right_thumbstick_click_maps_to_sneak() {
         // Sneak is the right thumbstick *click*, which does not collide with the
         // snap-turn axis on the same stick (tactical 168 Slice 0).
-        let mut right = controller(XrHand::Right, None, 0.0);
-        right.thumbstick_pressed = true;
-        let input = xr_locomotion_input_from_controllers(
-            &[controller(XrHand::Left, None, 0.0), right],
-            0.016,
-            None,
-        );
+        let mut frame = XrInputFrame::default();
+        frame.actions.held.insert(PlayerAction::Sneak);
+        let input = xr_locomotion_input_from_controllers(&frame, 0.016, None);
         assert!(input.shift, "right thumbstick click should engage sneak");
         assert!(
             !input.sprint,
@@ -1001,13 +955,9 @@ mod thruster_calibration_tests {
     fn left_thumbstick_click_is_not_sprint_or_sneak() {
         // Left thumbstick click is reserved for the game-UI toggle; it must not
         // leak into locomotion as sprint/sneak.
-        let mut left = controller(XrHand::Left, None, 0.0);
-        left.thumbstick_pressed = true;
-        let input = xr_locomotion_input_from_controllers(
-            &[left, controller(XrHand::Right, None, 0.0)],
-            0.016,
-            None,
-        );
+        let mut frame = XrInputFrame::default();
+        frame.actions.held.insert(PlayerAction::OpenBlockPalette);
+        let input = xr_locomotion_input_from_controllers(&frame, 0.016, None);
         assert!(!input.sprint);
         assert!(!input.shift);
     }

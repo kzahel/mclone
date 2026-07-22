@@ -1,21 +1,6 @@
 use super::*;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub(crate) struct XrGameplayInteractionButtons {
-    pub(super) attack: bool,
-    pub(super) use_item: bool,
-}
-
-impl XrGameplayInteractionButtons {
-    pub(super) const fn press_edges(self, current: Self) -> XrGameplayInteractionEdges {
-        XrGameplayInteractionEdges {
-            attack: current.attack && !self.attack,
-            use_item: current.use_item && !self.use_item,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct XrGameplayInteractionEdges {
     pub(super) attack: bool,
     pub(super) use_item: bool,
@@ -157,32 +142,12 @@ pub(crate) fn prepare_xr_menu_panel_draw(
     }
 }
 
-pub fn xr_menu_toggle_pressed(controllers: &[XrControllerSnapshot]) -> bool {
-    controllers
-        .iter()
-        .any(|controller| controller.hand == XR_MENU_TOGGLE_HAND && controller.select_pressed)
+pub fn xr_menu_toggle_pressed(actions: &PlayerActionFrame) -> bool {
+    actions.held.contains(&PlayerAction::OpenMenu)
 }
 
-pub fn xr_game_ui_toggle_pressed(controllers: &[XrControllerSnapshot]) -> bool {
-    controllers.iter().any(|controller| {
-        controller.hand == XR_GAME_UI_TOGGLE_HAND && controller.thumbstick_pressed
-    })
-}
-
-pub(crate) fn xr_gameplay_interaction_buttons_from_controllers(
-    controllers: &[XrControllerSnapshot],
-    previous: XrGameplayInteractionButtons,
-) -> XrGameplayInteractionButtons {
-    let Some(controller) = controllers
-        .iter()
-        .find(|controller| controller.hand == XR_GAMEPLAY_INTERACTION_HAND)
-    else {
-        return XrGameplayInteractionButtons::default();
-    };
-    XrGameplayInteractionButtons {
-        attack: xr_analog_button_down(controller.trigger, previous.attack),
-        use_item: xr_analog_button_down(controller.squeeze, previous.use_item),
-    }
+pub fn xr_game_ui_toggle_pressed(actions: &PlayerActionFrame) -> bool {
+    actions.held.contains(&PlayerAction::OpenBlockPalette)
 }
 
 pub(crate) fn xr_analog_button_down(value: f32, was_down: bool) -> bool {
@@ -195,7 +160,7 @@ pub(crate) fn xr_analog_button_down(value: f32, was_down: bool) -> bool {
 }
 
 pub fn xr_controller_interaction_ray_from_controllers(
-    controllers: &[XrControllerSnapshot],
+    controllers: &[TrackedControllerState],
     transform: XrStageToWorld,
 ) -> Option<(Vec3, Vec3)> {
     [XrHand::Right, XrHand::Left].into_iter().find_map(|hand| {
@@ -206,8 +171,23 @@ pub fn xr_controller_interaction_ray_from_controllers(
     })
 }
 
+pub(crate) fn xr_interaction_ray_with_head_fallback(
+    input: &XrInputFrame,
+    transform: XrStageToWorld,
+    head_gaze_stage: Option<(Vec3, Vec3)>,
+) -> Option<(Vec3, Vec3)> {
+    xr_controller_interaction_ray_from_controllers(&input.tracked, transform).or_else(|| {
+        head_gaze_stage.map(|(origin, direction)| {
+            (
+                transform.transform_position(origin),
+                transform.transform_direction(direction).normalize_or_zero(),
+            )
+        })
+    })
+}
+
 pub(crate) fn xr_controller_interaction_ray(
-    controller: &XrControllerSnapshot,
+    controller: &TrackedControllerState,
     transform: XrStageToWorld,
 ) -> Option<(Vec3, Vec3)> {
     let ray_origin = transform.transform_position(controller.aim_position?);
@@ -222,12 +202,13 @@ pub(crate) fn xr_controller_interaction_ray(
 }
 
 pub fn xr_gameplay_controller_ray_line_from_controllers(
-    controllers: &[XrControllerSnapshot],
+    input: &XrInputFrame,
     transform: XrStageToWorld,
     hit_distance: Option<f32>,
     pick_range: f32,
 ) -> Option<WorldGuiLine> {
-    let controller = controllers
+    let controller = input
+        .tracked
         .iter()
         .find(|controller| controller.hand == XR_GAMEPLAY_INTERACTION_HAND)?;
     let (ray_origin, ray_direction) = xr_controller_interaction_ray(controller, transform)?;
@@ -243,19 +224,27 @@ pub fn xr_gameplay_controller_ray_line_from_controllers(
     Some(WorldGuiLine::new(
         ray_origin,
         ray_origin + ray_direction * distance,
-        xr_gameplay_controller_ray_color(controller),
+        xr_gameplay_controller_ray_color(input, controller.hand),
     ))
 }
 
-pub(crate) fn xr_gameplay_controller_ray_color(controller: &XrControllerSnapshot) -> [f32; 4] {
-    let trigger_active =
-        controller.trigger.is_finite() && controller.trigger >= XR_MENU_POINTER_TRIGGER_PRESS;
-    let squeeze_active =
-        controller.squeeze.is_finite() && controller.squeeze >= XR_MENU_POINTER_TRIGGER_PRESS;
+pub(crate) fn xr_gameplay_controller_ray_color(input: &XrInputFrame, hand: XrHand) -> [f32; 4] {
+    let specific = input.xr_specific.controller(hand);
+    let trigger_active = specific.is_some_and(|controller| {
+        controller.pointer_select_value.is_finite()
+            && controller.pointer_select_value >= XR_MENU_POINTER_TRIGGER_PRESS
+    });
+    let squeeze_active = specific.is_some_and(|controller| {
+        controller.squeeze_value.is_finite()
+            && controller.squeeze_value >= XR_MENU_POINTER_TRIGGER_PRESS
+    });
     if trigger_active || squeeze_active {
         XR_MENU_TRIGGER_RAY_COLOR
     } else {
-        xr_menu_controller_ray_color(controller)
+        xr_menu_controller_ray_color(
+            hand,
+            specific.map_or(0.0, |state| state.pointer_select_value),
+        )
     }
 }
 
@@ -315,7 +304,7 @@ pub fn xr_diagnostic_panel_from_render_views(render_views: [ChunkRenderView; 2])
 }
 
 pub fn xr_game_ui_panel_from_controllers(
-    controllers: &[XrControllerSnapshot],
+    controllers: &[TrackedControllerState],
     transform: XrStageToWorld,
     render_views: [ChunkRenderView; 2],
 ) -> Option<WorldGuiPanel> {
@@ -385,13 +374,14 @@ pub struct XrMenuPointerHit {
 }
 
 pub fn xr_menu_pointer_hit_from_controllers(
-    controllers: &[XrControllerSnapshot],
+    input: &XrInputFrame,
     transform: XrStageToWorld,
     panel: WorldGuiPanel,
     gui_scale: GuiScale,
 ) -> Option<XrMenuPointerHit> {
     [XrHand::Right, XrHand::Left].into_iter().find_map(|hand| {
-        controllers
+        input
+            .tracked
             .iter()
             .find(|controller| controller.hand == hand)
             .and_then(|controller| {
@@ -401,7 +391,10 @@ pub fn xr_menu_pointer_hit_from_controllers(
                     |(point, distance)| XrMenuPointerHit {
                         hand,
                         point,
-                        trigger: controller.trigger,
+                        trigger: input
+                            .xr_specific
+                            .controller(hand)
+                            .map_or(0.0, |specific| specific.pointer_select_value),
                         distance,
                     },
                 )
@@ -410,23 +403,35 @@ pub fn xr_menu_pointer_hit_from_controllers(
 }
 
 pub fn xr_menu_controller_ray_lines_from_controllers(
-    controllers: &[XrControllerSnapshot],
+    input: &XrInputFrame,
     transform: XrStageToWorld,
     panel: WorldGuiPanel,
 ) -> Vec<WorldGuiLine> {
     [XrHand::Left, XrHand::Right]
         .into_iter()
         .filter_map(|hand| {
-            controllers
+            input
+                .tracked
                 .iter()
                 .find(|controller| controller.hand == hand)
-                .and_then(|controller| xr_menu_controller_ray_line(controller, transform, panel))
+                .and_then(|controller| {
+                    xr_menu_controller_ray_line(
+                        controller,
+                        input
+                            .xr_specific
+                            .controller(hand)
+                            .map_or(0.0, |specific| specific.pointer_select_value),
+                        transform,
+                        panel,
+                    )
+                })
         })
         .collect()
 }
 
 pub(crate) fn xr_menu_controller_ray_line(
-    controller: &XrControllerSnapshot,
+    controller: &TrackedControllerState,
+    pointer_select_value: f32,
     transform: XrStageToWorld,
     panel: WorldGuiPanel,
 ) -> Option<WorldGuiLine> {
@@ -445,15 +450,15 @@ pub(crate) fn xr_menu_controller_ray_line(
     Some(WorldGuiLine::new(
         ray_origin,
         ray_origin + direction * distance,
-        xr_menu_controller_ray_color(controller),
+        xr_menu_controller_ray_color(controller.hand, pointer_select_value),
     ))
 }
 
-pub fn xr_menu_controller_ray_color(controller: &XrControllerSnapshot) -> [f32; 4] {
-    if controller.trigger.is_finite() && controller.trigger >= XR_MENU_POINTER_TRIGGER_PRESS {
+pub fn xr_menu_controller_ray_color(hand: XrHand, pointer_select_value: f32) -> [f32; 4] {
+    if pointer_select_value.is_finite() && pointer_select_value >= XR_MENU_POINTER_TRIGGER_PRESS {
         return XR_MENU_TRIGGER_RAY_COLOR;
     }
-    match controller.hand {
+    match hand {
         XrHand::Left => XR_MENU_LEFT_RAY_COLOR,
         XrHand::Right => XR_MENU_RIGHT_RAY_COLOR,
     }
@@ -955,8 +960,8 @@ impl McloneSceneHost {
         }
     }
 
-    pub(crate) fn apply_menu_toggle_input(&mut self, controllers: &[XrControllerSnapshot]) {
-        let toggle_down = xr_menu_toggle_pressed(controllers);
+    pub(crate) fn apply_menu_toggle_input(&mut self, actions: &PlayerActionFrame) {
+        let toggle_down = xr_menu_toggle_pressed(actions);
         if toggle_down && !self.menu_toggle_down {
             if self.active_world.local_startup.is_some() {
                 if !self.ui.is_active() {
@@ -984,8 +989,8 @@ impl McloneSceneHost {
         self.menu_toggle_down = toggle_down;
     }
 
-    pub(crate) fn apply_game_ui_toggle_input(&mut self, controllers: &[XrControllerSnapshot]) {
-        let toggle_down = xr_game_ui_toggle_pressed(controllers);
+    pub(crate) fn apply_game_ui_toggle_input(&mut self, actions: &PlayerActionFrame) {
+        let toggle_down = xr_game_ui_toggle_pressed(actions);
         if toggle_down && !self.game_ui_toggle_down {
             if self.active_world.local_startup.is_some() || self.active_world.runtime.is_none() {
                 self.game_ui_toggle_down = toggle_down;
@@ -1037,7 +1042,7 @@ impl McloneSceneHost {
                     )
                     .ok()?;
                     xr_game_ui_panel_from_controllers(
-                        &self.latest_controllers,
+                        &self.latest_xr_input.tracked,
                         transform,
                         render_views,
                     )
@@ -1076,7 +1081,7 @@ impl McloneSceneHost {
         let gui_scale = GuiScale::from_pixels(XR_MENU_PANEL_PIXELS[0], XR_MENU_PANEL_PIXELS[1]);
         self.ui.set_scale(gui_scale);
         let hit = xr_menu_pointer_hit_from_controllers(
-            &self.latest_controllers,
+            &self.latest_xr_input,
             transform,
             panel,
             gui_scale,
@@ -1102,19 +1107,6 @@ impl McloneSceneHost {
             return self.apply_xr_ui_action(action, device, queue);
         }
         Ok(false)
-    }
-
-    pub(crate) fn update_gameplay_interaction_buttons(
-        &mut self,
-        controllers: &[XrControllerSnapshot],
-    ) -> XrGameplayInteractionEdges {
-        let current = xr_gameplay_interaction_buttons_from_controllers(
-            controllers,
-            self.gameplay_interaction_buttons,
-        );
-        let edges = self.gameplay_interaction_buttons.press_edges(current);
-        self.gameplay_interaction_buttons = current;
-        edges
     }
 
     pub(crate) fn sync_carried_item(&mut self) -> Result<bool> {
@@ -1200,8 +1192,7 @@ impl McloneSceneHost {
         {
             let transform =
                 XrStageToWorld::from_tracking_origin(origin, self.active_world.camera.snapshot())?;
-            if let Some((ray_origin, ray_direction)) =
-                xr_controller_interaction_ray_from_controllers(&self.latest_controllers, transform)
+            if let Some((ray_origin, ray_direction)) = self.current_xr_interaction_ray(transform)
                 && self.request_embedded_world_activation(
                     vec3d_from_glam(ray_origin),
                     vec3d_from_glam(ray_direction),
@@ -1288,7 +1279,7 @@ impl McloneSceneHost {
         let transform =
             XrStageToWorld::from_tracking_origin(origin, self.active_world.camera.snapshot())?;
         Ok(xr_menu_controller_ray_lines_from_controllers(
-            &self.latest_controllers,
+            &self.latest_xr_input,
             transform,
             panel,
         ))
@@ -1303,9 +1294,10 @@ impl McloneSceneHost {
         };
         let transform =
             XrStageToWorld::from_tracking_origin(origin, self.active_world.camera.snapshot())?;
-        let Some((ray_origin, ray_direction)) =
-            xr_controller_interaction_ray_from_controllers(&self.latest_controllers, transform)
-        else {
+        let Some((ray_origin, ray_direction)) = xr_controller_interaction_ray_from_controllers(
+            &self.latest_xr_input.tracked,
+            transform,
+        ) else {
             return Ok(None);
         };
         let hit_distance = self.active_world.runtime.as_ref().and_then(|runtime| {
@@ -1322,7 +1314,7 @@ impl McloneSceneHost {
                 })
         });
         Ok(xr_gameplay_controller_ray_line_from_controllers(
-            &self.latest_controllers,
+            &self.latest_xr_input,
             transform,
             hit_distance,
             self.active_world.interaction.pick_range() as f32,
@@ -1338,8 +1330,7 @@ impl McloneSceneHost {
         let transform =
             XrStageToWorld::from_tracking_origin(origin, self.active_world.camera.snapshot())
                 .ok()?;
-        let (ray_origin, ray_direction) =
-            xr_controller_interaction_ray_from_controllers(&self.latest_controllers, transform)?;
+        let (ray_origin, ray_direction) = self.current_xr_interaction_ray(transform)?;
         self.active_world.interaction.target_block(
             runtime.client(),
             vec3d_from_glam(ray_origin),
@@ -1350,5 +1341,13 @@ impl McloneSceneHost {
     pub(crate) fn current_xr_selection_outline(&self) -> Option<SelectionOutline> {
         self.current_xr_block_interaction_target()
             .map(|target| SelectionOutline::new(target.outline_boxes))
+    }
+
+    fn current_xr_interaction_ray(&self, transform: XrStageToWorld) -> Option<(Vec3, Vec3)> {
+        xr_interaction_ray_with_head_fallback(
+            &self.latest_xr_input,
+            transform,
+            self.latest_xr_head_gaze_stage,
+        )
     }
 }

@@ -8,12 +8,12 @@ text prompt foundations implemented as of 2026-07-22. Desktop flat now polls
 ordinary controllers through GilRs and browser Rust polls the W3C standard
 Gamepad mapping near its animation-frame boundary. Flat Android now routes a
 shared source-aware Java/Rust collector through the semantic scene input path;
-Android XR retains the same ordinary-controller facts for the pending tracked
-action convergence. Ordinary-gamepad XR adoption remains active work. This
-topic owns the durable all-target
-controller direction across desktop flat, web, flat Android, desktop XR,
-Android XR, offscreen/test hosts, Steam Deck, and a future native Steam Input
-integration. Tactical
+desktop and Android XR now merge the same ordinary-controller facts with
+semantic OpenXR actions. Tracked poses and XR-only mechanics remain typed
+extensions, while pose-less Attack/Use use a shared head-gaze fallback. This
+topic owns the durable all-target controller direction across desktop flat,
+web, flat Android, desktop XR, Android XR, offscreen/test hosts, Steam Deck,
+and a future native Steam Input integration. Tactical
 [`098`](../tactical/098-flat-input-capability-convergence.md) remains the
 bounded execution record for the existing flat-input slices.
 [`Tactical 215`](../tactical/215-preliminary-couch-readiness.md) owns the
@@ -115,18 +115,19 @@ source seam, but not yet the complete semantic or physical-input contract:
   both Android packages receive source-aware standard controller events through
   one shared Java/JNI bridge and pure Rust collector. All emit canonical
   snapshots and preserve session-local hotplug identity. Desktop, browser, and
-  flat Android route them semantically; Android XR retains its collected facts
-  for the pending XR action merge.
+  flat Android route them semantically; desktop and Android XR merge the same
+  ordinary semantics with their OpenXR action frames.
 - The legacy `GamepadInputAdapter` remains one controller at a time and still
-  projects right-stick state directly into `FlatInputFrame`. The new semantic
-  session fixes those constraints, but shipping hosts have not adopted it yet;
-  participant-scoped routing also remains downstream couch work.
+  projects right-stick state directly into `FlatInputFrame`. It is retained as
+  compatibility/test surface; shipping hosts use the semantic session.
+  Participant-scoped routing remains downstream couch work.
 - `MonoInteractiveInputRouter` now owns keyboard/mouse and semantic controller
   state, selects controller context from the real scene UI state, and composes
   continuous controller movement/look through shared frame advancement. Touch
   remains a supplemental shared frame. Desktop flat, browser, and flat Android
-  call the controller route; XR adoption remains open. Hosts still retain their
-  mechanical capability/activity collectors while semantic policy stays shared.
+  call the mono controller route; both XR apps use the corresponding shared XR
+  router and action combiner. Hosts retain mechanical capability/activity
+  collectors while semantic policy stays shared.
 - `mclone-ui::GuiNavigation` now owns directional traversal, confirm/back,
   page navigation, disabled-widget skipping, slider adjustment, and focus
   visuals. The scene maps semantic menu actions through it, and deterministic
@@ -138,10 +139,12 @@ source seam, but not yet the complete semantic or physical-input contract:
   PlayStation-like, Nintendo-like, Steam/Deck-like, generic, or unknown layout
   families. Exact vendor glyph assets and backend action-origin glyphs remain
   future work; text fallback is the supported foundation.
-- `XrControllerSnapshot` is correctly host-neutral, but it combines spatial
-  tracking with physically named controls such as `a_pressed`, `b_pressed`,
-  `y_pressed`, trigger, squeeze, and thumbstick. The OpenXR host similarly
-  creates physically named actions and the scene later assigns their meaning.
+- `XrInputFrame` now separates `PlayerActionFrame`, tracked aim/grip poses, and
+  XR-specific analog extensions. OpenXR application actions are semantic;
+  physical controls exist only in interaction-profile bindings. Desktop and
+  Android XR merge ordinary gamepad actions through one stateful aggregate,
+  preserving correct edges when two sources overlap. Remaining XR work is
+  real headset/gamepad feel and regression acceptance, not another input path.
 
 These are foundation gaps, not reasons to add platform-local gameplay maps.
 
@@ -362,11 +365,10 @@ Own only:
 | Android XR | Same Android collector beside OpenXR | ordinary snapshot plus tracked XR input |
 | Offscreen/test | scripted snapshots or semantic frames | exact shared resolver/router |
 
-As of 2026-07-22, desktop flat, Web/WASM, and flat Android route these collectors
-through the shared scene input owner. Android XR collects the same ordinary
-controller facts but deliberately routes them during Slice 6 so ordinary and
-tracked sources converge in one change. Desktop XR adopts the same native
-collector in that slice.
+As of 2026-07-22, desktop flat, Web/WASM, flat Android, desktop XR, and Android
+XR route these collectors through shared scene input owners. Both XR hosts
+combine ordinary actions with semantic OpenXR actions while retaining tracked
+pose and XR-specific extensions separately.
 
 ### Desktop and Steam Deck
 
@@ -377,9 +379,9 @@ Steam through `SDL_GAMECONTROLLERCONFIG`. It explicitly does not support
 Android.
 
 Desktop flat and desktop XR are in the same native app. The app-local GilRs
-collector now serves desktop flat without adding GilRs to `mclone-input`;
-desktop XR consumption remains paired with semantic tracked-action convergence.
-Steam Deck is the ordinary Linux path, not a separate engine target.
+collector serves both without adding GilRs to `mclone-input`; desktop XR merges
+its semantic frame beside OpenXR before shared scene application. Steam Deck
+is the ordinary Linux path, not a separate engine target.
 
 ### Web
 
@@ -423,7 +425,7 @@ policy must not move into the backend.
 
 ## XR Convergence
 
-OpenXR and ordinary gamepads should share semantic actions while preserving a
+OpenXR and ordinary gamepads share semantic actions while preserving a
 separate tracked-data channel.
 
 The target neutral shape is conceptually:
@@ -446,23 +448,24 @@ struct XrInputFrame {
 `XrSpecificInput` retains teleport, hand-push, thruster, and comfort-specific
 state that has no ordinary flat-gamepad meaning.
 
-`mclone-xr-host::OpenXrControllerActions` should migrate from physically named
-application actions such as `right_a_click` and `left_y_click` toward semantic
-actions such as Jump, Sprint, Move, Turn, Attack, Use, Menu, and UI Select.
-OpenXR suggested interaction-profile bindings then decide which physical
-control supplies each action. This follows OpenXR's own action model and makes
-the common action frame the natural boundary rather than an emulated gamepad.
+`mclone-xr-host::OpenXrControllerActions` creates semantic application actions
+such as Jump, Sprint, Move, Turn, Attack, Use, Menu, and block palette. OpenXR
+suggested interaction-profile bindings decide which physical control supplies
+each action. A shared assembler owns dead zones, trigger hysteresis, edges, and
+lifecycle re-arming rather than exposing physical button names to the scene.
 
 Desktop and Android XR continue to call the one shared scene frame path. The
 OpenXR host still owns action synchronization and space location; the scene
 still owns locomotion, comfort, UI, and gameplay meaning.
 
 An ordinary gamepad used in XR supplies actions but no tracked pose. Movement,
-turning, jump, sprint, pause, and focused menu navigation work normally. Attack
-and use fall back to a scene-owned head-gaze/crosshair ray. When a tracked ray
-is available, the scene continues to prefer the relevant tracked interaction
-source. Hand-push, thruster, and tracked teleport remain unavailable to an
-ordinary gamepad unless they receive a deliberate non-spatial alternative.
+turning, jump, sprint, pause, and focused menu navigation route normally.
+Attack and use fall back to a scene-owned head-gaze ray. When a tracked ray is
+available, the scene prefers it. Hand-push, thruster, and tracked teleport
+remain unavailable to an ordinary gamepad unless they receive a deliberate
+non-spatial alternative. Aggregate edges are derived after tracked and ordinary
+held state is combined, so releasing one device cannot cancel another device's
+continuing hold.
 
 ## Steam Input Direction
 
@@ -547,18 +550,18 @@ standard snapshot or make the shared gameplay path conditional on a vendor.
    traversal, repeat policy, and action/layout-based prompts. Prove every
    non-text menu with scripted controller input.
 4. **Synthetic and desktop proof.** Canonical scripted snapshots and the GilRs
-   desktop-flat collector are implemented. Desktop XR consumption and physical
-   desktop/Steam Deck validation remain open.
+   desktop-flat/XR collector are implemented. Physical desktop/Steam Deck
+   validation remains open.
 5. **Browser adoption.** Implemented in browser Rust with standard-mapping
    mocks, live capability/activity, and domain-blind TypeScript. Physical
    browser/controller validation remains open.
 6. **Android adoption.** The source-aware bridge, shared collector, flat scene
-   route, both APK builds, and AVD regression proof are implemented. Android XR
-   retains ordinary snapshots for step 7. Wired and wireless real-device
-   validation remains open rather than relying on AVD input injection.
-7. **XR action convergence.** Convert OpenXR application actions to semantic
-   action state plus tracked extensions, preserve existing tracked-controller
-   behavior, and prove ordinary gamepad use inside both XR targets.
+   route, both APK builds, AVD regression proof, and Android XR semantic route
+   are implemented. Wired and wireless real-device validation remains open
+   rather than relying on AVD input injection.
+7. **XR action convergence.** Implemented: OpenXR application actions produce
+   semantic action state plus typed tracked/XR extensions, both XR hosts accept
+   ordinary gamepad actions, and the shared scene owns head-gaze fallback.
 8. **Preferences and rebinding.** Persist controller sensitivity, inversion,
    dead zones, layout override, preferred input, and schema-versioned bindings
    through shared preference codecs and platform storage executors.
@@ -570,11 +573,10 @@ standard snapshot or make the shared gameplay path conditional on a vendor.
    introducing a controller-local player model.
 
 Tactical 215 completed source identity/descriptor, canonical snapshots, and
-bounded scripted assignment. Tactical 216 Slice 1 completed semantic
-per-source action state, look-rate semantics, input contexts, controller
-navigation repeat, lifecycle clearing, and controller-to-controller
-arbitration. Shared scene adoption, cross-class mixing, and UI traversal remain
-before a physical collector.
+bounded scripted assignment. Tactical 216 Slices 1–6 completed semantic input,
+shared scene and UI routing, desktop/browser/Android collectors, and XR action
+convergence. Preferences, rebinding, neutral haptics, closeout validation, and
+the recorded real-device ledger remain.
 
 Do not wire a platform backend before Slices 1–3 provide the complete shared
 gameplay and UI destination. Otherwise the first platform will accidentally
@@ -667,7 +669,7 @@ layouts require device testing.
   — semantic contexts/actions, per-source reduction, look-rate projection,
   hysteresis, navigation repeat, lifecycle clearing, and arbitration.
 - [`../../native/crates/mclone-scene/src/interactive_input.rs`](../../native/crates/mclone-scene/src/interactive_input.rs)
-  — shared mono input/context/action router.
+  — shared mono input/context/action router and ordinary-gamepad XR mixer.
 - [`../../native/crates/mclone-scene/src/locomotion.rs`](../../native/crates/mclone-scene/src/locomotion.rs)
   and [`../../native/crates/mclone-scene/src/ui_panels.rs`](../../native/crates/mclone-scene/src/ui_panels.rs)
   — current XR controller interpretation, locomotion, interactions, and

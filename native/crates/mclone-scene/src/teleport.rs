@@ -27,7 +27,7 @@ pub(crate) fn xr_blink_teleport_config() -> TeleportConfig {
 
 pub(crate) fn xr_blink_teleport_disabled_frame(
     travel_assist_mode: GameTravelAssistMode,
-    _controllers: &[XrControllerSnapshot],
+    _input: &XrInputFrame,
 ) -> Option<XrBlinkTeleportFrame> {
     (travel_assist_mode != GameTravelAssistMode::Blink).then_some(XrBlinkTeleportFrame {
         suppress_left_stick_movement: false,
@@ -36,11 +36,12 @@ pub(crate) fn xr_blink_teleport_disabled_frame(
 
 pub(crate) fn xr_blink_teleport_intent(
     camera: &EngineCameraController,
-    controllers: &[XrControllerSnapshot],
+    input: &XrInputFrame,
     transform: XrStageToWorld,
     target_yaw_degrees: f64,
 ) -> Option<TeleportIntent> {
-    let controller = controllers
+    let controller = input
+        .tracked
         .iter()
         .find(|controller| controller.hand == XrHand::Left)?;
     let aim_origin = transform.transform_position(controller.aim_position?);
@@ -234,24 +235,23 @@ pub(crate) fn horizontal_forward_from_player_yaw_degrees(yaw_degrees: f64) -> Ve
 impl McloneSceneHost {
     pub(crate) fn update_xr_blink_teleport(
         &mut self,
-        controllers: &[XrControllerSnapshot],
+        input: &XrInputFrame,
         views: &[XrView],
         transform: XrStageToWorld,
     ) -> Result<XrBlinkTeleportFrame> {
-        if let Some(frame) = xr_blink_teleport_disabled_frame(self.travel_assist_mode, controllers)
-        {
+        if let Some(frame) = xr_blink_teleport_disabled_frame(self.travel_assist_mode, input) {
             self.clear_xr_blink_teleport();
             return Ok(frame);
         }
 
-        let left_axis = xr_left_stick_raw_axis(controllers);
+        let left_axis = xr_left_stick_raw_axis(input);
         let left_axis_active = left_axis.length() > XR_JOYPAD_DEAD_ZONE;
-        let blink_engaged = xr_left_stick_blink_engaged(controllers);
+        let blink_engaged = xr_left_stick_blink_engaged(input);
         if blink_engaged {
             if !self.blink_teleport.active {
                 self.begin_xr_blink_teleport(views, transform);
             }
-            self.submit_xr_blink_teleport_request(controllers, transform)?;
+            self.submit_xr_blink_teleport_request(input, transform)?;
             self.poll_xr_blink_teleport_worker();
             return Ok(XrBlinkTeleportFrame {
                 suppress_left_stick_movement: true,
@@ -311,17 +311,17 @@ impl McloneSceneHost {
 
     pub(crate) fn submit_xr_blink_teleport_request(
         &mut self,
-        controllers: &[XrControllerSnapshot],
+        input: &XrInputFrame,
         transform: XrStageToWorld,
     ) -> Result<bool> {
-        let target_yaw_degrees = self.xr_blink_teleport_target_yaw_degrees(controllers);
+        let target_yaw_degrees = self.xr_blink_teleport_target_yaw_degrees(input);
         self.blink_teleport.target_yaw_degrees = target_yaw_degrees;
         if let Some(preview) = self.blink_teleport.preview.as_mut() {
             preview.target_yaw_degrees = target_yaw_degrees;
         }
         let Some(intent) = xr_blink_teleport_intent(
             &self.active_world.camera,
-            controllers,
+            input,
             transform,
             target_yaw_degrees,
         ) else {
@@ -455,17 +455,14 @@ impl McloneSceneHost {
         Ok(())
     }
 
-    pub(crate) fn xr_blink_teleport_target_yaw_degrees(
-        &mut self,
-        controllers: &[XrControllerSnapshot],
-    ) -> f64 {
+    pub(crate) fn xr_blink_teleport_target_yaw_degrees(&mut self, input: &XrInputFrame) -> f64 {
         let base_yaw_degrees = self.blink_teleport.base_yaw_degrees;
         let previous_target_yaw_degrees = self.blink_teleport.target_yaw_degrees;
         xr_blink_teleport_target_yaw_degrees_from_stick(
             base_yaw_degrees,
             previous_target_yaw_degrees,
             &mut self.blink_teleport.activation_left_stick_angle_radians,
-            xr_left_stick_raw_axis(controllers),
+            xr_left_stick_raw_axis(input),
         )
     }
 

@@ -96,16 +96,16 @@ mod android {
     };
     use mclone_render_session::EngineCameraSnapshot;
     use mclone_scene::{
-        MAX_XR_RENDER_DISTANCE, McloneSceneHost, McloneSceneHostOptions, XrDebugUiScreen,
-        XrFrameLocomotionAutomation, XrFramePipelineHostTiming, XrSceneFrameTarget,
-        XrStartupViewPose, XrTerrainEyeTarget, XrTerrainMultiviewTarget, XrUnderwaterDetectionMode,
-        record_xr_frame_pipeline, record_xr_frame_pipeline_with_peer_threads,
-        single_view_host_options, xr_frame_pipeline_accounting_config,
-        xr_frame_pipeline_peer_threads,
+        MAX_XR_RENDER_DISTANCE, McloneSceneHost, McloneSceneHostOptions, XrControllerInputRouter,
+        XrDebugUiScreen, XrFrameLocomotionAutomation, XrFramePipelineHostTiming,
+        XrSceneFrameTarget, XrStartupViewPose, XrTerrainEyeTarget, XrTerrainMultiviewTarget,
+        XrUnderwaterDetectionMode, record_xr_frame_pipeline,
+        record_xr_frame_pipeline_with_peer_threads, single_view_host_options,
+        xr_frame_pipeline_accounting_config, xr_frame_pipeline_peer_threads,
     };
     use mclone_xr_host::{
-        OpenXrControllerActions, OpenXrHostEvent, PRIMARY_STEREO_VIEW_TYPE, XrControllerSnapshot,
-        XrDisplayRefreshSnapshot, XrFrameStats,
+        OpenXrControllerActions, OpenXrHostEvent, PRIMARY_STEREO_VIEW_TYPE,
+        XrDisplayRefreshSnapshot, XrFrameStats, XrInputFrame,
     };
     use openxr as xr;
 
@@ -1851,7 +1851,7 @@ mod android {
                 stereo_target.texture_count(),
                 stereo_target.array_size()
             );
-            let controller_actions = OpenXrControllerActions::create_with_binding_logger(
+            let mut controller_actions = OpenXrControllerActions::create_with_binding_logger(
                 graphics.session.instance(),
                 &graphics.session,
                 |profile, err| {
@@ -1899,7 +1899,7 @@ mod android {
                     depth: &mut multiview_depth,
                 },
                 &mut terrain,
-                &controller_actions,
+                &mut controller_actions,
                 session_smoke,
                 perf_seconds,
                 perf_flight,
@@ -1956,7 +1956,7 @@ mod android {
             left_eye.texture_count(),
             right_eye.texture_count()
         );
-        let controller_actions = OpenXrControllerActions::create_with_binding_logger(
+        let mut controller_actions = OpenXrControllerActions::create_with_binding_logger(
             graphics.session.instance(),
             &graphics.session,
             |profile, err| {
@@ -2019,7 +2019,7 @@ mod android {
                 overlap_runtime_prefetch,
             },
             &mut terrain,
-            &controller_actions,
+            &mut controller_actions,
             session_smoke,
             perf_seconds,
             perf_flight,
@@ -3294,7 +3294,7 @@ mod android {
         environment_blend_mode: xr::EnvironmentBlendMode,
         frame_targets: AndroidXrFrameTargets<'_>,
         terrain: &mut AndroidXrTerrainState,
-        controller_actions: &OpenXrControllerActions,
+        controller_actions: &mut OpenXrControllerActions,
         session_smoke: Option<AndroidXrSessionSmoke>,
         perf_seconds: Option<u64>,
         perf_flight: Option<AndroidXrPerfFlight>,
@@ -3404,6 +3404,8 @@ mod android {
             thread_cpu_start_ms: None,
             stats_before_frame: XrFrameStats::default(),
             ordinary_gamepad: AndroidControllerCollector::new(),
+            ordinary_gamepad_started_at: Instant::now(),
+            ordinary_gamepad_input: XrControllerInputRouter::new(),
         };
         let mut driver = mclone_xr_host::OpenXrFrameDriver::new(
             &graphics.session,
@@ -3524,7 +3526,7 @@ mod android {
         stage: &'a xr::Space,
         frame_targets: AndroidXrFrameTargets<'a>,
         terrain: &'a mut AndroidXrTerrainState,
-        controller_actions: &'a OpenXrControllerActions,
+        controller_actions: &'a mut OpenXrControllerActions,
         session_smoke: Option<AndroidXrSessionSmoke>,
         fixed_render_view_pose: Option<XrStartupViewPose>,
         render_path: AndroidXrRenderPath,
@@ -3542,6 +3544,8 @@ mod android {
         thread_cpu_start_ms: Option<f64>,
         stats_before_frame: XrFrameStats,
         ordinary_gamepad: AndroidControllerCollector,
+        ordinary_gamepad_started_at: Instant,
+        ordinary_gamepad_input: XrControllerInputRouter,
     }
 
     impl mclone_xr_host::OpenXrFrameLoopHandler<graphics_vulkan::AppGraphics>
@@ -3558,6 +3562,7 @@ mod android {
                 .handle_events(drain_android_controller_events());
             if lifecycle.paused {
                 self.ordinary_gamepad.clear_controls_for_lifecycle();
+                self.ordinary_gamepad_input.clear_transient_input();
                 flush_terrain_on_android_pause(self.terrain);
             }
             if lifecycle.keep_running {
@@ -3573,6 +3578,17 @@ mod android {
         }
 
         fn on_openxr_event(&mut self, event: OpenXrHostEvent) {
+            if matches!(
+                event,
+                OpenXrHostEvent::SessionStateChanged(
+                    xr::SessionState::STOPPING
+                        | xr::SessionState::LOSS_PENDING
+                        | xr::SessionState::EXITING
+                )
+            ) {
+                self.controller_actions.clear_transient_input();
+                self.ordinary_gamepad_input.clear_transient_input();
+            }
             match event {
                 OpenXrHostEvent::EventsLost(_) => log::warn!("{event}"),
                 _ => log::info!("{event}"),
@@ -3613,18 +3629,36 @@ mod android {
             frame: &mut mclone_xr_host::OpenXrRenderFrame<'_, graphics_vulkan::AppGraphics>,
         ) -> Result<Self::RenderOutput> {
             let controller_poll_start = Instant::now();
-            let controllers = self.controller_actions.poll(
+            let input = self.controller_actions.poll(
                 frame.session(),
                 self.stage,
                 frame.predicted_display_time(),
             );
             self.frame_timing.controller_poll_ms = elapsed_ms(controller_poll_start);
-            let controllers = controllers?;
-            if !self.logged_controller_activity && !controllers.is_empty() {
+            let mut input = input?;
+            let ordinary_poll = self
+                .ordinary_gamepad
+                .poll(self.ordinary_gamepad_started_at.elapsed());
+            for source_id in ordinary_poll.disconnected {
+                self.ordinary_gamepad_input.disconnect_source(source_id)?;
+            }
+            for (source_id, descriptor) in ordinary_poll.connected {
+                self.ordinary_gamepad_input
+                    .connect_source(source_id, descriptor);
+            }
+            self.ordinary_gamepad_input.route_samples(
+                self.terrain,
+                ordinary_poll.sample_time,
+                ordinary_poll.samples,
+                self.device,
+                self.queue,
+            )?;
+            self.ordinary_gamepad_input.merge_into_frame(&mut input);
+            if !self.logged_controller_activity && !input.tracked.is_empty() {
                 self.logged_controller_activity = true;
                 log::info!(
                     "MCLONE_ANDROID_XR_CONTROLLERS_ACTIVE count={}",
-                    controllers.len()
+                    input.tracked.len()
                 );
             }
 
@@ -3642,7 +3676,7 @@ mod android {
                     left_eye,
                     right_eye,
                     self.terrain,
-                    &controllers,
+                    &input,
                     self.perf_probe.automation(),
                     self.fixed_render_view_pose,
                 ),
@@ -3657,7 +3691,7 @@ mod android {
                     stereo_target,
                     depth,
                     self.terrain,
-                    &controllers,
+                    &input,
                     self.perf_probe.automation(),
                     self.fixed_render_view_pose,
                 ),
@@ -6594,7 +6628,7 @@ mod android {
         left_eye: &mut graphics_vulkan::OpenXrEyeState,
         right_eye: &mut graphics_vulkan::OpenXrEyeState,
         terrain: &mut AndroidXrTerrainState,
-        controllers: &[XrControllerSnapshot],
+        input: &XrInputFrame,
         automation: Option<XrFrameLocomotionAutomation>,
         fixed_render_view_pose: Option<XrStartupViewPose>,
     ) -> Result<AndroidXrRenderedFrame> {
@@ -6616,7 +6650,7 @@ mod android {
         ];
         let locomotion_start = Instant::now();
         let locomotion = terrain
-            .apply_frame_locomotion(controllers, scene_views, automation)
+            .apply_frame_locomotion(input, scene_views, automation)
             .context("apply Android XR frame locomotion")?;
         timing.locomotion_ms = elapsed_ms(locomotion_start);
         copy_locomotion_timing(&mut timing, locomotion.timing);
@@ -6687,7 +6721,7 @@ mod android {
         stereo_target: &mut graphics_vulkan::OpenXrStereoState,
         depth: &mut ChunkMultiviewDepthTarget,
         terrain: &mut AndroidXrTerrainState,
-        controllers: &[XrControllerSnapshot],
+        input: &XrInputFrame,
         automation: Option<XrFrameLocomotionAutomation>,
         fixed_render_view_pose: Option<XrStartupViewPose>,
     ) -> Result<AndroidXrRenderedFrame> {
@@ -6709,7 +6743,7 @@ mod android {
         ];
         let locomotion_start = Instant::now();
         let locomotion = terrain
-            .apply_frame_locomotion(controllers, scene_views, automation)
+            .apply_frame_locomotion(input, scene_views, automation)
             .context("apply Android XR frame locomotion")?;
         timing.locomotion_ms = elapsed_ms(locomotion_start);
         copy_locomotion_timing(&mut timing, locomotion.timing);
