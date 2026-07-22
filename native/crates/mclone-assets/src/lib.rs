@@ -22,12 +22,13 @@ pub use block_registry::{
 };
 pub use figure::{
     ActorFigureId, CHICKEN_FIGURE_ID, CHICKEN_FIGURE_PATH, DEFAULT_PLAYER_FIGURE_ID,
-    DEFAULT_PLAYER_FIGURE_PATH, FIRST_PARTY_ACTOR_FIGURE_IDS, FigureAsciiTexture, FigureAsset,
-    FigureClip, FigureClipContact, FigureClipKey, FigureClipLocomotion, FigureClipRole,
-    FigureClipTransform, FigureFace, FigureJoint, FigureMaterial, FigurePart, FigurePrimitive,
-    UPRIGHT_BEAR_FIGURE_ID, UPRIGHT_BEAR_FIGURE_PATH, actor_figure_path, chicken_figure_id,
-    chicken_figure_path, default_player_figure_id, default_player_figure_path, load_figure_asset,
-    upright_bear_figure_id, upright_bear_figure_path,
+    DEFAULT_PLAYER_FIGURE_PATH, FIRST_PARTY_ACTOR_FIGURE_IDS, FigureAlphaCoverage, FigureAlphaMode,
+    FigureAsciiTexture, FigureAsset, FigureClip, FigureClipContact, FigureClipKey,
+    FigureClipLocomotion, FigureClipRole, FigureClipTransform, FigureFace, FigureJoint,
+    FigureMaterial, FigurePart, FigurePrimitive, UPRIGHT_BEAR_FIGURE_ID, UPRIGHT_BEAR_FIGURE_PATH,
+    actor_figure_path, chicken_figure_id, chicken_figure_path, default_player_figure_id,
+    default_player_figure_path, load_figure_asset, upright_bear_figure_id,
+    upright_bear_figure_path,
 };
 pub use first_party::{
     FIRST_PARTY_AUDIO_POLICY_PATH, FIRST_PARTY_MISSING_REGISTRY_PATH,
@@ -52,8 +53,8 @@ pub use prepared_figure::{
     PreparedFigureAtlas, PreparedFigureBounds, PreparedFigureClip, PreparedFigureClipContact,
     PreparedFigureClipKey, PreparedFigureClipLocomotion, PreparedFigureDiagnostics,
     PreparedFigureDrawRange, PreparedFigurePart, PreparedFigurePartRotationOverride,
-    PreparedFigurePoseSample, PreparedFigurePrimitiveKind, PreparedFigureVertex,
-    evaluate_prepared_figure_clip_into,
+    PreparedFigurePass, PreparedFigurePassRange, PreparedFigurePoseSample,
+    PreparedFigurePrimitiveKind, PreparedFigureVertex, evaluate_prepared_figure_clip_into,
     evaluate_prepared_figure_clip_with_part_rotation_overrides_into,
     evaluate_prepared_figure_rest_pose_into, load_prepared_figure, prepare_figure_asset,
 };

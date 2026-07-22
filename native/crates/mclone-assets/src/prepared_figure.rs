@@ -5,16 +5,17 @@ use std::fmt;
 use glam::{EulerRot, Mat3, Mat4, Quat, Vec3};
 
 use crate::{
-    AssetError, AssetPath, AssetResult, AssetSource, FigureAsset, FigureClipRole, FigurePart,
+    AssetError, AssetPath, AssetResult, AssetSource, FigureAlphaCoverage, FigureAlphaMode,
+    FigureAsset, FigureClipRole, FigurePart,
 };
 
-pub const PREPARED_FIGURE_COMPILER_ID: &str = "mclone-prepared-figure-cuboid-proxy-v1";
+pub const PREPARED_FIGURE_COMPILER_ID: &str = "mclone-prepared-figure-cuboid-proxy-v2";
 
 const MAX_PARTS: usize = 256;
 const MAX_VERTICES: usize = u16::MAX as usize;
 const MAX_TEXTURE_DIMENSION: usize = 4096;
 const MAX_ATLAS_BYTES: usize = 64 * 1024 * 1024;
-const PREPARED_VERTEX_BYTE_LEN: usize = 52;
+const PREPARED_VERTEX_BYTE_LEN: usize = 56;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedFigure {
@@ -25,6 +26,7 @@ pub struct PreparedFigure {
     pub parts: Vec<PreparedFigurePart>,
     pub evaluation_order: Vec<u16>,
     pub draw_ranges: Vec<PreparedFigureDrawRange>,
+    pub pass_ranges: Vec<PreparedFigurePassRange>,
     pub atlas: PreparedFigureAtlas,
     pub clips: BTreeMap<String, PreparedFigureClip>,
     pub normalization_matrix: [[f32; 4]; 4],
@@ -39,6 +41,7 @@ pub struct PreparedFigureVertex {
     pub uv: [f32; 2],
     pub color: [f32; 4],
     pub part_id: u32,
+    pub alpha_cutoff: f32,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -141,6 +144,33 @@ pub struct PreparedFigureDrawRange {
     pub face: String,
     pub material: Option<String>,
     pub texture: Option<String>,
+    pub pass: PreparedFigurePass,
+    pub first_index: u32,
+    pub index_count: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum PreparedFigurePass {
+    Opaque,
+    MaskThreshold,
+    MaskDither,
+    Blend,
+    Additive,
+}
+
+impl PreparedFigurePass {
+    pub const ALL: [Self; 5] = [
+        Self::Opaque,
+        Self::MaskThreshold,
+        Self::MaskDither,
+        Self::Blend,
+        Self::Additive,
+    ];
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PreparedFigurePassRange {
+    pub pass: PreparedFigurePass,
     pub first_index: u32,
     pub index_count: u32,
 }
@@ -166,6 +196,7 @@ pub struct PreparedFigureDiagnostics {
     pub vertex_count: usize,
     pub index_count: usize,
     pub draw_range_count: usize,
+    pub pass_range_count: usize,
     pub box_primitive_count: usize,
     pub sphere_cuboid_proxy_count: usize,
     pub capsule_cuboid_proxy_count: usize,
@@ -521,8 +552,8 @@ fn prepare_figure_asset_with_crc(
         .collect::<Vec<_>>();
     let clips = prepare_clips(asset, &part_names)?;
 
-    let (atlas, atlas_regions) = build_atlas(asset)?;
-    let materials = material_colors(asset)?;
+    let (atlas, atlas_regions, texture_transparency) = build_atlas(asset)?;
+    let materials = material_properties(asset)?;
     let mut vertices = Vec::with_capacity(asset.parts.len() * 24);
     let mut indices = Vec::with_capacity(asset.parts.len() * 36);
     let mut draw_ranges = Vec::with_capacity(asset.parts.len() * 6);
@@ -534,6 +565,7 @@ fn prepare_figure_asset_with_crc(
             part_index as u16,
             &materials,
             &atlas_regions,
+            &texture_transparency,
             atlas.width,
             atlas.height,
             &mut vertices,
@@ -541,6 +573,7 @@ fn prepare_figure_asset_with_crc(
             &mut draw_ranges,
         )?;
     }
+    let (indices, pass_ranges) = bucket_prepared_indices(indices, &mut draw_ranges);
     if vertices.len() > MAX_VERTICES {
         return Err(FigurePrepareError::new(format!(
             "figure '{}' prepared {} vertices; limit is {}",
@@ -561,6 +594,8 @@ fn prepare_figure_asset_with_crc(
         + atlas.rgba.len()
         + parts.len() * std::mem::size_of::<PreparedFigurePart>()
         + evaluation_order.len() * std::mem::size_of::<u16>()
+        + draw_ranges.len() * std::mem::size_of::<PreparedFigureDrawRange>()
+        + pass_ranges.len() * std::mem::size_of::<PreparedFigurePassRange>()
         + prepared_clip_bytes(&clips);
     let diagnostics = PreparedFigureDiagnostics {
         compiler_id: PREPARED_FIGURE_COMPILER_ID,
@@ -569,6 +604,7 @@ fn prepare_figure_asset_with_crc(
         vertex_count: vertices.len(),
         index_count: indices.len(),
         draw_range_count: draw_ranges.len(),
+        pass_range_count: pass_ranges.len(),
         box_primitive_count: raw_parts
             .iter()
             .filter(|part| part.primitive_kind == PreparedFigurePrimitiveKind::Box)
@@ -597,6 +633,7 @@ fn prepare_figure_asset_with_crc(
         parts,
         evaluation_order,
         draw_ranges,
+        pass_ranges,
         atlas,
         clips,
         normalization_matrix: normalization.to_cols_array_2d(),
@@ -1250,7 +1287,14 @@ struct AtlasRegion {
 
 fn build_atlas(
     asset: &FigureAsset,
-) -> Result<(PreparedFigureAtlas, BTreeMap<String, AtlasRegion>), FigurePrepareError> {
+) -> Result<
+    (
+        PreparedFigureAtlas,
+        BTreeMap<String, AtlasRegion>,
+        BTreeMap<String, bool>,
+    ),
+    FigurePrepareError,
+> {
     let mut texture_names = asset.textures.keys().cloned().collect::<Vec<_>>();
     texture_names.sort();
     let mut widths = BTreeMap::new();
@@ -1286,6 +1330,7 @@ fn build_atlas(
     }
     let mut rgba = vec![255_u8; byte_len];
     let mut regions = BTreeMap::new();
+    let mut texture_transparency = BTreeMap::new();
     let mut cursor_x = 3_usize;
     for name in texture_names {
         let texture = &asset.textures[&name];
@@ -1296,6 +1341,7 @@ fn build_atlas(
             width,
             height,
         };
+        let mut has_transparency = false;
         for (row_index, row) in texture.pixels.iter().enumerate() {
             for (column_index, symbol) in row.chars().enumerate() {
                 let color = texture.palette.get(&symbol.to_string()).ok_or_else(|| {
@@ -1310,6 +1356,7 @@ fn build_atlas(
                         asset.name, name, symbol, message
                     ))
                 })?;
+                has_transparency |= color[3] < 255;
                 set_atlas_pixel(
                     &mut rgba,
                     atlas_width,
@@ -1338,6 +1385,7 @@ fn build_atlas(
             set_atlas_pixel(&mut rgba, atlas_width, x, region.y - 1, top);
             set_atlas_pixel(&mut rgba, atlas_width, x, region.y + height, bottom);
         }
+        texture_transparency.insert(name.clone(), has_transparency);
         regions.insert(name, region);
         cursor_x += width + 2;
     }
@@ -1348,6 +1396,7 @@ fn build_atlas(
             rgba,
         },
         regions,
+        texture_transparency,
     ))
 }
 
@@ -1392,7 +1441,16 @@ fn atlas_pixel(rgba: &[u8], width: usize, x: usize, y: usize) -> [u8; 4] {
     rgba[start..start + 4].try_into().expect("RGBA pixel")
 }
 
-fn material_colors(asset: &FigureAsset) -> Result<HashMap<String, [f32; 4]>, FigurePrepareError> {
+#[derive(Clone, Copy, Debug)]
+struct PreparedMaterial {
+    color: [f32; 4],
+    pass: PreparedFigurePass,
+    alpha_cutoff: f32,
+}
+
+fn material_properties(
+    asset: &FigureAsset,
+) -> Result<HashMap<String, PreparedMaterial>, FigurePrepareError> {
     asset
         .materials
         .iter()
@@ -1403,7 +1461,61 @@ fn material_colors(asset: &FigureAsset) -> Result<HashMap<String, [f32; 4]>, Fig
                     asset.name, name, message
                 ))
             })?;
-            Ok((name.clone(), rgba8_to_float(color)))
+            let alpha_mode = material.alpha_mode.unwrap_or(FigureAlphaMode::Opaque);
+            let opacity = material.opacity.unwrap_or(1.0);
+            if !opacity.is_finite() || !(0.0..=1.0).contains(&opacity) {
+                return Err(FigurePrepareError::new(format!(
+                    "figure '{}' material '{}' opacity must be from 0 through 1",
+                    asset.name, name
+                )));
+            }
+            if alpha_mode == FigureAlphaMode::Opaque && opacity != 1.0 {
+                return Err(FigurePrepareError::new(format!(
+                    "figure '{}' material '{}' opaque alphaMode requires opacity 1",
+                    asset.name, name
+                )));
+            }
+            if material.alpha_cutoff.is_some() && alpha_mode != FigureAlphaMode::Mask {
+                return Err(FigurePrepareError::new(format!(
+                    "figure '{}' material '{}' alphaCutoff requires alphaMode 'mask'",
+                    asset.name, name
+                )));
+            }
+            let alpha_cutoff = material.alpha_cutoff.unwrap_or(0.1);
+            if !alpha_cutoff.is_finite() || !(0.0..=1.0).contains(&alpha_cutoff) {
+                return Err(FigurePrepareError::new(format!(
+                    "figure '{}' material '{}' alphaCutoff must be from 0 through 1",
+                    asset.name, name
+                )));
+            }
+            if material.alpha_coverage.is_some() && alpha_mode != FigureAlphaMode::Mask {
+                return Err(FigurePrepareError::new(format!(
+                    "figure '{}' material '{}' alphaCoverage requires alphaMode 'mask'",
+                    asset.name, name
+                )));
+            }
+            let pass = match alpha_mode {
+                FigureAlphaMode::Opaque => PreparedFigurePass::Opaque,
+                FigureAlphaMode::Mask => match material
+                    .alpha_coverage
+                    .unwrap_or(FigureAlphaCoverage::Threshold)
+                {
+                    FigureAlphaCoverage::Threshold => PreparedFigurePass::MaskThreshold,
+                    FigureAlphaCoverage::Dither => PreparedFigurePass::MaskDither,
+                },
+                FigureAlphaMode::Blend => PreparedFigurePass::Blend,
+                FigureAlphaMode::Additive => PreparedFigurePass::Additive,
+            };
+            let mut color = rgba8_to_float(color);
+            color[3] = opacity;
+            Ok((
+                name.clone(),
+                PreparedMaterial {
+                    color,
+                    pass,
+                    alpha_cutoff,
+                },
+            ))
         })
         .collect()
 }
@@ -1414,8 +1526,9 @@ fn append_prepared_cuboid(
     part: &FigurePart,
     size: Vec3,
     part_id: u16,
-    materials: &HashMap<String, [f32; 4]>,
+    materials: &HashMap<String, PreparedMaterial>,
     atlas_regions: &BTreeMap<String, AtlasRegion>,
+    texture_transparency: &BTreeMap<String, bool>,
     atlas_width: u32,
     atlas_height: u32,
     vertices: &mut Vec<PreparedFigureVertex>,
@@ -1434,15 +1547,23 @@ fn append_prepared_cuboid(
         let texture_name = override_face
             .and_then(|face| face.texture.as_deref())
             .or(part.texture.as_deref());
-        let color = match material_name {
+        let material = match material_name {
             Some(name) => *materials.get(name).ok_or_else(|| {
                 FigurePrepareError::new(format!(
                     "figure '{}' part '{}' references unknown material '{}'",
                     asset.name, part.name, name
                 ))
             })?,
-            None if texture_name.is_some() => [1.0, 1.0, 1.0, 1.0],
-            None => rgba8_to_float(parse_hex_color("#d7dde2").expect("default color")),
+            None if texture_name.is_some() => PreparedMaterial {
+                color: [1.0, 1.0, 1.0, 1.0],
+                pass: PreparedFigurePass::Opaque,
+                alpha_cutoff: 0.1,
+            },
+            None => PreparedMaterial {
+                color: rgba8_to_float(parse_hex_color("#d7dde2").expect("default color")),
+                pass: PreparedFigurePass::Opaque,
+                alpha_cutoff: 0.1,
+            },
         };
         let region = texture_name
             .map(|name| {
@@ -1454,12 +1575,23 @@ fn append_prepared_cuboid(
                 })
             })
             .transpose()?;
+        let pass = if material.pass == PreparedFigurePass::Opaque
+            && texture_name
+                .and_then(|name| texture_transparency.get(name))
+                .copied()
+                .unwrap_or(false)
+        {
+            PreparedFigurePass::MaskThreshold
+        } else {
+            material.pass
+        };
         let first_index = indices.len() as u32;
         append_box_face(
             size,
             face,
             part_id,
-            color,
+            material.color,
+            material.alpha_cutoff,
             region,
             atlas_width,
             atlas_height,
@@ -1471,11 +1603,39 @@ fn append_prepared_cuboid(
             face: face.name().to_owned(),
             material: material_name.map(str::to_owned),
             texture: texture_name.map(str::to_owned),
+            pass,
             first_index,
             index_count: 6,
         });
     }
     Ok(())
+}
+
+fn bucket_prepared_indices(
+    original_indices: Vec<u16>,
+    draw_ranges: &mut [PreparedFigureDrawRange],
+) -> (Vec<u16>, Vec<PreparedFigurePassRange>) {
+    let mut indices = Vec::with_capacity(original_indices.len());
+    let mut pass_ranges = Vec::with_capacity(PreparedFigurePass::ALL.len());
+    for pass in PreparedFigurePass::ALL {
+        let first_index = indices.len() as u32;
+        for range in draw_ranges.iter_mut().filter(|range| range.pass == pass) {
+            let source_start = range.first_index as usize;
+            let source_end = source_start + range.index_count as usize;
+            range.first_index = indices.len() as u32;
+            indices.extend_from_slice(&original_indices[source_start..source_end]);
+        }
+        let index_count = indices.len() as u32 - first_index;
+        if index_count > 0 {
+            pass_ranges.push(PreparedFigurePassRange {
+                pass,
+                first_index,
+                index_count,
+            });
+        }
+    }
+    debug_assert_eq!(indices.len(), original_indices.len());
+    (indices, pass_ranges)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1484,6 +1644,7 @@ fn append_box_face(
     face: BoxFace,
     part_id: u16,
     color: [f32; 4],
+    alpha_cutoff: f32,
     region: Option<AtlasRegion>,
     atlas_width: u32,
     atlas_height: u32,
@@ -1512,6 +1673,7 @@ fn append_box_face(
                 uv: atlas_uv(region, semantic_uv, atlas_width, atlas_height),
                 color,
                 part_id: u32::from(part_id),
+                alpha_cutoff,
             });
         }
     }
@@ -1559,7 +1721,24 @@ fn parse_palette_color(value: &str) -> Result<[u8; 4], String> {
     if value == "transparent" {
         return Ok([0, 0, 0, 0]);
     }
-    parse_hex_color(value)
+    let hex = value
+        .strip_prefix('#')
+        .ok_or_else(|| format!("expected #rrggbb or #rrggbbaa color, got '{}'", value))?;
+    if hex.len() != 6 && hex.len() != 8 {
+        return Err(format!(
+            "expected #rrggbb or #rrggbbaa color, got '{}'",
+            value
+        ));
+    }
+    let red = u8::from_str_radix(&hex[0..2], 16).map_err(|error| error.to_string())?;
+    let green = u8::from_str_radix(&hex[2..4], 16).map_err(|error| error.to_string())?;
+    let blue = u8::from_str_radix(&hex[4..6], 16).map_err(|error| error.to_string())?;
+    let alpha = if hex.len() == 8 {
+        u8::from_str_radix(&hex[6..8], 16).map_err(|error| error.to_string())?
+    } else {
+        255
+    };
+    Ok([red, green, blue, alpha])
 }
 
 fn rgba8_to_float(value: [u8; 4]) -> [f32; 4] {
@@ -1717,6 +1896,14 @@ mod tests {
         assert_eq!(prepared.vertices.len(), 288);
         assert_eq!(prepared.indices.len(), 432);
         assert_eq!(prepared.draw_ranges.len(), 72);
+        assert_eq!(
+            prepared.pass_ranges,
+            vec![PreparedFigurePassRange {
+                pass: PreparedFigurePass::Opaque,
+                first_index: 0,
+                index_count: 432,
+            }]
+        );
         assert_eq!(prepared.atlas.width, 13);
         assert_eq!(prepared.atlas.height, 10);
         assert!((prepared.bounds.min[1] - 0.0).abs() < 1.0e-6);
@@ -1766,36 +1953,123 @@ mod tests {
             [216, 208, 181, 255]
         );
         assert_eq!(atlas_pixel(&prepared.atlas.rgba, 7, 3, 1), [0, 0, 0, 0]);
+        assert_eq!(
+            prepared
+                .draw_ranges
+                .iter()
+                .find(|range| range.texture.as_deref() == Some("ribs"))
+                .unwrap()
+                .pass,
+            PreparedFigurePass::MaskThreshold
+        );
     }
 
     #[test]
-    fn rejects_partial_alpha_palette_colors() {
+    fn prepares_rgba_palettes_and_contiguous_material_passes() {
         let asset: FigureAsset = serde_json::from_value(serde_json::json!({
             "schemaVersion": 1,
             "name": "partial-alpha",
+            "materials": {
+                "opaque": { "color": "#ffffff" },
+                "threshold": {
+                    "color": "#ccddff", "alphaMode": "mask", "alphaCutoff": 0.35
+                },
+                "dither": {
+                    "color": "#bbddff", "alphaMode": "mask", "opacity": 0.5,
+                    "alphaCoverage": "dither"
+                },
+                "blend": { "color": "#aaccff", "alphaMode": "blend", "opacity": 0.4 },
+                "glow": { "color": "#88ccff", "alphaMode": "additive", "opacity": 0.7 }
+            },
             "textures": {
                 "ghost": {
                     "palette": { "g": "#ffffff80" },
                     "pixels": ["g"]
                 }
             },
-            "parts": [{
-                "name": "body",
-                "primitive": {
-                    "kind": "box",
-                    "size": [1, 1, 1],
-                    "faces": { "north": { "texture": "ghost" } }
-                }
-            }],
+            "parts": [
+                { "name": "opaque", "material": "opaque",
+                  "primitive": { "kind": "box", "size": [1, 1, 1] } },
+                { "name": "threshold", "material": "threshold",
+                  "primitive": { "kind": "box", "size": [1, 1, 1] } },
+                { "name": "dither", "material": "dither", "texture": "ghost",
+                  "primitive": { "kind": "box", "size": [1, 1, 1] } },
+                { "name": "blend", "material": "blend",
+                  "primitive": { "kind": "box", "size": [1, 1, 1] } },
+                { "name": "glow", "material": "glow",
+                  "primitive": { "kind": "box", "size": [1, 1, 1] } }
+            ],
             "clips": {}
         }))
         .unwrap();
+        let prepared = prepare_figure_asset(&asset).unwrap();
 
         assert!(
-            prepare_figure_asset(&asset)
-                .unwrap_err()
-                .to_string()
-                .contains("expected #rrggbb color")
+            prepared
+                .atlas
+                .rgba
+                .chunks_exact(4)
+                .any(|pixel| pixel == [255, 255, 255, 128])
+        );
+        assert_eq!(
+            prepared
+                .pass_ranges
+                .iter()
+                .map(|range| (range.pass, range.index_count))
+                .collect::<Vec<_>>(),
+            vec![
+                (PreparedFigurePass::Opaque, 36),
+                (PreparedFigurePass::MaskThreshold, 36),
+                (PreparedFigurePass::MaskDither, 36),
+                (PreparedFigurePass::Blend, 36),
+                (PreparedFigurePass::Additive, 36),
+            ]
+        );
+        assert_eq!(prepared.pass_ranges[0].first_index, 0);
+        assert_eq!(prepared.pass_ranges[4].first_index, 144);
+        assert!(prepared.draw_ranges.windows(2).all(|ranges| {
+            ranges[0].pass != ranges[1].pass
+                || ranges[0].first_index + ranges[0].index_count == ranges[1].first_index
+        }));
+        assert!((prepared.vertices[2 * 24].color[3] - 0.5).abs() < 1.0e-6);
+        assert!((prepared.vertices[24].alpha_cutoff - 0.35).abs() < 1.0e-6);
+    }
+
+    #[test]
+    fn rejects_invalid_material_alpha_combinations() {
+        let invalid = |material: serde_json::Value| {
+            let asset: FigureAsset = serde_json::from_value(serde_json::json!({
+                "schemaVersion": 1,
+                "name": "invalid-alpha",
+                "materials": { "body": material },
+                "parts": [{
+                    "name": "body",
+                    "material": "body",
+                    "primitive": { "kind": "box", "size": [1, 1, 1] }
+                }],
+                "clips": {}
+            }))
+            .unwrap();
+            prepare_figure_asset(&asset).unwrap_err().to_string()
+        };
+
+        assert!(
+            invalid(serde_json::json!({
+                "color": "#ffffff", "alphaMode": "opaque", "opacity": 0.5
+            }))
+            .contains("opaque alphaMode requires opacity 1")
+        );
+        assert!(
+            invalid(serde_json::json!({
+                "color": "#ffffff", "alphaMode": "blend", "alphaCutoff": 0.1
+            }))
+            .contains("alphaCutoff requires alphaMode 'mask'")
+        );
+        assert!(
+            invalid(serde_json::json!({
+                "color": "#ffffff", "alphaMode": "additive", "alphaCoverage": "dither"
+            }))
+            .contains("alphaCoverage requires alphaMode 'mask'")
         );
     }
 

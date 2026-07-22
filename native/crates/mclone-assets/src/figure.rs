@@ -49,6 +49,29 @@ pub struct FigureAsset {
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 pub struct FigureMaterial {
     pub color: String,
+    #[serde(rename = "alphaMode")]
+    pub alpha_mode: Option<FigureAlphaMode>,
+    pub opacity: Option<f32>,
+    #[serde(rename = "alphaCutoff")]
+    pub alpha_cutoff: Option<f32>,
+    #[serde(rename = "alphaCoverage")]
+    pub alpha_coverage: Option<FigureAlphaCoverage>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum FigureAlphaMode {
+    Opaque,
+    Mask,
+    Blend,
+    Additive,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum FigureAlphaCoverage {
+    Threshold,
+    Dither,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
