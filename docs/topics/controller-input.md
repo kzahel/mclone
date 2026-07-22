@@ -112,9 +112,12 @@ source seam, but not yet the complete semantic or physical-input contract:
   projects right-stick state directly into `FlatInputFrame`. The new semantic
   session fixes those constraints, but shipping hosts have not adopted it yet;
   participant-scoped routing also remains downstream couch work.
-- `MonoInteractiveInputRouter` owns the shared keyboard/mouse resolver but
-  receives touch as a supplemental frame and does not own gamepad state.
-  Desktop, Android, and web separately retain capability/preference facts.
+- `MonoInteractiveInputRouter` now owns keyboard/mouse and semantic controller
+  state, selects controller context from the real scene UI state, and composes
+  continuous controller movement/look through shared frame advancement. Touch
+  remains a supplemental shared frame, and no platform collector calls the
+  controller route yet. Desktop, Android, and web still separately retain
+  capability/preference facts.
 - `mclone-ui::GuiKey` currently exposes only Escape and F1. There is no shared
   directional navigation, confirm/back, focus traversal, or deterministic
   controller repeat policy.

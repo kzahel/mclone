@@ -1,5 +1,7 @@
 use std::{
     collections::{BTreeMap, BTreeSet},
+    error::Error,
+    fmt,
     time::Duration,
 };
 
@@ -197,6 +199,21 @@ pub enum ControllerInputError {
     UnknownSource(InputSourceId),
     DuplicateSample(InputSourceId),
 }
+
+impl fmt::Display for ControllerInputError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownSource(source_id) => {
+                write!(formatter, "unknown controller input source {source_id:?}")
+            }
+            Self::DuplicateSample(source_id) => {
+                write!(formatter, "duplicate controller sample for {source_id:?}")
+            }
+        }
+    }
+}
+
+impl Error for ControllerInputError {}
 
 #[derive(Clone, Debug)]
 struct ControllerSourceState {

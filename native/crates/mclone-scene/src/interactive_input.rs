@@ -1,9 +1,11 @@
 use anyhow::Result;
 use mclone_input::{
-    FlatInputAction, FlatInputFrame, KeyboardKey, KeyboardMouseInputAdapter, MouseWheelDirection,
-    PointerButton, TouchLookDelta,
+    ControllerInputError, ControllerInputSession, FlatInputAction, FlatInputFrame, InputContext,
+    InputSourceDescriptor, InputSourceId, KeyboardKey, KeyboardMouseInputAdapter,
+    MouseWheelDirection, PlayerActionFrame, PointerButton, StandardGamepadSnapshot, TouchLookDelta,
 };
 use mclone_ui::{GameHelpParent, GameUiAction, GuiKey, Point};
+use std::time::Duration;
 
 use crate::{
     HostEffects, McloneSceneHost, MonoInputFrameOutcome, MonoUiActionOutcome, MonoWorldActionStatus,
@@ -47,6 +49,8 @@ impl MonoInputDisposition {
 #[derive(Clone, Debug, Default)]
 pub struct MonoInteractiveInputRouter {
     keyboard_mouse: KeyboardMouseInputAdapter,
+    controller: ControllerInputSession,
+    latest_controller_actions: PlayerActionFrame,
 }
 
 impl MonoInteractiveInputRouter {
@@ -56,14 +60,55 @@ impl MonoInteractiveInputRouter {
 
     pub fn clear_transient_input(&mut self) {
         self.keyboard_mouse.clear_held();
+        self.controller.clear_held();
+        self.latest_controller_actions = PlayerActionFrame::default();
     }
 
     pub fn held_frame(&self) -> Option<FlatInputFrame> {
-        self.keyboard_mouse.held_frame()
+        let mut frame = self.keyboard_mouse.held_frame().unwrap_or_default();
+        frame.merge_from(self.latest_controller_actions.to_flat_frame(0.0));
+        (frame != FlatInputFrame::default()).then_some(frame)
     }
 
     pub fn has_continuous_movement_input(&self) -> bool {
         self.keyboard_mouse.has_continuous_movement_input()
+            || self.latest_controller_actions.movement != Default::default()
+            || self.latest_controller_actions.held.iter().any(|action| {
+                matches!(
+                    action,
+                    mclone_input::PlayerAction::Jump
+                        | mclone_input::PlayerAction::Sprint
+                        | mclone_input::PlayerAction::Sneak
+                        | mclone_input::PlayerAction::Descend
+                )
+            })
+    }
+
+    pub fn connect_controller_source(
+        &mut self,
+        source_id: InputSourceId,
+        descriptor: InputSourceDescriptor,
+    ) -> bool {
+        self.controller.connect_source(source_id, descriptor)
+    }
+
+    pub fn disconnect_controller_source(
+        &mut self,
+        source_id: InputSourceId,
+    ) -> std::result::Result<bool, ControllerInputError> {
+        let changed = self.controller.disconnect_source(source_id)?;
+        if self.latest_controller_actions.active_source == Some(source_id) {
+            self.latest_controller_actions = PlayerActionFrame::default();
+        }
+        Ok(changed)
+    }
+
+    pub fn controller_source_count(&self) -> usize {
+        self.controller.source_count()
+    }
+
+    pub fn latest_controller_actions(&self) -> &PlayerActionFrame {
+        &self.latest_controller_actions
     }
 
     pub fn advance_held_frame(
@@ -72,11 +117,72 @@ impl MonoInteractiveInputRouter {
         supplemental: Option<FlatInputFrame>,
         dt_seconds: f64,
     ) -> Result<MonoInputFrameOutcome> {
-        let mut frame = self.held_frame().unwrap_or_default();
+        let mut frame = self.keyboard_mouse.held_frame().unwrap_or_default();
+        frame.merge_from(self.latest_controller_actions.to_flat_frame(dt_seconds));
         if let Some(supplemental) = supplemental {
             frame.merge_from(supplemental);
         }
         host.advance_mono_input_frame(frame, dt_seconds)
+    }
+
+    /// Consume ordinary-controller snapshots at one presentation boundary.
+    /// The scene owns context selection; collectors supply only source IDs and
+    /// normalized physical state.
+    #[allow(clippy::too_many_arguments)]
+    pub fn route_controller_samples<H>(
+        &mut self,
+        host: &mut McloneSceneHost,
+        now: Duration,
+        samples: impl IntoIterator<Item = (InputSourceId, StandardGamepadSnapshot)>,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        effects: &mut H,
+    ) -> Result<MonoInputDisposition>
+    where
+        H: HostEffects,
+    {
+        let context = if host.mono_ui_is_active() {
+            InputContext::Menu
+        } else {
+            InputContext::Gameplay
+        };
+        let actions = self.sample_controller_actions(context, now, samples)?;
+        if context != InputContext::Gameplay {
+            return Ok(MonoInputDisposition {
+                handled: !actions.pressed.is_empty() || !actions.released.is_empty(),
+                ..MonoInputDisposition::default()
+            });
+        }
+        // Continuous movement/look is applied exactly once by
+        // `advance_held_frame`. The immediate route consumes only action edges
+        // (and any already-integrated pointer delta from a future semantic
+        // source), avoiding presentation-rate look being applied twice.
+        let mut frame = actions.to_flat_frame(0.0);
+        frame.forward = false;
+        frame.backward = false;
+        frame.left = false;
+        frame.right = false;
+        frame.movement = Default::default();
+        frame.analog_movement = None;
+        frame.jump = false;
+        frame.sprint = false;
+        frame.sneak = false;
+        frame.descend = false;
+        let disposition = Self::route_resolved_flat_frame(host, frame, device, queue, effects)?;
+        self.clear_if_requested(disposition);
+        Ok(disposition)
+    }
+
+    fn sample_controller_actions(
+        &mut self,
+        context: InputContext,
+        now: Duration,
+        samples: impl IntoIterator<Item = (InputSourceId, StandardGamepadSnapshot)>,
+    ) -> std::result::Result<PlayerActionFrame, ControllerInputError> {
+        self.controller.set_context(context);
+        let actions = self.controller.sample_frame(now, samples)?;
+        self.latest_controller_actions = actions.clone();
+        Ok(actions)
     }
 
     pub fn route_key<H>(
@@ -430,6 +536,10 @@ fn gui_key_from_keyboard_key(key: KeyboardKey) -> Option<GuiKey> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use glam::Vec2;
+    use mclone_input::{
+        InputSourceIdAllocator, StandardGamepadButtonState, StandardGamepadButtons,
+    };
 
     #[test]
     fn gui_keys_are_derived_from_neutral_keyboard_keys() {
@@ -454,6 +564,64 @@ mod tests {
 
         router.clear_transient_input();
         assert!(!router.has_continuous_movement_input());
+        assert!(router.held_frame().is_none());
+    }
+
+    #[test]
+    fn router_owns_shared_controller_state_and_context() {
+        let mut allocator = InputSourceIdAllocator::new();
+        let source_id = allocator.allocate().expect("source");
+        let mut router = MonoInteractiveInputRouter::new();
+        assert!(router.connect_controller_source(
+            source_id,
+            InputSourceDescriptor::scripted_gamepad("scene test")
+        ));
+        let gameplay = router
+            .sample_controller_actions(
+                InputContext::Gameplay,
+                Duration::ZERO,
+                [(
+                    source_id,
+                    StandardGamepadSnapshot {
+                        left_stick: Vec2::new(-1.0, 0.5),
+                        buttons: StandardGamepadButtons {
+                            south: StandardGamepadButtonState::pressed(),
+                            ..StandardGamepadButtons::default()
+                        },
+                        ..StandardGamepadSnapshot::default()
+                    },
+                )],
+            )
+            .expect("gameplay controller sample");
+        assert_eq!(gameplay.active_source, Some(source_id));
+        assert!(gameplay.pressed.contains(&mclone_input::PlayerAction::Jump));
+        let held = router.held_frame().expect("controller held frame");
+        assert!(held.jump);
+        assert!(held.movement.left > 0.0);
+
+        let menu = router
+            .sample_controller_actions(
+                InputContext::Menu,
+                Duration::from_millis(1),
+                [(
+                    source_id,
+                    StandardGamepadSnapshot {
+                        buttons: StandardGamepadButtons {
+                            dpad_down: StandardGamepadButtonState::pressed(),
+                            ..StandardGamepadButtons::default()
+                        },
+                        ..StandardGamepadSnapshot::default()
+                    },
+                )],
+            )
+            .expect("menu controller sample");
+        assert!(
+            menu.pressed
+                .contains(&mclone_input::PlayerAction::UiNavigateDown)
+        );
+        assert!(!router.has_continuous_movement_input());
+
+        router.clear_transient_input();
         assert!(router.held_frame().is_none());
     }
 }

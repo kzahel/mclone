@@ -226,6 +226,33 @@ trigger hysteresis, context-change non-replay, monotonic navigation repeat,
 meaningful-source arbitration, and disconnect release generation. Shipping
 hosts do not consume this session yet; Slice 2 owns adoption.
 
+### Slice 2a — shared scene router adoption
+
+Implemented on 2026-07-22. `MonoInteractiveInputRouter` now owns the semantic
+controller session beside keyboard/mouse held state. It exposes neutral source
+connect/disconnect/sample entry points, selects Gameplay or Menu from the real
+scene UI state, retains the latest semantic frame, composes controller movement
+with keyboard/touch in the existing shared held-frame advance, and clears all
+held device classes through one transient/lifecycle path.
+
+Controller action edges route through the existing shared gameplay/UI dispatch
+boundary. Continuous movement and look rate apply only during shared frame
+advancement; the immediate edge route explicitly excludes them, preventing
+double turning. A focused router trace proves gameplay movement/Jump, a context
+transition, menu navigation, and exhaustive clearing through one source.
+
+Focused evidence:
+
+```text
+cargo test -p mclone-scene interactive_input::tests: 3 passed
+cargo test -p mclone-input -p mclone-scene: 34 + 128 passed
+cargo check -p mclone-scene --target wasm32-unknown-unknown: passed
+```
+
+No platform collector calls the new route yet. Controller UI actions are
+recognized in Menu context but intentionally await Slice 3's shared focus and
+activation implementation before product adoption.
+
 ## Completion Bar
 
 - Every product host consumes one shared semantic action and UI-navigation
