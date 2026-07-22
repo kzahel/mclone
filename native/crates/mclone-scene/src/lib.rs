@@ -3814,6 +3814,7 @@ impl McloneSceneHost {
                 let snapshot = client.entity(entity_id)?;
                 Some(EmbeddedWorldPreviewActorObservation {
                     entity_id,
+                    persistent_id: snapshot.persistent_id,
                     kind: snapshot.kind,
                     source_feet_position: snapshot.position,
                     composition_feet_position: context.source_to_composition(snapshot.position),
@@ -4479,6 +4480,7 @@ mod tests {
     fn authoritative_entity_motion_requires_one_stable_id_and_changed_position() {
         let snapshot = |id, position, age_ticks| EntitySnapshot {
             id: mclone_protocol::EntityId(id),
+            persistent_id: mclone_protocol::EntityPersistentId::new(0, id),
             kind: mclone_protocol::EntityKind::Cow,
             item_stack: None,
             position,

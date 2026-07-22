@@ -171,6 +171,7 @@ mod tests {
     fn item_state() -> ServerEntityState {
         ServerEntityState {
             id: EntityId(1),
+            persistent_id: mclone_protocol::EntityPersistentId::new(0, 1),
             kind: EntityKind::Item,
             item_stack: Some(ItemStackSnapshot {
                 kind: ItemKind::Egg,

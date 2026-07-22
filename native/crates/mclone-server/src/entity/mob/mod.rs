@@ -987,6 +987,7 @@ mod tests {
         let mut mob = MobRuntimeState::from_spawn(EntityId(1), metadata, true, 0.0);
         let mut entity = ServerEntityState::from_metadata(
             EntityId(1),
+            mclone_protocol::EntityPersistentId::new(0, 1),
             metadata,
             Vec3d::new(0.5, 64.0, 0.5),
             0.0,
@@ -1010,6 +1011,7 @@ mod tests {
         let mut mob = MobRuntimeState::from_spawn(EntityId(1), metadata, true, 0.0);
         let mut entity = ServerEntityState::from_metadata(
             EntityId(1),
+            mclone_protocol::EntityPersistentId::new(0, 1),
             metadata,
             Vec3d::new(0.5, 64.0, 0.5),
             0.0,
@@ -1046,6 +1048,7 @@ mod tests {
         let mut mob = MobRuntimeState::from_spawn(EntityId(1), metadata, true, 0.0);
         let entity = ServerEntityState::from_metadata(
             EntityId(1),
+            mclone_protocol::EntityPersistentId::new(0, 1),
             metadata,
             mclone_core::Vec3d::new(0.0, 64.0, 0.0),
             90.0,
@@ -1066,6 +1069,7 @@ mod tests {
         let metadata = EntityMetadata::for_kind(EntityKind::Cow).unwrap();
         let mut entity = ServerEntityState::from_metadata(
             EntityId(1),
+            mclone_protocol::EntityPersistentId::new(0, 1),
             metadata,
             Vec3d::new(0.5, 64.0, 0.5),
             0.0,
@@ -1099,6 +1103,7 @@ mod tests {
         let metadata = EntityMetadata::for_kind(EntityKind::Cow).unwrap();
         let mut entity = ServerEntityState::from_metadata(
             EntityId(1),
+            mclone_protocol::EntityPersistentId::new(0, 1),
             metadata,
             Vec3d::new(0.5, 64.0, 0.5),
             0.0,

@@ -146,3 +146,23 @@ headless black/transparent result is not acceptance evidence.
   pixels are inspected.
 - Shared tests and affected target boundaries are green, and the living topic
   records exact final evidence and remaining per-subtype parity work.
+
+## Progress Evidence
+
+### Slice 1 — neutral persistent identity
+
+Implemented on 2026-07-22. `EntityPersistentId` now lives in
+`mclone-protocol` as the UUID-equivalent entity identity, formats as canonical
+UUID text, and is immutable `EntitySnapshot` data. Protocol version 32 carries
+it on initial snapshots while `EntityUpdate` remains addressed only by the
+session-local runtime `EntityId`. The server entity state allocates one durable
+identity for every actor, restores saved identities while assigning fresh
+runtime IDs, and publishes the durable value to ordinary clients. Client
+updates retain it unchanged.
+
+Shared embedded-preview observations now carry the durable identity through
+scene ownership. Browser diagnostics expose first/second actor persistent IDs,
+and the native offscreen motion receipt records the same canonical value. The
+protocol codec/format tests, all 126 client tests, all 536 server tests, all 127
+scene tests plus scene contract suites, and the web-client Wasm check pass. The
+Wasm check retains only pre-existing target-conditional warnings.

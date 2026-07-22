@@ -6,11 +6,11 @@ use mclone_core::{
 };
 #[cfg(feature = "physics-engine")]
 use mclone_protocol::EntityRotation;
-use mclone_protocol::{EntityId, EntityKind, ItemKind, ItemStackSnapshot};
+use mclone_protocol::{EntityId, EntityKind, EntityPersistentId, ItemKind, ItemStackSnapshot};
 
 use crate::persistence::{
     ChunkStoreError, ChunkStoreResult, ENTITY_CHUNK_RECORD_VERSION, EntityChunkRecord,
-    EntityPersistentId, EntitySavePayload, EntitySaveRecord, ItemStackSaveRecord,
+    EntitySavePayload, EntitySaveRecord, ItemStackSaveRecord,
 };
 use crate::players::ServerPlayerId;
 
@@ -222,8 +222,14 @@ impl ServerEntityStore {
             .canonicalize_position(position)
             .expect("debug physics entity must lie inside the dimension topology");
         if let Some(id) = self.debug_physics_cube_id {
+            let persistent_id = self
+                .entities
+                .get(&id)
+                .expect("debug physics cube id must retain entity state")
+                .persistent_id;
             let state = debug_physics_cube_state(
                 id,
+                persistent_id,
                 position,
                 y_rot_degrees,
                 x_rot_degrees,
@@ -250,9 +256,11 @@ impl ServerEntityStore {
             .canonicalize_position(position)
             .expect("debug physics entity must lie inside the dimension topology");
         let id = self.allocate_entity_id();
+        let persistent_id = self.allocate_persistent_id();
         self.debug_physics_cube_id = Some(id);
         let state = debug_physics_cube_state(
             id,
+            persistent_id,
             position,
             y_rot_degrees,
             x_rot_degrees,
@@ -734,6 +742,7 @@ impl ServerEntityStore {
         position: Vec3d,
         y_rot_degrees: f32,
     ) -> ServerEntityState {
+        let persistent_id = self.allocate_persistent_id();
         let position = self
             .topology
             .canonicalize_position(position)
@@ -742,6 +751,7 @@ impl ServerEntityStore {
         debug_assert!(metadata.is_passive_mob());
         let state = ServerEntityState::from_metadata(
             id,
+            persistent_id,
             metadata,
             position,
             y_rot_degrees,
@@ -754,7 +764,6 @@ impl ServerEntityStore {
             MobRuntimeState::from_spawn(id, metadata, state.on_ground, state.y_rot_degrees),
         );
         self.entities.insert(id, state);
-        let persistent_id = self.allocate_persistent_id();
         self.persistent_ids.insert(id, persistent_id);
         state
     }
@@ -765,6 +774,7 @@ impl ServerEntityStore {
         position: Vec3d,
         y_rot_degrees: f32,
     ) -> ServerEntityState {
+        let persistent_id = self.allocate_persistent_id();
         let position = self
             .topology
             .canonicalize_position(position)
@@ -773,6 +783,7 @@ impl ServerEntityStore {
         let metadata = EntityMetadata::for_kind(EntityKind::Item).expect("item metadata");
         let mut state = ServerEntityState::from_metadata(
             id,
+            persistent_id,
             metadata,
             position,
             y_rot_degrees,
@@ -785,7 +796,6 @@ impl ServerEntityStore {
         debug_assert_eq!(item.stack(), stack);
         self.items.insert(id, item);
         self.entities.insert(id, state);
-        let persistent_id = self.allocate_persistent_id();
         self.persistent_ids.insert(id, persistent_id);
         state
     }
@@ -876,6 +886,7 @@ impl ServerEntityStore {
         })?;
         let mut state = ServerEntityState::from_metadata(
             id,
+            saved.persistent_id,
             metadata,
             position,
             saved.y_rot_degrees,
@@ -909,6 +920,7 @@ impl ServerEntityStore {
         let metadata = EntityMetadata::for_kind(EntityKind::Item).expect("item metadata");
         let mut state = ServerEntityState::from_metadata(
             id,
+            saved.persistent_id,
             metadata,
             position,
             saved.y_rot_degrees,
@@ -926,11 +938,7 @@ impl ServerEntityStore {
 
     fn entity_save_record(&self, entity: ServerEntityState) -> Option<EntitySaveRecord> {
         let kind = entity_kind_code(entity.kind)?;
-        let persistent_id = self
-            .persistent_ids
-            .get(&entity.id)
-            .copied()
-            .unwrap_or_else(|| fallback_persistent_id(entity.id));
+        let persistent_id = entity.persistent_id;
         let delta_movement = self
             .items
             .get(&entity.id)
@@ -1002,6 +1010,7 @@ pub(crate) struct ServerEntityStoreDiagnostics {
 #[cfg(feature = "physics-engine")]
 fn debug_physics_cube_state(
     id: EntityId,
+    persistent_id: EntityPersistentId,
     position: Vec3d,
     y_rot_degrees: f32,
     x_rot_degrees: f32,
@@ -1010,6 +1019,7 @@ fn debug_physics_cube_state(
 ) -> ServerEntityState {
     ServerEntityState {
         id,
+        persistent_id,
         kind: EntityKind::DebugCube,
         item_stack: None,
         position,
@@ -1123,10 +1133,6 @@ fn item_stack_snapshot_from_save(
         kind,
         count: stack.count,
     })
-}
-
-fn fallback_persistent_id(id: EntityId) -> EntityPersistentId {
-    EntityPersistentId::new(ENTITY_PERSISTENT_ID_MOST, id.0)
 }
 
 #[cfg(test)]
@@ -1444,6 +1450,12 @@ mod tests {
         assert_ne!(loaded_chicken.id, chicken_id);
         assert_ne!(loaded_item.id, item_id);
         assert_ne!(loaded_mannequin.id, mannequin_id);
+        assert_eq!(loaded_chicken.persistent_id, chicken_record.persistent_id);
+        assert_eq!(loaded_item.persistent_id, item_record.persistent_id);
+        assert_eq!(
+            loaded_mannequin.persistent_id,
+            mannequin_record.persistent_id
+        );
         assert_eq!(
             loaded
                 .mob_state(loaded_mannequin.id)

@@ -28,7 +28,7 @@ pub use statistics::{
     SUCCESSFUL_BLOCK_PLACEMENT_STATISTIC_VALUE_KEY, StatisticKey, StatisticKeyError,
 };
 
-pub const PROTOCOL_VERSION: u32 = 31;
+pub const PROTOCOL_VERSION: u32 = 32;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const MAX_PLAYER_DISPLAY_NAME_BYTES: usize = 16;
@@ -518,6 +518,37 @@ pub struct RemotePlayerUpdate {
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct EntityId(pub u64);
 
+/// Stable UUID-equivalent identity for one entity across save/load.
+///
+/// [`EntityId`] remains the session-local runtime/network handle. This value is
+/// immutable spawn data and follows Minecraft Java's persisted entity UUID.
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct EntityPersistentId {
+    pub most: u64,
+    pub least: u64,
+}
+
+impl EntityPersistentId {
+    pub const fn new(most: u64, least: u64) -> Self {
+        Self { most, least }
+    }
+}
+
+impl fmt::Display for EntityPersistentId {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let value = (u128::from(self.most) << 64) | u128::from(self.least);
+        let group1 = (value >> 96) as u32;
+        let group2 = ((value >> 80) & 0xffff) as u16;
+        let group3 = ((value >> 64) & 0xffff) as u16;
+        let group4 = ((value >> 48) & 0xffff) as u16;
+        let group5 = value & 0xffff_ffff_ffff;
+        write!(
+            formatter,
+            "{group1:08x}-{group2:04x}-{group3:04x}-{group4:04x}-{group5:012x}"
+        )
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum EntityKind {
     Cow,
@@ -558,6 +589,7 @@ impl EntityRotation {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EntitySnapshot {
     pub id: EntityId,
+    pub persistent_id: EntityPersistentId,
     pub kind: EntityKind,
     pub item_stack: Option<ItemStackSnapshot>,
     pub position: Vec3d,
@@ -1601,8 +1633,14 @@ impl ByteWriter {
         self.write_u64(id.0);
     }
 
+    fn write_entity_persistent_id(&mut self, id: EntityPersistentId) {
+        self.write_u64(id.most);
+        self.write_u64(id.least);
+    }
+
     fn write_entity_snapshot(&mut self, snapshot: &EntitySnapshot) {
         self.write_entity_id(snapshot.id);
+        self.write_entity_persistent_id(snapshot.persistent_id);
         self.write_entity_kind(snapshot.kind);
         self.write_optional_item_stack_snapshot(snapshot.item_stack);
         self.write_vec3d(snapshot.position);
@@ -2156,9 +2194,14 @@ impl<'a> ByteReader<'a> {
         Ok(EntityId(self.read_u64()?))
     }
 
+    fn read_entity_persistent_id(&mut self) -> ProtocolCodecResult<EntityPersistentId> {
+        Ok(EntityPersistentId::new(self.read_u64()?, self.read_u64()?))
+    }
+
     fn read_entity_snapshot(&mut self) -> ProtocolCodecResult<EntitySnapshot> {
         let snapshot = EntitySnapshot {
             id: self.read_entity_id()?,
+            persistent_id: self.read_entity_persistent_id()?,
             kind: self.read_entity_kind()?,
             item_stack: self.read_optional_item_stack_snapshot()?,
             position: self.read_vec3d()?,
@@ -2651,6 +2694,7 @@ mod tests {
     fn server_update_codec_round_trips_entity_updates() {
         let snapshot = EntitySnapshot {
             id: EntityId(7),
+            persistent_id: EntityPersistentId::new(0x1234, 0x5678),
             kind: EntityKind::DebugCube,
             item_stack: None,
             position: Vec3d::new(12.5, 70.0, -3.25),
@@ -2695,9 +2739,17 @@ mod tests {
     }
 
     #[test]
+    fn entity_persistent_id_formats_as_canonical_uuid_text() {
+        let id = EntityPersistentId::new(0x0011_2233_4455_6677, 0x8899_aabb_ccdd_eeff);
+
+        assert_eq!(id.to_string(), "00112233-4455-6677-8899-aabbccddeeff");
+    }
+
+    #[test]
     fn server_update_codec_round_trips_item_entity_snapshot() {
         let snapshot = EntitySnapshot {
             id: EntityId(8),
+            persistent_id: EntityPersistentId::new(0x1234, 0x5679),
             kind: EntityKind::Item,
             item_stack: Some(ItemStackSnapshot {
                 kind: ItemKind::Egg,
@@ -2775,6 +2827,7 @@ mod tests {
 
         let invalid_dimensions = ServerUpdate::EntitySnapshot(EntitySnapshot {
             id: EntityId(42),
+            persistent_id: EntityPersistentId::new(0x1234, 42),
             kind: EntityKind::Chicken,
             item_stack: None,
             position: Vec3d::new(1.0, 70.0, -3.25),
@@ -2795,6 +2848,7 @@ mod tests {
 
         let missing_item_stack = ServerUpdate::EntitySnapshot(EntitySnapshot {
             id: EntityId(42),
+            persistent_id: EntityPersistentId::new(0x1234, 42),
             kind: EntityKind::Item,
             item_stack: None,
             position: Vec3d::new(1.0, 70.0, -3.25),
@@ -2815,6 +2869,7 @@ mod tests {
 
         let misplaced_item_stack = ServerUpdate::EntitySnapshot(EntitySnapshot {
             id: EntityId(42),
+            persistent_id: EntityPersistentId::new(0x1234, 42),
             kind: EntityKind::Chicken,
             item_stack: Some(ItemStackSnapshot {
                 kind: ItemKind::Egg,

@@ -3094,6 +3094,7 @@ pub(crate) fn run_lobby_scenario_smoke(
                 serde_json::json!({
                     "sequence": receipt.actor_motion_sequence,
                     "entityId": to.entity_id.0.to_string(),
+                    "persistentId": to.persistent_id.to_string(),
                     "kind": format!("{:?}", to.kind),
                     "fromAgeTicks": from.age_ticks.to_string(),
                     "toAgeTicks": to.age_ticks.to_string(),

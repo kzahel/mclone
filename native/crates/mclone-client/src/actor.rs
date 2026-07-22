@@ -521,6 +521,7 @@ mod tests {
     fn actor_presentation_converts_entity_snapshot() {
         let snapshot = EntitySnapshot {
             id: EntityId(7),
+            persistent_id: mclone_protocol::EntityPersistentId::new(0, 7),
             kind: EntityKind::Cow,
             item_stack: None,
             position: Vec3d::new(10.0, 64.0, -4.0),

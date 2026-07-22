@@ -637,6 +637,7 @@ pub struct EmbeddedWorldPreviewRenderSnapshot {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct EmbeddedWorldPreviewActorObservation {
     pub entity_id: EntityId,
+    pub persistent_id: mclone_protocol::EntityPersistentId,
     pub kind: EntityKind,
     pub source_feet_position: Vec3d,
     pub composition_feet_position: Vec3d,
@@ -686,6 +687,7 @@ impl EmbeddedWorldPreviewActorObservation {
     ) -> Self {
         Self {
             entity_id: snapshot.id,
+            persistent_id: snapshot.persistent_id,
             kind: snapshot.kind,
             source_feet_position: snapshot.position,
             composition_feet_position: context.source_to_composition(snapshot.position),

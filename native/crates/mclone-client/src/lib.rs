@@ -1076,6 +1076,7 @@ mod tests {
         }));
         runtime.apply_update(ServerUpdate::EntitySnapshot(EntitySnapshot {
             id: EntityId(7),
+            persistent_id: mclone_protocol::EntityPersistentId::new(0, 7),
             kind: mclone_protocol::EntityKind::Cow,
             item_stack: None,
             position: mclone_core::Vec3d::new(4.0, 64.0, 5.0),
@@ -1354,6 +1355,7 @@ mod tests {
         let id = EntityId(7);
         runtime.apply_update(ServerUpdate::EntitySnapshot(EntitySnapshot {
             id,
+            persistent_id: mclone_protocol::EntityPersistentId::new(0, id.0),
             kind: mclone_protocol::EntityKind::Cow,
             item_stack: None,
             position: Vec3d::new(511.75, 64.0, 2.0),
@@ -1386,6 +1388,7 @@ mod tests {
         let id = EntityId(7);
         let initial = EntitySnapshot {
             id,
+            persistent_id: mclone_protocol::EntityPersistentId::new(0, id.0),
             kind: mclone_protocol::EntityKind::Cow,
             item_stack: None,
             position: mclone_core::Vec3d::new(1.0, 64.0, 2.0),
@@ -1427,6 +1430,7 @@ mod tests {
         assert_eq!(updated.on_ground, moved.on_ground);
         assert_eq!(updated.age_ticks, moved.age_ticks);
         assert_eq!(updated.kind, initial.kind);
+        assert_eq!(updated.persistent_id, initial.persistent_id);
         assert_eq!(updated.item_stack, initial.item_stack);
         assert_eq!(updated.width, initial.width);
         assert_eq!(updated.height, initial.height);
@@ -1497,6 +1501,7 @@ mod tests {
         let mut runtime = ClientRuntime::new(ClientHost::RemoteDedicated);
         let snapshot = EntitySnapshot {
             id: EntityId(11),
+            persistent_id: mclone_protocol::EntityPersistentId::new(0, 11),
             kind: mclone_protocol::EntityKind::Cow,
             item_stack: None,
             position: mclone_core::Vec3d::new(10.0, 64.0, -4.0),
@@ -1540,6 +1545,7 @@ mod tests {
         };
         let snapshot = EntitySnapshot {
             id: EntityId(12),
+            persistent_id: mclone_protocol::EntityPersistentId::new(0, 12),
             kind: mclone_protocol::EntityKind::Item,
             item_stack: Some(stack),
             position: mclone_core::Vec3d::new(10.0, 64.0, -4.0),
@@ -1634,6 +1640,7 @@ mod tests {
         let id = EntityId(9);
         runtime.apply_update(ServerUpdate::EntitySnapshot(EntitySnapshot {
             id,
+            persistent_id: mclone_protocol::EntityPersistentId::new(0, id.0),
             kind: mclone_protocol::EntityKind::Item,
             item_stack: Some(mclone_protocol::ItemStackSnapshot {
                 kind: mclone_protocol::ItemKind::Egg,

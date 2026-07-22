@@ -22,6 +22,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, Transaction, params};
 use mclone_core::{
     AxisTopology, BlockPos, ChunkPos, ChunkRevision, ChunkSnapshot, HorizontalTopology, Vec3d,
 };
+pub use mclone_protocol::EntityPersistentId;
 use mclone_protocol::{
     DEFAULT_PLAYER_MAX_HEALTH, DimensionChunkPos, DimensionKey, EntityRotation, ItemStackSnapshot,
     MAX_PLAYER_STATISTIC_ENTRIES, MAX_STATISTIC_RESOURCE_KEY_BYTES, PlayerDamageCause,
@@ -368,18 +369,6 @@ pub fn decode_dimension_record(bytes: &[u8]) -> ChunkStoreResult<DimensionRecord
         )));
     }
     Ok(record)
-}
-
-#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct EntityPersistentId {
-    pub most: u64,
-    pub least: u64,
-}
-
-impl EntityPersistentId {
-    pub const fn new(most: u64, least: u64) -> Self {
-        Self { most, least }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -369,6 +369,7 @@ mod tests {
         let metadata = EntityMetadata::for_kind(EntityKind::Cow).unwrap();
         let entity = ServerEntityState::from_metadata(
             EntityId(1),
+            mclone_protocol::EntityPersistentId::new(0, 1),
             metadata,
             Vec3d::new(0.0, 64.0, 0.0),
             0.0,

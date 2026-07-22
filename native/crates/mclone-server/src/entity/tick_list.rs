@@ -62,6 +62,7 @@ mod tests {
     fn state(id: u64, x: f64, z: f64, alive: bool) -> ServerEntityState {
         ServerEntityState {
             id: EntityId(id),
+            persistent_id: mclone_protocol::EntityPersistentId::new(0, id),
             kind: EntityKind::Cow,
             item_stack: None,
             position: Vec3d::new(x, 64.0, z),

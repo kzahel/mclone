@@ -3280,6 +3280,11 @@ impl WebSceneHost {
                     )?;
                     report_set_string(
                         &object,
+                        &format!("embeddedPreview{prefix}ActorPersistentId"),
+                        &observation.persistent_id.to_string(),
+                    )?;
+                    report_set_string(
+                        &object,
                         &format!("embeddedPreview{prefix}ActorKind"),
                         match observation.kind {
                             mclone_protocol::EntityKind::Cow => "cow",
