@@ -44,6 +44,7 @@ mod tests {
                 relief: 0.0,
                 ruggedness: 0.0,
                 ridges: 0.0,
+                mountain_detail: 0.0,
                 surface_y,
             },
             slope,

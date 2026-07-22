@@ -3,7 +3,7 @@ use mclone_core::ChunkPos;
 use crate::noise::{SeedDomain, ValueNoise2d};
 
 pub const MCLONE_OVERWORLD_SEA_LEVEL: i32 = 63;
-pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-4";
+pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-5";
 pub const MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS: i32 = 2;
 
 const CONTINENT_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_636f_6e31);
@@ -16,6 +16,8 @@ const RUGGEDNESS_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7275_673
 const RUGGEDNESS_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7275_6732);
 const RIDGE_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_6431);
 const RIDGE_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_6432);
+const MOUNTAIN_DETAIL_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6d64_7431);
+const MOUNTAIN_DETAIL_FINE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6d64_7432);
 
 const CONTINENT_LARGE_SCALE: i32 = 2_048;
 const CONTINENT_MEDIUM_SCALE: i32 = 1_024;
@@ -27,6 +29,8 @@ const RUGGEDNESS_LARGE_SCALE: i32 = 1_536;
 const RUGGEDNESS_DETAIL_SCALE: i32 = 512;
 const RIDGE_LARGE_SCALE: i32 = 384;
 const RIDGE_DETAIL_SCALE: i32 = 128;
+const MOUNTAIN_DETAIL_LARGE_SCALE: i32 = 32;
+const MOUNTAIN_DETAIL_FINE_SCALE: i32 = 8;
 const MAX_REGION_SAMPLE_COUNT: usize = 16 * 1024 * 1024;
 const SPAWN_SEARCH_RADIUS_CHUNKS: i32 = 128;
 const SPAWN_MIN_SURFACE_Y: i32 = MCLONE_OVERWORLD_SEA_LEVEL + 5;
@@ -37,6 +41,7 @@ pub struct McloneOverworldTerrainSample {
     pub relief: f64,
     pub ruggedness: f64,
     pub ridges: f64,
+    pub mountain_detail: f64,
     pub surface_y: i32,
 }
 
@@ -130,6 +135,8 @@ pub struct McloneOverworldSampler {
     ruggedness_detail: ValueNoise2d,
     ridge_large: ValueNoise2d,
     ridge_detail: ValueNoise2d,
+    mountain_detail_large: ValueNoise2d,
+    mountain_detail_fine: ValueNoise2d,
 }
 
 impl McloneOverworldSampler {
@@ -161,6 +168,16 @@ impl McloneOverworldSampler {
             ),
             ridge_large: ValueNoise2d::new(seed, RIDGE_LARGE_DOMAIN, RIDGE_LARGE_SCALE),
             ridge_detail: ValueNoise2d::new(seed, RIDGE_DETAIL_DOMAIN, RIDGE_DETAIL_SCALE),
+            mountain_detail_large: ValueNoise2d::new(
+                seed,
+                MOUNTAIN_DETAIL_LARGE_DOMAIN,
+                MOUNTAIN_DETAIL_LARGE_SCALE,
+            ),
+            mountain_detail_fine: ValueNoise2d::new(
+                seed,
+                MOUNTAIN_DETAIL_FINE_DOMAIN,
+                MOUNTAIN_DETAIL_FINE_SCALE,
+            ),
         }
     }
 
@@ -180,12 +197,16 @@ impl McloneOverworldSampler {
             + self.ridge_detail.sample(world_x, world_z) * 0.22;
         let ridge_linear = (1.0 - ridge_source.abs()).clamp(0.0, 1.0);
         let ridges = ridge_linear * ridge_linear;
+        let mountain_detail = (self.mountain_detail_large.sample(world_x, world_z) * 0.55
+            + self.mountain_detail_fine.sample(world_x, world_z) * 0.45)
+            .clamp(-1.0, 1.0);
         McloneOverworldTerrainSample {
             continentalness,
             relief,
             ruggedness,
             ridges,
-            surface_y: surface_height(continentalness, relief, ruggedness, ridges),
+            mountain_detail,
+            surface_y: surface_height(continentalness, relief, ruggedness, ridges, mountain_detail),
         }
     }
 
@@ -282,7 +303,13 @@ pub fn mclone_overworld_spawn_chunk(seed: i64) -> ChunkPos {
     ChunkPos::new(0, 0)
 }
 
-fn surface_height(continentalness: f64, relief: f64, ruggedness: f64, ridges: f64) -> i32 {
+fn surface_height(
+    continentalness: f64,
+    relief: f64,
+    ruggedness: f64,
+    ridges: f64,
+    mountain_detail: f64,
+) -> i32 {
     if continentalness <= 0.0 {
         let shallow_water = smoothstep(((continentalness + 0.55) / 0.55).clamp(0.0, 1.0));
         let floor = 46.0 + shallow_water * 15.0 + relief * 1.5;
@@ -295,8 +322,9 @@ fn surface_height(continentalness: f64, relief: f64, ruggedness: f64, ridges: f6
     let mountain_strength = mountain_strength(continentalness, ruggedness);
     let ridge_shoulder = smoothstep(((ridges - 0.22) / 0.78).clamp(0.0, 1.0));
     let mountain_lift =
-        mountain_strength * (4.0 + ridge_shoulder * 16.0 + ridge_shoulder * ridge_shoulder * 54.0);
-    (base + rolling_relief + mountain_lift)
+        mountain_strength * (4.0 + ridge_shoulder * 12.0 + ridge_shoulder * ridge_shoulder * 38.0);
+    let mountain_texture = mountain_detail * mountain_strength * (6.0 + ridge_shoulder * 14.0);
+    (base + rolling_relief + mountain_lift + mountain_texture)
         .round()
         .clamp(62.0, 160.0) as i32
 }
@@ -393,11 +421,23 @@ mod tests {
         for ruggedness in [-1.0, 0.0, 1.0] {
             for ridges in [0.0, 0.5, 1.0] {
                 assert_eq!(
-                    surface_height(-0.4, 0.25, ruggedness, ridges),
-                    surface_height(-0.4, 0.25, 0.0, 0.0)
+                    surface_height(-0.4, 0.25, ruggedness, ridges, 1.0),
+                    surface_height(-0.4, 0.25, 0.0, 0.0, 0.0)
                 );
             }
         }
+    }
+
+    #[test]
+    fn lowlands_ignore_mountain_detail_until_the_region_is_active() {
+        assert_eq!(
+            surface_height(0.7, 0.25, -0.2, 1.0, -1.0),
+            surface_height(0.7, 0.25, -0.2, 1.0, 1.0)
+        );
+        assert_ne!(
+            surface_height(0.7, 0.25, 0.7, 1.0, -1.0),
+            surface_height(0.7, 0.25, 0.7, 1.0, 1.0)
+        );
     }
 
     #[test]

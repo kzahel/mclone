@@ -99,6 +99,9 @@ fn run() -> Result<()> {
     let relief_path = config.output_dir.join(format!("{prefix}-relief.png"));
     let ruggedness_path = config.output_dir.join(format!("{prefix}-ruggedness.png"));
     let ridges_path = config.output_dir.join(format!("{prefix}-ridges.png"));
+    let mountain_detail_path = config
+        .output_dir
+        .join(format!("{prefix}-mountain-detail.png"));
     let surface_path = config.output_dir.join(format!("{prefix}-surface-y.png"));
     let slope_path = config.output_dir.join(format!("{prefix}-slope.png"));
     let fields_path = config.output_dir.join(format!("{prefix}-fields.png"));
@@ -115,6 +118,7 @@ fn run() -> Result<()> {
     let relief = render_map(&region.samples, relief_color);
     let ruggedness = render_map(&region.samples, ruggedness_color);
     let ridges = render_map(&region.samples, ridges_color);
+    let mountain_detail = render_map(&region.samples, mountain_detail_color);
     let surface = render_map(&region.samples, surface_color);
     let slope = render_landform_map(&landforms, slope_color);
     let biomes = render_landform_map(&landforms, biome_color);
@@ -128,16 +132,29 @@ fn run() -> Result<()> {
     save_rgba(&relief_path, request.width, request.depth, &relief)?;
     save_rgba(&ruggedness_path, request.width, request.depth, &ruggedness)?;
     save_rgba(&ridges_path, request.width, request.depth, &ridges)?;
+    save_rgba(
+        &mountain_detail_path,
+        request.width,
+        request.depth,
+        &mountain_detail,
+    )?;
     save_rgba(&surface_path, request.width, request.depth, &surface)?;
     save_rgba(&slope_path, request.width, request.depth, &slope)?;
     let combined = combine_maps(
         request.width,
         request.depth,
-        [&continentalness, &relief, &ruggedness, &ridges, &surface],
+        [
+            &continentalness,
+            &relief,
+            &ruggedness,
+            &ridges,
+            &mountain_detail,
+            &surface,
+        ],
     );
     save_rgba(
         &fields_path,
-        request.width * 5 + MAP_GAP_PIXELS * 4,
+        request.width * 6 + MAP_GAP_PIXELS * 5,
         request.depth,
         &combined,
     )?;
@@ -162,7 +179,7 @@ fn run() -> Result<()> {
 
     let (commit, dirty) = git_state();
     let receipt = serde_json::json!({
-        "schema": 4,
+        "schema": 5,
         "profile": "mclone-overworld-v1",
         "fieldRevision": MCLONE_OVERWORLD_FIELD_REVISION,
         "decorationRevision": MCLONE_OVERWORLD_DECORATION_REVISION,
@@ -197,6 +214,7 @@ fn run() -> Result<()> {
             "relief": [facts.min_relief, facts.max_relief],
             "ruggedness": [facts.min_ruggedness, facts.max_ruggedness],
             "ridges": [facts.min_ridges, facts.max_ridges],
+            "mountainDetail": [facts.min_mountain_detail, facts.max_mountain_detail],
             "surfaceY": [facts.min_surface_y, facts.max_surface_y],
             "slope": [facts.min_slope, facts.max_slope],
             "exposure": [facts.min_exposure, facts.max_exposure],
@@ -245,12 +263,13 @@ fn run() -> Result<()> {
         "foundationFieldFingerprint": facts.foundation_field_fingerprint,
         "terrainLanguageFingerprint": facts.terrain_language_fingerprint,
         "maps": {
-            "order": ["continentalness", "relief", "ruggedness", "ridges", "surfaceY"],
+            "order": ["continentalness", "relief", "ruggedness", "ridges", "mountainDetail", "surfaceY"],
             "combined": fields_path,
             "continentalness": continentalness_path,
             "relief": relief_path,
             "ruggedness": ruggedness_path,
             "ridges": ridges_path,
+            "mountainDetail": mountain_detail_path,
             "surfaceY": surface_path,
             "terrainLanguageOrder": ["slope", "biomes", "surfaceRecipes"],
             "terrainLanguage": language_path,
@@ -360,6 +379,7 @@ fn sample_json(sample: McloneOverworldLandformSample) -> serde_json::Value {
         "relief": terrain.relief,
         "ruggedness": terrain.ruggedness,
         "ridges": terrain.ridges,
+        "mountainDetail": terrain.mountain_detail,
         "mountainStrength": terrain.mountain_strength(),
         "surfaceY": terrain.surface_y,
         "slope": sample.slope,
@@ -441,6 +461,8 @@ struct RegionFacts {
     max_ruggedness: f64,
     min_ridges: f64,
     max_ridges: f64,
+    min_mountain_detail: f64,
+    max_mountain_detail: f64,
     min_surface_y: i32,
     max_surface_y: i32,
     min_slope: f64,
@@ -487,6 +509,8 @@ impl RegionFacts {
         let mut max_ruggedness = f64::NEG_INFINITY;
         let mut min_ridges = f64::INFINITY;
         let mut max_ridges = f64::NEG_INFINITY;
+        let mut min_mountain_detail = f64::INFINITY;
+        let mut max_mountain_detail = f64::NEG_INFINITY;
         let mut min_slope = f64::INFINITY;
         let mut max_slope = f64::NEG_INFINITY;
         let mut min_exposure = f64::INFINITY;
@@ -522,6 +546,8 @@ impl RegionFacts {
             max_ruggedness = max_ruggedness.max(sample.ruggedness);
             min_ridges = min_ridges.min(sample.ridges);
             max_ridges = max_ridges.max(sample.ridges);
+            min_mountain_detail = min_mountain_detail.min(sample.mountain_detail);
+            max_mountain_detail = max_mountain_detail.max(sample.mountain_detail);
             min_slope = min_slope.min(landform.slope);
             max_slope = max_slope.max(landform.slope);
             min_exposure = min_exposure.min(landform.exposure());
@@ -583,6 +609,7 @@ impl RegionFacts {
                 .chain(sample.relief.to_bits().to_le_bytes())
                 .chain(sample.ruggedness.to_bits().to_le_bytes())
                 .chain(sample.ridges.to_bits().to_le_bytes())
+                .chain(sample.mountain_detail.to_bits().to_le_bytes())
                 .chain(sample.surface_y.to_le_bytes())
             {
                 fingerprint ^= u64::from(byte);
@@ -641,6 +668,8 @@ impl RegionFacts {
             max_ruggedness,
             min_ridges,
             max_ridges,
+            min_mountain_detail,
+            max_mountain_detail,
             min_surface_y: heights[0],
             max_surface_y: heights[heights.len() - 1],
             min_slope,
@@ -762,6 +791,22 @@ fn ruggedness_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
 
 fn ridges_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
     lerp_color([37, 74, 62, 255], [239, 236, 220, 255], sample.ridges)
+}
+
+fn mountain_detail_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    if sample.mountain_detail < 0.0 {
+        lerp_color(
+            [55, 72, 116, 255],
+            [218, 220, 210, 255],
+            sample.mountain_detail + 1.0,
+        )
+    } else {
+        lerp_color(
+            [218, 220, 210, 255],
+            [147, 73, 42, 255],
+            sample.mountain_detail,
+        )
+    }
 }
 
 fn surface_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
