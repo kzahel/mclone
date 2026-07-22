@@ -6,8 +6,8 @@ Status: complete and live-accepted 2026-07-21, then extended locally on
 2026-07-22 with typed creature classification, classification filters, three
 fantasy/monster waves, a first living-growth wave, binary and fractional alpha
 proofs, fixed planar cards, a two-figure fantasy-fauna follow-up, and a gentler
-recognizable-folklore wave followed by two anatomy-led trios. The current local
-inventory contains 196 canonical figures and 278 clips. The
+recognizable-folklore wave followed by three anatomy-led trios. The current
+local inventory contains 199 canonical figures and 284 clips. The
 read-only,
 production-built Asset Lab
 catalogue is available at
@@ -195,6 +195,8 @@ occur.
     anatomy-led designs without clothing, held props, or accessory concepts.
 16. [x] Add Owlbear, Cockatrice, and Young Dryad as a second anatomy-led
     fantasy trio with explicit typed classification and paired motion clips.
+17. [x] Add Centaur, Chimera, and Hippocampus as explicit multi-body-plan
+    hybrids with paired continuous and action motion.
 
 ## Local Acceptance Evidence
 
@@ -327,6 +329,15 @@ from five to six and Rooted from six to seven through bark, branches, roots,
 and double-sided leaves. Searches for `owlbear`, `cockatrice`, and `dryad` each
 resolve exactly one figure. Six clean action/locomotion sheets and MP4 reviews
 are under `/tmp/mclone-anatomy-fantasy-two/`.
+
+The anatomy-led hybrid follow-up builds 199 canonical figures, 284 clips, and
+4,313 parts. Centaur combines Quadruped and Biped classification; Chimera
+combines Quadruped and Serpentine; Hippocampus combines Quadruped and Swimmer
+and is explicitly aquatic. All three are neutral Animal/Fantasy figures whose
+shared `hybrid` theme returns exactly those three catalogue entries. Their
+species joins remain exposed rather than hidden beneath clothes, weapons,
+saddles, or other props. Six clean action/locomotion sheets and MP4 reviews are
+under `/tmp/mclone-hybrid-bestiary-three/`.
 
 ## Live Acceptance Evidence
 

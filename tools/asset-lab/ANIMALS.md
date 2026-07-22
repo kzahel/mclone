@@ -363,8 +363,8 @@ and the hoppers (kangaroo — `hop`).
 ## Stretch: fantasy & anthro (the `-folk` line)
 
 The lab already has anthropomorphic figures (`bearfolk`, `lionfolk`) and the
-humanoid `player`. If we lean into an original cast, these are the natural
-extensions — all **B** (`bipedWalk`), so no new tooling.
+humanoid `player`. This section now also tracks anatomy-led hybrids that
+compose the existing biped, quadruped, swimmer, and serpentine vocabularies.
 
 | Figure | Pri | Status | Notes |
 |---|---|---|---|
@@ -378,6 +378,9 @@ extensions — all **B** (`bipedWalk`), so no new tooling.
 | Jackalope | P2 | ✅ | `examples/jackalope` — anatomy-led antlered hare with high haunches, long ears and rear feet, grounded bound, and separate listening action |
 | Owlbear | P2 | ✅ | `examples/owlbear` — heavy bear quadruped with a broad owl facial disc, hooked beak, feathered shoulder mantle, grounded lumber, and separate ruffle display |
 | Cockatrice | P2 | ✅ | `examples/cockatrice` — rooster/reptile biped with comb, wattles, wings, scaled feet, a long articulated tail, grounded strut, and separate threat display |
+| Centaur | P2 | ✅ | `examples/centaur` — bare human torso grown directly from a horse frame, with grounded four-beat trot and hind-hoof-supported rear action |
+| Chimera | P2 | ✅ | `examples/chimera` — lion forequarters, a goat head rising from the spine, and a living articulated serpent tail with coordinated prowl and threat clips |
+| Hippocampus | P2 | ✅ | `examples/hippocampus` — equine forequarters and webbed forelegs taper into a four-stage fish tail with paired tidal-swim and breach clips |
 | Slime / blob | P3 | ✅ | `examples/slime` — six-box acid slime with textured gel layers, a grounded squash idle, and a separate leap-and-slam action (also a baddie — see below) |
 | Owl Scholar | P2 | ✅ | `examples/owl_scholar` — recognizable spectacled owl with folded wings, satchel, two exact cutout book-page cards, grounded perch-hop, and separate page-turn action |
 
@@ -466,8 +469,8 @@ should be a high-value early wave for a Minecraft-style mob set.
 
 ## Coverage snapshot
 
-- **Canonical box-and-card figures:** 196 sources and 278 clips after Owlbear,
-  Cockatrice, and Young Dryad extend the anatomy-led fantasy roster.
+- **Canonical box-and-card figures:** 199 sources and 284 clips after Centaur,
+  Chimera, and Hippocampus extend the anatomy-led hybrid roster.
 - **First hostile fantasy wave:** Skeleton, Slime, and Gargoyle, each with
   explicit typed catalogue classification and a separate special action.
 - **Binary-alpha proof:** Cutout Skeleton keeps a full torso cuboid and forms
@@ -498,6 +501,9 @@ should be a high-value early wave for a Minecraft-style mob set.
 - **Second anatomy-led follow-up:** Owlbear, Cockatrice, and Young Dryad build
   their fantasy read from hybrid anatomy, bark, branches, roots, and foliage;
   none relies on clothing, held props, occupations, or accessory concepts.
+- **Anatomy-led hybrid follow-up:** Centaur, Chimera, and Hippocampus expose
+  their species joins directly and combine existing quadruped, biped,
+  serpentine, and swimmer motion without clothing, weapons, or tack.
 - **Rounded-to-box migration complete (13):** piglet, sheep, dog, cat,
   bearfolk, lionfolk, cow, horse, goat, wolf, fox, bear, and lion.
 - **Retained rounded A/B archive:** all 18 former mixed-primitive sources live

@@ -15,7 +15,7 @@ test("browses hash-checked figures with animation and camera controls", async ({
   await expect(page.locator(".viewerHeader h2")).toHaveText("King Cobra");
   await expect(page).toHaveURL(/figure=king_cobra/);
   await expect(page.locator(".catalogRow.selected")).toHaveAttribute("data-catalog-name", "king_cobra");
-  await expect(page.locator(".summaryItem").first()).toContainText("196");
+  await expect(page.locator(".summaryItem").first()).toContainText("199");
   await expect(page.locator(".summaryItem").filter({ hasText: "runtime" })).toContainText("3");
   await expect(page.locator(".promotionStatus")).toContainText("Asset Lab only");
 
@@ -247,6 +247,20 @@ test("filters and inspects typed creature classifications", async ({ page }) => 
   await search.fill("dryad");
   await expect(page.locator(".resultCount")).toHaveText("1 figure");
   await expect(page.locator("[data-catalog-name='young_dryad']")).toBeVisible();
+  await search.fill("hybrid");
+  await expect(page.locator(".resultCount")).toHaveText("3 figures");
+  await expect(page.locator("[data-catalog-name='centaur']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='chimera']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='hippocampus']")).toBeVisible();
+  await page.locator("[data-catalog-name='centaur']").click();
+  await expect(classification).toContainText("Humanoid");
+  await expect(classification).toContainText("Biped");
+  await expect(classification).toContainText("Quadruped");
+  await page.locator("[data-catalog-name='chimera']").click();
+  await expect(classification).toContainText("Serpentine");
+  await page.locator("[data-catalog-name='hippocampus']").click();
+  await expect(classification).toContainText("Swimmer");
+  await expect(classification).toContainText("Water");
 
   await search.fill("");
   await groupFilter.selectOption("plant");
