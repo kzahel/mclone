@@ -465,6 +465,10 @@ struct FeatureVector {
     plane_r8_rmse: f64,
     plane_r16_rmse: f64,
     plane_r32_rmse: f64,
+    orientation_r4_coherence: f64,
+    orientation_r4_diagonal: f64,
+    orientation_r8_coherence: f64,
+    orientation_r8_diagonal: f64,
     roughness_exponent: f64,
     fine_detail_share_r4_of_r32: f64,
 }
@@ -482,12 +486,16 @@ impl FeatureVector {
             plane_r8_rmse: plane_rmse(value, 8),
             plane_r16_rmse: plane_rmse(value, 16),
             plane_r32_rmse: plane_rmse(value, 32),
+            orientation_r4_coherence: orientation_coherence(value, 4),
+            orientation_r4_diagonal: orientation_diagonal(value, 4),
+            orientation_r8_coherence: orientation_coherence(value, 8),
+            orientation_r8_diagonal: orientation_diagonal(value, 8),
             roughness_exponent: value.roughness_exponent.unwrap_or(0.0),
             fine_detail_share_r4_of_r32: value.fine_detail_share_r4_of_r32.unwrap_or(0.0),
         }
     }
 
-    fn rows(self) -> [(&'static str, f64); 12] {
+    fn rows(self) -> [(&'static str, f64); 16] {
         [
             ("included land share", self.included_share),
             ("lag 1 RMS delta", self.lag1_rms_delta),
@@ -499,6 +507,10 @@ impl FeatureVector {
             ("plane r8 RMSE", self.plane_r8_rmse),
             ("plane r16 RMSE", self.plane_r16_rmse),
             ("plane r32 RMSE", self.plane_r32_rmse),
+            ("orientation r4 coherence", self.orientation_r4_coherence),
+            ("orientation r4 diagonal", self.orientation_r4_diagonal),
+            ("orientation r8 coherence", self.orientation_r8_coherence),
+            ("orientation r8 diagonal", self.orientation_r8_diagonal),
             ("roughness exponent", self.roughness_exponent),
             ("fine detail share r4/r32", self.fine_detail_share_r4_of_r32),
         ]
@@ -519,6 +531,22 @@ fn plane_rmse(value: &TerrainCharacteristics, radius: usize) -> f64 {
         .iter()
         .find(|scale| scale.radius_blocks == radius)
         .map_or(0.0, |scale| scale.pooled_rmse)
+}
+
+fn orientation_coherence(value: &TerrainCharacteristics, radius: usize) -> f64 {
+    value
+        .orientation_curve
+        .iter()
+        .find(|scale| scale.radius_blocks == radius)
+        .map_or(0.0, |scale| scale.mean_coherence)
+}
+
+fn orientation_diagonal(value: &TerrainCharacteristics, radius: usize) -> f64 {
+    value
+        .orientation_curve
+        .iter()
+        .find(|scale| scale.radius_blocks == radius)
+        .map_or(0.0, |scale| scale.mean_diagonal_coherence)
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -552,7 +580,7 @@ fn summarize_groups(reports: &[SiteReport]) -> BTreeMap<String, GroupSummary> {
 
 fn median_feature_vector(values: &[FeatureVector]) -> FeatureVector {
     let rows = values.iter().map(|value| value.rows()).collect::<Vec<_>>();
-    let mut medians = [0.0; 12];
+    let mut medians = [0.0; 16];
     for index in 0..medians.len() {
         let mut column = rows.iter().map(|row| row[index].1).collect::<Vec<_>>();
         column.sort_by(f64::total_cmp);
@@ -569,8 +597,12 @@ fn median_feature_vector(values: &[FeatureVector]) -> FeatureVector {
         plane_r8_rmse: medians[7],
         plane_r16_rmse: medians[8],
         plane_r32_rmse: medians[9],
-        roughness_exponent: medians[10],
-        fine_detail_share_r4_of_r32: medians[11],
+        orientation_r4_coherence: medians[10],
+        orientation_r4_diagonal: medians[11],
+        orientation_r8_coherence: medians[12],
+        orientation_r8_diagonal: medians[13],
+        roughness_exponent: medians[14],
+        fine_detail_share_r4_of_r32: medians[15],
     }
 }
 

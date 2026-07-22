@@ -118,6 +118,18 @@ pub struct TerrainPlaneFitCharacteristics {
     pub p90_fitted_grade: f64,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TerrainOrientationCharacteristics {
+    pub radius_blocks: usize,
+    pub window_width_blocks: usize,
+    pub window_count: usize,
+    pub mean_coherence: f64,
+    pub p90_coherence: f64,
+    pub mean_diagonal_coherence: f64,
+    pub p90_diagonal_coherence: f64,
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct TerrainCharacteristics {
@@ -129,6 +141,7 @@ pub struct TerrainCharacteristics {
     pub lag_curve: Vec<TerrainLagCharacteristics>,
     pub curvature: TerrainValueDistribution,
     pub plane_fit_curve: Vec<TerrainPlaneFitCharacteristics>,
+    pub orientation_curve: Vec<TerrainOrientationCharacteristics>,
     pub roughness_exponent: Option<f64>,
     pub fine_detail_share_r4_of_r32: Option<f64>,
     pub fingerprint: u64,
@@ -169,6 +182,7 @@ pub fn analyze_terrain_height_raster(
         .map(|radius| plane_fit_characteristics(raster, &integrals, radius))
         .filter(|scale| scale.window_count > 0)
         .collect::<Vec<_>>();
+    let orientation_curve = orientation_characteristics(raster, plane_radii);
     let roughness_exponent = roughness_exponent(&lag_curve);
     let fine_detail_share_r4_of_r32 = detail_share(&plane_fit_curve, 4, 32);
     let included_columns = included_heights.len();
@@ -182,10 +196,65 @@ pub fn analyze_terrain_height_raster(
         lag_curve,
         curvature,
         plane_fit_curve,
+        orientation_curve,
         roughness_exponent,
         fine_detail_share_r4_of_r32,
         fingerprint: raster_fingerprint(raster),
     })
+}
+
+fn orientation_characteristics(
+    raster: &TerrainHeightRaster,
+    radii: &[usize],
+) -> Vec<TerrainOrientationCharacteristics> {
+    if raster.width < 3 || raster.depth < 3 {
+        return Vec::new();
+    }
+    let gradients = TerrainGradientIntegrals::new(raster);
+    radii
+        .iter()
+        .copied()
+        .filter(|radius| radius * 2 + 1 <= raster.width.min(raster.depth))
+        .filter_map(|radius| {
+            let side = radius * 2 + 1;
+            let expected_count = side * side;
+            let mut coherence = Vec::new();
+            let mut diagonal_coherence = Vec::new();
+            for z in radius..raster.depth - radius {
+                for x in radius..raster.width - radius {
+                    let min_x = x - radius;
+                    let min_z = z - radius;
+                    let max_x = x + radius + 1;
+                    let max_z = z + radius + 1;
+                    if gradients.mask.rect(min_x, min_z, max_x, max_z) as usize != expected_count {
+                        continue;
+                    }
+                    let xx = gradients.xx.rect(min_x, min_z, max_x, max_z);
+                    let zz = gradients.zz.rect(min_x, min_z, max_x, max_z);
+                    let xz = gradients.xz.rect(min_x, min_z, max_x, max_z);
+                    let energy = xx + zz;
+                    if energy <= f64::EPSILON {
+                        coherence.push(0.0);
+                        diagonal_coherence.push(0.0);
+                        continue;
+                    }
+                    coherence.push(((xx - zz).hypot(2.0 * xz) / energy).clamp(0.0, 1.0));
+                    diagonal_coherence.push((2.0 * xz.abs() / energy).clamp(0.0, 1.0));
+                }
+            }
+            let coherence = value_distribution(coherence);
+            let diagonal = value_distribution(diagonal_coherence);
+            (coherence.sample_count > 0).then_some(TerrainOrientationCharacteristics {
+                radius_blocks: radius,
+                window_width_blocks: side,
+                window_count: coherence.sample_count,
+                mean_coherence: coherence.mean,
+                p90_coherence: coherence.p90,
+                mean_diagonal_coherence: diagonal.mean,
+                p90_diagonal_coherence: diagonal.p90,
+            })
+        })
+        .collect()
 }
 
 fn validate_scales(label: &str, scales: &[usize]) -> Result<(), String> {
@@ -455,6 +524,47 @@ struct TerrainIntegrals {
     z_height: IntegralF64,
 }
 
+struct TerrainGradientIntegrals {
+    mask: IntegralU64,
+    xx: IntegralF64,
+    zz: IntegralF64,
+    xz: IntegralF64,
+}
+
+impl TerrainGradientIntegrals {
+    fn new(raster: &TerrainHeightRaster) -> Self {
+        let mut mask = vec![0; raster.heights.len()];
+        let mut xx = vec![0.0; raster.heights.len()];
+        let mut zz = vec![0.0; raster.heights.len()];
+        let mut xz = vec![0.0; raster.heights.len()];
+        for z in 1..raster.depth - 1 {
+            for x in 1..raster.width - 1 {
+                if !raster.is_included(x, z)
+                    || !raster.is_included(x - 1, z)
+                    || !raster.is_included(x + 1, z)
+                    || !raster.is_included(x, z - 1)
+                    || !raster.is_included(x, z + 1)
+                {
+                    continue;
+                }
+                let gradient_x = (raster.height(x + 1, z) - raster.height(x - 1, z)) * 0.5;
+                let gradient_z = (raster.height(x, z + 1) - raster.height(x, z - 1)) * 0.5;
+                let index = z * raster.width + x;
+                mask[index] = 1;
+                xx[index] = gradient_x * gradient_x;
+                zz[index] = gradient_z * gradient_z;
+                xz[index] = gradient_x * gradient_z;
+            }
+        }
+        Self {
+            mask: IntegralU64::new(raster.width, raster.depth, &mask),
+            xx: IntegralF64::new(raster.width, raster.depth, &xx),
+            zz: IntegralF64::new(raster.width, raster.depth, &zz),
+            xz: IntegralF64::new(raster.width, raster.depth, &xz),
+        }
+    }
+}
+
 impl TerrainIntegrals {
     fn new(raster: &TerrainHeightRaster) -> Self {
         let mut mask = Vec::with_capacity(raster.heights.len());
@@ -561,6 +671,40 @@ mod tests {
                 .all(|scale| scale.pooled_rmse <= 1e-6)
         );
         assert!((analysis.roughness_exponent.unwrap() - 1.0).abs() <= 1e-9);
+    }
+
+    #[test]
+    fn local_orientation_distinguishes_diagonal_and_cardinal_planes() {
+        let width = 33;
+        let depth = 33;
+        let diagonal = (0..depth)
+            .flat_map(|z| (0..width).map(move |x| 70 + x as i32 + z as i32))
+            .collect::<Vec<_>>();
+        let cardinal = (0..depth)
+            .flat_map(|_| (0..width).map(move |x| 70 + x as i32))
+            .collect::<Vec<_>>();
+        let mask = vec![true; width * depth];
+        let diagonal = analyze_terrain_height_raster(
+            &TerrainHeightRaster::new(width, depth, diagonal, mask.clone()).unwrap(),
+            &[1, 2, 4, 8, 16],
+            &[2, 4, 8],
+        )
+        .unwrap();
+        let cardinal = analyze_terrain_height_raster(
+            &TerrainHeightRaster::new(width, depth, cardinal, mask).unwrap(),
+            &[1, 2, 4, 8, 16],
+            &[2, 4, 8],
+        )
+        .unwrap();
+
+        for scale in &diagonal.orientation_curve {
+            assert!((scale.mean_coherence - 1.0).abs() <= 1e-9);
+            assert!((scale.mean_diagonal_coherence - 1.0).abs() <= 1e-9);
+        }
+        for scale in &cardinal.orientation_curve {
+            assert!((scale.mean_coherence - 1.0).abs() <= 1e-9);
+            assert!(scale.mean_diagonal_coherence <= 1e-9);
+        }
     }
 
     #[test]
