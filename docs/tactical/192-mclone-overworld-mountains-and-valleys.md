@@ -1,9 +1,11 @@
 # Tactical 192: Mclone Overworld Mountains And Valleys
 
-Status: Slice 0 completed 2026-07-22 after Tactical 188 completed 2026-07-18.
-The product target, two-field vocabulary, reuse boundary, compatibility audit,
-and clean maps/performance baseline are recorded. No field or terrain output
-has landed yet; Slice 1 is next.
+Status: Slice 1 landed 2026-07-22 and Review 1 is ready for human judgment.
+The production maps and geometry matrix show connected mountain crests,
+traversable valleys, bounded coast transitions, and an unchanged lowland
+control. Existing height-only forest selection visibly blankets the relief;
+surface and vegetation response remains intentionally unimplemented until the
+geometry/scale review is accepted.
 
 Topic: `mclone-overworld-generation`
 
@@ -119,31 +121,62 @@ stored generation-quality policy.
 
 ### Slice 1: first concrete relief caller
 
-- [ ] Extend pure point and bounded-region samples through one production
+- [x] Extend pure point and bounded-region samples through one production
   implementation used by chunk generation and review maps.
-- [ ] Compose mountains only where continental and regional intent permits;
+- [x] Compose mountains only where continental and regional intent permits;
   preserve oceans, beaches, and the ordinary lowland control.
-- [ ] Produce connected crests, shoulders, foothills, and valley floors without
+- [x] Produce connected crests, shoulders, foothills, and valley floors without
   chunk seams or coordinate-sign assumptions.
-- [ ] Keep height and local slope within the approved first-slice bounds.
-- [ ] Pin raw foundation fields separately from new fields and derived height.
-- [ ] Capture the first drawable mountain and valley before biome/surface
+- [x] Keep height and local slope within the approved first-slice bounds.
+- [x] Pin raw foundation fields separately from new fields and derived height.
+- [x] Capture the first drawable mountain and valley before biome/surface
   response is broadened.
 
 Gate: the terrain geometry alone reads as a range and valley system.
 
 ### Review 1: geometry and scale
 
-- [ ] Inspect broad raw/derived maps for repetition, axes, grid artifacts,
+- [x] Inspect broad raw/derived maps for repetition, axes, grid artifacts,
   ridge fragmentation, and valley connectivity.
-- [ ] Inspect the approved landscape matrix for silhouette, traversal, coast
+- [x] Inspect the approved landscape matrix for silhouette, traversal, coast
   transition, foundation preservation, and spawn quality.
-- [ ] Record height percentiles, highland fraction, slope bands, connected
+- [x] Record height percentiles, highland fraction, slope bands, connected
   ridge/valley measures where useful, and generation cost.
 - [ ] Accept the geometry, tune existing composition, or add at most one field
   whose absence is demonstrated by the review.
 
 Gate: obtain human review before extracting helpers or changing content rules.
+
+Field revision 3 uses ruggedness scales 1,536 and 512 plus ridge-source scales
+768 and 256; all divide the planned 6,144-block periodic circumference. The
+ridge source is narrowed into connected crest bands and gated by inland
+continentalness and ruggedness. Ocean-floor composition is unchanged, and
+the dependency plan remains the existing 3-by-3 work/5-by-5 Surface footprint.
+
+The 385-by-385, 16-block-stride production maps reported:
+
+| Seed and center | Surface range | Mountain region | Valleys | Crests | Y>=105 | Y>=135 |
+|---|---:|---:|---:|---:|---:|---:|
+| `12345`, chunk `(0,0)` | 45-109 | 5,481 | 2,897 | 408 | 158 | 0 |
+| `-98765`, chunk `(-96,72)` | 47-152 | 12,904 | 4,110 | 3,207 | 3,685 | 623 |
+| `8675309`, chunk `(128,-96)` | 45-88 | 0 | 0 | 0 | 0 | 0 |
+
+The first matrix covers seed `12345` range interior `(-67,-120)`, seed
+`-98765` range interior `(-183,23)`, valley `(-199,32)`, and range edge
+`(-243,18)`, plus seed `8675309` lowland control `(122,-96)`. Internal review
+found no isolated cone field, unbroken wall, coordinate-axis discontinuity, or
+global uplift. Connected crest bands and broad valley routes are visible. The
+current card's low camera can be hidden by trees or rising terrain, and the
+height-only wooded-upland rule blankets many shoulders; those are presentation
+and terrain-language findings rather than demonstrated reasons for a third
+geometry field.
+
+On the same Linux host and command as Slice 0, the release Mclone surface path
+measured 3,007.452 chunks/s (8.3 percent below baseline), cold decorated
+targets 624.704 chunks/s, and warm decorated targets 4,095.526 chunks/s. Broad
+map sampling rose to roughly 19-22 ms for 148,225 points. Full cold throughput
+is inside the 25 percent review threshold, while the isolated sampler increase
+remains an attribution baseline for periodic fields and rivers.
 
 ### Slice 2: terrain-language response
 

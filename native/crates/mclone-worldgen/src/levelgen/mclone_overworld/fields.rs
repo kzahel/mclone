@@ -3,7 +3,7 @@ use mclone_core::ChunkPos;
 use crate::noise::{SeedDomain, ValueNoise2d};
 
 pub const MCLONE_OVERWORLD_SEA_LEVEL: i32 = 63;
-pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-2";
+pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-3";
 
 const CONTINENT_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_636f_6e31);
 const CONTINENT_MEDIUM_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_636f_6e32);
@@ -11,6 +11,10 @@ const CONTINENT_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_636f_6e3
 const RELIEF_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7265_6c31);
 const RELIEF_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7265_6c32);
 const RELIEF_FINE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7265_6c33);
+const RUGGEDNESS_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7275_6731);
+const RUGGEDNESS_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7275_6732);
+const RIDGE_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_6431);
+const RIDGE_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_6432);
 
 const CONTINENT_LARGE_SCALE: i32 = 2_048;
 const CONTINENT_MEDIUM_SCALE: i32 = 1_024;
@@ -18,6 +22,10 @@ const CONTINENT_DETAIL_SCALE: i32 = 512;
 const RELIEF_LARGE_SCALE: i32 = 384;
 const RELIEF_DETAIL_SCALE: i32 = 128;
 const RELIEF_FINE_SCALE: i32 = 48;
+const RUGGEDNESS_LARGE_SCALE: i32 = 1_536;
+const RUGGEDNESS_DETAIL_SCALE: i32 = 512;
+const RIDGE_LARGE_SCALE: i32 = 768;
+const RIDGE_DETAIL_SCALE: i32 = 256;
 const MAX_REGION_SAMPLE_COUNT: usize = 16 * 1024 * 1024;
 const SPAWN_SEARCH_RADIUS_CHUNKS: i32 = 128;
 const SPAWN_MIN_SURFACE_Y: i32 = MCLONE_OVERWORLD_SEA_LEVEL + 5;
@@ -26,7 +34,15 @@ const SPAWN_MIN_SURFACE_Y: i32 = MCLONE_OVERWORLD_SEA_LEVEL + 5;
 pub struct McloneOverworldTerrainSample {
     pub continentalness: f64,
     pub relief: f64,
+    pub ruggedness: f64,
+    pub ridges: f64,
     pub surface_y: i32,
+}
+
+impl McloneOverworldTerrainSample {
+    pub fn mountain_strength(self) -> f64 {
+        mountain_strength(self.continentalness, self.ruggedness)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -63,6 +79,10 @@ pub struct McloneOverworldSampler {
     relief_large: ValueNoise2d,
     relief_detail: ValueNoise2d,
     relief_fine: ValueNoise2d,
+    ruggedness_large: ValueNoise2d,
+    ruggedness_detail: ValueNoise2d,
+    ridge_large: ValueNoise2d,
+    ridge_detail: ValueNoise2d,
 }
 
 impl McloneOverworldSampler {
@@ -82,6 +102,18 @@ impl McloneOverworldSampler {
             relief_large: ValueNoise2d::new(seed, RELIEF_LARGE_DOMAIN, RELIEF_LARGE_SCALE),
             relief_detail: ValueNoise2d::new(seed, RELIEF_DETAIL_DOMAIN, RELIEF_DETAIL_SCALE),
             relief_fine: ValueNoise2d::new(seed, RELIEF_FINE_DOMAIN, RELIEF_FINE_SCALE),
+            ruggedness_large: ValueNoise2d::new(
+                seed,
+                RUGGEDNESS_LARGE_DOMAIN,
+                RUGGEDNESS_LARGE_SCALE,
+            ),
+            ruggedness_detail: ValueNoise2d::new(
+                seed,
+                RUGGEDNESS_DETAIL_DOMAIN,
+                RUGGEDNESS_DETAIL_SCALE,
+            ),
+            ridge_large: ValueNoise2d::new(seed, RIDGE_LARGE_DOMAIN, RIDGE_LARGE_SCALE),
+            ridge_detail: ValueNoise2d::new(seed, RIDGE_DETAIL_DOMAIN, RIDGE_DETAIL_SCALE),
         }
     }
 
@@ -94,10 +126,19 @@ impl McloneOverworldSampler {
             + self.relief_detail.sample(world_x, world_z) * 0.30
             + self.relief_fine.sample(world_x, world_z) * 0.20)
             .clamp(-1.0, 1.0);
+        let ruggedness = (self.ruggedness_large.sample(world_x, world_z) * 0.72
+            + self.ruggedness_detail.sample(world_x, world_z) * 0.28)
+            .clamp(-1.0, 1.0);
+        let ridge_source = self.ridge_large.sample(world_x, world_z) * 0.78
+            + self.ridge_detail.sample(world_x, world_z) * 0.22;
+        let ridge_linear = (1.0 - ridge_source.abs()).clamp(0.0, 1.0);
+        let ridges = ridge_linear * ridge_linear;
         McloneOverworldTerrainSample {
             continentalness,
             relief,
-            surface_y: surface_height(continentalness, relief),
+            ruggedness,
+            ridges,
+            surface_y: surface_height(continentalness, relief, ruggedness, ridges),
         }
     }
 
@@ -183,7 +224,7 @@ pub fn mclone_overworld_spawn_chunk(seed: i64) -> ChunkPos {
     ChunkPos::new(0, 0)
 }
 
-fn surface_height(continentalness: f64, relief: f64) -> i32 {
+fn surface_height(continentalness: f64, relief: f64, ruggedness: f64, ridges: f64) -> i32 {
     if continentalness <= 0.0 {
         let shallow_water = smoothstep(((continentalness + 0.55) / 0.55).clamp(0.0, 1.0));
         let floor = 46.0 + shallow_water * 15.0 + relief * 1.5;
@@ -193,7 +234,19 @@ fn surface_height(continentalness: f64, relief: f64) -> i32 {
     let land_strength = smoothstep((continentalness / 0.45).clamp(0.0, 1.0));
     let base = 64.0 + land_strength * 18.0;
     let rolling_relief = relief * (2.0 + land_strength * 7.0);
-    (base + rolling_relief).round().clamp(62.0, 96.0) as i32
+    let mountain_strength = mountain_strength(continentalness, ruggedness);
+    let ridge_shoulder = smoothstep(((ridges - 0.12) / 0.88).clamp(0.0, 1.0));
+    let mountain_lift =
+        mountain_strength * (4.0 + ridge_shoulder * 16.0 + ridge_shoulder * ridge_shoulder * 54.0);
+    (base + rolling_relief + mountain_lift)
+        .round()
+        .clamp(62.0, 160.0) as i32
+}
+
+fn mountain_strength(continentalness: f64, ruggedness: f64) -> f64 {
+    let inland = smoothstep(((continentalness - 0.08) / 0.42).clamp(0.0, 1.0));
+    let region = smoothstep(((ruggedness + 0.20) / 0.90).clamp(0.0, 1.0));
+    inland * region
 }
 
 fn smoothstep(value: f64) -> f64 {
@@ -229,6 +282,64 @@ mod tests {
             }
         }
         assert_eq!(region.sample(request.width, 0), None);
+    }
+
+    #[test]
+    fn mountain_strength_requires_inland_rugged_terrain() {
+        assert_eq!(mountain_strength(-0.1, 1.0), 0.0);
+        assert_eq!(mountain_strength(1.0, -0.2), 0.0);
+        assert_eq!(mountain_strength(1.0, 0.7), 1.0);
+        assert!(mountain_strength(0.3, 0.3) > 0.0);
+        assert!(mountain_strength(0.3, 0.3) < 1.0);
+    }
+
+    #[test]
+    fn mountain_fields_are_bounded_across_signed_coordinates() {
+        let sampler = McloneOverworldSampler::new(-98_765);
+        for (x, z) in [
+            (i32::MIN + 1, i32::MAX),
+            (-6_145, -6_143),
+            (-1, 0),
+            (0, -1),
+            (6_143, 6_145),
+        ] {
+            let sample = sampler.sample(x, z);
+            assert!((-1.0..=1.0).contains(&sample.ruggedness));
+            assert!((0.0..=1.0).contains(&sample.ridges));
+        }
+    }
+
+    #[test]
+    fn selected_signed_points_pin_mountain_fields() {
+        let samples = [
+            (12_345, 0, 0),
+            (-98_765, -3_176, 520),
+            (8_675_309, 1_960, -1_528),
+        ]
+        .map(|(seed, x, z)| {
+            let sample = McloneOverworldSampler::new(seed).sample(x, z);
+            (sample.ruggedness.to_bits(), sample.ridges.to_bits())
+        });
+        assert_eq!(
+            samples,
+            [
+                (13_826_408_511_758_480_080, 4_606_201_729_120_264_332),
+                (4_602_433_175_868_524_518, 4_598_042_119_136_150_074),
+                (13_827_819_183_377_043_075, 4_605_782_885_895_260_980),
+            ]
+        );
+    }
+
+    #[test]
+    fn ocean_floor_ignores_mountain_fields() {
+        for ruggedness in [-1.0, 0.0, 1.0] {
+            for ridges in [0.0, 0.5, 1.0] {
+                assert_eq!(
+                    surface_height(-0.4, 0.25, ruggedness, ridges),
+                    surface_height(-0.4, 0.25, 0.0, 0.0)
+                );
+            }
+        }
     }
 
     #[test]

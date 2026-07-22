@@ -134,6 +134,7 @@ mod tests {
         let fingerprints = [12_345, -98_765, 8_675_309].map(|seed| {
             let sampler = McloneOverworldSampler::new(seed);
             let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+            let mut foundation_hash = 0xcbf2_9ce4_8422_2325_u64;
             let mut land = 0;
             let mut water = 0;
             for z in (-2_048..2_048).step_by(16) {
@@ -150,23 +151,35 @@ mod tests {
                         .to_le_bytes()
                         .into_iter()
                         .chain(sample.relief.to_bits().to_le_bytes())
+                        .chain(sample.ruggedness.to_bits().to_le_bytes())
+                        .chain(sample.ridges.to_bits().to_le_bytes())
                         .chain(sample.surface_y.to_le_bytes())
                     {
                         hash ^= u64::from(byte);
                         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
                     }
+                    for byte in sample
+                        .continentalness
+                        .to_bits()
+                        .to_le_bytes()
+                        .into_iter()
+                        .chain(sample.relief.to_bits().to_le_bytes())
+                    {
+                        foundation_hash ^= u64::from(byte);
+                        foundation_hash = foundation_hash.wrapping_mul(0x0000_0100_0000_01b3);
+                    }
                 }
             }
             assert!(land > 0, "seed {seed} had no land");
             assert!(water > 0, "seed {seed} had no water");
-            hash
+            (hash, foundation_hash)
         });
         assert_eq!(
             fingerprints,
             [
-                4_555_534_153_015_019_042,
-                18_040_415_189_221_613_033,
-                3_809_513_469_643_986_681,
+                (5_180_832_238_175_102_046, 540_454_697_130_909_605),
+                (3_045_799_481_234_307_995, 3_995_179_115_581_767_979),
+                (991_073_067_360_857_874, 14_722_381_067_837_031_305),
             ]
         );
     }
@@ -212,19 +225,19 @@ mod tests {
             receipts,
             [
                 (
-                    [21_961, 8_677, 18_012, 16_886],
-                    [13_072, 17_566, 34_698, 200],
-                    1_553_751_596_871_636_624,
+                    [21_961, 8_401, 15_387, 19_787],
+                    [13_072, 17_290, 34_968, 206],
+                    16_281_986_092_053_109_921,
                 ),
                 (
-                    [17_223, 7_179, 9_432, 31_702],
-                    [8_521, 15_881, 40_253, 881],
-                    9_869_182_724_332_914_468,
+                    [17_223, 7_088, 8_156, 33_069],
+                    [8_521, 15_790, 40_320, 905],
+                    10_942_147_653_060_848_687,
                 ),
                 (
-                    [33_641, 11_970, 9_716, 10_209],
-                    [21_336, 24_275, 19_814, 111],
-                    8_785_814_785_668_338_928,
+                    [33_641, 11_634, 9_858, 10_403],
+                    [21_336, 23_939, 20_150, 111],
+                    14_541_626_491_678_176_828,
                 ),
             ]
         );

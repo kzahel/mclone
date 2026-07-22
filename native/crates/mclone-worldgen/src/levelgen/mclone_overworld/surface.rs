@@ -85,6 +85,8 @@ mod tests {
         McloneOverworldTerrainSample {
             continentalness: 0.25,
             relief,
+            ruggedness: 0.0,
+            ridges: 0.0,
             surface_y,
         }
     }

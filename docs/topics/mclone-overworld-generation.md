@@ -9,13 +9,14 @@ internal-mutable `mclone-overworld-v1` profile while `overworld` remains the
 Minecraft Java 1.17.1 reference path. Tactical
 [`188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md) is complete.
 Tactical [`192`](../tactical/192-mclone-overworld-mountains-and-valleys.md)
-completed its clean Slice 0 baseline and selected its first field vocabulary
-on 2026-07-22; no mountain output has landed yet. The shared Flat Grass
-cylinder proof is complete; [`196`](../tactical/196-periodic-mclone-terrain-fields.md)
-is planned after the first accepted Tactical 192 field set and before rivers,
-climate breadth, or structures. The selected terrain sequence is mountains
-and valleys, periodic production fields, rivers and wetlands, then coherent
-streams, cascades, and waterfall reaches.
+landed its first two-field mountain geometry on 2026-07-22 and is paused at
+Review 1 for human judgment of geometry and scale before terrain-language
+rules change. The shared Flat Grass cylinder proof is complete;
+[`196`](../tactical/196-periodic-mclone-terrain-fields.md) is planned after the
+first accepted Tactical 192 field set and before rivers, climate breadth, or
+structures. The selected terrain sequence is mountains and valleys, periodic
+production fields, rivers and wetlands, then coherent streams, cascades, and
+waterfall reaches.
 
 ## Scope
 
@@ -310,19 +311,31 @@ and geological modifiers need a path to profile-owned 3D density or material
 sampling. Small Island may remain columnar if forcing it through a density
 pipeline adds no value.
 
-The live first request/response type contains only `continentalness: f64`,
-`relief: f64`, and `surface_y: i32`. Point and bounded row-major region
-requests call the same production sampler used by chunk generation. The
-region form is deliberately an in-process worldgen inspection seam, not a
-second scheduler/Worker protocol.
+The live request/response type contains `continentalness: f64`, `relief: f64`,
+`ruggedness: f64`, normalized `ridges: f64`, and derived `surface_y: i32`.
+Point and bounded row-major region requests call the same production sampler
+used by chunk generation. The region form is deliberately an in-process
+worldgen inspection seam, not a second scheduler/Worker protocol.
 
 Field revision 2 composes continentalness at 2,048, 1,024, and 512-block
 scales and relief at 384, 128, and a low-weight 48-block scale. Review 1 added
 the fine relief octave after initial cards exposed concentric contour bands;
-it did not add a new public semantic field. `pnpm native:worldgen:fields`
-writes broad production-backed maps and quantitative receipts, while
-`pnpm native:worldgen:card --generation-profile mclone-overworld-v1 ...`
-writes fully warmed seed/region and spawn cards.
+it did not add a new public semantic field.
+
+Field revision 3 preserves those raw fields and adds broad ruggedness at 1,536
+and 512 blocks plus a ridged crest source at 768 and 256 blocks. Every new
+scale divides the provisional 6,144-block periodic circumference. The terrain
+formula narrows the signed ridge source into connected crest bands, gates
+their lift by inland continentalness and ruggedness, and leaves ocean-floor
+height independent from the new fields. Strong interior crests can reach
+Y=160, while low ridge values within the same region remain traversable valley
+floors. No neighborhood search or new generation dependency footprint is
+involved.
+
+`pnpm native:worldgen:fields` now writes all five production-backed maps,
+foundation/new-field fingerprints, landform counts, and selected range,
+valley, edge, and lowland review sites. The fully warmed card tool writes
+rendered review views from those production-selected centers.
 
 ## Reuse Boundary
 
@@ -547,13 +560,13 @@ Do not create a debug-only approximation of the terrain formula.
 
 ## Next Work
 
-Begin [`Tactical 192`](../tactical/192-mclone-overworld-mountains-and-valleys.md)
-with its pre-slice product and reuse inventory. Add only the ridge and
-ruggedness/erosion signals used by the first mountain/valley rule, review their
-production maps and first landscapes before abstraction, and then reserve a
+Review Tactical 192's field maps and first geometry matrix before changing its
+surface and vegetation language. If accepted, make the existing biome,
+surface, and decoration rules react to the landed relief, then reserve a
 dedicated reuse/refactor checkpoint. Do not fold rivers, climate breadth,
-caves, or structures into that tactical. After its first field set is accepted,
-execute [`Tactical 196`](../tactical/196-periodic-mclone-terrain-fields.md):
+caves, or structures into that tactical. After its field set and terrain
+language are accepted, execute
+[`Tactical 196`](../tactical/196-periodic-mclone-terrain-fields.md):
 re-audit every live field scale, select the explicit periodic sampler and
 circumference, then route terrain and decoration through canonical outputs plus
 coherent seam work lifts. Do not add rivers or climate breadth before that
