@@ -14,7 +14,7 @@ use crate::levelgen::{
 use super::decoration::{
     decorate_mclone_overworld_center, decorate_mclone_overworld_center_with_topology,
 };
-use super::fields::McloneOverworldSamplingTopology;
+use super::fields::{MCLONE_OVERWORLD_PERIOD_CHUNKS, McloneOverworldSamplingTopology};
 use super::terrain::{
     generate_mclone_overworld_surface_buffer,
     generate_mclone_overworld_surface_buffer_with_topology, mclone_overworld_chunk_biomes,
@@ -189,6 +189,80 @@ impl McloneOverworldFeatureDependencyCache {
         let cache_report = mclone_overworld_cache_report(report);
         let mut chunks = BTreeMap::new();
 
+        if let Some(work_targets) = coherent_periodic_work_targets(&targets) {
+            let work_plan =
+                ChunkGenerationPlan::mclone_overworld_features(work_targets.values().copied());
+            let mut region_chunks = work_plan
+                .prerequisites()
+                .iter()
+                .map(|requirement| {
+                    let canonical = ChunkPos::new(
+                        topology.canonical_chunk_x(requirement.pos.x),
+                        requirement.pos.z,
+                    );
+                    let mut chunk = retained_dependencies
+                        .get(&canonical)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "periodic Mclone feature region omitted canonical dependency ({}, {})",
+                                canonical.x, canonical.z
+                            )
+                        })
+                        .clone();
+                    chunk.chunk_x = requirement.pos.x;
+                    chunk.chunk_z = requirement.pos.z;
+                    chunk
+                })
+                .collect::<Vec<_>>();
+            region_chunks.sort_by_key(|chunk| (chunk.chunk_z, chunk.chunk_x));
+            let first_work_target = *work_targets
+                .values()
+                .next()
+                .expect("non-empty coherent periodic target set");
+            let mut region =
+                FeatureRegion::new(first_work_target.x, first_work_target.z, region_chunks);
+            for center in
+                sorted_chunk_positions_z_major(work_plan.backend_work_chunks().iter().copied())
+            {
+                region.set_center_with_decoration_identity(
+                    center.x,
+                    center.z,
+                    topology.canonical_chunk_x(center.x),
+                    center.z,
+                );
+                decorate_mclone_overworld_center_with_topology(seed, topology, &mut region);
+            }
+
+            for (canonical, work) in work_targets {
+                let mut chunk = region.remove_chunk(work.x, work.z).unwrap_or_else(|| {
+                    panic!(
+                        "periodic Mclone feature region omitted lifted target ({}, {})",
+                        work.x, work.z
+                    )
+                });
+                chunk.chunk_x = canonical.x;
+                chunk.chunk_z = canonical.z;
+                chunks.insert(
+                    canonical,
+                    GeneratedChunk::from_mutable_buffer_with_biomes(
+                        chunk,
+                        mclone_overworld_chunk_biomes_with_topology(
+                            seed,
+                            topology,
+                            chunk_min_block_coord(canonical.x),
+                            chunk_min_block_coord(canonical.z),
+                        ),
+                    ),
+                );
+            }
+
+            return McloneOverworldFeatureBatchResult {
+                chunks,
+                retained_dependencies,
+                cache_report,
+            };
+        }
+
         for target in targets {
             let work_plan = ChunkGenerationPlan::mclone_overworld_features([target]);
             let mut region_chunks = work_plan
@@ -255,6 +329,32 @@ impl McloneOverworldFeatureDependencyCache {
             cache_report,
         }
     }
+}
+
+const MAX_COHERENT_PERIODIC_TARGET_SPAN_CHUNKS: i32 = 64;
+
+fn coherent_periodic_work_targets(
+    targets: &std::collections::BTreeSet<ChunkPos>,
+) -> Option<BTreeMap<ChunkPos, ChunkPos>> {
+    let anchor = *targets.iter().next()?;
+    let period = MCLONE_OVERWORLD_PERIOD_CHUNKS as i32;
+    let mut lifted = BTreeMap::new();
+    for target in targets {
+        let forward = (target.x - anchor.x).rem_euclid(period);
+        let offset_x = if forward > period / 2 {
+            forward - period
+        } else {
+            forward
+        };
+        lifted.insert(*target, ChunkPos::new(anchor.x + offset_x, target.z));
+    }
+    let min_x = lifted.values().map(|pos| pos.x).min()?;
+    let max_x = lifted.values().map(|pos| pos.x).max()?;
+    let min_z = lifted.values().map(|pos| pos.z).min()?;
+    let max_z = lifted.values().map(|pos| pos.z).max()?;
+    ((max_x - min_x) <= MAX_COHERENT_PERIODIC_TARGET_SPAN_CHUNKS
+        && (max_z - min_z) <= MAX_COHERENT_PERIODIC_TARGET_SPAN_CHUNKS)
+        .then_some(lifted)
 }
 
 fn canonical_periodic_plan(
