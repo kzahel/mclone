@@ -1,10 +1,13 @@
 # Tactical 196: Periodic Mclone Terrain Fields
 
-Status: active after Human Review 3 accepted Tactical 192's field revision 6
-on 2026-07-22. Tactical 195's cylinder runtime contract is complete; Mclone
-Overworld remains explicitly unsupported on periodic topology until this
-tactical lands. This is the selected enabling phase between mountain/valley
-acceptance and the first river/wetland field.
+Status: complete 2026-07-22. The exact 6,144-block / 384-chunk X-periodic
+Mclone Overworld is a supported persisted profile/topology pair across shared
+generation, native and browser Workers, SQLite and IndexedDB, and the current
+platform gates. Agent inspection accepted a decorated render-distance-16
+wooded upland crossing the seam for the objective continuity gate. Rivers,
+wetlands, streams, cascades, waterfalls,
+caves, structures, finite Mclone worlds, torus topology, and far LOD remain
+explicitly absent.
 
 Topic: `bounded-world-topology`
 
@@ -206,60 +209,125 @@ Execution record 2026-07-22:
 
 ### Slice 1: periodic production fields
 
-- [ ] Add an explicit periodic sampler mode without changing the ordinary
+- [x] Add an explicit periodic sampler mode without changing the ordinary
   `ValueNoise2d` path.
-- [ ] Prove periodic value and seam-slope continuity for positive and negative
+- [x] Prove periodic value and seam-slope continuity for positive and negative
   coordinates and every field scale.
-- [ ] Route point and region samples through the same production implementation.
-- [ ] Generate adjacent canonical seam chunks through coherent work lifts.
-- [ ] Extend field receipts with topology, period, seam strips, and ordinary
+- [x] Route point and region samples through the same production implementation.
+- [x] Generate adjacent canonical seam chunks through coherent work lifts.
+- [x] Extend field receipts with topology, period, seam strips, and ordinary
   control hashes.
 
 Gate: raw fields and derived terrain meet before feature planning changes.
 
+Execution record 2026-07-22:
+
+- `ValueNoise2d` and `GradientNoise2d` retain their exact ordinary
+  constructors and gain explicit periodic-X constructors. Only lattice X
+  identity wraps; local interpolation coordinates and Z remain unbounded;
+- `McloneOverworldSamplingTopology` admits either `Unbounded` or the exact
+  `PeriodicX` circumference. Point and region samplers, field receipts, biome
+  and surface callers all consume that same production value;
+- property and fixture tests cover every live scale, signed lifts, the seam's
+  values and finite-difference slopes, point/region equality, and exact
+  unbounded control hashes; and
+- the feature batch retains target-relative work coordinates while decoration
+  random identity and output ownership remain canonical. Normal seam-spanning
+  target rectangles receive one coherent lift instead of degenerating into
+  one independent generation pass per target.
+
 ### Slice 2: terrain, biome, and surface seam
 
-- [ ] Enable the selected Mclone profile/topology pair at dimension admission.
-- [ ] Generate canonical chunks `P - 1` and `0` with continuous terrain,
+- [x] Enable the selected Mclone profile/topology pair at dimension admission.
+- [x] Generate canonical chunks `P - 1` and `0` with continuous terrain,
   biome, surface, and packed payload facts.
-- [ ] Prove ordinary unbounded chunks and reference Overworld locks unchanged.
-- [ ] Capture broad periodic field maps and rendered views approaching,
+- [x] Prove ordinary unbounded chunks and reference Overworld locks unchanged.
+- [x] Capture broad periodic field maps and rendered views approaching,
   crossing, and looking along the seam.
-- [ ] Review repetition, circumference-scale landmarks, silhouette, coast, and
+- [x] Review repetition, circumference-scale landmarks, silhouette, coast, and
   valley continuity before adding decoration.
 
 Gate: a player can cross a generated Mclone seam with no content discontinuity.
 
+Execution record 2026-07-22:
+
+- dimension admission accepts plane or exactly `cylinder-x:384` for
+  `mclone-overworld-v1`; mismatched cylinders and finite axes fail explicitly;
+- broad full-circumference field and terrain-language maps show identical left
+  and right boundaries without hiding the seam through a terrain retune; and
+- inspected render-distance-16 cards cover beach and wooded-upland seams. The
+  accepted upland card at
+  `/tmp/mclone-periodic-seam-upland/mclone-overworld-v1-seed-neg98765-chunk-0-neg80-card.png`
+  shows continuous skyline, terraces, trees, and surface language across the
+  canonical `383/0` boundary from above-ground top-down, landscape, and
+  elevated perspectives.
+
 ### Slice 3: dependency and decoration seam
 
-- [ ] Make the Mclone feature plan enumerate canonical outputs plus coherent
+- [x] Make the Mclone feature plan enumerate canonical outputs plus coherent
   lifted centers and Surface prerequisites.
-- [ ] Adapt `FeatureRegion` reads/writes at the topology boundary and retain one
+- [x] Adapt `FeatureRegion` reads/writes at the topology boundary and retain one
   canonical owner per placed feature.
-- [ ] Make `SurfaceDependencyCache` topology-qualified and seam-deduplicated.
-- [ ] Prove trees, grass, and flowers crossing the seam under combined,
+- [x] Make `SurfaceDependencyCache` topology-qualified and seam-deduplicated.
+- [x] Prove trees, grass, and flowers crossing the seam under combined,
   partitioned, reversed-order, native-thread, and browser-Worker execution.
-- [ ] Verify spawn selection and safe player placement use the same periodic
+- [x] Verify spawn selection and safe player placement use the same periodic
   terrain facts.
 
 Gate: the current complete Mclone generation plan, not only base terrain, is
 periodic and deterministic.
 
+Execution record 2026-07-22:
+
+- `FeatureWorld` separates work placement from canonical decoration identity,
+  and canonicalizes reads and writes only at the topology-aware adapter;
+- dependency cache keys include sampling topology. Seam batches deduplicate
+  canonical prerequisites while preserving one rectangular lifted workspace;
+- combined, partitioned, reversed, and signed-lift tests lock identical packed
+  terrain, biome, surface, tree, grass, and flower output; and
+- spawn search, scheduler execution, job codec, integrated sessions, app
+  runtime, and scene startup carry the exact stored descriptor rather than
+  reconstructing topology in a host.
+
 ### Slice 4: persisted and platform closeout
 
-- [ ] Save edits and generated seam chunks through SQLite and IndexedDB,
+- [x] Save edits and generated seam chunks through SQLite and IndexedDB,
   reopen, and retain one canonical payload per chunk.
-- [ ] Prove local, TCP, and WebSocket clients receive the same topology and
+- [x] Prove local, TCP, and WebSocket clients receive the same topology and
   generated chunk facts.
-- [ ] Compare ordinary/cylinder generation time, cache hits, worker bytes,
+- [x] Compare ordinary/cylinder generation time, cache hits, worker bytes,
   startup, storage, and resident memory.
-- [ ] Run workspace, native pixel, production browser Worker, Android proxy,
+- [x] Run workspace, native pixel, production browser Worker, Android proxy,
   and available XR gates.
-- [ ] Update topology and Mclone support matrices with exact unsupported
+- [x] Update topology and Mclone support matrices with exact unsupported
   families and the next river/wetland boundary.
 
 Gate: periodic Mclone terrain is a supported persisted profile/topology pair
 and later content work consumes its sampler contract.
+
+Execution record 2026-07-22:
+
+- SQLite and production IndexedDB reload tests edit one canonical seam block,
+  reopen the world, and resolve the same value through canonical, negative,
+  and positive lifts. IndexedDB retained one dimension and 121 generated
+  chunks in the exercised view;
+- existing local, TCP, WebSocket, protocol, view, and persistence locks pass
+  with the generic exact topology descriptor. The production browser used the
+  shared-memory Web Worker and Rust-owned startup descriptor; smoke-only
+  TypeScript observes but does not reinterpret that policy;
+- at seed `-98765`, radius three, and three release iterations, plane versus
+  cylinder measured 1,133.096 versus 1,115.150 cold decorated targets/s and
+  6,079.168 versus 5,885.992 warm targets/s: 1.6 and 3.2 percent overhead.
+  Surface-only sampling measured 3,378.742 versus 2,573.646 chunks/s and is an
+  attribution warning, not representative of full cold target cost. Both
+  paths made 363 dependency requests: cold generated all 363 and warm hit all
+  363. Cross-host timings remain diagnostic rather than compatibility facts;
+- the browser Worker request was about 1 KiB and its generated response about
+  23 MiB for the exercised render-distance view. This tactical does not claim
+  a transport compression result or a resident-memory improvement; and
+- the worldgen, server, app-runtime, scene, web architecture-lock/typecheck,
+  browser WebGPU/IndexedDB, native XR check, Android APK, and Quest APK gates
+  pass. Far LOD continues to reject periodic topology explicitly.
 
 The preferred next content tactical is rivers and wetlands. It should add one
 inspectable production river influence and the minimum water-level, bank,

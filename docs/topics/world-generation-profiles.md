@@ -362,22 +362,23 @@ World topology and generation profile remain separate dimension facts, but a
 profile/topology pair must be explicitly supported. Tactical
 [`195`](../tactical/195-periodic-cylinder-topology-proof.md) completed the
 identity-topology baseline, finite-bound canary, and Flat Grass cylinder.
-Tactical [`196`](../tactical/196-periodic-mclone-terrain-fields.md) now owns the
-first genuine periodic Mclone sampler after Tactical 192's first accepted
-mountain/valley fields and before rivers, climate breadth, or structures.
+Tactical [`196`](../tactical/196-periodic-mclone-terrain-fields.md) completed
+the first genuine periodic Mclone sampler after Tactical 192's accepted
+mountain/valley fields.
 
 Flat Grass explicitly admits finite and periodic-X topology, while Authored
-Only admits fixture use. Reference Overworld, Mclone Overworld, Small Island,
-Alpha, and Beta still reject bounded or periodic topology during dimension
-registration. The cylinder runtime contract is complete; canonical wrapping
-alone does not make the existing Mclone planar fields periodic.
+Only admits fixture use. Mclone Overworld admits the plane and exactly
+`cylinder-x:384`; different cylinder periods and finite axes remain explicit
+errors. Reference Overworld, Small Island, Alpha, and Beta still reject
+bounded or periodic topology during dimension registration. Canonical runtime
+wrapping alone does not make a planar field periodic.
 
 Current `mclone-overworld-v1` support is:
 
 | Family | Plane | Finite | Cylinder | Torus | Cube atlas |
 |---|---|---|---|---|---|
-| Terrain fields | supported | pending | Tactical 196 planned | pending | design only |
-| Features | supported | pending | Tactical 196 planned | pending | design only |
+| Terrain fields | supported | unsupported | supported at 384 chunks | pending | design only |
+| Features | supported | unsupported | supported at 384 chunks | pending | design only |
 | Rivers/hydrology | absent | - | - | - | - |
 | Mclone caves | absent | - | - | - | - |
 | Mclone structures | absent | - | - | - | - |
@@ -412,18 +413,15 @@ output-identical columnar biome payload traversal and the Small Island/Mclone
 Surface dependency-cache lifecycle; profile rule composition remains
 concrete. The accepted terrain and reuse direction lives in
 [`mclone-overworld-generation.md`](mclone-overworld-generation.md), and
-[`Tactical 192`](../tactical/192-mclone-overworld-mountains-and-valleys.md)
-owns the next bounded mountain/valley family. Tactical
-[`195`](../tactical/195-periodic-cylinder-topology-proof.md) is complete;
-[`196`](../tactical/196-periodic-mclone-terrain-fields.md) follows the first
-accepted Tactical 192 field set and must complete before rivers, hydrology,
-climate breadth, or major structure work.
+[`Tactical 192`](../tactical/192-mclone-overworld-mountains-and-valleys.md),
+[`195`](../tactical/195-periodic-cylinder-topology-proof.md), and
+[`196`](../tactical/196-periodic-mclone-terrain-fields.md) are complete.
 
-The selected project campaign is therefore Tactical 192 mountains/valleys,
-Tactical 196 periodic production fields, a bounded rivers/wetlands family, and
-then coherent stream/cascade/waterfall reaches. True structure infrastructure
-remains ready as a separate concern but is parked while this terrain campaign
-advances.
+The selected project campaign is therefore now at a bounded rivers/wetlands
+family, followed by coherent stream/cascade/waterfall reaches. New Mclone
+fields must join the same exact plane/384-chunk-cylinder sampler contract from
+their first production revision. True structure infrastructure remains ready
+as a separate concern but is parked while this terrain campaign advances.
 
 True native structure infrastructure and original mclone structures remain a
 separate follow-up. Before adding it, extend the typed artifact vocabulary for

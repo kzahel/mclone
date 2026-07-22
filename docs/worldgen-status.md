@@ -20,9 +20,9 @@ and mountains/valleys continue in
 [`tactical/192-mclone-overworld-mountains-and-valleys.md`](tactical/192-mclone-overworld-mountains-and-valleys.md).
 The finite/periodic runtime proof is complete in
 [`tactical/195-periodic-cylinder-topology-proof.md`](tactical/195-periodic-cylinder-topology-proof.md);
-genuinely periodic Mclone fields and features are planned in
+genuinely periodic Mclone fields and features are complete in
 [`tactical/196-periodic-mclone-terrain-fields.md`](tactical/196-periodic-mclone-terrain-fields.md)
-after the first accepted Tactical 192 field set.
+for the plane and exact 384-chunk X cylinder.
 This is now the selected project campaign: mountains/valleys, periodic fields,
 rivers/wetlands, then coherent stream, cascade, and waterfall reaches. Caves
 and structures remain parked while those terrain families advance.
@@ -60,8 +60,9 @@ Landed native coverage:
 - Exact `flat-grass-v1` bedrock/dirt/grass layers, plains biomes, empty tick
   payloads, origin spawn policy, native/dedicated publication, and save/reopen
   coverage. It now supports authoritative finite dimensions and a persisted,
-  networked 32-chunk periodic-X cylinder; other procedural profiles still
-  reject non-Euclidean topology explicitly.
+  networked 32-chunk periodic-X cylinder. Mclone Overworld additionally
+  supports its exact 384-chunk periodic-X cylinder; other procedural profiles
+  still reject non-Euclidean topology explicitly.
 - Bounded `small-island-v1` world-coordinate terrain with seeded shoreline and
   relief, a guaranteed central spawn patch, plains/beach/ocean biomes,
   native/dedicated publication, seam/partition locks, and save/reopen coverage.
@@ -140,9 +141,10 @@ Still not full vanilla parity:
   continuous mclone overworld now exists but has only a deliberately narrow
   terrain/material/biome/vegetation palette; its first mountain family remains
   under review, and it has no rivers, caves, or structures
-- Mclone Overworld terrain and features remain planar until Tactical 196 makes
-  their production samplers, dependency plans, and feature writes periodic;
-  canonical chunk wrapping alone is intentionally rejected
+- Mclone Overworld terrain, biome, surface, spawn, and existing vegetation are
+  periodic for the exact 384-chunk X cylinder. Rivers and all later content
+  must join that sampler contract explicitly; canonical chunk wrapping alone
+  remains intentionally insufficient
 - full entity/natural-spawn parity is incomplete
 - block-state breadth is intentionally narrower than exhaustive vanilla state coverage
 - Caves & Cliffs Part 1 systems disabled in 1.17.1 vanilla overworld remain out of scope unless the target changes
@@ -172,5 +174,5 @@ Current native tacticals live under [`docs/tactical/`](tactical/README.md). Star
 - [`017-full-decorated-chunk-parity-gauntlet.md`](tactical/017-full-decorated-chunk-parity-gauntlet.md) for the current full decorated chunk parity target.
 - [`187-generator-profile-flat-grass-and-seeded-island.md`](tactical/187-generator-profile-flat-grass-and-seeded-island.md) for the accepted multi-generator refactor and first original terrain proof.
 - [`188-mclone-overworld-v1-terrain-foundation.md`](tactical/188-mclone-overworld-v1-terrain-foundation.md) for the first original continuous-terrain profile and its explicit reuse/refactor reviews.
-- [`192-mclone-overworld-mountains-and-valleys.md`](tactical/192-mclone-overworld-mountains-and-valleys.md) for the next original relief family.
-- [`196-periodic-mclone-terrain-fields.md`](tactical/196-periodic-mclone-terrain-fields.md) for the required seam-safe field phase before rivers and wetlands.
+- [`192-mclone-overworld-mountains-and-valleys.md`](tactical/192-mclone-overworld-mountains-and-valleys.md) for the accepted original relief family.
+- [`196-periodic-mclone-terrain-fields.md`](tactical/196-periodic-mclone-terrain-fields.md) for the completed seam-safe field phase before rivers and wetlands.

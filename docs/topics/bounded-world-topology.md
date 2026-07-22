@@ -10,8 +10,9 @@ one canonical ring; observation chooses a nearby lift of the same chunks,
 actors, meshes, and uploads. Movement, collision, targeting, lighting, fluids,
 multiplayer, save/reopen, TCP/WebSocket transport, mono/stereo/multiview
 rendering, and opt-in diagnostics agree on the seam. Crossing performs no bulk
-geometry shift or remesh. The next allocated work is Tactical 196's genuine
-periodic Mclone production sampler. Far LOD, natural spawning, multiple visible
+geometry shift or remesh. Tactical 196 subsequently completed the exact
+384-chunk periodic Mclone terrain, surface, and vegetation caller. Far LOD,
+natural spawning, multiple visible
 lifts, torus topology, nonlinear horizon bending, and patch atlases remain
 explicit follow-ups. The selected long-term model remains an exact locally
 Euclidean voxel world with dimension-owned finite, periodic, or later
@@ -28,7 +29,7 @@ regional-atlas integration.**
 | Client replica, mesh, light, fluids | supported | supported | supported | pending |
 | Flat Grass generation | supported | supported | supported | torus pending |
 | Authored Only generation | supported | fixture support | fixture support | design only |
-| Mclone Overworld generation | supported | unsupported | Tactical 196 | design only |
+| Mclone Overworld generation | supported | unsupported | supported at 384 chunks | design only |
 | Reference/Alpha/Beta/Small Island | supported | unsupported | unsupported | unsupported |
 | Far LOD | supported | unclaimed | explicit rejection | pending |
 | Natural spawning | supported | unclaimed | explicit rejection | pending |
@@ -501,8 +502,10 @@ addresses in different dimensions remain isolated by `DimensionKey`.
 Stages 0-2 as independently reviewable slices: identity topology and
 persistence, a finite-bound canary, then a real Flat Grass cylinder with
 interactive seam diagnostics. Tactical
-[`196`](../tactical/196-periodic-mclone-terrain-fields.md) owns the first
-procedural periodic terrain caller. Later stages remain unallocated.
+[`196`](../tactical/196-periodic-mclone-terrain-fields.md) completed the first
+procedural periodic terrain caller on 2026-07-22. Its next river/wetland fields
+must support the same exact plane/cylinder sampling modes from their first
+production revision. Later topology stages remain unallocated.
 
 ### 0. Contract and Euclidean baseline
 

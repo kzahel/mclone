@@ -19,12 +19,12 @@ revision 5 closed much of the scale gap but human review rejected its aligned
 diagonal terrace pattern. Field revision 6 replaces it with periodic-ready
 warped gradient detail; Human Review 3 accepted its more natural, less
 geometric result and production browser Worker closeout passed. The shared
-Flat Grass cylinder proof is complete;
-[`196`](../tactical/196-periodic-mclone-terrain-fields.md) is planned after the
-first accepted Tactical 192 field set and before rivers, climate breadth, or
-structures. The selected terrain sequence is mountains and valleys, periodic
-production fields, rivers and wetlands, then coherent streams, cascades, and
-waterfall reaches.
+Flat Grass cylinder proof and
+[`196`](../tactical/196-periodic-mclone-terrain-fields.md) are complete. The
+entire accepted terrain, biome, surface, spawn, and vegetation pipeline now
+supports either the ordinary plane or the exact 6,144-block / 384-chunk
+X-periodic cylinder. The selected terrain sequence is now at rivers and
+wetlands, followed by coherent streams, cascades, and waterfall reaches.
 
 ## Scope
 
@@ -249,6 +249,17 @@ The review tool's exact five-point landform maps take about 69 ms for 148,225
 points; that intentionally simple diagnostic path is not the production chunk
 sampling strategy.
 
+Tactical 196's release comparison at seed `-98765`, radius three, and three
+iterations measured 1,133.096 plane versus 1,115.150 cylinder cold decorated
+targets/s, and 6,079.168 versus 5,885.992 warm targets/s. The 1.6 and 3.2
+percent overhead is acceptable. Surface-only throughput fell from 3,378.742
+to 2,573.646 chunks/s, so field-level periodic modulo and lattice work remain
+an optimization signal even though full cold generation stays well inside the
+25-percent gate. Both modes made 363 dependency requests, generating all on
+the cold pass and hitting all on the warm pass. The first browser Worker
+request was about 1 KiB and its generated render-distance payload about 23
+MiB; periodicity does not claim to solve payload size or compression.
+
 Quality-versus-speed controls divide into two categories:
 
 1. **Output-neutral runtime controls** may change without changing a world:
@@ -383,8 +394,8 @@ lattice scale. The 32- and 8-block domains remain independent, now weighted
 already-sampled relief-detail, relief-fine, and ruggedness-detail components.
 No warp-only field, macro semantic fact, or larger chunk dependency is added.
 The mountain gate, reduced broad lift, and exact ocean/ordinary-lowland
-exclusion remain unchanged. Tactical 196 still owns making every live field
-periodic and proving canonical seam work.
+exclusion remain unchanged. Tactical 196 subsequently made every live field
+periodic and proved canonical seam work without changing the ordinary path.
 
 A separate
 `McloneOverworldLandformSample` pairs one raw terrain sample with the exact
@@ -529,6 +540,7 @@ subsystem horizontally.
    - This is an enabling terrain phase rather than a new visual family; it
      prevents rivers and later fields from accumulating hidden planar-only
      assumptions.
+   - Completed 2026-07-22 for the plane and exact 384-chunk X cylinder.
 4. **Rivers and wetlands**
    - Deterministic river influence applied before surface recipes.
    - Begin with an inspectable field; true rainfall/flow accumulation can be a
@@ -708,19 +720,15 @@ Human Review 3 accepted the result as more natural and less geometric.
 
 ## Next Work
 
-Execute
-[`Tactical 196`](../tactical/196-periodic-mclone-terrain-fields.md):
-re-audit every live field scale, select the explicit periodic sampler and
-circumference, then route terrain and decoration through canonical outputs plus
-coherent seam work lifts. Do not add rivers or climate breadth before that
-contract is demonstrated through the production browser Worker and persistence
-paths. After Tactical 196, prefer a bounded rivers-and-wetlands tactical over
-caves, structures, or broad biome expansion. Its first result should be one
-inspectable production river influence with coherent water level, banks,
-downstream direction, and wetland/headwater/outlet facts shared by terrain and
-biome/surface selection. Follow that with a separate stream/cascade/waterfall
-reach slice; waterfall placement must consume continuous watercourse and grade
-facts rather than decorate arbitrary cliffs.
+Open and execute a bounded rivers-and-wetlands tactical before caves,
+structures, or broad biome expansion. Its first result should be one
+inspectable production river influence with coherent water level, bed, banks,
+width, downstream direction, and low-gradient wetland response shared by
+terrain and biome/surface selection. It must use the same plane/periodic
+sampler contract from its first revision and retain bounded point-query cost.
+Follow it with a separate stream/cascade/waterfall reach slice; waterfall
+placement must consume continuous watercourse and grade facts rather than
+decorate arbitrary cliffs.
 
 ## Related
 
