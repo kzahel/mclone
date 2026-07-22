@@ -32,6 +32,11 @@ series implements the same concern, normally reuse the document slug in its
 
 ## Current Topics
 
+- [`persistent-actor-identity.md`](persistent-actor-identity.md): open,
+  previously unowned defect — relaunched authored worlds restore terrain but
+  give actors new entity IDs and reset ages; reproduction fixture,
+  classification hypotheses, shared-owner constraints, and the recommended
+  bounded fix tactical.
 - [`beta-world-generation.md`](beta-world-generation.md): active `beta-v1`
   implementation contract for a standalone Beta 1.7.3 Overworld with staged
   core parity, deterministic flavor-close population, product selection, and
