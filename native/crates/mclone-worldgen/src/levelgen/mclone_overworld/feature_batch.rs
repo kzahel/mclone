@@ -219,8 +219,8 @@ mod tests {
         ]
         .map(|(seed, target)| {
             let chunk = generate_mclone_overworld_chunk(seed, target.x, target.z);
-            let decoration_counts = [OAK_LOG, GRASS, DANDELION, POPPY]
-                .map(|block| chunk.block_count(block));
+            let decoration_counts =
+                [OAK_LOG, GRASS, DANDELION, POPPY].map(|block| chunk.block_count(block));
             let mut hash = 0xcbf2_9ce4_8422_2325_u64;
             for byte in chunk
                 .blocks()
