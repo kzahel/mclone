@@ -7125,21 +7125,28 @@ async function captureTargetPreviewProbe(page) {
  * @param {string} profile
  */
 async function captureGenerationProfileProbe(page, profile) {
-  await page.waitForFunction(
-    ({ profile }) => {
-      const state = globalThis.__mcloneWebApp?.state;
-      return state?.ok === true
-        && state.ready === true
-        && state.generationProfile === profile
-        && state.loadedChunkCount > 0
-        && state.residentSectionCount > 0
-        && Number.isFinite(Number(state.cameraY))
-        && state.onGround === true
-        && state.lastReport?.onGround === true;
-    },
-    { profile },
-    { timeout: 60_000 },
-  );
+  try {
+    await page.waitForFunction(
+      ({ profile }) => {
+        const state = globalThis.__mcloneWebApp?.state;
+        return state?.ok === true
+          && state.ready === true
+          && state.generationProfile === profile
+          && state.loadedChunkCount > 0
+          && state.residentSectionCount > 0
+          && Number.isFinite(Number(state.cameraY))
+          && state.onGround === true
+          && state.lastReport?.onGround === true;
+      },
+      { profile },
+      { timeout: 60_000 },
+    );
+  } catch (error) {
+    const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
+    throw new Error(
+      `native web generation-profile probe timed out: ${error instanceof Error ? error.message : String(error)}\nstate=${JSON.stringify(state, null, 2)}`,
+    );
+  }
   return page.evaluate(({ profile }) => {
     const state = globalThis.__mcloneWebApp.state;
     return {

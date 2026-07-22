@@ -174,6 +174,8 @@ class WebFrameDriver {
       }
     }
     const startup = startupOptionsFromLocation(module);
+    runtime.state.generationProfile = String(startup.generationProfile);
+    runtime.state.worldTopology = String(startup.worldTopology);
 
     publishRuntimeState(runtime.state);
     const resources = await fetchBootstrapResources(module, startup.browserPlan());

@@ -159,6 +159,35 @@ impl WebStartupConfig {
     pub fn browser_plan(&self) -> Result<JsValue, JsValue> {
         browser_resource_plan()
     }
+
+    #[wasm_bindgen(getter, js_name = generationProfile)]
+    pub fn generation_profile(&self) -> String {
+        self.options
+            .scene
+            .world_generation_profile
+            .label()
+            .to_owned()
+    }
+
+    #[wasm_bindgen(getter, js_name = worldTopology)]
+    pub fn world_topology(&self) -> String {
+        match (
+            self.options.scene.world_topology.x,
+            self.options.scene.world_topology.z,
+        ) {
+            (mclone_core::AxisTopology::Unbounded, mclone_core::AxisTopology::Unbounded) => {
+                "plane".to_owned()
+            }
+            (
+                mclone_core::AxisTopology::Periodic {
+                    minimum_chunk: 0,
+                    period_chunks,
+                },
+                mclone_core::AxisTopology::Unbounded,
+            ) => format!("cylinder-x:{period_chunks}"),
+            topology => format!("{topology:?}"),
+        }
+    }
 }
 
 impl WebStartupConfig {
