@@ -16,7 +16,7 @@ import {
 } from "./catalog-model";
 import { creatureMetadataForCatalog } from "./catalog-classification";
 import { discoverCanonicalFigureSources } from "./discover-figures";
-import { assertBoxOnlyFigure } from "./dsl";
+import { assertBoxOnlyFigure, figureAlphaModes } from "./dsl";
 import { assertFigureGeometry } from "./geometry-analysis";
 import { assertFigureGrounding } from "./ground-analysis";
 import { assertFigureSurfaces } from "./surface-analysis";
@@ -94,6 +94,7 @@ export async function buildWebCatalog(
       : undefined;
     prepared.push({
       entry: {
+        alphaModes: figureAlphaModes(asset),
         clipCount: clips.length,
         clips,
         defaultClip,
@@ -118,6 +119,7 @@ export async function buildWebCatalog(
     prepared.map(({ entry }) => [
       entry.name,
       entry.semanticSha256,
+      entry.alphaModes.join(","),
       JSON.stringify(entry.metadata),
       entry.runtimePromotion?.figureId ?? "",
       entry.runtimePromotion?.jsonPath ?? "",

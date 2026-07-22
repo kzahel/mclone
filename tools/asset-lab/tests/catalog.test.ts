@@ -28,6 +28,7 @@ test("builds deterministic canonical JSON catalogue artifacts", async () => {
       ["chicken", "king_cobra", "roly_poly"],
     );
     assert.equal(catalog.figures[0]?.defaultClip, "walk");
+    assert.deepEqual(catalog.figures[0]?.alphaModes, ["opaque"]);
     assert.deepEqual(catalog.figures[0]?.metadata, {
       bodyPlans: ["biped"],
       disposition: "neutral",
@@ -80,6 +81,12 @@ test("builds deterministic canonical JSON catalogue artifacts", async () => {
     assert.throws(
       () => parseAnimalCatalog(invalidMetadata, "invalid metadata catalogue"),
       /invalid creature metadata.*groups entry 0 'machine' is invalid/s,
+    );
+    const invalidAlphaMode = structuredClone(catalog);
+    (invalidAlphaMode.figures[0]!.alphaModes as unknown as string[])[0] = "sorted";
+    assert.throws(
+      () => parseAnimalCatalog(invalidAlphaMode, "invalid alpha catalogue"),
+      /invalid figure at index 0/,
     );
     for (const figure of catalog.figures) {
       const json = await fs.readFile(path.join(outRoot, figure.jsonPath), "utf8");

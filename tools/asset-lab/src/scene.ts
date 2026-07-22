@@ -5,8 +5,11 @@ import {
   type ClipSpec,
   type FaceSpec,
   type FigureAsset,
+  type FigureAlphaMode,
+  type MaterialSpec,
   type PartSpec,
   type Vec3,
+  paletteColorHasTransparency,
 } from "./dsl";
 
 export interface FigureScene {
@@ -37,8 +40,14 @@ interface PreparedClip {
 }
 
 interface PreparedAsciiTexture {
-  alphaCutout: boolean;
+  hasTransparency: boolean;
   texture: THREE.Texture;
+}
+
+interface PreparedThreeMaterial {
+  color: THREE.Material;
+  depth?: THREE.Material;
+  mode: FigureAlphaMode;
 }
 
 export function createFigureScene(asset: FigureAsset, clipName?: string, options: FigureSceneOptions = {}): FigureScene {
@@ -46,21 +55,9 @@ export function createFigureScene(asset: FigureAsset, clipName?: string, options
   root.name = asset.name;
 
   const textureMap = new Map<string, PreparedAsciiTexture>();
-  const materialMap = new Map<string, THREE.Material>();
 
   for (const [name, texture] of Object.entries(asset.textures)) {
     textureMap.set(name, asciiTextureToCanvasTexture(texture.palette, texture.pixels));
-  }
-
-  for (const [name, material] of Object.entries(asset.materials)) {
-    materialMap.set(
-      name,
-      new THREE.MeshStandardMaterial({
-        color: new THREE.Color(material.color),
-        roughness: material.roughness ?? 0.85,
-        metalness: material.metalness ?? 0,
-      }),
-    );
   }
 
   const parts = new Map<string, PartObject>();
@@ -77,9 +74,23 @@ export function createFigureScene(asset: FigureAsset, clipName?: string, options
     content.position.copy(pivot.clone().multiplyScalar(-1));
     group.add(content);
 
-    const mesh = new THREE.Mesh(createGeometry(part), createMaterials(part, materialMap, textureMap));
+    const geometry = createGeometry(part);
+    const preparedMaterials = createMaterials(part, asset.materials, textureMap);
+    const colorMaterials = mapPreparedMaterials(preparedMaterials, (material) => material.color);
+    const mesh = new THREE.Mesh(geometry, colorMaterials);
     mesh.name = `${part.name}_mesh`;
     content.add(mesh);
+
+    if (flattenPreparedMaterials(preparedMaterials).some((material) => material.depth)) {
+      const depthMaterials = mapPreparedMaterials(
+        preparedMaterials,
+        (material) => material.depth ?? hiddenMaterial(),
+      );
+      const depthMesh = new THREE.Mesh(geometry, depthMaterials);
+      depthMesh.name = `${part.name}_blend_depth_mesh`;
+      depthMesh.renderOrder = 1;
+      content.add(depthMesh);
+    }
 
     if (options.debug) {
       content.add(createWireframe(mesh.geometry));
@@ -142,7 +153,7 @@ export function createFigureScene(asset: FigureAsset, clipName?: string, options
     dispose() {
       disposeObjectResources(
         root,
-        materialMap.values(),
+        [],
         [...textureMap.values()].map((prepared) => prepared.texture),
       );
       root.clear();
@@ -189,16 +200,16 @@ const BOX_FACE_MATERIAL_ORDER: BoxFaceName[] = ["east", "west", "up", "down", "s
 
 function createMaterials(
   part: PartSpec,
-  materialMap: Map<string, THREE.Material>,
+  materials: Record<string, MaterialSpec>,
   textureMap: Map<string, PreparedAsciiTexture>,
-): THREE.Material | THREE.Material[] {
+): PreparedThreeMaterial | PreparedThreeMaterial[] {
   if (part.primitive.kind === "box" && part.primitive.faces) {
     const faces = part.primitive.faces;
     return BOX_FACE_MATERIAL_ORDER.map((faceName) =>
-      createMaterial(part, faces[faceName], materialMap, textureMap),
+      createMaterial(part, faces[faceName], materials, textureMap),
     );
   }
-  return createMaterial(part, undefined, materialMap, textureMap);
+  return createMaterial(part, undefined, materials, textureMap);
 }
 
 function partPivot(part: PartSpec): THREE.Vector3 {
@@ -208,33 +219,84 @@ function partPivot(part: PartSpec): THREE.Vector3 {
 function createMaterial(
   part: PartSpec,
   face: FaceSpec | undefined,
-  materialMap: Map<string, THREE.Material>,
+  materials: Record<string, MaterialSpec>,
   textureMap: Map<string, PreparedAsciiTexture>,
-): THREE.Material {
+): PreparedThreeMaterial {
   const materialName = face?.material ?? part.material;
   const textureName = face?.texture ?? part.texture;
-  const base = materialName ? materialMap.get(materialName) : undefined;
+  const spec = materialName ? materials[materialName] : undefined;
   const texture = textureName ? textureMap.get(textureName) : undefined;
+  const declaredMode = spec?.alphaMode ?? "opaque";
+  const mode = declaredMode === "opaque" && texture?.hasTransparency
+    ? "mask"
+    : declaredMode;
+  const opacity = spec?.opacity ?? 1;
+  const material = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(spec?.color ?? (texture ? "#ffffff" : "#d7dde2")),
+    map: texture?.texture ?? null,
+    metalness: spec?.metalness ?? 0,
+    opacity,
+    roughness: spec?.roughness ?? 0.85,
+  });
 
-  if (texture) {
-    const cloned = base?.clone() as THREE.MeshStandardMaterial | undefined;
-    const material =
-      cloned ??
-      new THREE.MeshStandardMaterial({
-        color: new THREE.Color("#ffffff"),
-        roughness: 0.85,
-      });
-    material.map = texture.texture;
-    if (texture.alphaCutout) {
-      material.alphaTest = 0.1;
-      material.depthWrite = true;
-      material.transparent = false;
+  if (mode === "mask") {
+    if (spec?.alphaCoverage === "dither") {
+      material.alphaHash = true;
+    } else {
+      material.alphaTest = spec?.alphaCutoff ?? 0.1;
     }
-    material.needsUpdate = true;
-    return material;
+  } else if (mode === "blend") {
+    material.depthFunc = THREE.EqualDepth;
+    material.depthWrite = false;
+    material.premultipliedAlpha = true;
+    material.transparent = true;
+  } else if (mode === "additive") {
+    material.blending = THREE.AdditiveBlending;
+    material.depthWrite = false;
+    material.transparent = true;
   }
+  material.needsUpdate = true;
 
-  return base ?? new THREE.MeshStandardMaterial({ color: new THREE.Color("#d7dde2"), roughness: 0.85 });
+  return {
+    color: material,
+    ...(mode === "blend" ? { depth: blendDepthMaterial(material, texture, opacity) } : {}),
+    mode,
+  };
+}
+
+function blendDepthMaterial(
+  color: THREE.MeshStandardMaterial,
+  texture: PreparedAsciiTexture | undefined,
+  opacity: number,
+): THREE.Material {
+  return new THREE.MeshBasicMaterial({
+    alphaTest: 0.0001,
+    colorWrite: false,
+    depthTest: true,
+    depthWrite: true,
+    map: texture?.texture ?? null,
+    opacity,
+    side: color.side,
+  });
+}
+
+function hiddenMaterial(): THREE.Material {
+  const material = new THREE.MeshBasicMaterial();
+  material.visible = false;
+  return material;
+}
+
+function mapPreparedMaterials(
+  materials: PreparedThreeMaterial | PreparedThreeMaterial[],
+  select: (material: PreparedThreeMaterial) => THREE.Material,
+): THREE.Material | THREE.Material[] {
+  return Array.isArray(materials) ? materials.map(select) : select(materials);
+}
+
+function flattenPreparedMaterials(
+  materials: PreparedThreeMaterial | PreparedThreeMaterial[],
+): PreparedThreeMaterial[] {
+  return Array.isArray(materials) ? materials : [materials];
 }
 
 function asciiTextureToCanvasTexture(
@@ -271,7 +333,7 @@ function asciiTextureToCanvasTexture(
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.flipY = true;
   return {
-    alphaCutout: Object.values(palette).includes(TRANSPARENT_PALETTE_COLOR),
+    hasTransparency: Object.values(palette).some(paletteColorHasTransparency),
     texture,
   };
 }

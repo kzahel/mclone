@@ -1,4 +1,9 @@
-import type { ClipRole, LocomotionKind } from "./dsl";
+import {
+  FIGURE_ALPHA_MODES,
+  type ClipRole,
+  type FigureAlphaMode,
+  type LocomotionKind,
+} from "./dsl";
 import {
   cloneCreatureMetadata,
   type CreatureMetadata,
@@ -17,6 +22,7 @@ export interface AnimalCatalogClip {
 }
 
 export interface AnimalCatalogFigure {
+  alphaModes: FigureAlphaMode[];
   clipCount: number;
   clips: AnimalCatalogClip[];
   defaultClip: string;
@@ -136,6 +142,9 @@ function parseCatalogFigure(value: unknown, sourceLabel: string, index: number):
     || !isRelativeArtifactPath(value.jsonPath, ".json")
     || !isRelativeArtifactPath(value.thumbnailPath, ".png")
     || !Array.isArray(value.clips)
+    || !Array.isArray(value.alphaModes)
+    || value.alphaModes.length === 0
+    || !value.alphaModes.every(isFigureAlphaMode)
     || !isSafeName(value.defaultClip)
   ) {
     throw new Error(`Animal catalogue '${sourceLabel}' has an invalid figure at index ${index}`);
@@ -166,6 +175,7 @@ function parseCatalogFigure(value: unknown, sourceLabel: string, index: number):
     );
   }
   return {
+    alphaModes: [...value.alphaModes] as FigureAlphaMode[],
     clipCount: value.clipCount,
     clips,
     defaultClip: value.defaultClip,
@@ -266,6 +276,11 @@ function isLocomotionKind(value: unknown): value is LocomotionKind {
     || value === "slither"
     || value === "swim"
     || value === "wing-flap";
+}
+
+function isFigureAlphaMode(value: unknown): value is FigureAlphaMode {
+  return typeof value === "string"
+    && (FIGURE_ALPHA_MODES as readonly string[]).includes(value);
 }
 
 function isClipRole(value: unknown): value is ClipRole {

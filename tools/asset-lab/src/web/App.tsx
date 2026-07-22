@@ -337,6 +337,10 @@ function FigureInspector({
           ? <MetadataTags label="Themes" values={figure.metadata.themes} />
           : null}
       </section>
+      <section className="inspectorSection renderingSection">
+        <h3>Rendering</h3>
+        <MetadataTags label="Alpha" values={figure.alphaModes} />
+      </section>
       <section className="inspectorSection">
         <h3>Active animation</h3>
         <dl>
@@ -457,6 +461,7 @@ function filterFigures(
       ...figure.metadata.groups,
       ...figure.metadata.bodyPlans,
       ...figure.metadata.habitats,
+      ...figure.alphaModes,
       figure.metadata.disposition,
       figure.metadata.scale,
       ...(figure.metadata.themes ?? []),

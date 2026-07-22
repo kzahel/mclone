@@ -54,7 +54,17 @@ export interface MaterialSpec {
   color: string;
   roughness?: number;
   metalness?: number;
+  alphaMode?: FigureAlphaMode;
+  opacity?: number;
+  alphaCutoff?: number;
+  alphaCoverage?: FigureAlphaCoverage;
 }
+
+export const FIGURE_ALPHA_MODES = ["opaque", "mask", "blend", "additive"] as const;
+export type FigureAlphaMode = typeof FIGURE_ALPHA_MODES[number];
+
+export const FIGURE_ALPHA_COVERAGES = ["threshold", "dither"] as const;
+export type FigureAlphaCoverage = typeof FIGURE_ALPHA_COVERAGES[number];
 
 export interface AsciiTextureSpec {
   palette: Record<string, string>;
@@ -539,6 +549,41 @@ export function validateFigure(asset: FigureAsset): string[] {
     if (!isHexColor(material.color)) {
       errors.push(`material '${name}' has invalid color '${material.color}'`);
     }
+    const alphaMode = material.alphaMode ?? "opaque";
+    if (!FIGURE_ALPHA_MODES.includes(alphaMode)) {
+      errors.push(`material '${name}' has invalid alphaMode '${String(alphaMode)}'`);
+    }
+    if (
+      material.opacity !== undefined
+      && (!Number.isFinite(material.opacity) || material.opacity < 0 || material.opacity > 1)
+    ) {
+      errors.push(`material '${name}' opacity must be from 0 through 1`);
+    }
+    if (alphaMode === "opaque" && material.opacity !== undefined && material.opacity !== 1) {
+      errors.push(`material '${name}' opaque alphaMode requires opacity 1`);
+    }
+    if (material.alphaCutoff !== undefined) {
+      if (alphaMode !== "mask") {
+        errors.push(`material '${name}' alphaCutoff requires alphaMode 'mask'`);
+      }
+      if (
+        !Number.isFinite(material.alphaCutoff)
+        || material.alphaCutoff < 0
+        || material.alphaCutoff > 1
+      ) {
+        errors.push(`material '${name}' alphaCutoff must be from 0 through 1`);
+      }
+    }
+    if (material.alphaCoverage !== undefined) {
+      if (alphaMode !== "mask") {
+        errors.push(`material '${name}' alphaCoverage requires alphaMode 'mask'`);
+      }
+      if (!FIGURE_ALPHA_COVERAGES.includes(material.alphaCoverage)) {
+        errors.push(
+          `material '${name}' has invalid alphaCoverage '${String(material.alphaCoverage)}'`,
+        );
+      }
+    }
   }
 
   for (const [name, texture] of Object.entries(asset.textures)) {
@@ -716,7 +761,9 @@ class FigureBuilder {
   }
 
   private mat(name: string, colorOrSpec: string | MaterialSpec): void {
-    this.materials[name] = typeof colorOrSpec === "string" ? { color: colorOrSpec } : colorOrSpec;
+    this.materials[name] = typeof colorOrSpec === "string"
+      ? { color: colorOrSpec }
+      : { ...colorOrSpec };
   }
 
   private asciiTexture(name: string, texture: AsciiTextureSpec): void {
@@ -1879,10 +1926,33 @@ function validateAsciiTexture(name: string, texture: AsciiTextureSpec, errors: s
     if (char.length !== 1) {
       errors.push(`texture '${name}' palette key '${char}' must be one character`);
     }
-    if (!isHexColor(color) && color !== TRANSPARENT_PALETTE_COLOR) {
+    if (!isPaletteColor(color)) {
       errors.push(`texture '${name}' palette '${char}' has invalid color '${color}'`);
     }
   }
+}
+
+export function figureAlphaModes(asset: FigureAsset): FigureAlphaMode[] {
+  const modes = new Set<FigureAlphaMode>();
+  for (const material of Object.values(asset.materials)) {
+    modes.add(material.alphaMode ?? "opaque");
+  }
+  if (
+    Object.values(asset.textures).some((texture) =>
+      Object.values(texture.palette).some(paletteColorHasTransparency)
+    )
+  ) {
+    modes.add("mask");
+  }
+  if (modes.size === 0) {
+    modes.add("opaque");
+  }
+  return FIGURE_ALPHA_MODES.filter((mode) => modes.has(mode));
+}
+
+export function paletteColorHasTransparency(value: string): boolean {
+  return value === TRANSPARENT_PALETTE_COLOR
+    || (/^#[0-9a-fA-F]{8}$/u.test(value) && value.slice(7, 9).toLocaleLowerCase() !== "ff");
 }
 
 function validatePrimitive(part: PartSpec, errors: string[]): void {
@@ -1944,4 +2014,10 @@ function validatePositive(label: string, value: number, errors: string[]): void 
 
 function isHexColor(value: string): boolean {
   return /^#[0-9a-fA-F]{6}$/.test(value);
+}
+
+function isPaletteColor(value: string): boolean {
+  return value === TRANSPARENT_PALETTE_COLOR
+    || isHexColor(value)
+    || /^#[0-9a-fA-F]{8}$/u.test(value);
 }

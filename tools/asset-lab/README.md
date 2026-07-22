@@ -228,10 +228,34 @@ so sheet and video review are still required.
 
 Three.js remains the semantic preview implementation, not the source format.
 
-ASCII texture palettes accept opaque `#RRGGBB` colors and the exact literal
-`"transparent"`. Transparent pixels are binary cutouts: preview and runtime
-discard them at the shared `0.1` alpha threshold while opaque pixels keep
-normal depth writes and do not use blending.
+Figure materials default to `{ alphaMode: "opaque", opacity: 1 }`. Authors may
+select `mask`, `blend`, or `additive` explicitly. Mask materials retain normal
+depth writes and use either a configurable cutoff or object-stable dithered
+coverage; blend materials use a figure depth prepass followed by premultiplied
+source-over color; additive materials contribute color without writing depth.
+
+```ts
+mat("spirit", {
+  color: "#b7e9ff",
+  alphaMode: "blend",
+  opacity: 0.42,
+});
+
+mat("fading_cloth", {
+  color: "#d8edf4",
+  alphaMode: "mask",
+  opacity: 0.65,
+  alphaCoverage: "dither",
+});
+```
+
+`alphaCutoff` and `alphaCoverage` belong only to `mask`; coverage defaults to
+`threshold` and cutoff defaults to `0.1`. Opaque materials require opacity 1.
+
+ASCII texture palettes accept `#RRGGBB`, `#RRGGBBAA`, and the exact literal
+`"transparent"`. Texture alpha is interpreted by the material mode. For
+backward compatibility, a texture with transparent palette entries used by an
+otherwise opaque material is treated as a threshold mask.
 
 ```ts
 asciiTexture("ribs", {
@@ -240,9 +264,8 @@ asciiTexture("ribs", {
 });
 ```
 
-Do not use `#RRGGBBAA` palette colors. Partial alpha, translucent materials,
-and ghost rendering are intentionally outside this binary contract and are
-rejected until their ordering and blending policy is designed.
+Use `"transparent"` for a fully empty texel and `#RRGGBBAA` when a mask,
+blend, or additive material needs authored per-texel coverage.
 
 Boxes support Minecraft-style per-face overrides:
 

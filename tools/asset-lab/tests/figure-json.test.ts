@@ -64,11 +64,17 @@ test("round-trips typed creature metadata and rejects invalid tags", () => {
   );
 });
 
-test("round-trips binary transparent palette entries and rejects partial alpha", () => {
+test("round-trips figure material modes and RGBA texture palettes", () => {
   const cutout = figure("cutout", ({ asciiTexture, box, mat, part }) => {
-    mat("bone", "#d8d0b5");
+    mat("bone", {
+      color: "#d8d0b5",
+      alphaMode: "mask",
+      opacity: 0.65,
+      alphaCutoff: 0.35,
+      alphaCoverage: "dither",
+    });
     asciiTexture("ribs", {
-      palette: { ".": "transparent", "b": "#d8d0b5" },
+      palette: { ".": "transparent", "b": "#d8d0b5", "f": "#ffffff80" },
       pixels: ["b.b", "bbb"],
     });
     part("body", box({
@@ -80,13 +86,48 @@ test("round-trips binary transparent palette entries and rejects partial alpha",
   });
   assert.deepEqual(
     roundTripFigureAsset(cutout, "cutout source").asset.textures.ribs?.palette,
-    { ".": "transparent", "b": "#d8d0b5" },
+    { ".": "transparent", "b": "#d8d0b5", "f": "#ffffff80" },
+  );
+  assert.deepEqual(
+    roundTripFigureAsset(cutout, "cutout source").asset.materials.bone,
+    {
+      color: "#d8d0b5",
+      alphaMode: "mask",
+      opacity: 0.65,
+      alphaCutoff: 0.35,
+      alphaCoverage: "dither",
+    },
   );
 
-  cutout.textures.ribs!.palette["."] = "#ffffff80";
+  cutout.textures.ribs!.palette["."] = "#fffffff";
   assert.throws(
     () => serializeFigureAsset(cutout),
-    /texture 'ribs' palette '\.' has invalid color '#ffffff80'/,
+    /texture 'ribs' palette '\.' has invalid color '#fffffff'/,
+  );
+});
+
+test("rejects invalid figure material alpha combinations", () => {
+  const invalidMaterial = (material: FigureAsset["materials"][string]): FigureAsset => {
+    const asset = tinyFigure();
+    asset.materials.white = material;
+    return asset;
+  };
+
+  assert.throws(
+    () => serializeFigureAsset(invalidMaterial({ color: "#ffffff", alphaMode: "opaque", opacity: 0.5 })),
+    /opaque alphaMode requires opacity 1/,
+  );
+  assert.throws(
+    () => serializeFigureAsset(invalidMaterial({ color: "#ffffff", alphaMode: "blend", alphaCutoff: 0.1 })),
+    /alphaCutoff requires alphaMode 'mask'/,
+  );
+  assert.throws(
+    () => serializeFigureAsset(invalidMaterial({ color: "#ffffff", alphaMode: "additive", alphaCoverage: "dither" })),
+    /alphaCoverage requires alphaMode 'mask'/,
+  );
+  assert.throws(
+    () => serializeFigureAsset(invalidMaterial({ color: "#ffffff", alphaMode: "mask", opacity: 1.1 })),
+    /opacity must be from 0 through 1/,
   );
 });
 

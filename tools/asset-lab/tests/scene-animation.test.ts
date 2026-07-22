@@ -74,10 +74,66 @@ test("switches clips on one shared semantic scene and disposes cleanly", () => {
   assert.doesNotThrow(() => scene.dispose());
 });
 
+test("maps figure alpha modes to explicit Three.js render states", () => {
+  const asset: FigureAsset = {
+    schemaVersion: 1,
+    name: "alpha-material-test",
+    materials: {
+      dither: {
+        color: "#ffffff",
+        alphaMode: "mask",
+        opacity: 0.55,
+        alphaCoverage: "dither",
+      },
+      blend: { color: "#88ccff", alphaMode: "blend", opacity: 0.42 },
+      glow: { color: "#aaddff", alphaMode: "additive", opacity: 0.7 },
+    },
+    textures: {},
+    parts: [
+      { name: "dither", material: "dither", primitive: { kind: "box", size: [1, 1, 1] } },
+      { name: "blend", material: "blend", primitive: { kind: "box", size: [1, 1, 1] } },
+      { name: "glow", material: "glow", primitive: { kind: "box", size: [1, 1, 1] } },
+    ],
+    clips: {},
+  };
+  const scene = createFigureScene(asset, undefined, { jointMarkers: false });
+
+  const dither = requiredMesh(scene.root, "dither_mesh").material as THREE.MeshStandardMaterial;
+  assert.equal(dither.alphaHash, true);
+  assert.equal(dither.transparent, false);
+  assert.equal(dither.depthWrite, true);
+  assert.equal(dither.opacity, 0.55);
+
+  const blend = requiredMesh(scene.root, "blend_mesh").material as THREE.MeshStandardMaterial;
+  assert.equal(blend.transparent, true);
+  assert.equal(blend.depthWrite, false);
+  assert.equal(blend.depthFunc, THREE.EqualDepth);
+  assert.equal(blend.premultipliedAlpha, true);
+  assert.equal(blend.opacity, 0.42);
+  const blendDepth = requiredMesh(scene.root, "blend_blend_depth_mesh")
+    .material as THREE.MeshBasicMaterial;
+  assert.equal(blendDepth.colorWrite, false);
+  assert.equal(blendDepth.depthWrite, true);
+  assert.equal(blendDepth.alphaTest, 0.0001);
+
+  const glow = requiredMesh(scene.root, "glow_mesh").material as THREE.MeshStandardMaterial;
+  assert.equal(glow.blending, THREE.AdditiveBlending);
+  assert.equal(glow.depthWrite, false);
+  assert.equal(glow.transparent, true);
+
+  assert.doesNotThrow(() => scene.dispose());
+});
+
 function requiredPart(root: THREE.Object3D, name: string): THREE.Object3D {
   const part = root.getObjectByName(name);
   assert.ok(part, `missing part '${name}'`);
   return part;
+}
+
+function requiredMesh(root: THREE.Object3D, name: string): THREE.Mesh {
+  const mesh = root.getObjectByName(name);
+  assert.ok(mesh instanceof THREE.Mesh, `missing mesh '${name}'`);
+  return mesh;
 }
 
 function figureWithKeys(keys: ClipKey[]): FigureAsset {
