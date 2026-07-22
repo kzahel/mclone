@@ -17,8 +17,8 @@ Last reconciled: **2026-07-22**.
 This topic owns the release-distribution and update direction for public Mclone
 builds:
 
-- the intended relationship between free first-party downloads and optional
-  paid store-hosted editions;
+- the technical boundary needed to support the direct and store offers defined
+  by [`distribution-go-to-market.md`](distribution-go-to-market.md);
 - direct desktop launcher and update ownership;
 - Steam, Quest Store, Android sideload, web, and dedicated-server update
   boundaries;
@@ -44,17 +44,18 @@ It does **not** own:
 
 ## Product Intent
 
-Mclone should remain available as a free first-party download. Players who
-prefer a store-managed installation may optionally purchase a store-hosted
-edition as a convenient way to support development. The intended game is the
-same: payment must not become a gameplay feature gate, and side loading must
-remain a real supported path rather than a deliberately degraded build.
+Mclone should retain a supported first-party distribution path for players who
+do not want Steam or another store. Whether that path is a complete free game,
+a free trial followed by a direct purchase, or a free base with supporter
+products is a commercial decision owned by
+[`distribution-go-to-market.md`](distribution-go-to-market.md). The current
+leading candidate is a paid Steam edition and proper Steam demo, plus a paid
+direct edition with a first-party trial.
 
-The exact store offer is still a commercial decision. A paid store app whose
-same gameplay is free directly may require advance store confirmation. A
-cleaner fallback is a free store base app with an optional supporter pack,
-soundtrack, cosmetic acknowledgement, or other clearly described support SKU.
-Do not settle that question indirectly by creating divergent engine builds.
+The intended game remains the same across flavors: payment must not create a
+gameplay fork, and side loading must remain a real supported path rather than a
+deliberately degraded build. Store-specific achievements, presence, cloud
+saves, entitlements, package identity, and update ownership may differ.
 
 Steam's published key rules require Steam customers to receive an offer
 comparable to Steam-key purchasers, but do not directly answer every case
@@ -477,6 +478,9 @@ must not be uploaded or exposed.
 
 ## Related Documents
 
+- [`distribution-go-to-market.md`](distribution-go-to-market.md) — commercial
+  channels, pricing models, positioning, competitive landscape, and launch
+  sequence.
 - [`../platforms.md`](../platforms.md) — platform posture, packaging owners, and
   validation matrix.
 - [`../native-engine-architecture.md`](../native-engine-architecture.md) —
