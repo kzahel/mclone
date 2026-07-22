@@ -165,17 +165,44 @@ leaf values.
 
 ### Slice 0: field and caller audit
 
-- [ ] Freeze the accepted Tactical 192 live field/domain inventory.
-- [ ] Reconfirm the compatibility safety ledger and ordinary Mclone output
+- [x] Freeze the accepted Tactical 192 live field/domain inventory.
+- [x] Reconfirm the compatibility safety ledger and ordinary Mclone output
   locks.
-- [ ] Choose wrapped lattice versus circle embedding with maps, cost evidence,
+- [x] Choose wrapped lattice versus circle embedding with maps, cost evidence,
   and an exact first circumference.
-- [ ] Inventory point/region sampling, terrain, biome, surface, spawn, feature,
+- [x] Inventory point/region sampling, terrain, biome, surface, spawn, feature,
   dependency-cache, worker-codec, and review-tool callers.
-- [ ] Record unsupported rivers/caves/structures as absent rather than
+- [x] Record unsupported rivers/caves/structures as absent rather than
   topology-complete.
 
 Gate: one explicit sampler rule and circumference cover every live field.
+
+Execution record 2026-07-22:
+
+- the accepted field revision 6 inventory is continentalness at `2048`,
+  `1024`, and `512` blocks; relief at `384`, `128`, and `48`; ruggedness at
+  `1536` and `512`; ridges at `384` and `128`; and warped gradient mountain
+  detail at `32` and `8`. Every scale divides 6,144 blocks exactly. The twelve
+  existing seed domains remain the frozen identity; periodicity does not add a
+  semantic field or domain;
+- the compatibility ledger remains `internal-unshipped` with no preservation
+  consumer. Existing ordinary field, surface, decorated-payload, reference
+  Overworld, and Worker locks are regression guards. The unbounded constructor
+  remains the exact control rather than being silently converted;
+- select an explicit X-wrapped lattice mode at 6,144 blocks / 384 chunks with
+  unbounded Z. It preserves accepted scales and performs only bounded lattice
+  index wrapping in the opt-in mode. Circle embedding would require new
+  higher-dimensional primitives and a fresh terrain tune without solving a
+  demonstrated problem. Release cost and seam maps remain Slice 1/2 evidence;
+- live callers are point and region sampling, slope halos, surface fill, biome
+  payloads, spawn search, 3x3 feature-center/5x5 Surface work, dependency
+  caching, scheduler and Worker descriptors/codecs, field review, terrain
+  characteristics, performance, and rendered cards. Each must receive or
+  derive the same explicit topology rather than canonicalizing coordinates
+  before ordinary noise; and
+- rivers, wetlands, streams, caves, carvers, structures, and climate breadth
+  are absent from this profile. Tactical 196 makes only the accepted terrain,
+  biome, surface, and current vegetation family topology-complete.
 
 ### Slice 1: periodic production fields
 
