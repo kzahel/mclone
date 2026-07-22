@@ -61,6 +61,8 @@ export interface AsciiTextureSpec {
   pixels: string[];
 }
 
+export const TRANSPARENT_PALETTE_COLOR = "transparent";
+
 export type BoxFaceName = "north" | "south" | "east" | "west" | "up" | "down";
 
 export const BOX_FACE_NAMES: readonly BoxFaceName[] = ["north", "south", "east", "west", "up", "down"];
@@ -1877,7 +1879,7 @@ function validateAsciiTexture(name: string, texture: AsciiTextureSpec, errors: s
     if (char.length !== 1) {
       errors.push(`texture '${name}' palette key '${char}' must be one character`);
     }
-    if (!isHexColor(color)) {
+    if (!isHexColor(color) && color !== TRANSPARENT_PALETTE_COLOR) {
       errors.push(`texture '${name}' palette '${char}' has invalid color '${color}'`);
     }
   }

@@ -1,5 +1,13 @@
 import * as THREE from "three";
-import type { BoxFaceName, ClipSpec, FaceSpec, FigureAsset, PartSpec, Vec3 } from "./dsl";
+import {
+  TRANSPARENT_PALETTE_COLOR,
+  type BoxFaceName,
+  type ClipSpec,
+  type FaceSpec,
+  type FigureAsset,
+  type PartSpec,
+  type Vec3,
+} from "./dsl";
 
 export interface FigureScene {
   root: THREE.Group;
@@ -28,11 +36,16 @@ interface PreparedClip {
   keysByPart: Map<string, ClipSpec["keys"]>;
 }
 
+interface PreparedAsciiTexture {
+  alphaCutout: boolean;
+  texture: THREE.Texture;
+}
+
 export function createFigureScene(asset: FigureAsset, clipName?: string, options: FigureSceneOptions = {}): FigureScene {
   const root = new THREE.Group();
   root.name = asset.name;
 
-  const textureMap = new Map<string, THREE.Texture>();
+  const textureMap = new Map<string, PreparedAsciiTexture>();
   const materialMap = new Map<string, THREE.Material>();
 
   for (const [name, texture] of Object.entries(asset.textures)) {
@@ -127,7 +140,11 @@ export function createFigureScene(asset: FigureAsset, clipName?: string, options
       }
     },
     dispose() {
-      disposeObjectResources(root, materialMap.values(), textureMap.values());
+      disposeObjectResources(
+        root,
+        materialMap.values(),
+        [...textureMap.values()].map((prepared) => prepared.texture),
+      );
       root.clear();
     },
   };
@@ -173,7 +190,7 @@ const BOX_FACE_MATERIAL_ORDER: BoxFaceName[] = ["east", "west", "up", "down", "s
 function createMaterials(
   part: PartSpec,
   materialMap: Map<string, THREE.Material>,
-  textureMap: Map<string, THREE.Texture>,
+  textureMap: Map<string, PreparedAsciiTexture>,
 ): THREE.Material | THREE.Material[] {
   if (part.primitive.kind === "box" && part.primitive.faces) {
     const faces = part.primitive.faces;
@@ -192,7 +209,7 @@ function createMaterial(
   part: PartSpec,
   face: FaceSpec | undefined,
   materialMap: Map<string, THREE.Material>,
-  textureMap: Map<string, THREE.Texture>,
+  textureMap: Map<string, PreparedAsciiTexture>,
 ): THREE.Material {
   const materialName = face?.material ?? part.material;
   const textureName = face?.texture ?? part.texture;
@@ -207,7 +224,12 @@ function createMaterial(
         color: new THREE.Color("#ffffff"),
         roughness: 0.85,
       });
-    material.map = texture;
+    material.map = texture.texture;
+    if (texture.alphaCutout) {
+      material.alphaTest = 0.1;
+      material.depthWrite = true;
+      material.transparent = false;
+    }
     material.needsUpdate = true;
     return material;
   }
@@ -215,7 +237,10 @@ function createMaterial(
   return base ?? new THREE.MeshStandardMaterial({ color: new THREE.Color("#d7dde2"), roughness: 0.85 });
 }
 
-function asciiTextureToCanvasTexture(palette: Record<string, string>, pixels: string[]): THREE.Texture {
+function asciiTextureToCanvasTexture(
+  palette: Record<string, string>,
+  pixels: string[],
+): PreparedAsciiTexture {
   const width = pixels[0]?.length ?? 1;
   const height = pixels.length;
   const canvas = document.createElement("canvas");
@@ -230,8 +255,13 @@ function asciiTextureToCanvasTexture(palette: Record<string, string>, pixels: st
   for (let y = 0; y < height; y += 1) {
     const row = pixels[y] ?? "";
     for (let x = 0; x < width; x += 1) {
-      context.fillStyle = palette[row[x] ?? "."] ?? "#ff00ff";
-      context.fillRect(x, y, 1, 1);
+      const color = palette[row[x] ?? "."] ?? "#ff00ff";
+      if (color === TRANSPARENT_PALETTE_COLOR) {
+        context.clearRect(x, y, 1, 1);
+      } else {
+        context.fillStyle = color;
+        context.fillRect(x, y, 1, 1);
+      }
     }
   }
 
@@ -240,7 +270,10 @@ function asciiTextureToCanvasTexture(palette: Record<string, string>, pixels: st
   texture.minFilter = THREE.NearestFilter;
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.flipY = true;
-  return texture;
+  return {
+    alphaCutout: Object.values(palette).includes(TRANSPARENT_PALETTE_COLOR),
+    texture,
+  };
 }
 
 function createPivotMarker(): THREE.Object3D {

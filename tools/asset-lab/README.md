@@ -228,6 +228,22 @@ so sheet and video review are still required.
 
 Three.js remains the semantic preview implementation, not the source format.
 
+ASCII texture palettes accept opaque `#RRGGBB` colors and the exact literal
+`"transparent"`. Transparent pixels are binary cutouts: preview and runtime
+discard them at the shared `0.1` alpha threshold while opaque pixels keep
+normal depth writes and do not use blending.
+
+```ts
+asciiTexture("ribs", {
+  palette: { ".": "transparent", "b": "#d8d0b5" },
+  pixels: ["b..b", "bbbb", "b..b"],
+});
+```
+
+Do not use `#RRGGBBAA` palette colors. Partial alpha, translucent materials,
+and ghost rendering are intentionally outside this binary contract and are
+rejected until their ordering and blending policy is designed.
+
 Boxes support Minecraft-style per-face overrides:
 
 ```ts

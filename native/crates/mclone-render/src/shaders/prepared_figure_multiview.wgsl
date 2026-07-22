@@ -48,6 +48,9 @@ fn vs_main(input: VertexInput, @builtin(view_index) view_index: i32) -> VertexOu
 @fragment
 fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let texel = textureSample(figure_texture, figure_sampler, input.uv);
+    if (texel.a < 0.1) {
+        discard;
+    }
     let normal = normalize(input.normal);
     let key_direction = normalize(vec3<f32>(3.0, 5.0, 4.0));
     let diffuse = max(dot(normal, key_direction), 0.0);

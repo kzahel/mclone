@@ -24,9 +24,9 @@ export default figure("gargoyle", ({ asciiTexture, bipedWalk, box, clip, default
   for (const [side, sign] of [["l", -1], ["r", 1]] as const) {
     part(`horn_${side}`, box({ parent: "head", at: [sign * 0.23, 0.35, 0.03], rot: [-12, 0, sign * -18], size: [0.13, 0.38, 0.13], material: "claw" }));
     part(`ear_${side}`, box({ parent: "head", at: [sign * 0.37, 0.06, 0.02], rot: [0, 0, sign * -18], size: [0.22, 0.12, 0.16], material: "stone_light" }));
-    part(`upper_arm_${side}`, box({ parent: "shoulder_bar", at: [sign * 0.51, -0.28, -0.01], rot: [-5, 0, sign * -5], size: [0.24, 0.58, 0.27], material: "stone", joint: { pivot: [0, 0.28, 0], axis: [1, 0, 0] } }));
-    part(`forearm_${side}`, box({ parent: `upper_arm_${side}`, at: [0, -0.42, -0.04], size: [0.26, 0.42, 0.3], material: "stone_dark" }));
-    part(`claw_${side}`, box({ parent: `forearm_${side}`, at: [0, -0.27, -0.1], size: [0.3, 0.16, 0.38], material: "claw" }));
+    part(`upper_arm_${side}`, box({ parent: "shoulder_bar", at: [sign * 0.51, -0.22, -0.01], rot: [-5, 0, sign * -5], size: [0.24, 0.44, 0.27], material: "stone", joint: { pivot: [0, 0.21, 0], axis: [1, 0, 0] } }));
+    part(`forearm_${side}`, box({ parent: `upper_arm_${side}`, at: [0, -0.31, -0.06], rot: [-10, 0, sign * 4], size: [0.25, 0.3, 0.29], material: "stone_dark" }));
+    part(`claw_${side}`, box({ parent: `forearm_${side}`, at: [0, -0.2, -0.09], size: [0.28, 0.14, 0.32], material: "claw" }));
     part(`leg_${side}`, box({ parent: "torso", at: [sign * 0.2, -0.56, 0.02], size: [0.27, 0.28, 0.3], material: "stone_dark", joint: { pivot: [0, 0.14, 0], axis: [1, 0, 0] } }));
     part(`foot_${side}`, box({ parent: `leg_${side}`, at: [0, -0.2, -0.1], size: [0.36, 0.12, 0.48], material: "claw" }));
     part(`wing_${side}`, box({ parent: "shoulder_bar", at: [sign * 0.68, 0.1, 0.14], rot: [0, sign * -8, sign * 24], size: [0.86, 0.075, 0.78], material: "stone_dark", faces: { up: { texture: "wing_ribs" }, down: { texture: "wing_ribs" } }, joint: { pivot: [sign * -0.4, 0, -0.08], axis: [0, 0, 1] } }));

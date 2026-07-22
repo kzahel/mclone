@@ -202,6 +202,10 @@ series implements the same concern, normally reuse the document slug in its
   and cross-platform validation. Tactical
   [`181`](../tactical/181-compiled-figure-static-box-proof.md) owns the first
   bounded static-box/UV artifact proof.
+- [`figure-alpha-cutout.md`](figure-alpha-cutout.md): implemented binary
+  transparent-palette contract across semantic validation, Asset Lab preview,
+  prepared atlases, mono/stereo/multiview shaders, and the Cutout Skeleton
+  visual proof; partial alpha and ghost materials remain deferred.
 - [`figure-animation-actions.md`](figure-animation-actions.md): accepted
   extensible clip contract for authored defaults, locomotion/idle/action roles,
   one-shot completion, catalogue action controls, and later general runtime

@@ -64,6 +64,32 @@ test("round-trips typed creature metadata and rejects invalid tags", () => {
   );
 });
 
+test("round-trips binary transparent palette entries and rejects partial alpha", () => {
+  const cutout = figure("cutout", ({ asciiTexture, box, mat, part }) => {
+    mat("bone", "#d8d0b5");
+    asciiTexture("ribs", {
+      palette: { ".": "transparent", "b": "#d8d0b5" },
+      pixels: ["b.b", "bbb"],
+    });
+    part("body", box({
+      at: [0, 0.5, 0],
+      size: [1, 1, 1],
+      material: "bone",
+      faces: { north: { texture: "ribs" } },
+    }));
+  });
+  assert.deepEqual(
+    roundTripFigureAsset(cutout, "cutout source").asset.textures.ribs?.palette,
+    { ".": "transparent", "b": "#d8d0b5" },
+  );
+
+  cutout.textures.ribs!.palette["."] = "#ffffff80";
+  assert.throws(
+    () => serializeFigureAsset(cutout),
+    /texture 'ribs' palette '\.' has invalid color '#ffffff80'/,
+  );
+});
+
 test("rejects values that cannot cross the JSON contract", () => {
   const source = tinyFigure();
   source.parts[0]!.at = [Number.NaN, 0, 0];

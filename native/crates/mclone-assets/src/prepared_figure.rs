@@ -1304,7 +1304,7 @@ fn build_atlas(
                         asset.name, name, symbol
                     ))
                 })?;
-                let color = parse_hex_color(color).map_err(|message| {
+                let color = parse_palette_color(color).map_err(|message| {
                     FigurePrepareError::new(format!(
                         "figure '{}' texture '{}' palette symbol '{}' {}",
                         asset.name, name, symbol, message
@@ -1555,6 +1555,13 @@ fn parse_hex_color(value: &str) -> Result<[u8; 4], String> {
     Ok([red, green, blue, 255])
 }
 
+fn parse_palette_color(value: &str) -> Result<[u8; 4], String> {
+    if value == "transparent" {
+        return Ok([0, 0, 0, 0]);
+    }
+    parse_hex_color(value)
+}
+
 fn rgba8_to_float(value: [u8; 4]) -> [f32; 4] {
     [
         value[0] as f32 / 255.0,
@@ -1723,6 +1730,73 @@ mod tests {
             1
         );
         assert!(prepared.clips.contains_key("walk"));
+    }
+
+    #[test]
+    fn preserves_binary_transparent_palette_entries_in_the_atlas() {
+        let asset: FigureAsset = serde_json::from_value(serde_json::json!({
+            "schemaVersion": 1,
+            "name": "cutout",
+            "materials": { "bone": { "color": "#d8d0b5" } },
+            "textures": {
+                "ribs": {
+                    "palette": { ".": "transparent", "b": "#d8d0b5" },
+                    "pixels": [".b"]
+                }
+            },
+            "parts": [{
+                "name": "body",
+                "material": "bone",
+                "primitive": {
+                    "kind": "box",
+                    "size": [1, 1, 1],
+                    "faces": { "north": { "texture": "ribs" } }
+                }
+            }],
+            "clips": {}
+        }))
+        .unwrap();
+        let prepared = prepare_figure_asset(&asset).unwrap();
+
+        assert_eq!(prepared.atlas.width, 7);
+        assert_eq!(prepared.atlas.height, 3);
+        assert_eq!(atlas_pixel(&prepared.atlas.rgba, 7, 4, 1), [0, 0, 0, 0]);
+        assert_eq!(
+            atlas_pixel(&prepared.atlas.rgba, 7, 5, 1),
+            [216, 208, 181, 255]
+        );
+        assert_eq!(atlas_pixel(&prepared.atlas.rgba, 7, 3, 1), [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn rejects_partial_alpha_palette_colors() {
+        let asset: FigureAsset = serde_json::from_value(serde_json::json!({
+            "schemaVersion": 1,
+            "name": "partial-alpha",
+            "textures": {
+                "ghost": {
+                    "palette": { "g": "#ffffff80" },
+                    "pixels": ["g"]
+                }
+            },
+            "parts": [{
+                "name": "body",
+                "primitive": {
+                    "kind": "box",
+                    "size": [1, 1, 1],
+                    "faces": { "north": { "texture": "ghost" } }
+                }
+            }],
+            "clips": {}
+        }))
+        .unwrap();
+
+        assert!(
+            prepare_figure_asset(&asset)
+                .unwrap_err()
+                .to_string()
+                .contains("expected #rrggbb color")
+        );
     }
 
     #[test]

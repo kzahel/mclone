@@ -111,8 +111,9 @@ test("filters and inspects typed creature classifications", async ({ page }) => 
 
   const groupFilter = page.getByRole("combobox", { name: "Group" });
   await groupFilter.selectOption("monster");
-  await expect(page.locator(".resultCount")).toHaveText("3 figures");
+  await expect(page.locator(".resultCount")).toHaveText("4 figures");
   await expect(page.locator("[data-catalog-name='skeleton']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='cutout_skeleton']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='slime']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='gargoyle']")).toBeVisible();
 
@@ -136,14 +137,25 @@ test("filters and inspects typed creature classifications", async ({ page }) => 
 
   const dispositionFilter = page.getByRole("combobox", { name: "Disposition" });
   await dispositionFilter.selectOption("hostile");
-  await expect(page.locator(".resultCount")).toHaveText("3 figures");
+  await expect(page.locator(".resultCount")).toHaveText("4 figures");
   await dispositionFilter.selectOption("all");
   await groupFilter.selectOption("all");
 
   const search = page.getByRole("searchbox", { name: "Search" });
   await search.fill("undead");
-  await expect(page.locator(".resultCount")).toHaveText("1 figure");
+  await expect(page.locator(".resultCount")).toHaveText("2 figures");
   await expect(page.locator("[data-catalog-name='skeleton']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='cutout_skeleton']")).toBeVisible();
+
+  await search.fill("alpha-cutout");
+  await expect(page.locator(".resultCount")).toHaveText("1 figure");
+  await page.locator("[data-catalog-name='cutout_skeleton']").click();
+  await expect(page.locator("canvas[data-figure='cutout_skeleton']")).toBeVisible();
+  await expect(classification).toContainText("Alpha cutout");
+  await page.screenshot({
+    path: "/tmp/mclone-creature-catalogue-alpha-cutout.png",
+    fullPage: true,
+  });
   expect(browserErrors).toEqual([]);
 });
 

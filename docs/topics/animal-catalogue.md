@@ -3,8 +3,9 @@
 Topic: `animal-catalogue`
 
 Status: complete and live-accepted 2026-07-21, then extended locally on
-2026-07-22 with typed creature classification, classification filters, and the
-first fantasy/monster wave. The read-only, production-built Asset Lab
+2026-07-22 with typed creature classification, classification filters, the
+first fantasy/monster wave, and a binary-alpha Cutout Skeleton proof. The
+read-only, production-built Asset Lab
 catalogue is available at
 `https://mclone.kzahel.com/animals/`, delivered by the existing native-web
 bundle and after-main-push deployment path.
@@ -173,13 +174,15 @@ occur.
 9. [x] Add typed multi-valued creature metadata, deterministic legacy
    inference, catalogue filters and inspector tags, and the Skeleton, Slime,
    and Gargoyle fantasy/monster wave.
+10. [x] Add Cutout Skeleton as a distinct searchable alpha-cutout demo and
+    retain the deeper separate-rib Skeleton for direct comparison.
 
 ## Local Acceptance Evidence
 
 The implemented path passes:
 
 - `pnpm asset-lab:typecheck`;
-- `pnpm asset-lab:test`: 24 semantic, scene, discovery, hash, and generation
+- `pnpm asset-lab:test`: 25 semantic, scene, discovery, hash, and generation
   tests plus the first-party figure drift gate;
 - `pnpm asset-lab:web:test`: four desktop and 390px production-subpath
   Playwright lanes covering deep links, animation advance/pause/keyboard scrub,
@@ -233,6 +236,14 @@ multi-valued inspector facts. The desktop classification capture at
 `/tmp/mclone-creature-catalogue-classification.png` and the refreshed 390px
 mobile capture were inspected. Separate clean sheets and MP4 reviews for all
 seven new clips are under `/tmp/mclone-asset-lab/fantasy-01/`.
+
+The binary-cutout follow-up builds 174 canonical figures, 234 clips, and 3,756
+parts. The `alpha-cutout` search returns only Cutout Skeleton, while Monster
+and Hostile each return four figures and `undead` returns both Skeleton
+variants. The catalogue capture is
+`/tmp/mclone-creature-catalogue-alpha-cutout.png`; clean sheets, MP4 reviews,
+and the semantic-versus-native prepared comparison are under
+`/tmp/mclone-asset-lab/binary-cutout/`.
 
 ## Live Acceptance Evidence
 

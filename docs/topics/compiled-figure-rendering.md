@@ -987,6 +987,8 @@ optimization, not a prerequisite.
 
 - solid-color materials as the ordinary path;
 - generated RGBA atlas regions derived from the sparse ASCII sources;
+- opaque `#RRGGBB` palette entries plus exact binary `"transparent"` texels,
+  discarded at alpha `0.1` with blending disabled and depth writes retained;
 - automatic planar `0..1` coordinates for each explicitly textured box face,
   remapped mechanically into its atlas region;
 - nearest-filtered sampling where authored;
@@ -1534,6 +1536,13 @@ Closed 2026-07-16 during the pre-landing design review.
    for A/B and schema-v1 compatibility review. The shared compiler continues
    translating those legacy records to explicitly diagnosed cuboid bounds;
    exact curved topology is no longer a production quality tier.
+10. **Binary alpha cutout.** ASCII palettes admit exact `"transparent"`
+    entries in addition to opaque `#RRGGBB`. Three.js and every prepared or
+    actor shader discard atlas samples below alpha `0.1`, keep blending off,
+    and retain normal depth writes. `#RRGGBBAA`, partial alpha, and translucent
+    material ordering remain outside this contract. The detailed evidence and
+    future split are recorded in
+    [`figure-alpha-cutout.md`](figure-alpha-cutout.md).
 
 ## Open Decisions
 
@@ -1550,9 +1559,9 @@ Closed 2026-07-16 during the pre-landing design review.
    replacement-pack compatibility decision would justify removing sphere,
    capsule, and cylinder parsing after the first-party migration is complete?
    Do not conflate zero canonical use with permission to break schema-v1 input.
-4. **Material expansion.** After Tactical 181's opaque color/box-face-texture
-   subset, which of alpha mode, roughness, metalness, emissive behavior, and
-   face shading belong in the shared shader contract?
+4. **Material expansion beyond cutout.** After the closed binary-alpha slice,
+   which of partial alpha/translucent ordering, roughness, metalness, emissive
+   behavior, and face shading belong in the shared shader contract?
 5. **Palette storage and evaluator threshold.** Uniform, storage-buffer, or
    texture-backed part matrices; how are alignment, browser limits, frames in
    flight, and many instances handled, and when does GPU expansion beat CPU

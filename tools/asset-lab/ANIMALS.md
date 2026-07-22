@@ -391,6 +391,7 @@ should be a high-value early wave for a Minecraft-style mob set.
 | Figure | Pri | Status | Variants to consider | Notes |
 |---|---|---|---|---|
 | Skeleton | P1 | ✅ | plain, dark/wither, frost/stray, armored | `examples/skeleton` — 24-box graveyard skeleton with layered ribs, articulated jaw, grounded march, and separate bone-rattle action |
+| Cutout Skeleton | P1 | ✅ | vanilla-shaped binary-alpha demo | `examples/cutout_skeleton` — full torso cuboid carved into ribs by transparent palette texels, with hollow march and rattle action |
 | Zombie | P1 | ☐ | plain, husk (desert), drowned (water) | shambling walk variant |
 | **Humanoid pig (pigman / orc)** | P1 | ☐ | piglin-style, zombified, brute, armored, tusked | **the one you asked for** — pig snout/ears on the folk biped + weapon |
 | Goblin | P2 | ☐ | scout, shaman | small biped |
@@ -413,7 +414,7 @@ should be a high-value early wave for a Minecraft-style mob set.
 | Giant spider | P2 | ☐ | C | normal, cave (small) | hostile build of Spider; needs N-leg crawl |
 | Ghost / wraith | P2 | ☐ | ST | — | floats (no gait); semi-transparent |
 | Golem | P2 | ☐ | B | stone, iron, clay | heavy biped; can be friendly too |
-| Gargoyle | P3 | ✅ | W/B | — | `examples/gargoyle` — 27-box stone biped with horns, raised two-stage wings, barbed tail, grounded stalk, glide, and awakening action |
+| Gargoyle | P3 | ✅ | W/B | — | `examples/gargoyle` — 27-box stone biped with horns, raised two-stage wings, shortened tucked arms, barbed tail, grounded stalk, glide, and awakening action |
 | Bat swarm | P3 | ☐ | W | — | hostile build of Bat (`wingFlap`) |
 | Mimic (chest monster) | P3 | ☐ | ST | — | block that sprouts teeth; fun gag |
 | Will-o-wisp / floating eye | P3 | ☐ | ST | — | tiny floater |
@@ -431,10 +432,12 @@ should be a high-value early wave for a Minecraft-style mob set.
 
 ## Coverage snapshot
 
-- **Canonical box-only figures:** 173 sources and 232 clips after the first
-  fantasy/monster wave.
+- **Canonical box-only figures:** 174 sources and 234 clips after the binary
+  cutout Skeleton follow-up.
 - **First hostile fantasy wave:** Skeleton, Slime, and Gargoyle, each with
   explicit typed catalogue classification and a separate special action.
+- **Binary-alpha proof:** Cutout Skeleton keeps a full torso cuboid and forms
+  its rib gaps entirely with explicit transparent palette texels.
 - **Rounded-to-box migration complete (13):** piglet, sheep, dog, cat,
   bearfolk, lionfolk, cow, horse, goat, wolf, fox, bear, and lion.
 - **Retained rounded A/B archive:** all 18 former mixed-primitive sources live

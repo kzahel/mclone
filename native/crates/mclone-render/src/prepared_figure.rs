@@ -777,4 +777,15 @@ mod tests {
         .validate(&module)
         .expect("multiview WGSL validates");
     }
+
+    #[test]
+    fn prepared_figure_shaders_discard_transparent_atlas_texels() {
+        for source in [
+            include_str!("shaders/prepared_figure.wgsl"),
+            include_str!("shaders/prepared_figure_multiview.wgsl"),
+        ] {
+            assert!(source.contains("if (texel.a < 0.1)"));
+            assert!(source.contains("discard;"));
+        }
+    }
 }
