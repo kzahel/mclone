@@ -14,8 +14,10 @@ traversal-scale tune, and the slope/exposure-aware surface and vegetation
 response on 2026-07-22. Human Review 1 accepted the geometry, but Human Review
 2 found the resulting mountain surfaces too smooth and the dominant relief too
 large-scale. A measurement-only terrain-characteristics checkpoint confirms
-that finding against exact undecorated Minecraft Java 1.17.1 terrain; a bounded
-scale-composition tune remains before host-equivalence closeout. The shared
+that finding against exact undecorated Minecraft Java 1.17.1 terrain. Field
+revision 5 closed much of the scale gap but human review rejected its aligned
+diagonal terrace pattern; a directionally varied revision remains before
+host-equivalence closeout. The shared
 Flat Grass cylinder proof is complete;
 [`196`](../tactical/196-periodic-mclone-terrain-fields.md) is planned after the
 first accepted Tactical 192 field set and before rivers, climate breadth, or
@@ -362,6 +364,16 @@ saddles, shelves, and gullies without changing a generation dependency
 footprint. Both new scales divide the provisional 6,144-block periodic
 circumference.
 
+Field revision 5 is not accepted. Its two harmonic, axis-aligned
+`ValueNoise2d` bands create locally planar interpolation patches; integer
+height quantization exposes those patches as repeated diagonal contour steps.
+The broad roughness ratios improved while this directional defect remained
+unmeasured. Revision 6 should replace these two implementations behind the
+same `mountain_detail` semantic value with periodic-ready gradient noise and
+independent gentle domain warps derived from existing relief/ruggedness
+components. Do not add volumetric density merely to solve a two-dimensional
+orientation artifact.
+
 A separate
 `McloneOverworldLandformSample` pairs one raw terrain sample with the exact
 four-block slope used by production. Its exposure relation combines accepted
@@ -646,6 +658,14 @@ lowland control remains fingerprint-identical. This is sufficient for a new
 human pixel review without forcing Mclone to copy vanilla's exact terrain
 distribution.
 
+The first field-revision-5 card review exposed a measurement blind spot:
+global X/Z anisotropy is about 1.06-1.26 across the mountain sites even though
+local diagonal herringbone is visually dominant. Opposing `/` and `\` patches
+cancel in a global axis ratio. Add local gradient structure tensors or an
+equivalent windowed orientation measure, report coherence and diagonal bias,
+and compare the same masks/sites against vanilla. Roughness magnitude remains
+necessary but is no longer sufficient for accepting a detail recipe.
+
 ## Acceptance Themes
 
 - distinct profile identity without any reference Overworld output change;
@@ -661,15 +681,16 @@ distribution.
 
 ## Next Work
 
-Review Tactical 192 field revision 5's production maps and complete
-maximum-view-distance landscape matrix. If its measured secondary form reads
-as coherent terrain rather than busy noise, accept the bounded tune and
-complete native/browser Worker equivalence and unchanged-host-contract
-closeout. If it still needs adjustment, keep that change within the landed
-32/8-block detail composition and broad-lift response rather than adding
-another field family. Do not fold rivers, climate breadth, caves, or structures
-into that tactical. After its field set and terrain language are accepted,
-execute
+Replace Tactical 192 field revision 5's rejected aligned detail with
+periodic-ready warped gradient detail behind the same `mountain_detail`
+contract. First extend the characteristic analyzer so local diagonal coherence
+is visible, then repeat the exact mountain/lowland suite and complete
+maximum-view-distance matrix. Keep the change within the 32/8-block detail
+composition and accepted broad-lift response unless evidence requires a
+bounded amplitude adjustment. Once human review accepts the result, complete
+native/browser Worker equivalence and unchanged-host-contract closeout. Do not
+fold rivers, climate breadth, caves, or structures into that tactical. After
+its field set and terrain language are accepted, execute
 [`Tactical 196`](../tactical/196-periodic-mclone-terrain-fields.md):
 re-audit every live field scale, select the explicit periodic sampler and
 circumference, then route terrain and decoration through canonical outputs plus

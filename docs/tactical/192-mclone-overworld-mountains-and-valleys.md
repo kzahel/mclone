@@ -9,8 +9,9 @@ ground, and an unchanged wooded lowland control. Human Review 2 rejected the
 current geometry as too smooth and too large-scale. A production-backed
 terrain-characteristics checkpoint now measures that finding against exact
 Minecraft Java 1.17.1 terrain. Field revision 5 applies the first bounded
-multiscale response and is ready for human pixel review before host-equivalence
-closeout and Tactical 196.
+multiscale response, but human pixel review rejected its strong diagonal
+terrace pattern. Revision 6 must replace the aligned value-noise detail before
+host-equivalence closeout and Tactical 196.
 
 Topic: `mclone-overworld-generation`
 
@@ -315,8 +316,10 @@ boundaries.
   Minecraft Java 1.17.1 terrain at shared block resolution.
 - [x] Rebalance fine, middle, and broad terrain scales against the measured
   reference envelope, then repeat maps and landscape review.
-- [ ] Accept or revise field revision 5 from the complete high-view-distance
-  landscape matrix.
+- [x] Reject field revision 5 from the complete high-view-distance landscape
+  matrix because of its coherent diagonal terrace artifact.
+- [ ] Replace aligned value-noise detail with directionally varied,
+  periodic-ready detail and repeat characteristic and pixel review.
 - [ ] Prove native thread and production browser Worker equivalence.
 - [ ] Re-run SQLite/IndexedDB only if identity, persistence, or startup behavior
   changed; otherwise cite Tactical 188's unchanged host contract.
@@ -388,7 +391,7 @@ adds no chunk-generation work. The JSON receipt is written to
 `/tmp/mclone-terrain-characteristics.json`; custom sites, radius, land mask,
 and output path are CLI arguments.
 
-#### Field revision 5 tuning candidate
+#### Field revision 5 rejected tuning candidate
 
 Field revision 5 keeps continentalness, relief, ruggedness, and both ridge
 domains byte-identical. It adds one live `mountain_detail` value composed from
@@ -443,7 +446,9 @@ range interior, mountain valley, positive-seed range, range edge, and lowland
 control retain 24, 128, and 315 blocks of camera clearance in their three
 views. The range cards show secondary peaks, saddles, shelves, and gullies;
 the valley remains a connected broad route, and the wooded lowland control is
-visually and numerically unchanged. Human acceptance remains open.
+visually and numerically unchanged. Human review nevertheless rejected the
+candidate because its top-down stone surfaces expose a strong diagonal
+herringbone pattern.
 
 On the same three-iteration release lane used by prior slices, field revision
 5 measured 3,836.042 surface chunks/s, 628.990 cold decorated targets/s, and
@@ -453,6 +458,34 @@ inside the 25 percent review threshold. The two added lattice samples are not
 an observable generation-cost concern in this run. Broad 148,225-point maps
 sampled in 16.7 ms and exact landforms in about 80-82 ms; the latter remains a
 diagnostic path rather than production's cached halo.
+
+The herringbone is real generated geometry, not the separate aliasing seen
+when an 8-block field is displayed on the 16-block diagnostic grid. Both
+detail bands use rectangular `ValueNoise2d` lattices at harmonic 32- and
+8-block scales. Each cell interpolates corner values independently along X and
+Z, creating locally smooth, nearly planar patches. Multiplying that result by
+up to 20 blocks and rounding to integer height turns the patches into parallel
+diagonal contour steps. Neighboring cells reverse gradient direction, so the
+steps form visible chevrons. The existing global X/Z anisotropy measure stays
+near one because opposing diagonal orientations cancel across a site.
+
+Revision 6 should not mask this defect with another aligned octave. Extend the
+characteristic analyzer with local structure-tensor coherence, diagonal
+alignment, and/or diagonal lag evidence so locally ordered terrain cannot hide
+inside a globally isotropic aggregate. Then replace both detail bands with a
+periodic-ready gradient-noise primitive. Sample each band through a gentle,
+independent two-axis domain warp derived from existing independent relief and
+ruggedness components; this bends lattice organization without adding a new
+macro semantic field. Preserve the accepted mountain/shoulder amplitude gate,
+the exact lowland/ocean exclusion, and the reduced broad lift unless new
+measurements justify a bounded adjustment.
+
+This remains a two-dimensional heightfield correction. Gradient direction and
+coordinate warping are sufficient to remove the planar lattice signature;
+volumetric density is reserved for a later demonstrated need for overhangs,
+arches, or undercut cliffs. The new noise must retain stable seed domains,
+signed-coordinate continuity, scales compatible with the planned 6,144-block
+period, and no larger chunk dependency footprint.
 
 ## Evidence
 

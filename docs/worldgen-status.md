@@ -76,7 +76,9 @@ Landed native coverage:
   large-scale. Field revision 5 adds mountain-gated 32/8-block detail and
   reduces broad ridge lift; the multiscale benchmark places it substantially
   closer to undecorated Java 1.17.1 terrain without changing the lowland
-  control. Its high-view-distance matrix awaits human acceptance.
+  control. Human review rejected its diagonal lattice-terrace artifact;
+  periodic-ready warped gradient detail and a local directionality metric are
+  the active replacement direction.
 - Production-backed broad field maps and fully warmed seed/region/spawn cards;
   the first review accepted macro scale and coast variation after adding one
   fine relief octave to break up concentric local contour bands. The second
