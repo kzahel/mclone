@@ -70,6 +70,11 @@ Landed native coverage:
   with separate gravel/sand/grass/stone surface recipes, a deterministic dry
   spawn, dependency-bearing vegetation execution, and field, seam, order,
   partition, cache, codec, native, and browser regression evidence.
+- Its first mountain/valley family adds coherent ridge and ruggedness fields,
+  derived slope/exposure, open valley and shoulder language, and exposed-stone
+  treatment. Human review found the current result too smooth and too
+  large-scale; a production-backed multiscale characteristic benchmark now
+  quantifies the pending tune against undecorated Java 1.17.1 terrain.
 - Production-backed broad field maps and fully warmed seed/region/spawn cards;
   the first review accepted macro scale and coast variation after adding one
   fine relief octave to break up concentric local contour bands. The second
@@ -93,6 +98,7 @@ Important native entry points:
 | Shared chunk/snapshot data | `native/crates/mclone-core/src/chunk.rs` |
 | Server scheduler/publication | `native/crates/mclone-server/src/scheduler.rs` |
 | Native worldgen smoke | `pnpm native:worldgen:smoke` |
+| Terrain characteristics | `pnpm native:worldgen:terrain-characteristics` |
 | Shared oracle fixtures | `test/fixtures/` |
 | Oracle generation tooling | `oracle/` |
 
@@ -124,8 +130,8 @@ Still not full vanilla parity:
   engine
 - the first original island generator remains intentionally bounded; the
   continuous mclone overworld now exists but has only a deliberately narrow
-  terrain/material/biome/vegetation palette and no mountains, rivers, caves,
-  or structures
+  terrain/material/biome/vegetation palette; its first mountain family remains
+  under review, and it has no rivers, caves, or structures
 - Mclone Overworld terrain and features remain planar until Tactical 196 makes
   their production samplers, dependency plans, and feature writes periodic;
   canonical chunk wrapping alone is intentionally rejected

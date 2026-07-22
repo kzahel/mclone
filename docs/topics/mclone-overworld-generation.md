@@ -11,9 +11,12 @@ Minecraft Java 1.17.1 reference path. Tactical
 Tactical [`192`](../tactical/192-mclone-overworld-mountains-and-valleys.md)
 landed its first two-field mountain geometry, a human-requested shorter
 traversal-scale tune, and the slope/exposure-aware surface and vegetation
-response on 2026-07-22. Human Review 1 accepted the geometry; the tactical is
-paused at Review 2 for judgment of the final terrain-language matrix before
-host-equivalence closeout. The shared Flat Grass cylinder proof is complete;
+response on 2026-07-22. Human Review 1 accepted the geometry, but Human Review
+2 found the resulting mountain surfaces too smooth and the dominant relief too
+large-scale. A measurement-only terrain-characteristics checkpoint confirms
+that finding against exact undecorated Minecraft Java 1.17.1 terrain; a bounded
+scale-composition tune remains before host-equivalence closeout. The shared
+Flat Grass cylinder proof is complete;
 [`196`](../tactical/196-periodic-mclone-terrain-fields.md) is planned after the
 first accepted Tactical 192 field set and before rivers, climate breadth, or
 structures. The selected terrain sequence is mountains and valleys, periodic
@@ -588,6 +591,40 @@ comparisons. The original Overworld will also need:
 Review tooling must sample the same pure field implementation as generation.
 Do not create a debug-only approximation of the terrain formula.
 
+`pnpm native:worldgen:terrain-characteristics` is the scale-sensitive
+counterpart to the field maps and visual cards. It converts actual generated
+chunks into a masked one-block height raster, then runs the same analysis on
+reference and candidate terrain. Its default 17-by-17-chunk sites compare
+three exact Java 1.17.1 mountain anchors with three reviewed Mclone mountain
+centers before carvers or decoration. Top-solid land at Y>=67 is the shared
+mask; material and vegetation cannot affect the result.
+
+Do not reduce this comparison to average slope. The durable characteristic
+vocabulary is:
+
+- a height-difference structure curve over 1-128-block separations;
+- five-point curvature for block-scale direction changes;
+- local plane-fit residual roughness over radii 2-32, which removes smooth
+  grade before measuring bumps and secondary forms;
+- the 1-32-block log/log roughness exponent; and
+- fine-detail residual-energy share between radius-4 and radius-32 fits.
+
+The first mountain benchmark quantified Human Review 2: relative to the
+vanilla group medians, Mclone has 0.408x lag-1 and 0.422x lag-4 RMS height
+change, 0.158x radius-8 and 0.220x radius-16 detrended roughness, but 1.604x
+lag-64 height change. Its roughness exponent is 0.919 versus 0.659. This is a
+smooth broad-ramp signature, not a lack of total mountain height. The current
+JSON receipt remains disposable under `/tmp`; deterministic analyzer tests
+and generated-terrain fingerprints make the procedure reproducible. Expand
+the site corpus before treating the values as a universal Minecraft biome
+distribution.
+
+The analyzer uses summed-area tables and takes about 14-27 ms for a
+272-by-272 site in the initial release run. It is offline tooling and adds no
+production generation cost. Keep future characteristic extraction in shared
+Rust so the same code can later serve a Terrain Lab or automated visual-review
+report without moving terrain semantics into TypeScript.
+
 ## Acceptance Themes
 
 - distinct profile identity without any reference Overworld output change;
@@ -603,11 +640,15 @@ Do not create a debug-only approximation of the terrain formula.
 
 ## Next Work
 
-Review Tactical 192's final slope/biome/surface maps and terrain-language card
-matrix. If accepted, complete its native/browser Worker equivalence and
-unchanged-host-contract closeout; do not fold rivers, climate breadth, caves,
-or structures into that tactical. After its field set and terrain language are
-accepted, execute
+Tune Tactical 192's mountain scale composition against the new multiscale
+terrain-characteristics baseline, then repeat its production maps and
+maximum-view-distance landscape matrix. The present result needs more
+coherent 4-32-block structure and less dominance from broad 64-block change;
+do not merely increase global height or add unmodulated noise everywhere. Once
+human review accepts that bounded tune, complete native/browser Worker
+equivalence and unchanged-host-contract closeout. Do not fold rivers, climate
+breadth, caves, or structures into that tactical. After its field set and
+terrain language are accepted, execute
 [`Tactical 196`](../tactical/196-periodic-mclone-terrain-fields.md):
 re-audit every live field scale, select the explicit periodic sampler and
 circumference, then route terrain and decoration through canonical outputs plus

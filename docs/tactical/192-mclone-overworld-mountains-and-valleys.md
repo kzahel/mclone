@@ -5,8 +5,11 @@ terrain-language response, and the dedicated no-extraction checkpoint landed
 2026-07-22. Human Review 1 accepted the revised geometry before surface rules
 changed. Production maps and the maximum-view-distance Review 2 matrix now
 show open valleys and transitional shoulders, grass below coherent rocky high
-ground, and an unchanged wooded lowland control. Review 2 is ready for human
-judgment before host-equivalence closeout and Tactical 196.
+ground, and an unchanged wooded lowland control. Human Review 2 rejected the
+current geometry as too smooth and too large-scale. A production-backed
+terrain-characteristics checkpoint now measures that finding against exact
+Minecraft Java 1.17.1 terrain. The bounded geometry tune remains before
+host-equivalence closeout and Tactical 196.
 
 Topic: `mclone-overworld-generation`
 
@@ -305,8 +308,12 @@ boundaries.
 ### Review 2 and closeout
 
 - [x] Re-run all production field maps and the complete landscape matrix.
-- [ ] Review mountain frequency, silhouette variety, valley connectivity,
+- [x] Review mountain frequency, silhouette variety, valley connectivity,
   surface exposure, vegetation, coast readability, repetition, and cost.
+- [x] Measure the rejected smoothness/scale finding against undecorated
+  Minecraft Java 1.17.1 terrain at shared block resolution.
+- [ ] Rebalance fine, middle, and broad terrain scales against the measured
+  reference envelope, then repeat maps and landscape review.
 - [ ] Prove native thread and production browser Worker equivalence.
 - [ ] Re-run SQLite/IndexedDB only if identity, persistence, or startup behavior
   changed; otherwise cite Tactical 188's unchanged host contract.
@@ -316,6 +323,67 @@ boundaries.
 Gate: the range/valley family is accepted and Tactical 196 can freeze the live
 field inventory before rivers/wetlands add another field family. If geometry
 still needs a bounded tune, record that exception explicitly.
+
+Human Review 2 found the range coherent and the terrain-language response
+useful, but found the mountain surface conspicuously smooth and its relief too
+large-scale. The first review metrics counted coarse 16-block map edges and
+could prove shorter ridge traversal, but could not distinguish a smooth ramp
+from a detailed slope. No generator output changed in response to this review.
+
+The measurement checkpoint adds
+`pnpm native:worldgen:terrain-characteristics`. Its default suite generates
+17 by 17 chunks per site on a shared one-block grid, extracts the highest
+non-fluid solid block, and keeps land at Y>=67. The vanilla side invokes the
+exact native Minecraft Java 1.17.1 `NoiseBasedChunkGenerator` terrain fill;
+the Mclone side invokes the production `mclone-overworld-v1` surface generator.
+Neither side includes carvers or decoration. Surface material does not affect
+the extracted height. Three established vanilla mountain anchors and three
+reviewed Mclone mountain centers are summarized by per-characteristic medians;
+one lowland control per profile remains a diagnostic rather than a
+representative biome survey.
+
+The reusable height-raster analyzer records:
+
+- RMS and percentile height differences at 1, 2, 4, 8, 16, 32, 64, and 128
+  block separations, plus directional anisotropy;
+- the absolute five-point discrete Laplacian as a block-scale curvature
+  signal;
+- least-squares local plane-fit residual RMSE at radii 2, 4, 8, 16, and 32,
+  which removes the broad local slope before measuring surface structure;
+- a log/log roughness exponent over 1-32 blocks, where a value nearer one
+  describes smooth ramp-like scale growth; and
+- the share of radius-32 residual energy already present at radius 4.
+
+The initial mountain-group result is:
+
+| Characteristic | Vanilla median | Mclone median | Mclone / vanilla |
+|---|---:|---:|---:|
+| Lag-1 RMS height delta | 1.282 | 0.523 | 0.408x |
+| Lag-4 RMS height delta | 3.602 | 1.520 | 0.422x |
+| Lag-16 RMS height delta | 8.022 | 5.889 | 0.734x |
+| Lag-64 RMS height delta | 12.977 | 20.819 | 1.604x |
+| Curvature RMS | 2.379 | 1.128 | 0.474x |
+| Plane-fit radius-4 RMSE | 1.365 | 0.279 | 0.205x |
+| Plane-fit radius-8 RMSE | 2.279 | 0.361 | 0.158x |
+| Plane-fit radius-16 RMSE | 3.904 | 0.859 | 0.220x |
+| Plane-fit radius-32 RMSE | 5.569 | 2.692 | 0.483x |
+| Roughness exponent | 0.659 | 0.919 | 1.394x |
+| Fine-detail energy share, r4/r32 | 0.060 | 0.011 | 0.183x |
+
+This is a strong quantitative match for the visual finding: Mclone has much
+less fine- and middle-scale structure after the broad slope is removed, while
+its 64-block height change is larger. The next tune should therefore not raise
+mountain amplitude globally. It should add or strengthen coherent detail in
+roughly the 4-32-block band and reduce or reshape the current broad lift until
+the scale curve moves toward the vanilla envelope. The reference remains a
+scale/legibility guide rather than an output-parity target.
+
+The default release run generated each 272 by 272 site in roughly 91-258 ms
+and analyzed it in 14-27 ms on the current Linux host. Analysis uses summed-area
+tables for constant-time plane windows and is offline review tooling, so it
+adds no chunk-generation work. The JSON receipt is written to
+`/tmp/mclone-terrain-characteristics.json`; custom sites, radius, land mask,
+and output path are CLI arguments.
 
 ## Evidence
 
