@@ -29,7 +29,7 @@ pnpm asset-lab:compare
 
 ## Interactive web catalogue
 
-The production-quality, read-only animal catalogue is another Asset Lab
+The production-quality, read-only creature catalogue is another Asset Lab
 display path. It discovers every canonical `examples/*/figure.ts`, crosses the
 same serialize/reparse validation boundary as preview and review commands, and
 generates semantic JSON, SHA-256 metadata, and deterministic thumbnails before
@@ -61,6 +61,20 @@ JSON. The UI shows the promoted count, offers a runtime-status filter, badges
 promoted rows, and displays their runtime figure ID and packed JSON path. React
 does not maintain a second promotion list.
 
+Canonical sources can declare typed creature classification through the DSL's
+`metadata()` helper. `groups`, `bodyPlans`, and `habitats` are nonempty tag
+sets; `disposition` and `scale` are single typed values; and optional `themes`
+are lowercase search tags. Multiple values are intentional: a Gargoyle can be
+both `fantasy` and `monster`, both `biped` and `winged`, and both `land` and
+`air`. The semantic JSON round-trip validates and preserves explicit metadata.
+
+Catalogue generation deterministically infers conservative metadata for older
+sources that do not yet declare it, so classification did not require a
+flag-day rewrite of the existing roster. New creatures, and existing creatures
+when materially edited, should author metadata explicitly. The catalogue
+manifest always carries the resolved result, and the UI exposes group, body
+plan, habitat, disposition, and metadata-aware search filters.
+
 The development preview and catalogue both use `src/viewport.ts` over the same
 `src/scene.ts` semantic renderer. React owns navigation and controls only; it
 does not create geometry or reinterpret animation keys.
@@ -79,8 +93,8 @@ to see.
 The batch command discovers `examples/*/figure.ts`, exports each asset, renders
 each sheet, and writes MP4 reviews under `/tmp/mclone-asset-lab/`. New example
 directories are included automatically; [`ANIMALS.md`](ANIMALS.md) is the
-current animal catalog and conversion queue. The deprecated rounded sources in
-`legacy-examples/` are deliberately excluded unless passed to a command by
+current creature roadmap and conversion queue. The deprecated rounded sources
+in `legacy-examples/` are deliberately excluded unless passed to a command by
 their explicit path.
 
 The compare command renders the same canonical semantic JSON through Three.js
@@ -155,6 +169,9 @@ animated-pose proof; visual sheet/video review remains required.
 Land figures also pass a sampled-pose ground-penetration gate. It evaluates
 rest, land locomotion, idle, and action poses; transforms every box corner; and
 reports non-contact parts more than `0.02` units below figure-space `y=0`.
+Explicit `metadata.habitats` containing `land` admits a figure even when its
+motion is entirely custom; older sources remain admitted through land
+locomotion inference.
 Swim/flight clips and exact boxes declared as locomotion contacts are excluded.
 Run `pnpm asset-lab:ground:check -- --verbose` to inspect the ratcheted catalog
 warning inventory as well as any failures.

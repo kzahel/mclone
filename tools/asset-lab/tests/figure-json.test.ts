@@ -27,6 +27,43 @@ test("serializes and reparses the complete semantic figure", () => {
   assert.match(document.json, /\n$/);
 });
 
+test("round-trips typed creature metadata and rejects invalid tags", () => {
+  const classified = figure("classified", ({ box, mat, metadata, part }) => {
+    metadata({
+      bodyPlans: ["quadruped", "swimmer"],
+      disposition: "neutral",
+      groups: ["animal"],
+      habitats: ["land", "water"],
+      scale: "medium",
+      themes: ["amphibious"],
+    });
+    mat("skin", "#667766");
+    part("body", box({ at: [0, 0.5, 0], size: [1, 1, 1], material: "skin" }));
+  });
+  assert.deepEqual(roundTripFigureAsset(classified, "classified source").asset.metadata, {
+    bodyPlans: ["quadruped", "swimmer"],
+    disposition: "neutral",
+    groups: ["animal"],
+    habitats: ["land", "water"],
+    scale: "medium",
+    themes: ["amphibious"],
+  });
+
+  const invalid = tinyFigure();
+  invalid.metadata = {
+    bodyPlans: ["quadruped"],
+    disposition: "neutral",
+    groups: ["animal"],
+    habitats: ["land"],
+    scale: "medium",
+    themes: ["Not a tag"],
+  };
+  assert.throws(
+    () => serializeFigureAsset(invalid),
+    /figure metadata theme 0 must be a lowercase tag/,
+  );
+});
+
 test("rejects values that cannot cross the JSON contract", () => {
   const source = tinyFigure();
   source.parts[0]!.at = [Number.NaN, 0, 0];

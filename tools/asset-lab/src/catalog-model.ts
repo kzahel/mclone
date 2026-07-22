@@ -1,4 +1,9 @@
 import type { ClipRole, LocomotionKind } from "./dsl";
+import {
+  cloneCreatureMetadata,
+  type CreatureMetadata,
+  validateCreatureMetadata,
+} from "./creature-metadata";
 
 export interface AnimalCatalogClip {
   durationSeconds: number;
@@ -18,6 +23,7 @@ export interface AnimalCatalogFigure {
   jsonPath: string;
   label: string;
   materialCount: number;
+  metadata: CreatureMetadata;
   name: string;
   partCount: number;
   runtimePromotion?: AnimalCatalogRuntimePromotion;
@@ -152,6 +158,13 @@ function parseCatalogFigure(value: unknown, sourceLabel: string, index: number):
   const runtimePromotion = value.runtimePromotion === undefined
     ? undefined
     : parseRuntimePromotion(value.runtimePromotion, sourceLabel, index);
+  const metadataErrors = validateCreatureMetadata(value.metadata, `figure ${index} metadata`);
+  if (metadataErrors.length > 0) {
+    throw new Error(
+      `Animal catalogue '${sourceLabel}' has invalid creature metadata for '${value.name}':\n`
+        + metadataErrors.map((error) => `- ${error}`).join("\n"),
+    );
+  }
   return {
     clipCount: value.clipCount,
     clips,
@@ -159,6 +172,7 @@ function parseCatalogFigure(value: unknown, sourceLabel: string, index: number):
     jsonPath: value.jsonPath,
     label: value.label,
     materialCount: value.materialCount,
+    metadata: cloneCreatureMetadata(value.metadata as CreatureMetadata),
     name: value.name,
     partCount: value.partCount,
     ...(runtimePromotion === undefined ? {} : { runtimePromotion }),

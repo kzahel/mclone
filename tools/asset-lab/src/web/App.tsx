@@ -4,6 +4,10 @@ import type { AnimalCatalogFigure } from "../catalog-model";
 import { FigureViewer } from "./FigureViewer";
 import {
   assetUrl,
+  type BodyPlanFilter,
+  type DispositionFilter,
+  type GroupFilter,
+  type HabitatFilter,
   type MotionFilter,
   type PromotionFilter,
   useAnimalCatalogueStore,
@@ -26,9 +30,50 @@ const promotionOptions: Array<{ label: string; value: PromotionFilter }> = [
   { label: "Lab only", value: "asset-lab" },
 ];
 
+const groupOptions: Array<{ label: string; value: GroupFilter }> = [
+  { label: "All groups", value: "all" },
+  { label: "Animals", value: "animal" },
+  { label: "Fantasy", value: "fantasy" },
+  { label: "Monsters", value: "monster" },
+  { label: "Humanoids", value: "humanoid" },
+  { label: "Constructs", value: "construct" },
+];
+
+const bodyPlanOptions: Array<{ label: string; value: BodyPlanFilter }> = [
+  { label: "All body plans", value: "all" },
+  { label: "Bipeds", value: "biped" },
+  { label: "Quadrupeds", value: "quadruped" },
+  { label: "Winged", value: "winged" },
+  { label: "Swimmers", value: "swimmer" },
+  { label: "Serpentine", value: "serpentine" },
+  { label: "Crawlers", value: "crawler" },
+  { label: "Blobs", value: "blob" },
+  { label: "Other", value: "other" },
+];
+
+const habitatOptions: Array<{ label: string; value: HabitatFilter }> = [
+  { label: "All habitats", value: "all" },
+  { label: "Land", value: "land" },
+  { label: "Water", value: "water" },
+  { label: "Air", value: "air" },
+  { label: "Underground", value: "underground" },
+];
+
+const dispositionOptions: Array<{ label: string; value: DispositionFilter }> = [
+  { label: "All dispositions", value: "all" },
+  { label: "Passive", value: "passive" },
+  { label: "Neutral", value: "neutral" },
+  { label: "Hostile", value: "hostile" },
+  { label: "Boss", value: "boss" },
+];
+
 export function App(): JSX.Element {
+  const bodyPlanFilter = useAnimalCatalogueStore((state) => state.bodyPlanFilter);
   const catalog = useAnimalCatalogueStore((state) => state.catalog);
+  const dispositionFilter = useAnimalCatalogueStore((state) => state.dispositionFilter);
   const error = useAnimalCatalogueStore((state) => state.error);
+  const groupFilter = useAnimalCatalogueStore((state) => state.groupFilter);
+  const habitatFilter = useAnimalCatalogueStore((state) => state.habitatFilter);
   const loadCatalog = useAnimalCatalogueStore((state) => state.loadCatalog);
   const loadStatus = useAnimalCatalogueStore((state) => state.loadStatus);
   const motionFilter = useAnimalCatalogueStore((state) => state.motionFilter);
@@ -39,6 +84,10 @@ export function App(): JSX.Element {
   const selectFigure = useAnimalCatalogueStore((state) => state.selectFigure);
   const selectedClipName = useAnimalCatalogueStore((state) => state.selectedClipName);
   const selectedFigureName = useAnimalCatalogueStore((state) => state.selectedFigureName);
+  const setBodyPlanFilter = useAnimalCatalogueStore((state) => state.setBodyPlanFilter);
+  const setDispositionFilter = useAnimalCatalogueStore((state) => state.setDispositionFilter);
+  const setGroupFilter = useAnimalCatalogueStore((state) => state.setGroupFilter);
+  const setHabitatFilter = useAnimalCatalogueStore((state) => state.setHabitatFilter);
   const setMotionFilter = useAnimalCatalogueStore((state) => state.setMotionFilter);
   const setPromotionFilter = useAnimalCatalogueStore((state) => state.setPromotionFilter);
   const setSearch = useAnimalCatalogueStore((state) => state.setSearch);
@@ -76,7 +125,16 @@ export function App(): JSX.Element {
     return () => cancelAnimationFrame(frame);
   }, [loadStatus, selectedFigureName]);
 
-  const figures = filterFigures(catalog?.figures ?? [], search, motionFilter, promotionFilter);
+  const figures = filterFigures(
+    catalog?.figures ?? [],
+    search,
+    groupFilter,
+    bodyPlanFilter,
+    habitatFilter,
+    dispositionFilter,
+    motionFilter,
+    promotionFilter,
+  );
   const selectedFigure = catalog?.figures.find((figure) => figure.name === selectedFigureName);
   const activeClipName = selectedFigure?.clips.some((clip) => clip.name === selectedClipName)
     ? selectedClipName as string
@@ -87,7 +145,7 @@ export function App(): JSX.Element {
       <header className="topBar">
         <div className="brandBlock">
           <div className="eyebrow">Mclone Asset Lab</div>
-          <h1>Animal Catalogue</h1>
+          <h1>Creature Catalogue</h1>
         </div>
         <div className="summaryStrip" aria-label="Catalogue summary">
           <SummaryItem label="figures" value={catalog?.summary.canonicalFigures ?? 0} />
@@ -106,7 +164,7 @@ export function App(): JSX.Element {
       {error ? <div className="errorBanner" role="alert">{error}</div> : null}
 
       <main className="workbench">
-        <aside className="catalogSidebar" aria-label="Figure catalogue">
+        <aside className="catalogSidebar" aria-label="Creature catalogue">
           <div className="catalogControls">
             <label>
               <span>Search</span>
@@ -114,8 +172,52 @@ export function App(): JSX.Element {
                 type="search"
                 value={search}
                 onChange={(event) => setSearch(event.target.value)}
-                placeholder="animal, clip, motion"
+                placeholder="creature, theme, clip"
               />
+            </label>
+            <label>
+              <span>Group</span>
+              <select
+                value={groupFilter}
+                onChange={(event) => setGroupFilter(event.target.value as GroupFilter)}
+              >
+                {groupOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Body plan</span>
+              <select
+                value={bodyPlanFilter}
+                onChange={(event) => setBodyPlanFilter(event.target.value as BodyPlanFilter)}
+              >
+                {bodyPlanOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Habitat</span>
+              <select
+                value={habitatFilter}
+                onChange={(event) => setHabitatFilter(event.target.value as HabitatFilter)}
+              >
+                {habitatOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
+            </label>
+            <label>
+              <span>Disposition</span>
+              <select
+                value={dispositionFilter}
+                onChange={(event) => setDispositionFilter(event.target.value as DispositionFilter)}
+              >
+                {dispositionOptions.map((option) => (
+                  <option key={option.value} value={option.value}>{option.label}</option>
+                ))}
+              </select>
             </label>
             <label>
               <span>Motion</span>
@@ -143,7 +245,7 @@ export function App(): JSX.Element {
               {figures.length} figure{figures.length === 1 ? "" : "s"}
             </div>
           </div>
-          <div className="catalogList" aria-label="Canonical figures">
+          <div className="catalogList" aria-label="Canonical creatures">
             {figures.map((figure) => (
               <button
                 type="button"
@@ -151,6 +253,10 @@ export function App(): JSX.Element {
                 className={figure.name === selectedFigureName ? "catalogRow selected" : "catalogRow"}
                 data-catalog-name={figure.name}
                 data-runtime-promoted={figure.runtimePromotion === undefined ? "false" : "true"}
+                data-groups={figure.metadata.groups.join(" ")}
+                data-body-plans={figure.metadata.bodyPlans.join(" ")}
+                data-habitats={figure.metadata.habitats.join(" ")}
+                data-disposition={figure.metadata.disposition}
                 aria-current={figure.name === selectedFigureName ? "true" : undefined}
                 onClick={() => selectFigure(figure.name)}
               >
@@ -160,7 +266,7 @@ export function App(): JSX.Element {
                     <strong>{figure.label}</strong>
                     {figure.runtimePromotion ? <span className="promotionBadge">Runtime</span> : null}
                   </span>
-                  <span>{motionLabel(figure)} · {figure.partCount} parts</span>
+                  <span>{formatTag(figure.metadata.groups[0] ?? "other")} · {motionLabel(figure)} · {figure.partCount} parts</span>
                 </span>
               </button>
             ))}
@@ -220,6 +326,17 @@ function FigureInspector({
         <Fact label="Textures" value={figure.textureCount} />
         <Fact label="Clips" value={figure.clipCount} />
       </section>
+      <section className="inspectorSection classificationSection">
+        <h3>Classification</h3>
+        <MetadataTags label="Groups" values={figure.metadata.groups} />
+        <MetadataTags label="Body" values={figure.metadata.bodyPlans} />
+        <MetadataTags label="Habitat" values={figure.metadata.habitats} />
+        <MetadataTags label="Disposition" values={[figure.metadata.disposition]} />
+        <MetadataTags label="Scale" values={[figure.metadata.scale]} />
+        {figure.metadata.themes && figure.metadata.themes.length > 0
+          ? <MetadataTags label="Themes" values={figure.metadata.themes} />
+          : null}
+      </section>
       <section className="inspectorSection">
         <h3>Active animation</h3>
         <dl>
@@ -274,9 +391,24 @@ function Fact({ label, value }: { label: string; value: number }): JSX.Element {
   return <div className="fact"><strong>{value}</strong><span>{label}</span></div>;
 }
 
+function MetadataTags({ label, values }: { label: string; values: readonly string[] }): JSX.Element {
+  return (
+    <div className="metadataRow">
+      <span>{label}</span>
+      <div className="metadataTags">
+        {values.map((value) => <span className="metadataTag" key={value}>{formatTag(value)}</span>)}
+      </div>
+    </div>
+  );
+}
+
 function filterFigures(
   figures: readonly AnimalCatalogFigure[],
   search: string,
+  groupFilter: GroupFilter,
+  bodyPlanFilter: BodyPlanFilter,
+  habitatFilter: HabitatFilter,
+  dispositionFilter: DispositionFilter,
   motionFilter: MotionFilter,
   promotionFilter: PromotionFilter,
 ): AnimalCatalogFigure[] {
@@ -286,6 +418,11 @@ function filterFigures(
       clip.locomotionKind === undefined ? [] : [clip.locomotionKind]
     ));
     const hasAction = figure.clips.some((clip) => clip.role === "action");
+    const matchesGroup = groupFilter === "all" || figure.metadata.groups.includes(groupFilter);
+    const matchesBodyPlan = bodyPlanFilter === "all" || figure.metadata.bodyPlans.includes(bodyPlanFilter);
+    const matchesHabitat = habitatFilter === "all" || figure.metadata.habitats.includes(habitatFilter);
+    const matchesDisposition = dispositionFilter === "all"
+      || figure.metadata.disposition === dispositionFilter;
     const matchesMotion = motionFilter === "all"
       || (motionFilter === "action"
         ? hasAction
@@ -296,7 +433,14 @@ function filterFigures(
       || (promotionFilter === "runtime"
         ? figure.runtimePromotion !== undefined
         : figure.runtimePromotion === undefined);
-    if (!matchesMotion || !matchesPromotion) {
+    if (
+      !matchesGroup
+      || !matchesBodyPlan
+      || !matchesHabitat
+      || !matchesDisposition
+      || !matchesMotion
+      || !matchesPromotion
+    ) {
       return false;
     }
     if (!query) {
@@ -310,12 +454,22 @@ function filterFigures(
       ...figure.clips.map((clip) => clip.role),
       ...figure.clips.flatMap((clip) => clip.nextClip === undefined ? [] : [clip.nextClip]),
       ...motionKinds,
+      ...figure.metadata.groups,
+      ...figure.metadata.bodyPlans,
+      ...figure.metadata.habitats,
+      figure.metadata.disposition,
+      figure.metadata.scale,
+      ...(figure.metadata.themes ?? []),
       ...(figure.runtimePromotion
         ? ["runtime", "promoted", figure.runtimePromotion.figureId, figure.runtimePromotion.jsonPath]
         : ["asset lab only"]),
     ].join(" ").toLocaleLowerCase();
     return haystack.includes(query);
   });
+}
+
+function formatTag(value: string): string {
+  return value.replaceAll("-", " ").replace(/^./u, (letter) => letter.toUpperCase());
 }
 
 function motionLabel(figure: AnimalCatalogFigure): string {

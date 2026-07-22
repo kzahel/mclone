@@ -14,6 +14,7 @@ import {
   type AnimalCatalogDocument,
   type AnimalCatalogFigure,
 } from "./catalog-model";
+import { creatureMetadataForCatalog } from "./catalog-classification";
 import { discoverCanonicalFigureSources } from "./discover-figures";
 import { assertBoxOnlyFigure } from "./dsl";
 import { assertFigureGeometry } from "./geometry-analysis";
@@ -99,6 +100,7 @@ export async function buildWebCatalog(
         jsonPath: `catalog/figures/${asset.name}.figure.json`,
         label: formatFigureLabel(asset.name),
         materialCount: Object.keys(asset.materials).length,
+        metadata: creatureMetadataForCatalog(asset),
         name: asset.name,
         partCount: asset.parts.length,
         ...(runtimePromotion === undefined ? {} : { runtimePromotion }),
@@ -116,6 +118,7 @@ export async function buildWebCatalog(
     prepared.map(({ entry }) => [
       entry.name,
       entry.semanticSha256,
+      JSON.stringify(entry.metadata),
       entry.runtimePromotion?.figureId ?? "",
       entry.runtimePromotion?.jsonPath ?? "",
     ].join("\0")).join("\n"),

@@ -4,6 +4,12 @@ import {
   type AnimalCatalogDocument,
   type AnimalCatalogFigure,
 } from "../catalog-model";
+import type {
+  CreatureBodyPlan,
+  CreatureDisposition,
+  CreatureGroup,
+  CreatureHabitat,
+} from "../creature-metadata";
 
 export type LoadStatus = "idle" | "loading" | "ready" | "error";
 export type MotionFilter =
@@ -16,11 +22,19 @@ export type MotionFilter =
   | "action"
   | "other";
 export type PromotionFilter = "all" | "runtime" | "asset-lab";
+export type GroupFilter = "all" | CreatureGroup;
+export type BodyPlanFilter = "all" | CreatureBodyPlan;
+export type HabitatFilter = "all" | CreatureHabitat;
+export type DispositionFilter = "all" | CreatureDisposition;
 export type ThemeMode = "light" | "dark";
 
 interface AnimalCatalogueState {
+  bodyPlanFilter: BodyPlanFilter;
   catalog: AnimalCatalogDocument | null;
+  dispositionFilter: DispositionFilter;
   error: string | null;
+  groupFilter: GroupFilter;
+  habitatFilter: HabitatFilter;
   loadCatalog: () => Promise<void>;
   loadStatus: LoadStatus;
   motionFilter: MotionFilter;
@@ -32,6 +46,10 @@ interface AnimalCatalogueState {
   selectedClipName: string | null;
   selectedFigureName: string | null;
   setMotionFilter: (filter: MotionFilter) => void;
+  setBodyPlanFilter: (filter: BodyPlanFilter) => void;
+  setDispositionFilter: (filter: DispositionFilter) => void;
+  setGroupFilter: (filter: GroupFilter) => void;
+  setHabitatFilter: (filter: HabitatFilter) => void;
   setPromotionFilter: (filter: PromotionFilter) => void;
   setSearch: (search: string) => void;
   syncSystemTheme: (themeMode: ThemeMode) => void;
@@ -41,8 +59,12 @@ interface AnimalCatalogueState {
 }
 
 export const useAnimalCatalogueStore = create<AnimalCatalogueState>((set, get) => ({
+  bodyPlanFilter: "all",
   catalog: null,
+  dispositionFilter: "all",
   error: null,
+  groupFilter: "all",
+  habitatFilter: "all",
   loadStatus: "idle",
   motionFilter: "all",
   promotionFilter: "all",
@@ -117,6 +139,22 @@ export const useAnimalCatalogueStore = create<AnimalCatalogueState>((set, get) =
 
   setMotionFilter(motionFilter) {
     set({ motionFilter });
+  },
+
+  setBodyPlanFilter(bodyPlanFilter) {
+    set({ bodyPlanFilter });
+  },
+
+  setDispositionFilter(dispositionFilter) {
+    set({ dispositionFilter });
+  },
+
+  setGroupFilter(groupFilter) {
+    set({ groupFilter });
+  },
+
+  setHabitatFilter(habitatFilter) {
+    set({ habitatFilter });
   },
 
   setPromotionFilter(promotionFilter) {

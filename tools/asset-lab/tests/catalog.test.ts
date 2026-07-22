@@ -28,6 +28,13 @@ test("builds deterministic canonical JSON catalogue artifacts", async () => {
       ["chicken", "king_cobra", "roly_poly"],
     );
     assert.equal(catalog.figures[0]?.defaultClip, "walk");
+    assert.deepEqual(catalog.figures[0]?.metadata, {
+      bodyPlans: ["biped"],
+      disposition: "neutral",
+      groups: ["animal"],
+      habitats: ["land"],
+      scale: "medium",
+    });
     assert.deepEqual(catalog.figures[0]?.runtimePromotion, {
       figureId: "mclone:chicken",
       jsonPath: "assets/mclone/figures/chicken.figure.json",
@@ -67,6 +74,12 @@ test("builds deterministic canonical JSON catalogue artifacts", async () => {
     assert.throws(
       () => parseAnimalCatalog(unsafeRuntimePath, "unsafe catalogue"),
       /invalid runtime promotion metadata/,
+    );
+    const invalidMetadata = structuredClone(catalog);
+    (invalidMetadata.figures[0]!.metadata.groups as unknown as string[])[0] = "machine";
+    assert.throws(
+      () => parseAnimalCatalog(invalidMetadata, "invalid metadata catalogue"),
+      /invalid creature metadata.*groups entry 0 'machine' is invalid/s,
     );
     for (const figure of catalog.figures) {
       const json = await fs.readFile(path.join(outRoot, figure.jsonPath), "utf8");

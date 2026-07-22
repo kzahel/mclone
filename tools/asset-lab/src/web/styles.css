@@ -577,6 +577,37 @@ h3 {
   text-align: right;
 }
 
+.classificationSection {
+  gap: 10px;
+}
+
+.metadataRow {
+  display: grid;
+  gap: 5px;
+}
+
+.metadataRow > span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.metadataTags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.metadataTag {
+  padding: 3px 7px;
+  border: 1px solid var(--accent-border);
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 10px;
+  line-height: 1.2;
+}
+
 .hashLine {
   overflow-wrap: anywhere;
 }
@@ -681,8 +712,8 @@ h3 {
   }
 
   .catalogSidebar {
-    min-height: 250px;
-    max-height: 340px;
+    min-height: 430px;
+    max-height: 520px;
     border-right: 0;
     border-bottom: 1px solid var(--border);
   }

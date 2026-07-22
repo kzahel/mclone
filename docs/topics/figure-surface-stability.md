@@ -159,8 +159,8 @@ whole parts, and parent-child categories cannot be suppressed.
   reason fails, a stale exception fails, and a defect appearing only at an
   animation key is detected.
 - The current required scan reports zero failures, zero acknowledged source
-  exceptions, and 146 ratcheted warnings across 170 canonical figures.
-- The 23-test semantic suite, connectivity scan, first-party drift check, and
+  exceptions, and 146 ratcheted warnings across 173 canonical figures.
+- The 24-test semantic suite, connectivity scan, first-party drift check, and
   typecheck pass.
 
 ## Authoring Contract

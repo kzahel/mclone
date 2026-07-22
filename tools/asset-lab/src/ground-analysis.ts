@@ -168,7 +168,8 @@ export function groundIssueKey(issue: FigureGroundIssue): string {
 }
 
 function hasLandLocomotion(asset: FigureAsset): boolean {
-  return Object.values(asset.clips).some((clip) =>
+  return asset.metadata?.habitats.includes("land") === true
+    || Object.values(asset.clips).some((clip) =>
     clip.locomotion !== undefined && LAND_LOCOMOTION_KINDS.has(clip.locomotion.kind)
   );
 }

@@ -1,10 +1,10 @@
-# Asset Lab — Animal Figure Roadmap & Checklist
+# Asset Lab — Creature Figure Roadmap & Checklist
 
 Planning / tracking / prioritization doc for figures authored in the
-[Asset Lab](README.md). Scope is **recognizable real-world animals** — the ones
-a player would name on sight — plus sensible variants (breed, color morph, age,
-sex). A short fantasy/anthro stretch section at the end continues the existing
-`-folk` line.
+[Asset Lab](README.md). The main inventory is **recognizable real-world
+animals** — the ones a player would name on sight — plus sensible variants
+(breed, color morph, age, sex). Fantasy, anthro, and hostile creatures extend
+that same canonical figure system near the end of the document.
 
 > **Scope:** real animals first, organized by family/type, then fantasy/anthro
 > `-folk` figures and a **Monsters & baddies** cast (skeletons, zombies, the
@@ -370,7 +370,7 @@ extensions — all **B** (`bipedWalk`), so no new tooling.
 | Dragon | P3 | ☐ | flagship mythic; W + Q hybrid, likely new tooling |
 | Unicorn / Pegasus | P3 | ☐ | horse rig + horn / wings |
 | Griffin | P3 | ☐ | eagle + lion |
-| Slime / blob | P3 | ☐ | ST + squash-stretch; trivial rig, fun motion (also a baddie — see below) |
+| Slime / blob | P3 | ✅ | `examples/slime` — six-box acid slime with textured gel layers, a grounded squash idle, and a separate leap-and-slam action (also a baddie — see below) |
 
 ---
 
@@ -390,7 +390,7 @@ should be a high-value early wave for a Minecraft-style mob set.
 
 | Figure | Pri | Status | Variants to consider | Notes |
 |---|---|---|---|---|
-| Skeleton | P1 | ☐ | plain, dark/wither, frost/stray, armored | bone texture on the humanoid rig; carries bow |
+| Skeleton | P1 | ✅ | plain, dark/wither, frost/stray, armored | `examples/skeleton` — 24-box graveyard skeleton with layered ribs, articulated jaw, grounded march, and separate bone-rattle action |
 | Zombie | P1 | ☐ | plain, husk (desert), drowned (water) | shambling walk variant |
 | **Humanoid pig (pigman / orc)** | P1 | ☐ | piglin-style, zombified, brute, armored, tusked | **the one you asked for** — pig snout/ears on the folk biped + weapon |
 | Goblin | P2 | ☐ | scout, shaman | small biped |
@@ -408,12 +408,12 @@ should be a high-value early wave for a Minecraft-style mob set.
 
 | Figure | Pri | Status | Body | Variants to consider | Notes |
 |---|---|---|---|---|---|
-| Slime / blob | P2 | ☐ | ST | small, medium, large; magma/acid | squash-stretch hop; trivial rig |
+| Slime / blob | P2 | ✅ | ST | small, medium, large; magma/acid | `examples/slime` — grounded restless ooze plus separate airborne acid-slam action |
 | Creeper-like crawler | P2 | ☐ | Q | — | legless/4-stub silent stalker |
 | Giant spider | P2 | ☐ | C | normal, cave (small) | hostile build of Spider; needs N-leg crawl |
 | Ghost / wraith | P2 | ☐ | ST | — | floats (no gait); semi-transparent |
 | Golem | P2 | ☐ | B | stone, iron, clay | heavy biped; can be friendly too |
-| Gargoyle | P3 | ☐ | W/B | — | winged biped; perch + glide |
+| Gargoyle | P3 | ✅ | W/B | — | `examples/gargoyle` — 27-box stone biped with horns, raised two-stage wings, barbed tail, grounded stalk, glide, and awakening action |
 | Bat swarm | P3 | ☐ | W | — | hostile build of Bat (`wingFlap`) |
 | Mimic (chest monster) | P3 | ☐ | ST | — | block that sprouts teeth; fun gag |
 | Will-o-wisp / floating eye | P3 | ☐ | ST | — | tiny floater |
@@ -431,16 +431,16 @@ should be a high-value early wave for a Minecraft-style mob set.
 
 ## Coverage snapshot
 
-- **Canonical box-only figures (20):** bear, bearfolk, butterfly, cat, chicken,
-  cow, dog, elephant, fox, goat, horse, lion, lionfolk, piglet, player, rabbit,
-  sheep, tiger, upright bear, and wolf.
+- **Canonical box-only figures:** 173 sources and 232 clips after the first
+  fantasy/monster wave.
+- **First hostile fantasy wave:** Skeleton, Slime, and Gargoyle, each with
+  explicit typed catalogue classification and a separate special action.
 - **Rounded-to-box migration complete (13):** piglet, sheep, dog, cat,
   bearfolk, lionfolk, cow, horse, goat, wolf, fox, bear, and lion.
 - **Retained rounded A/B archive:** all 18 former mixed-primitive sources live
   under `legacy-examples/` and remain schema-round-trip tested.
-- **Macros ready:** `quadrupedWalk` (Q), `bipedWalk` (B), `wingFlap` (W).
-- **Macros to build:** `swim` (S), `slither` (SL), `hop` (H — rabbit currently approximates it), N-leg crawl (C).
-- **Biggest single unlock:** the `swim` macro — gates the entire marine family.
-- **Lowest-effort wins next:** Deer and zebra can reuse the reviewed
-  horse-class rig; panda and polar bear can reuse the canonical bear.
-- **Cheapest enemy wave:** humanoid baddies (skeleton, zombie, humanoid pig) — all reuse the `player`/`-folk` biped rig + `bipedWalk`, no new tooling.
+- **Macros ready:** `quadrupedWalk` (Q), `bipedWalk` (B), `wingFlap` (W),
+  `swim` (S), and `slither` (SL), plus named idle/action clips.
+- **Macros to build:** a dedicated `hop` (H) and generalized N-leg crawl (C).
+- **Cheapest enemy follow-up:** Zombie, humanoid pig, and Goblin can reuse the
+  reviewed humanoid biped vocabulary while broadening monster silhouettes.

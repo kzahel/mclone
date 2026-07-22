@@ -37,7 +37,8 @@ evidence.
 
 [`ground-analysis.ts`](../../tools/asset-lab/src/ground-analysis.ts):
 
-1. Admits figures with at least one `biped-walk`, `quadruped-walk`, or
+1. Admits figures with explicit `metadata.habitats` containing `land`, or for
+   older unclassified sources at least one `biped-walk`, `quadruped-walk`, or
    `slither` locomotion clip.
 2. Samples rest plus land-locomotion, idle, and action poses at the same keys,
    midpoints, and bounded uniform cadence used by surface analysis.
@@ -94,11 +95,11 @@ multi-part groups, and arbitrary depth allowances cannot be suppressed.
 - A semantic fixture that penetrates only at an animation key fails and names
   the part, clip, time, depth, and suggested exception syntax.
 - Tests prove exact reasoned exceptions round-trip, stale exceptions fail,
-  declared locomotion contacts are excluded, and swim-only figures are outside
-  the land gate.
+  declared locomotion contacts are excluded, explicit land metadata admits
+  custom idle/action figures, and swim-only figures are outside the land gate.
 - The required scan reports zero failures, zero acknowledged source
-  exceptions, and 36 baseline warnings across 170 canonical figures.
-- The 23-test semantic suite, connectivity and surface scans, typecheck, and
+  exceptions, and 36 baseline warnings across 173 canonical figures.
+- The 24-test semantic suite, connectivity and surface scans, typecheck, and
   production catalogue build pass.
 
 ## Limits And Next Direction

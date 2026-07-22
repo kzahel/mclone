@@ -97,6 +97,56 @@ test("keeps the complete catalogue usable at a mobile viewport", async ({ page }
   expect(browserErrors).toEqual([]);
 });
 
+test("filters and inspects typed creature classifications", async ({ page }) => {
+  const browserErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      browserErrors.push(message.text());
+    }
+  });
+  page.on("pageerror", (error) => browserErrors.push(error.stack ?? error.message));
+
+  await page.goto("/animals/?figure=gargoyle&clip=stone_stalk");
+  await expect(page.locator("canvas[data-figure='gargoyle']")).toBeVisible();
+
+  const groupFilter = page.getByRole("combobox", { name: "Group" });
+  await groupFilter.selectOption("monster");
+  await expect(page.locator(".resultCount")).toHaveText("3 figures");
+  await expect(page.locator("[data-catalog-name='skeleton']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='slime']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='gargoyle']")).toBeVisible();
+
+  const classification = page.locator(".classificationSection");
+  await expect(classification).toContainText("Fantasy");
+  await expect(classification).toContainText("Monster");
+  await expect(classification).toContainText("Construct");
+  await expect(classification).toContainText("Land");
+  await expect(classification).toContainText("Air");
+  await expect(classification).toContainText("Hostile");
+  await page.screenshot({
+    path: "/tmp/mclone-creature-catalogue-classification.png",
+    fullPage: true,
+  });
+
+  const bodyPlanFilter = page.getByRole("combobox", { name: "Body plan" });
+  await bodyPlanFilter.selectOption("blob");
+  await expect(page.locator(".resultCount")).toHaveText("1 figure");
+  await expect(page.locator("[data-catalog-name='slime']")).toBeVisible();
+  await bodyPlanFilter.selectOption("all");
+
+  const dispositionFilter = page.getByRole("combobox", { name: "Disposition" });
+  await dispositionFilter.selectOption("hostile");
+  await expect(page.locator(".resultCount")).toHaveText("3 figures");
+  await dispositionFilter.selectOption("all");
+  await groupFilter.selectOption("all");
+
+  const search = page.getByRole("searchbox", { name: "Search" });
+  await search.fill("undead");
+  await expect(page.locator(".resultCount")).toHaveText("1 figure");
+  await expect(page.locator("[data-catalog-name='skeleton']")).toBeVisible();
+  expect(browserErrors).toEqual([]);
+});
+
 test("runs one-shot actions, holds their final pose, and follows nextClip", async ({ page }) => {
   const browserErrors: string[] = [];
   page.on("console", (message) => {

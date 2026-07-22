@@ -2,6 +2,20 @@ import * as THREE from "three";
 import { assertFigureGeometry } from "./geometry-analysis";
 import { assertFigureGrounding } from "./ground-analysis";
 import { assertFigureSurfaces } from "./surface-analysis";
+import {
+  cloneCreatureMetadata,
+  type CreatureMetadata,
+  validateCreatureMetadata,
+} from "./creature-metadata";
+
+export type {
+  CreatureBodyPlan,
+  CreatureDisposition,
+  CreatureGroup,
+  CreatureHabitat,
+  CreatureMetadata,
+  CreatureScale,
+} from "./creature-metadata";
 
 export type Vec3 = readonly [number, number, number];
 export type EulerDeg = Vec3;
@@ -10,6 +24,7 @@ export interface FigureAsset {
   schemaVersion: 1;
   name: string;
   defaultClip?: string;
+  metadata?: CreatureMetadata;
   geometryExceptions?: GeometryExceptionSpec[];
   surfaceExceptions?: SurfaceExceptionSpec[];
   materials: Record<string, MaterialSpec>;
@@ -349,6 +364,7 @@ export interface SlitherSpec extends CycleTimingSpec {
 
 export interface FigureApi {
   defaultClip(name: string): void;
+  metadata(spec: CreatureMetadata): void;
   geometryException(spec: GeometryExceptionSpec): void;
   surfaceException(spec: SurfaceExceptionSpec): void;
   mat(name: string, colorOrSpec: string | MaterialSpec): void;
@@ -446,6 +462,9 @@ export function validateFigure(asset: FigureAsset): string[] {
 
   if (!asset.name.trim()) {
     errors.push("figure name is required");
+  }
+  if (asset.metadata !== undefined) {
+    errors.push(...validateCreatureMetadata(asset.metadata, "figure metadata"));
   }
   if (asset.defaultClip !== undefined && !clipNames.has(asset.defaultClip)) {
     errors.push(`default clip references missing clip '${asset.defaultClip}'`);
@@ -615,11 +634,13 @@ class FigureBuilder {
   private readonly geometryExceptions: GeometryExceptionSpec[] = [];
   private readonly surfaceExceptions: SurfaceExceptionSpec[] = [];
   private defaultClipName: string | undefined;
+  private metadataSpec: CreatureMetadata | undefined;
   readonly api: LegacyFigureApi;
 
   constructor(private readonly name: string) {
     this.api = {
       defaultClip: (name) => this.defaultClip(name),
+      metadata: (spec) => this.metadata(spec),
       geometryException: (spec) => this.geometryException(spec),
       surfaceException: (spec) => this.surfaceException(spec),
       mat: (name, colorOrSpec) => this.mat(name, colorOrSpec),
@@ -648,6 +669,7 @@ class FigureBuilder {
       schemaVersion: 1,
       name: this.name,
       ...(this.defaultClipName === undefined ? {} : { defaultClip: this.defaultClipName }),
+      ...(this.metadataSpec === undefined ? {} : { metadata: this.metadataSpec }),
       ...(this.geometryExceptions.length === 0
         ? {}
         : { geometryExceptions: this.geometryExceptions }),
@@ -666,6 +688,13 @@ class FigureBuilder {
       throw new Error(`Figure '${this.name}' already declares default clip '${this.defaultClipName}'`);
     }
     this.defaultClipName = name;
+  }
+
+  private metadata(spec: CreatureMetadata): void {
+    if (this.metadataSpec !== undefined) {
+      throw new Error(`Figure '${this.name}' already declares metadata`);
+    }
+    this.metadataSpec = cloneCreatureMetadata(spec);
   }
 
   private geometryException(spec: GeometryExceptionSpec): void {

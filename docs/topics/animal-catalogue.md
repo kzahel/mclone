@@ -1,10 +1,11 @@
-# Deployed Animal Catalogue
+# Deployed Creature Catalogue
 
 Topic: `animal-catalogue`
 
-Status: complete and live-accepted 2026-07-21, including runtime promotion
-metadata and filtering. The read-only, production-built Asset Lab catalogue is
-available at
+Status: complete and live-accepted 2026-07-21, then extended locally on
+2026-07-22 with typed creature classification, classification filters, and the
+first fantasy/monster wave. The read-only, production-built Asset Lab
+catalogue is available at
 `https://mclone.kzahel.com/animals/`, delivered by the existing native-web
 bundle and after-main-push deployment path.
 
@@ -37,6 +38,12 @@ preparation remain owned by
 - Visitors can distinguish runtime-promoted figures from Asset Lab-only
   examples, filter by that status, and inspect the promoted runtime figure ID
   and packed semantic JSON path.
+- Visitors can filter by group, body plan, habitat, and disposition. Search
+  includes those classifications, scale, and optional authored theme tags.
+- Classification is multi-valued where the creature demands it: amphibious
+  creatures can be land and water, while a Gargoyle can be fantasy, monster,
+  construct, biped, winged, land, and air without flattening those facts into
+  one category.
 - Figure selection and clip selection are shareable through URL query
   parameters without requiring a Worker-side single-page-app fallback.
 - The layout is responsive and keyboard accessible, supports light and dark
@@ -60,12 +67,12 @@ examples/<name>/figure.ts
        -> catalogue thumbnail capture
 ```
 
-The browser-neutral semantic contract owns `FigureAsset`, validation,
-serialization, clip facts, and animation semantics. The shared Three.js layer
-owns semantic geometry, materials, texture construction, scene pose updates,
-camera framing, controls, resize behavior, lighting, and GPU disposal. React
-owns only catalogue/UI state and delegates rendering through the viewport
-controller.
+The browser-neutral semantic contract owns `FigureAsset`, typed creature
+metadata, validation, serialization, clip facts, and animation semantics. The
+shared Three.js layer owns semantic geometry, materials, texture construction,
+scene pose updates, camera framing, controls, resize behavior, lighting, and
+GPU disposal. React owns only catalogue/UI state and delegates rendering
+through the viewport controller.
 
 The current development preview must become a thin client of that same
 controller. React components must not create figure meshes, reinterpret clip
@@ -92,6 +99,8 @@ The manifest records at least:
 - part, material, texture, and clip counts;
 - clip names, labels, roles, duration, loop state, authored fps, locomotion
   kind, and optional next-clip behavior;
+- resolved creature groups, body plans, habitats, disposition, scale, and
+  optional themes;
 - a deterministic default clip and thumbnail URL;
 - the total runtime-promoted figure count; and
 - for promoted entries, the runtime figure ID and packed semantic JSON path.
@@ -130,8 +139,8 @@ Required gates are:
 - a production `/animals/` build served from its actual subpath;
 - Playwright coverage for initial load, search and selection, URL restoration,
   play/pause/scrub/speed controls, camera actions, figure replacement, theme,
-  runtime-status filtering and details, keyboard access, responsive layout,
-  and browser/page errors;
+  runtime-status and creature-classification filtering and details, keyboard
+  access, responsive layout, and browser/page errors;
 - inspected local desktop and mobile screenshots written under `/tmp`;
 - deploy-bundle inspection proving `dist-native-web/animals/index.html`, hashed
   app assets, manifest, figure JSON, and thumbnails are present; and
@@ -161,18 +170,22 @@ occur.
 7. [x] Publish and live-verify the runtime promotion follow-up.
 8. [x] Add authored defaults and action-aware grouped controls, completion,
    filtering, inspector facts, and shareable selection.
+9. [x] Add typed multi-valued creature metadata, deterministic legacy
+   inference, catalogue filters and inspector tags, and the Skeleton, Slime,
+   and Gargoyle fantasy/monster wave.
 
 ## Local Acceptance Evidence
 
 The implemented path passes:
 
 - `pnpm asset-lab:typecheck`;
-- `pnpm asset-lab:test`: 16 semantic, scene, discovery, hash, and generation
+- `pnpm asset-lab:test`: 24 semantic, scene, discovery, hash, and generation
   tests plus the first-party figure drift gate;
-- `pnpm asset-lab:web:test`: desktop and 390px production-subpath Playwright
-  lanes covering deep links, animation advance/pause/keyboard scrub, camera
-  pixel change, search, keyboard selection, figure replacement, one-canvas
-  ownership, theme, responsive width, and browser/page errors;
+- `pnpm asset-lab:web:test`: four desktop and 390px production-subpath
+  Playwright lanes covering deep links, animation advance/pause/keyboard scrub,
+  camera pixel change, search, keyboard selection, classification and runtime
+  filters, figure replacement, one-canvas ownership, theme, responsive width,
+  and browser/page errors;
 - `pnpm native:web:worker:test`: directory routing, isolation headers, nested
   hashed-asset immutable caching, and catalogue-data revalidation; and
 - `pnpm native:web:bundle`: complete asset packs, WASM, web glue, catalogue
@@ -210,6 +223,16 @@ proves grouped Roly-poly clips, the Special actions filter, repeated action
 restart, non-looping final-pose hold, automatic return from `unroll` to
 `crawl`, URL synchronization, and clean browser/page errors. The held action
 capture at `/tmp/mclone-roly-poly-action-catalogue.png` was inspected.
+
+The classification and first-monster follow-up builds 173 canonical figures,
+232 clips, and 3,742 parts. All three new sources carry explicit typed metadata;
+older sources receive deterministic catalogue-only inference until they are
+edited. Playwright proves the three-entry Monster result, the single Blob
+result, the three-entry Hostile result, theme-tag search, and Gargoyle's
+multi-valued inspector facts. The desktop classification capture at
+`/tmp/mclone-creature-catalogue-classification.png` and the refreshed 390px
+mobile capture were inspected. Separate clean sheets and MP4 reviews for all
+seven new clips are under `/tmp/mclone-asset-lab/fantasy-01/`.
 
 ## Live Acceptance Evidence
 
@@ -305,7 +328,9 @@ errors occurred. The fully loaded production capture at
 
 ## Recommended Next Work
 
-No acceptance work remains. Reconsider a workspace package only when a
-consumer outside `tools/asset-lab` needs the TypeScript viewer contract. Treat
-further bundle splitting or upload batching as measurement-led deployment
-improvements rather than catalogue correctness work.
+Migrate inferred legacy classifications to explicit source metadata when each
+creature is materially edited; do not perform a low-signal 170-source flag-day
+rewrite. Reconsider a workspace package only when a consumer outside
+`tools/asset-lab` needs the TypeScript viewer contract. Treat further bundle
+splitting or upload batching as measurement-led deployment improvements rather
+than catalogue correctness work.
