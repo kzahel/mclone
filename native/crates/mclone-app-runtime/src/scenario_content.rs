@@ -56,6 +56,15 @@ impl LobbyWorldSource {
             Self::AppPrivate(_) | Self::Catalog(_) => None,
         }
     }
+
+    /// Whether this route owns durable world state across runtime sessions.
+    ///
+    /// Runtime-only fixture decoration may be authored into a transient store,
+    /// but persistent worlds must restore their saved actor set without
+    /// re-running authoring on every open.
+    pub const fn allows_runtime_actor_authoring(&self) -> bool {
+        matches!(self, Self::TransientAuthored(_))
+    }
 }
 
 /// Stable identity for a persistent world owned by the application rather
@@ -131,6 +140,22 @@ mod tests {
         assert_eq!(
             AppPrivateWorldKey::LobbyFallback.storage_id(),
             "managed.lobby-preview-v3.overworld-v3"
+        );
+    }
+
+    #[test]
+    fn only_transient_lobby_storage_allows_runtime_actor_authoring() {
+        assert!(
+            LobbyWorldSource::TransientAuthored(AuthoredWorldFixtureKind::LobbyIslandV2)
+                .allows_runtime_actor_authoring()
+        );
+        assert!(
+            !LobbyWorldSource::AppPrivate(AppPrivateWorldKey::LobbyFallback)
+                .allows_runtime_actor_authoring()
+        );
+        assert!(
+            !LobbyWorldSource::Catalog(LocalWorldId::new("saved-world").unwrap())
+                .allows_runtime_actor_authoring()
         );
     }
 }

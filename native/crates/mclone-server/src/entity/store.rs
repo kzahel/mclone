@@ -49,6 +49,7 @@ pub(crate) struct ServerEntityStore {
     next_entity_id: u64,
     next_persistent_id: u64,
     debug_passive_showcase_ids: Vec<(EntityKind, EntityId)>,
+    provisional_debug_passive_showcase_ids: BTreeSet<EntityId>,
     debug_periodic_showcase_phase: u64,
     debug_periodic_showcase_crossings: u64,
     debug_periodic_showcase_last_x: Option<f64>,
@@ -93,6 +94,20 @@ impl ServerEntityStore {
                 ids.push(id);
                 continue;
             }
+            if let Some(id) = self.entities.values().find_map(|entity| {
+                (entity.alive
+                    && entity.kind == kind
+                    && !self.volatile_entities.contains(&entity.id)
+                    && !self
+                        .debug_passive_showcase_ids
+                        .iter()
+                        .any(|(_, registered_id)| *registered_id == entity.id))
+                .then_some(entity.id)
+            }) {
+                self.debug_passive_showcase_ids.push((kind, id));
+                ids.push(id);
+                continue;
+            }
 
             let id = self.allocate_entity_id();
             let mut position = debug_passive_showcase_position(spawn_position, index);
@@ -108,9 +123,38 @@ impl ServerEntityStore {
             let y_rot_degrees = debug_passive_showcase_y_rot(index);
             self.insert_passive_mob(id, kind, position, y_rot_degrees);
             self.debug_passive_showcase_ids.push((kind, id));
+            self.provisional_debug_passive_showcase_ids.insert(id);
             ids.push(id);
         }
         ids
+    }
+
+    pub(crate) fn adopt_hydrated_debug_passive_showcase(
+        &mut self,
+        hydrated: &[ServerEntityState],
+    ) -> Vec<ServerEntityState> {
+        let mut removed = Vec::new();
+        for entity in hydrated.iter().copied() {
+            let Some(index) = self
+                .debug_passive_showcase_ids
+                .iter()
+                .position(|(kind, _)| *kind == entity.kind)
+            else {
+                continue;
+            };
+            let provisional_id = self.debug_passive_showcase_ids[index].1;
+            if !self
+                .provisional_debug_passive_showcase_ids
+                .remove(&provisional_id)
+            {
+                continue;
+            }
+            self.debug_passive_showcase_ids[index].1 = entity.id;
+            if let Some(removed_entity) = self.remove_entity(provisional_id) {
+                removed.push(removed_entity);
+            }
+        }
+        removed
     }
 
     pub(crate) fn advance_debug_periodic_showcase(&mut self) -> Option<ServerEntityState> {
@@ -730,6 +774,7 @@ impl ServerEntityStore {
         self.items.remove(&id);
         self.persistent_ids.remove(&id);
         self.volatile_entities.remove(&id);
+        self.provisional_debug_passive_showcase_ids.remove(&id);
         self.tick_list.remove(id);
         Some(state)
     }
@@ -1211,6 +1256,80 @@ mod tests {
             .mob_state(first[1])
             .expect("starter chicken mob state");
         assert_eq!(chicken_mob.available_goal_count(), 3);
+    }
+
+    #[test]
+    fn debug_passive_showcase_adopts_hydrated_actors_without_duplication() {
+        let mut first = ServerEntityStore::default();
+        let first_ids =
+            first.ensure_debug_passive_showcase_near_spawn(Vec3d::new(8.0, 64.0, 8.0), true);
+        let first_persistent_ids = first_ids
+            .iter()
+            .map(|id| first.state(*id).unwrap().persistent_id)
+            .collect::<Vec<_>>();
+        let record = first.entity_chunk_record(ChunkPos::new(0, 0), 1);
+
+        let mut reloaded = ServerEntityStore::default();
+        reloaded.next_entity_id = 100;
+        let hydrated = reloaded.hydrate_entity_chunk_record(&record).unwrap();
+        let adopted =
+            reloaded.ensure_debug_passive_showcase_near_spawn(Vec3d::new(8.0, 64.0, 8.0), true);
+
+        assert_eq!(adopted.len(), PASSIVE_MOB_KINDS.len());
+        assert_eq!(reloaded.states().len(), PASSIVE_MOB_KINDS.len());
+        assert_eq!(
+            adopted,
+            hydrated.iter().map(|entity| entity.id).collect::<Vec<_>>()
+        );
+        assert_eq!(
+            adopted
+                .iter()
+                .map(|id| reloaded.state(*id).unwrap().persistent_id)
+                .collect::<Vec<_>>(),
+            first_persistent_ids
+        );
+    }
+
+    #[test]
+    fn hydrated_actors_replace_provisional_showcase_without_duplication() {
+        let mut saved = ServerEntityStore::default();
+        let saved_ids =
+            saved.ensure_debug_passive_showcase_near_spawn(Vec3d::new(40.0, 64.0, 40.0), true);
+        let saved_persistent_ids = saved_ids
+            .iter()
+            .map(|id| saved.state(*id).unwrap().persistent_id)
+            .collect::<Vec<_>>();
+        let record = saved.entity_chunk_record(ChunkPos::new(2, 2), 1);
+
+        let mut reloaded = ServerEntityStore::default();
+        reloaded.next_persistent_id = saved_persistent_ids
+            .iter()
+            .map(|id| id.least)
+            .max()
+            .unwrap();
+        let provisional =
+            reloaded.ensure_debug_passive_showcase_near_spawn(Vec3d::new(8.0, 64.0, 8.0), true);
+        let hydrated = reloaded.hydrate_entity_chunk_record(&record).unwrap();
+        let removed = reloaded.adopt_hydrated_debug_passive_showcase(&hydrated);
+
+        assert_eq!(removed.len(), PASSIVE_MOB_KINDS.len());
+        assert!(removed.iter().all(|entity| !entity.alive));
+        assert_eq!(
+            removed.iter().map(|entity| entity.id).collect::<Vec<_>>(),
+            provisional
+        );
+        assert_eq!(reloaded.states(), hydrated);
+        assert_eq!(
+            hydrated
+                .iter()
+                .map(|entity| entity.persistent_id)
+                .collect::<Vec<_>>(),
+            saved_persistent_ids
+        );
+        assert_eq!(
+            reloaded.ensure_debug_passive_showcase_near_spawn(Vec3d::new(8.0, 64.0, 8.0), true),
+            hydrated.iter().map(|entity| entity.id).collect::<Vec<_>>()
+        );
     }
 
     #[test]

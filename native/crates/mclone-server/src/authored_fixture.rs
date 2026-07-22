@@ -857,7 +857,7 @@ mod tests {
         let manifest =
             write_authored_world_fixture_dir(&root, AuthoredWorldFixtureKind::LobbyIslandV2)
                 .unwrap();
-        let saved_positions = {
+        let first_session_entities = {
             let mut server =
                 LocalRealmSession::try_with_threaded_sqlite_world_dir(manifest.seed, &root)
                     .unwrap();
@@ -901,13 +901,52 @@ mod tests {
                 "an authored passive actor should move through ordinary AI"
             );
             assert!(entities.iter().all(|entity| entity.tick_count > 0));
-            let positions = entities
-                .iter()
-                .map(|entity| (entity.kind, entity.position))
-                .collect::<Vec<_>>();
             server.shutdown_persistence().unwrap();
-            positions
+            entities
         };
+
+        let first_saved_record = {
+            let mut store = SqliteWorldStore::open_world_dir_read_only(&root).unwrap();
+            store
+                .load_entity_chunk(
+                    &mclone_protocol::DimensionKey::overworld(),
+                    AUTHORED_WORLD_FIXTURE_CENTER,
+                )
+                .unwrap()
+                .expect("saved authored entity chunk")
+        };
+        assert_eq!(first_saved_record.entities.len(), 2);
+        let saved_by_persistent_id = first_saved_record
+            .entities
+            .iter()
+            .map(|entity| (entity.persistent_id, entity))
+            .collect::<BTreeMap<_, _>>();
+        for entity in &first_session_entities {
+            let saved = saved_by_persistent_id
+                .get(&entity.persistent_id)
+                .expect("runtime actor must save under its durable identity");
+            assert_eq!(saved.position, entity.position);
+            assert_eq!(
+                saved.kind,
+                match entity.kind {
+                    EntityKind::Cow => "minecraft:cow",
+                    EntityKind::Chicken => "minecraft:chicken",
+                    _ => unreachable!("passive fixture contains only cow and chicken"),
+                }
+            );
+        }
+        let saved_chicken_egg_time = first_saved_record
+            .entities
+            .iter()
+            .find_map(|entity| match entity.payload {
+                EntitySavePayload::Chicken { egg_time } => Some(egg_time),
+                _ => None,
+            })
+            .expect("saved authored chicken timer");
+        assert!(
+            (1..6_000).contains(&saved_chicken_egg_time),
+            "ordinary simulation must persist the chicken-owned egg timer"
+        );
 
         let mut server =
             LocalRealmSession::try_with_threaded_sqlite_world_dir(manifest.seed, &root).unwrap();
@@ -922,16 +961,43 @@ mod tests {
             2,
             "reload must not duplicate authored actors"
         );
-        for entity in reloaded {
+        assert!(
+            reloaded.iter().all(|entity| entity.tick_count == 0),
+            "base entity tickCount is reconstructed runtime state"
+        );
+        for entity in &reloaded {
+            let saved = saved_by_persistent_id
+                .get(&entity.persistent_id)
+                .expect("reloaded actor must keep its durable identity");
             assert_eq!(
-                entity.position,
-                saved_positions
-                    .iter()
-                    .find_map(|(kind, position)| (*kind == entity.kind).then_some(*position))
-                    .expect("saved actor kind")
+                entity.position, saved.position,
+                "relaunch must restore the saved pose instead of reauthoring"
             );
         }
         server.shutdown_persistence().unwrap();
+
+        let second_saved_record = {
+            let mut store = SqliteWorldStore::open_world_dir_read_only(&root).unwrap();
+            store
+                .load_entity_chunk(
+                    &mclone_protocol::DimensionKey::overworld(),
+                    AUTHORED_WORLD_FIXTURE_CENTER,
+                )
+                .unwrap()
+                .expect("resaved authored entity chunk")
+        };
+        let reloaded_chicken_egg_time = second_saved_record
+            .entities
+            .iter()
+            .find_map(|entity| match entity.payload {
+                EntitySavePayload::Chicken { egg_time } => Some(egg_time),
+                _ => None,
+            })
+            .expect("reloaded authored chicken timer");
+        assert_eq!(
+            reloaded_chicken_egg_time, saved_chicken_egg_time,
+            "closed-world time must not catch up the chicken-owned timer"
+        );
         fs::remove_dir_all(root).unwrap();
     }
 

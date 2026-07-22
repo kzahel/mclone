@@ -2816,7 +2816,12 @@ impl RealmServer {
             }
 
             let observer_anchor = self.observer_preview_anchor_in_active_dimension();
-            if let Some(anchor) = observer_anchor {
+            if let Some(anchor) = observer_anchor
+                && self.scheduler.pending_persistence_load_count() == 0
+                && self
+                    .scheduler
+                    .entity_chunk_loaded(chunk_pos_for_player_position(anchor))
+            {
                 let showcase_enabled = self.debug_passive_showcase_enabled;
                 let showcase_ids = self
                     .entities
@@ -3442,6 +3447,8 @@ impl RealmServer {
                     self.dirty_entity_chunks.remove(&pos);
                     if let Some(record) = record {
                         let loaded = self.entities.hydrate_entity_chunk_record(&record)?;
+                        let removed = self.entities.adopt_hydrated_debug_passive_showcase(&loaded);
+                        self.reconcile_entity_subjects(removed, true);
                         self.reconcile_entity_subjects(loaded, true);
                     }
                 }

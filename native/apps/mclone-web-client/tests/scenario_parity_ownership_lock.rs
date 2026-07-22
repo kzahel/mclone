@@ -93,10 +93,7 @@ fn shared_lobby_recipe_selects_storage_without_materializing_payloads() {
 
 #[test]
 fn browser_runtime_honors_the_shared_lobby_actor_policy() {
-    assert!(
-        SCENE_SESSION
-            .contains("scene.debug_passive_showcase = self.debug_lobby_auxiliary_player_script;")
-    );
+    assert!(SCENE_SESSION.contains("storage_source.allows_runtime_actor_authoring()"));
     assert!(
         WEB_SCENE_HOST
             .contains(".with_debug_passive_showcase(pending.scene.debug_passive_showcase)")

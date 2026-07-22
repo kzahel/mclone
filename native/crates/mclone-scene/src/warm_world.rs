@@ -20,7 +20,8 @@ use mclone_core::{BlockPos, ChunkPos, Vec3d};
 use mclone_core::{block_to_chunk_coord, block_to_section_coord};
 use mclone_mesh::RenderSectionKey;
 use mclone_protocol::{
-    EntityId, EntityKind, EntitySnapshot, PlayerAppearance, RemotePlayerId, RemotePlayerUpdate,
+    EntityId, EntityKind, EntityPersistentId, EntitySnapshot, PlayerAppearance, RemotePlayerId,
+    RemotePlayerUpdate,
 };
 use mclone_render::chunk::TexturedSectionDrawResources;
 use mclone_render::chunk::{PlacedTexturedSectionRenderer, TexturedSectionRenderStats};
@@ -619,6 +620,11 @@ pub struct EmbeddedWorldPreviewRenderSnapshot {
     pub actor_observation_count: usize,
     pub first_actor_observation: Option<EmbeddedWorldPreviewActorObservation>,
     pub second_actor_observation: Option<EmbeddedWorldPreviewActorObservation>,
+    pub persistent_passive_actor_count: usize,
+    pub persistent_passive_actor_identity_xor: u64,
+    pub persistent_passive_actor_identity_sum: u64,
+    pub persistent_passive_actor_identities:
+        [Option<EntityPersistentId>; PERSISTENT_PASSIVE_ACTOR_IDENTITY_CAPACITY],
     pub remote_player_observation_count: usize,
     pub first_remote_player_observation: Option<EmbeddedWorldPreviewRemotePlayerObservation>,
     pub actor_motion_sequence: u64,
@@ -632,6 +638,16 @@ pub struct EmbeddedWorldPreviewRenderSnapshot {
     pub last_remote_player_update_to_visible_ms: f64,
     pub last_remote_player_update_to_visible_frame_count: usize,
     pub last_translucent_order: EmbeddedWorldPreviewTranslucentOrderSnapshot,
+}
+
+pub const PERSISTENT_PASSIVE_ACTOR_IDENTITY_CAPACITY: usize = 32;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PersistentPassiveActorIdentitySummary {
+    pub count: usize,
+    pub identity_xor: u64,
+    pub identity_sum: u64,
+    pub identities: [Option<EntityPersistentId>; PERSISTENT_PASSIVE_ACTOR_IDENTITY_CAPACITY],
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -695,6 +711,44 @@ impl EmbeddedWorldPreviewActorObservation {
             source_packed_light,
         }
     }
+}
+
+pub(crate) fn persistent_passive_actor_identity_summary(
+    actors: impl IntoIterator<Item = (EntityPersistentId, EntityKind)>,
+) -> PersistentPassiveActorIdentitySummary {
+    let mut actors = actors
+        .into_iter()
+        .filter(|(_, kind)| {
+            matches!(
+                kind,
+                EntityKind::Cow | EntityKind::Chicken | EntityKind::Mannequin
+            )
+        })
+        .collect::<Vec<_>>();
+    actors.sort_unstable_by_key(|(persistent_id, _)| (persistent_id.most, persistent_id.least));
+    actors.into_iter().enumerate().fold(
+        PersistentPassiveActorIdentitySummary::default(),
+        |mut summary, (index, (persistent_id, actor_kind))| {
+            let kind = match actor_kind {
+                EntityKind::Cow => 1,
+                EntityKind::Chicken => 2,
+                EntityKind::Mannequin => 3,
+                EntityKind::DebugCube | EntityKind::Item => unreachable!("filtered above"),
+            };
+            let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+            for value in [persistent_id.most, persistent_id.least, kind] {
+                hash ^= value;
+                hash = hash.wrapping_mul(0x100_0000_01b3);
+            }
+            summary.count += 1;
+            summary.identity_xor ^= hash;
+            summary.identity_sum = summary.identity_sum.wrapping_add(hash);
+            if index < summary.identities.len() {
+                summary.identities[index] = Some(persistent_id);
+            }
+            summary
+        },
+    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -877,6 +931,15 @@ impl EmbeddedWorldPreview {
         self.render.actor_observation_count = observations.len();
         self.render.first_actor_observation = observations.first().copied();
         self.render.second_actor_observation = observations.get(1).copied();
+        let passive_summary = persistent_passive_actor_identity_summary(
+            observations
+                .iter()
+                .map(|observation| (observation.persistent_id, observation.kind)),
+        );
+        self.render.persistent_passive_actor_count = passive_summary.count;
+        self.render.persistent_passive_actor_identity_xor = passive_summary.identity_xor;
+        self.render.persistent_passive_actor_identity_sum = passive_summary.identity_sum;
+        self.render.persistent_passive_actor_identities = passive_summary.identities;
         self.render.remote_player_observation_count = remote_player_observations.len();
         let previous_remote_player_observation = self.render.first_remote_player_observation;
         let current_remote_player_observation = remote_player_observations.first().copied();
@@ -1867,6 +1930,45 @@ pub(crate) fn bounded_preview_source_priority(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn actor_observation(
+        id: u64,
+        persistent_id: u64,
+        kind: EntityKind,
+    ) -> EmbeddedWorldPreviewActorObservation {
+        EmbeddedWorldPreviewActorObservation {
+            entity_id: EntityId(id),
+            persistent_id: mclone_protocol::EntityPersistentId::new(1, persistent_id),
+            kind,
+            source_feet_position: Vec3d::ZERO,
+            composition_feet_position: Vec3d::ZERO,
+            tick_count: 0,
+            source_packed_light: 0,
+        }
+    }
+
+    #[test]
+    fn persistent_passive_identity_summary_is_order_independent_and_excludes_items() {
+        let cow = actor_observation(1, 11, EntityKind::Cow);
+        let chicken = actor_observation(2, 12, EntityKind::Chicken);
+        let item = actor_observation(3, 13, EntityKind::Item);
+        let summarize = |observations: &[EmbeddedWorldPreviewActorObservation]| {
+            persistent_passive_actor_identity_summary(
+                observations
+                    .iter()
+                    .map(|observation| (observation.persistent_id, observation.kind)),
+            )
+        };
+
+        let expected = summarize(&[cow, chicken, item]);
+
+        assert_eq!(expected.count, 2);
+        assert_eq!(summarize(&[item, chicken, cow]), expected);
+        assert_ne!(
+            summarize(&[cow, actor_observation(4, 14, EntityKind::Chicken)]),
+            expected
+        );
+    }
 
     #[test]
     fn fresh_lobby_launch_has_no_pending_platform_start() {

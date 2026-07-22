@@ -980,6 +980,7 @@ impl McloneSceneHost {
                     .world_generation_profile
                     .authored_missing_chunk()
                     .is_none();
+                scene.debug_passive_showcase = false;
                 scene.world_dir = None;
                 Ok((
                     scene,
@@ -1328,7 +1329,10 @@ impl McloneSceneHost {
         summary: &LocalWorldSummary,
         world_dir: PathBuf,
     ) -> McloneSceneHostOptions {
-        self.scene_for_storage_intent(SessionStorageIntent::catalog_world(summary, world_dir))
+        let mut scene =
+            self.scene_for_storage_intent(SessionStorageIntent::catalog_world(summary, world_dir));
+        scene.debug_passive_showcase = false;
+        scene
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -1598,9 +1602,12 @@ impl McloneSceneHost {
         &mut self,
         request: SessionStartRequest,
         descriptor: Option<ActiveSessionDescriptor>,
-        scene: McloneSceneHostOptions,
+        mut scene: McloneSceneHostOptions,
         world_storage: Option<mclone_server::NativeIntegratedServerWorldStorage>,
     ) -> Result<()> {
+        if matches!(request, SessionStartRequest::OpenLocalWorld { .. }) {
+            scene.debug_passive_showcase = false;
+        }
         let scene = scene.validated()?;
         let mesh_assets = self.mesh_assets.clone();
         let mut options = local_integrated_scene_options(&scene);
@@ -2097,7 +2104,8 @@ impl McloneSceneHost {
             .world_generation_profile
             .authored_missing_chunk()
             .is_none();
-        scene.debug_passive_showcase = self.debug_lobby_auxiliary_player_script;
+        scene.debug_passive_showcase = self.debug_lobby_auxiliary_player_script
+            && storage_source.allows_runtime_actor_authoring();
         scene.debug_auxiliary_player_script = self.debug_lobby_auxiliary_player_script;
         let scene = scene.validated()?;
         let instance_id = self.allocate_world_instance_id();
@@ -2413,7 +2421,12 @@ impl McloneSceneHost {
             .world_generation_profile
             .authored_missing_chunk()
             .is_none();
-        scene.debug_passive_showcase = self.debug_lobby_auxiliary_player_script;
+        scene.debug_passive_showcase = self.debug_lobby_auxiliary_player_script
+            && native_world_dir.is_none()
+            && request
+                .storage_source
+                .as_ref()
+                .is_none_or(|source| source.allows_runtime_actor_authoring());
         scene.debug_auxiliary_player_script = self.debug_lobby_auxiliary_player_script;
         let scene = scene.validated()?;
         let descriptor = request
@@ -2691,6 +2704,22 @@ impl McloneSceneHost {
         self.embedded_world_preview
             .as_ref()
             .map(EmbeddedWorldPreview::snapshot)
+    }
+
+    pub fn active_persistent_passive_actor_identity_summary(
+        &self,
+    ) -> PersistentPassiveActorIdentitySummary {
+        self.active_world.runtime.as_ref().map_or_else(
+            PersistentPassiveActorIdentitySummary::default,
+            |runtime| {
+                persistent_passive_actor_identity_summary(
+                    runtime
+                        .client()
+                        .entity_snapshots()
+                        .map(|snapshot| (snapshot.persistent_id, snapshot.kind)),
+                )
+            },
+        )
     }
 
     pub fn embedded_world_activation_snapshot(&self) -> EmbeddedWorldActivationSnapshot {
@@ -5719,6 +5748,7 @@ impl McloneSceneHost {
                 .world_generation_profile
                 .authored_missing_chunk()
                 .is_none();
+            scene.debug_passive_showcase = false;
             scene.world_dir = None;
             Ok(scene)
         }

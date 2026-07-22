@@ -1788,16 +1788,20 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
           && Number(state?.embeddedPreviewActorRemotePlayerCount) === 1
           && Number(state?.embeddedPreviewActorSourceLocalPlayerCount) === 0
           && state?.embeddedPreviewFirstActorEntityId === expected.firstId
+          && state?.embeddedPreviewFirstActorPersistentId === expected.firstPersistentId
           && state?.embeddedPreviewFirstActorKind === expected.firstKind
           && state?.embeddedPreviewSecondActorEntityId === expected.secondId
+          && state?.embeddedPreviewSecondActorPersistentId === expected.secondPersistentId
           && state?.embeddedPreviewSecondActorKind === expected.secondKind
           && Number(state?.embeddedPreviewSubmittedActorCount) >= 4
           && Number(state?.embeddedPreviewDrawnActorCount) >= 1;
       },
       {
         firstId: firstLaunch.after.embeddedPreviewFirstActorEntityId,
+        firstPersistentId: firstLaunch.after.embeddedPreviewFirstActorPersistentId,
         firstKind: firstLaunch.after.embeddedPreviewFirstActorKind,
         secondId: firstLaunch.after.embeddedPreviewSecondActorEntityId,
+        secondPersistentId: firstLaunch.after.embeddedPreviewSecondActorPersistentId,
         secondKind: firstLaunch.after.embeddedPreviewSecondActorKind,
       },
       { timeout: 45_000 },
@@ -1820,13 +1824,15 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
       },
       first: {
         id: state.embeddedPreviewFirstActorEntityId,
+        persistentId: state.embeddedPreviewFirstActorPersistentId,
         kind: state.embeddedPreviewFirstActorKind,
-        ageTicks: state.embeddedPreviewFirstActorAgeTicks,
+        tickCount: state.embeddedPreviewFirstActorTickCount,
       },
       second: {
         id: state.embeddedPreviewSecondActorEntityId,
+        persistentId: state.embeddedPreviewSecondActorPersistentId,
         kind: state.embeddedPreviewSecondActorKind,
-        ageTicks: state.embeddedPreviewSecondActorAgeTicks,
+        tickCount: state.embeddedPreviewSecondActorTickCount,
       },
     };
   });
@@ -1861,6 +1867,45 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
     throw new Error(`island mutation was not submitted: ${JSON.stringify(mutation)}`);
   }
   const mutatedState = await waitForBlockStateAt(page, mutationBlock, 0);
+  const actorCountBeforeSpawn = await page.evaluate(
+    () => Number(globalThis.__mcloneWebApp?.state?.actorCount) || 0,
+  );
+  const activePersistentActorSetBeforeSpawn = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp.state;
+    return {
+      count: Number(state.activePersistentPassiveActorCount),
+      identityXor: state.activePersistentPassiveActorIdentityXor,
+      identitySum: state.activePersistentPassiveActorIdentitySum,
+      ids: String(state.activePersistentPassiveActorIds ?? "").split(",").filter(Boolean),
+    };
+  });
+  await page.keyboard.press("8");
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.selectedHotbarSlot === 7,
+    undefined,
+    { timeout: 10_000 },
+  );
+  await page.evaluate(() => globalThis.__mcloneWebApp?.frameInteractionSurface?.());
+  await page.waitForFunction(
+    () => globalThis.__mcloneWebApp?.state?.currentTarget?.hit === true,
+    undefined,
+    { timeout: 10_000 },
+  );
+  const spawnedActor = await page.evaluate(async () => {
+    const app = globalThis.__mcloneWebApp;
+    return await app.interactBlock?.("place") ?? null;
+  });
+  if (!spawnedActor?.commandSent || spawnedActor?.selectedHotbarSlot !== 7) {
+    throw new Error(`persistent actor spawn was not submitted: ${JSON.stringify(spawnedActor)}`);
+  }
+  await page.waitForFunction(
+    (before) => Number(globalThis.__mcloneWebApp?.state?.actorCount) === before + 1,
+    actorCountBeforeSpawn,
+    { timeout: 30_000 },
+  );
+  const spawnedActorCount = await page.evaluate(
+    () => Number(globalThis.__mcloneWebApp?.state?.actorCount) || 0,
+  );
   await page.waitForFunction(
     () => {
       const report = globalThis.__mcloneWebApp?.state?.lastReport;
@@ -1870,6 +1915,42 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
     undefined,
     { timeout: 30_000 },
   );
+  const spawnedPersistentActorSet = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp.state;
+    return {
+      count: Number(state.activePersistentPassiveActorCount),
+      identityXor: state.activePersistentPassiveActorIdentityXor,
+      identitySum: state.activePersistentPassiveActorIdentitySum,
+      ids: String(state.activePersistentPassiveActorIds ?? "").split(",").filter(Boolean),
+    };
+  });
+  const postSpawnReturn = await activateBrowserEmbeddedPreview(
+    page,
+    canvas,
+    "mouse",
+    "/tmp/mclone-native-web-lobby-lifecycle-spawned-actor-preview.png",
+  );
+  await page.evaluate(() => globalThis.__mcloneWebApp?.frameEmbeddedPreview?.());
+  await page.waitForFunction(
+    () => {
+      const state = globalThis.__mcloneWebApp?.state;
+      return state?.embeddedPreviewPhase === "visible"
+        && String(state?.embeddedPreviewPersistentPassiveActorIdentityXor).length > 0
+        && String(state?.embeddedPreviewPersistentPassiveActorIdentitySum).length > 0;
+    },
+    undefined,
+    { timeout: 45_000 },
+  );
+  const postSpawnPersistentActorSet = await page.evaluate(() => {
+    const state = globalThis.__mcloneWebApp.state;
+    return {
+      count: Number(state.embeddedPreviewPersistentPassiveActorCount),
+      identityXor: state.embeddedPreviewPersistentPassiveActorIdentityXor,
+      identitySum: state.embeddedPreviewPersistentPassiveActorIdentitySum,
+      ids: String(state.embeddedPreviewPersistentPassiveActorIds ?? "")
+        .split(",").filter(Boolean),
+    };
+  });
   await quitBrowserScenarioToTitle(page, canvas);
 
   const relaunched = await runLobbyScenarioProbe(page, canvas, false);
@@ -1880,19 +1961,25 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
     "/tmp/mclone-native-web-lobby-lifecycle-reopened-island.png",
   );
   const persistedState = await waitForBlockStateAt(page, mutationBlock, 0);
-  const persistedActor = [
-    {
-      kind: relaunched.after.embeddedPreviewFirstActorKind,
-      ageTicks: relaunched.after.embeddedPreviewFirstActorAgeTicks,
-    },
-    {
-      kind: relaunched.after.embeddedPreviewSecondActorKind,
-      ageTicks: relaunched.after.embeddedPreviewSecondActorAgeTicks,
-    },
-  ].find((actor) => actor.kind === firstLaunch.after.embeddedPreviewActorMotionKind);
+  const relaunchedPersistentActorSet = {
+    count: Number(relaunched.after.embeddedPreviewPersistentPassiveActorCount),
+    identityXor: relaunched.after.embeddedPreviewPersistentPassiveActorIdentityXor,
+    identitySum: relaunched.after.embeddedPreviewPersistentPassiveActorIdentitySum,
+    ids: String(relaunched.after.embeddedPreviewPersistentPassiveActorIds ?? "")
+      .split(",").filter(Boolean),
+  };
+  const spawnedPersistentActorIds = spawnedPersistentActorSet.ids.filter(
+    (id) => !activePersistentActorSetBeforeSpawn.ids.includes(id),
+  );
+  const persistentActorIdentitiesOk = spawnedPersistentActorIds.length === 1
+    && relaunchedPersistentActorSet.count
+      === Number(firstLaunch.after.embeddedPreviewPersistentPassiveActorCount) + 1
+    && relaunchedPersistentActorSet.ids.includes(spawnedPersistentActorIds[0]);
   const relaunchedPersistenceOk = relaunched.after.embeddedPreviewPhase === "visible"
-    && Number(relaunched.after.embeddedPreviewActorEntityCount) >= 2
-    && Number(relaunched.after.embeddedPreviewActorObservationCount) >= 2
+    && Number(relaunched.after.embeddedPreviewActorEntityCount)
+      >= relaunchedPersistentActorSet.count
+    && Number(relaunched.after.embeddedPreviewActorObservationCount)
+      === Number(relaunched.after.embeddedPreviewActorEntityCount)
     && Number(relaunched.after.embeddedPreviewActorRemotePlayerCount) === 1
     && Number(relaunched.after.embeddedPreviewRemotePlayerObservationCount) === 1
     && Number(relaunched.after.embeddedPreviewActorSourceLocalPlayerCount) === 0
@@ -1900,18 +1987,11 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
     && Number(relaunched.after.embeddedPreviewDrawnActorCount) >= 1
     && relaunched.after.embeddedPreviewFirstRemotePlayerId === "1"
     && relaunched.after.embeddedPreviewFirstRemotePlayerModel === "uprightBear"
-    && relaunched.after.embeddedPreviewFirstActorEntityId
-      === firstLaunch.after.embeddedPreviewFirstActorEntityId
-    && relaunched.after.embeddedPreviewFirstActorKind
-      === firstLaunch.after.embeddedPreviewFirstActorKind
-    && relaunched.after.embeddedPreviewSecondActorEntityId
-      === firstLaunch.after.embeddedPreviewSecondActorEntityId
-    && relaunched.after.embeddedPreviewSecondActorKind
-      === firstLaunch.after.embeddedPreviewSecondActorKind
+    && persistentActorIdentitiesOk
     && Number(relaunched.after.embeddedPreviewActorMotionSequence)
       > Number(relaunched.actorMotion.initialSequence)
-    && Number(relaunched.after.embeddedPreviewActorMotionToAgeTicks)
-      > Number(relaunched.after.embeddedPreviewActorMotionFromAgeTicks)
+    && Number(relaunched.after.embeddedPreviewActorMotionToTickCount)
+      > Number(relaunched.after.embeddedPreviewActorMotionFromTickCount)
     && relaunched.pixels.preview.nonClearInteriorPixelCount > 128;
 
   const visibility = await exerciseBrowserScenarioVisibility(page);
@@ -1967,9 +2047,11 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
       && mutationLeg.switchMaterializedRenderer === false
       && mutatedState.blockStateId === 0
       && persistedState.blockStateId === 0
-      && persistedActor !== undefined
-      && Number(persistedActor.ageTicks)
-        >= Number(firstLaunch.after.embeddedPreviewActorMotionToAgeTicks)
+      && persistentActorIdentitiesOk
+      && spawnedActorCount === actorCountBeforeSpawn + 1
+      && spawnedPersistentActorSet.count === activePersistentActorSetBeforeSpawn.count + 1
+      && postSpawnReturn.sourceWorld === firstDestinationWorld
+      && postSpawnReturn.destinationWorld === firstSourceWorld
       && reopenedIsland.destinationWorld === relaunched.after.standbyWorldInstanceId
       && visibility.backgroundSaveAdvanced
       && visibility.resumed
@@ -1992,10 +2074,19 @@ async function runLobbyScenarioLifecycleProbe(page, canvas) {
     mutation,
     mutationBlock,
     mutatedState,
+    actorCountBeforeSpawn,
+    activePersistentActorSetBeforeSpawn,
+    spawnedActor,
+    spawnedActorCount,
+    spawnedPersistentActorSet,
+    postSpawnReturn,
+    postSpawnPersistentActorSet,
     relaunched,
     reopenedIsland,
     persistedState,
-    persistedActor,
+    relaunchedPersistentActorSet,
+    spawnedPersistentActorIds,
+    persistentActorIdentitiesOk,
     relaunchedPersistenceOk,
     visibility,
     quitDuringDestinationStartup,
@@ -3071,6 +3162,14 @@ async function runLobbyScenarioProbe(page, canvas, mobile, chunkSpan = null) {
       embeddedPreviewPlacedActorMultiviewPipelineCount:
         state.embeddedPreviewPlacedActorMultiviewPipelineCount,
       embeddedPreviewActorObservationCount: state.embeddedPreviewActorObservationCount,
+      embeddedPreviewPersistentPassiveActorCount:
+        state.embeddedPreviewPersistentPassiveActorCount,
+      embeddedPreviewPersistentPassiveActorIdentityXor:
+        state.embeddedPreviewPersistentPassiveActorIdentityXor,
+      embeddedPreviewPersistentPassiveActorIdentitySum:
+        state.embeddedPreviewPersistentPassiveActorIdentitySum,
+      embeddedPreviewPersistentPassiveActorIds:
+        state.embeddedPreviewPersistentPassiveActorIds,
       embeddedPreviewRemotePlayerObservationCount:
         state.embeddedPreviewRemotePlayerObservationCount,
       embeddedPreviewFirstRemotePlayerId: state.embeddedPreviewFirstRemotePlayerId,
@@ -3092,20 +3191,24 @@ async function runLobbyScenarioProbe(page, canvas, mobile, chunkSpan = null) {
       embeddedPreviewFirstRemotePlayerCompositionZ:
         state.embeddedPreviewFirstRemotePlayerCompositionZ,
       embeddedPreviewFirstActorEntityId: state.embeddedPreviewFirstActorEntityId,
+      embeddedPreviewFirstActorPersistentId:
+        state.embeddedPreviewFirstActorPersistentId,
       embeddedPreviewFirstActorKind: state.embeddedPreviewFirstActorKind,
-      embeddedPreviewFirstActorAgeTicks: state.embeddedPreviewFirstActorAgeTicks,
+      embeddedPreviewFirstActorTickCount: state.embeddedPreviewFirstActorTickCount,
       embeddedPreviewFirstActorSourcePackedLight:
         state.embeddedPreviewFirstActorSourcePackedLight,
       embeddedPreviewSecondActorEntityId: state.embeddedPreviewSecondActorEntityId,
+      embeddedPreviewSecondActorPersistentId:
+        state.embeddedPreviewSecondActorPersistentId,
       embeddedPreviewSecondActorKind: state.embeddedPreviewSecondActorKind,
-      embeddedPreviewSecondActorAgeTicks: state.embeddedPreviewSecondActorAgeTicks,
+      embeddedPreviewSecondActorTickCount: state.embeddedPreviewSecondActorTickCount,
       embeddedPreviewSecondActorSourcePackedLight:
         state.embeddedPreviewSecondActorSourcePackedLight,
       embeddedPreviewActorMotionSequence: state.embeddedPreviewActorMotionSequence,
       embeddedPreviewActorMotionEntityId: state.embeddedPreviewActorMotionEntityId,
       embeddedPreviewActorMotionKind: state.embeddedPreviewActorMotionKind,
-      embeddedPreviewActorMotionFromAgeTicks: state.embeddedPreviewActorMotionFromAgeTicks,
-      embeddedPreviewActorMotionToAgeTicks: state.embeddedPreviewActorMotionToAgeTicks,
+      embeddedPreviewActorMotionFromTickCount: state.embeddedPreviewActorMotionFromTickCount,
+      embeddedPreviewActorMotionToTickCount: state.embeddedPreviewActorMotionToTickCount,
       embeddedPreviewActorMotionSourcePackedLight:
         state.embeddedPreviewActorMotionSourcePackedLight,
       embeddedPreviewActorMotionFromSourceX: state.embeddedPreviewActorMotionFromSourceX,
@@ -3323,6 +3426,9 @@ async function runLobbyScenarioProbe(page, canvas, mobile, chunkSpan = null) {
       && Number(after.embeddedPreviewActorEntityCount) >= 2
       && Number(after.embeddedPreviewActorObservationCount)
         === Number(after.embeddedPreviewActorEntityCount)
+      && Number(after.embeddedPreviewPersistentPassiveActorCount) >= 2
+      && String(after.embeddedPreviewPersistentPassiveActorIdentityXor).length > 0
+      && String(after.embeddedPreviewPersistentPassiveActorIdentitySum).length > 0
       && remotePlayerReceiptOk
       && Number(after.embeddedPreviewActorSourceLocalPlayerCount) === 0
       && Number(after.embeddedPreviewSubmittedActorCount) === (
@@ -3342,8 +3448,8 @@ async function runLobbyScenarioProbe(page, canvas, mobile, chunkSpan = null) {
       && Number(after.embeddedPreviewPlacedActorPipelineCount) === 1
       && Number(after.embeddedPreviewActorMotionSequence) > initialActorMotionSequence
       && ["cow", "chicken"].includes(String(after.embeddedPreviewActorMotionKind))
-      && Number(after.embeddedPreviewActorMotionToAgeTicks)
-        > Number(after.embeddedPreviewActorMotionFromAgeTicks)
+      && Number(after.embeddedPreviewActorMotionToTickCount)
+        > Number(after.embeddedPreviewActorMotionFromTickCount)
       && Number(after.embeddedPreviewActorMotionSourcePackedLight) > 0
       && actorMotionSourceDistance > 0
       && actorMotionCompositionDistance > 0

@@ -2059,7 +2059,10 @@ pub async fn mclone_web_create_scene_host_with_startup(
         )
         .with_world_generation_profile(scene_startup.world_generation_profile)
         .with_world_topology(scene_startup.world_topology)
-        .with_debug_passive_showcase(scene_startup.debug_passive_showcase)
+        .with_debug_passive_showcase(
+            scene_startup.debug_passive_showcase
+                && (storage.world_storage != "indexeddb" || storage.clear_world_storage),
+        )
         .with_debug_auxiliary_player_script(scene_startup.debug_auxiliary_player_script)
         .with_light_status_batch_size(scene_startup.light_status_batch_size);
         if storage.world_storage == "indexeddb" {
@@ -3024,6 +3027,33 @@ impl WebSceneHost {
                 "activeWorldSeedText",
                 &host.active_world_seed().to_string(),
             )?;
+            let active_persistent_actors = host.active_persistent_passive_actor_identity_summary();
+            report_set_number(
+                &object,
+                "activePersistentPassiveActorCount",
+                active_persistent_actors.count as f64,
+            )?;
+            report_set_string(
+                &object,
+                "activePersistentPassiveActorIdentityXor",
+                &active_persistent_actors.identity_xor.to_string(),
+            )?;
+            report_set_string(
+                &object,
+                "activePersistentPassiveActorIdentitySum",
+                &active_persistent_actors.identity_sum.to_string(),
+            )?;
+            report_set_string(
+                &object,
+                "activePersistentPassiveActorIds",
+                &active_persistent_actors
+                    .identities
+                    .iter()
+                    .flatten()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(","),
+            )?;
             if let Some(standby) = host.warm_world_standby_snapshot() {
                 report_set_bool(&object, "standbyWorldPresent", true)?;
                 report_set_string(
@@ -3260,6 +3290,39 @@ impl WebSceneHost {
                     &object,
                     "embeddedPreviewActorObservationCount",
                     preview.render.actor_observation_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "embeddedPreviewPersistentPassiveActorCount",
+                    preview.render.persistent_passive_actor_count as f64,
+                )?;
+                report_set_string(
+                    &object,
+                    "embeddedPreviewPersistentPassiveActorIdentityXor",
+                    &preview
+                        .render
+                        .persistent_passive_actor_identity_xor
+                        .to_string(),
+                )?;
+                report_set_string(
+                    &object,
+                    "embeddedPreviewPersistentPassiveActorIdentitySum",
+                    &preview
+                        .render
+                        .persistent_passive_actor_identity_sum
+                        .to_string(),
+                )?;
+                report_set_string(
+                    &object,
+                    "embeddedPreviewPersistentPassiveActorIds",
+                    &preview
+                        .render
+                        .persistent_passive_actor_identities
+                        .iter()
+                        .flatten()
+                        .map(ToString::to_string)
+                        .collect::<Vec<_>>()
+                        .join(","),
                 )?;
                 report_set_number(
                     &object,

@@ -1455,6 +1455,10 @@ impl ChunkScheduler {
         self.store.entity_chunks_supported()
     }
 
+    pub fn entity_chunk_loaded(&self, pos: ChunkPos) -> bool {
+        !self.entity_chunks_supported() || self.loaded_entity_chunks.contains(&pos)
+    }
+
     pub fn is_pending_unload(&self, pos: ChunkPos) -> bool {
         self.pending_unloads.contains(&pos)
     }
