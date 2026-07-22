@@ -2,14 +2,14 @@
 
 Topic: `persistent-actor-identity`
 
-Status: open; the contract was classified against Minecraft Java 1.17.1 on
-2026-07-22. The original finding was real test evidence, but it was
-misclassified as a persistent-identity defect: the fixture requires stable
-runtime entity IDs and a monotonic generic chicken tick counter across a world
-relaunch, neither of which is a vanilla invariant. No implementation has
-started. The remaining work is to correct the fixture and prove that authored
-destination worlds restore the vanilla-persistent identity and per-kind state
-described below.
+Status: implemented and validated on 2026-07-22. Runtime numeric IDs and the
+generic tick counter now follow vanilla reconstruction semantics, durable
+identity and subtype state survive save/load, and persistent destinations do
+not rerun runtime showcase authoring. Native SQLite and headed-browser
+IndexedDB relaunch coverage is green. The original finding was real test
+evidence but was misclassified: the old fixture required stable runtime entity
+IDs and a monotonic generic chicken tick counter, neither of which is a vanilla
+invariant.
 
 This concern was repeatedly reproduced and then explicitly deferred by the
 platform-boundary campaign (Tacticals 197, 202, 207, 212, and 213). The
@@ -85,22 +85,25 @@ that:
 - the compared chicken's generic `age_ticks` did not continue from the prior
   session.
 
-The last two observations are vanilla-compatible by themselves. They do not
+The last two observations are vanilla-compatible by themselves. They did not
 show whether the actors were correctly loaded or incorrectly re-authored. The
-aggregate is red because it currently asserts that both runtime IDs remain
-equal and the chicken's generic `age_ticks` remains monotonic. Those assertions
-must be replaced with the vanilla-persistent invariants; preserving them would
-encode the wrong product contract.
+fixture now correlates actors by `EntityPersistentId`, follows a deliberately
+spawned persistent chicken through IndexedDB relaunch, and requires that UUID
+exactly once in both the relaunched preview and reopened active destination.
+Runtime-ID, vector-order, generic-tick continuation, and off-crop pixel-motion
+assumptions were removed.
 
-The fixture therefore leaves these important questions unanswered:
+The corrected native and browser fixtures answer the original questions:
 
-- does each actor retain its `EntityPersistentId` across the full destination
-  relaunch, not merely a server-level codec round trip;
-- do saved position, movement, and implemented subtype fields resume correctly;
-- does a removed actor remain removed rather than being restored from the
-  authored template;
-- are there no duplicate loaded-plus-authored actors; and
-- do the browser IndexedDB and native SQLite paths produce the same result?
+- an authored actor retains its `EntityPersistentId` across a full SQLite
+  relaunch while receiving reconstructed runtime state;
+- saved position and implemented subtype fields resume correctly;
+- authored records win over any provisional showcase actor, and persistent
+  storage routes do not rerun showcase authoring;
+- the authored SQLite fixture reloads exactly its saved two actors without a
+  loaded-plus-authored duplicate; and
+- IndexedDB restores the deliberately spawned actor under the same durable ID
+  exactly once in the preview and active destination.
 
 Run the existing observation under the headed Wayland lane (`pnpm host:check`
 first; see `docs/native-web.md`):
@@ -109,41 +112,33 @@ first; see `docs/native-web.md`):
 pnpm native:web:lobby-scenario-lifecycle-smoke
 ```
 
-Until the fixture is corrected, its combined false verdict is expected and is
-not evidence that runtime identity or generic chicken age should be persisted.
-Tactical 202 confirmed the same result on pre-cutover controls, so the result
-predates the Tactical 207 operation-boundary cutover.
+The corrected aggregate passes. Tactical 202's historical false result remains
+useful evidence that the invalid runtime-ID/tick assumptions predated the
+Tactical 207 operation-boundary cutover; it is not a regression baseline.
 
-## Current Mclone Shape and Mismatch
+## Implemented Mclone Shape
 
-The shared server already has most of the intended identity shape:
+The shared stack now implements the intended identity shape:
 
-- `native/crates/mclone-server/src/persistence.rs` defines
-  `EntityPersistentId` and stores it in `EntitySaveRecord`;
+- `mclone-protocol` owns `EntityPersistentId`, carries it as immutable snapshot
+  data, and leaves ordinary updates addressed by runtime `EntityId`;
 - `native/crates/mclone-server/src/entity/store.rs` deliberately allocates a
   fresh runtime `EntityId` when hydrating a saved entity, then associates the
   restored `EntityPersistentId` with it;
-- the store round-trip test explicitly requires a persistent ID to survive a
-  fresh runtime-ID assignment; and
-- the save record currently contains position, movement, orientation,
-  `age_ticks`, chicken egg time, item pickup delay, and item stack state.
+- the generic field is now `tick_count`, is absent from entity save records,
+  and starts at zero when an entity is reconstructed;
+- dropped items own a separate persisted `age` beside pickup delay and stack
+  state, while chickens retain their persisted egg timer;
+- entity chunk format version 2 encodes the new ownership directly and has no
+  compatibility reader, as authorized for this unshipped format;
+- scene/client/browser observations expose durable identity without turning it
+  into an update address; and
+- session policy permits runtime showcase authoring only for transient authored
+  routes. Persistent catalog and app-private routes load saved actors instead.
 
-`age_ticks` currently combines concepts that vanilla keeps separate: it is a
-generic actor tick/animation value for mobs, but it is also the dropped-item
-lifetime used for despawning. Applying one persistence rule to that field for
-every entity kind is not a faithful long-term model. Alignment should separate
-the meanings when necessary:
-
-- a generic runtime tick or animation clock resets on reconstruction;
-- `AgeableMob` baby/breeding age persists once implemented;
-- chicken egg time persists;
-- dropped-item age and pickup delay persist; and
-- other semantic timers follow the corresponding vanilla subtype save data.
-
-The existing server codec already writes and restores `age_ticks`; that proves
-the field is not simply absent from serialization. It does not prove that an
-authored destination used the loaded record, nor does it make a generic chicken
-tick counter a vanilla-persistent field.
+`AgeableMob` baby/breeding age, health, equipment, effects, and other subtype
+state remain future system work. They must follow the same vanilla owner rule
+rather than reuse `tick_count`.
 
 ## Constraints
 
@@ -162,25 +157,11 @@ tick counter a vanilla-persistent field.
 - Read the relevant Minecraft 1.17.1 source before adding each subtype's saved
   state.
 
-## Recommended Next Work
+## Outcome and Follow-on Scope
 
-Open a bounded tactical:
-
-1. Update the lifecycle probe so it can correlate actors by
-   `EntityPersistentId`, or by an equally direct shared diagnostic if exposing
-   persistent identity in the product protocol is deferred. Do not correlate
-   actors by runtime `EntityId` or vector/order position.
-2. Replace the runtime-ID equality and generic chicken-`age_ticks` continuation
-   assertions with vanilla invariants: stable persistent identity, saved
-   position/behavior state, no resurrection, and no duplication. Use a
-   subtype-specific persisted value such as chicken egg time or dropped-item
-   age when testing timer persistence.
-3. Reproduce through browser IndexedDB and native SQLite, then classify any
-   remaining failure as record loading, destination re-authoring, save timing,
-   or subtype codec loss with file-and-line evidence.
-4. If needed, split generic runtime ticks from per-kind semantic age/timers in
-   the shared entity/protocol/persistence model and add server-level round-trip
-   coverage.
-5. Make the corrected lifecycle aggregate a required pass and replace active
-   "separate baseline debt" descriptions with the classified result. Preserve
-   completed tacticals as historical execution records.
+Tactical 218 completed this concern. Further entity kinds should extend their
+own vanilla-shaped save payload and round-trip tests. They should not reopen
+runtime-ID persistence, generic tick persistence, offline catch-up, or browser
+platform policy. Natural-spawn persistence remains a separate entity-spawning
+concern: today's explicitly volatile farm-animal scaffold is excluded from the
+durable actor proof.

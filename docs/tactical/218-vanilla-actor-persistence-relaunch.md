@@ -1,6 +1,6 @@
 # Tactical 218: Vanilla Actor Persistence Across Relaunch
 
-Status: active 2026-07-22.
+Status: completed 2026-07-22.
 
 Topic: [`persistent-actor-identity`](../topics/persistent-actor-identity.md).
 
@@ -182,3 +182,49 @@ tick counts after hydration while durable IDs, item age, item pickup delay, and
 chicken egg time survive. Item tests prove semantic age advances, expires, and
 selects the younger merge age independently of the generic counter. All 47
 protocol tests, 126 client tests, 536 server tests, and 127 scene tests pass.
+
+### Slice 3 — lifecycle truth
+
+Implemented on 2026-07-22. The authored SQLite fixture now compares actors by
+durable identity, verifies saved positions, accepts fresh runtime IDs, requires
+zero reconstructed generic tick counts, preserves the chicken egg timer, and
+proves a second closed-world reopen does not advance that timer. It reloads
+exactly the saved cow and chicken without duplication.
+
+Persistent catalog and app-private session routes disable runtime showcase
+authoring. The server also adopts already-hydrated showcase actors and replaces
+provisional actors if persistence completes after a transient authoring race,
+with focused coverage for both orders. The browser lifecycle follows a newly
+spawned durable ID through IndexedDB and requires exactly one occurrence in the
+relaunched preview and reopened active destination. Retained-world checks now
+use durable-ID overlap rather than runtime ID or observation order.
+
+### Slice 4 — cross-backend and pixels
+
+Validated on 2026-07-22 in a clean detached worktree. Individual suites pass:
+47 protocol tests, 126 client tests, 538 server tests, 128 scene tests plus
+contract suites, and 305 app-runtime tests plus integration suites. The focused
+SQLite authored-fixture reopen and provisional/hydrated reconciliation tests
+pass. The actor stack passed the `wasm32-unknown-unknown` web-client check with
+only existing warnings.
+
+`pnpm host:check -- --probe-browser-webgpu` selected headed Wayland and captured
+valid WebGPU pixels. The full lobby lifecycle aggregate then passed with the
+spawned durable actor present exactly once after relaunch and the mutated block
+still air. The spawned-actor preview, returned-live-actor preview, reopened
+island, and final lifecycle captures under `/tmp` were inspected and contain
+valid rendered terrain/UI pixels.
+
+The repository-wide formatter check is still red on the pre-existing layout of
+`mclone-worldgen/src/levelgen/mclone_overworld/feature_batch.rs`; every Rust
+file changed by this tactical passes `rustfmt --check`. After the separate
+auxiliary-split commit entered main, a current-head web check also reports its
+unhandled `GameUiAction::SetAuxiliarySplitMode` arm in `web_canvas.rs`. That
+unrelated integration issue was left untouched; the actor stack and headed
+browser acceptance had already passed.
+
+### Slice 5 — closeout
+
+Completed on 2026-07-22. The living topic now records the implemented vanilla
+contract, the corrected native/browser evidence, and the remaining subtype
+parity boundary. Historical tacticals remain unchanged as execution records.
