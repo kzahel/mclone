@@ -19,6 +19,7 @@ pub mod frame_render;
 pub mod host_mode;
 pub mod input_preferences;
 pub mod local_participant;
+pub mod local_participant_input;
 pub mod local_profile;
 pub mod lod_coverage;
 pub mod monotonic;

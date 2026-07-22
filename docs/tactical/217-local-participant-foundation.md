@@ -198,6 +198,25 @@ and collector locks keep participant and join policy out of desktop, browser,
 and Android physical adapters. Focused app-runtime and complete scene unit tests
 pass, as do the affected scene ownership/composition contract suites.
 
+### Slice 2 — participant-local semantic input
+
+Implemented on 2026-07-22. `LocalParticipantInputGroup` now composes the
+existing deterministic gamepad assignment reducer with one independent
+`ControllerInputSession` per admitted local participant. A sorted scripted join
+admits the stable participant slot lazily, reports source and participant facts,
+and suppresses the joining source until a fully neutral sample. The group owns
+connect, disconnect, reconnect, reservation expiry, explicit participant
+removal, context, and preference routing without changing any product
+collector.
+
+Focused tests prove two reordered sources with independent gameplay/menu
+contexts, exact four-seat admission plus a full result, held/pressed/released
+isolation, disconnect release delivery only to the owner, reconnect identity
+preservation, and post-expiry reassignment to the still-stable participant.
+The focused app-runtime tests, complete `mclone-input` suite, formatting, and
+the app-runtime Wasm check pass. The Wasm check retains only pre-existing
+target-conditional unused warnings.
+
 ## Stop Conditions
 
 Stop and ask for direction if implementation requires choosing:
