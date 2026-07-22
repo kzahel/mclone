@@ -15,6 +15,11 @@ gates; real-device acceptance remains open.
 [`Tactical 217`](../tactical/217-local-participant-foundation.md) completed the
 judgment-free participant/input/client/layout foundation on 2026-07-22 while
 stopping before product couch enablement and unresolved profile/cache policy.
+Active [`Tactical 219`](../tactical/219-live-auxiliary-split-mode.md) promotes
+that layout into a menu-controlled live single-player auxiliary view through
+one Rust scene/render path for desktop, browser, and flat Android. Browser
+TypeScript remains unaware of split semantics, and authoritative player-two
+support remains outside the slice.
 
 This topic owns local participant cardinality, participant-to-input assignment,
 participant-versus-view separation, shared split-screen presentation policy,
@@ -483,8 +488,9 @@ The sequence is intentionally staged so each milestone is useful on its own:
    already separate. Tactical 217 added validated viewport rectangles, safe
    areas, explicit horizontal/vertical plans, and a diagnostic compositor that
    prepares once and renders twice without changing mono. Shipping surface
-   scissor/composition, per-pane HUD policy, and retained-preview composition
-   remain consumer-driven follow-ups.
+   scissor/composition and a primary-HUD/auxiliary-world-only debug policy are
+   active in Tactical 219; authoritative per-participant HUD policy and
+   retained-preview composition remain later consumer-driven follow-ups.
 3. **Participantize singleton client-experience state.** Tactical 217 completed
    the bounded participant group, cardinality-one
    camera/interaction/player-model envelope, and scripted source assignment to
