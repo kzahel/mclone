@@ -23,6 +23,7 @@ const MOUNTAIN_DETAIL_FINE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6d64
 const RIVER_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_7631);
 const RIVER_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_7632);
 const RIVER_WIDTH_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_7633);
+const WETLAND_POOL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7765_7431);
 
 const CONTINENT_LARGE_SCALE: i32 = 2_048;
 const CONTINENT_MEDIUM_SCALE: i32 = 1_024;
@@ -39,6 +40,7 @@ const MOUNTAIN_DETAIL_FINE_SCALE: i32 = 8;
 const RIVER_LARGE_SCALE: i32 = 768;
 const RIVER_DETAIL_SCALE: i32 = 192;
 const RIVER_WIDTH_SCALE: i32 = 384;
+const WETLAND_POOL_SCALE: i32 = 96;
 const RIVER_GRADE_SAMPLE_DISTANCE: f64 = 16.0;
 const RIVER_MAX_RELEVANT_DISTANCE: f64 = 48.0;
 const MAX_REGION_SAMPLE_COUNT: usize = 16 * 1024 * 1024;
@@ -134,6 +136,7 @@ pub struct McloneOverworldWatercourseSample {
     pub flow_z: f64,
     pub grade: f64,
     pub wetland_influence: f64,
+    pub wetland_pool_influence: f64,
 }
 
 impl McloneOverworldWatercourseSample {
@@ -143,6 +146,14 @@ impl McloneOverworldWatercourseSample {
 
     pub fn is_bank(self) -> bool {
         self.bank_influence > 0.0 && !self.is_channel()
+    }
+
+    pub fn is_wetland_pool(self) -> bool {
+        self.wetland_pool_influence >= 0.55 && !self.is_channel()
+    }
+
+    pub fn is_water(self) -> bool {
+        self.is_channel() || self.is_wetland_pool()
     }
 }
 
@@ -253,6 +264,7 @@ pub struct McloneOverworldSampler {
     river_large: GradientNoise2d,
     river_detail: GradientNoise2d,
     river_width: ValueNoise2d,
+    wetland_pool: GradientNoise2d,
 }
 
 impl McloneOverworldSampler {
@@ -305,6 +317,7 @@ impl McloneOverworldSampler {
             river_large: topology.gradient_noise(seed, RIVER_LARGE_DOMAIN, RIVER_LARGE_SCALE),
             river_detail: topology.gradient_noise(seed, RIVER_DETAIL_DOMAIN, RIVER_DETAIL_SCALE),
             river_width: topology.value_noise(seed, RIVER_WIDTH_DOMAIN, RIVER_WIDTH_SCALE),
+            wetland_pool: topology.gradient_noise(seed, WETLAND_POOL_DOMAIN, WETLAND_POOL_SCALE),
         }
     }
 
@@ -449,9 +462,10 @@ impl McloneOverworldSampler {
         let mountain_region = mountain_strength(continentalness, ruggedness);
         let low_grade = 1.0 - smoothstep(((grade - 0.02) / 0.16).clamp(0.0, 1.0));
         let low_mountain = 1.0 - smoothstep((mountain_region / 0.55).clamp(0.0, 1.0));
+        let inland_wetland = smoothstep((continentalness / 0.18).clamp(0.0, 1.0));
         let wetland_selector = smoothstep(((geometry.width_noise - 0.42) / 0.58).clamp(0.0, 1.0));
         let wetland_influence = if relevant {
-            low_grade * low_mountain * wetland_selector
+            low_grade * low_mountain * inland_wetland * wetland_selector
         } else {
             0.0
         };
@@ -470,9 +484,23 @@ impl McloneOverworldSampler {
         } else {
             0.0
         };
+        let wetland_pool_texture = self.wetland_pool.sample_at(
+            world_x + geometry.tangent_x * 19.0,
+            world_z + geometry.tangent_z * 19.0,
+        ) * 0.5
+            + 0.5;
+        let wetland_pool_influence = if channel_influence == 0.0 {
+            wetland_influence
+                * bank_influence
+                * smoothstep(((wetland_pool_texture - 0.30) / 0.45).clamp(0.0, 1.0))
+        } else {
+            0.0
+        };
         let surface_y = if channel_influence > 0.0 {
             let channel_depth = 1.0 + channel_influence * f64::from(depth - 1);
             base_surface_y.min((f64::from(water_surface_y) - channel_depth).round() as i32)
+        } else if wetland_pool_influence >= 0.55 {
+            base_surface_y.min(water_surface_y - 1)
         } else if bank_influence > 0.0 {
             let bank_target = (f64::from(base_surface_y) * (1.0 - bank_influence)
                 + f64::from(water_surface_y + 1) * bank_influence)
@@ -495,6 +523,7 @@ impl McloneOverworldSampler {
                 flow_z,
                 grade,
                 wetland_influence,
+                wetland_pool_influence,
             },
             surface_y,
         )
@@ -616,7 +645,7 @@ pub fn mclone_overworld_spawn_chunk_with_topology(
                 let world_x = x * 16 + 8;
                 let world_z = z * 16 + 8;
                 let sample = sampler.sample(world_x, world_z);
-                if sample.surface_y >= SPAWN_MIN_SURFACE_Y && !sample.watercourse.is_channel() {
+                if sample.surface_y >= SPAWN_MIN_SURFACE_Y && !sample.watercourse.is_water() {
                     return ChunkPos::new(topology.canonical_chunk_x(x), z);
                 }
             }
@@ -705,6 +734,11 @@ mod tests {
         assert!((left.watercourse.grade - right.watercourse.grade).abs() < 1.0e-12);
         assert!(
             (left.watercourse.wetland_influence - right.watercourse.wetland_influence).abs()
+                < 1.0e-12
+        );
+        assert!(
+            (left.watercourse.wetland_pool_influence - right.watercourse.wetland_pool_influence)
+                .abs()
                 < 1.0e-12
         );
         assert_eq!(left.surface_y, right.surface_y);
@@ -934,6 +968,7 @@ mod tests {
             let sampler = McloneOverworldSampler::new(seed);
             let mut channels = 0;
             let mut wetlands = 0;
+            let mut wetland_pools = 0;
             for z in (-2_048..2_048).step_by(8) {
                 for x in (-2_048..2_048).step_by(8) {
                     let sample = sampler.sample(x, z);
@@ -944,6 +979,7 @@ mod tests {
                     assert!((4.5..=8.5).contains(&river.half_width));
                     assert!(river.bed_y < river.water_surface_y);
                     assert!((0.0..=1.0).contains(&river.wetland_influence));
+                    assert!((0.0..=1.0).contains(&river.wetland_pool_influence));
                     if river.is_channel() {
                         channels += 1;
                         assert!(sample.surface_y < river.water_surface_y);
@@ -951,10 +987,14 @@ mod tests {
                     if river.wetland_influence > 0.25 && river.bank_influence > 0.0 {
                         wetlands += 1;
                     }
+                    if river.is_wetland_pool() {
+                        wetland_pools += 1;
+                    }
                 }
             }
             assert!(channels > 0, "seed {seed} had no river channels");
             assert!(wetlands > 0, "seed {seed} had no wetland margins");
+            assert!(wetland_pools > 0, "seed {seed} had no wetland pools");
         }
     }
 }

@@ -32,7 +32,7 @@ pub fn mclone_overworld_biome_id_with_topology(
 
 pub fn mclone_overworld_biome_id_for_sample(sample: McloneOverworldLandformSample) -> i32 {
     let terrain = sample.terrain;
-    if terrain.watercourse.is_channel() {
+    if terrain.watercourse.is_water() {
         MCLONE_OVERWORLD_RIVER_BIOME_ID
     } else if terrain.watercourse.bank_influence > 0.0
         && terrain.watercourse.wetland_influence > 0.25
@@ -83,6 +83,7 @@ mod tests {
                     flow_z: 0.0,
                     grade: 0.0,
                     wetland_influence: 0.0,
+                    wetland_pool_influence: 0.0,
                 },
                 surface_y,
             },

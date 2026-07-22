@@ -282,6 +282,7 @@ fn run() -> Result<()> {
             "riverHalfWidth": [facts.min_river_half_width, facts.max_river_half_width],
             "riverGrade": [facts.min_river_grade, facts.max_river_grade],
             "wetlandInfluence": [facts.min_wetland_influence, facts.max_wetland_influence],
+            "wetlandPoolInfluence": [facts.min_wetland_pool_influence, facts.max_wetland_pool_influence],
             "baseSurfaceY": [facts.min_base_surface_y, facts.max_base_surface_y],
             "surfaceY": [facts.min_surface_y, facts.max_surface_y],
             "slope": [facts.min_slope, facts.max_slope],
@@ -313,6 +314,7 @@ fn run() -> Result<()> {
             "oceanFloor": facts.ocean_floor_columns,
             "beach": facts.beach_surface_columns,
             "riverBed": facts.river_bed_columns,
+            "wetlandBed": facts.wetland_bed_columns,
             "riverBank": facts.river_bank_columns,
             "grassSoil": facts.grass_soil_columns,
             "exposedStone": facts.exposed_stone_columns,
@@ -321,6 +323,7 @@ fn run() -> Result<()> {
             "channel": facts.river_channel_columns,
             "gradedBank": facts.river_bank_influence_columns,
             "wetlandAboveQuarter": facts.wetland_columns,
+            "wetlandPool": facts.wetland_pool_columns,
         },
         "landformCounts": {
             "mountainRegion": facts.mountain_region_columns,
@@ -469,6 +472,17 @@ fn select_review_sites(
                 .total_cmp(&right.terrain.watercourse.wetland_influence)
         })
         .map(|(index, _)| index);
+    let wetland_pool = samples
+        .iter()
+        .enumerate()
+        .filter(|(_, sample)| sample.terrain.watercourse.is_wetland_pool())
+        .max_by(|(_, left), (_, right)| {
+            left.terrain
+                .watercourse
+                .wetland_pool_influence
+                .total_cmp(&right.terrain.watercourse.wetland_pool_influence)
+        })
+        .map(|(index, _)| index);
 
     serde_json::json!({
         "rangeInterior": review_site_json(highest, samples, request),
@@ -479,6 +493,7 @@ fn select_review_sites(
         "mountainRiver": review_site_json(mountain_river, samples, request),
         "coastalRiver": review_site_json(coastal_river, samples, request),
         "wetland": review_site_json(wetland, samples, request),
+        "wetlandPool": review_site_json(wetland_pool, samples, request),
     })
 }
 
@@ -525,6 +540,7 @@ fn sample_json(sample: McloneOverworldLandformSample) -> serde_json::Value {
             "flow": [terrain.watercourse.flow_x, terrain.watercourse.flow_z],
             "grade": terrain.watercourse.grade,
             "wetlandInfluence": terrain.watercourse.wetland_influence,
+            "wetlandPoolInfluence": terrain.watercourse.wetland_pool_influence,
         },
     })
 }
@@ -623,6 +639,8 @@ struct RegionFacts {
     max_river_grade: f64,
     min_wetland_influence: f64,
     max_wetland_influence: f64,
+    min_wetland_pool_influence: f64,
+    max_wetland_pool_influence: f64,
     min_base_surface_y: i32,
     max_base_surface_y: i32,
     min_surface_y: i32,
@@ -648,12 +666,14 @@ struct RegionFacts {
     ocean_floor_columns: usize,
     beach_surface_columns: usize,
     river_bed_columns: usize,
+    wetland_bed_columns: usize,
     river_bank_columns: usize,
     grass_soil_columns: usize,
     exposed_stone_columns: usize,
     river_channel_columns: usize,
     river_bank_influence_columns: usize,
     wetland_columns: usize,
+    wetland_pool_columns: usize,
     mountain_region_columns: usize,
     mountain_valley_columns: usize,
     mountain_crest_columns: usize,
@@ -687,6 +707,8 @@ impl RegionFacts {
         let mut max_river_grade = f64::NEG_INFINITY;
         let mut min_wetland_influence = f64::INFINITY;
         let mut max_wetland_influence = f64::NEG_INFINITY;
+        let mut min_wetland_pool_influence = f64::INFINITY;
+        let mut max_wetland_pool_influence = f64::NEG_INFINITY;
         let mut min_base_surface_y = i32::MAX;
         let mut max_base_surface_y = i32::MIN;
         let mut min_slope = f64::INFINITY;
@@ -706,12 +728,14 @@ impl RegionFacts {
         let mut ocean_floor_columns = 0;
         let mut beach_surface_columns = 0;
         let mut river_bed_columns = 0;
+        let mut wetland_bed_columns = 0;
         let mut river_bank_columns = 0;
         let mut grass_soil_columns = 0;
         let mut exposed_stone_columns = 0;
         let mut river_channel_columns = 0;
         let mut river_bank_influence_columns = 0;
         let mut wetland_columns = 0;
+        let mut wetland_pool_columns = 0;
         let mut mountain_region_columns = 0;
         let mut mountain_valley_columns = 0;
         let mut mountain_crest_columns = 0;
@@ -740,6 +764,10 @@ impl RegionFacts {
             max_river_grade = max_river_grade.max(sample.watercourse.grade);
             min_wetland_influence = min_wetland_influence.min(sample.watercourse.wetland_influence);
             max_wetland_influence = max_wetland_influence.max(sample.watercourse.wetland_influence);
+            min_wetland_pool_influence =
+                min_wetland_pool_influence.min(sample.watercourse.wetland_pool_influence);
+            max_wetland_pool_influence =
+                max_wetland_pool_influence.max(sample.watercourse.wetland_pool_influence);
             min_base_surface_y = min_base_surface_y.min(sample.base_surface_y);
             max_base_surface_y = max_base_surface_y.max(sample.base_surface_y);
             min_slope = min_slope.min(landform.slope);
@@ -758,6 +786,9 @@ impl RegionFacts {
                 && sample.watercourse.bank_influence > 0.0
             {
                 wetland_columns += 1;
+            }
+            if sample.watercourse.is_wetland_pool() {
+                wetland_pool_columns += 1;
             }
             let mountain_strength = sample.mountain_strength();
             if mountain_strength >= 0.35 && sample.surface_y > MCLONE_OVERWORLD_SEA_LEVEL {
@@ -796,6 +827,7 @@ impl RegionFacts {
                 McloneOverworldSurfaceRecipe::OceanFloor => ocean_floor_columns += 1,
                 McloneOverworldSurfaceRecipe::Beach => beach_surface_columns += 1,
                 McloneOverworldSurfaceRecipe::RiverBed => river_bed_columns += 1,
+                McloneOverworldSurfaceRecipe::WetlandBed => wetland_bed_columns += 1,
                 McloneOverworldSurfaceRecipe::RiverBank => river_bank_columns += 1,
                 McloneOverworldSurfaceRecipe::GrassSoil => grass_soil_columns += 1,
                 McloneOverworldSurfaceRecipe::ExposedStone => exposed_stone_columns += 1,
@@ -831,6 +863,13 @@ impl RegionFacts {
                 .chain(sample.watercourse.flow_z.to_bits().to_le_bytes())
                 .chain(sample.watercourse.grade.to_bits().to_le_bytes())
                 .chain(sample.watercourse.wetland_influence.to_bits().to_le_bytes())
+                .chain(
+                    sample
+                        .watercourse
+                        .wetland_pool_influence
+                        .to_bits()
+                        .to_le_bytes(),
+                )
                 .chain(sample.surface_y.to_le_bytes())
             {
                 fingerprint ^= u64::from(byte);
@@ -899,6 +938,8 @@ impl RegionFacts {
             max_river_grade,
             min_wetland_influence,
             max_wetland_influence,
+            min_wetland_pool_influence,
+            max_wetland_pool_influence,
             min_base_surface_y,
             max_base_surface_y,
             min_surface_y: heights[0],
@@ -924,12 +965,14 @@ impl RegionFacts {
             ocean_floor_columns,
             beach_surface_columns,
             river_bed_columns,
+            wetland_bed_columns,
             river_bank_columns,
             grass_soil_columns,
             exposed_stone_columns,
             river_channel_columns,
             river_bank_influence_columns,
             wetland_columns,
+            wetland_pool_columns,
             mountain_region_columns,
             mountain_valley_columns,
             mountain_crest_columns,
@@ -1116,6 +1159,13 @@ fn wetland_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
     if sample.watercourse.bank_influence == 0.0 {
         return [31, 41, 43, 255];
     }
+    if sample.watercourse.is_wetland_pool() {
+        return lerp_color(
+            [47, 126, 139, 255],
+            [83, 182, 154, 255],
+            sample.watercourse.wetland_pool_influence,
+        );
+    }
     lerp_color(
         [123, 111, 70, 255],
         [52, 154, 118, 255],
@@ -1143,6 +1193,7 @@ fn surface_recipe_color(sample: McloneOverworldLandformSample) -> [u8; 4] {
         McloneOverworldSurfaceRecipe::OceanFloor => [104, 111, 119, 255],
         McloneOverworldSurfaceRecipe::Beach => [222, 207, 143, 255],
         McloneOverworldSurfaceRecipe::RiverBed => [86, 110, 123, 255],
+        McloneOverworldSurfaceRecipe::WetlandBed => [117, 137, 139, 255],
         McloneOverworldSurfaceRecipe::RiverBank => [112, 138, 74, 255],
         McloneOverworldSurfaceRecipe::GrassSoil => [91, 151, 67, 255],
         McloneOverworldSurfaceRecipe::ExposedStone => [137, 137, 137, 255],
@@ -1154,9 +1205,10 @@ fn surface_recipe_tag(recipe: McloneOverworldSurfaceRecipe) -> u8 {
         McloneOverworldSurfaceRecipe::OceanFloor => 0,
         McloneOverworldSurfaceRecipe::Beach => 1,
         McloneOverworldSurfaceRecipe::RiverBed => 2,
-        McloneOverworldSurfaceRecipe::RiverBank => 3,
-        McloneOverworldSurfaceRecipe::GrassSoil => 4,
-        McloneOverworldSurfaceRecipe::ExposedStone => 5,
+        McloneOverworldSurfaceRecipe::WetlandBed => 3,
+        McloneOverworldSurfaceRecipe::RiverBank => 4,
+        McloneOverworldSurfaceRecipe::GrassSoil => 5,
+        McloneOverworldSurfaceRecipe::ExposedStone => 6,
     }
 }
 

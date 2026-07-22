@@ -163,7 +163,7 @@ impl ChunkLandformSamples {
 
 #[cfg(test)]
 mod tests {
-    use crate::block::{AIR, GRASS_BLOCK, GRAVEL, SAND, STONE, WATER};
+    use crate::block::{AIR, CLAY, GRASS_BLOCK, GRAVEL, SAND, STONE, WATER};
 
     use super::*;
     use crate::levelgen::mclone_overworld::biomes::{
@@ -190,6 +190,7 @@ mod tests {
                         McloneOverworldSurfaceRecipe::OceanFloor => GRAVEL,
                         McloneOverworldSurfaceRecipe::Beach => SAND,
                         McloneOverworldSurfaceRecipe::RiverBed => GRAVEL,
+                        McloneOverworldSurfaceRecipe::WetlandBed => CLAY,
                         McloneOverworldSurfaceRecipe::RiverBank
                             if sample.terrain.base_surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 5 =>
                         {
@@ -208,7 +209,7 @@ mod tests {
                     let above = chunk.block_at_y(local_x, sample.terrain.surface_y + 1, local_z);
                     assert_eq!(
                         above.0,
-                        if sample.terrain.watercourse.is_channel()
+                        if sample.terrain.watercourse.is_water()
                             || sample.terrain.surface_y < MCLONE_OVERWORLD_SEA_LEVEL
                         {
                             WATER
@@ -301,9 +302,9 @@ mod tests {
         assert_eq!(
             fingerprints,
             [
-                (11_783_861_094_925_128_346, 540_454_697_130_909_605),
-                (3_727_374_364_347_381_080, 3_995_179_115_581_767_979),
-                (2_903_393_598_174_869_434, 14_722_381_067_837_031_305),
+                (3_960_265_825_402_180_826, 540_454_697_130_909_605),
+                (7_374_149_297_768_539_850, 3_995_179_115_581_767_979),
+                (13_980_807_361_361_955_481, 14_722_381_067_837_031_305),
             ]
         );
     }
@@ -313,7 +314,7 @@ mod tests {
         let receipts = [12_345, -98_765, 8_675_309].map(|seed| {
             let sampler = McloneOverworldSampler::new(seed);
             let mut biome_counts = [0_u32; 5];
-            let mut surface_counts = [0_u32; 6];
+            let mut surface_counts = [0_u32; 7];
             let mut hash = 0xcbf2_9ce4_8422_2325_u64;
             for z in (-2_048..2_048).step_by(16) {
                 for x in (-2_048..2_048).step_by(16) {
@@ -331,9 +332,10 @@ mod tests {
                         McloneOverworldSurfaceRecipe::OceanFloor => 0,
                         McloneOverworldSurfaceRecipe::Beach => 1,
                         McloneOverworldSurfaceRecipe::RiverBed => 2,
-                        McloneOverworldSurfaceRecipe::RiverBank => 3,
-                        McloneOverworldSurfaceRecipe::GrassSoil => 4,
-                        McloneOverworldSurfaceRecipe::ExposedStone => 5,
+                        McloneOverworldSurfaceRecipe::WetlandBed => 3,
+                        McloneOverworldSurfaceRecipe::RiverBank => 4,
+                        McloneOverworldSurfaceRecipe::GrassSoil => 5,
+                        McloneOverworldSurfaceRecipe::ExposedStone => 6,
                     };
                     biome_counts[biome_index] += 1;
                     surface_counts[surface_index] += 1;
@@ -359,19 +361,19 @@ mod tests {
             receipts,
             [
                 (
-                    [21_961, 7_997, 17_911, 15_834, 1_833],
-                    [13_072, 16_618, 1_833, 1_248, 32_669, 96],
-                    13_260_929_152_795_437_084,
+                    [21_961, 8_187, 17_706, 15_834, 1_848],
+                    [13_072, 16_716, 1_833, 15, 1_128, 32_676, 96],
+                    12_320_050_425_985_044_063,
                 ),
                 (
-                    [17_223, 6_584, 14_679, 24_907, 2_143],
-                    [8_521, 15_026, 2_143, 1_993, 37_751, 102],
-                    15_893_539_249_671_903_039,
+                    [17_223, 6_760, 14_471, 24_907, 2_175],
+                    [8_521, 15_139, 2_143, 32, 1_843, 37_756, 102],
+                    7_564_297_937_742_527_113,
                 ),
                 (
-                    [33_641, 10_733, 10_373, 9_553, 1_236],
-                    [21_336, 22_725, 1_236, 1_306, 18_933, 0],
-                    12_940_564_294_704_804_890,
+                    [33_641, 11_093, 9_989, 9_553, 1_260],
+                    [21_336, 22_931, 1_236, 24, 1_053, 18_956, 0],
+                    11_327_544_519_707_429_882,
                 ),
             ]
         );
