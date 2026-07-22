@@ -8,10 +8,10 @@ use image::RgbaImage;
 use mclone_worldgen::levelgen::{
     BEACH_BIOME_ID, MCLONE_OVERWORLD_DECORATION_REVISION, MCLONE_OVERWORLD_FIELD_REVISION,
     MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldLandformSample,
-    McloneOverworldSampleRegionRequest, McloneOverworldSampler, McloneOverworldSurfaceRecipe,
-    McloneOverworldTerrainSample, OCEAN_BIOME_ID, PLAINS_BIOME_ID,
+    McloneOverworldSampleRegionRequest, McloneOverworldSampler, McloneOverworldSamplingTopology,
+    McloneOverworldSurfaceRecipe, McloneOverworldTerrainSample, OCEAN_BIOME_ID, PLAINS_BIOME_ID,
     mclone_overworld_biome_id_for_sample, mclone_overworld_spawn_chunk,
-    mclone_overworld_surface_recipe,
+    mclone_overworld_spawn_chunk_with_topology, mclone_overworld_surface_recipe,
 };
 
 const DEFAULT_OUTPUT_DIR: &str = "/tmp/mclone-overworld-review";
@@ -65,7 +65,7 @@ fn run() -> Result<()> {
         step: config.step_blocks,
     };
 
-    let sampler = McloneOverworldSampler::new(config.seed);
+    let sampler = McloneOverworldSampler::new_with_topology(config.seed, config.topology);
     let sample_start = Instant::now();
     let region = sampler.sample_region(request).map_err(anyhow::Error::msg)?;
     let sample_elapsed_ms = sample_start.elapsed().as_secs_f64() * 1_000.0;
@@ -84,14 +84,22 @@ fn run() -> Result<()> {
     let facts = RegionFacts::from_samples(&landforms, request.width, request.depth);
     let review_sites = select_review_sites(&landforms, request);
     let center_sample = sampler.sample_landform(center_x, center_z);
-    let spawn_chunk = mclone_overworld_spawn_chunk(config.seed);
+    let spawn_chunk = match config.topology {
+        McloneOverworldSamplingTopology::Unbounded => mclone_overworld_spawn_chunk(config.seed),
+        McloneOverworldSamplingTopology::PeriodicX => {
+            mclone_overworld_spawn_chunk_with_topology(config.seed, config.topology)
+        }
+    };
     let spawn_x = spawn_chunk.min_block_x() + 8;
     let spawn_z = spawn_chunk.min_block_z() + 8;
     let spawn_sample = sampler.sample_landform(spawn_x, spawn_z);
 
     let prefix = format!(
-        "mclone-overworld-v1-seed-{}-chunk-{}-{}",
-        config.seed, config.chunk_x, config.chunk_z
+        "mclone-overworld-v1-{}-seed-{}-chunk-{}-{}",
+        config.topology.label(),
+        config.seed,
+        config.chunk_x,
+        config.chunk_z
     );
     let continentalness_path = config
         .output_dir
@@ -179,8 +187,9 @@ fn run() -> Result<()> {
 
     let (commit, dirty) = git_state();
     let receipt = serde_json::json!({
-        "schema": 5,
+        "schema": 6,
         "profile": "mclone-overworld-v1",
+        "topology": config.topology.label(),
         "fieldRevision": MCLONE_OVERWORLD_FIELD_REVISION,
         "decorationRevision": MCLONE_OVERWORLD_DECORATION_REVISION,
         "commit": commit,
@@ -395,6 +404,7 @@ struct Config {
     chunk_z: i32,
     radius_blocks: u32,
     step_blocks: u32,
+    topology: McloneOverworldSamplingTopology,
 }
 
 impl Config {
@@ -406,6 +416,7 @@ impl Config {
             chunk_z: 0,
             radius_blocks: DEFAULT_RADIUS_BLOCKS,
             step_blocks: DEFAULT_STEP_BLOCKS,
+            topology: McloneOverworldSamplingTopology::Unbounded,
         };
         let mut args = args.into_iter();
         while let Some(arg) = args.next() {
@@ -416,6 +427,14 @@ impl Config {
                 "--chunk-z" => config.chunk_z = parse_next(&mut args, &arg)?,
                 "--radius-blocks" => config.radius_blocks = parse_next(&mut args, &arg)?,
                 "--step-blocks" => config.step_blocks = parse_next(&mut args, &arg)?,
+                "--topology" => {
+                    let value: String = parse_next(&mut args, &arg)?;
+                    config.topology = match value.as_str() {
+                        "plane" => McloneOverworldSamplingTopology::Unbounded,
+                        "cylinder-x:384" => McloneOverworldSamplingTopology::PeriodicX,
+                        _ => bail!("--topology requires plane or cylinder-x:384; got `{value}`"),
+                    };
+                }
                 "--help" | "-h" => bail!(usage()),
                 _ => bail!("unknown argument `{arg}`\n{}", usage()),
             }
@@ -448,7 +467,7 @@ where
 fn usage() -> &'static str {
     "usage: mclone-overworld-review [--output-dir PATH] [--seed I64] \
      [--chunk-x I32] [--chunk-z I32] [--radius-blocks U32] \
-     [--step-blocks U32]"
+     [--step-blocks U32] [--topology plane|cylinder-x:384]"
 }
 
 #[derive(Clone, Debug)]

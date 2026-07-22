@@ -45,6 +45,13 @@ pub enum McloneOverworldSamplingTopology {
 }
 
 impl McloneOverworldSamplingTopology {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Unbounded => "plane",
+            Self::PeriodicX => "cylinder-x:384",
+        }
+    }
+
     pub const fn horizontal_topology(self) -> HorizontalTopology {
         match self {
             Self::Unbounded => HorizontalTopology::UNBOUNDED,

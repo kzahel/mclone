@@ -5,9 +5,10 @@ use mclone_core::ChunkPos;
 use mclone_worldgen::feature::DecorationStep;
 use mclone_worldgen::levelgen::{
     McloneOverworldFeatureDependencyCache, McloneOverworldFeatureDependencyCacheReport,
-    OverworldDependencyGenerationTiming, OverworldFeatureBatchTiming,
-    OverworldFeatureDependencyCache, OverworldFeatureDependencyCacheReport, SurfaceFillTiming,
-    generate_mclone_overworld_surface_chunk, generate_overworld_surface_chunk,
+    McloneOverworldSamplingTopology, OverworldDependencyGenerationTiming,
+    OverworldFeatureBatchTiming, OverworldFeatureDependencyCache,
+    OverworldFeatureDependencyCacheReport, SurfaceFillTiming,
+    generate_mclone_overworld_surface_chunk_with_topology, generate_overworld_surface_chunk,
 };
 
 const DEFAULT_SEED: i64 = 12_345;
@@ -59,6 +60,7 @@ struct Config {
     chunk_z: i32,
     radius: i32,
     iterations: usize,
+    mclone_topology: McloneOverworldSamplingTopology,
 }
 
 impl Config {
@@ -69,6 +71,7 @@ impl Config {
             chunk_z: DEFAULT_CHUNK_Z,
             radius: DEFAULT_RADIUS,
             iterations: DEFAULT_ITERATIONS,
+            mclone_topology: McloneOverworldSamplingTopology::Unbounded,
         };
 
         let mut args = args.into_iter();
@@ -82,6 +85,20 @@ impl Config {
                 }
                 "--iterations" => {
                     config.iterations = parse_next(&mut args, "--iterations")?;
+                }
+                "--mclone-topology" => {
+                    let value = args
+                        .next()
+                        .ok_or_else(|| "--mclone-topology requires a value".to_owned())?;
+                    config.mclone_topology = match value.as_str() {
+                        "plane" => McloneOverworldSamplingTopology::Unbounded,
+                        "cylinder-x:384" => McloneOverworldSamplingTopology::PeriodicX,
+                        _ => {
+                            return Err(format!(
+                                "--mclone-topology requires plane or cylinder-x:384; got `{value}`"
+                            ));
+                        }
+                    };
                 }
                 "--help" | "-h" => return Err(usage()),
                 _ => return Err(format!("unknown argument {arg}\n{}", usage())),
@@ -158,7 +175,12 @@ fn run_mclone_overworld_surface_phase(
     let mut non_air_blocks = 0_usize;
     for _ in 0..config.iterations {
         for pos in positions {
-            let chunk = generate_mclone_overworld_surface_chunk(config.seed, pos.x, pos.z);
+            let chunk = generate_mclone_overworld_surface_chunk_with_topology(
+                config.seed,
+                config.mclone_topology,
+                pos.x,
+                pos.z,
+            );
             generated_chunks += 1;
             non_air_blocks += chunk.non_air_block_count();
         }
@@ -184,7 +206,12 @@ fn run_mclone_features_phase(
         FeatureCacheMode::Cold => {
             for _ in 0..config.iterations {
                 let mut cache = McloneOverworldFeatureDependencyCache::new();
-                let result = cache.generate_features_chunks(config.seed, positions.iter().copied());
+                let result = cache.generate_features_chunks_with_topology_and_dependencies(
+                    config.seed,
+                    config.mclone_topology,
+                    positions.iter().copied(),
+                    std::iter::empty(),
+                );
                 generated_target_chunks += result.chunks.len();
                 non_air_blocks += result
                     .chunks
@@ -196,10 +223,20 @@ fn run_mclone_features_phase(
         }
         FeatureCacheMode::Warm => {
             let mut cache = McloneOverworldFeatureDependencyCache::new();
-            let _warmup = cache.generate_features_chunks(config.seed, positions.iter().copied());
+            let _warmup = cache.generate_features_chunks_with_topology_and_dependencies(
+                config.seed,
+                config.mclone_topology,
+                positions.iter().copied(),
+                std::iter::empty(),
+            );
             start = Instant::now();
             for _ in 0..config.iterations {
-                let result = cache.generate_features_chunks(config.seed, positions.iter().copied());
+                let result = cache.generate_features_chunks_with_topology_and_dependencies(
+                    config.seed,
+                    config.mclone_topology,
+                    positions.iter().copied(),
+                    std::iter::empty(),
+                );
                 generated_target_chunks += result.chunks.len();
                 non_air_blocks += result
                     .chunks
@@ -313,6 +350,13 @@ fn print_json(
     println!("  \"radius_chunks\": {},", config.radius);
     println!("  \"target_chunks\": {target_chunk_count},");
     println!("  \"iterations\": {},", config.iterations);
+    println!(
+        "  \"mclone_topology\": \"{}\",",
+        match config.mclone_topology {
+            McloneOverworldSamplingTopology::Unbounded => "plane",
+            McloneOverworldSamplingTopology::PeriodicX => "cylinder-x:384",
+        }
+    );
     println!("  \"total_elapsed_ms\": {:.3},", total_elapsed_ms);
     println!("  \"phases\": {{");
     print_surface_phase_json("    ", "surface", surface, true);
@@ -587,7 +631,8 @@ fn parse_next<T: std::str::FromStr>(
 }
 
 fn usage() -> String {
-    "usage: worldgen_perf [--seed N] [--chunk-x N] [--chunk-z N] [--radius N] [--iterations N]"
+    "usage: worldgen_perf [--seed N] [--chunk-x N] [--chunk-z N] [--radius N] \
+     [--iterations N] [--mclone-topology plane|cylinder-x:384]"
         .to_owned()
 }
 
