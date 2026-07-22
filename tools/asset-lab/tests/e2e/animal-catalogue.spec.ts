@@ -15,7 +15,7 @@ test("browses hash-checked figures with animation and camera controls", async ({
   await expect(page.locator(".viewerHeader h2")).toHaveText("King Cobra");
   await expect(page).toHaveURL(/figure=king_cobra/);
   await expect(page.locator(".catalogRow.selected")).toHaveAttribute("data-catalog-name", "king_cobra");
-  await expect(page.locator(".summaryItem").first()).not.toContainText("0");
+  await expect(page.locator(".summaryItem").first()).toContainText("190");
   await expect(page.locator(".summaryItem").filter({ hasText: "runtime" })).toContainText("3");
   await expect(page.locator(".promotionStatus")).toContainText("Asset Lab only");
 
@@ -220,12 +220,23 @@ test("filters and inspects typed creature classifications", async ({ page }) => 
   await search.fill("decay");
   await expect(page.locator(".resultCount")).toHaveText("1 figure");
   await expect(page.locator("[data-catalog-name='zombie']")).toBeVisible();
+  await search.fill("mandrake");
+  await expect(page.locator(".resultCount")).toHaveText("1 figure");
+  await expect(page.locator("[data-catalog-name='mandrake']")).toBeVisible();
+  await search.fill("cactus");
+  await expect(page.locator(".resultCount")).toHaveText("1 figure");
+  await expect(page.locator("[data-catalog-name='walking_cactus']")).toBeVisible();
+  await search.fill("scholar");
+  await expect(page.locator(".resultCount")).toHaveText("1 figure");
+  await expect(page.locator("[data-catalog-name='owl_scholar']")).toBeVisible();
 
   await search.fill("");
   await groupFilter.selectOption("plant");
-  await expect(page.locator(".resultCount")).toHaveText("2 figures");
+  await expect(page.locator(".resultCount")).toHaveText("4 figures");
   await expect(page.locator("[data-catalog-name='walking_banyan']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='maw_orchid']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='mandrake']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='walking_cactus']")).toBeVisible();
 
   await groupFilter.selectOption("fungus");
   await expect(page.locator(".resultCount")).toHaveText("1 figure");
@@ -240,7 +251,7 @@ test("filters and inspects typed creature classifications", async ({ page }) => 
 
   await groupFilter.selectOption("all");
   await bodyPlanFilter.selectOption("rooted");
-  await expect(page.locator(".resultCount")).toHaveText("3 figures");
+  await expect(page.locator(".resultCount")).toHaveText("5 figures");
   await bodyPlanFilter.selectOption("colony");
   await expect(page.locator(".resultCount")).toHaveText("1 figure");
   await page.screenshot({

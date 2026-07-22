@@ -5,8 +5,9 @@ Topic: `animal-catalogue`
 Status: complete and live-accepted 2026-07-21, then extended locally on
 2026-07-22 with typed creature classification, classification filters, three
 fantasy/monster waves, a first living-growth wave, binary and fractional alpha
-proofs, fixed planar cards, and a two-figure fantasy-fauna follow-up. The
-current local inventory contains 187 canonical figures and 260 clips. The
+proofs, fixed planar cards, a two-figure fantasy-fauna follow-up, and a gentler
+recognizable-folklore wave. The current local inventory contains 190 canonical
+figures and 266 clips. The
 read-only,
 production-built Asset Lab
 catalogue is available at
@@ -188,13 +189,15 @@ occur.
     with Walking Banyan, Maw Orchid, and Lantern Mycelium.
 13. [x] Add Book Mimic and Ceiling Angler with explicit fantasy/monster tags,
     independent idle/action clips, and searchable catalogue coverage.
+14. [x] Add Mandrake, Walking Cactus, and Owl Scholar with explicit
+    plant/animal, fantasy, rooted/winged, habitat, and theme classification.
 
 ## Local Acceptance Evidence
 
 The implemented path passes:
 
 - `pnpm asset-lab:typecheck`;
-- `pnpm asset-lab:test`: 25 semantic, scene, discovery, hash, and generation
+- `pnpm asset-lab:test`: 31 semantic, scene, discovery, hash, and generation
   tests plus the first-party figure drift gate;
 - `pnpm asset-lab:web:test`: four desktop and 390px production-subpath
   Playwright lanes covering deep links, animation advance/pause/keyboard scrub,
@@ -295,6 +298,13 @@ local upward lure strike into a downward ambush without maintaining an
 inverted semantic rig. Monster, Hostile, and `scary` results each increase to
 15; searching `mimic` returns the chest and book variants. Clean sheets and
 four MP4 reviews are under `/tmp/mclone-fantasy-two/`.
+
+The recognizable-folklore follow-up builds 190 canonical figures, 266 clips,
+and 4,113 parts. Mandrake and Walking Cactus increase the Plant result from two
+to four and the Rooted result from three to five; Owl Scholar remains both
+Animal and Fantasy. Searches for `mandrake`, `cactus`, and `scholar` each
+resolve exactly one figure. The six clean action/locomotion sheets and MP4
+reviews are under `/tmp/mclone-fantasy-plants-three/`.
 
 ## Live Acceptance Evidence
 

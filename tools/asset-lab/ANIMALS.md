@@ -376,6 +376,7 @@ extensions — all **B** (`bipedWalk`), so no new tooling.
 | Unicorn / Pegasus | P3 | ☐ | horse rig + horn / wings |
 | Griffin | P3 | ☐ | eagle + lion |
 | Slime / blob | P3 | ✅ | `examples/slime` — six-box acid slime with textured gel layers, a grounded squash idle, and a separate leap-and-slam action (also a baddie — see below) |
+| Owl Scholar | P2 | ✅ | `examples/owl_scholar` — recognizable spectacled owl with folded wings, satchel, two exact cutout book-page cards, grounded perch-hop, and separate page-turn action |
 
 ---
 
@@ -391,7 +392,8 @@ hostile growths.
 | Walking Banyan | P1 | ✅ | C/R | mossy, autumn, blossom | `examples/walking_banyan` — giant 23-box mobile tree with six alternating stilt roots, cutout canopy, root stride, and separate replant action |
 | Maw Orchid | P1 | ✅ | R | jungle, cave, ember | `examples/maw_orchid` — large 21-part carnivorous flower with 17 boxes, four exact cutout jaw-petal cards, a luminous lure, searching tendrils, and separate snap-trap action |
 | Lantern Mycelium | P1 | ✅ | R/COL | teal, violet, toxic | `examples/lantern_mycelium` — connected 28-box five-mushroom colony with out-of-phase cap pulses, additive gills, and smooth blended spore-bloom action |
-| Walking cactus | P2 | ☐ | B/R | desert, flowering | drops roots and waddles between water sources |
+| Mandrake | P2 | ✅ | B/R | folklore, woodland | `examples/mandrake` — small knotted humanoid root with five double-sided cutout leaf cards, grounded root-waddle, and separate full-bodied scream action |
+| Walking cactus | P2 | ✅ | B/R | desert, flowering | `examples/walking_cactus` — friendly saguaro whose branches remain its arms, with short root feet, grounded cactus-waddle, and separate rain-bloom action |
 | Sundew carpet | P2 | ☐ | R/COL | bog, giant | many independently folding adhesive pads |
 | Tumble grove | P3 | ☐ | R | dry, thorned | uproots, rolls, and unfolds into a small tree |
 
@@ -459,8 +461,8 @@ should be a high-value early wave for a Minecraft-style mob set.
 
 ## Coverage snapshot
 
-- **Canonical box-and-card figures:** 187 sources and 260 clips after Book
-  Mimic and Ceiling Angler extend the fantasy fauna.
+- **Canonical box-and-card figures:** 190 sources and 266 clips after Mandrake,
+  Walking Cactus, and Owl Scholar extend the gentler fantasy roster.
 - **First hostile fantasy wave:** Skeleton, Slime, and Gargoyle, each with
   explicit typed catalogue classification and a separate special action.
 - **Binary-alpha proof:** Cutout Skeleton keeps a full torso cuboid and forms
@@ -482,6 +484,9 @@ should be a high-value early wave for a Minecraft-style mob set.
   recognizable enchanted object, while Ceiling Angler adds an upside-down cave
   animal authored as a reusable upright quadruped. Gameplay should roll the
   complete actor onto the ceiling instead of inverting its semantic skeleton.
+- **Recognizable folklore follow-up:** Mandrake and Walking Cactus broaden the
+  filterable Plant/Rooted set, while Owl Scholar keeps an animal silhouette and
+  adds restrained character through spectacles, satchel, and animated pages.
 - **Rounded-to-box migration complete (13):** piglet, sheep, dog, cat,
   bearfolk, lionfolk, cow, horse, goat, wolf, fox, bear, and lion.
 - **Retained rounded A/B archive:** all 18 former mixed-primitive sources live
