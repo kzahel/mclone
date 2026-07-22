@@ -14,6 +14,10 @@ bounded execution record for the existing flat-input slices.
 [`Tactical 215`](../tactical/215-preliminary-couch-readiness.md) owns the
 bounded session-local source identity and scripted 1-4-source assignment proof;
 it deliberately does not add a physical gamepad collector.
+[`Tactical 216`](../tactical/216-controller-input-foundation.md) owns the active
+unattended implementation series through shared semantics, UI, physical
+collectors, XR convergence, preferences, and automated validation. Real-device
+acceptance remains a separate recorded gate.
 
 ## Top-Level Decision
 

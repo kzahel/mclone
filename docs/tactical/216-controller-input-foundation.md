@@ -1,0 +1,211 @@
+# Tactical 216: Controller Input Foundation
+
+Status: active 2026-07-22.
+
+Topic: [`controller-input`](../topics/controller-input.md).
+
+## Instruction Synthesis
+
+Implement the accepted all-target controller foundation unattended and commit
+it as a reviewable series. Complete shared semantic actions, contexts,
+per-source state, scene routing, controller-accessible UI, ordinary desktop,
+browser, and Android collectors, and the overlapping OpenXR action refactor.
+Add preferences, rebinding, prompt-layout, haptic, scripted-input, and
+cross-target validation foundations where they can be proved without physical
+hardware.
+
+Do not claim final controller acceptance without real Xbox-like,
+PlayStation-like, generic, browser, Android, Steam Deck, and XR device passes.
+Record those device gates explicitly instead. Native Steam Input, exact Steam
+action-origin glyphs, gyro/trackpad specialization, and tactile-quality tuning
+remain later device/runtime-backed work.
+
+## Starting Point
+
+- `mclone-input` owns capability/preference resolution, keyboard/mouse and touch
+  adapters, gamepad bindings/dead zones, a first flat gamepad adapter,
+  session-local `InputSourceId`, neutral descriptors, a complete normalized
+  `StandardGamepadSnapshot`, and deterministic four-seat assignment.
+- No shipping desktop, browser, flat Android, or Android XR host currently
+  polls an ordinary physical gamepad.
+- `FlatInputFrame` still combines mouse/touch deltas with right-stick look and
+  therefore cannot express presentation-rate-independent controller turning.
+- `MonoInteractiveInputRouter` owns keyboard/mouse state while app hosts merge
+  touch separately; it does not own a multi-source controller session.
+- `mclone-ui::GuiKey` exposes only Escape and F1. Focus visuals exist, but
+  directional traversal, confirm/back, repeat, and controller-origin prompts
+  do not.
+- OpenXR retains neutral poses but exposes physically named face-button actions
+  to shared scene policy.
+- Flat Android uses `winit 0.30`, whose Android backend drains the raw activity
+  queue and currently maps motion events without exposing gamepad source/axes.
+  Android XR already owns the raw `android_activity` queue directly.
+
+## Architecture Invariants
+
+1. Platform collectors emit neutral snapshots or already-semantic backend
+   actions. They never own gameplay, UI, binding, dead-zone, repeat, prompt, or
+   participant policy.
+2. `mclone-input` remains free of `winit`, `web-sys`, Android, OpenXR, GilRs,
+   Steamworks, scene, renderer, and app dependencies.
+3. Mouse/touch pointer delta and controller look rate remain distinct until the
+   shared scene applies rate using frame `dt`.
+4. Held, pressed, and released facts are derived once from per-source state.
+   Platform event repeat is not an action edge.
+5. Drift below the normalized dead zone never becomes activity or switches the
+   displayed prompt.
+6. Disconnect, focus loss, pause, visibility loss, and source replacement clear
+   held state deterministically.
+7. Input contexts are shared facts selected by the scene/UI state. The same
+   physical south button may resolve to Jump in gameplay and Confirm in menus.
+8. Tracked XR controllers converge at semantic actions but retain hand, pose,
+   ray, validity, and XR-only comfort facts in a typed extension.
+9. Ordinary gamepad use in XR supplies non-spatial actions and uses a shared
+   head-gaze/crosshair fallback for Attack/Use when no tracked ray is selected.
+10. Existing keyboard, mouse, touch, tracked-controller, mono, stereo,
+    multiview, headless, and scripted-input paths remain regression gates.
+11. A platform capability is advertised only when a real collector is active;
+    synthetic fixtures never make a shipping host claim hardware support.
+12. Real-device acceptance remains open until the exact platform/device pass is
+    recorded, even when builds, unit tests, mocks, and emulation are green.
+
+## Slice Plan
+
+### Slice 0 — plan and source locks
+
+- Add this tactical and link it from the controller topic and tactical index.
+- Record source locks for shared ownership and forbidden platform types.
+- Capture the exact shared, native, WASM, browser, Android, and XR gates used by
+  later slices.
+
+### Slice 1 — semantic controller session
+
+- Add shared `InputContext`, semantic action identifiers, continuous axes,
+  held/pressed/released sets, activity/source facts, and prompt origins.
+- Add per-source snapshot history, stick curves, trigger hysteresis,
+  navigation repeat, disconnect/focus clearing, and active-source arbitration.
+- Separate `look_rate` from `look_delta` and prove frame-rate invariance.
+- Preserve a bounded compatibility projection to `FlatInputFrame` while
+  existing hosts migrate.
+- Exercise multiple sources, reordered samples, drift, non-finite values,
+  context changes, duplicate samples, edges, reconnect, and mixed input.
+
+### Slice 2 — shared scene routing and scripted proof
+
+- Make `MonoInteractiveInputRouter` own the controller session and accept
+  connect/sample/disconnect/lifecycle events.
+- Select Gameplay/Menu/TextEntry context from shared scene state.
+- Apply semantic continuous and edge state once to camera, locomotion,
+  interaction, hotbar, UI, and client commands.
+- Add offscreen/scripted traces that prove equivalent overlapping outcomes for
+  keyboard, gamepad, and XR-shaped action input.
+
+### Slice 3 — controller-complete shared UI
+
+- Add directional navigation, confirm, back, page/tab, stable focus order,
+  disabled-widget skipping, slider adjustment, and deterministic repeat.
+- Cover title, world list/create/delete, New World, Join Remote, pause,
+  options/categories, server settings, asset packs, storage confirmation, help,
+  block palette/inventory, and failure/recovery surfaces.
+- Replace literal Xbox prompt assumptions with semantic action plus
+  layout/origin projection and retain text fallback when no glyph exists.
+- Capture and inspect focused/menu/prompt pixels outside the repository.
+
+### Slice 4 — desktop and browser collectors
+
+- Add an app/platform-owned GilRs collector for desktop flat and desktop XR.
+- Translate hotplugged cached state into `StandardGamepadSnapshot`, preserving
+  neutral source identity and clearing on focus/lifecycle loss.
+- Poll the browser Gamepad API near `requestAnimationFrame`, normalize only the
+  W3C standard mapping, and keep TypeScript domain-blind.
+- Add collector conversion tests, browser mocks, capability/activity gates,
+  and desktop/web build and smoke coverage.
+
+### Slice 5 — Android collectors
+
+- Add one neutral Android raw-controller normalizer in
+  `mclone-android-platform` for source classification, standard axes/buttons,
+  lifecycle, and stable session-local device handles.
+- Feed it directly from Android XR's raw event queue.
+- Establish the narrowest maintainable flat-Android raw event seam. Prefer an
+  upstreamable `winit` callback/source-aware event extension over duplicating
+  the activity/surface host; record any local dependency patch explicitly.
+- Build both APK lanes and add pure conversion/lifecycle tests. Leave wired and
+  Bluetooth hardware acceptance open.
+
+### Slice 6 — XR semantic convergence
+
+- Separate shared semantic action state from tracked controller pose/ray state.
+- Rename OpenXR application actions around meaning and keep physical controls
+  in suggested interaction-profile bindings.
+- Preserve existing tracked locomotion, interaction, teleport, hand-push,
+  thruster, menu, stereo, and multiview behavior.
+- Route ordinary gamepad actions through both XR hosts and add head-gaze
+  interaction fallback without pretending the gamepad has a pose.
+- Prove the shared action seam through XR emulation and existing OpenXR compile
+  and source-lock gates; leave headset feel/regression acceptance open.
+
+### Slice 7 — preferences, rebinding, haptics, and closeout
+
+- Persist controller sensitivity, inversion, dead zones, layout override,
+  preferred input, and schema-versioned semantic bindings through shared
+  preference codecs and existing platform storage executors.
+- Add a neutral haptic request/capability contract and platform no-op behavior;
+  add backend execution only where it can be compiled and deterministically
+  tested without claiming tactile quality.
+- Reconcile Tactical 098, this tactical, the controller topic, platform matrix,
+  validation evidence, and remaining real-device checklist.
+- Run the full affected gate matrix and commit each independently validated
+  slice with `Topic: controller-input`.
+
+## Validation Gates
+
+Minimum shared gates for every affected slice:
+
+```bash
+cargo fmt --manifest-path native/Cargo.toml --all -- --check
+cargo test --manifest-path native/Cargo.toml -p mclone-input
+cargo test --manifest-path native/Cargo.toml -p mclone-ui
+cargo test --manifest-path native/Cargo.toml -p mclone-scene
+cargo check --manifest-path native/Cargo.toml -p mclone-input \
+  --target wasm32-unknown-unknown
+cargo check --manifest-path native/Cargo.toml -p mclone-scene \
+  --target wasm32-unknown-unknown
+pnpm native:thin-adapters:purity
+pnpm native:scene-host:purity
+pnpm native:xr:frame-driver:purity
+```
+
+Use the current commands in [`../platforms.md`](../platforms.md) for desktop,
+browser, Android, and XR adoption. Android builds always run through the
+repository scripts. Browser pixels use the headed Wayland lane after
+`pnpm host:check`; generated captures go under `/tmp` and are inspected.
+
+## Hardware-Only Acceptance Ledger
+
+These remain open throughout unattended implementation unless an applicable
+device becomes available and evidence is recorded:
+
+- Xbox-like, PlayStation-like, and generic desktop controllers;
+- Steam Deck built-in controller, suspend/resume, and prompt layout;
+- Steam Controller compatibility through the ordinary virtual-gamepad path;
+- real controller in each supported browser family;
+- wired and Bluetooth controllers on flat Android;
+- ordinary gamepad plus tracked controllers in desktop XR;
+- ordinary gamepad plus tracked controllers on Quest/Android XR;
+- haptic strength/feel and vendor-specific layout/glyph correctness.
+
+## Completion Bar
+
+- Every product host consumes one shared semantic action and UI-navigation
+  contract.
+- Desktop, browser, flat Android, and Android XR have real collector code behind
+  truthful capability detection.
+- Tracked XR controls retain poses and XR-only extensions while overlapping
+  actions share the neutral semantic path.
+- Every non-text screen is deterministically navigable by scripted controller
+  input.
+- Automated unit, conformance, build, purity, browser-mock, emulation, and
+  rendered-output gates pass.
+- Documentation distinguishes implemented/automated evidence from each open
+  hardware acceptance item without overstating product readiness.
