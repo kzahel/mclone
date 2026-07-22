@@ -1,3 +1,5 @@
+#![recursion_limit = "256"]
+
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -7,11 +9,12 @@ use anyhow::{Context, Result, bail};
 use image::RgbaImage;
 use mclone_worldgen::levelgen::{
     BEACH_BIOME_ID, MCLONE_OVERWORLD_DECORATION_REVISION, MCLONE_OVERWORLD_FIELD_REVISION,
-    MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldLandformSample,
-    McloneOverworldSampleRegionRequest, McloneOverworldSampler, McloneOverworldSamplingTopology,
-    McloneOverworldSurfaceRecipe, McloneOverworldTerrainSample, OCEAN_BIOME_ID, PLAINS_BIOME_ID,
-    mclone_overworld_biome_id_for_sample, mclone_overworld_spawn_chunk,
-    mclone_overworld_spawn_chunk_with_topology, mclone_overworld_surface_recipe,
+    MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_RIVER_BIOME_ID, MCLONE_OVERWORLD_SEA_LEVEL,
+    McloneOverworldLandformSample, McloneOverworldSampleRegionRequest, McloneOverworldSampler,
+    McloneOverworldSamplingTopology, McloneOverworldSurfaceRecipe, McloneOverworldTerrainSample,
+    OCEAN_BIOME_ID, PLAINS_BIOME_ID, mclone_overworld_biome_id_for_sample,
+    mclone_overworld_spawn_chunk, mclone_overworld_spawn_chunk_with_topology,
+    mclone_overworld_surface_recipe,
 };
 
 const DEFAULT_OUTPUT_DIR: &str = "/tmp/mclone-overworld-review";
@@ -111,6 +114,16 @@ fn run() -> Result<()> {
         .output_dir
         .join(format!("{prefix}-mountain-detail.png"));
     let surface_path = config.output_dir.join(format!("{prefix}-surface-y.png"));
+    let base_surface_path = config
+        .output_dir
+        .join(format!("{prefix}-base-surface-y.png"));
+    let river_distance_path = config
+        .output_dir
+        .join(format!("{prefix}-river-distance.png"));
+    let river_level_path = config.output_dir.join(format!("{prefix}-river-level.png"));
+    let river_grade_path = config.output_dir.join(format!("{prefix}-river-grade.png"));
+    let wetland_path = config.output_dir.join(format!("{prefix}-wetland.png"));
+    let watercourses_path = config.output_dir.join(format!("{prefix}-watercourses.png"));
     let slope_path = config.output_dir.join(format!("{prefix}-slope.png"));
     let fields_path = config.output_dir.join(format!("{prefix}-fields.png"));
     let biome_path = config.output_dir.join(format!("{prefix}-biomes.png"));
@@ -128,6 +141,11 @@ fn run() -> Result<()> {
     let ridges = render_map(&region.samples, ridges_color);
     let mountain_detail = render_map(&region.samples, mountain_detail_color);
     let surface = render_map(&region.samples, surface_color);
+    let base_surface = render_map(&region.samples, base_surface_color);
+    let river_distance = render_map(&region.samples, river_distance_color);
+    let river_level = render_map(&region.samples, river_level_color);
+    let river_grade = render_map(&region.samples, river_grade_color);
+    let wetland = render_map(&region.samples, wetland_color);
     let slope = render_landform_map(&landforms, slope_color);
     let biomes = render_landform_map(&landforms, biome_color);
     let surface_recipes = render_landform_map(&landforms, surface_recipe_color);
@@ -147,6 +165,42 @@ fn run() -> Result<()> {
         &mountain_detail,
     )?;
     save_rgba(&surface_path, request.width, request.depth, &surface)?;
+    save_rgba(
+        &base_surface_path,
+        request.width,
+        request.depth,
+        &base_surface,
+    )?;
+    save_rgba(
+        &river_distance_path,
+        request.width,
+        request.depth,
+        &river_distance,
+    )?;
+    save_rgba(
+        &river_level_path,
+        request.width,
+        request.depth,
+        &river_level,
+    )?;
+    save_rgba(
+        &river_grade_path,
+        request.width,
+        request.depth,
+        &river_grade,
+    )?;
+    save_rgba(&wetland_path, request.width, request.depth, &wetland)?;
+    let watercourses = combine_maps(
+        request.width,
+        request.depth,
+        [&river_distance, &river_level, &river_grade, &wetland],
+    );
+    save_rgba(
+        &watercourses_path,
+        request.width * 4 + MAP_GAP_PIXELS * 3,
+        request.depth,
+        &watercourses,
+    )?;
     save_rgba(&slope_path, request.width, request.depth, &slope)?;
     let combined = combine_maps(
         request.width,
@@ -187,7 +241,7 @@ fn run() -> Result<()> {
 
     let (commit, dirty) = git_state();
     let receipt = serde_json::json!({
-        "schema": 6,
+        "schema": 7,
         "profile": "mclone-overworld-v1",
         "topology": config.topology.label(),
         "fieldRevision": MCLONE_OVERWORLD_FIELD_REVISION,
@@ -224,6 +278,11 @@ fn run() -> Result<()> {
             "ruggedness": [facts.min_ruggedness, facts.max_ruggedness],
             "ridges": [facts.min_ridges, facts.max_ridges],
             "mountainDetail": [facts.min_mountain_detail, facts.max_mountain_detail],
+            "riverDistance": [facts.min_river_distance, facts.max_river_distance],
+            "riverHalfWidth": [facts.min_river_half_width, facts.max_river_half_width],
+            "riverGrade": [facts.min_river_grade, facts.max_river_grade],
+            "wetlandInfluence": [facts.min_wetland_influence, facts.max_wetland_influence],
+            "baseSurfaceY": [facts.min_base_surface_y, facts.max_base_surface_y],
             "surfaceY": [facts.min_surface_y, facts.max_surface_y],
             "slope": [facts.min_slope, facts.max_slope],
             "exposure": [facts.min_exposure, facts.max_exposure],
@@ -248,12 +307,20 @@ fn run() -> Result<()> {
             "beach": facts.beach_biome_columns,
             "openLowland": facts.open_lowland_biome_columns,
             "woodedUpland": facts.wooded_upland_biome_columns,
+            "river": facts.river_biome_columns,
         },
         "surfaceRecipeCounts": {
             "oceanFloor": facts.ocean_floor_columns,
             "beach": facts.beach_surface_columns,
+            "riverBed": facts.river_bed_columns,
+            "riverBank": facts.river_bank_columns,
             "grassSoil": facts.grass_soil_columns,
             "exposedStone": facts.exposed_stone_columns,
+        },
+        "watercourseCounts": {
+            "channel": facts.river_channel_columns,
+            "gradedBank": facts.river_bank_influence_columns,
+            "wetlandAboveQuarter": facts.wetland_columns,
         },
         "landformCounts": {
             "mountainRegion": facts.mountain_region_columns,
@@ -280,6 +347,13 @@ fn run() -> Result<()> {
             "ridges": ridges_path,
             "mountainDetail": mountain_detail_path,
             "surfaceY": surface_path,
+            "baseSurfaceY": base_surface_path,
+            "watercourseOrder": ["distanceAndInfluence", "waterLevel", "grade", "wetland"],
+            "watercourses": watercourses_path,
+            "riverDistance": river_distance_path,
+            "riverLevel": river_level_path,
+            "riverGrade": river_grade_path,
+            "wetland": wetland_path,
             "terrainLanguageOrder": ["slope", "biomes", "surfaceRecipes"],
             "terrainLanguage": language_path,
             "slope": slope_path,
@@ -353,12 +427,58 @@ fn select_review_sites(
             (x - center_x).abs() + (z - center_z).abs()
         })
         .map(|(index, _)| index);
+    let river = samples
+        .iter()
+        .enumerate()
+        .filter(|(_, sample)| sample.terrain.watercourse.is_channel())
+        .min_by(|(_, left), (_, right)| {
+            left.terrain
+                .watercourse
+                .distance
+                .total_cmp(&right.terrain.watercourse.distance)
+        })
+        .map(|(index, _)| index);
+    let mountain_river = samples
+        .iter()
+        .enumerate()
+        .filter(|(_, sample)| sample.terrain.watercourse.is_channel())
+        .max_by(|(_, left), (_, right)| {
+            left.terrain
+                .mountain_strength()
+                .total_cmp(&right.terrain.mountain_strength())
+        })
+        .map(|(index, _)| index);
+    let coastal_river = samples
+        .iter()
+        .enumerate()
+        .filter(|(_, sample)| sample.terrain.watercourse.is_channel())
+        .min_by(|(_, left), (_, right)| {
+            left.terrain
+                .continentalness
+                .total_cmp(&right.terrain.continentalness)
+        })
+        .map(|(index, _)| index);
+    let wetland = samples
+        .iter()
+        .enumerate()
+        .filter(|(_, sample)| sample.terrain.watercourse.bank_influence > 0.0)
+        .max_by(|(_, left), (_, right)| {
+            left.terrain
+                .watercourse
+                .wetland_influence
+                .total_cmp(&right.terrain.watercourse.wetland_influence)
+        })
+        .map(|(index, _)| index);
 
     serde_json::json!({
         "rangeInterior": review_site_json(highest, samples, request),
         "mountainValley": review_site_json(mountain_valley, samples, request),
         "rangeEdge": review_site_json(range_edge, samples, request),
         "lowlandControl": review_site_json(lowland_control, samples, request),
+        "river": review_site_json(river, samples, request),
+        "mountainRiver": review_site_json(mountain_river, samples, request),
+        "coastalRiver": review_site_json(coastal_river, samples, request),
+        "wetland": review_site_json(wetland, samples, request),
     })
 }
 
@@ -390,9 +510,22 @@ fn sample_json(sample: McloneOverworldLandformSample) -> serde_json::Value {
         "ridges": terrain.ridges,
         "mountainDetail": terrain.mountain_detail,
         "mountainStrength": terrain.mountain_strength(),
+        "baseSurfaceY": terrain.base_surface_y,
         "surfaceY": terrain.surface_y,
         "slope": sample.slope,
         "exposure": sample.exposure(),
+        "watercourse": {
+            "distance": terrain.watercourse.distance,
+            "channelInfluence": terrain.watercourse.channel_influence,
+            "bankInfluence": terrain.watercourse.bank_influence,
+            "halfWidth": terrain.watercourse.half_width,
+            "waterSurfaceY": terrain.watercourse.water_surface_y,
+            "bedY": terrain.watercourse.bed_y,
+            "tangent": [terrain.watercourse.tangent_x, terrain.watercourse.tangent_z],
+            "flow": [terrain.watercourse.flow_x, terrain.watercourse.flow_z],
+            "grade": terrain.watercourse.grade,
+            "wetlandInfluence": terrain.watercourse.wetland_influence,
+        },
     })
 }
 
@@ -482,6 +615,16 @@ struct RegionFacts {
     max_ridges: f64,
     min_mountain_detail: f64,
     max_mountain_detail: f64,
+    min_river_distance: f64,
+    max_river_distance: f64,
+    min_river_half_width: f64,
+    max_river_half_width: f64,
+    min_river_grade: f64,
+    max_river_grade: f64,
+    min_wetland_influence: f64,
+    max_wetland_influence: f64,
+    min_base_surface_y: i32,
+    max_base_surface_y: i32,
     min_surface_y: i32,
     max_surface_y: i32,
     min_slope: f64,
@@ -501,10 +644,16 @@ struct RegionFacts {
     beach_biome_columns: usize,
     open_lowland_biome_columns: usize,
     wooded_upland_biome_columns: usize,
+    river_biome_columns: usize,
     ocean_floor_columns: usize,
     beach_surface_columns: usize,
+    river_bed_columns: usize,
+    river_bank_columns: usize,
     grass_soil_columns: usize,
     exposed_stone_columns: usize,
+    river_channel_columns: usize,
+    river_bank_influence_columns: usize,
+    wetland_columns: usize,
     mountain_region_columns: usize,
     mountain_valley_columns: usize,
     mountain_crest_columns: usize,
@@ -530,6 +679,16 @@ impl RegionFacts {
         let mut max_ridges = f64::NEG_INFINITY;
         let mut min_mountain_detail = f64::INFINITY;
         let mut max_mountain_detail = f64::NEG_INFINITY;
+        let mut min_river_distance = f64::INFINITY;
+        let mut max_river_distance = f64::NEG_INFINITY;
+        let mut min_river_half_width = f64::INFINITY;
+        let mut max_river_half_width = f64::NEG_INFINITY;
+        let mut min_river_grade = f64::INFINITY;
+        let mut max_river_grade = f64::NEG_INFINITY;
+        let mut min_wetland_influence = f64::INFINITY;
+        let mut max_wetland_influence = f64::NEG_INFINITY;
+        let mut min_base_surface_y = i32::MAX;
+        let mut max_base_surface_y = i32::MIN;
         let mut min_slope = f64::INFINITY;
         let mut max_slope = f64::NEG_INFINITY;
         let mut min_exposure = f64::INFINITY;
@@ -543,10 +702,16 @@ impl RegionFacts {
         let mut beach_biome_columns = 0;
         let mut open_lowland_biome_columns = 0;
         let mut wooded_upland_biome_columns = 0;
+        let mut river_biome_columns = 0;
         let mut ocean_floor_columns = 0;
         let mut beach_surface_columns = 0;
+        let mut river_bed_columns = 0;
+        let mut river_bank_columns = 0;
         let mut grass_soil_columns = 0;
         let mut exposed_stone_columns = 0;
+        let mut river_channel_columns = 0;
+        let mut river_bank_influence_columns = 0;
+        let mut wetland_columns = 0;
         let mut mountain_region_columns = 0;
         let mut mountain_valley_columns = 0;
         let mut mountain_crest_columns = 0;
@@ -567,12 +732,33 @@ impl RegionFacts {
             max_ridges = max_ridges.max(sample.ridges);
             min_mountain_detail = min_mountain_detail.min(sample.mountain_detail);
             max_mountain_detail = max_mountain_detail.max(sample.mountain_detail);
+            min_river_distance = min_river_distance.min(sample.watercourse.distance);
+            max_river_distance = max_river_distance.max(sample.watercourse.distance);
+            min_river_half_width = min_river_half_width.min(sample.watercourse.half_width);
+            max_river_half_width = max_river_half_width.max(sample.watercourse.half_width);
+            min_river_grade = min_river_grade.min(sample.watercourse.grade);
+            max_river_grade = max_river_grade.max(sample.watercourse.grade);
+            min_wetland_influence = min_wetland_influence.min(sample.watercourse.wetland_influence);
+            max_wetland_influence = max_wetland_influence.max(sample.watercourse.wetland_influence);
+            min_base_surface_y = min_base_surface_y.min(sample.base_surface_y);
+            max_base_surface_y = max_base_surface_y.max(sample.base_surface_y);
             min_slope = min_slope.min(landform.slope);
             max_slope = max_slope.max(landform.slope);
             min_exposure = min_exposure.min(landform.exposure());
             max_exposure = max_exposure.max(landform.exposure());
             heights.push(sample.surface_y);
             slopes.push(landform.slope);
+            if sample.watercourse.is_channel() {
+                river_channel_columns += 1;
+            }
+            if sample.watercourse.bank_influence > 0.0 {
+                river_bank_influence_columns += 1;
+            }
+            if sample.watercourse.wetland_influence > 0.25
+                && sample.watercourse.bank_influence > 0.0
+            {
+                wetland_columns += 1;
+            }
             let mountain_strength = sample.mountain_strength();
             if mountain_strength >= 0.35 && sample.surface_y > MCLONE_OVERWORLD_SEA_LEVEL {
                 mountain_region_columns += 1;
@@ -602,12 +788,15 @@ impl RegionFacts {
                 BEACH_BIOME_ID => beach_biome_columns += 1,
                 PLAINS_BIOME_ID => open_lowland_biome_columns += 1,
                 MCLONE_OVERWORLD_FOREST_BIOME_ID => wooded_upland_biome_columns += 1,
+                MCLONE_OVERWORLD_RIVER_BIOME_ID => river_biome_columns += 1,
                 _ => {}
             }
             let surface_recipe = mclone_overworld_surface_recipe(*landform);
             match surface_recipe {
                 McloneOverworldSurfaceRecipe::OceanFloor => ocean_floor_columns += 1,
                 McloneOverworldSurfaceRecipe::Beach => beach_surface_columns += 1,
+                McloneOverworldSurfaceRecipe::RiverBed => river_bed_columns += 1,
+                McloneOverworldSurfaceRecipe::RiverBank => river_bank_columns += 1,
                 McloneOverworldSurfaceRecipe::GrassSoil => grass_soil_columns += 1,
                 McloneOverworldSurfaceRecipe::ExposedStone => exposed_stone_columns += 1,
             }
@@ -629,6 +818,19 @@ impl RegionFacts {
                 .chain(sample.ruggedness.to_bits().to_le_bytes())
                 .chain(sample.ridges.to_bits().to_le_bytes())
                 .chain(sample.mountain_detail.to_bits().to_le_bytes())
+                .chain(sample.base_surface_y.to_le_bytes())
+                .chain(sample.watercourse.distance.to_bits().to_le_bytes())
+                .chain(sample.watercourse.channel_influence.to_bits().to_le_bytes())
+                .chain(sample.watercourse.bank_influence.to_bits().to_le_bytes())
+                .chain(sample.watercourse.half_width.to_bits().to_le_bytes())
+                .chain(sample.watercourse.water_surface_y.to_le_bytes())
+                .chain(sample.watercourse.bed_y.to_le_bytes())
+                .chain(sample.watercourse.tangent_x.to_bits().to_le_bytes())
+                .chain(sample.watercourse.tangent_z.to_bits().to_le_bytes())
+                .chain(sample.watercourse.flow_x.to_bits().to_le_bytes())
+                .chain(sample.watercourse.flow_z.to_bits().to_le_bytes())
+                .chain(sample.watercourse.grade.to_bits().to_le_bytes())
+                .chain(sample.watercourse.wetland_influence.to_bits().to_le_bytes())
                 .chain(sample.surface_y.to_le_bytes())
             {
                 fingerprint ^= u64::from(byte);
@@ -689,6 +891,16 @@ impl RegionFacts {
             max_ridges,
             min_mountain_detail,
             max_mountain_detail,
+            min_river_distance,
+            max_river_distance,
+            min_river_half_width,
+            max_river_half_width,
+            min_river_grade,
+            max_river_grade,
+            min_wetland_influence,
+            max_wetland_influence,
+            min_base_surface_y,
+            max_base_surface_y,
             min_surface_y: heights[0],
             max_surface_y: heights[heights.len() - 1],
             min_slope,
@@ -708,10 +920,16 @@ impl RegionFacts {
             beach_biome_columns,
             open_lowland_biome_columns,
             wooded_upland_biome_columns,
+            river_biome_columns,
             ocean_floor_columns,
             beach_surface_columns,
+            river_bed_columns,
+            river_bank_columns,
             grass_soil_columns,
             exposed_stone_columns,
+            river_channel_columns,
+            river_bank_influence_columns,
+            wetland_columns,
             mountain_region_columns,
             mountain_valley_columns,
             mountain_crest_columns,
@@ -844,6 +1062,67 @@ fn surface_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
     }
 }
 
+fn base_surface_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    surface_color(McloneOverworldTerrainSample {
+        surface_y: sample.base_surface_y,
+        ..sample
+    })
+}
+
+fn river_distance_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    if sample.continentalness <= 0.0 {
+        return [15, 35, 72, 255];
+    }
+    if sample.watercourse.is_channel() {
+        return lerp_color(
+            [111, 210, 232, 255],
+            [18, 85, 166, 255],
+            sample.watercourse.channel_influence,
+        );
+    }
+    if sample.watercourse.bank_influence > 0.0 {
+        return lerp_color(
+            [193, 181, 118, 255],
+            [86, 152, 119, 255],
+            sample.watercourse.bank_influence,
+        );
+    }
+    [43, 66, 51, 255]
+}
+
+fn river_level_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    if sample.watercourse.bank_influence == 0.0 {
+        return [31, 41, 43, 255];
+    }
+    lerp_color(
+        [34, 101, 183, 255],
+        [203, 226, 235, 255],
+        f64::from(sample.watercourse.water_surface_y - MCLONE_OVERWORLD_SEA_LEVEL) / 64.0,
+    )
+}
+
+fn river_grade_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    if sample.watercourse.bank_influence == 0.0 {
+        return [31, 41, 43, 255];
+    }
+    lerp_color(
+        [43, 138, 104, 255],
+        [215, 81, 52, 255],
+        sample.watercourse.grade / 0.4,
+    )
+}
+
+fn wetland_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    if sample.watercourse.bank_influence == 0.0 {
+        return [31, 41, 43, 255];
+    }
+    lerp_color(
+        [123, 111, 70, 255],
+        [52, 154, 118, 255],
+        sample.watercourse.wetland_influence,
+    )
+}
+
 fn slope_color(sample: McloneOverworldLandformSample) -> [u8; 4] {
     lerp_color([32, 65, 84, 255], [239, 223, 190, 255], sample.slope / 1.5)
 }
@@ -852,6 +1131,7 @@ fn biome_color(sample: McloneOverworldLandformSample) -> [u8; 4] {
     match mclone_overworld_biome_id_for_sample(sample) {
         OCEAN_BIOME_ID => [25, 76, 145, 255],
         BEACH_BIOME_ID => [222, 207, 143, 255],
+        MCLONE_OVERWORLD_RIVER_BIOME_ID => [42, 119, 181, 255],
         PLAINS_BIOME_ID => [112, 176, 76, 255],
         MCLONE_OVERWORLD_FOREST_BIOME_ID => [42, 105, 55, 255],
         _ => [211, 64, 198, 255],
@@ -862,6 +1142,8 @@ fn surface_recipe_color(sample: McloneOverworldLandformSample) -> [u8; 4] {
     match mclone_overworld_surface_recipe(sample) {
         McloneOverworldSurfaceRecipe::OceanFloor => [104, 111, 119, 255],
         McloneOverworldSurfaceRecipe::Beach => [222, 207, 143, 255],
+        McloneOverworldSurfaceRecipe::RiverBed => [86, 110, 123, 255],
+        McloneOverworldSurfaceRecipe::RiverBank => [112, 138, 74, 255],
         McloneOverworldSurfaceRecipe::GrassSoil => [91, 151, 67, 255],
         McloneOverworldSurfaceRecipe::ExposedStone => [137, 137, 137, 255],
     }
@@ -871,8 +1153,10 @@ fn surface_recipe_tag(recipe: McloneOverworldSurfaceRecipe) -> u8 {
     match recipe {
         McloneOverworldSurfaceRecipe::OceanFloor => 0,
         McloneOverworldSurfaceRecipe::Beach => 1,
-        McloneOverworldSurfaceRecipe::GrassSoil => 2,
-        McloneOverworldSurfaceRecipe::ExposedStone => 3,
+        McloneOverworldSurfaceRecipe::RiverBed => 2,
+        McloneOverworldSurfaceRecipe::RiverBank => 3,
+        McloneOverworldSurfaceRecipe::GrassSoil => 4,
+        McloneOverworldSurfaceRecipe::ExposedStone => 5,
     }
 }
 
