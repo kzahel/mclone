@@ -6,8 +6,8 @@ use anyhow::{Context, Result};
 use mclone_app_runtime::{DEFAULT_STARTUP_READINESS_TIMEOUT, RuntimePollDiagnostics};
 use mclone_assets::AssetSource;
 use mclone_input::{
-    InputCapabilities, InputCapabilityState, InputDeviceKind, InputPreferences, KeyboardKey,
-    MouseWheelDirection, PointerButton,
+    ControllerInputPreferences, InputCapabilities, InputCapabilityState, InputDeviceKind,
+    InputPreferences, KeyboardKey, MouseWheelDirection, PointerButton,
 };
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render::color_profile::DEFAULT_RENDER_SCALE;
@@ -193,6 +193,7 @@ struct ChunkApp {
     gamepad_collector: Option<crate::desktop_gamepad::DesktopGamepadCollector>,
     flat_input: DesktopFlatInputAdapter,
     input_preferences: InputPreferences,
+    controller_preferences: ControllerInputPreferences,
     frame_pacing: FramePacing,
     window: Option<Arc<Window>>,
     surface: Option<NativeSurfaceContext>,
@@ -589,6 +590,19 @@ impl ChunkApp {
                 None
             }
         };
+        let client_input_preferences =
+            match mclone_app_runtime::input_preferences::load_native_input_preferences(
+                scene.world_root.as_deref(),
+            ) {
+                Ok(preferences) => preferences,
+                Err(error) => {
+                    log::warn!("desktop input preferences unavailable: {error:#}");
+                    mclone_app_runtime::input_preferences::ClientInputPreferences::default()
+                }
+            };
+        let mut input_preferences = InputPreferences::AUTO;
+        input_preferences.preferred_scheme = client_input_preferences.controller.preferred_input;
+        input_preferences.touch_controls = client_input_preferences.touch_controls_mode;
         Self {
             scene: scene.clone(),
             render_options,
@@ -596,7 +610,8 @@ impl ChunkApp {
             gamepad_collector,
             assets,
             flat_input: DesktopFlatInputAdapter::new(),
-            input_preferences: InputPreferences::AUTO,
+            input_preferences,
+            controller_preferences: client_input_preferences.controller,
             frame_pacing: FramePacing::default(),
             window: None,
             surface: None,
@@ -1160,6 +1175,7 @@ impl ApplicationHandler for ChunkApp {
             &asset_source,
             self.start_intent,
             self.ui_v2_hit_debug,
+            &self.controller_preferences,
         ) {
             Ok(driver) => driver,
             Err(err) => {

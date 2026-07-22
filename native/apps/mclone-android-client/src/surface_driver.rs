@@ -12,6 +12,7 @@ use mclone_app_runtime::frame_pacing::{
 };
 use mclone_app_runtime::frame_pipeline_accounting::FramePipelineAccountant;
 use mclone_app_runtime::host_mode::SingleViewHostOptions;
+use mclone_app_runtime::input_preferences::ClientInputPreferences;
 use mclone_app_runtime::native_remote_session::{
     NativeRemoteServerSession, connect_native_remote_session_runtime_with_identity,
 };
@@ -357,6 +358,8 @@ struct AndroidGpuState {
     host: AndroidSceneHost,
     input_capabilities: InputCapabilityState,
     input_preferences: InputPreferences,
+    client_input_preferences: ClientInputPreferences,
+    input_preference_world_root: Option<std::path::PathBuf>,
     interactive_input: MonoInteractiveInputRouter,
     touch: TouchInputAdapter,
     ui_touch_id: Option<u64>,
@@ -370,6 +373,27 @@ struct AndroidGpuState {
 
 impl AndroidGpuState {
     fn new(window: Arc<Window>, startup: AndroidStartupOptions) -> Result<Self> {
+        let input_preference_world_root = startup.scene.world_root.clone();
+        let client_input_preferences =
+            match mclone_app_runtime::input_preferences::load_native_input_preferences(
+                input_preference_world_root.as_deref(),
+            ) {
+                Ok(preferences) => preferences,
+                Err(error) => {
+                    log::warn!("Android input preferences unavailable: {error:#}");
+                    ClientInputPreferences::default()
+                }
+            };
+        let mut input_preferences = InputPreferences::AUTO;
+        input_preferences.preferred_scheme = client_input_preferences.controller.preferred_input;
+        input_preferences.touch_controls = client_input_preferences.touch_controls_mode;
+        let interactive_input = MonoInteractiveInputRouter::with_controller_preferences(
+            &client_input_preferences.controller,
+        );
+        let touch = TouchInputAdapter::with_settings(TouchInputSettings {
+            look_sensitivity: client_input_preferences.touch_look_sensitivity,
+            ..TouchInputSettings::default()
+        });
         let size = window.inner_size();
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             backends: wgpu::Backends::VULKAN,
@@ -503,9 +527,11 @@ impl AndroidGpuState {
                 touch: true,
                 ..InputCapabilities::NONE
             }),
-            input_preferences: InputPreferences::AUTO,
-            interactive_input: MonoInteractiveInputRouter::new(),
-            touch: TouchInputAdapter::new(),
+            input_preferences,
+            client_input_preferences,
+            input_preference_world_root,
+            interactive_input,
+            touch,
             ui_touch_id: None,
             frame_timing: FrameTimingStats::default(),
             frame_pipeline: FramePipelineAccountant::new(xr_frame_pipeline_accounting_config(
@@ -900,6 +926,7 @@ impl AndroidGpuState {
             self.touch
                 .set_look_sensitivity(settings.clamped_look_sensitivity());
         }
+        self.persist_input_preferences_if_changed();
         if disposition.clear_transient_input || effects.outcome.quit_to_title {
             self.clear_flat_gameplay_input();
         }
@@ -907,6 +934,29 @@ impl AndroidGpuState {
             handled: disposition.handled,
             exit: effects.outcome.exit,
         }
+    }
+
+    fn persist_input_preferences_if_changed(&mut self) {
+        let mut current = self.client_input_preferences.clone();
+        current.touch_look_sensitivity = self.touch.settings.look_sensitivity;
+        current.touch_controls_mode = self.input_preferences.touch_controls;
+        let current = current.normalized();
+        if current == self.client_input_preferences {
+            return;
+        }
+        match mclone_app_runtime::input_preferences::store_native_input_preferences(
+            self.input_preference_world_root.as_deref(),
+            &current,
+        ) {
+            Ok(true) => {}
+            Ok(false) => {
+                log::debug!("Android input preferences have no configured storage path");
+            }
+            Err(error) => {
+                log::warn!("failed to store Android input preferences: {error:#}");
+            }
+        }
+        self.client_input_preferences = current;
     }
 
     fn handle_keyboard_input(

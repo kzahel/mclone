@@ -307,6 +307,13 @@ poses and XR-only mechanics separately. All platforms still require the
 real-device validation recorded in
 [`topics/controller-input.md`](topics/controller-input.md).
 
+`mclone-app-runtime::ClientInputPreferences` persists the same normalized
+controller tuning, semantic bindings, preferred input, and layout override for
+all interactive hosts. Browser storage uses a schema-1 document with legacy
+touch-key migration; native desktop, Android, and both XR hosts load the atomic
+native document before constructing their shared reducers. Haptic capability
+remains deliberately unadvertised pending physical backend acceptance.
+
 ## Validation Policy
 
 Every supported platform lane has an executable gate. Use `/tmp` for screenshots

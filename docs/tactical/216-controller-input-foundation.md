@@ -468,6 +468,36 @@ Slice 7b applies the native file profile in desktop flat/XR and Android flat/XR,
 then closes the automated ledger without claiming real-device tuning or haptic
 quality.
 
+### Slice 7b — native preference adoption
+
+Implemented on 2026-07-22. One native preference-path helper now loads the
+schema-1 document or a normalized default for desktop flat, desktop XR, flat
+Android, and Android XR. Every host applies the profile before constructing its
+shared controller reducer. Both XR hosts apply identical sensitivity and
+inversion to semantic OpenXR actions and identical complete bindings/tuning to
+their ordinary-controller reducer.
+
+Flat Android initializes touch sensitivity and visibility preference from the
+same document. Touch-option UI changes use the atomic native executor and
+preserve every controller field. Desktop and XR currently have no controller
+settings editor, so they consume externally or previously persisted profiles
+without inventing an app-local options model.
+
+Focused evidence:
+
+```text
+cargo test -p mclone-app-runtime input_preferences: 5 passed
+cargo check -p mclone-native-client --features xr: passed
+pnpm native:android:apk: arm64 debug APK passed
+pnpm native:android-xr:apk: arm64 release APK passed
+```
+
+The first Android XR cross-compile exposed and then closed a missing direct
+shared-input dependency plus an incorrect startup-scope load. The rerun built
+the real Android-only code and release package successfully. No host advertises
+haptic output; real-device bindings, feel, and tactile acceptance remain in the
+hardware-only ledger. Final automated cross-target closeout is still active.
+
 ## Completion Bar
 
 - Every product host consumes one shared semantic action and UI-navigation

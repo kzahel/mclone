@@ -6,7 +6,9 @@ use mclone_app_runtime::frame_pipeline_accounting::FramePipelineAccountant;
 use mclone_app_runtime::frame_render::{FlatScalePresentation, scaled_frame_size};
 use mclone_audio::AudioEngine;
 use mclone_diagnostics::FrameHostKind;
-use mclone_input::{KeyboardKey, MouseWheelDirection, PointerButton, TouchControlsMode};
+use mclone_input::{
+    ControllerInputPreferences, KeyboardKey, MouseWheelDirection, PointerButton, TouchControlsMode,
+};
 use mclone_render::chunk::{ChunkDepthTarget, TexturedSectionRenderOptions};
 use mclone_render::color_profile::RenderConfig;
 use mclone_render::target::RenderFrameContext;
@@ -108,6 +110,7 @@ impl WinitFrameDriver {
         asset_source: &impl mclone_assets::AssetSource,
         start_intent: WindowStartIntent,
         ui_v2_debug_overlay: bool,
+        controller_preferences: &ControllerInputPreferences,
     ) -> Result<Self> {
         let mut initial_scene = scene.clone();
         if start_intent == WindowStartIntent::Menu {
@@ -145,7 +148,9 @@ impl WinitFrameDriver {
         let target_size = [target_size[0].max(1), target_size[1].max(1)];
         Ok(Self {
             host,
-            interactive_input: MonoInteractiveInputRouter::new(),
+            interactive_input: MonoInteractiveInputRouter::with_controller_preferences(
+                controller_preferences,
+            ),
             depth: ChunkDepthTarget::new(device, target_size[0], target_size[1]),
             target_size,
             adaptive_render_admission_budget: scene.adaptive_render_admission_budget,

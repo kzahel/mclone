@@ -666,6 +666,20 @@ fn run_smoke_frames(
             SUBMITTED_FRAME_PROGRESS_TIMEOUT.as_secs_f64()
         );
     }
+    let controller_preferences = match &mode {
+        DesktopXrMode::Clear { .. } => mclone_input::ControllerInputPreferences::default(),
+        DesktopXrMode::Mclone { options } | DesktopXrMode::Real { options, .. } => {
+            match mclone_app_runtime::input_preferences::load_native_input_preferences(
+                options.scene.world_root.as_deref(),
+            ) {
+                Ok(preferences) => preferences.controller,
+                Err(error) => {
+                    println!("desktop XR input preferences unavailable: {error:#}");
+                    mclone_input::ControllerInputPreferences::default()
+                }
+            }
+        }
+    };
     let mut mclone = match mode {
         DesktopXrMode::Clear { .. } => None,
         DesktopXrMode::Mclone { options } => Some(
@@ -701,6 +715,7 @@ fn run_smoke_frames(
         |profile, err| println!("OpenXR binding suggestion unavailable for {profile}: {err:?}"),
     )
     .context("initialize OpenXR controller actions")?;
+    controller_actions.apply_controller_preferences(&controller_preferences);
     println!(
         "OpenXR controller actions: requested binding profiles=simple_controller, oculus_touch, valve_index, htc_vive, microsoft_motion_controller"
     );
@@ -729,7 +744,9 @@ fn run_smoke_frames(
         mclone: &mut mclone,
         controller_actions: &mut controller_actions,
         ordinary_gamepad,
-        ordinary_gamepad_input: XrControllerInputRouter::new(),
+        ordinary_gamepad_input: XrControllerInputRouter::with_controller_preferences(
+            &controller_preferences,
+        ),
         controller_summary: XrControllerInputSummary::default(),
         frame_pipeline_accountant: FramePipelineAccountant::new(
             xr_frame_pipeline_accounting_config(display_refresh.current_rate.map(f64::from)),

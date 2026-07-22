@@ -192,6 +192,28 @@ pub fn native_input_preference_path(world_root: Option<&Path>) -> Option<PathBuf
         .map(|root| root.join("preferences").join(INPUT_PREFERENCE_FILE_NAME))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+pub fn load_native_input_preferences(world_root: Option<&Path>) -> Result<ClientInputPreferences> {
+    let Some(path) = native_input_preference_path(world_root) else {
+        return Ok(ClientInputPreferences::default());
+    };
+    Ok(FileClientInputPreferenceStorage::new(path)
+        .load()?
+        .unwrap_or_default())
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+pub fn store_native_input_preferences(
+    world_root: Option<&Path>,
+    preferences: &ClientInputPreferences,
+) -> Result<bool> {
+    let Some(path) = native_input_preference_path(world_root) else {
+        return Ok(false);
+    };
+    FileClientInputPreferenceStorage::new(path).store(preferences)?;
+    Ok(true)
+}
+
 pub const fn touch_controls_mode_label(mode: TouchControlsMode) -> &'static str {
     match mode {
         TouchControlsMode::Auto => "auto",

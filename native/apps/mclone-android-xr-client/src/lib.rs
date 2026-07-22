@@ -90,6 +90,7 @@ mod android {
         BudgetDecisionPanelReport, FrameAccumulator, FrameHostKind, FramePipelineReport,
         FrameSummaryReport, PercentileMethod, QueuePanelReport, percentile_sorted_ms,
     };
+    use mclone_input::ControllerInputPreferences;
     use mclone_render::chunk::{
         ChunkDepthTarget, ChunkMultiviewDepthTarget, TexturedSectionRecordCacheStats,
         TexturedSectionRecordPrepareStats, TexturedSectionRenderOptions,
@@ -1488,6 +1489,16 @@ mod android {
         xr_render_scale: f32,
         xr_display_refresh_rate: Option<f32>,
     ) -> Result<()> {
+        let controller_preferences =
+            match mclone_app_runtime::input_preferences::load_native_input_preferences(
+                scene_options.world_root.as_deref(),
+            ) {
+                Ok(preferences) => preferences.controller,
+                Err(error) => {
+                    log::warn!("Android XR input preferences unavailable: {error:#}");
+                    ControllerInputPreferences::default()
+                }
+            };
         wait_for_android_resume(app)?;
         let entry = unsafe { xr::Entry::load().context("load OpenXR loader")? };
         entry
@@ -1859,6 +1870,7 @@ mod android {
                 },
             )
             .context("initialize Android XR controller actions")?;
+            controller_actions.apply_controller_preferences(&controller_preferences);
             log::info!(
                 "Android XR controller actions: requested binding profiles=simple_controller, oculus_touch, valve_index, htc_vive, microsoft_motion_controller"
             );
@@ -1900,6 +1912,7 @@ mod android {
                 },
                 &mut terrain,
                 &mut controller_actions,
+                &controller_preferences,
                 session_smoke,
                 perf_seconds,
                 perf_flight,
@@ -1964,6 +1977,7 @@ mod android {
             },
         )
         .context("initialize Android XR controller actions")?;
+        controller_actions.apply_controller_preferences(&controller_preferences);
         log::info!(
             "Android XR controller actions: requested binding profiles=simple_controller, oculus_touch, valve_index, htc_vive, microsoft_motion_controller"
         );
@@ -2020,6 +2034,7 @@ mod android {
             },
             &mut terrain,
             &mut controller_actions,
+            &controller_preferences,
             session_smoke,
             perf_seconds,
             perf_flight,
@@ -3295,6 +3310,7 @@ mod android {
         frame_targets: AndroidXrFrameTargets<'_>,
         terrain: &mut AndroidXrTerrainState,
         controller_actions: &mut OpenXrControllerActions,
+        controller_preferences: &ControllerInputPreferences,
         session_smoke: Option<AndroidXrSessionSmoke>,
         perf_seconds: Option<u64>,
         perf_flight: Option<AndroidXrPerfFlight>,
@@ -3405,7 +3421,9 @@ mod android {
             stats_before_frame: XrFrameStats::default(),
             ordinary_gamepad: AndroidControllerCollector::new(),
             ordinary_gamepad_started_at: Instant::now(),
-            ordinary_gamepad_input: XrControllerInputRouter::new(),
+            ordinary_gamepad_input: XrControllerInputRouter::with_controller_preferences(
+                controller_preferences,
+            ),
         };
         let mut driver = mclone_xr_host::OpenXrFrameDriver::new(
             &graphics.session,

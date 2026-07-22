@@ -1,8 +1,8 @@
 use anyhow::{Context, Result};
 use glam::{Quat, Vec2, Vec3};
 use mclone_input::{
-    TrackedControllerState, XrActionSnapshot, XrControllerSpecificState, XrHand, XrInputFrame,
-    XrInputFrameAssembler, XrSpecificInput,
+    ControllerInputPreferences, TrackedControllerState, XrActionSnapshot,
+    XrControllerSpecificState, XrHand, XrInputFrame, XrInputFrameAssembler, XrSpecificInput,
 };
 use openxr as xr;
 
@@ -35,6 +35,10 @@ pub struct OpenXrControllerActions {
 }
 
 impl OpenXrControllerActions {
+    pub fn apply_controller_preferences(&mut self, preferences: &ControllerInputPreferences) {
+        self.input_assembler.apply_settings(preferences.settings);
+    }
+
     pub fn clear_transient_input(&mut self) {
         self.input_assembler.clear();
     }
