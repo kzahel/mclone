@@ -31,6 +31,36 @@ const GRADIENTS: [[i32; 3]; 16] = [
     [-1, 1, 0],
     [0, -1, -1],
 ];
+const ORIGINAL_GRADIENTS_2D: [[f64; 2]; 16] = [
+    [1.0, 0.0],
+    [0.923_879_532_511_286_7, 0.382_683_432_365_089_8],
+    [
+        std::f64::consts::FRAC_1_SQRT_2,
+        std::f64::consts::FRAC_1_SQRT_2,
+    ],
+    [0.382_683_432_365_089_8, 0.923_879_532_511_286_7],
+    [0.0, 1.0],
+    [-0.382_683_432_365_089_8, 0.923_879_532_511_286_7],
+    [
+        -std::f64::consts::FRAC_1_SQRT_2,
+        std::f64::consts::FRAC_1_SQRT_2,
+    ],
+    [-0.923_879_532_511_286_7, 0.382_683_432_365_089_8],
+    [-1.0, 0.0],
+    [-0.923_879_532_511_286_7, -0.382_683_432_365_089_8],
+    [
+        -std::f64::consts::FRAC_1_SQRT_2,
+        -std::f64::consts::FRAC_1_SQRT_2,
+    ],
+    [-0.382_683_432_365_089_8, -0.923_879_532_511_286_7],
+    [0.0, -1.0],
+    [0.382_683_432_365_089_8, -0.923_879_532_511_286_7],
+    [
+        std::f64::consts::FRAC_1_SQRT_2,
+        -std::f64::consts::FRAC_1_SQRT_2,
+    ],
+    [0.923_879_532_511_286_7, -0.382_683_432_365_089_8],
+];
 
 /// Stable domain separation for original mclone procedural fields.
 ///
@@ -93,12 +123,106 @@ impl ValueNoise2d {
     }
 
     fn lattice_sample(self, x: i32, z: i32) -> f64 {
-        let mut value = (self.seed as u64) ^ self.domain.0;
-        value ^= (x as i64 as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
-        value ^= (z as i64 as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-        let unit = (splitmix64(value) >> 11) as f64 * (1.0 / ((1_u64 << 53) as f64));
+        let unit = (original_lattice_hash(self.seed, self.domain, i64::from(x), i64::from(z)) >> 11)
+            as f64
+            * (1.0 / ((1_u64 << 53) as f64));
         unit * 2.0 - 1.0
     }
+}
+
+/// Smooth gradient-lattice noise for original mclone content.
+///
+/// Unlike [`ValueNoise2d`], lattice hashes select gradient directions and the
+/// corner contribution is a dot product with local displacement. This avoids
+/// interpolating locally planar corner values. `new_periodic` additionally
+/// wraps lattice identity while retaining continuous fractions at a block
+/// period divisible by the lattice scale.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GradientNoise2d {
+    seed: i64,
+    scale: i32,
+    domain: SeedDomain,
+    lattice_period: Option<i64>,
+}
+
+impl GradientNoise2d {
+    pub fn new(seed: i64, domain: SeedDomain, scale: i32) -> Self {
+        assert!(scale > 0, "gradient-noise scale must be positive");
+        Self {
+            seed,
+            scale,
+            domain,
+            lattice_period: None,
+        }
+    }
+
+    pub fn new_periodic(seed: i64, domain: SeedDomain, scale: i32, period_blocks: i32) -> Self {
+        assert!(scale > 0, "gradient-noise scale must be positive");
+        assert!(
+            period_blocks > 0 && period_blocks % scale == 0,
+            "gradient-noise period must be positive and divisible by scale"
+        );
+        Self {
+            seed,
+            scale,
+            domain,
+            lattice_period: Some(i64::from(period_blocks / scale)),
+        }
+    }
+
+    pub fn sample(self, world_x: i32, world_z: i32) -> f64 {
+        self.sample_at(f64::from(world_x), f64::from(world_z))
+    }
+
+    pub fn sample_at(self, world_x: f64, world_z: f64) -> f64 {
+        assert!(
+            world_x.is_finite() && world_z.is_finite(),
+            "gradient-noise coordinates must be finite"
+        );
+        let scaled_x = world_x / f64::from(self.scale);
+        let scaled_z = world_z / f64::from(self.scale);
+        let lattice_x = scaled_x.floor() as i64;
+        let lattice_z = scaled_z.floor() as i64;
+        let fraction_x = scaled_x - lattice_x as f64;
+        let fraction_z = scaled_z - lattice_z as f64;
+        let blend_x = gradient_noise_fade(fraction_x);
+        let blend_z = gradient_noise_fade(fraction_z);
+        let top = value_noise_lerp(
+            self.corner(lattice_x, lattice_z, fraction_x, fraction_z),
+            self.corner(lattice_x + 1, lattice_z, fraction_x - 1.0, fraction_z),
+            blend_x,
+        );
+        let bottom = value_noise_lerp(
+            self.corner(lattice_x, lattice_z + 1, fraction_x, fraction_z - 1.0),
+            self.corner(
+                lattice_x + 1,
+                lattice_z + 1,
+                fraction_x - 1.0,
+                fraction_z - 1.0,
+            ),
+            blend_x,
+        );
+        (value_noise_lerp(top, bottom, blend_z) * std::f64::consts::SQRT_2).clamp(-1.0, 1.0)
+    }
+
+    fn corner(self, lattice_x: i64, lattice_z: i64, offset_x: f64, offset_z: f64) -> f64 {
+        let lattice_x = self
+            .lattice_period
+            .map_or(lattice_x, |period| lattice_x.rem_euclid(period));
+        let lattice_z = self
+            .lattice_period
+            .map_or(lattice_z, |period| lattice_z.rem_euclid(period));
+        let hash = original_lattice_hash(self.seed, self.domain, lattice_x, lattice_z);
+        let gradient = ORIGINAL_GRADIENTS_2D[hash as usize & (ORIGINAL_GRADIENTS_2D.len() - 1)];
+        gradient[0] * offset_x + gradient[1] * offset_z
+    }
+}
+
+fn original_lattice_hash(seed: i64, domain: SeedDomain, x: i64, z: i64) -> u64 {
+    let mut value = (seed as u64) ^ domain.0;
+    value ^= (x as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15);
+    value ^= (z as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    splitmix64(value)
 }
 
 fn splitmix64(mut value: u64) -> u64 {
@@ -110,6 +234,10 @@ fn splitmix64(mut value: u64) -> u64 {
 
 fn value_noise_smoothstep(value: f64) -> f64 {
     value * value * (3.0 - 2.0 * value)
+}
+
+fn gradient_noise_fade(value: f64) -> f64 {
+    value * value * value * (value * (value * 6.0 - 15.0) + 10.0)
 }
 
 fn value_noise_lerp(from: f64, to: f64, amount: f64) -> f64 {
@@ -947,6 +1075,42 @@ mod tests {
             ]
         );
         assert_eq!(domain.derive(12_345), -2_746_967_541_679_357_248);
+    }
+
+    #[test]
+    fn gradient_noise_is_deterministic_and_signed_across_the_origin() {
+        let domain = SeedDomain::new(0x6d63_6f76_6d64_7431);
+        let noise = GradientNoise2d::new(-98_765, domain, 32);
+        let coordinates = [
+            (-71.5, -53.25),
+            (-47.5, -33.25),
+            (-23.5, -11.25),
+            (-1.0, -1.0),
+            (0.0, 0.0),
+            (8.5, 13.25),
+            (17.5, 29.25),
+            (40.5, 61.25),
+            (72.5, 93.25),
+        ];
+        let samples = coordinates.map(|(x, z)| noise.sample_at(x, z));
+
+        assert!(samples.iter().any(|sample| *sample < 0.0));
+        assert!(samples.iter().any(|sample| *sample > 0.0));
+        assert_eq!(samples[4].to_bits(), 0.0_f64.to_bits());
+        assert!(samples.iter().all(|sample| (-1.0..=1.0).contains(sample)));
+        assert_eq!(samples, coordinates.map(|(x, z)| noise.sample_at(x, z)));
+    }
+
+    #[test]
+    fn periodic_gradient_noise_repeats_at_its_block_period() {
+        let noise =
+            GradientNoise2d::new_periodic(12_345, SeedDomain::new(0x6d63_6f76_6d64_7432), 8, 6_144);
+
+        for (x, z) in [(-8_191.75, -129.5), (-7.25, 13.75), (127.5, 4_097.125)] {
+            let expected = noise.sample_at(x, z);
+            assert!((noise.sample_at(x + 6_144.0, z) - expected).abs() < 1.0e-12);
+            assert!((noise.sample_at(x, z - 6_144.0) - expected).abs() < 1.0e-12);
+        }
     }
 
     #[derive(Debug, Deserialize)]

@@ -1,9 +1,9 @@
 use mclone_core::ChunkPos;
 
-use crate::noise::{SeedDomain, ValueNoise2d};
+use crate::noise::{GradientNoise2d, SeedDomain, ValueNoise2d};
 
 pub const MCLONE_OVERWORLD_SEA_LEVEL: i32 = 63;
-pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-5";
+pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-6";
 pub const MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS: i32 = 2;
 
 const CONTINENT_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_636f_6e31);
@@ -135,8 +135,8 @@ pub struct McloneOverworldSampler {
     ruggedness_detail: ValueNoise2d,
     ridge_large: ValueNoise2d,
     ridge_detail: ValueNoise2d,
-    mountain_detail_large: ValueNoise2d,
-    mountain_detail_fine: ValueNoise2d,
+    mountain_detail_large: GradientNoise2d,
+    mountain_detail_fine: GradientNoise2d,
 }
 
 impl McloneOverworldSampler {
@@ -168,12 +168,12 @@ impl McloneOverworldSampler {
             ),
             ridge_large: ValueNoise2d::new(seed, RIDGE_LARGE_DOMAIN, RIDGE_LARGE_SCALE),
             ridge_detail: ValueNoise2d::new(seed, RIDGE_DETAIL_DOMAIN, RIDGE_DETAIL_SCALE),
-            mountain_detail_large: ValueNoise2d::new(
+            mountain_detail_large: GradientNoise2d::new(
                 seed,
                 MOUNTAIN_DETAIL_LARGE_DOMAIN,
                 MOUNTAIN_DETAIL_LARGE_SCALE,
             ),
-            mountain_detail_fine: ValueNoise2d::new(
+            mountain_detail_fine: GradientNoise2d::new(
                 seed,
                 MOUNTAIN_DETAIL_FINE_DOMAIN,
                 MOUNTAIN_DETAIL_FINE_SCALE,
@@ -186,19 +186,32 @@ impl McloneOverworldSampler {
             + self.continent_medium.sample(world_x, world_z) * 0.30
             + self.continent_detail.sample(world_x, world_z) * 0.15)
             .clamp(-1.0, 1.0);
-        let relief = (self.relief_large.sample(world_x, world_z) * 0.50
-            + self.relief_detail.sample(world_x, world_z) * 0.30
-            + self.relief_fine.sample(world_x, world_z) * 0.20)
-            .clamp(-1.0, 1.0);
-        let ruggedness = (self.ruggedness_large.sample(world_x, world_z) * 0.72
-            + self.ruggedness_detail.sample(world_x, world_z) * 0.28)
-            .clamp(-1.0, 1.0);
+        let relief_large = self.relief_large.sample(world_x, world_z);
+        let relief_detail = self.relief_detail.sample(world_x, world_z);
+        let relief_fine = self.relief_fine.sample(world_x, world_z);
+        let relief =
+            (relief_large * 0.50 + relief_detail * 0.30 + relief_fine * 0.20).clamp(-1.0, 1.0);
+        let ruggedness_large = self.ruggedness_large.sample(world_x, world_z);
+        let ruggedness_detail = self.ruggedness_detail.sample(world_x, world_z);
+        let ruggedness = (ruggedness_large * 0.72 + ruggedness_detail * 0.28).clamp(-1.0, 1.0);
         let ridge_source = self.ridge_large.sample(world_x, world_z) * 0.78
             + self.ridge_detail.sample(world_x, world_z) * 0.22;
         let ridge_linear = (1.0 - ridge_source.abs()).clamp(0.0, 1.0);
         let ridges = ridge_linear * ridge_linear;
-        let mountain_detail = (self.mountain_detail_large.sample(world_x, world_z) * 0.55
-            + self.mountain_detail_fine.sample(world_x, world_z) * 0.45)
+        let world_x = f64::from(world_x);
+        let world_z = f64::from(world_z);
+        let large_warp_x = relief_detail * 18.0 + relief_fine * 4.0;
+        let large_warp_z = ruggedness_detail * 18.0 - relief_fine * 4.0;
+        let fine_warp_x = -ruggedness_detail * 7.0 + relief_detail * 3.0;
+        let fine_warp_z = relief_fine * 7.0 + relief_detail * 3.0;
+        let mountain_detail = (self
+            .mountain_detail_large
+            .sample_at(world_x + large_warp_x, world_z + large_warp_z)
+            * 0.70
+            + self
+                .mountain_detail_fine
+                .sample_at(world_x + fine_warp_x, world_z + fine_warp_z)
+                * 0.30)
             .clamp(-1.0, 1.0);
         McloneOverworldTerrainSample {
             continentalness,
