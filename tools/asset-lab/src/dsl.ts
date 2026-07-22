@@ -1934,15 +1934,19 @@ function validateAsciiTexture(name: string, texture: AsciiTextureSpec, errors: s
 
 export function figureAlphaModes(asset: FigureAsset): FigureAlphaMode[] {
   const modes = new Set<FigureAlphaMode>();
-  for (const material of Object.values(asset.materials)) {
-    modes.add(material.alphaMode ?? "opaque");
-  }
-  if (
-    Object.values(asset.textures).some((texture) =>
-      Object.values(texture.palette).some(paletteColorHasTransparency)
-    )
-  ) {
-    modes.add("mask");
+  for (const part of asset.parts) {
+    if (part.primitive.kind === "box") {
+      for (const faceName of BOX_FACE_NAMES) {
+        const face = part.primitive.faces?.[faceName];
+        modes.add(effectiveAlphaMode(
+          asset,
+          face?.material ?? part.material,
+          face?.texture ?? part.texture,
+        ));
+      }
+    } else {
+      modes.add(effectiveAlphaMode(asset, part.material, part.texture));
+    }
   }
   if (modes.size === 0) {
     modes.add("opaque");
@@ -1953,6 +1957,26 @@ export function figureAlphaModes(asset: FigureAsset): FigureAlphaMode[] {
 export function paletteColorHasTransparency(value: string): boolean {
   return value === TRANSPARENT_PALETTE_COLOR
     || (/^#[0-9a-fA-F]{8}$/u.test(value) && value.slice(7, 9).toLocaleLowerCase() !== "ff");
+}
+
+export function asciiTextureHasTransparency(texture: AsciiTextureSpec): boolean {
+  return texture.pixels.some((row) =>
+    [...row].some((character) => paletteColorHasTransparency(texture.palette[character] ?? ""))
+  );
+}
+
+function effectiveAlphaMode(
+  asset: FigureAsset,
+  materialName: string | undefined,
+  textureName: string | undefined,
+): FigureAlphaMode {
+  const declaredMode = materialName === undefined
+    ? "opaque"
+    : asset.materials[materialName]?.alphaMode ?? "opaque";
+  const texture = textureName === undefined ? undefined : asset.textures[textureName];
+  return declaredMode === "opaque" && texture !== undefined && asciiTextureHasTransparency(texture)
+    ? "mask"
+    : declaredMode;
 }
 
 function validatePrimitive(part: PartSpec, errors: string[]): void {

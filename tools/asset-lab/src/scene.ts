@@ -9,7 +9,7 @@ import {
   type MaterialSpec,
   type PartSpec,
   type Vec3,
-  paletteColorHasTransparency,
+  asciiTextureHasTransparency,
 } from "./dsl";
 
 export interface FigureScene {
@@ -333,7 +333,7 @@ function asciiTextureToCanvasTexture(
   texture.colorSpace = THREE.SRGBColorSpace;
   texture.flipY = true;
   return {
-    hasTransparency: Object.values(palette).some(paletteColorHasTransparency),
+    hasTransparency: asciiTextureHasTransparency({ palette, pixels }),
     texture,
   };
 }

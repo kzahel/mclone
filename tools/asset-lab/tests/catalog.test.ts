@@ -6,6 +6,7 @@ import path from "node:path";
 import test from "node:test";
 import { buildWebCatalog } from "../src/build-web-catalog";
 import { parseAnimalCatalog } from "../src/catalog-model";
+import { figureAlphaModes, type FigureAsset } from "../src/dsl";
 import { discoverCanonicalFigureSources } from "../src/discover-figures";
 import { FIRST_PARTY_FIGURES } from "../src/first-party-figures";
 import { assetLabRoot } from "../src/vite-figure-path";
@@ -97,6 +98,38 @@ test("builds deterministic canonical JSON catalogue artifacts", async () => {
   } finally {
     await fs.rm(tempRoot, { force: true, recursive: true });
   }
+});
+
+test("reports alpha modes from rendered faces rather than unused declarations", () => {
+  const asset: FigureAsset = {
+    schemaVersion: 1,
+    name: "alpha-catalog-test",
+    materials: {
+      smooth: { color: "#ffffff", alphaMode: "blend" },
+      unused: { color: "#ffffff", alphaMode: "mask" },
+    },
+    textures: {
+      translucent: {
+        palette: { ".": "transparent", "#": "#ffffff80" },
+        pixels: [".#"],
+      },
+      unused: {
+        palette: { ".": "transparent", "#": "#ffffff" },
+        pixels: ["##"],
+      },
+    },
+    parts: [{
+      name: "body",
+      material: "smooth",
+      texture: "translucent",
+      primitive: { kind: "box", size: [1, 1, 1] },
+    }],
+    clips: {},
+  };
+
+  assert.deepEqual(figureAlphaModes(asset), ["blend"]);
+  delete asset.parts[0]!.material;
+  assert.deepEqual(figureAlphaModes(asset), ["mask"]);
 });
 
 test("discovers canonical examples without the legacy rounded archive", async () => {
