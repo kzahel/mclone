@@ -15,11 +15,11 @@ gates; real-device acceptance remains open.
 [`Tactical 217`](../tactical/217-local-participant-foundation.md) completed the
 judgment-free participant/input/client/layout foundation on 2026-07-22 while
 stopping before product couch enablement and unresolved profile/cache policy.
-Active [`Tactical 219`](../tactical/219-live-auxiliary-split-mode.md) promotes
-that layout into a menu-controlled live single-player auxiliary view through
-one Rust scene/render path for desktop, browser, and flat Android. Browser
-TypeScript remains unaware of split semantics, and authoritative player-two
-support remains outside the slice.
+[`Tactical 219`](../tactical/219-live-auxiliary-split-mode.md) completed the
+first live consumer on 2026-07-22: a menu-controlled single-player auxiliary
+view through one Rust scene/render path for desktop, browser, and flat Android.
+Browser TypeScript remains unaware of split semantics, and authoritative
+player-two support remains outside the slice.
 
 This topic owns local participant cardinality, participant-to-input assignment,
 participant-versus-view separation, shared split-screen presentation policy,
@@ -166,6 +166,16 @@ presentation:
   stereo-eye identity remains XR-only;
 - `mclone-render-session` owns a validated, safe-area-aware 1-4 rectangle
   layout with explicit horizontal and vertical two-pane constructors; and
+- `mclone-app-runtime` owns pane-local color/depth targets and the shared GPU
+  compositor, while all three flat product hosts consume the same layout and
+  presenter without giving their platform rims split policy;
+- the shared Debug menu can cycle a session-local auxiliary view through Off,
+  Left / Right, and Top / Bottom. Unobscured gameplay prepares once and renders
+  an ordinary primary HUD view plus a separately culled elevated world-only
+  view; full-screen menus and visible embedded previews suppress composition;
+- headed WebGPU, native horizontal/vertical, and Android arm64 packaging gates
+  pass, while a browser ownership lock keeps split semantics out of production
+  TypeScript; and
 - the scene's current camera/interaction/player-model state is contained in a
   cardinality-one participant envelope. The inspected scripted offscreen proof
   drives two participant-local semantic sessions and renders independent
@@ -176,14 +186,15 @@ change:
 
 - one `DrawableWorldSlot` still retains exactly one participant presentation
   envelope;
-- the shipping multi-flat entry still targets complete textures rather than
-  applying the new viewport layout to a presentation surface, and rejects
-  simultaneous retained embedded-world preview composition;
+- the live multi-flat consumer is still an auxiliary two-view diagnostic, not
+  two participant presentations, and intentionally rejects simultaneous
+  retained embedded-world preview composition;
 - `LocalIntegratedSceneRuntime` owns one `SingleViewRuntime` and one
   `IntegratedRunnerConnection`;
 - the local profile layer exposes one installation/browser-origin profile,
   not a local participant/profile group;
-- flat screen-space HUD/menu state is assembled for one mono view; and
+- flat HUD/menu state still belongs to the one ordinary participant; the live
+  auxiliary pane deliberately has no HUD or menu ownership; and
 - product hosts still arbitrate multiple ordinary controllers into one local
   player's semantic input session rather than assigning them to participants.
 
@@ -488,9 +499,10 @@ The sequence is intentionally staged so each milestone is useful on its own:
    already separate. Tactical 217 added validated viewport rectangles, safe
    areas, explicit horizontal/vertical plans, and a diagnostic compositor that
    prepares once and renders twice without changing mono. Shipping surface
-   scissor/composition and a primary-HUD/auxiliary-world-only debug policy are
-   active in Tactical 219; authoritative per-participant HUD policy and
-   retained-preview composition remain later consumer-driven follow-ups.
+   scissor/composition and a primary-HUD/auxiliary-world-only debug policy were
+   completed in Tactical 219 across desktop, WebGPU, and flat Android;
+   authoritative per-participant HUD policy and retained-preview composition
+   remain later consumer-driven follow-ups.
 3. **Participantize singleton client-experience state.** Tactical 217 completed
    the bounded participant group, cardinality-one
    camera/interaction/player-model envelope, and scripted source assignment to
@@ -535,14 +547,14 @@ Shared contract tests must cover:
   two views.
 
 Rendered acceptance began with the inspected Tactical 217 single-player
-auxiliary proof. It established horizontal and vertical layouts with
-aspect-correct independent cameras, separate depth targets, and layout-bound
-compositing. Remaining product acceptance includes:
+auxiliary proof. Tactical 219 promoted it to the live shared GPU presenter and
+proved horizontal/vertical native pixels plus a menu-selected headed WebGPU
+frame with aspect-correct cameras, separate depth, primary-only HUD, exact
+layout-bound composition, and an unchanged direct mono branch. Remaining
+product acceptance includes:
 
-- shipping viewport/scissor containment and view-local effects;
-- per-pane HUD policy without cross-pane clipping;
-- one-view pixels and resource/cost behavior unchanged when auxiliary views
-  are absent;
+- authoritative per-participant HUD, owner state, and view-local effects;
+- live resize/orientation and controller-first interaction on target hardware;
 - two-player colocated, opposing-view, and separated captures;
 - 3/4-player layout and reduced-pane UI; and
 - flat plus synthetic/real XR, including full-frame multiview for enabled
@@ -583,8 +595,9 @@ changing shared participant semantics.
   — bounded participant ownership, isolated semantic input, and the ordinary
   local-client correctness harness.
 - [`../../native/crates/mclone-render-session/src/flat_surface_layout.rs`](../../native/crates/mclone-render-session/src/flat_surface_layout.rs)
-  and [`../../native/apps/mclone-native-client/src/offscreen_scene_host.rs`](../../native/apps/mclone-native-client/src/offscreen_scene_host.rs)
-  — validated flat-surface layout and the scripted diagnostic compositor.
+  and [`../../native/crates/mclone-app-runtime/src/frame_render.rs`](../../native/crates/mclone-app-runtime/src/frame_render.rs)
+  — validated flat-surface layout, pane-local attachments, and the shared GPU
+  compositor used by live flat hosts and offscreen acceptance.
 - [`../../native/crates/mclone-scene/src/lib.rs`](../../native/crates/mclone-scene/src/lib.rs)
   and [`../../native/crates/mclone-scene/src/mono.rs`](../../native/crates/mclone-scene/src/mono.rs)
   — cardinality-one participant presentation ownership and mono frame path.

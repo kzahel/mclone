@@ -1,6 +1,6 @@
 # Tactical 219: Live Auxiliary Split Mode
 
-Status: active 2026-07-22.
+Status: completed 2026-07-22.
 
 Topic: [`local-couch-multiplayer`](../topics/local-couch-multiplayer.md).
 
@@ -138,6 +138,76 @@ milestone.
 - Mono remains the allocation-free, one-view fast path.
 - Product TypeScript contains no split semantic vocabulary.
 - Inspected native and browser pixels plus affected automated gates pass.
+
+## Outcome
+
+The tactical completed without crossing any stop condition. Flat gameplay now
+has one session-local `Off -> Left / Right -> Top / Bottom -> Off` setting in
+the shared Debug menu. Desktop winit, browser WebGPU, and flat Android ask the
+same Rust scene owner for a validated layout and render the same primary HUD
+view plus deterministic world-only follow view through a shared GPU presenter.
+Menus restore the full surface and XR projects the option unavailable.
+
+The ordinary player remains the only participant, client endpoint, input
+owner, interaction source, audio listener, and authoritative interest source.
+The auxiliary camera does not widen residency. A visible embedded-world
+preview temporarily suppresses the split because combining those composition
+modes still needs an explicit product contract.
+
+Production browser TypeScript did not gain split vocabulary or state. It
+continues to size the canvas, collect DOM facts, and invoke the Rust frame
+boundary. Only the query-gated `.mjs` validation harness knows how to click the
+setting and classify the resulting pixels.
+
+Implementation commits:
+
+- `0e39ca8a` — tactical and topic contract;
+- `06ac9663` — shared setting, capability projection, menu, and camera policy;
+- `556fc10c` — shared GPU presentation, three flat-host integrations, and
+  rendered acceptance.
+
+## Validation Evidence
+
+- Shared unit suites passed: 306 `mclone-app-runtime`, 130 `mclone-scene`, and
+  97 `mclone-ui` tests. These include exact odd-sized horizontal/vertical
+  rectangles, one-to-four pane attachment specs, menu cycling, flat/XR
+  capability projection, follow-camera aspect, prepare-once/render-many, and
+  mono-path policy.
+- The native-client binary suite passed all 171 tests. The dual-view capture
+  now uses the live GPU presenter and reported one shared preparation, two
+  rendered views, primary-only HUD commands, and 125,291 differing paired
+  pane pixels. Inspected outputs are
+  `/tmp/mclone-aux-split-20260722/horizontal.png` and
+  `/tmp/mclone-aux-split-20260722/vertical.png`.
+- The full `mclone-web-client` unit and ownership-lock suite passed. Its source
+  lock rejects split mode, pane count, layout, and presentation semantics in
+  production TypeScript.
+- `cargo check -p mclone-web-client --target wasm32-unknown-unknown` passed.
+  `pnpm native:web:auxiliary-split-smoke` selected the option through the real
+  menu on headed Wayland WebGPU, found 460,346 differing paired pixels and no
+  transparent interior pixels, and wrote its report to
+  `/tmp/mclone-native-web-auxiliary-split.json`. The inspected menu and frame
+  captures are `/tmp/mclone-native-web-auxiliary-split-menu.png` and
+  `/tmp/mclone-native-web-auxiliary-split-horizontal.png`.
+- `pnpm native:android:apk` compiled the actual Android arm64 adapter and
+  assembled `android/app/build/outputs/apk/debug/app-debug.apk` successfully.
+- The full `cargo fmt --all -- --check` gate passed after mechanical commit
+  `e34418dc` corrected an unrelated pre-existing worldgen test reflow.
+  JavaScript passes `node --check`, and `git diff --check` passed before each
+  implementation commit.
+
+No physical gamepad, Android device, Steam Deck, or console hardware was
+available. Those remain hardware acceptance rather than a prerequisite for
+this single-participant presentation mode.
+
+## Deferred Product Gates
+
+This is an auxiliary debug/product-development feature, not couch multiplayer.
+The next authoritative two-player slice still requires explicit decisions on
+participant profiles, device assignment/join UX, per-player HUD and menu
+ownership, pause semantics, audio listening, observer interest, and shared
+client-resource ownership. Real controller acceptance should precede claiming
+that controller-first couch onboarding is usable.
 
 ## Stop Conditions
 

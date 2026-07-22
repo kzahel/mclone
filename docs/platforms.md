@@ -22,6 +22,15 @@ offscreen flat and headset-free stereo validation hosts:
 | Flat Android | first-class mobile target | `native/apps/mclone-android-client` plus [`../android/`](../android/) own the non-XR `NativeActivity` subclass, Vulkan surface/lifecycle, startup properties, raw touch translation, and source-aware gamepad collection over the shared Mono scene host. Standard controller keys/axes route through the shared semantic session without entering `winit` as touch. Validated on the `jstorrent-tablet` AVD with real terrain/HUD pixels, shared touch movement/look plus sneak, gamepad bridge/JNI packaging, populated frame-pipeline overlay, New World replacement, and background/foreground surface rebuild. Physical controller acceptance remains open. The three sentinel lanes are `native:android:avd-smoke`, `:avd-touch-smoke`, and `:avd-session-smoke`. |
 | Web/WASM | first-class browser target | `native/apps/mclone-web-client` builds for `wasm32-unknown-unknown` and drives the shared `McloneSceneHost` through a thin rAF/canvas/DOM rim. Local worker, IndexedDB local-world, and remote WebSocket modes share that owner while browser workers, promises, WebGPU targets, mobile controls, and deployment remain platform glue. The full behavioral matrix is documented in [`native-web.md`](native-web.md). |
 
+Desktop flat, flat Android, and Web/WASM now share an opt-in single-player
+auxiliary split diagnostic under `Pause > Options > Debug > Auxiliary View`.
+Rust owns its Off/Left-Right/Top-Bottom setting, layout, cameras, primary-only
+HUD policy, prepare-once/render-twice scene frame, and GPU compositor. Platform
+hosts only retain surface/presentation resources; production browser
+TypeScript has no split semantics. Menus remain full-surface, XR projects the
+setting unavailable, and this does not claim authoritative couch multiplayer.
+See [`Tactical 219`](tactical/219-live-auxiliary-split-mode.md).
+
 Additional host lane:
 
 | Host | Status | Notes |

@@ -105,6 +105,10 @@ pnpm native:web:serve
 # Validate the interactive browser app with Playwright screenshots in /tmp.
 pnpm native:web:app-smoke
 
+# Select the shared auxiliary view through the real Rust Debug menu and inspect
+# its full-surface menu plus primary-HUD/elevated-world WebGPU split captures.
+pnpm native:web:auxiliary-split-smoke
+
 # Apply the authored-plus-generated logical selection through the shared host,
 # reinitialize the resident compiler at the same epoch, and capture the native
 # Asset Packs screen under /tmp.
@@ -135,6 +139,7 @@ pnpm native:web:thread-smoke
 pnpm native:web:canvas-smoke
 pnpm native:web:chunk-smoke
 pnpm native:web:app-smoke
+pnpm native:web:auxiliary-split-smoke
 pnpm native:web:catalog-smoke
 pnpm native:web:mobile-smoke
 pnpm native:web:block-edit-probe
