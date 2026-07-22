@@ -111,7 +111,7 @@ test("filters and inspects typed creature classifications", async ({ page }) => 
 
   const groupFilter = page.getByRole("combobox", { name: "Group" });
   await groupFilter.selectOption("monster");
-  await expect(page.locator(".resultCount")).toHaveText("9 figures");
+  await expect(page.locator(".resultCount")).toHaveText("12 figures");
   await expect(page.locator("[data-catalog-name='skeleton']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='cutout_skeleton']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='slime']")).toBeVisible();
@@ -137,13 +137,28 @@ test("filters and inspects typed creature classifications", async ({ page }) => 
 
   const dispositionFilter = page.getByRole("combobox", { name: "Disposition" });
   await dispositionFilter.selectOption("hostile");
-  await expect(page.locator(".resultCount")).toHaveText("9 figures");
+  await expect(page.locator(".resultCount")).toHaveText("12 figures");
+  await expect(page.locator("[data-catalog-name='witch']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='werewolf']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='grave_crawler']")).toBeVisible();
   await dispositionFilter.selectOption("all");
   await groupFilter.selectOption("all");
 
   const search = page.getByRole("searchbox", { name: "Search" });
+  await search.fill("scary");
+  await expect(page.locator(".resultCount")).toHaveText("12 figures");
+  await expect(page.locator("[data-catalog-name='witch']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='werewolf']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='grave_crawler']")).toBeVisible();
+  await page.locator("[data-catalog-name='witch']").click();
+  await expect(page.locator("canvas[data-figure='witch']")).toBeVisible();
+  await page.screenshot({
+    path: "/tmp/mclone-scary-four/catalogue-scary-filter.png",
+    fullPage: true,
+  });
+
   await search.fill("undead");
-  await expect(page.locator(".resultCount")).toHaveText("5 figures");
+  await expect(page.locator(".resultCount")).toHaveText("6 figures");
   await expect(page.locator("[data-catalog-name='skeleton']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='cutout_skeleton']")).toBeVisible();
 

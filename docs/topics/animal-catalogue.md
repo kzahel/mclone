@@ -3,9 +3,10 @@
 Topic: `animal-catalogue`
 
 Status: complete and live-accepted 2026-07-21, then extended locally on
-2026-07-22 with typed creature classification, classification filters, the
-first fantasy/monster wave, and a binary-alpha Cutout Skeleton proof. The
-read-only, production-built Asset Lab
+2026-07-22 with typed creature classification, classification filters, three
+fantasy/monster waves, and binary and fractional alpha proofs. The current
+local inventory contains 182 canonical figures and 250 clips. The read-only,
+production-built Asset Lab
 catalogue is available at
 `https://mclone.kzahel.com/animals/`, delivered by the existing native-web
 bundle and after-main-push deployment path.
@@ -176,6 +177,9 @@ occur.
    and Gargoyle fantasy/monster wave.
 10. [x] Add Cutout Skeleton as a distinct searchable alpha-cutout demo and
     retain the deeper separate-rib Skeleton for direct comparison.
+11. [x] Continue the hostile/scary roster through Zombie, Mimic, Scarecrow,
+    Witch, Werewolf, and Grave Crawler while retaining explicit typed
+    disposition and searchable theme metadata.
 
 ## Local Acceptance Evidence
 
@@ -244,6 +248,16 @@ variants. The catalogue capture is
 `/tmp/mclone-creature-catalogue-alpha-cutout.png`; clean sheets, MP4 reviews,
 and the semantic-versus-native prepared comparison are under
 `/tmp/mclone-asset-lab/binary-cutout/`.
+
+The current scary-creature follow-ups build 182 canonical figures, 250 clips,
+and 3,921 parts. Every new figure authors `hostile` disposition and the
+`scary` theme instead of relying on inferred catalogue classification.
+Production-subpath Playwright proves that the Monster and Hostile filters each
+return all 12 intended figures, that searching `scary` returns the same 12,
+and that Witch, Werewolf, and Grave Crawler are visible through both routes.
+The focused catalogue capture is
+`/tmp/mclone-scary-four/catalogue-scary-filter.png`; clean sheets and six MP4
+reviews for the latest three figures are under `/tmp/mclone-scary-four/`.
 
 ## Live Acceptance Evidence
 

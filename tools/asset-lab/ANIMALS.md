@@ -397,8 +397,8 @@ should be a high-value early wave for a Minecraft-style mob set.
 | **Humanoid pig (pigman / orc)** | P1 | ☐ | piglin-style, zombified, brute, armored, tusked | **the one you asked for** — pig snout/ears on the folk biped + weapon |
 | Goblin | P2 | ☐ | scout, shaman | small biped |
 | Orc / Ogre / Troll | P2 | ☐ | orc (medium), ogre/troll (oversized) | big-biped scale of the rig |
-| Witch / Warlock | P2 | ☐ | witch, hooded cultist, necromancer | caster pose; staff/potion |
-| Werewolf | P2 | ☐ | — | hostile `wolffolk`; ties to Canids |
+| Witch / Warlock | P2 | ✅ | witch, hooded cultist, necromancer | `examples/witch` — crooked 27-box bog witch with binary-cutout ragged robe and hat, raised forked hex staff, stalking gait, and separate spell-cast action |
+| Werewolf | P2 | ✅ | — | `examples/werewolf` — hunched 26-box lycanthrope with digitigrade legs, oversized claws, high tail, predatory stalk, and separate moon-howl action |
 | Minotaur | P3 | ☐ | — | hostile `bullfolk`; horns + axe |
 | Vampire | P3 | ☐ | — | cape; can pair with Bat |
 | Mummy | P3 | ☐ | — | wrapped reskin of zombie rig |
@@ -412,6 +412,7 @@ should be a high-value early wave for a Minecraft-style mob set.
 |---|---|---|---|---|---|
 | Slime / blob | P2 | ✅ | ST | small, medium, large; magma/acid | `examples/slime` — grounded restless ooze plus separate airborne acid-slam action |
 | Creeper-like crawler | P2 | ☐ | Q | — | legless/4-stub silent stalker |
+| Grave Crawler | P2 | ✅ | Q | bone, moss, ember-lit | `examples/grave_crawler` — low 23-box grave-born crawler with a plated ribcage, split skull, four dragging limbs, grounded scuttle, and separate maw-burst action |
 | Giant spider | P2 | ☐ | C | normal, cave (small) | hostile build of Spider; needs N-leg crawl |
 | Ghost / wraith | P2 | ✅ | ST | dithered, smoothly blended | `examples/ghost_dither` and `examples/ghost_translucent` share one 15-box spectral rig and motion set; the pair proves depth-writing screen-door coverage against a depth-prepass blend with additive highlights |
 | Golem | P2 | ☐ | B | stone, iron, clay | heavy biped; can be friendly too |
@@ -433,8 +434,8 @@ should be a high-value early wave for a Minecraft-style mob set.
 
 ## Coverage snapshot
 
-- **Canonical box-only figures:** 179 sources and 244 clips after the Zombie,
-  Mimic, and binary-cutout Scarecrow scary-creature batch.
+- **Canonical box-only figures:** 182 sources and 250 clips after the Witch,
+  Werewolf, and Grave Crawler scary-creature batch.
 - **First hostile fantasy wave:** Skeleton, Slime, and Gargoyle, each with
   explicit typed catalogue classification and a separate special action.
 - **Binary-alpha proof:** Cutout Skeleton keeps a full torso cuboid and forms
@@ -445,6 +446,9 @@ should be a high-value early wave for a Minecraft-style mob set.
 - **Second hostile fantasy wave:** Zombie, Mimic, and Scarecrow add an undead
   shambler, deceptive prop monster, and rooted construct with six independently
   reviewed continuous/action clips.
+- **Third hostile fantasy wave:** Witch, Werewolf, and Grave Crawler add a
+  cutout-clothed caster, digitigrade beast, and low non-humanoid horror. All
+  three declare hostile disposition and the searchable `scary` theme.
 - **Rounded-to-box migration complete (13):** piglet, sheep, dog, cat,
   bearfolk, lionfolk, cow, horse, goat, wolf, fox, bear, and lion.
 - **Retained rounded A/B archive:** all 18 former mixed-primitive sources live
