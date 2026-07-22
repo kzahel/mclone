@@ -6,8 +6,8 @@ Status: complete and live-accepted 2026-07-21, then extended locally on
 2026-07-22 with typed creature classification, classification filters, three
 fantasy/monster waves, a first living-growth wave, binary and fractional alpha
 proofs, fixed planar cards, a two-figure fantasy-fauna follow-up, and a gentler
-recognizable-folklore wave followed by three anatomy-led trios. The current
-local inventory contains 199 canonical figures and 284 clips. The
+recognizable-folklore wave followed by four anatomy-led trios. The current
+local inventory contains 202 canonical figures and 290 clips. The
 read-only,
 production-built Asset Lab
 catalogue is available at
@@ -197,6 +197,8 @@ occur.
     fantasy trio with explicit typed classification and paired motion clips.
 17. [x] Add Centaur, Chimera, and Hippocampus as explicit multi-body-plan
     hybrids with paired continuous and action motion.
+18. [x] Add Griffin, Harpy, and Ammit as a second explicit anatomy-led hybrid
+    wave spanning winged quadruped, winged humanoid, and amphibious quadruped.
 
 ## Local Acceptance Evidence
 
@@ -338,6 +340,15 @@ shared `hybrid` theme returns exactly those three catalogue entries. Their
 species joins remain exposed rather than hidden beneath clothes, weapons,
 saddles, or other props. Six clean action/locomotion sheets and MP4 reviews are
 under `/tmp/mclone-hybrid-bestiary-three/`.
+
+The second anatomy-led hybrid follow-up builds 202 canonical figures, 290
+clips, and 4,381 parts. Griffin combines Quadruped and Winged classification
+across land and air; Harpy combines Biped, Winged, and Humanoid; Ammit is a
+land/water Quadruped. All three remain neutral Animal/Fantasy figures and
+increase the shared `hybrid` result from three to six exact entries. Their
+species boundaries and motion are anatomical rather than expressed through
+clothing, weapons, or other props. Six clean action/locomotion sheets and MP4
+reviews are under `/tmp/mclone-hybrid-bestiary-four/`.
 
 ## Live Acceptance Evidence
 

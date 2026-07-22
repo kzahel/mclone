@@ -374,13 +374,15 @@ compose the existing biped, quadruped, swimmer, and serpentine vocabularies.
 | Wolffolk / Foxfolk | P3 | ☐ | obvious next anthro canids |
 | Dragon | P3 | ☐ | flagship mythic; W + Q hybrid, likely new tooling |
 | Unicorn / Pegasus | P3 | ☐ | horse rig + horn / wings |
-| Griffin | P3 | ☐ | eagle + lion |
+| Griffin | P2 | ✅ | `examples/griffin` — eagle head, feathered chest, broad wings, and taloned forelegs join a lion frame with grounded lope and wing-assisted pounce clips |
 | Jackalope | P2 | ✅ | `examples/jackalope` — anatomy-led antlered hare with high haunches, long ears and rear feet, grounded bound, and separate listening action |
 | Owlbear | P2 | ✅ | `examples/owlbear` — heavy bear quadruped with a broad owl facial disc, hooked beak, feathered shoulder mantle, grounded lumber, and separate ruffle display |
 | Cockatrice | P2 | ✅ | `examples/cockatrice` — rooster/reptile biped with comb, wattles, wings, scaled feet, a long articulated tail, grounded strut, and separate threat display |
 | Centaur | P2 | ✅ | `examples/centaur` — bare human torso grown directly from a horse frame, with grounded four-beat trot and hind-hoof-supported rear action |
 | Chimera | P2 | ✅ | `examples/chimera` — lion forequarters, a goat head rising from the spine, and a living articulated serpent tail with coordinated prowl and threat clips |
 | Hippocampus | P2 | ✅ | `examples/hippocampus` — equine forequarters and webbed forelegs taper into a four-stage fish tail with paired tidal-swim and breach clips |
+| Harpy | P2 | ✅ | `examples/harpy` — human trunk grown from a bird pelvis, with wing-arms, raptor legs, grounded talon-hop, and separate full-wing threat flare |
+| Ammit | P2 | ✅ | `examples/ammit` — crocodile head, lion shoulders and forelegs, and hippopotamus hindquarters with weighty stalk and animated crushing bite |
 | Slime / blob | P3 | ✅ | `examples/slime` — six-box acid slime with textured gel layers, a grounded squash idle, and a separate leap-and-slam action (also a baddie — see below) |
 | Owl Scholar | P2 | ✅ | `examples/owl_scholar` — recognizable spectacled owl with folded wings, satchel, two exact cutout book-page cards, grounded perch-hop, and separate page-turn action |
 
@@ -469,8 +471,8 @@ should be a high-value early wave for a Minecraft-style mob set.
 
 ## Coverage snapshot
 
-- **Canonical box-and-card figures:** 199 sources and 284 clips after Centaur,
-  Chimera, and Hippocampus extend the anatomy-led hybrid roster.
+- **Canonical box-and-card figures:** 202 sources and 290 clips after Griffin,
+  Harpy, and Ammit extend the anatomy-led hybrid roster.
 - **First hostile fantasy wave:** Skeleton, Slime, and Gargoyle, each with
   explicit typed catalogue classification and a separate special action.
 - **Binary-alpha proof:** Cutout Skeleton keeps a full torso cuboid and forms
@@ -504,6 +506,9 @@ should be a high-value early wave for a Minecraft-style mob set.
 - **Anatomy-led hybrid follow-up:** Centaur, Chimera, and Hippocampus expose
   their species joins directly and combine existing quadruped, biped,
   serpentine, and swimmer motion without clothing, weapons, or tack.
+- **Second anatomy-led hybrid follow-up:** Griffin, Harpy, and Ammit add
+  raptor/lion, human/bird, and crocodile/lion/hippopotamus joins while reusing
+  grounded winged, biped, and heavy quadruped motion.
 - **Rounded-to-box migration complete (13):** piglet, sheep, dog, cat,
   bearfolk, lionfolk, cow, horse, goat, wolf, fox, bear, and lion.
 - **Retained rounded A/B archive:** all 18 former mixed-primitive sources live

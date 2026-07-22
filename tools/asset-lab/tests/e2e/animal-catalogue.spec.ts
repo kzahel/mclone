@@ -15,7 +15,7 @@ test("browses hash-checked figures with animation and camera controls", async ({
   await expect(page.locator(".viewerHeader h2")).toHaveText("King Cobra");
   await expect(page).toHaveURL(/figure=king_cobra/);
   await expect(page.locator(".catalogRow.selected")).toHaveAttribute("data-catalog-name", "king_cobra");
-  await expect(page.locator(".summaryItem").first()).toContainText("199");
+  await expect(page.locator(".summaryItem").first()).toContainText("202");
   await expect(page.locator(".summaryItem").filter({ hasText: "runtime" })).toContainText("3");
   await expect(page.locator(".promotionStatus")).toContainText("Asset Lab only");
 
@@ -248,10 +248,13 @@ test("filters and inspects typed creature classifications", async ({ page }) => 
   await expect(page.locator(".resultCount")).toHaveText("1 figure");
   await expect(page.locator("[data-catalog-name='young_dryad']")).toBeVisible();
   await search.fill("hybrid");
-  await expect(page.locator(".resultCount")).toHaveText("3 figures");
+  await expect(page.locator(".resultCount")).toHaveText("6 figures");
   await expect(page.locator("[data-catalog-name='centaur']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='chimera']")).toBeVisible();
   await expect(page.locator("[data-catalog-name='hippocampus']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='griffin']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='harpy']")).toBeVisible();
+  await expect(page.locator("[data-catalog-name='ammit']")).toBeVisible();
   await page.locator("[data-catalog-name='centaur']").click();
   await expect(classification).toContainText("Humanoid");
   await expect(classification).toContainText("Biped");
@@ -260,6 +263,15 @@ test("filters and inspects typed creature classifications", async ({ page }) => 
   await expect(classification).toContainText("Serpentine");
   await page.locator("[data-catalog-name='hippocampus']").click();
   await expect(classification).toContainText("Swimmer");
+  await expect(classification).toContainText("Water");
+  await page.locator("[data-catalog-name='griffin']").click();
+  await expect(classification).toContainText("Winged");
+  await expect(classification).toContainText("Air");
+  await page.locator("[data-catalog-name='harpy']").click();
+  await expect(classification).toContainText("Humanoid");
+  await expect(classification).toContainText("Biped");
+  await page.locator("[data-catalog-name='ammit']").click();
+  await expect(classification).toContainText("Quadruped");
   await expect(classification).toContainText("Water");
 
   await search.fill("");
