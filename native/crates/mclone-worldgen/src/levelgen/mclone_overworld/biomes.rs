@@ -1,5 +1,6 @@
 use super::fields::{
     MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldLandformSample, McloneOverworldSampler,
+    McloneOverworldSamplingTopology,
 };
 use crate::levelgen::profile::{BEACH_BIOME_ID, OCEAN_BIOME_ID, PLAINS_BIOME_ID};
 
@@ -9,8 +10,22 @@ pub const MCLONE_OVERWORLD_WOODED_MAX_SLOPE: f64 = 0.45;
 pub const MCLONE_OVERWORLD_WOODED_MAX_EXPOSURE: f64 = 0.44;
 
 pub fn mclone_overworld_biome_id(seed: i64, world_x: i32, world_z: i32) -> i32 {
+    mclone_overworld_biome_id_with_topology(
+        seed,
+        McloneOverworldSamplingTopology::Unbounded,
+        world_x,
+        world_z,
+    )
+}
+
+pub fn mclone_overworld_biome_id_with_topology(
+    seed: i64,
+    topology: McloneOverworldSamplingTopology,
+    world_x: i32,
+    world_z: i32,
+) -> i32 {
     mclone_overworld_biome_id_for_sample(
-        McloneOverworldSampler::new(seed).sample_landform(world_x, world_z),
+        McloneOverworldSampler::new_with_topology(seed, topology).sample_landform(world_x, world_z),
     )
 }
 

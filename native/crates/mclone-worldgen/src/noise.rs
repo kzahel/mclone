@@ -90,6 +90,7 @@ pub struct ValueNoise2d {
     seed: i64,
     scale: i32,
     domain: SeedDomain,
+    lattice_period_x: Option<i32>,
 }
 
 impl ValueNoise2d {
@@ -99,6 +100,21 @@ impl ValueNoise2d {
             seed,
             scale,
             domain,
+            lattice_period_x: None,
+        }
+    }
+
+    pub fn new_periodic_x(seed: i64, domain: SeedDomain, scale: i32, period_blocks: i32) -> Self {
+        assert!(scale > 0, "value-noise scale must be positive");
+        assert!(
+            period_blocks > 0 && period_blocks % scale == 0,
+            "value-noise period must be positive and divisible by scale"
+        );
+        Self {
+            seed,
+            scale,
+            domain,
+            lattice_period_x: Some(period_blocks / scale),
         }
     }
 
@@ -123,6 +139,9 @@ impl ValueNoise2d {
     }
 
     fn lattice_sample(self, x: i32, z: i32) -> f64 {
+        let x = self
+            .lattice_period_x
+            .map_or(x, |period| x.rem_euclid(period));
         let unit = (original_lattice_hash(self.seed, self.domain, i64::from(x), i64::from(z)) >> 11)
             as f64
             * (1.0 / ((1_u64 << 53) as f64));
@@ -142,7 +161,8 @@ pub struct GradientNoise2d {
     seed: i64,
     scale: i32,
     domain: SeedDomain,
-    lattice_period: Option<i64>,
+    lattice_period_x: Option<i64>,
+    lattice_period_z: Option<i64>,
 }
 
 impl GradientNoise2d {
@@ -152,7 +172,8 @@ impl GradientNoise2d {
             seed,
             scale,
             domain,
-            lattice_period: None,
+            lattice_period_x: None,
+            lattice_period_z: None,
         }
     }
 
@@ -166,7 +187,23 @@ impl GradientNoise2d {
             seed,
             scale,
             domain,
-            lattice_period: Some(i64::from(period_blocks / scale)),
+            lattice_period_x: Some(i64::from(period_blocks / scale)),
+            lattice_period_z: Some(i64::from(period_blocks / scale)),
+        }
+    }
+
+    pub fn new_periodic_x(seed: i64, domain: SeedDomain, scale: i32, period_blocks: i32) -> Self {
+        assert!(scale > 0, "gradient-noise scale must be positive");
+        assert!(
+            period_blocks > 0 && period_blocks % scale == 0,
+            "gradient-noise period must be positive and divisible by scale"
+        );
+        Self {
+            seed,
+            scale,
+            domain,
+            lattice_period_x: Some(i64::from(period_blocks / scale)),
+            lattice_period_z: None,
         }
     }
 
@@ -207,10 +244,10 @@ impl GradientNoise2d {
 
     fn corner(self, lattice_x: i64, lattice_z: i64, offset_x: f64, offset_z: f64) -> f64 {
         let lattice_x = self
-            .lattice_period
+            .lattice_period_x
             .map_or(lattice_x, |period| lattice_x.rem_euclid(period));
         let lattice_z = self
-            .lattice_period
+            .lattice_period_z
             .map_or(lattice_z, |period| lattice_z.rem_euclid(period));
         let hash = original_lattice_hash(self.seed, self.domain, lattice_x, lattice_z);
         let gradient = ORIGINAL_GRADIENTS_2D[hash as usize & (ORIGINAL_GRADIENTS_2D.len() - 1)];
@@ -1078,6 +1115,21 @@ mod tests {
     }
 
     #[test]
+    fn periodic_x_value_noise_repeats_only_the_x_axis() {
+        let noise = ValueNoise2d::new_periodic_x(
+            12_345,
+            SeedDomain::new(0x6d63_6f76_636f_6e31),
+            2_048,
+            6_144,
+        );
+
+        for (x, z) in [(-6_145, -2_049), (-1, 17), (2_047, 8_193)] {
+            assert_eq!(noise.sample(x, z), noise.sample(x + 6_144, z));
+        }
+        assert_ne!(noise.sample(317, 509), noise.sample(317, 509 + 6_144));
+    }
+
+    #[test]
     fn gradient_noise_is_deterministic_and_signed_across_the_origin() {
         let domain = SeedDomain::new(0x6d63_6f76_6d64_7431);
         let noise = GradientNoise2d::new(-98_765, domain, 32);
@@ -1111,6 +1163,22 @@ mod tests {
             assert!((noise.sample_at(x + 6_144.0, z) - expected).abs() < 1.0e-12);
             assert!((noise.sample_at(x, z - 6_144.0) - expected).abs() < 1.0e-12);
         }
+    }
+
+    #[test]
+    fn periodic_x_gradient_noise_leaves_z_unbounded() {
+        let noise = GradientNoise2d::new_periodic_x(
+            -98_765,
+            SeedDomain::new(0x6d63_6f76_6d64_7431),
+            32,
+            6_144,
+        );
+
+        for (x, z) in [(-8_191.75, -129.5), (-7.25, 13.75), (127.5, 4_097.125)] {
+            let expected = noise.sample_at(x, z);
+            assert!((noise.sample_at(x + 6_144.0, z) - expected).abs() < 1.0e-12);
+        }
+        assert!((noise.sample_at(17.25, 9.5) - noise.sample_at(17.25, 6_153.5)).abs() > 1.0e-6);
     }
 
     #[derive(Debug, Deserialize)]

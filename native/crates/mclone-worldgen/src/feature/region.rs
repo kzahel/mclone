@@ -21,6 +21,8 @@ pub struct FeatureRegionMetrics {
 pub struct FeatureRegion {
     center_chunk_x: i32,
     center_chunk_z: i32,
+    decoration_chunk_x: i32,
+    decoration_chunk_z: i32,
     dependency_radius: i32,
     write_radius_cutoff: i32,
     chunk_min_x: i32,
@@ -107,6 +109,8 @@ impl FeatureRegion {
         Self {
             center_chunk_x,
             center_chunk_z,
+            decoration_chunk_x: center_chunk_x,
+            decoration_chunk_z: center_chunk_z,
             dependency_radius,
             write_radius_cutoff,
             chunk_min_x,
@@ -131,6 +135,21 @@ impl FeatureRegion {
     pub fn set_center(&mut self, center_chunk_x: i32, center_chunk_z: i32) {
         self.center_chunk_x = center_chunk_x;
         self.center_chunk_z = center_chunk_z;
+        self.decoration_chunk_x = center_chunk_x;
+        self.decoration_chunk_z = center_chunk_z;
+    }
+
+    pub fn set_center_with_decoration_identity(
+        &mut self,
+        center_chunk_x: i32,
+        center_chunk_z: i32,
+        decoration_chunk_x: i32,
+        decoration_chunk_z: i32,
+    ) {
+        self.center_chunk_x = center_chunk_x;
+        self.center_chunk_z = center_chunk_z;
+        self.decoration_chunk_x = decoration_chunk_x;
+        self.decoration_chunk_z = decoration_chunk_z;
     }
 
     pub fn dependency_radius(&self) -> i32 {
@@ -237,6 +256,14 @@ impl FeatureWorld for FeatureRegion {
 
     fn center_chunk_z(&self) -> i32 {
         self.center_chunk_z
+    }
+
+    fn decoration_chunk_x(&self) -> i32 {
+        self.decoration_chunk_x
+    }
+
+    fn decoration_chunk_z(&self) -> i32 {
+        self.decoration_chunk_z
     }
 
     fn min_y(&self) -> i32 {

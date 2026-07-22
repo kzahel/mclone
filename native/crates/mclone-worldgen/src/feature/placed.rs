@@ -281,8 +281,11 @@ fn apply_feature_table_with_biomes_timed<W: FeatureWorld, B: FeatureBiomeResolve
     let min_block_x = chunk_min_block_coord(world.center_chunk_x());
     let min_block_z = chunk_min_block_coord(world.center_chunk_z());
     let origin = BlockPos::new(min_block_x, world.min_y(), min_block_z);
+    let decoration_min_block_x = chunk_min_block_coord(world.decoration_chunk_x());
+    let decoration_min_block_z = chunk_min_block_coord(world.decoration_chunk_z());
     let mut random = WorldgenRandom::default();
-    let decoration_seed = random.set_decoration_seed(seed, min_block_x, min_block_z);
+    let decoration_seed =
+        random.set_decoration_seed(seed, decoration_min_block_x, decoration_min_block_z);
     let mut placed_features = 0;
     let mut timing = FeatureDecorationTiming::default();
 

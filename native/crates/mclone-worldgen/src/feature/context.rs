@@ -86,6 +86,12 @@ impl FeatureDecorationTiming {
 pub trait FeatureWorld {
     fn center_chunk_x(&self) -> i32;
     fn center_chunk_z(&self) -> i32;
+    fn decoration_chunk_x(&self) -> i32 {
+        self.center_chunk_x()
+    }
+    fn decoration_chunk_z(&self) -> i32 {
+        self.center_chunk_z()
+    }
     fn min_y(&self) -> i32;
     fn height(&self) -> i32;
     fn non_air_block_count(&self) -> usize;

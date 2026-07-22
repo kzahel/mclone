@@ -22,7 +22,7 @@ pub(super) struct PreparedSurfaceDependencies {
 
 #[derive(Debug, Default)]
 pub(super) struct SurfaceDependencyCache {
-    seed: Option<i64>,
+    generation_key: Option<(i64, u64)>,
     chunks: BTreeMap<ChunkPos, MutableChunkBlockBuffer>,
 }
 
@@ -36,7 +36,7 @@ impl SurfaceDependencyCache {
     }
 
     pub fn clear(&mut self) {
-        self.seed = None;
+        self.generation_key = None;
         self.chunks.clear();
     }
 
@@ -45,10 +45,21 @@ impl SurfaceDependencyCache {
         seed: i64,
         plan: &ChunkGenerationPlan,
         dependencies: impl IntoIterator<Item = MutableChunkBlockBuffer>,
+        generate: impl FnMut(ChunkPos) -> MutableChunkBlockBuffer,
+    ) -> PreparedSurfaceDependencies {
+        self.prepare_scoped(seed, 0, plan, dependencies, generate)
+    }
+
+    pub fn prepare_scoped(
+        &mut self,
+        seed: i64,
+        scope: u64,
+        plan: &ChunkGenerationPlan,
+        dependencies: impl IntoIterator<Item = MutableChunkBlockBuffer>,
         mut generate: impl FnMut(ChunkPos) -> MutableChunkBlockBuffer,
     ) -> PreparedSurfaceDependencies {
-        if self.seed != Some(seed) {
-            self.seed = Some(seed);
+        if self.generation_key != Some((seed, scope)) {
+            self.generation_key = Some((seed, scope));
             self.chunks.clear();
         }
         for dependency in dependencies {
@@ -141,5 +152,17 @@ mod tests {
         assert!(prepared.region_chunks.is_empty());
         assert!(prepared.retained_dependencies.is_empty());
         assert_eq!(cache.retained_chunk_count(), 0);
+    }
+
+    #[test]
+    fn scope_change_clears_same_seed_residency() {
+        let mut cache = SurfaceDependencyCache::default();
+        let plan = ChunkGenerationPlan::mclone_overworld_features([ChunkPos::new(0, 0)]);
+        let first = cache.prepare_scoped(1, 0, &plan, std::iter::empty(), buffer);
+        assert_eq!(first.report.generated_dependency_chunks, 25);
+
+        let changed = cache.prepare_scoped(1, 1, &plan, std::iter::empty(), buffer);
+        assert_eq!(changed.report.cache_hits, 0);
+        assert_eq!(changed.report.generated_dependency_chunks, 25);
     }
 }

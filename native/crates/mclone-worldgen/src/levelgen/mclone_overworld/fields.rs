@@ -1,10 +1,12 @@
-use mclone_core::ChunkPos;
+use mclone_core::{AxisTopology, ChunkPos, HorizontalTopology};
 
 use crate::noise::{GradientNoise2d, SeedDomain, ValueNoise2d};
 
 pub const MCLONE_OVERWORLD_SEA_LEVEL: i32 = 63;
 pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-6";
 pub const MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS: i32 = 2;
+pub const MCLONE_OVERWORLD_PERIOD_BLOCKS: i32 = 6_144;
+pub const MCLONE_OVERWORLD_PERIOD_CHUNKS: u32 = 384;
 
 const CONTINENT_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_636f_6e31);
 const CONTINENT_MEDIUM_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_636f_6e32);
@@ -34,6 +36,74 @@ const MOUNTAIN_DETAIL_FINE_SCALE: i32 = 8;
 const MAX_REGION_SAMPLE_COUNT: usize = 16 * 1024 * 1024;
 const SPAWN_SEARCH_RADIUS_CHUNKS: i32 = 128;
 const SPAWN_MIN_SURFACE_Y: i32 = MCLONE_OVERWORLD_SEA_LEVEL + 5;
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+pub enum McloneOverworldSamplingTopology {
+    #[default]
+    Unbounded,
+    PeriodicX,
+}
+
+impl McloneOverworldSamplingTopology {
+    pub const fn horizontal_topology(self) -> HorizontalTopology {
+        match self {
+            Self::Unbounded => HorizontalTopology::UNBOUNDED,
+            Self::PeriodicX => HorizontalTopology::cylinder_x(0, MCLONE_OVERWORLD_PERIOD_CHUNKS),
+        }
+    }
+
+    pub fn from_horizontal_topology(topology: HorizontalTopology) -> Result<Self, String> {
+        match topology {
+            HorizontalTopology {
+                x: AxisTopology::Unbounded,
+                z: AxisTopology::Unbounded,
+            } => Ok(Self::Unbounded),
+            HorizontalTopology {
+                x:
+                    AxisTopology::Periodic {
+                        minimum_chunk: 0,
+                        period_chunks: MCLONE_OVERWORLD_PERIOD_CHUNKS,
+                    },
+                z: AxisTopology::Unbounded,
+            } => Ok(Self::PeriodicX),
+            _ => Err(format!(
+                "mclone-overworld-v1 supports only unbounded topology or cylinder-x:0:{MCLONE_OVERWORLD_PERIOD_CHUNKS}"
+            )),
+        }
+    }
+
+    pub fn canonical_chunk_x(self, chunk_x: i32) -> i32 {
+        self.horizontal_topology()
+            .x
+            .canonical_chunk(chunk_x)
+            .expect("Mclone sampling topology has no finite X exclusion")
+    }
+
+    pub const fn cache_scope(self) -> u64 {
+        match self {
+            Self::Unbounded => 0,
+            Self::PeriodicX => 1,
+        }
+    }
+
+    fn value_noise(self, seed: i64, domain: SeedDomain, scale: i32) -> ValueNoise2d {
+        match self {
+            Self::Unbounded => ValueNoise2d::new(seed, domain, scale),
+            Self::PeriodicX => {
+                ValueNoise2d::new_periodic_x(seed, domain, scale, MCLONE_OVERWORLD_PERIOD_BLOCKS)
+            }
+        }
+    }
+
+    fn gradient_noise(self, seed: i64, domain: SeedDomain, scale: i32) -> GradientNoise2d {
+        match self {
+            Self::Unbounded => GradientNoise2d::new(seed, domain, scale),
+            Self::PeriodicX => {
+                GradientNoise2d::new_periodic_x(seed, domain, scale, MCLONE_OVERWORLD_PERIOD_BLOCKS)
+            }
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct McloneOverworldTerrainSample {
@@ -141,39 +211,47 @@ pub struct McloneOverworldSampler {
 
 impl McloneOverworldSampler {
     pub fn new(seed: i64) -> Self {
+        Self::new_with_topology(seed, McloneOverworldSamplingTopology::Unbounded)
+    }
+
+    pub fn new_with_topology(seed: i64, topology: McloneOverworldSamplingTopology) -> Self {
         Self {
-            continent_large: ValueNoise2d::new(seed, CONTINENT_LARGE_DOMAIN, CONTINENT_LARGE_SCALE),
-            continent_medium: ValueNoise2d::new(
+            continent_large: topology.value_noise(
+                seed,
+                CONTINENT_LARGE_DOMAIN,
+                CONTINENT_LARGE_SCALE,
+            ),
+            continent_medium: topology.value_noise(
                 seed,
                 CONTINENT_MEDIUM_DOMAIN,
                 CONTINENT_MEDIUM_SCALE,
             ),
-            continent_detail: ValueNoise2d::new(
+            continent_detail: topology.value_noise(
                 seed,
                 CONTINENT_DETAIL_DOMAIN,
                 CONTINENT_DETAIL_SCALE,
             ),
-            relief_large: ValueNoise2d::new(seed, RELIEF_LARGE_DOMAIN, RELIEF_LARGE_SCALE),
-            relief_detail: ValueNoise2d::new(seed, RELIEF_DETAIL_DOMAIN, RELIEF_DETAIL_SCALE),
-            relief_fine: ValueNoise2d::new(seed, RELIEF_FINE_DOMAIN, RELIEF_FINE_SCALE),
-            ruggedness_large: ValueNoise2d::new(
+            relief_large: topology.value_noise(seed, RELIEF_LARGE_DOMAIN, RELIEF_LARGE_SCALE),
+            relief_detail: topology.value_noise(seed, RELIEF_DETAIL_DOMAIN, RELIEF_DETAIL_SCALE),
+            relief_fine: topology.value_noise(seed, RELIEF_FINE_DOMAIN, RELIEF_FINE_SCALE),
+            ruggedness_large: topology.value_noise(
                 seed,
                 RUGGEDNESS_LARGE_DOMAIN,
                 RUGGEDNESS_LARGE_SCALE,
             ),
-            ruggedness_detail: ValueNoise2d::new(
+            ruggedness_detail: topology.value_noise(
                 seed,
                 RUGGEDNESS_DETAIL_DOMAIN,
                 RUGGEDNESS_DETAIL_SCALE,
             ),
-            ridge_large: ValueNoise2d::new(seed, RIDGE_LARGE_DOMAIN, RIDGE_LARGE_SCALE),
-            ridge_detail: ValueNoise2d::new(seed, RIDGE_DETAIL_DOMAIN, RIDGE_DETAIL_SCALE),
-            mountain_detail_large: GradientNoise2d::new(
+            ridge_large: topology.value_noise(seed, RIDGE_LARGE_DOMAIN, RIDGE_LARGE_SCALE),
+            ridge_detail: topology.value_noise(seed, RIDGE_DETAIL_DOMAIN, RIDGE_DETAIL_SCALE),
+            mountain_detail_large: topology.gradient_noise(
                 seed,
                 MOUNTAIN_DETAIL_LARGE_DOMAIN,
                 MOUNTAIN_DETAIL_LARGE_SCALE,
             ),
-            mountain_detail_fine: GradientNoise2d::new(
+            mountain_detail_fine: topology.gradient_noise(
                 seed,
                 MOUNTAIN_DETAIL_FINE_DOMAIN,
                 MOUNTAIN_DETAIL_FINE_SCALE,
@@ -298,7 +376,14 @@ impl McloneOverworldSampler {
 }
 
 pub fn mclone_overworld_spawn_chunk(seed: i64) -> ChunkPos {
-    let sampler = McloneOverworldSampler::new(seed);
+    mclone_overworld_spawn_chunk_with_topology(seed, McloneOverworldSamplingTopology::Unbounded)
+}
+
+pub fn mclone_overworld_spawn_chunk_with_topology(
+    seed: i64,
+    topology: McloneOverworldSamplingTopology,
+) -> ChunkPos {
+    let sampler = McloneOverworldSampler::new_with_topology(seed, topology);
     for radius in 0..=SPAWN_SEARCH_RADIUS_CHUNKS {
         for z in -radius..=radius {
             for x in -radius..=radius {
@@ -308,7 +393,7 @@ pub fn mclone_overworld_spawn_chunk(seed: i64) -> ChunkPos {
                 let world_x = x * 16 + 8;
                 let world_z = z * 16 + 8;
                 if sampler.sample(world_x, world_z).surface_y >= SPAWN_MIN_SURFACE_Y {
-                    return ChunkPos::new(x, z);
+                    return ChunkPos::new(topology.canonical_chunk_x(x), z);
                 }
             }
         }
@@ -355,6 +440,91 @@ fn smoothstep(value: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn assert_samples_near(
+        left: McloneOverworldTerrainSample,
+        right: McloneOverworldTerrainSample,
+    ) {
+        assert!((left.continentalness - right.continentalness).abs() < 1.0e-12);
+        assert!((left.relief - right.relief).abs() < 1.0e-12);
+        assert!((left.ruggedness - right.ruggedness).abs() < 1.0e-12);
+        assert!((left.ridges - right.ridges).abs() < 1.0e-12);
+        assert!((left.mountain_detail - right.mountain_detail).abs() < 1.0e-12);
+        assert_eq!(left.surface_y, right.surface_y);
+    }
+
+    #[test]
+    fn sampling_topology_accepts_only_the_selected_cylinder() {
+        assert_eq!(
+            McloneOverworldSamplingTopology::from_horizontal_topology(
+                HorizontalTopology::UNBOUNDED
+            ),
+            Ok(McloneOverworldSamplingTopology::Unbounded)
+        );
+        assert_eq!(
+            McloneOverworldSamplingTopology::from_horizontal_topology(
+                HorizontalTopology::cylinder_x(0, MCLONE_OVERWORLD_PERIOD_CHUNKS)
+            ),
+            Ok(McloneOverworldSamplingTopology::PeriodicX)
+        );
+        assert!(
+            McloneOverworldSamplingTopology::from_horizontal_topology(
+                HorizontalTopology::cylinder_x(0, 32)
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn periodic_fields_and_seam_slopes_repeat_across_signed_lifts() {
+        let sampler = McloneOverworldSampler::new_with_topology(
+            -98_765,
+            McloneOverworldSamplingTopology::PeriodicX,
+        );
+        for (x, z) in [(-6_145, -517), (-1, 0), (0, 0), (6_143, 929), (8_191, -73)] {
+            assert_samples_near(
+                sampler.sample(x, z),
+                sampler.sample(x + MCLONE_OVERWORLD_PERIOD_BLOCKS, z),
+            );
+        }
+
+        for z in [-997, 0, 1_337] {
+            let before = sampler.sample(-1, z).surface_y;
+            let seam = sampler.sample(0, z).surface_y;
+            let repeated_before = sampler
+                .sample(MCLONE_OVERWORLD_PERIOD_BLOCKS - 1, z)
+                .surface_y;
+            let repeated_seam = sampler.sample(MCLONE_OVERWORLD_PERIOD_BLOCKS, z).surface_y;
+            assert_eq!(seam - before, repeated_seam - repeated_before);
+        }
+    }
+
+    #[test]
+    fn periodic_region_across_seam_matches_point_sampling() {
+        let sampler = McloneOverworldSampler::new_with_topology(
+            12_345,
+            McloneOverworldSamplingTopology::PeriodicX,
+        );
+        let request = McloneOverworldSampleRegionRequest {
+            min_x: MCLONE_OVERWORLD_PERIOD_BLOCKS - 3,
+            min_z: -5,
+            width: 7,
+            depth: 3,
+            step: 1,
+        };
+        let region = sampler.sample_region(request).unwrap();
+        for offset_z in 0..request.depth {
+            for offset_x in 0..request.width {
+                assert_eq!(
+                    region.sample(offset_x, offset_z),
+                    Some(sampler.sample(
+                        request.min_x + offset_x as i32,
+                        request.min_z + offset_z as i32,
+                    ))
+                );
+            }
+        }
+    }
 
     #[test]
     fn bounded_region_is_row_major_and_uses_the_point_sampler() {

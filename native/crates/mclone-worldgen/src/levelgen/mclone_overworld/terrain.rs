@@ -3,7 +3,7 @@ use mclone_core::{CHUNK_WIDTH, chunk_min_block_coord};
 use super::biomes::mclone_overworld_biome_id_for_sample;
 use super::fields::{
     MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS, McloneOverworldLandformSample, McloneOverworldSampler,
-    McloneOverworldTerrainSample,
+    McloneOverworldSamplingTopology, McloneOverworldTerrainSample,
 };
 use super::surface::write_surface_column;
 use crate::levelgen::chunk::sample_column_biome_payload;
@@ -15,9 +15,23 @@ pub fn generate_mclone_overworld_surface_chunk(
     chunk_x: i32,
     chunk_z: i32,
 ) -> GeneratedChunk {
+    generate_mclone_overworld_surface_chunk_with_topology(
+        seed,
+        McloneOverworldSamplingTopology::Unbounded,
+        chunk_x,
+        chunk_z,
+    )
+}
+
+pub fn generate_mclone_overworld_surface_chunk_with_topology(
+    seed: i64,
+    topology: McloneOverworldSamplingTopology,
+    chunk_x: i32,
+    chunk_z: i32,
+) -> GeneratedChunk {
     let min_x = chunk_min_block_coord(chunk_x);
     let min_z = chunk_min_block_coord(chunk_z);
-    let samples = ChunkLandformSamples::new(seed, min_x, min_z);
+    let samples = ChunkLandformSamples::new(seed, topology, min_x, min_z);
     let buffer = generate_mclone_overworld_surface_buffer_from_samples(chunk_x, chunk_z, &samples);
     GeneratedChunk::from_mutable_buffer_with_biomes(
         buffer,
@@ -30,9 +44,23 @@ pub(super) fn generate_mclone_overworld_surface_buffer(
     chunk_x: i32,
     chunk_z: i32,
 ) -> MutableChunkBlockBuffer {
+    generate_mclone_overworld_surface_buffer_with_topology(
+        seed,
+        McloneOverworldSamplingTopology::Unbounded,
+        chunk_x,
+        chunk_z,
+    )
+}
+
+pub(super) fn generate_mclone_overworld_surface_buffer_with_topology(
+    seed: i64,
+    topology: McloneOverworldSamplingTopology,
+    chunk_x: i32,
+    chunk_z: i32,
+) -> MutableChunkBlockBuffer {
     let min_x = chunk_min_block_coord(chunk_x);
     let min_z = chunk_min_block_coord(chunk_z);
-    let samples = ChunkLandformSamples::new(seed, min_x, min_z);
+    let samples = ChunkLandformSamples::new(seed, topology, min_x, min_z);
     generate_mclone_overworld_surface_buffer_from_samples(chunk_x, chunk_z, &samples)
 }
 
@@ -60,7 +88,21 @@ fn generate_mclone_overworld_surface_buffer_from_samples(
 }
 
 pub(super) fn mclone_overworld_chunk_biomes(seed: i64, min_x: i32, min_z: i32) -> Vec<i32> {
-    let samples = ChunkLandformSamples::new(seed, min_x, min_z);
+    mclone_overworld_chunk_biomes_with_topology(
+        seed,
+        McloneOverworldSamplingTopology::Unbounded,
+        min_x,
+        min_z,
+    )
+}
+
+pub(super) fn mclone_overworld_chunk_biomes_with_topology(
+    seed: i64,
+    topology: McloneOverworldSamplingTopology,
+    min_x: i32,
+    min_z: i32,
+) -> Vec<i32> {
+    let samples = ChunkLandformSamples::new(seed, topology, min_x, min_z);
     mclone_overworld_chunk_biomes_from_samples(min_x, min_z, &samples)
 }
 
@@ -82,8 +124,8 @@ struct ChunkLandformSamples {
 }
 
 impl ChunkLandformSamples {
-    fn new(seed: i64, min_x: i32, min_z: i32) -> Self {
-        let sampler = McloneOverworldSampler::new(seed);
+    fn new(seed: i64, topology: McloneOverworldSamplingTopology, min_x: i32, min_z: i32) -> Self {
+        let sampler = McloneOverworldSampler::new_with_topology(seed, topology);
         let radius = MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS;
         let width = usize::try_from(CHUNK_LANDFORM_SAMPLE_WIDTH)
             .expect("Mclone chunk landform sample width must fit usize");

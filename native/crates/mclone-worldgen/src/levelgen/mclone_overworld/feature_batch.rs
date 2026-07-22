@@ -1,16 +1,25 @@
 use std::collections::BTreeMap;
 
-use mclone_core::{ChunkPos, chunk_min_block_coord};
+use mclone_core::{ChunkPos, ChunkStatus, chunk_min_block_coord};
 
 use crate::feature::FeatureRegion;
 use crate::levelgen::feature_batch::sorted_chunk_positions_z_major;
 use crate::levelgen::surface_dependency_cache::{
     PreparedSurfaceDependencies, SurfaceDependencyCache, SurfaceDependencyCacheReport,
 };
-use crate::levelgen::{ChunkGenerationPlan, GeneratedChunk, MutableChunkBlockBuffer};
+use crate::levelgen::{
+    ChunkGenerationPlan, ChunkStatusRequirement, GeneratedChunk, MutableChunkBlockBuffer,
+};
 
-use super::decoration::decorate_mclone_overworld_center;
-use super::terrain::{generate_mclone_overworld_surface_buffer, mclone_overworld_chunk_biomes};
+use super::decoration::{
+    decorate_mclone_overworld_center, decorate_mclone_overworld_center_with_topology,
+};
+use super::fields::McloneOverworldSamplingTopology;
+use super::terrain::{
+    generate_mclone_overworld_surface_buffer,
+    generate_mclone_overworld_surface_buffer_with_topology, mclone_overworld_chunk_biomes,
+    mclone_overworld_chunk_biomes_with_topology,
+};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct McloneOverworldFeatureDependencyCacheReport {
@@ -58,6 +67,43 @@ impl McloneOverworldFeatureDependencyCache {
     }
 
     pub fn generate_features_chunks_with_dependencies(
+        &mut self,
+        seed: i64,
+        targets: impl IntoIterator<Item = ChunkPos>,
+        dependencies: impl IntoIterator<Item = MutableChunkBlockBuffer>,
+    ) -> McloneOverworldFeatureBatchResult {
+        self.generate_features_chunks_with_topology_and_dependencies(
+            seed,
+            McloneOverworldSamplingTopology::Unbounded,
+            targets,
+            dependencies,
+        )
+    }
+
+    pub fn generate_features_chunks_with_topology_and_dependencies(
+        &mut self,
+        seed: i64,
+        topology: McloneOverworldSamplingTopology,
+        targets: impl IntoIterator<Item = ChunkPos>,
+        dependencies: impl IntoIterator<Item = MutableChunkBlockBuffer>,
+    ) -> McloneOverworldFeatureBatchResult {
+        if topology == McloneOverworldSamplingTopology::Unbounded {
+            return self.generate_unbounded_features_chunks_with_dependencies(
+                seed,
+                targets,
+                dependencies,
+            );
+        }
+
+        self.generate_periodic_features_chunks_with_dependencies(
+            seed,
+            topology,
+            targets,
+            dependencies,
+        )
+    }
+
+    fn generate_unbounded_features_chunks_with_dependencies(
         &mut self,
         seed: i64,
         targets: impl IntoIterator<Item = ChunkPos>,
@@ -118,6 +164,122 @@ impl McloneOverworldFeatureDependencyCache {
             cache_report,
         }
     }
+
+    fn generate_periodic_features_chunks_with_dependencies(
+        &mut self,
+        seed: i64,
+        topology: McloneOverworldSamplingTopology,
+        targets: impl IntoIterator<Item = ChunkPos>,
+        dependencies: impl IntoIterator<Item = MutableChunkBlockBuffer>,
+    ) -> McloneOverworldFeatureBatchResult {
+        let targets = targets
+            .into_iter()
+            .map(|target| ChunkPos::new(topology.canonical_chunk_x(target.x), target.z))
+            .collect::<std::collections::BTreeSet<_>>();
+        let plan = canonical_periodic_plan(topology, targets.iter().copied());
+        let PreparedSurfaceDependencies {
+            retained_dependencies,
+            report,
+            ..
+        } = self
+            .cache
+            .prepare_scoped(seed, topology.cache_scope(), &plan, dependencies, |pos| {
+                generate_mclone_overworld_surface_buffer_with_topology(seed, topology, pos.x, pos.z)
+            });
+        let cache_report = mclone_overworld_cache_report(report);
+        let mut chunks = BTreeMap::new();
+
+        for target in targets {
+            let work_plan = ChunkGenerationPlan::mclone_overworld_features([target]);
+            let mut region_chunks = work_plan
+                .prerequisites()
+                .iter()
+                .map(|requirement| {
+                    let canonical = ChunkPos::new(
+                        topology.canonical_chunk_x(requirement.pos.x),
+                        requirement.pos.z,
+                    );
+                    let mut chunk = retained_dependencies
+                        .get(&canonical)
+                        .unwrap_or_else(|| {
+                            panic!(
+                                "periodic Mclone feature region omitted canonical dependency ({}, {})",
+                                canonical.x, canonical.z
+                            )
+                        })
+                        .clone();
+                    chunk.chunk_x = requirement.pos.x;
+                    chunk.chunk_z = requirement.pos.z;
+                    chunk
+                })
+                .collect::<Vec<_>>();
+            region_chunks.sort_by_key(|chunk| (chunk.chunk_z, chunk.chunk_x));
+            let mut region = FeatureRegion::new(target.x, target.z, region_chunks);
+            for center in
+                sorted_chunk_positions_z_major(work_plan.backend_work_chunks().iter().copied())
+            {
+                region.set_center_with_decoration_identity(
+                    center.x,
+                    center.z,
+                    topology.canonical_chunk_x(center.x),
+                    center.z,
+                );
+                decorate_mclone_overworld_center_with_topology(seed, topology, &mut region);
+            }
+
+            let mut chunk = region.remove_chunk(target.x, target.z).unwrap_or_else(|| {
+                panic!(
+                    "periodic Mclone feature region omitted target ({}, {})",
+                    target.x, target.z
+                )
+            });
+            chunk.chunk_x = target.x;
+            chunk.chunk_z = target.z;
+            chunks.insert(
+                target,
+                GeneratedChunk::from_mutable_buffer_with_biomes(
+                    chunk,
+                    mclone_overworld_chunk_biomes_with_topology(
+                        seed,
+                        topology,
+                        chunk_min_block_coord(target.x),
+                        chunk_min_block_coord(target.z),
+                    ),
+                ),
+            );
+        }
+
+        McloneOverworldFeatureBatchResult {
+            chunks,
+            retained_dependencies,
+            cache_report,
+        }
+    }
+}
+
+fn canonical_periodic_plan(
+    topology: McloneOverworldSamplingTopology,
+    targets: impl IntoIterator<Item = ChunkPos>,
+) -> ChunkGenerationPlan {
+    let raw = ChunkGenerationPlan::mclone_overworld_features(targets);
+    let (outputs, backend_work, prerequisites) = raw.into_parts();
+    ChunkGenerationPlan::from_parts(
+        outputs
+            .into_iter()
+            .map(|pos| ChunkPos::new(topology.canonical_chunk_x(pos.x), pos.z)),
+        backend_work
+            .into_iter()
+            .map(|pos| ChunkPos::new(topology.canonical_chunk_x(pos.x), pos.z)),
+        prerequisites.into_iter().map(|requirement| {
+            ChunkStatusRequirement::new(
+                ChunkPos::new(
+                    topology.canonical_chunk_x(requirement.pos.x),
+                    requirement.pos.z,
+                ),
+                ChunkStatus::Surface,
+            )
+        }),
+    )
 }
 
 fn mclone_overworld_cache_report(
@@ -132,9 +294,28 @@ fn mclone_overworld_cache_report(
 }
 
 pub fn generate_mclone_overworld_chunk(seed: i64, chunk_x: i32, chunk_z: i32) -> GeneratedChunk {
-    let pos = ChunkPos::new(chunk_x, chunk_z);
+    generate_mclone_overworld_chunk_with_topology(
+        seed,
+        McloneOverworldSamplingTopology::Unbounded,
+        chunk_x,
+        chunk_z,
+    )
+}
+
+pub fn generate_mclone_overworld_chunk_with_topology(
+    seed: i64,
+    topology: McloneOverworldSamplingTopology,
+    chunk_x: i32,
+    chunk_z: i32,
+) -> GeneratedChunk {
+    let pos = ChunkPos::new(topology.canonical_chunk_x(chunk_x), chunk_z);
     McloneOverworldFeatureDependencyCache::new()
-        .generate_features_chunks(seed, [pos])
+        .generate_features_chunks_with_topology_and_dependencies(
+            seed,
+            topology,
+            [pos],
+            std::iter::empty(),
+        )
         .chunks
         .remove(&pos)
         .unwrap_or_else(|| panic!("Mclone Overworld feature batch omitted ({chunk_x}, {chunk_z})"))
@@ -144,6 +325,7 @@ pub fn generate_mclone_overworld_chunk(seed: i64, chunk_x: i32, chunk_z: i32) ->
 mod tests {
     use super::*;
     use crate::block::{DANDELION, GRASS, OAK_LOG, POPPY};
+    use crate::levelgen::MCLONE_OVERWORLD_PERIOD_CHUNKS;
 
     #[test]
     fn cache_reuses_overlapping_surface_inputs() {
@@ -177,6 +359,61 @@ mod tests {
             .collect::<BTreeMap<_, _>>();
 
         assert_eq!(combined, partitioned);
+    }
+
+    #[test]
+    fn periodic_seam_batches_are_canonical_partition_and_order_independent() {
+        let topology = McloneOverworldSamplingTopology::PeriodicX;
+        let last_x = MCLONE_OVERWORLD_PERIOD_CHUNKS as i32 - 1;
+        let targets = [ChunkPos::new(last_x, 0), ChunkPos::new(0, 0)];
+        let mut combined_cache = McloneOverworldFeatureDependencyCache::new();
+        let combined = combined_cache.generate_features_chunks_with_topology_and_dependencies(
+            -98_765,
+            topology,
+            targets,
+            std::iter::empty(),
+        );
+        let reversed = McloneOverworldFeatureDependencyCache::new()
+            .generate_features_chunks_with_topology_and_dependencies(
+                -98_765,
+                topology,
+                [targets[1], targets[0]],
+                std::iter::empty(),
+            )
+            .chunks;
+        let partitioned = targets
+            .into_iter()
+            .map(|target| {
+                (
+                    target,
+                    generate_mclone_overworld_chunk_with_topology(
+                        -98_765, topology, target.x, target.z,
+                    ),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        assert_eq!(combined.chunks, reversed);
+        assert_eq!(combined.chunks, partitioned);
+        assert!(
+            combined
+                .retained_dependencies
+                .keys()
+                .all(|pos| { (0..MCLONE_OVERWORLD_PERIOD_CHUNKS as i32).contains(&pos.x) })
+        );
+        assert_eq!(
+            generate_mclone_overworld_chunk_with_topology(-98_765, topology, -1, 0),
+            generate_mclone_overworld_chunk_with_topology(-98_765, topology, last_x, 0)
+        );
+        assert_eq!(
+            generate_mclone_overworld_chunk_with_topology(
+                -98_765,
+                topology,
+                MCLONE_OVERWORLD_PERIOD_CHUNKS as i32,
+                0,
+            ),
+            generate_mclone_overworld_chunk_with_topology(-98_765, topology, 0, 0)
+        );
     }
 
     #[test]

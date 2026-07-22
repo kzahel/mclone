@@ -12,16 +12,29 @@ use crate::levelgen::profile::PLAINS_BIOME_ID;
 use crate::noise::SeedDomain;
 use crate::placement::ConfiguredDecorator;
 
-use super::biomes::{MCLONE_OVERWORLD_FOREST_BIOME_ID, mclone_overworld_biome_id};
+use super::biomes::{MCLONE_OVERWORLD_FOREST_BIOME_ID, mclone_overworld_biome_id_with_topology};
+use super::fields::McloneOverworldSamplingTopology;
 
 pub const MCLONE_OVERWORLD_DECORATION_REVISION: &str = "mclone-overworld-v1-decoration-3";
 
 const MCLONE_OVERWORLD_DECORATION_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6465_6331);
 
 pub(super) fn decorate_mclone_overworld_center(seed: i64, region: &mut FeatureRegion) {
-    let min_x = chunk_min_block_coord(region.center_chunk_x());
-    let min_z = chunk_min_block_coord(region.center_chunk_z());
-    let biome_id = mclone_overworld_biome_id(seed, min_x + 8, min_z + 8);
+    decorate_mclone_overworld_center_with_topology(
+        seed,
+        McloneOverworldSamplingTopology::Unbounded,
+        region,
+    );
+}
+
+pub(super) fn decorate_mclone_overworld_center_with_topology(
+    seed: i64,
+    topology: McloneOverworldSamplingTopology,
+    region: &mut FeatureRegion,
+) {
+    let min_x = chunk_min_block_coord(region.decoration_chunk_x());
+    let min_z = chunk_min_block_coord(region.decoration_chunk_z());
+    let biome_id = mclone_overworld_biome_id_with_topology(seed, topology, min_x + 8, min_z + 8);
     let features = feature_table(biome_id);
     if features.is_empty() {
         return;
