@@ -6,8 +6,8 @@ Status: complete and live-accepted 2026-07-21, then extended locally on
 2026-07-22 with typed creature classification, classification filters, three
 fantasy/monster waves, a first living-growth wave, binary and fractional alpha
 proofs, fixed planar cards, a two-figure fantasy-fauna follow-up, and a gentler
-recognizable-folklore wave. The current local inventory contains 190 canonical
-figures and 266 clips. The
+recognizable-folklore wave followed by an anatomy-led trio. The current local
+inventory contains 193 canonical figures and 272 clips. The
 read-only,
 production-built Asset Lab
 catalogue is available at
@@ -191,6 +191,8 @@ occur.
     independent idle/action clips, and searchable catalogue coverage.
 14. [x] Add Mandrake, Walking Cactus, and Owl Scholar with explicit
     plant/animal, fantasy, rooted/winged, habitat, and theme classification.
+15. [x] Add Jackalope, Walking Sunflower, and Mossback Tortoise as
+    anatomy-led designs without clothing, held props, or accessory concepts.
 
 ## Local Acceptance Evidence
 
@@ -305,6 +307,15 @@ to four and the Rooted result from three to five; Owl Scholar remains both
 Animal and Fantasy. Searches for `mandrake`, `cactus`, and `scholar` each
 resolve exactly one figure. The six clean action/locomotion sheets and MP4
 reviews are under `/tmp/mclone-fantasy-plants-three/`.
+
+The anatomy-led follow-up builds 193 canonical figures, 272 clips, and 4,171
+parts. Jackalope is a fantasy animal whose antlers remain subordinate to its
+hare silhouette; Walking Sunflower increases the Plant result from four to
+five and Rooted from five to six; Mossback Tortoise remains an ordinary Animal
+whose lichen is integrated into shell texture rather than attached decoration.
+Searches for `jackalope`, `sunflower`, and `mossback` each resolve exactly one
+figure. Six clean action/locomotion sheets and MP4 reviews are under
+`/tmp/mclone-natural-fantasy-three/`.
 
 ## Live Acceptance Evidence
 

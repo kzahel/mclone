@@ -309,7 +309,7 @@ reviewed rigs and then filling macro gaps.
 | Snake | P2 | ✅ | SL | green, brown, cobra (hood), rattlesnake | `examples/king_cobra` — approved 15-box king cobra with raised patterned hood, forked tongue, and seven-stage slither chain |
 | Gaboon viper | P3 | ✅ | SL | rhinoceros viper | `examples/gaboon_viper` — approved 15-box heavy viper with broad patterned head, paired nasal horns, fangs, eight-stage leaf-litter body, slow grounded slither, and separate contact-safe ambush strike |
 | Lizard / Gecko | P2 | ✅ | Q | gecko, iguana, chameleon | `examples/gecko` is the approved Tokay gecko; `examples/chameleon` is a review candidate veiled chameleon with raised independent eyes, casque, grasping feet, angular coiled tail, careful creep, and tongue-strike action |
-| Turtle / Tortoise | P2 | ✅ | Q/S | land tortoise, sea turtle, hatchling | `examples/sea_turtle` — approved 11-box green sea turtle with stepped shell and four swimming paddles |
+| Turtle / Tortoise | P2 | ✅ | Q/S | land tortoise, sea turtle, hatchling | `examples/sea_turtle` — approved 11-box green sea turtle with stepped shell and four swimming paddles; `examples/mossback_tortoise` — low land tortoise with lichen integrated into its textured shell, grounded crawl, and full-body shell withdrawal |
 | Crocodile / Alligator | P2 | ✅ | Q | croc, gator | `examples/crocodile` — approved 24-box Nile crocodile with armored back, long jaw, sprawled walk, and articulated tail |
 | Komodo dragon | P3 | ✅ | Q | — | `examples/komodo_dragon` — approved 31-box adult monitor with scaled torso, muscular neck, forked tongue, four stout clawed limbs, and four-stage tail |
 | Frog | P2 | ✅ | H | green, tree-frog morphs, toad; tadpole | `examples/frog` — approved 19-box green frog with raised amber eyes, broad head, folded hind legs, toe pads, looping hop, and separate one-shot jump action |
@@ -375,6 +375,7 @@ extensions — all **B** (`bipedWalk`), so no new tooling.
 | Dragon | P3 | ☐ | flagship mythic; W + Q hybrid, likely new tooling |
 | Unicorn / Pegasus | P3 | ☐ | horse rig + horn / wings |
 | Griffin | P3 | ☐ | eagle + lion |
+| Jackalope | P2 | ✅ | `examples/jackalope` — anatomy-led antlered hare with high haunches, long ears and rear feet, grounded bound, and separate listening action |
 | Slime / blob | P3 | ✅ | `examples/slime` — six-box acid slime with textured gel layers, a grounded squash idle, and a separate leap-and-slam action (also a baddie — see below) |
 | Owl Scholar | P2 | ✅ | `examples/owl_scholar` — recognizable spectacled owl with folded wings, satchel, two exact cutout book-page cards, grounded perch-hop, and separate page-turn action |
 
@@ -394,6 +395,7 @@ hostile growths.
 | Lantern Mycelium | P1 | ✅ | R/COL | teal, violet, toxic | `examples/lantern_mycelium` — connected 28-box five-mushroom colony with out-of-phase cap pulses, additive gills, and smooth blended spore-bloom action |
 | Mandrake | P2 | ✅ | B/R | folklore, woodland | `examples/mandrake` — small knotted humanoid root with five double-sided cutout leaf cards, grounded root-waddle, and separate full-bodied scream action |
 | Walking cactus | P2 | ✅ | B/R | desert, flowering | `examples/walking_cactus` — friendly saguaro whose branches remain its arms, with short root feet, grounded cactus-waddle, and separate rain-bloom action |
+| Walking Sunflower | P2 | ✅ | B/R | flowering, field | `examples/walking_sunflower` — anatomy-led sunflower with eight double-sided ray-floret cards, leaf limbs, root feet, grounded root-step, and sun-follow idle |
 | Sundew carpet | P2 | ☐ | R/COL | bog, giant | many independently folding adhesive pads |
 | Tumble grove | P3 | ☐ | R | dry, thorned | uproots, rolls, and unfolds into a small tree |
 
@@ -461,8 +463,9 @@ should be a high-value early wave for a Minecraft-style mob set.
 
 ## Coverage snapshot
 
-- **Canonical box-and-card figures:** 190 sources and 266 clips after Mandrake,
-  Walking Cactus, and Owl Scholar extend the gentler fantasy roster.
+- **Canonical box-and-card figures:** 193 sources and 272 clips after
+  Jackalope, Walking Sunflower, and Mossback Tortoise extend the anatomy-led
+  roster.
 - **First hostile fantasy wave:** Skeleton, Slime, and Gargoyle, each with
   explicit typed catalogue classification and a separate special action.
 - **Binary-alpha proof:** Cutout Skeleton keeps a full torso cuboid and forms
@@ -487,6 +490,9 @@ should be a high-value early wave for a Minecraft-style mob set.
 - **Recognizable folklore follow-up:** Mandrake and Walking Cactus broaden the
   filterable Plant/Rooted set, while Owl Scholar keeps an animal silhouette and
   adds restrained character through spectacles, satchel, and animated pages.
+- **Anatomy-led follow-up:** Jackalope, Walking Sunflower, and Mossback Tortoise
+  avoid clothing, held props, occupations, and detachable decoration. Antlers,
+  petals, roots, lichen texture, and natural behaviors carry their designs.
 - **Rounded-to-box migration complete (13):** piglet, sheep, dog, cat,
   bearfolk, lionfolk, cow, horse, goat, wolf, fox, bear, and lion.
 - **Retained rounded A/B archive:** all 18 former mixed-primitive sources live
