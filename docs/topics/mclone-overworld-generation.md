@@ -7,14 +7,15 @@ the first biome/surface/decoration language, two reuse checkpoints, and full
 host/persistence closeout completed 2026-07-18 as the separate
 internal-mutable `mclone-overworld-v1` profile while `overworld` remains the
 Minecraft Java 1.17.1 reference path. Tactical
-[`188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md) is complete;
-[`192`](../tactical/192-mclone-overworld-mountains-and-valleys.md) owns the
-next mountain/valley content family. The shared Flat Grass cylinder proof is
-complete; [`196`](../tactical/196-periodic-mclone-terrain-fields.md) is planned
-after the first accepted Tactical 192 field set and before rivers, climate
-breadth, or structures. As of 2026-07-22, this terrain sequence is the selected
-project focus: mountains and valleys, periodic production fields, rivers and
-wetlands, then coherent streams, cascades, and waterfall reaches.
+[`188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md) is complete.
+Tactical [`192`](../tactical/192-mclone-overworld-mountains-and-valleys.md)
+completed its clean Slice 0 baseline and selected its first field vocabulary
+on 2026-07-22; no mountain output has landed yet. The shared Flat Grass
+cylinder proof is complete; [`196`](../tactical/196-periodic-mclone-terrain-fields.md)
+is planned after the first accepted Tactical 192 field set and before rivers,
+climate breadth, or structures. The selected terrain sequence is mountains
+and valleys, periodic production fields, rivers and wetlands, then coherent
+streams, cascades, and waterfall reaches.
 
 ## Scope
 
@@ -79,6 +80,172 @@ and relative overburden for later caves. Its 2,096-block height, registry
 replacement model, and literal JSON spline tables are not implementation
 targets. The study does not change the current tactical order: mountains and
 valleys remain next, with rivers and caves deferred to their own slices.
+
+## Reference Vocabulary And Deliberate Divergence
+
+Minecraft Java 1.17.1 remains the executable reference for pipeline order,
+surface and feature vocabulary, deterministic chunk ownership, and the
+legibility expected at block scale. Its exact terrain composition is not the
+creative target for this profile.
+
+The useful 1.17.1 lessons are separation rather than wholesale algorithm
+reuse:
+
+- biome depth and scale are smoothly blended before density sampling;
+- base terrain precedes surface builders, local lakes and springs, and later
+  decoration;
+- river-shaped biome layers create an inexpensive, continuous visual result;
+  and
+- local lake and spring features validate their immediate solid/liquid
+  neighborhood before placing water.
+
+Mclone deliberately improves the ownership of landforms and water:
+
+| Concern | Java 1.17.1 role | Mclone original direction |
+|---|---|---|
+| Mountains | biome depth/scale contributes geometry | terrain owns mountain regions, crests, shoulders, and valleys; biome and surface react |
+| Rivers | a two-dimensional river layer mixes a low river biome into terrain | a shared watercourse contract owns channel influence, grade, width, bed, banks, and reach identity |
+| Lakes | bounded local ellipsoid feature | retain small ponds as local features; add basin-aware lakes only after macro water facts exist |
+| Springs | locally constrained source placement | retain as cave/cliff accents rather than treating them as a river network |
+| Waterfalls | usually incidental fluid placement and flow | classify a continuous reach with an upstream supply and downstream destination |
+
+This direction does not port `Aquifer`, `Cavifier`, `NoodleCavifier`, ore-vein
+paths, the Minecraft 1.18 density-function stack, or other systems excluded by
+the Java 1.17.1 target. A later profile-owned 3D density tactical remains
+available if reviewed cliffs, overhangs, or geology demonstrate a concrete
+need.
+
+## Landform Composition Direction
+
+Variation is hierarchical so that adding detail does not become independent
+noise soup:
+
+```text
+continental land/ocean intent
+  -> broad landform-region control
+  -> connected ridge and valley organization
+  -> shoulders, foothills, and local relief
+  -> derived height, slope, curvature, and exposure
+  -> biome, surface, vegetation, and later water response
+```
+
+Tactical 192 starts with exactly two new live semantic facts:
+
+- `ruggedness`: a broad signed regional control selecting where strong relief
+  belongs; and
+- `ridges`: a normalized connected-crest signal inside those regions.
+
+Valleys are initially the traversable low relation between the regional
+control and ridge signal, not a third stored noise field. Foundation
+`continentalness` and raw `relief` retain independent domains and raw values.
+The derived height may change intentionally for this internal profile, while
+ocean floors, coasts, and ordinary lowland controls should remain recognizable.
+At most one additional field may enter Tactical 192 if the first production
+maps and pixels demonstrate a specific missing degree of freedom.
+
+The initial temperate landform family should support rounded wooded ranges,
+connected rocky crests, layered grassy shoulders, broad pastoral valleys, and
+occasional steeper faces. Later selectors may add sharp ranges, plateaus and
+escarpments, isolated massifs, high basins, or gorge terrain. Those are
+landform recipes selected by macro facts, not separate uncoordinated octave
+stacks applied everywhere.
+
+Slope and curvature are derived facts. They should be computed at the smallest
+spacing needed by a real caller and should not require a neighborhood chunk
+dependency. The first implementation may keep them local to surface or review
+code; promote them into the public sample only when more than one production
+consumer needs identical semantics.
+
+## Water-System Direction
+
+Rivers and wetlands follow Tactical 196 so their fields are periodic and
+seam-correct from their first production revision. Water is a macro terrain
+input, not a biome decal or a post-surface trench. The eventual shared sample
+may expose these facts as each gains a real caller:
+
+- channel distance or influence;
+- stable water-surface and bed elevation;
+- half-width and depth;
+- downstream direction and grade;
+- network and reach identity;
+- headwater, tributary, main-stem, wetland, confluence, outlet, and later
+  stream-order or discharge classification.
+
+The first version may use deterministic bounded corridor planning rather than
+a scientific rainfall simulation. Terrain carves from the same facts that
+biomes, bank materials, wetlands, structures, and review tools query. No
+column sampler may trace arbitrarily far upstream, run an unbounded flood fill,
+or search until it finds an ocean. Coarse network construction belongs in
+canonical macro tiles with an explicit finite halo and a descriptor-keyed
+cache; point queries consume bounded reach facts.
+
+Reach grade later distinguishes calm water, riffles, rapids, cascades, falls,
+and plunge pools. A waterfall must have continuous upstream and downstream
+watercourse facts. Low-gradient reaches may meander or support floodplains and
+wetlands; steep constrained reaches may form gorges. Not every valley receives
+a river, and small configured ponds and springs remain useful local accents.
+
+This shared vocabulary also gives structures stable site facts for bridges,
+fords, mill races, water wheels, irrigation, ponds, and scenic settlement
+placement without making structures infer hydrology from final blocks.
+
+## Generation Cost And Quality Policy
+
+World generation must remain a bounded, inspectable workload. The default
+production path follows these rules:
+
+- point sampling is `O(live field count)` with a fixed amount of work per
+  field;
+- region and chunk callers batch or cache lattice work when measurement shows
+  repeated hashing to be material;
+- macro planners use fixed-size canonical tiles and finite halos rather than
+  request-order-dependent global searches;
+- terrain, biome, surface, spawn, water, and review tools consume one
+  production implementation rather than recomputing approximate variants;
+- a new field records its sampling cost and its full cold-generation cost;
+- caches are keyed by every output-affecting descriptor fact, including seed,
+  profile revision, topology, and any future generation-quality selection;
+  and
+- distant LOD may simplify rendering, but it must not silently become a
+  different authoritative block generator.
+
+The 2026-07-22 Linux Slice 0 baseline at commit `8cfa1ac4`, seed `12345`,
+center `(0,0)`, radius one chunk, and three release iterations measured:
+
+| Path | Baseline |
+|---|---:|
+| Mclone surface | 3,279.500 chunks/s |
+| Mclone cold decorated targets | 600.997 chunks/s |
+| Mclone warm decorated targets | 4,654.574 chunks/s |
+
+The 148,225-point, 16-block-stride production review grids sampled in 12.392
+ms for seed `12345` at origin and 17.457 ms for seed `-98765` around chunk
+`(-96,72)`. Cross-host timings are not compatibility locks; compare before
+and after on the same host. A greater than 25 percent regression in full cold
+Mclone target throughput requires an explanation and focused profiling. A
+twofold regression blocks a visual slice unless the tactical records an
+explicit product tradeoff and optimization follow-up. Field-map time and
+surface-only throughput remain diagnostic attribution gates even when full
+generation stays within budget.
+
+Quality-versus-speed controls divide into two categories:
+
+1. **Output-neutral runtime controls** may change without changing a world:
+   generation distance, job budget, worker count, cache size, pre-generation,
+   batching, and render/LOD quality.
+2. **Output-changing generation quality** changes terrain or blocks and must
+   be a stored world-creation descriptor fact. A world cannot switch between
+   fast and high-quality terrain as chunks load without creating seams or
+   cross-host disagreement.
+
+A future stored choice could offer `Fast`, `Standard`, and `High` recipes, but
+the initial campaign lands and tunes one canonical `Standard` path. Prefer
+keeping macro river topology and essential terrain organization common while
+varying detail octaves, secondary bank treatment, decoration density, or
+offline authoring work. Do not add the selector until profiling demonstrates
+a real product need and each mode has deterministic maps, performance
+receipts, worker equivalence, persistence coverage, and an explicit migration
+policy.
 
 ## Pipeline And Ownership
 

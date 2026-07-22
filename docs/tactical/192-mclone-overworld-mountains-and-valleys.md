@@ -1,8 +1,9 @@
 # Tactical 192: Mclone Overworld Mountains And Valleys
 
-Status: selected next 2026-07-22 after Tactical 188 completed 2026-07-18.
-Begin with the product/reuse inventory; no field or terrain output has landed
-yet.
+Status: Slice 0 completed 2026-07-22 after Tactical 188 completed 2026-07-18.
+The product target, two-field vocabulary, reuse boundary, compatibility audit,
+and clean maps/performance baseline are recorded. No field or terrain output
+has landed yet; Slice 1 is next.
 
 Topic: `mclone-overworld-generation`
 
@@ -84,18 +85,37 @@ Classify these candidates before implementation:
 
 ### Slice 0: target, fields, and clean baselines
 
-- [ ] Approve the visual rule and reject-list above.
-- [ ] Select broad-map and landscape centers from production foundation maps.
-- [ ] Define the minimum live structured fields, seed domains, ranges, and
+- [x] Approve the visual rule and reject-list above.
+- [x] Select broad-map controls from production foundation maps; select exact
+  range-interior and range-edge landscape centers from the first production
+  ruggedness/ridge map rather than inventing debug-only coordinates.
+- [x] Define the minimum live structured fields, seed domains, ranges, and
   composition units.
-- [ ] Decide whether valleys are a derived relation of ridge/regional fields or
+- [x] Decide whether valleys are a derived relation of ridge/regional fields or
   require one independently meaningful live signal.
-- [ ] Complete the reuse inventory and safety-ledger audit.
-- [ ] Capture clean foundation field hashes, selected chunk/final payload
+- [x] Complete the reuse inventory and safety-ledger audit.
+- [x] Capture clean foundation field hashes, selected chunk/final payload
   fingerprints, cards, distribution counts, and release generation cost.
 
 Gate: the desired relief can be evaluated quantitatively and visually before
 the generator changes.
+
+Slice 0 selected `ruggedness` as a broad signed regional control and `ridges`
+as a normalized connected-crest signal. Valleys are initially derived from
+their relation and do not receive a third noise field. Foundation
+continentalness and relief retain their raw domains and pinned values. New
+field scales must divide the provisional 6,144-block Tactical 196 period or
+else force that tactical to revisit its period explicitly.
+
+The clean Linux baseline at commit `8cfa1ac4`, seed `12345`, center `(0,0)`,
+radius one, and three release iterations produced 3,279.500 Mclone surface
+chunks/s, 600.997 cold decorated target chunks/s, and 4,654.574 warm decorated
+target chunks/s. Production 385-by-385 field maps at 16-block stride took
+12.392 ms at seed `12345`, origin, and 17.457 ms at seed `-98765`, chunk
+`(-96,72)`. Existing deterministic locks retain the clean raw foundation,
+selected chunk, terrain-language, order, and partition fingerprints. The
+living topic owns the fixed-cost hydrology, performance-regression, and future
+stored generation-quality policy.
 
 ### Slice 1: first concrete relief caller
 
