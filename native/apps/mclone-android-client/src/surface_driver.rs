@@ -508,6 +508,7 @@ impl AndroidGpuState {
         let overlay = self.touch.overlay_state();
         MonoUiContext {
             resolved_input,
+            controller_layout: mclone_input::ControllerLayoutFamily::Unknown,
             frame_pacing: FramePacingUiState {
                 mode: FramePacingMode::Vsync,
                 fps_cap: ANDROID_FIXED_FPS_CAP,

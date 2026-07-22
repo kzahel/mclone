@@ -108,8 +108,9 @@ use mclone_diagnostics::{
     BudgetDecisionPanelReport, BudgetHostMode, FrameHostKind, FramePipelineReport, WorkWindow,
 };
 use mclone_input::{
-    FLAT_HOTBAR_SLOT_COUNT, FlatInputAction, FlatInputFrame, InputPromptKind, ResolvedFlatInput,
-    TouchControlsMode, TouchLookDelta, XrControllerSnapshot, XrHand, keyboard_turn_mouse_delta,
+    ControllerLayoutFamily, FLAT_HOTBAR_SLOT_COUNT, FlatInputAction, FlatInputFrame,
+    InputPromptKind, ResolvedFlatInput, TouchControlsMode, TouchLookDelta, XrControllerSnapshot,
+    XrHand, keyboard_turn_mouse_delta,
 };
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh, quad_face_count_from_indices};
 use mclone_protocol::{DebugActorKind, DebugHotbarItem, EntitySnapshot, RemotePlayerUpdate};
@@ -164,10 +165,10 @@ use mclone_ui::{
     Color, DEFAULT_JOIN_REMOTE_ADDR, DebugActorTool, DebugOverlay, FlatHotbarOverlay, FlatHud,
     FlatHudDebugOverlay, GameCollisionMode, GameDeathCause, GameFramePacingMode, GameMovementMode,
     GamePlayerModel, GameScreen, GameSimulationCadence, GameTouchSettings, GameTravelAssistMode,
-    GameTurnMode, GameUiAction, GameUiHost, GameUiRenderState, GameXrTurnMode, GuiDrawList, GuiKey,
-    GuiScale, LoadingProgressOverlay, Point, Rect, StatusOverlay, StorageProfileBackend,
-    StorageProfileUiState, TouchOverlay, UiDebugSnapshot, UiDrawCacheStats, UiPanelRevision,
-    WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
+    GameTurnMode, GameUiAction, GameUiHost, GameUiRenderState, GameXrTurnMode, GamepadHudOverlay,
+    GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay, Point, Rect, StatusOverlay,
+    StorageProfileBackend, StorageProfileUiState, TouchOverlay, UiDebugSnapshot, UiDrawCacheStats,
+    UiPanelRevision, WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
 };
 
 mod asset_replacement;

@@ -179,6 +179,31 @@ fn desktop_touch_events_feed_shared_capability_resolution() {
 }
 
 #[test]
+fn desktop_gamepad_capability_requires_connection_and_meaningful_activity() {
+    let mut input = DesktopFlatInputAdapter::new();
+
+    input.set_gamepad_present(true);
+    let connected = input.capability_state.resolve(InputPreferences::AUTO);
+    assert!(connected.accepts_gamepad);
+    assert_ne!(
+        connected.preferred_prompt,
+        Some(mclone_input::InputPromptKind::Gamepad)
+    );
+
+    input.note_gamepad_activity();
+    assert_eq!(
+        input
+            .capability_state
+            .resolve(InputPreferences::AUTO)
+            .preferred_prompt,
+        Some(mclone_input::InputPromptKind::Gamepad)
+    );
+    input.set_gamepad_present(false);
+    assert!(!input.capability_state.capabilities.gamepad);
+    assert_eq!(input.capability_state.last_active_device, None);
+}
+
+#[test]
 fn player_movement_mode_cycles_through_shared_modes() {
     assert_eq!(
         EngineCameraMovementMode::Walking.toggled(),

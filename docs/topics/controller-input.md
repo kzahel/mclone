@@ -4,12 +4,13 @@ Topic: `controller-input`
 
 Status: active implementation; shared source/assignment, semantic controller
 session, scene routing, controller-complete menu navigation, and layout-aware
-text prompt foundations implemented as of 2026-07-22. The existing capability,
-binding, prompt, and first-pass gamepad adapter foundation is retained, but no
-product target currently polls a real gamepad. This topic
-owns the durable all-target controller direction across desktop flat, web,
-flat Android, desktop XR, Android XR, offscreen/test hosts, Steam Deck, and a
-future native Steam Input integration. Tactical
+text prompt foundations implemented as of 2026-07-22. Desktop flat now polls
+ordinary controllers through GilRs and browser Rust polls the W3C standard
+Gamepad mapping near its animation-frame boundary. Android and ordinary-gamepad
+XR adoption remain active work. This topic owns the durable all-target
+controller direction across desktop flat, web, flat Android, desktop XR,
+Android XR, offscreen/test hosts, Steam Deck, and a future native Steam Input
+integration. Tactical
 [`098`](../tactical/098-flat-input-capability-convergence.md) remains the
 bounded execution record for the existing flat-input slices.
 [`Tactical 215`](../tactical/215-preliminary-couch-readiness.md) owns the
@@ -106,9 +107,12 @@ source seam, but not yet the complete semantic or physical-input contract:
   axes, dead-zone/curve policy, trigger hysteresis, controller navigation
   repeat, lifecycle clearing, and active-source/layout arbitration. A bounded
   flat-frame projection applies look rate with `dt` while hosts migrate.
-- No desktop, browser, or Android product adapter currently advertises a real
-  gamepad or feeds that adapter. The repository explicitly records this in
-  [`platforms.md`](../platforms.md) and Tactical 098.
+- Desktop flat now drains and polls GilRs, while browser Rust polls only W3C
+  standard-mapped Gamepad API sources near the animation-frame boundary. Both
+  emit canonical snapshots, preserve session-local hotplug identity, advertise
+  only connected compatible sources, and switch prompts only on meaningful
+  post-dead-zone activity. No Android or XR ordinary-gamepad collector is wired
+  yet.
 - The legacy `GamepadInputAdapter` remains one controller at a time and still
   projects right-stick state directly into `FlatInputFrame`. The new semantic
   session fixes those constraints, but shipping hosts have not adopted it yet;
@@ -116,9 +120,10 @@ source seam, but not yet the complete semantic or physical-input contract:
 - `MonoInteractiveInputRouter` now owns keyboard/mouse and semantic controller
   state, selects controller context from the real scene UI state, and composes
   continuous controller movement/look through shared frame advancement. Touch
-  remains a supplemental shared frame, and no platform collector calls the
-  controller route yet. Desktop, Android, and web still separately retain
-  capability/preference facts.
+  remains a supplemental shared frame. Desktop flat and browser hosts call the
+  controller route; Android and XR adoption remains open. Hosts still retain
+  their mechanical capability/activity collectors while semantic policy stays
+  shared.
 - `mclone-ui::GuiNavigation` now owns directional traversal, confirm/back,
   page navigation, disabled-widget skipping, slider adjustment, and focus
   visuals. The scene maps semantic menu actions through it, and deterministic
@@ -354,6 +359,11 @@ Own only:
 | Android XR | Same Android collector beside OpenXR | ordinary snapshot plus tracked XR input |
 | Offscreen/test | scripted snapshots or semantic frames | exact shared resolver/router |
 
+As of 2026-07-22, desktop flat and Web/WASM implement the first and third rows.
+Desktop XR deliberately adopts the same native collector during Slice 6 so its
+ordinary and tracked sources converge in one change. Both Android rows remain
+open.
+
 ### Desktop and Steam Deck
 
 GilRs is the preferred ordinary desktop backend. Its current documented
@@ -362,10 +372,10 @@ unified controller layout, SDL-compatible mappings, and mappings supplied by
 Steam through `SDL_GAMECONTROLLERCONFIG`. It explicitly does not support
 Android.
 
-Desktop flat and desktop XR are in the same native app, so one app-local or
-small platform-input collector can serve both without adding GilRs to
-`mclone-input`. Steam Deck is the ordinary Linux path, not a separate engine
-target.
+Desktop flat and desktop XR are in the same native app. The app-local GilRs
+collector now serves desktop flat without adding GilRs to `mclone-input`;
+desktop XR consumption remains paired with semantic tracked-action convergence.
+Steam Deck is the ordinary Linux path, not a separate engine target.
 
 ### Web
 
@@ -374,16 +384,15 @@ as possible to the existing animation-frame input boundary. The W3C standard
 layout defines four stick axes and seventeen canonical buttons when the
 browser reports `mapping == "standard"`.
 
-Direct `web-sys` polling is the initial recommendation because it is small,
-fits the existing browser host, and keeps browser lifecycle facts explicit.
-GilRs also has a Wasm backend and may be adopted after a bounded spike if it
-reduces total code and preserves the host-boundary source locks. It cannot be
-the universal solution because Android remains unsupported.
+Direct `web-sys` polling is implemented because it is small, fits the existing
+browser host, and keeps browser lifecycle facts explicit. GilRs also has a Wasm
+backend and could replace it after a bounded spike if that reduces total code
+and preserves the host-boundary source locks. It cannot be the universal
+solution because Android remains unsupported.
 
-The TypeScript product adapter may install connection listeners and forward
-mechanical browser facts, but it must not contain action names, button maps,
-dead zones, or gameplay decisions. Browser Rust produces the canonical
-snapshot and feeds the shared resolver before each frame.
+The TypeScript product adapter contains no action names, button maps, dead
+zones, or gameplay decisions. Browser Rust produces the canonical snapshot and
+feeds the shared resolver before each admitted frame.
 
 ### Android
 
@@ -535,12 +544,12 @@ standard snapshot or make the shared gameplay path conditional on a vendor.
 3. **Shared UI completion.** Add navigation, confirm/back/page actions, focus
    traversal, repeat policy, and action/layout-based prompts. Prove every
    non-text menu with scripted controller input.
-4. **Synthetic and desktop proof.** Feed canonical snapshots through the
-   offscreen/test host, then add the GilRs desktop collector for flat and XR
-   modes. Validate ordinary desktop controllers and Steam Deck.
-5. **Browser adoption.** Poll browser gamepads at the frame boundary, normalize
-   the standard mapping in browser Rust, update real capability/activity, and
-   retain TypeScript as mechanical glue.
+4. **Synthetic and desktop proof.** Canonical scripted snapshots and the GilRs
+   desktop-flat collector are implemented. Desktop XR consumption and physical
+   desktop/Steam Deck validation remain open.
+5. **Browser adoption.** Implemented in browser Rust with standard-mapping
+   mocks, live capability/activity, and domain-blind TypeScript. Physical
+   browser/controller validation remains open.
 6. **Android adoption.** Land the raw-controller input seam, one shared Android
    collector, and both flat-Android and Android-XR consumption. Validate wired
    and wireless real devices rather than relying only on AVD key injection.

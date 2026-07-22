@@ -7,6 +7,7 @@ mod actor_assets;
 mod app;
 mod camera;
 mod cli;
+mod desktop_gamepad;
 mod desktop_scene_host;
 #[cfg(feature = "xr")]
 mod desktop_xr;

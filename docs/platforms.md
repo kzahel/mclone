@@ -296,10 +296,13 @@ result to the shared `mclone-scene` render-admission policy. Static Quest upload
 limits remain optional clamps on that shared adaptive grant, not a separate
 platform controller.
 
-`mclone-input::GamepadInputAdapter` and `GamepadBindings` are retained as a
-shared contract as of 2026-07-10. No current native adapter advertises gamepad
-capability or synthesizes support; adoption requires a real desktop, browser,
-or Android event source plus device validation.
+`mclone-input::ControllerInputSession`, `GamepadBindings`, and
+`StandardGamepadSnapshot` are the shared controller contract. As of 2026-07-22,
+desktop flat polls GilRs and browser Rust polls W3C standard-mapped Gamepad API
+sources; both advertise only compatible connected devices and feed the shared
+scene router. Android and ordinary-gamepad XR adoption remain active work, and
+all platforms still require the real-device validation recorded in
+[`topics/controller-input.md`](topics/controller-input.md).
 
 ## Validation Policy
 

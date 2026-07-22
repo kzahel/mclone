@@ -21,6 +21,7 @@ pub struct MonoInputDisposition {
     pub scene_changed: bool,
     pub clear_transient_input: bool,
     pub request_pointer_capture_when_ready: bool,
+    pub meaningful_controller_activity: bool,
 }
 
 impl MonoInputDisposition {
@@ -30,6 +31,7 @@ impl MonoInputDisposition {
             scene_changed: handled || outcome.scene_replaced,
             clear_transient_input: outcome.clear_gameplay_input,
             request_pointer_capture_when_ready: outcome.session_start_requested,
+            meaningful_controller_activity: false,
         }
     }
 
@@ -38,6 +40,7 @@ impl MonoInputDisposition {
         self.scene_changed |= other.scene_changed;
         self.clear_transient_input |= other.clear_transient_input;
         self.request_pointer_capture_when_ready |= other.request_pointer_capture_when_ready;
+        self.meaningful_controller_activity |= other.meaningful_controller_activity;
     }
 }
 
@@ -147,9 +150,11 @@ impl MonoInteractiveInputRouter {
             InputContext::Gameplay
         };
         let actions = self.sample_controller_actions(context, now, samples)?;
+        let meaningful_controller_activity = actions.activity_source.is_some();
         if context != InputContext::Gameplay {
             let mut disposition = MonoInputDisposition {
                 handled: !actions.pressed.is_empty() || !actions.released.is_empty(),
+                meaningful_controller_activity,
                 ..MonoInputDisposition::default()
             };
             for action in actions.pressed {
@@ -186,7 +191,8 @@ impl MonoInteractiveInputRouter {
         frame.sprint = false;
         frame.sneak = false;
         frame.descend = false;
-        let disposition = Self::route_resolved_flat_frame(host, frame, device, queue, effects)?;
+        let mut disposition = Self::route_resolved_flat_frame(host, frame, device, queue, effects)?;
+        disposition.meaningful_controller_activity = meaningful_controller_activity;
         self.clear_if_requested(disposition);
         Ok(disposition)
     }

@@ -45,6 +45,7 @@ const MONO_GROUND_PROBE_DISTANCE: f64 = 0.01;
 #[derive(Clone, Debug, PartialEq)]
 pub struct MonoUiContext {
     pub resolved_input: ResolvedFlatInput,
+    pub controller_layout: ControllerLayoutFamily,
     pub frame_pacing: FramePacingUiState,
     pub pacing_debug: FramePacingDebugStats,
     pub frame_timing: FrameTimingStats,
@@ -66,6 +67,7 @@ impl Default for MonoUiContext {
                 accepts_gamepad: false,
                 accepts_xr_controller: false,
             },
+            controller_layout: ControllerLayoutFamily::Unknown,
             frame_pacing: FramePacingUiState::default(),
             pacing_debug: FramePacingDebugStats::default(),
             frame_timing: FrameTimingStats::default(),
@@ -2183,6 +2185,7 @@ impl McloneSceneHost {
         let context = self.mono_ui_context.clone().unwrap_or_default();
         let palette_active = self.ui.screen() == Some(GameScreen::BlockPalette);
         let mut hud = FlatHud::new(context.resolved_input);
+        hud.gamepad = GamepadHudOverlay::visible_for_layout(context.controller_layout);
         hud.world_hud_visible = context.hud_visible && (!menu_active || palette_active);
         hud.crosshair_visible = context.hud_visible && self.crosshair_visible && !menu_active;
         hud.hotbar = FlatHotbarOverlay::selected_with_icons(

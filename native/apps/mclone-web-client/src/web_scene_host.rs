@@ -33,8 +33,9 @@ use mclone_assets::{
 use mclone_client::BlockInteractionTarget;
 use mclone_core::{BlockPos, ChunkPos, Direction, Vec3d};
 use mclone_input::{
-    FlatInputAction, InputPromptKind, KeyboardKey, MouseWheelDirection, PointerButton,
-    ResolvedFlatInput, TouchControlsMode, TouchInputAdapter, TouchInputEvent, TouchInputSettings,
+    ControllerLayoutFamily, FlatInputAction, InputCapabilities, InputCapabilityState,
+    InputDeviceKind, InputPreferences, KeyboardKey, MouseWheelDirection, PointerButton,
+    TouchControlsMode, TouchInputAdapter, TouchInputEvent, TouchInputSettings,
 };
 use mclone_render::actor_composition_fixture::ActorCompositionFixture;
 use mclone_render::chunk::{
@@ -65,6 +66,7 @@ use crate::web_canvas::{
     web_asset_pack_catalog,
 };
 use crate::web_catalog_execution::WebCatalogExecution;
+use crate::web_gamepad::BrowserGamepadCollector;
 use crate::web_render_worker::WebRenderWorkerCoordinator;
 use crate::web_scene_protocol::{
     WebSceneFrameAdmission, WebSceneFrameDriverPolicy, WebSceneFrameState, WebScenePlatformServices,
@@ -145,12 +147,19 @@ use crate::web_server_worker::WebIntegratedServerRunnerConfig;
 const RESUME_OBSERVATION_FRAMES: u8 = 8;
 const INITIAL_PRESENTATION_STABLE_FRAMES: u8 = 6;
 
-#[derive(Debug, Default)]
+#[derive(Clone, Copy, Debug, Default)]
 struct WebHostEffects {
     mouse_lock_requested: Option<bool>,
     touch_controls_mode: Option<TouchControlsMode>,
     quit_to_title: bool,
     exit: bool,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct WebFrameInputEffects {
+    clear_transient_input: bool,
+    pointer_capture_desired: Option<bool>,
+    exit_requested: bool,
 }
 
 impl HostEffects for WebHostEffects {
@@ -471,8 +480,11 @@ pub struct WebSceneHost {
     touch_controls_mode: TouchControlsMode,
     input_preferences: ClientInputPreferences,
     input_preference_error: Option<String>,
+    input_capability_state: InputCapabilityState,
     touch_overlay: TouchOverlay,
     interactive_input: MonoInteractiveInputRouter,
+    gamepad_collector: BrowserGamepadCollector,
+    frame_input_effects: WebFrameInputEffects,
     touch_input: TouchInputAdapter,
     ui_touch_id: Option<u64>,
     last_action: Option<GameUiAction>,
@@ -939,7 +951,7 @@ impl WebSceneHost {
         } = admission
         else {
             return self
-                .operational_report(false, 0.0, false)
+                .finish_frame_operational_report(false, 0.0, false)
                 .map_err(JsValue::from);
         };
 
@@ -951,11 +963,12 @@ impl WebSceneHost {
         self.last_visible_frame_millis = Some(now_millis);
         self.frame_count = self.frame_count.saturating_add(1);
         self.dom_input_frame_count = self.dom_input_frame_count.saturating_add(1);
+        self.poll_controller_input(now_millis)?;
 
         let Some(host) = self.host.as_mut() else {
             self.frame_policy.shutdown();
             return self
-                .operational_report(false, delta_seconds, first_after_resume)
+                .finish_frame_operational_report(false, delta_seconds, first_after_resume)
                 .map_err(JsValue::from);
         };
         let supplemental = self.touch_input.held_frame();
@@ -973,7 +986,7 @@ impl WebSceneHost {
                 self.startup_status_visible = false;
                 self.status_overlay = StatusOverlay::new(reason, false);
                 return self
-                    .operational_report(false, delta_seconds, first_after_resume)
+                    .finish_frame_operational_report(false, delta_seconds, first_after_resume)
                     .map_err(JsValue::from);
             }
         };
@@ -1060,7 +1073,7 @@ impl WebSceneHost {
             self.startup_status_visible = false;
             self.status_overlay = StatusOverlay::hidden();
         }
-        self.operational_report(true, delta_seconds, first_after_resume)
+        self.finish_frame_operational_report(true, delta_seconds, first_after_resume)
             .map_err(JsValue::from)
     }
 
@@ -1074,6 +1087,8 @@ impl WebSceneHost {
         pressed: bool,
         repeat: bool,
     ) -> Result<JsValue, JsValue> {
+        self.input_capability_state
+            .note_activity(InputDeviceKind::Keyboard);
         let Some(key) = browser_keyboard_key(code, legacy_key) else {
             return self
                 .input_disposition_report(
@@ -1137,6 +1152,8 @@ impl WebSceneHost {
         x: f64,
         y: f64,
     ) -> Result<JsValue, JsValue> {
+        self.input_capability_state
+            .note_activity(InputDeviceKind::Mouse);
         let Some(button) = browser_pointer_button(button) else {
             return self
                 .input_disposition_report(
@@ -1209,6 +1226,8 @@ impl WebSceneHost {
 
     #[wasm_bindgen(js_name = handleRawPointerMove)]
     pub fn handle_raw_pointer_move(&mut self, x: f64, y: f64) -> Result<JsValue, JsValue> {
+        self.input_capability_state
+            .note_activity(InputDeviceKind::Mouse);
         let point = self.ui_point(x, y);
         let mut effects = WebHostEffects::default();
         let disposition = self
@@ -1233,6 +1252,8 @@ impl WebSceneHost {
         delta_x: f32,
         delta_y: f32,
     ) -> Result<JsValue, JsValue> {
+        self.input_capability_state
+            .note_activity(InputDeviceKind::Mouse);
         let mut effects = WebHostEffects::default();
         let disposition = self
             .interactive_input
@@ -1253,6 +1274,8 @@ impl WebSceneHost {
 
     #[wasm_bindgen(js_name = handleRawWheel)]
     pub fn handle_raw_wheel(&mut self, delta_y: f64, _delta_mode: u32) -> Result<JsValue, JsValue> {
+        self.input_capability_state
+            .note_activity(InputDeviceKind::Mouse);
         let direction = if delta_y < 0.0 {
             MouseWheelDirection::Up
         } else {
@@ -1283,6 +1306,8 @@ impl WebSceneHost {
         x: f64,
         y: f64,
     ) -> Result<JsValue, JsValue> {
+        self.input_capability_state
+            .note_activity(InputDeviceKind::Touch);
         let id = u64::from(id);
         let scale = GuiScale::from_pixels(self.context.width, self.context.height);
         let point = scale.client_to_gui(x, y);
@@ -2174,6 +2199,18 @@ async fn create_scene_host(
         initial_speed,
     );
     let depth = ChunkDepthTarget::new(&context.device, context.width, context.height);
+    let mut input_capability_state = InputCapabilityState::new(InputCapabilities {
+        keyboard: true,
+        mouse: true,
+        touch: capabilities.touch_input_available(),
+        gamepad: false,
+        xr_controller: false,
+    });
+    input_capability_state.note_activity(if capabilities.touch_input_available() {
+        InputDeviceKind::Touch
+    } else {
+        InputDeviceKind::Keyboard
+    });
     let mut web_host = WebSceneHost {
         context,
         depth,
@@ -2207,8 +2244,11 @@ async fn create_scene_host(
         touch_controls_mode: input_preferences.touch_controls_mode,
         input_preferences,
         input_preference_error,
+        input_capability_state,
         touch_overlay: TouchOverlay::hidden(),
         interactive_input: MonoInteractiveInputRouter::new(),
+        gamepad_collector: BrowserGamepadCollector::new(),
+        frame_input_effects: WebFrameInputEffects::default(),
         touch_input: TouchInputAdapter::with_settings(TouchInputSettings {
             look_sensitivity: input_preferences.touch_look_sensitivity,
             ..TouchInputSettings::default()
@@ -2261,6 +2301,58 @@ impl WebSceneHost {
             host.clear_mono_camera_input();
             host.clear_mono_ui_input();
         }
+    }
+
+    fn poll_controller_input(&mut self, now_millis: f64) -> Result<(), JsValue> {
+        if self.host.is_none() {
+            return Ok(());
+        }
+        let poll = match self.gamepad_collector.poll_browser(now_millis) {
+            Ok(poll) => poll,
+            Err(error) => {
+                web_sys::console::warn_2(
+                    &JsValue::from_str("browser Gamepad API poll failed"),
+                    &error,
+                );
+                return Ok(());
+            }
+        };
+        self.input_capability_state
+            .set_present(InputDeviceKind::Gamepad, poll.connected_count() > 0);
+        for (source_id, descriptor) in poll.connected {
+            self.interactive_input
+                .connect_controller_source(source_id, descriptor);
+        }
+        for source_id in poll.disconnected {
+            self.interactive_input
+                .disconnect_controller_source(source_id)
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+        }
+        let mut effects = WebHostEffects::default();
+        let disposition = self
+            .interactive_input
+            .route_controller_samples(
+                self.host
+                    .as_mut()
+                    .ok_or_else(|| JsValue::from_str("scene host is shut down"))?,
+                poll.sample_time,
+                poll.samples,
+                &self.context.device,
+                &self.context.queue,
+                &mut effects,
+            )
+            .map_err(js_error)?;
+        if disposition.meaningful_controller_activity {
+            self.input_capability_state
+                .note_activity(InputDeviceKind::Gamepad);
+        }
+        self.frame_input_effects.clear_transient_input |= disposition.clear_transient_input;
+        if effects.mouse_lock_requested.is_some() {
+            self.frame_input_effects.pointer_capture_desired = effects.mouse_lock_requested;
+        }
+        self.frame_input_effects.exit_requested |= effects.exit;
+        self.apply_input_effect_state(disposition, effects)
+            .map_err(JsValue::from)
     }
 
     fn route_touch_input_event(
@@ -2322,6 +2414,7 @@ impl WebSceneHost {
                 scene_changed: true,
                 clear_transient_input: outcome.clear_gameplay_input,
                 request_pointer_capture_when_ready: outcome.session_start_requested,
+                meaningful_controller_activity: false,
             },
             effects,
         )
@@ -2332,25 +2425,7 @@ impl WebSceneHost {
         disposition: MonoInputDisposition,
         effects: WebHostEffects,
     ) -> Result<JsValue, String> {
-        if let Some(mode) = effects.touch_controls_mode {
-            self.touch_controls_mode = mode;
-        }
-        if let Some(settings) = self
-            .host_ref()
-            .map_err(|error| format!("{error:?}"))?
-            .mono_ui_render_state()
-            .touch_settings
-        {
-            self.touch_look_sensitivity = settings.clamped_look_sensitivity();
-            self.touch_input
-                .set_look_sensitivity(self.touch_look_sensitivity);
-        }
-        if disposition.clear_transient_input || effects.quit_to_title {
-            self.clear_interactive_input();
-        }
-        self.refresh_touch_overlay_from_input()
-            .map_err(|error| format!("refresh shared touch overlay: {error:?}"))?;
-        self.persist_input_preferences_if_changed();
+        self.apply_input_effect_state(disposition, effects)?;
 
         let value = self.ui_report(disposition.handled, None)?;
         let object: js_sys::Object = value.unchecked_into();
@@ -2377,6 +2452,33 @@ impl WebSceneHost {
         }
         report_set_bool(&object, "exitRequested", effects.exit)?;
         Ok(object.into())
+    }
+
+    fn apply_input_effect_state(
+        &mut self,
+        disposition: MonoInputDisposition,
+        effects: WebHostEffects,
+    ) -> Result<(), String> {
+        if let Some(mode) = effects.touch_controls_mode {
+            self.touch_controls_mode = mode;
+        }
+        if let Some(settings) = self
+            .host_ref()
+            .map_err(|error| format!("{error:?}"))?
+            .mono_ui_render_state()
+            .touch_settings
+        {
+            self.touch_look_sensitivity = settings.clamped_look_sensitivity();
+            self.touch_input
+                .set_look_sensitivity(self.touch_look_sensitivity);
+        }
+        if disposition.clear_transient_input || effects.quit_to_title {
+            self.clear_interactive_input();
+        }
+        self.refresh_touch_overlay_from_input()
+            .map_err(|error| format!("refresh shared touch overlay: {error:?}"))?;
+        self.persist_input_preferences_if_changed();
+        Ok(())
     }
 
     fn refresh_touch_overlay_from_input(&mut self) -> Result<(), JsValue> {
@@ -2464,18 +2566,15 @@ impl WebSceneHost {
 
     fn refresh_mono_ui_context(&mut self) -> Result<(), JsValue> {
         let mut context = MonoUiContext::default();
-        context.resolved_input = ResolvedFlatInput {
-            preferred_prompt: Some(if self.touch_overlay.visible {
-                InputPromptKind::Touch
-            } else {
-                InputPromptKind::KeyboardMouse
-            }),
-            touch_controls_visible: self.touch_overlay.visible,
-            accepts_keyboard_mouse: true,
-            accepts_touch: self.touch_settings_available,
-            accepts_gamepad: false,
-            accepts_xr_controller: false,
-        };
+        let mut preferences = InputPreferences::AUTO;
+        preferences.touch_controls = self.touch_controls_mode;
+        context.resolved_input = self.input_capability_state.resolve(preferences);
+        context.resolved_input.touch_controls_visible = self.touch_overlay.visible;
+        context.controller_layout = self
+            .interactive_input
+            .latest_controller_actions()
+            .active_controller_layout
+            .unwrap_or(ControllerLayoutFamily::Unknown);
         context.touch_overlay = self.touch_overlay.clone();
         context.touch_controls_mode = Some(self.touch_controls_mode);
         context.touch_settings = self
@@ -2734,10 +2833,24 @@ impl WebSceneHost {
             self.render_worker.pending_request_count() as f64,
         )?;
         report_set_bool(&object, "shutdownComplete", self.shutdown_complete)?;
+        report_set_bool(
+            &object,
+            "clearTransientInput",
+            self.frame_input_effects.clear_transient_input,
+        )?;
+        if let Some(requested) = self.frame_input_effects.pointer_capture_desired {
+            report_set_bool(&object, "pointerCaptureDesired", requested)?;
+        }
+        report_set_bool(
+            &object,
+            "exitRequested",
+            self.frame_input_effects.exit_requested,
+        )?;
         if let Some(host) = self.host.as_ref() {
             let ui_active = host.mono_ui_is_active();
             report_set_bool(&object, "active", ui_active)?;
             report_set_bool(&object, "uiActive", ui_active)?;
+            report_set_bool(&object, "releasePointerCapture", ui_active)?;
             report_set_bool(
                 &object,
                 "sessionActive",
@@ -2745,6 +2858,17 @@ impl WebSceneHost {
             )?;
         }
         Ok(object.into())
+    }
+
+    fn finish_frame_operational_report(
+        &mut self,
+        rendered: bool,
+        delta_seconds: f64,
+        first_after_resume: bool,
+    ) -> Result<JsValue, String> {
+        let report = self.operational_report(rendered, delta_seconds, first_after_resume);
+        self.frame_input_effects = WebFrameInputEffects::default();
+        report
     }
 
     fn diagnostic_report(

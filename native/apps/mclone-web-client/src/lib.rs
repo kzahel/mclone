@@ -40,6 +40,8 @@ pub use web_bootstrap::{WebBootstrapResources, WebHostCapabilities};
 mod web_canvas;
 #[cfg(any(target_arch = "wasm32", test))]
 mod web_catalog_execution;
+#[cfg(any(target_arch = "wasm32", test))]
+mod web_gamepad;
 #[cfg(target_arch = "wasm32")]
 pub use web_catalog_execution::{WebCatalogExecution, WebCatalogSmokeExecution};
 #[cfg(target_arch = "wasm32")]

@@ -492,6 +492,19 @@ class WebFrameDriver {
       return;
     }
     smokeObserver?.observeReport(frame);
+    const wasPointerCaptureBlocked = runtime.state.pointerCaptureBlocked === true;
+    runtime.state.pointerCaptureBlocked = Boolean(frame.active ?? frame.uiActive);
+    if (frame.clearTransientInput === true) {
+      this.pointerDragging = false;
+      this.pointerDown = null;
+      this.touchControls?.clearAll();
+    }
+    if (frame.releasePointerCapture === true) {
+      this.releasePointerLockForUi();
+    } else if (frame.pointerCaptureDesired === true
+      || (wasPointerCaptureBlocked && !runtime.state.pointerCaptureBlocked)) {
+      this.requestPointerLock();
+    }
     if (frame.rendered) {
       hideBootstrapStatus();
     }

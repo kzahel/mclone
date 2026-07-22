@@ -106,7 +106,13 @@ struct DesktopFlatInputAdapter {
 impl Default for DesktopFlatInputAdapter {
     fn default() -> Self {
         Self {
-            capability_state: InputCapabilityState::new(InputCapabilities::NONE),
+            capability_state: InputCapabilityState::new(InputCapabilities {
+                keyboard: true,
+                mouse: true,
+                touch: false,
+                gamepad: false,
+                xr_controller: false,
+            }),
         }
     }
 }
@@ -127,6 +133,16 @@ impl DesktopFlatInputAdapter {
 
     fn note_touch_activity(&mut self) {
         self.capability_state.note_activity(InputDeviceKind::Touch);
+    }
+
+    fn set_gamepad_present(&mut self, present: bool) {
+        self.capability_state
+            .set_present(InputDeviceKind::Gamepad, present);
+    }
+
+    fn note_gamepad_activity(&mut self) {
+        self.capability_state
+            .note_activity(InputDeviceKind::Gamepad);
     }
 
     fn normalize_keyboard_input(
@@ -174,6 +190,7 @@ struct ChunkApp {
     scene: SceneOptions,
     render_options: TexturedSectionRenderOptions,
     scene_driver: Option<WinitFrameDriver>,
+    gamepad_collector: Option<crate::desktop_gamepad::DesktopGamepadCollector>,
     flat_input: DesktopFlatInputAdapter,
     input_preferences: InputPreferences,
     frame_pacing: FramePacing,
@@ -562,10 +579,21 @@ impl ChunkApp {
         if ui_v2_hit_debug {
             log::info!("{UI_V2_HIT_DEBUG_ENV}=1; UI v2 hit debug overlay/logging enabled");
         }
+        let gamepad_collector = match crate::desktop_gamepad::DesktopGamepadCollector::new() {
+            Ok(collector) => {
+                log::info!("desktop gamepad collector initialized");
+                Some(collector)
+            }
+            Err(error) => {
+                log::warn!("desktop gamepad collector unavailable: {error:#}");
+                None
+            }
+        };
         Self {
             scene: scene.clone(),
             render_options,
             scene_driver: None,
+            gamepad_collector,
             assets,
             flat_input: DesktopFlatInputAdapter::new(),
             input_preferences: InputPreferences::AUTO,
@@ -676,6 +704,31 @@ impl ChunkApp {
         Ok(())
     }
 
+    fn poll_controller_input(&mut self, event_loop: &ActiveEventLoop) {
+        let poll = match self.gamepad_collector.as_mut() {
+            Some(collector) => match collector.poll() {
+                Ok(poll) => poll,
+                Err(error) => {
+                    log::error!("desktop gamepad poll failed; disabling collector: {error:#}");
+                    self.gamepad_collector = None;
+                    self.flat_input.set_gamepad_present(false);
+                    self.clear_flat_gameplay_input();
+                    return;
+                }
+            },
+            None => return,
+        };
+        self.flat_input
+            .set_gamepad_present(poll.connected_count() > 0);
+        let result = match (self.surface.as_ref(), self.scene_driver.as_mut()) {
+            (Some(surface), Some(driver)) => {
+                driver.route_controller_poll(poll, &surface.device, &surface.queue)
+            }
+            _ => return,
+        };
+        self.apply_input_outcome("gamepad input", result, event_loop);
+    }
+
     fn clear_flat_gameplay_input(&mut self) {
         if let Some(driver) = &mut self.scene_driver {
             driver.clear_interactive_input();
@@ -778,6 +831,9 @@ impl ChunkApp {
             }
         };
         let handled = result.scene.handled;
+        if result.controller_activity {
+            self.flat_input.note_gamepad_activity();
+        }
         self.apply_host_effect_outcome(result.host, result.scene.clear_transient_input, event_loop);
         handled
     }
@@ -1394,6 +1450,7 @@ impl ApplicationHandler for ChunkApp {
             }
             WindowEvent::RedrawRequested => {
                 let frame_start = Instant::now();
+                self.poll_controller_input(event_loop);
                 if let Some(window) = &self.window {
                     self.frame_pacing.update_monitor(window);
                 }

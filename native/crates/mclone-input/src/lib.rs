@@ -1945,6 +1945,44 @@ pub enum ControllerLayoutFamily {
     Unknown,
 }
 
+/// Best-effort presentation family classification from session-local backend
+/// identity facts. Gameplay and bindings never depend on this result.
+pub fn classify_controller_layout(
+    display_label: Option<&str>,
+    vendor_id: Option<u16>,
+) -> ControllerLayoutFamily {
+    match vendor_id {
+        Some(0x045e) => return ControllerLayoutFamily::XboxLike,
+        Some(0x054c) => return ControllerLayoutFamily::PlayStationLike,
+        Some(0x057e) => return ControllerLayoutFamily::NintendoLike,
+        Some(0x28de) => return ControllerLayoutFamily::SteamDeckLike,
+        _ => {}
+    }
+    let Some(label) = display_label.filter(|label| !label.trim().is_empty()) else {
+        return ControllerLayoutFamily::Unknown;
+    };
+    let label = label.to_ascii_lowercase();
+    if label.contains("steam deck") || label.contains("steam controller") || label.contains("valve")
+    {
+        ControllerLayoutFamily::SteamDeckLike
+    } else if label.contains("dualsense")
+        || label.contains("dualshock")
+        || label.contains("playstation")
+        || label.contains("sony")
+    {
+        ControllerLayoutFamily::PlayStationLike
+    } else if label.contains("nintendo")
+        || label.contains("joy-con")
+        || label.contains("switch pro")
+    {
+        ControllerLayoutFamily::NintendoLike
+    } else if label.contains("xbox") || label.contains("xinput") || label.contains("microsoft") {
+        ControllerLayoutFamily::XboxLike
+    } else {
+        ControllerLayoutFamily::Generic
+    }
+}
+
 /// Neutral source capabilities used by shared policy and presentation.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct InputSourceCapabilities {
@@ -3024,6 +3062,30 @@ mod tests {
         assert!(frame.select_hotbar_slot(FLAT_HOTBAR_SLOT_COUNT - 1));
         assert!(!frame.select_hotbar_slot(FLAT_HOTBAR_SLOT_COUNT));
         assert_eq!(frame.selected_hotbar_slot, Some(FLAT_HOTBAR_SLOT_COUNT - 1));
+    }
+
+    #[test]
+    fn controller_layout_classification_prefers_vendor_then_label() {
+        assert_eq!(
+            classify_controller_layout(Some("Generic Controller"), Some(0x054c)),
+            ControllerLayoutFamily::PlayStationLike
+        );
+        assert_eq!(
+            classify_controller_layout(Some("Steam Deck"), None),
+            ControllerLayoutFamily::SteamDeckLike
+        );
+        assert_eq!(
+            classify_controller_layout(Some("Nintendo Switch Pro Controller"), None),
+            ControllerLayoutFamily::NintendoLike
+        );
+        assert_eq!(
+            classify_controller_layout(Some("Unbranded USB pad"), None),
+            ControllerLayoutFamily::Generic
+        );
+        assert_eq!(
+            classify_controller_layout(None, None),
+            ControllerLayoutFamily::Unknown
+        );
     }
 
     #[test]

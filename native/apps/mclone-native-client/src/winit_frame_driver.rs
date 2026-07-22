@@ -42,6 +42,7 @@ pub(crate) struct WinitUiActionOutcome {
 pub(crate) struct WinitInputOutcome {
     pub(crate) scene: MonoInputDisposition,
     pub(crate) host: WinitHostEffectOutcome,
+    pub(crate) controller_activity: bool,
 }
 
 #[derive(Default)]
@@ -271,7 +272,7 @@ impl WinitFrameDriver {
     pub(crate) fn render(
         &mut self,
         frame: RenderFrameContext<'_>,
-        context: MonoUiContext,
+        mut context: MonoUiContext,
     ) -> Result<MonoSceneFrameSummary> {
         let RenderFrameContext {
             device,
@@ -300,6 +301,11 @@ impl WinitFrameDriver {
                 .flatten()
                 .map(|period_ms| (1_000.0 / period_ms) as f32),
         );
+        context.controller_layout = self
+            .interactive_input
+            .latest_controller_actions()
+            .active_controller_layout
+            .unwrap_or(mclone_input::ControllerLayoutFamily::Unknown);
         self.host.set_mono_ui_context(context);
         let view = self.host.mono_render_view(world_target.size)?;
         let split_native_ui = self.scale_presentation.is_some();
@@ -463,6 +469,35 @@ impl WinitFrameDriver {
         Ok(self.finish_input_outcome(scene, effects))
     }
 
+    pub(crate) fn route_controller_poll(
+        &mut self,
+        poll: crate::desktop_gamepad::DesktopGamepadPoll,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<WinitInputOutcome> {
+        for (source_id, descriptor) in poll.connected {
+            self.interactive_input
+                .connect_controller_source(source_id, descriptor);
+        }
+        for source_id in poll.disconnected {
+            self.interactive_input
+                .disconnect_controller_source(source_id)?;
+        }
+        let mut effects = WinitHostEffects::default();
+        let scene = self.interactive_input.route_controller_samples(
+            &mut self.host,
+            poll.sample_time,
+            poll.samples,
+            device,
+            queue,
+            &mut effects,
+        )?;
+        let controller_activity = scene.meaningful_controller_activity;
+        let mut outcome = self.finish_input_outcome(scene, effects);
+        outcome.controller_activity = controller_activity;
+        Ok(outcome)
+    }
+
     pub(crate) fn advance_held_input(&mut self, dt_seconds: f64) -> Result<bool> {
         Ok(self
             .interactive_input
@@ -490,6 +525,7 @@ impl WinitFrameDriver {
         WinitInputOutcome {
             scene,
             host: effects.outcome,
+            controller_activity: false,
         }
     }
 

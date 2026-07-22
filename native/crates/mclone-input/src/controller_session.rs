@@ -64,6 +64,8 @@ pub struct PlayerActionFrame {
     pub held: BTreeSet<PlayerAction>,
     pub pressed: BTreeSet<PlayerAction>,
     pub released: BTreeSet<PlayerAction>,
+    /// Source with meaningful post-dead-zone activity in this sample only.
+    pub activity_source: Option<InputSourceId>,
     pub active_source: Option<InputSourceId>,
     pub active_controller_layout: Option<ControllerLayoutFamily>,
 }
@@ -224,6 +226,7 @@ struct ControllerSourceState {
     repeat_deadlines: BTreeMap<PlayerAction, Duration>,
     left_trigger_pressed: bool,
     right_trigger_pressed: bool,
+    suppress_until_neutral: bool,
 }
 
 impl ControllerSourceState {
@@ -237,6 +240,7 @@ impl ControllerSourceState {
             repeat_deadlines: BTreeMap::new(),
             left_trigger_pressed: false,
             right_trigger_pressed: false,
+            suppress_until_neutral: false,
         }
     }
 
@@ -247,11 +251,12 @@ impl ControllerSourceState {
         self.repeat_deadlines.clear();
         self.left_trigger_pressed = false;
         self.right_trigger_pressed = false;
+        self.suppress_until_neutral = true;
         released
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 struct ResolvedSource {
     movement: MovementImpulse,
     look_rate: LookDelta,
@@ -377,14 +382,18 @@ impl ControllerInputSession {
         self.context = context;
         let settings = self.settings.normalized();
         for state in self.sources.values_mut() {
-            let resolved = resolve_source(
-                state,
-                self.context,
-                &self.bindings,
-                settings,
-                Duration::ZERO,
-                false,
-            );
+            let resolved = if state.suppress_until_neutral {
+                ResolvedSource::default()
+            } else {
+                resolve_source(
+                    state,
+                    self.context,
+                    &self.bindings,
+                    settings,
+                    Duration::ZERO,
+                    false,
+                )
+            };
             state.held_actions = resolved.held;
             state.repeat_deadlines.clear();
         }
@@ -410,6 +419,7 @@ impl ControllerInputSession {
                 return Err(ControllerInputError::UnknownSource(*source_id));
             }
         }
+        let settings = self.settings.normalized();
         let mut changed_samples = BTreeSet::new();
         for (source_id, snapshot) in samples {
             let state = self
@@ -420,9 +430,11 @@ impl ControllerInputSession {
                 changed_samples.insert(source_id);
             }
             state.snapshot = snapshot;
+            if state.suppress_until_neutral && snapshot_is_neutral(snapshot, settings) {
+                state.suppress_until_neutral = false;
+            }
         }
 
-        let settings = self.settings.normalized();
         let mut resolved_sources = BTreeMap::new();
         let mut activity_candidates = BTreeSet::new();
         let mut pressed = BTreeSet::new();
@@ -430,7 +442,11 @@ impl ControllerInputSession {
         let mut held = BTreeSet::new();
 
         for (source_id, state) in &mut self.sources {
-            let resolved = resolve_source(state, self.context, &self.bindings, settings, now, true);
+            let resolved = if state.suppress_until_neutral {
+                ResolvedSource::default()
+            } else {
+                resolve_source(state, self.context, &self.bindings, settings, now, true)
+            };
             let source_pressed = resolved
                 .held
                 .difference(&state.held_actions)
@@ -459,8 +475,9 @@ impl ControllerInputSession {
             resolved_sources.insert(*source_id, resolved);
         }
 
-        if !activity_candidates.is_empty() {
-            self.active_source = activity_candidates.first().copied();
+        let activity_source = activity_candidates.first().copied();
+        if activity_source.is_some() {
+            self.active_source = activity_source;
         } else if !self.active_source.is_some_and(|source_id| {
             resolved_sources
                 .get(&source_id)
@@ -477,6 +494,7 @@ impl ControllerInputSession {
             held,
             pressed,
             released,
+            activity_source,
             active_source: self.active_source,
             active_controller_layout: self.active_source.and_then(|source_id| {
                 self.sources
@@ -500,6 +518,27 @@ fn resolved_source_is_meaningful(resolved: &ResolvedSource) -> bool {
     resolved.movement != MovementImpulse::default()
         || resolved.look_rate != LookDelta::default()
         || !resolved.held.is_empty()
+}
+
+fn snapshot_is_neutral(
+    snapshot: StandardGamepadSnapshot,
+    settings: ControllerSessionSettings,
+) -> bool {
+    adjusted_stick(
+        snapshot.left_stick,
+        settings.movement_deadzone,
+        settings.movement_response_exponent,
+    ) == glam::Vec2::ZERO
+        && adjusted_stick(
+            snapshot.right_stick,
+            settings.look_deadzone,
+            settings.look_response_exponent,
+        ) == glam::Vec2::ZERO
+        && !snapshot
+            .buttons
+            .mapped_controls()
+            .into_iter()
+            .any(|(_, pressed)| pressed)
 }
 
 fn resolve_source(
@@ -889,6 +928,7 @@ mod tests {
             .expect("pressed sample");
         assert!(pressed.pressed.contains(&PlayerAction::Jump));
         assert!(pressed.held.contains(&PlayerAction::Jump));
+        assert_eq!(pressed.activity_source, Some(source_id));
         assert_eq!(pressed.active_source, Some(source_id));
 
         let held = session
@@ -896,6 +936,7 @@ mod tests {
             .expect("held sample");
         assert!(!held.pressed.contains(&PlayerAction::Jump));
         assert!(held.held.contains(&PlayerAction::Jump));
+        assert_eq!(held.activity_source, None);
 
         let released = session
             .sample_frame(
@@ -1075,5 +1116,48 @@ mod tests {
             .expect("post-disconnect frame");
         assert!(frame.released.contains(&PlayerAction::Jump));
         assert_eq!(frame.active_source, None);
+    }
+
+    #[test]
+    fn lifecycle_clear_requires_neutral_before_controls_rearm() {
+        let (source_id, descriptor) = source();
+        let mut session = ControllerInputSession::new();
+        session.connect_source(source_id, descriptor);
+        let pressed = StandardGamepadSnapshot {
+            buttons: StandardGamepadButtons {
+                south: StandardGamepadButtonState::pressed(),
+                ..StandardGamepadButtons::default()
+            },
+            ..StandardGamepadSnapshot::default()
+        };
+        session
+            .sample_frame(Duration::ZERO, [(source_id, pressed)])
+            .expect("initial press");
+
+        session.clear_held();
+        let suppressed = session
+            .sample_frame(Duration::from_millis(1), [(source_id, pressed)])
+            .expect("held after lifecycle clear");
+        assert!(!suppressed.pressed.contains(&PlayerAction::Jump));
+        assert!(!suppressed.held.contains(&PlayerAction::Jump));
+        assert_eq!(suppressed.activity_source, None);
+
+        session
+            .sample_frame(
+                Duration::from_millis(2),
+                [(
+                    source_id,
+                    StandardGamepadSnapshot {
+                        left_stick: Vec2::splat(0.05),
+                        ..StandardGamepadSnapshot::default()
+                    },
+                )],
+            )
+            .expect("post-clear neutral drift");
+        let rearmed = session
+            .sample_frame(Duration::from_millis(3), [(source_id, pressed)])
+            .expect("rearmed press");
+        assert!(rearmed.pressed.contains(&PlayerAction::Jump));
+        assert_eq!(rearmed.activity_source, Some(source_id));
     }
 }

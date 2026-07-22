@@ -49,6 +49,7 @@ crc32fast = "1"
 flate2 = "1"
 fs4 = "1"
 glam = "0.30"
+gilrs = "0.11.2"
 image = { version = "0.25", default-features = false, features = ["png"] }
 jni = "0.22"
 js-sys = "0.3.102"

@@ -294,6 +294,52 @@ outline on the first enabled Options row with the remaining menu geometry and
 world composition intact. The capture remains outside the repository. Physical
 device navigation and prompt-family acceptance remain in the hardware ledger.
 
+### Slice 4 — desktop-flat and browser collectors
+
+Implemented on 2026-07-22. The desktop-flat host now owns a GilRs 0.11
+collector that drains hotplug events and polls cached connected state before
+shared held-frame advancement. It retains session-local source identity across
+reconnects, classifies prompt layout from neutral name/vendor facts, and emits
+only `StandardGamepadSnapshot`. GilRs default filtering is disabled so the
+shared controller session remains the sole dead-zone/activity owner; force
+feedback remains disabled until the shared haptic contract lands.
+
+Browser Rust now polls `navigator.getGamepads()` at its animation-frame
+boundary, accepts only the W3C standard mapping, normalizes its four axes and
+seventeen buttons, and feeds the same scene router. TypeScript remains unaware
+of buttons, actions, bindings, and dead zones; it consumes only the generic
+pointer-capture and transient-clear effects reported by the Rust scene host.
+Browser mock tests cover standard mapping, axis orientation, analog triggers,
+hotplug, reconnect, and reused browser indices.
+
+Both hosts advertise gamepad capability only while a compatible source is
+connected and switch prompt origin only on meaningful post-dead-zone activity.
+Lifecycle clearing suppresses a physically held control until a neutral sample
+is observed, preventing focus-resume replay. The active layout now reaches the
+shared HUD prompt projection. Ordinary gamepads in desktop XR remain Slice 6
+work so adoption happens with the tracked/semantic convergence rather than as
+a second XR-only merge.
+
+Focused evidence:
+
+```text
+cargo test -p mclone-input: 36 passed
+cargo test -p mclone-scene: 128 passed plus integration suites
+cargo test -p mclone-native-client --bin mclone-native-client: 171 passed
+cargo test -p mclone-web-client: 38 passed plus integration suites
+cargo check -p mclone-web-client --target wasm32-unknown-unknown: passed
+cargo fmt --all -- --check: passed
+pnpm native:thin-adapters:purity: passed
+pnpm native:scene-host:purity: passed
+pnpm host:check: headed Wayland browser/WebGPU path available
+pnpm native:web:typecheck: passed
+pnpm native:web:app-smoke: passed; canvas pixels inspected
+```
+
+Desktop, Steam Deck, and real-browser device acceptance remains in the hardware
+ledger. Flat Android, Android XR, and XR ordinary-gamepad adoption have not yet
+landed.
+
 ## Completion Bar
 
 - Every product host consumes one shared semantic action and UI-navigation
