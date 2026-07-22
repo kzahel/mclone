@@ -57,10 +57,12 @@ mod android {
     use android_activity::{AndroidApp, InputStatus, MainEvent, PollEvent};
     use anyhow::{Context, Result, bail};
     use mclone_android_platform::{
-        ANDROID_ASSET_ROOT_ENV, AndroidAppDataPathPreference, android_app_data_asset_root,
-        android_app_data_world_root, normalize_android_legacy_remote_addr,
-        stage_android_bundled_first_party_packs,
+        ANDROID_ASSET_ROOT_ENV, AndroidAppDataPathPreference, AndroidControllerCollector,
+        android_app_data_asset_root, android_app_data_world_root, drain_android_controller_events,
+        normalize_android_legacy_remote_addr, stage_android_bundled_first_party_packs,
     };
+
+    mclone_android_platform::export_android_controller_jni_bridge!();
     use mclone_app_runtime::frame_render::scaled_frame_size;
     use mclone_app_runtime::native_remote_session::NativeRemoteServerSession;
     use mclone_app_runtime::native_service_assembly::NativeSessionServices;
@@ -3401,6 +3403,7 @@ mod android {
             frame_timing: AndroidXrFrameTiming::default(),
             thread_cpu_start_ms: None,
             stats_before_frame: XrFrameStats::default(),
+            ordinary_gamepad: AndroidControllerCollector::new(),
         };
         let mut driver = mclone_xr_host::OpenXrFrameDriver::new(
             &graphics.session,
@@ -3538,6 +3541,7 @@ mod android {
         frame_timing: AndroidXrFrameTiming,
         thread_cpu_start_ms: Option<f64>,
         stats_before_frame: XrFrameStats,
+        ordinary_gamepad: AndroidControllerCollector,
     }
 
     impl mclone_xr_host::OpenXrFrameLoopHandler<graphics_vulkan::AppGraphics>
@@ -3550,7 +3554,10 @@ mod android {
             timeout: Duration,
         ) -> Result<mclone_xr_host::OpenXrFrameLoopControl> {
             let lifecycle = poll_android_lifecycle(self.app, Some(timeout))?;
+            self.ordinary_gamepad
+                .handle_events(drain_android_controller_events());
             if lifecycle.paused {
+                self.ordinary_gamepad.clear_controls_for_lifecycle();
                 flush_terrain_on_android_pause(self.terrain);
             }
             if lifecycle.keep_running {

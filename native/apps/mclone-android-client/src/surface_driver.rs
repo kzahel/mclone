@@ -3,6 +3,9 @@ use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use glam::Vec2;
+use mclone_android_platform::{
+    AndroidControllerCollector, AndroidControllerPoll, drain_android_controller_events,
+};
 use mclone_app_runtime::client_experience::android_flat_native_client_experience_profile;
 use mclone_app_runtime::frame_pacing::{
     FramePacingDebugStats, FramePacingMode, FramePacingUiState, FrameTimingStats,
@@ -116,6 +119,8 @@ pub(crate) struct AndroidSurfaceDriver {
     window: Option<Arc<Window>>,
     gpu: Option<AndroidGpuState>,
     last_cursor: Option<PhysicalPosition<f64>>,
+    controller_input: AndroidControllerCollector,
+    controller_started_at: Instant,
 }
 
 impl AndroidSurfaceDriver {
@@ -125,6 +130,8 @@ impl AndroidSurfaceDriver {
             window: None,
             gpu: None,
             last_cursor: None,
+            controller_input: AndroidControllerCollector::new(),
+            controller_started_at: Instant::now(),
         }
     }
 
@@ -149,6 +156,8 @@ impl AndroidSurfaceDriver {
 
 impl ApplicationHandler for AndroidSurfaceDriver {
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
+        self.controller_input
+            .handle_events(drain_android_controller_events());
         if self.window.is_none() {
             match event_loop.create_window(WindowAttributes::default().with_title("Mclone")) {
                 Ok(window) => {
@@ -165,7 +174,10 @@ impl ApplicationHandler for AndroidSurfaceDriver {
         if let Some(window) = &self.window {
             if self.gpu.is_none() {
                 match AndroidGpuState::new(window.clone(), self.startup_options.clone()) {
-                    Ok(gpu) => self.gpu = Some(gpu),
+                    Ok(gpu) => {
+                        self.gpu = Some(gpu);
+                        self.controller_input.reannounce_connected_sources();
+                    }
                     Err(error) => {
                         log::error!("MCLONE_ANDROID_FAILURE: {error:#}");
                         event_loop.exit();
@@ -180,6 +192,9 @@ impl ApplicationHandler for AndroidSurfaceDriver {
 
     fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
         log::info!("Mclone Android suspended");
+        self.controller_input
+            .handle_events(drain_android_controller_events());
+        self.controller_input.clear_controls_for_lifecycle();
         if let Some(gpu) = &mut self.gpu
             && let Err(error) = gpu.on_background()
         {
@@ -205,9 +220,26 @@ impl ApplicationHandler for AndroidSurfaceDriver {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::RedrawRequested => {
+                self.controller_input
+                    .handle_events(drain_android_controller_events());
+                let controller_poll = self
+                    .controller_input
+                    .poll(self.controller_started_at.elapsed());
                 let Some(gpu) = self.gpu.as_mut() else {
                     return;
                 };
+                match gpu.route_controller_poll(controller_poll) {
+                    Ok(outcome) if outcome.exit => {
+                        event_loop.exit();
+                        return;
+                    }
+                    Ok(_) => {}
+                    Err(error) => {
+                        log::error!("failed to route Mclone Android controller input: {error:#}");
+                        event_loop.exit();
+                        return;
+                    }
+                }
                 match gpu.render_mclone_frame() {
                     Ok(()) => window.request_redraw(),
                     Err(AndroidRenderError::Surface(wgpu::SurfaceError::OutOfMemory)) => {
@@ -286,6 +318,7 @@ impl ApplicationHandler for AndroidSurfaceDriver {
             }
             WindowEvent::Focused(false) => {
                 self.last_cursor = None;
+                self.controller_input.clear_controls_for_lifecycle();
                 if let Some(gpu) = &mut self.gpu {
                     gpu.clear_flat_gameplay_input();
                 }
@@ -508,7 +541,11 @@ impl AndroidGpuState {
         let overlay = self.touch.overlay_state();
         MonoUiContext {
             resolved_input,
-            controller_layout: mclone_input::ControllerLayoutFamily::Unknown,
+            controller_layout: self
+                .interactive_input
+                .latest_controller_actions()
+                .active_controller_layout
+                .unwrap_or(mclone_input::ControllerLayoutFamily::Unknown),
             frame_pacing: FramePacingUiState {
                 mode: FramePacingMode::Vsync,
                 fps_cap: ANDROID_FIXED_FPS_CAP,
@@ -783,6 +820,36 @@ impl AndroidGpuState {
             self.host.update_mono_blink_debug();
         }
         Ok(())
+    }
+
+    fn route_controller_poll(
+        &mut self,
+        poll: AndroidControllerPoll,
+    ) -> Result<AndroidInputOutcome> {
+        self.input_capabilities
+            .set_present(InputDeviceKind::Gamepad, poll.connected_count() > 0);
+        for source_id in poll.disconnected {
+            self.interactive_input
+                .disconnect_controller_source(source_id)?;
+        }
+        for (source_id, descriptor) in poll.connected {
+            self.interactive_input
+                .connect_controller_source(source_id, descriptor);
+        }
+        let mut effects = AndroidHostEffects::default();
+        let disposition = self.interactive_input.route_controller_samples(
+            &mut self.host,
+            poll.sample_time,
+            poll.samples,
+            &self.device,
+            &self.queue,
+            &mut effects,
+        )?;
+        if disposition.meaningful_controller_activity {
+            self.input_capabilities
+                .note_activity(InputDeviceKind::Gamepad);
+        }
+        Ok(self.finish_input_disposition(disposition, effects))
     }
 
     fn route_flat_frame(&mut self, frame: FlatInputFrame) -> Result<AndroidInputOutcome> {

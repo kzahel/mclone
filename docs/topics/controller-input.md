@@ -6,8 +6,11 @@ Status: active implementation; shared source/assignment, semantic controller
 session, scene routing, controller-complete menu navigation, and layout-aware
 text prompt foundations implemented as of 2026-07-22. Desktop flat now polls
 ordinary controllers through GilRs and browser Rust polls the W3C standard
-Gamepad mapping near its animation-frame boundary. Android and ordinary-gamepad
-XR adoption remain active work. This topic owns the durable all-target
+Gamepad mapping near its animation-frame boundary. Flat Android now routes a
+shared source-aware Java/Rust collector through the semantic scene input path;
+Android XR retains the same ordinary-controller facts for the pending tracked
+action convergence. Ordinary-gamepad XR adoption remains active work. This
+topic owns the durable all-target
 controller direction across desktop flat, web, flat Android, desktop XR,
 Android XR, offscreen/test hosts, Steam Deck, and a future native Steam Input
 integration. Tactical
@@ -107,12 +110,13 @@ source seam, but not yet the complete semantic or physical-input contract:
   axes, dead-zone/curve policy, trigger hysteresis, controller navigation
   repeat, lifecycle clearing, and active-source/layout arbitration. A bounded
   flat-frame projection applies look rate with `dt` while hosts migrate.
-- Desktop flat now drains and polls GilRs, while browser Rust polls only W3C
-  standard-mapped Gamepad API sources near the animation-frame boundary. Both
-  emit canonical snapshots, preserve session-local hotplug identity, advertise
-  only connected compatible sources, and switch prompts only on meaningful
-  post-dead-zone activity. No Android or XR ordinary-gamepad collector is wired
-  yet.
+- Desktop flat drains and polls GilRs, browser Rust polls only W3C
+  standard-mapped Gamepad API sources near the animation-frame boundary, and
+  both Android packages receive source-aware standard controller events through
+  one shared Java/JNI bridge and pure Rust collector. All emit canonical
+  snapshots and preserve session-local hotplug identity. Desktop, browser, and
+  flat Android route them semantically; Android XR retains its collected facts
+  for the pending XR action merge.
 - The legacy `GamepadInputAdapter` remains one controller at a time and still
   projects right-stick state directly into `FlatInputFrame`. The new semantic
   session fixes those constraints, but shipping hosts have not adopted it yet;
@@ -120,10 +124,9 @@ source seam, but not yet the complete semantic or physical-input contract:
 - `MonoInteractiveInputRouter` now owns keyboard/mouse and semantic controller
   state, selects controller context from the real scene UI state, and composes
   continuous controller movement/look through shared frame advancement. Touch
-  remains a supplemental shared frame. Desktop flat and browser hosts call the
-  controller route; Android and XR adoption remains open. Hosts still retain
-  their mechanical capability/activity collectors while semantic policy stays
-  shared.
+  remains a supplemental shared frame. Desktop flat, browser, and flat Android
+  call the controller route; XR adoption remains open. Hosts still retain their
+  mechanical capability/activity collectors while semantic policy stays shared.
 - `mclone-ui::GuiNavigation` now owns directional traversal, confirm/back,
   page navigation, disabled-widget skipping, slider adjustment, and focus
   visuals. The scene maps semantic menu actions through it, and deterministic
@@ -359,10 +362,11 @@ Own only:
 | Android XR | Same Android collector beside OpenXR | ordinary snapshot plus tracked XR input |
 | Offscreen/test | scripted snapshots or semantic frames | exact shared resolver/router |
 
-As of 2026-07-22, desktop flat and Web/WASM implement the first and third rows.
-Desktop XR deliberately adopts the same native collector during Slice 6 so its
-ordinary and tracked sources converge in one change. Both Android rows remain
-open.
+As of 2026-07-22, desktop flat, Web/WASM, and flat Android route these collectors
+through the shared scene input owner. Android XR collects the same ordinary
+controller facts but deliberately routes them during Slice 6 so ordinary and
+tracked sources converge in one change. Desktop XR adopts the same native
+collector in that slice.
 
 ### Desktop and Steam Deck
 
@@ -396,28 +400,26 @@ feeds the shared resolver before each admitted frame.
 
 ### Android
 
-The preferred production-quality Android collector is a thin Rust/FFI wrapper
-around Android's Game Controller Library (Paddleboat), owned by
-`mclone-android-platform`. Paddleboat supplies connection callbacks,
-standardized dual-stick controller data, layout information, mapping data,
-haptics, motion sensors, and battery facts. It supports both `NativeActivity`
-and `GameActivity`, but requires raw `AInputEvent` or `GameActivity` events to
-be forwarded before its per-frame update/read step.
+Both Android packages compile one shared `ControllerInputBridge` Java source.
+It listens through `InputManager.InputDeviceListener`, enumerates compatible
+devices, and intercepts only standard controller keys and source-aware motion
+events. A small flat-Android `NativeActivity` subclass invokes the bridge before
+delegating unrelated input to the existing `winit` activity, which prevents
+joystick `ACTION_MOVE` from being interpreted as touchscreen motion without a
+local `winit` fork. The Quest activity owns the same bridge.
 
-Android XR already polls `android_activity` directly and can forward raw input
-to this collector. Flat Android currently lets `winit` own the Android input
-queue. Its implementation therefore needs a narrow raw-controller event seam,
-preferably upstreamable to `winit`, so joystick motion is identified by input
-source and forwarded instead of being interpreted as touchscreen motion. Do
-not replace the established Android surface/lifecycle host solely to obtain
-gamepads.
+Three JNI entry points feed a process-local queue in `mclone-android-platform`.
+Its pure Rust `AndroidControllerCollector` owns stable session-local identity,
+hotplug/reconnect, layout classification, standard key/axis normalization,
+right-stick and trigger fallbacks, and lifecycle clearing. It inspects
+`SOURCE_GAMEPAD`, `SOURCE_DPAD`, and `SOURCE_JOYSTICK` before assigning meaning
+and emits only `StandardGamepadSnapshot` plus neutral source facts.
 
-If Paddleboat packaging and C++ FFI are disproportionate for the first proof,
-a pure-Rust `android_activity` normalizer may temporarily map Android's
-documented standard axes and key codes behind the same
-`StandardGamepadSnapshot`. The shared contract and validation bar do not
-change, and the adapter must still inspect `SOURCE_GAMEPAD`, `SOURCE_DPAD`,
-and `SOURCE_JOYSTICK` before assigning meaning.
+Paddleboat remains a possible later backend if device testing shows its mapping
+database, motion sensors, battery facts, or haptic execution materially improve
+support. It can replace the mechanical collector behind the same shared
+snapshot and haptic contracts; gameplay, UI, dead-zone, binding, and prompt
+policy must not move into the backend.
 
 ## XR Convergence
 
@@ -550,9 +552,10 @@ standard snapshot or make the shared gameplay path conditional on a vendor.
 5. **Browser adoption.** Implemented in browser Rust with standard-mapping
    mocks, live capability/activity, and domain-blind TypeScript. Physical
    browser/controller validation remains open.
-6. **Android adoption.** Land the raw-controller input seam, one shared Android
-   collector, and both flat-Android and Android-XR consumption. Validate wired
-   and wireless real devices rather than relying only on AVD key injection.
+6. **Android adoption.** The source-aware bridge, shared collector, flat scene
+   route, both APK builds, and AVD regression proof are implemented. Android XR
+   retains ordinary snapshots for step 7. Wired and wireless real-device
+   validation remains open rather than relying on AVD input injection.
 7. **XR action convergence.** Convert OpenXR application actions to semantic
    action state plus tracked extensions, preserve existing tracked-controller
    behavior, and prove ordinary gamepad use inside both XR targets.

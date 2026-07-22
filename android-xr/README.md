@@ -23,6 +23,12 @@ frame, and logs `MCLONE_ANDROID_XR_ASSETS_READY`,
 through the shared XR scene runtime; use `--remote-addr` in the scripts to pass
 a launch-scoped TCP remote address through `mclone.startup.argv`.
 
+The Quest activity also compiles the same source-aware Java/JNI ordinary
+gamepad bridge as flat Android. `mclone-android-platform` normalizes its device,
+key, and axis facts into canonical snapshots. The XR frame loop retains those
+facts now; their semantic merge with tracked OpenXR actions is the next
+controller-foundation slice. Physical gamepad acceptance on Quest remains open.
+
 The APK also embeds the deterministic authored and generated-fallback logical
 packs. Startup stages them into the app-owned `assets/packs/` discovery root,
 and the shared scene host exposes the same Asset Packs catalog/actions as the

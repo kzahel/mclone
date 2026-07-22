@@ -1517,7 +1517,9 @@ name = "mclone-android-platform"
 version = "0.0.0"
 dependencies = [
  "android-activity",
+ "glam 0.30.10",
  "log",
+ "mclone-input",
 ]
 
 [[package]]

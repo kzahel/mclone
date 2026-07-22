@@ -1,15 +1,18 @@
 # Flat Android
 
 This directory owns the flat, non-XR Android package and validation lane for
-the shared Rust engine. It builds `mclone-android-client` as a `NativeActivity`
-APK, stages the packed Minecraft asset source onto the device, launches the
-app, captures screenshots under `/tmp`, and scans logcat for fatal failures.
+the shared Rust engine. It builds `mclone-android-client` behind a small
+`NativeActivity` subclass, stages the packed Minecraft asset source onto the
+device, launches the app, captures screenshots under `/tmp`, and scans logcat
+for fatal failures.
 
 Current status:
 
 - The APK builds and launches on the `jstorrent-tablet` AVD.
 - The Android host owns only NativeActivity lifecycle, `wgpu` surface/config
-  resize, package paths, asset staging paths, and touch input.
+  resize, package paths, asset staging paths, touch input, and a source-aware
+  standard-gamepad bridge. Controller semantics remain in the shared input and
+  scene owners.
 - Runtime, render-section streaming, texture/mesh asset loading, and full-frame
   sky/terrain composition come from shared Rust crates.
 - The default host mode is local integrated. Launch-scoped startup arguments
@@ -143,7 +146,7 @@ The validator passes the address through intent extra `mclone.startup.argv`,
 for example:
 
 ```bash
-adb shell am start -W -n com.kzahel.mclone/android.app.NativeActivity \
+adb shell am start -W -n com.kzahel.mclone/com.kzahel.mclone.McloneActivity \
   --es mclone.startup.argv '["--remote-addr","10.0.2.2:25565"]'
 ```
 

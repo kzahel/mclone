@@ -22,6 +22,8 @@ mod android {
     use crate::startup::prepare_android_startup;
     use crate::surface_driver::AndroidSurfaceDriver;
 
+    mclone_android_platform::export_android_controller_jni_bridge!();
+
     pub(crate) type AndroidSceneHost = McloneSceneHost;
 
     const LOG_TAG: &str = "mclone_android";

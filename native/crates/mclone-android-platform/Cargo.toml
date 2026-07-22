@@ -5,6 +5,10 @@ edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
+[dependencies]
+glam.workspace = true
+mclone-input.workspace = true
+
 [target.'cfg(target_os = "android")'.dependencies]
 android-activity.workspace = true
 log.workspace = true

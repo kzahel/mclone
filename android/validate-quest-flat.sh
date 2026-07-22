@@ -6,7 +6,7 @@ REPO_ROOT="$(cd "$ANDROID_DIR/.." && pwd)"
 source "$ANDROID_DIR/validate-common.sh"
 
 MCLONE_ANDROID_APP_ID="${MCLONE_ANDROID_APP_ID:-com.kzahel.mclone}"
-MCLONE_ANDROID_ACTIVITY="${MCLONE_ANDROID_ACTIVITY:-android.app.NativeActivity}"
+MCLONE_ANDROID_ACTIVITY="${MCLONE_ANDROID_ACTIVITY:-com.kzahel.mclone.McloneActivity}"
 MCLONE_ANDROID_REQUIRE_FOCUS="${MCLONE_ANDROID_REQUIRE_FOCUS:-0}"
 APK_PATH="${MCLONE_ANDROID_APK:-$ANDROID_DIR/app/build/outputs/apk/debug/app-debug.apk}"
 SCREENSHOT_PATH="${MCLONE_ANDROID_SCREENSHOT:-/tmp/mclone-quest-flat.png}"

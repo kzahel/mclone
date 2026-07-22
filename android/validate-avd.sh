@@ -6,7 +6,7 @@ REPO_ROOT="$(cd "$ANDROID_DIR/.." && pwd)"
 source "$ANDROID_DIR/validate-common.sh"
 
 MCLONE_ANDROID_APP_ID="${MCLONE_ANDROID_APP_ID:-com.kzahel.mclone}"
-MCLONE_ANDROID_ACTIVITY="${MCLONE_ANDROID_ACTIVITY:-android.app.NativeActivity}"
+MCLONE_ANDROID_ACTIVITY="${MCLONE_ANDROID_ACTIVITY:-com.kzahel.mclone.McloneActivity}"
 APK_PATH="${MCLONE_ANDROID_APK:-$ANDROID_DIR/app/build/outputs/apk/debug/app-debug.apk}"
 AVD_NAME="${MCLONE_ANDROID_AVD:-jstorrent-tablet}"
 SCREENSHOT_PATH="${MCLONE_ANDROID_SCREENSHOT:-/tmp/mclone-android-avd-clear.png}"

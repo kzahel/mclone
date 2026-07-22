@@ -126,10 +126,10 @@ remain later device/runtime-backed work.
 - Add one neutral Android raw-controller normalizer in
   `mclone-android-platform` for source classification, standard axes/buttons,
   lifecycle, and stable session-local device handles.
-- Feed it directly from Android XR's raw event queue.
-- Establish the narrowest maintainable flat-Android raw event seam. Prefer an
-  upstreamable `winit` callback/source-aware event extension over duplicating
-  the activity/surface host; record any local dependency patch explicitly.
+- Feed it from one shared source-aware Java activity bridge in both Android
+  packages, before flat Android forwards non-controller events to `winit`.
+- Keep the bridge mechanical: enumerate devices, forward descriptors and raw
+  standard keys/axes, and let the Rust normalizer own identity and mapping.
 - Build both APK lanes and add pure conversion/lifecycle tests. Leave wired and
   Bluetooth hardware acceptance open.
 
@@ -337,8 +337,49 @@ pnpm native:web:app-smoke: passed; canvas pixels inspected
 ```
 
 Desktop, Steam Deck, and real-browser device acceptance remains in the hardware
-ledger. Flat Android, Android XR, and XR ordinary-gamepad adoption have not yet
-landed.
+ledger. XR ordinary-gamepad adoption has not yet landed.
+
+### Slice 5 — Android collectors
+
+Implemented on 2026-07-22. Both Android packages now compile one shared
+`ControllerInputBridge` Java source. It listens for device changes through
+`InputManager`, classifies `GAMEPAD`, `JOYSTICK`, and `DPAD` sources, and
+forwards only standard controller keys and motion axes through three JNI entry
+points. Flat Android uses a small `NativeActivity` subclass so controller
+events are consumed before `winit`; keyboard, mouse, touch, and system events
+continue through the existing activity and surface host without a dependency
+fork. Android XR owns the same bridge beside its OpenXR activity.
+
+`mclone-android-platform::AndroidControllerCollector` is the pure Rust owner of
+source-aware device reduction, session-local identity, hotplug/reconnect,
+layout classification, Android axis orientation, right-stick and trigger
+fallbacks, standard snapshot emission, and lifecycle clearing. It accepts
+device-ID reuse without inheriting held state and can reannounce connected
+sources when a rebuilt scene begins consuming input. A process-local queue is
+the narrow JNI-to-frame boundary.
+
+Flat Android drains the queue before redraw and routes snapshots through the
+same `MonoInteractiveInputRouter` as desktop and browser. It advertises a
+gamepad only while a compatible device is connected and changes prompt layout
+only after meaningful shared-session activity. Android XR drains and retains
+the same ordinary-device facts now; Slice 6 owns their semantic merge with
+tracked OpenXR controls.
+
+Focused evidence:
+
+```text
+cargo test -p mclone-android-platform: 13 passed
+pnpm native:android:apk: arm64 and x86_64 APK builds passed
+pnpm native:android-xr:apk: arm64 APK build passed
+flat and XR native libraries: all three JNI symbols present
+flat and XR APKs: classes.dex and target native library present
+pnpm native:android:avd-smoke -- --skip-build: passed
+AVD screenshot: 2000x1200 shared terrain/HUD pixels visually inspected
+```
+
+The AVD proves packaging, lifecycle, JNI linkage, and unchanged rendered
+output, but has no physical controller. Wired/Bluetooth flat-Android and Quest
+ordinary-gamepad acceptance therefore remain in the hardware ledger.
 
 ## Completion Bar
 

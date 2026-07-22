@@ -2,6 +2,10 @@
 
 use std::path::PathBuf;
 
+mod android_controller;
+
+pub use android_controller::*;
+
 #[cfg(target_os = "android")]
 use android_activity::AndroidApp;
 

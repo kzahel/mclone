@@ -21,6 +21,7 @@ import android.widget.FrameLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+import com.kzahel.mclone.controller.ControllerInputBridge;
 
 public class McloneXrActivity extends NativeActivity {
     private static final String TAG = "McloneXrActivity";
@@ -32,6 +33,7 @@ public class McloneXrActivity extends NativeActivity {
     private EditText readinessEditText;
     private Boolean lastImeVisible;
     private boolean nativeFailureReported;
+    private ControllerInputBridge controllerInput;
 
     static {
         System.loadLibrary("mclone_android_xr_client");
@@ -40,9 +42,31 @@ public class McloneXrActivity extends NativeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        controllerInput = new ControllerInputBridge(this);
+        controllerInput.start();
         Log.i(TAG, "McloneXrActivity created");
         ensureReadinessEditText();
         logStartupArgv(getIntent());
+    }
+
+    @Override
+    protected void onDestroy() {
+        if (controllerInput != null) {
+            controllerInput.stop();
+        }
+        super.onDestroy();
+    }
+
+    @Override
+    public boolean dispatchKeyEvent(android.view.KeyEvent event) {
+        return controllerInput != null && controllerInput.dispatchKeyEvent(event)
+                || super.dispatchKeyEvent(event);
+    }
+
+    @Override
+    public boolean dispatchGenericMotionEvent(android.view.MotionEvent event) {
+        return controllerInput != null && controllerInput.dispatchGenericMotionEvent(event)
+                || super.dispatchGenericMotionEvent(event);
     }
 
     @Override

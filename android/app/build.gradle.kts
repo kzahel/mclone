@@ -22,4 +22,5 @@ android {
 
     sourceSets["main"].jniLibs.srcDirs("../jniLibs")
     sourceSets["main"].assets.srcDir(rootProject.file("../generated-assets/first-party-stage"))
+    sourceSets["main"].java.srcDir(rootProject.file("../android-common/src/main/java"))
 }
