@@ -312,6 +312,14 @@ Winit window creation, surface ownership, cursor-grab API calls, monitor/frame
 pacing, device events, and redraw scheduling are valid desktop responsibilities.
 The remaining diagnostic shortcuts are not part of the ordinary input route.
 
+On 2026-07-23, the desktop adapter's generic gameplay-input clear stopped
+discarding its last observed cursor position. Slider movement applies a shared
+settings action, and settings actions clear held gameplay input; winit's later
+`MouseInput::Released` event carries no position of its own. Preserving the
+platform cursor fact lets that release reach the shared UI and end slider
+capture. The native host-boundary lock now protects this distinction between
+held gameplay state and pointer position.
+
 ### Flat Android Audit
 
 Flat Android is now converged at the same final route. `surface_driver.rs`

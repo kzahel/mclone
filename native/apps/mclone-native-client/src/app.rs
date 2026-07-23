@@ -977,7 +977,7 @@ impl ChunkApp {
     fn apply_host_effect_outcome(
         &mut self,
         outcome: WinitHostEffectOutcome,
-        clear_transient_input: bool,
+        clear_gameplay_input: bool,
         event_loop: &ActiveEventLoop,
     ) {
         if outcome.exit {
@@ -1004,9 +1004,10 @@ impl ChunkApp {
         if let Some(mouse_lock_requested) = outcome.mouse_lock_requested {
             self.mouse_lock_requested = mouse_lock_requested;
         }
-        if clear_transient_input {
+        if clear_gameplay_input {
+            // Keep the cursor position: winit's button-release event has no
+            // coordinates, and the UI needs the last position to end capture.
             self.clear_flat_gameplay_input();
-            self.last_cursor = None;
         }
         self.sync_mouse_lock();
         self.schedule_next_redraw(event_loop);

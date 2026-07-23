@@ -4,6 +4,29 @@ const DESKTOP_DRIVER: &str =
 const FLAT_ANDROID: &str =
     include_str!("../../../apps/mclone-android-client/src/surface_driver.rs");
 
+fn braced_item<'a>(source: &'a str, marker: &str) -> &'a str {
+    let start = source.find(marker).expect("item marker present");
+    let body = &source[start..];
+    let mut depth = 0usize;
+    let mut opened = false;
+    for (index, byte) in body.bytes().enumerate() {
+        match byte {
+            b'{' => {
+                opened = true;
+                depth += 1;
+            }
+            b'}' if opened => {
+                depth -= 1;
+                if depth == 0 {
+                    return &body[..=index];
+                }
+            }
+            _ => {}
+        }
+    }
+    panic!("unterminated braced item for {marker}")
+}
+
 #[test]
 fn native_interactive_hosts_use_the_shared_router() {
     assert!(DESKTOP_DRIVER.contains("MonoInteractiveInputRouter"));
@@ -21,6 +44,19 @@ fn native_interactive_hosts_use_the_shared_router() {
             "native adapters no longer exercise shared route {method}"
         );
     }
+}
+
+#[test]
+fn desktop_gameplay_input_clear_preserves_ui_cursor_position() {
+    let apply_host_effect_outcome = braced_item(DESKTOP_APP, "fn apply_host_effect_outcome(");
+    assert!(
+        apply_host_effect_outcome.contains("self.clear_flat_gameplay_input();"),
+        "desktop host no longer clears held gameplay input when requested"
+    );
+    assert!(
+        !apply_host_effect_outcome.contains("self.last_cursor = None;"),
+        "desktop gameplay-input clear discarded the cursor position needed to route UI release"
+    );
 }
 
 #[test]
