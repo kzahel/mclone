@@ -515,6 +515,7 @@ impl McloneSceneHost {
         };
         let suppress_gameplay_interaction = ui_was_active != ui_active;
         if self.active_world.runtime.is_none() {
+            self.active_world.local_participant.reset_movement();
             self.head_comfort.reset();
             self.snap_turn_state.reset();
             self.clear_xr_blink_teleport();
@@ -538,12 +539,14 @@ impl McloneSceneHost {
         self.update_head_comfort_state(transform, &views, dt_seconds)
             .context("update XR head comfort fade state")?;
         if self.ui.is_active() {
+            self.active_world.local_participant.reset_movement();
             self.snap_turn_state.reset();
             self.clear_xr_blink_teleport();
             timing.input_ms = elapsed_ms(self.services.clock.elapsed_since(input_start));
             return Ok(timing);
         }
         if activation_was_active || self.embedded_world_activation.phase.active() {
+            self.active_world.local_participant.reset_movement();
             self.snap_turn_state.reset();
             self.clear_xr_blink_teleport();
             self.head_comfort.reset();
@@ -589,10 +592,11 @@ impl McloneSceneHost {
             .runtime
             .as_ref()
             .expect("runtime presence checked");
-        self.active_world
-            .local_participant
-            .camera
-            .apply_movement_input(runtime.client(), input);
+        let _ = self.active_world.local_participant.advance_movement(
+            runtime.client(),
+            input,
+            dt_seconds,
+        );
         timing.camera_apply_ms = elapsed_ms(self.services.clock.elapsed_since(camera_apply_start));
         self.play_landing_events();
         if !suppress_gameplay_interaction {
@@ -659,10 +663,11 @@ impl McloneSceneHost {
             .runtime
             .as_ref()
             .expect("runtime presence checked");
-        self.active_world
-            .local_participant
-            .camera
-            .apply_movement_input(runtime.client(), input);
+        let _ = self.active_world.local_participant.advance_movement(
+            runtime.client(),
+            input,
+            dt_seconds,
+        );
         timing.camera_apply_ms = elapsed_ms(self.services.clock.elapsed_since(camera_apply_start));
         Ok(timing)
     }
@@ -711,10 +716,11 @@ impl McloneSceneHost {
             .runtime
             .as_ref()
             .expect("runtime presence checked");
-        self.active_world
-            .local_participant
-            .camera
-            .apply_movement_input(runtime.client(), input);
+        let _ = self.active_world.local_participant.advance_movement(
+            runtime.client(),
+            input,
+            dt_seconds,
+        );
         timing.camera_apply_ms = elapsed_ms(self.services.clock.elapsed_since(camera_apply_start));
         Ok(timing)
     }
@@ -741,6 +747,7 @@ impl McloneSceneHost {
         self.head_comfort.reset();
         self.snap_turn_state.reset();
         self.last_locomotion_update = Some(self.services.clock.now());
+        self.active_world.local_participant.reset_movement();
         timing.input_ms = elapsed_ms(self.services.clock.elapsed_since(input_start));
         timing
     }

@@ -2,12 +2,17 @@
 
 mod far_lod_settle;
 mod interactive_input;
+mod player_movement;
 mod pose_sync;
 
 pub use far_lod_settle::{FarLodChunkLedgerRow, FarLodSettleSnapshot};
 pub use interactive_input::{
     MonoInputDisposition, MonoInteractiveInputRouter, XrControllerInputDisposition,
     XrControllerInputRouter,
+};
+pub use player_movement::{
+    DEFAULT_PLAYER_MOVEMENT_MAX_CATCH_UP_STEPS, DEFAULT_PLAYER_MOVEMENT_RATE_HZ,
+    PlayerMovementAdvance, PlayerMovementCadenceConfig,
 };
 
 use std::path::PathBuf;
@@ -99,10 +104,10 @@ use mclone_audio::PreparedAudioAssets;
 use mclone_audio::{AudioOutputCapability, landing_playback_for_impact};
 use mclone_client::{
     ActorInterpolationConfig, ActorInterpolationState, ActorPresentation, BlockInteractionTarget,
-    ClientInteractionController, HAND_PUSH_DEFAULT_HEAD_RADIUS, TeleportCollisionSnapshot,
-    TeleportConfig, TeleportIntent, TeleportPreview, TeleportPreviewCapability,
-    TeleportPreviewRequestId, TeleportPreviewResult, TeleportValidityReason,
-    sphere_intersects_solid_blocks, view_vector_from_rot_degrees,
+    ClientInteractionController, ClientRuntime, HAND_PUSH_DEFAULT_HEAD_RADIUS,
+    TeleportCollisionSnapshot, TeleportConfig, TeleportIntent, TeleportPreview,
+    TeleportPreviewCapability, TeleportPreviewRequestId, TeleportPreviewResult,
+    TeleportValidityReason, sphere_intersects_solid_blocks, view_vector_from_rot_degrees,
 };
 use mclone_core::{
     Aabb, AxisTopology, BlockStateId, CHUNK_WIDTH, ChunkPos, HorizontalTopology, Vec3d, time,
@@ -364,8 +369,69 @@ struct WorldPreparationPolicy {
 /// path while allowing one explicitly requested detached standby beside it.
 struct LocalParticipantPresentation {
     camera: EngineCameraController,
+    movement: player_movement::PlayerMovementState,
     interaction: ClientInteractionController,
     player_model: GamePlayerModel,
+}
+
+impl LocalParticipantPresentation {
+    fn new(camera: EngineCameraController, cadence: PlayerMovementCadenceConfig) -> Self {
+        let eye = camera.snapshot().eye;
+        Self {
+            camera,
+            movement: player_movement::PlayerMovementState::new(cadence, eye),
+            interaction: ClientInteractionController::new(),
+            player_model: GamePlayerModel::default(),
+        }
+    }
+
+    fn advance_movement(
+        &mut self,
+        client: &ClientRuntime,
+        mut input: EngineCameraInput,
+        elapsed_seconds: f64,
+    ) -> (bool, PlayerMovementAdvance) {
+        let before = self.camera.snapshot();
+        self.camera
+            .turn_mouse_delta(input.mouse_delta_x, input.mouse_delta_y);
+        input.mouse_delta_x = 0.0;
+        input.mouse_delta_y = 0.0;
+
+        self.movement.synchronize_eye(before.eye);
+        self.movement.observe_input(input);
+        let advance = self.movement.advance_elapsed(elapsed_seconds);
+        for _ in 0..advance.steps {
+            let step_input = self.movement.next_step_input();
+            let after = self.camera.apply_movement_input(client, step_input);
+            self.movement.record_step(after.eye);
+        }
+        if advance.dropped_steps > 0 {
+            log::warn!(
+                "dropped {} local-player movement steps after a long frame",
+                advance.dropped_steps
+            );
+        }
+        (self.camera.snapshot() != before, advance)
+    }
+
+    fn observe_movement(&mut self, input: EngineCameraInput) {
+        self.movement.observe_input(input);
+    }
+
+    fn reset_movement(&mut self) {
+        self.camera.clear_keys();
+        self.movement.reset(self.camera.snapshot().eye);
+    }
+
+    fn presentation_camera_snapshot(&self) -> EngineCameraSnapshot {
+        let authoritative = self.camera.snapshot();
+        EngineCameraSnapshot::from_eye_pose(
+            self.movement.presentation_eye(authoritative.eye),
+            authoritative.yaw_radians,
+            authoritative.pitch_radians,
+            authoritative.speed_blocks_per_second,
+        )
+    }
 }
 
 struct DrawableWorldSlot {
@@ -493,6 +559,10 @@ impl DrawableWorldSlot {
         render_admission_policy: RenderAdmissionPolicy,
     ) -> Self {
         let storage = WorldSlotStorage::from_scene(&install.scene, install.descriptor.as_ref());
+        let local_participant = LocalParticipantPresentation::new(
+            install.camera,
+            install.scene.player_movement_cadence,
+        );
         Self {
             id: install.id,
             descriptor: install.descriptor,
@@ -503,11 +573,7 @@ impl DrawableWorldSlot {
             runtime: install.runtime,
             local_startup: install.local_startup,
             external_runtime_startup_pending: install.external_runtime_startup_pending,
-            local_participant: LocalParticipantPresentation {
-                camera: install.camera,
-                interaction: ClientInteractionController::new(),
-                player_model: GamePlayerModel::default(),
-            },
+            local_participant,
             draw: install.draw,
             actors: install.actors,
             actor_interpolation: ActorInterpolationState::new(),
@@ -533,6 +599,10 @@ impl DrawableWorldSlot {
         self.local_startup = install.local_startup;
         self.external_runtime_startup_pending = install.external_runtime_startup_pending;
         self.camera = install.camera;
+        self.movement = player_movement::PlayerMovementState::new(
+            self.scene.player_movement_cadence,
+            self.camera.snapshot().eye,
+        );
         self.draw = install.draw;
         self.actors = install.actors;
         self.actor_interpolation = ActorInterpolationState::new();
@@ -570,6 +640,10 @@ impl DrawableWorldSlot {
         self.external_runtime_startup_pending = false;
         self.accepted_entry_pose = Some(WorldEntryPose::from_camera(&camera));
         self.camera = camera;
+        self.movement = player_movement::PlayerMovementState::new(
+            self.scene.player_movement_cadence,
+            self.camera.snapshot().eye,
+        );
         self.pending_startup_sections = pending_startup_sections;
         self.render_stats = RenderStreamStats::default();
         self.actor_interpolation = ActorInterpolationState::new();
@@ -1831,6 +1905,7 @@ impl McloneSceneHost {
             }
         };
         if camera_changed {
+            self.active_world.local_participant.reset_movement();
             // Observe a subsequent stable frame around the corrected camera
             // before admitting it as the active slot's retained entry.
             self.active_world.accepted_entry_pose = None;
@@ -3765,6 +3840,14 @@ impl McloneSceneHost {
         let presentations = self
             .active_world
             .interpolated_actor_presentations(self.services.clock.now());
+        let authoritative_eye = self.active_world.camera.snapshot().eye;
+        let presentation_eye = self
+            .active_world
+            .local_participant
+            .presentation_camera_snapshot()
+            .eye;
+        let local_presentation_offset =
+            glam_vec3_from_vec3d(presentation_eye.subtract(authoritative_eye));
         self.active_world
             .runtime
             .as_ref()
@@ -3772,16 +3855,22 @@ impl McloneSceneHost {
                 let instances = actor_instances_from_presentations_near_observer(
                     &presentations,
                     runtime.client(),
-                    self.active_world.camera.snapshot().eye,
+                    presentation_eye,
                 );
                 if self.mono_ui_context.is_some() {
                     instances
                         .into_iter()
-                        .chain(local_player_actor_instance_for_view(
-                            &self.active_world.camera,
-                            runtime.client(),
-                            actor_figure_id_for_player_model(self.active_world.player_model),
-                        ))
+                        .chain(
+                            local_player_actor_instance_for_view(
+                                &self.active_world.camera,
+                                runtime.client(),
+                                actor_figure_id_for_player_model(self.active_world.player_model),
+                            )
+                            .map(|mut actor| {
+                                actor.feet_position += local_presentation_offset;
+                                actor
+                            }),
+                        )
                         .collect()
                 } else {
                     instances
@@ -4394,6 +4483,8 @@ impl McloneSceneHost {
     fn commit_engine_camera_player_pose_timed(
         &mut self,
     ) -> Result<(bool, EngineCameraCommitTiming)> {
+        let before = self.active_world.camera.snapshot();
+        let before_feet = self.active_world.camera.feet_position();
         let Some(runtime) = self.active_world.runtime.as_mut() else {
             return Ok((false, EngineCameraCommitTiming::default()));
         };
@@ -4408,6 +4499,14 @@ impl McloneSceneHost {
             Some(&mut timing),
         )
         .context("sync XR terrain player pose")?;
+        let after = self.active_world.camera.snapshot();
+        if before.eye != after.eye
+            || before.yaw_radians != after.yaw_radians
+            || before.pitch_radians != after.pitch_radians
+            || before_feet != self.active_world.camera.feet_position()
+        {
+            self.active_world.local_participant.reset_movement();
+        }
         Ok((changed, timing))
     }
 

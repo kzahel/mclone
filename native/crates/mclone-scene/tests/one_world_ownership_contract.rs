@@ -209,7 +209,7 @@ fn participant_private_scene_state_has_a_cardinality_one_envelope() {
 
     assert_eq!(
         field_names(participant),
-        ["camera", "interaction", "player_model"]
+        ["camera", "movement", "interaction", "player_model"]
     );
     assert!(slot.contains("local_participant: LocalParticipantPresentation"));
     assert!(!slot.contains("camera: EngineCameraController"));

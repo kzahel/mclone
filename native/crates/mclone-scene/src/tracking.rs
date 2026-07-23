@@ -296,7 +296,9 @@ impl McloneSceneHost {
         let tracking_origin = self.tracking_origin_for_views(views)?;
         let transform = XrStageToWorld::from_tracking_origin(
             tracking_origin,
-            self.active_world.camera.snapshot(),
+            self.active_world
+                .local_participant
+                .presentation_camera_snapshot(),
         )?;
         Ok([
             xr_view_to_chunk_render_view(&views[0], transform, XR_NEAR, XR_FAR)?,

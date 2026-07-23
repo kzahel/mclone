@@ -18,7 +18,8 @@ This document exists to answer a different question than [`strategy.md`](./strat
 - `lod-architecture.md`: non-authoritative far-terrain LOD, Distant Horizons reference points, and the minimal surface-only first slice
 - `minecraft-client-replica-research.md`: vanilla integrated-server, client-world, lighting, fluid, entity-interpolation, and networking source review
 - `gui.md`: WebGPU-only, vanilla-shaped 2D GUI architecture for menus, loading status, HUD, options, debug settings, and touch UI
-- `player-movement-netcode.md`: paused high-rate player movement and netcode constraint notes
+- `player-movement-netcode.md`: fixed-rate local movement progress and retained
+  authoritative command/replay constraints
 - `structures.md`: vanilla overworld structure starts, references, placement, and implementation order
 - `worker-ownership.md`: concrete worker/cache ownership and the no-hangs baseline for UI/GPU and host ticks
 - `frame-pipeline-accounting.md`: holistic frame, terrain, host, worker, GPU,
@@ -132,7 +133,7 @@ We should be able to support both:
 
 The architecture should not assume only one of those exists.
 
-### 6. High-rate player movement is command-driven runtime gameplay, but paused behind client runtime architecture
+### 6. High-rate player movement is command-driven runtime gameplay
 
 Player movement is a deliberate runtime/gameplay divergence from vanilla 1.17.1, not a reason to fork the world or entity architecture. The lower shared movement ideas in `Entity.move(...)` and `LivingEntity.travel(...)` are still the reference to study before implementation, but the vanilla 20 TPS player packet loop is not the target protocol shape.
 
@@ -146,7 +147,14 @@ The durable constraints are:
 - lower-rate NPC AI can produce movement intent for the shared body simulation without forcing player physics down to AI tick rate
 - collision and physics revisions should be explicit once dynamic collision can affect prediction
 
-The movement tactical arc is paused until the client runtime arc establishes `IntegratedServer`, `ClientRuntime`, `ClientWorld`, prediction-service, and presentation ownership. See [`player-movement-netcode.md`](./player-movement-netcode.md) for retained constraints and the Client Runtime / Integrated Server arc in [`tactical/README.md`](./tactical/README.md) for active sequencing.
+The first client-side slice is now live: `mclone-scene` owns a configurable
+fixed player movement clock that defaults to 60 Hz, applies bounded catch-up
+across all flat and XR hosts, retains jump edges, and publishes an interpolated
+presentation eye. Render delta is no longer movement integration delta. The
+clock still consumes local semantic state rather than materialized sequenced
+command records, and the authoritative host does not replay those quanta yet.
+That command/ack/replay conversion is the remaining netcode arc described in
+[`player-movement-netcode.md`](./player-movement-netcode.md).
 
 ### 7. Simulation clocks are separate API boundaries
 

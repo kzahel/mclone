@@ -261,12 +261,29 @@ impl MonoInteractiveInputRouter {
         supplemental: Option<FlatInputFrame>,
         dt_seconds: f64,
     ) -> Result<MonoInputFrameOutcome> {
+        let frame = self.composed_held_frame(supplemental, dt_seconds);
+        host.advance_mono_input_frame(frame, dt_seconds)
+    }
+
+    pub fn observe_supplemental_movement(
+        &self,
+        host: &mut McloneSceneHost,
+        supplemental: Option<FlatInputFrame>,
+    ) {
+        host.observe_mono_movement_frame(self.composed_held_frame(supplemental, 0.0));
+    }
+
+    fn composed_held_frame(
+        &self,
+        supplemental: Option<FlatInputFrame>,
+        dt_seconds: f64,
+    ) -> FlatInputFrame {
         let mut frame = self.keyboard_mouse.held_frame().unwrap_or_default();
         frame.merge_from(self.latest_controller_actions.to_flat_frame(dt_seconds));
         if let Some(supplemental) = supplemental {
             frame.merge_from(supplemental);
         }
-        host.advance_mono_input_frame(frame, dt_seconds)
+        frame
     }
 
     /// Consume ordinary-controller snapshots at one presentation boundary.
@@ -317,6 +334,7 @@ impl MonoInteractiveInputRouter {
             self.clear_if_requested(disposition);
             return Ok(disposition);
         }
+        self.observe_supplemental_movement(host, None);
         // Continuous movement/look is applied exactly once by
         // `advance_held_frame`. The immediate route consumes only action edges
         // (and any already-integrated pointer delta from a future semantic
@@ -414,6 +432,7 @@ impl MonoInteractiveInputRouter {
         }
 
         let event = self.keyboard_mouse.handle_key(key, pressed, repeat);
+        self.observe_supplemental_movement(host, None);
         let mut disposition = MonoInputDisposition {
             handled: event.handled,
             ..MonoInputDisposition::default()

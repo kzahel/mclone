@@ -45,10 +45,11 @@ impl MonotonicClock for WebMonotonicClock {
 
 /// Browser-frame lifecycle retained by the rAF driver rim.
 ///
-/// Hidden pages do not step the scene. On resume the first delta is zero and
-/// later deltas are clamped, so a long background interval cannot become one
-/// giant movement or simulation catch-up. Surface/device failure is explicit
-/// and terminal for this proof owner; the caller must construct a fresh owner.
+/// Hidden pages do not step the scene and the first resumed delta is zero.
+/// Visible elapsed time remains intact for the shared scene-owned movement
+/// scheduler, which applies one cross-platform bounded catch-up policy.
+/// Surface/device failure is explicit and terminal for this proof owner; the
+/// caller must construct a fresh owner.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WebSceneFrameState {
     Running,
@@ -91,7 +92,7 @@ pub struct WebSceneFrameDriverPolicy {
 
 impl Default for WebSceneFrameDriverPolicy {
     fn default() -> Self {
-        Self::new(50.0)
+        Self::new(f64::INFINITY)
     }
 }
 
@@ -243,6 +244,25 @@ mod tests {
         );
         assert_eq!(policy.hidden_frame_skips(), 1);
         assert_eq!(policy.resume_count(), 1);
+    }
+
+    #[test]
+    fn default_policy_preserves_visible_elapsed_time_for_shared_catch_up() {
+        let mut policy = WebSceneFrameDriverPolicy::default();
+        assert!(matches!(
+            policy.admit_frame(100.0),
+            WebSceneFrameAdmission::Render {
+                delta_seconds: 0.0,
+                first_after_resume: true,
+            }
+        ));
+        assert_eq!(
+            policy.admit_frame(300.0),
+            WebSceneFrameAdmission::Render {
+                delta_seconds: 0.2,
+                first_after_resume: false,
+            }
+        );
     }
 
     #[test]

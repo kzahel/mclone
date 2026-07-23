@@ -1633,6 +1633,7 @@ impl WebSceneHost {
     pub fn set_hidden(&mut self, hidden: bool) -> Result<JsValue, JsValue> {
         if hidden && self.frame_policy.set_hidden(true) {
             self.last_visible_frame_millis = None;
+            self.clear_interactive_input();
             if let Some(host) = self.host.as_mut() {
                 let _ = host.on_background().map_err(js_error)?;
                 self.background_save_count = self.background_save_count.saturating_add(1);
@@ -2412,6 +2413,12 @@ impl WebSceneHost {
         event: TouchInputEvent,
         effects: &mut WebHostEffects,
     ) -> Result<MonoInputDisposition, JsValue> {
+        self.interactive_input.observe_supplemental_movement(
+            self.host
+                .as_mut()
+                .ok_or_else(|| JsValue::from_str("scene host is shut down"))?,
+            self.touch_input.held_frame(),
+        );
         let mut disposition = MonoInputDisposition {
             handled: event.handled,
             ..MonoInputDisposition::default()
@@ -2900,8 +2907,19 @@ impl WebSceneHost {
         )?;
         if let Some(host) = self.host.as_ref() {
             let ui_active = host.mono_ui_is_active();
+            let movement_cadence = host.player_movement_cadence();
             report_set_bool(&object, "active", ui_active)?;
             report_set_bool(&object, "uiActive", ui_active)?;
+            report_set_number(
+                &object,
+                "playerMovementRateHz",
+                f64::from(movement_cadence.rate_hz),
+            )?;
+            report_set_number(
+                &object,
+                "droppedPlayerMovementSteps",
+                host.dropped_player_movement_steps() as f64,
+            )?;
             report_set_bool(&object, "releasePointerCapture", ui_active)?;
             report_set_bool(
                 &object,

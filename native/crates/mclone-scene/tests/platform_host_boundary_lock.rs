@@ -83,3 +83,19 @@ fn native_apps_do_not_regain_final_frame_or_ui_dispatch() {
         }
     }
 }
+
+#[test]
+fn native_hosts_do_not_clamp_player_elapsed_time_before_the_scene() {
+    let desktop_update = braced_item(DESKTOP_APP, "fn update_camera_from_keys(");
+    assert!(desktop_update.contains("frame_dt.as_secs_f64()"));
+    assert!(
+        !desktop_update.contains(".min(0.05)"),
+        "desktop silently dropped player elapsed time before shared catch-up"
+    );
+
+    let android_advance = braced_item(FLAT_ANDROID, "fn drive_held_input(");
+    assert!(
+        !android_advance.contains("clamp("),
+        "flat Android silently dropped player elapsed time before shared catch-up"
+    );
+}

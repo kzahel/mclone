@@ -9,7 +9,9 @@ a developer cadence profile option that derives the runner host interval from
 the selected host rate, and the native runner can apply a new cadence profile
 while running. The shared in-game options UI now exposes local integrated-server
 cadence controls for host, world tick, and physics rates; native flat local
-captures validate the settings screen at the default 20/20/60 profile.
+captures validate the settings screen at the default 20/20/60 profile. Tactical
+221 separately lands the first 60 Hz client-player movement lane; it does not
+change the default 20 Hz world/gameplay lane or 20 Hz pose-publication lane.
 
 ## Purpose
 

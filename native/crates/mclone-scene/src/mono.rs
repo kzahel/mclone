@@ -524,6 +524,7 @@ impl McloneSceneHost {
             startup.replace_camera(camera.clone());
         }
         self.active_world.camera = camera;
+        self.active_world.local_participant.reset_movement();
     }
 
     pub fn set_mono_camera_view(&mut self, view_mode: EngineCameraViewMode) {
@@ -589,7 +590,10 @@ impl McloneSceneHost {
     }
 
     pub fn mono_underwater(&self) -> bool {
-        let snapshot = self.active_world.camera.snapshot();
+        let snapshot = self
+            .active_world
+            .local_participant
+            .presentation_camera_snapshot();
         self.active_world
             .runtime
             .as_ref()
@@ -611,9 +615,22 @@ impl McloneSceneHost {
             .frame_state(&self.active_world.interaction)
     }
 
+    pub fn player_movement_cadence(&self) -> PlayerMovementCadenceConfig {
+        self.active_world.local_participant.movement.config()
+    }
+
+    pub fn dropped_player_movement_steps(&self) -> u64 {
+        self.active_world
+            .local_participant
+            .movement
+            .total_dropped_steps()
+    }
+
     pub fn mono_render_view(&self, size: [u32; 2]) -> Result<ChunkRenderView> {
         render_pose_from_snapshot_with_view_mode(
-            self.active_world.camera.snapshot(),
+            self.active_world
+                .local_participant
+                .presentation_camera_snapshot(),
             self.active_world.camera.view_mode(),
             self.current_render_distance(),
         )
@@ -727,6 +744,7 @@ impl McloneSceneHost {
         dt_seconds: f64,
     ) -> Result<MonoInputFrameOutcome> {
         if !self.gameplay_startup_complete() {
+            self.active_world.local_participant.reset_movement();
             return Ok(MonoInputFrameOutcome::default());
         }
         let activation_was_active = self.embedded_world_activation.phase.active();
@@ -734,6 +752,8 @@ impl McloneSceneHost {
         let mut camera_changed = false;
         if !self.mono_ui_is_active() && !activation_was_active {
             camera_changed |= self.apply_mono_movement_frame(frame, dt_seconds);
+        } else {
+            self.active_world.local_participant.reset_movement();
         }
         let pose_sync_changed = if self.embedded_world_activation.phase.active() {
             false
@@ -757,14 +777,27 @@ impl McloneSceneHost {
             .as_ref()
             .expect("startup completion requires runtime");
         let input = engine_camera_input_from_flat_frame(frame, dt_seconds);
-        let before = self.active_world.camera.snapshot();
-        let after = self
-            .active_world
-            .local_participant
-            .camera
-            .apply_movement_input(runtime.client(), input);
+        let (changed, _) = self.active_world.local_participant.advance_movement(
+            runtime.client(),
+            input,
+            dt_seconds,
+        );
         self.play_landing_events();
-        after != before
+        changed
+    }
+
+    /// Preserve movement-button edges observed between fixed player steps.
+    ///
+    /// Physical adapters still own event receipt. The shared router calls this
+    /// with its complete held-state projection so a quick jump press/release
+    /// cannot disappear merely because no 60 Hz movement quantum was due yet.
+    pub fn observe_mono_movement_frame(&mut self, frame: FlatInputFrame) {
+        if !self.gameplay_startup_complete() || self.mono_ui_is_active() {
+            return;
+        }
+        self.active_world
+            .local_participant
+            .observe_movement(engine_camera_input_from_flat_frame(frame, 0.0));
     }
 
     pub fn apply_mono_look_frame(&mut self, frame: FlatInputFrame) -> bool {
@@ -789,7 +822,7 @@ impl McloneSceneHost {
     }
 
     pub fn clear_mono_camera_input(&mut self) {
-        self.active_world.camera.clear_keys();
+        self.active_world.local_participant.reset_movement();
     }
 
     pub fn begin_mono_blink_debug(&mut self) -> bool {
@@ -863,6 +896,7 @@ impl McloneSceneHost {
                 .camera
                 .probe_ground(runtime.client(), MONO_GROUND_PROBE_DISTANCE);
         }
+        self.active_world.local_participant.reset_movement();
         let changed = self.commit_mono_player_pose_now()?;
         Ok(MonoBlinkCommitStatus::Committed {
             target_feet,
@@ -989,7 +1023,9 @@ impl McloneSceneHost {
     }
 
     pub fn toggle_mono_walk_fly_movement_mode(&mut self) -> EngineCameraMovementMode {
-        self.active_world.camera.toggle_walk_fly_movement_mode()
+        let mode = self.active_world.camera.toggle_walk_fly_movement_mode();
+        self.active_world.local_participant.reset_movement();
+        mode
     }
 
     pub fn adjust_mono_camera_speed(&mut self, amount: f64) {

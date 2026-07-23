@@ -113,7 +113,7 @@ source seam, but not yet the complete semantic or physical-input contract:
   per-source semantic held/pressed/released actions, movement and look-rate
   axes, dead-zone/curve policy, trigger hysteresis, controller navigation
   repeat, lifecycle clearing, and active-source/layout arbitration. A bounded
-  flat-frame projection applies look rate with `dt` while hosts migrate.
+  flat-frame projection applies look rate with presentation `dt`.
 - Desktop flat drains and polls GilRs, browser Rust polls only W3C
   standard-mapped Gamepad API sources near the animation-frame boundary, and
   both Android packages receive source-aware standard controller events through
@@ -132,6 +132,14 @@ source seam, but not yet the complete semantic or physical-input contract:
   call the mono controller route; both XR apps use the corresponding shared XR
   router and action combiner. Hosts retain mechanical capability/activity
   collectors while semantic policy stays shared.
+- Shared semantic movement state is consumed by the scene-owned fixed 60 Hz
+  player movement clock rather than integrated with presentation `dt`.
+  Keyboard, touch, and controller changes notify that owner immediately when
+  their platform collector observes them; jump edges survive a press/release
+  between fixed movement steps. Look, mouse deltas, tracked XR poses, and
+  controller polling remain presentation-rate inputs. In particular, the
+  browser Gamepad API is still polled at the animation-frame boundary because
+  that browser API exposes snapshots rather than an independent event stream.
 - `mclone-ui::GuiNavigation` now owns directional traversal, confirm/back,
   page navigation, disabled-widget skipping, slider adjustment, and focus
   visuals. The scene maps semantic menu actions through it, and deterministic

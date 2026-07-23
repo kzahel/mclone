@@ -3001,6 +3001,7 @@ impl McloneSceneHost {
             || before.pitch_radians != after.pitch_radians
             || before_feet != standby.camera.feet_position();
         if position_changed {
+            standby.local_participant.reset_movement();
             self.invalidate_warm_world_destination_after_correction();
         }
         Ok(true)
@@ -3440,6 +3441,7 @@ impl McloneSceneHost {
                     snapshot.yaw_radians,
                     snapshot.pitch_radians,
                 );
+                self.active_world.local_participant.reset_movement();
                 let (changed, _) = self.commit_engine_camera_player_pose_timed()?;
                 Ok(changed)
             }
@@ -3632,6 +3634,7 @@ impl McloneSceneHost {
                 destination_entry_pose.yaw_radians,
                 pitch_radians,
             );
+            standby.local_participant.reset_movement();
             let (changed, position_changed) =
                 Self::commit_world_slot_camera(standby, &self.services.clock)
                     .context("commit mapped warm-world destination camera and interest")?;
@@ -3865,6 +3868,9 @@ impl McloneSceneHost {
             || before.yaw_radians != after.yaw_radians
             || before.pitch_radians != after.pitch_radians
             || before_feet != slot.camera.feet_position();
+        if position_changed {
+            slot.local_participant.reset_movement();
+        }
         Ok((changed, position_changed))
     }
 
@@ -4908,6 +4914,7 @@ impl McloneSceneHost {
             }
         };
         if camera_changed {
+            slot.local_participant.reset_movement();
             slot.accepted_entry_pose = Some(WorldEntryPose::from_camera(&slot.camera));
             state.accepted_entry_pose = None;
             state.destination_endpoint = None;
@@ -5415,6 +5422,7 @@ impl McloneSceneHost {
     fn clear_physical_presentation_state(&mut self) {
         self.tracking_origin = None;
         self.last_locomotion_update = None;
+        self.active_world.local_participant.reset_movement();
         self.player_pose_sync.reset();
         self.head_comfort.reset();
         self.clear_xr_blink_teleport();
@@ -5443,6 +5451,7 @@ impl McloneSceneHost {
         self.tracking_origin = None;
         self.prefetched_live_upload = None;
         self.last_locomotion_update = None;
+        self.active_world.local_participant.reset_movement();
         self.player_pose_sync.reset();
         self.first_eye_summary = None;
         self.last_ui_panel_stats = WorldGuiPanelRenderStats::default();
@@ -6093,6 +6102,7 @@ impl ClientExperienceSettingsHost for McloneSceneHost {
         self.active_world
             .camera
             .set_movement_mode(engine_movement_mode(mode));
+        self.active_world.local_participant.reset_movement();
         log::info!(
             "XR player movement mode {}",
             self.active_world.camera.movement_mode().label()
@@ -6104,6 +6114,7 @@ impl ClientExperienceSettingsHost for McloneSceneHost {
         self.active_world
             .camera
             .set_collision_mode(engine_collision_mode(mode));
+        self.active_world.local_participant.reset_movement();
         log::info!(
             "XR player collision mode {}",
             self.active_world.camera.collision_mode().label()

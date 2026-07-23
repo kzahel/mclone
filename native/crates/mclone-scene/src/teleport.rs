@@ -447,6 +447,7 @@ impl McloneSceneHost {
                 .camera
                 .probe_ground(runtime.client(), XR_BLINK_TELEPORT_GROUND_PROBE_DISTANCE);
         }
+        self.active_world.local_participant.reset_movement();
         log::info!(
             "XR Blink teleport committed feet=({:.2}, {:.2}, {:.2})",
             target_feet.x,

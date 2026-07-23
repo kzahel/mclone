@@ -2,8 +2,9 @@
 
 Topic: client-prediction
 
-Status: client-authoritative movement (vanilla-shaped) is the deliberate
-interim; server-side validation is planned; sequenced input replay is a
+Status: local player movement now runs on a scene-owned fixed 60 Hz command
+clock while remaining client-authoritative (vanilla-shaped) for the deliberate
+interim. Server-side validation is planned; sequenced input replay is a
 preserved future path, not scheduled work.
 
 Scope: who owns player movement truth, what the server checks, how remote
@@ -14,7 +15,7 @@ later. The wire/session/tick plan lives in
 [`vanilla/networking.md`](vanilla/networking.md)
 (movement send, validation walkthrough, teleport/ack, interpolation).
 
-## Current state (verified 2026-07-14)
+## Current state (verified 2026-07-23)
 
 - **Local movement is client-simulated and client-authoritative**, matching
   vanilla's model. The client runs its own physics
@@ -24,6 +25,23 @@ later. The wire/session/tick plan lives in
   attempts, `StatusOnly` on ground flip
   (`LOCAL_PLAYER_POSITION_SYNC_DELTA_SQR`/`..._REMINDER_INTERVAL`,
   `mclone-client/src/player.rs:65-66,909-964`).
+- **Local movement integration is fixed at 60 Hz by default and is not driven
+  by render delta.** `mclone-scene` owns a configurable player movement clock,
+  accepts elapsed wall time plus the latest shared semantic input, emits
+  bounded fixed quanta, retains jump edges across zero-step frames, and
+  interpolates only the presentation eye between committed movement poses.
+  Desktop, browser, flat Android, and XR all use that owner. The default
+  12-step catch-up bound preserves full movement through a 200 ms visible
+  frame and records explicitly dropped work beyond it. Lifecycle transitions,
+  teleports, server corrections, world swaps, and movement-policy changes snap
+  the timeline instead of interpolating from stale state.
+- **Walking recurrence is rate-independent at free motion boundaries.** The
+  vanilla-style impulse/drag/gravity affine recurrence now has a fractional
+  fixed-step form, so three 60 Hz steps compose to one former 20 Hz step in
+  unobstructed motion. Collision is still evaluated at every smaller quantum,
+  which is the intended higher-rate behavior. Fly/no-clip movement also keeps
+  sub-unit analog throttle instead of normalizing every non-zero stick vector
+  to full speed.
 - **Pose publication is scene-owned across platforms.** Mono and XR frame
   entry points advance one `mclone-scene` deadline at no more than 20 Hz,
   with wall-clock slip instead of catch-up bursts. Look-only changes reach the
@@ -116,11 +134,11 @@ Decisions to make **now** so Stage 2 stays cheap:
   protocol change that Stage 1's burst accounting can use immediately and
   Stage 2 requires. Do it when the session-layer protocol changes land, to
   avoid an extra version bump.
-- **Keep the client's input→physics quantum explicit.** The controller
-  already normalizes to a 20 Hz tick-equivalent
-  (`LOCAL_PLAYER_TICKS_PER_SECOND`, `mclone-client/src/player.rs:20,1276`);
-  Stage 2 needs inputs recorded per fixed quantum, so avoid smearing input
-  application across variable frame dt in ways that can't be replayed.
+- **Keep the client's input→physics quantum explicit.** The scene now emits
+  fixed 1/60-second local-player quanta while the lower movement implementation
+  retains a 20 Hz vanilla recurrence baseline through fractional composition.
+  Stage 2 still needs each quantum materialized as a sequenced command record,
+  so do not collapse this clock back into variable frame `dt`.
 - **Keep server movement application in shared code** (`mclone-server` +
   shared physics), never app-local, so the replay simulation has one home.
 - **Keep view pose, body heading, and locomotion reference conceptually
@@ -133,10 +151,13 @@ Decisions to make **now** so Stage 2 stays cheap:
 
 ## Variable-tick interplay
 
-- The current scene deadline makes the 20-attempt move reminder one second at
-  its fixed 20 Hz vanilla baseline. It should become handshake-rate-aware when
-  variable publication rates land, so a 60 Hz server does not triple movement
-  chatter.
+- The 60 Hz local movement clock, the current 20 Hz pose-publication deadline,
+  the configurable host/world/physics cadence, and render cadence are separate
+  lanes. Changing the integrated server from 20 to 60 Hz therefore does not
+  triple local movement or movement packets.
+- The current publication deadline makes the 20-attempt move reminder one
+  second at its fixed 20 Hz vanilla baseline. It should become
+  handshake-rate-aware when variable publication rates land.
 - Vanilla's per-tick thresholds ("too quickly" per packet-burst) assume the
   server tick as the accounting window; when the tick rate is configurable,
   the burst window follows the gameplay/publication lane, not wall-clock
@@ -153,6 +174,10 @@ Decisions to make **now** so Stage 2 stays cheap:
    has an autonomous tick (validation windows are per-tick).
 3. Leave Stage 2 unscheduled; revisit when gameplay needs server-auth
    movement (combat, competitive play) or cheating becomes real.
+4. When Stage 2 resumes, replace the movement clock's latest-state consumption
+   with timestamped, sequenced per-quantum command records. The current edge
+   latch prevents lost jump presses, but it cannot reconstruct the exact
+   within-frame timing of arbitrary held-axis changes after a long frame.
 
 ## Non-goals
 

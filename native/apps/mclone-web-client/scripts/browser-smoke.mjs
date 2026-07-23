@@ -3808,7 +3808,11 @@ async function runMovementPerfProbe(page, canvas) {
           Math.abs(Number(state.centerX) - start.centerX),
           Math.abs(Number(state.centerZ) - start.centerZ),
         );
-        return movedChunks >= movementPerfChunkBoundaries;
+        // Fast movement may cross the distance threshold before the first
+        // newly requested compile completes. Keep the key held until the
+        // probe has exercised both movement and background compilation.
+        return movedChunks >= movementPerfChunkBoundaries
+          && Number(state.compileTimingCount) > start.compileTimingCount;
       },
       { start, movementPerfChunkBoundaries },
       { timeout: 90_000 },
@@ -8128,6 +8132,9 @@ function assertMovementPerfResult(report, pageErrors, canvasPixels) {
   const result = report.result;
   if (!probe?.ok || !result?.ok || !result.ready) {
     throw new Error(`native web movement perf did not complete:\n${JSON.stringify(report, null, 2)}`);
+  }
+  if (Number(result.playerMovementRateHz) !== 60) {
+    throw new Error(`native web movement perf did not use the default 60 Hz player clock:\n${JSON.stringify(result, null, 2)}`);
   }
   if (probe.movedChunks < report.movementPerfChunkBoundaries) {
     throw new Error(`native web movement perf did not cross enough chunk boundaries:\n${JSON.stringify(probe, null, 2)}`);

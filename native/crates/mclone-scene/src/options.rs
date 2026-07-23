@@ -46,6 +46,7 @@ pub struct McloneSceneHostOptions {
     pub startup: mclone_app_runtime::startup_args::StartupSceneOptions,
     pub render_compile_worker_timing_enabled: bool,
     pub simulation_cadence: SimulationCadenceConfig,
+    pub player_movement_cadence: PlayerMovementCadenceConfig,
     pub world_behavior_profile: mclone_server::WorldBehaviorProfile,
     pub first_person_player_visible: bool,
     pub use_initial_spawn_center: bool,
@@ -66,6 +67,7 @@ impl Default for McloneSceneHostOptions {
             startup: mclone_app_runtime::startup_args::StartupSceneOptions::default(),
             render_compile_worker_timing_enabled: true,
             simulation_cadence: SimulationCadenceConfig::default(),
+            player_movement_cadence: PlayerMovementCadenceConfig::default(),
             world_behavior_profile: mclone_server::WorldBehaviorProfile::Mutable,
             first_person_player_visible: false,
             use_initial_spawn_center: true,
@@ -92,6 +94,7 @@ impl McloneSceneHostOptions {
             startup: scene,
             render_compile_worker_timing_enabled: true,
             simulation_cadence: SimulationCadenceConfig::default(),
+            player_movement_cadence: PlayerMovementCadenceConfig::default(),
             world_behavior_profile: mclone_server::WorldBehaviorProfile::Mutable,
             first_person_player_visible: false,
             use_initial_spawn_center: true,
@@ -112,6 +115,13 @@ impl McloneSceneHostOptions {
     }
 
     pub fn validated(self) -> Result<Self> {
+        if !self.player_movement_cadence.is_valid() {
+            bail!(
+                "player movement cadence must have a rate in 1..=1000 Hz and at least one catch-up step, got {}/{}",
+                self.player_movement_cadence.rate_hz,
+                self.player_movement_cadence.max_catch_up_steps
+            );
+        }
         if !self.world_topology.is_unbounded() && self.far_lod.enabled {
             bail!("Far LOD is unavailable for bounded or periodic world topology");
         }
@@ -284,5 +294,21 @@ mod tests {
         assert_eq!(projected.world_dir, Some(PathBuf::from("/tmp/worlds/demo")));
         // Platform policy is deliberately layered after the shared projection.
         assert!(projected.adaptive_chunk_publication_budget);
+    }
+
+    #[test]
+    fn scene_defaults_to_a_sixty_hz_player_clock_independent_of_world_ticks() {
+        let scene = McloneSceneHostOptions::default();
+        assert_eq!(scene.player_movement_cadence.rate_hz, 60);
+        assert_eq!(scene.simulation_cadence.gameplay_rate_hz, 20);
+        assert!(scene.validated().is_ok());
+    }
+
+    #[test]
+    fn scene_rejects_an_invalid_player_movement_cadence() {
+        let mut scene = McloneSceneHostOptions::default();
+        scene.player_movement_cadence = PlayerMovementCadenceConfig::new(0, 0);
+        let error = scene.validated().expect_err("invalid cadence");
+        assert!(error.to_string().contains("player movement cadence"));
     }
 }

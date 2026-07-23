@@ -1,6 +1,7 @@
 # Player Movement And Netcode Notes
 
-Status: **constraint notes for the resumed movement work**.
+Status: **the first fixed-rate local movement slice has landed; ordered
+client/host command replay remains future work**.
 
 The old movement/netcode sketch was useful for recording command-stream and prediction constraints, but it assumed too much about where the client prediction world lives. The client runtime architecture arc in [`tactical/README.md`](./tactical/README.md) has now landed the needed `IntegratedServer`, `ClientRuntime`, `ClientWorld`, `PredictionService`, and presentation ownership surfaces.
 
@@ -133,7 +134,11 @@ Rules to keep:
 - authoritative snapshots include enough body state to restart replay
 - polling, local worker `postMessage`, WebSocket, WebTransport, and future WebRTC adapters all carry the same logical records if they are used
 
-This is not yet an implementation plan. The missing prerequisite is the client replica/prediction boundary.
+The scene-owned 60 Hz clock now implements the fixed-quantum, bounded-catch-up,
+edge-retention, and presentation-interpolation parts of this shape for local
+prediction. It deliberately does not claim the rest: quanta are not yet
+materialized as sequenced protocol records, the host does not drain the same
+records, and corrections do not replay unacknowledged commands.
 
 ## Resume Criteria
 
@@ -146,4 +151,8 @@ The previous resume criteria are now satisfied by the client runtime arc:
 - a prediction-service API that can read a bounded collision/entity view without host access
 - tests or probes proving singleplayer and remote clients use the same client-world hydration path
 
-The next movement tactical should be redrafted from first principles. It should also account for named join/player-slot semantics before player movement becomes persistent state: a session is a transport/resume handle, while a player id should refer to an authoritative player slot in a world/save.
+Tactical 221 records the first resumed implementation. The next netcode
+tactical should convert the clock output into sequenced command records and
+account for named join/player-slot semantics before player movement becomes
+persistent state: a session is a transport/resume handle, while a player id
+should refer to an authoritative player slot in a world/save.

@@ -1348,39 +1348,59 @@ impl LocalPlayerController {
             step.y_rot_degrees,
             walking_input_speed(self.on_ground, sprinting)
                 * walking_speed_multiplier(step.speed_multiplier),
-        )
-        .scale(tick_scale);
-        self.delta_movement = self.delta_movement.add(acceleration);
-
-        let requested = self.delta_movement.scale(tick_scale);
+        );
+        let horizontal_drag = if self.on_ground {
+            LOCAL_PLAYER_BLOCK_FRICTION * LOCAL_PLAYER_FRICTION_MULTIPLIER
+        } else {
+            LOCAL_PLAYER_FRICTION_MULTIPLIER
+        };
+        let (requested_x, next_x) = fractional_tick_axis(
+            self.delta_movement.x,
+            acceleration.x,
+            horizontal_drag,
+            0.0,
+            tick_scale,
+        );
+        let (requested_y, next_y) = fractional_tick_axis(
+            self.delta_movement.y,
+            0.0,
+            LOCAL_PLAYER_VERTICAL_DRAG,
+            -LOCAL_PLAYER_GRAVITY * LOCAL_PLAYER_VERTICAL_DRAG,
+            tick_scale,
+        );
+        let (requested_z, next_z) = fractional_tick_axis(
+            self.delta_movement.z,
+            acceleration.z,
+            horizontal_drag,
+            0.0,
+            tick_scale,
+        );
+        let requested = Vec3d::new(requested_x, requested_y, requested_z);
         let collision = self.move_colliding(client, requested);
         self.update_water_contact(client);
         if self.should_schedule_auto_jump(client, input, step, collision, auto_jumped) {
             self.auto_jump_time = 1;
         }
 
-        let mut post_move_delta = self.delta_movement;
-        if !nearly_equal(requested.x, collision.traveled.x) {
-            post_move_delta.x = 0.0;
-        }
-        if !nearly_equal(requested.y, collision.traveled.y) {
-            post_move_delta.y = 0.0;
-        }
-        if !nearly_equal(requested.z, collision.traveled.z) {
-            post_move_delta.z = 0.0;
-        }
-
-        let horizontal_drag = if self.on_ground {
-            LOCAL_PLAYER_BLOCK_FRICTION * LOCAL_PLAYER_FRICTION_MULTIPLIER
-        } else {
-            LOCAL_PLAYER_FRICTION_MULTIPLIER
-        }
-        .powf(tick_scale);
-        let vertical_drag = LOCAL_PLAYER_VERTICAL_DRAG.powf(tick_scale);
+        let collided_x = !nearly_equal(requested.x, collision.traveled.x);
+        let collided_y = !nearly_equal(requested.y, collision.traveled.y);
+        let collided_z = !nearly_equal(requested.z, collision.traveled.z);
+        let gravity_after_vertical_collision = fractional_tick_axis(
+            0.0,
+            0.0,
+            LOCAL_PLAYER_VERTICAL_DRAG,
+            -LOCAL_PLAYER_GRAVITY * LOCAL_PLAYER_VERTICAL_DRAG,
+            tick_scale,
+        )
+        .1;
         self.delta_movement = Vec3d::new(
-            post_move_delta.x * horizontal_drag,
-            (post_move_delta.y - LOCAL_PLAYER_GRAVITY * tick_scale) * vertical_drag,
-            post_move_delta.z * horizontal_drag,
+            if collided_x { 0.0 } else { next_x },
+            if collided_y {
+                gravity_after_vertical_collision
+            } else {
+                next_y
+            },
+            if collided_z { 0.0 } else { next_z },
         );
 
         Some(WalkingMovementResult {
@@ -1399,51 +1419,66 @@ impl LocalPlayerController {
         sprinting: bool,
         tick_scale: f64,
     ) -> WalkingMovementResult {
-        if input.jumping {
-            self.delta_movement.y += LOCAL_PLAYER_FLUID_JUMP_POWER * tick_scale;
-        }
-        if input.shift_key_down {
-            self.delta_movement.y -= LOCAL_PLAYER_FLUID_JUMP_POWER * tick_scale;
-        }
-
+        let vertical_acceleration =
+            axis(input.jumping, input.shift_key_down) as f64 * LOCAL_PLAYER_FLUID_JUMP_POWER;
         let acceleration = walking_input_acceleration(
             input,
             step.y_rot_degrees,
             LOCAL_PLAYER_WATER_MOVEMENT_SPEED * walking_speed_multiplier(step.speed_multiplier),
-        )
-        .scale(tick_scale);
-        self.delta_movement = self.delta_movement.add(acceleration);
-
-        let requested = self.delta_movement.scale(tick_scale);
-        let collision = self.move_colliding(client, requested);
-
-        let mut post_move_delta = self.delta_movement;
-        if !nearly_equal(requested.x, collision.traveled.x) {
-            post_move_delta.x = 0.0;
-        }
-        if !nearly_equal(requested.y, collision.traveled.y) {
-            post_move_delta.y = 0.0;
-        }
-        if !nearly_equal(requested.z, collision.traveled.z) {
-            post_move_delta.z = 0.0;
-        }
-
+        );
         let horizontal_drag = if sprinting {
             LOCAL_PLAYER_WATER_SPRINT_SLOWDOWN
         } else {
             LOCAL_PLAYER_WATER_SLOWDOWN
-        }
-        .powf(tick_scale);
-        let vertical_drag = LOCAL_PLAYER_WATER_VERTICAL_DRAG.powf(tick_scale);
-        let mut y_delta = post_move_delta.y * vertical_drag;
-        if !sprinting {
-            y_delta = fluid_falling_adjusted_y(y_delta, tick_scale);
-        }
+        };
+        let vertical_after_drag = if sprinting {
+            0.0
+        } else {
+            -LOCAL_PLAYER_GRAVITY / 16.0
+        };
+        let (requested_x, next_x) = fractional_tick_axis(
+            self.delta_movement.x,
+            acceleration.x,
+            horizontal_drag,
+            0.0,
+            tick_scale,
+        );
+        let (requested_y, next_y) = fractional_tick_axis(
+            self.delta_movement.y,
+            vertical_acceleration,
+            LOCAL_PLAYER_WATER_VERTICAL_DRAG,
+            vertical_after_drag,
+            tick_scale,
+        );
+        let (requested_z, next_z) = fractional_tick_axis(
+            self.delta_movement.z,
+            acceleration.z,
+            horizontal_drag,
+            0.0,
+            tick_scale,
+        );
+        let requested = Vec3d::new(requested_x, requested_y, requested_z);
+        let collision = self.move_colliding(client, requested);
 
+        let collided_x = !nearly_equal(requested.x, collision.traveled.x);
+        let collided_y = !nearly_equal(requested.y, collision.traveled.y);
+        let collided_z = !nearly_equal(requested.z, collision.traveled.z);
+        let gravity_after_vertical_collision = fractional_tick_axis(
+            0.0,
+            0.0,
+            LOCAL_PLAYER_WATER_VERTICAL_DRAG,
+            vertical_after_drag,
+            tick_scale,
+        )
+        .1;
         self.delta_movement = Vec3d::new(
-            post_move_delta.x * horizontal_drag,
-            y_delta,
-            post_move_delta.z * horizontal_drag,
+            if collided_x { 0.0 } else { next_x },
+            if collided_y {
+                gravity_after_vertical_collision
+            } else {
+                next_y
+            },
+            if collided_z { 0.0 } else { next_z },
         );
         self.update_water_contact(client);
 
@@ -1937,9 +1972,29 @@ fn hand_push_jump_delta_movement(
     normalize_or_zero(velocity_average).scale(jump_speed / LOCAL_PLAYER_TICKS_PER_SECOND)
 }
 
-fn fluid_falling_adjusted_y(y_delta: f64, tick_scale: f64) -> f64 {
-    let gravity = (LOCAL_PLAYER_GRAVITY / 16.0) * tick_scale;
-    y_delta - gravity
+/// Fractional iterate of one vanilla-style movement axis tick.
+///
+/// A full tick maps `position += velocity + pre_move_impulse` and
+/// `velocity = drag * (velocity + pre_move_impulse) + post_drag_offset`.
+/// Taking the affine map's fractional power makes two or three smaller fixed
+/// steps compose back to the same free-motion result instead of approximating
+/// the recurrence with `dt * 20`.
+fn fractional_tick_axis(
+    velocity: f64,
+    pre_move_impulse: f64,
+    drag: f64,
+    post_drag_offset: f64,
+    tick_scale: f64,
+) -> (f64, f64) {
+    debug_assert!(drag > 0.0 && drag < 1.0);
+    debug_assert!(tick_scale > 0.0);
+    let decay = drag.powf(tick_scale);
+    let fixed_velocity = (drag * pre_move_impulse + post_drag_offset) / (1.0 - drag);
+    let displacement_from_velocity = (1.0 - decay) / (1.0 - drag);
+    let displacement = displacement_from_velocity * (velocity - fixed_velocity)
+        + tick_scale * (fixed_velocity + pre_move_impulse);
+    let next_velocity = fixed_velocity + decay * (velocity - fixed_velocity);
+    (displacement, next_velocity)
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -2099,10 +2154,15 @@ pub fn flying_displacement(input: PlayerInput, step: FlyingMovementStep) -> Opti
             0.0,
         ))
         .add(forward.scale(input.forward_impulse as f64));
-    let direction = normalize_or_zero(direction);
-    if direction == Vec3d::ZERO {
+    let magnitude = direction.length_sqr().sqrt();
+    if magnitude <= COLLISION_EPSILON {
         return None;
     }
+    let direction = if magnitude > 1.0 {
+        direction.scale(1.0 / magnitude)
+    } else {
+        direction
+    };
 
     let boost = if step.sprinting {
         NO_CLIP_BOOST_MULTIPLIER
@@ -2507,6 +2567,27 @@ mod tests {
         assert!((displacement.length_sqr().sqrt() - 6.0).abs() < 1.0e-9);
         assert!(displacement.y > 0.0);
         assert!(displacement.z > 0.0);
+    }
+
+    #[test]
+    fn no_clip_movement_preserves_analog_throttle_magnitude() {
+        let mut input = PlayerInput::default();
+        input.tick_with_movement_impulse(PlayerInputKeys::default(), false, Some((0.0, 0.25)));
+
+        let displacement = no_clip_displacement(
+            input,
+            NoClipMovementStep {
+                yaw_radians: 0.0,
+                pitch_radians: 0.0,
+                speed_blocks_per_second: 8.0,
+                dt_seconds: 0.5,
+                descending: false,
+                sprinting: false,
+            },
+        )
+        .expect("movement");
+
+        assert_eq!(displacement, Vec3d::new(0.0, 0.0, 1.0));
     }
 
     #[test]
@@ -3109,6 +3190,41 @@ mod tests {
 
         assert_approx_eq(result.collision.traveled.x, LOCAL_PLAYER_AIR_SPEED);
         assert_approx_eq(result.collision.traveled.z, 0.0);
+    }
+
+    #[test]
+    fn walking_free_motion_matches_at_twenty_and_sixty_hz() {
+        fn simulate(rate_hz: u32) -> (LocalPlayerPose, Vec3d) {
+            let client = ClientRuntime::local_integrated();
+            let mut controller = LocalPlayerController::new();
+            controller.set_key(PlayerInputKey::Forward, true);
+            for _ in 0..(rate_hz * 2) {
+                controller
+                    .tick_walking_movement(
+                        &client,
+                        WalkingMovementStep {
+                            y_rot_degrees: 0.0,
+                            speed_multiplier: 1.0,
+                            dt_seconds: 1.0 / f64::from(rate_hz),
+                        },
+                    )
+                    .expect("walking movement");
+            }
+            (controller.pose(), controller.delta_movement())
+        }
+
+        let (pose_20, velocity_20) = simulate(20);
+        let (pose_60, velocity_60) = simulate(60);
+        assert!(
+            pose_20.position.subtract(pose_60.position).length_sqr() < 1.0e-18,
+            "20 Hz position {:?} != 60 Hz position {:?}",
+            pose_20.position,
+            pose_60.position
+        );
+        assert!(
+            velocity_20.subtract(velocity_60).length_sqr() < 1.0e-18,
+            "20 Hz velocity {velocity_20:?} != 60 Hz velocity {velocity_60:?}"
+        );
     }
 
     #[test]

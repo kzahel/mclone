@@ -654,7 +654,8 @@ A shared interactive scene/host router should:
 - route key, pointer, touch, and gamepad events accordingly;
 - apply menu/help/debug/gameplay/camera/hotbar/interaction behavior once;
 - clear held/transient state on focus loss or context transition;
-- advance held movement from the presentation frame time;
+- supply elapsed time and current held state to the scene-owned fixed player
+  movement clock without making presentation `dt` authoritative;
 - invoke existing `McloneSceneHost` methods and client-experience reducers; and
 - return a mechanical outcome.
 

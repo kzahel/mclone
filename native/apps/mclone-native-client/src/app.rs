@@ -702,7 +702,6 @@ impl ChunkApp {
 
     fn update_camera_from_keys(&mut self, now: Instant) -> Result<()> {
         let frame_dt = now.duration_since(self.last_frame);
-        let movement_dt = frame_dt.as_secs_f32().min(0.05);
         self.last_frame = now;
         self.frame_timing.begin_frame(
             frame_dt.as_secs_f64() * 1000.0,
@@ -712,7 +711,7 @@ impl ChunkApp {
         let Some(driver) = self.scene_driver.as_mut() else {
             return Ok(());
         };
-        driver.advance_held_input(f64::from(movement_dt))?;
+        driver.advance_held_input(frame_dt.as_secs_f64())?;
         if !driver.ui_is_active() {
             driver.update_blink_debug();
         }

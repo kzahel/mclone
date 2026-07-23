@@ -63,7 +63,6 @@ use crate::startup::{
 
 const ANDROID_FIXED_FPS_CAP: u32 = 60;
 const ANDROID_TARGET_FRAME_MS: f64 = 1_000.0 / ANDROID_FIXED_FPS_CAP as f64;
-const TOUCH_MOVEMENT_MAX_FRAME_SECONDS: f64 = 0.05;
 
 pub(crate) enum AndroidRenderError {
     Surface(wgpu::SurfaceError),
@@ -880,7 +879,7 @@ impl AndroidGpuState {
         self.interactive_input.advance_held_frame(
             &mut self.host,
             self.touch.held_frame(),
-            dt_seconds.clamp(0.0, TOUCH_MOVEMENT_MAX_FRAME_SECONDS),
+            dt_seconds,
         )?;
         if !self.host.mono_ui_is_active() {
             self.host.update_mono_blink_debug();
@@ -931,6 +930,8 @@ impl AndroidGpuState {
     }
 
     fn apply_touch_event(&mut self, event: TouchInputEvent) -> Result<AndroidInputOutcome> {
+        self.interactive_input
+            .observe_supplemental_movement(&mut self.host, self.touch.held_frame());
         let mut outcome = AndroidInputOutcome {
             handled: event.handled,
             exit: false,
