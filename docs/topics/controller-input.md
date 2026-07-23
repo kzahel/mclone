@@ -27,6 +27,9 @@ it deliberately does not add a physical gamepad collector.
 completed unattended implementation series through shared semantics, UI,
 physical collectors, XR convergence, preferences, and automated validation.
 Real-device acceptance remains a separate recorded gate.
+The loss-aware ordering and timing contract between those physical collectors
+and this topic's semantic reducer lives in
+[`input-observation-timeline.md`](input-observation-timeline.md).
 
 ## Top-Level Decision
 
@@ -43,7 +46,8 @@ input beside those actions.
 gilrs / Web Gamepad API / Android controller API
                        |
                        v
-            StandardGamepadSnapshot
+       ordered canonical observations
+          + terminal source snapshots
                        |
                        v shared bindings
 OpenXR / Steam Input -> PlayerActionFrame
@@ -61,6 +65,12 @@ The meaningful reuse begins immediately after platform collection. Platform
 APIs may deliver callbacks, event queues, or polled snapshots, but none of
 them may own dead zones, gameplay bindings, edge semantics, input contexts,
 UI navigation, prompt selection, or game behavior.
+
+An event-capable collector should not discard transitions merely because the
+browser's common denominator is a snapshot. Event ordering, normalized sample
+time, lifecycle discontinuities, and terminal-state recovery are specified in
+the input-observation-timeline topic; this topic continues to own what those
+canonical controls mean.
 
 ## Goals
 
@@ -120,7 +130,13 @@ source seam, but not yet the complete semantic or physical-input contract:
   one shared Java/JNI bridge and pure Rust collector. All emit canonical
   snapshots and preserve session-local hotplug identity. Desktop, browser, and
   flat Android route them semantically; desktop and Android XR merge the same
-  ordinary semantics with their OpenXR action frames.
+  ordinary semantics with their OpenXR action frames. Desktop and Android
+  currently collapse their ordered backend events into one final snapshot per
+  render interval, so a press/release pair or intermediate axis transition can
+  be lost before shared edge generation. Browser snapshot polling is an API
+  capability limit; OpenXR action sampling is action-sync/frame-shaped. The
+  accepted correction is tracked in
+  [`input-observation-timeline.md`](input-observation-timeline.md).
 - The legacy `GamepadInputAdapter` remains one controller at a time and still
   projects right-stick state directly into `FlatInputFrame`. It is retained as
   compatibility/test surface; shipping hosts use the semantic session.
@@ -135,11 +151,14 @@ source seam, but not yet the complete semantic or physical-input contract:
 - Shared semantic movement state is consumed by the scene-owned fixed 60 Hz
   player movement clock rather than integrated with presentation `dt`.
   Keyboard, touch, and controller changes notify that owner immediately when
-  their platform collector observes them; jump edges survive a press/release
-  between fixed movement steps. Look, mouse deltas, tracked XR poses, and
-  controller polling remain presentation-rate inputs. In particular, the
-  browser Gamepad API is still polled at the animation-frame boundary because
-  that browser API exposes snapshots rather than an independent event stream.
+  their platform collector and shared reducer observe them; jump edges then
+  survive a press/release between fixed movement steps. The current
+  snapshot-only controller projection cannot preserve a physical edge that
+  starts and ends before the reducer runs. Look, mouse deltas, tracked XR
+  poses, and controller polling remain presentation-rate inputs. In
+  particular, the browser Gamepad API is still polled at the animation-frame
+  boundary because that browser API exposes snapshots rather than an
+  independent event stream.
 - `mclone-ui::GuiNavigation` now owns directional traversal, confirm/back,
   page navigation, disabled-widget skipping, slider adjustment, and focus
   visuals. The scene maps semantic menu actions through it, and deterministic
@@ -197,9 +216,12 @@ are never persisted as durable device identity.
 
 ### Standard gamepad snapshot
 
-Platform collectors for ordinary gamepads should emit one normalized
-`StandardGamepadSnapshot` per connected source at the presentation/input
-sample boundary. It should contain:
+Platform collectors for ordinary gamepads should always be able to emit a
+normalized `StandardGamepadSnapshot` per connected source at the
+presentation/input sample boundary. Event-capable collectors should also
+preserve ordered canonical observations as specified in
+[`input-observation-timeline.md`](input-observation-timeline.md). A snapshot
+should contain:
 
 - left and right 2D sticks in `[-1, 1]`;
 - left and right triggers in `[0, 1]`;
@@ -210,10 +232,11 @@ sample boundary. It should contain:
 - analog button values when available, plus normalized pressed state;
 - monotonic sample information only when it has cross-platform meaning.
 
-Snapshot input is the common denominator because the browser is naturally
-polled, GilRs offers cached state plus events, Android delivers raw events,
-and test hosts synthesize state. Platform event frequency and repeat behavior
-must not leak into shared action semantics.
+Snapshot input is the terminal-state common denominator because the browser is
+naturally polled, GilRs offers cached state plus events, Android delivers raw
+events, and test hosts synthesize state. It is not a reason to erase richer
+ordered observations before shared reduction. Platform event frequency and
+repeat behavior must not leak into shared action semantics.
 
 Unknown or non-standard controls may be retained in a bounded extension for
 diagnostics and future binding support. A backend must not guess that an

@@ -14,6 +14,9 @@ later. The wire/session/tick plan lives in
 [`multiplayer-networking.md`](multiplayer-networking.md); vanilla receipts in
 [`vanilla/networking.md`](vanilla/networking.md)
 (movement send, validation walkthrough, teleport/ack, interpolation).
+Preservation of physical input order and timing before semantic command
+materialization lives in
+[`input-observation-timeline.md`](input-observation-timeline.md).
 
 ## Current state (verified 2026-07-23)
 
@@ -175,9 +178,12 @@ Decisions to make **now** so Stage 2 stays cheap:
 3. Leave Stage 2 unscheduled; revisit when gameplay needs server-auth
    movement (combat, competitive play) or cheating becomes real.
 4. When Stage 2 resumes, replace the movement clock's latest-state consumption
-   with timestamped, sequenced per-quantum command records. The current edge
-   latch prevents lost jump presses, but it cannot reconstruct the exact
-   within-frame timing of arbitrary held-axis changes after a long frame.
+   with timestamped, sequenced per-quantum command records. The physical and
+   semantic observation prerequisites are specified in
+   [`input-observation-timeline.md`](input-observation-timeline.md). The
+   current edge latch prevents a lost jump press only after the shared reducer
+   has observed it; it cannot recover a physical edge or arbitrary held-axis
+   change already collapsed by a platform collector.
 
 ## Non-goals
 

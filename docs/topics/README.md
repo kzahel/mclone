@@ -125,6 +125,10 @@ series implements the same concern, normally reuse the document slug in its
   vanilla-shaped client-authoritative interim, planned server validation
   checks, the preserved sequenced-input-replay path, and remote-actor
   interpolation divergence.
+- [`input-observation-timeline.md`](input-observation-timeline.md): accepted
+  cross-platform input timeline — preserve ordered transitions where a
+  platform exposes them, degrade honestly to snapshots, normalize monotonic
+  timing, and feed shared semantic 60 Hz player commands.
 - [`platform-parity.md`](platform-parity.md): cross-platform parity tracker —
   per-platform-class target state, the feature × platform matrix, the
   shared-contract × consumer reuse matrix, and the cross-cutting blockers that

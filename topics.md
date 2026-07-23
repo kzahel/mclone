@@ -135,3 +135,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   no-Steam edition, first-class no-install web play, paid/demo/full-free
   commercial options, Quest and Deck positioning, competitive landscape,
   launch sequencing, and success measures
+- `input-observation-timeline` — loss-aware cross-platform physical input
+  observations, shared semantic reduction, and sequenced 60 Hz player commands
+  independent of presentation cadence
