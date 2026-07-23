@@ -15,7 +15,7 @@ pub const TERRAIN_PREVIEW_COMPUTE_WGSL_TEMPLATE: &str =
     include_str!("shaders/terrain_preview_compute.wgsl");
 pub const TERRAIN_PREVIEW_RENDER_WGSL: &str = include_str!("shaders/terrain_preview_render.wgsl");
 
-const TERRAIN_PREVIEW_UNIFORM_BYTES: u64 = 48;
+const TERRAIN_PREVIEW_UNIFORM_BYTES: u64 = 64;
 const TERRAIN_PREVIEW_SAMPLE_BYTES: u64 =
     (TERRAIN_PREVIEW_SAMPLE_FLOATS * std::mem::size_of::<f32>()) as u64;
 const TERRAIN_PREVIEW_WORKGROUP_AXIS: u32 = 8;
@@ -102,9 +102,36 @@ pub struct TerrainPreviewDrawOptions {
 impl Default for TerrainPreviewDrawOptions {
     fn default() -> Self {
         Self {
-            source: TerrainPreviewSource::Split,
+            source: TerrainPreviewSource::Reference,
             view: TerrainPreviewView::ThreeDimensional,
             layer: TerrainPreviewLayer::Terrain,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TerrainPreviewCamera {
+    pub yaw_radians: f32,
+    pub pitch_radians: f32,
+}
+
+impl TerrainPreviewCamera {
+    pub fn new(yaw_radians: f32, pitch_radians: f32) -> Result<Self, String> {
+        if !yaw_radians.is_finite() || !pitch_radians.is_finite() {
+            return Err("terrain preview camera angles must be finite".to_owned());
+        }
+        Ok(Self {
+            yaw_radians,
+            pitch_radians: pitch_radians.clamp(0.12, 1.25),
+        })
+    }
+}
+
+impl Default for TerrainPreviewCamera {
+    fn default() -> Self {
+        Self {
+            yaw_radians: std::f32::consts::FRAC_PI_4,
+            pitch_radians: 0.48,
         }
     }
 }
@@ -415,6 +442,7 @@ impl TerrainPreviewRenderer {
         revision: u64,
         reference: &TerrainPreviewReferenceGrid,
         options: TerrainPreviewDrawOptions,
+        camera: TerrainPreviewCamera,
     ) -> Result<(TerrainPreviewFrameStats, EncodedTerrainPreviewReadback), String> {
         let request = reference.request();
         if request.request().cells_per_axis != self.cells_per_axis
@@ -444,7 +472,7 @@ impl TerrainPreviewRenderer {
         queue.write_buffer(
             &self.uniform_buffer,
             0,
-            &uniform_bytes(reference, width, height, options),
+            &uniform_bytes(reference, width, height, options, camera),
         );
 
         {
@@ -646,6 +674,7 @@ fn uniform_bytes(
     width: u32,
     height: u32,
     options: TerrainPreviewDrawOptions,
+    camera: TerrainPreviewCamera,
 ) -> Vec<u8> {
     let request = reference.request();
     let source = request.request();
@@ -667,6 +696,9 @@ fn uniform_bytes(
     let mut bytes = Vec::with_capacity(TERRAIN_PREVIEW_UNIFORM_BYTES as usize);
     for word in words {
         bytes.extend_from_slice(&word.to_le_bytes());
+    }
+    for value in [camera.yaw_radians, camera.pitch_radians, 0.0, 0.0] {
+        bytes.extend_from_slice(&value.to_le_bytes());
     }
     bytes
 }
@@ -728,7 +760,14 @@ mod tests {
         let reference =
             TerrainPreviewReferenceGrid::compile(TerrainPreviewRequest::new(12_345, -64, 96, 16))
                 .unwrap();
-        let bytes = uniform_bytes(&reference, 1280, 720, TerrainPreviewDrawOptions::default());
+        let camera = TerrainPreviewCamera::new(-0.75, 0.65).unwrap();
+        let bytes = uniform_bytes(
+            &reference,
+            1280,
+            720,
+            TerrainPreviewDrawOptions::default(),
+            camera,
+        );
         assert_eq!(bytes.len(), TERRAIN_PREVIEW_UNIFORM_BYTES as usize);
         assert_eq!(
             i32::from_le_bytes(bytes[0..4].try_into().unwrap()),
@@ -740,6 +779,8 @@ mod tests {
         );
         assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 16);
         assert_eq!(u32::from_le_bytes(bytes[36..40].try_into().unwrap()), 65);
+        assert_eq!(f32::from_le_bytes(bytes[48..52].try_into().unwrap()), -0.75);
+        assert_eq!(f32::from_le_bytes(bytes[52..56].try_into().unwrap()), 0.65);
     }
 
     #[test]

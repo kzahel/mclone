@@ -1,6 +1,6 @@
 use mclone_terrain_view::{
-    TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION, TerrainPreviewCompletedComparison,
-    TerrainPreviewFrameStats, TerrainPreviewRenderer,
+    TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION, TerrainPreviewCamera,
+    TerrainPreviewCompletedComparison, TerrainPreviewFrameStats, TerrainPreviewRenderer,
 };
 use mclone_worldgen::{
     levelgen::McloneOverworldSamplingTopology,
@@ -52,6 +52,8 @@ struct TerrainLabRenderReport<'a> {
     topology: &'static str,
     width: u32,
     height: u32,
+    camera_yaw: f32,
+    camera_pitch: f32,
     cpu_reference_ms: f64,
     encode_submit_ms: f64,
     request_ms: f64,
@@ -136,6 +138,8 @@ impl TerrainLab {
         source: String,
         view: String,
         layer: String,
+        camera_yaw: f32,
+        camera_pitch: f32,
     ) -> Result<String, JsValue> {
         let request_start = now_ms()?;
         let seed_value = seed
@@ -143,6 +147,7 @@ impl TerrainLab {
             .parse::<i64>()
             .map_err(|error| js_error(format!("invalid signed 64-bit seed {seed:?}: {error}")))?;
         let options = terrain_preview_options(&source, &view, &layer).map_err(js_error)?;
+        let camera = TerrainPreviewCamera::new(camera_yaw, camera_pitch).map_err(js_error)?;
         let request = TerrainPreviewRequest {
             seed: seed_value,
             center_x,
@@ -179,6 +184,7 @@ impl TerrainLab {
                 u64::from(revision),
                 &reference,
                 options,
+                camera,
             )
             .map_err(js_error)?;
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -197,6 +203,8 @@ impl TerrainLab {
             layer,
             self.width,
             self.height,
+            camera.yaw_radians,
+            camera.pitch_radians,
             cpu_reference_ms,
             finished - encode_start,
             finished - request_start,
@@ -395,6 +403,8 @@ fn render_report<'a>(
     layer: &'static str,
     width: u32,
     height: u32,
+    camera_yaw: f32,
+    camera_pitch: f32,
     cpu_reference_ms: f64,
     encode_submit_ms: f64,
     request_ms: f64,
@@ -422,6 +432,8 @@ fn render_report<'a>(
         topology: McloneOverworldSamplingTopology::Unbounded.label(),
         width,
         height,
+        camera_yaw,
+        camera_pitch,
         cpu_reference_ms,
         encode_submit_ms,
         request_ms,

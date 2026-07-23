@@ -241,6 +241,10 @@ h1 {
   pointer-events: none;
 }
 
+.mobileHint {
+  display: none;
+}
+
 .canvasTopline {
   top: 16px;
   left: 16px;
@@ -401,6 +405,10 @@ select {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 8px;
+}
+
+.cameraResetButton {
+  width: 100%;
 }
 
 button {
@@ -681,6 +689,14 @@ button:hover {
     max-width: calc(100% - 20px);
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .desktopHint {
+    display: none;
+  }
+
+  .mobileHint {
+    display: inline;
   }
 
   .viewerFooter {

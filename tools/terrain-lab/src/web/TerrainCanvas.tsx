@@ -8,7 +8,9 @@ import initTerrainLab, {
 import {
   footprintBlocks,
   nextSpacing,
+  orbitTerrainLabCamera,
   panTerrainLabState,
+  type TerrainLabCamera,
   type TerrainLabState,
 } from "../state";
 
@@ -45,6 +47,8 @@ export interface TerrainLabRenderReport {
   topology: string;
   width: number;
   height: number;
+  cameraYaw: number;
+  cameraPitch: number;
   cpuReferenceMs: number;
   encodeSubmitMs: number;
   requestMs: number;
@@ -77,7 +81,9 @@ export interface TerrainLabComparisonReport {
 
 interface TerrainCanvasProps {
   state: TerrainLabState;
+  camera: TerrainLabCamera;
   onStateChange: (state: TerrainLabState) => void;
+  onCameraChange: (camera: TerrainLabCamera) => void;
   onAdapter: (report: TerrainLabAdapterReport) => void;
   onRender: (report: TerrainLabRenderReport) => void;
   onComparison: (report: TerrainLabComparisonReport | undefined) => void;
@@ -89,12 +95,16 @@ interface PointerStart {
   pointerId: number;
   clientX: number;
   clientY: number;
+  camera: TerrainLabCamera;
+  mode: "orbit" | "pan";
   state: TerrainLabState;
 }
 
 export function TerrainCanvas({
   state,
+  camera,
   onStateChange,
+  onCameraChange,
   onAdapter,
   onRender,
   onComparison,
@@ -106,6 +116,8 @@ export function TerrainCanvas({
   const labRef = useRef<TerrainLab | undefined>(undefined);
   const revisionRef = useRef(0);
   const pointerStartRef = useRef<PointerStart | undefined>(undefined);
+  const orbitFrameRef = useRef(0);
+  const pendingCameraRef = useRef<TerrainLabCamera | undefined>(undefined);
   const [canvasSize, setCanvasSize] = useState({ width: 1280, height: 720 });
   const [initialized, setInitialized] = useState(false);
 
@@ -189,6 +201,8 @@ export function TerrainCanvas({
           state.source,
           state.view,
           state.layer,
+          camera.yaw,
+          camera.pitch,
         ),
       );
       onRender(report);
@@ -225,6 +239,7 @@ export function TerrainCanvas({
     };
   }, [
     canvasSize,
+    camera,
     initialized,
     onComparison,
     onError,
@@ -233,25 +248,62 @@ export function TerrainCanvas({
     state,
   ]);
 
-  const beginPan = (event: ReactPointerEvent<HTMLDivElement>): void => {
-    if (event.button !== 0) {
+  const beginInteraction = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    if (event.button !== 0 && event.button !== 1) {
       return;
     }
+    event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
+    const orbit = state.view === "3d" && event.button === 0 && !event.shiftKey;
     pointerStartRef.current = {
       pointerId: event.pointerId,
       clientX: event.clientX,
       clientY: event.clientY,
+      camera,
+      mode: orbit ? "orbit" : "pan",
       state,
     };
   };
 
-  const finishPan = (event: ReactPointerEvent<HTMLDivElement>): void => {
+  const moveInteraction = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const start = pointerStartRef.current;
+    if (!start || start.pointerId !== event.pointerId || start.mode !== "orbit") {
+      return;
+    }
+    const stage = stageRef.current;
+    if (!stage) {
+      return;
+    }
+    const rect = stage.getBoundingClientRect();
+    pendingCameraRef.current = orbitTerrainLabCamera(
+      start.camera,
+      event.clientX - start.clientX,
+      event.clientY - start.clientY,
+      rect.width,
+      rect.height,
+    );
+    if (orbitFrameRef.current !== 0) {
+      return;
+    }
+    orbitFrameRef.current = window.requestAnimationFrame(() => {
+      orbitFrameRef.current = 0;
+      const pending = pendingCameraRef.current;
+      if (pending) {
+        pendingCameraRef.current = undefined;
+        onCameraChange(pending);
+      }
+    });
+  };
+
+  const finishInteraction = (event: ReactPointerEvent<HTMLDivElement>): void => {
     const start = pointerStartRef.current;
     if (!start || start.pointerId !== event.pointerId) {
       return;
     }
     pointerStartRef.current = undefined;
+    if (start.mode === "orbit") {
+      return;
+    }
     const stage = stageRef.current;
     if (!stage) {
       return;
@@ -280,11 +332,13 @@ export function TerrainCanvas({
       className="terrainStage"
       data-testid="terrain-stage"
       data-render-ready={initialized ? "true" : "false"}
-      onPointerDown={beginPan}
-      onPointerUp={finishPan}
+      onPointerDown={beginInteraction}
+      onPointerMove={moveInteraction}
+      onPointerUp={finishInteraction}
       onPointerCancel={() => {
         pointerStartRef.current = undefined;
       }}
+      onContextMenu={(event) => event.preventDefault()}
       onWheel={zoomWithWheel}
     >
       <canvas
@@ -301,12 +355,19 @@ export function TerrainCanvas({
       </div>
       {state.source === "split" ? (
         <div className="splitLabels" aria-hidden="true">
-          <span>CPU reference</span>
-          <span>GPU approximate</span>
+          <span>CPU final reference</span>
+          <span>GPU production base</span>
         </div>
       ) : null}
       <div className="canvasHint" aria-hidden="true">
-        drag to pan · wheel or pinch controls to zoom
+        <span className="desktopHint">
+          {state.view === "3d"
+            ? "left drag orbit · shift + left or middle drag pan · wheel zoom"
+            : "left drag pan · wheel zoom"}
+        </span>
+        <span className="mobileHint">
+          {state.view === "3d" ? "drag orbit · scale controls zoom" : "drag pan · scale controls zoom"}
+        </span>
       </div>
     </div>
   );

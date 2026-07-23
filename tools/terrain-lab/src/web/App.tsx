@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 
 import {
-  DEFAULT_TERRAIN_LAB_STATE,
+  DEFAULT_TERRAIN_LAB_CAMERA,
+  REVIEW_TERRAIN_LAB_STATE,
   TERRAIN_LAB_SPACINGS,
   footprintBlocks,
   nextSpacing,
@@ -10,6 +11,7 @@ import {
   terrainLabSearch,
   validSeed,
   type TerrainLabLayer,
+  type TerrainLabCamera,
   type TerrainLabSource,
   type TerrainLabState,
   type TerrainLabView,
@@ -24,8 +26,8 @@ import {
 type LabStatus = "loading" | "ready" | "rendering" | "error";
 
 const SOURCE_OPTIONS: Array<{ value: TerrainLabSource; label: string; note: string }> = [
-  { value: "split", label: "Split", note: "Reference left, GPU right" },
-  { value: "gpu", label: "GPU", note: "Approximate compute evaluator" },
+  { value: "split", label: "Compare", note: "Final reference left, GPU base fields right" },
+  { value: "gpu", label: "GPU base", note: "Production fields through base surface" },
   { value: "reference", label: "Reference", note: "Production CPU sampler" },
 ];
 
@@ -46,6 +48,7 @@ export function App(): React.JSX.Element {
   const [renderReport, setRenderReport] = useState<TerrainLabRenderReport>();
   const [comparison, setComparison] = useState<TerrainLabComparisonReport>();
   const [error, setError] = useState<string>();
+  const [camera, setCamera] = useState<TerrainLabCamera>(DEFAULT_TERRAIN_LAB_CAMERA);
 
   useEffect(() => {
     const search = terrainLabSearch(state);
@@ -83,6 +86,12 @@ export function App(): React.JSX.Element {
       data-comparison-ready={comparison ? "true" : "false"}
       data-comparison-revision={comparison?.revision ?? 0}
       data-render-revision={renderReport?.revision ?? 0}
+      data-camera-yaw={camera.yaw}
+      data-camera-pitch={camera.pitch}
+      data-base-mean-error={comparison?.meanAbsoluteBaseSurfaceError ?? ""}
+      data-base-p95-error={comparison?.p95AbsoluteBaseSurfaceError ?? ""}
+      data-ocean-agreement={comparison?.oceanWaterPresenceAgreement ?? ""}
+      data-continentalness-error={comparison?.meanAbsoluteContinentalnessError ?? ""}
     >
       <header className="topBar">
         <div className="brandLockup">
@@ -116,7 +125,9 @@ export function App(): React.JSX.Element {
         <section className="viewerColumn" aria-label="Terrain preview">
           <TerrainCanvas
             state={state}
+            camera={camera}
             onStateChange={updateState}
+            onCameraChange={setCamera}
             onAdapter={setAdapter}
             onRender={setRenderReport}
             onComparison={setComparison}
@@ -137,7 +148,8 @@ export function App(): React.JSX.Element {
               <strong>{state.spacing} blocks</strong>
             </div>
             <div className="approximationNote">
-              GPU A1 is presentation-only. The CPU half remains production truth.
+              GPU A2 ports production base fields. Final rivers, wetlands, and planned
+              streams remain visible reference-only residuals.
             </div>
           </div>
         </section>
@@ -158,8 +170,8 @@ export function App(): React.JSX.Element {
               />
             </div>
             <div className="buttonRow">
-              <button type="button" onClick={() => updateState(DEFAULT_TERRAIN_LAB_STATE)}>
-                Review site
+              <button type="button" onClick={() => updateState(REVIEW_TERRAIN_LAB_STATE)}>
+                Load review site
               </button>
               <button type="button" onClick={() => patchState({ seed: randomSeed() })}>
                 New seed
@@ -235,6 +247,13 @@ export function App(): React.JSX.Element {
                 ))}
               </select>
             </label>
+            <button
+              type="button"
+              className="cameraResetButton"
+              onClick={() => setCamera(DEFAULT_TERRAIN_LAB_CAMERA)}
+            >
+              Reset 3D camera
+            </button>
           </ControlSection>
 
           <ControlSection number="04" title="Evidence" subdued>

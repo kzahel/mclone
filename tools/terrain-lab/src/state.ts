@@ -16,14 +16,29 @@ export interface TerrainLabState {
   layer: TerrainLabLayer;
 }
 
+export interface TerrainLabCamera {
+  yaw: number;
+  pitch: number;
+}
+
 export const DEFAULT_TERRAIN_LAB_STATE: TerrainLabState = {
   seed: "-98765",
   centerX: -304,
   centerZ: 336,
   spacing: 32,
-  source: "split",
+  source: "reference",
   view: "3d",
   layer: "terrain",
+};
+
+export const REVIEW_TERRAIN_LAB_STATE: TerrainLabState = {
+  ...DEFAULT_TERRAIN_LAB_STATE,
+  source: "split",
+};
+
+export const DEFAULT_TERRAIN_LAB_CAMERA: TerrainLabCamera = {
+  yaw: Math.PI / 4,
+  pitch: 0.48,
 };
 
 const I64_MIN = -(1n << 63n);
@@ -91,6 +106,22 @@ export function panTerrainLabState(
     ...state,
     centerX: clampI32(snapToSpacing(state.centerX + deltaX, state.spacing)),
     centerZ: clampI32(snapToSpacing(state.centerZ + deltaZ, state.spacing)),
+  };
+}
+
+export function orbitTerrainLabCamera(
+  camera: TerrainLabCamera,
+  deltaX: number,
+  deltaY: number,
+  width: number,
+  height: number,
+): TerrainLabCamera {
+  return {
+    yaw: camera.yaw + (deltaX / Math.max(width, 1)) * Math.PI * 1.5,
+    pitch: Math.max(
+      0.12,
+      Math.min(1.25, camera.pitch - (deltaY / Math.max(height, 1)) * Math.PI),
+    ),
   };
 }
 

@@ -2,6 +2,7 @@ struct TerrainPreviewParams {
     origin_spacing_cells: vec4<i32>,
     seed_source_view: vec4<u32>,
     layer_samples_size: vec4<u32>,
+    camera: vec4<f32>,
 };
 
 struct TerrainPreviewSample {

@@ -3,8 +3,11 @@ import test from "node:test";
 
 import {
   DEFAULT_TERRAIN_LAB_STATE,
+  DEFAULT_TERRAIN_LAB_CAMERA,
+  REVIEW_TERRAIN_LAB_STATE,
   footprintBlocks,
   nextSpacing,
+  orbitTerrainLabCamera,
   panTerrainLabState,
   parseTerrainLabState,
   terrainLabSearch,
@@ -59,4 +62,31 @@ test("pans on the active sample lattice", () => {
   assert.equal(Math.abs(moved.centerZ % moved.spacing), 0);
   assert.equal(moved.centerX, -224);
   assert.equal(moved.centerZ, 288);
+});
+
+test("defaults to production truth and gives the fixed comparison site a name", () => {
+  assert.equal(DEFAULT_TERRAIN_LAB_STATE.source, "reference");
+  assert.equal(REVIEW_TERRAIN_LAB_STATE.seed, "-98765");
+  assert.equal(REVIEW_TERRAIN_LAB_STATE.source, "split");
+});
+
+test("orbits independently from URL-addressed terrain state", () => {
+  const camera = orbitTerrainLabCamera(
+    DEFAULT_TERRAIN_LAB_CAMERA,
+    200,
+    -100,
+    800,
+    600,
+  );
+  assert.ok(camera.yaw > DEFAULT_TERRAIN_LAB_CAMERA.yaw);
+  assert.ok(camera.pitch > DEFAULT_TERRAIN_LAB_CAMERA.pitch);
+  assert.deepEqual(DEFAULT_TERRAIN_LAB_STATE, {
+    seed: "-98765",
+    centerX: -304,
+    centerZ: 336,
+    spacing: 32,
+    source: "reference",
+    view: "3d",
+    layer: "terrain",
+  });
 });

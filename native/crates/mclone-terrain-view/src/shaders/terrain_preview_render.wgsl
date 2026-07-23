@@ -2,6 +2,7 @@ struct TerrainPreviewParams {
     origin_spacing_cells: vec4<i32>,
     seed_source_view: vec4<u32>,
     layer_samples_size: vec4<u32>,
+    camera: vec4<f32>,
 };
 
 struct TerrainPreviewSample {
@@ -176,10 +177,21 @@ fn vertex_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     var clip_y = -grid_z;
     var clip_z = 0.5;
     if params.seed_source_view.w == 1u {
-        let normalized_height = clamp((sample.terrain.y - 24.0) / 136.0, 0.0, 1.0);
-        clip_x = (grid_x - grid_z) * 0.50;
-        clip_y = (grid_x + grid_z) * 0.20 + (normalized_height - 0.35) * 0.78;
-        clip_z = clamp(0.5 - (grid_x + grid_z) * 0.20, 0.02, 0.98);
+        let yaw = params.camera.x;
+        let pitch = params.camera.y;
+        let view_right = vec2<f32>(cos(yaw), -sin(yaw));
+        let view_depth = vec2<f32>(sin(yaw), cos(yaw));
+        let horizontal = vec2<f32>(grid_x, grid_z);
+        let camera_x = dot(horizontal, view_right);
+        let camera_depth = dot(horizontal, view_depth);
+        let world_height = (sample.terrain.y - 63.0) / 72.0;
+        clip_x = camera_x * 0.72;
+        clip_y = (world_height * cos(pitch) + camera_depth * sin(pitch)) * 0.78;
+        clip_z = clamp(
+            0.5 - camera_depth * cos(pitch) * 0.24 + world_height * sin(pitch) * 0.08,
+            0.02,
+            0.98,
+        );
     }
     if aspect > 1.0 {
         clip_x = clip_x / aspect;

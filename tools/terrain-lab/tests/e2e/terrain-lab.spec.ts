@@ -18,15 +18,40 @@ test("generates terrain, round-trips controls, and completes comparison", async 
   await waitForCurrentComparison(page);
 
   const diagnostics = page.locator("[data-testid='terrain-diagnostics']");
-  await expect(diagnostics).not.toContainText("Mean height Δpending");
+  await expect(diagnostics).not.toContainText("Base mean Δpending");
+  const shell = page.locator(".appShell");
+  expect(Number(await shell.getAttribute("data-base-mean-error"))).toBeLessThanOrEqual(0.01);
+  expect(Number(await shell.getAttribute("data-base-p95-error"))).toBeLessThanOrEqual(0.01);
+  expect(Number(await shell.getAttribute("data-ocean-agreement"))).toBeGreaterThanOrEqual(0.999);
+  expect(Number(await shell.getAttribute("data-continentalness-error"))).toBeLessThanOrEqual(0.001);
   const canvas = page.locator("canvas[aria-label='Live GPU terrain preview']");
   await expect(canvas).toBeVisible();
   await canvas.screenshot({
     path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-initial.png`,
   });
 
-  const shell = page.locator(".appShell");
   const initialRevision = Number(await shell.getAttribute("data-render-revision"));
+  const initialYaw = Number(await shell.getAttribute("data-camera-yaw"));
+  const initialUrl = page.url();
+  const stage = page.getByTestId("terrain-stage");
+  const stageBox = await stage.boundingBox();
+  expect(stageBox).not.toBeNull();
+  await page.mouse.move(stageBox!.x + stageBox!.width * 0.5, stageBox!.y + stageBox!.height * 0.5);
+  await page.mouse.down();
+  await page.mouse.move(
+    stageBox!.x + stageBox!.width * 0.65,
+    stageBox!.y + stageBox!.height * 0.42,
+  );
+  await page.mouse.up();
+  await expect.poll(
+    async () => Number(await shell.getAttribute("data-camera-yaw")),
+  ).not.toBe(initialYaw);
+  expect(page.url()).toBe(initialUrl);
+  await page.getByRole("button", { name: "Reset 3D camera" }).click();
+  await expect.poll(
+    async () => Number(await shell.getAttribute("data-camera-yaw")),
+  ).toBeCloseTo(Math.PI / 4, 5);
+
   await page.getByLabel("Diagnostic layer").selectOption("error");
   await expect(page).toHaveURL(/layer=error/u);
   await expect.poll(

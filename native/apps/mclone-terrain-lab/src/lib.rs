@@ -79,10 +79,13 @@ mod tests {
     #[test]
     fn parses_browser_option_vocabulary() {
         let options = terrain_preview_options("split", "3d", "terrain").unwrap();
-        assert_eq!(options, TerrainPreviewDrawOptions::default());
         assert_eq!(
             terrain_preview_option_labels(options),
             ("split", "3d", "terrain")
+        );
+        assert_eq!(
+            terrain_preview_option_labels(TerrainPreviewDrawOptions::default()),
+            ("reference", "3d", "terrain")
         );
         assert_eq!(
             terrain_preview_options("CPU", "2d", "difference").unwrap(),

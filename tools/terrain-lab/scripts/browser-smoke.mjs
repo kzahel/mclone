@@ -68,17 +68,60 @@ try {
   await page.evaluate(() => window.scrollTo(0, 0));
   await settlePaint(page);
   const initialRevision = Number(await shell.getAttribute("data-render-revision"));
+  const initialUrl = page.url();
+  const comparisonMetrics = {
+    baseMeanError: await numericAttribute(shell, "data-base-mean-error"),
+    baseP95Error: await numericAttribute(shell, "data-base-p95-error"),
+    continentalnessError: await numericAttribute(shell, "data-continentalness-error"),
+    oceanAgreement: await numericAttribute(shell, "data-ocean-agreement"),
+  };
+  if (comparisonMetrics.baseMeanError > 0.01
+      || comparisonMetrics.baseP95Error > 0.01
+      || comparisonMetrics.continentalnessError > 0.001
+      || comparisonMetrics.oceanAgreement < 0.999) {
+    throw new Error(
+      `Production large-field comparison regressed: ${JSON.stringify(comparisonMetrics)}`,
+    );
+  }
 
   const pageCapture = `/tmp/mclone-terrain-lab-${label}.png`;
   const canvasCapture = `/tmp/mclone-terrain-lab-${label}-canvas.png`;
+  const orbitCapture = `/tmp/mclone-terrain-lab-${label}-orbit.png`;
   const errorCapture = `/tmp/mclone-terrain-lab-${label}-map-error.png`;
   await page.screenshot({ path: pageCapture, fullPage: true });
   await page.locator("canvas[aria-label='Live GPU terrain preview']").screenshot({
     path: canvasCapture,
   });
 
-  await page.getByLabel("Diagnostic layer").selectOption("error");
+  const stage = page.locator("[data-testid='terrain-stage']");
+  const stageBox = await stage.boundingBox();
+  if (!stageBox) {
+    throw new Error("Terrain Lab stage has no interactive bounds");
+  }
+  await page.mouse.move(
+    stageBox.x + stageBox.width * 0.5,
+    stageBox.y + stageBox.height * 0.5,
+  );
+  await page.mouse.down();
+  await page.mouse.move(
+    stageBox.x + stageBox.width * 0.7,
+    stageBox.y + stageBox.height * 0.38,
+  );
+  await page.mouse.up();
   await waitForRevision(shell, initialRevision);
+  const orbitRevision = Number(await shell.getAttribute("data-render-revision"));
+  if (page.url() !== initialUrl) {
+    throw new Error(`3D orbit changed terrain URL state: ${page.url()}`);
+  }
+  await page.locator("canvas[aria-label='Live GPU terrain preview']").screenshot({
+    path: orbitCapture,
+  });
+  await page.getByRole("button", { name: "Reset 3D camera" }).click();
+  await waitForRevision(shell, orbitRevision);
+  const resetRevision = Number(await shell.getAttribute("data-render-revision"));
+
+  await page.getByLabel("Diagnostic layer").selectOption("error");
+  await waitForRevision(shell, resetRevision);
   const errorRevision = Number(await shell.getAttribute("data-render-revision"));
   await page.getByRole("button", { name: "Map", exact: true }).click();
   await page.getByRole("button", { name: "Zoom out" }).click();
@@ -99,8 +142,9 @@ try {
 
   const report = {
     adapter: await page.locator("[data-testid='adapter-name']").textContent(),
-    captures: { canvasCapture, errorCapture, pageCapture },
+    captures: { canvasCapture, errorCapture, orbitCapture, pageCapture },
     comparison: await page.locator("[data-testid='terrain-diagnostics']").innerText(),
+    comparisonMetrics,
     finalUrl,
     target: externalBaseUrl ? "hosted" : "local-preview",
     launch: {
@@ -226,4 +270,12 @@ async function settlePaint(page) {
   await page.evaluate(() => new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(resolve));
   }));
+}
+
+async function numericAttribute(locator, name) {
+  const value = Number(await locator.getAttribute(name));
+  if (!Number.isFinite(value)) {
+    throw new Error(`Terrain Lab attribute ${name} is not numeric`);
+  }
+  return value;
 }
