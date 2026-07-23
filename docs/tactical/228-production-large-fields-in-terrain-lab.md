@@ -1,6 +1,6 @@
 # Production Large Fields In Terrain Lab
 
-Status: active implementation 2026-07-23.
+Status: complete 2026-07-23.
 
 Topic: `gpu-procedural-terrain`
 
@@ -124,3 +124,124 @@ hash reliably on admitted WebGPU adapters, the field port reveals a required
 generator-contract change, or measured broad-field disagreement remains after
 the exact graph is implemented. Ordinary numerical debugging and UX polish
 remain inside this tactical.
+
+## Result
+
+The A2 evaluator now ports the complete intended boundary:
+
+- the production signed-seed/full-domain 64-bit lattice hash runs in portable
+  WGSL through a tested pair-of-`u32` implementation;
+- Rust generates every GPU domain and scale constant from
+  `MCLONE_OVERWORLD_LARGE_FIELD_SPEC`, which the CPU sampler also consumes;
+- cubic value noise and the production 16-direction quintic gradient noise
+  drive continentalness, relief, ruggedness, ridges, warped mountain detail,
+  warped climate, land height, and bathymetry;
+- preview schema v2 carries both final production surface/water and
+  base-surface/ocean facts, so comparisons isolate the omitted hydrology
+  family;
+- the compute and reference buffers remain resident and render with no CPU
+  vertex or index arrays; and
+- the evaluator remains presentation-only and does not mutate canonical world
+  state.
+
+The product behavior is now conventional and explicit:
+
+- 3D left drag orbits through a shared renderer camera uniform;
+- Shift+left and middle drag pan geography in 3D;
+- left drag pans geography in map view;
+- camera reset does not change the seed or sampled location;
+- `Load review site` names the fixed request instead of looking like a generic
+  reset;
+- the initial source is production Reference;
+- Compare labels the left side `CPU final reference` and the right side `GPU
+  production base`; and
+- the page explains that rivers, wetlands, and planned streams are the
+  remaining reference-only residual.
+
+## Evidence
+
+The fixed review request is seed `-98765`, center `(-304, 336)`, 32-block
+spacing, and a 2,048-block footprint. Headed-Wayland BrowserWebGPU measured:
+
+- base-surface mean/P95/maximum error: `0.0 / 0.0 / 0.0` blocks;
+- ocean-presence agreement: `100.0%`;
+- mean continentalness error: `2.07e-8`;
+- final-surface mean/P95 error: `0.5 / 3.0` blocks, attributable to the
+  explicitly omitted watercourse family;
+- resident preview allocation: about `396.2 KiB`; and
+- representative production-reference compilation and encode/submit host
+  clocks: about `2.0-4.7 ms` and `0.3-1.3 ms`.
+
+The 1,024-block spacing uses the same 4,225 samples to span 65,536 blocks
+(65.5 km) and measured:
+
+- base-surface mean/P95 error: `0.0 / 0.0` blocks;
+- ocean-presence agreement: `100.0%`; and
+- mean continentalness error: `1.91e-8`.
+
+This is exact point-sample evidence, not a claim that the 65.5 km image is
+already a good coarse summary. Fine production bands visibly alias at that
+spacing; scale-aware aggregation/band limiting is the next tactical.
+
+The dedicated production bundle is:
+
+- Terrain Lab WASM: `496.86 kB` raw / `142.66 kB` gzip; and
+- Terrain Lab JavaScript: `238.49 kB` raw / `75.20 kB` gzip.
+
+Validation completed:
+
+```text
+cargo test -p mclone-worldgen --lib
+cargo test -p mclone-terrain-view
+cargo test -p mclone-terrain-lab
+cargo check -p mclone-terrain-view --target wasm32-unknown-unknown
+cargo check -p mclone-terrain-lab --target wasm32-unknown-unknown
+pnpm --dir tools/terrain-lab test
+pnpm terrain-lab:typecheck
+pnpm terrain-lab:web:test
+pnpm terrain-lab:web:smoke
+pnpm terrain-lab:web:smoke -- --mobile
+pnpm host:check -- --probe-browser-webgpu
+pnpm native:web:bundle
+```
+
+Both Playwright projects passed. The smoke journey independently enforces the
+2 km and 65.5 km large-field thresholds, proves orbit leaves the terrain URL
+unchanged, resets the camera, then exercises map, error, zoom, and
+continent-scale controls.
+
+Inspected captures under `/tmp` include:
+
+- `mclone-terrain-lab-desktop-canvas.png`;
+- `mclone-terrain-lab-desktop-orbit.png`;
+- `mclone-terrain-lab-desktop-map-error.png`;
+- `mclone-terrain-lab-desktop-continent-scale.png`; and
+- corresponding full-page and Pixel 7-sized captures.
+
+## Deployment
+
+The exact aggregate bundle was built at commit `a6e4e0f2` with asset version
+`c2c6c9e0711c-20260723205619`. Because the standard deploy loop was spending
+most of its time re-uploading hundreds of unchanged animal-catalog objects,
+publication was safely narrowed after the complete bundle build to the four
+new content-addressed Terrain Lab objects:
+
+```text
+terrain/index.html
+terrain/assets/index-DoWPFh8W.js
+terrain/assets/index-CR013qzw.css
+terrain/assets/mclone_terrain_lab_bg-4694YNq0.wasm
+```
+
+All four R2 uploads completed before the Worker was published. Production is
+live at
+[mclone.kzahel.com/terrain/](https://mclone.kzahel.com/terrain/) under
+Cloudflare Worker version `6e8ce34c-57f0-443d-8471-1930e6934c48`.
+
+The hosted desktop and Pixel 7 smoke journeys both passed through 2 km
+comparison, orbit, camera reset, error map, and the 65.5 km continent view with
+the same local parity thresholds. Hosted response checks confirmed:
+
+- `/terrain/`: `200`, `text/html`, no-cache;
+- the A2 WASM: `200`, `application/wasm`, 496,862 bytes, immutable caching; and
+- COOP `same-origin`, COEP `require-corp`, and CORP `same-origin` on both.

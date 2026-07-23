@@ -2,18 +2,22 @@
 
 Topic: `gpu-procedural-terrain`
 
-Status: first hosted GPU-tile proof completed 2026-07-23. Tactical
+Status: production large-field GPU port completed 2026-07-23. Tactical
 [`227-web-terrain-lab-vertical-slice.md`](../tactical/227-web-terrain-lab-vertical-slice.md)
 landed the deployable, web-first Terrain Lab, shared production-reference grid,
-and one shared Rust/WGPU resident tile. The lab now establishes that a tiny
-standalone payload can cover 128 blocks through 65.5 kilometers with one
-bounded grid, render reference/GPU/split diagnostics, and compare asynchronous
-GPU readback with production source samples. Progressive refinement, closer
-field agreement, and generator-edit iteration instrumentation are the next
-useful work. A thin native profiling host and eventual in-game LOD/map
-consumers should reuse the shared engine rather than becoming separate
-implementations. Optional GPU-backed canonical chunk generation and volumetric
-terrain remain separate later experiments.
+and one shared Rust/WGPU resident tile. Tactical
+[`228-production-large-fields-in-terrain-lab.md`](../tactical/228-production-large-fields-in-terrain-lab.md)
+then replaced its unrelated approximation with the production 64-bit field
+hash, value/gradient noises, field warps, base surface, climate, and
+bathymetry. Fixed 2 km and 65.5 km BrowserWebGPU receipts now measure zero
+base-height mean/P95 error, 100% ocean agreement, and about `2e-8` mean
+continentalness error. Final river/wetland/planned-stream disagreement remains
+explicit. The next useful work is scale-aware coarse summarization and
+edit-to-first-pixel instrumentation, followed by progressive refinement. A
+thin native profiling host and eventual in-game LOD/map consumers should reuse
+the shared engine rather than becoming separate implementations. Optional
+GPU-backed canonical chunk generation and volumetric terrain remain separate
+later experiments.
 
 ## Scope
 
@@ -124,12 +128,17 @@ and `FarTerrainLodWorkerCache` in the same file. Even 4-, 8-, or 16-block
 surface sampling currently pays for a full surface chunk before discarding
 most of its facts.
 
-The first terrain compute pipeline now exists in
+The terrain compute pipeline now exists in
 [`mclone-terrain-view`](../../native/crates/mclone-terrain-view/). It:
 
 - accepts the shared 65-by-65 production-reference grid;
-- evaluates the separately revisioned `mclone-overworld-v1-gpu-preview-a1`
-  approximation into GPU-resident storage;
+- evaluates the separately revisioned `mclone-overworld-v1-gpu-preview-a2`
+  production graph through `base_surface_y` into GPU-resident storage;
+- emulates the production unsigned 64-bit lattice hash with pairs of portable
+  WGSL `u32` values and generates domain/scale constants from a shared Rust
+  field specification;
+- retains separate base-surface/ocean and final-surface/watercourse comparison
+  facts so an omitted field family cannot masquerade as arithmetic error;
 - draws 24,576 vertices from `vertex_index` without CPU vertex or index arrays;
 - supports terrain, height, continentalness, climate, and error layers in map
   or oblique views; and
@@ -137,9 +146,12 @@ The first terrain compute pipeline now exists in
 
 [`mclone-terrain-lab`](../../native/apps/mclone-terrain-lab/) owns the narrow
 browser surface/device facade. [`tools/terrain-lab`](../../tools/terrain-lab/)
-owns URL state and responsive presentation. The deployed product route is
-`/terrain/`; it does not load the game client, asset packs, a server, canonical
-chunks, lighting, collision, or persistence.
+owns URL state and responsive presentation. Three-dimensional left drag now
+orbits without changing URL-addressed geography; Shift+left or middle drag
+pans, map drag pans, and camera reset is distinct from the named fixed-site
+action. Production Reference is the initial source. The deployed product route
+is `/terrain/`; it does not load the game client, asset packs, a server,
+canonical chunks, lighting, collision, or persistence.
 
 Normal terrain and the current Far LOD path still arrive at `mclone-render` as
 CPU-constructed mesh products. The new tile is a reusable experimental
@@ -807,6 +819,8 @@ directly from its generator.
 
 ### Experiment 0: Contract And Baseline
 
+Status: completed for the hosted single-tile boundary by Tacticals 227-228.
+
 - define the visual source identity and logical surface sample;
 - define the scale-aware summary, parent/child identity, and screen-space error
   inputs;
@@ -820,6 +834,9 @@ directly from its generator.
 - define rebuild-to-first-redraw latency as an explicit iteration metric.
 
 ### Experiment 1: One GPU Surface Tile
+
+Status: completed for production fields through base surface by Tacticals
+227-228.
 
 - implement the smallest shared `wgpu` compute kernel for continuous Mclone
   terrain fields;
@@ -922,6 +939,38 @@ The relevant success question is not only whether a kernel evaluates samples
 quickly. It is whether a new seed reaches a compelling, complete horizon
 sooner without delaying input, canonical gameplay readiness, or frame
 submission.
+
+## Latest Receipt And Next Direction
+
+The fixed review request uses seed `-98765`, center `(-304, 336)`, a 64-by-64
+cell tile, and 32-block spacing. On the headed-Wayland BrowserWebGPU adapter,
+the A2 evaluator measured:
+
+- 4,225 samples and 24,576 procedural vertices;
+- zero base-surface mean, P95, and maximum height error;
+- 100% ocean-presence agreement;
+- `2.07e-8` mean continentalness error;
+- 0.5 blocks final mean and 3 blocks final P95 error from omitted
+  watercourses; and
+- about 396.2 KiB resident for GPU, reference, and uniform buffers.
+
+The 1,024-block-spacing / 65.5 km receipt retained zero base mean/P95 error,
+100% ocean agreement, and `1.91e-8` mean continentalness error. That proves
+the same production point evaluator across the complete current spacing
+range. It does not prove a truthful coarse summary: point-sampled 512-block
+and smaller bands visibly alias at the 65.5 km extreme.
+
+The next tactical should therefore:
+
+1. define a CPU/GPU scale-aware summary target distinct from exact point
+   parity;
+2. band-limit or aggregate sub-sample field energy while preserving coast and
+   mountain silhouettes;
+3. instrument source-edit to first updated coarse pixel;
+4. add coverage-first parent/child refinement only after the extreme parent
+   is visually stable; and
+5. keep final rivers and bounded planned-stream records as explicit structured
+   overlays rather than weakening the exact large-field evaluator.
 
 ## Open Questions
 
