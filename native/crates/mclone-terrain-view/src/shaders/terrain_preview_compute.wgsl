@@ -10,26 +10,117 @@ struct TerrainPreviewSample {
     large_fields: vec4<f32>,
 };
 
+struct U64 {
+    low: u32,
+    high: u32,
+};
+
+// Rust replaces this marker with domains and scales from the production spec.
+// __MCLONE_PRODUCTION_FIELD_CONSTANTS__
+
+const HASH_X_MULTIPLIER: U64 = U64(0x7f4a7c15u, 0x9e3779b9u);
+const HASH_Z_MULTIPLIER: U64 = U64(0x1ce4e5b9u, 0xbf58476du);
+const SPLITMIX_SECOND_MULTIPLIER: U64 = U64(0x133111ebu, 0x94d049bbu);
+
+const GRADIENTS: array<vec2<f32>, 16> = array<vec2<f32>, 16>(
+    vec2<f32>(1.0, 0.0),
+    vec2<f32>(0.9238795325, 0.3826834324),
+    vec2<f32>(0.7071067812, 0.7071067812),
+    vec2<f32>(0.3826834324, 0.9238795325),
+    vec2<f32>(0.0, 1.0),
+    vec2<f32>(-0.3826834324, 0.9238795325),
+    vec2<f32>(-0.7071067812, 0.7071067812),
+    vec2<f32>(-0.9238795325, 0.3826834324),
+    vec2<f32>(-1.0, 0.0),
+    vec2<f32>(-0.9238795325, -0.3826834324),
+    vec2<f32>(-0.7071067812, -0.7071067812),
+    vec2<f32>(-0.3826834324, -0.9238795325),
+    vec2<f32>(0.0, -1.0),
+    vec2<f32>(0.3826834324, -0.9238795325),
+    vec2<f32>(0.7071067812, -0.7071067812),
+    vec2<f32>(0.9238795325, -0.3826834324),
+);
+
 @group(0) @binding(0)
 var<uniform> params: TerrainPreviewParams;
 
 @group(0) @binding(1)
 var<storage, read_write> gpu_samples: array<TerrainPreviewSample>;
 
-fn mix_hash(value: u32) -> u32 {
-    var mixed = value;
-    mixed = (mixed ^ (mixed >> 16u)) * 0x7feb352du;
-    mixed = (mixed ^ (mixed >> 15u)) * 0x846ca68bu;
-    return mixed ^ (mixed >> 16u);
+fn add_u64(left: U64, right: U64) -> U64 {
+    let low = left.low + right.low;
+    let carry = select(0u, 1u, low < left.low);
+    return U64(low, left.high + right.high + carry);
 }
 
-fn lattice_hash(domain: u32, x: i32, z: i32) -> u32 {
-    var value = params.seed_source_view.x
-        ^ ((params.seed_source_view.y << 16u) | (params.seed_source_view.y >> 16u))
-        ^ domain;
-    value = value ^ (bitcast<u32>(x) * 0x9e3779b9u);
-    value = value ^ (bitcast<u32>(z) * 0x85ebca6bu);
-    return mix_hash(value);
+fn xor_u64(left: U64, right: U64) -> U64 {
+    return U64(left.low ^ right.low, left.high ^ right.high);
+}
+
+fn shift_right_u64(value: U64, amount: u32) -> U64 {
+    return U64(
+        (value.low >> amount) | (value.high << (32u - amount)),
+        value.high >> amount,
+    );
+}
+
+fn multiply_u32_wide(left: u32, right: u32) -> U64 {
+    let left_low = left & 0xffffu;
+    let left_high = left >> 16u;
+    let right_low = right & 0xffffu;
+    let right_high = right >> 16u;
+    let low_product = left_low * right_low;
+    let middle = (low_product >> 16u)
+        + ((left_low * right_high) & 0xffffu)
+        + ((left_high * right_low) & 0xffffu);
+    let low = (low_product & 0xffffu) | (middle << 16u);
+    let high = left_high * right_high
+        + ((left_low * right_high) >> 16u)
+        + ((left_high * right_low) >> 16u)
+        + (middle >> 16u);
+    return U64(low, high);
+}
+
+fn multiply_u64(left: U64, right: U64) -> U64 {
+    let low_product = multiply_u32_wide(left.low, right.low);
+    return U64(
+        low_product.low,
+        low_product.high + left.low * right.high + left.high * right.low,
+    );
+}
+
+fn sign_extended_i32(value: i32) -> U64 {
+    return U64(bitcast<u32>(value), select(0u, 0xffffffffu, value < 0));
+}
+
+fn splitmix64(value: U64) -> U64 {
+    var mixed = add_u64(value, HASH_X_MULTIPLIER);
+    mixed = multiply_u64(
+        xor_u64(mixed, shift_right_u64(mixed, 30u)),
+        HASH_Z_MULTIPLIER,
+    );
+    mixed = multiply_u64(
+        xor_u64(mixed, shift_right_u64(mixed, 27u)),
+        SPLITMIX_SECOND_MULTIPLIER,
+    );
+    return xor_u64(mixed, shift_right_u64(mixed, 31u));
+}
+
+fn lattice_hash(domain: U64, x: i32, z: i32) -> U64 {
+    let seed = U64(
+        params.seed_source_view.x,
+        params.seed_source_view.y,
+    );
+    var value = xor_u64(seed, domain);
+    value = xor_u64(
+        value,
+        multiply_u64(sign_extended_i32(x), HASH_X_MULTIPLIER),
+    );
+    value = xor_u64(
+        value,
+        multiply_u64(sign_extended_i32(z), HASH_Z_MULTIPLIER),
+    );
+    return splitmix64(value);
 }
 
 fn floor_div(value: i32, divisor: i32) -> i32 {
@@ -47,16 +138,31 @@ fn smooth_curve(value: f32) -> f32 {
     return value * value * (3.0 - 2.0 * value);
 }
 
+fn gradient_fade(value: f32) -> f32 {
+    return value * value * value * (value * (value * 6.0 - 15.0) + 10.0);
+}
+
 fn lerp_value(from_value: f32, to_value: f32, amount: f32) -> f32 {
     return from_value + (to_value - from_value) * amount;
 }
 
-fn lattice_value(domain: u32, x: i32, z: i32) -> f32 {
-    let hash = lattice_hash(domain, x, z);
-    return f32(hash >> 8u) * (1.0 / 8388607.5) - 1.0;
+fn round_away_from_zero(value: f32) -> f32 {
+    return select(ceil(value - 0.5), floor(value + 0.5), value >= 0.0);
 }
 
-fn value_noise(domain: u32, scale: i32, world_x: i32, world_z: i32) -> f32 {
+fn lattice_value(domain: U64, x: i32, z: i32) -> f32 {
+    let hash = lattice_hash(domain, x, z);
+    let unit = f32(hash.high) * 2.3283064365386963e-10
+        + f32(hash.low >> 8u) * 1.3877787807814457e-17;
+    return unit * 2.0 - 1.0;
+}
+
+fn value_noise(
+    domain: U64,
+    scale: i32,
+    world_x: i32,
+    world_z: i32,
+) -> f32 {
     let lattice_x = floor_div(world_x, scale);
     let lattice_z = floor_div(world_z, scale);
     let fraction_x = f32(floor_mod(world_x, scale)) / f32(scale);
@@ -76,33 +182,39 @@ fn value_noise(domain: u32, scale: i32, world_x: i32, world_z: i32) -> f32 {
     return lerp_value(top, bottom, blend_z);
 }
 
-fn band_weight(scale: i32, sample_spacing: i32) -> f32 {
-    return clamp(f32(scale) / max(f32(sample_spacing) * 2.0, 1.0), 0.0, 1.0);
+fn corner_gradient(domain: U64, lattice_x: i32, lattice_z: i32) -> vec2<f32> {
+    let hash = lattice_hash(domain, lattice_x, lattice_z);
+    return GRADIENTS[hash.low & 15u];
 }
 
-fn weighted_field(
-    world_x: i32,
-    world_z: i32,
-    sample_spacing: i32,
-    domain_a: u32,
-    scale_a: i32,
-    weight_a: f32,
-    domain_b: u32,
-    scale_b: i32,
-    weight_b: f32,
-    domain_c: u32,
-    scale_c: i32,
-    weight_c: f32,
+fn gradient_noise(
+    domain: U64,
+    scale: i32,
+    world_x: f32,
+    world_z: f32,
 ) -> f32 {
-    let admitted_a = weight_a * band_weight(scale_a, sample_spacing);
-    let admitted_b = weight_b * band_weight(scale_b, sample_spacing);
-    let admitted_c = weight_c * band_weight(scale_c, sample_spacing);
-    let total = max(admitted_a + admitted_b + admitted_c, 0.0001);
-    return (
-        value_noise(domain_a, scale_a, world_x, world_z) * admitted_a
-        + value_noise(domain_b, scale_b, world_x, world_z) * admitted_b
-        + value_noise(domain_c, scale_c, world_x, world_z) * admitted_c
-    ) / total;
+    let scaled_x = world_x / f32(scale);
+    let scaled_z = world_z / f32(scale);
+    let lattice_x = i32(floor(scaled_x));
+    let lattice_z = i32(floor(scaled_z));
+    let fraction_x = scaled_x - f32(lattice_x);
+    let fraction_z = scaled_z - f32(lattice_z);
+    let blend_x = gradient_fade(fraction_x);
+    let blend_z = gradient_fade(fraction_z);
+    let gradient_00 = corner_gradient(domain, lattice_x, lattice_z);
+    let gradient_10 = corner_gradient(domain, lattice_x + 1, lattice_z);
+    let gradient_01 = corner_gradient(domain, lattice_x, lattice_z + 1);
+    let gradient_11 = corner_gradient(domain, lattice_x + 1, lattice_z + 1);
+    let corner_00 = dot(gradient_00, vec2<f32>(fraction_x, fraction_z));
+    let corner_10 = dot(gradient_10, vec2<f32>(fraction_x - 1.0, fraction_z));
+    let corner_01 = dot(gradient_01, vec2<f32>(fraction_x, fraction_z - 1.0));
+    let corner_11 = dot(
+        gradient_11,
+        vec2<f32>(fraction_x - 1.0, fraction_z - 1.0),
+    );
+    let top = lerp_value(corner_00, corner_10, blend_x);
+    let bottom = lerp_value(corner_01, corner_11, blend_x);
+    return clamp(lerp_value(top, bottom, blend_z) * 1.4142135624, -1.0, 1.0);
 }
 
 fn mountain_strength(continentalness: f32, ruggedness: f32) -> f32 {
@@ -125,160 +237,193 @@ fn land_surface_height(
     let shoulder = smooth_curve(clamp((ridges - 0.22) / 0.78, 0.0, 1.0));
     let lift = mountain * (4.0 + shoulder * 12.0 + shoulder * shoulder * 38.0);
     let texture = mountain_detail * mountain * (6.0 + shoulder * 14.0);
-    return clamp(round(base + rolling_relief + lift + texture), 62.0, 160.0);
+    return round_away_from_zero(
+        clamp(base + rolling_relief + lift + texture, 62.0, 160.0),
+    );
 }
 
 fn ocean_floor(
     world_x: i32,
     world_z: i32,
-    sample_spacing: i32,
     continentalness: f32,
 ) -> f32 {
     let depth_signal = -continentalness;
     let inner = smooth_curve(clamp(depth_signal / 0.08, 0.0, 1.0));
     let outer = smooth_curve(clamp(depth_signal / 0.24, 0.0, 1.0));
     let basin = smooth_curve(clamp((depth_signal - 0.18) / 0.32, 0.0, 1.0));
-    let basin_selector = value_noise(0x62617331u, 1536, world_x, world_z) * 0.5 + 0.5;
-    let seabed = weighted_field(
-        world_x,
-        world_z,
-        sample_spacing,
-        0x62617332u,
-        384,
-        0.68,
-        0x62617333u,
-        96,
-        0.32,
-        0x62617334u,
-        48,
-        0.0,
+    let basin_selector = gradient_noise(
+        OCEAN_BASIN_DOMAIN,
+        OCEAN_BASIN_SCALE,
+        f32(world_x),
+        f32(world_z),
+    ) * 0.5 + 0.5;
+    let seabed = clamp(
+        gradient_noise(
+            SEABED_LARGE_DOMAIN,
+            SEABED_LARGE_SCALE,
+            f32(world_x),
+            f32(world_z),
+        ) * 0.68
+        + gradient_noise(
+            SEABED_DETAIL_DOMAIN,
+            SEABED_DETAIL_SCALE,
+            f32(world_x),
+            f32(world_z),
+        ) * 0.32,
+        -1.0,
+        1.0,
     );
     let depth = 2.0
         + inner * 4.0
         + outer * 6.0
-        + basin * (18.0 + basin_selector * 10.0)
+        + basin * (18.0 + clamp(basin_selector, 0.0, 1.0) * 10.0)
         + seabed * (1.5 + basin * 7.0);
-    return 63.0 - clamp(round(depth), 2.0, 52.0);
+    let water_depth = clamp(round_away_from_zero(depth), 2.0, 52.0);
+    return 63.0 - water_depth;
 }
 
-fn evaluate(world_x: i32, world_z: i32, sample_spacing: i32) -> TerrainPreviewSample {
+fn evaluate(world_x: i32, world_z: i32) -> TerrainPreviewSample {
     let continentalness = clamp(
-        weighted_field(
+        value_noise(
+            CONTINENT_LARGE_DOMAIN,
+            CONTINENT_LARGE_SCALE,
             world_x,
             world_z,
-            sample_spacing,
-            0x636f6e31u,
-            2048,
-            0.55,
-            0x636f6e32u,
-            1024,
-            0.30,
-            0x636f6e33u,
-            512,
-            0.15,
-        ),
+        ) * 0.55
+        + value_noise(
+            CONTINENT_MEDIUM_DOMAIN,
+            CONTINENT_MEDIUM_SCALE,
+            world_x,
+            world_z,
+        ) * 0.30
+        + value_noise(
+            CONTINENT_DETAIL_DOMAIN,
+            CONTINENT_DETAIL_SCALE,
+            world_x,
+            world_z,
+        ) * 0.15,
         -1.0,
         1.0,
+    );
+    let relief_large = value_noise(
+        RELIEF_LARGE_DOMAIN,
+        RELIEF_LARGE_SCALE,
+        world_x,
+        world_z,
+    );
+    let relief_detail = value_noise(
+        RELIEF_DETAIL_DOMAIN,
+        RELIEF_DETAIL_SCALE,
+        world_x,
+        world_z,
+    );
+    let relief_fine = value_noise(
+        RELIEF_FINE_DOMAIN,
+        RELIEF_FINE_SCALE,
+        world_x,
+        world_z,
     );
     let relief = clamp(
-        weighted_field(
-            world_x,
-            world_z,
-            sample_spacing,
-            0x72656c31u,
-            384,
-            0.50,
-            0x72656c32u,
-            128,
-            0.30,
-            0x72656c33u,
-            48,
-            0.20,
-        ),
+        relief_large * 0.50 + relief_detail * 0.30 + relief_fine * 0.20,
         -1.0,
         1.0,
+    );
+    let ruggedness_large = value_noise(
+        RUGGEDNESS_LARGE_DOMAIN,
+        RUGGEDNESS_LARGE_SCALE,
+        world_x,
+        world_z,
+    );
+    let ruggedness_detail = value_noise(
+        RUGGEDNESS_DETAIL_DOMAIN,
+        RUGGEDNESS_DETAIL_SCALE,
+        world_x,
+        world_z,
     );
     let ruggedness = clamp(
-        weighted_field(
-            world_x,
-            world_z,
-            sample_spacing,
-            0x72756731u,
-            1536,
-            0.72,
-            0x72756732u,
-            512,
-            0.28,
-            0x72756733u,
-            256,
-            0.0,
-        ),
+        ruggedness_large * 0.72 + ruggedness_detail * 0.28,
         -1.0,
         1.0,
     );
-    let ridge_source = weighted_field(
+    let ridge_source = value_noise(
+        RIDGE_LARGE_DOMAIN,
+        RIDGE_LARGE_SCALE,
         world_x,
         world_z,
-        sample_spacing,
-        0x72696431u,
-        384,
-        0.78,
-        0x72696432u,
-        128,
-        0.22,
-        0x72696433u,
-        64,
-        0.0,
-    );
-    let ridge_linear = clamp(1.0 - abs(ridge_source), 0.0, 1.0);
-    let ridges = ridge_linear * ridge_linear;
-    let mountain_detail = weighted_field(
-        world_x,
-        world_z,
-        sample_spacing,
-        0x6d647431u,
-        32,
-        0.70,
-        0x6d647432u,
-        8,
-        0.30,
-        0x6d647433u,
-        4,
-        0.0,
-    );
-    let temperature = clamp(
-        weighted_field(
+    ) * 0.78
+        + value_noise(
+            RIDGE_DETAIL_DOMAIN,
+            RIDGE_DETAIL_SCALE,
             world_x,
             world_z,
-            sample_spacing,
-            0x74656d31u,
-            1536,
-            0.78,
-            0x74656d32u,
-            384,
-            0.22,
-            0x74656d33u,
-            192,
-            0.0,
-        ),
+        ) * 0.22;
+    let ridge_linear = clamp(1.0 - abs(ridge_source), 0.0, 1.0);
+    let ridges = ridge_linear * ridge_linear;
+
+    let large_warp_x = relief_detail * 18.0 + relief_fine * 4.0;
+    let large_warp_z = ruggedness_detail * 18.0 - relief_fine * 4.0;
+    let fine_warp_x = -ruggedness_detail * 7.0 + relief_detail * 3.0;
+    let fine_warp_z = relief_fine * 7.0 + relief_detail * 3.0;
+    let mountain_detail = clamp(
+        gradient_noise(
+            MOUNTAIN_DETAIL_LARGE_DOMAIN,
+            MOUNTAIN_DETAIL_LARGE_SCALE,
+            f32(world_x) + large_warp_x,
+            f32(world_z) + large_warp_z,
+        ) * 0.70
+        + gradient_noise(
+            MOUNTAIN_DETAIL_FINE_DOMAIN,
+            MOUNTAIN_DETAIL_FINE_SCALE,
+            f32(world_x) + fine_warp_x,
+            f32(world_z) + fine_warp_z,
+        ) * 0.30,
+        -1.0,
+        1.0,
+    );
+
+    let temperature_detail = gradient_noise(
+        TEMPERATURE_DETAIL_DOMAIN,
+        TEMPERATURE_DETAIL_SCALE,
+        f32(world_x),
+        f32(world_z),
+    );
+    let moisture_detail = gradient_noise(
+        MOISTURE_DETAIL_DOMAIN,
+        MOISTURE_DETAIL_SCALE,
+        f32(world_x),
+        f32(world_z),
+    );
+    let temperature_large_x = i32(round_away_from_zero(
+        f32(world_x) + temperature_detail * 176.0,
+    ));
+    let temperature_large_z = i32(round_away_from_zero(
+        f32(world_z) + moisture_detail * 176.0,
+    ));
+    let moisture_large_x = i32(round_away_from_zero(
+        f32(world_x) - moisture_detail * 144.0,
+    ));
+    let moisture_large_z = i32(round_away_from_zero(
+        f32(world_z) + temperature_detail * 144.0,
+    ));
+    let temperature = clamp(
+        value_noise(
+            TEMPERATURE_LARGE_DOMAIN,
+            TEMPERATURE_LARGE_SCALE,
+            temperature_large_x,
+            temperature_large_z,
+        ) * 0.78
+        + temperature_detail * 0.22,
         -1.0,
         1.0,
     );
     let moisture = clamp(
-        weighted_field(
-            world_x,
-            world_z,
-            sample_spacing,
-            0x6d6f6931u,
-            1024,
-            0.74,
-            0x6d6f6932u,
-            256,
-            0.26,
-            0x6d6f6933u,
-            128,
-            0.0,
-        ),
+        value_noise(
+            MOISTURE_LARGE_DOMAIN,
+            MOISTURE_LARGE_SCALE,
+            moisture_large_x,
+            moisture_large_z,
+        ) * 0.74
+        + moisture_detail * 0.26,
         -1.0,
         1.0,
     );
@@ -293,12 +438,7 @@ fn evaluate(world_x: i32, world_z: i32, sample_spacing: i32) -> TerrainPreviewSa
     var water = 0.0;
     var display_y = surface_y;
     if continentalness <= 0.0 {
-        surface_y = ocean_floor(
-            world_x,
-            world_z,
-            sample_spacing,
-            continentalness,
-        );
+        surface_y = ocean_floor(world_x, world_z, continentalness);
         display_y = 63.0;
         water = 1.0;
     }
@@ -320,5 +460,5 @@ fn compute_main(@builtin(global_invocation_id) invocation: vec3<u32>) {
     let world_x = params.origin_spacing_cells.x + i32(invocation.x) * sample_spacing;
     let world_z = params.origin_spacing_cells.y + i32(invocation.y) * sample_spacing;
     let index = invocation.y * samples_per_axis + invocation.x;
-    gpu_samples[index] = evaluate(world_x, world_z, sample_spacing);
+    gpu_samples[index] = evaluate(world_x, world_z);
 }

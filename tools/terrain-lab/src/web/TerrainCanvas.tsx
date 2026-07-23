@@ -63,6 +63,15 @@ export interface TerrainLabComparisonReport {
   meanAbsoluteSurfaceError: number;
   p95AbsoluteSurfaceError: number;
   waterPresenceAgreement: number;
+  maxAbsoluteBaseSurfaceError: number;
+  meanAbsoluteBaseSurfaceError: number;
+  p95AbsoluteBaseSurfaceError: number;
+  oceanWaterPresenceAgreement: number;
+  meanAbsoluteContinentalnessError: number;
+  meanAbsoluteReliefError: number;
+  meanAbsoluteTemperatureError: number;
+  meanAbsoluteMoistureError: number;
+  meanAbsoluteRuggednessError: number;
   staleResultCount: number;
 }
 

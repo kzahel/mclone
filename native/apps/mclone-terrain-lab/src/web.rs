@@ -72,6 +72,15 @@ struct TerrainLabComparisonReport {
     mean_absolute_surface_error: f32,
     p95_absolute_surface_error: f32,
     water_presence_agreement: f32,
+    max_absolute_base_surface_error: f32,
+    mean_absolute_base_surface_error: f32,
+    p95_absolute_base_surface_error: f32,
+    ocean_water_presence_agreement: f32,
+    mean_absolute_continentalness_error: f32,
+    mean_absolute_relief_error: f32,
+    mean_absolute_temperature_error: f32,
+    mean_absolute_moisture_error: f32,
+    mean_absolute_ruggedness_error: f32,
     stale_result_count: u64,
 }
 
@@ -436,6 +445,17 @@ fn comparison_report(
         mean_absolute_surface_error: completed.comparison.mean_absolute_surface_error,
         p95_absolute_surface_error: completed.comparison.p95_absolute_surface_error,
         water_presence_agreement: completed.comparison.water_presence_agreement,
+        max_absolute_base_surface_error: completed.comparison.max_absolute_base_surface_error,
+        mean_absolute_base_surface_error: completed.comparison.mean_absolute_base_surface_error,
+        p95_absolute_base_surface_error: completed.comparison.p95_absolute_base_surface_error,
+        ocean_water_presence_agreement: completed.comparison.ocean_water_presence_agreement,
+        mean_absolute_continentalness_error: completed
+            .comparison
+            .mean_absolute_continentalness_error,
+        mean_absolute_relief_error: completed.comparison.mean_absolute_relief_error,
+        mean_absolute_temperature_error: completed.comparison.mean_absolute_temperature_error,
+        mean_absolute_moisture_error: completed.comparison.mean_absolute_moisture_error,
+        mean_absolute_ruggedness_error: completed.comparison.mean_absolute_ruggedness_error,
         stale_result_count,
     }
 }

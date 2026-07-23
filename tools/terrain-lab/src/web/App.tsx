@@ -426,13 +426,15 @@ function Diagnostics({
       <div className="metricGrid">
         <Metric label="CPU reference" value={formatMs(report?.cpuReferenceMs)} />
         <Metric label="Encode + submit" value={formatMs(report?.encodeSubmitMs)} />
-        <Metric label="Mean height Δ" value={formatBlocks(comparison?.meanAbsoluteSurfaceError)} />
-        <Metric label="P95 height Δ" value={formatBlocks(comparison?.p95AbsoluteSurfaceError)} />
-        <Metric label="Maximum Δ" value={formatBlocks(comparison?.maxAbsoluteSurfaceError)} />
+        <Metric label="Base mean Δ" value={formatBlocks(comparison?.meanAbsoluteBaseSurfaceError)} />
+        <Metric label="Base P95 Δ" value={formatBlocks(comparison?.p95AbsoluteBaseSurfaceError)} />
+        <Metric label="Base maximum Δ" value={formatBlocks(comparison?.maxAbsoluteBaseSurfaceError)} />
         <Metric
-          label="Water agreement"
-          value={comparison ? `${(comparison.waterPresenceAgreement * 100).toFixed(1)}%` : "pending"}
+          label="Ocean agreement"
+          value={comparison ? `${(comparison.oceanWaterPresenceAgreement * 100).toFixed(1)}%` : "pending"}
         />
+        <Metric label="Final mean Δ" value={formatBlocks(comparison?.meanAbsoluteSurfaceError)} />
+        <Metric label="Final P95 Δ" value={formatBlocks(comparison?.p95AbsoluteSurfaceError)} />
         <Metric label="GPU resident" value={memory} />
         <Metric label="Vertices" value={report ? formatInteger(report.vertexCount) : "—"} />
       </div>

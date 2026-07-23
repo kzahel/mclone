@@ -1,15 +1,18 @@
 #![forbid(unsafe_code)]
 
+use std::fmt::Write;
 use std::num::NonZeroU64;
 use std::sync::mpsc;
 
+use mclone_worldgen::levelgen::{MCLONE_OVERWORLD_LARGE_FIELD_SPEC, McloneOverworldLargeFieldBand};
 use mclone_worldgen::terrain_preview::{
     TERRAIN_PREVIEW_SAMPLE_FLOATS, TerrainPreviewComparison, TerrainPreviewReferenceGrid,
     TerrainPreviewSample,
 };
 
-pub const TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION: &str = "mclone-overworld-v1-gpu-preview-a1";
-pub const TERRAIN_PREVIEW_COMPUTE_WGSL: &str = include_str!("shaders/terrain_preview_compute.wgsl");
+pub const TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION: &str = "mclone-overworld-v1-gpu-preview-a2";
+pub const TERRAIN_PREVIEW_COMPUTE_WGSL_TEMPLATE: &str =
+    include_str!("shaders/terrain_preview_compute.wgsl");
 pub const TERRAIN_PREVIEW_RENDER_WGSL: &str = include_str!("shaders/terrain_preview_render.wgsl");
 
 const TERRAIN_PREVIEW_UNIFORM_BYTES: u64 = 48;
@@ -17,6 +20,52 @@ const TERRAIN_PREVIEW_SAMPLE_BYTES: u64 =
     (TERRAIN_PREVIEW_SAMPLE_FLOATS * std::mem::size_of::<f32>()) as u64;
 const TERRAIN_PREVIEW_WORKGROUP_AXIS: u32 = 8;
 const TERRAIN_PREVIEW_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
+
+pub fn terrain_preview_compute_wgsl() -> String {
+    let spec = MCLONE_OVERWORLD_LARGE_FIELD_SPEC;
+    let mut constants = String::new();
+    for (name, band) in [
+        ("CONTINENT_LARGE", spec.continent[0]),
+        ("CONTINENT_MEDIUM", spec.continent[1]),
+        ("CONTINENT_DETAIL", spec.continent[2]),
+        ("RELIEF_LARGE", spec.relief[0]),
+        ("RELIEF_DETAIL", spec.relief[1]),
+        ("RELIEF_FINE", spec.relief[2]),
+        ("RUGGEDNESS_LARGE", spec.ruggedness[0]),
+        ("RUGGEDNESS_DETAIL", spec.ruggedness[1]),
+        ("RIDGE_LARGE", spec.ridge[0]),
+        ("RIDGE_DETAIL", spec.ridge[1]),
+        ("MOUNTAIN_DETAIL_LARGE", spec.mountain_detail[0]),
+        ("MOUNTAIN_DETAIL_FINE", spec.mountain_detail[1]),
+        ("OCEAN_BASIN", spec.ocean_basin),
+        ("SEABED_LARGE", spec.seabed[0]),
+        ("SEABED_DETAIL", spec.seabed[1]),
+        ("TEMPERATURE_LARGE", spec.temperature[0]),
+        ("TEMPERATURE_DETAIL", spec.temperature[1]),
+        ("MOISTURE_LARGE", spec.moisture[0]),
+        ("MOISTURE_DETAIL", spec.moisture[1]),
+    ] {
+        write_field_constants(&mut constants, name, band);
+    }
+    TERRAIN_PREVIEW_COMPUTE_WGSL_TEMPLATE
+        .replace("// __MCLONE_PRODUCTION_FIELD_CONSTANTS__", &constants)
+}
+
+fn write_field_constants(
+    destination: &mut String,
+    name: &str,
+    band: McloneOverworldLargeFieldBand,
+) {
+    let low = band.domain as u32;
+    let high = (band.domain >> 32) as u32;
+    writeln!(
+        destination,
+        "const {name}_DOMAIN: U64 = U64(0x{low:08x}u, 0x{high:08x}u);"
+    )
+    .expect("writing terrain preview WGSL constants to String cannot fail");
+    writeln!(destination, "const {name}_SCALE: i32 = {};", band.scale)
+        .expect("writing terrain preview WGSL constants to String cannot fail");
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u32)]
@@ -257,9 +306,10 @@ impl TerrainPreviewRenderer {
             ],
         });
 
+        let compute_shader_source = terrain_preview_compute_wgsl();
         let compute_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mclone_terrain_preview_compute_shader"),
-            source: wgpu::ShaderSource::Wgsl(TERRAIN_PREVIEW_COMPUTE_WGSL.into()),
+            source: wgpu::ShaderSource::Wgsl(compute_shader_source.into()),
         });
         let render_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mclone_terrain_preview_render_shader"),
@@ -668,7 +718,7 @@ mod tests {
 
     #[test]
     fn compute_and_render_shaders_validate() {
-        validate_shader(TERRAIN_PREVIEW_COMPUTE_WGSL, "compute_main");
+        validate_shader(&terrain_preview_compute_wgsl(), "compute_main");
         validate_shader(TERRAIN_PREVIEW_RENDER_WGSL, "vertex_main");
         validate_shader(TERRAIN_PREVIEW_RENDER_WGSL, "fragment_main");
     }
@@ -717,12 +767,20 @@ mod tests {
     }
 
     #[test]
-    fn evaluator_revision_is_explicitly_approximate() {
+    fn evaluator_revision_and_production_spec_are_explicit() {
         assert_eq!(
             TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION,
-            "mclone-overworld-v1-gpu-preview-a1"
+            "mclone-overworld-v1-gpu-preview-a2"
         );
-        assert!(TERRAIN_PREVIEW_COMPUTE_WGSL.contains("band_weight"));
+        let shader = terrain_preview_compute_wgsl();
+        assert!(!shader.contains("__MCLONE_PRODUCTION_FIELD_CONSTANTS__"));
+        assert!(
+            shader.contains("const CONTINENT_LARGE_DOMAIN: U64 = U64(0x636f6e31u, 0x6d636f76u);")
+        );
+        assert!(shader.contains("const MOUNTAIN_DETAIL_FINE_SCALE: i32 = 8;"));
+        assert!(shader.contains("fn splitmix64"));
+        assert!(shader.contains("fn gradient_noise"));
+        assert!(!shader.contains("band_weight"));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("error_color"));
     }
 }
