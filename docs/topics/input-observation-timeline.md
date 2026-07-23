@@ -2,11 +2,14 @@
 
 Topic: `input-observation-timeline`
 
-Status: direction accepted 2026-07-23; implementation is open. The current
-collectors and shared semantic reducer are correctly separated, but desktop
-and Android discard useful ordered observations before the shared reducer
-sees them. Browser and OpenXR expose more limited sampling models and must
-degrade honestly rather than pretending to provide event history.
+Status: direction accepted 2026-07-23; implementation is active. The shared
+bounded `ControllerInputBatch` and multi-observation semantic reduction are
+implemented with explicit ordering correction, overflow discontinuity, and
+terminal-state recovery. Platform collector adoption and fixed-rate semantic
+command materialization remain open. Desktop and Android still discard useful
+ordered observations before the shared reducer sees them. Browser and OpenXR
+expose more limited sampling models and must degrade honestly rather than
+pretending to provide event history.
 
 Scope: preserve the best physical-input order and timing each platform can
 provide, normalize it behind a host-neutral contract, reduce it into shared
@@ -77,6 +80,14 @@ collect platform input -> route shared semantics -> move -> render
 
 Keyboard, mouse, and touch enter through event-oriented paths. The remaining
 loss is concentrated in controller-like sources:
+
+`mclone-input` now owns the bounded physical batch and semantic result types.
+An event-capable batch may contain multiple ordered canonical snapshots per
+source plus terminal snapshots. `ControllerInputSession::sample_batch`
+preserves within-batch press/release order, unions observed edges for legacy
+frame consumers, exposes the ordered semantic states for later command
+materialization, clamps regressing order deterministically, and resynchronizes
+discontinuous batches without inventing a press.
 
 | Platform | API shape available | Current projection | Information lost |
 | --- | --- | --- | --- |

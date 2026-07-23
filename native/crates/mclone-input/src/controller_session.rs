@@ -277,6 +277,159 @@ impl fmt::Display for ControllerInputError {
 
 impl Error for ControllerInputError {}
 
+/// Maximum physical controller observations retained between two shared input
+/// drains. Overflow is explicit and recovers through terminal snapshots.
+pub const MAX_CONTROLLER_OBSERVATIONS_PER_BATCH: usize = 256;
+
+/// One ordered ordinary-controller state observation.
+///
+/// `sample_time` is measured from the collector's monotonic session origin.
+/// `sequence` breaks ties and preserves backend delivery order. Both are local
+/// input facts; portable replay uses later semantic player commands.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct ControllerInputObservation {
+    pub source_id: InputSourceId,
+    pub sample_time: Duration,
+    pub sequence: u64,
+    pub snapshot: StandardGamepadSnapshot,
+}
+
+/// A bounded physical-input drain plus authoritative terminal source state.
+///
+/// Event-capable collectors push one observation after every meaningful
+/// backend transition. Snapshot-only collectors push one observation per
+/// sampled source. Applying the ordered observations must reach the terminal
+/// snapshots unless `dropped_observations` reports a discontinuity.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ControllerInputBatch {
+    sample_time: Duration,
+    observations: Vec<ControllerInputObservation>,
+    terminal_snapshots: BTreeMap<InputSourceId, StandardGamepadSnapshot>,
+    dropped_observations: u64,
+    order_corrections: u64,
+}
+
+impl ControllerInputBatch {
+    pub fn new(sample_time: Duration) -> Self {
+        Self {
+            sample_time,
+            ..Self::default()
+        }
+    }
+
+    /// Compatibility constructor for a backend that exposes one current
+    /// snapshot per source at the drain boundary.
+    pub fn from_snapshots(
+        sample_time: Duration,
+        samples: impl IntoIterator<Item = (InputSourceId, StandardGamepadSnapshot)>,
+    ) -> Self {
+        let mut batch = Self::new(sample_time);
+        for (sequence, (source_id, snapshot)) in samples.into_iter().enumerate() {
+            batch.push_observation(ControllerInputObservation {
+                source_id,
+                sample_time,
+                sequence: sequence as u64,
+                snapshot,
+            });
+        }
+        batch
+    }
+
+    pub const fn sample_time(&self) -> Duration {
+        self.sample_time
+    }
+
+    pub fn observations(&self) -> &[ControllerInputObservation] {
+        &self.observations
+    }
+
+    pub fn terminal_snapshots(
+        &self,
+    ) -> impl Iterator<Item = (InputSourceId, StandardGamepadSnapshot)> + '_ {
+        self.terminal_snapshots
+            .iter()
+            .map(|(source_id, snapshot)| (*source_id, *snapshot))
+    }
+
+    pub const fn dropped_observations(&self) -> u64 {
+        self.dropped_observations
+    }
+
+    pub const fn order_corrections(&self) -> u64 {
+        self.order_corrections
+    }
+
+    pub const fn is_discontinuous(&self) -> bool {
+        self.dropped_observations > 0
+    }
+
+    /// Add one backend-ordered observation and update that source's terminal
+    /// state. Regressing/future times and non-increasing sequences are clamped
+    /// deterministically and reported through `order_corrections`.
+    pub fn push_observation(&mut self, mut observation: ControllerInputObservation) {
+        observation.snapshot = observation.snapshot.normalized();
+        if observation.sample_time > self.sample_time {
+            observation.sample_time = self.sample_time;
+            self.order_corrections = self.order_corrections.saturating_add(1);
+        }
+        if let Some(previous) = self.observations.last() {
+            if observation.sample_time < previous.sample_time {
+                observation.sample_time = previous.sample_time;
+                self.order_corrections = self.order_corrections.saturating_add(1);
+            }
+            if observation.sequence <= previous.sequence {
+                observation.sequence = previous.sequence.saturating_add(1);
+                self.order_corrections = self.order_corrections.saturating_add(1);
+            }
+        }
+        if self.observations.len() == MAX_CONTROLLER_OBSERVATIONS_PER_BATCH {
+            self.observations.remove(0);
+            self.dropped_observations = self.dropped_observations.saturating_add(1);
+        }
+        self.terminal_snapshots
+            .insert(observation.source_id, observation.snapshot);
+        self.observations.push(observation);
+    }
+
+    /// Supply an authoritative final state without manufacturing an
+    /// intermediate observation.
+    pub fn set_terminal_snapshot(
+        &mut self,
+        source_id: InputSourceId,
+        snapshot: StandardGamepadSnapshot,
+    ) {
+        self.terminal_snapshots
+            .insert(source_id, snapshot.normalized());
+    }
+
+    /// Report observations already dropped by a platform/backend queue.
+    pub fn note_dropped_observations(&mut self, count: u64) {
+        self.dropped_observations = self.dropped_observations.saturating_add(count);
+    }
+}
+
+/// One ordered semantic state reached while reducing a physical input batch.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlayerActionObservation {
+    pub sample_time: Duration,
+    pub source_id: Option<InputSourceId>,
+    pub physical_sequence: Option<u64>,
+    pub actions: PlayerActionFrame,
+}
+
+/// Semantic result of one physical controller drain.
+///
+/// `actions` is the terminal presentation state with every observed edge
+/// unioned for compatibility consumers. `observations` preserves exact edge
+/// order and intermediate continuous state for fixed-rate command builders.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ControllerActionBatch {
+    pub actions: PlayerActionFrame,
+    pub observations: Vec<PlayerActionObservation>,
+    pub dropped_physical_observations: u64,
+    pub physical_order_corrections: u64,
+}
+
 #[derive(Clone, Debug)]
 struct ControllerSourceState {
     descriptor: InputSourceDescriptor,
@@ -594,6 +747,83 @@ impl ControllerInputSession {
             frame.look_rate = resolved.look_rate;
         }
         Ok(frame)
+    }
+
+    /// Reduce every ordered observation in a bounded physical input batch.
+    ///
+    /// The compatibility `sample_frame` API remains the snapshot-only common
+    /// denominator. New collectors should use this method so transitions that
+    /// happen inside one presentation interval remain observable.
+    pub fn sample_batch(
+        &mut self,
+        batch: &ControllerInputBatch,
+    ) -> Result<ControllerActionBatch, ControllerInputError> {
+        if batch.is_discontinuous() {
+            let mut actions = self.sample_frame(batch.sample_time(), batch.terminal_snapshots())?;
+            // The missing interval cannot justify a new press. Preserve known
+            // releases and terminal held/axis state so controls cannot stick.
+            actions.pressed.clear();
+            actions.activity_source = None;
+            return Ok(ControllerActionBatch {
+                actions,
+                observations: Vec::new(),
+                dropped_physical_observations: batch.dropped_observations(),
+                physical_order_corrections: batch.order_corrections(),
+            });
+        }
+
+        let mut observations = Vec::with_capacity(batch.observations().len().saturating_add(1));
+        let mut pressed = BTreeSet::new();
+        let mut released = BTreeSet::new();
+        let mut latest_activity = None;
+
+        for observation in batch.observations() {
+            let actions = self.sample_frame(
+                observation.sample_time,
+                [(observation.source_id, observation.snapshot)],
+            )?;
+            pressed.extend(actions.pressed.iter().copied());
+            released.extend(actions.released.iter().copied());
+            if actions.activity_source.is_some() {
+                latest_activity = actions.activity_source;
+            }
+            observations.push(PlayerActionObservation {
+                sample_time: observation.sample_time,
+                source_id: Some(observation.source_id),
+                physical_sequence: Some(observation.sequence),
+                actions,
+            });
+        }
+
+        let terminal_actions =
+            self.sample_frame(batch.sample_time(), batch.terminal_snapshots())?;
+        pressed.extend(terminal_actions.pressed.iter().copied());
+        released.extend(terminal_actions.released.iter().copied());
+        if terminal_actions.activity_source.is_some() {
+            latest_activity = terminal_actions.activity_source;
+        }
+        if observations
+            .last()
+            .is_none_or(|observation| observation.actions != terminal_actions)
+        {
+            observations.push(PlayerActionObservation {
+                sample_time: batch.sample_time(),
+                source_id: None,
+                physical_sequence: None,
+                actions: terminal_actions.clone(),
+            });
+        }
+        let mut final_actions = terminal_actions;
+        final_actions.pressed = pressed;
+        final_actions.released = released;
+        final_actions.activity_source = latest_activity;
+
+        Ok(ControllerActionBatch {
+            actions: final_actions,
+            observations,
+            dropped_physical_observations: 0,
+            physical_order_corrections: batch.order_corrections(),
+        })
     }
 }
 
@@ -1035,6 +1265,125 @@ mod tests {
             .expect("released sample");
         assert!(released.released.contains(&PlayerAction::Jump));
         assert!(!released.held.contains(&PlayerAction::Jump));
+    }
+
+    #[test]
+    fn ordered_batch_preserves_press_and_release_between_frames() {
+        let (source_id, descriptor) = source();
+        let mut session = ControllerInputSession::new();
+        session.connect_source(source_id, descriptor);
+        let pressed = StandardGamepadSnapshot {
+            buttons: StandardGamepadButtons {
+                south: StandardGamepadButtonState::pressed(),
+                ..StandardGamepadButtons::default()
+            },
+            ..StandardGamepadSnapshot::default()
+        };
+        let mut batch = ControllerInputBatch::new(Duration::from_millis(16));
+        batch.push_observation(ControllerInputObservation {
+            source_id,
+            sample_time: Duration::from_millis(5),
+            sequence: 10,
+            snapshot: pressed,
+        });
+        batch.push_observation(ControllerInputObservation {
+            source_id,
+            sample_time: Duration::from_millis(8),
+            sequence: 11,
+            snapshot: StandardGamepadSnapshot::default(),
+        });
+
+        let actions = session.sample_batch(&batch).expect("ordered input batch");
+        assert!(actions.actions.pressed.contains(&PlayerAction::Jump));
+        assert!(actions.actions.released.contains(&PlayerAction::Jump));
+        assert!(!actions.actions.held.contains(&PlayerAction::Jump));
+        assert!(
+            actions.observations[0]
+                .actions
+                .pressed
+                .contains(&PlayerAction::Jump)
+        );
+        assert!(
+            actions.observations[1]
+                .actions
+                .released
+                .contains(&PlayerAction::Jump)
+        );
+        assert_eq!(actions.observations[0].physical_sequence, Some(10));
+        assert_eq!(actions.observations[1].physical_sequence, Some(11));
+    }
+
+    #[test]
+    fn observation_batch_clamps_order_and_bounds_history() {
+        let (source_id, _) = source();
+        let mut batch = ControllerInputBatch::new(Duration::from_millis(10));
+        for sequence in 0..=MAX_CONTROLLER_OBSERVATIONS_PER_BATCH as u64 {
+            batch.push_observation(ControllerInputObservation {
+                source_id,
+                sample_time: if sequence == 1 {
+                    Duration::from_millis(20)
+                } else {
+                    Duration::from_millis(sequence.min(9))
+                },
+                sequence: if sequence == 2 { 0 } else { sequence },
+                snapshot: StandardGamepadSnapshot::default(),
+            });
+        }
+
+        assert_eq!(
+            batch.observations().len(),
+            MAX_CONTROLLER_OBSERVATIONS_PER_BATCH
+        );
+        assert_eq!(batch.dropped_observations(), 1);
+        assert!(batch.order_corrections() >= 2);
+        assert!(
+            batch
+                .observations()
+                .windows(2)
+                .all(|pair| pair[0].sample_time <= pair[1].sample_time
+                    && pair[0].sequence < pair[1].sequence)
+        );
+    }
+
+    #[test]
+    fn discontinuity_resynchronizes_without_inventing_a_press() {
+        let (source_id, descriptor) = source();
+        let mut session = ControllerInputSession::new();
+        session.connect_source(source_id, descriptor);
+        let pressed = StandardGamepadSnapshot {
+            buttons: StandardGamepadButtons {
+                south: StandardGamepadButtonState::pressed(),
+                ..StandardGamepadButtons::default()
+            },
+            ..StandardGamepadSnapshot::default()
+        };
+
+        let mut discontinuous = ControllerInputBatch::new(Duration::from_millis(10));
+        discontinuous.set_terminal_snapshot(source_id, pressed);
+        discontinuous.note_dropped_observations(3);
+        let recovered = session
+            .sample_batch(&discontinuous)
+            .expect("discontinuous input batch");
+        assert!(recovered.actions.pressed.is_empty());
+        assert!(recovered.actions.held.contains(&PlayerAction::Jump));
+        assert!(recovered.observations.is_empty());
+        assert_eq!(recovered.dropped_physical_observations, 3);
+
+        let held = session
+            .sample_batch(&ControllerInputBatch::from_snapshots(
+                Duration::from_millis(11),
+                [(source_id, pressed)],
+            ))
+            .expect("post-recovery held sample");
+        assert!(!held.actions.pressed.contains(&PlayerAction::Jump));
+
+        let released = session
+            .sample_batch(&ControllerInputBatch::from_snapshots(
+                Duration::from_millis(12),
+                [(source_id, StandardGamepadSnapshot::default())],
+            ))
+            .expect("post-recovery release");
+        assert!(released.actions.released.contains(&PlayerAction::Jump));
     }
 
     #[test]

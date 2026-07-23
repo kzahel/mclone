@@ -9,8 +9,10 @@ use std::{
 mod controller_session;
 
 pub use controller_session::{
-    ControllerInputError, ControllerInputSession, ControllerSessionSettings, InputContext,
-    PlayerAction, PlayerActionFrame, PlayerActionFrameCombiner,
+    ControllerActionBatch, ControllerInputBatch, ControllerInputError, ControllerInputObservation,
+    ControllerInputSession, ControllerSessionSettings, InputContext,
+    MAX_CONTROLLER_OBSERVATIONS_PER_BATCH, PlayerAction, PlayerActionFrame,
+    PlayerActionFrameCombiner, PlayerActionObservation,
 };
 
 pub const FLAT_HOTBAR_SLOT_COUNT: u8 = 9;
