@@ -423,8 +423,10 @@ transverse slopes and uncontained source faces. Corrective field revision 8
 now realizes only flat Y63 lowland reaches on the exact
 plane/384-chunk-cylinder sampler contract. Hydraulic-closure diagnostics, an
 authoritative fluid wake test, multi-seed pixels, and cold/warm plus movement
-evidence pass. Human Review 2 now precedes platform closeout. Later baked
-waterfall templates remain separate from production chunk-time simulation.
+evidence pass. Human Review 2 still rejected one global river level and the
+shallow/smooth ocean-floor language. Size-aware bathymetry and explicit flat
+reaches with bounded baked drops now precede platform closeout. Production
+chunk-time simulation remains excluded.
 True structure infrastructure remains ready as a separate concern but is
 parked while this terrain campaign advances.
 

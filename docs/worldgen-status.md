@@ -34,8 +34,10 @@ Review 1 rejected the pointwise water surface on 2026-07-23. Transverse slopes
 and uncontained source faces required a flat contained-reach correction.
 Field revision 8 now limits water to constant-Y63 lowland reaches and passes
 hydraulic closure, authoritative fluid wake, RD16 pixel, cold/warm generation,
-and accelerated one-minute movement evidence. Human Review 2 now precedes
-platform closeout.
+and accelerated one-minute movement evidence. Human Review 2 rejected the
+world language: one global river level produces no visible drops and abruptly
+vanishes at the lowland gate, while large bodies lack shelf/deep-basin
+bathymetry. Those two terrain corrections now precede platform closeout.
 
 Compatibility safety is recorded in the
 [`world-generation-profiles` ledger](topics/world-generation-profiles.md#compatibility-safety-ledger).

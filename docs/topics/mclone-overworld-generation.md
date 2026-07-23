@@ -34,8 +34,11 @@ uncontained source faces that spill when woken. Corrective flat contained
 field revision 8 now limits physical water to constant-Y63 lowland reaches.
 Multi-seed closure audits, a real fluid-runtime wake test, RD16 pixels, release
 cold/warm generation measurements, and an accelerated 3,600-frame movement
-soak pass. Human Review 2 is ready; platform closeout and further water
-vocabulary remain gated on that judgment.
+soak pass. Human Review 2 nevertheless rejected the world language: every
+physical river still shares one level and disappears at the conservative
+lowland gate, while large water bodies have smooth shallow floors without
+size-aware shelf and deep-basin structure. Independent bathymetry and explicit
+flat reaches with bounded baked drops now precede platform closeout.
 
 ## Scope
 
@@ -210,7 +213,7 @@ integer-level, naturally contained lowland reaches and removes water where a
 bounded cut/fill budget cannot make the initial source body a fixed point of
 the runtime fluid rules.
 
-Field revision 8 implements the conservative foundation without adding a
+Field revision 8 implements a useful hydraulic foundation without adding a
 reach graph or chunk-time simulation. Every physical channel and shallow pool
 uses the global Y63 source-water surface. Realization is limited to lowlands
 whose broad surface is at most Y70 and base surface at most Y72. The existing
@@ -219,6 +222,22 @@ source or motion-blocking natural terrain. The generator may lower terrain
 into that body but never raises a levee to rescue a high reach. Highland
 corridor distance, tangent, grade, and width remain useful dry planning facts;
 physical higher water waits for named reaches and explicit bounded drops.
+
+Human Review 2 confirms that this foundation is not an acceptable complete
+water system. Because every implemented reach is Y63, it contains no visible
+level change. Because realization is disabled above the lowland thresholds,
+the corridor can vanish without a headwater, outlet, or other semantic
+termination. Preserve constant-level source bodies and their closure proof,
+but apply them per explicit reach rather than treating the global sea as the
+only reach.
+
+Ocean bathymetry is a separate missing terrain family. The current negative-
+continentalness branch maps almost the entire ocean floor through a smooth
+Y46-to-Y61 curve with only `relief * 1.5` local variation. It has no shelf
+break, deep-basin selector, or independent seabed relief. The next field
+revision should add continuous shore/shelf, basin-interior, depth, and seabed
+facts. Large water interiors become substantially deeper and more irregular
+while the surface remains flat at Y63.
 
 The production hydraulic-closure audit checks generated chunks with a
 one-chunk halo. It rejects horizontal source faces open to non-solid cells,
@@ -797,14 +816,12 @@ Human Review 3 accepted the result as more natural and less geometric.
 
 ## Next Work
 
-Human Review 2 should inspect field revision 8's dense, coastal, wetland, and
-periodic-seam reaches interactively, especially source boundaries near steep
-local terrain and the breadth of alluvial sand shelves. If accepted, run
-Slice 3 platform closeout before choosing between true reach/network semantics
-and the first bounded waterfall-template catalogue. A later waterfall slice
-should stamp build-time-settled bounded templates rather than simulate whole
-rivers during chunk generation. Caves, structures, and broad biome expansion
-remain parked until the corrected water foundation passes.
+Human Review 2 rejected field revision 8 as a complete water system. Execute
+Tactical 220's bathymetry and explicit-reach corrections next. Human Review 3
+must see a deep basin, a coast-to-shelf transition, two flat river levels and
+their bounded drop, and a river outlet whose bed joins the shelf rather than a
+three-block trench entering a shallow plane. Caves, structures, broad biome
+expansion, and platform closeout remain parked until that review passes.
 
 ## Related
 

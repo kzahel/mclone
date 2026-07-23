@@ -1,12 +1,13 @@
 # Tactical 220: Mclone Overworld Rivers And Wetlands
 
 Status: Human Review 1 rejected the field-revision-7 hydraulic surface on
-2026-07-23. Field revision 8 now replaces it with conservative flat,
-sea-level lowland reaches and has passed generated-region closure audits, an
-authoritative fluid-runtime wake test, multi-seed maps, RD16 pixels, release
-cold/warm generation measurement, and an accelerated one-minute movement
-soak. Human Review 2 is ready. Baked waterfalls remain a later bounded
-template slice.
+2026-07-23. Field revision 8 replaced it with hydraulically safe flat,
+sea-level lowland water and passed its objective gates, but Human Review 2
+rejected the resulting world language. Rivers disappear wherever the lowland
+gate ends, no screenshot contains a water-level change, and large bodies lack
+the shelf, deep-basin, and seabed-relief structure visible in vanilla. The
+next review requires independent ocean bathymetry plus multiple flat river
+reaches connected by bounded baked drops.
 
 Topic: `mclone-overworld-generation`
 
@@ -336,6 +337,51 @@ only at sites satisfying bounded wall, lip, drop, and receiving-pool
 preconditions. Production generation stays fixed-work. Any optional
 output-changing offline quality mode must be persisted in the world descriptor
 and may not vary by chunk.
+
+### Corrective Slice 2D: ocean bathymetry
+
+- [ ] Add explicit shore/shelf, shelf-break, basin-interior, water-depth, and
+  seabed-relief facts to the production sample.
+- [ ] Keep the ocean surface hydrostatic at Y63 while making broad water
+  interiors materially deeper and more locally varied than coastal shelves.
+- [ ] Use the exact periodic production fields and fixed-work point sampling;
+  do not add a connected-component search to every column.
+- [ ] Add water-depth distributions, maps, representative coast-to-basin
+  transects, and RD16 deep-water cards.
+- [ ] Re-run surface, cold, and warm generation performance.
+
+Gate: large bodies visibly progress from shallow shore through a shelf break
+into a deep, irregular basin without changing the flat water surface or
+creating fluid ticks.
+
+Minecraft 1.17.1 supplies the architectural reference. `AddDeepOceanLayer`
+promotes a shallow-ocean cell only when all four cardinal neighbors are also
+ocean. The resulting deep-ocean biome uses depth `-1.8` rather than `-1.0`;
+`NoiseSampler` blends depth/scale over a five-by-five biome neighborhood and
+then combines that result with three-dimensional blended density noise. Mclone
+should preserve the size-aware shelf/interior lesson without porting that
+profile's biome-layer or density pipeline.
+
+### Corrective Slice 2E: explicit flat reaches and bounded drops
+
+- [ ] Replace the single global river level with an inspectable reach
+  vocabulary: reach level, upstream/downstream relation, headwater, outlet,
+  drop height, transition kind, and receiving pool.
+- [ ] Keep every ordinary reach surface constant at one integer Y and
+  monotonic downstream.
+- [ ] End water only at an explicit headwater/source or outlet. Never let a
+  height threshold silently erase an otherwise visible corridor.
+- [ ] Connect adjacent levels with bounded baked flowing-water stencils whose
+  wall, lip, fall, and receiving-pool preconditions are locally checkable.
+- [ ] Extend hydraulic review to distinguish quiescent source reaches from
+  intentional stable flowing transitions, including a real fluid-runtime wake
+  test.
+- [ ] Capture at least one RD16 card where two flat levels and their transition
+  are visible together, plus a river-to-shelf-to-deep-basin outlet.
+
+Gate: pixels visibly demonstrate level change without a sloped source sheet,
+arbitrary disappearance, floating water, or an unbounded generation-time
+simulation.
 
 ### Slice 3: reuse and platform closeout after corrective human acceptance
 
