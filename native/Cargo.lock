@@ -1870,6 +1870,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "mclone-terrain-lab"
+version = "0.0.0"
+dependencies = [
+ "js-sys",
+ "mclone-terrain-view",
+ "mclone-worldgen",
+ "serde",
+ "serde_json",
+ "wasm-bindgen",
+ "wasm-bindgen-futures",
+ "web-sys",
+ "wgpu",
+]
+
+[[package]]
 name = "mclone-terrain-view"
 version = "0.0.0"
 dependencies = [
