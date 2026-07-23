@@ -7,6 +7,7 @@ struct TerrainPreviewParams {
 struct TerrainPreviewSample {
     terrain: vec4<f32>,
     climate: vec4<f32>,
+    large_fields: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -305,6 +306,7 @@ fn evaluate(world_x: i32, world_z: i32, sample_spacing: i32) -> TerrainPreviewSa
     var sample: TerrainPreviewSample;
     sample.terrain = vec4<f32>(surface_y, display_y, continentalness, relief);
     sample.climate = vec4<f32>(temperature, moisture, water, ruggedness);
+    sample.large_fields = vec4<f32>(surface_y, display_y, water, 0.0);
     return sample;
 }
 

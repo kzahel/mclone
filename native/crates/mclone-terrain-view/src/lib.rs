@@ -703,6 +703,9 @@ mod tests {
             moisture: 0.6,
             water: 0.0,
             ruggedness: 0.8,
+            base_surface_y: 63.0,
+            base_display_y: 64.0,
+            ocean_water: 0.0,
         };
         let mut bytes = Vec::new();
         for value in sample.packed() {

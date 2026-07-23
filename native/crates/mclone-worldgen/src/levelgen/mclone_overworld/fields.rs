@@ -8,57 +8,138 @@ pub const MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS: i32 = 2;
 pub const MCLONE_OVERWORLD_PERIOD_BLOCKS: i32 = 6_144;
 pub const MCLONE_OVERWORLD_PERIOD_CHUNKS: u32 = 384;
 
-const CONTINENT_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_636f_6e31);
-const CONTINENT_MEDIUM_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_636f_6e32);
-const CONTINENT_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_636f_6e33);
-const RELIEF_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7265_6c31);
-const RELIEF_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7265_6c32);
-const RELIEF_FINE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7265_6c33);
-const RUGGEDNESS_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7275_6731);
-const RUGGEDNESS_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7275_6732);
-const RIDGE_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_6431);
-const RIDGE_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_6432);
-const MOUNTAIN_DETAIL_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6d64_7431);
-const MOUNTAIN_DETAIL_FINE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6d64_7432);
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct McloneOverworldLargeFieldBand {
+    pub domain: u64,
+    pub scale: i32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct McloneOverworldLargeFieldSpec {
+    pub continent: [McloneOverworldLargeFieldBand; 3],
+    pub relief: [McloneOverworldLargeFieldBand; 3],
+    pub ruggedness: [McloneOverworldLargeFieldBand; 2],
+    pub ridge: [McloneOverworldLargeFieldBand; 2],
+    pub mountain_detail: [McloneOverworldLargeFieldBand; 2],
+    pub ocean_basin: McloneOverworldLargeFieldBand,
+    pub seabed: [McloneOverworldLargeFieldBand; 2],
+    pub temperature: [McloneOverworldLargeFieldBand; 2],
+    pub moisture: [McloneOverworldLargeFieldBand; 2],
+}
+
+const fn field_band(domain: u64, scale: i32) -> McloneOverworldLargeFieldBand {
+    McloneOverworldLargeFieldBand { domain, scale }
+}
+
+pub const MCLONE_OVERWORLD_LARGE_FIELD_SPEC: McloneOverworldLargeFieldSpec =
+    McloneOverworldLargeFieldSpec {
+        continent: [
+            field_band(0x6d63_6f76_636f_6e31, 2_048),
+            field_band(0x6d63_6f76_636f_6e32, 1_024),
+            field_band(0x6d63_6f76_636f_6e33, 512),
+        ],
+        relief: [
+            field_band(0x6d63_6f76_7265_6c31, 384),
+            field_band(0x6d63_6f76_7265_6c32, 128),
+            field_band(0x6d63_6f76_7265_6c33, 48),
+        ],
+        ruggedness: [
+            field_band(0x6d63_6f76_7275_6731, 1_536),
+            field_band(0x6d63_6f76_7275_6732, 512),
+        ],
+        ridge: [
+            field_band(0x6d63_6f76_7269_6431, 384),
+            field_band(0x6d63_6f76_7269_6432, 128),
+        ],
+        mountain_detail: [
+            field_band(0x6d63_6f76_6d64_7431, 32),
+            field_band(0x6d63_6f76_6d64_7432, 8),
+        ],
+        ocean_basin: field_band(0x6d63_6f76_6261_7331, 1_536),
+        seabed: [
+            field_band(0x6d63_6f76_6261_7332, 384),
+            field_band(0x6d63_6f76_6261_7333, 96),
+        ],
+        temperature: [
+            field_band(0x6d63_6f76_7465_6d31, 1_536),
+            field_band(0x6d63_6f76_7465_6d32, 384),
+        ],
+        moisture: [
+            field_band(0x6d63_6f76_6d6f_6931, 1_024),
+            field_band(0x6d63_6f76_6d6f_6932, 256),
+        ],
+    };
+
+const CONTINENT_LARGE_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.continent[0].domain);
+const CONTINENT_MEDIUM_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.continent[1].domain);
+const CONTINENT_DETAIL_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.continent[2].domain);
+const RELIEF_LARGE_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.relief[0].domain);
+const RELIEF_DETAIL_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.relief[1].domain);
+const RELIEF_FINE_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.relief[2].domain);
+const RUGGEDNESS_LARGE_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.ruggedness[0].domain);
+const RUGGEDNESS_DETAIL_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.ruggedness[1].domain);
+const RIDGE_LARGE_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.ridge[0].domain);
+const RIDGE_DETAIL_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.ridge[1].domain);
+const MOUNTAIN_DETAIL_LARGE_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.mountain_detail[0].domain);
+const MOUNTAIN_DETAIL_FINE_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.mountain_detail[1].domain);
 const RIVER_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_7631);
 const RIVER_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_7632);
 const RIVER_WIDTH_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_7633);
 const RIVER_REACH_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_7634);
 const RIVER_MORPHOLOGY_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_7635);
 const WETLAND_POOL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7765_7431);
-const OCEAN_BASIN_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6261_7331);
-const SEABED_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6261_7332);
-const SEABED_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6261_7333);
-const TEMPERATURE_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7465_6d31);
-const TEMPERATURE_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7465_6d32);
-const MOISTURE_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6d6f_6931);
-const MOISTURE_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6d6f_6932);
+const OCEAN_BASIN_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.ocean_basin.domain);
+const SEABED_LARGE_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.seabed[0].domain);
+const SEABED_DETAIL_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.seabed[1].domain);
+const TEMPERATURE_LARGE_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.temperature[0].domain);
+const TEMPERATURE_DETAIL_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.temperature[1].domain);
+const MOISTURE_LARGE_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.moisture[0].domain);
+const MOISTURE_DETAIL_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.moisture[1].domain);
 
-const CONTINENT_LARGE_SCALE: i32 = 2_048;
-const CONTINENT_MEDIUM_SCALE: i32 = 1_024;
-const CONTINENT_DETAIL_SCALE: i32 = 512;
-const RELIEF_LARGE_SCALE: i32 = 384;
-const RELIEF_DETAIL_SCALE: i32 = 128;
-const RELIEF_FINE_SCALE: i32 = 48;
-const RUGGEDNESS_LARGE_SCALE: i32 = 1_536;
-const RUGGEDNESS_DETAIL_SCALE: i32 = 512;
-const RIDGE_LARGE_SCALE: i32 = 384;
-const RIDGE_DETAIL_SCALE: i32 = 128;
-const MOUNTAIN_DETAIL_LARGE_SCALE: i32 = 32;
-const MOUNTAIN_DETAIL_FINE_SCALE: i32 = 8;
+const CONTINENT_LARGE_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.continent[0].scale;
+const CONTINENT_MEDIUM_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.continent[1].scale;
+const CONTINENT_DETAIL_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.continent[2].scale;
+const RELIEF_LARGE_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.relief[0].scale;
+const RELIEF_DETAIL_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.relief[1].scale;
+const RELIEF_FINE_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.relief[2].scale;
+const RUGGEDNESS_LARGE_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.ruggedness[0].scale;
+const RUGGEDNESS_DETAIL_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.ruggedness[1].scale;
+const RIDGE_LARGE_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.ridge[0].scale;
+const RIDGE_DETAIL_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.ridge[1].scale;
+const MOUNTAIN_DETAIL_LARGE_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.mountain_detail[0].scale;
+const MOUNTAIN_DETAIL_FINE_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.mountain_detail[1].scale;
 const RIVER_LARGE_SCALE: i32 = 768;
 const RIVER_DETAIL_SCALE: i32 = 192;
 const RIVER_WIDTH_SCALE: i32 = 384;
 const RIVER_REACH_SCALE: i32 = 96;
 const RIVER_MORPHOLOGY_DETAIL_SCALE: i32 = 32;
 const WETLAND_POOL_SCALE: i32 = 96;
-const OCEAN_BASIN_SCALE: i32 = 1_536;
-const SEABED_LARGE_SCALE: i32 = 384;
-const SEABED_DETAIL_SCALE: i32 = 96;
-const TEMPERATURE_LARGE_SCALE: i32 = 1_536;
-const TEMPERATURE_DETAIL_SCALE: i32 = 384;
-const MOISTURE_LARGE_SCALE: i32 = 1_024;
-const MOISTURE_DETAIL_SCALE: i32 = 256;
+const OCEAN_BASIN_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.ocean_basin.scale;
+const SEABED_LARGE_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.seabed[0].scale;
+const SEABED_DETAIL_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.seabed[1].scale;
+const TEMPERATURE_LARGE_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.temperature[0].scale;
+const TEMPERATURE_DETAIL_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.temperature[1].scale;
+const MOISTURE_LARGE_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.moisture[0].scale;
+const MOISTURE_DETAIL_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.moisture[1].scale;
 const RIVER_GRADE_SAMPLE_DISTANCE: f64 = 16.0;
 const RIVER_MAX_RELEVANT_DISTANCE: f64 = 64.0;
 const RIVER_OUTLET_FADE_CONTINENTALNESS: f64 = 0.18;
@@ -1315,6 +1396,63 @@ mod tests {
                 (4_603_662_754_231_223_194, 13_797_514_369_469_026_053),
                 (4_604_792_002_519_359_514, 4_602_285_638_028_510_205),
                 (4_585_722_008_247_260_483, 4_599_867_704_838_024_287),
+            ]
+        );
+    }
+
+    #[test]
+    fn selected_signed_points_pin_complete_large_fields() {
+        let samples =
+            [(12_345, 0, 0), (-98_765, -3_176, 520), (-98_765, -304, 336)].map(|(seed, x, z)| {
+                let sample = McloneOverworldSampler::new(seed).sample(x, z);
+                (
+                    sample.continentalness.to_bits(),
+                    sample.relief.to_bits(),
+                    sample.ruggedness.to_bits(),
+                    sample.ridges.to_bits(),
+                    sample.mountain_detail.to_bits(),
+                    sample.climate.temperature.to_bits(),
+                    sample.climate.moisture.to_bits(),
+                    sample.bathymetry.water_depth,
+                    sample.base_surface_y,
+                )
+            });
+        assert_eq!(
+            samples,
+            [
+                (
+                    4_595_346_711_797_442_751,
+                    13_820_231_938_309_795_238,
+                    13_826_408_511_758_480_080,
+                    4_606_201_729_120_264_332,
+                    4_597_008_412_862_321_985,
+                    4_603_662_754_231_223_194,
+                    13_797_514_369_469_026_053,
+                    0,
+                    69,
+                ),
+                (
+                    4_601_889_778_342_039_790,
+                    13_818_401_204_400_516_524,
+                    4_602_433_175_868_524_518,
+                    4_605_762_744_906_985_117,
+                    4_594_532_169_671_232_426,
+                    4_604_792_002_519_359_514,
+                    4_602_285_638_028_510_205,
+                    0,
+                    120,
+                ),
+                (
+                    13_814_565_550_205_726_302,
+                    4_599_019_303_536_164_406,
+                    13_820_513_172_644_214_677,
+                    4_594_555_355_530_533_207,
+                    4_594_401_671_120_503_157,
+                    13_813_028_612_715_141_736,
+                    13_809_771_509_350_218_609,
+                    8,
+                    55,
+                ),
             ]
         );
     }

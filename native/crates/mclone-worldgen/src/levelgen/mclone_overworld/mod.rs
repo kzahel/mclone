@@ -35,12 +35,13 @@ pub use feature_batch::{
     generate_mclone_overworld_chunk_with_topology,
 };
 pub use fields::{
-    MCLONE_OVERWORLD_FIELD_REVISION, MCLONE_OVERWORLD_PERIOD_BLOCKS,
-    MCLONE_OVERWORLD_PERIOD_CHUNKS, MCLONE_OVERWORLD_SEA_LEVEL,
+    MCLONE_OVERWORLD_FIELD_REVISION, MCLONE_OVERWORLD_LARGE_FIELD_SPEC,
+    MCLONE_OVERWORLD_PERIOD_BLOCKS, MCLONE_OVERWORLD_PERIOD_CHUNKS, MCLONE_OVERWORLD_SEA_LEVEL,
     MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS, McloneOverworldBathymetrySample,
-    McloneOverworldClimateSample, McloneOverworldLandformSample, McloneOverworldSampleRegion,
-    McloneOverworldSampleRegionRequest, McloneOverworldSampler, McloneOverworldSamplingTopology,
-    McloneOverworldTerrainSample, McloneOverworldWatercourseSample, mclone_overworld_spawn_chunk,
+    McloneOverworldClimateSample, McloneOverworldLandformSample, McloneOverworldLargeFieldBand,
+    McloneOverworldLargeFieldSpec, McloneOverworldSampleRegion, McloneOverworldSampleRegionRequest,
+    McloneOverworldSampler, McloneOverworldSamplingTopology, McloneOverworldTerrainSample,
+    McloneOverworldWatercourseSample, mclone_overworld_spawn_chunk,
     mclone_overworld_spawn_chunk_with_topology,
 };
 pub use streams::{

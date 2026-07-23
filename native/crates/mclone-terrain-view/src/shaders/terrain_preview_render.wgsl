@@ -7,6 +7,7 @@ struct TerrainPreviewParams {
 struct TerrainPreviewSample {
     terrain: vec4<f32>,
     climate: vec4<f32>,
+    large_fields: vec4<f32>,
 };
 
 @group(0) @binding(0)

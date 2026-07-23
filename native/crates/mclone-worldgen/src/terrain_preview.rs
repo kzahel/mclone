@@ -4,13 +4,13 @@ use crate::levelgen::{
 };
 
 pub const TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION: &str =
-    "mclone-terrain-preview-reference-grid-v1";
+    "mclone-terrain-preview-reference-grid-v2";
 pub const TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS: u32 = 64;
 pub const TERRAIN_PREVIEW_MIN_CELLS_PER_AXIS: u32 = 8;
 pub const TERRAIN_PREVIEW_MAX_CELLS_PER_AXIS: u32 = 128;
 pub const TERRAIN_PREVIEW_MIN_SAMPLE_SPACING: u32 = 2;
 pub const TERRAIN_PREVIEW_MAX_SAMPLE_SPACING: u32 = 1_024;
-pub const TERRAIN_PREVIEW_SAMPLE_FLOATS: usize = 8;
+pub const TERRAIN_PREVIEW_SAMPLE_FLOATS: usize = 12;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TerrainPreviewRequest {
@@ -160,6 +160,9 @@ pub struct TerrainPreviewSample {
     pub moisture: f32,
     pub water: f32,
     pub ruggedness: f32,
+    pub base_surface_y: f32,
+    pub base_display_y: f32,
+    pub ocean_water: f32,
 }
 
 impl TerrainPreviewSample {
@@ -173,6 +176,10 @@ impl TerrainPreviewSample {
             self.moisture,
             self.water,
             self.ruggedness,
+            self.base_surface_y,
+            self.base_display_y,
+            self.ocean_water,
+            0.0,
         ]
     }
 
@@ -186,11 +193,18 @@ impl TerrainPreviewSample {
             moisture: values[5],
             water: values[6],
             ruggedness: values[7],
+            base_surface_y: values[8],
+            base_display_y: values[9],
+            ocean_water: values[10],
         }
     }
 
     pub fn is_water(self) -> bool {
         self.water >= 0.5
+    }
+
+    pub fn is_ocean_water(self) -> bool {
+        self.ocean_water >= 0.5
     }
 }
 
@@ -226,6 +240,7 @@ impl TerrainPreviewReferenceGrid {
                 } else {
                     MCLONE_OVERWORLD_SEA_LEVEL
                 };
+                let ocean_water = terrain.continentalness <= 0.0;
                 samples.push(TerrainPreviewSample {
                     surface_y: terrain.surface_y as f32,
                     display_y: if water {
@@ -239,6 +254,13 @@ impl TerrainPreviewReferenceGrid {
                     moisture: terrain.climate.moisture as f32,
                     water: if water { 1.0 } else { 0.0 },
                     ruggedness: terrain.ruggedness as f32,
+                    base_surface_y: terrain.base_surface_y as f32,
+                    base_display_y: if ocean_water {
+                        MCLONE_OVERWORLD_SEA_LEVEL as f32
+                    } else {
+                        terrain.base_surface_y as f32
+                    },
+                    ocean_water: if ocean_water { 1.0 } else { 0.0 },
                 });
             }
         }
@@ -286,6 +308,15 @@ pub struct TerrainPreviewComparison {
     pub mean_absolute_surface_error: f32,
     pub p95_absolute_surface_error: f32,
     pub water_presence_agreement: f32,
+    pub max_absolute_base_surface_error: f32,
+    pub mean_absolute_base_surface_error: f32,
+    pub p95_absolute_base_surface_error: f32,
+    pub ocean_water_presence_agreement: f32,
+    pub mean_absolute_continentalness_error: f32,
+    pub mean_absolute_relief_error: f32,
+    pub mean_absolute_temperature_error: f32,
+    pub mean_absolute_moisture_error: f32,
+    pub mean_absolute_ruggedness_error: f32,
 }
 
 impl TerrainPreviewComparison {
@@ -308,25 +339,57 @@ impl TerrainPreviewComparison {
         let mut error_sum = 0.0_f64;
         let mut max_error = 0.0_f32;
         let mut water_matches = 0_usize;
+        let mut base_errors = Vec::with_capacity(candidate.len());
+        let mut base_error_sum = 0.0_f64;
+        let mut max_base_error = 0.0_f32;
+        let mut ocean_water_matches = 0_usize;
+        let mut continentalness_error_sum = 0.0_f64;
+        let mut relief_error_sum = 0.0_f64;
+        let mut temperature_error_sum = 0.0_f64;
+        let mut moisture_error_sum = 0.0_f64;
+        let mut ruggedness_error_sum = 0.0_f64;
         for (expected, actual) in reference.samples.iter().zip(candidate) {
-            if !actual.surface_y.is_finite() {
-                return Err("terrain preview candidate contains a non-finite surface".to_owned());
+            if !actual.packed().iter().all(|value| value.is_finite()) {
+                return Err("terrain preview candidate contains a non-finite field".to_owned());
             }
             let error = (expected.surface_y - actual.surface_y).abs();
             errors.push(error);
             error_sum += f64::from(error);
             max_error = max_error.max(error);
             water_matches += usize::from(expected.is_water() == actual.is_water());
+            let base_error = (expected.base_surface_y - actual.base_surface_y).abs();
+            base_errors.push(base_error);
+            base_error_sum += f64::from(base_error);
+            max_base_error = max_base_error.max(base_error);
+            ocean_water_matches +=
+                usize::from(expected.is_ocean_water() == actual.is_ocean_water());
+            continentalness_error_sum +=
+                f64::from((expected.continentalness - actual.continentalness).abs());
+            relief_error_sum += f64::from((expected.relief - actual.relief).abs());
+            temperature_error_sum += f64::from((expected.temperature - actual.temperature).abs());
+            moisture_error_sum += f64::from((expected.moisture - actual.moisture).abs());
+            ruggedness_error_sum += f64::from((expected.ruggedness - actual.ruggedness).abs());
         }
         errors.sort_by(f32::total_cmp);
+        base_errors.sort_by(f32::total_cmp);
         let p95_index = ((errors.len() - 1) * 95) / 100;
+        let sample_count = candidate.len() as f64;
 
         Ok(Self {
             sample_count: candidate.len(),
             max_absolute_surface_error: max_error,
-            mean_absolute_surface_error: (error_sum / candidate.len() as f64) as f32,
+            mean_absolute_surface_error: (error_sum / sample_count) as f32,
             p95_absolute_surface_error: errors[p95_index],
             water_presence_agreement: water_matches as f32 / candidate.len() as f32,
+            max_absolute_base_surface_error: max_base_error,
+            mean_absolute_base_surface_error: (base_error_sum / sample_count) as f32,
+            p95_absolute_base_surface_error: base_errors[p95_index],
+            ocean_water_presence_agreement: ocean_water_matches as f32 / candidate.len() as f32,
+            mean_absolute_continentalness_error: (continentalness_error_sum / sample_count) as f32,
+            mean_absolute_relief_error: (relief_error_sum / sample_count) as f32,
+            mean_absolute_temperature_error: (temperature_error_sum / sample_count) as f32,
+            mean_absolute_moisture_error: (moisture_error_sum / sample_count) as f32,
+            mean_absolute_ruggedness_error: (ruggedness_error_sum / sample_count) as f32,
         })
     }
 }
@@ -392,6 +455,8 @@ mod tests {
             assert_eq!(sample.relief, terrain.relief as f32);
             assert_eq!(sample.temperature, terrain.climate.temperature as f32);
             assert_eq!(sample.moisture, terrain.climate.moisture as f32);
+            assert_eq!(sample.base_surface_y, terrain.base_surface_y as f32);
+            assert_eq!(sample.is_ocean_water(), terrain.continentalness <= 0.0);
         }
         assert_eq!(
             grid.packed_bytes().len(),
@@ -423,6 +488,13 @@ mod tests {
         candidate[0].surface_y += 10.0;
         candidate[1].surface_y -= 2.0;
         candidate[2].water = if candidate[2].is_water() { 0.0 } else { 1.0 };
+        candidate[3].base_surface_y += 4.0;
+        candidate[4].ocean_water = if candidate[4].is_ocean_water() {
+            0.0
+        } else {
+            1.0
+        };
+        candidate[5].continentalness += 0.25;
 
         let report = TerrainPreviewComparison::compare(&reference, &candidate).unwrap();
         assert_eq!(report.sample_count, 4_225);
@@ -433,6 +505,13 @@ mod tests {
             report.water_presence_agreement,
             (report.sample_count - 1) as f32 / report.sample_count as f32
         );
+        assert_eq!(report.max_absolute_base_surface_error, 4.0);
+        assert!(report.mean_absolute_base_surface_error > 0.0);
+        assert_eq!(
+            report.ocean_water_presence_agreement,
+            (report.sample_count - 1) as f32 / report.sample_count as f32
+        );
+        assert!(report.mean_absolute_continentalness_error > 0.0);
     }
 
     #[test]
@@ -443,7 +522,7 @@ mod tests {
         );
         assert_eq!(
             TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION,
-            "mclone-terrain-preview-reference-grid-v1"
+            "mclone-terrain-preview-reference-grid-v2"
         );
     }
 }
