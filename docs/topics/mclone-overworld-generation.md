@@ -31,8 +31,11 @@ biome and substrate language, sparse shallow wetland pools, production maps,
 and periodic seam proof. Human Review 1 subsequently rejected its pointwise
 terrain-relative water height: it permits transverse water slopes and
 uncontained source faces that spill when woken. Corrective flat contained
-reaches, hydraulic-closure evidence, and a sustained walking/performance soak
-now precede platform closeout or further water vocabulary.
+field revision 8 now limits physical water to constant-Y63 lowland reaches.
+Multi-seed closure audits, a real fluid-runtime wake test, RD16 pixels, release
+cold/warm generation measurements, and an accelerated 3,600-frame movement
+soak pass. Human Review 2 is ready; platform closeout and further water
+vocabulary remain gated on that judgment.
 
 ## Scope
 
@@ -207,6 +210,25 @@ integer-level, naturally contained lowland reaches and removes water where a
 bounded cut/fill budget cannot make the initial source body a fixed point of
 the runtime fluid rules.
 
+Field revision 8 implements the conservative foundation without adding a
+reach graph or chunk-time simulation. Every physical channel and shallow pool
+uses the global Y63 source-water surface. Realization is limited to lowlands
+whose broad surface is at most Y70 and base surface at most Y72. The existing
+sea fill therefore closes every source boundary against either another Y63
+source or motion-blocking natural terrain. The generator may lower terrain
+into that body but never raises a levee to rescue a high reach. Highland
+corridor distance, tangent, grade, and width remain useful dry planning facts;
+physical higher water waits for named reaches and explicit bounded drops.
+
+The production hydraulic-closure audit checks generated chunks with a
+one-chunk halo. It rejects horizontal source faces open to non-solid cells,
+unsupported sources, unequal tops on adjacent wet columns, and initial liquid
+ticks. Dense river, coast, wetland-pool, and exact periodic-seam review regions
+all report closed with zero failure counters. A separate authoritative-server
+test wakes every source in a dense generated reach and requires zero mutation
+and an empty final fluid queue. The audit is review/test work and adds no hot
+path generation cost.
+
 This corridor family is fixed-work and visually continuous, but it is not yet
 a drainage network. Generic zero contours may form closed loops and do not
 provide tributaries, confluences, accumulated discharge, named reaches, or
@@ -293,6 +315,26 @@ Tactical 196 plane result and remain inside the 25-percent gate. The cylinder
 measured 2,777.558, 896.640, and 4,777.684 respectively. Analytic derivatives
 replaced an initial finite-difference centerline estimate whose surface-only
 path was about 42 percent below the baseline.
+
+The field-revision-8 corrective release measurement at clean commit
+`2feb9189`, seed `-98765`, radius three, and three iterations measured
+2,857.849 plane surface chunks/s, 904.243 cold decorated targets/s, and
+5,053.663 warm targets/s. The exact cylinder measured 2,571.381, 868.850, and
+4,352.229 respectively. The plane result is 15.4, 20.2, and 16.9 percent below
+Tactical 196's accepted plane baseline, so all three remain inside the
+25-percent investigation gate. The warm pass served all 363 dependency
+requests from cache and generated none.
+
+The clean release movement evidence uses a river-heavy, eight-chunk-radius
+route around seed `-98765` chunk `(47,102)` at render distance 10. The
+canonical offscreen harness advances 3,600 frames at 60 Hz and 32 blocks/s,
+representing 60 seconds of motion but deliberately does not sleep to wall
+clock. Across 64 unique chunk centers it measured 3.358 ms average frame work,
+1.567 ms accounted frame-wall p50, 7.533 ms p95, 10.587 ms p99, and 13.108 ms
+max with no over-budget frames. Worldgen and publication queues ended empty;
+loaded chunks stayed between 529 and 576. Maximum and final scheduled-fluid
+depth, as well as due, executed, deferred, mutation, snapshot, and event
+counters, were all zero.
 
 Quality-versus-speed controls divide into two categories:
 
@@ -577,7 +619,9 @@ subsystem horizontally.
    - Completed 2026-07-22 for the plane and exact 384-chunk X cylinder.
 4. **Rivers and wetlands**
    - Deterministic river influence applied before surface recipes.
-   - Human Review 1 is open on the bounded warped-contour implementation.
+   - Human Review 1 rejected field revision 7's sloped/uncontained water.
+     Corrective field revision 8 has passed closure, runtime, pixel, and
+     performance evidence and is ready for Human Review 2.
    - Water surface, width/depth, banks, provisional flow, grade, and wetland
      facts are live. Headwater, confluence, outlet, discharge, and true reach
      continuity await a network-semantic slice if review calls for one.
@@ -753,14 +797,14 @@ Human Review 3 accepted the result as more natural and less geometric.
 
 ## Next Work
 
-Human Review 1 rejected
-[`Tactical 220`](../tactical/220-mclone-overworld-rivers-and-wetlands.md).
-The next review requires flat contained reaches, hydraulic-closure evidence,
-release warm-generation comparison, and a 60-to-120-second movement/fluid soak.
-A later waterfall slice should stamp build-time-settled bounded templates
-rather than simulate whole rivers during chunk generation. Caves, structures,
-and broad biome expansion remain parked until the corrected water foundation
-passes.
+Human Review 2 should inspect field revision 8's dense, coastal, wetland, and
+periodic-seam reaches interactively, especially source boundaries near steep
+local terrain and the breadth of alluvial sand shelves. If accepted, run
+Slice 3 platform closeout before choosing between true reach/network semantics
+and the first bounded waterfall-template catalogue. A later waterfall slice
+should stamp build-time-settled bounded templates rather than simulate whole
+rivers during chunk generation. Caves, structures, and broad biome expansion
+remain parked until the corrected water foundation passes.
 
 ## Related
 

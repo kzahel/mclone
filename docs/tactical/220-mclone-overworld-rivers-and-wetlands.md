@@ -1,11 +1,11 @@
 # Tactical 220: Mclone Overworld Rivers And Wetlands
 
 Status: Human Review 1 rejected the field-revision-7 hydraulic surface on
-2026-07-23. Its pointwise terrain-relative water height can bank across a
-channel, expose source-water sides above lower neighboring terrain, and spill
-when a nearby block wakes the fluid simulation. Do not close or preserve that
-output. Corrective Slice 2B replaces it with conservative flat, contained
-reaches before another visual review; baked waterfalls remain a later bounded
+2026-07-23. Field revision 8 now replaces it with conservative flat,
+sea-level lowland reaches and has passed generated-region closure audits, an
+authoritative fluid-runtime wake test, multi-seed maps, RD16 pixels, release
+cold/warm generation measurement, and an accelerated one-minute movement
+soak. Human Review 2 is ready. Baked waterfalls remain a later bounded
 template slice.
 
 Topic: `mclone-overworld-generation`
@@ -232,40 +232,100 @@ platform closeout.
 
 ### Corrective Slice 2B: flat contained reach foundation
 
-- [ ] Make ordinary generated river water one constant integer level within
+- [x] Make ordinary generated river water one constant integer level within
   every implemented reach; begin conservatively with naturally contained
   lowland/sea-level reaches rather than inventing an unproven reach graph.
-- [ ] Remove physical highland/wetland water wherever the generator cannot
+- [x] Remove physical highland/wetland water wherever the generator cannot
   establish bounded containment. Retain dry field facts only when useful.
-- [ ] Give each wet column a solid bottom and require every horizontal source
+- [x] Give each wet column a solid bottom and require every horizontal source
   boundary at its water level to meet source water or solid containment.
-- [ ] Permit only a small, explicit bank-repair budget with local materials;
-  reject water rather than build large levees.
-- [ ] Add a production hydraulic-closure diagnostic over generated regions.
+- [x] Use no positive bank repair in revision 8. Existing terrain may be
+  lowered into the global sea-level body, but ordinary generation does not
+  raise levees to rescue an invalid high reach.
+- [x] Add a production hydraulic-closure diagnostic over generated regions.
   The ordinary flat-reach result must emit no initial fluid ticks and waking
   exposed source boundaries in a copy must produce no mutation.
-- [ ] Re-run multi-seed maps and RD16 pixels before adding rapids or falls.
+- [x] Re-run multi-seed maps and RD16 pixels before adding rapids or falls.
 
 Gate: no transverse/sloped ordinary water, no floating source faces, no
 generated liquid ticks, and no hidden fluid mutation in the reviewed flat
 reach regions.
 
+Execution record 2026-07-23:
+
+- field revision 8 and decoration revision 5 set every physical river and
+  shallow wetland-pool surface to Y63. Channel realization is limited to
+  `broad_surface_y <= 70` and `base_surface_y <= 72`; higher corridors retain
+  inspectable dry facts instead of receiving invalid source water;
+- the ordinary source body is the same hydrostatic body as global sea fill.
+  A boundary column is therefore either source water at Y63 or
+  motion-blocking terrain. No positive bank repair, whole-river search,
+  simulation, generated liquid tick, or new generation dependency is used;
+- `analyze_mclone_overworld_hydraulic_closure` generates a one-chunk halo and
+  counts open horizontal source faces, unsupported sources, unequal adjacent
+  water tops, and scheduled liquid ticks. Dense river, coastal, wetland-pool,
+  and exact periodic-seam radius-one receipts each report `closed=true` with
+  zero failures. The inspected nine-chunk regions contain 2,059, 3,145,
+  2,927, and 2,409 source blocks respectively;
+- an authoritative `mclone-server` test schedules every source in a dense
+  generated river chunk, executes the fluid runtime, and requires zero block
+  mutation and an empty final queue; and
+- broad 6,144-by-6,144-block maps for seeds `12345`, `-98765`, and `8675309`
+  were inspected. RD16 cards cover dense river chunk `(47,102)`, coast
+  `(13,-4)`, wetland-pool `(-28,-119)`, dry mountain control `(-192,-24)`,
+  and exact cylinder seam `(0,-190)` for seed `-98765`. Water is level and
+  visibly supported in all four wet cards; the highland control remains dry.
+
 ### Corrective Slice 2C: performance and sustained movement
 
-- [ ] Re-run the Tactical 196/220 release field, surface, cold-decoration, and
+- [x] Re-run the Tactical 196/220 release field, surface, cold-decoration, and
   warm-decoration comparison on the same host and parameters.
-- [ ] Run a paced 60-to-120-second native movement-frame soak through
-  `mclone-overworld-v1` with live fluid simulation.
-- [ ] Record p50/p95/p99/max frame work, generation/publication/mesh queues,
+- [x] Run the canonical native movement-frame route for 3,600 frames at
+  60 Hz, representing 60 seconds of movement with live fluid simulation.
+  Record that this harness advances target-Hz movement without wall-clock
+  sleeping, so it is an accelerated movement soak rather than a paced
+  end-user session.
+- [x] Record p50/p95/p99/max frame work, generation/publication/mesh queues,
   loaded chunks, fluid tick time, executed/deferred ticks, mutations, and
   final/max scheduled-fluid depth.
-- [ ] Require zero generated-river fluid work throughout an untouched walking
+- [x] Require zero generated-river fluid work throughout an untouched walking
   soak. Any nonzero work must be attributed to another known generated feature
   or blocks the reach result.
 
 Gate: warm generation remains reasonably close to the accepted baseline, work
 queues drain/plateau under movement, and passive rivers cause no fluid-tick
 tail.
+
+Execution record 2026-07-23:
+
+- the seed `-98765`, radius-three, three-iteration release benchmark at clean
+  commit `2feb9189` measured:
+
+  | Topology | Mclone surface | Cold decorated | Warm decorated |
+  |---|---:|---:|---:|
+  | plane | 2,857.849 chunks/s | 904.243 targets/s | 5,053.663 targets/s |
+  | cylinder-x:384 | 2,571.381 chunks/s | 868.850 targets/s | 4,352.229 targets/s |
+
+  The plane result is 15.4, 20.2, and 16.9 percent below Tactical 196's
+  accepted plane baseline, respectively. All remain inside the 25-percent
+  investigation gate. The warm pass served all 363 dependency requests from
+  cache and generated none;
+- the clean release movement probe used seed `-98765`, river chunk `(47,102)`,
+  render distance 10, an eight-chunk-radius route, 32 blocks/s, derived
+  7-worker/20-pending render capacity, and 3,600 frames at 60 Hz. The route
+  visited 64 unique chunk centers and repeated the same river-heavy circuit,
+  exercising cold then warm streaming;
+- the accelerated 60-second route measured 3.358 ms average offscreen frame
+  work, 1.567 ms accounted frame-wall p50, 7.533 ms p95, 10.587 ms p99, and
+  13.108 ms max. No frame exceeded the 16.667 ms budget and frame accounting
+  reported no conservation violation;
+- loaded chunks remained between 529 and 576. Worldgen jobs peaked at one and
+  ended at zero; publications peaked at 14 and ended at zero; render compile
+  jobs peaked at five and ended at zero. Pending render chunks peaked at 129
+  and ended at 91 while the camera was still moving; and
+- scheduled fluid depth was zero at maximum and final state. Due, executed,
+  deferred, mutated, snapshot, and fluid-event totals were all zero. The
+  largest bookkeeping-only fluid lane sample was 0.023 ms.
 
 ### Later bounded waterfall templates
 

@@ -379,7 +379,7 @@ Current `mclone-overworld-v1` support is:
 |---|---|---|---|---|---|
 | Terrain fields | supported | unsupported | supported at 384 chunks | pending | design only |
 | Features | supported | unsupported | supported at 384 chunks | pending | design only |
-| Rivers/hydrology | absent | - | - | - | - |
+| Rivers/hydrology | flat lowland reaches at Y63 | unsupported | flat lowland reaches at Y63 for 384 chunks | pending | design only |
 | Mclone caves | absent | - | - | - | - |
 | Mclone structures | absent | - | - | - | - |
 
@@ -418,11 +418,12 @@ concrete. The accepted terrain and reuse direction lives in
 [`196`](../tactical/196-periodic-mclone-terrain-fields.md) are complete.
 
 Human Review 1 rejected the first bounded rivers/wetlands hydraulic
-realization. Its fields use the exact plane/384-chunk-cylinder sampler
-contract, but pointwise terrain-relative water height permits transverse
-slopes and uncontained source faces. Corrective work now owns conservative
-flat contained reaches, hydraulic-closure diagnostics, and sustained
-warm-generation/movement evidence before platform closeout. Later baked
+realization because pointwise terrain-relative water height permitted
+transverse slopes and uncontained source faces. Corrective field revision 8
+now realizes only flat Y63 lowland reaches on the exact
+plane/384-chunk-cylinder sampler contract. Hydraulic-closure diagnostics, an
+authoritative fluid wake test, multi-seed pixels, and cold/warm plus movement
+evidence pass. Human Review 2 now precedes platform closeout. Later baked
 waterfall templates remain separate from production chunk-time simulation.
 True structure infrastructure remains ready as a separate concern but is
 parked while this terrain campaign advances.

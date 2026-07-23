@@ -31,8 +31,11 @@ The active water slice is
 Its broad periodic river corridor, terrain carving, banks, local water levels,
 river biome/substrate, and sparse shallow wetland pools are live, but Human
 Review 1 rejected the pointwise water surface on 2026-07-23. Transverse slopes
-and uncontained source faces require a flat contained-reach correction plus
-hydraulic and sustained-performance evidence before platform closeout.
+and uncontained source faces required a flat contained-reach correction.
+Field revision 8 now limits water to constant-Y63 lowland reaches and passes
+hydraulic closure, authoritative fluid wake, RD16 pixel, cold/warm generation,
+and accelerated one-minute movement evidence. Human Review 2 now precedes
+platform closeout.
 
 Compatibility safety is recorded in the
 [`world-generation-profiles` ledger](topics/world-generation-profiles.md#compatibility-safety-ledger).
@@ -93,14 +96,17 @@ Landed native coverage:
   structure-tensor metric supplements, but does not replace, pixel review.
 - Its first watercourse family adds a periodic warped-contour river field,
   analytic centerline distance/tangent sampling, locally graded beds and
-  banks, a smooth hydraulic surface, river biome `7`, gravel beds, coastal
+  banks, river biome `7`, gravel beds, coastal
   sand transitions, dry-spawn exclusion, and sparse clay-bottomed wetland
   pools. Production maps and actual 384-chunk cylinder-seam cards agree with
   chunk output. The reviewed fixed-work implementation remains deliberately
   short of drainage-network, tributary, confluence, discharge, and true
-  downstream-reach semantics. Its first hydraulic realization is rejected:
-  column-local water height can slope across a channel and expose source faces
-  above lower enclosure terrain.
+  downstream-reach semantics. Its first smooth hydraulic realization was
+  rejected because column-local water height could slope across a channel and
+  expose source faces. Field revision 8 instead realizes only constant-Y63
+  lowland reaches. A halo-aware block audit and real fluid-runtime wake test
+  prove the reviewed bodies are quiescent; higher reaches and bounded
+  waterfall templates remain deferred.
 - Production-backed broad field maps and fully warmed seed/region/spawn cards;
   the first review accepted macro scale and coast variation after adding one
   fine relief octave to break up concentric local contour bands. The second
@@ -157,8 +163,8 @@ Still not full vanilla parity:
 - the first original island generator remains intentionally bounded; the
   continuous mclone overworld now exists but has only a deliberately narrow
   terrain/material/biome/vegetation palette. Its first broad river and sparse
-  wetland family failed Human Review 1 and is being corrected to flat contained
-  reaches. It still has no small streams,
+  wetland family failed Human Review 1; flat contained field revision 8 is now
+  ready for Human Review 2. It still has no small streams,
   cascades, waterfalls, caves, or structures
 - Mclone Overworld terrain, biome, surface, spawn, existing vegetation, broad
   rivers, and wetland pools are periodic for the exact 384-chunk X cylinder.
