@@ -28,6 +28,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   seams/portals, shrink-and-fall); geometry-first XR composition, fidelity
   ladder, authority/runtime/render seams, and protected single-world fast path.
   Initial dual-integrated-host ownership smoke added; no commit series yet
+- `tabletop-overview-mode` — shared active-world scale-model presentation
+  across flat and XR, including inverse-mapped interaction, capability-gated
+  passthrough, survival/multiplayer authority, and same-slot renderer reuse
 - `performance` — high-priority known performance issues, measured pickup
   queue, baselines, and cross-platform performance follow-ups
 - `dynamic-point-lights` — presentation-side finite-radius point lights,
