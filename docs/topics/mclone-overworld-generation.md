@@ -982,7 +982,8 @@ partition/periodic fixtures, SQLite reopen, same-host performance comparison,
 one-minute movement soak, and internally inspected production pixels pass.
 Human Review 1 accepted the modest headwater, calm reaches, carved shoulders,
 and confluence as a peaceful spring-fed creek. Tactical 222 is complete.
-Future variation should preserve that quiet scale as one landmark family.
+Future variation should preserve that quiet scale as one landmark family
+while adding deliberately dramatic cascade, gorge, and waterfall families.
 One river-to-shelf-to-deep-basin composition remains an objective review gap.
 General drainage-network semantics remain deliberately absent.
 

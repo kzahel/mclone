@@ -608,8 +608,10 @@ Human review asks:
 Human Review 1 accepted the complete RD16 result on 2026-07-23. The intended
 visual language landed: it reads as “peaceful,” specifically “like a spring
 feeding a creek.” Preserve that modest headwater, calm scale, and gentle
-valley relationship in later variation work rather than turning every
-instance into a dramatic waterfall landmark.
+valley relationship as one stream family. Later variation should also include
+deliberately dramatic cascades, gorges, and waterfall reaches; those should be
+additional classified families rather than a rewrite that erases the peaceful
+case.
 
 ## Stop Conditions
 
