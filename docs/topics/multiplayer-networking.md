@@ -203,13 +203,15 @@ remain:
 
 Vanilla's shape, adapted to our runtime (receipts in the reference doc):
 
-- **One ordered, reliable stream per client** (TCP native, WebSocket web —
-  a faithful TCP analog with message framing). Keep strict ordering as a
-  protocol invariant for correctness-critical session and gameplay facts;
-  vanilla leans on it everywhere (login sequencing, teleport acks,
-  chunk-then-delta coherence). No datagram transport lands until a measured
-  need exists. The optional loss-tolerant side-channel criteria for ephemeral
-  remote body/head/hand poses live in
+- **One session with explicit reliable and ephemeral classes.** Keep strict
+  reliable-stream ordering as a protocol invariant for correctness-critical
+  session and gameplay facts; vanilla leans on it everywhere (login
+  sequencing, teleport acks, chunk-then-delta coherence). The preferred
+  dedicated transport is WebTransport over HTTP/3/QUIC: reliable streams and
+  unreliable datagrams share one authenticated, encrypted,
+  congestion-controlled session. TCP and WebSocket remain the reliable
+  compatibility profile. Ephemeral remote body/head/hand pose semantics and
+  cross-lane barriers live in
   [`remote-player-presentation.md`](remote-player-presentation.md).
 - **Full-duplex, push-based wire.** Commands flow up and updates flow down
   independently. Server publishes on its own tick cadence: chunk
@@ -231,13 +233,15 @@ Vanilla's shape, adapted to our runtime (receipts in the reference doc):
   teleport with id, chunk streaming, entity/remote-player adds). Keepalive
   ping/ack (vanilla: 15 s interval, 30 s read timeout) plus explicit
   disconnect messages.
-- **Threading stays std-threads + blocking IO.** Vanilla is Netty IO threads
-  + one game thread; our equivalent (accept thread, reader/writer threads per
-  connection, one authoritative server thread, mpsc handoff) is already the
-  house style and is fine at our player counts. No async runtime unless the
-  connection count ever demands it. On web, the browser's event-driven
-  WebSocket already matches; browser singleplayer keeps the worker-owned
-  integrated server.
+- **Simulation stays on ordinary threads; transport mechanics stay
+  contained.** Vanilla is Netty IO threads plus one game thread; our
+  authoritative server and bounded channel handoff remain that shape.
+  TCP/WebSocket may continue using blocking workers. A future-based
+  QUIC/WebTransport library may own a private async runtime inside the
+  transport adapter, but async types and scheduling do not spread into
+  `mclone-server`, the simulation cadence, or the frame thread. Browser
+  WebTransport remains worker-owned; browser singleplayer keeps the
+  worker-owned integrated server.
 - **The protocol stays transport-neutral logical messages** (the current
   `mclone-protocol` stance), but grows: session/login messages, keepalive,
   disconnect-with-reason, and a capability field so debug variants can be
@@ -363,7 +367,14 @@ later phases remain topic-level direction.
    separates body/tracked-pose report, server replication, and presentation
    rates instead of treating "publication" as one universal clock. See the
    next section for the gameplay semantics decision this forces.
-5. **Robustness/perf tail.** Threshold-based frame compression (vanilla:
+5. **Mixed-reliability remote pose transport.** After sequenced snapshots,
+   buffered interpolation, and loss simulation establish the logical pose
+   contract, add one WebTransport/QUIC session for first-party native and
+   browser clients. Carry critical facts on reliable streams and ephemeral
+   pose on datagrams, with an independently configured 20 Hz reliable
+   fallback profile. The implementation and platform-spike order lives in
+   [`remote-player-presentation.md`](remote-player-presentation.md).
+6. **Robustness/perf tail.** Threshold-based frame compression (vanilla:
    zlib over 256 bytes; we control both ends, so lz4/zstd are candidates —
    must build on wasm), capability-based protocol evolution instead of
    strict version equality, chunk-send pacing/budgets per player, metrics.
@@ -408,11 +419,11 @@ lane, expressed in time units.
   join and command traces guard that host-boundary choice.
 - Compression codec choice and threshold once frames are measured
   post-push-wire.
-- Whether later measured entity transform traffic warrants a separate
-  superseding/coalescing lane. The current reliable stream keeps exact
-  64-frame / 64 MiB per-peer bounds and disconnects a slow consumer rather
-  than dropping or reordering gameplay updates; any future lane must define
-  spawn/despawn and correction ordering first.
+- Whether entity transforms later join the accepted superseding/coalescing
+  datagram lane. The current reliable stream keeps exact 64-frame / 64 MiB
+  per-peer bounds and disconnects a slow consumer rather than dropping or
+  reordering gameplay updates; entity spawn/despawn and correction barriers
+  must be defined before moving transform samples.
 
 ## Code and doc map
 

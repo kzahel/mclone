@@ -7,8 +7,10 @@ relays a client-authoritative feet position, one yaw/pitch pair, ground state,
 and appearance over the reliable ordered session stream. Remote clients retain
 the newest state and apply render-delta-based exponential smoothing. Separate
 body, head, and hand poses; explicit pose and replication cadences; buffered
-snapshot interpolation; and an optional unreliable sequenced pose channel are
-planned improvements, not yet implemented.
+snapshot interpolation; and a sequenced unreliable pose channel are planned
+improvements, not yet implemented. Mixed reliable/unreliable transport is an
+accepted first-party client and dedicated-server target, while the current
+TCP/WebSocket path remains the reliable compatibility profile.
 
 Scope: the quality, timing, representation, relay, and presentation of other
 players after local movement has produced a reportable state. This includes
@@ -158,7 +160,8 @@ least:
 - the maximum client body-pose report rate the server wants;
 - the maximum tracked-pose report rate, when tracked components are supported;
 - the server's intended remote-player replication rate or interval;
-- protocol capabilities for component poses and optional datagrams.
+- protocol capabilities for component poses and mixed-reliability transport;
+- the effective transport profile and its rate limits.
 
 The local movement rate remains a local simulation profile. Because the server
 does not replay movement, it does not need to force local movement to its
@@ -263,8 +266,9 @@ correctness-critical session and gameplay messages. Remote pose quality should
 nevertheless be designed so it does not depend on reliable stream ordering.
 
 Define a logical ephemeral pose sample that can travel over today's reliable
-stream first and tolerate a future unreliable sequenced channel later. The
-exact Rust schema is not fixed, but it needs enough information to identify:
+stream first and then travel over the accepted unreliable sequenced channel.
+The exact Rust schema is not fixed, but it needs enough information to
+identify:
 
 - session/player and presentation epoch;
 - sample sequence;
@@ -292,28 +296,101 @@ Keep these on the reliable ordered stream:
 Body/head/hand samples between those barriers may be latest-wins and lossy.
 They must never be the sole carrier of a critical lifecycle transition.
 
-### A future UDP-like path is optional, not assumed
+### Mixed-reliability transport is a target, not a measurement-gated option
 
-Potential future transports include a native UDP side channel, QUIC
-datagrams, WebTransport datagrams, or WebRTC data channels. Browser support,
-NAT traversal, hosting, authentication, encryption, congestion control,
-head-of-line behavior, and operational complexity differ substantially.
-This topic deliberately chooses none of them yet.
+The preferred dedicated-session shape is one WebTransport-over-HTTP/3/QUIC
+session with:
 
-Any datagram adoption requires:
+- reliable ordered streams for critical session, world, and gameplay facts;
+- QUIC/WebTransport datagrams for ephemeral body/head/hand samples;
+- one connection identity, encryption context, congestion controller, and
+  session lifecycle shared by both message classes.
 
-- measured evidence that reliable TCP/WebSocket head-of-line delay or
-  bandwidth materially harms remote embodiment;
+First-party desktop, Android, XR, and current-browser clients should support
+that shape. Native clients may use a Rust WebTransport implementation while
+the browser adapter uses the browser API in its existing worker-owned
+transport boundary. Using WebTransport for native clients as well avoids
+inventing a raw-QUIC/native protocol beside the browser protocol. A platform
+spike must still prove the selected Rust stack on desktop, flat Android, and
+Quest before locking the implementation dependency.
+
+TCP and WebSocket remain supported compatibility transports, and older
+browsers or networks that cannot establish an unreliable WebTransport session
+may select them. WebTransport itself can also negotiate a reliable-only
+HTTP/2/TCP connection; the adapter must inspect its effective reliability and
+must not label that connection a datagram path. WebRTC data channels are not
+the primary client/server plan because ICE, DTLS, SCTP, signaling, and possible
+relay infrastructure add complexity that WebTransport does not need. They
+remain a contingency only if a supported deployed browser or webview cannot
+use WebTransport or WebSocket acceptably.
+
+The initial candidate transport profiles are:
+
+| Profile | Pose transport | Candidate body cap |
+| --- | --- | ---: |
+| Mixed reliability | sequenced datagrams | 60 Hz |
+| Reliable compatibility | reliable stream | 20 Hz |
+
+These are independently configurable starting profiles, not protocol
+constants. The reliable profile's 20 Hz cap limits stale queued pose traffic;
+it does not reduce local input observation or the client's 60 Hz movement
+simulation. A clean TCP connection may carry 60 samples per second, but TCP
+cannot prevent a lost byte from delaying newer pose data behind
+retransmission. The compatibility profile therefore promises graceful,
+interpolated motion rather than the same tail latency as the datagram profile.
+
+The mixed-reliability implementation requires:
+
 - session-bound authentication and rejection of spoofed player/source IDs;
 - congestion and send-budget behavior that yields before critical traffic;
 - payloads bounded below the path's safe datagram size, with no reliance on IP
   fragmentation;
 - recovery after loss without waiting indefinitely for a missing delta;
 - native and browser fallback to the reliable-stream representation;
-- the same decoded pose-sample contract above every transport.
+- the same decoded pose-sample contract above every transport;
+- capability and effective-reliability negotiation rather than assumptions
+  based only on the requested transport.
 
 An unreliable channel does not justify sending raw OpenXR, browser, Android,
 or controller API records. It carries neutral remote-player pose components.
+
+### Cross-lane ordering is explicit
+
+Reliable stream ordering cannot order a separate datagram against a gameplay
+command. Any command whose interpretation depends on a current pose therefore
+carries or names a reliable pose barrier. One workable first contract is:
+
+1. send a self-contained pose keyframe on the reliable stream with its epoch
+   and sequence;
+2. send the dependent interaction after it on the same reliable stream;
+3. let ordinary newer datagram samples continue independently;
+4. ignore stale-epoch datagrams after a reliable teleport, respawn, transfer,
+   or other discontinuity changes the epoch.
+
+The exact encoding remains open, but correctness must never depend on arrival
+order across reliable and unreliable lanes.
+
+### Current external transport facts
+
+As rechecked on 2026-07-23, the
+[WebTransport API](https://www.w3.org/TR/webtransport/) exposes reliable
+streams, unreliable datagrams, an effective reliability mode, worker support,
+and a `requireUnreliable` option. It became
+[Baseline Newly Available](https://developer.mozilla.org/en-US/docs/Web/API/WebTransport)
+across current major browsers in March 2026; older browser versions still
+require feature detection and fallback. Safari added it in
+[Safari 26.4](https://webkit.org/blog/17862/webkit-features-for-safari-26-4/).
+[RFC 9221](https://www.rfc-editor.org/rfc/rfc9221.html) defines QUIC
+DATAGRAM frames as unreliable application data within the authenticated QUIC
+connection.
+
+Current pure-Rust candidates include
+[WTransport](https://github.com/BiagioFesta/wtransport), which provides
+native client/server WebTransport over Quinn/Tokio but still labels itself not
+fully production-ready, and
+[moq-dev/web-transport](https://github.com/moq-dev/web-transport), which
+offers native Quinn and browser-WASM backends. Dependency choice remains an
+implementation-spike decision, not an architectural commitment.
 
 ## Platform Considerations
 
@@ -335,9 +412,12 @@ require a browser-specific remote-player protocol. The browser uses the same
 change thresholds, component samples, snapshot buffer, and fallback reliable
 semantics as native clients.
 
-WebSocket remains the supported transport. A future browser datagram path
-must sit behind the same connection/decoded-update boundary and cannot move
-socket or decode policy onto the main/render thread.
+WebTransport-over-HTTP/3 is the preferred mixed-reliability transport for
+current browsers, with feature-detected WebSocket or reliable-only
+WebTransport fallback. It must sit behind the same connection/decoded-update
+boundary and cannot move socket or decode policy onto the main/render thread.
+The browser requests or verifies unreliable support before selecting the
+mixed-reliability rate profile.
 
 ### Desktop XR and Android XR
 
@@ -414,19 +494,23 @@ motion traces or short captures are required for interpolation quality.
 4. **Buffered remote interpolation.** Give remote players a dedicated
    snapshot timeline and cadence/jitter-aware presentation delay. Do not
    change general entity smoothing accidentally.
-5. **Component embodiment.** Add optional body/view separation, tracked head,
-   and tracked hands; extend the shared actor/presentation/render contracts
-   through Mono, per-eye XR, and multiview.
-6. **Loss-tolerant conformance.** Run the same logical sample stream through a
+5. **Loss-tolerant conformance.** Run the same logical sample stream through a
    simulator that injects loss, duplication, reordering, delay, and pressure.
    Decide full samples, component masks, quantization, keyframes, and recovery
    from measured results.
-7. **Optional datagram transport.** Add one only if measurements justify it
-   and native/browser hosting constraints have a concrete supported design.
+6. **Mixed-reliability transport.** Spike the Rust WebTransport candidates
+   on desktop, Android, and Quest; then add the dedicated endpoint, browser
+   worker adapter, native clients, capability/effective-profile negotiation,
+   and reliable fallback. Prove one logical pose stream over both profiles.
+7. **Component embodiment.** Add optional body/view separation, tracked head,
+   and tracked hands; extend the shared actor/presentation/render contracts
+   through Mono, per-eye XR, and multiview using the established pose lane.
 
 Each stage is independently useful. In particular, cadence negotiation and
-buffered interpolation should improve remote players over the current
-TCP/WebSocket paths without waiting for XR component poses or datagrams.
+buffered interpolation are prerequisites for datagrams and improve the
+TCP/WebSocket fallback. Do enough reliable-path work to prove the logical
+contract, but do not treat high-cadence TCP tuning as the terminal quality
+path.
 
 ## Accepted Decisions
 
@@ -439,10 +523,15 @@ TCP/WebSocket paths without waiting for XR component poses or datagrams.
 - Remote clients need a sequence-aware snapshot timeline rather than only a
   latest target plus fixed half-life.
 - Critical lifecycle/gameplay facts remain reliable and ordered.
-- Ephemeral pose semantics should tolerate loss/reordering before a datagram
-  transport is selected.
-- No UDP/QUIC/WebTransport/WebRTC implementation is scheduled merely by this
-  topic.
+- Ephemeral pose semantics tolerate loss/reordering before the production
+  datagram adapter is enabled.
+- A mixed reliable-stream plus unreliable-datagram session is a supported
+  dedicated-server and first-party-client target.
+- WebTransport over HTTP/3/QUIC is the preferred common native/browser
+  transport; TCP/WebSocket remains the reliable compatibility profile.
+- The candidate defaults are 60 Hz body reporting on mixed reliability and
+  20 Hz on reliable compatibility, independently of 60 Hz local movement.
+- WebRTC is a contingency rather than the primary browser transport.
 
 ## Open Decisions
 
@@ -456,8 +545,10 @@ TCP/WebSocket paths without waiting for XR component poses or datagrams.
   keyframes plus deltas/component masks.
 - Where server coalescing occurs relative to interest changes and per-observer
   budgets.
-- Which, if any, unreliable transport has an acceptable native, browser,
-  hosting, and security story.
+- Which Rust WebTransport implementation satisfies desktop, Android, Quest,
+  server-operation, maintenance, and binary-size gates.
+- Certificate, port, reverse-proxy, and local-development ergonomics for
+  self-hosted WebTransport.
 
 ## Code Map
 

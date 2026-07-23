@@ -131,8 +131,8 @@ series implements the same concern, normally reuse the document slug in its
 - [`remote-player-presentation.md`](remote-player-presentation.md): accepted
   remote embodiment work stream — independently configurable body/tracked-pose
   report and replication cadences, buffered interpolation, separate XR
-  body/head/hands, and transport-neutral loss-tolerant pose semantics before
-  any optional datagram transport.
+  body/head/hands, transport-neutral loss-tolerant pose semantics, and a
+  WebTransport/QUIC mixed-reliability target with TCP/WebSocket compatibility.
 - [`platform-parity.md`](platform-parity.md): cross-platform parity tracker —
   per-platform-class target state, the feature × platform matrix, the
   shared-contract × consumer reuse matrix, and the cross-cutting blockers that
