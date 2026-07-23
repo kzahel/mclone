@@ -552,17 +552,25 @@ pull_result()
     echo "$destination"
 }
 
+cleanup_bounded_run()
+{
+    local remote_dir=$1
+    register_title "$remote_dir" play >/dev/null 2>&1 || true
+    set_deck_internal_screen_sleep true disabled off >/dev/null 2>&1 || true
+}
+
 run_bounded()
 {
     local mode=$1
     local timeout_seconds=$2
     local remote_dir run_id status=0 destination
-    local restore_command
+    local cleanup_command
 
     remote_dir=$(prepare_remote_directory)
-    printf -v restore_command 'register_title %q play >/dev/null 2>&1 || true' \
+    printf -v cleanup_command 'cleanup_bounded_run %q' \
         "$remote_dir"
-    trap "$restore_command" EXIT
+    trap "$cleanup_command" EXIT
+    set_deck_internal_screen_sleep false enabled on
     run_id=$(new_run_id "$mode")
     register_title "$remote_dir" "$mode" "$run_id"
     echo "Launching $mode as Devkit Game: $DECK_TITLE"
@@ -573,10 +581,23 @@ run_bounded()
     status=$?
     set -e
     register_title "$remote_dir" play
-    trap - EXIT
     destination=$(pull_result "$run_id")
     echo "Pulled Deck result: $destination"
+    set_deck_internal_screen_sleep true disabled off
+    trap - EXIT
     return "$status"
+}
+
+run_bounded_workflow()
+{
+    local mode=$1
+    local timeout_seconds=$2
+    trap \
+        'set_deck_internal_screen_sleep true disabled off >/dev/null 2>&1 || true' \
+        EXIT
+    stage_payload
+    upload_payload >/dev/null
+    run_bounded "$mode" "$timeout_seconds"
 }
 
 command=${1:-help}
@@ -627,15 +648,11 @@ case "$command" in
         ;;
     smoke)
         [[ $# == 0 ]] || die "smoke takes no arguments"
-        stage_payload
-        upload_payload >/dev/null
-        run_bounded smoke 600
+        run_bounded_workflow smoke 600
         ;;
     perf)
         [[ $# == 0 ]] || die "perf takes no arguments"
-        stage_payload
-        upload_payload >/dev/null
-        run_bounded perf 1200
+        run_bounded_workflow perf 1200
         ;;
     pull-results)
         [[ $# -le 1 ]] || die "pull-results accepts at most one RUN_ID"

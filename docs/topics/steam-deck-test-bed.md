@@ -250,18 +250,27 @@ ambient occlusion, and fullscreen/video modes), not as cosmetic menu rows.
 
 `smoke` temporarily registers a bounded command that:
 
-1. captures a deterministic 1280x800 offscreen frame from a fixed camera;
-2. runs 300 frames through the live Gamescope swapchain and present path;
-3. writes logs, JSON reports, a status file, and the PNG under the Deck user's
+1. enables the internal panel before live presentation work;
+2. captures a deterministic 1280x800 offscreen frame from a fixed camera;
+3. runs 300 frames through the live Gamescope swapchain and present path;
+4. writes logs, JSON reports, a status file, and the PNG under the Deck user's
    state directory;
-4. restores the normal interactive shortcut; and
-5. pulls the result to `/tmp/mclone-steam-deck-results/RUN_ID`.
+5. restores the normal interactive shortcut;
+6. pulls the result to `/tmp/mclone-steam-deck-results/RUN_ID`; and
+7. disables the internal panel again while leaving the Deck reachable.
 
 `perf` uses the same lifecycle for a 600-frame offscreen timedemo followed by
 a 3600-frame, render-distance-10 Gamescope presentation run. It is a
 repeatable developer benchmark, not an automatic performance acceptance
 threshold. Record the Deck refresh rate, frame cap, TDP, thermals, clock
-policy, and whether the display is docked before comparing runs.
+policy, and whether the display is docked before comparing runs. Both bounded
+commands also attempt to restore the interactive shortcut and disable the
+internal panel if the build, stage, upload, run, result wait, or result pull
+fails. Interactive `deploy` and `launch` deliberately leave the panel enabled
+for playtesting.
+The 2026-07-23 bounded-smoke check completed all 300 presentation frames,
+pulled a valid 1280x800 PNG and status-zero result, then left
+`card0-eDP-1=disabled`, SSH reachable, and the Deck-button wake service active.
 
 The `:steamrt4` commands build the client inside the pinned SDK rather than on
 the Ubuntu host. The build-only command leaves the artifact and provenance
