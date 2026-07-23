@@ -53,11 +53,17 @@ mechanical fixed-point proof but rejected the grass-topped containment shelf
 and tiny visible fall. Tactical
 [`222`](../tactical/222-bounded-valley-stream-structures.md) now owns a
 48-96-block, structure-shaped, valley-following replacement. Its reusable
-start/reference kernel and plan-only Mclone consumer are live. Three reviewed
-seeds produce bounded 91-96-block plans with monotonic integer reach levels,
-zero required fill, typed pieces, cacheable identities, and production
-candidate/route/cut maps; generated terrain still remains on field revision
-11 until clipped realization passes.
+start/reference kernel, plan-only Mclone consumer, and first clipped terrain
+realization are live. Three reviewed seeds produce bounded 91-96-block plans
+with monotonic integer reach levels, zero required fill, typed pieces,
+cacheable identities, and production candidate/route/cut maps. The first
+complete reviewed route cuts a grassed shallow valley, calm multi-block
+reaches, a rounded headwater, three cardinal fixed-point drop stencils, and a
+widened Y63 confluence without any containment fill. Exact target partition,
+full-route closure, authoritative all-water wake, and RD16 production pixels
+pass. The profile intentionally still reports field revision 11 until dead
+revision-11 code, periodic/output fixtures, LOD, persistence, and performance
+closeout are complete.
 
 ## Scope
 

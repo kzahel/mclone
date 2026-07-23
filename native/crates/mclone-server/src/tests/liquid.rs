@@ -592,9 +592,20 @@ fn generated_mclone_flat_reach_is_quiescent_when_every_source_is_woken() {
 }
 
 #[test]
-fn generated_mclone_bounded_tributary_is_quiescent_when_every_water_cell_is_woken() {
+fn generated_mclone_planned_stream_is_quiescent_when_every_water_cell_is_woken() {
     let seed = -98_765;
-    let center = ChunkPos::new(183, -177);
+    let center = ChunkPos::new(149, -124);
+    let planner = mclone_worldgen::levelgen::McloneOverworldStreamPlanner::new(
+        seed,
+        mclone_worldgen::levelgen::McloneOverworldSamplingTopology::Unbounded,
+    );
+    let candidate = planner
+        .potential_start(ChunkPos::new(147, -126))
+        .expect("stream placement");
+    let plan = planner
+        .plan_start(candidate)
+        .expect("stream plan")
+        .expect("reviewed stream start");
     let definition =
         DimensionDefinition::overworld(seed, WorldGenerationProfile::McloneOverworldV1);
     let mut server = LocalRealmSession::local_integrated_with_dimension_definition(definition);
@@ -603,8 +614,8 @@ fn generated_mclone_bounded_tributary_is_quiescent_when_every_water_cell_is_woke
         &mut server,
         ClientCommand::SetChunkView(ChunkView {
             center,
-            render_distance: 2,
-            chunk_tracking_radius: 2,
+            render_distance: 5,
+            chunk_tracking_radius: 5,
         }),
     );
 
@@ -616,21 +627,22 @@ fn generated_mclone_bounded_tributary_is_quiescent_when_every_water_cell_is_woke
 
     let mut water = Vec::new();
     let mut flowing = 0;
-    for chunk_z in center.z - 1..=center.z + 1 {
-        for chunk_x in center.x - 1..=center.x + 1 {
-            let chunk = ChunkPos::new(chunk_x, chunk_z);
-            for x in chunk.min_block_x()..=chunk.min_block_x() + 15 {
-                for z in chunk.min_block_z()..=chunk.min_block_z() + 15 {
-                    for y in 0..256 {
-                        let pos = WorldBlockPos::new(x, y, z);
-                        let Some(block) = server.scheduler().block_at_world(pos) else {
-                            continue;
-                        };
-                        if mclone_worldgen::block::is_water(block) {
-                            water.push(pos);
-                            flowing += usize::from(block != WATER);
-                        }
-                    }
+    for z in plan.structure.bounds.min_z..=plan.structure.bounds.max_z {
+        for x in plan.structure.bounds.min_x..=plan.structure.bounds.max_x {
+            if !plan
+                .terrain_intent(x, z, 0)
+                .is_some_and(|intent| intent.channel_influence > 0.0)
+            {
+                continue;
+            }
+            for y in 0..256 {
+                let pos = WorldBlockPos::new(x, y, z);
+                let Some(block) = server.scheduler().block_at_world(pos) else {
+                    continue;
+                };
+                if mclone_worldgen::block::is_water(block) {
+                    water.push(pos);
+                    flowing += usize::from(block != WATER);
                 }
             }
         }
@@ -682,17 +694,9 @@ fn generated_mclone_bounded_tributary_is_quiescent_when_every_water_cell_is_woke
         })
         .take(20)
         .collect::<Vec<_>>();
-    let sampler = mclone_worldgen::levelgen::McloneOverworldSampler::new(seed);
     let change_details = changes
         .iter()
-        .map(|(pos, before, after)| {
-            (
-                *pos,
-                *before,
-                *after,
-                sampler.sample(pos.x, pos.z).watercourse,
-            )
-        })
+        .map(|(pos, before, after)| (*pos, *before, *after, plan.sample_column(pos.x, pos.z)))
         .collect::<Vec<_>>();
     assert_eq!(
         mutated,

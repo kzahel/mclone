@@ -15,10 +15,10 @@ use super::decoration::{
     decorate_mclone_overworld_center, decorate_mclone_overworld_center_with_topology,
 };
 use super::fields::{MCLONE_OVERWORLD_PERIOD_CHUNKS, McloneOverworldSamplingTopology};
+use super::streams::{McloneOverworldStreamPlanCache, McloneOverworldStreamPlanCacheReport};
 use super::terrain::{
-    generate_mclone_overworld_surface_buffer,
-    generate_mclone_overworld_surface_buffer_with_topology, mclone_overworld_chunk_biomes,
-    mclone_overworld_chunk_biomes_with_topology,
+    generate_mclone_overworld_surface_buffer_with_stream_cache,
+    mclone_overworld_chunk_biomes_with_stream_cache,
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -27,6 +27,11 @@ pub struct McloneOverworldFeatureDependencyCacheReport {
     pub cache_hits: usize,
     pub generated_dependency_chunks: usize,
     pub retained_dependency_chunks: usize,
+    pub stream_plan_requests: u64,
+    pub stream_plan_cache_hits: u64,
+    pub stream_plan_cache_misses: u64,
+    pub accepted_stream_plans: usize,
+    pub rejected_stream_candidates: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -39,6 +44,7 @@ pub struct McloneOverworldFeatureBatchResult {
 #[derive(Debug, Default)]
 pub struct McloneOverworldFeatureDependencyCache {
     cache: SurfaceDependencyCache,
+    stream_plans: Option<McloneOverworldStreamPlanCache>,
 }
 
 impl McloneOverworldFeatureDependencyCache {
@@ -56,6 +62,7 @@ impl McloneOverworldFeatureDependencyCache {
 
     pub fn clear(&mut self) {
         self.cache.clear();
+        self.stream_plans = None;
     }
 
     pub fn generate_features_chunks(
@@ -109,15 +116,27 @@ impl McloneOverworldFeatureDependencyCache {
         targets: impl IntoIterator<Item = ChunkPos>,
         dependencies: impl IntoIterator<Item = MutableChunkBlockBuffer>,
     ) -> McloneOverworldFeatureBatchResult {
+        let topology = McloneOverworldSamplingTopology::Unbounded;
         let plan = ChunkGenerationPlan::mclone_overworld_features(targets);
+        ensure_stream_cache(&mut self.stream_plans, seed, topology);
+        let stream_plans = self
+            .stream_plans
+            .as_mut()
+            .expect("Mclone stream cache was initialized");
         let PreparedSurfaceDependencies {
             region_chunks,
             retained_dependencies,
             report,
         } = self.cache.prepare(seed, &plan, dependencies, |pos| {
-            generate_mclone_overworld_surface_buffer(seed, pos.x, pos.z)
+            generate_mclone_overworld_surface_buffer_with_stream_cache(
+                seed,
+                topology,
+                pos.x,
+                pos.z,
+                stream_plans,
+            )
         });
-        let cache_report = mclone_overworld_cache_report(report);
+        let cache_report = mclone_overworld_cache_report(report, stream_plans.report());
 
         if plan.output_chunks().is_empty() {
             return McloneOverworldFeatureBatchResult {
@@ -153,7 +172,13 @@ impl McloneOverworldFeatureDependencyCache {
                 target,
                 GeneratedChunk::from_mutable_buffer_with_biomes(
                     chunk,
-                    mclone_overworld_chunk_biomes(seed, min_x, min_z),
+                    mclone_overworld_chunk_biomes_with_stream_cache(
+                        seed,
+                        topology,
+                        min_x,
+                        min_z,
+                        stream_plans,
+                    ),
                 ),
             );
         }
@@ -177,6 +202,11 @@ impl McloneOverworldFeatureDependencyCache {
             .map(|target| ChunkPos::new(topology.canonical_chunk_x(target.x), target.z))
             .collect::<std::collections::BTreeSet<_>>();
         let plan = canonical_periodic_plan(topology, targets.iter().copied());
+        ensure_stream_cache(&mut self.stream_plans, seed, topology);
+        let stream_plans = self
+            .stream_plans
+            .as_mut()
+            .expect("Mclone stream cache was initialized");
         let PreparedSurfaceDependencies {
             retained_dependencies,
             report,
@@ -184,9 +214,15 @@ impl McloneOverworldFeatureDependencyCache {
         } = self
             .cache
             .prepare_scoped(seed, topology.cache_scope(), &plan, dependencies, |pos| {
-                generate_mclone_overworld_surface_buffer_with_topology(seed, topology, pos.x, pos.z)
+                generate_mclone_overworld_surface_buffer_with_stream_cache(
+                    seed,
+                    topology,
+                    pos.x,
+                    pos.z,
+                    stream_plans,
+                )
             });
-        let cache_report = mclone_overworld_cache_report(report);
+        let cache_report = mclone_overworld_cache_report(report, stream_plans.report());
         let mut chunks = BTreeMap::new();
 
         if let Some(work_targets) = coherent_periodic_work_targets(&targets) {
@@ -246,11 +282,12 @@ impl McloneOverworldFeatureDependencyCache {
                     canonical,
                     GeneratedChunk::from_mutable_buffer_with_biomes(
                         chunk,
-                        mclone_overworld_chunk_biomes_with_topology(
+                        mclone_overworld_chunk_biomes_with_stream_cache(
                             seed,
                             topology,
                             chunk_min_block_coord(canonical.x),
                             chunk_min_block_coord(canonical.z),
+                            stream_plans,
                         ),
                     ),
                 );
@@ -313,11 +350,12 @@ impl McloneOverworldFeatureDependencyCache {
                 target,
                 GeneratedChunk::from_mutable_buffer_with_biomes(
                     chunk,
-                    mclone_overworld_chunk_biomes_with_topology(
+                    mclone_overworld_chunk_biomes_with_stream_cache(
                         seed,
                         topology,
                         chunk_min_block_coord(target.x),
                         chunk_min_block_coord(target.z),
+                        stream_plans,
                     ),
                 ),
             );
@@ -384,12 +422,31 @@ fn canonical_periodic_plan(
 
 fn mclone_overworld_cache_report(
     report: SurfaceDependencyCacheReport,
+    stream_report: McloneOverworldStreamPlanCacheReport,
 ) -> McloneOverworldFeatureDependencyCacheReport {
     McloneOverworldFeatureDependencyCacheReport {
         requested_dependency_chunks: report.requested_dependency_chunks,
         cache_hits: report.cache_hits,
         generated_dependency_chunks: report.generated_dependency_chunks,
         retained_dependency_chunks: report.retained_dependency_chunks,
+        stream_plan_requests: stream_report.requests,
+        stream_plan_cache_hits: stream_report.hits,
+        stream_plan_cache_misses: stream_report.misses,
+        accepted_stream_plans: stream_report.accepted_plans,
+        rejected_stream_candidates: stream_report.rejected_candidates,
+    }
+}
+
+fn ensure_stream_cache(
+    cache: &mut Option<McloneOverworldStreamPlanCache>,
+    seed: i64,
+    topology: McloneOverworldSamplingTopology,
+) {
+    if cache
+        .as_ref()
+        .is_none_or(|cache| !cache.matches(seed, topology))
+    {
+        *cache = Some(McloneOverworldStreamPlanCache::new(seed, topology));
     }
 }
 
@@ -459,6 +516,36 @@ mod tests {
             .collect::<BTreeMap<_, _>>();
 
         assert_eq!(combined, partitioned);
+    }
+
+    #[test]
+    fn planned_stream_chunks_are_partition_order_and_cache_independent() {
+        let seed = -98_765;
+        let targets = [ChunkPos::new(148, -124), ChunkPos::new(149, -124)];
+        let mut combined_cache = McloneOverworldFeatureDependencyCache::new();
+        let combined = combined_cache.generate_features_chunks(seed, targets);
+        let reversed = McloneOverworldFeatureDependencyCache::new()
+            .generate_features_chunks(seed, [targets[1], targets[0]])
+            .chunks;
+        let partitioned = targets
+            .into_iter()
+            .map(|target| {
+                (
+                    target,
+                    generate_mclone_overworld_chunk(seed, target.x, target.z),
+                )
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        assert_eq!(combined.chunks, reversed);
+        assert_eq!(combined.chunks, partitioned);
+        assert!(combined.cache_report.accepted_stream_plans > 0);
+        assert!(combined.cache_report.stream_plan_cache_hits > 0);
+        assert_eq!(
+            combined.cache_report.stream_plan_requests,
+            combined.cache_report.stream_plan_cache_hits
+                + combined.cache_report.stream_plan_cache_misses
+        );
     }
 
     #[test]

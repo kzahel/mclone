@@ -36,7 +36,8 @@ pub use streams::{
     McloneOverworldStreamNode, McloneOverworldStreamPiece, McloneOverworldStreamPlan,
     McloneOverworldStreamPlanAttempt, McloneOverworldStreamPlanCache,
     McloneOverworldStreamPlanCacheReport, McloneOverworldStreamPlanMetrics,
-    McloneOverworldStreamPlanner, McloneOverworldStreamRejection, stream_placement,
+    McloneOverworldStreamPlanner, McloneOverworldStreamRejection,
+    McloneOverworldStreamTerrainIntent, stream_placement,
 };
 pub use surface::{
     MCLONE_OVERWORLD_EXPOSED_STONE_MIN_EXPOSURE, MCLONE_OVERWORLD_EXPOSED_STONE_MIN_SLOPE,

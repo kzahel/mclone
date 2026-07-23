@@ -60,7 +60,7 @@ const TRIBUTARY_DROP_BOUNDARY_BLOCKS: f64 = 3.0;
 const TRIBUTARY_HALF_WIDTH_BLOCKS: f64 = 2.75;
 const TRIBUTARY_SOURCE_POOL_RADIUS_BLOCKS: f64 = 5.5;
 const TRIBUTARY_BANK_SPAN_BLOCKS: f64 = 7.0;
-const RIVER_FALL_HALF_WIDTH_BLOCKS: f64 = 1.75;
+const RIVER_FALL_HALF_WIDTH_BLOCKS: f64 = 7.0;
 const RIVER_ROCK_LIP_RUN_BLOCKS: f64 = 2.0;
 const MAX_REGION_SAMPLE_COUNT: usize = 16 * 1024 * 1024;
 const SPAWN_SEARCH_RADIUS_CHUNKS: i32 = 128;
@@ -608,6 +608,7 @@ impl McloneOverworldSampler {
         }
     }
 
+    #[allow(dead_code)]
     fn solve_tributary_anchor(self, geometry: RiverGeometry) -> Option<TributaryAnchor> {
         // Reconstruct the nearest crossing of the major-river and tributary
         // zero contours from bounded local facts. Every column in the short
@@ -757,39 +758,10 @@ impl McloneOverworldSampler {
         let mut drop_upper_y = MCLONE_OVERWORLD_SEA_LEVEL;
         let mut drop_lower_y = MCLONE_OVERWORLD_SEA_LEVEL;
 
-        // Raised water is allowed only as a bounded vignette whose sink is an
-        // already-valid sea-level major river. An independent contour crosses
-        // one chosen river bank, extends a short fixed distance, and closes in
-        // a source pool. The whole source -> reach -> fall -> sink sequence is
-        // therefore locally inspectable and cannot later turn uphill.
-        let tributary_anchor = if geometry.signed_distance >= geometry.half_width - 1.0
-            && geometry.distance <= RIVER_MAX_RELEVANT_DISTANCE
-        {
-            let crossing_hint =
-                self.sample_tributary_geometry(geometry.center_x, geometry.center_z);
-            let crossing_alignment_hint = (crossing_hint.tangent_x * geometry.normal_x
-                + crossing_hint.tangent_z * geometry.normal_z)
-                .abs();
-            let selector_hint = self.tributary_selector.sample(
-                geometry.center_x.round() as i32,
-                geometry.center_z.round() as i32,
-            ) * 0.5
-                + 0.5;
-            if crossing_hint.distance <= 40.0
-                && crossing_alignment_hint >= 0.64
-                && selector_hint >= 0.40
-                && (65.0..=78.0).contains(&self.sample_hydraulic_surface_height(
-                    geometry.center_x.round() as i32,
-                    geometry.center_z.round() as i32,
-                ))
-            {
-                self.solve_tributary_anchor(geometry)
-            } else {
-                None
-            }
-        } else {
-            None
-        };
+        // Raised water now comes only from the finite procedural stream plan.
+        // Keep the revision-11 branch compiled during the first realization
+        // checkpoint so its removal is a separate behavior-preserving cleanup.
+        let tributary_anchor: Option<TributaryAnchor> = None;
         if let Some(anchor) = tributary_anchor {
             let delta_x = world_x - anchor.x;
             let delta_z = world_z - anchor.z;

@@ -40,13 +40,13 @@ pub use mclone_overworld::{
     McloneOverworldStreamPiece, McloneOverworldStreamPlan, McloneOverworldStreamPlanAttempt,
     McloneOverworldStreamPlanCache, McloneOverworldStreamPlanCacheReport,
     McloneOverworldStreamPlanMetrics, McloneOverworldStreamPlanner, McloneOverworldStreamRejection,
-    McloneOverworldSurfaceRecipe, McloneOverworldTerrainSample, McloneOverworldWatercourseSample,
-    analyze_mclone_overworld_hydraulic_closure, generate_mclone_overworld_chunk,
-    generate_mclone_overworld_chunk_with_topology, generate_mclone_overworld_surface_chunk,
-    generate_mclone_overworld_surface_chunk_with_topology, mclone_overworld_biome_id,
-    mclone_overworld_biome_id_for_sample, mclone_overworld_biome_id_with_topology,
-    mclone_overworld_spawn_chunk, mclone_overworld_spawn_chunk_with_topology,
-    mclone_overworld_surface_recipe, stream_placement,
+    McloneOverworldStreamTerrainIntent, McloneOverworldSurfaceRecipe, McloneOverworldTerrainSample,
+    McloneOverworldWatercourseSample, analyze_mclone_overworld_hydraulic_closure,
+    generate_mclone_overworld_chunk, generate_mclone_overworld_chunk_with_topology,
+    generate_mclone_overworld_surface_chunk, generate_mclone_overworld_surface_chunk_with_topology,
+    mclone_overworld_biome_id, mclone_overworld_biome_id_for_sample,
+    mclone_overworld_biome_id_with_topology, mclone_overworld_spawn_chunk,
+    mclone_overworld_spawn_chunk_with_topology, mclone_overworld_surface_recipe, stream_placement,
 };
 pub use planning::{ChunkGenerationPlan, ChunkStatusRequirement};
 pub use profile::{

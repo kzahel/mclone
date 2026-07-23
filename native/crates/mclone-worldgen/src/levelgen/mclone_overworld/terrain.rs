@@ -9,6 +9,7 @@ use super::fields::{
     MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS, McloneOverworldLandformSample, McloneOverworldSampler,
     McloneOverworldSamplingTopology, McloneOverworldTerrainSample,
 };
+use super::streams::{McloneOverworldStreamPlan, McloneOverworldStreamPlanCache};
 use super::surface::write_surface_column;
 use crate::levelgen::chunk::sample_column_biome_payload;
 use crate::levelgen::profile::{FLAT_GRASS_HEIGHT, FLAT_GRASS_MIN_Y};
@@ -58,9 +59,27 @@ pub fn generate_mclone_overworld_surface_chunk_with_topology(
     chunk_x: i32,
     chunk_z: i32,
 ) -> GeneratedChunk {
+    let mut stream_cache = McloneOverworldStreamPlanCache::new(seed, topology);
+    generate_mclone_overworld_surface_chunk_with_stream_cache(
+        seed,
+        topology,
+        chunk_x,
+        chunk_z,
+        &mut stream_cache,
+    )
+}
+
+fn generate_mclone_overworld_surface_chunk_with_stream_cache(
+    seed: i64,
+    topology: McloneOverworldSamplingTopology,
+    chunk_x: i32,
+    chunk_z: i32,
+    stream_cache: &mut McloneOverworldStreamPlanCache,
+) -> GeneratedChunk {
     let min_x = chunk_min_block_coord(chunk_x);
     let min_z = chunk_min_block_coord(chunk_z);
-    let samples = ChunkLandformSamples::new(seed, topology, min_x, min_z);
+    let samples =
+        ChunkLandformSamples::new_with_stream_cache(seed, topology, min_x, min_z, stream_cache);
     let buffer = generate_mclone_overworld_surface_buffer_from_samples(chunk_x, chunk_z, &samples);
     GeneratedChunk::from_mutable_buffer_with_biomes(
         buffer,
@@ -88,13 +107,18 @@ pub fn analyze_mclone_overworld_hydraulic_closure(
         .checked_add(1)
         .expect("hydraulic review halo radius overflow");
     let mut chunks = BTreeMap::new();
+    let mut stream_cache = McloneOverworldStreamPlanCache::new(seed, topology);
     for chunk_z in center.z - halo_radius..=center.z + halo_radius {
         for chunk_x in center.x - halo_radius..=center.x + halo_radius {
             let pos = ChunkPos::new(chunk_x, chunk_z);
             chunks.insert(
                 pos,
-                generate_mclone_overworld_surface_chunk_with_topology(
-                    seed, topology, chunk_x, chunk_z,
+                generate_mclone_overworld_surface_chunk_with_stream_cache(
+                    seed,
+                    topology,
+                    chunk_x,
+                    chunk_z,
+                    &mut stream_cache,
                 ),
             );
         }
@@ -240,28 +264,17 @@ fn hydraulic_column_has_flowing(
     })
 }
 
-pub(super) fn generate_mclone_overworld_surface_buffer(
-    seed: i64,
-    chunk_x: i32,
-    chunk_z: i32,
-) -> MutableChunkBlockBuffer {
-    generate_mclone_overworld_surface_buffer_with_topology(
-        seed,
-        McloneOverworldSamplingTopology::Unbounded,
-        chunk_x,
-        chunk_z,
-    )
-}
-
-pub(super) fn generate_mclone_overworld_surface_buffer_with_topology(
+pub(super) fn generate_mclone_overworld_surface_buffer_with_stream_cache(
     seed: i64,
     topology: McloneOverworldSamplingTopology,
     chunk_x: i32,
     chunk_z: i32,
+    stream_cache: &mut McloneOverworldStreamPlanCache,
 ) -> MutableChunkBlockBuffer {
     let min_x = chunk_min_block_coord(chunk_x);
     let min_z = chunk_min_block_coord(chunk_z);
-    let samples = ChunkLandformSamples::new(seed, topology, min_x, min_z);
+    let samples =
+        ChunkLandformSamples::new_with_stream_cache(seed, topology, min_x, min_z, stream_cache);
     generate_mclone_overworld_surface_buffer_from_samples(chunk_x, chunk_z, &samples)
 }
 
@@ -277,7 +290,7 @@ fn generate_mclone_overworld_surface_buffer_from_samples(
         for local_x in 0..CHUNK_WIDTH {
             let fall_top_flow_level =
                 baked_fall_top_flow_level(samples, local_x, local_z).unwrap_or(1);
-            let landform = contained_tributary_landform(samples, local_x, local_z);
+            let landform = samples.landform(local_x, local_z);
             write_surface_column(&mut buffer, local_x, local_z, landform, fall_top_flow_level);
         }
     }
@@ -286,113 +299,26 @@ fn generate_mclone_overworld_surface_buffer_from_samples(
     buffer
 }
 
-fn contained_tributary_landform(
-    samples: &ChunkLandformSamples,
-    local_x: i32,
-    local_z: i32,
-) -> McloneOverworldLandformSample {
-    let mut sample = samples.landform(local_x, local_z);
-    let watercourse = sample.terrain.watercourse;
-    if !watercourse.is_raised_tributary()
-        || watercourse.is_fall_column()
-        || watercourse.water_surface_y <= super::fields::MCLONE_OVERWORLD_SEA_LEVEL
-    {
-        return sample;
-    }
-
-    let source_y = watercourse.water_surface_y;
-    let locally_sealed =
-        [(-1, 0), (1, 0), (0, -1), (0, 1)]
-            .into_iter()
-            .all(|(offset_x, offset_z)| {
-                let neighbor = samples.terrain(local_x + offset_x, local_z + offset_z);
-                let neighbor_water_top = if neighbor.watercourse.is_fall_column() {
-                    neighbor.watercourse.drop_upper_y
-                } else if neighbor.watercourse.is_channel() {
-                    neighbor.watercourse.water_surface_y
-                } else {
-                    i32::MIN
-                };
-                neighbor_water_top >= source_y || neighbor.surface_y >= source_y
-            });
-    if locally_sealed {
-        return sample;
-    }
-
-    // A contour can end on a single column where the local anchor solver's
-    // acceptance changes. Realize that boundary as the same solid berm used
-    // around the rest of the vignette, so waking the fluid simulation cannot
-    // expose a floating source face.
-    sample.terrain.watercourse.channel_influence =
-        sample.terrain.watercourse.major_channel_influence;
-    sample.terrain.watercourse.raised_tributary_influence = 0.0;
-    sample.terrain.watercourse.tributary_source_pool_influence = 0.0;
-    sample.terrain.watercourse.drop_distance = f64::INFINITY;
-    sample.terrain.watercourse.drop_height = 0;
-    sample.terrain.watercourse.drop_upper_y = super::fields::MCLONE_OVERWORLD_SEA_LEVEL;
-    sample.terrain.watercourse.drop_lower_y = super::fields::MCLONE_OVERWORLD_SEA_LEVEL;
-    sample.terrain.surface_y = sample.terrain.base_surface_y.max(source_y + 1);
-    sample
-}
-
 fn baked_fall_top_flow_level(
     samples: &ChunkLandformSamples,
     local_x: i32,
     local_z: i32,
 ) -> Option<u8> {
     let watercourse = samples.terrain(local_x, local_z).watercourse;
-    if !watercourse.is_fall_column() {
-        return None;
-    }
-    let mut visited: Vec<(i32, i32)> = vec![(0, 0)];
-    let mut frontier: Vec<(i32, i32)> = vec![(0, 0)];
-    for distance in 1_i32..=MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS {
-        let mut next = Vec::new();
-        for (offset_x, offset_z) in frontier {
-            for (step_x, step_z) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
-                let candidate = (offset_x + step_x, offset_z + step_z);
-                if candidate.0.abs() > MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS
-                    || candidate.1.abs() > MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS
-                    || visited.contains(&candidate)
-                {
-                    continue;
-                }
-                visited.push(candidate);
-                let neighbor = samples
-                    .terrain(local_x + candidate.0, local_z + candidate.1)
-                    .watercourse;
-                let same_drop = neighbor.is_drop_transition()
-                    && neighbor.drop_upper_y == watercourse.drop_upper_y
-                    && neighbor.drop_lower_y == watercourse.drop_lower_y;
-                if neighbor.is_channel() && same_drop && neighbor.drop_distance > 0.0 {
-                    return Some(distance as u8);
-                }
-                if neighbor.is_fall_column() && same_drop {
-                    next.push(candidate);
-                }
-            }
-        }
-        frontier = next;
-    }
-    Some((MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS + 1) as u8)
+    watercourse
+        .is_fall_column()
+        .then(|| (-watercourse.drop_distance).ceil().clamp(0.0, 7.0) as u8)
 }
 
-pub(super) fn mclone_overworld_chunk_biomes(seed: i64, min_x: i32, min_z: i32) -> Vec<i32> {
-    mclone_overworld_chunk_biomes_with_topology(
-        seed,
-        McloneOverworldSamplingTopology::Unbounded,
-        min_x,
-        min_z,
-    )
-}
-
-pub(super) fn mclone_overworld_chunk_biomes_with_topology(
+pub(super) fn mclone_overworld_chunk_biomes_with_stream_cache(
     seed: i64,
     topology: McloneOverworldSamplingTopology,
     min_x: i32,
     min_z: i32,
+    stream_cache: &mut McloneOverworldStreamPlanCache,
 ) -> Vec<i32> {
-    let samples = ChunkLandformSamples::new(seed, topology, min_x, min_z);
+    let samples =
+        ChunkLandformSamples::new_with_stream_cache(seed, topology, min_x, min_z, stream_cache);
     mclone_overworld_chunk_biomes_from_samples(min_x, min_z, &samples)
 }
 
@@ -414,15 +340,36 @@ struct ChunkLandformSamples {
 }
 
 impl ChunkLandformSamples {
-    fn new(seed: i64, topology: McloneOverworldSamplingTopology, min_x: i32, min_z: i32) -> Self {
+    fn new_with_stream_cache(
+        seed: i64,
+        topology: McloneOverworldSamplingTopology,
+        min_x: i32,
+        min_z: i32,
+        stream_cache: &mut McloneOverworldStreamPlanCache,
+    ) -> Self {
+        assert!(
+            stream_cache.matches(seed, topology),
+            "Mclone stream cache seed/topology must match terrain generation"
+        );
         let sampler = McloneOverworldSampler::new_with_topology(seed, topology);
+        let center = ChunkPos::new(block_to_chunk_coord(min_x), block_to_chunk_coord(min_z));
+        let stream_plans = stream_cache
+            .plans_intersecting_chunks(
+                ChunkPos::new(center.x - 1, center.z - 1),
+                ChunkPos::new(center.x + 1, center.z + 1),
+            )
+            .expect("Mclone stream placement constants must remain valid");
         let radius = MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS;
         let width = usize::try_from(CHUNK_LANDFORM_SAMPLE_WIDTH)
             .expect("Mclone chunk landform sample width must fit usize");
         let mut terrain = Vec::with_capacity(width * width);
         for offset_z in -radius..CHUNK_WIDTH + radius {
             for offset_x in -radius..CHUNK_WIDTH + radius {
-                terrain.push(sampler.sample(min_x + offset_x, min_z + offset_z));
+                let world_x = min_x + offset_x;
+                let world_z = min_z + offset_z;
+                let mut sample = sampler.sample(world_x, world_z);
+                apply_stream_plans(&mut sample, world_x, world_z, &stream_plans);
+                terrain.push(sample);
             }
         }
         Self { terrain }
@@ -449,6 +396,65 @@ impl ChunkLandformSamples {
             .expect("Mclone chunk landform sample width must fit usize");
         self.terrain[sample_z * width + sample_x]
     }
+}
+
+fn apply_stream_plans(
+    sample: &mut McloneOverworldTerrainSample,
+    world_x: i32,
+    world_z: i32,
+    plans: &[McloneOverworldStreamPlan],
+) {
+    let intent = plans
+        .iter()
+        .filter(|plan| {
+            world_x >= plan.structure.bounds.min_x
+                && world_x <= plan.structure.bounds.max_x
+                && world_z >= plan.structure.bounds.min_z
+                && world_z <= plan.structure.bounds.max_z
+        })
+        .filter_map(|plan| plan.terrain_intent(world_x, world_z, sample.base_surface_y))
+        .max_by(|left, right| left.influence.total_cmp(&right.influence));
+    let Some(intent) = intent else {
+        return;
+    };
+
+    sample.surface_y = sample.surface_y.min(intent.target_surface_y);
+    sample.watercourse.distance = sample.watercourse.distance.min(intent.distance);
+    sample.watercourse.bank_influence =
+        sample.watercourse.bank_influence.max(intent.bank_influence);
+    sample.watercourse.raised_tributary_influence = sample
+        .watercourse
+        .raised_tributary_influence
+        .max(intent.influence);
+    if intent.channel_influence == 0.0 {
+        return;
+    }
+
+    sample.watercourse.channel_influence = sample
+        .watercourse
+        .channel_influence
+        .max(intent.channel_influence);
+    sample.watercourse.tributary_source_pool_influence = if intent.is_headwater {
+        intent.channel_influence
+    } else {
+        0.0
+    };
+    sample.watercourse.half_width = intent.half_width;
+    sample.watercourse.water_surface_y = intent.water_y;
+    sample.watercourse.bed_y = intent.bed_y;
+    sample.watercourse.tangent_x = intent.tangent_x;
+    sample.watercourse.tangent_z = intent.tangent_z;
+    sample.watercourse.flow_x = intent.tangent_x;
+    sample.watercourse.flow_z = intent.tangent_z;
+    sample.watercourse.grade = if intent.drop_height > 0 {
+        f64::from(intent.drop_height) / intent.drop_distance.abs().max(1.0)
+    } else {
+        0.0
+    };
+    sample.watercourse.drop_distance = intent.drop_distance;
+    sample.watercourse.drop_height = intent.drop_height;
+    sample.watercourse.drop_upper_y = intent.drop_upper_y;
+    sample.watercourse.drop_lower_y = intent.drop_lower_y;
 }
 
 #[cfg(test)]
@@ -577,6 +583,20 @@ mod tests {
             assert!(report.source_boundary_blocks > 0, "{seed} {center:?}");
             assert!(report.is_closed(), "{seed} {center:?}: {report:?}");
         }
+    }
+
+    #[test]
+    fn planned_stream_is_closed_across_its_complete_source_to_sink_bounds() {
+        let report = analyze_mclone_overworld_hydraulic_closure(
+            -98_765,
+            McloneOverworldSamplingTopology::Unbounded,
+            ChunkPos::new(149, -124),
+            4,
+        );
+        assert!(report.source_water_blocks > 1_000, "{report:?}");
+        assert!(report.flowing_water_blocks > 0, "{report:?}");
+        assert!(report.intentional_drop_edges >= 3, "{report:?}");
+        assert!(report.is_closed(), "{report:?}");
     }
 
     #[test]

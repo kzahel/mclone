@@ -69,7 +69,9 @@ pub(super) fn write_surface_column(
             write_subsurface(buffer, local_x, local_z, surface_y, CLAY, 2)
         }
         McloneOverworldSurfaceRecipe::RiverBank => {
-            if sample.terrain.base_surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 5 {
+            if sample.terrain.base_surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 5
+                && !sample.terrain.watercourse.is_raised_tributary()
+            {
                 write_subsurface(buffer, local_x, local_z, surface_y, SAND, 4);
             } else {
                 write_subsurface(buffer, local_x, local_z, surface_y - 1, DIRT, 3);
@@ -99,13 +101,13 @@ pub(super) fn write_surface_column(
         for y in (surface_y + 1).max(watercourse.drop_lower_y + 1)..watercourse.drop_upper_y {
             buffer.set_block_at_y(local_x, y, local_z, WATER_LEVEL_8);
         }
-        buffer.set_block_at_y(
-            local_x,
-            watercourse.drop_upper_y,
-            local_z,
-            water_block_for_level(fall_top_flow_level.clamp(1, 7))
-                .expect("bounded Mclone waterfall top level must map to water"),
-        );
+        let top_water = if fall_top_flow_level == 0 {
+            WATER
+        } else {
+            water_block_for_level(fall_top_flow_level.min(7))
+                .expect("bounded Mclone waterfall top level must map to water")
+        };
+        buffer.set_block_at_y(local_x, watercourse.drop_upper_y, local_z, top_water);
     } else {
         for y in surface_y + 1..=water_fill_y {
             buffer.set_block_at_y(local_x, y, local_z, WATER);

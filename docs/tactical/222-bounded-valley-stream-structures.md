@@ -386,19 +386,59 @@ valley cross-section and first actual pixels.
 
 - [ ] Replace revision 11's raised contour landmark with the accepted stream
   plan behind a new field/landmark revision.
-- [ ] Apply stream terrain intent before surfaces and vegetation.
-- [ ] Realize headwater, reach, riffle/cascade/fall, receiver, and confluence
+- [x] Apply stream terrain intent before surfaces and vegetation.
+- [x] Realize headwater, reach, riffle/cascade/fall, receiver, and confluence
   pieces through per-target clipping.
-- [ ] Preserve plane, periodic seam, target partition, and output fingerprint
-  determinism.
+- [x] Preserve plane target partition and cache-independent output.
+- [ ] Preserve the periodic seam and update intentional output fingerprints.
 
 Gate: exact generated blocks are independent of target request order and no
 piece writes beyond its clipped target box.
 
+First realization checkpoint 2026-07-23:
+
+- surface dependencies and biome resampling now share one seed/topology-scoped
+  positive and negative plan cache rather than repeating bounded route search
+  for every column or chunk;
+- each affected chunk reconstructs only metadata starts within the vanilla
+  radius-eight reference square, applies the immutable continuous column
+  query to its own padded terrain samples, then runs ordinary surface and
+  decoration language;
+- the cross-section cuts only: a three-to-five-block calm channel, deeper
+  rounded source and receiving pools, and an approximately eighteen-block
+  shoulder envelope blend into untouched terrain without revision 11's raised
+  containment shelf;
+- a small deterministic lateral offset is applied to intermediate geometry
+  nodes, preserving endpoints and the accepted route envelope while avoiding
+  a ruler-straight rendered centerline;
+- planned banks use grass/soil rather than inheriting the broad Y63 river's
+  low sand-bank rule; and
+- combined, reversed, partitioned, and warm-cache target generation produce
+  identical exact chunks at the reviewed accepted start.
+
+The first naive transition used a route projection for flowing-water levels.
+The authoritative wake exposed why that is insufficient: runtime water uses
+cardinal shortest paths, and a diagonal lip can give one cell two source
+neighbors, converting it into a new source and propagating across the lower
+reach. The accepted stencil narrows only the transition to a one-cell
+cardinal stair-step throat, then bakes a bounded two-dimensional Manhattan
+apron with levels zero through seven. Calm reaches retain their full width.
+This is a fixed discrete structure-piece stencil, not a generation-time fluid
+simulation.
+
+The reviewed seed `-98765`, start `(147,-126)`, now renders a continuous
+roughly 95-block source-to-river stream with three drops, a shallow grassed
+valley, a rounded headwater pool, and a widened confluence. RD16 production
+top-down, landscape, and elevated evidence is under
+`/tmp/mclone-stream-card-meander`. The first complete pixels are materially
+more natural than the rejected shelf, but the field revision remains 11 until
+the dead revision-11 solver is removed, periodic/output fixtures are updated,
+and the remaining closeout gates pass.
+
 ### Slice 4: hydraulic, LOD, and persistence closeout
 
-- [ ] Extend closure diagnostics to every planned reach and transition.
-- [ ] Wake every water cell through the authoritative server and require zero
+- [x] Extend closure diagnostics to every planned reach and transition.
+- [x] Wake every water cell through the authoritative server and require zero
   unintended mutation and an empty queue.
 - [ ] Route synthetic far LOD and review sampling through the same immutable
   plan/column facts.
@@ -407,6 +447,16 @@ piece writes beyond its clipped target box.
 
 Gate: full chunks, LOD, reload, native worker, and browser Worker agree on
 start identity, route, bounding box, and water levels.
+
+Hydraulic checkpoint 2026-07-23:
+
+- the complete nine-by-nine source-to-sink audit reports source and flowing
+  water, at least three intentional transitions, zero unsupported cells, zero
+  horizontally open source faces, zero unexplained unequal-level edges, and
+  zero generation-time liquid ticks; and
+- the authoritative server schedules every water cell inside the accepted
+  plan, executes the complete queue, observes zero block mutations, and
+  finishes with an empty queue.
 
 ### Slice 5: performance and human review
 
