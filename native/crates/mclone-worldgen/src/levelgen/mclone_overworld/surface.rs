@@ -9,6 +9,7 @@ use super::fields::{MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldLandformSample};
 pub const MCLONE_OVERWORLD_EXPOSED_STONE_MIN_Y: i32 = 80;
 pub const MCLONE_OVERWORLD_EXPOSED_STONE_MIN_SLOPE: f64 = 0.80;
 pub const MCLONE_OVERWORLD_EXPOSED_STONE_MIN_EXPOSURE: f64 = 0.76;
+pub const MCLONE_OVERWORLD_ALPINE_EXPOSED_STONE_MIN_SLOPE: f64 = 1.05;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum McloneOverworldSurfaceRecipe {
@@ -38,13 +39,15 @@ pub fn mclone_overworld_surface_recipe(
         McloneOverworldSurfaceRecipe::OceanFloor
     } else if terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 3 {
         McloneOverworldSurfaceRecipe::Beach
+    } else if mclone_overworld_biome_recipe(sample) == McloneOverworldBiomeRecipe::SnowyAlpine
+        && sample.slope < MCLONE_OVERWORLD_ALPINE_EXPOSED_STONE_MIN_SLOPE
+    {
+        McloneOverworldSurfaceRecipe::AlpineSnow
     } else if terrain.surface_y >= MCLONE_OVERWORLD_EXPOSED_STONE_MIN_Y
         && (sample.slope >= MCLONE_OVERWORLD_EXPOSED_STONE_MIN_SLOPE
             || sample.exposure() >= MCLONE_OVERWORLD_EXPOSED_STONE_MIN_EXPOSURE)
     {
         McloneOverworldSurfaceRecipe::ExposedStone
-    } else if mclone_overworld_biome_recipe(sample) == McloneOverworldBiomeRecipe::SnowyAlpine {
-        McloneOverworldSurfaceRecipe::AlpineSnow
     } else {
         McloneOverworldSurfaceRecipe::GrassSoil
     }

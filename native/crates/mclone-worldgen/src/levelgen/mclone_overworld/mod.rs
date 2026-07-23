@@ -45,9 +45,9 @@ pub use streams::{
     McloneOverworldStreamTerrainIntent, stream_placement,
 };
 pub use surface::{
-    MCLONE_OVERWORLD_EXPOSED_STONE_MIN_EXPOSURE, MCLONE_OVERWORLD_EXPOSED_STONE_MIN_SLOPE,
-    MCLONE_OVERWORLD_EXPOSED_STONE_MIN_Y, McloneOverworldSurfaceRecipe,
-    mclone_overworld_surface_recipe,
+    MCLONE_OVERWORLD_ALPINE_EXPOSED_STONE_MIN_SLOPE, MCLONE_OVERWORLD_EXPOSED_STONE_MIN_EXPOSURE,
+    MCLONE_OVERWORLD_EXPOSED_STONE_MIN_SLOPE, MCLONE_OVERWORLD_EXPOSED_STONE_MIN_Y,
+    McloneOverworldSurfaceRecipe, mclone_overworld_surface_recipe,
 };
 pub use terrain::{
     McloneOverworldHydraulicClosureReport, analyze_mclone_overworld_hydraulic_closure,
