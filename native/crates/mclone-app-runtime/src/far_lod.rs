@@ -11,6 +11,7 @@ use mclone_render::far_lod::{FarTerrainLodFrameUpdate, FarTerrainLodTileMesh};
 use mclone_render_session::{
     ResidentTileCache, ResidentTileUploadCoordinator, ResidentTileUploadPayload,
 };
+use mclone_server::WorldGenerationProfile;
 use mclone_worldgen::block::{
     ANDESITE, BEDROCK, BLACK_TERRACOTTA, BLUE_TERRACOTTA, BROWN_TERRACOTTA, CLAY, COARSE_DIRT,
     CYAN_TERRACOTTA, DIORITE, DIRT, GRANITE, GRASS_BLOCK, GRAVEL, GRAY_TERRACOTTA,
@@ -20,7 +21,13 @@ use mclone_worldgen::block::{
     SNOW_BLOCK, STONE, TERRACOTTA, WHITE_TERRACOTTA, YELLOW_TERRACOTTA, base_block_id, has_fluid,
     is_air_like, is_lava, is_water,
 };
-use mclone_worldgen::levelgen::{GeneratedChunk, generate_overworld_surface_chunk};
+use mclone_worldgen::levelgen::{
+    AlphaGenerationStage, BetaGenerationStage, GeneratedChunk, McloneOverworldSamplingTopology,
+    McloneOverworldStreamPlanCache, generate_alpha_stage_chunk, generate_beta_stage_chunk,
+    generate_flat_grass_chunk, generate_mclone_overworld_surface_chunk,
+    generate_mclone_overworld_surface_chunk_with_stream_cache, generate_overworld_surface_chunk,
+    generate_small_island_surface_chunk,
+};
 use serde::Deserialize;
 
 use crate::monotonic::{MonotonicClockHandle, MonotonicInstant};
@@ -78,6 +85,7 @@ pub struct FarTerrainLodBuildRequest {
 pub struct FarTerrainLodWorkerInput {
     pub key: LodTileKey,
     pub seed: i64,
+    pub generation_profile: WorldGenerationProfile,
     pub sample_spacing_blocks: u32,
     pub neighbor_sample_spacings: [u32; 4],
 }
@@ -129,6 +137,7 @@ impl FarTerrainLodBuildRequest {
         FarTerrainLodWorkerInput {
             key: self.key,
             seed: self.source_key.seed,
+            generation_profile: self.source_key.generation_profile,
             sample_spacing_blocks: far_lod_sample_spacing_for_level(
                 self.source_key.sample_spacing_blocks,
                 self.key.level,
@@ -572,6 +581,7 @@ fn srgb_color(color: [u8; 4]) -> [f32; 4] {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct FarTerrainLodBuildKey {
     seed: i64,
+    generation_profile: WorldGenerationProfile,
     center: ChunkPos,
     render_distance: u32,
     start_margin_chunks: u32,
@@ -583,16 +593,33 @@ struct FarTerrainLodBuildKey {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct FarTerrainLodSourceKey {
     seed: i64,
+    generation_profile: WorldGenerationProfile,
     sample_spacing_blocks: u32,
     detail_mode: FarLodDetailMode,
     materials_available: bool,
 }
 
 impl FarTerrainLodSourceKey {
+    #[cfg(test)]
     fn new(seed: i64, config: FarTerrainLodConfig, materials_available: bool) -> Self {
+        Self::new_with_profile(
+            seed,
+            WorldGenerationProfile::Overworld,
+            config,
+            materials_available,
+        )
+    }
+
+    fn new_with_profile(
+        seed: i64,
+        generation_profile: WorldGenerationProfile,
+        config: FarTerrainLodConfig,
+        materials_available: bool,
+    ) -> Self {
         let config = config.normalized();
         Self {
             seed,
+            generation_profile,
             sample_spacing_blocks: config
                 .detail_mode
                 .sample_spacing_blocks(config.sample_spacing_blocks),
@@ -604,6 +631,7 @@ impl FarTerrainLodSourceKey {
     fn patch_build_key(self, pos: ChunkPos) -> FarTerrainLodBuildKey {
         FarTerrainLodBuildKey {
             seed: self.seed,
+            generation_profile: self.generation_profile,
             center: pos,
             render_distance: 0,
             start_margin_chunks: 0,
@@ -615,10 +643,28 @@ impl FarTerrainLodSourceKey {
 }
 
 impl FarTerrainLodBuildKey {
+    #[cfg(test)]
     fn new(seed: i64, center: ChunkPos, render_distance: u32, config: FarTerrainLodConfig) -> Self {
+        Self::new_with_profile(
+            seed,
+            WorldGenerationProfile::Overworld,
+            center,
+            render_distance,
+            config,
+        )
+    }
+
+    fn new_with_profile(
+        seed: i64,
+        generation_profile: WorldGenerationProfile,
+        center: ChunkPos,
+        render_distance: u32,
+        config: FarTerrainLodConfig,
+    ) -> Self {
         let config = config.normalized();
         Self {
             seed,
+            generation_profile,
             center,
             render_distance,
             start_margin_chunks: config.start_margin_chunks,
@@ -781,10 +827,35 @@ impl FarTerrainLodCache {
         compiler: &mut C,
         build_budget: usize,
     ) -> Result<()> {
-        self.advance_for_camera_at(
+        self.advance_for_camera_with_profile(
+            config,
+            seed,
+            WorldGenerationProfile::Overworld,
+            center,
+            render_distance,
+            materials,
+            compiler,
+            build_budget,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn advance_for_camera_with_profile<C: FarTerrainLodCompiler>(
+        &mut self,
+        config: FarTerrainLodConfig,
+        seed: i64,
+        generation_profile: WorldGenerationProfile,
+        center: ChunkPos,
+        render_distance: u32,
+        materials: Option<&FarTerrainLodMaterialPalette>,
+        compiler: &mut C,
+        build_budget: usize,
+    ) -> Result<()> {
+        self.advance_for_camera_at_with_profile(
             self.clock.now(),
             config,
             seed,
+            generation_profile,
             center,
             render_distance,
             materials,
@@ -805,6 +876,32 @@ impl FarTerrainLodCache {
         compiler: &mut C,
         build_budget: usize,
     ) -> Result<()> {
+        self.advance_for_camera_at_with_profile(
+            now,
+            config,
+            seed,
+            WorldGenerationProfile::Overworld,
+            center,
+            render_distance,
+            materials,
+            compiler,
+            build_budget,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn advance_for_camera_at_with_profile<C: FarTerrainLodCompiler>(
+        &mut self,
+        now: MonotonicInstant,
+        config: FarTerrainLodConfig,
+        seed: i64,
+        generation_profile: WorldGenerationProfile,
+        center: ChunkPos,
+        render_distance: u32,
+        materials: Option<&FarTerrainLodMaterialPalette>,
+        compiler: &mut C,
+        build_budget: usize,
+    ) -> Result<()> {
         self.now = self.now.max(now);
         if !config.enabled {
             let abandoned = self.clear();
@@ -812,12 +909,23 @@ impl FarTerrainLodCache {
             return Ok(());
         }
         compiler.ensure_far_lod_capacity()?;
-        let source_key = FarTerrainLodSourceKey::new(seed, config, materials.is_some());
+        let source_key = FarTerrainLodSourceKey::new_with_profile(
+            seed,
+            generation_profile,
+            config,
+            materials.is_some(),
+        );
         if self.source_key != Some(source_key) {
             let abandoned = self.reset_for_source(source_key, materials);
             compiler.release_completed_far_lod_jobs(abandoned);
         }
-        let key = FarTerrainLodBuildKey::new(seed, center, render_distance, config);
+        let key = FarTerrainLodBuildKey::new_with_profile(
+            seed,
+            generation_profile,
+            center,
+            render_distance,
+            config,
+        );
         self.update_target(key, self.now);
         self.accept_completed(compiler)?;
         self.ensure_pending_builds(self.now);
@@ -840,9 +948,34 @@ impl FarTerrainLodCache {
         chunk_budget: usize,
         compiler: &mut C,
     ) -> FarTerrainLodCoverage {
-        let _ = self.advance_for_camera(
+        self.prewarm_with_profile(
             config,
             seed,
+            WorldGenerationProfile::Overworld,
+            center,
+            render_distance,
+            materials,
+            chunk_budget,
+            compiler,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn prewarm_with_profile<C: FarTerrainLodCompiler>(
+        &mut self,
+        config: FarTerrainLodConfig,
+        seed: i64,
+        generation_profile: WorldGenerationProfile,
+        center: ChunkPos,
+        render_distance: u32,
+        materials: Option<&FarTerrainLodMaterialPalette>,
+        chunk_budget: usize,
+        compiler: &mut C,
+    ) -> FarTerrainLodCoverage {
+        let _ = self.advance_for_camera_with_profile(
+            config,
+            seed,
+            generation_profile,
             center,
             render_distance,
             materials,
@@ -1686,6 +1819,7 @@ pub(crate) fn compile_far_terrain_lod_request_cached(
     let input = request.worker_input();
     let source_key = FarTerrainLodSourceKey {
         seed: input.seed,
+        generation_profile: input.generation_profile,
         sample_spacing_blocks: input.sample_spacing_blocks.max(1),
         detail_mode: FarLodDetailMode::Auto,
         materials_available: request.materials.is_some(),
@@ -1713,6 +1847,7 @@ pub fn compile_far_terrain_lod_worker_input(
     let mut surface_chunks = BTreeMap::new();
     let source_key = FarTerrainLodSourceKey {
         seed: input.seed,
+        generation_profile: input.generation_profile,
         sample_spacing_blocks: input.sample_spacing_blocks.max(1),
         detail_mode: FarLodDetailMode::Auto,
         materials_available: materials.is_some(),
@@ -1731,8 +1866,9 @@ pub fn compile_far_terrain_lod_worker_input(
 fn build_far_terrain_lod_tile(key: FarTerrainLodBuildKey, pos: ChunkPos) -> FarTerrainLodTileMesh {
     compile_far_terrain_lod_request(FarTerrainLodBuildRequest::new(
         pos,
-        FarTerrainLodSourceKey::new(
+        FarTerrainLodSourceKey::new_with_profile(
             key.seed,
+            key.generation_profile,
             FarTerrainLodConfig {
                 enabled: true,
                 detail_mode: key.detail_mode,
@@ -1775,6 +1911,7 @@ fn append_far_terrain_lod_chunk_patch<S: FarTerrainSurfaceSource>(
             cells.push(sample_lod_cell(
                 surface_chunks,
                 seed,
+                key.generation_profile,
                 x0,
                 x1,
                 z0,
@@ -1879,6 +2016,7 @@ struct LodNeighborCell {
 fn sample_lod_cell<S: FarTerrainSurfaceSource>(
     chunks: &mut S,
     seed: i64,
+    generation_profile: WorldGenerationProfile,
     x0: i32,
     x1: i32,
     z0: i32,
@@ -1887,14 +2025,20 @@ fn sample_lod_cell<S: FarTerrainSurfaceSource>(
 ) -> Option<FarTerrainLodCell> {
     let sample_x = x0 + (x1 - x0) / 2;
     let sample_z = z0 + (z1 - z0) / 2;
-    surface_sample_world(chunks, seed, sample_x, sample_z, materials).map(|sample| {
-        FarTerrainLodCell {
-            x0,
-            x1,
-            z0,
-            z1,
-            sample,
-        }
+    surface_sample_world(
+        chunks,
+        seed,
+        generation_profile,
+        sample_x,
+        sample_z,
+        materials,
+    )
+    .map(|sample| FarTerrainLodCell {
+        x0,
+        x1,
+        z0,
+        z1,
+        sample,
     })
 }
 
@@ -1945,7 +2089,16 @@ fn neighbor_lod_cell<S: FarTerrainSurfaceSource>(
             let spacing =
                 neighbor_sample_spacings[direction.index()].clamp(1, CHUNK_WIDTH as u32) as i32;
             let (x0, x1, z0, z1) = neighbor_cell_bounds_at_spacing(cell, direction, spacing);
-            let neighbor = sample_lod_cell(surface_chunks, seed, x0, x1, z0, z1, materials)?;
+            let neighbor = sample_lod_cell(
+                surface_chunks,
+                seed,
+                key.generation_profile,
+                x0,
+                x1,
+                z0,
+                z1,
+                materials,
+            )?;
             Some(LodNeighborCell {
                 cell: neighbor,
                 region: neighbor_region(key, neighbor, normal_coverage),
@@ -2149,6 +2302,7 @@ trait FarTerrainSurfaceSource {
     fn sample_world(
         &mut self,
         seed: i64,
+        generation_profile: WorldGenerationProfile,
         world_x: i32,
         world_z: i32,
         materials: Option<&FarTerrainLodMaterialPalette>,
@@ -2159,14 +2313,15 @@ impl FarTerrainSurfaceSource for BTreeMap<ChunkPos, GeneratedChunk> {
     fn sample_world(
         &mut self,
         seed: i64,
+        generation_profile: WorldGenerationProfile,
         world_x: i32,
         world_z: i32,
         materials: Option<&FarTerrainLodMaterialPalette>,
     ) -> Option<FarTerrainSurfaceSample> {
         let pos = ChunkPos::from_block_coords(world_x, world_z);
-        let chunk = self
-            .entry(pos)
-            .or_insert_with(|| generate_overworld_surface_chunk(seed, pos.x, pos.z));
+        let chunk = self.entry(pos).or_insert_with(|| {
+            generate_far_lod_surface_chunk(generation_profile, seed, pos.x, pos.z)
+        });
         let local_x = world_x - chunk_min_block_coord(pos.x);
         let local_z = world_z - chunk_min_block_coord(pos.z);
         surface_sample(chunk, local_x, local_z, materials)
@@ -2175,32 +2330,92 @@ impl FarTerrainSurfaceSource for BTreeMap<ChunkPos, GeneratedChunk> {
 
 const MAX_FAR_LOD_WORKER_SURFACE_CHUNKS: usize = 128;
 
+fn generate_far_lod_surface_chunk(
+    profile: WorldGenerationProfile,
+    seed: i64,
+    chunk_x: i32,
+    chunk_z: i32,
+) -> GeneratedChunk {
+    match profile {
+        WorldGenerationProfile::Overworld => {
+            generate_overworld_surface_chunk(seed, chunk_x, chunk_z)
+        }
+        WorldGenerationProfile::FlatGrassV1 => generate_flat_grass_chunk(chunk_x, chunk_z),
+        WorldGenerationProfile::SmallIslandV1 => {
+            generate_small_island_surface_chunk(seed, chunk_x, chunk_z)
+        }
+        WorldGenerationProfile::McloneOverworldV1 => {
+            generate_mclone_overworld_surface_chunk(seed, chunk_x, chunk_z)
+        }
+        WorldGenerationProfile::AlphaV1 { winter } => generate_alpha_stage_chunk(
+            seed,
+            chunk_x,
+            chunk_z,
+            winter,
+            AlphaGenerationStage::Surface,
+        ),
+        WorldGenerationProfile::BetaV1 => {
+            generate_beta_stage_chunk(seed, chunk_x, chunk_z, BetaGenerationStage::Surface)
+        }
+        // Authored terrain has no deterministic procedural source. Existing
+        // callers keep far LOD disabled for this profile; retain the historic
+        // Overworld fallback if one is requested directly.
+        WorldGenerationProfile::AuthoredOnly { .. } => {
+            generate_overworld_surface_chunk(seed, chunk_x, chunk_z)
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub(crate) struct FarTerrainLodWorkerCache {
-    seed: Option<i64>,
+    source: Option<(i64, WorldGenerationProfile)>,
     chunks: BTreeMap<ChunkPos, Vec<Option<FarTerrainSurfaceColumn>>>,
     insertion_order: VecDeque<ChunkPos>,
+    mclone_stream_plans: Option<McloneOverworldStreamPlanCache>,
 }
 
 impl FarTerrainLodWorkerCache {
-    fn reset_for_seed(&mut self, seed: i64) {
-        if self.seed == Some(seed) {
+    fn reset_for_source(&mut self, seed: i64, generation_profile: WorldGenerationProfile) {
+        let source = (seed, generation_profile);
+        if self.source == Some(source) {
             return;
         }
-        self.seed = Some(seed);
+        self.source = Some(source);
         self.chunks.clear();
         self.insertion_order.clear();
+        self.mclone_stream_plans =
+            (generation_profile == WorldGenerationProfile::McloneOverworldV1).then(|| {
+                McloneOverworldStreamPlanCache::new(
+                    seed,
+                    McloneOverworldSamplingTopology::Unbounded,
+                )
+            });
     }
 
-    fn insert_generated_chunk(&mut self, seed: i64, pos: ChunkPos) {
-        self.reset_for_seed(seed);
+    fn insert_generated_chunk(
+        &mut self,
+        seed: i64,
+        generation_profile: WorldGenerationProfile,
+        pos: ChunkPos,
+    ) {
+        self.reset_for_source(seed, generation_profile);
         while self.chunks.len() >= MAX_FAR_LOD_WORKER_SURFACE_CHUNKS {
             let Some(oldest) = self.insertion_order.pop_front() else {
                 break;
             };
             self.chunks.remove(&oldest);
         }
-        let chunk = generate_overworld_surface_chunk(seed, pos.x, pos.z);
+        let chunk = if let Some(stream_plans) = self.mclone_stream_plans.as_mut() {
+            generate_mclone_overworld_surface_chunk_with_stream_cache(
+                seed,
+                McloneOverworldSamplingTopology::Unbounded,
+                pos.x,
+                pos.z,
+                stream_plans,
+            )
+        } else {
+            generate_far_lod_surface_chunk(generation_profile, seed, pos.x, pos.z)
+        };
         let mut columns = Vec::with_capacity((CHUNK_WIDTH * CHUNK_WIDTH) as usize);
         for local_z in 0..CHUNK_WIDTH {
             for local_x in 0..CHUNK_WIDTH {
@@ -2216,14 +2431,15 @@ impl FarTerrainSurfaceSource for FarTerrainLodWorkerCache {
     fn sample_world(
         &mut self,
         seed: i64,
+        generation_profile: WorldGenerationProfile,
         world_x: i32,
         world_z: i32,
         materials: Option<&FarTerrainLodMaterialPalette>,
     ) -> Option<FarTerrainSurfaceSample> {
-        self.reset_for_seed(seed);
+        self.reset_for_source(seed, generation_profile);
         let pos = ChunkPos::from_block_coords(world_x, world_z);
         if !self.chunks.contains_key(&pos) {
-            self.insert_generated_chunk(seed, pos);
+            self.insert_generated_chunk(seed, generation_profile, pos);
         }
         let local_x = world_x - chunk_min_block_coord(pos.x);
         let local_z = world_z - chunk_min_block_coord(pos.z);
@@ -2270,11 +2486,12 @@ fn surface_sample(
 fn surface_sample_world<S: FarTerrainSurfaceSource>(
     chunks: &mut S,
     seed: i64,
+    generation_profile: WorldGenerationProfile,
     world_x: i32,
     world_z: i32,
     materials: Option<&FarTerrainLodMaterialPalette>,
 ) -> Option<FarTerrainSurfaceSample> {
-    chunks.sample_world(seed, world_x, world_z, materials)
+    chunks.sample_world(seed, generation_profile, world_x, world_z, materials)
 }
 
 fn chunk_distance_from_center(center: ChunkPos, world_x: i32, world_z: i32) -> u32 {
@@ -2532,6 +2749,35 @@ mod tests {
 
         assert_ne!(auto, fixed);
         assert_eq!(auto.sample_spacing_blocks, fixed.sample_spacing_blocks);
+    }
+
+    #[test]
+    fn generation_profiles_have_distinct_far_lod_source_keys() {
+        let config = FarTerrainLodConfig::enabled();
+        let overworld = FarTerrainLodSourceKey::new_with_profile(
+            12345,
+            WorldGenerationProfile::Overworld,
+            config,
+            false,
+        );
+        let mclone = FarTerrainLodSourceKey::new_with_profile(
+            12345,
+            WorldGenerationProfile::McloneOverworldV1,
+            config,
+            false,
+        );
+
+        assert_ne!(overworld, mclone);
+        let request = FarTerrainLodBuildRequest::new(
+            ChunkPos::new(0, 0),
+            mclone,
+            None,
+            MonotonicInstant::ZERO,
+        );
+        assert_eq!(
+            request.worker_input().generation_profile,
+            WorldGenerationProfile::McloneOverworldV1
+        );
     }
 
     #[test]
@@ -2835,6 +3081,75 @@ mod tests {
     }
 
     #[test]
+    fn far_lod_worker_uses_mclone_profile_and_cached_valley_stream_plan() {
+        let seed = -98_765;
+        let planner = mclone_worldgen::levelgen::McloneOverworldStreamPlanner::new(
+            seed,
+            McloneOverworldSamplingTopology::Unbounded,
+        );
+        let candidate = planner
+            .potential_start(ChunkPos::new(147, -126))
+            .expect("stream placement");
+        let plan = planner
+            .plan_start(candidate)
+            .expect("stream plan")
+            .expect("reviewed stream start");
+        let mut mclone_cache = FarTerrainLodWorkerCache::default();
+        let mut overworld_cache = FarTerrainLodWorkerCache::default();
+        let mut direct_chunks = BTreeMap::new();
+        let mut observed_stream_water = false;
+        let mut differs_from_vanilla = false;
+
+        for node in &plan.nodes {
+            let pos = ChunkPos::from_block_coords(node.x, node.z);
+            let chunk = direct_chunks
+                .entry(pos)
+                .or_insert_with(|| generate_mclone_overworld_surface_chunk(seed, pos.x, pos.z));
+            let local_x = node.x - chunk_min_block_coord(pos.x);
+            let local_z = node.z - chunk_min_block_coord(pos.z);
+            let direct = surface_column(chunk, local_x, local_z)
+                .expect("planned stream centerline has a surface");
+            observed_stream_water |= is_water(direct.block.raw());
+
+            let sampled = surface_sample_world(
+                &mut mclone_cache,
+                seed,
+                WorldGenerationProfile::McloneOverworldV1,
+                node.x,
+                node.z,
+                None,
+            )
+            .expect("Mclone far LOD sample exists");
+            assert_eq!(sampled.y, direct.y as f32);
+
+            let vanilla = surface_sample_world(
+                &mut overworld_cache,
+                seed,
+                WorldGenerationProfile::Overworld,
+                node.x,
+                node.z,
+                None,
+            )
+            .expect("vanilla far LOD sample exists");
+            differs_from_vanilla |= sampled != vanilla;
+        }
+
+        assert!(observed_stream_water);
+        assert!(differs_from_vanilla);
+        let report = mclone_cache
+            .mclone_stream_plans
+            .as_ref()
+            .expect("Mclone LOD owns a stream plan cache")
+            .report();
+        assert!(report.requests > 0);
+        assert!(report.hits > 0);
+        assert_eq!(
+            mclone_cache.source,
+            Some((seed, WorldGenerationProfile::McloneOverworldV1))
+        );
+    }
+
+    #[test]
     fn far_terrain_lod_chunk_patch_emits_flat_blocky_cell_caps() {
         let config = FarTerrainLodConfig::enabled().with_extra_radius_chunks(1);
         let key = FarTerrainLodBuildKey::new(12345, ChunkPos::new(0, 0), 0, config);
@@ -3029,8 +3344,15 @@ mod tests {
         let mut chunks = BTreeMap::new();
         let world_x = chunk_min_block_coord(1);
 
-        let _sample = surface_sample_world(&mut chunks, 12345, world_x, 0, None)
-            .expect("surface sample exists");
+        let _sample = surface_sample_world(
+            &mut chunks,
+            12345,
+            WorldGenerationProfile::Overworld,
+            world_x,
+            0,
+            None,
+        )
+        .expect("surface sample exists");
 
         assert!(chunks.contains_key(&ChunkPos::new(1, 0)));
         assert!(!chunks.contains_key(&ChunkPos::new(0, 0)));

@@ -162,6 +162,8 @@ impl WebRenderWorkerActor {
                 WorkKind::FarLod => session
                     .compile_far_lod_tile_bytes(
                         string(message, "farLodSeed").unwrap_or_else(|| "0".to_owned()),
+                        string(message, "farLodGenerationProfile")
+                            .unwrap_or_else(|| "overworld".to_owned()),
                         number(message, "farLodChunkX") as i32,
                         number(message, "farLodChunkZ") as i32,
                         nonzero_number(message, "farLodLevel", 1.0) as u8,

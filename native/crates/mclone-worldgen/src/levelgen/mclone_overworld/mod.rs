@@ -46,5 +46,7 @@ pub use surface::{
 };
 pub use terrain::{
     McloneOverworldHydraulicClosureReport, analyze_mclone_overworld_hydraulic_closure,
-    generate_mclone_overworld_surface_chunk, generate_mclone_overworld_surface_chunk_with_topology,
+    generate_mclone_overworld_surface_chunk,
+    generate_mclone_overworld_surface_chunk_with_stream_cache,
+    generate_mclone_overworld_surface_chunk_with_topology,
 };

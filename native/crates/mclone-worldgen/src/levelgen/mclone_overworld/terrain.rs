@@ -69,7 +69,12 @@ pub fn generate_mclone_overworld_surface_chunk_with_topology(
     )
 }
 
-fn generate_mclone_overworld_surface_chunk_with_stream_cache(
+/// Generate one surface-stage chunk while reusing the bounded stream planner
+/// cache across neighboring chunks.
+///
+/// Runtime batch generation and far-LOD workers use this entry point so one
+/// immutable start plan is not redundantly solved for every sampled chunk.
+pub fn generate_mclone_overworld_surface_chunk_with_stream_cache(
     seed: i64,
     topology: McloneOverworldSamplingTopology,
     chunk_x: i32,

@@ -1,8 +1,9 @@
 # Tactical 222: Bounded Valley Stream Structures
 
-Status: active 2026-07-23. The design contract is accepted; implementation
-starts with a reusable procedural-start kernel and keeps field revision 11
-active until the replacement passes objective and visual gates.
+Status: active 2026-07-23. The reusable procedural-start kernel, bounded
+stream plan, clipped field-revision-12 realization, hydraulic proof, and
+profile-correct far LOD are implemented. Persistence, performance, and final
+human review remain.
 
 Topics: `mclone-overworld-generation`, `procedural-structure-starts`
 
@@ -455,7 +456,7 @@ Revision closeout 2026-07-23:
 - [x] Extend closure diagnostics to every planned reach and transition.
 - [x] Wake every water cell through the authoritative server and require zero
   unintended mutation and an empty queue.
-- [ ] Route synthetic far LOD and review sampling through the same immutable
+- [x] Route synthetic far LOD and review sampling through the same immutable
   plan/column facts.
 - [ ] Record the accepted deterministic reconstruction or persist versioned
   start/reference metadata across native SQLite and browser IndexedDB reopen.
@@ -472,6 +473,24 @@ Hydraulic checkpoint 2026-07-23:
 - the authoritative server schedules every water cell inside the accepted
   plan, executes the complete queue, observes zero block mutations, and
   finishes with an empty queue.
+
+LOD checkpoint 2026-07-23:
+
+- far-LOD source/build keys and portable worker inputs now carry the active
+  `WorldGenerationProfile`; changing seed or profile invalidates retained
+  synthetic coverage;
+- native scene startup prewarm, native live rendering, mono/XR scene calls,
+  the browser scene, the browser doorbell, and the Web Worker compile entry
+  all preserve the profile instead of silently sampling vanilla Overworld;
+- Mclone native LOD workers reuse one bounded stream-plan cache across their
+  neighboring generated surface chunks;
+- a focused accepted-start fixture samples every reviewed route node through
+  the cached LOD source, matches the authoritative Mclone surface column,
+  observes planned water, differs from vanilla surface output, and records
+  plan-cache hits; and
+- all 309 `mclone-app-runtime` library tests pass, while native and
+  `wasm32-unknown-unknown` browser checks compile the complete transport
+  boundary. Existing unrelated target-specific warnings remain.
 
 ### Slice 5: performance and human review
 

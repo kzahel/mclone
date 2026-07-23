@@ -371,6 +371,7 @@ impl WebRenderCompilerSession {
     pub fn compile_far_lod_tile(
         &mut self,
         seed_text: String,
+        generation_profile_label: String,
         chunk_x: i32,
         chunk_z: i32,
         level: u8,
@@ -382,6 +383,7 @@ impl WebRenderCompilerSession {
     ) -> Result<js_sys::Uint8Array, JsValue> {
         let packed = self.compile_far_lod_tile_bytes(
             seed_text,
+            generation_profile_label,
             chunk_x,
             chunk_z,
             level,
@@ -464,6 +466,7 @@ impl WebRenderCompilerSession {
     pub(crate) fn compile_far_lod_tile_bytes(
         &mut self,
         seed_text: String,
+        generation_profile_label: String,
         chunk_x: i32,
         chunk_z: i32,
         level: u8,
@@ -477,10 +480,13 @@ impl WebRenderCompilerSession {
         let seed = seed_text
             .parse::<i64>()
             .map_err(|error| JsValue::from_str(&format!("invalid far LOD seed: {error}")))?;
+        let generation_profile = WorldGenerationProfile::parse_label(&generation_profile_label)
+            .map_err(JsValue::from)?;
         let mesh = compile_far_terrain_lod_worker_input(
             FarTerrainLodWorkerInput {
                 key: LodTileKey::new(ChunkPos::new(chunk_x, chunk_z), level),
                 seed,
+                generation_profile,
                 sample_spacing_blocks,
                 neighbor_sample_spacings: [
                     west_sample_spacing_blocks,
@@ -1673,6 +1679,11 @@ impl WebRenderSectionCompiler {
                 let input = request.worker_input();
                 set_string(object, "workKind", "far-lod")?;
                 set_string(object, "farLodSeed", &input.seed.to_string())?;
+                set_string(
+                    object,
+                    "farLodGenerationProfile",
+                    input.generation_profile.label(),
+                )?;
                 set_number(object, "farLodChunkX", f64::from(input.key.chunk.x))?;
                 set_number(object, "farLodChunkZ", f64::from(input.key.chunk.z))?;
                 set_number(object, "farLodLevel", f64::from(input.key.level))?;
@@ -2253,6 +2264,7 @@ impl SceneRuntimeService for WebSceneRuntimeService {
         &mut self,
         config: FarTerrainLodConfig,
         seed: i64,
+        generation_profile: WorldGenerationProfile,
         center: ChunkPos,
         camera_position: glam::Vec3,
         build_budget: usize,
@@ -2271,10 +2283,11 @@ impl SceneRuntimeService for WebSceneRuntimeService {
             .map(|section| ChunkPos::new(section.chunk_x, section.chunk_z))
             .collect::<BTreeSet<_>>();
         let previous_request = self.render_compiler.in_flight_request_id();
-        self.far_lod_cache.advance_for_camera_at(
+        self.far_lod_cache.advance_for_camera_at_with_profile(
             self.clock.now(),
             config,
             seed,
+            generation_profile,
             center,
             self.runtime.scene_core().render_distance(),
             self.mesh_assets.far_lod_materials.as_ref(),

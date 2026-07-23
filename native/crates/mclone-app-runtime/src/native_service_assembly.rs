@@ -524,6 +524,7 @@ struct StartupLodPrewarm {
     config: StartupLodPrewarmConfig,
     far_lod: FarTerrainLodConfig,
     seed: i64,
+    generation_profile: WorldGenerationProfile,
     center: ChunkPos,
     started_at: Option<Instant>,
     elapsed_ms: f64,
@@ -534,11 +535,17 @@ struct StartupLodPrewarm {
 }
 
 impl StartupLodPrewarm {
-    fn new(config: StartupLodPrewarmConfig, seed: i64, center: ChunkPos) -> Self {
+    fn new(
+        config: StartupLodPrewarmConfig,
+        seed: i64,
+        generation_profile: WorldGenerationProfile,
+        center: ChunkPos,
+    ) -> Self {
         Self {
             config,
             far_lod: config.far_lod_config(),
             seed,
+            generation_profile,
             center,
             started_at: None,
             elapsed_ms: 0.0,
@@ -568,6 +575,7 @@ impl StartupLodPrewarm {
         let coverage = runtime.prewarm_far_lod(
             self.far_lod,
             self.seed,
+            self.generation_profile,
             self.center,
             camera_position,
             budget,
@@ -707,8 +715,12 @@ where
         options: LocalIntegratedSceneOptions,
         mesh_assets: TexturedMeshAssets,
     ) -> Result<Self> {
-        let prewarm =
-            StartupLodPrewarm::new(options.startup_lod_prewarm, options.seed, options.center);
+        let prewarm = StartupLodPrewarm::new(
+            options.startup_lod_prewarm,
+            options.seed,
+            options.world_generation_profile,
+            options.center,
+        );
         let runtime = NativeSessionServices::local_with_mesh_assets(options, mesh_assets)?;
         Ok(Self::from_session_runtime(
             runtime,
@@ -741,7 +753,12 @@ where
         )?;
         // Remote startup carries a disabled prewarm: startup LOD prewarm is a
         // local-integrated policy only (docs/tactical/167).
-        let prewarm = StartupLodPrewarm::new(StartupLodPrewarmConfig::disabled(), 0, center);
+        let prewarm = StartupLodPrewarm::new(
+            StartupLodPrewarmConfig::disabled(),
+            0,
+            WorldGenerationProfile::Overworld,
+            center,
+        );
         Ok(Self::from_session_runtime(
             runtime,
             StartupReadinessPolicy::Playable,
@@ -781,7 +798,12 @@ where
     /// them through the shared readiness gate and render seed.
     pub fn from_runtime(runtime: NativeSessionServices<S>) -> Self {
         let center = runtime.interest_center();
-        let prewarm = StartupLodPrewarm::new(StartupLodPrewarmConfig::disabled(), 0, center);
+        let prewarm = StartupLodPrewarm::new(
+            StartupLodPrewarmConfig::disabled(),
+            0,
+            WorldGenerationProfile::Overworld,
+            center,
+        );
         Self::from_session_runtime(runtime, StartupReadinessPolicy::Playable, prewarm)
     }
 
@@ -1306,6 +1328,7 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
         &mut self,
         config: FarTerrainLodConfig,
         seed: i64,
+        generation_profile: WorldGenerationProfile,
         center: ChunkPos,
         camera_position: Vec3,
         build_budget: usize,
@@ -1321,9 +1344,10 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
                 .traversal_ready_render_section_keys(camera_position),
         );
         let materials = self.mesh_assets.far_lod_materials.clone();
-        self.far_lod_cache.advance_for_camera(
+        self.far_lod_cache.advance_for_camera_with_profile(
             config,
             seed,
+            generation_profile,
             center,
             self.core.render_distance(),
             materials.as_ref(),
@@ -1363,13 +1387,15 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
         &mut self,
         config: FarTerrainLodConfig,
         seed: i64,
+        generation_profile: WorldGenerationProfile,
         center: ChunkPos,
         _camera_position: Vec3,
         chunk_budget: usize,
     ) -> FarTerrainLodCoverage {
-        self.far_lod_cache.prewarm(
+        self.far_lod_cache.prewarm_with_profile(
             config,
             seed,
+            generation_profile,
             center,
             self.core.render_distance(),
             self.mesh_assets.far_lod_materials.as_ref(),
@@ -2043,6 +2069,7 @@ where
         &mut self,
         config: FarTerrainLodConfig,
         seed: i64,
+        generation_profile: WorldGenerationProfile,
         center: ChunkPos,
         camera_position: Vec3,
         build_budget: usize,
@@ -2052,6 +2079,7 @@ where
             Self::Local(scene) => scene.prepare_far_lod_frame(
                 config,
                 seed,
+                generation_profile,
                 center,
                 camera_position,
                 build_budget,
@@ -2060,6 +2088,7 @@ where
             Self::RemoteDedicated(scene) => scene.prepare_far_lod_frame(
                 config,
                 seed,
+                generation_profile,
                 center,
                 camera_position,
                 build_budget,
@@ -2943,6 +2972,7 @@ where
         &mut self,
         config: FarTerrainLodConfig,
         seed: i64,
+        generation_profile: WorldGenerationProfile,
         center: ChunkPos,
         camera_position: Vec3,
         build_budget: usize,
@@ -2958,9 +2988,10 @@ where
                 .traversal_ready_render_section_keys(camera_position),
         );
         let materials = self.mesh_assets.far_lod_materials.clone();
-        self.far_lod_cache.advance_for_camera(
+        self.far_lod_cache.advance_for_camera_with_profile(
             config,
             seed,
+            generation_profile,
             center,
             self.core.render_distance(),
             materials.as_ref(),
@@ -3495,6 +3526,7 @@ where
         &mut self,
         config: FarTerrainLodConfig,
         seed: i64,
+        generation_profile: WorldGenerationProfile,
         center: ChunkPos,
         camera_position: Vec3,
         build_budget: usize,
@@ -3504,6 +3536,7 @@ where
             self,
             config,
             seed,
+            generation_profile,
             center,
             camera_position,
             build_budget,

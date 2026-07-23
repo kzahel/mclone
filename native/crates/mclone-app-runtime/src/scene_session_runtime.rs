@@ -20,7 +20,7 @@ use mclone_mesh::{
 use mclone_protocol::{ClientCommand, PlayerPositionUpdate};
 use mclone_render::far_lod::FarTerrainLodFrameUpdate;
 use mclone_render_session::{RenderSectionCacheUpdate, RenderSectionCompileQueueHealth};
-use mclone_server::SimulationCadenceConfig;
+use mclone_server::{SimulationCadenceConfig, WorldGenerationProfile};
 use mclone_ui::LoadingProgressOverlay;
 
 use crate::far_lod::{
@@ -112,6 +112,7 @@ pub trait SceneRuntimeService {
         &mut self,
         config: FarTerrainLodConfig,
         seed: i64,
+        generation_profile: WorldGenerationProfile,
         center: ChunkPos,
         camera_position: Vec3,
         build_budget: usize,

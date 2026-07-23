@@ -2352,6 +2352,7 @@ impl McloneSceneHost {
             .flatten();
         let far_lod_config = self.active_world.scene.far_lod;
         let far_lod_seed = self.active_world.scene.seed;
+        let far_lod_generation_profile = self.active_world.scene.world_generation_profile;
         let far_lod_center = self.active_world.camera.snapshot().chunk_pos;
         let sky_clear_color = self.sky_clear_color();
         let time_of_day = self.time_of_day();
@@ -2363,6 +2364,7 @@ impl McloneSceneHost {
             runtime.prepare_far_lod_frame(
                 far_lod_config,
                 far_lod_seed,
+                far_lod_generation_profile,
                 far_lod_center,
                 center_position,
                 lod_grant.build_tiles,
@@ -4054,12 +4056,14 @@ impl McloneSceneHost {
         let mut render_stats = self.active_world.render_stats;
         let far_lod_config = self.active_world.scene.far_lod;
         let far_lod_seed = self.active_world.scene.seed;
+        let far_lod_generation_profile = self.active_world.scene.world_generation_profile;
         let far_lod_center = self.active_world.camera.snapshot().chunk_pos;
         let lod_grant = self.active_world.render_admission_policy.lod_grant();
         let far_lod_mesh = if let Some(runtime) = self.active_world.runtime.as_mut() {
             runtime.prepare_far_lod_frame(
                 far_lod_config,
                 far_lod_seed,
+                far_lod_generation_profile,
                 far_lod_center,
                 render_view.camera_position,
                 lod_grant.build_tiles,

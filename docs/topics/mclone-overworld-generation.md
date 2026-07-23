@@ -64,7 +64,12 @@ full-route closure, authoritative all-water wake, and RD16 production pixels
 pass. Field revision 12 and decoration revision 9 remove the dead revision-11
 contour/berm solver, adopt planned-stream vocabulary, update intentional raw
 field fingerprints, and prove exact seam-crossing realization on the
-384-chunk cylinder. LOD, persistence, and performance closeout remain.
+384-chunk cylinder.
+Synthetic far LOD now carries the active generation profile through startup,
+scene runtime, native workers, browser doorbells, and Web Workers. Its Mclone
+source reuses the same immutable bounded stream-plan cache and matches
+authoritative stream columns at the reviewed route. Persistence and
+performance closeout remain.
 
 ## Scope
 
@@ -949,16 +954,16 @@ Human Review 3 accepted the result as more natural and less geometric.
 
 ## Next Work
 
-Field revision 11 remains the mechanical baseline but its raised tributary is
-visually rejected. Tactical 222 has established reusable procedural starts,
-boxes, references, clipped-piece queries, and the plan-only 48-96-block
-stream from a raised headwater to the Y63 river sink. Next, the immutable plan
-must replace revision 11's short landmark through a clipped continuous valley
-cross-section, full-chunk water stencil, and matching synthetic LOD query.
-Hydraulic closure and wake-every-water-cell fixed-point proofs follow the
-first generated pixels. One river-to-shelf-to-deep-basin composition remains
-an objective review gap. General drainage-network semantics remain
-deliberately absent.
+Field revision 12 owns the first complete bounded valley stream: reusable
+procedural starts and references, a 48-96-block monotonic plan, clipped
+continuous valley terrain, fixed-point water stencils, and matching synthetic
+LOD. Full-route closure, all-water authoritative wake, deterministic
+partition/periodic fixtures, and production pixels pass. Tactical 222 next
+needs persisted-chunk reopen evidence, a same-host generation comparison, an
+accelerated one-minute movement soak, and final human inspection of the
+headwater, reaches, transitions, and confluence. One
+river-to-shelf-to-deep-basin composition remains an objective review gap.
+General drainage-network semantics remain deliberately absent.
 
 ## Related
 
