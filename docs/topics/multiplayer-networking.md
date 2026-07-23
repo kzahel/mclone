@@ -30,9 +30,13 @@ first survival lifecycle on 2026-07-17: ordered owner life state, persistent
 lava death, dead-command gating, shared death UI, and explicit safe respawn
 now use those same local and hosted paths.
 
-The mixed-reliability WebTransport, browser-to-LAN, and native-client
-**Share to Browser** directions were accepted on 2026-07-23. Their transport
-adapters, QR/link launch UI, and public HTTPS launcher remain planned work.
+The carrier-neutral reliable/ephemeral lane model, dependency-free native
+TCP-plus-UDP first carrier, browser-to-LAN, and native-client **Share to
+Browser** directions were accepted on 2026-07-23. Tactical
+[`224`](../tactical/224-carrier-neutral-ephemeral-pose-and-native-udp.md)
+owns the first logical-lane, snapshot, fallback, and native UDP vertical slice.
+WebTransport remains a future browser-capable carrier and Share-to-Browser
+candidate rather than the common native/browser architecture.
 
 Scope: the client/server wire protocol, transports, session lifecycle, server
 tick/publication cadence, and the dependency ordering for making mclone
@@ -59,7 +63,7 @@ persist accepted pose/rotation, selected slot, display name, total experience,
 typed statistics, health, and an optional pending death cause in memory,
 SQLite, and IndexedDB. Valid saved poses resume exactly, including airborne
 poses, while blocked poses reuse the deterministic safe surface search.
-Protocol v29 publishes owner-only experience, statistics, and ordered life
+Protocol v29 introduced owner-only experience, statistics, and ordered life
 state; it accepts an explicit `Respawn` command. Dedicated TCP and SQLite
 restart tests prove the same UUID resumes durable pose, XP, statistics, and
 dead-or-respawned lifecycle state.
@@ -70,7 +74,7 @@ world clocks, and the daylight-cycle rule. New worlds start both clocks at
 zero; legacy mclone stores preserve the prior day-time 1000 convention once.
 SQLite and IndexedDB load and validate those facts before generation, reject
 later seed/profile reinterpretation, autosave every 6000 game ticks, and flush
-on normal lifecycle close. Protocol v29 carries `game_time`, `day_time`, and
+on normal lifecycle close. Protocol v29 introduced `game_time`, `day_time`, and
 daylight running state; the shared client advances its replica at 20 Hz between
 join/tick-1/20-tick authoritative corrections.
 
@@ -91,8 +95,10 @@ independent, and normal frame polling accepts unsolicited decoded batches.
 Native runtime adapters now expose one ready-only stream with
 transport-neutral frame/queue diagnostics and no pending-response state.
 Desktop flat/XR and Android flat/XR select the same shared adapter under a
-source purity gate. Browser remote now creates a module worker that owns its
-WebSocket, handshake, command send, receipt, and full update decode validation;
+source purity gate. Browser remote now creates a module worker whose Rust actor
+owns handshake, command canonicalization, receipt, and full update decode
+validation while its TypeScript shell owns only WebSocket mechanics and
+opaque-byte forwarding;
 ordered canonical update buffers cross to the same ready-only runtime pump.
 Dedicated WebSocket peers terminate directly in the shared authoritative
 connection registry rather than looping back through native TCP.
@@ -122,7 +128,7 @@ variant, while the 20-publication-attempt position reminder corresponds to
 about one second at the default rate. Immediate interaction, teleport, and
 offscreen-diagnostic reconciles remain explicit scene-owned operations.
 
-Protocol v29 negotiates optional capability bits during native/WebSocket
+Protocol v29 introduced optional capability bits during native/WebSocket
 handshake and publishes `SessionConfiguration` then `SessionReady` before
 ordinary world facts. The shared replica exposes Connecting, Configuring,
 Playing, and first-reason-wins Disconnected state to the UI. Dedicated sessions
@@ -153,8 +159,9 @@ The autonomous wire and first identity/player-durability proof now have their
 intended production shape, but broader session and world durability work
 remain:
 
-- **Protocol**: hand-rolled, validated, little-endian binary codec, strict
-  `PROTOCOL_VERSION = 29` equality check. The transport handshake now carries
+- **Protocol**: hand-rolled, validated, little-endian binary codec, current
+  strict `PROTOCOL_VERSION = 32` equality check. The transport handshake
+  carries
   the local profile UUID/display name plus supported capabilities, and
   `PlayerExperience`, `PlayerStatistics`, and `PlayerLife` are owner-only
   updates alongside chunk view/snapshots/unloads, section block deltas,
@@ -207,15 +214,16 @@ remain:
 
 Vanilla's shape, adapted to our runtime (receipts in the reference doc):
 
-- **One session with explicit reliable and ephemeral classes.** Keep strict
-  reliable-stream ordering as a protocol invariant for correctness-critical
-  session and gameplay facts; vanilla leans on it everywhere (login
-  sequencing, teleport acks, chunk-then-delta coherence). The preferred
-  dedicated transport is WebTransport over HTTP/3/QUIC: reliable streams and
-  unreliable datagrams share one authenticated, encrypted,
-  congestion-controlled session. TCP and WebSocket remain the reliable
-  compatibility profile. Ephemeral remote body/head/hand pose semantics and
-  cross-lane barriers live in
+- **One decoded session with explicit reliable and ephemeral classes.** Keep
+  strict reliable-stream ordering as a protocol invariant for
+  correctness-critical session and gameplay facts; vanilla leans on it
+  everywhere (login sequencing, teleport acks, chunk-then-delta coherence).
+  Physical carriers are negotiated capabilities rather than the game
+  architecture. TCP and WebSocket remain reliable compatibility profiles;
+  native TCP plus dependency-free raw UDP is the first mixed-reliability
+  profile; WebTransport and WebRTC can later supply the same logical lanes for
+  their supported browser/client and peer-hosted topologies. Ephemeral remote
+  body/head/hand pose semantics and cross-lane barriers live in
   [`remote-player-presentation.md`](remote-player-presentation.md).
 - **Full-duplex, push-based wire.** Commands flow up and updates flow down
   independently. Server publishes on its own tick cadence: chunk
@@ -240,12 +248,12 @@ Vanilla's shape, adapted to our runtime (receipts in the reference doc):
 - **Simulation stays on ordinary threads; transport mechanics stay
   contained.** Vanilla is Netty IO threads plus one game thread; our
   authoritative server and bounded channel handoff remain that shape.
-  TCP/WebSocket may continue using blocking workers. A future-based
-  QUIC/WebTransport library may own a private async runtime inside the
-  transport adapter, but async types and scheduling do not spread into
+  TCP/WebSocket and the first UDP lane may continue using blocking workers. A
+  future-based QUIC/WebTransport library may own a private async runtime inside
+  its transport adapter, but async types and scheduling do not spread into
   `mclone-server`, the simulation cadence, or the frame thread. Browser
-  WebTransport remains worker-owned; browser singleplayer keeps the
-  worker-owned integrated server.
+  carriers remain worker-owned; browser singleplayer keeps the worker-owned
+  integrated server.
 - **The protocol stays transport-neutral logical messages** (the current
   `mclone-protocol` stance), but grows: session/login messages, keepalive,
   disconnect-with-reason, and a capability field so debug variants can be
@@ -253,11 +261,13 @@ Vanilla's shape, adapted to our runtime (receipts in the reference doc):
 
 ### Share to Browser / browser-to-LAN hosting target
 
-A native integrated host and the dedicated server should expose the same
-optional WebTransport listener. The native client presents this as a
-first-class **Share to Browser** action: start sharing, show a copyable link
-and QR code, admit browser players, report direct/relayed connection state,
-and stop sharing without stopping the local world.
+A native integrated host and the dedicated server should eventually expose the
+same optional browser-capable listener, with WebTransport currently the
+strongest direct-LAN candidate. This is one carrier adapter above the shared
+session lanes, not the native networking foundation. The native client
+presents it as a first-class **Share to Browser** action: start sharing, show a
+copyable link and QR code, admit browser players, report direct/relayed
+connection state, and stop sharing without stopping the local world.
 
 The target flow is:
 
@@ -375,14 +385,17 @@ WebRTC stack, so browser-to-browser support does not add a native WebRTC
 library to the Rust dependency tree. Native clients joining such a room would
 need a separately measured native WebRTC adapter or gateway.
 
-### Native dependency boundary and first measurement
+### Future WebTransport dependency boundary and first measurement
 
-QUIC/TLS is a meaningful native dependency, but it stays behind a native-only
-transport adapter. That adapter may own Quinn, rustls, certificate generation,
-and a small private Tokio runtime. It exchanges decoded commands and updates
-with the existing bounded channel boundary, so Tokio does not enter
-`mclone-server`, the simulation loop, or the render thread. Browser/WASM uses
-the browser's WebTransport implementation and adds only worker adapter glue,
+QUIC/TLS remains a meaningful future native dependency for a WebTransport
+adapter, but it is not required by the first mixed-reliability slice. Tactical
+224 instead uses the standard library's UDP socket beside existing TCP. If
+WebTransport is later selected for Share to Browser or another profile, its
+adapter may own Quinn, rustls, certificate generation, and a small private
+Tokio runtime. It exchanges decoded commands and updates with the existing
+bounded channel boundary, so Tokio does not enter `mclone-server`, the
+simulation loop, or the render thread. Browser/WASM uses the browser's
+WebTransport implementation and adds only domain-blind worker adapter glue,
 not a compiled QUIC or TLS stack.
 
 A 2026-07-23 sizing probe used WTransport 0.7.1 with its default
@@ -439,12 +452,16 @@ build a chunk mesh. Startup may choose an unlimited *apply* budget, but it does
 not move socket IO or payload decode onto the frame.
 
 Native remote therefore uses independent blocking reader and writer ownership
-around bounded command/update queues. Production web remote must put WebSocket
-ownership plus frame decode in a Web Worker; a browser-main-thread callback or
-inline integrated server may remain an explicit smoke/fallback path, not the
-target production topology. Transferable buffers are an acceptable first
-worker handoff; `SharedArrayBuffer` can replace that mechanism later without
-changing `ClientConnection` semantics.
+around bounded command/update queues. Production web remote keeps browser
+WebSocket mechanics in a Web Worker and protocol/frame meaning in its
+worker-resident Rust actor. The TypeScript shell forwards bounded opaque bytes
+and generic open/close/error/pressure events; it must not identify pose,
+session, command, cadence, reliability, or fallback semantics. A
+browser-main-thread callback or inline integrated server may remain an
+explicit smoke/fallback path, not the target production topology.
+Transferable buffers are an acceptable first worker handoff;
+`SharedArrayBuffer` can replace that mechanism later without changing
+`ClientConnection` semantics.
 
 One adapter-conformance suite must exercise integrated runner, native TCP, and
 web-worker/WebSocket implementations. It owns command/update ordering,
@@ -527,13 +544,17 @@ later phases remain topic-level direction.
    separates body/tracked-pose report, server replication, and presentation
    rates instead of treating "publication" as one universal clock. See the
    next section for the gameplay semantics decision this forces.
-5. **Mixed-reliability remote pose transport.** After sequenced snapshots,
-   buffered interpolation, and loss simulation establish the logical pose
-   contract, add one WebTransport/QUIC session for first-party native and
-   browser clients. Carry critical facts on reliable streams and ephemeral
-   pose on datagrams, with an independently configured 20 Hz reliable
-   fallback profile. The implementation and platform-spike order lives in
-   [`remote-player-presentation.md`](remote-player-presentation.md).
+5. **Mixed-reliability remote pose transport — active Tactical 224.** Establish
+   transport-neutral logical lanes, sequenced snapshots, buffered
+   interpolation, and loss simulation first. Then add dependency-free raw UDP
+   beside existing TCP for first-party native clients and the dedicated
+   server. Carry critical facts on the reliable lane and ephemeral body pose
+   on UDP, with an independently configured 20 Hz reliable fallback profile.
+   WebTransport and WebRTC remain later adapters over the same decoded
+   contract. The implementation order lives in
+   [`remote-player-presentation.md`](remote-player-presentation.md) and
+   Tactical
+   [`224`](../tactical/224-carrier-neutral-ephemeral-pose-and-native-udp.md).
 6. **Share to Browser discovery and launch.** Add the native-host share
    lifecycle, endpoint/certificate/capability envelope, QR and copyable URL,
    stable HTTPS launcher with build selection, direct-LAN candidate racing,

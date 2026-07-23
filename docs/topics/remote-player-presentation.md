@@ -2,15 +2,19 @@
 
 Topic: `remote-player-presentation`
 
-Status: accepted work-stream direction as of 2026-07-23. The current product
+Status: Tactical
+[`224`](../tactical/224-carrier-neutral-ephemeral-pose-and-native-udp.md)
+active as of 2026-07-23. The current product
 relays a client-authoritative feet position, one yaw/pitch pair, ground state,
 and appearance over the reliable ordered session stream. Remote clients retain
 the newest state and apply render-delta-based exponential smoothing. Separate
 body, head, and hand poses; explicit pose and replication cadences; buffered
 snapshot interpolation; and a sequenced unreliable pose channel are planned
 improvements, not yet implemented. Mixed reliable/unreliable transport is an
-accepted first-party client and dedicated-server target, while the current
-TCP/WebSocket path remains the reliable compatibility profile.
+accepted first-party client and dedicated-server target. The first carrier is
+dependency-free raw UDP beside existing native TCP; TCP/WebSocket remains the
+reliable compatibility profile, and WebTransport/WebRTC remain later adapters
+for their supported browser and peer-hosted topologies.
 
 Scope: the quality, timing, representation, relay, and presentation of other
 players after local movement has produced a reportable state. This includes
@@ -298,40 +302,40 @@ They must never be the sole carrier of a critical lifecycle transition.
 
 ### Mixed-reliability transport is a target, not a measurement-gated option
 
-The preferred dedicated-session shape is one WebTransport-over-HTTP/3/QUIC
-session with:
+The architecture is one decoded session with explicit reliable and ephemeral
+lanes, not one preferred socket implementation. The server advertises
+supported profiles and the client selects the best mutually supported shape:
 
-- reliable ordered streams for critical session, world, and gameplay facts;
-- QUIC/WebTransport datagrams for ephemeral body/head/hand samples;
-- one connection identity, encryption context, congestion controller, and
-  session lifecycle shared by both message classes.
+| Profile | Reliable carrier | Ephemeral carrier | Initial use |
+| --- | --- | --- | --- |
+| Integrated | in-memory ordered queue | in-memory latest sample | singleplayer/tests |
+| Native reliable | TCP | bounded reliable fallback | compatibility |
+| Native mixed | TCP | dependency-free raw UDP | first production datagram slice |
+| Browser reliable | WebSocket | bounded reliable fallback | current web clients |
+| Browser mixed | WebTransport stream | WebTransport datagram | future client/server adapter |
+| Browser peer | reliable data channel | unordered zero-retransmit channel | future browser-hosted rooms |
 
-First-party desktop, Android, XR, and current-browser clients should support
-that shape. Native clients may use a Rust WebTransport implementation while
-the browser adapter uses the browser API in its existing worker-owned
-transport boundary. Using WebTransport for native clients as well avoids
-inventing a raw-QUIC/native protocol beside the browser protocol. A platform
-spike must still prove the selected Rust stack on desktop, flat Android, and
-Quest before locking the implementation dependency.
+Every carrier decodes to the same logical pose sample and cross-lane barrier
+contract. No platform API record enters the protocol. A future QUIC,
+WebTransport, ENet, Renet, or other implementation can replace one physical
+profile without changing client prediction, server authority, observer
+routing, or remote interpolation.
 
-TCP and WebSocket remain supported compatibility transports, and older
-browsers or networks that cannot establish an unreliable WebTransport session
-may select them. The WebTransport specification permits a reliable-only
-HTTP/2/TCP connection, but shipping browser APIs are uneven: current Chromium
-implements HTTP/3 WebTransport and datagrams without the draft
-`reliability`/`requireUnreliable` members, while Firefox and Safari expose
-those newer members. The server handshake therefore publishes the effective
-transport profile; a client uses browser reliability information when it
-exists but does not require that property to exist. Absence of those members
-in Chromium does not mean absence of datagrams: Chrome has shipped unreliable
-WebTransport datagrams since version 97.
+Tactical 224 first adds `std::net::UdpSocket` beside the existing native TCP
+session. TCP negotiates an unpredictable expiring attachment token; a bounded
+UDP hello binds the observed endpoint to that reliable session. Ordinary
+self-contained body samples then travel in both directions over UDP. Wrong
+session/source, malformed, stale, duplicate, and oversized datagrams are
+dropped. Timeout or carrier failure returns pose traffic to reliable fallback
+without disconnecting the gameplay session. UDP does not carry chunks,
+inventory, interactions, lifecycle transitions, or a home-grown reliable
+protocol.
 
-WebRTC data channels are not the primary dedicated client/server plan because
-ICE, DTLS, SCTP, signaling, and possible relay infrastructure add complexity
-that WebTransport does not need. They are, however, the accepted carrier for
-browser-hosted peer rooms: the host browser runs the existing integrated
-authority and admits browser guests over reliable and ephemeral data channels.
-See
+TCP and WebSocket remain supported compatibility transports. Browser
+WebTransport support is feature-detected when that future adapter lands; older
+browsers or networks retain WebSocket. WebRTC remains the accepted carrier for
+browser-hosted peer rooms, where ICE, DTLS, SCTP, signaling, and possible TURN
+relay are topology requirements rather than dedicated-server defaults. See
 [`browser-hosted-peer-sessions.md`](browser-hosted-peer-sessions.md).
 
 The initial candidate transport profiles are:
@@ -351,7 +355,7 @@ interpolated motion rather than the same tail latency as the datagram profile.
 
 The mixed-reliability implementation requires:
 
-- session-bound authentication and rejection of spoofed player/source IDs;
+- session-bound attachment and rejection of wrong player/source IDs;
 - congestion and send-budget behavior that yields before critical traffic;
 - payloads bounded below the path's safe datagram size, with no reliance on IP
   fragmentation;
@@ -404,7 +408,8 @@ native client/server WebTransport over Quinn/Tokio but still labels itself not
 fully production-ready, and
 [moq-dev/web-transport](https://github.com/moq-dev/web-transport), which
 offers native Quinn and browser-WASM backends. Dependency choice remains an
-implementation-spike decision, not an architectural commitment.
+implementation-spike decision for a future WebTransport carrier, not a
+prerequisite for Tactical 224's standard-library native UDP path.
 
 ## Platform Considerations
 
@@ -426,14 +431,15 @@ require a browser-specific remote-player protocol. The browser uses the same
 change thresholds, component samples, snapshot buffer, and fallback reliable
 semantics as native clients.
 
-WebTransport-over-HTTP/3 is the preferred mixed-reliability transport for
-current browsers, with feature-detected WebSocket or reliable-only
-WebTransport fallback. It must sit behind the same connection/decoded-update
-boundary and cannot move socket or decode policy onto the main/render thread.
-The negotiated server session profile is authoritative. Firefox and Safari
-may additionally request and inspect their reliability mode; current Chromium
-uses its HTTP/3-only WebTransport/datagram implementation without those draft
-members. Browser conformance tests must cover both API shapes.
+WebSocket is the current browser compatibility carrier. A future
+WebTransport-over-HTTP/3 adapter can add mixed reliability where supported,
+with feature-detected WebSocket or reliable-only fallback. It must sit behind
+the same connection/decoded-update boundary and cannot move socket, codec,
+pose, cadence, or fallback policy onto the main/render thread. TypeScript and
+JavaScript remain bounded opaque-byte brokers; Rust owns protocol and game
+meaning. The negotiated server session profile is authoritative. Browser
+conformance tests for a future WebTransport adapter must cover both reliability
+API shapes described above.
 
 ### Desktop XR and Android XR
 
@@ -514,10 +520,11 @@ motion traces or short captures are required for interpolation quality.
    simulator that injects loss, duplication, reordering, delay, and pressure.
    Decide full samples, component masks, quantization, keyframes, and recovery
    from measured results.
-6. **Mixed-reliability transport.** Spike the Rust WebTransport candidates
-   on desktop, Android, and Quest; then add the dedicated endpoint, browser
-   worker adapter, native clients, capability/effective-profile negotiation,
-   and reliable fallback. Prove one logical pose stream over both profiles.
+6. **Mixed-reliability transport — active Tactical 224.** Add capability and
+   effective-profile negotiation, reliable fallback, and dependency-free
+   native TCP-plus-UDP on desktop, Android, and Quest through the shared native
+   adapter. Prove one logical pose stream over both profiles. WebTransport and
+   WebRTC remain separate future carrier milestones.
 7. **Component embodiment.** Add optional body/view separation, tracked head,
    and tracked hands; extend the shared actor/presentation/render contracts
    through Mono, per-eye XR, and multiview using the established pose lane.
@@ -543,8 +550,13 @@ path.
   datagram adapter is enabled.
 - A mixed reliable-stream plus unreliable-datagram session is a supported
   dedicated-server and first-party-client target.
-- WebTransport over HTTP/3/QUIC is the preferred common native/browser
-  transport; TCP/WebSocket remains the reliable compatibility profile.
+- Logical lanes and negotiated capabilities are the architecture; no one
+  physical carrier is the common native/browser protocol.
+- Dependency-free native TCP-plus-UDP is the first production mixed profile;
+  TCP/WebSocket remains the reliable compatibility profile.
+- WebTransport remains a future browser-capable client/server and
+  Share-to-Browser carrier, while WebRTC remains the browser-hosted peer
+  carrier.
 - The candidate defaults are 60 Hz body reporting on mixed reliability and
   20 Hz on reliable compatibility, independently of 60 Hz local movement.
 - WebRTC reliable and ephemeral data channels are the accepted carrier for
@@ -562,8 +574,10 @@ path.
   keyframes plus deltas/component masks.
 - Where server coalescing occurs relative to interest changes and per-observer
   budgets.
-- Which Rust WebTransport implementation satisfies desktop, Android, Quest,
-  server-operation, maintenance, and binary-size gates.
+- Whether a future unified reliable-UDP/QUIC carrier provides enough measured
+  benefit to replace native TCP-plus-UDP.
+- Which Rust WebTransport implementation satisfies future
+  Share-to-Browser/server-operation, maintenance, and binary-size gates.
 - Certificate, port, reverse-proxy, and local-development ergonomics for
   self-hosted WebTransport.
 

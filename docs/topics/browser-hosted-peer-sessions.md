@@ -136,9 +136,10 @@ would require either:
 - a gateway that terminates WebRTC and forwards the neutral Mclone protocol.
 
 That dependency and deployment choice must be measured independently.
-WebTransport remains the preferred dedicated-server and native-integrated-host
-transport. Browser-hosted WebRTC is an additional topology, not its
-replacement.
+Dedicated and native-integrated hosts expose the same carrier-neutral logical
+lanes through native TCP-plus-UDP, compatibility transports, or a future
+WebTransport adapter. Browser-hosted WebRTC is an additional topology, not a
+replacement for those client/server profiles.
 
 ## Implementation Sequence
 
@@ -170,8 +171,9 @@ replacement.
 - The page-side peer broker remains a transport adapter; simulation and
   protocol policy stay in shared Rust owners.
 - Initial rooms are small host-centered stars without host migration.
-- Browser WebRTC and client/server WebTransport solve different connection
-  topologies and should both be supported.
+- Browser WebRTC and client/server carriers such as native TCP-plus-UDP and
+  WebTransport solve different connection topologies and should coexist
+  behind the same logical lanes.
 
 ## Open Decisions
 

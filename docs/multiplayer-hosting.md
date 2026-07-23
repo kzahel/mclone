@@ -69,7 +69,7 @@ the same protocol/client/server boundary as singleplayer.
   pressure disconnects.
 - **`--multi-client-smoke`** runs the multi-client integration check (two clients
   sharing a world with remote-player replication).
-- `PROTOCOL_VERSION = 29` is negotiated with strict equality. The handshake
+- `PROTOCOL_VERSION = 32` is negotiated with strict equality. The handshake
   also carries the client's unauthenticated stable local UUID/display name;
   persistent realms save pose, selected slot, XP, typed statistics, health,
   and a pending typed death cause under that UUID. Ordered owner life updates
@@ -142,9 +142,11 @@ must expose whether a session is direct or relayed rather than promising that
 room-key joins are always serverless.
 
 The browser still cannot listen for inbound WebTransport. That limitation does
-not prevent it from hosting authority through WebRTC. WebTransport remains the
-preferred dedicated-server/native-host carrier, while browser-hosted rooms use
-the browser's WebRTC stack and reuse the same logical protocol and authority.
+not prevent it from hosting authority through WebRTC. WebTransport is one
+future browser-capable client/server carrier, while native clients can use a
+TCP-plus-UDP profile and compatibility clients can use TCP or WebSocket.
+Browser-hosted rooms use the browser's WebRTC stack and reuse the same logical
+protocol and authority.
 See
 [`topics/browser-hosted-peer-sessions.md`](./topics/browser-hosted-peer-sessions.md)
 for the ownership, lifecycle, and implementation contract.
@@ -152,9 +154,10 @@ for the ownership, lifecycle, and implementation contract.
 ## Guardrails
 
 - Keep authority, transport, and asset hosting orthogonal.
-- Keep TCP and WebSocket as compatibility transports; use WebTransport for the
-  preferred client/server mixed-reliability path and WebRTC for browser-hosted
-  peer rooms.
+- Keep TCP and WebSocket as compatibility transports; select the best
+  negotiated ephemeral carrier independently. Start with dependency-free
+  native UDP, retain WebTransport as a future browser-capable client/server
+  carrier, and use WebRTC for browser-hosted peer rooms.
 - Keep dedicated world configuration server-owned.
 - Reuse the integrated-host authority in browser rooms; WebRTC changes the
   carrier, not the simulation or persistence owner.

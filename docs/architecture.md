@@ -116,8 +116,10 @@ World state and chunk records should have an engine-defined logical shape. Brows
 Likewise, local singleplayer and remote multiplayer should share the same message model, with different transports:
 
 - local: `postMessage` / `MessagePort`
-- remote dedicated/native host: TCP/WebSocket compatibility, with WebTransport
-  as the preferred mixed-reliability target
+- remote dedicated/native host: carrier-neutral reliable and ephemeral lanes;
+  TCP/WebSocket are the reliable compatibility carriers, dependency-free
+  TCP-plus-UDP is the first native mixed-reliability carrier, and WebTransport
+  remains a future browser-capable carrier
 - browser-hosted peer rooms: WebRTC reliable and ephemeral data channels
 
 The client platform is not the host mode. Desktop flat, flat Android, web,
@@ -433,8 +435,8 @@ That means:
   over an in-process or worker transport
 - remote dedicated play uses the same serialized messages over native TCP
   (desktop) or WebSocket (browser)
-- WebTransport, WebRTC, or other transports must carry the same logical
-  messages instead of redefining authority
+- raw UDP, WebTransport, WebRTC, or other transports must carry the same
+  logical reliable/ephemeral messages instead of redefining authority
 
 What has landed on that rule (now on the Rust client/server boundary):
 

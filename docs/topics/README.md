@@ -60,7 +60,8 @@ series implements the same concern, normally reuse the document slug in its
   mclone Overworld.
 - [`multiplayer-networking.md`](multiplayer-networking.md): wire protocol,
   transports, session lifecycle, server tick/publication cadence, accepted
-  mixed-reliability WebTransport direction, and native-host **Share to
+  carrier-neutral reliable/ephemeral direction, dependency-free native UDP
+  first slice, future browser-capable carriers, and native-host **Share to
   Browser** links through a versioned public HTTPS launcher.
 - [`realm-dimension-runtime.md`](realm-dimension-runtime.md): accepted unified
   `RealmServer` topology for integrated, Web Worker, dedicated, and test hosts;
@@ -135,8 +136,9 @@ series implements the same concern, normally reuse the document slug in its
 - [`remote-player-presentation.md`](remote-player-presentation.md): accepted
   remote embodiment work stream — independently configurable body/tracked-pose
   report and replication cadences, buffered interpolation, separate XR
-  body/head/hands, transport-neutral loss-tolerant pose semantics, and a
-  WebTransport/QUIC mixed-reliability target with TCP/WebSocket compatibility.
+  body/head/hands, transport-neutral loss-tolerant pose semantics,
+  dependency-free native TCP-plus-UDP first, and TCP/WebSocket compatibility
+  with future WebTransport/WebRTC carriers.
 - [`browser-hosted-peer-sessions.md`](browser-hosted-peer-sessions.md):
   accepted browser-authoritative room topology — the existing worker
   `RealmServer`, room-key signaling, WebRTC reliable/ephemeral channels,

@@ -229,12 +229,14 @@ plus app-owned sockets):
   `native:web:remote-smoke` validates that worker path against the native
   dedicated WebSocket server.
 
-There is no HTTP, WebTransport, or WebRTC gameplay transport, and no Node/Deno
-host.
+There is no HTTP, raw-UDP, WebTransport, or WebRTC gameplay transport yet, and
+no Node/Deno host.
 
 The reliable ordered publication lane is now implemented. Planned
-WebTransport datagrams and browser-hosted WebRTC ephemeral channels for
-high-rate entity/player transforms must preserve spawn/despawn, correction,
-and keyframe ordering and must not redesign authority around the carrier.
-Compression, authentication, required capabilities, version ranges, and
-reconnect-without-rebuilding-the-replica remain future protocol work.
+carrier-neutral ephemeral messages for high-rate player pose will first gain a
+dependency-free native UDP adapter and reliable-stream fallback. Later
+WebTransport datagrams and browser-hosted WebRTC ephemeral channels must decode
+to that same logical contract, preserve spawn/despawn, correction, and keyframe
+barriers, and must not redesign authority around the carrier. Compression,
+authentication, required capabilities, version ranges, and reconnect without
+rebuilding the replica remain future protocol work.
