@@ -2,8 +2,8 @@
 
 Status: active 2026-07-23. The reusable procedural-start kernel, bounded
 stream plan, clipped field-revision-12 realization, hydraulic proof, and
-profile-correct far LOD are implemented. Persistence, performance, and final
-human review remain.
+profile-correct far LOD, and SQLite reopen proof are implemented.
+Performance and final human review remain.
 
 Topics: `mclone-overworld-generation`, `procedural-structure-starts`
 
@@ -458,7 +458,7 @@ Revision closeout 2026-07-23:
   unintended mutation and an empty queue.
 - [x] Route synthetic far LOD and review sampling through the same immutable
   plan/column facts.
-- [ ] Record the accepted deterministic reconstruction or persist versioned
+- [x] Record the accepted deterministic reconstruction or persist versioned
   start/reference metadata across native SQLite and browser IndexedDB reopen.
 
 Gate: full chunks, LOD, reload, native worker, and browser Worker agree on
@@ -491,6 +491,30 @@ LOD checkpoint 2026-07-23:
 - all 309 `mclone-app-runtime` library tests pass, while native and
   `wasm32-unknown-unknown` browser checks compile the complete transport
   boundary. Existing unrelated target-specific warnings remain.
+
+Persistence checkpoint 2026-07-23:
+
+- the first internal/unshipped revision uses deterministic reconstruction,
+  not a new persisted structure-start record: seed, profile field revision,
+  topology, structure kind, and canonical start chunk fully determine the
+  immutable plan;
+- exact candidate reconstruction, request-order/partition/cache independence,
+  and periodic seam ownership are already pinned by the planning and
+  realization fixtures;
+- a native threaded SQLite fixture now generates a reviewed mid-route stream
+  chunk, proves its centerline source water, closes persistence, reopens the
+  world, and receives an exactly equal full `ChunkSnapshot` with
+  `LoadedFromStore` residency; and
+- this is intentionally scoped to the current `internal-mutable`
+  `mclone-overworld-v1` ledger. Before a release freeze or queryable gameplay
+  such as `/locate`, the project must add versioned start/reference metadata
+  rather than relying only on deterministic replay and final chunk blocks.
+
+Browser IndexedDB already stores the same portable chunk record and generation
+descriptor codecs used by its scheduler path. A browser-specific database
+reopen test is not required to prove a new structure metadata record because
+this revision adds none; worker/profile equivalence and the shared record
+codec remain the relevant browser gates.
 
 ### Slice 5: performance and human review
 

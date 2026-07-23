@@ -68,8 +68,11 @@ field fingerprints, and prove exact seam-crossing realization on the
 Synthetic far LOD now carries the active generation profile through startup,
 scene runtime, native workers, browser doorbells, and Web Workers. Its Mclone
 source reuses the same immutable bounded stream-plan cache and matches
-authoritative stream columns at the reviewed route. Persistence and
-performance closeout remain.
+authoritative stream columns at the reviewed route. A reviewed mid-route
+chunk also survives native SQLite close/reopen as an exactly equal snapshot
+loaded from storage. Deterministic plan reconstruction is accepted while the
+profile remains internal-mutable; versioned queryable start/reference records
+are required before release freeze. Performance closeout remains.
 
 ## Scope
 
@@ -959,9 +962,9 @@ procedural starts and references, a 48-96-block monotonic plan, clipped
 continuous valley terrain, fixed-point water stencils, and matching synthetic
 LOD. Full-route closure, all-water authoritative wake, deterministic
 partition/periodic fixtures, and production pixels pass. Tactical 222 next
-needs persisted-chunk reopen evidence, a same-host generation comparison, an
-accelerated one-minute movement soak, and final human inspection of the
-headwater, reaches, transitions, and confluence. One
+needs a same-host generation comparison, an accelerated one-minute movement
+soak, and final human inspection of the headwater, reaches, transitions, and
+confluence. One
 river-to-shelf-to-deep-basin composition remains an objective review gap.
 General drainage-network semantics remain deliberately absent.
 

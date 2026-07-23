@@ -1,4 +1,5 @@
 use super::support::*;
+use crate::player_chunk_tracking::PlayerChunkTrackingPolicy;
 
 #[test]
 fn stored_light_chunks_satisfy_interest_without_worldgen() {
@@ -596,5 +597,82 @@ fn integrated_server_saves_and_reloads_resident_chunk() {
     assert!(!holder.is_dirty());
     assert_eq!(reloaded.scheduler().dirty_chunk_count(), 0);
 
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn mclone_valley_stream_chunk_roundtrips_sqlite_across_reopen() {
+    let root = unique_temp_dir("mclone_valley_stream_chunk_sqlite_reopen");
+    let seed = -98_765;
+    let definition =
+        DimensionDefinition::overworld(seed, WorldGenerationProfile::McloneOverworldV1);
+    let planner = mclone_worldgen::levelgen::McloneOverworldStreamPlanner::new(
+        seed,
+        mclone_worldgen::levelgen::McloneOverworldSamplingTopology::Unbounded,
+    );
+    let candidate = planner
+        .potential_start(ChunkPos::new(147, -126))
+        .expect("stream placement");
+    let plan = planner
+        .plan_start(candidate)
+        .expect("stream plan")
+        .expect("reviewed stream start");
+    let stream_node = &plan.nodes[plan.nodes.len() / 2];
+    let center = ChunkPos::from_block_coords(stream_node.x, stream_node.z);
+    let stream_water = WorldBlockPos::new(stream_node.x, stream_node.water_y, stream_node.z);
+    let interest = ChunkView {
+        center,
+        render_distance: 0,
+        chunk_tracking_radius: 0,
+    };
+
+    let first_snapshot = {
+        let mut server =
+            LocalRealmSession::try_with_threaded_sqlite_world_dir_dimension_definition_and_player_chunk_tracking_policy(
+                definition.clone(),
+                &root,
+                PlayerChunkTrackingPolicy::default(),
+            )
+            .unwrap();
+        server.set_lighting_enabled(false);
+        let updates =
+            try_handle_command_and_poll(&mut server, ClientCommand::SetChunkView(interest.clone()))
+                .unwrap();
+        let snapshot = snapshot_update_for(&updates, center)
+            .expect("generated stream chunk is published")
+            .clone();
+        assert_eq!(
+            snapshot_block_state(&snapshot, stream_water),
+            generated_block_state_id(WATER),
+            "reviewed route node must persist source water"
+        );
+        server.shutdown_persistence().unwrap();
+        snapshot
+    };
+
+    let mut reopened =
+        LocalRealmSession::try_with_threaded_sqlite_world_dir_dimension_definition_and_player_chunk_tracking_policy(
+            definition,
+            &root,
+            PlayerChunkTrackingPolicy::default(),
+        )
+        .unwrap();
+    reopened.set_lighting_enabled(false);
+    let updates =
+        try_handle_command_and_poll(&mut reopened, ClientCommand::SetChunkView(interest)).unwrap();
+    let reopened_snapshot =
+        snapshot_update_for(&updates, center).expect("stored stream chunk is republished");
+
+    assert_eq!(reopened_snapshot, &first_snapshot);
+    assert_eq!(
+        snapshot_block_state(reopened_snapshot, stream_water),
+        generated_block_state_id(WATER)
+    );
+    assert_eq!(
+        reopened.scheduler().holder(center).unwrap().residency(),
+        ChunkResidency::LoadedFromStore
+    );
+    reopened.shutdown_persistence().unwrap();
     std::fs::remove_dir_all(root).unwrap();
 }
