@@ -29,8 +29,10 @@ and structures remain parked while those terrain families advance.
 The active water slice is
 [`tactical/220-mclone-overworld-rivers-and-wetlands.md`](tactical/220-mclone-overworld-rivers-and-wetlands.md).
 Its broad periodic river corridor, terrain carving, banks, local water levels,
-river biome/substrate, and sparse shallow wetland pools are live; Human Review
-1 is open before platform closeout and selection of the next water family.
+river biome/substrate, and sparse shallow wetland pools are live, but Human
+Review 1 rejected the pointwise water surface on 2026-07-23. Transverse slopes
+and uncontained source faces require a flat contained-reach correction plus
+hydraulic and sustained-performance evidence before platform closeout.
 
 Compatibility safety is recorded in the
 [`world-generation-profiles` ledger](topics/world-generation-profiles.md#compatibility-safety-ledger).
@@ -96,7 +98,9 @@ Landed native coverage:
   pools. Production maps and actual 384-chunk cylinder-seam cards agree with
   chunk output. The reviewed fixed-work implementation remains deliberately
   short of drainage-network, tributary, confluence, discharge, and true
-  downstream-reach semantics.
+  downstream-reach semantics. Its first hydraulic realization is rejected:
+  column-local water height can slope across a channel and expose source faces
+  above lower enclosure terrain.
 - Production-backed broad field maps and fully warmed seed/region/spawn cards;
   the first review accepted macro scale and coast variation after adding one
   fine relief octave to break up concentric local contour bands. The second
@@ -153,7 +157,8 @@ Still not full vanilla parity:
 - the first original island generator remains intentionally bounded; the
   continuous mclone overworld now exists but has only a deliberately narrow
   terrain/material/biome/vegetation palette. Its first broad river and sparse
-  wetland family is at Human Review 1, and it still has no small streams,
+  wetland family failed Human Review 1 and is being corrected to flat contained
+  reaches. It still has no small streams,
   cascades, waterfalls, caves, or structures
 - Mclone Overworld terrain, biome, surface, spawn, existing vegetation, broad
   rivers, and wetland pools are periodic for the exact 384-chunk X cylinder.

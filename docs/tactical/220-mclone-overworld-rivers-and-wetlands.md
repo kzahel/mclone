@@ -1,10 +1,12 @@
 # Tactical 220: Mclone Overworld Rivers And Wetlands
 
-Status: Human Review 1 open 2026-07-22. Slices 0-2 produced field revision 7
-and decoration revision 4 on the plane and exact 384-chunk X cylinder. Broad
-rivers, graded banks, coast transitions, local river levels, river biomes, and
-sparse shallow inland wetland pools are live and inspected. Slice 3 platform
-closeout remains intentionally paused until the visual/architecture decision.
+Status: Human Review 1 rejected the field-revision-7 hydraulic surface on
+2026-07-23. Its pointwise terrain-relative water height can bank across a
+channel, expose source-water sides above lower neighboring terrain, and spill
+when a nearby block wakes the fluid simulation. Do not close or preserve that
+output. Corrective Slice 2B replaces it with conservative flat, contained
+reaches before another visual review; baked waterfalls remain a later bounded
+template slice.
 
 Topic: `mclone-overworld-generation`
 
@@ -47,6 +49,12 @@ The required local reference sources were read on 2026-07-22:
   upper half, and performs local surface/freeze repair; and
 - `SpringFeature` places a liquid source only when a configured count of the
   five adjacent positions is rock and another configured count is empty.
+- the disabled `Aquifer` used by the 1.17.1 target fills default source water
+  only below one global sea level and reports
+  `shouldScheduleFluidUpdate() == false`; and
+- `NoiseBasedChunkGenerator` schedules generated fluid only when the selected
+  aquifer explicitly requests it, while springs and exposed underwater-carver
+  cells schedule local ticks.
 
 The reusable lessons are pipeline separation, deterministic domains, a
 smoothed independent river signal, and local validation before liquid writes.
@@ -59,6 +67,11 @@ they are not substitutes for that macro fact.
 
 This work does not port the disabled 1.17.1 aquifer or Caves & Cliffs density
 paths.
+
+Vanilla therefore does not pre-settle ordinary rivers. It avoids the problem:
+the river layer is principally biome language, ordinary Overworld water is one
+flat sea-level source body, and only bounded exposed liquid features request
+runtime work.
 
 ## First Field Decision
 
@@ -203,7 +216,68 @@ close into loops and do not produce tributary, confluence, discharge, or true
 downstream network identity. Sparse pools make the wetland fact physical, but
 wetland vegetation and material character remain deliberately minimal.
 
-### Slice 3: reuse and platform closeout after human acceptance
+Human Review 1 result, 2026-07-23: **rejected**. Interactive inspection found
+two correctness failures hidden by the elevated cards:
+
+- `water_surface_y` follows broad terrain independently at every column, so
+  the water plane can slope across the channel rather than only descend along
+  a real flow transition; and
+- bank grading only lowers terrain. A channel source may therefore border air
+  above a lower natural enclosure, appearing to float until a block mutation
+  schedules it and the ordinary fluid simulation spills it outward.
+
+These are not material/charm defects. The initial generated water is not a
+fixed point of the runtime fluid rules, so revision 7 cannot proceed to
+platform closeout.
+
+### Corrective Slice 2B: flat contained reach foundation
+
+- [ ] Make ordinary generated river water one constant integer level within
+  every implemented reach; begin conservatively with naturally contained
+  lowland/sea-level reaches rather than inventing an unproven reach graph.
+- [ ] Remove physical highland/wetland water wherever the generator cannot
+  establish bounded containment. Retain dry field facts only when useful.
+- [ ] Give each wet column a solid bottom and require every horizontal source
+  boundary at its water level to meet source water or solid containment.
+- [ ] Permit only a small, explicit bank-repair budget with local materials;
+  reject water rather than build large levees.
+- [ ] Add a production hydraulic-closure diagnostic over generated regions.
+  The ordinary flat-reach result must emit no initial fluid ticks and waking
+  exposed source boundaries in a copy must produce no mutation.
+- [ ] Re-run multi-seed maps and RD16 pixels before adding rapids or falls.
+
+Gate: no transverse/sloped ordinary water, no floating source faces, no
+generated liquid ticks, and no hidden fluid mutation in the reviewed flat
+reach regions.
+
+### Corrective Slice 2C: performance and sustained movement
+
+- [ ] Re-run the Tactical 196/220 release field, surface, cold-decoration, and
+  warm-decoration comparison on the same host and parameters.
+- [ ] Run a paced 60-to-120-second native movement-frame soak through
+  `mclone-overworld-v1` with live fluid simulation.
+- [ ] Record p50/p95/p99/max frame work, generation/publication/mesh queues,
+  loaded chunks, fluid tick time, executed/deferred ticks, mutations, and
+  final/max scheduled-fluid depth.
+- [ ] Require zero generated-river fluid work throughout an untouched walking
+  soak. Any nonzero work must be attributed to another known generated feature
+  or blocks the reach result.
+
+Gate: warm generation remains reasonably close to the accepted baseline, work
+queues drain/plateau under movement, and passive rivers cause no fluid-tick
+tail.
+
+### Later bounded waterfall templates
+
+Do not run a whole-river fluid simulation during chunk generation. A later
+slice may settle a finite catalogue of width/drop/run/receiving-pool templates
+in build or test tooling, bake their source/flowing block stencils, and stamp
+only at sites satisfying bounded wall, lip, drop, and receiving-pool
+preconditions. Production generation stays fixed-work. Any optional
+output-changing offline quality mode must be persisted in the world descriptor
+and may not vary by chunk.
+
+### Slice 3: reuse and platform closeout after corrective human acceptance
 
 - [ ] Compare the working channel writer with vanilla lake/spring liquid and
   local validation mechanisms; extract only a behavior-preserving primitive

@@ -28,9 +28,11 @@ wetlands: Tactical
 [`220`](../tactical/220-mclone-overworld-rivers-and-wetlands.md) has landed its
 bounded broad-river field, graded channels and banks, local water level, river
 biome and substrate language, sparse shallow wetland pools, production maps,
-and periodic seam proof. Human Review 1 is open before platform closeout or a
-choice between network semantics, streams/cascades/falls, and further visual
-tuning.
+and periodic seam proof. Human Review 1 subsequently rejected its pointwise
+terrain-relative water height: it permits transverse water slopes and
+uncontained source faces that spill when woken. Corrective flat contained
+reaches, hydraulic-closure evidence, and a sustained walking/performance soak
+now precede platform closeout or further water vocabulary.
 
 ## Scope
 
@@ -196,6 +198,14 @@ Terrain, biome, surface material, spawn, review maps, and feature exclusion
 consume those facts. Riverbeds use gravel, wetland pools use clay, inland banks
 remain grassy, and coastal banks inherit sand. A reviewed coarse-dirt marsh
 band was rejected because it made floodplains look engineered.
+
+Field revision 7's hydraulic realization is rejected. Sampling a smooth water
+height independently at each column does not create a physically meaningful
+water surface: the gradient may point across the channel, and lowering banks
+cannot guarantee lateral containment. The correction begins with constant
+integer-level, naturally contained lowland reaches and removes water where a
+bounded cut/fill budget cannot make the initial source body a fixed point of
+the runtime fluid rules.
 
 This corridor family is fixed-work and visually continuous, but it is not yet
 a drainage network. Generic zero contours may form closed loops and do not
@@ -743,15 +753,14 @@ Human Review 3 accepted the result as more natural and less geometric.
 
 ## Next Work
 
-Human Review 1 is open on
+Human Review 1 rejected
 [`Tactical 220`](../tactical/220-mclone-overworld-rivers-and-wetlands.md).
-Review should decide whether to accept the bounded broad corridor for platform
-closeout and then add streams/cascades/waterfalls, or first add canonical
-macro-tile drainage and reach identity. Width, banks, wetlands, and vegetation
-can receive a smaller charm tune without changing that architecture.
-Waterfall placement must consume continuous watercourse and grade facts rather
-than decorate arbitrary cliffs. Caves, structures, and broad biome expansion
-remain parked until that decision.
+The next review requires flat contained reaches, hydraulic-closure evidence,
+release warm-generation comparison, and a 60-to-120-second movement/fluid soak.
+A later waterfall slice should stamp build-time-settled bounded templates
+rather than simulate whole rivers during chunk generation. Caves, structures,
+and broad biome expansion remain parked until the corrected water foundation
+passes.
 
 ## Related
 

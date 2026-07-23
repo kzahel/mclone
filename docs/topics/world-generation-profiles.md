@@ -417,14 +417,15 @@ concrete. The accepted terrain and reuse direction lives in
 [`195`](../tactical/195-periodic-cylinder-topology-proof.md), and
 [`196`](../tactical/196-periodic-mclone-terrain-fields.md) are complete.
 
-The selected project campaign is at Human Review 1 for its first bounded
-rivers/wetlands family. The live broad river, bank, local water-level, biome,
-substrate, and sparse wetland-pool facts use the same exact
-plane/384-chunk-cylinder sampler contract. Review now decides whether the next
-step is platform closeout followed by coherent stream/cascade/waterfall
-reaches, or a macro drainage/reach layer before smaller water. True structure
-infrastructure remains ready as a separate concern but is parked while this
-terrain campaign advances.
+Human Review 1 rejected the first bounded rivers/wetlands hydraulic
+realization. Its fields use the exact plane/384-chunk-cylinder sampler
+contract, but pointwise terrain-relative water height permits transverse
+slopes and uncontained source faces. Corrective work now owns conservative
+flat contained reaches, hydraulic-closure diagnostics, and sustained
+warm-generation/movement evidence before platform closeout. Later baked
+waterfall templates remain separate from production chunk-time simulation.
+True structure infrastructure remains ready as a separate concern but is
+parked while this terrain campaign advances.
 
 True native structure infrastructure and original mclone structures remain a
 separate follow-up. Before adding it, extend the typed artifact vocabulary for
