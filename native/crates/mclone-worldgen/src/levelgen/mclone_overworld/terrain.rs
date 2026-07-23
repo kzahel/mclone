@@ -89,13 +89,12 @@ fn generate_mclone_overworld_surface_chunk_with_stream_cache(
 
 /// Inspect generated water without running fluid simulation.
 ///
-/// Major rivers and oceans use level-zero Y63 source water. Bounded tributary
-/// landmarks add a Y67 source pool/reach and vertical level-eight falling
-/// columns below a source lip. Source bodies are closed when every horizontal
-/// boundary meets water or a motion-blocking cell and every source has solid
-/// or water support below it. A falling column is supported by water above it.
-/// A one-chunk halo makes the proof independent of the requested target
-/// boundary.
+/// Major rivers and oceans use level-zero Y63 source water. Bounded valley
+/// streams add several flat source reaches and authored transition stencils.
+/// Source bodies are closed when every horizontal boundary meets water or a
+/// motion-blocking cell and every source has solid or water support below it.
+/// A falling column is supported by water above it. A one-chunk halo makes the
+/// proof independent of the requested target boundary.
 pub fn analyze_mclone_overworld_hydraulic_closure(
     seed: i64,
     topology: McloneOverworldSamplingTopology,
@@ -422,9 +421,9 @@ fn apply_stream_plans(
     sample.watercourse.distance = sample.watercourse.distance.min(intent.distance);
     sample.watercourse.bank_influence =
         sample.watercourse.bank_influence.max(intent.bank_influence);
-    sample.watercourse.raised_tributary_influence = sample
+    sample.watercourse.planned_stream_influence = sample
         .watercourse
-        .raised_tributary_influence
+        .planned_stream_influence
         .max(intent.influence);
     if intent.channel_influence == 0.0 {
         return;
@@ -434,7 +433,7 @@ fn apply_stream_plans(
         .watercourse
         .channel_influence
         .max(intent.channel_influence);
-    sample.watercourse.tributary_source_pool_influence = if intent.is_headwater {
+    sample.watercourse.stream_headwater_influence = if intent.is_headwater {
         intent.channel_influence
     } else {
         0.0
@@ -648,9 +647,9 @@ mod tests {
         assert_eq!(
             fingerprints,
             [
-                (2_430_787_019_006_668_337, 540_454_697_130_909_605),
-                (17_888_646_860_546_090_117, 3_995_179_115_581_767_979),
-                (5_166_970_427_423_576_759, 14_722_381_067_837_031_305),
+                (16_814_275_564_477_349_497, 540_454_697_130_909_605),
+                (17_836_579_662_090_859_138, 3_995_179_115_581_767_979),
+                (9_399_436_600_503_439_313, 14_722_381_067_837_031_305),
             ]
         );
     }
@@ -707,19 +706,19 @@ mod tests {
             receipts,
             [
                 (
-                    [21_961, 9_543, 18_460, 14_121, 1_451],
-                    [16_943, 12_604, 1_409, 42, 2_538, 31_892, 108],
-                    12_512_909_875_598_697,
+                    [21_961, 9_556, 18_465, 14_117, 1_437],
+                    [16_943, 12_607, 1_395, 42, 2_560, 31_884, 105],
+                    3_897_804_533_720_171_775,
                 ),
                 (
-                    [17_223, 8_067, 17_274, 21_252, 1_720],
-                    [12_358, 11_053, 1_609, 111, 2_841, 37_276, 288],
-                    5_968_977_450_935_617_420,
+                    [17_223, 8_076, 17_269, 21_253, 1_715],
+                    [12_358, 11_054, 1_604, 111, 2_850, 37_271, 288],
+                    110_489_083_812_910_482,
                 ),
                 (
-                    [33_641, 11_572, 10_830, 8_519, 974],
-                    [26_125, 17_796, 902, 72, 1_882, 18_751, 8],
-                    8_773_927_903_654_210_865,
+                    [33_641, 11_579, 10_825, 8_519, 972],
+                    [26_125, 17_799, 900, 72, 1_887, 18_745, 8],
+                    16_139_248_388_008_531_613,
                 ),
             ]
         );

@@ -13,7 +13,7 @@ use super::fields::{
     McloneOverworldSampler, McloneOverworldSamplingTopology,
 };
 
-pub const MCLONE_OVERWORLD_STREAM_STRUCTURE_TYPE: &str = "mclone:raised_stream";
+pub const MCLONE_OVERWORLD_STREAM_STRUCTURE_TYPE: &str = "mclone:valley_stream";
 pub const MCLONE_OVERWORLD_STREAM_PLACEMENT_SPACING_CHUNKS: u32 = 8;
 pub const MCLONE_OVERWORLD_STREAM_PLACEMENT_SEPARATION_CHUNKS: u32 = 3;
 pub const MCLONE_OVERWORLD_STREAM_REFERENCE_RADIUS_CHUNKS: u8 = 8;
@@ -1361,5 +1361,17 @@ mod tests {
             .potential_start(ChunkPos::new(MCLONE_OVERWORLD_PERIOD_CHUNKS as i32 - 1, 12))
             .unwrap();
         assert_eq!(left.canonical_start, right.canonical_start);
+
+        let candidate = planner
+            .potential_start(ChunkPos::new(3, -935))
+            .expect("periodic stream placement");
+        assert_eq!(candidate.work_start, ChunkPos::new(3, -935));
+        let plan = planner
+            .plan_start(candidate)
+            .expect("periodic stream plan")
+            .expect("reviewed seam-crossing stream");
+        assert!(plan.structure.bounds.min_x < 0);
+        assert!(plan.structure.bounds.max_x >= 0);
+        assert_eq!(plan.structure.key.canonical_start, ChunkPos::new(3, -935));
     }
 }

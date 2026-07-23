@@ -384,13 +384,13 @@ valley cross-section and first actual pixels.
 
 ### Slice 3: clipped terrain and water realization
 
-- [ ] Replace revision 11's raised contour landmark with the accepted stream
+- [x] Replace revision 11's raised contour landmark with the accepted stream
   plan behind a new field/landmark revision.
 - [x] Apply stream terrain intent before surfaces and vegetation.
 - [x] Realize headwater, reach, riffle/cascade/fall, receiver, and confluence
   pieces through per-target clipping.
 - [x] Preserve plane target partition and cache-independent output.
-- [ ] Preserve the periodic seam and update intentional output fingerprints.
+- [x] Preserve the periodic seam and update intentional output fingerprints.
 
 Gate: exact generated blocks are independent of target request order and no
 piece writes beyond its clipped target box.
@@ -431,9 +431,24 @@ roughly 95-block source-to-river stream with three drops, a shallow grassed
 valley, a rounded headwater pool, and a widened confluence. RD16 production
 top-down, landscape, and elevated evidence is under
 `/tmp/mclone-stream-card-meander`. The first complete pixels are materially
-more natural than the rejected shelf, but the field revision remains 11 until
-the dead revision-11 solver is removed, periodic/output fixtures are updated,
-and the remaining closeout gates pass.
+more natural than the rejected shelf. This checkpoint deliberately retained
+field revision 11 until the following cleanup and periodic gates passed.
+
+Revision closeout 2026-07-23:
+
+- field revision 12 and decoration revision 9 identify the procedural valley
+  stream output;
+- the disabled revision-11 tributary noise domains, selector, contour solver,
+  containment branch, and vocabulary have been removed rather than retained
+  as dead generation code;
+- the surviving watercourse facts are named for the planned stream and its
+  headwater instead of the rejected raised tributary;
+- raw terrain, biome, and surface-language fingerprints were intentionally
+  updated to the revision-12 no-landmark baseline; procedural stream output is
+  proven separately at its accepted starts; and
+- seed `12345`, periodic candidate `(3,-935)` owns a reviewed plan whose
+  bounding box crosses the X seam. The exact generated stream chunk equals
+  its 384-chunk lift.
 
 ### Slice 4: hydraulic, LOD, and persistence closeout
 

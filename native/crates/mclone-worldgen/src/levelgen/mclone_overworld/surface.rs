@@ -70,7 +70,7 @@ pub(super) fn write_surface_column(
         }
         McloneOverworldSurfaceRecipe::RiverBank => {
             if sample.terrain.base_surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 5
-                && !sample.terrain.watercourse.is_raised_tributary()
+                && !sample.terrain.watercourse.is_planned_stream()
             {
                 write_subsurface(buffer, local_x, local_z, surface_y, SAND, 4);
             } else {
@@ -154,8 +154,8 @@ mod tests {
                     distance: 512.0,
                     channel_influence: 0.0,
                     major_channel_influence: 0.0,
-                    raised_tributary_influence: 0.0,
-                    tributary_source_pool_influence: 0.0,
+                    planned_stream_influence: 0.0,
+                    stream_headwater_influence: 0.0,
                     bank_influence: 0.0,
                     half_width: 6.0,
                     water_surface_y: MCLONE_OVERWORLD_SEA_LEVEL,

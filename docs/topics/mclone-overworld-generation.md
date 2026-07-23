@@ -61,9 +61,10 @@ complete reviewed route cuts a grassed shallow valley, calm multi-block
 reaches, a rounded headwater, three cardinal fixed-point drop stencils, and a
 widened Y63 confluence without any containment fill. Exact target partition,
 full-route closure, authoritative all-water wake, and RD16 production pixels
-pass. The profile intentionally still reports field revision 11 until dead
-revision-11 code, periodic/output fixtures, LOD, persistence, and performance
-closeout are complete.
+pass. Field revision 12 and decoration revision 9 remove the dead revision-11
+contour/berm solver, adopt planned-stream vocabulary, update intentional raw
+field fingerprints, and prove exact seam-crossing realization on the
+384-chunk cylinder. LOD, persistence, and performance closeout remain.
 
 ## Scope
 

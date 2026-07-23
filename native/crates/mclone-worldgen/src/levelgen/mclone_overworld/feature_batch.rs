@@ -604,6 +604,34 @@ mod tests {
     }
 
     #[test]
+    fn periodic_stream_realization_repeats_across_seam_lifts() {
+        let seed = 12_345;
+        let topology = McloneOverworldSamplingTopology::PeriodicX;
+        let planner = super::super::streams::McloneOverworldStreamPlanner::new(seed, topology);
+        let candidate = planner
+            .potential_start(ChunkPos::new(3, -935))
+            .expect("periodic stream placement");
+        let plan = planner
+            .plan_start(candidate)
+            .expect("periodic stream plan")
+            .expect("reviewed seam-crossing stream");
+        let seam_node = plan
+            .nodes
+            .iter()
+            .min_by_key(|node| node.x.abs())
+            .expect("stream plan has nodes");
+        let left = ChunkPos::new(seam_node.x.div_euclid(16), seam_node.z.div_euclid(16));
+        assert!(plan.structure.bounds.intersects_chunk(left));
+        assert!(plan.terrain_intent(seam_node.x, seam_node.z, 80).is_some());
+
+        let lifted = ChunkPos::new(left.x + MCLONE_OVERWORLD_PERIOD_CHUNKS as i32, left.z);
+        assert_eq!(
+            generate_mclone_overworld_chunk_with_topology(seed, topology, left.x, left.z),
+            generate_mclone_overworld_chunk_with_topology(seed, topology, lifted.x, lifted.z)
+        );
+    }
+
+    #[test]
     fn feature_stage_places_the_profile_owned_vegetation_family() {
         let targets = (-4..=4)
             .flat_map(|z| (-4..=4).map(move |x| ChunkPos::new(x, z)))
