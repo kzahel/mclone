@@ -5,8 +5,26 @@ SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
 REPO_ROOT=$(CDPATH= cd -- "$SCRIPT_DIR/.." && pwd)
 STAGE_DIR="$REPO_ROOT/dist/steamdeck"
 PAYLOAD_RUN="$REPO_ROOT/scripts/steam-deck/payload-run.sh"
-CLIENT_BINARY="$REPO_ROOT/native/target/release/mclone-native-client"
 ASSET_PACK="$REPO_ROOT/reference/minecraft-1.17.1/extracted.zip"
+STEAMRT4_BUILD_SCRIPT="$REPO_ROOT/scripts/steam-deck-build-steamrt4.sh"
+
+DECK_BUILDER=${MCLONE_STEAM_DECK_BUILDER:-host}
+case "$DECK_BUILDER" in
+    host)
+        CLIENT_BINARY=${MCLONE_STEAM_DECK_CLIENT_BINARY:-"$REPO_ROOT/native/target/release/mclone-native-client"}
+        BUILD_RUNTIME=host-ubuntu
+        BUILDER_RECEIPT=
+        ;;
+    steamrt4)
+        CLIENT_BINARY=${MCLONE_STEAM_DECK_CLIENT_BINARY:-"$REPO_ROOT/native/target/steamrt4/release/mclone-native-client"}
+        BUILD_RUNTIME=steamrt4-sdk-4.0.20260608.242786
+        BUILDER_RECEIPT="$REPO_ROOT/native/target/steamrt4/build-receipt.json"
+        ;;
+    *)
+        echo "steam-deck: unknown builder: $DECK_BUILDER" >&2
+        exit 1
+        ;;
+esac
 
 DECK_HOST=${MCLONE_STEAM_DECK:-steamdeck.local}
 DECK_USER=${MCLONE_STEAM_DECK_USER:-deck}
@@ -44,7 +62,9 @@ Environment:
   MCLONE_STEAM_DECK=HOST
       Deck hostname or address. Defaults to steamdeck.local.
   MCLONE_STEAM_DECK_SKIP_BUILD=1
-      Reuse native/target/release/mclone-native-client while staging.
+      Reuse the selected builder's existing binary while staging.
+  MCLONE_STEAM_DECK_BUILDER=host|steamrt4
+      Build on Ubuntu or in the pinned SteamRT4 SDK. Defaults to host.
   MCLONE_STEAM_DECK_SKIP_ASSET_CHECK=1
       Skip pnpm assets:pack:check while staging.
   MCLONE_STEAM_DECK_RUNTIME=SteamLinuxRuntime_4|none
@@ -88,12 +108,19 @@ stage_payload()
 
     local build_skipped=false
     if [[ ${MCLONE_STEAM_DECK_SKIP_BUILD:-0} != 1 ]]; then
-        cargo build \
-            --release \
-            --locked \
-            --manifest-path "$REPO_ROOT/native/Cargo.toml" \
-            -p mclone-native-client \
-            --bin mclone-native-client
+        case "$DECK_BUILDER" in
+            host)
+                cargo build \
+                    --release \
+                    --locked \
+                    --manifest-path "$REPO_ROOT/native/Cargo.toml" \
+                    -p mclone-native-client \
+                    --bin mclone-native-client
+                ;;
+            steamrt4)
+                "$STEAMRT4_BUILD_SCRIPT"
+                ;;
+        esac
     else
         build_skipped=true
     fi
@@ -117,7 +144,7 @@ stage_payload()
     install -Dm755 "$PAYLOAD_RUN" "$temp_stage/run.sh"
     install -Dm644 "$ASSET_PACK" "$temp_stage/assets/extracted.zip"
 
-    local commit dirty binary_sha asset_sha
+    local commit dirty binary_sha asset_sha builder_receipt
     commit=$(git -C "$REPO_ROOT" rev-parse HEAD)
     if [[ -z $(git -C "$REPO_ROOT" status --porcelain --untracked-files=normal) ]]; then
         dirty=false
@@ -126,6 +153,12 @@ stage_payload()
     fi
     binary_sha=$(sha256sum "$temp_stage/mclone-native-client" | cut -d' ' -f1)
     asset_sha=$(sha256sum "$temp_stage/assets/extracted.zip" | cut -d' ' -f1)
+    builder_receipt=null
+    if [[ -n $BUILDER_RECEIPT ]]; then
+        test -f "$BUILDER_RECEIPT" ||
+            die "builder receipt not found: $BUILDER_RECEIPT"
+        builder_receipt=$(jq -c . "$BUILDER_RECEIPT")
+    fi
     jq -n \
         --arg schema "mclone-steam-deck-stage-v1" \
         --arg commit "$commit" \
@@ -133,7 +166,8 @@ stage_payload()
         --argjson buildSkipped "$build_skipped" \
         --argjson assetCheckSkipped "$asset_check_skipped" \
         --arg target "x86_64-unknown-linux-gnu" \
-        --arg buildRuntime "host-ubuntu" \
+        --arg buildRuntime "$BUILD_RUNTIME" \
+        --argjson builderReceipt "$builder_receipt" \
         --arg binarySha256 "$binary_sha" \
         --arg assetSha256 "$asset_sha" \
         '{
@@ -144,6 +178,7 @@ stage_payload()
             assetCheckSkipped: $assetCheckSkipped,
             target: $target,
             buildRuntime: $buildRuntime,
+            builderReceipt: $builderReceipt,
             binarySha256: $binarySha256,
             assetSha256: $assetSha256
         }' >"$temp_stage/build.json"
