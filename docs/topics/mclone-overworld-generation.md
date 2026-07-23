@@ -85,14 +85,19 @@ Tactical
 [`223`](../tactical/223-mclone-climate-and-bookend-biomes.md) then adds
 periodic temperature and moisture, altitude cooling, and the first
 cool-wet-conifer, snowy-alpine, and warm-dry-steppe recipes. Field revision 13
-and decoration revision 10 carry taiga, snowy-mountain, and savanna-compatible
+and decoration revision 10 first carried taiga, snowy-mountain, and
+savanna-compatible
 biome IDs through Mclone-owned surfaces and feature tables. Far-LOD snow,
 SQLite reopen, exact periodic seams, browser WASM compilation, same-host
 generation benchmarks, a mixed-climate one-minute movement soak, and fully
-warmed RD16 cards pass. Implementation is complete and Human Review 1 is
-pending. The next recommended terrain campaign is sustained three-dimensional
-geology work, comparing placed rocks, bounded formation structures, and
-selective regional density modifiers before caves.
+warmed RD16 cards pass. Human Review 1 accepted the vocabulary but found the
+steppe too small. Field revision 14 and decoration revision 11 retain the old
+warm-dry core and add a continuous, sparser regional shoulder. Multi-seed
+component maps, alternating old/new generation measurements, and three fully
+warmed RD16 cards pass; Human Review 2 is pending. The next recommended
+terrain campaign remains sustained three-dimensional geology work, comparing
+placed rocks, bounded formation structures, and selective regional density
+modifiers before caves.
 
 ## Scope
 
@@ -826,9 +831,10 @@ subsystem horizontally.
      recipes.
    - Reuse configured feature implementations while owning selection,
      density, and seed domains.
-   - Field revision 13 now supplies periodic temperature/moisture,
-     altitude-adjusted snow, conifer, alpine, and steppe recipes. Tactical 223
-     is implementation-complete and awaiting Human Review 1.
+   - Field revision 14 now supplies periodic temperature/moisture,
+     altitude-adjusted snow, conifer, alpine, and core/shoulder steppe
+     recipes. Tactical 223 is implementation-complete and awaiting Human
+     Review 2 of the steppe-scale correction.
 7. **Three-dimensional geology and rock formations**
    - Give boulders, scree, tors, hoodoos, sea stacks, arches, cliff shelves,
      undercuts, and overhangs sustained shape and pixel iteration.

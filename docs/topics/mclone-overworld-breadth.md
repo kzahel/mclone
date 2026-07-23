@@ -7,7 +7,9 @@ ledger: vanilla Minecraft 1.17.1 supplies a measured reference vocabulary,
 while Mclone owns its regional recipes, distribution, terrain geometry, and
 visual identity. Tactical
 [`223`](../tactical/223-mclone-climate-and-bookend-biomes.md) has completed
-the first climate-driven implementation and is awaiting Human Review 1.
+the first climate-driven implementation. Human Review 1 accepted its
+vocabulary but requested a broader steppe; the core/shoulder correction is
+complete and awaiting Human Review 2.
 
 ## Scope
 
@@ -67,7 +69,7 @@ geology, vegetation, and landmark variation inside them.
 
 ## Current Original-Profile Baseline
 
-Field revision 13 emits eight vanilla-compatible biome IDs:
+Field revision 14 emits eight vanilla-compatible biome IDs:
 
 | ID | Current Mclone meaning | Decoration |
 |---:|---|---|
@@ -78,7 +80,7 @@ Field revision 13 emits eight vanilla-compatible biome IDs:
 | `7` | major river and planned stream water | none |
 | `5` | cool-wet conifer country | spruce/pine, ferns, berries |
 | `13` | cold alpine highland | snow/rock, treeless initially |
-| `35` | warm-dry steppe | sparse acacia, tall grass, restrained flowers |
+| `35` | warm-dry steppe core and regional shoulder | core acacia/tall grass, sparser shoulder |
 
 The terrain is already substantially broader than that biome list: continents,
 shelves and deep basins, beaches, open lowlands, wooded uplands, rugged
@@ -107,9 +109,9 @@ decoration language but do not change terrain geometry.
 | beach and shore | beach, stone shore, snowy beach | sea-level band | sand only | `live`, one shore family |
 | major river and wetland | rivers, swamps, lakes | flat Y63 corridor, banks, pools | gravel, sand/grass banks, clay pools | `reviewed`, no climate variants |
 | peaceful spring-fed creek | springs and bounded water landmarks | 91-96-block planned valley stream | grassed shoulders, fixed-point drops | `reviewed` |
-| cool-wet conifer upland | taiga, taiga hills | temperature + moisture + landform | spruce/pine, ferns, berries | `live`, Human Review 1 pending |
-| snowy alpine | snowy mountains, tundra | altitude-adjusted cold rugged terrain | snow, exposed rock, no trees initially | `live`, Human Review 1 pending |
-| warm-dry steppe | savanna and plateau | warm + dry open terrain | golden grass, tall grass, sparse acacia | `live`, Human Review 1 pending |
+| cool-wet conifer upland | taiga, taiga hills | temperature + moisture + landform | spruce/pine, ferns, berries | `live`, vocabulary accepted in Human Review 1 |
+| snowy alpine | snowy mountains, tundra | altitude-adjusted cold rugged terrain | snow, exposed rock, no trees initially | `live`, vocabulary accepted in Human Review 1 |
+| warm-dry steppe | savanna and plateau | warm/dry suitability core plus shoulder | golden grass, core acacia/tall grass, sparser shoulder | `live`, scale correction awaiting Human Review 2 |
 | flower meadow and birch grove | sunflower plains, flower/birch forest | temperate local selectors | broader flowers, birch stands | `planned` |
 | deep/dark or ancient forest | dark forest, giant taiga | humid sheltered terrain | dark oak or giant conifer, fungi, boulders | `planned` |
 | arid desert and dune field | desert and desert lakes | hot + very dry low relief | sand/sandstone, cactus, dead bush, oasis | `planned` |
@@ -221,8 +223,8 @@ voxel noise:
 
 ## Recommended Sequence
 
-1. Complete Human Review 1 for Tactical 223's climate fields and first three
-   regional recipes; apply only bounded art-direction corrections.
+1. Complete Human Review 2 for Tactical 223's bounded steppe-scale
+   correction.
 2. Add the first 3D-geology tactical before broad caves:
    - baseline and map the current heightfield limitation;
    - prove one placed boulder/talus family;

@@ -1,6 +1,8 @@
 # Tactical 223: Mclone Climate And Bookend Biomes
 
-Status: implementation complete 2026-07-23; Human Review 1 pending.
+Status: Human Review 1 accepted the regional vocabulary but requested a
+larger steppe scale; field revision 14 correction complete 2026-07-23 and
+Human Review 2 pending.
 
 Topics: `mclone-overworld-generation`, `mclone-overworld-breadth`
 
@@ -386,6 +388,80 @@ unrelated compiler warnings remain unchanged.
 This is the intended Human Review 1 stop. Acceptance or art-direction changes
 to regional distribution, tint, vegetation density, and snowline remain a
 human decision.
+
+## Human Review 1 Steppe-Scale Correction
+
+Human Review 1 found the conifer, alpine, and steppe vocabulary readable, but
+the reviewed steppe looked like a small savanna grove rather than regional
+steppe country. Field revision 14 and decoration revision 11 address only that
+scale problem.
+
+The old strict condition remains the **core**:
+
+- raw temperature at or above `0.18`; and
+- raw moisture at or below `-0.10`.
+
+The new **shoulder** uses a continuous geometric-mean suitability computed
+from independently normalized warmth and dryness. It remains bounded by
+temperature at or above `0.08`, moisture at or below `0.04`, and suitability
+at or above `0.38`. This rounds and enlarges the old rectangular climate
+corner without adding another noise sample or allowing a merely hot-wet or
+cold-dry column to become steppe.
+
+Both bands emit savanna biome ID `35` and the same grass surface. The core
+retains the reviewed acacia/tall-grass table. Shoulder chunks use zero base
+acacia attempts with a 45-percent one-tree extra chance, one tall-grass patch,
+and slightly rarer flowers. The region therefore expands more than its tree
+density.
+
+Review receipt schema 13 adds the suitability range and map, core/shoulder
+counts, separate sites, and four-connected realized-region components. Broad
+6,144-by-6,144-block maps now report:
+
+| Seed | Core | Shoulder | Total steppe | Dry-land share | Largest sampled span |
+|---:|---:|---:|---:|---:|---:|
+| `-98765` | 3,081 | 2,495 | 5,576 | 7.3% | 656 × 1,440 blocks |
+| `12345` | 4,336 | 4,436 | 8,772 | 15.8% | 704 × 976 blocks |
+| `8675309` | 2,643 | 3,461 | 6,104 | 11.7% | 1,008 × 1,520 blocks |
+
+The earlier totals were 3,155, 4,376, and 2,831 respectively. The exact
+component spans are observational: water, shore, rivers, and higher-priority
+recipes can split one underlying climate footprint, and components touching
+the map boundary are truncated.
+
+Three fully warmed RD16 cards were inspected:
+
+- seed `12345`, core chunk `(-5,0)`, where steppe now crosses the river and
+  occupies most of the view while temperate country remains visible at the
+  edges;
+- seed `-98765`, core chunk `(-7,-51)`, showing a broad inland region and a
+  conifer/temperate boundary; and
+- seed `8675309`, core chunk `(29,0)`, showing steppe meeting a large beach
+  and ocean rather than overriding the coast.
+
+Every card reached 1,225 of 1,225 loaded and render-ready target chunks with
+zero target-pending stream or render work.
+
+An alternating same-host pre-shoulder/post-shoulder release comparison used
+seed `-98765` at the origin and seed `12345` at the reviewed steppe hotspot.
+The no-feature control showed no regression within measurement noise. At the
+hotspot, cold generation changed from 692.526 to 699.311 targets/s and warm
+generation from 3,616.107 to 3,519.568 targets/s, a 2.7-percent warm cost
+while producing the larger decorated region.
+
+The unpaced movement probe was also rerun. It recorded zero over-budget
+frames, zero fluid work, a maximum of one worldgen job, and bounded render
+compile work, but it is not used as throughput acceptance for this correction:
+the accelerated loop can advance simulated movement faster than asynchronous
+workers receive wall time, render incomplete views more cheaply, and amplify
+that lead. Fully warmed cards and alternating static generation provide the
+bounded acceptance evidence. A truly paced walking lane remains the correct
+future improvement for end-user streaming throughput.
+
+The full `mclone-worldgen` suite passes with 310 tests and one ignored parity
+gauntlet. All 44 far-LOD tests, the focused SQLite reopen, all three review
+tool tests, and the browser WASM build pass. Human Review 2 now decides
+whether this scale correction closes Tactical 223.
 
 ## Stop Conditions
 

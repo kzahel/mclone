@@ -62,14 +62,16 @@ spring-fed-creek language, completing Tactical 222; general drainage
 semantics remain explicitly out of scope.
 Tactical
 [`223`](tactical/223-mclone-climate-and-bookend-biomes.md) is
-implementation-complete and awaiting Human Review 1. Field revision 13 adds
-periodic temperature/moisture and altitude cooling; decoration revision 10
-realizes cool-wet conifer, snowy alpine, and warm-dry steppe through
+implementation-complete after a bounded Human Review 1 correction and is
+awaiting Human Review 2. Field revision 14 provides periodic
+temperature/moisture, altitude cooling, and a continuous warm-dry suitability
+shoulder around the original steppe core; decoration revision 11 realizes
+cool-wet conifer, snowy alpine, and core/shoulder steppe through
 taiga/snowy-mountain/savanna-compatible biome IDs, alpine snow and exposed
 rock, spruce/pine/fern/berry language, and sparse
 acacia/tall-grass/flower language. Exact cylinder seams, far-LOD snow, SQLite
-reopen, browser WASM compilation, generation performance, a 3,600-frame
-mixed-climate movement route, and fully warmed RD16 cards pass.
+reopen, browser WASM compilation, alternating generation performance, and
+fully warmed RD16 cards pass.
 
 Compatibility safety is recorded in the
 [`world-generation-profiles` ledger](topics/world-generation-profiles.md#compatibility-safety-ledger).
@@ -155,7 +157,9 @@ Landed native coverage:
   woodland, and meadow recipes. New regions emit taiga `5`, snowy mountains
   `13`, and savanna `35`; alpine snow remains visible in synthetic far LOD,
   while conifer and steppe use Mclone-owned decoration density. Human Review
-  1 is pending.
+  1 accepted the vocabulary but requested larger steppe country. The live
+  correction preserves its dense core and adds a continuous, sparser
+  shoulder; Human Review 2 is pending.
 - Production-backed broad field maps and fully warmed seed/region/spawn cards;
   the first review accepted macro scale and coast variation after adding one
   fine relief octave to break up concentric local contour bands. The second
