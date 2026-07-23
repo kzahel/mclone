@@ -769,6 +769,29 @@ successful AVD rerun staged the current local reference pack with
 `MCLONE_ANDROID_ASSET_LOCK_CHECK=0`. This exception does not replace the open
 physical-controller, headset, Steam Deck, or haptic acceptance ledger.
 
+## Linux Quest Bring-Up Evidence
+
+Completed on 2026-07-23 with an attached Meta Quest 3:
+
+- Linux ADB authorization completed and the headset reported online as a Quest
+  3 running API 34.
+- The first device launch exposed that Horizon OpenXR requires every localized
+  action name in an action set to be unique. The analog attack action and the
+  simple-controller fallback both used `Attack`; the fallback now uses
+  `Simple Controller Attack`.
+- `cargo test -p mclone-xr-host` and the release Android XR APK build passed.
+  The standard submitted-frame validator then passed with the already-recorded
+  local reference-pack lock exception.
+- A persistent interactive launch reached assets, controller, session, terrain,
+  and submitted-frame ready markers without a fatal marker. An ADB headset
+  capture under `/tmp` was inspected and showed rendered terrain in both eye
+  images, and the user confirmed the running scene was visible in-headset.
+
+This closes the Quest action-set creation and application-launch regression. It
+does not close tracked or ordinary-controller physical interaction acceptance;
+the app reported two active tracked controllers, but their input behavior was
+not exercised in-headset during this bring-up.
+
 ## Definition Of Done
 
 Controller input is complete only when:

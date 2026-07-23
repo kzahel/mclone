@@ -63,6 +63,24 @@ android-xr/app/build/outputs/apk/debug/app-debug.apk
 android-xr/app/build/outputs/apk/release/app-release.apk
 ```
 
+### Linux ADB permissions
+
+If `lsusb` sees an Oculus device but `adb devices -l` is empty, check the USB
+node permissions. This host needed a vendor rule because the Quest node
+defaulted to `root:root 0664` even though it exposed the ADB `ff:42:01`
+interface:
+
+```text
+SUBSYSTEM=="usb", ATTR{idVendor}=="2833", MODE="0660", GROUP="plugdev", TAG+="uaccess"
+```
+
+Install that line as `/etc/udev/rules.d/51-oculus-adb.rules`, make sure the
+login user belongs to `plugdev`, reload the udev rules, and reconnect or
+re-trigger the headset. The first successful connection should then appear as
+`unauthorized`; put on the headset, accept the RSA prompt, and select
+**Always allow from this computer**. A healthy connection appears as `device`
+in `adb devices -l`.
+
 ## Install
 
 For interactive Quest testing from Windows, use the wrapper:

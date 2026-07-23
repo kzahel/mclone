@@ -75,7 +75,7 @@ impl OpenXrControllerActions {
         let right_use_value = action_set.create_action::<f32>("use", "Use", &[])?;
         let open_menu = action_set.create_action::<bool>("open_menu", "Open Menu", &[])?;
         let right_simple_attack =
-            action_set.create_action::<bool>("simple_attack", "Attack", &[])?;
+            action_set.create_action::<bool>("simple_attack", "Simple Controller Attack", &[])?;
         let jump = action_set.create_action::<bool>("jump", "Jump", &[])?;
         let descend = action_set.create_action::<bool>("descend", "Descend", &[])?;
         let sprint = action_set.create_action::<bool>("sprint", "Sprint", &[])?;
