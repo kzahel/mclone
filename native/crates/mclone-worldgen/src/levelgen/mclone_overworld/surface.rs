@@ -26,6 +26,22 @@ pub enum McloneOverworldSurfaceRecipe {
     ExposedStone,
 }
 
+impl McloneOverworldSurfaceRecipe {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::OceanFloor => "oceanFloor",
+            Self::Beach => "beach",
+            Self::RiverBed => "riverBed",
+            Self::WetlandBed => "wetlandBed",
+            Self::RiverBank => "riverBank",
+            Self::GrassSoil => "grassSoil",
+            Self::ErodedSlope => "erodedSlope",
+            Self::AlpineSnow => "alpineSnow",
+            Self::ExposedStone => "exposedStone",
+        }
+    }
+}
+
 pub fn mclone_overworld_surface_recipe(
     sample: McloneOverworldLandformSample,
 ) -> McloneOverworldSurfaceRecipe {

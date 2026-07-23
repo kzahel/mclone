@@ -1,4 +1,5 @@
 mod biomes;
+mod debug;
 mod decoration;
 mod feature_batch;
 mod fields;
@@ -16,10 +17,16 @@ pub use biomes::{
     MCLONE_OVERWORLD_STEPPE_SHOULDER_MIN_SUITABILITY,
     MCLONE_OVERWORLD_STEPPE_SHOULDER_MIN_TEMPERATURE, MCLONE_OVERWORLD_TAIGA_BIOME_ID,
     MCLONE_OVERWORLD_WOODED_MAX_EXPOSURE, MCLONE_OVERWORLD_WOODED_MAX_SLOPE,
-    MCLONE_OVERWORLD_WOODED_UPLAND_MIN_Y, McloneOverworldBiomeRecipe, McloneOverworldSteppeBand,
-    mclone_overworld_biome_id, mclone_overworld_biome_id_for_sample,
-    mclone_overworld_biome_id_with_topology, mclone_overworld_biome_recipe,
-    mclone_overworld_steppe_band, mclone_overworld_steppe_suitability,
+    MCLONE_OVERWORLD_WOODED_UPLAND_MIN_Y, McloneOverworldBiomeDecision, McloneOverworldBiomeRecipe,
+    McloneOverworldBiomeSelectionReason, McloneOverworldSteppeBand,
+    mclone_overworld_biome_decision, mclone_overworld_biome_id,
+    mclone_overworld_biome_id_for_sample, mclone_overworld_biome_id_with_topology,
+    mclone_overworld_biome_recipe, mclone_overworld_steppe_band,
+    mclone_overworld_steppe_suitability,
+};
+pub use debug::{
+    McloneOverworldDebugSample, McloneOverworldHydrologyKind, McloneOverworldLandformKind,
+    mclone_overworld_debug_sample,
 };
 pub use decoration::MCLONE_OVERWORLD_DECORATION_REVISION;
 pub use feature_batch::{

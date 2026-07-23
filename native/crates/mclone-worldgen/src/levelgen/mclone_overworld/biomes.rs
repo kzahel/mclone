@@ -76,6 +76,43 @@ impl McloneOverworldBiomeRecipe {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum McloneOverworldBiomeSelectionReason {
+    RiverWater,
+    WetlandBank,
+    BelowSeaLevel,
+    ShoreElevation,
+    ColdAlpine,
+    CoolWetConifer,
+    WarmDrySteppeCore,
+    WarmDrySteppeShoulder,
+    ShelteredWoodedUpland,
+    TemperateMeadowFallback,
+}
+
+impl McloneOverworldBiomeSelectionReason {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::RiverWater => "watercourse water",
+            Self::WetlandBank => "wetland bank",
+            Self::BelowSeaLevel => "below sea level",
+            Self::ShoreElevation => "shore elevation",
+            Self::ColdAlpine => "cold alpine threshold",
+            Self::CoolWetConifer => "cool and moist",
+            Self::WarmDrySteppeCore => "warm-dry steppe core",
+            Self::WarmDrySteppeShoulder => "warm-dry steppe shoulder",
+            Self::ShelteredWoodedUpland => "sheltered wooded upland",
+            Self::TemperateMeadowFallback => "temperate meadow fallback",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct McloneOverworldBiomeDecision {
+    pub recipe: McloneOverworldBiomeRecipe,
+    pub reason: McloneOverworldBiomeSelectionReason,
+}
+
 pub fn mclone_overworld_biome_id(seed: i64, world_x: i32, world_z: i32) -> i32 {
     mclone_overworld_biome_id_with_topology(
         seed,
@@ -142,17 +179,35 @@ pub fn mclone_overworld_steppe_band(
 pub fn mclone_overworld_biome_recipe(
     sample: McloneOverworldLandformSample,
 ) -> McloneOverworldBiomeRecipe {
+    mclone_overworld_biome_decision(sample).recipe
+}
+
+pub fn mclone_overworld_biome_decision(
+    sample: McloneOverworldLandformSample,
+) -> McloneOverworldBiomeDecision {
     let terrain = sample.terrain;
     if terrain.watercourse.is_water() {
-        McloneOverworldBiomeRecipe::River
+        McloneOverworldBiomeDecision {
+            recipe: McloneOverworldBiomeRecipe::River,
+            reason: McloneOverworldBiomeSelectionReason::RiverWater,
+        }
     } else if terrain.watercourse.bank_influence > 0.0
         && terrain.watercourse.wetland_influence > 0.25
     {
-        McloneOverworldBiomeRecipe::TemperateMeadow
+        McloneOverworldBiomeDecision {
+            recipe: McloneOverworldBiomeRecipe::TemperateMeadow,
+            reason: McloneOverworldBiomeSelectionReason::WetlandBank,
+        }
     } else if terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL - 2 {
-        McloneOverworldBiomeRecipe::Ocean
+        McloneOverworldBiomeDecision {
+            recipe: McloneOverworldBiomeRecipe::Ocean,
+            reason: McloneOverworldBiomeSelectionReason::BelowSeaLevel,
+        }
     } else if terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 3 {
-        McloneOverworldBiomeRecipe::Shore
+        McloneOverworldBiomeDecision {
+            recipe: McloneOverworldBiomeRecipe::Shore,
+            reason: McloneOverworldBiomeSelectionReason::ShoreElevation,
+        }
     } else {
         let adjusted_temperature = terrain
             .climate
@@ -160,22 +215,50 @@ pub fn mclone_overworld_biome_recipe(
         if terrain.surface_y >= MCLONE_OVERWORLD_ALPINE_MIN_Y
             && adjusted_temperature <= MCLONE_OVERWORLD_ALPINE_MAX_TEMPERATURE
         {
-            McloneOverworldBiomeRecipe::SnowyAlpine
+            McloneOverworldBiomeDecision {
+                recipe: McloneOverworldBiomeRecipe::SnowyAlpine,
+                reason: McloneOverworldBiomeSelectionReason::ColdAlpine,
+            }
         } else if adjusted_temperature <= MCLONE_OVERWORLD_CONIFER_MAX_TEMPERATURE
             && terrain.climate.moisture >= MCLONE_OVERWORLD_CONIFER_MIN_MOISTURE
         {
-            McloneOverworldBiomeRecipe::CoolWetConifer
-        } else if mclone_overworld_steppe_band(terrain.climate).is_steppe() {
-            McloneOverworldBiomeRecipe::WarmDrySteppe
+            McloneOverworldBiomeDecision {
+                recipe: McloneOverworldBiomeRecipe::CoolWetConifer,
+                reason: McloneOverworldBiomeSelectionReason::CoolWetConifer,
+            }
+        } else if let steppe @ (McloneOverworldSteppeBand::Core
+        | McloneOverworldSteppeBand::Shoulder) =
+            mclone_overworld_steppe_band(terrain.climate)
+        {
+            McloneOverworldBiomeDecision {
+                recipe: McloneOverworldBiomeRecipe::WarmDrySteppe,
+                reason: match steppe {
+                    McloneOverworldSteppeBand::Core => {
+                        McloneOverworldBiomeSelectionReason::WarmDrySteppeCore
+                    }
+                    McloneOverworldSteppeBand::Shoulder => {
+                        McloneOverworldBiomeSelectionReason::WarmDrySteppeShoulder
+                    }
+                    McloneOverworldSteppeBand::Outside => {
+                        unreachable!("pattern above excludes outside steppe")
+                    }
+                },
+            }
         } else if terrain.surface_y >= MCLONE_OVERWORLD_WOODED_UPLAND_MIN_Y
             && !terrain.is_mountain_valley()
             && !terrain.is_open_mountain_shoulder()
             && sample.slope < MCLONE_OVERWORLD_WOODED_MAX_SLOPE
             && sample.exposure() < MCLONE_OVERWORLD_WOODED_MAX_EXPOSURE
         {
-            McloneOverworldBiomeRecipe::TemperateWoodland
+            McloneOverworldBiomeDecision {
+                recipe: McloneOverworldBiomeRecipe::TemperateWoodland,
+                reason: McloneOverworldBiomeSelectionReason::ShelteredWoodedUpland,
+            }
         } else {
-            McloneOverworldBiomeRecipe::TemperateMeadow
+            McloneOverworldBiomeDecision {
+                recipe: McloneOverworldBiomeRecipe::TemperateMeadow,
+                reason: McloneOverworldBiomeSelectionReason::TemperateMeadowFallback,
+            }
         }
     }
 }
