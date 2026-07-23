@@ -101,6 +101,11 @@ series implements the same concern, normally reuse the document slug in its
   landmark sequence. Tactical
   [`188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md) owns the
   first bounded terrain foundation.
+- [`mclone-overworld-breadth.md`](mclone-overworld-breadth.md): active
+  original-profile breadth ledger measured against grouped Java 1.17.1
+  families, with explicit mechanism/live/reviewed states, regional recipe
+  gaps, and a first-class 3D geology campaign for boulders, tors, arches,
+  hoodoos, cliff shelves, overhangs, and other volumetric rock formations.
 - [`starter-farmstead-settlement.md`](starter-farmstead-settlement.md): accepted
   terrain-adaptive blueprint direction for a maximal but incrementally built
   demo farmstead, including a cross-profile starter-content overlay, vanilla

@@ -814,11 +814,20 @@ subsystem horizontally.
      recipes.
    - Reuse configured feature implementations while owning selection,
      density, and seed domains.
-7. **Caves and geology**
-   - Independently seeded 3D subtractive fields or carvers.
-   - Reuse geometric helpers only after the first concrete mclone cave rule
-     proves the shared shape.
-8. **Landmarks and structures**
+7. **Three-dimensional geology and rock formations**
+   - Give boulders, scree, tors, hoodoos, sea stacks, arches, cliff shelves,
+     undercuts, and overhangs sustained shape and pixel iteration.
+   - Compare placed features, bounded structure-shaped volumes, and selective
+     regional density modifiers before choosing one universal mechanism.
+   - Use cheap macro selectors, bounded 3D influence, coarse lattice
+     interpolation, and explicit far-LOD silhouettes so ordinary chunks do
+     not pay dense 3D-noise cost.
+8. **Caves and subsurface geology**
+   - Add independently seeded 3D subtractive fields or carvers after the first
+     surface-rock density experiments.
+   - Reuse geometric helpers only after a concrete Mclone cave rule proves the
+     shared shape; do not make cave prevalence dictate surface outcrops.
+9. **Landmarks and structures**
    - Keep bounded local content in placed features when honest.
    - Add true starts, references, pieces, bounding boxes, and persistence when
      the first cross-chunk landmark requires them.

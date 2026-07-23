@@ -151,3 +151,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `browser-hosted-peer-sessions` — browser-authoritative rooms over WebRTC
   reliable/ephemeral data channels, room-key signaling, direct ICE with
   conditional TURN, and worker-owned Rust authority
+- `mclone-overworld-breadth` — grouped vanilla breadth reference versus live
+  original-profile regional recipes, surfaces, vegetation, water, ecology,
+  landmarks, and a dedicated volumetric rock-formation campaign
