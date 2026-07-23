@@ -12,8 +12,8 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `asset-pack-profiles` — tactical 169 runtime selection and provenance
 - `multiplayer-networking` — vanilla-shaped push protocol, session layer, and
   tick/publication cadence plan
-- `client-prediction` — movement authority, server validation checks, and the
-  preserved input-replay path
+- `client-prediction` — permissive client movement authority, server pose
+  sanitization, and local semantic input recording
 - `vanilla-networking` — 1.17.1 vanilla network stack reference receipts
 - `web-scene-host-adoption` — tactical 170 browser adoption of the shared
   scene host

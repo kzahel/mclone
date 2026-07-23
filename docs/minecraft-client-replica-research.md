@@ -1,6 +1,12 @@
 # Minecraft Client Replica And Network Internals Research
 
-Research notes from the Minecraft Java 1.17.1 source under `reference/minecraft-1.17.1/src/`. This document is about vanilla's runtime topology and client-side world model. It is not a plan to copy vanilla's 20 TPS player movement protocol for `mclone`.
+Research notes from the Minecraft Java 1.17.1 source under
+`reference/minecraft-1.17.1/src/`. This document is about vanilla's runtime
+topology and client-side world model. It is not a plan to copy vanilla's
+20 TPS player movement protocol for `mclone`. Its earlier authoritative
+command-replay recommendation is superseded by the accepted permissive
+client-movement policy in
+[`topics/client-prediction.md`](topics/client-prediction.md).
 
 ## Summary
 
@@ -165,14 +171,20 @@ Key source points:
 - `reference/minecraft-1.17.1/src/net/minecraft/server/network/ServerGamePacketListenerImpl.java:903`
 - `reference/minecraft-1.17.1/src/net/minecraft/client/multiplayer/ClientPacketListener.java:530`
 
-This is not the movement model `mclone` wants for FPS-style prediction. It is still useful because it proves vanilla clients carry enough local world state to run immediate local movement and accept server correction.
+This is not the movement model `mclone` uses. It is still useful because it
+proves vanilla clients carry enough local world state to run immediate local
+movement and accept explicit server relocation.
 
-For `mclone`, the movement divergence should be:
+For `mclone`, the accepted movement divergence is:
 
-- client sends sequenced command records, not absolute position as authority
-- host drains commands by sequence and simulates the same fixed command quantum the client predicted
-- client replay/correction uses authoritative ack snapshots
-- vanilla movement/collision source remains useful for lower-body collision concepts, fluid/ladder modes, and entity movement sharing
+- the client runs sequenced local 60 Hz semantic commands and publishes its
+  resulting absolute pose;
+- the host sanitizes and accepts that pose rather than draining or replaying
+  semantic movement commands;
+- teleport acknowledgements preserve explicit server relocation, not routine
+  correction replay;
+- vanilla movement/collision source remains useful for lower-body collision
+  concepts, fluid/ladder modes, and entity movement sharing.
 
 ## Lighting
 
@@ -263,14 +275,16 @@ Use four logical owners:
 
 | Owner | Responsibilities |
 |---|---|
-| Authoritative host | canonical chunks, entities, player bodies, AI, worldgen, block/liquid ticks, canonical lighting, persistence, gameplay consequences |
+| Authoritative host | canonical chunks, entities other than routine local-player movement, AI, worldgen, block/liquid ticks, canonical lighting, persistence, gameplay consequences |
 | Client replica/runtime | visible/interested chunk facts, entity replicas, local light/render facts, world time/weather presentation, interpolation buffers, speculative overlays, local prediction services |
-| Prediction service | sequenced command buffer, local body replay, reconciliation, diagnostics, collision-window read view over client-replica facts |
+| Local movement service | sequenced semantic command recording, local body simulation, diagnostics, and collision-window read view over client-replica facts |
 | UI/render thread | raw input sampling, pointer lock, UI, GPU resources, draw submission, compact presentation-state consumption |
 
-The prediction service can be a submodule of the client replica/runtime. It does not have to be a dedicated worker on day one. The important architectural rule is ownership, not thread count:
+The local movement service can be a submodule of the client replica/runtime.
+It does not require a dedicated worker. The important architectural rule is
+ownership, not thread count:
 
-- prediction must not read authoritative host internals
+- local movement must not read authoritative host internals
 - render/UI code must not own canonical chunk or collision facts
 - singleplayer must hydrate the client replica from the same client-facing messages as multiplayer
 - worker placement can change after measurement without changing the logical protocol
@@ -289,8 +303,9 @@ That can be physically implemented as host worker plus client replica worker plu
 
 ## Decisions This Should Inform
 
-- Pause `Movement3+` movement tacticals until the client runtime arc establishes integrated-server, client-world, prediction-service, and presentation ownership.
-- Movement prediction needs collision-relevant client replica facts, but it does not need lighting, worldgen, AI, persistence, or scheduled fluid ticks.
+- The completed local movement path needs collision-relevant client replica
+  facts, but it does not need lighting, worldgen, AI, persistence, or
+  scheduled fluid ticks.
 - Lighting should be planned as client-replica/render-world data, server-fed but locally usable for meshing and dirty visual updates.
 - Water should start as host-authoritative fluid state plus deltas. Client water prediction is a later overlay if measured packet volume or local feel demands it.
 - Remote players/NPCs should initially use interpolation over authoritative snapshots. Full local AI prediction is not a vanilla precedent.

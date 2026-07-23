@@ -8,9 +8,10 @@ The shared bounded `ControllerInputBatch` and multi-observation semantic
 reduction preserve ordered input through platform collection and scene
 routing. The scene materializes timestamped semantic state as sequenced 60 Hz
 `PlayerMovementCommand` records, applies the same records to local prediction,
-and retains a bounded recording for deterministic replay. Server transport,
-authoritative replay, and correction replay remain the separately scheduled
-Stage 2 in [`client-prediction.md`](client-prediction.md).
+and retains a bounded recording for deterministic replay. The accepted
+permissive movement-authority direction deliberately keeps semantic commands
+local: server transport, authoritative replay, and correction replay are not
+planned. See [`client-prediction.md`](client-prediction.md).
 
 Scope: preserve the best physical-input order and timing each platform can
 provide, normalize it behind a host-neutral contract, reduce it into shared
@@ -68,7 +69,7 @@ shared semantic reducer
 timestamped, sequenced 60 Hz PlayerCommands
     |                              |
     v                              v
-local prediction             host validation/replay
+local prediction             local recording/tests
 ```
 
 ## Current State (Verified 2026-07-23)
@@ -217,10 +218,10 @@ Catch-up remains bounded; skipped movement work advances the command sequence,
 so the next emitted record exposes an explicit gap rather than pretending the
 commands ran.
 
-Raw physical observations are local and disposable. Deterministic replay and
-future network transport use semantic player commands, not GilRs, Android,
-browser, or OpenXR records. This keeps replay independent of controller layout
-and platform API.
+Raw physical observations are local and disposable. Deterministic local replay
+uses semantic player commands, not GilRs, Android, browser, or OpenXR records.
+This keeps replay independent of controller layout and platform API without
+implying a future network transport.
 
 The default command rate remains 60 Hz. It is a configurable simulation lane,
 not a promise that the renderer, server world, AI, pose publication, or
@@ -370,16 +371,16 @@ and driver facts; they do not require another architecture.
    materialize one sequenced command per fixed movement quantum.
 5. Complete: record/replay those semantic commands locally and prove
    cadence-independent command traces.
-6. Connect the command stream to protocol/server replay only when Stage 2 of
-   [`client-prediction.md`](client-prediction.md) is scheduled. The richer
-   local input timeline does not require changing movement authority first.
+6. Complete by decision: keep the command stream local under the accepted
+   permissive movement-authority policy. Protocol/server replay requires a
+   future explicit product-direction change.
 7. Run platform builds and synthetic parity fixtures, then perform separately
    recorded real-device acceptance.
 
-The first five slices are one coherent local end-to-end implementation and do
-not require a new product decision. Server-authoritative correction replay is
-a separate authority milestone; this topic keeps its input prerequisites
-ready without silently scheduling it.
+The first five slices are one coherent local end-to-end implementation.
+Server-authoritative correction replay is not a remaining milestone. The
+local command boundary may be reused if that product decision ever changes,
+but no preparatory network or server complexity is required now.
 
 ## Code Map
 
@@ -397,8 +398,9 @@ ready without silently scheduling it.
 - `native/crates/mclone-scene`: semantic frame routing, fixed movement clock,
   command materialization, and local replay.
 - `native/crates/mclone-client`: predicted player movement consumer.
-- `native/crates/mclone-protocol` and `native/crates/mclone-server`: later
-  semantic command transport, validation, and authoritative replay.
+- `native/crates/mclone-protocol` and `native/crates/mclone-server`: accepted
+  pose publication, finite-value/bounds checks, and teleport continuity; no
+  semantic command replay.
 
 ## Non-Goals
 
@@ -410,5 +412,5 @@ ready without silently scheduling it.
   gameplay replays.
 - Coupling player command rate to render rate, AI/world tick rate, or packet
   publication rate.
-- Scheduling server-authoritative prediction and correction replay as part of
-  the collector fix.
+- Server-authoritative prediction, movement validation, or correction replay
+  without an explicit product-direction change.

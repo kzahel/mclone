@@ -131,6 +131,14 @@ updates carry a life epoch, health, and typed death cause; `Respawn` returns
 through the same full-duplex command path. Debug actions are rejected unless
 their capability was negotiated.
 
+The movement sequence preserves pose-publication ordering and teleport
+continuity; it is not a semantic-command acknowledgement or server-replay
+contract. Routine player movement is deliberately client-authoritative. The
+server rejects non-finite values, clamps coordinates, honors pending
+teleports, and otherwise accepts the reported pose without collision, speed,
+or floating replay. Integrated single-player therefore does not duplicate the
+client's 60 Hz movement simulation.
+
 This cadence controls when a pose is selected and enqueued; it does not define
 what XR pose means. Current XR behavior still publishes the existing combined
 player camera/body yaw and pitch, while locomotion may reference headset yaw
@@ -339,10 +347,11 @@ later phases remain topic-level direction.
    [`184`](../tactical/184-session-configuration-liveness-and-disconnect.md)
    owns configured admission and liveness. Auth, reconnect preservation, and
    broader player-state restore remain later work.
-3. **Movement validation (basic anti-teleport).** Vanilla's checks server-
-   side: packet-burst clamp, moved-too-quickly, collision replay +
-   moved-wrongly, floating kick, with the local-integrated owner exempted
-   like vanilla's singleplayer owner. Detailed in
+3. **Permissive movement authority — accepted 2026-07-23.** Cooperative
+   clients own routine movement; the server validates representation and
+   bounds but does not replay collision, speed, floating, or semantic input.
+   This is the intended integrated and dedicated posture, not an interim
+   anti-cheat milestone. Detailed in
    [`client-prediction.md`](client-prediction.md).
 4. **Variable tick over the wire.** Carry gameplay/publication rates in the
    join handshake; make client-side tick-denominated behavior (move

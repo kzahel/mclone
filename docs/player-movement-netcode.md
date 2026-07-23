@@ -1,25 +1,34 @@
 # Player Movement And Netcode Notes
 
-Status: **the first fixed-rate local movement slice has landed; ordered
-client/host command replay remains future work**.
+Status: **historical server-authoritative alternative, superseded for current
+planning by the accepted permissive client-authority direction in
+[`topics/client-prediction.md`](topics/client-prediction.md)**.
 
 The old movement/netcode sketch was useful for recording command-stream and prediction constraints, but it assumed too much about where the client prediction world lives. The client runtime architecture arc in [`tactical/README.md`](./tactical/README.md) has now landed the needed `IntegratedServer`, `ClientRuntime`, `ClientWorld`, `PredictionService`, and presentation ownership surfaces.
 
-Do not resurrect the old `Movement3+` tactical direction from this document. Treat this file as constraint notes for a fresh movement integration tactical based on the current client-runtime architecture.
+Do not resurrect the old `Movement3+` tactical direction from this document.
+The command transport, host replay, acknowledgement, and correction design
+below is retained as research only. It requires an explicit product-direction
+change before becoming roadmap work.
 
-## What Stays True
+## Current Accepted Constraints
 
-The long-term target is still high-rate FPS-style movement on an authoritative host:
+The current target is high-rate FPS-style local movement with a cooperative
+client trust boundary:
 
-- local movement should feel responsive at high-refresh display rates
-- the host remains authoritative for player body state, collision, block interaction, and gameplay consequences
-- client and host movement must consume the same ordered command timeline
-- render frame delta, HTTP polling cadence, and host world tick cadence must not become movement integration `dt`
-- prediction snaps to authoritative state and replays unacknowledged commands; smoothing is presentation-only
-- NPC AI/pathfinding may run at Minecraft-like rates without forcing player physics down to 20 Hz
-- the lower body/collision core should be reusable by players, mobs, items, and simple physics entities
-
-These constraints survive the pause. The concrete module boundaries and tactical order do not.
+- local movement should feel responsive at high-refresh display rates;
+- the client owns routine player body movement and publishes resulting poses;
+- the server rejects malformed or non-finite poses, clamps world bounds, and
+  honors server-directed teleport acknowledgement, but does not replay
+  movement;
+- the server remains authoritative for block interaction, inventory, health,
+  entities, world mutation, persistence, and other gameplay consequences;
+- render delta, packet cadence, and host world tick cadence must not become
+  movement integration `dt`;
+- NPC AI/pathfinding may run at Minecraft-like rates without forcing player
+  physics down to 20 Hz;
+- integrated single-player must not duplicate the client's movement and
+  collision computation.
 
 ## What Was Wrong Or Premature
 
@@ -41,7 +50,7 @@ That replica is not a full server. It should not own worldgen, persistence, bloc
 The architectural dependency is now:
 
 ```text
-IntegratedServer / DedicatedServer authority
+IntegratedServer / DedicatedServer world authority
   -> logical protocol messages
   -> ClientRuntime + ClientWorld replica
   -> PredictionService and interpolation views
@@ -80,9 +89,10 @@ Vanilla should inform the client replica topology:
 
 Block collision facts are shared below both player and mob movement. `noOcclusion()` is a render/light concept, not a movement concept; `noCollission()` is the block-property path that removes collision. [`tactical/BlockCollision0-render-occlusion-vs-collision-shapes.md`](./tactical/BlockCollision0-render-occlusion-vs-collision-shapes.md) lands the first shared collision-shape split.
 
-## Tilefun Guidance
+## Conditional Tilefun Guidance
 
-`tilefun` remains useful prior art for command/prediction mechanics, once the client runtime architecture exists:
+`tilefun` remains useful prior art if authoritative command replay is ever
+explicitly reopened:
 
 | Concern | Source |
 |---|---|
@@ -93,17 +103,18 @@ Block collision facts are shared below both player and mob movement. `noOcclusio
 | Input queue and no-phantom-movement lessons | `/Users/kgraehl/code/tilefun/docs/hard-won-knowledge.md` |
 | Netcode parity scenarios | `/Users/kgraehl/code/tilefun/src/server/NetcodeParityBaseline.test.ts`, `/Users/kgraehl/code/tilefun/src/server/InputQueuePrediction.test.ts` |
 
-The main invariant to preserve:
+The main invariant for that dormant alternative would be:
 
 ```text
-The server must advance player movement from the same ordered command records the client predicted.
+An authoritative server must advance player movement from the same ordered
+command records the client predicted.
 ```
 
 Do not collapse multiple client samples into one mutable "latest input" slot, and do not let the server move a predicted player extra times from wall-clock ticks that had no corresponding command.
 
-## Deferred Netcode Shape
+## Archived Authoritative Netcode Shape
 
-The likely future command shape remains:
+One coherent command shape, if that product direction is ever reopened, is:
 
 ```ts
 interface PlayerMoveCommand {
@@ -124,7 +135,7 @@ interface PlayerMoveCommand {
 }
 ```
 
-Rules to keep:
+Conditional rules for that alternative:
 
 - `sequence` is strictly increasing per player
 - `commandQuantumUs` is fixed while a movement profile is active
@@ -134,15 +145,15 @@ Rules to keep:
 - authoritative snapshots include enough body state to restart replay
 - polling, local worker `postMessage`, WebSocket, WebTransport, and future WebRTC adapters all carry the same logical records if they are used
 
-The scene-owned 60 Hz clock now implements the fixed-quantum, bounded-catch-up,
-edge-retention, and presentation-interpolation parts of this shape for local
-prediction. It deliberately does not claim the rest: quanta are not yet
-materialized as sequenced protocol records, the host does not drain the same
-records, and corrections do not replay unacknowledged commands.
+The scene-owned 60 Hz clock implements fixed quanta, bounded catch-up, edge
+retention, sequenced local semantic command recording, and presentation
+interpolation. Those commands intentionally remain local. The host does not
+drain them, corrections do not replay them, and neither behavior is missing
+work under the accepted authority policy.
 
-## Resume Criteria
+## Reopening This Alternative
 
-The previous resume criteria are now satisfied by the client runtime arc:
+The earlier architectural prerequisites are now present:
 
 - an `IntegratedServer` / authoritative host facade for browser singleplayer
 - a `ClientRuntime` that consumes the same logical protocol in singleplayer and multiplayer
@@ -151,8 +162,7 @@ The previous resume criteria are now satisfied by the client runtime arc:
 - a prediction-service API that can read a bounded collision/entity view without host access
 - tests or probes proving singleplayer and remote clients use the same client-world hydration path
 
-Tactical 221 records the first resumed implementation. The next netcode
-tactical should convert the clock output into sequenced command records and
-account for named join/player-slot semantics before player movement becomes
-persistent state: a session is a transport/resume handle, while a player id
-should refer to an authoritative player slot in a world/save.
+Tactical 221 records the completed local input/movement implementation. There
+is no next command-transport tactical. Reopening server-authoritative movement
+requires an explicit product decision and a fresh tactical; these historical
+notes can then inform it without making the old shape mandatory.

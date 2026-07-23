@@ -122,9 +122,8 @@ series implements the same concern, normally reuse the document slug in its
   credit economy that meters bespoke AI authoring while keeping discovery and
   play free. Does not reopen the read-only first proof.
 - [`client-prediction.md`](client-prediction.md): player movement authority —
-  vanilla-shaped client-authoritative interim, planned server validation
-  checks, the preserved sequenced-input-replay path, and remote-actor
-  interpolation divergence.
+  accepted permissive client authority, finite-value/bounds safety, no planned
+  server movement replay, and remote-actor interpolation divergence.
 - [`input-observation-timeline.md`](input-observation-timeline.md): accepted
   cross-platform input timeline — preserve ordered transitions where a
   platform exposes them, degrade honestly to snapshots, normalize monotonic

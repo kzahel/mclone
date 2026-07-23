@@ -2,16 +2,16 @@
 
 Topic: client-prediction
 
-Status: local player movement now runs from recorded, sequenced 60 Hz semantic
-commands while remaining client-authoritative (vanilla-shaped) for the
-deliberate interim. Server-side validation is planned; transporting and
-authoritatively replaying those commands is a preserved future path, not
-scheduled work.
+Status: permissive client-authoritative movement is the accepted direction as
+of 2026-07-23, not an interim awaiting anti-cheat work. Local movement runs
+from recorded, sequenced 60 Hz semantic commands. The server accepts reported
+finite poses after world-bound clamping and pending-teleport checks; speed,
+collision, floating, semantic-command transport, authoritative movement
+replay, and correction replay are intentionally not planned.
 
 Scope: who owns player movement truth, what the server checks, how remote
-entities are smoothed, and which protocol/design decisions must be made now
-so that server-side input replay and stronger validation remain cheap to add
-later. The wire/session/tick plan lives in
+entities are smoothed, and the accepted boundary between responsive local
+movement and server-owned world state. The wire/session/tick plan lives in
 [`multiplayer-networking.md`](multiplayer-networking.md); vanilla receipts in
 [`vanilla/networking.md`](vanilla/networking.md)
 (movement send, validation walkthrough, teleport/ack, interpolation).
@@ -59,7 +59,8 @@ materialization lives in
 - **The server accepts reported positions with clamps only**: finiteness
   checks and vanilla coordinate clamps, plus the pending-teleport gate
   (`mclone-server/src/player.rs:63-95`). There is **no collision replay, no
-  speed check, no floating check** — a client can teleport anywhere.
+  speed check, no floating check** — a finite client can teleport, fly, or
+  pass through collision. This is the accepted cooperative trust model.
 - **The teleport-correction/ack loop is implemented**: corrections carry
   relative flags + `teleport_id`; moves are ignored while a teleport is
   outstanding and the correction is re-sent; the client acks with
@@ -67,11 +68,12 @@ materialization lives in
   (`mclone-server/src/player.rs:97-157`,
   `mclone-server/src/integrated.rs:1230-1258`,
   `mclone-app-runtime/src/camera_reconcile.rs:149-186`). This is the vanilla
-  mechanism and is the foundation the validation checks reject into.
+  mechanism for server-directed spawn, restore, transfer, respawn, and other
+  explicit relocation; it is not a routine movement-validation loop.
 - **Dedicated sessions buffer movement** and flush it before other ordered
   commands with packet-count bookkeeping
-  (`mclone-dedicated-server/src/session.rs:138-183`) — the counter the
-  vanilla burst-factor check needs already exists.
+  (`mclone-dedicated-server/src/session.rs:138-183`). This preserves transport
+  ordering; the bookkeeping is not a commitment to movement validation.
 - **Remote entity smoothing diverges from vanilla**: mclone smooths actors
   toward the latest authoritative target with a frame-rate-independent
   exponential half-life (`interpolation_factor(dt, half_life)`,
@@ -99,62 +101,49 @@ acks, unconditional placement corrections, stateId inventory resync) — see
 the reference doc; those follow the same "predict locally, reconcile via
 authoritative fact" pattern and are out of scope for this topic.
 
-## Direction: two stages, one preserved path
+## Accepted direction: trust the client for movement
 
-### Stage 1 (planned): vanilla validation checks
+Movement uses a cooperative-client trust boundary. In both integrated and
+dedicated sessions, the client simulates its player and reports the resulting
+pose. The server:
 
-Port the `handleMovePlayer` checks onto the existing correction loop —
-phase 4 of the multiplayer-networking plan. All the ingredients exist:
-per-session move-packet counts, teleport-id rejection path, and server
-collision via the shared physics runtime. Scope:
+- rejects malformed protocol data and non-finite position or rotation values;
+- clamps coordinates to the supported world bounds;
+- normalizes rotations;
+- ignores ordinary movement while a server teleport awaits acknowledgement;
+- otherwise accepts the reported position, rotation, and on-ground state.
 
-- packet-burst clamp; "moved too quickly" with vanilla thresholds;
-- server collision replay of the reported delta + "moved wrongly" residual
-  check; rollback teleport on failure or new-collision overlap;
-- floating/fly kick (once abilities/game-mode exist enough to exempt
-  legitimate flight);
-- exempt the local-integrated player the way vanilla exempts the
-  singleplayer owner.
+The server does not replay player collision, check speed, detect floating or
+flight, transport semantic movement commands, or reconcile a predicted input
+history. A finite modified client can therefore teleport, fly, or move through
+collision. That tradeoff is accepted indefinitely for the current cooperative
+product direction.
 
-This delivers "the client can't just teleport around" at vanilla strength
-without touching movement feel, and it is the correct baseline regardless of
-whether Stage 2 ever ships.
+The accepted pose becomes the server's current fact for interest management,
+observer replication, persistence, and location-dependent gameplay. This does
+not make inventory, entities, world mutation, health, or other gameplay facts
+client-authoritative; those systems retain their own server-owned contracts.
 
-### Stage 2 (preserved, not scheduled): sequenced input replay
+The integrated server must not duplicate the client's 60 Hz movement or
+collision work. It consumes the published pose and spends its simulation
+budget on the world. Dedicated sessions deliberately use the same permissive
+movement policy rather than maintaining a second authority model.
 
-The long-term shape both
-[`../minecraft-client-replica-research.md`](../minecraft-client-replica-research.md)
-and [`../player-movement-netcode.md`](../player-movement-netcode.md) point
-at: the client sends sequenced input command records; the server drains them
-by sequence and simulates the same quantum the client predicted; corrections
-reference the last-applied sequence so the client replays unacked inputs
-instead of hard-snapping. This upgrades movement from "validated
-client-authoritative" to server-authoritative with client prediction, and is
-the real anti-cheat/fairness endpoint. It is deliberately deferred — vanilla
-itself never does this, and the interim model is fine for current gameplay.
+Existing `MovePlayer` sequence values and
+`PlayerPositionUpdate.last_applied_move_sequence` preserve pose-publication
+ordering and teleport continuity. They are not acknowledgements for semantic
+movement commands and do not imply replay. The local
+`PlayerMovementCommand` recording remains useful for diagnostics,
+deterministic tests, and future local replay without requiring a network
+schema, server command queue, or server movement consumer.
 
-Decisions to make **now** so Stage 2 stays cheap:
+### Dormant alternatives are not roadmap work
 
-- **Sequence-number the movement stream early.** Adding a `seq: u32` to
-  `MovePlayer` (and echoing `last_applied_seq` in corrections) is a small
-  protocol change that Stage 1's burst accounting can use immediately and
-  Stage 2 requires. Do it when the session-layer protocol changes land, to
-  avoid an extra version bump.
-- **Keep the client's input→physics quantum explicit.** The scene now
-  materializes fixed 1/60-second local-player quanta as sequenced
-  `PlayerMovementCommand` records while the lower movement implementation
-  retains a 20 Hz vanilla recurrence baseline through fractional composition.
-  Stage 2 can transport this boundary; do not collapse it back into variable
-  frame `dt`.
-- **Keep server movement application in shared code** (`mclone-server` +
-  shared physics), never app-local, so the replay simulation has one home.
-- **Keep view pose, body heading, and locomotion reference conceptually
-  separate.** They currently collapse to one network pose, including XR, but
-  a future tracked head may rotate independently of the movement/body heading.
-  Extend the shared pose/protocol contract when that distinction becomes
-  observable; do not encode it as an XR-only send cadence.
-- **Corrections must stay id-gated** (already true) — replay reconciliation
-  is an extension of the teleport-ack loop, not a replacement.
+Vanilla-style movement validation and full authoritative command replay remain
+known alternatives, not scheduled stages. Do not add complexity solely to
+prepare for either one. Reopen this decision only through an explicit product
+direction change, such as competitive play or a concrete mechanic that cannot
+work with client-reported poses.
 
 ## Variable-tick interplay
 
@@ -165,27 +154,22 @@ Decisions to make **now** so Stage 2 stays cheap:
 - The current publication deadline makes the 20-attempt move reminder one
   second at its fixed 20 Hz vanilla baseline. It should become
   handshake-rate-aware when variable publication rates land.
-- Vanilla's per-tick thresholds ("too quickly" per packet-burst) assume the
-  server tick as the accounting window; when the tick rate is configurable,
-  the burst window follows the gameplay/publication lane, not wall-clock
-  frames.
+- No server-side 60 Hz player-movement lane is required. A server cadence
+  change affects when accepted poses are consumed and published, not how often
+  local movement is simulated.
 - Remote-actor smoothing is already dt-based (half-life), so publication-rate
   changes only affect how stale targets are; if the publication lane runs
   faster than 20 Hz, consider tightening the half-life to match.
 
 ## Recommended next work
 
-1. Ride the sequence-number + `last_applied_seq` fields on the phase-3
-   session/protocol changes (multiplayer-networking plan).
-2. Implement Stage 1 checks as their own tactical after the dedicated server
-   has an autonomous tick (validation windows are per-tick).
-3. Leave Stage 2 unscheduled; revisit when gameplay needs server-auth
-   movement (combat, competitive play) or cheating becomes real.
-4. When Stage 2 resumes, add command transport, server replay, acknowledged
-   sequence tracking, and correction replay around the existing local
-   `PlayerMovementCommand` stream. Its physical and semantic observation
-   prerequisites are complete and specified in
-   [`input-observation-timeline.md`](input-observation-timeline.md).
+1. Continue improving local input collection, movement feel, and presentation
+   independently of server, world, AI, render, and publication rates.
+2. Make pose publication and remote smoothing cadence-aware if variable
+   publication rates become observable.
+3. Preserve finite-value rejection, coordinate clamps, sequence ordering, and
+   the teleport acknowledgement gate. Do not add movement validation or replay
+   without an explicit product-direction change.
 
 ## Non-goals
 
@@ -193,4 +177,6 @@ Decisions to make **now** so Stage 2 stays cheap:
   actors stay interpolation-only).
 - Fluid/block-tick prediction (server-authoritative; see the client-replica
   research doc).
-- Anti-cheat beyond vanilla-strength movement checks.
+- Vanilla-strength movement anti-cheat.
+- Authoritative server movement simulation, semantic-command transport, or
+  correction replay.
