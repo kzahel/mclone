@@ -52,7 +52,8 @@ the same protocol/client/server boundary as singleplayer.
 - **`--listen-ws HOST:PORT`** adds a WebSocket listener whose peers terminate
   directly in the same authoritative connection registry as TCP; there is no
   TCP loopback bridge.
-- The host advances autonomously at the shared default 20/20/60 cadence,
+- The host advances autonomously at the shared default 60/20/60 cadence
+  (host/player boundary, gameplay, physics),
   drains ready commands at host boundaries, and publishes each player's
   ordered stream through an independent bounded writer. Client traffic does
   not clock world time, worldgen publication, entity tracking, or autosave.
@@ -69,7 +70,9 @@ the same protocol/client/server boundary as singleplayer.
   pressure disconnects.
 - **`--multi-client-smoke`** runs the multi-client integration check (two clients
   sharing a world with remote-player replication).
-- `PROTOCOL_VERSION = 33` is negotiated with strict equality. The handshake
+- `PROTOCOL_VERSION = 34` is negotiated with strict equality. The native
+  handshake may also offer a bounded UDP pose attachment token and port; the
+  WebSocket handshake remains reliable-only. The handshake
   also carries the client's unauthenticated stable local UUID/display name;
   persistent realms save pose, selected slot, XP, typed statistics, health,
   and a pending typed death cause under that UUID. Ordered owner life updates
@@ -85,7 +88,8 @@ Client connect status (full grid in
 [`topics/platform-parity.md`](./topics/platform-parity.md)):
 
 - **Desktop flat + OpenXR** connect to a dedicated server over TCP via
-  `--remote-addr HOST:PORT`.
+  `--remote-addr HOST:PORT`; ordinary body pose switches to companion UDP on
+  the same numeric port after attachment.
 - **Flat Android** can connect over TCP through the Android-owned
   `debug.mclone.remote_addr` property. There is not yet an in-app connect UI.
 - **Android XR** can connect over TCP through launch-scoped

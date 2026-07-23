@@ -166,7 +166,7 @@ impl LocalIntegratedSceneOptions {
             world_behavior_profile: WorldBehaviorProfile::Mutable,
             center,
             render_distance,
-            cadence: SimulationCadenceConfig::new(20, 20, 60),
+            cadence: SimulationCadenceConfig::new(60, 20, 60),
             day_time_override: None,
             freeze_time: false,
             freeze_scheduled_fluid_ticks: false,
@@ -2867,6 +2867,10 @@ where
 {
     fn send_command_only(&mut self, command: ClientCommand) -> Result<()> {
         self.session.send_command_only(command)
+    }
+
+    fn send_ephemeral(&mut self, message: ClientEphemeralMessage) -> Result<()> {
+        self.session.send_ephemeral(message)
     }
 
     fn try_drain_next_update(&mut self) -> Result<ClientConnectionDrainResult> {

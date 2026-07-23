@@ -370,7 +370,9 @@ impl ServerRunnerDiagnostics {
             seed,
             day_time,
             simulation_cadence: SimulationCadenceConfig::default(),
-            host_tick_interval: std::time::Duration::from_millis(50),
+            host_tick_interval: host_tick_interval_for_rate_hz(
+                SimulationCadenceConfig::default().host_rate_hz,
+            ),
             awaiting_tick: false,
             command_queue_depth: 0,
             update_queue_depth: 0,
@@ -682,8 +684,10 @@ mod native {
                 scheduled_fluid_ticks_frozen: false,
                 debug_passive_showcase: true,
                 debug_auxiliary_player_script: false,
-                tick_interval: Duration::from_millis(50),
-                cadence: SimulationCadenceConfig::new(20, 20, 60),
+                tick_interval: host_tick_interval_for_rate_hz(
+                    SimulationCadenceConfig::default().host_rate_hz,
+                ),
+                cadence: SimulationCadenceConfig::default(),
                 publication_budget: ChunkPublicationBudgetConfig::disabled(),
                 world_storage: NativeIntegratedServerWorldStorage::Transient,
                 local_player_identity: None,
@@ -1458,7 +1462,7 @@ mod native {
                     diagnostics_detail_sampler,
                     None,
                     true,
-                    Some(false),
+                    None,
                     None,
                     physics_published_updates,
                 );
@@ -1832,7 +1836,7 @@ mod native {
         }
 
         #[test]
-        fn native_runner_config_defaults_to_twenty_hz_cadence() {
+        fn native_runner_config_defaults_to_sixty_hz_host_cadence() {
             let config = NativeIntegratedServerRunnerConfig::new(0);
 
             assert_eq!(config.cadence, SimulationCadenceConfig::default());
@@ -1849,8 +1853,8 @@ mod native {
                     .expect("default native cadence")
                     .advance_host_frame(),
                 crate::SimulationCadenceFrame {
-                    gameplay_ticks: 1,
-                    physics_steps: 3,
+                    gameplay_ticks: 0,
+                    physics_steps: 1,
                 }
             );
         }

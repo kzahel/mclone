@@ -160,7 +160,7 @@ intended production shape, but broader session and world durability work
 remain:
 
 - **Protocol**: hand-rolled, validated, little-endian binary codec, current
-  strict `PROTOCOL_VERSION = 33` equality check. The transport handshake
+  strict `PROTOCOL_VERSION = 34` equality check. The transport handshake
   carries
   the local profile UUID/display name plus supported capabilities, and
   `PlayerExperience`, `PlayerStatistics`, and `PlayerLife` are owner-only
@@ -171,13 +171,14 @@ remain:
   no varints.
 - **Transports**: in-process mpsc channels (native local integrated,
   `mclone-server/src/runner.rs:830-991`), length-prefixed TCP
-  (`mclone-net/src/lib.rs:347-1146`), direct dedicated WebSocket adapter
+  plus an attached bounded raw-UDP pose lane (`mclone-net`), direct dedicated
+  WebSocket adapter
   (`mclone-dedicated-server/src/websocket_connection.rs`), Web Worker channels
   for browser singleplayer and remote play
   (`mclone-web-client/src/web_server_worker.rs` and
   `www/mclone-remote-websocket-worker.ts`). Real
-  cross-machine play works today over TCP (desktop/Android/XR) and WS
-  (browser), validated by dedicated-server smokes.
+  cross-machine play works over TCP+UDP (desktop/Android/XR) and reliable-only
+  WS (browser), validated by dedicated-server loopback and fallback smokes.
 - **Client ingress is in good shape**: shared `ClientConnection` trait +
   ordered per-frame pump with budgets across local/remote/web
   (`mclone-app-runtime/src/client_connection.rs:240-296`), a dedicated client

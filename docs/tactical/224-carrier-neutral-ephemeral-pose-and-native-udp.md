@@ -144,7 +144,9 @@ The native dual-lane profile reuses the existing TCP session:
    with the accepted TCP connection.
 3. The client sends a bounded UDP attach message containing that token.
 4. The server binds the observed source endpoint to the reliable session and
-   confirms attachment over the reliable lane.
+   returns a token-matched UDP acknowledgement, proving both datagram
+   directions without adding transport-control messages to the logical game
+   protocol.
 5. Body samples flow client-to-server and server-to-observer over UDP.
 6. Inactivity, malformed traffic, source change without reattachment, or
    socket failure disables UDP and returns the session to reliable fallback
@@ -368,5 +370,34 @@ scene test suites.
   pressure. No TypeScript or JavaScript source changed.
 
 Validated with client, app-runtime, scene, structural-boundary, and workspace
-tests. Slice 3 native UDP attachment, cross-platform builds, and physical
-motion review remain.
+tests.
+
+### 2026-07-23: Slice 3 native TCP-plus-UDP carrier
+
+- Added a contained standard-library UDP packet codec and client/server socket
+  actors in `mclone-net`. Packets are self-contained, authenticated to the
+  cooperative session by a 128-bit attachment token, and remain below the
+  1200-byte no-fragment budget.
+- Protocol v34 extends the native TCP handshake with an optional UDP port and
+  token. WebSocket framing and browser byte brokers are unchanged.
+- The native client attaches automatically and sends complete local body
+  samples over a bounded latest-wins UDP queue. Before attachment, after
+  timeout, or after socket failure it transparently uses the rate-limited
+  reliable wrapper.
+- The dedicated server binds UDP on the TCP listener's numeric port, associates
+  the observed endpoint with the accepted TCP connection, and routes decoded
+  client/server ephemeral messages through the ordinary session boundaries.
+  Reliable player add/remove, appearance, lifecycle, and pose barriers remain
+  on TCP.
+- The default host pump is now 60 Hz while gameplay remains 20 Hz and physics
+  remains 60 Hz. Dedicated and integrated runners apply player/session
+  boundaries each host frame without increasing gameplay or AI tick rate.
+- `--disable-udp` selects the reliable-only native conformance profile.
+- Tests cover packet bounds, malformed packets, wrong tokens, source binding,
+  bidirectional loopback relay, bounded latest-wins pressure, timeout and
+  reattachment, negotiated native relay, and disabled-UDP fallback.
+- No TypeScript or JavaScript source changed.
+
+Validated with focused net, server cadence, dedicated-server, and
+app-runtime suites. Slice 4 platform builds, browser compatibility gates, and
+available motion review remain.

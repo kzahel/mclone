@@ -9,11 +9,13 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use mclone_net::{
-    complete_server_handshake_with_capabilities, try_read_client_command_frame,
+    NativeUdpAttachmentTokenGenerator, NativeUdpOffer, NativeUdpServer, NativeUdpServerHandle,
+    complete_server_handshake_with_capabilities_and_udp_offer, try_read_client_command_frame,
     write_server_update_batch,
 };
 use mclone_protocol::{
-    ClientCommand, ClientIdentity, DisconnectReason, ServerUpdate, SessionCapabilities,
+    ClientCommand, ClientIdentity, DisconnectReason, EffectiveEphemeralTransport, ServerUpdate,
+    SessionCapabilities,
 };
 
 pub(crate) const DEDICATED_OUTBOUND_QUEUE_CAPACITY: usize = 64;
@@ -26,6 +28,10 @@ pub(crate) struct DedicatedConnectionId(u64);
 impl DedicatedConnectionId {
     pub(crate) fn next(counter: &AtomicU64) -> Self {
         Self(counter.fetch_add(1, Ordering::Relaxed))
+    }
+
+    pub(crate) const fn as_u64(self) -> u64 {
+        self.0
     }
 }
 
@@ -87,6 +93,7 @@ pub(crate) struct DedicatedOutbound {
     frames: SyncSender<DedicatedOutboundMessage>,
     pressure: Arc<DedicatedOutboundPressure>,
     limits: DedicatedOutboundLimits,
+    udp: Option<(u64, NativeUdpServerHandle)>,
 }
 
 #[derive(Debug)]
@@ -108,6 +115,7 @@ impl DedicatedOutbound {
                 frames,
                 pressure: Arc::clone(&pressure),
                 limits,
+                udp: None,
             },
             DedicatedOutboundReceiver {
                 frames: receiver,
@@ -116,7 +124,32 @@ impl DedicatedOutbound {
         )
     }
 
+    fn channel_with_udp(
+        session_key: u64,
+        udp: NativeUdpServerHandle,
+    ) -> (Self, DedicatedOutboundReceiver) {
+        let (mut outbound, receiver) = Self::channel();
+        outbound.udp = Some((session_key, udp));
+        (outbound, receiver)
+    }
+
     pub(crate) fn publish(&self, updates: Vec<ServerUpdate>) -> Result<()> {
+        let updates = if let Some((session_key, udp)) = &self.udp {
+            updates
+                .into_iter()
+                .filter(|update| {
+                    let ServerUpdate::EphemeralFallback(message) = update else {
+                        return true;
+                    };
+                    !udp.send_latest(*session_key, *message)
+                })
+                .collect()
+        } else {
+            updates
+        };
+        if updates.is_empty() {
+            return Ok(());
+        }
         let encoded_bytes = encoded_update_batch_len(&updates)?;
         self.reserve(encoded_bytes)?;
         self.try_send_reserved(
@@ -270,6 +303,7 @@ pub(crate) enum DedicatedNetworkEvent {
         peer_addr: SocketAddr,
         identity: ClientIdentity,
         capabilities: SessionCapabilities,
+        ephemeral_transport: EffectiveEphemeralTransport,
         outbound: DedicatedOutbound,
     },
     Command {
@@ -291,6 +325,7 @@ pub(crate) enum DedicatedNetworkEvent {
 #[derive(Debug)]
 pub(crate) struct DedicatedNetwork {
     events: Receiver<DedicatedNetworkEvent>,
+    udp: Option<NativeUdpServer>,
     running: Arc<AtomicBool>,
     accept_threads: Vec<JoinHandle<()>>,
 }
@@ -304,6 +339,27 @@ impl DedicatedNetwork {
         listener: TcpListener,
         websocket_listener: Option<TcpListener>,
     ) -> Result<Self> {
+        Self::start_with_websocket_and_udp(listener, websocket_listener, true)
+    }
+
+    pub(crate) fn start_with_websocket_and_udp(
+        listener: TcpListener,
+        websocket_listener: Option<TcpListener>,
+        enable_udp: bool,
+    ) -> Result<Self> {
+        let udp = if enable_udp {
+            let addr = listener
+                .local_addr()
+                .context("failed to read dedicated TCP listener address for UDP")?;
+            Some(
+                NativeUdpServer::bind(addr)
+                    .context("failed to bind dedicated UDP pose listener")?,
+            )
+        } else {
+            None
+        };
+        let udp_handle = udp.as_ref().map(NativeUdpServer::handle);
+        let udp_port = udp.as_ref().map(|udp| udp.local_addr().port());
         listener
             .set_nonblocking(true)
             .context("failed to set dedicated server listener nonblocking")?;
@@ -316,7 +372,14 @@ impl DedicatedNetwork {
         let tcp_accept_thread = thread::Builder::new()
             .name("mclone-dedicated-accept".to_owned())
             .spawn(move || {
-                accept_loop(listener, tcp_events, accept_running, accept_next_id);
+                accept_loop(
+                    listener,
+                    tcp_events,
+                    accept_running,
+                    accept_next_id,
+                    udp_handle,
+                    udp_port,
+                );
             })
             .context("failed to spawn dedicated server accept thread")?;
         let mut accept_threads = vec![tcp_accept_thread];
@@ -340,6 +403,7 @@ impl DedicatedNetwork {
 
         Ok(Self {
             events,
+            udp,
             running,
             accept_threads,
         })
@@ -347,19 +411,40 @@ impl DedicatedNetwork {
 
     #[cfg(test)]
     pub(crate) fn recv(&self) -> Result<DedicatedNetworkEvent> {
+        if let Some(event) = self.try_recv_udp()? {
+            return Ok(event);
+        }
         self.events
             .recv()
             .context("dedicated network event channel closed")
     }
 
     pub(crate) fn recv_timeout(&self, timeout: Duration) -> Result<Option<DedicatedNetworkEvent>> {
+        if let Some(event) = self.try_recv_udp()? {
+            return Ok(Some(event));
+        }
         match self.events.recv_timeout(timeout) {
             Ok(event) => Ok(Some(event)),
-            Err(RecvTimeoutError::Timeout) => Ok(None),
+            Err(RecvTimeoutError::Timeout) => self.try_recv_udp(),
             Err(RecvTimeoutError::Disconnected) => {
                 anyhow::bail!("dedicated network event channel closed")
             }
         }
+    }
+
+    fn try_recv_udp(&self) -> Result<Option<DedicatedNetworkEvent>> {
+        let Some(udp) = &self.udp else {
+            return Ok(None);
+        };
+        udp.try_recv()
+            .map(|event| {
+                event.map(|event| DedicatedNetworkEvent::Command {
+                    id: DedicatedConnectionId(event.session_key),
+                    peer_addr: event.peer_addr,
+                    command: ClientCommand::EphemeralFallback(event.message),
+                })
+            })
+            .context("failed to poll dedicated UDP pose listener")
     }
 }
 
@@ -377,15 +462,30 @@ fn accept_loop(
     events: mpsc::Sender<DedicatedNetworkEvent>,
     running: Arc<AtomicBool>,
     next_id: Arc<AtomicU64>,
+    udp: Option<NativeUdpServerHandle>,
+    udp_port: Option<u16>,
 ) {
+    let mut token_generator = NativeUdpAttachmentTokenGenerator::new();
     while running.load(Ordering::Acquire) {
         match listener.accept() {
             Ok((stream, peer_addr)) => {
                 let id = DedicatedConnectionId::next(&next_id);
+                let udp_offer = udp_port.map(|port| NativeUdpOffer {
+                    port,
+                    token: token_generator.generate(id.as_u64(), peer_addr),
+                });
                 let connection_events = events.clone();
+                let connection_udp = udp.clone();
                 let thread_name = format!("mclone-dedicated-conn-{}", id.0);
                 if let Err(err) = thread::Builder::new().name(thread_name).spawn(move || {
-                    connection_loop(id, stream, peer_addr, connection_events);
+                    connection_loop(
+                        id,
+                        stream,
+                        peer_addr,
+                        connection_events,
+                        connection_udp,
+                        udp_offer,
+                    );
                 }) {
                     let _ = events.send(DedicatedNetworkEvent::AcceptFailed {
                         message: format!("failed to spawn connection {id} for {peer_addr}: {err}"),
@@ -415,6 +515,8 @@ fn connection_loop(
     mut stream: TcpStream,
     peer_addr: SocketAddr,
     events: mpsc::Sender<DedicatedNetworkEvent>,
+    udp: Option<NativeUdpServerHandle>,
+    udp_offer: Option<NativeUdpOffer>,
 ) {
     if let Err(err) = stream.set_nonblocking(false) {
         let _ = events.send(DedicatedNetworkEvent::Disconnected {
@@ -430,9 +532,10 @@ fn connection_loop(
     if let Err(err) = stream.set_nodelay(true) {
         log::warn!("failed to set TCP_NODELAY for {id} {peer_addr}: {err}");
     }
-    let accepted = match complete_server_handshake_with_capabilities(
+    let accepted = match complete_server_handshake_with_capabilities_and_udp_offer(
         &mut stream,
         SessionCapabilities::DEVELOPMENT_DEFAULT,
+        udp_offer,
     ) {
         Ok(accepted) => accepted,
         Err(err) => {
@@ -466,7 +569,29 @@ fn connection_loop(
             return;
         }
     };
-    let (outbound, outbound_rx) = DedicatedOutbound::channel();
+    let negotiated_udp = udp_offer.filter(|_| {
+        accepted
+            .capabilities
+            .contains(SessionCapabilities::EPHEMERAL_BODY_POSE)
+    });
+    if let (Some(udp), Some(offer)) = (&udp, negotiated_udp)
+        && let Err(err) = udp.register(id.as_u64(), offer.token)
+    {
+        let _ = events.send(DedicatedNetworkEvent::Disconnected {
+            id,
+            peer_addr,
+            command_count: 0,
+            reason: Some(format!(
+                "failed to register dedicated UDP attachment: {err}"
+            )),
+        });
+        return;
+    }
+    let (outbound, outbound_rx) = if let (Some(udp), Some(_)) = (&udp, negotiated_udp) {
+        DedicatedOutbound::channel_with_udp(id.as_u64(), udp.clone())
+    } else {
+        DedicatedOutbound::channel()
+    };
     let writer_reason = Arc::new(Mutex::new(None));
     let writer_shared_reason = Arc::clone(&writer_reason);
     let writer_thread = match thread::Builder::new()
@@ -491,10 +616,18 @@ fn connection_loop(
             peer_addr,
             identity: accepted.identity,
             capabilities: accepted.capabilities,
+            ephemeral_transport: if negotiated_udp.is_some() {
+                EffectiveEphemeralTransport::NativeUdp
+            } else {
+                EffectiveEphemeralTransport::ReliableFallback
+            },
             outbound,
         })
         .is_err()
     {
+        if let Some(udp) = &udp {
+            udp.unregister(id.as_u64());
+        }
         let _ = writer_thread.join();
         return;
     }
@@ -536,6 +669,9 @@ fn connection_loop(
         command_count,
         reason,
     });
+    if let Some(udp) = &udp {
+        udp.unregister(id.as_u64());
+    }
     let _ = writer_thread.join();
 }
 
@@ -575,11 +711,15 @@ fn connection_writer_loop(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mclone_core::ChunkPos;
+    use mclone_core::{ChunkPos, Vec3d};
     use mclone_net::{
         NativeClientIoSession, NativeTransportError, complete_client_handshake_with_version,
     };
-    use mclone_protocol::{ChunkView, DisconnectReason, DisconnectReasonCode, PROTOCOL_VERSION};
+    use mclone_protocol::{
+        ChunkView, ClientEphemeralMessage, DisconnectReason, DisconnectReasonCode,
+        PROTOCOL_VERSION, PlayerBodyPoseSample, RemotePlayerBodyPoseSample, RemotePlayerId,
+        ServerEphemeralMessage,
+    };
 
     fn time_update(day_time: u64) -> ServerUpdate {
         ServerUpdate::TimeUpdate {
@@ -587,6 +727,133 @@ mod tests {
             day_time,
             daylight_cycle_running: true,
         }
+    }
+
+    fn client_pose(sequence: u32) -> ClientEphemeralMessage {
+        ClientEphemeralMessage::BodyPose(PlayerBodyPoseSample::new(
+            1,
+            sequence,
+            sequence * 10,
+            Vec3d::new(f64::from(sequence), 64.0, -3.0),
+            25.0,
+            -5.0,
+            true,
+        ))
+    }
+
+    fn server_pose(sequence: u32) -> ServerEphemeralMessage {
+        ServerEphemeralMessage::RemoteBodyPose(RemotePlayerBodyPoseSample {
+            id: RemotePlayerId(91),
+            pose: match client_pose(sequence) {
+                ClientEphemeralMessage::BodyPose(pose) => pose,
+            },
+        })
+    }
+
+    #[test]
+    fn native_session_negotiates_udp_and_relays_pose_both_directions() {
+        let _guard = crate::DEDICATED_NETWORK_TEST_LOCK.lock().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let network = DedicatedNetwork::start(listener).unwrap();
+        let mut client = NativeClientIoSession::connect(addr).unwrap();
+        let DedicatedNetworkEvent::Connected {
+            id,
+            ephemeral_transport,
+            outbound,
+            ..
+        } = network.recv().unwrap()
+        else {
+            panic!("expected native connection");
+        };
+        assert_eq!(ephemeral_transport, EffectiveEphemeralTransport::NativeUdp);
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(2);
+        while !client
+            .native_udp_diagnostics()
+            .is_some_and(|diagnostics| diagnostics.attached)
+            && std::time::Instant::now() < deadline
+        {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(
+            client
+                .native_udp_diagnostics()
+                .is_some_and(|diagnostics| diagnostics.attached)
+        );
+
+        client.send_ephemeral(client_pose(4)).unwrap();
+        let received = loop {
+            if let Some(DedicatedNetworkEvent::Command {
+                id: received_id,
+                command,
+                ..
+            }) = network.recv_timeout(Duration::from_millis(20)).unwrap()
+                && matches!(command, ClientCommand::EphemeralFallback(_))
+            {
+                break (received_id, command);
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for client UDP pose"
+            );
+        };
+        assert_eq!(received.0, id);
+        assert_eq!(received.1, ClientCommand::EphemeralFallback(client_pose(4)));
+
+        outbound
+            .publish(vec![ServerUpdate::EphemeralFallback(server_pose(5))])
+            .unwrap();
+        let updates = loop {
+            if let Some(batch) = client.try_drain_update_batch().unwrap() {
+                break batch.into_updates();
+            }
+            assert!(
+                std::time::Instant::now() < deadline,
+                "timed out waiting for server UDP pose"
+            );
+            thread::sleep(Duration::from_millis(5));
+        };
+        assert_eq!(
+            updates,
+            vec![ServerUpdate::EphemeralFallback(server_pose(5))]
+        );
+    }
+
+    #[test]
+    fn disabled_udp_uses_the_same_reliable_pose_messages() {
+        let _guard = crate::DEDICATED_NETWORK_TEST_LOCK.lock().unwrap();
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let network =
+            DedicatedNetwork::start_with_websocket_and_udp(listener, None, false).unwrap();
+        let mut client = NativeClientIoSession::connect(addr).unwrap();
+        let DedicatedNetworkEvent::Connected {
+            ephemeral_transport,
+            outbound,
+            ..
+        } = network.recv().unwrap()
+        else {
+            panic!("expected native connection");
+        };
+        assert_eq!(
+            ephemeral_transport,
+            EffectiveEphemeralTransport::ReliableFallback
+        );
+        assert!(client.native_udp_diagnostics().is_none());
+
+        client.send_ephemeral(client_pose(7)).unwrap();
+        let DedicatedNetworkEvent::Command { command, .. } = network.recv().unwrap() else {
+            panic!("expected reliable fallback command");
+        };
+        assert_eq!(command, ClientCommand::EphemeralFallback(client_pose(7)));
+        outbound
+            .publish(vec![ServerUpdate::EphemeralFallback(server_pose(8))])
+            .unwrap();
+        assert_eq!(
+            client.drain_update_batch().unwrap().into_updates(),
+            vec![ServerUpdate::EphemeralFallback(server_pose(8))]
+        );
     }
 
     #[test]

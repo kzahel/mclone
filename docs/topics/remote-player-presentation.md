@@ -6,11 +6,12 @@ Status: Tactical
 [`224`](../tactical/224-carrier-neutral-ephemeral-pose-and-native-udp.md)
 active as of 2026-07-23. The current product
 has a carrier-neutral, complete, sequenced body-pose sample and a distinct
-ephemeral send boundary. Integrated, TCP, and WebSocket compatibility paths
-currently carry that message through a bounded reliable fallback; remote
-clients reject stale epoch/sequence samples and retain the newest state.
+ephemeral send boundary. Native dedicated sessions now attach a bounded raw
+UDP lane beside TCP; integrated and WebSocket compatibility paths retain the
+same logical message through reliable fallback. Remote clients reject stale
+epoch/sequence samples and retain the newest state.
 Remote body presentation now evaluates a bounded snapshot timeline at render
-time with cadence/jitter-aware delay. The native UDP carrier remains the
+time with cadence/jitter-aware delay. Cross-platform closeout remains the
 active Tactical 224 slice. Separate body, head, and hand poses remain later
 representation work. The first datagram carrier is dependency-free raw UDP
 beside existing native TCP, and WebTransport/WebRTC remain later adapters for
@@ -70,7 +71,7 @@ player locations.
 
 ### Wire and server relay
 
-- Protocol v33 defines strict client body-pose and observer remote-body-pose
+- Protocol v33 introduced strict client body-pose and observer remote-body-pose
   codecs with nonzero epochs/sequences, finite values, bounded payloads, and
   wrap-aware sequence comparison.
 - `ClientConnection` exposes a typed ephemeral send method. Its default maps
@@ -100,9 +101,19 @@ remote-player subject and routes a complete ephemeral body sample to
 interested observers. Add, remove, appearance, and lifecycle facts remain
 reliable.
 
-Integrated memory channels, native TCP, direct WebSocket, and browser worker
-WebSocket paths therefore provide reliable ordered delivery today. No
-shipping path offers an unreliable datagram side channel.
+Protocol v34 extends only the native TCP handshake with an optional UDP port
+and unpredictable attachment token. The client proves reachability with a
+bounded attach packet; the server binds the observed source endpoint and
+acknowledges it. Complete pose samples then flow in both directions over UDP.
+Wrong tokens, malformed packets, and messages from a source other than the
+attached endpoint are dropped. Per-session latest-wins queues stay bounded,
+and liveness timeout or socket failure returns traffic to the 20 Hz reliable
+fallback without disconnecting the session.
+
+Integrated memory and browser WebSocket paths retain reliable delivery of the
+same decoded message. Native desktop, Android, and XR share the TCP+UDP
+adapter. No TypeScript or JavaScript code parses pose or owns cadence,
+fallback, attachment, or interpolation policy.
 
 ### Remote client and rendering
 

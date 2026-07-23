@@ -6,7 +6,7 @@
 
 use std::time::Duration;
 
-pub const DEFAULT_HOST_RATE_HZ: u32 = 20;
+pub const DEFAULT_HOST_RATE_HZ: u32 = 60;
 pub const DEFAULT_GAMEPLAY_RATE_HZ: u32 = 20;
 pub const DEFAULT_PHYSICS_RATE_HZ: u32 = 60;
 pub const DEFAULT_MAX_CATCH_UP_HOST_FRAMES: u32 = 4;

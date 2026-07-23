@@ -2,7 +2,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use mclone_core::ChunkPos;
-use mclone_protocol::{ClientCommand, ServerUpdate};
+use mclone_protocol::{ClientCommand, ClientEphemeralMessage, ServerUpdate};
 use mclone_server::ServerRunnerDiagnostics;
 
 use crate::{
@@ -95,6 +95,9 @@ impl SingleViewHostOptions {
 /// producer, so a drawable caller can never turn this poll into transport IO.
 pub trait RemoteDedicatedServerSession {
     fn send_command_only(&mut self, command: ClientCommand) -> Result<()>;
+    fn send_ephemeral(&mut self, message: ClientEphemeralMessage) -> Result<()> {
+        self.send_command_only(ClientCommand::EphemeralFallback(message))
+    }
     fn try_drain_update_batch(&mut self) -> Result<Option<RemoteServerUpdateBatch>>;
     fn pending_update_metrics(&self) -> RemoteUpdateQueueMetrics;
     fn reconnect(&mut self) -> Result<()>;

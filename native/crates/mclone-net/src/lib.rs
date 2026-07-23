@@ -1,5 +1,8 @@
 #![forbid(unsafe_code)]
 
+#[cfg(not(target_arch = "wasm32"))]
+mod native_udp;
+
 use std::collections::VecDeque;
 use std::error::Error;
 use std::fmt;
@@ -12,15 +15,24 @@ use mclone_protocol::{
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_tcp::{
-    NATIVE_CLIENT_COMMAND_QUEUE_CAPACITY, NATIVE_CLIENT_UPDATE_BATCH_QUEUE_CAPACITY,
-    NativeClientIoDiagnostics, NativeClientIoSession, NativeServerUpdateBatch,
-    NativeServerUpdateEnvelope, NativeTransportError, NativeTransportResult,
-    complete_client_handshake, complete_client_handshake_with_identity,
+    AcceptedNativeServerHandshake, NATIVE_CLIENT_COMMAND_QUEUE_CAPACITY,
+    NATIVE_CLIENT_UPDATE_BATCH_QUEUE_CAPACITY, NativeClientIoDiagnostics, NativeClientIoSession,
+    NativeServerUpdateBatch, NativeServerUpdateEnvelope, NativeTransportError,
+    NativeTransportResult, complete_client_handshake, complete_client_handshake_with_identity,
     complete_client_handshake_with_identity_and_capabilities,
+    complete_client_handshake_with_identity_capabilities_and_udp_offer,
     complete_client_handshake_with_version, complete_server_handshake,
-    complete_server_handshake_with_capabilities, read_client_command_frame,
+    complete_server_handshake_with_capabilities,
+    complete_server_handshake_with_capabilities_and_udp_offer, read_client_command_frame,
     read_client_command_frames, read_server_update_batch, try_read_client_command_frame,
     write_client_command_frame, write_server_update_batch,
+};
+#[cfg(not(target_arch = "wasm32"))]
+pub use native_udp::{
+    MAX_NATIVE_UDP_PACKET_BYTES, NATIVE_UDP_ATTACHMENT_TIMEOUT, NativeUdpAttachmentToken,
+    NativeUdpAttachmentTokenGenerator, NativeUdpClient, NativeUdpDiagnostics, NativeUdpError,
+    NativeUdpOffer, NativeUdpReceivedServerMessage, NativeUdpResult, NativeUdpServer,
+    NativeUdpServerEvent, NativeUdpServerHandle,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -459,10 +471,11 @@ mod native_tcp {
     use std::thread::{self, JoinHandle};
     use std::time::{Duration, Instant};
 
+    use crate::{NativeUdpClient, NativeUdpDiagnostics, NativeUdpOffer};
     use mclone_protocol::{
-        ClientCommand, ClientIdentity, DisconnectReason, PROTOCOL_VERSION, PlayerProfileId,
-        ProtocolCodecError, ServerUpdate, SessionCapabilities, decode_client_command,
-        decode_server_update, encode_client_command, encode_server_update,
+        ClientCommand, ClientEphemeralMessage, ClientIdentity, DisconnectReason, PROTOCOL_VERSION,
+        PlayerProfileId, ProtocolCodecError, ServerUpdate, SessionCapabilities,
+        decode_client_command, decode_server_update, encode_client_command, encode_server_update,
         validate_client_identity,
     };
 
@@ -471,9 +484,18 @@ mod native_tcp {
     const MAX_FRAME_BYTES: usize = 64 * 1024 * 1024;
     pub const NATIVE_CLIENT_COMMAND_QUEUE_CAPACITY: usize = 256;
     pub const NATIVE_CLIENT_UPDATE_BATCH_QUEUE_CAPACITY: usize = 256;
+    const NATIVE_CLIENT_DRAIN_POLL_INTERVAL: Duration = Duration::from_millis(4);
     const HANDSHAKE_MAGIC: &[u8] = b"MCLONE_NATIVE_TCP";
     const SERVER_HANDSHAKE_ACCEPT: u8 = 1;
     const SERVER_HANDSHAKE_REJECT: u8 = 2;
+    const SERVER_HANDSHAKE_BASE_BYTES: usize = HANDSHAKE_MAGIC.len() + 17;
+    const SERVER_HANDSHAKE_UDP_OFFER_BYTES: usize = 19;
+
+    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+    pub struct AcceptedNativeServerHandshake {
+        pub capabilities: SessionCapabilities,
+        pub udp_offer: Option<NativeUdpOffer>,
+    }
 
     #[derive(Debug)]
     pub enum NativeTransportError {
@@ -784,6 +806,9 @@ mod native_tcp {
     pub struct NativeClientIoSession {
         command_tx: Option<mpsc::SyncSender<NativeClientIoCommand>>,
         update_rx: mpsc::Receiver<NativeServerUpdateBatch>,
+        udp_client: Option<NativeUdpClient>,
+        next_udp_frame_sequence: u64,
+        last_reliable_ephemeral_send: Option<Instant>,
         diagnostics: Arc<NativeClientIoSharedDiagnostics>,
         shutdown_stream: TcpStream,
         writer_join_handle: Option<JoinHandle<()>>,
@@ -807,11 +832,17 @@ mod native_tcp {
             identity: &ClientIdentity,
         ) -> NativeTransportResult<Self> {
             let mut stream = TcpStream::connect(addr)?;
-            let negotiated_capabilities = complete_client_handshake_with_identity_and_capabilities(
+            let accepted = complete_client_handshake_with_identity_capabilities_and_udp_offer(
                 &mut stream,
                 identity,
                 SessionCapabilities::DEVELOPMENT_DEFAULT,
             )?;
+            let negotiated_capabilities = accepted.capabilities;
+            let udp_client = accepted.udp_offer.and_then(|offer| {
+                let mut server_addr = stream.peer_addr().ok()?;
+                server_addr.set_port(offer.port);
+                NativeUdpClient::connect(server_addr, offer.token).ok()
+            });
             let shutdown_stream = stream.try_clone()?;
             let reader_stream = stream.try_clone()?;
             let (command_tx, command_rx) = mpsc::sync_channel(NATIVE_CLIENT_COMMAND_QUEUE_CAPACITY);
@@ -848,6 +879,9 @@ mod native_tcp {
             Ok(Self {
                 command_tx: Some(command_tx),
                 update_rx,
+                udp_client,
+                next_udp_frame_sequence: 0,
+                last_reliable_ephemeral_send: None,
                 diagnostics,
                 shutdown_stream,
                 writer_join_handle: Some(writer_join_handle),
@@ -893,19 +927,59 @@ mod native_tcp {
             }
         }
 
+        pub fn send_ephemeral(
+            &mut self,
+            message: ClientEphemeralMessage,
+        ) -> NativeTransportResult<()> {
+            if self
+                .udp_client
+                .as_ref()
+                .is_some_and(|udp| udp.send_latest(message))
+            {
+                return Ok(());
+            }
+            let discontinuity = match message {
+                ClientEphemeralMessage::BodyPose(sample) => sample.discontinuity,
+            };
+            if !discontinuity
+                && self
+                    .last_reliable_ephemeral_send
+                    .is_some_and(|sent| sent.elapsed() < Duration::from_millis(50))
+            {
+                return Ok(());
+            }
+            self.send_command_only(ClientCommand::EphemeralFallback(message))?;
+            self.last_reliable_ephemeral_send = Some(Instant::now());
+            Ok(())
+        }
+
         pub fn drain_update_batch(&mut self) -> NativeTransportResult<NativeServerUpdateBatch> {
-            match self.update_rx.recv() {
-                Ok(batch) => {
-                    self.diagnostics.record_batch_drained(&batch);
-                    Ok(batch)
+            loop {
+                if let Some(batch) = self.take_udp_update_batch() {
+                    return Ok(batch);
                 }
-                Err(_) => Err(self.diagnostics.actor_stopped_error()),
+                match self
+                    .update_rx
+                    .recv_timeout(NATIVE_CLIENT_DRAIN_POLL_INTERVAL)
+                {
+                    Ok(batch) => {
+                        self.diagnostics.record_batch_drained(&batch);
+                        return Ok(batch);
+                    }
+                    Err(mpsc::RecvTimeoutError::Timeout) => {}
+                    Err(mpsc::RecvTimeoutError::Disconnected) => {
+                        return Err(self.diagnostics.actor_stopped_error());
+                    }
+                }
             }
         }
 
         pub fn try_drain_update_batch(
             &mut self,
         ) -> NativeTransportResult<Option<NativeServerUpdateBatch>> {
+            if let Some(batch) = self.take_udp_update_batch() {
+                return Ok(Some(batch));
+            }
             match self.update_rx.try_recv() {
                 Ok(batch) => {
                     self.diagnostics.record_batch_drained(&batch);
@@ -919,7 +993,59 @@ mod native_tcp {
         }
 
         pub fn diagnostics(&self) -> NativeClientIoDiagnostics {
-            self.diagnostics.snapshot()
+            let mut diagnostics = self.diagnostics.snapshot();
+            if let Some(udp) = &self.udp_client {
+                let udp = udp.diagnostics();
+                diagnostics.inbound_update_batches = diagnostics
+                    .inbound_update_batches
+                    .saturating_add(udp.pending_inbound);
+                diagnostics.inbound_update_depth = diagnostics
+                    .inbound_update_depth
+                    .saturating_add(udp.pending_inbound);
+            }
+            diagnostics
+        }
+
+        pub fn native_udp_diagnostics(&self) -> Option<NativeUdpDiagnostics> {
+            self.udp_client.as_ref().map(NativeUdpClient::diagnostics)
+        }
+
+        fn take_udp_update_batch(&mut self) -> Option<NativeServerUpdateBatch> {
+            let received = self.udp_client.as_ref()?.take_received()?;
+            self.next_udp_frame_sequence = self
+                .next_udp_frame_sequence
+                .max(
+                    self.diagnostics
+                        .inbound_frame_sequence
+                        .load(Ordering::Acquire),
+                )
+                .saturating_add(1);
+            let update = ServerUpdate::EphemeralFallback(received.message);
+            let encoded_len = encode_server_update(&update)
+                .map(|encoded| encoded.len())
+                .unwrap_or(received.encoded_len);
+            let batch = NativeServerUpdateBatch {
+                updates: vec![NativeServerUpdateEnvelope {
+                    update,
+                    encoded_len,
+                    inbound_frame_sequence: self.next_udp_frame_sequence,
+                    producer_read_ms: 0.0,
+                    producer_decode_ms: 0.0,
+                }],
+                inbound_frame_sequence: self.next_udp_frame_sequence,
+                producer_read_ms: 0.0,
+                producer_decode_ms: 0.0,
+                queued_at: received.received_at,
+            };
+            self.diagnostics.record_batch_queued(
+                batch.update_count(),
+                batch.encoded_bytes(),
+                batch.inbound_frame_sequence,
+                0.0,
+                0.0,
+            );
+            self.diagnostics.record_batch_drained(&batch);
+            Some(batch)
         }
     }
 
@@ -1177,6 +1303,19 @@ mod native_tcp {
         identity: &ClientIdentity,
         capabilities: SessionCapabilities,
     ) -> NativeTransportResult<SessionCapabilities> {
+        complete_client_handshake_with_identity_capabilities_and_udp_offer(
+            stream,
+            identity,
+            capabilities,
+        )
+        .map(|accepted| accepted.capabilities)
+    }
+
+    pub fn complete_client_handshake_with_identity_capabilities_and_udp_offer<T: Read + Write>(
+        stream: &mut T,
+        identity: &ClientIdentity,
+        capabilities: SessionCapabilities,
+    ) -> NativeTransportResult<AcceptedNativeServerHandshake> {
         write_client_handshake(stream, PROTOCOL_VERSION, identity, capabilities)?;
         stream.flush()?;
         read_server_handshake(stream, PROTOCOL_VERSION)
@@ -1210,6 +1349,14 @@ mod native_tcp {
         stream: &mut T,
         server_capabilities: SessionCapabilities,
     ) -> NativeTransportResult<super::AcceptedClientHandshake> {
+        complete_server_handshake_with_capabilities_and_udp_offer(stream, server_capabilities, None)
+    }
+
+    pub fn complete_server_handshake_with_capabilities_and_udp_offer<T: Read + Write>(
+        stream: &mut T,
+        server_capabilities: SessionCapabilities,
+        udp_offer: Option<NativeUdpOffer>,
+    ) -> NativeTransportResult<super::AcceptedClientHandshake> {
         let received = read_client_handshake(stream)?;
         if received.protocol_version != PROTOCOL_VERSION {
             write_server_handshake_reject(stream, PROTOCOL_VERSION, received.protocol_version)?;
@@ -1222,7 +1369,9 @@ mod native_tcp {
             .capabilities
             .intersection(server_capabilities)
             .known();
-        write_server_handshake_accept(stream, PROTOCOL_VERSION, capabilities)?;
+        let udp_offer =
+            udp_offer.filter(|_| capabilities.contains(SessionCapabilities::EPHEMERAL_BODY_POSE));
+        write_server_handshake_accept(stream, PROTOCOL_VERSION, capabilities, udp_offer)?;
         Ok(super::AcceptedClientHandshake {
             identity: received.identity,
             capabilities,
@@ -1369,6 +1518,7 @@ mod native_tcp {
         writer: &mut impl Write,
         protocol_version: u32,
         capabilities: SessionCapabilities,
+        udp_offer: Option<NativeUdpOffer>,
     ) -> NativeTransportResult<()> {
         write_server_handshake(
             writer,
@@ -1376,6 +1526,7 @@ mod native_tcp {
             protocol_version,
             protocol_version,
             capabilities,
+            udp_offer,
         )
     }
 
@@ -1390,6 +1541,7 @@ mod native_tcp {
             expected,
             received,
             SessionCapabilities::NONE,
+            None,
         )
     }
 
@@ -1399,13 +1551,21 @@ mod native_tcp {
         expected: u32,
         received: u32,
         capabilities: SessionCapabilities,
+        udp_offer: Option<NativeUdpOffer>,
     ) -> NativeTransportResult<()> {
-        let mut payload = Vec::with_capacity(HANDSHAKE_MAGIC.len() + 17);
+        let mut payload = Vec::with_capacity(
+            SERVER_HANDSHAKE_BASE_BYTES + udp_offer.map_or(0, |_| SERVER_HANDSHAKE_UDP_OFFER_BYTES),
+        );
         payload.extend_from_slice(HANDSHAKE_MAGIC);
         payload.push(status);
         payload.extend_from_slice(&expected.to_le_bytes());
         payload.extend_from_slice(&received.to_le_bytes());
         payload.extend_from_slice(&capabilities.bits().to_le_bytes());
+        if let Some(offer) = udp_offer {
+            payload.push(1);
+            payload.extend_from_slice(&offer.port.to_le_bytes());
+            payload.extend_from_slice(&offer.token.bytes());
+        }
         write_frame(writer, "server handshake", &payload)?;
         writer.flush()?;
         Ok(())
@@ -1414,9 +1574,11 @@ mod native_tcp {
     fn read_server_handshake(
         reader: &mut impl Read,
         client_version: u32,
-    ) -> NativeTransportResult<SessionCapabilities> {
+    ) -> NativeTransportResult<AcceptedNativeServerHandshake> {
         let payload = read_frame(reader, "server handshake")?;
-        if payload.len() != HANDSHAKE_MAGIC.len() + 17 {
+        if payload.len() != SERVER_HANDSHAKE_BASE_BYTES
+            && payload.len() != SERVER_HANDSHAKE_BASE_BYTES + SERVER_HANDSHAKE_UDP_OFFER_BYTES
+        {
             return Err(NativeTransportError::InvalidHandshake(
                 "server handshake had invalid length",
             ));
@@ -1448,6 +1610,32 @@ mod native_tcp {
                 .expect("server handshake capabilities length checked"),
         ))
         .known();
+        let udp_offer = if payload.len() == SERVER_HANDSHAKE_BASE_BYTES {
+            None
+        } else {
+            let offer_offset = SERVER_HANDSHAKE_BASE_BYTES;
+            if payload[offer_offset] != 1 {
+                return Err(NativeTransportError::InvalidHandshake(
+                    "server handshake had invalid UDP offer marker",
+                ));
+            }
+            let port = u16::from_le_bytes(
+                payload[offer_offset + 1..offer_offset + 3]
+                    .try_into()
+                    .expect("server handshake UDP port length checked"),
+            );
+            if port == 0 {
+                return Err(NativeTransportError::InvalidHandshake(
+                    "server handshake UDP offer used port zero",
+                ));
+            }
+            let token = crate::NativeUdpAttachmentToken::from_bytes(
+                payload[offer_offset + 3..offer_offset + 19]
+                    .try_into()
+                    .expect("server handshake UDP token length checked"),
+            );
+            Some(NativeUdpOffer { port, token })
+        };
 
         match status {
             SERVER_HANDSHAKE_ACCEPT => {
@@ -1457,7 +1645,10 @@ mod native_tcp {
                         received: client_version,
                     });
                 }
-                Ok(capabilities)
+                Ok(AcceptedNativeServerHandshake {
+                    capabilities,
+                    udp_offer,
+                })
             }
             SERVER_HANDSHAKE_REJECT => {
                 Err(NativeTransportError::ProtocolVersionMismatch { expected, received })

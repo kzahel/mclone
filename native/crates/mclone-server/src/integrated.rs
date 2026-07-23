@@ -18,12 +18,12 @@ use mclone_core::{
 use mclone_protocol::EntityRotation;
 use mclone_protocol::{
     AcceptTeleportCommand, ChunkView, ClientCommand, ClientEphemeralMessage, ClientIdentity,
-    DebugActorKind, DebugHotbarItem, DimensionKey, EntityKind, InteractionHand, MovePlayerCommand,
-    PlayerActionCommand, PlayerActionKind, PlayerAppearance, PlayerDamageCause, PlayerLifeState,
-    PlayerModelKind, PlayerProfileId, PlayerStatistics, RealmId, SequencedMovePlayerCommand,
-    ServerUpdate, SessionCapabilities, SessionConfiguration, SetCarriedItemCommand,
-    SetDebugHotbarSlotCommand, SetPlayerAppearanceCommand, StatisticKey, UseItemOnCommand,
-    sequence_is_newer, validate_body_pose_sample,
+    DebugActorKind, DebugHotbarItem, DimensionKey, EffectiveEphemeralTransport, EntityKind,
+    InteractionHand, MovePlayerCommand, PlayerActionCommand, PlayerActionKind, PlayerAppearance,
+    PlayerDamageCause, PlayerLifeState, PlayerModelKind, PlayerProfileId, PlayerStatistics,
+    RealmId, SequencedMovePlayerCommand, ServerUpdate, SessionCapabilities, SessionConfiguration,
+    SetCarriedItemCommand, SetDebugHotbarSlotCommand, SetPlayerAppearanceCommand, StatisticKey,
+    UseItemOnCommand, sequence_is_newer, validate_body_pose_sample,
 };
 use mclone_worldgen::biome::OverworldBiomeSource;
 use mclone_worldgen::block::{AIR, RawBlockId, block_name, generated_block_state_id};
@@ -131,6 +131,21 @@ fn session_configuration(
         max_chunk_tracking_radius,
         capabilities,
     )
+}
+
+fn session_configuration_with_pose_transport(
+    policy: PlayerChunkTrackingPolicy,
+    capabilities: SessionCapabilities,
+    transport: EffectiveEphemeralTransport,
+) -> SessionConfiguration {
+    let configuration = session_configuration(policy, capabilities);
+    if capabilities.contains(SessionCapabilities::EPHEMERAL_BODY_POSE)
+        && transport.is_mixed_reliability()
+    {
+        configuration.with_pose_profile(60, 60, transport)
+    } else {
+        configuration
+    }
 }
 
 #[derive(Debug)]
@@ -1359,6 +1374,7 @@ impl RealmServer {
         self.add_player_with_capabilities_in_dimension(
             dimension,
             SessionCapabilities::DEVELOPMENT_DEFAULT,
+            EffectiveEphemeralTransport::ReliableFallback,
         )
     }
 
@@ -1366,8 +1382,12 @@ impl RealmServer {
         &mut self,
         capabilities: SessionCapabilities,
     ) -> ServerPlayerId {
-        self.add_player_with_capabilities_in_dimension(DimensionKey::overworld(), capabilities)
-            .expect("compatibility Overworld dimension must remain loaded")
+        self.add_player_with_capabilities_in_dimension(
+            DimensionKey::overworld(),
+            capabilities,
+            EffectiveEphemeralTransport::ReliableFallback,
+        )
+        .expect("compatibility Overworld dimension must remain loaded")
     }
 
     pub fn add_observer(
@@ -1622,10 +1642,15 @@ impl RealmServer {
         &mut self,
         dimension: DimensionKey,
         capabilities: SessionCapabilities,
+        pose_transport: EffectiveEphemeralTransport,
     ) -> ChunkStoreResult<ServerPlayerId> {
         self.activate_dimension(&dimension)?;
         let player_id = self.players.add_in_dimension(dimension, capabilities);
-        let configuration = session_configuration(self.chunk_tracking.policy(), capabilities);
+        let configuration = session_configuration_with_pose_transport(
+            self.chunk_tracking.policy(),
+            capabilities,
+            pose_transport,
+        );
         let world_info = self.world_info_update();
         let time_update = self.time_update();
         self.chunk_tracking.add_player(player_id);
@@ -1663,6 +1688,19 @@ impl RealmServer {
         identity: ClientIdentity,
         capabilities: SessionCapabilities,
     ) -> ChunkStoreResult<ServerPlayerId> {
+        self.add_player_with_identity_capabilities_and_pose_transport(
+            identity,
+            capabilities,
+            EffectiveEphemeralTransport::ReliableFallback,
+        )
+    }
+
+    pub fn add_player_with_identity_capabilities_and_pose_transport(
+        &mut self,
+        identity: ClientIdentity,
+        capabilities: SessionCapabilities,
+        pose_transport: EffectiveEphemeralTransport,
+    ) -> ChunkStoreResult<ServerPlayerId> {
         let key = player_record_key(identity.profile_id);
         let record = self
             .scheduler
@@ -1674,8 +1712,11 @@ impl RealmServer {
             .as_ref()
             .map(|record| record.dimension.clone())
             .unwrap_or_else(DimensionKey::overworld);
-        let player_id =
-            self.add_player_with_capabilities_in_dimension(resume_dimension, capabilities)?;
+        let player_id = self.add_player_with_capabilities_in_dimension(
+            resume_dimension,
+            capabilities,
+            pose_transport,
+        )?;
         let player = self
             .players
             .get_mut(player_id)
@@ -2091,7 +2132,7 @@ impl RealmServer {
         )
     }
 
-    pub(crate) fn try_simulation_tick_report_global_with_physics_steps(
+    pub fn try_simulation_tick_report_global_with_physics_steps(
         &mut self,
         physics_steps: u32,
         physics_step_dt_seconds: f64,
@@ -2306,7 +2347,7 @@ impl RealmServer {
         Ok(report)
     }
 
-    pub(crate) fn try_physics_step_report_global_with_step_dt(
+    pub fn try_physics_step_report_global_with_step_dt(
         &mut self,
         physics_steps: u32,
         physics_step_dt_seconds: f64,

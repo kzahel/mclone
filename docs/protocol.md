@@ -42,7 +42,7 @@ can report missing collision facts.
 
 ## Protocol Version And Handshake
 
-`PROTOCOL_VERSION` (currently `29`) is exchanged in the transport handshake
+`PROTOCOL_VERSION` (currently `34`) is exchanged in the transport handshake
 before any messages — `MCLONE_NATIVE_TCP` for native TCP, `MCLONE_WS` for
 WebSocket. The server replies accept or reject; a mismatch fails the connection
 with `ProtocolVersionMismatch`.

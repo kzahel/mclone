@@ -12,7 +12,9 @@ use mclone_net::{
     encode_websocket_server_handshake_accept_with_capabilities,
     encode_websocket_server_handshake_reject, encode_websocket_server_update_batch,
 };
-use mclone_protocol::{PROTOCOL_VERSION, ServerUpdate, SessionCapabilities};
+use mclone_protocol::{
+    EffectiveEphemeralTransport, PROTOCOL_VERSION, ServerUpdate, SessionCapabilities,
+};
 use tungstenite::{Error as WebSocketError, Message, accept};
 
 use crate::connection::{
@@ -130,6 +132,7 @@ fn websocket_connection_loop(
             peer_addr,
             identity: accepted.identity,
             capabilities: accepted.capabilities,
+            ephemeral_transport: EffectiveEphemeralTransport::ReliableFallback,
             outbound,
         })
         .is_err()

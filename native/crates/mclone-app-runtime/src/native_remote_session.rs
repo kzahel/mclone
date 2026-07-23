@@ -1,6 +1,6 @@
 use anyhow::{Context, Result};
 use mclone_net::{NativeClientIoSession, NativeServerUpdateBatch};
-use mclone_protocol::{ClientCommand, ClientIdentity};
+use mclone_protocol::{ClientCommand, ClientEphemeralMessage, ClientIdentity};
 
 use crate::host_mode::{
     RemoteDedicatedServerSession, RemoteServerUpdate, RemoteServerUpdateBatch,
@@ -99,6 +99,15 @@ impl NativeRemoteServerSession {
         })
     }
 
+    pub fn send_ephemeral(&mut self, message: ClientEphemeralMessage) -> Result<()> {
+        self.session.send_ephemeral(message).with_context(|| {
+            format!(
+                "failed to send ephemeral message to {} remote server {}",
+                self.host_label, self.addr
+            )
+        })
+    }
+
     pub fn try_drain_update_batch(&mut self) -> Result<Option<RemoteServerUpdateBatch>> {
         self.session
             .try_drain_update_batch()
@@ -124,6 +133,10 @@ impl NativeRemoteServerSession {
 impl RemoteDedicatedServerSession for NativeRemoteServerSession {
     fn send_command_only(&mut self, command: ClientCommand) -> Result<()> {
         NativeRemoteServerSession::send_command_only(self, command)
+    }
+
+    fn send_ephemeral(&mut self, message: ClientEphemeralMessage) -> Result<()> {
+        NativeRemoteServerSession::send_ephemeral(self, message)
     }
 
     fn try_drain_update_batch(&mut self) -> Result<Option<RemoteServerUpdateBatch>> {

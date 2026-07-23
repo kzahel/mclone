@@ -43,6 +43,7 @@ struct Cli {
     seed: i64,
     world_generation_profile: WorldGenerationProfile,
     world_topology: HorizontalTopology,
+    enable_udp: bool,
     serve_once: bool,
     multi_client_smoke: bool,
     world: DedicatedWorldSelection,
@@ -56,6 +57,7 @@ impl Default for Cli {
             seed: DEFAULT_SEED,
             world_generation_profile: WorldGenerationProfile::default(),
             world_topology: HorizontalTopology::UNBOUNDED,
+            enable_udp: true,
             serve_once: false,
             multi_client_smoke: false,
             world: DedicatedWorldSelection::Transient,
@@ -117,6 +119,9 @@ impl Cli {
                 }
                 "--serve-once" => {
                     cli.serve_once = true;
+                }
+                "--disable-udp" => {
+                    cli.enable_udp = false;
                 }
                 "--multi-client-smoke" => {
                     cli.multi_client_smoke = true;
@@ -237,10 +242,10 @@ fn print_help() {
     println!(
         "mclone-dedicated-server\n\n\
          Usage:\n\
-           mclone-dedicated-server [--listen 127.0.0.1:25565] [--seed 12345] [--generation-profile overworld|flat-grass-v1|small-island-v1|mclone-overworld-v1|alpha-v1|alpha-v1-winter|beta-v1|authored-only] [--world-topology plane|cylinder-x|cylinder-x:32] [--world-dir ./worlds/world] [--serve-once]\n\
+           mclone-dedicated-server [--listen 127.0.0.1:25565] [--disable-udp] [--seed 12345] [--generation-profile overworld|flat-grass-v1|small-island-v1|mclone-overworld-v1|alpha-v1|alpha-v1-winter|beta-v1|authored-only] [--world-topology plane|cylinder-x|cylinder-x:32] [--world-dir ./worlds/world] [--serve-once]\n\
            mclone-dedicated-server [--listen 127.0.0.1:25565] [--listen-ws 127.0.0.1:25566] [--seed 12345] [--world-root ./worlds] [--world-name world]\n\
            mclone-dedicated-server --multi-client-smoke [--seed 12345]\n\n\
-         The server accepts persistent native TCP command streams from multiple clients. --generation-profile authored-only makes absent chunks deterministic void instead of running overworld generation. --world-topology selects plane or a periodic X cylinder. --world-dir opens a persistent SQLite-backed world; --world-root/--world-name select a named world directory. Without a world argument, or with --transient, the server uses explicit transient storage. --listen-ws accepts browser clients into the same authoritative host as native peers. --serve-once is intended for loopback smokes and exits after the first connection closes."
+         The server accepts persistent native TCP command streams from multiple clients and companion UDP pose traffic on the same numeric port. --disable-udp selects the reliable-only compatibility profile. --generation-profile authored-only makes absent chunks deterministic void instead of running overworld generation. --world-topology selects plane or a periodic X cylinder. --world-dir opens a persistent SQLite-backed world; --world-root/--world-name select a named world directory. Without a world argument, or with --transient, the server uses explicit transient storage. --listen-ws accepts browser clients into the same authoritative host as native peers. --serve-once is intended for loopback smokes and exits after the first connection closes."
     );
 }
 
@@ -295,6 +300,7 @@ fn run_server(cli: Cli) -> Result<()> {
             cli.world_topology,
             cli.world,
             mode,
+            cli.enable_udp,
         );
     }
     run_server_loop_with_profile_and_topology(
@@ -304,6 +310,7 @@ fn run_server(cli: Cli) -> Result<()> {
         cli.world_topology,
         cli.world,
         mode,
+        cli.enable_udp,
     )
 }
 
@@ -346,6 +353,7 @@ fn run_server_with_websocket(
     topology: HorizontalTopology,
     world: DedicatedWorldSelection,
     mode: ServerRunMode,
+    enable_udp: bool,
 ) -> Result<()> {
     let ws_listener = TcpListener::bind(listen_ws)
         .with_context(|| format!("failed to bind dedicated websocket listener to {listen_ws}"))?;
@@ -361,6 +369,7 @@ fn run_server_with_websocket(
         topology,
         world,
         mode,
+        enable_udp,
     )
 }
 
@@ -402,6 +411,7 @@ fn run_server_loop_with_profile(
         HorizontalTopology::UNBOUNDED,
         world,
         mode,
+        true,
     )
 }
 
@@ -412,8 +422,11 @@ fn run_server_loop_with_profile_and_topology(
     topology: HorizontalTopology,
     world: DedicatedWorldSelection,
     mode: ServerRunMode,
+    enable_udp: bool,
 ) -> Result<()> {
-    run_server_loop_with_listeners(listener, None, seed, profile, topology, world, mode)
+    run_server_loop_with_listeners(
+        listener, None, seed, profile, topology, world, mode, enable_udp,
+    )
 }
 
 fn run_server_loop_with_listeners(
@@ -424,8 +437,10 @@ fn run_server_loop_with_listeners(
     topology: HorizontalTopology,
     world: DedicatedWorldSelection,
     mode: ServerRunMode,
+    enable_udp: bool,
 ) -> Result<()> {
-    let network = DedicatedNetwork::start_with_websocket(listener, websocket_listener)?;
+    let network =
+        DedicatedNetwork::start_with_websocket_and_udp(listener, websocket_listener, enable_udp)?;
     let mut server = open_dedicated_server(seed, profile, topology, &world)?;
     let loop_result = run_server_loop_inner(network, &mut server, mode);
     let shutdown_result = server
@@ -489,6 +504,7 @@ fn run_server_loop_inner(
                     peer_addr,
                     identity,
                     capabilities,
+                    ephemeral_transport,
                     outbound: connection_outbound,
                 } => {
                     if let Some(existing) = active_profiles.get(&identity.profile_id) {
@@ -506,8 +522,11 @@ fn run_server_loop_inner(
                         continue;
                     }
                     let player_id = match server
-                        .add_player_with_identity_and_capabilities(identity.clone(), capabilities)
-                    {
+                        .add_player_with_identity_capabilities_and_pose_transport(
+                            identity.clone(),
+                            capabilities,
+                            ephemeral_transport,
+                        ) {
                         Ok(player_id) => player_id,
                         Err(error) => {
                             let message = format!(
@@ -678,8 +697,11 @@ fn run_server_loop_inner(
             }
         }
 
-        let diagnostics = advance_dedicated_host_frame(server, &mut sessions, &mut cadence)?;
-        summary.record_tick(diagnostics);
+        if let Some(diagnostics) =
+            advance_dedicated_host_frame(server, &mut sessions, &mut cadence)?
+        {
+            summary.record_tick(diagnostics);
+        }
 
         let liveness_now = Instant::now();
         let mut liveness_disconnects = Vec::new();
@@ -805,38 +827,48 @@ fn advance_dedicated_host_frame(
     server: &mut RealmServer,
     sessions: &mut BTreeMap<DedicatedConnectionId, DedicatedSession>,
     cadence: &mut SimulationCadence,
-) -> Result<DedicatedSessionDiagnostics> {
+) -> Result<Option<DedicatedSessionDiagnostics>> {
     for session in sessions.values_mut() {
         session.finish_tick_boundary(server)?;
     }
 
     let frame = cadence.advance_host_frame();
-    if frame.gameplay_ticks != 1 || frame.physics_steps != 3 {
+    if frame.gameplay_ticks > 1 || frame.physics_steps > 1 {
         bail!(
             "dedicated default cadence produced unsupported frame gameplay_ticks={} physics_steps={}",
             frame.gameplay_ticks,
             frame.physics_steps
         );
     }
-    let report = server
-        .try_simulation_tick_report_global()
-        .context("failed to advance autonomous dedicated simulation")?;
-    if should_autosave(report.simulation_tick) {
+    let diagnostics = if frame.gameplay_ticks == 1 {
+        let report = server
+            .try_simulation_tick_report_global_with_physics_steps(0, 1.0 / 60.0)
+            .context("failed to advance autonomous dedicated gameplay simulation")?;
+        if should_autosave(report.simulation_tick) {
+            server
+                .save_dirty_chunks()
+                .context("failed to queue dedicated autosave")?;
+            server
+                .save_all_player_records()
+                .context("failed to queue dedicated player autosave")?;
+            server
+                .save_world_metadata_blocking()
+                .context("failed to save dedicated world metadata")?;
+        }
+        Some(DedicatedSessionDiagnostics::from_report(
+            &report,
+            server.pending_job_count(),
+            server.pending_publication_count(),
+        ))
+    } else {
+        None
+    };
+    if frame.physics_steps == 1 {
         server
-            .save_dirty_chunks()
-            .context("failed to queue dedicated autosave")?;
-        server
-            .save_all_player_records()
-            .context("failed to queue dedicated player autosave")?;
-        server
-            .save_world_metadata_blocking()
-            .context("failed to save dedicated world metadata")?;
+            .try_physics_step_report_global_with_step_dt(1, 1.0 / 60.0)
+            .context("failed to advance autonomous dedicated physics simulation")?;
     }
-    Ok(DedicatedSessionDiagnostics::from_report(
-        &report,
-        server.pending_job_count(),
-        server.pending_publication_count(),
-    ))
+    Ok(diagnostics)
 }
 
 const fn should_autosave(simulation_tick: u64) -> bool {
@@ -1038,6 +1070,7 @@ mod tests {
                 seed: -7,
                 world_generation_profile: WorldGenerationProfile::authored_only(),
                 world_topology: HorizontalTopology::UNBOUNDED,
+                enable_udp: true,
                 serve_once: true,
                 multi_client_smoke: false,
                 world: DedicatedWorldSelection::Transient,
@@ -1090,11 +1123,18 @@ mod tests {
                 seed: 17,
                 world_generation_profile: WorldGenerationProfile::Overworld,
                 world_topology: HorizontalTopology::UNBOUNDED,
+                enable_udp: true,
                 serve_once: false,
                 multi_client_smoke: false,
                 world: DedicatedWorldSelection::Transient,
             }
         );
+    }
+
+    #[test]
+    fn cli_can_disable_udp_pose_transport() {
+        let cli = Cli::parse(["--disable-udp".to_owned()]).unwrap();
+        assert!(!cli.enable_udp);
     }
 
     #[test]
@@ -1112,6 +1152,7 @@ mod tests {
                 seed: 99,
                 world_generation_profile: WorldGenerationProfile::Overworld,
                 world_topology: HorizontalTopology::UNBOUNDED,
+                enable_udp: true,
                 serve_once: false,
                 multi_client_smoke: true,
                 world: DedicatedWorldSelection::Transient,
@@ -1135,6 +1176,7 @@ mod tests {
                 seed: 77,
                 world_generation_profile: WorldGenerationProfile::Overworld,
                 world_topology: HorizontalTopology::UNBOUNDED,
+                enable_udp: true,
                 serve_once: false,
                 multi_client_smoke: false,
                 world: DedicatedWorldSelection::Persistent {
@@ -1253,7 +1295,7 @@ mod tests {
         let mut sessions = BTreeMap::new();
         let mut cadence = SimulationCadence::default();
 
-        for _ in 0..20 {
+        for _ in 0..60 {
             advance_dedicated_host_frame(&mut server, &mut sessions, &mut cadence).unwrap();
         }
 
@@ -1289,12 +1331,10 @@ mod tests {
         }
         assert_eq!(server.simulation_tick(), 0);
 
-        advance_dedicated_host_frame(
-            &mut server,
-            &mut sessions,
-            &mut SimulationCadence::default(),
-        )
-        .unwrap();
+        let mut cadence = SimulationCadence::default();
+        for _ in 0..3 {
+            advance_dedicated_host_frame(&mut server, &mut sessions, &mut cadence).unwrap();
+        }
         assert_eq!(server.simulation_tick(), 1);
     }
 
@@ -1860,6 +1900,7 @@ mod tests {
                 topology,
                 DedicatedWorldSelection::Transient,
                 ServerRunMode::ServeOnce,
+                true,
             )
         });
 
