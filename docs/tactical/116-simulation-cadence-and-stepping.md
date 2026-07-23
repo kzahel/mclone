@@ -9,9 +9,12 @@ a developer cadence profile option that derives the runner host interval from
 the selected host rate, and the native runner can apply a new cadence profile
 while running. The shared in-game options UI now exposes local integrated-server
 cadence controls for host, world tick, and physics rates; native flat local
-captures validate the settings screen at the default 20/20/60 profile. Tactical
-221 separately lands the first 60 Hz client-player movement lane; it does not
-change the default 20 Hz world/gameplay lane or 20 Hz pose-publication lane.
+captures validated the settings screen at the former default 20/20/60 profile.
+Tactical 221 landed the first 60 Hz client-player movement lane. Tactical 224
+then made 60/20/60 the shared default host/gameplay/physics profile so player
+and session boundaries can run at 60 Hz without increasing the 20 Hz
+world/gameplay lane; body-pose publication is 60 Hz on the mixed UDP profile
+and 20 Hz on reliable fallback.
 
 ## Purpose
 
@@ -31,7 +34,7 @@ Minecraft-like default, not an architectural ceiling.
 
 ## Cadence Lanes
 
-- Host/server pump: configurable long-term, with 20/30/60 Hz as plausible
+- Host/server pump: configurable, default 60 Hz, with 20/30/60 Hz supported
   modes. This owns wall-clock pacing and command intake, not gameplay policy.
 - Gameplay lane: default 20 Hz for the Minecraft-like profile. Scheduled block
   ticks, fluid ticks, random ticks, entity age, and parity-sensitive world rules

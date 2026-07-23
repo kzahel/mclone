@@ -139,7 +139,10 @@ Current framing is deliberately simple:
 - native commands are one little-endian `u32` payload length followed by one
   encoded `ClientCommand`;
 - a native publication frame is a little-endian `u32` update count followed by
-  one length-prefixed encoded `ServerUpdate` per entry; and
+  one length-prefixed encoded `ServerUpdate` per entry;
+- an attached native UDP lane carries bounded, self-contained client and
+  observer body-pose samples associated with the TCP session by its negotiated
+  128-bit token; and
 - WebSocket carries the same command payload and publication-batch contents in
   binary messages after its version handshake.
 
@@ -229,14 +232,16 @@ plus app-owned sockets):
   `native:web:remote-smoke` validates that worker path against the native
   dedicated WebSocket server.
 
-There is no HTTP, raw-UDP, WebTransport, or WebRTC gameplay transport yet, and
-no Node/Deno host.
+There is no HTTP, WebTransport, or WebRTC gameplay transport yet, and no
+Node/Deno host.
 
-The reliable ordered publication lane is now implemented. Planned
-carrier-neutral ephemeral messages for high-rate player pose will first gain a
-dependency-free native UDP adapter and reliable-stream fallback. Later
+The reliable ordered publication lane and carrier-neutral ephemeral body-pose
+lane are implemented. Native sessions negotiate dependency-free companion UDP
+and automatically use the reliable stream at the lower compatibility cadence
+before attachment or after timeout/failure. Browser WebSocket sessions use the
+same decoded ephemeral message through that reliable fallback. Later
 WebTransport datagrams and browser-hosted WebRTC ephemeral channels must decode
-to that same logical contract, preserve spawn/despawn, correction, and keyframe
+to the same logical contract, preserve spawn/despawn, correction, and keyframe
 barriers, and must not redesign authority around the carrier. Compression,
 authentication, required capabilities, version ranges, and reconnect without
 rebuilding the replica remain future protocol work.

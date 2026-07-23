@@ -566,11 +566,8 @@ fn spawn_smoke_client(
                     SmokeClientControl::Command(command) => {
                         let result = session
                             .send_command_only(command)
-                            .and_then(|()| session.drain_update_batch())
-                            .map(|batch| SmokeClientReport {
-                                index,
-                                updates: batch.into_updates(),
-                            })
+                            .and_then(|()| drain_smoke_publications(&mut session))
+                            .map(|updates| SmokeClientReport { index, updates })
                             .map_err(|err| format!("smoke client {index} command failed: {err}"));
                         let should_stop = result.is_err();
                         if result_tx.send(result).is_err() || should_stop {
@@ -578,12 +575,8 @@ fn spawn_smoke_client(
                         }
                     }
                     SmokeClientControl::DrainPublications => {
-                        let result = session
-                            .drain_update_batch()
-                            .map(|batch| SmokeClientReport {
-                                index,
-                                updates: batch.into_updates(),
-                            })
+                        let result = drain_available_smoke_publications(&mut session)
+                            .map(|updates| SmokeClientReport { index, updates })
                             .map_err(|err| {
                                 format!("smoke client {index} publication drain failed: {err}")
                             });
@@ -597,6 +590,44 @@ fn spawn_smoke_client(
             }
         })
         .expect("failed to spawn dedicated smoke client thread")
+}
+
+fn drain_smoke_publications(
+    session: &mut NativeClientIoSession,
+) -> mclone_net::NativeTransportResult<Vec<ServerUpdate>> {
+    let mut updates = session.drain_update_batch()?.into_updates();
+    drain_ready_smoke_publications(session, &mut updates)?;
+    Ok(updates)
+}
+
+fn drain_ready_smoke_publications(
+    session: &mut NativeClientIoSession,
+    updates: &mut Vec<ServerUpdate>,
+) -> mclone_net::NativeTransportResult<()> {
+    let quiet_deadline = std::time::Instant::now() + Duration::from_millis(25);
+    while std::time::Instant::now() < quiet_deadline {
+        if let Some(batch) = session.try_drain_update_batch()? {
+            updates.extend(batch.into_updates());
+        } else {
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+    Ok(())
+}
+
+fn drain_available_smoke_publications(
+    session: &mut NativeClientIoSession,
+) -> mclone_net::NativeTransportResult<Vec<ServerUpdate>> {
+    let deadline = std::time::Instant::now() + Duration::from_millis(100);
+    let mut updates = Vec::new();
+    while std::time::Instant::now() < deadline {
+        if let Some(batch) = session.try_drain_update_batch()? {
+            updates.extend(batch.into_updates());
+        } else {
+            thread::sleep(Duration::from_millis(1));
+        }
+    }
+    Ok(updates)
 }
 
 fn wait_for_ready_clients(ready_rx: &Receiver<std::result::Result<usize, String>>) -> Result<()> {
@@ -679,7 +710,13 @@ fn wait_for_client_reports_count(
         match result_rx.recv_timeout(CLIENT_REPORT_TIMEOUT) {
             Ok(Ok(report)) => reports.push(report),
             Ok(Err(message)) => bail!(message),
-            Err(err) => bail!("timed out waiting for smoke client reports: {err}"),
+            Err(err) => bail!(
+                "timed out waiting for {count} smoke client reports after receiving {:?}: {err}",
+                reports
+                    .iter()
+                    .map(|report| report.index)
+                    .collect::<Vec<_>>()
+            ),
         }
     }
     reports.sort_by_key(|report| report.index);
@@ -1172,9 +1209,13 @@ fn has_remote_player_add(updates: &[ServerUpdate], id: RemotePlayerId) -> bool {
 }
 
 fn has_remote_player_update(updates: &[ServerUpdate], id: RemotePlayerId) -> bool {
-    updates
-        .iter()
-        .any(|update| matches!(update, ServerUpdate::RemotePlayerUpdate(update) if update.id == id))
+    updates.iter().any(|update| match update {
+        ServerUpdate::RemotePlayerUpdate(update) => update.id == id,
+        ServerUpdate::EphemeralFallback(
+            mclone_protocol::ServerEphemeralMessage::RemoteBodyPose(sample),
+        ) => sample.id == id,
+        _ => false,
+    })
 }
 
 fn has_remote_player_remove(updates: &[ServerUpdate], id: RemotePlayerId) -> bool {

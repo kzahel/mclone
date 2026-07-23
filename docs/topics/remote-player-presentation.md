@@ -4,15 +4,16 @@ Topic: `remote-player-presentation`
 
 Status: Tactical
 [`224`](../tactical/224-carrier-neutral-ephemeral-pose-and-native-udp.md)
-active as of 2026-07-23. The current product
+completed on 2026-07-23. The current product
 has a carrier-neutral, complete, sequenced body-pose sample and a distinct
 ephemeral send boundary. Native dedicated sessions now attach a bounded raw
 UDP lane beside TCP; integrated and WebSocket compatibility paths retain the
 same logical message through reliable fallback. Remote clients reject stale
 epoch/sequence samples and retain the newest state.
 Remote body presentation now evaluates a bounded snapshot timeline at render
-time with cadence/jitter-aware delay. Cross-platform closeout remains the
-active Tactical 224 slice. Separate body, head, and hand poses remain later
+time with cadence/jitter-aware delay. Automated cross-platform closeout covers
+desktop, browser, flat Android, and Android XR seams. Separate body, head, and
+hand poses remain later
 representation work. The first datagram carrier is dependency-free raw UDP
 beside existing native TCP, and WebTransport/WebRTC remain later adapters for
 their supported browser and peer-hosted topologies.
@@ -143,11 +144,11 @@ networked XR embodiment path beside it.
 
 ### Cadence contract
 
-The protocol already carries `SessionConfiguration.gameplay_rate_hz` and
-`publication_rate_hz`, but server configuration currently populates the fixed
-20/20 values and the scene's player-pose deadline remains a fixed 50 ms.
-`publication_rate_hz` does not configure pose reporting or remote
-interpolation.
+The protocol carries gameplay/publication cadence plus a negotiated pose
+profile with independently named client report and server replication rates.
+The shared scene selects its body-pose deadline from that effective profile;
+remote interpolation uses the negotiated replication interval rather than
+assuming the gameplay rate.
 
 The current effective lanes are:
 
@@ -157,10 +158,10 @@ The current effective lanes are:
 | Keyboard/touch observation | platform event callbacks |
 | Browser ordinary gamepad observation | one snapshot near each animation frame |
 | OpenXR head/actions/hands | one observation at the OpenXR frame/action-sync boundary |
-| Local body-pose report selection | change-driven, capped at 20 Hz |
-| Server host/gameplay/physics | configurable profile, default 20/20/60 Hz |
-| Remote-player relay | generated when accepted movement is processed |
-| Remote actor presentation | render cadence with fixed 80 ms half-life |
+| Local body-pose report selection | change-driven, capped at negotiated 60 Hz mixed / 20 Hz reliable-only |
+| Server host/gameplay/physics | configurable profile, default 60/20/60 Hz |
+| Remote-player relay | bounded latest-wins UDP at 60 Hz mixed / reliable fallback at 20 Hz |
+| Remote actor presentation | render cadence over bounded timeline with 35-150 ms adaptive delay |
 
 These are distinct clocks even where their current numeric defaults happen to
 match.
@@ -551,11 +552,12 @@ motion traces or short captures are required for interpolation quality.
    simulator that injects loss, duplication, reordering, delay, and pressure.
    Decide full samples, component masks, quantization, keyframes, and recovery
    from measured results.
-6. **Mixed-reliability transport — active Tactical 224.** Add capability and
+6. **Mixed-reliability transport — complete in Tactical 224.** Capability and
    effective-profile negotiation, reliable fallback, and dependency-free
-   native TCP-plus-UDP on desktop, Android, and Quest through the shared native
-   adapter. Prove one logical pose stream over both profiles. WebTransport and
-   WebRTC remain separate future carrier milestones.
+   native TCP-plus-UDP now share one adapter on desktop, Android, and Quest.
+   Native loopback and browser WebSocket smokes prove the same logical pose
+   stream over mixed and reliable-only profiles. WebTransport and WebRTC
+   remain separate future carrier milestones.
 7. **Component embodiment.** Add optional body/view separation, tracked head,
    and tracked hands; extend the shared actor/presentation/render contracts
    through Mono, per-eye XR, and multiview using the established pose lane.
@@ -614,18 +616,25 @@ path.
 
 ## Code Map
 
-- `native/crates/mclone-scene/src/pose_sync.rs`: current fixed 20 Hz local
+- `native/crates/mclone-scene/src/pose_sync.rs`: negotiated, monotonic local
   pose-publication deadline.
 - `native/crates/mclone-client/src/player.rs`: local change selector,
-  movement packet sequence, thresholds, and reminder count.
-- `native/crates/mclone-protocol/src/lib.rs`: session configuration,
-  `MovePlayer`, and current flat `RemotePlayerUpdate`.
+  movement packet sequence, thresholds, heartbeat, and pose sample selection.
+- `native/crates/mclone-client/src/remote_pose.rs`: bounded remote sample
+  timeline, sequence/loss accounting, and interpolation delay.
+- `native/crates/mclone-protocol/src/ephemeral.rs`: carrier-neutral body-pose
+  schema, effective profile, and strict codec.
+- `native/crates/mclone-protocol/src/lib.rs`: session configuration, reliable
+  fallback wrappers, `MovePlayer`, and flat `RemotePlayerUpdate`.
+- `native/crates/mclone-net/src/native_udp.rs`: bounded UDP packet codec,
+  attachment, liveness, and latest-wins socket actors.
 - `native/crates/mclone-server/src/player.rs`: accepted client pose and
   teleport gate.
 - `native/crates/mclone-server/src/remote_players.rs`: interest-aware
   remote-player add/update/remove routing.
-- `native/crates/mclone-client/src/lib.rs`: latest remote-player replica state.
-- `native/crates/mclone-client/src/actor.rs`: current fixed-half-life actor
+- `native/crates/mclone-client/src/lib.rs`: remote-player replica state and
+  render-time timeline sampling.
+- `native/crates/mclone-client/src/actor.rs`: generic-entity half-life actor
   interpolation and derived walk animation.
 - `native/crates/mclone-scene`: shared actor handoff and Mono/XR presentation.
 - `native/crates/mclone-xr-host/src/actions.rs`: local OpenXR action and tracked

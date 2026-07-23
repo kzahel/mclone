@@ -34,7 +34,8 @@ The carrier-neutral reliable/ephemeral lane model, dependency-free native
 TCP-plus-UDP first carrier, browser-to-LAN, and native-client **Share to
 Browser** directions were accepted on 2026-07-23. Tactical
 [`224`](../tactical/224-carrier-neutral-ephemeral-pose-and-native-udp.md)
-owns the first logical-lane, snapshot, fallback, and native UDP vertical slice.
+completed the first logical-lane, snapshot, fallback, and native UDP vertical
+slice on 2026-07-23.
 WebTransport remains a future browser-capable carrier and Share-to-Browser
 candidate rather than the common native/browser architecture.
 
@@ -53,7 +54,7 @@ transfer contract live in the focused
 [`185`](../tactical/185-realm-dimension-and-observer-runtime.md) owns the
 implementation sequence.
 
-## Current state (verified 2026-07-17)
+## Current state (verified 2026-07-23)
 
 Tactical 182's core proof is live. Each installation/browser origin owns one
 unauthenticated local UUID profile. Integrated, native TCP, direct WebSocket,
@@ -189,8 +190,8 @@ remain:
   visibility fanout (`mclone-server/src/remote_players.rs`), per-player
   entity routing, server-owned inventories.
 - **Local integrated runner already has the right tick shape**: a dedicated
-  server thread paced by wall clock at 20 Hz with a validated cadence config
-  (host/gameplay/physics lanes, default 20/20/60, live-reconfigurable)
+  server thread paced by wall clock at 60 Hz with a validated cadence config
+  (host/gameplay/physics lanes, default 60/20/60, live-reconfigurable)
   (`mclone-server/src/runner.rs:1143-1258`,
   `mclone-server/src/cadence.rs:9-130`).
 
@@ -545,14 +546,14 @@ later phases remain topic-level direction.
    separates body/tracked-pose report, server replication, and presentation
    rates instead of treating "publication" as one universal clock. See the
    next section for the gameplay semantics decision this forces.
-5. **Mixed-reliability remote pose transport — active Tactical 224.** Establish
-   transport-neutral logical lanes, sequenced snapshots, buffered
-   interpolation, and loss simulation first. Then add dependency-free raw UDP
-   beside existing TCP for first-party native clients and the dedicated
-   server. Carry critical facts on the reliable lane and ephemeral body pose
-   on UDP, with an independently configured 20 Hz reliable fallback profile.
+5. **Mixed-reliability remote pose transport — complete Tactical 224.**
+   Transport-neutral logical lanes, sequenced snapshots, buffered
+   interpolation, loss conformance, and dependency-free raw UDP now work
+   beside TCP for first-party native clients and the dedicated server.
+   Critical facts remain reliable; ephemeral body pose uses UDP when attached
+   and an independently configured 20 Hz reliable fallback otherwise.
    WebTransport and WebRTC remain later adapters over the same decoded
-   contract. The implementation order lives in
+   contract. The implementation record lives in
    [`remote-player-presentation.md`](remote-player-presentation.md) and
    Tactical
    [`224`](../tactical/224-carrier-neutral-ephemeral-pose-and-native-udp.md).

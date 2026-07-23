@@ -370,8 +370,9 @@ impl ServerRunnerDiagnostics {
             seed,
             day_time,
             simulation_cadence: SimulationCadenceConfig::default(),
-            host_tick_interval: host_tick_interval_for_rate_hz(
-                SimulationCadenceConfig::default().host_rate_hz,
+            host_tick_interval: std::time::Duration::from_nanos(
+                (1_000_000_000 + u64::from(SimulationCadenceConfig::default().host_rate_hz) / 2)
+                    / u64::from(SimulationCadenceConfig::default().host_rate_hz),
             ),
             awaiting_tick: false,
             command_queue_depth: 0,

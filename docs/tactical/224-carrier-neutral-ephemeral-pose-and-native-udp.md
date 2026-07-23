@@ -1,6 +1,6 @@
 # 224: Carrier-Neutral Ephemeral Pose And Native UDP
 
-Status: active 2026-07-23.
+Status: completed 2026-07-23.
 
 Topic: `remote-player-presentation`
 
@@ -314,7 +314,10 @@ cargo check --manifest-path native/Cargo.toml \
 cargo check --manifest-path native/Cargo.toml \
   --target wasm32-unknown-unknown -p mclone-web-client
 pnpm native:web:typecheck
+pnpm native:web:remote-smoke
 pnpm native:thin-adapters:purity
+pnpm native:dedicated:smoke
+pnpm native:xr:check
 pnpm native:android:apk
 pnpm native:android-xr:apk
 git diff --check
@@ -399,5 +402,36 @@ tests.
 - No TypeScript or JavaScript source changed.
 
 Validated with focused net, server cadence, dedicated-server, and
-app-runtime suites. Slice 4 platform builds, browser compatibility gates, and
-available motion review remain.
+app-runtime suites.
+
+### 2026-07-23: Slice 4 cross-platform closeout
+
+- Corrected the server-runner diagnostics initializer to derive its initial
+  host interval without a native-only helper, preserving the same cadence on
+  `wasm32-unknown-unknown`.
+- Routed browser body samples through the typed Rust ephemeral boundary and
+  its explicit reliable wrapper. The existing TypeScript/JavaScript byte and
+  event brokers remain generic; no TypeScript or JavaScript source changed.
+- Preserved intentionally empty reliable publication batches when separating
+  native UDP pose updates from TCP, while suppressing only batches whose
+  contents were all successfully handed to UDP.
+- Extended the native two-client smoke to accept remote body samples from the
+  negotiated UDP lane, tolerate latest-wins publication semantics, and still
+  recognize the equivalent reliable fallback representation.
+- Shared protocol, net, client, server, app-runtime, scene, dedicated, and
+  workspace checks pass. The affected combined Rust run completed with 310
+  app-runtime tests and 546 server tests, in addition to the focused protocol,
+  net, client, scene, and dedicated evidence recorded by earlier slices.
+- `native:dedicated:smoke` passed over negotiated TCP plus UDP.
+  `native:web:remote-smoke` passed over reliable WebSocket in headed Wayland;
+  its 1280x720 capture contained the expected remote world, UI, and nonblack
+  WebGPU pixels at the 60 Hz player-movement cadence.
+- Browser WASM build plus TypeScript typecheck, thin-adapter purity, desktop
+  flat workspace check, desktop OpenXR feature check, flat Android debug APK,
+  and Android XR release APK all pass.
+- The purity gate reports zero browser TypeScript occurrences for pose
+  publication selection/cadence and remote protocol decoding.
+
+Physical two-device LAN, high-refresh motion-feel comparison, Android
+lifecycle, and in-headset Quest review remain useful product-quality evidence.
+They are not automated correctness blockers for the carrier-neutral contract.

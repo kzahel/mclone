@@ -134,6 +134,7 @@ impl DedicatedOutbound {
     }
 
     pub(crate) fn publish(&self, updates: Vec<ServerUpdate>) -> Result<()> {
+        let was_empty = updates.is_empty();
         let updates = if let Some((session_key, udp)) = &self.udp {
             updates
                 .into_iter()
@@ -147,7 +148,7 @@ impl DedicatedOutbound {
         } else {
             updates
         };
-        if updates.is_empty() {
+        if updates.is_empty() && !was_empty {
             return Ok(());
         }
         let encoded_bytes = encoded_update_batch_len(&updates)?;

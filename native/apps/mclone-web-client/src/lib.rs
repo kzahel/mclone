@@ -14,6 +14,8 @@ use mclone_app_runtime::{
 use mclone_client::{ClientHost, ClientRuntime};
 use mclone_core::ChunkPos;
 use mclone_net::LocalTransport;
+#[cfg(target_arch = "wasm32")]
+use mclone_protocol::ClientEphemeralMessage;
 use mclone_protocol::{
     ChunkView, ClientCommand, ProtocolCodecError, ProtocolCodecResult, ServerUpdate,
     decode_client_command, decode_server_update, encode_client_command, encode_server_update,
@@ -289,6 +291,15 @@ impl WebRuntime {
         Ok(self.apply_exchange(exchange))
     }
 
+    #[cfg(target_arch = "wasm32")]
+    pub fn send_ephemeral_deferred(
+        &mut self,
+        message: ClientEphemeralMessage,
+    ) -> Result<WebRuntimeStepReport, String> {
+        let exchange = self.host.enqueue_ephemeral(message)?;
+        Ok(self.apply_exchange(exchange))
+    }
+
     pub fn drain_pending_runner_updates_with_budget(
         &mut self,
         budget: RuntimeUpdatePumpBudget,
@@ -462,6 +473,14 @@ impl WebRuntimeHost {
                 host.queue_command(command).map(command_deferred_exchange)
             }
         }
+    }
+
+    #[cfg(target_arch = "wasm32")]
+    fn enqueue_ephemeral(
+        &mut self,
+        message: ClientEphemeralMessage,
+    ) -> Result<RuntimeExchange, String> {
+        self.enqueue_command(ClientCommand::EphemeralFallback(message))
     }
 
     #[cfg(target_arch = "wasm32")]

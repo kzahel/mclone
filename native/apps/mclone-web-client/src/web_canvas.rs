@@ -66,7 +66,9 @@ use mclone_mesh::{
     RenderSectionKey, TexturedMeshCatalog, TexturedRenderSectionBuildReport,
     TexturedRenderSectionMesh, TexturedRenderSectionMetadata, load_textured_terrain_assets,
 };
-use mclone_protocol::{ClientCommand, ServerUpdate, decode_server_update, encode_server_update};
+use mclone_protocol::{
+    ClientCommand, ClientEphemeralMessage, ServerUpdate, decode_server_update, encode_server_update,
+};
 use mclone_render::actor_assets::load_actor_texture_assets;
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render::color_profile::{RenderColorProfile, RenderConfig};
@@ -2400,6 +2402,30 @@ impl SceneRuntimeService for WebSceneRuntimeService {
         let mut report = self
             .runtime
             .send_gameplay_command_deferred(command)
+            .map_err(anyhow::Error::msg)?;
+        if policy == GameplayCommandUpdatePolicy::DrainImmediately {
+            let drained = self
+                .runtime
+                .drain_pending_runner_updates_with_budget(RuntimeUpdatePumpBudget::unlimited())
+                .map_err(anyhow::Error::msg)?;
+            report.update_count = report.update_count.saturating_add(drained.update_count);
+        }
+        Ok(GameplayCommandSubmission {
+            timing: GameplayCommandTiming {
+                updates: report.update_count,
+                ..GameplayCommandTiming::default()
+            },
+        })
+    }
+
+    fn send_ephemeral_with_update_policy_timed(
+        &mut self,
+        message: ClientEphemeralMessage,
+        policy: GameplayCommandUpdatePolicy,
+    ) -> anyhow::Result<GameplayCommandSubmission> {
+        let mut report = self
+            .runtime
+            .send_ephemeral_deferred(message)
             .map_err(anyhow::Error::msg)?;
         if policy == GameplayCommandUpdatePolicy::DrainImmediately {
             let drained = self
