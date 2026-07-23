@@ -1,0 +1,449 @@
+use crate::levelgen::{
+    MCLONE_OVERWORLD_FIELD_REVISION, MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldSampler,
+    McloneOverworldSamplingTopology,
+};
+
+pub const TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION: &str =
+    "mclone-terrain-preview-reference-grid-v1";
+pub const TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS: u32 = 64;
+pub const TERRAIN_PREVIEW_MIN_CELLS_PER_AXIS: u32 = 8;
+pub const TERRAIN_PREVIEW_MAX_CELLS_PER_AXIS: u32 = 128;
+pub const TERRAIN_PREVIEW_MIN_SAMPLE_SPACING: u32 = 2;
+pub const TERRAIN_PREVIEW_MAX_SAMPLE_SPACING: u32 = 1_024;
+pub const TERRAIN_PREVIEW_SAMPLE_FLOATS: usize = 8;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TerrainPreviewRequest {
+    pub seed: i64,
+    pub center_x: i32,
+    pub center_z: i32,
+    pub sample_spacing: u32,
+    pub cells_per_axis: u32,
+    pub topology: McloneOverworldSamplingTopology,
+}
+
+impl TerrainPreviewRequest {
+    pub const fn new(seed: i64, center_x: i32, center_z: i32, sample_spacing: u32) -> Self {
+        Self {
+            seed,
+            center_x,
+            center_z,
+            sample_spacing,
+            cells_per_axis: TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS,
+            topology: McloneOverworldSamplingTopology::Unbounded,
+        }
+    }
+
+    pub fn validate(self) -> Result<ValidatedTerrainPreviewRequest, String> {
+        if !self.sample_spacing.is_power_of_two()
+            || !(TERRAIN_PREVIEW_MIN_SAMPLE_SPACING..=TERRAIN_PREVIEW_MAX_SAMPLE_SPACING)
+                .contains(&self.sample_spacing)
+        {
+            return Err(format!(
+                "terrain preview sample spacing must be a power of two from \
+                 {TERRAIN_PREVIEW_MIN_SAMPLE_SPACING} through \
+                 {TERRAIN_PREVIEW_MAX_SAMPLE_SPACING}, got {}",
+                self.sample_spacing
+            ));
+        }
+        if !self.cells_per_axis.is_power_of_two()
+            || !(TERRAIN_PREVIEW_MIN_CELLS_PER_AXIS..=TERRAIN_PREVIEW_MAX_CELLS_PER_AXIS)
+                .contains(&self.cells_per_axis)
+        {
+            return Err(format!(
+                "terrain preview cells per axis must be a power of two from \
+                 {TERRAIN_PREVIEW_MIN_CELLS_PER_AXIS} through \
+                 {TERRAIN_PREVIEW_MAX_CELLS_PER_AXIS}, got {}",
+                self.cells_per_axis
+            ));
+        }
+
+        let footprint_blocks = self
+            .cells_per_axis
+            .checked_mul(self.sample_spacing)
+            .ok_or("terrain preview footprint overflow")?;
+        let half_footprint = i32::try_from(footprint_blocks / 2)
+            .map_err(|_| "terrain preview half footprint exceeds i32 coordinates")?;
+        let min_x = self
+            .center_x
+            .checked_sub(half_footprint)
+            .ok_or("terrain preview minimum X coordinate overflow")?;
+        let min_z = self
+            .center_z
+            .checked_sub(half_footprint)
+            .ok_or("terrain preview minimum Z coordinate overflow")?;
+        self.center_x
+            .checked_add(half_footprint)
+            .ok_or("terrain preview maximum X coordinate overflow")?;
+        self.center_z
+            .checked_add(half_footprint)
+            .ok_or("terrain preview maximum Z coordinate overflow")?;
+
+        let samples_per_axis = self
+            .cells_per_axis
+            .checked_add(1)
+            .ok_or("terrain preview sample axis overflow")?;
+        let sample_count = samples_per_axis
+            .checked_mul(samples_per_axis)
+            .ok_or("terrain preview sample count overflow")?;
+
+        Ok(ValidatedTerrainPreviewRequest {
+            request: self,
+            min_x,
+            min_z,
+            footprint_blocks,
+            samples_per_axis,
+            sample_count,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ValidatedTerrainPreviewRequest {
+    request: TerrainPreviewRequest,
+    min_x: i32,
+    min_z: i32,
+    footprint_blocks: u32,
+    samples_per_axis: u32,
+    sample_count: u32,
+}
+
+impl ValidatedTerrainPreviewRequest {
+    pub const fn request(self) -> TerrainPreviewRequest {
+        self.request
+    }
+
+    pub const fn min_x(self) -> i32 {
+        self.min_x
+    }
+
+    pub const fn min_z(self) -> i32 {
+        self.min_z
+    }
+
+    pub const fn footprint_blocks(self) -> u32 {
+        self.footprint_blocks
+    }
+
+    pub const fn samples_per_axis(self) -> u32 {
+        self.samples_per_axis
+    }
+
+    pub const fn sample_count(self) -> u32 {
+        self.sample_count
+    }
+
+    pub fn world_x(self, sample_x: u32) -> Option<i32> {
+        if sample_x >= self.samples_per_axis {
+            return None;
+        }
+        let offset = sample_x.checked_mul(self.request.sample_spacing)?;
+        self.min_x.checked_add(i32::try_from(offset).ok()?)
+    }
+
+    pub fn world_z(self, sample_z: u32) -> Option<i32> {
+        if sample_z >= self.samples_per_axis {
+            return None;
+        }
+        let offset = sample_z.checked_mul(self.request.sample_spacing)?;
+        self.min_z.checked_add(i32::try_from(offset).ok()?)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TerrainPreviewSample {
+    pub surface_y: f32,
+    pub display_y: f32,
+    pub continentalness: f32,
+    pub relief: f32,
+    pub temperature: f32,
+    pub moisture: f32,
+    pub water: f32,
+    pub ruggedness: f32,
+}
+
+impl TerrainPreviewSample {
+    pub const fn packed(self) -> [f32; TERRAIN_PREVIEW_SAMPLE_FLOATS] {
+        [
+            self.surface_y,
+            self.display_y,
+            self.continentalness,
+            self.relief,
+            self.temperature,
+            self.moisture,
+            self.water,
+            self.ruggedness,
+        ]
+    }
+
+    pub const fn from_packed(values: [f32; TERRAIN_PREVIEW_SAMPLE_FLOATS]) -> Self {
+        Self {
+            surface_y: values[0],
+            display_y: values[1],
+            continentalness: values[2],
+            relief: values[3],
+            temperature: values[4],
+            moisture: values[5],
+            water: values[6],
+            ruggedness: values[7],
+        }
+    }
+
+    pub fn is_water(self) -> bool {
+        self.water >= 0.5
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TerrainPreviewReferenceGrid {
+    request: ValidatedTerrainPreviewRequest,
+    samples: Vec<TerrainPreviewSample>,
+}
+
+impl TerrainPreviewReferenceGrid {
+    pub fn compile(request: TerrainPreviewRequest) -> Result<Self, String> {
+        let request = request.validate()?;
+        let source = request.request();
+        let sampler = McloneOverworldSampler::new_with_topology(source.seed, source.topology);
+        let mut samples = Vec::with_capacity(
+            usize::try_from(request.sample_count())
+                .map_err(|_| "terrain preview sample count does not fit usize")?,
+        );
+
+        for sample_z in 0..request.samples_per_axis() {
+            let world_z = request
+                .world_z(sample_z)
+                .expect("validated terrain preview Z coordinate");
+            for sample_x in 0..request.samples_per_axis() {
+                let world_x = request
+                    .world_x(sample_x)
+                    .expect("validated terrain preview X coordinate");
+                let terrain = sampler.sample(world_x, world_z);
+                let water = terrain.surface_y < MCLONE_OVERWORLD_SEA_LEVEL
+                    || terrain.watercourse.is_water();
+                let water_y = if terrain.watercourse.is_water() {
+                    terrain.watercourse.water_surface_y
+                } else {
+                    MCLONE_OVERWORLD_SEA_LEVEL
+                };
+                samples.push(TerrainPreviewSample {
+                    surface_y: terrain.surface_y as f32,
+                    display_y: if water {
+                        terrain.surface_y.max(water_y) as f32
+                    } else {
+                        terrain.surface_y as f32
+                    },
+                    continentalness: terrain.continentalness as f32,
+                    relief: terrain.relief as f32,
+                    temperature: terrain.climate.temperature as f32,
+                    moisture: terrain.climate.moisture as f32,
+                    water: if water { 1.0 } else { 0.0 },
+                    ruggedness: terrain.ruggedness as f32,
+                });
+            }
+        }
+
+        Ok(Self { request, samples })
+    }
+
+    pub const fn request(&self) -> ValidatedTerrainPreviewRequest {
+        self.request
+    }
+
+    pub fn samples(&self) -> &[TerrainPreviewSample] {
+        &self.samples
+    }
+
+    pub fn sample(&self, sample_x: u32, sample_z: u32) -> Option<TerrainPreviewSample> {
+        if sample_x >= self.request.samples_per_axis()
+            || sample_z >= self.request.samples_per_axis()
+        {
+            return None;
+        }
+        let index = usize::try_from(sample_z).ok()?
+            * usize::try_from(self.request.samples_per_axis()).ok()?
+            + usize::try_from(sample_x).ok()?;
+        self.samples.get(index).copied()
+    }
+
+    pub fn packed_bytes(&self) -> Vec<u8> {
+        let mut bytes = Vec::with_capacity(
+            self.samples.len() * TERRAIN_PREVIEW_SAMPLE_FLOATS * std::mem::size_of::<f32>(),
+        );
+        for sample in &self.samples {
+            for value in sample.packed() {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+        bytes
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TerrainPreviewComparison {
+    pub sample_count: usize,
+    pub max_absolute_surface_error: f32,
+    pub mean_absolute_surface_error: f32,
+    pub p95_absolute_surface_error: f32,
+    pub water_presence_agreement: f32,
+}
+
+impl TerrainPreviewComparison {
+    pub fn compare(
+        reference: &TerrainPreviewReferenceGrid,
+        candidate: &[TerrainPreviewSample],
+    ) -> Result<Self, String> {
+        if candidate.len() != reference.samples.len() {
+            return Err(format!(
+                "terrain preview candidate has {} samples, reference has {}",
+                candidate.len(),
+                reference.samples.len()
+            ));
+        }
+        if candidate.is_empty() {
+            return Err("terrain preview comparison requires at least one sample".to_owned());
+        }
+
+        let mut errors = Vec::with_capacity(candidate.len());
+        let mut error_sum = 0.0_f64;
+        let mut max_error = 0.0_f32;
+        let mut water_matches = 0_usize;
+        for (expected, actual) in reference.samples.iter().zip(candidate) {
+            if !actual.surface_y.is_finite() {
+                return Err("terrain preview candidate contains a non-finite surface".to_owned());
+            }
+            let error = (expected.surface_y - actual.surface_y).abs();
+            errors.push(error);
+            error_sum += f64::from(error);
+            max_error = max_error.max(error);
+            water_matches += usize::from(expected.is_water() == actual.is_water());
+        }
+        errors.sort_by(f32::total_cmp);
+        let p95_index = ((errors.len() - 1) * 95) / 100;
+
+        Ok(Self {
+            sample_count: candidate.len(),
+            max_absolute_surface_error: max_error,
+            mean_absolute_surface_error: (error_sum / candidate.len() as f64) as f32,
+            p95_absolute_surface_error: errors[p95_index],
+            water_presence_agreement: water_matches as f32 / candidate.len() as f32,
+        })
+    }
+}
+
+pub const fn terrain_preview_field_revision() -> &'static str {
+    MCLONE_OVERWORLD_FIELD_REVISION
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn centered_request_uses_shared_corner_grid() {
+        let request = TerrainPreviewRequest::new(12_345, -64, 96, 16)
+            .validate()
+            .unwrap();
+        assert_eq!(request.footprint_blocks(), 1_024);
+        assert_eq!(request.samples_per_axis(), 65);
+        assert_eq!(request.sample_count(), 4_225);
+        assert_eq!(request.min_x(), -576);
+        assert_eq!(request.min_z(), -416);
+        assert_eq!(request.world_x(0), Some(-576));
+        assert_eq!(request.world_x(32), Some(-64));
+        assert_eq!(request.world_x(64), Some(448));
+        assert_eq!(request.world_x(65), None);
+    }
+
+    #[test]
+    fn rejects_invalid_spacing_cells_and_coordinate_overflow() {
+        assert!(TerrainPreviewRequest::new(1, 0, 0, 0).validate().is_err());
+        assert!(TerrainPreviewRequest::new(1, 0, 0, 3).validate().is_err());
+        assert!(
+            TerrainPreviewRequest::new(1, 0, 0, 2_048)
+                .validate()
+                .is_err()
+        );
+
+        let mut request = TerrainPreviewRequest::new(1, 0, 0, 16);
+        request.cells_per_axis = 63;
+        assert!(request.validate().is_err());
+        request.cells_per_axis = 256;
+        assert!(request.validate().is_err());
+
+        let request = TerrainPreviewRequest::new(1, i32::MAX, 0, 1_024);
+        assert!(request.validate().is_err());
+    }
+
+    #[test]
+    fn reference_grid_matches_direct_production_samples() {
+        let request = TerrainPreviewRequest::new(-98_765, -304, 336, 32);
+        let grid = TerrainPreviewReferenceGrid::compile(request).unwrap();
+        let validated = request.validate().unwrap();
+        let sampler = McloneOverworldSampler::new(request.seed);
+
+        for (sample_x, sample_z) in [(0, 0), (1, 63), (32, 32), (64, 64)] {
+            let world_x = validated.world_x(sample_x).unwrap();
+            let world_z = validated.world_z(sample_z).unwrap();
+            let terrain = sampler.sample(world_x, world_z);
+            let sample = grid.sample(sample_x, sample_z).unwrap();
+            assert_eq!(sample.surface_y, terrain.surface_y as f32);
+            assert_eq!(sample.continentalness, terrain.continentalness as f32);
+            assert_eq!(sample.relief, terrain.relief as f32);
+            assert_eq!(sample.temperature, terrain.climate.temperature as f32);
+            assert_eq!(sample.moisture, terrain.climate.moisture as f32);
+        }
+        assert_eq!(
+            grid.packed_bytes().len(),
+            4_225 * TERRAIN_PREVIEW_SAMPLE_FLOATS * std::mem::size_of::<f32>()
+        );
+    }
+
+    #[test]
+    fn reference_grid_preserves_periodic_x_topology() {
+        let mut left = TerrainPreviewRequest::new(8_675_309, 0, 0, 64);
+        left.topology = McloneOverworldSamplingTopology::PeriodicX;
+        let mut right = left;
+        right.center_x += crate::levelgen::MCLONE_OVERWORLD_PERIOD_BLOCKS;
+        assert_eq!(
+            TerrainPreviewReferenceGrid::compile(left)
+                .unwrap()
+                .samples(),
+            TerrainPreviewReferenceGrid::compile(right)
+                .unwrap()
+                .samples()
+        );
+    }
+
+    #[test]
+    fn comparison_reports_height_and_water_disagreement() {
+        let request = TerrainPreviewRequest::new(12_345, 0, 0, 1_024);
+        let reference = TerrainPreviewReferenceGrid::compile(request).unwrap();
+        let mut candidate = reference.samples().to_vec();
+        candidate[0].surface_y += 10.0;
+        candidate[1].surface_y -= 2.0;
+        candidate[2].water = if candidate[2].is_water() { 0.0 } else { 1.0 };
+
+        let report = TerrainPreviewComparison::compare(&reference, &candidate).unwrap();
+        assert_eq!(report.sample_count, 4_225);
+        assert_eq!(report.max_absolute_surface_error, 10.0);
+        assert!(report.mean_absolute_surface_error > 0.0);
+        assert_eq!(report.p95_absolute_surface_error, 0.0);
+        assert_eq!(
+            report.water_presence_agreement,
+            (report.sample_count - 1) as f32 / report.sample_count as f32
+        );
+    }
+
+    #[test]
+    fn exposes_production_field_and_reference_schema_revisions() {
+        assert_eq!(
+            terrain_preview_field_revision(),
+            MCLONE_OVERWORLD_FIELD_REVISION
+        );
+        assert_eq!(
+            TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION,
+            "mclone-terrain-preview-reference-grid-v1"
+        );
+    }
+}

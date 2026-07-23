@@ -13,6 +13,7 @@ pub mod structure_json;
 pub mod structure_template;
 pub mod surface;
 pub mod terrain_analysis;
+pub mod terrain_preview;
 
 pub fn target_minecraft_version() -> &'static str {
     mclone_core::TARGET_MINECRAFT_VERSION
