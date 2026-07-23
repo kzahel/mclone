@@ -368,7 +368,7 @@ instead of being discarded while the app creates a hard-coded logical
 
 Host validation passed all 177 native-client tests, including the SteamOS
 profile parser, handheld-native scale, 4K-to-1080p world cap, and
-aspect-preserving 16:10/ultrawide cases. Commit `eb3b1a7e` was then rebuilt
+aspect-preserving 16:10/ultrawide cases. Commit `1129692a` was then rebuilt
 from a clean source tree with the pinned SDK and Rust 1.97.0; its binary hash
 is `10abc615367e1a443004f6d1b13915d022031b872f56b6a988ee0c2cbcc4fd0f`.
 
