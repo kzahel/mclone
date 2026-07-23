@@ -10,9 +10,12 @@ Tactical
 native consumer of this direction. Its reusable pure procedural
 placement/start/bounding-box/reference/clipping kernel is now live in
 `mclone-worldgen::procedural_structure`; the terrain-affecting Mclone stream
-is its first planned content consumer. It does not by itself claim the full
-persisted vanilla status pipeline, templates, jigsaw, or structure-family
-parity.
+is its first live plan-only content consumer. That consumer now proves
+random-spread candidates, a capped multi-chunk route, monotonic typed pieces,
+aggregate boxes, continuous column queries, positive/negative plan caching,
+and production diagnostics without changing generated blocks. It does not by
+itself claim the full persisted vanilla status pipeline, templates, jigsaw,
+or structure-family parity.
 
 Durable architecture notes for Minecraft Java 1.17.1 overworld structures in `mclone`.
 

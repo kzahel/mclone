@@ -12,9 +12,12 @@ use mclone_core::ChunkPos;
 use mclone_worldgen::levelgen::{
     BEACH_BIOME_ID, MCLONE_OVERWORLD_DECORATION_REVISION, MCLONE_OVERWORLD_FIELD_REVISION,
     MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_PERIOD_BLOCKS,
-    MCLONE_OVERWORLD_RIVER_BIOME_ID, MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldLandformSample,
-    McloneOverworldSampleRegionRequest, McloneOverworldSampler, McloneOverworldSamplingTopology,
-    McloneOverworldSurfaceRecipe, McloneOverworldTerrainSample, OCEAN_BIOME_ID, PLAINS_BIOME_ID,
+    MCLONE_OVERWORLD_RIVER_BIOME_ID, MCLONE_OVERWORLD_SEA_LEVEL,
+    MCLONE_OVERWORLD_STREAM_REFERENCE_RADIUS_CHUNKS, McloneOverworldLandformSample,
+    McloneOverworldSampleRegion, McloneOverworldSampleRegionRequest, McloneOverworldSampler,
+    McloneOverworldSamplingTopology, McloneOverworldStreamPlan, McloneOverworldStreamPlanAttempt,
+    McloneOverworldStreamPlanner, McloneOverworldStreamRejection, McloneOverworldSurfaceRecipe,
+    McloneOverworldTerrainSample, OCEAN_BIOME_ID, PLAINS_BIOME_ID,
     analyze_mclone_overworld_hydraulic_closure, mclone_overworld_biome_id_for_sample,
     mclone_overworld_spawn_chunk, mclone_overworld_spawn_chunk_with_topology,
     mclone_overworld_surface_recipe,
@@ -107,6 +110,20 @@ fn run() -> Result<()> {
         1,
     );
     let hydraulic_elapsed_ms = hydraulic_start.elapsed().as_secs_f64() * 1_000.0;
+    let stream_planning_start = Instant::now();
+    let stream_planner = McloneOverworldStreamPlanner::new(config.seed, config.topology);
+    let min_review_chunk =
+        ChunkPos::new(request.min_x.div_euclid(16), request.min_z.div_euclid(16));
+    let max_review_x = request.min_x + (request.width as i32 - 1) * request.step as i32;
+    let max_review_z = request.min_z + (request.depth as i32 - 1) * request.step as i32;
+    let max_review_chunk = ChunkPos::new(max_review_x.div_euclid(16), max_review_z.div_euclid(16));
+    let stream_attempts = stream_planner
+        .plan_candidates_in_chunks(min_review_chunk, max_review_chunk)
+        .map_err(anyhow::Error::msg)?;
+    let stream_plans = stream_planner
+        .plans_intersecting_chunks(min_review_chunk, max_review_chunk)
+        .map_err(anyhow::Error::msg)?;
+    let stream_planning_elapsed_ms = stream_planning_start.elapsed().as_secs_f64() * 1_000.0;
 
     let prefix = format!(
         "mclone-overworld-v1-{}-seed-{}-chunk-{}-{}",
@@ -138,6 +155,13 @@ fn run() -> Result<()> {
         .join(format!("{prefix}-river-transitions.png"));
     let wetland_path = config.output_dir.join(format!("{prefix}-wetland.png"));
     let watercourses_path = config.output_dir.join(format!("{prefix}-watercourses.png"));
+    let stream_plans_path = config.output_dir.join(format!("{prefix}-stream-plans.png"));
+    let stream_candidates_path = config
+        .output_dir
+        .join(format!("{prefix}-stream-candidates.png"));
+    let stream_costs_path = config
+        .output_dir
+        .join(format!("{prefix}-stream-plan-costs.png"));
     let water_depth_path = config.output_dir.join(format!("{prefix}-water-depth.png"));
     let shelf_break_path = config.output_dir.join(format!("{prefix}-shelf-break.png"));
     let ocean_basin_path = config.output_dir.join(format!("{prefix}-ocean-basin.png"));
@@ -168,6 +192,10 @@ fn run() -> Result<()> {
     let river_grade = render_map(&region.samples, river_grade_color);
     let river_transitions = render_map(&region.samples, river_transition_color);
     let wetland = render_map(&region.samples, wetland_color);
+    let stream_plan_map = render_stream_plan_map(&region, &stream_plans);
+    let stream_candidate_map =
+        render_stream_candidate_map(&region, &stream_attempts, &stream_plans);
+    let stream_cost_map = render_stream_plan_cost_map(&region, &stream_plans);
     let water_depth = render_map(&region.samples, water_depth_color);
     let shelf_break = render_map(&region.samples, shelf_break_color);
     let ocean_basin = render_map(&region.samples, ocean_basin_color);
@@ -222,6 +250,24 @@ fn run() -> Result<()> {
         &river_transitions,
     )?;
     save_rgba(&wetland_path, request.width, request.depth, &wetland)?;
+    save_rgba(
+        &stream_plans_path,
+        request.width,
+        request.depth,
+        &stream_plan_map,
+    )?;
+    save_rgba(
+        &stream_candidates_path,
+        request.width,
+        request.depth,
+        &stream_candidate_map,
+    )?;
+    save_rgba(
+        &stream_costs_path,
+        request.width,
+        request.depth,
+        &stream_cost_map,
+    )?;
     save_rgba(
         &water_depth_path,
         request.width,
@@ -415,6 +461,11 @@ fn run() -> Result<()> {
             "wetlandAboveQuarter": facts.wetland_columns,
             "wetlandPool": facts.wetland_pool_columns,
         },
+        "streamPlanning": stream_planning_json(
+            &stream_attempts,
+            &stream_plans,
+            stream_planning_elapsed_ms,
+        ),
         "bathymetryCounts": {
             "shelf": facts.shelf_columns,
             "shelfBreak": facts.shelf_break_columns,
@@ -475,6 +526,9 @@ fn run() -> Result<()> {
             "riverTransitions": river_transition_path,
             "riverGrade": river_grade_path,
             "wetland": wetland_path,
+            "streamPlans": stream_plans_path,
+            "streamCandidates": stream_candidates_path,
+            "streamPlanCosts": stream_costs_path,
             "terrainLanguageOrder": ["slope", "biomes", "surfaceRecipes"],
             "terrainLanguage": language_path,
             "slope": slope_path,
@@ -665,6 +719,133 @@ fn select_review_sites(
         "wetlandPool": review_site_json(wetland_pool, samples, request),
         "periodicSeamRiver": review_site_json(seam_river, samples, request),
     })
+}
+
+fn stream_planning_json(
+    attempts: &[(
+        Option<McloneOverworldStreamPlan>,
+        McloneOverworldStreamPlanAttempt,
+    )],
+    plans: &[McloneOverworldStreamPlan],
+    elapsed_ms: f64,
+) -> serde_json::Value {
+    let mut rejection_counts = std::collections::BTreeMap::<&'static str, usize>::new();
+    let expanded_nodes = attempts
+        .iter()
+        .map(|(_, attempt)| u64::from(attempt.expanded_nodes))
+        .sum::<u64>();
+    for (_, attempt) in attempts {
+        if let Some(rejection) = attempt.rejection {
+            *rejection_counts
+                .entry(stream_rejection_label(rejection))
+                .or_default() += 1;
+        }
+    }
+    let candidate_attempts = attempts
+        .iter()
+        .map(|(plan, attempt)| {
+            serde_json::json!({
+                "canonicalStartChunk": [
+                    attempt.candidate.canonical_start.x,
+                    attempt.candidate.canonical_start.z,
+                ],
+                "workStartChunk": [
+                    attempt.candidate.work_start.x,
+                    attempt.candidate.work_start.z,
+                ],
+                "accepted": plan.is_some(),
+                "rejection": attempt.rejection.map(stream_rejection_label),
+                "expandedNodes": attempt.expanded_nodes,
+            })
+        })
+        .collect::<Vec<_>>();
+    let plans = plans
+        .iter()
+        .map(|plan| {
+            serde_json::json!({
+                "canonicalStartChunk": [
+                    plan.structure.key.canonical_start.x,
+                    plan.structure.key.canonical_start.z,
+                ],
+                "workStartChunk": [
+                    plan.structure.work_start.x,
+                    plan.structure.work_start.z,
+                ],
+                "bounds": {
+                    "min": [
+                        plan.structure.bounds.min_x,
+                        plan.structure.bounds.min_y,
+                        plan.structure.bounds.min_z,
+                    ],
+                    "max": [
+                        plan.structure.bounds.max_x,
+                        plan.structure.bounds.max_y,
+                        plan.structure.bounds.max_z,
+                    ],
+                },
+                "metrics": {
+                    "routeLengthBlocks": plan.metrics.route_length_blocks,
+                    "expandedNodes": plan.metrics.expanded_nodes,
+                    "flatReaches": plan.metrics.flat_reaches,
+                    "transitions": plan.metrics.transitions,
+                    "totalRiseBlocks": plan.metrics.total_rise_blocks,
+                    "maximumCutBlocks": plan.metrics.maximum_cut_blocks,
+                    "maximumRequiredFillBlocks":
+                        plan.metrics.maximum_required_fill_blocks,
+                    "minimumBankClearanceBlocks":
+                        plan.metrics.minimum_bank_clearance_blocks,
+                },
+                "referenceFootprintChunks": {
+                    "min": [
+                        plan.structure.work_start.x
+                            - i32::from(MCLONE_OVERWORLD_STREAM_REFERENCE_RADIUS_CHUNKS),
+                        plan.structure.work_start.z
+                            - i32::from(MCLONE_OVERWORLD_STREAM_REFERENCE_RADIUS_CHUNKS),
+                    ],
+                    "max": [
+                        plan.structure.work_start.x
+                            + i32::from(MCLONE_OVERWORLD_STREAM_REFERENCE_RADIUS_CHUNKS),
+                        plan.structure.work_start.z
+                            + i32::from(MCLONE_OVERWORLD_STREAM_REFERENCE_RADIUS_CHUNKS),
+                    ],
+                },
+                "nodes": plan.nodes.iter().map(|node| {
+                    serde_json::json!([
+                        node.x,
+                        node.base_surface_y,
+                        node.z,
+                        node.water_y,
+                    ])
+                }).collect::<Vec<_>>(),
+            })
+        })
+        .collect::<Vec<_>>();
+    serde_json::json!({
+        "elapsedMs": elapsed_ms,
+        "candidateStarts": attempts.len(),
+        "acceptedStarts": attempts
+            .iter()
+            .filter(|(plan, _)| plan.is_some())
+            .count(),
+        "intersectingPlans": plans.len(),
+        "expandedNodes": expanded_nodes,
+        "rejections": rejection_counts,
+        "candidateAttempts": candidate_attempts,
+        "plans": plans,
+    })
+}
+
+fn stream_rejection_label(rejection: McloneOverworldStreamRejection) -> &'static str {
+    match rejection {
+        McloneOverworldStreamRejection::NoMajorRiverInStartChunk => "noMajorRiverInStartChunk",
+        McloneOverworldStreamRejection::NoBoundedRoute => "noBoundedRoute",
+        McloneOverworldStreamRejection::RouteTooShort => "routeTooShort",
+        McloneOverworldStreamRejection::RequiresTerrainFill => "requiresTerrainFill",
+        McloneOverworldStreamRejection::InsufficientBankClearance => "insufficientBankClearance",
+        McloneOverworldStreamRejection::ExcessiveCut => "excessiveCut",
+        McloneOverworldStreamRejection::NoRaisedReach => "noRaisedReach",
+        McloneOverworldStreamRejection::StructureBounds => "structureBounds",
+    }
 }
 
 fn review_site_json(
@@ -1369,6 +1550,291 @@ fn render_map(
     color: fn(McloneOverworldTerrainSample) -> [u8; 4],
 ) -> Vec<u8> {
     samples.iter().copied().flat_map(color).collect::<Vec<_>>()
+}
+
+fn render_stream_plan_map(
+    region: &McloneOverworldSampleRegion,
+    plans: &[McloneOverworldStreamPlan],
+) -> Vec<u8> {
+    let mut pixels = Vec::with_capacity(region.samples.len() * 4);
+    for offset_z in 0..region.request.depth {
+        for offset_x in 0..region.request.width {
+            let sample = region
+                .sample(offset_x, offset_z)
+                .expect("review region coordinates are in bounds");
+            let world_x = region.request.min_x + offset_x as i32 * region.request.step as i32;
+            let world_z = region.request.min_z + offset_z as i32 * region.request.step as i32;
+            let mut color = stream_plan_base_color(sample);
+            let mut nearest = None;
+            for plan in plans {
+                if world_x < plan.structure.bounds.min_x
+                    || world_x > plan.structure.bounds.max_x
+                    || world_z < plan.structure.bounds.min_z
+                    || world_z > plan.structure.bounds.max_z
+                {
+                    continue;
+                }
+                let column = plan.sample_column(world_x, world_z);
+                if nearest.as_ref().is_none_or(
+                    |current: &mclone_worldgen::levelgen::McloneOverworldStreamColumnSample| {
+                        column.distance.total_cmp(&current.distance).is_lt()
+                    },
+                ) {
+                    nearest = Some(column);
+                }
+            }
+            if let Some(column) = nearest {
+                color = if column.distance <= column.half_width {
+                    if column.transition.is_some() {
+                        [239, 183, 66, 255]
+                    } else if column.is_headwater {
+                        [66, 222, 215, 255]
+                    } else if column.is_confluence {
+                        [91, 154, 239, 255]
+                    } else {
+                        let level = f64::from(column.water_y - MCLONE_OVERWORLD_SEA_LEVEL) / 6.0;
+                        lerp_color([42, 102, 214, 255], [99, 226, 230, 255], level)
+                    }
+                } else if column.distance <= 10.0 {
+                    lerp_color(color, [48, 38, 28, 255], 0.42)
+                } else {
+                    color
+                };
+            }
+            pixels.extend(color);
+        }
+    }
+    pixels
+}
+
+fn render_stream_candidate_map(
+    region: &McloneOverworldSampleRegion,
+    attempts: &[(
+        Option<McloneOverworldStreamPlan>,
+        McloneOverworldStreamPlanAttempt,
+    )],
+    plans: &[McloneOverworldStreamPlan],
+) -> Vec<u8> {
+    let mut pixels = region
+        .samples
+        .iter()
+        .copied()
+        .flat_map(stream_plan_base_color)
+        .collect::<Vec<_>>();
+    let radius = i32::from(MCLONE_OVERWORLD_STREAM_REFERENCE_RADIUS_CHUNKS);
+    for plan in plans {
+        let footprint_min_x = (plan.structure.work_start.x - radius) * 16;
+        let footprint_min_z = (plan.structure.work_start.z - radius) * 16;
+        let footprint_max_x = (plan.structure.work_start.x + radius + 1) * 16 - 1;
+        let footprint_max_z = (plan.structure.work_start.z + radius + 1) * 16 - 1;
+        draw_world_box(
+            &mut pixels,
+            region,
+            footprint_min_x,
+            footprint_min_z,
+            footprint_max_x,
+            footprint_max_z,
+            [110, 76, 166, 255],
+        );
+        draw_world_box(
+            &mut pixels,
+            region,
+            plan.structure.bounds.min_x,
+            plan.structure.bounds.min_z,
+            plan.structure.bounds.max_x,
+            plan.structure.bounds.max_z,
+            [242, 189, 67, 255],
+        );
+    }
+    for (plan, attempt) in attempts {
+        let x = attempt.candidate.work_start.min_block_x() + 8;
+        let z = attempt.candidate.work_start.min_block_z() + 8;
+        let color = match attempt.rejection {
+            None if plan.is_some() => [57, 225, 121, 255],
+            Some(McloneOverworldStreamRejection::NoMajorRiverInStartChunk) => [99, 110, 105, 255],
+            Some(McloneOverworldStreamRejection::NoRaisedReach) => [242, 179, 70, 255],
+            Some(McloneOverworldStreamRejection::ExcessiveCut) => [221, 92, 54, 255],
+            Some(McloneOverworldStreamRejection::RequiresTerrainFill)
+            | Some(McloneOverworldStreamRejection::InsufficientBankClearance) => [229, 64, 82, 255],
+            Some(_) => [191, 87, 174, 255],
+            None => [255, 255, 255, 255],
+        };
+        draw_world_marker(&mut pixels, region, x, z, color);
+    }
+    pixels
+}
+
+fn render_stream_plan_cost_map(
+    region: &McloneOverworldSampleRegion,
+    plans: &[McloneOverworldStreamPlan],
+) -> Vec<u8> {
+    let mut pixels = Vec::with_capacity(region.samples.len() * 4);
+    for offset_z in 0..region.request.depth {
+        for offset_x in 0..region.request.width {
+            let sample = region
+                .sample(offset_x, offset_z)
+                .expect("review region coordinates are in bounds");
+            let world_x = region.request.min_x + offset_x as i32 * region.request.step as i32;
+            let world_z = region.request.min_z + offset_z as i32 * region.request.step as i32;
+            let mut color = stream_plan_base_color(sample);
+            let nearest = plans
+                .iter()
+                .filter(|plan| {
+                    world_x >= plan.structure.bounds.min_x
+                        && world_x <= plan.structure.bounds.max_x
+                        && world_z >= plan.structure.bounds.min_z
+                        && world_z <= plan.structure.bounds.max_z
+                })
+                .map(|plan| plan.sample_column(world_x, world_z))
+                .min_by(|left, right| left.distance.total_cmp(&right.distance));
+            if let Some(column) = nearest.filter(|column| column.distance <= column.half_width) {
+                let target_bed_y = column.water_y - 2;
+                let cut = sample.base_surface_y - target_bed_y;
+                color = if cut < 0 {
+                    lerp_color(
+                        [88, 181, 236, 255],
+                        [218, 55, 74, 255],
+                        f64::from(-cut) / 2.0,
+                    )
+                } else {
+                    lerp_color(
+                        [245, 223, 106, 255],
+                        [155, 42, 36, 255],
+                        f64::from(cut) / 8.0,
+                    )
+                };
+            }
+            pixels.extend(color);
+        }
+    }
+    pixels
+}
+
+fn stream_plan_base_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    let y = sample.base_surface_y;
+    if sample.continentalness <= 0.0 {
+        return lerp_color(
+            [64, 147, 202, 255],
+            [12, 42, 103, 255],
+            f64::from((MCLONE_OVERWORLD_SEA_LEVEL - y).clamp(0, 40)) / 40.0,
+        );
+    }
+    let mut color = if y <= MCLONE_OVERWORLD_SEA_LEVEL + 2 {
+        [219, 200, 132, 255]
+    } else if y <= 96 {
+        lerp_color(
+            [92, 154, 77, 255],
+            [49, 92, 50, 255],
+            f64::from(y - 65) / 31.0,
+        )
+    } else {
+        lerp_color(
+            [116, 92, 62, 255],
+            [187, 190, 187, 255],
+            f64::from(y - 96) / 80.0,
+        )
+    };
+    if y.rem_euclid(4) == 0 {
+        color = lerp_color(color, [22, 31, 24, 255], 0.18);
+    }
+    color
+}
+
+fn draw_world_marker(
+    pixels: &mut [u8],
+    region: &McloneOverworldSampleRegion,
+    world_x: i32,
+    world_z: i32,
+    color: [u8; 4],
+) {
+    let Some((center_x, center_z)) = world_to_review_pixel(region, world_x, world_z) else {
+        return;
+    };
+    for offset_z in -1..=1 {
+        for offset_x in -1..=1 {
+            set_review_pixel(
+                pixels,
+                region.request.width,
+                region.request.depth,
+                center_x + offset_x,
+                center_z + offset_z,
+                color,
+            );
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn draw_world_box(
+    pixels: &mut [u8],
+    region: &McloneOverworldSampleRegion,
+    min_x: i32,
+    min_z: i32,
+    max_x: i32,
+    max_z: i32,
+    color: [u8; 4],
+) {
+    let step = region.request.step as i32;
+    let pixel_min_x = (min_x - region.request.min_x).div_euclid(step);
+    let pixel_min_z = (min_z - region.request.min_z).div_euclid(step);
+    let pixel_max_x = (max_x - region.request.min_x).div_euclid(step);
+    let pixel_max_z = (max_z - region.request.min_z).div_euclid(step);
+    for x in pixel_min_x..=pixel_max_x {
+        set_review_pixel(
+            pixels,
+            region.request.width,
+            region.request.depth,
+            x,
+            pixel_min_z,
+            color,
+        );
+        set_review_pixel(
+            pixels,
+            region.request.width,
+            region.request.depth,
+            x,
+            pixel_max_z,
+            color,
+        );
+    }
+    for z in pixel_min_z..=pixel_max_z {
+        set_review_pixel(
+            pixels,
+            region.request.width,
+            region.request.depth,
+            pixel_min_x,
+            z,
+            color,
+        );
+        set_review_pixel(
+            pixels,
+            region.request.width,
+            region.request.depth,
+            pixel_max_x,
+            z,
+            color,
+        );
+    }
+}
+
+fn world_to_review_pixel(
+    region: &McloneOverworldSampleRegion,
+    world_x: i32,
+    world_z: i32,
+) -> Option<(i32, i32)> {
+    let step = region.request.step as i32;
+    let x = (world_x - region.request.min_x).div_euclid(step);
+    let z = (world_z - region.request.min_z).div_euclid(step);
+    (x >= 0 && z >= 0 && x < region.request.width as i32 && z < region.request.depth as i32)
+        .then_some((x, z))
+}
+
+fn set_review_pixel(pixels: &mut [u8], width: u32, height: u32, x: i32, z: i32, color: [u8; 4]) {
+    if x < 0 || z < 0 || x >= width as i32 || z >= height as i32 {
+        return;
+    }
+    let index = (z as usize * width as usize + x as usize) * 4;
+    pixels[index..index + 4].copy_from_slice(&color);
 }
 
 fn render_landform_map(

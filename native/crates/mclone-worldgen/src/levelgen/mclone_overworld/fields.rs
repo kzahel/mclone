@@ -66,7 +66,7 @@ const MAX_REGION_SAMPLE_COUNT: usize = 16 * 1024 * 1024;
 const SPAWN_SEARCH_RADIUS_CHUNKS: i32 = 128;
 const SPAWN_MIN_SURFACE_Y: i32 = MCLONE_OVERWORLD_SEA_LEVEL + 5;
 
-#[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum McloneOverworldSamplingTopology {
     #[default]
     Unbounded,
@@ -553,6 +553,25 @@ impl McloneOverworldSampler {
             relief_detail * 72.0 + ruggedness_detail * 24.0,
             ruggedness_detail * 72.0 - relief_large * 24.0,
         )
+    }
+
+    pub(super) fn sample_major_river_geometry(
+        self,
+        world_x: f64,
+        world_z: f64,
+    ) -> McloneOverworldMajorRiverGeometry {
+        let geometry = self.sample_river_geometry_at(world_x, world_z);
+        McloneOverworldMajorRiverGeometry {
+            signed_distance: geometry.signed_distance,
+            distance: geometry.distance,
+            half_width: geometry.half_width,
+            normal_x: geometry.normal_x,
+            normal_z: geometry.normal_z,
+            tangent_x: geometry.tangent_x,
+            tangent_z: geometry.tangent_z,
+            center_x: geometry.center_x,
+            center_z: geometry.center_z,
+        }
     }
 
     fn sample_tributary_geometry(self, world_x: f64, world_z: f64) -> RiverGeometry {
@@ -1118,6 +1137,19 @@ struct RiverGeometry {
     width_noise: f64,
     center_x: f64,
     center_z: f64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct McloneOverworldMajorRiverGeometry {
+    pub signed_distance: f64,
+    pub distance: f64,
+    pub half_width: f64,
+    pub normal_x: f64,
+    pub normal_z: f64,
+    pub tangent_x: f64,
+    pub tangent_z: f64,
+    pub center_x: f64,
+    pub center_z: f64,
 }
 
 #[derive(Clone, Copy, Debug)]

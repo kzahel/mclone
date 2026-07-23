@@ -52,7 +52,12 @@ globally monotonic macro flow. Interactive review subsequently accepted the
 mechanical fixed-point proof but rejected the grass-topped containment shelf
 and tiny visible fall. Tactical
 [`222`](../tactical/222-bounded-valley-stream-structures.md) now owns a
-48-96-block, structure-shaped, valley-following replacement.
+48-96-block, structure-shaped, valley-following replacement. Its reusable
+start/reference kernel and plan-only Mclone consumer are live. Three reviewed
+seeds produce bounded 91-96-block plans with monotonic integer reach levels,
+zero required fill, typed pieces, cacheable identities, and production
+candidate/route/cut maps; generated terrain still remains on field revision
+11 until clipped realization passes.
 
 ## Scope
 
@@ -938,14 +943,15 @@ Human Review 3 accepted the result as more natural and less geometric.
 ## Next Work
 
 Field revision 11 remains the mechanical baseline but its raised tributary is
-visually rejected. Tactical 222 next establishes reusable procedural starts,
-boxes, references, and clipped pieces, then plans a complete 48-96-block
-stream from a known headwater to the Y63 river sink. It must follow and carve
-existing valley terrain, descend monotonically through flat reaches and
-one-/two-block transitions, appear in LOD, and retain the wake-every-water-cell
-fixed-point proof. One river-to-shelf-to-deep-basin composition remains an
-objective review gap. General drainage-network semantics remain deliberately
-absent.
+visually rejected. Tactical 222 has established reusable procedural starts,
+boxes, references, clipped-piece queries, and the plan-only 48-96-block
+stream from a raised headwater to the Y63 river sink. Next, the immutable plan
+must replace revision 11's short landmark through a clipped continuous valley
+cross-section, full-chunk water stencil, and matching synthetic LOD query.
+Hydraulic closure and wake-every-water-cell fixed-point proofs follow the
+first generated pixels. One river-to-shelf-to-deep-basin composition remains
+an objective review gap. General drainage-network semantics remain
+deliberately absent.
 
 ## Related
 

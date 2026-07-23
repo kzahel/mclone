@@ -274,11 +274,28 @@ Hard gates:
 
 - [x] Record the accepted direction, reference precedent, dependency boundary,
   objective gates, and explicit exclusions.
-- [ ] Pin revision 11's reviewed start, hydraulic receipt, generation
+- [x] Pin revision 11's reviewed start, hydraulic receipt, generation
   performance, and screenshot as the replacement baseline.
 
 Gate: no source change until the reference read and bounded contract are
 reviewable in one tactical.
+
+Baseline record:
+
+- revision 11 is commit `2ea92637`, reviewed at seed `-98765`, chunk
+  `(183,-177)`, RD16;
+- the nine-chunk hydraulic receipt counted 1,409 source blocks, 16 flowing
+  blocks, four intentional drop edges, zero closure failures, and zero
+  scheduled ticks after generation;
+- waking every water cell through the authoritative server caused zero block
+  mutations;
+- same-host revision-10/revision-11 surface, cold, and warm throughput changed
+  by `-7.0%`, `-1.5%`, and `-22.5%` respectively;
+- the 3,600-frame RD10 movement run averaged 5.671 ms with p95 9.398 ms,
+  p99 11.679 ms, 16.953 ms maximum, and zero fluid counters; and
+- the rejected pixel is the 2026-07-23 interactive screenshot showing the
+  grass-topped containment shelf and tiny outlet. Disposable final-card
+  evidence was captured under `/tmp/mclone-rev11-final-card`.
 
 ### Slice 1: reusable procedural-start kernel
 
@@ -314,16 +331,56 @@ Execution record 2026-07-23:
 
 ### Slice 2: plan-only Mclone stream
 
-- [ ] Add cheap Y63 major-river candidate predicates.
-- [ ] Run one fixed-budget valley route search only for accepted candidates.
-- [ ] Derive monotonic reach levels and typed stream pieces.
-- [ ] Add plan caches keyed by every output fact.
-- [ ] Add production maps for candidates, route, reach Y, cut depth, required
+- [x] Add cheap Y63 major-river candidate predicates.
+- [x] Run one fixed-budget valley route search only for accepted candidates.
+- [x] Derive monotonic reach levels and typed stream pieces.
+- [x] Add plan caches keyed by every output fact.
+- [x] Add production maps for candidates, route, reach Y, cut depth, required
   fill, rejected reason, start box, and reference footprint.
 
 Gate: at least three seeds contain inspectable 48-96-block plans, every route
 is monotonically non-increasing downstream, and no plan requires more than the
 allowed fill or reference radius. No generated blocks change yet.
+
+Execution record 2026-07-23:
+
+- `McloneOverworldStreamPlanner` uses an eight-chunk spacing, three-chunk
+  separation, stable salt, and the vanilla maximum reference radius of eight;
+- only candidate chunks intersected by the existing Y63 major-river contour
+  enter a deterministic two-sided beam search over a four-block lattice;
+- the planner caps each search at 4,096 expanded alternatives, rewards
+  valley-side relief, penalizes ridges, abrupt grade, high cuts, curvature,
+  and movement back toward the river, then trims against measured route
+  length rather than lattice-step count;
+- accepted plans contain integer headwater-to-sink nodes, two to four
+  downstream drops in the reviewed corpus, typed headwater/reach/transition/
+  confluence pieces, an aggregate box, and a reusable continuous column
+  query;
+- the hydraulic profile is solved backward from Y63 using future minimum bank
+  capacity. Accepted nodes descend or remain flat, require zero fill in the
+  three-seed review, cut at most eight blocks, and reject any source plane
+  lacking untouched side-bank clearance;
+- `McloneOverworldStreamPlanCache` scopes positive and negative entries to one
+  seed, topology, field code revision, and complete canonical/work start
+  candidate. Cache tests prove both accepted and rejected hits;
+- production review now emits `stream-plans`, `stream-plan-costs`, and
+  `stream-candidates` maps plus candidate reasons, route nodes, reach
+  metrics, boxes, and reference footprints in the JSON receipt; and
+- no terrain sample, generated block, field revision, biome, surface, fluid,
+  or LOD output changes in this slice.
+
+The 4,096-by-4,096-block, step-16 review regions produced:
+
+| Seed / center chunk | Candidates | Accepted | Planning ms | Accepted route lengths |
+|---|---:|---:|---:|---|
+| `12345` / `(0,0)` | 1,036 | 10 | 420.5 | 93-96 |
+| `424242` / `(0,0)` | 1,038 | 2 | 196.0 | 93-95 |
+| `-98765` / `(183,-177)` | 1,024 | 10 | 463.7 | 91-96 |
+
+The seed `-98765`, start chunk `(147,-126)` step-1 maps show the chosen
+centerline following the visible low band in the untouched height field. Its
+plan is intentionally still a coarse polyline; Slice 3 owns the continuous
+valley cross-section and first actual pixels.
 
 ### Slice 3: clipped terrain and water realization
 

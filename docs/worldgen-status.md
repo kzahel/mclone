@@ -51,7 +51,12 @@ general highland rivers, confluences, discharge, globally monotonic macro
 drainage, and one integrated river-to-deep-basin outlet remain open. Tactical
 [`222`](tactical/222-bounded-valley-stream-structures.md) is active to replace
 it with a bounded multi-chunk stream that follows and carves an existing
-valley through reusable procedural structure starts and clipped pieces.
+valley through reusable procedural structure starts and clipped pieces. The
+generic start/reference kernel and the plan-only Mclone consumer are now live:
+three reviewed seeds produce deterministic 91-96-block routes, two to four
+monotonic drops into Y63, zero required fill, typed pieces, bounded caches,
+and production route/cut/candidate maps. Generated blocks remain on field
+revision 11 until the clipped terrain and water realization passes.
 
 Compatibility safety is recorded in the
 [`world-generation-profiles` ledger](topics/world-generation-profiles.md#compatibility-safety-ledger).

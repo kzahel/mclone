@@ -2,6 +2,7 @@ mod biomes;
 mod decoration;
 mod feature_batch;
 mod fields;
+mod streams;
 mod surface;
 mod terrain;
 
@@ -25,6 +26,17 @@ pub use fields::{
     McloneOverworldSampler, McloneOverworldSamplingTopology, McloneOverworldTerrainSample,
     McloneOverworldWatercourseSample, mclone_overworld_spawn_chunk,
     mclone_overworld_spawn_chunk_with_topology,
+};
+pub use streams::{
+    MCLONE_OVERWORLD_STREAM_MAX_EXPANDED_NODES, MCLONE_OVERWORLD_STREAM_MAX_LENGTH_BLOCKS,
+    MCLONE_OVERWORLD_STREAM_MIN_LENGTH_BLOCKS, MCLONE_OVERWORLD_STREAM_PLACEMENT_SEPARATION_CHUNKS,
+    MCLONE_OVERWORLD_STREAM_PLACEMENT_SPACING_CHUNKS,
+    MCLONE_OVERWORLD_STREAM_REFERENCE_RADIUS_CHUNKS, MCLONE_OVERWORLD_STREAM_ROUTE_STEP_BLOCKS,
+    MCLONE_OVERWORLD_STREAM_STRUCTURE_TYPE, McloneOverworldStreamColumnSample,
+    McloneOverworldStreamNode, McloneOverworldStreamPiece, McloneOverworldStreamPlan,
+    McloneOverworldStreamPlanAttempt, McloneOverworldStreamPlanCache,
+    McloneOverworldStreamPlanCacheReport, McloneOverworldStreamPlanMetrics,
+    McloneOverworldStreamPlanner, McloneOverworldStreamRejection, stream_placement,
 };
 pub use surface::{
     MCLONE_OVERWORLD_EXPOSED_STONE_MIN_EXPOSURE, MCLONE_OVERWORLD_EXPOSED_STONE_MIN_SLOPE,
