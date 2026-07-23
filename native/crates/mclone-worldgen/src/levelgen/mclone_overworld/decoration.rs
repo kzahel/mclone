@@ -4,8 +4,9 @@ use mclone_core::chunk_min_block_coord;
 
 use crate::biome::get_layered_biome_by_id;
 use crate::block::{
-    DANDELION, DIRT, FERN, GRASS, GRASS_BLOCK, LARGE_FERN_LOWER, POPPY, RawBlockId,
-    SWEET_BERRY_BUSH, TALL_GRASS_LOWER,
+    ANDESITE, COARSE_DIRT, COBBLESTONE, DANDELION, DIRT, FERN, GRASS, GRASS_BLOCK, GRAVEL,
+    LARGE_FERN_LOWER, MOSSY_COBBLESTONE, POPPY, RawBlockId, SAND, STONE, SWEET_BERRY_BUSH,
+    TALL_GRASS_LOWER, is_water,
 };
 use crate::feature::{
     BasicTreeConfiguration, ConfiguredFeature, DecorationStep, FeatureRegion, FeatureWorld,
@@ -15,7 +16,8 @@ use crate::feature::{
 };
 use crate::levelgen::profile::PLAINS_BIOME_ID;
 use crate::noise::SeedDomain;
-use crate::placement::{ConfiguredDecorator, HeightmapType};
+use crate::placement::{BlockPos, ConfiguredDecorator, HeightmapType};
+use crate::prng::WorldgenRandom;
 
 use super::biomes::{
     MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_SAVANNA_BIOME_ID,
@@ -24,9 +26,29 @@ use super::biomes::{
 };
 use super::fields::{McloneOverworldSampler, McloneOverworldSamplingTopology};
 
-pub const MCLONE_OVERWORLD_DECORATION_REVISION: &str = "mclone-overworld-v1-decoration-11";
+pub const MCLONE_OVERWORLD_DECORATION_REVISION: &str = "mclone-overworld-v1-decoration-12";
 
 const MCLONE_OVERWORLD_DECORATION_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6465_6331);
+const MCLONE_OVERWORLD_RIVER_ROCK_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_726f_636b);
+const RIVER_ROCK_WATER_SITE_LIMIT: usize = 12;
+const RIVER_ROCK_BANK_OFFSETS: [(i32, i32); 16] = [
+    (4, 0),
+    (-4, 0),
+    (0, 4),
+    (0, -4),
+    (5, 2),
+    (5, -2),
+    (-5, 2),
+    (-5, -2),
+    (2, 5),
+    (2, -5),
+    (-2, 5),
+    (-2, -5),
+    (6, 3),
+    (6, -3),
+    (-6, 3),
+    (-6, -3),
+];
 
 pub(super) fn decorate_mclone_overworld_center(seed: i64, region: &mut FeatureRegion) {
     decorate_mclone_overworld_center_with_topology(
@@ -43,8 +65,9 @@ pub(super) fn decorate_mclone_overworld_center_with_topology(
 ) {
     let min_x = chunk_min_block_coord(region.decoration_chunk_x());
     let min_z = chunk_min_block_coord(region.decoration_chunk_z());
-    let landform = McloneOverworldSampler::new_with_topology(seed, topology)
-        .sample_landform(min_x + 8, min_z + 8);
+    let sampler = McloneOverworldSampler::new_with_topology(seed, topology);
+    let landform = sampler.sample_landform(min_x + 8, min_z + 8);
+    place_sparse_watercourse_rock(seed, region, sampler);
     let biome_id = mclone_overworld_biome_id_for_sample(landform);
     let features = feature_table(
         biome_id,
@@ -59,6 +82,140 @@ pub(super) fn decorate_mclone_overworld_center_with_topology(
         features,
         region,
     );
+}
+
+fn place_sparse_watercourse_rock(
+    seed: i64,
+    region: &mut FeatureRegion,
+    sampler: McloneOverworldSampler,
+) {
+    let identity_min_x = chunk_min_block_coord(region.decoration_chunk_x());
+    let identity_min_z = chunk_min_block_coord(region.decoration_chunk_z());
+    let work_min_x = chunk_min_block_coord(region.center_chunk_x());
+    let work_min_z = chunk_min_block_coord(region.center_chunk_z());
+    let mut random = WorldgenRandom::default();
+    random.set_decoration_seed(
+        MCLONE_OVERWORLD_RIVER_ROCK_DOMAIN.derive(seed),
+        identity_min_x,
+        identity_min_z,
+    );
+    let mut water_sites = Vec::new();
+    for local_z in (1..16).step_by(2) {
+        for local_x in (1..16).step_by(2) {
+            let x = work_min_x + local_x;
+            let z = work_min_z + local_z;
+            let Some(ocean_floor_y) = region.height_at(HeightmapType::OceanFloorWg, x, z) else {
+                continue;
+            };
+            let Some(world_surface_y) = region.height_at(HeightmapType::WorldSurfaceWg, x, z)
+            else {
+                continue;
+            };
+            if world_surface_y > ocean_floor_y
+                && region
+                    .block_at_world(BlockPos::new(x, world_surface_y - 1, z))
+                    .is_some_and(is_water)
+            {
+                water_sites.push((x, world_surface_y, z));
+            }
+        }
+    }
+    if water_sites.is_empty() {
+        return;
+    }
+    if random.next_int_bound(2) != 0 {
+        return;
+    }
+    let water_start = random.next_int_bound(water_sites.len() as i32) as usize;
+    let offset_start = random.next_int_bound(RIVER_ROCK_BANK_OFFSETS.len() as i32) as usize;
+    for water_offset in 0..water_sites.len().min(RIVER_ROCK_WATER_SITE_LIMIT) {
+        let (water_x, water_surface_y, water_z) =
+            water_sites[(water_start + water_offset) % water_sites.len()];
+        for bank_offset in 0..RIVER_ROCK_BANK_OFFSETS.len() {
+            let (dx, dz) = RIVER_ROCK_BANK_OFFSETS
+                [(offset_start + bank_offset) % RIVER_ROCK_BANK_OFFSETS.len()];
+            let x = water_x + dx;
+            let z = water_z + dz;
+            let Some(ground_y) = region.height_at(HeightmapType::OceanFloorWg, x, z) else {
+                continue;
+            };
+            let Some(world_surface_y) = region.height_at(HeightmapType::WorldSurfaceWg, x, z)
+            else {
+                continue;
+            };
+            if ground_y != world_surface_y || (ground_y - water_surface_y).abs() > 4 {
+                continue;
+            }
+            let support = region.block_at_world(BlockPos::new(x, ground_y - 1, z));
+            if !support.is_some_and(|block| {
+                matches!(
+                    block,
+                    GRASS_BLOCK | DIRT | COARSE_DIRT | STONE | ANDESITE | SAND | GRAVEL
+                )
+            }) {
+                continue;
+            }
+            let terrain = sampler.sample(x, z);
+            if terrain.continentalness <= 0.0 {
+                continue;
+            }
+            let state = if terrain.climate.moisture >= 0.18 && random.next_boolean() {
+                MOSSY_COBBLESTONE
+            } else if random.next_int_bound(4) == 0 {
+                ANDESITE
+            } else {
+                COBBLESTONE
+            };
+            if place_watercourse_rock_blob(
+                region,
+                &mut random,
+                BlockPos::new(x, ground_y, z),
+                state,
+            ) {
+                return;
+            }
+        }
+    }
+}
+
+fn place_watercourse_rock_blob(
+    region: &mut FeatureRegion,
+    random: &mut WorldgenRandom,
+    origin: BlockPos,
+    state: RawBlockId,
+) -> bool {
+    let mut center = origin;
+    let mut placed = false;
+    for _ in 0..3 {
+        let radius_x = random.next_int_bound(2);
+        let radius_y = random.next_int_bound(2);
+        let radius_z = random.next_int_bound(2);
+        let radius = (radius_x + radius_y + radius_z) as f32 * 0.333 + 0.5;
+        let radius_squared = radius * radius;
+        for x in center.x - radius_x..=center.x + radius_x {
+            for y in center.y - radius_y..=center.y + radius_y {
+                for z in center.z - radius_z..=center.z + radius_z {
+                    let dx = x as f32 + 0.5 - center.x as f32;
+                    let dy = y as f32 + 0.5 - center.y as f32;
+                    let dz = z as f32 + 0.5 - center.z as f32;
+                    if dx * dx + dy * dy + dz * dz > radius_squared {
+                        continue;
+                    }
+                    let pos = BlockPos::new(x, y, z);
+                    if region.block_at_world(pos).is_some_and(is_water) {
+                        continue;
+                    }
+                    placed |= region.set_block_world(pos, state);
+                }
+            }
+        }
+        center = BlockPos::new(
+            center.x - 1 + random.next_int_bound(2),
+            center.y - random.next_int_bound(2),
+            center.z - 1 + random.next_int_bound(2),
+        );
+    }
+    placed
 }
 
 fn feature_table(

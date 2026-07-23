@@ -485,8 +485,8 @@ pub fn generate_mclone_overworld_chunk_with_topology(
 mod tests {
     use super::*;
     use crate::block::{
-        ACACIA_LOG, DANDELION, FERN, GRASS, LARGE_FERN_LOWER, OAK_LOG, POPPY, SPRUCE_LOG,
-        SWEET_BERRY_BUSH, TALL_GRASS_LOWER,
+        ACACIA_LOG, ANDESITE, COBBLESTONE, DANDELION, FERN, GRASS, LARGE_FERN_LOWER,
+        MOSSY_COBBLESTONE, OAK_LOG, POPPY, SPRUCE_LOG, SWEET_BERRY_BUSH, TALL_GRASS_LOWER, WATER,
     };
     use crate::levelgen::MCLONE_OVERWORLD_PERIOD_CHUNKS;
 
@@ -683,9 +683,37 @@ mod tests {
 
         assert_eq!(
             decoration_counts,
-            [111, 621, 240, 2_012, 376, 6, 11, 42, 73, 54]
+            [111, 621, 240, 1_985, 376, 6, 11, 42, 73, 54]
         );
-        assert_eq!(hash, 1_537_891_052_426_716_892);
+        assert_eq!(hash, 11_352_546_092_800_642_539);
+    }
+
+    #[test]
+    fn river_heavy_region_places_sparse_watercourse_rocks() {
+        let center = ChunkPos::new(47, 102);
+        let targets = (center.z - 3..=center.z + 3)
+            .flat_map(|z| (center.x - 3..=center.x + 3).map(move |x| ChunkPos::new(x, z)))
+            .collect::<Vec<_>>();
+        let chunks = McloneOverworldFeatureDependencyCache::new()
+            .generate_features_chunks(-98_765, targets)
+            .chunks;
+        let rock_blocks = chunks
+            .values()
+            .map(|chunk| {
+                chunk.block_count(COBBLESTONE)
+                    + chunk.block_count(MOSSY_COBBLESTONE)
+                    + chunk.block_count(ANDESITE)
+            })
+            .sum::<usize>();
+        let water_blocks = chunks
+            .values()
+            .map(|chunk| chunk.block_count(WATER))
+            .sum::<usize>();
+
+        assert!(
+            (1..=256).contains(&rock_blocks),
+            "{rock_blocks} rock blocks beside {water_blocks} water blocks"
+        );
     }
 
     #[test]
