@@ -133,6 +133,10 @@ series implements the same concern, normally reuse the document slug in its
   report and replication cadences, buffered interpolation, separate XR
   body/head/hands, transport-neutral loss-tolerant pose semantics, and a
   WebTransport/QUIC mixed-reliability target with TCP/WebSocket compatibility.
+- [`browser-hosted-peer-sessions.md`](browser-hosted-peer-sessions.md):
+  accepted browser-authoritative room topology — the existing worker
+  `RealmServer`, room-key signaling, WebRTC reliable/ephemeral channels,
+  direct ICE with conditional TURN, and explicit browser lifecycle limits.
 - [`platform-parity.md`](platform-parity.md): cross-platform parity tracker —
   per-platform-class target state, the feature × platform matrix, the
   shared-contract × consumer reuse matrix, and the cross-cutting blockers that

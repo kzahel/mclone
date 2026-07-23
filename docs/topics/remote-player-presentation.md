@@ -322,11 +322,17 @@ implements HTTP/3 WebTransport and datagrams without the draft
 `reliability`/`requireUnreliable` members, while Firefox and Safari expose
 those newer members. The server handshake therefore publishes the effective
 transport profile; a client uses browser reliability information when it
-exists but does not require that property to exist. WebRTC data channels are
-not the primary client/server plan because ICE, DTLS, SCTP, signaling, and
-possible relay infrastructure add complexity that WebTransport does not need.
-They remain a contingency only if a supported deployed browser or webview
-cannot use WebTransport or WebSocket acceptably.
+exists but does not require that property to exist. Absence of those members
+in Chromium does not mean absence of datagrams: Chrome has shipped unreliable
+WebTransport datagrams since version 97.
+
+WebRTC data channels are not the primary dedicated client/server plan because
+ICE, DTLS, SCTP, signaling, and possible relay infrastructure add complexity
+that WebTransport does not need. They are, however, the accepted carrier for
+browser-hosted peer rooms: the host browser runs the existing integrated
+authority and admits browser guests over reliable and ephemeral data channels.
+See
+[`browser-hosted-peer-sessions.md`](browser-hosted-peer-sessions.md).
 
 The initial candidate transport profiles are:
 
@@ -541,7 +547,8 @@ path.
   transport; TCP/WebSocket remains the reliable compatibility profile.
 - The candidate defaults are 60 Hz body reporting on mixed reliability and
   20 Hz on reliable compatibility, independently of 60 Hz local movement.
-- WebRTC is a contingency rather than the primary browser transport.
+- WebRTC reliable and ephemeral data channels are the accepted carrier for
+  browser-hosted peer rooms, not the primary dedicated-server transport.
 
 ## Open Decisions
 

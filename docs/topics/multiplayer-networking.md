@@ -283,14 +283,25 @@ auto-discover the LAN.
 
 WebTransport does not provide NAT traversal. Same-LAN connections need no
 relay; internet-hosted dedicated servers need a reachable UDP port, and
-player-hosted internet sessions need manual port forwarding or a later relay
-or traversal service.
+native player-hosted internet sessions need manual port forwarding or a later
+relay or traversal service.
 
-A browser client cannot itself listen for inbound WebTransport connections.
-Its integrated server remains private to the browser worker. Desktop, flat
-Android, Android XR/Quest, and other native hosts can expose their integrated
-realm when their platform lifecycle and firewall permit it; browser-hosted
-multiplayer requires an external host or relay.
+A browser client cannot itself listen for inbound WebTransport connections,
+but that does not prevent browser hosting. Its existing worker-owned
+`RealmServer` can be authoritative for guests connected over WebRTC data
+channels after offer/answer/ICE signaling. Direct ICE paths need only the
+signaling service and normally STUN; restrictive NAT or firewall combinations
+need TURN, which relays the actual gameplay traffic. Browser-hosted rooms are
+therefore a distinct accepted topology, not a WebTransport listener and not a
+guaranteed relay-free path. See
+[`browser-hosted-peer-sessions.md`](browser-hosted-peer-sessions.md).
+
+Desktop, flat Android, Android XR/Quest, and other native hosts can expose
+their integrated realm through WebTransport when their platform lifecycle and
+firewall permit it. A browser-hosted room instead uses the browser-provided
+WebRTC stack, so browser-to-browser support does not add a native WebRTC
+library to the Rust dependency tree. Native clients joining such a room would
+need a separately measured native WebRTC adapter or gateway.
 
 ### Native dependency boundary and first measurement
 
@@ -319,8 +330,10 @@ after selecting between
 [WTransport](https://github.com/BiagioFesta/wtransport) and
 [moq-dev/web-transport](https://github.com/moq-dev/web-transport), and after
 desktop, Android, and Quest build spikes. The current evidence classifies the
-dependency as moderate and containable, not lightweight and not remotely
-comparable to embedding a full WebRTC media stack.
+dependency as moderate and containable, not lightweight. Browser-to-browser
+rooms do not embed WebRTC in the executable because the browser provides it;
+a future native WebRTC adapter would be a separate, substantially heavier
+dependency decision.
 
 ## Shared ownership and frame-thread contract
 

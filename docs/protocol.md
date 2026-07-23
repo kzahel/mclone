@@ -232,9 +232,9 @@ plus app-owned sockets):
 There is no HTTP, WebTransport, or WebRTC gameplay transport, and no Node/Deno
 host.
 
-The reliable ordered publication lane is now implemented. A later measured
-WebRTC/datagram or coalescing lane for high-rate entity/player transforms must
-preserve spawn/despawn, correction, and keyframe ordering and must not redesign
-authority around the carrier. Compression, authentication, required
-capabilities, version ranges, and reconnect-without-rebuilding-the-replica
-remain future protocol work.
+The reliable ordered publication lane is now implemented. Planned
+WebTransport datagrams and browser-hosted WebRTC ephemeral channels for
+high-rate entity/player transforms must preserve spawn/despawn, correction,
+and keyframe ordering and must not redesign authority around the carrier.
+Compression, authentication, required capabilities, version ranges, and
+reconnect-without-rebuilding-the-replica remain future protocol work.

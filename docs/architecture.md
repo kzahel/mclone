@@ -116,13 +116,15 @@ World state and chunk records should have an engine-defined logical shape. Brows
 Likewise, local singleplayer and remote multiplayer should share the same message model, with different transports:
 
 - local: `postMessage` / `MessagePort`
-- remote dedicated: WebSocket by default, with HTTP retained only as non-default compatibility coverage
-- future P2P or high-rate snapshot lanes: WebRTC only if the protocol needs it
+- remote dedicated/native host: TCP/WebSocket compatibility, with WebTransport
+  as the preferred mixed-reliability target
+- browser-hosted peer rooms: WebRTC reliable and ephemeral data channels
 
 The client platform is not the host mode. Desktop flat, flat Android, web,
 desktop XR, and Android XR should be able to select local integrated or remote
-dedicated play through shared runtime contracts, with P2P later treated as
-another session/transport topology behind the same command/update model.
+dedicated play through shared runtime contracts. Browser-hosted rooms are an
+additional accepted session/transport topology behind the same command/update
+model.
 
 ### 5. Parity and custom gameplay are policies, not architectural forks
 
@@ -431,8 +433,8 @@ That means:
   over an in-process or worker transport
 - remote dedicated play uses the same serialized messages over native TCP
   (desktop) or WebSocket (browser)
-- future WebRTC or other transports must carry the same logical messages instead
-  of redefining authority
+- WebTransport, WebRTC, or other transports must carry the same logical
+  messages instead of redefining authority
 
 What has landed on that rule (now on the Rust client/server boundary):
 

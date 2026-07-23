@@ -147,3 +147,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `remote-player-presentation` — remote body/head/hand embodiment, independent
   report/replication/presentation cadences, buffered interpolation, and
   transport-neutral ephemeral pose semantics
+- `browser-hosted-peer-sessions` — browser-authoritative rooms over WebRTC
+  reliable/ephemeral data channels, room-key signaling, direct ICE with
+  conditional TURN, and worker-owned Rust authority

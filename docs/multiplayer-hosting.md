@@ -17,15 +17,16 @@ in the translated worldgen and host runtime. The logical messages are in
 - Let the player choose local singleplayer or a server-hosted world with the
   same client.
 - Keep dedicated server setup close to "run a server, clients join it."
-- Keep WebSocket the default browser remote transport and TCP the native one.
-- Leave a clean path to future browser-hosted peer-to-peer multiplayer.
+- Keep WebSocket and TCP as compatibility transports while adding the accepted
+  mixed-reliability paths.
+- Support browser-hosted peer rooms without creating another world authority.
 - Keep world authority, transport carrier, and asset hosting orthogonal.
 
 ## Non-Goals
 
 - Do not let the renderer or a client generate authoritative chunks for a
   dedicated world.
-- Do not require WebRTC before WebSocket/TCP remote play is mature.
+- Do not require WebRTC for ordinary dedicated-server or native-host sessions.
 - Do not tie hosting to a specific platform app shell.
 
 ## Separate Axes
@@ -36,8 +37,8 @@ over every carrier.
 
 | Axis | Options |
 |---|---|
-| World authority | local integrated host (native runner or browser worker), native dedicated server, future browser P2P host |
-| Transport carrier | in-process `LocalTransport`, worker channel, native TCP, WebSocket, future WebRTC data channels |
+| World authority | local integrated host (native runner or browser worker), native dedicated server |
+| Transport carrier | in-process `LocalTransport`, worker channel, native TCP, WebSocket, WebTransport, browser WebRTC data channels |
 | Asset hosting | local packed assets, dedicated-server static hosting (future), CDN/static host |
 | Persistence | SQLite world store (native/Android), IndexedDB world store (browser singleplayer), export/import adapters (future) |
 
@@ -119,23 +120,42 @@ disconnect reasons.
 Those belong in the shared session/persistence layers rather than app-specific
 TCP or WebSocket wrappers.
 
-## Future Static P2P / WebRTC
+## Browser-Hosted Peer Rooms / WebRTC
 
-Static P2P should stay possible: the web app can be hosted from any static host,
-one browser becomes authority by running the same integrated-host shape used for
-singleplayer, and guests connect over WebRTC data channels with a signaling
-service that only exchanges SDP/ICE/room metadata and never owns world state.
-Dedicated WebRTC should wait until the gameplay protocol needs unreliable or
-unordered lanes (e.g. high-rate entity/player snapshots). Either way, P2P and
-WebRTC must reuse the same logical host/client messages — only the carrier
-changes.
+Browser-hosted rooms are an accepted topology. The host browser runs the same
+Rust `RealmServer` and IndexedDB persistence shape as singleplayer; guests
+connect to it over WebRTC data channels. A small room-key signaling service
+exchanges offers, answers, ICE candidates, and room metadata. It does not own
+world state or carry gameplay after a direct connection succeeds.
+
+Each guest connection uses two logical lanes:
+
+- a reliable ordered data channel for session, world, gameplay, and
+  cross-lane barrier facts;
+- an unordered data channel with zero retransmissions for disposable,
+  sequenced pose samples.
+
+ICE may establish a direct peer path with the help of STUN. Restrictive NAT or
+firewall combinations require TURN; in that case the TURN service relays
+gameplay traffic and is more than a lightweight signaling service. The product
+must expose whether a session is direct or relayed rather than promising that
+room-key joins are always serverless.
+
+The browser still cannot listen for inbound WebTransport. That limitation does
+not prevent it from hosting authority through WebRTC. WebTransport remains the
+preferred dedicated-server/native-host carrier, while browser-hosted rooms use
+the browser's WebRTC stack and reuse the same logical protocol and authority.
+See
+[`topics/browser-hosted-peer-sessions.md`](./topics/browser-hosted-peer-sessions.md)
+for the ownership, lifecycle, and implementation contract.
 
 ## Guardrails
 
 - Keep authority, transport, and asset hosting orthogonal.
-- Keep TCP (native) and WebSocket (browser) as the default remote transports
-  until measurements justify WebRTC.
+- Keep TCP and WebSocket as compatibility transports; use WebTransport for the
+  preferred client/server mixed-reliability path and WebRTC for browser-hosted
+  peer rooms.
 - Keep dedicated world configuration server-owned.
-- Keep P2P static deployment possible by reusing the integrated-host authority
-  in a browser host.
+- Reuse the integrated-host authority in browser rooms; WebRTC changes the
+  carrier, not the simulation or persistence owner.
 - Keep any future reload/restart admin-only and testable.
