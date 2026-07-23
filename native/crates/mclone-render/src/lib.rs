@@ -27,6 +27,7 @@ pub mod sky_render;
 pub mod target;
 mod texture_mips;
 pub mod uniform;
+pub mod world_color_mesh;
 
 pub use mclone_diagnostics::GpuPassId;
 
