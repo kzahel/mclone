@@ -392,14 +392,13 @@ fn debug_lines(layer: WorldgenLensLayer, sample: McloneOverworldDebugSample) -> 
             water.wetland_influence
         ),
         format!(
-            "FLOW ({:.2},{:.2}) WIDTH {:.1} BED {} WATER {} GRADE {:.3}",
+            "FLOW ({:.2},{:.2}) WIDTH {:.1} GRADE {:.3}",
             water.flow_x,
             water.flow_z,
             water.half_width * 2.0,
-            water.bed_y,
-            water.water_surface_y,
             water.grade
         ),
+        format!("LEVEL BED {} WATER {}", water.bed_y, water.water_surface_y,),
     ]);
     lines
 }
