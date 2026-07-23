@@ -114,7 +114,8 @@ fn write_subsurface(
 mod tests {
     use super::*;
     use crate::levelgen::mclone_overworld::fields::{
-        McloneOverworldTerrainSample, McloneOverworldWatercourseSample,
+        McloneOverworldBathymetrySample, McloneOverworldTerrainSample,
+        McloneOverworldWatercourseSample,
     };
 
     fn sample(surface_y: i32, slope: f64) -> McloneOverworldLandformSample {
@@ -125,6 +126,7 @@ mod tests {
                 ruggedness: 0.0,
                 ridges: 0.0,
                 mountain_detail: 0.0,
+                bathymetry: McloneOverworldBathymetrySample::LAND,
                 base_surface_y: surface_y,
                 watercourse: McloneOverworldWatercourseSample {
                     distance: 512.0,

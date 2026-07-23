@@ -20,9 +20,9 @@ pub use feature_batch::{
 pub use fields::{
     MCLONE_OVERWORLD_FIELD_REVISION, MCLONE_OVERWORLD_PERIOD_BLOCKS,
     MCLONE_OVERWORLD_PERIOD_CHUNKS, MCLONE_OVERWORLD_SEA_LEVEL,
-    MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS, McloneOverworldLandformSample,
-    McloneOverworldSampleRegion, McloneOverworldSampleRegionRequest, McloneOverworldSampler,
-    McloneOverworldSamplingTopology, McloneOverworldTerrainSample,
+    MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS, McloneOverworldBathymetrySample,
+    McloneOverworldLandformSample, McloneOverworldSampleRegion, McloneOverworldSampleRegionRequest,
+    McloneOverworldSampler, McloneOverworldSamplingTopology, McloneOverworldTerrainSample,
     McloneOverworldWatercourseSample, mclone_overworld_spawn_chunk,
     mclone_overworld_spawn_chunk_with_topology,
 };

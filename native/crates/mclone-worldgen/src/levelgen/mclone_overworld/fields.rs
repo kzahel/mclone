@@ -3,7 +3,7 @@ use mclone_core::{AxisTopology, ChunkPos, HorizontalTopology};
 use crate::noise::{GradientNoise2d, SeedDomain, ValueNoise2d};
 
 pub const MCLONE_OVERWORLD_SEA_LEVEL: i32 = 63;
-pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-8";
+pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-9";
 pub const MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS: i32 = 2;
 pub const MCLONE_OVERWORLD_PERIOD_BLOCKS: i32 = 6_144;
 pub const MCLONE_OVERWORLD_PERIOD_CHUNKS: u32 = 384;
@@ -24,6 +24,9 @@ const RIVER_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_7631);
 const RIVER_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_7632);
 const RIVER_WIDTH_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_7633);
 const WETLAND_POOL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7765_7431);
+const OCEAN_BASIN_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6261_7331);
+const SEABED_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6261_7332);
+const SEABED_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6261_7333);
 
 const CONTINENT_LARGE_SCALE: i32 = 2_048;
 const CONTINENT_MEDIUM_SCALE: i32 = 1_024;
@@ -41,6 +44,9 @@ const RIVER_LARGE_SCALE: i32 = 768;
 const RIVER_DETAIL_SCALE: i32 = 192;
 const RIVER_WIDTH_SCALE: i32 = 384;
 const WETLAND_POOL_SCALE: i32 = 96;
+const OCEAN_BASIN_SCALE: i32 = 1_536;
+const SEABED_LARGE_SCALE: i32 = 384;
+const SEABED_DETAIL_SCALE: i32 = 96;
 const RIVER_GRADE_SAMPLE_DISTANCE: f64 = 16.0;
 const RIVER_MAX_RELEVANT_DISTANCE: f64 = 48.0;
 const RIVER_LOWLAND_MAX_BROAD_SURFACE_Y: i32 = MCLONE_OVERWORLD_SEA_LEVEL + 7;
@@ -125,6 +131,31 @@ impl McloneOverworldSamplingTopology {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub struct McloneOverworldBathymetrySample {
+    pub ocean_interior: f64,
+    pub shelf_influence: f64,
+    pub shelf_break_influence: f64,
+    pub basin_influence: f64,
+    pub seabed_relief: f64,
+    pub water_depth: i32,
+}
+
+impl McloneOverworldBathymetrySample {
+    pub const LAND: Self = Self {
+        ocean_interior: 0.0,
+        shelf_influence: 0.0,
+        shelf_break_influence: 0.0,
+        basin_influence: 0.0,
+        seabed_relief: 0.0,
+        water_depth: 0,
+    };
+
+    pub const fn floor_y(self) -> i32 {
+        MCLONE_OVERWORLD_SEA_LEVEL - self.water_depth
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct McloneOverworldWatercourseSample {
     pub distance: f64,
     pub channel_influence: f64,
@@ -166,6 +197,7 @@ pub struct McloneOverworldTerrainSample {
     pub ruggedness: f64,
     pub ridges: f64,
     pub mountain_detail: f64,
+    pub bathymetry: McloneOverworldBathymetrySample,
     pub base_surface_y: i32,
     pub watercourse: McloneOverworldWatercourseSample,
     pub surface_y: i32,
@@ -267,6 +299,9 @@ pub struct McloneOverworldSampler {
     river_detail: GradientNoise2d,
     river_width: ValueNoise2d,
     wetland_pool: GradientNoise2d,
+    ocean_basin: GradientNoise2d,
+    seabed_large: GradientNoise2d,
+    seabed_detail: GradientNoise2d,
 }
 
 impl McloneOverworldSampler {
@@ -320,6 +355,9 @@ impl McloneOverworldSampler {
             river_detail: topology.gradient_noise(seed, RIVER_DETAIL_DOMAIN, RIVER_DETAIL_SCALE),
             river_width: topology.value_noise(seed, RIVER_WIDTH_DOMAIN, RIVER_WIDTH_SCALE),
             wetland_pool: topology.gradient_noise(seed, WETLAND_POOL_DOMAIN, WETLAND_POOL_SCALE),
+            ocean_basin: topology.gradient_noise(seed, OCEAN_BASIN_DOMAIN, OCEAN_BASIN_SCALE),
+            seabed_large: topology.gradient_noise(seed, SEABED_LARGE_DOMAIN, SEABED_LARGE_SCALE),
+            seabed_detail: topology.gradient_noise(seed, SEABED_DETAIL_DOMAIN, SEABED_DETAIL_SCALE),
         }
     }
 
@@ -355,9 +393,17 @@ impl McloneOverworldSampler {
                 .sample_at(world_x + fine_warp_x, world_z + fine_warp_z)
                 * 0.30)
             .clamp(-1.0, 1.0);
-        let base_surface_y =
-            surface_height(continentalness, relief, ruggedness, ridges, mountain_detail);
-        let broad_surface_y = surface_height(continentalness, relief, ruggedness, ridges, 0.0);
+        let bathymetry = self.sample_bathymetry(world_x as i32, world_z as i32, continentalness);
+        let base_surface_y = if continentalness <= 0.0 {
+            bathymetry.floor_y()
+        } else {
+            land_surface_height(continentalness, relief, ruggedness, ridges, mountain_detail)
+        };
+        let broad_surface_y = if continentalness <= 0.0 {
+            bathymetry.floor_y()
+        } else {
+            land_surface_height(continentalness, relief, ruggedness, ridges, 0.0)
+        };
         let river_warp_x = relief_detail * 72.0 + ruggedness_detail * 24.0;
         let river_warp_z = ruggedness_detail * 72.0 - relief_large * 24.0;
         let river_geometry =
@@ -377,10 +423,27 @@ impl McloneOverworldSampler {
             ruggedness,
             ridges,
             mountain_detail,
+            bathymetry,
             base_surface_y,
             watercourse,
             surface_y,
         }
+    }
+
+    fn sample_bathymetry(
+        self,
+        world_x: i32,
+        world_z: i32,
+        continentalness: f64,
+    ) -> McloneOverworldBathymetrySample {
+        if continentalness > 0.0 {
+            return McloneOverworldBathymetrySample::LAND;
+        }
+        let basin_selector = self.ocean_basin.sample(world_x, world_z) * 0.5 + 0.5;
+        let seabed_relief = (self.seabed_large.sample(world_x, world_z) * 0.68
+            + self.seabed_detail.sample(world_x, world_z) * 0.32)
+            .clamp(-1.0, 1.0);
+        bathymetry_sample(continentalness, basin_selector, seabed_relief)
     }
 
     fn sample_river_geometry(
@@ -547,7 +610,7 @@ impl McloneOverworldSampler {
         let ridge_source = self.ridge_large.sample(world_x, world_z) * 0.78
             + self.ridge_detail.sample(world_x, world_z) * 0.22;
         let ridge_linear = (1.0 - ridge_source.abs()).clamp(0.0, 1.0);
-        surface_height(
+        land_surface_height(
             continentalness,
             relief,
             ruggedness,
@@ -657,19 +720,41 @@ pub fn mclone_overworld_spawn_chunk_with_topology(
     ChunkPos::new(0, 0)
 }
 
-fn surface_height(
+fn bathymetry_sample(
+    continentalness: f64,
+    basin_selector: f64,
+    seabed_relief: f64,
+) -> McloneOverworldBathymetrySample {
+    if continentalness > 0.0 {
+        return McloneOverworldBathymetrySample::LAND;
+    }
+    let ocean_depth_signal = -continentalness;
+    let ocean_interior = smoothstep((ocean_depth_signal / 0.55).clamp(0.0, 1.0));
+    let shelf_progress = smoothstep((ocean_depth_signal / 0.24).clamp(0.0, 1.0));
+    let basin_influence = smoothstep(((ocean_depth_signal - 0.18) / 0.32).clamp(0.0, 1.0));
+    let shelf_influence = 1.0 - basin_influence;
+    let shelf_break_influence = 4.0 * basin_influence * shelf_influence;
+    let depth = 2.0
+        + shelf_progress * 10.0
+        + basin_influence * (18.0 + basin_selector.clamp(0.0, 1.0) * 10.0)
+        + seabed_relief.clamp(-1.0, 1.0) * (1.5 + basin_influence * 7.0);
+    McloneOverworldBathymetrySample {
+        ocean_interior,
+        shelf_influence,
+        shelf_break_influence,
+        basin_influence,
+        seabed_relief: seabed_relief.clamp(-1.0, 1.0),
+        water_depth: depth.round().clamp(2.0, 52.0) as i32,
+    }
+}
+
+fn land_surface_height(
     continentalness: f64,
     relief: f64,
     ruggedness: f64,
     ridges: f64,
     mountain_detail: f64,
 ) -> i32 {
-    if continentalness <= 0.0 {
-        let shallow_water = smoothstep(((continentalness + 0.55) / 0.55).clamp(0.0, 1.0));
-        let floor = 46.0 + shallow_water * 15.0 + relief * 1.5;
-        return floor.round().clamp(42.0, 61.0) as i32;
-    }
-
     let land_strength = smoothstep((continentalness / 0.45).clamp(0.0, 1.0));
     let base = 64.0 + land_strength * 18.0;
     let rolling_relief = relief * (2.0 + land_strength * 7.0);
@@ -715,6 +800,19 @@ mod tests {
         assert!((left.ruggedness - right.ruggedness).abs() < 1.0e-12);
         assert!((left.ridges - right.ridges).abs() < 1.0e-12);
         assert!((left.mountain_detail - right.mountain_detail).abs() < 1.0e-12);
+        assert!((left.bathymetry.ocean_interior - right.bathymetry.ocean_interior).abs() < 1.0e-12);
+        assert!(
+            (left.bathymetry.shelf_influence - right.bathymetry.shelf_influence).abs() < 1.0e-12
+        );
+        assert!(
+            (left.bathymetry.shelf_break_influence - right.bathymetry.shelf_break_influence).abs()
+                < 1.0e-12
+        );
+        assert!(
+            (left.bathymetry.basin_influence - right.bathymetry.basin_influence).abs() < 1.0e-12
+        );
+        assert!((left.bathymetry.seabed_relief - right.bathymetry.seabed_relief).abs() < 1.0e-12);
+        assert_eq!(left.bathymetry.water_depth, right.bathymetry.water_depth);
         assert_eq!(left.base_surface_y, right.base_surface_y);
         assert!((left.watercourse.distance - right.watercourse.distance).abs() < 1.0e-9);
         assert!(
@@ -894,26 +992,58 @@ mod tests {
     }
 
     #[test]
-    fn ocean_floor_ignores_mountain_fields() {
-        for ruggedness in [-1.0, 0.0, 1.0] {
-            for ridges in [0.0, 0.5, 1.0] {
-                assert_eq!(
-                    surface_height(-0.4, 0.25, ruggedness, ridges, 1.0),
-                    surface_height(-0.4, 0.25, 0.0, 0.0, 0.0)
-                );
+    fn ocean_bathymetry_progresses_from_shelf_to_deep_basin() {
+        let coast = bathymetry_sample(-0.01, 0.5, 0.0);
+        let shelf = bathymetry_sample(-0.18, 0.5, 0.0);
+        let shelf_break = bathymetry_sample(-0.34, 0.5, 0.0);
+        let basin = bathymetry_sample(-0.55, 0.5, 0.0);
+
+        assert!(coast.water_depth <= 4);
+        assert!(shelf.water_depth >= 10);
+        assert!(basin.water_depth >= 35);
+        assert!(coast.shelf_influence > basin.shelf_influence);
+        assert!(basin.basin_influence > shelf.basin_influence);
+        assert!(shelf_break.shelf_break_influence > coast.shelf_break_influence);
+        assert_eq!(McloneOverworldBathymetrySample::LAND.water_depth, 0);
+    }
+
+    #[test]
+    fn selected_regions_exercise_shelves_breaks_and_deep_basins() {
+        for seed in [12_345, -98_765, 8_675_309] {
+            let sampler = McloneOverworldSampler::new(seed);
+            let mut shelves = 0;
+            let mut breaks = 0;
+            let mut deep = 0;
+            let mut max_depth = 0;
+            for z in (-3_072..=3_072).step_by(32) {
+                for x in (-3_072..=3_072).step_by(32) {
+                    let sample = sampler.sample(x, z);
+                    if sample.continentalness > 0.0 {
+                        assert_eq!(sample.bathymetry, McloneOverworldBathymetrySample::LAND);
+                        continue;
+                    }
+                    max_depth = max_depth.max(sample.bathymetry.water_depth);
+                    shelves += usize::from(sample.bathymetry.basin_influence < 0.25);
+                    breaks += usize::from(sample.bathymetry.shelf_break_influence >= 0.75);
+                    deep += usize::from(sample.bathymetry.water_depth >= 24);
+                }
             }
+            assert!(shelves > 100, "seed {seed} shelves={shelves}");
+            assert!(breaks > 100, "seed {seed} breaks={breaks}");
+            assert!(deep > 100, "seed {seed} deep={deep}");
+            assert!(max_depth >= 36, "seed {seed} max_depth={max_depth}");
         }
     }
 
     #[test]
     fn lowlands_ignore_mountain_detail_until_the_region_is_active() {
         assert_eq!(
-            surface_height(0.7, 0.25, -0.2, 1.0, -1.0),
-            surface_height(0.7, 0.25, -0.2, 1.0, 1.0)
+            land_surface_height(0.7, 0.25, -0.2, 1.0, -1.0),
+            land_surface_height(0.7, 0.25, -0.2, 1.0, 1.0)
         );
         assert_ne!(
-            surface_height(0.7, 0.25, 0.7, 1.0, -1.0),
-            surface_height(0.7, 0.25, 0.7, 1.0, 1.0)
+            land_surface_height(0.7, 0.25, 0.7, 1.0, -1.0),
+            land_surface_height(0.7, 0.25, 0.7, 1.0, 1.0)
         );
     }
 

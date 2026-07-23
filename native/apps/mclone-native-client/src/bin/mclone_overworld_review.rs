@@ -134,6 +134,13 @@ fn run() -> Result<()> {
     let river_grade_path = config.output_dir.join(format!("{prefix}-river-grade.png"));
     let wetland_path = config.output_dir.join(format!("{prefix}-wetland.png"));
     let watercourses_path = config.output_dir.join(format!("{prefix}-watercourses.png"));
+    let water_depth_path = config.output_dir.join(format!("{prefix}-water-depth.png"));
+    let shelf_break_path = config.output_dir.join(format!("{prefix}-shelf-break.png"));
+    let ocean_basin_path = config.output_dir.join(format!("{prefix}-ocean-basin.png"));
+    let seabed_relief_path = config
+        .output_dir
+        .join(format!("{prefix}-seabed-relief.png"));
+    let bathymetry_path = config.output_dir.join(format!("{prefix}-bathymetry.png"));
     let slope_path = config.output_dir.join(format!("{prefix}-slope.png"));
     let fields_path = config.output_dir.join(format!("{prefix}-fields.png"));
     let biome_path = config.output_dir.join(format!("{prefix}-biomes.png"));
@@ -156,6 +163,10 @@ fn run() -> Result<()> {
     let river_level = render_map(&region.samples, river_level_color);
     let river_grade = render_map(&region.samples, river_grade_color);
     let wetland = render_map(&region.samples, wetland_color);
+    let water_depth = render_map(&region.samples, water_depth_color);
+    let shelf_break = render_map(&region.samples, shelf_break_color);
+    let ocean_basin = render_map(&region.samples, ocean_basin_color);
+    let seabed_relief = render_map(&region.samples, seabed_relief_color);
     let slope = render_landform_map(&landforms, slope_color);
     let biomes = render_landform_map(&landforms, biome_color);
     let surface_recipes = render_landform_map(&landforms, surface_recipe_color);
@@ -200,6 +211,41 @@ fn run() -> Result<()> {
         &river_grade,
     )?;
     save_rgba(&wetland_path, request.width, request.depth, &wetland)?;
+    save_rgba(
+        &water_depth_path,
+        request.width,
+        request.depth,
+        &water_depth,
+    )?;
+    save_rgba(
+        &shelf_break_path,
+        request.width,
+        request.depth,
+        &shelf_break,
+    )?;
+    save_rgba(
+        &ocean_basin_path,
+        request.width,
+        request.depth,
+        &ocean_basin,
+    )?;
+    save_rgba(
+        &seabed_relief_path,
+        request.width,
+        request.depth,
+        &seabed_relief,
+    )?;
+    let bathymetry = combine_maps(
+        request.width,
+        request.depth,
+        [&water_depth, &shelf_break, &ocean_basin, &seabed_relief],
+    );
+    save_rgba(
+        &bathymetry_path,
+        request.width * 4 + MAP_GAP_PIXELS * 3,
+        request.depth,
+        &bathymetry,
+    )?;
     let watercourses = combine_maps(
         request.width,
         request.depth,
@@ -251,7 +297,7 @@ fn run() -> Result<()> {
 
     let (commit, dirty) = git_state();
     let receipt = serde_json::json!({
-        "schema": 8,
+        "schema": 9,
         "profile": "mclone-overworld-v1",
         "topology": config.topology.label(),
         "fieldRevision": MCLONE_OVERWORLD_FIELD_REVISION,
@@ -288,6 +334,11 @@ fn run() -> Result<()> {
             "ruggedness": [facts.min_ruggedness, facts.max_ruggedness],
             "ridges": [facts.min_ridges, facts.max_ridges],
             "mountainDetail": [facts.min_mountain_detail, facts.max_mountain_detail],
+            "oceanInterior": [facts.min_ocean_interior, facts.max_ocean_interior],
+            "shelfBreakInfluence": [facts.min_shelf_break, facts.max_shelf_break],
+            "oceanBasinInfluence": [facts.min_ocean_basin, facts.max_ocean_basin],
+            "seabedRelief": [facts.min_seabed_relief, facts.max_seabed_relief],
+            "waterDepth": [facts.min_water_depth, facts.max_water_depth],
             "riverDistance": [facts.min_river_distance, facts.max_river_distance],
             "riverHalfWidth": [facts.min_river_half_width, facts.max_river_half_width],
             "riverGrade": [facts.min_river_grade, facts.max_river_grade],
@@ -302,6 +353,11 @@ fn run() -> Result<()> {
             "p10": facts.surface_y_p10,
             "p50": facts.surface_y_p50,
             "p90": facts.surface_y_p90,
+        },
+        "oceanWaterDepthPercentiles": {
+            "p10": facts.water_depth_p10,
+            "p50": facts.water_depth_p50,
+            "p90": facts.water_depth_p90,
         },
         "slopePercentiles": {
             "p50": facts.slope_p50,
@@ -334,6 +390,11 @@ fn run() -> Result<()> {
             "gradedBank": facts.river_bank_influence_columns,
             "wetlandAboveQuarter": facts.wetland_columns,
             "wetlandPool": facts.wetland_pool_columns,
+        },
+        "bathymetryCounts": {
+            "shelf": facts.shelf_columns,
+            "shelfBreak": facts.shelf_break_columns,
+            "deepBasin": facts.deep_basin_columns,
         },
         "hydraulicClosure": {
             "radiusChunks": 1,
@@ -373,6 +434,12 @@ fn run() -> Result<()> {
             "mountainDetail": mountain_detail_path,
             "surfaceY": surface_path,
             "baseSurfaceY": base_surface_path,
+            "bathymetryOrder": ["waterDepth", "shelfBreak", "oceanBasin", "seabedRelief"],
+            "bathymetry": bathymetry_path,
+            "waterDepth": water_depth_path,
+            "shelfBreak": shelf_break_path,
+            "oceanBasin": ocean_basin_path,
+            "seabedRelief": seabed_relief_path,
             "watercourseOrder": ["distanceAndInfluence", "waterLevel", "grade", "wetland"],
             "watercourses": watercourses_path,
             "riverDistance": river_distance_path,
@@ -453,6 +520,23 @@ fn select_review_sites(
             (x - center_x).abs() + (z - center_z).abs()
         })
         .map(|(index, _)| index);
+    let deep_ocean_basin = samples
+        .iter()
+        .enumerate()
+        .filter(|(_, sample)| sample.terrain.continentalness <= 0.0)
+        .max_by_key(|(_, sample)| sample.terrain.bathymetry.water_depth)
+        .map(|(index, _)| index);
+    let shelf_break = samples
+        .iter()
+        .enumerate()
+        .filter(|(_, sample)| sample.terrain.continentalness <= 0.0)
+        .max_by(|(_, left), (_, right)| {
+            left.terrain
+                .bathymetry
+                .shelf_break_influence
+                .total_cmp(&right.terrain.bathymetry.shelf_break_influence)
+        })
+        .map(|(index, _)| index);
     let river = samples
         .iter()
         .enumerate()
@@ -527,6 +611,8 @@ fn select_review_sites(
         "mountainValley": review_site_json(mountain_valley, samples, request),
         "rangeEdge": review_site_json(range_edge, samples, request),
         "lowlandControl": review_site_json(lowland_control, samples, request),
+        "deepOceanBasin": review_site_json(deep_ocean_basin, samples, request),
+        "shelfBreak": review_site_json(shelf_break, samples, request),
         "river": review_site_json(river, samples, request),
         "mountainRiver": review_site_json(mountain_river, samples, request),
         "coastalRiver": review_site_json(coastal_river, samples, request),
@@ -564,6 +650,15 @@ fn sample_json(sample: McloneOverworldLandformSample) -> serde_json::Value {
         "ridges": terrain.ridges,
         "mountainDetail": terrain.mountain_detail,
         "mountainStrength": terrain.mountain_strength(),
+        "bathymetry": {
+            "oceanInterior": terrain.bathymetry.ocean_interior,
+            "shelfInfluence": terrain.bathymetry.shelf_influence,
+            "shelfBreakInfluence": terrain.bathymetry.shelf_break_influence,
+            "basinInfluence": terrain.bathymetry.basin_influence,
+            "seabedRelief": terrain.bathymetry.seabed_relief,
+            "waterDepth": terrain.bathymetry.water_depth,
+            "floorY": terrain.bathymetry.floor_y(),
+        },
         "baseSurfaceY": terrain.base_surface_y,
         "surfaceY": terrain.surface_y,
         "slope": sample.slope,
@@ -670,6 +765,16 @@ struct RegionFacts {
     max_ridges: f64,
     min_mountain_detail: f64,
     max_mountain_detail: f64,
+    min_ocean_interior: f64,
+    max_ocean_interior: f64,
+    min_shelf_break: f64,
+    max_shelf_break: f64,
+    min_ocean_basin: f64,
+    max_ocean_basin: f64,
+    min_seabed_relief: f64,
+    max_seabed_relief: f64,
+    min_water_depth: i32,
+    max_water_depth: i32,
     min_river_distance: f64,
     max_river_distance: f64,
     min_river_half_width: f64,
@@ -691,6 +796,9 @@ struct RegionFacts {
     surface_y_p10: i32,
     surface_y_p50: i32,
     surface_y_p90: i32,
+    water_depth_p10: i32,
+    water_depth_p50: i32,
+    water_depth_p90: i32,
     slope_p50: f64,
     slope_p90: f64,
     slope_p99: f64,
@@ -713,6 +821,9 @@ struct RegionFacts {
     river_bank_influence_columns: usize,
     wetland_columns: usize,
     wetland_pool_columns: usize,
+    shelf_columns: usize,
+    shelf_break_columns: usize,
+    deep_basin_columns: usize,
     mountain_region_columns: usize,
     mountain_valley_columns: usize,
     mountain_crest_columns: usize,
@@ -738,6 +849,16 @@ impl RegionFacts {
         let mut max_ridges = f64::NEG_INFINITY;
         let mut min_mountain_detail = f64::INFINITY;
         let mut max_mountain_detail = f64::NEG_INFINITY;
+        let mut min_ocean_interior = f64::INFINITY;
+        let mut max_ocean_interior = f64::NEG_INFINITY;
+        let mut min_shelf_break = f64::INFINITY;
+        let mut max_shelf_break = f64::NEG_INFINITY;
+        let mut min_ocean_basin = f64::INFINITY;
+        let mut max_ocean_basin = f64::NEG_INFINITY;
+        let mut min_seabed_relief = f64::INFINITY;
+        let mut max_seabed_relief = f64::NEG_INFINITY;
+        let mut min_water_depth = i32::MAX;
+        let mut max_water_depth = i32::MIN;
         let mut min_river_distance = f64::INFINITY;
         let mut max_river_distance = f64::NEG_INFINITY;
         let mut min_river_half_width = f64::INFINITY;
@@ -756,6 +877,7 @@ impl RegionFacts {
         let mut max_exposure = f64::NEG_INFINITY;
         let mut heights = Vec::with_capacity(samples.len());
         let mut slopes = Vec::with_capacity(samples.len());
+        let mut water_depths = Vec::new();
         let mut water_columns = 0;
         let mut shore_columns = 0;
         let mut dry_land_columns = 0;
@@ -775,6 +897,9 @@ impl RegionFacts {
         let mut river_bank_influence_columns = 0;
         let mut wetland_columns = 0;
         let mut wetland_pool_columns = 0;
+        let mut shelf_columns = 0;
+        let mut shelf_break_columns = 0;
+        let mut deep_basin_columns = 0;
         let mut mountain_region_columns = 0;
         let mut mountain_valley_columns = 0;
         let mut mountain_crest_columns = 0;
@@ -795,6 +920,28 @@ impl RegionFacts {
             max_ridges = max_ridges.max(sample.ridges);
             min_mountain_detail = min_mountain_detail.min(sample.mountain_detail);
             max_mountain_detail = max_mountain_detail.max(sample.mountain_detail);
+            min_ocean_interior = min_ocean_interior.min(sample.bathymetry.ocean_interior);
+            max_ocean_interior = max_ocean_interior.max(sample.bathymetry.ocean_interior);
+            min_shelf_break = min_shelf_break.min(sample.bathymetry.shelf_break_influence);
+            max_shelf_break = max_shelf_break.max(sample.bathymetry.shelf_break_influence);
+            min_ocean_basin = min_ocean_basin.min(sample.bathymetry.basin_influence);
+            max_ocean_basin = max_ocean_basin.max(sample.bathymetry.basin_influence);
+            min_seabed_relief = min_seabed_relief.min(sample.bathymetry.seabed_relief);
+            max_seabed_relief = max_seabed_relief.max(sample.bathymetry.seabed_relief);
+            if sample.continentalness <= 0.0 {
+                min_water_depth = min_water_depth.min(sample.bathymetry.water_depth);
+                max_water_depth = max_water_depth.max(sample.bathymetry.water_depth);
+                water_depths.push(sample.bathymetry.water_depth);
+                if sample.bathymetry.basin_influence < 0.25 {
+                    shelf_columns += 1;
+                }
+                if sample.bathymetry.shelf_break_influence >= 0.75 {
+                    shelf_break_columns += 1;
+                }
+                if sample.bathymetry.water_depth >= 24 {
+                    deep_basin_columns += 1;
+                }
+            }
             min_river_distance = min_river_distance.min(sample.watercourse.distance);
             max_river_distance = max_river_distance.max(sample.watercourse.distance);
             min_river_half_width = min_river_half_width.min(sample.watercourse.half_width);
@@ -889,6 +1036,18 @@ impl RegionFacts {
                 .chain(sample.ruggedness.to_bits().to_le_bytes())
                 .chain(sample.ridges.to_bits().to_le_bytes())
                 .chain(sample.mountain_detail.to_bits().to_le_bytes())
+                .chain(sample.bathymetry.ocean_interior.to_bits().to_le_bytes())
+                .chain(sample.bathymetry.shelf_influence.to_bits().to_le_bytes())
+                .chain(
+                    sample
+                        .bathymetry
+                        .shelf_break_influence
+                        .to_bits()
+                        .to_le_bytes(),
+                )
+                .chain(sample.bathymetry.basin_influence.to_bits().to_le_bytes())
+                .chain(sample.bathymetry.seabed_relief.to_bits().to_le_bytes())
+                .chain(sample.bathymetry.water_depth.to_le_bytes())
                 .chain(sample.base_surface_y.to_le_bytes())
                 .chain(sample.watercourse.distance.to_bits().to_le_bytes())
                 .chain(sample.watercourse.channel_influence.to_bits().to_le_bytes())
@@ -928,6 +1087,7 @@ impl RegionFacts {
         }
         heights.sort_unstable();
         slopes.sort_by(f64::total_cmp);
+        water_depths.sort_unstable();
 
         let mut slope_edges = 0;
         let mut slope_at_least_one = 0;
@@ -969,6 +1129,16 @@ impl RegionFacts {
             max_ridges,
             min_mountain_detail,
             max_mountain_detail,
+            min_ocean_interior,
+            max_ocean_interior,
+            min_shelf_break,
+            max_shelf_break,
+            min_ocean_basin,
+            max_ocean_basin,
+            min_seabed_relief,
+            max_seabed_relief,
+            min_water_depth,
+            max_water_depth,
             min_river_distance,
             max_river_distance,
             min_river_half_width,
@@ -990,6 +1160,9 @@ impl RegionFacts {
             surface_y_p10: percentile(&heights, 10),
             surface_y_p50: percentile(&heights, 50),
             surface_y_p90: percentile(&heights, 90),
+            water_depth_p10: percentile(&water_depths, 10),
+            water_depth_p50: percentile(&water_depths, 50),
+            water_depth_p90: percentile(&water_depths, 90),
             slope_p50: percentile_f64(&slopes, 50),
             slope_p90: percentile_f64(&slopes, 90),
             slope_p99: percentile_f64(&slopes, 99),
@@ -1012,6 +1185,9 @@ impl RegionFacts {
             river_bank_influence_columns,
             wetland_columns,
             wetland_pool_columns,
+            shelf_columns,
+            shelf_break_columns,
+            deep_basin_columns,
             mountain_region_columns,
             mountain_valley_columns,
             mountain_crest_columns,
@@ -1149,6 +1325,58 @@ fn base_surface_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
         surface_y: sample.base_surface_y,
         ..sample
     })
+}
+
+fn water_depth_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    if sample.continentalness > 0.0 {
+        return [48, 72, 49, 255];
+    }
+    lerp_color(
+        [112, 205, 224, 255],
+        [7, 20, 68, 255],
+        f64::from(sample.bathymetry.water_depth - 2) / 50.0,
+    )
+}
+
+fn shelf_break_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    if sample.continentalness > 0.0 {
+        return [32, 44, 42, 255];
+    }
+    lerp_color(
+        [19, 54, 91, 255],
+        [242, 194, 75, 255],
+        sample.bathymetry.shelf_break_influence,
+    )
+}
+
+fn ocean_basin_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    if sample.continentalness > 0.0 {
+        return [32, 44, 42, 255];
+    }
+    lerp_color(
+        [83, 171, 196, 255],
+        [23, 27, 84, 255],
+        sample.bathymetry.basin_influence,
+    )
+}
+
+fn seabed_relief_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    if sample.continentalness > 0.0 {
+        return [32, 44, 42, 255];
+    }
+    if sample.bathymetry.seabed_relief < 0.0 {
+        lerp_color(
+            [28, 50, 105, 255],
+            [174, 190, 175, 255],
+            sample.bathymetry.seabed_relief + 1.0,
+        )
+    } else {
+        lerp_color(
+            [174, 190, 175, 255],
+            [181, 113, 57, 255],
+            sample.bathymetry.seabed_relief,
+        )
+    }
 }
 
 fn river_distance_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
