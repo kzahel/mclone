@@ -7,10 +7,12 @@ retired TypeScript engine and are retained only in Git history.
 
 Tactical
 [`222`](tactical/222-bounded-valley-stream-structures.md) is the first active
-native consumer of this direction. It begins with a reusable pure procedural
-placement/start/bounding-box/reference/clipping kernel and a terrain-affecting
-Mclone stream. It does not by itself claim the full persisted vanilla status
-pipeline, templates, jigsaw, or structure-family parity.
+native consumer of this direction. Its reusable pure procedural
+placement/start/bounding-box/reference/clipping kernel is now live in
+`mclone-worldgen::procedural_structure`; the terrain-affecting Mclone stream
+is its first planned content consumer. It does not by itself claim the full
+persisted vanilla status pipeline, templates, jigsaw, or structure-family
+parity.
 
 Durable architecture notes for Minecraft Java 1.17.1 overworld structures in `mclone`.
 

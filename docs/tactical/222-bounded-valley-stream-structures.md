@@ -282,17 +282,35 @@ reviewable in one tactical.
 
 ### Slice 1: reusable procedural-start kernel
 
-- [ ] Add placement, start key, bounding box, piece, start, reference, and
+- [x] Add placement, start key, bounding box, piece, start, reference, and
   clipped-query types in shared worldgen ownership.
-- [ ] Prove random-spread placement across signed coordinates.
-- [ ] Prove aggregate boxes, radius-eight discovery, target references,
+- [x] Prove random-spread placement across signed coordinates.
+- [x] Prove aggregate boxes, radius-eight discovery, target references,
   clipped pieces, duplicate suppression, and reversed/partitioned request
   equivalence.
-- [ ] Prove periodic canonical starts and coherent lifted intersection across
+- [x] Prove periodic canonical starts and coherent lifted intersection across
   the 384-chunk seam.
 
 Gate: a synthetic multi-chunk procedural start yields identical target
 references and clipped pieces under every request partition and order.
+
+Execution record 2026-07-23:
+
+- `mclone-worldgen::procedural_structure` owns the first shared kernel without
+  enlarging `FeatureRegion` or `ChunkGenerationPlan` block prerequisites;
+- `StructurePlacement` directly translates Java 1.17.1's linear
+  spacing/separation/salt selection through the existing `WorldgenRandom`,
+  rejects a radius above eight, and requires periodic spacing to divide the
+  cylinder circumference;
+- periodic candidates carry separate canonical and coherently lifted work
+  chunks, so persistent identity need not depend on which side of the seam
+  requested the start;
+- starts sort and validate stable piece ordinals, aggregate inclusive 3D
+  boxes, emit references only inside the configured radius, and clip pieces to
+  one target chunk; and
+- seven focused kernel tests plus the nine existing generation-planning tests
+  pass. The synthetic three-piece start produces identical references for
+  ordered, reversed, and partitioned target requests.
 
 ### Slice 2: plan-only Mclone stream
 
@@ -370,4 +388,3 @@ Pause for direction before expanding scope if:
 
 Otherwise continue through objective gates and stop at the first complete
 human visual review point.
-
