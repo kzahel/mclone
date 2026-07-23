@@ -491,12 +491,13 @@ fn apply_stream_plans(
 
 #[cfg(test)]
 mod tests {
-    use crate::block::{AIR, CLAY, GRASS_BLOCK, GRAVEL, SAND, STONE, WATER};
+    use crate::block::{AIR, CLAY, GRASS_BLOCK, GRAVEL, SAND, SNOW, STONE, WATER};
 
     use super::*;
     use crate::levelgen::mclone_overworld::biomes::{
         MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_RIVER_BIOME_ID,
-        mclone_overworld_biome_id_for_sample,
+        MCLONE_OVERWORLD_SAVANNA_BIOME_ID, MCLONE_OVERWORLD_SNOWY_MOUNTAINS_BIOME_ID,
+        MCLONE_OVERWORLD_TAIGA_BIOME_ID, mclone_overworld_biome_id_for_sample,
     };
     use crate::levelgen::mclone_overworld::fields::MCLONE_OVERWORLD_SEA_LEVEL;
     use crate::levelgen::mclone_overworld::surface::{
@@ -526,6 +527,7 @@ mod tests {
                         }
                         McloneOverworldSurfaceRecipe::RiverBank => GRASS_BLOCK,
                         McloneOverworldSurfaceRecipe::GrassSoil => GRASS_BLOCK,
+                        McloneOverworldSurfaceRecipe::AlpineSnow => GRASS_BLOCK,
                         McloneOverworldSurfaceRecipe::ExposedStone => STONE,
                     };
                     assert_eq!(
@@ -537,7 +539,11 @@ mod tests {
                     let above = chunk.block_at_y(local_x, sample.terrain.surface_y + 1, local_z);
                     assert_eq!(
                         above.0,
-                        if sample.terrain.watercourse.is_water()
+                        if mclone_overworld_surface_recipe(sample)
+                            == McloneOverworldSurfaceRecipe::AlpineSnow
+                        {
+                            SNOW
+                        } else if sample.terrain.watercourse.is_water()
                             || sample.terrain.surface_y < MCLONE_OVERWORLD_SEA_LEVEL
                         {
                             WATER
@@ -713,8 +719,8 @@ mod tests {
     fn selected_regions_exercise_and_pin_biome_and_surface_language() {
         let receipts = [12_345, -98_765, 8_675_309].map(|seed| {
             let sampler = McloneOverworldSampler::new(seed);
-            let mut biome_counts = [0_u32; 5];
-            let mut surface_counts = [0_u32; 7];
+            let mut biome_counts = [0_u32; 8];
+            let mut surface_counts = [0_u32; 8];
             let mut hash = 0xcbf2_9ce4_8422_2325_u64;
             for z in (-2_048..2_048).step_by(16) {
                 for x in (-2_048..2_048).step_by(16) {
@@ -726,6 +732,9 @@ mod tests {
                         PLAINS_BIOME_ID => 2,
                         MCLONE_OVERWORLD_FOREST_BIOME_ID => 3,
                         MCLONE_OVERWORLD_RIVER_BIOME_ID => 4,
+                        MCLONE_OVERWORLD_TAIGA_BIOME_ID => 5,
+                        MCLONE_OVERWORLD_SNOWY_MOUNTAINS_BIOME_ID => 6,
+                        MCLONE_OVERWORLD_SAVANNA_BIOME_ID => 7,
                         _ => panic!("unexpected Mclone biome ID {biome_id}"),
                     };
                     let surface_index = match mclone_overworld_surface_recipe(landform) {
@@ -735,7 +744,8 @@ mod tests {
                         McloneOverworldSurfaceRecipe::WetlandBed => 3,
                         McloneOverworldSurfaceRecipe::RiverBank => 4,
                         McloneOverworldSurfaceRecipe::GrassSoil => 5,
-                        McloneOverworldSurfaceRecipe::ExposedStone => 6,
+                        McloneOverworldSurfaceRecipe::AlpineSnow => 6,
+                        McloneOverworldSurfaceRecipe::ExposedStone => 7,
                     };
                     biome_counts[biome_index] += 1;
                     surface_counts[surface_index] += 1;
@@ -746,7 +756,7 @@ mod tests {
                 }
             }
             assert!(
-                biome_counts.into_iter().all(|count| count > 0),
+                biome_counts[..6].iter().all(|count| *count > 0),
                 "seed {seed} biome counts: {biome_counts:?}"
             );
             assert!(
@@ -756,24 +766,28 @@ mod tests {
             (biome_counts, surface_counts, hash)
         });
         assert!(receipts.iter().any(|receipt| receipt.1[3] > 0));
+        assert!(
+            (5..8).all(|index| receipts.iter().any(|receipt| receipt.0[index] > 0)),
+            "bookend biome counts: {receipts:?}"
+        );
 
         assert_eq!(
             receipts,
             [
                 (
-                    [21_961, 9_556, 18_465, 14_117, 1_437],
-                    [16_943, 12_607, 1_395, 42, 2_560, 31_884, 105],
-                    3_897_804_533_720_171_775,
+                    [21_961, 9_556, 14_080, 7_113, 1_437, 8_696, 9, 2_684],
+                    [16_943, 12_607, 1_395, 42, 2_560, 31_876, 8, 105],
+                    17_102_189_075_701_965_996,
                 ),
                 (
-                    [17_223, 8_076, 17_269, 21_253, 1_715],
-                    [12_358, 11_054, 1_604, 111, 2_850, 37_271, 288],
-                    110_489_083_812_910_482,
+                    [17_223, 8_076, 9_246, 11_081, 1_715, 16_011, 1_025, 1_159],
+                    [12_358, 11_054, 1_604, 111, 2_850, 36_315, 956, 288],
+                    13_631_866_106_043_957_920,
                 ),
                 (
-                    [33_641, 11_579, 10_825, 8_519, 972],
-                    [26_125, 17_799, 900, 72, 1_887, 18_745, 8],
-                    16_139_248_388_008_531_613,
+                    [33_641, 11_579, 7_741, 7_079, 972, 1_888, 0, 2_636],
+                    [26_125, 17_799, 900, 72, 1_887, 18_745, 0, 8],
+                    485_092_951_242_005_629,
                 ),
             ]
         );
@@ -803,7 +817,7 @@ mod tests {
             [
                 5_584_272_403_799_234_324,
                 53_515_349_257_108_940,
-                171_330_102_405_640_746,
+                17_128_386_512_483_643_946,
             ]
         );
     }

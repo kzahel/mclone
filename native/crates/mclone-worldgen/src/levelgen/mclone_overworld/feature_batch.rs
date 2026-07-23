@@ -661,8 +661,8 @@ mod tests {
             }
         }
 
-        assert_eq!(decoration_counts, [49, 2_779, 319, 181]);
-        assert_eq!(hash, 11_070_694_557_156_229_324);
+        assert_eq!(decoration_counts, [49, 2_778, 319, 181]);
+        assert_eq!(hash, 16_242_981_415_705_772_351);
     }
 
     #[test]

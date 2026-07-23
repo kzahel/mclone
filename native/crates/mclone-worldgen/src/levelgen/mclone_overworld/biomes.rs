@@ -5,7 +5,10 @@ use super::fields::{
 use crate::levelgen::profile::{BEACH_BIOME_ID, OCEAN_BIOME_ID, PLAINS_BIOME_ID};
 
 pub const MCLONE_OVERWORLD_FOREST_BIOME_ID: i32 = 4;
+pub const MCLONE_OVERWORLD_TAIGA_BIOME_ID: i32 = 5;
 pub const MCLONE_OVERWORLD_RIVER_BIOME_ID: i32 = 7;
+pub const MCLONE_OVERWORLD_SNOWY_MOUNTAINS_BIOME_ID: i32 = 13;
+pub const MCLONE_OVERWORLD_SAVANNA_BIOME_ID: i32 = 35;
 pub const MCLONE_OVERWORLD_WOODED_UPLAND_MIN_Y: i32 = 75;
 pub const MCLONE_OVERWORLD_WOODED_MAX_SLOPE: f64 = 0.45;
 pub const MCLONE_OVERWORLD_WOODED_MAX_EXPOSURE: f64 = 0.44;
@@ -64,26 +67,15 @@ pub fn mclone_overworld_biome_id_with_topology(
 }
 
 pub fn mclone_overworld_biome_id_for_sample(sample: McloneOverworldLandformSample) -> i32 {
-    let terrain = sample.terrain;
-    if terrain.watercourse.is_water() {
-        MCLONE_OVERWORLD_RIVER_BIOME_ID
-    } else if terrain.watercourse.bank_influence > 0.0
-        && terrain.watercourse.wetland_influence > 0.25
-    {
-        PLAINS_BIOME_ID
-    } else if terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL - 2 {
-        OCEAN_BIOME_ID
-    } else if terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 3 {
-        BEACH_BIOME_ID
-    } else if terrain.surface_y >= MCLONE_OVERWORLD_WOODED_UPLAND_MIN_Y
-        && !terrain.is_mountain_valley()
-        && !terrain.is_open_mountain_shoulder()
-        && sample.slope < MCLONE_OVERWORLD_WOODED_MAX_SLOPE
-        && sample.exposure() < MCLONE_OVERWORLD_WOODED_MAX_EXPOSURE
-    {
-        MCLONE_OVERWORLD_FOREST_BIOME_ID
-    } else {
-        PLAINS_BIOME_ID
+    match mclone_overworld_biome_recipe(sample) {
+        McloneOverworldBiomeRecipe::Ocean => OCEAN_BIOME_ID,
+        McloneOverworldBiomeRecipe::Shore => BEACH_BIOME_ID,
+        McloneOverworldBiomeRecipe::River => MCLONE_OVERWORLD_RIVER_BIOME_ID,
+        McloneOverworldBiomeRecipe::SnowyAlpine => MCLONE_OVERWORLD_SNOWY_MOUNTAINS_BIOME_ID,
+        McloneOverworldBiomeRecipe::CoolWetConifer => MCLONE_OVERWORLD_TAIGA_BIOME_ID,
+        McloneOverworldBiomeRecipe::WarmDrySteppe => MCLONE_OVERWORLD_SAVANNA_BIOME_ID,
+        McloneOverworldBiomeRecipe::TemperateWoodland => MCLONE_OVERWORLD_FOREST_BIOME_ID,
+        McloneOverworldBiomeRecipe::TemperateMeadow => PLAINS_BIOME_ID,
     }
 }
 
@@ -93,6 +85,10 @@ pub fn mclone_overworld_biome_recipe(
     let terrain = sample.terrain;
     if terrain.watercourse.is_water() {
         McloneOverworldBiomeRecipe::River
+    } else if terrain.watercourse.bank_influence > 0.0
+        && terrain.watercourse.wetland_influence > 0.25
+    {
+        McloneOverworldBiomeRecipe::TemperateMeadow
     } else if terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL - 2 {
         McloneOverworldBiomeRecipe::Ocean
     } else if terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 3 {
@@ -201,7 +197,7 @@ mod tests {
         );
         assert_eq!(
             mclone_overworld_biome_id_for_sample(sample(90, MCLONE_OVERWORLD_WOODED_MAX_SLOPE)),
-            PLAINS_BIOME_ID
+            MCLONE_OVERWORLD_TAIGA_BIOME_ID
         );
     }
 
@@ -241,6 +237,36 @@ mod tests {
         assert_eq!(
             mclone_overworld_biome_recipe(landform),
             McloneOverworldBiomeRecipe::Ocean
+        );
+    }
+
+    #[test]
+    fn climate_recipes_map_to_compatible_biome_ids() {
+        let mut landform = sample(80, 0.0);
+        landform.terrain.climate = McloneOverworldClimateSample {
+            temperature: -0.3,
+            moisture: 0.4,
+        };
+        assert_eq!(
+            mclone_overworld_biome_id_for_sample(landform),
+            MCLONE_OVERWORLD_TAIGA_BIOME_ID
+        );
+
+        landform.terrain.climate = McloneOverworldClimateSample {
+            temperature: 0.4,
+            moisture: -0.4,
+        };
+        assert_eq!(
+            mclone_overworld_biome_id_for_sample(landform),
+            MCLONE_OVERWORLD_SAVANNA_BIOME_ID
+        );
+
+        landform.terrain.surface_y = 112;
+        landform.terrain.base_surface_y = 112;
+        landform.terrain.climate = McloneOverworldClimateSample::TEMPERATE;
+        assert_eq!(
+            mclone_overworld_biome_id_for_sample(landform),
+            MCLONE_OVERWORLD_SNOWY_MOUNTAINS_BIOME_ID
         );
     }
 }

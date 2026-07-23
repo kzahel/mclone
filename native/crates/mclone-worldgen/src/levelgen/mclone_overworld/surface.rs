@@ -1,8 +1,9 @@
 use crate::block::{
-    CLAY, DIRT, GRASS_BLOCK, GRAVEL, SAND, STONE, WATER, WATER_LEVEL_8, water_block_for_level,
+    CLAY, DIRT, GRASS_BLOCK, GRAVEL, SAND, SNOW, STONE, WATER, WATER_LEVEL_8, water_block_for_level,
 };
 use crate::levelgen::MutableChunkBlockBuffer;
 
+use super::biomes::{McloneOverworldBiomeRecipe, mclone_overworld_biome_recipe};
 use super::fields::{MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldLandformSample};
 
 pub const MCLONE_OVERWORLD_EXPOSED_STONE_MIN_Y: i32 = 80;
@@ -17,6 +18,7 @@ pub enum McloneOverworldSurfaceRecipe {
     WetlandBed,
     RiverBank,
     GrassSoil,
+    AlpineSnow,
     ExposedStone,
 }
 
@@ -41,6 +43,8 @@ pub fn mclone_overworld_surface_recipe(
             || sample.exposure() >= MCLONE_OVERWORLD_EXPOSED_STONE_MIN_EXPOSURE)
     {
         McloneOverworldSurfaceRecipe::ExposedStone
+    } else if mclone_overworld_biome_recipe(sample) == McloneOverworldBiomeRecipe::SnowyAlpine {
+        McloneOverworldSurfaceRecipe::AlpineSnow
     } else {
         McloneOverworldSurfaceRecipe::GrassSoil
     }
@@ -81,6 +85,11 @@ pub(super) fn write_surface_column(
         McloneOverworldSurfaceRecipe::GrassSoil => {
             write_subsurface(buffer, local_x, local_z, surface_y - 1, DIRT, 2);
             buffer.set_block_at_y(local_x, surface_y, local_z, GRASS_BLOCK);
+        }
+        McloneOverworldSurfaceRecipe::AlpineSnow => {
+            write_subsurface(buffer, local_x, local_z, surface_y - 1, DIRT, 2);
+            buffer.set_block_at_y(local_x, surface_y, local_z, GRASS_BLOCK);
+            buffer.set_block_at_y(local_x, surface_y + 1, local_z, SNOW);
         }
         McloneOverworldSurfaceRecipe::ExposedStone => {
             for y in 1..=surface_y {
@@ -196,6 +205,13 @@ mod tests {
         assert_eq!(
             mclone_overworld_surface_recipe(sample(80, MCLONE_OVERWORLD_EXPOSED_STONE_MIN_SLOPE)),
             McloneOverworldSurfaceRecipe::ExposedStone
+        );
+
+        let mut alpine = sample(112, 0.0);
+        alpine.terrain.climate = McloneOverworldClimateSample::TEMPERATE;
+        assert_eq!(
+            mclone_overworld_surface_recipe(alpine),
+            McloneOverworldSurfaceRecipe::AlpineSnow
         );
     }
 }

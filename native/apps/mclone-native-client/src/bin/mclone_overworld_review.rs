@@ -12,12 +12,13 @@ use mclone_core::ChunkPos;
 use mclone_worldgen::levelgen::{
     BEACH_BIOME_ID, MCLONE_OVERWORLD_DECORATION_REVISION, MCLONE_OVERWORLD_FIELD_REVISION,
     MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_PERIOD_BLOCKS,
-    MCLONE_OVERWORLD_RIVER_BIOME_ID, MCLONE_OVERWORLD_SEA_LEVEL,
-    MCLONE_OVERWORLD_STREAM_REFERENCE_RADIUS_CHUNKS, McloneOverworldBiomeRecipe,
-    McloneOverworldLandformSample, McloneOverworldSampleRegion, McloneOverworldSampleRegionRequest,
-    McloneOverworldSampler, McloneOverworldSamplingTopology, McloneOverworldStreamPlan,
-    McloneOverworldStreamPlanAttempt, McloneOverworldStreamPlanner, McloneOverworldStreamRejection,
-    McloneOverworldSurfaceRecipe, McloneOverworldTerrainSample, OCEAN_BIOME_ID, PLAINS_BIOME_ID,
+    MCLONE_OVERWORLD_RIVER_BIOME_ID, MCLONE_OVERWORLD_SAVANNA_BIOME_ID, MCLONE_OVERWORLD_SEA_LEVEL,
+    MCLONE_OVERWORLD_SNOWY_MOUNTAINS_BIOME_ID, MCLONE_OVERWORLD_STREAM_REFERENCE_RADIUS_CHUNKS,
+    MCLONE_OVERWORLD_TAIGA_BIOME_ID, McloneOverworldBiomeRecipe, McloneOverworldLandformSample,
+    McloneOverworldSampleRegion, McloneOverworldSampleRegionRequest, McloneOverworldSampler,
+    McloneOverworldSamplingTopology, McloneOverworldStreamPlan, McloneOverworldStreamPlanAttempt,
+    McloneOverworldStreamPlanner, McloneOverworldStreamRejection, McloneOverworldSurfaceRecipe,
+    McloneOverworldTerrainSample, OCEAN_BIOME_ID, PLAINS_BIOME_ID,
     analyze_mclone_overworld_hydraulic_closure, mclone_overworld_biome_id_for_sample,
     mclone_overworld_biome_recipe, mclone_overworld_spawn_chunk,
     mclone_overworld_spawn_chunk_with_topology, mclone_overworld_surface_recipe,
@@ -483,6 +484,9 @@ fn run() -> Result<()> {
             "openLowland": facts.open_lowland_biome_columns,
             "woodedUpland": facts.wooded_upland_biome_columns,
             "river": facts.river_biome_columns,
+            "taiga": facts.taiga_biome_columns,
+            "snowyMountains": facts.snowy_mountains_biome_columns,
+            "savanna": facts.savanna_biome_columns,
         },
         "climateRecipeCounts": {
             "ocean": facts.ocean_recipe_columns,
@@ -501,6 +505,7 @@ fn run() -> Result<()> {
             "wetlandBed": facts.wetland_bed_columns,
             "riverBank": facts.river_bank_columns,
             "grassSoil": facts.grass_soil_columns,
+            "alpineSnow": facts.alpine_snow_columns,
             "exposedStone": facts.exposed_stone_columns,
         },
         "watercourseCounts": {
@@ -1120,6 +1125,9 @@ struct RegionFacts {
     open_lowland_biome_columns: usize,
     wooded_upland_biome_columns: usize,
     river_biome_columns: usize,
+    taiga_biome_columns: usize,
+    snowy_mountains_biome_columns: usize,
+    savanna_biome_columns: usize,
     ocean_recipe_columns: usize,
     shore_recipe_columns: usize,
     river_recipe_columns: usize,
@@ -1135,6 +1143,7 @@ struct RegionFacts {
     river_bank_columns: usize,
     grass_soil_columns: usize,
     exposed_stone_columns: usize,
+    alpine_snow_columns: usize,
     river_channel_columns: usize,
     major_river_channel_columns: usize,
     planned_stream_columns: usize,
@@ -1219,6 +1228,9 @@ impl RegionFacts {
         let mut open_lowland_biome_columns = 0;
         let mut wooded_upland_biome_columns = 0;
         let mut river_biome_columns = 0;
+        let mut taiga_biome_columns = 0;
+        let mut snowy_mountains_biome_columns = 0;
+        let mut savanna_biome_columns = 0;
         let mut ocean_recipe_columns = 0;
         let mut shore_recipe_columns = 0;
         let mut river_recipe_columns = 0;
@@ -1234,6 +1246,7 @@ impl RegionFacts {
         let mut river_bank_columns = 0;
         let mut grass_soil_columns = 0;
         let mut exposed_stone_columns = 0;
+        let mut alpine_snow_columns = 0;
         let mut river_channel_columns = 0;
         let mut major_river_channel_columns = 0;
         let mut planned_stream_columns = 0;
@@ -1381,6 +1394,9 @@ impl RegionFacts {
                 PLAINS_BIOME_ID => open_lowland_biome_columns += 1,
                 MCLONE_OVERWORLD_FOREST_BIOME_ID => wooded_upland_biome_columns += 1,
                 MCLONE_OVERWORLD_RIVER_BIOME_ID => river_biome_columns += 1,
+                MCLONE_OVERWORLD_TAIGA_BIOME_ID => taiga_biome_columns += 1,
+                MCLONE_OVERWORLD_SNOWY_MOUNTAINS_BIOME_ID => snowy_mountains_biome_columns += 1,
+                MCLONE_OVERWORLD_SAVANNA_BIOME_ID => savanna_biome_columns += 1,
                 _ => {}
             }
             let biome_recipe = mclone_overworld_biome_recipe(*landform);
@@ -1404,6 +1420,7 @@ impl RegionFacts {
                 McloneOverworldSurfaceRecipe::WetlandBed => wetland_bed_columns += 1,
                 McloneOverworldSurfaceRecipe::RiverBank => river_bank_columns += 1,
                 McloneOverworldSurfaceRecipe::GrassSoil => grass_soil_columns += 1,
+                McloneOverworldSurfaceRecipe::AlpineSnow => alpine_snow_columns += 1,
                 McloneOverworldSurfaceRecipe::ExposedStone => exposed_stone_columns += 1,
             }
             for byte in biome_id
@@ -1618,6 +1635,9 @@ impl RegionFacts {
             open_lowland_biome_columns,
             wooded_upland_biome_columns,
             river_biome_columns,
+            taiga_biome_columns,
+            snowy_mountains_biome_columns,
+            savanna_biome_columns,
             ocean_recipe_columns,
             shore_recipe_columns,
             river_recipe_columns,
@@ -1633,6 +1653,7 @@ impl RegionFacts {
             river_bank_columns,
             grass_soil_columns,
             exposed_stone_columns,
+            alpine_snow_columns,
             river_channel_columns,
             major_river_channel_columns,
             planned_stream_columns,
@@ -2296,6 +2317,9 @@ fn biome_color(sample: McloneOverworldLandformSample) -> [u8; 4] {
         OCEAN_BIOME_ID => [25, 76, 145, 255],
         BEACH_BIOME_ID => [222, 207, 143, 255],
         MCLONE_OVERWORLD_RIVER_BIOME_ID => [42, 119, 181, 255],
+        MCLONE_OVERWORLD_TAIGA_BIOME_ID => [44, 92, 75, 255],
+        MCLONE_OVERWORLD_SNOWY_MOUNTAINS_BIOME_ID => [229, 240, 242, 255],
+        MCLONE_OVERWORLD_SAVANNA_BIOME_ID => [185, 162, 73, 255],
         PLAINS_BIOME_ID => [112, 176, 76, 255],
         MCLONE_OVERWORLD_FOREST_BIOME_ID => [42, 105, 55, 255],
         _ => [211, 64, 198, 255],
@@ -2323,6 +2347,7 @@ fn surface_recipe_color(sample: McloneOverworldLandformSample) -> [u8; 4] {
         McloneOverworldSurfaceRecipe::WetlandBed => [117, 137, 139, 255],
         McloneOverworldSurfaceRecipe::RiverBank => [112, 138, 74, 255],
         McloneOverworldSurfaceRecipe::GrassSoil => [91, 151, 67, 255],
+        McloneOverworldSurfaceRecipe::AlpineSnow => [229, 240, 242, 255],
         McloneOverworldSurfaceRecipe::ExposedStone => [137, 137, 137, 255],
     }
 }
@@ -2335,7 +2360,8 @@ fn surface_recipe_tag(recipe: McloneOverworldSurfaceRecipe) -> u8 {
         McloneOverworldSurfaceRecipe::WetlandBed => 3,
         McloneOverworldSurfaceRecipe::RiverBank => 4,
         McloneOverworldSurfaceRecipe::GrassSoil => 5,
-        McloneOverworldSurfaceRecipe::ExposedStone => 6,
+        McloneOverworldSurfaceRecipe::AlpineSnow => 6,
+        McloneOverworldSurfaceRecipe::ExposedStone => 7,
     }
 }
 
