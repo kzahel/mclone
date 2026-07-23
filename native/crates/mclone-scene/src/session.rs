@@ -5938,6 +5938,11 @@ impl HostEffects for XrSettingsHostEffects {
         Ok(())
     }
 
+    fn set_world_render_scale_mode(&mut self, _mode: GameWorldRenderScaleMode) -> Result<()> {
+        log::info!("flat world render scale ignored by XR scene host");
+        Ok(())
+    }
+
     fn set_touch_controls_mode(&mut self, _mode: TouchControlsMode) -> Result<()> {
         Ok(())
     }
@@ -5970,6 +5975,11 @@ impl HostEffects for XrSessionHostEffects<'_, '_> {
 
     fn cycle_fps_cap(&mut self) -> Result<()> {
         log::info!("XR FPS cap cycle ignored by scene host");
+        Ok(())
+    }
+
+    fn set_world_render_scale_mode(&mut self, _mode: GameWorldRenderScaleMode) -> Result<()> {
+        log::info!("flat world render scale ignored by XR scene host");
         Ok(())
     }
 

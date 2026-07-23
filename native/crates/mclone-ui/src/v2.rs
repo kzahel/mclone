@@ -2,22 +2,22 @@ use crate::{
     AssetPackUiApplyState, AssetPackUiRow, AssetPackUiRowStatus, AssetPacksUiState,
     BLOCK_PALETTE_ENTRY_CAPACITY, BLOCK_PALETTE_PADDING, BlockPaletteEntry, BlockPaletteOverlay,
     Button, Checkbox, Color, CycleButton, DebugPaletteItem, FlatHud, Font, GameDeathCause,
-    GameHelpParent, GameOptionsCategory, GameOptionsParent, GameScenarioId, GameScreen,
-    GameStorageAction, GameTurnMode, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey,
-    GuiScale, GuiTextureUv, HOTBAR_SLOT_COUNT_USIZE, Interaction, LoadingProgressOverlay, Point,
-    Rect, Slider, WidgetId, WorldCatalogUiEntry, WorldCatalogUiState, WorldCatalogUiWorldId,
-    block_palette_panel_rect, block_palette_slot_rect, centered_panel,
-    far_lod_range_from_slider_value, far_lod_range_label, far_lod_range_slider_value,
-    fly_speed_from_slider_value, fly_speed_label, fly_speed_slider_value,
-    movement_speed_from_slider_value, movement_speed_label, movement_speed_slider_value,
-    next_touch_controls_mode, render_block_palette_tooltip, render_distance_from_slider_value,
-    render_distance_label, render_distance_slider_value, render_flat_hud_debug_layer,
-    render_flat_hud_frame_pipeline_layer, render_flat_hud_hotbar_layer,
-    render_flat_hud_prompt_layer, render_flat_hud_retained_layer, render_flat_hud_status_layer,
-    render_flat_hud_transient_layers, render_loading_progress_overlay,
-    render_loading_progress_panel_at, render_palette_slot_contents, render_touch_panel,
-    touch_controls_mode_label, touch_look_from_slider_value, touch_look_label,
-    touch_look_slider_value,
+    GameFlatPresentationState, GameHelpParent, GameOptionsCategory, GameOptionsParent,
+    GameScenarioId, GameScreen, GameStorageAction, GameTurnMode, GameUiAction, GameUiRenderState,
+    GuiDrawList, GuiKey, GuiScale, GuiTextureUv, HOTBAR_SLOT_COUNT_USIZE, Interaction,
+    LoadingProgressOverlay, Point, Rect, Slider, WidgetId, WorldCatalogUiEntry,
+    WorldCatalogUiState, WorldCatalogUiWorldId, block_palette_panel_rect, block_palette_slot_rect,
+    centered_panel, far_lod_range_from_slider_value, far_lod_range_label,
+    far_lod_range_slider_value, fly_speed_from_slider_value, fly_speed_label,
+    fly_speed_slider_value, movement_speed_from_slider_value, movement_speed_label,
+    movement_speed_slider_value, next_touch_controls_mode, render_block_palette_tooltip,
+    render_distance_from_slider_value, render_distance_label, render_distance_slider_value,
+    render_flat_hud_debug_layer, render_flat_hud_frame_pipeline_layer,
+    render_flat_hud_hotbar_layer, render_flat_hud_prompt_layer, render_flat_hud_retained_layer,
+    render_flat_hud_status_layer, render_flat_hud_transient_layers,
+    render_loading_progress_overlay, render_loading_progress_panel_at,
+    render_palette_slot_contents, render_touch_panel, touch_controls_mode_label,
+    touch_look_from_slider_value, touch_look_label, touch_look_slider_value,
 };
 use mclone_input::{
     FLAT_HOTBAR_SLOT_COUNT, ShortcutHelpGroup, ShortcutHelpRow,
@@ -329,12 +329,32 @@ enum UiSliderAction {
     TouchLook,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct UiScrollRegion {
+    clip: Rect,
+    first_widget: usize,
+    widget_count: usize,
+    content_height: f32,
+    offset: f32,
+}
+
+impl UiScrollRegion {
+    fn contains_widget(self, index: usize) -> bool {
+        (self.first_widget..self.first_widget + self.widget_count).contains(&index)
+    }
+
+    fn max_offset(self) -> f32 {
+        (self.content_height - self.clip.height).max(0.0)
+    }
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct UiLayout {
     pub screen: Option<UiScreenId>,
     pub revision: u64,
     widgets: Vec<UiWidget>,
     help_rows: Vec<UiHelpRow>,
+    scroll_region: Option<UiScrollRegion>,
 }
 
 impl UiLayout {
@@ -344,6 +364,7 @@ impl UiLayout {
             revision,
             widgets: Vec::new(),
             help_rows: Vec::new(),
+            scroll_region: None,
         }
     }
 
@@ -362,9 +383,18 @@ impl UiLayout {
     pub fn hit_test(&self, point: Point) -> Option<UiWidgetId> {
         self.widgets
             .iter()
+            .enumerate()
             .rev()
-            .find(|widget| widget.contains(point))
-            .map(|widget| widget.id)
+            .find(|(index, widget)| {
+                self.scroll_region.is_none_or(|region| {
+                    !region.contains_widget(*index) || region.clip.contains(point)
+                }) && widget.contains(point)
+            })
+            .map(|(_, widget)| widget.id)
+    }
+
+    fn set_scroll_region(&mut self, region: UiScrollRegion) {
+        self.scroll_region = Some(region);
     }
 
     fn set_help_rows(&mut self, rows: Vec<UiHelpRow>) {
@@ -410,6 +440,9 @@ pub struct UiDebugSnapshot {
     pub hovered: Option<UiWidgetId>,
     pub captured: Option<UiWidgetId>,
     pub focused: Option<UiWidgetId>,
+    pub scroll_offset: f32,
+    pub scroll_max: f32,
+    pub scroll_clip: Option<Rect>,
     pub widgets: Vec<UiDebugWidget>,
 }
 
@@ -464,6 +497,7 @@ pub struct UiSurface {
     hovered: Option<UiWidgetId>,
     captured: Option<UiWidgetId>,
     focused: Option<UiWidgetId>,
+    scroll_offset: f32,
     font: Font,
     debug_overlay: bool,
     block_palette_grid: Option<CachedBlockPaletteGridLayer>,
@@ -494,6 +528,7 @@ impl UiSurface {
             hovered: None,
             captured: None,
             focused: None,
+            scroll_offset: 0.0,
             font: Font::default(),
             debug_overlay: false,
             block_palette_grid: None,
@@ -516,6 +551,7 @@ impl UiSurface {
         self.screen = screen;
         self.frame_revision = self.frame_revision.wrapping_add(1);
         self.layout_dirty = true;
+        self.scroll_offset = 0.0;
         self.set_interaction_state(None, None, None);
         self.set_focus(None);
     }
@@ -601,6 +637,15 @@ impl UiSurface {
             hovered: self.hovered,
             captured: self.captured,
             focused: self.focused,
+            scroll_offset: self
+                .layout
+                .scroll_region
+                .map_or(0.0, |region| region.offset),
+            scroll_max: self
+                .layout
+                .scroll_region
+                .map_or(0.0, UiScrollRegion::max_offset),
+            scroll_clip: self.layout.scroll_region.map(|region| region.clip),
             widgets: self
                 .layout
                 .widgets()
@@ -695,10 +740,12 @@ impl UiSurface {
             GuiNavigation::Confirm => (true, self.activate_focused()),
             GuiNavigation::PreviousPage => {
                 self.move_focus_linear(-1);
+                self.ensure_focused_visible();
                 (true, None)
             }
             GuiNavigation::NextPage => {
                 self.move_focus_linear(1);
+                self.ensure_focused_visible();
                 (true, None)
             }
             GuiNavigation::Left | GuiNavigation::Right if self.focused_widget_is_slider() => {
@@ -714,9 +761,29 @@ impl UiSurface {
             | GuiNavigation::Left
             | GuiNavigation::Right => {
                 self.move_focus_spatial(navigation);
+                self.ensure_focused_visible();
                 (true, None)
             }
         }
+    }
+
+    pub fn scroll_by(&mut self, amount: f32, render_state: GameUiRenderState) -> bool {
+        if !self.is_active() {
+            return false;
+        }
+        self.set_render_state(render_state);
+        self.ensure_layout();
+        let Some(region) = self.layout.scroll_region else {
+            return true;
+        };
+        let next = (self.scroll_offset + amount).clamp(0.0, region.max_offset());
+        if (next - self.scroll_offset).abs() > f32::EPSILON {
+            self.scroll_offset = next;
+            self.frame_revision = self.frame_revision.wrapping_add(1);
+            self.layout_dirty = true;
+            self.ensure_layout();
+        }
+        true
     }
 
     pub fn key_pressed(&mut self, key: GuiKey) -> (bool, Option<GameUiAction>) {
@@ -902,6 +969,7 @@ impl UiSurface {
                 parent,
                 category,
                 self.render_state,
+                self.scroll_offset,
             ),
             Some(UiScreenId::ServerSettings { parent }) => {
                 server_settings_layout(self.scale, self.layout_revision, parent, self.render_state)
@@ -920,10 +988,20 @@ impl UiSurface {
                 self.render_state,
             ),
             Some(UiScreenId::Help { parent }) => {
-                help_layout(self.scale, self.layout_revision, parent)
+                help_layout(self.scale, self.layout_revision, parent, self.scroll_offset)
             }
             None => UiLayout::new(None, self.layout_revision),
         };
+        if let Some(region) = self.layout.scroll_region {
+            let clamped = self.scroll_offset.clamp(0.0, region.max_offset());
+            if (clamped - self.scroll_offset).abs() > f32::EPSILON {
+                self.scroll_offset = clamped;
+                self.layout_dirty = true;
+                return self.ensure_layout();
+            }
+        } else {
+            self.scroll_offset = 0.0;
+        }
         self.layout_dirty = false;
         self.hovered = self.pointer.and_then(|point| self.layout.hit_test(point));
         if self
@@ -1061,6 +1139,39 @@ impl UiSurface {
                 _ => unreachable!("only spatial navigation reaches this helper"),
             });
         }
+    }
+
+    fn ensure_focused_visible(&mut self) {
+        self.ensure_layout();
+        let Some(focused) = self.focused else {
+            return;
+        };
+        let Some(region) = self.layout.scroll_region else {
+            return;
+        };
+        let Some((index, widget)) = self
+            .layout
+            .widgets()
+            .iter()
+            .enumerate()
+            .find(|(_, widget)| widget.id == focused)
+        else {
+            return;
+        };
+        if !region.contains_widget(index) {
+            return;
+        }
+        let next = if widget.rect.y < region.clip.y {
+            self.scroll_offset - (region.clip.y - widget.rect.y)
+        } else if widget.rect.bottom() > region.clip.bottom() {
+            self.scroll_offset + (widget.rect.bottom() - region.clip.bottom())
+        } else {
+            return;
+        };
+        self.scroll_offset = next.clamp(0.0, region.max_offset());
+        self.frame_revision = self.frame_revision.wrapping_add(1);
+        self.layout_dirty = true;
+        self.ensure_layout();
     }
 
     fn focused_widget_is_slider(&self) -> bool {
@@ -1518,8 +1629,24 @@ impl UiSurface {
             Color::rgba(245, 252, 234, 255),
         );
         let interaction = self.interaction();
-        for widget in self.layout.widgets() {
-            self.render_widget(draw, widget, interaction);
+        if let Some(region) = self.layout.scroll_region {
+            draw.push_clip(region.clip);
+            for (index, widget) in self.layout.widgets().iter().enumerate() {
+                if region.contains_widget(index) {
+                    self.render_widget(draw, widget, interaction);
+                }
+            }
+            draw.pop_clip();
+            for (index, widget) in self.layout.widgets().iter().enumerate() {
+                if !region.contains_widget(index) {
+                    self.render_widget(draw, widget, interaction);
+                }
+            }
+            self.render_scrollbar(draw, region);
+        } else {
+            for widget in self.layout.widgets() {
+                self.render_widget(draw, widget, interaction);
+            }
         }
         if category == GameOptionsCategory::StorageProfile {
             let status = if self.render_state.storage_profile.status.visible {
@@ -1547,6 +1674,28 @@ impl UiSurface {
             }
         }
         let _ = parent;
+    }
+
+    fn render_scrollbar(&self, draw: &mut GuiDrawList, region: UiScrollRegion) {
+        let max_offset = region.max_offset();
+        if max_offset <= 0.0 {
+            return;
+        }
+        let track = Rect::new(
+            region.clip.right() - 3.0,
+            region.clip.y,
+            3.0,
+            region.clip.height,
+        );
+        let thumb_height = (region.clip.height * region.clip.height / region.content_height)
+            .clamp(10.0, track.height);
+        let travel = (track.height - thumb_height).max(0.0);
+        let thumb_y = track.y + travel * (region.offset / max_offset);
+        draw.fill(track, Color::rgba(8, 12, 13, 190));
+        draw.fill(
+            Rect::new(track.x, thumb_y, track.width, thumb_height),
+            Color::rgba(174, 220, 154, 255),
+        );
     }
 
     fn render_server_settings(&self, draw: &mut GuiDrawList, parent: GameOptionsParent) {
@@ -1713,8 +1862,17 @@ impl UiSurface {
             panel.y + 20.0,
             Color::rgba(185, 212, 198, 255),
         );
-        for row in self.layout.help_rows() {
-            self.render_help_row(draw, row);
+        if let Some(region) = self.layout.scroll_region {
+            draw.push_clip(region.clip);
+            for row in self.layout.help_rows() {
+                self.render_help_row(draw, row);
+            }
+            draw.pop_clip();
+            self.render_scrollbar(draw, region);
+        } else {
+            for row in self.layout.help_rows() {
+                self.render_help_row(draw, row);
+            }
         }
         let interaction = self.interaction();
         for widget in self.layout.widgets() {
@@ -2678,6 +2836,11 @@ impl GameUiHost {
         }
     }
 
+    pub fn scroll_by(&mut self, amount: f32) -> bool {
+        let state = self.committed_render_state;
+        self.sync_surface_screen() && self.surface.scroll_by(amount, state)
+    }
+
     pub fn pointer_move(&mut self, point: Point) -> (bool, Option<GameUiAction>) {
         let state = self.committed_render_state;
         if self.sync_surface_screen() {
@@ -2790,6 +2953,7 @@ impl GameUiHost {
             | GameUiAction::SetXrTurnMode(_)
             | GameUiAction::CycleFramePacing
             | GameUiAction::CycleFpsCap
+            | GameUiAction::SetWorldRenderScaleMode(_)
             | GameUiAction::SetRenderDistance(_)
             | GameUiAction::SetFarLodRange(_)
             | GameUiAction::SetFlySpeed(_)
@@ -2997,6 +3161,9 @@ const UI_V2_OPTIONS_CAT_DEBUG: UiWidgetId = UiWidgetId(128);
 const UI_V2_OPTIONS_ASSET_PACKS: UiWidgetId = UiWidgetId(129);
 const UI_V2_OPTIONS_FAR_LOD_DETAIL: UiWidgetId = UiWidgetId(131);
 const UI_V2_OPTIONS_CAT_STORAGE: UiWidgetId = UiWidgetId(132);
+const UI_V2_OPTIONS_OUTPUT_RESOLUTION: UiWidgetId = UiWidgetId(144);
+const UI_V2_OPTIONS_WORLD_RESOLUTION: UiWidgetId = UiWidgetId(145);
+const UI_V2_OPTIONS_WORLD_RENDER_SCALE: UiWidgetId = UiWidgetId(146);
 const UI_V2_STORAGE_PROFILE_NAME: UiWidgetId = UiWidgetId(133);
 const UI_V2_STORAGE_PROFILE_ID: UiWidgetId = UiWidgetId(134);
 const UI_V2_STORAGE_BACKEND: UiWidgetId = UiWidgetId(135);
@@ -3484,11 +3651,36 @@ fn block_palette_layout(scale: GuiScale, revision: u64, overlay: BlockPaletteOve
     layout
 }
 
-fn help_layout(scale: GuiScale, revision: u64, parent: GameHelpParent) -> UiLayout {
+fn help_layout(
+    scale: GuiScale,
+    revision: u64,
+    parent: GameHelpParent,
+    scroll_offset: f32,
+) -> UiLayout {
     let mut layout = UiLayout::new(Some(UiScreenId::Help { parent }), revision);
     let panel = help_panel_rect(scale);
     let font = Font::default();
-    layout.set_help_rows(help_text_rows(panel, font.line_height()));
+    let mut rows = help_text_rows(panel, font.line_height());
+    for row in &mut rows {
+        row.y -= scroll_offset;
+    }
+    let content_height = rows
+        .iter()
+        .map(|row| row.y + font.line_height() + scroll_offset - (panel.y + 34.0))
+        .fold(0.0, f32::max);
+    layout.set_help_rows(rows);
+    layout.set_scroll_region(UiScrollRegion {
+        clip: Rect::new(
+            panel.x + 8.0,
+            panel.y + 32.0,
+            panel.width - 16.0,
+            (panel.height - 62.0).max(1.0),
+        ),
+        first_widget: 0,
+        widget_count: 0,
+        content_height,
+        offset: scroll_offset,
+    });
     layout.push(
         UiWidget::button(UI_V2_HELP_BACK, help_back_rect(scale), "Back")
             .action(GameUiAction::CloseHelp(parent)),
@@ -3603,7 +3795,7 @@ const fn options_category_widget_id(category: GameOptionsCategory) -> UiWidgetId
 /// the row list twice.
 const fn options_category_row_count(category: GameOptionsCategory) -> usize {
     match category {
-        GameOptionsCategory::Graphics => 8,
+        GameOptionsCategory::Graphics => 10,
         GameOptionsCategory::Movement => 8,
         GameOptionsCategory::Display => 3,
         GameOptionsCategory::Debug => 5,
@@ -3698,6 +3890,54 @@ fn options_category_rows(
     let ph = Rect::new(0.0, 0.0, 0.0, 0.0);
     match category {
         GameOptionsCategory::Graphics => vec![
+            (
+                20.0,
+                UiWidget::cycle(
+                    UI_V2_OPTIONS_OUTPUT_RESOLUTION,
+                    ph,
+                    "Output Resolution",
+                    state
+                        .flat_presentation
+                        .map(GameFlatPresentationState::output_size_label)
+                        .unwrap_or_else(|| "N/A".to_owned()),
+                )
+                .enabled(false),
+            ),
+            (
+                20.0,
+                UiWidget::cycle(
+                    UI_V2_OPTIONS_WORLD_RESOLUTION,
+                    ph,
+                    "World Resolution",
+                    state
+                        .flat_presentation
+                        .map(GameFlatPresentationState::world_size_label)
+                        .unwrap_or_else(|| "N/A".to_owned()),
+                )
+                .enabled(false),
+            ),
+            (
+                20.0,
+                state.flat_presentation.map_or_else(
+                    || {
+                        UiWidget::cycle(UI_V2_OPTIONS_WORLD_RENDER_SCALE, ph, "World Scale", "N/A")
+                            .enabled(false)
+                    },
+                    |presentation| {
+                        UiWidget::cycle(
+                            UI_V2_OPTIONS_WORLD_RENDER_SCALE,
+                            ph,
+                            "World Scale",
+                            presentation
+                                .world_render_scale_mode
+                                .label(presentation.world_render_scale),
+                        )
+                        .action(GameUiAction::SetWorldRenderScaleMode(
+                            presentation.world_render_scale_mode.next(),
+                        ))
+                    },
+                ),
+            ),
             (
                 18.0,
                 UiWidget::checkbox(
@@ -4099,6 +4339,7 @@ fn options_category_layout(
     parent: GameOptionsParent,
     category: GameOptionsCategory,
     state: GameUiRenderState,
+    scroll_offset: f32,
 ) -> UiLayout {
     let mut layout = UiLayout::new(
         Some(UiScreenId::OptionsCategory { parent, category }),
@@ -4106,15 +4347,36 @@ fn options_category_layout(
     );
     let panel = options_category_panel_rect(scale, category);
     let rows = options_category_rows(parent, category, state);
-    let bottom = if category == GameOptionsCategory::StorageProfile {
-        place_storage_profile_rows(&mut layout, panel, rows)
+    let scroll_clip = Rect::new(
+        panel.x + 12.0,
+        panel.y + 28.0,
+        panel.width - 24.0,
+        (panel.height - 60.0).max(1.0),
+    );
+    let first_widget = layout.widgets.len();
+    let content_height = if category == GameOptionsCategory::StorageProfile {
+        place_storage_profile_rows(&mut layout, panel, rows, scroll_offset)
     } else {
-        place_option_rows(&mut layout, panel, 2, rows)
+        place_option_rows(
+            &mut layout,
+            panel,
+            options_category_columns(panel),
+            rows,
+            scroll_offset,
+        )
     };
+    let widget_count = layout.widgets.len() - first_widget;
+    layout.set_scroll_region(UiScrollRegion {
+        clip: scroll_clip,
+        first_widget,
+        widget_count,
+        content_height,
+        offset: scroll_offset,
+    });
     layout.push(
         UiWidget::button(
             UI_V2_OPTIONS_BACK,
-            Rect::new(panel.center_x() - 55.0, bottom + 6.0, 110.0, 20.0),
+            Rect::new(panel.center_x() - 55.0, panel.bottom() - 26.0, 110.0, 20.0),
             match parent {
                 GameOptionsParent::Title => "Back",
                 GameOptionsParent::Pause => "Done",
@@ -4129,13 +4391,14 @@ fn place_storage_profile_rows(
     layout: &mut UiLayout,
     panel: Rect,
     rows: Vec<(f32, UiWidget)>,
+    scroll_offset: f32,
 ) -> f32 {
     debug_assert_eq!(
         rows.len(),
         options_category_row_count(GameOptionsCategory::StorageProfile)
     );
     let x0 = panel.x + 18.0;
-    let y0 = panel.y + 30.0;
+    let y0 = panel.y + 30.0 - scroll_offset;
     let pitch = 24.0;
     let column_gap = 10.0;
     let full_width = panel.width - 36.0;
@@ -4156,7 +4419,7 @@ fn place_storage_profile_rows(
         };
         layout.push(widget);
     }
-    y0 + 6.0 * pitch
+    6.0 * pitch
 }
 
 /// Flow `rows` (each `(height, widget)`) into `cols` columns within `panel`,
@@ -4167,13 +4430,14 @@ fn place_option_rows(
     panel: Rect,
     cols: usize,
     rows: Vec<(f32, UiWidget)>,
+    scroll_offset: f32,
 ) -> f32 {
     let cols = cols.max(1);
     let column_gap = 10.0;
     let column_width =
         ((panel.width - 36.0 - column_gap * (cols as f32 - 1.0)) / cols as f32).max(110.0);
     let x0 = panel.x + 18.0;
-    let y0 = panel.y + 30.0;
+    let y0 = panel.y + 30.0 - scroll_offset;
     let pitch = 24.0;
     let per_col = rows.len().div_ceil(cols).max(1);
     for (index, (height, mut widget)) in rows.into_iter().enumerate() {
@@ -4187,7 +4451,7 @@ fn place_option_rows(
         );
         layout.push(widget);
     }
-    y0 + per_col as f32 * pitch
+    per_col as f32 * pitch
 }
 
 fn server_settings_layout(
@@ -4327,16 +4591,27 @@ fn asset_packs_layout(
 }
 
 fn options_category_panel_rect(scale: GuiScale, category: GameOptionsCategory) -> Rect {
+    let panel_width = (scale.width - 18.0).clamp(242.0, 420.0);
     let row_count = if category == GameOptionsCategory::StorageProfile {
         6
     } else {
-        options_category_row_count(category).div_ceil(2).max(1)
+        options_category_row_count(category)
+            .div_ceil(options_category_columns(Rect::new(
+                0.0,
+                0.0,
+                panel_width,
+                1.0,
+            )))
+            .max(1)
     };
-    let panel_width = (scale.width - 18.0).clamp(242.0, 420.0);
     // title band + flowed rows + Back button + bottom padding
     let content = 30.0 + row_count as f32 * 24.0 + 34.0;
     let panel_height = content.min((scale.height - 4.0).max(1.0));
     centered_panel(scale, panel_width, panel_height)
+}
+
+fn options_category_columns(panel: Rect) -> usize {
+    if panel.width < 340.0 { 1 } else { 2 }
 }
 
 fn server_settings_panel_rect(scale: GuiScale, state: GameUiRenderState) -> Rect {

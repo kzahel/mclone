@@ -1,12 +1,38 @@
 use super::*;
 
 #[test]
-fn desktop_render_scale_presets_cycle_from_default() {
-    assert_eq!(next_desktop_render_scale(1.0), 0.5);
-    assert_eq!(next_desktop_render_scale(0.5), 0.75);
-    assert_eq!(next_desktop_render_scale(0.75), 1.5);
-    assert_eq!(next_desktop_render_scale(1.5), 1.0);
-    assert_eq!(next_desktop_render_scale(1.25), 1.0);
+fn world_render_scale_modes_cycle_from_auto_through_fixed_presets() {
+    let mut mode = GameWorldRenderScaleMode::Automatic;
+    for expected in [
+        GameWorldRenderScaleMode::Half,
+        GameWorldRenderScaleMode::TwoThirds,
+        GameWorldRenderScaleMode::ThreeQuarters,
+        GameWorldRenderScaleMode::Native,
+        GameWorldRenderScaleMode::Automatic,
+    ] {
+        mode = mode.next();
+        assert_eq!(mode, expected);
+    }
+}
+
+#[test]
+fn fixed_world_render_scale_overrides_the_platform_profile() {
+    assert_eq!(
+        world_render_scale(
+            WindowPlatformProfile::SteamOs,
+            [3840, 2160],
+            GameWorldRenderScaleMode::ThreeQuarters,
+        ),
+        0.75,
+    );
+    assert_eq!(
+        world_render_scale(
+            WindowPlatformProfile::Desktop,
+            [3840, 2160],
+            GameWorldRenderScaleMode::Half,
+        ),
+        0.5,
+    );
 }
 
 #[test]

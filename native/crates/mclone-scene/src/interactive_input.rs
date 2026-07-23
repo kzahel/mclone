@@ -718,8 +718,10 @@ impl MonoInteractiveInputRouter {
         H: HostEffects,
     {
         if host.mono_ui_is_active() {
+            let changed = host.mono_ui_scroll(direction);
             return Ok(MonoInputDisposition {
                 handled: true,
+                scene_changed: changed,
                 ..MonoInputDisposition::default()
             });
         }

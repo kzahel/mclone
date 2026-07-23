@@ -21,7 +21,9 @@ use mclone_scene::{
     WarmWorldStandbySnapshot, XrStartupViewPose, XrTerrainEyeTarget, XrTerrainFrameSummary,
     record_mono_frame_pipeline, xr_frame_pipeline_accounting_config,
 };
-use mclone_ui::{GameUiAction, GameUiHost, GuiScale, Point};
+use mclone_ui::{
+    GameFlatPresentationState, GameUiAction, GameUiHost, GameWorldRenderScaleMode, GuiScale, Point,
+};
 
 use crate::camera::SpectatorCamera;
 use crate::cli::{SceneOptions, StartupWaitPolicy};
@@ -111,6 +113,13 @@ impl HostEffects for OffscreenHostEffects {
     }
 
     fn cycle_fps_cap(&mut self) -> Result<()> {
+        Ok(())
+    }
+
+    fn set_world_render_scale_mode(
+        &mut self,
+        _mode: mclone_ui::GameWorldRenderScaleMode,
+    ) -> Result<()> {
         Ok(())
     }
 
@@ -623,6 +632,7 @@ impl OffscreenDriver {
         hud_visible: bool,
         frozen: bool,
     ) -> Result<MonoSceneFrameSummary> {
+        let output_size = frame.target.size;
         self.frame_timing
             .begin_frame(self.clock.frame_ms, self.clock.target_frame_ms);
         let target_hz = self
@@ -639,6 +649,12 @@ impl OffscreenDriver {
             },
             frame_timing: self.frame_timing,
             render_scale: 1.0,
+            flat_presentation: Some(GameFlatPresentationState::new(
+                output_size,
+                output_size,
+                1.0,
+                GameWorldRenderScaleMode::Automatic,
+            )),
             hud_visible,
             ..MonoUiContext::default()
         });

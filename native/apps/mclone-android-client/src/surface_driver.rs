@@ -100,6 +100,13 @@ impl HostEffects for AndroidHostEffects {
         Ok(())
     }
 
+    fn set_world_render_scale_mode(
+        &mut self,
+        _mode: mclone_ui::GameWorldRenderScaleMode,
+    ) -> Result<()> {
+        Ok(())
+    }
+
     fn set_touch_controls_mode(&mut self, mode: TouchControlsMode) -> Result<()> {
         self.outcome.touch_controls_mode = Some(mode);
         Ok(())

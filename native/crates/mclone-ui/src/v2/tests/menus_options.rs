@@ -1,5 +1,5 @@
 use super::*;
-use crate::GameAuxiliarySplitMode;
+use crate::{GameAuxiliarySplitMode, GameFlatPresentationState, GameWorldRenderScaleMode};
 
 #[test]
 fn game_ui_host_has_title_and_ingame_start_modes() {
@@ -273,6 +273,112 @@ fn debug_options_cycles_the_flat_auxiliary_view_mode() {
             GameAuxiliarySplitMode::Horizontal
         ))
     );
+}
+
+#[test]
+fn graphics_options_show_flat_resolution_and_cycle_world_scale_mode() {
+    let mut surface = UiSurface::new();
+    surface.set_screen(Some(UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::Graphics,
+    }));
+    surface.set_scale(GuiScale::from_pixels(960, 540));
+    let state = GameUiRenderState {
+        flat_presentation: Some(GameFlatPresentationState::new(
+            [3840, 2160],
+            [1920, 1080],
+            0.5,
+            GameWorldRenderScaleMode::Automatic,
+        )),
+        ..GameUiRenderState::default()
+    };
+    surface.set_render_state(state);
+
+    let output = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_OUTPUT_RESOLUTION)
+        .expect("output resolution row")
+        .clone();
+    let world = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_WORLD_RESOLUTION)
+        .expect("world resolution row")
+        .clone();
+    let scale = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_WORLD_RENDER_SCALE)
+        .expect("world render scale row")
+        .clone();
+
+    assert_eq!(output.value.as_deref(), Some("3840 x 2160"));
+    assert!(!output.enabled);
+    assert_eq!(world.value.as_deref(), Some("1920 x 1080"));
+    assert!(!world.enabled);
+    assert_eq!(scale.value.as_deref(), Some("Auto (50%)"));
+    assert!(scale.enabled);
+    assert!(surface.pointer_down(point_in(scale.rect), state));
+    assert_eq!(
+        surface.pointer_up(point_in(scale.rect), state).1,
+        Some(GameUiAction::SetWorldRenderScaleMode(
+            GameWorldRenderScaleMode::Half,
+        ))
+    );
+}
+
+#[test]
+fn compact_options_scroll_and_controller_focus_reveals_hidden_rows() {
+    let mut surface = UiSurface::new();
+    surface.set_screen(Some(UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::Graphics,
+    }));
+    surface.set_scale(GuiScale::from_pixels(320, 140));
+    let state = GameUiRenderState {
+        flat_presentation: Some(GameFlatPresentationState::new(
+            [1280, 800],
+            [1280, 800],
+            1.0,
+            GameWorldRenderScaleMode::Automatic,
+        )),
+        far_lod_enabled: true,
+        ..GameUiRenderState::default()
+    };
+    surface.set_render_state(state);
+
+    let initial = surface.debug_snapshot().expect("graphics snapshot");
+    assert!(initial.scroll_max > 0.0);
+    assert_eq!(initial.scroll_offset, 0.0);
+    assert!(surface.scroll_by(12.0, state));
+    assert_eq!(
+        surface
+            .debug_snapshot()
+            .expect("scrolled graphics snapshot")
+            .scroll_offset,
+        12.0,
+    );
+
+    surface.scroll_offset = 0.0;
+    surface.layout_dirty = true;
+    for _ in 0..10 {
+        surface.navigate(GuiNavigation::NextPage, state);
+        if surface
+            .debug_snapshot()
+            .is_some_and(|snapshot| snapshot.focused == Some(UI_V2_OPTIONS_FPS_CAP))
+        {
+            break;
+        }
+    }
+    let focused = surface.debug_snapshot().expect("focused graphics snapshot");
+    let clip = focused.scroll_clip.expect("graphics scroll clip");
+    let fps = focused
+        .widgets
+        .iter()
+        .find(|widget| widget.id == UI_V2_OPTIONS_FPS_CAP)
+        .expect("FPS cap row");
+    assert_eq!(focused.focused, Some(UI_V2_OPTIONS_FPS_CAP));
+    assert!(focused.scroll_offset > 0.0);
+    assert!(fps.rect.y >= clip.y - f32::EPSILON);
+    assert!(fps.rect.bottom() <= clip.bottom() + f32::EPSILON);
 }
 
 #[test]

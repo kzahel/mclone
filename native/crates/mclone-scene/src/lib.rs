@@ -117,8 +117,9 @@ use mclone_diagnostics::{
 };
 use mclone_input::{
     ControllerLayoutFamily, FLAT_HOTBAR_SLOT_COUNT, FlatInputAction, FlatInputFrame,
-    InputPromptKind, PlayerAction, PlayerActionFrame, ResolvedFlatInput, TouchControlsMode,
-    TouchLookDelta, TrackedControllerState, XrHand, XrInputFrame, keyboard_turn_mouse_delta,
+    InputPromptKind, MouseWheelDirection, PlayerAction, PlayerActionFrame, ResolvedFlatInput,
+    TouchControlsMode, TouchLookDelta, TrackedControllerState, XrHand, XrInputFrame,
+    keyboard_turn_mouse_delta,
 };
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh, quad_face_count_from_indices};
 use mclone_protocol::{DebugActorKind, DebugHotbarItem, EntitySnapshot, RemotePlayerUpdate};
@@ -173,12 +174,12 @@ use mclone_server::{SimulationCadenceConfig, WorkerFrameMetrics};
 use mclone_ui::{
     Color, DEFAULT_JOIN_REMOTE_ADDR, DebugActorTool, DebugOverlay, FlatHotbarOverlay, FlatHud,
     FlatHudDebugOverlay, GameAuxiliarySplitMode, GameCollisionMode, GameDeathCause,
-    GameFramePacingMode, GameMovementMode, GamePlayerModel, GameScreen, GameSimulationCadence,
-    GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameUiAction, GameUiHost,
-    GameUiRenderState, GameXrTurnMode, GamepadHudOverlay, GuiDrawList, GuiKey, GuiScale,
-    LoadingProgressOverlay, Point, Rect, StatusOverlay, StorageProfileBackend,
-    StorageProfileUiState, TouchOverlay, UiDebugSnapshot, UiDrawCacheStats, UiPanelRevision,
-    WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
+    GameFlatPresentationState, GameFramePacingMode, GameMovementMode, GamePlayerModel, GameScreen,
+    GameSimulationCadence, GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameUiAction,
+    GameUiHost, GameUiRenderState, GameWorldRenderScaleMode, GameXrTurnMode, GamepadHudOverlay,
+    GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay, Point, Rect, StatusOverlay,
+    StorageProfileBackend, StorageProfileUiState, TouchOverlay, UiDebugSnapshot, UiDrawCacheStats,
+    UiPanelRevision, WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
 };
 
 mod asset_replacement;

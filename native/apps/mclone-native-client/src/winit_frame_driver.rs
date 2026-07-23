@@ -20,7 +20,9 @@ use mclone_scene::{
     MonoSceneFrameSummary, MonoUiActionOutcome, MonoUiContext, MonoUiPresentation,
     record_mono_frame_pipeline, xr_frame_pipeline_accounting_config,
 };
-use mclone_ui::{GameUiAction, GameUiHost, GuiScale, Point, UiDebugSnapshot};
+use mclone_ui::{
+    GameUiAction, GameUiHost, GameWorldRenderScaleMode, GuiScale, Point, UiDebugSnapshot,
+};
 
 use crate::cli::{SceneOptions, WindowStartIntent};
 use crate::desktop_scene_host::{DesktopSceneHost, create_desktop_scene_host};
@@ -31,6 +33,7 @@ pub(crate) struct WinitHostEffectOutcome {
     pub(crate) mouse_lock_requested: Option<bool>,
     pub(crate) cycle_frame_pacing: bool,
     pub(crate) cycle_fps_cap: bool,
+    pub(crate) world_render_scale_mode: Option<GameWorldRenderScaleMode>,
     pub(crate) touch_controls_mode: Option<TouchControlsMode>,
     pub(crate) quit_to_title: bool,
     pub(crate) exit: bool,
@@ -67,6 +70,11 @@ impl HostEffects for WinitHostEffects {
 
     fn cycle_fps_cap(&mut self) -> Result<()> {
         self.outcome.cycle_fps_cap = true;
+        Ok(())
+    }
+
+    fn set_world_render_scale_mode(&mut self, mode: GameWorldRenderScaleMode) -> Result<()> {
+        self.outcome.world_render_scale_mode = Some(mode);
         Ok(())
     }
 

@@ -13,7 +13,7 @@ use mclone_ui::{
     DebugActorTool, GameAuxiliarySplitMode, GameCollisionMode, GameFarLodDetailMode,
     GameFramePacingMode, GameMovementMode, GamePlayerModel, GameScenarioId, GameSimulationCadence,
     GameStorageAction, GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameUiAction,
-    GameUiRenderState, GameXrTurnMode,
+    GameUiRenderState, GameWorldRenderScaleMode, GameXrTurnMode,
 };
 
 use crate::asset_pack_ui::{ClientAssetPackController, ClientAssetPackEffect};
@@ -169,6 +169,7 @@ impl ClientExperienceController {
             | GameUiAction::SetXrTurnMode(_)
             | GameUiAction::CycleFramePacing
             | GameUiAction::CycleFpsCap
+            | GameUiAction::SetWorldRenderScaleMode(_)
             | GameUiAction::SetRenderDistance(_)
             | GameUiAction::SetFlySpeed(_)
             | GameUiAction::SetMovementSpeed(_)
@@ -365,6 +366,7 @@ pub struct ClientExperienceSettingsProfile {
     pub xr_turn: ClientExperienceCapabilityStatus,
     pub frame_pacing: ClientExperienceCapabilityStatus,
     pub fps_cap: ClientExperienceCapabilityStatus,
+    pub world_render_scale: ClientExperienceCapabilityStatus,
     pub render_distance: ClientExperienceCapabilityStatus,
     pub fly_speed: ClientExperienceCapabilityStatus,
     pub movement_speed: ClientExperienceCapabilityStatus,
@@ -398,6 +400,7 @@ impl ClientExperienceSettingsProfile {
             xr_turn: ClientExperienceCapabilityStatus::Supported,
             frame_pacing: ClientExperienceCapabilityStatus::Supported,
             fps_cap: ClientExperienceCapabilityStatus::Supported,
+            world_render_scale: ClientExperienceCapabilityStatus::Supported,
             render_distance: ClientExperienceCapabilityStatus::Supported,
             fly_speed: ClientExperienceCapabilityStatus::Supported,
             movement_speed: ClientExperienceCapabilityStatus::Supported,
@@ -430,6 +433,7 @@ impl ClientExperienceSettingsProfile {
             ClientExperienceActionKind::SetXrTurnMode => self.xr_turn,
             ClientExperienceActionKind::CycleFramePacing => self.frame_pacing,
             ClientExperienceActionKind::CycleFpsCap => self.fps_cap,
+            ClientExperienceActionKind::SetWorldRenderScaleMode => self.world_render_scale,
             ClientExperienceActionKind::SetRenderDistance => self.render_distance,
             ClientExperienceActionKind::SetFlySpeed => self.fly_speed,
             ClientExperienceActionKind::SetMovementSpeed => self.movement_speed,
@@ -449,8 +453,9 @@ impl ClientExperienceSettingsProfile {
     /// [`NATIVE_FEATURE_PARITY_EXCEPTIONS`]; a bare
     /// [`ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED`] (silent drift)
     /// is forbidden. Input/surface-shaped capabilities (turn, touch, crosshair,
-    /// frame pacing, fps cap) are intentionally excluded — those legitimately
-    /// differ by hardware and may vary per platform.
+    /// frame pacing, fps cap, flat world render scale) are intentionally
+    /// excluded — those legitimately differ by hardware and may vary per
+    /// platform.
     pub fn feature_axis(
         self,
     ) -> [(
@@ -536,6 +541,7 @@ pub fn xr_native_client_experience_profile() -> ClientExperienceProfile {
     settings.crosshair = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.frame_pacing = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.fps_cap = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.world_render_scale = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.touch_look = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.touch_controls = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     ClientExperienceProfile::new(settings)
@@ -555,6 +561,9 @@ pub fn android_flat_native_client_experience_profile() -> ClientExperienceProfil
     );
     settings.fps_cap =
         ClientExperienceCapabilityStatus::Unsupported("FPS cap is fixed on flat Android");
+    settings.world_render_scale = ClientExperienceCapabilityStatus::Unsupported(
+        "World render scale is fixed on flat Android",
+    );
     ClientExperienceProfile::new(settings)
 }
 
@@ -571,6 +580,7 @@ pub fn web_client_experience_profile() -> ClientExperienceProfile {
     settings.xr_turn = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.frame_pacing = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.fps_cap = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.world_render_scale = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.frame_pipeline_overlay =
         ClientExperienceCapabilityStatus::Unsupported(WEB_FRAME_PIPELINE_OVERLAY_REASON);
     settings.debug_diagnostics =
@@ -892,6 +902,11 @@ impl ClientExperienceSettingsController {
                     .setting_effects
                     .push(ClientExperienceSettingEffect::CycleFpsCap);
             }
+            GameUiAction::SetWorldRenderScaleMode(mode) => {
+                effects
+                    .setting_effects
+                    .push(ClientExperienceSettingEffect::SetWorldRenderScaleMode(mode));
+            }
             GameUiAction::SetRenderDistance(render_distance) => {
                 self.state.render_distance = self.state.clamp_render_distance(render_distance);
                 effects
@@ -1037,6 +1052,10 @@ impl ClientExperienceSettingsController {
                 profile.frame_pacing,
             ),
             (ClientExperienceActionKind::CycleFpsCap, profile.fps_cap),
+            (
+                ClientExperienceActionKind::SetWorldRenderScaleMode,
+                profile.world_render_scale,
+            ),
             (
                 ClientExperienceActionKind::SetRenderDistance,
                 profile.render_distance,
@@ -1507,6 +1526,7 @@ pub enum ClientExperienceSettingEffect {
     SetXrTurnMode(GameXrTurnMode),
     CycleFramePacing,
     CycleFpsCap,
+    SetWorldRenderScaleMode(GameWorldRenderScaleMode),
     SetRenderDistance(u32),
     SetFlySpeedMultiplier(f32),
     SetMovementSpeedMultiplier(f32),
@@ -1592,6 +1612,7 @@ pub enum ClientExperienceActionKind {
     SetXrTurnMode,
     CycleFramePacing,
     CycleFpsCap,
+    SetWorldRenderScaleMode,
     SetRenderDistance,
     SetFlySpeed,
     SetMovementSpeed,
@@ -1672,6 +1693,9 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
         GameUiAction::SetXrTurnMode(_) => ClientExperienceActionKind::SetXrTurnMode,
         GameUiAction::CycleFramePacing => ClientExperienceActionKind::CycleFramePacing,
         GameUiAction::CycleFpsCap => ClientExperienceActionKind::CycleFpsCap,
+        GameUiAction::SetWorldRenderScaleMode(_) => {
+            ClientExperienceActionKind::SetWorldRenderScaleMode
+        }
         GameUiAction::SetRenderDistance(_) => ClientExperienceActionKind::SetRenderDistance,
         GameUiAction::SetFlySpeed(_) => ClientExperienceActionKind::SetFlySpeed,
         GameUiAction::SetMovementSpeed(_) => ClientExperienceActionKind::SetMovementSpeed,
@@ -1739,6 +1763,7 @@ pub const fn classify_client_experience_action_kind(
         | ClientExperienceActionKind::SetXrTurnMode
         | ClientExperienceActionKind::CycleFramePacing
         | ClientExperienceActionKind::CycleFpsCap
+        | ClientExperienceActionKind::SetWorldRenderScaleMode
         | ClientExperienceActionKind::SetRenderDistance
         | ClientExperienceActionKind::SetTouchLookSensitivity
         | ClientExperienceActionKind::SetTouchControlsMode
@@ -2005,6 +2030,7 @@ mod tests {
             GameUiAction::SetXrTurnMode(GameXrTurnMode::Snap30),
             GameUiAction::CycleFramePacing,
             GameUiAction::CycleFpsCap,
+            GameUiAction::SetWorldRenderScaleMode(GameWorldRenderScaleMode::Automatic),
             GameUiAction::SetRenderDistance(8),
             GameUiAction::SetFlySpeed(2.0),
             GameUiAction::SetMovementSpeed(2.0),
@@ -2014,7 +2040,7 @@ mod tests {
             GameUiAction::Quit,
         ];
 
-        assert_eq!(samples.len(), 61);
+        assert_eq!(samples.len(), 62);
         for sample in samples {
             let _ = classify_game_ui_action(sample);
         }

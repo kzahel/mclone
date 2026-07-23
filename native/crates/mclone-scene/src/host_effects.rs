@@ -8,7 +8,7 @@ use mclone_app_runtime::far_lod::FarLodDetailMode;
 use mclone_input::TouchControlsMode;
 use mclone_ui::{
     GameCollisionMode, GameMovementMode, GamePlayerModel, GameSimulationCadence,
-    GameTravelAssistMode, GameTurnMode, GameXrTurnMode, StatusOverlay,
+    GameTravelAssistMode, GameTurnMode, GameWorldRenderScaleMode, GameXrTurnMode, StatusOverlay,
 };
 
 /// Platform hooks emitted by shared client-experience policy.
@@ -20,6 +20,7 @@ pub trait HostEffects {
     fn request_mouse_lock(&mut self, requested: bool) -> Result<()>;
     fn cycle_frame_pacing(&mut self) -> Result<()>;
     fn cycle_fps_cap(&mut self) -> Result<()>;
+    fn set_world_render_scale_mode(&mut self, mode: GameWorldRenderScaleMode) -> Result<()>;
     fn set_touch_controls_mode(&mut self, mode: TouchControlsMode) -> Result<()>;
     fn quit_to_title(&mut self) -> Result<()>;
     fn exit(&mut self) -> Result<()>;
@@ -121,6 +122,9 @@ where
             }
             ClientExperienceSettingEffect::CycleFramePacing => host.cycle_frame_pacing()?,
             ClientExperienceSettingEffect::CycleFpsCap => host.cycle_fps_cap()?,
+            ClientExperienceSettingEffect::SetWorldRenderScaleMode(mode) => {
+                host.set_world_render_scale_mode(mode)?;
+            }
             ClientExperienceSettingEffect::SetRenderDistance(render_distance) => {
                 target.set_render_distance(render_distance)?;
             }
@@ -244,6 +248,7 @@ mod tests {
         record_method!(request_mouse_lock(requested: bool));
         record_method!(cycle_frame_pacing());
         record_method!(cycle_fps_cap());
+        record_method!(set_world_render_scale_mode(mode: GameWorldRenderScaleMode));
         record_method!(set_touch_controls_mode(mode: TouchControlsMode));
         record_method!(quit_to_title());
         record_method!(exit());
@@ -258,6 +263,9 @@ mod tests {
                 ClientExperienceSettingEffect::SetFullbright(true),
                 ClientExperienceSettingEffect::SetTravelAssistMode(GameTravelAssistMode::Blink),
                 ClientExperienceSettingEffect::CycleFramePacing,
+                ClientExperienceSettingEffect::SetWorldRenderScaleMode(
+                    GameWorldRenderScaleMode::ThreeQuarters,
+                ),
                 ClientExperienceSettingEffect::SetTouchControlsMode(TouchControlsMode::On),
             ],
             ..ClientExperienceSettingsEffects::default()
@@ -270,7 +278,11 @@ mod tests {
         );
         assert_eq!(
             host.calls,
-            vec!["cycle_frame_pacing", "set_touch_controls_mode"]
+            vec![
+                "cycle_frame_pacing",
+                "set_world_render_scale_mode",
+                "set_touch_controls_mode",
+            ]
         );
         assert!(target.status.as_ref().is_some_and(|status| !status.visible));
     }

@@ -1907,6 +1907,7 @@ pub enum GameUiAction {
     SetXrTurnMode(GameXrTurnMode),
     CycleFramePacing,
     CycleFpsCap,
+    SetWorldRenderScaleMode(GameWorldRenderScaleMode),
     SetRenderDistance(i32),
     SetFlySpeed(f32),
     SetMovementSpeed(f32),
@@ -1914,6 +1915,89 @@ pub enum GameUiAction {
     SetTouchControlsMode(TouchControlsMode),
     SetServerSimulationCadence(GameSimulationCadence),
     Quit,
+}
+
+/// Player-facing policy for the internal flat world render target.
+///
+/// `Automatic` lets the active platform profile choose a scale for the current
+/// output (for example the SteamOS 1080p-class world budget). Fixed modes are
+/// explicit overrides. Screen-space UI remains at the output resolution.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameWorldRenderScaleMode {
+    #[default]
+    Automatic,
+    Half,
+    TwoThirds,
+    ThreeQuarters,
+    Native,
+}
+
+impl GameWorldRenderScaleMode {
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Automatic => Self::Half,
+            Self::Half => Self::TwoThirds,
+            Self::TwoThirds => Self::ThreeQuarters,
+            Self::ThreeQuarters => Self::Native,
+            Self::Native => Self::Automatic,
+        }
+    }
+
+    pub const fn fixed_scale(self) -> Option<f32> {
+        match self {
+            Self::Automatic => None,
+            Self::Half => Some(0.5),
+            Self::TwoThirds => Some(2.0 / 3.0),
+            Self::ThreeQuarters => Some(0.75),
+            Self::Native => Some(1.0),
+        }
+    }
+
+    pub fn label(self, effective_scale: f32) -> String {
+        match self {
+            Self::Automatic => format!("Auto ({:.0}%)", effective_scale * 100.0),
+            Self::Half => "50%".to_owned(),
+            Self::TwoThirds => "67%".to_owned(),
+            Self::ThreeQuarters => "75%".to_owned(),
+            Self::Native => "100%".to_owned(),
+        }
+    }
+}
+
+/// Current flat presentation facts projected into the shared settings UI.
+///
+/// Platform hosts own output/swapchain configuration; the UI only displays the
+/// committed facts and emits a typed world-scale preference.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GameFlatPresentationState {
+    pub output_size: [u32; 2],
+    pub world_size: [u32; 2],
+    pub world_render_scale: f32,
+    pub world_render_scale_mode: GameWorldRenderScaleMode,
+}
+
+impl GameFlatPresentationState {
+    pub const fn new(
+        output_size: [u32; 2],
+        world_size: [u32; 2],
+        world_render_scale: f32,
+        world_render_scale_mode: GameWorldRenderScaleMode,
+    ) -> Self {
+        Self {
+            output_size,
+            world_size,
+            world_render_scale,
+            world_render_scale_mode,
+        }
+    }
+
+    pub fn output_size_label(self) -> String {
+        format!("{} x {}", self.output_size[0], self.output_size[1])
+    }
+
+    pub fn world_size_label(self) -> String {
+        format!("{} x {}", self.world_size[0], self.world_size[1])
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -2048,6 +2132,8 @@ pub struct GameUiRenderState {
     pub max_movement_speed_multiplier: f32,
     pub frame_pacing_mode: GameFramePacingMode,
     pub fps_cap: u32,
+    /// `None` when this projection does not own a conventional flat output.
+    pub flat_presentation: Option<GameFlatPresentationState>,
     pub server_cadence: Option<GameSimulationCadence>,
     pub touch_controls_mode: Option<TouchControlsMode>,
     pub touch_settings: Option<GameTouchSettings>,
@@ -2091,6 +2177,7 @@ impl Default for GameUiRenderState {
             max_movement_speed_multiplier: 8.0,
             frame_pacing_mode: GameFramePacingMode::Vsync,
             fps_cap: 120,
+            flat_presentation: None,
             server_cadence: None,
             touch_controls_mode: None,
             touch_settings: None,

@@ -50,6 +50,7 @@ pub struct MonoUiContext {
     pub pacing_debug: FramePacingDebugStats,
     pub frame_timing: FrameTimingStats,
     pub render_scale: f32,
+    pub flat_presentation: Option<GameFlatPresentationState>,
     pub hud_visible: bool,
     pub touch_overlay: TouchOverlay,
     pub touch_controls_mode: Option<TouchControlsMode>,
@@ -75,6 +76,7 @@ impl Default for MonoUiContext {
             pacing_debug: FramePacingDebugStats::default(),
             frame_timing: FrameTimingStats::default(),
             render_scale: 1.0,
+            flat_presentation: None,
             hud_visible: true,
             touch_overlay: TouchOverlay::hidden(),
             touch_controls_mode: None,
@@ -1166,6 +1168,13 @@ impl McloneSceneHost {
         navigation: mclone_ui::GuiNavigation,
     ) -> (bool, Option<GameUiAction>) {
         self.ui.navigate(navigation)
+    }
+
+    pub fn mono_ui_scroll(&mut self, direction: MouseWheelDirection) -> bool {
+        self.ui.scroll_by(match direction {
+            MouseWheelDirection::Up => -12.0,
+            MouseWheelDirection::Down => 12.0,
+        })
     }
 
     pub fn mono_ui_pointer_down(&mut self, point: Point) -> bool {
@@ -2529,6 +2538,7 @@ impl McloneSceneHost {
             }
         };
         state.fps_cap = context.frame_pacing.fps_cap;
+        state.flat_presentation = context.flat_presentation;
         state.touch_controls_mode = context.touch_controls_mode;
         state.touch_settings = context.touch_settings;
         state.auxiliary_split_mode = Some(context.auxiliary_split_mode);

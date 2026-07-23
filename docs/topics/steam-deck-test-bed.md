@@ -165,12 +165,38 @@ target. Ultrawide and 16:10 outputs derive both world dimensions from the
 actual output rather than forcing 16:9. The launch profile must not be treated
 as proof that the built-in panel is active.
 
-The first profile slice intentionally fixes screen-space UI at native output
-resolution. A future persisted display preference may offer native-output UI
-versus world-target UI; the latter is a valid performance/aesthetic choice,
-but should be explicit rather than an invisible consequence of lowering
-world resolution. Graphics/display preferences must remain machine-local and
-must not be cloud-synchronized across dissimilar displays.
+The shared Graphics page now makes that presentation contract visible:
+
+- `Output Resolution` reports the current compositor/swapchain extent;
+- `World Resolution` reports the actual internal 3D target;
+- `World Scale` cycles through `Auto`, 50%, 67%, 75%, and 100%;
+- `Auto` retains the launch profile's dock-aware policy, while a fixed
+  percentage is an explicit runtime override and remains fixed across resize
+  and dock/undock events; and
+- the screen-space UI remains native-output resolution in every mode.
+
+The fixed override is intentionally launch-scoped in this slice. Relaunching
+returns to `Auto`; persisting it requires the shared typed graphics-preference
+codec rather than a desktop-app-only file. Graphics/display preferences must
+remain machine-local and must not be cloud-synchronized across dissimilar
+displays.
+
+Output resolution is factual/read-only for now. A real selector must enumerate
+platform video modes, distinguish Gamescope's game-resolution envelope from a
+desktop monitor mode, preserve aspect-ratio choices, and provide a timed
+apply/revert path. Do not turn the read-only row into a window-size control and
+call that display-mode switching.
+
+The Graphics page also retains the already-live render distance, section
+occlusion, Far LOD/detail/range, frame pacing, and FPS cap controls. Settings
+categories and Controls Help now use a shared clipped scroll region: wheel or
+trackpad input scrolls it, controller focus brings hidden rows into view,
+headings and Back/Done remain fixed, and compact widths switch from two columns
+to one. Direct touch-drag and draggable-scrollbar interaction remain future
+input work; Deck controller focus and the mouse-emulating trackpads are covered.
+Future detailed settings should be added only with real runtime ownership and
+effects (for example particles, clouds, entity distance, mipmaps, UI scale,
+ambient occlusion, and fullscreen/video modes), not as cosmetic menu rows.
 
 `smoke` temporarily registers a bounded command that:
 
@@ -291,6 +317,21 @@ Initial acceptance should cover:
 Use an ordinary release build for representative performance. Use a separate
 `perf-diagnostics` build only when its instrumentation is required, and do not
 compare its absolute numbers directly with the production-shaped release.
+
+Local validation for the graphics-menu/scroll slice on 2026-07-23:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-ui
+  -p mclone-app-runtime -p mclone-scene -p mclone-native-client` passed;
+- an inspected 1280x800 offscreen `options-graphics` capture showed all ten
+  rows, native/output and world sizes, the live scale control, and fixed Done
+  footer without overlap; and
+- an inspected 320x140 compact capture showed the responsive one-column list,
+  clipped content, fixed footer, and visible scrollbar. A focused unit test
+  also proves that controller navigation scrolls the FPS-cap row into view.
+
+This is shared/local rendered evidence. The menu-driven scale change and
+trackpad/controller scrolling still need one Gaming Mode pass on the physical
+Deck before being called device-accepted.
 
 ## 2026-07-23 Device Evidence
 

@@ -13,7 +13,9 @@ use mclone_input::{
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render::color_profile::DEFAULT_RENDER_SCALE;
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
-use mclone_ui::{GameUiAction, GuiScale, Point};
+use mclone_ui::{
+    GameFlatPresentationState, GameUiAction, GameWorldRenderScaleMode, GuiScale, Point,
+};
 use serde_json::{Value, json};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
@@ -44,7 +46,6 @@ const FRAME_PIPELINE_OVERLAY_KEY: KeyCode = KeyCode::F6;
 const DEBUG_PHYSICS_CUBE_SHOOT_KEY: KeyCode = KeyCode::F7;
 const RENDER_RESOURCE_REBUILD_KEY: KeyCode = KeyCode::F8;
 const RENDER_SCALE_REBUILD_KEY: KeyCode = KeyCode::F9;
-const DESKTOP_RENDER_SCALE_PRESETS: [f32; 4] = [DEFAULT_RENDER_SCALE, 0.5, 0.75, 1.5];
 const RENDER_SCALE_PRESET_EPSILON: f32 = 0.000_1;
 const STEAMOS_WORLD_RENDER_MAX_HEIGHT: u32 = 1080;
 const STEAMOS_WORLD_RENDER_MAX_PIXELS: u64 = 1920 * 1080;
@@ -100,16 +101,6 @@ pub(crate) fn run_window(
     Ok(())
 }
 
-fn next_desktop_render_scale(current: f32) -> f32 {
-    let Some(index) = DESKTOP_RENDER_SCALE_PRESETS
-        .iter()
-        .position(|scale| (current - *scale).abs() <= RENDER_SCALE_PRESET_EPSILON)
-    else {
-        return DEFAULT_RENDER_SCALE;
-    };
-    DESKTOP_RENDER_SCALE_PRESETS[(index + 1) % DESKTOP_RENDER_SCALE_PRESETS.len()]
-}
-
 fn automatic_world_render_scale(
     profile: WindowPlatformProfile,
     output_size: [u32; 2],
@@ -128,6 +119,16 @@ fn automatic_world_render_scale(
             .min(f64::from(DEFAULT_RENDER_SCALE))
             .max(f64::from(MIN_FLAT_RENDER_SCALE)) as f32,
     )
+}
+
+fn world_render_scale(
+    profile: WindowPlatformProfile,
+    output_size: [u32; 2],
+    mode: GameWorldRenderScaleMode,
+) -> f32 {
+    mode.fixed_scale().unwrap_or_else(|| {
+        automatic_world_render_scale(profile, output_size).unwrap_or(DEFAULT_RENDER_SCALE)
+    })
 }
 
 #[derive(Clone, Debug)]
@@ -228,6 +229,7 @@ struct ChunkApp {
     input_preferences: InputPreferences,
     controller_preferences: ControllerInputPreferences,
     frame_pacing: FramePacing,
+    world_render_scale_mode: GameWorldRenderScaleMode,
     window: Option<Arc<Window>>,
     surface: Option<NativeSurfaceContext>,
     frame_timing: FrameTimingStats,
@@ -682,6 +684,7 @@ impl ChunkApp {
             input_preferences,
             controller_preferences: client_input_preferences.controller,
             frame_pacing: FramePacing::default(),
+            world_render_scale_mode: GameWorldRenderScaleMode::Automatic,
             window: None,
             surface: None,
             frame_timing: FrameTimingStats::default(),
@@ -769,16 +772,15 @@ impl ChunkApp {
         fallback
     }
 
-    fn apply_automatic_world_render_scale(&mut self) {
+    fn apply_world_render_scale(&mut self) {
         let Some(surface) = &mut self.surface else {
             return;
         };
-        let Some(render_scale) = automatic_world_render_scale(
+        let render_scale = world_render_scale(
             self.window_options.platform_profile,
             [surface.config.width, surface.config.height],
-        ) else {
-            return;
-        };
+            self.world_render_scale_mode,
+        );
         if (surface.render_config.render_scale - render_scale).abs() <= RENDER_SCALE_PRESET_EPSILON
         {
             return;
@@ -796,8 +798,9 @@ impl ChunkApp {
             surface.render_config.render_scale,
         );
         log::info!(
-            "automatic {} world render scale {:.3}: output={}x{} world={}x{} native_ui=true",
+            "{} world render scale mode={:?} scale={:.3}: output={}x{} world={}x{} native_ui=true",
             self.window_options.platform_profile.label(),
+            self.world_render_scale_mode,
             surface.render_config.render_scale,
             surface.config.width,
             surface.config.height,
@@ -1103,6 +1106,10 @@ impl ChunkApp {
             self.frame_pacing.cycle_fps_cap();
             self.next_redraw_at = None;
         }
+        if let Some(mode) = outcome.world_render_scale_mode {
+            self.world_render_scale_mode = mode;
+            self.apply_world_render_scale();
+        }
         if let Some(mode) = outcome.touch_controls_mode {
             self.input_preferences.touch_controls = mode;
         }
@@ -1161,22 +1168,9 @@ impl ChunkApp {
     }
 
     fn trigger_render_scale_rebuild(&mut self, event_loop: &ActiveEventLoop) {
-        let Some(current_config) = self.surface.as_ref().map(|surface| surface.render_config)
-        else {
-            return;
-        };
-        let next_scale = next_desktop_render_scale(current_config.render_scale);
-        let next_config = current_config.with_render_scale(next_scale);
-        if let Some(surface) = &mut self.surface {
-            surface.render_config = next_config;
-            if let Some(driver) = &mut self.scene_driver {
-                driver.set_render_config(
-                    &surface.device,
-                    [surface.config.width, surface.config.height],
-                    next_config,
-                );
-            }
-        }
+        self.world_render_scale_mode = self.world_render_scale_mode.next();
+        self.apply_world_render_scale();
+        let next_scale = self.current_render_scale();
         let result = load_asset_source()
             .context("failed to load assets for render-scale rebuild")
             .and_then(|asset_source| self.rebuild_render_resources(&asset_source));
@@ -1266,12 +1260,12 @@ impl ApplicationHandler for ChunkApp {
                 return;
             }
         };
-        if let Some(render_scale) = automatic_world_render_scale(
+        let render_scale = world_render_scale(
             self.window_options.platform_profile,
             [surface.config.width, surface.config.height],
-        ) {
-            surface.render_config = surface.render_config.with_render_scale(render_scale);
-        }
+            self.world_render_scale_mode,
+        );
+        surface.render_config = surface.render_config.with_render_scale(render_scale);
         let initial_world_size = scaled_frame_size(
             [surface.config.width, surface.config.height],
             surface.render_config.render_scale,
@@ -1359,7 +1353,7 @@ impl ApplicationHandler for ChunkApp {
                 if let Some(surface) = &mut self.surface {
                     surface.resize(size);
                 }
-                self.apply_automatic_world_render_scale();
+                self.apply_world_render_scale();
                 if let Some(surface) = &self.surface {
                     if let Some(driver) = &mut self.scene_driver {
                         driver.resize(
@@ -1609,6 +1603,15 @@ impl ApplicationHandler for ChunkApp {
                     event_loop.exit();
                     return;
                 }
+                let flat_presentation = self.surface.as_ref().map(|surface| {
+                    let output_size = [surface.config.width, surface.config.height];
+                    GameFlatPresentationState::new(
+                        output_size,
+                        scaled_frame_size(output_size, surface.render_config.render_scale),
+                        surface.render_config.render_scale,
+                        self.world_render_scale_mode,
+                    )
+                });
                 let ui_context = MonoUiContext {
                     resolved_input: self
                         .flat_input
@@ -1618,6 +1621,7 @@ impl ApplicationHandler for ChunkApp {
                     pacing_debug: self.frame_pacing.debug_stats(),
                     frame_timing: self.frame_timing,
                     render_scale: self.current_render_scale(),
+                    flat_presentation,
                     hud_visible: true,
                     ..MonoUiContext::default()
                 };

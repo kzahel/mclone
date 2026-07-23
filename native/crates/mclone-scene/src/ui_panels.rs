@@ -639,6 +639,7 @@ impl McloneSceneHost {
                 .display_refresh_hz
                 .map(|hz| hz.round().clamp(1.0, 999.0) as u32)
                 .unwrap_or(XR_UI_FPS_CAP),
+            flat_presentation: None,
             server_cadence: None,
             touch_controls_mode: None,
             touch_settings: None,
