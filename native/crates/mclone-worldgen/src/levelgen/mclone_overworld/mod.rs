@@ -12,10 +12,14 @@ pub use biomes::{
     MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_RIVER_BIOME_ID,
     MCLONE_OVERWORLD_SAVANNA_BIOME_ID, MCLONE_OVERWORLD_SNOWY_MOUNTAINS_BIOME_ID,
     MCLONE_OVERWORLD_STEPPE_MAX_MOISTURE, MCLONE_OVERWORLD_STEPPE_MIN_TEMPERATURE,
-    MCLONE_OVERWORLD_TAIGA_BIOME_ID, MCLONE_OVERWORLD_WOODED_MAX_EXPOSURE,
-    MCLONE_OVERWORLD_WOODED_MAX_SLOPE, MCLONE_OVERWORLD_WOODED_UPLAND_MIN_Y,
-    McloneOverworldBiomeRecipe, mclone_overworld_biome_id, mclone_overworld_biome_id_for_sample,
+    MCLONE_OVERWORLD_STEPPE_SHOULDER_MAX_MOISTURE,
+    MCLONE_OVERWORLD_STEPPE_SHOULDER_MIN_SUITABILITY,
+    MCLONE_OVERWORLD_STEPPE_SHOULDER_MIN_TEMPERATURE, MCLONE_OVERWORLD_TAIGA_BIOME_ID,
+    MCLONE_OVERWORLD_WOODED_MAX_EXPOSURE, MCLONE_OVERWORLD_WOODED_MAX_SLOPE,
+    MCLONE_OVERWORLD_WOODED_UPLAND_MIN_Y, McloneOverworldBiomeRecipe, McloneOverworldSteppeBand,
+    mclone_overworld_biome_id, mclone_overworld_biome_id_for_sample,
     mclone_overworld_biome_id_with_topology, mclone_overworld_biome_recipe,
+    mclone_overworld_steppe_band, mclone_overworld_steppe_suitability,
 };
 pub use decoration::MCLONE_OVERWORLD_DECORATION_REVISION;
 pub use feature_batch::{

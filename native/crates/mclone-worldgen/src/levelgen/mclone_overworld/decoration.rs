@@ -20,11 +20,11 @@ use crate::placement::{ConfiguredDecorator, HeightmapType};
 use super::biomes::{
     MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_SAVANNA_BIOME_ID,
     MCLONE_OVERWORLD_SNOWY_MOUNTAINS_BIOME_ID, MCLONE_OVERWORLD_TAIGA_BIOME_ID,
-    mclone_overworld_biome_id_with_topology,
+    McloneOverworldSteppeBand, mclone_overworld_biome_id_for_sample, mclone_overworld_steppe_band,
 };
-use super::fields::McloneOverworldSamplingTopology;
+use super::fields::{McloneOverworldSampler, McloneOverworldSamplingTopology};
 
-pub const MCLONE_OVERWORLD_DECORATION_REVISION: &str = "mclone-overworld-v1-decoration-10";
+pub const MCLONE_OVERWORLD_DECORATION_REVISION: &str = "mclone-overworld-v1-decoration-11";
 
 const MCLONE_OVERWORLD_DECORATION_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6465_6331);
 
@@ -43,8 +43,13 @@ pub(super) fn decorate_mclone_overworld_center_with_topology(
 ) {
     let min_x = chunk_min_block_coord(region.decoration_chunk_x());
     let min_z = chunk_min_block_coord(region.decoration_chunk_z());
-    let biome_id = mclone_overworld_biome_id_with_topology(seed, topology, min_x + 8, min_z + 8);
-    let features = feature_table(biome_id);
+    let landform = McloneOverworldSampler::new_with_topology(seed, topology)
+        .sample_landform(min_x + 8, min_z + 8);
+    let biome_id = mclone_overworld_biome_id_for_sample(landform);
+    let features = feature_table(
+        biome_id,
+        mclone_overworld_steppe_band(landform.terrain.climate),
+    );
     if features.is_empty() {
         return;
     }
@@ -56,12 +61,19 @@ pub(super) fn decorate_mclone_overworld_center_with_topology(
     );
 }
 
-fn feature_table(biome_id: i32) -> &'static [PlacedFeature] {
+fn feature_table(
+    biome_id: i32,
+    steppe_band: McloneOverworldSteppeBand,
+) -> &'static [PlacedFeature] {
     match biome_id {
         PLAINS_BIOME_ID => open_lowland_features(),
         MCLONE_OVERWORLD_FOREST_BIOME_ID => wooded_upland_features(),
         MCLONE_OVERWORLD_TAIGA_BIOME_ID => cool_wet_conifer_features(),
-        MCLONE_OVERWORLD_SAVANNA_BIOME_ID => warm_dry_steppe_features(),
+        MCLONE_OVERWORLD_SAVANNA_BIOME_ID => match steppe_band {
+            McloneOverworldSteppeBand::Core => warm_dry_steppe_core_features(),
+            McloneOverworldSteppeBand::Shoulder => warm_dry_steppe_shoulder_features(),
+            McloneOverworldSteppeBand::Outside => &[],
+        },
         MCLONE_OVERWORLD_SNOWY_MOUNTAINS_BIOME_ID => &[],
         _ => &[],
     }
@@ -110,16 +122,31 @@ fn cool_wet_conifer_features() -> &'static [PlacedFeature] {
         .as_slice()
 }
 
-fn warm_dry_steppe_features() -> &'static [PlacedFeature] {
+fn warm_dry_steppe_core_features() -> &'static [PlacedFeature] {
     static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
     FEATURES
         .get_or_init(|| {
             vec![
-                acacia_tree_feature(),
-                tall_grass_patch(),
+                acacia_tree_feature(1, 0.25),
+                tall_grass_patch(2),
                 grass_patch(GRASS, 5),
                 occasional_flower_patch(DANDELION, 5),
                 occasional_flower_patch(POPPY, 8),
+            ]
+        })
+        .as_slice()
+}
+
+fn warm_dry_steppe_shoulder_features() -> &'static [PlacedFeature] {
+    static FEATURES: OnceLock<Vec<PlacedFeature>> = OnceLock::new();
+    FEATURES
+        .get_or_init(|| {
+            vec![
+                acacia_tree_feature(0, 0.45),
+                tall_grass_patch(1),
+                grass_patch(GRASS, 5),
+                occasional_flower_patch(DANDELION, 6),
+                occasional_flower_patch(POPPY, 9),
             ]
         })
         .as_slice()
@@ -139,11 +166,11 @@ fn conifer_tree_feature() -> PlacedFeature {
     )
 }
 
-fn acacia_tree_feature() -> PlacedFeature {
+fn acacia_tree_feature(count: i32, extra_chance: f32) -> PlacedFeature {
     PlacedFeature::new(
         DecorationStep::VegetalDecoration,
         ConfiguredFeature::tree(TreeConfiguration::acacia()),
-        tree_decorators(1, 0.25, 1),
+        tree_decorators(count, extra_chance, 1),
     )
 }
 
@@ -156,7 +183,7 @@ fn tree_decorators(count: i32, extra_chance: f32, extra_count: i32) -> Vec<Confi
     ]
 }
 
-fn tall_grass_patch() -> PlacedFeature {
+fn tall_grass_patch(count: i32) -> PlacedFeature {
     PlacedFeature::new(
         DecorationStep::VegetalDecoration,
         ConfiguredFeature::random_patch(RandomPatchConfiguration {
@@ -175,7 +202,7 @@ fn tall_grass_patch() -> PlacedFeature {
             place_on: &[GRASS_BLOCK, DIRT],
         }),
         vec![
-            ConfiguredDecorator::count(2),
+            ConfiguredDecorator::count(count),
             ConfiguredDecorator::square(),
             ConfiguredDecorator::heightmap(HeightmapType::MotionBlocking),
             ConfiguredDecorator::spread_32_above(),
@@ -250,12 +277,57 @@ mod tests {
 
     #[test]
     fn mclone_tables_own_temperate_conifer_and_steppe_language() {
-        assert_eq!(feature_table(PLAINS_BIOME_ID).len(), 4);
-        assert_eq!(feature_table(MCLONE_OVERWORLD_FOREST_BIOME_ID).len(), 4);
-        assert_eq!(feature_table(MCLONE_OVERWORLD_TAIGA_BIOME_ID).len(), 5);
-        assert_eq!(feature_table(MCLONE_OVERWORLD_SAVANNA_BIOME_ID).len(), 5);
-        assert!(feature_table(MCLONE_OVERWORLD_SNOWY_MOUNTAINS_BIOME_ID).is_empty());
-        assert!(feature_table(OCEAN_BIOME_ID).is_empty());
-        assert!(feature_table(BEACH_BIOME_ID).is_empty());
+        assert_eq!(
+            feature_table(PLAINS_BIOME_ID, McloneOverworldSteppeBand::Outside).len(),
+            4
+        );
+        assert_eq!(
+            feature_table(
+                MCLONE_OVERWORLD_FOREST_BIOME_ID,
+                McloneOverworldSteppeBand::Outside,
+            )
+            .len(),
+            4
+        );
+        assert_eq!(
+            feature_table(
+                MCLONE_OVERWORLD_TAIGA_BIOME_ID,
+                McloneOverworldSteppeBand::Outside,
+            )
+            .len(),
+            5
+        );
+        assert_eq!(
+            feature_table(
+                MCLONE_OVERWORLD_SAVANNA_BIOME_ID,
+                McloneOverworldSteppeBand::Core,
+            )
+            .len(),
+            5
+        );
+        assert_eq!(
+            feature_table(
+                MCLONE_OVERWORLD_SAVANNA_BIOME_ID,
+                McloneOverworldSteppeBand::Shoulder,
+            )
+            .len(),
+            5
+        );
+        assert!(
+            feature_table(
+                MCLONE_OVERWORLD_SAVANNA_BIOME_ID,
+                McloneOverworldSteppeBand::Outside,
+            )
+            .is_empty()
+        );
+        assert!(
+            feature_table(
+                MCLONE_OVERWORLD_SNOWY_MOUNTAINS_BIOME_ID,
+                McloneOverworldSteppeBand::Outside,
+            )
+            .is_empty()
+        );
+        assert!(feature_table(OCEAN_BIOME_ID, McloneOverworldSteppeBand::Outside).is_empty());
+        assert!(feature_table(BEACH_BIOME_ID, McloneOverworldSteppeBand::Outside).is_empty());
     }
 }

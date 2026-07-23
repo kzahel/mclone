@@ -18,6 +18,36 @@ pub const MCLONE_OVERWORLD_CONIFER_MAX_TEMPERATURE: f64 = -0.12;
 pub const MCLONE_OVERWORLD_CONIFER_MIN_MOISTURE: f64 = -0.05;
 pub const MCLONE_OVERWORLD_STEPPE_MIN_TEMPERATURE: f64 = 0.18;
 pub const MCLONE_OVERWORLD_STEPPE_MAX_MOISTURE: f64 = -0.10;
+pub const MCLONE_OVERWORLD_STEPPE_SHOULDER_MIN_TEMPERATURE: f64 = 0.08;
+pub const MCLONE_OVERWORLD_STEPPE_SHOULDER_MAX_MOISTURE: f64 = 0.04;
+pub const MCLONE_OVERWORLD_STEPPE_SHOULDER_MIN_SUITABILITY: f64 = 0.38;
+
+const MCLONE_OVERWORLD_STEPPE_SUITABILITY_TEMPERATURE_START: f64 = 0.04;
+const MCLONE_OVERWORLD_STEPPE_SUITABILITY_TEMPERATURE_RANGE: f64 = 0.32;
+const MCLONE_OVERWORLD_STEPPE_SUITABILITY_MOISTURE_START: f64 = 0.08;
+const MCLONE_OVERWORLD_STEPPE_SUITABILITY_MOISTURE_RANGE: f64 = 0.32;
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum McloneOverworldSteppeBand {
+    #[default]
+    Outside,
+    Shoulder,
+    Core,
+}
+
+impl McloneOverworldSteppeBand {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Outside => "outside",
+            Self::Shoulder => "shoulder",
+            Self::Core => "core",
+        }
+    }
+
+    pub const fn is_steppe(self) -> bool {
+        !matches!(self, Self::Outside)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum McloneOverworldBiomeRecipe {
@@ -79,6 +109,36 @@ pub fn mclone_overworld_biome_id_for_sample(sample: McloneOverworldLandformSampl
     }
 }
 
+pub fn mclone_overworld_steppe_suitability(
+    climate: super::fields::McloneOverworldClimateSample,
+) -> f64 {
+    let warmth = ((climate.temperature - MCLONE_OVERWORLD_STEPPE_SUITABILITY_TEMPERATURE_START)
+        / MCLONE_OVERWORLD_STEPPE_SUITABILITY_TEMPERATURE_RANGE)
+        .clamp(0.0, 1.0);
+    let dryness = ((MCLONE_OVERWORLD_STEPPE_SUITABILITY_MOISTURE_START - climate.moisture)
+        / MCLONE_OVERWORLD_STEPPE_SUITABILITY_MOISTURE_RANGE)
+        .clamp(0.0, 1.0);
+    (warmth * dryness).sqrt()
+}
+
+pub fn mclone_overworld_steppe_band(
+    climate: super::fields::McloneOverworldClimateSample,
+) -> McloneOverworldSteppeBand {
+    if climate.temperature >= MCLONE_OVERWORLD_STEPPE_MIN_TEMPERATURE
+        && climate.moisture <= MCLONE_OVERWORLD_STEPPE_MAX_MOISTURE
+    {
+        McloneOverworldSteppeBand::Core
+    } else if climate.temperature >= MCLONE_OVERWORLD_STEPPE_SHOULDER_MIN_TEMPERATURE
+        && climate.moisture <= MCLONE_OVERWORLD_STEPPE_SHOULDER_MAX_MOISTURE
+        && mclone_overworld_steppe_suitability(climate)
+            >= MCLONE_OVERWORLD_STEPPE_SHOULDER_MIN_SUITABILITY
+    {
+        McloneOverworldSteppeBand::Shoulder
+    } else {
+        McloneOverworldSteppeBand::Outside
+    }
+}
+
 pub fn mclone_overworld_biome_recipe(
     sample: McloneOverworldLandformSample,
 ) -> McloneOverworldBiomeRecipe {
@@ -105,9 +165,7 @@ pub fn mclone_overworld_biome_recipe(
             && terrain.climate.moisture >= MCLONE_OVERWORLD_CONIFER_MIN_MOISTURE
         {
             McloneOverworldBiomeRecipe::CoolWetConifer
-        } else if terrain.climate.temperature >= MCLONE_OVERWORLD_STEPPE_MIN_TEMPERATURE
-            && terrain.climate.moisture <= MCLONE_OVERWORLD_STEPPE_MAX_MOISTURE
-        {
+        } else if mclone_overworld_steppe_band(terrain.climate).is_steppe() {
             McloneOverworldBiomeRecipe::WarmDrySteppe
         } else if terrain.surface_y >= MCLONE_OVERWORLD_WOODED_UPLAND_MIN_Y
             && !terrain.is_mountain_valley()
@@ -238,6 +296,52 @@ mod tests {
             mclone_overworld_biome_recipe(landform),
             McloneOverworldBiomeRecipe::Ocean
         );
+    }
+
+    #[test]
+    fn warm_dry_suitability_adds_a_bounded_shoulder_around_the_old_core() {
+        let old_core = McloneOverworldClimateSample {
+            temperature: MCLONE_OVERWORLD_STEPPE_MIN_TEMPERATURE,
+            moisture: MCLONE_OVERWORLD_STEPPE_MAX_MOISTURE,
+        };
+        assert_eq!(
+            mclone_overworld_steppe_band(old_core),
+            McloneOverworldSteppeBand::Core
+        );
+
+        let warm_shoulder = McloneOverworldClimateSample {
+            temperature: 0.25,
+            moisture: 0.0,
+        };
+        let dry_shoulder = McloneOverworldClimateSample {
+            temperature: 0.12,
+            moisture: -0.20,
+        };
+        assert_eq!(
+            mclone_overworld_steppe_band(warm_shoulder),
+            McloneOverworldSteppeBand::Shoulder
+        );
+        assert_eq!(
+            mclone_overworld_steppe_band(dry_shoulder),
+            McloneOverworldSteppeBand::Shoulder
+        );
+
+        for outside in [
+            McloneOverworldClimateSample {
+                temperature: 0.07,
+                moisture: -0.40,
+            },
+            McloneOverworldClimateSample {
+                temperature: 0.40,
+                moisture: 0.05,
+            },
+            McloneOverworldClimateSample::TEMPERATE,
+        ] {
+            assert_eq!(
+                mclone_overworld_steppe_band(outside),
+                McloneOverworldSteppeBand::Outside
+            );
+        }
     }
 
     #[test]

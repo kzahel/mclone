@@ -1,6 +1,6 @@
 #![recursion_limit = "256"]
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, VecDeque};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -16,12 +16,13 @@ use mclone_worldgen::levelgen::{
     MCLONE_OVERWORLD_SNOWY_MOUNTAINS_BIOME_ID, MCLONE_OVERWORLD_STREAM_REFERENCE_RADIUS_CHUNKS,
     MCLONE_OVERWORLD_TAIGA_BIOME_ID, McloneOverworldBiomeRecipe, McloneOverworldLandformSample,
     McloneOverworldSampleRegion, McloneOverworldSampleRegionRequest, McloneOverworldSampler,
-    McloneOverworldSamplingTopology, McloneOverworldStreamPlan, McloneOverworldStreamPlanAttempt,
-    McloneOverworldStreamPlanner, McloneOverworldStreamRejection, McloneOverworldSurfaceRecipe,
-    McloneOverworldTerrainSample, OCEAN_BIOME_ID, PLAINS_BIOME_ID,
+    McloneOverworldSamplingTopology, McloneOverworldSteppeBand, McloneOverworldStreamPlan,
+    McloneOverworldStreamPlanAttempt, McloneOverworldStreamPlanner, McloneOverworldStreamRejection,
+    McloneOverworldSurfaceRecipe, McloneOverworldTerrainSample, OCEAN_BIOME_ID, PLAINS_BIOME_ID,
     analyze_mclone_overworld_hydraulic_closure, mclone_overworld_biome_id_for_sample,
     mclone_overworld_biome_recipe, mclone_overworld_spawn_chunk,
-    mclone_overworld_spawn_chunk_with_topology, mclone_overworld_surface_recipe,
+    mclone_overworld_spawn_chunk_with_topology, mclone_overworld_steppe_band,
+    mclone_overworld_steppe_suitability, mclone_overworld_surface_recipe,
 };
 
 const DEFAULT_OUTPUT_DIR: &str = "/tmp/mclone-overworld-review";
@@ -92,6 +93,13 @@ fn run() -> Result<()> {
         .collect::<Vec<_>>();
     let landform_elapsed_ms = landform_start.elapsed().as_secs_f64() * 1_000.0;
     let facts = RegionFacts::from_samples(&landforms, request.width, request.depth);
+    let steppe_components = recipe_component_stats(
+        &landforms,
+        request.width,
+        request.depth,
+        request.step,
+        McloneOverworldBiomeRecipe::WarmDrySteppe,
+    );
     let review_sites = select_review_sites(&landforms, request, config.topology);
     let center_sample = sampler.sample_landform(center_x, center_z);
     let spawn_chunk = match config.topology {
@@ -176,6 +184,9 @@ fn run() -> Result<()> {
     let adjusted_temperature_path = config
         .output_dir
         .join(format!("{prefix}-adjusted-temperature.png"));
+    let steppe_suitability_path = config
+        .output_dir
+        .join(format!("{prefix}-steppe-suitability.png"));
     let recipe_path = config
         .output_dir
         .join(format!("{prefix}-climate-recipes.png"));
@@ -214,6 +225,7 @@ fn run() -> Result<()> {
     let temperature = render_map(&region.samples, temperature_color);
     let moisture = render_map(&region.samples, moisture_color);
     let adjusted_temperature = render_landform_map(&landforms, adjusted_temperature_color);
+    let steppe_suitability = render_map(&region.samples, steppe_suitability_color);
     let recipes = render_landform_map(&landforms, biome_recipe_color);
     let biomes = render_landform_map(&landforms, biome_color);
     let surface_recipes = render_landform_map(&landforms, surface_recipe_color);
@@ -348,15 +360,27 @@ fn run() -> Result<()> {
         request.depth,
         &adjusted_temperature,
     )?;
+    save_rgba(
+        &steppe_suitability_path,
+        request.width,
+        request.depth,
+        &steppe_suitability,
+    )?;
     save_rgba(&recipe_path, request.width, request.depth, &recipes)?;
     let climate = combine_maps(
         request.width,
         request.depth,
-        [&temperature, &moisture, &adjusted_temperature, &recipes],
+        [
+            &temperature,
+            &moisture,
+            &adjusted_temperature,
+            &steppe_suitability,
+            &recipes,
+        ],
     );
     save_rgba(
         &climate_path,
-        request.width * 4 + MAP_GAP_PIXELS * 3,
+        request.width * 5 + MAP_GAP_PIXELS * 4,
         request.depth,
         &climate,
     )?;
@@ -399,7 +423,7 @@ fn run() -> Result<()> {
 
     let (commit, dirty) = git_state();
     let receipt = serde_json::json!({
-        "schema": 12,
+        "schema": 13,
         "profile": "mclone-overworld-v1",
         "topology": config.topology.label(),
         "fieldRevision": MCLONE_OVERWORLD_FIELD_REVISION,
@@ -441,6 +465,10 @@ fn run() -> Result<()> {
             "altitudeAdjustedTemperature": [
                 facts.min_adjusted_temperature,
                 facts.max_adjusted_temperature,
+            ],
+            "warmDrySteppeSuitability": [
+                facts.min_steppe_suitability,
+                facts.max_steppe_suitability,
             ],
             "oceanInterior": [facts.min_ocean_interior, facts.max_ocean_interior],
             "shelfBreakInfluence": [facts.min_shelf_break, facts.max_shelf_break],
@@ -495,8 +523,13 @@ fn run() -> Result<()> {
             "snowyAlpine": facts.snowy_alpine_recipe_columns,
             "coolWetConifer": facts.cool_wet_conifer_recipe_columns,
             "warmDrySteppe": facts.warm_dry_steppe_recipe_columns,
+            "warmDrySteppeCore": facts.warm_dry_steppe_core_columns,
+            "warmDrySteppeShoulder": facts.warm_dry_steppe_shoulder_columns,
             "temperateWoodland": facts.temperate_woodland_recipe_columns,
             "temperateMeadow": facts.temperate_meadow_recipe_columns,
+        },
+        "regionalComponents": {
+            "warmDrySteppe": steppe_components,
         },
         "surfaceRecipeCounts": {
             "oceanFloor": facts.ocean_floor_columns,
@@ -573,11 +606,18 @@ fn run() -> Result<()> {
             "mountainDetail": mountain_detail_path,
             "surfaceY": surface_path,
             "baseSurfaceY": base_surface_path,
-            "climateOrder": ["temperature", "moisture", "altitudeAdjustedTemperature", "recipe"],
+            "climateOrder": [
+                "temperature",
+                "moisture",
+                "altitudeAdjustedTemperature",
+                "warmDrySteppeSuitability",
+                "recipe",
+            ],
             "climate": climate_path,
             "temperature": temperature_path,
             "moisture": moisture_path,
             "altitudeAdjustedTemperature": adjusted_temperature_path,
+            "warmDrySteppeSuitability": steppe_suitability_path,
             "climateRecipes": recipe_path,
             "bathymetryOrder": ["waterDepth", "shelfBreak", "oceanBasin", "seabedRelief"],
             "bathymetry": bathymetry_path,
@@ -766,6 +806,18 @@ fn select_review_sites(
         request.depth,
         McloneOverworldBiomeRecipe::WarmDrySteppe,
     );
+    let warm_dry_steppe_core = nearest_steppe_band_site(
+        samples,
+        request.width,
+        request.depth,
+        McloneOverworldSteppeBand::Core,
+    );
+    let warm_dry_steppe_shoulder = nearest_steppe_band_site(
+        samples,
+        request.width,
+        request.depth,
+        McloneOverworldSteppeBand::Shoulder,
+    );
     let snowy_alpine = samples
         .iter()
         .enumerate()
@@ -805,6 +857,8 @@ fn select_review_sites(
         "wetlandPool": review_site_json(wetland_pool, samples, request),
         "coolWetConifer": review_site_json(cool_wet_conifer, samples, request),
         "warmDrySteppe": review_site_json(warm_dry_steppe, samples, request),
+        "warmDrySteppeCore": review_site_json(warm_dry_steppe_core, samples, request),
+        "warmDrySteppeShoulder": review_site_json(warm_dry_steppe_shoulder, samples, request),
         "snowyAlpine": review_site_json(snowy_alpine, samples, request),
         "periodicSeamRiver": review_site_json(seam_river, samples, request),
     })
@@ -825,6 +879,29 @@ fn nearest_recipe_site(
         .min_by_key(|(index, _)| {
             let x = *index as i64 % i64::from(width);
             let z = *index as i64 / i64::from(width);
+            (x - center_x).abs() + (z - center_z).abs()
+        })
+        .map(|(index, _)| index)
+}
+
+fn nearest_steppe_band_site(
+    samples: &[McloneOverworldLandformSample],
+    width: u32,
+    depth: u32,
+    band: McloneOverworldSteppeBand,
+) -> Option<usize> {
+    let center_x = i64::from(width) / 2;
+    let center_z = i64::from(depth) / 2;
+    samples
+        .iter()
+        .enumerate()
+        .filter(|(_, sample)| {
+            mclone_overworld_biome_recipe(**sample) == McloneOverworldBiomeRecipe::WarmDrySteppe
+                && mclone_overworld_steppe_band(sample.terrain.climate) == band
+        })
+        .min_by_key(|(index, _)| {
+            let x = (*index % width as usize) as i64;
+            let z = (*index / width as usize) as i64;
             (x - center_x).abs() + (z - center_z).abs()
         })
         .map(|(index, _)| index)
@@ -990,6 +1067,10 @@ fn sample_json(sample: McloneOverworldLandformSample) -> serde_json::Value {
             "moisture": terrain.climate.moisture,
             "altitudeAdjustedTemperature":
                 terrain.climate.altitude_adjusted_temperature(terrain.surface_y),
+            "warmDrySteppeSuitability":
+                mclone_overworld_steppe_suitability(terrain.climate),
+            "warmDrySteppeBand":
+                mclone_overworld_steppe_band(terrain.climate).label(),
             "recipe": mclone_overworld_biome_recipe(sample).label(),
         },
         "bathymetry": {
@@ -1121,6 +1202,8 @@ struct RegionFacts {
     max_moisture: f64,
     min_adjusted_temperature: f64,
     max_adjusted_temperature: f64,
+    min_steppe_suitability: f64,
+    max_steppe_suitability: f64,
     min_ocean_interior: f64,
     max_ocean_interior: f64,
     min_shelf_break: f64,
@@ -1177,6 +1260,8 @@ struct RegionFacts {
     snowy_alpine_recipe_columns: usize,
     cool_wet_conifer_recipe_columns: usize,
     warm_dry_steppe_recipe_columns: usize,
+    warm_dry_steppe_core_columns: usize,
+    warm_dry_steppe_shoulder_columns: usize,
     temperate_woodland_recipe_columns: usize,
     temperate_meadow_recipe_columns: usize,
     ocean_floor_columns: usize,
@@ -1232,6 +1317,8 @@ impl RegionFacts {
         let mut max_moisture = f64::NEG_INFINITY;
         let mut min_adjusted_temperature = f64::INFINITY;
         let mut max_adjusted_temperature = f64::NEG_INFINITY;
+        let mut min_steppe_suitability = f64::INFINITY;
+        let mut max_steppe_suitability = f64::NEG_INFINITY;
         let mut min_ocean_interior = f64::INFINITY;
         let mut max_ocean_interior = f64::NEG_INFINITY;
         let mut min_shelf_break = f64::INFINITY;
@@ -1280,6 +1367,8 @@ impl RegionFacts {
         let mut snowy_alpine_recipe_columns = 0;
         let mut cool_wet_conifer_recipe_columns = 0;
         let mut warm_dry_steppe_recipe_columns = 0;
+        let mut warm_dry_steppe_core_columns = 0;
+        let mut warm_dry_steppe_shoulder_columns = 0;
         let mut temperate_woodland_recipe_columns = 0;
         let mut temperate_meadow_recipe_columns = 0;
         let mut ocean_floor_columns = 0;
@@ -1333,6 +1422,9 @@ impl RegionFacts {
                 .altitude_adjusted_temperature(sample.surface_y);
             min_adjusted_temperature = min_adjusted_temperature.min(adjusted_temperature);
             max_adjusted_temperature = max_adjusted_temperature.max(adjusted_temperature);
+            let steppe_suitability = mclone_overworld_steppe_suitability(sample.climate);
+            min_steppe_suitability = min_steppe_suitability.min(steppe_suitability);
+            max_steppe_suitability = max_steppe_suitability.max(steppe_suitability);
             min_ocean_interior = min_ocean_interior.min(sample.bathymetry.ocean_interior);
             max_ocean_interior = max_ocean_interior.max(sample.bathymetry.ocean_interior);
             min_shelf_break = min_shelf_break.min(sample.bathymetry.shelf_break_influence);
@@ -1449,7 +1541,20 @@ impl RegionFacts {
                 McloneOverworldBiomeRecipe::River => river_recipe_columns += 1,
                 McloneOverworldBiomeRecipe::SnowyAlpine => snowy_alpine_recipe_columns += 1,
                 McloneOverworldBiomeRecipe::CoolWetConifer => cool_wet_conifer_recipe_columns += 1,
-                McloneOverworldBiomeRecipe::WarmDrySteppe => warm_dry_steppe_recipe_columns += 1,
+                McloneOverworldBiomeRecipe::WarmDrySteppe => {
+                    warm_dry_steppe_recipe_columns += 1;
+                    match mclone_overworld_steppe_band(sample.climate) {
+                        McloneOverworldSteppeBand::Core => {
+                            warm_dry_steppe_core_columns += 1;
+                        }
+                        McloneOverworldSteppeBand::Shoulder => {
+                            warm_dry_steppe_shoulder_columns += 1;
+                        }
+                        McloneOverworldSteppeBand::Outside => {
+                            unreachable!("steppe recipe must have a steppe climate band");
+                        }
+                    }
+                }
                 McloneOverworldBiomeRecipe::TemperateWoodland => {
                     temperate_woodland_recipe_columns += 1
                 }
@@ -1567,7 +1672,10 @@ impl RegionFacts {
                 .into_iter()
                 .chain(sample.climate.moisture.to_bits().to_le_bytes())
                 .chain(adjusted_temperature.to_bits().to_le_bytes())
-                .chain([biome_recipe_tag(biome_recipe)])
+                .chain([
+                    biome_recipe_tag(biome_recipe),
+                    steppe_band_tag(mclone_overworld_steppe_band(sample.climate)),
+                ])
             {
                 climate_fingerprint ^= u64::from(byte);
                 climate_fingerprint = climate_fingerprint.wrapping_mul(0x0000_0100_0000_01b3);
@@ -1631,6 +1739,8 @@ impl RegionFacts {
             max_moisture,
             min_adjusted_temperature,
             max_adjusted_temperature,
+            min_steppe_suitability,
+            max_steppe_suitability,
             min_ocean_interior,
             max_ocean_interior,
             min_shelf_break,
@@ -1687,6 +1797,8 @@ impl RegionFacts {
             snowy_alpine_recipe_columns,
             cool_wet_conifer_recipe_columns,
             warm_dry_steppe_recipe_columns,
+            warm_dry_steppe_core_columns,
+            warm_dry_steppe_shoulder_columns,
             temperate_woodland_recipe_columns,
             temperate_meadow_recipe_columns,
             ocean_floor_columns,
@@ -1724,6 +1836,116 @@ impl RegionFacts {
             terrain_language_fingerprint,
         }
     }
+}
+
+fn recipe_component_stats(
+    samples: &[McloneOverworldLandformSample],
+    width: u32,
+    depth: u32,
+    step: u32,
+    recipe: McloneOverworldBiomeRecipe,
+) -> serde_json::Value {
+    let width = width as usize;
+    let depth = depth as usize;
+    assert_eq!(samples.len(), width * depth);
+
+    #[derive(Clone, Copy)]
+    struct Component {
+        columns: usize,
+        span_x: usize,
+        span_z: usize,
+        touches_boundary: bool,
+    }
+
+    let mut visited = vec![false; samples.len()];
+    let mut components = Vec::new();
+    for start in 0..samples.len() {
+        if visited[start] || mclone_overworld_biome_recipe(samples[start]) != recipe {
+            continue;
+        }
+
+        visited[start] = true;
+        let mut queue = VecDeque::from([start]);
+        let mut columns = 0;
+        let mut min_x = width;
+        let mut max_x = 0;
+        let mut min_z = depth;
+        let mut max_z = 0;
+        let mut touches_boundary = false;
+        while let Some(index) = queue.pop_front() {
+            let x = index % width;
+            let z = index / width;
+            columns += 1;
+            min_x = min_x.min(x);
+            max_x = max_x.max(x);
+            min_z = min_z.min(z);
+            max_z = max_z.max(z);
+            touches_boundary |= x == 0 || z == 0 || x + 1 == width || z + 1 == depth;
+
+            for neighbor in [
+                x.checked_sub(1).map(|next_x| z * width + next_x),
+                (x + 1 < width).then_some(z * width + x + 1),
+                z.checked_sub(1).map(|next_z| next_z * width + x),
+                (z + 1 < depth).then_some((z + 1) * width + x),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                if !visited[neighbor] && mclone_overworld_biome_recipe(samples[neighbor]) == recipe
+                {
+                    visited[neighbor] = true;
+                    queue.push_back(neighbor);
+                }
+            }
+        }
+
+        components.push(Component {
+            columns,
+            span_x: max_x - min_x + 1,
+            span_z: max_z - min_z + 1,
+            touches_boundary,
+        });
+    }
+
+    let total_columns = components
+        .iter()
+        .map(|component| component.columns)
+        .sum::<usize>();
+    let boundary_touching = components
+        .iter()
+        .filter(|component| component.touches_boundary)
+        .count();
+    let mut by_size = components;
+    by_size.sort_by_key(|component| component.columns);
+    let median_columns = by_size
+        .get(by_size.len().saturating_sub(1) / 2)
+        .map_or(0, |component| component.columns);
+    let largest = by_size.last().copied();
+    let largest_components = by_size
+        .iter()
+        .rev()
+        .take(8)
+        .map(|component| component.columns)
+        .collect::<Vec<_>>();
+    let step = usize::try_from(step).expect("review step exceeds usize");
+
+    serde_json::json!({
+        "connectivity": 4,
+        "componentCount": by_size.len(),
+        "boundaryTouchingComponents": boundary_touching,
+        "totalColumns": total_columns,
+        "medianColumns": median_columns,
+        "largestColumns": largest.map_or(0, |component| component.columns),
+        "largestApproximateAreaBlocks": largest.map_or(0, |component| {
+            component.columns.saturating_mul(step).saturating_mul(step)
+        }),
+        "largestSpanBlocks": largest.map_or([0, 0], |component| [
+            component.span_x.saturating_mul(step),
+            component.span_z.saturating_mul(step),
+        ]),
+        "largestTouchesBoundary": largest.is_some_and(|component| component.touches_boundary),
+        "largestEightColumns": largest_components,
+    })
 }
 
 fn add_slope(
@@ -2324,6 +2546,16 @@ fn moisture_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
     lerp_color([201, 157, 73, 255], [32, 111, 128, 255], amount)
 }
 
+fn steppe_suitability_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    let suitability = mclone_overworld_steppe_suitability(sample.climate);
+    let base = lerp_color([39, 48, 50, 255], [221, 190, 86, 255], suitability);
+    match mclone_overworld_steppe_band(sample.climate) {
+        McloneOverworldSteppeBand::Outside => base,
+        McloneOverworldSteppeBand::Shoulder => lerp_color(base, [235, 205, 112, 255], 0.45),
+        McloneOverworldSteppeBand::Core => lerp_color(base, [196, 132, 47, 255], 0.65),
+    }
+}
+
 fn adjusted_temperature_color(sample: McloneOverworldLandformSample) -> [u8; 4] {
     let amount = sample
         .terrain
@@ -2349,7 +2581,15 @@ fn biome_recipe_color(sample: McloneOverworldLandformSample) -> [u8; 4] {
         McloneOverworldBiomeRecipe::River => [42, 119, 181, 255],
         McloneOverworldBiomeRecipe::SnowyAlpine => [229, 240, 242, 255],
         McloneOverworldBiomeRecipe::CoolWetConifer => [44, 92, 75, 255],
-        McloneOverworldBiomeRecipe::WarmDrySteppe => [185, 162, 73, 255],
+        McloneOverworldBiomeRecipe::WarmDrySteppe => {
+            match mclone_overworld_steppe_band(sample.terrain.climate) {
+                McloneOverworldSteppeBand::Core => [185, 145, 55, 255],
+                McloneOverworldSteppeBand::Shoulder => [207, 181, 91, 255],
+                McloneOverworldSteppeBand::Outside => {
+                    unreachable!("steppe recipe must have a steppe climate band")
+                }
+            }
+        }
         McloneOverworldBiomeRecipe::TemperateWoodland => [42, 105, 55, 255],
         McloneOverworldBiomeRecipe::TemperateMeadow => [112, 176, 76, 255],
     }
@@ -2379,6 +2619,14 @@ fn biome_recipe_tag(recipe: McloneOverworldBiomeRecipe) -> u8 {
         McloneOverworldBiomeRecipe::WarmDrySteppe => 5,
         McloneOverworldBiomeRecipe::TemperateWoodland => 6,
         McloneOverworldBiomeRecipe::TemperateMeadow => 7,
+    }
+}
+
+fn steppe_band_tag(band: McloneOverworldSteppeBand) -> u8 {
+    match band {
+        McloneOverworldSteppeBand::Outside => 0,
+        McloneOverworldSteppeBand::Shoulder => 1,
+        McloneOverworldSteppeBand::Core => 2,
     }
 }
 
