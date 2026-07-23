@@ -867,16 +867,21 @@ impl McloneOverworldStreamPlan {
             return None;
         }
         let transition = self.transition_context(world_x, world_z, column.distance);
+        let channel_half_width = if transition.is_some() {
+            STREAM_HALF_WIDTH_BLOCKS
+        } else {
+            column.half_width
+        };
         let channel_influence = if transition.is_some_and(|it| it.downstream_run <= 0) {
             f64::from(transition.is_some_and(|it| it.upstream_throat))
         } else {
-            compact_influence(column.distance, column.half_width, 1.75)
+            compact_influence(column.distance, channel_half_width, 1.75)
         };
         let bank_influence = if channel_influence > 0.0 {
             1.0
         } else {
             1.0 - smoothstep(
-                ((column.distance - column.half_width) / (envelope - column.half_width))
+                ((column.distance - channel_half_width) / (envelope - channel_half_width))
                     .clamp(0.0, 1.0),
             )
         };
@@ -920,7 +925,7 @@ impl McloneOverworldStreamPlan {
         let target_surface_y = if channel_influence > 0.0 {
             bed_y
         } else {
-            let bank_run = (column.distance - column.half_width).max(0.0);
+            let bank_run = (column.distance - channel_half_width).max(0.0);
             let bank_water_y = transition.map_or(water_y, |it| it.upper_y);
             let side = column.signed_distance.signum();
             let bank_signal = self.morphology_signal(column.station_blocks, 5.23);
@@ -952,7 +957,7 @@ impl McloneOverworldStreamPlan {
             half_width: if transition.is_some_and(|it| it.downstream_run <= 0) {
                 0.5
             } else {
-                column.half_width
+                channel_half_width
             },
             tangent_x: column.tangent_x,
             tangent_z: column.tangent_z,
@@ -1418,6 +1423,30 @@ mod tests {
             "stream width range was {min_width}..{max_width}"
         );
         assert_eq!(ordinary_depths, BTreeSet::from([2, 3]));
+
+        let mut baked_fall_columns = 0;
+        for pair in plan.nodes.windows(2) {
+            if pair[0].water_y == pair[1].water_y {
+                continue;
+            }
+            for z in pair[0].z - 8..=pair[0].z + 8 {
+                for x in pair[0].x - 8..=pair[0].x + 8 {
+                    let Some(intent) = plan.terrain_intent(x, z, pair[0].base_surface_y) else {
+                        continue;
+                    };
+                    if intent.drop_height > 0 && intent.drop_distance < 0.0 {
+                        baked_fall_columns += 1;
+                        assert!(
+                            intent.half_width == 0.5
+                                || intent.half_width == STREAM_HALF_WIDTH_BLOCKS,
+                            "baked fall width {} must be a fixed throat or fall width",
+                            intent.half_width
+                        );
+                    }
+                }
+            }
+        }
+        assert!(baked_fall_columns > 0);
     }
 
     #[test]
