@@ -7,14 +7,16 @@ use std::time::Instant;
 
 use anyhow::{Context, Result, bail};
 use image::RgbaImage;
+use mclone_core::ChunkPos;
 use mclone_worldgen::levelgen::{
     BEACH_BIOME_ID, MCLONE_OVERWORLD_DECORATION_REVISION, MCLONE_OVERWORLD_FIELD_REVISION,
     MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_PERIOD_BLOCKS,
     MCLONE_OVERWORLD_RIVER_BIOME_ID, MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldLandformSample,
     McloneOverworldSampleRegionRequest, McloneOverworldSampler, McloneOverworldSamplingTopology,
     McloneOverworldSurfaceRecipe, McloneOverworldTerrainSample, OCEAN_BIOME_ID, PLAINS_BIOME_ID,
-    mclone_overworld_biome_id_for_sample, mclone_overworld_spawn_chunk,
-    mclone_overworld_spawn_chunk_with_topology, mclone_overworld_surface_recipe,
+    analyze_mclone_overworld_hydraulic_closure, mclone_overworld_biome_id_for_sample,
+    mclone_overworld_spawn_chunk, mclone_overworld_spawn_chunk_with_topology,
+    mclone_overworld_surface_recipe,
 };
 
 const DEFAULT_OUTPUT_DIR: &str = "/tmp/mclone-overworld-review";
@@ -96,6 +98,14 @@ fn run() -> Result<()> {
     let spawn_x = spawn_chunk.min_block_x() + 8;
     let spawn_z = spawn_chunk.min_block_z() + 8;
     let spawn_sample = sampler.sample_landform(spawn_x, spawn_z);
+    let hydraulic_start = Instant::now();
+    let hydraulic = analyze_mclone_overworld_hydraulic_closure(
+        config.seed,
+        config.topology,
+        ChunkPos::new(config.chunk_x, config.chunk_z),
+        1,
+    );
+    let hydraulic_elapsed_ms = hydraulic_start.elapsed().as_secs_f64() * 1_000.0;
 
     let prefix = format!(
         "mclone-overworld-v1-{}-seed-{}-chunk-{}-{}",
@@ -241,7 +251,7 @@ fn run() -> Result<()> {
 
     let (commit, dirty) = git_state();
     let receipt = serde_json::json!({
-        "schema": 7,
+        "schema": 8,
         "profile": "mclone-overworld-v1",
         "topology": config.topology.label(),
         "fieldRevision": MCLONE_OVERWORLD_FIELD_REVISION,
@@ -324,6 +334,18 @@ fn run() -> Result<()> {
             "gradedBank": facts.river_bank_influence_columns,
             "wetlandAboveQuarter": facts.wetland_columns,
             "wetlandPool": facts.wetland_pool_columns,
+        },
+        "hydraulicClosure": {
+            "radiusChunks": 1,
+            "elapsedMs": hydraulic_elapsed_ms,
+            "targetChunks": hydraulic.target_chunks,
+            "sourceWaterBlocks": hydraulic.source_water_blocks,
+            "sourceBoundaryBlocks": hydraulic.source_boundary_blocks,
+            "horizontallyOpenSourceFaces": hydraulic.horizontally_open_source_faces,
+            "unsupportedSourceBlocks": hydraulic.unsupported_source_blocks,
+            "slopedSurfaceEdges": hydraulic.sloped_surface_edges,
+            "scheduledLiquidTicks": hydraulic.scheduled_liquid_ticks,
+            "closed": hydraulic.is_closed(),
         },
         "landformCounts": {
             "mountainRegion": facts.mountain_region_columns,

@@ -533,6 +533,65 @@ fn generated_liquid_ticks_are_registered_when_watery_chunk_is_published() {
 }
 
 #[test]
+fn generated_mclone_flat_reach_is_quiescent_when_every_source_is_woken() {
+    let seed = -98_765;
+    let center = ChunkPos::new(-118, -159);
+    let definition =
+        DimensionDefinition::overworld(seed, WorldGenerationProfile::McloneOverworldV1);
+    let mut server = LocalRealmSession::local_integrated_with_dimension_definition(definition);
+    server.set_lighting_enabled(false);
+    handle_command_and_poll(
+        &mut server,
+        ClientCommand::SetChunkView(ChunkView {
+            center,
+            render_distance: 2,
+            chunk_tracking_radius: 2,
+        }),
+    );
+
+    assert_eq!(
+        server.scheduled_fluid_tick_count(),
+        0,
+        "ordinary Mclone reaches must not carry generation-time liquid ticks"
+    );
+
+    let mut sources = Vec::new();
+    for x in center.min_block_x()..=center.min_block_x() + 15 {
+        for z in center.min_block_z()..=center.min_block_z() + 15 {
+            for y in 0..256 {
+                let pos = WorldBlockPos::new(x, y, z);
+                if server.scheduler().block_at_world(pos) == Some(WATER) {
+                    sources.push(pos);
+                }
+            }
+        }
+    }
+    assert!(
+        sources.len() > 100,
+        "reviewed lowland reach should contain a meaningful source-water body"
+    );
+    for source in &sources {
+        server.schedule_fluid_tick(*source, FluidKind::Water, 0);
+    }
+
+    let mut executed = 0;
+    let mut mutated = 0;
+    for _ in 0..2 {
+        let report = server.simulation_tick_report();
+        executed += report.fluid_ticks_executed;
+        mutated += report.fluid_mutated_blocks;
+    }
+
+    assert_eq!(executed, sources.len());
+    assert_eq!(mutated, 0, "waking a flat contained reach must not spill");
+    assert_eq!(
+        server.scheduled_fluid_tick_count(),
+        0,
+        "a quiescent reach must drain the synthetic wake queue"
+    );
+}
+
+#[test]
 fn scheduled_water_tick_spreads_down_and_publishes_section_update() {
     let mut server = LocalRealmSession::new(12_345);
     let initial_updates = handle_command_and_poll(

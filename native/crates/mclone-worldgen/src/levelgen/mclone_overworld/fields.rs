@@ -3,7 +3,7 @@ use mclone_core::{AxisTopology, ChunkPos, HorizontalTopology};
 use crate::noise::{GradientNoise2d, SeedDomain, ValueNoise2d};
 
 pub const MCLONE_OVERWORLD_SEA_LEVEL: i32 = 63;
-pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-7";
+pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-8";
 pub const MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS: i32 = 2;
 pub const MCLONE_OVERWORLD_PERIOD_BLOCKS: i32 = 6_144;
 pub const MCLONE_OVERWORLD_PERIOD_CHUNKS: u32 = 384;
@@ -43,6 +43,8 @@ const RIVER_WIDTH_SCALE: i32 = 384;
 const WETLAND_POOL_SCALE: i32 = 96;
 const RIVER_GRADE_SAMPLE_DISTANCE: f64 = 16.0;
 const RIVER_MAX_RELEVANT_DISTANCE: f64 = 48.0;
+const RIVER_LOWLAND_MAX_BROAD_SURFACE_Y: i32 = MCLONE_OVERWORLD_SEA_LEVEL + 7;
+const RIVER_LOWLAND_MAX_BASE_SURFACE_Y: i32 = MCLONE_OVERWORLD_SEA_LEVEL + 9;
 const MAX_REGION_SAMPLE_COUNT: usize = 16 * 1024 * 1024;
 const SPAWN_SEARCH_RADIUS_CHUNKS: i32 = 128;
 const SPAWN_MIN_SURFACE_Y: i32 = MCLONE_OVERWORLD_SEA_LEVEL + 5;
@@ -425,19 +427,20 @@ impl McloneOverworldSampler {
         base_surface_y: i32,
         geometry: RiverGeometry,
     ) -> (McloneOverworldWatercourseSample, i32) {
-        let inland = smoothstep((continentalness / 0.45).clamp(0.0, 1.0));
-        let water_surface_y = (MCLONE_OVERWORLD_SEA_LEVEL as f64 * (1.0 - inland)
-            + f64::from(broad_surface_y - 3) * inland)
-            .round()
-            .clamp(
-                f64::from(MCLONE_OVERWORLD_SEA_LEVEL),
-                f64::from((base_surface_y - 1).max(MCLONE_OVERWORLD_SEA_LEVEL)),
-            ) as i32;
+        // Ordinary revision-8 reaches deliberately share one hydrostatic
+        // surface. The rejected revision-7 formula followed broad terrain at
+        // every column, which could tilt water across a channel and expose a
+        // source face above lower neighboring terrain. Higher local reaches
+        // require explicit reach identity and bounded drop templates; do not
+        // approximate them with a smoothly sloped source-water sheet.
+        let water_surface_y = MCLONE_OVERWORLD_SEA_LEVEL;
         let depth = (2.0 + geometry.half_width * 0.24).round() as i32;
         let bed_y = water_surface_y - depth;
 
         let relevant = continentalness > 0.0
             && base_surface_y > MCLONE_OVERWORLD_SEA_LEVEL
+            && broad_surface_y <= RIVER_LOWLAND_MAX_BROAD_SURFACE_Y
+            && base_surface_y <= RIVER_LOWLAND_MAX_BASE_SURFACE_Y
             && geometry.distance <= RIVER_MAX_RELEVANT_DISTANCE;
         let (flow_x, flow_z, grade) = if relevant {
             let offset_x = geometry.tangent_x * RIVER_GRADE_SAMPLE_DISTANCE;
@@ -982,6 +985,7 @@ mod tests {
                     assert!((0.0..=1.0).contains(&river.wetland_pool_influence));
                     if river.is_channel() {
                         channels += 1;
+                        assert_eq!(river.water_surface_y, MCLONE_OVERWORLD_SEA_LEVEL);
                         assert!(sample.surface_y < river.water_surface_y);
                     }
                     if river.wetland_influence > 0.25 && river.bank_influence > 0.0 {
@@ -989,6 +993,7 @@ mod tests {
                     }
                     if river.is_wetland_pool() {
                         wetland_pools += 1;
+                        assert_eq!(river.water_surface_y, MCLONE_OVERWORLD_SEA_LEVEL);
                     }
                 }
             }
