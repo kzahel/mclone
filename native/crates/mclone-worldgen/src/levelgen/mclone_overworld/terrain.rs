@@ -69,6 +69,34 @@ pub fn generate_mclone_overworld_surface_chunk_with_topology(
     )
 }
 
+/// Generate a surface batch with one bounded metadata cache.
+///
+/// Callers producing adjacent chunks should prefer this over repeatedly
+/// invoking the isolated single-chunk convenience wrapper: accepted stream
+/// routes are metadata prerequisites shared by the whole batch.
+pub fn generate_mclone_overworld_surface_chunks_with_topology(
+    seed: i64,
+    topology: McloneOverworldSamplingTopology,
+    positions: impl IntoIterator<Item = ChunkPos>,
+) -> BTreeMap<ChunkPos, GeneratedChunk> {
+    let mut stream_cache = McloneOverworldStreamPlanCache::new(seed, topology);
+    positions
+        .into_iter()
+        .map(|pos| {
+            (
+                pos,
+                generate_mclone_overworld_surface_chunk_with_stream_cache(
+                    seed,
+                    topology,
+                    pos.x,
+                    pos.z,
+                    &mut stream_cache,
+                ),
+            )
+        })
+        .collect()
+}
+
 /// Generate one surface-stage chunk while reusing the bounded stream planner
 /// cache across neighboring chunks.
 ///
@@ -550,6 +578,28 @@ mod tests {
                     );
                 }
             }
+        }
+    }
+
+    #[test]
+    fn surface_batch_matches_isolated_stream_chunks_exactly() {
+        let seed = -98_765;
+        let positions = [
+            ChunkPos::new(148, -125),
+            ChunkPos::new(149, -124),
+            ChunkPos::new(150, -123),
+        ];
+        let batch = generate_mclone_overworld_surface_chunks_with_topology(
+            seed,
+            McloneOverworldSamplingTopology::Unbounded,
+            positions,
+        );
+
+        for pos in positions {
+            assert_eq!(
+                batch[&pos],
+                generate_mclone_overworld_surface_chunk(seed, pos.x, pos.z)
+            );
         }
     }
 

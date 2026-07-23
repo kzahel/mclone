@@ -526,6 +526,34 @@ codec remain the relevant browser gates.
 - [ ] Inspect every first drawable milestone before adding the next visual
   layer.
 
+Performance correction checkpoint 2026-07-23:
+
+- the first three-iteration hotspot probe exposed the intended investigation
+  gate: before follow-up optimization, seed `-98765` around `(149,-124)`
+  measured 274 surface chunks/s, 468 cold decorated targets/s, and 1,822 warm
+  targets/s, versus 2,055, 880, and 5,097 around the no-stream origin
+  control. The source was redundant immutable metadata work, not liquid
+  simulation;
+- `McloneOverworldStreamPlanCache` now retains at most 4,096 candidate plans
+  and 2,048 clipped chunk-intersection queries. Repeated surface/biome and
+  warm target requests reuse the latter instead of rescanning the vanilla
+  radius-eight reference square;
+- immutable rendered route coordinates are computed once per accepted plan
+  and stored as exact floating-point bit patterns. Column sampling no longer
+  repeats trigonometric meander construction for every route segment and
+  terrain column;
+- a shared-cache surface-batch API makes the metadata dependency explicit.
+  The production feature batch, native LOD worker, browser LOD tile compiler,
+  and benchmark all reuse a bounded cache; the isolated single-chunk
+  convenience API remains correct but is not the performance lane for
+  adjacent generation;
+- the benchmark receipt now exposes planner requests/hits, clipped-query
+  requests/hits and retention, plus accepted/rejected plan counts; and
+- exact batch-versus-isolated blocks, raw field fingerprints,
+  partition/order/cache independence, all 306 worldgen tests, all 309 app
+  runtime tests, and the browser WASM check pass. Final same-host numbers and
+  the movement soak follow from a committed clean build.
+
 Human review asks:
 
 - Does the stream visibly occupy several calm reaches rather than only a tiny

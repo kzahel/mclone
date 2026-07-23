@@ -8,7 +8,7 @@ use mclone_worldgen::levelgen::{
     McloneOverworldSamplingTopology, OverworldDependencyGenerationTiming,
     OverworldFeatureBatchTiming, OverworldFeatureDependencyCache,
     OverworldFeatureDependencyCacheReport, SurfaceFillTiming,
-    generate_mclone_overworld_surface_chunk_with_topology, generate_overworld_surface_chunk,
+    generate_mclone_overworld_surface_chunks_with_topology, generate_overworld_surface_chunk,
 };
 
 const DEFAULT_SEED: i64 = 12_345;
@@ -174,16 +174,16 @@ fn run_mclone_overworld_surface_phase(
     let mut generated_chunks = 0_usize;
     let mut non_air_blocks = 0_usize;
     for _ in 0..config.iterations {
-        for pos in positions {
-            let chunk = generate_mclone_overworld_surface_chunk_with_topology(
-                config.seed,
-                config.mclone_topology,
-                pos.x,
-                pos.z,
-            );
-            generated_chunks += 1;
-            non_air_blocks += chunk.non_air_block_count();
-        }
+        let chunks = generate_mclone_overworld_surface_chunks_with_topology(
+            config.seed,
+            config.mclone_topology,
+            positions.iter().copied(),
+        );
+        generated_chunks += chunks.len();
+        non_air_blocks += chunks
+            .values()
+            .map(|chunk| chunk.non_air_block_count())
+            .sum::<usize>();
     }
     SurfacePhaseReport {
         elapsed_ms: elapsed_ms(start.elapsed()),
@@ -327,6 +327,17 @@ fn add_mclone_cache_report(
     target.cache_hits += source.cache_hits;
     target.generated_dependency_chunks += source.generated_dependency_chunks;
     target.retained_dependency_chunks += source.retained_dependency_chunks;
+    // Stream planner counters describe the long-lived cache and are
+    // cumulative. Keep the latest observation rather than summing repeated
+    // snapshots of the same cache.
+    target.stream_plan_requests = source.stream_plan_requests;
+    target.stream_plan_cache_hits = source.stream_plan_cache_hits;
+    target.stream_plan_cache_misses = source.stream_plan_cache_misses;
+    target.stream_intersection_requests = source.stream_intersection_requests;
+    target.stream_intersection_cache_hits = source.stream_intersection_cache_hits;
+    target.retained_stream_intersection_queries = source.retained_stream_intersection_queries;
+    target.accepted_stream_plans = source.accepted_stream_plans;
+    target.rejected_stream_candidates = source.rejected_stream_candidates;
 }
 
 fn print_json(
@@ -489,8 +500,40 @@ fn print_mclone_cache_report_json(
         report.generated_dependency_chunks
     );
     println!(
-        "{indent}  \"retained_dependency_chunks\": {}",
+        "{indent}  \"retained_dependency_chunks\": {},",
         report.retained_dependency_chunks
+    );
+    println!(
+        "{indent}  \"stream_plan_requests\": {},",
+        report.stream_plan_requests
+    );
+    println!(
+        "{indent}  \"stream_plan_cache_hits\": {},",
+        report.stream_plan_cache_hits
+    );
+    println!(
+        "{indent}  \"stream_plan_cache_misses\": {},",
+        report.stream_plan_cache_misses
+    );
+    println!(
+        "{indent}  \"stream_intersection_requests\": {},",
+        report.stream_intersection_requests
+    );
+    println!(
+        "{indent}  \"stream_intersection_cache_hits\": {},",
+        report.stream_intersection_cache_hits
+    );
+    println!(
+        "{indent}  \"retained_stream_intersection_queries\": {},",
+        report.retained_stream_intersection_queries
+    );
+    println!(
+        "{indent}  \"accepted_stream_plans\": {},",
+        report.accepted_stream_plans
+    );
+    println!(
+        "{indent}  \"rejected_stream_candidates\": {}",
+        report.rejected_stream_candidates
     );
     let suffix = if trailing_comma { "," } else { "" };
     println!("{indent}}}{suffix}");

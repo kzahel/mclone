@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use mclone_core::{CHUNK_WIDTH, ChunkPos};
 
@@ -22,6 +22,8 @@ pub const MCLONE_OVERWORLD_STREAM_MAX_LENGTH_BLOCKS: u32 = 96;
 pub const MCLONE_OVERWORLD_STREAM_ROUTE_STEP_BLOCKS: i32 = 4;
 pub const MCLONE_OVERWORLD_STREAM_MAX_EXPANDED_NODES: u32 = 4_096;
 
+const MAX_STREAM_PLAN_CACHE_ENTRIES: usize = 4_096;
+const MAX_STREAM_INTERSECTION_CACHE_ENTRIES: usize = 2_048;
 const STREAM_PLACEMENT_SALT: i32 = 1_901_147;
 const SINK_SCAN_STEP_BLOCKS: i32 = 2;
 const ROUTE_MAX_STEPS: usize = MCLONE_OVERWORLD_STREAM_MAX_LENGTH_BLOCKS as usize
@@ -94,6 +96,7 @@ pub struct McloneOverworldStreamPlan {
     pub structure: ProceduralStructureStart<McloneOverworldStreamPiece>,
     pub nodes: Vec<McloneOverworldStreamNode>,
     pub metrics: McloneOverworldStreamPlanMetrics,
+    geometry_bits: Vec<[u64; 2]>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -165,6 +168,9 @@ pub struct McloneOverworldStreamPlanCacheReport {
     pub requests: u64,
     pub hits: u64,
     pub misses: u64,
+    pub intersection_requests: u64,
+    pub intersection_hits: u64,
+    pub retained_intersection_queries: usize,
     pub accepted_plans: usize,
     pub rejected_candidates: usize,
 }
@@ -173,8 +179,13 @@ pub struct McloneOverworldStreamPlanCacheReport {
 pub struct McloneOverworldStreamPlanCache {
     planner: McloneOverworldStreamPlanner,
     plans: BTreeMap<StructureStartCandidate, Option<McloneOverworldStreamPlan>>,
+    plan_insertion_order: VecDeque<StructureStartCandidate>,
+    intersections: BTreeMap<(ChunkPos, ChunkPos), Vec<McloneOverworldStreamPlan>>,
+    intersection_insertion_order: VecDeque<(ChunkPos, ChunkPos)>,
     requests: u64,
     hits: u64,
+    intersection_requests: u64,
+    intersection_hits: u64,
 }
 
 impl McloneOverworldStreamPlanCache {
@@ -182,8 +193,13 @@ impl McloneOverworldStreamPlanCache {
         Self {
             planner: McloneOverworldStreamPlanner::new(seed, topology),
             plans: BTreeMap::new(),
+            plan_insertion_order: VecDeque::new(),
+            intersections: BTreeMap::new(),
+            intersection_insertion_order: VecDeque::new(),
             requests: 0,
             hits: 0,
+            intersection_requests: 0,
+            intersection_hits: 0,
         }
     }
 
@@ -205,7 +221,14 @@ impl McloneOverworldStreamPlanCache {
             return Ok(plan.clone());
         }
         let plan = self.planner.plan_start(candidate)?;
+        while self.plans.len() >= MAX_STREAM_PLAN_CACHE_ENTRIES {
+            let Some(oldest) = self.plan_insertion_order.pop_front() else {
+                break;
+            };
+            self.plans.remove(&oldest);
+        }
         self.plans.insert(candidate, plan.clone());
+        self.plan_insertion_order.push_back(candidate);
         Ok(plan)
     }
 
@@ -215,6 +238,9 @@ impl McloneOverworldStreamPlanCache {
             requests: self.requests,
             hits: self.hits,
             misses: self.requests - self.hits,
+            intersection_requests: self.intersection_requests,
+            intersection_hits: self.intersection_hits,
+            retained_intersection_queries: self.intersections.len(),
             accepted_plans,
             rejected_candidates: self.plans.len() - accepted_plans,
         }
@@ -225,6 +251,12 @@ impl McloneOverworldStreamPlanCache {
         min_chunk: ChunkPos,
         max_chunk: ChunkPos,
     ) -> Result<Vec<McloneOverworldStreamPlan>, ProceduralStructureError> {
+        self.intersection_requests += 1;
+        let query = (min_chunk, max_chunk);
+        if let Some(plans) = self.intersections.get(&query) {
+            self.intersection_hits += 1;
+            return Ok(plans.clone());
+        }
         let radius = i32::from(self.planner.placement().reference_radius());
         let mut candidates = BTreeSet::new();
         for chunk_z in min_chunk.z - radius..=max_chunk.z + radius {
@@ -249,6 +281,14 @@ impl McloneOverworldStreamPlanCache {
                 && plan.structure.bounds.min_z <= max_chunk.min_block_z() + CHUNK_WIDTH - 1
         });
         plans.sort_by(|left, right| left.structure.key.cmp(&right.structure.key));
+        while self.intersections.len() >= MAX_STREAM_INTERSECTION_CACHE_ENTRIES {
+            let Some(oldest) = self.intersection_insertion_order.pop_front() else {
+                break;
+            };
+            self.intersections.remove(&oldest);
+        }
+        self.intersections.insert(query, plans.clone());
+        self.intersection_insertion_order.push_back(query);
         Ok(plans)
     }
 }
@@ -620,6 +660,7 @@ impl McloneOverworldStreamPlanner {
         }
         sink_to_source.reverse();
         let nodes = sink_to_source;
+        let geometry_bits = stream_geometry_bits(&nodes);
         let pieces = stream_pieces(&nodes)?;
         let structure = ProceduralStructureStart::new(
             StructureStartKey::new(
@@ -647,6 +688,7 @@ impl McloneOverworldStreamPlanner {
             },
             structure,
             nodes,
+            geometry_bits,
         })
     }
 }
@@ -784,25 +826,8 @@ impl McloneOverworldStreamPlan {
     }
 
     fn geometry_node(&self, index: usize) -> (f64, f64) {
-        let node = self.nodes[index];
-        if index == 0 || index + 1 == self.nodes.len() {
-            return (f64::from(node.x), f64::from(node.z));
-        }
-
-        let previous = self.nodes[index - 1];
-        let next = self.nodes[index + 1];
-        let tangent_x = f64::from(next.x - previous.x);
-        let tangent_z = f64::from(next.z - previous.z);
-        let tangent_length = tangent_x.hypot(tangent_z).max(1.0);
-        let endpoint_fade = (index.min(self.nodes.len() - 1 - index) as f64 / 3.0).min(1.0);
-        let origin = self.nodes[0];
-        let phase = (f64::from(origin.x) * 0.754_877_666 + f64::from(origin.z) * 0.569_840_29)
-            .rem_euclid(std::f64::consts::TAU);
-        let offset = (index as f64 * 0.72 + phase).sin() * 1.6 * endpoint_fade;
-        (
-            f64::from(node.x) - tangent_z / tangent_length * offset,
-            f64::from(node.z) + tangent_x / tangent_length * offset,
-        )
+        let [x, z] = self.geometry_bits[index];
+        (f64::from_bits(x), f64::from_bits(z))
     }
 
     pub fn terrain_intent(
@@ -962,6 +987,37 @@ impl McloneOverworldStreamPlan {
             })
             .min_by_key(|context| context.downstream_run.abs())
     }
+}
+
+fn stream_geometry_bits(nodes: &[McloneOverworldStreamNode]) -> Vec<[u64; 2]> {
+    (0..nodes.len())
+        .map(|index| {
+            let (x, z) = stream_geometry_node(nodes, index);
+            [x.to_bits(), z.to_bits()]
+        })
+        .collect()
+}
+
+fn stream_geometry_node(nodes: &[McloneOverworldStreamNode], index: usize) -> (f64, f64) {
+    let node = nodes[index];
+    if index == 0 || index + 1 == nodes.len() {
+        return (f64::from(node.x), f64::from(node.z));
+    }
+
+    let previous = nodes[index - 1];
+    let next = nodes[index + 1];
+    let tangent_x = f64::from(next.x - previous.x);
+    let tangent_z = f64::from(next.z - previous.z);
+    let tangent_length = tangent_x.hypot(tangent_z).max(1.0);
+    let endpoint_fade = (index.min(nodes.len() - 1 - index) as f64 / 3.0).min(1.0);
+    let origin = nodes[0];
+    let phase = (f64::from(origin.x) * 0.754_877_666 + f64::from(origin.z) * 0.569_840_29)
+        .rem_euclid(std::f64::consts::TAU);
+    let offset = (index as f64 * 0.72 + phase).sin() * 1.6 * endpoint_fade;
+    (
+        f64::from(node.x) - tangent_z / tangent_length * offset,
+        f64::from(node.z) + tangent_x / tangent_length * offset,
+    )
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1350,6 +1406,26 @@ mod tests {
         assert!(report.accepted_plans >= 1);
         assert!(report.rejected_candidates >= 1);
         assert_eq!(report.requests, report.hits + report.misses);
+    }
+
+    #[test]
+    fn plan_cache_reuses_bounded_chunk_intersection_queries() {
+        let mut cache = McloneOverworldStreamPlanCache::new(
+            -98_765,
+            McloneOverworldSamplingTopology::Unbounded,
+        );
+        let min = ChunkPos::new(148, -125);
+        let max = ChunkPos::new(150, -123);
+        let first = cache.plans_intersecting_chunks(min, max).unwrap();
+        let plan_requests_after_first = cache.report().requests;
+        let second = cache.plans_intersecting_chunks(min, max).unwrap();
+        let report = cache.report();
+
+        assert_eq!(second, first);
+        assert_eq!(report.intersection_requests, 2);
+        assert_eq!(report.intersection_hits, 1);
+        assert_eq!(report.retained_intersection_queries, 1);
+        assert_eq!(report.requests, plan_requests_after_first);
     }
 
     #[test]

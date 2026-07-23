@@ -30,6 +30,9 @@ pub struct McloneOverworldFeatureDependencyCacheReport {
     pub stream_plan_requests: u64,
     pub stream_plan_cache_hits: u64,
     pub stream_plan_cache_misses: u64,
+    pub stream_intersection_requests: u64,
+    pub stream_intersection_cache_hits: u64,
+    pub retained_stream_intersection_queries: usize,
     pub accepted_stream_plans: usize,
     pub rejected_stream_candidates: usize,
 }
@@ -136,13 +139,11 @@ impl McloneOverworldFeatureDependencyCache {
                 stream_plans,
             )
         });
-        let cache_report = mclone_overworld_cache_report(report, stream_plans.report());
-
         if plan.output_chunks().is_empty() {
             return McloneOverworldFeatureBatchResult {
                 chunks: BTreeMap::new(),
                 retained_dependencies,
-                cache_report,
+                cache_report: mclone_overworld_cache_report(report, stream_plans.report()),
             };
         }
 
@@ -186,7 +187,7 @@ impl McloneOverworldFeatureDependencyCache {
         McloneOverworldFeatureBatchResult {
             chunks,
             retained_dependencies,
-            cache_report,
+            cache_report: mclone_overworld_cache_report(report, stream_plans.report()),
         }
     }
 
@@ -222,7 +223,6 @@ impl McloneOverworldFeatureDependencyCache {
                     stream_plans,
                 )
             });
-        let cache_report = mclone_overworld_cache_report(report, stream_plans.report());
         let mut chunks = BTreeMap::new();
 
         if let Some(work_targets) = coherent_periodic_work_targets(&targets) {
@@ -296,7 +296,7 @@ impl McloneOverworldFeatureDependencyCache {
             return McloneOverworldFeatureBatchResult {
                 chunks,
                 retained_dependencies,
-                cache_report,
+                cache_report: mclone_overworld_cache_report(report, stream_plans.report()),
             };
         }
 
@@ -364,7 +364,7 @@ impl McloneOverworldFeatureDependencyCache {
         McloneOverworldFeatureBatchResult {
             chunks,
             retained_dependencies,
-            cache_report,
+            cache_report: mclone_overworld_cache_report(report, stream_plans.report()),
         }
     }
 }
@@ -432,6 +432,9 @@ fn mclone_overworld_cache_report(
         stream_plan_requests: stream_report.requests,
         stream_plan_cache_hits: stream_report.hits,
         stream_plan_cache_misses: stream_report.misses,
+        stream_intersection_requests: stream_report.intersection_requests,
+        stream_intersection_cache_hits: stream_report.intersection_hits,
+        retained_stream_intersection_queries: stream_report.retained_intersection_queries,
         accepted_stream_plans: stream_report.accepted_plans,
         rejected_stream_candidates: stream_report.rejected_candidates,
     }

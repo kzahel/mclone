@@ -1844,7 +1844,7 @@ pub fn compile_far_terrain_lod_worker_input(
     input: FarTerrainLodWorkerInput,
     materials: Option<&FarTerrainLodMaterialPalette>,
 ) -> FarTerrainLodTileMesh {
-    let mut surface_chunks = BTreeMap::new();
+    let mut surface_chunks = FarTerrainLodWorkerCache::default();
     let source_key = FarTerrainLodSourceKey {
         seed: input.seed,
         generation_profile: input.generation_profile,

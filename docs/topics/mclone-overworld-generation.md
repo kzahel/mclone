@@ -384,6 +384,15 @@ production path follows these rules:
 - distant LOD may simplify rendering, but it must not silently become a
   different authoritative block generator.
 
+Bounded stream metadata follows the same rule. Candidate plans and clipped
+chunk-intersection results live in capped, seed/topology-scoped caches;
+rendered meander coordinates are computed once per immutable accepted plan.
+Adjacent surface generation uses a shared-cache batch API. Production feature
+batches and native/browser LOD reuse that contract rather than repeatedly
+solving the same radius-eight metadata neighborhood. Benchmark receipts expose
+both plan-cache and clipped-query hit/retention counters so a visually sparse
+structure cannot hide unbounded or redundant planning cost.
+
 The 2026-07-22 Linux Slice 0 baseline at commit `8cfa1ac4`, seed `12345`,
 center `(0,0)`, radius one chunk, and three release iterations measured:
 

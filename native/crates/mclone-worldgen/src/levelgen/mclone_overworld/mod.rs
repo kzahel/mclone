@@ -49,4 +49,5 @@ pub use terrain::{
     generate_mclone_overworld_surface_chunk,
     generate_mclone_overworld_surface_chunk_with_stream_cache,
     generate_mclone_overworld_surface_chunk_with_topology,
+    generate_mclone_overworld_surface_chunks_with_topology,
 };
