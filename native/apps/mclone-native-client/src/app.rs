@@ -42,6 +42,8 @@ use mclone_scene::{MonoBlinkCommitStatus, MonoUiContext};
 
 const NO_CLIP_TOGGLE_KEY: KeyCode = KeyCode::KeyN;
 const DESKTOP_BLINK_DEBUG_KEY: KeyCode = KeyCode::KeyT;
+const WORLDGEN_LENS_TOGGLE_KEY: KeyCode = KeyCode::F3;
+const WORLDGEN_LENS_CYCLE_KEY: KeyCode = KeyCode::F4;
 const FRAME_PIPELINE_OVERLAY_KEY: KeyCode = KeyCode::F6;
 const DEBUG_PHYSICS_CUBE_SHOOT_KEY: KeyCode = KeyCode::F7;
 const RENDER_RESOURCE_REBUILD_KEY: KeyCode = KeyCode::F8;
@@ -1398,6 +1400,32 @@ impl ApplicationHandler for ChunkApp {
                         self.trigger_render_scale_rebuild(event_loop);
                         return;
                     }
+                    if key_code == WORLDGEN_LENS_TOGGLE_KEY
+                        && event.state == ElementState::Pressed
+                        && !event.repeat
+                    {
+                        let active = self
+                            .scene_driver
+                            .as_mut()
+                            .and_then(|driver| driver.host_mut().toggle_worldgen_lens());
+                        log::info!(
+                            "worldgen lens {}",
+                            active.map_or("OFF", |layer| layer.label())
+                        );
+                        self.schedule_next_redraw(event_loop);
+                        return;
+                    }
+                    if key_code == WORLDGEN_LENS_CYCLE_KEY
+                        && event.state == ElementState::Pressed
+                        && !event.repeat
+                    {
+                        if let Some(driver) = self.scene_driver.as_mut() {
+                            let layer = driver.host_mut().cycle_worldgen_lens();
+                            log::info!("worldgen lens {}", layer.label());
+                        }
+                        self.schedule_next_redraw(event_loop);
+                        return;
+                    }
                     if key_code == FRAME_PIPELINE_OVERLAY_KEY
                         && event.state == ElementState::Pressed
                         && !event.repeat
@@ -1746,7 +1774,13 @@ impl ApplicationHandler for ChunkApp {
 fn desktop_keyboard_key_from_key_code(key_code: KeyCode) -> Option<KeyboardKey> {
     if matches!(
         key_code,
-        KeyCode::KeyN | KeyCode::KeyO | KeyCode::KeyL | KeyCode::F8 | KeyCode::F9
+        KeyCode::KeyN
+            | KeyCode::KeyO
+            | KeyCode::KeyL
+            | KeyCode::F3
+            | KeyCode::F4
+            | KeyCode::F8
+            | KeyCode::F9
     ) {
         return None;
     }

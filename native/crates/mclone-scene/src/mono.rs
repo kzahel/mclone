@@ -327,6 +327,7 @@ impl McloneSceneHost {
         );
         self.active_world.far_lod = FarTerrainLodRenderer::new(device, self.color_format);
         self.selection_outline = SelectionOutlineRenderer::new(device, self.color_format);
+        self.worldgen_lens_renderer = WorldColorMeshRenderer::new(device, self.color_format);
         self.world_gui_renderer = WorldGuiRenderer::new(device, self.color_format);
         self.world_gui_overlay_renderer = WorldGuiRenderer::new(device, self.color_format);
         #[cfg(not(target_arch = "wasm32"))]
@@ -1746,6 +1747,45 @@ impl McloneSceneHost {
             if !full_frame_gui.covers_world {
                 let selection_view =
                     render_view_with_underwater_effect(view.render_view, underwater_overlay);
+                let lens_mesh = if self.worldgen_lens.active_layer().is_some() {
+                    let topology = self
+                        .active_world
+                        .runtime
+                        .as_ref()
+                        .map_or(HorizontalTopology::UNBOUNDED, |runtime| {
+                            runtime.client().topology()
+                        });
+                    let loaded_chunks = self
+                        .active_world
+                        .runtime
+                        .as_ref()
+                        .map(|runtime| {
+                            runtime
+                                .client()
+                                .loaded_chunk_positions()
+                                .collect::<std::collections::BTreeSet<_>>()
+                        })
+                        .unwrap_or_default();
+                    self.worldgen_lens.prepare_mesh(
+                        self.active_world.scene.seed,
+                        self.active_world.scene.world_generation_profile,
+                        topology,
+                        selection_view.camera_position,
+                        &loaded_chunks,
+                    )
+                } else {
+                    None
+                };
+                self.worldgen_lens_renderer.render_in_slot(
+                    device,
+                    queue,
+                    encoder,
+                    view.target,
+                    view.depth,
+                    selection_view,
+                    lens_mesh,
+                    view_slot,
+                );
                 let selection = self
                     .current_mono_block_target()
                     .map(|target| SelectionOutline::new(target.outline_boxes));
@@ -2191,6 +2231,45 @@ impl McloneSceneHost {
         if !full_frame_gui.covers_world {
             let selection_view =
                 render_view_with_underwater_effect(render_view, underwater_overlay);
+            let lens_mesh = if self.worldgen_lens.active_layer().is_some() {
+                let topology = self
+                    .active_world
+                    .runtime
+                    .as_ref()
+                    .map_or(HorizontalTopology::UNBOUNDED, |runtime| {
+                        runtime.client().topology()
+                    });
+                let loaded_chunks = self
+                    .active_world
+                    .runtime
+                    .as_ref()
+                    .map(|runtime| {
+                        runtime
+                            .client()
+                            .loaded_chunk_positions()
+                            .collect::<std::collections::BTreeSet<_>>()
+                    })
+                    .unwrap_or_default();
+                self.worldgen_lens.prepare_mesh(
+                    self.active_world.scene.seed,
+                    self.active_world.scene.world_generation_profile,
+                    topology,
+                    selection_view.camera_position,
+                    &loaded_chunks,
+                )
+            } else {
+                None
+            };
+            self.worldgen_lens_renderer.render_in_slot(
+                device,
+                queue,
+                encoder,
+                target,
+                depth,
+                selection_view,
+                lens_mesh,
+                SINGLE_VIEW_SLOT,
+            );
             let selection = self
                 .current_mono_block_target()
                 .map(|target| SelectionOutline::new(target.outline_boxes));
@@ -2491,6 +2570,13 @@ impl McloneSceneHost {
             }
             .overlay();
             let mut debug_overlay = debug.to_debug_overlay();
+            let lens_lines = self.worldgen_lens.inspection_lines(
+                self.active_world.scene.seed,
+                self.active_world.scene.world_generation_profile,
+                topology,
+                glam_vec3_from_vec3d(snapshot.eye),
+            );
+            debug_overlay.lines.splice(0..0, lens_lines);
             if let Some(standby) = self.warm_world_standby_snapshot() {
                 let mut warm_lines = vec![
                     format!(

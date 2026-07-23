@@ -156,6 +156,7 @@ use mclone_render::uniform::{
     LEFT_EYE_VIEW_SLOT, MAX_PRESENTATION_VIEW_COUNT, PER_VIEW_UNIFORM_FRAME_COUNT, PerViewSlot,
     PresentationViewIndex, RIGHT_EYE_VIEW_SLOT, SINGLE_VIEW_SLOT,
 };
+use mclone_render::world_color_mesh::WorldColorMeshRenderer;
 use mclone_render_session::{
     ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER,
     ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER,
@@ -197,6 +198,7 @@ mod timing;
 mod tracking;
 mod ui_panels;
 mod warm_world;
+mod worldgen_lens;
 
 pub use comfort::*;
 pub use host_effects::*;
@@ -210,6 +212,7 @@ pub use timing::*;
 pub use tracking::*;
 pub use ui_panels::*;
 pub use warm_world::*;
+pub use worldgen_lens::WorldgenLensLayer;
 
 use diagnostic_panel::XrDiagnosticPanel;
 pub use frame_pipeline_reporter::{
@@ -765,6 +768,8 @@ pub struct McloneSceneHost {
     crosshair_visible: bool,
     travel_assist_mode: GameTravelAssistMode,
     selection_outline: SelectionOutlineRenderer,
+    worldgen_lens: worldgen_lens::WorldgenLensState,
+    worldgen_lens_renderer: WorldColorMeshRenderer,
     world_gui_renderer: WorldGuiRenderer,
     world_gui_overlay_renderer: WorldGuiRenderer,
     // Screen-space HUD renderer for the flat (mono) view topology (tactical 168
@@ -2851,6 +2856,48 @@ impl McloneSceneHost {
     ) -> Result<XrWorldOverlayStats> {
         let overlay_target = RenderFrameTarget::color(target.color_view, target.size);
         let selection_outline = self.current_xr_selection_outline();
+        let lens_position =
+            (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
+        let lens_mesh = if self.worldgen_lens.active_layer().is_some() {
+            let topology = self
+                .active_world
+                .runtime
+                .as_ref()
+                .map_or(HorizontalTopology::UNBOUNDED, |runtime| {
+                    runtime.client().topology()
+                });
+            let loaded_chunks = self
+                .active_world
+                .runtime
+                .as_ref()
+                .map(|runtime| {
+                    runtime
+                        .client()
+                        .loaded_chunk_positions()
+                        .collect::<std::collections::BTreeSet<_>>()
+                })
+                .unwrap_or_default();
+            self.worldgen_lens.prepare_mesh(
+                self.active_world.scene.seed,
+                self.active_world.scene.world_generation_profile,
+                topology,
+                lens_position,
+                &loaded_chunks,
+            )
+        } else {
+            None
+        };
+        self.worldgen_lens_renderer
+            .render_multiview(
+                device,
+                queue,
+                encoder,
+                overlay_target,
+                target.depth,
+                render_views,
+                lens_mesh,
+            )
+            .context("render XR worldgen lens multiview")?;
         self.selection_outline
             .render_multiview(
                 device,
@@ -4277,6 +4324,45 @@ impl McloneSceneHost {
             });
         }
         let selection_start = collect_split_timing.then(|| self.services.clock.now());
+        let lens_mesh = if self.worldgen_lens.active_layer().is_some() {
+            let topology = self
+                .active_world
+                .runtime
+                .as_ref()
+                .map_or(HorizontalTopology::UNBOUNDED, |runtime| {
+                    runtime.client().topology()
+                });
+            let loaded_chunks = self
+                .active_world
+                .runtime
+                .as_ref()
+                .map(|runtime| {
+                    runtime
+                        .client()
+                        .loaded_chunk_positions()
+                        .collect::<std::collections::BTreeSet<_>>()
+                })
+                .unwrap_or_default();
+            self.worldgen_lens.prepare_mesh(
+                self.active_world.scene.seed,
+                self.active_world.scene.world_generation_profile,
+                topology,
+                render_view.camera_position,
+                &loaded_chunks,
+            )
+        } else {
+            None
+        };
+        self.worldgen_lens_renderer.render_in_slot(
+            device,
+            queue,
+            &mut encoder,
+            RenderFrameTarget::color(target.color_view, target.size),
+            target.depth,
+            render_view,
+            lens_mesh,
+            view_slot,
+        );
         self.selection_outline.render_in_slot(
             device,
             queue,

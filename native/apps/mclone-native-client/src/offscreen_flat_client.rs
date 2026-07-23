@@ -2105,6 +2105,12 @@ fn configure_screenshot_scene(
     host.driver
         .host_mut()
         .set_mono_debug_diagnostics_visible(options.debug_pane);
+    if let Some(target_layer) = options.worldgen_lens {
+        host.driver.host_mut().toggle_worldgen_lens();
+        while host.driver.host().worldgen_lens_layer() != Some(target_layer) {
+            host.driver.host_mut().cycle_worldgen_lens();
+        }
+    }
     host.driver
         .host_mut()
         .set_mono_camera_view(options.camera_view);

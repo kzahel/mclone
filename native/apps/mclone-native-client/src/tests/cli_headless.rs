@@ -673,6 +673,7 @@ fn cli_parses_full_frame_screenshot_options() {
                 hud: true,
                 frame_pipeline_overlay: false,
                 debug_pane: true,
+                worldgen_lens: None,
                 player_collision_box: true,
                 blink_debug: true,
                 controller_focus: true,
@@ -700,6 +701,29 @@ fn cli_parses_frame_pipeline_overlay_screenshot_flag() {
     };
     assert!(options.hud);
     assert!(options.frame_pipeline_overlay);
+}
+
+#[test]
+fn cli_parses_worldgen_lens_screenshot_layer() {
+    let cli = Cli::parse([
+        "--screenshot".to_owned(),
+        "/tmp/mclone-worldgen-lens.png".to_owned(),
+        "--screenshot-worldgen-lens".to_owned(),
+        "hydrology".to_owned(),
+        "--screenshot-debug-pane".to_owned(),
+        "true".to_owned(),
+    ])
+    .unwrap();
+
+    let Cli::HeadlessScreenshot { options } = cli else {
+        panic!("expected screenshot CLI");
+    };
+    assert_eq!(
+        options.worldgen_lens,
+        Some(mclone_scene::WorldgenLensLayer::Hydrology)
+    );
+    assert!(options.hud);
+    assert!(options.debug_pane);
 }
 
 #[test]

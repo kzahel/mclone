@@ -905,6 +905,25 @@ impl McloneSceneHost {
                 lines.insert(1, format!("GATE FAIL {failure}"));
             }
         }
+        let topology = self
+            .active_world
+            .runtime
+            .as_ref()
+            .map_or(HorizontalTopology::UNBOUNDED, |runtime| {
+                runtime.client().topology()
+            });
+        let mut lens_lines = self.worldgen_lens.inspection_lines(
+            self.active_world.scene.seed,
+            self.active_world.scene.world_generation_profile,
+            topology,
+            Vec3::new(
+                snapshot.eye.x as f32,
+                snapshot.eye.y as f32,
+                snapshot.eye.z as f32,
+            ),
+        );
+        lens_lines.append(&mut lines);
+        lines = lens_lines;
         DebugOverlay::new("XR DEBUG", lines)
     }
 

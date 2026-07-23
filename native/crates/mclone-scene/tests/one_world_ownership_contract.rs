@@ -122,6 +122,8 @@ const SCENE_HOST_FIELDS: &[&str] = &[
     "crosshair_visible",
     "travel_assist_mode",
     "selection_outline",
+    "worldgen_lens",
+    "worldgen_lens_renderer",
     "world_gui_renderer",
     "world_gui_overlay_renderer",
     "mono_gui",
@@ -177,7 +179,7 @@ fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
     assert_eq!(slot_fields, DRAWABLE_WORLD_SLOT_FIELDS);
     assert_eq!(slot_fields.len(), 21);
     assert_eq!(host_fields, SCENE_HOST_FIELDS);
-    assert_eq!(host_fields.len(), 85);
+    assert_eq!(host_fields.len(), 87);
     assert_eq!(host.matches("active_world: DrawableWorldSlot").count(), 1);
     assert_eq!(
         host.matches("standby_world: Option<DrawableWorldSlot>")
