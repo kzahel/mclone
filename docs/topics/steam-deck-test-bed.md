@@ -165,6 +165,20 @@ suspend the Deck. The commands fail explicitly outside an active Gamescope
 session and affect only the internal panel; they do not blank a docked external
 display.
 
+The Gamescope convar is a forced state: Gamescope does not clear it merely
+because ordinary input arrives. Before disabling the connector, the wrapper
+therefore deploys and arms a one-shot, non-grabbing user service that watches
+the built-in Deck controller's read-only HID reports. The next mapped Deck
+button press clears the convar and exits the watcher. Touch and motion alone
+are deliberately ignored, while the physical power button retains its system
+suspend semantics. If the watcher cannot arm, `screen-off` refuses to blank
+the panel. The byte masks follow the upstream Linux
+[`hid-steam`](https://github.com/torvalds/linux/blob/master/drivers/hid/hid-steam.c)
+Deck report layout. `screen-on` over SSH remains the fallback recovery path.
+The end-to-end 2026-07-23 hardware check disabled `card0-eDP-1`, retained SSH,
+then observed an A-button report on `/dev/hidraw2` and restored the connector
+to `enabled`.
+
 Turn the screen on before interactive play, screenshot acceptance through the
 live compositor, or presentation/performance measurement. Leaving the
 connector disabled is appropriate for idle availability and CPU-only or

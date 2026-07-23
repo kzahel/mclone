@@ -7,6 +7,7 @@ STAGE_DIR="$REPO_ROOT/dist/steamdeck"
 PAYLOAD_RUN="$REPO_ROOT/scripts/steam-deck/payload-run.sh"
 ASSET_PACK="$REPO_ROOT/reference/minecraft-1.17.1/extracted.zip"
 STEAMRT4_BUILD_SCRIPT="$REPO_ROOT/scripts/steam-deck-build-steamrt4.sh"
+SCREEN_WAKE_HELPER="$REPO_ROOT/scripts/steam-deck/screen-wake.py"
 
 DECK_BUILDER=${MCLONE_STEAM_DECK_BUILDER:-host}
 case "$DECK_BUILDER" in
@@ -157,15 +158,34 @@ set_deck_internal_screen_sleep()
     local requested=$1
     local expected=$2
     local label=$3
+    local remote_helper=none
     require_deck
+    if [[ $requested == true ]]; then
+        test -f "$SCREEN_WAKE_HELPER" ||
+            die "screen wake helper not found: $SCREEN_WAKE_HELPER"
+        local remote_helper_dir="/home/$DECK_USER/.local/state/mclone-deck/screen-wake"
+        remote_helper="$remote_helper_dir/screen-wake.py"
+        ssh_deck \
+            "/usr/bin/install -d -m 700 $(printf '%q' "$remote_helper_dir")"
+        rsync \
+            -a \
+            --chmod=Fu=rwx,Fgo= \
+            -e "ssh ${SSH_OPTIONS[*]}" \
+            "$SCREEN_WAKE_HELPER" \
+            "$DECK_USER@$DECK_HOST:$remote_helper"
+    fi
     ssh_deck \
-        "/usr/bin/bash -s -- $(printf '%q' "$requested") $(printf '%q' "$expected") $(printf '%q' "$label")" \
+        "/usr/bin/bash -s -- $(printf '%q' "$requested") $(printf '%q' "$expected") $(printf '%q' "$label") $(printf '%q' "$remote_helper")" \
         <<'REMOTE'
 set -euo pipefail
 requested=$1
 expected=$2
 label=$3
+remote_helper=$4
 runtime_dir="/run/user/$(id -u)"
+watcher_unit=mclone-deck-screen-wake.service
+watcher_state_dir="$HOME/.local/state/mclone-deck/screen-wake"
+watcher_ready="$watcher_state_dir/ready"
 
 gamescope_display=
 for path in "$runtime_dir"/gamescope-[0-9]*; do
@@ -183,6 +203,60 @@ command -v gamescopectl >/dev/null 2>&1 || {
     echo "steam-deck: gamescopectl is unavailable" >&2
     exit 1
 }
+
+stop_watcher()
+{
+    systemctl --user stop "$watcher_unit" >/dev/null 2>&1 || true
+    systemctl --user reset-failed "$watcher_unit" >/dev/null 2>&1 || true
+    rm -f -- "$watcher_ready"
+}
+
+if [[ $requested == true ]]; then
+    [[ -x $remote_helper ]] || {
+        echo "steam-deck: deployed screen wake helper is unavailable" >&2
+        exit 1
+    }
+    stop_watcher
+    install -d -m 700 "$watcher_state_dir"
+    systemd-run \
+        --user \
+        --unit="$watcher_unit" \
+        --collect \
+        --quiet \
+        /usr/bin/env \
+        "XDG_RUNTIME_DIR=$runtime_dir" \
+        "GAMESCOPE_WAYLAND_DISPLAY=$gamescope_display" \
+        /usr/bin/python3 \
+        "$remote_helper" \
+        "$watcher_ready"
+    for _attempt in {1..50}; do
+        [[ -f $watcher_ready ]] && break
+        systemctl --user is-active --quiet "$watcher_unit" || {
+            journalctl --user -u "$watcher_unit" -n 20 --no-pager >&2 || true
+            echo "steam-deck: local-input screen wake watcher failed to start" >&2
+            exit 1
+        }
+        sleep 0.1
+    done
+    [[ -f $watcher_ready ]] || {
+        stop_watcher
+        echo "steam-deck: local-input screen wake watcher did not arm" >&2
+        exit 1
+    }
+else
+    stop_watcher
+fi
+
+cleanup_failed_sleep()
+{
+    if [[ $requested == true ]]; then
+        XDG_RUNTIME_DIR=$runtime_dir \
+        GAMESCOPE_WAYLAND_DISPLAY=$gamescope_display \
+            gamescopectl drm_sleep_internal_screen false >/dev/null 2>&1 || true
+        stop_watcher
+    fi
+}
+trap cleanup_failed_sleep ERR
 
 XDG_RUNTIME_DIR=$runtime_dir \
 GAMESCOPE_WAYLAND_DISPLAY=$gamescope_display \
@@ -211,9 +285,11 @@ done
         >&2
     exit 1
 }
+trap - ERR
 printf \
-    'Deck internal screen: %s (%s=%s); SSH remains reachable\n' \
-    "$label" "${connector##*/}" "$state"
+    'Deck internal screen: %s (%s=%s); SSH remains reachable%s\n' \
+    "$label" "${connector##*/}" "$state" \
+    "$([[ $requested == true ]] && printf '; local Deck-button wake armed' || true)"
 REMOTE
 }
 
