@@ -13,14 +13,14 @@ use mclone_worldgen::levelgen::{
     BEACH_BIOME_ID, MCLONE_OVERWORLD_DECORATION_REVISION, MCLONE_OVERWORLD_FIELD_REVISION,
     MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_PERIOD_BLOCKS,
     MCLONE_OVERWORLD_RIVER_BIOME_ID, MCLONE_OVERWORLD_SEA_LEVEL,
-    MCLONE_OVERWORLD_STREAM_REFERENCE_RADIUS_CHUNKS, McloneOverworldLandformSample,
-    McloneOverworldSampleRegion, McloneOverworldSampleRegionRequest, McloneOverworldSampler,
-    McloneOverworldSamplingTopology, McloneOverworldStreamPlan, McloneOverworldStreamPlanAttempt,
-    McloneOverworldStreamPlanner, McloneOverworldStreamRejection, McloneOverworldSurfaceRecipe,
-    McloneOverworldTerrainSample, OCEAN_BIOME_ID, PLAINS_BIOME_ID,
+    MCLONE_OVERWORLD_STREAM_REFERENCE_RADIUS_CHUNKS, McloneOverworldBiomeRecipe,
+    McloneOverworldLandformSample, McloneOverworldSampleRegion, McloneOverworldSampleRegionRequest,
+    McloneOverworldSampler, McloneOverworldSamplingTopology, McloneOverworldStreamPlan,
+    McloneOverworldStreamPlanAttempt, McloneOverworldStreamPlanner, McloneOverworldStreamRejection,
+    McloneOverworldSurfaceRecipe, McloneOverworldTerrainSample, OCEAN_BIOME_ID, PLAINS_BIOME_ID,
     analyze_mclone_overworld_hydraulic_closure, mclone_overworld_biome_id_for_sample,
-    mclone_overworld_spawn_chunk, mclone_overworld_spawn_chunk_with_topology,
-    mclone_overworld_surface_recipe,
+    mclone_overworld_biome_recipe, mclone_overworld_spawn_chunk,
+    mclone_overworld_spawn_chunk_with_topology, mclone_overworld_surface_recipe,
 };
 
 const DEFAULT_OUTPUT_DIR: &str = "/tmp/mclone-overworld-review";
@@ -170,6 +170,15 @@ fn run() -> Result<()> {
         .join(format!("{prefix}-seabed-relief.png"));
     let bathymetry_path = config.output_dir.join(format!("{prefix}-bathymetry.png"));
     let slope_path = config.output_dir.join(format!("{prefix}-slope.png"));
+    let temperature_path = config.output_dir.join(format!("{prefix}-temperature.png"));
+    let moisture_path = config.output_dir.join(format!("{prefix}-moisture.png"));
+    let adjusted_temperature_path = config
+        .output_dir
+        .join(format!("{prefix}-adjusted-temperature.png"));
+    let recipe_path = config
+        .output_dir
+        .join(format!("{prefix}-climate-recipes.png"));
+    let climate_path = config.output_dir.join(format!("{prefix}-climate.png"));
     let fields_path = config.output_dir.join(format!("{prefix}-fields.png"));
     let biome_path = config.output_dir.join(format!("{prefix}-biomes.png"));
     let surface_recipe_path = config
@@ -201,6 +210,10 @@ fn run() -> Result<()> {
     let ocean_basin = render_map(&region.samples, ocean_basin_color);
     let seabed_relief = render_map(&region.samples, seabed_relief_color);
     let slope = render_landform_map(&landforms, slope_color);
+    let temperature = render_map(&region.samples, temperature_color);
+    let moisture = render_map(&region.samples, moisture_color);
+    let adjusted_temperature = render_landform_map(&landforms, adjusted_temperature_color);
+    let recipes = render_landform_map(&landforms, biome_recipe_color);
     let biomes = render_landform_map(&landforms, biome_color);
     let surface_recipes = render_landform_map(&landforms, surface_recipe_color);
     save_rgba(
@@ -321,6 +334,31 @@ fn run() -> Result<()> {
         &watercourses,
     )?;
     save_rgba(&slope_path, request.width, request.depth, &slope)?;
+    save_rgba(
+        &temperature_path,
+        request.width,
+        request.depth,
+        &temperature,
+    )?;
+    save_rgba(&moisture_path, request.width, request.depth, &moisture)?;
+    save_rgba(
+        &adjusted_temperature_path,
+        request.width,
+        request.depth,
+        &adjusted_temperature,
+    )?;
+    save_rgba(&recipe_path, request.width, request.depth, &recipes)?;
+    let climate = combine_maps(
+        request.width,
+        request.depth,
+        [&temperature, &moisture, &adjusted_temperature, &recipes],
+    );
+    save_rgba(
+        &climate_path,
+        request.width * 4 + MAP_GAP_PIXELS * 3,
+        request.depth,
+        &climate,
+    )?;
     let combined = combine_maps(
         request.width,
         request.depth,
@@ -360,7 +398,7 @@ fn run() -> Result<()> {
 
     let (commit, dirty) = git_state();
     let receipt = serde_json::json!({
-        "schema": 11,
+        "schema": 12,
         "profile": "mclone-overworld-v1",
         "topology": config.topology.label(),
         "fieldRevision": MCLONE_OVERWORLD_FIELD_REVISION,
@@ -397,6 +435,12 @@ fn run() -> Result<()> {
             "ruggedness": [facts.min_ruggedness, facts.max_ruggedness],
             "ridges": [facts.min_ridges, facts.max_ridges],
             "mountainDetail": [facts.min_mountain_detail, facts.max_mountain_detail],
+            "temperature": [facts.min_temperature, facts.max_temperature],
+            "moisture": [facts.min_moisture, facts.max_moisture],
+            "altitudeAdjustedTemperature": [
+                facts.min_adjusted_temperature,
+                facts.max_adjusted_temperature,
+            ],
             "oceanInterior": [facts.min_ocean_interior, facts.max_ocean_interior],
             "shelfBreakInfluence": [facts.min_shelf_break, facts.max_shelf_break],
             "oceanBasinInfluence": [facts.min_ocean_basin, facts.max_ocean_basin],
@@ -439,6 +483,16 @@ fn run() -> Result<()> {
             "openLowland": facts.open_lowland_biome_columns,
             "woodedUpland": facts.wooded_upland_biome_columns,
             "river": facts.river_biome_columns,
+        },
+        "climateRecipeCounts": {
+            "ocean": facts.ocean_recipe_columns,
+            "shore": facts.shore_recipe_columns,
+            "river": facts.river_recipe_columns,
+            "snowyAlpine": facts.snowy_alpine_recipe_columns,
+            "coolWetConifer": facts.cool_wet_conifer_recipe_columns,
+            "warmDrySteppe": facts.warm_dry_steppe_recipe_columns,
+            "temperateWoodland": facts.temperate_woodland_recipe_columns,
+            "temperateMeadow": facts.temperate_meadow_recipe_columns,
         },
         "surfaceRecipeCounts": {
             "oceanFloor": facts.ocean_floor_columns,
@@ -502,6 +556,7 @@ fn run() -> Result<()> {
         },
         "sampleFingerprint": facts.fingerprint,
         "foundationFieldFingerprint": facts.foundation_field_fingerprint,
+        "climateFingerprint": facts.climate_fingerprint,
         "terrainLanguageFingerprint": facts.terrain_language_fingerprint,
         "maps": {
             "order": ["continentalness", "relief", "ruggedness", "ridges", "mountainDetail", "surfaceY"],
@@ -513,6 +568,12 @@ fn run() -> Result<()> {
             "mountainDetail": mountain_detail_path,
             "surfaceY": surface_path,
             "baseSurfaceY": base_surface_path,
+            "climateOrder": ["temperature", "moisture", "altitudeAdjustedTemperature", "recipe"],
+            "climate": climate_path,
+            "temperature": temperature_path,
+            "moisture": moisture_path,
+            "altitudeAdjustedTemperature": adjusted_temperature_path,
+            "climateRecipes": recipe_path,
             "bathymetryOrder": ["waterDepth", "shelfBreak", "oceanBasin", "seabedRelief"],
             "bathymetry": bathymetry_path,
             "waterDepth": water_depth_path,
@@ -876,6 +937,13 @@ fn sample_json(sample: McloneOverworldLandformSample) -> serde_json::Value {
         "ridges": terrain.ridges,
         "mountainDetail": terrain.mountain_detail,
         "mountainStrength": terrain.mountain_strength(),
+        "climate": {
+            "temperature": terrain.climate.temperature,
+            "moisture": terrain.climate.moisture,
+            "altitudeAdjustedTemperature":
+                terrain.climate.altitude_adjusted_temperature(terrain.surface_y),
+            "recipe": mclone_overworld_biome_recipe(sample).label(),
+        },
         "bathymetry": {
             "oceanInterior": terrain.bathymetry.ocean_interior,
             "shelfInfluence": terrain.bathymetry.shelf_influence,
@@ -999,6 +1067,12 @@ struct RegionFacts {
     max_ridges: f64,
     min_mountain_detail: f64,
     max_mountain_detail: f64,
+    min_temperature: f64,
+    max_temperature: f64,
+    min_moisture: f64,
+    max_moisture: f64,
+    min_adjusted_temperature: f64,
+    max_adjusted_temperature: f64,
     min_ocean_interior: f64,
     max_ocean_interior: f64,
     min_shelf_break: f64,
@@ -1046,6 +1120,14 @@ struct RegionFacts {
     open_lowland_biome_columns: usize,
     wooded_upland_biome_columns: usize,
     river_biome_columns: usize,
+    ocean_recipe_columns: usize,
+    shore_recipe_columns: usize,
+    river_recipe_columns: usize,
+    snowy_alpine_recipe_columns: usize,
+    cool_wet_conifer_recipe_columns: usize,
+    warm_dry_steppe_recipe_columns: usize,
+    temperate_woodland_recipe_columns: usize,
+    temperate_meadow_recipe_columns: usize,
     ocean_floor_columns: usize,
     beach_surface_columns: usize,
     river_bed_columns: usize,
@@ -1076,6 +1158,7 @@ struct RegionFacts {
     slope_at_least_three: usize,
     fingerprint: u64,
     foundation_field_fingerprint: u64,
+    climate_fingerprint: u64,
     terrain_language_fingerprint: u64,
 }
 
@@ -1091,6 +1174,12 @@ impl RegionFacts {
         let mut max_ridges = f64::NEG_INFINITY;
         let mut min_mountain_detail = f64::INFINITY;
         let mut max_mountain_detail = f64::NEG_INFINITY;
+        let mut min_temperature = f64::INFINITY;
+        let mut max_temperature = f64::NEG_INFINITY;
+        let mut min_moisture = f64::INFINITY;
+        let mut max_moisture = f64::NEG_INFINITY;
+        let mut min_adjusted_temperature = f64::INFINITY;
+        let mut max_adjusted_temperature = f64::NEG_INFINITY;
         let mut min_ocean_interior = f64::INFINITY;
         let mut max_ocean_interior = f64::NEG_INFINITY;
         let mut min_shelf_break = f64::INFINITY;
@@ -1130,6 +1219,14 @@ impl RegionFacts {
         let mut open_lowland_biome_columns = 0;
         let mut wooded_upland_biome_columns = 0;
         let mut river_biome_columns = 0;
+        let mut ocean_recipe_columns = 0;
+        let mut shore_recipe_columns = 0;
+        let mut river_recipe_columns = 0;
+        let mut snowy_alpine_recipe_columns = 0;
+        let mut cool_wet_conifer_recipe_columns = 0;
+        let mut warm_dry_steppe_recipe_columns = 0;
+        let mut temperate_woodland_recipe_columns = 0;
+        let mut temperate_meadow_recipe_columns = 0;
         let mut ocean_floor_columns = 0;
         let mut beach_surface_columns = 0;
         let mut river_bed_columns = 0;
@@ -1157,6 +1254,7 @@ impl RegionFacts {
         let mut summit_columns = 0;
         let mut fingerprint = 0xcbf2_9ce4_8422_2325_u64;
         let mut foundation_field_fingerprint = 0xcbf2_9ce4_8422_2325_u64;
+        let mut climate_fingerprint = 0xcbf2_9ce4_8422_2325_u64;
         let mut terrain_language_fingerprint = 0xcbf2_9ce4_8422_2325_u64;
         for landform in samples {
             let sample = landform.terrain;
@@ -1170,6 +1268,15 @@ impl RegionFacts {
             max_ridges = max_ridges.max(sample.ridges);
             min_mountain_detail = min_mountain_detail.min(sample.mountain_detail);
             max_mountain_detail = max_mountain_detail.max(sample.mountain_detail);
+            min_temperature = min_temperature.min(sample.climate.temperature);
+            max_temperature = max_temperature.max(sample.climate.temperature);
+            min_moisture = min_moisture.min(sample.climate.moisture);
+            max_moisture = max_moisture.max(sample.climate.moisture);
+            let adjusted_temperature = sample
+                .climate
+                .altitude_adjusted_temperature(sample.surface_y);
+            min_adjusted_temperature = min_adjusted_temperature.min(adjusted_temperature);
+            max_adjusted_temperature = max_adjusted_temperature.max(adjusted_temperature);
             min_ocean_interior = min_ocean_interior.min(sample.bathymetry.ocean_interior);
             max_ocean_interior = max_ocean_interior.max(sample.bathymetry.ocean_interior);
             min_shelf_break = min_shelf_break.min(sample.bathymetry.shelf_break_influence);
@@ -1276,6 +1383,19 @@ impl RegionFacts {
                 MCLONE_OVERWORLD_RIVER_BIOME_ID => river_biome_columns += 1,
                 _ => {}
             }
+            let biome_recipe = mclone_overworld_biome_recipe(*landform);
+            match biome_recipe {
+                McloneOverworldBiomeRecipe::Ocean => ocean_recipe_columns += 1,
+                McloneOverworldBiomeRecipe::Shore => shore_recipe_columns += 1,
+                McloneOverworldBiomeRecipe::River => river_recipe_columns += 1,
+                McloneOverworldBiomeRecipe::SnowyAlpine => snowy_alpine_recipe_columns += 1,
+                McloneOverworldBiomeRecipe::CoolWetConifer => cool_wet_conifer_recipe_columns += 1,
+                McloneOverworldBiomeRecipe::WarmDrySteppe => warm_dry_steppe_recipe_columns += 1,
+                McloneOverworldBiomeRecipe::TemperateWoodland => {
+                    temperate_woodland_recipe_columns += 1
+                }
+                McloneOverworldBiomeRecipe::TemperateMeadow => temperate_meadow_recipe_columns += 1,
+            }
             let surface_recipe = mclone_overworld_surface_recipe(*landform);
             match surface_recipe {
                 McloneOverworldSurfaceRecipe::OceanFloor => ocean_floor_columns += 1,
@@ -1304,6 +1424,8 @@ impl RegionFacts {
                 .chain(sample.ruggedness.to_bits().to_le_bytes())
                 .chain(sample.ridges.to_bits().to_le_bytes())
                 .chain(sample.mountain_detail.to_bits().to_le_bytes())
+                .chain(sample.climate.temperature.to_bits().to_le_bytes())
+                .chain(sample.climate.moisture.to_bits().to_le_bytes())
                 .chain(sample.bathymetry.ocean_interior.to_bits().to_le_bytes())
                 .chain(sample.bathymetry.shelf_influence.to_bits().to_le_bytes())
                 .chain(
@@ -1377,6 +1499,19 @@ impl RegionFacts {
                 foundation_field_fingerprint =
                     foundation_field_fingerprint.wrapping_mul(0x0000_0100_0000_01b3);
             }
+            for byte in sample
+                .climate
+                .temperature
+                .to_bits()
+                .to_le_bytes()
+                .into_iter()
+                .chain(sample.climate.moisture.to_bits().to_le_bytes())
+                .chain(adjusted_temperature.to_bits().to_le_bytes())
+                .chain([biome_recipe_tag(biome_recipe)])
+            {
+                climate_fingerprint ^= u64::from(byte);
+                climate_fingerprint = climate_fingerprint.wrapping_mul(0x0000_0100_0000_01b3);
+            }
         }
         heights.sort_unstable();
         slopes.sort_by(f64::total_cmp);
@@ -1430,6 +1565,12 @@ impl RegionFacts {
             max_ridges,
             min_mountain_detail,
             max_mountain_detail,
+            min_temperature,
+            max_temperature,
+            min_moisture,
+            max_moisture,
+            min_adjusted_temperature,
+            max_adjusted_temperature,
             min_ocean_interior,
             max_ocean_interior,
             min_shelf_break,
@@ -1477,6 +1618,14 @@ impl RegionFacts {
             open_lowland_biome_columns,
             wooded_upland_biome_columns,
             river_biome_columns,
+            ocean_recipe_columns,
+            shore_recipe_columns,
+            river_recipe_columns,
+            snowy_alpine_recipe_columns,
+            cool_wet_conifer_recipe_columns,
+            warm_dry_steppe_recipe_columns,
+            temperate_woodland_recipe_columns,
+            temperate_meadow_recipe_columns,
             ocean_floor_columns,
             beach_surface_columns,
             river_bed_columns,
@@ -1507,6 +1656,7 @@ impl RegionFacts {
             slope_at_least_three,
             fingerprint,
             foundation_field_fingerprint,
+            climate_fingerprint,
             terrain_language_fingerprint,
         }
     }
@@ -2092,6 +2242,55 @@ fn slope_color(sample: McloneOverworldLandformSample) -> [u8; 4] {
     lerp_color([32, 65, 84, 255], [239, 223, 190, 255], sample.slope / 1.5)
 }
 
+fn temperature_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    let amount = sample.climate.temperature * 0.5 + 0.5;
+    if amount < 0.5 {
+        lerp_color([42, 96, 176, 255], [222, 230, 203, 255], amount * 2.0)
+    } else {
+        lerp_color(
+            [222, 230, 203, 255],
+            [214, 83, 45, 255],
+            (amount - 0.5) * 2.0,
+        )
+    }
+}
+
+fn moisture_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    let amount = sample.climate.moisture * 0.5 + 0.5;
+    lerp_color([201, 157, 73, 255], [32, 111, 128, 255], amount)
+}
+
+fn adjusted_temperature_color(sample: McloneOverworldLandformSample) -> [u8; 4] {
+    let amount = sample
+        .terrain
+        .climate
+        .altitude_adjusted_temperature(sample.terrain.surface_y)
+        * 0.5
+        + 0.5;
+    if amount < 0.5 {
+        lerp_color([225, 245, 250, 255], [117, 157, 181, 255], amount * 2.0)
+    } else {
+        lerp_color(
+            [117, 157, 181, 255],
+            [203, 106, 50, 255],
+            (amount - 0.5) * 2.0,
+        )
+    }
+}
+
+fn biome_recipe_color(sample: McloneOverworldLandformSample) -> [u8; 4] {
+    match mclone_overworld_biome_recipe(sample) {
+        McloneOverworldBiomeRecipe::Ocean => [25, 76, 145, 255],
+        McloneOverworldBiomeRecipe::Shore => [222, 207, 143, 255],
+        McloneOverworldBiomeRecipe::River => [42, 119, 181, 255],
+        McloneOverworldBiomeRecipe::SnowyAlpine => [229, 240, 242, 255],
+        McloneOverworldBiomeRecipe::CoolWetConifer => [44, 92, 75, 255],
+        McloneOverworldBiomeRecipe::WarmDrySteppe => [185, 162, 73, 255],
+        McloneOverworldBiomeRecipe::TemperateWoodland => [42, 105, 55, 255],
+        McloneOverworldBiomeRecipe::TemperateMeadow => [112, 176, 76, 255],
+    }
+}
+
 fn biome_color(sample: McloneOverworldLandformSample) -> [u8; 4] {
     match mclone_overworld_biome_id_for_sample(sample) {
         OCEAN_BIOME_ID => [25, 76, 145, 255],
@@ -2100,6 +2299,19 @@ fn biome_color(sample: McloneOverworldLandformSample) -> [u8; 4] {
         PLAINS_BIOME_ID => [112, 176, 76, 255],
         MCLONE_OVERWORLD_FOREST_BIOME_ID => [42, 105, 55, 255],
         _ => [211, 64, 198, 255],
+    }
+}
+
+fn biome_recipe_tag(recipe: McloneOverworldBiomeRecipe) -> u8 {
+    match recipe {
+        McloneOverworldBiomeRecipe::Ocean => 0,
+        McloneOverworldBiomeRecipe::Shore => 1,
+        McloneOverworldBiomeRecipe::River => 2,
+        McloneOverworldBiomeRecipe::SnowyAlpine => 3,
+        McloneOverworldBiomeRecipe::CoolWetConifer => 4,
+        McloneOverworldBiomeRecipe::WarmDrySteppe => 5,
+        McloneOverworldBiomeRecipe::TemperateWoodland => 6,
+        McloneOverworldBiomeRecipe::TemperateMeadow => 7,
     }
 }
 

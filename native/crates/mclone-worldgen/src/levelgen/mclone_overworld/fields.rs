@@ -3,7 +3,7 @@ use mclone_core::{AxisTopology, ChunkPos, HorizontalTopology};
 use crate::noise::{GradientNoise2d, SeedDomain, ValueNoise2d};
 
 pub const MCLONE_OVERWORLD_SEA_LEVEL: i32 = 63;
-pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-12";
+pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-13";
 pub const MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS: i32 = 2;
 pub const MCLONE_OVERWORLD_PERIOD_BLOCKS: i32 = 6_144;
 pub const MCLONE_OVERWORLD_PERIOD_CHUNKS: u32 = 384;
@@ -27,6 +27,10 @@ const WETLAND_POOL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7765_7431);
 const OCEAN_BASIN_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6261_7331);
 const SEABED_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6261_7332);
 const SEABED_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6261_7333);
+const TEMPERATURE_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7465_6d31);
+const TEMPERATURE_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7465_6d32);
+const MOISTURE_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6d6f_6931);
+const MOISTURE_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6d6f_6932);
 
 const CONTINENT_LARGE_SCALE: i32 = 2_048;
 const CONTINENT_MEDIUM_SCALE: i32 = 1_024;
@@ -47,6 +51,10 @@ const WETLAND_POOL_SCALE: i32 = 96;
 const OCEAN_BASIN_SCALE: i32 = 1_536;
 const SEABED_LARGE_SCALE: i32 = 384;
 const SEABED_DETAIL_SCALE: i32 = 96;
+const TEMPERATURE_LARGE_SCALE: i32 = 1_536;
+const TEMPERATURE_DETAIL_SCALE: i32 = 384;
+const MOISTURE_LARGE_SCALE: i32 = 1_024;
+const MOISTURE_DETAIL_SCALE: i32 = 256;
 const RIVER_GRADE_SAMPLE_DISTANCE: f64 = 16.0;
 const RIVER_MAX_RELEVANT_DISTANCE: f64 = 64.0;
 const STREAM_FALL_MAX_FLOW_LEVEL: f64 = 7.0;
@@ -155,6 +163,24 @@ impl McloneOverworldBathymetrySample {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub struct McloneOverworldClimateSample {
+    pub temperature: f64,
+    pub moisture: f64,
+}
+
+impl McloneOverworldClimateSample {
+    pub const TEMPERATE: Self = Self {
+        temperature: 0.0,
+        moisture: 0.0,
+    };
+
+    pub fn altitude_adjusted_temperature(self, surface_y: i32) -> f64 {
+        let altitude_cooling = (f64::from(surface_y - 72).max(0.0) / 96.0).clamp(0.0, 0.75);
+        (self.temperature - altitude_cooling).clamp(-1.0, 1.0)
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct McloneOverworldWatercourseSample {
     pub distance: f64,
     pub channel_influence: f64,
@@ -226,6 +252,7 @@ pub struct McloneOverworldTerrainSample {
     pub ruggedness: f64,
     pub ridges: f64,
     pub mountain_detail: f64,
+    pub climate: McloneOverworldClimateSample,
     pub bathymetry: McloneOverworldBathymetrySample,
     pub base_surface_y: i32,
     pub watercourse: McloneOverworldWatercourseSample,
@@ -331,6 +358,10 @@ pub struct McloneOverworldSampler {
     ocean_basin: GradientNoise2d,
     seabed_large: GradientNoise2d,
     seabed_detail: GradientNoise2d,
+    temperature_large: ValueNoise2d,
+    temperature_detail: GradientNoise2d,
+    moisture_large: ValueNoise2d,
+    moisture_detail: GradientNoise2d,
 }
 
 impl McloneOverworldSampler {
@@ -387,6 +418,22 @@ impl McloneOverworldSampler {
             ocean_basin: topology.gradient_noise(seed, OCEAN_BASIN_DOMAIN, OCEAN_BASIN_SCALE),
             seabed_large: topology.gradient_noise(seed, SEABED_LARGE_DOMAIN, SEABED_LARGE_SCALE),
             seabed_detail: topology.gradient_noise(seed, SEABED_DETAIL_DOMAIN, SEABED_DETAIL_SCALE),
+            temperature_large: topology.value_noise(
+                seed,
+                TEMPERATURE_LARGE_DOMAIN,
+                TEMPERATURE_LARGE_SCALE,
+            ),
+            temperature_detail: topology.gradient_noise(
+                seed,
+                TEMPERATURE_DETAIL_DOMAIN,
+                TEMPERATURE_DETAIL_SCALE,
+            ),
+            moisture_large: topology.value_noise(seed, MOISTURE_LARGE_DOMAIN, MOISTURE_LARGE_SCALE),
+            moisture_detail: topology.gradient_noise(
+                seed,
+                MOISTURE_DETAIL_DOMAIN,
+                MOISTURE_DETAIL_SCALE,
+            ),
         }
     }
 
@@ -422,6 +469,22 @@ impl McloneOverworldSampler {
                 .sample_at(world_x + fine_warp_x, world_z + fine_warp_z)
                 * 0.30)
             .clamp(-1.0, 1.0);
+        let temperature_detail = self
+            .temperature_detail
+            .sample(world_x as i32, world_z as i32);
+        let moisture_detail = self.moisture_detail.sample(world_x as i32, world_z as i32);
+        let temperature_large = self.temperature_large.sample(
+            (world_x + temperature_detail * 176.0).round() as i32,
+            (world_z + moisture_detail * 176.0).round() as i32,
+        );
+        let moisture_large = self.moisture_large.sample(
+            (world_x - moisture_detail * 144.0).round() as i32,
+            (world_z + temperature_detail * 144.0).round() as i32,
+        );
+        let climate = McloneOverworldClimateSample {
+            temperature: (temperature_large * 0.78 + temperature_detail * 0.22).clamp(-1.0, 1.0),
+            moisture: (moisture_large * 0.74 + moisture_detail * 0.26).clamp(-1.0, 1.0),
+        };
         let bathymetry = self.sample_bathymetry(world_x as i32, world_z as i32, continentalness);
         let base_surface_y = if continentalness <= 0.0 {
             bathymetry.floor_y()
@@ -446,6 +509,7 @@ impl McloneOverworldSampler {
             ruggedness,
             ridges,
             mountain_detail,
+            climate,
             bathymetry,
             base_surface_y,
             watercourse,
@@ -909,6 +973,8 @@ mod tests {
         assert!((left.ruggedness - right.ruggedness).abs() < 1.0e-12);
         assert!((left.ridges - right.ridges).abs() < 1.0e-12);
         assert!((left.mountain_detail - right.mountain_detail).abs() < 1.0e-12);
+        assert!((left.climate.temperature - right.climate.temperature).abs() < 1.0e-12);
+        assert!((left.climate.moisture - right.climate.moisture).abs() < 1.0e-12);
         assert!((left.bathymetry.ocean_interior - right.bathymetry.ocean_interior).abs() < 1.0e-12);
         assert!(
             (left.bathymetry.shelf_influence - right.bathymetry.shelf_influence).abs() < 1.0e-12
@@ -1108,7 +1174,21 @@ mod tests {
             let sample = sampler.sample(x, z);
             assert!((-1.0..=1.0).contains(&sample.ruggedness));
             assert!((0.0..=1.0).contains(&sample.ridges));
+            assert!((-1.0..=1.0).contains(&sample.climate.temperature));
+            assert!((-1.0..=1.0).contains(&sample.climate.moisture));
         }
+    }
+
+    #[test]
+    fn altitude_adjustment_cools_highlands_without_changing_raw_climate() {
+        let climate = McloneOverworldClimateSample {
+            temperature: 0.4,
+            moisture: -0.2,
+        };
+        assert_eq!(climate.altitude_adjusted_temperature(72), 0.4);
+        assert!((climate.altitude_adjusted_temperature(120) + 0.1).abs() < 1.0e-12);
+        assert_eq!(climate.temperature, 0.4);
+        assert_eq!(climate.moisture, -0.2);
     }
 
     #[test]
@@ -1128,6 +1208,30 @@ mod tests {
                 (13_826_408_511_758_480_080, 4_606_201_729_120_264_332),
                 (4_602_433_175_868_524_518, 4_605_762_744_906_985_117),
                 (13_827_819_183_377_043_075, 4_603_495_361_005_022_309),
+            ]
+        );
+    }
+
+    #[test]
+    fn selected_signed_points_pin_climate_fields() {
+        let samples = [
+            (12_345, 0, 0),
+            (-98_765, -3_176, 520),
+            (8_675_309, 1_960, -1_528),
+        ]
+        .map(|(seed, x, z)| {
+            let sample = McloneOverworldSampler::new(seed).sample(x, z);
+            (
+                sample.climate.temperature.to_bits(),
+                sample.climate.moisture.to_bits(),
+            )
+        });
+        assert_eq!(
+            samples,
+            [
+                (4_603_662_754_231_223_194, 13_797_514_369_469_026_053),
+                (4_604_792_002_519_359_514, 4_602_285_638_028_510_205),
+                (4_585_722_008_247_260_483, 4_599_867_704_838_024_287),
             ]
         );
     }
