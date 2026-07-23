@@ -148,6 +148,10 @@ series implements the same concern, normally reuse the document slug in its
   shared-contract × consumer reuse matrix, and the cross-cutting blockers that
   keep new features from re-forking across the client lanes and offscreen
   validation hosts.
+- [`steam-deck-test-bed.md`](steam-deck-test-bed.md): active physical Steam
+  Deck provisioning and validation lane — official Devkit Client deployment,
+  native Linux staging and asset-root contracts, Gaming Mode acceptance, and
+  reproducible handheld performance evidence.
 - [`release-distribution-and-updates.md`](release-distribution-and-updates.md):
   accepted first-party/store distribution architecture — a stable Tauri
   launcher for managed direct desktop installs, store-owned updates for
