@@ -160,3 +160,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `game-title-and-brand-identity` — public-title research and decision record:
   repo-derived naming brief, Wilderfold recommendation, retained fallbacks,
   preliminary availability evidence, and clearance/adoption gates
+- `worldgen-debug-lens` — production-derived biome, landform, surface, and
+  hydrology diagnostics projected through a cached terrain overlay and
+  crosshair inspector without entering chunk persistence or generation state
