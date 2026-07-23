@@ -19,6 +19,7 @@ members = [
   "crates/mclone-render",
   "crates/mclone-render-session",
   "crates/mclone-server",
+  "crates/mclone-terrain-view",
   "crates/mclone-ui",
   "crates/mclone-worldgen",
   "crates/mclone-xr-graphics",
@@ -76,6 +77,7 @@ mclone-protocol = { path = "crates/mclone-protocol" }
 mclone-render = { path = "crates/mclone-render" }
 mclone-render-session = { path = "crates/mclone-render-session" }
 mclone-server = { path = "crates/mclone-server" }
+mclone-terrain-view = { path = "crates/mclone-terrain-view" }
 mclone-ui = { path = "crates/mclone-ui" }
 mclone-worldgen = { path = "crates/mclone-worldgen" }
 mclone-xr-graphics = { path = "crates/mclone-xr-graphics" }

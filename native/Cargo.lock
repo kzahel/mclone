@@ -1870,6 +1870,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "mclone-terrain-view"
+version = "0.0.0"
+dependencies = [
+ "mclone-worldgen",
+ "naga",
+ "wgpu",
+]
+
+[[package]]
 name = "mclone-ui"
 version = "0.0.0"
 dependencies = [

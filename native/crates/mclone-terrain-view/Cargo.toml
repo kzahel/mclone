@@ -1,0 +1,17 @@
+[package]
+name = "mclone-terrain-view"
+version = "0.0.0"
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+mclone-worldgen.workspace = true
+wgpu.workspace = true
+
+[dev-dependencies]
+naga.workspace = true
+
+[lib]
+name = "mclone_terrain_view"
+path = "src/lib.rs"
