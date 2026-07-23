@@ -2,12 +2,16 @@
 
 Topic: `gpu-procedural-terrain`
 
-Status: accepted research direction recorded 2026-07-23. No implementation
-tactical is open yet. The first recommended proof is GPU-resident,
-presentation-only terrain for `mclone-overworld-v1`: establish coarse visible
-coverage immediately, refine it progressively, and let ordinary authoritative
-chunks replace it when they become ready. Optional GPU-backed canonical chunk
-generation and volumetric terrain remain separate later experiments.
+Status: accepted research direction recorded 2026-07-23. Tactical
+[`227-web-terrain-lab-vertical-slice.md`](../tactical/227-web-terrain-lab-vertical-slice.md)
+is active. Its first proving surface is a deployable, web-first Terrain Lab
+backed by shared Rust/WGPU terrain-view contracts. It should establish coarse
+GPU-resident coverage immediately, zoom from continent-scale summaries into
+progressively refined terrain, and compare the result with the CPU source. A
+thin native profiling host and eventual in-game LOD/map consumers should reuse
+that engine rather than becoming separate implementations. Optional GPU-backed
+canonical chunk generation and volumetric terrain remain separate later
+experiments.
 
 ## Scope
 
@@ -17,8 +21,14 @@ This topic owns the continuing direction for:
 - showing coarse terrain before canonical chunks are generated, lit, meshed,
   and published;
 - progressively refining one visible terrain representation through nested
-  sample spacings such as 16, 8, 4, and 2 blocks;
+  sample spacings from continent-scale footprints down through 16, 8, 4, and 2
+  blocks;
+- scale-aware summaries that let one far sample represent hundreds or
+  thousands of chunks without first generating those chunks;
 - retaining procedural terrain on the GPU without CPU-built per-tile meshes;
+- a standalone Terrain Lab for fast macro-to-local generator iteration, its
+  shared engine boundary, and its relationship to native diagnostics and
+  in-game consumers;
 - optionally using a GPU as an asynchronous authoritative-worldgen worker;
 - presentation lighting appropriate to coarse GPU terrain;
 - later sparse volumetric density, occupancy, meshing, or ray-casting
@@ -212,6 +222,90 @@ system remains a valid first implementation substrate. A tactical should
 measure tile, clipmap, and hybrid shapes before choosing a durable cache
 identity.
 
+### Extreme-Distance Scale Hierarchy
+
+At multi- and tens-of-kilometers range, chunks should stop being the unit of
+generation. The renderer should evaluate a bounded grid of scale-aware terrain
+summaries directly. Increasing the sample spacing lets the same small GPU tile
+cover exponentially more world area:
+
+| Sample spacing | Area covered by 64 x 64 cells | Equivalent chunk width |
+| ---: | ---: | ---: |
+| 2 blocks | 128 x 128 blocks | 8 chunks |
+| 16 blocks | 1,024 x 1,024 blocks | 64 chunks |
+| 64 blocks | 4,096 x 4,096 blocks | 256 chunks |
+| 256 blocks | 16,384 x 16,384 blocks | 1,024 chunks |
+| 1,024 blocks | 65,536 x 65,536 blocks | 4,096 chunks |
+
+A 64-cell tile may require a 65th shared-edge sample or neighbor lookup; the
+table describes its world footprint, not a locked buffer layout. At
+256-block spacing, one such tile covers the area of 1,048,576 ordinary chunks.
+That is the intended meaning of grouping chunks: the system does not enumerate
+or aggregate a million `GeneratedChunk` objects merely to produce the tile.
+
+The distance bands above are illustrative. Runtime level selection should use
+projected screen-space error, terrain roughness, viewport, and device budget.
+A flat ocean may remain at a very coarse level much closer to the camera than a
+mountain skyline. Stable powers-of-two identities are still valuable for
+cache reuse and parent/child transitions.
+
+One center-point height is insufficient at coarse scale. A logical far summary
+may include:
+
+```rust
+struct FarTerrainSummary {
+    representative_y: i16,
+    min_y: i16,
+    max_y: i16,
+    water_y: i16,
+    roughness: u16,
+    dominant_material: u16,
+    water_coverage: u8,
+    feature_mask: u8,
+}
+```
+
+This is conceptual rather than a locked ABI. The important information is:
+
+- a representative surface for drawing;
+- minimum, maximum, variance, or another conservative relief measure for
+  screen-space error and skyline preservation;
+- water presence and fractional coverage for coastlines and large lakes;
+- dominant or blended surface language rather than one arbitrary center
+  material; and
+- compact flags for major features that must survive at the current scale.
+
+The hierarchy needs two production modes:
+
+1. **Direct coarse synthesis:** when no finer data exists, evaluate filtered
+   generator fields over the footprint and produce the summary immediately.
+2. **Truthful roll-up:** when child summaries or canonical terrain are already
+   resident, reduce them into the same parent identity so edited or refined
+   facts can improve the coarse representation.
+
+Direct synthesis must never wait for children; otherwise the design recreates
+the Voxy pregeneration problem. Roll-up is a later accuracy and edit-overlay
+path, not a prerequisite for first sight.
+
+Scale-aware evaluation must also be band-limited. Sampling all fine noise at
+the center of a 512-block footprint produces temporal shimmer, aliasing, and
+false geography. Each level should omit or analytically filter field bands
+smaller than its footprint and retain the large-scale continent, climate,
+watershed, and relief bands. Nonlinear composition may require explicit
+per-level field definitions or conservative multi-sampling rather than simply
+dropping the last noise octaves.
+
+Major features need scale-specific proxies. A distant river can be a water
+coverage or centerline fact before it becomes block-accurate banks; a
+settlement can be a footprint or landmark flag before its buildings are
+meshed. Features should appear when their projected importance warrants them,
+not only when the renderer reaches one-block samples.
+
+Every dispatch should use a tile-local coordinate frame plus a stable
+high/low world-origin decomposition. Tens-of-kilometers coverage is easy to
+address but will expose `f32` camera-relative jitter if large absolute
+coordinates leak directly into vertex positions.
+
 ## Workstream A: GPU Visual-First Terrain
 
 This is the recommended first experiment.
@@ -246,7 +340,9 @@ struct ProceduralSurfaceSample {
 This is conceptual, not a locked ABI. A storage texture or packed storage
 buffer may be a better physical format. The logical facts should remain
 separate from one GPU layout so format changes do not redefine terrain
-semantics.
+semantics. At extreme distance, `FarTerrainSummary` is the corresponding
+footprint-aware value; it is not assumed to be the same physical record as a
+near-field surface sample.
 
 Rendering should begin with a reusable indexed grid or vertex-ID-generated
 grid that reads the resident sample data. The first proof should avoid:
@@ -497,9 +593,10 @@ budget-selected implementations, not a desktop-owned gameplay fork.
   canonical generation.
 - **Steam Deck:** first physical handheld target for a smaller/coarser
   GPU-resident horizon under real memory, thermal, and frame-budget evidence.
-- **Browser/WebGPU:** retain the same visual contract where compute, storage,
-  and device limits admit it. Worker/device ownership must follow the browser
-  host boundary rather than leaking terrain policy into TypeScript.
+- **Browser/WebGPU:** primary Terrain Lab product and a required game-client
+  reuse lane. Retain the same visual contract where compute, storage, and
+  device limits admit it. Worker/device ownership must follow the browser host
+  boundary rather than leaking terrain policy into TypeScript.
 - **Flat Android:** use measured mobile Vulkan/WebGPU capability and memory
   policy; no assumption that desktop defaults transfer.
 - **Android XR / Quest:** may disable the path, reduce range, rebuild only in
@@ -512,6 +609,145 @@ Every renderer-visible path must support mono, per-eye, and multiview. Terrain
 compute is view-independent and should be shared by both eyes; presentation
 still uses each view's own transforms and projections.
 
+## Terrain Lab Product Direction
+
+The recommended answer is not to choose permanently between a desktop binary,
+a website, and an in-game feature. Build one shared terrain-view engine and
+give it three deliberately different hosts:
+
+```text
+shared generator semantics + terrain summary/evaluation contracts
+  |
+  +-> web Terrain Lab: primary exploration and iteration product
+  +-> native diagnostic host: precise profiling, capture, and adapter testing
+  `-> game consumers: Far LOD, overview map, minimap, or tabletop view
+```
+
+The working product name is **Terrain Lab**; **Terrain Generation Lab** is a
+clear UI title if the shorter name is too ambiguous. `/terrain/` is the natural
+candidate deployment route alongside `/animals/` and `/structures/`, but a
+tactical should lock the final route and package name.
+
+### Primary Web Product
+
+Terrain Lab should be a standalone, deployable web application and the fastest
+normal way to inspect a generator change. It should be usable from a desktop
+browser and a phone without starting a server, joining a world, waiting for
+canonical chunks, or navigating the game camera.
+
+Its central interaction is one continuous scale:
+
+- begin with complete continent- or region-scale coverage;
+- pan and zoom through the hierarchy without changing tools;
+- switch between a topographic/map view and a 3D orbit or flyover view;
+- refine the selected area toward block-scale surface samples;
+- expose which scale, field bands, tiles, and representation are currently
+  visible; and
+- preserve seed, position, zoom, profile revision, view mode, and selected
+  diagnostic layers in a shareable URL.
+
+The first useful controls are seed, profile/field revision, position, scale,
+presentation mode, and diagnostic layer. Later authoring controls can expose
+typed profile parameters. The browser must not accept arbitrary shader text or
+reimplement generator composition in TypeScript merely to make a slider easy.
+A parameter edit creates a new source revision, invalidates affected resident
+tiles, restores complete coarse coverage first, and then refines.
+
+High-value diagnostic views include:
+
+- rendered terrain, height, slope/roughness, water coverage, climate, material,
+  field-band contribution, and feature masks;
+- split or swipe A/B comparison between revisions or parameter sets;
+- CPU reference versus GPU result with numeric and visual error;
+- tile boundaries, selected levels, parent/child handoff, and cache residency;
+- dispatch, first-coverage, refinement, draw, and resident-memory timing; and
+- pinned sites or camera bookmarks that make generator review reproducible.
+
+Phone support is part of the product shape, not a promise of desktop range.
+The UI should be responsive and touch-native, while the engine selects smaller
+tile budgets, fewer layers, and coarser refinement when necessary. A device
+without an admitted WebGPU compute path may offer a clearly labeled,
+lower-resolution CPU/WASM reference mode or an honest unsupported message. It
+must not report CPU fallback timing as GPU evidence.
+
+The desired development loop is one command that watches Rust/WASM, WGSL, and
+the web shell; rebuilds the affected layer; restores URL-addressed view state;
+and redraws coarse coverage immediately. Shader-only hot reload may be a
+development convenience if deployed shaders still come from the same
+content-hashed source. Rebuild and first-redraw latency should be measured as a
+product metric rather than assumed to be fast.
+
+### Relationship To Existing Labs
+
+Asset Lab and Structure Lab prove the Vite/React/Zustand catalogue shell,
+responsive controls, shareable URL state, Playwright capture, aggregate
+deployment, and subpath hosting. They mostly ship build-time semantic JSON and
+baked display artifacts. Texture Lab is a local mutable authoring service
+because its curation workflow writes files and invokes local pipelines.
+
+Terrain Lab is a fourth shape:
+
+- it can reuse the established web-product shell and aggregate deployment;
+- it needs a live Rust/WASM and WebGPU evaluator rather than only baked assets;
+- it should remain read-only with respect to the repository and saved worlds
+  in its first slice;
+- its shareable state is a compact generator/view recipe, not a generated
+  multi-kilometer mesh; and
+- it must exercise the same evaluator, summary, scheduling, and rendering
+  contracts intended for the game.
+
+React or another small web shell may own DOM controls, responsive layout, URL
+encoding, and browser capability presentation. It must not own terrain
+semantics, level selection policy, tile validity, or CPU/GPU comparison truth.
+Those remain in shared Rust and renderer contracts. Unlike Structure Lab,
+Terrain Lab should not bake every possible view ahead of time.
+
+The existing aggregate native-web deployment can eventually stage the lab
+under its own route. Terrain Lab should have a smaller dedicated WASM entry
+surface or split payload rather than forcing a phone visitor to boot a complete
+game session. It may share compiled crates and shader sources with
+`mclone-web-client`; sharing does not require sharing the full application
+binary.
+
+### Native Diagnostic Host
+
+A minimal native host remains useful, but it is supporting infrastructure, not
+the product boundary. Native is the strongest lane for:
+
+- GPU timestamps and vendor/backend comparisons;
+- RenderDoc or platform graphics-debugger capture;
+- deterministic offscreen screenshots and large stress sweeps;
+- testing ranges that exceed mobile browser budgets; and
+- quickly separating WebGPU/browser-host cost from kernel cost.
+
+This could be a small dedicated app binary, an offscreen test harness, or a
+diagnostic mode over an existing thin host. The first tactical should choose
+the least code that can instantiate the shared service. It must not acquire
+its own terrain evaluator, level policy, or UI model.
+
+### In-Game Reuse
+
+The game should consume the shared terrain-view service, not embed the complete
+Terrain Lab UI. Candidate consumers include:
+
+- the current Far LOD replacement;
+- an overview or world-map renderer;
+- a minimap;
+- an XR tabletop or god-view presentation; and
+- seed/world previews before canonical play is ready.
+
+These consumers may choose different cameras, labels, budgets, and overlay
+policy while sharing tile identities, field revisions, summaries, GPU
+pipelines, and coverage/refinement scheduling. A map might render
+`FarTerrainSummary` into color contours; the horizon renderer might displace a
+grid from the same summaries. Neither should regenerate the underlying fields
+through a private path.
+
+The lab can deliberately expose more diagnostics than the game, and the game
+can combine procedural terrain with authoritative edits and chunks in ways the
+first lab does not. Reuse is at the semantic and service boundary, not at the
+React component or whole-screen level.
+
 ## Ownership Direction
 
 The shared-first boundary should be:
@@ -522,19 +758,25 @@ The shared-first boundary should be:
 - `mclone-server`: generator-owned planning and canonical readiness, consuming
   an abstract completion backend rather than `wgpu`;
 - `mclone-app-runtime`: bounded visual coverage/refinement scheduling, source
-  revisions, capability policy, and optional compute-service assembly;
+  revisions, capability policy, Terrain Lab request/view state that is useful
+  outside one host, and optional compute-service assembly;
 - `mclone-render-session`: resident procedural-tile or clipmap lifecycle,
   replacement readiness, and upload/compute admission;
 - `mclone-render`: GPU buffers/textures, compute and draw pipelines, material
   sampling, timestamps, mono/per-eye/multiview drawing, and resource rebuild;
 - `mclone-scene`: active-world orchestration, real/procedural arbitration,
   frame budgets, world switching, and diagnostics; and
-- app/platform crates: adapter/device creation, surface/session lifecycle, raw
-  capability collection, and presentation only.
+- Terrain Lab web/native apps: URL/DOM or CLI/capture mechanics, adapter/device
+  creation, surface lifecycle, and presentation of shared diagnostics; and
+- game app/platform crates: adapter/device creation, surface/session
+  lifecycle, raw capability collection, and presentation only.
 
-The exact crate split is deferred until the first proof identifies a real
-shared API. Terrain rules must not be hand-copied into app crates or hidden as
-renderer policy merely because WGSL consumes them.
+The exact crate and app names are deferred until the first proof identifies a
+real shared API. A small shared terrain-view crate may become justified if the
+request, hierarchy, summary, and diagnostics contracts do not fit cleanly in
+the owners above. Terrain rules must not be hand-copied into app crates, a
+standalone TypeScript package, or hidden as renderer policy merely because
+WGSL consumes them.
 
 GPU meshing of ordinary CPU-authoritative chunks is adjacent but independent.
 It may produce a larger near-field throughput win and applies to every profile,
@@ -546,30 +788,41 @@ directly from its generator.
 ### Experiment 0: Contract And Baseline
 
 - define the visual source identity and logical surface sample;
+- define the scale-aware summary, parent/child identity, and screen-space error
+  inputs;
 - record the current CPU Far LOD generation, CPU mesh, payload, upload, and
   settled draw costs for `mclone-overworld-v1`;
 - add or reuse GPU timestamp attribution for compute and draw;
 - select fixed plane and periodic-cylinder seeds/sites; and
-- retain the existing CPU path as a bit-for-bit off/fallback control.
+- retain the existing CPU path as a bit-for-bit off/fallback control;
+- establish a URL-addressed Terrain Lab shell that can show CPU reference
+  output before the GPU kernel exists; and
+- define rebuild-to-first-redraw latency as an explicit iteration metric.
 
 ### Experiment 1: One GPU Surface Tile
 
 - implement the smallest shared `wgpu` compute kernel for continuous Mclone
   terrain fields;
 - write height, water, material, and normal/ambient facts to resident GPU data;
-- draw one tile through a reusable grid in mono and multiview;
+- draw one tile through a reusable grid in the web Terrain Lab and the smallest
+  native validation host;
 - perform no readback and no canonical chunk mutation;
 - capture and inspect pixels at the first drawable milestone; and
 - compare the tile against CPU source samples.
 
 ### Experiment 2: Coverage-First Progressive Refinement
 
-- cover a fixed visible region at 16-block spacing;
-- refine selected regions through 8, 4, and 2 blocks;
+- cover a fixed visible region immediately with a bounded 64-cell-style grid;
+- prove at least one extreme level where one tile represents hundreds of
+  chunks in each dimension without materializing those chunks;
+- band-limit coarse field evaluation and inspect stability while panning;
+- refine selected regions through powers-of-two levels down to 16, 8, 4, and 2
+  blocks;
 - retain parents until children are complete;
 - prove exact desired coverage with the existing structural/depth oracle;
 - implement aligned seam, skirt, morph, or dither policy; and
-- measure stationary startup plus sustained movement.
+- measure stationary startup, pan/zoom, sustained movement, and
+  rebuild-to-first-redraw latency.
 
 ### Experiment 3: Real-Terrain Handoff And Structured Overlays
 
@@ -606,6 +859,7 @@ does not silently authorize or commit to the next.
 ### Correctness And Coherence
 
 - fixed-seed CPU/GPU point and region comparisons;
+- direct-coarse versus child-roll-up summary comparisons where both exist;
 - maximum and percentile surface-height error;
 - water-presence, water-height, material, biome-tint, and category mismatch;
 - exact X-periodic cylinder seams where the profile supports them;
@@ -619,6 +873,8 @@ does not silently authorize or commit to the next.
 ### Rendered Output
 
 - capture and inspect the first tile before building the full hierarchy;
+- inspect a continuous lab zoom from continent scale to the local surface;
+- inspect desktop and phone-sized Terrain Lab layouts and touch interaction;
 - inspect fixed lowland, coast, mountain, river, snow, and planned-stream
   views;
 - inspect refinement and real-terrain transitions in motion;
@@ -627,6 +883,7 @@ does not silently authorize or commit to the next.
 
 ### Performance
 
+- edit/rebuild-to-first-coarse-redraw time in the Terrain Lab;
 - CPU terrain sampling and mesh time avoided;
 - CPU worker occupancy and main-thread acceptance time;
 - request and upload bytes;
@@ -670,6 +927,14 @@ submission.
   normal chunks?
 - What field precision and world-coordinate decomposition avoid visible
   jitter kilometers from the origin?
+- Which summary statistics preserve mountain silhouettes, islands, river
+  networks, and authored landmarks at each footprint?
+- At what level should a parent switch from direct procedural synthesis to a
+  roll-up of resident canonical or edited descendants?
+- Is a small dedicated Terrain Lab WASM payload practical while sharing the
+  production evaluator and WGPU pipelines with the game?
+- Should the minimal native diagnostic be a dedicated app, an offscreen
+  harness, or a mode of an existing host after the shared service exists?
 - At what point do volumetric bricks justify their memory and update cost over
   a surface shell?
 
@@ -683,6 +948,8 @@ submission.
 - [`dynamic-point-lights.md`](dynamic-point-lights.md)
 - [`performance.md`](performance.md)
 - [`world-height-and-volumetric-streaming.md`](world-height-and-volumetric-streaming.md)
+- [`structure-lab.md`](structure-lab.md)
 - [`web-worker-runtime-ownership.md`](web-worker-runtime-ownership.md)
+- [`../native-web.md`](../native-web.md)
 - [`../runtime-data-model.md`](../runtime-data-model.md)
 - [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md)
