@@ -48,7 +48,11 @@ baked four-block fall into an already-valid Y63 major river. Closure,
 authoritative fluid wakes, hotspot generation performance, a 3,600-frame
 movement soak, maps, and final RD16 pixels pass. The compromise deliberately
 does not claim a drainage network, general highland rivers, confluences, or
-globally monotonic macro flow.
+globally monotonic macro flow. Interactive review subsequently accepted the
+mechanical fixed-point proof but rejected the grass-topped containment shelf
+and tiny visible fall. Tactical
+[`222`](../tactical/222-bounded-valley-stream-structures.md) now owns a
+48-96-block, structure-shaped, valley-following replacement.
 
 ## Scope
 
@@ -933,15 +937,15 @@ Human Review 3 accepted the result as more natural and less geometric.
 
 ## Next Work
 
-Field revision 11 is the current human review point. Inspect the RD16
-`(183,-177)` card interactively: the important subjective questions are
-whether the broad Y63 river valley reads naturally, whether the small Y67
-source-pool/tributary/fall landmark is legible and charming, and whether its
-seven-block support band looks authored rather than engineered. One
-river-to-shelf-to-deep-basin composition remains an objective review gap.
-General highland rivers and globally monotonic drainage remain deliberately
-absent; do not reconstruct them from the provisional local flow vector. Caves,
-structures, and broad biome expansion remain parked until this review.
+Field revision 11 remains the mechanical baseline but its raised tributary is
+visually rejected. Tactical 222 next establishes reusable procedural starts,
+boxes, references, and clipped pieces, then plans a complete 48-96-block
+stream from a known headwater to the Y63 river sink. It must follow and carve
+existing valley terrain, descend monotonically through flat reaches and
+one-/two-block transitions, appear in LOD, and retain the wake-every-water-cell
+fixed-point proof. One river-to-shelf-to-deep-basin composition remains an
+objective review gap. General drainage-network semantics remain deliberately
+absent.
 
 ## Related
 

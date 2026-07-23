@@ -10,8 +10,12 @@ non-monotonic level sequence. Field revision 11 now keeps major rivers flat at
 Y63 and confines raised water to a complete bounded source-pool, short upper
 tributary, fall, and major-river sink landmark. Its map, hydraulic,
 runtime-wake, hotspot-performance, movement, and RD16 pixel gates pass. It is
-ready for human review without claiming a true drainage network, general
-highland rivers, confluences, or an integrated river-to-deep-basin outlet.
+mechanically accepted but interactive review rejected its raised support shelf
+and tiny visible fall as an artificial retaining-wall composition. Tactical
+[`222`](222-bounded-valley-stream-structures.md) replaces it with a bounded
+multi-chunk valley-following stream. This tactical still does not claim a true
+drainage network, general highland rivers, confluences, or an integrated
+river-to-deep-basin outlet.
 
 Topic: `mclone-overworld-generation`
 
@@ -492,6 +496,13 @@ Execution record 2026-07-23:
   exceeds budget, none exceeds 2x, and all scheduled-fluid and fluid-work
   counters remain zero. The final RD16 card is saved outside the repository at
   `/tmp/mclone-rev11-final-card`.
+
+Human review result: **mechanically accepted, visually rejected**. The wake
+proof is valuable and remains a required regression gate, but the seven-block
+support band raises low terrain into a grass-topped shelf where the tributary
+meets the lowered major-river valley. The roughly two-column falling section
+reads as a tiny outlet in a retaining wall. Do not tune this shape by widening
+the berm; Tactical 222 owns its bounded valley-following replacement.
 
 ### Slice 3: reuse and platform closeout after corrective human acceptance
 

@@ -5,6 +5,13 @@ runtime is implemented in the live Rust tree. Earlier claims that
 structure starts/references and buried treasure were landed described the
 retired TypeScript engine and are retained only in Git history.
 
+Tactical
+[`222`](tactical/222-bounded-valley-stream-structures.md) is the first active
+native consumer of this direction. It begins with a reusable pure procedural
+placement/start/bounding-box/reference/clipping kernel and a terrain-affecting
+Mclone stream. It does not by itself claim the full persisted vanilla status
+pipeline, templates, jigsaw, or structure-family parity.
+
 Durable architecture notes for Minecraft Java 1.17.1 overworld structures in `mclone`.
 
 This document is about vanilla `StructureFeature` generation, not every worldgen feature that looks structure-like. It should be read with:

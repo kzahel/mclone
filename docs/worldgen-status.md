@@ -44,9 +44,14 @@ its locally downhill steps may later rise. Field revision 11 instead keeps
 major rivers at Y63 and permits raised water only in sparse, short
 source-pool/upper-tributary/fall/major-river-sink landmarks. Closure,
 authoritative wake, hotspot performance, movement, map, and RD16 evidence
-pass; interactive quality review is next. This is not a drainage graph:
+pass. Interactive review accepted revision 11's hydraulic stability but
+rejected its terrain treatment: the local support band becomes a raised
+grass-topped shelf with a tiny waterfall outlet. This is not a drainage graph:
 general highland rivers, confluences, discharge, globally monotonic macro
-drainage, and one integrated river-to-deep-basin outlet remain open.
+drainage, and one integrated river-to-deep-basin outlet remain open. Tactical
+[`222`](tactical/222-bounded-valley-stream-structures.md) is active to replace
+it with a bounded multi-chunk stream that follows and carves an existing
+valley through reusable procedural structure starts and clipped pieces.
 
 Compatibility safety is recorded in the
 [`world-generation-profiles` ledger](topics/world-generation-profiles.md#compatibility-safety-ledger).

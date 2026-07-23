@@ -121,6 +121,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   deterministic guides/BoM, programmatic-SEO distribution, and a prompt-
   iteration credit economy that meters bespoke AI authoring while keeping
   discovery and play free; does not reopen the read-only first proof
+- `procedural-structure-starts` — reusable vanilla-shaped placement, start,
+  bounding-box, reference, and clipped-piece machinery, first exercised by
+  bounded terrain-affecting Mclone streams
 - `local-couch-multiplayer` — 1-4 local participants, ordinary realm player
   endpoints, shared multi-presentation residency, split/auxiliary views,
   helper-builder roles, and mixed XR-plus-flat couch play
