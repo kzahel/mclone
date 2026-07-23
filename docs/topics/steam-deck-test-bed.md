@@ -143,6 +143,35 @@ Valve's upload preparation, an incremental clean `rsync`, and registration as
 `Devkit Game: mclone`. `deploy` also launches interactive play. `launch`
 restarts an already uploaded interactive build.
 
+The payload launcher passes `--platform-profile steamos` for interactive and
+live-presentation runs. This is a launch-policy hint carried by the ordinary
+SteamRT4 Linux binary, not a separate Deck executable:
+
+- it requests borderless fullscreen so Gamescope supplies the active output
+  extent instead of applying X11 logical-window DPI expansion;
+- `--width` and `--height` are physical fallback dimensions for window
+  creation, rather than logical dimensions;
+- the swapchain and screen-space UI stay at the compositor-provided output
+  resolution;
+- the 3D world stays native through a 1080-pixel-high / 1920x1080 pixel
+  budget, then scales down proportionally while preserving the active
+  display's aspect ratio; and
+- resize events recompute that automatic world scale, so dock/undock can move
+  between handheld-native and capped external-display rendering.
+
+On the built-in 1280x800 panel the automatic world scale is `1.0`. A 4K
+external output uses a native 3840x2160 swapchain and UI with a 1920x1080 world
+target. Ultrawide and 16:10 outputs derive both world dimensions from the
+actual output rather than forcing 16:9. The launch profile must not be treated
+as proof that the built-in panel is active.
+
+The first profile slice intentionally fixes screen-space UI at native output
+resolution. A future persisted display preference may offer native-output UI
+versus world-target UI; the latter is a valid performance/aesthetic choice,
+but should be explicit rather than an invisible consequence of lowering
+world resolution. Graphics/display preferences must remain machine-local and
+must not be cloud-synchronized across dissimilar displays.
+
 `smoke` temporarily registers a bounded command that:
 
 1. captures a deterministic 1280x800 offscreen frame from a fixed camera;
@@ -329,6 +358,26 @@ standard x86-64 loader. All resolved inside the pinned SDK.
   extracted/packed asset drift before calling this a fully clean production
   payload or establishing the release performance threshold.
 
+## 2026-07-23 SteamOS Presentation Profile
+
+The shared Linux binary now accepts `--platform-profile steamos`, and the Deck
+payload supplies it for play plus both bounded live-presentation lanes.
+`--width`/`--height` now reach window mode as physical fallback dimensions
+instead of being discarded while the app creates a hard-coded logical
+1280x900 window.
+
+Host validation passed all 177 native-client tests, including the SteamOS
+profile parser, handheld-native scale, 4K-to-1080p world cap, and
+aspect-preserving 16:10/ultrawide cases. Commit `eb3b1a7e` was then rebuilt
+from a clean source tree with the pinned SDK and Rust 1.97.0; its binary hash
+is `10abc615367e1a443004f6d1b13915d022031b872f56b6a988ee0c2cbcc4fd0f`.
+
+Device upload and screenshot/presentation validation remain pending because
+the paired Deck became unreachable after the build. The next device run must
+confirm that Gamescope reports a fullscreen 1280x800 output/world target,
+scale `1.0`, native UI, and no recurrence of the old 2667x1875 X11 logical-DPI
+surface before this becomes the release baseline.
+
 ## Bring-up Ledger
 
 - [x] Retail Steam Deck Developer Mode enabled.
@@ -342,5 +391,6 @@ standard x86-64 loader. All resolved inside the pinned SDK.
 - [x] Build the production payload inside a pinned SteamRT4 SDK container.
 - [x] Deploy and smoke a clean-source SteamRT4 artifact.
 - [x] Record SteamRT4 timedemo and live presentation evidence.
+- [ ] Validate the SteamOS presentation profile at native 1280x800.
 - [ ] Record interactive Linux/Gamescope/controller acceptance.
 - [ ] Record the first reproducible release performance baseline.

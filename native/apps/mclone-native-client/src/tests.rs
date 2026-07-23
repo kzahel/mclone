@@ -1,5 +1,5 @@
 use super::*;
-use crate::cli::{StartupWaitPolicy, XrDebugUiScreen};
+use crate::cli::{NativeWindowOptions, StartupWaitPolicy, WindowPlatformProfile, XrDebugUiScreen};
 use mclone_core::{BlockStateId, ChunkRevision, ChunkStatus};
 
 fn screenshot_cli(

@@ -292,6 +292,7 @@ fn cli_parses_fullbright_toggle() {
         Cli::Window {
             scene: SceneOptions::default(),
             render_options: TexturedSectionRenderOptions::default(),
+            window: NativeWindowOptions::default(),
             start_intent: WindowStartIntent::InWorld,
             startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
             frame_report: None,
@@ -345,6 +346,7 @@ fn cli_parses_lighting_false_as_runtime_bypass() {
                 force_fullbright: true,
                 ..TexturedSectionRenderOptions::default()
             },
+            window: NativeWindowOptions::default(),
             start_intent: WindowStartIntent::InWorld,
             startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
             frame_report: None,
@@ -370,6 +372,7 @@ fn cli_parses_lighting_false_as_runtime_bypass() {
                 ..SceneOptions::default()
             },
             render_options: TexturedSectionRenderOptions::default(),
+            window: NativeWindowOptions::default(),
             start_intent: WindowStartIntent::InWorld,
             startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
             frame_report: None,

@@ -143,11 +143,54 @@ fn cli_defaults_to_window() {
         Cli::Window {
             scene: SceneOptions::default(),
             render_options: TexturedSectionRenderOptions::default(),
+            window: NativeWindowOptions::default(),
             start_intent: WindowStartIntent::InWorld,
             startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
             frame_report: None,
         }
     );
+}
+
+#[test]
+fn cli_parses_steamos_window_profile_and_physical_extent() {
+    let cli = Cli::parse([
+        "--platform-profile".to_owned(),
+        "steamos".to_owned(),
+        "--width".to_owned(),
+        "1280".to_owned(),
+        "--height".to_owned(),
+        "800".to_owned(),
+    ])
+    .unwrap();
+    let Cli::Window { window, .. } = cli else {
+        panic!("expected window mode");
+    };
+
+    assert_eq!(
+        window,
+        NativeWindowOptions {
+            platform_profile: WindowPlatformProfile::SteamOs,
+            initial_width: 1280,
+            initial_height: 800,
+        }
+    );
+}
+
+#[test]
+fn cli_rejects_platform_profile_outside_window_mode() {
+    let error = Cli::parse([
+        "--platform-profile".to_owned(),
+        "steamos".to_owned(),
+        "--timedemo".to_owned(),
+    ])
+    .unwrap_err()
+    .to_string();
+    assert!(error.contains("applies only to window mode"));
+
+    let error = Cli::parse(["--platform-profile".to_owned(), "handheld".to_owned()])
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("expects desktop or steamos"));
 }
 
 #[test]
@@ -157,6 +200,7 @@ fn cli_parses_window_menu_start_intent() {
         Cli::Window {
             scene: SceneOptions::default(),
             render_options: TexturedSectionRenderOptions::default(),
+            window: NativeWindowOptions::default(),
             start_intent: WindowStartIntent::Menu,
             startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
             frame_report: None,
@@ -168,6 +212,7 @@ fn cli_parses_window_menu_start_intent() {
         Cli::Window {
             scene: SceneOptions::default(),
             render_options: TexturedSectionRenderOptions::default(),
+            window: NativeWindowOptions::default(),
             start_intent: WindowStartIntent::Menu,
             startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
             frame_report: None,
@@ -182,6 +227,7 @@ fn cli_parses_startup_wait_policy() {
         Cli::Window {
             scene: SceneOptions::default(),
             render_options: TexturedSectionRenderOptions::default(),
+            window: NativeWindowOptions::default(),
             start_intent: WindowStartIntent::InWorld,
             startup_wait: StartupWaitPolicy::Idle,
             frame_report: None,
@@ -193,6 +239,7 @@ fn cli_parses_startup_wait_policy() {
         Cli::Window {
             scene: SceneOptions::default(),
             render_options: TexturedSectionRenderOptions::default(),
+            window: NativeWindowOptions::default(),
             start_intent: WindowStartIntent::InWorld,
             startup_wait: StartupWaitPolicy::Progress,
             frame_report: None,
@@ -252,6 +299,7 @@ fn cli_parses_local_world_dir() {
                 ..SceneOptions::default()
             },
             render_options: TexturedSectionRenderOptions::default(),
+            window: NativeWindowOptions::default(),
             start_intent: WindowStartIntent::InWorld,
             startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
             frame_report: None,
@@ -380,6 +428,7 @@ fn cli_parses_world_root_and_transient_catalog_mode() {
                 ..SceneOptions::default()
             },
             render_options: TexturedSectionRenderOptions::default(),
+            window: NativeWindowOptions::default(),
             start_intent: WindowStartIntent::InWorld,
             startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
             frame_report: None,
@@ -395,6 +444,7 @@ fn cli_parses_world_root_and_transient_catalog_mode() {
                 ..SceneOptions::default()
             },
             render_options: TexturedSectionRenderOptions::default(),
+            window: NativeWindowOptions::default(),
             start_intent: WindowStartIntent::InWorld,
             startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
             frame_report: None,
@@ -415,6 +465,7 @@ fn cli_parses_window_frame_report_options() {
         Cli::Window {
             scene: SceneOptions::default(),
             render_options: TexturedSectionRenderOptions::default(),
+            window: NativeWindowOptions::default(),
             start_intent: WindowStartIntent::InWorld,
             startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
             frame_report: Some(WindowFrameReportOptions {

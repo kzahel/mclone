@@ -15,7 +15,7 @@ RESULT_DIR="$RESULT_ROOT/$RUN_ID"
 
 case "$MODE" in
     play)
-        exec "$BIN" --menu
+        exec "$BIN" --platform-profile steamos --menu
         ;;
     smoke|perf)
         ;;
@@ -61,6 +61,7 @@ if [ "$MODE" = smoke ]; then
         2>"$RESULT_DIR/screenshot.stderr.log"
 
     "$BIN" \
+        --platform-profile steamos \
         --window-frame-report "$RESULT_DIR/present.json" \
         --window-frame-report-frames 300 \
         --start-in-world true \
@@ -86,6 +87,7 @@ else
         2>"$RESULT_DIR/timedemo.stderr.log"
 
     "$BIN" \
+        --platform-profile steamos \
         --window-frame-report "$RESULT_DIR/present.json" \
         --window-frame-report-frames 3600 \
         --start-in-world true \

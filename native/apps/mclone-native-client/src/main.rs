@@ -416,12 +416,14 @@ fn main() -> Result<()> {
         Cli::Window {
             scene,
             render_options,
+            window,
             start_intent,
             startup_wait,
             frame_report,
         } => run_window(
             scene,
             render_options,
+            window,
             start_intent,
             startup_wait,
             frame_report,

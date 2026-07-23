@@ -3,6 +3,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
+use mclone_app_runtime::frame_render::{MIN_FLAT_RENDER_SCALE, scaled_frame_size};
 use mclone_app_runtime::{DEFAULT_STARTUP_READINESS_TIMEOUT, RuntimePollDiagnostics};
 use mclone_assets::AssetSource;
 use mclone_input::{
@@ -15,14 +16,18 @@ use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
 use mclone_ui::{GameUiAction, GuiScale, Point};
 use serde_json::{Value, json};
 use winit::application::ApplicationHandler;
+use winit::dpi::PhysicalSize;
 use winit::event::{
     DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent,
 };
 use winit::event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
-use winit::window::{CursorGrabMode, Window, WindowId};
+use winit::window::{CursorGrabMode, Fullscreen, Window, WindowId};
 
-use crate::cli::{SceneOptions, StartupWaitPolicy, WindowFrameReportOptions, WindowStartIntent};
+use crate::cli::{
+    NativeWindowOptions, SceneOptions, StartupWaitPolicy, WindowFrameReportOptions,
+    WindowPlatformProfile, WindowStartIntent,
+};
 use crate::frame_pacing::{
     FramePacing, FramePacingMode, FrameTimingStats, RedrawSchedule, elapsed_ms,
     next_capped_redraw_deadline, redraw_schedule,
@@ -41,18 +46,24 @@ const RENDER_RESOURCE_REBUILD_KEY: KeyCode = KeyCode::F8;
 const RENDER_SCALE_REBUILD_KEY: KeyCode = KeyCode::F9;
 const DESKTOP_RENDER_SCALE_PRESETS: [f32; 4] = [DEFAULT_RENDER_SCALE, 0.5, 0.75, 1.5];
 const RENDER_SCALE_PRESET_EPSILON: f32 = 0.000_1;
+const STEAMOS_WORLD_RENDER_MAX_HEIGHT: u32 = 1080;
+const STEAMOS_WORLD_RENDER_MAX_PIXELS: u64 = 1920 * 1080;
 const UI_V2_HIT_DEBUG_ENV: &str = "MCLONE_UI_V2_HIT_DEBUG";
 
 pub(crate) fn run_window(
     scene: SceneOptions,
     render_options: TexturedSectionRenderOptions,
+    window_options: NativeWindowOptions,
     start_intent: WindowStartIntent,
     startup_wait: StartupWaitPolicy,
     frame_report: Option<WindowFrameReportOptions>,
 ) -> Result<()> {
     let assets = WindowSceneAssets::load()?;
     log::info!(
-        "native window startup seed={} initial_center=({}, {}) render_distance={} render_compile_workers={} lighting={} cadence={}/{}/{} color_profile={} remote={:?} atlas={}x{} start={:?} startup_wait={:?}",
+        "native window startup profile={} initial_physical={}x{} seed={} initial_center=({}, {}) render_distance={} render_compile_workers={} lighting={} cadence={}/{}/{} color_profile={} remote={:?} atlas={}x{} start={:?} startup_wait={:?}",
+        window_options.platform_profile.label(),
+        window_options.initial_width,
+        window_options.initial_height,
         scene.seed,
         scene.chunk_x,
         scene.chunk_z,
@@ -80,6 +91,7 @@ pub(crate) fn run_window(
         scene,
         assets,
         render_options,
+        window_options,
         start_intent,
         startup_wait,
         frame_report,
@@ -96,6 +108,26 @@ fn next_desktop_render_scale(current: f32) -> f32 {
         return DEFAULT_RENDER_SCALE;
     };
     DESKTOP_RENDER_SCALE_PRESETS[(index + 1) % DESKTOP_RENDER_SCALE_PRESETS.len()]
+}
+
+fn automatic_world_render_scale(
+    profile: WindowPlatformProfile,
+    output_size: [u32; 2],
+) -> Option<f32> {
+    if profile != WindowPlatformProfile::SteamOs {
+        return None;
+    }
+    let width = output_size[0].max(1);
+    let height = output_size[1].max(1);
+    let output_pixels = u64::from(width) * u64::from(height);
+    let height_scale = f64::from(STEAMOS_WORLD_RENDER_MAX_HEIGHT) / f64::from(height);
+    let pixel_scale = (STEAMOS_WORLD_RENDER_MAX_PIXELS as f64 / output_pixels as f64).sqrt();
+    Some(
+        height_scale
+            .min(pixel_scale)
+            .min(f64::from(DEFAULT_RENDER_SCALE))
+            .max(f64::from(MIN_FLAT_RENDER_SCALE)) as f32,
+    )
 }
 
 #[derive(Clone, Debug)]
@@ -189,6 +221,7 @@ struct ChunkApp {
     assets: WindowSceneAssets,
     scene: SceneOptions,
     render_options: TexturedSectionRenderOptions,
+    window_options: NativeWindowOptions,
     scene_driver: Option<WinitFrameDriver>,
     gamepad_collector: Option<crate::desktop_gamepad::DesktopGamepadCollector>,
     flat_input: DesktopFlatInputAdapter,
@@ -330,9 +363,42 @@ impl WindowFrameReportRecorder {
             "color_profile": render_options.color_profile.as_str(),
         });
         let surface_json = app.surface.as_ref().map(|surface| {
+            let world_size = scaled_frame_size(
+                [surface.config.width, surface.config.height],
+                surface.render_config.render_scale,
+            );
             json!({
                 "width": surface.config.width,
                 "height": surface.config.height,
+                "world_width": world_size[0],
+                "world_height": world_size[1],
+                "world_render_scale": surface.render_config.render_scale,
+                "native_ui": true,
+            })
+        });
+        let window_json = app.window.as_ref().map(|window| {
+            let inner_size = window.inner_size();
+            let monitor = window.current_monitor().map(|monitor| {
+                let size = monitor.size();
+                json!({
+                    "name": monitor.name(),
+                    "width": size.width,
+                    "height": size.height,
+                    "scale_factor": monitor.scale_factor(),
+                    "refresh_hz": monitor
+                        .refresh_rate_millihertz()
+                        .map(|millihertz| f64::from(millihertz) / 1000.0),
+                })
+            });
+            json!({
+                "platform_profile": app.window_options.platform_profile.label(),
+                "requested_initial_width": app.window_options.initial_width,
+                "requested_initial_height": app.window_options.initial_height,
+                "inner_width": inner_size.width,
+                "inner_height": inner_size.height,
+                "scale_factor": window.scale_factor(),
+                "fullscreen": window.fullscreen().is_some(),
+                "monitor": monitor,
             })
         });
         let frame_pacing_json = json!({
@@ -378,6 +444,7 @@ impl WindowFrameReportRecorder {
             "elapsed_wall_ms": elapsed_ms(self.start.elapsed()),
             "scene": scene_json,
             "render_options": render_options_json,
+            "window": window_json,
             "surface": surface_json,
             "frame_pacing": frame_pacing_json,
             "budgeted_frames": budget_counts.budgeted_frames,
@@ -572,6 +639,7 @@ impl ChunkApp {
         scene: SceneOptions,
         assets: WindowSceneAssets,
         render_options: TexturedSectionRenderOptions,
+        window_options: NativeWindowOptions,
         start_intent: WindowStartIntent,
         startup_wait: StartupWaitPolicy,
         frame_report: Option<WindowFrameReportOptions>,
@@ -606,6 +674,7 @@ impl ChunkApp {
         Self {
             scene: scene.clone(),
             render_options,
+            window_options,
             scene_driver: None,
             gamepad_collector,
             assets,
@@ -698,6 +767,43 @@ impl ChunkApp {
                 surface.render_config.render_scale
             });
         fallback
+    }
+
+    fn apply_automatic_world_render_scale(&mut self) {
+        let Some(surface) = &mut self.surface else {
+            return;
+        };
+        let Some(render_scale) = automatic_world_render_scale(
+            self.window_options.platform_profile,
+            [surface.config.width, surface.config.height],
+        ) else {
+            return;
+        };
+        if (surface.render_config.render_scale - render_scale).abs() <= RENDER_SCALE_PRESET_EPSILON
+        {
+            return;
+        }
+        surface.render_config = surface.render_config.with_render_scale(render_scale);
+        if let Some(driver) = &mut self.scene_driver {
+            driver.set_render_config(
+                &surface.device,
+                [surface.config.width, surface.config.height],
+                surface.render_config,
+            );
+        }
+        let world_size = scaled_frame_size(
+            [surface.config.width, surface.config.height],
+            surface.render_config.render_scale,
+        );
+        log::info!(
+            "automatic {} world render scale {:.3}: output={}x{} world={}x{} native_ui=true",
+            self.window_options.platform_profile.label(),
+            surface.render_config.render_scale,
+            surface.config.width,
+            surface.config.height,
+            world_size[0],
+            world_size[1],
+        );
     }
 
     fn update_camera_from_keys(&mut self, now: Instant) -> Result<()> {
@@ -1132,9 +1238,15 @@ impl ApplicationHandler for ChunkApp {
         if self.window.is_some() {
             return;
         }
-        let attrs = Window::default_attributes()
+        let mut attrs = Window::default_attributes()
             .with_title("mclone native")
-            .with_inner_size(winit::dpi::LogicalSize::new(1280, 900));
+            .with_inner_size(PhysicalSize::new(
+                self.window_options.initial_width,
+                self.window_options.initial_height,
+            ));
+        if self.window_options.platform_profile == WindowPlatformProfile::SteamOs {
+            attrs = attrs.with_fullscreen(Some(Fullscreen::Borderless(None)));
+        }
         let window = match event_loop.create_window(attrs) {
             Ok(window) => Arc::new(window),
             Err(err) => {
@@ -1154,6 +1266,27 @@ impl ApplicationHandler for ChunkApp {
                 return;
             }
         };
+        if let Some(render_scale) = automatic_world_render_scale(
+            self.window_options.platform_profile,
+            [surface.config.width, surface.config.height],
+        ) {
+            surface.render_config = surface.render_config.with_render_scale(render_scale);
+        }
+        let initial_world_size = scaled_frame_size(
+            [surface.config.width, surface.config.height],
+            surface.render_config.render_scale,
+        );
+        log::info!(
+            "native presentation profile={} fullscreen={} window_scale_factor={:.3} output={}x{} world={}x{} render_scale={:.3} native_ui=true",
+            self.window_options.platform_profile.label(),
+            window.fullscreen().is_some(),
+            window.scale_factor(),
+            surface.config.width,
+            surface.config.height,
+            initial_world_size[0],
+            initial_world_size[1],
+            surface.render_config.render_scale,
+        );
         self.frame_pacing.update_monitor(&window);
         self.frame_pacing.apply_to_surface(&mut surface);
         let asset_source = match load_asset_source() {
@@ -1226,6 +1359,7 @@ impl ApplicationHandler for ChunkApp {
                 if let Some(surface) = &mut self.surface {
                     surface.resize(size);
                 }
+                self.apply_automatic_world_render_scale();
                 if let Some(surface) = &self.surface {
                     if let Some(driver) = &mut self.scene_driver {
                         driver.resize(
