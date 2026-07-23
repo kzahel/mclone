@@ -102,6 +102,7 @@ pub struct McloneOverworldStreamPlan {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct McloneOverworldStreamColumnSample {
     pub distance: f64,
+    pub signed_distance: f64,
     pub station_blocks: f64,
     pub segment_progress: f64,
     pub segment_length: f64,
@@ -716,7 +717,13 @@ impl McloneOverworldStreamPlan {
             };
             let closest_x = start_x + dx * projection;
             let closest_z = start_z + dz * projection;
-            let distance = (f64::from(world_x) - closest_x).hypot(f64::from(world_z) - closest_z);
+            let tangent_x = dx / length.max(1.0);
+            let tangent_z = dz / length.max(1.0);
+            let offset_x = f64::from(world_x) - closest_x;
+            let offset_z = f64::from(world_z) - closest_z;
+            let cross_distance = offset_x * -tangent_z + offset_z * tangent_x;
+            let distance = offset_x.hypot(offset_z);
+            let signed_distance = distance.copysign(cross_distance);
             let candidate_station = traversed + length * projection;
             let transition = (start.water_y != end.water_y).then_some((
                 start.water_y.max(end.water_y),
@@ -735,10 +742,11 @@ impl McloneOverworldStreamPlan {
             };
             let candidate = (
                 distance,
+                signed_distance,
                 candidate_station,
                 start.water_y,
-                dx / length.max(1.0),
-                dz / length.max(1.0),
+                tangent_x,
+                tangent_z,
                 transition,
                 index,
                 projection,
@@ -747,6 +755,7 @@ impl McloneOverworldStreamPlan {
             );
             if best.as_ref().is_none_or(
                 |current: &(
+                    f64,
                     f64,
                     f64,
                     i32,
@@ -766,6 +775,7 @@ impl McloneOverworldStreamPlan {
         }
         let (
             mut distance,
+            mut signed_distance,
             _,
             mut water_y,
             tangent_x,
@@ -790,13 +800,17 @@ impl McloneOverworldStreamPlan {
         } else if is_confluence {
             STREAM_CONFLUENCE_RADIUS_BLOCKS
         } else {
-            STREAM_HALF_WIDTH_BLOCKS
+            let width_signal = self.morphology_signal(station, 0.0) * 0.70
+                + self.morphology_signal(station, 1.91) * 0.30;
+            (STREAM_HALF_WIDTH_BLOCKS + width_signal * 0.72).clamp(1.55, 2.95)
         };
         if is_headwater {
             distance = headwater_distance;
+            signed_distance = headwater_distance;
             water_y = self.nodes[0].water_y;
         } else if is_confluence {
             distance = confluence_distance;
+            signed_distance = confluence_distance;
             water_y = confluence.water_y;
         }
         let transition = (!is_headwater && !is_confluence)
@@ -811,6 +825,7 @@ impl McloneOverworldStreamPlan {
         }
         McloneOverworldStreamColumnSample {
             distance,
+            signed_distance,
             station_blocks: station,
             segment_progress,
             segment_length,
@@ -828,6 +843,16 @@ impl McloneOverworldStreamPlan {
     fn geometry_node(&self, index: usize) -> (f64, f64) {
         let [x, z] = self.geometry_bits[index];
         (f64::from_bits(x), f64::from_bits(z))
+    }
+
+    fn morphology_signal(&self, station_blocks: f64, phase_offset: f64) -> f64 {
+        let start = self.structure.key.canonical_start;
+        let phase =
+            (f64::from(start.x) * 0.754_877_666 + f64::from(start.z) * 0.569_840_29 + phase_offset)
+                .rem_euclid(std::f64::consts::TAU);
+        ((station_blocks / 18.0 + phase).sin() * 0.68
+            + (station_blocks / 7.0 + phase * 1.73).sin() * 0.32)
+            .clamp(-1.0, 1.0)
     }
 
     pub fn terrain_intent(
@@ -889,18 +914,32 @@ impl McloneOverworldStreamPlan {
         } else if column.is_headwater || column.is_confluence {
             water_y - 3
         } else {
-            water_y - 2
+            let depth_signal = self.morphology_signal(column.station_blocks, 3.47);
+            water_y - if depth_signal >= 0.18 { 3 } else { 2 }
         };
         let target_surface_y = if channel_influence > 0.0 {
             bed_y
         } else {
             let bank_run = (column.distance - column.half_width).max(0.0);
             let bank_water_y = transition.map_or(water_y, |it| it.upper_y);
-            let natural_bank_y = bank_water_y + 1 + (bank_run / 3.5).floor().min(5.0) as i32;
+            let side = column.signed_distance.signum();
+            let bank_signal = self.morphology_signal(column.station_blocks, 5.23);
+            let bank_asymmetry = side * bank_signal;
+            let collar_width = (1.35 + bank_asymmetry * 0.55).clamp(0.75, 2.0);
+            let terrace_run = (3.35 - bank_asymmetry * 0.75).clamp(2.5, 4.2);
+            let terrace_phase = (bank_signal * 1.1 + bank_asymmetry * 0.6).max(0.0);
+            let terrace_rise = ((bank_run - collar_width + terrace_phase).max(0.0) / terrace_run)
+                .floor()
+                .min(5.0) as i32;
+            let natural_bank_y = bank_water_y + 1 + terrace_rise;
             let carved_y = base_surface_y.min(natural_bank_y);
-            (f64::from(base_surface_y) * (1.0 - bank_influence)
-                + f64::from(carved_y) * bank_influence)
-                .round() as i32
+            if bank_run <= collar_width {
+                bank_water_y + 1
+            } else {
+                (f64::from(base_surface_y) * (1.0 - bank_influence)
+                    + f64::from(carved_y) * bank_influence)
+                    .round() as i32
+            }
         };
         Some(McloneOverworldStreamTerrainIntent {
             distance: column.distance,
@@ -1013,7 +1052,9 @@ fn stream_geometry_node(nodes: &[McloneOverworldStreamNode], index: usize) -> (f
     let origin = nodes[0];
     let phase = (f64::from(origin.x) * 0.754_877_666 + f64::from(origin.z) * 0.569_840_29)
         .rem_euclid(std::f64::consts::TAU);
-    let offset = (index as f64 * 0.72 + phase).sin() * 1.6 * endpoint_fade;
+    let offset = ((index as f64 * 0.72 + phase).sin() * 1.35
+        + (index as f64 * 1.31 + phase * 0.61).sin() * 0.45)
+        * endpoint_fade;
     (
         f64::from(node.x) - tangent_z / tangent_length * offset,
         f64::from(node.z) + tangent_x / tangent_length * offset,
@@ -1352,6 +1393,31 @@ mod tests {
             plan.nodes.last().expect("plan has sink").water_y,
             MCLONE_OVERWORLD_SEA_LEVEL
         );
+
+        let mut min_width = f64::INFINITY;
+        let mut max_width = f64::NEG_INFINITY;
+        let mut ordinary_depths = BTreeSet::new();
+        for node in plan
+            .nodes
+            .iter()
+            .skip(2)
+            .take(plan.nodes.len().saturating_sub(4))
+        {
+            let column = plan.sample_column(node.x, node.z);
+            min_width = min_width.min(column.half_width);
+            max_width = max_width.max(column.half_width);
+            let intent = plan
+                .terrain_intent(node.x, node.z, node.base_surface_y)
+                .expect("route node lies inside its terrain envelope");
+            if intent.drop_height == 0 && !intent.is_headwater && !intent.is_confluence {
+                ordinary_depths.insert(intent.water_y - intent.bed_y);
+            }
+        }
+        assert!(
+            max_width - min_width >= 0.45,
+            "stream width range was {min_width}..{max_width}"
+        );
+        assert_eq!(ordinary_depths, BTreeSet::from([2, 3]));
     }
 
     #[test]
