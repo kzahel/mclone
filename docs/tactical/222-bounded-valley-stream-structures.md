@@ -1,10 +1,10 @@
 # Tactical 222: Bounded Valley Stream Structures
 
-Status: active 2026-07-23. The reusable procedural-start kernel, bounded
+Status: complete 2026-07-23. The reusable procedural-start kernel, bounded
 stream plan, clipped field-revision-12 realization, hydraulic proof,
 profile-correct far LOD, SQLite reopen proof, generation comparison, movement
 soak, and final production captures are implemented. Objective validation is
-complete; Human Review 1 remains.
+complete, and Human Review 1 accepted the result.
 
 Topics: `mclone-overworld-generation`, `procedural-structure-starts`
 
@@ -604,6 +604,12 @@ Human review asks:
 - Do shoulders read as carved terrain rather than a levee or retaining wall?
 - Does the confluence widen and blend naturally into the major river?
 - Is the result worth its generation and LOD cost?
+
+Human Review 1 accepted the complete RD16 result on 2026-07-23. The intended
+visual language landed: it reads as “peaceful,” specifically “like a spring
+feeding a creek.” Preserve that modest headwater, calm scale, and gentle
+valley relationship in later variation work rather than turning every
+instance into a dramatic waterfall landmark.
 
 ## Stop Conditions
 

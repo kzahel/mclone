@@ -56,8 +56,9 @@ Field revision 12 now realizes deterministic 91-96-block routes with
 monotonic reaches, zero required fill, shallow carved valleys, fixed-point
 drop stencils, matching far LOD, and exact SQLite reopen. Closure,
 authoritative wake, partition, periodic seam, release performance, movement,
-and fully warmed RD16 evidence pass. The implementation is at Human Review 1;
-general drainage semantics remain explicitly out of scope.
+and fully warmed RD16 evidence pass. Human Review 1 accepted its peaceful
+spring-fed-creek language, completing Tactical 222; general drainage
+semantics remain explicitly out of scope.
 
 Compatibility safety is recorded in the
 [`world-generation-profiles` ledger](topics/world-generation-profiles.md#compatibility-safety-ledger).
@@ -196,9 +197,9 @@ Still not full vanilla parity:
   terrain/material/biome/vegetation palette. Its first broad river and sparse
   wetland family failed Human Reviews 1 and 2, and the global stepped-river
   attempt was rejected interactively. Corrective bathymetry and the first
-  bounded valley stream are ready for review. It still has no general
-  highland stream/cascade family, drainage-network semantics, caves, or
-  authored gameplay structures
+  bounded valley stream now pass objective and human review. It still has no
+  general highland stream/cascade family, drainage-network semantics, caves,
+  or authored gameplay structures
 - Mclone Overworld terrain, biome, surface, spawn, existing vegetation, broad
   rivers, and wetland pools are periodic for the exact 384-chunk X cylinder.
   All later content must join that sampler contract explicitly; canonical

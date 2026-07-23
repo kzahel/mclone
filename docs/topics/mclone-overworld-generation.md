@@ -79,7 +79,8 @@ targets/s on one pinned CPU, while the no-stream control is 3.7 percent
 faster. The hotspot remains below the twofold blocker in every lane. A
 3,600-frame RD10 traversal records zero fluid work and bounded generation and
 render queues, and fully warmed RD16 production pixels pass internal
-inspection. The implementation is now paused for Human Review 1.
+inspection. Human Review 1 accepted the result as peaceful, “like a spring
+feeding a creek.” Tactical 222 is complete.
 
 ## Scope
 
@@ -979,10 +980,11 @@ continuous valley terrain, fixed-point water stencils, and matching synthetic
 LOD. Full-route closure, all-water authoritative wake, deterministic
 partition/periodic fixtures, SQLite reopen, same-host performance comparison,
 one-minute movement soak, and internally inspected production pixels pass.
-Tactical 222 is at Human Review 1 for the headwater, calm reaches,
-transitions, carved shoulders, and confluence. One river-to-shelf-to-deep-
-basin composition remains an objective review gap. General drainage-network
-semantics remain deliberately absent.
+Human Review 1 accepted the modest headwater, calm reaches, carved shoulders,
+and confluence as a peaceful spring-fed creek. Tactical 222 is complete.
+Future variation should preserve that quiet scale as one landmark family.
+One river-to-shelf-to-deep-basin composition remains an objective review gap.
+General drainage-network semantics remain deliberately absent.
 
 ## Related
 
