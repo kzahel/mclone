@@ -152,6 +152,10 @@ series implements the same concern, normally reuse the document slug in its
   Deck provisioning and validation lane — official Devkit Client deployment,
   native Linux staging and asset-root contracts, Gaming Mode acceptance, and
   reproducible handheld performance evidence.
+- [`graphics-video-settings.md`](graphics-video-settings.md): active
+  player-facing graphics/video contract — current live controls and SteamOS
+  profile behavior, settings-persistence investigation, output/UI/world
+  resolution policy, and the remaining production settings backlog.
 - [`release-distribution-and-updates.md`](release-distribution-and-updates.md):
   accepted first-party/store distribution architecture — a stable Tauri
   launcher for managed direct desktop installs, store-owned updates for

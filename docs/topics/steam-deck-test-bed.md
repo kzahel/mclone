@@ -179,7 +179,9 @@ The fixed override is intentionally launch-scoped in this slice. Relaunching
 returns to `Auto`; persisting it requires the shared typed graphics-preference
 codec rather than a desktop-app-only file. Graphics/display preferences must
 remain machine-local and must not be cloud-synchronized across dissimilar
-displays.
+displays. The complete settings inventory, persistence investigation, and
+implementation order live in
+[`graphics-video-settings.md`](graphics-video-settings.md).
 
 Output resolution is factual/read-only for now. A real selector must enumerate
 platform video modes, distinguish Gamescope's game-resolution envelope from a
