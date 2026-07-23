@@ -1,6 +1,6 @@
 # Web Terrain Lab Vertical Slice
 
-Status: active implementation as of 2026-07-23.
+Status: complete as of 2026-07-23.
 
 Topic: `gpu-procedural-terrain`
 
@@ -286,3 +286,112 @@ Topic: gpu-procedural-terrain
 - Far LOD, minimap, world-map, and XR integration;
 - exact rivers, planned streams, structures, vegetation, and lighting; and
 - volumetric caves, bricks, meshing, or ray casting.
+
+## Result
+
+The vertical slice shipped with the planned shared ownership:
+
+- `mclone-worldgen` now compiles validated 64-cell, 65-sample-edge preview
+  grids directly from `McloneOverworldSampler`, with power-of-two spacing from
+  2 through 1,024 blocks;
+- `mclone-terrain-view` owns the approximate A1 WGSL compute evaluator, resident
+  sample/reference buffers, vertex-ID grid renderer, and bounded asynchronous
+  comparison readback;
+- `mclone-terrain-lab` is a dedicated Rust/WASM browser adapter with no game
+  client, server, asset-pack, chunk, lighting, collision, or persistence
+  dependency; and
+- `tools/terrain-lab` supplies the responsive URL-addressed workbench, desktop
+  and phone controls, diagnostics, smoke capture, and Playwright coverage.
+
+The aggregate web bundle stages the content-hashed product at `/terrain/`
+beside the other labs. The first slice remains deliberately honest: production
+CPU terrain is the reference, while `mclone-overworld-v1-gpu-preview-a1` is a
+presentation-only approximation. It is useful precisely because split and
+error views expose the work still needed for closer reconstruction.
+
+## Evidence
+
+The fixed review request uses seed `-98765`, center `(-304, 336)`, a 64-by-64
+cell tile, and split presentation. On the headed-Wayland BrowserWebGPU adapter:
+
+- 4,225 samples render through 24,576 procedural vertices;
+- resident GPU allocation is 264.1 KiB;
+- representative warm production-reference sampling was 2.0–3.5 ms;
+- representative CPU-side encode plus submit measurement was 0.2–1.4 ms;
+- the A1 approximation measured 19.7–20.2 blocks mean absolute height error,
+  43–44 blocks p95 error, 60–73 blocks maximum error, and about 50% water
+  presence agreement across the inspected 2–4.1 km views; and
+- the production bundle is 477.33 kB raw / 136.80 kB gzip of WASM and
+  236.67 kB raw / 74.72 kB gzip of JavaScript.
+
+Those timings are host clocks around reference compilation and command
+encoding/submission. They are not labeled GPU execution time. The disagreement
+statistics establish diagnostic honesty, not parity.
+
+Validation completed:
+
+```text
+cargo test -p mclone-worldgen terrain_preview
+cargo test -p mclone-terrain-view
+cargo test -p mclone-terrain-lab
+cargo check -p mclone-terrain-view --target wasm32-unknown-unknown
+cargo check -p mclone-terrain-lab --target wasm32-unknown-unknown
+pnpm --dir tools/terrain-lab test
+pnpm terrain-lab:typecheck
+pnpm terrain-lab:web:test
+pnpm terrain-lab:web:smoke
+pnpm terrain-lab:web:smoke -- --mobile
+pnpm host:check -- --probe-browser-webgpu
+pnpm native:web:bundle
+```
+
+Both Playwright projects passed. Inspected captures under `/tmp` include the
+desktop and Pixel 7-sized 3D split view plus a materially distinct 4.1 km error
+map. They show opaque non-black WebGPU output, completed comparison evidence,
+usable phone control sizing, and stable URL changes through layer, view, and
+zoom interactions. Warm Rust/WASM regeneration completed in 0.05–0.35 seconds
+and warm Vite builds in 77–102 ms on this host. Rebuild-to-first-redraw is not
+yet instrumented as one end-to-end latency.
+
+The aggregate build initially exposed an unrelated exhaustive-match omission
+for the new world-render-scale UI action in `mclone-web-client`. Adding its
+diagnostic label restored the full WASM deploy gate; no Terrain Lab dependency
+was added to the game app.
+
+Production deployment completed at
+[mclone.kzahel.com/terrain/](https://mclone.kzahel.com/terrain/) with Cloudflare
+Worker version `7e83603b-e52c-4982-84a0-cd70e0c7da7a`. The long aggregate
+command uploaded every R2 object successfully, then its execution session hit
+the tool wall-time during the final Worker publish. Rerunning only the
+idempotent `wrangler deploy` step completed the release; the R2 pass was not
+repeated.
+
+The same smoke harness then passed against the hosted route in desktop and
+Pixel 7 profiles. Hosted response checks proved:
+
+- `/terrain/` returns `200`, `text/html`, and no-cache HTML policy;
+- the hashed terrain WASM returns `200`, `application/wasm`, and immutable
+  caching; and
+- both responses carry COOP `same-origin`, COEP `require-corp`, and CORP
+  `same-origin`.
+
+The hosted GPU journey reached the error-map URL at 4.1 km, completed comparison
+readback, reported zero page/console errors, and produced newly inspected
+desktop and phone captures under `/tmp`.
+
+## Next Direction
+
+The next tactical should optimize for the requested generator-edit loop:
+
+1. measure source edit to first updated reference/GPU pixel as one receipt;
+2. make generator parameters or field revisions explicit in the URL so
+   alternative terrain ideas can be compared reproducibly;
+3. improve the GPU evaluator's large-scale land, relief, and water agreement
+   while retaining the production reference and error layers;
+4. inspect the 65.5 km extreme spacing with band-limited fields rather than
+   treating point-sampled fine noise as truthful coarse geography; and
+5. only then add coverage-first parent/child refinement or an in-game consumer.
+
+The first proof supports the architecture but does not yet establish that GPU
+generation beats the CPU sampler end to end, nor that the approximate evaluator
+is suitable for canonical terrain.

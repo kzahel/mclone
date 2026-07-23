@@ -168,14 +168,16 @@ pnpm terrain-lab:web:smoke -- --mobile
 
 # Build, upload the native web bundle and asset pack to the mclone R2 bucket,
 # deploy the Cloudflare Worker, and make it available at mclone.kzahel.com.
-pnpm deploy
+pnpm run deploy
 ```
 
 `native:web:mobile-smoke` runs with browser CPU throttling and locks startup
 admission: the camera must remain at its held spawn height until the underfoot
 interest chunk and drawable view are ready, then settle onto loaded ground.
 
-`pnpm deploy` is an alias for `pnpm native:web:deploy`.
+`pnpm run deploy` is an alias for `pnpm native:web:deploy`. Use the explicit
+`run`: recent pnpm versions reserve bare `pnpm deploy` for their workspace
+deployment command.
 
 ## Deploy Contents
 
@@ -216,9 +218,14 @@ For this local checkout, [`../scripts/local-deploy/deploy-after-main-push.sh`](.
 ./scripts/local-deploy/install-hook.sh
 ```
 
-The hook returns immediately. A background worker waits until the pushed `main` commit is visible on the remote, then runs `pnpm deploy`.
+The hook returns immediately. A background worker waits until the pushed
+`main` commit is visible on the remote, then runs `pnpm run deploy`.
 
-Quick successive pushes replace the pending SHA before deployment starts. The worker deploys from a reusable sibling worktree, by default `../mclone-deploy-worktree`, which it resets to the pushed commit before running `pnpm deploy`. The active checkout can be edited immediately after pushing.
+Quick successive pushes replace the pending SHA before deployment starts. The
+worker deploys from a reusable sibling worktree, by default
+`../mclone-deploy-worktree`, which it resets to the pushed commit before
+running `pnpm run deploy`. The active checkout can be edited immediately after
+pushing.
 
 Local ignored inputs and caches such as `reference/minecraft-1.17.1` and the
 root `node_modules` are linked into that deploy worktree when present. The

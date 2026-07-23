@@ -44,3 +44,11 @@ pnpm terrain-lab:web:smoke -- --mobile
 
 The smoke path follows the repository's headed-Wayland WebGPU policy on Linux
 and writes screenshots and its diagnostic report under `/tmp`.
+
+To exercise an already-hosted aggregate deployment without rebuilding or
+starting Vite:
+
+```sh
+TERRAIN_LAB_SMOKE_BASE_URL=https://mclone.kzahel.com \
+  pnpm terrain-lab:web:smoke
+```

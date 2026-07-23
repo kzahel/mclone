@@ -16,7 +16,9 @@ const port = Number.parseInt(
   process.env.TERRAIN_LAB_SMOKE_PORT ?? (mobile ? "4182" : "4181"),
   10,
 );
-const baseUrl = `http://127.0.0.1:${port}`;
+const externalBaseUrl = process.env.TERRAIN_LAB_SMOKE_BASE_URL
+  ?.replace(/\/+$/u, "");
+const baseUrl = externalBaseUrl ?? `http://127.0.0.1:${port}`;
 const launch = resolveBrowserWebGpuLaunch();
 const pageErrors = [];
 let server;
@@ -27,9 +29,11 @@ if (!Number.isInteger(port) || port <= 0) {
 }
 
 try {
-  runBuild();
-  server = startPreview();
-  await waitForPreview();
+  if (!externalBaseUrl) {
+    runBuild();
+    server = startPreview();
+    await waitForPreview();
+  }
 
   browser = await chromium.launch({
     channel: process.env.PLAYWRIGHT_CHROME_CHANNEL ?? "chrome",
@@ -98,6 +102,7 @@ try {
     captures: { canvasCapture, errorCapture, pageCapture },
     comparison: await page.locator("[data-testid='terrain-diagnostics']").innerText(),
     finalUrl,
+    target: externalBaseUrl ? "hosted" : "local-preview",
     launch: {
       autoConfiguredWayland: launch.autoConfiguredWayland,
       headed: launch.headed,

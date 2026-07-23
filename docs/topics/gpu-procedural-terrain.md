@@ -2,16 +2,18 @@
 
 Topic: `gpu-procedural-terrain`
 
-Status: accepted research direction recorded 2026-07-23. Tactical
+Status: first hosted GPU-tile proof completed 2026-07-23. Tactical
 [`227-web-terrain-lab-vertical-slice.md`](../tactical/227-web-terrain-lab-vertical-slice.md)
-is active. Its first proving surface is a deployable, web-first Terrain Lab
-backed by shared Rust/WGPU terrain-view contracts. It should establish coarse
-GPU-resident coverage immediately, zoom from continent-scale summaries into
-progressively refined terrain, and compare the result with the CPU source. A
-thin native profiling host and eventual in-game LOD/map consumers should reuse
-that engine rather than becoming separate implementations. Optional GPU-backed
-canonical chunk generation and volumetric terrain remain separate later
-experiments.
+landed the deployable, web-first Terrain Lab, shared production-reference grid,
+and one shared Rust/WGPU resident tile. The lab now establishes that a tiny
+standalone payload can cover 128 blocks through 65.5 kilometers with one
+bounded grid, render reference/GPU/split diagnostics, and compare asynchronous
+GPU readback with production source samples. Progressive refinement, closer
+field agreement, and generator-edit iteration instrumentation are the next
+useful work. A thin native profiling host and eventual in-game LOD/map
+consumers should reuse the shared engine rather than becoming separate
+implementations. Optional GPU-backed canonical chunk generation and volumetric
+terrain remain separate later experiments.
 
 ## Scope
 
@@ -122,8 +124,26 @@ and `FarTerrainLodWorkerCache` in the same file. Even 4-, 8-, or 16-block
 surface sampling currently pays for a full surface chunk before discarding
 most of its facts.
 
-There is no current terrain compute pipeline. Normal terrain and Far LOD arrive
-at `mclone-render` as CPU-constructed mesh products.
+The first terrain compute pipeline now exists in
+[`mclone-terrain-view`](../../native/crates/mclone-terrain-view/). It:
+
+- accepts the shared 65-by-65 production-reference grid;
+- evaluates the separately revisioned `mclone-overworld-v1-gpu-preview-a1`
+  approximation into GPU-resident storage;
+- draws 24,576 vertices from `vertex_index` without CPU vertex or index arrays;
+- supports terrain, height, continentalness, climate, and error layers in map
+  or oblique views; and
+- performs an optional bounded asynchronous readback for lab comparison.
+
+[`mclone-terrain-lab`](../../native/apps/mclone-terrain-lab/) owns the narrow
+browser surface/device facade. [`tools/terrain-lab`](../../tools/terrain-lab/)
+owns URL state and responsive presentation. The deployed product route is
+`/terrain/`; it does not load the game client, asset packs, a server, canonical
+chunks, lighting, collision, or persistence.
+
+Normal terrain and the current Far LOD path still arrive at `mclone-render` as
+CPU-constructed mesh products. The new tile is a reusable experimental
+service, not yet an in-game replacement.
 
 Existing performance records motivate measurement without proving a GPU win:
 
