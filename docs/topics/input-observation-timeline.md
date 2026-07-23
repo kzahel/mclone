@@ -2,8 +2,8 @@
 
 Topic: `input-observation-timeline`
 
-Status: local end-to-end implementation completed 2026-07-23; automated
-cross-platform validation is active and real-device acceptance remains open.
+Status: local end-to-end implementation and automated cross-platform
+validation completed 2026-07-23; real-device acceptance remains open.
 The shared bounded `ControllerInputBatch` and multi-observation semantic
 reduction preserve ordered input through platform collection and scene
 routing. The scene materializes timestamped semantic state as sequenced 60 Hz
@@ -327,6 +327,34 @@ Compilation and synthetic tests can close the shared contract on every target.
 Final product acceptance still requires representative physical controllers,
 Android hardware, and OpenXR runtimes because backend drivers can differ in
 event shape, timestamps, noise, and lifecycle behavior.
+
+### Automated evidence (2026-07-23)
+
+- The full native Rust workspace test suite passes, including scripted
+  controller ordering, Android historical samples, scene command assignment,
+  fly/no-clip historical pitch, queue overflow recovery, epoch reset, command
+  gaps, cadence-independent traces, and local command replay.
+- `pnpm native:thin-adapters:purity` passes, confirming input policy remains
+  in shared owners rather than platform rims.
+- `pnpm native:web:build` and `pnpm native:web:typecheck` pass for
+  `wasm32-unknown-unknown`. The browser collector test proves that one rAF poll
+  emits exactly one timestamped snapshot and terminal state rather than
+  claiming unobservable history.
+- Headed-Wayland `native:web:app-smoke` passes with fly/no-clip movement at the
+  shared 60 Hz player rate. `native:web:mobile-smoke` passes touch movement,
+  look, jump, attack, use, menu, and lifecycle probes; its active joystick
+  segment moved the camera and rendered an in-bounds joystick. Both captures
+  were visually inspected.
+- `pnpm native:android:apk` and `pnpm native:android-xr:apk` pass, compiling
+  the event-time/history Java bridge, JNI contract, shared timeline, and both
+  Android app surfaces for `arm64-v8a`.
+- `pnpm native:movement:smoke` and `pnpm native:xr-emulation:smoke` pass; the
+  stereo capture was visually inspected.
+
+Still required for product acceptance: physical desktop controllers, a phone
+with touch and browser Gamepad hardware, Android controller hardware, and
+representative OpenXR runtimes/headsets. Those checks validate backend feel
+and driver facts; they do not require another architecture.
 
 ## Implementation Sequence
 

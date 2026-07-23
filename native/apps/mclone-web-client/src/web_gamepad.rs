@@ -328,4 +328,23 @@ mod tests {
         assert_eq!(replaced.disconnected, [source]);
         assert_ne!(replaced.connected[0].0, source);
     }
+
+    #[test]
+    fn browser_poll_is_one_timestamped_snapshot_not_invented_history() {
+        let mut collector = BrowserGamepadCollector::new();
+        let mut gamepad = standard_gamepad(0, "Xbox Controller");
+        gamepad.timestamp_millis = 4.5;
+
+        let poll = collector
+            .update(Duration::from_millis(10), [gamepad])
+            .expect("poll");
+
+        assert_eq!(poll.input.observations().len(), 1);
+        assert_eq!(
+            poll.input.observations()[0].sample_time,
+            Duration::from_secs_f64(0.0045)
+        );
+        assert_eq!(poll.input.terminal_snapshot_count(), 1);
+        assert_eq!(poll.input.dropped_observations(), 0);
+    }
 }
