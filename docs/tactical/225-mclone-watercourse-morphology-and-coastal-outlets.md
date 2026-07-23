@@ -389,6 +389,7 @@ The field receipt and maps are under
 `/tmp/mclone-t225-final-fields`. Final fully warmed, lit RD16 cards are under:
 
 - `/tmp/mclone-t225-final-river-card`;
+- `/tmp/mclone-t225-final-outlet-card`;
 - `/tmp/mclone-t225-final-mountain-card`; and
 - `/tmp/mclone-t225-final-stream-card`.
 
