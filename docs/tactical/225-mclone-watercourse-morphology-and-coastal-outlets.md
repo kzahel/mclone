@@ -1,7 +1,7 @@
 # Mclone Watercourse Morphology And Coastal Outlets
 
-Status: active 2026-07-23; design and interactive-review findings recorded,
-implementation pending.
+Status: implementation and internal validation complete 2026-07-23; Human
+Review 1 pending.
 
 Topic: `mclone-overworld-generation`
 
@@ -334,3 +334,126 @@ Pause for human direction if:
 - cold generation crosses the twofold performance blocker.
 
 Otherwise continue through the complete visual review point.
+
+## Execution Record
+
+### Landed behavior
+
+The implementation landed as one documented series:
+
+- `41b62e5c` continues a major-river thalweg beneath the receiving coast,
+  modestly fans the submerged outlet, takes the deeper of outlet incision and
+  ordinary bathymetry, and steepens the generic inner shelf without changing
+  ocean biome or the flat Y63 water plane;
+- `5744592b` adds periodic broad/short morphology fields for coherent
+  centerline displacement, width and depth runs, pool/riffle depth, and
+  asymmetric banks. Reviewed major-river widths exercise roughly three to
+  five blocks of half-width and both shallow and deep reaches;
+- `83fd8c66` derives planned-stream width, depth, centerline, and opposite-bank
+  variation from canonical structure identity plus route station without
+  changing placement, references, dependency radius, or reach levels;
+- `38193625` replaces the binary grass/stone threshold with an eroded-slope
+  band whose existing coherent terrain signals select grass, coarse dirt,
+  gravel, or stone;
+- `eef5667a` adds a deterministic sparse bank-rock pass. Only water-bearing
+  chunks are eligible; a dry nearby bank receives at most one partially
+  embedded three-lobe cobble, mossy-cobble, or andesite rock, and water blocks
+  are never replacement targets; and
+- `44dbab92` restores the fixed transition width around every planned-stream
+  throat and baked fall after the authoritative wake exposed one unstable
+  level-seven edge cell. Ordinary calm reaches retain their new width/depth
+  variation. Field revision 17 records that corrected final realization;
+  decoration revision 12 records the rocks.
+
+The first pass does not add a separate disk-decoration sweep. Coherent
+gravel/coarse-dirt/stone patches already come from the mixed surface band,
+while river and ocean floors retain their existing gravel/sand/clay
+languages. A later art pass may add target-filtered disks if interactive
+review finds the current substrate variety too quiet; that is no longer
+required to correct the reported contour defect.
+
+### Objective receipts
+
+The seed-`8675309`, 1,024-by-1,024-block outlet review records:
+
+- 2,357 submerged-outlet samples;
+- 98 narrow and 1,144 wide major-river samples;
+- 469 shallow and 1,266 deep major-river samples;
+- ocean water-depth percentiles of 5, 14, and 22 blocks;
+- 594 eroded-slope samples in addition to ordinary soil and exposed families;
+  and
+- a closed static hydraulic audit with zero unsupported water, open source
+  faces, sloped source edges, or scheduled liquid ticks.
+
+The field receipt and maps are under
+`/tmp/mclone-t225-final-fields`. Final fully warmed, lit RD16 cards are under:
+
+- `/tmp/mclone-t225-final-river-card`;
+- `/tmp/mclone-t225-final-mountain-card`; and
+- `/tmp/mclone-t225-final-stream-card`.
+
+Internal inspection found the river mouth continues into visibly deeper
+water, river sections and opposite banks no longer repeat one exact offset,
+the mountain grass-to-stone contour is broken by coherent material fingers,
+rocks remain sparse, and the bounded stream still reads as the accepted
+peaceful spring-fed creek. Human Review 1 remains the subjective acceptance
+gate.
+
+### Determinism and hydraulic safety
+
+The complete `mclone-worldgen` suite passes: 312 tests, one intentional
+ignored parity gauntlet, plus all binary and doc tests. This includes exact
+periodic fields, adjacent chunks, planned-stream cache/order/partition
+independence, periodic stream realization, intentional fingerprints, the
+coastal non-rising-floor fixture, and the static major-river/complete-stream
+closure audits.
+
+Both focused authoritative server wakes pass:
+
+- every source in a representative ordinary Mclone flat reach executes once,
+  mutates zero blocks, and leaves no residual tick; and
+- every source and baked flowing-water cell in the complete reviewed planned
+  stream executes, mutates zero blocks, and leaves no residual tick.
+
+The first planned-stream wake before `44dbab92` failed: one
+level-seven fall-edge block disappeared. That failure demonstrated why the
+runtime wake remains authoritative even when static containment passes. The
+fixed transition-width invariant and passing rerun are part of the final
+evidence, not a waived defect.
+
+### Same-host generation performance
+
+The baseline is detached commit `19404a74`, immediately before Tactical 225.
+Baseline and candidate were built separately on the same Linux host and each
+generated a radius-three region for five release iterations. Candidate
+receipts include all implementation commits through `44dbab92`.
+
+| Site | Lane | Baseline | Candidate | Change |
+|---|---|---:|---:|---:|
+| control `(0,0)` | surface chunks/s | 2,202.001 | 1,917.212 | -12.9% |
+|  | cold targets/s | 722.665 | 663.172 | -8.2% |
+|  | warm targets/s | 4,436.785 | 3,764.835 | -15.1% |
+| major river `(47,102)` | surface chunks/s | 1,746.153 | 1,630.851 | -6.6% |
+|  | cold targets/s | 608.041 | 614.719 | +1.1% |
+|  | warm targets/s | 3,678.457 | 3,370.630 | -8.4% |
+| planned stream `(149,-124)` | surface chunks/s | 1,585.888 | 1,375.910 | -13.2% |
+|  | cold targets/s | 575.982 | 512.558 | -11.0% |
+|  | warm targets/s | 2,924.607 | 2,545.574 | -13.0% |
+
+All lanes stay inside the 25-percent investigation gate and far from the
+twofold blocker. The sparse rock pass adds fixed work only in water-bearing
+chunks and does not change the feature dependency radius.
+
+The final accelerated 3,600-frame movement soak used seed `-98765`, river
+chunk `(47,102)`, RD10, an eight-chunk route, 32 blocks/s, 60 Hz, and derived
+7-worker/20-pending render capacity. Across 64 unique chunk centers it
+measured 4.609 ms average offscreen work, 10.295 ms p95, 11.984 ms p99, and
+16.281 ms maximum, with zero over-budget frames and zero accounting
+violations.
+
+Loaded chunks stayed between 399 and 576. Publications, render compiles, and
+the server update queue ended empty; one generation job and 91 ordinary
+render chunks remained while the route was still moving. Maximum/final
+scheduled-fluid depth and total due, executed, deferred, mutation, and event
+counters were all zero. The disposable receipt is
+`/tmp/mclone-t225-final-movement-soak.json`.

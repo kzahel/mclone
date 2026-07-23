@@ -107,9 +107,16 @@ smoothly and symmetrically carved, with insufficient width/depth variation,
 pools, riffles, substrate patches, and rocks; the binary grass-to-exposed-stone
 surface rule also draws stark contour lines across valley walls. Tactical
 [`225`](../tactical/225-mclone-watercourse-morphology-and-coastal-outlets.md)
-owns the fixed-work outlet, morphology, mixed-surface, and sparse-local-feature
-correction while preserving flat source planes and the accepted peaceful
-stream family.
+lands the fixed-work outlet, morphology, mixed-surface, and sparse-local-
+feature correction while preserving flat source planes and the accepted
+peaceful stream family. Field revision 17 and decoration revision 12 continue
+major-river beds beneath receiving coasts, add coherent major-river and
+planned-stream width/depth/bank variation, replace the binary mountain surface
+edge with mixed eroded slopes, and place sparse hydrology-aware bank rocks.
+Static closure, complete authoritative wakes, exact periodic/partition
+fixtures, same-host generation comparison, a zero-fluid-work 3,600-frame
+movement soak, and internally inspected RD16 cards pass. Human Review 1 is
+pending.
 
 ## Scope
 
@@ -1044,14 +1051,16 @@ Human Review 1 accepted the modest headwater, calm reaches, carved shoulders,
 and confluence as a peaceful spring-fed creek. Tactical 222 is complete.
 Future variation should preserve that quiet scale as one landmark family
 while adding deliberately dramatic cascade, gorge, and waterfall families.
-Tactical 225 now owns the objectively demonstrated river-to-shelf sill plus
-the associated smooth-channel, binary-surface, and sparse-local-feature
-correction. One completed review must show an outlet whose centerline floor
-does not rise into the receiving ocean, coherent width/depth and bend
-variation, mixed grass/dirt/gravel/stone transitions, and sparse rocks without
-fluid work or loss of the accepted peaceful stream. General drainage-network
-semantics remain deliberately absent. The sustained volumetric geology
-campaign follows this bounded hydrology correction.
+Tactical 225's implementation and internal validation are complete. The
+candidate shows an outlet whose centerline floor does not rise into the
+receiving ocean, coherent width/depth and bend variation, mixed
+grass/coarse-dirt/gravel/stone transitions, and sparse rocks without fluid
+work or loss of the accepted peaceful stream. The authoritative wake caught
+and corrected one unstable varied-width fall edge before closeout. Human
+Review 1 now owns the subjective decision; general drainage-network semantics
+remain deliberately absent. After that review, the recommended next terrain
+campaign is sustained volumetric geology: overhangs, outcrops, tors, arches,
+and regional 3D formation recipes.
 
 ## Related
 
