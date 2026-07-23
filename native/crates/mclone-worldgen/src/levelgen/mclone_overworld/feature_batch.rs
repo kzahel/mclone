@@ -484,7 +484,10 @@ pub fn generate_mclone_overworld_chunk_with_topology(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::block::{DANDELION, GRASS, OAK_LOG, POPPY};
+    use crate::block::{
+        ACACIA_LOG, DANDELION, FERN, GRASS, LARGE_FERN_LOWER, OAK_LOG, POPPY, SPRUCE_LOG,
+        SWEET_BERRY_BUSH, TALL_GRASS_LOWER,
+    };
     use crate::levelgen::MCLONE_OVERWORLD_PERIOD_CHUNKS;
 
     #[test]
@@ -636,13 +639,30 @@ mod tests {
 
     #[test]
     fn feature_stage_places_the_profile_owned_vegetation_family() {
-        let targets = (-4..=4)
-            .flat_map(|z| (-4..=4).map(move |x| ChunkPos::new(x, z)))
+        let targets = [(ChunkPos::new(-43, 6), 3), (ChunkPos::new(-5, 0), 3)]
+            .into_iter()
+            .flat_map(|(center, radius)| {
+                (center.z - radius..=center.z + radius).flat_map(move |z| {
+                    (center.x - radius..=center.x + radius).map(move |x| ChunkPos::new(x, z))
+                })
+            })
             .collect::<Vec<_>>();
         let chunks = McloneOverworldFeatureDependencyCache::new()
             .generate_features_chunks(12_345, targets)
             .chunks;
-        let decoration_counts = [OAK_LOG, GRASS, DANDELION, POPPY].map(|block| {
+        let decoration_counts = [
+            OAK_LOG,
+            SPRUCE_LOG,
+            ACACIA_LOG,
+            GRASS,
+            FERN,
+            LARGE_FERN_LOWER,
+            SWEET_BERRY_BUSH,
+            TALL_GRASS_LOWER,
+            DANDELION,
+            POPPY,
+        ]
+        .map(|block| {
             chunks
                 .values()
                 .map(|chunk| chunk.block_count(block))
@@ -661,8 +681,11 @@ mod tests {
             }
         }
 
-        assert_eq!(decoration_counts, [49, 2_778, 319, 181]);
-        assert_eq!(hash, 16_242_981_415_705_772_351);
+        assert_eq!(
+            decoration_counts,
+            [120, 621, 160, 1_953, 367, 6, 20, 40, 125, 68]
+        );
+        assert_eq!(hash, 7_099_734_824_665_627_965);
     }
 
     #[test]

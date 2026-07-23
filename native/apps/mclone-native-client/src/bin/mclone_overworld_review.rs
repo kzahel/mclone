@@ -754,6 +754,26 @@ fn select_review_sites(
                 .total_cmp(&right.terrain.watercourse.wetland_pool_influence)
         })
         .map(|(index, _)| index);
+    let cool_wet_conifer = nearest_recipe_site(
+        samples,
+        request.width,
+        request.depth,
+        McloneOverworldBiomeRecipe::CoolWetConifer,
+    );
+    let warm_dry_steppe = nearest_recipe_site(
+        samples,
+        request.width,
+        request.depth,
+        McloneOverworldBiomeRecipe::WarmDrySteppe,
+    );
+    let snowy_alpine = samples
+        .iter()
+        .enumerate()
+        .filter(|(_, sample)| {
+            mclone_overworld_biome_recipe(**sample) == McloneOverworldBiomeRecipe::SnowyAlpine
+        })
+        .max_by_key(|(_, sample)| sample.terrain.surface_y)
+        .map(|(index, _)| index);
     let seam_river = if topology == McloneOverworldSamplingTopology::PeriodicX {
         samples
             .iter()
@@ -783,8 +803,31 @@ fn select_review_sites(
         "waterfall": review_site_json(waterfall, samples, request),
         "wetland": review_site_json(wetland, samples, request),
         "wetlandPool": review_site_json(wetland_pool, samples, request),
+        "coolWetConifer": review_site_json(cool_wet_conifer, samples, request),
+        "warmDrySteppe": review_site_json(warm_dry_steppe, samples, request),
+        "snowyAlpine": review_site_json(snowy_alpine, samples, request),
         "periodicSeamRiver": review_site_json(seam_river, samples, request),
     })
+}
+
+fn nearest_recipe_site(
+    samples: &[McloneOverworldLandformSample],
+    width: u32,
+    depth: u32,
+    recipe: McloneOverworldBiomeRecipe,
+) -> Option<usize> {
+    let center_x = i64::from(width) / 2;
+    let center_z = i64::from(depth) / 2;
+    samples
+        .iter()
+        .enumerate()
+        .filter(|(_, sample)| mclone_overworld_biome_recipe(**sample) == recipe)
+        .min_by_key(|(index, _)| {
+            let x = *index as i64 % i64::from(width);
+            let z = *index as i64 / i64::from(width);
+            (x - center_x).abs() + (z - center_z).abs()
+        })
+        .map(|(index, _)| index)
 }
 
 fn stream_planning_json(
