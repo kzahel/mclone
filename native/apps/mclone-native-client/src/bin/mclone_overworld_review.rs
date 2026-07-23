@@ -543,6 +543,7 @@ fn run() -> Result<()> {
             "wetlandBed": facts.wetland_bed_columns,
             "riverBank": facts.river_bank_columns,
             "grassSoil": facts.grass_soil_columns,
+            "erodedSlope": facts.eroded_slope_columns,
             "alpineSnow": facts.alpine_snow_columns,
             "exposedStone": facts.exposed_stone_columns,
         },
@@ -1286,6 +1287,7 @@ struct RegionFacts {
     wetland_bed_columns: usize,
     river_bank_columns: usize,
     grass_soil_columns: usize,
+    eroded_slope_columns: usize,
     exposed_stone_columns: usize,
     alpine_snow_columns: usize,
     river_channel_columns: usize,
@@ -1402,6 +1404,7 @@ impl RegionFacts {
         let mut wetland_bed_columns = 0;
         let mut river_bank_columns = 0;
         let mut grass_soil_columns = 0;
+        let mut eroded_slope_columns = 0;
         let mut exposed_stone_columns = 0;
         let mut alpine_snow_columns = 0;
         let mut river_channel_columns = 0;
@@ -1613,6 +1616,7 @@ impl RegionFacts {
                 McloneOverworldSurfaceRecipe::WetlandBed => wetland_bed_columns += 1,
                 McloneOverworldSurfaceRecipe::RiverBank => river_bank_columns += 1,
                 McloneOverworldSurfaceRecipe::GrassSoil => grass_soil_columns += 1,
+                McloneOverworldSurfaceRecipe::ErodedSlope => eroded_slope_columns += 1,
                 McloneOverworldSurfaceRecipe::AlpineSnow => alpine_snow_columns += 1,
                 McloneOverworldSurfaceRecipe::ExposedStone => exposed_stone_columns += 1,
             }
@@ -1865,6 +1869,7 @@ impl RegionFacts {
             wetland_bed_columns,
             river_bank_columns,
             grass_soil_columns,
+            eroded_slope_columns,
             exposed_stone_columns,
             alpine_snow_columns,
             river_channel_columns,
@@ -2701,6 +2706,7 @@ fn surface_recipe_color(sample: McloneOverworldLandformSample) -> [u8; 4] {
         McloneOverworldSurfaceRecipe::WetlandBed => [117, 137, 139, 255],
         McloneOverworldSurfaceRecipe::RiverBank => [112, 138, 74, 255],
         McloneOverworldSurfaceRecipe::GrassSoil => [91, 151, 67, 255],
+        McloneOverworldSurfaceRecipe::ErodedSlope => [139, 124, 89, 255],
         McloneOverworldSurfaceRecipe::AlpineSnow => [229, 240, 242, 255],
         McloneOverworldSurfaceRecipe::ExposedStone => [137, 137, 137, 255],
     }
@@ -2714,8 +2720,9 @@ fn surface_recipe_tag(recipe: McloneOverworldSurfaceRecipe) -> u8 {
         McloneOverworldSurfaceRecipe::WetlandBed => 3,
         McloneOverworldSurfaceRecipe::RiverBank => 4,
         McloneOverworldSurfaceRecipe::GrassSoil => 5,
-        McloneOverworldSurfaceRecipe::AlpineSnow => 6,
-        McloneOverworldSurfaceRecipe::ExposedStone => 7,
+        McloneOverworldSurfaceRecipe::ErodedSlope => 6,
+        McloneOverworldSurfaceRecipe::AlpineSnow => 7,
+        McloneOverworldSurfaceRecipe::ExposedStone => 8,
     }
 }
 

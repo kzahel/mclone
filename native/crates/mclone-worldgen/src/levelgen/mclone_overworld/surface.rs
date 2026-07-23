@@ -1,14 +1,16 @@
 use crate::block::{
-    CLAY, DIRT, GRASS_BLOCK, GRAVEL, SAND, SNOW, STONE, WATER, WATER_LEVEL_8, water_block_for_level,
+    CLAY, COARSE_DIRT, DIRT, GRASS_BLOCK, GRAVEL, RawBlockId, SAND, SNOW, STONE, WATER,
+    WATER_LEVEL_8, water_block_for_level,
 };
 use crate::levelgen::MutableChunkBlockBuffer;
 
 use super::biomes::{McloneOverworldBiomeRecipe, mclone_overworld_biome_recipe};
 use super::fields::{MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldLandformSample};
 
-pub const MCLONE_OVERWORLD_EXPOSED_STONE_MIN_Y: i32 = 80;
-pub const MCLONE_OVERWORLD_EXPOSED_STONE_MIN_SLOPE: f64 = 0.80;
-pub const MCLONE_OVERWORLD_EXPOSED_STONE_MIN_EXPOSURE: f64 = 0.76;
+pub const MCLONE_OVERWORLD_ERODED_SLOPE_MIN_Y: i32 = 72;
+pub const MCLONE_OVERWORLD_ERODED_SLOPE_MIN_STRENGTH: f64 = 0.18;
+pub const MCLONE_OVERWORLD_EXPOSED_STONE_MIN_Y: i32 = 84;
+pub const MCLONE_OVERWORLD_EXPOSED_STONE_MIN_STRENGTH: f64 = 0.82;
 pub const MCLONE_OVERWORLD_ALPINE_EXPOSED_STONE_MIN_SLOPE: f64 = 1.05;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -19,6 +21,7 @@ pub enum McloneOverworldSurfaceRecipe {
     WetlandBed,
     RiverBank,
     GrassSoil,
+    ErodedSlope,
     AlpineSnow,
     ExposedStone,
 }
@@ -44,12 +47,36 @@ pub fn mclone_overworld_surface_recipe(
     {
         McloneOverworldSurfaceRecipe::AlpineSnow
     } else if terrain.surface_y >= MCLONE_OVERWORLD_EXPOSED_STONE_MIN_Y
-        && (sample.slope >= MCLONE_OVERWORLD_EXPOSED_STONE_MIN_SLOPE
-            || sample.exposure() >= MCLONE_OVERWORLD_EXPOSED_STONE_MIN_EXPOSURE)
+        && erosion_strength(sample) >= MCLONE_OVERWORLD_EXPOSED_STONE_MIN_STRENGTH
     {
         McloneOverworldSurfaceRecipe::ExposedStone
+    } else if terrain.surface_y >= MCLONE_OVERWORLD_ERODED_SLOPE_MIN_Y
+        && erosion_strength(sample) >= MCLONE_OVERWORLD_ERODED_SLOPE_MIN_STRENGTH
+    {
+        McloneOverworldSurfaceRecipe::ErodedSlope
     } else {
         McloneOverworldSurfaceRecipe::GrassSoil
+    }
+}
+
+pub(super) fn mclone_overworld_surface_top_material(
+    sample: McloneOverworldLandformSample,
+) -> RawBlockId {
+    match mclone_overworld_surface_recipe(sample) {
+        McloneOverworldSurfaceRecipe::OceanFloor | McloneOverworldSurfaceRecipe::RiverBed => GRAVEL,
+        McloneOverworldSurfaceRecipe::Beach => SAND,
+        McloneOverworldSurfaceRecipe::WetlandBed => CLAY,
+        McloneOverworldSurfaceRecipe::RiverBank
+            if sample.terrain.base_surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 5
+                && !sample.terrain.watercourse.is_planned_stream() =>
+        {
+            SAND
+        }
+        McloneOverworldSurfaceRecipe::RiverBank
+        | McloneOverworldSurfaceRecipe::GrassSoil
+        | McloneOverworldSurfaceRecipe::AlpineSnow => GRASS_BLOCK,
+        McloneOverworldSurfaceRecipe::ErodedSlope => eroded_slope_material(sample),
+        McloneOverworldSurfaceRecipe::ExposedStone => STONE,
     }
 }
 
@@ -89,6 +116,13 @@ pub(super) fn write_surface_column(
             write_subsurface(buffer, local_x, local_z, surface_y - 1, DIRT, 2);
             buffer.set_block_at_y(local_x, surface_y, local_z, GRASS_BLOCK);
         }
+        McloneOverworldSurfaceRecipe::ErodedSlope => write_eroded_slope_column(
+            buffer,
+            local_x,
+            local_z,
+            surface_y,
+            mclone_overworld_surface_top_material(sample),
+        ),
         McloneOverworldSurfaceRecipe::AlpineSnow => {
             write_subsurface(buffer, local_x, local_z, surface_y - 1, DIRT, 2);
             buffer.set_block_at_y(local_x, surface_y, local_z, GRASS_BLOCK);
@@ -124,6 +158,56 @@ pub(super) fn write_surface_column(
         for y in surface_y + 1..=water_fill_y {
             buffer.set_block_at_y(local_x, y, local_z, WATER);
         }
+    }
+}
+
+fn erosion_strength(sample: McloneOverworldLandformSample) -> f64 {
+    let slope = ((sample.slope - 0.45) / 0.95).clamp(0.0, 1.0);
+    let exposure = ((sample.exposure() - 0.48) / 0.44).clamp(0.0, 1.0);
+    slope.max(exposure)
+}
+
+fn eroded_slope_material(sample: McloneOverworldLandformSample) -> RawBlockId {
+    let terrain = sample.terrain;
+    let texture = (terrain.mountain_detail * 0.68
+        + terrain.relief * 0.17
+        + (terrain.ridges * 2.0 - 1.0) * 0.15)
+        .clamp(-1.0, 1.0);
+    let strength = erosion_strength(sample);
+    if strength >= 0.62 && texture >= 0.36 - strength * 0.28 {
+        STONE
+    } else if texture >= 0.02 - strength * 0.22 {
+        GRAVEL
+    } else if texture >= -0.48 - strength * 0.10 {
+        COARSE_DIRT
+    } else {
+        GRASS_BLOCK
+    }
+}
+
+fn write_eroded_slope_column(
+    buffer: &mut MutableChunkBlockBuffer,
+    local_x: i32,
+    local_z: i32,
+    surface_y: i32,
+    material: RawBlockId,
+) {
+    match material {
+        GRASS_BLOCK => {
+            write_subsurface(buffer, local_x, local_z, surface_y - 1, DIRT, 2);
+            buffer.set_block_at_y(local_x, surface_y, local_z, GRASS_BLOCK);
+        }
+        COARSE_DIRT => {
+            write_subsurface(buffer, local_x, local_z, surface_y - 1, DIRT, 2);
+            buffer.set_block_at_y(local_x, surface_y, local_z, COARSE_DIRT);
+        }
+        GRAVEL => write_subsurface(buffer, local_x, local_z, surface_y, GRAVEL, 2),
+        STONE => {
+            for y in 1..=surface_y {
+                buffer.set_block_at_y(local_x, y, local_z, STONE);
+            }
+        }
+        material => unreachable!("unexpected eroded-slope material {material}"),
     }
 }
 
@@ -204,11 +288,31 @@ mod tests {
         );
         assert_eq!(
             mclone_overworld_surface_recipe(sample(79, 1.0)),
-            McloneOverworldSurfaceRecipe::GrassSoil
+            McloneOverworldSurfaceRecipe::ErodedSlope
         );
         assert_eq!(
-            mclone_overworld_surface_recipe(sample(80, MCLONE_OVERWORLD_EXPOSED_STONE_MIN_SLOPE)),
+            mclone_overworld_surface_recipe(sample(92, 1.4)),
             McloneOverworldSurfaceRecipe::ExposedStone
+        );
+        let mut mixed_materials = [false; 4];
+        for detail in [-0.85, -0.25, 0.20, 0.85] {
+            let mut eroded = sample(80, 1.0);
+            eroded.terrain.mountain_detail = detail;
+            let index = match mclone_overworld_surface_top_material(eroded) {
+                GRASS_BLOCK => 0,
+                COARSE_DIRT => 1,
+                GRAVEL => 2,
+                STONE => 3,
+                material => panic!("unexpected eroded material {material}"),
+            };
+            mixed_materials[index] = true;
+        }
+        assert!(
+            mixed_materials
+                .into_iter()
+                .filter(|present| *present)
+                .count()
+                >= 3
         );
 
         let mut alpine = sample(112, 0.0);

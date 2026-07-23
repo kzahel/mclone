@@ -491,7 +491,7 @@ fn apply_stream_plans(
 
 #[cfg(test)]
 mod tests {
-    use crate::block::{AIR, CLAY, GRASS_BLOCK, GRAVEL, SAND, SNOW, STONE, WATER};
+    use crate::block::{AIR, SNOW, WATER};
 
     use super::*;
     use crate::levelgen::mclone_overworld::biomes::{
@@ -502,6 +502,7 @@ mod tests {
     use crate::levelgen::mclone_overworld::fields::MCLONE_OVERWORLD_SEA_LEVEL;
     use crate::levelgen::mclone_overworld::surface::{
         McloneOverworldSurfaceRecipe, mclone_overworld_surface_recipe,
+        mclone_overworld_surface_top_material,
     };
     use crate::levelgen::profile::{BEACH_BIOME_ID, OCEAN_BIOME_ID, PLAINS_BIOME_ID};
 
@@ -515,21 +516,7 @@ mod tests {
             for local_z in 0..CHUNK_WIDTH {
                 for local_x in 0..CHUNK_WIDTH {
                     let sample = sampler.sample_landform(min_x + local_x, min_z + local_z);
-                    let expected_top = match mclone_overworld_surface_recipe(sample) {
-                        McloneOverworldSurfaceRecipe::OceanFloor => GRAVEL,
-                        McloneOverworldSurfaceRecipe::Beach => SAND,
-                        McloneOverworldSurfaceRecipe::RiverBed => GRAVEL,
-                        McloneOverworldSurfaceRecipe::WetlandBed => CLAY,
-                        McloneOverworldSurfaceRecipe::RiverBank
-                            if sample.terrain.base_surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 5 =>
-                        {
-                            SAND
-                        }
-                        McloneOverworldSurfaceRecipe::RiverBank => GRASS_BLOCK,
-                        McloneOverworldSurfaceRecipe::GrassSoil => GRASS_BLOCK,
-                        McloneOverworldSurfaceRecipe::AlpineSnow => GRASS_BLOCK,
-                        McloneOverworldSurfaceRecipe::ExposedStone => STONE,
-                    };
+                    let expected_top = mclone_overworld_surface_top_material(sample);
                     assert_eq!(
                         chunk
                             .block_at_y(local_x, sample.terrain.surface_y, local_z)
@@ -720,7 +707,7 @@ mod tests {
         let receipts = [12_345, -98_765, 8_675_309].map(|seed| {
             let sampler = McloneOverworldSampler::new(seed);
             let mut biome_counts = [0_u32; 8];
-            let mut surface_counts = [0_u32; 8];
+            let mut surface_counts = [0_u32; 9];
             let mut hash = 0xcbf2_9ce4_8422_2325_u64;
             for z in (-2_048..2_048).step_by(16) {
                 for x in (-2_048..2_048).step_by(16) {
@@ -744,8 +731,9 @@ mod tests {
                         McloneOverworldSurfaceRecipe::WetlandBed => 3,
                         McloneOverworldSurfaceRecipe::RiverBank => 4,
                         McloneOverworldSurfaceRecipe::GrassSoil => 5,
-                        McloneOverworldSurfaceRecipe::AlpineSnow => 6,
-                        McloneOverworldSurfaceRecipe::ExposedStone => 7,
+                        McloneOverworldSurfaceRecipe::ErodedSlope => 6,
+                        McloneOverworldSurfaceRecipe::AlpineSnow => 7,
+                        McloneOverworldSurfaceRecipe::ExposedStone => 8,
                     };
                     biome_counts[biome_index] += 1;
                     surface_counts[surface_index] += 1;
@@ -776,18 +764,18 @@ mod tests {
             [
                 (
                     [21_961, 9_295, 12_099, 5_886, 1_441, 8_758, 9, 6_087],
-                    [19_655, 9_897, 1_398, 43, 2_119, 32_313, 9, 102],
-                    319_293_097_708_678_052,
+                    [19_655, 9_897, 1_398, 43, 2_119, 31_784, 605, 9, 26],
+                    3_997_115_657_057_839_270,
                 ),
                 (
                     [17_223, 7_808, 9_056, 10_363, 1_699, 16_170, 1_022, 2_195],
-                    [15_353, 8_046, 1_585, 114, 2_337, 36_910, 999, 192],
-                    5_057_323_442_780_980_665,
+                    [15_353, 8_046, 1_585, 114, 2_337, 35_803, 1_247, 999, 52],
+                    11_771_498_767_002_029_931,
                 ),
                 (
                     [33_641, 11_468, 6_346, 5_143, 989, 1_901, 0, 6_048],
-                    [29_838, 14_083, 916, 73, 1_619, 19_004, 0, 3],
-                    1_470_113_270_147_300_148,
+                    [29_838, 14_083, 916, 73, 1_619, 18_796, 211, 0, 0],
+                    5_553_198_139_751_724_371,
                 ),
             ]
         );
@@ -815,7 +803,7 @@ mod tests {
         assert_eq!(
             fingerprints,
             [
-                2_145_033_864_292_311_726,
+                3_307_820_178_694_792_859,
                 3_516_601_028_463_849_576,
                 17_128_386_512_483_643_946,
             ]
