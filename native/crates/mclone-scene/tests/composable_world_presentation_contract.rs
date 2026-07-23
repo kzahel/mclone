@@ -383,8 +383,10 @@ fn composition_phase_order_is_all_actors_between_all_opaque_and_translucent() {
 fn retained_destination_presentations_exist_below_scene_omission() {
     let client = read("../mclone-client/src/lib.rs");
     let presentations = braced_item(&client, "pub fn actor_presentations(&self)");
-    assert!(presentations.contains("self.remote_players"));
-    assert!(presentations.contains("self.entities"));
+    assert!(presentations.contains("actor_presentations_at"));
+    let timed_presentations = braced_item(&client, "pub fn actor_presentations_at(");
+    assert!(timed_presentations.contains("self.remote_players"));
+    assert!(timed_presentations.contains("self.entities"));
 
     let scene = read("src/lib.rs");
     let collect = braced_item(&scene, "fn current_actor_instances(&mut self)");

@@ -1470,7 +1470,9 @@ impl SingleViewRuntime {
         let update_report = self.engine.mark_server_update_render_dirty(&updates);
         let dirty_mark_ms = timing_elapsed_ms(&self.clock, dirty_mark_start);
         let client_apply_start = self.clock.now();
-        self.client_mut().apply_updates(updates);
+        let arrival_time_millis = client_apply_start.as_nanos() / 1_000_000;
+        self.client_mut()
+            .apply_updates_at(updates, arrival_time_millis);
         let client_apply_updates_ms = timing_elapsed_ms(&self.clock, client_apply_start);
         let mut report = RuntimeUpdateApplyReport {
             changed: update_report.changed,

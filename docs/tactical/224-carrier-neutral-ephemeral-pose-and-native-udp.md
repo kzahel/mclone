@@ -345,6 +345,28 @@ evidence if interpolation changes become drawable during closeout.
 - No TypeScript or JavaScript source changed.
 
 Validated with the protocol, client, server, render-session, app-runtime, and
-scene test suites. Slice 2 snapshot timelines and loss conformance, Slice 3
-native UDP attachment, cross-platform builds, and physical motion review
-remain.
+scene test suites.
+
+### 2026-07-23: Slice 2 snapshot timeline and lossy conformance
+
+- Added a bounded 32-sample body timeline per remote player. It retains
+  sender-relative sample time and local monotonic arrival time while the
+  latest accepted authority state remains available separately.
+- Sequence handling rejects stale and duplicate samples, handles nonzero
+  wrapping sequences, counts missing samples, resets on newer epochs and
+  discontinuities, and drops only oldest superseded history under pressure.
+- Render-time sampling uses the negotiated remote replication interval plus
+  measured arrival jitter under explicit 35-150 ms delay clamps.
+- Position follows the shortest topology lift and yaw/pitch follow the
+  shortest angular path. No unbounded extrapolation is performed.
+- Shared scene presentation evaluates the body timeline against its monotonic
+  render time. General entities retain their existing half-life smoother.
+- Per-player diagnostics expose received, accepted, stale, duplicate, gap,
+  discontinuity, superseded, jitter, delay, and latest-pose age.
+- Deterministic tests cover delay, jitter, loss, duplication, reordering,
+  nonzero sequence wrap, epochs, discontinuities, periodic seams, and bounded
+  pressure. No TypeScript or JavaScript source changed.
+
+Validated with client, app-runtime, scene, structural-boundary, and workspace
+tests. Slice 3 native UDP attachment, cross-platform builds, and physical
+motion review remain.

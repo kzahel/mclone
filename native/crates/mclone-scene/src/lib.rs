@@ -700,7 +700,9 @@ impl DrawableWorldSlot {
         };
         self.actor_interpolation.reconcile_authoritative_in(
             runtime.client().topology(),
-            runtime.client().actor_presentations(),
+            runtime
+                .client()
+                .actor_presentations_at(now.as_nanos() / 1_000_000),
         );
         let dt_seconds = self
             .last_actor_presentation_update
@@ -709,7 +711,10 @@ impl DrawableWorldSlot {
                 now.saturating_duration_since(last).as_secs_f32()
             });
         self.actor_interpolation
-            .step(dt_seconds, ActorInterpolationConfig::default());
+            .step_with_preinterpolated_remote_players(
+                dt_seconds,
+                ActorInterpolationConfig::default(),
+            );
         self.actor_interpolation.presentations()
     }
 }

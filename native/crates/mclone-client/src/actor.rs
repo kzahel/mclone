@@ -160,9 +160,26 @@ impl ActorInterpolationState {
     }
 
     pub fn step(&mut self, dt_seconds: f32, config: ActorInterpolationConfig) {
+        self.step_with_remote_policy(dt_seconds, config, false);
+    }
+
+    pub fn step_with_preinterpolated_remote_players(
+        &mut self,
+        dt_seconds: f32,
+        config: ActorInterpolationConfig,
+    ) {
+        self.step_with_remote_policy(dt_seconds, config, true);
+    }
+
+    fn step_with_remote_policy(
+        &mut self,
+        dt_seconds: f32,
+        config: ActorInterpolationConfig,
+        remote_players_preinterpolated: bool,
+    ) {
         let factor = interpolation_factor(dt_seconds, config.half_life_seconds);
         for track in self.tracks.values_mut() {
-            track.step(factor, dt_seconds);
+            track.step(factor, dt_seconds, remote_players_preinterpolated);
         }
     }
 
@@ -223,7 +240,14 @@ impl ActorTrack {
         }
     }
 
-    fn step(&mut self, factor: f32, dt_seconds: f32) {
+    fn step(&mut self, factor: f32, dt_seconds: f32, remote_players_preinterpolated: bool) {
+        let factor = if remote_players_preinterpolated
+            && matches!(self.rendered.kind, ActorPresentationKind::RemotePlayer)
+        {
+            1.0
+        } else {
+            factor
+        };
         let previous_position = self.rendered.feet_position;
         self.rendered.feet_position = lerp_vec3d(
             self.rendered.feet_position,

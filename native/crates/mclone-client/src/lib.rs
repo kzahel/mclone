@@ -6,6 +6,7 @@ mod actor;
 mod interaction;
 mod inventory;
 mod player;
+mod remote_pose;
 mod teleport;
 
 pub mod block_facts {
@@ -29,7 +30,7 @@ use mclone_protocol::{
     ChunkView, ClientCommand, DimensionKey, DisconnectReason, DisconnectReasonCode, EntityId,
     EntitySnapshot, EntityUpdate, PlayerLifeState, PlayerPositionUpdate, PlayerStatistics,
     RemotePlayerId, RemotePlayerUpdate, SectionBlockUpdate, ServerEphemeralMessage, ServerUpdate,
-    SessionConfiguration, sequence_is_newer, validate_body_pose_sample,
+    SessionConfiguration, validate_body_pose_sample,
 };
 
 pub use actor::{
@@ -57,6 +58,7 @@ pub use player::{
     no_clip_displacement, sphere_intersects_solid_blocks, thruster_acceleration,
     thruster_integrate, view_vector, view_vector_from_rot_degrees,
 };
+pub use remote_pose::RemotePoseTimelineDiagnostics;
 #[cfg(not(target_arch = "wasm32"))]
 pub use teleport::{
     NativeTeleportPreviewWorker, TeleportPreviewWorkerError, native_teleport_preview_capability,
@@ -106,7 +108,7 @@ pub struct ClientRuntime {
     player_position_updates: VecDeque<PlayerPositionUpdate>,
     remote_players: BTreeMap<RemotePlayerId, RemotePlayerUpdate>,
     remote_player_walk_distances: BTreeMap<RemotePlayerId, f32>,
-    remote_player_pose_order: BTreeMap<RemotePlayerId, (u32, u32)>,
+    remote_player_pose_timelines: BTreeMap<RemotePlayerId, remote_pose::RemotePlayerPoseTimeline>,
     entities: BTreeMap<EntityId, EntitySnapshot>,
     entity_seam_crossings: BTreeMap<EntityId, u64>,
     entity_chunks: BTreeMap<EntityId, ChunkPos>,
@@ -136,7 +138,7 @@ impl ClientRuntime {
             player_position_updates: VecDeque::new(),
             remote_players: BTreeMap::new(),
             remote_player_walk_distances: BTreeMap::new(),
-            remote_player_pose_order: BTreeMap::new(),
+            remote_player_pose_timelines: BTreeMap::new(),
             entities: BTreeMap::new(),
             entity_seam_crossings: BTreeMap::new(),
             entity_chunks: BTreeMap::new(),
@@ -195,6 +197,10 @@ impl ClientRuntime {
     }
 
     pub fn apply_update(&mut self, update: ServerUpdate) {
+        self.apply_update_at(update, 0);
+    }
+
+    pub fn apply_update_at(&mut self, update: ServerUpdate, arrival_time_millis: u64) {
         match update {
             ServerUpdate::SessionConfiguration(configuration) => {
                 if self.session_phase != ClientSessionPhase::Disconnected {
@@ -273,7 +279,8 @@ impl ClientRuntime {
                 self.remote_player_walk_distances
                     .entry(update.id)
                     .or_default();
-                self.remote_player_pose_order.remove(&update.id);
+                self.remote_player_pose_timelines
+                    .insert(update.id, remote_pose::RemotePlayerPoseTimeline::default());
                 self.remote_players.insert(update.id, update);
             }
             ServerUpdate::RemotePlayerUpdate(update) => {
@@ -290,7 +297,7 @@ impl ClientRuntime {
             ServerUpdate::RemotePlayerRemove { id } => {
                 self.remote_players.remove(&id);
                 self.remote_player_walk_distances.remove(&id);
-                self.remote_player_pose_order.remove(&id);
+                self.remote_player_pose_timelines.remove(&id);
             }
             ServerUpdate::EntitySnapshot(snapshot) => {
                 self.insert_entity_snapshot(snapshot);
@@ -313,7 +320,7 @@ impl ClientRuntime {
                 }
             }
             ServerUpdate::EphemeralFallback(message) => {
-                self.apply_ephemeral_message(message);
+                self.apply_ephemeral_message_at(message, arrival_time_millis);
             }
             ServerUpdate::KeepAlive { .. } => {}
             ServerUpdate::Disconnect(reason) => self.apply_disconnect(reason),
@@ -328,6 +335,19 @@ impl ClientRuntime {
     }
 
     pub fn apply_ephemeral_message(&mut self, message: ServerEphemeralMessage) -> bool {
+        let arrival_time_millis = match message {
+            ServerEphemeralMessage::RemoteBodyPose(sample) => {
+                u64::from(sample.pose.sample_time_millis)
+            }
+        };
+        self.apply_ephemeral_message_at(message, arrival_time_millis)
+    }
+
+    pub fn apply_ephemeral_message_at(
+        &mut self,
+        message: ServerEphemeralMessage,
+        arrival_time_millis: u64,
+    ) -> bool {
         match message {
             ServerEphemeralMessage::RemoteBodyPose(sample) => {
                 if validate_body_pose_sample(sample.pose).is_err() {
@@ -336,17 +356,14 @@ impl ClientRuntime {
                 let Some(previous) = self.remote_players.get(&sample.id).copied() else {
                     return false;
                 };
-                let order = (sample.pose.presentation_epoch, sample.pose.sequence);
-                if let Some((current_epoch, current_sequence)) =
-                    self.remote_player_pose_order.get(&sample.id).copied()
+                let timeline = self
+                    .remote_player_pose_timelines
+                    .entry(sample.id)
+                    .or_default();
+                if timeline.push(sample.pose, arrival_time_millis)
+                    != remote_pose::RemotePosePushResult::Accepted
                 {
-                    let epoch_is_newer = sequence_is_newer(order.0, current_epoch);
-                    if order.0 != current_epoch && !epoch_is_newer {
-                        return false;
-                    }
-                    if order.0 == current_epoch && !sequence_is_newer(order.1, current_sequence) {
-                        return false;
-                    }
+                    return false;
                 }
 
                 let update = RemotePlayerUpdate {
@@ -362,15 +379,22 @@ impl ClientRuntime {
                     .entry(sample.id)
                     .or_default() += distance;
                 self.remote_players.insert(sample.id, update);
-                self.remote_player_pose_order.insert(sample.id, order);
                 true
             }
         }
     }
 
     pub fn apply_updates(&mut self, updates: impl IntoIterator<Item = ServerUpdate>) {
+        self.apply_updates_at(updates, 0);
+    }
+
+    pub fn apply_updates_at(
+        &mut self,
+        updates: impl IntoIterator<Item = ServerUpdate>,
+        arrival_time_millis: u64,
+    ) {
         for update in updates {
-            self.apply_update(update);
+            self.apply_update_at(update, arrival_time_millis);
         }
     }
 
@@ -458,7 +482,7 @@ impl ClientRuntime {
         self.player_position_updates.clear();
         self.remote_players.clear();
         self.remote_player_walk_distances.clear();
-        self.remote_player_pose_order.clear();
+        self.remote_player_pose_timelines.clear();
         self.entities.clear();
         self.entity_seam_crossings.clear();
         self.entity_chunks.clear();
@@ -497,10 +521,28 @@ impl ClientRuntime {
     }
 
     pub fn actor_presentations(&self) -> Vec<ActorPresentation> {
+        self.actor_presentations_at(0)
+    }
+
+    pub fn actor_presentations_at(&self, now_millis: u64) -> Vec<ActorPresentation> {
+        let report_rate_hz = self.session_configuration.map_or(20, |configuration| {
+            configuration.remote_pose_replication_rate_hz
+        });
         self.remote_players
             .values()
             .copied()
             .map(|update| {
+                let update = self
+                    .remote_player_pose_timelines
+                    .get(&update.id)
+                    .and_then(|timeline| timeline.sample(self.topology, now_millis, report_rate_hz))
+                    .map_or(update, |pose| RemotePlayerUpdate {
+                        position: pose.position,
+                        y_rot_degrees: pose.y_rot_degrees,
+                        x_rot_degrees: pose.x_rot_degrees,
+                        on_ground: pose.on_ground,
+                        ..update
+                    });
                 ActorPresentation::remote_player(
                     update,
                     self.remote_player_walk_distances
@@ -516,6 +558,19 @@ impl ClientRuntime {
                     .map(ActorPresentation::entity),
             )
             .collect()
+    }
+
+    pub fn remote_pose_timeline_diagnostics(
+        &self,
+        id: RemotePlayerId,
+        now_millis: u64,
+    ) -> Option<RemotePoseTimelineDiagnostics> {
+        let report_rate_hz = self.session_configuration.map_or(20, |configuration| {
+            configuration.remote_pose_replication_rate_hz
+        });
+        self.remote_player_pose_timelines
+            .get(&id)
+            .map(|timeline| timeline.diagnostics(now_millis, report_rate_hz))
     }
 
     fn defer_chunk_snapshot_drop(&mut self, snapshot: ChunkSnapshot) {
@@ -1375,6 +1430,47 @@ mod tests {
             runtime.remote_player(id).unwrap().position,
             mclone_core::Vec3d::new(8.0, 64.0, 2.0)
         );
+    }
+
+    #[test]
+    fn actor_presentation_samples_the_delayed_remote_pose_timeline() {
+        let mut runtime = ClientRuntime::new(ClientHost::RemoteDedicated);
+        let id = RemotePlayerId(7);
+        let initial = RemotePlayerUpdate {
+            id,
+            appearance: PlayerAppearance::default(),
+            position: mclone_core::Vec3d::new(0.0, 64.0, 2.0),
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            on_ground: true,
+        };
+        runtime.apply_update(ServerUpdate::RemotePlayerAdd(initial));
+        let message = |sequence, sample_time_millis, x| {
+            ServerEphemeralMessage::RemoteBodyPose(mclone_protocol::RemotePlayerBodyPoseSample {
+                id,
+                pose: mclone_protocol::PlayerBodyPoseSample::new(
+                    1,
+                    sequence,
+                    sample_time_millis,
+                    mclone_core::Vec3d::new(x, 64.0, 2.0),
+                    x as f32 * 10.0,
+                    0.0,
+                    true,
+                ),
+            })
+        };
+        assert!(runtime.apply_ephemeral_message_at(message(1, 1_000, 0.0), 10_000));
+        assert!(runtime.apply_ephemeral_message_at(message(2, 1_050, 10.0), 10_050));
+
+        assert_eq!(runtime.remote_player(id).unwrap().position.x, 10.0);
+        let presentation = runtime.actor_presentations_at(10_125).remove(0);
+        assert!((presentation.feet_position.x - 5.0).abs() < 1.0e-9);
+        assert!((presentation.y_rot_degrees - 50.0).abs() < 1.0e-6);
+        let diagnostics = runtime
+            .remote_pose_timeline_diagnostics(id, 10_125)
+            .unwrap();
+        assert_eq!(diagnostics.accepted_samples, 2);
+        assert_eq!(diagnostics.interpolation_delay_millis, 100);
     }
 
     #[test]

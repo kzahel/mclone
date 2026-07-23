@@ -9,8 +9,9 @@ has a carrier-neutral, complete, sequenced body-pose sample and a distinct
 ephemeral send boundary. Integrated, TCP, and WebSocket compatibility paths
 currently carry that message through a bounded reliable fallback; remote
 clients reject stale epoch/sequence samples and retain the newest state.
-Buffered snapshot interpolation and the native UDP carrier remain active
-Tactical 224 slices. Separate body, head, and hand poses remain later
+Remote body presentation now evaluates a bounded snapshot timeline at render
+time with cadence/jitter-aware delay. The native UDP carrier remains the
+active Tactical 224 slice. Separate body, head, and hand poses remain later
 representation work. The first datagram carrier is dependency-free raw UDP
 beside existing native TCP, and WebTransport/WebRTC remain later adapters for
 their supported browser and peer-hosted topologies.
@@ -79,10 +80,9 @@ player locations.
 - The server accepts the permissively client-authored sample, applies normal
   movement validation, and routes a sequenced remote sample to observers.
 - The receiving replica ignores unknown-player, stale-epoch, duplicate, and
-  older-sequence samples. It still presents only the latest target through the
-  existing smoothing path until Tactical 224 Slice 2 adds a bounded timeline.
+  older-sequence samples before accepting them into a bounded timeline.
 
-`RemotePlayerUpdate` currently contains:
+Reliable `RemotePlayerAdd`/`RemotePlayerUpdate` currently contain:
 
 - `RemotePlayerId`;
 - appearance/model selection;
@@ -90,16 +90,15 @@ player locations.
 - one yaw and pitch pair;
 - `on_ground`.
 
-It has no remote-presentation epoch, pose sequence, sample time, velocity,
-discontinuity marker, independent body heading, head transform, or hand
-transforms. The incoming `MovePlayer` sequence is not retained in the remote
-update.
+The ephemeral body sample adds remote-presentation epoch, pose sequence,
+sample time, and a discontinuity marker. It does not yet add velocity,
+independent body heading, head transform, or hand transforms.
 
 The server accepts finite/clamped client movement under the permissive
 movement-authority policy. Each accepted move reconciles the player as a
-remote-player subject and routes an update to interested observers. Add,
-update, and remove messages share the same reliable ordered per-client stream
-as chunks, gameplay state, life state, teleports, and other protocol facts.
+remote-player subject and routes a complete ephemeral body sample to
+interested observers. Add, remove, appearance, and lifecycle facts remain
+reliable.
 
 Integrated memory channels, native TCP, direct WebSocket, and browser worker
 WebSocket paths therefore provide reliable ordered delivery today. No
@@ -107,19 +106,24 @@ shipping path offers an unreliable datagram side channel.
 
 ### Remote client and rendering
 
-`mclone-client` retains only the latest `RemotePlayerUpdate` per player. It
-derives cumulative horizontal walk distance when accepted updates arrive.
+`mclone-client` retains the latest accepted authority state plus up to 32
+timed body samples per remote player. Each track records sender-relative
+sample time and local monotonic arrival time, rejects stale/duplicate samples,
+counts sequence gaps, handles nonzero sequence wrap, and resets on a newer
+epoch or explicit discontinuity. Pressure discards only the oldest
+already-superseded sample.
 
-`ActorInterpolationState` then eases each rendered actor toward the newest
-target with a frame-rate-independent exponential half-life of 80 ms. This is
-better than frame-count-dependent smoothing, but it:
+The render-time sample is evaluated at `now - delay`. Delay begins at two
+negotiated replication intervals, adds twice measured arrival jitter, and is
+clamped to 35-150 ms. Position interpolation follows the topology's shortest
+lift and yaw/pitch take the shortest angular path. The track holds the newest
+sample rather than extrapolating beyond known state.
 
-- has no history from which to interpolate at a deliberately delayed time;
-- does not model source sample cadence, arrival jitter, loss, or reordering;
-- never converges exactly in finite time;
-- can trade visible lag against jitter only through one fixed half-life;
-- applies the same presentation policy to remote players and other actors;
-- cannot present head or hands because those facts do not exist.
+The shared scene supplies monotonic render time and tells the existing actor
+interpolator that remote players are already sampled. General entities retain
+their previous frame-rate-independent 80 ms half-life behavior. Diagnostics
+expose received, accepted, stale, duplicate, gap, discontinuity, superseded,
+jitter, delay, and latest-age facts per remote player.
 
 Remote players render through the shared actor path on Mono, stereo, and XR
 multiview surfaces. The current player figure uses feet position, the one
@@ -523,13 +527,16 @@ motion traces or short captures are required for interpolation quality.
    configuration, make body report selection rate-aware and change-driven,
    make the heartbeat time-based, and force the final pose before lifecycle
    persistence.
-3. **Sequenced body snapshots.** Add presentation epoch, pose sequence,
+3. **Sequenced body snapshots — complete in Tactical 224 Slice 1.** Add
+   presentation epoch, pose sequence,
    bounded relative sample timing, and discontinuity to remote-player body
    updates. Keep them on the reliable stream initially.
-4. **Buffered remote interpolation.** Give remote players a dedicated
+4. **Buffered remote interpolation — complete in Tactical 224 Slice 2.** Give
+   remote players a dedicated
    snapshot timeline and cadence/jitter-aware presentation delay. Do not
    change general entity smoothing accidentally.
-5. **Loss-tolerant conformance.** Run the same logical sample stream through a
+5. **Loss-tolerant conformance — complete for the decoded track in Tactical
+   224 Slice 2.** Run the same logical sample stream through a
    simulator that injects loss, duplication, reordering, delay, and pressure.
    Decide full samples, component masks, quantization, keyframes, and recovery
    from measured results.
