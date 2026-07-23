@@ -1,9 +1,10 @@
 use anyhow::Result;
 use mclone_input::{
-    ControllerInputError, ControllerInputPreferences, ControllerInputSession, FlatInputAction,
-    FlatInputFrame, InputContext, InputSourceDescriptor, InputSourceId, KeyboardKey,
-    KeyboardMouseInputAdapter, MouseWheelDirection, PlayerActionFrame, PlayerActionFrameCombiner,
-    PointerButton, StandardGamepadSnapshot, TouchLookDelta, XrInputFrame,
+    ControllerActionBatch, ControllerInputBatch, ControllerInputError, ControllerInputPreferences,
+    ControllerInputSession, FlatInputAction, FlatInputFrame, InputContext, InputSourceDescriptor,
+    InputSourceId, KeyboardKey, KeyboardMouseInputAdapter, MouseWheelDirection, PlayerActionFrame,
+    PlayerActionFrameCombiner, PointerButton, StandardGamepadSnapshot, TouchLookDelta,
+    XrInputFrame,
 };
 use mclone_ui::{GameHelpParent, GameUiAction, GuiKey, GuiNavigation, Point};
 use std::time::Duration;
@@ -113,30 +114,48 @@ impl XrControllerInputRouter {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<XrControllerInputDisposition> {
+        self.route_batch(
+            host,
+            &ControllerInputBatch::from_snapshots(now, samples),
+            device,
+            queue,
+        )
+    }
+
+    pub fn route_batch(
+        &mut self,
+        host: &mut McloneSceneHost,
+        batch: &ControllerInputBatch,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<XrControllerInputDisposition> {
         let context = if host.mono_ui_is_active() {
             InputContext::Menu
         } else {
             InputContext::Gameplay
         };
-        let actions = self.sample_actions(context, now, samples)?;
+        let action_batch = self.sample_batch(context, batch)?;
+        let actions = &action_batch.actions;
         let mut disposition = XrControllerInputDisposition {
             meaningful_controller_activity: actions.activity_source.is_some(),
             ..XrControllerInputDisposition::default()
         };
         if context != InputContext::Gameplay {
-            for action in actions.pressed.iter().copied() {
-                let Some(navigation) = gui_navigation_from_player_action(action) else {
-                    continue;
-                };
-                let (handled, ui_action) = host.mono_ui_navigate(navigation);
-                disposition.scene_changed |= handled;
-                if let Some(ui_action) = ui_action {
-                    disposition.scene_changed |=
-                        host.apply_xr_ui_action(ui_action, device, queue)?;
+            for observation in &action_batch.observations {
+                for action in observation.actions.pressed.iter().copied() {
+                    let Some(navigation) = gui_navigation_from_player_action(action) else {
+                        continue;
+                    };
+                    let (handled, ui_action) = host.mono_ui_navigate(navigation);
+                    disposition.scene_changed |= handled;
+                    if let Some(ui_action) = ui_action {
+                        disposition.scene_changed |=
+                            host.apply_xr_ui_action(ui_action, device, queue)?;
+                    }
                 }
             }
         }
-        self.latest_actions = actions;
+        self.latest_actions = action_batch.actions;
         Ok(disposition)
     }
 
@@ -146,9 +165,19 @@ impl XrControllerInputRouter {
         now: Duration,
         samples: impl IntoIterator<Item = (InputSourceId, StandardGamepadSnapshot)>,
     ) -> std::result::Result<PlayerActionFrame, ControllerInputError> {
+        Ok(self
+            .sample_batch(context, &ControllerInputBatch::from_snapshots(now, samples))?
+            .actions)
+    }
+
+    fn sample_batch(
+        &mut self,
+        context: InputContext,
+        batch: &ControllerInputBatch,
+    ) -> std::result::Result<ControllerActionBatch, ControllerInputError> {
         self.controller.set_context(context);
-        let actions = self.controller.sample_frame(now, samples)?;
-        self.latest_actions = actions.clone();
+        let actions = self.controller.sample_batch(batch)?;
+        self.latest_actions = actions.actions.clone();
         Ok(actions)
     }
 }
@@ -302,33 +331,59 @@ impl MonoInteractiveInputRouter {
     where
         H: HostEffects,
     {
+        self.route_controller_batch(
+            host,
+            &ControllerInputBatch::from_snapshots(now, samples),
+            device,
+            queue,
+            effects,
+        )
+    }
+
+    /// Consume an ordered ordinary-controller batch at one presentation
+    /// boundary without collapsing physical transitions before shared action
+    /// routing.
+    pub fn route_controller_batch<H>(
+        &mut self,
+        host: &mut McloneSceneHost,
+        batch: &ControllerInputBatch,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        effects: &mut H,
+    ) -> Result<MonoInputDisposition>
+    where
+        H: HostEffects,
+    {
         let context = if host.mono_ui_is_active() {
             InputContext::Menu
         } else {
             InputContext::Gameplay
         };
-        let actions = self.sample_controller_actions(context, now, samples)?;
-        let meaningful_controller_activity = actions.activity_source.is_some();
+        let action_batch = self.sample_controller_batch(context, batch)?;
+        let meaningful_controller_activity = action_batch.actions.activity_source.is_some();
         if context != InputContext::Gameplay {
             let mut disposition = MonoInputDisposition {
-                handled: !actions.pressed.is_empty() || !actions.released.is_empty(),
+                handled: !action_batch.actions.pressed.is_empty()
+                    || !action_batch.actions.released.is_empty(),
                 meaningful_controller_activity,
                 ..MonoInputDisposition::default()
             };
-            for action in actions.pressed {
-                let Some(navigation) = gui_navigation_from_player_action(action) else {
-                    continue;
-                };
-                let (handled, ui_action) = host.mono_ui_navigate(navigation);
-                disposition.handled |= handled;
-                disposition.scene_changed |= handled;
-                if let Some(ui_action) = ui_action {
-                    disposition.merge(Self::apply_ui_action(
-                        host, ui_action, false, device, queue, effects,
-                    )?);
-                }
-                if disposition.clear_transient_input {
-                    break;
+            'observations: for observation in action_batch.observations {
+                for action in observation.actions.pressed {
+                    let Some(navigation) = gui_navigation_from_player_action(action) else {
+                        continue;
+                    };
+                    let (handled, ui_action) = host.mono_ui_navigate(navigation);
+                    disposition.handled |= handled;
+                    disposition.scene_changed |= handled;
+                    if let Some(ui_action) = ui_action {
+                        disposition.merge(Self::apply_ui_action(
+                            host, ui_action, false, device, queue, effects,
+                        )?);
+                    }
+                    if disposition.clear_transient_input {
+                        break 'observations;
+                    }
                 }
             }
             self.clear_if_requested(disposition);
@@ -339,18 +394,26 @@ impl MonoInteractiveInputRouter {
         // `advance_held_frame`. The immediate route consumes only action edges
         // (and any already-integrated pointer delta from a future semantic
         // source), avoiding presentation-rate look being applied twice.
-        let mut frame = actions.to_flat_frame(0.0);
-        frame.forward = false;
-        frame.backward = false;
-        frame.left = false;
-        frame.right = false;
-        frame.movement = Default::default();
-        frame.analog_movement = None;
-        frame.jump = false;
-        frame.sprint = false;
-        frame.sneak = false;
-        frame.descend = false;
-        let mut disposition = Self::route_resolved_flat_frame(host, frame, device, queue, effects)?;
+        let mut disposition = MonoInputDisposition::default();
+        for observation in action_batch.observations {
+            let mut frame = observation.actions.to_flat_frame(0.0);
+            frame.forward = false;
+            frame.backward = false;
+            frame.left = false;
+            frame.right = false;
+            frame.movement = Default::default();
+            frame.analog_movement = None;
+            frame.jump = false;
+            frame.sprint = false;
+            frame.sneak = false;
+            frame.descend = false;
+            disposition.merge(Self::route_resolved_flat_frame(
+                host, frame, device, queue, effects,
+            )?);
+            if disposition.clear_transient_input {
+                break;
+            }
+        }
         disposition.meaningful_controller_activity = meaningful_controller_activity;
         self.clear_if_requested(disposition);
         Ok(disposition)
@@ -362,9 +425,19 @@ impl MonoInteractiveInputRouter {
         now: Duration,
         samples: impl IntoIterator<Item = (InputSourceId, StandardGamepadSnapshot)>,
     ) -> std::result::Result<PlayerActionFrame, ControllerInputError> {
+        Ok(self
+            .sample_controller_batch(context, &ControllerInputBatch::from_snapshots(now, samples))?
+            .actions)
+    }
+
+    fn sample_controller_batch(
+        &mut self,
+        context: InputContext,
+        batch: &ControllerInputBatch,
+    ) -> std::result::Result<ControllerActionBatch, ControllerInputError> {
         self.controller.set_context(context);
-        let actions = self.controller.sample_frame(now, samples)?;
-        self.latest_controller_actions = actions.clone();
+        let actions = self.controller.sample_batch(batch)?;
+        self.latest_controller_actions = actions.actions.clone();
         Ok(actions)
     }
 
@@ -762,7 +835,8 @@ mod tests {
     use super::*;
     use glam::Vec2;
     use mclone_input::{
-        InputSourceIdAllocator, StandardGamepadButtonState, StandardGamepadButtons,
+        ControllerInputObservation, InputSourceIdAllocator, StandardGamepadButtonState,
+        StandardGamepadButtons,
     };
 
     #[test]
@@ -847,6 +921,74 @@ mod tests {
 
         router.clear_transient_input();
         assert!(router.held_frame().is_none());
+    }
+
+    #[test]
+    fn router_preserves_controller_edges_inside_one_presentation_interval() {
+        let mut allocator = InputSourceIdAllocator::new();
+        let source_id = allocator.allocate().expect("source");
+        let mut router = MonoInteractiveInputRouter::new();
+        router.connect_controller_source(
+            source_id,
+            InputSourceDescriptor::scripted_gamepad("ordered scene test"),
+        );
+        let pressed = StandardGamepadSnapshot {
+            buttons: StandardGamepadButtons {
+                south: StandardGamepadButtonState::pressed(),
+                ..StandardGamepadButtons::default()
+            },
+            ..StandardGamepadSnapshot::default()
+        };
+        let mut input = ControllerInputBatch::new(Duration::from_millis(16));
+        input.push_observation(ControllerInputObservation {
+            source_id,
+            sample_time: Duration::from_millis(4),
+            sequence: 20,
+            snapshot: pressed,
+        });
+        input.push_observation(ControllerInputObservation {
+            source_id,
+            sample_time: Duration::from_millis(9),
+            sequence: 21,
+            snapshot: StandardGamepadSnapshot::default(),
+        });
+
+        let actions = router
+            .sample_controller_batch(InputContext::Gameplay, &input)
+            .expect("ordered controller batch");
+        assert!(
+            actions
+                .actions
+                .pressed
+                .contains(&mclone_input::PlayerAction::Jump)
+        );
+        assert!(
+            actions
+                .actions
+                .released
+                .contains(&mclone_input::PlayerAction::Jump)
+        );
+        assert_eq!(
+            actions.observations[0].sample_time,
+            Duration::from_millis(4)
+        );
+        assert_eq!(
+            actions.observations[1].sample_time,
+            Duration::from_millis(9)
+        );
+        assert!(
+            actions.observations[0]
+                .actions
+                .pressed
+                .contains(&mclone_input::PlayerAction::Jump)
+        );
+        assert!(
+            actions.observations[1]
+                .actions
+                .released
+                .contains(&mclone_input::PlayerAction::Jump)
+        );
+        assert!(!router.has_continuous_movement_input());
     }
 
     #[test]

@@ -902,10 +902,9 @@ impl AndroidGpuState {
                 .connect_controller_source(source_id, descriptor);
         }
         let mut effects = AndroidHostEffects::default();
-        let disposition = self.interactive_input.route_controller_samples(
+        let disposition = self.interactive_input.route_controller_batch(
             &mut self.host,
-            poll.sample_time,
-            poll.samples,
+            &poll.input,
             &self.device,
             &self.queue,
             &mut effects,

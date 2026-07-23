@@ -60,6 +60,7 @@ public final class ControllerInputBridge implements InputManager.InputDeviceList
         nativeControllerKey(
                 event.getDeviceId(),
                 event.getSource(),
+                event.getEventTime(),
                 event.getKeyCode(),
                 event.getAction(),
                 event.getRepeatCount());
@@ -72,22 +73,37 @@ public final class ControllerInputBridge implements InputManager.InputDeviceList
             return false;
         }
         reportDevice(DEVICE_CHANGED, event.getDeviceId());
+        for (int historyIndex = 0; historyIndex < event.getHistorySize(); historyIndex++) {
+            reportMotionSample(event, historyIndex);
+        }
+        reportMotionSample(event, -1);
+        return true;
+    }
+
+    private static void reportMotionSample(MotionEvent event, int historyIndex) {
+        boolean historical = historyIndex >= 0;
         nativeControllerMotion(
                 event.getDeviceId(),
                 event.getSource(),
-                event.getAxisValue(MotionEvent.AXIS_X),
-                event.getAxisValue(MotionEvent.AXIS_Y),
-                event.getAxisValue(MotionEvent.AXIS_Z),
-                event.getAxisValue(MotionEvent.AXIS_RZ),
-                event.getAxisValue(MotionEvent.AXIS_RX),
-                event.getAxisValue(MotionEvent.AXIS_RY),
-                event.getAxisValue(MotionEvent.AXIS_HAT_X),
-                event.getAxisValue(MotionEvent.AXIS_HAT_Y),
-                event.getAxisValue(MotionEvent.AXIS_LTRIGGER),
-                event.getAxisValue(MotionEvent.AXIS_RTRIGGER),
-                event.getAxisValue(MotionEvent.AXIS_BRAKE),
-                event.getAxisValue(MotionEvent.AXIS_GAS));
-        return true;
+                historical ? event.getHistoricalEventTime(historyIndex) : event.getEventTime(),
+                axisValue(event, MotionEvent.AXIS_X, historyIndex),
+                axisValue(event, MotionEvent.AXIS_Y, historyIndex),
+                axisValue(event, MotionEvent.AXIS_Z, historyIndex),
+                axisValue(event, MotionEvent.AXIS_RZ, historyIndex),
+                axisValue(event, MotionEvent.AXIS_RX, historyIndex),
+                axisValue(event, MotionEvent.AXIS_RY, historyIndex),
+                axisValue(event, MotionEvent.AXIS_HAT_X, historyIndex),
+                axisValue(event, MotionEvent.AXIS_HAT_Y, historyIndex),
+                axisValue(event, MotionEvent.AXIS_LTRIGGER, historyIndex),
+                axisValue(event, MotionEvent.AXIS_RTRIGGER, historyIndex),
+                axisValue(event, MotionEvent.AXIS_BRAKE, historyIndex),
+                axisValue(event, MotionEvent.AXIS_GAS, historyIndex));
+    }
+
+    private static float axisValue(MotionEvent event, int axis, int historyIndex) {
+        return historyIndex >= 0
+                ? event.getHistoricalAxisValue(axis, historyIndex)
+                : event.getAxisValue(axis);
     }
 
     @Override
@@ -180,11 +196,17 @@ public final class ControllerInputBridge implements InputManager.InputDeviceList
             String displayLabel);
 
     private static native void nativeControllerKey(
-            int deviceId, int source, int keyCode, int action, int repeatCount);
+            int deviceId,
+            int source,
+            long eventTimeMillis,
+            int keyCode,
+            int action,
+            int repeatCount);
 
     private static native void nativeControllerMotion(
             int deviceId,
             int source,
+            long eventTimeMillis,
             float x,
             float y,
             float z,

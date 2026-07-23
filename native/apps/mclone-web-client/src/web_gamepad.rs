@@ -7,8 +7,9 @@ use std::{
 
 use glam::Vec2;
 use mclone_input::{
-    InputSourceDescriptor, InputSourceId, InputSourceIdAllocator, StandardGamepadButtonState,
-    StandardGamepadButtons, StandardGamepadSnapshot, classify_controller_layout,
+    ControllerInputBatch, ControllerInputObservation, InputSourceDescriptor, InputSourceId,
+    InputSourceIdAllocator, StandardGamepadButtonState, StandardGamepadButtons,
+    StandardGamepadSnapshot, classify_controller_layout,
 };
 
 const W3C_STANDARD_AXIS_COUNT: usize = 4;
@@ -24,6 +25,7 @@ struct BrowserGamepadButton {
 struct BrowserGamepadState {
     index: u32,
     id: String,
+    timestamp_millis: f64,
     standard_mapping: bool,
     axes: Vec<f32>,
     buttons: Vec<BrowserGamepadButton>,
@@ -31,15 +33,14 @@ struct BrowserGamepadState {
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct BrowserGamepadPoll {
-    pub(crate) sample_time: Duration,
     pub(crate) connected: Vec<(InputSourceId, InputSourceDescriptor)>,
     pub(crate) disconnected: Vec<InputSourceId>,
-    pub(crate) samples: Vec<(InputSourceId, StandardGamepadSnapshot)>,
+    pub(crate) input: ControllerInputBatch,
 }
 
 impl BrowserGamepadPoll {
     pub(crate) fn connected_count(&self) -> usize {
-        self.samples.len()
+        self.input.terminal_snapshot_count()
     }
 }
 
@@ -54,6 +55,7 @@ struct BrowserGamepadSource {
 pub(crate) struct BrowserGamepadCollector {
     allocator: InputSourceIdAllocator,
     sources: BTreeMap<u32, BrowserGamepadSource>,
+    next_observation_sequence: u64,
 }
 
 impl BrowserGamepadCollector {
@@ -89,7 +91,7 @@ impl BrowserGamepadCollector {
             .map(|(gamepad, _)| gamepad.index)
             .collect::<BTreeSet<_>>();
         let mut poll = BrowserGamepadPoll {
-            sample_time,
+            input: ControllerInputBatch::new(sample_time),
             ..BrowserGamepadPoll::default()
         };
 
@@ -133,7 +135,19 @@ impl BrowserGamepadCollector {
                     ),
                 ));
             }
-            poll.samples.push((source.source_id, snapshot));
+            let observed_at =
+                if gamepad.timestamp_millis.is_finite() && gamepad.timestamp_millis > 0.0 {
+                    duration_from_browser_millis(gamepad.timestamp_millis)
+                } else {
+                    sample_time
+                };
+            poll.input.push_observation(ControllerInputObservation {
+                source_id: source.source_id,
+                sample_time: observed_at,
+                sequence: self.next_observation_sequence,
+                snapshot,
+            });
+            self.next_observation_sequence = self.next_observation_sequence.saturating_add(1);
         }
 
         for (index, source) in &mut self.sources {
@@ -190,7 +204,6 @@ fn normalize_standard_mapping(gamepad: &BrowserGamepadState) -> Option<StandardG
     )
 }
 
-#[cfg(target_arch = "wasm32")]
 fn duration_from_browser_millis(now_millis: f64) -> Duration {
     if now_millis.is_finite() && now_millis > 0.0 {
         Duration::from_secs_f64(now_millis / 1_000.0)
@@ -237,6 +250,7 @@ fn browser_gamepad_states() -> Result<Vec<BrowserGamepadState>, wasm_bindgen::Js
         states.push(BrowserGamepadState {
             index: gamepad.index(),
             id: gamepad.id(),
+            timestamp_millis: gamepad.timestamp(),
             standard_mapping: gamepad.mapping() == GamepadMappingType::Standard,
             axes,
             buttons,
@@ -262,6 +276,7 @@ mod tests {
         BrowserGamepadState {
             index,
             id: id.to_owned(),
+            timestamp_millis: 0.0,
             standard_mapping: true,
             axes: vec![0.25, -0.5, -0.75, 1.0],
             buttons,
@@ -289,7 +304,7 @@ mod tests {
             .update(Duration::ZERO, [standard_gamepad(2, "Xbox Controller")])
             .expect("connect");
         let source = connected.connected[0].0;
-        assert_eq!(connected.sample_time, Duration::ZERO);
+        assert_eq!(connected.input.sample_time(), Duration::ZERO);
         assert_eq!(connected.connected_count(), 1);
 
         let disconnected = collector

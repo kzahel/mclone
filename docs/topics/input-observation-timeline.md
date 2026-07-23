@@ -5,11 +5,11 @@ Topic: `input-observation-timeline`
 Status: direction accepted 2026-07-23; implementation is active. The shared
 bounded `ControllerInputBatch` and multi-observation semantic reduction are
 implemented with explicit ordering correction, overflow discontinuity, and
-terminal-state recovery. Platform collector adoption and fixed-rate semantic
-command materialization remain open. Desktop and Android still discard useful
-ordered observations before the shared reducer sees them. Browser and OpenXR
-expose more limited sampling models and must degrade honestly rather than
-pretending to provide event history.
+terminal-state recovery. Desktop retains each GilRs transition, Android
+forwards key/motion times and historical axis samples through a bounded queue,
+browser emits one timestamped rAF snapshot, and OpenXR preserves action-change
+metadata from each required action sync. Fixed-rate semantic command
+materialization remains open.
 
 Scope: preserve the best physical-input order and timing each platform can
 provide, normalize it behind a host-neutral contract, reduce it into shared
@@ -78,8 +78,8 @@ All interactive hosts already use the correct broad ordering:
 collect platform input -> route shared semantics -> move -> render
 ```
 
-Keyboard, mouse, and touch enter through event-oriented paths. The remaining
-loss is concentrated in controller-like sources:
+Keyboard, mouse, and touch enter through event-oriented paths. Controller-like
+sources now project their available capabilities as follows:
 
 `mclone-input` now owns the bounded physical batch and semantic result types.
 An event-capable batch may contain multiple ordered canonical snapshots per
@@ -91,10 +91,10 @@ discontinuous batches without inventing a press.
 
 | Platform | API shape available | Current projection | Information lost |
 | --- | --- | --- | --- |
-| Browser | `navigator.getGamepads()` current snapshots, normally polled once per `requestAnimationFrame` | Rust/Wasm emits one W3C standard-mapped snapshot per source before scene advance | Transitions between browser samples are unavailable to the application |
-| Desktop | GilRs ordered events plus cached gamepad state | The host drains all events, then emits only each device's final cached snapshot | Event order, event times, and press/release or axis transitions within one render interval |
-| Android | Java `KeyEvent` and `MotionEvent` callbacks queued through JNI | Rust applies all queued events, then emits only each device's final snapshot | Event times, `MotionEvent` historical samples, and intermediate state transitions |
-| OpenXR | Action state observed at `sync_actions` cadence, including runtime change/time facts where exposed | The host reads current action state once per XR frame | Useful change/time metadata; the runtime does not promise arbitrary physical event history |
+| Browser | `navigator.getGamepads()` current snapshots, normally polled once per `requestAnimationFrame` | Rust/Wasm emits one timestamped W3C standard-mapped observation plus terminal state per source before scene advance | Transitions between browser samples remain unavailable to the application |
+| Desktop | GilRs ordered events plus cached gamepad state | The host captures canonical state after each drained event and supplies final cached state for recovery | Backend history is preserved; hardware/driver acceptance remains |
+| Android | Java `KeyEvent` and `MotionEvent` callbacks queued through JNI | Java forwards event times and historical motion samples; Rust emits canonical state after each queued sample and terminal state | Backend history is preserved within the bounded queue; hardware/driver acceptance remains |
+| OpenXR | Action state observed at `sync_actions` cadence, including runtime change/time facts where exposed | The host reads current action state once per XR frame and retains changed-since-sync/source-time metadata per action | The runtime does not promise arbitrary physical event history |
 | Scripted/offscreen | Fully controlled synthetic input | Usually one requested snapshot per frame | Nothing inherent; it can exercise the richer contract deterministically |
 
 Browser TypeScript is already a deliberately mechanical forwarder. Browser

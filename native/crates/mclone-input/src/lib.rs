@@ -62,6 +62,37 @@ impl XrSpecificInput {
     }
 }
 
+/// Host-neutral identity for one action-based XR control.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum XrActionControl {
+    MovementX,
+    MovementY,
+    TurnX,
+    TurnY,
+    PointerSelect,
+    Attack,
+    SimpleAttack,
+    Squeeze,
+    Use,
+    OpenMenu,
+    Jump,
+    Descend,
+    Sprint,
+    OpenBlockPalette,
+    Sneak,
+}
+
+/// Change metadata exposed by an action-based XR runtime at one action sync.
+///
+/// The source timestamp is runtime-local diagnostic/order evidence. It is not
+/// a portable replay timestamp and does not imply that intermediate physical
+/// history is available.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct XrActionChange {
+    pub control: XrActionControl,
+    pub source_time_nanos: i64,
+}
+
 /// One XR presentation-boundary input sample.
 ///
 /// Ordinary gamepad, Steam-style, and OpenXR controls converge in `actions`;
@@ -71,6 +102,7 @@ pub struct XrInputFrame {
     pub actions: PlayerActionFrame,
     pub tracked: Vec<TrackedControllerState>,
     pub xr_specific: XrSpecificInput,
+    pub action_changes: Vec<XrActionChange>,
 }
 
 /// Raw semantic values supplied by an action-based XR backend.
@@ -134,6 +166,7 @@ impl XrInputFrameAssembler {
                     actions: PlayerActionFrame::default(),
                     tracked,
                     xr_specific,
+                    action_changes: Vec::new(),
                 };
             }
             self.suppress_until_neutral = false;
@@ -203,6 +236,7 @@ impl XrInputFrameAssembler {
             },
             tracked,
             xr_specific,
+            action_changes: Vec::new(),
         }
     }
 }

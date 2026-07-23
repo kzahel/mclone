@@ -526,10 +526,9 @@ impl WinitFrameDriver {
                 .disconnect_controller_source(source_id)?;
         }
         let mut effects = WinitHostEffects::default();
-        let scene = self.interactive_input.route_controller_samples(
+        let scene = self.interactive_input.route_controller_batch(
             &mut self.host,
-            poll.sample_time,
-            poll.samples,
+            &poll.input,
             device,
             queue,
             &mut effects,

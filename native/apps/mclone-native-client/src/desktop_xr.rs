@@ -524,10 +524,9 @@ impl mclone_xr_host::OpenXrFrameLoopHandler<platform_graphics::AppGraphics>
                     self.ordinary_gamepad_input
                         .connect_source(source_id, descriptor);
                 }
-                self.ordinary_gamepad_input.route_samples(
+                self.ordinary_gamepad_input.route_batch(
                     mclone,
-                    poll.sample_time,
-                    poll.samples,
+                    &poll.input,
                     self.device,
                     self.queue,
                 )?;

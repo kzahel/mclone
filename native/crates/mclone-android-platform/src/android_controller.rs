@@ -13,8 +13,9 @@ use std::{
 
 use glam::Vec2;
 use mclone_input::{
-    InputSourceDescriptor, InputSourceId, InputSourceIdAllocator, StandardGamepadButtonState,
-    StandardGamepadButtons, StandardGamepadSnapshot, classify_controller_layout,
+    ControllerInputBatch, ControllerInputObservation, InputSourceDescriptor, InputSourceId,
+    InputSourceIdAllocator, StandardGamepadButtonState, StandardGamepadButtons,
+    StandardGamepadSnapshot, classify_controller_layout,
 };
 
 pub const ANDROID_SOURCE_DPAD: u32 = 0x0000_0201;
@@ -51,6 +52,7 @@ const KEYCODE_BUTTON_THUMBR: i32 = 107;
 const KEYCODE_BUTTON_START: i32 = 108;
 const KEYCODE_BUTTON_SELECT: i32 = 109;
 const KEYCODE_BUTTON_MODE: i32 = 110;
+const MAX_PENDING_ANDROID_CONTROLLER_EVENTS: usize = 1_024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AndroidControllerDeviceChange {
@@ -111,6 +113,9 @@ pub struct AndroidControllerMotion {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum AndroidControllerEvent {
+    Discontinuity {
+        dropped_events: u64,
+    },
     Device {
         change: AndroidControllerDeviceChange,
         device: AndroidControllerDevice,
@@ -118,6 +123,7 @@ pub enum AndroidControllerEvent {
     Key {
         device_id: i32,
         source: u32,
+        event_time_millis: u64,
         key_code: i32,
         action: AndroidControllerKeyAction,
         repeat_count: i32,
@@ -125,22 +131,29 @@ pub enum AndroidControllerEvent {
     Motion {
         device_id: i32,
         source: u32,
+        event_time_millis: u64,
         axes: AndroidControllerMotion,
     },
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct AndroidControllerPoll {
-    pub sample_time: Duration,
     pub connected: Vec<(InputSourceId, InputSourceDescriptor)>,
     pub disconnected: Vec<InputSourceId>,
-    pub samples: Vec<(InputSourceId, StandardGamepadSnapshot)>,
+    pub input: ControllerInputBatch,
 }
 
 impl AndroidControllerPoll {
     pub fn connected_count(&self) -> usize {
-        self.samples.len()
+        self.input.terminal_snapshot_count()
     }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PendingAndroidControllerObservation {
+    source_id: InputSourceId,
+    event_time_millis: u64,
+    snapshot: StandardGamepadSnapshot,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -219,6 +232,11 @@ pub struct AndroidControllerCollector {
     devices: BTreeMap<i32, AndroidControllerState>,
     pending_connected: Vec<(InputSourceId, InputSourceDescriptor)>,
     pending_disconnected: Vec<InputSourceId>,
+    pending_observations: Vec<PendingAndroidControllerObservation>,
+    pending_dropped_events: u64,
+    android_time_origin_millis: Option<u64>,
+    input_time_origin: Duration,
+    next_observation_sequence: u64,
 }
 
 impl AndroidControllerCollector {
@@ -228,6 +246,11 @@ impl AndroidControllerCollector {
 
     pub fn handle_event(&mut self, event: AndroidControllerEvent) -> bool {
         match event {
+            AndroidControllerEvent::Discontinuity { dropped_events } => {
+                self.pending_dropped_events =
+                    self.pending_dropped_events.saturating_add(dropped_events);
+                true
+            }
             AndroidControllerEvent::Device { change, device } => {
                 if change != AndroidControllerDeviceChange::Removed
                     && !is_android_controller_source(device.sources)
@@ -240,6 +263,7 @@ impl AndroidControllerCollector {
             AndroidControllerEvent::Key {
                 device_id,
                 source,
+                event_time_millis,
                 key_code,
                 action,
                 repeat_count: _,
@@ -255,18 +279,34 @@ impl AndroidControllerCollector {
                     return true;
                 };
                 let state = self.ensure_implicit_device(device_id, source);
-                map_key(&mut state.digital_buttons, key_code, pressed);
+                let changed = map_key(&mut state.digital_buttons, key_code, pressed);
+                if changed {
+                    let observation = PendingAndroidControllerObservation {
+                        source_id: state.source_id,
+                        event_time_millis,
+                        snapshot: state.snapshot(),
+                    };
+                    self.pending_observations.push(observation);
+                }
                 true
             }
             AndroidControllerEvent::Motion {
                 device_id,
                 source,
+                event_time_millis,
                 axes,
             } => {
                 if !is_android_controller_source(source) {
                     return false;
                 }
-                self.ensure_implicit_device(device_id, source).axes = axes;
+                let state = self.ensure_implicit_device(device_id, source);
+                state.axes = axes;
+                let observation = PendingAndroidControllerObservation {
+                    source_id: state.source_id,
+                    event_time_millis,
+                    snapshot: state.snapshot(),
+                };
+                self.pending_observations.push(observation);
                 true
             }
         }
@@ -279,6 +319,8 @@ impl AndroidControllerCollector {
     }
 
     pub fn clear_controls_for_lifecycle(&mut self) {
+        self.pending_observations.clear();
+        self.pending_dropped_events = 0;
         for state in self.devices.values_mut() {
             state.clear_controls();
         }
@@ -298,17 +340,55 @@ impl AndroidControllerCollector {
     }
 
     pub fn poll(&mut self, sample_time: Duration) -> AndroidControllerPoll {
+        self.initialize_time_mapping(sample_time);
+        let mut input = ControllerInputBatch::new(sample_time);
+        input.note_dropped_observations(std::mem::take(&mut self.pending_dropped_events));
+        let pending_observations = std::mem::take(&mut self.pending_observations);
+        for observation in pending_observations {
+            input.push_observation(ControllerInputObservation {
+                source_id: observation.source_id,
+                sample_time: self.map_event_time(observation.event_time_millis),
+                sequence: self.next_observation_sequence,
+                snapshot: observation.snapshot,
+            });
+            self.next_observation_sequence = self.next_observation_sequence.saturating_add(1);
+        }
+        for state in self.devices.values().filter(|state| state.connected) {
+            input.set_terminal_snapshot(state.source_id, state.snapshot());
+        }
         AndroidControllerPoll {
-            sample_time,
             connected: std::mem::take(&mut self.pending_connected),
             disconnected: std::mem::take(&mut self.pending_disconnected),
-            samples: self
-                .devices
-                .values()
-                .filter(|state| state.connected)
-                .map(|state| (state.source_id, state.snapshot()))
-                .collect(),
+            input,
         }
+    }
+
+    fn initialize_time_mapping(&mut self, sample_time: Duration) {
+        if self.android_time_origin_millis.is_some() {
+            return;
+        }
+        let Some(first) = self.pending_observations.first() else {
+            return;
+        };
+        let latest_millis = self
+            .pending_observations
+            .iter()
+            .map(|observation| observation.event_time_millis)
+            .max()
+            .unwrap_or(first.event_time_millis);
+        self.android_time_origin_millis = Some(first.event_time_millis);
+        self.input_time_origin = sample_time.saturating_sub(Duration::from_millis(
+            latest_millis.saturating_sub(first.event_time_millis),
+        ));
+    }
+
+    fn map_event_time(&self, event_time_millis: u64) -> Duration {
+        let Some(origin) = self.android_time_origin_millis else {
+            return self.input_time_origin;
+        };
+        self.input_time_origin.saturating_add(Duration::from_millis(
+            event_time_millis.saturating_sub(origin),
+        ))
     }
 
     fn handle_device(
@@ -466,23 +546,40 @@ fn merge_digital_button(
     }
 }
 
-static ANDROID_CONTROLLER_EVENT_QUEUE: OnceLock<Mutex<VecDeque<AndroidControllerEvent>>> =
+#[derive(Debug, Default)]
+struct AndroidControllerEventQueue {
+    events: VecDeque<AndroidControllerEvent>,
+    dropped_events: u64,
+}
+
+static ANDROID_CONTROLLER_EVENT_QUEUE: OnceLock<Mutex<AndroidControllerEventQueue>> =
     OnceLock::new();
 
 pub fn enqueue_android_controller_event(event: AndroidControllerEvent) {
-    ANDROID_CONTROLLER_EVENT_QUEUE
-        .get_or_init(|| Mutex::new(VecDeque::new()))
+    let mut queue = ANDROID_CONTROLLER_EVENT_QUEUE
+        .get_or_init(|| Mutex::new(AndroidControllerEventQueue::default()))
         .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner())
-        .push_back(event);
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if queue.events.len() == MAX_PENDING_ANDROID_CONTROLLER_EVENTS {
+        queue.events.pop_front();
+        queue.dropped_events = queue.dropped_events.saturating_add(1);
+    }
+    queue.events.push_back(event);
 }
 
 pub fn drain_android_controller_events() -> Vec<AndroidControllerEvent> {
-    let mut events = ANDROID_CONTROLLER_EVENT_QUEUE
-        .get_or_init(|| Mutex::new(VecDeque::new()))
+    let mut queue = ANDROID_CONTROLLER_EVENT_QUEUE
+        .get_or_init(|| Mutex::new(AndroidControllerEventQueue::default()))
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
-    events.drain(..).collect()
+    let mut drained = Vec::with_capacity(queue.events.len().saturating_add(1));
+    if queue.dropped_events > 0 {
+        drained.push(AndroidControllerEvent::Discontinuity {
+            dropped_events: std::mem::take(&mut queue.dropped_events),
+        });
+    }
+    drained.extend(queue.events.drain(..));
+    drained
 }
 
 /// Exports the fixed JNI entry points used by the shared Java controller
@@ -545,6 +642,7 @@ macro_rules! export_android_controller_jni_bridge {
             _class: jni::objects::JClass<'caller>,
             device_id: jni::sys::jint,
             source: jni::sys::jint,
+            event_time_millis: jni::sys::jlong,
             key_code: jni::sys::jint,
             action: jni::sys::jint,
             repeat_count: jni::sys::jint,
@@ -561,6 +659,8 @@ macro_rules! export_android_controller_jni_bridge {
                         $crate::AndroidControllerEvent::Key {
                             device_id,
                             source: source as u32,
+                            event_time_millis: u64::try_from(event_time_millis)
+                                .unwrap_or_default(),
                             key_code,
                             action,
                             repeat_count,
@@ -578,6 +678,7 @@ macro_rules! export_android_controller_jni_bridge {
             _class: jni::objects::JClass<'caller>,
             device_id: jni::sys::jint,
             source: jni::sys::jint,
+            event_time_millis: jni::sys::jlong,
             x: jni::sys::jfloat,
             y: jni::sys::jfloat,
             z: jni::sys::jfloat,
@@ -598,6 +699,8 @@ macro_rules! export_android_controller_jni_bridge {
                         $crate::AndroidControllerEvent::Motion {
                             device_id,
                             source: source as u32,
+                            event_time_millis: u64::try_from(event_time_millis)
+                                .unwrap_or_default(),
                             axes: $crate::AndroidControllerMotion {
                                 x,
                                 y,
@@ -664,6 +767,7 @@ mod tests {
         collector.handle_event(AndroidControllerEvent::Motion {
             device_id: 7,
             source: ANDROID_SOURCE_JOYSTICK,
+            event_time_millis: 1_000,
             axes: AndroidControllerMotion {
                 x: 0.25,
                 y: -0.5,
@@ -678,6 +782,7 @@ mod tests {
         collector.handle_event(AndroidControllerEvent::Key {
             device_id: 7,
             source: ANDROID_SOURCE_GAMEPAD,
+            event_time_millis: 1_004,
             key_code: KEYCODE_BUTTON_A,
             action: AndroidControllerKeyAction::Down,
             repeat_count: 0,
@@ -689,7 +794,12 @@ mod tests {
             poll.connected[0].1.controller_layout,
             ControllerLayoutFamily::XboxLike
         );
-        let snapshot = poll.samples[0].1;
+        let snapshot = poll
+            .input
+            .terminal_snapshots()
+            .next()
+            .expect("terminal snapshot")
+            .1;
         assert_eq!(snapshot.left_stick, Vec2::new(0.25, 0.5));
         assert_eq!(snapshot.right_stick, Vec2::new(-0.6, -0.8));
         assert!(snapshot.buttons.south.pressed);
@@ -712,12 +822,18 @@ mod tests {
         collector.handle_event(AndroidControllerEvent::Key {
             device_id: 9,
             source: ANDROID_SOURCE_GAMEPAD,
+            event_time_millis: 1_000,
             key_code: KEYCODE_BUTTON_A,
             action: AndroidControllerKeyAction::Down,
             repeat_count: 4,
         });
         assert!(
-            collector.poll(Duration::from_millis(1)).samples[0]
+            collector
+                .poll(Duration::from_millis(1))
+                .input
+                .terminal_snapshots()
+                .next()
+                .expect("terminal snapshot")
                 .1
                 .buttons
                 .south
@@ -729,7 +845,7 @@ mod tests {
         });
         let removed = collector.poll(Duration::from_millis(2));
         assert_eq!(removed.disconnected, vec![first_id]);
-        assert!(removed.samples.is_empty());
+        assert_eq!(removed.input.terminal_snapshot_count(), 0);
 
         collector.handle_event(AndroidControllerEvent::Device {
             change: AndroidControllerDeviceChange::Added,
@@ -737,7 +853,17 @@ mod tests {
         });
         let reconnected = collector.poll(Duration::from_millis(3));
         assert_eq!(reconnected.connected[0].0, first_id);
-        assert!(!reconnected.samples[0].1.buttons.south.pressed);
+        assert!(
+            !reconnected
+                .input
+                .terminal_snapshots()
+                .next()
+                .expect("terminal snapshot")
+                .1
+                .buttons
+                .south
+                .pressed
+        );
 
         let mut replacement = device;
         replacement.vendor_id = Some(0x054c);
@@ -766,6 +892,7 @@ mod tests {
         collector.handle_event(AndroidControllerEvent::Key {
             device_id: 3,
             source: ANDROID_SOURCE_GAMEPAD,
+            event_time_millis: 1_000,
             key_code: KEYCODE_BUTTON_START,
             action: AndroidControllerKeyAction::Down,
             repeat_count: 0,
@@ -773,7 +900,17 @@ mod tests {
         collector.clear_controls_for_lifecycle();
         let poll = collector.poll(Duration::ZERO);
         assert_eq!(poll.connected.len(), 1);
-        assert!(!poll.samples[0].1.buttons.start.pressed);
+        assert!(
+            !poll
+                .input
+                .terminal_snapshots()
+                .next()
+                .expect("terminal snapshot")
+                .1
+                .buttons
+                .start
+                .pressed
+        );
     }
 
     #[test]
@@ -800,6 +937,62 @@ mod tests {
         assert!(poll.disconnected.is_empty());
         assert_eq!(poll.connected.len(), 1);
         assert_ne!(poll.connected[0].0, first_id);
-        assert_eq!(poll.samples.len(), 1);
+        assert_eq!(poll.input.terminal_snapshot_count(), 1);
+    }
+
+    #[test]
+    fn key_edges_and_historical_motion_keep_android_event_order() {
+        let mut collector = AndroidControllerCollector::new();
+        collector.handle_event(AndroidControllerEvent::Device {
+            change: AndroidControllerDeviceChange::Added,
+            device: xbox_device(11),
+        });
+        collector.handle_event(AndroidControllerEvent::Key {
+            device_id: 11,
+            source: ANDROID_SOURCE_GAMEPAD,
+            event_time_millis: 10_000,
+            key_code: KEYCODE_BUTTON_A,
+            action: AndroidControllerKeyAction::Down,
+            repeat_count: 0,
+        });
+        collector.handle_event(AndroidControllerEvent::Motion {
+            device_id: 11,
+            source: ANDROID_SOURCE_JOYSTICK,
+            event_time_millis: 10_004,
+            axes: AndroidControllerMotion {
+                x: 0.25,
+                ..AndroidControllerMotion::default()
+            },
+        });
+        collector.handle_event(AndroidControllerEvent::Motion {
+            device_id: 11,
+            source: ANDROID_SOURCE_JOYSTICK,
+            event_time_millis: 10_008,
+            axes: AndroidControllerMotion {
+                x: 0.75,
+                ..AndroidControllerMotion::default()
+            },
+        });
+        collector.handle_event(AndroidControllerEvent::Key {
+            device_id: 11,
+            source: ANDROID_SOURCE_GAMEPAD,
+            event_time_millis: 10_012,
+            key_code: KEYCODE_BUTTON_A,
+            action: AndroidControllerKeyAction::Up,
+            repeat_count: 0,
+        });
+
+        let poll = collector.poll(Duration::from_millis(20));
+        assert_eq!(poll.input.observations().len(), 4);
+        assert!(poll.input.observations()[0].snapshot.buttons.south.pressed);
+        assert_eq!(poll.input.observations()[1].snapshot.left_stick.x, 0.25);
+        assert_eq!(poll.input.observations()[2].snapshot.left_stick.x, 0.75);
+        assert!(!poll.input.observations()[3].snapshot.buttons.south.pressed);
+        assert!(
+            poll.input
+                .observations()
+                .windows(2)
+                .all(|pair| pair[0].sample_time < pair[1].sample_time)
+        );
     }
 }

@@ -3664,10 +3664,9 @@ mod android {
                 self.ordinary_gamepad_input
                     .connect_source(source_id, descriptor);
             }
-            self.ordinary_gamepad_input.route_samples(
+            self.ordinary_gamepad_input.route_batch(
                 self.terrain,
-                ordinary_poll.sample_time,
-                ordinary_poll.samples,
+                &ordinary_poll.input,
                 self.device,
                 self.queue,
             )?;

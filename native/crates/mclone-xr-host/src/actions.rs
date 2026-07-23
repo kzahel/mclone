@@ -1,8 +1,9 @@
 use anyhow::{Context, Result};
 use glam::{Quat, Vec2, Vec3};
 use mclone_input::{
-    ControllerInputPreferences, TrackedControllerState, XrActionSnapshot,
-    XrControllerSpecificState, XrHand, XrInputFrame, XrInputFrameAssembler, XrSpecificInput,
+    ControllerInputPreferences, TrackedControllerState, XrActionChange, XrActionControl,
+    XrActionSnapshot, XrControllerSpecificState, XrHand, XrInputFrame, XrInputFrameAssembler,
+    XrSpecificInput,
 };
 use openxr as xr;
 
@@ -175,33 +176,107 @@ impl OpenXrControllerActions {
         if let Some(state) = self.read_tracked_hand(session, stage, time, XrHand::Right) {
             tracked.push(state);
         }
+        let mut action_changes = Vec::new();
         let movement_axis = Vec2::new(
-            Self::read_float_action(session, &self.move_x),
-            Self::read_float_action(session, &self.move_y),
+            Self::read_float_action(
+                session,
+                &self.move_x,
+                XrActionControl::MovementX,
+                &mut action_changes,
+            ),
+            Self::read_float_action(
+                session,
+                &self.move_y,
+                XrActionControl::MovementY,
+                &mut action_changes,
+            ),
         );
         let turn_axis = Vec2::new(
-            Self::read_float_action(session, &self.turn_x),
-            Self::read_float_action(session, &self.turn_y),
+            Self::read_float_action(
+                session,
+                &self.turn_x,
+                XrActionControl::TurnX,
+                &mut action_changes,
+            ),
+            Self::read_float_action(
+                session,
+                &self.turn_y,
+                XrActionControl::TurnY,
+                &mut action_changes,
+            ),
         );
-        let left_pointer_select_value =
-            Self::read_float_action(session, &self.left_pointer_select_value);
-        let right_attack_value = Self::read_float_action(session, &self.right_attack_value).max(
-            f32::from(Self::read_bool_action(session, &self.right_simple_attack)),
+        let left_pointer_select_value = Self::read_float_action(
+            session,
+            &self.left_pointer_select_value,
+            XrActionControl::PointerSelect,
+            &mut action_changes,
         );
-        let left_squeeze_value = Self::read_float_action(session, &self.left_squeeze_value);
-        let right_use_value = Self::read_float_action(session, &self.right_use_value);
-        Ok(self.input_assembler.sample(
+        let right_attack_value = Self::read_float_action(
+            session,
+            &self.right_attack_value,
+            XrActionControl::Attack,
+            &mut action_changes,
+        )
+        .max(f32::from(Self::read_bool_action(
+            session,
+            &self.right_simple_attack,
+            XrActionControl::SimpleAttack,
+            &mut action_changes,
+        )));
+        let left_squeeze_value = Self::read_float_action(
+            session,
+            &self.left_squeeze_value,
+            XrActionControl::Squeeze,
+            &mut action_changes,
+        );
+        let right_use_value = Self::read_float_action(
+            session,
+            &self.right_use_value,
+            XrActionControl::Use,
+            &mut action_changes,
+        );
+        let mut frame = self.input_assembler.sample(
             XrActionSnapshot {
                 movement_axis,
                 turn_axis,
                 attack_value: right_attack_value,
                 use_value: right_use_value,
-                jump: Self::read_bool_action(session, &self.jump),
-                sprint: Self::read_bool_action(session, &self.sprint),
-                sneak: Self::read_bool_action(session, &self.sneak),
-                descend: Self::read_bool_action(session, &self.descend),
-                open_menu: Self::read_bool_action(session, &self.open_menu),
-                open_block_palette: Self::read_bool_action(session, &self.open_block_palette),
+                jump: Self::read_bool_action(
+                    session,
+                    &self.jump,
+                    XrActionControl::Jump,
+                    &mut action_changes,
+                ),
+                sprint: Self::read_bool_action(
+                    session,
+                    &self.sprint,
+                    XrActionControl::Sprint,
+                    &mut action_changes,
+                ),
+                sneak: Self::read_bool_action(
+                    session,
+                    &self.sneak,
+                    XrActionControl::Sneak,
+                    &mut action_changes,
+                ),
+                descend: Self::read_bool_action(
+                    session,
+                    &self.descend,
+                    XrActionControl::Descend,
+                    &mut action_changes,
+                ),
+                open_menu: Self::read_bool_action(
+                    session,
+                    &self.open_menu,
+                    XrActionControl::OpenMenu,
+                    &mut action_changes,
+                ),
+                open_block_palette: Self::read_bool_action(
+                    session,
+                    &self.open_block_palette,
+                    XrActionControl::OpenBlockPalette,
+                    &mut action_changes,
+                ),
             },
             tracked,
             XrSpecificInput {
@@ -222,7 +297,9 @@ impl OpenXrControllerActions {
                     },
                 ],
             },
-        ))
+        );
+        frame.action_changes = action_changes;
+        Ok(frame)
     }
 
     fn suggest_simple_controller_bindings<F>(
@@ -482,25 +559,41 @@ impl OpenXrControllerActions {
     fn read_float_action<G: xr::Graphics>(
         session: &xr::Session<G>,
         action: &xr::Action<f32>,
+        control: XrActionControl,
+        changes: &mut Vec<XrActionChange>,
     ) -> f32 {
-        action
-            .state(session, xr::Path::NULL)
-            .ok()
-            .filter(|state| state.is_active)
-            .map(|state| state.current_state)
-            .unwrap_or(0.0)
+        let Ok(state) = action.state(session, xr::Path::NULL) else {
+            return 0.0;
+        };
+        if state.changed_since_last_sync {
+            changes.push(XrActionChange {
+                control,
+                source_time_nanos: state.last_change_time.as_nanos(),
+            });
+        }
+        if state.is_active {
+            state.current_state
+        } else {
+            0.0
+        }
     }
 
     fn read_bool_action<G: xr::Graphics>(
         session: &xr::Session<G>,
         action: &xr::Action<bool>,
+        control: XrActionControl,
+        changes: &mut Vec<XrActionChange>,
     ) -> bool {
-        action
-            .state(session, xr::Path::NULL)
-            .ok()
-            .filter(|state| state.is_active)
-            .map(|state| state.current_state)
-            .unwrap_or(false)
+        let Ok(state) = action.state(session, xr::Path::NULL) else {
+            return false;
+        };
+        if state.changed_since_last_sync {
+            changes.push(XrActionChange {
+                control,
+                source_time_nanos: state.last_change_time.as_nanos(),
+            });
+        }
+        state.is_active && state.current_state
     }
 }
 

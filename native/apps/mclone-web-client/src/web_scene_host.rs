@@ -2384,12 +2384,11 @@ impl WebSceneHost {
         let mut effects = WebHostEffects::default();
         let disposition = self
             .interactive_input
-            .route_controller_samples(
+            .route_controller_batch(
                 self.host
                     .as_mut()
                     .ok_or_else(|| JsValue::from_str("scene host is shut down"))?,
-                poll.sample_time,
-                poll.samples,
+                &poll.input,
                 &self.context.device,
                 &self.context.queue,
                 &mut effects,

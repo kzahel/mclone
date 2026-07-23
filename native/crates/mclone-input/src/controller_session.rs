@@ -351,6 +351,10 @@ impl ControllerInputBatch {
             .map(|(source_id, snapshot)| (*source_id, *snapshot))
     }
 
+    pub fn terminal_snapshot_count(&self) -> usize {
+        self.terminal_snapshots.len()
+    }
+
     pub const fn dropped_observations(&self) -> u64 {
         self.dropped_observations
     }
