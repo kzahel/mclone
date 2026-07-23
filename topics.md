@@ -141,3 +141,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `input-observation-timeline` — loss-aware cross-platform physical input
   observations, shared semantic reduction, and sequenced 60 Hz player commands
   independent of presentation cadence
+- `remote-player-presentation` — remote body/head/hand embodiment, independent
+  report/replication/presentation cadences, buffered interpolation, and
+  transport-neutral ephemeral pose semantics

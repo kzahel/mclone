@@ -9,9 +9,11 @@ finite poses after world-bound clamping and pending-teleport checks; speed,
 collision, floating, semantic-command transport, authoritative movement
 replay, and correction replay are intentionally not planned.
 
-Scope: who owns player movement truth, what the server checks, how remote
-entities are smoothed, and the accepted boundary between responsive local
-movement and server-owned world state. The wire/session/tick plan lives in
+Scope: who owns player movement truth, what the server checks, and the
+accepted boundary between responsive local movement and server-owned world
+state. Remote-player cadence, component poses, and interpolation live in
+[`remote-player-presentation.md`](remote-player-presentation.md). The
+wire/session/tick plan lives in
 [`multiplayer-networking.md`](multiplayer-networking.md); vanilla receipts in
 [`vanilla/networking.md`](vanilla/networking.md)
 (movement send, validation walkthrough, teleport/ack, interpolation).
@@ -82,7 +84,9 @@ materialization lives in
   is cadence-independent (good for variable tick and XR frame rates) but
   never exactly converges and can lag differently at different frame rates.
   Keep, but note the parity lever: vanilla's fixed-window lerp is the
-  fallback if remote motion ever needs exact vanilla feel.
+  fallback if remote motion ever needs exact vanilla feel. The replacement
+  direction for remote players is owned by
+  [`remote-player-presentation.md`](remote-player-presentation.md).
 
 ## Vanilla baseline (what "as good as Minecraft" means here)
 
@@ -165,8 +169,9 @@ work with client-reported poses.
 
 1. Continue improving local input collection, movement feel, and presentation
    independently of server, world, AI, render, and publication rates.
-2. Make pose publication and remote smoothing cadence-aware if variable
-   publication rates become observable.
+2. Implement the independently configurable pose-report, replication, and
+   remote snapshot-presentation work stream in
+   [`remote-player-presentation.md`](remote-player-presentation.md).
 3. Preserve finite-value rejection, coordinate clamps, sequence ordering, and
    the teleport acknowledgement gate. Do not add movement validation or replay
    without an explicit product-direction change.

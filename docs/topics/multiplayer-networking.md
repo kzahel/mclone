@@ -205,9 +205,12 @@ Vanilla's shape, adapted to our runtime (receipts in the reference doc):
 
 - **One ordered, reliable stream per client** (TCP native, WebSocket web —
   a faithful TCP analog with message framing). Keep strict ordering as a
-  protocol invariant; vanilla leans on it everywhere (login sequencing,
-  teleport acks, chunk-then-delta coherence). No UDP/QUIC/WebTransport until
-  a measured need exists.
+  protocol invariant for correctness-critical session and gameplay facts;
+  vanilla leans on it everywhere (login sequencing, teleport acks,
+  chunk-then-delta coherence). No datagram transport lands until a measured
+  need exists. The optional loss-tolerant side-channel criteria for ephemeral
+  remote body/head/hand poses live in
+  [`remote-player-presentation.md`](remote-player-presentation.md).
 - **Full-duplex, push-based wire.** Commands flow up and updates flow down
   independently. Server publishes on its own tick cadence: chunk
   snapshots/unloads as interest changes, per-tick section-batched block
@@ -356,8 +359,10 @@ later phases remain topic-level direction.
 4. **Variable tick over the wire.** Carry gameplay/publication rates in the
    join handshake; make client-side tick-denominated behavior (move
    reminder, interpolation windows, day-time conversion) rate-aware; add the
-   cadence knob to the dedicated server CLI/config. See the next section for
-   the semantics decision this forces.
+   cadence knob to the dedicated server CLI/config. The remote-player topic
+   separates body/tracked-pose report, server replication, and presentation
+   rates instead of treating "publication" as one universal clock. See the
+   next section for the gameplay semantics decision this forces.
 5. **Robustness/perf tail.** Threshold-based frame compression (vanilla:
    zlib over 256 bytes; we control both ends, so lz4/zstd are candidates —
    must build on wasm), capability-based protocol evolution instead of

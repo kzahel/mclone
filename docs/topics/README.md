@@ -123,11 +123,16 @@ series implements the same concern, normally reuse the document slug in its
   play free. Does not reopen the read-only first proof.
 - [`client-prediction.md`](client-prediction.md): player movement authority —
   accepted permissive client authority, finite-value/bounds safety, no planned
-  server movement replay, and remote-actor interpolation divergence.
+  server movement replay, and explicit teleport continuity.
 - [`input-observation-timeline.md`](input-observation-timeline.md): accepted
   cross-platform input timeline — preserve ordered transitions where a
   platform exposes them, degrade honestly to snapshots, normalize monotonic
   timing, and feed shared semantic 60 Hz player commands.
+- [`remote-player-presentation.md`](remote-player-presentation.md): accepted
+  remote embodiment work stream — independently configurable body/tracked-pose
+  report and replication cadences, buffered interpolation, separate XR
+  body/head/hands, and transport-neutral loss-tolerant pose semantics before
+  any optional datagram transport.
 - [`platform-parity.md`](platform-parity.md): cross-platform parity tracker —
   per-platform-class target state, the feature × platform matrix, the
   shared-contract × consumer reuse matrix, and the cross-cutting blockers that
