@@ -298,6 +298,19 @@ tabletop with explicit recenter should remain available. Follow constants are
 comfort policy and may differ by presentation class, but their state machine
 and meaning belong in shared code.
 
+### Topology and local-orientation caveat
+
+The initial proof may assume the ordinary global vertical. A conventional
+finite cuboid would preserve locally Euclidean rendering and gravity, as does
+the landed periodic cylinder; the cylinder's optional apparent curvature is
+presentation only. Future cube-face, cuboid-surface, or gravity-changing
+experiments may instead give a player a face- or location-relative “up.”
+
+This topic does not choose how those future orientation transitions work. It
+records only that overview follow, manipulation, visibility, and interaction
+must not permanently assume one global vertical, and that flat and XR
+presentations will need to communicate a change of local frame somehow.
+
 ### Underground visibility and keyhole cutaway
 
 An external camera will often lose the controlled player beneath a roof,
@@ -760,6 +773,8 @@ background capability.
   screens?
 - Should XR direct-control default to leashed recentering or a fully static
   tabletop?
+- How should a future non-global-up dimension communicate local-frame changes
+  in flat and XR overview?
 - Which materials count as weak occluders, and what keyhole radius/depth and
   hysteresis work across forests, buildings, and caves?
 - At what depth or solid-coverage threshold should the keyhole switch to an
@@ -794,6 +809,8 @@ performance question.
 
 - [`embedded-worlds.md`](embedded-worlds.md) — placed geometry, live dioramas,
   warm worlds, active-world-source reuse, and the direct-path invariant.
+- [`bounded-world-topology.md`](bounded-world-topology.md) — landed periodic
+  cylinder behavior and future cube-atlas frame-orientation questions.
 - [`realm-dimension-runtime.md`](realm-dimension-runtime.md) — player and
   observer authority and interest.
 - [`controller-input.md`](controller-input.md) — shared semantic input,
