@@ -316,13 +316,17 @@ Quest before locking the implementation dependency.
 
 TCP and WebSocket remain supported compatibility transports, and older
 browsers or networks that cannot establish an unreliable WebTransport session
-may select them. WebTransport itself can also negotiate a reliable-only
-HTTP/2/TCP connection; the adapter must inspect its effective reliability and
-must not label that connection a datagram path. WebRTC data channels are not
-the primary client/server plan because ICE, DTLS, SCTP, signaling, and possible
-relay infrastructure add complexity that WebTransport does not need. They
-remain a contingency only if a supported deployed browser or webview cannot
-use WebTransport or WebSocket acceptably.
+may select them. The WebTransport specification permits a reliable-only
+HTTP/2/TCP connection, but shipping browser APIs are uneven: current Chromium
+implements HTTP/3 WebTransport and datagrams without the draft
+`reliability`/`requireUnreliable` members, while Firefox and Safari expose
+those newer members. The server handshake therefore publishes the effective
+transport profile; a client uses browser reliability information when it
+exists but does not require that property to exist. WebRTC data channels are
+not the primary client/server plan because ICE, DTLS, SCTP, signaling, and
+possible relay infrastructure add complexity that WebTransport does not need.
+They remain a contingency only if a supported deployed browser or webview
+cannot use WebTransport or WebSocket acceptably.
 
 The initial candidate transport profiles are:
 
@@ -373,9 +377,13 @@ order across reliable and unreliable lanes.
 ### Current external transport facts
 
 As rechecked on 2026-07-23, the
-[WebTransport API](https://www.w3.org/TR/webtransport/) exposes reliable
-streams, unreliable datagrams, an effective reliability mode, worker support,
-and a `requireUnreliable` option. It became
+[WebTransport specification](https://www.w3.org/TR/webtransport/) defines
+reliable streams, unreliable datagrams, an effective reliability mode, worker
+support, and a `requireUnreliable` option. Shipping support is more granular:
+[MDN browser-compatibility data](https://raw.githubusercontent.com/mdn/browser-compat-data/main/api/WebTransport.json)
+records base WebTransport and datagrams in Chromium 97, Firefox 114, and
+Safari 26.4, but records the draft reliability-mode members as absent in
+Chromium. WebTransport became
 [Baseline Newly Available](https://developer.mozilla.org/en-US/docs/Web/API/WebTransport)
 across current major browsers in March 2026; older browser versions still
 require feature detection and fallback. Safari added it in
@@ -416,8 +424,10 @@ WebTransport-over-HTTP/3 is the preferred mixed-reliability transport for
 current browsers, with feature-detected WebSocket or reliable-only
 WebTransport fallback. It must sit behind the same connection/decoded-update
 boundary and cannot move socket or decode policy onto the main/render thread.
-The browser requests or verifies unreliable support before selecting the
-mixed-reliability rate profile.
+The negotiated server session profile is authoritative. Firefox and Safari
+may additionally request and inspect their reliability mode; current Chromium
+uses its HTTP/3-only WebTransport/datagram implementation without those draft
+members. Browser conformance tests must cover both API shapes.
 
 ### Desktop XR and Android XR
 

@@ -247,6 +247,81 @@ Vanilla's shape, adapted to our runtime (receipts in the reference doc):
   disconnect-with-reason, and a capability field so debug variants can be
   gated rather than baked in.
 
+### Browser-to-LAN hosting target
+
+A native integrated host and the dedicated server should expose the same
+optional WebTransport listener. "Open to LAN" has this target flow:
+
+1. Bind an HTTP/3/WebTransport endpoint on one local UDP port.
+2. Generate or rotate an ephemeral ECDSA P-256 certificate whose validity is
+   shorter than the WebTransport two-week certificate-hash limit.
+3. Create a random join capability token and publish the endpoint, certificate
+   SHA-256 hash, and token as a copyable link and QR code.
+4. Let the HTTPS-hosted Mclone web client open the private endpoint with
+   `serverCertificateHashes`, then authenticate the join token in-band.
+5. Attach the accepted connection to the ordinary `RealmServer` connection
+   registry; do not create another integrated-server implementation.
+
+The certificate hash lets a public web app authenticate a self-signed,
+non-publicly-routable LAN host without installing a local CA. Current
+[MDN compatibility data](https://raw.githubusercontent.com/mdn/browser-compat-data/main/api/WebTransport.json)
+records certificate-hash support in Chromium 100, Firefox 125, and Safari
+26.4. The
+[WebTransport certificate rules](https://www.w3.org/TR/webtransport/#dom-webtransportoptions-servercertificatehashes)
+require a short-lived X.509v3 certificate and support P-256 as the
+interoperable key type. Chrome 147 and newer also put public-site-to-LAN
+WebTransport behind an explicit
+[Local Network Access permission](https://developer.chrome.com/release-notes/147#local-network-access).
+Actual current Chrome, Firefox, Safari, Android WebView, and Quest Browser
+connections still require product tests; a standards feature table is not a
+substitute for certificate, firewall, OS permission, and device validation.
+
+Opening a listener is an explicit user action. The server validates the web
+origin and one-time/random join capability, and the UI explains the OS/browser
+firewall or local-network prompt. The public web page does not scan or
+auto-discover the LAN.
+
+WebTransport does not provide NAT traversal. Same-LAN connections need no
+relay; internet-hosted dedicated servers need a reachable UDP port, and
+player-hosted internet sessions need manual port forwarding or a later relay
+or traversal service.
+
+A browser client cannot itself listen for inbound WebTransport connections.
+Its integrated server remains private to the browser worker. Desktop, flat
+Android, Android XR/Quest, and other native hosts can expose their integrated
+realm when their platform lifecycle and firewall permit it; browser-hosted
+multiplayer requires an external host or relay.
+
+### Native dependency boundary and first measurement
+
+QUIC/TLS is a meaningful native dependency, but it stays behind a native-only
+transport adapter. That adapter may own Quinn, rustls, certificate generation,
+and a small private Tokio runtime. It exchanges decoded commands and updates
+with the existing bounded channel boundary, so Tokio does not enter
+`mclone-server`, the simulation loop, or the render thread. Browser/WASM uses
+the browser's WebTransport implementation and adds only worker adapter glue,
+not a compiled QUIC or TLS stack.
+
+A 2026-07-23 sizing probe used WTransport 0.7.1 with its default
+Quinn/rustls/ring/self-signed stack:
+
+- the current dedicated server had 85 unique normal-dependency package IDs;
+- the probe introduced about 113 package IDs not already in that tree;
+- a clean standalone release build resolved 147 packages, finished in about
+  17 seconds on the current Linux host, and used about 400 MiB peak build RSS;
+- the stripped thin-LTO executable that generated a certificate and opened a
+  WebTransport endpoint was 1.9 MiB;
+- its local Cargo target directory was 254 MiB.
+
+These numbers describe build/dependency weight, not the eventual incremental
+Mclone binary size or per-connection memory. Re-measure inside the workspace
+after selecting between
+[WTransport](https://github.com/BiagioFesta/wtransport) and
+[moq-dev/web-transport](https://github.com/moq-dev/web-transport), and after
+desktop, Android, and Quest build spikes. The current evidence classifies the
+dependency as moderate and containable, not lightweight and not remotely
+comparable to embedding a full WebRTC media stack.
+
 ## Shared ownership and frame-thread contract
 
 The push conversion must not create separate desktop, XR, Android, and web
