@@ -1,6 +1,6 @@
 # Worldgen Debug Lens
 
-Status: active implementation 2026-07-23.
+Status: implemented; awaiting Human Review 1 as of 2026-07-23.
 
 Topic: `worldgen-debug-lens`
 
@@ -133,7 +133,8 @@ reports that the profile is unsupported by this first slice.
 
 ## Overlay Geometry And Palette
 
-The scene samples a square region centered on the camera's four-block cell.
+The scene samples a bounded circular region centered on the camera's
+four-block cell.
 Each diagnostic cell becomes two terrain-following triangles:
 
 - corners use production surface-height samples, so the overlay follows broad
@@ -153,8 +154,10 @@ Biome colors distinguish ocean, shore, river, alpine, conifer, steppe,
 woodland, and meadow. Landform colors distinguish water, coast, lowland,
 upland, mountain valley, shoulder, and massif. Surface colors distinguish the
 nine production recipes. Hydrology colors distinguish dry terrain, bank
-influence, wetland, major-river channel, submerged outlet, and planned-stream
-facts when they are present in the sampled production intent.
+influence, wetland, major-river channel, and submerged outlet. Cyan remains
+reserved for planned streams, but the first slice deliberately does not
+reconstruct bounded structure intent; that belongs to the later Structures
+layer.
 
 ## Inspector Contract
 
@@ -234,6 +237,87 @@ Rendered review:
 - confirm the legend matches pixels and remains readable; and
 - compare lens-off and lens-on frames for accidental generator or camera
   changes.
+
+## Implemented Result And Evidence
+
+The first vertical slice is complete:
+
+- `mclone-worldgen` exposes one production-derived diagnostic sample with
+  biome-selection reason, landform class, surface recipe, hydrology class, and
+  the underlying continuous terrain sample.
+- `mclone-scene` owns the four lens modes, camera-aligned cache, palettes,
+  inspector text, and a 160-block-radius circular overlay sampled every four
+  blocks.
+- Geometry is clipped to currently loaded chunks. It does not color unloaded
+  sky or imply that unseen chunks are resident.
+- The generic `mclone-render` world-color mesh path is depth-tested,
+  translucent, and implemented for ordinary views, XR per-eye rendering, and
+  XR multiview rendering.
+- Desktop `F3` and `F4` call shared scene actions. Backquote exposes the
+  existing debug pane with the lens legend and semantic sample.
+- The offscreen screenshot lane accepts
+  `--screenshot-worldgen-lens biome|landform|surface|hydrology|off` for
+  repeatable review.
+- The disabled frame path does not gather loaded chunks, sample worldgen,
+  build or upload vertices, or encode the overlay renderer.
+
+The bounded cache contains at most 38,400 vertices before circular and
+loaded-chunk clipping. It realigns only at a 16-block camera boundary, when the
+selected layer changes, or when the seed, topology, profile, or resident chunk
+signature changes. This is intentionally debug-only work and adds nothing to
+chunk persistence.
+
+Automated evidence:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-worldgen`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-render
+  world_color_mesh`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-scene`
+- `cargo test --manifest-path native/Cargo.toml -p mclone-native-client
+  --bin mclone-native-client`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-web-client
+  --target wasm32-unknown-unknown` reached and checked `mclone-worldgen`,
+  `mclone-render`, and `mclone-scene`
+
+All applicable tests passed on 2026-07-23. The scene suite passed 152 unit
+tests plus its integration contracts; the desktop-client suite passed 179
+tests. The final full web-client check remains blocked by its unrelated
+pre-existing non-exhaustive `SetWorldRenderScaleMode` action match in
+`web_canvas.rs`; the lens's shared WASM owners compiled before that failure.
+
+Rendered bird's-eye captures used seed `-98765`, center chunk `-190,21`,
+render distance 10, a fixed daytime, and a 1,000-frame warmup. Visual
+inspection established that:
+
+- Biome distinguishes the river, shore, meadow, woodland, and conifer
+  decisions while preserving underlying terrain.
+- Landform makes the current broad mountain-shoulder classification
+  immediately visible; that is useful review evidence, not a lens defect.
+- Surface clearly separates exposed stone, eroded slope, soil, bank, and river
+  bed.
+- Hydrology keeps dry terrain faint while making the river channel and its
+  much broader bank-influence field legible.
+- Circular and loaded-chunk clipping avoid the misleading square paint-card
+  edge seen in the first capture.
+
+## Human Review 1
+
+In a transient `mclone-overworld-v1` world:
+
+1. Fly upward with no-clip and look down over a biome or water transition.
+2. Press `F3` to enable the lens.
+3. Press `F4` to compare Biome, Landform, Surface, and Hydrology without moving
+   the camera.
+4. Press backquote when exact labels and continuous values are useful; press
+   it again for an unobstructed comparison.
+5. Move across a chunk boundary and confirm coverage follows loaded terrain
+   without coloring the sky.
+6. Press `F3` to disable the lens and compare the unchanged world beneath it.
+
+The most useful feedback is whether the palette boundaries answer “which
+system owns this visible effect?” and which one additional layer would remove
+the most remaining ambiguity. Structure bounds and scalar heatmaps are the
+leading candidates.
 
 ## Follow-Up Queue
 
