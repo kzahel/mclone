@@ -10,8 +10,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 
 - `unified-native-scene-host` — tactical 168 shared host/driver convergence
 - `asset-pack-profiles` — tactical 169 runtime selection and provenance
-- `multiplayer-networking` — vanilla-shaped push protocol, session layer, and
-  tick/publication cadence plan
+- `multiplayer-networking` — vanilla-shaped push protocol, session layer,
+  tick/publication cadence, mixed-reliability transport, and native-host
+  Share to Browser launch plan
 - `client-prediction` — permissive client movement authority, server pose
   sanitization, and local semantic input recording
 - `vanilla-networking` — 1.17.1 vanilla network stack reference receipts

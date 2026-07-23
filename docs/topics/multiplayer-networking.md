@@ -30,6 +30,10 @@ first survival lifecycle on 2026-07-17: ordered owner life state, persistent
 lava death, dead-command gating, shared death UI, and explicit safe respawn
 now use those same local and hosted paths.
 
+The mixed-reliability WebTransport, browser-to-LAN, and native-client
+**Share to Browser** directions were accepted on 2026-07-23. Their transport
+adapters, QR/link launch UI, and public HTTPS launcher remain planned work.
+
 Scope: the client/server wire protocol, transports, session lifecycle, server
 tick/publication cadence, and the dependency ordering for making mclone
 multiplayer behave like vanilla Minecraft (extended with configurable tick
@@ -247,20 +251,76 @@ Vanilla's shape, adapted to our runtime (receipts in the reference doc):
   disconnect-with-reason, and a capability field so debug variants can be
   gated rather than baked in.
 
-### Browser-to-LAN hosting target
+### Share to Browser / browser-to-LAN hosting target
 
 A native integrated host and the dedicated server should expose the same
-optional WebTransport listener. "Open to LAN" has this target flow:
+optional WebTransport listener. The native client presents this as a
+first-class **Share to Browser** action: start sharing, show a copyable link
+and QR code, admit browser players, report direct/relayed connection state,
+and stop sharing without stopping the local world.
+
+The target flow is:
 
 1. Bind an HTTP/3/WebTransport endpoint on one local UDP port.
 2. Generate or rotate an ephemeral ECDSA P-256 certificate whose validity is
    shorter than the WebTransport two-week certificate-hash limit.
-3. Create a random join capability token and publish the endpoint, certificate
-   SHA-256 hash, and token as a copyable link and QR code.
-4. Let the HTTPS-hosted Mclone web client open the private endpoint with
-   `serverCertificateHashes`, then authenticate the join token in-band.
-5. Attach the accepted connection to the ordinary `RealmServer` connection
-   registry; do not create another integrated-server implementation.
+3. Enumerate plausible LAN endpoint candidates rather than assuming one
+   interface or one address, and create a random expiring join capability.
+4. Encode or register a versioned join envelope containing the endpoint
+   candidates, certificate SHA-256 hash, capability, protocol/build identity,
+   transport profile, and expiry.
+5. Publish a stable public HTTPS Mclone join URL as both text and a QR code.
+   The launcher loads the matching versioned WASM/WebGPU client, remains on
+   the public origin, and tries the private endpoint candidates with
+   `serverCertificateHashes`.
+6. Authenticate the join capability in-band and attach the accepted
+   connection to the ordinary `RealmServer` connection registry; do not
+   create another integrated-server implementation.
+
+A representative product URL is conceptually:
+
+```text
+https://play.mclone.example/join#<opaque-versioned-join-envelope>
+```
+
+The concrete encoding remains open. Two compatible discovery shapes are
+useful:
+
+- **Self-contained LAN link.** Put the endpoint candidates, certificate hash,
+  build identity, expiry, and high-entropy capability in an encrypted or
+  opaque URL fragment. Fragments are not sent with the HTTP request, so the
+  static launcher service need not learn the LAN address or capability. The
+  bearer link can still leak through the QR image, clipboard, browser history,
+  screenshots, or chat and must be short-lived and revocable.
+- **Short room link.** Register the same envelope temporarily with a
+  rendezvous service and put a short room code plus a capability proof in the
+  URL. This produces a friendlier QR/code and lets the descriptor later add a
+  public endpoint or relay candidate without changing the join UX. The
+  rendezvous service owns discovery metadata only, not gameplay or world
+  authority.
+
+The browser should not navigate or redirect to a LAN page. It stays on the
+trusted public HTTPS origin while the transport adapter connects to the LAN
+host. A page served as `http://192.168.x.x` is not a production answer because
+WebGPU is restricted to secure contexts; navigating to a randomly generated
+self-signed HTTPS certificate also produces browser trust friction. The
+WebTransport certificate-hash mechanism authenticates the game connection,
+not an ordinary top-level page navigation. A stable public launcher gives the
+WASM/WebGPU application a trusted secure context, CDN caching, and a durable
+origin while the native binary serves only the world session.
+
+The native distribution may still bundle the web artifacts for reproducible
+builds, development, or a later offline path. Literal LAN asset hosting is not
+required for the first feature. First-use offline joining would need a
+previously installed/cached PWA, a trusted local HTTPS solution, or another
+explicit bootstrap; it must not silently fall back to an insecure page.
+
+The join envelope must select a web build compatible with the host rather than
+always loading whatever deployment is newest. Versioned immutable web bundles
+or an explicit compatibility negotiation avoid a native binary being stranded
+by a newer public client. After parsing a self-contained capability, the page
+should remove sensitive material from the visible address/history when doing
+so does not break intentional link reuse.
 
 The certificate hash lets a public web app authenticate a self-signed,
 non-publicly-routable LAN host without installing a local CA. Current
@@ -272,6 +332,9 @@ require a short-lived X.509v3 certificate and support P-256 as the
 interoperable key type. Chrome 147 and newer also put public-site-to-LAN
 WebTransport behind an explicit
 [Local Network Access permission](https://developer.chrome.com/release-notes/147#local-network-access).
+Chrome's
+[WebGPU troubleshooting guidance](https://developer.chrome.com/docs/web-platform/webgpu/troubleshooting-tips)
+also confirms that WebGPU is exposed only in secure contexts.
 Actual current Chrome, Firefox, Safari, Android WebView, and Quest Browser
 connections still require product tests; a standards feature table is not a
 substitute for certificate, firewall, OS permission, and device validation.
@@ -279,7 +342,16 @@ substitute for certificate, firewall, OS permission, and device validation.
 Opening a listener is an explicit user action. The server validates the web
 origin and one-time/random join capability, and the UI explains the OS/browser
 firewall or local-network prompt. The public web page does not scan or
-auto-discover the LAN.
+auto-discover the LAN. Host UI should show the share expiry, connected browser
+players, selected connection path, and a prominent revoke/stop-sharing action.
+
+The launcher tries direct LAN candidates first. A later hybrid descriptor may
+also advertise a publicly reachable WebTransport endpoint, a relay/tunnel, or
+a future native WebRTC candidate. The browser still stays on the same public
+join page; candidate selection changes the carrier, not the URL, authority,
+or player workflow. Failure diagnostics should distinguish incompatible
+build, local-network permission denial, no reachable LAN candidate, firewall,
+expired/revoked capability, and relay unavailable.
 
 WebTransport does not provide NAT traversal. Same-LAN connections need no
 relay; internet-hosted dedicated servers need a reachable UDP port, and
@@ -462,7 +534,13 @@ later phases remain topic-level direction.
    pose on datagrams, with an independently configured 20 Hz reliable
    fallback profile. The implementation and platform-spike order lives in
    [`remote-player-presentation.md`](remote-player-presentation.md).
-6. **Robustness/perf tail.** Threshold-based frame compression (vanilla:
+6. **Share to Browser discovery and launch.** Add the native-host share
+   lifecycle, endpoint/certificate/capability envelope, QR and copyable URL,
+   stable HTTPS launcher with build selection, direct-LAN candidate racing,
+   local-network permission UX, revocation, and cross-device validation.
+   Preserve room-code rendezvous and relay candidates as compatible
+   extensions rather than redesigning the join link later.
+7. **Robustness/perf tail.** Threshold-based frame compression (vanilla:
    zlib over 256 bytes; we control both ends, so lz4/zstd are candidates —
    must build on wasm), capability-based protocol evolution instead of
    strict version equality, chunk-send pacing/budgets per player, metrics.
@@ -512,6 +590,9 @@ lane, expressed in time units.
   per-peer bounds and disconnects a slow consumer rather than dropping or
   reordering gameplay updates; entity spawn/despawn and correction barriers
   must be defined before moving transform samples.
+- Whether the first Share to Browser URL is self-contained, uses a short-code
+  rendezvous service, or offers both; how long capabilities and immutable web
+  bundles remain valid; and what offline bootstrap is worth supporting.
 
 ## Code and doc map
 

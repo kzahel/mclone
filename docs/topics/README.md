@@ -59,10 +59,9 @@ series implements the same concern, normally reuse the document slug in its
   mountain-conditioned Underlands, with bounded lessons for the original
   mclone Overworld.
 - [`multiplayer-networking.md`](multiplayer-networking.md): wire protocol,
-  transports, session lifecycle, server tick/publication cadence — current
-  state, structural gaps (lockstep request/response wire, tick-per-command
-  dedicated server, no session layer), and the phased plan toward a
-  vanilla-shaped push protocol with configurable tick rates.
+  transports, session lifecycle, server tick/publication cadence, accepted
+  mixed-reliability WebTransport direction, and native-host **Share to
+  Browser** links through a versioned public HTTPS launcher.
 - [`realm-dimension-runtime.md`](realm-dimension-runtime.md): accepted unified
   `RealmServer` topology for integrated, Web Worker, dedicated, and test hosts;
   realm-scoped players/statistics, open-ended concurrent dimensions,
