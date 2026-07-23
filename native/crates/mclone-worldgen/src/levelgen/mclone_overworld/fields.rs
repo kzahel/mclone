@@ -3,7 +3,7 @@ use mclone_core::{AxisTopology, ChunkPos, HorizontalTopology};
 use crate::noise::{GradientNoise2d, SeedDomain, ValueNoise2d};
 
 pub const MCLONE_OVERWORLD_SEA_LEVEL: i32 = 63;
-pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-15";
+pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-16";
 pub const MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS: i32 = 2;
 pub const MCLONE_OVERWORLD_PERIOD_BLOCKS: i32 = 6_144;
 pub const MCLONE_OVERWORLD_PERIOD_CHUNKS: u32 = 384;
@@ -23,6 +23,8 @@ const MOUNTAIN_DETAIL_FINE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6d64
 const RIVER_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_7631);
 const RIVER_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_7632);
 const RIVER_WIDTH_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_7633);
+const RIVER_REACH_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_7634);
+const RIVER_MORPHOLOGY_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_7635);
 const WETLAND_POOL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7765_7431);
 const OCEAN_BASIN_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6261_7331);
 const SEABED_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6261_7332);
@@ -47,6 +49,8 @@ const MOUNTAIN_DETAIL_FINE_SCALE: i32 = 8;
 const RIVER_LARGE_SCALE: i32 = 768;
 const RIVER_DETAIL_SCALE: i32 = 192;
 const RIVER_WIDTH_SCALE: i32 = 384;
+const RIVER_REACH_SCALE: i32 = 96;
+const RIVER_MORPHOLOGY_DETAIL_SCALE: i32 = 32;
 const WETLAND_POOL_SCALE: i32 = 96;
 const OCEAN_BASIN_SCALE: i32 = 1_536;
 const SEABED_LARGE_SCALE: i32 = 384;
@@ -360,6 +364,8 @@ pub struct McloneOverworldSampler {
     river_large: GradientNoise2d,
     river_detail: GradientNoise2d,
     river_width: ValueNoise2d,
+    river_reach: ValueNoise2d,
+    river_morphology_detail: GradientNoise2d,
     wetland_pool: GradientNoise2d,
     ocean_basin: GradientNoise2d,
     seabed_large: GradientNoise2d,
@@ -420,6 +426,12 @@ impl McloneOverworldSampler {
             river_large: topology.gradient_noise(seed, RIVER_LARGE_DOMAIN, RIVER_LARGE_SCALE),
             river_detail: topology.gradient_noise(seed, RIVER_DETAIL_DOMAIN, RIVER_DETAIL_SCALE),
             river_width: topology.value_noise(seed, RIVER_WIDTH_DOMAIN, RIVER_WIDTH_SCALE),
+            river_reach: topology.value_noise(seed, RIVER_REACH_DOMAIN, RIVER_REACH_SCALE),
+            river_morphology_detail: topology.gradient_noise(
+                seed,
+                RIVER_MORPHOLOGY_DETAIL_DOMAIN,
+                RIVER_MORPHOLOGY_DETAIL_SCALE,
+            ),
             wetland_pool: topology.gradient_noise(seed, WETLAND_POOL_DOMAIN, WETLAND_POOL_SCALE),
             ocean_basin: topology.gradient_noise(seed, OCEAN_BASIN_DOMAIN, OCEAN_BASIN_SCALE),
             seabed_large: topology.gradient_noise(seed, SEABED_LARGE_DOMAIN, SEABED_LARGE_SCALE),
@@ -566,18 +578,28 @@ impl McloneOverworldSampler {
             tangent_x = -tangent_x;
             tangent_z = -tangent_z;
         }
+        let center_x = world_x - normal_x * signed_distance;
+        let center_z = world_z - normal_z * signed_distance;
         let width_noise = self.river_width.sample(world_x as i32, world_z as i32) * 0.5 + 0.5;
+        let reach_noise = self
+            .river_reach
+            .sample(center_x.round() as i32, center_z.round() as i32);
+        let morphology_detail = self.river_morphology_detail.sample_at(center_x, center_z);
+        let half_width = (4.5 + width_noise * 4.0 + reach_noise * 1.20 + morphology_detail * 0.65)
+            .clamp(3.75, 9.75);
         RiverGeometry {
             signed_distance,
             distance,
-            half_width: 4.5 + width_noise * 4.0,
+            half_width,
             normal_x,
             normal_z,
             tangent_x,
             tangent_z,
             width_noise,
-            center_x: world_x - normal_x * signed_distance,
-            center_z: world_z - normal_z * signed_distance,
+            reach_noise,
+            morphology_detail,
+            center_x,
+            center_z,
         }
     }
 
@@ -623,7 +645,10 @@ impl McloneOverworldSampler {
         base_surface_y: i32,
         geometry: RiverGeometry,
     ) -> (McloneOverworldWatercourseSample, i32) {
-        let depth = (2.0 + geometry.half_width * 0.24).round() as i32;
+        let depth = (3.2 + geometry.half_width * 0.10 + geometry.reach_noise * 0.85
+            - geometry.morphology_detail * 0.55)
+            .round()
+            .clamp(2.0, 6.0) as i32;
         if geometry.distance > RIVER_MAX_RELEVANT_DISTANCE {
             return inactive_watercourse(geometry, depth, base_surface_y);
         }
@@ -680,7 +705,10 @@ impl McloneOverworldSampler {
         let wetland_influence = low_grade * low_mountain * inland_wetland * wetland_selector;
         let incision_depth =
             (f64::from(base_surface_y - MCLONE_OVERWORLD_SEA_LEVEL - 1)).clamp(0.0, 28.0);
-        let bank_span = 12.0 + incision_depth * 1.4 + wetland_influence * 16.0;
+        let bank_asymmetry = geometry.signed_distance.signum()
+            * (geometry.reach_noise * 0.35 + geometry.morphology_detail * 0.65);
+        let bank_span = (12.0 + incision_depth * 1.4 + wetland_influence * 16.0)
+            * (1.0 + bank_asymmetry * 0.28).clamp(0.72, 1.28);
         let major_channel_influence =
             compact_influence(geometry.distance, geometry.half_width - 0.5, 3.0);
         let major_bank_influence = 1.0
@@ -704,10 +732,21 @@ impl McloneOverworldSampler {
         } else if wetland_pool_influence >= 0.55 {
             base_surface_y.min(MCLONE_OVERWORLD_SEA_LEVEL - 1)
         } else if major_bank_influence > 0.0 {
+            let bank_run = (geometry.distance - geometry.half_width).max(0.0);
+            let collar_width =
+                (2.0 + geometry.morphology_detail * 0.85 + bank_asymmetry * 0.45).clamp(1.0, 3.0);
+            let terrace_run =
+                (3.25 + geometry.reach_noise * 0.65 - bank_asymmetry * 0.55).clamp(2.4, 4.2);
+            let terrace_phase =
+                (geometry.morphology_detail * 1.25 + bank_asymmetry * 0.75).max(0.0);
+            let terrace_rise = ((bank_run - collar_width + terrace_phase).max(0.0) / terrace_run)
+                .floor()
+                .min(5.0) as i32;
+            let carved_y = base_surface_y.min(MCLONE_OVERWORLD_SEA_LEVEL + 1 + terrace_rise);
             let bank_target = (f64::from(base_surface_y) * (1.0 - major_bank_influence)
-                + f64::from(MCLONE_OVERWORLD_SEA_LEVEL + 1) * major_bank_influence)
+                + f64::from(carved_y) * major_bank_influence)
                 .round() as i32;
-            if geometry.distance <= geometry.half_width + 3.0 {
+            if bank_run <= collar_width {
                 MCLONE_OVERWORLD_SEA_LEVEL + 1
             } else {
                 bank_target
@@ -946,6 +985,8 @@ struct RiverGeometry {
     tangent_x: f64,
     tangent_z: f64,
     width_noise: f64,
+    reach_noise: f64,
+    morphology_detail: f64,
     center_x: f64,
     center_z: f64,
 }
@@ -1423,6 +1464,10 @@ mod tests {
             let mut channels = 0;
             let mut wetlands = 0;
             let mut wetland_pools = 0;
+            let mut min_channel_width = f64::INFINITY;
+            let mut max_channel_width = f64::NEG_INFINITY;
+            let mut min_channel_depth = i32::MAX;
+            let mut max_channel_depth = i32::MIN;
             for z in (-2_048..2_048).step_by(8) {
                 for x in (-2_048..2_048).step_by(8) {
                     let sample = sampler.sample(x, z);
@@ -1435,15 +1480,20 @@ mod tests {
                     assert_eq!(river.stream_headwater_influence, 0.0);
                     assert!((0.0..=1.0).contains(&river.bank_influence));
                     if sample.continentalness <= 0.0 {
-                        assert!((4.5..=12.325).contains(&river.half_width));
+                        assert!((3.75..=14.1375).contains(&river.half_width));
                     } else {
-                        assert!((4.5..=8.5).contains(&river.half_width));
+                        assert!((3.75..=9.75).contains(&river.half_width));
                     }
                     assert!(river.bed_y < river.water_surface_y);
                     assert!((0.0..=1.0).contains(&river.wetland_influence));
                     assert!((0.0..=1.0).contains(&river.wetland_pool_influence));
                     if river.is_channel() {
                         channels += 1;
+                        min_channel_width = min_channel_width.min(river.half_width);
+                        max_channel_width = max_channel_width.max(river.half_width);
+                        let depth = river.water_surface_y - river.bed_y;
+                        min_channel_depth = min_channel_depth.min(depth);
+                        max_channel_depth = max_channel_depth.max(depth);
                         assert_eq!(river.water_surface_y, MCLONE_OVERWORLD_SEA_LEVEL);
                         assert!(river.is_major_channel());
                         assert!(!river.is_planned_stream());
@@ -1461,6 +1511,14 @@ mod tests {
                 }
             }
             assert!(channels > 0, "seed {seed} had no river channels");
+            assert!(
+                max_channel_width - min_channel_width >= 2.0,
+                "seed {seed} channel width range was {min_channel_width}..{max_channel_width}"
+            );
+            assert!(
+                max_channel_depth - min_channel_depth >= 1,
+                "seed {seed} channel depth range was {min_channel_depth}..{max_channel_depth}"
+            );
             assert!(wetlands > 0, "seed {seed} had no wetland margins");
             assert!(wetland_pools > 0, "seed {seed} had no wetland pools");
         }

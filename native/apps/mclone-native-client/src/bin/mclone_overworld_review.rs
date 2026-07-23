@@ -482,6 +482,7 @@ fn run() -> Result<()> {
                 facts.min_submerged_outlet_influence,
                 facts.max_submerged_outlet_influence,
             ],
+            "riverBedDepth": [facts.min_river_bed_depth, facts.max_river_bed_depth],
             "riverWaterSurfaceY": [facts.min_river_water_y, facts.max_river_water_y],
             "wetlandInfluence": [facts.min_wetland_influence, facts.max_wetland_influence],
             "wetlandPoolInfluence": [facts.min_wetland_pool_influence, facts.max_wetland_pool_influence],
@@ -548,6 +549,10 @@ fn run() -> Result<()> {
         "watercourseCounts": {
             "channel": facts.river_channel_columns,
             "majorChannel": facts.major_river_channel_columns,
+            "majorNarrow": facts.major_river_narrow_columns,
+            "majorWide": facts.major_river_wide_columns,
+            "majorShallow": facts.major_river_shallow_columns,
+            "majorDeep": facts.major_river_deep_columns,
             "submergedOutlet": facts.submerged_outlet_columns,
             "plannedStream": facts.planned_stream_columns,
             "streamHeadwater": facts.stream_headwater_columns,
@@ -1229,6 +1234,8 @@ struct RegionFacts {
     max_river_grade: f64,
     min_submerged_outlet_influence: f64,
     max_submerged_outlet_influence: f64,
+    min_river_bed_depth: i32,
+    max_river_bed_depth: i32,
     min_river_water_y: i32,
     max_river_water_y: i32,
     min_wetland_influence: f64,
@@ -1283,6 +1290,10 @@ struct RegionFacts {
     alpine_snow_columns: usize,
     river_channel_columns: usize,
     major_river_channel_columns: usize,
+    major_river_narrow_columns: usize,
+    major_river_wide_columns: usize,
+    major_river_shallow_columns: usize,
+    major_river_deep_columns: usize,
     submerged_outlet_columns: usize,
     planned_stream_columns: usize,
     stream_headwater_columns: usize,
@@ -1347,6 +1358,8 @@ impl RegionFacts {
         let mut max_river_grade = f64::NEG_INFINITY;
         let mut min_submerged_outlet_influence = f64::INFINITY;
         let mut max_submerged_outlet_influence = f64::NEG_INFINITY;
+        let mut min_river_bed_depth = i32::MAX;
+        let mut max_river_bed_depth = i32::MIN;
         let mut min_river_water_y = i32::MAX;
         let mut max_river_water_y = i32::MIN;
         let mut min_wetland_influence = f64::INFINITY;
@@ -1393,6 +1406,10 @@ impl RegionFacts {
         let mut alpine_snow_columns = 0;
         let mut river_channel_columns = 0;
         let mut major_river_channel_columns = 0;
+        let mut major_river_narrow_columns = 0;
+        let mut major_river_wide_columns = 0;
+        let mut major_river_shallow_columns = 0;
+        let mut major_river_deep_columns = 0;
         let mut submerged_outlet_columns = 0;
         let mut planned_stream_columns = 0;
         let mut stream_headwater_columns = 0;
@@ -1486,12 +1503,20 @@ impl RegionFacts {
             slopes.push(landform.slope);
             if sample.watercourse.is_channel() {
                 river_channel_columns += 1;
+                let bed_depth = sample.watercourse.water_surface_y - sample.watercourse.bed_y;
+                min_river_bed_depth = min_river_bed_depth.min(bed_depth);
+                max_river_bed_depth = max_river_bed_depth.max(bed_depth);
                 min_river_water_y = min_river_water_y.min(sample.watercourse.water_surface_y);
                 max_river_water_y = max_river_water_y.max(sample.watercourse.water_surface_y);
                 reach_levels.insert(sample.watercourse.water_surface_y);
             }
             if sample.watercourse.is_major_channel() {
                 major_river_channel_columns += 1;
+                major_river_narrow_columns += usize::from(sample.watercourse.half_width <= 6.0);
+                major_river_wide_columns += usize::from(sample.watercourse.half_width >= 8.0);
+                let bed_depth = sample.watercourse.water_surface_y - sample.watercourse.bed_y;
+                major_river_shallow_columns += usize::from(bed_depth <= 3);
+                major_river_deep_columns += usize::from(bed_depth >= 5);
             }
             if sample.watercourse.submerged_outlet_influence > 0.0 {
                 submerged_outlet_columns += 1;
@@ -1716,6 +1741,8 @@ impl RegionFacts {
             max_water_depth = 0;
         }
         if reach_levels.is_empty() {
+            min_river_bed_depth = 0;
+            max_river_bed_depth = 0;
             min_river_water_y = MCLONE_OVERWORLD_SEA_LEVEL;
             max_river_water_y = MCLONE_OVERWORLD_SEA_LEVEL;
         }
@@ -1786,6 +1813,8 @@ impl RegionFacts {
             max_river_grade,
             min_submerged_outlet_influence,
             max_submerged_outlet_influence,
+            min_river_bed_depth,
+            max_river_bed_depth,
             min_river_water_y,
             max_river_water_y,
             min_wetland_influence,
@@ -1840,6 +1869,10 @@ impl RegionFacts {
             alpine_snow_columns,
             river_channel_columns,
             major_river_channel_columns,
+            major_river_narrow_columns,
+            major_river_wide_columns,
+            major_river_shallow_columns,
+            major_river_deep_columns,
             submerged_outlet_columns,
             planned_stream_columns,
             stream_headwater_columns,
