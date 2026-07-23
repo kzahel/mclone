@@ -166,3 +166,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `worldgen-debug-lens` — production-derived biome, landform, surface, and
   hydrology diagnostics projected through a cached terrain overlay and
   crosshair inspector without entering chunk persistence or generation state
+- `gpu-procedural-terrain` — GPU-reconstructible first-party terrain,
+  coverage-first progressive refinement, authoritative chunk handoff, optional
+  asynchronous canonical generation, and later volumetric residency research

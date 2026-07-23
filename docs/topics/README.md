@@ -228,6 +228,11 @@ series implements the same concern, normally reuse the document slug in its
   coverage-defect ledger (altitude graph-cull voids, suppression/painted
   mismatch), planned settle-state validation lanes, and the tactical 172 →
   162 ordering.
+- [`gpu-procedural-terrain.md`](gpu-procedural-terrain.md): accepted research
+  direction for immediate GPU-generated first-party terrain, coverage-first
+  16/8/4/2 refinement, authoritative chunk replacement, approximate GPU
+  lighting, optional asynchronous canonical generation, and later volumetric
+  residency/rendering experiments.
 - [`lighting.md`](lighting.md): native Java-shaped stored-light system,
   render handoff, solver/status/rendering gaps, and next slices.
 - [`dynamic-point-lights.md`](dynamic-point-lights.md): presentation-side
