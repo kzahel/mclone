@@ -6,8 +6,8 @@ Status: active 2026-07-23. This is the original Mclone Overworld breadth
 ledger: vanilla Minecraft 1.17.1 supplies a measured reference vocabulary,
 while Mclone owns its regional recipes, distribution, terrain geometry, and
 visual identity. Tactical
-[`223`](../tactical/223-mclone-climate-and-bookend-biomes.md) owns the first
-climate-driven expansion.
+[`223`](../tactical/223-mclone-climate-and-bookend-biomes.md) has completed
+the first climate-driven implementation and is awaiting Human Review 1.
 
 ## Scope
 
@@ -67,7 +67,7 @@ geology, vegetation, and landmark variation inside them.
 
 ## Current Original-Profile Baseline
 
-Field revision 12 emits five vanilla-compatible biome IDs:
+Field revision 13 emits eight vanilla-compatible biome IDs:
 
 | ID | Current Mclone meaning | Decoration |
 |---:|---|---|
@@ -76,6 +76,9 @@ Field revision 12 emits five vanilla-compatible biome IDs:
 | `1` | open lowland, mountain valley/shoulder, and wetland land | oak, grass, dandelion, poppy |
 | `4` | sheltered wooded upland | denser oak, grass, dandelion, poppy |
 | `7` | major river and planned stream water | none |
+| `5` | cool-wet conifer country | spruce/pine, ferns, berries |
+| `13` | cold alpine highland | snow/rock, treeless initially |
+| `35` | warm-dry steppe | sparse acacia, tall grass, restrained flowers |
 
 The terrain is already substantially broader than that biome list: continents,
 shelves and deep basins, beaches, open lowlands, wooded uplands, rugged
@@ -83,9 +86,15 @@ mountains, valleys, exposed stone, major rivers, wetlands, and the reviewed
 spring-fed creek all exist. The narrowness is regional climate, surface
 palette, vegetation, ecology, geology, and generated landmark breadth.
 
-Seven surface recipes are live: ocean floor, beach, river bed, wetland bed,
-river bank, grass/soil, and exposed stone. Only two land decoration tables are
-live, and both remain temperate oak language.
+Eight surface recipes are live: ocean floor, beach, river bed, wetland bed,
+river bank, grass/soil, exposed stone, and alpine snow. Four land decoration
+tables are live: temperate meadow, temperate woodland, cool-wet conifer, and
+warm-dry steppe. Alpine is deliberately undecorated in its first pass.
+
+Temperature and moisture are now independent broad periodic fields with
+smaller cross-warp detail. Altitude-adjusted temperature is derived during
+regional classification. These climate facts alter biome, surface, and
+decoration language but do not change terrain geometry.
 
 ## Regional Recipe Ledger
 
@@ -98,9 +107,9 @@ live, and both remain temperate oak language.
 | beach and shore | beach, stone shore, snowy beach | sea-level band | sand only | `live`, one shore family |
 | major river and wetland | rivers, swamps, lakes | flat Y63 corridor, banks, pools | gravel, sand/grass banks, clay pools | `reviewed`, no climate variants |
 | peaceful spring-fed creek | springs and bounded water landmarks | 91-96-block planned valley stream | grassed shoulders, fixed-point drops | `reviewed` |
-| cool-wet conifer upland | taiga, taiga hills | temperature + moisture + landform | spruce/pine, ferns, berries | `active` in Tactical 223 |
-| snowy alpine | snowy mountains, tundra | altitude-adjusted cold rugged terrain | snow, exposed rock, sparse or no trees | `active` in Tactical 223 |
-| warm-dry steppe | savanna and plateau | warm + dry open terrain | golden grass, tall grass, sparse acacia | `active` in Tactical 223 |
+| cool-wet conifer upland | taiga, taiga hills | temperature + moisture + landform | spruce/pine, ferns, berries | `live`, Human Review 1 pending |
+| snowy alpine | snowy mountains, tundra | altitude-adjusted cold rugged terrain | snow, exposed rock, no trees initially | `live`, Human Review 1 pending |
+| warm-dry steppe | savanna and plateau | warm + dry open terrain | golden grass, tall grass, sparse acacia | `live`, Human Review 1 pending |
 | flower meadow and birch grove | sunflower plains, flower/birch forest | temperate local selectors | broader flowers, birch stands | `planned` |
 | deep/dark or ancient forest | dark forest, giant taiga | humid sheltered terrain | dark oak or giant conifer, fungi, boulders | `planned` |
 | arid desert and dune field | desert and desert lakes | hot + very dry low relief | sand/sandstone, cactus, dead bush, oasis | `planned` |
@@ -121,7 +130,7 @@ or persistence needs it.
 
 | Dimension | Current Mclone | Important missing families |
 |---|---|---|
-| climate | temperate appearance with altitude/slope response | periodic temperature and moisture, snowline, regional water response |
+| climate | periodic temperature/moisture, altitude snowline, temperate/conifer/alpine/steppe response | regional water climate, more hot-wet and hot-dry extremes |
 | terrain | continents, coasts, lowlands, mountains, valleys | plateaus, dunes, mesas, escarpments, volcanic terrain, high basins |
 | surfaces | grass, dirt, sand, gravel, clay, stone | snow/ice, podzol/coarse dirt, terracotta/red sand, fungal and richer rocky palettes |
 | vegetation | oak, grass, dandelion, poppy | every other tree family, undergrowth, aquatic plants, desert flora, fungi |
@@ -212,7 +221,8 @@ voxel noise:
 
 ## Recommended Sequence
 
-1. Complete Tactical 223's climate fields and first three regional recipes.
+1. Complete Human Review 1 for Tactical 223's climate fields and first three
+   regional recipes; apply only bounded art-direction corrections.
 2. Add the first 3D-geology tactical before broad caves:
    - baseline and map the current heightfield limitation;
    - prove one placed boulder/talus family;

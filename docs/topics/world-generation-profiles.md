@@ -379,9 +379,10 @@ Current `mclone-overworld-v1` support is:
 |---|---|---|---|---|---|
 | Terrain fields | supported | unsupported | supported at 384 chunks | pending | design only |
 | Features | supported | unsupported | supported at 384 chunks | pending | design only |
+| Regional climate | periodic temperature/moisture, altitude cooling, and five land recipes | unsupported | same exact periodic fields at 384 chunks | pending | design only |
 | Rivers/hydrology | size-aware ocean bathymetry, flat Y63 major rivers, and bounded Y67 source/tributary/fall/sink landmarks | unsupported | same periodic fields and fixed local stencils at 384 chunks | pending | design only |
 | Mclone caves | absent | - | - | - | - |
-| Mclone structures | absent | - | - | - | - |
+| Mclone structures | one bounded valley-stream start/piece family | unsupported | exact periodic start/piece realization at 384 chunks | pending | design only |
 
 Future Mclone content tacticals must classify each added family as
 topology-neutral, plane/finite only, periodic-axis compatible, patch-atlas

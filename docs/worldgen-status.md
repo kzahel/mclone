@@ -23,9 +23,10 @@ The finite/periodic runtime proof is complete in
 genuinely periodic Mclone fields and features are complete in
 [`tactical/196-periodic-mclone-terrain-fields.md`](tactical/196-periodic-mclone-terrain-fields.md)
 for the plane and exact 384-chunk X cylinder.
-This is now the selected project campaign: mountains/valleys, periodic fields,
-rivers/wetlands, then coherent stream, cascade, and waterfall reaches. Caves
-and structures remain parked while those terrain families advance.
+The selected campaign has now advanced through mountains/valleys, periodic
+fields, rivers/wetlands, a coherent bounded stream, and the first climate
+regions. Three-dimensional geology and rock formations are the recommended
+next terrain phase before broad caves.
 The active water slice is
 [`tactical/220-mclone-overworld-rivers-and-wetlands.md`](tactical/220-mclone-overworld-rivers-and-wetlands.md).
 Its broad periodic river corridor, terrain carving, banks, local water levels,
@@ -59,6 +60,16 @@ authoritative wake, partition, periodic seam, release performance, movement,
 and fully warmed RD16 evidence pass. Human Review 1 accepted its peaceful
 spring-fed-creek language, completing Tactical 222; general drainage
 semantics remain explicitly out of scope.
+Tactical
+[`223`](tactical/223-mclone-climate-and-bookend-biomes.md) is
+implementation-complete and awaiting Human Review 1. Field revision 13 adds
+periodic temperature/moisture and altitude cooling; decoration revision 10
+realizes cool-wet conifer, snowy alpine, and warm-dry steppe through
+taiga/snowy-mountain/savanna-compatible biome IDs, alpine snow and exposed
+rock, spruce/pine/fern/berry language, and sparse
+acacia/tall-grass/flower language. Exact cylinder seams, far-LOD snow, SQLite
+reopen, browser WASM compilation, generation performance, a 3,600-frame
+mixed-climate movement route, and fully warmed RD16 cards pass.
 
 Compatibility safety is recorded in the
 [`world-generation-profiles` ledger](topics/world-generation-profiles.md#compatibility-safety-ledger).
@@ -139,6 +150,12 @@ Landed native coverage:
   far LOD, and persisted reopen agree. General highland networks,
   drainage-network identity, accumulated discharge, and arbitrary
   confluences remain absent.
+- Its first climate family adds independent periodic temperature and moisture
+  fields, derived altitude cooling, and broad conifer, alpine, steppe,
+  woodland, and meadow recipes. New regions emit taiga `5`, snowy mountains
+  `13`, and savanna `35`; alpine snow remains visible in synthetic far LOD,
+  while conifer and steppe use Mclone-owned decoration density. Human Review
+  1 is pending.
 - Production-backed broad field maps and fully warmed seed/region/spawn cards;
   the first review accepted macro scale and coast variation after adding one
   fine relief octave to break up concentric local contour bands. The second

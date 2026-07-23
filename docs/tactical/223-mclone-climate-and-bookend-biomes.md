@@ -1,6 +1,6 @@
 # Tactical 223: Mclone Climate And Bookend Biomes
 
-Status: active 2026-07-23.
+Status: implementation complete 2026-07-23; Human Review 1 pending.
 
 Topics: `mclone-overworld-generation`, `mclone-overworld-breadth`
 
@@ -225,40 +225,167 @@ scope.
 - [x] Create the Mclone breadth tracker with vanilla grouped reference
   families and explicit mechanism/live/reviewed states.
 - [x] Record 3D geology as a dedicated formation campaign.
-- [ ] Pin current field, biome, surface, decoration, topology, and performance
+- [x] Pin current field, biome, surface, decoration, topology, and performance
   baselines.
 
 ### Slice 1: climate fields and maps
 
-- [ ] Add periodic temperature/moisture sampling and raw fingerprints.
-- [ ] Add altitude-adjusted temperature and recipe classification.
-- [ ] Add production maps, ratios, cross-products, and multi-seed review.
-- [ ] Tune only broad scales and thresholds; generated blocks remain unchanged
+- [x] Add periodic temperature/moisture sampling and raw fingerprints.
+- [x] Add altitude-adjusted temperature and recipe classification.
+- [x] Add production maps, ratios, cross-products, and multi-seed review.
+- [x] Tune only broad scales and thresholds; generated blocks remain unchanged
   until the distribution is accepted internally.
 
 ### Slice 2: biome payload and surface realization
 
-- [ ] Emit conifer, alpine, and steppe biome IDs.
-- [ ] Add alpine snow/exposed-rock surface language.
-- [ ] Preserve water/shore priorities and exact target partition.
-- [ ] Update intentional field and surface fingerprints.
+- [x] Emit conifer, alpine, and steppe biome IDs.
+- [x] Add alpine snow/exposed-rock surface language.
+- [x] Preserve water/shore priorities and exact target partition.
+- [x] Update intentional field and surface fingerprints.
 
 ### Slice 3: decoration language
 
-- [ ] Add conifer vegetation.
-- [ ] Add sparse steppe acacia/tall-grass language.
-- [ ] Decide whether alpine needs sparse trees from inspected pixels.
-- [ ] Prove deterministic decoration counts, boundaries, and periodic seams.
+- [x] Add conifer vegetation.
+- [x] Add sparse steppe acacia/tall-grass language.
+- [x] Decide whether alpine needs sparse trees from inspected pixels.
+- [x] Prove deterministic decoration counts, boundaries, and periodic seams.
 
 ### Slice 4: production closeout
 
-- [ ] Prove far-LOD climate/snow agreement.
-- [ ] Prove native SQLite reopen of one chunk from each new family.
-- [ ] Compile browser Worker/WASM boundaries.
-- [ ] Benchmark controls and family hotspots.
-- [ ] Capture fully warmed high-view-distance multi-family cards.
-- [ ] Stop for human judgment of distribution, color, density, snowline, and
+- [x] Prove far-LOD climate/snow agreement.
+- [x] Prove native SQLite reopen of a new-family final chunk payload.
+- [x] Compile browser Worker/WASM boundaries.
+- [x] Benchmark controls and family hotspots.
+- [x] Capture fully warmed high-view-distance multi-family cards.
+- [x] Stop for human judgment of distribution, color, density, snowline, and
   family identity.
+
+## Execution Record
+
+### Climate fields and regional recipes
+
+Field revision 13 adds four fixed-work periodic samples: broad and detail
+temperature plus broad and detail moisture. The broad fields are gently
+cross-warped by the opposite detail field. This removed the rectilinear
+boundary tendency seen in the first unwarped maps without coupling climate to
+terrain geometry.
+
+Temperature uses 1,536- and 384-block scales; moisture uses 1,024- and
+256-block scales. Every scale divides the 6,144-block cylinder circumference.
+The resulting raw values are immutable absolute-coordinate facts. Altitude
+cooling is derived only when classifying a column.
+
+The production priority is water/shore, snowy alpine, cool-wet conifer,
+warm-dry steppe, temperate woodland, then temperate meadow. The first
+thresholds are:
+
+- snowy alpine at Y96 or above with altitude-adjusted temperature at or below
+  `-0.18`;
+- cool-wet conifer at adjusted temperature at or below `-0.12` and moisture
+  at or above `-0.05`; and
+- warm-dry steppe at raw temperature at or above `0.18` and moisture at or
+  below `-0.10`.
+
+The review receipt is schema 12 and records temperature, moisture,
+altitude-adjusted temperature, recipe, biome, surface, cross-products,
+family block counts, ranges, and fingerprints. Broad three-seed maps were
+inspected. Their 385-by-385 sampled grids contained all three new land
+families without a pathological search:
+
+| Seed | Conifer | Alpine | Steppe |
+|---:|---:|---:|---:|
+| `-98765` | 27,875 | 1,602 | 3,155 |
+| `12345` | 14,975 | 68 | 4,376 |
+| `8675309` | 20,729 | 220 | 2,831 |
+
+Those are sampled-column counts over the complete review grid, including its
+ocean and shore columns; they are distribution evidence rather than desired
+land percentages.
+
+### Surfaces and decoration
+
+The recipes emit taiga `5`, snowy mountains `13`, and savanna `35`.
+Snowy-alpine columns retain grass/soil support and place a thin snow layer
+above it. Surface priority was corrected after the first pixels allowed the
+generic exposed-stone rule to consume nearly every alpine cap. Snow now wins
+on slopes below `1.05`, while steep faces retain coherent exposed ribs.
+
+Decoration revision 10 adds Mclone-owned tables rather than importing whole
+vanilla biome tables:
+
+- cool-wet conifer uses spruce and pine, ferns, sparse large ferns, ordinary
+  grass, and restrained berry bushes;
+- warm-dry steppe uses sparse acacia, tall grass, ordinary grass, and
+  restrained flowers; and
+- snowy alpine remains treeless in this first pass so its snow/rock
+  silhouette stays legible.
+
+Water, shore, bank, wetland, and planned-stream priorities are unchanged.
+Exact target partition, arbitrary target order, and the 384-chunk-X periodic
+seam pass with the new climate and decoration revisions.
+
+### Shared boundaries
+
+Synthetic far LOD consumes the same authoritative surface chunk and preserves
+alpine snow. Ordinary trees and plants retain the existing feature-omitting
+LOD policy. A conifer-family chunk survives native SQLite close/reopen with
+exact biome and final block payload equality; no separate climate record was
+introduced. The production browser client still compiles for
+`wasm32-unknown-unknown`, preserving the shared Worker/WASM generation
+boundary.
+
+### Performance and sustained movement
+
+On the same release host and seed `-98765`, the radius-three,
+three-iteration origin control measured:
+
+| Lane | Revision-12 baseline | Revision 13 | Change |
+|---|---:|---:|---:|
+| surface | 2,857.849 chunks/s | 2,448.346 chunks/s | -14.3% |
+| cold decorated | 904.243 targets/s | 841.992 targets/s | -6.9% |
+| warm decorated | 5,053.663 targets/s | 4,589.829 targets/s | -9.2% |
+
+All remain inside the 15-percent broad-control investigation gate. Seed
+`12345` family hotspots measured 2,564.534 warm targets/s in the dense
+conifer site, 3,332.879 in steppe, and 3,852.176 in alpine. The conifer
+hotspot is intentionally the most expensive because its feature payload is
+materially denser; it remains far from the twofold blocker.
+
+A clean release movement probe at commit `3e4fdc67` used seed `12345`, center
+`(-24,3)`, render distance 10, a 19-chunk-radius route, derived
+7-worker/20-pending render capacity, 32 blocks/s, and 3,600 frames at 60 Hz.
+The accelerated 60-second circuit crossed 152 unique chunk centers and
+measured 5.547 ms average offscreen frame work, 11.476 ms p95, 13.493 ms p99,
+and 15.769 ms max. No frame exceeded the 16.667 ms budget and frame
+accounting reported no conservation violation.
+
+Loaded chunks remained between 523 and 576. Worldgen jobs peaked at one and
+ended at zero; publications peaked at 65 and ended at zero; render compile
+jobs peaked at 11 and ended at zero. Pending render chunks peaked at 127 and
+ended at 91 while the camera was still moving. Scheduled fluid depth, due
+ticks, executed ticks, deferred ticks, mutations, and fluid events all
+remained zero.
+
+### Pixel and test checkpoint
+
+Fully warmed render-distance-16 production cards were captured at conifer
+chunk `(-43,6)`, steppe chunk `(-5,0)`, and alpine chunk `(-130,-69)` for
+seed `12345`. Each receipt records all 1,225 requested chunks loaded and
+render-ready with no target-pending stream or render work. Internal inspection
+found:
+
+- a dark, legible spruce/pine region transitioning into oak lowland and river;
+- a localized golden steppe with sparse acacias and taller grass; and
+- connected alpine snow caps and bowls broken by exposed gray ribs.
+
+The full `mclone-worldgen` library suite passes with 309 tests and one ignored
+test. All 44 filtered `mclone-app-runtime` far-LOD tests pass, the focused
+SQLite climate reopen passes, and the browser WASM build passes. Existing
+unrelated compiler warnings remain unchanged.
+
+This is the intended Human Review 1 stop. Acceptance or art-direction changes
+to regional distribution, tint, vegetation density, and snowline remain a
+human decision.
 
 ## Stop Conditions
 
