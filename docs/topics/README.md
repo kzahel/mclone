@@ -272,9 +272,10 @@ series implements the same concern, normally reuse the document slug in its
 - [`tabletop-overview-mode.md`](tabletop-overview-mode.md): researched
   potential for presenting the active world as one shared manipulable scale
   model across flat, touch, gamepad, XR, and capability-gated passthrough;
-  records same-slot renderer reuse, inverse target mapping, survival and
-  multiplayer authority boundaries, platform-neutral input, current gaps, and
-  a read-only-first implementation sequence.
+  records edit and direct-control adventure purposes, same-slot renderer reuse,
+  camera follow and leashed XR recentering, bounded keyhole cutaways, inverse
+  target mapping, authority boundaries, platform-neutral input, current gaps,
+  and a read-only-first implementation sequence.
 - [`visor-vr-reference.md`](visor-vr-reference.md): Visor VR architecture
   research, including reusable lessons for world-space UI surfaces, pointer
   focus/capture, virtual-keyboard text entry, input contexts, render staging,

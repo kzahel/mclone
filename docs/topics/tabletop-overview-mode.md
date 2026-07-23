@@ -2,12 +2,13 @@
 
 Topic: `tabletop-overview-mode`
 
-Status: **potential feature direction researched 2026-07-23; no implementation
-or tactical is open.** The recommended product shape is one shared active-world
-overview mode with flat, touch, gamepad, tracked-controller, and later
-hand-tracking interaction. XR may place that mode over passthrough when the
-runtime supports it, but passthrough is a presentation capability rather than
-the feature's owner or availability boundary.
+Status: **potential feature directions researched 2026-07-23; no
+implementation or tactical is open.** The recommended product shape is one
+shared active-world overview presentation with direct-control adventure and
+edit purposes across flat, touch, gamepad, tracked-controller, and later
+hand-tracking interaction. XR may place that presentation over passthrough
+when the runtime supports it, but passthrough is a capability rather than the
+feature's owner or availability boundary.
 
 Last reconciled: **2026-07-23**.
 
@@ -19,7 +20,10 @@ presented as a manipulable scale model:
 - a flat-screen orbit or god-view building mode;
 - an XR tabletop or floating-diorama mode;
 - passthrough-backed mixed reality where the XR runtime supports it;
+- a direct-control adventure purpose in which the ordinary player moves while
+  an external camera or tabletop follows that canonical body;
 - shared pan, rotation, scale, pointing, selection, place, and break intent;
+- bounded underground visibility when terrain occludes the followed player;
 - inverse mapping from presentation-space hits to canonical world targets;
 - creative, survival, multiplayer, and remote-authority policy for actions
   performed away from the player's embodied reach; and
@@ -73,6 +77,22 @@ pointer hit in presentation space
 The same mode can therefore feel like an orbit-camera builder on desktop, a
 touch-manipulated model on mobile, and a physical model on a table in XR
 without creating separate gameplay implementations.
+
+Overview has two complementary purposes:
+
+```text
+overview presentation
+  +-- direct-control adventure: move the canonical miniature player
+  |   while the presentation follows or recentres
+  `-- edit: point at and manipulate canonical world targets
+```
+
+The adventure purpose can feel like a first-person-controlled top-down
+platformer: movement and actions still originate at the player's body, but the
+camera observes from above and outside. The edit purpose instead makes the
+model itself the primary target. They should share rendering, placement,
+focus, input context, and transition machinery without sharing interaction
+authority accidentally.
 
 The strongest Mclone-specific version is a **living survival-world model**.
 Creatures, players, water, time, farms, machines, and multiplayer activity
@@ -164,6 +184,11 @@ own camera, input, authority, streaming, comfort, and passthrough decisions.
 - **Embodied mode**: ordinary first-person or configured player-camera play.
 - **Overview mode**: the shared active-world scale-model presentation and
   input context.
+- **Direct-control adventure**: overview purpose in which ordinary character
+  movement and body-relative actions continue while the presentation follows
+  the canonical player.
+- **Overview edit**: overview purpose in which a presentation-space pointer
+  selects or edits canonical blocks and entities under explicit authority.
 - **Tabletop**: the spatial XR expression of overview mode. The model may sit
   on a real table, a virtual plinth, or float at a comfortable height; a
   detected physical table is not required.
@@ -175,6 +200,8 @@ own camera, input, authority, streaming, comfort, and passthrough decisions.
   the focus independently of the embodied player's location.
 - **Interaction policy**: authoritative rule deciding whether an overview hit
   is read-only, limited to embodied reach, or eligible for remote editing.
+- **Keyhole cutaway**: a bounded overview-only visibility effect that reveals
+  an occluded player without changing canonical terrain or collision.
 
 “God mode” is useful conversational shorthand but should not be the contract
 name. It conflates presentation with elevated gameplay permission.
@@ -235,6 +262,85 @@ Selection outlines, break progress, placement previews, particles, and world
 UI eventually need the same presentation transform as terrain and actors.
 They must not be drawn only in mono/per-eye while disappearing in multiview.
 
+### Direct-control adventure
+
+This purpose keeps the ordinary player replica, movement, collision, reach,
+tool use, and server authority. Only the presentation changes. The local
+player needs a full-body miniature because the external camera, unlike the
+ordinary first-person camera, must show the controlled body.
+
+Movement should be camera-relative on the horizontal plane while retaining the
+ordinary simulation's vertical axis. Camera-relative intent must be converted
+to canonical movement before it reaches the existing controller; overview yaw
+must never become player or world rotation implicitly. Attack, use, reach, and
+target origin should remain body-centric initially, so the player cannot
+interact through an otherwise invisible roof merely because the overview
+camera can see beyond it.
+
+For flat screens, the initial camera should use a damped follow with a generous
+dead zone:
+
+- follow the player's canonical position without continuously rotating the
+  presentation;
+- preserve player-controlled yaw, scale, and pitch constraints;
+- ease only after the miniature crosses the dead zone;
+- snap after teleport, dimension change, respawn, or another large
+  discontinuity; and
+- offer a static/manual-recentre option for players who prefer no follow
+  motion.
+
+For room-scale XR, continuously sliding the whole world under the user can be
+more distracting than a conventional flat camera. The default candidate is a
+**leashed tabletop**: keep the model physically anchored while the miniature
+player remains inside a comfortable inner region, then ease the model back
+toward centre only after the player crosses that boundary. A fully static
+tabletop with explicit recenter should remain available. Follow constants are
+comfort policy and may differ by presentation class, but their state machine
+and meaning belong in shared code.
+
+### Underground visibility and keyhole cutaway
+
+An external camera will often lose the controlled player beneath a roof,
+overhang, or underground terrain. Removing whole chunks, sections, or every
+block above the player would suppress too much spatial context. The first
+candidate should instead combine cheap CPU occlusion detection with a bounded
+overview-only shader effect:
+
+1. cast a voxel DDA ray, or a small fixed set of rays, from the flat camera or
+   XR eye midpoint toward the miniature's head and torso;
+2. ignore configurable weak occluders such as glass, leaves, and water when
+   deciding whether the cutaway is needed;
+3. when solid terrain blocks the view, enable a narrow world-space capsule or
+   cone running from the observer toward the player;
+4. discard only overview terrain fragments inside that volume and in front of
+   the player, with a short ordered-dither feather band at its boundary; and
+5. hold activation/deactivation briefly, initially about 150–250 ms, so
+   individual block edges do not make the aperture flicker.
+
+The aperture radius and affected depth must be clamped. Geometry behind the
+player remains visible, preserving the cave's local context. Ordered dithering
+is preferable to broad alpha transparency because it avoids sorting a large
+new translucent terrain region and gives the cutaway a deliberate
+Minecraft-like/X-ray character.
+
+The cut volume must be one physical three-dimensional shape shared by both XR
+eyes. Independent screen-space circles would disagree in stereo, and any new
+terrain shader/uniform path must cover mono, per-eye, and full-frame multiview.
+
+Canonical block meshes omit faces between adjacent opaque blocks. Shader
+discard therefore cannot reveal a physically capped excavation surface; it
+will look like an enchanted keyhole into the existing cave, not a clean
+architectural cross-section. That is acceptable for the cheap first effect.
+If a player is extremely deep or the aperture reveals mostly empty solid
+terrain, fall back to a local-player outline or a bounded local-cave slice
+rather than expanding the hole across most of the world. True cap faces or
+mesh surgery are a separate, substantially more expensive feature.
+
+The keyhole changes visibility only. If camera-pointer underground editing is
+added later, picking must apply the exact same cut-volume visibility rule or
+the pointer will hit an invisible roof. Body-centric actions avoid that
+ambiguity in the first direct-control implementation.
+
 ## Authority And Game-Mode Policy
 
 Presentation does not grant authority. Unlimited distant editing would bypass
@@ -268,16 +374,17 @@ The feature should follow existing shared-first boundaries:
 - **`mclone-input`**: neutral manipulation and pointing observations, shared
   semantic actions, hand/controller identity, and device-independent intent.
 - **`mclone-scene`**: `Embodied` versus `Overview` state, transition policy,
-  focus, manipulation reduction, input context, physical-view preparation,
-  active-slot selection, render submission, and camera/body publication
-  separation.
+  purpose, focus, follow/recentre policy, occlusion state, manipulation
+  reduction, input context, physical-view preparation, active-slot selection,
+  render submission, and camera/body publication separation.
 - **`mclone-render-session`**: neutral mono/stereo view and ray contracts where
   renderer-facing presentation facts belong.
 - **`mclone-render`**: reversible placement including yaw, placed terrain and
-  actor draws, presentation-aware culling, clipping, and later outlines or
-  effects.
+  actor draws, presentation-aware culling, mono/stereo/multiview cutaway
+  clipping, and later outlines or effects.
 - **`mclone-client`**: canonical target selection and client interaction state
-  where the existing block/entity interaction owner requires it.
+  where the existing block/entity interaction owner requires it, plus the
+  canonical local-player miniature inputs already owned by the replica.
 - **`mclone-server`**: reach, game-mode, permission, protected-world, and
   remote-edit authorization.
 - **`mclone-xr-host`**: OpenXR passthrough handle/layer lifecycle and
@@ -297,10 +404,16 @@ enum WorldPresentationMode {
 }
 
 struct OverviewState {
+    purpose: OverviewPurpose,
     focus: Vec3d,
     presentation: OverviewPresentation,
     source_bounds: OverviewBounds,
     interaction_policy: OverviewInteractionPolicy,
+}
+
+enum OverviewPurpose {
+    DirectControl,
+    Edit,
 }
 
 struct OverviewPresentation {
@@ -325,6 +438,13 @@ submit only the placed bounded region. Drawing the same source both directly
 and as a miniature is useful for later in-world tables, but it is not required
 for a full-screen flat editor or passthrough tabletop and would add unnecessary
 cost.
+
+Direct-control adventure requires the active local player to join the placed
+actor records as a full-body miniature. Its camera/focus follower consumes
+canonical player motion but does not create another actor, replica, or
+simulation. The keyhole's DDA probes consume the same canonical terrain
+occupancy used for ordinary block targeting; they should not read rendered
+depth back from the GPU.
 
 Initial focus should remain near the embodied player and inside the existing
 resident set. Free panning beyond that set requires a separate bounded
@@ -486,9 +606,23 @@ This is the first drawable review checkpoint.
 - Hand tracking.
 - Distant focus and bounded observer interest.
 - Circular/rounded crop and boundary polish.
-- Miniature local-player embodiment.
 - Blueprint or survival-native remote construction.
 - Spatial table discovery or persistent room anchoring.
+
+### Direct-control adventure follow-up
+
+This is a branch after the shared read-only placement proof, not a requirement
+for creative editing:
+
+1. add a flat static/follow camera above ground;
+2. render the local-player miniature and map camera-relative movement into the
+   ordinary canonical controller;
+3. add DDA-triggered, dithered keyhole cutaway in mono capture;
+4. prove the same physical cut volume in synthetic stereo and multiview;
+5. add the anchored/leashed tabletop policy, then capability-gated
+   passthrough; and
+6. consider camera-pointer underground interaction only after visibility and
+   picking can share one tested mask.
 
 ## Validation Requirements
 
@@ -499,7 +633,18 @@ Required contract evidence should include:
 
 - transform and inverse-transform round trips at ordinary and far coordinates;
 - stable focus under scale and yaw;
+- stable flat follow and XR leashed recenter without oscillation, surprise
+  yaw, or model motion inside the configured dead zone;
+- overview camera motion never published as canonical body motion;
+- camera-relative controls preserve ordinary movement, collision, reach, and
+  server authority;
+- local-player miniature pose and movement match the canonical replica;
 - exact block-face and adjacent-placement target selection;
+- repeatable DDA activation across roofs, caves, glass, leaves, and water;
+- bounded aperture radius/depth, hysteresis, and deep-underground fallback;
+- one physical keyhole volume producing consistent per-eye and multiview
+  results;
+- no camera-pointer hit against fragments hidden by the cutaway;
 - active-world mutations visible in the overview and persisted after reopen;
 - no duplicate runtime, replica, draw store, actor cache, or player identity;
 - no overview work or measurable regression when the mode is off;
@@ -529,6 +674,21 @@ and not a convenience automatically granted by the renderer.
 The overview camera is presentation state. Publishing it as the player's body
 pose would teleport or fight authoritative reconciliation. The embodied body,
 overview focus, and physical XR camera must remain distinct.
+
+### Follow motion and XR comfort
+
+A camera that chases every block step will jitter on flat screens, while a
+tabletop that continuously slides through the room can feel physically
+unstable. Dead zones, damping, discontinuity snaps, leashed XR recentering, and
+a static option are product controls rather than tuning afterthoughts.
+
+### Cutaway overreach
+
+A wide or deep cut volume can erase the terrain needed to understand where the
+player is. A narrow clamped aperture, short hysteresis, weak-occluder
+filtering, and an outline/local-slice fallback bound both visual suppression
+and shader cost. The first effect intentionally does not promise generated cap
+faces.
 
 ### Unbounded residency cost
 
@@ -567,6 +727,17 @@ background capability.
 - Keep the active-world source in the existing slot; do not require a warm
   second runtime.
 - Distinguish overview focus/camera from the embodied player body.
+- Treat direct-control adventure and overview edit as purposes of one shared
+  presentation, not separate engines or platform modes.
+- Keep direct-control movement and actions body-centric; the overview camera
+  does not extend reach or interaction authority.
+- Prefer damped flat follow and anchored/leashed XR recentering, with a static
+  option.
+- Treat underground visibility as a bounded DDA-triggered, overview-only
+  world-space keyhole shared by both eyes, not section culling or permanent
+  world mutation.
+- Accept an intentionally uncapped X-ray look before considering
+  boundary-remeshing or mesh surgery.
 - Require server-authoritative permission for editing beyond ordinary reach.
 - Support a read-only first proof before creative/admin authority exists.
 - Make tracked controllers the first complete XR tool and hand tracking a
@@ -585,6 +756,14 @@ background capability.
 - Does the first view show only the region around the player, a selected build
   site, or a bounded settlement?
 - Should the local player appear as a miniature body?
+- Which follow dead zone, damping, and teleport threshold feel stable on flat
+  screens?
+- Should XR direct-control default to leashed recentering or a fully static
+  tabletop?
+- Which materials count as weak occluders, and what keyhole radius/depth and
+  hysteresis work across forests, buildings, and caves?
+- At what depth or solid-coverage threshold should the keyhole switch to an
+  outline or local-cave-slice fallback?
 - Which input gestures are reserved for model manipulation versus block tools?
 - What scale range keeps blocks selectable without excessive geometry?
 - Is the first boundary rectangular, skirted, fogged, or circular?
@@ -600,6 +779,11 @@ Keep this as a researched potential until current product priorities select it.
 When selected, open a bounded tactical for Slices 0–1 only: a read-only,
 active-world, player-centred overview using the landed placed terrain/actor
 paths on flat and synthetic stereo, with the ordinary path locked unchanged.
+
+After that proof, direct-control adventure is a bounded early follow-up because
+it can validate the local-player miniature, flat follow, canonical movement,
+and cheap keyhole without first requiring remote editing authority. Keep its
+initial actions body-centric.
 
 Do not begin with passthrough, hand tracking, circular clipping, distant
 streaming, or survival remote editing. Those depend on the shared presentation
