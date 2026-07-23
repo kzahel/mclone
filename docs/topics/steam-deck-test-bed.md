@@ -4,8 +4,8 @@ Topic: steam-deck-test-bed
 
 Status: active provisioning. As of 2026-07-23, the first retail Steam Deck has
 Developer Mode enabled and the Linux deployment host has a working Steam
-client plus the SteamOS Devkit Client payload. Pairing the host and the first
-native mclone deployment remain open.
+client plus the SteamOS Devkit Client payload. The host is paired and its
+managed SSH path is verified; the first native mclone deployment remains open.
 
 ## Scope
 
@@ -36,6 +36,12 @@ the host key during pairing. Do not enable the Deck's general-purpose SSH
 service, set a password, or unlock SteamOS's read-only root solely for this
 workflow. Direct SSH/rsync remains a fallback for command-line automation, not
 the first provisioning step.
+
+The first pairing was verified on 2026-07-23 by authenticating with the
+Devkit-generated key, synchronizing Valve's utility scripts, and completing a
+machine-readable `steamos-get-status` query while the Deck was in its Gamescope
+session. Keep the device address, exact host paths, and local account state in
+the private laptop ledger.
 
 Valve's current reference instructions are:
 
@@ -115,7 +121,7 @@ compare its absolute numbers directly with the production-shaped release.
 - [x] Retail Steam Deck Developer Mode enabled.
 - [x] Linux host Steam package and per-user Steam client bootstrapped.
 - [x] Sign the Linux host into Steam and install App ID `943760`.
-- [ ] Pair/register the Deck through **Pair new host**.
+- [x] Pair/register the Deck through **Pair new host**.
 - [ ] Create a reproducible staging script and launch wrapper.
 - [ ] Deploy the first native release payload.
 - [ ] Record interactive Linux/Gamescope/controller acceptance.
