@@ -478,6 +478,10 @@ fn run() -> Result<()> {
             "riverDistance": [facts.min_river_distance, facts.max_river_distance],
             "riverHalfWidth": [facts.min_river_half_width, facts.max_river_half_width],
             "riverGrade": [facts.min_river_grade, facts.max_river_grade],
+            "submergedOutletInfluence": [
+                facts.min_submerged_outlet_influence,
+                facts.max_submerged_outlet_influence,
+            ],
             "riverWaterSurfaceY": [facts.min_river_water_y, facts.max_river_water_y],
             "wetlandInfluence": [facts.min_wetland_influence, facts.max_wetland_influence],
             "wetlandPoolInfluence": [facts.min_wetland_pool_influence, facts.max_wetland_pool_influence],
@@ -544,6 +548,7 @@ fn run() -> Result<()> {
         "watercourseCounts": {
             "channel": facts.river_channel_columns,
             "majorChannel": facts.major_river_channel_columns,
+            "submergedOutlet": facts.submerged_outlet_columns,
             "plannedStream": facts.planned_stream_columns,
             "streamHeadwater": facts.stream_headwater_columns,
             "gradedBank": facts.river_bank_influence_columns,
@@ -1090,6 +1095,8 @@ fn sample_json(sample: McloneOverworldLandformSample) -> serde_json::Value {
             "distance": terrain.watercourse.distance,
             "channelInfluence": terrain.watercourse.channel_influence,
             "majorChannelInfluence": terrain.watercourse.major_channel_influence,
+            "submergedOutletInfluence":
+                terrain.watercourse.submerged_outlet_influence,
             "plannedStreamInfluence": terrain.watercourse.planned_stream_influence,
             "streamHeadwaterInfluence": terrain.watercourse.stream_headwater_influence,
             "bankInfluence": terrain.watercourse.bank_influence,
@@ -1220,6 +1227,8 @@ struct RegionFacts {
     max_river_half_width: f64,
     min_river_grade: f64,
     max_river_grade: f64,
+    min_submerged_outlet_influence: f64,
+    max_submerged_outlet_influence: f64,
     min_river_water_y: i32,
     max_river_water_y: i32,
     min_wetland_influence: f64,
@@ -1274,6 +1283,7 @@ struct RegionFacts {
     alpine_snow_columns: usize,
     river_channel_columns: usize,
     major_river_channel_columns: usize,
+    submerged_outlet_columns: usize,
     planned_stream_columns: usize,
     stream_headwater_columns: usize,
     river_bank_influence_columns: usize,
@@ -1335,6 +1345,8 @@ impl RegionFacts {
         let mut max_river_half_width = f64::NEG_INFINITY;
         let mut min_river_grade = f64::INFINITY;
         let mut max_river_grade = f64::NEG_INFINITY;
+        let mut min_submerged_outlet_influence = f64::INFINITY;
+        let mut max_submerged_outlet_influence = f64::NEG_INFINITY;
         let mut min_river_water_y = i32::MAX;
         let mut max_river_water_y = i32::MIN;
         let mut min_wetland_influence = f64::INFINITY;
@@ -1381,6 +1393,7 @@ impl RegionFacts {
         let mut alpine_snow_columns = 0;
         let mut river_channel_columns = 0;
         let mut major_river_channel_columns = 0;
+        let mut submerged_outlet_columns = 0;
         let mut planned_stream_columns = 0;
         let mut stream_headwater_columns = 0;
         let mut river_bank_influence_columns = 0;
@@ -1453,6 +1466,10 @@ impl RegionFacts {
             max_river_half_width = max_river_half_width.max(sample.watercourse.half_width);
             min_river_grade = min_river_grade.min(sample.watercourse.grade);
             max_river_grade = max_river_grade.max(sample.watercourse.grade);
+            min_submerged_outlet_influence =
+                min_submerged_outlet_influence.min(sample.watercourse.submerged_outlet_influence);
+            max_submerged_outlet_influence =
+                max_submerged_outlet_influence.max(sample.watercourse.submerged_outlet_influence);
             min_wetland_influence = min_wetland_influence.min(sample.watercourse.wetland_influence);
             max_wetland_influence = max_wetland_influence.max(sample.watercourse.wetland_influence);
             min_wetland_pool_influence =
@@ -1475,6 +1492,9 @@ impl RegionFacts {
             }
             if sample.watercourse.is_major_channel() {
                 major_river_channel_columns += 1;
+            }
+            if sample.watercourse.submerged_outlet_influence > 0.0 {
+                submerged_outlet_columns += 1;
             }
             if sample.watercourse.is_planned_stream() {
                 planned_stream_columns += 1;
@@ -1610,6 +1630,13 @@ impl RegionFacts {
                     sample
                         .watercourse
                         .major_channel_influence
+                        .to_bits()
+                        .to_le_bytes(),
+                )
+                .chain(
+                    sample
+                        .watercourse
+                        .submerged_outlet_influence
                         .to_bits()
                         .to_le_bytes(),
                 )
@@ -1757,6 +1784,8 @@ impl RegionFacts {
             max_river_half_width,
             min_river_grade,
             max_river_grade,
+            min_submerged_outlet_influence,
+            max_submerged_outlet_influence,
             min_river_water_y,
             max_river_water_y,
             min_wetland_influence,
@@ -1811,6 +1840,7 @@ impl RegionFacts {
             alpine_snow_columns,
             river_channel_columns,
             major_river_channel_columns,
+            submerged_outlet_columns,
             planned_stream_columns,
             stream_headwater_columns,
             river_bank_influence_columns,

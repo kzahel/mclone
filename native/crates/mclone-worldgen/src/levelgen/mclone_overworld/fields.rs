@@ -3,7 +3,7 @@ use mclone_core::{AxisTopology, ChunkPos, HorizontalTopology};
 use crate::noise::{GradientNoise2d, SeedDomain, ValueNoise2d};
 
 pub const MCLONE_OVERWORLD_SEA_LEVEL: i32 = 63;
-pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-14";
+pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-15";
 pub const MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS: i32 = 2;
 pub const MCLONE_OVERWORLD_PERIOD_BLOCKS: i32 = 6_144;
 pub const MCLONE_OVERWORLD_PERIOD_CHUNKS: u32 = 384;
@@ -57,6 +57,11 @@ const MOISTURE_LARGE_SCALE: i32 = 1_024;
 const MOISTURE_DETAIL_SCALE: i32 = 256;
 const RIVER_GRADE_SAMPLE_DISTANCE: f64 = 16.0;
 const RIVER_MAX_RELEVANT_DISTANCE: f64 = 64.0;
+const RIVER_OUTLET_FADE_CONTINENTALNESS: f64 = 0.18;
+const RIVER_OUTLET_FAN_CONTINENTALNESS: f64 = 0.10;
+const RIVER_OUTLET_MAX_FAN: f64 = 0.45;
+const RIVER_OUTLET_MIN_DEPTH: i32 = 4;
+const INNER_SHELF_CONTINENTALNESS: f64 = 0.08;
 const STREAM_FALL_MAX_FLOW_LEVEL: f64 = 7.0;
 const MAX_REGION_SAMPLE_COUNT: usize = 16 * 1024 * 1024;
 const SPAWN_SEARCH_RADIUS_CHUNKS: i32 = 128;
@@ -185,6 +190,7 @@ pub struct McloneOverworldWatercourseSample {
     pub distance: f64,
     pub channel_influence: f64,
     pub major_channel_influence: f64,
+    pub submerged_outlet_influence: f64,
     pub planned_stream_influence: f64,
     pub stream_headwater_influence: f64,
     pub bank_influence: f64,
@@ -618,8 +624,33 @@ impl McloneOverworldSampler {
         geometry: RiverGeometry,
     ) -> (McloneOverworldWatercourseSample, i32) {
         let depth = (2.0 + geometry.half_width * 0.24).round() as i32;
-        if continentalness <= 0.0 || geometry.distance > RIVER_MAX_RELEVANT_DISTANCE {
+        if geometry.distance > RIVER_MAX_RELEVANT_DISTANCE {
             return inactive_watercourse(geometry, depth, base_surface_y);
+        }
+
+        if continentalness <= 0.0 {
+            let ocean_depth_signal = -continentalness;
+            let outlet_fade = 1.0
+                - smoothstep(
+                    (ocean_depth_signal / RIVER_OUTLET_FADE_CONTINENTALNESS).clamp(0.0, 1.0),
+                );
+            let fan = 1.0
+                + smoothstep(
+                    (ocean_depth_signal / RIVER_OUTLET_FAN_CONTINENTALNESS).clamp(0.0, 1.0),
+                ) * outlet_fade
+                    * RIVER_OUTLET_MAX_FAN;
+            let outlet_half_width = geometry.half_width * fan;
+            let submerged_outlet_influence =
+                compact_influence(geometry.distance, outlet_half_width - 0.5, 3.0) * outlet_fade;
+            let outlet_depth = depth.max(RIVER_OUTLET_MIN_DEPTH);
+            let channel_depth =
+                2.0 + submerged_outlet_influence * f64::from(outlet_depth.saturating_sub(2));
+            let surface_y = base_surface_y
+                .min(MCLONE_OVERWORLD_SEA_LEVEL - channel_depth.round().max(2.0) as i32);
+            let (mut watercourse, _) = inactive_watercourse(geometry, outlet_depth, base_surface_y);
+            watercourse.submerged_outlet_influence = submerged_outlet_influence;
+            watercourse.half_width = outlet_half_width;
+            return (watercourse, surface_y);
         }
 
         // Major rivers deliberately share the global sea-level source plane.
@@ -690,6 +721,7 @@ impl McloneOverworldSampler {
                 distance: geometry.distance,
                 channel_influence: major_channel_influence,
                 major_channel_influence,
+                submerged_outlet_influence: 0.0,
                 planned_stream_influence: 0.0,
                 stream_headwater_influence: 0.0,
                 bank_influence: major_bank_influence,
@@ -837,12 +869,15 @@ fn bathymetry_sample(
     }
     let ocean_depth_signal = -continentalness;
     let ocean_interior = smoothstep((ocean_depth_signal / 0.55).clamp(0.0, 1.0));
-    let shelf_progress = smoothstep((ocean_depth_signal / 0.24).clamp(0.0, 1.0));
+    let inner_shelf_progress =
+        smoothstep((ocean_depth_signal / INNER_SHELF_CONTINENTALNESS).clamp(0.0, 1.0));
+    let outer_shelf_progress = smoothstep((ocean_depth_signal / 0.24).clamp(0.0, 1.0));
     let basin_influence = smoothstep(((ocean_depth_signal - 0.18) / 0.32).clamp(0.0, 1.0));
     let shelf_influence = 1.0 - basin_influence;
     let shelf_break_influence = 4.0 * basin_influence * shelf_influence;
     let depth = 2.0
-        + shelf_progress * 10.0
+        + inner_shelf_progress * 4.0
+        + outer_shelf_progress * 6.0
         + basin_influence * (18.0 + basin_selector.clamp(0.0, 1.0) * 10.0)
         + seabed_relief.clamp(-1.0, 1.0) * (1.5 + basin_influence * 7.0);
     McloneOverworldBathymetrySample {
@@ -938,6 +973,7 @@ fn inactive_watercourse(
             distance: geometry.distance,
             channel_influence: 0.0,
             major_channel_influence: 0.0,
+            submerged_outlet_influence: 0.0,
             planned_stream_influence: 0.0,
             stream_headwater_influence: 0.0,
             bank_influence: 0.0,
@@ -996,6 +1032,12 @@ mod tests {
         );
         assert!(
             (left.watercourse.major_channel_influence - right.watercourse.major_channel_influence)
+                .abs()
+                < 1.0e-9
+        );
+        assert!(
+            (left.watercourse.submerged_outlet_influence
+                - right.watercourse.submerged_outlet_influence)
                 .abs()
                 < 1.0e-9
         );
@@ -1239,17 +1281,51 @@ mod tests {
     #[test]
     fn ocean_bathymetry_progresses_from_shelf_to_deep_basin() {
         let coast = bathymetry_sample(-0.01, 0.5, 0.0);
+        let inner_shelf = bathymetry_sample(-0.08, 0.5, 0.0);
         let shelf = bathymetry_sample(-0.18, 0.5, 0.0);
         let shelf_break = bathymetry_sample(-0.34, 0.5, 0.0);
         let basin = bathymetry_sample(-0.55, 0.5, 0.0);
 
         assert!(coast.water_depth <= 4);
+        assert!(inner_shelf.water_depth >= 7);
         assert!(shelf.water_depth >= 10);
         assert!(basin.water_depth >= 35);
         assert!(coast.shelf_influence > basin.shelf_influence);
         assert!(basin.basin_influence > shelf.basin_influence);
         assert!(shelf_break.shelf_break_influence > coast.shelf_break_influence);
         assert_eq!(McloneOverworldBathymetrySample::LAND.water_depth, 0);
+    }
+
+    #[test]
+    fn coastal_steppe_outlet_never_replaces_river_with_a_shallower_shelf() {
+        let sampler = McloneOverworldSampler::new(8_675_309);
+        let mut outlet_columns = 0;
+        let mut corrected_shallow_columns = 0;
+
+        for z in 300..=372 {
+            for x in 484..=556 {
+                let sample = sampler.sample(x, z);
+                if sample.continentalness > 0.0
+                    || sample.watercourse.submerged_outlet_influence < 0.75
+                {
+                    continue;
+                }
+                outlet_columns += 1;
+                assert!(!sample.watercourse.is_water());
+                assert_eq!(sample.watercourse.major_channel_influence, 0.0);
+                assert!(
+                    sample.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL - RIVER_OUTLET_MIN_DEPTH,
+                    "{x},{z}: {sample:?}"
+                );
+                if sample.bathymetry.water_depth < RIVER_OUTLET_MIN_DEPTH {
+                    corrected_shallow_columns += 1;
+                    assert!(sample.surface_y < sample.base_surface_y, "{x},{z}");
+                }
+            }
+        }
+
+        assert!(outlet_columns > 0);
+        assert!(corrected_shallow_columns > 0);
     }
 
     #[test]
@@ -1354,10 +1430,15 @@ mod tests {
                     assert!((0.0..=512.0).contains(&river.distance));
                     assert!((0.0..=1.0).contains(&river.channel_influence));
                     assert!((0.0..=1.0).contains(&river.major_channel_influence));
+                    assert!((0.0..=1.0).contains(&river.submerged_outlet_influence));
                     assert_eq!(river.planned_stream_influence, 0.0);
                     assert_eq!(river.stream_headwater_influence, 0.0);
                     assert!((0.0..=1.0).contains(&river.bank_influence));
-                    assert!((4.5..=8.5).contains(&river.half_width));
+                    if sample.continentalness <= 0.0 {
+                        assert!((4.5..=12.325).contains(&river.half_width));
+                    } else {
+                        assert!((4.5..=8.5).contains(&river.half_width));
+                    }
                     assert!(river.bed_y < river.water_surface_y);
                     assert!((0.0..=1.0).contains(&river.wetland_influence));
                     assert!((0.0..=1.0).contains(&river.wetland_pool_influence));

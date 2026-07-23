@@ -167,6 +167,7 @@ mod tests {
                     distance: 512.0,
                     channel_influence: 0.0,
                     major_channel_influence: 0.0,
+                    submerged_outlet_influence: 0.0,
                     planned_stream_influence: 0.0,
                     stream_headwater_influence: 0.0,
                     bank_influence: 0.0,
