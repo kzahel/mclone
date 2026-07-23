@@ -163,6 +163,11 @@ series implements the same concern, normally reuse the document slug in its
   web as a first-class no-install client and acquisition surface, Quest as a
   differentiation wedge, competitive landscape, positioning, launch
   sequencing, metrics, and unresolved store-policy decisions.
+- [`game-title-and-brand-identity.md`](game-title-and-brand-identity.md):
+  current public-title research and decision record — the repo-derived
+  living-landscape plus folded-world naming brief, `Wilderfold` recommendation,
+  retained fallbacks, dated preliminary availability evidence, near-name
+  concerns, and explicit clearance and adoption gates.
 - [`web-scene-host-adoption.md`](web-scene-host-adoption.md): completed browser
   adoption of the shared `McloneSceneHost`, including landed service and
   typed-async boundaries, preserved worker/compiler topology, production

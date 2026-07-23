@@ -157,3 +157,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `steam-deck-test-bed` — official Devkit Client deployment, native Linux
   staging and asset-root contracts, Gaming Mode playtesting, and reproducible
   physical handheld performance evidence
+- `game-title-and-brand-identity` — public-title research and decision record:
+  repo-derived naming brief, Wilderfold recommendation, retained fallbacks,
+  preliminary availability evidence, and clearance/adoption gates
