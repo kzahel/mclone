@@ -98,6 +98,18 @@ warmed RD16 cards pass; Human Review 2 is pending. The next recommended
 terrain campaign remains sustained three-dimensional geology work, comparing
 placed rocks, bounded formation structures, and selective regional density
 modifiers before caves.
+Interactive watercourse review then exposed a narrower correction before that
+campaign. At a seed-`8675309` coastal outlet, the three-to-four-block major
+river bed is clipped at the coastline and replaced by bathymetry's initial
+two-block shelf. Lighting makes the raised underwater sill appear as a water
+color boundary. The same review found major rivers and planned streams too
+smoothly and symmetrically carved, with insufficient width/depth variation,
+pools, riffles, substrate patches, and rocks; the binary grass-to-exposed-stone
+surface rule also draws stark contour lines across valley walls. Tactical
+[`225`](../tactical/225-mclone-watercourse-morphology-and-coastal-outlets.md)
+owns the fixed-work outlet, morphology, mixed-surface, and sparse-local-feature
+correction while preserving flat source planes and the accepted peaceful
+stream family.
 
 ## Scope
 
@@ -300,6 +312,24 @@ relief may reach the configured 52-block maximum. Seed `-98765`'s reviewed
 period spans depth 2 through 40 with p10/p50/p90 depths 3/9/30. The surface
 remains source-flat at Y63 while the accepted RD16 deep-water card reaches a
 contoured floor at Y23.
+
+Interactive review subsequently found one missing composition invariant.
+Major-river carving returns as soon as continentalness becomes ocean, while
+the ocean starts at two blocks of depth. A typical three-to-four-block river
+therefore meets a shallower receiving shelf. This is physical floor geometry,
+not a biome-water tint or LOD boundary. Tactical 225 must continue a fading
+submerged thalweg beneath the inner shelf, select the deeper of outlet and
+ordinary bathymetry, and tighten the generic shelf progression after a narrow
+shallow margin. It must not trace the coast or turn the receiving ocean into
+an infinite river biome.
+
+The same review makes watercourse morphology a first-class local fact.
+Accepted routes remain the macro skeleton. Fixed-work meso-scale morphology
+varies width, bed depth, thalweg offset, pools/riffles, bend asymmetry, and
+left/right banks; micro-scale morphology varies edges, substrates, ledges,
+and sparse local rocks. Every surface remains a flat integer source plane,
+and the first dry containment ring remains clamped above it. Correlated
+variation replaces repeated cross-sections; per-block white noise is rejected.
 
 Field revision 10 is the first local stepped-reach realization. It projects
 each column onto the analytic centerline before sampling a hydraulic terrain
@@ -1014,8 +1044,14 @@ Human Review 1 accepted the modest headwater, calm reaches, carved shoulders,
 and confluence as a peaceful spring-fed creek. Tactical 222 is complete.
 Future variation should preserve that quiet scale as one landmark family
 while adding deliberately dramatic cascade, gorge, and waterfall families.
-One river-to-shelf-to-deep-basin composition remains an objective review gap.
-General drainage-network semantics remain deliberately absent.
+Tactical 225 now owns the objectively demonstrated river-to-shelf sill plus
+the associated smooth-channel, binary-surface, and sparse-local-feature
+correction. One completed review must show an outlet whose centerline floor
+does not rise into the receiving ocean, coherent width/depth and bend
+variation, mixed grass/dirt/gravel/stone transitions, and sparse rocks without
+fluid work or loss of the accepted peaceful stream. General drainage-network
+semantics remain deliberately absent. The sustained volumetric geology
+campaign follows this bounded hydrology correction.
 
 ## Related
 
