@@ -4556,6 +4556,14 @@ impl McloneSceneHost {
     fn commit_engine_camera_player_pose_if_due_timed(
         &mut self,
     ) -> Result<Option<(bool, EngineCameraCommitTiming)>> {
+        let report_rate_hz = self
+            .active_world
+            .runtime
+            .as_ref()
+            .and_then(|runtime| runtime.client().session_configuration())
+            .map(|configuration| configuration.body_pose_report_rate_hz)
+            .unwrap_or(pose_sync::DEFAULT_PLAYER_POSE_SYNC_RATE_HZ);
+        self.player_pose_sync.set_rate_hz(report_rate_hz);
         if !self.player_pose_sync.is_due(self.services.clock.now()) {
             return Ok(None);
         }

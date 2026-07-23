@@ -49,6 +49,9 @@ pub(crate) struct ServerPlayerEntry {
     pub(crate) life_epoch: u32,
     pub(crate) player_record_revision: u64,
     pub(crate) capabilities: SessionCapabilities,
+    pub(crate) presentation_epoch: u32,
+    pub(crate) remote_pose_sequence: u32,
+    pub(crate) remote_pose_sample_time_millis: u32,
 }
 
 impl Default for ServerPlayerEntry {
@@ -68,6 +71,9 @@ impl Default for ServerPlayerEntry {
             life_epoch: 0,
             player_record_revision: 0,
             capabilities: SessionCapabilities::NONE,
+            presentation_epoch: 1,
+            remote_pose_sequence: 0,
+            remote_pose_sample_time_millis: 0,
         }
     }
 }

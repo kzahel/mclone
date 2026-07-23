@@ -17,7 +17,7 @@ use mclone_mesh::{
     RenderSectionKey, TexturedRenderSectionBuildReport, TexturedRenderSectionMesh,
     TexturedRenderSectionMetadata,
 };
-use mclone_protocol::{ClientCommand, PlayerPositionUpdate};
+use mclone_protocol::{ClientCommand, ClientEphemeralMessage, PlayerPositionUpdate};
 use mclone_render::far_lod::FarTerrainLodFrameUpdate;
 use mclone_render_session::{RenderSectionCacheUpdate, RenderSectionCompileQueueHealth};
 use mclone_server::{SimulationCadenceConfig, WorldGenerationProfile};
@@ -136,6 +136,11 @@ pub trait SceneRuntimeService {
     fn send_gameplay_command_with_update_policy_timed(
         &mut self,
         command: ClientCommand,
+        policy: GameplayCommandUpdatePolicy,
+    ) -> Result<GameplayCommandSubmission>;
+    fn send_ephemeral_with_update_policy_timed(
+        &mut self,
+        message: ClientEphemeralMessage,
         policy: GameplayCommandUpdatePolicy,
     ) -> Result<GameplayCommandSubmission>;
     fn poll_with_update_budget(&mut self, budget: RuntimeUpdatePumpBudget) -> Result<bool>;
@@ -323,6 +328,15 @@ impl SceneSessionRuntime {
             command,
             GameplayCommandUpdatePolicy::DrainImmediately,
         )
+    }
+
+    pub fn send_ephemeral_with_update_policy_timed(
+        &mut self,
+        message: ClientEphemeralMessage,
+        policy: GameplayCommandUpdatePolicy,
+    ) -> Result<GameplayCommandSubmission> {
+        self.service
+            .send_ephemeral_with_update_policy_timed(message, policy)
     }
 
     pub fn drain_player_position_updates(&mut self) -> Vec<PlayerPositionUpdate> {

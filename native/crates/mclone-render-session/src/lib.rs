@@ -28,7 +28,8 @@ use mclone_mesh::{
     build_textured_render_sections_with_stats, quad_face_count_from_indices,
 };
 use mclone_protocol::{
-    ClientCommand, EntityKind, ItemKind, PlayerPositionUpdate, SectionBlockUpdate, ServerUpdate,
+    ClientCommand, ClientEphemeralMessage, EntityKind, ItemKind, PlayerPositionUpdate,
+    SectionBlockUpdate, ServerUpdate,
 };
 use mclone_render::chunk::{ChunkCamera, PerspectiveRenderPose};
 use mclone_render::entity::{ActorInstance, ActorInstanceId};

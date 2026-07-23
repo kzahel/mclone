@@ -286,6 +286,16 @@ fn remote_player_update(
         {
             Some(*update)
         }
+        ServerUpdate::EphemeralFallback(
+            mclone_protocol::ServerEphemeralMessage::RemoteBodyPose(sample),
+        ) if sample.id == RemotePlayerId(player_id.as_u64()) => Some(RemotePlayerUpdate {
+            id: sample.id,
+            appearance: PlayerAppearance::default(),
+            position: sample.pose.position,
+            y_rot_degrees: sample.pose.y_rot_degrees,
+            x_rot_degrees: sample.pose.x_rot_degrees,
+            on_ground: sample.pose.on_ground,
+        }),
         _ => None,
     })
 }

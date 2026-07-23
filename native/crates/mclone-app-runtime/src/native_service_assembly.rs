@@ -22,7 +22,7 @@ use mclone_mesh::{
     RenderSectionKey, TexturedRenderSectionBuildReport, TexturedRenderSectionMesh,
     TexturedRenderSectionMetadata,
 };
-use mclone_protocol::{ClientCommand, ServerUpdate, encode_server_update};
+use mclone_protocol::{ClientCommand, ClientEphemeralMessage, ServerUpdate, encode_server_update};
 use mclone_render::far_lod::FarTerrainLodFrameUpdate;
 use mclone_render_session::{RenderSectionCacheUpdate, RenderSectionCompileQueueHealth};
 use mclone_server::{
@@ -1533,6 +1533,45 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
         })
     }
 
+    pub fn send_ephemeral_with_update_policy_timed(
+        &mut self,
+        message: ClientEphemeralMessage,
+        policy: GameplayCommandUpdatePolicy,
+    ) -> Result<GameplayCommandSubmission> {
+        let total_start = Instant::now();
+        let send_start = Instant::now();
+        self.connection
+            .send_ephemeral(message)
+            .context("failed to send local integrated ephemeral message")?;
+        let send_ms = elapsed_ms(send_start.elapsed());
+        let (drain_updates_ms, apply_report) = match policy {
+            GameplayCommandUpdatePolicy::DrainImmediately => {
+                let pump_report = pump_client_connection_updates_report(
+                    &mut self.core,
+                    &mut self.connection,
+                    RuntimeUpdatePumpBudget::unlimited(),
+                )
+                .context("failed to drain local integrated server updates")?;
+                (pump_report.drain_updates_ms, pump_report.apply_report)
+            }
+            GameplayCommandUpdatePolicy::SendOnly => (0.0, RuntimeUpdateApplyReport::default()),
+        };
+        Ok(GameplayCommandSubmission {
+            timing: GameplayCommandTiming {
+                total_ms: elapsed_ms(total_start.elapsed()),
+                send_ms,
+                drain_updates_ms,
+                apply_updates_ms: apply_report.total_ms,
+                apply_dirty_mark_ms: apply_report.dirty_mark_ms,
+                apply_client_updates_ms: apply_report.client_apply_updates_ms,
+                updates: apply_report.updates,
+                snapshot_updates: apply_report.snapshot_updates,
+                section_block_updates: apply_report.section_block_updates,
+                unload_updates: apply_report.unload_updates,
+            },
+        })
+    }
+
     pub fn poll(&mut self) -> Result<bool> {
         self.poll_with_update_budget(RuntimeUpdatePumpBudget::default())
     }
@@ -2271,6 +2310,19 @@ where
             }
             Self::RemoteDedicated(scene) => {
                 scene.send_gameplay_command_with_update_policy_timed(command, policy)
+            }
+        }
+    }
+
+    pub fn send_ephemeral_with_update_policy_timed(
+        &mut self,
+        message: ClientEphemeralMessage,
+        policy: GameplayCommandUpdatePolicy,
+    ) -> Result<GameplayCommandSubmission> {
+        match self {
+            Self::Local(scene) => scene.send_ephemeral_with_update_policy_timed(message, policy),
+            Self::RemoteDedicated(scene) => {
+                scene.send_ephemeral_with_update_policy_timed(message, policy)
             }
         }
     }
@@ -3131,6 +3183,59 @@ where
         })
     }
 
+    pub fn send_ephemeral_with_update_policy_timed(
+        &mut self,
+        message: ClientEphemeralMessage,
+        policy: GameplayCommandUpdatePolicy,
+    ) -> Result<GameplayCommandSubmission> {
+        let total_start = Instant::now();
+        let mut drain_updates_ms = 0.0;
+        let mut apply_report = RuntimeUpdateApplyReport::default();
+        if matches!(policy, GameplayCommandUpdatePolicy::DrainImmediately)
+            && self.connection.pending_update_metrics()?.update_depth() > 0
+        {
+            let pump_report = pump_client_connection_updates_report(
+                &mut self.core,
+                &mut self.connection,
+                RuntimeUpdatePumpBudget::unlimited(),
+            )?;
+            drain_updates_ms += pump_report.drain_updates_ms;
+            apply_report.accumulate(pump_report.apply_report);
+        }
+
+        let send_start = Instant::now();
+        self.connection
+            .send_ephemeral(message)
+            .context("failed to enqueue remote dedicated ephemeral message")?;
+        let send_ms = elapsed_ms(send_start.elapsed());
+        self.core.apply_exchange(deferred_command_exchange());
+
+        if matches!(policy, GameplayCommandUpdatePolicy::DrainImmediately) {
+            let pump_report = pump_client_connection_updates_report(
+                &mut self.core,
+                &mut self.connection,
+                RuntimeUpdatePumpBudget::unlimited(),
+            )?;
+            drain_updates_ms += pump_report.drain_updates_ms;
+            apply_report.accumulate(pump_report.apply_report);
+        }
+
+        Ok(GameplayCommandSubmission {
+            timing: GameplayCommandTiming {
+                total_ms: elapsed_ms(total_start.elapsed()),
+                send_ms,
+                drain_updates_ms,
+                apply_updates_ms: apply_report.total_ms,
+                apply_dirty_mark_ms: apply_report.dirty_mark_ms,
+                apply_client_updates_ms: apply_report.client_apply_updates_ms,
+                updates: apply_report.updates,
+                snapshot_updates: apply_report.snapshot_updates,
+                section_block_updates: apply_report.section_block_updates,
+                unload_updates: apply_report.unload_updates,
+            },
+        })
+    }
+
     /// Reconnect and request the current view from a clean replica/queue state.
     ///
     /// Connection establishment may block and therefore belongs to the session
@@ -3594,6 +3699,14 @@ where
         policy: GameplayCommandUpdatePolicy,
     ) -> Result<GameplayCommandSubmission> {
         NativeSceneServices::send_gameplay_command_with_update_policy_timed(self, command, policy)
+    }
+
+    fn send_ephemeral_with_update_policy_timed(
+        &mut self,
+        message: ClientEphemeralMessage,
+        policy: GameplayCommandUpdatePolicy,
+    ) -> Result<GameplayCommandSubmission> {
+        NativeSceneServices::send_ephemeral_with_update_policy_timed(self, message, policy)
     }
 
     fn poll_with_update_budget(&mut self, budget: RuntimeUpdatePumpBudget) -> Result<bool> {

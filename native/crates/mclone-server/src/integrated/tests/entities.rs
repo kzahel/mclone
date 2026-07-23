@@ -148,6 +148,9 @@ fn shared_auxiliary_player_script_uses_authoritative_commands() {
             {
                 Some(update.position)
             }
+            ServerUpdate::EphemeralFallback(
+                mclone_protocol::ServerEphemeralMessage::RemoteBodyPose(sample),
+            ) if sample.id == RemotePlayerId(player_id.as_u64()) => Some(sample.pose.position),
             _ => None,
         }));
         if add.is_some() && positions.windows(2).any(|pair| pair.first() != pair.get(1)) {

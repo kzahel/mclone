@@ -67,6 +67,7 @@ impl EngineServerUpdateReport {
                 | ServerUpdate::RemotePlayerAdd(_)
                 | ServerUpdate::RemotePlayerUpdate(_)
                 | ServerUpdate::RemotePlayerRemove { .. }
+                | ServerUpdate::EphemeralFallback(_)
                 | ServerUpdate::EntitySnapshot(_)
                 | ServerUpdate::EntityUpdate(_)
                 | ServerUpdate::EntityRemove { .. } => {}
@@ -148,6 +149,7 @@ impl EngineServerUpdateDirtyBatch {
                 ServerUpdate::RemotePlayerAdd(_)
                 | ServerUpdate::RemotePlayerUpdate(_)
                 | ServerUpdate::RemotePlayerRemove { .. }
+                | ServerUpdate::EphemeralFallback(_)
                 | ServerUpdate::EntitySnapshot(_)
                 | ServerUpdate::EntityUpdate(_)
                 | ServerUpdate::EntityRemove { .. } => {}

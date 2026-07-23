@@ -5,16 +5,15 @@ Topic: `remote-player-presentation`
 Status: Tactical
 [`224`](../tactical/224-carrier-neutral-ephemeral-pose-and-native-udp.md)
 active as of 2026-07-23. The current product
-relays a client-authoritative feet position, one yaw/pitch pair, ground state,
-and appearance over the reliable ordered session stream. Remote clients retain
-the newest state and apply render-delta-based exponential smoothing. Separate
-body, head, and hand poses; explicit pose and replication cadences; buffered
-snapshot interpolation; and a sequenced unreliable pose channel are planned
-improvements, not yet implemented. Mixed reliable/unreliable transport is an
-accepted first-party client and dedicated-server target. The first carrier is
-dependency-free raw UDP beside existing native TCP; TCP/WebSocket remains the
-reliable compatibility profile, and WebTransport/WebRTC remain later adapters
-for their supported browser and peer-hosted topologies.
+has a carrier-neutral, complete, sequenced body-pose sample and a distinct
+ephemeral send boundary. Integrated, TCP, and WebSocket compatibility paths
+currently carry that message through a bounded reliable fallback; remote
+clients reject stale epoch/sequence samples and retain the newest state.
+Buffered snapshot interpolation and the native UDP carrier remain active
+Tactical 224 slices. Separate body, head, and hand poses remain later
+representation work. The first datagram carrier is dependency-free raw UDP
+beside existing native TCP, and WebTransport/WebRTC remain later adapters for
+their supported browser and peer-hosted topologies.
 
 Scope: the quality, timing, representation, relay, and presentation of other
 players after local movement has produced a reportable state. This includes
@@ -57,17 +56,31 @@ player locations.
 ### Local reporting
 
 - Local movement is simulated from fixed 60 Hz semantic commands.
-- `mclone-scene` checks one shared player-pose publication deadline at no more
-  than 20 Hz on Mono and XR paths.
-- The selector emits `PosRot`, `Pos`, `Rot`, or `StatusOnly` only when the
-  corresponding facts changed. A position reminder is forced every 20
-  publication attempts, currently about once per second.
+- `mclone-scene` checks one shared negotiated player-pose publication
+  deadline on Mono and XR paths: 20 Hz for reliable compatibility and 60 Hz
+  for a mixed-reliability profile.
+- The selector emits a complete body pose when position, rotation, or grounded
+  state changes. An unchanged body emits a one-second heartbeat measured on
+  the shared monotonic timeline, independent of frame or attempt rate.
 - Attack/use and other ordering-sensitive paths can force the current pose
   before the gameplay command.
 - The shared scene owns this policy; desktop, browser, Android, and XR
   adapters do not select movement packets.
 
 ### Wire and server relay
+
+- Protocol v33 defines strict client body-pose and observer remote-body-pose
+  codecs with nonzero epochs/sequences, finite values, bounded payloads, and
+  wrap-aware sequence comparison.
+- `ClientConnection` exposes a typed ephemeral send method. Its default maps
+  to an explicit reliable-fallback command, so integrated, native TCP, and
+  browser WebSocket sessions exercise the same decoded pose semantics without
+  adding protocol awareness to JavaScript or TypeScript.
+- The server accepts the permissively client-authored sample, applies normal
+  movement validation, and routes a sequenced remote sample to observers.
+- The receiving replica ignores unknown-player, stale-epoch, duplicate, and
+  older-sequence samples. It still presents only the latest target through the
+  existing smoothing path until Tactical 224 Slice 2 adds a bounded timeline.
 
 `RemotePlayerUpdate` currently contains:
 

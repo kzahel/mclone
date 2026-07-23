@@ -160,7 +160,7 @@ intended production shape, but broader session and world durability work
 remain:
 
 - **Protocol**: hand-rolled, validated, little-endian binary codec, current
-  strict `PROTOCOL_VERSION = 32` equality check. The transport handshake
+  strict `PROTOCOL_VERSION = 33` equality check. The transport handshake
   carries
   the local profile UUID/display name plus supported capabilities, and
   `PlayerExperience`, `PlayerStatistics`, and `PlayerLife` are owner-only

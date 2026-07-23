@@ -185,11 +185,10 @@ fn player_transfers_a_to_b_to_a_with_one_realm_record_and_replica_reset() {
         )
         .unwrap();
     let peer_updates = server.try_drain_updates_for_player(overworld_peer).unwrap();
-    assert!(peer_updates.iter().any(|update| matches!(
-        update,
-        ServerUpdate::RemotePlayerAdd(remote) | ServerUpdate::RemotePlayerUpdate(remote)
-            if remote.id == RemotePlayerId(traveler.as_u64())
-    )));
+    assert!(
+        remote_player_add(&peer_updates, traveler).is_some()
+            || remote_player_update(&peer_updates, traveler).is_some()
+    );
     server.try_drain_updates_for_player(moon_peer).unwrap();
 
     assert!(

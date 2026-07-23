@@ -8,7 +8,10 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mclone_core::{BlockPos, ChunkPos, Vec3d};
-use mclone_protocol::{PlayerAppearance, RemotePlayerId, RemotePlayerUpdate, ServerUpdate};
+use mclone_protocol::{
+    PlayerAppearance, PlayerBodyPoseSample, RemotePlayerBodyPoseSample, RemotePlayerId,
+    RemotePlayerUpdate, ServerEphemeralMessage, ServerUpdate,
+};
 
 use crate::{player_chunk_tracking::DimensionInterestSource, players::ServerPlayerId};
 
@@ -21,6 +24,9 @@ pub(crate) struct RemotePlayerState {
     pub(crate) x_rot_degrees: f32,
     pub(crate) on_ground: bool,
     pub(crate) publishable: bool,
+    pub(crate) presentation_epoch: u32,
+    pub(crate) pose_sequence: u32,
+    pub(crate) sample_time_millis: u32,
 }
 
 impl RemotePlayerState {
@@ -38,6 +44,21 @@ impl RemotePlayerState {
             on_ground: self.on_ground,
         }
     }
+
+    fn protocol_pose(self) -> ServerEphemeralMessage {
+        ServerEphemeralMessage::RemoteBodyPose(RemotePlayerBodyPoseSample {
+            id: remote_player_id(self.player_id),
+            pose: PlayerBodyPoseSample::new(
+                self.presentation_epoch,
+                self.pose_sequence,
+                self.sample_time_millis,
+                self.position,
+                self.y_rot_degrees,
+                self.x_rot_degrees,
+                self.on_ground,
+            ),
+        })
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -49,6 +70,7 @@ pub(crate) struct RoutedRemotePlayerUpdate {
 #[derive(Debug, Default)]
 pub(crate) struct RemotePlayerTracking {
     seen_by_subject: BTreeMap<ServerPlayerId, BTreeSet<DimensionInterestSource>>,
+    last_state_by_subject: BTreeMap<ServerPlayerId, RemotePlayerState>,
 }
 
 impl RemotePlayerTracking {
@@ -68,6 +90,7 @@ impl RemotePlayerTracking {
                 }
             }
         }
+        self.last_state_by_subject.remove(&player_id);
         for observers in self.seen_by_subject.values_mut() {
             observers.remove(&DimensionInterestSource::Player(player_id));
         }
@@ -88,7 +111,16 @@ impl RemotePlayerTracking {
     ) -> Vec<RoutedRemotePlayerUpdate> {
         let mut routes = Vec::new();
         for subject in subjects {
-            self.reconcile_pair(observer, *subject, &mut tracks_chunk, false, &mut routes);
+            self.reconcile_pair(
+                observer,
+                *subject,
+                &mut tracks_chunk,
+                false,
+                false,
+                &mut routes,
+            );
+            self.last_state_by_subject
+                .insert(subject.player_id, *subject);
         }
         routes
     }
@@ -102,15 +134,22 @@ impl RemotePlayerTracking {
     ) -> Vec<RoutedRemotePlayerUpdate> {
         let mut routes = Vec::new();
         self.add_player(subject.player_id);
+        let appearance_changed = self
+            .last_state_by_subject
+            .get(&subject.player_id)
+            .is_some_and(|previous| previous.appearance != subject.appearance);
         for observer in observers {
             self.reconcile_pair(
                 observer,
                 subject,
                 &mut tracks_chunk,
                 emit_existing_updates,
+                appearance_changed,
                 &mut routes,
             );
         }
+        self.last_state_by_subject
+            .insert(subject.player_id, subject);
         routes
     }
 
@@ -120,6 +159,7 @@ impl RemotePlayerTracking {
         subject: RemotePlayerState,
         tracks_chunk: &mut impl FnMut(DimensionInterestSource, ChunkPos) -> bool,
         emit_existing_update: bool,
+        reliable_existing_update: bool,
         routes: &mut Vec<RoutedRemotePlayerUpdate>,
     ) {
         if observer == DimensionInterestSource::Player(subject.player_id) {
@@ -136,7 +176,11 @@ impl RemotePlayerTracking {
             } else if emit_existing_update {
                 routes.push(RoutedRemotePlayerUpdate {
                     recipient: observer,
-                    update: ServerUpdate::RemotePlayerUpdate(subject.protocol_update()),
+                    update: if reliable_existing_update {
+                        ServerUpdate::RemotePlayerUpdate(subject.protocol_update())
+                    } else {
+                        ServerUpdate::EphemeralFallback(subject.protocol_pose())
+                    },
                 });
             }
         } else if observers.remove(&observer) {
@@ -178,6 +222,9 @@ mod tests {
             x_rot_degrees: 10.0,
             on_ground: true,
             publishable: true,
+            presentation_epoch: 1,
+            pose_sequence: 1,
+            sample_time_millis: 50,
         }
     }
 
@@ -228,7 +275,7 @@ mod tests {
             routes,
             vec![RoutedRemotePlayerUpdate {
                 recipient: observer,
-                update: ServerUpdate::RemotePlayerUpdate(moved.protocol_update()),
+                update: ServerUpdate::EphemeralFallback(moved.protocol_pose()),
             }]
         );
     }

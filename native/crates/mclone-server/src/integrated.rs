@@ -17,12 +17,13 @@ use mclone_core::{
 #[cfg(feature = "physics-engine")]
 use mclone_protocol::EntityRotation;
 use mclone_protocol::{
-    AcceptTeleportCommand, ChunkView, ClientCommand, ClientIdentity, DebugActorKind,
-    DebugHotbarItem, DimensionKey, EntityKind, InteractionHand, MovePlayerCommand,
+    AcceptTeleportCommand, ChunkView, ClientCommand, ClientEphemeralMessage, ClientIdentity,
+    DebugActorKind, DebugHotbarItem, DimensionKey, EntityKind, InteractionHand, MovePlayerCommand,
     PlayerActionCommand, PlayerActionKind, PlayerAppearance, PlayerDamageCause, PlayerLifeState,
     PlayerModelKind, PlayerProfileId, PlayerStatistics, RealmId, SequencedMovePlayerCommand,
     ServerUpdate, SessionCapabilities, SessionConfiguration, SetCarriedItemCommand,
     SetDebugHotbarSlotCommand, SetPlayerAppearanceCommand, StatisticKey, UseItemOnCommand,
+    sequence_is_newer, validate_body_pose_sample,
 };
 use mclone_worldgen::biome::OverworldBiomeSource;
 use mclone_worldgen::block::{AIR, RawBlockId, block_name, generated_block_state_id};
@@ -1906,6 +1907,9 @@ impl RealmServer {
             ClientCommand::MovePlayer(command) => {
                 self.handle_move_player_for_target(target, command)
             }
+            ClientCommand::EphemeralFallback(message) => {
+                self.handle_ephemeral_message_for_target(target, message)
+            }
             ClientCommand::AcceptTeleport(command) => {
                 self.handle_accept_teleport_for_target(target, command.id)
             }
@@ -2711,9 +2715,76 @@ impl RealmServer {
     fn handle_move_player_for_target(
         &mut self,
         target: CommandTarget,
+        command: SequencedMovePlayerCommand,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        self.handle_move_player_for_target_with_pose_metadata(target, command, None)
+    }
+
+    fn handle_ephemeral_message_for_target(
+        &mut self,
+        target: CommandTarget,
+        message: ClientEphemeralMessage,
+    ) -> ChunkStoreResult<Vec<ServerUpdate>> {
+        if !self
+            .players
+            .get(target.player_id())
+            .ok_or_else(|| unknown_player_error(target.player_id()))?
+            .capabilities
+            .contains(SessionCapabilities::EPHEMERAL_BODY_POSE)
+        {
+            return Err(ChunkStoreError::InvalidData(
+                "player sent an ephemeral body pose without the negotiated capability".to_owned(),
+            ));
+        }
+        match message {
+            ClientEphemeralMessage::BodyPose(sample) => {
+                validate_body_pose_sample(sample).map_err(|error| {
+                    ChunkStoreError::InvalidData(format!("invalid ephemeral body pose: {error}"))
+                })?;
+                let player = self
+                    .players
+                    .get(target.player_id())
+                    .ok_or_else(|| unknown_player_error(target.player_id()))?;
+                if sample.presentation_epoch != player.presentation_epoch
+                    && !sequence_is_newer(sample.presentation_epoch, player.presentation_epoch)
+                {
+                    return Ok(Vec::new());
+                }
+                if sample.presentation_epoch == player.presentation_epoch
+                    && player.remote_pose_sequence != 0
+                    && !sequence_is_newer(sample.sequence, player.remote_pose_sequence)
+                {
+                    return Ok(Vec::new());
+                }
+                self.handle_move_player_for_target_with_pose_metadata(
+                    target,
+                    SequencedMovePlayerCommand::new(
+                        sample.sequence,
+                        MovePlayerCommand::PosRot {
+                            position: sample.position,
+                            y_rot_degrees: sample.y_rot_degrees,
+                            x_rot_degrees: sample.x_rot_degrees,
+                            on_ground: sample.on_ground,
+                        },
+                    ),
+                    Some((
+                        sample.presentation_epoch,
+                        sample.sequence,
+                        sample.sample_time_millis,
+                    )),
+                )
+            }
+        }
+    }
+
+    fn handle_move_player_for_target_with_pose_metadata(
+        &mut self,
+        target: CommandTarget,
         mut command: SequencedMovePlayerCommand,
+        pose_metadata: Option<(u32, u32, u32)>,
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         let simulation_tick = self.simulation_tick;
+        let command_sequence = command.sequence;
         let topology = self.active_dimension.definition.topology;
         if command.movement.has_position() && !topology.is_unbounded() {
             let current = self.player_for_target(target)?.position();
@@ -2752,6 +2823,23 @@ impl RealmServer {
             updates.push(self.increment_player_statistic(target, StatisticKey::jump())?);
         }
         if result == MovePlayerApplyResult::Accepted {
+            let player = self
+                .players
+                .get_mut(target.player_id())
+                .ok_or_else(|| unknown_player_error(target.player_id()))?;
+            if let Some((epoch, sequence, sample_time_millis)) = pose_metadata {
+                player.presentation_epoch = epoch;
+                player.remote_pose_sequence = sequence;
+                player.remote_pose_sample_time_millis = sample_time_millis;
+            } else {
+                player.remote_pose_sequence = if command_sequence == 0 {
+                    next_nonzero_sequence(player.remote_pose_sequence)
+                } else {
+                    command_sequence
+                };
+                player.remote_pose_sample_time_millis =
+                    self.simulation_tick.wrapping_mul(50) as u32;
+            }
             updates.extend(self.kill_player_if_touching_lava(target)?);
             self.reconcile_remote_player_subject(target.player_id(), true);
         }
@@ -3575,6 +3663,9 @@ impl RealmServer {
             x_rot_degrees: player.state.x_rot_degrees(),
             on_ground: player.state.on_ground(),
             publishable: player.state.has_accepted_position() && !player.vitals.is_dead(),
+            presentation_epoch: player.presentation_epoch,
+            pose_sequence: player.remote_pose_sequence.max(1),
+            sample_time_millis: player.remote_pose_sample_time_millis,
         })
     }
 
@@ -5091,6 +5182,11 @@ fn command_is_allowed_during_dead_lifecycle(command: &ClientCommand) -> bool {
             | ClientCommand::Respawn
             | ClientCommand::Disconnect(_)
     )
+}
+
+fn next_nonzero_sequence(current: u32) -> u32 {
+    let next = current.wrapping_add(1);
+    if next == 0 { 1 } else { next }
 }
 
 fn player_life_state(player: &crate::players::ServerPlayerEntry) -> PlayerLifeState {

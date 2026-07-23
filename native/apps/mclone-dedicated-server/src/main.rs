@@ -1421,12 +1421,15 @@ mod tests {
             .unwrap();
         advance_dedicated_host_frame(&mut server, &mut sessions, &mut cadence).unwrap();
         let observer_updates = server.try_drain_updates_for_player(player_b).unwrap();
-        assert!(observer_updates.iter().any(|update| matches!(
-            update,
-            ServerUpdate::RemotePlayerUpdate(remote)
-                if remote.id == RemotePlayerId(player_a.as_u64())
-                    && remote.position == moved
-        )));
+        assert!(observer_updates.iter().any(|update| match update {
+            ServerUpdate::RemotePlayerUpdate(remote) => {
+                remote.id == RemotePlayerId(player_a.as_u64()) && remote.position == moved
+            }
+            ServerUpdate::EphemeralFallback(
+                mclone_protocol::ServerEphemeralMessage::RemoteBodyPose(sample),
+            ) => sample.id == RemotePlayerId(player_a.as_u64()) && sample.pose.position == moved,
+            _ => false,
+        }));
     }
 
     #[test]

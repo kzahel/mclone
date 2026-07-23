@@ -325,5 +325,26 @@ evidence if interpolation changes become drawable during closeout.
 
 ## Execution Record
 
-Active. Append each landed slice, commit, validation result, measured default,
-and explicit remaining hardware/human check here.
+### 2026-07-23: Slice 1 logical lane and reliable fallback
+
+- Added strict, bounded client body-pose and observer remote-body-pose codecs
+  with presentation epoch, wrapping sequence, monotonic sample time, complete
+  pose, ground state, and discontinuity.
+- Protocol v33 negotiates the body-pose capability, report and replication
+  rates, and effective ephemeral transport independently of gameplay and
+  publication rates.
+- Added a typed ephemeral method at the decoded client-connection and scene
+  runtime boundaries. Its default is an explicit reliable wrapper, preserving
+  integrated, TCP, and WebSocket compatibility without browser-domain logic.
+- Shared camera reconciliation now publishes complete change-driven samples.
+  The shared scene selects the negotiated 20/60 Hz cap, late frames do not
+  catch up, and an unchanged pose uses a one-second monotonic heartbeat.
+- The server accepts and relays those samples through existing observer
+  interest. The client rejects stale epoch/sequence samples before updating
+  its current remote target.
+- No TypeScript or JavaScript source changed.
+
+Validated with the protocol, client, server, render-session, app-runtime, and
+scene test suites. Slice 2 snapshot timelines and loss conformance, Slice 3
+native UDP attachment, cross-platform builds, and physical motion review
+remain.

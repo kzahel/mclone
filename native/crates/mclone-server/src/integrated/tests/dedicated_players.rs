@@ -86,6 +86,7 @@ fn dedicated_join_orders_negotiated_configuration_before_world_state() {
                 max_render_distance: 11,
                 max_chunk_tracking_radius: 11,
                 capabilities: SessionCapabilities::NONE,
+                ..
             }),
             ServerUpdate::SessionReady,
             ServerUpdate::WorldInfo { .. },

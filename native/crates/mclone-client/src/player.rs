@@ -3,7 +3,8 @@ use std::collections::VecDeque;
 use mclone_blocks::{BlockFluidKind, block_fluid_height, block_fluid_kind};
 use mclone_core::{Aabb, BlockPos, ChunkPos, HorizontalTopology, Vec3d};
 use mclone_protocol::{
-    AcceptTeleportCommand, ClientCommand, MovePlayerCommand, PlayerPositionUpdate,
+    AcceptTeleportCommand, ClientCommand, MovePlayerCommand, PlayerBodyPoseSample,
+    PlayerPositionUpdate,
 };
 
 use crate::ClientRuntime;
@@ -64,6 +65,7 @@ pub const THRUSTER_MAX_SPEED: f64 = 30.0;
 const LOCAL_PLAYER_GROUND_ACCELERATION_NUMERATOR: f64 = 0.21600002;
 const LOCAL_PLAYER_POSITION_SYNC_DELTA_SQR: f64 = 9.0e-4;
 const LOCAL_PLAYER_POSITION_REMINDER_INTERVAL: u32 = 20;
+const LOCAL_PLAYER_POSE_HEARTBEAT_MILLIS: u32 = 1_000;
 const COLLISION_EPSILON: f64 = 1.0e-7;
 const LOCAL_PLAYER_AUTO_JUMP_HEIGHT: f64 = 1.0;
 const LOCAL_PLAYER_AUTO_JUMP_MIN_MOVEMENT_DOT: f64 = -0.15;
@@ -915,6 +917,7 @@ struct LocalPlayerMoveSync {
     last_on_ground: bool,
     position_reminder: u32,
     next_sequence: u32,
+    last_ephemeral_report_time_millis: Option<u32>,
 }
 
 impl LocalPlayerMoveSync {
@@ -979,11 +982,53 @@ impl LocalPlayerMoveSync {
     }
 
     fn sequence_command(&mut self, movement: MovePlayerCommand) -> ClientCommand {
+        ClientCommand::sequenced_move_player(self.next_sequence(), movement)
+    }
+
+    fn next_sequence(&mut self) -> u32 {
         self.next_sequence = self.next_sequence.wrapping_add(1);
         if self.next_sequence == 0 {
             self.next_sequence = 1;
         }
-        ClientCommand::sequenced_move_player(self.next_sequence, movement)
+        self.next_sequence
+    }
+
+    fn next_body_pose_sample(
+        &mut self,
+        topology: HorizontalTopology,
+        pose: LocalPlayerPose,
+        on_ground: bool,
+        sample_time_millis: u32,
+    ) -> Option<PlayerBodyPoseSample> {
+        let position = topology.canonicalize_position(pose.position)?;
+        let y_rot_degrees = pose.y_rot_degrees as f32;
+        let x_rot_degrees = pose.x_rot_degrees as f32;
+        let position_delta = pose.position.subtract(self.last_position);
+        let moved = position_delta.length_sqr() > LOCAL_PLAYER_POSITION_SYNC_DELTA_SQR;
+        let rotated =
+            y_rot_degrees != self.last_y_rot_degrees || x_rot_degrees != self.last_x_rot_degrees;
+        let ground_changed = self.last_on_ground != on_ground;
+        let heartbeat_due = self.last_ephemeral_report_time_millis.is_none_or(|last| {
+            sample_time_millis.wrapping_sub(last) >= LOCAL_PLAYER_POSE_HEARTBEAT_MILLIS
+        });
+
+        if !moved && !rotated && !ground_changed && !heartbeat_due {
+            return None;
+        }
+
+        self.record_position(pose.position);
+        self.record_rotation(y_rot_degrees, x_rot_degrees);
+        self.last_on_ground = on_ground;
+        self.last_ephemeral_report_time_millis = Some(sample_time_millis);
+        Some(PlayerBodyPoseSample::new(
+            1,
+            self.next_sequence(),
+            sample_time_millis,
+            position,
+            y_rot_degrees,
+            x_rot_degrees,
+            on_ground,
+        ))
     }
 
     fn record_position(&mut self, position: Vec3d) {
@@ -1087,6 +1132,19 @@ impl LocalPlayerController {
         let movement = self.move_sync.next_command(self.pose, self.on_ground)?;
         let movement = canonical_move_player_command(topology, movement)?;
         Some(self.move_sync.sequence_command(movement))
+    }
+
+    pub fn next_body_pose_sample_in(
+        &mut self,
+        topology: HorizontalTopology,
+        sample_time_millis: u32,
+    ) -> Option<PlayerBodyPoseSample> {
+        self.move_sync.next_body_pose_sample(
+            topology,
+            self.pose,
+            self.on_ground,
+            sample_time_millis,
+        )
     }
 
     pub fn pos_rot_move_player_command(&mut self) -> ClientCommand {
@@ -2760,6 +2818,53 @@ mod tests {
                 }
             ))
         );
+    }
+
+    #[test]
+    fn ephemeral_body_pose_heartbeat_uses_elapsed_time_not_attempt_count() {
+        let mut controller = LocalPlayerController::new();
+        let first = controller
+            .next_body_pose_sample_in(HorizontalTopology::UNBOUNDED, 10_000)
+            .expect("first sample establishes the body-pose baseline");
+        assert_eq!(first.sequence, 1);
+
+        for sample_time_millis in 10_001..11_000 {
+            assert_eq!(
+                controller
+                    .next_body_pose_sample_in(HorizontalTopology::UNBOUNDED, sample_time_millis),
+                None
+            );
+        }
+
+        let heartbeat = controller
+            .next_body_pose_sample_in(HorizontalTopology::UNBOUNDED, 11_000)
+            .expect("one wall-clock second publishes a heartbeat");
+        assert_eq!(heartbeat.sequence, 2);
+        assert_eq!(heartbeat.sample_time_millis, 11_000);
+    }
+
+    #[test]
+    fn ephemeral_body_pose_is_full_and_change_driven() {
+        let mut controller = LocalPlayerController::new();
+        let _ = controller.next_body_pose_sample_in(HorizontalTopology::UNBOUNDED, 0);
+        controller.set_pose(LocalPlayerPose {
+            position: Vec3d::new(4.0, 65.0, -2.0),
+            y_rot_degrees: 35.0,
+            x_rot_degrees: -12.0,
+            ..controller.pose()
+        });
+        controller.on_ground = true;
+
+        let sample = controller
+            .next_body_pose_sample_in(HorizontalTopology::UNBOUNDED, 16)
+            .expect("changed body pose");
+
+        assert_eq!(sample.position, Vec3d::new(4.0, 65.0, -2.0));
+        assert_eq!(sample.y_rot_degrees, 35.0);
+        assert_eq!(sample.x_rot_degrees, -12.0);
+        assert!(sample.on_ground);
+        assert_eq!(sample.presentation_epoch, 1);
+        assert_eq!(sample.sequence, 2);
     }
 
     #[test]

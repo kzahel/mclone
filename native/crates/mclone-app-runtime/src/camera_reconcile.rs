@@ -11,7 +11,7 @@
 
 use anyhow::{Context, Result};
 use mclone_core::{ChunkPos, HorizontalTopology};
-use mclone_protocol::{ClientCommand, PlayerPositionUpdate};
+use mclone_protocol::{ClientCommand, ClientEphemeralMessage, PlayerPositionUpdate};
 use mclone_render_session::EngineCameraController;
 
 use crate::monotonic::MonotonicClockHandle;
@@ -35,6 +35,17 @@ pub trait EngineCameraRuntime {
         command: ClientCommand,
         policy: GameplayCommandUpdatePolicy,
     ) -> Result<GameplayCommandSubmission>;
+
+    fn send_camera_ephemeral_with_policy_timed(
+        &mut self,
+        message: ClientEphemeralMessage,
+        policy: GameplayCommandUpdatePolicy,
+    ) -> Result<GameplayCommandSubmission> {
+        self.send_camera_command_with_policy_timed(
+            ClientCommand::EphemeralFallback(message),
+            policy,
+        )
+    }
 
     fn drain_camera_position_updates(&mut self) -> Vec<PlayerPositionUpdate>;
 
@@ -66,6 +77,14 @@ where
         self.send_gameplay_command_with_update_policy_timed(command, policy)
     }
 
+    fn send_camera_ephemeral_with_policy_timed(
+        &mut self,
+        message: ClientEphemeralMessage,
+        policy: GameplayCommandUpdatePolicy,
+    ) -> Result<GameplayCommandSubmission> {
+        self.send_ephemeral_with_update_policy_timed(message, policy)
+    }
+
     fn drain_camera_position_updates(&mut self) -> Vec<PlayerPositionUpdate> {
         self.drain_player_position_updates()
     }
@@ -94,6 +113,14 @@ impl EngineCameraRuntime for crate::scene_session_runtime::SceneSessionRuntime {
         policy: GameplayCommandUpdatePolicy,
     ) -> Result<GameplayCommandSubmission> {
         self.send_gameplay_command_with_update_policy_timed(command, policy)
+    }
+
+    fn send_camera_ephemeral_with_policy_timed(
+        &mut self,
+        message: ClientEphemeralMessage,
+        policy: GameplayCommandUpdatePolicy,
+    ) -> Result<GameplayCommandSubmission> {
+        self.send_ephemeral_with_update_policy_timed(message, policy)
     }
 
     fn drain_camera_position_updates(&mut self) -> Vec<PlayerPositionUpdate> {
@@ -220,10 +247,18 @@ where
         .is_some()
         .then(|| clock.expect("timed reconcile needs clock").now());
     let topology = runtime.camera_topology();
-    let submitted = if let Some(report) = camera.next_pose_sync_command_in(topology) {
-        let submission = runtime
-            .send_camera_command_with_policy_timed(report.command, context.pose_sync_policy)
-            .with_context(|| format!("failed to sync {} player pose to server", context.lane))?;
+    let sample_time_millis = clock
+        .map(|clock| (clock.now().as_nanos() / 1_000_000) as u32)
+        .unwrap_or(0);
+    let submitted = if let Some(report) =
+        camera.next_pose_sync_command_in_at(topology, sample_time_millis)
+    {
+        let submission = if let Some(message) = report.ephemeral {
+            runtime.send_camera_ephemeral_with_policy_timed(message, context.pose_sync_policy)
+        } else {
+            runtime.send_camera_command_with_policy_timed(report.command, context.pose_sync_policy)
+        }
+        .with_context(|| format!("failed to sync {} player pose to server", context.lane))?;
         if let Some(timing) = timing.as_deref_mut() {
             timing.server_command = submission.timing;
         }

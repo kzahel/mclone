@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod ephemeral;
 mod player_lifecycle;
 mod realm_dimension;
 mod statistics;
@@ -13,6 +14,13 @@ use mclone_core::{
     PackedChunkSection, PackedLightSection, SECTION_HEIGHT, Vec3d,
 };
 
+pub use ephemeral::{
+    ClientEphemeralMessage, EffectiveEphemeralTransport, MAX_EPHEMERAL_MESSAGE_BYTES,
+    PlayerBodyPoseSample, RemotePlayerBodyPoseSample, ServerEphemeralMessage,
+    decode_client_ephemeral_message, decode_server_ephemeral_message,
+    encode_client_ephemeral_message, encode_server_ephemeral_message, sequence_is_newer,
+    validate_body_pose_sample,
+};
 pub use player_lifecycle::{
     DEFAULT_PLAYER_MAX_HEALTH, PLAYER_STANDING_HEIGHT, PLAYER_STANDING_WIDTH, PlayerDamageCause,
     PlayerLifeState, PlayerLifeStateError, PlayerVitals, PlayerVitalsError,
@@ -28,7 +36,7 @@ pub use statistics::{
     SUCCESSFUL_BLOCK_PLACEMENT_STATISTIC_VALUE_KEY, StatisticKey, StatisticKeyError,
 };
 
-pub const PROTOCOL_VERSION: u32 = 32;
+pub const PROTOCOL_VERSION: u32 = 33;
 pub const HOTBAR_SLOT_COUNT: u8 = 9;
 pub const HOTBAR_SLOT_COUNT_USIZE: usize = HOTBAR_SLOT_COUNT as usize;
 pub const MAX_PLAYER_DISPLAY_NAME_BYTES: usize = 16;
@@ -57,6 +65,7 @@ const CLIENT_COMMAND_SET_PLAYER_APPEARANCE: u8 = 9;
 const CLIENT_COMMAND_KEEP_ALIVE: u8 = 10;
 const CLIENT_COMMAND_DISCONNECT: u8 = 11;
 const CLIENT_COMMAND_RESPAWN: u8 = 12;
+const CLIENT_COMMAND_EPHEMERAL_FALLBACK: u8 = 13;
 const SERVER_UPDATE_CHUNK_SNAPSHOT: u8 = 1;
 const SERVER_UPDATE_CHUNK_UNLOAD: u8 = 2;
 const SERVER_UPDATE_SECTION_BLOCK_UPDATES: u8 = 3;
@@ -77,6 +86,7 @@ const SERVER_UPDATE_DISCONNECT: u8 = 17;
 const SERVER_UPDATE_DIMENSION_CHANGE: u8 = 18;
 const SERVER_UPDATE_PLAYER_STATISTICS: u8 = 19;
 const SERVER_UPDATE_PLAYER_LIFE: u8 = 20;
+const SERVER_UPDATE_EPHEMERAL_FALLBACK: u8 = 21;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub struct SessionCapabilities(u64);
@@ -84,7 +94,8 @@ pub struct SessionCapabilities(u64);
 impl SessionCapabilities {
     pub const NONE: Self = Self(0);
     pub const DEBUG_ACTIONS: Self = Self(1 << 0);
-    pub const KNOWN: Self = Self(Self::DEBUG_ACTIONS.0);
+    pub const EPHEMERAL_BODY_POSE: Self = Self(1 << 1);
+    pub const KNOWN: Self = Self(Self::DEBUG_ACTIONS.0 | Self::EPHEMERAL_BODY_POSE.0);
     pub const DEVELOPMENT_DEFAULT: Self = Self::KNOWN;
 
     pub const fn from_bits_retain(bits: u64) -> Self {
@@ -112,6 +123,9 @@ impl SessionCapabilities {
 pub struct SessionConfiguration {
     pub gameplay_rate_hz: u32,
     pub publication_rate_hz: u32,
+    pub body_pose_report_rate_hz: u32,
+    pub remote_pose_replication_rate_hz: u32,
+    pub ephemeral_transport: EffectiveEphemeralTransport,
     pub max_render_distance: u32,
     pub max_chunk_tracking_radius: u32,
     pub capabilities: SessionCapabilities,
@@ -126,10 +140,25 @@ impl SessionConfiguration {
         Self {
             gameplay_rate_hz: 20,
             publication_rate_hz: 20,
+            body_pose_report_rate_hz: 20,
+            remote_pose_replication_rate_hz: 20,
+            ephemeral_transport: EffectiveEphemeralTransport::ReliableFallback,
             max_render_distance,
             max_chunk_tracking_radius,
             capabilities,
         }
+    }
+
+    pub const fn with_pose_profile(
+        mut self,
+        body_pose_report_rate_hz: u32,
+        remote_pose_replication_rate_hz: u32,
+        ephemeral_transport: EffectiveEphemeralTransport,
+    ) -> Self {
+        self.body_pose_report_rate_hz = body_pose_report_rate_hz;
+        self.remote_pose_replication_rate_hz = remote_pose_replication_rate_hz;
+        self.ephemeral_transport = ephemeral_transport;
+        self
     }
 }
 
@@ -273,6 +302,7 @@ pub enum ClientCommand {
     ShootDebugPhysicsCube,
     KeepAlive { id: u64 },
     Respawn,
+    EphemeralFallback(ClientEphemeralMessage),
     Disconnect(ClientDisconnectReason),
 }
 
@@ -496,6 +526,7 @@ pub enum ServerUpdate {
     },
     /// Owner-only atomic health/death snapshot.
     PlayerLife(PlayerLifeState),
+    EphemeralFallback(ServerEphemeralMessage),
     KeepAlive {
         id: u64,
     },
@@ -793,6 +824,10 @@ pub fn encode_client_command(command: &ClientCommand) -> ProtocolCodecResult<Vec
             writer.write_u64(*id);
         }
         ClientCommand::Respawn => writer.write_u8(CLIENT_COMMAND_RESPAWN),
+        ClientCommand::EphemeralFallback(message) => {
+            writer.write_u8(CLIENT_COMMAND_EPHEMERAL_FALLBACK);
+            writer.write_raw(&encode_client_ephemeral_message(*message)?);
+        }
         ClientCommand::Disconnect(reason) => {
             writer.write_u8(CLIENT_COMMAND_DISCONNECT);
             writer.write_client_disconnect_reason(*reason);
@@ -835,6 +870,9 @@ pub fn decode_client_command(bytes: &[u8]) -> ProtocolCodecResult<ClientCommand>
             id: reader.read_u64()?,
         },
         CLIENT_COMMAND_RESPAWN => ClientCommand::Respawn,
+        CLIENT_COMMAND_EPHEMERAL_FALLBACK => ClientCommand::EphemeralFallback(
+            decode_client_ephemeral_message(reader.read_remaining())?,
+        ),
         CLIENT_COMMAND_DISCONNECT => {
             ClientCommand::Disconnect(reader.read_client_disconnect_reason()?)
         }
@@ -978,6 +1016,10 @@ pub fn encode_server_update(update: &ServerUpdate) -> ProtocolCodecResult<Vec<u8
                 Some(PlayerDamageCause::Lava) => 1,
             });
         }
+        ServerUpdate::EphemeralFallback(message) => {
+            writer.write_u8(SERVER_UPDATE_EPHEMERAL_FALLBACK);
+            writer.write_raw(&encode_server_ephemeral_message(*message)?);
+        }
         ServerUpdate::KeepAlive { id } => {
             writer.write_u8(SERVER_UPDATE_KEEP_ALIVE);
             writer.write_u64(*id);
@@ -1106,6 +1148,9 @@ pub fn decode_server_update(bytes: &[u8]) -> ProtocolCodecResult<ServerUpdate> {
                 })?,
             )
         }
+        SERVER_UPDATE_EPHEMERAL_FALLBACK => ServerUpdate::EphemeralFallback(
+            decode_server_ephemeral_message(reader.read_remaining())?,
+        ),
         SERVER_UPDATE_KEEP_ALIVE => ServerUpdate::KeepAlive {
             id: reader.read_u64()?,
         },
@@ -1138,6 +1183,16 @@ fn validate_session_configuration(configuration: &SessionConfiguration) -> Proto
     if configuration.publication_rate_hz == 0 {
         return Err(ProtocolCodecError::InvalidData(
             "session publication rate must be nonzero",
+        ));
+    }
+    if configuration.body_pose_report_rate_hz == 0 {
+        return Err(ProtocolCodecError::InvalidData(
+            "session body pose report rate must be nonzero",
+        ));
+    }
+    if configuration.remote_pose_replication_rate_hz == 0 {
+        return Err(ProtocolCodecError::InvalidData(
+            "session remote pose replication rate must be nonzero",
         ));
     }
     if configuration.max_render_distance > configuration.max_chunk_tracking_radius {
@@ -1297,6 +1352,10 @@ impl ByteWriter {
 
     fn write_u8(&mut self, value: u8) {
         self.bytes.push(value);
+    }
+
+    fn write_raw(&mut self, bytes: &[u8]) {
+        self.bytes.extend_from_slice(bytes);
     }
 
     fn write_bool(&mut self, value: bool) {
@@ -1461,6 +1520,9 @@ impl ByteWriter {
     fn write_session_configuration(&mut self, configuration: SessionConfiguration) {
         self.write_u32(configuration.gameplay_rate_hz);
         self.write_u32(configuration.publication_rate_hz);
+        self.write_u32(configuration.body_pose_report_rate_hz);
+        self.write_u32(configuration.remote_pose_replication_rate_hz);
+        self.write_u8(configuration.ephemeral_transport.tag());
         self.write_u32(configuration.max_render_distance);
         self.write_u32(configuration.max_chunk_tracking_radius);
         self.write_u64(configuration.capabilities.bits());
@@ -1742,6 +1804,12 @@ impl<'a> ByteReader<'a> {
         Ok(self.read_exact::<1>()?[0])
     }
 
+    fn read_remaining(&mut self) -> &'a [u8] {
+        let remaining = &self.bytes[self.offset..];
+        self.offset = self.bytes.len();
+        remaining
+    }
+
     fn read_bool(&mut self) -> ProtocolCodecResult<bool> {
         match self.read_u8()? {
             0 => Ok(false),
@@ -1934,6 +2002,9 @@ impl<'a> ByteReader<'a> {
         let configuration = SessionConfiguration {
             gameplay_rate_hz: self.read_u32()?,
             publication_rate_hz: self.read_u32()?,
+            body_pose_report_rate_hz: self.read_u32()?,
+            remote_pose_replication_rate_hz: self.read_u32()?,
+            ephemeral_transport: EffectiveEphemeralTransport::from_tag(self.read_u8()?)?,
             max_render_distance: self.read_u32()?,
             max_chunk_tracking_radius: self.read_u32()?,
             capabilities: SessionCapabilities::from_bits_retain(self.read_u64()?).known(),
@@ -2388,6 +2459,32 @@ mod tests {
     }
 
     #[test]
+    fn reliable_fallback_round_trips_ephemeral_pose_messages() {
+        let pose = PlayerBodyPoseSample::new(
+            3,
+            u32::MAX,
+            17_500,
+            Vec3d::new(4.5, 70.0, -8.25),
+            125.0,
+            -20.0,
+            true,
+        );
+        let client = ClientCommand::EphemeralFallback(ClientEphemeralMessage::BodyPose(pose));
+        let server = ServerUpdate::EphemeralFallback(ServerEphemeralMessage::RemoteBodyPose(
+            RemotePlayerBodyPoseSample {
+                id: RemotePlayerId(42),
+                pose,
+            },
+        ));
+
+        let client_bytes = encode_client_command(&client).unwrap();
+        let server_bytes = encode_server_update(&server).unwrap();
+
+        assert_eq!(decode_client_command(&client_bytes).unwrap(), client);
+        assert_eq!(decode_server_update(&server_bytes).unwrap(), server);
+    }
+
+    #[test]
     fn client_control_commands_round_trip() {
         for command in [
             ClientCommand::KeepAlive { id: 0x1234_5678 },
@@ -2654,6 +2751,9 @@ mod tests {
         let update = ServerUpdate::SessionConfiguration(SessionConfiguration {
             gameplay_rate_hz: 0,
             publication_rate_hz: 20,
+            body_pose_report_rate_hz: 20,
+            remote_pose_replication_rate_hz: 20,
+            ephemeral_transport: EffectiveEphemeralTransport::ReliableFallback,
             max_render_distance: 10,
             max_chunk_tracking_radius: 11,
             capabilities: SessionCapabilities::NONE,

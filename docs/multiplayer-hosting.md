@@ -69,7 +69,7 @@ the same protocol/client/server boundary as singleplayer.
   pressure disconnects.
 - **`--multi-client-smoke`** runs the multi-client integration check (two clients
   sharing a world with remote-player replication).
-- `PROTOCOL_VERSION = 32` is negotiated with strict equality. The handshake
+- `PROTOCOL_VERSION = 33` is negotiated with strict equality. The handshake
   also carries the client's unauthenticated stable local UUID/display name;
   persistent realms save pose, selected slot, XP, typed statistics, health,
   and a pending typed death cause under that UUID. Ordered owner life updates

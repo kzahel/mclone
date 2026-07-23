@@ -920,25 +920,21 @@ fn engine_camera_controller_reports_pose_sync_command() {
         .expect("rotation should produce pose sync");
 
     assert_eq!(report.kind, EnginePoseSyncCommandKind::Movement);
-    let ClientCommand::MovePlayer(command) = report.command else {
-        panic!("stationary mouse look must publish a movement command");
+    let Some(mclone_protocol::ClientEphemeralMessage::BodyPose(sample)) = report.ephemeral else {
+        panic!("stationary mouse look must publish an ephemeral body sample");
     };
-    assert_eq!(command.sequence, 2);
-    let mclone_protocol::MovePlayerCommand::Rot {
-        y_rot_degrees,
-        x_rot_degrees,
-        ..
-    } = command.movement
-    else {
-        panic!("stationary mouse look must publish a rotation-only command");
-    };
+    assert_eq!(sample.sequence, 2);
     assert_eq!(
-        y_rot_degrees,
+        sample.y_rot_degrees,
         -report.camera.yaw_radians.to_degrees() as f32
     );
     assert_eq!(
-        x_rot_degrees,
+        sample.x_rot_degrees,
         -report.camera.pitch_radians.to_degrees() as f32
+    );
+    assert_eq!(
+        report.command,
+        ClientCommand::EphemeralFallback(mclone_protocol::ClientEphemeralMessage::BodyPose(sample))
     );
     assert_eq!(report.camera, camera.snapshot());
     assert!(camera.next_pose_sync_command().is_none());
@@ -972,9 +968,14 @@ fn engine_camera_controller_reports_correction_acceptance_and_resync() {
     let resync = camera.corrected_pose_sync_command();
 
     assert_eq!(resync.kind, EnginePoseSyncCommandKind::CorrectionResync);
+    assert_eq!(resync.ephemeral, None);
     assert!(matches!(resync.command, ClientCommand::MovePlayer(_)));
     assert_eq!(resync.camera, camera.snapshot());
-    assert!(camera.next_pose_sync_command().is_none());
+    assert!(
+        camera.next_pose_sync_command().is_some(),
+        "the ephemeral stream re-establishes its own full baseline after a \
+         reliable correction barrier"
+    );
 }
 
 #[test]

@@ -388,6 +388,7 @@ pub enum EnginePoseSyncCommandKind {
 pub struct EnginePoseSyncCommand {
     pub kind: EnginePoseSyncCommandKind,
     pub command: ClientCommand,
+    pub ephemeral: Option<ClientEphemeralMessage>,
     pub camera: EngineCameraSnapshot,
 }
 
@@ -703,17 +704,29 @@ impl EngineCameraController {
     }
 
     pub fn next_pose_sync_command(&mut self) -> Option<EnginePoseSyncCommand> {
-        self.next_pose_sync_command_in(HorizontalTopology::UNBOUNDED)
+        self.next_pose_sync_command_in_at(HorizontalTopology::UNBOUNDED, 0)
     }
 
     pub fn next_pose_sync_command_in(
         &mut self,
         topology: HorizontalTopology,
     ) -> Option<EnginePoseSyncCommand> {
-        let command = self.next_move_player_command_in(topology)?;
+        self.next_pose_sync_command_in_at(topology, 0)
+    }
+
+    pub fn next_pose_sync_command_in_at(
+        &mut self,
+        topology: HorizontalTopology,
+        sample_time_millis: u32,
+    ) -> Option<EnginePoseSyncCommand> {
+        let message = ClientEphemeralMessage::BodyPose(
+            self.player
+                .next_body_pose_sample_in(topology, sample_time_millis)?,
+        );
         Some(EnginePoseSyncCommand {
             kind: EnginePoseSyncCommandKind::Movement,
-            command,
+            command: ClientCommand::EphemeralFallback(message),
+            ephemeral: Some(message),
             camera: self.snapshot(),
         })
     }
@@ -753,6 +766,7 @@ impl EngineCameraController {
         Some(EnginePoseSyncCommand {
             kind: EnginePoseSyncCommandKind::CorrectionResync,
             command,
+            ephemeral: None,
             camera: self.snapshot(),
         })
     }

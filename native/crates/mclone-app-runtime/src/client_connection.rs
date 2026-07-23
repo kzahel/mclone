@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use mclone_protocol::{ClientCommand, ServerUpdate};
+use mclone_protocol::{ClientCommand, ClientEphemeralMessage, ServerUpdate};
 use mclone_server::{
     IntegratedServerRunner, ServerRunnerDiagnostics, ServerRunnerResult, ServerUpdateEnvelope,
     SimulationCadenceConfig,
@@ -127,6 +127,9 @@ impl ClientConnectionDrainResult {
 
 pub trait ClientConnection {
     fn send_command_only(&mut self, command: ClientCommand) -> Result<()>;
+    fn send_ephemeral(&mut self, message: ClientEphemeralMessage) -> Result<()> {
+        self.send_command_only(ClientCommand::EphemeralFallback(message))
+    }
     /// Drain one already-produced update without waiting for transport IO,
     /// decode, publication, or queue capacity.
     fn try_drain_next_update(&mut self) -> Result<ClientConnectionDrainResult>;

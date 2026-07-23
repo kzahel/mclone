@@ -28,7 +28,8 @@ use mclone_core::{
 use mclone_protocol::{
     ChunkView, ClientCommand, DimensionKey, DisconnectReason, DisconnectReasonCode, EntityId,
     EntitySnapshot, EntityUpdate, PlayerLifeState, PlayerPositionUpdate, PlayerStatistics,
-    RemotePlayerId, RemotePlayerUpdate, SectionBlockUpdate, ServerUpdate, SessionConfiguration,
+    RemotePlayerId, RemotePlayerUpdate, SectionBlockUpdate, ServerEphemeralMessage, ServerUpdate,
+    SessionConfiguration, sequence_is_newer, validate_body_pose_sample,
 };
 
 pub use actor::{
@@ -105,6 +106,7 @@ pub struct ClientRuntime {
     player_position_updates: VecDeque<PlayerPositionUpdate>,
     remote_players: BTreeMap<RemotePlayerId, RemotePlayerUpdate>,
     remote_player_walk_distances: BTreeMap<RemotePlayerId, f32>,
+    remote_player_pose_order: BTreeMap<RemotePlayerId, (u32, u32)>,
     entities: BTreeMap<EntityId, EntitySnapshot>,
     entity_seam_crossings: BTreeMap<EntityId, u64>,
     entity_chunks: BTreeMap<EntityId, ChunkPos>,
@@ -134,6 +136,7 @@ impl ClientRuntime {
             player_position_updates: VecDeque::new(),
             remote_players: BTreeMap::new(),
             remote_player_walk_distances: BTreeMap::new(),
+            remote_player_pose_order: BTreeMap::new(),
             entities: BTreeMap::new(),
             entity_seam_crossings: BTreeMap::new(),
             entity_chunks: BTreeMap::new(),
@@ -270,6 +273,7 @@ impl ClientRuntime {
                 self.remote_player_walk_distances
                     .entry(update.id)
                     .or_default();
+                self.remote_player_pose_order.remove(&update.id);
                 self.remote_players.insert(update.id, update);
             }
             ServerUpdate::RemotePlayerUpdate(update) => {
@@ -286,6 +290,7 @@ impl ClientRuntime {
             ServerUpdate::RemotePlayerRemove { id } => {
                 self.remote_players.remove(&id);
                 self.remote_player_walk_distances.remove(&id);
+                self.remote_player_pose_order.remove(&id);
             }
             ServerUpdate::EntitySnapshot(snapshot) => {
                 self.insert_entity_snapshot(snapshot);
@@ -307,6 +312,9 @@ impl ClientRuntime {
                     self.player_life = state;
                 }
             }
+            ServerUpdate::EphemeralFallback(message) => {
+                self.apply_ephemeral_message(message);
+            }
             ServerUpdate::KeepAlive { .. } => {}
             ServerUpdate::Disconnect(reason) => self.apply_disconnect(reason),
         }
@@ -316,6 +324,47 @@ impl ClientRuntime {
         if self.disconnect_reason.is_none() {
             self.disconnect_reason = Some(reason);
             self.session_phase = ClientSessionPhase::Disconnected;
+        }
+    }
+
+    pub fn apply_ephemeral_message(&mut self, message: ServerEphemeralMessage) -> bool {
+        match message {
+            ServerEphemeralMessage::RemoteBodyPose(sample) => {
+                if validate_body_pose_sample(sample.pose).is_err() {
+                    return false;
+                }
+                let Some(previous) = self.remote_players.get(&sample.id).copied() else {
+                    return false;
+                };
+                let order = (sample.pose.presentation_epoch, sample.pose.sequence);
+                if let Some((current_epoch, current_sequence)) =
+                    self.remote_player_pose_order.get(&sample.id).copied()
+                {
+                    let epoch_is_newer = sequence_is_newer(order.0, current_epoch);
+                    if order.0 != current_epoch && !epoch_is_newer {
+                        return false;
+                    }
+                    if order.0 == current_epoch && !sequence_is_newer(order.1, current_sequence) {
+                        return false;
+                    }
+                }
+
+                let update = RemotePlayerUpdate {
+                    position: sample.pose.position,
+                    y_rot_degrees: sample.pose.y_rot_degrees,
+                    x_rot_degrees: sample.pose.x_rot_degrees,
+                    on_ground: sample.pose.on_ground,
+                    ..previous
+                };
+                let distance = remote_player_horizontal_distance(self.topology, &previous, &update);
+                *self
+                    .remote_player_walk_distances
+                    .entry(sample.id)
+                    .or_default() += distance;
+                self.remote_players.insert(sample.id, update);
+                self.remote_player_pose_order.insert(sample.id, order);
+                true
+            }
         }
     }
 
@@ -409,6 +458,7 @@ impl ClientRuntime {
         self.player_position_updates.clear();
         self.remote_players.clear();
         self.remote_player_walk_distances.clear();
+        self.remote_player_pose_order.clear();
         self.entities.clear();
         self.entity_seam_crossings.clear();
         self.entity_chunks.clear();
@@ -1286,6 +1336,45 @@ mod tests {
         runtime.apply_update(ServerUpdate::RemotePlayerRemove { id });
         assert_eq!(runtime.remote_player_count(), 0);
         assert_eq!(runtime.remote_player(id), None);
+    }
+
+    #[test]
+    fn client_runtime_rejects_stale_ephemeral_remote_poses() {
+        let mut runtime = ClientRuntime::new(ClientHost::RemoteDedicated);
+        let id = RemotePlayerId(7);
+        let initial = RemotePlayerUpdate {
+            id,
+            appearance: PlayerAppearance::default(),
+            position: mclone_core::Vec3d::new(1.0, 64.0, 2.0),
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+            on_ground: true,
+        };
+        runtime.apply_update(ServerUpdate::RemotePlayerAdd(initial));
+        let message = |epoch, sequence, x| {
+            ServerEphemeralMessage::RemoteBodyPose(mclone_protocol::RemotePlayerBodyPoseSample {
+                id,
+                pose: mclone_protocol::PlayerBodyPoseSample::new(
+                    epoch,
+                    sequence,
+                    sequence,
+                    mclone_core::Vec3d::new(x, 64.0, 2.0),
+                    0.0,
+                    0.0,
+                    true,
+                ),
+            })
+        };
+
+        assert!(runtime.apply_ephemeral_message(message(1, 5, 5.0)));
+        assert!(!runtime.apply_ephemeral_message(message(1, 4, 4.0)));
+        assert!(!runtime.apply_ephemeral_message(message(1, 5, 6.0)));
+        assert!(runtime.apply_ephemeral_message(message(2, 1, 8.0)));
+        assert!(!runtime.apply_ephemeral_message(message(1, 6, 6.0)));
+        assert_eq!(
+            runtime.remote_player(id).unwrap().position,
+            mclone_core::Vec3d::new(8.0, 64.0, 2.0)
+        );
     }
 
     #[test]
