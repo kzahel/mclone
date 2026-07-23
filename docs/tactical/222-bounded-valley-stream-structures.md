@@ -1,9 +1,10 @@
 # Tactical 222: Bounded Valley Stream Structures
 
 Status: active 2026-07-23. The reusable procedural-start kernel, bounded
-stream plan, clipped field-revision-12 realization, hydraulic proof, and
-profile-correct far LOD, and SQLite reopen proof are implemented.
-Performance and final human review remain.
+stream plan, clipped field-revision-12 realization, hydraulic proof,
+profile-correct far LOD, SQLite reopen proof, generation comparison, movement
+soak, and final production captures are implemented. Objective validation is
+complete; Human Review 1 remains.
 
 Topics: `mclone-overworld-generation`, `procedural-structure-starts`
 
@@ -518,12 +519,12 @@ codec remain the relevant browser gates.
 
 ### Slice 5: performance and human review
 
-- [ ] Compare revision 11 and the candidate on the same clean host at an
+- [x] Compare revision 11 and the candidate on the same clean host at an
   accepted-stream hotspot and a no-stream control.
-- [ ] Run the accelerated one-minute movement soak with fluid counters.
-- [ ] Capture high-view-distance top-down, landscape, confluence, headwater,
+- [x] Run the accelerated one-minute movement soak with fluid counters.
+- [x] Capture high-view-distance top-down, landscape, confluence, headwater,
   and along-stream views from fully warmed production chunks.
-- [ ] Inspect every first drawable milestone before adding the next visual
+- [x] Inspect every first drawable milestone before adding the next visual
   layer.
 
 Performance correction checkpoint 2026-07-23:
@@ -553,6 +554,46 @@ Performance correction checkpoint 2026-07-23:
   partition/order/cache independence, all 306 worldgen tests, all 309 app
   runtime tests, and the browser WASM check pass. Final same-host numbers and
   the movement soak follow from a committed clean build.
+
+Final performance and review checkpoint 2026-07-23:
+
+- revision 11 at `2ea92637` and the field-revision-12 candidate at
+  `9bbb240d` were built into separate release targets, alternated twice on the
+  same host, and pinned to CPU 15. Every sample generated a radius-three
+  region for 20 iterations;
+- at seed `-98765`, chunk `(149,-124)`, revision 11 averaged 1,741 surface
+  chunks/s, 561 cold decorated targets/s, and 2,623 warm targets/s. Revision
+  12 averaged 1,065, 381, and 1,945 respectively: `-38.8%`, `-32.0%`, and
+  `-25.9%`;
+- at the no-stream origin control, revision 12 versus revision 11 changed by
+  `-4.3%`, `+3.7%`, and `+20.9%`. This isolates the material cost to planned
+  stream terrain rather than a broad field regression;
+- within revision 12, the accepted-stream hotspot is 1.69x, 1.62x, and 1.91x
+  slower than its control. The greater-than-25-percent investigation gate was
+  therefore justified and completed by the cache/geometry correction above;
+  no lane reaches the twofold visual-acceptance blocker. Absolute cold
+  throughput remains about 381 targets/s on one pinned CPU;
+- the committed clean 3,600-frame RD10 movement run used a radius-eight path
+  at 32 blocks/s and 60 Hz. It averaged 8.303 ms, with p95 15.978 ms, p99
+  24.703 ms, 43.563 ms maximum, 157 over-budget frames, six over 2x budget,
+  and none over 4x;
+- the movement run scheduled, found due, executed, deferred, and mutated zero
+  fluid work. Generation jobs, publications, render chunks, and render
+  compiles remained bounded at maxima of 1, 94, 129, and 9 respectively;
+  the server update queue remained zero. Active movement still had ordinary
+  interest/render work at the final frame, but none of the queues grew
+  without bound; and
+- the final clean receipt at seed `-98765`, chunk `(149,-124)`, warmed all
+  1,225 expected RD16 chunks and finished with zero target render work
+  pending. Its top-down and elevated panels expose the complete headwater,
+  four calm reaches, three transitions, downstream view, and confluence;
+  the landscape panel verifies the valley at traversable scale. The inspected
+  card and full-size source PNGs are under
+  `/tmp/mclone-stream-final-card-clean`.
+
+The clean A/B reports are under `/tmp/mclone-stream-{current,rev11}-*.json`;
+the movement receipt is `/tmp/mclone-stream-movement-soak.json`. These are
+disposable host evidence and are intentionally not repository artifacts.
 
 Human review asks:
 

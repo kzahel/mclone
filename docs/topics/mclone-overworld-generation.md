@@ -72,7 +72,14 @@ authoritative stream columns at the reviewed route. A reviewed mid-route
 chunk also survives native SQLite close/reopen as an exactly equal snapshot
 loaded from storage. Deterministic plan reconstruction is accepted while the
 profile remains internal-mutable; versioned queryable start/reference records
-are required before release freeze. Performance closeout remains.
+are required before release freeze. The final same-host comparison isolates
+the accepted-stream cost to the new structure-shaped terrain: cold generation
+is 32.0 percent below revision 11 at the hotspot but remains roughly 381
+targets/s on one pinned CPU, while the no-stream control is 3.7 percent
+faster. The hotspot remains below the twofold blocker in every lane. A
+3,600-frame RD10 traversal records zero fluid work and bounded generation and
+render queues, and fully warmed RD16 production pixels pass internal
+inspection. The implementation is now paused for Human Review 1.
 
 ## Scope
 
@@ -970,12 +977,12 @@ Field revision 12 owns the first complete bounded valley stream: reusable
 procedural starts and references, a 48-96-block monotonic plan, clipped
 continuous valley terrain, fixed-point water stencils, and matching synthetic
 LOD. Full-route closure, all-water authoritative wake, deterministic
-partition/periodic fixtures, and production pixels pass. Tactical 222 next
-needs a same-host generation comparison, an accelerated one-minute movement
-soak, and final human inspection of the headwater, reaches, transitions, and
-confluence. One
-river-to-shelf-to-deep-basin composition remains an objective review gap.
-General drainage-network semantics remain deliberately absent.
+partition/periodic fixtures, SQLite reopen, same-host performance comparison,
+one-minute movement soak, and internally inspected production pixels pass.
+Tactical 222 is at Human Review 1 for the headwater, calm reaches,
+transitions, carved shoulders, and confluence. One river-to-shelf-to-deep-
+basin composition remains an objective review gap. General drainage-network
+semantics remain deliberately absent.
 
 ## Related
 

@@ -51,12 +51,13 @@ general highland rivers, confluences, discharge, globally monotonic macro
 drainage, and one integrated river-to-deep-basin outlet remain open. Tactical
 [`222`](tactical/222-bounded-valley-stream-structures.md) is active to replace
 it with a bounded multi-chunk stream that follows and carves an existing
-valley through reusable procedural structure starts and clipped pieces. The
-generic start/reference kernel and the plan-only Mclone consumer are now live:
-three reviewed seeds produce deterministic 91-96-block routes, two to four
-monotonic drops into Y63, zero required fill, typed pieces, bounded caches,
-and production route/cut/candidate maps. Generated blocks remain on field
-revision 11 until the clipped terrain and water realization passes.
+valley through reusable procedural structure starts and clipped pieces.
+Field revision 12 now realizes deterministic 91-96-block routes with
+monotonic reaches, zero required fill, shallow carved valleys, fixed-point
+drop stencils, matching far LOD, and exact SQLite reopen. Closure,
+authoritative wake, partition, periodic seam, release performance, movement,
+and fully warmed RD16 evidence pass. The implementation is at Human Review 1;
+general drainage semantics remain explicitly out of scope.
 
 Compatibility safety is recorded in the
 [`world-generation-profiles` ledger](topics/world-generation-profiles.md#compatibility-safety-ledger).
@@ -130,9 +131,13 @@ Landed native coverage:
   Revision 11 restores Y63 major rivers and reuses the stable four-block drop
   only in a complete bounded tributary landmark with an explicit source pool
   and river sink. A halo-aware block audit and real fluid-runtime wake tests
-  prove the ordinary river and landmark are quiescent. General highland
-  reaches, drainage-network identity, confluences, and accumulated discharge
-  remain absent.
+  prove the ordinary river and landmark are quiescent. Revision 12 replaces
+  its rejected containment shelf with a reusable procedural start and a
+  95-block reviewed valley stream: four calm reaches, three drops, a rounded
+  headwater, grassed cut shoulders, and a widened Y63 confluence. Full chunks,
+  far LOD, and persisted reopen agree. General highland networks,
+  drainage-network identity, accumulated discharge, and arbitrary
+  confluences remain absent.
 - Production-backed broad field maps and fully warmed seed/region/spawn cards;
   the first review accepted macro scale and coast variation after adding one
   fine relief octave to break up concentric local contour bands. The second
@@ -191,9 +196,9 @@ Still not full vanilla parity:
   terrain/material/biome/vegetation palette. Its first broad river and sparse
   wetland family failed Human Reviews 1 and 2, and the global stepped-river
   attempt was rejected interactively. Corrective bathymetry and the first
-  bounded raised tributary landmark are ready for review. It still has no
-  general highland stream/cascade family, drainage-network semantics, caves,
-  or structures
+  bounded valley stream are ready for review. It still has no general
+  highland stream/cascade family, drainage-network semantics, caves, or
+  authored gameplay structures
 - Mclone Overworld terrain, biome, surface, spawn, existing vegetation, broad
   rivers, and wetland pools are periodic for the exact 384-chunk X cylinder.
   All later content must join that sampler contract explicitly; canonical
