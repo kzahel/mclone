@@ -160,6 +160,12 @@ pnpm asset-lab:web:test
 pnpm structure-lab:web:build
 pnpm structure-lab:web:test
 
+# Build and test the GPU-first Terrain Lab served at /terrain/.
+pnpm terrain-lab:web:build
+pnpm terrain-lab:web:test
+pnpm terrain-lab:web:smoke
+pnpm terrain-lab:web:smoke -- --mobile
+
 # Build, upload the native web bundle and asset pack to the mclone R2 bucket,
 # deploy the Cloudflare Worker, and make it available at mclone.kzahel.com.
 pnpm deploy
@@ -179,6 +185,7 @@ The deploy path packages:
 - wasm-bindgen output under `/pkg/`
 - the validated Asset Lab animal catalogue under `/animals/`
 - the validated Structure Lab catalogue under `/structures/`
+- the dedicated Terrain Lab Rust/WASM workbench under `/terrain/`
 - `reference/minecraft-1.17.1/extracted.zip`
 - deterministic authored/fallback packs and sidecars under
   `/first-party-packs/`
@@ -215,10 +222,11 @@ Quick successive pushes replace the pending SHA before deployment starts. The wo
 
 Local ignored inputs and caches such as `reference/minecraft-1.17.1` and the
 root `node_modules` are linked into that deploy worktree when present. The
-bundle command installs the separately locked Asset Lab and Structure Lab
-packages with `--frozen-lockfile` when their local dependencies are absent, so
-a clean deploy worktree can build `/animals/` and `/structures/` without
-depending on nested ignored files from the active checkout.
+bundle command installs the separately locked Asset Lab, Structure Lab, and
+Terrain Lab packages with `--frozen-lockfile` when their local dependencies
+are absent, so a clean deploy worktree can build `/animals/`, `/structures/`,
+and `/terrain/` without depending on nested ignored files from the active
+checkout.
 
 Status is available with:
 

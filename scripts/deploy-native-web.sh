@@ -11,6 +11,7 @@ WEB_GLUE_BUILD_SCRIPT="$PROJECT_DIR/native/apps/mclone-web-client/scripts/build-
 WEB_ROOT="$NATIVE_ROOT/target/mclone-web-client-www"
 ANIMAL_CATALOG_WEB_ROOT="$PROJECT_DIR/tools/asset-lab/dist/web"
 STRUCTURE_CATALOG_WEB_ROOT="$PROJECT_DIR/tools/structure-lab/dist/web"
+TERRAIN_LAB_WEB_ROOT="$PROJECT_DIR/tools/terrain-lab/dist/web"
 REFERENCE_DIR="$PROJECT_DIR/reference/minecraft-1.17.1"
 ASSET_PACK_ZIP="$REFERENCE_DIR/extracted.zip"
 ASSET_PACK_MANIFEST="$REFERENCE_DIR/extracted.zip.json"
@@ -112,6 +113,15 @@ ensure_structure_lab_dependencies() {
   pnpm --dir "$PROJECT_DIR/tools/structure-lab" install --frozen-lockfile
 }
 
+ensure_terrain_lab_dependencies() {
+  if [ -x "$PROJECT_DIR/tools/terrain-lab/node_modules/.bin/vite" ]; then
+    return
+  fi
+
+  echo "==> Installing Terrain Lab web dependencies"
+  pnpm --dir "$PROJECT_DIR/tools/terrain-lab" install --frozen-lockfile
+}
+
 echo "==> Building native web assets"
 cd "$PROJECT_DIR"
 pnpm assets:pack
@@ -135,6 +145,8 @@ ensure_asset_lab_dependencies
 pnpm asset-lab:web:build
 ensure_structure_lab_dependencies
 pnpm structure-lab:web:build
+ensure_terrain_lab_dependencies
+pnpm terrain-lab:web:build
 rm -rf "$DEPLOY_DIR"
 mkdir -p "$DEPLOY_DIR/pkg"
 cp -R "$WEB_ROOT"/. "$DEPLOY_DIR"/
@@ -149,6 +161,8 @@ mkdir -p "$DEPLOY_DIR/animals"
 cp -R "$ANIMAL_CATALOG_WEB_ROOT"/. "$DEPLOY_DIR/animals"/
 mkdir -p "$DEPLOY_DIR/structures"
 cp -R "$STRUCTURE_CATALOG_WEB_ROOT"/. "$DEPLOY_DIR/structures"/
+mkdir -p "$DEPLOY_DIR/terrain"
+cp -R "$TERRAIN_LAB_WEB_ROOT"/. "$DEPLOY_DIR/terrain"/
 mkdir -p "$DEPLOY_DIR/reference/minecraft-1.17.1"
 cp "$ASSET_PACK_ZIP" "$DEPLOY_DIR/reference/minecraft-1.17.1/extracted.zip"
 cp "$ASSET_PACK_MANIFEST" "$DEPLOY_DIR/reference/minecraft-1.17.1/extracted.zip.json"

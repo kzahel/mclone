@@ -2955,6 +2955,7 @@ pub(super) fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::SetXrTurnMode(_) => "setXrTurnMode",
         GameUiAction::CycleFramePacing => "cycleFramePacing",
         GameUiAction::CycleFpsCap => "cycleFpsCap",
+        GameUiAction::SetWorldRenderScaleMode(_) => "setWorldRenderScaleMode",
         GameUiAction::SetRenderDistance(_) => "setRenderDistance",
         GameUiAction::SetFlySpeed(_) => "setFlySpeed",
         GameUiAction::SetMovementSpeed(_) => "setMovementSpeed",
