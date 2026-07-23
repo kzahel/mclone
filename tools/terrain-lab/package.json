@@ -1,0 +1,35 @@
+{
+  "name": "@mclone/terrain-lab",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "wasm:build": "node scripts/build-wasm.mjs",
+    "typecheck": "pnpm wasm:build && tsc --noEmit",
+    "test": "tsx --test tests/state.test.ts",
+    "web:dev": "pnpm wasm:build && vite --config src/web/vite.config.ts",
+    "web:build": "pnpm wasm:build && vite build --config src/web/vite.config.ts",
+    "web:preview": "vite preview --config src/web/vite.config.ts",
+    "web:test": "playwright test -c playwright.config.ts",
+    "web:smoke": "node scripts/browser-smoke.mjs"
+  },
+  "dependencies": {
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.2.17",
+    "@types/react-dom": "^19.2.3",
+    "@vitejs/plugin-react": "^6.0.3",
+    "@webgpu/types": "^0.1.69",
+    "tsx": "^4.20.6",
+    "typescript": "^5.7.2",
+    "vite": "^8.1.5"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "packageManager": "pnpm@9.15.1"
+}

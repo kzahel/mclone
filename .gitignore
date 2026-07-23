@@ -4,6 +4,7 @@ build/
 dist/
 dist-native-web/
 generated-assets/
+tools/terrain-lab/generated/
 oracle/classes/
 node_modules/
 *.wasm
