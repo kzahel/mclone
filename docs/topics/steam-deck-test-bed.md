@@ -6,7 +6,8 @@ Status: active test lane. As of 2026-07-23, the first retail Steam Deck is
 paired with the Linux deployment host. Automated staging, incremental upload,
 SteamRT4 launch, screenshot smoke, and bounded performance collection pass on
 the device. Manual controller, persistence, suspend/resume, and dock/undock
-acceptance remain open, as does the production Steam Runtime SDK builder.
+acceptance remain open. The pinned production-style Steam Runtime SDK builder
+is implemented and its clean-source artifact passes device smoke and perf.
 
 ## Scope
 
@@ -120,6 +121,12 @@ pnpm steamdeck:launch
 pnpm steamdeck:smoke
 pnpm steamdeck:perf
 pnpm steamdeck:pull-results -- RUN_ID
+
+pnpm steamdeck:build:steamrt4
+pnpm steamdeck:stage:steamrt4
+pnpm steamdeck:deploy:steamrt4
+pnpm steamdeck:smoke:steamrt4
+pnpm steamdeck:perf:steamrt4
 ```
 
 The wrapper defaults to the paired device's mDNS name and the Devkit-managed
@@ -151,6 +158,11 @@ repeatable developer benchmark, not an automatic performance acceptance
 threshold. Record the Deck refresh rate, frame cap, TDP, thermals, clock
 policy, and whether the display is docked before comparing runs.
 
+The `:steamrt4` commands build the client inside the pinned SDK rather than on
+the Ubuntu host. The build-only command leaves the artifact and provenance
+receipt under `native/target/steamrt4`; the stage/deploy/smoke/perf commands
+feed that exact artifact through the same payload and Devkit lifecycle.
+
 The asset-lock check intentionally fails closed. During the first bring-up the
 working tree already contained unrelated extracted/packed asset drift. Fast
 iteration reused the existing release binary and pack with:
@@ -167,45 +179,64 @@ receipt records both overrides so a reused binary or unchecked pack cannot be
 mistaken for a clean build. The final smoke rebuilt with `cargo build
 --release --locked`; it still required only the asset-check override.
 
-## Production SteamRT4 Builder Requirements
+## Production SteamRT4 Builder
 
 Valve currently recommends Steam Linux Runtime 4 for new native Linux games
-and recommends compiling inside the matching SDK container. The proposed
-reproducible builder is:
+and recommends compiling inside the matching SDK container. The implemented
+builder is [`containers/steamrt4/Dockerfile`](../../containers/steamrt4/Dockerfile)
+plus
+[`scripts/steam-deck-build-steamrt4.sh`](../../scripts/steam-deck-build-steamrt4.sh).
+Its contract is:
 
-1. Base a dedicated image on
+1. Base the dedicated image on
    `registry.gitlab.steamos.cloud/steamrt/steamrt4/sdk`, pinned by digest. As
    observed on 2026-07-23, Valve's stable `latest` alias identifies SteamRT4
    build `4.0.20260608.242786` and manifest digest
    `sha256:584939ebd7d2f1eec719e771fdde4ae3bd469ee741c783abb7fe812ddaaf3ee4`.
-   Treat that as a proposed initial pin, not a forever version.
-2. Add a pinned Rust toolchain. The current host uses Rust 1.97.0 and the
-   workspace requires at least 1.92; use 1.97.0 initially and commit the pin
-   with the builder.
-3. Declare native build dependencies explicitly: a C/C++ build toolchain,
-   `pkg-config`, ALSA development headers for `cpal`, and libudev development
-   headers for `gilrs`. Add only other libraries demonstrated by a clean
-   container build.
-4. Run the container as the invoking host UID/GID, mount the repository
-   read-only where practical, and use named/writeable Cargo registry, git, and
-   target caches. Do not leave root-owned build artifacts in the checkout.
+   Treat that as the current pin, not a forever version.
+2. Verify the SDK's compiler, `pkg-config`, ALSA development headers for
+   `cpal`, and libudev development headers for `gilrs`. The pinned SDK already
+   contains this dependency set, so the image does not mutate Valve's package
+   state through an unpinned `apt-get`.
+3. Install Rust 1.97.0 through checksum-pinned rustup-init 1.28.2. The
+   workspace requires at least 1.92.
+4. Run the container as the invoking host UID/GID with all Linux capabilities
+   dropped and `no-new-privileges`. Mount the repository read-only and expose
+   only the isolated SteamRT4 target and Cargo cache as writeable paths. Use a
+   dedicated empty Docker client config so unrelated/stale desktop credential
+   helpers do not affect anonymous Valve SDK pulls.
 5. Build `mclone-native-client` with `cargo build --release --locked` for
-   `x86_64-unknown-linux-gnu`, run the asset-pack lock check, and feed the
-   resulting binary into the existing staging/upload wrapper.
+   the SDK's `x86_64-unknown-linux-gnu` host. Reject
+   `RUSTFLAGS=-Ctarget-cpu=native`; explicit portable or future Deck-only
+   flags are recorded.
 6. Record the base-image digest, Rust version, Cargo.lock hash, source commit
    and dirty state, target/Rust flags, binary hash, asset-pack hash, and final
-   dynamic dependency / GLIBC symbol audit in `build.json`.
+   dynamic dependency / GLIBC symbol audit. Embed the builder receipt in the
+   staged `build.json`.
 7. Test the staged artifact under SteamRT4 on the Deck. A successful build in
    the SDK is necessary ABI evidence, but it does not replace the device
    smoke, interactive controls, persistence, or performance lanes.
 
-Docker 29 is already installed on the current Linux host, but the logged-in
-user cannot access its root-owned daemon socket. No Docker, group membership,
-rootless-container, or project container configuration was changed during
-bring-up. Before implementing the builder, choose deliberately between
-rootless Podman/Docker (Valve supports both) and granting this user access to
-the system Docker daemon. Membership in the `docker` group is effectively
-root-equivalent and should not be an incidental setup step.
+The Linux deployment account is deliberately authorized for the system Docker
+daemon. This is root-equivalent access; the exact group and machine setup are
+recorded in the private laptop ledger. A new login/session is required after
+the group change. The Docker daemon itself was not reconfigured.
+
+The builder's advantage is compatibility and provenance, not automatic frame
+rate:
+
+- it prevents Ubuntu's newer headers/libraries from leaking into a release;
+- a pinned SDK, Rust toolchain, lockfile, target and flags make local and CI
+  release inputs repeatable;
+- a clean container build catches undeclared native dependencies;
+- the embedded receipt makes a deployed binary traceable and auditable; and
+- the same builder can become the Linux CI/release lane without changing the
+  Deck deployment workflow.
+
+It does not emulate the Deck GPU, Gamescope, controller, power envelope, or
+suspend behavior, and it does not intrinsically optimize code for Zen 2. Those
+remain physical-hardware tests. The first pull also has a meaningful local
+storage cost because Valve's SDK is a full development sysroot.
 
 ## Validation Contract
 
@@ -263,6 +294,41 @@ production ABI or performance baseline.
 The result bundles stay under `/tmp` on the host and are not repository
 artifacts.
 
+## 2026-07-23 SteamRT4 Production-Style Evidence
+
+Commit `295d788a8e6ec4290ad9a70a7b9ad56cedf88150` was rebuilt from a clean
+source tree in the pinned SDK. Its receipt records:
+
+```text
+SteamRT4 build: 4.0.20260608.242786
+SDK manifest:   sha256:584939ebd7d2f1eec719e771fdde4ae3bd469ee741c783abb7fe812ddaaf3ee4
+Rust:           1.97.0
+Target:         x86_64-unknown-linux-gnu
+RUSTFLAGS:      empty (generic x86-64)
+Source dirty:   false
+Binary SHA-256: c6eb94ee6ecb2d21c2261cff0670a354d67417caa1f15275301b590267366d34
+Maximum GLIBC:  GLIBC_2.39
+```
+
+The ELF needs only `libudev`, ALSA, `libgcc_s`, `libm`, `libc`, and the
+standard x86-64 loader. All resolved inside the pinned SDK.
+
+- Smoke `20260723T152012Z-295d788a8e6e-smoke-2663708` exited zero under the
+  Deck's `SteamLinuxRuntime_4`. The fresh 1280x800 PNG was inspected and
+  matched the accepted terrain/foliage view. All 300 Gamescope frames
+  presented with no skipped or reconfigured frames.
+- Perf `20260723T152103Z-295d788a8e6e-perf-2665383` exited zero. Its 600-frame
+  timedemo averaged 5.789 ms after a 6.759 s scene build. The live
+  render-distance-10 lane presented all 3600 frames, reached 529 visible
+  chunks, and exited with no pending generation/publication work.
+- The live lane still used the current 2667x1875, 89.887 Hz Gamescope surface.
+  It reported 11.141 ms median, 15.183 ms p95, and 16.650 ms p99 frame-wall
+  time. This is effectively in the earlier host-built bring-up envelope, which
+  is expected: the container changes ABI discipline, not the runtime workload.
+- The asset-lock override remains recorded as true. Resolve the unrelated
+  extracted/packed asset drift before calling this a fully clean production
+  payload or establishing the release performance threshold.
+
 ## Bring-up Ledger
 
 - [x] Retail Steam Deck Developer Mode enabled.
@@ -273,6 +339,8 @@ artifacts.
 - [x] Deploy the first native release payload.
 - [x] Record automated screenshot and Gamescope smoke evidence.
 - [x] Exercise the bounded timedemo and live presentation command.
-- [ ] Build the production payload inside a pinned SteamRT4 SDK container.
+- [x] Build the production payload inside a pinned SteamRT4 SDK container.
+- [x] Deploy and smoke a clean-source SteamRT4 artifact.
+- [x] Record SteamRT4 timedemo and live presentation evidence.
 - [ ] Record interactive Linux/Gamescope/controller acceptance.
 - [ ] Record the first reproducible release performance baseline.
