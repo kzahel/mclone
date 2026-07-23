@@ -119,6 +119,35 @@ fn engine_camera_controller_toggles_movement_mode() {
 }
 
 #[test]
+fn engine_camera_controller_toggles_walk_and_fly_without_specialized_modes() {
+    let mut camera = EngineCameraController::spawn_for_chunk(ChunkPos::new(0, 0));
+
+    assert_eq!(
+        camera.toggle_walk_fly_movement_mode(),
+        EngineCameraMovementMode::Fly
+    );
+    assert_eq!(camera.collision_mode(), EngineCameraCollisionMode::NoClip);
+    assert_eq!(
+        camera.toggle_walk_fly_movement_mode(),
+        EngineCameraMovementMode::Walking
+    );
+    assert_eq!(camera.collision_mode(), EngineCameraCollisionMode::Normal);
+
+    for specialized in [
+        EngineCameraMovementMode::HandPush,
+        EngineCameraMovementMode::Thruster,
+    ] {
+        camera.set_movement_mode(specialized);
+        camera.set_collision_mode(EngineCameraCollisionMode::NoClip);
+        assert_eq!(
+            camera.toggle_walk_fly_movement_mode(),
+            EngineCameraMovementMode::Walking
+        );
+        assert_eq!(camera.collision_mode(), EngineCameraCollisionMode::Normal);
+    }
+}
+
+#[test]
 fn thruster_defaults_normal_collision_but_leaves_noclip_selectable() {
     // Tactical 157: entering Thruster must default to Normal collision (never
     // force NoClip like Fly), yet — unlike HandPush, which is always

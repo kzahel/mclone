@@ -601,6 +601,25 @@ impl EngineCameraController {
         self.movement_mode
     }
 
+    /// Toggle the flat debug shortcut between ordinary walking and no-clip
+    /// flight without entering the specialized hand-driven movement modes.
+    pub fn toggle_walk_fly_movement_mode(&mut self) -> EngineCameraMovementMode {
+        let movement_mode = match self.movement_mode {
+            EngineCameraMovementMode::Walking => EngineCameraMovementMode::Fly,
+            EngineCameraMovementMode::Fly
+            | EngineCameraMovementMode::HandPush
+            | EngineCameraMovementMode::Thruster => EngineCameraMovementMode::Walking,
+        };
+        self.set_movement_mode(movement_mode);
+        let collision_mode = if movement_mode == EngineCameraMovementMode::Fly {
+            EngineCameraCollisionMode::NoClip
+        } else {
+            EngineCameraCollisionMode::Normal
+        };
+        self.set_collision_mode(collision_mode);
+        self.movement_mode
+    }
+
     pub fn set_collision_mode(&mut self, collision_mode: EngineCameraCollisionMode) {
         let collision_mode = if self.movement_mode == EngineCameraMovementMode::HandPush {
             EngineCameraCollisionMode::Normal

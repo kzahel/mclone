@@ -1023,9 +1023,9 @@ impl ChunkApp {
         );
     }
 
-    fn toggle_movement_mode(&mut self) {
+    fn toggle_walk_fly_movement_mode(&mut self) {
         if let Some(driver) = &mut self.scene_driver {
-            let movement_mode = driver.toggle_movement_mode();
+            let movement_mode = driver.toggle_walk_fly_movement_mode();
             log::info!("player movement mode {}", movement_mode.label());
         }
     }
@@ -1357,7 +1357,7 @@ impl ApplicationHandler for ChunkApp {
                         && event.state == ElementState::Pressed
                         && !event.repeat
                     {
-                        self.toggle_movement_mode();
+                        self.toggle_walk_fly_movement_mode();
                         self.schedule_next_redraw(event_loop);
                         return;
                     }

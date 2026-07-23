@@ -632,8 +632,8 @@ impl WinitFrameDriver {
         self.host.commit_mono_blink_debug()
     }
 
-    pub(crate) fn toggle_movement_mode(&mut self) -> EngineCameraMovementMode {
-        self.host.toggle_mono_movement_mode()
+    pub(crate) fn toggle_walk_fly_movement_mode(&mut self) -> EngineCameraMovementMode {
+        self.host.toggle_mono_walk_fly_movement_mode()
     }
 
     pub(crate) fn shoot_debug_physics_cube(&mut self) -> Result<bool> {

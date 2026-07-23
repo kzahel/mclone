@@ -1144,7 +1144,7 @@ impl WebSceneHost {
         if pressed && !repeat && !self.host_ref()?.mono_ui_is_active() {
             match key {
                 KeyboardKey::KeyN => {
-                    let _ = self.host_mut()?.toggle_mono_movement_mode();
+                    let _ = self.host_mut()?.toggle_mono_walk_fly_movement_mode();
                     return self
                         .input_disposition_report(
                             MonoInputDisposition {

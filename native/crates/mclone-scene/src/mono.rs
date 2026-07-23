@@ -988,8 +988,8 @@ impl McloneSceneHost {
         self.active_world.camera.toggle_view_mode()
     }
 
-    pub fn toggle_mono_movement_mode(&mut self) -> EngineCameraMovementMode {
-        self.active_world.camera.toggle_movement_mode()
+    pub fn toggle_mono_walk_fly_movement_mode(&mut self) -> EngineCameraMovementMode {
+        self.active_world.camera.toggle_walk_fly_movement_mode()
     }
 
     pub fn adjust_mono_camera_speed(&mut self, amount: f64) {
