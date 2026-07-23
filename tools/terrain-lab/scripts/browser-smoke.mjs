@@ -69,25 +69,14 @@ try {
   await settlePaint(page);
   const initialRevision = Number(await shell.getAttribute("data-render-revision"));
   const initialUrl = page.url();
-  const comparisonMetrics = {
-    baseMeanError: await numericAttribute(shell, "data-base-mean-error"),
-    baseP95Error: await numericAttribute(shell, "data-base-p95-error"),
-    continentalnessError: await numericAttribute(shell, "data-continentalness-error"),
-    oceanAgreement: await numericAttribute(shell, "data-ocean-agreement"),
-  };
-  if (comparisonMetrics.baseMeanError > 0.01
-      || comparisonMetrics.baseP95Error > 0.01
-      || comparisonMetrics.continentalnessError > 0.001
-      || comparisonMetrics.oceanAgreement < 0.999) {
-    throw new Error(
-      `Production large-field comparison regressed: ${JSON.stringify(comparisonMetrics)}`,
-    );
-  }
+  const comparisonMetrics = await readComparisonMetrics(shell);
+  assertLargeFieldMetrics(comparisonMetrics, "2 km review");
 
   const pageCapture = `/tmp/mclone-terrain-lab-${label}.png`;
   const canvasCapture = `/tmp/mclone-terrain-lab-${label}-canvas.png`;
   const orbitCapture = `/tmp/mclone-terrain-lab-${label}-orbit.png`;
   const errorCapture = `/tmp/mclone-terrain-lab-${label}-map-error.png`;
+  const continentScaleCapture = `/tmp/mclone-terrain-lab-${label}-continent-scale.png`;
   await page.screenshot({ path: pageCapture, fullPage: true });
   await page.locator("canvas[aria-label='Live GPU terrain preview']").screenshot({
     path: canvasCapture,
@@ -130,10 +119,20 @@ try {
   await settlePaint(page);
   await page.screenshot({ path: errorCapture, fullPage: true });
 
+  const localMapRevision = Number(await shell.getAttribute("data-render-revision"));
+  await page.getByLabel("Diagnostic layer").selectOption("continentalness");
+  await page.getByLabel("Sample spacing").selectOption("1024");
+  await waitForRevision(shell, localMapRevision);
+  const continentScaleMetrics = await readComparisonMetrics(shell);
+  assertLargeFieldMetrics(continentScaleMetrics, "65.5 km continent");
+  await page.locator("canvas[aria-label='Live GPU terrain preview']").screenshot({
+    path: continentScaleCapture,
+  });
+
   const finalUrl = page.url();
-  if (!finalUrl.includes("layer=error")
+  if (!finalUrl.includes("layer=continentalness")
       || !finalUrl.includes("view=map")
-      || !finalUrl.includes("spacing=64")) {
+      || !finalUrl.includes("spacing=1024")) {
     throw new Error(`Terrain Lab controls did not round-trip through the URL: ${finalUrl}`);
   }
   if (pageErrors.length > 0) {
@@ -142,9 +141,16 @@ try {
 
   const report = {
     adapter: await page.locator("[data-testid='adapter-name']").textContent(),
-    captures: { canvasCapture, errorCapture, orbitCapture, pageCapture },
+    captures: {
+      canvasCapture,
+      continentScaleCapture,
+      errorCapture,
+      orbitCapture,
+      pageCapture,
+    },
     comparison: await page.locator("[data-testid='terrain-diagnostics']").innerText(),
     comparisonMetrics,
+    continentScaleMetrics,
     finalUrl,
     target: externalBaseUrl ? "hosted" : "local-preview",
     launch: {
@@ -278,4 +284,24 @@ async function numericAttribute(locator, name) {
     throw new Error(`Terrain Lab attribute ${name} is not numeric`);
   }
   return value;
+}
+
+async function readComparisonMetrics(shell) {
+  return {
+    baseMeanError: await numericAttribute(shell, "data-base-mean-error"),
+    baseP95Error: await numericAttribute(shell, "data-base-p95-error"),
+    continentalnessError: await numericAttribute(shell, "data-continentalness-error"),
+    oceanAgreement: await numericAttribute(shell, "data-ocean-agreement"),
+  };
+}
+
+function assertLargeFieldMetrics(metrics, label) {
+  if (metrics.baseMeanError > 0.01
+      || metrics.baseP95Error > 0.01
+      || metrics.continentalnessError > 0.001
+      || metrics.oceanAgreement < 0.999) {
+    throw new Error(
+      `Production large-field comparison regressed at ${label}: ${JSON.stringify(metrics)}`,
+    );
+  }
 }
