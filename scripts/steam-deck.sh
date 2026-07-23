@@ -48,6 +48,9 @@ Usage: scripts/steam-deck.sh COMMAND
 
 Commands:
   status        Query the paired Deck and SteamOS session.
+  power-status  Report AC, idle-suspend, and internal-screen state.
+  screen-off    Sleep the internal panel through the Gaming Mode compositor.
+  screen-on     Wake the internal panel through the Gaming Mode compositor.
   stage         Build and assemble dist/steamdeck.
   upload        Stage, upload, and register Devkit Game: mclone.
   deploy        Stage, upload, register, and launch interactive play.
@@ -97,6 +100,121 @@ require_deck()
     require_command jq
     test -f "$DECK_KEY" || die "Devkit key not found: $DECK_KEY"
     ssh_deck "/usr/bin/true" >/dev/null
+}
+
+deck_power_status()
+{
+    require_deck
+    ssh_deck "/usr/bin/bash -s" <<'REMOTE'
+set -euo pipefail
+
+ac_online=unknown
+for supply in /sys/class/power_supply/*; do
+    [[ -e $supply ]] || continue
+    [[ $(cat "$supply/type" 2>/dev/null || true) == Mains ]] || continue
+    ac_online=$(cat "$supply/online" 2>/dev/null || echo unknown)
+    break
+done
+
+config="$HOME/.local/share/Steam/config/config.vdf"
+ac_suspend=$(sed -n \
+    's/.*"IdleSuspendACSeconds"[[:space:]]*"\([0-9]*\)".*/\1/p' \
+    "$config" 2>/dev/null | tail -1)
+battery_suspend=$(sed -n \
+    's/.*"IdleSuspendBatterySeconds"[[:space:]]*"\([0-9]*\)".*/\1/p' \
+    "$config" 2>/dev/null | tail -1)
+
+connector=unavailable
+connector_state=unknown
+for path in /sys/class/drm/card*-eDP-*; do
+    [[ -e $path ]] || continue
+    connector=${path##*/}
+    connector_state=$(cat "$path/enabled" 2>/dev/null || echo unknown)
+    break
+done
+
+if pgrep -f '(^|/)gamescope( |$)' >/dev/null 2>&1; then
+    gamescope_state=running
+else
+    gamescope_state=stopped
+fi
+
+printf 'AC online: %s\n' "$ac_online"
+printf 'AC idle suspend: %s seconds%s\n' \
+    "${ac_suspend:-unknown}" \
+    "$([[ ${ac_suspend:-} == 0 ]] && printf ' (disabled)' || true)"
+printf 'Battery idle suspend: %s seconds%s\n' \
+    "${battery_suspend:-unknown}" \
+    "$([[ ${battery_suspend:-} == 0 ]] && printf ' (disabled)' || true)"
+printf 'Gamescope: %s\n' "$gamescope_state"
+printf 'Internal connector: %s (%s)\n' "$connector" "$connector_state"
+printf 'SSH: reachable\n'
+REMOTE
+}
+
+set_deck_internal_screen_sleep()
+{
+    local requested=$1
+    local expected=$2
+    local label=$3
+    require_deck
+    ssh_deck \
+        "/usr/bin/bash -s -- $(printf '%q' "$requested") $(printf '%q' "$expected") $(printf '%q' "$label")" \
+        <<'REMOTE'
+set -euo pipefail
+requested=$1
+expected=$2
+label=$3
+runtime_dir="/run/user/$(id -u)"
+
+gamescope_display=
+for path in "$runtime_dir"/gamescope-[0-9]*; do
+    [[ -S $path ]] || continue
+    name=${path##*/}
+    [[ $name =~ ^gamescope-[0-9]+$ ]] || continue
+    gamescope_display=$name
+    break
+done
+[[ -n $gamescope_display ]] || {
+    echo "steam-deck: active Gaming Mode Gamescope socket not found" >&2
+    exit 1
+}
+command -v gamescopectl >/dev/null 2>&1 || {
+    echo "steam-deck: gamescopectl is unavailable" >&2
+    exit 1
+}
+
+XDG_RUNTIME_DIR=$runtime_dir \
+GAMESCOPE_WAYLAND_DISPLAY=$gamescope_display \
+    gamescopectl drm_sleep_internal_screen "$requested"
+
+connector=
+for path in /sys/class/drm/card*-eDP-*; do
+    [[ -e $path ]] || continue
+    connector=$path
+    break
+done
+[[ -n $connector ]] || {
+    echo "steam-deck: internal eDP connector not found" >&2
+    exit 1
+}
+
+state=unknown
+for _attempt in {1..20}; do
+    state=$(cat "$connector/enabled" 2>/dev/null || echo unknown)
+    [[ $state == "$expected" ]] && break
+    sleep 0.1
+done
+[[ $state == "$expected" ]] || {
+    echo \
+        "steam-deck: internal connector did not become $expected (state=$state)" \
+        >&2
+    exit 1
+}
+printf \
+    'Deck internal screen: %s (%s=%s); SSH remains reachable\n' \
+    "$label" "${connector##*/}" "$state"
+REMOTE
 }
 
 stage_payload()
@@ -398,6 +516,18 @@ case "$command" in
     status)
         require_deck
         ssh_deck "python3 ~/devkit-utils/steamos-get-status --json"
+        ;;
+    power-status)
+        [[ $# == 0 ]] || die "power-status takes no arguments"
+        deck_power_status
+        ;;
+    screen-off)
+        [[ $# == 0 ]] || die "screen-off takes no arguments"
+        set_deck_internal_screen_sleep true disabled off
+        ;;
+    screen-on)
+        [[ $# == 0 ]] || die "screen-on takes no arguments"
+        set_deck_internal_screen_sleep false enabled on
         ;;
     stage)
         [[ $# == 0 ]] || die "stage takes no arguments"

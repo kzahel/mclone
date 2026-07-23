@@ -114,6 +114,9 @@ Its package commands are:
 
 ```bash
 pnpm steamdeck:status
+pnpm steamdeck:power-status
+pnpm steamdeck:screen-off
+pnpm steamdeck:screen-on
 pnpm steamdeck:stage
 pnpm steamdeck:upload
 pnpm steamdeck:deploy
@@ -136,6 +139,37 @@ repository:
 ```bash
 MCLONE_STEAM_DECK=HOST pnpm steamdeck:status
 ```
+
+### Unattended AC power and screen control
+
+The paired Deck is configured with `IdleSuspendACSeconds=0`, so Gaming Mode
+does not idle-suspend it while AC remains connected. Its battery idle-suspend
+timer remains 900 seconds. This is the desired unattended-test-bed policy:
+losing AC still has a bounded battery safeguard, while an AC-powered Deck
+retains SSH and Devkit reachability without a long-running inhibitor process.
+
+Use the wrapper to inspect that state and sleep only the built-in panel:
+
+```bash
+MCLONE_STEAM_DECK=HOST pnpm steamdeck:power-status
+MCLONE_STEAM_DECK=HOST pnpm steamdeck:screen-off
+MCLONE_STEAM_DECK=HOST pnpm steamdeck:screen-on
+```
+
+`screen-off` asks the active Gaming Mode Gamescope session to set
+`drm_sleep_internal_screen=true`. On the 2026-07-23 device this changed
+`card0-eDP-1/enabled` from `enabled` to `disabled` while SSH remained live.
+`screen-on` clears the convar and verifies that the connector becomes enabled
+again. This is real connector sleep, not minimum brightness, and it does not
+suspend the Deck. The commands fail explicitly outside an active Gamescope
+session and affect only the internal panel; they do not blank a docked external
+display.
+
+Turn the screen on before interactive play, screenshot acceptance through the
+live compositor, or presentation/performance measurement. Leaving the
+connector disabled is appropriate for idle availability and CPU-only or
+offscreen work, but it is not representative live-presentation evidence. An
+ordinary Gamescope restart resets this session-scoped forced-sleep state.
 
 `stage` builds the release client, verifies the checked-in asset-pack lock,
 and assembles `dist/steamdeck` with a SHA-256 build receipt. `upload` performs
