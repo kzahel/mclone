@@ -3150,6 +3150,50 @@ mod tests {
     }
 
     #[test]
+    fn far_lod_worker_preserves_mclone_alpine_snow_surface() {
+        let seed = -98_765;
+        let sampler = mclone_worldgen::levelgen::McloneOverworldSampler::new(seed);
+        let (world_x, world_z) = 'site: {
+            for world_z in (-2_048..2_048).step_by(16) {
+                for world_x in (-2_048..2_048).step_by(16) {
+                    let landform = sampler.sample_landform(world_x, world_z);
+                    if mclone_worldgen::levelgen::mclone_overworld_surface_recipe(landform)
+                        == mclone_worldgen::levelgen::McloneOverworldSurfaceRecipe::AlpineSnow
+                    {
+                        break 'site (world_x, world_z);
+                    }
+                }
+            }
+            panic!("review seed should contain an alpine snow surface");
+        };
+        let pos = ChunkPos::from_block_coords(world_x, world_z);
+        let direct_chunk = generate_mclone_overworld_surface_chunk(seed, pos.x, pos.z);
+        let direct = surface_column(
+            &direct_chunk,
+            world_x - pos.min_block_x(),
+            world_z - pos.min_block_z(),
+        )
+        .expect("alpine snow column has a surface");
+        assert_eq!(direct.block.raw(), SNOW);
+
+        let mut cache = FarTerrainLodWorkerCache::default();
+        let sampled = surface_sample_world(
+            &mut cache,
+            seed,
+            WorldGenerationProfile::McloneOverworldV1,
+            world_x,
+            world_z,
+            None,
+        )
+        .expect("Mclone alpine far LOD sample exists");
+        assert_eq!(sampled.y, direct.y as f32);
+        assert_eq!(
+            cache.source,
+            Some((seed, WorldGenerationProfile::McloneOverworldV1))
+        );
+    }
+
+    #[test]
     fn far_terrain_lod_chunk_patch_emits_flat_blocky_cell_caps() {
         let config = FarTerrainLodConfig::enabled().with_extra_radius_chunks(1);
         let key = FarTerrainLodBuildKey::new(12345, ChunkPos::new(0, 0), 0, config);
