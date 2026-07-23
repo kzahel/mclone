@@ -592,9 +592,9 @@ fn generated_mclone_flat_reach_is_quiescent_when_every_source_is_woken() {
 }
 
 #[test]
-fn generated_mclone_baked_drop_is_quiescent_when_every_water_cell_is_woken() {
+fn generated_mclone_bounded_tributary_is_quiescent_when_every_water_cell_is_woken() {
     let seed = -98_765;
-    let center = ChunkPos::new(-103, 185);
+    let center = ChunkPos::new(183, -177);
     let definition =
         DimensionDefinition::overworld(seed, WorldGenerationProfile::McloneOverworldV1);
     let mut server = LocalRealmSession::local_integrated_with_dimension_definition(definition);

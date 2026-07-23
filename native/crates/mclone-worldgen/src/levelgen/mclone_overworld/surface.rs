@@ -151,6 +151,9 @@ mod tests {
                 watercourse: McloneOverworldWatercourseSample {
                     distance: 512.0,
                     channel_influence: 0.0,
+                    major_channel_influence: 0.0,
+                    raised_tributary_influence: 0.0,
+                    tributary_source_pool_influence: 0.0,
                     bank_influence: 0.0,
                     half_width: 6.0,
                     water_surface_y: MCLONE_OVERWORLD_SEA_LEVEL,

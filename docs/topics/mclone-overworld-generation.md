@@ -38,11 +38,17 @@ soak pass. Human Review 2 nevertheless rejected the world language: every
 physical river still shares one level and disappears at the conservative
 lowland gate, while large water bodies have smooth shallow floors without
 size-aware shelf and deep-basin structure. Field revision 9 now supplies
-size-aware shelf/deep-basin bathymetry, and field revision 10 supplies local
-four-block flat levels joined by bounded baked drops. Their structural,
-runtime, performance, movement, map, and pixel evidence passes and awaits
-Human Review 3. The local solution deliberately does not claim true
-headwaters, outlets, confluences, or globally monotonic drainage.
+size-aware shelf/deep-basin bathymetry. Field revision 10 then supplied local
+four-block flat levels joined by bounded baked drops, but interactive review
+found that its locally downhill choices can still produce a river whose level
+falls and later rises. Field revision 11 replaces that rejected global
+stepping with sea-level major rivers plus sparse, short, closed tributary
+landmarks: an explicit source pool and Y67 upper reach descend through one
+baked four-block fall into an already-valid Y63 major river. Closure,
+authoritative fluid wakes, hotspot generation performance, a 3,600-frame
+movement soak, maps, and final RD16 pixels pass. The compromise deliberately
+does not claim a drainage network, general highland rivers, confluences, or
+globally monotonic macro flow.
 
 ## Scope
 
@@ -265,17 +271,53 @@ not a globally monotonic drainage proof, and there is no explicit headwater,
 outlet, confluence, accumulated discharge, or named reach identity. One
 integrated river-to-shelf-to-deep-basin outlet remains a review gap.
 
+Interactive review rejected revision 10 as a global river model. Quantizing a
+local hydraulic potential does not establish one persistent source-to-sink
+ordering: a player can follow the corridor down one step and later encounter
+an uphill step. Increasing the local sample radius cannot prove otherwise.
+The implementation remains useful evidence for stable lips, falling sheets,
+and receiving pools, but its levels must not be interpreted as drainage
+topology.
+
+Field revision 11 adopts the bounded compromise. The major warped-contour
+river is always one Y63 source plane, including where a broad graded valley
+must lower higher land toward it. Raised water exists only in a local
+hydrology landmark with all four roles present:
+
+1. a round source pool;
+2. a roughly 31-40-block Y67 upper tributary;
+3. one four-block rock-lip, falling-sheet, and receiver transition; and
+4. the existing Y63 major river as its explicit sink.
+
+An independent 384/128-block tributary contour provides the short natural
+alignment. A bounded two-refinement local intersection solve reconstructs the
+same major-river/tributary anchor from each participating column; it neither
+walks the river nor consults generated chunks. A 768-block selector keeps the
+landmarks sparse. The sample exposes separate major-channel,
+raised-tributary, and source-pool influences so review and later structure
+siting do not have to infer those roles from water blocks.
+
+Containment is part of the authored landmark. A seven-block local support band
+keeps the upper source plane below its banks. During final column realization,
+a four-neighbor check converts any rare exposed high-source fringe into a
+solid one-column berm. This is fixed local work over the existing two-block
+sample halo, not fluid simulation, recursion, or another chunk dependency.
+The major river's immediate bank is Y64 and then grades back to accepted
+terrain across a width proportional to incision, avoiding both floating water
+and the initial sheer-canyon artifact.
+
 The production hydraulic-closure audit checks generated chunks with a
 one-chunk halo. It rejects horizontal source faces open to non-solid cells,
 unsupported source or flowing water, unequal tops on adjacent ordinary source
 columns, and initial liquid ticks. It classifies unequal tops across the
-bounded falling stencil as intentional drop edges. The reviewed seed `-98765`
-drop at chunk `(-103,185)` contains 2,570 source and 68 flowing blocks with 17
-intentional drop edges and zero structural failures; the periodic drop at
-`(-75,-95)` passes the same contract. Separate authoritative-server tests wake
-every water cell in the drop and every source in an ordinary reach, require
-zero mutation, and drain the queues. The audit is review/test work and adds no
-hot-path generation cost.
+bounded falling stencil as intentional drop edges. The revision-11 review
+landmark at seed `-98765`, chunk `(183,-177)`, contains 1,409 source and 16
+flowing blocks across its audited nine chunks, with four intentional drop
+edges and zero open faces, unsupported cells, accidental sloped edges, or
+initial liquid ticks. An authoritative server test wakes every water cell in
+those chunks; every tick drains and zero blocks change. The periodic ordinary
+river audits remain closed. The audit is review/test work and adds no chunk
+dependency or fluid work to production generation.
 
 This corridor family is fixed-work and visually continuous, but it is not yet
 a drainage network. Generic zero contours may form closed loops and do not
@@ -405,6 +447,25 @@ none exceeded 2x. Publications ended empty, while a 17-worldgen-job and
 94-render-chunk tail remained because the accelerated route was still moving.
 Maximum/final scheduled-fluid depth and all due, executed, deferred, mutation,
 snapshot, and fluid-event totals were zero.
+
+The revision-11 hotspot comparison used separately built revision-10 and
+revision-11 binaries on the same Linux host at seed `-98765`, chunk
+`(183,-177)`, radius three, and 20 iterations. Revision 10 measured 2,331
+surface chunks/s, 771 cold decorated targets/s, and 3,794 warm targets/s.
+Revision 11 measured 2,168, 759, and 2,941 respectively: -7.0 percent surface,
+-1.5 percent cold, and -22.5 percent warm. This deliberately branch-heavy
+site remains inside the 25-percent investigation gate. Columns outside a
+64-block major-river corridor return before hydraulic work; the two-step
+intersection solve runs only after cheap side, distance, alignment, selector,
+and height gates identify a plausible landmark.
+
+The matching revision-11 movement run used chunk `(183,-177)` and the same
+RD10, eight-chunk-radius, 32-block/s, 3,600-frame/60 Hz shape. It measured
+5.671 ms average offscreen work, 9.398 ms p95, 11.679 ms p99, and 16.953 ms
+max. One frame exceeded 16.667 ms and none exceeded 2x. The accelerated route
+ended with a 19-job, six-publication, and 114-render-chunk tail while still
+moving. Scheduled-fluid depth and due, executed, deferred, mutation, snapshot,
+and event totals stayed zero.
 
 Quality-versus-speed controls divide into two categories:
 
@@ -690,19 +751,19 @@ subsystem horizontally.
 4. **Rivers and wetlands**
    - Deterministic river influence applied before surface recipes.
    - Human Review 1 rejected field revision 7's sloped/uncontained water.
-     Human Review 2 rejected revision 8's one-level language. Corrective field
-     revisions 9/10 now pass bathymetry, stepped-reach, bounded-drop,
-     closure, runtime, pixel, and performance evidence and are ready for Human
-     Review 3.
-   - Water surface, width/depth, banks, provisional flow, grade, local
-     upper/lower drop, receiving-pool, and wetland facts are live. Headwater,
-     confluence, outlet, discharge, globally monotonic drainage, and true
-     reach continuity await a network-semantic slice.
+     Human Review 2 rejected revision 8's one-level language, then interactive
+     review rejected revision 10's globally non-monotonic stepped corridor.
+     Revision 9 bathymetry and revision 11's flat major rivers plus bounded
+     source/tributary/fall/sink landmarks now pass closure, runtime, pixel,
+     movement, and performance evidence.
+   - Water surface, width/depth, banks, provisional flow, grade, local source
+     pool, upper tributary, drop, receiving pool, and wetland facts are live.
+     General highland reaches, confluences, discharge, globally monotonic
+     drainage, and macro headwater/outlet identity remain deferred.
 5. **Streams, cascades, and waterfall reaches**
-   - Generalize the first bounded four-block drop only after the parent river
-     and its local stencil pass human review. Realize smaller continuous
-     watercourses against accepted relief and river facts, with stable
-     upstream and downstream destinations.
+   - The first short source-to-river tributary is live as a bounded landmark.
+     Generalize it only after interactive human review, and retain explicit
+     upstream and downstream destinations for every raised-water variant.
    - Classify calm, riffle, cascade, fall, and later mill-compatible reaches;
      never place an isolated falling-water decoration without a watercourse.
    - Keep sound, mist, splash particles, animation, and functional machinery
@@ -872,15 +933,15 @@ Human Review 3 accepted the result as more natural and less geometric.
 
 ## Next Work
 
-Field revisions 9/10 are at Human Review 3. Review the deep-basin RD16 card and
-the stepped-reach card interactively, especially whether the containment edge
-looks like a plausible bank or an engineered canal. The remaining objective
-review gap is one river outlet whose bed joins a visible shelf and deep basin;
-the remaining semantic gap is actual headwater/outlet and globally monotonic
-reach identity. Do not hide those gaps by inferring a drainage graph from the
-local flow vector. Caves, structures, broad biome expansion, and platform
-closeout remain parked until the human water review decides whether to refine
-this local family or move directly to macro drainage-network semantics.
+Field revision 11 is the current human review point. Inspect the RD16
+`(183,-177)` card interactively: the important subjective questions are
+whether the broad Y63 river valley reads naturally, whether the small Y67
+source-pool/tributary/fall landmark is legible and charming, and whether its
+seven-block support band looks authored rather than engineered. One
+river-to-shelf-to-deep-basin composition remains an objective review gap.
+General highland rivers and globally monotonic drainage remain deliberately
+absent; do not reconstruct them from the provisional local flow vector. Caves,
+structures, and broad biome expansion remain parked until this review.
 
 ## Related
 

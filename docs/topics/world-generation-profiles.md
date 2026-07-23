@@ -379,7 +379,7 @@ Current `mclone-overworld-v1` support is:
 |---|---|---|---|---|---|
 | Terrain fields | supported | unsupported | supported at 384 chunks | pending | design only |
 | Features | supported | unsupported | supported at 384 chunks | pending | design only |
-| Rivers/hydrology | size-aware ocean bathymetry plus local four-block flat reaches and bounded drops | unsupported | same fields and stencils at 384 chunks | pending | design only |
+| Rivers/hydrology | size-aware ocean bathymetry, flat Y63 major rivers, and bounded Y67 source/tributary/fall/sink landmarks | unsupported | same periodic fields and fixed local stencils at 384 chunks | pending | design only |
 | Mclone caves | absent | - | - | - | - |
 | Mclone structures | absent | - | - | - | - |
 
@@ -421,13 +421,14 @@ Human Review 1 rejected the first bounded rivers/wetlands hydraulic
 realization because pointwise terrain-relative water height permitted
 transverse slopes and uncontained source faces. Human Review 2 then rejected
 field revision 8's one-level lowland language and shallow ocean floors. Field
-revision 9 adds size-aware shelf/deep-basin bathymetry; revision 10 adds local
-four-block flat levels, a bounded lip/fall/pool stencil, and source-versus-flow
-closure diagnostics on the exact plane/384-chunk-cylinder sampler contract.
-Authoritative runtime wakes and a waterfall-centered movement soak produce no
-fluid mutations or generated fluid-tick tail. Human Review 3 now decides
-whether this local family is visually sufficient or should give way to
-macro-tile drainage semantics. Explicit headwater/outlet identity, global
+revision 9 adds size-aware shelf/deep-basin bathymetry. Revision 10 proved a
+bounded lip/fall/pool stencil but interactive review rejected its locally
+quantized major corridor because it can descend and later rise. Revision 11
+keeps major rivers hydrostatic at Y63 and uses the stable drop only in a short
+Y67 source-pool/tributary/fall/Y63-river landmark. Authoritative wakes and a
+waterfall-centered movement soak produce no fluid mutations or generated
+fluid-tick tail. Human review now decides whether this compromise is visually
+sufficient. General highland rivers, macro drainage identity, global
 monotonicity, and one integrated river-to-deep-basin outlet remain open.
 Production chunk-time simulation remains excluded.
 True structure infrastructure remains ready as a separate concern but is

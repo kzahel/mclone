@@ -314,7 +314,7 @@ fn run() -> Result<()> {
 
     let (commit, dirty) = git_state();
     let receipt = serde_json::json!({
-        "schema": 10,
+        "schema": 11,
         "profile": "mclone-overworld-v1",
         "topology": config.topology.label(),
         "fieldRevision": MCLONE_OVERWORLD_FIELD_REVISION,
@@ -405,6 +405,9 @@ fn run() -> Result<()> {
         },
         "watercourseCounts": {
             "channel": facts.river_channel_columns,
+            "majorChannel": facts.major_river_channel_columns,
+            "raisedTributary": facts.raised_tributary_columns,
+            "tributarySourcePool": facts.tributary_source_pool_columns,
             "gradedBank": facts.river_bank_influence_columns,
             "distinctReachLevels": facts.reach_level_count,
             "dropTransition": facts.drop_transition_columns,
@@ -708,6 +711,9 @@ fn sample_json(sample: McloneOverworldLandformSample) -> serde_json::Value {
         "watercourse": {
             "distance": terrain.watercourse.distance,
             "channelInfluence": terrain.watercourse.channel_influence,
+            "majorChannelInfluence": terrain.watercourse.major_channel_influence,
+            "raisedTributaryInfluence": terrain.watercourse.raised_tributary_influence,
+            "tributarySourcePoolInfluence": terrain.watercourse.tributary_source_pool_influence,
             "bankInfluence": terrain.watercourse.bank_influence,
             "halfWidth": terrain.watercourse.half_width,
             "waterSurfaceY": terrain.watercourse.water_surface_y,
@@ -867,6 +873,9 @@ struct RegionFacts {
     grass_soil_columns: usize,
     exposed_stone_columns: usize,
     river_channel_columns: usize,
+    major_river_channel_columns: usize,
+    raised_tributary_columns: usize,
+    tributary_source_pool_columns: usize,
     river_bank_influence_columns: usize,
     reach_level_count: usize,
     drop_transition_columns: usize,
@@ -948,6 +957,9 @@ impl RegionFacts {
         let mut grass_soil_columns = 0;
         let mut exposed_stone_columns = 0;
         let mut river_channel_columns = 0;
+        let mut major_river_channel_columns = 0;
+        let mut raised_tributary_columns = 0;
+        let mut tributary_source_pool_columns = 0;
         let mut river_bank_influence_columns = 0;
         let mut reach_levels = BTreeSet::new();
         let mut drop_transition_columns = 0;
@@ -1024,6 +1036,15 @@ impl RegionFacts {
                 min_river_water_y = min_river_water_y.min(sample.watercourse.water_surface_y);
                 max_river_water_y = max_river_water_y.max(sample.watercourse.water_surface_y);
                 reach_levels.insert(sample.watercourse.water_surface_y);
+            }
+            if sample.watercourse.is_major_channel() {
+                major_river_channel_columns += 1;
+            }
+            if sample.watercourse.is_raised_tributary() {
+                raised_tributary_columns += 1;
+            }
+            if sample.watercourse.is_tributary_source_pool() {
+                tributary_source_pool_columns += 1;
             }
             if sample.watercourse.is_drop_transition() {
                 drop_transition_columns += 1;
@@ -1117,6 +1138,27 @@ impl RegionFacts {
                 .chain(sample.base_surface_y.to_le_bytes())
                 .chain(sample.watercourse.distance.to_bits().to_le_bytes())
                 .chain(sample.watercourse.channel_influence.to_bits().to_le_bytes())
+                .chain(
+                    sample
+                        .watercourse
+                        .major_channel_influence
+                        .to_bits()
+                        .to_le_bytes(),
+                )
+                .chain(
+                    sample
+                        .watercourse
+                        .raised_tributary_influence
+                        .to_bits()
+                        .to_le_bytes(),
+                )
+                .chain(
+                    sample
+                        .watercourse
+                        .tributary_source_pool_influence
+                        .to_bits()
+                        .to_le_bytes(),
+                )
                 .chain(sample.watercourse.bank_influence.to_bits().to_le_bytes())
                 .chain(sample.watercourse.half_width.to_bits().to_le_bytes())
                 .chain(sample.watercourse.water_surface_y.to_le_bytes())
@@ -1262,6 +1304,9 @@ impl RegionFacts {
             grass_soil_columns,
             exposed_stone_columns,
             river_channel_columns,
+            major_river_channel_columns,
+            raised_tributary_columns,
+            tributary_source_pool_columns,
             river_bank_influence_columns,
             reach_level_count: reach_levels.len(),
             drop_transition_columns,
@@ -1473,6 +1518,20 @@ fn river_distance_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
         return [15, 35, 72, 255];
     }
     if sample.watercourse.is_channel() {
+        if sample.watercourse.is_tributary_source_pool() {
+            return lerp_color(
+                [91, 184, 192, 255],
+                [25, 98, 153, 255],
+                sample.watercourse.tributary_source_pool_influence,
+            );
+        }
+        if sample.watercourse.is_raised_tributary() {
+            return lerp_color(
+                [86, 190, 213, 255],
+                [24, 112, 176, 255],
+                sample.watercourse.raised_tributary_influence,
+            );
+        }
         return lerp_color(
             [111, 210, 232, 255],
             [18, 85, 166, 255],
@@ -1496,7 +1555,7 @@ fn river_level_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
     lerp_color(
         [34, 101, 183, 255],
         [203, 226, 235, 255],
-        f64::from(sample.watercourse.water_surface_y - MCLONE_OVERWORLD_SEA_LEVEL) / 64.0,
+        f64::from(sample.watercourse.water_surface_y - MCLONE_OVERWORLD_SEA_LEVEL) / 8.0,
     )
 }
 
@@ -1531,6 +1590,16 @@ fn river_transition_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
             [70, 205, 220, 255],
             1.0 - sample.watercourse.drop_distance.abs() / 10.0,
         );
+    }
+    if sample.watercourse.is_tributary_source_pool() {
+        return lerp_color(
+            [48, 105, 148, 255],
+            [155, 103, 191, 255],
+            sample.watercourse.tributary_source_pool_influence,
+        );
+    }
+    if sample.watercourse.is_raised_tributary() {
+        return [51, 145, 173, 255];
     }
     [52, 77, 70, 255]
 }

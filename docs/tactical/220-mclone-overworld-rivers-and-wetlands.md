@@ -4,11 +4,14 @@ Status: Human Review 1 rejected the field-revision-7 hydraulic surface on
 2026-07-23. Field revision 8 replaced it with hydraulically safe flat,
 sea-level lowland water and passed its objective gates, but Human Review 2
 rejected the resulting world language. Field revision 9 now adds size-aware
-ocean bathymetry, and field revision 10 adds four-block flat reach levels plus
-bounded baked drops. Their objective map, hydraulic, runtime-wake, performance,
-and movement gates pass. They are ready for Human Review 3, but do not yet
-claim a true drainage network, explicit headwaters/outlets, or an integrated
-river-to-deep-basin outlet composition.
+ocean bathymetry. Field revision 10 added four-block flat reach levels plus
+bounded baked drops, but interactive review rejected its globally
+non-monotonic level sequence. Field revision 11 now keeps major rivers flat at
+Y63 and confines raised water to a complete bounded source-pool, short upper
+tributary, fall, and major-river sink landmark. Its map, hydraulic,
+runtime-wake, hotspot-performance, movement, and RD16 pixel gates pass. It is
+ready for human review without claiming a true drainage network, general
+highland rivers, confluences, or an integrated river-to-deep-basin outlet.
 
 Topic: `mclone-overworld-generation`
 
@@ -437,6 +440,59 @@ Execution record 2026-07-23:
   identity. Those unchecked semantics must not be inferred from the local
   level and flow fields.
 
+Human review result: **rejected as the major-river model**. The individual
+flat planes and transition stencil look plausible locally, but following one
+corridor can descend and later rise because the local hydraulic profile has no
+persistent source/sink ordering. A larger local dependency radius does not
+solve that semantic problem.
+
+### Corrective Slice 2F: flat major rivers and bounded tributary landmarks
+
+- [x] Restore every major river to the globally hydrostatic Y63 source plane.
+- [x] Grade a broad valley from a Y64 immediate edge back to accepted natural
+  terrain instead of preserving a sheer high bank.
+- [x] Permit raised water only in a complete local
+  source-pool/upper-reach/fall/major-river-sink composition.
+- [x] Expose major-channel, raised-tributary, and tributary-source-pool facts
+  separately in the production sampler and schema-11 review receipt.
+- [x] Use fixed local intersection work and the existing two-block column
+  halo; add no simulation, river trace, macro cache, or chunk dependency.
+- [x] Require the generated stencil and an authoritative wake of every water
+  cell to produce zero mutation and no residual fluid ticks.
+- [x] Re-run the branch-hotspot generation comparison, a 3,600-frame movement
+  soak, and RD16 pixels.
+
+Execution record 2026-07-23:
+
+- field revision 11 and decoration revision 8 retain the existing major-river
+  contour but realize it only at Y63. Incision-dependent bank width now grades
+  from a contained Y64 edge to the original terrain instead of cutting the
+  first reviewed sheer wall;
+- independent 384/128-block tributary contours and a 768-block selector choose
+  sparse positive-bank crossings. A bounded two-refinement local solve
+  reconstructs one anchor. Each landmark has a roughly 31-40-block Y67 upper
+  reach, 5.5-block-radius source pool, four-block drop, and Y63 receiver;
+- a seven-block support band and final four-neighbor source check seal the
+  raised plane. A rejected exposed fringe becomes a one-column solid berm.
+  This is bounded stencil realization rather than pre-running fluid
+  simulation;
+- the full-period four-block-step receipt contains 58,587 major-channel, 405
+  raised-tributary, 97 source-pool, 50 drop-transition, and 15 fall samples.
+  The exact review at chunk `(183,-177)` contains 1,409 source and 16 flowing
+  blocks, four intentional drop edges, and zero open faces, unsupported cells,
+  accidental sloped edges, or initial ticks;
+- the authoritative server schedules every water cell in the nine reviewed
+  chunks. Every wake drains and zero blocks mutate;
+- a same-host, 20-iteration radius-three hotspot A/B against revision 10
+  measures 2,168 versus 2,331 surface chunks/s, 759 versus 771 cold decorated
+  targets/s, and 2,941 versus 3,794 warm targets/s. Regressions of 7.0, 1.5,
+  and 22.5 percent remain within the 25-percent gate; and
+- the matching RD10, eight-chunk-radius, 3,600-frame movement run measures
+  5.671 ms average, 9.398 ms p95, 11.679 ms p99, and 16.953 ms max. One frame
+  exceeds budget, none exceeds 2x, and all scheduled-fluid and fluid-work
+  counters remain zero. The final RD16 card is saved outside the repository at
+  `/tmp/mclone-rev11-final-card`.
+
 ### Slice 3: reuse and platform closeout after corrective human acceptance
 
 - [ ] Compare the working channel writer with vanilla lake/spring liquid and
@@ -488,10 +544,26 @@ Revision-10 same-host A/B record, 2026-07-23:
   throughout, and due, executed, deferred, mutation, snapshot, and event
   totals were all zero.
 
+Revision-11 hotspot A/B record, 2026-07-23:
+
+- separately built revision-10 and revision-11 binaries ran at seed `-98765`,
+  chunk `(183,-177)`, radius three, and 20 iterations on the same Linux host;
+- revision 10 measured 2,331 surface chunks/s, 771 cold decorated targets/s,
+  and 3,794 warm targets/s. Revision 11 measured 2,168, 759, and 2,941:
+  regressions of 7.0, 1.5, and 22.5 percent. The solve is gated to plausible
+  intersections and every lane remains inside the 25-percent gate; and
+- the matching movement route measured 5.671 ms average, 9.398 ms p95, 11.679
+  ms p99, and 16.953 ms max. One frame exceeded budget, none exceeded 2x, and
+  all fluid counters remained zero.
+
 ## Human Review Questions
 
 - Do rivers read as connected waterways instead of trenches, blue contour
   lines, or canals?
+- Does the small source pool, upper tributary, fall, and major-river receiver
+  read as one authored hydrology landmark?
+- Does its support band look like plausible local terrain rather than a levee
+  or floating-water repair?
 - Are spacing, width, turns, banks, and floodplains believable at walking and
   elevated scales?
 - Do channels sit naturally in lowlands and mountain valleys without cutting

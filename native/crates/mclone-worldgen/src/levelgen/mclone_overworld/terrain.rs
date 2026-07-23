@@ -70,12 +70,13 @@ pub fn generate_mclone_overworld_surface_chunk_with_topology(
 
 /// Inspect generated water without running fluid simulation.
 ///
-/// Ordinary reaches and oceans use level-zero source water. Bounded drop
-/// stencils add vertical level-eight falling-water columns below a source lip.
-/// Source bodies are closed when every horizontal boundary meets water or a
-/// motion-blocking cell and every source has solid or water support below it.
-/// A falling column is supported by water above it. A one-chunk halo makes the
-/// proof independent of the requested target boundary.
+/// Major rivers and oceans use level-zero Y63 source water. Bounded tributary
+/// landmarks add a Y67 source pool/reach and vertical level-eight falling
+/// columns below a source lip. Source bodies are closed when every horizontal
+/// boundary meets water or a motion-blocking cell and every source has solid
+/// or water support below it. A falling column is supported by water above it.
+/// A one-chunk halo makes the proof independent of the requested target
+/// boundary.
 pub fn analyze_mclone_overworld_hydraulic_closure(
     seed: i64,
     topology: McloneOverworldSamplingTopology,
@@ -276,18 +277,62 @@ fn generate_mclone_overworld_surface_buffer_from_samples(
         for local_x in 0..CHUNK_WIDTH {
             let fall_top_flow_level =
                 baked_fall_top_flow_level(samples, local_x, local_z).unwrap_or(1);
-            write_surface_column(
-                &mut buffer,
-                local_x,
-                local_z,
-                samples.landform(local_x, local_z),
-                fall_top_flow_level,
-            );
+            let landform = contained_tributary_landform(samples, local_x, local_z);
+            write_surface_column(&mut buffer, local_x, local_z, landform, fall_top_flow_level);
         }
     }
     buffer.prime_worldgen_heightmaps();
 
     buffer
+}
+
+fn contained_tributary_landform(
+    samples: &ChunkLandformSamples,
+    local_x: i32,
+    local_z: i32,
+) -> McloneOverworldLandformSample {
+    let mut sample = samples.landform(local_x, local_z);
+    let watercourse = sample.terrain.watercourse;
+    if !watercourse.is_raised_tributary()
+        || watercourse.is_fall_column()
+        || watercourse.water_surface_y <= super::fields::MCLONE_OVERWORLD_SEA_LEVEL
+    {
+        return sample;
+    }
+
+    let source_y = watercourse.water_surface_y;
+    let locally_sealed =
+        [(-1, 0), (1, 0), (0, -1), (0, 1)]
+            .into_iter()
+            .all(|(offset_x, offset_z)| {
+                let neighbor = samples.terrain(local_x + offset_x, local_z + offset_z);
+                let neighbor_water_top = if neighbor.watercourse.is_fall_column() {
+                    neighbor.watercourse.drop_upper_y
+                } else if neighbor.watercourse.is_channel() {
+                    neighbor.watercourse.water_surface_y
+                } else {
+                    i32::MIN
+                };
+                neighbor_water_top >= source_y || neighbor.surface_y >= source_y
+            });
+    if locally_sealed {
+        return sample;
+    }
+
+    // A contour can end on a single column where the local anchor solver's
+    // acceptance changes. Realize that boundary as the same solid berm used
+    // around the rest of the vignette, so waking the fluid simulation cannot
+    // expose a floating source face.
+    sample.terrain.watercourse.channel_influence =
+        sample.terrain.watercourse.major_channel_influence;
+    sample.terrain.watercourse.raised_tributary_influence = 0.0;
+    sample.terrain.watercourse.tributary_source_pool_influence = 0.0;
+    sample.terrain.watercourse.drop_distance = f64::INFINITY;
+    sample.terrain.watercourse.drop_height = 0;
+    sample.terrain.watercourse.drop_upper_y = super::fields::MCLONE_OVERWORLD_SEA_LEVEL;
+    sample.terrain.watercourse.drop_lower_y = super::fields::MCLONE_OVERWORLD_SEA_LEVEL;
+    sample.terrain.surface_y = sample.terrain.base_surface_y.max(source_y + 1);
+    sample
 }
 
 fn baked_fall_top_flow_level(
@@ -509,7 +554,7 @@ mod tests {
             (
                 -98_765,
                 McloneOverworldSamplingTopology::Unbounded,
-                ChunkPos::new(-103, 185),
+                ChunkPos::new(183, -177),
             ),
             (
                 12_345,
@@ -583,9 +628,9 @@ mod tests {
         assert_eq!(
             fingerprints,
             [
-                (551_266_325_926_843_499, 540_454_697_130_909_605),
-                (2_478_835_774_507_231_805, 3_995_179_115_581_767_979),
-                (3_557_113_522_619_655_269, 14_722_381_067_837_031_305),
+                (2_430_787_019_006_668_337, 540_454_697_130_909_605),
+                (17_888_646_860_546_090_117, 3_995_179_115_581_767_979),
+                (5_166_970_427_423_576_759, 14_722_381_067_837_031_305),
             ]
         );
     }
@@ -642,19 +687,19 @@ mod tests {
             receipts,
             [
                 (
-                    [21_961, 8_231, 17_815, 16_113, 1_416],
-                    [16_943, 12_810, 1_394, 22, 1_762, 32_436, 169],
-                    10_019_914_944_634_594_603,
+                    [21_961, 9_543, 18_460, 14_121, 1_451],
+                    [16_943, 12_604, 1_409, 42, 2_538, 31_892, 108],
+                    12_512_909_875_598_697,
                 ),
                 (
-                    [17_223, 6_817, 14_368, 25_517, 1_611],
-                    [12_358, 11_276, 1_603, 8, 1_585, 38_208, 498],
-                    2_127_736_042_911_625_617,
+                    [17_223, 8_067, 17_274, 21_252, 1_720],
+                    [12_358, 11_053, 1_609, 111, 2_841, 37_276, 288],
+                    5_968_977_450_935_617_420,
                 ),
                 (
-                    [33_641, 11_192, 9_876, 9_915, 912],
-                    [26_125, 18_086, 900, 12, 1_301, 19_085, 27],
-                    16_960_331_876_708_392_567,
+                    [33_641, 11_572, 10_830, 8_519, 974],
+                    [26_125, 17_796, 902, 72, 1_882, 18_751, 8],
+                    8_773_927_903_654_210_865,
                 ),
             ]
         );
@@ -682,8 +727,8 @@ mod tests {
         assert_eq!(
             fingerprints,
             [
-                9_298_043_774_959_183_043,
-                10_056_739_344_004_506_620,
+                5_584_272_403_799_234_324,
+                53_515_349_257_108_940,
                 171_330_102_405_640_746,
             ]
         );

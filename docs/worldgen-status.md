@@ -38,11 +38,15 @@ and accelerated one-minute movement evidence. Human Review 2 rejected the
 world language: one global river level produces no visible drops and abruptly
 vanishes at the lowland gate, while large bodies lack shelf/deep-basin
 bathymetry. Field revision 9 now adds size-aware shelf/deep-basin floors and
-field revision 10 adds local four-block flat reaches joined by a bounded baked
-lip/fall/pool stencil. Closure, runtime wake, performance, movement, map, and
-RD16 evidence pass; Human Review 3 is next. This is not yet a drainage graph:
-explicit headwaters/outlets, globally monotonic reach identity, and one
-integrated river-to-deep-basin outlet remain open.
+field revision 10 added local four-block flat reaches joined by a bounded
+baked lip/fall/pool stencil. Interactive review rejected that corridor because
+its locally downhill steps may later rise. Field revision 11 instead keeps
+major rivers at Y63 and permits raised water only in sparse, short
+source-pool/upper-tributary/fall/major-river-sink landmarks. Closure,
+authoritative wake, hotspot performance, movement, map, and RD16 evidence
+pass; interactive quality review is next. This is not a drainage graph:
+general highland rivers, confluences, discharge, globally monotonic macro
+drainage, and one integrated river-to-deep-basin outlet remain open.
 
 Compatibility safety is recorded in the
 [`world-generation-profiles` ledger](topics/world-generation-profiles.md#compatibility-safety-ledger).
@@ -111,12 +115,14 @@ Landed native coverage:
   downstream-reach semantics. Its first smooth hydraulic realization was
   rejected because column-local water height could slope across a channel and
   expose source faces. Field revision 8 instead realizes only constant-Y63
-  lowland reaches. Revisions 9/10 add size-aware ocean depth, local four-block
-  source planes, and a bounded baked drop between adjacent levels. A
-  halo-aware block audit and real fluid-runtime wake tests prove ordinary
-  reaches and the reviewed falling stencil are quiescent. The result still
-  lacks a true drainage network, headwater/outlet identity, confluences, and
-  accumulated discharge.
+  lowland reaches. Revision 9 adds size-aware ocean depth. Revision 10's local
+  stepped corridor was hydraulically stable but globally non-monotonic.
+  Revision 11 restores Y63 major rivers and reuses the stable four-block drop
+  only in a complete bounded tributary landmark with an explicit source pool
+  and river sink. A halo-aware block audit and real fluid-runtime wake tests
+  prove the ordinary river and landmark are quiescent. General highland
+  reaches, drainage-network identity, confluences, and accumulated discharge
+  remain absent.
 - Production-backed broad field maps and fully warmed seed/region/spawn cards;
   the first review accepted macro scale and coast variation after adding one
   fine relief octave to break up concentric local contour bands. The second
@@ -173,9 +179,11 @@ Still not full vanilla parity:
 - the first original island generator remains intentionally bounded; the
   continuous mclone overworld now exists but has only a deliberately narrow
   terrain/material/biome/vegetation palette. Its first broad river and sparse
-  wetland family failed Human Reviews 1 and 2; corrective bathymetry and local
-  stepped reaches are ready for Human Review 3. It still has no small streams,
-  general cascade family, drainage-network semantics, caves, or structures
+  wetland family failed Human Reviews 1 and 2, and the global stepped-river
+  attempt was rejected interactively. Corrective bathymetry and the first
+  bounded raised tributary landmark are ready for review. It still has no
+  general highland stream/cascade family, drainage-network semantics, caves,
+  or structures
 - Mclone Overworld terrain, biome, surface, spawn, existing vegetation, broad
   rivers, and wetland pools are periodic for the exact 384-chunk X cylinder.
   All later content must join that sampler contract explicitly; canonical
