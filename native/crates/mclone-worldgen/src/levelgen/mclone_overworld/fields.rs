@@ -3,7 +3,7 @@ use mclone_core::{AxisTopology, ChunkPos, HorizontalTopology};
 use crate::noise::{GradientNoise2d, SeedDomain, ValueNoise2d};
 
 pub const MCLONE_OVERWORLD_SEA_LEVEL: i32 = 63;
-pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-9";
+pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-10";
 pub const MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS: i32 = 2;
 pub const MCLONE_OVERWORLD_PERIOD_BLOCKS: i32 = 6_144;
 pub const MCLONE_OVERWORLD_PERIOD_CHUNKS: u32 = 384;
@@ -49,8 +49,10 @@ const SEABED_LARGE_SCALE: i32 = 384;
 const SEABED_DETAIL_SCALE: i32 = 96;
 const RIVER_GRADE_SAMPLE_DISTANCE: f64 = 16.0;
 const RIVER_MAX_RELEVANT_DISTANCE: f64 = 48.0;
-const RIVER_LOWLAND_MAX_BROAD_SURFACE_Y: i32 = MCLONE_OVERWORLD_SEA_LEVEL + 7;
-const RIVER_LOWLAND_MAX_BASE_SURFACE_Y: i32 = MCLONE_OVERWORLD_SEA_LEVEL + 9;
+const RIVER_REACH_HEIGHT: i32 = 4;
+const RIVER_DROP_CONTEXT_BLOCKS: f64 = 10.0;
+const RIVER_FALL_HALF_WIDTH_BLOCKS: f64 = 1.75;
+const RIVER_ROCK_LIP_RUN_BLOCKS: f64 = 2.0;
 const MAX_REGION_SAMPLE_COUNT: usize = 16 * 1024 * 1024;
 const SPAWN_SEARCH_RADIUS_CHUNKS: i32 = 128;
 const SPAWN_MIN_SURFACE_Y: i32 = MCLONE_OVERWORLD_SEA_LEVEL + 5;
@@ -168,6 +170,10 @@ pub struct McloneOverworldWatercourseSample {
     pub flow_x: f64,
     pub flow_z: f64,
     pub grade: f64,
+    pub drop_distance: f64,
+    pub drop_height: i32,
+    pub drop_upper_y: i32,
+    pub drop_lower_y: i32,
     pub wetland_influence: f64,
     pub wetland_pool_influence: f64,
 }
@@ -187,6 +193,17 @@ impl McloneOverworldWatercourseSample {
 
     pub fn is_water(self) -> bool {
         self.is_channel() || self.is_wetland_pool()
+    }
+
+    pub fn is_drop_transition(self) -> bool {
+        self.drop_height > 0
+    }
+
+    pub fn is_fall_column(self) -> bool {
+        self.is_channel()
+            && self.is_drop_transition()
+            && self.drop_distance <= 0.0
+            && self.drop_distance >= -RIVER_FALL_HALF_WIDTH_BLOCKS
     }
 }
 
@@ -399,11 +416,6 @@ impl McloneOverworldSampler {
         } else {
             land_surface_height(continentalness, relief, ruggedness, ridges, mountain_detail)
         };
-        let broad_surface_y = if continentalness <= 0.0 {
-            bathymetry.floor_y()
-        } else {
-            land_surface_height(continentalness, relief, ruggedness, ridges, 0.0)
-        };
         let river_warp_x = relief_detail * 72.0 + ruggedness_detail * 24.0;
         let river_warp_z = ruggedness_detail * 72.0 - relief_large * 24.0;
         let river_geometry =
@@ -413,7 +425,6 @@ impl McloneOverworldSampler {
             world_z,
             continentalness,
             ruggedness,
-            broad_surface_y,
             base_surface_y,
             river_geometry,
         );
@@ -463,7 +474,10 @@ impl McloneOverworldSampler {
         let gradient_x = large.1 * 0.82 + detail.1 * 0.18;
         let gradient_z = large.2 * 0.82 + detail.2 * 0.18;
         let gradient_length = gradient_x.hypot(gradient_z).max(1.0 / 2_048.0);
-        let distance = (center.abs() / gradient_length).min(512.0);
+        let signed_distance = (center / gradient_length).clamp(-512.0, 512.0);
+        let distance = signed_distance.abs();
+        let normal_x = gradient_x / gradient_length;
+        let normal_z = gradient_z / gradient_length;
         let mut tangent_x = -gradient_z / gradient_length;
         let mut tangent_z = gradient_x / gradient_length;
         if tangent_z < 0.0 || (tangent_z == 0.0 && tangent_x < 0.0) {
@@ -477,6 +491,8 @@ impl McloneOverworldSampler {
             tangent_x,
             tangent_z,
             width_noise,
+            center_x: world_x - normal_x * signed_distance,
+            center_z: world_z - normal_z * signed_distance,
         }
     }
 
@@ -486,70 +502,122 @@ impl McloneOverworldSampler {
         world_z: f64,
         continentalness: f64,
         ruggedness: f64,
-        broad_surface_y: i32,
         base_surface_y: i32,
         geometry: RiverGeometry,
     ) -> (McloneOverworldWatercourseSample, i32) {
-        // Ordinary revision-8 reaches deliberately share one hydrostatic
-        // surface. The rejected revision-7 formula followed broad terrain at
-        // every column, which could tilt water across a channel and expose a
-        // source face above lower neighboring terrain. Higher local reaches
-        // require explicit reach identity and bounded drop templates; do not
-        // approximate them with a smoothly sloped source-water sheet.
-        let water_surface_y = MCLONE_OVERWORLD_SEA_LEVEL;
         let depth = (2.0 + geometry.half_width * 0.24).round() as i32;
-        let bed_y = water_surface_y - depth;
+        if continentalness <= 0.0 || geometry.distance > RIVER_MAX_RELEVANT_DISTANCE {
+            return inactive_watercourse(geometry, depth, base_surface_y);
+        }
+        // Project the column onto the local centerline before deriving a reach
+        // level. This keeps every cross-section on one hydrostatic step rather
+        // than letting transverse terrain noise tilt a source-water sheet.
+        let center_surface = self.sample_hydraulic_surface_height(
+            geometry.center_x.round() as i32,
+            geometry.center_z.round() as i32,
+        );
+        if center_surface <= f64::from(MCLONE_OVERWORLD_SEA_LEVEL) {
+            return inactive_watercourse(geometry, depth, base_surface_y);
+        }
+        let available_surface = center_surface - 1.0;
+        let ordinary_reach_y = quantized_reach_level(available_surface);
 
-        let relevant = continentalness > 0.0
-            && base_surface_y > MCLONE_OVERWORLD_SEA_LEVEL
-            && broad_surface_y <= RIVER_LOWLAND_MAX_BROAD_SURFACE_Y
-            && base_surface_y <= RIVER_LOWLAND_MAX_BASE_SURFACE_Y
-            && geometry.distance <= RIVER_MAX_RELEVANT_DISTANCE;
-        let (flow_x, flow_z, grade) = if relevant {
-            let offset_x = geometry.tangent_x * RIVER_GRADE_SAMPLE_DISTANCE;
-            let offset_z = geometry.tangent_z * RIVER_GRADE_SAMPLE_DISTANCE;
-            let backward = self.sample_broad_surface_y(
-                (world_x - offset_x).round() as i32,
-                (world_z - offset_z).round() as i32,
-            );
-            let forward = self.sample_broad_surface_y(
-                (world_x + offset_x).round() as i32,
-                (world_z + offset_z).round() as i32,
-            );
-            let direction = if forward <= backward { 1.0 } else { -1.0 };
-            (
-                geometry.tangent_x * direction,
-                geometry.tangent_z * direction,
-                f64::from((forward - backward).abs()) / (RIVER_GRADE_SAMPLE_DISTANCE * 2.0),
-            )
+        let offset_x = geometry.tangent_x * RIVER_GRADE_SAMPLE_DISTANCE;
+        let offset_z = geometry.tangent_z * RIVER_GRADE_SAMPLE_DISTANCE;
+        let backward = self.sample_hydraulic_surface_height(
+            (geometry.center_x - offset_x).round() as i32,
+            (geometry.center_z - offset_z).round() as i32,
+        );
+        let forward = self.sample_hydraulic_surface_height(
+            (geometry.center_x + offset_x).round() as i32,
+            (geometry.center_z + offset_z).round() as i32,
+        );
+        let direction = if forward <= backward { 1.0 } else { -1.0 };
+        let (flow_x, flow_z) = (
+            geometry.tangent_x * direction,
+            geometry.tangent_z * direction,
+        );
+        let grade = (forward - backward).abs() / (RIVER_GRADE_SAMPLE_DISTANCE * 2.0);
+
+        // A drop is the narrow neighborhood where the smooth centerline
+        // height crosses a four-block reach boundary. Positive distance is
+        // upstream. The block writer realizes the center strip as a baked
+        // source lip, falling-water column, and lower receiving pool.
+        let nearest_boundary = f64::from(MCLONE_OVERWORLD_SEA_LEVEL)
+            + ((available_surface - f64::from(MCLONE_OVERWORLD_SEA_LEVEL))
+                / f64::from(RIVER_REACH_HEIGHT))
+            .round()
+                * f64::from(RIVER_REACH_HEIGHT);
+        let candidate_drop_distance =
+            if grade >= 1.0 / 256.0 && nearest_boundary > f64::from(MCLONE_OVERWORLD_SEA_LEVEL) {
+                (available_surface - nearest_boundary) / grade
+            } else {
+                f64::INFINITY
+            };
+        let drop_height = if candidate_drop_distance.abs() <= RIVER_DROP_CONTEXT_BLOCKS {
+            RIVER_REACH_HEIGHT
         } else {
-            (geometry.tangent_x, geometry.tangent_z, 0.0)
+            0
+        };
+        let drop_upper_y = nearest_boundary.round() as i32;
+        let drop_lower_y = drop_upper_y - drop_height;
+        let drop_distance = if drop_height > 0 {
+            candidate_drop_distance
+        } else {
+            f64::INFINITY
+        };
+        let water_surface_y = if drop_height > 0 {
+            if drop_distance >= 0.0 {
+                drop_upper_y
+            } else {
+                drop_lower_y
+            }
+        } else {
+            ordinary_reach_y
+        };
+        let receiving_pool_depth = if drop_height > 0
+            && drop_distance < -RIVER_FALL_HALF_WIDTH_BLOCKS
+            && drop_distance >= -8.0
+        {
+            2
+        } else {
+            0
+        };
+        let upstream_rock_lip =
+            drop_height > 0 && drop_distance > 0.0 && drop_distance <= RIVER_ROCK_LIP_RUN_BLOCKS;
+        let bed_y = if upstream_rock_lip {
+            drop_upper_y - 1
+        } else if drop_height > 0
+            && drop_distance <= 0.0
+            && drop_distance >= -RIVER_FALL_HALF_WIDTH_BLOCKS
+        {
+            drop_lower_y - depth - 1
+        } else {
+            water_surface_y - depth - receiving_pool_depth
         };
         let mountain_region = mountain_strength(continentalness, ruggedness);
         let low_grade = 1.0 - smoothstep(((grade - 0.02) / 0.16).clamp(0.0, 1.0));
         let low_mountain = 1.0 - smoothstep((mountain_region / 0.55).clamp(0.0, 1.0));
         let inland_wetland = smoothstep((continentalness / 0.18).clamp(0.0, 1.0));
         let wetland_selector = smoothstep(((geometry.width_noise - 0.42) / 0.58).clamp(0.0, 1.0));
-        let wetland_influence = if relevant {
+        let wetland_influence = if drop_height == 0
+            && water_surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + RIVER_REACH_HEIGHT
+        {
             low_grade * low_mountain * inland_wetland * wetland_selector
         } else {
             0.0
         };
-        let bank_span = 8.0 + wetland_influence * 16.0;
-        let channel_influence = if relevant {
+        let incision_depth = (f64::from(base_surface_y - water_surface_y - 1)).clamp(0.0, 16.0);
+        let bank_span = 8.0 + incision_depth * 0.5 + wetland_influence * 16.0;
+        let channel_influence = if geometry.distance < geometry.half_width - 0.5 {
             1.0 - smoothstep(
-                ((geometry.distance - geometry.half_width + 1.5) / 3.0).clamp(0.0, 1.0),
+                ((geometry.distance - geometry.half_width + 3.0) / 3.0).clamp(0.0, 1.0),
             )
         } else {
             0.0
         };
-        let bank_influence = if relevant {
-            1.0 - smoothstep(
-                ((geometry.distance - geometry.half_width) / bank_span).clamp(0.0, 1.0),
-            )
-        } else {
-            0.0
-        };
+        let bank_influence = 1.0
+            - smoothstep(((geometry.distance - geometry.half_width) / bank_span).clamp(0.0, 1.0));
         let wetland_pool_texture = self.wetland_pool.sample_at(
             world_x + geometry.tangent_x * 19.0,
             world_z + geometry.tangent_z * 19.0,
@@ -562,11 +630,18 @@ impl McloneOverworldSampler {
         } else {
             0.0
         };
-        let surface_y = if channel_influence > 0.0 {
+        let containment_bank = channel_influence == 0.0
+            && bank_influence > 0.0
+            && geometry.distance <= geometry.half_width + 3.0;
+        let surface_y = if channel_influence > 0.0 && upstream_rock_lip {
+            drop_upper_y - 1
+        } else if channel_influence > 0.0 {
             let channel_depth = 1.0 + channel_influence * f64::from(depth - 1);
             base_surface_y.min((f64::from(water_surface_y) - channel_depth).round() as i32)
         } else if wetland_pool_influence >= 0.55 {
             base_surface_y.min(water_surface_y - 1)
+        } else if containment_bank {
+            base_surface_y.max(water_surface_y + 1)
         } else if bank_influence > 0.0 {
             let bank_target = (f64::from(base_surface_y) * (1.0 - bank_influence)
                 + f64::from(water_surface_y + 1) * bank_influence)
@@ -588,6 +663,10 @@ impl McloneOverworldSampler {
                 flow_x,
                 flow_z,
                 grade,
+                drop_distance,
+                drop_height,
+                drop_upper_y,
+                drop_lower_y,
                 wetland_influence,
                 wetland_pool_influence,
             },
@@ -595,7 +674,7 @@ impl McloneOverworldSampler {
         )
     }
 
-    fn sample_broad_surface_y(self, world_x: i32, world_z: i32) -> i32 {
+    fn sample_hydraulic_surface_height(self, world_x: i32, world_z: i32) -> f64 {
         let continentalness = (self.continent_large.sample(world_x, world_z) * 0.55
             + self.continent_medium.sample(world_x, world_z) * 0.30
             + self.continent_detail.sample(world_x, world_z) * 0.15)
@@ -604,19 +683,9 @@ impl McloneOverworldSampler {
             + self.relief_detail.sample(world_x, world_z) * 0.30
             + self.relief_fine.sample(world_x, world_z) * 0.20)
             .clamp(-1.0, 1.0);
-        let ruggedness = (self.ruggedness_large.sample(world_x, world_z) * 0.72
-            + self.ruggedness_detail.sample(world_x, world_z) * 0.28)
-            .clamp(-1.0, 1.0);
-        let ridge_source = self.ridge_large.sample(world_x, world_z) * 0.78
-            + self.ridge_detail.sample(world_x, world_z) * 0.22;
-        let ridge_linear = (1.0 - ridge_source.abs()).clamp(0.0, 1.0);
-        land_surface_height(
-            continentalness,
-            relief,
-            ruggedness,
-            ridge_linear * ridge_linear,
-            0.0,
-        )
+        let land_strength = smoothstep((continentalness / 0.45).clamp(0.0, 1.0));
+        let hydraulic_relief = relief * (2.0 + land_strength * 7.0);
+        (64.0 + land_strength * 18.0 + hydraulic_relief).clamp(63.0, 104.0)
     }
 
     pub fn sample_landform(self, world_x: i32, world_z: i32) -> McloneOverworldLandformSample {
@@ -755,6 +824,17 @@ fn land_surface_height(
     ridges: f64,
     mountain_detail: f64,
 ) -> i32 {
+    land_surface_height_f64(continentalness, relief, ruggedness, ridges, mountain_detail).round()
+        as i32
+}
+
+fn land_surface_height_f64(
+    continentalness: f64,
+    relief: f64,
+    ruggedness: f64,
+    ridges: f64,
+    mountain_detail: f64,
+) -> f64 {
     let land_strength = smoothstep((continentalness / 0.45).clamp(0.0, 1.0));
     let base = 64.0 + land_strength * 18.0;
     let rolling_relief = relief * (2.0 + land_strength * 7.0);
@@ -763,9 +843,19 @@ fn land_surface_height(
     let mountain_lift =
         mountain_strength * (4.0 + ridge_shoulder * 12.0 + ridge_shoulder * ridge_shoulder * 38.0);
     let mountain_texture = mountain_detail * mountain_strength * (6.0 + ridge_shoulder * 14.0);
-    (base + rolling_relief + mountain_lift + mountain_texture)
+    (base + rolling_relief + mountain_lift + mountain_texture).clamp(62.0, 160.0)
+}
+
+fn quantized_reach_level(available_surface: f64) -> i32 {
+    let sea_level = f64::from(MCLONE_OVERWORLD_SEA_LEVEL);
+    let reach_height = f64::from(RIVER_REACH_HEIGHT);
+    (sea_level
+        + ((available_surface - sea_level) / reach_height)
+            .floor()
+            .max(0.0)
+            * reach_height)
         .round()
-        .clamp(62.0, 160.0) as i32
+        .clamp(sea_level, 159.0) as i32
 }
 
 fn mountain_strength(continentalness: f64, ruggedness: f64) -> f64 {
@@ -785,6 +875,37 @@ struct RiverGeometry {
     tangent_x: f64,
     tangent_z: f64,
     width_noise: f64,
+    center_x: f64,
+    center_z: f64,
+}
+
+fn inactive_watercourse(
+    geometry: RiverGeometry,
+    depth: i32,
+    base_surface_y: i32,
+) -> (McloneOverworldWatercourseSample, i32) {
+    (
+        McloneOverworldWatercourseSample {
+            distance: geometry.distance,
+            channel_influence: 0.0,
+            bank_influence: 0.0,
+            half_width: geometry.half_width,
+            water_surface_y: MCLONE_OVERWORLD_SEA_LEVEL,
+            bed_y: MCLONE_OVERWORLD_SEA_LEVEL - depth,
+            tangent_x: geometry.tangent_x,
+            tangent_z: geometry.tangent_z,
+            flow_x: geometry.tangent_x,
+            flow_z: geometry.tangent_z,
+            grade: 0.0,
+            drop_distance: f64::INFINITY,
+            drop_height: 0,
+            drop_upper_y: MCLONE_OVERWORLD_SEA_LEVEL,
+            drop_lower_y: MCLONE_OVERWORLD_SEA_LEVEL,
+            wetland_influence: 0.0,
+            wetland_pool_influence: 0.0,
+        },
+        base_surface_y,
+    )
 }
 
 #[cfg(test)]
@@ -833,6 +954,21 @@ mod tests {
         assert!((left.watercourse.flow_x - right.watercourse.flow_x).abs() < 1.0e-9);
         assert!((left.watercourse.flow_z - right.watercourse.flow_z).abs() < 1.0e-9);
         assert!((left.watercourse.grade - right.watercourse.grade).abs() < 1.0e-12);
+        assert!(
+            (left.watercourse.drop_distance.is_infinite()
+                && right.watercourse.drop_distance.is_infinite())
+                || (left.watercourse.drop_distance - right.watercourse.drop_distance).abs()
+                    < 1.0e-9
+        );
+        assert_eq!(left.watercourse.drop_height, right.watercourse.drop_height);
+        assert_eq!(
+            left.watercourse.drop_upper_y,
+            right.watercourse.drop_upper_y
+        );
+        assert_eq!(
+            left.watercourse.drop_lower_y,
+            right.watercourse.drop_lower_y
+        );
         assert!(
             (left.watercourse.wetland_influence - right.watercourse.wetland_influence).abs()
                 < 1.0e-12
@@ -1100,8 +1236,11 @@ mod tests {
         for seed in [12_345, -98_765, 8_675_309] {
             let sampler = McloneOverworldSampler::new(seed);
             let mut channels = 0;
+            let mut elevated_channels = 0;
+            let mut drop_transitions = 0;
             let mut wetlands = 0;
             let mut wetland_pools = 0;
+            let mut reach_levels = std::collections::BTreeSet::new();
             for z in (-2_048..2_048).step_by(8) {
                 for x in (-2_048..2_048).step_by(8) {
                     let sample = sampler.sample(x, z);
@@ -1115,19 +1254,52 @@ mod tests {
                     assert!((0.0..=1.0).contains(&river.wetland_pool_influence));
                     if river.is_channel() {
                         channels += 1;
-                        assert_eq!(river.water_surface_y, MCLONE_OVERWORLD_SEA_LEVEL);
+                        assert!(river.water_surface_y >= MCLONE_OVERWORLD_SEA_LEVEL);
+                        assert_eq!(
+                            (river.water_surface_y - MCLONE_OVERWORLD_SEA_LEVEL)
+                                % RIVER_REACH_HEIGHT,
+                            0
+                        );
+                        reach_levels.insert(river.water_surface_y);
+                        if river.water_surface_y > MCLONE_OVERWORLD_SEA_LEVEL {
+                            elevated_channels += 1;
+                        }
                         assert!(sample.surface_y < river.water_surface_y);
+                    }
+                    if river.is_drop_transition() {
+                        drop_transitions += 1;
+                        assert_eq!(river.drop_height, RIVER_REACH_HEIGHT);
+                        assert_eq!(river.drop_upper_y - river.drop_lower_y, RIVER_REACH_HEIGHT);
+                        assert!(river.drop_distance.abs() <= RIVER_DROP_CONTEXT_BLOCKS);
+                    } else {
+                        assert!(river.drop_distance.is_infinite());
                     }
                     if river.wetland_influence > 0.25 && river.bank_influence > 0.0 {
                         wetlands += 1;
                     }
                     if river.is_wetland_pool() {
                         wetland_pools += 1;
-                        assert_eq!(river.water_surface_y, MCLONE_OVERWORLD_SEA_LEVEL);
+                        assert!(
+                            (MCLONE_OVERWORLD_SEA_LEVEL
+                                ..=MCLONE_OVERWORLD_SEA_LEVEL + RIVER_REACH_HEIGHT)
+                                .contains(&river.water_surface_y)
+                        );
                     }
                 }
             }
             assert!(channels > 0, "seed {seed} had no river channels");
+            assert!(
+                elevated_channels > 0,
+                "seed {seed} had no elevated river channels"
+            );
+            assert!(
+                drop_transitions > 0,
+                "seed {seed} had no river drop transitions"
+            );
+            assert!(
+                reach_levels.len() >= 2,
+                "seed {seed} had fewer than two river reach levels: {reach_levels:?}"
+            );
             assert!(wetlands > 0, "seed {seed} had no wetland margins");
             assert!(wetland_pools > 0, "seed {seed} had no wetland pools");
         }

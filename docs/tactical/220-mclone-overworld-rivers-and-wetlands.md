@@ -3,11 +3,12 @@
 Status: Human Review 1 rejected the field-revision-7 hydraulic surface on
 2026-07-23. Field revision 8 replaced it with hydraulically safe flat,
 sea-level lowland water and passed its objective gates, but Human Review 2
-rejected the resulting world language. Rivers disappear wherever the lowland
-gate ends, no screenshot contains a water-level change, and large bodies lack
-the shelf, deep-basin, and seabed-relief structure visible in vanilla. The
-next review requires independent ocean bathymetry plus multiple flat river
-reaches connected by bounded baked drops.
+rejected the resulting world language. Field revision 9 now adds size-aware
+ocean bathymetry, and field revision 10 adds four-block flat reach levels plus
+bounded baked drops. Their objective map, hydraulic, runtime-wake, performance,
+and movement gates pass. They are ready for Human Review 3, but do not yet
+claim a true drainage network, explicit headwaters/outlets, or an integrated
+river-to-deep-basin outlet composition.
 
 Topic: `mclone-overworld-generation`
 
@@ -328,27 +329,27 @@ Execution record 2026-07-23:
   deferred, mutated, snapshot, and fluid-event totals were all zero. The
   largest bookkeeping-only fluid lane sample was 0.023 ms.
 
-### Later bounded waterfall templates
+### Bounded waterfall constraint
 
-Do not run a whole-river fluid simulation during chunk generation. A later
-slice may settle a finite catalogue of width/drop/run/receiving-pool templates
-in build or test tooling, bake their source/flowing block stencils, and stamp
-only at sites satisfying bounded wall, lip, drop, and receiving-pool
-preconditions. Production generation stays fixed-work. Any optional
+Do not run a whole-river fluid simulation during chunk generation. The first
+revision-10 stencil is generated from a fixed local lip/fall/pool recipe and
+validated by the same runtime that would respond to a block update. A later
+catalogue may settle more width/drop/run/receiving-pool variants in build or
+test tooling, but production generation stays fixed-work. Any optional
 output-changing offline quality mode must be persisted in the world descriptor
 and may not vary by chunk.
 
 ### Corrective Slice 2D: ocean bathymetry
 
-- [ ] Add explicit shore/shelf, shelf-break, basin-interior, water-depth, and
+- [x] Add explicit shore/shelf, shelf-break, basin-interior, water-depth, and
   seabed-relief facts to the production sample.
-- [ ] Keep the ocean surface hydrostatic at Y63 while making broad water
+- [x] Keep the ocean surface hydrostatic at Y63 while making broad water
   interiors materially deeper and more locally varied than coastal shelves.
-- [ ] Use the exact periodic production fields and fixed-work point sampling;
+- [x] Use the exact periodic production fields and fixed-work point sampling;
   do not add a connected-component search to every column.
-- [ ] Add water-depth distributions, maps, representative coast-to-basin
+- [x] Add water-depth distributions, maps, representative coast-to-basin
   transects, and RD16 deep-water cards.
-- [ ] Re-run surface, cold, and warm generation performance.
+- [x] Re-run surface, cold, and warm generation performance.
 
 Gate: large bodies visibly progress from shallow shore through a shelf break
 into a deep, irregular basin without changing the flat water surface or
@@ -362,18 +363,35 @@ then combines that result with three-dimensional blended density noise. Mclone
 should preserve the size-aware shelf/interior lesson without porting that
 profile's biome-layer or density pipeline.
 
+Execution record 2026-07-23:
+
+- field revision 9 adds independent 1,536-block basin selection and
+  384/96-block seabed relief. Negative continentalness becomes explicit
+  ocean-interior, shelf, shelf-break, basin, relief, and integer water-depth
+  facts. Every scale divides the 6,144-block X period;
+- water remains source-flat at Y63. Depth progresses from two-block coastal
+  shallows through a roughly twelve-block shelf into a basin whose configured
+  maximum is 52 blocks. Seed `-98765`'s full-period, four-block-step review
+  spans depth 2 through 40 with p10/p50/p90 depths 3/9/30;
+- surface generation consumes only the resulting floor Y. Biome, surface, and
+  review callers consume the same sample, so there is no connected-component
+  lookup, flood fill, or chunk dependency; and
+- the full-period water-depth map, coast-to-basin transect receipt, and RD16
+  card at seed `-98765`, chunk `(184,135)` visibly show a shelf break and a
+  deep contoured floor at Y23 beneath the unchanged Y63 surface.
+
 ### Corrective Slice 2E: explicit flat reaches and bounded drops
 
 - [ ] Replace the single global river level with an inspectable reach
   vocabulary: reach level, upstream/downstream relation, headwater, outlet,
   drop height, transition kind, and receiving pool.
-- [ ] Keep every ordinary reach surface constant at one integer Y and
-  monotonic downstream.
+- [x] Keep every ordinary reach surface constant at one integer Y.
+- [ ] Prove the sequence of reaches is globally monotonic downstream.
 - [ ] End water only at an explicit headwater/source or outlet. Never let a
   height threshold silently erase an otherwise visible corridor.
-- [ ] Connect adjacent levels with bounded baked flowing-water stencils whose
+- [x] Connect adjacent levels with bounded baked flowing-water stencils whose
   wall, lip, fall, and receiving-pool preconditions are locally checkable.
-- [ ] Extend hydraulic review to distinguish quiescent source reaches from
+- [x] Extend hydraulic review to distinguish quiescent source reaches from
   intentional stable flowing transitions, including a real fluid-runtime wake
   test.
 - [ ] Capture at least one RD16 card where two flat levels and their transition
@@ -382,6 +400,42 @@ profile's biome-layer or density pipeline.
 Gate: pixels visibly demonstrate level change without a sloped source sheet,
 arbitrary disappearance, floating water, or an unbounded generation-time
 simulation.
+
+Execution record 2026-07-23:
+
+- field revision 10 projects each water column onto the analytic local
+  centerline before sampling hydraulic height. It omits sharp
+  ridge/ruggedness lift, quantizes the remaining broad terrain potential into
+  four-block levels from Y63 upward, and orients provisional flow using two
+  fixed probes 16 blocks along the tangent. This removes the old Y70/Y72
+  lowland gate and realizes seven levels, Y63 through Y87, in the full-period
+  seed `-98765` review;
+- a ten-block transition context identifies local crossings of a quantized
+  level. The writer uses a two-block upstream rock lip, a narrow downstream
+  falling-water sheet, and a two-block-deeper receiving pool. The top flowing
+  level is a bounded digital distance over the existing two-block sample halo;
+  it performs no simulation, arbitrary search, or new chunk dependency;
+- the containment collar raises only the immediate non-channel edge to at
+  least water Y+1. The source body elsewhere remains a flat integer plane.
+  The hydraulic audit now counts source and flowing water separately,
+  requires support for each, and accepts unequal neighboring tops only across
+  a column containing the intentional flowing stencil;
+- seed `-98765` chunk `(-103,185)` contains source reaches at Y75/Y79 and 68
+  flowing blocks. Its radius-one audit reports 2,570 source blocks, 419 source
+  boundary blocks, 17 intentional drop edges, and zero open source faces,
+  unsupported source/flowing blocks, accidental sloped edges, or initial
+  liquid ticks. The exact periodic review at chunk `(-75,-95)` passes the same
+  structural contract;
+- an authoritative server test schedules every water cell in the reviewed
+  nine-chunk drop region. All synthetic wakes execute, the queue drains, and
+  no block changes. A separate ordinary-reach wake test remains green; and
+- the RD16 card at `(-103,185)` shows the first level-changing reach. The
+  separate deep-basin card passes the bathymetry review, but one integrated
+  river-to-shelf-to-basin composition has not yet been captured. More
+  importantly, the zero-contour corridor can still loop and lacks actual
+  headwater, outlet, confluence, accumulated-discharge, and named-reach
+  identity. Those unchecked semantics must not be inferred from the local
+  level and flow fields.
 
 ### Slice 3: reuse and platform closeout after corrective human acceptance
 
@@ -413,6 +467,27 @@ and host for comparison.
 - a later output-changing quality selector remains a persisted descriptor, not
   a per-chunk performance switch.
 
+Revision-10 same-host A/B record, 2026-07-23:
+
+- the Linux workstation cannot be compared numerically with the earlier Apple
+  M4 release record. To isolate the change, the bathymetry-only parent and
+  revision 10 were built separately and alternated for two 20-iteration,
+  radius-three seed `-98765` runs on the same host;
+- the bathymetry-only parent averaged 2,272 surface chunks/s, 762 cold
+  decorated targets/s, and 4,031 warm targets/s. Revision 10 averaged 2,368,
+  771, and 3,836 respectively: +4.2 percent surface, +1.2 percent cold, and
+  -4.9 percent warm. Run-to-run variation is larger than any surface/cold
+  regression, and all lanes remain comfortably inside the 25-percent
+  investigation gate; and
+- the 3,600-frame, 60 Hz, 32-block/s movement route around waterfall chunk
+  `(-103,185)` visited 64 unique chunk centers at RD10. Offscreen frame work
+  measured 6.023 ms average, 12.691 ms p95, 14.746 ms p99, and 22.003 ms max;
+  10 frames exceeded 16.667 ms and none exceeded 2x. Publications ended empty;
+  generation and render work retained a 17-job/94-chunk tail because the
+  accelerated route was still moving. Scheduled-fluid depth was zero
+  throughout, and due, executed, deferred, mutation, snapshot, and event
+  totals were all zero.
+
 ## Human Review Questions
 
 - Do rivers read as connected waterways instead of trenches, blue contour
@@ -429,8 +504,9 @@ and host for comparison.
 
 Stop and split follow-up work if the first visual result requires a global
 drainage solver, arbitrary upstream search, fluid simulation changes, true
-confluence/discharge identity, waterfall realization, a generic field graph,
-reference Overworld changes, or app/platform terrain policy.
+confluence/discharge identity, a waterfall family beyond the bounded
+corrective stencil, a generic field graph, reference Overworld changes, or
+app/platform terrain policy.
 
 ## Related
 

@@ -592,6 +592,125 @@ fn generated_mclone_flat_reach_is_quiescent_when_every_source_is_woken() {
 }
 
 #[test]
+fn generated_mclone_baked_drop_is_quiescent_when_every_water_cell_is_woken() {
+    let seed = -98_765;
+    let center = ChunkPos::new(-103, 185);
+    let definition =
+        DimensionDefinition::overworld(seed, WorldGenerationProfile::McloneOverworldV1);
+    let mut server = LocalRealmSession::local_integrated_with_dimension_definition(definition);
+    server.set_lighting_enabled(false);
+    handle_command_and_poll(
+        &mut server,
+        ClientCommand::SetChunkView(ChunkView {
+            center,
+            render_distance: 2,
+            chunk_tracking_radius: 2,
+        }),
+    );
+
+    assert_eq!(
+        server.scheduled_fluid_tick_count(),
+        0,
+        "baked Mclone drops must not carry generation-time liquid ticks"
+    );
+
+    let mut water = Vec::new();
+    let mut flowing = 0;
+    for chunk_z in center.z - 1..=center.z + 1 {
+        for chunk_x in center.x - 1..=center.x + 1 {
+            let chunk = ChunkPos::new(chunk_x, chunk_z);
+            for x in chunk.min_block_x()..=chunk.min_block_x() + 15 {
+                for z in chunk.min_block_z()..=chunk.min_block_z() + 15 {
+                    for y in 0..256 {
+                        let pos = WorldBlockPos::new(x, y, z);
+                        let Some(block) = server.scheduler().block_at_world(pos) else {
+                            continue;
+                        };
+                        if mclone_worldgen::block::is_water(block) {
+                            water.push(pos);
+                            flowing += usize::from(block != WATER);
+                        }
+                    }
+                }
+            }
+        }
+    }
+    assert!(
+        water.len() > 100,
+        "reviewed drop should contain a water body"
+    );
+    assert!(
+        flowing > 0,
+        "reviewed drop should contain baked flowing-water cells"
+    );
+    let mut watched = std::collections::BTreeMap::new();
+    for pos in &water {
+        for candidate in [
+            *pos,
+            pos.offset(0, 1, 0),
+            pos.below(),
+            pos.offset(-1, 0, 0),
+            pos.offset(1, 0, 0),
+            pos.offset(0, 0, -1),
+            pos.offset(0, 0, 1),
+        ] {
+            watched
+                .entry(candidate)
+                .or_insert_with(|| server.scheduler().block_at_world(candidate));
+        }
+    }
+    for pos in &water {
+        server.schedule_fluid_tick(*pos, FluidKind::Water, 0);
+    }
+
+    let mut executed = 0;
+    let mut mutated = 0;
+    for _ in 0..20 {
+        let report = server.simulation_tick_report();
+        executed += report.fluid_ticks_executed;
+        mutated += report.fluid_mutated_blocks;
+        if server.scheduled_fluid_tick_count() == 0 {
+            break;
+        }
+    }
+
+    let changes = watched
+        .iter()
+        .filter_map(|(pos, before)| {
+            let after = server.scheduler().block_at_world(*pos);
+            (after != *before).then_some((*pos, *before, after))
+        })
+        .take(20)
+        .collect::<Vec<_>>();
+    let sampler = mclone_worldgen::levelgen::McloneOverworldSampler::new(seed);
+    let change_details = changes
+        .iter()
+        .map(|(pos, before, after)| {
+            (
+                *pos,
+                *before,
+                *after,
+                sampler.sample(pos.x, pos.z).watercourse,
+            )
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        mutated,
+        0,
+        "waking a baked drop must preserve its authored fluid stencil \
+         (executed={executed}, initial={}, remaining={}, changes={change_details:?})",
+        water.len(),
+        server.scheduled_fluid_tick_count()
+    );
+    assert_eq!(executed, water.len());
+    assert_eq!(
+        server.scheduled_fluid_tick_count(),
+        0,
+        "a quiescent baked drop must drain the synthetic wake queue"
+    );
+}
+
+#[test]
 fn scheduled_water_tick_spreads_down_and_publishes_section_update() {
     let mut server = LocalRealmSession::new(12_345);
     let initial_updates = handle_command_and_poll(

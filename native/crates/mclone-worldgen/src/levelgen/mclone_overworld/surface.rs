@@ -1,4 +1,6 @@
-use crate::block::{CLAY, DIRT, GRASS_BLOCK, GRAVEL, SAND, STONE, WATER};
+use crate::block::{
+    CLAY, DIRT, GRASS_BLOCK, GRAVEL, SAND, STONE, WATER, WATER_LEVEL_8, water_block_for_level,
+};
 use crate::levelgen::MutableChunkBlockBuffer;
 
 use super::fields::{MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldLandformSample};
@@ -49,6 +51,7 @@ pub(super) fn write_surface_column(
     local_x: i32,
     local_z: i32,
     sample: McloneOverworldLandformSample,
+    fall_top_flow_level: u8,
 ) {
     buffer.set_block_at_y(local_x, 0, local_z, crate::block::BEDROCK);
     let surface_y = sample.terrain.surface_y;
@@ -83,13 +86,30 @@ pub(super) fn write_surface_column(
             }
         }
     }
-    let water_fill_y = if sample.terrain.watercourse.is_water() {
-        sample.terrain.watercourse.water_surface_y
+    let watercourse = sample.terrain.watercourse;
+    let water_fill_y = if watercourse.is_water() {
+        watercourse.water_surface_y
     } else {
         MCLONE_OVERWORLD_SEA_LEVEL
     };
-    for y in surface_y + 1..=water_fill_y {
-        buffer.set_block_at_y(local_x, y, local_z, WATER);
+    if watercourse.is_fall_column() {
+        for y in surface_y + 1..=watercourse.drop_lower_y {
+            buffer.set_block_at_y(local_x, y, local_z, WATER);
+        }
+        for y in (surface_y + 1).max(watercourse.drop_lower_y + 1)..watercourse.drop_upper_y {
+            buffer.set_block_at_y(local_x, y, local_z, WATER_LEVEL_8);
+        }
+        buffer.set_block_at_y(
+            local_x,
+            watercourse.drop_upper_y,
+            local_z,
+            water_block_for_level(fall_top_flow_level.clamp(1, 7))
+                .expect("bounded Mclone waterfall top level must map to water"),
+        );
+    } else {
+        for y in surface_y + 1..=water_fill_y {
+            buffer.set_block_at_y(local_x, y, local_z, WATER);
+        }
     }
 }
 
@@ -140,6 +160,10 @@ mod tests {
                     flow_x: 1.0,
                     flow_z: 0.0,
                     grade: 0.0,
+                    drop_distance: f64::INFINITY,
+                    drop_height: 0,
+                    drop_upper_y: MCLONE_OVERWORLD_SEA_LEVEL,
+                    drop_lower_y: MCLONE_OVERWORLD_SEA_LEVEL,
                     wetland_influence: 0.0,
                     wetland_pool_influence: 0.0,
                 },

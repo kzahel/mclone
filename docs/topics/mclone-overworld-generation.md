@@ -37,8 +37,12 @@ cold/warm generation measurements, and an accelerated 3,600-frame movement
 soak pass. Human Review 2 nevertheless rejected the world language: every
 physical river still shares one level and disappears at the conservative
 lowland gate, while large water bodies have smooth shallow floors without
-size-aware shelf and deep-basin structure. Independent bathymetry and explicit
-flat reaches with bounded baked drops now precede platform closeout.
+size-aware shelf and deep-basin structure. Field revision 9 now supplies
+size-aware shelf/deep-basin bathymetry, and field revision 10 supplies local
+four-block flat levels joined by bounded baked drops. Their structural,
+runtime, performance, movement, map, and pixel evidence passes and awaits
+Human Review 3. The local solution deliberately does not claim true
+headwaters, outlets, confluences, or globally monotonic drainage.
 
 ## Scope
 
@@ -231,22 +235,47 @@ termination. Preserve constant-level source bodies and their closure proof,
 but apply them per explicit reach rather than treating the global sea as the
 only reach.
 
-Ocean bathymetry is a separate missing terrain family. The current negative-
-continentalness branch maps almost the entire ocean floor through a smooth
-Y46-to-Y61 curve with only `relief * 1.5` local variation. It has no shelf
-break, deep-basin selector, or independent seabed relief. The next field
-revision should add continuous shore/shelf, basin-interior, depth, and seabed
-facts. Large water interiors become substantially deeper and more irregular
-while the surface remains flat at Y63.
+Field revision 9 makes ocean bathymetry an independent terrain family.
+Negative continentalness supplies continuous ocean-interior, shelf,
+shelf-break, basin, depth, and seabed-relief facts. An independent 1,536-block
+basin selector and 384/96-block seabed relief preserve exact 6,144-block X
+periodicity without a connected-component query. Coastal depth begins at two
+blocks, the shelf contributes roughly ten more, and basin selection plus
+relief may reach the configured 52-block maximum. Seed `-98765`'s reviewed
+period spans depth 2 through 40 with p10/p50/p90 depths 3/9/30. The surface
+remains source-flat at Y63 while the accepted RD16 deep-water card reaches a
+contoured floor at Y23.
+
+Field revision 10 is the first local stepped-reach realization. It projects
+each column onto the analytic centerline before sampling a hydraulic terrain
+profile, then quantizes that profile into four-block source planes from Y63
+upward. Provisional flow comes from two fixed probes 16 blocks along the
+centerline tangent. Crossing a level boundary selects a bounded two-block
+source lip, narrow falling-water sheet, and deeper receiving pool. A tiny
+digital-distance calculation over the existing two-block sample halo assigns
+the falling sheet's top flow level. Immediate non-channel edge columns form a
+containment collar; production performs no fluid simulation, arbitrary
+upstream search, or new chunk dependency.
+
+This revision provides inspectable level, local flow direction, grade,
+drop-distance, upper/lower level, drop height, falling-column, and receiving
+pool facts. It does **not** complete the intended reach vocabulary. The
+zero-contour corridor can still close into loops, local downhill choices are
+not a globally monotonic drainage proof, and there is no explicit headwater,
+outlet, confluence, accumulated discharge, or named reach identity. One
+integrated river-to-shelf-to-deep-basin outlet remains a review gap.
 
 The production hydraulic-closure audit checks generated chunks with a
 one-chunk halo. It rejects horizontal source faces open to non-solid cells,
-unsupported sources, unequal tops on adjacent wet columns, and initial liquid
-ticks. Dense river, coast, wetland-pool, and exact periodic-seam review regions
-all report closed with zero failure counters. A separate authoritative-server
-test wakes every source in a dense generated reach and requires zero mutation
-and an empty final fluid queue. The audit is review/test work and adds no hot
-path generation cost.
+unsupported source or flowing water, unequal tops on adjacent ordinary source
+columns, and initial liquid ticks. It classifies unequal tops across the
+bounded falling stencil as intentional drop edges. The reviewed seed `-98765`
+drop at chunk `(-103,185)` contains 2,570 source and 68 flowing blocks with 17
+intentional drop edges and zero structural failures; the periodic drop at
+`(-75,-95)` passes the same contract. Separate authoritative-server tests wake
+every water cell in the drop and every source in an ordinary reach, require
+zero mutation, and drain the queues. The audit is review/test work and adds no
+hot-path generation cost.
 
 This corridor family is fixed-work and visually continuous, but it is not yet
 a drainage network. Generic zero contours may form closed loops and do not
@@ -257,11 +286,13 @@ with an explicit finite halo and a descriptor-keyed cache; point queries
 consume bounded reach facts. No column sampler may trace arbitrarily far
 upstream, run an unbounded flood fill, or search until it finds an ocean.
 
-Reach grade later distinguishes calm water, riffles, rapids, cascades, falls,
-and plunge pools. A waterfall must have continuous upstream and downstream
-watercourse facts. Low-gradient reaches may meander or support floodplains and
-wetlands; steep constrained reaches may form gorges. Not every valley receives
-a river, and small configured ponds and springs remain useful local accents.
+Reach grade now selects the first bounded four-block fall and receiving pool.
+It may later distinguish calm water, riffles, rapids, smaller cascades, and
+gorges. A generalized waterfall must have continuous upstream and downstream
+watercourse facts; the local flow estimate is not a substitute for that
+network identity. Low-gradient reaches may meander or support floodplains and
+wetlands. Not every valley receives a river, and small configured ponds and
+springs remain useful local accents.
 
 This shared vocabulary also gives structures stable site facts for bridges,
 fords, mill races, water wheels, irrigation, ponds, and scenic settlement
@@ -354,6 +385,26 @@ max with no over-budget frames. Worldgen and publication queues ended empty;
 loaded chunks stayed between 529 and 576. Maximum and final scheduled-fluid
 depth, as well as due, executed, deferred, mutation, snapshot, and event
 counters, were all zero.
+
+The revision-10 stepped-reach comparison was captured on the current Linux
+workstation and therefore does not compare raw throughput with the preceding
+Apple M4 records. An alternating same-host A/B built the bathymetry-only parent
+and revision 10 separately, then ran two 20-iteration radius-three passes of
+each at seed `-98765`. The parent averaged 2,272 surface chunks/s, 762 cold
+decorated targets/s, and 4,031 warm targets/s. Revision 10 averaged 2,368,
+771, and 3,836: +4.2 percent, +1.2 percent, and -4.9 percent respectively.
+This is inside the 25-percent investigation gate. Hydraulic sampling returns
+before its three profile probes on ocean and columns more than 48 blocks from
+the corridor, which keeps the extra fixed work local.
+
+The matching waterfall-centered movement run used chunk `(-103,185)` and the
+same RD10, eight-chunk-radius, 32-block/s, 3,600-frame/60 Hz shape. Across 64
+unique chunk centers, offscreen work measured 6.023 ms average, 12.691 ms p95,
+14.746 ms p99, and 22.003 ms max; 10 frames exceeded the 16.667 ms budget and
+none exceeded 2x. Publications ended empty, while a 17-worldgen-job and
+94-render-chunk tail remained because the accelerated route was still moving.
+Maximum/final scheduled-fluid depth and all due, executed, deferred, mutation,
+snapshot, and fluid-event totals were zero.
 
 Quality-versus-speed controls divide into two categories:
 
@@ -639,14 +690,19 @@ subsystem horizontally.
 4. **Rivers and wetlands**
    - Deterministic river influence applied before surface recipes.
    - Human Review 1 rejected field revision 7's sloped/uncontained water.
-     Corrective field revision 8 has passed closure, runtime, pixel, and
-     performance evidence and is ready for Human Review 2.
-   - Water surface, width/depth, banks, provisional flow, grade, and wetland
-     facts are live. Headwater, confluence, outlet, discharge, and true reach
-     continuity await a network-semantic slice if review calls for one.
+     Human Review 2 rejected revision 8's one-level language. Corrective field
+     revisions 9/10 now pass bathymetry, stepped-reach, bounded-drop,
+     closure, runtime, pixel, and performance evidence and are ready for Human
+     Review 3.
+   - Water surface, width/depth, banks, provisional flow, grade, local
+     upper/lower drop, receiving-pool, and wetland facts are live. Headwater,
+     confluence, outlet, discharge, globally monotonic drainage, and true
+     reach continuity await a network-semantic slice.
 5. **Streams, cascades, and waterfall reaches**
-   - Realize continuous watercourses against the accepted relief and river
-     facts, with stable upstream and downstream destinations.
+   - Generalize the first bounded four-block drop only after the parent river
+     and its local stencil pass human review. Realize smaller continuous
+     watercourses against accepted relief and river facts, with stable
+     upstream and downstream destinations.
    - Classify calm, riffle, cascade, fall, and later mill-compatible reaches;
      never place an isolated falling-water decoration without a watercourse.
    - Keep sound, mist, splash particles, animation, and functional machinery
@@ -816,12 +872,15 @@ Human Review 3 accepted the result as more natural and less geometric.
 
 ## Next Work
 
-Human Review 2 rejected field revision 8 as a complete water system. Execute
-Tactical 220's bathymetry and explicit-reach corrections next. Human Review 3
-must see a deep basin, a coast-to-shelf transition, two flat river levels and
-their bounded drop, and a river outlet whose bed joins the shelf rather than a
-three-block trench entering a shallow plane. Caves, structures, broad biome
-expansion, and platform closeout remain parked until that review passes.
+Field revisions 9/10 are at Human Review 3. Review the deep-basin RD16 card and
+the stepped-reach card interactively, especially whether the containment edge
+looks like a plausible bank or an engineered canal. The remaining objective
+review gap is one river outlet whose bed joins a visible shelf and deep basin;
+the remaining semantic gap is actual headwater/outlet and globally monotonic
+reach identity. Do not hide those gaps by inferring a drainage graph from the
+local flow vector. Caves, structures, broad biome expansion, and platform
+closeout remain parked until the human water review decides whether to refine
+this local family or move directly to macro drainage-network semantics.
 
 ## Related
 

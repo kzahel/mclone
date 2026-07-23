@@ -379,7 +379,7 @@ Current `mclone-overworld-v1` support is:
 |---|---|---|---|---|---|
 | Terrain fields | supported | unsupported | supported at 384 chunks | pending | design only |
 | Features | supported | unsupported | supported at 384 chunks | pending | design only |
-| Rivers/hydrology | flat lowland reaches at Y63 | unsupported | flat lowland reaches at Y63 for 384 chunks | pending | design only |
+| Rivers/hydrology | size-aware ocean bathymetry plus local four-block flat reaches and bounded drops | unsupported | same fields and stencils at 384 chunks | pending | design only |
 | Mclone caves | absent | - | - | - | - |
 | Mclone structures | absent | - | - | - | - |
 
@@ -419,14 +419,17 @@ concrete. The accepted terrain and reuse direction lives in
 
 Human Review 1 rejected the first bounded rivers/wetlands hydraulic
 realization because pointwise terrain-relative water height permitted
-transverse slopes and uncontained source faces. Corrective field revision 8
-now realizes only flat Y63 lowland reaches on the exact
-plane/384-chunk-cylinder sampler contract. Hydraulic-closure diagnostics, an
-authoritative fluid wake test, multi-seed pixels, and cold/warm plus movement
-evidence pass. Human Review 2 still rejected one global river level and the
-shallow/smooth ocean-floor language. Size-aware bathymetry and explicit flat
-reaches with bounded baked drops now precede platform closeout. Production
-chunk-time simulation remains excluded.
+transverse slopes and uncontained source faces. Human Review 2 then rejected
+field revision 8's one-level lowland language and shallow ocean floors. Field
+revision 9 adds size-aware shelf/deep-basin bathymetry; revision 10 adds local
+four-block flat levels, a bounded lip/fall/pool stencil, and source-versus-flow
+closure diagnostics on the exact plane/384-chunk-cylinder sampler contract.
+Authoritative runtime wakes and a waterfall-centered movement soak produce no
+fluid mutations or generated fluid-tick tail. Human Review 3 now decides
+whether this local family is visually sufficient or should give way to
+macro-tile drainage semantics. Explicit headwater/outlet identity, global
+monotonicity, and one integrated river-to-deep-basin outlet remain open.
+Production chunk-time simulation remains excluded.
 True structure infrastructure remains ready as a separate concern but is
 parked while this terrain campaign advances.
 

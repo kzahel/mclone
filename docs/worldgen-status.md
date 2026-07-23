@@ -37,7 +37,12 @@ hydraulic closure, authoritative fluid wake, RD16 pixel, cold/warm generation,
 and accelerated one-minute movement evidence. Human Review 2 rejected the
 world language: one global river level produces no visible drops and abruptly
 vanishes at the lowland gate, while large bodies lack shelf/deep-basin
-bathymetry. Those two terrain corrections now precede platform closeout.
+bathymetry. Field revision 9 now adds size-aware shelf/deep-basin floors and
+field revision 10 adds local four-block flat reaches joined by a bounded baked
+lip/fall/pool stencil. Closure, runtime wake, performance, movement, map, and
+RD16 evidence pass; Human Review 3 is next. This is not yet a drainage graph:
+explicit headwaters/outlets, globally monotonic reach identity, and one
+integrated river-to-deep-basin outlet remain open.
 
 Compatibility safety is recorded in the
 [`world-generation-profiles` ledger](topics/world-generation-profiles.md#compatibility-safety-ledger).
@@ -106,9 +111,12 @@ Landed native coverage:
   downstream-reach semantics. Its first smooth hydraulic realization was
   rejected because column-local water height could slope across a channel and
   expose source faces. Field revision 8 instead realizes only constant-Y63
-  lowland reaches. A halo-aware block audit and real fluid-runtime wake test
-  prove the reviewed bodies are quiescent; higher reaches and bounded
-  waterfall templates remain deferred.
+  lowland reaches. Revisions 9/10 add size-aware ocean depth, local four-block
+  source planes, and a bounded baked drop between adjacent levels. A
+  halo-aware block audit and real fluid-runtime wake tests prove ordinary
+  reaches and the reviewed falling stencil are quiescent. The result still
+  lacks a true drainage network, headwater/outlet identity, confluences, and
+  accumulated discharge.
 - Production-backed broad field maps and fully warmed seed/region/spawn cards;
   the first review accepted macro scale and coast variation after adding one
   fine relief octave to break up concentric local contour bands. The second
@@ -165,9 +173,9 @@ Still not full vanilla parity:
 - the first original island generator remains intentionally bounded; the
   continuous mclone overworld now exists but has only a deliberately narrow
   terrain/material/biome/vegetation palette. Its first broad river and sparse
-  wetland family failed Human Review 1; flat contained field revision 8 is now
-  ready for Human Review 2. It still has no small streams,
-  cascades, waterfalls, caves, or structures
+  wetland family failed Human Reviews 1 and 2; corrective bathymetry and local
+  stepped reaches are ready for Human Review 3. It still has no small streams,
+  general cascade family, drainage-network semantics, caves, or structures
 - Mclone Overworld terrain, biome, surface, spawn, existing vegetation, broad
   rivers, and wetland pools are periodic for the exact 384-chunk X cylinder.
   All later content must join that sampler contract explicitly; canonical

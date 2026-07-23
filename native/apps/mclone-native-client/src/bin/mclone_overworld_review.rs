@@ -1,5 +1,6 @@
 #![recursion_limit = "256"]
 
+use std::collections::BTreeSet;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -132,6 +133,9 @@ fn run() -> Result<()> {
         .join(format!("{prefix}-river-distance.png"));
     let river_level_path = config.output_dir.join(format!("{prefix}-river-level.png"));
     let river_grade_path = config.output_dir.join(format!("{prefix}-river-grade.png"));
+    let river_transition_path = config
+        .output_dir
+        .join(format!("{prefix}-river-transitions.png"));
     let wetland_path = config.output_dir.join(format!("{prefix}-wetland.png"));
     let watercourses_path = config.output_dir.join(format!("{prefix}-watercourses.png"));
     let water_depth_path = config.output_dir.join(format!("{prefix}-water-depth.png"));
@@ -162,6 +166,7 @@ fn run() -> Result<()> {
     let river_distance = render_map(&region.samples, river_distance_color);
     let river_level = render_map(&region.samples, river_level_color);
     let river_grade = render_map(&region.samples, river_grade_color);
+    let river_transitions = render_map(&region.samples, river_transition_color);
     let wetland = render_map(&region.samples, wetland_color);
     let water_depth = render_map(&region.samples, water_depth_color);
     let shelf_break = render_map(&region.samples, shelf_break_color);
@@ -210,6 +215,12 @@ fn run() -> Result<()> {
         request.depth,
         &river_grade,
     )?;
+    save_rgba(
+        &river_transition_path,
+        request.width,
+        request.depth,
+        &river_transitions,
+    )?;
     save_rgba(&wetland_path, request.width, request.depth, &wetland)?;
     save_rgba(
         &water_depth_path,
@@ -249,11 +260,17 @@ fn run() -> Result<()> {
     let watercourses = combine_maps(
         request.width,
         request.depth,
-        [&river_distance, &river_level, &river_grade, &wetland],
+        [
+            &river_distance,
+            &river_level,
+            &river_transitions,
+            &river_grade,
+            &wetland,
+        ],
     );
     save_rgba(
         &watercourses_path,
-        request.width * 4 + MAP_GAP_PIXELS * 3,
+        request.width * 5 + MAP_GAP_PIXELS * 4,
         request.depth,
         &watercourses,
     )?;
@@ -297,7 +314,7 @@ fn run() -> Result<()> {
 
     let (commit, dirty) = git_state();
     let receipt = serde_json::json!({
-        "schema": 9,
+        "schema": 10,
         "profile": "mclone-overworld-v1",
         "topology": config.topology.label(),
         "fieldRevision": MCLONE_OVERWORLD_FIELD_REVISION,
@@ -342,6 +359,7 @@ fn run() -> Result<()> {
             "riverDistance": [facts.min_river_distance, facts.max_river_distance],
             "riverHalfWidth": [facts.min_river_half_width, facts.max_river_half_width],
             "riverGrade": [facts.min_river_grade, facts.max_river_grade],
+            "riverWaterSurfaceY": [facts.min_river_water_y, facts.max_river_water_y],
             "wetlandInfluence": [facts.min_wetland_influence, facts.max_wetland_influence],
             "wetlandPoolInfluence": [facts.min_wetland_pool_influence, facts.max_wetland_pool_influence],
             "baseSurfaceY": [facts.min_base_surface_y, facts.max_base_surface_y],
@@ -388,6 +406,9 @@ fn run() -> Result<()> {
         "watercourseCounts": {
             "channel": facts.river_channel_columns,
             "gradedBank": facts.river_bank_influence_columns,
+            "distinctReachLevels": facts.reach_level_count,
+            "dropTransition": facts.drop_transition_columns,
+            "fall": facts.fall_columns,
             "wetlandAboveQuarter": facts.wetland_columns,
             "wetlandPool": facts.wetland_pool_columns,
         },
@@ -401,10 +422,14 @@ fn run() -> Result<()> {
             "elapsedMs": hydraulic_elapsed_ms,
             "targetChunks": hydraulic.target_chunks,
             "sourceWaterBlocks": hydraulic.source_water_blocks,
+            "flowingWaterBlocks": hydraulic.flowing_water_blocks,
             "sourceBoundaryBlocks": hydraulic.source_boundary_blocks,
             "horizontallyOpenSourceFaces": hydraulic.horizontally_open_source_faces,
+            "firstOpenSource": hydraulic.first_open_source,
             "unsupportedSourceBlocks": hydraulic.unsupported_source_blocks,
+            "unsupportedFlowingBlocks": hydraulic.unsupported_flowing_blocks,
             "slopedSurfaceEdges": hydraulic.sloped_surface_edges,
+            "intentionalDropEdges": hydraulic.intentional_drop_edges,
             "scheduledLiquidTicks": hydraulic.scheduled_liquid_ticks,
             "closed": hydraulic.is_closed(),
         },
@@ -440,10 +465,11 @@ fn run() -> Result<()> {
             "shelfBreak": shelf_break_path,
             "oceanBasin": ocean_basin_path,
             "seabedRelief": seabed_relief_path,
-            "watercourseOrder": ["distanceAndInfluence", "waterLevel", "grade", "wetland"],
+            "watercourseOrder": ["distanceAndInfluence", "waterLevel", "transitions", "grade", "wetland"],
             "watercourses": watercourses_path,
             "riverDistance": river_distance_path,
             "riverLevel": river_level_path,
+            "riverTransitions": river_transition_path,
             "riverGrade": river_grade_path,
             "wetland": wetland_path,
             "terrainLanguageOrder": ["slope", "biomes", "surfaceRecipes"],
@@ -568,6 +594,21 @@ fn select_review_sites(
                 .total_cmp(&right.terrain.continentalness)
         })
         .map(|(index, _)| index);
+    let waterfall = samples
+        .iter()
+        .enumerate()
+        .filter(|(_, sample)| {
+            sample.terrain.watercourse.is_channel()
+                && sample.terrain.watercourse.is_drop_transition()
+        })
+        .min_by(|(_, left), (_, right)| {
+            left.terrain
+                .watercourse
+                .drop_distance
+                .abs()
+                .total_cmp(&right.terrain.watercourse.drop_distance.abs())
+        })
+        .map(|(index, _)| index);
     let wetland = samples
         .iter()
         .enumerate()
@@ -616,6 +657,7 @@ fn select_review_sites(
         "river": review_site_json(river, samples, request),
         "mountainRiver": review_site_json(mountain_river, samples, request),
         "coastalRiver": review_site_json(coastal_river, samples, request),
+        "waterfall": review_site_json(waterfall, samples, request),
         "wetland": review_site_json(wetland, samples, request),
         "wetlandPool": review_site_json(wetland_pool, samples, request),
         "periodicSeamRiver": review_site_json(seam_river, samples, request),
@@ -673,6 +715,11 @@ fn sample_json(sample: McloneOverworldLandformSample) -> serde_json::Value {
             "tangent": [terrain.watercourse.tangent_x, terrain.watercourse.tangent_z],
             "flow": [terrain.watercourse.flow_x, terrain.watercourse.flow_z],
             "grade": terrain.watercourse.grade,
+            "dropDistance": terrain.watercourse.drop_distance,
+            "dropHeight": terrain.watercourse.drop_height,
+            "dropUpperY": terrain.watercourse.drop_upper_y,
+            "dropLowerY": terrain.watercourse.drop_lower_y,
+            "fallColumn": terrain.watercourse.is_fall_column(),
             "wetlandInfluence": terrain.watercourse.wetland_influence,
             "wetlandPoolInfluence": terrain.watercourse.wetland_pool_influence,
         },
@@ -781,6 +828,8 @@ struct RegionFacts {
     max_river_half_width: f64,
     min_river_grade: f64,
     max_river_grade: f64,
+    min_river_water_y: i32,
+    max_river_water_y: i32,
     min_wetland_influence: f64,
     max_wetland_influence: f64,
     min_wetland_pool_influence: f64,
@@ -819,6 +868,9 @@ struct RegionFacts {
     exposed_stone_columns: usize,
     river_channel_columns: usize,
     river_bank_influence_columns: usize,
+    reach_level_count: usize,
+    drop_transition_columns: usize,
+    fall_columns: usize,
     wetland_columns: usize,
     wetland_pool_columns: usize,
     shelf_columns: usize,
@@ -865,6 +917,8 @@ impl RegionFacts {
         let mut max_river_half_width = f64::NEG_INFINITY;
         let mut min_river_grade = f64::INFINITY;
         let mut max_river_grade = f64::NEG_INFINITY;
+        let mut min_river_water_y = i32::MAX;
+        let mut max_river_water_y = i32::MIN;
         let mut min_wetland_influence = f64::INFINITY;
         let mut max_wetland_influence = f64::NEG_INFINITY;
         let mut min_wetland_pool_influence = f64::INFINITY;
@@ -895,6 +949,9 @@ impl RegionFacts {
         let mut exposed_stone_columns = 0;
         let mut river_channel_columns = 0;
         let mut river_bank_influence_columns = 0;
+        let mut reach_levels = BTreeSet::new();
+        let mut drop_transition_columns = 0;
+        let mut fall_columns = 0;
         let mut wetland_columns = 0;
         let mut wetland_pool_columns = 0;
         let mut shelf_columns = 0;
@@ -964,6 +1021,15 @@ impl RegionFacts {
             slopes.push(landform.slope);
             if sample.watercourse.is_channel() {
                 river_channel_columns += 1;
+                min_river_water_y = min_river_water_y.min(sample.watercourse.water_surface_y);
+                max_river_water_y = max_river_water_y.max(sample.watercourse.water_surface_y);
+                reach_levels.insert(sample.watercourse.water_surface_y);
+            }
+            if sample.watercourse.is_drop_transition() {
+                drop_transition_columns += 1;
+            }
+            if sample.watercourse.is_fall_column() {
+                fall_columns += 1;
             }
             if sample.watercourse.bank_influence > 0.0 {
                 river_bank_influence_columns += 1;
@@ -1060,6 +1126,10 @@ impl RegionFacts {
                 .chain(sample.watercourse.flow_x.to_bits().to_le_bytes())
                 .chain(sample.watercourse.flow_z.to_bits().to_le_bytes())
                 .chain(sample.watercourse.grade.to_bits().to_le_bytes())
+                .chain(sample.watercourse.drop_distance.to_bits().to_le_bytes())
+                .chain(sample.watercourse.drop_height.to_le_bytes())
+                .chain(sample.watercourse.drop_upper_y.to_le_bytes())
+                .chain(sample.watercourse.drop_lower_y.to_le_bytes())
                 .chain(sample.watercourse.wetland_influence.to_bits().to_le_bytes())
                 .chain(
                     sample
@@ -1088,6 +1158,14 @@ impl RegionFacts {
         heights.sort_unstable();
         slopes.sort_by(f64::total_cmp);
         water_depths.sort_unstable();
+        if water_depths.is_empty() {
+            min_water_depth = 0;
+            max_water_depth = 0;
+        }
+        if reach_levels.is_empty() {
+            min_river_water_y = MCLONE_OVERWORLD_SEA_LEVEL;
+            max_river_water_y = MCLONE_OVERWORLD_SEA_LEVEL;
+        }
 
         let mut slope_edges = 0;
         let mut slope_at_least_one = 0;
@@ -1145,6 +1223,8 @@ impl RegionFacts {
             max_river_half_width,
             min_river_grade,
             max_river_grade,
+            min_river_water_y,
+            max_river_water_y,
             min_wetland_influence,
             max_wetland_influence,
             min_wetland_pool_influence,
@@ -1160,9 +1240,9 @@ impl RegionFacts {
             surface_y_p10: percentile(&heights, 10),
             surface_y_p50: percentile(&heights, 50),
             surface_y_p90: percentile(&heights, 90),
-            water_depth_p10: percentile(&water_depths, 10),
-            water_depth_p50: percentile(&water_depths, 50),
-            water_depth_p90: percentile(&water_depths, 90),
+            water_depth_p10: percentile_or_default(&water_depths, 10, 0),
+            water_depth_p50: percentile_or_default(&water_depths, 50, 0),
+            water_depth_p90: percentile_or_default(&water_depths, 90, 0),
             slope_p50: percentile_f64(&slopes, 50),
             slope_p90: percentile_f64(&slopes, 90),
             slope_p99: percentile_f64(&slopes, 99),
@@ -1183,6 +1263,9 @@ impl RegionFacts {
             exposed_stone_columns,
             river_channel_columns,
             river_bank_influence_columns,
+            reach_level_count: reach_levels.len(),
+            drop_transition_columns,
+            fall_columns,
             wetland_columns,
             wetland_pool_columns,
             shelf_columns,
@@ -1223,6 +1306,12 @@ fn add_slope(
 fn percentile(sorted: &[i32], percentile: usize) -> i32 {
     let index = (sorted.len() - 1) * percentile / 100;
     sorted[index]
+}
+
+fn percentile_or_default(sorted: &[i32], percentile_value: usize, default: i32) -> i32 {
+    (!sorted.is_empty())
+        .then(|| percentile(sorted, percentile_value))
+        .unwrap_or(default)
 }
 
 fn percentile_f64(sorted: &[f64], percentile: usize) -> f64 {
@@ -1420,6 +1509,30 @@ fn river_grade_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
         [215, 81, 52, 255],
         sample.watercourse.grade / 0.4,
     )
+}
+
+fn river_transition_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    if sample.watercourse.bank_influence == 0.0 {
+        return [31, 41, 43, 255];
+    }
+    if sample.watercourse.is_fall_column() {
+        return [246, 243, 218, 255];
+    }
+    if sample.watercourse.is_drop_transition() {
+        if sample.watercourse.drop_distance >= 0.0 {
+            return lerp_color(
+                [94, 63, 156, 255],
+                [234, 128, 48, 255],
+                1.0 - sample.watercourse.drop_distance.abs() / 10.0,
+            );
+        }
+        return lerp_color(
+            [29, 107, 159, 255],
+            [70, 205, 220, 255],
+            1.0 - sample.watercourse.drop_distance.abs() / 10.0,
+        );
+    }
+    [52, 77, 70, 255]
 }
 
 fn wetland_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {

@@ -18,10 +18,14 @@ use crate::levelgen::{GeneratedChunk, MutableChunkBlockBuffer};
 pub struct McloneOverworldHydraulicClosureReport {
     pub target_chunks: usize,
     pub source_water_blocks: usize,
+    pub flowing_water_blocks: usize,
     pub source_boundary_blocks: usize,
     pub horizontally_open_source_faces: usize,
+    pub first_open_source: Option<[i32; 3]>,
     pub unsupported_source_blocks: usize,
+    pub unsupported_flowing_blocks: usize,
     pub sloped_surface_edges: usize,
+    pub intentional_drop_edges: usize,
     pub scheduled_liquid_ticks: usize,
 }
 
@@ -29,6 +33,7 @@ impl McloneOverworldHydraulicClosureReport {
     pub const fn is_closed(self) -> bool {
         self.horizontally_open_source_faces == 0
             && self.unsupported_source_blocks == 0
+            && self.unsupported_flowing_blocks == 0
             && self.sloped_surface_edges == 0
             && self.scheduled_liquid_ticks == 0
     }
@@ -63,13 +68,14 @@ pub fn generate_mclone_overworld_surface_chunk_with_topology(
     )
 }
 
-/// Inspect ordinary generated source water without running fluid simulation.
+/// Inspect generated water without running fluid simulation.
 ///
-/// Revision-8 reaches contain only level-zero source water. For that restricted
-/// vocabulary, a source body is a fixed point when every horizontal boundary
-/// meets another source or a motion-blocking cell and every source has solid or
-/// source support below it. A one-chunk halo makes the proof independent of the
-/// requested target boundary.
+/// Ordinary reaches and oceans use level-zero source water. Bounded drop
+/// stencils add vertical level-eight falling-water columns below a source lip.
+/// Source bodies are closed when every horizontal boundary meets water or a
+/// motion-blocking cell and every source has solid or water support below it.
+/// A falling column is supported by water above it. A one-chunk halo makes the
+/// proof independent of the requested target boundary.
 pub fn analyze_mclone_overworld_hydraulic_closure(
     seed: i64,
     topology: McloneOverworldSamplingTopology,
@@ -109,14 +115,27 @@ pub fn analyze_mclone_overworld_hydraulic_closure(
                     let world_x = min_x + local_x;
                     let world_z = min_z + local_z;
                     let mut top_water_y = None;
+                    let mut column_has_flowing = false;
                     for y in chunk.min_y..chunk.min_y + chunk.height {
-                        if chunk.block_at_y(local_x, y, local_z).0 != crate::block::WATER {
+                        let block = chunk.block_at_y(local_x, y, local_z).0;
+                        if !crate::block::is_water(block) {
+                            continue;
+                        }
+                        top_water_y = Some(y);
+                        if block != crate::block::WATER {
+                            report.flowing_water_blocks += 1;
+                            column_has_flowing = true;
+                            if block == crate::block::WATER_LEVEL_8 {
+                                let above = hydraulic_block_at(&chunks, world_x, y + 1, world_z);
+                                if !above.is_some_and(crate::block::is_water) {
+                                    report.unsupported_flowing_blocks += 1;
+                                }
+                            }
                             continue;
                         }
                         report.source_water_blocks += 1;
-                        top_water_y = Some(y);
                         let below = hydraulic_block_at(&chunks, world_x, y - 1, world_z);
-                        if below != Some(crate::block::WATER)
+                        if !below.is_some_and(crate::block::is_water)
                             && !below.is_some_and(crate::block::material_blocks_motion)
                         {
                             report.unsupported_source_blocks += 1;
@@ -130,12 +149,15 @@ pub fn analyze_mclone_overworld_hydraulic_closure(
                                 y,
                                 world_z + offset_z,
                             );
-                            if neighbor == Some(crate::block::WATER) {
+                            if neighbor.is_some_and(crate::block::is_water) {
                                 continue;
                             }
                             boundary = true;
                             if !neighbor.is_some_and(crate::block::material_blocks_motion) {
                                 report.horizontally_open_source_faces += 1;
+                                report
+                                    .first_open_source
+                                    .get_or_insert([world_x, y, world_z]);
                             }
                         }
                         if boundary {
@@ -150,7 +172,17 @@ pub fn analyze_mclone_overworld_hydraulic_closure(
                             continue;
                         };
                         if top_water_y.is_some_and(|top| top != neighbor_top) {
-                            report.sloped_surface_edges += 1;
+                            if column_has_flowing
+                                || hydraulic_column_has_flowing(
+                                    &chunks,
+                                    world_x + offset_x,
+                                    world_z + offset_z,
+                                )
+                            {
+                                report.intentional_drop_edges += 1;
+                            } else {
+                                report.sloped_surface_edges += 1;
+                            }
                         }
                     }
                 }
@@ -183,10 +215,27 @@ fn hydraulic_top_water_y(
     let pos = ChunkPos::new(block_to_chunk_coord(world_x), block_to_chunk_coord(world_z));
     let chunk = chunks.get(&pos)?;
     (chunk.min_y..chunk.min_y + chunk.height).rev().find(|y| {
-        chunk
+        let block = chunk
             .block_at_y(local_block_coord(world_x), *y, local_block_coord(world_z))
-            .0
-            == crate::block::WATER
+            .0;
+        crate::block::is_water(block)
+    })
+}
+
+fn hydraulic_column_has_flowing(
+    chunks: &BTreeMap<ChunkPos, GeneratedChunk>,
+    world_x: i32,
+    world_z: i32,
+) -> bool {
+    let pos = ChunkPos::new(block_to_chunk_coord(world_x), block_to_chunk_coord(world_z));
+    let Some(chunk) = chunks.get(&pos) else {
+        return false;
+    };
+    (chunk.min_y..chunk.min_y + chunk.height).any(|y| {
+        let block = chunk
+            .block_at_y(local_block_coord(world_x), y, local_block_coord(world_z))
+            .0;
+        crate::block::is_water(block) && block != crate::block::WATER
     })
 }
 
@@ -225,17 +274,62 @@ fn generate_mclone_overworld_surface_buffer_from_samples(
 
     for local_z in 0..CHUNK_WIDTH {
         for local_x in 0..CHUNK_WIDTH {
+            let fall_top_flow_level =
+                baked_fall_top_flow_level(samples, local_x, local_z).unwrap_or(1);
             write_surface_column(
                 &mut buffer,
                 local_x,
                 local_z,
                 samples.landform(local_x, local_z),
+                fall_top_flow_level,
             );
         }
     }
     buffer.prime_worldgen_heightmaps();
 
     buffer
+}
+
+fn baked_fall_top_flow_level(
+    samples: &ChunkLandformSamples,
+    local_x: i32,
+    local_z: i32,
+) -> Option<u8> {
+    let watercourse = samples.terrain(local_x, local_z).watercourse;
+    if !watercourse.is_fall_column() {
+        return None;
+    }
+    let mut visited: Vec<(i32, i32)> = vec![(0, 0)];
+    let mut frontier: Vec<(i32, i32)> = vec![(0, 0)];
+    for distance in 1_i32..=MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS {
+        let mut next = Vec::new();
+        for (offset_x, offset_z) in frontier {
+            for (step_x, step_z) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                let candidate = (offset_x + step_x, offset_z + step_z);
+                if candidate.0.abs() > MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS
+                    || candidate.1.abs() > MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS
+                    || visited.contains(&candidate)
+                {
+                    continue;
+                }
+                visited.push(candidate);
+                let neighbor = samples
+                    .terrain(local_x + candidate.0, local_z + candidate.1)
+                    .watercourse;
+                let same_drop = neighbor.is_drop_transition()
+                    && neighbor.drop_upper_y == watercourse.drop_upper_y
+                    && neighbor.drop_lower_y == watercourse.drop_lower_y;
+                if neighbor.is_channel() && same_drop && neighbor.drop_distance > 0.0 {
+                    return Some(distance as u8);
+                }
+                if neighbor.is_fall_column() && same_drop {
+                    next.push(candidate);
+                }
+            }
+        }
+        frontier = next;
+    }
+    Some((MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS + 1) as u8)
 }
 
 pub(super) fn mclone_overworld_chunk_biomes(seed: i64, min_x: i32, min_z: i32) -> Vec<i32> {
@@ -413,6 +507,11 @@ mod tests {
                 ChunkPos::new(-25, 72),
             ),
             (
+                -98_765,
+                McloneOverworldSamplingTopology::Unbounded,
+                ChunkPos::new(-103, 185),
+            ),
+            (
                 12_345,
                 McloneOverworldSamplingTopology::Unbounded,
                 ChunkPos::new(141, 100),
@@ -421,6 +520,11 @@ mod tests {
                 -98_765,
                 McloneOverworldSamplingTopology::PeriodicX,
                 ChunkPos::new(0, -190),
+            ),
+            (
+                -98_765,
+                McloneOverworldSamplingTopology::PeriodicX,
+                ChunkPos::new(-75, -95),
             ),
         ] {
             let report = analyze_mclone_overworld_hydraulic_closure(seed, topology, center, 1);
@@ -479,9 +583,9 @@ mod tests {
         assert_eq!(
             fingerprints,
             [
-                (12_335_676_003_106_193_217, 540_454_697_130_909_605),
-                (13_689_122_299_195_622_996, 3_995_179_115_581_767_979),
-                (11_325_994_624_197_391_690, 14_722_381_067_837_031_305),
+                (551_266_325_926_843_499, 540_454_697_130_909_605),
+                (2_478_835_774_507_231_805, 3_995_179_115_581_767_979),
+                (3_557_113_522_619_655_269, 14_722_381_067_837_031_305),
             ]
         );
     }
@@ -538,19 +642,19 @@ mod tests {
             receipts,
             [
                 (
-                    [21_961, 8_197, 17_644, 16_986, 748],
-                    [16_943, 12_845, 738, 10, 568, 34_356, 76],
-                    9_025_484_779_118_470_955,
+                    [21_961, 8_231, 17_815, 16_113, 1_416],
+                    [16_943, 12_810, 1_394, 22, 1_762, 32_436, 169],
+                    10_019_914_944_634_594_603,
                 ),
                 (
-                    [17_223, 6_773, 13_742, 27_253, 545],
-                    [12_358, 11_302, 544, 1, 458, 40_773, 100],
-                    16_263_007_689_816_945_037,
+                    [17_223, 6_817, 14_368, 25_517, 1_611],
+                    [12_358, 11_276, 1_603, 8, 1_585, 38_208, 498],
+                    2_127_736_042_911_625_617,
                 ),
                 (
-                    [33_641, 11_096, 9_674, 10_360, 765],
-                    [26_125, 18_142, 759, 6, 618, 19_886, 0],
-                    11_508_008_108_798_108_195,
+                    [33_641, 11_192, 9_876, 9_915, 912],
+                    [26_125, 18_086, 900, 12, 1_301, 19_085, 27],
+                    16_960_331_876_708_392_567,
                 ),
             ]
         );
@@ -579,7 +683,7 @@ mod tests {
             fingerprints,
             [
                 9_298_043_774_959_183_043,
-                4_668_154_216_011_265_078,
+                10_056_739_344_004_506_620,
                 171_330_102_405_640_746,
             ]
         );
