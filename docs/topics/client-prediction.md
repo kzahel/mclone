@@ -2,10 +2,11 @@
 
 Topic: client-prediction
 
-Status: local player movement now runs on a scene-owned fixed 60 Hz command
-clock while remaining client-authoritative (vanilla-shaped) for the deliberate
-interim. Server-side validation is planned; sequenced input replay is a
-preserved future path, not scheduled work.
+Status: local player movement now runs from recorded, sequenced 60 Hz semantic
+commands while remaining client-authoritative (vanilla-shaped) for the
+deliberate interim. Server-side validation is planned; transporting and
+authoritatively replaying those commands is a preserved future path, not
+scheduled work.
 
 Scope: who owns player movement truth, what the server checks, how remote
 entities are smoothed, and which protocol/design decisions must be made now
@@ -30,14 +31,16 @@ materialization lives in
   `mclone-client/src/player.rs:65-66,909-964`).
 - **Local movement integration is fixed at 60 Hz by default and is not driven
   by render delta.** `mclone-scene` owns a configurable player movement clock,
-  accepts elapsed wall time plus the latest shared semantic input, emits
-  bounded fixed quanta, retains jump edges across zero-step frames, and
-  interpolates only the presentation eye between committed movement poses.
+  consumes a bounded timestamped semantic-input timeline, emits recorded
+  `PlayerMovementCommand { epoch, sequence, input }` quanta, retains jump
+  edges across zero-step frames, and interpolates only the presentation eye
+  between committed movement poses.
   Desktop, browser, flat Android, and XR all use that owner. The default
   12-step catch-up bound preserves full movement through a 200 ms visible
-  frame and records explicitly dropped work beyond it. Lifecycle transitions,
-  teleports, server corrections, world swaps, and movement-policy changes snap
-  the timeline instead of interpolating from stale state.
+  frame and exposes an explicit sequence gap for dropped work beyond it.
+  Lifecycle transitions, teleports, server corrections, world swaps, and
+  movement-policy changes advance the command epoch and snap the timeline
+  instead of interpolating from stale state.
 - **Walking recurrence is rate-independent at free motion boundaries.** The
   vanilla-style impulse/drag/gravity affine recurrence now has a fractional
   fixed-step form, so three 60 Hz steps compose to one former 20 Hz step in
@@ -137,11 +140,12 @@ Decisions to make **now** so Stage 2 stays cheap:
   protocol change that Stage 1's burst accounting can use immediately and
   Stage 2 requires. Do it when the session-layer protocol changes land, to
   avoid an extra version bump.
-- **Keep the client's input→physics quantum explicit.** The scene now emits
-  fixed 1/60-second local-player quanta while the lower movement implementation
+- **Keep the client's input→physics quantum explicit.** The scene now
+  materializes fixed 1/60-second local-player quanta as sequenced
+  `PlayerMovementCommand` records while the lower movement implementation
   retains a 20 Hz vanilla recurrence baseline through fractional composition.
-  Stage 2 still needs each quantum materialized as a sequenced command record,
-  so do not collapse this clock back into variable frame `dt`.
+  Stage 2 can transport this boundary; do not collapse it back into variable
+  frame `dt`.
 - **Keep server movement application in shared code** (`mclone-server` +
   shared physics), never app-local, so the replay simulation has one home.
 - **Keep view pose, body heading, and locomotion reference conceptually
@@ -177,13 +181,11 @@ Decisions to make **now** so Stage 2 stays cheap:
    has an autonomous tick (validation windows are per-tick).
 3. Leave Stage 2 unscheduled; revisit when gameplay needs server-auth
    movement (combat, competitive play) or cheating becomes real.
-4. When Stage 2 resumes, replace the movement clock's latest-state consumption
-   with timestamped, sequenced per-quantum command records. The physical and
-   semantic observation prerequisites are specified in
-   [`input-observation-timeline.md`](input-observation-timeline.md). The
-   current edge latch prevents a lost jump press only after the shared reducer
-   has observed it; it cannot recover a physical edge or arbitrary held-axis
-   change already collapsed by a platform collector.
+4. When Stage 2 resumes, add command transport, server replay, acknowledged
+   sequence tracking, and correction replay around the existing local
+   `PlayerMovementCommand` stream. Its physical and semantic observation
+   prerequisites are complete and specified in
+   [`input-observation-timeline.md`](input-observation-timeline.md).
 
 ## Non-goals
 

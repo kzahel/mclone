@@ -883,6 +883,30 @@ fn engine_camera_controller_fly_no_clip_passes_through_blocks() {
 }
 
 #[test]
+fn fly_command_uses_explicit_pitch_without_turning_the_view() {
+    let client = ClientRuntime::local_integrated();
+    let mut camera =
+        EngineCameraController::from_eye_pose(Vec3d::new(8.0, 96.0, 8.0), 0.0, 0.0, 20.0);
+    camera.set_movement_mode(EngineCameraMovementMode::Fly);
+    camera.set_collision_mode(EngineCameraCollisionMode::NoClip);
+    let before = camera.snapshot();
+
+    let after = camera.apply_movement_input(
+        &client,
+        EngineCameraInput {
+            dt_seconds: 0.1,
+            movement_impulse: Some(EngineCameraMovementImpulse::new(0.0, 1.0)),
+            movement_yaw_radians: Some(0.0),
+            movement_pitch_radians: Some(0.5),
+            ..EngineCameraInput::default()
+        },
+    );
+
+    assert!((after.eye.y - before.eye.y).abs() > 0.1);
+    assert!((after.pitch_radians - before.pitch_radians).abs() < 1.0e-12);
+}
+
+#[test]
 fn engine_camera_controller_reports_pose_sync_command() {
     let mut camera =
         EngineCameraController::from_eye_pose(Vec3d::new(8.0, 96.0, 8.0), 0.0, 0.0, 32.0);

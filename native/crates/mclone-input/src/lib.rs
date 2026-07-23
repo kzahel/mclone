@@ -93,6 +93,13 @@ pub struct XrActionChange {
     pub source_time_nanos: i64,
 }
 
+/// One semantic action state observed before the current XR frame boundary.
+#[derive(Clone, Debug, PartialEq)]
+pub struct AgedPlayerActionFrame {
+    pub age: Duration,
+    pub actions: PlayerActionFrame,
+}
+
 /// One XR presentation-boundary input sample.
 ///
 /// Ordinary gamepad, Steam-style, and OpenXR controls converge in `actions`;
@@ -103,6 +110,7 @@ pub struct XrInputFrame {
     pub tracked: Vec<TrackedControllerState>,
     pub xr_specific: XrSpecificInput,
     pub action_changes: Vec<XrActionChange>,
+    pub action_observations: Vec<AgedPlayerActionFrame>,
 }
 
 /// Raw semantic values supplied by an action-based XR backend.
@@ -167,6 +175,7 @@ impl XrInputFrameAssembler {
                     tracked,
                     xr_specific,
                     action_changes: Vec::new(),
+                    action_observations: Vec::new(),
                 };
             }
             self.suppress_until_neutral = false;
@@ -237,6 +246,7 @@ impl XrInputFrameAssembler {
             tracked,
             xr_specific,
             action_changes: Vec::new(),
+            action_observations: Vec::new(),
         }
     }
 }

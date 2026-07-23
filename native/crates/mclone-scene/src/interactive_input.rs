@@ -1,8 +1,9 @@
 use anyhow::Result;
 use mclone_input::{
-    ControllerActionBatch, ControllerInputBatch, ControllerInputError, ControllerInputPreferences,
-    ControllerInputSession, FlatInputAction, FlatInputFrame, InputContext, InputSourceDescriptor,
-    InputSourceId, KeyboardKey, KeyboardMouseInputAdapter, MouseWheelDirection, PlayerActionFrame,
+    AgedPlayerActionFrame, ControllerActionBatch, ControllerInputBatch, ControllerInputError,
+    ControllerInputPreferences, ControllerInputSession, FlatInputAction, FlatInputFrame,
+    InputContext, InputSourceDescriptor, InputSourceId, KEYBOARD_TURN_MOUSE_DELTA_PER_SECOND,
+    KeyboardKey, KeyboardMouseInputAdapter, MouseWheelDirection, PlayerActionFrame,
     PlayerActionFrameCombiner, PointerButton, StandardGamepadSnapshot, TouchLookDelta,
     XrInputFrame,
 };
@@ -44,6 +45,7 @@ pub struct XrControllerInputRouter {
     controller: ControllerInputSession,
     combiner: PlayerActionFrameCombiner,
     latest_actions: PlayerActionFrame,
+    latest_action_observations: Vec<AgedPlayerActionFrame>,
 }
 
 impl XrControllerInputRouter {
@@ -62,12 +64,14 @@ impl XrControllerInputRouter {
         self.controller.apply_preferences(preferences);
         self.combiner.clear();
         self.latest_actions = PlayerActionFrame::default();
+        self.latest_action_observations.clear();
     }
 
     pub fn clear_transient_input(&mut self) {
         self.controller.clear_held();
         self.combiner.clear();
         self.latest_actions = PlayerActionFrame::default();
+        self.latest_action_observations.clear();
     }
 
     pub fn connect_source(
@@ -100,6 +104,20 @@ impl XrControllerInputRouter {
     /// Compose ordinary and tracked-controller semantics without allowing one
     /// source's release edge to cancel another source's continuing hold.
     pub fn merge_into_frame(&mut self, frame: &mut XrInputFrame) {
+        let primary_actions = frame.actions.clone();
+        frame
+            .action_observations
+            .extend(
+                self.latest_action_observations
+                    .iter()
+                    .cloned()
+                    .map(|mut observation| {
+                        let mut actions = primary_actions.clone();
+                        actions.merge_from(observation.actions);
+                        observation.actions = actions;
+                        observation
+                    }),
+            );
         frame.actions = self.combiner.combine(
             std::mem::take(&mut frame.actions),
             self.latest_actions.clone(),
@@ -159,6 +177,7 @@ impl XrControllerInputRouter {
         Ok(disposition)
     }
 
+    #[cfg(test)]
     fn sample_actions(
         &mut self,
         context: InputContext,
@@ -178,6 +197,20 @@ impl XrControllerInputRouter {
         self.controller.set_context(context);
         let actions = self.controller.sample_batch(batch)?;
         self.latest_actions = actions.actions.clone();
+        self.latest_action_observations = actions
+            .observations
+            .iter()
+            .map(|observation| AgedPlayerActionFrame {
+                age: batch.sample_time().saturating_sub(observation.sample_time),
+                actions: observation.actions.clone(),
+            })
+            .collect();
+        if self.latest_action_observations.is_empty() {
+            self.latest_action_observations.push(AgedPlayerActionFrame {
+                age: Duration::ZERO,
+                actions: actions.actions.clone(),
+            });
+        }
         Ok(actions)
     }
 }
@@ -299,7 +332,11 @@ impl MonoInteractiveInputRouter {
         host: &mut McloneSceneHost,
         supplemental: Option<FlatInputFrame>,
     ) {
-        host.observe_mono_movement_frame(self.composed_held_frame(supplemental, 0.0));
+        host.observe_mono_movement_frame_ago(
+            self.composed_held_frame(supplemental, 0.0),
+            self.composed_look_rate_mouse_delta_per_second(&self.latest_controller_actions),
+            Duration::ZERO,
+        );
     }
 
     fn composed_held_frame(
@@ -313,6 +350,29 @@ impl MonoInteractiveInputRouter {
             frame.merge_from(supplemental);
         }
         frame
+    }
+
+    fn movement_frame_for_controller_actions(&self, actions: &PlayerActionFrame) -> FlatInputFrame {
+        let mut frame = self.keyboard_mouse.held_frame().unwrap_or_default();
+        frame.merge_from(actions.to_flat_frame(0.0));
+        frame
+    }
+
+    fn composed_look_rate_mouse_delta_per_second(
+        &self,
+        controller_actions: &PlayerActionFrame,
+    ) -> [f64; 2] {
+        let keyboard_turn = self
+            .keyboard_mouse
+            .held_frame()
+            .map(|frame| frame.keyboard_turn)
+            .unwrap_or_default()
+            .clamp(-1.0, 1.0);
+        [
+            f64::from(controller_actions.look_rate.x)
+                - f64::from(keyboard_turn) * KEYBOARD_TURN_MOUSE_DELTA_PER_SECOND,
+            f64::from(controller_actions.look_rate.y),
+        ]
     }
 
     /// Consume ordinary-controller snapshots at one presentation boundary.
@@ -389,7 +449,20 @@ impl MonoInteractiveInputRouter {
             self.clear_if_requested(disposition);
             return Ok(disposition);
         }
-        self.observe_supplemental_movement(host, None);
+        for observation in &action_batch.observations {
+            host.observe_mono_movement_frame_ago(
+                self.movement_frame_for_controller_actions(&observation.actions),
+                self.composed_look_rate_mouse_delta_per_second(&observation.actions),
+                batch.sample_time().saturating_sub(observation.sample_time),
+            );
+        }
+        if action_batch.observations.is_empty() {
+            host.observe_mono_movement_frame_ago(
+                self.movement_frame_for_controller_actions(&action_batch.actions),
+                self.composed_look_rate_mouse_delta_per_second(&action_batch.actions),
+                Duration::ZERO,
+            );
+        }
         // Continuous movement/look is applied exactly once by
         // `advance_held_frame`. The immediate route consumes only action edges
         // (and any already-integrated pointer delta from a future semantic
@@ -419,6 +492,7 @@ impl MonoInteractiveInputRouter {
         Ok(disposition)
     }
 
+    #[cfg(test)]
     fn sample_controller_actions(
         &mut self,
         context: InputContext,

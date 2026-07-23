@@ -2,14 +2,15 @@
 
 Topic: `input-observation-timeline`
 
-Status: direction accepted 2026-07-23; implementation is active. The shared
-bounded `ControllerInputBatch` and multi-observation semantic reduction are
-implemented with explicit ordering correction, overflow discontinuity, and
-terminal-state recovery. Desktop retains each GilRs transition, Android
-forwards key/motion times and historical axis samples through a bounded queue,
-browser emits one timestamped rAF snapshot, and OpenXR preserves action-change
-metadata from each required action sync. Fixed-rate semantic command
-materialization remains open.
+Status: local end-to-end implementation completed 2026-07-23; automated
+cross-platform validation is active and real-device acceptance remains open.
+The shared bounded `ControllerInputBatch` and multi-observation semantic
+reduction preserve ordered input through platform collection and scene
+routing. The scene materializes timestamped semantic state as sequenced 60 Hz
+`PlayerMovementCommand` records, applies the same records to local prediction,
+and retains a bounded recording for deterministic replay. Server transport,
+authoritative replay, and correction replay remain the separately scheduled
+Stage 2 in [`client-prediction.md`](client-prediction.md).
 
 Scope: preserve the best physical-input order and timing each platform can
 provide, normalize it behind a host-neutral contract, reduce it into shared
@@ -106,12 +107,14 @@ and the extra callbacks still need ordering against scene time. Polling once
 per animation frame is the honest browser behavior.
 
 Desktop uses GilRs rather than SDL for ordinary controllers. GilRs events
-carry source identity, event kind, and a timestamp, but the current drain loop
-uses them only to refresh GilRs' cached final state.
+carry source identity, event kind, and a timestamp. The drain loop now
+captures the canonical cached state after every event and appends a final
+cached snapshot for recovery.
 
-Android Java is also correctly domain-blind. It forwards raw controller facts,
-but it currently omits Android event times and historical motion samples. The
-fix belongs in the raw bridge contract, not in Java action mappings.
+Android Java remains correctly domain-blind. It now forwards Android event
+times and historical controller-axis samples through JNI. The Rust collector
+applies them in order and appends a terminal snapshot without moving action
+mapping into Java.
 
 OpenXR action sampling is intentionally frame-shaped. Preserve the facts the
 runtime supplies, but do not invent a transition history or add a free-running
@@ -180,9 +183,8 @@ Attack, or any other game action.
 
 ### Materialize movement commands at the simulation boundary
 
-The scene-owned fixed clock should stop consuming only the latest semantic
-movement state. It should build one `PlayerCommand` (name provisional) for
-each 60 Hz quantum from the semantic timeline:
+The scene-owned fixed clock consumes the semantic timeline and builds one
+`PlayerMovementCommand` for each 60 Hz quantum:
 
 - a sequence number;
 - the quantum duration or movement-clock boundary;
@@ -195,10 +197,30 @@ different physical meanings. The command builder should integrate or sample
 each according to that meaning rather than treating every control as a
 variable-frame delta.
 
+`PlayerMovementCommand` carries an input epoch, a quantum sequence number, and
+the complete host-neutral `EngineCameraInput` applied for that quantum. The
+command builder:
+
+- assigns ordered held-state and one-shot jump changes to their command
+  boundary;
+- samples movement axes and modifiers as state;
+- integrates keyboard/controller look rates across command time;
+- preserves exact pointer/touch view yaw and pitch observations;
+- does not backdate a newly sampled XR locomotion heading onto older ordinary
+  gamepad history;
+- preserves view-directed fly/no-clip pitch while retaining XR's explicit
+  horizontal locomotion-yaw contract.
+
+The pending semantic queue is bounded at 2,048 observations. Local command
+recording retains the latest 1,024 commands and reports dropped recordings.
+Catch-up remains bounded; skipped movement work advances the command sequence,
+so the next emitted record exposes an explicit gap rather than pretending the
+commands ran.
+
 Raw physical observations are local and disposable. Deterministic replay and
-network transport use semantic player commands, not GilRs, Android, browser,
-or OpenXR records. This keeps replay independent of controller layout and
-platform API.
+future network transport use semantic player commands, not GilRs, Android,
+browser, or OpenXR records. This keeps replay independent of controller layout
+and platform API.
 
 The default command rate remains 60 Hz. It is a configurable simulation lane,
 not a promise that the renderer, server world, AI, pose publication, or
@@ -308,16 +330,18 @@ event shape, timestamps, noise, and lifecycle behavior.
 
 ## Implementation Sequence
 
-1. Add a bounded, timestamped canonical observation batch and deterministic
-   scripted fixtures in `mclone-input`.
-2. Teach `ControllerInputSession` to consume multiple ordered observations per
-   source while preserving final state and all observed edges.
-3. Adapt desktop GilRs and Android Java/JNI/Rust collectors to retain their
-   event histories; project browser and OpenXR honestly onto the same contract.
-4. Extend scene routing with a bounded semantic timeline and materialize one
-   sequenced command per fixed movement quantum.
-5. Record/replay those semantic commands locally and prove cadence-independent
-   results.
+1. Complete: add a bounded, timestamped canonical observation batch and
+   deterministic scripted fixtures in `mclone-input`.
+2. Complete: teach `ControllerInputSession` to consume multiple ordered
+   observations per source while preserving final state and all observed
+   edges.
+3. Complete: adapt desktop GilRs and Android Java/JNI/Rust collectors to
+   retain their event histories; project browser and OpenXR honestly onto the
+   same contract.
+4. Complete: extend scene routing with a bounded semantic timeline and
+   materialize one sequenced command per fixed movement quantum.
+5. Complete: record/replay those semantic commands locally and prove
+   cadence-independent command traces.
 6. Connect the command stream to protocol/server replay only when Stage 2 of
    [`client-prediction.md`](client-prediction.md) is scheduled. The richer
    local input timeline does not require changing movement authority first.

@@ -152,6 +152,7 @@ pub fn xr_locomotion_input_from_controllers_with_turn_policy(
         sprint,
         movement_impulse,
         movement_yaw_radians,
+        movement_pitch_radians: None,
         hand_push: None,
         hand_push_emulation: false,
         thruster: None,
@@ -564,6 +565,45 @@ impl McloneSceneHost {
         let movement_yaw_radians = self
             .locomotion_movement_yaw_radians_with_transform(&views, transform)
             .context("resolve XR locomotion frame")?;
+        for observation in &input.action_observations {
+            let observation_frame = XrInputFrame {
+                actions: observation.actions.clone(),
+                ..XrInputFrame::default()
+            };
+            let mut observation_input = xr_locomotion_input_from_controllers_with_turn_policy(
+                &observation_frame,
+                0.0,
+                movement_yaw_radians,
+                self.turn_policy,
+            );
+            if blink_frame.suppress_left_stick_movement {
+                observation_input.movement_impulse = None;
+            }
+            // The action history can predate this XR frame, but the headset
+            // locomotion heading was observed only at this frame boundary.
+            // Preserve the prior heading until the terminal frame sample
+            // below rather than backdating a newly observed pose.
+            observation_input.movement_yaw_radians = None;
+            let age_nanos = u64::try_from(observation.age.as_nanos()).unwrap_or(u64::MAX);
+            let observed_at =
+                MonotonicInstant::from_nanos(now.as_nanos().saturating_sub(age_nanos));
+            let look_rate_mouse_delta_per_second =
+                if matches!(self.turn_policy, XrTurnPolicy::Smooth) {
+                    [
+                        f64::from(observation.actions.look_rate.x),
+                        f64::from(observation.actions.look_rate.y),
+                    ]
+                } else {
+                    [0.0; 2]
+                };
+            self.active_world
+                .local_participant
+                .observe_movement_without_heading(
+                    observation_input,
+                    look_rate_mouse_delta_per_second,
+                    observed_at,
+                );
+        }
         let mut input = xr_locomotion_input_from_controllers_with_turn_policy(
             input,
             dt_seconds,
@@ -596,6 +636,7 @@ impl McloneSceneHost {
             runtime.client(),
             input,
             dt_seconds,
+            now,
         );
         timing.camera_apply_ms = elapsed_ms(self.services.clock.elapsed_since(camera_apply_start));
         self.play_landing_events();
@@ -667,6 +708,7 @@ impl McloneSceneHost {
             runtime.client(),
             input,
             dt_seconds,
+            now,
         );
         timing.camera_apply_ms = elapsed_ms(self.services.clock.elapsed_since(camera_apply_start));
         Ok(timing)
@@ -720,6 +762,7 @@ impl McloneSceneHost {
             runtime.client(),
             input,
             dt_seconds,
+            now,
         );
         timing.camera_apply_ms = elapsed_ms(self.services.clock.elapsed_since(camera_apply_start));
         Ok(timing)

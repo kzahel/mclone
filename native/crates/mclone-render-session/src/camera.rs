@@ -48,6 +48,9 @@ pub struct EngineCameraInput {
     pub sprint: bool,
     pub movement_impulse: Option<EngineCameraMovementImpulse>,
     pub movement_yaw_radians: Option<f64>,
+    /// Explicit pitch paired with `movement_yaw_radians`. `None` preserves the
+    /// existing horizontal-yaw locomotion contract used by XR.
+    pub movement_pitch_radians: Option<f64>,
     pub hand_push: Option<EngineHandPushInput>,
     pub hand_push_emulation: bool,
     pub thruster: Option<EngineThrusterInput>,
@@ -183,6 +186,7 @@ impl Default for EngineCameraInput {
             sprint: false,
             movement_impulse: None,
             movement_yaw_radians: None,
+            movement_pitch_radians: None,
             hand_push: None,
             hand_push_emulation: false,
             thruster: None,
@@ -1053,7 +1057,7 @@ impl EngineCameraController {
 
     fn tick_no_clip(&mut self, input: EngineCameraInput) -> bool {
         let dt_seconds = input.dt_seconds.clamp(0.0, 0.1);
-        Self::tick_player_no_clip(
+        Self::tick_player_no_clip_with_heading(
             &mut self.player,
             self.speed_blocks_per_second,
             dt_seconds,
@@ -1061,6 +1065,7 @@ impl EngineCameraController {
                 .movement_impulse
                 .map(EngineCameraMovementImpulse::as_player_impulse),
             input.movement_yaw_radians,
+            input.movement_pitch_radians,
         )
         .is_some()
     }
@@ -1072,14 +1077,34 @@ impl EngineCameraController {
         movement_impulse: Option<(f32, f32)>,
         movement_yaw_radians: Option<f64>,
     ) -> Option<Vec3d> {
+        Self::tick_player_no_clip_with_heading(
+            player,
+            speed_blocks_per_second,
+            dt_seconds,
+            movement_impulse,
+            movement_yaw_radians,
+            None,
+        )
+    }
+
+    fn tick_player_no_clip_with_heading(
+        player: &mut LocalPlayerController,
+        speed_blocks_per_second: f64,
+        dt_seconds: f64,
+        movement_impulse: Option<(f32, f32)>,
+        movement_yaw_radians: Option<f64>,
+        movement_pitch_radians: Option<f64>,
+    ) -> Option<Vec3d> {
         let pose = player.pose();
         let movement_yaw = finite_movement_yaw(movement_yaw_radians);
         let yaw_radians = movement_yaw.unwrap_or_else(|| pose.native_yaw_radians());
-        let pitch_radians = if movement_yaw.is_some() {
-            0.0
-        } else {
-            pose.native_pitch_radians()
-        };
+        let pitch_radians = finite_movement_pitch(movement_pitch_radians).unwrap_or_else(|| {
+            if movement_yaw.is_some() {
+                0.0
+            } else {
+                pose.native_pitch_radians()
+            }
+        });
         player.tick_no_clip_movement_with_impulse(
             NoClipMovementStep {
                 yaw_radians,
@@ -1095,7 +1120,7 @@ impl EngineCameraController {
 
     fn tick_flying(&mut self, client: &ClientRuntime, input: EngineCameraInput) -> bool {
         let dt_seconds = input.dt_seconds.clamp(0.0, 0.1);
-        Self::tick_player_flying(
+        Self::tick_player_flying_with_heading(
             &mut self.player,
             client,
             self.speed_blocks_per_second,
@@ -1104,6 +1129,7 @@ impl EngineCameraController {
                 .movement_impulse
                 .map(EngineCameraMovementImpulse::as_player_impulse),
             input.movement_yaw_radians,
+            input.movement_pitch_radians,
         )
         .is_some()
     }
@@ -1116,14 +1142,36 @@ impl EngineCameraController {
         movement_impulse: Option<(f32, f32)>,
         movement_yaw_radians: Option<f64>,
     ) -> Option<CollisionMovementResult> {
+        Self::tick_player_flying_with_heading(
+            player,
+            client,
+            speed_blocks_per_second,
+            dt_seconds,
+            movement_impulse,
+            movement_yaw_radians,
+            None,
+        )
+    }
+
+    fn tick_player_flying_with_heading(
+        player: &mut LocalPlayerController,
+        client: &ClientRuntime,
+        speed_blocks_per_second: f64,
+        dt_seconds: f64,
+        movement_impulse: Option<(f32, f32)>,
+        movement_yaw_radians: Option<f64>,
+        movement_pitch_radians: Option<f64>,
+    ) -> Option<CollisionMovementResult> {
         let pose = player.pose();
         let movement_yaw = finite_movement_yaw(movement_yaw_radians);
         let yaw_radians = movement_yaw.unwrap_or_else(|| pose.native_yaw_radians());
-        let pitch_radians = if movement_yaw.is_some() {
-            0.0
-        } else {
-            pose.native_pitch_radians()
-        };
+        let pitch_radians = finite_movement_pitch(movement_pitch_radians).unwrap_or_else(|| {
+            if movement_yaw.is_some() {
+                0.0
+            } else {
+                pose.native_pitch_radians()
+            }
+        });
         player.tick_flying_movement_with_impulse(
             client,
             FlyingMovementStep {
@@ -1566,6 +1614,12 @@ fn clamp_movement_speed_multiplier(multiplier: f64) -> f64 {
 
 fn finite_movement_yaw(yaw_radians: Option<f64>) -> Option<f64> {
     yaw_radians.filter(|yaw| yaw.is_finite())
+}
+
+fn finite_movement_pitch(pitch_radians: Option<f64>) -> Option<f64> {
+    pitch_radians
+        .filter(|pitch| pitch.is_finite())
+        .map(|pitch| pitch.clamp(-std::f64::consts::FRAC_PI_2, std::f64::consts::FRAC_PI_2))
 }
 
 fn thruster_hand_input(hand: EngineThrusterHand) -> ThrusterHandInput {

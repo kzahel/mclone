@@ -626,6 +626,28 @@ impl McloneSceneHost {
             .total_dropped_steps()
     }
 
+    pub fn recent_player_movement_commands(&self) -> Vec<PlayerMovementCommand> {
+        self.active_world
+            .local_participant
+            .movement
+            .recorded_commands()
+            .collect()
+    }
+
+    pub fn dropped_recorded_player_movement_commands(&self) -> u64 {
+        self.active_world
+            .local_participant
+            .movement
+            .dropped_recorded_commands()
+    }
+
+    pub fn dropped_player_input_observations(&self) -> u64 {
+        self.active_world
+            .local_participant
+            .movement
+            .dropped_input_observations()
+    }
+
     pub fn mono_render_view(&self, size: [u32; 2]) -> Result<ChunkRenderView> {
         render_pose_from_snapshot_with_view_mode(
             self.active_world
@@ -776,11 +798,13 @@ impl McloneSceneHost {
             .runtime
             .as_ref()
             .expect("startup completion requires runtime");
+        let frame_end = self.services.clock.now();
         let input = engine_camera_input_from_flat_frame(frame, dt_seconds);
         let (changed, _) = self.active_world.local_participant.advance_movement(
             runtime.client(),
             input,
             dt_seconds,
+            frame_end,
         );
         self.play_landing_events();
         changed
@@ -792,12 +816,30 @@ impl McloneSceneHost {
     /// with its complete held-state projection so a quick jump press/release
     /// cannot disappear merely because no 60 Hz movement quantum was due yet.
     pub fn observe_mono_movement_frame(&mut self, frame: FlatInputFrame) {
+        self.observe_mono_movement_frame_ago(frame, [0.0; 2], Duration::ZERO);
+    }
+
+    /// Preserve one timestamped semantic movement state relative to the
+    /// current scene clock. Controller batches use `age` to retain
+    /// transitions observed earlier in the just-finished presentation
+    /// interval.
+    pub fn observe_mono_movement_frame_ago(
+        &mut self,
+        frame: FlatInputFrame,
+        look_rate_mouse_delta_per_second: [f64; 2],
+        age: Duration,
+    ) {
         if !self.gameplay_startup_complete() || self.mono_ui_is_active() {
             return;
         }
-        self.active_world
-            .local_participant
-            .observe_movement(engine_camera_input_from_flat_frame(frame, 0.0));
+        let now = self.services.clock.now();
+        let age_nanos = u64::try_from(age.as_nanos()).unwrap_or(u64::MAX);
+        let observed_at = MonotonicInstant::from_nanos(now.as_nanos().saturating_sub(age_nanos));
+        self.active_world.local_participant.observe_movement(
+            engine_camera_input_from_flat_frame(frame, 0.0),
+            look_rate_mouse_delta_per_second,
+            observed_at,
+        );
     }
 
     pub fn apply_mono_look_frame(&mut self, frame: FlatInputFrame) -> bool {
@@ -807,6 +849,10 @@ impl McloneSceneHost {
         self.active_world
             .camera
             .turn_mouse_delta(f64::from(frame.look_delta.x), f64::from(frame.look_delta.y));
+        let observed_at = self.services.clock.now();
+        self.active_world
+            .local_participant
+            .observe_movement_heading(observed_at);
         true
     }
 
@@ -818,6 +864,10 @@ impl McloneSceneHost {
             -f64::from(delta.yaw_radians) / ENGINE_CAMERA_MOUSE_SENSITIVITY,
             -f64::from(delta.pitch_radians) / ENGINE_CAMERA_MOUSE_SENSITIVITY,
         );
+        let observed_at = self.services.clock.now();
+        self.active_world
+            .local_participant
+            .observe_movement_heading(observed_at);
         true
     }
 

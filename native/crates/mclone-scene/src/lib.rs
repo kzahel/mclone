@@ -12,7 +12,7 @@ pub use interactive_input::{
 };
 pub use player_movement::{
     DEFAULT_PLAYER_MOVEMENT_MAX_CATCH_UP_STEPS, DEFAULT_PLAYER_MOVEMENT_RATE_HZ,
-    PlayerMovementAdvance, PlayerMovementCadenceConfig,
+    PlayerMovementAdvance, PlayerMovementCadenceConfig, PlayerMovementCommand,
 };
 
 use std::path::PathBuf;
@@ -376,10 +376,10 @@ struct LocalParticipantPresentation {
 
 impl LocalParticipantPresentation {
     fn new(camera: EngineCameraController, cadence: PlayerMovementCadenceConfig) -> Self {
-        let eye = camera.snapshot().eye;
+        let snapshot = camera.snapshot();
         Self {
             camera,
-            movement: player_movement::PlayerMovementState::new(cadence, eye),
+            movement: player_movement::PlayerMovementState::new(cadence, snapshot),
             interaction: ClientInteractionController::new(),
             player_model: GamePlayerModel::default(),
         }
@@ -390,19 +390,33 @@ impl LocalParticipantPresentation {
         client: &ClientRuntime,
         mut input: EngineCameraInput,
         elapsed_seconds: f64,
+        frame_end: MonotonicInstant,
     ) -> (bool, PlayerMovementAdvance) {
         let before = self.camera.snapshot();
+        let look_rate_mouse_delta_per_second =
+            if elapsed_seconds.is_finite() && elapsed_seconds > 0.0 {
+                [
+                    input.mouse_delta_x / elapsed_seconds,
+                    input.mouse_delta_y / elapsed_seconds,
+                ]
+            } else {
+                [0.0; 2]
+            };
         self.camera
             .turn_mouse_delta(input.mouse_delta_x, input.mouse_delta_y);
         input.mouse_delta_x = 0.0;
         input.mouse_delta_y = 0.0;
 
         self.movement.synchronize_eye(before.eye);
-        self.movement.observe_input(input);
-        let advance = self.movement.advance_elapsed(elapsed_seconds);
+        self.movement
+            .observe_input_at(input, look_rate_mouse_delta_per_second, frame_end);
+        let advance = self.movement.advance_elapsed(frame_end, elapsed_seconds);
         for _ in 0..advance.steps {
-            let step_input = self.movement.next_step_input();
-            let after = self.camera.apply_movement_input(client, step_input);
+            let command = self
+                .movement
+                .next_step_command()
+                .expect("movement advance reported a missing command");
+            let after = self.camera.apply_movement_input(client, command.input);
             self.movement.record_step(after.eye);
         }
         if advance.dropped_steps > 0 {
@@ -414,13 +428,38 @@ impl LocalParticipantPresentation {
         (self.camera.snapshot() != before, advance)
     }
 
-    fn observe_movement(&mut self, input: EngineCameraInput) {
-        self.movement.observe_input(input);
+    fn observe_movement(
+        &mut self,
+        input: EngineCameraInput,
+        look_rate_mouse_delta_per_second: [f64; 2],
+        observed_at: MonotonicInstant,
+    ) {
+        self.movement
+            .observe_input_at(input, look_rate_mouse_delta_per_second, observed_at);
+    }
+
+    fn observe_movement_without_heading(
+        &mut self,
+        input: EngineCameraInput,
+        look_rate_mouse_delta_per_second: [f64; 2],
+        observed_at: MonotonicInstant,
+    ) {
+        self.movement.observe_input_without_heading_at(
+            input,
+            look_rate_mouse_delta_per_second,
+            observed_at,
+        );
+    }
+
+    fn observe_movement_heading(&mut self, observed_at: MonotonicInstant) {
+        let camera = self.camera.snapshot();
+        self.movement
+            .observe_heading_at(camera.yaw_radians, camera.pitch_radians, observed_at);
     }
 
     fn reset_movement(&mut self) {
         self.camera.clear_keys();
-        self.movement.reset(self.camera.snapshot().eye);
+        self.movement.reset(self.camera.snapshot());
     }
 
     fn presentation_camera_snapshot(&self) -> EngineCameraSnapshot {
@@ -601,7 +640,7 @@ impl DrawableWorldSlot {
         self.camera = install.camera;
         self.movement = player_movement::PlayerMovementState::new(
             self.scene.player_movement_cadence,
-            self.camera.snapshot().eye,
+            self.camera.snapshot(),
         );
         self.draw = install.draw;
         self.actors = install.actors;
@@ -642,7 +681,7 @@ impl DrawableWorldSlot {
         self.camera = camera;
         self.movement = player_movement::PlayerMovementState::new(
             self.scene.player_movement_cadence,
-            self.camera.snapshot().eye,
+            self.camera.snapshot(),
         );
         self.pending_startup_sections = pending_startup_sections;
         self.render_stats = RenderStreamStats::default();

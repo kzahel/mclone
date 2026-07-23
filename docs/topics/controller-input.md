@@ -130,12 +130,12 @@ source seam, but not yet the complete semantic or physical-input contract:
   one shared Java/JNI bridge and pure Rust collector. All emit canonical
   snapshots and preserve session-local hotplug identity. Desktop, browser, and
   flat Android route them semantically; desktop and Android XR merge the same
-  ordinary semantics with their OpenXR action frames. Desktop and Android
-  currently collapse their ordered backend events into one final snapshot per
-  render interval, so a press/release pair or intermediate axis transition can
-  be lost before shared edge generation. Browser snapshot polling is an API
-  capability limit; OpenXR action sampling is action-sync/frame-shaped. The
-  accepted correction is tracked in
+  ordinary semantics with their OpenXR action frames. Desktop now retains
+  canonical state after each GilRs event. Android forwards event time and
+  `MotionEvent` history through its bounded Java/JNI/Rust queue. Browser
+  snapshot polling remains an API capability limit; OpenXR action sampling is
+  action-sync/frame-shaped and retains the runtime's available change
+  metadata. The detailed loss and recovery contract is tracked in
   [`input-observation-timeline.md`](input-observation-timeline.md).
 - The legacy `GamepadInputAdapter` remains one controller at a time and still
   projects right-stick state directly into `FlatInputFrame`. It is retained as
@@ -150,15 +150,13 @@ source seam, but not yet the complete semantic or physical-input contract:
   collectors while semantic policy stays shared.
 - Shared semantic movement state is consumed by the scene-owned fixed 60 Hz
   player movement clock rather than integrated with presentation `dt`.
-  Keyboard, touch, and controller changes notify that owner immediately when
-  their platform collector and shared reducer observe them; jump edges then
-  survive a press/release between fixed movement steps. The current
-  snapshot-only controller projection cannot preserve a physical edge that
-  starts and ends before the reducer runs. Look, mouse deltas, tracked XR
-  poses, and controller polling remain presentation-rate inputs. In
-  particular, the browser Gamepad API is still polled at the animation-frame
-  boundary because that browser API exposes snapshots rather than an
-  independent event stream.
+  Keyboard, touch, and ordered controller changes enter a bounded semantic
+  timeline. The scene assigns state and edges to sequenced movement commands,
+  integrates rate controls over command time, preserves sampled view heading,
+  and records the resulting local replay stream. Event-capable native
+  collectors preserve a press/release or axis changes between presentation
+  frames. Browser Gamepad polling remains at the animation-frame boundary
+  because that API exposes snapshots rather than an independent event stream.
 - `mclone-ui::GuiNavigation` now owns directional traversal, confirm/back,
   page navigation, disabled-widget skipping, slider adjustment, and focus
   visuals. The scene maps semantic menu actions through it, and deterministic
