@@ -2,7 +2,8 @@
 
 Topic: `gpu-procedural-terrain`
 
-Status: textured projection and navigation follow-up active 2026-07-24 under
+Status: textured projection and navigation follow-up implemented and locally
+validated 2026-07-24; targeted hosted validation is pending under
 Tactical
 [`233-terrain-lab-projection-materials-and-navigation.md`](../tactical/233-terrain-lab-projection-materials-and-navigation.md).
 The canonical multi-pane Terrain Lab workspace completed local and hosted
@@ -152,7 +153,8 @@ The terrain compute pipeline now exists in
 
 - accepts aligned 64-cell / 65-sample production-reference tiles;
 - evaluates the separately revisioned `mclone-overworld-v1-gpu-preview-a2`
-  production graph through `base_surface_y` into GPU-resident storage;
+  `mclone-overworld-v1-gpu-preview-a3` production graph through
+  `base_surface_y` and macro surface material into GPU-resident storage;
 - emulates the production unsigned 64-bit lattice hash with pairs of portable
   WGSL `u32` values and generates domain/scale constants from a shared Rust
   field specification;
@@ -187,9 +189,10 @@ separately bounded from the broad visual footprint. Water and vegetation
 switches remesh retained exact blocks without changing generation.
 
 Three-dimensional left drag orbits with conventional pitch direction without
-changing URL-addressed geography; Shift+left or middle drag pans, map drag
-pans, wheel and pinch change a separate continuous viewport, and map zoom is
-cursor anchored. Auto targets approximately two CSS pixels per sample cell;
+changing URL-addressed geography; right drag, Shift+left, or middle drag pan,
+focused arrow keys pan in map and 3D, map left drag pans, wheel and pinch
+change a separate continuous viewport, and map zoom is cursor anchored. Auto
+targets approximately two CSS pixels per sample cell;
 an explicit manual request remains visible when the interactive tile budget
 raises effective spacing. CPU and GPU LOD publish independently at exact
 matching coordinates. Wide procedural canvases place them side by side;
@@ -1170,13 +1173,22 @@ boundary. It does not yet prove a truthful far summary. The 65.5 km
 continentalness image still evaluates sub-footprint field energy at points, so
 aliasing and temporal stability remain open correctness problems.
 
-Tactical 233 is the immediate fidelity follow-up. It removes the remaining
-presentation mismatch before far-summary work: one physical camera projection
-for exact and LOD panes, production surface-material identities and
-first-party atlas sampling in CPU/GPU LOD, an explicit smooth overview mip
-policy for the Lab, and right-drag plus arrow-key panning in map and 3D.
+Tactical 233 removes the remaining presentation mismatch before far-summary
+work. Exact and LOD panes now use one physical projection, CPU/GPU samples
+carry a shared macro surface block ID with measured 100% agreement, and both
+LOD lanes sample the first-party atlas through five filtered mip levels.
+Exact terrain opts into the same smooth overview minification without changing
+the game's vanilla-compatible default. Right drag and focused arrows pan the
+shared URL center in map and 3D.
 
-After that fidelity slice, the next implementation direction is:
+Local headed-Wayland desktop and Pixel smokes passed the complete interaction,
+65.5 km, and cold-race flows. Material agreement remained 100% alongside zero
+base mean/P95 height error, 100% ocean agreement, and about `2e-8`
+continentalness error. The macro contract is deliberately uncarved: final
+river/wetland clay and planned-stream materials still belong to the exact pane
+until structured overlays reach the GPU path.
+
+The next implementation direction is:
 
 1. define a CPU/GPU scale-aware summary target distinct from exact point
    parity;

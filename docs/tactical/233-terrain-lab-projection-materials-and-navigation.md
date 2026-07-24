@@ -1,6 +1,7 @@
 # Terrain Lab Projection, Materials, And Navigation
 
-Status: active 2026-07-24.
+Status: implemented and locally validated 2026-07-24; targeted hosted
+validation pending.
 
 Topic: `gpu-procedural-terrain`
 
@@ -58,14 +59,13 @@ contract must still agree.
 ### Surface Materials And Textures
 
 The production first-party surface rule remains the semantic owner. Terrain
-preview samples gain a stable material identity sufficient to distinguish at
-least:
+preview samples gain a stable macro material identity sufficient to
+distinguish:
 
 - water;
 - grass;
 - sand;
 - gravel;
-- clay;
 - coarse dirt;
 - stone; and
 - snow-covered ground.
@@ -88,13 +88,18 @@ the LOD panes.
 
 ### Mip And Filter Policy
 
+Clay remains owned by final wetland/watercourse surface generation and is not
+invented in the uncarved macro-base payload.
+
 The shared chunk renderer retains its vanilla-compatible default sampler.
 Terrain Lab opts into an overview sampler that:
 
 - uploads the existing bounded block-atlas mip chain;
 - uses linear minification and linear mip interpolation;
 - keeps nearest magnification so close pixels remain block-like; and
-- uses admitted anisotropy where portable limits permit it.
+- remains within the baseline WebGPU feature set; anisotropy is deferred
+  because this slice preserves nearest magnification and requests no optional
+  sampler feature.
 
 The procedural atlas follows the same Lab policy. Diagnostics expose the
 allocated mip count and filter mode so the result is verifiable rather than
@@ -141,6 +146,37 @@ TypeScript must not recreate material rules or projection math.
 
 Commit every coherent slice with `Topic: gpu-procedural-terrain`.
 
+## Implementation Outcome
+
+The slice landed as commits `e7c723a8`, `5634e15a`, `8cfc7642`,
+`17d72ecd`, `ce1d4e52`, `9664ec87`, and `a0621c8e`.
+
+- `mclone-terrain-view` now owns one perspective/top-down projection
+  descriptor. Exact chunks consume it through `ChunkCamera`; LOD WGSL consumes
+  the same eye, target, up, FOV, near/far, and logical-pane aspect values.
+  The old viewport-dependent LOD height exaggeration is gone.
+- `mclone-worldgen` exports a spacing-stable macro top-material classifier for
+  water, sand, grass, snow, exposed stone, gravel, and coarse dirt. The CPU
+  preview packs the raw block ID and the GPU evaluator ports the same
+  classifier under evaluator revision `gpu-preview-a3`.
+- CPU/GPU comparison reports material agreement independently of height and
+  ocean agreement.
+- The procedural renderer loads the authored/generated first-party packs,
+  maps raw surface block IDs to atlas sprites, repeats detail in world block
+  coordinates, and modulates the semantic material color so incomplete
+  fallback art cannot turn every surface purple.
+- Procedural and exact overview paths allocate five atlas mip levels. The Lab
+  uses nearest magnification plus linear minification and linear mip
+  interpolation. The normal chunk renderer retains nearest/nearest as its
+  default.
+- Right mouse, Shift+left, and middle mouse pan in 3D. Left mouse remains
+  orbit. Arrow keys pan a focused pane in map or 3D, and the stage exposes a
+  visible focus ring.
+
+The material contract intentionally describes the uncarved broad LOD surface.
+Final rivers, wetlands, clay beds, and planned streams remain visible only in
+the exact pane until their structured overlay is ported.
+
 ## Validation
 
 - canonical and LOD projections place fixed world landmarks at matching
@@ -157,6 +193,29 @@ Commit every coherent slice with `Topic: gpu-procedural-terrain`.
 - right-drag and arrow keys pan both map and 3D views without orbiting,
   scrolling the page, or editing focused inputs; and
 - local and hosted headed-Wayland desktop/phone WebGPU smokes remain clean.
+
+## Local Evidence
+
+`cargo test -p mclone-worldgen macro_surface_materials_preserve_distinct_lod_regions --lib`
+pins seven representative macro materials. `mclone-terrain-view` shader/unit
+tests pass, the Terrain Lab Wasm target checks, and
+`terrain_overview_sampling_does_not_change_vanilla_defaults` proves the Lab
+filter opt-in does not change normal chunk sampling.
+
+Headed-Wayland desktop and Pixel smokes both completed the exact/CPU/GPU
+workspace, orbit, right-button desktop pan, focused arrow pan, map zoom,
+65.5 km field check, and cold independent scheduler race. Both reported:
+
+- zero CPU/GPU base-height mean/P95 error at the 512-block review;
+- 100% ocean agreement;
+- 100% macro-material agreement;
+- about `2e-8` mean continentalness error; and
+- `5 mip · trilinear minification` in browser diagnostics.
+
+Inspected desktop and phone captures show the exact patch at its truthful
+bounded radius and matching physical scale, with independently published LOD
+panes using material-preserving atlas detail. Generated purple/pink fallback
+art remains visible in the exact patch where first-party curation is absent.
 
 ## Non-Goals
 
