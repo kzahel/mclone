@@ -1505,7 +1505,7 @@ mod tests {
         write_headless_textured_sections_png_with_options(
             HeadlessChunkOptions {
                 path: wind_later_path.clone(),
-                ..base_options
+                ..base_options.clone()
             },
             &sections,
             atlas,
@@ -1527,6 +1527,100 @@ mod tests {
         assert!(
             animated_pixels > 100,
             "fixed-camera wind times should produce visible deformation"
+        );
+
+        let mut interactors = crate::GrassInteractorSet::default();
+        interactors.push(
+            crate::GrassInteractor::new(
+                crate::GrassInteractorIdentity::LocalPlayer,
+                [0.0, 1.0, 0.0],
+                1.0,
+            )
+            .expect("fixture interactor is finite"),
+        );
+        let interaction_path = PathBuf::from("/tmp/mclone-238-interaction-contact.png");
+        let recovery_path = PathBuf::from("/tmp/mclone-238-interaction-recovery.png");
+        let recovery_control_path =
+            PathBuf::from("/tmp/mclone-238-interaction-recovery-control.png");
+        write_headless_textured_sections_png_with_options(
+            HeadlessChunkOptions {
+                path: recovery_control_path.clone(),
+                ..base_options.clone()
+            },
+            &sections,
+            atlas,
+            render_options
+                .with_grass_detail(crate::GrassQuality::Lush)
+                .with_grass_time_seconds(4.0),
+        )?;
+        let (device, queue) = create_headless_device()?;
+        let target = OffscreenTarget::new(&device, WIDTH, HEIGHT, HEADLESS_FORMAT);
+        let depth = ChunkDepthTarget::new(&device, WIDTH, HEIGHT);
+        let draw =
+            TexturedSectionDrawResources::new(&device, &queue, HEADLESS_FORMAT, &sections, atlas)?;
+        let interaction_options = render_options
+            .with_grass_detail(crate::GrassQuality::Lush)
+            .with_grass_interactors(interactors);
+        for step in 0..=16 {
+            let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("mclone_headless_grass_interaction_recovery_encoder"),
+            });
+            let frame =
+                RenderFrameContext::new(&device, &queue, &mut encoder, target.render_target());
+            let render_view = camera.render_view(WIDTH, HEIGHT);
+            let render_target = ChunkRenderTarget::from_frame_target(
+                frame.target.with_depth(&depth.view),
+                fixture_clear_color(),
+            )?;
+            draw.render_with_options(
+                frame.queue,
+                frame.encoder,
+                render_target,
+                render_view,
+                if step == 0 {
+                    interaction_options
+                } else {
+                    render_options
+                        .with_grass_detail(crate::GrassQuality::Lush)
+                        .with_grass_time_seconds(step as f32 * 0.25)
+                },
+            )?;
+            queue.submit(std::iter::once(encoder.finish()));
+            if step == 0 {
+                let pixels = read_rgba8(&device, &queue, &target.texture, WIDTH, HEIGHT)?;
+                save_rgba_png(&interaction_path, WIDTH, HEIGHT, &pixels)?;
+            } else if step == 16 {
+                let pixels = read_rgba8(&device, &queue, &target.texture, WIDTH, HEIGHT)?;
+                save_rgba_png(&recovery_path, WIDTH, HEIGHT, &pixels)?;
+            }
+        }
+        let interaction = image::ImageReader::open(&interaction_path)?
+            .decode()?
+            .to_rgba8();
+        let recovery = image::ImageReader::open(&recovery_path)?
+            .decode()?
+            .to_rgba8();
+        let recovery_control = image::ImageReader::open(&recovery_control_path)?
+            .decode()?
+            .to_rgba8();
+        let interaction_pixels = wind_start
+            .pixels()
+            .zip(interaction.pixels())
+            .filter(|(start, interaction)| start != interaction)
+            .count();
+        assert!(
+            interaction_pixels > 40,
+            "a qualifying footprint should visibly bend nearby grass"
+        );
+        let recovery_pixels = recovery_control
+            .pixels()
+            .zip(recovery.pixels())
+            .filter(|(control, recovery)| control != recovery)
+            .count();
+        assert!(
+            recovery_pixels < interaction_pixels,
+            "grass should recover toward its unstamped pose: \
+             {recovery_pixels} >= {interaction_pixels}"
         );
         Ok(())
     }
@@ -1668,7 +1762,21 @@ fn fs_main() -> @location(0) vec4<f32> {
             rgba: &atlas_rgba,
         };
         let active_sections = [fixture_active_section()];
-        let preview_sections = [fixture_preview_section()];
+        let mut preview_section = fixture_preview_section();
+        for z in 4..=12 {
+            for x in 4..=12 {
+                preview_section.grass_patches.push(GrassPatch {
+                    root: [x, 12, z],
+                    packed_tint: 0x0048_b850,
+                    packed_light: 0x00f0_00f0,
+                    seed: (x as u32).wrapping_mul(0x9e37_79b9)
+                        ^ (z as u32).wrapping_mul(0x85eb_ca6b),
+                    flags: 0,
+                    reserved: 0,
+                });
+            }
+        }
+        let preview_sections = [preview_section];
         let active = TexturedSectionDrawResources::new(
             &device,
             &queue,
@@ -1694,6 +1802,18 @@ fn fs_main() -> @location(0) vec4<f32> {
         let mut render_options = TexturedSectionRenderOptions::default();
         render_options.force_fullbright = true;
         render_options.section_occlusion_culling = false;
+        let mut interactors = crate::GrassInteractorSet::default();
+        interactors.push(
+            crate::GrassInteractor::new(
+                crate::GrassInteractorIdentity::Entity(238),
+                [8.0, 12.0, 8.0],
+                1.2,
+            )
+            .expect("placed fixture interactor is finite"),
+        );
+        render_options = render_options
+            .with_grass_detail(crate::GrassQuality::Lush)
+            .with_grass_interactors(interactors);
         let view = fixture_camera(0.0).render_view(WIDTH, HEIGHT);
 
         let active_only = OffscreenTarget::new(&device, WIDTH, HEIGHT, HEADLESS_FORMAT);
@@ -1778,6 +1898,13 @@ fn fs_main() -> @location(0) vec4<f32> {
             "preview did not occlude far active wall: {preview_over_active}"
         );
         assert_eq!(composed_stats.drawn_section_count, 1);
+        assert!(composed_stats.grass_drawn_patch_count > 0);
+        assert_eq!(composed_stats.grass_interaction_field_count, 1);
+        assert!(
+            composed_stats.grass_interaction_active_cell_count > 0,
+            "placed interaction did not stamp source grass: {composed_stats:?}"
+        );
+        assert_eq!(composed_stats.grass_interaction_uploaded_bytes, 65_536);
         save_rgba_png(
             Path::new("/tmp/mclone-live-diorama-slice2-mono.png"),
             WIDTH,

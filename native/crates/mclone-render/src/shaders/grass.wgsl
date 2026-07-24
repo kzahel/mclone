@@ -17,6 +17,17 @@ struct GrassFrameUniforms {
 @group(2) @binding(0)
 var<uniform> grass_frame: GrassFrameUniforms;
 
+struct GrassInteractionUniforms {
+    origin_cell_size_enabled: vec4<f32>,
+    topology_periods_strength: vec4<f32>,
+};
+
+@group(3) @binding(0)
+var grass_interaction_field: texture_2d<f32>;
+
+@group(3) @binding(1)
+var<uniform> grass_interaction: GrassInteractionUniforms;
+
 struct GrassPatchInput {
     @location(0) root: vec3<i32>,
     @location(1) packed_tint: u32,
@@ -122,6 +133,41 @@ fn observer_local_position(position: vec3<f32>) -> vec3<f32> {
     );
 }
 
+fn grass_interaction_bend(world_sample: vec2<f32>) -> vec2<f32> {
+    if (grass_interaction.origin_cell_size_enabled.w < 0.5) {
+        return vec2<f32>(0.0);
+    }
+    let origin = grass_interaction.origin_cell_size_enabled.xy;
+    let cell_size = grass_interaction.origin_cell_size_enabled.z;
+    let center = origin + vec2<f32>(64.0 * cell_size);
+    let lifted = vec2<f32>(
+        nearest_periodic_lift(
+            world_sample.x,
+            center.x,
+            grass_interaction.topology_periods_strength.x,
+        ),
+        nearest_periodic_lift(
+            world_sample.y,
+            center.y,
+            grass_interaction.topology_periods_strength.y,
+        ),
+    );
+    let cell = vec2<i32>(floor((lifted - origin) / cell_size));
+    let dimensions = vec2<i32>(textureDimensions(grass_interaction_field));
+    if (any(cell < vec2<i32>(0)) || any(cell >= dimensions)) {
+        return vec2<f32>(0.0);
+    }
+    let sample = textureLoad(grass_interaction_field, cell, 0);
+    let raw_direction = sample.rg * 2.0 - vec2<f32>(1.0);
+    let direction_length = length(raw_direction);
+    let direction = select(
+        vec2<f32>(0.0),
+        raw_direction / max(direction_length, 0.0001),
+        direction_length > 0.0001,
+    );
+    return direction * sample.b * grass_interaction.topology_periods_strength.z;
+}
+
 fn unpack_tint(packed: u32) -> vec3<f32> {
     return vec3<f32>(
         f32(packed & 255u),
@@ -191,7 +237,8 @@ fn blade_vertex(input: GrassPatchInput, vertex_index: u32) -> vec3<f32> {
         * flutter
         * shelter
         * height_factor;
-    let bend = (resting_lean + wind_bend + flutter_bend) * influence;
+    let bend = (resting_lean + wind_bend + flutter_bend) * influence
+        + grass_interaction_bend(world_sample) * influence;
     return root
         + vec3<f32>(
             center.x + axis.x * lateral + bend.x,

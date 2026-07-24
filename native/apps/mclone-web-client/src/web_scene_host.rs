@@ -246,6 +246,12 @@ struct LastFrameStats {
     grass_estimated_blade_count: u32,
     grass_draw_calls: usize,
     grass_resident_bytes: u64,
+    grass_interaction_field_count: u32,
+    grass_interaction_active_cell_count: u32,
+    grass_interaction_stamp_count: u32,
+    grass_interaction_recenter_count: u32,
+    grass_interaction_reset_count: u32,
+    grass_interaction_uploaded_bytes: u64,
     actor_count: usize,
     drawn_actor_count: usize,
     gui_command_count: usize,
@@ -1134,6 +1140,12 @@ impl WebSceneHost {
             grass_estimated_blade_count: summary.render.grass_estimated_blade_count,
             grass_draw_calls: summary.render.grass_draw_calls,
             grass_resident_bytes: summary.render.grass_resident_bytes,
+            grass_interaction_field_count: summary.render.grass_interaction_field_count,
+            grass_interaction_active_cell_count: summary.render.grass_interaction_active_cell_count,
+            grass_interaction_stamp_count: summary.render.grass_interaction_stamp_count,
+            grass_interaction_recenter_count: summary.render.grass_interaction_recenter_count,
+            grass_interaction_reset_count: summary.render.grass_interaction_reset_count,
+            grass_interaction_uploaded_bytes: summary.render.grass_interaction_uploaded_bytes,
             actor_count: summary.render.actor_count,
             drawn_actor_count: summary.render.drawn_actor_count,
             gui_command_count: summary.render.gui_command_count,
@@ -4317,6 +4329,36 @@ impl WebSceneHost {
                 "grassResidentBytes",
                 summary.render.grass_resident_bytes as f64,
             )?;
+            report_set_number(
+                &object,
+                "grassInteractionFieldCount",
+                summary.render.grass_interaction_field_count as f64,
+            )?;
+            report_set_number(
+                &object,
+                "grassInteractionActiveCellCount",
+                summary.render.grass_interaction_active_cell_count as f64,
+            )?;
+            report_set_number(
+                &object,
+                "grassInteractionStampCount",
+                summary.render.grass_interaction_stamp_count as f64,
+            )?;
+            report_set_number(
+                &object,
+                "grassInteractionRecenterCount",
+                summary.render.grass_interaction_recenter_count as f64,
+            )?;
+            report_set_number(
+                &object,
+                "grassInteractionResetCount",
+                summary.render.grass_interaction_reset_count as f64,
+            )?;
+            report_set_number(
+                &object,
+                "grassInteractionUploadedBytes",
+                summary.render.grass_interaction_uploaded_bytes as f64,
+            )?;
             report_set_number(&object, "actorCount", summary.render.actor_count as f64)?;
             report_set_number(
                 &object,
@@ -4403,6 +4445,36 @@ impl WebSceneHost {
             &object,
             "grassResidentBytes",
             self.last_frame.grass_resident_bytes as f64,
+        )?;
+        report_set_number(
+            &object,
+            "grassInteractionFieldCount",
+            self.last_frame.grass_interaction_field_count as f64,
+        )?;
+        report_set_number(
+            &object,
+            "grassInteractionActiveCellCount",
+            self.last_frame.grass_interaction_active_cell_count as f64,
+        )?;
+        report_set_number(
+            &object,
+            "grassInteractionStampCount",
+            self.last_frame.grass_interaction_stamp_count as f64,
+        )?;
+        report_set_number(
+            &object,
+            "grassInteractionRecenterCount",
+            self.last_frame.grass_interaction_recenter_count as f64,
+        )?;
+        report_set_number(
+            &object,
+            "grassInteractionResetCount",
+            self.last_frame.grass_interaction_reset_count as f64,
+        )?;
+        report_set_number(
+            &object,
+            "grassInteractionUploadedBytes",
+            self.last_frame.grass_interaction_uploaded_bytes as f64,
         )?;
         report_set_number(&object, "actorCount", self.last_frame.actor_count as f64)?;
         report_set_number(

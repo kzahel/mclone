@@ -447,6 +447,58 @@ Accepted evidence:
 Exit: nearby bodies bend and leave recovering grass trails without affecting
 gameplay state or another world/view's history.
 
+Implemented 2026-07-24:
+
+- `mclone-scene` supplies a bounded, host-neutral set containing the local
+  player and stable remote-player/entity footprints. Anonymous presentation
+  actors are ignored, and duplicate identities update their existing entry.
+- Each grass world retains the real resident patch roots for a height-aware
+  qualification check. A moving body contributes interpolated samples only
+  near those roots, so actors well above or below grass do not stamp.
+- Four renderer-owned 128x128 RGBA8 fields cover the maximum four
+  presentation observers at 0.5 blocks per cell. Stereo and multiview use one
+  head field; separate flat views use separate fields; separate world draw
+  stores cannot share trails.
+- Direction and strength combine radial footprint pressure with movement.
+  Strength recovers exponentially with a 0.85-second time constant. Small
+  camera moves shift retained cells, topology changes and large teleports
+  reset them, and periodic worlds lift camera, interactor, and shader sample
+  coordinates across seams.
+- Lush and Ultra enable interaction. Sparse uses the shared empty binding and
+  reports zero fields/uploads. Returning to a disabled tier clears active
+  field history before reuse; Off still releases the complete grass owner.
+- Bounded placed worlds center the field on their source bounds, while
+  unbounded placed worlds use the inverse-mapped source observer. Preview
+  actors already supplied in source coordinates therefore bend miniature
+  grass even when physical placement scale would put the source camera beyond
+  the 64-block field.
+- All six direct/placed/clipped mono/multiview shaders sample the field in
+  canonical source space, compose interaction with wind using the same
+  quadratic root-fixed influence, and apply placement afterward.
+- Render, frame, and browser reports expose field, active-cell, stamp,
+  recenter, reset, and upload-byte counts. One active field uploads one
+  aligned 65,536-byte image per distinct presentation time.
+
+Accepted evidence:
+
+- focused render, scene, and app-runtime suites passed; shader-source
+  contracts cover every pipeline variant and the scene identity fixture
+  covers local, remote, entity, duplicate, and anonymous actors;
+- ignored GPU lifecycle tests passed for contact, recovery, recentering,
+  periodic seams, height rejection, and all six pipeline layouts;
+- the inspected `/tmp/mclone-238-interaction-contact.png` and
+  `/tmp/mclone-238-interaction-recovery.png` show the stamped and recovered
+  poses, with the latter verified against an unstamped time-matched control;
+- the placed fixture reported 81 drawn patches, one interaction field, active
+  cells, and a 65,536-byte upload. Its inspected mono and side-by-side stereo
+  captures show miniature grass, and its full-frame multiview path passed on
+  the local adapter; and
+- headed Wayland `native:web:app-smoke -- --grass-detail lush` passed with one
+  field, 54 active cells, eight stamps, 65,536 uploaded bytes, 14,033 resident
+  patches, 4,190 drawn patches, about 21,788 blades, and 32 grass draws. The
+  inspected canvas showed grass through the complete browser worker/WebGPU
+  path.
+
 ## Slice 5: Platform and Performance Closeout
 
 Run focused gates after every owning slice, then the affected matrix:

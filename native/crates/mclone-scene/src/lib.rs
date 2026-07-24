@@ -126,7 +126,6 @@ use mclone_input::{
 };
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh, quad_face_count_from_indices};
 use mclone_protocol::{DebugActorKind, DebugHotbarItem, EntitySnapshot, RemotePlayerUpdate};
-use mclone_render::GrassQuality;
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_render::actor_assets::ActorTextureAssets;
 use mclone_render::actor_assets::ActorTextureImage;
@@ -138,7 +137,9 @@ use mclone_render::chunk::{
     TexturedSectionRenderStats, TexturedSectionTranslucentRecord, TexturedSectionUploadReport,
     TexturedSectionUploadTiming,
 };
-use mclone_render::entity::{ActorDrawResources, ActorFigureSet, ActorInstance, ActorRenderStats};
+use mclone_render::entity::{
+    ActorDrawResources, ActorFigureSet, ActorInstance, ActorInstanceId, ActorRenderStats,
+};
 use mclone_render::far_lod::FarTerrainLodRenderer;
 use mclone_render::fog::RenderFog;
 use mclone_render::gui::{
@@ -161,6 +162,7 @@ use mclone_render::uniform::{
     PresentationViewIndex, RIGHT_EYE_VIEW_SLOT, SINGLE_VIEW_SLOT,
 };
 use mclone_render::world_color_mesh::WorldColorMeshRenderer;
+use mclone_render::{GrassInteractor, GrassInteractorIdentity, GrassInteractorSet, GrassQuality};
 use mclone_render_session::{
     ENGINE_CAMERA_MAX_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER,
     ENGINE_CAMERA_MIN_FLY_SPEED_MULTIPLIER, ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER,
@@ -1700,6 +1702,8 @@ impl McloneSceneHost {
         let underwater_overlays = self.underwater_overlays(render_views);
         let actor_instances = self.current_actor_instances();
         let preview_actor_instances = self.current_preview_actor_instances();
+        let render_options =
+            render_options_with_actor_grass_interactors(render_options, &actor_instances);
         let collect_split_timing = self.render_split_timing_enabled;
         let records_start = collect_split_timing.then(|| self.services.clock.now());
         let (prepared_records, record_cache_prepare) =
@@ -1708,8 +1712,10 @@ impl McloneSceneHost {
         timing.shared_records_ms = records_start.map_or(0.0, |start| {
             elapsed_ms(self.services.clock.elapsed_since(start))
         });
-        let (terrain_views, terrain_options, _) =
+        let (terrain_views, mut terrain_options, _) =
             self.terrain_render_views_and_options(render_views);
+        terrain_options = terrain_options
+            .map(|options| render_options_with_actor_grass_interactors(options, &actor_instances));
         let (prepared_stereo_draw, stereo_draw_timing) = if collect_split_timing {
             self.active_world.draw.prepare_stereo_draw_timed(
                 &prepared_records,
@@ -1746,6 +1752,13 @@ impl McloneSceneHost {
                             .render_options
                             .with_sky_darken(mclone_render::light_texture::sky_darken(preview_time))
                             .with_grass_time_seconds(render_options.grass_time_seconds)
+                            .with_grass_interactors(
+                                preview_actor_instances
+                                    .as_ref()
+                                    .map_or_else(GrassInteractorSet::default, |actors| {
+                                        grass_interactors_from_actors(None, &actors.instances)
+                                    }),
+                            )
                             .with_topology(
                                 slot.runtime.as_ref().map_or(
                                     mclone_core::HorizontalTopology::UNBOUNDED,
@@ -2120,13 +2133,15 @@ impl McloneSceneHost {
         include_actors: bool,
     ) -> Result<XrTerrainStereoFrameSummary> {
         self.poll_asset_replacement(device, queue)?;
-        let (terrain_views, terrain_options, _) =
+        let (terrain_views, mut terrain_options, _) =
             self.terrain_render_views_and_options(render_views);
         let actor_instances = if include_actors {
             self.current_actor_instances()
         } else {
             Vec::new()
         };
+        terrain_options = terrain_options
+            .map(|options| render_options_with_actor_grass_interactors(options, &actor_instances));
         let prepared_records = self.active_world.draw.prepare_render_records();
         let prepared_stereo_draw = self.active_world.draw.prepare_stereo_draw(
             &prepared_records,
@@ -2172,6 +2187,21 @@ impl McloneSceneHost {
             left.grass_estimated_blade_count;
         self.active_world.render_stats.grass_draw_calls = left.grass_draw_calls;
         self.active_world.render_stats.grass_resident_bytes = left.grass_resident_bytes;
+        self.active_world.render_stats.grass_interaction_field_count =
+            left.grass_interaction_field_count;
+        self.active_world
+            .render_stats
+            .grass_interaction_active_cell_count = left.grass_interaction_active_cell_count;
+        self.active_world.render_stats.grass_interaction_stamp_count =
+            left.grass_interaction_stamp_count;
+        self.active_world
+            .render_stats
+            .grass_interaction_recenter_count = left.grass_interaction_recenter_count;
+        self.active_world.render_stats.grass_interaction_reset_count =
+            left.grass_interaction_reset_count;
+        self.active_world
+            .render_stats
+            .grass_interaction_uploaded_bytes = left.grass_interaction_uploaded_bytes;
         self.rendered_frames += 1;
         self.record_warm_world_first_destination_frame(
             left.drawn_section_count,
@@ -2414,7 +2444,7 @@ impl McloneSceneHost {
         include_overlays: bool,
         mut timing: Option<&mut XrTerrainFrameTiming>,
     ) -> Result<XrTerrainMultiviewFrameSummary> {
-        let (terrain_views, terrain_options, underwater_overlays) =
+        let (terrain_views, mut terrain_options, underwater_overlays) =
             self.terrain_render_views_and_options(render_views);
         let actor_instances = if include_actors {
             self.current_actor_instances()
@@ -2424,6 +2454,8 @@ impl McloneSceneHost {
         let preview_actor_instances = include_actors
             .then(|| self.current_preview_actor_instances())
             .flatten();
+        terrain_options = terrain_options
+            .map(|options| render_options_with_actor_grass_interactors(options, &actor_instances));
         let far_lod_config = self.active_world.scene.far_lod;
         let far_lod_seed = self.active_world.scene.seed;
         let far_lod_generation_profile = self.active_world.scene.world_generation_profile;
@@ -2541,6 +2573,13 @@ impl McloneSceneHost {
                             .render_options
                             .with_sky_darken(mclone_render::light_texture::sky_darken(preview_time))
                             .with_grass_time_seconds(terrain_options[0].grass_time_seconds)
+                            .with_grass_interactors(
+                                preview_actor_instances
+                                    .as_ref()
+                                    .map_or_else(GrassInteractorSet::default, |actors| {
+                                        grass_interactors_from_actors(None, &actors.instances)
+                                    }),
+                            )
                             .with_topology(
                                 slot.runtime.as_ref().map_or(
                                     mclone_core::HorizontalTopology::UNBOUNDED,
@@ -2874,6 +2913,21 @@ impl McloneSceneHost {
             stats[0].grass_estimated_blade_count;
         self.active_world.render_stats.grass_draw_calls = stats[0].grass_draw_calls;
         self.active_world.render_stats.grass_resident_bytes = stats[0].grass_resident_bytes;
+        self.active_world.render_stats.grass_interaction_field_count =
+            stats[0].grass_interaction_field_count;
+        self.active_world
+            .render_stats
+            .grass_interaction_active_cell_count = stats[0].grass_interaction_active_cell_count;
+        self.active_world.render_stats.grass_interaction_stamp_count =
+            stats[0].grass_interaction_stamp_count;
+        self.active_world
+            .render_stats
+            .grass_interaction_recenter_count = stats[0].grass_interaction_recenter_count;
+        self.active_world.render_stats.grass_interaction_reset_count =
+            stats[0].grass_interaction_reset_count;
+        self.active_world
+            .render_stats
+            .grass_interaction_uploaded_bytes = stats[0].grass_interaction_uploaded_bytes;
         if let (Some(preview), Some((preview_stats, cull_ms, draw_ms, bounded, outside))) =
             (self.embedded_world_preview.as_mut(), preview_stats)
         {
@@ -4261,6 +4315,12 @@ impl McloneSceneHost {
                         self.render_options
                             .with_sky_darken(mclone_render::light_texture::sky_darken(preview_time))
                             .with_grass_time_seconds(render_options.grass_time_seconds)
+                            .with_grass_interactors(
+                                preview_actor_instances
+                                    .map_or_else(GrassInteractorSet::default, |actors| {
+                                        grass_interactors_from_actors(None, &actors.instances)
+                                    }),
+                            )
                             .with_topology(
                                 standby.runtime.as_ref().map_or(
                                     mclone_core::HorizontalTopology::UNBOUNDED,
@@ -4814,6 +4874,8 @@ impl McloneSceneHost {
     fn effective_render_options(&self, camera_position: Vec3) -> TexturedSectionRenderOptions {
         let mut options = self.render_options;
         options.grass_time_seconds = grass_presentation_time_seconds(self.services.clock.now());
+        options.grass_interactors =
+            grass_interactors_from_actors(Some(self.active_world.camera.feet_position()), &[]);
         options.topology = self
             .active_world
             .runtime
@@ -4826,6 +4888,49 @@ impl McloneSceneHost {
         }
         options
     }
+}
+
+fn grass_interactors_from_actors(
+    local_feet_position: Option<Vec3d>,
+    actors: &[ActorInstance],
+) -> GrassInteractorSet {
+    let mut interactors = GrassInteractorSet::default();
+    if let Some(position) = local_feet_position
+        && let Some(interactor) = GrassInteractor::new(
+            GrassInteractorIdentity::LocalPlayer,
+            [position.x as f32, position.y as f32, position.z as f32],
+            0.65,
+        )
+    {
+        interactors.push(interactor);
+    }
+    for actor in actors {
+        let Some(identity) = actor.id.map(|identity| match identity {
+            ActorInstanceId::LocalPlayer => GrassInteractorIdentity::LocalPlayer,
+            ActorInstanceId::RemotePlayer(id) => GrassInteractorIdentity::RemotePlayer(id),
+            ActorInstanceId::Entity(id) => GrassInteractorIdentity::Entity(id),
+        }) else {
+            continue;
+        };
+        if let Some(interactor) = GrassInteractor::new(
+            identity,
+            actor.feet_position.to_array(),
+            actor.width * 0.5 + 0.3,
+        ) {
+            interactors.push(interactor);
+        }
+    }
+    interactors
+}
+
+fn render_options_with_actor_grass_interactors(
+    mut options: TexturedSectionRenderOptions,
+    actors: &[ActorInstance],
+) -> TexturedSectionRenderOptions {
+    for actor in grass_interactors_from_actors(None, actors).iter() {
+        options.grass_interactors.push(actor);
+    }
+    options
 }
 
 fn grass_presentation_time_seconds(now: MonotonicInstant) -> f32 {
@@ -4852,6 +4957,37 @@ mod tests {
             1.5
         );
     }
+
+    #[test]
+    fn grass_interactors_keep_stable_actor_identity_and_local_player_priority() {
+        let mut local = ActorInstance::local_player(Vec3::new(2.0, 64.0, 3.0), 0.0);
+        local.width = 0.8;
+        let mut remote = ActorInstance::remote_player(Vec3::new(4.0, 64.0, 5.0), 0.0);
+        remote.id = Some(ActorInstanceId::RemotePlayer(7));
+        let mut cow = ActorInstance::cow_model(Vec3::new(6.0, 64.0, 7.0), 0.0, 0.9, 1.4);
+        cow.id = Some(ActorInstanceId::Entity(11));
+        let anonymous = ActorInstance::cow_model(Vec3::new(8.0, 64.0, 9.0), 0.0, 0.9, 1.4);
+
+        let interactors = grass_interactors_from_actors(
+            Some(Vec3d::new(1.0, 64.0, 1.0)),
+            &[local, remote, cow, anonymous],
+        );
+        let interactors = interactors.iter().collect::<Vec<_>>();
+
+        assert_eq!(interactors.len(), 3);
+        assert_eq!(
+            interactors[0].identity,
+            GrassInteractorIdentity::LocalPlayer
+        );
+        assert_eq!(interactors[0].feet_position, [2.0, 64.0, 3.0]);
+        assert_eq!(
+            interactors[1].identity,
+            GrassInteractorIdentity::RemotePlayer(7)
+        );
+        assert_eq!(interactors[2].identity, GrassInteractorIdentity::Entity(11));
+        assert!((interactors[2].footprint_radius - 0.75).abs() < f32::EPSILON);
+    }
+
     use mclone_render_session::ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND;
 
     #[test]

@@ -1924,7 +1924,10 @@ impl McloneSceneHost {
         for (index, view) in views.iter().enumerate() {
             let view_index = PresentationViewIndex::new(index as u32);
             let view_slot = PerViewSlot::for_view(view_index).in_uniform_frame(uniform_frame);
-            let render_options = self.effective_render_options(view.render_view.camera_position);
+            let render_options = render_options_with_actor_grass_interactors(
+                self.effective_render_options(view.render_view.camera_position),
+                &actor_instances,
+            );
             let underwater_overlay = self.mono_underwater_overlay(view.render_view);
             let gui_scale = GuiScale::from_pixels(view.target.size[0], view.target.size[1]);
             let (full_frame_gui, gui_draw, hud_cache) = self.mono_gui_frame(gui_scale, view.ui);
@@ -2215,6 +2218,8 @@ impl McloneSceneHost {
         let underwater_overlay = self.mono_underwater_overlay(render_view);
         let actor_instances = self.current_actor_instances();
         let preview_actor_instances = self.current_preview_actor_instances();
+        let render_options =
+            render_options_with_actor_grass_interactors(render_options, &actor_instances);
 
         let gui_scale = GuiScale::from_pixels(target.size[0], target.size[1]);
         let (full_frame_gui, gui_draw, hud_cache) = self.mono_gui_frame(gui_scale, ui);
@@ -2286,6 +2291,13 @@ impl McloneSceneHost {
                     .render_options
                     .with_sky_darken(mclone_render::light_texture::sky_darken(preview_time))
                     .with_grass_time_seconds(render_options.grass_time_seconds)
+                    .with_grass_interactors(
+                        preview_actor_instances
+                            .as_ref()
+                            .map_or_else(GrassInteractorSet::default, |actors| {
+                                grass_interactors_from_actors(None, &actors.instances)
+                            }),
+                    )
                     .with_topology(
                         standby
                             .runtime

@@ -5,7 +5,10 @@ mod gpu_util;
 
 mod asset_lab_figure;
 mod grass;
-pub use grass::GrassQuality;
+pub use grass::{
+    GrassInteractor, GrassInteractorIdentity, GrassInteractorSet, GrassQuality,
+    MAX_GRASS_INTERACTORS,
+};
 mod prepared_actor;
 
 pub mod actor_assets;

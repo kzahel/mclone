@@ -7927,6 +7927,13 @@ function assertAppLoopResult(
       result.lastReport?.grassDetail !== expectedGrassDetail
       || result.lastReport?.grassPatchesCompileEnabled !== (expectedGrassDetail !== "off")
       || (
+        (expectedGrassDetail === "off" || expectedGrassDetail === "sparse")
+        && (
+          result.lastReport?.grassInteractionFieldCount !== 0
+          || result.lastReport?.grassInteractionUploadedBytes !== 0
+        )
+      )
+      || (
         expectedGrassDetail !== "off"
         && (
           result.lastCompileReport?.grassPatchesRequested !== true
@@ -7934,6 +7941,14 @@ function assertAppLoopResult(
           || result.lastReport?.grassDrawnPatchCount <= 0
           || result.lastReport?.grassEstimatedBladeCount <= 0
           || result.lastReport?.grassDrawCalls <= 0
+        )
+      )
+      || (
+        (expectedGrassDetail === "lush" || expectedGrassDetail === "ultra")
+        && (
+          result.lastReport?.grassInteractionFieldCount <= 0
+          || result.lastReport?.grassInteractionUploadedBytes < 65_536
+          || result.lastReport.grassInteractionUploadedBytes % 65_536 !== 0
         )
       )
     )

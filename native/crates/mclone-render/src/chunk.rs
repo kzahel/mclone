@@ -26,7 +26,8 @@ use crate::color_profile::{RenderColorProfile, RenderConfig};
 use crate::fog::RenderFog;
 use crate::gpu_timestamps::GpuTimestampFrameEncoder;
 use crate::grass::{
-    GrassDrawStats, GrassPatchDrawResources, GrassPipelineCache, GrassPipelineVariant, GrassQuality,
+    GrassDrawStats, GrassInteractorSet, GrassPatchDrawResources, GrassPipelineCache,
+    GrassPipelineVariant, GrassQuality,
 };
 use crate::placement::{
     CompositionClip, WorldCompositionContext, WorldPlacement, WorldSourceBounds,
@@ -507,6 +508,12 @@ pub struct TexturedSectionRenderStats {
     pub grass_near_patch_count: u32,
     pub grass_middle_patch_count: u32,
     pub grass_far_patch_count: u32,
+    pub grass_interaction_field_count: u32,
+    pub grass_interaction_active_cell_count: u32,
+    pub grass_interaction_stamp_count: u32,
+    pub grass_interaction_recenter_count: u32,
+    pub grass_interaction_reset_count: u32,
+    pub grass_interaction_uploaded_bytes: u64,
 }
 
 /// Pull-only exact section sets for one render view. `paintable_frustum_keys`
@@ -577,6 +584,10 @@ pub struct TexturedSectionRenderOptions {
     /// Scene presentation time for world-locked grass animation. This is
     /// intentionally independent from authoritative server/game time.
     pub grass_time_seconds: f32,
+    /// Presentation-only source-world actor footprints consumed by the
+    /// renderer-owned interaction history. Placed submissions keep these in
+    /// source coordinates; their bounded field follows the source bounds.
+    pub grass_interactors: GrassInteractorSet,
     /// Active dimension topology used only for observer-local presentation.
     /// Canonical mesh/upload identity remains unchanged.
     pub topology: HorizontalTopology,
@@ -592,6 +603,7 @@ impl Default for TexturedSectionRenderOptions {
             color_profile: RenderColorProfile::default(),
             grass_detail: GrassQuality::Off,
             grass_time_seconds: 0.0,
+            grass_interactors: GrassInteractorSet::default(),
             topology: HorizontalTopology::UNBOUNDED,
         }
     }
@@ -636,6 +648,11 @@ impl TexturedSectionRenderOptions {
         self
     }
 
+    pub fn with_grass_interactors(mut self, interactors: GrassInteractorSet) -> Self {
+        self.grass_interactors = interactors;
+        self
+    }
+
     pub fn with_topology(mut self, topology: HorizontalTopology) -> Self {
         self.topology = topology;
         self
@@ -652,6 +669,12 @@ impl TexturedSectionRenderStats {
         self.grass_near_patch_count = stats.near_patch_count;
         self.grass_middle_patch_count = stats.middle_patch_count;
         self.grass_far_patch_count = stats.far_patch_count;
+        self.grass_interaction_field_count = stats.interaction_field_count;
+        self.grass_interaction_active_cell_count = stats.interaction_active_cell_count;
+        self.grass_interaction_stamp_count = stats.interaction_stamp_count;
+        self.grass_interaction_recenter_count = stats.interaction_recenter_count;
+        self.grass_interaction_reset_count = stats.interaction_reset_count;
+        self.grass_interaction_uploaded_bytes = stats.interaction_uploaded_bytes;
     }
 
     pub fn loaded_face_count(&self) -> u32 {
@@ -1107,6 +1130,7 @@ pub struct PreparedTexturedSectionStereoDraw {
     draw_masks: FxHashMap<RenderSectionKey, StereoDrawMask>,
     translucent_keys: Vec<RenderSectionKey>,
     grass_observer_position: [f32; 3],
+    grass_interaction_position: [f32; 3],
 }
 
 impl PreparedTexturedSectionStereoDraw {
@@ -4399,6 +4423,24 @@ impl TexturedSectionDrawResources {
         released
     }
 
+    fn write_grass_frame(
+        &self,
+        queue: &wgpu::Queue,
+        options: TexturedSectionRenderOptions,
+        observer_id: u32,
+        observer_position: [f32; 3],
+    ) {
+        self.grass.write_frame(
+            queue,
+            options.grass_detail,
+            options.grass_time_seconds,
+            observer_id,
+            observer_position,
+            options.topology,
+            options.grass_interactors,
+        );
+    }
+
     /// Allocate the opt-in placed pipeline shell for this draw store. Nothing
     /// in `new` calls this, preserving the ordinary single-world allocation
     /// and shader-compilation path.
@@ -4592,10 +4634,12 @@ impl TexturedSectionDrawResources {
         self.section_arena
             .ensure_indirect_capacity(device, self.sections.len())?;
         let grass_frame_layout = self.shared.grass_pipelines.frame_layout(device);
+        let grass_interaction_layout = self.shared.grass_pipelines.interaction_layout(device);
         let grass_upload = self.grass.apply_section_updates(
             device,
             &self.queue,
             grass_frame_layout,
+            grass_interaction_layout,
             sections,
             removed.iter().copied(),
         )?;
@@ -5445,8 +5489,15 @@ impl TexturedSectionDrawResources {
                 )
             });
         if grass_pipeline.is_some() {
-            self.grass
-                .write_frame(queue, options.grass_detail, options.grass_time_seconds);
+            self.write_grass_frame(
+                queue,
+                options,
+                view_slot.view().get(),
+                placed_grass_interaction_position(
+                    context,
+                    source_render_view.camera_position.to_array(),
+                ),
+            );
         }
         let mut grass_stats = GrassDrawStats::default();
         let encode_start = timing.is_some().then(timing_now);
@@ -5556,6 +5607,10 @@ impl TexturedSectionDrawResources {
             draw_masks: culling.draw_masks,
             translucent_keys,
             grass_observer_position: stereo_center_position(source_render_views).to_array(),
+            grass_interaction_position: placed_grass_interaction_position(
+                context,
+                stereo_center_position(source_render_views).to_array(),
+            ),
         }
     }
 
@@ -5658,8 +5713,7 @@ impl TexturedSectionDrawResources {
                 )
             });
         if grass_pipeline.is_some() {
-            self.grass
-                .write_frame(queue, options.grass_detail, options.grass_time_seconds);
+            self.write_grass_frame(queue, options, 0, prepared_draw.grass_interaction_position);
         }
         let mut grass_stats = GrassDrawStats::default();
         {
@@ -5805,10 +5859,11 @@ impl TexturedSectionDrawResources {
                 options[0].grass_time_seconds, options[1].grass_time_seconds,
                 "stereo grass eyes must share presentation time"
             );
-            self.grass.write_frame(
+            self.write_grass_frame(
                 queue,
-                options[0].grass_detail,
-                options[0].grass_time_seconds,
+                options[0],
+                0,
+                prepared_draw.grass_interaction_position,
             );
         }
         let mut grass_stats = GrassDrawStats::default();
@@ -6216,10 +6271,11 @@ impl TexturedSectionDrawResources {
                 options[0].grass_time_seconds, options[1].grass_time_seconds,
                 "multiview grass eyes must share presentation time"
             );
-            self.grass.write_frame(
+            self.write_grass_frame(
                 queue,
-                options[0].grass_detail,
-                options[0].grass_time_seconds,
+                options[0],
+                0,
+                prepared_draw.grass_interaction_position,
             );
         }
         let mut grass_stats = GrassDrawStats::default();
@@ -6492,8 +6548,12 @@ impl TexturedSectionDrawResources {
                         .cached_pipeline(GrassPipelineVariant::Direct)
                 });
         if grass_pipeline.is_some() {
-            self.grass
-                .write_frame(queue, options.grass_detail, options.grass_time_seconds);
+            self.write_grass_frame(
+                queue,
+                options,
+                view_slot.view().get(),
+                render_view.camera_position.to_array(),
+            );
         }
         let mut grass_stats = GrassDrawStats::default();
         {
@@ -6682,6 +6742,7 @@ impl TexturedSectionDrawResources {
             draw_masks: culling.draw_masks,
             translucent_keys,
             grass_observer_position: stereo_center_position(render_views).to_array(),
+            grass_interaction_position: stereo_center_position(render_views).to_array(),
         }
     }
 
@@ -6720,8 +6781,7 @@ impl TexturedSectionDrawResources {
                         .cached_pipeline(GrassPipelineVariant::Direct)
                 });
         if grass_pipeline.is_some() {
-            self.grass
-                .write_frame(queue, options.grass_detail, options.grass_time_seconds);
+            self.write_grass_frame(queue, options, 0, prepared_draw.grass_observer_position);
         }
         let mut grass_stats = GrassDrawStats::default();
         {
@@ -6882,6 +6942,21 @@ fn stereo_union_stats_for_options(
 
 fn stereo_center_position(render_views: [ChunkRenderView; 2]) -> Vec3 {
     (render_views[0].camera_position + render_views[1].camera_position) * 0.5
+}
+
+fn placed_grass_interaction_position(
+    context: WorldCompositionContext,
+    fallback: [f32; 3],
+) -> [f32; 3] {
+    context.source_bounds().map_or(fallback, |bounds| {
+        let min = bounds.min();
+        let max = bounds.max();
+        [
+            ((min.x + max.x) * 0.5) as f32,
+            ((min.y + max.y) * 0.5) as f32,
+            ((min.z + max.z) * 0.5) as f32,
+        ]
+    })
 }
 
 fn stereo_translucent_sort_view(render_views: [ChunkRenderView; 2]) -> ChunkRenderView {
@@ -7456,6 +7531,30 @@ mod tests {
         );
         assert!(frustum.is_render_section_visible(RenderSectionKey::new(62, 0, 62)));
         assert!(!frustum.is_render_section_visible(RenderSectionKey::new(62, 0, 80)));
+    }
+
+    #[test]
+    fn bounded_placed_grass_centers_interaction_on_the_source_presentation() {
+        let placement =
+            WorldPlacement::new(Vec3d::new(8.0, 0.0, 8.0), Vec3d::ZERO, 0.2).unwrap();
+        let bounds = WorldSourceBounds::new(
+            Vec3d::new(0.0, 0.0, 0.0),
+            Vec3d::new(32.0, 16.0, 64.0),
+        )
+        .unwrap();
+        let context = WorldCompositionContext::unbounded(placement, Some(bounds));
+
+        assert_eq!(
+            placed_grass_interaction_position(context, [8.0, 24.0, 68.0]),
+            [16.0, 8.0, 32.0]
+        );
+        assert_eq!(
+            placed_grass_interaction_position(
+                WorldCompositionContext::unbounded(placement, None),
+                [8.0, 24.0, 68.0],
+            ),
+            [8.0, 24.0, 68.0]
+        );
     }
 
     #[test]

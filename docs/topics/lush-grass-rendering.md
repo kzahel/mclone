@@ -2,8 +2,8 @@
 
 Topic: `lush-grass-rendering`
 
-Status: implementation active; static grass, quality/settings, and wind are
-complete. Interaction and platform/performance closeout remain.
+Status: implementation active; static grass, quality/settings, wind, and
+interaction are complete. Platform/performance closeout remains.
 
 ## Scope
 
@@ -137,6 +137,38 @@ validated. Native full-frame, synthetic stereo, and headed Wayland browser
 captures passed and were inspected; the browser retained the established
 Lush counts of `14,033` resident patches, `5,277` drawn patches, about
 `27,078` blades, and `42` grass draws.
+
+## 2026-07-24 Interaction Milestone
+
+Grass interaction is presentation-only state shared by every host. The scene
+collects the local player plus stable remote-player and entity identities into
+a fixed, portable set of at most 24 source-world footprints. The renderer
+checks those footprints against the actual resident grass-patch roots, so an
+actor above or below the surface cannot bend unrelated grass.
+
+Each grass-bearing world owns four 128x128 RGBA8 fields, enough for the four
+supported presentation observers. Lush and Ultra activate a 0.5-block cell
+field; Sparse leaves it disabled. Direction and strength accumulate under
+radial footprints and interpolated motion samples, then recover
+exponentially with a 0.85-second time constant. Camera motion shifts retained
+cells, discontinuous movement and topology changes reset them, and periodic
+worlds use the nearest lifted coordinates across their seams. Released fields
+forget their observer, topology, trail, and clock before reuse.
+
+Placed worlds consume source-world footprints. A bounded miniature centers
+its interaction field on its source bounds rather than the distant
+inverse-mapped physical camera, which keeps Local Play and embedded previews
+interactive even at small placement scales. Direct, placed, clipped,
+per-eye, and full-frame multiview shaders all sample the same source-world
+deformation after wind and before placement. Stereo eyes share one field.
+
+The GPU lifecycle and visual fixtures prove stamping, decay, recentering,
+periodic seams, height rejection, contact pixels, and recovery toward an
+unstamped control at the same wind time. The placed-terrain fixture rendered
+and inspected interacting grass in mono and stereo, and exercised the
+multiview pipeline on the local adapter. Headed Wayland browser WebGPU
+reported one field, 54 active cells, eight stamps, and one aligned 65,536-byte
+upload while rendering 14,033 resident grass patches.
 
 ## Attribution And External References
 

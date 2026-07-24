@@ -114,6 +114,12 @@ pub struct RenderStreamStats {
     pub grass_estimated_blade_count: u32,
     pub grass_draw_calls: usize,
     pub grass_resident_bytes: u64,
+    pub grass_interaction_field_count: u32,
+    pub grass_interaction_active_cell_count: u32,
+    pub grass_interaction_stamp_count: u32,
+    pub grass_interaction_recenter_count: u32,
+    pub grass_interaction_reset_count: u32,
+    pub grass_interaction_uploaded_bytes: u64,
     pub resident_cpu_mesh_section_count: usize,
     pub resident_cpu_mesh_vertex_count: u32,
     pub resident_cpu_mesh_face_count: u32,
@@ -168,6 +174,12 @@ pub struct FullFrameRenderSummary {
     pub grass_estimated_blade_count: u32,
     pub grass_draw_calls: usize,
     pub grass_resident_bytes: u64,
+    pub grass_interaction_field_count: u32,
+    pub grass_interaction_active_cell_count: u32,
+    pub grass_interaction_stamp_count: u32,
+    pub grass_interaction_recenter_count: u32,
+    pub grass_interaction_reset_count: u32,
+    pub grass_interaction_uploaded_bytes: u64,
     pub frustum_index_count: u32,
     pub graph_culled_index_count: u32,
     pub gui_command_count: usize,
@@ -2625,6 +2637,15 @@ where
         render_stats.grass_estimated_blade_count = frame_stats.grass_estimated_blade_count;
         render_stats.grass_draw_calls = frame_stats.grass_draw_calls;
         render_stats.grass_resident_bytes = frame_stats.grass_resident_bytes;
+        render_stats.grass_interaction_field_count = frame_stats.grass_interaction_field_count;
+        render_stats.grass_interaction_active_cell_count =
+            frame_stats.grass_interaction_active_cell_count;
+        render_stats.grass_interaction_stamp_count = frame_stats.grass_interaction_stamp_count;
+        render_stats.grass_interaction_recenter_count =
+            frame_stats.grass_interaction_recenter_count;
+        render_stats.grass_interaction_reset_count = frame_stats.grass_interaction_reset_count;
+        render_stats.grass_interaction_uploaded_bytes =
+            frame_stats.grass_interaction_uploaded_bytes;
         match opaque_world_insertion.as_ref() {
             Some(OpaqueWorldInsertion::Gate(gate_renderer, gate)) => {
                 gate_renderer.render_in_slot(
@@ -2850,6 +2871,24 @@ where
         render_stats.grass_draw_calls = render_stats
             .grass_draw_calls
             .saturating_add(placed_terrain_stats.grass_draw_calls);
+        render_stats.grass_interaction_field_count = render_stats
+            .grass_interaction_field_count
+            .saturating_add(placed_terrain_stats.grass_interaction_field_count);
+        render_stats.grass_interaction_active_cell_count = render_stats
+            .grass_interaction_active_cell_count
+            .saturating_add(placed_terrain_stats.grass_interaction_active_cell_count);
+        render_stats.grass_interaction_stamp_count = render_stats
+            .grass_interaction_stamp_count
+            .saturating_add(placed_terrain_stats.grass_interaction_stamp_count);
+        render_stats.grass_interaction_recenter_count = render_stats
+            .grass_interaction_recenter_count
+            .saturating_add(placed_terrain_stats.grass_interaction_recenter_count);
+        render_stats.grass_interaction_reset_count = render_stats
+            .grass_interaction_reset_count
+            .saturating_add(placed_terrain_stats.grass_interaction_reset_count);
+        render_stats.grass_interaction_uploaded_bytes = render_stats
+            .grass_interaction_uploaded_bytes
+            .saturating_add(placed_terrain_stats.grass_interaction_uploaded_bytes);
     } else {
         render_stats.drawn_section_count = 0;
         render_stats.drawn_face_count = 0;
@@ -2857,6 +2896,12 @@ where
         render_stats.grass_drawn_patch_count = 0;
         render_stats.grass_estimated_blade_count = 0;
         render_stats.grass_draw_calls = 0;
+        render_stats.grass_interaction_field_count = 0;
+        render_stats.grass_interaction_active_cell_count = 0;
+        render_stats.grass_interaction_stamp_count = 0;
+        render_stats.grass_interaction_recenter_count = 0;
+        render_stats.grass_interaction_reset_count = 0;
+        render_stats.grass_interaction_uploaded_bytes = 0;
     }
     render_stats.actor_count = actor_instances.len();
     render_stats.drawn_actor_count = actor_stats.drawn_actor_count;
@@ -2899,6 +2944,12 @@ where
         grass_estimated_blade_count: render_stats.grass_estimated_blade_count,
         grass_draw_calls: render_stats.grass_draw_calls,
         grass_resident_bytes: render_stats.grass_resident_bytes,
+        grass_interaction_field_count: render_stats.grass_interaction_field_count,
+        grass_interaction_active_cell_count: render_stats.grass_interaction_active_cell_count,
+        grass_interaction_stamp_count: render_stats.grass_interaction_stamp_count,
+        grass_interaction_recenter_count: render_stats.grass_interaction_recenter_count,
+        grass_interaction_reset_count: render_stats.grass_interaction_reset_count,
+        grass_interaction_uploaded_bytes: render_stats.grass_interaction_uploaded_bytes,
         frustum_index_count: terrain_stats.frustum_index_count,
         graph_culled_index_count: terrain_stats.graph_culled_index_count,
         gui_command_count,
