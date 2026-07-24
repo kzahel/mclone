@@ -233,11 +233,6 @@ pub struct FullFrameRenderTiming {
     pub terrain_translucent_ms: f64,
     pub terrain_records_ms: f64,
     pub terrain_cull_ms: f64,
-    pub terrain_cull_frustum_ms: f64,
-    pub terrain_cull_traversal_ms: f64,
-    pub terrain_cull_region_tests: usize,
-    pub terrain_cull_region_rejections: usize,
-    pub terrain_cull_section_tests: usize,
     pub terrain_cull_cache_lookups: usize,
     pub terrain_cull_cache_hits: usize,
     pub terrain_uniform_write_ms: f64,
@@ -1037,11 +1032,6 @@ pub fn render_view_with_underwater_effect(
 fn add_terrain_timing(frame: &mut FullFrameRenderTiming, terrain: TexturedSectionRenderTiming) {
     frame.terrain_records_ms += terrain.records_ms;
     frame.terrain_cull_ms += terrain.cull_ms;
-    frame.terrain_cull_frustum_ms += terrain.cull_frustum_ms;
-    frame.terrain_cull_traversal_ms += terrain.cull_traversal_ms;
-    frame.terrain_cull_region_tests += terrain.cull_region_tests;
-    frame.terrain_cull_region_rejections += terrain.cull_region_rejections;
-    frame.terrain_cull_section_tests += terrain.cull_section_tests;
     frame.terrain_cull_cache_lookups += usize::from(terrain.cull_cache_lookup);
     frame.terrain_cull_cache_hits += usize::from(terrain.cull_cache_hit);
     frame.terrain_uniform_write_ms += terrain.uniform_write_ms;

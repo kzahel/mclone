@@ -537,11 +537,6 @@ impl TexturedSectionRenderPhase {
 pub struct TexturedSectionRenderTiming {
     pub records_ms: f64,
     pub cull_ms: f64,
-    pub cull_frustum_ms: f64,
-    pub cull_traversal_ms: f64,
-    pub cull_region_tests: usize,
-    pub cull_region_rejections: usize,
-    pub cull_section_tests: usize,
     pub cull_cache_lookup: bool,
     pub cull_cache_hit: bool,
     pub uniform_write_ms: f64,
@@ -703,7 +698,17 @@ pub fn textured_section_visibility_stats_with_options_and_ready_sections(
             )
         })
         .collect::<BTreeMap<_, _>>();
-    let prepared = PreparedTexturedSectionRecords::from_records(records);
+    let loaded_section_count = records.values().filter(|record| record.drawable).count();
+    let loaded_index_count = records
+        .values()
+        .filter(|record| record.drawable)
+        .map(|record| record.index_count)
+        .sum();
+    let prepared = PreparedTexturedSectionRecords {
+        records,
+        loaded_section_count,
+        loaded_index_count,
+    };
     let mut scratch = CullScratch::default();
     cull_textured_sections(&prepared, render_view, options, &mut scratch).stats
 }
@@ -716,30 +721,9 @@ struct TexturedSectionCullingRecord {
     traversal_ready: bool,
 }
 
-const RENDER_CULL_REGION_CHUNKS: i32 = 4;
-const RENDER_CULL_REGION_SECTIONS_Y: i32 = 4;
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-struct RenderSectionCullRegionKey {
-    region_x: i32,
-    region_y: i32,
-    region_z: i32,
-}
-
-impl RenderSectionCullRegionKey {
-    fn containing(key: RenderSectionKey) -> Self {
-        Self {
-            region_x: key.chunk_x.div_euclid(RENDER_CULL_REGION_CHUNKS),
-            region_y: key.section_y.div_euclid(RENDER_CULL_REGION_SECTIONS_Y),
-            region_z: key.chunk_z.div_euclid(RENDER_CULL_REGION_CHUNKS),
-        }
-    }
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct PreparedTexturedSectionRecords {
     records: BTreeMap<RenderSectionKey, TexturedSectionCullingRecord>,
-    regions: BTreeMap<RenderSectionCullRegionKey, BTreeSet<RenderSectionKey>>,
     // Slice F (docs/tactical/106): view-independent loaded totals, computed once
     // when the record set is built rather than re-summed per eye per frame in
     // `cull_textured_sections`.
@@ -748,28 +732,6 @@ pub struct PreparedTexturedSectionRecords {
 }
 
 impl PreparedTexturedSectionRecords {
-    fn from_records(records: BTreeMap<RenderSectionKey, TexturedSectionCullingRecord>) -> Self {
-        let mut regions = BTreeMap::<RenderSectionCullRegionKey, BTreeSet<RenderSectionKey>>::new();
-        for key in records.keys().copied() {
-            regions
-                .entry(RenderSectionCullRegionKey::containing(key))
-                .or_default()
-                .insert(key);
-        }
-        let loaded_section_count = records.values().filter(|record| record.drawable).count();
-        let loaded_index_count = records
-            .values()
-            .filter(|record| record.drawable)
-            .map(|record| record.index_count)
-            .sum();
-        Self {
-            records,
-            regions,
-            loaded_section_count,
-            loaded_index_count,
-        }
-    }
-
     /// Build the stable, bounded record set consumed by an embedded terrain
     /// presentation. The source store remains untouched and may continue to
     /// retain neighboring sections for lighting or later interest changes.
@@ -780,7 +742,17 @@ impl PreparedTexturedSectionRecords {
             .filter(|(key, _)| bounds.contains_render_section(**key))
             .map(|(key, record)| (*key, *record))
             .collect::<BTreeMap<_, _>>();
-        Self::from_records(records)
+        let loaded_section_count = records.values().filter(|record| record.drawable).count();
+        let loaded_index_count = records
+            .values()
+            .filter(|record| record.drawable)
+            .map(|record| record.index_count)
+            .sum();
+        Self {
+            records,
+            loaded_section_count,
+            loaded_index_count,
+        }
     }
 
     pub fn section_keys(&self) -> impl ExactSizeIterator<Item = RenderSectionKey> + '_ {
@@ -1002,11 +974,6 @@ pub struct TexturedSectionRecordPrepareStats {
 struct TexturedSectionCullingResult {
     stats: TexturedSectionRenderStats,
     drawn_keys: FxHashSet<RenderSectionKey>,
-    frustum_ms: f64,
-    traversal_ms: f64,
-    region_tests: usize,
-    region_rejections: usize,
-    section_tests: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1040,11 +1007,6 @@ struct TexturedSectionStereoCullingResult {
     eye_stats: [TexturedSectionRenderStats; 2],
     drawn_keys: FxHashSet<RenderSectionKey>,
     draw_masks: FxHashMap<RenderSectionKey, StereoDrawMask>,
-    frustum_ms: f64,
-    traversal_ms: f64,
-    region_tests: usize,
-    region_rejections: usize,
-    section_tests: usize,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -1235,16 +1197,11 @@ fn cull_textured_sections_with_frustum(
         queue,
         infos,
     } = scratch;
-    let frustum_start = timing_now();
-    let mut region_tests = 0;
-    let mut region_rejections = 0;
-    let mut section_tests = 0;
-    let mut test_section = |key: RenderSectionKey, record: &TexturedSectionCullingRecord| {
-        section_tests += 1;
-        if frustum.is_render_section_visible(key) {
-            frustum_keys.insert(key);
+    for (key, record) in records {
+        if frustum.is_render_section_visible(*key) {
+            frustum_keys.insert(*key);
             if record.traversal_ready {
-                ready_frustum_keys.insert(key);
+                ready_frustum_keys.insert(*key);
             }
             if record.drawable {
                 stats.frustum_section_count += 1;
@@ -1255,29 +1212,8 @@ fn cull_textured_sections_with_frustum(
                 }
             }
         }
-    };
-    if frustum.supports_region_culling() {
-        for (region_key, region_sections) in &prepared.regions {
-            region_tests += 1;
-            if !frustum.is_render_region_visible(*region_key) {
-                region_rejections += 1;
-                continue;
-            }
-            for key in region_sections {
-                if let Some(record) = records.get(key) {
-                    test_section(*key, record);
-                }
-            }
-        }
-    } else {
-        for (key, record) in records {
-            test_section(*key, record);
-        }
     }
-    drop(test_section);
-    let frustum_ms = timing_elapsed_ms(frustum_start);
 
-    let traversal_start = timing_now();
     let start_keys = traversal_start_keys(
         records,
         frustum_keys,
@@ -1300,11 +1236,6 @@ fn cull_textured_sections_with_frustum(
             stats,
             // `ready_frustum_keys` is reused scratch, so hand back an owned copy.
             drawn_keys: ready_frustum_keys.iter().copied().collect(),
-            frustum_ms,
-            traversal_ms: timing_elapsed_ms(traversal_start),
-            region_tests,
-            region_rejections,
-            section_tests,
         };
     }
 
@@ -1380,15 +1311,7 @@ fn cull_textured_sections_with_frustum(
         .saturating_sub(stats.readiness_culled_index_count)
         .saturating_sub(stats.drawn_index_count);
 
-    TexturedSectionCullingResult {
-        stats,
-        drawn_keys,
-        frustum_ms,
-        traversal_ms: timing_elapsed_ms(traversal_start),
-        region_tests,
-        region_rejections,
-        section_tests,
-    }
+    TexturedSectionCullingResult { stats, drawn_keys }
 }
 
 fn cull_textured_sections_stereo_union(
@@ -1442,15 +1365,10 @@ fn cull_textured_sections_stereo_union_with_frustums(
         queue,
         infos,
     } = scratch;
-    let frustum_start = timing_now();
-    let mut region_tests = 0;
-    let mut region_rejections = 0;
-    let mut section_tests = 0;
-    let mut test_section = |key: RenderSectionKey, record: &TexturedSectionCullingRecord| {
-        section_tests += 1;
+    for (key, record) in records {
         let mut mask = StereoDrawMask::default();
         for eye in 0..2 {
-            if frustums[eye].is_render_section_visible(key) {
+            if frustums[eye].is_render_section_visible(*key) {
                 mask.insert(if eye == 0 {
                     StereoDrawMask::LEFT
                 } else {
@@ -1467,10 +1385,10 @@ fn cull_textured_sections_stereo_union_with_frustums(
             }
         }
         if !mask.is_empty() {
-            frustum_keys.insert(key);
-            frustum_masks.insert(key, mask);
+            frustum_keys.insert(*key);
+            frustum_masks.insert(*key, mask);
             if record.traversal_ready {
-                ready_frustum_keys.insert(key);
+                ready_frustum_keys.insert(*key);
             }
             if record.drawable {
                 stats.frustum_section_count += 1;
@@ -1481,35 +1399,8 @@ fn cull_textured_sections_stereo_union_with_frustums(
                 }
             }
         }
-    };
-    if frustums
-        .iter()
-        .all(RenderSectionFrustum::supports_region_culling)
-    {
-        for (region_key, region_sections) in &prepared.regions {
-            region_tests += 1;
-            if !frustums
-                .iter()
-                .any(|frustum| frustum.is_render_region_visible(*region_key))
-            {
-                region_rejections += 1;
-                continue;
-            }
-            for key in region_sections {
-                if let Some(record) = records.get(key) {
-                    test_section(*key, record);
-                }
-            }
-        }
-    } else {
-        for (key, record) in records {
-            test_section(*key, record);
-        }
     }
-    drop(test_section);
-    let frustum_ms = timing_elapsed_ms(frustum_start);
 
-    let traversal_start = timing_now();
     let center_position = stereo_center_position(render_views);
     let start_keys =
         traversal_start_keys(records, frustum_keys, center_position, options[0].topology);
@@ -1533,11 +1424,6 @@ fn cull_textured_sections_stereo_union_with_frustums(
             eye_stats,
             drawn_keys,
             draw_masks,
-            frustum_ms,
-            traversal_ms: timing_elapsed_ms(traversal_start),
-            region_tests,
-            region_rejections,
-            section_tests,
         };
     }
 
@@ -1628,11 +1514,6 @@ fn cull_textured_sections_stereo_union_with_frustums(
         eye_stats,
         drawn_keys,
         draw_masks,
-        frustum_ms,
-        traversal_ms: timing_elapsed_ms(traversal_start),
-        region_tests,
-        region_rejections,
-        section_tests,
     }
 }
 
@@ -1739,10 +1620,11 @@ fn outside_retained_section_start_keys(
     // from it by non-frustum records, so the graph could never reach the first
     // section that actually paints the column.
     let mut starts_by_column = BTreeMap::<(i32, i32), RenderSectionKey>::new();
-    for key in frustum_keys.iter().copied().filter(|key| {
-        records
-            .get(key)
-            .is_some_and(|record| record.traversal_ready && record.drawable)
+    for key in records.keys().copied().filter(|key| {
+        frustum_keys.contains(key)
+            && records
+                .get(key)
+                .is_some_and(|record| record.traversal_ready && record.drawable)
     }) {
         starts_by_column
             .entry((key.chunk_x, key.chunk_z))
@@ -1841,14 +1723,6 @@ struct ClipFrustum {
 
 trait RenderSectionFrustum {
     fn is_render_section_visible(&self, key: RenderSectionKey) -> bool;
-
-    fn supports_region_culling(&self) -> bool {
-        false
-    }
-
-    fn is_render_region_visible(&self, _key: RenderSectionCullRegionKey) -> bool {
-        true
-    }
 }
 
 impl ClipFrustum {
@@ -1868,26 +1742,6 @@ impl ClipFrustum {
 }
 
 impl RenderSectionFrustum for ClipFrustum {
-    fn supports_region_culling(&self) -> bool {
-        self.topology == HorizontalTopology::UNBOUNDED
-    }
-
-    fn is_render_region_visible(&self, key: RenderSectionCullRegionKey) -> bool {
-        let margin = Vec3::splat(BUSHY_LEAF_CARD_OVERHANG);
-        let min = Vec3::new(
-            (key.region_x * RENDER_CULL_REGION_CHUNKS * MESH_CHUNK_WIDTH) as f32,
-            (key.region_y * RENDER_CULL_REGION_SECTIONS_Y * RENDER_SECTION_HEIGHT) as f32,
-            (key.region_z * RENDER_CULL_REGION_CHUNKS * MESH_CHUNK_WIDTH) as f32,
-        ) - margin;
-        let max =
-            min + Vec3::new(
-                (RENDER_CULL_REGION_CHUNKS * MESH_CHUNK_WIDTH) as f32,
-                (RENDER_CULL_REGION_SECTIONS_Y * RENDER_SECTION_HEIGHT) as f32,
-                (RENDER_CULL_REGION_CHUNKS * MESH_CHUNK_WIDTH) as f32,
-            ) + margin * 2.0;
-        self.is_aabb_visible(min, max)
-    }
-
     fn is_render_section_visible(&self, key: RenderSectionKey) -> bool {
         let center = render_section_center_in(key, self.camera_position, self.topology);
         let half = Vec3::new(
@@ -4229,13 +4083,6 @@ impl TexturedSectionDrawResources {
                     .loaded_index_count
                     .saturating_sub(previous.index_count);
             }
-            let region_key = RenderSectionCullRegionKey::containing(*key);
-            if let Some(region_keys) = prepared.regions.get_mut(&region_key) {
-                region_keys.remove(key);
-                if region_keys.is_empty() {
-                    prepared.regions.remove(&region_key);
-                }
-            }
             let Some(visibility) = self.visibility_sections.get(key).copied() else {
                 continue;
             };
@@ -4252,7 +4099,6 @@ impl TexturedSectionDrawResources {
                     prepared.loaded_index_count.saturating_add(next.index_count);
             }
             prepared.records.insert(*key, next);
-            prepared.regions.entry(region_key).or_default().insert(*key);
         }
         true
     }
@@ -5626,13 +5472,6 @@ impl TexturedSectionDrawResources {
         if let Some(timing) = &mut timing {
             timing.cull_cache_lookup = cull_cache_lookup;
             timing.cull_cache_hit = cull_cache_hit;
-            if !cull_cache_hit {
-                timing.cull_frustum_ms = culling.frustum_ms;
-                timing.cull_traversal_ms = culling.traversal_ms;
-                timing.cull_region_tests = culling.region_tests;
-                timing.cull_region_rejections = culling.region_rejections;
-                timing.cull_section_tests = culling.section_tests;
-            }
         }
         if let (Some(timing), Some(cull_start)) = (&mut timing, cull_start) {
             timing.cull_ms = timing_elapsed_ms(cull_start);
@@ -5742,13 +5581,6 @@ impl TexturedSectionDrawResources {
             let mut scratch = self.cull_scratch.borrow_mut();
             cull_textured_sections_stereo_union(records, render_views, options, &mut scratch)
         };
-        if let Some(timing) = &mut timing {
-            timing.cull_frustum_ms = culling.frustum_ms;
-            timing.cull_traversal_ms = culling.traversal_ms;
-            timing.cull_region_tests = culling.region_tests;
-            timing.cull_region_rejections = culling.region_rejections;
-            timing.cull_section_tests = culling.section_tests;
-        }
         if let (Some(timing), Some(cull_start)) = (&mut timing, cull_start) {
             timing.cull_ms = timing_elapsed_ms(cull_start);
         }
@@ -5875,10 +5707,16 @@ impl TexturedSectionDrawResources {
 
     fn build_prepared_records(&self) -> PreparedTexturedSectionRecords {
         let mut records = BTreeMap::new();
+        let mut loaded_section_count = 0usize;
+        let mut loaded_index_count = 0u32;
         for (key, visibility) in &self.visibility_sections {
             let mesh = self.sections.get(key);
             let index_count = mesh.map_or(0, GpuTexturedChunkMesh::index_count);
             let drawable = mesh.is_some();
+            if drawable {
+                loaded_section_count += 1;
+                loaded_index_count += index_count;
+            }
             records.insert(
                 *key,
                 TexturedSectionCullingRecord {
@@ -5889,7 +5727,11 @@ impl TexturedSectionDrawResources {
                 },
             );
         }
-        PreparedTexturedSectionRecords::from_records(records)
+        PreparedTexturedSectionRecords {
+            records,
+            loaded_section_count,
+            loaded_index_count,
+        }
     }
 }
 
@@ -6830,7 +6672,11 @@ mod tests {
 
     #[test]
     fn mono_culling_cache_requires_identical_view_options_and_record_generation() {
-        let records = Arc::new(PreparedTexturedSectionRecords::from_records(BTreeMap::new()));
+        let records = Arc::new(PreparedTexturedSectionRecords {
+            records: BTreeMap::new(),
+            loaded_section_count: 0,
+            loaded_index_count: 0,
+        });
         let render_view = ChunkCamera::overview_for_chunk(0, 0).render_view(640, 480);
         let key = TexturedSectionMonoCullingCacheKey {
             render_view,
@@ -6844,11 +6690,6 @@ mod tests {
             result: Arc::new(TexturedSectionCullingResult {
                 stats: TexturedSectionRenderStats::default(),
                 drawn_keys: FxHashSet::default(),
-                frustum_ms: 0.0,
-                traversal_ms: 0.0,
-                region_tests: 0,
-                region_rejections: 0,
-                section_tests: 0,
             }),
         };
 
@@ -6860,70 +6701,12 @@ mod tests {
         };
         assert!(!cache.matches(moved_key, &records));
 
-        let replacement = Arc::new(PreparedTexturedSectionRecords::from_records(BTreeMap::new()));
+        let replacement = Arc::new(PreparedTexturedSectionRecords {
+            records: BTreeMap::new(),
+            loaded_section_count: 0,
+            loaded_index_count: 0,
+        });
         assert!(!cache.matches(key, &replacement));
-    }
-
-    struct SectionOnlyFrustum(ClipFrustum);
-
-    impl RenderSectionFrustum for SectionOnlyFrustum {
-        fn is_render_section_visible(&self, key: RenderSectionKey) -> bool {
-            self.0.is_render_section_visible(key)
-        }
-    }
-
-    #[test]
-    fn region_culling_matches_exact_sections_and_reduces_section_tests() {
-        let sections = (-16..=16)
-            .flat_map(|chunk_x| {
-                (-16..=16).flat_map(move |chunk_z| {
-                    (0..6).map(move |section_y| {
-                        fake_section(
-                            RenderSectionKey::new(chunk_x, section_y, chunk_z),
-                            6,
-                            VisibilitySet::all_visible(),
-                        )
-                    })
-                })
-            })
-            .collect::<Vec<_>>();
-        let prepared = prepared_records_for_sections(&sections);
-        let render_view = ChunkCamera {
-            eye: [8.0, 196.0, 8.0],
-            target: [8.0, 64.0, 8.0],
-            up: [0.0, 0.0, -1.0],
-            fov_y_radians: 70.0_f32.to_radians(),
-            z_near: 0.05,
-            z_far: 1_024.0,
-        }
-        .render_view(1280, 800);
-        let options = TexturedSectionRenderOptions {
-            section_occlusion_culling: false,
-            ..TexturedSectionRenderOptions::default()
-        };
-        let frustum = ClipFrustum::from_render_view(render_view, options.topology);
-
-        let hierarchical = cull_textured_sections_with_frustum(
-            &prepared,
-            render_view,
-            options,
-            &mut CullScratch::default(),
-            &frustum,
-        );
-        let exact = cull_textured_sections_with_frustum(
-            &prepared,
-            render_view,
-            options,
-            &mut CullScratch::default(),
-            &SectionOnlyFrustum(frustum),
-        );
-
-        assert_eq!(hierarchical.stats, exact.stats);
-        assert_eq!(hierarchical.drawn_keys, exact.drawn_keys);
-        assert!(hierarchical.region_tests > 0);
-        assert!(hierarchical.region_rejections > 0);
-        assert!(hierarchical.section_tests < exact.section_tests);
-        assert_eq!(exact.section_tests, prepared.records.len());
     }
 
     #[test]
@@ -7108,7 +6891,17 @@ mod tests {
                 )
             })
             .collect::<BTreeMap<_, _>>();
-        PreparedTexturedSectionRecords::from_records(records)
+        let loaded_section_count = records.values().filter(|record| record.drawable).count();
+        let loaded_index_count = records
+            .values()
+            .filter(|record| record.drawable)
+            .map(|record| record.index_count)
+            .sum();
+        PreparedTexturedSectionRecords {
+            records,
+            loaded_section_count,
+            loaded_index_count,
+        }
     }
 
     #[test]
