@@ -1,4 +1,5 @@
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::mem::size_of;
 use std::num::NonZeroU64;
 use std::sync::mpsc;
 
@@ -14,6 +15,16 @@ use super::{
     TerrainViewportTileId, parse_samples, terrain_preview_compute_wgsl,
     viewport_uniform_bytes_for_request,
 };
+
+pub const TERRAIN_PREVIEW_MATERIAL_UV_COUNT: usize = 256;
+
+#[derive(Clone, Copy, Debug)]
+pub struct TerrainPreviewMaterialAtlas<'a> {
+    pub width: u32,
+    pub height: u32,
+    pub rgba: &'a [u8],
+    pub material_uvs: &'a [[f32; 4]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT],
+}
 
 pub const TERRAIN_VIEWPORT_MAX_RESIDENT_TILES: usize = 192;
 pub const TERRAIN_VIEWPORT_TILE_COMPILES_PER_FRAME: usize = 4;
@@ -130,6 +141,175 @@ impl TerrainViewportDepthTarget {
     }
 }
 
+struct TerrainPreviewMaterialResources {
+    _texture: wgpu::Texture,
+    _view: wgpu::TextureView,
+    _sampler: wgpu::Sampler,
+    _uv_buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+}
+
+impl TerrainPreviewMaterialResources {
+    fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        layout: &wgpu::BindGroupLayout,
+        atlas: TerrainPreviewMaterialAtlas<'_>,
+    ) -> Result<Self, String> {
+        let width = atlas.width.max(1);
+        let height = atlas.height.max(1);
+        let expected_len = width as usize * height as usize * 4;
+        if atlas.rgba.len() != expected_len {
+            return Err(format!(
+                "terrain preview material atlas has {} bytes; expected {expected_len} for \
+                 {width}x{height} RGBA",
+                atlas.rgba.len()
+            ));
+        }
+        let mip_levels = generate_material_mips(width, height, atlas.rgba, 5);
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("mclone_terrain_preview_material_atlas"),
+            size: wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: mip_levels.len() as u32,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        for (mip_level, mip) in mip_levels.iter().enumerate() {
+            queue.write_texture(
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture,
+                    mip_level: mip_level as u32,
+                    origin: Default::default(),
+                    aspect: Default::default(),
+                },
+                &mip.rgba,
+                wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(mip.width * 4),
+                    rows_per_image: Some(mip.height),
+                },
+                wgpu::Extent3d {
+                    width: mip.width,
+                    height: mip.height,
+                    depth_or_array_layers: 1,
+                },
+            );
+        }
+        let view = texture.create_view(&Default::default());
+        let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            label: Some("mclone_terrain_preview_material_sampler"),
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Linear,
+            mipmap_filter: wgpu::FilterMode::Linear,
+            lod_max_clamp: mip_levels.len().saturating_sub(1) as f32,
+            ..Default::default()
+        });
+        let mut uv_bytes =
+            Vec::with_capacity(TERRAIN_PREVIEW_MATERIAL_UV_COUNT * 4 * size_of::<f32>());
+        for rect in atlas.material_uvs {
+            for value in rect {
+                uv_bytes.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+        let uv_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mclone_terrain_preview_material_uvs"),
+            size: uv_bytes.len() as u64,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(&uv_buffer, 0, &uv_bytes);
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mclone_terrain_preview_material_bind_group"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: uv_buffer.as_entire_binding(),
+                },
+            ],
+        });
+        Ok(Self {
+            _texture: texture,
+            _view: view,
+            _sampler: sampler,
+            _uv_buffer: uv_buffer,
+            bind_group,
+        })
+    }
+}
+
+struct TerrainPreviewMaterialMip {
+    width: u32,
+    height: u32,
+    rgba: Vec<u8>,
+}
+
+fn generate_material_mips(
+    width: u32,
+    height: u32,
+    rgba: &[u8],
+    max_level_count: usize,
+) -> Vec<TerrainPreviewMaterialMip> {
+    let mut levels = vec![TerrainPreviewMaterialMip {
+        width,
+        height,
+        rgba: rgba.to_vec(),
+    }];
+    while levels.len() < max_level_count
+        && levels
+            .last()
+            .is_some_and(|level| level.width > 1 || level.height > 1)
+    {
+        let previous = levels.last().expect("base material mip exists");
+        let next_width = (previous.width / 2).max(1);
+        let next_height = (previous.height / 2).max(1);
+        let mut next_rgba = vec![0_u8; next_width as usize * next_height as usize * 4];
+        for y in 0..next_height {
+            for x in 0..next_width {
+                let mut sum = [0_u32; 4];
+                let mut count = 0_u32;
+                for source_y in (y * 2)..(y * 2 + 2).min(previous.height) {
+                    for source_x in (x * 2)..(x * 2 + 2).min(previous.width) {
+                        let source = ((source_y * previous.width + source_x) * 4) as usize;
+                        for channel in 0..4 {
+                            sum[channel] += u32::from(previous.rgba[source + channel]);
+                        }
+                        count += 1;
+                    }
+                }
+                let destination = ((y * next_width + x) * 4) as usize;
+                for channel in 0..4 {
+                    next_rgba[destination + channel] = (sum[channel] / count) as u8;
+                }
+            }
+        }
+        levels.push(TerrainPreviewMaterialMip {
+            width: next_width,
+            height: next_height,
+            rgba: next_rgba,
+        });
+    }
+    levels
+}
+
 struct TerrainViewportGpuTile {
     request: ValidatedTerrainPreviewRequest,
     reference: Option<TerrainPreviewReferenceGrid>,
@@ -241,6 +421,7 @@ pub struct TerrainViewportRenderer {
     sample_byte_len: u64,
     compute_layout: wgpu::BindGroupLayout,
     render_layout: wgpu::BindGroupLayout,
+    _material_resources: TerrainPreviewMaterialResources,
     compute_pipeline: wgpu::ComputePipeline,
     render_pipeline: wgpu::RenderPipeline,
     depth: TerrainViewportDepthTarget,
@@ -269,9 +450,11 @@ pub struct TerrainViewportRenderer {
 impl TerrainViewportRenderer {
     pub fn new(
         device: &wgpu::Device,
+        queue: &wgpu::Queue,
         color_format: wgpu::TextureFormat,
         width: u32,
         height: u32,
+        material_atlas: TerrainPreviewMaterialAtlas<'_>,
     ) -> Result<Self, String> {
         let samples_per_axis = TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS + 1;
         let sample_count_per_tile = samples_per_axis
@@ -305,6 +488,34 @@ impl TerrainViewportRenderer {
                 ),
             ],
         });
+        let material_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("mclone_terrain_viewport_material_layout"),
+            entries: &[
+                wgpu::BindGroupLayoutEntry {
+                    binding: 0,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Texture {
+                        sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                        view_dimension: wgpu::TextureViewDimension::D2,
+                        multisampled: false,
+                    },
+                    count: None,
+                },
+                wgpu::BindGroupLayoutEntry {
+                    binding: 1,
+                    visibility: wgpu::ShaderStages::FRAGMENT,
+                    ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    count: None,
+                },
+                uniform_layout_entry_with_size(
+                    2,
+                    wgpu::ShaderStages::FRAGMENT,
+                    (TERRAIN_PREVIEW_MATERIAL_UV_COUNT * 4 * size_of::<f32>()) as u64,
+                ),
+            ],
+        });
+        let material_resources =
+            TerrainPreviewMaterialResources::new(device, queue, &material_layout, material_atlas)?;
         let compute_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mclone_terrain_viewport_compute_shader"),
             source: wgpu::ShaderSource::Wgsl(terrain_preview_compute_wgsl().into()),
@@ -322,7 +533,7 @@ impl TerrainViewportRenderer {
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("mclone_terrain_viewport_render_pipeline_layout"),
-                bind_group_layouts: &[&render_layout],
+                bind_group_layouts: &[&render_layout, &material_layout],
                 push_constant_ranges: &[],
             });
         let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -374,6 +585,7 @@ impl TerrainViewportRenderer {
             sample_byte_len,
             compute_layout,
             render_layout,
+            _material_resources: material_resources,
             compute_pipeline,
             render_pipeline,
             depth: TerrainViewportDepthTarget::new(device, width, height),
@@ -1080,6 +1292,7 @@ impl TerrainViewportRenderer {
             ..Default::default()
         });
         pass.set_pipeline(&self.render_pipeline);
+        pass.set_bind_group(1, &self._material_resources.bind_group, &[]);
         let panels = render_panels(options.source, width, height);
         for panel in panels {
             pass.set_scissor_rect(panel.x, panel.y, panel.width, panel.height);
@@ -1211,13 +1424,21 @@ fn uniform_layout_entry(
     binding: u32,
     visibility: wgpu::ShaderStages,
 ) -> wgpu::BindGroupLayoutEntry {
+    uniform_layout_entry_with_size(binding, visibility, TERRAIN_PREVIEW_UNIFORM_BYTES)
+}
+
+fn uniform_layout_entry_with_size(
+    binding: u32,
+    visibility: wgpu::ShaderStages,
+    byte_len: u64,
+) -> wgpu::BindGroupLayoutEntry {
     wgpu::BindGroupLayoutEntry {
         binding,
         visibility,
         ty: wgpu::BindingType::Buffer {
             ty: wgpu::BufferBindingType::Uniform,
             has_dynamic_offset: false,
-            min_binding_size: NonZeroU64::new(TERRAIN_PREVIEW_UNIFORM_BYTES),
+            min_binding_size: NonZeroU64::new(byte_len),
         },
         count: None,
     }

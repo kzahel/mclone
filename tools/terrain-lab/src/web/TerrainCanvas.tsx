@@ -164,6 +164,9 @@ interface PinchStart {
   state: TerrainLabState;
 }
 
+const AUTHORED_PACK_URL = "/first-party-packs/mclone-authored.pbp";
+const FALLBACK_PACK_URL = "/first-party-packs/mclone-generated-fallback.pbp";
+
 export function TerrainCanvas({
   state,
   camera,
@@ -205,11 +208,19 @@ export function TerrainCanvas({
       if (!("gpu" in navigator)) {
         throw new Error("This browser does not expose WebGPU.");
       }
-      await initTerrainLab();
+      const [, authored, fallback] = await Promise.all([
+        initTerrainLab(),
+        fetchPack(AUTHORED_PACK_URL),
+        fetchPack(FALLBACK_PACK_URL),
+      ]);
       if (cancelled) {
         return;
       }
-      const lab = await mclone_terrain_lab_create(canvas) as TerrainLab;
+      const lab = await mclone_terrain_lab_create(
+        canvas,
+        authored,
+        fallback,
+      ) as TerrainLab;
       if (cancelled) {
         lab.free();
         return;
@@ -636,6 +647,14 @@ function firstPointerPair(
 
 function pointerDistance(first: ActivePointer, second: ActivePointer): number {
   return Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY);
+}
+
+async function fetchPack(url: string): Promise<Uint8Array> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Failed to load ${url}: HTTP ${response.status}`);
+  }
+  return new Uint8Array(await response.arrayBuffer());
 }
 
 function panelReadiness(

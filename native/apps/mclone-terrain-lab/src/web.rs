@@ -1,5 +1,9 @@
+use mclone_assets::{AssetSourceChain, PackedAssetSource};
+use mclone_core::BlockStateId;
+use mclone_mesh::load_first_party_textured_terrain_assets;
 use mclone_terrain_view::{
-    CanonicalTerrainCompiler, TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION, TerrainPreviewCamera,
+    CanonicalTerrainCompiler, TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION,
+    TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainPreviewCamera, TerrainPreviewMaterialAtlas,
     TerrainViewportCompletedComparison, TerrainViewportDetail, TerrainViewportFrameStats,
     TerrainViewportRenderer, TerrainViewportRequest, canonical_terrain_chunk_order,
     plan_terrain_viewport,
@@ -470,7 +474,28 @@ impl TerrainLab {
 }
 
 impl TerrainLab {
-    async fn new(canvas: HtmlCanvasElement) -> Result<Self, String> {
+    async fn new(
+        canvas: HtmlCanvasElement,
+        authored_bytes: js_sys::Uint8Array,
+        fallback_bytes: js_sys::Uint8Array,
+    ) -> Result<Self, String> {
+        let mut source = AssetSourceChain::new();
+        source.push(
+            PackedAssetSource::from_bytes(authored_bytes.to_vec())
+                .map_err(|error| format!("failed to parse authored first-party pack: {error}"))?,
+        );
+        source.push(
+            PackedAssetSource::from_bytes(fallback_bytes.to_vec())
+                .map_err(|error| format!("failed to parse fallback first-party pack: {error}"))?,
+        );
+        let assets = load_first_party_textured_terrain_assets(&source)
+            .map_err(|error| format!("failed to load Terrain Lab LOD materials: {error}"))?;
+        let mut material_uvs = [[0.0_f32, 0.0, 1.0, 1.0]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT];
+        for (raw_id, target) in material_uvs.iter_mut().enumerate() {
+            if let Some(sprite) = assets.catalog.gui_icon_uv(BlockStateId(raw_id as u32)) {
+                *target = [sprite.u0, sprite.v0, sprite.u1, sprite.v1];
+            }
+        }
         let width = canvas.width().max(1);
         let height = canvas.height().max(1);
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
@@ -524,7 +549,19 @@ impl TerrainLab {
         );
 
         device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let renderer = TerrainViewportRenderer::new(&device, format, width, height)?;
+        let renderer = TerrainViewportRenderer::new(
+            &device,
+            &queue,
+            format,
+            width,
+            height,
+            TerrainPreviewMaterialAtlas {
+                width: assets.atlas.width,
+                height: assets.atlas.height,
+                rgba: assets.atlas.rgba(),
+                material_uvs: &material_uvs,
+            },
+        )?;
         if let Some(error) = device.pop_error_scope().await {
             return Err(format!(
                 "failed to initialize Terrain Lab GPU pipelines: {error}"
@@ -600,9 +637,13 @@ impl TerrainLab {
 }
 
 #[wasm_bindgen]
-pub fn mclone_terrain_lab_create(canvas: HtmlCanvasElement) -> js_sys::Promise {
+pub fn mclone_terrain_lab_create(
+    canvas: HtmlCanvasElement,
+    authored_bytes: js_sys::Uint8Array,
+    fallback_bytes: js_sys::Uint8Array,
+) -> js_sys::Promise {
     wasm_bindgen_futures::future_to_promise(async move {
-        TerrainLab::new(canvas)
+        TerrainLab::new(canvas, authored_bytes, fallback_bytes)
             .await
             .map(JsValue::from)
             .map_err(JsValue::from)

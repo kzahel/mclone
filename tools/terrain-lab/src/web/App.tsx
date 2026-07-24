@@ -129,6 +129,7 @@ export function App(): React.JSX.Element {
       data-base-mean-error={comparison?.meanAbsoluteBaseSurfaceError ?? ""}
       data-base-p95-error={comparison?.p95AbsoluteBaseSurfaceError ?? ""}
       data-ocean-agreement={comparison?.oceanWaterPresenceAgreement ?? ""}
+      data-material-agreement={comparison?.macroSurfaceMaterialAgreement ?? ""}
       data-continentalness-error={comparison?.meanAbsoluteContinentalnessError ?? ""}
       data-compare-layout={compareLayout}
       data-vertex-count={renderReport?.vertexCount ?? 0}
@@ -892,6 +893,12 @@ function Diagnostics({
           label="Ocean agreement"
           value={comparison ? `${(comparison.oceanWaterPresenceAgreement * 100).toFixed(1)}%` : "pending"}
         />
+        <Metric
+          label="Material agreement"
+          value={comparison
+            ? `${(comparison.macroSurfaceMaterialAgreement * 100).toFixed(1)}%`
+            : "pending"}
+        />
         <Metric label="Final mean Δ" value={formatBlocks(comparison?.meanAbsoluteSurfaceError)} />
         <Metric label="Final P95 Δ" value={formatBlocks(comparison?.p95AbsoluteSurfaceError)} />
         <Metric label="GPU resident" value={memory} />
@@ -948,6 +955,7 @@ function Diagnostics({
         </div>
         <div><dt>Field</dt><dd>{shortRevision(report?.fieldRevision)}</dd></div>
         <div><dt>GPU evaluator</dt><dd>{shortRevision(report?.gpuEvaluatorRevision)}</dd></div>
+        <div><dt>Texture sampling</dt><dd>5 mip · trilinear minification</dd></div>
       </dl>
     </div>
   );

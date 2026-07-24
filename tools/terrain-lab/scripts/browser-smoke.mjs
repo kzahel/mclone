@@ -63,7 +63,19 @@ try {
   );
   const shell = page.locator(".appShell");
   await page.locator("[data-testid='lab-status']").waitFor({ state: "visible" });
-  await waitForComparison(shell);
+  try {
+    await waitForComparison(shell);
+  } catch (error) {
+    const failureCapture = `/tmp/mclone-terrain-lab-${label}-comparison-timeout.png`;
+    await page.screenshot({ path: failureCapture, fullPage: true });
+    const statusText = await page.locator("[data-testid='lab-status']").textContent();
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}\n`
+      + `Status: ${statusText ?? "missing"}\n`
+      + `Browser errors: ${pageErrors.join("\n") || "none"}\n`
+      + `Capture: ${failureCapture}`,
+    );
+  }
   await waitForCanonical(shell, 9);
   const sourceControls = page.locator("[data-testid='preview-source-controls']");
   await sourceControls.waitFor({ state: "visible" });
@@ -433,6 +445,7 @@ async function readComparisonMetrics(shell) {
     baseP95Error: await numericAttribute(shell, "data-base-p95-error"),
     continentalnessError: await numericAttribute(shell, "data-continentalness-error"),
     oceanAgreement: await numericAttribute(shell, "data-ocean-agreement"),
+    materialAgreement: await numericAttribute(shell, "data-material-agreement"),
   };
 }
 
@@ -440,7 +453,8 @@ function assertLargeFieldMetrics(metrics, label) {
   if (metrics.baseMeanError > 0.01
       || metrics.baseP95Error > 0.01
       || metrics.continentalnessError > 0.001
-      || metrics.oceanAgreement < 0.999) {
+      || metrics.oceanAgreement < 0.999
+      || metrics.materialAgreement < 0.999) {
     throw new Error(
       `Production large-field comparison regressed at ${label}: ${JSON.stringify(metrics)}`,
     );

@@ -23,9 +23,26 @@ var<storage, read> gpu_samples: array<TerrainPreviewSample>;
 @group(0) @binding(2)
 var<storage, read> reference_samples: array<TerrainPreviewSample>;
 
+struct TerrainPreviewMaterialUvs {
+    values: array<vec4<f32>, 256>,
+};
+
+@group(1) @binding(0)
+var material_atlas: texture_2d<f32>;
+
+@group(1) @binding(1)
+var material_sampler: sampler;
+
+@group(1) @binding(2)
+var<uniform> material_uvs: TerrainPreviewMaterialUvs;
+
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec3<f32>,
+    @location(1) world_xz: vec2<f32>,
+    @location(2) light: f32,
+    @location(3) @interpolate(flat) material: u32,
+    @location(4) @interpolate(flat) textured: u32,
 };
 
 fn grid_corner(vertex_in_cell: u32) -> vec2<u32> {
@@ -255,10 +272,42 @@ fn vertex_main(
     var out: VertexOutput;
     out.position = vec4<f32>(clip_x, clip_y, clip_z, 1.0);
     out.color = sample_color(sample, reference, gpu, light);
+    out.world_xz = vec2<f32>(f32(world_x), f32(world_z));
+    out.light = light;
+    out.material = u32(round(sample.large_fields.w));
+    out.textured = select(0u, 1u, params.layer_samples_size.x == 0u);
     return out;
 }
 
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    let world_dx = dpdx(input.world_xz);
+    let world_dy = dpdy(input.world_xz);
+    if input.textured != 0u && input.material < 256u {
+        let sprite = material_uvs.values[input.material];
+        let sprite_size = sprite.zw - sprite.xy;
+        let local_uv = fract(input.world_xz);
+        let atlas_uv = sprite.xy + local_uv * sprite_size;
+        let atlas_dx = world_dx * sprite_size;
+        let atlas_dy = world_dy * sprite_size;
+        let texel = textureSampleGrad(
+            material_atlas,
+            material_sampler,
+            atlas_uv,
+            atlas_dx,
+            atlas_dy,
+        );
+        let blocks_per_pixel = max(length(world_dx), length(world_dy));
+        let texture_weight = mix(
+            0.82,
+            0.42,
+            clamp((blocks_per_pixel - 1.0) / 7.0, 0.0, 1.0),
+        );
+        let texture_detail = clamp(texel.rgb * 1.25, vec3<f32>(0.0), vec3<f32>(1.5));
+        return vec4<f32>(
+            input.color * mix(vec3<f32>(1.0), texture_detail, texture_weight),
+            1.0,
+        );
+    }
     return vec4<f32>(input.color, 1.0);
 }

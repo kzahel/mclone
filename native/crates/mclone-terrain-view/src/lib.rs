@@ -27,6 +27,7 @@ pub use viewport::{
     TerrainViewportTileId, plan_terrain_viewport,
 };
 pub use viewport_renderer::{
+    TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainPreviewMaterialAtlas,
     TerrainViewportCompletedComparison, TerrainViewportFrameStats, TerrainViewportRenderer,
 };
 
