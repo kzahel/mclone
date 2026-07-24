@@ -380,13 +380,23 @@ impl McloneSceneHost {
             return Ok(());
         }
         if self.active_world.runtime.is_none() {
-            self.mesh_assets.catalog = self.mesh_assets.catalog.clone().with_leaf_detail(detail);
-            self.active_assets.mesh.catalog = self
-                .active_assets
-                .mesh
-                .catalog
-                .clone()
-                .with_leaf_detail(detail);
+            let mut mesh_assets = self.mesh_assets.clone();
+            mesh_assets.catalog = mesh_assets.catalog.with_leaf_detail(detail);
+            #[cfg(not(target_arch = "wasm32"))]
+            if let Some(startup) = self.active_world.local_startup.as_mut() {
+                if startup.pump.poll_count() != 0 {
+                    self.pending_restored_leaf_detail = Some(detail);
+                    log::info!(
+                        "leaf detail {detail:?} queued until the active startup pump completes"
+                    );
+                    return Ok(());
+                }
+                startup
+                    .pump
+                    .replace_mesh_assets_before_start(mesh_assets.clone())?;
+            }
+            self.mesh_assets = mesh_assets.clone();
+            self.active_assets.mesh = mesh_assets;
             self.pending_restored_leaf_detail = None;
             self.persist_graphics_preference(detail);
             log::info!("leaf detail set to {detail:?} before active runtime startup");

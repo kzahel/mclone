@@ -1104,6 +1104,27 @@ impl LocalIntegratedStartupPump {
         self.inner.runtime_mut()
     }
 
+    /// Replace presentation assets before the first startup poll.
+    ///
+    /// Direct-to-world hosts may discover machine-local graphics preferences
+    /// after constructing the scene shell but before driving its startup pump.
+    /// At that point no client snapshots or seed meshes have been admitted, so
+    /// swapping the compiler catalog is lossless and avoids compiling one
+    /// throwaway epoch just to restore a preference.
+    pub fn replace_mesh_assets_before_start(
+        &mut self,
+        mesh_assets: TexturedMeshAssets,
+    ) -> Result<()> {
+        if self.inner.poll_count() != 0 || self.inner.render_seed_section_count() != 0 {
+            bail!("startup mesh assets can only change before the first startup poll");
+        }
+        self.inner
+            .runtime_mut()
+            .as_local_mut()
+            .expect("local startup pump always owns a local integrated runtime")
+            .replace_mesh_assets_before_start(mesh_assets)
+    }
+
     /// Startup render-seed sections accumulated so far, including empty sections.
     pub fn render_seed_section_count(&self) -> usize {
         self.inner.render_seed_section_count()
@@ -1289,6 +1310,20 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
 
     pub const fn mesh_assets(&self) -> &TexturedMeshAssets {
         &self.mesh_assets
+    }
+
+    fn replace_mesh_assets_before_start(&mut self, mesh_assets: TexturedMeshAssets) -> Result<()> {
+        let health = self.render_compile_dispatcher.queue_health();
+        self.render_compile_dispatcher =
+            NativeRenderSectionCompileDispatcher::with_worker_count_and_max_pending_jobs_and_timing(
+                mesh_assets.catalog.clone(),
+                health.compile_worker_count.max(1),
+                health.max_pending_jobs.max(1),
+                self.render_compile_dispatcher.worker_timing_enabled(),
+            )?;
+        self.mesh_assets = mesh_assets;
+        self.clear_far_lod();
+        Ok(())
     }
 
     pub fn replace_asset_epoch(
@@ -4578,6 +4613,34 @@ mod tests {
         }
 
         panic!("startup pump did not reach playable center");
+    }
+
+    #[test]
+    fn local_startup_pump_accepts_catalog_policy_before_first_poll_only() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let blocky = load_textured_mesh_assets().unwrap();
+        let mut bushy = blocky.clone();
+        bushy.catalog = bushy
+            .catalog
+            .with_leaf_detail(mclone_mesh::LeafDetail::Bushy);
+        let mut pump = LocalIntegratedStartupPump::with_mesh_assets(
+            LocalIntegratedSceneOptions::new(12345, ChunkPos::new(0, 0), 0)
+                .with_lighting_enabled(false),
+            blocky.clone(),
+        )
+        .unwrap();
+
+        pump.replace_mesh_assets_before_start(bushy).unwrap();
+        assert_eq!(
+            pump.runtime().mesh_assets().catalog.leaf_detail(),
+            mclone_mesh::LeafDetail::Bushy
+        );
+
+        pump.step(Vec3::new(8.0, 80.0, 8.0)).unwrap();
+        assert!(pump.replace_mesh_assets_before_start(blocky).is_err());
     }
 
     #[test]

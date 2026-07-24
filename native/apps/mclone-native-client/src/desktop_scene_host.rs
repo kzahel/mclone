@@ -187,6 +187,15 @@ pub(crate) fn configure_desktop_asset_pack_sources(
     host: &mut McloneSceneHost,
     world_root: Option<&std::path::Path>,
 ) -> Result<()> {
+    if let Some(path) =
+        mclone_app_runtime::graphics_preferences::native_graphics_preference_path(world_root)
+    {
+        host.configure_graphics_preference_storage(Box::new(
+            mclone_app_runtime::graphics_preferences::FileClientGraphicsPreferenceStorage::new(
+                path,
+            ),
+        ))?;
+    }
     let reference = mclone_assets::SharedAssetSource::new(
         load_asset_source().context("reload native reference source for asset-pack discovery")?,
     );
@@ -199,15 +208,6 @@ pub(crate) fn configure_desktop_asset_pack_sources(
     {
         host.configure_asset_pack_preference_storage(Box::new(
             mclone_app_runtime::asset_pack_preferences::FileAssetPackPreferenceStorage::new(path),
-        ))?;
-    }
-    if let Some(path) =
-        mclone_app_runtime::graphics_preferences::native_graphics_preference_path(world_root)
-    {
-        host.configure_graphics_preference_storage(Box::new(
-            mclone_app_runtime::graphics_preferences::FileClientGraphicsPreferenceStorage::new(
-                path,
-            ),
         ))?;
     }
     Ok(())

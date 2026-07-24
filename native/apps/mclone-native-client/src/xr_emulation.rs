@@ -273,15 +273,6 @@ pub(crate) fn run_xr_emulation_screenshot(
                     ))?;
                 }
             }
-            if let Some(path) =
-                mclone_app_runtime::graphics_preferences::native_graphics_preference_path(
-                    scene.world_root.as_deref(),
-                )
-            {
-                driver.host_mut().configure_graphics_preference_storage(Box::new(
-                    mclone_app_runtime::graphics_preferences::FileClientGraphicsPreferenceStorage::new(path),
-                ))?;
-            }
             let mut views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
             driver.drive_stereo_until_streamed(device, queue, views)?;
             drive_embedded_preview_until_visible(
