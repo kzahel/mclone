@@ -2,7 +2,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use mclone_ui::GameLeafDetail;
+use mclone_ui::{GameGrassDetail, GameLeafDetail};
 use serde::{Deserialize, Serialize};
 
 use crate::input_preferences::PreferenceKeyValueStore;
@@ -14,6 +14,7 @@ pub const GRAPHICS_PREFERENCE_FILE_NAME: &str = "graphics-preferences.v1.json";
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ClientGraphicsPreferences {
     pub leaf_detail: GameLeafDetail,
+    pub grass_detail: GameGrassDetail,
 }
 
 impl ClientGraphicsPreferences {
@@ -50,6 +51,7 @@ impl ClientGraphicsPreferences {
 #[serde(default, rename_all = "camelCase")]
 struct StoredGraphicsPreferences {
     leaf_detail: StoredLeafDetail,
+    grass_detail: StoredGrassDetail,
 }
 
 impl From<ClientGraphicsPreferences> for StoredGraphicsPreferences {
@@ -58,6 +60,12 @@ impl From<ClientGraphicsPreferences> for StoredGraphicsPreferences {
             leaf_detail: match value.leaf_detail {
                 GameLeafDetail::Blocky => StoredLeafDetail::Blocky,
                 GameLeafDetail::Bushy => StoredLeafDetail::Bushy,
+            },
+            grass_detail: match value.grass_detail {
+                GameGrassDetail::Off => StoredGrassDetail::Off,
+                GameGrassDetail::Sparse => StoredGrassDetail::Sparse,
+                GameGrassDetail::Lush => StoredGrassDetail::Lush,
+                GameGrassDetail::Ultra => StoredGrassDetail::Ultra,
             },
         }
     }
@@ -70,6 +78,12 @@ impl From<StoredGraphicsPreferences> for ClientGraphicsPreferences {
                 StoredLeafDetail::Blocky => GameLeafDetail::Blocky,
                 StoredLeafDetail::Bushy => GameLeafDetail::Bushy,
             },
+            grass_detail: match value.grass_detail {
+                StoredGrassDetail::Off => GameGrassDetail::Off,
+                StoredGrassDetail::Sparse => GameGrassDetail::Sparse,
+                StoredGrassDetail::Lush => GameGrassDetail::Lush,
+                StoredGrassDetail::Ultra => GameGrassDetail::Ultra,
+            },
         }
     }
 }
@@ -80,6 +94,16 @@ enum StoredLeafDetail {
     #[default]
     Blocky,
     Bushy,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum StoredGrassDetail {
+    #[default]
+    Off,
+    Sparse,
+    Lush,
+    Ultra,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -204,6 +228,10 @@ mod tests {
             ClientGraphicsPreferences::default().leaf_detail,
             GameLeafDetail::Blocky
         );
+        assert_eq!(
+            ClientGraphicsPreferences::default().grass_detail,
+            GameGrassDetail::Off
+        );
     }
 
     #[test]
@@ -211,6 +239,7 @@ mod tests {
         let store = MemoryStore::default();
         let preferences = ClientGraphicsPreferences {
             leaf_detail: GameLeafDetail::Bushy,
+            grass_detail: GameGrassDetail::Lush,
         };
         preferences.store(&store).unwrap();
 
@@ -231,6 +260,12 @@ mod tests {
         assert!(
             ClientGraphicsPreferences::from_json(
                 r#"{"schema":1,"preferences":{"leafDetail":"ultra"}}"#
+            )
+            .is_err()
+        );
+        assert!(
+            ClientGraphicsPreferences::from_json(
+                r#"{"schema":1,"preferences":{"grassDetail":"cinematic"}}"#
             )
             .is_err()
         );
@@ -256,6 +291,7 @@ mod tests {
         let storage = FileClientGraphicsPreferenceStorage::new(&path);
         let preferences = ClientGraphicsPreferences {
             leaf_detail: GameLeafDetail::Bushy,
+            grass_detail: GameGrassDetail::Ultra,
         };
 
         storage.store(&preferences).unwrap();

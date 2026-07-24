@@ -2933,6 +2933,7 @@ impl GameUiHost {
             | GameUiAction::CycleWorldGenerationProfile => {}
             GameUiAction::ToggleSectionOcclusion
             | GameUiAction::SetLeafDetail(_)
+            | GameUiAction::SetGrassDetail(_)
             | GameUiAction::ToggleAssetPack(_)
             | GameUiAction::ApplyAssetPacks
             | GameUiAction::ClearRebuildableCache
@@ -3173,6 +3174,7 @@ const UI_V2_OPTIONS_OUTPUT_RESOLUTION: UiWidgetId = UiWidgetId(144);
 const UI_V2_OPTIONS_WORLD_RESOLUTION: UiWidgetId = UiWidgetId(145);
 const UI_V2_OPTIONS_WORLD_RENDER_SCALE: UiWidgetId = UiWidgetId(146);
 const UI_V2_OPTIONS_LEAF_DETAIL: UiWidgetId = UiWidgetId(147);
+const UI_V2_OPTIONS_GRASS_DETAIL: UiWidgetId = UiWidgetId(154);
 const UI_V2_STORAGE_PROFILE_NAME: UiWidgetId = UiWidgetId(133);
 const UI_V2_STORAGE_PROFILE_ID: UiWidgetId = UiWidgetId(134);
 const UI_V2_STORAGE_BACKEND: UiWidgetId = UiWidgetId(135);
@@ -3968,6 +3970,16 @@ fn options_category_rows(
                     state.leaf_detail.label(),
                 )
                 .action(GameUiAction::SetLeafDetail(state.leaf_detail.next())),
+            ),
+            (
+                20.0,
+                UiWidget::cycle(
+                    UI_V2_OPTIONS_GRASS_DETAIL,
+                    ph,
+                    "Grass Detail",
+                    state.grass_detail.label(),
+                )
+                .action(GameUiAction::SetGrassDetail(state.grass_detail.next())),
             ),
             (
                 18.0,

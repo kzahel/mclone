@@ -5,6 +5,7 @@ mod gpu_util;
 
 mod asset_lab_figure;
 mod grass;
+pub use grass::GrassQuality;
 mod prepared_actor;
 
 pub mod actor_assets;

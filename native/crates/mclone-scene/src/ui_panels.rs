@@ -607,6 +607,7 @@ impl McloneSceneHost {
             max_render_distance: MAX_XR_RENDER_DISTANCE as i32,
             section_occlusion_culling: self.render_options.section_occlusion_culling,
             leaf_detail: game_leaf_detail(self.mesh_assets.catalog.leaf_detail()),
+            grass_detail: game_grass_detail(self.render_options.grass_detail),
             force_fullbright: self.render_options.force_fullbright,
             far_lod_enabled: self.active_world.scene.far_lod.enabled,
             far_lod_detail_mode: mclone_app_runtime::client_experience::game_far_lod_detail_mode(

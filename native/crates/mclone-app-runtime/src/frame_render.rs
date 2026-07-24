@@ -109,6 +109,11 @@ pub struct RenderStreamStats {
     pub drawn_face_count: u32,
     pub index_count: u32,
     pub drawn_index_count: u32,
+    pub grass_resident_patch_count: u32,
+    pub grass_drawn_patch_count: u32,
+    pub grass_estimated_blade_count: u32,
+    pub grass_draw_calls: usize,
+    pub grass_resident_bytes: u64,
     pub resident_cpu_mesh_section_count: usize,
     pub resident_cpu_mesh_vertex_count: u32,
     pub resident_cpu_mesh_face_count: u32,
@@ -134,6 +139,9 @@ pub struct RenderStreamStats {
     pub last_uploaded_vertex_count: u32,
     pub last_uploaded_face_count: u32,
     pub last_uploaded_index_count: u32,
+    pub last_uploaded_grass_patch_count: u32,
+    pub last_removed_grass_patch_count: u32,
+    pub last_uploaded_grass_bytes: u64,
     pub last_remesh_ms: f64,
     pub last_upload_ms: f64,
     pub last_frame_ms: f32,
@@ -155,6 +163,11 @@ pub struct FullFrameRenderSummary {
     pub graph_culled_section_count: usize,
     pub index_count: u32,
     pub drawn_index_count: u32,
+    pub grass_resident_patch_count: u32,
+    pub grass_drawn_patch_count: u32,
+    pub grass_estimated_blade_count: u32,
+    pub grass_draw_calls: usize,
+    pub grass_resident_bytes: u64,
     pub frustum_index_count: u32,
     pub graph_culled_index_count: u32,
     pub gui_command_count: usize,
@@ -165,6 +178,8 @@ pub struct FullFrameRenderSummary {
     pub far_lod_uploaded_bytes: usize,
     pub placed_drawn_section_count: usize,
     pub placed_drawn_index_count: u32,
+    pub placed_grass_drawn_patch_count: u32,
+    pub placed_grass_estimated_blade_count: u32,
     pub placed_actor_stats: ActorRenderStats,
 }
 
@@ -2605,6 +2620,11 @@ where
         render_stats.drawn_section_count = frame_stats.drawn_section_count;
         render_stats.drawn_face_count = frame_stats.drawn_face_count();
         render_stats.drawn_index_count = frame_stats.drawn_index_count;
+        render_stats.grass_resident_patch_count = frame_stats.grass_resident_patch_count;
+        render_stats.grass_drawn_patch_count = frame_stats.grass_drawn_patch_count;
+        render_stats.grass_estimated_blade_count = frame_stats.grass_estimated_blade_count;
+        render_stats.grass_draw_calls = frame_stats.grass_draw_calls;
+        render_stats.grass_resident_bytes = frame_stats.grass_resident_bytes;
         match opaque_world_insertion.as_ref() {
             Some(OpaqueWorldInsertion::Gate(gate_renderer, gate)) => {
                 gate_renderer.render_in_slot(
@@ -2821,10 +2841,22 @@ where
         render_stats.drawn_index_count = render_stats
             .drawn_index_count
             .saturating_add(placed_terrain_stats.drawn_index_count);
+        render_stats.grass_drawn_patch_count = render_stats
+            .grass_drawn_patch_count
+            .saturating_add(placed_terrain_stats.grass_drawn_patch_count);
+        render_stats.grass_estimated_blade_count = render_stats
+            .grass_estimated_blade_count
+            .saturating_add(placed_terrain_stats.grass_estimated_blade_count);
+        render_stats.grass_draw_calls = render_stats
+            .grass_draw_calls
+            .saturating_add(placed_terrain_stats.grass_draw_calls);
     } else {
         render_stats.drawn_section_count = 0;
         render_stats.drawn_face_count = 0;
         render_stats.drawn_index_count = 0;
+        render_stats.grass_drawn_patch_count = 0;
+        render_stats.grass_estimated_blade_count = 0;
+        render_stats.grass_draw_calls = 0;
     }
     render_stats.actor_count = actor_instances.len();
     render_stats.drawn_actor_count = actor_stats.drawn_actor_count;
@@ -2862,6 +2894,11 @@ where
         graph_culled_section_count: terrain_stats.graph_culled_section_count,
         index_count: draw.index_count(),
         drawn_index_count: render_stats.drawn_index_count,
+        grass_resident_patch_count: render_stats.grass_resident_patch_count,
+        grass_drawn_patch_count: render_stats.grass_drawn_patch_count,
+        grass_estimated_blade_count: render_stats.grass_estimated_blade_count,
+        grass_draw_calls: render_stats.grass_draw_calls,
+        grass_resident_bytes: render_stats.grass_resident_bytes,
         frustum_index_count: terrain_stats.frustum_index_count,
         graph_culled_index_count: terrain_stats.graph_culled_index_count,
         gui_command_count,
@@ -2872,6 +2909,8 @@ where
         far_lod_uploaded_bytes: render_stats.far_lod_uploaded_bytes,
         placed_drawn_section_count: placed_terrain_stats.drawn_section_count,
         placed_drawn_index_count: placed_terrain_stats.drawn_index_count,
+        placed_grass_drawn_patch_count: placed_terrain_stats.grass_drawn_patch_count,
+        placed_grass_estimated_blade_count: placed_terrain_stats.grass_estimated_blade_count,
         placed_actor_stats,
     })
 }
@@ -2948,6 +2987,9 @@ pub fn record_render_section_update_stats(
     render_stats.last_uploaded_vertex_count = upload_report.uploaded_vertex_count;
     render_stats.last_uploaded_face_count = upload_report.uploaded_face_count();
     render_stats.last_uploaded_index_count = upload_report.uploaded_index_count;
+    render_stats.last_uploaded_grass_patch_count = upload_report.uploaded_grass_patch_count;
+    render_stats.last_removed_grass_patch_count = upload_report.removed_grass_patch_count;
+    render_stats.last_uploaded_grass_bytes = upload_report.uploaded_grass_bytes;
 }
 
 fn clear_frame_color(

@@ -195,6 +195,20 @@ Exact values are measurement-driven. Begin conservatively and record every
 accepted value in this tactical. Sparse is intentionally small enough for
 evaluation on constrained devices but remains Off by default.
 
+The accepted initial static profiles are:
+
+| Tier | Radius | Near end | Middle end | Blades near/middle/far |
+| --- | ---: | ---: | ---: | --- |
+| Sparse | 64 blocks | 24 | 48 | 2 / 1 / 1 |
+| Lush | 128 blocks | 48 | 96 | 6 / 4 / 2 |
+| Ultra | 192 blocks | 64 | 128 | 8 / 6 / 3 |
+
+All three profiles currently use the same one-segment tapered strip template.
+They select a prefix of eight deterministic blades per patch, so tier and LOD
+changes do not rebuild patch buffers. Band transitions use a four-block
+hysteresis margin. Wind and interaction may add profile facts without changing
+these static density values.
+
 LOD selection is per presentation observer, not one mutable global section
 tier:
 
@@ -331,6 +345,39 @@ light, depth, fog, culling, and cross-view geometry.
 
 Exit: one shared persisted setting changes real rendering on every host, and
 each tier has stable measured transitions without patch rebuilds.
+
+Implemented 2026-07-24:
+
+- `GameGrassDetail`, the Graphics row, action/effect/capability projection,
+  scene host, and schema-1 preference field are shared; the default and a
+  missing field are Off.
+- Off/non-Off changes control patch discovery and mark resident sections for
+  one resource rebuild. Sparse/Lush/Ultra reuse the same arena and templates.
+  Off immediately frees each world's grass arena and LOD histories.
+- LOD histories are keyed by world draw owner and stable observer. Stereo and
+  multiview share the head-center plan; placed worlds use inverse-mapped source
+  positions; periodic worlds use shortest wrapped distance.
+- Browser incremental compilation now decorates the same request as native
+  with biome seed, topology, and grass policy. A diagnostic regression fence
+  records the worker's decoded grass request bit.
+- Shared render and frame reports expose resident/drawn patches, estimated
+  blades, draw calls, bytes, uploads, and removals.
+
+Accepted evidence:
+
+- the render GPU tier fixture produced and inspected
+  `/tmp/mclone-238-static-grass-{off,sparse,lush,ultra}.png`; changed-pixel
+  counts increased strictly for Sparse, Lush, and Ultra;
+- a native scene restored Lush from schema-1 preferences and the inspected
+  `/tmp/mclone-desktop-offscreen.png` showed dense rooted grass across the
+  ordinary app/runtime/scene path;
+- headed Wayland browser WebGPU restored Lush, decoded an enabled worker
+  request, retained `14,033` patches, drew `5,277` patches and an estimated
+  `27,078` blades in `42` grass draws; the inspected
+  `/tmp/mclone-native-web-app-canvas.png` showed the same effect; and
+- focused UI, preference, scene, renderer, render-session, app-runtime, GPU
+  pipeline, and GPU pixel tests passed. The complete affected package set and
+  web build passed before the slice commit.
 
 ## Slice 3: Wind and Clump Character
 

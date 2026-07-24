@@ -1213,6 +1213,7 @@ pub struct SingleViewRuntime {
     engine: EngineRenderSession,
     clock: MonotonicClockHandle,
     asset_epoch: u64,
+    grass_patches_enabled: bool,
     render_distance: u32,
     chunk_tracking_radius: u32,
     interest_center: ChunkPos,
@@ -1252,6 +1253,7 @@ impl SingleViewRuntime {
             engine: EngineRenderSession::new(client),
             clock: MonotonicClockHandle::default(),
             asset_epoch: 0,
+            grass_patches_enabled: false,
             render_distance,
             chunk_tracking_radius,
             interest_center,
@@ -1347,6 +1349,18 @@ impl SingleViewRuntime {
 
     pub const fn asset_epoch(&self) -> u64 {
         self.asset_epoch
+    }
+
+    pub const fn grass_patches_enabled(&self) -> bool {
+        self.grass_patches_enabled
+    }
+
+    pub fn set_grass_patches_enabled(&mut self, enabled: bool) -> usize {
+        if self.grass_patches_enabled == enabled {
+            return 0;
+        }
+        self.grass_patches_enabled = enabled;
+        self.mark_all_render_sections_dirty_for_resource_rebuild()
     }
 
     pub fn replace_asset_epoch_sections(
@@ -1636,8 +1650,10 @@ impl SingleViewRuntime {
         Snapshots: FnOnce(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
     {
         let topology = self.client().topology();
+        let biome_zoom_seed = self.client().biome_zoom_seed();
+        let grass_patches_enabled = self.grass_patches_enabled;
         self.engine
-            .sync_render_sections_with_budget_and_completed_result_acceptance(
+            .sync_render_sections_with_budget_and_completed_result_acceptance_and_request_map(
                 compiler,
                 chunk_budget,
                 |dirty_work| {
@@ -1658,6 +1674,12 @@ impl SingleViewRuntime {
                 RenderSectionRemovalMode::ApplyImmediately,
                 completed_result_accept_budget,
                 snapshots_for_submit,
+                move |request| {
+                    request
+                        .with_biome_zoom_seed(biome_zoom_seed)
+                        .with_topology(topology)
+                        .with_grass_patches(grass_patches_enabled)
+                },
             )
     }
 
@@ -1716,6 +1738,7 @@ impl SingleViewRuntime {
                 request
                     .with_biome_zoom_seed(self.client().biome_zoom_seed())
                     .with_topology(self.client().topology())
+                    .with_grass_patches(self.grass_patches_enabled)
             })
         else {
             timing.submit_request_build_ms += elapsed_ms(request_build_start.elapsed());

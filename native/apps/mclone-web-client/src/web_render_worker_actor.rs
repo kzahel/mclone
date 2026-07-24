@@ -153,7 +153,7 @@ impl WebRenderWorkerActor {
             && !snapshot_input_compile_used
             && target_sections.length() > 0;
 
-        let (packed, summary, upserts, evictions, mirror_chunks) = {
+        let (packed, summary, upserts, evictions, mirror_chunks, grass_patches_requested) = {
             let session = self
                 .compiler_sessions
                 .get_mut(&world_instance_id)
@@ -209,6 +209,7 @@ impl WebRenderWorkerActor {
                 session.last_delta_upsert_count(),
                 session.last_delta_eviction_count(),
                 session.mirror_chunk_count(),
+                session.grass_patches_enabled(),
             )
         };
 
@@ -273,6 +274,7 @@ impl WebRenderWorkerActor {
         set_number(&report, "snapshotInputUpsertCount", upserts as f64)?;
         set_number(&report, "snapshotInputEvictionCount", evictions as f64)?;
         set_number(&report, "snapshotMirrorChunkCount", mirror_chunks as f64)?;
+        set_bool(&report, "grassPatchesRequested", grass_patches_requested)?;
         set_bool(
             &report,
             "snapshotInputCompileUsed",

@@ -2,7 +2,7 @@
 
 Topic: `lush-grass-rendering`
 
-Status: implementation active; static renderer complete, settings/wind/interaction
+Status: implementation active; quality/settings complete, wind and interaction
 remain.
 
 ## Scope
@@ -32,8 +32,9 @@ switch.
 
 Implementation is governed by
 [`../tactical/238-lush-grass-rendering.md`](../tactical/238-lush-grass-rendering.md).
-The shared patch artifact and worker ABI are the first active slice; every
-runtime still requests `Off` until the renderer and shared setting host land.
+The shared patch artifact, static renderer, and quality/setting path are
+complete. Off remains the default on every host while the renderer accepts
+explicit Sparse, Lush, and Ultra choices.
 
 ## 2026-07-24 Off Baseline
 
@@ -89,9 +90,31 @@ Validation at this milestone:
   green tapered blades rooted on the test surface; the paired
   `/tmp/mclone-238-static-grass-off.png` retained the exact bare surface.
 
-The renderer flag is intentionally still unreachable from normal runtime
-preferences in this commit. The next slice adds the shared Off/Low/Lush
-quality contract and triggers request-aware section recompilation.
+## 2026-07-24 Quality And Settings Milestone
+
+`Grass Detail: Off / Sparse / Lush / Ultra` is now an independent shared
+Graphics setting. It projects through `mclone-ui`, client-experience effects,
+`mclone-scene`, schema-1 graphics preferences, native file storage, and
+browser localStorage. Missing fields restore Off. Crossing Off/non-Off
+recompiles resident sections because patch discovery changes; enabled-tier
+changes only select deterministic template prefixes and LOD bands.
+
+Initial profiles use 64/128/192-block radii for Sparse/Lush/Ultra and
+2/6/8 near blades respectively. Middle/far density falls to 1/1, 4/2, and
+6/3. A four-block hysteresis margin stabilizes the near/middle/far
+transitions. LOD state belongs to each world draw owner and observer; stereo
+eyes and full-frame multiview share a head-center plan, while placed and
+periodic worlds calculate source-space distance correctly.
+
+The browser smoke uncovered and fixed a shared request-boundary omission:
+the incremental browser sync path had bypassed native request decoration,
+silently losing biome zoom seed, topology, and grass policy. Both paths now
+decorate the neutral compile request through the same render-session hook.
+Headed Wayland evidence restored Lush and reported `14,033` resident patches,
+`5,277` drawn patches, about `27,078` blades, and `42` grass draws. The
+inspected browser and native app captures showed dense grass rooted on exposed
+grass blocks. The isolated GPU tier fixture also proved strictly increasing
+Sparse/Lush/Ultra pixel coverage while Off retained the bare surface.
 
 ## Attribution And External References
 

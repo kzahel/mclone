@@ -11,10 +11,10 @@ use crate::far_lod::{
 use mclone_input::TouchControlsMode;
 use mclone_ui::{
     DebugActorTool, GameAuxiliarySplitMode, GameCollisionMode, GameFarLodDetailMode,
-    GameFramePacingMode, GameLeafDetail, GameLocalPlayGuestInput, GameLocalPlayLayout,
-    GameLocalPlayState, GameMovementMode, GamePlayerModel, GameScenarioId, GameSimulationCadence,
-    GameStorageAction, GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameUiAction,
-    GameUiRenderState, GameWorldRenderScaleMode, GameXrTurnMode,
+    GameFramePacingMode, GameGrassDetail, GameLeafDetail, GameLocalPlayGuestInput,
+    GameLocalPlayLayout, GameLocalPlayState, GameMovementMode, GamePlayerModel, GameScenarioId,
+    GameSimulationCadence, GameStorageAction, GameTouchSettings, GameTravelAssistMode,
+    GameTurnMode, GameUiAction, GameUiRenderState, GameWorldRenderScaleMode, GameXrTurnMode,
 };
 
 use crate::asset_pack_ui::{ClientAssetPackController, ClientAssetPackEffect};
@@ -153,6 +153,7 @@ impl ClientExperienceController {
             }
             GameUiAction::ToggleSectionOcclusion
             | GameUiAction::SetLeafDetail(_)
+            | GameUiAction::SetGrassDetail(_)
             | GameUiAction::ToggleFullbright
             | GameUiAction::ToggleFarLod
             | GameUiAction::CycleFarLodDetail
@@ -356,6 +357,7 @@ impl ClientExperienceProfile {
 pub struct ClientExperienceSettingsProfile {
     pub section_occlusion: ClientExperienceCapabilityStatus,
     pub leaf_detail: ClientExperienceCapabilityStatus,
+    pub grass_detail: ClientExperienceCapabilityStatus,
     pub fullbright: ClientExperienceCapabilityStatus,
     pub far_lod: ClientExperienceCapabilityStatus,
     pub player_collision_box: ClientExperienceCapabilityStatus,
@@ -391,6 +393,7 @@ impl ClientExperienceSettingsProfile {
         Self {
             section_occlusion: ClientExperienceCapabilityStatus::Supported,
             leaf_detail: ClientExperienceCapabilityStatus::Supported,
+            grass_detail: ClientExperienceCapabilityStatus::Supported,
             fullbright: ClientExperienceCapabilityStatus::Supported,
             far_lod: ClientExperienceCapabilityStatus::Supported,
             player_collision_box: ClientExperienceCapabilityStatus::Supported,
@@ -423,6 +426,7 @@ impl ClientExperienceSettingsProfile {
         match kind {
             ClientExperienceActionKind::ToggleSectionOcclusion => self.section_occlusion,
             ClientExperienceActionKind::SetLeafDetail => self.leaf_detail,
+            ClientExperienceActionKind::SetGrassDetail => self.grass_detail,
             ClientExperienceActionKind::ToggleFullbright => self.fullbright,
             ClientExperienceActionKind::ToggleFarLod
             | ClientExperienceActionKind::CycleFarLodDetail
@@ -468,11 +472,12 @@ impl ClientExperienceSettingsProfile {
     ) -> [(
         ClientExperienceFeatureCapability,
         ClientExperienceCapabilityStatus,
-    ); 16] {
+    ); 17] {
         use ClientExperienceFeatureCapability as F;
         [
             (F::SectionOcclusion, self.section_occlusion),
             (F::LeafDetail, self.leaf_detail),
+            (F::GrassDetail, self.grass_detail),
             (F::Fullbright, self.fullbright),
             (F::FarLod, self.far_lod),
             (F::PlayerCollisionBox, self.player_collision_box),
@@ -497,6 +502,7 @@ impl ClientExperienceSettingsProfile {
 pub enum ClientExperienceFeatureCapability {
     SectionOcclusion,
     LeafDetail,
+    GrassDetail,
     Fullbright,
     FarLod,
     PlayerCollisionBox,
@@ -758,6 +764,12 @@ impl ClientExperienceSettingsController {
                 effects
                     .setting_effects
                     .push(ClientExperienceSettingEffect::SetLeafDetail(detail));
+            }
+            GameUiAction::SetGrassDetail(detail) => {
+                self.state.grass_detail = detail;
+                effects
+                    .setting_effects
+                    .push(ClientExperienceSettingEffect::SetGrassDetail(detail));
             }
             GameUiAction::ToggleFullbright => {
                 self.state.force_fullbright = !self.state.force_fullbright;
@@ -1054,6 +1066,10 @@ impl ClientExperienceSettingsController {
                 profile.leaf_detail,
             ),
             (
+                ClientExperienceActionKind::SetGrassDetail,
+                profile.grass_detail,
+            ),
+            (
                 ClientExperienceActionKind::ToggleFullbright,
                 profile.fullbright,
             ),
@@ -1231,6 +1247,7 @@ pub struct ClientExperienceSettingsState {
     pub max_render_distance: i32,
     pub section_occlusion_culling: bool,
     pub leaf_detail: GameLeafDetail,
+    pub grass_detail: GameGrassDetail,
     pub force_fullbright: bool,
     pub far_lod_enabled: bool,
     pub far_lod_detail_mode: GameFarLodDetailMode,
@@ -1277,6 +1294,7 @@ impl From<GameUiRenderState> for ClientExperienceSettingsState {
             max_render_distance: state.max_render_distance,
             section_occlusion_culling: state.section_occlusion_culling,
             leaf_detail: state.leaf_detail,
+            grass_detail: state.grass_detail,
             force_fullbright: state.force_fullbright,
             far_lod_enabled: state.far_lod_enabled,
             far_lod_detail_mode: state.far_lod_detail_mode,
@@ -1324,6 +1342,7 @@ impl ClientExperienceSettingsState {
         state.max_render_distance = self.max_render_distance;
         state.section_occlusion_culling = self.section_occlusion_culling;
         state.leaf_detail = self.leaf_detail;
+        state.grass_detail = self.grass_detail;
         state.force_fullbright = self.force_fullbright;
         state.far_lod_enabled = self.far_lod_enabled;
         state.far_lod_detail_mode = self.far_lod_detail_mode;
@@ -1578,6 +1597,7 @@ pub const fn game_far_lod_detail_mode(mode: FarLodDetailMode) -> GameFarLodDetai
 pub enum ClientExperienceSettingEffect {
     SetSectionOcclusionCulling(bool),
     SetLeafDetail(GameLeafDetail),
+    SetGrassDetail(GameGrassDetail),
     SetFullbright(bool),
     SetFarLod {
         enabled: bool,
@@ -1671,6 +1691,7 @@ pub enum ClientExperienceActionKind {
     QuitToTitle,
     ToggleSectionOcclusion,
     SetLeafDetail,
+    SetGrassDetail,
     ToggleFullbright,
     ToggleFarLod,
     CycleFarLodDetail,
@@ -1749,6 +1770,7 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
         GameUiAction::QuitToTitle => ClientExperienceActionKind::QuitToTitle,
         GameUiAction::ToggleSectionOcclusion => ClientExperienceActionKind::ToggleSectionOcclusion,
         GameUiAction::SetLeafDetail(_) => ClientExperienceActionKind::SetLeafDetail,
+        GameUiAction::SetGrassDetail(_) => ClientExperienceActionKind::SetGrassDetail,
         GameUiAction::ToggleFullbright => ClientExperienceActionKind::ToggleFullbright,
         GameUiAction::ToggleFarLod => ClientExperienceActionKind::ToggleFarLod,
         GameUiAction::CycleFarLodDetail => ClientExperienceActionKind::CycleFarLodDetail,
@@ -1824,6 +1846,7 @@ pub const fn classify_client_experience_action_kind(
         | ClientExperienceActionKind::QuitToTitle
         | ClientExperienceActionKind::ToggleSectionOcclusion
         | ClientExperienceActionKind::SetLeafDetail
+        | ClientExperienceActionKind::SetGrassDetail
         | ClientExperienceActionKind::ToggleFullbright
         | ClientExperienceActionKind::TogglePlayerCollisionBox
         | ClientExperienceActionKind::ToggleFirstPersonPlayer
@@ -2339,6 +2362,18 @@ mod tests {
             effects.setting_effects,
             vec![ClientExperienceSettingEffect::SetLeafDetail(
                 GameLeafDetail::Bushy
+            )]
+        );
+
+        let effects = settings.apply_ui_action(
+            GameUiAction::SetGrassDetail(GameGrassDetail::Lush),
+            ClientExperienceSettingsProfile::default(),
+        );
+        assert_eq!(settings.state().grass_detail, GameGrassDetail::Lush);
+        assert_eq!(
+            effects.setting_effects,
+            vec![ClientExperienceSettingEffect::SetGrassDetail(
+                GameGrassDetail::Lush
             )]
         );
 

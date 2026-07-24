@@ -96,6 +96,53 @@ fn engine_render_session_submits_when_compiler_capacity_is_available() {
 }
 
 #[test]
+fn engine_render_session_maps_platform_compile_request_options() {
+    let chunk = ChunkPos::new(2, -1);
+    let mut client = ClientRuntime::local_integrated();
+    client.apply_update(ServerUpdate::ChunkSnapshot(empty_test_snapshot(
+        chunk,
+        0,
+        SECTION_HEIGHT,
+    )));
+    let mut engine = EngineRenderSession::new(client);
+    let mut compiler = CapacityTestCompiler::new(0, 1);
+    let topology = HorizontalTopology::cylinder_x(-8, 16);
+
+    engine
+        .sync_render_sections_with_budget_and_completed_result_acceptance_and_request_map(
+            &mut compiler,
+            1,
+            |dirty_work| dirty_work.loaded_dirty_chunks.iter().copied().collect(),
+            |dirty_work| {
+                dirty_work
+                    .loaded_dirty_sections_by_chunk
+                    .keys()
+                    .copied()
+                    .collect()
+            },
+            |_client, _key| RenderSectionNeighborReadiness::ReadyWithNeighbors,
+            RenderSectionRemovalMode::Defer,
+            None,
+            |client, _compiler| client.chunk_snapshots().cloned().collect(),
+            |request| {
+                request
+                    .with_biome_zoom_seed(Some(41))
+                    .with_topology(topology)
+                    .with_grass_patches(true)
+            },
+        )
+        .expect("mapped sync should submit");
+
+    let request = compiler
+        .submitted_requests
+        .first()
+        .expect("mapped request should reach compiler");
+    assert_eq!(request.biome_zoom_seed, Some(41));
+    assert_eq!(request.topology, topology);
+    assert!(request.grass_patches);
+}
+
+#[test]
 fn engine_render_session_waits_when_compiler_capacity_is_full() {
     let chunk = ChunkPos::new(2, -1);
     let mut client = ClientRuntime::local_integrated();

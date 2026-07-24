@@ -2013,6 +2013,7 @@ pub enum GameUiAction {
     QuitToTitle,
     ToggleSectionOcclusion,
     SetLeafDetail(GameLeafDetail),
+    SetGrassDetail(GameGrassDetail),
     ToggleFullbright,
     ToggleFarLod,
     CycleFarLodDetail,
@@ -2062,6 +2063,35 @@ impl GameLeafDetail {
         match self {
             Self::Blocky => "Blocky",
             Self::Bushy => "Bushy",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameGrassDetail {
+    #[default]
+    Off,
+    Sparse,
+    Lush,
+    Ultra,
+}
+
+impl GameGrassDetail {
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Off => Self::Sparse,
+            Self::Sparse => Self::Lush,
+            Self::Lush => Self::Ultra,
+            Self::Ultra => Self::Off,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Sparse => "Sparse",
+            Self::Lush => "Lush",
+            Self::Ultra => "Ultra",
         }
     }
 }
@@ -2255,6 +2285,7 @@ pub struct GameUiRenderState {
     pub max_render_distance: i32,
     pub section_occlusion_culling: bool,
     pub leaf_detail: GameLeafDetail,
+    pub grass_detail: GameGrassDetail,
     pub force_fullbright: bool,
     pub far_lod_enabled: bool,
     pub far_lod_detail_mode: GameFarLodDetailMode,
@@ -2304,6 +2335,7 @@ impl Default for GameUiRenderState {
             max_render_distance: 16,
             section_occlusion_culling: true,
             leaf_detail: GameLeafDetail::Blocky,
+            grass_detail: GameGrassDetail::Off,
             force_fullbright: false,
             far_lod_enabled: false,
             far_lod_detail_mode: GameFarLodDetailMode::Auto,

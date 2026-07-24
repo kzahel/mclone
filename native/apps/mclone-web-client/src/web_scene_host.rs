@@ -241,6 +241,11 @@ struct LastFrameStats {
     frustum_section_count: usize,
     index_count: u32,
     drawn_index_count: u32,
+    grass_resident_patch_count: u32,
+    grass_drawn_patch_count: u32,
+    grass_estimated_blade_count: u32,
+    grass_draw_calls: usize,
+    grass_resident_bytes: u64,
     actor_count: usize,
     drawn_actor_count: usize,
     gui_command_count: usize,
@@ -1124,6 +1129,11 @@ impl WebSceneHost {
             frustum_section_count: summary.render.frustum_section_count,
             index_count: summary.render.index_count,
             drawn_index_count: summary.render.drawn_index_count,
+            grass_resident_patch_count: summary.render.grass_resident_patch_count,
+            grass_drawn_patch_count: summary.render.grass_drawn_patch_count,
+            grass_estimated_blade_count: summary.render.grass_estimated_blade_count,
+            grass_draw_calls: summary.render.grass_draw_calls,
+            grass_resident_bytes: summary.render.grass_resident_bytes,
             actor_count: summary.render.actor_count,
             drawn_actor_count: summary.render.drawn_actor_count,
             gui_command_count: summary.render.gui_command_count,
@@ -4282,6 +4292,31 @@ impl WebSceneHost {
                 "drawnIndexCount",
                 summary.render.drawn_index_count as f64,
             )?;
+            report_set_number(
+                &object,
+                "grassResidentPatchCount",
+                summary.render.grass_resident_patch_count as f64,
+            )?;
+            report_set_number(
+                &object,
+                "grassDrawnPatchCount",
+                summary.render.grass_drawn_patch_count as f64,
+            )?;
+            report_set_number(
+                &object,
+                "grassEstimatedBladeCount",
+                summary.render.grass_estimated_blade_count as f64,
+            )?;
+            report_set_number(
+                &object,
+                "grassDrawCalls",
+                summary.render.grass_draw_calls as f64,
+            )?;
+            report_set_number(
+                &object,
+                "grassResidentBytes",
+                summary.render.grass_resident_bytes as f64,
+            )?;
             report_set_number(&object, "actorCount", summary.render.actor_count as f64)?;
             report_set_number(
                 &object,
@@ -4321,6 +4356,53 @@ impl WebSceneHost {
             &object,
             "drawnIndexCount",
             self.last_frame.drawn_index_count as f64,
+        )?;
+        if let Some(host) = self.host.as_ref() {
+            report_set_string(
+                &object,
+                "grassDetail",
+                match host.grass_detail() {
+                    mclone_render::GrassQuality::Off => "off",
+                    mclone_render::GrassQuality::Sparse => "sparse",
+                    mclone_render::GrassQuality::Lush => "lush",
+                    mclone_render::GrassQuality::Ultra => "ultra",
+                },
+            )?;
+            report_set_bool(
+                &object,
+                "grassPatchesCompileEnabled",
+                host.active_grass_patches_compile_enabled(),
+            )?;
+            report_set_string(
+                &object,
+                "graphicsPreferenceError",
+                host.graphics_preference_error().unwrap_or_default(),
+            )?;
+        }
+        report_set_number(
+            &object,
+            "grassResidentPatchCount",
+            self.last_frame.grass_resident_patch_count as f64,
+        )?;
+        report_set_number(
+            &object,
+            "grassDrawnPatchCount",
+            self.last_frame.grass_drawn_patch_count as f64,
+        )?;
+        report_set_number(
+            &object,
+            "grassEstimatedBladeCount",
+            self.last_frame.grass_estimated_blade_count as f64,
+        )?;
+        report_set_number(
+            &object,
+            "grassDrawCalls",
+            self.last_frame.grass_draw_calls as f64,
+        )?;
+        report_set_number(
+            &object,
+            "grassResidentBytes",
+            self.last_frame.grass_resident_bytes as f64,
         )?;
         report_set_number(&object, "actorCount", self.last_frame.actor_count as f64)?;
         report_set_number(

@@ -410,6 +410,46 @@ impl EngineRenderSession {
         Ready: FnMut(&ClientRuntime, RenderSectionKey) -> RenderSectionNeighborReadiness,
         Snapshots: FnOnce(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
     {
+        self.sync_render_sections_with_budget_and_completed_result_acceptance_and_request_map(
+            compiler,
+            chunk_budget,
+            order_loaded_dirty_chunks,
+            order_dirty_section_chunks,
+            section_readiness,
+            removal_mode,
+            completed_result_accept_budget,
+            snapshots_for_submit,
+            |request| request,
+        )
+    }
+
+    pub fn sync_render_sections_with_budget_and_completed_result_acceptance_and_request_map<
+        C,
+        OrderChunks,
+        OrderSections,
+        Ready,
+        Snapshots,
+        MapRequest,
+    >(
+        &mut self,
+        compiler: &mut C,
+        chunk_budget: usize,
+        order_loaded_dirty_chunks: OrderChunks,
+        order_dirty_section_chunks: OrderSections,
+        section_readiness: Ready,
+        removal_mode: RenderSectionRemovalMode,
+        completed_result_accept_budget: Option<usize>,
+        snapshots_for_submit: Snapshots,
+        map_request: MapRequest,
+    ) -> Result<RenderSectionCacheUpdate>
+    where
+        C: RenderSectionCompiler,
+        OrderChunks: FnOnce(&RenderSectionDirtyWork) -> Vec<ChunkPos>,
+        OrderSections: FnOnce(&RenderSectionDirtyWork) -> Vec<ChunkPos>,
+        Ready: FnMut(&ClientRuntime, RenderSectionKey) -> RenderSectionNeighborReadiness,
+        Snapshots: FnOnce(&ClientRuntime, &mut C) -> Vec<ChunkSnapshot>,
+        MapRequest: FnOnce(RenderSectionCompileRequest) -> RenderSectionCompileRequest,
+    {
         let completed_results = compiler.try_recv_completed()?;
         let pending_compile_jobs = compiler.pending_job_count();
         let mut report = self.drain_completed_compile_updates_with_acceptance_budget(
@@ -449,7 +489,7 @@ impl EngineRenderSession {
         let snapshots = snapshots_for_submit(self.client(), compiler);
         let submission_update =
             self.submit_prepared_sync_plan(&sync_plan, snapshots, |_sync_plan, request| {
-                compiler.submit(request)
+                compiler.submit(map_request(request))
             })?;
         report.merge(submission_update.cache_update);
         report.pending_compile_jobs = compiler.pending_job_count();

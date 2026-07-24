@@ -238,6 +238,7 @@ impl McloneSceneHost {
                         self.pending_leaf_detail = Some(detail);
                     }
                 }
+                self.request_grass_detail(engine_grass_detail(preferences.grass_detail));
             }
             Ok(None) => {}
             Err(error) => {
@@ -251,6 +252,17 @@ impl McloneSceneHost {
 
     pub fn graphics_preference_error(&self) -> Option<&str> {
         self.graphics_preference_error.as_deref()
+    }
+
+    pub const fn grass_detail(&self) -> mclone_render::GrassQuality {
+        self.render_options.grass_detail
+    }
+
+    pub fn active_grass_patches_compile_enabled(&self) -> bool {
+        self.active_world
+            .runtime
+            .as_ref()
+            .is_some_and(SceneSessionRuntime::grass_patches_enabled)
     }
 
     pub fn preferred_asset_pack_ids(&self) -> impl Iterator<Item = &mclone_assets::AssetPackId> {
@@ -454,7 +466,7 @@ impl McloneSceneHost {
             }
             self.mesh_assets = mesh_assets.clone();
             self.active_assets.mesh = mesh_assets;
-            self.persist_graphics_preference(detail);
+            self.persist_graphics_preferences();
             log::info!("leaf detail set to {detail:?} before active runtime startup");
             return Ok(());
         }
@@ -466,9 +478,39 @@ impl McloneSceneHost {
         Ok(())
     }
 
-    fn persist_graphics_preference(&mut self, detail: mclone_mesh::LeafDetail) {
+    pub(crate) fn request_grass_detail(&mut self, detail: mclone_render::GrassQuality) {
+        if self.render_options.grass_detail == detail {
+            return;
+        }
+        self.render_options.grass_detail = detail;
+        let enabled = detail.enabled();
+        if let Some(runtime) = self.active_world.runtime.as_mut() {
+            runtime.set_grass_patches_enabled(enabled);
+        }
+        if let Some(runtime) = self
+            .standby_world
+            .as_mut()
+            .and_then(|slot| slot.runtime.as_mut())
+        {
+            runtime.set_grass_patches_enabled(enabled);
+        }
+        if !enabled {
+            self.active_world.draw.clear_grass_patches();
+            if let Some(slot) = self.standby_world.as_mut() {
+                slot.draw.clear_grass_patches();
+            }
+            if let Some(shell) = self.prepared_warm_world_shell.as_mut() {
+                shell.draw.clear_grass_patches();
+            }
+        }
+        self.persist_graphics_preferences();
+        log::info!("grass detail set to {detail:?}");
+    }
+
+    fn persist_graphics_preferences(&mut self) {
         let preferences = ClientGraphicsPreferences {
-            leaf_detail: game_leaf_detail(detail),
+            leaf_detail: game_leaf_detail(self.active_assets.mesh.catalog.leaf_detail()),
+            grass_detail: game_grass_detail(self.render_options.grass_detail),
         };
         if let Some(storage) = self.graphics_preference_storage.as_ref() {
             if let Err(error) = storage.store(&preferences) {
@@ -503,8 +545,7 @@ impl McloneSceneHost {
             && let Some(detail) = self.pending_leaf_detail.take()
             && let Err(error) = self.request_leaf_detail(detail)
         {
-            self.graphics_preference_error =
-                Some(format!("apply queued leaf detail: {error:#}"));
+            self.graphics_preference_error = Some(format!("apply queued leaf detail: {error:#}"));
             self.pending_leaf_detail = Some(detail);
         }
         if self.asset_replacement.is_none()
@@ -855,7 +896,7 @@ impl McloneSceneHost {
             }
         }
         self.asset_pack_preference = preference;
-        self.persist_graphics_preference(self.active_assets.mesh.catalog.leaf_detail());
+        self.persist_graphics_preferences();
         self.asset_replacement_started_at = None;
         self.asset_replacement_assets_ready_at = None;
         self.last_asset_replacement_commit = Some(report);

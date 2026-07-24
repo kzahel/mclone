@@ -7,8 +7,9 @@ use mclone_app_runtime::client_session_policy::ClientSessionHostAction;
 use mclone_app_runtime::far_lod::FarLodDetailMode;
 use mclone_input::TouchControlsMode;
 use mclone_ui::{
-    GameCollisionMode, GameLeafDetail, GameMovementMode, GamePlayerModel, GameSimulationCadence,
-    GameTravelAssistMode, GameTurnMode, GameWorldRenderScaleMode, GameXrTurnMode, StatusOverlay,
+    GameCollisionMode, GameGrassDetail, GameLeafDetail, GameMovementMode, GamePlayerModel,
+    GameSimulationCadence, GameTravelAssistMode, GameTurnMode, GameWorldRenderScaleMode,
+    GameXrTurnMode, StatusOverlay,
 };
 
 /// Platform hooks emitted by shared client-experience policy.
@@ -31,6 +32,7 @@ pub trait HostEffects {
 pub trait ClientExperienceSettingsHost {
     fn set_section_occlusion_culling(&mut self, enabled: bool) -> Result<()>;
     fn set_leaf_detail(&mut self, detail: GameLeafDetail) -> Result<()>;
+    fn set_grass_detail(&mut self, detail: GameGrassDetail) -> Result<()>;
     fn set_fullbright(&mut self, enabled: bool) -> Result<()>;
     fn set_far_lod(&mut self, enabled: bool, extra_radius_chunks: u32) -> Result<()>;
     fn set_far_lod_detail_mode(&mut self, mode: FarLodDetailMode) -> Result<()>;
@@ -75,6 +77,9 @@ where
             }
             ClientExperienceSettingEffect::SetLeafDetail(detail) => {
                 target.set_leaf_detail(detail)?;
+            }
+            ClientExperienceSettingEffect::SetGrassDetail(detail) => {
+                target.set_grass_detail(detail)?;
             }
             ClientExperienceSettingEffect::SetFullbright(enabled) => {
                 target.set_fullbright(enabled)?;
@@ -219,6 +224,7 @@ mod tests {
     impl ClientExperienceSettingsHost for TestSettingsHost {
         record_method!(set_section_occlusion_culling(enabled: bool));
         record_method!(set_leaf_detail(detail: GameLeafDetail));
+        record_method!(set_grass_detail(detail: GameGrassDetail));
         record_method!(set_fullbright(enabled: bool));
         record_method!(set_far_lod(enabled: bool, extra_radius_chunks: u32));
         record_method!(set_far_lod_detail_mode(mode: FarLodDetailMode));
@@ -268,6 +274,7 @@ mod tests {
         let effects = ClientExperienceSettingsEffects {
             setting_effects: vec![
                 ClientExperienceSettingEffect::SetLeafDetail(GameLeafDetail::Bushy),
+                ClientExperienceSettingEffect::SetGrassDetail(GameGrassDetail::Lush),
                 ClientExperienceSettingEffect::SetFullbright(true),
                 ClientExperienceSettingEffect::SetTravelAssistMode(GameTravelAssistMode::Blink),
                 ClientExperienceSettingEffect::CycleFramePacing,
@@ -284,6 +291,7 @@ mod tests {
             target.calls,
             vec![
                 "set_leaf_detail",
+                "set_grass_detail",
                 "set_fullbright",
                 "set_travel_assist_mode"
             ]

@@ -297,6 +297,14 @@ impl SceneSessionRuntime {
         )
     }
 
+    pub fn set_grass_patches_enabled(&mut self, enabled: bool) -> usize {
+        self.service.core_mut().set_grass_patches_enabled(enabled)
+    }
+
+    pub fn grass_patches_enabled(&self) -> bool {
+        self.service.core().grass_patches_enabled()
+    }
+
     pub fn set_chunk_view(
         &mut self,
         center: ChunkPos,

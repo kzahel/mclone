@@ -4,12 +4,13 @@ use std::num::NonZeroU32;
 use std::ops::Range;
 
 use anyhow::{Context, Result, bail};
+use mclone_core::{HorizontalTopology, Vec3d};
 use mclone_mesh::{GrassPatch, RenderSectionKey, TexturedRenderSectionMesh};
 
 use crate::chunk::DEPTH_FORMAT;
 
-pub(crate) const STATIC_GRASS_BLADE_COUNT: u32 = 6;
-pub(crate) const STATIC_GRASS_VERTICES_PER_PATCH: u32 = STATIC_GRASS_BLADE_COUNT * 6;
+pub(crate) const STATIC_GRASS_BLADE_COUNT: u32 = 8;
+const GRASS_VERTICES_PER_BLADE: u32 = 6;
 const GRASS_PATCH_MIN_CAPACITY: u32 = 4_096;
 const GRASS_PIPELINE_VARIANT_COUNT: usize = 6;
 
@@ -20,6 +21,9 @@ pub(crate) struct GrassDrawStats {
     pub estimated_blade_count: u32,
     pub draw_calls: usize,
     pub resident_bytes: u64,
+    pub near_patch_count: u32,
+    pub middle_patch_count: u32,
+    pub far_patch_count: u32,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -27,6 +31,76 @@ pub(crate) struct GrassUploadStats {
     pub uploaded_patch_count: u32,
     pub removed_patch_count: u32,
     pub uploaded_bytes: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, Ord, PartialEq, PartialOrd)]
+pub enum GrassQuality {
+    #[default]
+    Off,
+    Sparse,
+    Lush,
+    Ultra,
+}
+
+impl GrassQuality {
+    pub const fn enabled(self) -> bool {
+        !matches!(self, Self::Off)
+    }
+
+    const fn profile(self) -> Option<GrassQualityProfile> {
+        match self {
+            Self::Off => None,
+            Self::Sparse => Some(GrassQualityProfile {
+                radius_blocks: 64.0,
+                near_end_blocks: 24.0,
+                middle_end_blocks: 48.0,
+                near_blades: 2,
+                middle_blades: 1,
+                far_blades: 1,
+            }),
+            Self::Lush => Some(GrassQualityProfile {
+                radius_blocks: 128.0,
+                near_end_blocks: 48.0,
+                middle_end_blocks: 96.0,
+                near_blades: 6,
+                middle_blades: 4,
+                far_blades: 2,
+            }),
+            Self::Ultra => Some(GrassQualityProfile {
+                radius_blocks: 192.0,
+                near_end_blocks: 64.0,
+                middle_end_blocks: 128.0,
+                near_blades: 8,
+                middle_blades: 6,
+                far_blades: 3,
+            }),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct GrassQualityProfile {
+    radius_blocks: f32,
+    near_end_blocks: f32,
+    middle_end_blocks: f32,
+    near_blades: u32,
+    middle_blades: u32,
+    far_blades: u32,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+enum GrassLodTier {
+    Near,
+    Middle,
+    Far,
+    #[default]
+    Hidden,
+}
+
+#[derive(Default)]
+struct GrassObserverLodHistory {
+    quality: GrassQuality,
+    tiers: BTreeMap<RenderSectionKey, GrassLodTier>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -435,6 +509,7 @@ fn create_grass_patch_buffer(device: &wgpu::Device, capacity: u32) -> wgpu::Buff
 pub(crate) struct GrassPatchDrawResources {
     arena: Option<GrassPatchArena>,
     sections: BTreeMap<RenderSectionKey, Range<u32>>,
+    lod_histories: RefCell<BTreeMap<u32, GrassObserverLodHistory>>,
 }
 
 impl GrassPatchDrawResources {
@@ -452,6 +527,9 @@ impl GrassPatchDrawResources {
             {
                 stats.removed_patch_count += range.len() as u32;
                 arena.ranges.release(range);
+            }
+            for history in self.lod_histories.get_mut().values_mut() {
+                history.tiers.remove(&key);
             }
         }
         for section in sections {
@@ -482,6 +560,7 @@ impl GrassPatchDrawResources {
         }
         if self.sections.is_empty() {
             self.arena = None;
+            self.lod_histories.get_mut().clear();
         }
         Ok(stats)
     }
@@ -498,6 +577,10 @@ impl GrassPatchDrawResources {
         &'pass self,
         pass: &mut wgpu::RenderPass<'pass>,
         pipeline: &'pass wgpu::RenderPipeline,
+        quality: GrassQuality,
+        observer_id: u32,
+        observer_position: [f32; 3],
+        topology: HorizontalTopology,
         mut visible: impl FnMut(RenderSectionKey) -> bool,
     ) -> GrassDrawStats {
         let resident_patch_count = self.resident_patch_count();
@@ -509,19 +592,103 @@ impl GrassPatchDrawResources {
         let Some(arena) = self.arena.as_ref() else {
             return stats;
         };
+        let Some(profile) = quality.profile() else {
+            return stats;
+        };
+        let mut histories = self.lod_histories.borrow_mut();
+        let history = histories.entry(observer_id).or_default();
+        if history.quality != quality {
+            history.quality = quality;
+            history.tiers.clear();
+        }
         pass.set_pipeline(pipeline);
         pass.set_vertex_buffer(0, arena.buffer.slice(..));
         for (key, range) in &self.sections {
             if !visible(*key) {
                 continue;
             }
+            let distance = grass_section_distance(*key, observer_position, topology);
+            let previous = history.tiers.get(key).copied().unwrap_or_default();
+            let tier = grass_lod_tier(profile, distance, previous);
+            history.tiers.insert(*key, tier);
+            let blade_count = match tier {
+                GrassLodTier::Near => {
+                    stats.near_patch_count += range.len() as u32;
+                    profile.near_blades
+                }
+                GrassLodTier::Middle => {
+                    stats.middle_patch_count += range.len() as u32;
+                    profile.middle_blades
+                }
+                GrassLodTier::Far => {
+                    stats.far_patch_count += range.len() as u32;
+                    profile.far_blades
+                }
+                GrassLodTier::Hidden => continue,
+            };
+            debug_assert!(blade_count <= STATIC_GRASS_BLADE_COUNT);
             let patch_count = range.len() as u32;
-            pass.draw(0..STATIC_GRASS_VERTICES_PER_PATCH, range.clone());
+            pass.draw(0..blade_count * GRASS_VERTICES_PER_BLADE, range.clone());
             stats.drawn_patch_count += patch_count;
-            stats.estimated_blade_count += patch_count * STATIC_GRASS_BLADE_COUNT;
+            stats.estimated_blade_count += patch_count * blade_count;
             stats.draw_calls += 1;
         }
         stats
+    }
+}
+
+fn grass_section_distance(
+    key: RenderSectionKey,
+    observer_position: [f32; 3],
+    topology: HorizontalTopology,
+) -> f32 {
+    let section_center = Vec3d::new(
+        f64::from(key.chunk_x) * 16.0 + 8.0,
+        f64::from(key.section_y) * 16.0 + 8.0,
+        f64::from(key.chunk_z) * 16.0 + 8.0,
+    );
+    let observer = Vec3d::new(
+        f64::from(observer_position[0]),
+        f64::from(observer_position[1]),
+        f64::from(observer_position[2]),
+    );
+    let delta = topology.shortest_position_displacement(observer, section_center);
+    (delta.x.mul_add(delta.x, delta.z * delta.z) as f32).sqrt()
+}
+
+fn grass_lod_tier(
+    profile: GrassQualityProfile,
+    distance: f32,
+    previous: GrassLodTier,
+) -> GrassLodTier {
+    const HYSTERESIS_BLOCKS: f32 = 4.0;
+    match previous {
+        GrassLodTier::Near if distance <= profile.near_end_blocks + HYSTERESIS_BLOCKS => {
+            GrassLodTier::Near
+        }
+        GrassLodTier::Middle if distance < profile.near_end_blocks - HYSTERESIS_BLOCKS => {
+            GrassLodTier::Near
+        }
+        GrassLodTier::Middle if distance <= profile.middle_end_blocks + HYSTERESIS_BLOCKS => {
+            GrassLodTier::Middle
+        }
+        GrassLodTier::Far if distance < profile.middle_end_blocks - HYSTERESIS_BLOCKS => {
+            if distance < profile.near_end_blocks {
+                GrassLodTier::Near
+            } else {
+                GrassLodTier::Middle
+            }
+        }
+        GrassLodTier::Far if distance <= profile.radius_blocks + HYSTERESIS_BLOCKS => {
+            GrassLodTier::Far
+        }
+        GrassLodTier::Hidden if distance > profile.radius_blocks - HYSTERESIS_BLOCKS => {
+            GrassLodTier::Hidden
+        }
+        _ if distance <= profile.near_end_blocks => GrassLodTier::Near,
+        _ if distance <= profile.middle_end_blocks => GrassLodTier::Middle,
+        _ if distance <= profile.radius_blocks => GrassLodTier::Far,
+        _ => GrassLodTier::Hidden,
     }
 }
 
@@ -572,6 +739,47 @@ mod tests {
             assert!(source.contains("clip_plane"));
             assert!(source.contains("discard"));
         }
+    }
+
+    #[test]
+    fn grass_quality_profiles_use_hysteretic_lod_bands() {
+        let profile = GrassQuality::Lush.profile().unwrap();
+        assert_eq!(
+            grass_lod_tier(profile, 47.0, GrassLodTier::Hidden),
+            GrassLodTier::Near
+        );
+        assert_eq!(
+            grass_lod_tier(profile, 51.0, GrassLodTier::Near),
+            GrassLodTier::Near
+        );
+        assert_eq!(
+            grass_lod_tier(profile, 53.0, GrassLodTier::Near),
+            GrassLodTier::Middle
+        );
+        assert_eq!(
+            grass_lod_tier(profile, 99.0, GrassLodTier::Middle),
+            GrassLodTier::Middle
+        );
+        assert_eq!(
+            grass_lod_tier(profile, 101.0, GrassLodTier::Middle),
+            GrassLodTier::Far
+        );
+        assert_eq!(
+            grass_lod_tier(profile, 131.0, GrassLodTier::Far),
+            GrassLodTier::Far
+        );
+        assert_eq!(
+            grass_lod_tier(profile, 133.0, GrassLodTier::Far),
+            GrassLodTier::Hidden
+        );
+    }
+
+    #[test]
+    fn periodic_grass_lod_distance_uses_the_shortest_seam_lift() {
+        let topology = HorizontalTopology::cylinder_x(0, 32);
+        let key = RenderSectionKey::new(0, 0, 0);
+        let seam_distance = grass_section_distance(key, [511.0, 8.0, 8.0], topology);
+        assert_eq!(seam_distance, 9.0);
     }
 
     #[test]

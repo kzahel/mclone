@@ -126,6 +126,7 @@ use mclone_input::{
 };
 use mclone_mesh::{RenderSectionKey, TexturedRenderSectionMesh, quad_face_count_from_indices};
 use mclone_protocol::{DebugActorKind, DebugHotbarItem, EntitySnapshot, RemotePlayerUpdate};
+use mclone_render::GrassQuality;
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_render::actor_assets::ActorTextureAssets;
 use mclone_render::actor_assets::ActorTextureImage;
@@ -178,13 +179,14 @@ use mclone_server::{SimulationCadenceConfig, WorkerFrameMetrics};
 use mclone_ui::{
     Color, DEFAULT_JOIN_REMOTE_ADDR, DebugActorTool, DebugOverlay, FlatHotbarOverlay, FlatHud,
     FlatHudDebugOverlay, GameAuxiliarySplitMode, GameCollisionMode, GameDeathCause,
-    GameFlatPresentationState, GameFramePacingMode, GameLeafDetail, GameLocalPlayControllerFamily,
-    GameLocalPlayGuestInput, GameLocalPlayState, GameMovementMode, GamePlayerModel, GameScreen,
-    GameSimulationCadence, GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameUiAction,
-    GameUiHost, GameUiRenderState, GameWorldRenderScaleMode, GameXrTurnMode, GamepadHudOverlay,
-    GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay, Point, Rect, StatusOverlay,
-    StorageProfileBackend, StorageProfileUiState, TouchOverlay, UiDebugSnapshot, UiDrawCacheStats,
-    UiPanelRevision, WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
+    GameFlatPresentationState, GameFramePacingMode, GameGrassDetail, GameLeafDetail,
+    GameLocalPlayControllerFamily, GameLocalPlayGuestInput, GameLocalPlayState, GameMovementMode,
+    GamePlayerModel, GameScreen, GameSimulationCadence, GameTouchSettings, GameTravelAssistMode,
+    GameTurnMode, GameUiAction, GameUiHost, GameUiRenderState, GameWorldRenderScaleMode,
+    GameXrTurnMode, GamepadHudOverlay, GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay,
+    Point, Rect, StatusOverlay, StorageProfileBackend, StorageProfileUiState, TouchOverlay,
+    UiDebugSnapshot, UiDrawCacheStats, UiPanelRevision, WorldCatalogUiStatus,
+    render_loading_progress_overlay, render_status_overlay,
 };
 
 mod asset_replacement;
@@ -215,6 +217,24 @@ pub(crate) const fn game_leaf_detail(detail: mclone_mesh::LeafDetail) -> GameLea
     match detail {
         mclone_mesh::LeafDetail::Blocky => GameLeafDetail::Blocky,
         mclone_mesh::LeafDetail::Bushy => GameLeafDetail::Bushy,
+    }
+}
+
+pub(crate) const fn engine_grass_detail(detail: GameGrassDetail) -> GrassQuality {
+    match detail {
+        GameGrassDetail::Off => GrassQuality::Off,
+        GameGrassDetail::Sparse => GrassQuality::Sparse,
+        GameGrassDetail::Lush => GrassQuality::Lush,
+        GameGrassDetail::Ultra => GrassQuality::Ultra,
+    }
+}
+
+pub(crate) const fn game_grass_detail(detail: GrassQuality) -> GameGrassDetail {
+    match detail {
+        GrassQuality::Off => GameGrassDetail::Off,
+        GrassQuality::Sparse => GameGrassDetail::Sparse,
+        GrassQuality::Lush => GameGrassDetail::Lush,
+        GrassQuality::Ultra => GameGrassDetail::Ultra,
     }
 }
 
@@ -2139,6 +2159,12 @@ impl McloneSceneHost {
         self.active_world.render_stats.drawn_section_count = left.drawn_section_count;
         self.active_world.render_stats.drawn_face_count = left.drawn_face_count();
         self.active_world.render_stats.drawn_index_count = left.drawn_index_count;
+        self.active_world.render_stats.grass_resident_patch_count = left.grass_resident_patch_count;
+        self.active_world.render_stats.grass_drawn_patch_count = left.grass_drawn_patch_count;
+        self.active_world.render_stats.grass_estimated_blade_count =
+            left.grass_estimated_blade_count;
+        self.active_world.render_stats.grass_draw_calls = left.grass_draw_calls;
+        self.active_world.render_stats.grass_resident_bytes = left.grass_resident_bytes;
         self.rendered_frames += 1;
         self.record_warm_world_first_destination_frame(
             left.drawn_section_count,
@@ -2827,6 +2853,13 @@ impl McloneSceneHost {
         self.active_world.render_stats.drawn_section_count = stats[0].drawn_section_count;
         self.active_world.render_stats.drawn_face_count = stats[0].drawn_face_count();
         self.active_world.render_stats.drawn_index_count = stats[0].drawn_index_count;
+        self.active_world.render_stats.grass_resident_patch_count =
+            stats[0].grass_resident_patch_count;
+        self.active_world.render_stats.grass_drawn_patch_count = stats[0].grass_drawn_patch_count;
+        self.active_world.render_stats.grass_estimated_blade_count =
+            stats[0].grass_estimated_blade_count;
+        self.active_world.render_stats.grass_draw_calls = stats[0].grass_draw_calls;
+        self.active_world.render_stats.grass_resident_bytes = stats[0].grass_resident_bytes;
         if let (Some(preview), Some((preview_stats, cull_ms, draw_ms, bounded, outside))) =
             (self.embedded_world_preview.as_mut(), preview_stats)
         {
@@ -3148,6 +3181,7 @@ impl McloneSceneHost {
         frame_deadline: Option<MonotonicDeadline>,
         timing: &mut XrTerrainFrameTiming,
     ) -> Result<XrTerrainUploadSummary> {
+        self.reconcile_grass_compile_policy();
         if self.defer_embedded_world_destination_preparation() {
             let upload = self.frozen_runtime_upload_summary();
             self.advance_warm_world_gpu(device, camera_position, frame_deadline)?;
@@ -3191,6 +3225,20 @@ impl McloneSceneHost {
         self.advance_warm_world_gpu(device, camera_position, standby_deadline)?;
         self.synchronize_world_gate_state();
         Ok(upload)
+    }
+
+    fn reconcile_grass_compile_policy(&mut self) {
+        let enabled = self.render_options.grass_detail.enabled();
+        if let Some(runtime) = self.active_world.runtime.as_mut() {
+            runtime.set_grass_patches_enabled(enabled);
+        }
+        if let Some(runtime) = self
+            .standby_world
+            .as_mut()
+            .and_then(|slot| slot.runtime.as_mut())
+        {
+            runtime.set_grass_patches_enabled(enabled);
+        }
     }
 
     fn sync_player_lifecycle_ui(&mut self) {
@@ -3729,6 +3777,10 @@ impl McloneSceneHost {
         slot.render_stats.last_uploaded_vertex_count = upload_report.uploaded_vertex_count;
         slot.render_stats.last_uploaded_face_count = upload_report.uploaded_face_count();
         slot.render_stats.last_uploaded_index_count = upload_report.uploaded_index_count;
+        slot.render_stats.last_uploaded_grass_patch_count =
+            upload_report.uploaded_grass_patch_count;
+        slot.render_stats.last_removed_grass_patch_count = upload_report.removed_grass_patch_count;
+        slot.render_stats.last_uploaded_grass_bytes = upload_report.uploaded_grass_bytes;
         let upload_queue = slot.section_uploads.stats();
         let pending_render_count_start = policy.clock.now();
         let pending_render_chunks_after = runtime.pending_render_chunk_count();

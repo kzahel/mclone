@@ -1443,7 +1443,6 @@ mod tests {
         let atlas_rgba = [255, 255, 255, 255];
         let camera = fixture_camera(0.0);
         let baseline_path = PathBuf::from("/tmp/mclone-238-static-grass-off.png");
-        let enabled_path = PathBuf::from("/tmp/mclone-238-static-grass-on.png");
         let base_options = HeadlessChunkOptions {
             path: baseline_path.clone(),
             width: WIDTH,
@@ -1467,29 +1466,39 @@ mod tests {
             atlas,
             render_options,
         )?;
-        write_headless_textured_sections_png_with_options(
-            HeadlessChunkOptions {
-                path: enabled_path.clone(),
-                ..base_options
-            },
-            &sections,
-            atlas,
-            render_options.with_grass_enabled(true),
-        )?;
-
         let baseline = image::ImageReader::open(baseline_path)?
             .decode()?
             .to_rgba8();
-        let enabled = image::ImageReader::open(enabled_path)?.decode()?.to_rgba8();
-        let changed_pixels = baseline
-            .pixels()
-            .zip(enabled.pixels())
-            .filter(|(baseline, enabled)| baseline != enabled)
-            .count();
-        assert!(
-            changed_pixels > 500,
-            "expected visible grass geometry, found {changed_pixels} changed pixels"
-        );
+        let mut previous_changed_pixels = 0;
+        for (quality, label) in [
+            (crate::GrassQuality::Sparse, "sparse"),
+            (crate::GrassQuality::Lush, "lush"),
+            (crate::GrassQuality::Ultra, "ultra"),
+        ] {
+            let path = PathBuf::from(format!("/tmp/mclone-238-static-grass-{label}.png"));
+            write_headless_textured_sections_png_with_options(
+                HeadlessChunkOptions {
+                    path: path.clone(),
+                    ..base_options.clone()
+                },
+                &sections,
+                atlas,
+                render_options.with_grass_detail(quality),
+            )?;
+            let enabled = image::ImageReader::open(path)?.decode()?.to_rgba8();
+            let changed_pixels = baseline
+                .pixels()
+                .zip(enabled.pixels())
+                .filter(|(baseline, enabled)| baseline != enabled)
+                .count();
+            assert!(
+                changed_pixels > previous_changed_pixels,
+                "{label} should add pixels beyond the preceding quality: \
+                 {changed_pixels} <= {previous_changed_pixels}"
+            );
+            previous_changed_pixels = changed_pixels;
+        }
+        assert!(previous_changed_pixels > 500);
         Ok(())
     }
 

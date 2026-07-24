@@ -379,6 +379,11 @@ impl WebRenderCompilerSession {
         self.compile_count
     }
 
+    #[wasm_bindgen(js_name = grassPatchesEnabled)]
+    pub fn grass_patches_enabled(&self) -> bool {
+        self.grass_patches
+    }
+
     /// Create an independent per-world snapshot mirror while retaining the
     /// one immutable parsed asset catalog owned by the Worker.
     #[wasm_bindgen(js_name = forkWorldSession)]
@@ -2985,6 +2990,7 @@ pub(super) fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::Respawn => "respawn",
         GameUiAction::ToggleSectionOcclusion => "toggleSectionOcclusion",
         GameUiAction::SetLeafDetail(_) => "setLeafDetail",
+        GameUiAction::SetGrassDetail(_) => "setGrassDetail",
         GameUiAction::ToggleFullbright => "toggleFullbright",
         GameUiAction::ToggleFarLod => "toggleFarLod",
         GameUiAction::CycleFarLodDetail => "cycleFarLodDetail",

@@ -26,7 +26,7 @@ use crate::color_profile::{RenderColorProfile, RenderConfig};
 use crate::fog::RenderFog;
 use crate::gpu_timestamps::GpuTimestampFrameEncoder;
 use crate::grass::{
-    GrassDrawStats, GrassPatchDrawResources, GrassPipelineCache, GrassPipelineVariant,
+    GrassDrawStats, GrassPatchDrawResources, GrassPipelineCache, GrassPipelineVariant, GrassQuality,
 };
 use crate::placement::{
     CompositionClip, WorldCompositionContext, WorldPlacement, WorldSourceBounds,
@@ -504,6 +504,9 @@ pub struct TexturedSectionRenderStats {
     pub grass_estimated_blade_count: u32,
     pub grass_draw_calls: usize,
     pub grass_resident_bytes: u64,
+    pub grass_near_patch_count: u32,
+    pub grass_middle_patch_count: u32,
+    pub grass_far_patch_count: u32,
 }
 
 /// Pull-only exact section sets for one render view. `paintable_frustum_keys`
@@ -570,7 +573,7 @@ pub struct TexturedSectionRenderOptions {
     pub color_profile: RenderColorProfile,
     /// Draw request-gated grass patch artifacts. Off remains allocation-free
     /// when compilation also omits grass patches.
-    pub grass_enabled: bool,
+    pub grass_detail: GrassQuality,
     /// Active dimension topology used only for observer-local presentation.
     /// Canonical mesh/upload identity remains unchanged.
     pub topology: HorizontalTopology,
@@ -584,7 +587,7 @@ impl Default for TexturedSectionRenderOptions {
             sky_darken: 1.0,
             fog: RenderFog::none(),
             color_profile: RenderColorProfile::default(),
-            grass_enabled: false,
+            grass_detail: GrassQuality::Off,
             topology: HorizontalTopology::UNBOUNDED,
         }
     }
@@ -607,7 +610,16 @@ impl TexturedSectionRenderOptions {
     }
 
     pub fn with_grass_enabled(mut self, grass_enabled: bool) -> Self {
-        self.grass_enabled = grass_enabled;
+        self.grass_detail = if grass_enabled {
+            GrassQuality::Lush
+        } else {
+            GrassQuality::Off
+        };
+        self
+    }
+
+    pub fn with_grass_detail(mut self, grass_detail: GrassQuality) -> Self {
+        self.grass_detail = grass_detail;
         self
     }
 
@@ -624,6 +636,9 @@ impl TexturedSectionRenderStats {
         self.grass_estimated_blade_count = stats.estimated_blade_count;
         self.grass_draw_calls = stats.draw_calls;
         self.grass_resident_bytes = stats.resident_bytes;
+        self.grass_near_patch_count = stats.near_patch_count;
+        self.grass_middle_patch_count = stats.middle_patch_count;
+        self.grass_far_patch_count = stats.far_patch_count;
     }
 
     pub fn loaded_face_count(&self) -> u32 {
@@ -1078,6 +1093,7 @@ pub struct PreparedTexturedSectionStereoDraw {
     drawn_keys: FxHashSet<RenderSectionKey>,
     draw_masks: FxHashMap<RenderSectionKey, StereoDrawMask>,
     translucent_keys: Vec<RenderSectionKey>,
+    grass_observer_position: [f32; 3],
 }
 
 impl PreparedTexturedSectionStereoDraw {
@@ -4362,6 +4378,14 @@ impl TexturedSectionDrawResources {
         Arc::strong_count(&self.shared)
     }
 
+    /// Immediately release presentation-only grass residency. Off quality uses
+    /// this before asynchronous section recompilation removes patch metadata.
+    pub fn clear_grass_patches(&mut self) -> u32 {
+        let released = self.grass.resident_patch_count();
+        self.grass = GrassPatchDrawResources::default();
+        released
+    }
+
     /// Allocate the opt-in placed pipeline shell for this draw store. Nothing
     /// in `new` calls this, preserving the ordinary single-world allocation
     /// and shader-compilation path.
@@ -5390,17 +5414,21 @@ impl TexturedSectionDrawResources {
         if let (Some(timing), Some(start)) = (timing.as_deref_mut(), uniform_start) {
             timing.uniform_write_ms += timing_elapsed_ms(start);
         }
-        let grass_pipeline = (options.grass_enabled && !self.grass.is_empty()).then(|| {
-            let uniform_layout = selected.solid_pipeline().get_bind_group_layout(0);
-            let texture_layout = selected.solid_pipeline().get_bind_group_layout(1);
-            let variant = match context.clip() {
-                CompositionClip::Unbounded => GrassPipelineVariant::Placed,
-                CompositionClip::HalfSpace(_) => GrassPipelineVariant::ClippedPlaced,
-            };
-            self.shared
-                .grass_pipelines
-                .pipeline(device, variant, &uniform_layout, &texture_layout)
-        });
+        let grass_pipeline =
+            (options.grass_detail.enabled() && !self.grass.is_empty()).then(|| {
+                let uniform_layout = selected.solid_pipeline().get_bind_group_layout(0);
+                let texture_layout = selected.solid_pipeline().get_bind_group_layout(1);
+                let variant = match context.clip() {
+                    CompositionClip::Unbounded => GrassPipelineVariant::Placed,
+                    CompositionClip::HalfSpace(_) => GrassPipelineVariant::ClippedPlaced,
+                };
+                self.shared.grass_pipelines.pipeline(
+                    device,
+                    variant,
+                    &uniform_layout,
+                    &texture_layout,
+                )
+            });
         let mut grass_stats = GrassDrawStats::default();
         let encode_start = timing.is_some().then(timing_now);
         {
@@ -5450,9 +5478,15 @@ impl TexturedSectionDrawResources {
                 }
             }
             if let Some(pipeline) = grass_pipeline.as_deref() {
-                grass_stats = self
-                    .grass
-                    .draw(&mut pass, pipeline, |key| culling.drawn_keys.contains(&key));
+                grass_stats = self.grass.draw(
+                    &mut pass,
+                    pipeline,
+                    options.grass_detail,
+                    view_slot.view().get(),
+                    source_render_view.camera_position.to_array(),
+                    options.topology,
+                    |key| culling.drawn_keys.contains(&key),
+                );
             }
         }
         if let (Some(timing), Some(start)) = (timing.as_deref_mut(), encode_start) {
@@ -5502,6 +5536,7 @@ impl TexturedSectionDrawResources {
             drawn_keys: culling.drawn_keys,
             draw_masks: culling.draw_masks,
             translucent_keys,
+            grass_observer_position: stereo_center_position(source_render_views).to_array(),
         }
     }
 
@@ -5588,17 +5623,21 @@ impl TexturedSectionDrawResources {
             context,
             renderer.color_format,
         );
-        let grass_pipeline = (options.grass_enabled && !self.grass.is_empty()).then(|| {
-            let uniform_layout = selected.solid_pipeline().get_bind_group_layout(0);
-            let texture_layout = selected.solid_pipeline().get_bind_group_layout(1);
-            let variant = match context.clip() {
-                CompositionClip::Unbounded => GrassPipelineVariant::Placed,
-                CompositionClip::HalfSpace(_) => GrassPipelineVariant::ClippedPlaced,
-            };
-            self.shared
-                .grass_pipelines
-                .pipeline(device, variant, &uniform_layout, &texture_layout)
-        });
+        let grass_pipeline =
+            (options.grass_detail.enabled() && !self.grass.is_empty()).then(|| {
+                let uniform_layout = selected.solid_pipeline().get_bind_group_layout(0);
+                let texture_layout = selected.solid_pipeline().get_bind_group_layout(1);
+                let variant = match context.clip() {
+                    CompositionClip::Unbounded => GrassPipelineVariant::Placed,
+                    CompositionClip::HalfSpace(_) => GrassPipelineVariant::ClippedPlaced,
+                };
+                self.shared.grass_pipelines.pipeline(
+                    device,
+                    variant,
+                    &uniform_layout,
+                    &texture_layout,
+                )
+            });
         let mut grass_stats = GrassDrawStats::default();
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -5648,9 +5687,15 @@ impl TexturedSectionDrawResources {
             }
             if let Some(pipeline) = grass_pipeline.as_deref() {
                 let eye = stereo_eye_for_slot(view_slot);
-                grass_stats = self.grass.draw(&mut pass, pipeline, |key| {
-                    prepared_draw.draws_in_eye(key, eye)
-                });
+                grass_stats = self.grass.draw(
+                    &mut pass,
+                    pipeline,
+                    options.grass_detail,
+                    0,
+                    prepared_draw.grass_observer_position,
+                    options.topology,
+                    |key| prepared_draw.draws_in_eye(key, eye),
+                );
             }
         }
         let mut stats = prepared_draw.stats_for_eye(stereo_eye_for_slot(view_slot));
@@ -5719,7 +5764,7 @@ impl TexturedSectionDrawResources {
             context,
             renderer.color_format,
         );
-        let grass_pipeline = (options.iter().any(|options| options.grass_enabled)
+        let grass_pipeline = (options.iter().any(|options| options.grass_detail.enabled())
             && !self.grass.is_empty())
         .then(|| {
             let uniform_layout = multiview.solid_pipeline().get_bind_group_layout(0);
@@ -5780,9 +5825,15 @@ impl TexturedSectionDrawResources {
                 }
             }
             if let Some(pipeline) = grass_pipeline.as_deref() {
-                grass_stats = self.grass.draw(&mut pass, pipeline, |key| {
-                    prepared_draw.drawn_keys.contains(&key)
-                });
+                grass_stats = self.grass.draw(
+                    &mut pass,
+                    pipeline,
+                    options[0].grass_detail,
+                    0,
+                    prepared_draw.grass_observer_position,
+                    options[0].topology,
+                    |key| prepared_draw.drawn_keys.contains(&key),
+                );
             }
         }
         let mut stats = prepared_draw.stats();
@@ -6114,7 +6165,7 @@ impl TexturedSectionDrawResources {
             self.shared.renderer.color_format,
         );
         let grass_pipeline = (phase.draws_opaque()
-            && options.iter().any(|options| options.grass_enabled)
+            && options.iter().any(|options| options.grass_detail.enabled())
             && !self.grass.is_empty())
         .then(|| {
             let uniform_layout = renderer.solid_pipeline.get_bind_group_layout(0);
@@ -6192,9 +6243,15 @@ impl TexturedSectionDrawResources {
                 }
             }
             if let Some(pipeline) = grass_pipeline.as_deref() {
-                grass_stats = self.grass.draw(&mut pass, pipeline, |key| {
-                    prepared_draw.drawn_keys.contains(&key)
-                });
+                grass_stats = self.grass.draw(
+                    &mut pass,
+                    pipeline,
+                    options[0].grass_detail,
+                    0,
+                    prepared_draw.grass_observer_position,
+                    options[0].topology,
+                    |key| prepared_draw.drawn_keys.contains(&key),
+                );
             }
         }
         let mut stats = prepared_draw.stats();
@@ -6383,11 +6440,12 @@ impl TexturedSectionDrawResources {
         };
         let direct_draw_calls = direct_opaque_draw_calls + translucent_sections.len();
         let grass_pipeline =
-            (phase.draws_opaque() && options.grass_enabled && !self.grass.is_empty()).then(|| {
-                self.shared
-                    .grass_pipelines
-                    .cached_pipeline(GrassPipelineVariant::Direct)
-            });
+            (phase.draws_opaque() && options.grass_detail.enabled() && !self.grass.is_empty())
+                .then(|| {
+                    self.shared
+                        .grass_pipelines
+                        .cached_pipeline(GrassPipelineVariant::Direct)
+                });
         let mut grass_stats = GrassDrawStats::default();
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -6489,9 +6547,15 @@ impl TexturedSectionDrawResources {
                 }
             }
             if let Some(pipeline) = grass_pipeline.as_deref() {
-                grass_stats = self
-                    .grass
-                    .draw(&mut pass, pipeline, |key| culling.drawn_keys.contains(&key));
+                grass_stats = self.grass.draw(
+                    &mut pass,
+                    pipeline,
+                    options.grass_detail,
+                    view_slot.view().get(),
+                    render_view.camera_position.to_array(),
+                    options.topology,
+                    |key| culling.drawn_keys.contains(&key),
+                );
             }
         }
         if let Some(timing) = &mut timing {
@@ -6568,6 +6632,7 @@ impl TexturedSectionDrawResources {
             drawn_keys: culling.drawn_keys,
             draw_masks: culling.draw_masks,
             translucent_keys,
+            grass_observer_position: stereo_center_position(render_views).to_array(),
         }
     }
 
@@ -6599,11 +6664,12 @@ impl TexturedSectionDrawResources {
 
         let encode_start = timing.as_ref().map(|_| timing_now());
         let grass_pipeline =
-            (phase.draws_opaque() && options.grass_enabled && !self.grass.is_empty()).then(|| {
-                self.shared
-                    .grass_pipelines
-                    .cached_pipeline(GrassPipelineVariant::Direct)
-            });
+            (phase.draws_opaque() && options.grass_detail.enabled() && !self.grass.is_empty())
+                .then(|| {
+                    self.shared
+                        .grass_pipelines
+                        .cached_pipeline(GrassPipelineVariant::Direct)
+                });
         let mut grass_stats = GrassDrawStats::default();
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -6674,9 +6740,15 @@ impl TexturedSectionDrawResources {
             }
             if let Some(pipeline) = grass_pipeline.as_deref() {
                 let eye = stereo_eye_for_slot(view_slot);
-                grass_stats = self.grass.draw(&mut pass, pipeline, |key| {
-                    prepared_draw.draws_in_eye(key, eye)
-                });
+                grass_stats = self.grass.draw(
+                    &mut pass,
+                    pipeline,
+                    options.grass_detail,
+                    0,
+                    prepared_draw.grass_observer_position,
+                    options.topology,
+                    |key| prepared_draw.draws_in_eye(key, eye),
+                );
             }
         }
         if let (Some(timing), Some(encode_start)) = (&mut timing, encode_start) {

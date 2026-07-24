@@ -64,6 +64,13 @@ const initialLeafDetail = leafDetailArgIndex >= 0
 if (initialLeafDetail && !["blocky", "bushy"].includes(initialLeafDetail)) {
   throw new Error(`--leaf-detail requires blocky or bushy; got ${initialLeafDetail}`);
 }
+const grassDetailArgIndex = process.argv.indexOf("--grass-detail");
+const initialGrassDetail = grassDetailArgIndex >= 0
+  ? String(process.argv[grassDetailArgIndex + 1] ?? "")
+  : "";
+if (initialGrassDetail && !["off", "sparse", "lush", "ultra"].includes(initialGrassDetail)) {
+  throw new Error(`--grass-detail requires off, sparse, lush, or ultra; got ${initialGrassDetail}`);
+}
 const movementPerf = process.argv.includes("--movement-perf")
   || process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF === "1";
 const blockEditProbe = process.argv.includes("--block-edit-probe")
@@ -353,13 +360,17 @@ async function run() {
         }
       : undefined);
     const page = await context.newPage();
-    if (initialLeafDetail) {
-      await page.addInitScript((leafDetail) => {
+    if (initialLeafDetail || initialGrassDetail) {
+      await page.addInitScript(({ leafDetail, grassDetail }) => {
+        const preferences = {
+          leafDetail: leafDetail || "blocky",
+        };
+        if (grassDetail) preferences.grassDetail = grassDetail;
         globalThis.localStorage?.setItem("mclone.graphics.preferences.v1", JSON.stringify({
           schema: 1,
-          preferences: { leafDetail },
+          preferences,
         }));
-      }, initialLeafDetail);
+      }, { leafDetail: initialLeafDetail, grassDetail: initialGrassDetail });
     }
     if (deathUiProbe) {
       await page.addInitScript(() => {
@@ -1670,6 +1681,7 @@ async function run() {
         targetPreviewProbe,
         blockInteractionProbe,
         remoteServer?.websocketUrl ?? null,
+        initialGrassDetail || null,
       );
       assertNativeUiProbe(nativeUiProbe);
       console.log(JSON.stringify({
@@ -1680,6 +1692,7 @@ async function run() {
         nativeUiCanvasScreenshotPath,
         appLoop,
         initialLeafDetail: initialLeafDetail || null,
+        initialGrassDetail: initialGrassDetail || null,
         remoteWebSocket,
         remoteWebSocketUrl: remoteServer?.websocketUrl ?? null,
         canvasPixels,
@@ -7855,6 +7868,7 @@ function assertAppLoopResult(
   targetPreviewProbe,
   blockInteractionProbe,
   remoteWebSocketUrl = null,
+  expectedGrassDetail = null,
 ) {
   if (pageErrors.length > 0) {
     throw new Error(`browser app page errors:\n${pageErrors.join("\n")}`);
@@ -7906,6 +7920,25 @@ function assertAppLoopResult(
   }
   if (!result.lastCompileReport?.workerCompileUsed) {
     throw new Error(`native web app did not stream through the browser worker compiler:\n${JSON.stringify(result, null, 2)}`);
+  }
+  if (
+    expectedGrassDetail
+    && (
+      result.lastReport?.grassDetail !== expectedGrassDetail
+      || result.lastReport?.grassPatchesCompileEnabled !== (expectedGrassDetail !== "off")
+      || (
+        expectedGrassDetail !== "off"
+        && (
+          result.lastCompileReport?.grassPatchesRequested !== true
+          || result.lastReport?.grassResidentPatchCount <= 0
+          || result.lastReport?.grassDrawnPatchCount <= 0
+          || result.lastReport?.grassEstimatedBladeCount <= 0
+          || result.lastReport?.grassDrawCalls <= 0
+        )
+      )
+    )
+  ) {
+    throw new Error(`native web app did not restore and render the requested grass detail:\n${JSON.stringify(result, null, 2)}`);
   }
   if (
     result.compileTimingCount < 2

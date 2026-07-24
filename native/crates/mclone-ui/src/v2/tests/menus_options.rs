@@ -1,6 +1,6 @@
 use super::*;
 use crate::{
-    GameAuxiliarySplitMode, GameFlatPresentationState, GameLeafDetail,
+    GameAuxiliarySplitMode, GameFlatPresentationState, GameGrassDetail, GameLeafDetail,
     GameLocalPlayControllerFamily, GameLocalPlayGuestInput, GameLocalPlayLayout,
     GameLocalPlayState, GameWorldRenderScaleMode,
 };
@@ -473,6 +473,34 @@ fn graphics_options_show_and_cycle_leaf_detail() {
     assert_eq!(
         surface.pointer_up(point_in(leaf_detail.rect), state).1,
         Some(GameUiAction::SetLeafDetail(GameLeafDetail::Blocky))
+    );
+}
+
+#[test]
+fn graphics_options_show_and_cycle_grass_detail() {
+    let mut surface = UiSurface::new();
+    surface.set_screen(Some(UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::Graphics,
+    }));
+    surface.set_scale(GuiScale::from_pixels(960, 540));
+    let state = GameUiRenderState {
+        grass_detail: GameGrassDetail::Lush,
+        ..GameUiRenderState::default()
+    };
+    surface.set_render_state(state);
+
+    let grass_detail = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_GRASS_DETAIL)
+        .expect("grass detail row")
+        .clone();
+    assert_eq!(grass_detail.value.as_deref(), Some("Lush"));
+    assert!(grass_detail.enabled);
+    assert!(surface.pointer_down(point_in(grass_detail.rect), state));
+    assert_eq!(
+        surface.pointer_up(point_in(grass_detail.rect), state).1,
+        Some(GameUiAction::SetGrassDetail(GameGrassDetail::Ultra))
     );
 }
 

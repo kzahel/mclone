@@ -6205,6 +6205,11 @@ impl ClientExperienceSettingsHost for McloneSceneHost {
         self.request_leaf_detail(engine_leaf_detail(detail))
     }
 
+    fn set_grass_detail(&mut self, detail: GameGrassDetail) -> Result<()> {
+        self.request_grass_detail(engine_grass_detail(detail));
+        Ok(())
+    }
+
     fn set_fullbright(&mut self, enabled: bool) -> Result<()> {
         self.render_options.force_fullbright = enabled;
         log::info!(
