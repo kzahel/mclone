@@ -145,6 +145,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `input-observation-timeline` — loss-aware cross-platform physical input
   observations, shared semantic reduction, and sequenced 60 Hz player commands
   independent of presentation cadence
+- `touchscreen-input` — direct menu touch, shared in-world touch controls,
+  capability-led visibility and preferences, desktop/Deck collection, and
+  physical touchscreen acceptance
 - `remote-player-presentation` — remote body/head/hand embodiment, independent
   report/replication/presentation cadences, buffered interpolation, and
   transport-neutral ephemeral pose semantics

@@ -133,6 +133,10 @@ series implements the same concern, normally reuse the document slug in its
   cross-platform input timeline — preserve ordered transitions where a
   platform exposes them, degrade honestly to snapshots, normalize monotonic
   timing, and feed shared semantic 60 Hz player commands.
+- [`touchscreen-input.md`](touchscreen-input.md): active direct-touch contract
+  for native desktop, Steam Deck, Android, and browser clients — menu contact
+  lifecycle, shared gameplay controls, capability-led visibility/preferences,
+  platform event differences, and physical touchscreen acceptance.
 - [`remote-player-presentation.md`](remote-player-presentation.md): accepted
   remote embodiment work stream — independently configurable body/tracked-pose
   report and replication cadences, buffered interpolation, separate XR
