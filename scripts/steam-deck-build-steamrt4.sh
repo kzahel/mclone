@@ -16,6 +16,7 @@ STEAMRT4_DIGEST=sha256:584939ebd7d2f1eec719e771fdde4ae3bd469ee741c783abb7fe812dd
 RUST_VERSION=1.97.0
 IMAGE=${MCLONE_STEAMRT4_BUILDER_IMAGE:-"mclone-steamrt4-builder:${STEAMRT4_BUILD}-rust${RUST_VERSION}"}
 RUSTFLAGS_VALUE=${RUSTFLAGS:-}
+CARGO_FEATURES=${MCLONE_STEAMRT4_CARGO_FEATURES:-}
 
 die()
 {
@@ -80,6 +81,17 @@ docker_cli build \
     "$DOCKER_CONTEXT"
 
 echo "Building mclone-native-client inside SteamRT4 SDK"
+build_args=(
+    cargo build
+    --release
+    --locked
+    --manifest-path native/Cargo.toml
+    -p mclone-native-client
+    --bin mclone-native-client
+)
+if [[ -n $CARGO_FEATURES ]]; then
+    build_args+=(--features "$CARGO_FEATURES")
+fi
 docker_cli run \
     --rm \
     --init \
@@ -97,12 +109,7 @@ docker_cli run \
     --mount "type=bind,src=$CARGO_CACHE,dst=/cargo-home" \
     --workdir /workspace \
     "$IMAGE" \
-    cargo build \
-        --release \
-        --locked \
-        --manifest-path native/Cargo.toml \
-        -p mclone-native-client \
-        --bin mclone-native-client
+    "${build_args[@]}"
 
 test -x "$BINARY" || die "container build did not produce $BINARY"
 
@@ -160,6 +167,7 @@ jq -n \
     --arg cargoLockSha256 "$lock_sha" \
     --arg target "x86_64-unknown-linux-gnu" \
     --arg rustflags "$RUSTFLAGS_VALUE" \
+    --arg cargoFeatures "$CARGO_FEATURES" \
     --arg binarySha256 "$binary_sha" \
     --arg glibcMax "$glibc_max" \
     --argjson needed "$needed" \
@@ -186,6 +194,7 @@ jq -n \
         },
         target: $target,
         rustflags: $rustflags,
+        cargoFeatures: $cargoFeatures,
         artifact: {
             path: "native/target/steamrt4/release/mclone-native-client",
             sha256: $binarySha256,

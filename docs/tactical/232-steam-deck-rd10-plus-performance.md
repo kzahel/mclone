@@ -197,15 +197,15 @@ GPU/content ceiling explicit.
 
 ### Slice 0: Measurement Trust And Controlled A/B Knobs
 
-- [ ] Attribute frame-accounting scans, traversal-ready stamp construction,
+- [x] Attribute frame-accounting scans, traversal-ready stamp construction,
   update integration, record preparation, cull, per-layer draw encoding,
   upload publication, surface acquire, submit, present, and device wait.
-- [ ] Add supported wgpu terrain/pass timestamp queries with asynchronous
+- [x] Add supported wgpu terrain/pass timestamp queries with asynchronous
   readback and explicit unsupported capability reporting.
-- [ ] Add matrix controls for native/half world resolution, scheduled-fluid
+- [x] Add matrix controls for native/half world resolution, scheduled-fluid
   freeze, one/two/derived render workers, fresh/soaked stationary, and focused
   candidate A/B selection.
-- [ ] Extend matrix summaries with GPU pass time, accounting/stamp/cull spans,
+- [x] Extend matrix summaries with GPU pass time, accounting/stamp/cull spans,
   fluid mutation/rebuild correlation, compiler occupancy/queue age, and ticket
   propagation/reconciliation time.
 - [ ] Calibrate measurement overhead and retain release-shaped default rows.
@@ -352,3 +352,35 @@ Append each tested slice here with:
 - Next action: Slice 0 controls and subphase instrumentation, beginning with
   the existing live-window report and matrix rather than a second benchmark
   harness.
+
+### 2026-07-24: Slice 0 Attribution Matrix
+
+- Instrumentation commit: `fc7fbbd0`.
+- SteamRT4 binary SHA-256:
+  `6a9335fe68cf887e6c9692292a1c0ac4af40ad13694963d81eddbc66271bdbd0`.
+- Run:
+  `20260724T132612Z-fc7fbbd05e7f-perf-matrix-attribution-3647962`.
+- All five rows reached the complete idle gate. Both traversal rows covered
+  approximately 320 blocks in 20 seconds.
+- RD13 stationary native/half/frozen-fluid measured 64.1/69.3/89.7 FPS.
+  Native and frozen GPU terrain p50 remained close at 2.48/2.46 ms while
+  surface-encode p95 fell from 20.95 to 9.51 ms when fluid-driven rebuilds
+  fell from 679 to zero.
+- RD13 traversal native/half measured 48.2/47.3 FPS with equal travel.
+  Native GPU terrain p50 was 2.75 ms against 24.23 ms surface-encode p95;
+  halving world resolution did not improve the row.
+- Native stationary/traversal p95 subphases were respectively:
+  pending render accounting 1.06/1.30 ms, traversal-ready refresh
+  3.45/3.85 ms, prepared-record rebuild 3.63/4.69 ms, and cull 4.70/4.99 ms.
+- Decision: accept H6. RD13 top-down is CPU preparation/submission limited,
+  not primarily fragment-fill limited.
+- Decision: accept H4's attribution. Scheduled-fluid mutation is the cause of
+  the fresh-stationary remesh tail; freeze remains diagnostic rather than
+  gameplay policy.
+- Instrumentation defect: compiler completion/busy counters were compiled
+  out of this release artifact even though worker timing was requested.
+  Matrices now request the `perf-diagnostics` Cargo feature and record it in
+  the SteamRT4 receipt before the worker-capacity experiment.
+- Next action: run the corrected worker matrix, then implement bookkeeping,
+  static-cull, active-level, and fluid/remesh slices against these named
+  spans.

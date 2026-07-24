@@ -83,6 +83,9 @@ Environment:
       Reuse the selected builder's existing binary while staging.
   MCLONE_STEAM_DECK_BUILDER=host|steamrt4
       Build on Ubuntu or in the pinned SteamRT4 SDK. Defaults to host.
+  MCLONE_STEAMRT4_CARGO_FEATURES=FEATURES
+      Optional Cargo feature list recorded in the SteamRT4 build receipt.
+      Performance matrices automatically enable perf-diagnostics.
   MCLONE_STEAM_DECK_SKIP_ASSET_CHECK=1
       Skip pnpm assets:pack:check while staging.
   MCLONE_STEAM_DECK_ENSURE_ASSET_PACK=1
@@ -706,19 +709,23 @@ case "$command" in
         ;;
     matrix)
         [[ $# == 0 ]] || die "matrix takes no arguments"
-        run_bounded_workflow perf-matrix 5400
+        MCLONE_STEAMRT4_CARGO_FEATURES=perf-diagnostics \
+            run_bounded_workflow perf-matrix 5400
         ;;
     matrix-smoke)
         [[ $# == 0 ]] || die "matrix-smoke takes no arguments"
-        run_bounded_workflow perf-matrix-smoke 900
+        MCLONE_STEAMRT4_CARGO_FEATURES=perf-diagnostics \
+            run_bounded_workflow perf-matrix-smoke 900
         ;;
     matrix-attribution)
         [[ $# == 0 ]] || die "matrix-attribution takes no arguments"
-        run_bounded_workflow perf-matrix-attribution 2700
+        MCLONE_STEAMRT4_CARGO_FEATURES=perf-diagnostics \
+            run_bounded_workflow perf-matrix-attribution 2700
         ;;
     matrix-workers)
         [[ $# == 0 ]] || die "matrix-workers takes no arguments"
-        run_bounded_workflow perf-matrix-workers 3600
+        MCLONE_STEAMRT4_CARGO_FEATURES=perf-diagnostics \
+            run_bounded_workflow perf-matrix-workers 3600
         ;;
     pull-results)
         [[ $# -le 1 ]] || die "pull-results accepts at most one RUN_ID"
