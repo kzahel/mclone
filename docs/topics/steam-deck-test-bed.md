@@ -829,6 +829,64 @@ The executable proof and implementation campaign now lives in Tactical
 paired A/B rules, instrumentation controls, correctness gates, ordered
 bookkeeping/culling/server/fluid/worker/batching slices, and result ledger.
 
+### Accepted RD10+ rendering result
+
+The first campaign-changing renderer result is the shared terrain arena and
+multi-draw series ending at `e5a45346`. Exact-hash physical run
+`20260724T153005Z-e5a453469c10-perf-matrix-3868806` used SteamRT4 binary
+SHA-256
+`82a0ebf512d2f7ee0b220a3b44669665b73256c6819f8a88c934d2e8df42c897`.
+It retained unique section geometry while replacing per-section GPU buffers
+and most solid/cutout submission calls with paged shared arenas and
+feature-detected multi-draw-indirect groups. Translucent order stays exact and
+direct; stereo and multiview share the arena storage through their existing
+direct paths.
+
+The cumulative RD13 top-down traversal result, compared with the
+column-readiness parent, was:
+
+| Metric | Before | Arena/multi-draw |
+|---|---:|---:|
+| FPS | 76.6 | 84.6 |
+| frame p95 | 19.65 ms | 19.46 ms |
+| surface encode p95 | 14.38 ms | 11.43 ms |
+| terrain encode p95 | 4.18 ms | 0.85 ms |
+| GPU terrain p50 | 2.68 ms | 2.62 ms |
+
+The full equal-distance top-down traversal curve on the final artifact was:
+
+| Render distance | FPS | frame p95 | frame p99 |
+|---:|---:|---:|---:|
+| 5 | 89.9 | 12.69 ms | 14.03 ms |
+| 8 | 89.8 | 12.92 ms | 14.22 ms |
+| 10 | 89.0 | 13.10 ms | 20.44 ms |
+| 13 | 84.3 | 20.28 ms | 25.00 ms |
+
+All four rows traveled approximately 320 blocks and completed their expected
+253/343/403/493 feature and light publications. Stationary RD5 through RD13
+held 89.5-90.0 FPS. The RD13 oblique traversal control reached 87.2 FPS,
+again showing that top-down cost follows exposed terrain work rather than
+aggregate CPU or GPU saturation.
+
+Treat RD8 as the strict 90 Hz handheld default class on this artifact. RD10 is
+a reasonable near-90 quality setting, but its 20.44 ms p99 means it is not yet
+a strict pacing guarantee. RD13 is a supported stress/quality setting at
+roughly 84 FPS in the hardest traversal row, not a 90 Hz promise. These are
+native-panel results for this world and workload, not a universal content
+guarantee.
+
+Deterministic parent/candidate captures differed by zero pixels. Mono,
+per-eye stereo, full-frame multiview, placed-terrain, and resource-ownership
+tests passed. The final RD13 traversal used approximately 424 MiB of vertex
+data and 64 MiB of index data; bounded vertex pages are required because the
+Deck adapter exposes a 256 MiB maximum for one vertex buffer.
+
+The next Deck priorities are no longer per-section terrain command encoding.
+They are the approximately 4 ms p95 server holder-reconciliation span during
+continuous movement, 1.3-3.3 ms cull/occlusion work as distance grows, and
+fresh-fluid remesh/upload bursts that raise frame and GPU tails despite low
+steady GPU p50.
+
 ## Bring-up Ledger
 
 - [x] Retail Steam Deck Developer Mode enabled.

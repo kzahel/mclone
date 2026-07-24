@@ -353,6 +353,42 @@ RD7/RD10 pressure stays with the Quest pacing tacticals.
 See the publication-valve record in
 [`../performance-records.md`](../performance-records.md).
 
+### Steam Deck RD10+ priority revision
+
+Tactical
+[`232`](../tactical/232-steam-deck-rd10-plus-performance.md) now owns the
+physical native-panel campaign. Its accepted bookkeeping, ticket-cache,
+stable-record, column-readiness, and shared-terrain-arena series moved RD13
+top-down traversal from the original 46.1 FPS baseline to 84.3-84.6 FPS while
+preserving equal travel and publication work. The arena/multi-draw slice alone
+cut terrain encode p95 from 4.18 to 0.85 ms without raising GPU terrain p50.
+Per-section draw encoding is therefore no longer the first Deck bottleneck.
+
+The current Deck pickup order is:
+
+1. Split the remaining roughly 4 ms p95 integrated-server holder
+   reconciliation into active-level construction, holder application, and
+   unload processing. Port changed-source incremental propagation only if the
+   map reconstruction remains material during continuous traversal.
+2. Attribute fresh-fluid rebuild frames after command batching. Existing
+   stale compile counts are low, so coalesce only repeated revisions or
+   unchanged render work that measurements prove redundant.
+3. Reduce accepted-section cull/occlusion traversal, currently about
+   1.3-3.3 ms p95 across RD5-RD13. The tested coarse region hierarchy was
+   reverted because it saved only 0.04 ms at RD13.
+4. Attribute RD10/RD13 frame and GPU tails separately from steady terrain
+   execution. RD13 terrain GPU p50 is about 2.6 ms while its traversal p95 can
+   reach 10.5 ms, consistent with bursty mesh publication/upload rather than
+   a steady fill-rate ceiling.
+
+On the measured artifact, stationary RD5-RD13 hold 90 Hz. Equal-distance
+top-down traversal holds 89.9 FPS at RD5, 89.8 at RD8, 89.0 at RD10, and 84.3
+at RD13. Use RD8 as the current strict-90 handheld default class, RD10 as a
+near-90 quality option with visible p99 risk, and RD13 as stress/quality
+rather than a 90 Hz promise. The detailed hashes, matrix rows, pixel evidence,
+and rejected candidates remain in Tactical 232 and
+[`steam-deck-test-bed.md`](steam-deck-test-bed.md).
+
 ## Priority Queue
 
 | Priority | Work | Java-shaped | Tactical | Status | Why It Matters |

@@ -303,17 +303,17 @@ separately.
 
 ### Slice 7: Reduced Draw Submission
 
-- [ ] Use H6, GPU timestamps, cull spans, and per-layer draw counts to choose
+- [x] Use H6, GPU timestamps, cull spans, and per-layer draw counts to choose
   between render bundles, shared vertex/index arenas with indirect draws, or
   a smaller state-change batching step.
-- [ ] Keep per-section unique geometry while moving chunk transforms and draw
+- [x] Keep per-section unique geometry while moving chunk transforms and draw
   ranges into stable GPU-visible records.
-- [ ] Preserve opaque/cutout ordering, translucent back-to-front behavior,
+- [x] Preserve opaque/cutout ordering, translucent back-to-front behavior,
   mesh replacement, stale-result rejection, topology lifts, and bounded
   allocation.
-- [ ] Implement mono first only behind a diagnostic toggle, then cover
-  per-eye and full-frame multiview before enabling it as shared policy.
-- [ ] Compare CPU encode, GPU terrain time, residency, uploads, frame tails,
+- [x] Feature-detect multi-draw for mono while retaining arena-backed direct
+  draws for per-eye stereo and full-frame multiview; cover all three paths.
+- [x] Compare CPU encode, GPU terrain time, residency, uploads, frame tails,
   and visual output across the full Deck matrix.
 
 Exit: H8 is accepted or rejected. A path that merely moves CPU time into GPU
@@ -321,7 +321,7 @@ time without improving frame pacing is not a win.
 
 ### Slice 8: Closeout And Durable Policy
 
-- [ ] Run the complete stationary/traversal matrix on a clean SteamRT4
+- [x] Run the complete stationary/traversal matrix on a clean SteamRT4
   artifact, including fresh, soaked, fluid-control, resolution-control, and
   selected worker rows.
 - [ ] Record before/after tables, thermal/run variance, failed hypotheses,
@@ -517,3 +517,52 @@ Append each tested slice here with:
   rejection does not repay its indirection. Proceed to draw submission and
   finer holder-reconciliation attribution rather than adding another CPU
   hierarchy.
+
+### 2026-07-24: Shared Terrain Arenas And Multi-Draw Kept
+
+- Candidate commits: `4d544f65`, `dbd039f5`, and `e5a45346`.
+- Final SteamRT4 binary SHA-256:
+  `82a0ebf512d2f7ee0b220a3b44669665b73256c6819f8a88c934d2e8df42c897`.
+- Focused run:
+  `20260724T152436Z-e5a453469c10-perf-matrix-attribution-3864793`.
+- Full guardrail run:
+  `20260724T153005Z-e5a453469c10-perf-matrix-3868806`.
+- Terrain meshes now occupy growable, range-managed shared GPU vertex pages
+  and one shared index arena. Supported adapters encode solid and cutout
+  sections as multi-draw-indirect groups per vertex page. Translucent draws
+  remain direct and retain exact global back-to-front order. Stereo and
+  multiview use the same arena storage with direct draws.
+- The first one-buffer prototype exposed two useful limits rather than
+  producing a valid comparison. Run
+  `20260724T151512Z-4d544f65edf5-perf-matrix-attribution-3857969`
+  found a false power-of-two growth failure at 4,194,304 vertices. Exact
+  limiting fixed that defect, then run
+  `20260724T151721Z-dbd039f57c80-perf-matrix-attribution-3860553`
+  reached the Deck adapter's real 256 MiB per-buffer limit near 6.71 million
+  vertices. Bounded vertex paging removed that single-buffer ceiling. Both
+  failed runs restored the shortcut, slept the panel, and left Gamescope,
+  SteamOS, and SSH healthy.
+- Against `fa5f442e`, native RD13 top-down traversal improved from 76.6 to
+  84.6 FPS. Terrain encode p95 fell from 4.18 to 0.85 ms and surface encode
+  p95 from 14.38 to 11.43 ms. Frame p95 changed only from 19.65 to 19.46 ms,
+  showing that the remaining tails now lie outside terrain draw encoding.
+- That traversal averaged approximately 417 direct translucent draws, four
+  multi-draw calls, and 1,677 underlying indirect solid/cutout draws. Vertex
+  residency was 424.2 MiB used in 512 MiB capacity; index residency was
+  63.6 MiB used in 128 MiB capacity. GPU terrain p50 stayed approximately
+  2.62 ms rather than absorbing the CPU reduction.
+- Deterministic no-actor parent/candidate captures had zero differing pixels.
+  Mono, per-eye stereo, full-frame multiview, placed-terrain, allocator,
+  indirect-offset, and one-world resource-ownership checks passed.
+- The exact-hash guardrail run held 89.9/89.8/89.0/84.3 FPS during equal
+  RD5/RD8/RD10/RD13 top-down traversal. All rows traveled approximately
+  320 blocks and published 253/343/403/493 feature and light results.
+  Corresponding frame p95 was 12.69/12.92/13.10/20.28 ms. RD13 oblique
+  traversal reached 87.2 FPS and 14.54 ms p95.
+- Native stationary RD5/RD8/RD10/RD13 all held 89.5-90.0 FPS. Adaptive
+  admission remained worse at RD13, 83.2 versus 84.3 FPS, and stays an
+  opt-in diagnostic rather than the recommended Deck policy.
+- Decision: accept H8 and keep the shared arena/multi-draw path. Terrain
+  command construction is no longer the primary Deck limit. Next attribute
+  holder reconciliation, then distinguish render-upload/remesh bursts from
+  the remaining cull/occlusion cost.
