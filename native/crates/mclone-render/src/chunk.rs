@@ -574,6 +574,9 @@ pub struct TexturedSectionRenderOptions {
     /// Draw request-gated grass patch artifacts. Off remains allocation-free
     /// when compilation also omits grass patches.
     pub grass_detail: GrassQuality,
+    /// Scene presentation time for world-locked grass animation. This is
+    /// intentionally independent from authoritative server/game time.
+    pub grass_time_seconds: f32,
     /// Active dimension topology used only for observer-local presentation.
     /// Canonical mesh/upload identity remains unchanged.
     pub topology: HorizontalTopology,
@@ -588,6 +591,7 @@ impl Default for TexturedSectionRenderOptions {
             fog: RenderFog::none(),
             color_profile: RenderColorProfile::default(),
             grass_detail: GrassQuality::Off,
+            grass_time_seconds: 0.0,
             topology: HorizontalTopology::UNBOUNDED,
         }
     }
@@ -620,6 +624,15 @@ impl TexturedSectionRenderOptions {
 
     pub fn with_grass_detail(mut self, grass_detail: GrassQuality) -> Self {
         self.grass_detail = grass_detail;
+        self
+    }
+
+    pub fn with_grass_time_seconds(mut self, time_seconds: f32) -> Self {
+        self.grass_time_seconds = if time_seconds.is_finite() {
+            time_seconds.max(0.0).rem_euclid(4_096.0)
+        } else {
+            0.0
+        };
         self
     }
 
@@ -4578,9 +4591,11 @@ impl TexturedSectionDrawResources {
         }
         self.section_arena
             .ensure_indirect_capacity(device, self.sections.len())?;
+        let grass_frame_layout = self.shared.grass_pipelines.frame_layout(device);
         let grass_upload = self.grass.apply_section_updates(
             device,
             &self.queue,
+            grass_frame_layout,
             sections,
             removed.iter().copied(),
         )?;
@@ -5429,6 +5444,10 @@ impl TexturedSectionDrawResources {
                     &texture_layout,
                 )
             });
+        if grass_pipeline.is_some() {
+            self.grass
+                .write_frame(queue, options.grass_detail, options.grass_time_seconds);
+        }
         let mut grass_stats = GrassDrawStats::default();
         let encode_start = timing.is_some().then(timing_now);
         {
@@ -5638,6 +5657,10 @@ impl TexturedSectionDrawResources {
                     &texture_layout,
                 )
             });
+        if grass_pipeline.is_some() {
+            self.grass
+                .write_frame(queue, options.grass_detail, options.grass_time_seconds);
+        }
         let mut grass_stats = GrassDrawStats::default();
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -5777,6 +5800,17 @@ impl TexturedSectionDrawResources {
                 .grass_pipelines
                 .pipeline(device, variant, &uniform_layout, &texture_layout)
         });
+        if grass_pipeline.is_some() {
+            debug_assert_eq!(
+                options[0].grass_time_seconds, options[1].grass_time_seconds,
+                "stereo grass eyes must share presentation time"
+            );
+            self.grass.write_frame(
+                queue,
+                options[0].grass_detail,
+                options[0].grass_time_seconds,
+            );
+        }
         let mut grass_stats = GrassDrawStats::default();
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -6177,6 +6211,17 @@ impl TexturedSectionDrawResources {
                 &texture_layout,
             )
         });
+        if grass_pipeline.is_some() {
+            debug_assert_eq!(
+                options[0].grass_time_seconds, options[1].grass_time_seconds,
+                "multiview grass eyes must share presentation time"
+            );
+            self.grass.write_frame(
+                queue,
+                options[0].grass_detail,
+                options[0].grass_time_seconds,
+            );
+        }
         let mut grass_stats = GrassDrawStats::default();
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -6446,6 +6491,10 @@ impl TexturedSectionDrawResources {
                         .grass_pipelines
                         .cached_pipeline(GrassPipelineVariant::Direct)
                 });
+        if grass_pipeline.is_some() {
+            self.grass
+                .write_frame(queue, options.grass_detail, options.grass_time_seconds);
+        }
         let mut grass_stats = GrassDrawStats::default();
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -6670,6 +6719,10 @@ impl TexturedSectionDrawResources {
                         .grass_pipelines
                         .cached_pipeline(GrassPipelineVariant::Direct)
                 });
+        if grass_pipeline.is_some() {
+            self.grass
+                .write_frame(queue, options.grass_detail, options.grass_time_seconds);
+        }
         let mut grass_stats = GrassDrawStats::default();
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {

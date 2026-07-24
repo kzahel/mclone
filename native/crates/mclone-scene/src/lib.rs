@@ -1742,9 +1742,16 @@ impl McloneSceneHost {
                             .runtime
                             .as_ref()
                             .map_or(0.0, |runtime| runtime.time_of_day());
-                        let options = self.render_options.with_sky_darken(
-                            mclone_render::light_texture::sky_darken(preview_time),
-                        );
+                        let options = self
+                            .render_options
+                            .with_sky_darken(mclone_render::light_texture::sky_darken(preview_time))
+                            .with_grass_time_seconds(render_options.grass_time_seconds)
+                            .with_topology(
+                                slot.runtime.as_ref().map_or(
+                                    mclone_core::HorizontalTopology::UNBOUNDED,
+                                    |runtime| runtime.client().topology(),
+                                ),
+                            );
                         let bounded_section_count = records.section_keys().len();
                         let out_of_region_submission_count = records
                             .section_keys()
@@ -2530,9 +2537,16 @@ impl McloneSceneHost {
                             .runtime
                             .as_ref()
                             .map_or(0.0, |runtime| runtime.time_of_day());
-                        let options = self.render_options.with_sky_darken(
-                            mclone_render::light_texture::sky_darken(preview_time),
-                        );
+                        let options = self
+                            .render_options
+                            .with_sky_darken(mclone_render::light_texture::sky_darken(preview_time))
+                            .with_grass_time_seconds(terrain_options[0].grass_time_seconds)
+                            .with_topology(
+                                slot.runtime.as_ref().map_or(
+                                    mclone_core::HorizontalTopology::UNBOUNDED,
+                                    |runtime| runtime.client().topology(),
+                                ),
+                            );
                         let bounded_section_count = records.section_keys().len();
                         let out_of_region_submission_count = records
                             .section_keys()
@@ -4227,46 +4241,54 @@ impl McloneSceneHost {
             .zip(self.world_gate.as_ref().map(WorldGate::render_gate));
         #[cfg(target_arch = "wasm32")]
         let opaque_world_gate = None;
-        let terrain_composition = preview_prepared_draw
-            .zip(preview_translucent_order)
-            .and_then(|(prepared, translucent_order)| {
-                let preview = self
-                    .embedded_world_preview
-                    .as_ref()
-                    .filter(|preview| preview.phase == EmbeddedWorldPreviewPhase::Visible)?;
-                let standby = self
-                    .standby_world
-                    .as_mut()
-                    .filter(|slot| slot.id == preview.source_world)?;
-                let preview_time = standby
-                    .runtime
-                    .as_ref()
-                    .map_or(0.0, |runtime| runtime.time_of_day());
-                let preview_options = self
-                    .render_options
-                    .with_sky_darken(mclone_render::light_texture::sky_darken(preview_time));
-                let placed_actors = preview_actor_instances
-                    .filter(|actors| actors.source_world == preview.source_world)
-                    .and_then(|actors| {
-                        standby.actors.as_mut().map(|draw| PlacedActorFrame {
-                            draw,
-                            instances: &actors.instances,
+        let terrain_composition =
+            preview_prepared_draw
+                .zip(preview_translucent_order)
+                .and_then(|(prepared, translucent_order)| {
+                    let preview = self
+                        .embedded_world_preview
+                        .as_ref()
+                        .filter(|preview| preview.phase == EmbeddedWorldPreviewPhase::Visible)?;
+                    let standby = self
+                        .standby_world
+                        .as_mut()
+                        .filter(|slot| slot.id == preview.source_world)?;
+                    let preview_time = standby
+                        .runtime
+                        .as_ref()
+                        .map_or(0.0, |runtime| runtime.time_of_day());
+                    let preview_options =
+                        self.render_options
+                            .with_sky_darken(mclone_render::light_texture::sky_darken(preview_time))
+                            .with_grass_time_seconds(render_options.grass_time_seconds)
+                            .with_topology(
+                                standby.runtime.as_ref().map_or(
+                                    mclone_core::HorizontalTopology::UNBOUNDED,
+                                    |runtime| runtime.client().topology(),
+                                ),
+                            );
+                    let placed_actors = preview_actor_instances
+                        .filter(|actors| actors.source_world == preview.source_world)
+                        .and_then(|actors| {
+                            standby.actors.as_mut().map(|draw| PlacedActorFrame {
+                                draw,
+                                instances: &actors.instances,
+                                context: preview.context,
+                                render_options: preview_options,
+                            })
+                        });
+                    Some(TerrainCompositionFrame {
+                        placed: PlacedTerrainFrame {
+                            draw: &standby.draw,
+                            renderer: &preview.renderer,
+                            prepared: PlacedTerrainPrepared::Stereo(prepared),
                             context: preview.context,
                             render_options: preview_options,
-                        })
-                    });
-                Some(TerrainCompositionFrame {
-                    placed: PlacedTerrainFrame {
-                        draw: &standby.draw,
-                        renderer: &preview.renderer,
-                        prepared: PlacedTerrainPrepared::Stereo(prepared),
-                        context: preview.context,
-                        render_options: preview_options,
-                    },
-                    actors: placed_actors,
-                    translucent_order,
-                })
-            });
+                        },
+                        actors: placed_actors,
+                        translucent_order,
+                    })
+                });
         let full_frame_start = collect_split_timing.then(|| self.services.clock.now());
         let (summary, frame_timing) = if collect_split_timing {
             let far_lod = far_lod_mesh.map(|_| &mut self.active_world.far_lod);
@@ -4791,6 +4813,7 @@ impl McloneSceneHost {
 
     fn effective_render_options(&self, camera_position: Vec3) -> TexturedSectionRenderOptions {
         let mut options = self.render_options;
+        options.grass_time_seconds = grass_presentation_time_seconds(self.services.clock.now());
         options.topology = self
             .active_world
             .runtime
@@ -4805,6 +4828,10 @@ impl McloneSceneHost {
     }
 }
 
+fn grass_presentation_time_seconds(now: MonotonicInstant) -> f32 {
+    (now.as_nanos() % 4_096_000_000_000) as f32 / 1_000_000_000.0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -4813,6 +4840,18 @@ mod tests {
         LocalWorldId, LocalWorldSummary, WorldCatalogCapabilities, WorldCatalogRequest,
         WorldCatalogResponse,
     };
+
+    #[test]
+    fn grass_presentation_time_is_monotonic_and_safely_rebased() {
+        assert_eq!(
+            grass_presentation_time_seconds(MonotonicInstant::from_nanos(1_500_000_000)),
+            1.5
+        );
+        assert_eq!(
+            grass_presentation_time_seconds(MonotonicInstant::from_nanos(4_097_500_000_000)),
+            1.5
+        );
+    }
     use mclone_render_session::ENGINE_CAMERA_BASE_SPEED_BLOCKS_PER_SECOND;
 
     #[test]

@@ -2284,7 +2284,16 @@ impl McloneSceneHost {
                     .map_or(0.0, |runtime| runtime.time_of_day());
                 let preview_options = self
                     .render_options
-                    .with_sky_darken(mclone_render::light_texture::sky_darken(preview_time));
+                    .with_sky_darken(mclone_render::light_texture::sky_darken(preview_time))
+                    .with_grass_time_seconds(render_options.grass_time_seconds)
+                    .with_topology(
+                        standby
+                            .runtime
+                            .as_ref()
+                            .map_or(mclone_core::HorizontalTopology::UNBOUNDED, |runtime| {
+                                runtime.client().topology()
+                            }),
+                    );
                 let terrain_view =
                     render_view_with_underwater_effect(render_view, underwater_overlay);
                 let active_records = self.active_world.draw.prepare_render_records();

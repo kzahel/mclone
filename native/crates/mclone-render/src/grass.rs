@@ -1,7 +1,8 @@
 use std::cell::{Ref, RefCell};
 use std::collections::BTreeMap;
-use std::num::NonZeroU32;
+use std::num::{NonZeroU32, NonZeroU64};
 use std::ops::Range;
+use std::sync::OnceLock;
 
 use anyhow::{Context, Result, bail};
 use mclone_core::{HorizontalTopology, Vec3d};
@@ -10,9 +11,10 @@ use mclone_mesh::{GrassPatch, RenderSectionKey, TexturedRenderSectionMesh};
 use crate::chunk::DEPTH_FORMAT;
 
 pub(crate) const STATIC_GRASS_BLADE_COUNT: u32 = 8;
-const GRASS_VERTICES_PER_BLADE: u32 = 6;
+const GRASS_VERTICES_PER_BLADE: u32 = 12;
 const GRASS_PATCH_MIN_CAPACITY: u32 = 4_096;
 const GRASS_PIPELINE_VARIANT_COUNT: usize = 6;
+const GRASS_FRAME_UNIFORM_SIZE: u64 = 32;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) struct GrassDrawStats {
@@ -57,6 +59,7 @@ impl GrassQuality {
                 near_blades: 2,
                 middle_blades: 1,
                 far_blades: 1,
+                wind_amplitude: 0.10,
             }),
             Self::Lush => Some(GrassQualityProfile {
                 radius_blocks: 128.0,
@@ -65,6 +68,7 @@ impl GrassQuality {
                 near_blades: 6,
                 middle_blades: 4,
                 far_blades: 2,
+                wind_amplitude: 0.14,
             }),
             Self::Ultra => Some(GrassQualityProfile {
                 radius_blocks: 192.0,
@@ -73,6 +77,7 @@ impl GrassQuality {
                 near_blades: 8,
                 middle_blades: 6,
                 far_blades: 3,
+                wind_amplitude: 0.17,
             }),
         }
     }
@@ -86,6 +91,7 @@ struct GrassQualityProfile {
     near_blades: u32,
     middle_blades: u32,
     far_blades: u32,
+    wind_amplitude: f32,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -151,6 +157,7 @@ impl GrassPipelineVariant {
 /// shader and allocates no grass GPU buffer.
 pub(crate) struct GrassPipelineCache {
     color_format: wgpu::TextureFormat,
+    frame_layout: OnceLock<wgpu::BindGroupLayout>,
     pipelines: RefCell<[Option<wgpu::RenderPipeline>; GRASS_PIPELINE_VARIANT_COUNT]>,
 }
 
@@ -158,8 +165,14 @@ impl GrassPipelineCache {
     pub(crate) fn new(color_format: wgpu::TextureFormat) -> Self {
         Self {
             color_format,
+            frame_layout: OnceLock::new(),
             pipelines: RefCell::new(std::array::from_fn(|_| None)),
         }
+    }
+
+    pub(crate) fn frame_layout<'a>(&'a self, device: &wgpu::Device) -> &'a wgpu::BindGroupLayout {
+        self.frame_layout
+            .get_or_init(|| create_grass_frame_layout(device))
     }
 
     pub(crate) fn pipeline<'a>(
@@ -171,12 +184,14 @@ impl GrassPipelineCache {
     ) -> Ref<'a, wgpu::RenderPipeline> {
         let index = variant.index();
         if self.pipelines.borrow()[index].is_none() {
+            let frame_layout = self.frame_layout(device);
             let pipeline = create_grass_pipeline(
                 device,
                 self.color_format,
                 variant,
                 uniform_layout,
                 texture_layout,
+                frame_layout,
             );
             self.pipelines.borrow_mut()[index] = Some(pipeline);
         }
@@ -206,6 +221,7 @@ fn create_grass_pipeline(
     variant: GrassPipelineVariant,
     uniform_layout: &wgpu::BindGroupLayout,
     texture_layout: &wgpu::BindGroupLayout,
+    frame_layout: &wgpu::BindGroupLayout,
 ) -> wgpu::RenderPipeline {
     let source = grass_shader_source(variant);
     let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
@@ -214,7 +230,7 @@ fn create_grass_pipeline(
     });
     let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
         label: Some(variant.label()),
-        bind_group_layouts: &[uniform_layout, texture_layout],
+        bind_group_layouts: &[uniform_layout, texture_layout, frame_layout],
         push_constant_ranges: &[],
     });
     device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -286,6 +302,22 @@ fn create_grass_pipeline(
         multisample: Default::default(),
         multiview: variant.multiview(),
         cache: None,
+    })
+}
+
+fn create_grass_frame_layout(device: &wgpu::Device) -> wgpu::BindGroupLayout {
+    device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+        label: Some("mclone_grass_frame_layout"),
+        entries: &[wgpu::BindGroupLayoutEntry {
+            binding: 0,
+            visibility: wgpu::ShaderStages::VERTEX,
+            ty: wgpu::BindingType::Buffer {
+                ty: wgpu::BufferBindingType::Uniform,
+                has_dynamic_offset: false,
+                min_binding_size: NonZeroU64::new(GRASS_FRAME_UNIFORM_SIZE),
+            },
+            count: None,
+        }],
     })
 }
 
@@ -505,9 +537,35 @@ fn create_grass_patch_buffer(device: &wgpu::Device, capacity: u32) -> wgpu::Buff
     })
 }
 
+struct GrassFrameResources {
+    buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+}
+
+impl GrassFrameResources {
+    fn new(device: &wgpu::Device, layout: &wgpu::BindGroupLayout) -> Self {
+        let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mclone_grass_frame_uniform"),
+            size: GRASS_FRAME_UNIFORM_SIZE,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mclone_grass_frame_bind_group"),
+            layout,
+            entries: &[wgpu::BindGroupEntry {
+                binding: 0,
+                resource: buffer.as_entire_binding(),
+            }],
+        });
+        Self { buffer, bind_group }
+    }
+}
+
 #[derive(Default)]
 pub(crate) struct GrassPatchDrawResources {
     arena: Option<GrassPatchArena>,
+    frame: Option<GrassFrameResources>,
     sections: BTreeMap<RenderSectionKey, Range<u32>>,
     lod_histories: RefCell<BTreeMap<u32, GrassObserverLodHistory>>,
 }
@@ -517,6 +575,7 @@ impl GrassPatchDrawResources {
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
+        frame_layout: &wgpu::BindGroupLayout,
         sections: &[TexturedRenderSectionMesh],
         removed: impl IntoIterator<Item = RenderSectionKey>,
     ) -> Result<GrassUploadStats> {
@@ -545,6 +604,7 @@ impl GrassPatchDrawResources {
             let count = section.grass_patches.len() as u32;
             if self.arena.is_none() {
                 self.arena = Some(GrassPatchArena::new(device, count)?);
+                self.frame = Some(GrassFrameResources::new(device, frame_layout));
             }
             let arena = self.arena.as_mut().expect("grass arena created above");
             let range = arena.allocate(device, queue, count)?;
@@ -560,9 +620,26 @@ impl GrassPatchDrawResources {
         }
         if self.sections.is_empty() {
             self.arena = None;
+            self.frame = None;
             self.lod_histories.get_mut().clear();
         }
         Ok(stats)
+    }
+
+    pub(crate) fn write_frame(
+        &self,
+        queue: &wgpu::Queue,
+        quality: GrassQuality,
+        time_seconds: f32,
+    ) {
+        let (Some(frame), Some(profile)) = (self.frame.as_ref(), quality.profile()) else {
+            return;
+        };
+        queue.write_buffer(
+            &frame.buffer,
+            0,
+            &grass_frame_uniform_bytes(time_seconds, profile.wind_amplitude),
+        );
     }
 
     pub(crate) fn resident_patch_count(&self) -> u32 {
@@ -602,6 +679,15 @@ impl GrassPatchDrawResources {
             history.tiers.clear();
         }
         pass.set_pipeline(pipeline);
+        pass.set_bind_group(
+            2,
+            &self
+                .frame
+                .as_ref()
+                .expect("non-empty grass draw must own frame resources")
+                .bind_group,
+            &[],
+        );
         pass.set_vertex_buffer(0, arena.buffer.slice(..));
         for (key, range) in &self.sections {
             if !visible(*key) {
@@ -635,6 +721,24 @@ impl GrassPatchDrawResources {
         }
         stats
     }
+}
+
+fn grass_frame_uniform_bytes(time_seconds: f32, amplitude: f32) -> [u8; 32] {
+    let values = [
+        time_seconds.rem_euclid(4_096.0),
+        0.819_231_9,
+        0.573_462_37,
+        0.18,
+        amplitude,
+        0.035,
+        0.72,
+        0.035,
+    ];
+    let mut bytes = [0_u8; 32];
+    for (index, value) in values.into_iter().enumerate() {
+        bytes[index * 4..index * 4 + 4].copy_from_slice(&value.to_le_bytes());
+    }
+    bytes
 }
 
 fn grass_section_distance(
@@ -730,6 +834,14 @@ mod tests {
     }
 
     #[test]
+    fn grass_frame_uniforms_are_fixed_width_and_rebase_time() {
+        let bytes = grass_frame_uniform_bytes(4_097.5, 0.14);
+        assert_eq!(bytes.len(), GRASS_FRAME_UNIFORM_SIZE as usize);
+        assert_eq!(f32::from_le_bytes(bytes[0..4].try_into().unwrap()), 1.5);
+        assert_eq!(f32::from_le_bytes(bytes[16..20].try_into().unwrap()), 0.14);
+    }
+
+    #[test]
     fn clipped_shader_variants_keep_the_shared_placement_contract() {
         let mono = clipped_placed_grass_shader_source();
         let multiview = clipped_placed_multiview_grass_shader_source();
@@ -738,6 +850,24 @@ mod tests {
             assert!(source.contains("composition_anchor"));
             assert!(source.contains("clip_plane"));
             assert!(source.contains("discard"));
+        }
+    }
+
+    #[test]
+    fn every_grass_shader_uses_the_shared_source_world_wind_contract() {
+        for variant in [
+            GrassPipelineVariant::Direct,
+            GrassPipelineVariant::Placed,
+            GrassPipelineVariant::ClippedPlaced,
+            GrassPipelineVariant::DirectMultiview,
+            GrassPipelineVariant::PlacedMultiview,
+            GrassPipelineVariant::ClippedPlacedMultiview,
+        ] {
+            let source = grass_shader_source(variant);
+            assert!(source.contains("@group(2) @binding(0)"));
+            assert!(source.contains("grass_frame.shape.y"));
+            assert!(source.contains("height_factor * height_factor"));
+            assert!(source.contains("let world_sample = root.xz + center;"));
         }
     }
 

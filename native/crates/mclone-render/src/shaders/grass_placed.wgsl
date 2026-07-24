@@ -11,6 +11,14 @@ struct Uniforms {
 @group(0) @binding(0)
 var<uniform> uniforms: Uniforms;
 
+struct GrassFrameUniforms {
+    time_direction_shelter: vec4<f32>,
+    shape: vec4<f32>,
+};
+
+@group(2) @binding(0)
+var<uniform> grass_frame: GrassFrameUniforms;
+
 struct GrassPatchInput {
     @location(0) root: vec3<i32>,
     @location(1) packed_tint: u32,
@@ -110,8 +118,10 @@ fn unpack_tint(packed: u32) -> vec3<f32> {
 }
 
 fn blade_vertex(input: GrassPatchInput, vertex_index: u32) -> vec3<f32> {
-    let blade = vertex_index / 6u;
-    let corner = vertex_index % 6u;
+    let blade = vertex_index / 12u;
+    let blade_vertex = vertex_index % 12u;
+    let segment = blade_vertex / 6u;
+    let corner = blade_vertex % 6u;
     let blade_hash = mix_hash(input.seed ^ (blade * 0x9e3779b9u));
     let angle = hash_unit(blade_hash) * 6.283185307;
     let radial = sqrt(hash_unit(blade_hash ^ 0x68bc21ebu)) * 0.42;
@@ -120,29 +130,60 @@ fn blade_vertex(input: GrassPatchInput, vertex_index: u32) -> vec3<f32> {
     let axis = vec2<f32>(cos(angle), sin(angle));
     let height = 0.38 + hash_unit(blade_hash ^ 0xa511e9b3u) * 0.34;
     let width = 0.035 + hash_unit(blade_hash ^ 0x63d83595u) * 0.035;
-    var lateral = -width;
-    var rise = 0.006;
-    switch corner {
-        case 1u: {
-            lateral = width;
-        }
-        case 2u: {
-            lateral = width * 0.18;
-            rise = height;
-        }
-        case 3u: {}
-        case 4u: {
-            lateral = width * 0.18;
-            rise = height;
-        }
-        case 5u: {
-            lateral = -width * 0.18;
-            rise = height;
-        }
-        default: {}
-    }
     let root = vec3<f32>(input.root) + vec3<f32>(0.5, 0.0, 0.5);
-    return root + vec3<f32>(center.x + axis.x * lateral, rise, center.y + axis.y * lateral);
+    let segment_start = f32(segment) * 0.52;
+    let segment_end = select(0.52, 1.0, segment == 1u);
+    let top_corner = corner == 2u || corner == 4u || corner == 5u;
+    let height_factor = select(segment_start, segment_end, top_corner);
+    let side = select(-1.0, 1.0, corner == 1u || corner == 2u || corner == 4u);
+    let width_factor = mix(1.0, 0.16, height_factor);
+    let lateral = width * width_factor * side;
+    let rise = mix(0.006, height, height_factor);
+
+    let wind_direction = normalize(grass_frame.time_direction_shelter.yz);
+    let wind_perpendicular = vec2<f32>(-wind_direction.y, wind_direction.x);
+    let time = grass_frame.time_direction_shelter.x;
+    let world_sample = root.xz + center;
+    let broad_phase = dot(world_sample, vec2<f32>(0.89, -0.69) * grass_frame.shape.y)
+        + time * grass_frame.shape.z;
+    let clump_phase = dot(world_sample, vec2<f32>(0.087, 0.064))
+        - time * 0.29;
+    let gust = 0.58
+        + sin(broad_phase) * 0.27
+        + sin(clump_phase + sin(broad_phase * 0.47)) * 0.15;
+    let flutter = sin(
+        time * 2.7
+            + dot(world_sample, vec2<f32>(0.41, -0.33))
+            + hash_unit(blade_hash ^ 0xc2b2ae35u) * 6.283185307,
+    );
+    let sky_light = f32((input.packed_light >> 20u) & 15u);
+    let shelter = mix(
+        grass_frame.time_direction_shelter.w,
+        1.0,
+        smoothstep(4.0, 13.0, sky_light),
+    );
+    let resistance = mix(0.66, 1.0, hash_unit(blade_hash ^ 0x27d4eb2fu));
+    let influence = height_factor * height_factor;
+    let lean_angle = hash_unit(blade_hash ^ 0x165667b1u) * 6.283185307;
+    let resting_lean = vec2<f32>(cos(lean_angle), sin(lean_angle))
+        * (0.018 + 0.025 * hash_unit(blade_hash ^ 0xd3a2646cu));
+    let wind_bend = wind_direction
+        * grass_frame.shape.x
+        * gust
+        * shelter
+        * resistance;
+    let flutter_bend = wind_perpendicular
+        * grass_frame.shape.w
+        * flutter
+        * shelter
+        * height_factor;
+    let bend = (resting_lean + wind_bend + flutter_bend) * influence;
+    return root
+        + vec3<f32>(
+            center.x + axis.x * lateral + bend.x,
+            rise,
+            center.y + axis.y * lateral + bend.y,
+        );
 }
 
 @vertex
@@ -153,7 +194,8 @@ fn vs_main(input: GrassPatchInput, @builtin(vertex_index) vertex_index: u32) -> 
         + (source_position - uniforms.source_anchor_scale.xyz)
             * uniforms.source_anchor_scale.w;
     let variation = 0.78 + hash_unit(input.seed ^ 0xd1b54a35u) * 0.22;
-    let tip = select(0.82, 1.0, vertex_index % 6u >= 2u);
+    let tip = mix(0.82, 1.0, f32((vertex_index % 12u) / 6u) * 0.52
+        + select(0.0, 0.48, vertex_index % 6u >= 2u));
     output.position = uniforms.view_projection * vec4<f32>(composition_position, 1.0);
     output.color = unpack_tint(input.packed_tint) * variation * tip;
     output.composition_position = composition_position;

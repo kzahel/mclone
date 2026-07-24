@@ -2,8 +2,8 @@
 
 Topic: `lush-grass-rendering`
 
-Status: implementation active; quality/settings complete, wind and interaction
-remain.
+Status: implementation active; static grass, quality/settings, and wind are
+complete. Interaction and platform/performance closeout remain.
 
 ## Scope
 
@@ -115,6 +115,28 @@ Headed Wayland evidence restored Lush and reported `14,033` resident patches,
 inspected browser and native app captures showed dense grass rooted on exposed
 grass blocks. The isolated GPU tier fixture also proved strictly increasing
 Sparse/Lush/Ultra pixel coverage while Off retained the bare surface.
+
+## 2026-07-24 Wind Milestone
+
+Wind is now a shared, analytic source-world deformation rather than
+camera-relative animation. The scene supplies one safely rebased monotonic
+presentation time per frame. Both XR eyes share it, and placed worlds deform
+before source-to-composition mapping. Each world owns a lazy 32-byte wind
+uniform beside its patch arena, so Off retains no wind resource or update
+work.
+
+The blade template has two tapered vertical segments. Broad and clump-scale
+fields combine with stable blade resistance, resting lean, and flutter;
+quadratic height influence keeps roots fixed. Packed skylight attenuates
+sheltered motion. Sparse/Lush/Ultra use 0.10/0.14/0.17-block wind amplitudes
+without changing patch buffers.
+
+The fixed-camera GPU fixture changed `3,979` pixels between time 0 and 3.25
+seconds. All six direct/placed/clipped mono/multiview pipeline variants
+validated. Native full-frame, synthetic stereo, and headed Wayland browser
+captures passed and were inspected; the browser retained the established
+Lush counts of `14,033` resident patches, `5,277` drawn patches, about
+`27,078` blades, and `42` grass draws.
 
 ## Attribution And External References
 

@@ -1421,7 +1421,7 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "GPU visual proof for Tactical 238 static grass"]
+    #[ignore = "GPU visual proof for Tactical 238 grass quality and wind"]
     fn static_grass_renders_request_gated_patch_artifacts() -> Result<()> {
         const WIDTH: u32 = 960;
         const HEIGHT: u32 = 640;
@@ -1499,6 +1499,35 @@ mod tests {
             previous_changed_pixels = changed_pixels;
         }
         assert!(previous_changed_pixels > 500);
+
+        let wind_start_path = PathBuf::from("/tmp/mclone-238-static-grass-lush.png");
+        let wind_later_path = PathBuf::from("/tmp/mclone-238-wind-lush-t1.png");
+        write_headless_textured_sections_png_with_options(
+            HeadlessChunkOptions {
+                path: wind_later_path.clone(),
+                ..base_options
+            },
+            &sections,
+            atlas,
+            render_options
+                .with_grass_detail(crate::GrassQuality::Lush)
+                .with_grass_time_seconds(3.25),
+        )?;
+        let wind_start = image::ImageReader::open(wind_start_path)?
+            .decode()?
+            .to_rgba8();
+        let wind_later = image::ImageReader::open(wind_later_path)?
+            .decode()?
+            .to_rgba8();
+        let animated_pixels = wind_start
+            .pixels()
+            .zip(wind_later.pixels())
+            .filter(|(start, later)| start != later)
+            .count();
+        assert!(
+            animated_pixels > 100,
+            "fixed-camera wind times should produce visible deformation"
+        );
         Ok(())
     }
 

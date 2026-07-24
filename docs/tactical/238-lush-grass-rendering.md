@@ -393,6 +393,46 @@ Accepted evidence:
 Exit: the field reads as flexible, coherent grass rather than vibrating cards,
 with no camera-relative popping or stereo disagreement.
 
+Implemented 2026-07-24:
+
+- `mclone-scene` supplies one monotonic presentation time, rebased every
+  4,096 seconds for stable `f32` shader precision. Stereo and multiview use the
+  same sampled time, and placed previews copy the active frame time while
+  retaining their own source-world topology.
+- Each world grass owner lazily allocates a 32-byte frame uniform only beside
+  a non-empty patch arena. The uniform and all wind work disappear with the
+  arena on Off or world release; terrain bind-group layouts are unchanged.
+- Every direct, placed, clipped, per-eye, and multiview shader derives the
+  broad and clump phases from canonical source-world coordinates. Placement
+  happens after deformation, so miniature and translated worlds scale the
+  same source motion instead of changing its character.
+- The original blade template now has two tapered vertical segments. A
+  deterministic resting lean, per-blade resistance and flutter combine with
+  two spatially coherent gust bands. Deformation grows quadratically from a
+  fixed root, and packed skylight attenuates wind to an 18-percent sheltered
+  floor.
+- Sparse/Lush/Ultra select conservative wind amplitudes of 0.10/0.14/0.17
+  blocks without rebuilding patch data. Direction, field scales, speed, and
+  flutter remain shared presentation facts.
+
+Accepted evidence:
+
+- focused render and scene suites passed with `176` render tests and `158`
+  scene tests, plus the scene integration contracts;
+- the ignored GPU gate materialized all six wind-aware pipelines, and the
+  fixed-camera visual fixture changed `3,979` pixels between time 0 and
+  3.25 seconds while retaining identical terrain;
+- the inspected `/tmp/mclone-238-static-grass-lush.png` and
+  `/tmp/mclone-238-wind-lush-t1.png` showed rooted coherent blades at the two
+  fixed times;
+- native full-frame and synthetic stereo captures passed and were inspected;
+  the latter reported `250,370` differing eye pixels while showing the same
+  wind state in both eyes; and
+- headed Wayland `native:web:app-smoke -- --grass-detail lush` passed with
+  `14,033` resident patches, `5,277` drawn patches, an estimated `27,078`
+  blades, and `42` grass draws. Its inspected canvas showed wind-deformed
+  blades through the browser/Web Worker/WebGPU path.
+
 ## Slice 4: Entity Bending and Recovery
 
 - Add scene-neutral interactor collection and grass-surface filtering.
