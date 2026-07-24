@@ -117,6 +117,8 @@ const farLodIndexedDb = process.argv.includes("--far-lod-indexeddb")
   || process.env.MCLONE_NATIVE_WEB_FAR_LOD_INDEXEDDB === "1";
 const remoteWebSocket = process.argv.includes("--remote-websocket")
   || process.env.MCLONE_NATIVE_WEB_REMOTE_WEBSOCKET === "1";
+const menuEntryProbe = process.argv.includes("--menu-entry-probe")
+  || process.env.MCLONE_NATIVE_WEB_MENU_ENTRY_PROBE === "1";
 const appLoop = movementPerf
   || blockEditProbe
   || deathUiProbe
@@ -131,6 +133,7 @@ const appLoop = movementPerf
   || lobbyScenarioProbe
   || farLodProbe
   || remoteWebSocket
+  || menuEntryProbe
   || process.argv.includes("--app-loop")
   || process.argv.includes("--mobile-app-loop")
   || process.env.MCLONE_NATIVE_WEB_APP_LOOP === "1";
@@ -166,6 +169,8 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     ? `/tmp/mclone-native-web-far-lod-${remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local"}.png`
     : mobileAppLoop
     ? "/tmp/mclone-native-web-mobile-app.png"
+    : menuEntryProbe
+    ? "/tmp/mclone-native-web-menu-entry.png"
     : appLoop ? "/tmp/mclone-native-web-app.png" : "/tmp/mclone-native-web-smoke.png");
 const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
   ?? (movementPerf
@@ -194,6 +199,8 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     ? `/tmp/mclone-native-web-far-lod-${remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local"}-canvas.png`
     : mobileAppLoop
     ? "/tmp/mclone-native-web-mobile-app-canvas.png"
+    : menuEntryProbe
+    ? "/tmp/mclone-native-web-menu-entry-canvas.png"
     : appLoop ? "/tmp/mclone-native-web-app-canvas.png" : "/tmp/mclone-native-web-canvas.png");
 const nativeUiCanvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_UI_CANVAS_SCREENSHOT
   ?? "/tmp/mclone-native-web-ui-canvas.png";
@@ -547,6 +554,7 @@ async function run() {
         : `${baseUrl}/app.html${indexedDbReloadQuery || deathUiQuery || farLodQuery || lobbyScenarioQuery}`;
       const startupParameters = new URLSearchParams();
       startupParameters.set("smokeObserver", "1");
+      if (!menuEntryProbe) startupParameters.set("startInWorld", "1");
       if (mobileAppLoop) startupParameters.set("holdStartupProgress", "1");
       if (generationProfile) startupParameters.set("generationProfile", generationProfile);
       if (worldTopology) startupParameters.set("worldTopology", worldTopology);
@@ -616,6 +624,46 @@ async function run() {
         throw new Error(`native web app failed to boot:\n${JSON.stringify(bootState, null, 2)}`);
       }
       const canvas = page.locator("#mclone-canvas");
+      if (menuEntryProbe) {
+        await page.waitForFunction(
+          () => {
+            const state = globalThis.__mcloneWebApp?.state;
+            return state?.nativeUiScreen === "title"
+              && state?.lastReport?.sessionState === "none";
+          },
+          undefined,
+          { timeout: 20_000 },
+        );
+        await page.waitForTimeout(250);
+        const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
+        const pageScreenshotCaptured = await page.screenshot({
+          path: screenshotPath,
+          fullPage: false,
+          timeout: 60_000,
+        }).then(() => true, () => false);
+        const canvasPng = await canvas.screenshot({
+          path: canvasScreenshotPath,
+          timeout: 60_000,
+        });
+        const canvasPixels = analyzePng(canvasPng);
+        if (pageErrors.length > 0 || canvasPixels.distinctInteriorColorCount < 2) {
+          throw new Error(`browser menu-entry probe failed:\n${JSON.stringify({
+            pageErrors,
+            canvasPixels,
+            result,
+          }, null, 2)}`);
+        }
+        console.log(JSON.stringify({
+          url: appUrl,
+          screenshotPath,
+          pageScreenshotCaptured,
+          canvasScreenshotPath,
+          menuEntryProbe,
+          canvasPixels,
+          result,
+        }, null, 2));
+        return;
+      }
       if (auxiliarySplitProbe) {
         const auxiliarySplitProbeResult = await runAuxiliarySplitProbe(page, canvas);
         const report = {

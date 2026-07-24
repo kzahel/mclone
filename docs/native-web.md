@@ -9,6 +9,15 @@ https://mclone.kzahel.com/
 The live web client is the Rust/WASM target under
 [`../native/apps/mclone-web-client/`](../native/apps/mclone-web-client/).
 
+## Client Entry
+
+An ordinary browser URL opens the title menu without constructing a local or
+remote session. A product link can request immediate entry with
+`?startInWorld=true`; a remote address or IndexedDB world destination also
+implies an explicit session request. `?startInWorld=false` forces title entry.
+The browser adapter normalizes those URL facts into the same shared
+`ClientEntryResolution` used by the other clients.
+
 ## Runtime Ownership
 
 The production browser uses the same `mclone_scene::McloneSceneHost` policy
@@ -104,6 +113,9 @@ pnpm native:web:serve
 
 # Validate the interactive browser app with Playwright screenshots in /tmp.
 pnpm native:web:app-smoke
+
+# Prove that an ordinary URL renders title with no active session or world.
+pnpm native:web:menu-smoke
 
 # Select the shared auxiliary view through the real Rust Debug menu and inspect
 # its full-surface menu plus primary-HUD/elevated-world WebGPU split captures.

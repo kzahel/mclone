@@ -13,6 +13,9 @@ use crate::web_world_catalog_descriptor;
 use super::{
     SMOKE_INITIAL_CENTER, SMOKE_MOVED_CENTER, SMOKE_RADIUS_CHUNKS, SMOKE_SEED, WebRuntime,
 };
+use mclone_app_runtime::client_entry::{
+    ClientEntryIntent, ClientEntryResolution, ClientEntrySource,
+};
 use mclone_app_runtime::deferred_drop::{
     BoundedDeferredDropQueue, DEFAULT_DEFERRED_DROP_MAX_ITEMS, DeferredDropService,
 };
@@ -37,7 +40,9 @@ use mclone_app_runtime::scene_session_runtime::{
     FarLodRuntimeSettleSnapshot, RuntimeRenderPriority, SceneRuntimeService, SceneSessionRuntime,
     StartupReadinessPolicy,
 };
-use mclone_app_runtime::session::ActiveSessionDescriptor;
+use mclone_app_runtime::session::{
+    ActiveSessionDescriptor, RemoteSessionEndpoint, SessionStartRequest,
+};
 use mclone_app_runtime::startup_args::{
     RenderCompileCapacityRequest, RenderDistanceLimits, STARTUP_QUERY_KEYS, StartupArgState,
     StartupOptions, StartupSceneOptions,
@@ -96,6 +101,7 @@ const WEB_DEFAULT_RENDER_DISTANCE: u32 = 3;
 const WEB_QUERY_WORLD_STORAGE: &str = "worldStorage";
 const WEB_QUERY_WORLD_ID: &str = "worldId";
 const WEB_QUERY_CLEAR_WORLD_STORAGE: &str = "clearWorldStorage";
+const WEB_QUERY_START_IN_WORLD: &str = "startInWorld";
 // 067 Stage 3: web drives the shared streaming loop at the same per-frame increment as
 // desktop (`DEFAULT_RENDER_CHUNK_MESH_BUDGET`). One small job in flight per frame; the
 // resident cache stays visible while movement fills progressively.
@@ -146,13 +152,19 @@ pub fn mclone_web_render_canvas_report(canvas: HtmlCanvasElement) -> js_sys::Pro
 pub fn mclone_web_startup_options_from_query(search: String) -> Result<WebStartupConfig, JsValue> {
     let options = parse_startup_options_from_query(&search)?;
     let storage = parse_web_world_storage_from_query(&search, options.scene.seed)?;
-    Ok(WebStartupConfig { options, storage })
+    let entry = resolve_web_client_entry(&search, &options, &storage)?;
+    Ok(WebStartupConfig {
+        options,
+        storage,
+        entry,
+    })
 }
 
 #[wasm_bindgen]
 pub struct WebStartupConfig {
     options: StartupOptions,
     storage: WebWorldStorageStartupOptions,
+    entry: ClientEntryResolution,
 }
 
 #[wasm_bindgen]
@@ -190,11 +202,22 @@ impl WebStartupConfig {
             topology => format!("{topology:?}"),
         }
     }
+
+    #[wasm_bindgen(getter, js_name = startsSession)]
+    pub fn starts_session(&self) -> bool {
+        matches!(self.entry.intent, ClientEntryIntent::StartSession(_))
+    }
 }
 
 impl WebStartupConfig {
-    pub(super) fn into_parts(self) -> (StartupOptions, WebWorldStorageStartupOptions) {
-        (self.options, self.storage)
+    pub(super) fn into_parts(
+        self,
+    ) -> (
+        StartupOptions,
+        WebWorldStorageStartupOptions,
+        ClientEntryResolution,
+    ) {
+        (self.options, self.storage, self.entry)
     }
 }
 
@@ -3318,6 +3341,53 @@ fn parse_web_world_storage_from_query(
     })
 }
 
+fn resolve_web_client_entry(
+    search: &str,
+    options: &StartupOptions,
+    storage: &WebWorldStorageStartupOptions,
+) -> Result<ClientEntryResolution, JsValue> {
+    let params = web_sys::UrlSearchParams::new_with_str(search).map_err(|error| {
+        JsValue::from_str(&format!(
+            "failed to parse web client-entry query string: {error:?}"
+        ))
+    })?;
+    let explicit_start = query_optional_bool(&params, WEB_QUERY_START_IN_WORLD)?;
+    let implied_session =
+        options.scene.remote_addr.is_some() || storage.world_storage == "indexeddb";
+    if !explicit_start.unwrap_or(implied_session) {
+        return Ok(if explicit_start.is_some() {
+            ClientEntryResolution::explicit(
+                ClientEntryIntent::Title,
+                ClientEntrySource::BrowserLocation,
+            )
+        } else {
+            ClientEntryResolution::ordinary()
+        });
+    }
+    let request = if let Some(address) = &options.scene.remote_addr {
+        SessionStartRequest::JoinRemote {
+            endpoint: RemoteSessionEndpoint::new(address.clone()),
+        }
+    } else {
+        let mut create = LocalWorldCreateOptions::new(
+            format!("Seed {}", options.scene.seed),
+            options.scene.seed,
+        )
+        .map_err(|error| JsValue::from_str(&error.to_string()))?
+        .with_world_generation_profile(options.scene.world_generation_profile);
+        if storage.world_storage == "indexeddb" {
+            let id = LocalWorldId::new(storage.world_id.clone())
+                .map_err(|error| JsValue::from_str(&error.to_string()))?;
+            create = create.with_requested_id(id);
+        }
+        SessionStartRequest::create_local_world(create)
+    };
+    Ok(ClientEntryResolution::explicit(
+        ClientEntryIntent::StartSession(request),
+        ClientEntrySource::BrowserLocation,
+    ))
+}
+
 fn normalize_web_world_storage_label(value: &str) -> Result<String, String> {
     let normalized = value.trim().to_ascii_lowercase();
     match normalized.as_str() {
@@ -3342,6 +3412,23 @@ fn query_truthy(params: &web_sys::UrlSearchParams, key: &str) -> bool {
         "" | "1" | "true" | "yes" | "on" => true,
         "0" | "false" | "no" | "off" => false,
         _ => true,
+    }
+}
+
+fn query_optional_bool(
+    params: &web_sys::UrlSearchParams,
+    key: &str,
+) -> Result<Option<bool>, JsValue> {
+    if !params.has(key) {
+        return Ok(None);
+    }
+    let value = params.get(key).unwrap_or_default();
+    match value.trim().to_ascii_lowercase().as_str() {
+        "" | "1" | "true" | "yes" | "on" => Ok(Some(true)),
+        "0" | "false" | "no" | "off" => Ok(Some(false)),
+        _ => Err(JsValue::from_str(&format!(
+            "{key} must be true or false, got `{value}`"
+        ))),
     }
 }
 

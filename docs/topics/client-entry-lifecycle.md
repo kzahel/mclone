@@ -3,8 +3,8 @@
 Topic: `client-entry-lifecycle`
 
 Status: active. The product decision, shared entry/lifecycle policy, bounded
-accounting correction, desktop/SteamOS and flat-Android menu-first entry, and
-Steam Deck Devkit process ownership are implemented. Web, XR, and
+accounting correction, desktop/SteamOS, flat-Android, and browser menu-first
+entry, and Steam Deck Devkit process ownership are implemented. XR and
 idle-cadence migration remain active.
 
 ## Scope
@@ -158,7 +158,7 @@ As of 2026-07-24:
 | Desktop flat | title menu; explicit `--start-in-world true`, remote address, world directory, or automation frame report starts a session | shared `ClientEntryResolution` projected from desktop CLI syntax |
 | Steam Deck interactive Devkit payload | title menu | the managed payload and ordinary desktop default resolve through the same shared entry policy; `steamos` remains only a presentation profile |
 | Flat Android | title menu; activity argv, remote address, direct world destination, and perf harnesses can explicitly start a session | shared `ClientEntryResolution` projected from Android intent/property syntax |
-| Web | constructs local/remote runtime and then clears the UI screen | browser scene-host startup |
+| Web | title menu; explicit `startInWorld`, remote address, or IndexedDB world destination starts a session | shared `ClientEntryResolution` projected from browser query/deep-link syntax |
 | Desktop/Android XR | session construction and visible UI selection are not one consistent entry policy | XR app/scene assembly |
 | Offscreen/smoke/perf | intentionally starts the requested workload | harness-specific options |
 
@@ -225,6 +225,12 @@ sections, and emitted no active-session marker. A complementary
 `--start-in-world true` activity intent logged
 `source=activity-intent intent=start-session`, created the local world, and
 rendered the in-game scene. Both screenshots were inspected on 2026-07-24.
+
+The browser now also constructs the session-free shell for an ordinary URL.
+The headed-Wayland menu probe rendered the title, reported `sessionState=none`
+and zero world sections, and produced an inspected WebGPU screenshot. The
+complementary app smoke used `startInWorld=true`, reached an active local
+session, and produced an inspected in-game screenshot on 2026-07-24.
 
 ## Steam Deck Devkit Process Ownership
 

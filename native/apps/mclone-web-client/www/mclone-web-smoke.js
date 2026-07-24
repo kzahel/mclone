@@ -413,7 +413,7 @@ async function renderCanvas() {
       "mclone-render-compiler-smoke",
     );
     const startup = module.mclone_web_startup_options_from_query(
-      "?renderDistance=1&movementMode=fly",
+      "?startInWorld=true&renderDistance=1&movementMode=fly",
     );
     const resources = await fetchBootstrapResources(module, startup);
     const session = await module.mclone_web_create_scene_host_with_startup(
@@ -593,7 +593,7 @@ async function createIndexedDbSmokeSession(
   module, canvas, worldId, clearWorldStorage,
 ) {
   const startup = module.mclone_web_startup_options_from_query(
-    `?seed=424242&renderDistance=1&worldStorage=indexeddb&worldId=${encodeURIComponent(worldId)}&clearWorldStorage=${clearWorldStorage}`,
+    `?startInWorld=true&seed=424242&renderDistance=1&worldStorage=indexeddb&worldId=${encodeURIComponent(worldId)}&clearWorldStorage=${clearWorldStorage}`,
   );
   const resources = await fetchBootstrapResources(module, startup);
   return await module.mclone_web_create_scene_host_with_startup(

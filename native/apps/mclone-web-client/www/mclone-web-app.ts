@@ -187,6 +187,7 @@ class WebFrameDriver {
       hasTouchInput(),
       this.canvas.getBoundingClientRect().width,
     );
+    const startsSession = startup.startsSession;
     this.session = await module.mclone_web_create_scene_host_with_startup(
       this.canvas,
       resources,
@@ -222,9 +223,13 @@ class WebFrameDriver {
     this.touchControls = new TouchControls(this);
     this.syncCanvasSize();
     publishRuntimeState(runtime.state);
-    // 067 Stage 3: warm up the streaming loop to idle so the first presented frame has
-    // terrain (the web analog of desktop's pre-render `sync_all_render_sections`).
-    await this.warmUpStreamingToIdle();
+    if (startsSession) {
+      // Explicit session destinations warm their streaming loop before first
+      // presentation. An ordinary title entry has no world work to warm.
+      await this.warmUpStreamingToIdle();
+    } else {
+      await this.streamFrameOnce();
+    }
   }
 
   start(): void {

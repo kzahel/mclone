@@ -11,6 +11,9 @@ use std::rc::Rc;
 use anyhow::Result;
 use glam::{Vec2, Vec3};
 use mclone_app_runtime::chunk_tracking_radius_for_render_distance;
+use mclone_app_runtime::client_entry::{
+    ClientEntryController, ClientEntryEffect, ClientEntryResolution, ClientHostAvailability,
+};
 use mclone_app_runtime::client_experience::web_client_experience_profile;
 use mclone_app_runtime::frame_render::FlatSurfacePresentation;
 use mclone_app_runtime::input_preferences::{
@@ -22,9 +25,9 @@ use mclone_app_runtime::prepared_assets::{
     AUTHORED_FIRST_PARTY_PACK_ID, MINECRAFT_REFERENCE_PACK_ID, PreparedSceneAssets,
 };
 use mclone_app_runtime::scene_session_runtime::RuntimeRenderPriority;
-use mclone_app_runtime::session::{
-    ActiveSessionDescriptor, GameSessionState, RemoteSessionEndpoint, SessionStartRequest,
-};
+#[cfg(all(test, target_arch = "wasm32"))]
+use mclone_app_runtime::session::RemoteSessionEndpoint;
+use mclone_app_runtime::session::{ActiveSessionDescriptor, GameSessionState, SessionStartRequest};
 use mclone_app_runtime::world_catalog::{
     WorldCatalogError, WorldCatalogErrorKind, WorldCatalogResponse,
 };
@@ -63,9 +66,9 @@ use web_sys::HtmlCanvasElement;
 
 use crate::web_bootstrap::{InitialAssetPacks, WebBootstrapResources, WebHostCapabilities};
 use crate::web_canvas::{
-    WebCanvasContext, WebSceneRuntimeService, WebStartupConfig, gui_key_from_label,
-    prepare_web_scene_assets_from_pack, prepare_web_scene_assets_from_selection, ui_action_label,
-    web_asset_pack_catalog,
+    WebCanvasContext, WebSceneRuntimeService, WebStartupConfig, WebWorldStorageStartupOptions,
+    gui_key_from_label, prepare_web_scene_assets_from_pack,
+    prepare_web_scene_assets_from_selection, ui_action_label, web_asset_pack_catalog,
 };
 use crate::web_catalog_execution::WebCatalogExecution;
 use crate::web_gamepad::BrowserGamepadCollector;
@@ -481,6 +484,7 @@ pub struct WebSceneHost {
     max_resume_drop_backlog: usize,
     shutdown_complete: bool,
     render_worker: WebRenderWorkerCoordinator,
+    startup_runtime_storage: Option<WebWorldStorageStartupOptions>,
     initial_asset_packs: InitialAssetPacks,
     asset_pack_file_count: usize,
     pending_asset_pack_file_count: Option<(u64, usize)>,
@@ -1818,8 +1822,9 @@ impl WebSceneHost {
     ) -> Result<Option<WebSceneOperation>, JsValue> {
         let resources = (worker_url, job_worker_url, bindgen_js_url, bindgen_wasm_url);
         if let Some(pending) = self.host_mut()?.take_external_session_start() {
+            let startup_storage = self.startup_runtime_storage.take();
             return Ok(Some(WebSceneOperationDrain::take_scene_operation(
-                lower_runtime_start(pending, resources.clone()),
+                lower_runtime_start(pending, resources.clone(), startup_storage.as_ref()),
             )));
         }
         if self
@@ -1832,7 +1837,7 @@ impl WebSceneHost {
         }
         if let Some(pending) = self.host_mut()?.take_external_runtime_start() {
             return Ok(Some(WebSceneOperationDrain::take_scene_operation(
-                lower_runtime_start(pending, resources),
+                lower_runtime_start(pending, resources, None),
             )));
         }
         if self.host_ref()?.pending_external_catalog_operation_count() != 0
@@ -1951,6 +1956,7 @@ impl WebSceneHost {
 fn lower_runtime_start(
     pending: ExternalSceneSessionStart,
     resources: WebRuntimeResources,
+    startup_storage: Option<&WebWorldStorageStartupOptions>,
 ) -> WebSceneOperationEffect {
     let (worker_url, job_worker_url, bindgen_js_url, bindgen_wasm_url) = resources;
     let center = pending.scene.center();
@@ -1988,6 +1994,15 @@ fn lower_runtime_start(
                     ),
                 ) => config.with_transient_authored_fixture(*fixture),
                 Some(source) => config.with_indexed_db_world(source.world_id(), false),
+                None if startup_storage
+                    .is_some_and(|storage| storage.world_storage == "indexeddb") =>
+                {
+                    let storage = startup_storage.expect("startup storage presence checked");
+                    config.with_indexed_db_world(
+                        storage.world_id.clone(),
+                        storage.clear_world_storage,
+                    )
+                }
                 None if id.is_some() => {
                     config.with_indexed_db_world(id.as_ref().unwrap().as_str(), false)
                 }
@@ -2085,60 +2100,10 @@ pub async fn mclone_web_create_scene_host_with_startup(
     render_worker_transport_factory: js_sys::Function,
 ) -> Result<WebSceneHost, JsValue> {
     let initial_asset_packs = resources.into_initial_asset_packs()?;
-    let (options, storage) = startup.into_parts();
+    let (options, storage, entry) = startup.into_parts();
     let scene_startup = options.scene;
     let render_options = options.render_options;
-    let center = ChunkPos::new(scene_startup.chunk_x, scene_startup.chunk_z);
-    let (mut runtime, descriptor) = if let Some(websocket_url) = scene_startup.remote_addr.clone() {
-        let runtime = crate::WebRuntime::websocket_remote_at(websocket_url.clone(), center)
-            .await
-            .map_err(JsValue::from)?;
-        (
-            runtime,
-            ActiveSessionDescriptor::Remote {
-                endpoint: RemoteSessionEndpoint::new(websocket_url),
-            },
-        )
-    } else {
-        let mut config = WebIntegratedServerRunnerConfig::new(
-            scene_startup.seed,
-            server_worker_url,
-            server_job_worker_url,
-            bindgen_js_url.clone(),
-            bindgen_wasm_url.clone(),
-        )
-        .with_world_generation_profile(scene_startup.world_generation_profile)
-        .with_world_topology(scene_startup.world_topology)
-        .with_debug_passive_showcase(
-            scene_startup.debug_passive_showcase
-                && (storage.world_storage != "indexeddb" || storage.clear_world_storage),
-        )
-        .with_debug_auxiliary_player_script(scene_startup.debug_auxiliary_player_script)
-        .with_light_status_batch_size(scene_startup.light_status_batch_size);
-        if storage.world_storage == "indexeddb" {
-            config = config.with_indexed_db_world(storage.world_id, storage.clear_world_storage);
-        } else if storage.world_storage != "transient" {
-            return Err(JsValue::from_str("unsupported browser world storage"));
-        }
-        let runtime = crate::WebRuntime::web_worker_integrated_at(config, center)
-            .await
-            .map_err(JsValue::from)?;
-        (
-            runtime,
-            ActiveSessionDescriptor::LocalWorld {
-                seed: scene_startup.seed,
-                id: None,
-                display_name: None,
-            },
-        )
-    };
-    runtime
-        .request_chunk_view_deferred(
-            center,
-            scene_startup.render_distance,
-            chunk_tracking_radius_for_render_distance(scene_startup.render_distance),
-        )
-        .map_err(JsValue::from)?;
+    let _ = (server_worker_url, server_job_worker_url);
     let scene = McloneSceneHostOptions {
         startup: scene_startup,
         use_initial_spawn_center: false,
@@ -2149,10 +2114,10 @@ pub async fn mclone_web_create_scene_host_with_startup(
         canvas,
         initial_asset_packs,
         capabilities,
-        runtime,
-        descriptor,
         scene,
         render_options,
+        entry,
+        storage,
         bindgen_js_url,
         bindgen_wasm_url,
         render_worker_transport_factory,
@@ -2165,10 +2130,10 @@ async fn create_scene_host(
     canvas: HtmlCanvasElement,
     initial_asset_packs: InitialAssetPacks,
     capabilities: WebHostCapabilities,
-    runtime: crate::WebRuntime,
-    descriptor: ActiveSessionDescriptor,
     scene: McloneSceneHostOptions,
     render_options: TexturedSectionRenderOptions,
+    entry: ClientEntryResolution,
+    startup_storage: WebWorldStorageStartupOptions,
     bindgen_js_url: String,
     bindgen_wasm_url: String,
     render_worker_transport_factory: js_sys::Function,
@@ -2208,22 +2173,12 @@ async fn create_scene_host(
         .await
         .map_err(JsValue::from)?;
     let (platform, clock, catalog_operations) = WebScenePlatformServices::new();
-    let runtime = WebSceneRuntimeService::new(
-        runtime,
-        active_assets.mesh.clone(),
-        render_worker.clone(),
-        clock.clone(),
-        1,
-        RuntimeRenderPriority::Active,
-    )
-    .into_scene_session_runtime(descriptor.clone());
-    let mut host = McloneSceneHost::with_scene_runtime(
+    let mut host = McloneSceneHost::without_session(
         &context.device,
         &context.queue,
         context.format,
         clock,
         scene,
-        runtime,
         render_options,
         active_assets,
         web_client_experience_profile(),
@@ -2232,7 +2187,6 @@ async fn create_scene_host(
     )
     .map_err(js_error)?;
     host.set_mono_ui_context(MonoUiContext::default());
-    host.set_mono_ui_screen(None);
     host.set_mono_debug_diagnostics_visible(capabilities.initial_debug_overlay_visible());
     host.configure_external_asset_pack_catalog(
         catalog,
@@ -2255,6 +2209,38 @@ async fn create_scene_host(
         -0.35,
         initial_fly_speed,
     );
+    let startup_requests_session = matches!(
+        &entry.intent,
+        mclone_app_runtime::client_entry::ClientEntryIntent::StartSession(_)
+    );
+    let mut entry_controller = ClientEntryController::new(entry);
+    let entry_effect = entry_controller
+        .update_host(ClientHostAvailability {
+            bootstrapped: true,
+            foreground: true,
+            presentation_available: true,
+        })
+        .expect("ready browser host dispatches its entry exactly once");
+    web_sys::console::info_1(&JsValue::from_str(&format!(
+        "Mclone browser client entry source={} intent={}",
+        entry_controller.resolution().source.label(),
+        entry_controller.resolution().intent.label(),
+    )));
+    let startup_status = match entry_effect {
+        ClientEntryEffect::EnterTitle { status } => {
+            host.set_client_entry_status(status);
+            StatusOverlay::hidden()
+        }
+        ClientEntryEffect::StartSession(request) => {
+            host.start_session_for_request(&context.device, &context.queue, request)
+                .map_err(js_error)?;
+            StatusOverlay::new("Generating world...", true)
+        }
+        ClientEntryEffect::LaunchScenario(intent) => {
+            host.begin_lobby_launch(intent).map_err(js_error)?;
+            StatusOverlay::new("Preparing lobby...", true)
+        }
+    };
     let depth = ChunkDepthTarget::new(&context.device, context.width, context.height);
     let mut input_capability_state = InputCapabilityState::new(InputCapabilities {
         keyboard: true,
@@ -2293,10 +2279,11 @@ async fn create_scene_host(
         max_resume_drop_backlog: 0,
         shutdown_complete: false,
         render_worker,
+        startup_runtime_storage: startup_requests_session.then_some(startup_storage),
         initial_asset_packs,
         asset_pack_file_count,
         pending_asset_pack_file_count: None,
-        status_overlay: StatusOverlay::new("Generating world...", true),
+        status_overlay: startup_status,
         touch_look_sensitivity: input_preferences.touch_look_sensitivity,
         touch_settings_available: capabilities.touch_input_available(),
         touch_controls_mode: input_preferences.touch_controls_mode,
