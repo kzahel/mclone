@@ -1,10 +1,18 @@
 # Terrain Lab
 
-Terrain Lab is the browser-hosted macro terrain workbench at `/terrain/`. It
-keeps the production first-party terrain sampler as the CPU reference while a
-small, explicitly approximate WebGPU evaluator generates aligned resident
-terrain tiles. Each tile has a 64 × 64 cell / 65 × 65 sample lattice, while
-the viewport may cover and progressively refine many tiles.
+Terrain Lab is the browser-hosted terrain workspace at `/terrain/`. Its
+visible panes are independently configurable but coordinate-locked:
+
+- `Real terrain` compiles exact first-party chunks through the production
+  generator and renders their blocks, biomes, fluids, and final features with
+  the production first-party texture atlas and cheap preview lighting.
+- `CPU LOD` samples the production large-scale surface fields.
+- `GPU LOD` evaluates the aligned, explicitly approximate WebGPU fields.
+
+The exact compiler runs in a replaceable Web Worker and publishes chunks
+center-first as they finish. The LOD panes use 64 × 64 cell / 65 × 65 sample
+tiles and may cover and progressively refine many tiles. Every visible pane
+shares seed, center, footprint, camera, and navigation.
 
 The URL owns the review state:
 
@@ -13,7 +21,12 @@ The URL owns the review state:
 - `blocks`: continuous viewport width from 64 through 131,072 blocks
 - `detail`: `auto` or a power-of-two sample spacing from 1 through 1,024
   blocks
-- `source`: `reference`, `gpu`, or `split`
+- `panes`: comma-separated `canonical`, `cpu`, and/or `gpu`
+- `canonical`: `surface` or `final`
+- `radius`: exact chunk radius from `0` through `2`
+- `water` and `vegetation`: `1` to show or `0` to hide retained exact blocks
+- `source`: legacy/procedural compatibility value (`reference`, `gpu`, or
+  `split`); new links should use `panes`
 - `view`: `3d` or `map`
 - `layer`: `terrain`, `height`, `error`, `continentalness`, or `climate`
 
@@ -29,12 +42,15 @@ pixels per sample cell. A manual detail request remains visible even when the
 bounded eight-tile-per-axis interactive budget must raise its effective
 spacing; zooming in eventually admits every manual level, including `1:1`.
 
-The shared Rust scheduler has independent CPU compilation and GPU dispatch
-queues. Each lane covers the viewport coarsely before refining through nested
-power-of-two levels, and each publishes its finest complete level without
-waiting for the other. GPU work is submitted before the bounded CPU compiler
-runs so the two lanes can overlap. The evidence panel reports their separate
-queues, coarse/target readiness, end-to-end throughput, and published detail.
+The exact scheduler terminates and replaces its Worker when generation
+identity changes, so stale chunks cannot land after a seed, center, checkpoint,
+radius, or cold-cache change. Water and vegetation switches only remesh
+retained chunks; they do not rerun or mutate generation. The shared LOD
+scheduler has independent CPU compilation and GPU dispatch queues. Each lane
+covers the viewport coarsely before refining through nested power-of-two
+levels, and each publishes its finest complete level without waiting for the
+other. The evidence panel reports exact arrival/generation/upload timing and
+the LOD queues, readiness, throughput, and published detail.
 
 CPU reference wall time and WGPU encode/submit wall time are not GPU execution
 time. Portable timestamp queries are not enabled in this Lab slice, so the UI
@@ -42,22 +58,23 @@ says `GPU execution: unavailable` rather than inferring a GPU/CPU speed ratio.
 The GPU evaluator remains a preview experiment, not authoritative world
 generation.
 
-`split` is a coordinate-locked asynchronous comparison. Wide canvases place
-the views side by side; phone-sized portrait canvases stack two full-width
-views so Compare does not halve their screen-space detail. The first panel
-publishes CPU production-base levels and the second publishes GPU
-production-base levels. Their readiness labels make the race visible, while
-the final comparison still requires matching target samples from both lanes.
-`reference` separately shows CPU-final terrain including rivers, wetlands,
-and planned streams.
+When both LOD panes are visible, wide canvases place them side by side and
+portrait canvases stack two full-width views. The CPU and GPU panels publish
+independently at identical coordinates; their labels expose the race while
+the final comparison waits for matching target samples. The exact pane is not
+another height field: it is a bounded block-and-feature patch nested at the
+same world center and scale. Generated fallback atlas tiles intentionally
+remain visible for block materials that do not yet have curated first-party
+textures.
 
-`Cache on` uses a session-local 192-tile LRU keyed by seed, aligned origin,
-and sample spacing. It retains CPU samples, uploaded reference data,
-GPU-computed buffers, and completed validation readbacks while panning and
-zooming. Camera, layer, and source are not cache identity. `Cache off` drops
-resident tiles whenever the generation viewport changes, retains only the
-active request long enough to draw it, and disables speculative preload.
-`Cold current view` invalidates the same viewport explicitly.
+The exact and LOD caches are independent. `Exact cache on` retains generated
+chunks by seed, checkpoint, and chunk coordinate; `Exact cache off` compiles
+the current patch cold. `Cache on` uses a session-local 192-tile LRU keyed by
+seed, aligned origin, and sample spacing. It retains CPU samples, uploaded
+reference data, GPU-computed buffers, and completed validation readbacks while
+panning and zooming. Camera, layer, and pane visibility are not LOD cache
+identity. `Cache off` retains only the active request and disables speculative
+preload. `Cold current view` invalidates both cache domains explicitly.
 
 `Run stress race` selects the fixed review seed/site, turns cache off, and
 uses a larger 12-tile-per-axis diagnostic budget over a 2 km requested-`1:2`
@@ -66,12 +83,12 @@ the default interactive budget. CPU end-to-end and GPU
 dispatch-to-validation-readback throughput use labeled, different timing
 boundaries; neither is presented as pure GPU execution time.
 
-The preview surface uses upward-facing counter-clockwise triangles, rejects
-back faces, and projects the oblique camera from above the height field.
-CPU-final and Compare share the same per-tile sample lattices and viewport
-plan. CPU-final can look busier because narrow watercourse and bank fields are
-point sampled; those aliases are evidence for a later scale-aware summary
-rather than additional mesh resolution.
+The LOD preview surface uses upward-facing counter-clockwise triangles,
+rejects back faces, and projects the oblique camera from above the height
+field. CPU and GPU LOD share the same per-tile sample lattices and viewport
+plan. Final rivers, wetlands, and planned streams remain absent from the GPU
+LOD path; exact final chunks include those production features wherever the
+generator places them.
 
 ## Develop
 

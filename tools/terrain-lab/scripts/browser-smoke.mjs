@@ -56,20 +56,22 @@ try {
   });
 
   await page.goto(
-    `${baseUrl}/terrain/?seed=-98765&x=-304&z=336&blocks=2048&detail=auto`
-      + "&source=split&view=3d&layer=terrain",
+    `${baseUrl}/terrain/?seed=-98765&x=-304&z=336&blocks=512&detail=auto`
+      + "&panes=canonical%2Ccpu%2Cgpu&canonical=final&radius=1"
+      + "&water=1&vegetation=1&view=3d&layer=terrain",
     { waitUntil: "networkidle" },
   );
   const shell = page.locator(".appShell");
   await page.locator("[data-testid='lab-status']").waitFor({ state: "visible" });
   await waitForComparison(shell);
+  await waitForCanonical(shell, 9);
   const sourceControls = page.locator("[data-testid='preview-source-controls']");
   await sourceControls.waitFor({ state: "visible" });
   const sourceGuide = await sourceControls.innerText();
-  if (!sourceGuide.includes("exact same world coordinates")) {
+  if (!sourceGuide.includes("Same coordinates, independent readiness")) {
     throw new Error(`Terrain Lab compare guidance is missing:\n${sourceGuide}`);
   }
-  const expectedCompareLayout = mobile ? "stacked" : "side-by-side";
+  const expectedCompareLayout = "stacked";
   if (await shell.getAttribute("data-compare-layout") !== expectedCompareLayout
       || Number(await shell.getAttribute("data-vertex-count")) <= 49_152
       || await shell.getAttribute("data-target-ready") !== "true") {
@@ -85,22 +87,26 @@ try {
   const initialPitch = Number(await shell.getAttribute("data-camera-pitch"));
   const initialUrl = page.url();
   const comparisonMetrics = await readComparisonMetrics(shell);
-  assertLargeFieldMetrics(comparisonMetrics, "2 km review");
+  assertLargeFieldMetrics(comparisonMetrics, "512 block review");
 
   const pageCapture = `/tmp/mclone-terrain-lab-${label}.png`;
+  const canonicalCapture = `/tmp/mclone-terrain-lab-${label}-canonical.png`;
   const canvasCapture = `/tmp/mclone-terrain-lab-${label}-canvas.png`;
   const orbitCapture = `/tmp/mclone-terrain-lab-${label}-orbit.png`;
   const errorCapture = `/tmp/mclone-terrain-lab-${label}-map-error.png`;
   const continentScaleCapture = `/tmp/mclone-terrain-lab-${label}-continent-scale.png`;
   const stressRaceCapture = `/tmp/mclone-terrain-lab-${label}-stress-race.png`;
   await page.screenshot({ path: pageCapture, fullPage: true });
+  await page.locator("canvas[aria-label='Canonical textured terrain preview']").screenshot({
+    path: canonicalCapture,
+  });
   await page.locator("canvas[aria-label='Live GPU terrain preview']").screenshot({
     path: canvasCapture,
   });
 
   const stage = page.locator("[data-testid='terrain-stage']");
-  const stageBox = await stage.boundingBox();
-  if (!stageBox) {
+  const layoutStageBox = await stage.boundingBox();
+  if (!layoutStageBox) {
     throw new Error("Terrain Lab stage has no interactive bounds");
   }
   const sourceControlsBox = await sourceControls.boundingBox();
@@ -109,17 +115,27 @@ try {
     .boundingBox();
   if (!sourceControlsBox || !viewportControlsBox
       || sourceControlsBox.y + sourceControlsBox.height > viewportControlsBox.y + 1
-      || viewportControlsBox.y + viewportControlsBox.height > stageBox.y + 1) {
+      || viewportControlsBox.y + viewportControlsBox.height > layoutStageBox.y + 1) {
     throw new Error("Terrain Lab source and viewport controls are not adjacent to the preview");
   }
+  await stage.scrollIntoViewIfNeeded();
+  const stageBox = await stage.boundingBox();
+  if (!stageBox) {
+    throw new Error("Terrain Lab stage disappeared after scrolling");
+  }
+  const viewportHeight = page.viewportSize()?.height ?? 900;
+  const orbitStartY = Math.max(
+    100,
+    Math.min(stageBox.y + 200, viewportHeight - 100),
+  );
   await page.mouse.move(
     stageBox.x + stageBox.width * 0.5,
-    stageBox.y + stageBox.height * 0.5,
+    orbitStartY,
   );
   await page.mouse.down();
   await page.mouse.move(
     stageBox.x + stageBox.width * 0.7,
-    stageBox.y + stageBox.height * 0.38,
+    orbitStartY - 80,
   );
   await page.mouse.up();
   await waitForRevision(shell, initialRevision);
@@ -152,7 +168,7 @@ try {
 
   const localMapRevision = Number(await shell.getAttribute("data-render-revision"));
   await page.getByLabel("Diagnostic layer").selectOption("continentalness");
-  for (let index = 0; index < 4; index += 1) {
+  for (let index = 0; index < 6; index += 1) {
     await page.getByRole("button", { name: "Zoom out" }).click();
   }
   await waitForRevision(shell, localMapRevision);
@@ -203,9 +219,7 @@ try {
     throw new Error(`CPU/GPU panels never published independently: ${raceStates.join(", ")}`);
   }
   await settlePaint(page);
-  await page.locator("canvas[aria-label='Live GPU terrain preview']").screenshot({
-    path: stressRaceCapture,
-  });
+  await page.screenshot({ path: stressRaceCapture, fullPage: true });
   const stressBenchmark = {
     cacheEnabled: await shell.getAttribute("data-cache-enabled"),
     cacheHits: Number(await shell.getAttribute("data-cache-hits")),
@@ -233,6 +247,7 @@ try {
   const report = {
     adapter: await page.locator("[data-testid='adapter-name']").textContent(),
     captures: {
+      canonicalCapture,
       canvasCapture,
       continentScaleCapture,
       errorCapture,
@@ -342,6 +357,18 @@ async function waitForComparison(shell) {
       );
       return renderRevision > 0 && comparisonRevision === renderRevision;
     },
+  );
+}
+
+async function waitForCanonical(shell, requestedChunks) {
+  await shell.page().waitForFunction(
+    (requested) => {
+      const element = document.querySelector(".appShell");
+      return element?.getAttribute("data-canonical-complete") === "true"
+        && Number(element.getAttribute("data-canonical-published")) === requested
+        && Number(element.getAttribute("data-canonical-requested")) === requested;
+    },
+    requestedChunks,
   );
 }
 
