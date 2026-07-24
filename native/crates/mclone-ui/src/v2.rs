@@ -2933,6 +2933,7 @@ impl GameUiHost {
             | GameUiAction::RerollSeed
             | GameUiAction::CycleWorldGenerationProfile => {}
             GameUiAction::ToggleSectionOcclusion
+            | GameUiAction::SetLeafDetail(_)
             | GameUiAction::ToggleAssetPack(_)
             | GameUiAction::ApplyAssetPacks
             | GameUiAction::ClearRebuildableCache
@@ -3164,6 +3165,7 @@ const UI_V2_OPTIONS_CAT_STORAGE: UiWidgetId = UiWidgetId(132);
 const UI_V2_OPTIONS_OUTPUT_RESOLUTION: UiWidgetId = UiWidgetId(144);
 const UI_V2_OPTIONS_WORLD_RESOLUTION: UiWidgetId = UiWidgetId(145);
 const UI_V2_OPTIONS_WORLD_RENDER_SCALE: UiWidgetId = UiWidgetId(146);
+const UI_V2_OPTIONS_LEAF_DETAIL: UiWidgetId = UiWidgetId(147);
 const UI_V2_STORAGE_PROFILE_NAME: UiWidgetId = UiWidgetId(133);
 const UI_V2_STORAGE_PROFILE_ID: UiWidgetId = UiWidgetId(134);
 const UI_V2_STORAGE_BACKEND: UiWidgetId = UiWidgetId(135);
@@ -3795,7 +3797,7 @@ const fn options_category_widget_id(category: GameOptionsCategory) -> UiWidgetId
 /// the row list twice.
 const fn options_category_row_count(category: GameOptionsCategory) -> usize {
     match category {
-        GameOptionsCategory::Graphics => 10,
+        GameOptionsCategory::Graphics => 11,
         GameOptionsCategory::Movement => 8,
         GameOptionsCategory::Display => 3,
         GameOptionsCategory::Debug => 5,
@@ -3947,6 +3949,16 @@ fn options_category_rows(
                     state.section_occlusion_culling,
                 )
                 .action(GameUiAction::ToggleSectionOcclusion),
+            ),
+            (
+                20.0,
+                UiWidget::cycle(
+                    UI_V2_OPTIONS_LEAF_DETAIL,
+                    ph,
+                    "Leaf Detail",
+                    state.leaf_detail.label(),
+                )
+                .action(GameUiAction::SetLeafDetail(state.leaf_detail.next())),
             ),
             (
                 18.0,

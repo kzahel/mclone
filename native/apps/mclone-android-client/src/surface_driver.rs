@@ -548,6 +548,17 @@ impl AndroidGpuState {
                 ))?;
             }
         }
+        if let Some(path) =
+            mclone_app_runtime::graphics_preferences::native_graphics_preference_path(
+                startup.scene.world_root.as_deref(),
+            )
+        {
+            host.configure_graphics_preference_storage(Box::new(
+                mclone_app_runtime::graphics_preferences::FileClientGraphicsPreferenceStorage::new(
+                    path,
+                ),
+            ))?;
+        }
         apply_startup_camera_options(&mut host, startup.camera);
         let mut ui = GameUiHost::new();
         ui.set_new_world_seed(startup.scene.seed);

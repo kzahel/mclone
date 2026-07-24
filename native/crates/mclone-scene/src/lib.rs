@@ -62,6 +62,9 @@ use mclone_app_runtime::frame_render::{
     render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_timed_in_slot,
     render_view_with_underwater_effect,
 };
+use mclone_app_runtime::graphics_preferences::{
+    ClientGraphicsPreferenceStorage, ClientGraphicsPreferences,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_app_runtime::host_mode::RemoteDedicatedServerSession;
 use mclone_app_runtime::host_mode::{SingleViewHostMode, SingleViewHostOptions};
@@ -175,12 +178,13 @@ use mclone_server::{SimulationCadenceConfig, WorkerFrameMetrics};
 use mclone_ui::{
     Color, DEFAULT_JOIN_REMOTE_ADDR, DebugActorTool, DebugOverlay, FlatHotbarOverlay, FlatHud,
     FlatHudDebugOverlay, GameAuxiliarySplitMode, GameCollisionMode, GameDeathCause,
-    GameFlatPresentationState, GameFramePacingMode, GameMovementMode, GamePlayerModel, GameScreen,
-    GameSimulationCadence, GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameUiAction,
-    GameUiHost, GameUiRenderState, GameWorldRenderScaleMode, GameXrTurnMode, GamepadHudOverlay,
-    GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay, Point, Rect, StatusOverlay,
-    StorageProfileBackend, StorageProfileUiState, TouchOverlay, UiDebugSnapshot, UiDrawCacheStats,
-    UiPanelRevision, WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
+    GameFlatPresentationState, GameFramePacingMode, GameLeafDetail, GameMovementMode,
+    GamePlayerModel, GameScreen, GameSimulationCadence, GameTouchSettings, GameTravelAssistMode,
+    GameTurnMode, GameUiAction, GameUiHost, GameUiRenderState, GameWorldRenderScaleMode,
+    GameXrTurnMode, GamepadHudOverlay, GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay,
+    Point, Rect, StatusOverlay, StorageProfileBackend, StorageProfileUiState, TouchOverlay,
+    UiDebugSnapshot, UiDrawCacheStats, UiPanelRevision, WorldCatalogUiStatus,
+    render_loading_progress_overlay, render_status_overlay,
 };
 
 mod asset_replacement;
@@ -199,6 +203,20 @@ mod tracking;
 mod ui_panels;
 mod warm_world;
 mod worldgen_lens;
+
+pub(crate) const fn engine_leaf_detail(detail: GameLeafDetail) -> mclone_mesh::LeafDetail {
+    match detail {
+        GameLeafDetail::Blocky => mclone_mesh::LeafDetail::Blocky,
+        GameLeafDetail::Bushy => mclone_mesh::LeafDetail::Bushy,
+    }
+}
+
+pub(crate) const fn game_leaf_detail(detail: mclone_mesh::LeafDetail) -> GameLeafDetail {
+    match detail {
+        mclone_mesh::LeafDetail::Blocky => GameLeafDetail::Blocky,
+        mclone_mesh::LeafDetail::Bushy => GameLeafDetail::Bushy,
+    }
+}
 
 pub use comfort::*;
 pub use host_effects::*;
@@ -752,6 +770,9 @@ pub struct McloneSceneHost {
     asset_pack_preference: AssetPackPreference,
     asset_pack_preference_storage: Option<Box<dyn AssetPackPreferenceStorage>>,
     asset_pack_preference_error: Option<String>,
+    graphics_preference_storage: Option<Box<dyn ClientGraphicsPreferenceStorage>>,
+    graphics_preference_error: Option<String>,
+    pending_restored_leaf_detail: Option<mclone_mesh::LeafDetail>,
     pending_restored_asset_pack_selection: Option<AssetPackSelection>,
     external_asset_pack_preparation: bool,
     pending_external_asset_pack_selection: Option<PlatformOperation<ExternalAssetPackSelection>>,

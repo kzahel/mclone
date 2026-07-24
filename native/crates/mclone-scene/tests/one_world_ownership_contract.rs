@@ -107,6 +107,9 @@ const SCENE_HOST_FIELDS: &[&str] = &[
     "asset_pack_preference",
     "asset_pack_preference_storage",
     "asset_pack_preference_error",
+    "graphics_preference_storage",
+    "graphics_preference_error",
+    "pending_restored_leaf_detail",
     "pending_restored_asset_pack_selection",
     "external_asset_pack_preparation",
     "pending_external_asset_pack_selection",
@@ -179,7 +182,7 @@ fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
     assert_eq!(slot_fields, DRAWABLE_WORLD_SLOT_FIELDS);
     assert_eq!(slot_fields.len(), 21);
     assert_eq!(host_fields, SCENE_HOST_FIELDS);
-    assert_eq!(host_fields.len(), 87);
+    assert_eq!(host_fields.len(), 90);
     assert_eq!(host.matches("active_world: DrawableWorldSlot").count(), 1);
     assert_eq!(
         host.matches("standby_world: Option<DrawableWorldSlot>")

@@ -2158,6 +2158,10 @@ mod android {
             mclone_app_runtime::asset_pack_preferences::native_asset_pack_preference_path(
                 scene_options.world_root.as_deref(),
             );
+        let graphics_preference_path =
+            mclone_app_runtime::graphics_preferences::native_graphics_preference_path(
+                scene_options.world_root.as_deref(),
+            );
         let entry_world_dir = scene_options.world_dir.clone();
         let mut terrain = McloneSceneHost::start_native_without_session(
             device,
@@ -2188,6 +2192,13 @@ mod android {
                     mclone_app_runtime::asset_pack_preferences::FileAssetPackPreferenceStorage::new(path),
                 ))?;
             }
+        }
+        if let Some(path) = graphics_preference_path {
+            terrain.configure_graphics_preference_storage(Box::new(
+                mclone_app_runtime::graphics_preferences::FileClientGraphicsPreferenceStorage::new(
+                    path,
+                ),
+            ))?;
         }
         let audio = match AudioEngine::new(&asset_source, AudioSettings::default()) {
             Ok(audio) => Some(audio),

@@ -180,6 +180,39 @@ impl McloneSceneHost {
         Ok(())
     }
 
+    pub fn configure_graphics_preference_storage(
+        &mut self,
+        storage: Box<dyn ClientGraphicsPreferenceStorage>,
+    ) -> Result<()> {
+        match storage.load() {
+            Ok(Some(preferences)) => {
+                let detail = engine_leaf_detail(preferences.leaf_detail);
+                if detail != self.mesh_assets.catalog.leaf_detail() {
+                    if self.asset_replacement.is_none() {
+                        if let Err(error) = self.request_leaf_detail(detail) {
+                            self.graphics_preference_error =
+                                Some(format!("failed to restore {}: {error:#}", storage.label()));
+                            self.pending_restored_leaf_detail = Some(detail);
+                        }
+                    } else {
+                        self.pending_restored_leaf_detail = Some(detail);
+                    }
+                }
+            }
+            Ok(None) => {}
+            Err(error) => {
+                self.graphics_preference_error =
+                    Some(format!("failed to load {}: {error:#}", storage.label()));
+            }
+        }
+        self.graphics_preference_storage = Some(storage);
+        Ok(())
+    }
+
+    pub fn graphics_preference_error(&self) -> Option<&str> {
+        self.graphics_preference_error.as_deref()
+    }
+
     pub fn preferred_asset_pack_ids(&self) -> impl Iterator<Item = &mclone_assets::AssetPackId> {
         self.asset_pack_preference.enabled_ids()
     }
@@ -222,7 +255,7 @@ impl McloneSceneHost {
         let resolution = self.external_asset_pack_operations.complete(
             mclone_app_runtime::platform_operation::PlatformOperationCompletion { token, result },
         );
-        let (pending, assets) = match resolution {
+        let (pending, mut assets) = match resolution {
             mclone_app_runtime::platform_operation::PlatformOperationResolution::Applied {
                 kind,
                 value,
@@ -251,6 +284,10 @@ impl McloneSceneHost {
             self.fail_asset_replacement(message.clone());
             bail!(message);
         }
+        assets.mesh.catalog = assets
+            .mesh
+            .catalog
+            .with_leaf_detail(self.mesh_assets.catalog.leaf_detail());
         self.asset_replacement_assets_ready_at = Some(self.services.clock.now());
         let (snapshots, target_sections) = self.current_asset_compile_inputs()?;
         let replacement = PreparedAssetReplacement::build(
@@ -317,17 +354,64 @@ impl McloneSceneHost {
         let started_at = self.services.clock.now();
         self.validate_replacement_epoch(epoch)?;
         let (snapshots, target_sections) = self.current_asset_compile_inputs()?;
+        #[cfg(not(target_arch = "wasm32"))]
         let request = PreparedAssetReplacementRequest::spawn(
             assets,
             snapshots,
             target_sections,
             self.current_biome_zoom_seed(),
         )?;
+        #[cfg(target_arch = "wasm32")]
+        let request = PreparedAssetReplacementRequest::ready(PreparedAssetReplacement::build(
+            assets,
+            snapshots,
+            target_sections,
+            self.current_biome_zoom_seed(),
+        )?);
         self.asset_replacement = Some(SceneAssetReplacementPending::Meshes(request));
         self.asset_replacement_started_at = Some(started_at);
         self.asset_replacement_assets_ready_at = Some(started_at);
         self.asset_replacement_status = AssetReplacementStatus::PreparingMeshes { epoch };
         Ok(())
+    }
+
+    pub(crate) fn request_leaf_detail(&mut self, detail: mclone_mesh::LeafDetail) -> Result<()> {
+        if self.mesh_assets.catalog.leaf_detail() == detail {
+            return Ok(());
+        }
+        if self.active_world.runtime.is_none() {
+            self.mesh_assets.catalog = self.mesh_assets.catalog.clone().with_leaf_detail(detail);
+            self.active_assets.mesh.catalog = self
+                .active_assets
+                .mesh
+                .catalog
+                .clone()
+                .with_leaf_detail(detail);
+            self.pending_restored_leaf_detail = None;
+            self.persist_graphics_preference(detail);
+            log::info!("leaf detail set to {detail:?} before active runtime startup");
+            return Ok(());
+        }
+        let epoch = self.active_asset_epoch().saturating_add(1);
+        let mut assets = self.active_asset_snapshot_for_epoch(epoch);
+        assets.mesh.catalog = assets.mesh.catalog.with_leaf_detail(detail);
+        self.begin_prepared_asset_replacement(assets)?;
+        log::info!("leaf detail replacement epoch {epoch} requested as {detail:?}");
+        Ok(())
+    }
+
+    fn persist_graphics_preference(&mut self, detail: mclone_mesh::LeafDetail) {
+        let preferences = ClientGraphicsPreferences {
+            leaf_detail: game_leaf_detail(detail),
+        };
+        if let Some(storage) = self.graphics_preference_storage.as_ref() {
+            if let Err(error) = storage.store(&preferences) {
+                self.graphics_preference_error =
+                    Some(format!("failed to store {}: {error:#}", storage.label()));
+            } else {
+                self.graphics_preference_error = None;
+            }
+        }
     }
 
     /// Snapshot the current CPU resources for deterministic rollback/switchback
@@ -350,6 +434,15 @@ impl McloneSceneHost {
     ) -> Result<()> {
         if self.asset_replacement.is_none()
             && self.active_world.runtime.is_some()
+            && let Some(detail) = self.pending_restored_leaf_detail.take()
+            && let Err(error) = self.request_leaf_detail(detail)
+        {
+            self.graphics_preference_error =
+                Some(format!("restore preferred leaf detail: {error:#}"));
+            self.pending_restored_leaf_detail = Some(detail);
+        }
+        if self.asset_replacement.is_none()
+            && self.active_world.runtime.is_some()
             && let Some(selection) = self.pending_restored_asset_pack_selection.take()
         {
             if let Err(error) = self.request_asset_pack_selection(selection) {
@@ -364,7 +457,7 @@ impl McloneSceneHost {
                 AssetPreparePoll::Pending => {
                     self.asset_replacement = Some(SceneAssetReplacementPending::Assets(request));
                 }
-                AssetPreparePoll::Ready(assets) => {
+                AssetPreparePoll::Ready(mut assets) => {
                     if assets.epoch != request.epoch() {
                         self.fail_asset_replacement(format!(
                             "asset worker returned epoch {} for request {}",
@@ -373,6 +466,10 @@ impl McloneSceneHost {
                         ));
                         return Ok(());
                     }
+                    assets.mesh.catalog = assets
+                        .mesh
+                        .catalog
+                        .with_leaf_detail(self.mesh_assets.catalog.leaf_detail());
                     let epoch = assets.epoch;
                     self.asset_replacement_assets_ready_at = Some(self.services.clock.now());
                     let (snapshots, target_sections) = self.current_asset_compile_inputs()?;
@@ -692,6 +789,8 @@ impl McloneSceneHost {
             }
         }
         self.asset_pack_preference = preference;
+        self.persist_graphics_preference(self.active_assets.mesh.catalog.leaf_detail());
+        self.pending_restored_leaf_detail = None;
         self.asset_replacement_started_at = None;
         self.asset_replacement_assets_ready_at = None;
         self.last_asset_replacement_commit = Some(report);

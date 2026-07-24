@@ -17,6 +17,7 @@ pub mod frame_pacing;
 pub mod frame_pipeline_accounting;
 pub mod frame_pipeline_presentation;
 pub mod frame_render;
+pub mod graphics_preferences;
 pub mod host_mode;
 pub mod input_preferences;
 pub mod local_client_group;

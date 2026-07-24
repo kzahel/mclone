@@ -11,9 +11,9 @@ use crate::far_lod::{
 use mclone_input::TouchControlsMode;
 use mclone_ui::{
     DebugActorTool, GameAuxiliarySplitMode, GameCollisionMode, GameFarLodDetailMode,
-    GameFramePacingMode, GameMovementMode, GamePlayerModel, GameScenarioId, GameSimulationCadence,
-    GameStorageAction, GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameUiAction,
-    GameUiRenderState, GameWorldRenderScaleMode, GameXrTurnMode,
+    GameFramePacingMode, GameLeafDetail, GameMovementMode, GamePlayerModel, GameScenarioId,
+    GameSimulationCadence, GameStorageAction, GameTouchSettings, GameTravelAssistMode,
+    GameTurnMode, GameUiAction, GameUiRenderState, GameWorldRenderScaleMode, GameXrTurnMode,
 };
 
 use crate::asset_pack_ui::{ClientAssetPackController, ClientAssetPackEffect};
@@ -151,6 +151,7 @@ impl ClientExperienceController {
                 );
             }
             GameUiAction::ToggleSectionOcclusion
+            | GameUiAction::SetLeafDetail(_)
             | GameUiAction::ToggleFullbright
             | GameUiAction::ToggleFarLod
             | GameUiAction::CycleFarLodDetail
@@ -351,6 +352,7 @@ impl ClientExperienceProfile {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ClientExperienceSettingsProfile {
     pub section_occlusion: ClientExperienceCapabilityStatus,
+    pub leaf_detail: ClientExperienceCapabilityStatus,
     pub fullbright: ClientExperienceCapabilityStatus,
     pub far_lod: ClientExperienceCapabilityStatus,
     pub player_collision_box: ClientExperienceCapabilityStatus,
@@ -385,6 +387,7 @@ impl ClientExperienceSettingsProfile {
     pub const fn all_supported() -> Self {
         Self {
             section_occlusion: ClientExperienceCapabilityStatus::Supported,
+            leaf_detail: ClientExperienceCapabilityStatus::Supported,
             fullbright: ClientExperienceCapabilityStatus::Supported,
             far_lod: ClientExperienceCapabilityStatus::Supported,
             player_collision_box: ClientExperienceCapabilityStatus::Supported,
@@ -416,6 +419,7 @@ impl ClientExperienceSettingsProfile {
     ) -> ClientExperienceCapabilityStatus {
         match kind {
             ClientExperienceActionKind::ToggleSectionOcclusion => self.section_occlusion,
+            ClientExperienceActionKind::SetLeafDetail => self.leaf_detail,
             ClientExperienceActionKind::ToggleFullbright => self.fullbright,
             ClientExperienceActionKind::ToggleFarLod
             | ClientExperienceActionKind::CycleFarLodDetail
@@ -461,10 +465,11 @@ impl ClientExperienceSettingsProfile {
     ) -> [(
         ClientExperienceFeatureCapability,
         ClientExperienceCapabilityStatus,
-    ); 15] {
+    ); 16] {
         use ClientExperienceFeatureCapability as F;
         [
             (F::SectionOcclusion, self.section_occlusion),
+            (F::LeafDetail, self.leaf_detail),
             (F::Fullbright, self.fullbright),
             (F::FarLod, self.far_lod),
             (F::PlayerCollisionBox, self.player_collision_box),
@@ -488,6 +493,7 @@ impl ClientExperienceSettingsProfile {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ClientExperienceFeatureCapability {
     SectionOcclusion,
+    LeafDetail,
     Fullbright,
     FarLod,
     PlayerCollisionBox,
@@ -743,6 +749,12 @@ impl ClientExperienceSettingsController {
                         self.state.section_occlusion_culling,
                     ),
                 );
+            }
+            GameUiAction::SetLeafDetail(detail) => {
+                self.state.leaf_detail = detail;
+                effects
+                    .setting_effects
+                    .push(ClientExperienceSettingEffect::SetLeafDetail(detail));
             }
             GameUiAction::ToggleFullbright => {
                 self.state.force_fullbright = !self.state.force_fullbright;
@@ -1000,6 +1012,10 @@ impl ClientExperienceSettingsController {
                 profile.section_occlusion,
             ),
             (
+                ClientExperienceActionKind::SetLeafDetail,
+                profile.leaf_detail,
+            ),
+            (
                 ClientExperienceActionKind::ToggleFullbright,
                 profile.fullbright,
             ),
@@ -1163,6 +1179,7 @@ pub struct ClientExperienceSettingsState {
     pub min_render_distance: i32,
     pub max_render_distance: i32,
     pub section_occlusion_culling: bool,
+    pub leaf_detail: GameLeafDetail,
     pub force_fullbright: bool,
     pub far_lod_enabled: bool,
     pub far_lod_detail_mode: GameFarLodDetailMode,
@@ -1207,6 +1224,7 @@ impl From<GameUiRenderState> for ClientExperienceSettingsState {
             min_render_distance: state.min_render_distance,
             max_render_distance: state.max_render_distance,
             section_occlusion_culling: state.section_occlusion_culling,
+            leaf_detail: state.leaf_detail,
             force_fullbright: state.force_fullbright,
             far_lod_enabled: state.far_lod_enabled,
             far_lod_detail_mode: state.far_lod_detail_mode,
@@ -1252,6 +1270,7 @@ impl ClientExperienceSettingsState {
         state.min_render_distance = self.min_render_distance;
         state.max_render_distance = self.max_render_distance;
         state.section_occlusion_culling = self.section_occlusion_culling;
+        state.leaf_detail = self.leaf_detail;
         state.force_fullbright = self.force_fullbright;
         state.far_lod_enabled = self.far_lod_enabled;
         state.far_lod_detail_mode = self.far_lod_detail_mode;
@@ -1504,6 +1523,7 @@ pub const fn game_far_lod_detail_mode(mode: FarLodDetailMode) -> GameFarLodDetai
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ClientExperienceSettingEffect {
     SetSectionOcclusionCulling(bool),
+    SetLeafDetail(GameLeafDetail),
     SetFullbright(bool),
     SetFarLod {
         enabled: bool,
@@ -1594,6 +1614,7 @@ pub enum ClientExperienceActionKind {
     BackToPause,
     QuitToTitle,
     ToggleSectionOcclusion,
+    SetLeafDetail,
     ToggleFullbright,
     ToggleFarLod,
     CycleFarLodDetail,
@@ -1669,6 +1690,7 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
         GameUiAction::BackToPause => ClientExperienceActionKind::BackToPause,
         GameUiAction::QuitToTitle => ClientExperienceActionKind::QuitToTitle,
         GameUiAction::ToggleSectionOcclusion => ClientExperienceActionKind::ToggleSectionOcclusion,
+        GameUiAction::SetLeafDetail(_) => ClientExperienceActionKind::SetLeafDetail,
         GameUiAction::ToggleFullbright => ClientExperienceActionKind::ToggleFullbright,
         GameUiAction::ToggleFarLod => ClientExperienceActionKind::ToggleFarLod,
         GameUiAction::CycleFarLodDetail => ClientExperienceActionKind::CycleFarLodDetail,
@@ -1741,6 +1763,7 @@ pub const fn classify_client_experience_action_kind(
         | ClientExperienceActionKind::BackToTitle
         | ClientExperienceActionKind::QuitToTitle
         | ClientExperienceActionKind::ToggleSectionOcclusion
+        | ClientExperienceActionKind::SetLeafDetail
         | ClientExperienceActionKind::ToggleFullbright
         | ClientExperienceActionKind::TogglePlayerCollisionBox
         | ClientExperienceActionKind::ToggleFirstPersonPlayer
@@ -2013,6 +2036,7 @@ mod tests {
             GameUiAction::BackToPause,
             GameUiAction::QuitToTitle,
             GameUiAction::ToggleSectionOcclusion,
+            GameUiAction::SetLeafDetail(GameLeafDetail::Bushy),
             GameUiAction::ToggleFullbright,
             GameUiAction::ToggleFarLod,
             GameUiAction::CycleFarLodDetail,
@@ -2040,7 +2064,7 @@ mod tests {
             GameUiAction::Quit,
         ];
 
-        assert_eq!(samples.len(), 62);
+        assert_eq!(samples.len(), 63);
         for sample in samples {
             let _ = classify_game_ui_action(sample);
         }
@@ -2243,6 +2267,18 @@ mod tests {
     #[test]
     fn settings_toggles_round_trip_and_emit_effects() {
         let mut settings = ClientExperienceSettingsController::default();
+
+        let effects = settings.apply_ui_action(
+            GameUiAction::SetLeafDetail(GameLeafDetail::Bushy),
+            ClientExperienceSettingsProfile::default(),
+        );
+        assert_eq!(settings.state().leaf_detail, GameLeafDetail::Bushy);
+        assert_eq!(
+            effects.setting_effects,
+            vec![ClientExperienceSettingEffect::SetLeafDetail(
+                GameLeafDetail::Bushy
+            )]
+        );
 
         let effects = settings.apply_ui_action(
             GameUiAction::ToggleFullbright,

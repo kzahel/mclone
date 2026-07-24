@@ -204,6 +204,36 @@ impl HostEffects for WebHostEffects {
     }
 }
 
+struct WebGraphicsPreferenceStorage;
+
+impl mclone_app_runtime::graphics_preferences::ClientGraphicsPreferenceStorage
+    for WebGraphicsPreferenceStorage
+{
+    fn load(
+        &self,
+    ) -> Result<Option<mclone_app_runtime::graphics_preferences::ClientGraphicsPreferences>> {
+        let store = WebPreferenceKeyValueStore;
+        let Some(json) =
+            store.get(mclone_app_runtime::graphics_preferences::GRAPHICS_PREFERENCE_STORAGE_KEY)?
+        else {
+            return Ok(None);
+        };
+        mclone_app_runtime::graphics_preferences::ClientGraphicsPreferences::from_json(&json)
+            .map(Some)
+    }
+
+    fn store(
+        &self,
+        preferences: &mclone_app_runtime::graphics_preferences::ClientGraphicsPreferences,
+    ) -> Result<()> {
+        preferences.store(&WebPreferenceKeyValueStore)
+    }
+
+    fn label(&self) -> &str {
+        "browser localStorage mclone.graphics.preferences.v1"
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default)]
 struct LastFrameStats {
     section_count: usize,
@@ -2205,6 +2235,8 @@ async fn create_scene_host(
     )
     .map_err(js_error)?;
     host.configure_asset_pack_preference_storage(Box::new(WebAssetPackPreferenceStorage))
+        .map_err(js_error)?;
+    host.configure_graphics_preference_storage(Box::new(WebGraphicsPreferenceStorage))
         .map_err(js_error)?;
     // Reposition the browser camera without confusing the walking multiplier
     // with the camera's absolute fly speed. The shared host has already

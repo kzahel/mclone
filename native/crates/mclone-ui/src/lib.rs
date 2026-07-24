@@ -1889,6 +1889,7 @@ pub enum GameUiAction {
     BackToPause,
     QuitToTitle,
     ToggleSectionOcclusion,
+    SetLeafDetail(GameLeafDetail),
     ToggleFullbright,
     ToggleFarLod,
     CycleFarLodDetail,
@@ -1915,6 +1916,29 @@ pub enum GameUiAction {
     SetTouchControlsMode(TouchControlsMode),
     SetServerSimulationCadence(GameSimulationCadence),
     Quit,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameLeafDetail {
+    #[default]
+    Blocky,
+    Bushy,
+}
+
+impl GameLeafDetail {
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Blocky => Self::Bushy,
+            Self::Bushy => Self::Blocky,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Blocky => "Blocky",
+            Self::Bushy => "Bushy",
+        }
+    }
 }
 
 /// Player-facing policy for the internal flat world render target.
@@ -2105,6 +2129,7 @@ pub struct GameUiRenderState {
     pub min_render_distance: i32,
     pub max_render_distance: i32,
     pub section_occlusion_culling: bool,
+    pub leaf_detail: GameLeafDetail,
     pub force_fullbright: bool,
     pub far_lod_enabled: bool,
     pub far_lod_detail_mode: GameFarLodDetailMode,
@@ -2151,6 +2176,7 @@ impl Default for GameUiRenderState {
             min_render_distance: 2,
             max_render_distance: 16,
             section_occlusion_culling: true,
+            leaf_detail: GameLeafDetail::Blocky,
             force_fullbright: false,
             far_lod_enabled: false,
             far_lod_detail_mode: GameFarLodDetailMode::Auto,

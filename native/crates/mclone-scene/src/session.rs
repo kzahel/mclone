@@ -457,6 +457,9 @@ impl McloneSceneHost {
             asset_pack_preference: AssetPackPreference::default(),
             asset_pack_preference_storage: None,
             asset_pack_preference_error: None,
+            graphics_preference_storage: None,
+            graphics_preference_error: None,
+            pending_restored_leaf_detail: None,
             pending_restored_asset_pack_selection: None,
             external_asset_pack_preparation: false,
             pending_external_asset_pack_selection: None,
@@ -656,6 +659,9 @@ impl McloneSceneHost {
             asset_pack_preference: AssetPackPreference::default(),
             asset_pack_preference_storage: None,
             asset_pack_preference_error: None,
+            graphics_preference_storage: None,
+            graphics_preference_error: None,
+            pending_restored_leaf_detail: None,
             pending_restored_asset_pack_selection: None,
             external_asset_pack_preparation: false,
             pending_external_asset_pack_selection: None,
@@ -937,6 +943,9 @@ impl McloneSceneHost {
             asset_pack_preference: AssetPackPreference::default(),
             asset_pack_preference_storage: None,
             asset_pack_preference_error: None,
+            graphics_preference_storage: None,
+            graphics_preference_error: None,
+            pending_restored_leaf_detail: None,
             pending_restored_asset_pack_selection: None,
             external_asset_pack_preparation: false,
             pending_external_asset_pack_selection: None,
@@ -6190,6 +6199,10 @@ impl ClientExperienceSettingsHost for McloneSceneHost {
             if enabled { "enabled" } else { "disabled" }
         );
         Ok(())
+    }
+
+    fn set_leaf_detail(&mut self, detail: GameLeafDetail) -> Result<()> {
+        self.request_leaf_detail(engine_leaf_detail(detail))
     }
 
     fn set_fullbright(&mut self, enabled: bool) -> Result<()> {

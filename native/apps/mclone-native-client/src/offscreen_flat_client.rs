@@ -1690,6 +1690,17 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
                         .configure_asset_pack_preference_storage(Box::new(storage))?;
                 }
             }
+            if let Some(path) =
+                mclone_app_runtime::graphics_preferences::native_graphics_preference_path(
+                    scene.world_root.as_deref(),
+                )
+            {
+                host.driver
+                    .host_mut()
+                    .configure_graphics_preference_storage(Box::new(
+                        mclone_app_runtime::graphics_preferences::FileClientGraphicsPreferenceStorage::new(path),
+                    ))?;
+            }
             host.start_scene_with_wait_policy(device, queue, startup_wait)?;
             configure_screenshot_scene(&mut host, options, device, queue)?;
             if let Some((authored, fallback)) = &asset_replacement_smoke {

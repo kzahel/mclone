@@ -1,5 +1,7 @@
 use super::*;
-use crate::{GameAuxiliarySplitMode, GameFlatPresentationState, GameWorldRenderScaleMode};
+use crate::{
+    GameAuxiliarySplitMode, GameFlatPresentationState, GameLeafDetail, GameWorldRenderScaleMode,
+};
 
 #[test]
 fn game_ui_host_has_title_and_ingame_start_modes() {
@@ -322,6 +324,34 @@ fn graphics_options_show_flat_resolution_and_cycle_world_scale_mode() {
         Some(GameUiAction::SetWorldRenderScaleMode(
             GameWorldRenderScaleMode::Half,
         ))
+    );
+}
+
+#[test]
+fn graphics_options_show_and_cycle_leaf_detail() {
+    let mut surface = UiSurface::new();
+    surface.set_screen(Some(UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::Graphics,
+    }));
+    surface.set_scale(GuiScale::from_pixels(960, 540));
+    let state = GameUiRenderState {
+        leaf_detail: GameLeafDetail::Bushy,
+        ..GameUiRenderState::default()
+    };
+    surface.set_render_state(state);
+
+    let leaf_detail = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_LEAF_DETAIL)
+        .expect("leaf detail row")
+        .clone();
+    assert_eq!(leaf_detail.value.as_deref(), Some("Bushy"));
+    assert!(leaf_detail.enabled);
+    assert!(surface.pointer_down(point_in(leaf_detail.rect), state));
+    assert_eq!(
+        surface.pointer_up(point_in(leaf_detail.rect), state).1,
+        Some(GameUiAction::SetLeafDetail(GameLeafDetail::Blocky))
     );
 }
 
