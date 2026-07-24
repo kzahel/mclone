@@ -167,9 +167,40 @@ try {
   await page.getByRole("button", { name: "Reset 3D camera" }).click();
   await waitForRevision(shell, orbitRevision);
   const resetRevision = Number(await shell.getAttribute("data-render-revision"));
+  let navigationRevision = resetRevision;
+  if (!mobile) {
+    const beforePanUrl = page.url();
+    const beforePanYaw = Number(await shell.getAttribute("data-camera-yaw"));
+    const beforePanPitch = Number(await shell.getAttribute("data-camera-pitch"));
+    await page.mouse.move(
+      stageBox.x + stageBox.width * 0.5,
+      orbitStartY,
+    );
+    await page.mouse.down({ button: "right" });
+    await page.mouse.move(
+      stageBox.x + stageBox.width * 0.6,
+      orbitStartY + 50,
+    );
+    await page.mouse.up({ button: "right" });
+    await waitForRevision(shell, resetRevision);
+    navigationRevision = Number(await shell.getAttribute("data-render-revision"));
+    if (page.url() === beforePanUrl
+        || Number(await shell.getAttribute("data-camera-yaw")) !== beforePanYaw
+        || Number(await shell.getAttribute("data-camera-pitch")) !== beforePanPitch) {
+      throw new Error("Right-button 3D pan did not move terrain independently from orbit");
+    }
+  }
+  const beforeArrowUrl = page.url();
+  await stage.focus();
+  await page.keyboard.press("ArrowRight");
+  await waitForRevision(shell, navigationRevision);
+  if (page.url() === beforeArrowUrl) {
+    throw new Error("Focused preview ArrowRight did not pan terrain");
+  }
+  navigationRevision = Number(await shell.getAttribute("data-render-revision"));
 
   await page.getByLabel("Diagnostic layer").selectOption("error");
-  await waitForRevision(shell, resetRevision);
+  await waitForRevision(shell, navigationRevision);
   const errorRevision = Number(await shell.getAttribute("data-render-revision"));
   await page.getByRole("button", { name: "Map", exact: true }).click();
   await page.getByRole("button", { name: "Zoom out" }).click();
