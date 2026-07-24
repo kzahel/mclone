@@ -128,6 +128,7 @@ pnpm steamdeck:pull-results -- RUN_ID
 pnpm steamdeck:build:steamrt4
 pnpm steamdeck:stage:steamrt4
 pnpm steamdeck:deploy:steamrt4
+pnpm steamdeck:install:production
 pnpm steamdeck:deploy:production
 pnpm steamdeck:smoke:steamrt4
 pnpm steamdeck:perf:steamrt4
@@ -197,14 +198,19 @@ Valve's upload preparation, an incremental clean `rsync`, and registration as
 `Devkit Game: mclone`. `deploy` also launches interactive play. `launch`
 restarts an already uploaded interactive build.
 
-`steamdeck:deploy:production` is the complete manual production-style command.
-It checks the asset pack against the tracked lock before the expensive build.
-If the check fails, it rebuilds the ignored archive once and checks again; it
-never rewrites the tracked lock automatically, so intentional source/tool
-changes still require inspection and an explicit
-`pnpm assets:pack:write-lock`. Once assets pass, it builds the ordinary
-`x86_64` client inside the pinned SteamRT4 SDK, stages the binary/pack/receipt,
-uploads incrementally, registers `Devkit Game: mclone`, and launches it.
+The two complete production-style commands share asset/build/stage/upload
+policy. Each checks the asset pack against the tracked lock before the
+expensive build. If the check fails, it rebuilds the ignored archive once and
+checks again; neither rewrites the tracked lock automatically, so intentional
+source/tool changes still require inspection and an explicit
+`pnpm assets:pack:write-lock`. Once assets pass, both build the ordinary
+`x86_64` client inside the pinned SteamRT4 SDK, stage the binary/pack/receipt,
+upload incrementally, and register `Devkit Game: mclone`.
+
+`steamdeck:install:production` stops there, leaving the title ready for the
+user to launch without changing the current foreground game or display state.
+`steamdeck:deploy:production` additionally launches the title and is therefore
+the explicit interactive manual command.
 
 ### Optional deploy after pushing `main`
 
@@ -227,7 +233,9 @@ background worker first waits until the remote really reports the pushed
 `main` SHA, coalesces quick successive pushes, and probes Devkit-managed SSH
 for only a few seconds. An unavailable Deck is an explicit logged skip. A
 reachable Deck is built and deployed from a clean reusable sibling worktree at
-the exact pushed commit, independently of the web deploy worker. Generated
+the exact pushed commit, independently of the web deploy worker. Push
+automation uses `steamdeck:install:production`: it uploads and registers the
+new build but deliberately does not launch it or wake the panel. Generated
 asset archives and SteamRT4 target/cache state remain ignored and local. The
 worker incrementally copies the extracted source tree into its worktree before
 packing so manifests remain repository-relative and web/Deck pack generation

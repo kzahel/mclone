@@ -21,6 +21,7 @@
     "steamdeck:build:steamrt4": "bash ./scripts/steam-deck-build-steamrt4.sh",
     "steamdeck:stage:steamrt4": "MCLONE_STEAM_DECK_BUILDER=steamrt4 bash ./scripts/steam-deck.sh stage",
     "steamdeck:deploy:steamrt4": "MCLONE_STEAM_DECK_BUILDER=steamrt4 bash ./scripts/steam-deck.sh deploy",
+    "steamdeck:install:production": "MCLONE_STEAM_DECK_BUILDER=steamrt4 MCLONE_STEAM_DECK_ENSURE_ASSET_PACK=1 bash ./scripts/steam-deck.sh upload",
     "steamdeck:deploy:production": "MCLONE_STEAM_DECK_BUILDER=steamrt4 MCLONE_STEAM_DECK_ENSURE_ASSET_PACK=1 bash ./scripts/steam-deck.sh deploy",
     "steamdeck:smoke:steamrt4": "MCLONE_STEAM_DECK_BUILDER=steamrt4 bash ./scripts/steam-deck.sh smoke",
     "steamdeck:perf:steamrt4": "MCLONE_STEAM_DECK_BUILDER=steamrt4 bash ./scripts/steam-deck.sh perf",

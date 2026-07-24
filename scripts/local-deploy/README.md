@@ -46,7 +46,8 @@ unreachable. A reachable Deck is deployed from a separate reusable sibling
 worktree at the exact pushed commit. The production command checks the asset
 lock first, rebuilds the ignored archive only when necessary, rechecks without
 ever rewriting the tracked lock, builds in the pinned SteamRT4 SDK, uploads
-incrementally, registers the shortcut, and launches it.
+incrementally, and registers the shortcut without launching it or waking the
+panel. Launching remains an explicit interactive command.
 
 Deploys run from a reusable sibling worktree:
 

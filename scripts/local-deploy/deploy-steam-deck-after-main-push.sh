@@ -46,7 +46,7 @@ Usage:
 Auto-deploy is disabled by default and stored in this checkout's local Git
 configuration. The pre-push hook calls --schedule. A background worker waits
 until the remote branch reports the pushed SHA, probes the configured Deck,
-and runs 'pnpm steamdeck:deploy:production' from a clean reusable worktree.
+and runs 'pnpm steamdeck:install:production' from a clean reusable worktree.
 EOF
 }
 
@@ -543,22 +543,22 @@ run_worker() {
 
     local deploy_start_epoch
     deploy_start_epoch="$(epoch_seconds)"
-    log "starting production Steam Deck deploy for $sha"
+    log "starting production Steam Deck install for $sha"
     write_summary \
       "deploying" \
       "$sha" \
       "$remote" \
       "$branch" \
-      "running pnpm steamdeck:deploy:production"
+      "running pnpm steamdeck:install:production"
     if (
       cd "$DEPLOY_WORKTREE"
-      MCLONE_STEAM_DECK="$host" pnpm steamdeck:deploy:production
+      MCLONE_STEAM_DECK="$host" pnpm steamdeck:install:production
     ); then
       local deploy_end_epoch total_seconds deploy_seconds
       deploy_end_epoch="$(epoch_seconds)"
       deploy_seconds="$((deploy_end_epoch - deploy_start_epoch))"
       total_seconds="$(elapsed_since_desired)"
-      log "production Steam Deck deploy succeeded for $sha"
+      log "production Steam Deck install succeeded for $sha"
       write_tsv \
         "$COMPLETED_FILE" \
         "$sha" \
@@ -574,7 +574,7 @@ run_worker() {
         "$sha" \
         "$remote" \
         "$branch" \
-        "production Steam Deck deploy succeeded" \
+        "production Steam Deck install succeeded without launching" \
         "$total_seconds" \
         "$deploy_seconds"
       clear_desired_if_current "$sha" "$remote" "$branch"
@@ -582,7 +582,7 @@ run_worker() {
       local status=$?
       local deploy_seconds
       deploy_seconds="$(( $(epoch_seconds) - deploy_start_epoch ))"
-      local detail="production Deck deploy exited with $status after ${deploy_seconds}s"
+      local detail="production Deck install exited with $status after ${deploy_seconds}s"
       log "$detail"
       record_failure \
         "$sha" \
