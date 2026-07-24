@@ -183,6 +183,12 @@ series implements the same concern, normally reuse the document slug in its
   access routes, adjacent retention references, source/open-content/mod
   posture, and a Mclone inspiration ledger focused on each product's
   impressive or distinctive aspects.
+- [`scripting-and-mod-platform.md`](scripting-and-mod-platform.md): accepted
+  single-ecosystem mod direction spanning declarative content, portable
+  capability-sandboxed gameplay, trusted server/desktop extensions, source
+  forks, reproducible profiles, an open registry protocol, and a first-party
+  in-game browser; WebAssembly is preferred for the cross-platform runtime
+  spike while store-policy validation remains open.
 - [`game-title-and-brand-identity.md`](game-title-and-brand-identity.md):
   current public-title research and decision record — the repo-derived
   living-landscape plus folded-world naming brief, `Wilderfold` recommendation,

@@ -174,3 +174,7 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `gpu-procedural-terrain` — GPU-reconstructible first-party terrain,
   coverage-first progressive refinement, authoritative chunk handoff, optional
   asynchronous canonical generation, and later volumetric residency research
+- `scripting-and-mod-platform` — one cross-platform package ecosystem spanning
+  declarative content, portable capability-sandboxed gameplay, trusted
+  server/desktop extensions, source forks, reproducible profiles, an open
+  registry protocol, and a first-party in-game mod browser

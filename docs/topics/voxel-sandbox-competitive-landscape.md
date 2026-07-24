@@ -1129,6 +1129,9 @@ specialists inside Minecraft.
 
 ## Related Documents
 
+- [`scripting-and-mod-platform.md`](scripting-and-mod-platform.md) — accepted
+  package tiers, portable runtime, capability sandbox, gameplay profiles,
+  registry, mod browser, and open-source extension direction.
 - [`distribution-go-to-market.md`](distribution-go-to-market.md) — commercial
   channels, competitive distribution openings, positioning, and launch
   sequence.
