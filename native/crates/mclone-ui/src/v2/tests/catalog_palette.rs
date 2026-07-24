@@ -343,6 +343,37 @@ fn block_palette_grid_cache_survives_hover_and_pointer_jitter() {
 }
 
 #[test]
+fn block_palette_controller_focus_matches_pointer_highlight_and_tooltip() {
+    let state = block_palette_state(2);
+    let mut surface = UiSurface::new();
+    surface.set_screen(Some(UiScreenId::BlockPalette));
+    surface.set_scale(GuiScale::from_pixels(960, 540));
+
+    let normal = surface.render_draw_list(state);
+    assert_eq!(
+        surface.navigate(GuiNavigation::NextPage, state),
+        (true, None)
+    );
+    assert_eq!(
+        surface
+            .debug_snapshot()
+            .and_then(|snapshot| snapshot.focused),
+        Some(block_palette_slot_id(0)),
+    );
+    let focused = surface.render_draw_list(state);
+    assert_ne!(focused, normal);
+    assert!(
+        focused.commands().len() > normal.commands().len() + 4,
+        "focus should add both the four-edge slot outline and tooltip commands",
+    );
+
+    let slot = surface.layout().widgets()[0].rect;
+    surface.pointer_move(point_in(slot), state);
+    let hovered = surface.render_draw_list(state);
+    assert_eq!(focused, hovered);
+}
+
+#[test]
 fn game_ui_host_block_palette_uses_v2_panel_cache() {
     let state = block_palette_state(4);
     let mut host = GameUiHost::new_ingame();

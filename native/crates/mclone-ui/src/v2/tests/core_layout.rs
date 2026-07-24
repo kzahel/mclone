@@ -98,6 +98,81 @@ fn controller_focusability_skips_disabled_widgets() {
 }
 
 #[test]
+fn controller_focus_matches_pointer_highlight_for_every_widget_kind() {
+    let rect = Rect::new(10.0, 20.0, 160.0, 20.0);
+    let widgets = [
+        UiWidget::button(UiWidgetId(1), rect, "Button").action(GameUiAction::Resume),
+        UiWidget::checkbox(UiWidgetId(2), rect, "Checkbox", true)
+            .action(GameUiAction::ToggleSectionOcclusion),
+        UiWidget::cycle(UiWidgetId(3), rect, "Cycle", "Value")
+            .action(GameUiAction::CycleFramePacing),
+        UiWidget::world_row(UiWidgetId(4), rect, "World", "Seed 123", false, false, true)
+            .action(GameUiAction::Resume),
+        UiWidget::world_row(
+            UiWidgetId(8),
+            rect,
+            "Selected World",
+            "Seed 456",
+            true,
+            false,
+            true,
+        )
+        .action(GameUiAction::Resume),
+        UiWidget {
+            id: UiWidgetId(5),
+            kind: UiWidgetKind::AssetPackRow {
+                checked: true,
+                locked: false,
+                status: AssetPackUiRowStatus::Enabled,
+            },
+            rect,
+            label: "Asset Pack".to_owned(),
+            enabled: true,
+            value: Some("First party".to_owned()),
+            action: Some(UiWidgetAction::Static(GameUiAction::Resume)),
+        },
+        UiWidget::palette_slot(UiWidgetId(6), rect, "Palette", None).action(GameUiAction::Resume),
+        UiWidget::slider(UiWidgetId(7), rect, "Slider", 0.5)
+            .slider_action(UiSliderAction::RenderDistance),
+    ];
+    let surface = UiSurface::new();
+
+    for widget in widgets {
+        let mut normal = GuiDrawList::new();
+        surface.render_widget(&mut normal, &widget, Interaction::default());
+        let mut hovered = GuiDrawList::new();
+        surface.render_widget(
+            &mut hovered,
+            &widget,
+            Interaction {
+                pointer: Some(point_in(widget.rect)),
+                ..Interaction::default()
+            },
+        );
+        let mut focused = GuiDrawList::new();
+        surface.render_widget(
+            &mut focused,
+            &widget,
+            Interaction {
+                focused: Some(widget.id.legacy_widget_id()),
+                ..Interaction::default()
+            },
+        );
+
+        assert_eq!(
+            focused, hovered,
+            "controller focus diverged from pointer highlight for {:?}",
+            widget.kind,
+        );
+        assert_ne!(
+            focused, normal,
+            "focused {:?} has no visible highlight",
+            widget.kind,
+        );
+    }
+}
+
+#[test]
 fn controller_navigation_wraps_stable_pause_order() {
     let mut surface = UiSurface::new();
     surface.set_screen(Some(UiScreenId::Pause));

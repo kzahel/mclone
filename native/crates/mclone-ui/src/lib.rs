@@ -409,6 +409,10 @@ impl Interaction {
     pub fn is_focused(self, id: WidgetId) -> bool {
         self.focused == Some(id)
     }
+
+    pub fn is_highlighted(self, id: WidgetId, rect: Rect) -> bool {
+        self.is_hovered(rect) || self.is_focused(id)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -582,7 +586,7 @@ impl Button {
             ButtonVisual::Pressed
         } else if interaction.is_hovered(self.rect) {
             ButtonVisual::Hovered
-        } else if interaction.is_focused(self.id) {
+        } else if interaction.is_highlighted(self.id, self.rect) {
             ButtonVisual::Focused
         } else {
             ButtonVisual::Normal
@@ -687,9 +691,13 @@ impl Checkbox {
         interaction: Interaction,
         atlas_text: bool,
     ) {
-        let hovered = interaction.is_hovered(self.rect);
+        let highlighted = self.enabled && interaction.is_highlighted(self.id, self.rect);
+        if highlighted {
+            draw.fill(self.rect, Color::rgba(45, 62, 60, 225));
+            draw.outline(self.rect, Color::rgba(196, 224, 180, 255));
+        }
         let box_rect = Rect::new(self.rect.x, self.rect.y + 2.0, 12.0, 12.0);
-        let border = if hovered {
+        let border = if highlighted {
             Color::rgba(196, 224, 180, 255)
         } else {
             Color::rgba(130, 154, 152, 255)
@@ -710,7 +718,9 @@ impl Checkbox {
                 Color::WHITE,
             );
         }
-        let text_color = if self.enabled {
+        let text_color = if highlighted {
+            Color::rgba(255, 255, 225, 255)
+        } else if self.enabled {
             Color::rgba(235, 242, 232, 255)
         } else {
             Color::rgba(135, 140, 136, 255)

@@ -1963,6 +1963,7 @@ impl UiSurface {
     }
 
     fn render_block_palette_interaction_layer(&self, draw: &mut GuiDrawList) {
+        let highlighted = self.hovered.or(self.focused);
         for widget in self.layout.widgets() {
             let UiWidgetKind::PaletteSlot { icon } = widget.kind else {
                 continue;
@@ -1971,25 +1972,25 @@ impl UiSurface {
                 render_touch_panel(draw, widget.rect, true);
                 render_palette_slot_contents(draw, &self.font, widget.rect, icon);
             }
-            if self.hovered == Some(widget.id) {
+            if highlighted == Some(widget.id) {
                 draw.outline(widget.rect.inset(-1.0), Color::rgba(245, 250, 255, 205));
             }
         }
 
-        let Some(hovered) = self.hovered.and_then(|id| self.layout.widget(id)) else {
+        let Some(highlighted) = highlighted.and_then(|id| self.layout.widget(id)) else {
             return;
         };
-        if matches!(hovered.kind, UiWidgetKind::PaletteSlot { .. }) {
+        if matches!(highlighted.kind, UiWidgetKind::PaletteSlot { .. }) {
             let tooltip_anchor = Point {
-                x: hovered.rect.right(),
-                y: hovered.rect.y,
+                x: highlighted.rect.right(),
+                y: highlighted.rect.y,
             };
             render_block_palette_tooltip(
                 draw,
                 &self.font,
                 self.scale,
                 tooltip_anchor,
-                hovered.label.as_str(),
+                highlighted.label.as_str(),
             );
         }
     }
@@ -2028,10 +2029,13 @@ impl UiSurface {
                 locked,
                 compatible,
             } => {
-                let hovered = interaction.is_hovered(widget.rect);
-                let fill = if *selected {
+                let highlighted = widget.enabled
+                    && interaction.is_highlighted(widget.id.legacy_widget_id(), widget.rect);
+                let fill = if *selected && highlighted {
+                    Color::rgba(84, 112, 106, 245)
+                } else if *selected {
                     Color::rgba(64, 90, 84, 230)
-                } else if hovered {
+                } else if highlighted {
                     Color::rgba(42, 58, 58, 225)
                 } else {
                     Color::rgba(19, 27, 28, 210)
@@ -2080,8 +2084,9 @@ impl UiSurface {
                 locked,
                 status,
             } => {
-                let hovered = widget.enabled && interaction.is_hovered(widget.rect);
-                let fill = if hovered {
+                let highlighted = widget.enabled
+                    && interaction.is_highlighted(widget.id.legacy_widget_id(), widget.rect);
+                let fill = if highlighted {
                     Color::rgba(45, 62, 60, 235)
                 } else {
                     Color::rgba(19, 27, 28, 220)
@@ -2140,6 +2145,11 @@ impl UiSurface {
                     interaction.pressed == Some(widget.id.legacy_widget_id()),
                 );
                 render_palette_slot_contents(draw, &self.font, widget.rect, *icon);
+                if widget.enabled
+                    && interaction.is_highlighted(widget.id.legacy_widget_id(), widget.rect)
+                {
+                    draw.outline(widget.rect.inset(-1.0), Color::rgba(245, 250, 255, 205));
+                }
             }
             UiWidgetKind::Slider { value } => Slider::new(
                 widget.id.legacy_widget_id(),
@@ -2149,17 +2159,6 @@ impl UiSurface {
             )
             .enabled(widget.enabled)
             .render_atlas_text(draw, &self.font, interaction),
-        }
-        if widget.enabled
-            && interaction.is_focused(widget.id.legacy_widget_id())
-            && matches!(
-                widget.kind,
-                UiWidgetKind::WorldRow { .. }
-                    | UiWidgetKind::AssetPackRow { .. }
-                    | UiWidgetKind::PaletteSlot { .. }
-            )
-        {
-            draw.outline(widget.rect.inset(1.0), Color::rgba(255, 255, 225, 255));
         }
     }
 

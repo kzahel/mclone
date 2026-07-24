@@ -165,7 +165,11 @@ source seam, but not yet the complete semantic or physical-input contract:
   controller repeat remains in `ControllerInputSession`. Dynamic rows are
   navigable when their committed action-bearing widgets exist. Text-entry
   editing remains keyboard/touch oriented and is intentionally not treated as
-  complete controller text entry.
+  complete controller text entry. Every action-bearing widget kind now
+  projects controller focus through the same highlight state as pointer hover.
+  Checkboxes use a conspicuous full-row highlight, and the block-palette
+  interaction layer preserves both its slot outline and tooltip when focus
+  comes from controller navigation rather than a pointer.
 - The gamepad HUD now resolves text labels from semantic bindings and Xbox-like,
   PlayStation-like, Nintendo-like, Steam/Deck-like, generic, or unknown layout
   families. Exact vendor glyph assets and backend action-origin glyphs remain
@@ -841,6 +845,22 @@ rebuilt client selected that semantic profile as one `XboxLike` source, and the
 operator confirmed correct in-game behavior. This closes the original
 right-stick/trigger symptom for the tested SN30 Pro mode. Hotplug/reconnect and
 other connection modes remain physical acceptance items.
+
+## Focused Widget Visual Audit
+
+Completed on 2026-07-24:
+
+- a table-driven `mclone-ui` regression proves that button, checkbox, cycle,
+  world-row, asset-pack-row, palette-slot, and slider focus draws match their
+  pointer-highlight draws;
+- the block palette has a separate regression because its cached grid bypasses
+  the ordinary widget renderer; controller focus now adds the same slot outline
+  and tooltip as pointer hover;
+- all 104 `mclone-ui` tests passed, and the browser/Wasm client build passed;
+  and
+- offscreen captures under `/tmp` were inspected at 960x540. The Debug options
+  capture shows a focused checkbox with a full-row fill and bright outline, and
+  the playable block-palette capture shows the controller-focused first slot.
 
 ## Definition Of Done
 
