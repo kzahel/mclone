@@ -227,12 +227,16 @@ voxel noise:
    correction.
 2. Add the first 3D-geology tactical before broad caves:
    - baseline and map the current heightfield limitation;
+   - derive a small semantic formation-intent selector from existing macro,
+     climate, ruggedness, ridge, and water facts;
    - prove one placed boulder/talus family;
    - prove one bounded signature outcrop such as a tor or arch;
    - compare a small regional density modifier for cliff shelves/overhangs;
    - select the reusable mechanism only after all three are rendered and
      measured.
-3. Expand hot/dry and wet/humid regional corners.
+3. Expand hot/dry and wet/humid regional corners as coordinated surface,
+   vegetation, clutter, and landmark bundles with explicit transition
+   shoulders.
 4. Add ocean-climate families and climate-aware water treatment.
 5. Add independent caves, strata, ores, and underground landmarks.
 6. Grow authored and procedural structures on the resulting regional
@@ -255,6 +259,7 @@ Every live family should eventually record:
 ## Related
 
 - [`mclone-overworld-generation.md`](mclone-overworld-generation.md)
+- [`still-life-and-tectonic-reference.md`](still-life-and-tectonic-reference.md)
 - [`world-generation-profiles.md`](world-generation-profiles.md)
 - [`starter-farmstead-settlement.md`](starter-farmstead-settlement.md)
 - [`../worldgen-status.md`](../worldgen-status.md)

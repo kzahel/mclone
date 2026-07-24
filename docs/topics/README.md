@@ -58,6 +58,11 @@ series implements the same concern, normally reuse the document slug in its
   terrain-participating rivers, relative-depth cave hierarchy, and
   mountain-conditioned Underlands, with bounded lessons for the original
   mclone Overworld.
+- [`still-life-and-tectonic-reference.md`](still-life-and-tectonic-reference.md):
+  source and release-pack study of Still Life's ecological transition system,
+  its Lithosphere terrain dependency, and Tectonic's regional landform router,
+  with bounded 3D-geology and ecology lessons for the original mclone
+  Overworld.
 - [`multiplayer-networking.md`](multiplayer-networking.md): wire protocol,
   transports, session lifecycle, server tick/publication cadence, accepted
   carrier-neutral reliable/ephemeral direction, dependency-free native UDP

@@ -1061,12 +1061,21 @@ Review 1 now owns the subjective decision; general drainage-network semantics
 remain deliberately absent. After that review, the recommended next terrain
 campaign is sustained volumetric geology: overhangs, outcrops, tors, arches,
 and regional 3D formation recipes.
+The
+[`still-life-and-tectonic-reference.md`](still-life-and-tectonic-reference.md)
+study sharpens that direction: select mutually legible geology families
+through a small shared regional-intent classifier, expose both raw and
+classified facts to maps and LOD, and follow the geology campaign with
+coordinated ecological endpoint and transition recipes. It does not justify a
+global density soup, a large biome-parameter table, or aquifer heuristics in
+place of the existing stream contracts.
 
 ## Related
 
 - [`world-generation-profiles.md`](world-generation-profiles.md)
 - [`starter-farmstead-settlement.md`](starter-farmstead-settlement.md)
 - [`jjthunder-to-the-max-reference.md`](jjthunder-to-the-max-reference.md)
+- [`still-life-and-tectonic-reference.md`](still-life-and-tectonic-reference.md)
 - [`../worldgen-status.md`](../worldgen-status.md)
 - [`../reference-minecraft.md`](../reference-minecraft.md)
 - [`../structures.md`](../structures.md)
