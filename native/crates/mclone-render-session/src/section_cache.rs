@@ -139,6 +139,10 @@ impl CachedTexturedRenderSections {
         self.tiles.generation()
     }
 
+    pub fn dirty_generation(&self) -> u64 {
+        self.tiles.dirty_generation()
+    }
+
     pub fn resident_mesh_stats(&self) -> RenderSectionResidentMeshStats {
         let mut stats = RenderSectionResidentMeshStats {
             resident_section_count: self.tiles.len(),

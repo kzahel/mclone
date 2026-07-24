@@ -48,6 +48,7 @@ pub struct ResidentTileCache<K, M> {
     tiles: BTreeMap<K, ResidentTileSlot<M>>,
     tile_keys_by_chunk: BTreeMap<ChunkPos, BTreeSet<K>>,
     generation: u64,
+    dirty_generation: u64,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -62,6 +63,7 @@ impl<K, M> Default for ResidentTileCache<K, M> {
             tiles: BTreeMap::new(),
             tile_keys_by_chunk: BTreeMap::new(),
             generation: 0,
+            dirty_generation: 0,
         }
     }
 }
@@ -85,6 +87,10 @@ impl<K: ResidentTileKey, M> ResidentTileCache<K, M> {
 
     pub fn generation(&self) -> u64 {
         self.generation
+    }
+
+    pub fn dirty_generation(&self) -> u64 {
+        self.dirty_generation
     }
 
     pub fn metadata(&self) -> impl Iterator<Item = &M> {
@@ -120,6 +126,9 @@ impl<K: ResidentTileKey, M> ResidentTileCache<K, M> {
         let Some(slot) = self.tiles.get_mut(&key) else {
             return false;
         };
+        if !slot.dirty {
+            self.dirty_generation = self.dirty_generation.wrapping_add(1);
+        }
         slot.dirty = true;
         true
     }
@@ -132,6 +141,9 @@ impl<K: ResidentTileKey, M> ResidentTileCache<K, M> {
             }
             slot.dirty = true;
         }
+        if marked > 0 {
+            self.dirty_generation = self.dirty_generation.wrapping_add(1);
+        }
         marked
     }
 
@@ -139,6 +151,9 @@ impl<K: ResidentTileKey, M> ResidentTileCache<K, M> {
         let Some(slot) = self.tiles.get_mut(&key) else {
             return false;
         };
+        if slot.dirty {
+            self.dirty_generation = self.dirty_generation.wrapping_add(1);
+        }
         slot.dirty = false;
         true
     }
@@ -192,16 +207,17 @@ impl<K: ResidentTileKey, M> ResidentTileCache<K, M> {
     }
 
     pub fn insert(&mut self, key: K, metadata: M) -> Option<M> {
-        let replaced = self
-            .tiles
-            .insert(
-                key,
-                ResidentTileSlot {
-                    metadata,
-                    dirty: false,
-                },
-            )
-            .map(|slot| slot.metadata);
+        let replaced = self.tiles.insert(
+            key,
+            ResidentTileSlot {
+                metadata,
+                dirty: false,
+            },
+        );
+        if replaced.as_ref().is_some_and(|slot| slot.dirty) {
+            self.dirty_generation = self.dirty_generation.wrapping_add(1);
+        }
+        let replaced = replaced.map(|slot| slot.metadata);
         if replaced.is_none() {
             self.generation = self.generation.wrapping_add(1);
             self.tile_keys_by_chunk
@@ -213,7 +229,11 @@ impl<K: ResidentTileKey, M> ResidentTileCache<K, M> {
     }
 
     pub fn remove(&mut self, key: K) -> Option<M> {
-        let metadata = self.tiles.remove(&key)?.metadata;
+        let removed = self.tiles.remove(&key)?;
+        if removed.dirty {
+            self.dirty_generation = self.dirty_generation.wrapping_add(1);
+        }
+        let metadata = removed.metadata;
         self.generation = self.generation.wrapping_add(1);
         let pos = key.chunk_pos();
         if let Some(keys) = self.tile_keys_by_chunk.get_mut(&pos) {

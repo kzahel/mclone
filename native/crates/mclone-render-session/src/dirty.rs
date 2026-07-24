@@ -6,6 +6,7 @@ pub struct RenderSectionDirtyState {
     pub dirty_sections: BTreeSet<RenderSectionKey>,
     pub inflight_sections: BTreeSet<RenderSectionKey>,
     pub(crate) section_revisions: BTreeMap<RenderSectionKey, u64>,
+    pub(crate) work_generation: u64,
 }
 
 impl RenderSectionDirtyState {
@@ -28,11 +29,13 @@ impl RenderSectionDirtyState {
             self.bump_section_revision(key);
         }
         self.dirty_chunks.insert(pos);
+        self.mark_work_changed();
     }
 
     pub fn mark_section_dirty(&mut self, key: RenderSectionKey) {
         self.bump_section_revision(key);
         self.dirty_sections.insert(key);
+        self.mark_work_changed();
     }
 
     pub fn bump_section_revision(&mut self, key: RenderSectionKey) {
@@ -74,6 +77,9 @@ impl RenderSectionDirtyState {
     pub fn mark_compile_submitted(&mut self, target_sections: &BTreeSet<RenderSectionKey>) {
         self.inflight_sections
             .extend(target_sections.iter().copied());
+        if !target_sections.is_empty() {
+            self.mark_work_changed();
+        }
     }
 
     pub fn accept_completed_compile_result(
@@ -83,6 +89,9 @@ impl RenderSectionDirtyState {
         for key in &completed.target_sections {
             self.inflight_sections.remove(key);
         }
+        if !completed.target_sections.is_empty() {
+            self.mark_work_changed();
+        }
         completed.partition_by_revision(|key| self.section_revision(key))
     }
 
@@ -91,6 +100,9 @@ impl RenderSectionDirtyState {
         stale_chunks: &BTreeSet<ChunkPos>,
         stale_sections: &BTreeSet<RenderSectionKey>,
     ) {
+        if !stale_chunks.is_empty() || !stale_sections.is_empty() {
+            self.mark_work_changed();
+        }
         for pos in stale_chunks {
             self.dirty_chunks.remove(pos);
         }
@@ -104,6 +116,9 @@ impl RenderSectionDirtyState {
         removal_chunks: &BTreeSet<ChunkPos>,
         removal_sections: &BTreeSet<RenderSectionKey>,
     ) {
+        if !removal_chunks.is_empty() || !removal_sections.is_empty() {
+            self.mark_work_changed();
+        }
         for pos in removal_chunks {
             self.dirty_chunks.remove(pos);
             self.dirty_sections
@@ -118,6 +133,12 @@ impl RenderSectionDirtyState {
     }
 
     pub fn apply_ready_plan(&mut self, plan: &RenderSectionReadyPlan) {
+        if !plan.budgeted_loaded_chunks.is_empty()
+            || !plan.ready_section_keys.is_empty()
+            || !plan.deferred_section_keys.is_empty()
+        {
+            self.mark_work_changed();
+        }
         for pos in &plan.budgeted_loaded_chunks {
             self.dirty_chunks.remove(pos);
         }
@@ -142,6 +163,14 @@ impl RenderSectionDirtyState {
     pub fn accept_ready_plan_compile_submission(&mut self, plan: &RenderSectionReadyPlan) {
         self.mark_compile_submitted(&plan.ready_section_keys);
         self.apply_ready_plan(plan);
+    }
+
+    pub const fn work_generation(&self) -> u64 {
+        self.work_generation
+    }
+
+    pub(crate) fn mark_work_changed(&mut self) {
+        self.work_generation = self.work_generation.wrapping_add(1);
     }
 }
 

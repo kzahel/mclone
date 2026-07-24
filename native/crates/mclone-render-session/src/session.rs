@@ -526,6 +526,9 @@ impl RenderSectionSession {
     }
 
     pub fn dirty_mut(&mut self) -> &mut RenderSectionDirtyState {
+        // A mutable borrow may edit the public work sets directly. Invalidate
+        // generation-stamped consumers conservatively before handing it out.
+        self.dirty.mark_work_changed();
         &mut self.dirty
     }
 
@@ -539,6 +542,10 @@ impl RenderSectionSession {
 
     pub fn section_cache_generation(&self) -> u64 {
         self.cache.generation()
+    }
+
+    pub fn pending_work_generations(&self) -> (u64, u64) {
+        (self.dirty.work_generation(), self.cache.dirty_generation())
     }
 
     /// Whether any dirty chunk/section is ready to make compile progress this frame —
@@ -629,6 +636,7 @@ impl RenderSectionSession {
             self.known_section_keys_for_chunk(pos, loaded_section_keys.iter().copied());
         self.dirty
             .bump_section_revisions(known_section_keys.iter().copied());
+        self.dirty.mark_work_changed();
 
         if !resident_section_keys.is_empty()
             && !loaded_section_keys.is_empty()
@@ -738,6 +746,7 @@ impl RenderSectionSession {
 
     pub fn mark_section_dirty(&mut self, key: RenderSectionKey) {
         self.dirty.bump_section_revision(key);
+        self.dirty.mark_work_changed();
         if !self.cache.mark_section_dirty(key) {
             self.dirty.dirty_sections.insert(key);
         }
@@ -883,6 +892,12 @@ impl RenderSectionSession {
     }
 
     pub fn apply_ready_plan(&mut self, plan: &RenderSectionReadyPlan) {
+        if !plan.budgeted_loaded_chunks.is_empty()
+            || !plan.ready_section_keys.is_empty()
+            || !plan.deferred_section_keys.is_empty()
+        {
+            self.dirty.mark_work_changed();
+        }
         for pos in &plan.budgeted_loaded_chunks {
             self.dirty.dirty_chunks.remove(pos);
         }
@@ -1064,6 +1079,9 @@ impl RenderSectionSession {
         target_sections: BTreeSet<RenderSectionKey>,
         mut section_is_loaded: impl FnMut(RenderSectionKey) -> bool,
     ) -> usize {
+        if !target_sections.is_empty() {
+            self.dirty.mark_work_changed();
+        }
         let mut requeued = 0;
         for key in target_sections {
             if section_is_loaded(key) || self.cache.contains_section(key) {

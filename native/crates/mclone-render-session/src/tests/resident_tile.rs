@@ -50,6 +50,7 @@ fn resident_tile_cache_shares_chunk_lookup_dirtying_and_eviction_across_levels()
     assert_eq!(cache.insert(far, "far"), None);
     assert_eq!(cache.insert(other, "other"), None);
     assert_eq!(cache.generation(), 3);
+    assert_eq!(cache.dirty_generation(), 0);
     assert_eq!(
         cache
             .tile_keys_for_chunk(ChunkPos::new(2, 0))
@@ -58,12 +59,18 @@ fn resident_tile_cache_shares_chunk_lookup_dirtying_and_eviction_across_levels()
     );
 
     assert!(cache.mark_tile_dirty(far));
+    assert_eq!(cache.dirty_generation(), 1);
+    assert!(cache.mark_tile_dirty(far));
+    assert_eq!(cache.dirty_generation(), 1);
     assert_eq!(cache.dirty_tile_keys().collect::<Vec<_>>(), vec![far]);
     assert_eq!(cache.mark_all_tiles_dirty(), 2);
+    assert_eq!(cache.dirty_generation(), 2);
     assert_eq!(cache.dirty_tile_count(), 3);
     assert!(cache.clear_tile_dirty(near));
+    assert_eq!(cache.dirty_generation(), 3);
 
     assert_eq!(cache.remove(far), Some("far"));
+    assert_eq!(cache.dirty_generation(), 4);
     assert_eq!(cache.generation(), 4);
     assert!(cache.contains_chunk(ChunkPos::new(2, 0)));
     assert_eq!(cache.remove(near), Some("near"));

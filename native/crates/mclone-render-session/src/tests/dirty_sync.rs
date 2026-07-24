@@ -45,14 +45,18 @@ fn render_section_dirty_state_tracks_dirty_inflight_and_stale_revisions() {
     let first = RenderSectionKey::new(0, 4, 0);
     let second = RenderSectionKey::new(0, 5, 0);
     let mut dirty = RenderSectionDirtyState::default();
+    let initial_generation = dirty.work_generation();
 
     dirty.mark_chunk_dirty(ChunkPos::new(0, 0), [first, second]);
+    assert_ne!(dirty.work_generation(), initial_generation);
     assert_eq!(dirty.dirty_chunks, BTreeSet::from([ChunkPos::new(0, 0)]));
     assert_eq!(dirty.section_revision(first), 1);
     assert_eq!(dirty.section_revision(second), 1);
 
     let request = dirty.build_compile_request(BTreeSet::from([first, second]), Vec::new());
+    let dirty_generation = dirty.work_generation();
     dirty.mark_compile_submitted(&request.target_sections);
+    assert_ne!(dirty.work_generation(), dirty_generation);
     assert_eq!(dirty.inflight_sections, BTreeSet::from([first, second]));
 
     dirty.mark_section_dirty(second);

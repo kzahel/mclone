@@ -97,6 +97,7 @@ pub struct ClientRuntime {
     topology: HorizontalTopology,
     chunk_view: Option<ChunkView>,
     chunks: BTreeMap<ChunkPos, ChunkSnapshot>,
+    loaded_chunk_generation: u64,
     deferred_chunk_drops: VecDeque<ChunkSnapshot>,
     deferred_chunk_drop_items: usize,
     game_time: u64,
@@ -127,6 +128,7 @@ impl ClientRuntime {
             topology: HorizontalTopology::UNBOUNDED,
             chunk_view: None,
             chunks: BTreeMap::new(),
+            loaded_chunk_generation: 0,
             deferred_chunk_drops: VecDeque::new(),
             deferred_chunk_drop_items: 0,
             game_time: 0,
@@ -249,10 +251,12 @@ impl ClientRuntime {
                 if let Some(previous) = self.chunks.insert(snapshot.pos, snapshot) {
                     self.defer_chunk_snapshot_drop(previous);
                 }
+                self.loaded_chunk_generation = self.loaded_chunk_generation.wrapping_add(1);
             }
             ServerUpdate::ChunkUnload { pos } => {
                 if let Some(snapshot) = self.chunks.remove(&pos) {
                     self.defer_chunk_snapshot_drop(snapshot);
+                    self.loaded_chunk_generation = self.loaded_chunk_generation.wrapping_add(1);
                 }
                 self.remove_entities_in_chunk(pos);
             }
@@ -450,6 +454,10 @@ impl ClientRuntime {
         self.chunks.len()
     }
 
+    pub const fn loaded_chunk_generation(&self) -> u64 {
+        self.loaded_chunk_generation
+    }
+
     pub fn deferred_chunk_drop_item_count(&self) -> usize {
         self.deferred_chunk_drop_items
     }
@@ -476,7 +484,10 @@ impl ClientRuntime {
     }
 
     pub fn clear_server_replica(&mut self) {
-        self.chunks.clear();
+        if !self.chunks.is_empty() {
+            self.chunks.clear();
+            self.loaded_chunk_generation = self.loaded_chunk_generation.wrapping_add(1);
+        }
         self.deferred_chunk_drops.clear();
         self.deferred_chunk_drop_items = 0;
         self.player_position_updates.clear();

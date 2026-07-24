@@ -61,6 +61,7 @@ pub use crate::scene_session_runtime::{
 pub use crate::startup_render_seed::StartupRenderSectionSeed;
 pub use crate::world_catalog::WorldCatalog;
 
+use std::cell::RefCell;
 use std::collections::BTreeSet;
 use std::time::Duration;
 #[cfg(not(target_arch = "wasm32"))]
@@ -411,7 +412,7 @@ pub struct TraversalReadySectionStamp {
     pub interest_center: ChunkPos,
     pub render_distance: u32,
     pub render_section_cache_generation: u64,
-    pub loaded_chunks: BTreeSet<ChunkPos>,
+    pub loaded_chunk_generation: u64,
     pub near_camera_columns: BTreeSet<ChunkPos>,
     pub draw_section_generation: u64,
 }
@@ -1180,6 +1181,21 @@ pub struct TargetRenderWorkStats {
     pub inflight_render_sections: usize,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PendingRenderChunkCountStamp {
+    asset_epoch: u64,
+    interest_center: ChunkPos,
+    render_distance: u32,
+    loaded_chunk_generation: u64,
+    render_section_cache_generation: u64,
+    render_dirty_generation: u64,
+    resident_dirty_generation: u64,
+    dirty_chunk_count: usize,
+    dirty_section_count: usize,
+    resident_dirty_section_count: usize,
+    inflight_section_count: usize,
+}
+
 #[derive(Debug)]
 pub struct SingleViewRuntime {
     engine: EngineRenderSession,
@@ -1209,6 +1225,8 @@ pub struct SingleViewRuntime {
     last_simulation_fluid_mutated_blocks: usize,
     scheduled_fluid_ticks: usize,
     last_poll_diagnostics: RuntimePollDiagnostics,
+    pending_render_chunk_count_cache: RefCell<Option<(PendingRenderChunkCountStamp, usize)>>,
+    target_pending_render_chunk_count_cache: RefCell<Option<(PendingRenderChunkCountStamp, usize)>>,
 }
 
 impl SingleViewRuntime {
@@ -1246,6 +1264,8 @@ impl SingleViewRuntime {
             last_simulation_fluid_mutated_blocks: 0,
             scheduled_fluid_ticks: 0,
             last_poll_diagnostics: RuntimePollDiagnostics::default(),
+            pending_render_chunk_count_cache: RefCell::new(None),
+            target_pending_render_chunk_count_cache: RefCell::new(None),
         }
     }
 
@@ -2412,7 +2432,7 @@ impl SingleViewRuntime {
             interest_center: self.interest_center,
             render_distance: self.render_distance,
             render_section_cache_generation: self.render_session().section_cache_generation(),
-            loaded_chunks: self.client().loaded_chunk_positions().collect(),
+            loaded_chunk_generation: self.client().loaded_chunk_generation(),
             near_camera_columns: render_section_near_camera_readiness_columns(
                 self.client().topology(),
                 camera_position,
@@ -2456,6 +2476,21 @@ impl SingleViewRuntime {
     }
 
     fn target_pending_render_chunk_count(&self) -> usize {
+        let stamp = self.pending_render_chunk_count_stamp();
+        if let Some((cached_stamp, count)) = self
+            .target_pending_render_chunk_count_cache
+            .borrow()
+            .as_ref()
+            && *cached_stamp == stamp
+        {
+            return *count;
+        }
+        let count = self.target_pending_render_chunk_count_exact();
+        *self.target_pending_render_chunk_count_cache.borrow_mut() = Some((stamp, count));
+        count
+    }
+
+    fn target_pending_render_chunk_count_exact(&self) -> usize {
         let mut pending = self
             .render_session()
             .dirty()
@@ -2586,6 +2621,18 @@ impl SingleViewRuntime {
     }
 
     pub fn pending_render_chunk_count(&self) -> usize {
+        let stamp = self.pending_render_chunk_count_stamp();
+        if let Some((cached_stamp, count)) = self.pending_render_chunk_count_cache.borrow().as_ref()
+            && *cached_stamp == stamp
+        {
+            return *count;
+        }
+        let count = self.pending_render_chunk_count_exact();
+        *self.pending_render_chunk_count_cache.borrow_mut() = Some((stamp, count));
+        count
+    }
+
+    pub fn pending_render_chunk_count_exact(&self) -> usize {
         let mut pending = self
             .render_session()
             .dirty()
@@ -2629,6 +2676,26 @@ impl SingleViewRuntime {
                 .map(render_section_chunk_pos),
         );
         pending.len()
+    }
+
+    fn pending_render_chunk_count_stamp(&self) -> PendingRenderChunkCountStamp {
+        let render_session = self.render_session();
+        let dirty = render_session.dirty();
+        let (render_dirty_generation, resident_dirty_generation) =
+            render_session.pending_work_generations();
+        PendingRenderChunkCountStamp {
+            asset_epoch: self.asset_epoch,
+            interest_center: self.interest_center,
+            render_distance: self.render_distance,
+            loaded_chunk_generation: self.client().loaded_chunk_generation(),
+            render_section_cache_generation: render_session.section_cache_generation(),
+            render_dirty_generation,
+            resident_dirty_generation,
+            dirty_chunk_count: dirty.dirty_chunks.len(),
+            dirty_section_count: dirty.dirty_sections.len(),
+            resident_dirty_section_count: render_session.resident_dirty_section_count(),
+            inflight_section_count: dirty.inflight_sections.len(),
+        }
     }
 
     pub fn camera_inside_water(&self, position: Vec3) -> bool {
@@ -3125,7 +3192,7 @@ mod tests {
 
     #[test]
     fn traversal_ready_section_cache_skips_until_stamp_changes() {
-        let runtime = SingleViewRuntime::local_integrated(ChunkPos::new(0, 0), 2, 3);
+        let mut runtime = SingleViewRuntime::local_integrated(ChunkPos::new(0, 0), 2, 3);
         let mut cache = TraversalReadySectionCache::default();
 
         let first = cache.refresh(&runtime, Vec3::new(0.0, 64.0, 0.0), 0);
@@ -3142,9 +3209,54 @@ mod tests {
         let camera_near_set_changed = cache.refresh(&runtime, Vec3::new(64.0, 64.0, 0.0), 1);
         assert!(camera_near_set_changed.refreshed);
 
+        runtime.apply_server_updates(vec![ServerUpdate::ChunkSnapshot(
+            empty_runtime_test_snapshot(ChunkPos::new(0, 0)),
+        )]);
+        let loaded_set_changed = cache.refresh(&runtime, Vec3::new(64.0, 64.0, 0.0), 1);
+        assert!(loaded_set_changed.refreshed);
+
         cache.clear();
         let after_clear = cache.refresh(&runtime, Vec3::new(64.0, 64.0, 0.0), 1);
         assert!(after_clear.refreshed);
+    }
+
+    #[test]
+    fn pending_render_chunk_cache_matches_exact_audit_across_updates() {
+        let pos = ChunkPos::new(0, 0);
+        let mut runtime = SingleViewRuntime::local_integrated(pos, 2, 3);
+        assert_eq!(
+            runtime.pending_render_chunk_count(),
+            runtime.pending_render_chunk_count_exact()
+        );
+
+        runtime.apply_server_updates(vec![ServerUpdate::ChunkSnapshot(
+            empty_runtime_test_snapshot(pos),
+        )]);
+        assert_eq!(
+            runtime.pending_render_chunk_count(),
+            runtime.pending_render_chunk_count_exact()
+        );
+
+        runtime.apply_server_updates(vec![ServerUpdate::SectionBlockUpdates {
+            pos,
+            section_y: 0,
+            updates: vec![mclone_protocol::SectionBlockUpdate {
+                local_x: 1,
+                local_y: 2,
+                local_z: 3,
+                block_state: BlockStateId(1),
+            }],
+        }]);
+        assert_eq!(
+            runtime.pending_render_chunk_count(),
+            runtime.pending_render_chunk_count_exact()
+        );
+
+        runtime.apply_server_updates(vec![ServerUpdate::ChunkUnload { pos }]);
+        assert_eq!(
+            runtime.pending_render_chunk_count(),
+            runtime.pending_render_chunk_count_exact()
+        );
     }
 
     #[test]
