@@ -171,6 +171,10 @@ impl CachedTexturedRenderSections {
         self.tiles.tile_keys_for_chunk(pos)
     }
 
+    pub fn section_counts_by_chunk(&self) -> impl Iterator<Item = (ChunkPos, usize)> + '_ {
+        self.tiles.tile_counts_by_chunk()
+    }
+
     pub(crate) fn has_dirty_sections(&self) -> bool {
         self.tiles.has_dirty_tiles()
     }

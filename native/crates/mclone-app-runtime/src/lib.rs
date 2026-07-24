@@ -426,7 +426,8 @@ pub struct TraversalReadySectionRefresh {
 #[derive(Clone, Debug, Default)]
 pub struct TraversalReadySectionCache {
     stamp: Option<TraversalReadySectionStamp>,
-    ready_sections: BTreeSet<RenderSectionKey>,
+    ready_columns: BTreeSet<ChunkPos>,
+    ready_section_count: usize,
 }
 
 impl TraversalReadySectionCache {
@@ -440,24 +441,28 @@ impl TraversalReadySectionCache {
         if self.stamp.as_ref() == Some(&stamp) {
             return TraversalReadySectionRefresh {
                 refreshed: false,
-                section_count: self.ready_sections.len(),
+                section_count: self.ready_section_count,
             };
         }
-        self.ready_sections = runtime.traversal_ready_render_section_keys(camera_position);
+        let (ready_columns, ready_section_count) =
+            runtime.traversal_ready_render_columns(camera_position);
+        self.ready_columns = ready_columns;
+        self.ready_section_count = ready_section_count;
         self.stamp = Some(stamp);
         TraversalReadySectionRefresh {
             refreshed: true,
-            section_count: self.ready_sections.len(),
+            section_count: self.ready_section_count,
         }
     }
 
-    pub fn ready_sections(&self) -> &BTreeSet<RenderSectionKey> {
-        &self.ready_sections
+    pub fn ready_columns(&self) -> &BTreeSet<ChunkPos> {
+        &self.ready_columns
     }
 
     pub fn clear(&mut self) {
         self.stamp = None;
-        self.ready_sections.clear();
+        self.ready_columns.clear();
+        self.ready_section_count = 0;
     }
 }
 
@@ -2423,6 +2428,26 @@ impl SingleViewRuntime {
             .collect()
     }
 
+    pub fn traversal_ready_render_columns(
+        &self,
+        camera_position: Vec3,
+    ) -> (BTreeSet<ChunkPos>, usize) {
+        let client = self.client();
+        let mut ready_columns = BTreeSet::new();
+        let mut ready_section_count = 0;
+        for (pos, section_count) in self.render_session().resident_section_counts_by_chunk() {
+            let readiness_key = RenderSectionKey::new(pos.x, 0, pos.z);
+            if self.render_section_within_render_distance(readiness_key)
+                && render_section_neighbor_readiness(client, readiness_key, camera_position)
+                    .is_ready()
+            {
+                ready_columns.insert(pos);
+                ready_section_count += section_count;
+            }
+        }
+        (ready_columns, ready_section_count)
+    }
+
     pub fn traversal_ready_section_stamp(
         &self,
         camera_position: Vec3,
@@ -3218,6 +3243,50 @@ mod tests {
         cache.clear();
         let after_clear = cache.refresh(&runtime, Vec3::new(64.0, 64.0, 0.0), 1);
         assert!(after_clear.refreshed);
+    }
+
+    #[test]
+    fn traversal_ready_columns_match_exact_section_readiness() {
+        let center = ChunkPos::new(0, 0);
+        let east = ChunkPos::new(1, 0);
+        let mut runtime = SingleViewRuntime::local_integrated(center, 2, 3);
+        runtime.apply_server_updates(
+            [
+                center,
+                ChunkPos::new(-1, 0),
+                east,
+                ChunkPos::new(0, -1),
+                ChunkPos::new(0, 1),
+            ]
+            .into_iter()
+            .map(empty_runtime_test_snapshot)
+            .map(ServerUpdate::ChunkSnapshot)
+            .collect(),
+        );
+        let center_key = RenderSectionKey::new(center.x, 0, center.z);
+        let east_key = RenderSectionKey::new(east.x, 0, east.z);
+        runtime.replace_asset_epoch_sections(
+            1,
+            mclone_mesh::TexturedRenderSectionBuildReport {
+                sections: [center_key, east_key]
+                    .into_iter()
+                    .map(|key| mclone_mesh::TexturedRenderSectionMesh {
+                        key,
+                        mesh: mclone_mesh::TexturedVisibleChunkMesh::default(),
+                        visibility: mclone_mesh::VisibilitySet::all_visible(),
+                    })
+                    .collect(),
+                ..Default::default()
+            },
+        );
+
+        let camera = Vec3::new(1_000.0, 64.0, 1_000.0);
+        let exact = runtime.traversal_ready_render_section_keys(camera);
+        let (columns, section_count) = runtime.traversal_ready_render_columns(camera);
+
+        assert_eq!(exact, BTreeSet::from([center_key]));
+        assert_eq!(columns, BTreeSet::from([center]));
+        assert_eq!(section_count, exact.len());
     }
 
     #[test]

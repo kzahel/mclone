@@ -3120,8 +3120,8 @@ impl McloneSceneHost {
         timing.runtime_ready_sections_ms = elapsed_ms(clock.elapsed_since(ready_start));
         let ready_publish_start = clock.now();
         if refresh.refreshed {
-            slot.draw.set_traversal_ready_sections_with_context(
-                slot.traversal_ready_sections.ready_sections(),
+            slot.draw.set_traversal_ready_columns_with_context(
+                slot.traversal_ready_sections.ready_columns(),
                 upload_backpressured,
             );
         } else {

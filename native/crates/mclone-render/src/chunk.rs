@@ -10,7 +10,7 @@ use std::time::Instant;
 use anyhow::{Context, Result, bail};
 use glam::{Mat4, Quat, Vec3, Vec4};
 use mclone_core::{
-    HorizontalTopology, Vec3d, block_to_chunk_coord, block_to_section_coord,
+    ChunkPos, HorizontalTopology, Vec3d, block_to_chunk_coord, block_to_section_coord,
     chunk_middle_block_coord, chunk_min_block_coord,
 };
 use mclone_diagnostics::GpuPassId;
@@ -3587,7 +3587,9 @@ pub struct TexturedSectionDrawResources {
     shared: Arc<TexturedSectionSharedResources>,
     sections: BTreeMap<RenderSectionKey, GpuTexturedChunkMesh>,
     visibility_sections: BTreeMap<RenderSectionKey, VisibilitySet>,
+    visibility_section_keys_by_chunk: BTreeMap<ChunkPos, BTreeSet<RenderSectionKey>>,
     traversal_ready_sections: BTreeSet<RenderSectionKey>,
+    traversal_ready_columns: Option<BTreeSet<ChunkPos>>,
     section_set_generation: u64,
     queue: wgpu::Queue,
     // Slice F (docs/tactical/106): the prepared culling records only change when
@@ -3637,7 +3639,9 @@ impl TexturedSectionDrawResources {
             shared,
             sections: BTreeMap::new(),
             visibility_sections: BTreeMap::new(),
+            visibility_section_keys_by_chunk: BTreeMap::new(),
             traversal_ready_sections: BTreeSet::new(),
+            traversal_ready_columns: None,
             section_set_generation: 0,
             queue: queue.clone(),
             cached_records: RefCell::new(None),
@@ -3792,16 +3796,41 @@ impl TexturedSectionDrawResources {
             if self.sections.remove(key).is_some() {
                 report.removed_section_count += 1;
             }
-            self.visibility_sections.remove(key);
+            if self.visibility_sections.remove(key).is_some() {
+                let pos = ChunkPos::new(key.chunk_x, key.chunk_z);
+                if let Some(keys) = self.visibility_section_keys_by_chunk.get_mut(&pos) {
+                    keys.remove(key);
+                    if keys.is_empty() {
+                        self.visibility_section_keys_by_chunk.remove(&pos);
+                    }
+                }
+            }
             self.traversal_ready_sections.remove(key);
         }
         timing.remove_ms = timing_elapsed_ms(remove_start);
 
         for section in sections {
             let section_state_start = timing_now();
-            self.visibility_sections
-                .insert(section.key, section.visibility);
-            self.traversal_ready_sections.insert(section.key);
+            let pos = ChunkPos::new(section.key.chunk_x, section.key.chunk_z);
+            if self
+                .visibility_sections
+                .insert(section.key, section.visibility)
+                .is_none()
+            {
+                self.visibility_section_keys_by_chunk
+                    .entry(pos)
+                    .or_default()
+                    .insert(section.key);
+            }
+            let section_is_ready = self
+                .traversal_ready_columns
+                .as_ref()
+                .is_none_or(|columns| columns.contains(&pos));
+            if section_is_ready {
+                self.traversal_ready_sections.insert(section.key);
+            } else {
+                self.traversal_ready_sections.remove(&section.key);
+            }
             if section.is_empty() {
                 if self.sections.remove(&section.key).is_some() {
                     report.removed_section_count += 1;
@@ -3860,6 +3889,10 @@ impl TexturedSectionDrawResources {
         let mut stats = self.record_cache_stats.get();
         let changed = filtered_ready_sections != self.traversal_ready_sections;
         stats.record_ready_set_call(upload_backpressured, changed);
+        // The section-oriented API may represent a partial column. Leave
+        // column mode even when the effective section set is unchanged so
+        // later section insertions retain the legacy caller's semantics.
+        self.traversal_ready_columns = None;
         if !changed {
             self.record_cache_stats.set(stats);
             return;
@@ -3880,6 +3913,61 @@ impl TexturedSectionDrawResources {
         }
         self.mark_records_dirty(dirty_causes);
         self.traversal_ready_sections = filtered_ready_sections;
+        if can_patch_cached_records && self.patch_cached_records(&changed_record_keys) {
+            self.records_dirty.set(false);
+            self.record_dirty_causes
+                .set(TexturedSectionRecordDirtyCauses::empty());
+        }
+    }
+
+    pub fn set_traversal_ready_columns_with_context(
+        &mut self,
+        ready_columns: &BTreeSet<ChunkPos>,
+        upload_backpressured: bool,
+    ) {
+        let changed_record_keys =
+            if let Some(previous_columns) = self.traversal_ready_columns.as_ref() {
+                previous_columns
+                    .symmetric_difference(ready_columns)
+                    .filter_map(|pos| self.visibility_section_keys_by_chunk.get(pos))
+                    .flat_map(|keys| keys.iter().copied())
+                    .collect::<BTreeSet<_>>()
+            } else {
+                let desired_ready_sections = ready_columns
+                    .iter()
+                    .filter_map(|pos| self.visibility_section_keys_by_chunk.get(pos))
+                    .flat_map(|keys| keys.iter().copied())
+                    .collect::<BTreeSet<_>>();
+                desired_ready_sections
+                    .symmetric_difference(&self.traversal_ready_sections)
+                    .copied()
+                    .collect()
+            };
+        let changed = !changed_record_keys.is_empty();
+        let mut stats = self.record_cache_stats.get();
+        stats.record_ready_set_call(upload_backpressured, changed);
+        self.record_cache_stats.set(stats);
+        self.traversal_ready_columns = Some(ready_columns.clone());
+        if !changed {
+            return;
+        }
+
+        let can_patch_cached_records =
+            !self.records_dirty.get() && self.cached_records.borrow().is_some();
+        let mut dirty_causes = TexturedSectionRecordDirtyCauses::TRAVERSAL_READY;
+        if upload_backpressured {
+            dirty_causes =
+                dirty_causes.with(TexturedSectionRecordDirtyCauses::UPLOAD_BACKPRESSURED);
+        }
+        self.mark_records_dirty(dirty_causes);
+        for key in &changed_record_keys {
+            let pos = ChunkPos::new(key.chunk_x, key.chunk_z);
+            if ready_columns.contains(&pos) {
+                self.traversal_ready_sections.insert(*key);
+            } else {
+                self.traversal_ready_sections.remove(key);
+            }
+        }
         if can_patch_cached_records && self.patch_cached_records(&changed_record_keys) {
             self.records_dirty.set(false);
             self.record_dirty_causes

@@ -540,6 +540,10 @@ impl RenderSectionSession {
         self.cache.dirty_section_keys()
     }
 
+    pub fn resident_section_counts_by_chunk(&self) -> impl Iterator<Item = (ChunkPos, usize)> + '_ {
+        self.cache.section_counts_by_chunk()
+    }
+
     pub fn section_cache_generation(&self) -> u64 {
         self.cache.generation()
     }

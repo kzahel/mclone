@@ -108,6 +108,12 @@ impl<K: ResidentTileKey, M> ResidentTileCache<K, M> {
             .flat_map(|keys| keys.iter().copied())
     }
 
+    pub fn tile_counts_by_chunk(&self) -> impl Iterator<Item = (ChunkPos, usize)> + '_ {
+        self.tile_keys_by_chunk
+            .iter()
+            .map(|(pos, keys)| (*pos, keys.len()))
+    }
+
     pub fn has_dirty_tiles(&self) -> bool {
         self.tiles.values().any(|slot| slot.dirty)
     }
