@@ -7,6 +7,7 @@ pub mod catalog_executor;
 pub mod catalog_storage_plan;
 pub mod client_catalog_policy;
 pub mod client_connection;
+pub mod client_entry;
 pub mod client_experience;
 pub mod client_session_policy;
 pub mod debug_overlay;
