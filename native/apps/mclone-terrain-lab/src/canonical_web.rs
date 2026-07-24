@@ -3,9 +3,9 @@ use std::collections::{BTreeMap, BTreeSet};
 use mclone_assets::{AssetSourceChain, PackedAssetSource};
 use mclone_core::BlockStateId;
 use mclone_mesh::{
-    TexturedChunkMeshInput, TexturedMeshCatalog, TexturedRenderSectionMesh,
-    TexturedVisibleChunkMesh, build_textured_render_sections_for_chunk_set,
-    load_first_party_textured_terrain_assets,
+    RENDER_SECTION_HEIGHT, RenderSectionKey, TexturedChunkMeshInput, TexturedMeshCatalog,
+    TexturedRenderSectionMesh, TexturedVisibleChunkMesh,
+    build_textured_render_sections_for_chunk_set, load_first_party_textured_terrain_assets,
 };
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkRenderView, ChunkTextureAtlas,
@@ -16,7 +16,7 @@ use mclone_terrain_view::{
     TerrainPreviewView, canonical_terrain_presentation_blocks, terrain_preview_focus_y,
     terrain_preview_projection,
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 use web_sys::HtmlCanvasElement;
 
@@ -42,6 +42,23 @@ struct CanonicalAcceptReport {
     vertex_count: u32,
     index_count: u32,
     mesh_upload_ms: f64,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd)]
+#[serde(rename_all = "camelCase")]
+struct CanonicalChunkCoordinate {
+    chunk_x: i32,
+    chunk_z: i32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CanonicalRetainReport {
+    resident_chunks: usize,
+    removed_chunks: usize,
+    removed_sections: usize,
+    vertex_count: u32,
+    index_count: u32,
 }
 
 #[derive(Serialize)]
@@ -99,6 +116,47 @@ impl CanonicalTerrainLab {
         self.vertex_count = 0;
         self.index_count = 0;
         Ok(())
+    }
+
+    #[wasm_bindgen(js_name = retainChunks)]
+    pub fn retain_chunks(&mut self, coordinates_json: String) -> Result<String, JsValue> {
+        let coordinates = serde_json::from_str::<Vec<CanonicalChunkCoordinate>>(&coordinates_json)
+            .map_err(|error| js_error(format!("invalid canonical retain coordinates: {error}")))?;
+        let retained = coordinates
+            .into_iter()
+            .map(|coordinate| (coordinate.chunk_x, coordinate.chunk_z))
+            .collect::<BTreeSet<_>>();
+        let removed_chunks = self
+            .chunks
+            .keys()
+            .copied()
+            .filter(|position| !retained.contains(position))
+            .collect::<Vec<_>>();
+        let mut removed_sections = BTreeSet::new();
+        for position in &removed_chunks {
+            let Some(chunk) = self.chunks.remove(position) else {
+                continue;
+            };
+            for local_y_start in (0..chunk.height).step_by(RENDER_SECTION_HEIGHT as usize) {
+                removed_sections.insert(RenderSectionKey::new(
+                    position.0,
+                    (chunk.min_y + local_y_start).div_euclid(RENDER_SECTION_HEIGHT),
+                    position.1,
+                ));
+            }
+        }
+        self.draw
+            .apply_section_updates(&self.device, &[], &removed_sections)
+            .map_err(|error| js_error(format!("failed to retain canonical terrain: {error}")))?;
+        self.vertex_count = self.draw.vertex_count();
+        self.index_count = self.draw.index_count();
+        json(&CanonicalRetainReport {
+            resident_chunks: self.chunks.len(),
+            removed_chunks: removed_chunks.len(),
+            removed_sections: removed_sections.len(),
+            vertex_count: self.vertex_count,
+            index_count: self.index_count,
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -371,25 +429,46 @@ impl CanonicalTerrainLab {
         if targets.is_empty() {
             return Ok((self.vertex_count, self.index_count));
         }
-        let presented = self
-            .chunks
-            .values()
-            .map(|chunk| {
-                canonical_terrain_presentation_blocks(&chunk.blocks, self.visibility)
+        let input_positions = targets
+            .iter()
+            .flat_map(|(chunk_x, chunk_z)| {
+                [
+                    (*chunk_x, *chunk_z),
+                    (*chunk_x - 1, *chunk_z),
+                    (*chunk_x + 1, *chunk_z),
+                    (*chunk_x, *chunk_z - 1),
+                    (*chunk_x, *chunk_z + 1),
+                ]
+            })
+            .filter(|position| self.chunks.contains_key(position))
+            .collect::<BTreeSet<_>>();
+        let presented = input_positions
+            .iter()
+            .filter_map(|position| {
+                let chunk = self.chunks.get(position)?;
+                let blocks = canonical_terrain_presentation_blocks(&chunk.blocks, self.visibility)
                     .into_iter()
                     .map(|block| BlockStateId(u32::from(block)))
-                    .collect::<Vec<_>>()
+                    .collect::<Vec<_>>();
+                Some((*position, blocks))
             })
             .collect::<Vec<_>>();
-        let inputs = self
-            .chunks
+        let inputs = presented
             .iter()
-            .zip(presented.iter())
-            .map(|(((chunk_x, chunk_z), chunk), blocks)| {
-                TexturedChunkMeshInput::new(*chunk_x, *chunk_z, chunk.min_y, chunk.height, blocks)
+            .filter_map(|((chunk_x, chunk_z), blocks)| {
+                let chunk = self.chunks.get(&(*chunk_x, *chunk_z))?;
+                Some(
+                    TexturedChunkMeshInput::new(
+                        *chunk_x,
+                        *chunk_z,
+                        chunk.min_y,
+                        chunk.height,
+                        blocks,
+                    )
                     .with_biomes(&chunk.biomes)
                     .with_world_seed(self.seed)
-                    .with_fluids_visible(self.visibility.water)
+                    .with_fluids_visible(self.visibility.water),
+                )
             })
             .collect::<Vec<_>>();
         let mut sections =
