@@ -215,13 +215,13 @@ later candidate has a named primary span.
 
 ### Slice 1: Constant-Time Frame Bookkeeping
 
-- [ ] Replace per-frame exact `pending_render_chunk_count` set construction
+- [x] Replace per-frame exact `pending_render_chunk_count` set construction
   with mutation-maintained counts or cached summaries.
-- [ ] Preserve an explicit exact audit for tests, settle gates, and periodic
+- [x] Preserve an explicit exact audit for tests, settle gates, and periodic
   diagnostic verification.
-- [ ] Replace full loaded-chunk-set copies in traversal-ready stamps with
+- [x] Replace full loaded-chunk-set copies in traversal-ready stamps with
   monotonic client/load and render generations.
-- [ ] Prove counter/generation conservation under load, unload, dirty,
+- [x] Prove counter/generation conservation under load, unload, dirty,
   inflight, stale-result, and removal transitions.
 - [ ] Run stationary and traversal A/Bs at RD5, RD10, and RD13.
 
@@ -230,15 +230,15 @@ unchanged.
 
 ### Slice 2: Vanilla-Shaped Static Visibility Reuse
 
-- [ ] Define a cache key containing camera/view/projection, topology, render
+- [x] Define a cache key containing camera/view/projection, topology, render
   options, render distance, prepared-record generation, traversal readiness,
   and any state that changes the drawable list or ordering.
-- [ ] Reuse the culled/drawn section plan when the key is unchanged.
-- [ ] Invalidate exactly on section add/remove/mesh/connectivity/readiness,
+- [x] Reuse the culled/drawn section plan when the key is unchanged.
+- [x] Invalidate exactly on section add/remove/mesh/connectivity/readiness,
   camera or projection changes, and relevant option changes.
-- [ ] Keep uniform writes and actual frame drawing current; cache commands or
+- [x] Keep uniform writes and actual frame drawing current; cache commands or
   pixels only in a separately measured later slice.
-- [ ] Validate stationary, camera nudge/rotation, chunk mutation, fluid
+- [x] Validate stationary, camera nudge/rotation, chunk mutation, fluid
   mutation, render-distance change, and topology cases.
 
 Exit: H2 is accepted or rejected. Traversal is expected to remain unchanged.
@@ -247,11 +247,11 @@ Exit: H2 is accepted or rejected. Traversal is expected to remain unchanged.
 
 - [ ] Instrument `active_levels`, holder reconciliation, unload processing,
   and their call counts per server tick.
-- [ ] First cache the propagated map behind a ticket/topology generation and
+- [x] First cache the propagated map behind a ticket/topology generation and
   share one immutable result across same-generation callers.
-- [ ] Prove exact equality against the current full reconstruction across
+- [x] Prove exact equality against the current full reconstruction across
   add/remove/timeout/forced/player movement and plane/cylinder topology tests.
-- [ ] Run stationary and traversal A/Bs.
+- [x] Run stationary and traversal A/Bs.
 - [ ] If reconstruction still matters during continuous movement, port the
   Vanilla-shaped changed-source graph propagation behind the same observable
   contract and compare it with the cached full-map control.
@@ -261,14 +261,14 @@ order, unload decisions, or published chunks.
 
 ### Slice 4: Fluid-To-Remesh Attribution And Coalescing
 
-- [ ] Add the frozen-fluid stationary rows and record executed ticks, mutated
+- [x] Add the frozen-fluid stationary rows and record executed ticks, mutated
   blocks, dirty sections, superseded/stale compiles, rebuilt/uploaded sections,
   and visible/offscreen classification.
-- [ ] Identify whether repeated dirtying, neighbor fan-out, stale completions,
+- [x] Identify whether repeated dirtying, neighbor fan-out, stale completions,
   or unchanged render facts cause redundant meshes.
 - [ ] Coalesce revisions and supersede obsolete work at existing shared dirty
   and compile-queue boundaries.
-- [ ] Avoid only provably unchanged render work; preserve Vanilla fluid
+- [x] Avoid only provably unchanged render work; preserve Vanilla fluid
   simulation and client-visible state.
 - [ ] Validate cross-section and cross-chunk water/lava boundaries as well as
   fresh/soaked stationary Deck rows.
@@ -404,3 +404,69 @@ Append each tested slice here with:
   travel, or frame pacing.
 - Decision: reject H5 and retain the one-worker default. The limiting path is
   main-thread integration/preparation/submission, not compiler throughput.
+
+### 2026-07-24: Bookkeeping Cache Kept
+
+- Candidate commit: `40abdccc`.
+- SteamRT4 binary SHA-256:
+  `b9ace21e3c076efdbc98395b2a6f2164b91edbf5614fdac8ba39997bfd001f45`.
+- Run:
+  `20260724T140444Z-40abdccc0fc5-perf-matrix-attribution-3731787`.
+- Against the `fc7fbbd0` attribution control, native RD13 pending-render
+  accounting p95 fell from 1.06 to 0.82 ms stationary and from 1.30 to
+  0.98 ms during equal-distance traversal. Traversal-ready construction fell
+  from 3.45 to 3.24 ms stationary and from 3.85 to 3.65 ms traversing.
+- Exact audits and mutation-generation tests passed. The 320.2-block
+  traversal published 493 feature chunks and 480 light statuses and rebuilt
+  8,742 sections.
+- Overall traversal did not improve: 46.4 FPS and 27.68 ms p95 versus the
+  control's 48.2 FPS and 26.78 ms. Fresh-fluid work differed between runs, so
+  the stationary 64.1-to-69.5 FPS change is not attributed to bookkeeping.
+- Decision: keep H1's low-risk targeted reduction, but reject bookkeeping as a
+  primary RD13 frame-rate fix. RD5/RD10 guardrail rows remain for closeout.
+
+### 2026-07-24: Same-Generation Ticket Reuse Kept
+
+- Candidate commit: `8ffeb803`.
+- SteamRT4 binary SHA-256:
+  `2c3d9ba6d40ef4e5fe27ba67dc25306312edaf0147b36d5f5ea008fbe6248d3e`.
+- Run:
+  `20260724T141138Z-8ffeb80309f1-perf-matrix-attribution-3739759`.
+- Against the bookkeeping-only parent, native RD13 traversal improved from
+  46.4 to 49.3 FPS and frame p95 fell from 27.68 to 25.32 ms.
+- Equal-work guardrails held: 320.1 blocks traveled, 493 feature and 493 light
+  publications completed, and 8,826 sections rebuilt.
+- Stationary FPS is not used for this decision because the measured live
+  fluid tail rebuilt only 381 sections versus 549 in the parent run.
+- The later detailed build still measures holder reconciliation at
+  approximately 4 ms p95 during traversal. Same-generation reuse therefore
+  helps, but does not remove the cost when player movement changes tickets.
+- Decision: keep H3's immutable cache and continue to changed-source
+  incremental propagation only after separating active-level construction
+  from the rest of holder reconciliation.
+
+### 2026-07-24: Stable Visibility And Record Reuse Kept
+
+- Candidate commit: `c261efcf`.
+- SteamRT4 binary SHA-256:
+  `caaa03244ef75ad9d794b7f96243b384e6f4d486434e47a8963223e98af13700`.
+- Run:
+  `20260724T141728Z-c261efcfbf41-perf-matrix-attribution-3747451`.
+- Against its ticket-cache parent, native RD13 traversal improved from 49.3
+  to 71.4 FPS and frame p95 fell from 25.32 to 21.62 ms while traveling
+  319.9 blocks, publishing 493/493 feature/light results, and rebuilding
+  9,337 sections.
+- Prepared-record p95 fell from 4.55 to effectively 0.00 ms and terrain-cull
+  p95 fell from 5.03 to 3.08 ms. The traversal row recorded 889 cache hits in
+  2,318 lookups. Only 41 of 9,380 submitted compile sections became stale, so
+  compiler supersession is not the dominant remaining work.
+- Frozen-fluid stationary recorded 3,595 hits in 3,596 lookups, held 89.9
+  FPS, and reduced surface-encode p95 to 6.95 ms. Live stationary reached
+  85.9 FPS with 459 rebuilt sections; no-rebuild frames averaged 91.4 FPS
+  while rebuild frames averaged 70.9 FPS.
+- Native/half traversal remained 71.4/71.1 FPS with GPU terrain p50
+  2.68/2.26 ms, reinforcing H6: remaining pressure is still CPU-side.
+- Decision: accept and keep H2. H4's dominant redundant work was full
+  readiness/record/cull recomputation after bounded mesh changes, not stale
+  compiler results. Continue with incremental readiness publication, moving
+  spatial culling, and draw submission.
