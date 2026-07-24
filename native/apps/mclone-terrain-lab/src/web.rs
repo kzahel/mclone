@@ -11,8 +11,8 @@ use mclone_terrain_view::{
 };
 use mclone_worldgen::{
     levelgen::{
-        McloneOverworldDebugSample, McloneOverworldSampler, McloneOverworldSamplingTopology,
-        mclone_overworld_debug_sample_with_streams,
+        MCLONE_OVERWORLD_DECORATION_REVISION, McloneOverworldDebugSample, McloneOverworldSampler,
+        McloneOverworldSamplingTopology, mclone_overworld_debug_sample_with_streams,
     },
     terrain_preview::{
         TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS, TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION,
@@ -297,6 +297,9 @@ struct TerrainLabComparisonReport {
 #[serde(rename_all = "camelCase")]
 struct TerrainLabPointReceipt {
     field_revision: &'static str,
+    preview_schema_revision: &'static str,
+    gpu_evaluator_revision: &'static str,
+    decoration_revision: &'static str,
     world_x: i32,
     world_z: i32,
     chunk_x: i32,
@@ -311,13 +314,17 @@ struct TerrainLabPointReceipt {
     planned_stream_start: Option<TerrainLabCanonicalChunkCoordinate>,
     base_surface_y: i32,
     surface_y: i32,
+    carve_delta: i32,
     slope: f64,
+    mountain_strength: f64,
+    exposure: f64,
     continentalness: f64,
     relief: f64,
     ruggedness: f64,
     ridges: f64,
     mountain_detail: f64,
     temperature: f64,
+    adjusted_temperature: f64,
     moisture: f64,
     river_signed_distance: f64,
     river_distance: f64,
@@ -876,6 +883,9 @@ fn point_receipt(sample: McloneOverworldDebugSample) -> TerrainLabPointReceipt {
     let watercourse = terrain.watercourse;
     TerrainLabPointReceipt {
         field_revision: terrain_preview_field_revision(),
+        preview_schema_revision: TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION,
+        gpu_evaluator_revision: TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION,
+        decoration_revision: MCLONE_OVERWORLD_DECORATION_REVISION,
         world_x: sample.world_x,
         world_z: sample.world_z,
         chunk_x: sample.world_x.div_euclid(16),
@@ -895,13 +905,19 @@ fn point_receipt(sample: McloneOverworldDebugSample) -> TerrainLabPointReceipt {
         }),
         base_surface_y: terrain.base_surface_y,
         surface_y: terrain.surface_y,
+        carve_delta: terrain.base_surface_y - terrain.surface_y,
         slope: landform.slope,
+        mountain_strength: terrain.mountain_strength(),
+        exposure: landform.exposure(),
         continentalness: terrain.continentalness,
         relief: terrain.relief,
         ruggedness: terrain.ruggedness,
         ridges: terrain.ridges,
         mountain_detail: terrain.mountain_detail,
         temperature: terrain.climate.temperature,
+        adjusted_temperature: terrain
+            .climate
+            .altitude_adjusted_temperature(terrain.surface_y),
         moisture: terrain.climate.moisture,
         river_signed_distance: watercourse.signed_distance,
         river_distance: watercourse.distance,

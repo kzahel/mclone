@@ -275,6 +275,9 @@ test("reconstructs one planned stream for both LOD lanes", async ({
   await expect(shell).toHaveAttribute("data-inspected-z", "-1977");
   await expect(page.getByTestId("point-receipt")).toContainText("planned stream");
   await expect(page.getByTestId("point-receipt")).toContainText("147, -126");
+  await page.getByText("Production fields and revisions").click();
+  await expect(page.getByTestId("point-receipt")).toContainText("gpu-preview-a4");
+  await expect(page.getByTestId("point-receipt")).toContainText("Carve delta");
   await stage.screenshot({
     path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-structured-stream.png`,
   });

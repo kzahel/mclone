@@ -81,6 +81,23 @@
   font-size: 10px;
 }
 
+.pointReceiptDetails {
+  padding-top: 8px;
+  border-top: 1px solid var(--line);
+}
+
+.pointReceiptDetails summary {
+  color: var(--accent);
+  cursor: pointer;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.pointReceiptDetails[open] summary {
+  margin-bottom: 10px;
+}
+
 .inspectionMarker {
   position: absolute;
   z-index: 5;

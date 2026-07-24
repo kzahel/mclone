@@ -143,6 +143,9 @@ export interface TerrainLabComparisonReport {
 
 export interface TerrainLabPointReceipt {
   fieldRevision: string;
+  previewSchemaRevision: string;
+  gpuEvaluatorRevision: string;
+  decorationRevision: string;
   worldX: number;
   worldZ: number;
   chunkX: number;
@@ -157,13 +160,17 @@ export interface TerrainLabPointReceipt {
   plannedStreamStart: { chunkX: number; chunkZ: number } | null;
   baseSurfaceY: number;
   surfaceY: number;
+  carveDelta: number;
   slope: number;
+  mountainStrength: number;
+  exposure: number;
   continentalness: number;
   relief: number;
   ruggedness: number;
   ridges: number;
   mountainDetail: number;
   temperature: number;
+  adjustedTemperature: number;
   moisture: number;
   riverSignedDistance: number;
   riverDistance: number;

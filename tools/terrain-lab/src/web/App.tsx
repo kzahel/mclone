@@ -658,6 +658,45 @@ function PointReceipt({
           <dd>{receipt.temperature.toFixed(3)} / {receipt.moisture.toFixed(3)}</dd>
         </div>
       </dl>
+      <details className="pointReceiptDetails">
+        <summary>Production fields and revisions</summary>
+        <dl className="pointReceiptGrid">
+          <div><dt>Field</dt><dd>{shortRevision(receipt.fieldRevision)}</dd></div>
+          <div><dt>Preview</dt><dd>{shortRevision(receipt.previewSchemaRevision)}</dd></div>
+          <div><dt>GPU evaluator</dt><dd>{shortRevision(receipt.gpuEvaluatorRevision)}</dd></div>
+          <div><dt>Decoration</dt><dd>{shortRevision(receipt.decorationRevision)}</dd></div>
+          <div><dt>Carve delta</dt><dd>{receipt.carveDelta} blocks</dd></div>
+          <div><dt>Slope</dt><dd>{receipt.slope.toFixed(3)}</dd></div>
+          <div><dt>Mountain</dt><dd>{receipt.mountainStrength.toFixed(3)}</dd></div>
+          <div><dt>Exposure</dt><dd>{receipt.exposure.toFixed(3)}</dd></div>
+          <div><dt>Continental</dt><dd>{receipt.continentalness.toFixed(4)}</dd></div>
+          <div><dt>Relief</dt><dd>{receipt.relief.toFixed(4)}</dd></div>
+          <div><dt>Ruggedness</dt><dd>{receipt.ruggedness.toFixed(4)}</dd></div>
+          <div><dt>Ridges</dt><dd>{receipt.ridges.toFixed(4)}</dd></div>
+          <div><dt>Mountain detail</dt><dd>{receipt.mountainDetail.toFixed(4)}</dd></div>
+          <div>
+            <dt>Adjusted temp</dt>
+            <dd>{receipt.adjustedTemperature.toFixed(4)}</dd>
+          </div>
+          <div>
+            <dt>Wetland pool</dt>
+            <dd>{receipt.wetlandPoolInfluence.toFixed(4)}</dd>
+          </div>
+          <div>
+            <dt>Submerged outlet</dt>
+            <dd>{receipt.submergedOutletInfluence.toFixed(4)}</dd>
+          </div>
+          <div>
+            <dt>Bed / water Y</dt>
+            <dd>{receipt.bedY} / {receipt.waterSurfaceY}</dd>
+          </div>
+          <div>
+            <dt>Flow X / Z</dt>
+            <dd>{receipt.flowX.toFixed(3)} / {receipt.flowZ.toFixed(3)}</dd>
+          </div>
+          <div><dt>Grade</dt><dd>{receipt.grade.toFixed(4)}</dd></div>
+        </dl>
+      </details>
     </div>
   );
 }
