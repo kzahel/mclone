@@ -12,7 +12,8 @@ use mclone_render::chunk::{
     TexturedSectionDrawResources, TexturedSectionRenderOptions,
 };
 use mclone_terrain_view::{
-    CanonicalTerrainVisibility, TerrainPreviewCamera, canonical_terrain_presentation_blocks,
+    CanonicalTerrainVisibility, TerrainPreviewCamera, TerrainPreviewView,
+    canonical_terrain_presentation_blocks, terrain_preview_projection,
 };
 use serde::Serialize;
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
@@ -462,41 +463,27 @@ fn canonical_camera(
 ) -> Result<ChunkCamera, JsValue> {
     let center_x = center_x as f32;
     let center_z = center_z as f32;
-    let target_y = 54.0;
-    let aspect = width.max(1) as f32 / height.max(1) as f32;
-    let vertical_blocks = blocks_across.max(16) as f32 / aspect.max(0.2);
-    let fov = 58.0_f32.to_radians();
-    let (eye, up) = match view.trim().to_ascii_lowercase().as_str() {
-        "map" | "2d" => {
-            let distance = vertical_blocks * 0.5 / (fov * 0.5).tan() + 96.0;
-            ([center_x, target_y + distance, center_z], [0.0, 0.0, -1.0])
-        }
-        "3d" | "terrain" => {
-            let distance = blocks_across.max(96) as f32 * 0.9 + 64.0;
-            let horizontal = camera.pitch_radians.cos() * distance;
-            (
-                [
-                    center_x + camera.yaw_radians.cos() * horizontal,
-                    target_y + camera.pitch_radians.sin() * distance,
-                    center_z - camera.yaw_radians.sin() * horizontal,
-                ],
-                [0.0, 1.0, 0.0],
-            )
-        }
+    let preview_view = match view.trim().to_ascii_lowercase().as_str() {
+        "map" | "2d" => TerrainPreviewView::Map,
+        "3d" | "terrain" => TerrainPreviewView::ThreeDimensional,
         other => {
             return Err(js_error(format!(
                 "unsupported canonical terrain view {other:?}; expected map or 3d"
             )));
         }
     };
-    let distance = blocks_across.max(128) as f32 * 6.0 + 512.0;
+    let projection = terrain_preview_projection(blocks_across, preview_view, camera, width, height);
     Ok(ChunkCamera {
-        eye,
-        target: [center_x, target_y, center_z],
-        up,
-        fov_y_radians: fov,
-        z_near: 0.25,
-        z_far: distance,
+        eye: [
+            center_x + projection.eye_offset[0],
+            projection.target_y + projection.eye_offset[1],
+            center_z + projection.eye_offset[2],
+        ],
+        target: [center_x, projection.target_y, center_z],
+        up: projection.up,
+        fov_y_radians: projection.fov_y_radians,
+        z_near: projection.z_near,
+        z_far: projection.z_far,
     })
 }
 

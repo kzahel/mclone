@@ -2,7 +2,9 @@ struct TerrainPreviewParams {
     origin_spacing_cells: vec4<i32>,
     seed_source_view: vec4<u32>,
     layer_samples_size: vec4<u32>,
-    camera: vec4<f32>,
+    camera_eye_target: vec4<f32>,
+    camera_up_fov: vec4<f32>,
+    camera_projection: vec4<f32>,
     viewport_center_extent: vec4<i32>,
 };
 
@@ -204,42 +206,40 @@ fn vertex_main(
             view_width = width * 0.5;
         }
     }
-    let aspect = view_width / view_height;
+    let aspect = params.camera_projection.z;
     var clip_x = grid_x;
     var clip_y = -grid_z;
     var clip_z = 0.5;
     if params.seed_source_view.w == 1u {
-        let yaw = params.camera.x;
-        let pitch = params.camera.y;
-        let view_right = vec2<f32>(cos(yaw), -sin(yaw));
-        let view_depth = vec2<f32>(sin(yaw), cos(yaw));
-        let world_grid_z = f32(world_z - params.viewport_center_extent.y)
-            / (viewport_width * 0.5);
-        let horizontal = vec2<f32>(grid_x, world_grid_z);
-        let camera_x = dot(horizontal, view_right);
-        let camera_depth = dot(horizontal, view_depth);
-        let height_exaggeration = clamp(2048.0 / viewport_width, 0.08, 4.0);
-        let world_height = (sample.terrain.y - 63.0) / 72.0 * height_exaggeration;
-        clip_x = camera_x * 0.72;
-        clip_y = (world_height * cos(pitch) - camera_depth * sin(pitch)) * 0.78;
-        clip_z = clamp(
-            0.5 - camera_depth * cos(pitch) * 0.24 - world_height * sin(pitch) * 0.08,
-            0.02,
-            0.98,
+        let eye = params.camera_eye_target.xyz;
+        let camera_target = vec3<f32>(0.0, params.camera_eye_target.w, 0.0);
+        let forward = normalize(camera_target - eye);
+        let right = normalize(cross(forward, params.camera_up_fov.xyz));
+        let camera_up = normalize(cross(right, forward));
+        let position = vec3<f32>(
+            f32(world_x - params.viewport_center_extent.x),
+            sample.terrain.y,
+            f32(world_z - params.viewport_center_extent.y),
         );
-        if aspect > 1.0 {
-            clip_x = clip_x / aspect;
-        } else {
-            clip_y = clip_y * aspect;
-        }
+        let from_eye = position - eye;
+        let depth = max(dot(from_eye, forward), params.camera_projection.x);
+        let half_height = depth * tan(params.camera_up_fov.w * 0.5);
+        clip_x = dot(from_eye, right) / max(half_height * aspect, 0.001);
+        clip_y = dot(from_eye, camera_up) / max(half_height, 0.001);
+        clip_z = clamp(
+            (depth - params.camera_projection.x)
+                / (params.camera_projection.y - params.camera_projection.x),
+            0.0,
+            1.0,
+        );
     }
     if compare {
         if stacked_compare {
             let panel_center = select(0.5, -0.5, instance_index == 1u);
-            clip_y = clip_y * 0.46 + panel_center;
+            clip_y = clip_y * 0.5 + panel_center;
         } else {
             let panel_center = select(-0.5, 0.5, instance_index == 1u);
-            clip_x = clip_x * 0.46 + panel_center;
+            clip_x = clip_x * 0.5 + panel_center;
         }
     }
 

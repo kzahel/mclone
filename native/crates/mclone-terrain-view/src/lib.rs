@@ -35,7 +35,7 @@ pub const TERRAIN_PREVIEW_COMPUTE_WGSL_TEMPLATE: &str =
     include_str!("shaders/terrain_preview_compute.wgsl");
 pub const TERRAIN_PREVIEW_RENDER_WGSL: &str = include_str!("shaders/terrain_preview_render.wgsl");
 
-const TERRAIN_PREVIEW_UNIFORM_BYTES: u64 = 80;
+const TERRAIN_PREVIEW_UNIFORM_BYTES: u64 = 112;
 const TERRAIN_PREVIEW_SAMPLE_BYTES: u64 =
     (TERRAIN_PREVIEW_SAMPLE_FLOATS * std::mem::size_of::<f32>()) as u64;
 const TERRAIN_PREVIEW_WORKGROUP_AXIS: u32 = 8;
@@ -153,6 +153,58 @@ impl Default for TerrainPreviewCamera {
             yaw_radians: std::f32::consts::FRAC_PI_4,
             pitch_radians: 0.48,
         }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TerrainPreviewProjection {
+    pub eye_offset: [f32; 3],
+    pub target_y: f32,
+    pub up: [f32; 3],
+    pub fov_y_radians: f32,
+    pub z_near: f32,
+    pub z_far: f32,
+    pub aspect: f32,
+}
+
+pub fn terrain_preview_projection(
+    blocks_across: u32,
+    view: TerrainPreviewView,
+    camera: TerrainPreviewCamera,
+    panel_width: u32,
+    panel_height: u32,
+) -> TerrainPreviewProjection {
+    let blocks_across = blocks_across.max(16) as f32;
+    let aspect = panel_width.max(1) as f32 / panel_height.max(1) as f32;
+    let target_y = 54.0;
+    let fov_y_radians = 58.0_f32.to_radians();
+    let (eye_offset, up) = match view {
+        TerrainPreviewView::Map => {
+            let vertical_blocks = blocks_across / aspect.max(0.2);
+            let distance = vertical_blocks * 0.5 / (fov_y_radians * 0.5).tan() + 96.0;
+            ([0.0, distance, 0.0], [0.0, 0.0, -1.0])
+        }
+        TerrainPreviewView::ThreeDimensional => {
+            let distance = blocks_across.max(96.0) * 0.9 + 64.0;
+            let horizontal = camera.pitch_radians.cos() * distance;
+            (
+                [
+                    camera.yaw_radians.cos() * horizontal,
+                    camera.pitch_radians.sin() * distance,
+                    -camera.yaw_radians.sin() * horizontal,
+                ],
+                [0.0, 1.0, 0.0],
+            )
+        }
+    };
+    TerrainPreviewProjection {
+        eye_offset,
+        target_y,
+        up,
+        fov_y_radians,
+        z_near: 0.25,
+        z_far: blocks_across.max(128.0) * 6.0 + 512.0,
+        aspect,
     }
 }
 
@@ -775,11 +827,35 @@ fn viewport_uniform_bytes_for_request(
         width.max(1),
         height.max(1),
     ];
+    let (panel_width, panel_height) = terrain_preview_panel_size(width, height, options.source);
+    let projection = terrain_preview_projection(
+        viewport_width_blocks,
+        options.view,
+        camera,
+        panel_width,
+        panel_height,
+    );
     let mut bytes = Vec::with_capacity(TERRAIN_PREVIEW_UNIFORM_BYTES as usize);
     for word in words {
         bytes.extend_from_slice(&word.to_le_bytes());
     }
-    for value in [camera.yaw_radians, camera.pitch_radians, 0.0, 0.0] {
+    for value in [
+        projection.eye_offset[0],
+        projection.eye_offset[1],
+        projection.eye_offset[2],
+        projection.target_y,
+    ] {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    for value in [
+        projection.up[0],
+        projection.up[1],
+        projection.up[2],
+        projection.fov_y_radians,
+    ] {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    for value in [projection.z_near, projection.z_far, projection.aspect, 0.0] {
         bytes.extend_from_slice(&value.to_le_bytes());
     }
     for value in [
@@ -791,6 +867,17 @@ fn viewport_uniform_bytes_for_request(
         bytes.extend_from_slice(&value.to_le_bytes());
     }
     bytes
+}
+
+fn terrain_preview_panel_size(width: u32, height: u32, source: TerrainPreviewSource) -> (u32, u32) {
+    if source != TerrainPreviewSource::Split {
+        return (width.max(1), height.max(1));
+    }
+    if width <= height {
+        (width.max(1), (height / 2).max(1))
+    } else {
+        ((width / 2).max(1), height.max(1))
+    }
 }
 
 fn parse_samples(bytes: &[u8]) -> Result<Vec<TerrainPreviewSample>, String> {
@@ -869,13 +956,29 @@ mod tests {
         );
         assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 16);
         assert_eq!(u32::from_le_bytes(bytes[36..40].try_into().unwrap()), 65);
-        assert_eq!(f32::from_le_bytes(bytes[48..52].try_into().unwrap()), -0.75);
-        assert_eq!(f32::from_le_bytes(bytes[52..56].try_into().unwrap()), 0.65);
+        let projection = terrain_preview_projection(
+            1_024,
+            TerrainPreviewView::ThreeDimensional,
+            camera,
+            1_280,
+            720,
+        );
         assert_eq!(
-            i32::from_le_bytes(bytes[64..68].try_into().unwrap()),
+            f32::from_le_bytes(bytes[48..52].try_into().unwrap()),
+            projection.eye_offset[0]
+        );
+        assert_eq!(
+            f32::from_le_bytes(bytes[60..64].try_into().unwrap()),
+            projection.target_y
+        );
+        assert_eq!(
+            i32::from_le_bytes(bytes[96..100].try_into().unwrap()),
             reference.request().request().center_x
         );
-        assert_eq!(i32::from_le_bytes(bytes[72..76].try_into().unwrap()), 1_024);
+        assert_eq!(
+            i32::from_le_bytes(bytes[104..108].try_into().unwrap()),
+            1_024
+        );
     }
 
     #[test]
@@ -921,8 +1024,7 @@ mod tests {
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("@builtin(instance_index)"));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("fn reference_base_sample"));
         assert!(
-            TERRAIN_PREVIEW_RENDER_WGSL
-                .contains("clip_y = (world_height * cos(pitch) - camera_depth * sin(pitch))")
+            TERRAIN_PREVIEW_RENDER_WGSL.contains("let forward = normalize(camera_target - eye)")
         );
         assert!(
             TERRAIN_PREVIEW_RENDER_WGSL
