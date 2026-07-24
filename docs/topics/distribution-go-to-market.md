@@ -29,8 +29,8 @@ for a public Mclone release:
 - channel priority without artificial exclusivity or steering;
 - target audiences, positioning, launch sequence, acquisition loops, and
   success measures;
-- the competitive landscape, especially the Minecraft access gaps on Steam
-  Deck and standalone Quest; and
+- the commercially relevant competitive snapshot, especially the Minecraft
+  access gaps on Steam Deck and standalone Quest; and
 - commercial, policy, brand, and product risks that must be settled before a
   public offer is announced.
 
@@ -46,7 +46,11 @@ It does **not** own:
   lives in [`asset-pack-profiles.md`](asset-pack-profiles.md);
 - the structure catalogue's separate product and acquisition-loop proposal;
   that lives in
-  [`structure-catalogue-product.md`](structure-catalogue-product.md); or
+  [`structure-catalogue-product.md`](structure-catalogue-product.md);
+- detailed gameplay, product-design, mod-ecosystem, and inspiration profiles;
+  those live in
+  [`voxel-sandbox-competitive-landscape.md`](voxel-sandbox-competitive-landscape.md);
+  or
 - legal, tax, accounting, age-rating, privacy, or storefront approval itself.
 
 ## Strategic Thesis
@@ -240,6 +244,8 @@ actually available at submission time rather than assumed now.
 
 This snapshot was checked on 2026-07-22. It should be rechecked before pricing,
 store-page copy, or launch sequencing is approved.
+The broader design-oriented viewing guide and inspiration ledger live in
+[`voxel-sandbox-competitive-landscape.md`](voxel-sandbox-competitive-landscape.md).
 
 | Product or route | Current strength | Gap or lesson for Mclone |
 |---|---|---|
@@ -251,7 +257,7 @@ store-page copy, or launch sequencing is approved.
 | [cyubeVR](https://store.steampowered.com/app/619500/cyubeVR/) | Established premium PC-VR voxel sandbox emphasizing visual quality and hands-on VR crafting/building interactions. | It is the quality benchmark for VR-native interaction and presentation, even where it is not a standalone-Quest answer. Mclone cannot treat tracked controls as a gamepad remap. |
 | [Hytale](https://hytale.com/news/2026/1/2026-01-13-hytale-is-finally-here/) | High-mindshare voxel RPG/sandbox, released in paid PC Early Access through its own account, store, and launcher in January 2026. | Direct paid distribution can support a large launch, but Hytale raises PC expectations for original art direction, creator tools, servers, and visible momentum. Mclone still benefits from Steam and XR reach that Hytale's current direct PC offer does not provide. |
 | [Vintage Story](https://vintagestory.info/en/play/) | Deep survival/crafting proposition with paid direct distribution and no Steam release. | Demonstrates durable demand for a focused direct voxel product, while also illustrating the discovery and customer-preference cost of staying off Steam. |
-| [Luanti](https://www.luanti.org/en/) | Free, open-source voxel creation engine/platform across desktop and Android with mods, multiple games, and multiplayer. | Free access and extensibility already exist. Mclone's premium case must be a cohesive authored game, presentation, onboarding, and multi-target experience rather than engine capability alone. |
+| [Luanti](https://www.luanti.org/en/) and other open voxel projects | Free, open-source voxel engines or games already provide mods, forks, self-hosting, multiple games, and multiplayer. | “Open source” alone is not unique. A fully open first-party client/server/tool/content stack across native, web, Android, and XR could still be a sharp differentiator when paired with a cohesive authored game, excellent onboarding, official tested binaries, and sustainable support. |
 
 Minecraft's own 1.21.40 changelog records the VR/MR sunset:
 [Minecraft Bedrock 1.21.40](https://www.minecraft.net/en-us/article/minecraft-1-21-40-bedrock-changelog).
@@ -638,6 +644,10 @@ design before they become marketing features.
   chargebacks, invoices, and regional availability?
 - Is the public dedicated server always free, and which commercial hosted
   service, if any, is deliberately separate from it?
+- Does Mclone adopt a genuinely open first-party stack, and if so which
+  standard code/content licenses, trademark boundary, contribution model,
+  proprietary platform exceptions, and official-binary value proposition make
+  that promise exact?
 - What mod, UGC, chat, creator-marketplace, or shared-world promises are in the
   first public release versus explicitly later?
 
@@ -661,6 +671,10 @@ Before settling price or launch order:
    refunds, chargebacks, signing, CDN, and entitlement operations.
 7. Test two positioning cuts—broad cross-platform survival versus standalone
    Quest/Deck access—against wishlist, trial, and second-session behavior.
+8. Test the proposed open-stack position against Luanti, Terasology, Veloren,
+   Vintage Story, Hytale, and exemplary closed mod ecosystems. Obtain legal
+   review of code, content, dependency, contribution, and trademark licenses
+   before using “fully open source” in public copy.
 
 ## Related Documents
 
@@ -678,5 +692,9 @@ Before settling price or launch order:
   packs and provenance boundary.
 - [`structure-catalogue-product.md`](structure-catalogue-product.md) —
   catalogue-led acquisition and product-economy exploration.
+- [`voxel-sandbox-competitive-landscape.md`](voxel-sandbox-competitive-landscape.md)
+  — design-oriented competitor profiles, gameplay viewing guide, Minecraft
+  mod substitutes, source/open-content/mod posture, and the cross-product
+  inspiration ledger.
 - [`../native-web.md`](../native-web.md) — full web-client build, smoke, and
   deployment mechanics.

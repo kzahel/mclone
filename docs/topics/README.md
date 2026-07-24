@@ -172,6 +172,12 @@ series implements the same concern, normally reuse the document slug in its
   web as a first-class no-install client and acquisition surface, Quest as a
   differentiation wedge, competitive landscape, positioning, launch
   sequencing, metrics, and unresolved store-policy decisions.
+- [`voxel-sandbox-competitive-landscape.md`](voxel-sandbox-competitive-landscape.md):
+  dated product-research and viewing guide across direct voxel sandboxes,
+  survival/RPG/colony/automation/social/XR specialists, Minecraft mods and
+  access routes, adjacent retention references, source/open-content/mod
+  posture, and a Mclone inspiration ledger focused on each product's
+  impressive or distinctive aspects.
 - [`game-title-and-brand-identity.md`](game-title-and-brand-identity.md):
   current public-title research and decision record — the repo-derived
   living-landscape plus folded-world naming brief, `Wilderfold` recommendation,
