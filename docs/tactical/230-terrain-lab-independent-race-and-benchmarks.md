@@ -1,7 +1,7 @@
 # Terrain Lab Independent Race And Benchmarks
 
-Status: implementation and local headed-WebGPU validation complete 2026-07-24;
-hosted deployment receipt pending.
+Status: complete 2026-07-24, including local and hosted desktop/mobile
+headed-WebGPU validation.
 
 Topic: `gpu-procedural-terrain`
 
@@ -191,3 +191,49 @@ Both settled with empty queues, effectively zero base mean/P95 height error,
 100% ocean agreement, and matching inspected CPU/GPU terrain. These are
 end-to-end browser results for this fixed workload, not portable GPU execution
 timings or a general promise of the same ratio on every adapter.
+
+## Hosted Validation Receipt
+
+A targeted Terrain Lab upload avoided publishing unrelated dirty applications.
+The existing Worker version
+`5575a252-3d41-48f9-b308-fa42f65220f7` was unchanged. The production route
+serves:
+
+- JavaScript `index-BcjjqS2k.js`;
+- stylesheet `index-Jbtyl1cl.css`; and
+- Wasm `mclone_terrain_lab_bg-BZKifX35.wasm`.
+
+The HTML switched only after those immutable objects were available. Direct
+requests confirmed the expected content types and immutable one-year asset
+cache policy.
+
+Dedicated hosted headed-Wayland BrowserWebGPU smokes then exercised the
+desktop and Pixel 7-sized layouts at
+`https://mclone.kzahel.com/terrain/`. Both observed:
+
+```text
+neither target ready -> GPU target ready -> both targets ready
+```
+
+The hosted desktop fixed race selected effective `1:8`, with 35 visible
+target tiles and 51 total nested-level tiles:
+
+- GPU target plus validation readback: 278.2 ms;
+- CPU target publication: 2,187.3 ms;
+- GPU end-to-end target rate: 774.5 K samples/s; and
+- CPU end-to-end target rate: 98.5 K samples/s.
+
+The hosted phone fixed race selected effective `1:4`, with 81 visible target
+tiles and 119 total nested-level tiles:
+
+- GPU target plus validation readback: 686.4 ms;
+- CPU target publication: 1,918.9 ms;
+- GPU end-to-end target rate: 732.5 K samples/s; and
+- CPU end-to-end target rate: 262.0 K samples/s.
+
+Both ran with cache disabled, recorded zero cache hits, drained both queues,
+retained effectively zero base mean/P95 error, and had 100% ocean agreement.
+The inspected final desktop side-by-side and phone stacked captures showed
+the same coordinate-locked geography in both panels. As above, GPU target
+time ends at validation readback; it is not a pure timestamp-query execution
+duration.

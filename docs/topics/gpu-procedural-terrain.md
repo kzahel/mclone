@@ -3,8 +3,8 @@
 Topic: `gpu-procedural-terrain`
 
 Status: independent CPU/GPU Terrain Lab publication, cache controls, and cold
-benchmark implementation completed local desktop/mobile headed-WebGPU
-validation 2026-07-24; Tactical 230 hosted receipt is pending. Tactical
+benchmark implementation completed local and hosted desktop/mobile
+headed-WebGPU validation 2026-07-24. Tactical
 [`227-web-terrain-lab-vertical-slice.md`](../tactical/227-web-terrain-lab-vertical-slice.md)
 landed the deployable, web-first Terrain Lab, shared production-reference grid,
 and one shared Rust/WGPU resident tile. Tactical
@@ -1061,6 +1061,16 @@ target-plus-readback completed in 287.9 ms versus 2,595.5 ms for CPU target
 publication; phone measured 665.6 ms versus 1,881.3 ms. Both retained
 effectively zero base mean/P95 error and 100% ocean agreement. These are
 end-to-end fixed-workload timings, not pure GPU execution measurements.
+
+The targeted production upload changed only Terrain Lab. The existing Worker
+version `5575a252-3d41-48f9-b308-fa42f65220f7` now serves JavaScript
+`index-BcjjqS2k.js`, stylesheet `index-Jbtyl1cl.css`, and Wasm
+`mclone_terrain_lab_bg-BZKifX35.wasm`. Hosted headed-Wayland BrowserWebGPU
+desktop and phone smokes reproduced `neither -> GPU only -> both` with cache
+off and zero hits. The desktop fixed race measured GPU
+target-plus-readback at 278.2 ms versus 2,187.3 ms for CPU target publication;
+the phone measured 686.4 ms versus 1,918.9 ms. Inspected side-by-side and
+stacked captures showed matching coordinate-locked geography.
 
 This proves useful navigation, bounded resident generation, and progressive
 point-sampled detail. It does not yet prove a truthful far summary. The 65.5
