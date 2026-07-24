@@ -8,7 +8,10 @@ use std::fmt::Write;
 use std::num::NonZeroU64;
 use std::sync::mpsc;
 
-use mclone_worldgen::levelgen::{MCLONE_OVERWORLD_LARGE_FIELD_SPEC, McloneOverworldLargeFieldBand};
+use mclone_worldgen::levelgen::{
+    MCLONE_OVERWORLD_LARGE_FIELD_SPEC, MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldLargeFieldBand,
+    McloneOverworldSampler,
+};
 use mclone_worldgen::terrain_preview::{
     TERRAIN_PREVIEW_SAMPLE_FLOATS, TerrainPreviewComparison, TerrainPreviewReferenceGrid,
     TerrainPreviewSample, ValidatedTerrainPreviewRequest,
@@ -180,25 +183,51 @@ pub struct TerrainPreviewProjection {
     pub aspect: f32,
 }
 
+pub fn terrain_preview_focus_y(seed: i64, world_x: i32, world_z: i32) -> f32 {
+    let terrain = McloneOverworldSampler::new(seed).sample(world_x, world_z);
+    let display_y =
+        if terrain.watercourse.is_water() || terrain.surface_y < MCLONE_OVERWORLD_SEA_LEVEL {
+            terrain.surface_y.max(terrain.watercourse.water_surface_y)
+        } else {
+            terrain.surface_y
+        };
+    display_y as f32 + 1.0
+}
+
 pub fn terrain_preview_projection(
     blocks_across: u32,
     view: TerrainPreviewView,
     camera: TerrainPreviewCamera,
     panel_width: u32,
     panel_height: u32,
+    target_y: f32,
 ) -> TerrainPreviewProjection {
-    let blocks_across = blocks_across.max(16) as f32;
+    const OVERVIEW_FOV_Y: f32 = 58.0_f32.to_radians();
+    const MAP_CAMERA_CLEARANCE: f32 = 192.0;
+    const CLOSE_3D_THRESHOLD_BLOCKS: f32 = 96.0;
+
+    let blocks_across = blocks_across.max(1) as f32;
     let aspect = panel_width.max(1) as f32 / panel_height.max(1) as f32;
-    let target_y = 54.0;
-    let fov_y_radians = 58.0_f32.to_radians();
-    let (eye_offset, up) = match view {
+    let (eye_offset, up, fov_y_radians) = match view {
         TerrainPreviewView::Map => {
             let vertical_blocks = blocks_across / aspect.max(0.2);
-            let distance = vertical_blocks * 0.5 / (fov_y_radians * 0.5).tan() + 96.0;
-            ([0.0, distance, 0.0], [0.0, 0.0, -1.0])
+            let half_height = vertical_blocks * 0.5;
+            let distance = half_height / (OVERVIEW_FOV_Y * 0.5).tan() + MAP_CAMERA_CLEARANCE;
+            let fov_y_radians = 2.0 * (half_height / distance).atan();
+            ([0.0, distance, 0.0], [0.0, 0.0, -1.0], fov_y_radians)
         }
         TerrainPreviewView::ThreeDimensional => {
-            let distance = blocks_across.max(96.0) * 0.9 + 64.0;
+            let overview_distance = CLOSE_3D_THRESHOLD_BLOCKS * 0.9 + 64.0;
+            let (distance, fov_y_radians) = if blocks_across < CLOSE_3D_THRESHOLD_BLOCKS {
+                (
+                    overview_distance,
+                    2.0 * ((OVERVIEW_FOV_Y * 0.5).tan() * blocks_across
+                        / CLOSE_3D_THRESHOLD_BLOCKS)
+                        .atan(),
+                )
+            } else {
+                (blocks_across * 0.9 + 64.0, OVERVIEW_FOV_Y)
+            };
             let horizontal = camera.pitch_radians.cos() * distance;
             (
                 [
@@ -207,6 +236,7 @@ pub fn terrain_preview_projection(
                     -camera.yaw_radians.sin() * horizontal,
                 ],
                 [0.0, 1.0, 0.0],
+                fov_y_radians,
             )
         }
     };
@@ -215,8 +245,10 @@ pub fn terrain_preview_projection(
         target_y,
         up,
         fov_y_radians,
-        z_near: 0.25,
-        z_far: blocks_across.max(128.0) * 6.0 + 512.0,
+        z_near: 0.1,
+        z_far: eye_offset[0].hypot(eye_offset[1]).hypot(eye_offset[2])
+            + blocks_across.max(128.0) * 6.0
+            + 512.0,
         aspect,
     }
 }
@@ -799,6 +831,11 @@ fn viewport_uniform_bytes(
     viewport_width_blocks: u32,
     viewport_height_blocks: u32,
 ) -> Vec<u8> {
+    let focus_y = terrain_preview_focus_y(
+        reference.request().request().seed,
+        viewport_center_x,
+        viewport_center_z,
+    );
     viewport_uniform_bytes_for_request(
         reference.request(),
         width,
@@ -809,6 +846,7 @@ fn viewport_uniform_bytes(
         viewport_center_z,
         viewport_width_blocks,
         viewport_height_blocks,
+        focus_y,
     )
 }
 
@@ -823,6 +861,7 @@ fn viewport_uniform_bytes_for_request(
     viewport_center_z: i32,
     viewport_width_blocks: u32,
     viewport_height_blocks: u32,
+    focus_y: f32,
 ) -> Vec<u8> {
     let source = request.request();
     let seed = source.seed as u64;
@@ -847,6 +886,7 @@ fn viewport_uniform_bytes_for_request(
         camera,
         panel_width,
         panel_height,
+        focus_y,
     );
     let mut bytes = Vec::with_capacity(TERRAIN_PREVIEW_UNIFORM_BYTES as usize);
     for word in words {
@@ -949,6 +989,48 @@ mod tests {
     }
 
     #[test]
+    fn close_projection_frames_one_block_at_the_local_surface() {
+        let camera = TerrainPreviewCamera::default();
+        let focus_y = terrain_preview_focus_y(-98_765, -304, 336);
+        let map = terrain_preview_projection(1, TerrainPreviewView::Map, camera, 800, 400, focus_y);
+        let projected_map_height = map.eye_offset[1] * (map.fov_y_radians * 0.5).tan() * 2.0;
+        assert!((projected_map_height - 0.5).abs() < 1.0e-5);
+        assert_eq!(map.target_y, focus_y);
+        assert!(map.fov_y_radians < 1.0_f32.to_radians());
+        assert!(map.z_near > 0.0 && map.z_far > map.z_near);
+
+        let close = terrain_preview_projection(
+            1,
+            TerrainPreviewView::ThreeDimensional,
+            camera,
+            800,
+            400,
+            focus_y,
+        );
+        let threshold = terrain_preview_projection(
+            96,
+            TerrainPreviewView::ThreeDimensional,
+            camera,
+            800,
+            400,
+            focus_y,
+        );
+        let overview = terrain_preview_projection(
+            512,
+            TerrainPreviewView::ThreeDimensional,
+            camera,
+            800,
+            400,
+            focus_y,
+        );
+        assert_eq!(close.eye_offset, threshold.eye_offset);
+        assert!(close.fov_y_radians < 1.0_f32.to_radians());
+        assert!((threshold.fov_y_radians - 58.0_f32.to_radians()).abs() < f32::EPSILON);
+        assert!((overview.fov_y_radians - 58.0_f32.to_radians()).abs() < f32::EPSILON);
+        assert!(overview.eye_offset[1] > threshold.eye_offset[1]);
+    }
+
+    #[test]
     fn uniform_packing_matches_wgsl_layout() {
         let reference =
             TerrainPreviewReferenceGrid::compile(TerrainPreviewRequest::new(12_345, -64, 96, 16))
@@ -972,12 +1054,18 @@ mod tests {
         );
         assert_eq!(u32::from_le_bytes(bytes[8..12].try_into().unwrap()), 16);
         assert_eq!(u32::from_le_bytes(bytes[36..40].try_into().unwrap()), 65);
+        let focus_y = terrain_preview_focus_y(
+            reference.request().request().seed,
+            reference.request().request().center_x,
+            reference.request().request().center_z,
+        );
         let projection = terrain_preview_projection(
             1_024,
             TerrainPreviewView::ThreeDimensional,
             camera,
             1_280,
             720,
+            focus_y,
         );
         assert_eq!(
             f32::from_le_bytes(bytes[48..52].try_into().unwrap()),
@@ -1063,6 +1151,11 @@ mod tests {
         assert!(
             TERRAIN_PREVIEW_RENDER_WGSL.contains("let forward = normalize(camera_target - eye)")
         );
+        assert!(
+            TERRAIN_PREVIEW_RENDER_WGSL
+                .contains("params.camera_eye_target.y + params.camera_eye_target.w")
+        );
+        assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("sample.terrain.y + 1.0"));
         assert!(
             TERRAIN_PREVIEW_RENDER_WGSL
                 .contains("let stacked_compare = compare && width <= height")

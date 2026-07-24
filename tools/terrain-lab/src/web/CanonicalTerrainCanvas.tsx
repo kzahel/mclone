@@ -571,7 +571,9 @@ export function CanonicalTerrainCanvas({
         <span className="canvasBadge primary">Canonical · {state.canonicalStage}</span>
         <span className="canvasBadge">
           {latestReport
-            ? `${latestReport.publishedChunks}/${latestReport.requestedChunks} chunks`
+            ? `${latestReport.publishedChunks}/${latestReport.requestedChunks} ${
+                latestReport.requestedChunks === 1 ? "chunk" : "chunks"
+              }`
             : "loading atlas"}
         </span>
         <span className="canvasBadge">
@@ -650,5 +652,5 @@ function errorMessage(error: unknown): string {
 function formatFootprint(blocks: number): string {
   return blocks >= 1_000
     ? `${(blocks / 1_000).toLocaleString(undefined, { maximumFractionDigits: 1 })} km`
-    : `${blocks.toLocaleString()} blocks`;
+    : `${blocks.toLocaleString()} ${blocks === 1 ? "block" : "blocks"}`;
 }

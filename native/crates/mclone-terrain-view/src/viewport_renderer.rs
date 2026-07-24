@@ -12,7 +12,7 @@ use super::{
     TERRAIN_PREVIEW_DEPTH_FORMAT, TERRAIN_PREVIEW_RENDER_WGSL, TERRAIN_PREVIEW_SAMPLE_BYTES,
     TERRAIN_PREVIEW_UNIFORM_BYTES, TERRAIN_PREVIEW_WORKGROUP_AXIS, TerrainPreviewCamera,
     TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource, TerrainViewportPlan,
-    TerrainViewportTileId, parse_samples, terrain_preview_compute_wgsl,
+    TerrainViewportTileId, parse_samples, terrain_preview_compute_wgsl, terrain_preview_focus_y,
     viewport_uniform_bytes_for_request,
 };
 
@@ -698,6 +698,11 @@ impl TerrainViewportRenderer {
             .ok_or("terrain viewport renderer has no active plan")?;
         let cpu_required = source_needs_cpu(options, plan.request.content_stage);
         let gpu_required = source_needs_gpu(options);
+        let focus_y = terrain_preview_focus_y(
+            plan.request.seed,
+            plan.request.center_x,
+            plan.request.center_z,
+        );
         let mut encoded_readbacks = Vec::new();
         let mut gpu_dispatched_tiles = 0_u32;
 
@@ -737,6 +742,7 @@ impl TerrainViewportRenderer {
                         plan.request.center_z,
                         plan.view_width_blocks,
                         plan.view_height_blocks,
+                        focus_y,
                     ),
                 );
                 {
@@ -856,6 +862,7 @@ impl TerrainViewportRenderer {
                     plan.request.center_z,
                     plan.view_width_blocks,
                     plan.view_height_blocks,
+                    focus_y,
                 ),
             );
             self.use_clock = self.use_clock.saturating_add(1);

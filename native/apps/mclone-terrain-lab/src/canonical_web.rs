@@ -13,7 +13,7 @@ use mclone_render::chunk::{
 };
 use mclone_terrain_view::{
     CanonicalTerrainVisibility, TerrainPreviewCamera, TerrainPreviewView,
-    canonical_terrain_presentation_blocks, terrain_preview_projection,
+    canonical_terrain_presentation_blocks, terrain_preview_focus_y, terrain_preview_projection,
 };
 use serde::Serialize;
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
@@ -195,6 +195,7 @@ impl CanonicalTerrainLab {
         camera_pitch: f32,
     ) -> Result<String, JsValue> {
         let camera = TerrainPreviewCamera::new(camera_yaw, camera_pitch).map_err(js_error)?;
+        let focus_y = terrain_preview_focus_y(self.seed, center_x, center_z);
         let render_camera = canonical_camera(
             center_x,
             center_z,
@@ -203,6 +204,7 @@ impl CanonicalTerrainLab {
             camera,
             self.width,
             self.height,
+            focus_y,
         )?;
         let frame = self.acquire_frame()?;
         let color_view = frame
@@ -461,9 +463,13 @@ fn canonical_camera(
     camera: TerrainPreviewCamera,
     width: u32,
     height: u32,
+    focus_y: f32,
 ) -> Result<ChunkCamera, JsValue> {
-    let center_x = center_x as f32;
-    let center_z = center_z as f32;
+    // Integer Terrain Lab centers identify block columns. Aim exact geometry
+    // at that column's center so a one-block viewport frames one complete top
+    // face rather than four quarters around a block boundary.
+    let center_x = center_x as f32 + 0.5;
+    let center_z = center_z as f32 + 0.5;
     let preview_view = match view.trim().to_ascii_lowercase().as_str() {
         "map" | "2d" => TerrainPreviewView::Map,
         "3d" | "terrain" => TerrainPreviewView::ThreeDimensional,
@@ -473,7 +479,8 @@ fn canonical_camera(
             )));
         }
     };
-    let projection = terrain_preview_projection(blocks_across, preview_view, camera, width, height);
+    let projection =
+        terrain_preview_projection(blocks_across, preview_view, camera, width, height, focus_y);
     Ok(ChunkCamera {
         eye: [
             center_x + projection.eye_offset[0],

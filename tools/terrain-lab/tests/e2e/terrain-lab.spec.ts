@@ -296,6 +296,58 @@ test("reconstructs one planned stream for both LOD lanes", async ({
   expect(pageErrors).toEqual([]);
 });
 
+test("zooms shared and canonical terrain to one-block texture detail", async ({
+  page,
+}, testInfo) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      pageErrors.push(message.text());
+    }
+  });
+  await page.goto(
+    "/terrain/?seed=-98765&x=-304&z=336&blocks=4&detail=auto"
+      + "&panes=canonical%2Ccpu%2Cgpu&canonical=final&radius=0"
+      + "&water=1&vegetation=1&stage=hydrology&view=map&layer=terrain",
+  );
+  await waitForCurrentComparison(page);
+  await waitForCanonical(page, 1);
+  const shell = page.locator(".appShell");
+
+  await page.getByRole("button", { name: "Zoom in" }).click();
+  await expect(page).toHaveURL(/blocks=2/u);
+  await page.getByRole("button", { name: "Zoom in" }).click();
+  await expect(page).toHaveURL(/blocks=1/u);
+  await waitForCurrentComparison(page);
+  await waitForCanonical(page, 1);
+  await expect(shell).toHaveAttribute("data-effective-spacing", "1");
+  await expect(shell).toHaveAttribute("data-cpu-target-ready", "true");
+  await expect(shell).toHaveAttribute("data-gpu-target-ready", "true");
+  expect(Number(await shell.getAttribute("data-visible-tiles"))).toBeLessThanOrEqual(4);
+
+  await page.getByRole("button", { name: "Zoom in" }).click();
+  await expect(page).toHaveURL(/blocks=1/u);
+  await page.getByTestId("pane-workspace").screenshot({
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-block-workspace.png`,
+  });
+  await page.getByRole("button", { name: "CPU LOD", exact: true }).click();
+  await page.getByRole("button", { name: "GPU LOD", exact: true }).click();
+  await expect(shell).toHaveAttribute("data-panes", "canonical");
+  const canonicalStage = page.getByTestId("canonical-terrain-stage");
+  await canonicalStage.screenshot({
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-canonical-block-map.png`,
+  });
+
+  await page.getByRole("button", { name: "3D terrain", exact: true }).click();
+  await expect(page).toHaveURL(/view=3d/u);
+  await settlePaint(page);
+  await canonicalStage.screenshot({
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-canonical-block-3d.png`,
+  });
+  expect(pageErrors).toEqual([]);
+});
+
 test("two-finger gestures pan and zoom procedural and real terrain", async ({
   page,
 }, testInfo) => {

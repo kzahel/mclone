@@ -701,7 +701,9 @@ export function TerrainCanvas({
         </span>
         <span className="canvasBadge">
           {latestReport && latestReport.publishedSpacing > 0
-            ? `${latestReport.publishedTileCount} tiles · 1:${latestReport.publishedSpacing}`
+            ? `${latestReport.publishedTileCount} ${
+                latestReport.publishedTileCount === 1 ? "tile" : "tiles"
+              } · 1:${latestReport.publishedSpacing}`
             : "planning tiles"}
         </span>
         <span className="canvasBadge">{formatFootprint(footprintBlocks(state))} across</span>
@@ -824,5 +826,5 @@ function formatFootprint(blocks: number): string {
   if (blocks >= 1_000) {
     return `${(blocks / 1_000).toLocaleString(undefined, { maximumFractionDigits: 1 })} km`;
   }
-  return `${blocks.toLocaleString()} blocks`;
+  return `${blocks.toLocaleString()} ${blocks === 1 ? "block" : "blocks"}`;
 }

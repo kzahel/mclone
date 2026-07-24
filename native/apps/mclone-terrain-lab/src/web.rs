@@ -7,7 +7,7 @@ use mclone_terrain_view::{
     TerrainPreviewSource, TerrainPreviewView, TerrainViewportCompletedComparison,
     TerrainViewportDetail, TerrainViewportFrameStats, TerrainViewportRenderer,
     TerrainViewportRequest, canonical_terrain_chunk_order, plan_terrain_viewport,
-    terrain_preview_projection,
+    terrain_preview_focus_y, terrain_preview_projection,
 };
 use mclone_worldgen::{
     levelgen::{
@@ -803,8 +803,15 @@ fn inspection_world_coordinate(
     pointer_x: f32,
     pointer_y: f32,
 ) -> (i32, i32) {
-    let projection =
-        terrain_preview_projection(blocks_across, view, camera, panel_width, panel_height);
+    let focus_y = terrain_preview_focus_y(seed, center_x, center_z);
+    let projection = terrain_preview_projection(
+        blocks_across,
+        view,
+        camera,
+        panel_width,
+        panel_height,
+        focus_y,
+    );
     let normalized_x = pointer_x / panel_width.max(1) as f32;
     let normalized_y = pointer_y / panel_height.max(1) as f32;
     if view == TerrainPreviewView::Map {
@@ -816,7 +823,11 @@ fn inspection_world_coordinate(
         );
     }
 
-    let eye = projection.eye_offset;
+    let eye = [
+        projection.eye_offset[0],
+        projection.target_y + projection.eye_offset[1],
+        projection.eye_offset[2],
+    ];
     let forward = normalize3([-eye[0], projection.target_y - eye[1], -eye[2]]);
     let right = normalize3(cross3(forward, projection.up));
     let camera_up = normalize3(cross3(right, forward));
@@ -846,7 +857,7 @@ fn inspection_world_coordinate(
         } else {
             terrain.surface_y
         };
-        (relative_y - display_y as f32, world_x, world_z)
+        (relative_y - (display_y as f32 + 1.0), world_x, world_z)
     };
     let mut previous_distance = projection.z_near;
     let mut previous = ray_height(previous_distance);

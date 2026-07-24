@@ -332,14 +332,18 @@ fn vertex_main(
     var clip_y = -grid_z;
     var clip_z = 0.5;
     if params.seed_source_view.w == 1u {
-        let eye = params.camera_eye_target.xyz;
+        let eye = vec3<f32>(
+            params.camera_eye_target.x,
+            params.camera_eye_target.y + params.camera_eye_target.w,
+            params.camera_eye_target.z,
+        );
         let camera_target = vec3<f32>(0.0, params.camera_eye_target.w, 0.0);
         let forward = normalize(camera_target - eye);
         let right = normalize(cross(forward, params.camera_up_fov.xyz));
         let camera_up = normalize(cross(right, forward));
         let position = vec3<f32>(
             f32(world_x - params.viewport_center_extent.x),
-            sample.terrain.y,
+            sample.terrain.y + 1.0,
             f32(world_z - params.viewport_center_extent.y),
         );
         let from_eye = position - eye;

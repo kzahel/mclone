@@ -1179,7 +1179,7 @@ function formatDistance(blocks: number): string {
   if (blocks >= 1_000) {
     return `${(blocks / 1_000).toLocaleString(undefined, { maximumFractionDigits: 1 })} km`;
   }
-  return `${formatInteger(blocks)} blocks`;
+  return `${formatInteger(blocks)} ${blocks === 1 ? "block" : "blocks"}`;
 }
 
 function formatInteger(value: number): string {
