@@ -15,9 +15,9 @@ use mclone_core::{
 };
 use mclone_diagnostics::GpuPassId;
 use mclone_mesh::{
-    CHUNK_WIDTH as MESH_CHUNK_WIDTH, RENDER_SECTION_HEIGHT, RenderSectionKey, SectionFace,
-    TexturedRenderSectionMesh, TexturedRenderSectionMetadata, TexturedVisibleChunkMesh,
-    VisibilitySet, VisibleChunkMesh, quad_face_count_from_indices,
+    BUSHY_LEAF_CARD_OVERHANG, CHUNK_WIDTH as MESH_CHUNK_WIDTH, RENDER_SECTION_HEIGHT,
+    RenderSectionKey, SectionFace, TexturedRenderSectionMesh, TexturedRenderSectionMetadata,
+    TexturedVisibleChunkMesh, VisibilitySet, VisibleChunkMesh, quad_face_count_from_indices,
 };
 use rustc_hash::{FxHashMap, FxHashSet};
 use wgpu::util::DeviceExt;
@@ -1722,13 +1722,15 @@ impl RenderSectionFrustum for ClipFrustum {
             RENDER_SECTION_HEIGHT as f32 * 0.5,
             MESH_CHUNK_WIDTH as f32 * 0.5,
         );
-        let min = center - half;
-        let max = min
+        let margin = Vec3::splat(BUSHY_LEAF_CARD_OVERHANG);
+        let min = center - half - margin;
+        let max = center - half
             + Vec3::new(
                 MESH_CHUNK_WIDTH as f32,
                 RENDER_SECTION_HEIGHT as f32,
                 MESH_CHUNK_WIDTH as f32,
-            );
+            )
+            + margin;
         self.is_aabb_visible(min, max)
     }
 }
@@ -1756,17 +1758,18 @@ impl PlacedClipFrustum {
 
 impl RenderSectionFrustum for PlacedClipFrustum {
     fn is_render_section_visible(&self, key: RenderSectionKey) -> bool {
+        let margin = Vec3::splat(BUSHY_LEAF_CARD_OVERHANG);
         let min = Vec3::new(
             chunk_min_block_coord(key.chunk_x) as f32,
             key.min_y() as f32,
             chunk_min_block_coord(key.chunk_z) as f32,
-        );
-        let max = min
-            + Vec3::new(
+        ) - margin;
+        let max =
+            min + Vec3::new(
                 MESH_CHUNK_WIDTH as f32,
                 RENDER_SECTION_HEIGHT as f32,
                 MESH_CHUNK_WIDTH as f32,
-            );
+            ) + margin * 2.0;
         let composition_min = self.source_to_composition(min);
         let composition_max = self.source_to_composition(max);
         if self.clip.rejects_aabb(composition_min, composition_max) {

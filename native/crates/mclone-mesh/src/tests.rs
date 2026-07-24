@@ -225,22 +225,33 @@ fn stone_and_leaves_textured_catalog() -> TexturedMeshCatalog {
     );
     source.insert_text(
         AssetPath::new("assets/minecraft/models/block/oak_leaves.json"),
-        r##"{"parent":"minecraft:block/cube_all","textures":{"all":"minecraft:block/stone"}}"##,
+        r##"{"parent":"minecraft:block/cube_all","textures":{"all":"minecraft:block/oak_leaves"}}"##,
     );
     source.insert(
         AssetPath::new("assets/minecraft/textures/block/stone.png"),
         png_header(16, 16),
     );
+    source.insert(
+        AssetPath::new("assets/minecraft/textures/block/oak_leaves.png"),
+        png_header(16, 16),
+    );
+    source.insert(
+        AssetPath::new("assets/mclone/textures/derived/bushy_leaf/minecraft/block/oak_leaves.png"),
+        png_header(32, 32),
+    );
 
     let index = BlockStateAssetIndex::load_namespace(&source, "minecraft").unwrap();
     let library = BlockModelLibrary::load_for_blockstates(&source, &index).unwrap();
-    let materials = library
+    let mut materials = library
         .collect_materials_for_models(
             index
                 .assets()
                 .flat_map(|asset| asset.model_refs.iter().cloned()),
         )
         .unwrap();
+    materials.insert(crate::catalog::bushy_leaf_material(
+        &TextureMaterial::blocks(ResourceLocation::parse("minecraft:block/oak_leaves").unwrap()),
+    ));
     let atlas = TextureAtlasPlan::build(&source, materials).unwrap();
     TexturedMeshCatalog::from_assets(&registry, &index, &library, &atlas).unwrap()
 }

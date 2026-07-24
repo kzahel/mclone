@@ -12,17 +12,17 @@ mod visibility;
 use mclone_core::BlockStateId;
 
 pub use builder::{
-    ChunkMeshInput, TexturedChunkMeshInput, build_textured_render_sections,
-    build_textured_render_sections_for_chunk_set,
+    BUSHY_LEAF_CARD_OVERHANG, ChunkMeshInput, TexturedChunkMeshInput,
+    build_textured_render_sections, build_textured_render_sections_for_chunk_set,
     build_textured_render_sections_for_chunk_set_with_stats,
     build_textured_render_sections_for_section_set_with_stats,
     build_textured_render_sections_with_stats, build_textured_visible_chunk_area_mesh,
     build_textured_visible_chunk_mesh, build_visible_chunk_area_mesh, build_visible_chunk_mesh,
 };
 pub use catalog::{
-    AtlasSpriteUv, TexturedBlockFace, TexturedBlockModel, TexturedColorMap, TexturedColorMaps,
-    TexturedFluidKind, TexturedFluidModel, TexturedMeshCatalog, TexturedMeshError,
-    TexturedTerrainRenderLayer,
+    AtlasSpriteUv, LeafDetail, TexturedBlockFace, TexturedBlockModel, TexturedColorMap,
+    TexturedColorMaps, TexturedFluidKind, TexturedFluidModel, TexturedLeafCardModel,
+    TexturedMeshCatalog, TexturedMeshError, TexturedTerrainRenderLayer,
 };
 pub use data::{
     ChunkVertex, RenderSectionKey, SectionMeshStats, TexturedChunkVertex,

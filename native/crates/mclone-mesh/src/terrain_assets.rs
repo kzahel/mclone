@@ -4,10 +4,11 @@ use std::fmt;
 
 use mclone_assets::{
     AssetError, AssetPath, AssetSource, BlockModelLibrary, BlockStateAssetIndex,
-    BlockStateRegistry, FirstPartyVisualCatalog, ResourceLocation, TextureAtlasPlan,
-    TextureMaterial,
+    BlockStateRegistry, FirstPartyVisualCatalog, MemoryAssetSource, ResourceLocation,
+    TextureAtlasPlan, TextureMaterial,
 };
 
+use crate::catalog::bushy_leaf_material;
 use crate::{TexturedColorMap, TexturedColorMaps, TexturedMeshCatalog, TexturedMeshError};
 
 #[derive(Clone, Debug, PartialEq)]
@@ -124,9 +125,12 @@ pub fn load_textured_terrain_assets(
     let models = BlockModelLibrary::load_model_tree(source, selected_model_refs.iter().cloned())?;
     let mut materials = models.collect_materials_for_models(selected_model_refs.iter().cloned())?;
     insert_fluid_materials(&mut materials);
-    let atlas_plan = TextureAtlasPlan::build(source, materials)?;
+    let (derived, derived_materials) = derive_bushy_leaf_assets(source, &materials)?;
+    materials.extend(derived_materials);
+    let overlay = DerivedAssetOverlay::new(source, derived);
+    let atlas_plan = TextureAtlasPlan::build(&overlay, materials)?;
     let atlas_sprite_count = atlas_plan.len();
-    let atlas = stitch_texture_atlas(source, &atlas_plan)?;
+    let atlas = stitch_texture_atlas(&overlay, &atlas_plan)?;
     let mut catalog =
         TexturedMeshCatalog::from_assets(&registry, &blockstates, &models, &atlas_plan)?;
     if let Some(color_maps) = load_color_maps(source)? {
@@ -150,9 +154,15 @@ pub fn load_first_party_textured_terrain_assets(
         .filter_map(|visual| visual.material.clone())
         .map(TextureMaterial::blocks)
         .collect::<BTreeSet<_>>();
-    let atlas_plan = TextureAtlasPlan::build(source, materials)?;
+    let (derived, derived_materials) = derive_bushy_leaf_assets(source, &materials)?;
+    let materials = materials
+        .into_iter()
+        .chain(derived_materials)
+        .collect::<BTreeSet<_>>();
+    let overlay = DerivedAssetOverlay::new(source, derived);
+    let atlas_plan = TextureAtlasPlan::build(&overlay, materials)?;
     let atlas_sprite_count = atlas_plan.len();
-    let atlas = stitch_texture_atlas(source, &atlas_plan)?;
+    let atlas = stitch_texture_atlas(&overlay, &atlas_plan)?;
     let mut catalog =
         TexturedMeshCatalog::from_first_party_visuals(&registry, &visuals, &atlas_plan)?;
     if let Some(color_maps) = load_color_maps(source)? {
@@ -222,6 +232,150 @@ fn insert_fluid_materials(materials: &mut BTreeSet<TextureMaterial>) {
             ResourceLocation::parse(texture).expect("fluid texture locations are valid"),
         ));
     }
+}
+
+struct DerivedAssetOverlay<'a, S> {
+    base: &'a S,
+    derived: MemoryAssetSource,
+}
+
+impl<'a, S> DerivedAssetOverlay<'a, S> {
+    fn new(base: &'a S, derived: MemoryAssetSource) -> Self {
+        Self { base, derived }
+    }
+}
+
+impl<S: AssetSource> AssetSource for DerivedAssetOverlay<'_, S> {
+    fn read(&self, path: &AssetPath) -> mclone_assets::AssetResult<Option<Vec<u8>>> {
+        match self.derived.read(path)? {
+            Some(bytes) => Ok(Some(bytes)),
+            None => self.base.read(path),
+        }
+    }
+
+    fn list(&self, prefix: &str, suffix: &str) -> mclone_assets::AssetResult<Vec<AssetPath>> {
+        let mut paths = self
+            .base
+            .list(prefix, suffix)?
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        paths.extend(self.derived.list(prefix, suffix)?);
+        Ok(paths.into_iter().collect())
+    }
+}
+
+fn derive_bushy_leaf_assets(
+    source: &impl AssetSource,
+    materials: &BTreeSet<TextureMaterial>,
+) -> Result<(MemoryAssetSource, BTreeSet<TextureMaterial>), TexturedTerrainAssetError> {
+    use image::ImageEncoder;
+
+    let mut assets = MemoryAssetSource::new();
+    let mut derived_materials = BTreeSet::new();
+    for material in materials
+        .iter()
+        .filter(|material| material.texture.path().ends_with("_leaves"))
+    {
+        let source_path = AssetPath::texture_png(&material.texture);
+        let bytes = source
+            .read(&source_path)?
+            .ok_or_else(|| AssetError::MissingAsset(source_path.clone()))?;
+        let image = image::load_from_memory(&bytes)
+            .map_err(|source| TexturedTerrainAssetError::TextureDecode {
+                path: source_path.clone(),
+                source,
+            })?
+            .to_rgba8();
+        if image.width() != image.height() {
+            // Vertical animation strips and unusual non-square pack materials
+            // retain ordinary blocky leaves until a frame-aware derivative
+            // contract exists.
+            continue;
+        }
+        let derived_material = bushy_leaf_material(material);
+        let derived_path = AssetPath::texture_png(&derived_material.texture);
+        let rgba = derive_bushy_leaf_rgba(
+            image.as_raw(),
+            image.width(),
+            stable_material_seed(material),
+        );
+        let derived_width = image.width() * 2;
+        let derived_height = image.height() * 2;
+        let mut png = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut png)
+            .write_image(
+                &rgba,
+                derived_width,
+                derived_height,
+                image::ColorType::Rgba8.into(),
+            )
+            .map_err(|source| TexturedTerrainAssetError::TextureDecode {
+                path: derived_path.clone(),
+                source,
+            })?;
+        assets.insert(derived_path, png);
+        derived_materials.insert(derived_material);
+    }
+    Ok((assets, derived_materials))
+}
+
+fn stable_material_seed(material: &TextureMaterial) -> u64 {
+    let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+    for byte in material
+        .texture
+        .namespace()
+        .bytes()
+        .chain([b':'])
+        .chain(material.texture.path().bytes())
+    {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
+}
+
+fn derive_bushy_leaf_rgba(source: &[u8], size: u32, seed: u64) -> Vec<u8> {
+    let output_size = size * 2;
+    let mut output = vec![0; (output_size * output_size * 4) as usize];
+    let center = output_size as f32 * 0.5;
+    let radius = output_size as f32 * 0.49;
+    let phase = ((seed >> 8) & 0xffff) as f32 / 65_535.0 * std::f32::consts::TAU;
+
+    for y in 0..output_size {
+        for x in 0..output_size {
+            let dx = (x as f32 + 0.5 - center) / radius;
+            let dy = (y as f32 + 0.5 - center) / radius;
+            let distance = (dx * dx + dy * dy).sqrt();
+            let angle = dy.atan2(dx);
+            let lobes = 0.91
+                + 0.055 * (angle * 5.0 + phase).sin()
+                + 0.035 * (angle * 9.0 - phase * 0.7).sin();
+            let pixel_noise = signed_pixel_noise(seed, x, y) * 0.045;
+            if distance > lobes + pixel_noise {
+                continue;
+            }
+
+            let source_x = (x + size / 2) % size;
+            let source_y = (y + size / 2) % size;
+            let source_start = ((source_y * size + source_x) * 4) as usize;
+            let output_start = ((y * output_size + x) * 4) as usize;
+            output[output_start..output_start + 4]
+                .copy_from_slice(&source[source_start..source_start + 4]);
+        }
+    }
+    output
+}
+
+fn signed_pixel_noise(seed: u64, x: u32, y: u32) -> f32 {
+    let mut value = seed
+        ^ u64::from(x).wrapping_mul(0x9e37_79b9_7f4a_7c15)
+        ^ u64::from(y).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value ^= value >> 30;
+    value = value.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value ^= value >> 27;
+    value = value.wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^= value >> 31;
+    ((value & 0xffff) as f32 / 32_767.5) - 1.0
 }
 
 fn load_color_maps(
@@ -348,6 +502,34 @@ fn copy_sprite_with_gutter(
 mod tests {
     use super::*;
     use image::ImageEncoder;
+
+    #[test]
+    fn bushy_leaf_derivative_is_doubled_deterministic_and_original() {
+        let mut source = Vec::new();
+        for y in 0..4_u8 {
+            for x in 0..4_u8 {
+                source.extend_from_slice(&[20 + x, 80 + y, 140, 255]);
+            }
+        }
+
+        let first = derive_bushy_leaf_rgba(&source, 4, 0x1234_5678);
+        let second = derive_bushy_leaf_rgba(&source, 4, 0x1234_5678);
+
+        assert_eq!(first, second);
+        assert_eq!(first.len(), 8 * 8 * 4);
+        assert_eq!(first[3], 0, "the analytic silhouette clears its corner");
+        assert!(
+            first
+                .chunks_exact(4)
+                .filter(|pixel| pixel[3] != 0)
+                .all(|pixel| pixel[2] == 140 && pixel[3] == 255),
+            "the derivative only masks and tiles source pixels"
+        );
+        assert!(
+            first.chunks_exact(4).any(|pixel| pixel[3] == 255),
+            "the derivative retains opaque leaf texels"
+        );
+    }
 
     #[cfg(not(target_arch = "wasm32"))]
     fn extracted_asset_root() -> std::path::PathBuf {

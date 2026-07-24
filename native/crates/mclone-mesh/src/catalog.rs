@@ -42,6 +42,24 @@ pub struct TexturedBlockFace {
     pub shade: bool,
 }
 
+/// Client-local decorative leaf geometry policy.
+///
+/// This is deliberately catalog state rather than renderer state: changing it
+/// creates a new mesh/asset epoch, so `Blocky` section meshes contain no hidden
+/// bush-card vertices or indices.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum LeafDetail {
+    #[default]
+    Blocky,
+    Bushy,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TexturedLeafCardModel {
+    pub sprite: AtlasSpriteUv,
+    pub tint: TexturedBlockTint,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum TexturedBlockTint {
     #[default]
@@ -169,6 +187,7 @@ impl BlockStateModelRotation {
 pub struct TexturedBlockModel {
     pub faces: Vec<TexturedBlockFace>,
     pub fluid: Option<TexturedFluidModel>,
+    pub leaf_cards: Option<TexturedLeafCardModel>,
     pub render_layer: TexturedTerrainRenderLayer,
     pub occludes: bool,
     pub ambient_occlusion: bool,
@@ -242,6 +261,7 @@ pub struct TexturedColorMaps {
 pub struct TexturedMeshCatalog {
     blocks: BTreeMap<BlockStateId, TexturedBlockModel>,
     color_maps: Option<TexturedColorMaps>,
+    leaf_detail: LeafDetail,
 }
 
 impl TexturedMeshCatalog {
@@ -285,6 +305,17 @@ impl TexturedMeshCatalog {
                 .map(|sprite| first_party_fluid_model(record, sprite))
                 .transpose()?
                 .flatten();
+            let leaf_cards = visual
+                .material
+                .as_ref()
+                .filter(|_| record.block.path().ends_with("_leaves"))
+                .and_then(|material| {
+                    textured_leaf_card_model(
+                        record.block.path(),
+                        &TextureMaterial::blocks(material.clone()),
+                        atlas,
+                    )
+                });
             let full_cube_occluder = visual.class == FirstPartyVisualClass::Solid;
             let facts = block_render_facts(record, full_cube_occluder);
             blocks.insert(
@@ -292,6 +323,7 @@ impl TexturedMeshCatalog {
                 TexturedBlockModel {
                     faces,
                     fluid,
+                    leaf_cards,
                     render_layer: textured_terrain_render_layer(
                         record.block.path(),
                         facts.solid_render,
@@ -310,6 +342,7 @@ impl TexturedMeshCatalog {
         Ok(Self {
             blocks,
             color_maps: None,
+            leaf_detail: LeafDetail::Blocky,
         })
     }
 
@@ -363,9 +396,13 @@ impl TexturedMeshCatalog {
             };
             let mut faces = Vec::new();
             let mut ambient_occlusion = true;
+            let mut leaf_source_material = None;
             for (model, rotation) in model_selections {
                 let baked = models.bake_model(model)?;
                 ambient_occlusion &= baked.ambient_occlusion;
+                if leaf_source_material.is_none() {
+                    leaf_source_material = baked.faces.first().map(|face| face.texture.clone());
+                }
                 faces.extend(
                     baked
                         .faces
@@ -382,6 +419,12 @@ impl TexturedMeshCatalog {
                 );
             }
             let fluid = textured_fluid_model(record, atlas)?;
+            let leaf_cards = leaf_source_material
+                .as_ref()
+                .filter(|_| record.block.path().ends_with("_leaves"))
+                .and_then(|material| {
+                    textured_leaf_card_model(record.block.path(), material, atlas)
+                });
             let full_cube_occluder = full_cube_occluder(&faces);
             let facts = block_render_facts(record, full_cube_occluder);
             let render_layer =
@@ -391,6 +434,7 @@ impl TexturedMeshCatalog {
                 TexturedBlockModel {
                     faces,
                     fluid,
+                    leaf_cards,
                     render_layer,
                     occludes: facts.occludes,
                     ambient_occlusion,
@@ -407,12 +451,22 @@ impl TexturedMeshCatalog {
         Ok(Self {
             blocks,
             color_maps: None,
+            leaf_detail: LeafDetail::Blocky,
         })
     }
 
     pub fn with_color_maps(mut self, color_maps: TexturedColorMaps) -> Self {
         self.color_maps = Some(color_maps);
         self
+    }
+
+    pub fn with_leaf_detail(mut self, leaf_detail: LeafDetail) -> Self {
+        self.leaf_detail = leaf_detail;
+        self
+    }
+
+    pub const fn leaf_detail(&self) -> LeafDetail {
+        self.leaf_detail
     }
 
     pub fn get(&self, state_id: BlockStateId) -> Option<&TexturedBlockModel> {
@@ -445,6 +499,12 @@ impl TexturedMeshCatalog {
             .get(&state_id)
             .map(|model| model.occludes)
             .unwrap_or(false)
+    }
+
+    pub(crate) fn is_leaf(&self, state_id: BlockStateId) -> bool {
+        self.blocks
+            .get(&state_id)
+            .is_some_and(|model| model.leaf_cards.is_some())
     }
 
     pub(crate) fn light_block(&self, state_id: BlockStateId) -> u8 {
@@ -494,6 +554,37 @@ impl TexturedMeshCatalog {
             .as_ref()
             .map(|maps| maps.foliage.sample(temperature, downfall))
     }
+}
+
+pub(crate) fn bushy_leaf_material(source: &TextureMaterial) -> TextureMaterial {
+    TextureMaterial::blocks(
+        ResourceLocation::new(
+            "mclone",
+            format!(
+                "derived/bushy_leaf/{}/{}",
+                source.texture.namespace(),
+                source.texture.path()
+            ),
+        )
+        .expect("source resource locations produce valid derived leaf paths"),
+    )
+}
+
+fn textured_leaf_card_model(
+    block_path: &str,
+    source: &TextureMaterial,
+    atlas: &TextureAtlasPlan,
+) -> Option<TexturedLeafCardModel> {
+    let sprite = atlas.sprite(&bushy_leaf_material(source))?;
+    Some(TexturedLeafCardModel {
+        sprite: AtlasSpriteUv {
+            u0: sprite.u0,
+            v0: sprite.v0,
+            u1: sprite.u1,
+            v1: sprite.v1,
+        },
+        tint: textured_block_tint(block_path, 0),
+    })
 }
 
 fn first_party_sprite(

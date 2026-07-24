@@ -5,8 +5,8 @@ use crate::ambient_occlusion::{
     calculate_ambient_occlusion_face, calculate_ambient_occlusion_shape,
 };
 use crate::catalog::{
-    TexturedBlockFace, TexturedFluidKind, TexturedFluidModel, TexturedMeshCatalog,
-    TexturedMeshError, TexturedTerrainRenderLayer,
+    LeafDetail, TexturedBlockFace, TexturedFluidKind, TexturedFluidModel, TexturedLeafCardModel,
+    TexturedMeshCatalog, TexturedMeshError, TexturedTerrainRenderLayer,
 };
 use crate::data::{
     ChunkVertex, RenderSectionKey, TexturedChunkVertex, TexturedRenderSectionBuildReport,
@@ -29,6 +29,7 @@ use mclone_light::{
 
 const LCG_MULTIPLIER: i64 = 6364136223846793005;
 const LCG_INCREMENT: i64 = 1442695040888963407;
+pub const BUSHY_LEAF_CARD_OVERHANG: f32 = 0.25;
 
 #[derive(Clone, Copy, Debug)]
 pub struct ChunkMeshInput<'a> {
@@ -488,6 +489,20 @@ fn add_textured_chunk_range_to_mesh(
                         }
                     }
                 }
+                if catalog.leaf_detail() == LeafDetail::Bushy
+                    && let Some(cards) = block_model.leaf_cards
+                    && !leaf_is_fully_enclosed(area, catalog, world_x, world_y, world_z)
+                {
+                    add_bushy_leaf_cards(
+                        &mut cutout_mesh,
+                        area,
+                        catalog,
+                        world_x,
+                        world_y,
+                        world_z,
+                        cards,
+                    );
+                }
             }
         }
     }
@@ -677,6 +692,199 @@ fn add_textured_face(
         base_index + 2,
         base_index + 3,
     ]);
+}
+
+fn leaf_is_fully_enclosed(
+    area: &[TexturedChunkMeshInput<'_>],
+    catalog: &TexturedMeshCatalog,
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+) -> bool {
+    [
+        [0, -1, 0],
+        [0, 1, 0],
+        [0, 0, -1],
+        [0, 0, 1],
+        [-1, 0, 0],
+        [1, 0, 0],
+    ]
+    .into_iter()
+    .all(|offset| {
+        catalog.is_leaf(block_state_at_world_or_air(
+            area,
+            world_x + offset[0],
+            world_y + offset[1],
+            world_z + offset[2],
+        ))
+    })
+}
+
+fn add_bushy_leaf_cards(
+    mesh: &mut TexturedVisibleChunkMesh,
+    area: &[TexturedChunkMeshInput<'_>],
+    catalog: &TexturedMeshCatalog,
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+    cards: TexturedLeafCardModel,
+) {
+    let layout = bushy_leaf_layout(world_x, world_y, world_z);
+    let tint = block_tint(catalog, cards.tint, world_x, world_y, world_z, |x, y, z| {
+        biome_id_at_world_or_default(area, x, y, z)
+    });
+    let color = [tint[0], tint[1], tint[2], 1.0];
+    let packed_light = liquid_packed_light(area, world_x, world_y, world_z);
+    let uvs = [
+        cards.sprite.map(0.0, 16.0),
+        cards.sprite.map(0.0, 0.0),
+        cards.sprite.map(16.0, 0.0),
+        cards.sprite.map(16.0, 16.0),
+    ];
+
+    for angle in [layout.angle, layout.angle + std::f32::consts::FRAC_PI_2] {
+        let direction = [angle.cos(), angle.sin()];
+        let corners = [
+            [
+                0.5 - direction[0] * layout.radius,
+                layout.bottom,
+                0.5 - direction[1] * layout.radius,
+            ],
+            [
+                0.5 - direction[0] * layout.radius,
+                layout.top,
+                0.5 - direction[1] * layout.radius,
+            ],
+            [
+                0.5 + direction[0] * layout.radius,
+                layout.top,
+                0.5 + direction[1] * layout.radius,
+            ],
+            [
+                0.5 + direction[0] * layout.radius,
+                layout.bottom,
+                0.5 + direction[1] * layout.radius,
+            ],
+        ];
+        add_textured_leaf_quad(
+            mesh,
+            world_x,
+            world_y,
+            world_z,
+            corners,
+            uvs,
+            color,
+            packed_light,
+            false,
+        );
+        add_textured_leaf_quad(
+            mesh,
+            world_x,
+            world_y,
+            world_z,
+            corners,
+            uvs,
+            color,
+            packed_light,
+            true,
+        );
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct BushyLeafLayout {
+    angle: f32,
+    radius: f32,
+    bottom: f32,
+    top: f32,
+}
+
+fn bushy_leaf_layout(world_x: i32, world_y: i32, world_z: i32) -> BushyLeafLayout {
+    let hash = stable_position_hash(world_x, world_y, world_z);
+    match hash & 3 {
+        0 => BushyLeafLayout {
+            angle: std::f32::consts::PI / 12.0,
+            radius: 0.70,
+            bottom: -0.12,
+            top: 1.15,
+        },
+        1 => BushyLeafLayout {
+            angle: std::f32::consts::PI * 5.0 / 24.0,
+            radius: 0.74,
+            bottom: -0.15,
+            top: 1.12,
+        },
+        2 => BushyLeafLayout {
+            angle: std::f32::consts::PI / 3.0,
+            radius: 0.68,
+            bottom: -0.10,
+            top: 1.16,
+        },
+        _ => BushyLeafLayout {
+            angle: std::f32::consts::PI * 11.0 / 24.0,
+            radius: 0.72,
+            bottom: -0.14,
+            top: 1.10,
+        },
+    }
+}
+
+fn stable_position_hash(world_x: i32, world_y: i32, world_z: i32) -> u64 {
+    let mut value = (world_x as i64 as u64).wrapping_mul(0x9e37_79b9_7f4a_7c15)
+        ^ (world_y as i64 as u64).wrapping_mul(0xbf58_476d_1ce4_e5b9)
+        ^ (world_z as i64 as u64).wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^= value >> 30;
+    value = value.wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    value ^= value >> 27;
+    value = value.wrapping_mul(0x94d0_49bb_1331_11eb);
+    value ^ (value >> 31)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn add_textured_leaf_quad(
+    mesh: &mut TexturedVisibleChunkMesh,
+    world_x: i32,
+    world_y: i32,
+    world_z: i32,
+    corners: [[f32; 3]; 4],
+    uvs: [[f32; 2]; 4],
+    color: [f32; 4],
+    packed_light: u32,
+    reversed: bool,
+) {
+    let base_index = mesh.vertices.len() as u32;
+    for index in 0..4 {
+        let corner = corners[index];
+        mesh.vertices.push(TexturedChunkVertex {
+            position: [
+                world_x as f32 + corner[0],
+                world_y as f32 + corner[1],
+                world_z as f32 + corner[2],
+            ],
+            uv: uvs[index],
+            color,
+            packed_light,
+        });
+    }
+    if reversed {
+        mesh.indices.extend_from_slice(&[
+            base_index,
+            base_index + 3,
+            base_index + 2,
+            base_index,
+            base_index + 2,
+            base_index + 1,
+        ]);
+    } else {
+        mesh.indices.extend_from_slice(&[
+            base_index,
+            base_index + 1,
+            base_index + 2,
+            base_index,
+            base_index + 2,
+            base_index + 3,
+        ]);
+    }
 }
 
 const MAX_FLUID_HEIGHT: f32 = 8.0 / 9.0;
@@ -1619,6 +1827,16 @@ mod tests {
 
     fn empty_textured_blocks(height: i32) -> Vec<BlockStateId> {
         vec![AIR_BLOCK_STATE_ID; CHUNK_WIDTH as usize * CHUNK_WIDTH as usize * height as usize]
+    }
+
+    #[test]
+    fn bushy_leaf_layout_is_stable_and_varies_by_world_position() {
+        let origin = bushy_leaf_layout(0, 64, 0);
+        assert_eq!(origin, bushy_leaf_layout(0, 64, 0));
+        assert!(
+            (1..32).any(|x| bushy_leaf_layout(x, 64, 0) != origin),
+            "nearby leaves should not all select the same card layout"
+        );
     }
 
     fn biome_id_for_world_quart(quart_x: i32, quart_z: i32) -> i32 {

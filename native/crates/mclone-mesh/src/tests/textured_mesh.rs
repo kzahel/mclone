@@ -1,6 +1,71 @@
 use super::*;
 
 #[test]
+fn blocky_leaf_detail_emits_no_decorative_card_geometry() {
+    let catalog = stone_and_leaves_textured_catalog();
+    let blocks = textured_chunk_blocks(16, &[(8, 8, 8, BlockStateId(2))]);
+
+    let mesh = build_textured_visible_chunk_mesh(
+        TexturedChunkMeshInput::new(0, 0, 0, 16, &blocks),
+        &catalog,
+    )
+    .unwrap();
+
+    assert_eq!(catalog.leaf_detail(), LeafDetail::Blocky);
+    assert_eq!(mesh.stats().face_count(), 6);
+    assert_eq!(mesh.stats().vertex_count, 24);
+    assert_eq!(mesh.cutout_index_count(), 36);
+}
+
+#[test]
+fn bushy_leaf_detail_adds_four_surface_card_quads() {
+    let catalog = stone_and_leaves_textured_catalog().with_leaf_detail(LeafDetail::Bushy);
+    let blocks = textured_chunk_blocks(16, &[(8, 8, 8, BlockStateId(2))]);
+
+    let mesh = build_textured_visible_chunk_mesh(
+        TexturedChunkMeshInput::new(0, 0, 0, 16, &blocks),
+        &catalog,
+    )
+    .unwrap();
+
+    assert_eq!(mesh.stats().face_count(), 10);
+    assert_eq!(mesh.stats().vertex_count, 40);
+    assert_eq!(mesh.cutout_index_count(), 60);
+    assert!(mesh.vertices.iter().any(|vertex| {
+        vertex.position[0] < 8.0
+            || vertex.position[0] > 9.0
+            || vertex.position[1] < 8.0
+            || vertex.position[1] > 9.0
+            || vertex.position[2] < 8.0
+            || vertex.position[2] > 9.0
+    }));
+}
+
+#[test]
+fn bushy_leaf_detail_suppresses_cards_for_fully_enclosed_leaf() {
+    let catalog = stone_and_leaves_textured_catalog().with_leaf_detail(LeafDetail::Bushy);
+    let mut filled = Vec::new();
+    for y in 7..=9 {
+        for z in 7..=9 {
+            for x in 7..=9 {
+                filled.push((x, y, z, BlockStateId(2)));
+            }
+        }
+    }
+    let blocks = textured_chunk_blocks(16, &filled);
+
+    let mesh = build_textured_visible_chunk_mesh(
+        TexturedChunkMeshInput::new(0, 0, 0, 16, &blocks),
+        &catalog,
+    )
+    .unwrap();
+
+    // Leaves retain their ordinary six cutout faces. The 26 surface leaves
+    // receive four card quads each; the one fully enclosed center leaf does not.
+    assert_eq!(mesh.stats().face_count(), 27 * 6 + 26 * 4);
+}
+
+#[test]
 fn textured_liquid_source_emits_exposed_surface_faces() {
     let catalog = liquid_textured_catalog();
     let blocks = textured_chunk_blocks(16, &[(0, 0, 0, BlockStateId(2))]);
