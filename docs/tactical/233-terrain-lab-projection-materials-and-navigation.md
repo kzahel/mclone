@@ -1,7 +1,6 @@
 # Terrain Lab Projection, Materials, And Navigation
 
-Status: implemented and locally validated 2026-07-24; targeted hosted
-validation pending.
+Status: completed with local and hosted desktop/mobile validation 2026-07-24.
 
 Topic: `gpu-procedural-terrain`
 
@@ -216,6 +215,30 @@ Inspected desktop and phone captures show the exact patch at its truthful
 bounded radius and matching physical scale, with independently published LOD
 panes using material-preserving atlas detail. Generated purple/pink fallback
 art remains visible in the exact patch where first-party curation is absent.
+
+## Hosted Receipt
+
+A clean detached build at product commit `7a538223` was uploaded only under
+`/terrain/`; the Cloudflare Worker and the rest of the aggregate deployment
+were unchanged. Hashed assets were uploaded before HTML and downloaded back
+from R2 for byte-for-byte SHA-256 verification. Production now serves:
+
+- JavaScript `index-DC0tTMgU.js`;
+- canonical Worker `canonical-worker-C3EyhCMt.js`;
+- stylesheet `index-BUU9cbcd.css`; and
+- Wasm `mclone_terrain_lab_bg-CEXO1oC3.wasm`.
+
+Hosted headed-Wayland desktop and Pixel smokes passed against
+`https://mclone.kzahel.com/terrain/`. They exercised exact completion, shared
+orbit, desktop right-button pan, focused arrow pan, map/65.5 km navigation,
+and the cold independent scheduler race. Both retained zero review-site base
+mean/P95 error, 100% ocean agreement, 100% material agreement, and about
+`2e-8` continentalness error.
+
+The hosted desktop cold race published GPU target plus readback in 847.6 ms
+and CPU target in 14,134.1 ms. Pixel measured 1,123.8 ms and 12,758.1 ms.
+These are end-to-end fixed-workload boundaries under host load, not pure GPU
+execution timings.
 
 ## Non-Goals
 

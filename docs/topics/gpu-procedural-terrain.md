@@ -2,8 +2,8 @@
 
 Topic: `gpu-procedural-terrain`
 
-Status: textured projection and navigation follow-up implemented and locally
-validated 2026-07-24; targeted hosted validation is pending under
+Status: textured projection and navigation follow-up completed with local and
+hosted desktop/mobile validation 2026-07-24 under
 Tactical
 [`233-terrain-lab-projection-materials-and-navigation.md`](../tactical/233-terrain-lab-projection-materials-and-navigation.md).
 The canonical multi-pane Terrain Lab workspace completed local and hosted
@@ -1187,6 +1187,23 @@ base mean/P95 height error, 100% ocean agreement, and about `2e-8`
 continentalness error. The macro contract is deliberately uncarved: final
 river/wetland clay and planned-stream materials still belong to the exact pane
 until structured overlays reach the GPU path.
+
+The targeted production upload changed only `/terrain/` objects and was built
+from clean product commit `7a538223`. The unchanged Worker now serves
+JavaScript `index-DC0tTMgU.js`, canonical Worker
+`canonical-worker-C3EyhCMt.js`, stylesheet `index-BUU9cbcd.css`, and Wasm
+`mclone_terrain_lab_bg-CEXO1oC3.wasm`. Every object was downloaded from R2 and
+byte-verified before acceptance.
+
+Hosted headed-Wayland desktop and Pixel smokes passed at
+`https://mclone.kzahel.com/terrain/`, including desktop right-button pan,
+focused arrow pan, exact completion, 65.5 km navigation, and the cold
+independent scheduler race. Both reported 100% macro-material and ocean
+agreement, zero review base mean/P95 height error, and about `2e-8`
+continentalness error. The hosted cold race published GPU target plus
+readback in 847.6/1,123.8 ms on desktop/Pixel versus CPU target publication in
+14,134.1/12,758.1 ms. These remain end-to-end boundaries rather than pure GPU
+execution.
 
 The next implementation direction is:
 
