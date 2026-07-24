@@ -1,10 +1,12 @@
+use crate::levelgen::apply_stream_plans;
 use crate::levelgen::{
     MCLONE_OVERWORLD_FIELD_REVISION, MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldBiomeRecipe,
     McloneOverworldLandformSample, McloneOverworldSampler, McloneOverworldSamplingTopology,
-    McloneOverworldSurfaceRecipe, mclone_overworld_biome_recipe,
-    mclone_overworld_macro_surface_top_material, mclone_overworld_preview_visible_material,
-    mclone_overworld_surface_recipe,
+    McloneOverworldStreamPlan, McloneOverworldStreamPlanCache, McloneOverworldSurfaceRecipe,
+    mclone_overworld_biome_recipe, mclone_overworld_macro_surface_top_material,
+    mclone_overworld_preview_visible_material, mclone_overworld_surface_recipe,
 };
+use mclone_core::ChunkPos;
 
 pub const TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION: &str =
     "mclone-terrain-preview-reference-grid-v4";
@@ -314,6 +316,7 @@ impl TerrainPreviewReferenceGrid {
         let request = request.validate()?;
         let source = request.request();
         let sampler = McloneOverworldSampler::new_with_topology(source.seed, source.topology);
+        let stream_plans = preview_stream_plans(request)?;
         let mut samples = Vec::with_capacity(
             usize::try_from(request.sample_count())
                 .map_err(|_| "terrain preview sample count does not fit usize")?,
@@ -327,7 +330,10 @@ impl TerrainPreviewReferenceGrid {
                 let world_x = request
                     .world_x(sample_x)
                     .expect("validated terrain preview X coordinate");
-                let terrain = sampler.sample(world_x, world_z);
+                let mut terrain = sampler.sample(world_x, world_z);
+                if let Some(plans) = &stream_plans {
+                    let _ = apply_stream_plans(&mut terrain, world_x, world_z, plans);
+                }
                 let water = terrain.surface_y < MCLONE_OVERWORLD_SEA_LEVEL
                     || terrain.watercourse.is_water();
                 let water_y = if terrain.watercourse.is_water() {
@@ -420,6 +426,39 @@ impl TerrainPreviewReferenceGrid {
     }
 }
 
+fn preview_stream_plans(
+    request: ValidatedTerrainPreviewRequest,
+) -> Result<Option<Vec<McloneOverworldStreamPlan>>, String> {
+    let source = request.request();
+    if !source.content_stage.includes_structured_hydrology() || source.sample_spacing > 4 {
+        return Ok(None);
+    }
+    let max_x = request
+        .min_x()
+        .checked_add(
+            i32::try_from(request.footprint_blocks())
+                .map_err(|_| "terrain preview footprint exceeds i32")?,
+        )
+        .ok_or("terrain preview maximum X coordinate overflow")?;
+    let max_z = request
+        .min_z()
+        .checked_add(
+            i32::try_from(request.footprint_blocks())
+                .map_err(|_| "terrain preview footprint exceeds i32")?,
+        )
+        .ok_or("terrain preview maximum Z coordinate overflow")?;
+    let min_chunk = ChunkPos::new(
+        request.min_x().div_euclid(16),
+        request.min_z().div_euclid(16),
+    );
+    let max_chunk = ChunkPos::new(max_x.div_euclid(16), max_z.div_euclid(16));
+    let mut cache = McloneOverworldStreamPlanCache::new(source.seed, source.topology);
+    cache
+        .plans_intersecting_chunks(min_chunk, max_chunk)
+        .map(Some)
+        .map_err(|error| format!("failed to compile Terrain Lab planned streams: {error}"))
+}
+
 const fn biome_recipe_code(recipe: McloneOverworldBiomeRecipe) -> f32 {
     match recipe {
         McloneOverworldBiomeRecipe::Ocean => 0.0,
@@ -477,6 +516,14 @@ pub struct TerrainPreviewComparison {
     pub mean_absolute_moisture_error: f32,
     pub mean_absolute_ruggedness_error: f32,
     pub macro_surface_material_agreement: f32,
+    pub channel_presence_agreement: f32,
+    pub mean_absolute_river_signed_distance_error: f32,
+    pub mean_absolute_channel_influence_error: f32,
+    pub mean_absolute_bank_influence_error: f32,
+    pub mean_absolute_wetland_influence_error: f32,
+    pub visible_surface_material_agreement: f32,
+    pub biome_recipe_agreement: f32,
+    pub surface_recipe_agreement: f32,
 }
 
 impl TerrainPreviewComparison {
@@ -516,6 +563,14 @@ impl TerrainPreviewComparison {
         let mut moisture_error_sum = 0.0_f64;
         let mut ruggedness_error_sum = 0.0_f64;
         let mut macro_material_matches = 0_usize;
+        let mut channel_matches = 0_usize;
+        let mut river_signed_distance_error_sum = 0.0_f64;
+        let mut channel_influence_error_sum = 0.0_f64;
+        let mut bank_influence_error_sum = 0.0_f64;
+        let mut wetland_influence_error_sum = 0.0_f64;
+        let mut visible_material_matches = 0_usize;
+        let mut biome_matches = 0_usize;
+        let mut surface_recipe_matches = 0_usize;
         for (expected, actual) in reference.iter().zip(candidate) {
             if !actual.packed().iter().all(|value| value.is_finite()) {
                 return Err("terrain preview candidate contains a non-finite field".to_owned());
@@ -539,6 +594,24 @@ impl TerrainPreviewComparison {
             ruggedness_error_sum += f64::from((expected.ruggedness - actual.ruggedness).abs());
             macro_material_matches +=
                 usize::from(expected.macro_surface_material() == actual.macro_surface_material());
+            channel_matches += usize::from(expected.is_channel() == actual.is_channel());
+            river_signed_distance_error_sum +=
+                f64::from((expected.river_signed_distance - actual.river_signed_distance).abs());
+            channel_influence_error_sum +=
+                f64::from((expected.channel_influence - actual.channel_influence).abs());
+            bank_influence_error_sum +=
+                f64::from((expected.bank_influence - actual.bank_influence).abs());
+            wetland_influence_error_sum +=
+                f64::from((expected.wetland_influence - actual.wetland_influence).abs());
+            visible_material_matches += usize::from(
+                expected.visible_surface_material() == actual.visible_surface_material(),
+            );
+            biome_matches += usize::from(
+                expected.biome_recipe.round() as i32 == actual.biome_recipe.round() as i32,
+            );
+            surface_recipe_matches += usize::from(
+                expected.surface_recipe.round() as i32 == actual.surface_recipe.round() as i32,
+            );
         }
         errors.sort_by(f32::total_cmp);
         base_errors.sort_by(f32::total_cmp);
@@ -562,6 +635,18 @@ impl TerrainPreviewComparison {
             mean_absolute_ruggedness_error: (ruggedness_error_sum / sample_count) as f32,
             macro_surface_material_agreement: macro_material_matches as f32
                 / candidate.len() as f32,
+            channel_presence_agreement: channel_matches as f32 / candidate.len() as f32,
+            mean_absolute_river_signed_distance_error: (river_signed_distance_error_sum
+                / sample_count) as f32,
+            mean_absolute_channel_influence_error: (channel_influence_error_sum / sample_count)
+                as f32,
+            mean_absolute_bank_influence_error: (bank_influence_error_sum / sample_count) as f32,
+            mean_absolute_wetland_influence_error: (wetland_influence_error_sum / sample_count)
+                as f32,
+            visible_surface_material_agreement: visible_material_matches as f32
+                / candidate.len() as f32,
+            biome_recipe_agreement: biome_matches as f32 / candidate.len() as f32,
+            surface_recipe_agreement: surface_recipe_matches as f32 / candidate.len() as f32,
         })
     }
 }

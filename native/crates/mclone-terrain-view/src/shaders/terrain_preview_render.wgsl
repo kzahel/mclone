@@ -6,6 +6,7 @@ struct TerrainPreviewParams {
     camera_up_fov: vec4<f32>,
     camera_projection: vec4<f32>,
     viewport_center_extent: vec4<i32>,
+    content_stage_flags: vec4<u32>,
 };
 
 struct TerrainPreviewSample {
@@ -46,6 +47,8 @@ struct VertexOutput {
     @location(2) light: f32,
     @location(3) @interpolate(flat) material: u32,
     @location(4) @interpolate(flat) textured: u32,
+    @location(5) river: vec4<f32>,
+    @location(6) semantics: vec4<f32>,
 };
 
 fn grid_corner(vertex_in_cell: u32) -> vec2<u32> {
@@ -59,24 +62,36 @@ fn grid_corner(vertex_in_cell: u32) -> vec2<u32> {
     }
 }
 
-fn reference_base_sample(index: u32) -> TerrainPreviewSample {
-    let final_sample = reference_samples[index];
+fn base_sample(final_sample: TerrainPreviewSample) -> TerrainPreviewSample {
     var base_sample = final_sample;
     base_sample.terrain.x = final_sample.large_fields.x;
     base_sample.terrain.y = final_sample.large_fields.y;
     base_sample.climate.z = final_sample.large_fields.z;
+    base_sample.hydrology_detail.w = final_sample.large_fields.w;
     return base_sample;
+}
+
+fn staged_gpu_sample(index: u32) -> TerrainPreviewSample {
+    let gpu = gpu_samples[index];
+    let reference = reference_samples[index];
+    if params.content_stage_flags.x >= 2u && reference.semantics.x > 0.0 {
+        return reference;
+    }
+    return gpu;
 }
 
 fn selected_sample(index: u32, instance_index: u32) -> TerrainPreviewSample {
     let source_mode = params.seed_source_view.z;
+    var sample = staged_gpu_sample(index);
     if source_mode == 1u {
-        return reference_samples[index];
+        sample = reference_samples[index];
+    } else if source_mode == 2u && instance_index == 0u {
+        sample = reference_samples[index];
     }
-    if source_mode == 2u && instance_index == 0u {
-        return reference_base_sample(index);
+    if params.content_stage_flags.x == 0u {
+        return base_sample(sample);
     }
-    return gpu_samples[index];
+    return sample;
 }
 
 fn terrain_color(sample: TerrainPreviewSample, light: f32) -> vec3<f32> {
@@ -167,7 +182,13 @@ fn sample_color(
         return height_color(sample.terrain.y);
     }
     if layer == 2u {
-        return error_color(abs(reference.large_fields.x - gpu.large_fields.x));
+        var reference_stage = reference;
+        var gpu_stage = gpu;
+        if params.content_stage_flags.x == 0u {
+            reference_stage = base_sample(reference);
+            gpu_stage = base_sample(gpu);
+        }
+        return error_color(abs(reference_stage.terrain.x - gpu_stage.terrain.x));
     }
     if layer == 3u {
         return continentalness_color(sample.terrain.z);
@@ -176,6 +197,46 @@ fn sample_color(
         let warmth = clamp(sample.climate.x * 0.5 + 0.5, 0.0, 1.0);
         let moisture = clamp(sample.climate.y * 0.5 + 0.5, 0.0, 1.0);
         return vec3<f32>(warmth, moisture, 1.0 - warmth * 0.65);
+    }
+    if layer == 5u {
+        let channel = clamp(sample.hydrology.y, 0.0, 1.0);
+        let bank = clamp(sample.hydrology.z, 0.0, 1.0);
+        return mix(
+            vec3<f32>(0.055, 0.075, 0.11),
+            mix(vec3<f32>(0.76, 0.53, 0.18), vec3<f32>(0.04, 0.58, 0.94), channel),
+            max(bank, channel),
+        );
+    }
+    if layer == 6u {
+        let wetland = clamp(sample.hydrology_detail.x, 0.0, 1.0);
+        let pool = clamp(sample.hydrology_detail.y, 0.0, 1.0);
+        return mix(
+            vec3<f32>(0.055, 0.075, 0.11),
+            mix(vec3<f32>(0.24, 0.65, 0.33), vec3<f32>(0.09, 0.73, 0.72), pool),
+            max(wetland, pool),
+        );
+    }
+    if layer == 7u {
+        let biome = u32(round(sample.semantics.y));
+        let colors = array<vec3<f32>, 8>(
+            vec3<f32>(0.04, 0.28, 0.60),
+            vec3<f32>(0.82, 0.70, 0.42),
+            vec3<f32>(0.05, 0.50, 0.88),
+            vec3<f32>(0.90, 0.95, 0.98),
+            vec3<f32>(0.12, 0.38, 0.27),
+            vec3<f32>(0.65, 0.51, 0.22),
+            vec3<f32>(0.20, 0.52, 0.25),
+            vec3<f32>(0.48, 0.68, 0.30),
+        );
+        return colors[min(biome, 7u)] * light;
+    }
+    if layer == 8u {
+        let recipe = clamp(sample.semantics.w / 8.0, 0.0, 1.0);
+        return mix(vec3<f32>(0.06, 0.22, 0.38), vec3<f32>(0.94, 0.78, 0.42), recipe) * light;
+    }
+    if layer == 9u {
+        let planned = clamp(sample.semantics.x, 0.0, 1.0);
+        return mix(vec3<f32>(0.055, 0.075, 0.11), vec3<f32>(0.95, 0.20, 0.76), planned);
     }
     return terrain_color(sample, light);
 }
@@ -277,8 +338,24 @@ fn vertex_main(
     out.color = sample_color(sample, reference, gpu, light);
     out.world_xz = vec2<f32>(f32(world_x), f32(world_z));
     out.light = light;
-    out.material = u32(round(sample.large_fields.w));
+    out.material = u32(round(select(
+        sample.hydrology_detail.w,
+        sample.large_fields.w,
+        params.content_stage_flags.x == 0u,
+    )));
     out.textured = select(0u, 1u, params.layer_samples_size.x == 0u);
+    out.river = vec4<f32>(
+        sample.hydrology.x,
+        sample.hydrology.w,
+        sample.hydrology.y,
+        sample.terrain.z,
+    );
+    out.semantics = vec4<f32>(
+        sample.hydrology_detail.x,
+        sample.hydrology_detail.y,
+        sample.semantics.x,
+        sample.semantics.z,
+    );
     return out;
 }
 
@@ -286,6 +363,9 @@ fn vertex_main(
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let world_dx = dpdx(input.world_xz);
     let world_dy = dpdy(input.world_xz);
+    let blocks_per_pixel = max(length(world_dx), length(world_dy));
+    let river_anti_alias = max(fwidth(input.river.x), blocks_per_pixel * 0.35);
+    var color = input.color;
     if input.textured != 0u && input.material < 256u {
         let sprite = material_uvs.values[input.material];
         let sprite_size = sprite.zw - sprite.xy;
@@ -300,17 +380,31 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
             atlas_dx,
             atlas_dy,
         );
-        let blocks_per_pixel = max(length(world_dx), length(world_dy));
         let texture_weight = mix(
             0.82,
             0.42,
             clamp((blocks_per_pixel - 1.0) / 7.0, 0.0, 1.0),
         );
         let texture_detail = clamp(texel.rgb * 1.25, vec3<f32>(0.0), vec3<f32>(1.5));
-        return vec4<f32>(
-            input.color * mix(vec3<f32>(1.0), texture_detail, texture_weight),
-            1.0,
-        );
+        color *= mix(vec3<f32>(1.0), texture_detail, texture_weight);
     }
-    return vec4<f32>(input.color, 1.0);
+    if input.textured != 0u && params.content_stage_flags.x >= 1u {
+        let visible_half_width = max(input.river.y, blocks_per_pixel * 0.70);
+        let river_alpha = 1.0 - smoothstep(
+            visible_half_width,
+            visible_half_width + river_anti_alias,
+            abs(input.river.x),
+        );
+        let river_color = mix(
+            vec3<f32>(0.11, 0.48, 0.69),
+            vec3<f32>(0.035, 0.22, 0.42),
+            clamp((63.0 - input.position.z) * 0.15, 0.0, 1.0),
+        );
+        color = mix(color, river_color * input.light, river_alpha * 0.88);
+        if params.content_stage_flags.x >= 4u {
+            let cover = clamp(input.semantics.w, 0.0, 1.0);
+            color = mix(color, color * vec3<f32>(0.57, 0.82, 0.58), cover * 0.36);
+        }
+    }
+    return vec4<f32>(color, 1.0);
 }

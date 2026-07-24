@@ -31,12 +31,12 @@ pub use viewport_renderer::{
     TerrainViewportCompletedComparison, TerrainViewportFrameStats, TerrainViewportRenderer,
 };
 
-pub const TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION: &str = "mclone-overworld-v1-gpu-preview-a3";
+pub const TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION: &str = "mclone-overworld-v1-gpu-preview-a4";
 pub const TERRAIN_PREVIEW_COMPUTE_WGSL_TEMPLATE: &str =
     include_str!("shaders/terrain_preview_compute.wgsl");
 pub const TERRAIN_PREVIEW_RENDER_WGSL: &str = include_str!("shaders/terrain_preview_render.wgsl");
 
-const TERRAIN_PREVIEW_UNIFORM_BYTES: u64 = 112;
+const TERRAIN_PREVIEW_UNIFORM_BYTES: u64 = 128;
 const TERRAIN_PREVIEW_SAMPLE_BYTES: u64 =
     (TERRAIN_PREVIEW_SAMPLE_FLOATS * std::mem::size_of::<f32>()) as u64;
 const TERRAIN_PREVIEW_WORKGROUP_AXIS: u32 = 8;
@@ -58,6 +58,12 @@ pub fn terrain_preview_compute_wgsl() -> String {
         ("RIDGE_DETAIL", spec.ridge[1]),
         ("MOUNTAIN_DETAIL_LARGE", spec.mountain_detail[0]),
         ("MOUNTAIN_DETAIL_FINE", spec.mountain_detail[1]),
+        ("RIVER_LARGE", spec.river[0]),
+        ("RIVER_DETAIL", spec.river[1]),
+        ("RIVER_WIDTH", spec.river[2]),
+        ("RIVER_REACH", spec.river[3]),
+        ("RIVER_MORPHOLOGY_DETAIL", spec.river[4]),
+        ("WETLAND_POOL", spec.wetland_pool),
         ("OCEAN_BASIN", spec.ocean_basin),
         ("SEABED_LARGE", spec.seabed[0]),
         ("SEABED_DETAIL", spec.seabed[1]),
@@ -111,6 +117,11 @@ pub enum TerrainPreviewLayer {
     Error = 2,
     Continentalness = 3,
     Climate = 4,
+    Rivers = 5,
+    Wetlands = 6,
+    Biomes = 7,
+    SurfaceRecipe = 8,
+    PlannedStreams = 9,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -867,6 +878,9 @@ fn viewport_uniform_bytes_for_request(
     ] {
         bytes.extend_from_slice(&value.to_le_bytes());
     }
+    for word in [source.content_stage as u32, 0, 0, 0] {
+        bytes.extend_from_slice(&word.to_le_bytes());
+    }
     bytes
 }
 
@@ -980,6 +994,10 @@ mod tests {
             i32::from_le_bytes(bytes[104..108].try_into().unwrap()),
             1_024
         );
+        assert_eq!(
+            u32::from_le_bytes(bytes[112..116].try_into().unwrap()),
+            mclone_worldgen::terrain_preview::TerrainPreviewContentStage::Base as u32
+        );
     }
 
     #[test]
@@ -1023,7 +1041,7 @@ mod tests {
     fn evaluator_revision_and_production_spec_are_explicit() {
         assert_eq!(
             TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION,
-            "mclone-overworld-v1-gpu-preview-a3"
+            "mclone-overworld-v1-gpu-preview-a4"
         );
         let shader = terrain_preview_compute_wgsl();
         assert!(!shader.contains("__MCLONE_PRODUCTION_FIELD_CONSTANTS__"));
@@ -1031,12 +1049,16 @@ mod tests {
             shader.contains("const CONTINENT_LARGE_DOMAIN: U64 = U64(0x636f6e31u, 0x6d636f76u);")
         );
         assert!(shader.contains("const MOUNTAIN_DETAIL_FINE_SCALE: i32 = 8;"));
+        assert!(shader.contains("const RIVER_LARGE_SCALE: i32 = 768;"));
+        assert!(shader.contains("fn river_geometry"));
+        assert!(shader.contains("fn complete_hydrology"));
         assert!(shader.contains("fn splitmix64"));
         assert!(shader.contains("fn gradient_noise"));
         assert!(!shader.contains("band_weight"));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("error_color"));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("@builtin(instance_index)"));
-        assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("fn reference_base_sample"));
+        assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("fn base_sample"));
+        assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("visible_half_width"));
         assert!(
             TERRAIN_PREVIEW_RENDER_WGSL.contains("let forward = normalize(camera_target - eye)")
         );

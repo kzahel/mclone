@@ -4,8 +4,8 @@ use std::num::NonZeroU64;
 use std::sync::mpsc;
 
 use mclone_worldgen::terrain_preview::{
-    TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS, TerrainPreviewComparison, TerrainPreviewReferenceGrid,
-    TerrainPreviewSample, ValidatedTerrainPreviewRequest,
+    TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS, TerrainPreviewComparison, TerrainPreviewContentStage,
+    TerrainPreviewReferenceGrid, TerrainPreviewSample, ValidatedTerrainPreviewRequest,
 };
 
 use super::{
@@ -696,7 +696,7 @@ impl TerrainViewportRenderer {
             .plan
             .clone()
             .ok_or("terrain viewport renderer has no active plan")?;
-        let cpu_required = source_needs_cpu(options);
+        let cpu_required = source_needs_cpu(options, plan.request.content_stage);
         let gpu_required = source_needs_gpu(options);
         let mut encoded_readbacks = Vec::new();
         let mut gpu_dispatched_tiles = 0_u32;
@@ -1412,8 +1412,13 @@ fn render_panels(source: TerrainPreviewSource, width: u32, height: u32) -> Vec<R
     }
 }
 
-fn source_needs_cpu(options: TerrainPreviewDrawOptions) -> bool {
-    options.source != TerrainPreviewSource::Gpu || options.layer == TerrainPreviewLayer::Error
+fn source_needs_cpu(
+    options: TerrainPreviewDrawOptions,
+    content_stage: TerrainPreviewContentStage,
+) -> bool {
+    options.source != TerrainPreviewSource::Gpu
+        || options.layer == TerrainPreviewLayer::Error
+        || content_stage.includes_structured_hydrology()
 }
 
 fn source_needs_gpu(options: TerrainPreviewDrawOptions) -> bool {
@@ -1493,20 +1498,27 @@ mod tests {
     #[test]
     fn source_lanes_are_independent_except_for_error_comparison() {
         let mut options = TerrainPreviewDrawOptions::default();
-        assert!(source_needs_cpu(options));
+        assert!(source_needs_cpu(options, TerrainPreviewContentStage::Base));
         assert!(!source_needs_gpu(options));
 
         options.source = TerrainPreviewSource::Gpu;
-        assert!(!source_needs_cpu(options));
+        assert!(!source_needs_cpu(options, TerrainPreviewContentStage::Base));
         assert!(source_needs_gpu(options));
 
         options.source = TerrainPreviewSource::Split;
-        assert!(source_needs_cpu(options));
+        assert!(source_needs_cpu(options, TerrainPreviewContentStage::Base));
         assert!(source_needs_gpu(options));
 
         options.source = TerrainPreviewSource::Reference;
         options.layer = TerrainPreviewLayer::Error;
-        assert!(source_needs_cpu(options));
+        assert!(source_needs_cpu(options, TerrainPreviewContentStage::Base));
         assert!(source_needs_gpu(options));
+        assert!(source_needs_cpu(
+            TerrainPreviewDrawOptions {
+                source: TerrainPreviewSource::Gpu,
+                ..TerrainPreviewDrawOptions::default()
+            },
+            TerrainPreviewContentStage::Structured,
+        ));
     }
 }

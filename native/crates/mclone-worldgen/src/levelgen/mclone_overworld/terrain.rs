@@ -465,7 +465,7 @@ pub(super) fn sample_mclone_overworld_landform_with_streams(
     ))
 }
 
-fn apply_stream_plans(
+pub(crate) fn apply_stream_plans(
     sample: &mut McloneOverworldTerrainSample,
     world_x: i32,
     world_z: i32,

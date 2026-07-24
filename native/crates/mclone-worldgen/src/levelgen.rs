@@ -19,6 +19,7 @@ pub use feature_batch::{
     generate_overworld_features_chunks, generate_overworld_surface_chunk,
 };
 pub use generator::NoiseBasedChunkGenerator;
+pub(crate) use mclone_overworld::apply_stream_plans;
 pub use mclone_overworld::{
     MCLONE_OVERWORLD_ALPINE_EXPOSED_STONE_MIN_SLOPE, MCLONE_OVERWORLD_ALPINE_MAX_TEMPERATURE,
     MCLONE_OVERWORLD_ALPINE_MIN_Y, MCLONE_OVERWORLD_CONIFER_MAX_TEMPERATURE,

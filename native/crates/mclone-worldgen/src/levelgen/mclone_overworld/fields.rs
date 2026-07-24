@@ -21,6 +21,8 @@ pub struct McloneOverworldLargeFieldSpec {
     pub ruggedness: [McloneOverworldLargeFieldBand; 2],
     pub ridge: [McloneOverworldLargeFieldBand; 2],
     pub mountain_detail: [McloneOverworldLargeFieldBand; 2],
+    pub river: [McloneOverworldLargeFieldBand; 5],
+    pub wetland_pool: McloneOverworldLargeFieldBand,
     pub ocean_basin: McloneOverworldLargeFieldBand,
     pub seabed: [McloneOverworldLargeFieldBand; 2],
     pub temperature: [McloneOverworldLargeFieldBand; 2],
@@ -55,6 +57,14 @@ pub const MCLONE_OVERWORLD_LARGE_FIELD_SPEC: McloneOverworldLargeFieldSpec =
             field_band(0x6d63_6f76_6d64_7431, 32),
             field_band(0x6d63_6f76_6d64_7432, 8),
         ],
+        river: [
+            field_band(0x6d63_6f76_7269_7631, 768),
+            field_band(0x6d63_6f76_7269_7632, 192),
+            field_band(0x6d63_6f76_7269_7633, 384),
+            field_band(0x6d63_6f76_7269_7634, 96),
+            field_band(0x6d63_6f76_7269_7635, 32),
+        ],
+        wetland_pool: field_band(0x6d63_6f76_7765_7431, 96),
         ocean_basin: field_band(0x6d63_6f76_6261_7331, 1_536),
         seabed: [
             field_band(0x6d63_6f76_6261_7332, 384),
@@ -94,12 +104,18 @@ const MOUNTAIN_DETAIL_LARGE_DOMAIN: SeedDomain =
     SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.mountain_detail[0].domain);
 const MOUNTAIN_DETAIL_FINE_DOMAIN: SeedDomain =
     SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.mountain_detail[1].domain);
-const RIVER_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_7631);
-const RIVER_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_7632);
-const RIVER_WIDTH_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_7633);
-const RIVER_REACH_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_7634);
-const RIVER_MORPHOLOGY_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7269_7635);
-const WETLAND_POOL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_7765_7431);
+const RIVER_LARGE_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.river[0].domain);
+const RIVER_DETAIL_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.river[1].domain);
+const RIVER_WIDTH_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.river[2].domain);
+const RIVER_REACH_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.river[3].domain);
+const RIVER_MORPHOLOGY_DETAIL_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.river[4].domain);
+const WETLAND_POOL_DOMAIN: SeedDomain =
+    SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.wetland_pool.domain);
 const OCEAN_BASIN_DOMAIN: SeedDomain =
     SeedDomain::new(MCLONE_OVERWORLD_LARGE_FIELD_SPEC.ocean_basin.domain);
 const SEABED_LARGE_DOMAIN: SeedDomain =
@@ -127,12 +143,12 @@ const RIDGE_LARGE_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.ridge[0].scale;
 const RIDGE_DETAIL_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.ridge[1].scale;
 const MOUNTAIN_DETAIL_LARGE_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.mountain_detail[0].scale;
 const MOUNTAIN_DETAIL_FINE_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.mountain_detail[1].scale;
-const RIVER_LARGE_SCALE: i32 = 768;
-const RIVER_DETAIL_SCALE: i32 = 192;
-const RIVER_WIDTH_SCALE: i32 = 384;
-const RIVER_REACH_SCALE: i32 = 96;
-const RIVER_MORPHOLOGY_DETAIL_SCALE: i32 = 32;
-const WETLAND_POOL_SCALE: i32 = 96;
+const RIVER_LARGE_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.river[0].scale;
+const RIVER_DETAIL_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.river[1].scale;
+const RIVER_WIDTH_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.river[2].scale;
+const RIVER_REACH_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.river[3].scale;
+const RIVER_MORPHOLOGY_DETAIL_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.river[4].scale;
+const WETLAND_POOL_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.wetland_pool.scale;
 const OCEAN_BASIN_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.ocean_basin.scale;
 const SEABED_LARGE_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.seabed[0].scale;
 const SEABED_DETAIL_SCALE: i32 = MCLONE_OVERWORLD_LARGE_FIELD_SPEC.seabed[1].scale;

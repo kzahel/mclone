@@ -63,6 +63,7 @@ pub use surface::{
     mclone_overworld_macro_surface_top_material, mclone_overworld_preview_visible_material,
     mclone_overworld_surface_recipe,
 };
+pub(crate) use terrain::apply_stream_plans;
 pub use terrain::{
     McloneOverworldHydraulicClosureReport, analyze_mclone_overworld_hydraulic_closure,
     generate_mclone_overworld_surface_chunk,
