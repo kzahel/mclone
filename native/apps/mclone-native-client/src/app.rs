@@ -20,7 +20,8 @@ use serde_json::{Value, json};
 use winit::application::ApplicationHandler;
 use winit::dpi::PhysicalSize;
 use winit::event::{
-    DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, WindowEvent,
+    DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, Touch, TouchPhase,
+    WindowEvent,
 };
 use winit::event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
@@ -220,6 +221,56 @@ impl DesktopFlatInputAdapter {
     }
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DesktopUiTouchAction {
+    Down,
+    Move,
+    Up,
+    Cancel,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct DesktopUiTouchTracker {
+    active_contact: Option<u64>,
+}
+
+impl DesktopUiTouchTracker {
+    fn route(
+        &mut self,
+        contact_id: u64,
+        phase: TouchPhase,
+        ui_active: bool,
+    ) -> Option<DesktopUiTouchAction> {
+        if self.active_contact == Some(contact_id) {
+            if !ui_active {
+                self.active_contact = None;
+                return Some(DesktopUiTouchAction::Cancel);
+            }
+            return match phase {
+                TouchPhase::Moved => Some(DesktopUiTouchAction::Move),
+                TouchPhase::Ended => {
+                    self.active_contact = None;
+                    Some(DesktopUiTouchAction::Up)
+                }
+                TouchPhase::Cancelled => {
+                    self.active_contact = None;
+                    Some(DesktopUiTouchAction::Cancel)
+                }
+                TouchPhase::Started => None,
+            };
+        }
+        if self.active_contact.is_none() && ui_active && phase == TouchPhase::Started {
+            self.active_contact = Some(contact_id);
+            return Some(DesktopUiTouchAction::Down);
+        }
+        None
+    }
+
+    fn clear(&mut self) {
+        self.active_contact = None;
+    }
+}
+
 struct ChunkApp {
     assets: WindowSceneAssets,
     scene: SceneOptions,
@@ -238,6 +289,7 @@ struct ChunkApp {
     mouse_locked: bool,
     mouse_lock_requested: bool,
     last_cursor: Option<(f64, f64)>,
+    ui_touch: DesktopUiTouchTracker,
     ui_v2_hit_debug: bool,
     last_frame: Instant,
     next_redraw_at: Option<Instant>,
@@ -693,6 +745,7 @@ impl ChunkApp {
             mouse_locked: false,
             mouse_lock_requested: false,
             last_cursor: None,
+            ui_touch: DesktopUiTouchTracker::default(),
             ui_v2_hit_debug,
             last_frame: Instant::now(),
             next_redraw_at: None,
@@ -939,6 +992,46 @@ impl ChunkApp {
             _ => return false,
         };
         self.apply_input_outcome("mouse wheel input", result, event_loop)
+    }
+
+    fn handle_touch_input(&mut self, touch: Touch, event_loop: &ActiveEventLoop) {
+        self.flat_input.note_touch_activity();
+        let ui_active = self
+            .scene_driver
+            .as_ref()
+            .is_some_and(WinitFrameDriver::ui_is_active);
+        let Some(point) = self.gui_point(touch.location.x, touch.location.y) else {
+            self.schedule_next_redraw(event_loop);
+            return;
+        };
+        match self.ui_touch.route(touch.id, touch.phase, ui_active) {
+            Some(DesktopUiTouchAction::Down) => {
+                self.route_pointer_button_input(
+                    PointerButton::Primary,
+                    true,
+                    Some(point),
+                    event_loop,
+                );
+            }
+            Some(DesktopUiTouchAction::Move) => {
+                self.route_pointer_move_input(point, event_loop);
+            }
+            Some(DesktopUiTouchAction::Up) => {
+                self.route_pointer_button_input(
+                    PointerButton::Primary,
+                    false,
+                    Some(point),
+                    event_loop,
+                );
+            }
+            Some(DesktopUiTouchAction::Cancel) => {
+                if let Some(driver) = &mut self.scene_driver {
+                    driver.clear_ui_input();
+                }
+                self.schedule_next_redraw(event_loop);
+            }
+            None => self.schedule_next_redraw(event_loop),
+        }
     }
 
     fn apply_input_outcome(
@@ -1604,14 +1697,12 @@ impl ApplicationHandler for ChunkApp {
                 let direction = self.flat_input.normalize_mouse_wheel(delta);
                 self.route_mouse_wheel_input(direction, event_loop);
             }
-            WindowEvent::Touch(_touch) => {
-                self.flat_input.note_touch_activity();
-                self.schedule_next_redraw(event_loop);
-            }
+            WindowEvent::Touch(touch) => self.handle_touch_input(touch, event_loop),
             WindowEvent::Focused(false) => {
                 self.mouse_lock_requested = false;
                 self.clear_flat_gameplay_input();
                 self.last_cursor = None;
+                self.ui_touch.clear();
                 if let Some(driver) = &mut self.scene_driver {
                     driver.clear_ui_input();
                 }

@@ -179,6 +179,54 @@ fn desktop_touch_events_feed_shared_capability_resolution() {
 }
 
 #[test]
+fn desktop_ui_touch_tracker_owns_one_contact_through_release() {
+    let mut tracker = DesktopUiTouchTracker::default();
+
+    assert_eq!(
+        tracker.route(7, TouchPhase::Started, true),
+        Some(DesktopUiTouchAction::Down)
+    );
+    assert_eq!(tracker.route(8, TouchPhase::Started, true), None);
+    assert_eq!(tracker.route(8, TouchPhase::Ended, true), None);
+    assert_eq!(
+        tracker.route(7, TouchPhase::Moved, true),
+        Some(DesktopUiTouchAction::Move)
+    );
+    assert_eq!(
+        tracker.route(7, TouchPhase::Ended, true),
+        Some(DesktopUiTouchAction::Up)
+    );
+    assert_eq!(
+        tracker.route(8, TouchPhase::Started, true),
+        Some(DesktopUiTouchAction::Down)
+    );
+}
+
+#[test]
+fn desktop_ui_touch_tracker_cancels_without_pointer_up() {
+    let mut tracker = DesktopUiTouchTracker::default();
+
+    assert_eq!(tracker.route(4, TouchPhase::Started, false), None);
+    assert_eq!(
+        tracker.route(4, TouchPhase::Started, true),
+        Some(DesktopUiTouchAction::Down)
+    );
+    assert_eq!(
+        tracker.route(4, TouchPhase::Cancelled, true),
+        Some(DesktopUiTouchAction::Cancel)
+    );
+    assert_eq!(
+        tracker.route(5, TouchPhase::Started, true),
+        Some(DesktopUiTouchAction::Down)
+    );
+    assert_eq!(
+        tracker.route(5, TouchPhase::Moved, false),
+        Some(DesktopUiTouchAction::Cancel)
+    );
+    assert_eq!(tracker.active_contact, None);
+}
+
+#[test]
 fn desktop_gamepad_capability_requires_connection_and_meaningful_activity() {
     let mut input = DesktopFlatInputAdapter::new();
 
