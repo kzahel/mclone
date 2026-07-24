@@ -2,8 +2,8 @@
 
 Topic: `lush-grass-rendering`
 
-Status: implementation active; static grass, quality/settings, wind, and
-interaction are complete. Platform/performance closeout remains.
+Status: core implementation and platform/performance closeout completed
+2026-07-24. Off remains the default on every host.
 
 ## Scope
 
@@ -169,6 +169,70 @@ and inspected interacting grass in mono and stereo, and exercised the
 multiview pipeline on the local adapter. Headed Wayland browser WebGPU
 reported one field, 54 active cells, eight stamps, and one aligned 65,536-byte
 upload while rendering 14,033 resident grass patches.
+
+## 2026-07-24 Platform And Performance Closeout
+
+The core effect is complete across shared mesh, render-session, renderer,
+scene, UI, preference, browser-worker, Android, and XR boundaries. The final
+release offscreen timedemo used a fixed 1280x720, 240-frame run. Its frame
+wall time includes the renderer's GPU wait; this adapter/lane did not provide
+a grass-only GPU timestamp.
+
+| Tier | Avg ms | p50 | p95 | p99 | Resident patches | Avg blades | Avg draws |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Off | 2.303 | 2.201 | 6.226 | 7.872 | 0 | 0 | 0 |
+| Sparse | 4.408 | 4.131 | 6.988 | 7.420 | 28,605 | 5,537.413 | 30.850 |
+| Lush | 4.559 | 4.319 | 7.200 | 7.367 | 28,605 | 50,593.292 | 91.979 |
+| Ultra | 4.413 | 4.209 | 6.503 | 6.757 | 28,605 | 103,942.637 | 121.496 |
+
+All enabled tiers retained the same 915,360-byte compact patch artifact.
+Sparse disabled interaction. Lush and Ultra used one 128x128 field and a
+65,536-byte upload per frame during this moving-camera run. Off kept every
+grass counter structurally zero. The slight single-run Lush/Ultra time
+inversion is noise rather than reduced work: estimated blades and draw calls
+increase monotonically through the profiles.
+
+Accepted platform evidence:
+
+- native Off, Lush, fixed wind, interaction contact/recovery, placed-world,
+  side-by-side stereo, and synthetic XR images were captured under `/tmp` and
+  inspected. The final XR Lush run retained 250,359 differing eye pixels;
+- the Lush movement smoke passed all 12 scripted steps;
+- headed Wayland browser WebGPU passed the host probe, build, default-Off app
+  smoke, explicit-Lush app smoke, and mobile-sized explicit-Lush movement
+  lane. Default Off reported exact-zero grass compile and render work;
+- both the flat Android debug APK and Quest XR release APK built through the
+  documented shared scripts; and
+- formatting, affected packages, native-client, focused renderer/scene,
+  ignored grass GPU fixtures, placed multiview, browser, and Android gates
+  passed.
+
+Two unrelated repository gates remain visible rather than being folded into
+this feature. The full Rust workspace reached 549 passing tests and then
+repeatedly failed the older server persistence test
+`sqlite_restart_restores_mclone_profile_before_unseen_generation`; no commit
+in the grass series changes `mclone-server`. The thin-adapter purity script
+also reports the earlier diagnostic camera-pose call in
+`winit_frame_driver.rs`. Browser mobile Options smoke stops at the same
+pre-grass touch-UI sensitivity timeout with both Off and Lush, while the
+mobile-sized Lush movement/WebGPU lane passes.
+
+### Final Default And Follow-up Direction
+
+Keep Grass Detail Off by default on desktop, browser, Android, and Quest.
+Sparse approximately doubled average release offscreen frame wall time and
+added about 31 section draws in this conservative fixture, so even desktop
+promotion should wait for sustained in-window GPU timestamp evidence. Quest
+and mobile promotion additionally require physical-device pixels and frame
+measurements; synthetic XR and APK builds are contract evidence, not device
+performance evidence.
+
+The first optimization target is draw submission: group visible grass
+sections by template so quality does not scale toward one draw per section.
+The second is interaction traffic: skip unchanged field uploads and measure
+dirty-region uploads. Re-evaluate Sparse after those changes. Generated
+plants, snow tips, flowers, particles, and grass shadows remain optional
+sibling work and are not required for the completed core effect.
 
 ## Attribution And External References
 

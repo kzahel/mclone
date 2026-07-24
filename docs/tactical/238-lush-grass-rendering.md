@@ -1,6 +1,6 @@
 # Tactical 238: Lush Grass Rendering
 
-Status: active 2026-07-24
+Status: completed 2026-07-24
 
 Topic: [`../topics/lush-grass-rendering.md`](../topics/lush-grass-rendering.md)
 
@@ -48,13 +48,14 @@ world persistence.
 
 ## Scope
 
-This tactical owns core Slices 0 through 4 from the living topic:
+This tactical owns core Slices 0 through 5 from the living topic:
 
 1. tactical, baselines, counters, and executable contracts;
 2. static tinted patch instancing in every render topology;
 3. Off/Sparse/Lush/Ultra quality, stable LOD, UI, and preference storage;
 4. coherent world-space wind and clump character; and
-5. entity interaction history and lifecycle recovery.
+5. entity interaction history and lifecycle recovery; and
+6. cross-platform build, pixel, and performance closeout.
 
 The following remain later optional work unless a core requirement exposes a
 small prerequisite:
@@ -552,6 +553,65 @@ Compare Off/Sparse/Lush/Ultra with:
 - visible sections and draws;
 - browser worker payload and compile time; and
 - first-use pipeline/resource materialization.
+
+Implemented and accepted 2026-07-24:
+
+- The release offscreen timedemo now includes the selected Grass Detail tier,
+  resident patch and byte counts, average drawn patches, estimated blades and
+  draw calls, interaction activity, and frame-time p50/p95/p99. The existing
+  report remains machine-readable JSON.
+- A fixed 1280x720, 240-frame release run measured the four profiles. Frame
+  time is end-to-end wall time including the renderer's GPU wait; the local
+  adapter did not expose a grass-specific timestamp query in this lane.
+
+| Tier | Avg ms | p50 | p95 | p99 | Max | Resident patches | Avg drawn | Avg blades | Avg draws |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Off | 2.303 | 2.201 | 6.226 | 7.872 | 9.116 | 0 | 0 | 0 | 0 |
+| Sparse | 4.408 | 4.131 | 6.988 | 7.420 | 9.367 | 28,605 | 4,574.654 | 5,537.413 | 30.850 |
+| Lush | 4.559 | 4.319 | 7.200 | 7.367 | 7.671 | 28,605 | 13,737.629 | 50,593.292 | 91.979 |
+| Ultra | 4.413 | 4.209 | 6.503 | 6.757 | 7.090 | 28,605 | 17,796.592 | 103,942.637 | 121.496 |
+
+  Enabled tiers retained 915,360 patch bytes. Lush and Ultra averaged one
+  interaction field and 24.75 active cells, recorded 597 stamps, and uploaded
+  65,536 interaction bytes per frame. Off and Sparse recorded zero
+  interaction fields, cells, stamps, and upload bytes. Setup time was
+  3,150.138 ms for Off and 3,674.383/3,650.980/3,695.648 ms for
+  Sparse/Lush/Ultra. The single-run Lush/Ultra time inversion is measurement
+  noise; resident, blade, and draw work still increase monotonically.
+- Fixed-camera native Off and Lush captures were inspected at
+  `/tmp/mclone-238-closeout-desktop-{off,lush}.png`. Synthetic XR Lush passed
+  with 250,359 differing eye pixels, and the inspected
+  `/tmp/mclone-238-closeout-xr-lush.png` showed consistent source-world grass
+  in both eyes. The enabled movement smoke completed all 12 scripted steps in
+  14,360.893 ms.
+- Headed Wayland WebGPU passed the host probe and browser build. The default
+  browser app restored Off and reported exact-zero compile policy, patch,
+  draw, wind, and interaction work. The Lush app path rendered 14,033 resident
+  patches and exercised browser-worker decoding, WebGPU residency, wind, and
+  interaction. The inspected browser canvas showed the effect.
+- The mobile-sized browser movement lane passed with explicit Lush at a
+  780x1688 backing size. It retained 13,110 patches (419,520 bytes), one
+  interaction field, and a 65,536-byte field upload; its final scripted camera
+  looked into the sky, so the earlier app capture remains the browser pixel
+  acceptance image. Three mobile Options smoke attempts, including default
+  Off and explicit Lush, stopped at the same pre-existing 10-second touch-UI
+  sensitivity wait before any grass assertion.
+- Both documented Android boundaries built from the shared implementation:
+  the flat debug APK and Quest XR release APK completed their Gradle builds.
+  No physical Android or Quest device was attached, so device performance and
+  promotion of a non-Off default remain deliberately unclaimed.
+- Formatting, the complete affected Rust package set, 191 native-client
+  tests, the focused scene/render suites, all three ignored grass GPU gates,
+  the placed mono/stereo/multiview fixture, web build, browser smokes, Android
+  flat, and Android XR passed. The full workspace reached 549 passing tests
+  and one repeatable pre-existing server persistence failure:
+  `sqlite_restart_restores_mclone_profile_before_unseen_generation` expected
+  `Some(2)` and observed `None`. The grass series does not touch
+  `mclone-server`.
+- `native:thin-adapters:purity` remains blocked by the pre-existing
+  `force_mono_player_pose_reconcile_for_diagnostics` call introduced before
+  this series in `winit_frame_driver.rs`. No grass policy was added to an app
+  adapter.
 
 Physical Quest evidence is required only before enabling a non-Off Quest
 default. If no Quest is attached, Android XR build and synthetic/full-frame
