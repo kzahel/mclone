@@ -79,7 +79,7 @@ test("orbits independently from URL-addressed terrain state", () => {
     600,
   );
   assert.ok(camera.yaw > DEFAULT_TERRAIN_LAB_CAMERA.yaw);
-  assert.ok(camera.pitch > DEFAULT_TERRAIN_LAB_CAMERA.pitch);
+  assert.ok(camera.pitch < DEFAULT_TERRAIN_LAB_CAMERA.pitch);
   assert.deepEqual(DEFAULT_TERRAIN_LAB_STATE, {
     seed: "-98765",
     centerX: -304,

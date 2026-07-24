@@ -17,6 +17,9 @@ test("generates terrain, round-trips controls, and completes comparison", async 
   await expect(page.locator("[data-testid='lab-status']")).toContainText("ready");
   await waitForCurrentComparison(page);
 
+  const sourceControls = page.getByTestId("preview-source-controls");
+  await expect(sourceControls).toBeVisible();
+  await expect(sourceControls).toContainText("The thin pale line is only the seam");
   const diagnostics = page.locator("[data-testid='terrain-diagnostics']");
   await expect(diagnostics).not.toContainText("Base mean Δpending");
   const shell = page.locator(".appShell");
@@ -32,10 +35,14 @@ test("generates terrain, round-trips controls, and completes comparison", async 
 
   const initialRevision = Number(await shell.getAttribute("data-render-revision"));
   const initialYaw = Number(await shell.getAttribute("data-camera-yaw"));
+  const initialPitch = Number(await shell.getAttribute("data-camera-pitch"));
   const initialUrl = page.url();
   const stage = page.getByTestId("terrain-stage");
   const stageBox = await stage.boundingBox();
+  const sourceControlsBox = await sourceControls.boundingBox();
   expect(stageBox).not.toBeNull();
+  expect(sourceControlsBox).not.toBeNull();
+  expect(sourceControlsBox!.y + sourceControlsBox!.height).toBeLessThanOrEqual(stageBox!.y + 1);
   await page.mouse.move(stageBox!.x + stageBox!.width * 0.5, stageBox!.y + stageBox!.height * 0.5);
   await page.mouse.down();
   await page.mouse.move(
@@ -46,6 +53,9 @@ test("generates terrain, round-trips controls, and completes comparison", async 
   await expect.poll(
     async () => Number(await shell.getAttribute("data-camera-yaw")),
   ).not.toBe(initialYaw);
+  await expect.poll(
+    async () => Number(await shell.getAttribute("data-camera-pitch")),
+  ).toBeLessThan(initialPitch);
   expect(page.url()).toBe(initialUrl);
   await page.getByRole("button", { name: "Reset 3D camera" }).click();
   await expect.poll(

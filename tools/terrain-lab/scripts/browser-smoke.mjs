@@ -63,11 +63,18 @@ try {
   const shell = page.locator(".appShell");
   await page.locator("[data-testid='lab-status']").waitFor({ state: "visible" });
   await waitForComparison(shell);
+  const sourceControls = page.locator("[data-testid='preview-source-controls']");
+  await sourceControls.waitFor({ state: "visible" });
+  const sourceGuide = await sourceControls.innerText();
+  if (!sourceGuide.includes("The thin pale line is only the seam")) {
+    throw new Error(`Terrain Lab compare guidance is missing:\n${sourceGuide}`);
+  }
   await page.locator("[data-testid='terrain-diagnostics']").scrollIntoViewIfNeeded();
   await settlePaint(page);
   await page.evaluate(() => window.scrollTo(0, 0));
   await settlePaint(page);
   const initialRevision = Number(await shell.getAttribute("data-render-revision"));
+  const initialPitch = Number(await shell.getAttribute("data-camera-pitch"));
   const initialUrl = page.url();
   const comparisonMetrics = await readComparisonMetrics(shell);
   assertLargeFieldMetrics(comparisonMetrics, "2 km review");
@@ -87,6 +94,11 @@ try {
   if (!stageBox) {
     throw new Error("Terrain Lab stage has no interactive bounds");
   }
+  const sourceControlsBox = await sourceControls.boundingBox();
+  if (!sourceControlsBox
+      || sourceControlsBox.y + sourceControlsBox.height > stageBox.y + 1) {
+    throw new Error("Terrain Lab source controls are not immediately before the preview");
+  }
   await page.mouse.move(
     stageBox.x + stageBox.width * 0.5,
     stageBox.y + stageBox.height * 0.5,
@@ -101,6 +113,12 @@ try {
   const orbitRevision = Number(await shell.getAttribute("data-render-revision"));
   if (page.url() !== initialUrl) {
     throw new Error(`3D orbit changed terrain URL state: ${page.url()}`);
+  }
+  const orbitPitch = Number(await shell.getAttribute("data-camera-pitch"));
+  if (!(orbitPitch < initialPitch)) {
+    throw new Error(
+      `Upward orbit drag did not lower pitch: ${initialPitch} -> ${orbitPitch}`,
+    );
   }
   await page.locator("canvas[aria-label='Live GPU terrain preview']").screenshot({
     path: orbitCapture,

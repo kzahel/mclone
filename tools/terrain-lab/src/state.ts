@@ -120,7 +120,7 @@ export function orbitTerrainLabCamera(
     yaw: camera.yaw + (deltaX / Math.max(width, 1)) * Math.PI * 1.5,
     pitch: Math.max(
       0.12,
-      Math.min(1.25, camera.pitch - (deltaY / Math.max(height, 1)) * Math.PI),
+      Math.min(1.25, camera.pitch + (deltaY / Math.max(height, 1)) * Math.PI),
     ),
   };
 }

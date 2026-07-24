@@ -23,7 +23,7 @@ var<storage, read> reference_samples: array<TerrainPreviewSample>;
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec3<f32>,
-    @location(1) split_line: f32,
+    @location(1) split_coordinate: f32,
 };
 
 fn grid_corner(vertex_in_cell: u32) -> vec2<u32> {
@@ -202,17 +202,17 @@ fn vertex_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     var out: VertexOutput;
     out.position = vec4<f32>(clip_x, clip_y, clip_z, 1.0);
     out.color = sample_color(sample, reference, gpu, light);
-    out.split_line = select(
-        0.0,
-        1.0,
-        params.seed_source_view.z == 2u
-            && abs(i32(sample_x) - i32(cells / 2u)) <= 1,
-    );
+    out.split_coordinate = f32(sample_x) - f32(cells) * 0.5;
     return out;
 }
 
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    let color = mix(input.color, vec3<f32>(0.96, 0.94, 0.84), input.split_line * 0.82);
+    var seam = 0.0;
+    if params.seed_source_view.z == 2u {
+        let pixel_width = max(fwidth(input.split_coordinate) * 1.15, 0.0001);
+        seam = 1.0 - smoothstep(0.0, pixel_width, abs(input.split_coordinate));
+    }
+    let color = mix(input.color, vec3<f32>(0.84, 0.89, 0.81), seam * 0.42);
     return vec4<f32>(color, 1.0);
 }

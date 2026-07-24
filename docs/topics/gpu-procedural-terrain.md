@@ -147,11 +147,18 @@ The terrain compute pipeline now exists in
 [`mclone-terrain-lab`](../../native/apps/mclone-terrain-lab/) owns the narrow
 browser surface/device facade. [`tools/terrain-lab`](../../tools/terrain-lab/)
 owns URL state and responsive presentation. Three-dimensional left drag now
-orbits without changing URL-addressed geography; Shift+left or middle drag
-pans, map drag pans, and camera reset is distinct from the named fixed-site
-action. Production Reference is the initial source. The deployed product route
-is `/terrain/`; it does not load the game client, asset packs, a server,
-canonical chunks, lighting, collision, or persistence.
+orbits with conventional pitch direction without changing URL-addressed
+geography; Shift+left or middle drag pans, map drag pans, and camera reset is
+distinct from the named fixed-site action. The source selector and its live
+comparison contract sit directly above the preview on every viewport. Compare
+splices CPU-final terrain on the left and GPU production-base terrain on the
+right, with a subdued center seam; its guidance names coastlines, broad
+elevation, and mountain shape as the intended comparison and calls out the
+expected CPU-only river and wetland residual. The seam is derivative-sized to
+remain a thin screen-space line while still orbiting with the sampled terrain.
+Production Reference is the initial source. The deployed product route is
+`/terrain/`; it does not load the game client, asset packs, a server, canonical
+chunks, lighting, collision, or persistence.
 
 Normal terrain and the current Far LOD path still arrive at `mclone-render` as
 CPU-constructed mesh products. The new tile is a reusable experimental

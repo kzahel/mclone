@@ -26,9 +26,9 @@ import {
 type LabStatus = "loading" | "ready" | "rendering" | "error";
 
 const SOURCE_OPTIONS: Array<{ value: TerrainLabSource; label: string; note: string }> = [
-  { value: "split", label: "Compare", note: "Final reference left, GPU base fields right" },
+  { value: "reference", label: "CPU final", note: "Complete production CPU sampler" },
+  { value: "split", label: "Compare", note: "CPU final left, GPU production base right" },
   { value: "gpu", label: "GPU base", note: "Production fields through base surface" },
-  { value: "reference", label: "Reference", note: "Production CPU sampler" },
 ];
 
 const LAYER_OPTIONS: Array<{ value: TerrainLabLayer; label: string }> = [
@@ -123,6 +123,15 @@ export function App(): React.JSX.Element {
 
       <main className="labWorkbench">
         <section className="viewerColumn" aria-label="Terrain preview">
+          <div className="previewToolbar" data-testid="preview-source-controls">
+            <SegmentedControl<TerrainLabSource>
+              label="Preview source"
+              value={state.source}
+              options={SOURCE_OPTIONS}
+              onChange={(source) => patchState({ source })}
+            />
+            <SourceGuide source={state.source} />
+          </div>
           <TerrainCanvas
             state={state}
             camera={camera}
@@ -230,12 +239,6 @@ export function App(): React.JSX.Element {
               ]}
               onChange={(view) => patchState({ view })}
             />
-            <SegmentedControl<TerrainLabSource>
-              label="Data source"
-              value={state.source}
-              options={SOURCE_OPTIONS}
-              onChange={(source) => patchState({ source })}
-            />
             <label className="fieldLabel">
               <span>Diagnostic layer</span>
               <select
@@ -265,6 +268,42 @@ export function App(): React.JSX.Element {
           </ControlSection>
         </aside>
       </main>
+    </div>
+  );
+}
+
+function SourceGuide({ source }: { source: TerrainLabSource }): React.JSX.Element {
+  if (source === "split") {
+    return (
+      <div className="sourceGuide">
+        <strong>Compare split</strong>
+        <span>
+          CPU final is on the labeled left side; GPU production base is on the right.
+          The thin pale line is only the seam and orbits with the terrain. Compare
+          coastlines, broad elevations, and mountain shapes. Final rivers and wetlands
+          may appear only on the CPU side.
+        </span>
+      </div>
+    );
+  }
+  if (source === "gpu") {
+    return (
+      <div className="sourceGuide">
+        <strong>GPU production base</strong>
+        <span>
+          Production large-scale fields through bathymetry. Final rivers, wetlands,
+          and planned streams are not ported yet.
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="sourceGuide">
+      <strong>CPU final reference</strong>
+      <span>
+        Complete production CPU terrain, including final rivers, wetlands, and planned
+        streams.
+      </span>
     </div>
   );
 }
