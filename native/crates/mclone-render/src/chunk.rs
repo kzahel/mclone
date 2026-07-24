@@ -2123,6 +2123,7 @@ impl ElementRangeAllocator {
 
 #[derive(Clone, Debug)]
 struct GpuTexturedSectionMesh {
+    vertex_page: usize,
     vertex_range: Range<u32>,
     index_range: Range<u32>,
     solid_index_count: u32,
@@ -2163,15 +2164,19 @@ impl GpuTexturedSectionMesh {
 }
 
 struct GpuTexturedSectionArena {
-    vertex_buffer: wgpu::Buffer,
+    vertex_pages: Vec<GpuTexturedSectionVertexArena>,
     index_buffer: wgpu::Buffer,
-    vertex_ranges: ElementRangeAllocator,
     index_ranges: ElementRangeAllocator,
     indirect_buffer: wgpu::Buffer,
     indirect_draw_capacity_per_slot: u32,
     max_vertex_capacity: u32,
     max_index_capacity: u32,
     multi_draw_indirect: bool,
+}
+
+struct GpuTexturedSectionVertexArena {
+    buffer: wgpu::Buffer,
+    ranges: ElementRangeAllocator,
 }
 
 impl GpuTexturedSectionArena {
@@ -2188,7 +2193,7 @@ impl GpuTexturedSectionArena {
         let max_index_capacity =
             u32::try_from(max_buffer_size / std::mem::size_of::<u32>() as u64).unwrap_or(u32::MAX);
         let vertex_capacity = initial_arena_capacity(
-            initial_vertex_count,
+            initial_vertex_count.min(max_vertex_capacity),
             TERRAIN_ARENA_MIN_VERTEX_CAPACITY,
             max_vertex_capacity,
         )?;
@@ -2209,14 +2214,10 @@ impl GpuTexturedSectionArena {
             );
         }
         Ok(Self {
-            vertex_buffer: device.create_buffer(&wgpu::BufferDescriptor {
-                label: Some("mclone_textured_section_vertex_arena"),
-                size: u64::from(vertex_capacity) * TEXTURED_VERTEX_BYTE_SIZE,
-                usage: wgpu::BufferUsages::VERTEX
-                    | wgpu::BufferUsages::COPY_SRC
-                    | wgpu::BufferUsages::COPY_DST,
-                mapped_at_creation: false,
-            }),
+            vertex_pages: vec![GpuTexturedSectionVertexArena {
+                buffer: create_textured_section_vertex_arena(device, vertex_capacity),
+                ranges: ElementRangeAllocator::new(vertex_capacity),
+            }],
             index_buffer: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("mclone_textured_section_index_arena"),
                 size: u64::from(index_capacity) * std::mem::size_of::<u32>() as u64,
@@ -2225,7 +2226,6 @@ impl GpuTexturedSectionArena {
                     | wgpu::BufferUsages::COPY_DST,
                 mapped_at_creation: false,
             }),
-            vertex_ranges: ElementRangeAllocator::new(vertex_capacity),
             index_ranges: ElementRangeAllocator::new(index_capacity),
             indirect_buffer: device.create_buffer(&wgpu::BufferDescriptor {
                 label: Some("mclone_textured_section_indirect_draws"),
@@ -2257,9 +2257,10 @@ impl GpuTexturedSectionArena {
         let vertex_bytes = textured_vertex_bytes(mesh);
         timing.vertex_bytes_ms = timing_elapsed_ms(vertex_bytes_start);
         let vertex_buffer_start = timing_now();
-        let vertex_range = self.allocate_vertices(device, queue, mesh.vertices.len() as u32)?;
+        let (vertex_page, vertex_range) =
+            self.allocate_vertices(device, queue, mesh.vertices.len() as u32)?;
         queue.write_buffer(
-            &self.vertex_buffer,
+            &self.vertex_pages[vertex_page].buffer,
             u64::from(vertex_range.start) * TEXTURED_VERTEX_BYTE_SIZE,
             &vertex_bytes,
         );
@@ -2272,7 +2273,7 @@ impl GpuTexturedSectionArena {
         let index_range = match self.allocate_indices(device, queue, mesh.indices.len() as u32) {
             Ok(range) => range,
             Err(error) => {
-                self.vertex_ranges.release(vertex_range);
+                self.vertex_pages[vertex_page].ranges.release(vertex_range);
                 return Err(error);
             }
         };
@@ -2285,6 +2286,7 @@ impl GpuTexturedSectionArena {
         timing.total_ms = timing_elapsed_ms(total_start);
         Ok((
             GpuTexturedSectionMesh {
+                vertex_page,
                 vertex_range,
                 index_range,
                 solid_index_count: mesh.solid_index_count().min(mesh.indices.len() as u32),
@@ -2295,7 +2297,9 @@ impl GpuTexturedSectionArena {
     }
 
     fn release(&mut self, mesh: GpuTexturedSectionMesh) {
-        self.vertex_ranges.release(mesh.vertex_range);
+        self.vertex_pages[mesh.vertex_page]
+            .ranges
+            .release(mesh.vertex_range);
         self.index_ranges.release(mesh.index_range);
     }
 
@@ -2349,11 +2353,17 @@ impl GpuTexturedSectionArena {
     }
 
     fn vertex_used_bytes(&self) -> u64 {
-        u64::from(self.vertex_ranges.used()) * TEXTURED_VERTEX_BYTE_SIZE
+        self.vertex_pages
+            .iter()
+            .map(|page| u64::from(page.ranges.used()) * TEXTURED_VERTEX_BYTE_SIZE)
+            .sum()
     }
 
     fn vertex_capacity_bytes(&self) -> u64 {
-        u64::from(self.vertex_ranges.capacity) * TEXTURED_VERTEX_BYTE_SIZE
+        self.vertex_pages
+            .iter()
+            .map(|page| u64::from(page.ranges.capacity) * TEXTURED_VERTEX_BYTE_SIZE)
+            .sum()
     }
 
     fn index_used_bytes(&self) -> u64 {
@@ -2369,25 +2379,48 @@ impl GpuTexturedSectionArena {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         count: u32,
-    ) -> Result<Range<u32>> {
-        if let Some(range) = self.vertex_ranges.allocate(count) {
-            return Ok(range);
+    ) -> Result<(usize, Range<u32>)> {
+        for (page_index, page) in self.vertex_pages.iter_mut().enumerate() {
+            if let Some(range) = page.ranges.allocate(count) {
+                return Ok((page_index, range));
+            }
         }
-        let capacity =
-            grown_arena_capacity(self.vertex_ranges.capacity, count, self.max_vertex_capacity)?;
-        self.vertex_buffer = grow_arena_buffer(
-            device,
-            queue,
-            &self.vertex_buffer,
-            "mclone_textured_section_vertex_arena",
-            u64::from(self.vertex_ranges.capacity) * TEXTURED_VERTEX_BYTE_SIZE,
-            u64::from(capacity) * TEXTURED_VERTEX_BYTE_SIZE,
-            wgpu::BufferUsages::VERTEX,
-        );
-        self.vertex_ranges.extend(capacity);
-        self.vertex_ranges
+        for (page_index, page) in self.vertex_pages.iter_mut().enumerate() {
+            if page.ranges.capacity >= self.max_vertex_capacity {
+                continue;
+            }
+            let capacity =
+                grown_arena_capacity(page.ranges.capacity, count, self.max_vertex_capacity)?;
+            page.buffer = grow_arena_buffer(
+                device,
+                queue,
+                &page.buffer,
+                "mclone_textured_section_vertex_arena",
+                u64::from(page.ranges.capacity) * TEXTURED_VERTEX_BYTE_SIZE,
+                u64::from(capacity) * TEXTURED_VERTEX_BYTE_SIZE,
+                wgpu::BufferUsages::VERTEX,
+            );
+            page.ranges.extend(capacity);
+            let range = page
+                .ranges
+                .allocate(count)
+                .context("grown terrain vertex arena must fit requested range")?;
+            return Ok((page_index, range));
+        }
+        let capacity = initial_arena_capacity(
+            count,
+            TERRAIN_ARENA_MIN_VERTEX_CAPACITY,
+            self.max_vertex_capacity,
+        )?;
+        let mut ranges = ElementRangeAllocator::new(capacity);
+        let range = ranges
             .allocate(count)
-            .context("grown terrain vertex arena must fit requested range")
+            .context("new terrain vertex arena page must fit requested range")?;
+        self.vertex_pages.push(GpuTexturedSectionVertexArena {
+            buffer: create_textured_section_vertex_arena(device, capacity),
+            ranges,
+        });
+        Ok((self.vertex_pages.len() - 1, range))
     }
 
     fn allocate_indices(
@@ -2448,6 +2481,17 @@ fn indirect_buffer_size(draw_capacity_per_slot: u32) -> Result<wgpu::BufferAddre
         .context("terrain indirect buffer size overflow")
 }
 
+fn create_textured_section_vertex_arena(device: &wgpu::Device, capacity: u32) -> wgpu::Buffer {
+    device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("mclone_textured_section_vertex_arena"),
+        size: u64::from(capacity) * TEXTURED_VERTEX_BYTE_SIZE,
+        usage: wgpu::BufferUsages::VERTEX
+            | wgpu::BufferUsages::COPY_SRC
+            | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    })
+}
+
 fn grow_arena_buffer(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -2475,18 +2519,27 @@ fn bind_textured_section_arena<'pass>(
     pass: &mut wgpu::RenderPass<'pass>,
     arena: &'pass GpuTexturedSectionArena,
 ) {
-    pass.set_vertex_buffer(0, arena.vertex_buffer.slice(..));
     pass.set_index_buffer(arena.index_buffer.slice(..), wgpu::IndexFormat::Uint32);
 }
 
-fn draw_textured_section_mesh_range(
-    pass: &mut wgpu::RenderPass<'_>,
+fn bind_textured_section_vertex_page<'pass>(
+    pass: &mut wgpu::RenderPass<'pass>,
+    arena: &'pass GpuTexturedSectionArena,
+    page: usize,
+) {
+    pass.set_vertex_buffer(0, arena.vertex_pages[page].buffer.slice(..));
+}
+
+fn draw_textured_section_mesh_range<'pass>(
+    pass: &mut wgpu::RenderPass<'pass>,
+    arena: &'pass GpuTexturedSectionArena,
     mesh: &GpuTexturedSectionMesh,
     range: Range<u32>,
 ) {
     if range.is_empty() {
         return;
     }
+    bind_textured_section_vertex_page(pass, arena, mesh.vertex_page);
     pass.draw_indexed(
         mesh.index_range.start + range.start..mesh.index_range.start + range.end,
         mesh.vertex_range.start as i32,
@@ -2509,9 +2562,14 @@ impl TerrainIndirectDrawSpan {
 #[derive(Clone, Debug, Default)]
 struct TerrainIndirectDrawBatch {
     args: Vec<wgpu::util::DrawIndexedIndirectArgs>,
+    pages: Vec<TerrainIndirectDrawPage>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct TerrainIndirectDrawPage {
+    vertex_page: usize,
     solid: TerrainIndirectDrawSpan,
     cutout: TerrainIndirectDrawSpan,
-    translucent: TerrainIndirectDrawSpan,
 }
 
 impl TerrainIndirectDrawBatch {
@@ -5305,13 +5363,23 @@ impl TexturedSectionDrawResources {
             pass.set_pipeline(selected.solid_pipeline());
             for (key, mesh) in &self.sections {
                 if culling.drawn_keys.contains(key) {
-                    draw_textured_section_mesh_range(&mut pass, mesh, mesh.solid_index_range());
+                    draw_textured_section_mesh_range(
+                        &mut pass,
+                        &self.section_arena,
+                        mesh,
+                        mesh.solid_index_range(),
+                    );
                 }
             }
             pass.set_pipeline(selected.cutout_pipeline());
             for (key, mesh) in &self.sections {
                 if culling.drawn_keys.contains(key) {
-                    draw_textured_section_mesh_range(&mut pass, mesh, mesh.cutout_index_range());
+                    draw_textured_section_mesh_range(
+                        &mut pass,
+                        &self.section_arena,
+                        mesh,
+                        mesh.cutout_index_range(),
+                    );
                 }
             }
         }
@@ -5473,13 +5541,23 @@ impl TexturedSectionDrawResources {
             pass.set_pipeline(selected.solid_pipeline());
             for (key, mesh) in &self.sections {
                 if prepared_draw.draws_in_eye(*key, stereo_eye_for_slot(view_slot)) {
-                    draw_textured_section_mesh_range(&mut pass, mesh, mesh.solid_index_range());
+                    draw_textured_section_mesh_range(
+                        &mut pass,
+                        &self.section_arena,
+                        mesh,
+                        mesh.solid_index_range(),
+                    );
                 }
             }
             pass.set_pipeline(selected.cutout_pipeline());
             for (key, mesh) in &self.sections {
                 if prepared_draw.draws_in_eye(*key, stereo_eye_for_slot(view_slot)) {
-                    draw_textured_section_mesh_range(&mut pass, mesh, mesh.cutout_index_range());
+                    draw_textured_section_mesh_range(
+                        &mut pass,
+                        &self.section_arena,
+                        mesh,
+                        mesh.cutout_index_range(),
+                    );
                 }
             }
         }
@@ -5574,13 +5652,23 @@ impl TexturedSectionDrawResources {
             pass.set_pipeline(multiview.solid_pipeline());
             for (key, mesh) in &self.sections {
                 if prepared_draw.drawn_keys.contains(key) {
-                    draw_textured_section_mesh_range(&mut pass, mesh, mesh.solid_index_range());
+                    draw_textured_section_mesh_range(
+                        &mut pass,
+                        &self.section_arena,
+                        mesh,
+                        mesh.solid_index_range(),
+                    );
                 }
             }
             pass.set_pipeline(multiview.cutout_pipeline());
             for (key, mesh) in &self.sections {
                 if prepared_draw.drawn_keys.contains(key) {
-                    draw_textured_section_mesh_range(&mut pass, mesh, mesh.cutout_index_range());
+                    draw_textured_section_mesh_range(
+                        &mut pass,
+                        &self.section_arena,
+                        mesh,
+                        mesh.cutout_index_range(),
+                    );
                 }
             }
         }
@@ -5642,7 +5730,12 @@ impl TexturedSectionDrawResources {
                 continue;
             }
             if let Some(mesh) = self.sections.get(key) {
-                draw_textured_section_mesh_range(&mut pass, mesh, mesh.translucent_index_range());
+                draw_textured_section_mesh_range(
+                    &mut pass,
+                    &self.section_arena,
+                    mesh,
+                    mesh.translucent_index_range(),
+                );
             }
         }
     }
@@ -5710,7 +5803,12 @@ impl TexturedSectionDrawResources {
                 continue;
             }
             if let Some(mesh) = self.sections.get(key) {
-                draw_textured_section_mesh_range(&mut pass, mesh, mesh.translucent_index_range());
+                draw_textured_section_mesh_range(
+                    &mut pass,
+                    &self.section_arena,
+                    mesh,
+                    mesh.translucent_index_range(),
+                );
             }
         }
     }
@@ -5761,7 +5859,12 @@ impl TexturedSectionDrawResources {
         pass.set_pipeline(&renderer.translucent_pipeline);
         for key in keys {
             if let Some(mesh) = self.sections.get(key) {
-                draw_textured_section_mesh_range(&mut pass, mesh, mesh.translucent_index_range());
+                draw_textured_section_mesh_range(
+                    &mut pass,
+                    &self.section_arena,
+                    mesh,
+                    mesh.translucent_index_range(),
+                );
             }
         }
         Ok(())
@@ -5821,7 +5924,12 @@ impl TexturedSectionDrawResources {
         pass.set_pipeline(multiview.translucent_pipeline());
         for key in keys {
             if let Some(mesh) = self.sections.get(key) {
-                draw_textured_section_mesh_range(&mut pass, mesh, mesh.translucent_index_range());
+                draw_textured_section_mesh_range(
+                    &mut pass,
+                    &self.section_arena,
+                    mesh,
+                    mesh.translucent_index_range(),
+                );
             }
         }
         Ok(())
@@ -5920,14 +6028,24 @@ impl TexturedSectionDrawResources {
                     if !prepared_draw.drawn_keys.contains(key) {
                         continue;
                     }
-                    draw_textured_section_mesh_range(&mut pass, mesh, mesh.solid_index_range());
+                    draw_textured_section_mesh_range(
+                        &mut pass,
+                        &self.section_arena,
+                        mesh,
+                        mesh.solid_index_range(),
+                    );
                 }
                 pass.set_pipeline(&renderer.cutout_pipeline);
                 for (key, mesh) in &self.sections {
                     if !prepared_draw.drawn_keys.contains(key) {
                         continue;
                     }
-                    draw_textured_section_mesh_range(&mut pass, mesh, mesh.cutout_index_range());
+                    draw_textured_section_mesh_range(
+                        &mut pass,
+                        &self.section_arena,
+                        mesh,
+                        mesh.cutout_index_range(),
+                    );
                 }
             }
             if phase.draws_translucent() {
@@ -5936,6 +6054,7 @@ impl TexturedSectionDrawResources {
                     if let Some(mesh) = self.sections.get(key) {
                         draw_textured_section_mesh_range(
                             &mut pass,
+                            &self.section_arena,
                             mesh,
                             mesh.translucent_index_range(),
                         );
@@ -6067,31 +6186,31 @@ impl TexturedSectionDrawResources {
         let encode_start = timing.as_ref().map(|_| timing_now());
         let indirect_batch = if self.section_arena.multi_draw_indirect {
             let mut batch = TerrainIndirectDrawBatch::default();
-            let first = batch.begin_span();
             if phase.draws_opaque() {
-                for (key, mesh) in &self.sections {
-                    if culling.drawn_keys.contains(key) {
-                        batch.push(mesh, mesh.solid_index_range());
+                for vertex_page in 0..self.section_arena.vertex_pages.len() {
+                    let first = batch.begin_span();
+                    for (key, mesh) in &self.sections {
+                        if mesh.vertex_page == vertex_page && culling.drawn_keys.contains(key) {
+                            batch.push(mesh, mesh.solid_index_range());
+                        }
+                    }
+                    let solid = batch.finish_span(first);
+                    let first = batch.begin_span();
+                    for (key, mesh) in &self.sections {
+                        if mesh.vertex_page == vertex_page && culling.drawn_keys.contains(key) {
+                            batch.push(mesh, mesh.cutout_index_range());
+                        }
+                    }
+                    let cutout = batch.finish_span(first);
+                    if solid.count > 0 || cutout.count > 0 {
+                        batch.pages.push(TerrainIndirectDrawPage {
+                            vertex_page,
+                            solid,
+                            cutout,
+                        });
                     }
                 }
             }
-            batch.solid = batch.finish_span(first);
-            let first = batch.begin_span();
-            if phase.draws_opaque() {
-                for (key, mesh) in &self.sections {
-                    if culling.drawn_keys.contains(key) {
-                        batch.push(mesh, mesh.cutout_index_range());
-                    }
-                }
-            }
-            batch.cutout = batch.finish_span(first);
-            let first = batch.begin_span();
-            if phase.draws_translucent() {
-                for (_, mesh) in &translucent_sections {
-                    batch.push(mesh, mesh.translucent_index_range());
-                }
-            }
-            batch.translucent = batch.finish_span(first);
             let offset = self.section_arena.write_indirect_args(
                 queue,
                 terrain_indirect_slot(view_slot, phase),
@@ -6101,7 +6220,7 @@ impl TexturedSectionDrawResources {
         } else {
             None
         };
-        let direct_draw_calls = if indirect_batch.is_none() {
+        let direct_opaque_draw_calls = if indirect_batch.is_none() {
             let opaque = if phase.draws_opaque() {
                 self.sections
                     .iter()
@@ -6120,10 +6239,11 @@ impl TexturedSectionDrawResources {
             } else {
                 0
             };
-            opaque + translucent_sections.len()
+            opaque
         } else {
             0
         };
+        let direct_draw_calls = direct_opaque_draw_calls + translucent_sections.len();
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("mclone_textured_section_render_pass"),
@@ -6150,29 +6270,39 @@ impl TexturedSectionDrawResources {
             pass.set_bind_group(1, &self.shared.atlas.bind_group, &[]);
             bind_textured_section_arena(&mut pass, &self.section_arena);
             if let Some((batch, offset)) = &indirect_batch {
-                if batch.solid.count > 0 {
-                    pass.set_pipeline(&self.shared.renderer.solid_pipeline);
-                    pass.multi_draw_indexed_indirect(
-                        &self.section_arena.indirect_buffer,
-                        batch.solid.byte_offset(*offset),
-                        batch.solid.count,
+                for page in &batch.pages {
+                    bind_textured_section_vertex_page(
+                        &mut pass,
+                        &self.section_arena,
+                        page.vertex_page,
                     );
+                    if page.solid.count > 0 {
+                        pass.set_pipeline(&self.shared.renderer.solid_pipeline);
+                        pass.multi_draw_indexed_indirect(
+                            &self.section_arena.indirect_buffer,
+                            page.solid.byte_offset(*offset),
+                            page.solid.count,
+                        );
+                    }
+                    if page.cutout.count > 0 {
+                        pass.set_pipeline(&self.shared.renderer.cutout_pipeline);
+                        pass.multi_draw_indexed_indirect(
+                            &self.section_arena.indirect_buffer,
+                            page.cutout.byte_offset(*offset),
+                            page.cutout.count,
+                        );
+                    }
                 }
-                if batch.cutout.count > 0 {
-                    pass.set_pipeline(&self.shared.renderer.cutout_pipeline);
-                    pass.multi_draw_indexed_indirect(
-                        &self.section_arena.indirect_buffer,
-                        batch.cutout.byte_offset(*offset),
-                        batch.cutout.count,
-                    );
-                }
-                if batch.translucent.count > 0 {
+                if phase.draws_translucent() {
                     pass.set_pipeline(&self.shared.renderer.translucent_pipeline);
-                    pass.multi_draw_indexed_indirect(
-                        &self.section_arena.indirect_buffer,
-                        batch.translucent.byte_offset(*offset),
-                        batch.translucent.count,
-                    );
+                    for (_, mesh) in &translucent_sections {
+                        draw_textured_section_mesh_range(
+                            &mut pass,
+                            &self.section_arena,
+                            mesh,
+                            mesh.translucent_index_range(),
+                        );
+                    }
                 }
             } else {
                 if phase.draws_opaque() {
@@ -6181,7 +6311,12 @@ impl TexturedSectionDrawResources {
                         if !culling.drawn_keys.contains(key) {
                             continue;
                         }
-                        draw_textured_section_mesh_range(&mut pass, mesh, mesh.solid_index_range());
+                        draw_textured_section_mesh_range(
+                            &mut pass,
+                            &self.section_arena,
+                            mesh,
+                            mesh.solid_index_range(),
+                        );
                     }
                     pass.set_pipeline(&self.shared.renderer.cutout_pipeline);
                     for (key, mesh) in &self.sections {
@@ -6190,6 +6325,7 @@ impl TexturedSectionDrawResources {
                         }
                         draw_textured_section_mesh_range(
                             &mut pass,
+                            &self.section_arena,
                             mesh,
                             mesh.cutout_index_range(),
                         );
@@ -6200,6 +6336,7 @@ impl TexturedSectionDrawResources {
                     for (_, mesh) in &translucent_sections {
                         draw_textured_section_mesh_range(
                             &mut pass,
+                            &self.section_arena,
                             mesh,
                             mesh.translucent_index_range(),
                         );
@@ -6210,9 +6347,13 @@ impl TexturedSectionDrawResources {
         if let Some(timing) = &mut timing {
             timing.direct_draw_calls = direct_draw_calls;
             if let Some((batch, _)) = &indirect_batch {
-                timing.multi_draw_calls = usize::from(batch.solid.count > 0)
-                    + usize::from(batch.cutout.count > 0)
-                    + usize::from(batch.translucent.count > 0);
+                timing.multi_draw_calls = batch
+                    .pages
+                    .iter()
+                    .map(|page| {
+                        usize::from(page.solid.count > 0) + usize::from(page.cutout.count > 0)
+                    })
+                    .sum();
                 timing.indirect_draw_count = batch.args.len();
             }
             timing.arena_vertex_used_bytes = self.section_arena.vertex_used_bytes();
@@ -6336,14 +6477,24 @@ impl TexturedSectionDrawResources {
                     if !prepared_draw.draws_in_eye(*key, stereo_eye_for_slot(view_slot)) {
                         continue;
                     }
-                    draw_textured_section_mesh_range(&mut pass, mesh, mesh.solid_index_range());
+                    draw_textured_section_mesh_range(
+                        &mut pass,
+                        &self.section_arena,
+                        mesh,
+                        mesh.solid_index_range(),
+                    );
                 }
                 pass.set_pipeline(&self.shared.renderer.cutout_pipeline);
                 for (key, mesh) in &self.sections {
                     if !prepared_draw.draws_in_eye(*key, stereo_eye_for_slot(view_slot)) {
                         continue;
                     }
-                    draw_textured_section_mesh_range(&mut pass, mesh, mesh.cutout_index_range());
+                    draw_textured_section_mesh_range(
+                        &mut pass,
+                        &self.section_arena,
+                        mesh,
+                        mesh.cutout_index_range(),
+                    );
                 }
             }
             if phase.draws_translucent() {
@@ -6355,6 +6506,7 @@ impl TexturedSectionDrawResources {
                     if let Some(mesh) = self.sections.get(key) {
                         draw_textured_section_mesh_range(
                             &mut pass,
+                            &self.section_arena,
                             mesh,
                             mesh.translucent_index_range(),
                         );
@@ -8131,6 +8283,7 @@ mod tests {
     #[test]
     fn terrain_arena_indirect_args_apply_global_mesh_offsets() {
         let mesh = GpuTexturedSectionMesh {
+            vertex_page: 0,
             vertex_range: 100..116,
             index_range: 200..224,
             solid_index_count: 12,
