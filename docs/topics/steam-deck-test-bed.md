@@ -128,8 +128,14 @@ pnpm steamdeck:pull-results -- RUN_ID
 pnpm steamdeck:build:steamrt4
 pnpm steamdeck:stage:steamrt4
 pnpm steamdeck:deploy:steamrt4
+pnpm steamdeck:deploy:production
 pnpm steamdeck:smoke:steamrt4
 pnpm steamdeck:perf:steamrt4
+
+pnpm steamdeck:auto-deploy:on
+pnpm steamdeck:auto-deploy:off
+pnpm steamdeck:auto-deploy:status
+pnpm steamdeck:auto-deploy:log
 ```
 
 The wrapper defaults to the paired device's mDNS name and the Devkit-managed
@@ -190,6 +196,51 @@ and assembles `dist/steamdeck` with a SHA-256 build receipt. `upload` performs
 Valve's upload preparation, an incremental clean `rsync`, and registration as
 `Devkit Game: mclone`. `deploy` also launches interactive play. `launch`
 restarts an already uploaded interactive build.
+
+`steamdeck:deploy:production` is the complete manual production-style command.
+It checks the asset pack against the tracked lock before the expensive build.
+If the check fails, it rebuilds the ignored archive once and checks again; it
+never rewrites the tracked lock automatically, so intentional source/tool
+changes still require inspection and an explicit
+`pnpm assets:pack:write-lock`. Once assets pass, it builds the ordinary
+`x86_64` client inside the pinned SteamRT4 SDK, stages the binary/pack/receipt,
+uploads incrementally, registers `Devkit Game: mclone`, and launches it.
+
+### Optional deploy after pushing `main`
+
+The existing non-blocking local pre-push hook also schedules a separate Steam
+Deck lane when enabled:
+
+```bash
+pnpm steamdeck:auto-deploy:on
+```
+
+The toggle is local to this checkout and defaults to off in a new clone. Disable
+it before pushing from a network that cannot reach the paired device:
+
+```bash
+pnpm steamdeck:auto-deploy:off
+```
+
+Scheduling never blocks or determines the success of `git push`. The
+background worker first waits until the remote really reports the pushed
+`main` SHA, coalesces quick successive pushes, and probes Devkit-managed SSH
+for only a few seconds. An unavailable Deck is an explicit logged skip. A
+reachable Deck is built and deployed from a clean reusable sibling worktree at
+the exact pushed commit, independently of the web deploy worker. Generated
+asset archives and SteamRT4 target/cache state remain ignored and local.
+
+Inspect structured state or the latest log lines with:
+
+```bash
+pnpm steamdeck:auto-deploy:status
+pnpm steamdeck:auto-deploy:log
+```
+
+State is under `.git/mclone-steam-deck-after-main-push/` with separate pending,
+completed, skipped, failed, summary, and append-only log records. The
+machine-local host is read from `mclone.steamDeckHost` in this checkout's local
+Git configuration, with `MCLONE_STEAM_DECK` retaining highest precedence.
 
 The payload launcher passes `--platform-profile steamos` for interactive and
 live-presentation runs. This is a launch-policy hint carried by the ordinary

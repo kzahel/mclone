@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Install the local pre-push hook that schedules native web deploys after main pushes.
+# Install the local pre-push hook that schedules enabled deploy lanes.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"

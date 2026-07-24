@@ -27,7 +27,9 @@ case "$DECK_BUILDER" in
         ;;
 esac
 
-DECK_HOST=${MCLONE_STEAM_DECK:-steamdeck.local}
+CONFIGURED_DECK_HOST=$(git -C "$REPO_ROOT" config --local --get \
+    mclone.steamDeckHost 2>/dev/null || true)
+DECK_HOST=${MCLONE_STEAM_DECK:-${CONFIGURED_DECK_HOST:-steamdeck.local}}
 DECK_USER=${MCLONE_STEAM_DECK_USER:-deck}
 DECK_KEY=${MCLONE_STEAM_DECK_KEY:-"$HOME/.config/steamos-devkit/devkit_rsa"}
 DECK_TITLE=${MCLONE_STEAM_DECK_TITLE:-mclone}
@@ -71,6 +73,9 @@ Environment:
       Build on Ubuntu or in the pinned SteamRT4 SDK. Defaults to host.
   MCLONE_STEAM_DECK_SKIP_ASSET_CHECK=1
       Skip pnpm assets:pack:check while staging.
+  MCLONE_STEAM_DECK_ENSURE_ASSET_PACK=1
+      If the asset lock check fails, rebuild the archive once and recheck.
+      The tracked asset lock is never rewritten automatically.
   MCLONE_STEAM_DECK_RUNTIME=SteamLinuxRuntime_4|none
       Devkit compatibility runtime. Defaults to Steam Linux Runtime 4.
   MCLONE_STEAM_DECK_RESULTS_ROOT=PATH
@@ -300,6 +305,28 @@ stage_payload()
     require_command rsync
     require_command sha256sum
 
+    local asset_check_skipped=false
+    if [[ ${MCLONE_STEAM_DECK_SKIP_ASSET_CHECK:-0} != 1 ]]; then
+        if ! (
+            cd "$REPO_ROOT"
+            pnpm assets:pack:check
+        ); then
+            if [[ ${MCLONE_STEAM_DECK_ENSURE_ASSET_PACK:-0} != 1 ]]; then
+                return 1
+            fi
+            echo \
+                "Steam Deck asset pack is stale; rebuilding the archive once"
+            (
+                cd "$REPO_ROOT"
+                pnpm assets:pack
+                pnpm assets:pack:check
+            )
+        fi
+    else
+        asset_check_skipped=true
+    fi
+    test -f "$ASSET_PACK" || die "asset pack not found: $ASSET_PACK"
+
     local build_skipped=false
     if [[ ${MCLONE_STEAM_DECK_SKIP_BUILD:-0} != 1 ]]; then
         case "$DECK_BUILDER" in
@@ -319,17 +346,6 @@ stage_payload()
         build_skipped=true
     fi
     test -x "$CLIENT_BINARY" || die "release binary not found: $CLIENT_BINARY"
-
-    local asset_check_skipped=false
-    if [[ ${MCLONE_STEAM_DECK_SKIP_ASSET_CHECK:-0} != 1 ]]; then
-        (
-            cd "$REPO_ROOT"
-            pnpm assets:pack:check
-        )
-    else
-        asset_check_skipped=true
-    fi
-    test -f "$ASSET_PACK" || die "asset pack not found: $ASSET_PACK"
 
     local temp_stage
     temp_stage=$(mktemp -d)

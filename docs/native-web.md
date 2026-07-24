@@ -219,7 +219,10 @@ For this local checkout, [`../scripts/local-deploy/deploy-after-main-push.sh`](.
 ```
 
 The hook returns immediately. A background worker waits until the pushed
-`main` commit is visible on the remote, then runs `pnpm run deploy`.
+`main` commit is visible on the remote, then runs `pnpm run deploy`. The same
+hook can independently schedule the opt-in physical Steam Deck lane documented
+in [`topics/steam-deck-test-bed.md`](topics/steam-deck-test-bed.md); Deck
+availability and failures do not block the web lane or `git push`.
 
 Quick successive pushes replace the pending SHA before deployment starts. The
 worker deploys from a reusable sibling worktree, by default

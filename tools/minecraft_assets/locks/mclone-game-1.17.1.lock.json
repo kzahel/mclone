@@ -1,24 +1,24 @@
 {
   "asset_set": "mclone-game-1.17.1",
   "format_version": 1,
-  "generated_at": "2026-07-20T10:51:50.208674Z",
+  "generated_at": "2026-07-24T05:14:19.321138Z",
   "minecraft_version": "1.17.1",
   "pack": {
     "asset_set": "mclone-game-1.17.1",
-    "content_manifest_sha256": "afeb3bd0a2219bb3a79e5a39de21025f59c96c47ab833a562722b0ee7fbb48e6",
-    "file_count": 6985,
+    "content_manifest_sha256": "58b667bcf4b8479b0df52b1ac39998cca801d78c82d26ec6007f2d17335f8250",
+    "file_count": 7025,
     "fingerprints": {
       "payload_raw_v1": {
         "algorithm": "sha256",
-        "bytes": 6161069,
-        "file_count": 6985,
-        "sha256": "765a71d5847f8d76c95e1b2599c5500c412995a97d0a79126595558b03ece21d"
+        "bytes": 13964054,
+        "file_count": 7025,
+        "sha256": "2699c47ac800497f5d92f8c114e468c6e39790a3073c43f8f3363938de99b8a5"
       },
       "portable_json_text_v1": {
         "algorithm": "sha256",
-        "excluded_file_count": 3073,
-        "fingerprinted_file_count": 3912,
-        "sha256": "afeb3bd0a2219bb3a79e5a39de21025f59c96c47ab833a562722b0ee7fbb48e6"
+        "excluded_file_count": 3087,
+        "fingerprinted_file_count": 3938,
+        "sha256": "58b667bcf4b8479b0df52b1ac39998cca801d78c82d26ec6007f2d17335f8250"
       }
     },
     "manifest_path": "reference/minecraft-1.17.1/extracted.zip.json",
@@ -40,6 +40,206 @@
           "bytes": 11493,
           "path": "assets/mclone/figures/upright_bear.figure.json",
           "sha256": "80b5db57d2b49bd57d7945740eacbb76637e84b68e512dd4532bd61c8adc02b9"
+        },
+        {
+          "bytes": 102944,
+          "path": "assets/mclone/structure-previews/atlases/terrain-4f0c6faf041b7a74fcea0030baf51ca53d673f8c79bb52c6996a3727d76749b2.png",
+          "sha256": "4f0c6faf041b7a74fcea0030baf51ca53d673f8c79bb52c6996a3727d76749b2"
+        },
+        {
+          "bytes": 737088,
+          "path": "assets/mclone/structure-previews/meshes/farmstead-barn-core-a-v2.glb",
+          "sha256": "7453374bbe008a25082a686051f7eab82b9707a53d2b9e3f7859f5462e0a6ef7"
+        },
+        {
+          "bytes": 897028,
+          "path": "assets/mclone/structure-previews/meshes/farmstead-barn-core-long-v1.glb",
+          "sha256": "377f11e31acf381d60bdeb3d7a9bd1205c9b6198bba1f4b0f295f88d19785d3a"
+        },
+        {
+          "bytes": 576488,
+          "path": "assets/mclone/structure-previews/meshes/farmstead-barn-core-short-v1.glb",
+          "sha256": "c2189a6a8250d590255035540a1a71aedcf5e0c24bc27ba6c1028e1c6c8ef843"
+        },
+        {
+          "bytes": 180012,
+          "path": "assets/mclone/structure-previews/meshes/farmstead-barn-lean-to-a-v2.glb",
+          "sha256": "861d80aa1f81d913ffbeb54bfeb9464bc53f845e5be75b28f69325a08b0ed4f1"
+        },
+        {
+          "bytes": 231428,
+          "path": "assets/mclone/structure-previews/meshes/farmstead-barn-lean-to-long-v1.glb",
+          "sha256": "860cbee69294723157f01caddc52eccd847a7805ac3b3335790c8f8c6afb8a8c"
+        },
+        {
+          "bytes": 130288,
+          "path": "assets/mclone/structure-previews/meshes/farmstead-barn-lean-to-short-v1.glb",
+          "sha256": "943ce120aa851e6a7166560590d4e4cfee52735a2b44bf6e551bb33ca4523290"
+        },
+        {
+          "bytes": 599400,
+          "path": "assets/mclone/structure-previews/meshes/farmstead-cottage-a-v2.glb",
+          "sha256": "f971965620aba98be3b76532aad3a2aa0aa7475aa38e165449c6c4ff427be645"
+        },
+        {
+          "bytes": 683432,
+          "path": "assets/mclone/structure-previews/meshes/farmstead-cottage-deep-canopy-porch-v1.glb",
+          "sha256": "46ae9a1250c33e72355711f6f3d056b799604505aa8281eeacf3c0b6498ec665"
+        },
+        {
+          "bytes": 670928,
+          "path": "assets/mclone/structure-previews/meshes/farmstead-cottage-deep-stoop-v1.glb",
+          "sha256": "c20f2c365698ce86613491c3f0e39d7657016db35f7698f71c35af17459f8248"
+        },
+        {
+          "bytes": 519460,
+          "path": "assets/mclone/structure-previews/meshes/farmstead-cottage-snug-canopy-porch-v1.glb",
+          "sha256": "fa17946dbe82495a97fe6c0dfcdc9d14235ca06b154ff0e8b46eb4e8b167b526"
+        },
+        {
+          "bytes": 506960,
+          "path": "assets/mclone/structure-previews/meshes/farmstead-cottage-snug-stoop-v1.glb",
+          "sha256": "4c10e30aa209dd14ab0efc117f1af66d56d39adc47689faf4315bb11e9e70d51"
+        },
+        {
+          "bytes": 586936,
+          "path": "assets/mclone/structure-previews/meshes/farmstead-cottage-standard-stoop-v1.glb",
+          "sha256": "2d93dc02447d6d7dc7dd93902162ac908fe2d42f286a96de4d06a3a8b362c84a"
+        },
+        {
+          "bytes": 280508,
+          "path": "assets/mclone/structure-previews/meshes/farmstead-rosehip-chicken-coop-v1.glb",
+          "sha256": "2f217c5c90d88517e867488931463e3944ed27cf08cd5eb23e49d753ecf15275"
+        },
+        {
+          "bytes": 5869,
+          "path": "assets/mclone/structure-previews/receipts/farmstead-barn-core-a-v2.preview.json",
+          "sha256": "25c4297427d89deebcede7862172466468143e18fd2f16b414ec7b75253c82b1"
+        },
+        {
+          "bytes": 5871,
+          "path": "assets/mclone/structure-previews/receipts/farmstead-barn-core-long-v1.preview.json",
+          "sha256": "7eafb03f5ccfd83b84882062d31902a233dd535d8e228d923ce5bb3e6c1154e2"
+        },
+        {
+          "bytes": 5871,
+          "path": "assets/mclone/structure-previews/receipts/farmstead-barn-core-short-v1.preview.json",
+          "sha256": "09c8d913fce31b3c451248c5f9af557478a3905b0f9234c4b90337aa45a6abf2"
+        },
+        {
+          "bytes": 4566,
+          "path": "assets/mclone/structure-previews/receipts/farmstead-barn-lean-to-a-v2.preview.json",
+          "sha256": "6cc1d2188186de89a720d297cf5171453c9cb66c46963df33c35faa8fa313b53"
+        },
+        {
+          "bytes": 4569,
+          "path": "assets/mclone/structure-previews/receipts/farmstead-barn-lean-to-long-v1.preview.json",
+          "sha256": "8a3d37bd5403b1abd26b7bc552c3fbac43313701997e6667360c4b7022dfcb88"
+        },
+        {
+          "bytes": 4562,
+          "path": "assets/mclone/structure-previews/receipts/farmstead-barn-lean-to-short-v1.preview.json",
+          "sha256": "275a51a84b6f6788d69546625ee7d9a1d92f9a49e0e3f669508e8d3db5c3e9b9"
+        },
+        {
+          "bytes": 6180,
+          "path": "assets/mclone/structure-previews/receipts/farmstead-cottage-a-v2.preview.json",
+          "sha256": "58e6cb3f0809f326d8814cd5f5ded727dc4573b3add144c5520c833ee0ee981f"
+        },
+        {
+          "bytes": 6221,
+          "path": "assets/mclone/structure-previews/receipts/farmstead-cottage-deep-canopy-porch-v1.preview.json",
+          "sha256": "e83d2af4ca38507cfcca9a25ef694e437c0703e59845794d06a6480982400e9a"
+        },
+        {
+          "bytes": 6190,
+          "path": "assets/mclone/structure-previews/receipts/farmstead-cottage-deep-stoop-v1.preview.json",
+          "sha256": "aee6d797467f40010c5ae1162826c0112dc32d5b2dabf9a8c9946de02dcf6df0"
+        },
+        {
+          "bytes": 6210,
+          "path": "assets/mclone/structure-previews/receipts/farmstead-cottage-snug-canopy-porch-v1.preview.json",
+          "sha256": "eb8c0bdcfc12f3e3ff11fc40b9b37b0bd9dd20c0ef22cac21cec8cdc922c0ed8"
+        },
+        {
+          "bytes": 6179,
+          "path": "assets/mclone/structure-previews/receipts/farmstead-cottage-snug-stoop-v1.preview.json",
+          "sha256": "3585a8354bce50b76d671ffc9c84302b113fcb6e7e19aa7b286bab5d08e6cf5c"
+        },
+        {
+          "bytes": 6196,
+          "path": "assets/mclone/structure-previews/receipts/farmstead-cottage-standard-stoop-v1.preview.json",
+          "sha256": "2ba69265f1e0f8013b03c32854988849ba734f2998b11ee12e27ba3e8f0de0ea"
+        },
+        {
+          "bytes": 5978,
+          "path": "assets/mclone/structure-previews/receipts/farmstead-rosehip-chicken-coop-v1.preview.json",
+          "sha256": "62b9d38c21f4564d019ffd5dc3e1c4c28c1e46734f3fa23d32d04d68706f859c"
+        },
+        {
+          "bytes": 149955,
+          "path": "assets/mclone/structures/farmstead-barn-core-a-v2.structure.json",
+          "sha256": "a1a2d0e4fb798ce9af1d46c998ca9ba4943819d7d550550f0e02f2f98dea7072"
+        },
+        {
+          "bytes": 189983,
+          "path": "assets/mclone/structures/farmstead-barn-core-long-v1.structure.json",
+          "sha256": "fd5fc24a3c0b5c5ae4ac164be1708403ee4ebf62b3abd9459ff4190925ac3a11"
+        },
+        {
+          "bytes": 109921,
+          "path": "assets/mclone/structures/farmstead-barn-core-short-v1.structure.json",
+          "sha256": "fe4dd2569f4dbca21edbdd7c14d703da3de923ca482fb9b2eaf574e314ac987e"
+        },
+        {
+          "bytes": 22376,
+          "path": "assets/mclone/structures/farmstead-barn-lean-to-a-v2.structure.json",
+          "sha256": "24d41bb3014b35541380f8a4d8a01a8c9d150f45cafce5e963f0e2eab7c364dd"
+        },
+        {
+          "bytes": 27482,
+          "path": "assets/mclone/structures/farmstead-barn-lean-to-long-v1.structure.json",
+          "sha256": "0581cc3723930dc9b81b2df39ca5f031a41e3ef6e39e7de3b9a392c6045e1c0d"
+        },
+        {
+          "bytes": 17515,
+          "path": "assets/mclone/structures/farmstead-barn-lean-to-short-v1.structure.json",
+          "sha256": "83a16133524b78c6f28463490bbb8318df595fd6f8c8cea69980b1df4590dd56"
+        },
+        {
+          "bytes": 80684,
+          "path": "assets/mclone/structures/farmstead-cottage-a-v2.structure.json",
+          "sha256": "dd9e32d337c6c482b0f4a1ee533994623c729e32a6ffb83c76d73a76d4a28616"
+        },
+        {
+          "bytes": 92940,
+          "path": "assets/mclone/structures/farmstead-cottage-deep-canopy-porch-v1.structure.json",
+          "sha256": "32654f88b2e68b42c9952ee69b9763cba1b06200f74107c9d27a596eab07abc6"
+        },
+        {
+          "bytes": 91422,
+          "path": "assets/mclone/structures/farmstead-cottage-deep-stoop-v1.structure.json",
+          "sha256": "491ec815384ce50c8a242b37e8e237bb3cb20572b2b20edfb91ec155f6104225"
+        },
+        {
+          "bytes": 68477,
+          "path": "assets/mclone/structures/farmstead-cottage-snug-canopy-porch-v1.structure.json",
+          "sha256": "1dd66c3e69eaee81583c6e11085107d7f821bf04cf739a843fb7d1d2cd76b1b8"
+        },
+        {
+          "bytes": 66959,
+          "path": "assets/mclone/structures/farmstead-cottage-snug-stoop-v1.structure.json",
+          "sha256": "2b9ad4c24089e87a343336dfd4790622308848e48352f5a588977f7fc70e483f"
+        },
+        {
+          "bytes": 79193,
+          "path": "assets/mclone/structures/farmstead-cottage-standard-stoop-v1.structure.json",
+          "sha256": "78db6ffdb6853a5f6822bb37cf873f3897d96b37cdfc5faf6d4fd7f75e2ff4b3"
+        },
+        {
+          "bytes": 28716,
+          "path": "assets/mclone/structures/farmstead-rosehip-chicken-coop-v1.structure.json",
+          "sha256": "c26c07f62e84d5b29744cb723deebbb312cbc4e3b8092cfd3b94316589dc841c"
         },
         {
           "bytes": 3232,
@@ -34956,19 +35156,19 @@
     }
   },
   "source": {
-    "file_count": 6985,
+    "file_count": 7025,
     "fingerprints": {
       "payload_raw_v1": {
         "algorithm": "sha256",
-        "bytes": 6161069,
-        "file_count": 6985,
-        "sha256": "765a71d5847f8d76c95e1b2599c5500c412995a97d0a79126595558b03ece21d"
+        "bytes": 13964054,
+        "file_count": 7025,
+        "sha256": "2699c47ac800497f5d92f8c114e468c6e39790a3073c43f8f3363938de99b8a5"
       },
       "portable_json_text_v1": {
         "algorithm": "sha256",
-        "excluded_file_count": 3073,
-        "fingerprinted_file_count": 3912,
-        "sha256": "afeb3bd0a2219bb3a79e5a39de21025f59c96c47ab833a562722b0ee7fbb48e6"
+        "excluded_file_count": 3087,
+        "fingerprinted_file_count": 3938,
+        "sha256": "58b667bcf4b8479b0df52b1ac39998cca801d78c82d26ec6007f2d17335f8250"
       }
     },
     "root": "reference/minecraft-1.17.1/extracted",

@@ -1,7 +1,9 @@
-# Local Web Deploy Hook
+# Local Push Deploy Hooks
 
-This folder contains the local, CI-like deploy path for the native web/WASM app.
-It is intentionally local automation rather than a GitHub-hosted workflow.
+This folder contains local, CI-like deploy paths for the native web/WASM app
+and the paired Steam Deck. They are intentionally local automation rather than
+GitHub-hosted workflows because they use machine-local credentials, ignored
+reference assets, build caches, and physical hardware.
 
 ## Why This Exists
 
@@ -18,7 +20,10 @@ background, then lets the push continue.
 ## How It Works
 
 `pre-push-hook.sh` receives Git's pushed refs and schedules a deploy only for
-pushes to `main`. It records the desired SHA under:
+pushes to `main`. It schedules the always-on web lane and, when enabled in the
+local checkout, an independent Steam Deck lane.
+
+The web lane records the desired SHA under:
 
 ```text
 .git/mclone-deploy-after-main-push/
@@ -28,6 +33,20 @@ pushes to `main`. It records the desired SHA under:
 remote branch actually reports the pushed SHA before deploying, so a rejected or
 failed push does not publish. A single-worker lock prevents overlapping deploys.
 Quick successive pushes replace the pending SHA before deployment starts.
+
+The Deck lane uses:
+
+```text
+.git/mclone-steam-deck-after-main-push/
+```
+
+It waits for the same remote confirmation, briefly probes the Devkit-managed
+SSH connection, and skips without blocking the push when the Deck is
+unreachable. A reachable Deck is deployed from a separate reusable sibling
+worktree at the exact pushed commit. The production command checks the asset
+lock first, rebuilds the ignored archive only when necessary, rechecks without
+ever rewriting the tracked lock, builds in the pinned SteamRT4 SDK, uploads
+incrementally, registers the shortcut, and launches it.
 
 Deploys run from a reusable sibling worktree:
 
@@ -56,11 +75,27 @@ Check pending, completed, failed, and timing state:
 ./scripts/local-deploy/deploy-after-main-push.sh --status
 ```
 
-Follow the full worker log:
+Enable, disable, and inspect the machine-local Deck lane:
+
+```bash
+pnpm steamdeck:auto-deploy:on
+pnpm steamdeck:auto-deploy:off
+pnpm steamdeck:auto-deploy:status
+pnpm steamdeck:auto-deploy:log
+```
+
+New checkouts default to off. The toggle and optional Deck host are stored only
+in the checkout's local Git configuration as
+`mclone.steamDeckAutoDeploy` and `mclone.steamDeckHost`.
+
+Follow the full web worker log:
 
 ```bash
 tail -f .git/mclone-deploy-after-main-push/deploy.log
 ```
+
+The Deck log is
+`.git/mclone-steam-deck-after-main-push/deploy.log`.
 
 ## Status Files
 
@@ -76,6 +111,10 @@ answer "what deployed?" or "what failed?" without scraping the full log.
 `total_seconds` measures from hook scheduling to final success or failure.
 `deploy_seconds` measures the `pnpm run deploy` command itself.
 
+The Deck state directory uses the same summary/pending/completed/failed shape
+and adds `skipped.tsv` for expected unavailability. Its status and completion
+rows also record the machine-local Deck host and production deploy duration.
+
 ## Tunables
 
 Environment variables:
@@ -86,3 +125,14 @@ Environment variables:
 - `MCLONE_DEPLOY_AFTER_PUSH_POLL_SECONDS`: remote polling interval, default `10`.
 - `MCLONE_DEPLOY_AFTER_PUSH_SETTLE_SECONDS`: quick-successive-push settle window, default `30`.
 - `MCLONE_DEPLOY_AFTER_PUSH_MAX_WAIT_SECONDS`: max wait for remote branch visibility, default `1800`.
+
+The Deck lane shares the branch/remote settings and has:
+
+- `MCLONE_STEAM_DECK_DEPLOY_AFTER_PUSH_WORKTREE`: reusable Deck worktree.
+- `MCLONE_STEAM_DECK_DEPLOY_AFTER_PUSH_POLL_SECONDS`: polling interval.
+- `MCLONE_STEAM_DECK_DEPLOY_AFTER_PUSH_SETTLE_SECONDS`: settle window.
+- `MCLONE_STEAM_DECK_DEPLOY_AFTER_PUSH_MAX_WAIT_SECONDS`: remote wait limit.
+- `MCLONE_STEAM_DECK_DEPLOY_AFTER_PUSH_PROBE_SECONDS`: SSH probe limit,
+  default `8`.
+- `MCLONE_STEAM_DECK_DEPLOY_LOG_LINES`: lines printed by
+  `steamdeck:auto-deploy:log`, default `200`.
