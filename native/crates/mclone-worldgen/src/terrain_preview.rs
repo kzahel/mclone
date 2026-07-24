@@ -658,6 +658,7 @@ pub const fn terrain_preview_field_revision() -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::levelgen::McloneOverworldStreamPlanner;
 
     #[test]
     fn centered_request_uses_shared_corner_grid() {
@@ -743,6 +744,40 @@ mod tests {
             TerrainPreviewReferenceGrid::compile(right)
                 .unwrap()
                 .samples()
+        );
+    }
+
+    #[test]
+    fn structured_near_detail_reconstructs_planned_stream_records() {
+        let seed = -98_765;
+        let plan =
+            McloneOverworldStreamPlanner::new(seed, McloneOverworldSamplingTopology::Unbounded)
+                .plans_intersecting_chunks(ChunkPos::new(148, -125), ChunkPos::new(150, -123))
+                .unwrap()
+                .into_iter()
+                .next()
+                .expect("review region has a planned stream");
+        let node = plan.nodes[plan.nodes.len() / 2];
+        let structured = TerrainPreviewReferenceGrid::compile(
+            TerrainPreviewRequest::new(seed, node.x, node.z, 1)
+                .with_content_stage(TerrainPreviewContentStage::Structured),
+        )
+        .unwrap();
+        assert!(
+            structured
+                .samples()
+                .iter()
+                .any(|sample| sample.planned_stream_influence > 0.0)
+        );
+        let hydrology = TerrainPreviewReferenceGrid::compile(TerrainPreviewRequest::new(
+            seed, node.x, node.z, 1,
+        ))
+        .unwrap();
+        assert!(
+            hydrology
+                .samples()
+                .iter()
+                .all(|sample| sample.planned_stream_influence == 0.0)
         );
     }
 

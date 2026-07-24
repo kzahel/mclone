@@ -1336,8 +1336,17 @@ impl TerrainViewportRenderer {
         for tile_id in &target.visible_tiles {
             let tile = self.cache.get(tile_id)?;
             let samples = tile.gpu_samples.as_ref()?;
-            reference_samples.extend_from_slice(tile.reference.as_ref()?.samples());
-            gpu_samples.extend_from_slice(samples);
+            let reference = tile.reference.as_ref()?.samples();
+            reference_samples.extend_from_slice(reference);
+            gpu_samples.extend(samples.iter().zip(reference).map(|(gpu, cpu)| {
+                if tile_id.content_stage.includes_structured_hydrology()
+                    && cpu.planned_stream_influence > 0.0
+                {
+                    *cpu
+                } else {
+                    *gpu
+                }
+            }));
         }
         Some(
             TerrainPreviewComparison::compare_samples(&reference_samples, &gpu_samples).map(
