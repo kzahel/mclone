@@ -12,20 +12,27 @@ test("generates terrain, round-trips controls, and completes comparison", async 
   });
 
   await page.goto(
-    "/terrain/?seed=-98765&x=-304&z=336&blocks=2048&detail=auto&source=split&view=3d&layer=terrain",
+    "/terrain/?seed=-98765&x=-304&z=336&blocks=512&detail=auto"
+      + "&panes=canonical%2Ccpu%2Cgpu&canonical=final&radius=1"
+      + "&water=1&vegetation=1&view=3d&layer=terrain",
   );
-  await expect(page.locator("[data-testid='lab-status']")).toContainText("ready");
   await waitForCurrentComparison(page);
+  await waitForCanonical(page, 9);
+  await expect(page.locator("[data-testid='lab-status']")).toContainText("ready");
 
   const sourceControls = page.getByTestId("preview-source-controls");
   await expect(sourceControls).toBeVisible();
-  await expect(sourceControls).toContainText("exact same world coordinates");
+  await expect(sourceControls).toContainText("Same coordinates, independent readiness");
   const diagnostics = page.locator("[data-testid='terrain-diagnostics']");
   await expect(diagnostics).not.toContainText("Base mean Δpending");
   const shell = page.locator(".appShell");
+  await expect(shell).toHaveAttribute("data-panes", "canonical,cpu,gpu");
+  await expect(shell).toHaveAttribute("data-canonical-published", "9");
+  await expect(shell).toHaveAttribute("data-canonical-requested", "9");
+  await expect(shell).toHaveAttribute("data-canonical-complete", "true");
   await expect(shell).toHaveAttribute(
     "data-compare-layout",
-    testInfo.project.name === "phone-chrome" ? "stacked" : "side-by-side",
+    "stacked",
   );
   expect(Number(await shell.getAttribute("data-vertex-count"))).toBeGreaterThan(49_152);
   await expect(shell).toHaveAttribute("data-target-ready", "true");
@@ -36,15 +43,34 @@ test("generates terrain, round-trips controls, and completes comparison", async 
   expect(Number(await shell.getAttribute("data-ocean-agreement"))).toBeGreaterThanOrEqual(0.999);
   expect(Number(await shell.getAttribute("data-continentalness-error"))).toBeLessThanOrEqual(0.001);
   const canvas = page.locator("canvas[aria-label='Live GPU terrain preview']");
+  const canonicalCanvas = page.locator(
+    "canvas[aria-label='Canonical textured terrain preview']",
+  );
   await expect(canvas).toBeVisible();
+  await expect(canonicalCanvas).toBeVisible();
+  await page.screenshot({
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-workspace.png`,
+    fullPage: true,
+  });
+  await canonicalCanvas.screenshot({
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-canonical.png`,
+  });
   await canvas.screenshot({
     path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-initial.png`,
   });
   const compareStageBox = await page.getByTestId("terrain-stage").boundingBox();
   expect(compareStageBox).not.toBeNull();
 
-  await page.getByRole("button", { name: "CPU final" }).click();
+  await page.getByRole("button", { name: "Water shown", exact: true }).click();
+  await expect(page).toHaveURL(/water=0/u);
+  await expect(shell).toHaveAttribute("data-canonical-published", "9");
+  await expect(shell).toHaveAttribute("data-canonical-complete", "true");
+  await page.getByRole("button", { name: "Water hidden", exact: true }).click();
+  await expect(page).toHaveURL(/water=1/u);
+
+  await page.getByRole("button", { name: "GPU LOD", exact: true }).click();
   await waitForLane(page, "cpu");
+  await expect(shell).toHaveAttribute("data-panes", "canonical,cpu");
   await expect(shell).toHaveAttribute("data-compare-layout", "single");
   const singleStageBox = await page.getByTestId("terrain-stage").boundingBox();
   expect(singleStageBox).not.toBeNull();
@@ -55,11 +81,12 @@ test("generates terrain, round-trips controls, and completes comparison", async 
     path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-cpu-final.png`,
   });
 
-  await page.getByRole("button", { name: "Compare" }).click();
+  await page.getByRole("button", { name: "GPU LOD", exact: true }).click();
   await waitForCurrentComparison(page);
+  await expect(shell).toHaveAttribute("data-panes", "canonical,cpu,gpu");
   await expect(shell).toHaveAttribute(
     "data-compare-layout",
-    testInfo.project.name === "phone-chrome" ? "stacked" : "side-by-side",
+    "stacked",
   );
 
   const initialRevision = Number(await shell.getAttribute("data-render-revision"));
@@ -67,21 +94,29 @@ test("generates terrain, round-trips controls, and completes comparison", async 
   const initialPitch = Number(await shell.getAttribute("data-camera-pitch"));
   const initialUrl = page.url();
   const stage = page.getByTestId("terrain-stage");
-  const stageBox = await stage.boundingBox();
+  const layoutStageBox = await stage.boundingBox();
   const sourceControlsBox = await sourceControls.boundingBox();
   const viewportControlsBox = await page.getByTestId("viewport-controls").boundingBox();
-  expect(stageBox).not.toBeNull();
+  expect(layoutStageBox).not.toBeNull();
   expect(sourceControlsBox).not.toBeNull();
   expect(viewportControlsBox).not.toBeNull();
   expect(sourceControlsBox!.y + sourceControlsBox!.height)
     .toBeLessThanOrEqual(viewportControlsBox!.y + 1);
   expect(viewportControlsBox!.y + viewportControlsBox!.height)
-    .toBeLessThanOrEqual(stageBox!.y + 1);
-  await page.mouse.move(stageBox!.x + stageBox!.width * 0.5, stageBox!.y + stageBox!.height * 0.5);
+    .toBeLessThanOrEqual(layoutStageBox!.y + 1);
+  await stage.scrollIntoViewIfNeeded();
+  const stageBox = await stage.boundingBox();
+  expect(stageBox).not.toBeNull();
+  const viewportHeight = page.viewportSize()?.height ?? 900;
+  const orbitStartY = Math.max(
+    100,
+    Math.min(stageBox!.y + 200, viewportHeight - 100),
+  );
+  await page.mouse.move(stageBox!.x + stageBox!.width * 0.5, orbitStartY);
   await page.mouse.down();
   await page.mouse.move(
     stageBox!.x + stageBox!.width * 0.65,
-    stageBox!.y + stageBox!.height * 0.42,
+    orbitStartY - 80,
   );
   await page.mouse.up();
   await expect.poll(
@@ -107,7 +142,7 @@ test("generates terrain, round-trips controls, and completes comparison", async 
   await page.getByRole("button", { name: "Map", exact: true }).click();
   await page.getByRole("button", { name: "Zoom out" }).click();
   await expect(page).toHaveURL(/view=map/u);
-  await expect(page).toHaveURL(/blocks=4096/u);
+  await expect(page).toHaveURL(/blocks=1024/u);
   await expect(page).toHaveURL(/detail=auto/u);
   await expect.poll(
     async () => Number(await shell.getAttribute("data-render-revision")),
@@ -176,6 +211,7 @@ test("generates terrain, round-trips controls, and completes comparison", async 
   const beforeStressRevision = Number(await shell.getAttribute("data-render-revision"));
   await page.getByRole("button", { name: "Run stress race" }).click();
   await expect(shell).toHaveAttribute("data-cache-enabled", "false");
+  await expect(shell).toHaveAttribute("data-panes", "cpu,gpu");
   await expect(page).toHaveURL(/blocks=2048/u);
   await expect(page).toHaveURL(/detail=2/u);
   await expect(page).toHaveURL(/source=split/u);
@@ -201,6 +237,18 @@ test("generates terrain, round-trips controls, and completes comparison", async 
 
   expect(pageErrors).toEqual([]);
 });
+
+async function waitForCanonical(
+  page: import("@playwright/test").Page,
+  requestedChunks: number,
+): Promise<void> {
+  await page.waitForFunction((requested) => {
+    const shell = document.querySelector(".appShell");
+    return shell?.getAttribute("data-canonical-complete") === "true"
+      && Number(shell.getAttribute("data-canonical-published")) === requested
+      && Number(shell.getAttribute("data-canonical-requested")) === requested;
+  }, requestedChunks);
+}
 
 async function waitForLane(
   page: import("@playwright/test").Page,

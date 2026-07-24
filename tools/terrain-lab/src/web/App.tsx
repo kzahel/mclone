@@ -99,7 +99,10 @@ export function App(): React.JSX.Element {
   const gpuVisible = state.panes.includes("gpu");
   const proceduralVisible = cpuVisible || gpuVisible;
   const proceduralSource = proceduralSourceForPanes(state.panes);
-  const proceduralState = { ...state, source: proceduralSource };
+  const proceduralState = useMemo(
+    () => ({ ...state, source: proceduralSource }),
+    [proceduralSource, state],
+  );
   const workspaceStatus: LabStatus = error
     ? "error"
     : (!proceduralVisible || status === "ready")
