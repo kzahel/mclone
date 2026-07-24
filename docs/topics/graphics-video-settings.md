@@ -277,6 +277,7 @@ inventory is:
 | Mipmaps and texture filtering | absent control; define reload/apply cost and sampler ownership |
 | Entity shadows and entity distance | absent controls; require real renderer hooks |
 | Biome blend | absent control; requires renderer/mesh policy rather than a cosmetic row |
+| Leaf and grass detail | absent; keep `Leaf Detail: Blocky/Bushy` independent from `Grass Detail: Off/Sparse/Lush/Ultra`, then let a later overall quality preset project both; see [`bushy-leaf-rendering.md`](bushy-leaf-rendering.md) and [`lush-grass-rendering.md`](lush-grass-rendering.md) |
 | View bobbing | absent control |
 | Screen-effect and FOV-effect strength | absent controls; likely shared accessibility/presentation preferences |
 | Camera FOV | absent player control; likely Display or Accessibility rather than a Deck-only graphics row |

@@ -274,6 +274,10 @@ series implements the same concern, normally reuse the document slug in its
   artifact/reconstruction research, observed section/wind/interaction/color
   architecture, attribution and license constraints, and the accepted
   independent mclone patch-instancing, LOD, multiview, and validation direction.
+- [`bushy-leaf-rendering.md`](bushy-leaf-rendering.md): pinned Motschen's Better
+  Leaves 9.5/8.1/1.17.1-era artifact and source research, derived-texture
+  versus geometry tradeoff, current mclone asset/model gaps, performance
+  accounting, and the recommended independent Blocky/Bushy shared setting.
 - [`compiled-figure-rendering.md`](compiled-figure-rendering.md): selected
   direction for compiling Asset Lab primitives, textures, rigs, clips, and
   generated LODs into shared static GPU figures with presentation-rate

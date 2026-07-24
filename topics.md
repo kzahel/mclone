@@ -40,6 +40,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `lush-grass-rendering` — dense biome-tinted procedural grass, patch
   instancing, distance LOD, wind, entity interaction, and cross-view rendering
   research/direction
+- `bushy-leaf-rendering` — derived active-pack leaf sprites, deterministic
+  canopy-surface geometry, independent Blocky/Bushy graphics policy, and
+  shared mono/stereo/multiview validation
 - `compiled-figure-rendering` — compiled figure artifact, static local-space
   GPU geometry, presentation-rate rigid-part animation, instancing, and
   generated figure LOD direction; Tactical 181 static-box proof

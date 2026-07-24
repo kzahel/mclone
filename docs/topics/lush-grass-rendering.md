@@ -20,6 +20,12 @@ inspired by the visible effect and broad rendering techniques while fitting
 mclone's shared section compiler, render session, renderer, scene, and
 mono/stereo/multiview contracts.
 
+Bushy canopy geometry is a related but independent presentation concern.
+[`bushy-leaf-rendering.md`](bushy-leaf-rendering.md) records the Better Leaves
+research and recommends a separate `Leaf Detail: Blocky / Bushy` control.
+Grass and leaves may eventually share world-space wind facts, but they should
+not share eligibility, geometry caches, or a mandatory on/off switch.
+
 No implementation is present yet. Future work should create a bounded tactical
 before changing runtime behavior.
 
@@ -515,6 +521,12 @@ Expose quality presets first. Expert sliders for radius, density, height,
 width, wind, and interaction can follow only if they remain coherent and do
 not multiply validation excessively. A desktop OpenXR host may select Lush or
 Ultra based on the desktop GPU; “desktop-oriented” does not mean flat-only.
+
+Keep this `Grass Detail` profile independent from bushy `Leaf Detail`. Their
+cost scales differently, especially on Quest/mobile, so a player should be
+able to retain bushy leaves while reducing or disabling dense ground blades.
+A future overall Graphics Quality preset may project both only after both
+individual effects and their shared preference fields exist.
 
 Quest should remain Off by default. Instancing reduces CPU and buffer traffic,
 but does not remove stereo vertex work, fragment/overdraw pressure, or the
