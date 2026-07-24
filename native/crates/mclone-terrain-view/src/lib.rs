@@ -30,7 +30,7 @@ pub use viewport_renderer::{
     TerrainViewportCompletedComparison, TerrainViewportFrameStats, TerrainViewportRenderer,
 };
 
-pub const TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION: &str = "mclone-overworld-v1-gpu-preview-a2";
+pub const TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION: &str = "mclone-overworld-v1-gpu-preview-a3";
 pub const TERRAIN_PREVIEW_COMPUTE_WGSL_TEMPLATE: &str =
     include_str!("shaders/terrain_preview_compute.wgsl");
 pub const TERRAIN_PREVIEW_RENDER_WGSL: &str = include_str!("shaders/terrain_preview_render.wgsl");
@@ -995,6 +995,7 @@ mod tests {
             base_surface_y: 63.0,
             base_display_y: 64.0,
             ocean_water: 0.0,
+            macro_surface_material: 4.0,
         };
         let mut bytes = Vec::new();
         for value in sample.packed() {
@@ -1009,7 +1010,7 @@ mod tests {
     fn evaluator_revision_and_production_spec_are_explicit() {
         assert_eq!(
             TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION,
-            "mclone-overworld-v1-gpu-preview-a2"
+            "mclone-overworld-v1-gpu-preview-a3"
         );
         let shader = terrain_preview_compute_wgsl();
         assert!(!shader.contains("__MCLONE_PRODUCTION_FIELD_CONSTANTS__"));

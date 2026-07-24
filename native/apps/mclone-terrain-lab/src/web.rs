@@ -271,6 +271,7 @@ struct TerrainLabComparisonReport {
     mean_absolute_temperature_error: f32,
     mean_absolute_moisture_error: f32,
     mean_absolute_ruggedness_error: f32,
+    macro_surface_material_agreement: f32,
     stale_result_count: u64,
 }
 
@@ -760,6 +761,7 @@ fn comparison_report(
         mean_absolute_temperature_error: completed.comparison.mean_absolute_temperature_error,
         mean_absolute_moisture_error: completed.comparison.mean_absolute_moisture_error,
         mean_absolute_ruggedness_error: completed.comparison.mean_absolute_ruggedness_error,
+        macro_surface_material_agreement: completed.comparison.macro_surface_material_agreement,
         stale_result_count,
     }
 }

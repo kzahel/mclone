@@ -1,10 +1,10 @@
 use crate::levelgen::{
     MCLONE_OVERWORLD_FIELD_REVISION, MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldSampler,
-    McloneOverworldSamplingTopology,
+    McloneOverworldSamplingTopology, mclone_overworld_macro_surface_top_material,
 };
 
 pub const TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION: &str =
-    "mclone-terrain-preview-reference-grid-v2";
+    "mclone-terrain-preview-reference-grid-v3";
 pub const TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS: u32 = 64;
 pub const TERRAIN_PREVIEW_MIN_CELLS_PER_AXIS: u32 = 8;
 pub const TERRAIN_PREVIEW_MAX_CELLS_PER_AXIS: u32 = 128;
@@ -163,6 +163,7 @@ pub struct TerrainPreviewSample {
     pub base_surface_y: f32,
     pub base_display_y: f32,
     pub ocean_water: f32,
+    pub macro_surface_material: f32,
 }
 
 impl TerrainPreviewSample {
@@ -179,7 +180,7 @@ impl TerrainPreviewSample {
             self.base_surface_y,
             self.base_display_y,
             self.ocean_water,
-            0.0,
+            self.macro_surface_material,
         ]
     }
 
@@ -196,6 +197,7 @@ impl TerrainPreviewSample {
             base_surface_y: values[8],
             base_display_y: values[9],
             ocean_water: values[10],
+            macro_surface_material: values[11],
         }
     }
 
@@ -205,6 +207,12 @@ impl TerrainPreviewSample {
 
     pub fn is_ocean_water(self) -> bool {
         self.ocean_water >= 0.5
+    }
+
+    pub fn macro_surface_material(self) -> u8 {
+        self.macro_surface_material
+            .round()
+            .clamp(0.0, f32::from(u8::MAX)) as u8
     }
 }
 
@@ -261,6 +269,9 @@ impl TerrainPreviewReferenceGrid {
                         terrain.base_surface_y as f32
                     },
                     ocean_water: if ocean_water { 1.0 } else { 0.0 },
+                    macro_surface_material: f32::from(mclone_overworld_macro_surface_top_material(
+                        terrain,
+                    )),
                 });
             }
         }
@@ -317,6 +328,7 @@ pub struct TerrainPreviewComparison {
     pub mean_absolute_temperature_error: f32,
     pub mean_absolute_moisture_error: f32,
     pub mean_absolute_ruggedness_error: f32,
+    pub macro_surface_material_agreement: f32,
 }
 
 impl TerrainPreviewComparison {
@@ -355,6 +367,7 @@ impl TerrainPreviewComparison {
         let mut temperature_error_sum = 0.0_f64;
         let mut moisture_error_sum = 0.0_f64;
         let mut ruggedness_error_sum = 0.0_f64;
+        let mut macro_material_matches = 0_usize;
         for (expected, actual) in reference.iter().zip(candidate) {
             if !actual.packed().iter().all(|value| value.is_finite()) {
                 return Err("terrain preview candidate contains a non-finite field".to_owned());
@@ -376,6 +389,8 @@ impl TerrainPreviewComparison {
             temperature_error_sum += f64::from((expected.temperature - actual.temperature).abs());
             moisture_error_sum += f64::from((expected.moisture - actual.moisture).abs());
             ruggedness_error_sum += f64::from((expected.ruggedness - actual.ruggedness).abs());
+            macro_material_matches +=
+                usize::from(expected.macro_surface_material() == actual.macro_surface_material());
         }
         errors.sort_by(f32::total_cmp);
         base_errors.sort_by(f32::total_cmp);
@@ -397,6 +412,8 @@ impl TerrainPreviewComparison {
             mean_absolute_temperature_error: (temperature_error_sum / sample_count) as f32,
             mean_absolute_moisture_error: (moisture_error_sum / sample_count) as f32,
             mean_absolute_ruggedness_error: (ruggedness_error_sum / sample_count) as f32,
+            macro_surface_material_agreement: macro_material_matches as f32
+                / candidate.len() as f32,
         })
     }
 }
@@ -538,7 +555,7 @@ mod tests {
         );
         assert_eq!(
             TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION,
-            "mclone-terrain-preview-reference-grid-v2"
+            "mclone-terrain-preview-reference-grid-v3"
         );
     }
 }

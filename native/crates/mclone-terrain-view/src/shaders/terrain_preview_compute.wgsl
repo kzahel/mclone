@@ -227,6 +227,55 @@ fn mountain_strength(continentalness: f32, ruggedness: f32) -> f32 {
     return inland * region;
 }
 
+fn macro_surface_material(
+    surface_y: f32,
+    continentalness: f32,
+    relief: f32,
+    ruggedness: f32,
+    ridges: f32,
+    mountain_detail: f32,
+    temperature: f32,
+) -> f32 {
+    if continentalness <= 0.0 {
+        return 2.0;
+    }
+    if surface_y <= 66.0 {
+        return 6.0;
+    }
+    let altitude_cooling = clamp(max(surface_y - 72.0, 0.0) / 96.0, 0.0, 0.75);
+    let adjusted_temperature = clamp(temperature - altitude_cooling, -1.0, 1.0);
+    if surface_y >= 96.0 && adjusted_temperature <= -0.18 {
+        return 8.0;
+    }
+    let altitude = smooth_curve(clamp((surface_y - 82.0) / 48.0, 0.0, 1.0));
+    let crest = smooth_curve(clamp((ridges - 0.35) / 0.65, 0.0, 1.0));
+    let exposure = mountain_strength(continentalness, ruggedness)
+        * (altitude * 0.35 + crest * 0.65);
+    let strength = clamp((exposure - 0.48) / 0.44, 0.0, 1.0);
+    if surface_y >= 84.0 && strength >= 0.82 {
+        return 1.0;
+    }
+    if surface_y >= 72.0 && strength >= 0.18 {
+        let texture = clamp(
+            mountain_detail * 0.68
+                + relief * 0.17
+                + (ridges * 2.0 - 1.0) * 0.15,
+            -1.0,
+            1.0,
+        );
+        if strength >= 0.62 && texture >= 0.36 - strength * 0.28 {
+            return 1.0;
+        }
+        if texture >= 0.02 - strength * 0.22 {
+            return 7.0;
+        }
+        if texture >= -0.48 - strength * 0.10 {
+            return 13.0;
+        }
+    }
+    return 4.0;
+}
+
 fn land_surface_height(
     continentalness: f32,
     relief: f32,
@@ -450,7 +499,20 @@ fn evaluate(world_x: i32, world_z: i32) -> TerrainPreviewSample {
     var sample: TerrainPreviewSample;
     sample.terrain = vec4<f32>(surface_y, display_y, continentalness, relief);
     sample.climate = vec4<f32>(temperature, moisture, water, ruggedness);
-    sample.large_fields = vec4<f32>(surface_y, display_y, water, 0.0);
+    sample.large_fields = vec4<f32>(
+        surface_y,
+        display_y,
+        water,
+        macro_surface_material(
+            surface_y,
+            continentalness,
+            relief,
+            ruggedness,
+            ridges,
+            mountain_detail,
+            temperature,
+        ),
+    );
     return sample;
 }
 

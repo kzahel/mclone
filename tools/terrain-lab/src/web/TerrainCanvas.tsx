@@ -126,6 +126,7 @@ export interface TerrainLabComparisonReport {
   meanAbsoluteTemperatureError: number;
   meanAbsoluteMoistureError: number;
   meanAbsoluteRuggednessError: number;
+  macroSurfaceMaterialAgreement: number;
   staleResultCount: number;
 }
 

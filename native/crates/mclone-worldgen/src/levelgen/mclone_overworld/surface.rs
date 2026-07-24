@@ -75,6 +75,57 @@ pub fn mclone_overworld_surface_recipe(
     }
 }
 
+/// Selects a stable macro-scale top material from the same production fields
+/// available to CPU and GPU terrain previews.
+///
+/// The exact surface pass additionally reacts to block-scale slope and
+/// watercourses. This contract deliberately classifies the uncarved base
+/// surface so coarse LOD tiles remain deterministic at every sample spacing.
+pub fn mclone_overworld_macro_surface_top_material(
+    terrain: super::fields::McloneOverworldTerrainSample,
+) -> RawBlockId {
+    if terrain.continentalness <= 0.0 {
+        return WATER;
+    }
+    let surface_y = terrain.base_surface_y;
+    if surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 3 {
+        return SAND;
+    }
+    let adjusted_temperature = terrain.climate.altitude_adjusted_temperature(surface_y);
+    if surface_y >= super::biomes::MCLONE_OVERWORLD_ALPINE_MIN_Y
+        && adjusted_temperature <= super::biomes::MCLONE_OVERWORLD_ALPINE_MAX_TEMPERATURE
+    {
+        return SNOW;
+    }
+    let altitude = smoothstep((f64::from(surface_y - 82) / 48.0).clamp(0.0, 1.0));
+    let crest = smoothstep(((terrain.ridges - 0.35) / 0.65).clamp(0.0, 1.0));
+    let exposure = terrain.mountain_strength() * (altitude * 0.35 + crest * 0.65);
+    let strength = ((exposure - 0.48) / 0.44).clamp(0.0, 1.0);
+    if surface_y >= MCLONE_OVERWORLD_EXPOSED_STONE_MIN_Y
+        && strength >= MCLONE_OVERWORLD_EXPOSED_STONE_MIN_STRENGTH
+    {
+        return STONE;
+    }
+    if surface_y >= MCLONE_OVERWORLD_ERODED_SLOPE_MIN_Y
+        && strength >= MCLONE_OVERWORLD_ERODED_SLOPE_MIN_STRENGTH
+    {
+        let texture = (terrain.mountain_detail * 0.68
+            + terrain.relief * 0.17
+            + (terrain.ridges * 2.0 - 1.0) * 0.15)
+            .clamp(-1.0, 1.0);
+        return if strength >= 0.62 && texture >= 0.36 - strength * 0.28 {
+            STONE
+        } else if texture >= 0.02 - strength * 0.22 {
+            GRAVEL
+        } else if texture >= -0.48 - strength * 0.10 {
+            COARSE_DIRT
+        } else {
+            GRASS_BLOCK
+        };
+    }
+    GRASS_BLOCK
+}
+
 pub(super) fn mclone_overworld_surface_top_material(
     sample: McloneOverworldLandformSample,
 ) -> RawBlockId {
@@ -242,6 +293,10 @@ fn write_subsurface(
     for y in material_min_y..=top_y {
         buffer.set_block_at_y(local_x, y, local_z, material);
     }
+}
+
+fn smoothstep(value: f64) -> f64 {
+    value * value * (3.0 - 2.0 * value)
 }
 
 #[cfg(test)]

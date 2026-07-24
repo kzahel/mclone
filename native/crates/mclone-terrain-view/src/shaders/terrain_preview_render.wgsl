@@ -63,16 +63,25 @@ fn terrain_color(sample: TerrainPreviewSample, light: f32) -> vec3<f32> {
     let surface_y = sample.terrain.x;
     let temperature = sample.climate.x;
     let moisture = sample.climate.y;
-    let water = sample.climate.z >= 0.5;
-    if water {
+    let material = u32(round(sample.large_fields.w));
+    if material == 2u {
         let depth = clamp((63.0 - surface_y) / 52.0, 0.0, 1.0);
         return mix(vec3<f32>(0.16, 0.55, 0.68), vec3<f32>(0.025, 0.17, 0.34), depth) * light;
     }
-    if surface_y >= 126.0 {
-        return mix(vec3<f32>(0.64, 0.66, 0.62), vec3<f32>(0.94, 0.96, 0.94), clamp((surface_y - 126.0) / 20.0, 0.0, 1.0)) * light;
+    if material == 1u {
+        return vec3<f32>(0.48, 0.49, 0.47) * light;
     }
-    if surface_y >= 98.0 {
-        return mix(vec3<f32>(0.34, 0.39, 0.34), vec3<f32>(0.58, 0.57, 0.52), clamp((surface_y - 98.0) / 28.0, 0.0, 1.0)) * light;
+    if material == 6u {
+        return vec3<f32>(0.82, 0.76, 0.53) * light;
+    }
+    if material == 7u {
+        return vec3<f32>(0.47, 0.46, 0.43) * light;
+    }
+    if material == 8u {
+        return vec3<f32>(0.92, 0.95, 0.96) * light;
+    }
+    if material == 13u {
+        return vec3<f32>(0.45, 0.35, 0.23) * light;
     }
     let dry = vec3<f32>(0.63, 0.54, 0.29);
     let wet = vec3<f32>(0.17, 0.48, 0.25);
