@@ -1,5 +1,7 @@
 #![forbid(unsafe_code)]
 
+mod viewport;
+
 use std::fmt::Write;
 use std::num::NonZeroU64;
 use std::sync::mpsc;
@@ -8,6 +10,13 @@ use mclone_worldgen::levelgen::{MCLONE_OVERWORLD_LARGE_FIELD_SPEC, McloneOverwor
 use mclone_worldgen::terrain_preview::{
     TERRAIN_PREVIEW_SAMPLE_FLOATS, TerrainPreviewComparison, TerrainPreviewReferenceGrid,
     TerrainPreviewSample,
+};
+
+pub use viewport::{
+    TERRAIN_VIEWPORT_AUTO_PIXELS_PER_CELL, TERRAIN_VIEWPORT_MAX_BLOCKS_ACROSS,
+    TERRAIN_VIEWPORT_MAX_VISIBLE_TILES_PER_AXIS, TERRAIN_VIEWPORT_MIN_BLOCKS_ACROSS,
+    TERRAIN_VIEWPORT_PRELOAD_MARGIN_TILES, TerrainViewportDetail, TerrainViewportLevel,
+    TerrainViewportPlan, TerrainViewportRequest, TerrainViewportTileId, plan_terrain_viewport,
 };
 
 pub const TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION: &str = "mclone-overworld-v1-gpu-preview-a2";

@@ -8,7 +8,7 @@ pub const TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION: &str =
 pub const TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS: u32 = 64;
 pub const TERRAIN_PREVIEW_MIN_CELLS_PER_AXIS: u32 = 8;
 pub const TERRAIN_PREVIEW_MAX_CELLS_PER_AXIS: u32 = 128;
-pub const TERRAIN_PREVIEW_MIN_SAMPLE_SPACING: u32 = 2;
+pub const TERRAIN_PREVIEW_MIN_SAMPLE_SPACING: u32 = 1;
 pub const TERRAIN_PREVIEW_MAX_SAMPLE_SPACING: u32 = 1_024;
 pub const TERRAIN_PREVIEW_SAMPLE_FLOATS: usize = 12;
 
@@ -416,6 +416,15 @@ mod tests {
         assert_eq!(request.world_x(32), Some(-64));
         assert_eq!(request.world_x(64), Some(448));
         assert_eq!(request.world_x(65), None);
+    }
+
+    #[test]
+    fn one_block_spacing_is_available_for_close_diagnostic_views() {
+        let request = TerrainPreviewRequest::new(12_345, -64, 96, 1)
+            .validate()
+            .unwrap();
+        assert_eq!(request.footprint_blocks(), 64);
+        assert_eq!(request.world_x(64), Some(-32));
     }
 
     #[test]
