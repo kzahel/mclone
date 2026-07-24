@@ -6,6 +6,7 @@ import {
   DEFAULT_TERRAIN_LAB_CAMERA,
   REVIEW_TERRAIN_LAB_STATE,
   footprintBlocks,
+  grabPanTerrainLabState,
   nextBlocksAcross,
   orbitTerrainLabCamera,
   panTerrainLabState,
@@ -62,6 +63,19 @@ test("pans continuously rather than snapping to the detail lattice", () => {
   const moved = panTerrainLabState(DEFAULT_TERRAIN_LAB_STATE, 79, -47);
   assert.equal(moved.centerX, -225);
   assert.equal(moved.centerZ, 289);
+});
+
+test("map grab follows the pointer on both screen axes", () => {
+  const moved = grabPanTerrainLabState(
+    DEFAULT_TERRAIN_LAB_STATE,
+    100,
+    75,
+    800,
+    600,
+    4 / 3,
+  );
+  assert.equal(moved.centerX, -560);
+  assert.equal(moved.centerZ, 144);
 });
 
 test("anchors map zoom under the pointer", () => {

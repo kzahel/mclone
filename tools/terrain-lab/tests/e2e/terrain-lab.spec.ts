@@ -114,6 +114,34 @@ test("generates terrain, round-trips controls, and completes comparison", async 
   ).toBeGreaterThan(errorRevision);
   await waitForCurrentComparison(page);
 
+  await stage.scrollIntoViewIfNeeded();
+  await page.evaluate(() => window.scrollBy(0, 80));
+  const mapStageBox = await stage.boundingBox();
+  expect(mapStageBox).not.toBeNull();
+  const beforeWheelScroll = await page.evaluate(() => window.scrollY);
+  const beforeWheelBlocks = new URL(page.url()).searchParams.get("blocks");
+  const pointerX = mapStageBox!.x + mapStageBox!.width * 0.5;
+  const pointerY = Math.max(
+    1,
+    Math.min(
+      mapStageBox!.y + Math.min(mapStageBox!.height * 0.1, 100),
+      testInfo.project.name === "phone-chrome" ? 780 : 940,
+    ),
+  );
+  await page.mouse.move(pointerX, pointerY);
+  await page.mouse.wheel(0, 120);
+  await expect.poll(() => new URL(page.url()).searchParams.get("blocks"))
+    .not.toBe(beforeWheelBlocks);
+  expect(await page.evaluate(() => window.scrollY)).toBe(beforeWheelScroll);
+
+  const beforeGrabZ = Number(new URL(page.url()).searchParams.get("z"));
+  await page.mouse.down();
+  await page.mouse.move(pointerX, pointerY + 80);
+  await page.mouse.up();
+  await expect.poll(() => Number(new URL(page.url()).searchParams.get("z")))
+    .toBeLessThan(beforeGrabZ);
+  await waitForCurrentComparison(page);
+
   await page.getByLabel("Terrain resolution").selectOption("1");
   await expect(page).toHaveURL(/detail=1/u);
   await waitForCurrentComparison(page);

@@ -1,8 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type {
-  PointerEvent as ReactPointerEvent,
-  WheelEvent as ReactWheelEvent,
-} from "react";
+import type { PointerEvent as ReactPointerEvent } from "react";
 import type { TerrainLab } from "../../generated/pkg/mclone_terrain_lab";
 import initTerrainLab, {
   mclone_terrain_lab_create,
@@ -10,8 +7,8 @@ import initTerrainLab, {
 
 import {
   footprintBlocks,
+  grabPanTerrainLabState,
   orbitTerrainLabCamera,
-  panTerrainLabState,
   zoomTerrainLabState,
   type TerrainLabCamera,
   type TerrainLabSource,
@@ -400,13 +397,16 @@ export function TerrainCanvas({
     if (start.mode === "pan") {
       const panel = terrainPanelSize(rect.width, rect.height, start.state.source);
       const panelAspect = panel.width / Math.max(panel.height, 1);
-      const deltaX =
-        -((event.clientX - start.clientX) / Math.max(panel.width, 1))
-        * start.state.blocksAcross;
-      const deltaZ =
-        ((event.clientY - start.clientY) / Math.max(panel.height, 1))
-        * (start.state.blocksAcross / Math.max(panelAspect, 0.01));
-      queueState(panTerrainLabState(start.state, deltaX, deltaZ));
+      queueState(
+        grabPanTerrainLabState(
+          start.state,
+          event.clientX - start.clientX,
+          event.clientY - start.clientY,
+          panel.width,
+          panel.height,
+          panelAspect,
+        ),
+      );
       return;
     }
     pendingCameraRef.current = orbitTerrainLabCamera(
@@ -448,30 +448,34 @@ export function TerrainCanvas({
     }
   };
 
-  const zoomWithWheel = (event: ReactWheelEvent<HTMLDivElement>): void => {
-    event.preventDefault();
+  useEffect(() => {
     const stage = stageRef.current;
     if (!stage) {
       return;
     }
-    const rect = stage.getBoundingClientRect();
-    const panel = terrainPanelAtPointer(
-      rect.width,
-      rect.height,
-      event.clientX - rect.left,
-      event.clientY - rect.top,
-      state.source,
-    );
-    onStateChange(
-      zoomTerrainLabState(
-        state,
-        Math.exp(event.deltaY * 0.0015),
-        state.view === "map" ? panel.normalizedX : 0,
-        state.view === "map" ? panel.normalizedZ : 0,
-        panel.width / Math.max(panel.height, 1),
-      ),
-    );
-  };
+    const zoomWithWheel = (event: WheelEvent): void => {
+      event.preventDefault();
+      const rect = stage.getBoundingClientRect();
+      const panel = terrainPanelAtPointer(
+        rect.width,
+        rect.height,
+        event.clientX - rect.left,
+        event.clientY - rect.top,
+        state.source,
+      );
+      onStateChange(
+        zoomTerrainLabState(
+          state,
+          Math.exp(event.deltaY * 0.0015),
+          state.view === "map" ? panel.normalizedX : 0,
+          state.view === "map" ? panel.normalizedZ : 0,
+          panel.width / Math.max(panel.height, 1),
+        ),
+      );
+    };
+    stage.addEventListener("wheel", zoomWithWheel, { passive: false });
+    return () => stage.removeEventListener("wheel", zoomWithWheel);
+  }, [onStateChange, state]);
 
   return (
     <div
@@ -484,7 +488,6 @@ export function TerrainCanvas({
       onPointerUp={finishInteraction}
       onPointerCancel={finishInteraction}
       onContextMenu={(event) => event.preventDefault()}
-      onWheel={zoomWithWheel}
     >
       <canvas
         ref={canvasRef}

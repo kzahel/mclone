@@ -139,6 +139,22 @@ export function panTerrainLabState(
   };
 }
 
+export function grabPanTerrainLabState(
+  state: TerrainLabState,
+  pointerDeltaX: number,
+  pointerDeltaY: number,
+  panelWidth: number,
+  panelHeight: number,
+  panelAspect: number,
+): TerrainLabState {
+  return panTerrainLabState(
+    state,
+    -(pointerDeltaX / Math.max(panelWidth, 1)) * state.blocksAcross,
+    -(pointerDeltaY / Math.max(panelHeight, 1))
+      * (state.blocksAcross / Math.max(panelAspect, 0.01)),
+  );
+}
+
 export function orbitTerrainLabCamera(
   camera: TerrainLabCamera,
   deltaX: number,
