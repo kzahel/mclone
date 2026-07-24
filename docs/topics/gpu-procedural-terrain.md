@@ -1246,6 +1246,17 @@ footprints. A phone-sized browser observed progressive publication through all
 81 final-feature chunks in about four seconds, and the same byte-verified
 bundle passed hosted desktop and phone headed-WebGPU smokes.
 
+Tactical
+[`237`](../tactical/237-terrain-lab-block-detail-zoom.md) is complete. The
+shared viewport now moves continuously from a 131,072-block continental
+overview to one block in map and 3D. Sub-tile procedural views retain and crop
+an aligned spacing-one tile, while canonical rendering uses a
+production-surface-focused projection that exposes complete block faces and
+crisp authored texture texels. Inspected desktop and phone captures prove the
+same one-block footprint across canonical, CPU LOD, and GPU LOD panes. The
+byte-verified `/terrain/` bundle also passed hosted desktop and phone
+headed-WebGPU regression smokes.
+
 The next implementation direction is:
 
 1. band-limit or aggregate other sub-sample field energy while preserving
