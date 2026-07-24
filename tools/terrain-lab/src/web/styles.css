@@ -219,6 +219,66 @@ h1 {
   background: rgba(8, 20, 21, 0.9);
 }
 
+.mapToolbar {
+  min-height: 62px;
+  display: grid;
+  grid-template-columns: minmax(240px, 0.8fr) minmax(230px, 1fr) 188px;
+  gap: 14px;
+  align-items: end;
+  padding: 10px 18px 11px;
+  border-bottom: 1px solid var(--line);
+  background: rgba(11, 25, 25, 0.95);
+}
+
+.mapToolbar .segmentedField,
+.mapToolbar .fieldLabel {
+  min-width: 0;
+}
+
+.compactField select {
+  min-height: 36px;
+}
+
+.mapZoom {
+  min-height: 36px;
+  display: grid;
+  grid-template-columns: 38px minmax(90px, 1fr) 38px;
+  align-items: stretch;
+  border: 1px solid var(--line-strong);
+  border-radius: 3px;
+  overflow: hidden;
+}
+
+.mapZoom button {
+  min-height: 34px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  font-size: 22px;
+}
+
+.mapZoom div {
+  display: grid;
+  place-items: center;
+  align-content: center;
+  border-right: 1px solid var(--line);
+  border-left: 1px solid var(--line);
+  background: rgba(4, 13, 14, 0.58);
+}
+
+.mapZoom strong {
+  font-family: "DM Mono", monospace;
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.mapZoom span {
+  color: var(--faint);
+  font-size: 8px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
 .sourceGuide {
   min-width: 0;
   display: grid;
@@ -520,6 +580,32 @@ button:hover {
   gap: 12px;
 }
 
+.navigationReadout {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  background: rgba(4, 13, 14, 0.34);
+}
+
+.navigationReadout > span {
+  color: var(--faint);
+  font-family: "DM Mono", monospace;
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.navigationReadout strong {
+  font-size: 14px;
+}
+
+.navigationReadout small {
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.45;
+}
+
 .panPad {
   display: grid;
   grid-template-columns: repeat(4, 33px);
@@ -643,6 +729,14 @@ button:hover {
     grid-template-columns: minmax(260px, 0.6fr) 1fr;
     gap: 16px;
   }
+
+  .mapToolbar {
+    grid-template-columns: minmax(220px, 0.8fr) minmax(210px, 1fr);
+  }
+
+  .mapZoom {
+    grid-column: 1 / -1;
+  }
 }
 
 @media (max-width: 800px) {
@@ -679,6 +773,15 @@ button:hover {
 
   .previewToolbar {
     grid-template-columns: minmax(245px, 0.7fr) 1fr;
+  }
+
+  .mapToolbar {
+    grid-template-columns: 1fr 1fr;
+    padding: 9px 12px 10px;
+  }
+
+  .mapToolbar .mapZoom {
+    grid-column: 1 / -1;
   }
 
   .controlRail {
@@ -807,10 +910,6 @@ button:hover {
     grid-template-columns: 1fr 1fr;
     gap: 12px;
     padding: 11px 12px;
-  }
-
-  .viewerFooter > div:nth-child(3) {
-    display: none;
   }
 
   .approximationNote {

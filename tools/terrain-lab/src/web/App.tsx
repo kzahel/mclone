@@ -5,11 +5,12 @@ import {
   REVIEW_TERRAIN_LAB_STATE,
   TERRAIN_LAB_SPACINGS,
   footprintBlocks,
-  nextSpacing,
+  nextBlocksAcross,
   panTerrainLabState,
   parseTerrainLabState,
   terrainLabSearch,
   validSeed,
+  type TerrainLabDetail,
   type TerrainLabLayer,
   type TerrainLabCamera,
   type TerrainLabSource,
@@ -99,6 +100,12 @@ export function App(): React.JSX.Element {
       data-continentalness-error={comparison?.meanAbsoluteContinentalnessError ?? ""}
       data-compare-layout={compareLayout}
       data-vertex-count={renderReport?.vertexCount ?? 0}
+      data-requested-spacing={renderReport?.requestedSpacing ?? 0}
+      data-effective-spacing={renderReport?.effectiveSpacing ?? 0}
+      data-published-spacing={renderReport?.publishedSpacing ?? 0}
+      data-resident-tiles={renderReport?.residentTileCount ?? 0}
+      data-queued-tiles={renderReport?.queuedTileCount ?? 0}
+      data-target-ready={renderReport?.targetReady ? "true" : "false"}
     >
       <header className="topBar">
         <div className="brandLockup">
@@ -139,6 +146,58 @@ export function App(): React.JSX.Element {
             />
             <SourceGuide source={state.source} />
           </div>
+          <div className="mapToolbar" data-testid="viewport-controls">
+            <SegmentedControl<TerrainLabView>
+              label="View"
+              value={state.view}
+              options={[
+                { value: "3d", label: "3D terrain" },
+                { value: "map", label: "Map" },
+              ]}
+              onChange={(view) => patchState({ view })}
+            />
+            <label className="fieldLabel compactField">
+              <span>Resolution</span>
+              <select
+                aria-label="Terrain resolution"
+                value={String(state.detail)}
+                onChange={(event) =>
+                  patchState({ detail: parseDetail(event.target.value) })
+                }
+              >
+                <option value="auto">Auto · viewport</option>
+                {TERRAIN_LAB_SPACINGS.map((spacing) => (
+                  <option key={spacing} value={spacing}>
+                    1:{spacing} · {spacing} block{spacing === 1 ? "" : "s"} per sample
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="mapZoom" aria-label="Viewport zoom controls">
+              <button
+                type="button"
+                onClick={() =>
+                  patchState({ blocksAcross: nextBlocksAcross(state.blocksAcross, "in") })
+                }
+                aria-label="Zoom in"
+              >
+                +
+              </button>
+              <div>
+                <strong>{formatDistance(footprint)}</strong>
+                <span>across</span>
+              </div>
+              <button
+                type="button"
+                onClick={() =>
+                  patchState({ blocksAcross: nextBlocksAcross(state.blocksAcross, "out") })
+                }
+                aria-label="Zoom out"
+              >
+                −
+              </button>
+            </div>
+          </div>
           <TerrainCanvas
             state={state}
             camera={camera}
@@ -153,15 +212,25 @@ export function App(): React.JSX.Element {
           <div className="viewerFooter">
             <div>
               <span className="footerLabel">footprint</span>
-              <strong>{formatDistance(footprint)} × {formatDistance(footprint)}</strong>
+              <strong>
+                {formatDistance(footprint)} ×{" "}
+                {formatDistance(renderReport?.viewHeightBlocks ?? footprint)}
+              </strong>
             </div>
             <div>
               <span className="footerLabel">chunk equivalent</span>
-              <strong>{formatInteger(chunkWidth)} × {formatInteger(chunkWidth)}</strong>
+              <strong>
+                {formatInteger(chunkWidth)} ×{" "}
+                {formatInteger((renderReport?.viewHeightBlocks ?? footprint) / 16)}
+              </strong>
             </div>
             <div>
-              <span className="footerLabel">sample spacing</span>
-              <strong>{state.spacing} blocks</strong>
+              <span className="footerLabel">resolution</span>
+              <strong>
+                {state.detail === "auto" ? "Auto" : `1:${state.detail}`}
+                {" → "}
+                1:{renderReport?.effectiveSpacing ?? "—"}
+              </strong>
             </div>
             <div className="approximationNote">
               <SourceFootnote source={state.source} />
@@ -194,57 +263,19 @@ export function App(): React.JSX.Element {
             </div>
           </ControlSection>
 
-          <ControlSection number="02" title="Scale">
-            <label className="fieldLabel">
-              <span>Sample spacing</span>
-              <select
-                value={state.spacing}
-                onChange={(event) =>
-                  patchState({ spacing: Number(event.target.value) as TerrainLabState["spacing"] })
-                }
-              >
-                {TERRAIN_LAB_SPACINGS.map((spacing) => (
-                  <option key={spacing} value={spacing}>
-                    {spacing} blocks · {formatDistance(spacing * 64)} view
-                  </option>
-                ))}
-              </select>
-            </label>
-            <div className="zoomRow">
-              <button
-                type="button"
-                className="zoomButton"
-                onClick={() => patchState({ spacing: nextSpacing(state.spacing, "in") })}
-                aria-label="Zoom in"
-              >
-                <span>+</span> closer
-              </button>
-              <div className="scaleReadout">
-                <strong>{formatDistance(footprint)}</strong>
-                <span>across</span>
-              </div>
-              <button
-                type="button"
-                className="zoomButton"
-                onClick={() => patchState({ spacing: nextSpacing(state.spacing, "out") })}
-                aria-label="Zoom out"
-              >
-                <span>−</span> farther
-              </button>
+          <ControlSection number="02" title="Navigation">
+            <div className="navigationReadout">
+              <span>Viewport width</span>
+              <strong>{formatDistance(footprint)}</strong>
+              <small>
+                Wheel or pinch changes coverage. Resolution stays{" "}
+                {state.detail === "auto" ? "automatic" : `fixed at 1:${state.detail}`}.
+              </small>
             </div>
             <PanPad state={state} onChange={updateState} />
           </ControlSection>
 
           <ControlSection number="03" title="Presentation">
-            <SegmentedControl<TerrainLabView>
-              label="View"
-              value={state.view}
-              options={[
-                { value: "3d", label: "3D terrain" },
-                { value: "map", label: "Map" },
-              ]}
-              onChange={(view) => patchState({ view })}
-            />
             <label className="fieldLabel">
               <span>Diagnostic layer</span>
               <select
@@ -479,7 +510,7 @@ function PanPad({
   state: TerrainLabState;
   onChange: (state: TerrainLabState) => void;
 }): React.JSX.Element {
-  const distance = Math.max(state.spacing * 8, footprintBlocks(state) / 4);
+  const distance = footprintBlocks(state) / 4;
   const pan = (x: number, z: number): void =>
     onChange(panTerrainLabState(state, x * distance, z * distance));
   return (
@@ -514,8 +545,17 @@ function Diagnostics({
   return (
     <div className="diagnostics" data-testid="terrain-diagnostics">
       <div className="metricGrid">
-        <Metric label="CPU reference" value={formatMs(report?.cpuReferenceMs)} />
+        <Metric label="CPU compile / frame" value={formatMs(report?.cpuReferenceMs)} />
         <Metric label="Encode + submit" value={formatMs(report?.encodeSubmitMs)} />
+        <Metric label="Coarse pixel" value={formatMs(report?.coarseReadyMs)} />
+        <Metric label="Target pixel" value={formatMs(report?.targetReadyMs)} />
+        <Metric label="GPU execution" value="unavailable" />
+        <Metric
+          label="Tile progress"
+          value={report
+            ? `${report.publishedTileCount}/${report.visibleTileCount} visible`
+            : "—"}
+        />
         <Metric label="Base mean Δ" value={formatBlocks(comparison?.meanAbsoluteBaseSurfaceError)} />
         <Metric label="Base P95 Δ" value={formatBlocks(comparison?.p95AbsoluteBaseSurfaceError)} />
         <Metric label="Base maximum Δ" value={formatBlocks(comparison?.maxAbsoluteBaseSurfaceError)} />
@@ -526,11 +566,38 @@ function Diagnostics({
         <Metric label="Final mean Δ" value={formatBlocks(comparison?.meanAbsoluteSurfaceError)} />
         <Metric label="Final P95 Δ" value={formatBlocks(comparison?.p95AbsoluteSurfaceError)} />
         <Metric label="GPU resident" value={memory} />
-        <Metric label="Vertices" value={report ? formatInteger(report.vertexCount) : "—"} />
+        <Metric
+          label="Queue"
+          value={report ? `${formatInteger(report.queuedTileCount)} queued` : "—"}
+        />
       </div>
       <dl className="detailList">
         <div><dt>Adapter</dt><dd data-testid="adapter-name">{adapterLabel}</dd></div>
         <div><dt>Backend</dt><dd>{adapter?.backend ?? "—"}</dd></div>
+        <div>
+          <dt>Detail</dt>
+          <dd>
+            {report
+              ? `${report.requestedDetail} → 1:${report.effectiveSpacing}`
+              : "—"}
+          </dd>
+        </div>
+        <div>
+          <dt>Published</dt>
+          <dd>
+            {report
+              ? `1:${report.publishedSpacing} · ${report.publishedTileCount} tiles`
+              : "—"}
+          </dd>
+        </div>
+        <div>
+          <dt>Cache</dt>
+          <dd>
+            {report
+              ? `${report.residentTileCount} resident · ${report.evictedTilesTotal} evicted`
+              : "—"}
+          </dd>
+        </div>
         <div><dt>Samples</dt><dd>{report ? formatInteger(report.sampleCount) : "—"}</dd></div>
         <div><dt>Field</dt><dd>{shortRevision(report?.fieldRevision)}</dd></div>
         <div><dt>GPU evaluator</dt><dd>{shortRevision(report?.gpuEvaluatorRevision)}</dd></div>
@@ -559,8 +626,10 @@ function formatInteger(value: number): string {
   return value.toLocaleString("en-US", { maximumFractionDigits: 0 });
 }
 
-function formatMs(value: number | undefined): string {
-  return value === undefined ? "—" : `${value.toFixed(value >= 10 ? 1 : 2)} ms`;
+function formatMs(value: number | null | undefined): string {
+  return value === undefined || value === null
+    ? "—"
+    : `${value.toFixed(value >= 10 ? 1 : 2)} ms`;
 }
 
 function formatBlocks(value: number | undefined): string {
@@ -587,4 +656,8 @@ function randomSeed(): string {
   const high = BigInt(words[1] ?? 0);
   const low = BigInt(words[0] ?? 0);
   return BigInt.asIntN(64, (high << 32n) | low).toString();
+}
+
+function parseDetail(value: string): TerrainLabDetail {
+  return value === "auto" ? "auto" : Number(value) as TerrainLabDetail;
 }

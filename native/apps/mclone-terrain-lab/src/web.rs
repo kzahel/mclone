@@ -1,12 +1,13 @@
 use mclone_terrain_view::{
     TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION, TerrainPreviewCamera,
-    TerrainPreviewCompletedComparison, TerrainPreviewFrameStats, TerrainPreviewRenderer,
+    TerrainViewportCompletedComparison, TerrainViewportDetail, TerrainViewportFrameStats,
+    TerrainViewportRenderer, TerrainViewportRequest, plan_terrain_viewport,
 };
 use mclone_worldgen::{
     levelgen::McloneOverworldSamplingTopology,
     terrain_preview::{
         TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS, TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION,
-        TerrainPreviewReferenceGrid, TerrainPreviewRequest, terrain_preview_field_revision,
+        terrain_preview_field_revision,
     },
 };
 use serde::Serialize;
@@ -39,6 +40,10 @@ struct TerrainLabRenderReport<'a> {
     seed: &'a str,
     center_x: i32,
     center_z: i32,
+    requested_detail: &'a str,
+    requested_spacing: u32,
+    effective_spacing: u32,
+    published_spacing: u32,
     sample_spacing: u32,
     cells_per_axis: u32,
     samples_per_axis: u32,
@@ -46,6 +51,17 @@ struct TerrainLabRenderReport<'a> {
     vertex_count: u32,
     footprint_blocks: u32,
     footprint_chunks: u32,
+    view_width_blocks: u32,
+    view_height_blocks: u32,
+    level_count: u32,
+    visible_tile_count: u32,
+    published_tile_count: u32,
+    resident_tile_count: u32,
+    queued_tile_count: u32,
+    pending_readback_count: u32,
+    compiled_tiles: u32,
+    compiled_tiles_total: u64,
+    evicted_tiles_total: u64,
     source: &'static str,
     view: &'static str,
     layer: &'static str,
@@ -57,18 +73,27 @@ struct TerrainLabRenderReport<'a> {
     cpu_reference_ms: f64,
     encode_submit_ms: f64,
     request_ms: f64,
+    coarse_ready_ms: Option<f64>,
+    target_ready_ms: Option<f64>,
     reference_bytes: u64,
     gpu_sample_bytes: u64,
     readback_bytes: u64,
     resident_bytes: u64,
     comparison_pending: bool,
     stale_result_count: u64,
+    coarse_ready: bool,
+    target_ready: bool,
+    budget_limited: bool,
+    needs_redraw: bool,
+    gpu_execution_timing_available: bool,
 }
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TerrainLabComparisonReport {
     revision: u64,
+    sample_spacing: u32,
+    tile_count: u32,
     sample_count: usize,
     max_absolute_surface_error: f32,
     mean_absolute_surface_error: f32,
@@ -102,7 +127,11 @@ pub struct TerrainLab {
     adapter_device_type: String,
     adapter_driver: String,
     adapter_driver_info: String,
-    renderer: TerrainPreviewRenderer,
+    renderer: TerrainViewportRenderer,
+    active_revision: u64,
+    request_started_ms: f64,
+    coarse_ready_ms: Option<f64>,
+    target_ready_ms: Option<f64>,
 }
 
 #[wasm_bindgen]
@@ -134,7 +163,10 @@ impl TerrainLab {
         seed: String,
         center_x: i32,
         center_z: i32,
-        sample_spacing: u32,
+        blocks_across: u32,
+        detail: String,
+        panel_width_css: u32,
+        panel_height_css: u32,
         source: String,
         view: String,
         layer: String,
@@ -148,19 +180,25 @@ impl TerrainLab {
             .map_err(|error| js_error(format!("invalid signed 64-bit seed {seed:?}: {error}")))?;
         let options = terrain_preview_options(&source, &view, &layer).map_err(js_error)?;
         let camera = TerrainPreviewCamera::new(camera_yaw, camera_pitch).map_err(js_error)?;
-        let request = TerrainPreviewRequest {
+        let viewport_detail = parse_viewport_detail(&detail).map_err(js_error)?;
+        let plan = plan_terrain_viewport(TerrainViewportRequest {
             seed: seed_value,
             center_x,
             center_z,
-            sample_spacing,
-            cells_per_axis: TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS,
-            topology: McloneOverworldSamplingTopology::Unbounded,
-        };
-
-        let reference_start = now_ms()?;
-        let reference = TerrainPreviewReferenceGrid::compile(request).map_err(js_error)?;
-        let reference_finished = now_ms()?;
-        let cpu_reference_ms = reference_finished - reference_start;
+            blocks_across,
+            panel_width_css,
+            panel_height_css,
+            detail: viewport_detail,
+        })
+        .map_err(js_error)?;
+        let revision = u64::from(revision);
+        if self.active_revision != revision {
+            self.active_revision = revision;
+            self.request_started_ms = request_start;
+            self.coarse_ready_ms = None;
+            self.target_ready_ms = None;
+        }
+        self.renderer.set_viewport(revision, plan);
 
         let frame = self.acquire_frame()?;
         let color_view = frame
@@ -172,7 +210,7 @@ impl TerrainLab {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("mclone_terrain_lab_encoder"),
             });
-        let (stats, readback) = self
+        let (stats, readbacks) = self
             .renderer
             .encode(
                 &self.device,
@@ -181,23 +219,28 @@ impl TerrainLab {
                 &color_view,
                 self.width,
                 self.height,
-                u64::from(revision),
-                &reference,
                 options,
                 camera,
+                performance_now,
             )
             .map_err(js_error)?;
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
-        self.renderer.mark_submitted(readback);
+        self.renderer.mark_submitted(readbacks);
         let finished = now_ms()?;
+        if stats.coarse_ready && self.coarse_ready_ms.is_none() {
+            self.coarse_ready_ms = Some(finished - self.request_started_ms);
+        }
+        if stats.target_ready && self.target_ready_ms.is_none() {
+            self.target_ready_ms = Some(finished - self.request_started_ms);
+        }
         let (source, view, layer) = terrain_preview_option_labels(options);
         let report = render_report(
             stats,
             &seed,
             center_x,
             center_z,
-            sample_spacing,
+            &detail,
             source,
             view,
             layer,
@@ -205,10 +248,10 @@ impl TerrainLab {
             self.height,
             camera.yaw_radians,
             camera.pitch_radians,
-            cpu_reference_ms,
             finished - encode_start,
-            finished - request_start,
-            self.renderer.stale_result_count(),
+            finished - self.request_started_ms,
+            self.coarse_ready_ms,
+            self.target_ready_ms,
         );
         json(&report)
     }
@@ -282,13 +325,7 @@ impl TerrainLab {
         );
 
         device.push_error_scope(wgpu::ErrorFilter::Validation);
-        let renderer = TerrainPreviewRenderer::new(
-            &device,
-            format,
-            width,
-            height,
-            TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS,
-        )?;
+        let renderer = TerrainViewportRenderer::new(&device, format, width, height)?;
         if let Some(error) = device.pop_error_scope().await {
             return Err(format!(
                 "failed to initialize Terrain Lab GPU pipelines: {error}"
@@ -311,6 +348,10 @@ impl TerrainLab {
             adapter_driver: adapter_info.driver,
             adapter_driver_info: adapter_info.driver_info,
             renderer,
+            active_revision: 0,
+            request_started_ms: 0.0,
+            coarse_ready_ms: None,
+            target_ready_ms: None,
         })
     }
 
@@ -393,11 +434,11 @@ fn surface_configuration(
 
 #[allow(clippy::too_many_arguments)]
 fn render_report<'a>(
-    stats: TerrainPreviewFrameStats,
+    stats: TerrainViewportFrameStats,
     seed: &'a str,
     center_x: i32,
     center_z: i32,
-    sample_spacing: u32,
+    requested_detail: &'a str,
     source: &'static str,
     view: &'static str,
     layer: &'static str,
@@ -405,10 +446,10 @@ fn render_report<'a>(
     height: u32,
     camera_yaw: f32,
     camera_pitch: f32,
-    cpu_reference_ms: f64,
     encode_submit_ms: f64,
     request_ms: f64,
-    stale_result_count: u64,
+    coarse_ready_ms: Option<f64>,
+    target_ready_ms: Option<f64>,
 ) -> TerrainLabRenderReport<'a> {
     TerrainLabRenderReport {
         revision: stats.revision,
@@ -419,13 +460,28 @@ fn render_report<'a>(
         seed,
         center_x,
         center_z,
-        sample_spacing,
-        cells_per_axis: stats.cells_per_axis,
-        samples_per_axis: stats.samples_per_axis,
+        requested_detail,
+        requested_spacing: stats.requested_spacing,
+        effective_spacing: stats.effective_spacing,
+        published_spacing: stats.published_spacing,
+        sample_spacing: stats.effective_spacing,
+        cells_per_axis: TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS,
+        samples_per_axis: TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS + 1,
         sample_count: stats.sample_count,
         vertex_count: stats.vertex_count,
-        footprint_blocks: stats.footprint_blocks,
-        footprint_chunks: stats.footprint_blocks / 16,
+        footprint_blocks: stats.view_width_blocks,
+        footprint_chunks: stats.view_width_blocks / 16,
+        view_width_blocks: stats.view_width_blocks,
+        view_height_blocks: stats.view_height_blocks,
+        level_count: stats.level_count,
+        visible_tile_count: stats.visible_tile_count,
+        published_tile_count: stats.published_tile_count,
+        resident_tile_count: stats.resident_tile_count,
+        queued_tile_count: stats.queued_tile_count,
+        pending_readback_count: stats.pending_readback_count,
+        compiled_tiles: stats.compiled_tiles,
+        compiled_tiles_total: stats.compiled_tiles_total,
+        evicted_tiles_total: stats.evicted_tiles_total,
         source,
         view,
         layer,
@@ -434,24 +490,33 @@ fn render_report<'a>(
         height,
         camera_yaw,
         camera_pitch,
-        cpu_reference_ms,
+        cpu_reference_ms: stats.cpu_reference_micros as f64 / 1_000.0,
         encode_submit_ms,
         request_ms,
+        coarse_ready_ms,
+        target_ready_ms,
         reference_bytes: stats.reference_bytes,
         gpu_sample_bytes: stats.gpu_sample_bytes,
         readback_bytes: stats.readback_bytes,
         resident_bytes: stats.resident_bytes,
-        comparison_pending: true,
-        stale_result_count,
+        comparison_pending: stats.pending_readback_count > 0,
+        stale_result_count: stats.stale_result_count,
+        coarse_ready: stats.coarse_ready,
+        target_ready: stats.target_ready,
+        budget_limited: stats.budget_limited,
+        needs_redraw: stats.needs_redraw,
+        gpu_execution_timing_available: false,
     }
 }
 
 fn comparison_report(
-    completed: TerrainPreviewCompletedComparison,
+    completed: TerrainViewportCompletedComparison,
     stale_result_count: u64,
 ) -> TerrainLabComparisonReport {
     TerrainLabComparisonReport {
         revision: completed.revision,
+        sample_spacing: completed.sample_spacing,
+        tile_count: completed.tile_count,
         sample_count: completed.comparison.sample_count,
         max_absolute_surface_error: completed.comparison.max_absolute_surface_error,
         mean_absolute_surface_error: completed.comparison.mean_absolute_surface_error,
@@ -472,12 +537,29 @@ fn comparison_report(
     }
 }
 
+fn parse_viewport_detail(detail: &str) -> Result<TerrainViewportDetail, String> {
+    if detail == "auto" {
+        return Ok(TerrainViewportDetail::Auto);
+    }
+    detail
+        .parse::<u32>()
+        .map(TerrainViewportDetail::Manual)
+        .map_err(|error| format!("invalid terrain viewport detail {detail:?}: {error}"))
+}
+
 fn now_ms() -> Result<f64, JsValue> {
     web_sys::window()
         .ok_or_else(|| js_error("Terrain Lab has no Window"))?
         .performance()
         .ok_or_else(|| js_error("Terrain Lab has no Performance clock"))
         .map(|performance| performance.now())
+}
+
+fn performance_now() -> f64 {
+    web_sys::window()
+        .and_then(|window| window.performance())
+        .map(|performance| performance.now())
+        .unwrap_or(0.0)
 }
 
 fn json(value: &impl Serialize) -> Result<String, JsValue> {

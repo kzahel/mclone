@@ -6,12 +6,13 @@ import {
   DEFAULT_TERRAIN_LAB_CAMERA,
   REVIEW_TERRAIN_LAB_STATE,
   footprintBlocks,
-  nextSpacing,
+  nextBlocksAcross,
   orbitTerrainLabCamera,
   panTerrainLabState,
   parseTerrainLabState,
   terrainLabSearch,
   validSeed,
+  zoomTerrainLabState,
 } from "../src/state";
 
 test("round-trips complete URL state", () => {
@@ -19,7 +20,8 @@ test("round-trips complete URL state", () => {
     seed: "-9223372036854775808",
     centerX: -1024,
     centerZ: 2048,
-    spacing: 256 as const,
+    blocksAcross: 16_384,
+    detail: 16 as const,
     source: "gpu" as const,
     view: "map" as const,
     layer: "continentalness" as const,
@@ -48,20 +50,31 @@ test("validates the complete signed 64-bit seed range", () => {
   assert.equal(validSeed("1.5"), undefined);
 });
 
-test("zooms through power-of-two spacing and reports footprint", () => {
-  assert.equal(nextSpacing(2, "in"), 2);
-  assert.equal(nextSpacing(32, "in"), 16);
-  assert.equal(nextSpacing(32, "out"), 64);
-  assert.equal(nextSpacing(1024, "out"), 1024);
-  assert.equal(footprintBlocks({ spacing: 256 }), 16_384);
+test("zooms independently from detail and reports footprint", () => {
+  assert.equal(nextBlocksAcross(64, "in"), 64);
+  assert.equal(nextBlocksAcross(2_048, "in"), 1_024);
+  assert.equal(nextBlocksAcross(2_048, "out"), 4_096);
+  assert.equal(nextBlocksAcross(131_072, "out"), 131_072);
+  assert.equal(footprintBlocks({ blocksAcross: 16_384 }), 16_384);
 });
 
-test("pans on the active sample lattice", () => {
+test("pans continuously rather than snapping to the detail lattice", () => {
   const moved = panTerrainLabState(DEFAULT_TERRAIN_LAB_STATE, 79, -47);
-  assert.equal(Math.abs(moved.centerX % moved.spacing), 0);
-  assert.equal(Math.abs(moved.centerZ % moved.spacing), 0);
-  assert.equal(moved.centerX, -224);
-  assert.equal(moved.centerZ, 288);
+  assert.equal(moved.centerX, -225);
+  assert.equal(moved.centerZ, 289);
+});
+
+test("anchors map zoom under the pointer", () => {
+  const zoomed = zoomTerrainLabState(DEFAULT_TERRAIN_LAB_STATE, 0.5, 0.5, -0.5, 2);
+  assert.equal(zoomed.blocksAcross, 1_024);
+  assert.equal(zoomed.centerX, 208);
+  assert.equal(zoomed.centerZ, 80);
+});
+
+test("accepts old spacing links without changing their visible footprint", () => {
+  const legacy = parseTerrainLabState("?spacing=32");
+  assert.equal(legacy.blocksAcross, 2_048);
+  assert.equal(legacy.detail, 32);
 });
 
 test("defaults to production truth and gives the fixed comparison site a name", () => {
@@ -84,7 +97,8 @@ test("orbits independently from URL-addressed terrain state", () => {
     seed: "-98765",
     centerX: -304,
     centerZ: 336,
-    spacing: 32,
+    blocksAcross: 2_048,
+    detail: "auto",
     source: "reference",
     view: "3d",
     layer: "terrain",

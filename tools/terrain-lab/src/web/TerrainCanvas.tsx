@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent, WheelEvent as ReactWheelEvent } from "react";
+import type {
+  PointerEvent as ReactPointerEvent,
+  WheelEvent as ReactWheelEvent,
+} from "react";
 import type { TerrainLab } from "../../generated/pkg/mclone_terrain_lab";
 import initTerrainLab, {
   mclone_terrain_lab_create,
@@ -7,10 +10,11 @@ import initTerrainLab, {
 
 import {
   footprintBlocks,
-  nextSpacing,
   orbitTerrainLabCamera,
   panTerrainLabState,
+  zoomTerrainLabState,
   type TerrainLabCamera,
+  type TerrainLabSource,
   type TerrainLabState,
 } from "../state";
 
@@ -34,6 +38,10 @@ export interface TerrainLabRenderReport {
   seed: string;
   centerX: number;
   centerZ: number;
+  requestedDetail: string;
+  requestedSpacing: number;
+  effectiveSpacing: number;
+  publishedSpacing: number;
   sampleSpacing: number;
   cellsPerAxis: number;
   samplesPerAxis: number;
@@ -41,6 +49,17 @@ export interface TerrainLabRenderReport {
   vertexCount: number;
   footprintBlocks: number;
   footprintChunks: number;
+  viewWidthBlocks: number;
+  viewHeightBlocks: number;
+  levelCount: number;
+  visibleTileCount: number;
+  publishedTileCount: number;
+  residentTileCount: number;
+  queuedTileCount: number;
+  pendingReadbackCount: number;
+  compiledTiles: number;
+  compiledTilesTotal: number;
+  evictedTilesTotal: number;
   source: string;
   view: string;
   layer: string;
@@ -52,16 +71,25 @@ export interface TerrainLabRenderReport {
   cpuReferenceMs: number;
   encodeSubmitMs: number;
   requestMs: number;
+  coarseReadyMs: number | null;
+  targetReadyMs: number | null;
   referenceBytes: number;
   gpuSampleBytes: number;
   readbackBytes: number;
   residentBytes: number;
   comparisonPending: boolean;
   staleResultCount: number;
+  coarseReady: boolean;
+  targetReady: boolean;
+  budgetLimited: boolean;
+  needsRedraw: boolean;
+  gpuExecutionTimingAvailable: boolean;
 }
 
 export interface TerrainLabComparisonReport {
   revision: number;
+  sampleSpacing: number;
+  tileCount: number;
   sampleCount: number;
   maxAbsoluteSurfaceError: number;
   meanAbsoluteSurfaceError: number;
@@ -100,6 +128,16 @@ interface PointerStart {
   state: TerrainLabState;
 }
 
+interface ActivePointer {
+  clientX: number;
+  clientY: number;
+}
+
+interface PinchStart {
+  distance: number;
+  state: TerrainLabState;
+}
+
 export function TerrainCanvas({
   state,
   camera,
@@ -116,10 +154,15 @@ export function TerrainCanvas({
   const labRef = useRef<TerrainLab | undefined>(undefined);
   const revisionRef = useRef(0);
   const pointerStartRef = useRef<PointerStart | undefined>(undefined);
+  const activePointersRef = useRef(new Map<number, ActivePointer>());
+  const pinchStartRef = useRef<PinchStart | undefined>(undefined);
+  const interactionFrameRef = useRef(0);
   const orbitFrameRef = useRef(0);
+  const pendingStateRef = useRef<TerrainLabState | undefined>(undefined);
   const pendingCameraRef = useRef<TerrainLabCamera | undefined>(undefined);
   const [canvasSize, setCanvasSize] = useState({ width: 1280, height: 720 });
   const [initialized, setInitialized] = useState(false);
+  const [latestReport, setLatestReport] = useState<TerrainLabRenderReport>();
 
   useEffect(() => {
     let cancelled = false;
@@ -153,6 +196,8 @@ export function TerrainCanvas({
     });
     return () => {
       cancelled = true;
+      window.cancelAnimationFrame(interactionFrameRef.current);
+      window.cancelAnimationFrame(orbitFrameRef.current);
       labRef.current?.free();
       labRef.current = undefined;
     };
@@ -184,58 +229,71 @@ export function TerrainCanvas({
       return;
     }
     let cancelled = false;
-    let pollFrame = 0;
+    let pumpFrame = 0;
+    let needsRender = true;
+    let comparisonComplete = false;
     const revision = ++revisionRef.current;
-    try {
-      onStatus("rendering");
-      onError(undefined);
-      onComparison(undefined);
-      lab.resize(canvasSize.width, canvasSize.height);
-      const report = parseJson<TerrainLabRenderReport>(
-        lab.render(
-          revision,
-          state.seed,
-          state.centerX,
-          state.centerZ,
-          state.spacing,
-          state.source,
-          state.view,
-          state.layer,
-          camera.yaw,
-          camera.pitch,
-        ),
-      );
-      onRender(report);
-      onStatus("ready");
-    } catch (error: unknown) {
-      onStatus("error");
-      onError(errorMessage(error));
-      return;
-    }
+    onStatus("rendering");
+    onError(undefined);
+    onComparison(undefined);
+    lab.resize(canvasSize.width, canvasSize.height);
 
-    const poll = (): void => {
+    const pump = (): void => {
       if (cancelled) {
         return;
       }
       try {
+        if (needsRender) {
+          const stage = stageRef.current;
+          if (!stage) {
+            return;
+          }
+          const rect = stage.getBoundingClientRect();
+          const panel = terrainPanelSize(rect.width, rect.height, state.source);
+          const report = parseJson<TerrainLabRenderReport>(
+            lab.render(
+              revision,
+              state.seed,
+              state.centerX,
+              state.centerZ,
+              state.blocksAcross,
+              String(state.detail),
+              Math.max(1, Math.round(panel.width)),
+              Math.max(1, Math.round(panel.height)),
+              state.source,
+              state.view,
+              state.layer,
+              camera.yaw,
+              camera.pitch,
+            ),
+          );
+          setLatestReport(report);
+          onRender(report);
+          needsRender = report.needsRedraw;
+        }
         const result = lab.pollComparison();
         if (result !== undefined) {
           const comparison = parseJson<TerrainLabComparisonReport>(result);
           if (comparison.revision === revision) {
             onComparison(comparison);
-            return;
+            comparisonComplete = true;
           }
         }
       } catch (error: unknown) {
+        onStatus("error");
         onError(errorMessage(error));
         return;
       }
-      pollFrame = window.requestAnimationFrame(poll);
+      if (needsRender || !comparisonComplete) {
+        pumpFrame = window.requestAnimationFrame(pump);
+      } else {
+        onStatus("ready");
+      }
     };
-    pollFrame = window.requestAnimationFrame(poll);
+    pump();
     return () => {
       cancelled = true;
-      window.cancelAnimationFrame(pollFrame);
+      window.cancelAnimationFrame(pumpFrame);
     };
   }, [
     canvasSize,
@@ -248,12 +306,42 @@ export function TerrainCanvas({
     state,
   ]);
 
+  const queueState = (next: TerrainLabState): void => {
+    pendingStateRef.current = next;
+    if (interactionFrameRef.current !== 0) {
+      return;
+    }
+    interactionFrameRef.current = window.requestAnimationFrame(() => {
+      interactionFrameRef.current = 0;
+      const pending = pendingStateRef.current;
+      if (pending) {
+        pendingStateRef.current = undefined;
+        onStateChange(pending);
+      }
+    });
+  };
+
   const beginInteraction = (event: ReactPointerEvent<HTMLDivElement>): void => {
     if (event.button !== 0 && event.button !== 1) {
       return;
     }
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
+    if (event.pointerType === "touch") {
+      activePointersRef.current.set(event.pointerId, {
+        clientX: event.clientX,
+        clientY: event.clientY,
+      });
+      const pair = firstPointerPair(activePointersRef.current);
+      if (pair) {
+        pinchStartRef.current = {
+          distance: pointerDistance(pair[0], pair[1]),
+          state,
+        };
+        pointerStartRef.current = undefined;
+        return;
+      }
+    }
     const orbit = state.view === "3d" && event.button === 0 && !event.shiftKey;
     pointerStartRef.current = {
       pointerId: event.pointerId,
@@ -266,15 +354,61 @@ export function TerrainCanvas({
   };
 
   const moveInteraction = (event: ReactPointerEvent<HTMLDivElement>): void => {
-    const start = pointerStartRef.current;
-    if (!start || start.pointerId !== event.pointerId || start.mode !== "orbit") {
-      return;
-    }
     const stage = stageRef.current;
     if (!stage) {
       return;
     }
+    if (event.pointerType === "touch" && activePointersRef.current.has(event.pointerId)) {
+      activePointersRef.current.set(event.pointerId, {
+        clientX: event.clientX,
+        clientY: event.clientY,
+      });
+      const pair = firstPointerPair(activePointersRef.current);
+      const pinch = pinchStartRef.current;
+      if (pair && pinch) {
+        const distance = pointerDistance(pair[0], pair[1]);
+        if (distance > 1) {
+          const rect = stage.getBoundingClientRect();
+          const midpointX = (pair[0].clientX + pair[1].clientX) * 0.5 - rect.left;
+          const midpointY = (pair[0].clientY + pair[1].clientY) * 0.5 - rect.top;
+          const panel = terrainPanelAtPointer(
+            rect.width,
+            rect.height,
+            midpointX,
+            midpointY,
+            state.source,
+          );
+          queueState(
+            zoomTerrainLabState(
+              pinch.state,
+              pinch.distance / distance,
+              state.view === "map" ? panel.normalizedX : 0,
+              state.view === "map" ? panel.normalizedZ : 0,
+              panel.width / Math.max(panel.height, 1),
+            ),
+          );
+        }
+        return;
+      }
+    }
+
+    const start = pointerStartRef.current;
+    if (!start || start.pointerId !== event.pointerId) {
+      return;
+    }
     const rect = stage.getBoundingClientRect();
+    if (start.mode === "pan") {
+      const panel = terrainPanelSize(rect.width, rect.height, start.state.source);
+      const panelAspect = panel.width / Math.max(panel.height, 1);
+      const deltaX =
+        -((event.clientX - start.clientX) / Math.max(panel.width, 1))
+        * start.state.blocksAcross;
+      const deltaZ =
+        ((event.clientY - start.clientY) / Math.max(panel.height, 1))
+        * (start.state.blocksAcross / Math.max(panelAspect, 0.01));
+      queueState(panTerrainLabState(start.state, deltaX, deltaZ));
+      return;
+    }
     pendingCameraRef.current = orbitTerrainLabCamera(
       start.camera,
       event.clientX - start.clientX,
@@ -282,48 +416,61 @@ export function TerrainCanvas({
       rect.width,
       rect.height,
     );
-    if (orbitFrameRef.current !== 0) {
-      return;
+    if (orbitFrameRef.current === 0) {
+      orbitFrameRef.current = window.requestAnimationFrame(() => {
+        orbitFrameRef.current = 0;
+        const pending = pendingCameraRef.current;
+        if (pending) {
+          pendingCameraRef.current = undefined;
+          onCameraChange(pending);
+        }
+      });
     }
-    orbitFrameRef.current = window.requestAnimationFrame(() => {
-      orbitFrameRef.current = 0;
-      const pending = pendingCameraRef.current;
-      if (pending) {
-        pendingCameraRef.current = undefined;
-        onCameraChange(pending);
-      }
-    });
   };
 
   const finishInteraction = (event: ReactPointerEvent<HTMLDivElement>): void => {
-    const start = pointerStartRef.current;
-    if (!start || start.pointerId !== event.pointerId) {
-      return;
+    activePointersRef.current.delete(event.pointerId);
+    if (activePointersRef.current.size < 2) {
+      pinchStartRef.current = undefined;
     }
-    pointerStartRef.current = undefined;
-    if (start.mode === "orbit") {
-      return;
+    if (pointerStartRef.current?.pointerId === event.pointerId) {
+      pointerStartRef.current = undefined;
     }
+    const pendingState = pendingStateRef.current;
+    if (pendingState) {
+      pendingStateRef.current = undefined;
+      onStateChange(pendingState);
+    }
+    const pendingCamera = pendingCameraRef.current;
+    if (pendingCamera) {
+      pendingCameraRef.current = undefined;
+      onCameraChange(pendingCamera);
+    }
+  };
+
+  const zoomWithWheel = (event: ReactWheelEvent<HTMLDivElement>): void => {
+    event.preventDefault();
     const stage = stageRef.current;
     if (!stage) {
       return;
     }
     const rect = stage.getBoundingClientRect();
-    const footprint = footprintBlocks(start.state);
-    const deltaX = -((event.clientX - start.clientX) / Math.max(rect.width, 1)) * footprint;
-    const deltaZ = ((event.clientY - start.clientY) / Math.max(rect.height, 1)) * footprint;
-    if (Math.abs(deltaX) < start.state.spacing && Math.abs(deltaZ) < start.state.spacing) {
-      return;
-    }
-    onStateChange(panTerrainLabState(start.state, Math.round(deltaX), Math.round(deltaZ)));
-  };
-
-  const zoomWithWheel = (event: ReactWheelEvent<HTMLDivElement>): void => {
-    event.preventDefault();
-    onStateChange({
-      ...state,
-      spacing: nextSpacing(state.spacing, event.deltaY > 0 ? "out" : "in"),
-    });
+    const panel = terrainPanelAtPointer(
+      rect.width,
+      rect.height,
+      event.clientX - rect.left,
+      event.clientY - rect.top,
+      state.source,
+    );
+    onStateChange(
+      zoomTerrainLabState(
+        state,
+        Math.exp(event.deltaY * 0.0015),
+        state.view === "map" ? panel.normalizedX : 0,
+        state.view === "map" ? panel.normalizedZ : 0,
+        panel.width / Math.max(panel.height, 1),
+      ),
+    );
   };
 
   return (
@@ -335,9 +482,7 @@ export function TerrainCanvas({
       onPointerDown={beginInteraction}
       onPointerMove={moveInteraction}
       onPointerUp={finishInteraction}
-      onPointerCancel={() => {
-        pointerStartRef.current = undefined;
-      }}
+      onPointerCancel={finishInteraction}
       onContextMenu={(event) => event.preventDefault()}
       onWheel={zoomWithWheel}
     >
@@ -349,9 +494,15 @@ export function TerrainCanvas({
         aria-label="Live GPU terrain preview"
       />
       <div className="canvasTopline" aria-hidden="true">
-        <span className="canvasBadge primary">live compute</span>
-        <span className="canvasBadge">64 × 64 cells</span>
-        <span className="canvasBadge">{formatFootprint(footprintBlocks(state))} square</span>
+        <span className="canvasBadge primary">
+          {latestReport?.targetReady ? "target detail" : "refining"}
+        </span>
+        <span className="canvasBadge">
+          {latestReport && latestReport.publishedSpacing > 0
+            ? `${latestReport.publishedTileCount} tiles · 1:${latestReport.publishedSpacing}`
+            : "planning tiles"}
+        </span>
+        <span className="canvasBadge">{formatFootprint(footprintBlocks(state))} across</span>
       </div>
       {state.source === "split" ? (
         <div className="splitLabels" aria-hidden="true">
@@ -363,14 +514,57 @@ export function TerrainCanvas({
         <span className="desktopHint">
           {state.view === "3d"
             ? "left drag orbit · shift + left or middle drag pan · wheel zoom"
-            : "left drag pan · wheel zoom"}
+            : "left drag pan · wheel zoom at pointer"}
         </span>
         <span className="mobileHint">
-          {state.view === "3d" ? "drag orbit · scale controls zoom" : "drag pan · scale controls zoom"}
+          {state.view === "3d" ? "drag orbit · pinch zoom" : "drag pan · pinch zoom"}
         </span>
       </div>
     </div>
   );
+}
+
+function terrainPanelSize(
+  width: number,
+  height: number,
+  source: TerrainLabSource,
+): { width: number; height: number } {
+  if (source !== "split") {
+    return { width, height };
+  }
+  return width <= height ? { width, height: height / 2 } : { width: width / 2, height };
+}
+
+function terrainPanelAtPointer(
+  width: number,
+  height: number,
+  pointerX: number,
+  pointerY: number,
+  source: TerrainLabSource,
+): { width: number; height: number; normalizedX: number; normalizedZ: number } {
+  const panel = terrainPanelSize(width, height, source);
+  const localX = source === "split" && width > height
+    ? pointerX % Math.max(panel.width, 1)
+    : pointerX;
+  const localY = source === "split" && width <= height
+    ? pointerY % Math.max(panel.height, 1)
+    : pointerY;
+  return {
+    ...panel,
+    normalizedX: localX / Math.max(panel.width, 1) - 0.5,
+    normalizedZ: localY / Math.max(panel.height, 1) - 0.5,
+  };
+}
+
+function firstPointerPair(
+  pointers: Map<number, ActivePointer>,
+): [ActivePointer, ActivePointer] | undefined {
+  const pair = [...pointers.values()].slice(0, 2);
+  return pair.length === 2 ? [pair[0]!, pair[1]!] : undefined;
+}
+
+function pointerDistance(first: ActivePointer, second: ActivePointer): number {
+  return Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY);
 }
 
 function parseJson<T>(value: string): T {

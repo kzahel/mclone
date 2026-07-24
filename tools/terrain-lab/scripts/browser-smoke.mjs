@@ -56,7 +56,7 @@ try {
   });
 
   await page.goto(
-    `${baseUrl}/terrain/?seed=-98765&x=-304&z=336&spacing=32`
+    `${baseUrl}/terrain/?seed=-98765&x=-304&z=336&blocks=2048&detail=auto`
       + "&source=split&view=3d&layer=terrain",
     { waitUntil: "networkidle" },
   );
@@ -71,7 +71,8 @@ try {
   }
   const expectedCompareLayout = mobile ? "stacked" : "side-by-side";
   if (await shell.getAttribute("data-compare-layout") !== expectedCompareLayout
-      || Number(await shell.getAttribute("data-vertex-count")) !== 49_152) {
+      || Number(await shell.getAttribute("data-vertex-count")) <= 49_152
+      || await shell.getAttribute("data-target-ready") !== "true") {
     throw new Error(
       `Terrain Lab Compare did not submit two synchronized ${expectedCompareLayout} terrain views`,
     );
@@ -102,9 +103,13 @@ try {
     throw new Error("Terrain Lab stage has no interactive bounds");
   }
   const sourceControlsBox = await sourceControls.boundingBox();
-  if (!sourceControlsBox
-      || sourceControlsBox.y + sourceControlsBox.height > stageBox.y + 1) {
-    throw new Error("Terrain Lab source controls are not immediately before the preview");
+  const viewportControlsBox = await page
+    .locator("[data-testid='viewport-controls']")
+    .boundingBox();
+  if (!sourceControlsBox || !viewportControlsBox
+      || sourceControlsBox.y + sourceControlsBox.height > viewportControlsBox.y + 1
+      || viewportControlsBox.y + viewportControlsBox.height > stageBox.y + 1) {
+    throw new Error("Terrain Lab source and viewport controls are not adjacent to the preview");
   }
   await page.mouse.move(
     stageBox.x + stageBox.width * 0.5,
@@ -146,7 +151,9 @@ try {
 
   const localMapRevision = Number(await shell.getAttribute("data-render-revision"));
   await page.getByLabel("Diagnostic layer").selectOption("continentalness");
-  await page.getByLabel("Sample spacing").selectOption("1024");
+  for (let index = 0; index < 4; index += 1) {
+    await page.getByRole("button", { name: "Zoom out" }).click();
+  }
   await waitForRevision(shell, localMapRevision);
   const continentScaleMetrics = await readComparisonMetrics(shell);
   assertLargeFieldMetrics(continentScaleMetrics, "65.5 km continent");
@@ -157,7 +164,8 @@ try {
   const finalUrl = page.url();
   if (!finalUrl.includes("layer=continentalness")
       || !finalUrl.includes("view=map")
-      || !finalUrl.includes("spacing=1024")) {
+      || !finalUrl.includes("blocks=65536")
+      || !finalUrl.includes("detail=auto")) {
     throw new Error(`Terrain Lab controls did not round-trip through the URL: ${finalUrl}`);
   }
   if (pageErrors.length > 0) {

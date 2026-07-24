@@ -12,7 +12,7 @@ test("generates terrain, round-trips controls, and completes comparison", async 
   });
 
   await page.goto(
-    "/terrain/?seed=-98765&x=-304&z=336&spacing=32&source=split&view=3d&layer=terrain",
+    "/terrain/?seed=-98765&x=-304&z=336&blocks=2048&detail=auto&source=split&view=3d&layer=terrain",
   );
   await expect(page.locator("[data-testid='lab-status']")).toContainText("ready");
   await waitForCurrentComparison(page);
@@ -27,7 +27,10 @@ test("generates terrain, round-trips controls, and completes comparison", async 
     "data-compare-layout",
     testInfo.project.name === "phone-chrome" ? "stacked" : "side-by-side",
   );
-  await expect(shell).toHaveAttribute("data-vertex-count", "49152");
+  expect(Number(await shell.getAttribute("data-vertex-count"))).toBeGreaterThan(49_152);
+  await expect(shell).toHaveAttribute("data-target-ready", "true");
+  expect(Number(await shell.getAttribute("data-resident-tiles"))).toBeGreaterThan(1);
+  expect(Number(await shell.getAttribute("data-effective-spacing"))).toBeGreaterThanOrEqual(1);
   expect(Number(await shell.getAttribute("data-base-mean-error"))).toBeLessThanOrEqual(0.01);
   expect(Number(await shell.getAttribute("data-base-p95-error"))).toBeLessThanOrEqual(0.01);
   expect(Number(await shell.getAttribute("data-ocean-agreement"))).toBeGreaterThanOrEqual(0.999);
@@ -66,9 +69,14 @@ test("generates terrain, round-trips controls, and completes comparison", async 
   const stage = page.getByTestId("terrain-stage");
   const stageBox = await stage.boundingBox();
   const sourceControlsBox = await sourceControls.boundingBox();
+  const viewportControlsBox = await page.getByTestId("viewport-controls").boundingBox();
   expect(stageBox).not.toBeNull();
   expect(sourceControlsBox).not.toBeNull();
-  expect(sourceControlsBox!.y + sourceControlsBox!.height).toBeLessThanOrEqual(stageBox!.y + 1);
+  expect(viewportControlsBox).not.toBeNull();
+  expect(sourceControlsBox!.y + sourceControlsBox!.height)
+    .toBeLessThanOrEqual(viewportControlsBox!.y + 1);
+  expect(viewportControlsBox!.y + viewportControlsBox!.height)
+    .toBeLessThanOrEqual(stageBox!.y + 1);
   await page.mouse.move(stageBox!.x + stageBox!.width * 0.5, stageBox!.y + stageBox!.height * 0.5);
   await page.mouse.down();
   await page.mouse.move(
@@ -99,11 +107,18 @@ test("generates terrain, round-trips controls, and completes comparison", async 
   await page.getByRole("button", { name: "Map", exact: true }).click();
   await page.getByRole("button", { name: "Zoom out" }).click();
   await expect(page).toHaveURL(/view=map/u);
-  await expect(page).toHaveURL(/spacing=64/u);
+  await expect(page).toHaveURL(/blocks=4096/u);
+  await expect(page).toHaveURL(/detail=auto/u);
   await expect.poll(
     async () => Number(await shell.getAttribute("data-render-revision")),
   ).toBeGreaterThan(errorRevision);
   await waitForCurrentComparison(page);
+
+  await page.getByLabel("Terrain resolution").selectOption("1");
+  await expect(page).toHaveURL(/detail=1/u);
+  await waitForCurrentComparison(page);
+  await expect(shell).toHaveAttribute("data-requested-spacing", "1");
+  expect(Number(await shell.getAttribute("data-effective-spacing"))).toBeGreaterThan(1);
   await page.screenshot({
     path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-map-error.png`,
     fullPage: true,

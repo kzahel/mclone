@@ -1,7 +1,6 @@
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::num::NonZeroU64;
 use std::sync::mpsc;
-use std::time::Instant;
 
 use mclone_worldgen::terrain_preview::{
     TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS, TerrainPreviewComparison, TerrainPreviewReferenceGrid,
@@ -17,6 +16,7 @@ use super::{
 
 pub const TERRAIN_VIEWPORT_MAX_RESIDENT_TILES: usize = 192;
 pub const TERRAIN_VIEWPORT_TILE_COMPILES_PER_FRAME: usize = 4;
+pub const TERRAIN_VIEWPORT_CPU_COMPILE_BUDGET_MICROS: u64 = 8_000;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TerrainViewportFrameStats {
@@ -364,6 +364,10 @@ impl TerrainViewportRenderer {
         self.evict_unused_tiles();
     }
 
+    pub const fn stale_result_count(&self) -> u64 {
+        self.stale_result_count
+    }
+
     pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
         let width = width.max(1);
         let height = height.max(1);
@@ -383,6 +387,7 @@ impl TerrainViewportRenderer {
         height: u32,
         options: TerrainPreviewDrawOptions,
         camera: TerrainPreviewCamera,
+        mut clock_ms: impl FnMut() -> f64,
     ) -> Result<(TerrainViewportFrameStats, EncodedTerrainViewportReadbacks), String> {
         self.resize(device, width, height);
         let plan = self
@@ -394,14 +399,19 @@ impl TerrainViewportRenderer {
         let mut cpu_reference_micros = 0_u64;
 
         for _ in 0..TERRAIN_VIEWPORT_TILE_COMPILES_PER_FRAME {
+            if compiled_tiles > 0
+                && cpu_reference_micros >= TERRAIN_VIEWPORT_CPU_COMPILE_BUDGET_MICROS
+            {
+                break;
+            }
             let Some(tile_id) = self.take_next_missing_tile() else {
                 break;
             };
-            let compile_started = Instant::now();
+            let compile_started = clock_ms();
             let reference = TerrainPreviewReferenceGrid::compile(tile_id.preview_request())?;
-            cpu_reference_micros = cpu_reference_micros.saturating_add(
-                u64::try_from(compile_started.elapsed().as_micros()).unwrap_or(u64::MAX),
-            );
+            let compile_micros = ((clock_ms() - compile_started).max(0.0) * 1_000.0).round();
+            cpu_reference_micros =
+                cpu_reference_micros.saturating_add(compile_micros.min(u64::MAX as f64) as u64);
             let mut tile = TerrainViewportGpuTile::new(
                 device,
                 queue,

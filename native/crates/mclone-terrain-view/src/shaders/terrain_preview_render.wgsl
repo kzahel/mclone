@@ -227,11 +227,11 @@ fn vertex_main(
             0.02,
             0.98,
         );
-    }
-    if aspect > 1.0 {
-        clip_x = clip_x / aspect;
-    } else {
-        clip_y = clip_y * aspect;
+        if aspect > 1.0 {
+            clip_x = clip_x / aspect;
+        } else {
+            clip_y = clip_y * aspect;
+        }
     }
     if compare {
         if stacked_compare {

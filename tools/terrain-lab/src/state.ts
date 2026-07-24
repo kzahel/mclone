@@ -1,7 +1,10 @@
-export const TERRAIN_LAB_SPACINGS = [2, 4, 8, 16, 32, 64, 128, 256, 512, 1024] as const;
+export const TERRAIN_LAB_SPACINGS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024] as const;
 export const TERRAIN_LAB_CELLS_PER_AXIS = 64;
+export const TERRAIN_LAB_MIN_BLOCKS_ACROSS = 64;
+export const TERRAIN_LAB_MAX_BLOCKS_ACROSS = 131_072;
 
 export type TerrainLabSpacing = (typeof TERRAIN_LAB_SPACINGS)[number];
+export type TerrainLabDetail = "auto" | TerrainLabSpacing;
 export type TerrainLabSource = "gpu" | "reference" | "split";
 export type TerrainLabView = "map" | "3d";
 export type TerrainLabLayer = "terrain" | "height" | "error" | "continentalness" | "climate";
@@ -10,7 +13,8 @@ export interface TerrainLabState {
   seed: string;
   centerX: number;
   centerZ: number;
-  spacing: TerrainLabSpacing;
+  blocksAcross: number;
+  detail: TerrainLabDetail;
   source: TerrainLabSource;
   view: TerrainLabView;
   layer: TerrainLabLayer;
@@ -25,7 +29,8 @@ export const DEFAULT_TERRAIN_LAB_STATE: TerrainLabState = {
   seed: "-98765",
   centerX: -304,
   centerZ: 336,
-  spacing: 32,
+  blocksAcross: 2_048,
+  detail: "auto",
   source: "reference",
   view: "3d",
   layer: "terrain",
@@ -60,11 +65,16 @@ export function parseTerrainLabState(
   fallback: TerrainLabState = DEFAULT_TERRAIN_LAB_STATE,
 ): TerrainLabState {
   const params = new URLSearchParams(search);
+  const legacySpacing = validSpacing(params.get("spacing"));
   return {
     seed: validSeed(params.get("seed")) ?? fallback.seed,
     centerX: validI32(params.get("x")) ?? fallback.centerX,
     centerZ: validI32(params.get("z")) ?? fallback.centerZ,
-    spacing: validSpacing(params.get("spacing")) ?? fallback.spacing,
+    blocksAcross:
+      validBlocksAcross(params.get("blocks"))
+      ?? (legacySpacing === undefined ? undefined : legacySpacing * TERRAIN_LAB_CELLS_PER_AXIS)
+      ?? fallback.blocksAcross,
+    detail: validDetail(params.get("detail")) ?? legacySpacing ?? fallback.detail,
     source: validMember(params.get("source"), SOURCES) ?? fallback.source,
     view: validMember(params.get("view"), VIEWS) ?? fallback.view,
     layer: validMember(params.get("layer"), LAYERS) ?? fallback.layer,
@@ -76,25 +86,45 @@ export function terrainLabSearch(state: TerrainLabState): string {
   params.set("seed", state.seed);
   params.set("x", String(state.centerX));
   params.set("z", String(state.centerZ));
-  params.set("spacing", String(state.spacing));
+  params.set("blocks", String(state.blocksAcross));
+  params.set("detail", String(state.detail));
   params.set("source", state.source);
   params.set("view", state.view);
   params.set("layer", state.layer);
   return `?${params.toString()}`;
 }
 
-export function footprintBlocks(state: Pick<TerrainLabState, "spacing">): number {
-  return state.spacing * TERRAIN_LAB_CELLS_PER_AXIS;
+export function footprintBlocks(state: Pick<TerrainLabState, "blocksAcross">): number {
+  return state.blocksAcross;
 }
 
-export function nextSpacing(
-  spacing: TerrainLabSpacing,
+export function nextBlocksAcross(
+  blocksAcross: number,
   direction: "in" | "out",
-): TerrainLabSpacing {
-  const current = TERRAIN_LAB_SPACINGS.indexOf(spacing);
-  const delta = direction === "in" ? -1 : 1;
-  const index = Math.max(0, Math.min(TERRAIN_LAB_SPACINGS.length - 1, current + delta));
-  return TERRAIN_LAB_SPACINGS[index] ?? spacing;
+): number {
+  const factor = direction === "in" ? 0.5 : 2;
+  return clampBlocksAcross(blocksAcross * factor);
+}
+
+export function zoomTerrainLabState(
+  state: TerrainLabState,
+  factor: number,
+  anchorX = 0,
+  anchorZ = 0,
+  panelAspect = 1,
+): TerrainLabState {
+  if (!Number.isFinite(factor) || factor <= 0) {
+    return state;
+  }
+  const blocksAcross = clampBlocksAcross(state.blocksAcross * factor);
+  const oldHeight = state.blocksAcross / Math.max(panelAspect, 0.01);
+  const newHeight = blocksAcross / Math.max(panelAspect, 0.01);
+  return {
+    ...state,
+    centerX: clampI32(Math.round(state.centerX + anchorX * (state.blocksAcross - blocksAcross))),
+    centerZ: clampI32(Math.round(state.centerZ + anchorZ * (oldHeight - newHeight))),
+    blocksAcross,
+  };
 }
 
 export function panTerrainLabState(
@@ -104,8 +134,8 @@ export function panTerrainLabState(
 ): TerrainLabState {
   return {
     ...state,
-    centerX: clampI32(snapToSpacing(state.centerX + deltaX, state.spacing)),
-    centerZ: clampI32(snapToSpacing(state.centerZ + deltaZ, state.spacing)),
+    centerX: clampI32(Math.round(state.centerX + deltaX)),
+    centerZ: clampI32(Math.round(state.centerZ + deltaZ)),
   };
 }
 
@@ -156,12 +186,31 @@ function validSpacing(value: string | null): TerrainLabSpacing | undefined {
   return TERRAIN_LAB_SPACINGS.find((spacing) => spacing === parsed);
 }
 
+function validDetail(value: string | null): TerrainLabDetail | undefined {
+  return value === "auto" ? "auto" : validSpacing(value);
+}
+
+function validBlocksAcross(value: string | null): number | undefined {
+  const parsed = validI32(value);
+  if (
+    parsed === undefined
+    || parsed < TERRAIN_LAB_MIN_BLOCKS_ACROSS
+    || parsed > TERRAIN_LAB_MAX_BLOCKS_ACROSS
+  ) {
+    return undefined;
+  }
+  return parsed;
+}
+
 function validMember<T extends string>(value: string | null, values: Set<T>): T | undefined {
   return value !== null && values.has(value as T) ? value as T : undefined;
 }
 
-function snapToSpacing(value: number, spacing: number): number {
-  return Math.round(value / spacing) * spacing;
+function clampBlocksAcross(value: number): number {
+  return Math.max(
+    TERRAIN_LAB_MIN_BLOCKS_ACROSS,
+    Math.min(TERRAIN_LAB_MAX_BLOCKS_ACROSS, Math.round(value)),
+  );
 }
 
 function clampI32(value: number): number {
