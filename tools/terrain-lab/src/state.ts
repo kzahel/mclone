@@ -2,6 +2,7 @@ export const TERRAIN_LAB_SPACINGS = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024
 export const TERRAIN_LAB_CELLS_PER_AXIS = 64;
 export const TERRAIN_LAB_MIN_BLOCKS_ACROSS = 1;
 export const TERRAIN_LAB_MAX_BLOCKS_ACROSS = 131_072;
+export const TERRAIN_LAB_CHUNK_WIDTH = 16;
 export const TERRAIN_LAB_CANONICAL_RADII = [0, 1, 2, 3, 4] as const;
 
 export type TerrainLabSpacing = (typeof TERRAIN_LAB_SPACINGS)[number];
@@ -210,6 +211,10 @@ export function toggleTerrainLabPane(
 
 export function footprintBlocks(state: Pick<TerrainLabState, "blocksAcross">): number {
   return state.blocksAcross;
+}
+
+export function canonicalTerrainCenterChunk(center: number): number {
+  return Math.floor(center / TERRAIN_LAB_CHUNK_WIDTH);
 }
 
 export function nextBlocksAcross(

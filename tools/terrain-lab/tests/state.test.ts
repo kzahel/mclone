@@ -6,6 +6,7 @@ import {
   DEFAULT_TERRAIN_LAB_CAMERA,
   REVIEW_TERRAIN_LAB_STATE,
   arrowPanTerrainLabState,
+  canonicalTerrainCenterChunk,
   footprintBlocks,
   grabPanTerrainLabState,
   grabPanTerrainLabStateInView,
@@ -83,6 +84,15 @@ test("accepts one-block links and rejects zero-width viewports", () => {
     parseTerrainLabState("?blocks=0").blocksAcross,
     DEFAULT_TERRAIN_LAB_STATE.blocksAcross,
   );
+});
+
+test("canonical coverage changes only at Euclidean chunk boundaries", () => {
+  assert.equal(canonicalTerrainCenterChunk(0), 0);
+  assert.equal(canonicalTerrainCenterChunk(15), 0);
+  assert.equal(canonicalTerrainCenterChunk(16), 1);
+  assert.equal(canonicalTerrainCenterChunk(-1), -1);
+  assert.equal(canonicalTerrainCenterChunk(-16), -1);
+  assert.equal(canonicalTerrainCenterChunk(-17), -2);
 });
 
 test("pans continuously rather than snapping to the detail lattice", () => {

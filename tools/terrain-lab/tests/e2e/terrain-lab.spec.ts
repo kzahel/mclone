@@ -472,6 +472,87 @@ test("publishes an 81-chunk real-terrain footprint progressively", async ({
   expect(pageErrors).toEqual([]);
 });
 
+test("keeps a 9x9 real footprint resident and paces pan admission", async ({
+  page,
+}, testInfo) => {
+  test.slow();
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      pageErrors.push(message.text());
+    }
+  });
+  await page.goto(
+    "/terrain/?seed=-98765&x=-304&z=336&blocks=512&detail=auto"
+      + "&panes=canonical&canonical=final&radius=4"
+      + "&water=1&vegetation=1&stage=hydrology&view=map&layer=terrain",
+  );
+  await waitForCanonical(page, 81);
+  const shell = page.locator(".appShell");
+  const centerX = page.getByLabel("Center X");
+  const initialEpoch = await shell.getAttribute("data-canonical-epoch");
+
+  await centerX.fill("-303");
+  await centerX.press("Enter");
+  await expect(page).toHaveURL(/x=-303/u);
+  await expect(shell).toHaveAttribute("data-canonical-epoch", initialEpoch!);
+  await expect(shell).toHaveAttribute("data-canonical-published", "81");
+
+  await centerX.fill("-288");
+  await centerX.press("Enter");
+  await expect(page).toHaveURL(/x=-288/u);
+  await expect(shell).toHaveAttribute("data-canonical-resident-hits", "72");
+  await waitForCanonical(page, 81);
+  await expect(shell).toHaveAttribute("data-canonical-admission-frames", "9");
+  await expect(shell).toHaveAttribute("data-canonical-max-frame-admissions", "1");
+
+  await page.evaluate(() => {
+    const counts: number[] = [];
+    const element = document.querySelector(".appShell");
+    const record = (): void => {
+      const count = Number(element?.getAttribute("data-canonical-published") ?? "0");
+      if (counts.at(-1) !== count) {
+        counts.push(count);
+      }
+    };
+    record();
+    const observer = new MutationObserver(record);
+    if (element) {
+      observer.observe(element, {
+        attributes: true,
+        attributeFilter: ["data-canonical-published"],
+      });
+    }
+    Object.assign(window, {
+      terrainLabCanonicalPanCounts: counts,
+      terrainLabCanonicalPanObserver: observer,
+    });
+  });
+  await centerX.fill("-304");
+  await centerX.press("Enter");
+  await expect(page).toHaveURL(/x=-304/u);
+  await expect(shell).toHaveAttribute("data-canonical-resident-hits", "72");
+  await waitForCanonical(page, 81);
+  const counts = await page.evaluate(() => {
+    const holder = window as typeof window & {
+      terrainLabCanonicalPanCounts?: number[];
+      terrainLabCanonicalPanObserver?: MutationObserver;
+    };
+    holder.terrainLabCanonicalPanObserver?.disconnect();
+    return holder.terrainLabCanonicalPanCounts ?? [];
+  });
+  expect(Math.min(...counts)).toBeGreaterThanOrEqual(72);
+  expect(counts.some((count) => count > 72 && count < 81)).toBe(true);
+  await expect(shell).toHaveAttribute("data-canonical-cache-hits", "9");
+  await expect(shell).toHaveAttribute("data-canonical-admission-frames", "9");
+  await expect(shell).toHaveAttribute("data-canonical-max-frame-admissions", "1");
+  await page.getByTestId("canonical-terrain-stage").screenshot({
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-canonical-responsive-pan.png`,
+  });
+  expect(pageErrors).toEqual([]);
+});
+
 async function waitForCanonical(
   page: import("@playwright/test").Page,
   requestedChunks: number,

@@ -174,6 +174,10 @@ export function App(): React.JSX.Element {
       data-canonical-complete={canonicalReport?.complete ? "true" : "false"}
       data-canonical-cache-enabled={canonicalCacheEnabled ? "true" : "false"}
       data-canonical-cache-hits={canonicalReport?.cacheHits ?? 0}
+      data-canonical-epoch={canonicalReport?.epoch ?? 0}
+      data-canonical-resident-hits={canonicalReport?.residentHits ?? 0}
+      data-canonical-admission-frames={canonicalReport?.admissionFrames ?? 0}
+      data-canonical-max-frame-admissions={canonicalReport?.maxFrameAdmissions ?? 0}
     >
       <header className="topBar">
         <div className="brandLockup">
@@ -1032,6 +1036,16 @@ function Diagnostics({
         <Metric
           label="Real cache"
           value={canonical ? `${canonical.cacheHits} hits` : "—"}
+        />
+        <Metric
+          label="Real resident reuse"
+          value={canonical ? `${canonical.residentHits} chunks` : "—"}
+        />
+        <Metric
+          label="Real admission"
+          value={canonical
+            ? `${canonical.admissionFrames} frames · max ${canonical.maxFrameAdmissions}/frame`
+            : "—"}
         />
         <Metric label="CPU compile / frame" value={formatMs(report?.cpuReferenceMs)} />
         <Metric label="Encode + submit" value={formatMs(report?.encodeSubmitMs)} />
