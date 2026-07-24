@@ -868,10 +868,10 @@ held 89.5-90.0 FPS. The RD13 oblique traversal control reached 87.2 FPS,
 again showing that top-down cost follows exposed terrain work rather than
 aggregate CPU or GPU saturation.
 
-Treat RD8 as the strict 90 Hz handheld default class on this artifact. RD10 is
-a reasonable near-90 quality setting, but its 20.44 ms p99 means it is not yet
-a strict pacing guarantee. RD13 is a supported stress/quality setting at
-roughly 84 FPS in the hardest traversal row, not a 90 Hz promise. These are
+Treat RD8 as the refresh-rate-average handheld default class on this artifact.
+RD10 is a reasonable near-90 quality setting, but neither is a strict
+11.125 ms p95 guarantee. RD13 is a supported stress/quality setting at roughly
+84 FPS in the hardest traversal row, not a 90 Hz promise. These are
 native-panel results for this world and workload, not a universal content
 guarantee.
 
@@ -881,11 +881,55 @@ tests passed. The final RD13 traversal used approximately 424 MiB of vertex
 data and 64 MiB of index data; bounded vertex pages are required because the
 Deck adapter exposes a 256 MiB maximum for one vertex buffer.
 
-The next Deck priorities are no longer per-section terrain command encoding.
-They are the approximately 4 ms p95 server holder-reconciliation span during
-continuous movement, 1.3-3.3 ms cull/occlusion work as distance grows, and
-fresh-fluid remesh/upload bursts that raise frame and GPU tails despite low
-steady GPU p50.
+The later holder-plan slice removed the approximately 4 ms p95 server
+reconciliation span. The remaining priorities are 1.3-3.4 ms
+cull/occlusion work as distance grows, the 0.3-1.2 ms runtime-target admission
+scan, and fresh-fluid remesh/upload plus GPU tails despite low steady GPU p50.
+
+### Holder-plan and campaign closeout
+
+Commit `d7344628` retains the sorted runtime-target plan behind ticket,
+priority, topology, and lighting-policy generations. Unchanged server ticks
+skip approximately 3,100 repeated holder updates while still scanning the
+runtime targets that can become schedulable as persistence, generation, and
+lighting complete.
+
+Focused run
+`20260724T160927Z-d7344628d640-perf-matrix-attribution-3906378` used
+SteamRT4 binary SHA-256
+`dc3ea20d378adbf366890ad1a4879150b5a0dffff347215dc7ce59cd098c7f8a`.
+Against the instrumented parent, native RD13 traversal reconciliation p95
+fell from 3.77 to 1.10 ms, holder-update p95 from 2.56 ms to zero, and frame
+p95 from 19.69 to 16.53 ms. Travel remained 319.9 blocks, feature/light
+publication remained 493/493, and 9,571 sections rebuilt.
+
+Final full run `20260724T161657Z-d7344628d640-perf-matrix-3916887` produced:
+
+| Render distance | traversal FPS | frame p95 | frame p99 |
+|---:|---:|---:|---:|
+| 5 | 89.9 | 12.60 ms | 14.47 ms |
+| 8 | 89.8 | 12.83 ms | 14.46 ms |
+| 10 | 89.5 | 12.98 ms | 14.61 ms |
+| 13 | 83.6 | 20.97 ms | 25.23 ms |
+
+All traversal rows covered approximately 320 blocks. RD13 oblique reached
+87.8 FPS and 13.80 ms p95; adaptive top-down admission tied the native
+83.6 FPS row and remains unrecommended. Every stationary RD5-RD13 oblique and
+top-down row averaged 89.7-89.9 FPS.
+
+A release-shaped build without `perf-diagnostics`, binary SHA-256
+`aff985906db3610dbe3dd5fe7e0f543bf9be0bc26e8194046808dab9b5322808`,
+ran as
+`20260724T162954Z-d7344628d640-perf-matrix-attribution-3935581`.
+Its native RD13 traversal was 85.0 FPS/18.21 ms p95 versus the diagnostic
+run's 85.6/16.53; the half-resolution comparison moved oppositely. Treat the
+difference as run variance, not measurable diagnostic overhead.
+
+Fresh-fluid work is real but already coalesced: one final stationary native
+row combined 2,105 fluid mutations into 418 rebuilt sections with zero stale
+compiles. Frozen fluids remain a diagnostic control, not gameplay policy.
+Further coalescing needs evidence of duplicate accepted meshes, not merely a
+visible rebuild count.
 
 ## Bring-up Ledger
 
@@ -900,7 +944,7 @@ steady GPU p50.
 - [x] Build the production payload inside a pinned SteamRT4 SDK container.
 - [x] Deploy and smoke a clean-source SteamRT4 artifact.
 - [x] Record SteamRT4 timedemo and live presentation evidence.
-- [ ] Validate the SteamOS presentation profile at native 1280x800.
+- [x] Validate the SteamOS presentation profile at native 1280x800.
 - [ ] Record interactive Linux/Gamescope/controller acceptance.
 - [ ] Record physical touchscreen menu/gameplay acceptance.
-- [ ] Record the first reproducible release performance baseline.
+- [x] Record the first reproducible release performance baseline.

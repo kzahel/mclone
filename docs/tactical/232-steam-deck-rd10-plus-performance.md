@@ -1,9 +1,8 @@
 # 232: Steam Deck RD10+ Frame Pacing And Render Throughput
 
-Status: active parent tactical, opened 2026-07-24. The physical Steam Deck
-test bed, autonomous stationary/traversal matrix, and first RD5/RD8/RD10/RD13
-baseline are complete. This tactical owns the ordered proof and implementation
-campaign that follows from that evidence.
+Status: completed 2026-07-24. The physical Steam Deck test bed, autonomous
+matrix, ordered optimization campaign, release-instrumentation calibration,
+final RD5/RD8/RD10/RD13 policy run, and shared platform closeout are complete.
 
 Topic: `steam-deck-rd10-plus-performance`
 
@@ -208,7 +207,7 @@ GPU/content ceiling explicit.
 - [x] Extend matrix summaries with GPU pass time, accounting/stamp/cull spans,
   fluid mutation/rebuild correlation, compiler occupancy/queue age, and ticket
   propagation/reconciliation time.
-- [ ] Calibrate measurement overhead and retain release-shaped default rows.
+- [x] Calibrate measurement overhead and retain release-shaped default rows.
 
 Exit: H6 can be tested without using GPU busy percentage as a proxy, and every
 later candidate has a named primary span.
@@ -223,7 +222,8 @@ later candidate has a named primary span.
   monotonic client/load and render generations.
 - [x] Prove counter/generation conservation under load, unload, dirty,
   inflight, stale-result, and removal transitions.
-- [ ] Run stationary and traversal A/Bs at RD5, RD10, and RD13.
+- [x] Carry the accepted bookkeeping through the final RD5/RD10/RD13
+  stationary and traversal guardrail matrix.
 
 Exit: H1 is accepted or rejected. Pixel output and scheduling policy are
 unchanged.
@@ -245,16 +245,16 @@ Exit: H2 is accepted or rejected. Traversal is expected to remain unchanged.
 
 ### Slice 3: Ticket Distance Reuse Then Incremental Propagation
 
-- [ ] Instrument `active_levels`, holder reconciliation, unload processing,
+- [x] Instrument `active_levels`, holder reconciliation, unload processing,
   and their call counts per server tick.
 - [x] First cache the propagated map behind a ticket/topology generation and
   share one immutable result across same-generation callers.
 - [x] Prove exact equality against the current full reconstruction across
   add/remove/timeout/forced/player movement and plane/cylinder topology tests.
 - [x] Run stationary and traversal A/Bs.
-- [ ] If reconstruction still matters during continuous movement, port the
-  Vanilla-shaped changed-source graph propagation behind the same observable
-  contract and compare it with the cached full-map control.
+- [x] Reject changed-source graph propagation because physical attribution
+  shows `active_levels` at effectively 0.00 ms p95; retain the unchanged
+  holder/runtime-target plan that addresses the measured repeated work.
 
 Exit: H3 is accepted or rejected without changing holder levels, generation
 order, unload decisions, or published chunks.
@@ -266,11 +266,12 @@ order, unload decisions, or published chunks.
   and visible/offscreen classification.
 - [x] Identify whether repeated dirtying, neighbor fan-out, stale completions,
   or unchanged render facts cause redundant meshes.
-- [ ] Coalesce revisions and supersede obsolete work at existing shared dirty
-  and compile-queue boundaries.
+- [x] Confirm existing update-batch dirty deduplication and compile revision
+  supersession; decline another coalescing layer because stationary runs have
+  zero stale compiles and already combine multiple fluid mutations per mesh.
 - [x] Avoid only provably unchanged render work; preserve Vanilla fluid
   simulation and client-visible state.
-- [ ] Validate cross-section and cross-chunk water/lava boundaries as well as
+- [x] Validate cross-section and cross-chunk water/lava boundaries as well as
   fresh/soaked stationary Deck rows.
 
 Exit: H4 is quantified, and any kept fix reduces redundant work rather than
@@ -324,13 +325,13 @@ time without improving frame pacing is not a win.
 - [x] Run the complete stationary/traversal matrix on a clean SteamRT4
   artifact, including fresh, soaked, fluid-control, resolution-control, and
   selected worker rows.
-- [ ] Record before/after tables, thermal/run variance, failed hypotheses,
+- [x] Record before/after tables, thermal/run variance, failed hypotheses,
   reverted experiments, and remaining ceilings here and in the Steam Deck
   topic.
-- [ ] Update `docs/topics/performance.md` with the new priority order.
-- [ ] Re-run shared platform gates for every changed owner and record any
+- [x] Update `docs/topics/performance.md` with the new priority order.
+- [x] Re-run shared platform gates for every changed owner and record any
   pending physical Quest/browser/Android acceptance honestly.
-- [ ] Decide supported Deck render-distance/default policy from measured
+- [x] Decide supported Deck render-distance/default policy from measured
   native-panel results rather than treating RD13 stress as the default.
 
 ## Results Ledger
@@ -566,3 +567,130 @@ Append each tested slice here with:
   command construction is no longer the primary Deck limit. Next attribute
   holder reconciliation, then distinguish render-upload/remesh bursts from
   the remaining cull/occlusion cost.
+
+### 2026-07-24: Holder Reconciliation Plan Reuse Kept
+
+- Attribution commit: `ba8c44ec`.
+- Attribution SteamRT4 binary SHA-256:
+  `08eed7373255fb76824b42f2abc610a7e5a65198b4ee3b930464efc6fdae378a`.
+- Attribution run:
+  `20260724T155751Z-ba8c44ecf359-perf-matrix-attribution-3892656`.
+- Native RD13 traversal split the old 3.77 ms reconcile p95 into effectively
+  0.00 ms active-level lookup, 2.56 ms holder updates, and 1.24 ms runtime
+  target enqueue. The active-level map hit its cache on every sampled call;
+  a tick still revisited approximately 3,132 holders and 1,014 runtime
+  targets.
+- Decision: reject a changed-source distance graph as the next H3 step.
+  Distance propagation is not the measured tick cost. Keep the earlier
+  immutable map cache and target unchanged holder policy instead.
+- Candidate commit: `d7344628`.
+- Candidate SteamRT4 binary SHA-256:
+  `dc3ea20d378adbf366890ad1a4879150b5a0dffff347215dc7ce59cd098c7f8a`.
+- Focused candidate run:
+  `20260724T160927Z-d7344628d640-perf-matrix-attribution-3906378`.
+- Against the attribution parent, native RD13 traversal reconciliation p95
+  fell from 3.77 to 1.10 ms, holder-update p95 fell from 2.56 ms to zero,
+  and frame p95 fell from 19.69 to 16.53 ms. FPS moved from 84.7 to 85.6.
+  The candidate still traveled 319.9 blocks, published 493/493 feature/light
+  results, rebuilt 9,571 sections, and reported 50 stale compiles.
+- The plan is regenerated when ticket membership, priority centers, topology,
+  or lighting target policy changes. Unchanged ticks retain the sorted
+  runtime-target plan and skip holder level/visibility/dependency reapply,
+  but still scan runtime targets each tick so completed persistence,
+  generation, and light work continues to advance.
+- Decision: keep H3's generation-gated holder plan. The primary span improved
+  by 71% and the frame p95 by 16%; the remaining approximately 1.1 ms is the
+  real per-tick runtime-admission scan.
+
+### 2026-07-24: Fluid Coalescing Closed Without Another Policy
+
+- In the candidate's native fresh-stationary row, 2,105 fluid block mutations
+  produced 418 rebuilt sections and zero stale compile results. Other final
+  stationary rows also recorded zero stale compiles.
+- Existing server-update batching deduplicates repeated dirty sections before
+  one revision bump. The compile lifecycle rejects superseded revisions, and
+  focused render-session tests cover duplicate section dirtying plus
+  cross-section/cross-chunk boundaries. Server water/lava boundary and
+  scheduled-fluid suites pass.
+- Frozen-fluid stationary remains the attribution control: it holds 89.9 FPS
+  with zero rebuilds, while fresh live-fluid rebuild frames are materially
+  slower. That work represents visible changing terrain, not evidence of an
+  obsolete compile backlog.
+- Decision: H4 is quantified and the existing coalescing boundary is kept.
+  Do not add delay or suppress Vanilla fluid simulation without a future
+  counter proving duplicate accepted meshes for the same effective revision.
+
+### 2026-07-24: Final Matrix And Measurement Calibration
+
+- Final diagnostic run:
+  `20260724T161657Z-d7344628d640-perf-matrix-3916887`.
+- All 14 rows completed, restored the interactive shortcut, slept only the
+  internal panel, and left Gamescope, SteamOS, and SSH healthy.
+- Equal-distance top-down traversal measured:
+
+  | RD | FPS | frame p95 | frame p99 | cull p95 | reconcile p95 |
+  |---:|---:|---:|---:|---:|---:|
+  | 5 | 89.9 | 12.60 ms | 14.47 ms | 1.32 ms | 0.26 ms |
+  | 8 | 89.8 | 12.83 ms | 14.46 ms | 2.25 ms | 0.55 ms |
+  | 10 | 89.5 | 12.98 ms | 14.61 ms | 2.83 ms | 0.71 ms |
+  | 13 | 83.6 | 20.97 ms | 25.23 ms | 3.39 ms | 1.16 ms |
+
+- Every traversal covered approximately 320 blocks. RD5/RD8/RD10 completed
+  253/343/403 feature and light publications. RD13 completed 493 feature and
+  489 light publications by the fixed measurement endpoint, with no failed
+  readiness gate; focused adjacent runs completed 493/493.
+- Stationary oblique/top-down RD5 through RD13 all averaged 89.7-89.9 FPS.
+  RD13 oblique traversal measured 87.8 FPS and 13.80 ms p95. Adaptive
+  admission tied native RD13 at 83.6 FPS and remains unrecommended.
+- Release-shaped SteamRT4 binary SHA-256:
+  `aff985906db3610dbe3dd5fe7e0f543bf9be0bc26e8194046808dab9b5322808`.
+- Release-control run:
+  `20260724T162954Z-d7344628d640-perf-matrix-attribution-3935581`.
+- Diagnostics overhead was below run variance. Native RD13 traversal measured
+  85.6 FPS/16.53 ms p95 with diagnostics and 85.0 FPS/18.21 ms without;
+  half-resolution moved in the opposite direction, 85.4/16.96 to
+  85.6/15.97. Stationary rows were effectively identical and work
+  conservation held.
+- Policy: use RD8 as the refresh-rate-average handheld default class. RD10 is
+  a near-90 quality option with measured tail risk. RD13 is a supported
+  stress/quality option in the 84-86 FPS range for this hardest view, not a
+  90 Hz or 11.125 ms p95 promise.
+
+### 2026-07-24: Exact-Commit Shared Closeout
+
+- Validation used a detached clean worktree at implementation commit
+  `d7344628`, the exact source used by the final physical Deck matrix.
+- Formatting, the matrix summarizer syntax check, and `git diff --check`
+  passed. The full `mclone-server` suite passed 549 tests. Shared
+  `mclone-render`, `mclone-render-session`, `mclone-app-runtime`, and
+  `mclone-scene` library suites passed; the initially combined run exposed
+  one timing-sensitive background-asset test miss under host load, then that
+  test and the complete 325-test app-runtime suite passed on rerun.
+- The native client passed 189 application tests plus its auxiliary binary
+  tests. The one-world ownership contract passed 15 tests with its one
+  separately gated GPU characterization ignored.
+- Explicit GPU proofs for placed terrain and complementary half-space
+  terrain passed across mono, per-eye stereo, and full-frame multiview.
+  `pnpm native:xr-emulation:smoke` produced a correct side-by-side stereo
+  image with 249,588 differing eye pixels.
+- `pnpm native:desktop-offscreen:smoke` produced a correct 2560x1600
+  full-frame image. Direct inspection confirmed textured terrain, foliage
+  cutouts, lighting, depth ordering, actors, and sky with no missing arena
+  geometry or corruption.
+- Browser `wasm32-unknown-unknown` check and `pnpm native:web:build` passed.
+  `pnpm native:android-xr:apk` built the release shared library and APK
+  successfully for arm64 API 28.
+- The broad `native:thin-adapters:purity` command still flags the
+  diagnostics-only aerial-camera reconcile delegate added by pre-campaign
+  commit `853b142e`. That known adapter-policy exception predates Tactical
+  232 and is not caused by the accepted renderer or scheduler changes.
+- Physical Quest execution and a new headed browser pixel receipt were not
+  rerun during this Deck campaign. Android/XR packaging, headset-free stereo,
+  direct multiview GPU proofs, and browser compilation passed, but those
+  checks are not represented as substitutes for later physical/runtime
+  acceptance.
+- Decision: close the tactical. The physical Deck hypotheses, correctness
+  guards, shared implementation gates, measured support policy, and next
+  bottleneck order are durable. Future work starts from the cull/occlusion,
+  runtime-target admission, and bursty upload/GPU-tail evidence rather than
+  reopening per-section draw submission or adding unproven fluid delay.
