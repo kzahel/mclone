@@ -2,8 +2,8 @@
 
 Topic: `gpu-procedural-terrain`
 
-Status: canonical multi-pane Terrain Lab workspace implementation active
-2026-07-24 under Tactical
+Status: canonical multi-pane Terrain Lab workspace completed local and hosted
+desktop/mobile headed-WebGPU validation 2026-07-24 under Tactical
 [`232-terrain-lab-canonical-workspace.md`](../tactical/232-terrain-lab-canonical-workspace.md).
 Independent CPU/GPU Terrain Lab publication, cache controls, and cold
 benchmark implementation previously completed local and hosted desktop/mobile
@@ -25,7 +25,7 @@ river/wetland/planned-stream disagreement remains explicit. Tactical
 [`230-terrain-lab-independent-race-and-benchmarks.md`](../tactical/230-terrain-lab-independent-race-and-benchmarks.md)
 then separated CPU/GPU scheduling and publication, exposed cache bypass and
 invalidation, added a repeatable cold race, and fixed trackpad/page-scroll and
-vertical map-grab behavior. Tactical 232 now makes the Lab a configurable
+vertical map-grab behavior. Tactical 232 makes the Lab a configurable
 canonical/CPU-LOD/GPU-LOD workspace. It adds bounded exact final chunk
 generation, shared textured block rendering, cheap preview lighting,
 progressive worker publication, and presentation-only feature visibility.
@@ -168,25 +168,36 @@ The terrain compute pipeline now exists in
   viewport for lab comparison.
 
 [`mclone-terrain-lab`](../../native/apps/mclone-terrain-lab/) owns the narrow
-browser surface/device facade. [`tools/terrain-lab`](../../tools/terrain-lab/)
-owns URL state and responsive presentation. Three-dimensional left drag
-orbits with conventional pitch direction without changing URL-addressed
-geography; Shift+left or middle drag pans, map drag pans, wheel and pinch
-change a separate continuous viewport, and map zoom is cursor anchored.
-Map/3D, Auto/manual resolution, and zoom controls sit immediately above the
-preview on every viewport. Auto targets approximately two CSS pixels per
-sample cell; an explicit manual request remains visible when the
-eight-tile-per-axis safety budget raises its effective spacing. Compare draws
-every published tile twice: CPU production base first and GPU production base
-second. Both panels share exact world coordinates, seed, center, viewport,
-effective spacing, camera, and diagnostic layer. Wide canvases place them
-side by side; phone-sized portrait canvases stack full-width panels in a
-double-height stage. The surface grid uses outward-facing counter-clockwise
-triangles, back-face culling, and an above-surface oblique projection. CPU
-Final remains a separate full-width source for reviewing the intentionally
-omitted river, wetland, and planned-stream layer. The deployed product route
-is `/terrain/`; it does not load the game client, asset packs, a server,
-canonical chunks, lighting, collision, or persistence.
+browser surface/device facade and exact typed Worker payload. It now exposes a
+second canonical surface that builds the normal block catalogue and texture
+atlas from the first-party authored and generated-fallback packs, incrementally
+updates shared textured section resources, and renders with preview lighting.
+The shared `CanonicalTerrainCompiler` in `mclone-terrain-view` calls the
+production surface or final generator and supplies a Rust-owned center-first
+chunk order.
+
+[`tools/terrain-lab`](../../tools/terrain-lab/) owns URL state, replaceable
+Worker epochs, responsive presentation, and cache controls. The workspace
+shows any unique subset of canonical, CPU LOD, and GPU LOD panes. Every pane
+shares seed, center, viewport, camera, and navigation; the exact radius remains
+separately bounded from the broad visual footprint. Water and vegetation
+switches remesh retained exact blocks without changing generation.
+
+Three-dimensional left drag orbits with conventional pitch direction without
+changing URL-addressed geography; Shift+left or middle drag pans, map drag
+pans, wheel and pinch change a separate continuous viewport, and map zoom is
+cursor anchored. Auto targets approximately two CSS pixels per sample cell;
+an explicit manual request remains visible when the interactive tile budget
+raises effective spacing. CPU and GPU LOD publish independently at exact
+matching coordinates. Wide procedural canvases place them side by side;
+portrait canvases stack full-width panels.
+
+The deployed `/terrain/` product remains independent of the game client,
+server, collision, persistence, and authoritative propagated lighting. It now
+does load the production first-party packs and bounded exact chunks. Generated
+fallback tiles remain visible for materials without curated first-party
+textures, and final rivers/wetlands/planned streams remain absent from the GPU
+LOD path rather than being hidden by the exact pane.
 
 Normal terrain and the current Far LOD path still arrive at `mclone-render` as
 CPU-constructed mesh products. The viewport planner and resident renderer are
@@ -1112,19 +1123,51 @@ target-plus-readback at 278.2 ms versus 2,187.3 ms for CPU target publication;
 the phone measured 686.4 ms versus 1,918.9 ms. Inspected side-by-side and
 stacked captures showed matching coordinate-locked geography.
 
-This proves useful navigation, bounded resident generation, and progressive
-point-sampled detail. It does not yet prove a truthful far summary. The 65.5
-km continentalness image still evaluates sub-footprint field energy at points,
-so aliasing and temporal stability remain an open correctness problem.
+Tactical 232 now proves the canonical workspace end to end. The default route
+shows exact final terrain, CPU LOD, and GPU LOD at one seed, center, scale, and
+camera. The exact pane has a separately bounded radius, compiles production
+chunks center-first in a replaceable Worker, transfers each result
+independently, and incrementally updates the shared textured section renderer.
+Final/surface generation, water/vegetation presentation, and exact/LOD cache
+domains are separate controls.
 
-The immediate implementation direction is Tactical 232's canonical workspace.
-It will expose production final chunks beside the two LOD evaluators so terrain
-work can distinguish a field-preview defect from a real generated-world
-defect. Its exact footprint is deliberately bounded, generated center-first in
-a cancelable worker, and rendered with shared first-party textured terrain
-resources plus preview lighting.
+Fixed-seed shared tests compare canonical final chunks directly with production
+generation. Presentation filters preserve the pre-filter block/biome
+fingerprint. Desktop and Pixel Playwright coverage exercised exact completion,
+shared orbit, pane toggles, visibility-only remeshing, map cancellation,
+cache-off work, and independent CPU/GPU publication. A manually exercised
+25-chunk final footprint remained progressive after replacing combined-mesh
+rebuilds with section and immediate-neighbor updates.
 
-After that workspace is proven:
+The targeted hosted upload changed only Terrain Lab objects. The unchanged
+Cloudflare Worker now serves JavaScript `index-BbUZPeEi.js`, canonical Worker
+`canonical-worker-DEYoRExd.js`, stylesheet `index-D63K5d8a.css`, and Wasm
+`mclone_terrain_lab_bg-CRfewa58.wasm`. Each hashed object was byte-verified
+before HTML switched. Hosted headed-Wayland desktop and Pixel smokes passed
+against `https://mclone.kzahel.com/terrain/`.
+
+The hosted Pixel run reached the first of nine exact final chunks in 170.1 ms
+and completed the footprint in 423.6 ms. The desktop run measured 182.9 ms and
+578.4 ms. Both retained effectively zero CPU/GPU base-height mean/P95 error,
+100% ocean agreement, and about `2e-8` continentalness error through the
+65.5 km view. The Pixel cold race published the GPU target plus readback in
+1,010.2 ms and the CPU target in 3,052.8 ms. The desktop run, under other host
+build load, measured 469.7 ms and 11,726.4 ms. These remain different
+end-to-end boundaries, not pure GPU execution timings.
+
+The exact pane also exposed a production asset truth: many current block
+catalogue entries resolve to generated fallback atlas tiles because curated
+first-party materials are incomplete. The Lab labels those fallbacks rather
+than substituting reference Minecraft assets or presenting their purple/pink
+appearance as a worldgen or renderer mismatch.
+
+This proves useful navigation, bounded exact and resident generation,
+progressive point-sampled detail, and the shared exact-versus-LOD review
+boundary. It does not yet prove a truthful far summary. The 65.5 km
+continentalness image still evaluates sub-footprint field energy at points, so
+aliasing and temporal stability remain open correctness problems.
+
+The next implementation direction is:
 
 1. define a CPU/GPU scale-aware summary target distinct from exact point
    parity;

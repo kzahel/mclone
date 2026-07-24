@@ -1,6 +1,6 @@
 # Terrain Lab Canonical Workspace
 
-Status: active 2026-07-24.
+Status: completed 2026-07-24.
 
 Topic: `gpu-procedural-terrain`
 
@@ -203,3 +203,101 @@ next architectural decision is whether to retain Far LOD's useful
 coverage/residency/handoff control plane while replacing its synthetic content
 path with the Terrain Lab's shared procedural evaluator and exact handoff
 contract.
+
+## Execution Receipt
+
+The completed series landed:
+
+- `27155259` — the canonical workspace contract;
+- `99e78b53` — the shared exact terrain preview compiler;
+- `6869cfc7` — typed Wasm worker payloads and Rust-owned chunk order;
+- `d8a5124c` — first-party atlas-backed exact terrain rendering;
+- `92838d98` — synchronized canonical/CPU/GPU panes and scheduling;
+- `e86f6453` — stable cross-pane state and desktop/phone acceptance;
+- `5d959ca2` — workspace smoke coverage and operator documentation; and
+- `bb6f96ca` — atomic cold-race benchmark receipts.
+
+`CanonicalTerrainCompiler` now produces surface or final production chunks
+through `McloneOverworldFeatureDependencyCache`. Fixed-seed tests compare its
+final result directly with production generation. Its stable fingerprint is
+computed before presentation filtering, so hiding fluids or vegetation cannot
+change retained generator truth.
+
+The browser creates a replaceable Worker for each exact request identity.
+Rust supplies the center-first chunk order. The Worker compiles and transfers
+one typed chunk payload at a time; replacing the Worker cancels the remaining
+queue and prevents stale epochs from reaching the canonical renderer.
+
+The canonical surface uses the shared block catalogue, first-party authored
+and generated-fallback packs, textured section compiler, and section draw
+resources. New chunks update only their own sections and immediate neighbors;
+the renderer no longer rebuilds one combined mesh after every arrival.
+Authoritative propagated light is intentionally absent. The UI identifies the
+first-party atlas, preview lighting, and generated fallback tiles.
+
+The web workspace defaults to all three logical panes. It records pane set,
+exact stage/radius, water/vegetation visibility, shared coordinates, scale,
+view, and LOD layer in the URL. CPU and GPU LOD still publish independently
+inside one procedural WebGPU session. Exact rendering uses a second session,
+so the three-pane product does not allocate three devices or three atlases.
+
+## Validation Receipt
+
+Shared and browser validation passed:
+
+- `cargo test -p mclone-terrain-view --lib` — 16 tests;
+- the targeted `mclone-mesh` fluid-visibility test;
+- `cargo test -p mclone-terrain-lab --lib` — 3 tests;
+- `cargo check -p mclone-terrain-lab --target wasm32-unknown-unknown`;
+- Terrain Lab TypeScript/Wasm typecheck and 11 URL/state tests;
+- production Vite build;
+- Playwright desktop Chrome and Pixel 7 projects; and
+- local and hosted headed-Wayland BrowserWebGPU desktop/phone smokes.
+
+The complete 25-chunk radius-two exact footprint was also exercised manually.
+Incremental section updates removed the earlier quadratic remesh behavior and
+kept center-out pop-in observable. Captures were inspected at close exact
+scale, with water hidden, at multiple land sites, and in the complete
+three-pane desktop and phone layouts.
+
+The final hosted Pixel-sized run compiled nine final chunks center-first:
+
+- first exact chunk: 170.1 ms;
+- complete exact footprint: 423.6 ms;
+- accumulated generation: 146.3 ms; and
+- accumulated mesh plus upload: 138.7 ms.
+
+The hosted desktop run recorded 182.9 ms to the first exact chunk and
+578.4 ms to all nine. These are browser wall-time observations for one fixed
+site, not generator throughput promises.
+
+Both hosted runs navigated to 65.5 km, retained effectively zero base-height
+mean/P95 disagreement, 100% ocean agreement, and continentalness error around
+`2e-8`. Their cache-off stress race visibly followed:
+
+```text
+neither target ready -> GPU target ready -> both targets ready
+```
+
+The hosted desktop race measured GPU target plus validation readback at
+469.7 ms and CPU target publication at 11,726.4 ms while the host was under
+other build load. The Pixel-sized run measured 1,010.2 ms and 3,052.8 ms.
+These boundaries include different work and are not pure GPU execution
+timings.
+
+## Hosted Receipt
+
+A targeted R2 upload changed only Terrain Lab objects; the Cloudflare Worker,
+game, other labs, and root first-party pack objects were not redeployed.
+Production now serves:
+
+- JavaScript `index-BbUZPeEi.js`;
+- Worker JavaScript `canonical-worker-DEYoRExd.js`;
+- stylesheet `index-D63K5d8a.css`; and
+- Wasm `mclone_terrain_lab_bg-CRfewa58.wasm`.
+
+Each immutable object was uploaded and hash-verified before
+`terrain/index.html` was switched. Direct HTTPS responses report the expected
+JavaScript, CSS, and Wasm content types, one-year immutable caching for hashed
+assets, and revalidation for HTML. Dedicated hosted desktop and Pixel smokes
+then passed against `https://mclone.kzahel.com/terrain/`.
