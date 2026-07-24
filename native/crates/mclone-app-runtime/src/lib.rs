@@ -1040,6 +1040,13 @@ pub struct RuntimePollDiagnostics {
     pub scheduler_report_ms: f64,
     pub scheduler_purge_stale_tickets_ms: f64,
     pub scheduler_reconcile_holders_ms: f64,
+    pub scheduler_active_levels_ms: f64,
+    pub scheduler_holder_updates_ms: f64,
+    pub scheduler_runtime_enqueue_ms: f64,
+    pub scheduler_active_levels_calls: usize,
+    pub scheduler_active_levels_cache_hits: usize,
+    pub scheduler_holder_update_count: usize,
+    pub scheduler_runtime_target_count: usize,
     pub scheduler_publish_completed_ms: f64,
     pub scheduler_budget_decision_panel: BudgetDecisionPanelReport,
     pub scheduler_adaptive_publication_budget_enabled: bool,
@@ -2914,6 +2921,17 @@ impl SingleViewRuntime {
             micros_to_ms(tick.timing.scheduler_purge_stale_tickets_us);
         diagnostics.scheduler_reconcile_holders_ms =
             micros_to_ms(tick.timing.scheduler_reconcile_holders_us);
+        diagnostics.scheduler_active_levels_ms =
+            micros_to_ms(tick.timing.scheduler_active_levels_us);
+        diagnostics.scheduler_holder_updates_ms =
+            micros_to_ms(tick.timing.scheduler_holder_updates_us);
+        diagnostics.scheduler_runtime_enqueue_ms =
+            micros_to_ms(tick.timing.scheduler_runtime_enqueue_us);
+        diagnostics.scheduler_active_levels_calls = tick.timing.scheduler_active_levels_calls;
+        diagnostics.scheduler_active_levels_cache_hits =
+            tick.timing.scheduler_active_levels_cache_hits;
+        diagnostics.scheduler_holder_update_count = tick.timing.scheduler_holder_update_count;
+        diagnostics.scheduler_runtime_target_count = tick.timing.scheduler_runtime_target_count;
         diagnostics.scheduler_publish_completed_ms =
             micros_to_ms(tick.timing.scheduler_publish_completed_us);
         diagnostics.scheduler_budget_decision_panel =

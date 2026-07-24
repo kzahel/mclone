@@ -254,6 +254,32 @@ function summarizeRow(manifest) {
       workValues(work, "scheduler.reconcile_holders_ms"),
       0.95,
     ),
+    scheduler_active_levels_p95_ms: percentile(
+      workValues(work, "scheduler.active_levels_ms"),
+      0.95,
+    ),
+    scheduler_holder_updates_p95_ms: percentile(
+      workValues(work, "scheduler.holder_updates_ms"),
+      0.95,
+    ),
+    scheduler_runtime_enqueue_p95_ms: percentile(
+      workValues(work, "scheduler.runtime_enqueue_ms"),
+      0.95,
+    ),
+    scheduler_active_levels_calls: workValues(
+      work,
+      "scheduler.active_levels_calls",
+    ).reduce((sum, value) => sum + value, 0),
+    scheduler_active_levels_cache_hits: workValues(
+      work,
+      "scheduler.active_levels_cache_hits",
+    ).reduce((sum, value) => sum + value, 0),
+    scheduler_holder_update_count_average: average(
+      workValues(work, "scheduler.holder_update_count"),
+    ),
+    scheduler_runtime_target_count_average: average(
+      workValues(work, "scheduler.runtime_target_count"),
+    ),
     server_total_p95_ms: percentile(workValues(work, "server.reported_total_ms"), 0.95),
     drawn_sections_average: average(workValues(work, "render.drawn_section_count")),
     drawn_sections_p95: percentile(workValues(work, "render.drawn_section_count"), 0.95),
@@ -379,11 +405,11 @@ const markdown = [
     return `| ${row.case} | ${row.render_distance} | ${motion} | ${fixed(row.average_fps, 1)} | ${fixed(row.frame_wall_p95_ms)} / ${fixed(row.frame_wall_p99_ms)} | ${fixed(row.surface_encode_p95_ms)} | ${fixed(row.terrain_cull_p95_ms)} / ${fixed(row.terrain_encode_p95_ms)} | ${fixed(row.gpu_terrain_p50_ms)} / ${fixed(row.gpu_terrain_p95_ms)} | ${fixed(row.drawn_sections_average, 0)} | ${fixed(row.rebuilt_sections, 0)} | ${fixed(row.system?.average_cpu_cores)} | ${fixed(row.system?.gpu_busy_average_percent, 1)}% |`;
   }),
   "",
-  "| Attribution case | Scale | Fluids | Pending count p95 | Ready stamp p95 | Records p95 | Cull cache hits | Reconcile p95 | Compile submit / done / stale | GPU total p50 / p95 | Fluid due / run / mutations |",
-  "|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|",
+  "| Attribution case | Scale | Fluids | Pending count p95 | Ready stamp p95 | Records p95 | Cull cache hits | Reconcile p95 | Levels / holders / enqueue p95 | Level hits / calls | Holder / target avg | Compile submit / done / stale | GPU total p50 / p95 | Fluid due / run / mutations |",
+  "|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
   ...rows.map(
     (row) =>
-      `| ${row.case} | ${fixed(row.world_scale_percent, 0)}% | ${row.freeze_fluids ? "frozen" : "live"} | ${fixed(row.pending_render_count_p95_ms)} | ${fixed(row.traversal_ready_p95_ms)} | ${fixed(row.terrain_records_p95_ms)} | ${fixed(row.terrain_cull_cache_hits, 0)} / ${fixed(row.terrain_cull_cache_lookups, 0)} | ${fixed(row.scheduler_reconcile_holders_p95_ms)} | ${fixed(row.submitted_compile_sections, 0)} / ${fixed(row.completed_compile_sections, 0)} / ${fixed(row.stale_compile_sections, 0)} | ${fixed(row.gpu_total_p50_ms)} / ${fixed(row.gpu_total_p95_ms)} | ${fixed(row.fluid_due_ticks, 0)} / ${fixed(row.fluid_executed_ticks, 0)} / ${fixed(row.fluid_mutated_blocks, 0)} |`,
+      `| ${row.case} | ${fixed(row.world_scale_percent, 0)}% | ${row.freeze_fluids ? "frozen" : "live"} | ${fixed(row.pending_render_count_p95_ms)} | ${fixed(row.traversal_ready_p95_ms)} | ${fixed(row.terrain_records_p95_ms)} | ${fixed(row.terrain_cull_cache_hits, 0)} / ${fixed(row.terrain_cull_cache_lookups, 0)} | ${fixed(row.scheduler_reconcile_holders_p95_ms)} | ${fixed(row.scheduler_active_levels_p95_ms)} / ${fixed(row.scheduler_holder_updates_p95_ms)} / ${fixed(row.scheduler_runtime_enqueue_p95_ms)} | ${fixed(row.scheduler_active_levels_cache_hits, 0)} / ${fixed(row.scheduler_active_levels_calls, 0)} | ${fixed(row.scheduler_holder_update_count_average, 0)} / ${fixed(row.scheduler_runtime_target_count_average, 0)} | ${fixed(row.submitted_compile_sections, 0)} / ${fixed(row.completed_compile_sections, 0)} / ${fixed(row.stale_compile_sections, 0)} | ${fixed(row.gpu_total_p50_ms)} / ${fixed(row.gpu_total_p95_ms)} | ${fixed(row.fluid_due_ticks, 0)} / ${fixed(row.fluid_executed_ticks, 0)} / ${fixed(row.fluid_mutated_blocks, 0)} |`,
   ),
   "",
   "| Submission case | Direct / multi calls avg | Indirect draws avg | Vertex used / cap MiB | Index used / cap MiB |",

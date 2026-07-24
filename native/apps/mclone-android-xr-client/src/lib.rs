@@ -6406,6 +6406,27 @@ mod android {
             poll_scheduler_reconcile_holders_ms: a
                 .poll_scheduler_reconcile_holders_ms
                 .max(b.poll_scheduler_reconcile_holders_ms),
+            poll_scheduler_active_levels_ms: a
+                .poll_scheduler_active_levels_ms
+                .max(b.poll_scheduler_active_levels_ms),
+            poll_scheduler_holder_updates_ms: a
+                .poll_scheduler_holder_updates_ms
+                .max(b.poll_scheduler_holder_updates_ms),
+            poll_scheduler_runtime_enqueue_ms: a
+                .poll_scheduler_runtime_enqueue_ms
+                .max(b.poll_scheduler_runtime_enqueue_ms),
+            poll_scheduler_active_levels_calls: a
+                .poll_scheduler_active_levels_calls
+                .max(b.poll_scheduler_active_levels_calls),
+            poll_scheduler_active_levels_cache_hits: a
+                .poll_scheduler_active_levels_cache_hits
+                .max(b.poll_scheduler_active_levels_cache_hits),
+            poll_scheduler_holder_update_count: a
+                .poll_scheduler_holder_update_count
+                .max(b.poll_scheduler_holder_update_count),
+            poll_scheduler_runtime_target_count: a
+                .poll_scheduler_runtime_target_count
+                .max(b.poll_scheduler_runtime_target_count),
             poll_scheduler_adaptive_publication_budget_enabled: a
                 .poll_scheduler_adaptive_publication_budget_enabled
                 || b.poll_scheduler_adaptive_publication_budget_enabled,

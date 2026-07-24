@@ -203,10 +203,14 @@ impl ChunkDistanceManager {
     }
 
     pub(crate) fn active_levels(&self) -> Arc<BTreeMap<ChunkPos, i32>> {
+        self.active_levels_with_cache_status().0
+    }
+
+    pub(crate) fn active_levels_with_cache_status(&self) -> (Arc<BTreeMap<ChunkPos, i32>>, bool) {
         if let Some((generation, levels)) = self.active_levels_cache.borrow().as_ref()
             && *generation == self.ticket_generation
         {
-            return Arc::clone(levels);
+            return (Arc::clone(levels), true);
         }
 
         let mut levels: BTreeMap<ChunkPos, i32> = BTreeMap::new();
@@ -242,7 +246,7 @@ impl ChunkDistanceManager {
         let levels = Arc::new(levels);
         *self.active_levels_cache.borrow_mut() =
             Some((self.ticket_generation, Arc::clone(&levels)));
-        levels
+        (levels, false)
     }
 
     pub(crate) fn player_interest_positions(&self) -> BTreeSet<ChunkPos> {
@@ -302,8 +306,10 @@ mod tests {
             ChunkTicketKey::Chunk(center),
         );
 
-        let first = manager.active_levels();
-        let second = manager.active_levels();
+        let (first, first_hit) = manager.active_levels_with_cache_status();
+        let (second, second_hit) = manager.active_levels_with_cache_status();
+        assert!(!first_hit);
+        assert!(second_hit);
         assert!(Arc::ptr_eq(&first, &second));
         assert_eq!(first.get(&center), Some(&MAX_CHUNK_DISTANCE));
 
@@ -314,7 +320,8 @@ mod tests {
             MAX_CHUNK_DISTANCE,
             ChunkTicketKey::Chunk(east),
         );
-        let after_add = manager.active_levels();
+        let (after_add, after_add_hit) = manager.active_levels_with_cache_status();
+        assert!(!after_add_hit);
         assert!(!Arc::ptr_eq(&first, &after_add));
         assert_eq!(after_add.get(&east), Some(&MAX_CHUNK_DISTANCE));
 
@@ -324,7 +331,8 @@ mod tests {
             MAX_CHUNK_DISTANCE,
             ChunkTicketKey::Chunk(east),
         );
-        let after_remove = manager.active_levels();
+        let (after_remove, after_remove_hit) = manager.active_levels_with_cache_status();
+        assert!(!after_remove_hit);
         assert!(!Arc::ptr_eq(&after_add, &after_remove));
         assert!(!after_remove.contains_key(&east));
     }

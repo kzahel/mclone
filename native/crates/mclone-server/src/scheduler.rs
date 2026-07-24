@@ -79,6 +79,24 @@ type SimulationTimingStart = Option<std::time::Instant>;
 #[cfg(target_arch = "wasm32")]
 type SimulationTimingStart = Option<()>;
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct ActiveLevelsCallTiming {
+    elapsed_us: u128,
+    calls: usize,
+    cache_hits: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct ReconcileHoldersTiming {
+    active_levels_us: u128,
+    holder_updates_us: u128,
+    runtime_enqueue_us: u128,
+    active_levels_calls: usize,
+    active_levels_cache_hits: usize,
+    holder_update_count: usize,
+    runtime_target_count: usize,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ChunkStatusJob {
     pub id: ChunkJobId,
@@ -1183,7 +1201,7 @@ impl ChunkScheduler {
         let purge_stale_tickets_us = simulation_timing_elapsed_us(purge_start);
 
         let reconcile_start = simulation_timing_start();
-        let mut events = self.reconcile_ticketed_holders()?;
+        let (mut events, reconcile_timing) = self.reconcile_ticketed_holders_with_timing()?;
         let reconcile_holders_us = simulation_timing_elapsed_us(reconcile_start);
 
         let publish_start = simulation_timing_start();
@@ -1192,7 +1210,7 @@ impl ChunkScheduler {
         let publish_completed_us = simulation_timing_elapsed_us(publish_start);
 
         let pending_unload_start = simulation_timing_start();
-        let (pending_unloads_processed, unload_events) = self
+        let (pending_unloads_processed, unload_events, unload_active_levels) = self
             .process_pending_unloads_with_events_and_record_builder(
                 DEFAULT_PENDING_UNLOAD_BUDGET,
                 record_builder,
@@ -1211,6 +1229,19 @@ impl ChunkScheduler {
                 total_us: simulation_timing_elapsed_us(total_start),
                 purge_stale_tickets_us,
                 reconcile_holders_us,
+                active_levels_us: reconcile_timing
+                    .active_levels_us
+                    .saturating_add(unload_active_levels.elapsed_us),
+                holder_updates_us: reconcile_timing.holder_updates_us,
+                runtime_enqueue_us: reconcile_timing.runtime_enqueue_us,
+                active_levels_calls: reconcile_timing
+                    .active_levels_calls
+                    .saturating_add(unload_active_levels.calls),
+                active_levels_cache_hits: reconcile_timing
+                    .active_levels_cache_hits
+                    .saturating_add(unload_active_levels.cache_hits),
+                holder_update_count: reconcile_timing.holder_update_count,
+                runtime_target_count: reconcile_timing.runtime_target_count,
                 publish_completed_us,
                 pending_unload_us,
             },
@@ -2726,11 +2757,12 @@ impl ChunkScheduler {
     ) -> ChunkStoreResult<(usize, Vec<ChunkSchedulerEvent>)> {
         let mut record_builder =
             |snapshot: &ChunkSnapshot| ChunkRecord::from_snapshot(snapshot.clone());
-        self.process_pending_unloads_with_events_and_record_builder(
+        let (processed, events, _) = self.process_pending_unloads_with_events_and_record_builder(
             max_chunks,
             &mut record_builder,
             &mut |_, _| None,
-        )
+        )?;
+        Ok((processed, events))
     }
 
     fn process_pending_unloads_with_events_and_record_builder(
@@ -2738,12 +2770,18 @@ impl ChunkScheduler {
         max_chunks: usize,
         record_builder: &mut impl FnMut(&ChunkSnapshot) -> ChunkRecord,
         entity_record_builder: &mut impl FnMut(ChunkPos, u64) -> Option<EntityChunkRecord>,
-    ) -> ChunkStoreResult<(usize, Vec<ChunkSchedulerEvent>)> {
+    ) -> ChunkStoreResult<(usize, Vec<ChunkSchedulerEvent>, ActiveLevelsCallTiming)> {
         if max_chunks == 0 || self.pending_unloads.is_empty() {
-            return Ok((0, Vec::new()));
+            return Ok((0, Vec::new(), ActiveLevelsCallTiming::default()));
         }
 
-        let active_levels = self.distance_manager.active_levels();
+        let active_levels_start = simulation_timing_start();
+        let (active_levels, cache_hit) = self.distance_manager.active_levels_with_cache_status();
+        let active_levels_timing = ActiveLevelsCallTiming {
+            elapsed_us: simulation_timing_elapsed_us(active_levels_start),
+            calls: 1,
+            cache_hits: usize::from(cache_hit),
+        };
         let candidates = self
             .pending_unloads
             .iter()
@@ -2813,13 +2851,23 @@ impl ChunkScheduler {
             self.light_mailbox.enqueue_unload(unloaded_light_columns);
         }
 
-        Ok((processed, events))
+        Ok((processed, events, active_levels_timing))
     }
 
     pub(crate) fn reconcile_ticketed_holders(
         &mut self,
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
-        let active_levels = self.distance_manager.active_levels();
+        Ok(self.reconcile_ticketed_holders_with_timing()?.0)
+    }
+
+    fn reconcile_ticketed_holders_with_timing(
+        &mut self,
+    ) -> ChunkStoreResult<(Vec<ChunkSchedulerEvent>, ReconcileHoldersTiming)> {
+        let active_levels_start = simulation_timing_start();
+        let (active_levels, cache_hit) = self.distance_manager.active_levels_with_cache_status();
+        let active_levels_us = simulation_timing_elapsed_us(active_levels_start);
+
+        let holder_updates_start = simulation_timing_start();
         let desired_set = active_levels.keys().copied().collect::<BTreeSet<_>>();
         let client_visible_set = self.distance_manager.player_interest_positions();
         let priority_centers = self
@@ -2828,6 +2876,7 @@ impl ChunkScheduler {
             .to_vec();
         let lighting_enabled = self.lighting_enabled;
         let mut events = Vec::new();
+        let mut holder_update_count = 0_usize;
 
         for pos in self
             .holders
@@ -2836,6 +2885,7 @@ impl ChunkScheduler {
             .filter(|pos| !desired_set.contains(pos))
             .collect::<Vec<_>>()
         {
+            holder_update_count = holder_update_count.saturating_add(1);
             let holder = self.holders.get_mut(&pos).expect("holder key disappeared");
             holder.set_ticket_level(UNLOADED_CHUNK_LEVEL);
             if holder.client_visible {
@@ -2847,6 +2897,7 @@ impl ChunkScheduler {
 
         let mut runtime_targets = BTreeSet::new();
         for (&pos, &ticket_level) in active_levels.iter() {
+            holder_update_count = holder_update_count.saturating_add(1);
             self.pending_unloads.remove(&pos);
             let should_be_client_visible = client_visible_set.contains(&pos);
             let full_status = full_chunk_status_for_ticket_level(ticket_level);
@@ -2894,7 +2945,10 @@ impl ChunkScheduler {
                 self.ensure_dependency_status_scheduled(pos, target_status);
             }
         }
+        let holder_updates_us = simulation_timing_elapsed_us(holder_updates_start);
 
+        let runtime_target_count = runtime_targets.len();
+        let runtime_enqueue_start = simulation_timing_start();
         events.extend(self.enqueue_runtime_chunks(
             sorted_chunk_positions_by_priority_in(
                 self.topology,
@@ -2904,7 +2958,19 @@ impl ChunkScheduler {
             self.runtime_chunk_target_status(),
             &priority_centers,
         )?);
-        Ok(events)
+        let runtime_enqueue_us = simulation_timing_elapsed_us(runtime_enqueue_start);
+        Ok((
+            events,
+            ReconcileHoldersTiming {
+                active_levels_us,
+                holder_updates_us,
+                runtime_enqueue_us,
+                active_levels_calls: 1,
+                active_levels_cache_hits: usize::from(cache_hit),
+                holder_update_count,
+                runtime_target_count,
+            },
+        ))
     }
 
     fn enqueue_runtime_chunks(
@@ -4566,6 +4632,28 @@ mod tests {
                 (-radius..=radius).map(move |x| ChunkPos::new(center.x + x, center.z + z))
             })
             .collect()
+    }
+
+    #[test]
+    fn tick_timing_reports_active_level_cache_and_holder_work() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        let center = ChunkPos::new(0, 0);
+        scheduler.distance_manager.add_ticket(
+            ChunkTicketType::Forced,
+            center,
+            MAX_CHUNK_DISTANCE,
+            ChunkTicketKey::Chunk(center),
+        );
+
+        let rebuilt = scheduler.tick_report().unwrap();
+        assert_eq!(rebuilt.timing.active_levels_calls, 1);
+        assert_eq!(rebuilt.timing.active_levels_cache_hits, 0);
+        assert_eq!(rebuilt.timing.holder_update_count, 1);
+
+        let cached = scheduler.tick_report().unwrap();
+        assert_eq!(cached.timing.active_levels_calls, 1);
+        assert_eq!(cached.timing.active_levels_cache_hits, 1);
+        assert_eq!(cached.timing.holder_update_count, 1);
     }
 
     #[test]
