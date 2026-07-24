@@ -165,6 +165,10 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `steam-deck-test-bed` — official Devkit Client deployment, native Linux
   staging and asset-root contracts, Gaming Mode playtesting, and reproducible
   physical handheld performance evidence
+- `steam-deck-rd10-plus-performance` — physical Steam Deck proof campaign for
+  constant-time render bookkeeping, static and moving visibility, incremental
+  ticket levels, fluid/remesh churn, worker capacity, GPU attribution, and
+  reduced RD10+ draw submission
 - `graphics-video-settings` — player-facing graphics/video controls,
   platform-profile and stored-preference precedence, output/UI/world
   resolution policy, and the remaining production settings backlog

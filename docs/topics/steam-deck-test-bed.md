@@ -824,6 +824,11 @@ No renderer or scheduler optimization was applied in this matrix slice. These
 are measured candidates for focused A/B changes, with RD5 traversal retained
 as the frame-pacing guardrail and RD13 as the pressure case.
 
+The executable proof and implementation campaign now lives in Tactical
+[`232`](../tactical/232-steam-deck-rd10-plus-performance.md). It owns the
+paired A/B rules, instrumentation controls, correctness gates, ordered
+bookkeeping/culling/server/fluid/worker/batching slices, and result ledger.
+
 ## Bring-up Ledger
 
 - [x] Retail Steam Deck Developer Mode enabled.
