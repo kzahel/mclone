@@ -6,7 +6,7 @@ use mclone_worldgen::{
     },
 };
 
-pub const TERRAIN_VIEWPORT_MIN_BLOCKS_ACROSS: u32 = 64;
+pub const TERRAIN_VIEWPORT_MIN_BLOCKS_ACROSS: u32 = 1;
 pub const TERRAIN_VIEWPORT_MAX_BLOCKS_ACROSS: u32 = 131_072;
 pub const TERRAIN_VIEWPORT_MAX_VISIBLE_TILES_PER_AXIS: u32 = 8;
 pub const TERRAIN_VIEWPORT_MAX_DIAGNOSTIC_TILES_PER_AXIS: u32 = 16;
@@ -438,6 +438,23 @@ mod tests {
     }
 
     #[test]
+    fn block_detail_view_crops_one_aligned_spacing_one_tile() {
+        let mut close = request(TerrainViewportDetail::Auto);
+        close.center_x = 17;
+        close.center_z = -19;
+        close.blocks_across = 1;
+        let plan = plan_terrain_viewport(close).unwrap();
+        assert_eq!(plan.view_width_blocks, 1);
+        assert_eq!(plan.view_height_blocks, 1);
+        assert_eq!(plan.requested_spacing, 1);
+        assert_eq!(plan.effective_spacing, 1);
+        assert_eq!(plan.levels.len(), 1);
+        assert_eq!(plan.target_level().visible_tile_count(), 1);
+        assert_eq!(plan.target_level().visible_tiles[0].footprint_blocks(), 64);
+        assert_eq!(plan.target_level().preload_tiles.len(), 9);
+    }
+
+    #[test]
     fn manual_detail_is_budgeted_and_refines_in_nested_levels() {
         let plan = plan_terrain_viewport(request(TerrainViewportDetail::Manual(1))).unwrap();
         assert_eq!(plan.requested_spacing, 1);
@@ -503,6 +520,9 @@ mod tests {
     #[test]
     fn rejects_invalid_manual_detail_and_coordinate_overflow() {
         assert!(plan_terrain_viewport(request(TerrainViewportDetail::Manual(3))).is_err());
+        let mut empty = request(TerrainViewportDetail::Auto);
+        empty.blocks_across = 0;
+        assert!(plan_terrain_viewport(empty).is_err());
         let mut edge = request(TerrainViewportDetail::Auto);
         edge.center_x = i32::MAX;
         assert!(plan_terrain_viewport(edge).is_err());

@@ -67,11 +67,21 @@ test("validates the complete signed 64-bit seed range", () => {
 });
 
 test("zooms independently from detail and reports footprint", () => {
-  assert.equal(nextBlocksAcross(64, "in"), 64);
+  assert.equal(nextBlocksAcross(64, "in"), 32);
+  assert.equal(nextBlocksAcross(2, "in"), 1);
+  assert.equal(nextBlocksAcross(1, "in"), 1);
   assert.equal(nextBlocksAcross(2_048, "in"), 1_024);
   assert.equal(nextBlocksAcross(2_048, "out"), 4_096);
   assert.equal(nextBlocksAcross(131_072, "out"), 131_072);
   assert.equal(footprintBlocks({ blocksAcross: 16_384 }), 16_384);
+});
+
+test("accepts one-block links and rejects zero-width viewports", () => {
+  assert.equal(parseTerrainLabState("?blocks=1").blocksAcross, 1);
+  assert.equal(
+    parseTerrainLabState("?blocks=0").blocksAcross,
+    DEFAULT_TERRAIN_LAB_STATE.blocksAcross,
+  );
 });
 
 test("pans continuously rather than snapping to the detail lattice", () => {
