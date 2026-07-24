@@ -245,6 +245,15 @@ completed, skipped, failed, summary, and append-only log records. The
 machine-local host is read from `mclone.steamDeckHost` in this checkout's local
 Git configuration, with `MCLONE_STEAM_DECK` retaining highest precedence.
 
+The 2026-07-24 end-to-end checks covered both outcomes. A reserved unreachable
+address produced `deck-unreachable`, cleared the pending request, and exited in
+one second. A reachable clean-worktree deploy built commit `ae4b64a4` through
+the pinned SDK, recorded `dirty=false` and `GLIBC_2.39`, uploaded, registered,
+and launched in 92 seconds with a cold target directory. Repeating the exact
+manual production command used the cached 0.27-second Cargo build and completed
+the full check/build/stage/upload/launch path in 7.15 seconds. The Deck remained
+SSH-reachable with its internal connector disabled.
+
 The payload launcher passes `--platform-profile steamos` for interactive and
 live-presentation runs. This is a launch-policy hint carried by the ordinary
 SteamRT4 Linux binary, not a separate Deck executable:
