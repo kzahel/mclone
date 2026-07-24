@@ -2,7 +2,8 @@
 
 Topic: `lush-grass-rendering`
 
-Status: implementation active; tactical and Off baseline complete.
+Status: implementation active; static renderer complete, settings/wind/interaction
+remain.
 
 ## Scope
 
@@ -59,6 +60,38 @@ dirty; the executable and source revision were otherwise fixed.
 The initial implementation preserves that Off result by carrying an explicit
 request bit through both native and browser compilers. An Off request never
 calls patch discovery and serializes no patch payload.
+
+## 2026-07-24 Static Renderer Milestone
+
+The request-gated patch artifact now has a shared GPU owner in
+`mclone-render`. Each world draw store owns one lazy, range-managed patch
+arena, while compatible worlds share six lazily materialized pipelines:
+direct, direct multiview, placed, placed multiview, clipped placed, and
+clipped placed multiview. Off builds contain no patches, allocate no patch
+arena, and never materialize a grass pipeline.
+
+The original static geometry derives six deterministic tapered blades from
+each 32-byte patch instance. It reuses terrain view, periodic-topology,
+lighting, fog, color-profile, placement, clip-plane, depth, and culling
+contracts. Grass draws in the opaque phase after solid/cutout terrain, with
+one instanced draw per visible resident section. Upload and render reports
+expose patch, estimated blade, draw-call, and byte counts independently of
+terrain faces.
+
+Validation at this milestone:
+
+- `cargo test -p mclone-render --lib`: `172` passed, `9` ignored.
+- The ignored GPU pipeline test materialized and validated all six grass
+  shader/pipeline variants on the local adapter.
+- The ignored GPU visual test compared an Off image with a 35-patch enabled
+  image and required more than 500 changed pixels.
+- The inspected `/tmp/mclone-238-static-grass-on.png` showed deterministic
+  green tapered blades rooted on the test surface; the paired
+  `/tmp/mclone-238-static-grass-off.png` retained the exact bare surface.
+
+The renderer flag is intentionally still unreachable from normal runtime
+preferences in this commit. The next slice adds the shared Off/Low/Lush
+quality contract and triggers request-aware section recompilation.
 
 ## Attribution And External References
 

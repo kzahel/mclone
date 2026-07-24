@@ -1318,6 +1318,10 @@ pub(crate) fn run_renderer_rebuild_smoke(
         removed_section_count: section_update.removed_section_count(),
         uploaded_vertex_count: section_update.rebuilt_vertex_count,
         uploaded_index_count: section_update.rebuilt_index_count,
+        uploaded_grass_patch_count: section_update.rebuilt_grass_patch_count,
+        removed_grass_patch_count: 0,
+        uploaded_grass_bytes: u64::from(section_update.rebuilt_grass_patch_count)
+            * mclone_mesh::GrassPatch::BYTE_SIZE as u64,
     };
     let asset_source = load_asset_source()?;
     let render_options = options.render_options;

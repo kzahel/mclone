@@ -4,6 +4,7 @@
 mod gpu_util;
 
 mod asset_lab_figure;
+mod grass;
 mod prepared_actor;
 
 pub mod actor_assets;

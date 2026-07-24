@@ -1411,13 +1411,86 @@ mod tests {
     };
     use glam::Vec3;
     use mclone_core::{ChunkPos, Vec3d};
-    use mclone_mesh::{TexturedChunkVertex, VisibilitySet};
+    use mclone_mesh::{GrassPatch, TexturedChunkVertex, VisibilitySet};
 
     #[test]
     fn row_padding_uses_wgpu_copy_alignment() {
         assert_eq!(padded_row_bytes(4), 256);
         assert_eq!(padded_row_bytes(256), 256);
         assert_eq!(padded_row_bytes(260), 512);
+    }
+
+    #[test]
+    #[ignore = "GPU visual proof for Tactical 238 static grass"]
+    fn static_grass_renders_request_gated_patch_artifacts() -> Result<()> {
+        const WIDTH: u32 = 960;
+        const HEIGHT: u32 = 640;
+        let mut section = fixture_active_section();
+        for z in -2..=2 {
+            for x in -3..=3 {
+                section.grass_patches.push(GrassPatch {
+                    root: [x, 1, z],
+                    packed_tint: 0x0048_b850,
+                    packed_light: 0x00f0_00f0,
+                    seed: (x as u32).wrapping_mul(0x9e37_79b9)
+                        ^ (z as u32).wrapping_mul(0x85eb_ca6b),
+                    flags: 0,
+                    reserved: 0,
+                });
+            }
+        }
+        let sections = [section];
+        let atlas_rgba = [255, 255, 255, 255];
+        let camera = fixture_camera(0.0);
+        let baseline_path = PathBuf::from("/tmp/mclone-238-static-grass-off.png");
+        let enabled_path = PathBuf::from("/tmp/mclone-238-static-grass-on.png");
+        let base_options = HeadlessChunkOptions {
+            path: baseline_path.clone(),
+            width: WIDTH,
+            height: HEIGHT,
+            color: fixture_clear_color(),
+            camera,
+        };
+        let atlas = ChunkTextureAtlas {
+            width: 1,
+            height: 1,
+            rgba: &atlas_rgba,
+        };
+        let render_options = TexturedSectionRenderOptions {
+            force_fullbright: true,
+            section_occlusion_culling: false,
+            ..TexturedSectionRenderOptions::default()
+        };
+        write_headless_textured_sections_png_with_options(
+            base_options.clone(),
+            &sections,
+            atlas,
+            render_options,
+        )?;
+        write_headless_textured_sections_png_with_options(
+            HeadlessChunkOptions {
+                path: enabled_path.clone(),
+                ..base_options
+            },
+            &sections,
+            atlas,
+            render_options.with_grass_enabled(true),
+        )?;
+
+        let baseline = image::ImageReader::open(baseline_path)?
+            .decode()?
+            .to_rgba8();
+        let enabled = image::ImageReader::open(enabled_path)?.decode()?.to_rgba8();
+        let changed_pixels = baseline
+            .pixels()
+            .zip(enabled.pixels())
+            .filter(|(baseline, enabled)| baseline != enabled)
+            .count();
+        assert!(
+            changed_pixels > 500,
+            "expected visible grass geometry, found {changed_pixels} changed pixels"
+        );
+        Ok(())
     }
 
     #[test]

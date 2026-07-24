@@ -25,6 +25,9 @@ use wgpu::util::DeviceExt;
 use crate::color_profile::{RenderColorProfile, RenderConfig};
 use crate::fog::RenderFog;
 use crate::gpu_timestamps::GpuTimestampFrameEncoder;
+use crate::grass::{
+    GrassDrawStats, GrassPatchDrawResources, GrassPipelineCache, GrassPipelineVariant,
+};
 use crate::placement::{
     CompositionClip, WorldCompositionContext, WorldPlacement, WorldSourceBounds,
 };
@@ -496,6 +499,11 @@ pub struct TexturedSectionRenderStats {
     pub frustum_index_count: u32,
     pub readiness_culled_index_count: u32,
     pub graph_culled_index_count: u32,
+    pub grass_resident_patch_count: u32,
+    pub grass_drawn_patch_count: u32,
+    pub grass_estimated_blade_count: u32,
+    pub grass_draw_calls: usize,
+    pub grass_resident_bytes: u64,
 }
 
 /// Pull-only exact section sets for one render view. `paintable_frustum_keys`
@@ -560,6 +568,9 @@ pub struct TexturedSectionRenderOptions {
     pub sky_darken: f32,
     pub fog: RenderFog,
     pub color_profile: RenderColorProfile,
+    /// Draw request-gated grass patch artifacts. Off remains allocation-free
+    /// when compilation also omits grass patches.
+    pub grass_enabled: bool,
     /// Active dimension topology used only for observer-local presentation.
     /// Canonical mesh/upload identity remains unchanged.
     pub topology: HorizontalTopology,
@@ -573,6 +584,7 @@ impl Default for TexturedSectionRenderOptions {
             sky_darken: 1.0,
             fog: RenderFog::none(),
             color_profile: RenderColorProfile::default(),
+            grass_enabled: false,
             topology: HorizontalTopology::UNBOUNDED,
         }
     }
@@ -594,6 +606,11 @@ impl TexturedSectionRenderOptions {
         self
     }
 
+    pub fn with_grass_enabled(mut self, grass_enabled: bool) -> Self {
+        self.grass_enabled = grass_enabled;
+        self
+    }
+
     pub fn with_topology(mut self, topology: HorizontalTopology) -> Self {
         self.topology = topology;
         self
@@ -601,6 +618,14 @@ impl TexturedSectionRenderOptions {
 }
 
 impl TexturedSectionRenderStats {
+    fn record_grass(&mut self, stats: GrassDrawStats) {
+        self.grass_resident_patch_count = stats.resident_patch_count;
+        self.grass_drawn_patch_count = stats.drawn_patch_count;
+        self.grass_estimated_blade_count = stats.estimated_blade_count;
+        self.grass_draw_calls = stats.draw_calls;
+        self.grass_resident_bytes = stats.resident_bytes;
+    }
+
     pub fn loaded_face_count(&self) -> u32 {
         quad_face_count_from_indices(self.loaded_index_count)
     }
@@ -628,6 +653,9 @@ pub struct TexturedSectionUploadReport {
     pub removed_section_count: usize,
     pub uploaded_vertex_count: u32,
     pub uploaded_index_count: u32,
+    pub uploaded_grass_patch_count: u32,
+    pub removed_grass_patch_count: u32,
+    pub uploaded_grass_bytes: u64,
 }
 
 impl TexturedSectionUploadReport {
@@ -4165,6 +4193,7 @@ impl<'a> ChunkMultiviewRenderTarget<'a> {
 pub struct TexturedSectionSharedResources {
     renderer: TexturedChunkRenderer,
     atlas: GpuChunkTextureAtlas,
+    grass_pipelines: GrassPipelineCache,
 }
 
 impl TexturedSectionSharedResources {
@@ -4199,7 +4228,12 @@ impl TexturedSectionSharedResources {
             sampling,
         )
         .context("failed to upload chunk texture atlas")?;
-        Ok(Arc::new(Self { renderer, atlas }))
+        let grass_pipelines = GrassPipelineCache::new(color_format);
+        Ok(Arc::new(Self {
+            renderer,
+            atlas,
+            grass_pipelines,
+        }))
     }
 
     pub const fn color_format(&self) -> wgpu::TextureFormat {
@@ -4211,6 +4245,7 @@ pub struct TexturedSectionDrawResources {
     shared: Arc<TexturedSectionSharedResources>,
     sections: BTreeMap<RenderSectionKey, GpuTexturedSectionMesh>,
     section_arena: GpuTexturedSectionArena,
+    grass: GrassPatchDrawResources,
     visibility_sections: BTreeMap<RenderSectionKey, VisibilitySet>,
     visibility_section_keys_by_chunk: BTreeMap<ChunkPos, BTreeSet<RenderSectionKey>>,
     traversal_ready_sections: BTreeSet<RenderSectionKey>,
@@ -4297,6 +4332,7 @@ impl TexturedSectionDrawResources {
                 initial_index_count,
                 sections.len(),
             )?,
+            grass: GrassPatchDrawResources::default(),
             visibility_sections: BTreeMap::new(),
             visibility_section_keys_by_chunk: BTreeMap::new(),
             traversal_ready_sections: BTreeSet::new(),
@@ -4518,6 +4554,25 @@ impl TexturedSectionDrawResources {
         }
         self.section_arena
             .ensure_indirect_capacity(device, self.sections.len())?;
+        let grass_upload = self.grass.apply_section_updates(
+            device,
+            &self.queue,
+            sections,
+            removed.iter().copied(),
+        )?;
+        report.uploaded_grass_patch_count = grass_upload.uploaded_patch_count;
+        report.removed_grass_patch_count = grass_upload.removed_patch_count;
+        report.uploaded_grass_bytes = grass_upload.uploaded_bytes;
+        if !self.grass.is_empty() {
+            let uniform_layout = self.shared.renderer.solid_pipeline.get_bind_group_layout(0);
+            let texture_layout = self.shared.renderer.solid_pipeline.get_bind_group_layout(1);
+            drop(self.shared.grass_pipelines.pipeline(
+                device,
+                GrassPipelineVariant::Direct,
+                &uniform_layout,
+                &texture_layout,
+            ));
+        }
         if can_patch_cached_records && self.patch_cached_records(&changed_record_keys) {
             self.records_dirty.set(false);
             self.record_dirty_causes
@@ -5335,6 +5390,18 @@ impl TexturedSectionDrawResources {
         if let (Some(timing), Some(start)) = (timing.as_deref_mut(), uniform_start) {
             timing.uniform_write_ms += timing_elapsed_ms(start);
         }
+        let grass_pipeline = (options.grass_enabled && !self.grass.is_empty()).then(|| {
+            let uniform_layout = selected.solid_pipeline().get_bind_group_layout(0);
+            let texture_layout = selected.solid_pipeline().get_bind_group_layout(1);
+            let variant = match context.clip() {
+                CompositionClip::Unbounded => GrassPipelineVariant::Placed,
+                CompositionClip::HalfSpace(_) => GrassPipelineVariant::ClippedPlaced,
+            };
+            self.shared
+                .grass_pipelines
+                .pipeline(device, variant, &uniform_layout, &texture_layout)
+        });
+        let mut grass_stats = GrassDrawStats::default();
         let encode_start = timing.is_some().then(timing_now);
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -5382,11 +5449,18 @@ impl TexturedSectionDrawResources {
                     );
                 }
             }
+            if let Some(pipeline) = grass_pipeline.as_deref() {
+                grass_stats = self
+                    .grass
+                    .draw(&mut pass, pipeline, |key| culling.drawn_keys.contains(&key));
+            }
         }
         if let (Some(timing), Some(start)) = (timing.as_deref_mut(), encode_start) {
             timing.encode_ms += timing_elapsed_ms(start);
         }
-        Ok(culling.stats)
+        let mut stats = culling.stats;
+        stats.record_grass(grass_stats);
+        Ok(stats)
     }
 
     pub fn prepare_placed_stereo_draw(
@@ -5514,6 +5588,18 @@ impl TexturedSectionDrawResources {
             context,
             renderer.color_format,
         );
+        let grass_pipeline = (options.grass_enabled && !self.grass.is_empty()).then(|| {
+            let uniform_layout = selected.solid_pipeline().get_bind_group_layout(0);
+            let texture_layout = selected.solid_pipeline().get_bind_group_layout(1);
+            let variant = match context.clip() {
+                CompositionClip::Unbounded => GrassPipelineVariant::Placed,
+                CompositionClip::HalfSpace(_) => GrassPipelineVariant::ClippedPlaced,
+            };
+            self.shared
+                .grass_pipelines
+                .pipeline(device, variant, &uniform_layout, &texture_layout)
+        });
+        let mut grass_stats = GrassDrawStats::default();
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("mclone_placed_textured_section_stereo_render_pass"),
@@ -5560,8 +5646,16 @@ impl TexturedSectionDrawResources {
                     );
                 }
             }
+            if let Some(pipeline) = grass_pipeline.as_deref() {
+                let eye = stereo_eye_for_slot(view_slot);
+                grass_stats = self.grass.draw(&mut pass, pipeline, |key| {
+                    prepared_draw.draws_in_eye(key, eye)
+                });
+            }
         }
-        Ok(prepared_draw.stats_for_eye(stereo_eye_for_slot(view_slot)))
+        let mut stats = prepared_draw.stats_for_eye(stereo_eye_for_slot(view_slot));
+        stats.record_grass(grass_stats);
+        Ok(stats)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -5625,6 +5719,20 @@ impl TexturedSectionDrawResources {
             context,
             renderer.color_format,
         );
+        let grass_pipeline = (options.iter().any(|options| options.grass_enabled)
+            && !self.grass.is_empty())
+        .then(|| {
+            let uniform_layout = multiview.solid_pipeline().get_bind_group_layout(0);
+            let texture_layout = multiview.solid_pipeline().get_bind_group_layout(1);
+            let variant = match context.clip() {
+                CompositionClip::Unbounded => GrassPipelineVariant::PlacedMultiview,
+                CompositionClip::HalfSpace(_) => GrassPipelineVariant::ClippedPlacedMultiview,
+            };
+            self.shared
+                .grass_pipelines
+                .pipeline(device, variant, &uniform_layout, &texture_layout)
+        });
+        let mut grass_stats = GrassDrawStats::default();
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("mclone_placed_textured_section_multiview_render_pass"),
@@ -5671,8 +5779,16 @@ impl TexturedSectionDrawResources {
                     );
                 }
             }
+            if let Some(pipeline) = grass_pipeline.as_deref() {
+                grass_stats = self.grass.draw(&mut pass, pipeline, |key| {
+                    prepared_draw.drawn_keys.contains(&key)
+                });
+            }
         }
-        Ok(prepared_draw.stats())
+        let mut stats = prepared_draw.stats();
+        stats[0].record_grass(grass_stats);
+        stats[1].record_grass(grass_stats);
+        Ok(stats)
     }
 
     /// Draw an already composition-sorted run of direct-world translucent
@@ -5997,6 +6113,20 @@ impl TexturedSectionDrawResources {
             options,
             self.shared.renderer.color_format,
         );
+        let grass_pipeline = (phase.draws_opaque()
+            && options.iter().any(|options| options.grass_enabled)
+            && !self.grass.is_empty())
+        .then(|| {
+            let uniform_layout = renderer.solid_pipeline.get_bind_group_layout(0);
+            let texture_layout = renderer.solid_pipeline.get_bind_group_layout(1);
+            self.shared.grass_pipelines.pipeline(
+                device,
+                GrassPipelineVariant::DirectMultiview,
+                &uniform_layout,
+                &texture_layout,
+            )
+        });
+        let mut grass_stats = GrassDrawStats::default();
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("mclone_textured_section_multiview_render_pass"),
@@ -6061,8 +6191,16 @@ impl TexturedSectionDrawResources {
                     }
                 }
             }
+            if let Some(pipeline) = grass_pipeline.as_deref() {
+                grass_stats = self.grass.draw(&mut pass, pipeline, |key| {
+                    prepared_draw.drawn_keys.contains(&key)
+                });
+            }
         }
-        Ok(prepared_draw.stats())
+        let mut stats = prepared_draw.stats();
+        stats[0].record_grass(grass_stats);
+        stats[1].record_grass(grass_stats);
+        Ok(stats)
     }
 
     fn render_with_options_inner(
@@ -6244,6 +6382,13 @@ impl TexturedSectionDrawResources {
             0
         };
         let direct_draw_calls = direct_opaque_draw_calls + translucent_sections.len();
+        let grass_pipeline =
+            (phase.draws_opaque() && options.grass_enabled && !self.grass.is_empty()).then(|| {
+                self.shared
+                    .grass_pipelines
+                    .cached_pipeline(GrassPipelineVariant::Direct)
+            });
+        let mut grass_stats = GrassDrawStats::default();
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("mclone_textured_section_render_pass"),
@@ -6343,6 +6488,11 @@ impl TexturedSectionDrawResources {
                     }
                 }
             }
+            if let Some(pipeline) = grass_pipeline.as_deref() {
+                grass_stats = self
+                    .grass
+                    .draw(&mut pass, pipeline, |key| culling.drawn_keys.contains(&key));
+            }
         }
         if let Some(timing) = &mut timing {
             timing.direct_draw_calls = direct_draw_calls;
@@ -6364,7 +6514,9 @@ impl TexturedSectionDrawResources {
         if let (Some(timing), Some(encode_start)) = (&mut timing, encode_start) {
             timing.encode_ms = timing_elapsed_ms(encode_start);
         }
-        Ok(culling.stats)
+        let mut stats = culling.stats;
+        stats.record_grass(grass_stats);
+        Ok(stats)
     }
 
     fn prepare_stereo_draw_inner(
@@ -6446,6 +6598,13 @@ impl TexturedSectionDrawResources {
         }
 
         let encode_start = timing.as_ref().map(|_| timing_now());
+        let grass_pipeline =
+            (phase.draws_opaque() && options.grass_enabled && !self.grass.is_empty()).then(|| {
+                self.shared
+                    .grass_pipelines
+                    .cached_pipeline(GrassPipelineVariant::Direct)
+            });
+        let mut grass_stats = GrassDrawStats::default();
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("mclone_textured_section_stereo_prepared_render_pass"),
@@ -6513,11 +6672,19 @@ impl TexturedSectionDrawResources {
                     }
                 }
             }
+            if let Some(pipeline) = grass_pipeline.as_deref() {
+                let eye = stereo_eye_for_slot(view_slot);
+                grass_stats = self.grass.draw(&mut pass, pipeline, |key| {
+                    prepared_draw.draws_in_eye(key, eye)
+                });
+            }
         }
         if let (Some(timing), Some(encode_start)) = (&mut timing, encode_start) {
             timing.encode_ms = timing_elapsed_ms(encode_start);
         }
-        Ok(prepared_draw.stats_for_eye(stereo_eye_for_slot(view_slot)))
+        let mut stats = prepared_draw.stats_for_eye(stereo_eye_for_slot(view_slot));
+        stats.record_grass(grass_stats);
+        Ok(stats)
     }
 
     fn build_prepared_records(&self) -> PreparedTexturedSectionRecords {
@@ -7667,6 +7834,7 @@ mod tests {
             removed_section_count: 0,
             uploaded_vertex_count: 40,
             uploaded_index_count: 60,
+            ..TexturedSectionUploadReport::default()
         };
         assert_eq!(upload.uploaded_face_count(), 10);
     }
