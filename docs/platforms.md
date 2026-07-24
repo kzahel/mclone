@@ -115,6 +115,22 @@ target is the default implementation or validation baseline. New behavior
 belongs in shared contracts first, and validation should cover the specific
 platform boundaries affected by the change.
 
+Ordinary interactive launch is menu-first on every client target. Desktop
+argv, Steam launch options, Android activity properties, browser URLs, and XR
+launch intents are platform syntax projected into the shared
+`ClientEntryResolution`; a world, saved destination, remote session, scenario,
+or automation workload starts only when that source supplies an explicit
+request. Presentation profiles such as `steamos`, touch, or XR never select a
+destination by themselves. The current contract and physical evidence live in
+[`topics/client-entry-lifecycle.md`](topics/client-entry-lifecycle.md).
+
+Static session-free menus also share one `ClientActivityDemand`
+classification. Desktop/winit, flat Android, and browser hosts stop product
+rendering after one-shot menu work settles, retaining only a cheap 30 Hz
+input-only controller poll. Active sessions remain continuous, while OpenXR
+continues to obey its runtime-required frame sequencing and skips unnecessary
+shared scene work.
+
 Client platform and server host mode are separate axes. Local integrated play
 is a useful default for bring-up and offline validation, but every supported
 client lane should retain a path to dedicated-server play. Future P2P or

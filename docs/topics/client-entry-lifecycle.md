@@ -2,11 +2,12 @@
 
 Topic: `client-entry-lifecycle`
 
-Status: active. The product decision, shared entry/lifecycle policy, bounded
-accounting correction, desktop/SteamOS, flat-Android, and browser menu-first
-entry, XR entry normalization, and Steam Deck Devkit process ownership are
-implemented. Shared activity demand and demand-driven flat-client cadence are
-implemented; physical Steam Deck and headset acceptance remain active.
+Status: implementation and automated validation complete. The product
+decision, shared entry/lifecycle policy, bounded accounting correction,
+menu-first entry on every interactive client, explicit native save binding,
+shared activity demand, demand-driven flat-client cadence, and Steam Deck
+Devkit process ownership are implemented. The physical lifecycle and UX gates
+listed below remain active.
 
 ## Scope
 
@@ -306,7 +307,7 @@ This replacement behavior is for iterative Devkit runs. It is not evidence for
 normal Steam single-instance behavior and must not be used as the save-on-quit
 acceptance path.
 
-## Recommended Implementation Order
+## Implementation Record
 
 1. Correct bounded live frame accounting first, because the defect worsens
    with uptime and contaminates subsequent performance evidence.
@@ -321,9 +322,9 @@ acceptance path.
 6. Run cross-platform conformance, lifecycle, rendered-menu, long-idle, and
    physical-device acceptance.
 
-Each implementation tactical should take a bounded slice from this sequence.
-Do not combine all platform migration, frame-accounting internals, and cadence
-changes into one review unit.
+The implementation followed this order in separate reviewable commits. Device
+UX and lifecycle acceptance remain the explicit human gates below rather than
+hidden prerequisites for the shared implementation.
 
 ## Validation And Human Gates
 
