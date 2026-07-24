@@ -466,6 +466,25 @@ impl WinitFrameDriver {
         Ok(self.finish_input_outcome(scene, effects))
     }
 
+    pub(crate) fn route_touch_pointer_button(
+        &mut self,
+        pressed: bool,
+        point: Point,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<WinitInputOutcome> {
+        let mut effects = WinitHostEffects::default();
+        let scene = self.interactive_input.route_touch_pointer_button(
+            &mut self.host,
+            pressed,
+            point,
+            device,
+            queue,
+            &mut effects,
+        )?;
+        Ok(self.finish_input_outcome(scene, effects))
+    }
+
     pub(crate) fn route_pointer_move(
         &mut self,
         point: Point,

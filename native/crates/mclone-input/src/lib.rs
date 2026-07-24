@@ -1780,6 +1780,77 @@ pub struct TouchInputEvent {
     pub look_delta: Option<TouchLookDelta>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TouchContactPhase {
+    Started,
+    Moved,
+    Ended,
+    Cancelled,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TouchUiContactRoute {
+    PointerDown,
+    PointerMove,
+    PointerUp,
+    Cancel,
+    Ignore,
+    Gameplay,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TouchUiContactTracker {
+    active_contact: Option<u64>,
+}
+
+impl TouchUiContactTracker {
+    pub fn route(
+        &mut self,
+        contact_id: u64,
+        phase: TouchContactPhase,
+        ui_active: bool,
+    ) -> TouchUiContactRoute {
+        if self.active_contact == Some(contact_id) {
+            if !ui_active {
+                self.active_contact = None;
+                return TouchUiContactRoute::Cancel;
+            }
+            return match phase {
+                TouchContactPhase::Moved => TouchUiContactRoute::PointerMove,
+                TouchContactPhase::Ended => {
+                    self.active_contact = None;
+                    TouchUiContactRoute::PointerUp
+                }
+                TouchContactPhase::Cancelled => {
+                    self.active_contact = None;
+                    TouchUiContactRoute::Cancel
+                }
+                TouchContactPhase::Started => TouchUiContactRoute::Ignore,
+            };
+        }
+        if self.active_contact.is_some() {
+            return TouchUiContactRoute::Ignore;
+        }
+        if !ui_active {
+            return TouchUiContactRoute::Gameplay;
+        }
+        if phase == TouchContactPhase::Started {
+            self.active_contact = Some(contact_id);
+            TouchUiContactRoute::PointerDown
+        } else {
+            TouchUiContactRoute::Ignore
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.active_contact = None;
+    }
+
+    pub const fn active_contact(&self) -> Option<u64> {
+        self.active_contact
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct TouchJoystickState {
     pub base: Vec2,
@@ -3987,6 +4058,56 @@ mod tests {
         );
         let joystick = adapter.overlay_state().movement.expect("joystick overlay");
         assert_eq!(joystick.thumb, Vec2::new(70.0, 30.0));
+    }
+
+    #[test]
+    fn ui_touch_tracker_owns_one_contact_through_release() {
+        let mut tracker = TouchUiContactTracker::default();
+
+        assert_eq!(
+            tracker.route(7, TouchContactPhase::Started, true),
+            TouchUiContactRoute::PointerDown
+        );
+        assert_eq!(
+            tracker.route(8, TouchContactPhase::Started, true),
+            TouchUiContactRoute::Ignore
+        );
+        assert_eq!(
+            tracker.route(7, TouchContactPhase::Moved, true),
+            TouchUiContactRoute::PointerMove
+        );
+        assert_eq!(
+            tracker.route(7, TouchContactPhase::Ended, true),
+            TouchUiContactRoute::PointerUp
+        );
+        assert_eq!(tracker.active_contact(), None);
+        assert_eq!(
+            tracker.route(8, TouchContactPhase::Started, false),
+            TouchUiContactRoute::Gameplay
+        );
+    }
+
+    #[test]
+    fn ui_touch_tracker_cancels_without_pointer_up() {
+        let mut tracker = TouchUiContactTracker::default();
+
+        assert_eq!(
+            tracker.route(4, TouchContactPhase::Started, true),
+            TouchUiContactRoute::PointerDown
+        );
+        assert_eq!(
+            tracker.route(4, TouchContactPhase::Cancelled, true),
+            TouchUiContactRoute::Cancel
+        );
+        assert_eq!(
+            tracker.route(5, TouchContactPhase::Started, true),
+            TouchUiContactRoute::PointerDown
+        );
+        assert_eq!(
+            tracker.route(5, TouchContactPhase::Moved, false),
+            TouchUiContactRoute::Cancel
+        );
+        assert_eq!(tracker.active_contact(), None);
     }
 
     #[test]

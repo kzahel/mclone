@@ -606,6 +606,50 @@ impl MonoInteractiveInputRouter {
     where
         H: HostEffects,
     {
+        self.route_pointer_button_with_capture_policy(
+            host, button, pressed, ui_point, true, device, queue, effects,
+        )
+    }
+
+    pub fn route_touch_pointer_button<H>(
+        &mut self,
+        host: &mut McloneSceneHost,
+        pressed: bool,
+        ui_point: Point,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        effects: &mut H,
+    ) -> Result<MonoInputDisposition>
+    where
+        H: HostEffects,
+    {
+        self.route_pointer_button_with_capture_policy(
+            host,
+            PointerButton::Primary,
+            pressed,
+            Some(ui_point),
+            false,
+            device,
+            queue,
+            effects,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn route_pointer_button_with_capture_policy<H>(
+        &mut self,
+        host: &mut McloneSceneHost,
+        button: PointerButton,
+        pressed: bool,
+        ui_point: Option<Point>,
+        request_pointer_capture: bool,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        effects: &mut H,
+    ) -> Result<MonoInputDisposition>
+    where
+        H: HostEffects,
+    {
         if host.mono_ui_is_active() {
             if button != PointerButton::Primary {
                 return Ok(MonoInputDisposition {
@@ -635,7 +679,12 @@ impl MonoInteractiveInputRouter {
             };
             if let Some(action) = action {
                 disposition.merge(Self::apply_ui_action(
-                    host, action, true, device, queue, effects,
+                    host,
+                    action,
+                    request_pointer_capture,
+                    device,
+                    queue,
+                    effects,
                 )?);
             }
             self.clear_if_requested(disposition);

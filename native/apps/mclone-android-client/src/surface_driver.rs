@@ -30,8 +30,9 @@ use mclone_core::{CHUNK_WIDTH, Vec3d};
 use mclone_diagnostics::{FrameHostKind, FramePipelineReport};
 use mclone_input::{
     FlatInputFrame, InputCapabilities, InputCapabilityState, InputDeviceKind, InputPreferences,
-    KeyboardKey, MouseWheelDirection, PointerButton, TouchControlsMode, TouchInputAdapter,
-    TouchInputEvent, TouchInputSettings,
+    KeyboardKey, MouseWheelDirection, PointerButton, TouchContactPhase, TouchControlsMode,
+    TouchInputAdapter, TouchInputEvent, TouchInputSettings, TouchUiContactRoute,
+    TouchUiContactTracker,
 };
 use mclone_render::chunk::{ChunkDepthTarget, TexturedSectionRenderOptions};
 use mclone_render::color_profile::{RenderColorProfile, RenderConfig};
@@ -371,7 +372,7 @@ struct AndroidGpuState {
     input_preference_world_root: Option<std::path::PathBuf>,
     interactive_input: MonoInteractiveInputRouter,
     touch: TouchInputAdapter,
-    ui_touch_id: Option<u64>,
+    ui_touch: TouchUiContactTracker,
     frame_timing: FrameTimingStats,
     frame_pipeline: FramePipelineAccountant,
     pacing_perf: Option<AndroidPacingPerfState>,
@@ -542,7 +543,7 @@ impl AndroidGpuState {
             input_preference_world_root,
             interactive_input,
             touch,
-            ui_touch_id: None,
+            ui_touch: TouchUiContactTracker::default(),
             frame_timing: FrameTimingStats::default(),
             frame_pipeline: FramePipelineAccountant::new(xr_frame_pipeline_accounting_config(
                 Some(ANDROID_FIXED_FPS_CAP as f64),
@@ -1111,38 +1112,39 @@ impl AndroidGpuState {
         let position = Vec2::new(point.x, point.y);
         self.touch
             .set_viewport_size(Vec2::new(scale.width, scale.height));
-        if self.ui_touch_id == Some(touch.id) {
-            return match touch.phase {
-                TouchPhase::Moved => self.route_touch_pointer_move(point),
-                TouchPhase::Ended | TouchPhase::Cancelled => {
-                    self.ui_touch_id = None;
-                    self.route_touch_pointer_button(false, point)
-                }
-                TouchPhase::Started => Ok(AndroidInputOutcome {
+        match self.ui_touch.route(
+            touch.id,
+            touch_contact_phase(touch.phase),
+            self.host.mono_ui_is_active(),
+        ) {
+            TouchUiContactRoute::PointerDown => self.route_touch_pointer_button(true, point),
+            TouchUiContactRoute::PointerMove => self.route_touch_pointer_move(point),
+            TouchUiContactRoute::PointerUp => self.route_touch_pointer_button(false, point),
+            TouchUiContactRoute::Cancel => {
+                self.host.clear_mono_ui_input();
+                Ok(AndroidInputOutcome {
                     handled: true,
                     exit: false,
-                }),
-            };
-        }
-        match touch.phase {
-            TouchPhase::Started if self.host.mono_ui_is_active() && self.ui_touch_id.is_none() => {
-                self.ui_touch_id = Some(touch.id);
-                self.route_touch_pointer_button(true, point)
+                })
             }
-            TouchPhase::Started => {
-                let control = touch_control_at(scale, point);
-                let event = self.touch.begin_contact(touch.id, control, position);
-                self.apply_touch_event(event)
-            }
-            TouchPhase::Moved => {
-                let menu_active = touch_menu_button_rect().contains(point);
-                let event = self.touch.move_contact(touch.id, position, menu_active);
-                self.apply_touch_event(event)
-            }
-            TouchPhase::Ended | TouchPhase::Cancelled => {
-                let event = self
-                    .touch
-                    .end_contact(touch.id, touch.phase == TouchPhase::Cancelled);
+            TouchUiContactRoute::Ignore => Ok(AndroidInputOutcome {
+                handled: true,
+                exit: false,
+            }),
+            TouchUiContactRoute::Gameplay => {
+                let event = match touch.phase {
+                    TouchPhase::Started => {
+                        let control = touch_control_at(scale, point);
+                        self.touch.begin_contact(touch.id, control, position)
+                    }
+                    TouchPhase::Moved => {
+                        let menu_active = touch_menu_button_rect().contains(point);
+                        self.touch.move_contact(touch.id, position, menu_active)
+                    }
+                    TouchPhase::Ended | TouchPhase::Cancelled => self
+                        .touch
+                        .end_contact(touch.id, touch.phase == TouchPhase::Cancelled),
+                };
                 self.apply_touch_event(event)
             }
         }
@@ -1151,7 +1153,7 @@ impl AndroidGpuState {
     fn clear_flat_gameplay_input(&mut self) {
         self.interactive_input.clear_transient_input();
         self.touch.clear();
-        self.ui_touch_id = None;
+        self.ui_touch.clear();
         self.host.clear_mono_camera_input();
         self.host.clear_mono_blink_debug();
     }
@@ -1174,11 +1176,10 @@ impl AndroidGpuState {
         point: Point,
     ) -> Result<AndroidInputOutcome> {
         let mut effects = AndroidHostEffects::default();
-        let disposition = self.interactive_input.route_pointer_button(
+        let disposition = self.interactive_input.route_touch_pointer_button(
             &mut self.host,
-            PointerButton::Primary,
             pressed,
-            Some(point),
+            point,
             &self.device,
             &self.queue,
             &mut effects,
@@ -1385,6 +1386,15 @@ fn mouse_wheel_direction(delta: MouseScrollDelta) -> MouseWheelDirection {
         MouseWheelDirection::Up
     } else {
         MouseWheelDirection::Down
+    }
+}
+
+fn touch_contact_phase(phase: TouchPhase) -> TouchContactPhase {
+    match phase {
+        TouchPhase::Started => TouchContactPhase::Started,
+        TouchPhase::Moved => TouchContactPhase::Moved,
+        TouchPhase::Ended => TouchContactPhase::Ended,
+        TouchPhase::Cancelled => TouchContactPhase::Cancelled,
     }
 }
 

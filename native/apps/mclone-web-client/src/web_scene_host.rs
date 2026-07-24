@@ -36,7 +36,8 @@ use mclone_core::{BlockPos, ChunkPos, Direction, Vec3d};
 use mclone_input::{
     ControllerLayoutFamily, FlatInputAction, InputCapabilities, InputCapabilityState,
     InputDeviceKind, InputPreferences, KeyboardKey, MouseWheelDirection, PointerButton,
-    TouchControlsMode, TouchInputAdapter, TouchInputEvent, TouchInputSettings,
+    TouchContactPhase, TouchControlsMode, TouchInputAdapter, TouchInputEvent, TouchInputSettings,
+    TouchUiContactRoute, TouchUiContactTracker,
 };
 use mclone_render::actor_composition_fixture::ActorCompositionFixture;
 use mclone_render::chunk::{
@@ -495,7 +496,7 @@ pub struct WebSceneHost {
     gamepad_collector: BrowserGamepadCollector,
     frame_input_effects: WebFrameInputEffects,
     touch_input: TouchInputAdapter,
-    ui_touch_id: Option<u64>,
+    ui_touch: TouchUiContactTracker,
     last_action: Option<GameUiAction>,
     last_frame: LastFrameStats,
     command_count: usize,
@@ -1358,6 +1359,7 @@ impl WebSceneHost {
     ) -> Result<JsValue, JsValue> {
         self.input_capability_state
             .note_activity(InputDeviceKind::Touch);
+        let phase = web_touch_contact_phase(phase)?;
         let id = u64::from(id);
         let scale = GuiScale::from_pixels(self.context.width, self.context.height);
         let point = scale.client_to_gui(x, y);
@@ -1365,84 +1367,62 @@ impl WebSceneHost {
         self.touch_input
             .set_viewport_size(Vec2::new(scale.width, scale.height));
 
+        let ui_active = self.host_ref()?.mono_ui_is_active();
+        let route = self.ui_touch.route(id, phase, ui_active);
         let mut effects = WebHostEffects::default();
-        let disposition = if self.ui_touch_id == Some(id) {
-            match phase {
-                "move" => self
-                    .interactive_input
-                    .route_pointer_move(
-                        self.host
-                            .as_mut()
-                            .ok_or_else(|| JsValue::from_str("scene host is shut down"))?,
-                        point,
-                        &self.context.device,
-                        &self.context.queue,
-                        &mut effects,
-                    )
-                    .map_err(js_error)?,
-                "end" | "cancel" => {
-                    self.ui_touch_id = None;
-                    self.interactive_input
-                        .route_pointer_button(
-                            self.host
-                                .as_mut()
-                                .ok_or_else(|| JsValue::from_str("scene host is shut down"))?,
-                            PointerButton::Primary,
-                            false,
-                            Some(point),
-                            &self.context.device,
-                            &self.context.queue,
-                            &mut effects,
-                        )
-                        .map_err(js_error)?
-                }
-                "start" => MonoInputDisposition {
+        let disposition = match route {
+            TouchUiContactRoute::PointerDown | TouchUiContactRoute::PointerUp => self
+                .interactive_input
+                .route_touch_pointer_button(
+                    self.host
+                        .as_mut()
+                        .ok_or_else(|| JsValue::from_str("scene host is shut down"))?,
+                    route == TouchUiContactRoute::PointerDown,
+                    point,
+                    &self.context.device,
+                    &self.context.queue,
+                    &mut effects,
+                )
+                .map_err(js_error)?,
+            TouchUiContactRoute::PointerMove => self
+                .interactive_input
+                .route_pointer_move(
+                    self.host
+                        .as_mut()
+                        .ok_or_else(|| JsValue::from_str("scene host is shut down"))?,
+                    point,
+                    &self.context.device,
+                    &self.context.queue,
+                    &mut effects,
+                )
+                .map_err(js_error)?,
+            TouchUiContactRoute::Cancel => {
+                self.host_mut()?.clear_mono_ui_input();
+                MonoInputDisposition {
                     handled: true,
+                    scene_changed: true,
                     ..MonoInputDisposition::default()
-                },
-                other => {
-                    return Err(JsValue::from_str(&format!(
-                        "unknown raw touch phase {other:?}"
-                    )));
                 }
             }
-        } else {
-            match phase {
-                "start" if self.host_ref()?.mono_ui_is_active() && self.ui_touch_id.is_none() => {
-                    self.ui_touch_id = Some(id);
-                    self.interactive_input
-                        .route_pointer_button(
-                            self.host
-                                .as_mut()
-                                .ok_or_else(|| JsValue::from_str("scene host is shut down"))?,
-                            PointerButton::Primary,
-                            true,
-                            Some(point),
-                            &self.context.device,
-                            &self.context.queue,
-                            &mut effects,
-                        )
-                        .map_err(js_error)?
-                }
-                "start" => {
-                    let control = touch_control_at(scale, point);
-                    let event = self.touch_input.begin_contact(id, control, position);
-                    self.route_touch_input_event(event, &mut effects)?
-                }
-                "move" => {
-                    let menu_active = touch_menu_button_rect().contains(point);
-                    let event = self.touch_input.move_contact(id, position, menu_active);
-                    self.route_touch_input_event(event, &mut effects)?
-                }
-                "end" | "cancel" => {
-                    let event = self.touch_input.end_contact(id, phase == "cancel");
-                    self.route_touch_input_event(event, &mut effects)?
-                }
-                other => {
-                    return Err(JsValue::from_str(&format!(
-                        "unknown raw touch phase {other:?}"
-                    )));
-                }
+            TouchUiContactRoute::Ignore => MonoInputDisposition {
+                handled: true,
+                ..MonoInputDisposition::default()
+            },
+            TouchUiContactRoute::Gameplay => {
+                let event = match phase {
+                    TouchContactPhase::Started => {
+                        let control = touch_control_at(scale, point);
+                        self.touch_input.begin_contact(id, control, position)
+                    }
+                    TouchContactPhase::Moved => {
+                        let menu_active = touch_menu_button_rect().contains(point);
+                        self.touch_input.move_contact(id, position, menu_active)
+                    }
+                    TouchContactPhase::Ended | TouchContactPhase::Cancelled => self
+                        .touch_input
+                        .end_contact(id, phase == TouchContactPhase::Cancelled),
+                };
+                self.route_touch_input_event(event, &mut effects)?
             }
         };
         self.input_disposition_report(disposition, effects)
@@ -2313,7 +2293,7 @@ async fn create_scene_host(
             look_sensitivity: input_preferences.touch_look_sensitivity,
             ..TouchInputSettings::default()
         }),
-        ui_touch_id: None,
+        ui_touch: TouchUiContactTracker::default(),
         last_action: None,
         last_frame: LastFrameStats::default(),
         command_count: 0,
@@ -2356,7 +2336,7 @@ impl WebSceneHost {
     fn clear_interactive_input(&mut self) {
         self.interactive_input.clear_transient_input();
         self.touch_input.clear();
-        self.ui_touch_id = None;
+        self.ui_touch.clear();
         if let Some(host) = self.host.as_mut() {
             host.clear_mono_camera_input();
             host.clear_mono_ui_input();
@@ -4443,6 +4423,18 @@ fn browser_pointer_button(button: i16) -> Option<PointerButton> {
         1 => Some(PointerButton::Middle),
         2 => Some(PointerButton::Secondary),
         _ => None,
+    }
+}
+
+fn web_touch_contact_phase(phase: &str) -> Result<TouchContactPhase, JsValue> {
+    match phase {
+        "start" => Ok(TouchContactPhase::Started),
+        "move" => Ok(TouchContactPhase::Moved),
+        "end" => Ok(TouchContactPhase::Ended),
+        "cancel" => Ok(TouchContactPhase::Cancelled),
+        other => Err(JsValue::from_str(&format!(
+            "unknown raw touch phase {other:?}"
+        ))),
     }
 }
 

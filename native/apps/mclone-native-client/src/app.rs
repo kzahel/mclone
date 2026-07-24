@@ -8,7 +8,8 @@ use mclone_app_runtime::{DEFAULT_STARTUP_READINESS_TIMEOUT, RuntimePollDiagnosti
 use mclone_assets::AssetSource;
 use mclone_input::{
     ControllerInputPreferences, InputCapabilities, InputCapabilityState, InputDeviceKind,
-    InputPreferences, KeyboardKey, MouseWheelDirection, PointerButton,
+    InputPreferences, KeyboardKey, MouseWheelDirection, PointerButton, TouchContactPhase,
+    TouchUiContactRoute, TouchUiContactTracker,
 };
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render::color_profile::DEFAULT_RENDER_SCALE;
@@ -221,56 +222,6 @@ impl DesktopFlatInputAdapter {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum DesktopUiTouchAction {
-    Down,
-    Move,
-    Up,
-    Cancel,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-struct DesktopUiTouchTracker {
-    active_contact: Option<u64>,
-}
-
-impl DesktopUiTouchTracker {
-    fn route(
-        &mut self,
-        contact_id: u64,
-        phase: TouchPhase,
-        ui_active: bool,
-    ) -> Option<DesktopUiTouchAction> {
-        if self.active_contact == Some(contact_id) {
-            if !ui_active {
-                self.active_contact = None;
-                return Some(DesktopUiTouchAction::Cancel);
-            }
-            return match phase {
-                TouchPhase::Moved => Some(DesktopUiTouchAction::Move),
-                TouchPhase::Ended => {
-                    self.active_contact = None;
-                    Some(DesktopUiTouchAction::Up)
-                }
-                TouchPhase::Cancelled => {
-                    self.active_contact = None;
-                    Some(DesktopUiTouchAction::Cancel)
-                }
-                TouchPhase::Started => None,
-            };
-        }
-        if self.active_contact.is_none() && ui_active && phase == TouchPhase::Started {
-            self.active_contact = Some(contact_id);
-            return Some(DesktopUiTouchAction::Down);
-        }
-        None
-    }
-
-    fn clear(&mut self) {
-        self.active_contact = None;
-    }
-}
-
 struct ChunkApp {
     assets: WindowSceneAssets,
     scene: SceneOptions,
@@ -289,7 +240,7 @@ struct ChunkApp {
     mouse_locked: bool,
     mouse_lock_requested: bool,
     last_cursor: Option<(f64, f64)>,
-    ui_touch: DesktopUiTouchTracker,
+    ui_touch: TouchUiContactTracker,
     ui_v2_hit_debug: bool,
     last_frame: Instant,
     next_redraw_at: Option<Instant>,
@@ -745,7 +696,7 @@ impl ChunkApp {
             mouse_locked: false,
             mouse_lock_requested: false,
             last_cursor: None,
-            ui_touch: DesktopUiTouchTracker::default(),
+            ui_touch: TouchUiContactTracker::default(),
             ui_v2_hit_debug,
             last_frame: Instant::now(),
             next_redraw_at: None,
@@ -946,6 +897,21 @@ impl ChunkApp {
         self.apply_input_outcome("pointer button input", result, event_loop)
     }
 
+    fn route_touch_pointer_button_input(
+        &mut self,
+        pressed: bool,
+        point: Point,
+        event_loop: &ActiveEventLoop,
+    ) -> bool {
+        let result = match (self.surface.as_ref(), self.scene_driver.as_mut()) {
+            (Some(surface), Some(driver)) => {
+                driver.route_touch_pointer_button(pressed, point, &surface.device, &surface.queue)
+            }
+            _ => return false,
+        };
+        self.apply_input_outcome("touch pointer button input", result, event_loop)
+    }
+
     fn route_pointer_move_input(&mut self, point: Point, event_loop: &ActiveEventLoop) -> bool {
         let result = match (self.surface.as_ref(), self.scene_driver.as_mut()) {
             (Some(surface), Some(driver)) => {
@@ -1004,33 +970,28 @@ impl ChunkApp {
             self.schedule_next_redraw(event_loop);
             return;
         };
-        match self.ui_touch.route(touch.id, touch.phase, ui_active) {
-            Some(DesktopUiTouchAction::Down) => {
-                self.route_pointer_button_input(
-                    PointerButton::Primary,
-                    true,
-                    Some(point),
-                    event_loop,
-                );
+        match self
+            .ui_touch
+            .route(touch.id, touch_contact_phase(touch.phase), ui_active)
+        {
+            TouchUiContactRoute::PointerDown => {
+                self.route_touch_pointer_button_input(true, point, event_loop);
             }
-            Some(DesktopUiTouchAction::Move) => {
+            TouchUiContactRoute::PointerMove => {
                 self.route_pointer_move_input(point, event_loop);
             }
-            Some(DesktopUiTouchAction::Up) => {
-                self.route_pointer_button_input(
-                    PointerButton::Primary,
-                    false,
-                    Some(point),
-                    event_loop,
-                );
+            TouchUiContactRoute::PointerUp => {
+                self.route_touch_pointer_button_input(false, point, event_loop);
             }
-            Some(DesktopUiTouchAction::Cancel) => {
+            TouchUiContactRoute::Cancel => {
                 if let Some(driver) = &mut self.scene_driver {
                     driver.clear_ui_input();
                 }
                 self.schedule_next_redraw(event_loop);
             }
-            None => self.schedule_next_redraw(event_loop),
+            TouchUiContactRoute::Ignore | TouchUiContactRoute::Gameplay => {
+                self.schedule_next_redraw(event_loop)
+            }
         }
     }
 
@@ -1884,6 +1845,15 @@ fn desktop_pointer_button_from_mouse_button(button: MouseButton) -> Option<Point
         MouseButton::Right => Some(PointerButton::Secondary),
         MouseButton::Middle => Some(PointerButton::Middle),
         _ => None,
+    }
+}
+
+fn touch_contact_phase(phase: TouchPhase) -> TouchContactPhase {
+    match phase {
+        TouchPhase::Started => TouchContactPhase::Started,
+        TouchPhase::Moved => TouchContactPhase::Moved,
+        TouchPhase::Ended => TouchContactPhase::Ended,
+        TouchPhase::Cancelled => TouchContactPhase::Cancelled,
     }
 }
 
