@@ -243,6 +243,44 @@ test("generates terrain, round-trips controls, and completes comparison", async 
   expect(pageErrors).toEqual([]);
 });
 
+test("reconstructs one planned stream for both LOD lanes", async ({
+  page,
+}, testInfo) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      pageErrors.push(message.text());
+    }
+  });
+  await page.goto(
+    "/terrain/?seed=-98765&x=2369&z=-1977&blocks=128&detail=1"
+      + "&panes=cpu%2Cgpu&canonical=final&radius=1&water=1&vegetation=1"
+      + "&stage=structured&view=map&layer=streams",
+  );
+  await waitForCurrentComparison(page);
+  const shell = page.locator(".appShell");
+  await expect(shell).toHaveAttribute("data-channel-agreement", "1");
+  await expect(page.getByTestId("terrain-diagnostics")).toContainText(
+    "planned streams available",
+  );
+  const stage = page.getByTestId("terrain-stage");
+  const bounds = await stage.boundingBox();
+  expect(bounds).not.toBeNull();
+  const stacked = bounds!.width <= bounds!.height;
+  const pointerX = bounds!.x + bounds!.width * (stacked ? 0.5 : 0.25);
+  const pointerY = bounds!.y + bounds!.height * (stacked ? 0.25 : 0.5);
+  await page.mouse.click(pointerX, pointerY);
+  await expect(shell).toHaveAttribute("data-inspected-x", "2369");
+  await expect(shell).toHaveAttribute("data-inspected-z", "-1977");
+  await expect(page.getByTestId("point-receipt")).toContainText("planned stream");
+  await expect(page.getByTestId("point-receipt")).toContainText("147, -126");
+  await stage.screenshot({
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-structured-stream.png`,
+  });
+  expect(pageErrors).toEqual([]);
+});
+
 async function waitForCanonical(
   page: import("@playwright/test").Page,
   requestedChunks: number,
