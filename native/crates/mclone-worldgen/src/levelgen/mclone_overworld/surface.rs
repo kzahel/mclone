@@ -348,6 +348,42 @@ mod tests {
     }
 
     #[test]
+    fn macro_surface_materials_preserve_distinct_lod_regions() {
+        let mut terrain = sample(70, 0.0).terrain;
+        assert_eq!(
+            mclone_overworld_macro_surface_top_material(terrain),
+            GRASS_BLOCK
+        );
+
+        terrain.continentalness = -0.1;
+        assert_eq!(mclone_overworld_macro_surface_top_material(terrain), WATER);
+
+        terrain.continentalness = 0.5;
+        terrain.base_surface_y = 65;
+        assert_eq!(mclone_overworld_macro_surface_top_material(terrain), SAND);
+
+        terrain.base_surface_y = 110;
+        terrain.climate.temperature = -1.0;
+        assert_eq!(mclone_overworld_macro_surface_top_material(terrain), SNOW);
+
+        terrain.base_surface_y = 150;
+        terrain.climate.temperature = 1.0;
+        terrain.ruggedness = 1.0;
+        terrain.ridges = 1.0;
+        terrain.mountain_detail = 1.0;
+        assert_eq!(mclone_overworld_macro_surface_top_material(terrain), STONE);
+
+        terrain.base_surface_y = 80;
+        terrain.mountain_detail = 0.0;
+        assert_eq!(mclone_overworld_macro_surface_top_material(terrain), GRAVEL);
+        terrain.mountain_detail = -0.5;
+        assert_eq!(
+            mclone_overworld_macro_surface_top_material(terrain),
+            COARSE_DIRT
+        );
+    }
+
+    #[test]
     fn surface_language_has_distinct_floor_shore_soil_and_exposure_recipes() {
         assert_eq!(
             mclone_overworld_surface_recipe(sample(59, 0.0)),
