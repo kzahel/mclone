@@ -110,7 +110,7 @@ const SCENE_HOST_FIELDS: &[&str] = &[
     "asset_pack_preference_error",
     "graphics_preference_storage",
     "graphics_preference_error",
-    "pending_restored_leaf_detail",
+    "pending_leaf_detail",
     "pending_restored_asset_pack_selection",
     "external_asset_pack_preparation",
     "pending_external_asset_pack_selection",

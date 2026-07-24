@@ -55,6 +55,27 @@ pub(crate) enum SceneAssetReplacementPending {
     Meshes(PreparedAssetReplacementRequest),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LeafDetailRequestDisposition {
+    AlreadyActive,
+    Queue,
+    Replace,
+}
+
+fn leaf_detail_request_disposition(
+    active: mclone_mesh::LeafDetail,
+    requested: mclone_mesh::LeafDetail,
+    replacement_in_progress: bool,
+) -> LeafDetailRequestDisposition {
+    if replacement_in_progress {
+        LeafDetailRequestDisposition::Queue
+    } else if active == requested {
+        LeafDetailRequestDisposition::AlreadyActive
+    } else {
+        LeafDetailRequestDisposition::Replace
+    }
+}
+
 impl McloneSceneHost {
     pub fn asset_replacement_status(&self) -> &AssetReplacementStatus {
         &self.asset_replacement_status
@@ -211,10 +232,10 @@ impl McloneSceneHost {
                         if let Err(error) = self.request_leaf_detail(detail) {
                             self.graphics_preference_error =
                                 Some(format!("failed to restore {}: {error:#}", storage.label()));
-                            self.pending_restored_leaf_detail = Some(detail);
+                            self.pending_leaf_detail = Some(detail);
                         }
                     } else {
-                        self.pending_restored_leaf_detail = Some(detail);
+                        self.pending_leaf_detail = Some(detail);
                     }
                 }
             }
@@ -395,8 +416,25 @@ impl McloneSceneHost {
     }
 
     pub(crate) fn request_leaf_detail(&mut self, detail: mclone_mesh::LeafDetail) -> Result<()> {
-        if self.mesh_assets.catalog.leaf_detail() == detail {
-            return Ok(());
+        match leaf_detail_request_disposition(
+            self.mesh_assets.catalog.leaf_detail(),
+            detail,
+            self.asset_replacement.is_some(),
+        ) {
+            LeafDetailRequestDisposition::Queue => {
+                self.pending_leaf_detail = Some(detail);
+                log::info!(
+                    "leaf detail {detail:?} queued until the active asset replacement completes"
+                );
+                return Ok(());
+            }
+            LeafDetailRequestDisposition::AlreadyActive => {
+                self.pending_leaf_detail = None;
+                return Ok(());
+            }
+            LeafDetailRequestDisposition::Replace => {
+                self.pending_leaf_detail = None;
+            }
         }
         if self.active_world.runtime.is_none() {
             let mut mesh_assets = self.mesh_assets.clone();
@@ -404,7 +442,7 @@ impl McloneSceneHost {
             #[cfg(not(target_arch = "wasm32"))]
             if let Some(startup) = self.active_world.local_startup.as_mut() {
                 if startup.pump.poll_count() != 0 {
-                    self.pending_restored_leaf_detail = Some(detail);
+                    self.pending_leaf_detail = Some(detail);
                     log::info!(
                         "leaf detail {detail:?} queued until the active startup pump completes"
                     );
@@ -416,7 +454,6 @@ impl McloneSceneHost {
             }
             self.mesh_assets = mesh_assets.clone();
             self.active_assets.mesh = mesh_assets;
-            self.pending_restored_leaf_detail = None;
             self.persist_graphics_preference(detail);
             log::info!("leaf detail set to {detail:?} before active runtime startup");
             return Ok(());
@@ -463,12 +500,12 @@ impl McloneSceneHost {
     ) -> Result<()> {
         if self.asset_replacement.is_none()
             && self.active_world.runtime.is_some()
-            && let Some(detail) = self.pending_restored_leaf_detail.take()
+            && let Some(detail) = self.pending_leaf_detail.take()
             && let Err(error) = self.request_leaf_detail(detail)
         {
             self.graphics_preference_error =
-                Some(format!("restore preferred leaf detail: {error:#}"));
-            self.pending_restored_leaf_detail = Some(detail);
+                Some(format!("apply queued leaf detail: {error:#}"));
+            self.pending_leaf_detail = Some(detail);
         }
         if self.asset_replacement.is_none()
             && self.active_world.runtime.is_some()
@@ -819,7 +856,6 @@ impl McloneSceneHost {
         }
         self.asset_pack_preference = preference;
         self.persist_graphics_preference(self.active_assets.mesh.catalog.leaf_detail());
-        self.pending_restored_leaf_detail = None;
         self.asset_replacement_started_at = None;
         self.asset_replacement_assets_ready_at = None;
         self.last_asset_replacement_commit = Some(report);
@@ -840,4 +876,32 @@ fn estimated_section_gpu_bytes(stats: &mclone_mesh::SectionMeshStats) -> usize {
     (stats.vertex_count as usize)
         .saturating_mul(std::mem::size_of::<mclone_mesh::TexturedChunkVertex>())
         .saturating_add((stats.index_count as usize).saturating_mul(std::mem::size_of::<u32>()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use mclone_mesh::LeafDetail;
+
+    #[test]
+    fn leaf_detail_requests_queue_behind_any_active_replacement() {
+        for requested in [LeafDetail::Blocky, LeafDetail::Bushy] {
+            assert_eq!(
+                leaf_detail_request_disposition(LeafDetail::Blocky, requested, true),
+                LeafDetailRequestDisposition::Queue
+            );
+        }
+    }
+
+    #[test]
+    fn idle_leaf_detail_requests_only_replace_changed_detail() {
+        assert_eq!(
+            leaf_detail_request_disposition(LeafDetail::Blocky, LeafDetail::Blocky, false),
+            LeafDetailRequestDisposition::AlreadyActive
+        );
+        assert_eq!(
+            leaf_detail_request_disposition(LeafDetail::Blocky, LeafDetail::Bushy, false),
+            LeafDetailRequestDisposition::Replace
+        );
+    }
 }
