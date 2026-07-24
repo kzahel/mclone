@@ -967,6 +967,15 @@ the same production point evaluator across the complete current spacing
 range. It does not prove a truthful coarse summary: point-sampled 512-block
 and smaller bands visibly alias at the 65.5 km extreme.
 
+The 2026-07-24 mobile review correction is deployed from code commit
+`69cf25fa` and aggregate asset version
+`69cf25fa2739-20260724043243`. Hosted desktop and phone BrowserWebGPU flows
+prove that source controls and comparison guidance immediately precede the
+preview, upward drag uses conventional pitch direction, the thin seam remains
+an orbiting divider rather than terrain, and the fixed 2 km / 65.5 km parity
+gates still pass. The deployed Cloudflare Worker version is
+`d0304204-25ee-4639-aba1-ed0efe0b2a1a`.
+
 The next tactical should therefore:
 
 1. define a CPU/GPU scale-aware summary target distinct from exact point
