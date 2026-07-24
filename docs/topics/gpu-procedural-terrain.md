@@ -2,8 +2,11 @@
 
 Topic: `gpu-procedural-terrain`
 
-Status: independent CPU/GPU Terrain Lab publication, cache controls, and cold
-benchmark implementation completed local and hosted desktop/mobile
+Status: canonical multi-pane Terrain Lab workspace implementation active
+2026-07-24 under Tactical
+[`232-terrain-lab-canonical-workspace.md`](../tactical/232-terrain-lab-canonical-workspace.md).
+Independent CPU/GPU Terrain Lab publication, cache controls, and cold
+benchmark implementation previously completed local and hosted desktop/mobile
 headed-WebGPU validation 2026-07-24. Tactical
 [`227-web-terrain-lab-vertical-slice.md`](../tactical/227-web-terrain-lab-vertical-slice.md)
 landed the deployable, web-first Terrain Lab, shared production-reference grid,
@@ -22,11 +25,14 @@ river/wetland/planned-stream disagreement remains explicit. Tactical
 [`230-terrain-lab-independent-race-and-benchmarks.md`](../tactical/230-terrain-lab-independent-race-and-benchmarks.md)
 then separated CPU/GPU scheduling and publication, exposed cache bypass and
 invalidation, added a repeatable cold race, and fixed trackpad/page-scroll and
-vertical map-grab behavior. The next useful
-work is scale-aware coarse summarization and band limiting, followed by
-shader/edit hot-reload latency. A thin native profiling host and eventual
-in-game LOD/map consumers should reuse the shared engine rather than becoming
-separate implementations. Optional GPU-backed canonical chunk generation and
+vertical map-grab behavior. Tactical 232 now makes the Lab a configurable
+canonical/CPU-LOD/GPU-LOD workspace. It adds bounded exact final chunk
+generation, shared textured block rendering, cheap preview lighting,
+progressive worker publication, and presentation-only feature visibility.
+Scale-aware coarse summarization and band limiting remain the next far-field
+correctness work. A thin native profiling host and eventual in-game LOD/map
+consumers should reuse the shared engine rather than becoming separate
+implementations. Optional GPU-backed authoritative chunk generation and
 volumetric terrain remain separate later experiments.
 
 ## Scope
@@ -707,6 +713,27 @@ Its central interaction is one continuous scale:
 - preserve seed, position, zoom, profile revision, view mode, and selected
   diagnostic layers in a shareable URL.
 
+Terrain Lab is also the canonical generator review surface. Its workspace may
+show any unique subset of:
+
+- exact production terrain after final feature generation;
+- the CPU LOD-style surface evaluator; and
+- the GPU-resident LOD-style surface evaluator.
+
+These are synchronized logical panes, not three unrelated viewers. They share
+seed, coordinates, viewport, map/3D camera, and navigation. The exact pane has
+its own bounded chunk radius because canonical coverage and visual horizon
+coverage are intentionally different readiness states. At continent scale,
+the exact footprint must remain honest rather than silently expanding into
+millions of generated chunks.
+
+The canonical pane uses ordinary generated block/biome facts, the first-party
+asset packs, the shared textured section compiler, and the shared textured
+renderer. It may bypass propagated light in favor of explicitly labeled cheap
+preview lighting. Generation-stage selection and presentation visibility are
+different controls: hiding water or vegetation after generation must not alter
+feature execution or deterministic random consumption.
+
 The first useful controls are seed, profile/field revision, position, scale,
 presentation mode, and diagnostic layer. Later authoring controls can expose
 typed profile parameters. The browser must not accept arbitrary shader text or
@@ -900,6 +927,19 @@ in-game structural/depth coverage remain open.
 - measure stationary startup, pan/zoom, sustained movement, and
   rebuild-to-first-redraw latency.
 
+### Experiment 2.5: Canonical Terrain Workspace
+
+Status: active under Tactical 232.
+
+- show independently hideable canonical, CPU LOD, and GPU LOD panes with one
+  synchronized location and camera;
+- generate bounded exact chunks progressively in a cancelable Web Worker;
+- reuse production first-party textures, block meshing, and translucent water;
+- distinguish surface/final generation checkpoints from presentation-only
+  water and vegetation visibility;
+- expose canonical and procedural cache/readiness facts independently; and
+- use the resulting side-by-side evidence to define the later in-game handoff.
+
 ### Experiment 3: Real-Terrain Handoff And Structured Overlays
 
 - permit procedural terrain underneath not-yet-drawable normal chunks;
@@ -1075,9 +1115,16 @@ stacked captures showed matching coordinate-locked geography.
 This proves useful navigation, bounded resident generation, and progressive
 point-sampled detail. It does not yet prove a truthful far summary. The 65.5
 km continentalness image still evaluates sub-footprint field energy at points,
-so aliasing and temporal stability remain the next correctness problem.
+so aliasing and temporal stability remain an open correctness problem.
 
-The next tactical should therefore:
+The immediate implementation direction is Tactical 232's canonical workspace.
+It will expose production final chunks beside the two LOD evaluators so terrain
+work can distinguish a field-preview defect from a real generated-world
+defect. Its exact footprint is deliberately bounded, generated center-first in
+a cancelable worker, and rendered with shared first-party textured terrain
+resources plus preview lighting.
+
+After that workspace is proven:
 
 1. define a CPU/GPU scale-aware summary target distinct from exact point
    parity;
@@ -1086,9 +1133,11 @@ The next tactical should therefore:
 3. add a Rust/WGSL edit watcher and measure source-edit to first updated
    coarse pixel;
 4. choose explicit mixed-level seam/transition behavior before using partial
-   child coverage; and
+   child coverage;
 5. keep final rivers and bounded planned-stream records as explicit structured
-   overlays rather than weakening the exact large-field evaluator.
+   overlays rather than weakening the exact large-field evaluator; and
+6. decide whether the current Far LOD control plane should adopt the shared
+   procedural content and exact-handoff contracts proven in the Lab.
 
 ## Open Questions
 
