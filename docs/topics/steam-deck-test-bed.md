@@ -262,6 +262,13 @@ manual production command used the cached 0.27-second Cargo build and completed
 the full check/build/stage/upload/launch path in 7.15 seconds. The Deck remained
 SSH-reachable with its internal connector disabled.
 
+After separating installation from interactive launch, the real background
+worker built and installed commit `42cc3ca0` in nine seconds (eight seconds in
+the production install command). Its log contained asset verification,
+SteamRT4 build, upload, and shortcut registration, with no `run-game` RPC or
+command-line launch. The Deck remained SSH-reachable and the internal connector
+remained disabled after completion.
+
 The payload launcher passes `--platform-profile steamos` for interactive and
 live-presentation runs. This is a launch-policy hint carried by the ordinary
 SteamRT4 Linux binary, not a separate Deck executable:
