@@ -88,6 +88,8 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   platform initialization and mechanics stay local; browser TS input
   semantics, web-Rust string-action dispatch, and production smoke mirrors
   are the gaps to close
+- `client-entry-lifecycle` — menu-first shared entry intent, repeatable host
+  lifecycle, bounded idle work, and managed development process ownership
 - `figure-surface-stability` — same-facing coplanar and near-coplanar figure
   surfaces, sampled-pose exact-overlap and animated head-socket margin gates,
   reasoned face-pair exceptions, ratcheted warning inventory, and corrected

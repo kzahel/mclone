@@ -40,6 +40,46 @@ work. Entries here must distinguish an existing engine cost from the feature
 that happened to expose it, name the current owner, and describe a bounded
 first improvement. Start here when looking for high-value, low-hanging work.
 
+### HP-0: Bound Live Frame Accounting Cost
+
+**Priority: immediate. Status: corrected and Steam Deck soak-clean; Quest RD5
+overhead revalidation pending. Scope: shared live native frame accounting, not
+world simulation.**
+
+The old always-on `FramePipelineAccountant` recorded every observation in an
+unbounded `FrameAccumulator`, then rebuilt percentile inputs and sorted both
+percentiles and all historical worst-frame candidates whenever it published
+the next report. Live clients published that rich report every frame. The
+result was growing resident memory and per-frame work that increased with
+process uptime; a static title menu exposed the defect but did not cause it.
+
+The implemented correction:
+
+1. uses O(1), allocation-free steady-state live frame recording with separate
+   monotonic frame identity;
+2. maintains lifetime counts, sums, extrema, budget tiers, and conservation
+   failures;
+3. retains 512 recent observations for rolling percentiles;
+4. maintains the configured fixed top-K worst-frame detail;
+5. sends a lightweight per-frame budget signal distinct from the rich
+   diagnostic report;
+6. publishes the rich report once per 30 frames; and
+7. keeps an explicit exact constructor for finite benchmark output.
+
+The fixed SteamRT4 RD13 aerial run stayed at 89.98-90.01 FPS through ten
+minutes. `VmData` stayed exactly 792,936 KiB across the measured four-to-ten
+minute interval, RSS page residency flattened, and a late `perf` sample had no
+frame-accounting symbol above 0.5%. The matching unbounded run declined from
+about 87 FPS at 2:40 to about 65 FPS at 5:28 while RSS continued growing; its
+late profile spent roughly 29% of all sampled process cycles cloning and
+sorting frame history.
+
+Preserve the measurement semantics and overhead ceiling in
+[`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md). The
+menu-first lifecycle and idle sanity gate are tracked in
+[`client-entry-lifecycle.md`](client-entry-lifecycle.md). A Quest RD5
+accounting on/off pass remains the cross-platform acceptance gate.
+
 ### HP-1: Split Actor Pose Updates From Whole-Mesh Rebuilds
 
 **Priority: high. Status: CPU-baked fallback cleanup remains unclaimed; the

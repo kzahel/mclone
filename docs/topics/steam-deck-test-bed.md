@@ -121,6 +121,7 @@ pnpm steamdeck:stage
 pnpm steamdeck:upload
 pnpm steamdeck:deploy
 pnpm steamdeck:launch
+pnpm steamdeck:stop
 pnpm steamdeck:smoke
 pnpm steamdeck:perf
 pnpm steamdeck:pull-results -- RUN_ID
@@ -196,7 +197,28 @@ ordinary Gamescope restart resets this session-scoped forced-sleep state.
 and assembles `dist/steamdeck` with a SHA-256 build receipt. `upload` performs
 Valve's upload preparation, an incremental clean `rsync`, and registration as
 `Devkit Game: mclone`. `deploy` also launches interactive play. `launch`
-restarts an already uploaded interactive build.
+restarts an already uploaded interactive build. `stop` terminates only the
+interactive process recorded by the staged payload.
+
+The payload owns one interactive Devkit process through a lifetime file lock
+and a PID plus Linux process-start identity. `launch` and `deploy` stop that
+exact owner before issuing Valve's `run-game` RPC; a direct duplicate payload
+start is rejected, and stale owner records self-heal. Stop sends `TERM`, waits
+five seconds, and escalates to `KILL` only if that exact development process
+does not exit. This is iterative Devkit replacement policy, not a name-wide
+process sweep or an assumption about production Steam process management.
+
+Launch replacement can be abrupt and is not the persistence acceptance path.
+Use normal in-game quit/quit-to-title behavior when validating save lifecycle.
+The shared menu-first and explicit-entry decision is recorded in
+[`client-entry-lifecycle.md`](client-entry-lifecycle.md).
+
+Physical validation on 2026-07-24 launched one SteamRT4 menu process, launched
+again, and proved that the recorded old PID exited before a new PID became the
+sole `mclone-native-client`. A direct concurrent payload invocation exited with
+the dedicated duplicate-owner status while the existing owner remained the
+only process. `steamdeck:stop` then removed the owner record and left zero
+client processes.
 
 The two complete production-style commands share asset/build/stage/upload
 policy. Each checks the asset pack against the tracked lock before the
@@ -586,6 +608,104 @@ AVD touch smoke, and headed-Wayland mobile-browser touch smoke passed. Android
 and browser touch HUD/menu/options captures were inspected. The remaining gate
 is a physical Gaming Mode pass using the checklist in
 [`touchscreen-input.md`](touchscreen-input.md#physical-steam-deck-acceptance).
+
+## 2026-07-24 Gamescope Lock And RD13 Accounting A/B
+
+The reported failure looked like a device hard lock: the game stopped
+responding, Gamescope counters stopped updating, and the Steam button could
+not render its menu. SSH and the Linux kernel remained alive. There was no
+kernel GPU-reset or OOM evidence, and Steam still observed focus/button state,
+so this was a wedged Gaming Mode userspace/display session rather than a
+kernel hard lock. Stopping only the game did not restore presentation;
+`steamosctl switch-to-game-mode` restarted the Gamescope/Steam session and
+restored the 89.887 Hz panel.
+
+The controlled screenshot matrix did not reproduce a screenshot-triggered
+wedge:
+
+- two `gamescopectl screenshot` calls on the Steam home screen passed;
+- two calls on a fresh mclone title screen passed at 90 Hz;
+- two calls on a fresh static RD13 aerial world passed;
+- calls after the unbounded-accounting run had degraded into the 50-65 FPS
+  range also passed; and
+- post-fix calls at fresh, five-minute, and ten-minute points returned in
+  4-6 ms, wrote valid 1280x800 RGBA captures, left the client alive, and did
+  not move Gamescope from 90 Hz.
+
+The first apparent automated recurrence was not a compositor failure. The
+bounded run had completed and its cleanup intentionally slept the internal
+panel before the next screenshot probe. Waking `card0-eDP-1` immediately
+resumed presentation. Future classification must check connector enabled
+state as well as Gamescope/app liveness.
+
+The autonomous reproduction lane is:
+
+```bash
+MCLONE_STEAM_DECK_BUILDER=steamrt4 \
+MCLONE_STEAM_DECK_SKIP_ASSET_CHECK=1 \
+pnpm steamdeck:gamescope-repro
+```
+
+It launches seed 12345 directly into an idle-settled transient RD13 world,
+places a no-clip camera at `(8, 196, 8)` looking vertically at `(8, 64, 8)`,
+and records a long window-frame report. The corresponding
+`--window-camera-eye` and `--window-camera-target` flags require each other
+and are restricted to window-report runs, so no human loading, render-distance
+editing, flight, or camera positioning is needed.
+
+Before the accounting correction, run
+`20260724T082305Z-c3846792fe7e-gamescope-repro-3263339` used SteamRT4 binary
+SHA-256
+`2925ea4f17a677807a5bbd303eb17d10fe8700ec1509729c706baa5beeab359b`.
+With a static view and no streaming input, it measured approximately:
+
+- 87 FPS and 709,984 KiB RSS at 2:40;
+- 79.5 FPS and 718,900 KiB RSS at 3:43;
+- 73 FPS and 728,104 KiB RSS at 4:52; and
+- 64.6 FPS around 5:28, with screenshots still completing.
+
+A five-second late `perf` sample attributed about 29% of all process cycles to
+`FrameAccumulator::summary_report`, percentile sorting, and cloning/sorting
+`worst_frames`. This is the primary cause of the time-dependent low-FPS,
+low-aggregate-utilization report.
+
+The fixed comparison run
+`20260724T084815Z-c3846792fe7e-gamescope-repro-3287052` used SteamRT4 binary
+SHA-256
+`c5be566f4bf22ceacba7219ea78e0734b067d1c971a8a85df9a9e4399a21a297`.
+It held 89.98-90.01 FPS through ten minutes and then completed all 72,000
+requested frames: 72,000 presented, zero skipped, and zero reconfigured at a
+native 1280x800 world and output. The full-window frame-wall p50/p95 were
+11.123/12.218 ms; the last 6,000 frames averaged 11.113 ms. `VmData` stayed
+exactly 792,936 KiB from the first recorded sample through completion, RSS
+settled near 725-727 MiB, and no accounting symbol appeared above 0.5% in the
+late profile.
+
+The remaining static RD13 work is not fill-rate limited. The fixed run used
+about 1.33-1.45 CPU cores and 34-36% of the client GPU graphics engine.
+Thread accounting split that into roughly 81% of one logical CPU on the
+render/main thread and 53% on the integrated-server thread; aggregating that
+over the Deck's eight logical CPUs explains the roughly 19-23% UI reading.
+The late profile's real hot spots were integrated-server distance-level scans,
+terrain culling/traversal, pending-render-work scans, client chunk snapshots,
+and draw encoding. Looking down from altitude exposes more terrain and makes
+those visibility/draw-preparation costs worse even while total CPU and GPU
+percentages remain low. The final runtime had zero generation jobs,
+publications, render-compile jobs, or upload backlog, but still reported 112
+pending render chunks; the meaning and repeated scan cost of that stationary
+set is a concrete next investigation.
+
+These are controlled dirty-tree diagnostic A/B rows, not a release threshold:
+the source changes were uncommitted and the unrelated asset-lock mismatch was
+explicitly bypassed. The exact binary hashes and pulled `/tmp` result bundles
+make the two rows reproducible without mislabeling their provenance.
+
+The original userspace Gamescope wedge is therefore not proven to have been
+caused by `gamescopectl screenshot`. The strongest current explanation is that
+the screenshot happened during severe main-thread/accounting collapse, with a
+separate Gamescope or explicit-sync failure possible. Keep the controlled
+repro lane and automatic session recovery, but do not treat screenshot capture
+as the root cause without a panel-enabled recurrence.
 
 ## Bring-up Ledger
 

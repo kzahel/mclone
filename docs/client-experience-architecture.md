@@ -30,6 +30,9 @@ into more specific architecture docs.
 Related docs:
 
 - [`platforms.md`](platforms.md) owns current platform lanes and validation.
+- [`topics/client-entry-lifecycle.md`](topics/client-entry-lifecycle.md) owns
+  initial destination, repeated host lifecycle, menu-first defaults, and
+  idle-work sanity.
 - [`topics/platform-parity.md`](topics/platform-parity.md) owns feature and
   shared-contract parity matrices.
 - [`native-engine-architecture.md`](native-engine-architecture.md) owns durable

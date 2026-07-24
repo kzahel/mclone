@@ -58,10 +58,14 @@ Commands:
   upload        Stage, upload, and register Devkit Game: mclone.
   deploy        Stage, upload, register, and launch interactive play.
   launch        Launch the already-uploaded interactive title.
+  stop          Stop the owned interactive Devkit title, if running.
   smoke         Stage/upload, run the bounded screenshot + present smoke,
                 pull its results, and restore the interactive shortcut.
   perf          Stage/upload, run the timedemo + 3600-frame present bench,
                 pull its results, and restore the interactive shortcut.
+  gamescope-repro
+                Stage/upload and run the bounded elevated RD13 window used
+                for controlled Gamescope screenshot reproduction.
   pull-results  Pull the newest Deck result, or the optional RUN_ID argument.
 
 Environment:
@@ -503,8 +507,16 @@ upload_payload()
 launch_title()
 {
     require_deck
+    stop_title
     ssh_deck \
         "python3 ~/devkit-utils/steam-devkit-rpc run-game gameid=$(printf '%q' "$DECK_TITLE")"
+}
+
+stop_title()
+{
+    local remote_dir
+    remote_dir=$(prepare_remote_directory)
+    ssh_deck "$(printf '%q' "$remote_dir/run.sh") stop"
 }
 
 new_run_id()
@@ -662,6 +674,11 @@ case "$command" in
         [[ $# == 0 ]] || die "launch takes no arguments"
         launch_title
         ;;
+    stop)
+        [[ $# == 0 ]] || die "stop takes no arguments"
+        require_deck
+        stop_title
+        ;;
     smoke)
         [[ $# == 0 ]] || die "smoke takes no arguments"
         run_bounded_workflow smoke 600
@@ -669,6 +686,10 @@ case "$command" in
     perf)
         [[ $# == 0 ]] || die "perf takes no arguments"
         run_bounded_workflow perf 1200
+        ;;
+    gamescope-repro)
+        [[ $# == 0 ]] || die "gamescope-repro takes no arguments"
+        run_bounded_workflow gamescope-repro 1200
         ;;
     pull-results)
         [[ $# -le 1 ]] || die "pull-results accepts at most one RUN_ID"

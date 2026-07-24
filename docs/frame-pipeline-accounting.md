@@ -391,6 +391,33 @@ added app-work p95 on the Quest RD5 guardrail lane. The recorded RD5 A/B on
 versus `15.777 ms` with accounting off, with zero conservation violations, so
 no source was demoted to opt-in.
 
+The 2026-07-24 Steam Deck menu investigation invalidated the assumption that
+the live aggregation implementation has bounded overhead over process uptime.
+`FrameAccumulator` retains every observation, and the live
+`FramePipelineAccountant` rebuilds percentile vectors and sorts all historical
+worst-frame candidates on every frame. This makes live report cost and memory
+grow with uptime even when the scene is idle.
+
+The durable live contract is therefore:
+
+- per-frame recording is O(1) and allocation-free;
+- lifetime scalar counters are incremental;
+- rolling percentile history and detailed worst-frame retention are bounded;
+- rich report generation is decimated or demand-driven rather than per-frame;
+- frame identity is independent of bounded-window length; and
+- exact finite benchmark accumulation is a separate explicitly bounded mode.
+
+The correction now keeps 512 recent observations in the live ring, maintains
+lifetime counters and the configured top-K worst frames incrementally,
+publishes a lightweight render-admission signal every frame, and rebuilds the
+rich report once per 30 frames. Exact finite collectors remain a separate
+constructor. A ten-minute static Steam Deck RD13 aerial A/B held 90 Hz after
+the correction where the prior implementation declined from about 87 to 65
+FPS by five and a half minutes; the late profile no longer contained frame
+history sorting. The prior RD5 A/B remains evidence only for its finite
+recorded interval. Re-run the Quest RD5 accounting on/off overhead guardrail
+before treating the cross-platform `<= 0.2 ms` ceiling as revalidated.
+
 ## Validating The Instrumentation
 
 Wrong measurements are worse than missing ones: they redirect optimization

@@ -19,6 +19,12 @@ the current code and extended it with the browser-Rust dispatch surface, the
 desktop frame-driver dispatch role, the XR emulation path, and the
 undocumented browser input behaviors Stage 0 must record.
 
+Initial destination, repeated host lifecycle, and menu-idle semantics are owned
+by the focused
+[`client-entry-lifecycle.md`](client-entry-lifecycle.md) topic. This topic
+continues to own the adapter boundary through which those shared decisions are
+executed.
+
 ## Top-Level Frame
 
 > What is the smallest clean platform-host boundary that lets desktop,

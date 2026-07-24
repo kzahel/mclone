@@ -153,6 +153,11 @@ series implements the same concern, normally reuse the document slug in its
   shared-contract × consumer reuse matrix, and the cross-cutting blockers that
   keep new features from re-forking across the client lanes and offscreen
   validation hosts.
+- [`client-entry-lifecycle.md`](client-entry-lifecycle.md): accepted
+  menu-first product entry and repeatable host-lifecycle contract — sessions
+  require explicit host-neutral launch intent, platform presentation does not
+  select destinations, idle work stays bounded, and managed development
+  launchers own at most one interactive process.
 - [`steam-deck-test-bed.md`](steam-deck-test-bed.md): active physical Steam
   Deck provisioning and validation lane — official Devkit Client deployment,
   native Linux staging and asset-root contracts, Gaming Mode acceptance, and
