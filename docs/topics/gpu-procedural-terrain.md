@@ -1237,6 +1237,15 @@ agreement. In the fixed uncached race, desktop GPU target plus readback took
 not pure GPU execution timing. The complete object hashes and validation
 receipt live in Tactical 234.
 
+Tactical
+[`236`](../tactical/236-terrain-lab-multitouch-and-exact-footprints.md) is
+also complete. Two-contact gestures now combine centroid pan and pinch zoom
+in map and 3D across both procedural and canonical panes. The shared canonical
+preview bound now offers center-first `7x7 = 49` and `9x9 = 81` exact
+footprints. A phone-sized browser observed progressive publication through all
+81 final-feature chunks in about four seconds, and the same byte-verified
+bundle passed hosted desktop and phone headed-WebGPU smokes.
+
 The next implementation direction is:
 
 1. band-limit or aggregate other sub-sample field energy while preserving
