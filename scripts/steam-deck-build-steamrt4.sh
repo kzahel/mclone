@@ -54,7 +54,18 @@ if ! docker_cli info >/dev/null 2>&1; then
         die "Docker is unavailable even though this shell has the docker group"
     fi
     if getent group docker | cut -d: -f4 | tr ',' '\n' | grep -qx "$(id -un)"; then
-        die "Docker access needs a fresh login; meanwhile run this command through: sg docker -c 'pnpm steamdeck:build:steamrt4'"
+        if [[ ${MCLONE_STEAMRT4_GROUP_REEXEC:-0} != 1 ]] &&
+            command -v sg >/dev/null 2>&1; then
+            printf -v reexec_command \
+                '%q ' \
+                env \
+                MCLONE_STEAMRT4_GROUP_REEXEC=1 \
+                "$SCRIPT_DIR/steam-deck-build-steamrt4.sh"
+            echo \
+                "Re-entering the authorized docker group for this SteamRT4 build"
+            exec sg docker -c "$reexec_command"
+        fi
+        die "Docker group membership is registered but unavailable to this process"
     fi
     die "Docker daemon access is unavailable for $(id -un)"
 fi

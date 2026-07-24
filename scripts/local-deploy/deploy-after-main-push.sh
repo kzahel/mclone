@@ -151,14 +151,15 @@ ensure_deploy_worktree() {
     fi
 
     log "creating deploy worktree at $DEPLOY_WORKTREE"
-    mkdir -p "$(dirname "$DEPLOY_WORKTREE")"
-    git -C "$PROJECT_DIR" worktree add --detach "$DEPLOY_WORKTREE" "$sha"
+    mkdir -p "$(dirname "$DEPLOY_WORKTREE")" || return 1
+    git -C "$PROJECT_DIR" worktree add --detach "$DEPLOY_WORKTREE" "$sha" ||
+      return 1
   fi
 
   git -C "$DEPLOY_WORKTREE" fetch --quiet "$DESIRED_REMOTE" "$DESIRED_BRANCH" || true
-  git -C "$DEPLOY_WORKTREE" checkout --detach "$sha"
-  git -C "$DEPLOY_WORKTREE" reset --hard "$sha"
-  git -C "$DEPLOY_WORKTREE" clean -fd
+  git -C "$DEPLOY_WORKTREE" checkout --detach "$sha" || return 1
+  git -C "$DEPLOY_WORKTREE" reset --hard "$sha" || return 1
+  git -C "$DEPLOY_WORKTREE" clean -fd || return 1
 }
 
 ensure_reference_assets_link() {
@@ -170,19 +171,19 @@ ensure_reference_assets_link() {
     return 1
   fi
 
-  mkdir -p "$target_parent"
+  mkdir -p "$target_parent" || return 1
   if [ -L "$target" ]; then
     local current
     current="$(readlink "$target")"
     if [ "$current" != "$REFERENCE_SOURCE" ]; then
-      rm "$target"
-      ln -s "$REFERENCE_SOURCE" "$target"
+      rm "$target" || return 1
+      ln -s "$REFERENCE_SOURCE" "$target" || return 1
     fi
   elif [ -e "$target" ]; then
     echo "$target exists and is not the expected symlink to $REFERENCE_SOURCE" >&2
     return 1
   else
-    ln -s "$REFERENCE_SOURCE" "$target"
+    ln -s "$REFERENCE_SOURCE" "$target" || return 1
   fi
 }
 
@@ -197,13 +198,13 @@ ensure_node_modules_link() {
     local current
     current="$(readlink "$target")"
     if [ "$current" != "$NODE_MODULES_SOURCE" ]; then
-      rm "$target"
-      ln -s "$NODE_MODULES_SOURCE" "$target"
+      rm "$target" || return 1
+      ln -s "$NODE_MODULES_SOURCE" "$target" || return 1
     fi
   elif [ -e "$target" ]; then
     return 0
   else
-    ln -s "$NODE_MODULES_SOURCE" "$target"
+    ln -s "$NODE_MODULES_SOURCE" "$target" || return 1
   fi
 }
 

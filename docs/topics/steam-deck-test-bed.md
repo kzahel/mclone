@@ -228,7 +228,10 @@ background worker first waits until the remote really reports the pushed
 for only a few seconds. An unavailable Deck is an explicit logged skip. A
 reachable Deck is built and deployed from a clean reusable sibling worktree at
 the exact pushed commit, independently of the web deploy worker. Generated
-asset archives and SteamRT4 target/cache state remain ignored and local.
+asset archives and SteamRT4 target/cache state remain ignored and local. The
+worker incrementally copies the extracted source tree into its worktree before
+packing so manifests remain repository-relative and web/Deck pack generation
+cannot race through a shared output archive.
 
 Inspect structured state or the latest log lines with:
 
@@ -384,8 +387,10 @@ Its contract is:
 
 The Linux deployment account is deliberately authorized for the system Docker
 daemon. This is root-equivalent access; the exact group and machine setup are
-recorded in the private laptop ledger. A new login/session is required after
-the group change. The Docker daemon itself was not reconfigured.
+recorded in the private laptop ledger. Ordinary processes need a new
+login/session after the group change; the SteamRT4 builder can re-enter the
+already-authorized group through `sg` when invoked from an older shell. The
+Docker daemon itself was not reconfigured.
 
 The builder's advantage is compatibility and provenance, not automatic frame
 rate:

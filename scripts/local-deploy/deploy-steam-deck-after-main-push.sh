@@ -249,17 +249,18 @@ ensure_deploy_worktree() {
     fi
 
     log "creating Steam Deck deploy worktree at $DEPLOY_WORKTREE"
-    mkdir -p "$(dirname "$DEPLOY_WORKTREE")"
-    git -C "$PROJECT_DIR" worktree add --detach "$DEPLOY_WORKTREE" "$sha"
+    mkdir -p "$(dirname "$DEPLOY_WORKTREE")" || return 1
+    git -C "$PROJECT_DIR" worktree add --detach "$DEPLOY_WORKTREE" "$sha" ||
+      return 1
   fi
 
   git -C "$DEPLOY_WORKTREE" fetch --quiet "$DESIRED_REMOTE" "$DESIRED_BRANCH" || true
-  git -C "$DEPLOY_WORKTREE" checkout --detach "$sha"
-  git -C "$DEPLOY_WORKTREE" reset --hard "$sha"
-  git -C "$DEPLOY_WORKTREE" clean -fd
+  git -C "$DEPLOY_WORKTREE" checkout --detach "$sha" || return 1
+  git -C "$DEPLOY_WORKTREE" reset --hard "$sha" || return 1
+  git -C "$DEPLOY_WORKTREE" clean -fd || return 1
 }
 
-ensure_reference_assets_link() {
+ensure_reference_assets_copy() {
   local source="$REFERENCE_SOURCE/extracted"
   local target_parent="$DEPLOY_WORKTREE/reference/minecraft-1.17.1"
   local target="$target_parent/extracted"
@@ -269,20 +270,20 @@ ensure_reference_assets_link() {
     return 1
   fi
 
-  mkdir -p "$target_parent"
-  if [ -L "$target" ]; then
-    local current
-    current="$(readlink "$target")"
-    if [ "$current" != "$source" ]; then
-      rm "$target"
-      ln -s "$source" "$target"
-    fi
-  elif [ -e "$target" ]; then
-    echo "$target exists and is not the expected symlink to $source" >&2
+  command -v rsync >/dev/null 2>&1 || {
+    echo "rsync is required to prepare isolated Deck assets" >&2
     return 1
-  else
-    ln -s "$source" "$target"
+  }
+
+  mkdir -p "$target_parent" || return 1
+  if [ -L "$target" ]; then
+    rm "$target" || return 1
+  elif [ -e "$target" ] && [ ! -d "$target" ]; then
+    echo "$target exists and is not a directory" >&2
+    return 1
   fi
+  mkdir -p "$target" || return 1
+  rsync -a --delete "$source/" "$target/" || return 1
 }
 
 acquire_lock() {
@@ -527,8 +528,8 @@ run_worker() {
       exit 1
     fi
 
-    if ! ensure_reference_assets_link; then
-      local detail="failed to link extracted reference assets into Deck worktree"
+    if ! ensure_reference_assets_copy; then
+      local detail="failed to copy extracted reference assets into Deck worktree"
       log "$detail"
       record_failure \
         "$sha" \
