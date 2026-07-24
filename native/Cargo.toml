@@ -45,7 +45,9 @@ publish = false
 android-activity = { version = "=0.6.0", features = ["native-activity"] }
 anyhow = "1"
 ash = "0.38"
+block2 = "0.6"
 cpal = "0.18"
+embed_plist = "1.2.2"
 env_logger = "0.11"
 crc32fast = "1"
 flate2 = "1"
@@ -86,6 +88,8 @@ mclone-xr-host = { path = "crates/mclone-xr-host" }
 mclone-scene = { path = "crates/mclone-scene" }
 metal = "0.31"
 naga = { version = "=25.0.1", features = ["wgsl-in"] }
+objc2 = "0.6.4"
+objc2-game-controller = "0.3.2"
 pollster = "0.4"
 openxr = "0.21"
 serde = { version = "1", features = ["derive"] }

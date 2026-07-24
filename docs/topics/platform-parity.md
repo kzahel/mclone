@@ -134,6 +134,12 @@ burn-down.
 > interactive host. Automated collectors/builds are green; the hardware ledger
 > remains open for real controllers, Steam Deck, browser/device combinations,
 > mixed XR use, and haptic feel.
+> Refreshed on 2026-07-24 after a USB Xbox device exposed the macOS raw-HID
+> mapping failure. Desktop macOS now uses Apple GameController extended
+> profiles with embedded support metadata, ordered callbacks, and terminal
+> snapshots; Linux/Windows and Steam Deck retain GilRs. The USB Xbox path and
+> all in-game bindings passed operator acceptance; hotplug/reconnect and the
+> separate SN30 Pro pass remain physical acceptance items.
 > When a slice closes a gap, update the affected cell **and** link the tactical.
 > If a cell and the code disagree, the code wins — fix the cell.
 
@@ -202,7 +208,7 @@ A cell is a **parity gap** when it is not ✅ and its class targets it above.
 | Lighting (sky+block, render integ.) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Day/night + sky | ✅ | ✅ | ✅ | ◐ (frozen) | ✅ | ✅ |
 | Player movement + collision | ✅ | ◐ (perf/scripted paths; no real host loop) | ✅ | ✅ (shared touch + AVD swipe) | ✅ | ✅ |
-| Ordinary controller input | ◐ (GilRs/shared route; hardware pending) | ✅ (canonical scripted snapshots) | ◐ (GilRs + semantic OpenXR merge; hardware pending) | ◐ (shared Android collector; hardware pending) | ◐ (Android collector + semantic OpenXR merge; hardware pending) | ◐ (standard Gamepad API mocks; hardware pending) |
+| Ordinary controller input | ◐ (GameController on macOS, GilRs on Linux/Windows; USB Xbox accepted, broader hardware pending) | ✅ (canonical scripted snapshots) | ◐ (same desktop OS collector + semantic OpenXR merge; hardware pending) | ◐ (shared Android collector; hardware pending) | ◐ (Android collector + semantic OpenXR merge; hardware pending) | ◐ (standard Gamepad API mocks; hardware pending) |
 | Block interaction (break/place) | ✅ | ◐ (scripted `FlatInputFrame`, no real host loop) | ✗ | ◐ (shared path + touch controls; action smoke pending) | ✗ | ✅ |
 | Remote-player rendering | ✅ | ◐ (render path, scenario coverage thin) | ◐ (path, unspawned) | ◐ (shared path, unspawned) | ◐ (path, unspawned; device smoke pending) | ✅ |
 | Passive entities (cow/chicken) | ✅ | ◐ (render path, scenario coverage thin) | ◐ (path, unspawned) | ◐ (shared path, unspawned) | ◐ (path, unspawned; device smoke pending) | ◐ (placeholder) |
@@ -281,7 +287,7 @@ use (and should) · — n/a.
 | `app-runtime::render_asset_data` (CPU mesh/atlas/far-LOD bundle) | ✅ | ✅ (production epoch replacement through scene host) | ✅ | ✅ | `cargo test -p mclone-app-runtime`; Tactical 169 — Runtime Asset Pack Selection; Tactical 170 — Web Scene-Host Adoption |
 | `mclone-audio` | ✅ (desktop flat + desktop XR code wired; listen validation pending) | ✗ (web deferred) | ✅ (code wired; device audio validation pending) | ✅ (code wired; device audio validation pending) | `cargo test -p mclone-audio`; tactical 091 build gates |
 | `mclone-ui` (GuiDrawList) | ✅ | ✅ | ✅ (shared touch menu+controls, AVD touch/session smoke) | ✅ (XR world panel + pointer, user-validated; automation/tuning pending) | `native:web:app-smoke`; `cargo test -p mclone-ui`; `cargo test -p mclone-scene`; `native:android:avd-session-smoke` |
-| `mclone-input` controller session + `app-runtime::input_preferences` | ✅ (GilRs desktop flat/XR; scripted offscreen; native profile) | ✅ (standard Gamepad API; schema-1 browser profile) | ✅ (shared Android collector; native profile) | ✅ (Android collector + semantic OpenXR; native profile) | `cargo test -p mclone-input`; `cargo test -p mclone-app-runtime input_preferences`; `cargo test -p mclone-scene`; `native:web:app-smoke`; `native:android:apk`; `native:android-xr:apk`; Tactical 216 |
+| `mclone-input` controller session + `app-runtime::input_preferences` | ✅ (macOS GameController, Linux/Windows GilRs desktop flat/XR; scripted offscreen; native profile) | ✅ (standard Gamepad API; schema-1 browser profile) | ✅ (shared Android collector; native profile) | ✅ (Android collector + semantic OpenXR; native profile) | `cargo test -p mclone-input`; `cargo test -p mclone-app-runtime input_preferences`; `cargo test -p mclone-scene`; `native:web:app-smoke`; `native:android:apk`; `native:android-xr:apk`; Tactical 216 |
 | `mclone-scene` | ✅ | ✅ | ✅ | ✅ | `native:desktop-offscreen:smoke`; `native:web:smoke`; `native:xr-emulation:smoke`; `native:xr:*`; `native:android:*` |
 | `mclone-xr-{host,graphics}` | ✅ (desktop XR) | — | — | ✅ | `native:xr:*`; `native:android-xr:validate` |
 

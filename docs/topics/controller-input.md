@@ -5,19 +5,20 @@ Topic: `controller-input`
 Status: unattended foundation complete as of 2026-07-22; real-device product
 acceptance remains open. Shared source/assignment, semantic controller session,
 scene routing, controller-complete menu navigation, and layout-aware text
-prompt foundations are implemented. Desktop flat polls
-ordinary controllers through GilRs and browser Rust polls the W3C standard
-Gamepad mapping near its animation-frame boundary. Flat Android now routes a
-shared source-aware Java/Rust collector through the semantic scene input path;
-desktop and Android XR now merge the same ordinary-controller facts with
-semantic OpenXR actions. Tracked poses and XR-only mechanics remain typed
-extensions, while pose-less Attack/Use use a shared head-gaze fallback. A
-versioned shared preference profile and neutral haptic output contract are
-implemented and consumed by every interactive host. The automated workspace,
-WASM, desktop, browser, Android build, AVD, and XR-emulation closeout is
-recorded below. This topic owns the durable all-target controller direction
-across desktop flat, web, flat Android, desktop XR, Android XR, offscreen/test
-hosts, Steam Deck, and a future native Steam Input integration. Tactical
+prompt foundations are implemented. Desktop flat polls ordinary controllers
+through Apple GameController on macOS and GilRs on Linux/Windows; browser Rust
+polls the W3C standard Gamepad mapping near its animation-frame boundary. Flat
+Android now routes a shared source-aware Java/Rust collector through the
+semantic scene input path; desktop and Android XR now merge the same
+ordinary-controller facts with semantic OpenXR actions. Tracked poses and
+XR-only mechanics remain typed extensions, while pose-less Attack/Use use a
+shared head-gaze fallback. A versioned shared preference profile and neutral
+haptic output contract are implemented and consumed by every interactive host.
+The automated workspace, WASM, desktop, browser, Android build, AVD, and
+XR-emulation closeout is recorded below. This topic owns the durable all-target
+controller direction across desktop flat, web, flat Android, desktop XR,
+Android XR, offscreen/test hosts, Steam Deck, and a future native Steam Input
+integration. Tactical
 [`098`](../tactical/098-flat-input-capability-convergence.md) remains the
 bounded execution record for the existing flat-input slices.
 [`Tactical 215`](../tactical/215-preliminary-couch-readiness.md) owns the
@@ -96,8 +97,8 @@ canonical controls mean.
 - A catch-all platform adapter trait spanning input, windowing, storage,
   rendering, and lifecycle.
 - Making tracked controllers pretend to be ordinary gamepads.
-- Putting `winit`, `web-sys`, Android, OpenXR, GilRs, or Steamworks types in
-  `mclone-input`.
+- Putting `winit`, `web-sys`, Android, OpenXR, Apple GameController, GilRs, or
+  Steamworks types in `mclone-input`.
 - Treating successful in-world movement as complete controller support while
   title, pause, options, world selection, and first-run UI remain inaccessible.
 - Native Steam Input in the first gamepad slice.
@@ -124,18 +125,19 @@ source seam, but not yet the complete semantic or physical-input contract:
   axes, dead-zone/curve policy, trigger hysteresis, controller navigation
   repeat, lifecycle clearing, and active-source/layout arbitration. A bounded
   flat-frame projection applies look rate with presentation `dt`.
-- Desktop flat drains and polls GilRs, browser Rust polls only W3C
-  standard-mapped Gamepad API sources near the animation-frame boundary, and
-  both Android packages receive source-aware standard controller events through
-  one shared Java/JNI bridge and pure Rust collector. All emit canonical
-  snapshots and preserve session-local hotplug identity. Desktop, browser, and
-  flat Android route them semantically; desktop and Android XR merge the same
-  ordinary semantics with their OpenXR action frames. Desktop now retains
-  canonical state after each GilRs event. Android forwards event time and
+- Desktop flat and XR use Apple GameController profiles on macOS and GilRs on
+  Linux/Windows; browser Rust polls only W3C standard-mapped Gamepad API
+  sources near the animation-frame boundary, and both Android packages receive
+  source-aware standard controller events through one shared Java/JNI bridge
+  and pure Rust collector. All emit canonical snapshots and preserve
+  session-local hotplug identity. Desktop, browser, and flat Android route them
+  semantically; desktop and Android XR merge the same ordinary semantics with
+  their OpenXR action frames. Desktop retains canonical state after each
+  GameController callback or GilRs event. Android forwards event time and
   `MotionEvent` history through its bounded Java/JNI/Rust queue. Browser
   snapshot polling remains an API capability limit; OpenXR action sampling is
-  action-sync/frame-shaped and retains the runtime's available change
-  metadata. The detailed loss and recovery contract is tracked in
+  action-sync/frame-shaped and retains the runtime's available change metadata.
+  The detailed loss and recovery contract is tracked in
   [`input-observation-timeline.md`](input-observation-timeline.md).
 - The legacy `GamepadInputAdapter` remains one controller at a time and still
   projects right-stick state directly into `FlatInputFrame`. It is retained as
@@ -403,8 +405,8 @@ Own only:
 
 | Target | Physical collector | Shared destination |
 |---|---|---|
-| Desktop flat | GilRs | `StandardGamepadSnapshot` |
-| Desktop XR | Same GilRs collector beside OpenXR | ordinary snapshot plus tracked XR input |
+| Desktop flat | Apple GameController (macOS); GilRs (Linux/Windows) | `StandardGamepadSnapshot` |
+| Desktop XR | Same OS collector beside OpenXR | ordinary snapshot plus tracked XR input |
 | Web/WASM | Browser Gamepad API near `requestAnimationFrame` | `StandardGamepadSnapshot` |
 | Flat Android | Android raw controller collector in `mclone-android-platform` | `StandardGamepadSnapshot` |
 | Android XR | Same Android collector beside OpenXR | ordinary snapshot plus tracked XR input |
@@ -417,16 +419,26 @@ pose and XR-specific extensions separately.
 
 ### Desktop and Steam Deck
 
-GilRs is the preferred ordinary desktop backend. Its current documented
-support covers Linux/BSD, Windows, macOS, and Wasm, including hotplugging,
-unified controller layout, SDL-compatible mappings, and mappings supplied by
-Steam through `SDL_GAMECONTROLLERCONFIG`. It explicitly does not support
-Android.
+GilRs remains the ordinary Linux/Windows desktop backend. Its normalized
+layout, SDL-compatible mappings, and Steam-supplied
+`SDL_GAMECONTROLLERCONFIG` mappings fit those hosts, including Steam Deck.
 
-Desktop flat and desktop XR are in the same native app. The app-local GilRs
-collector serves both without adding GilRs to `mclone-input`; desktop XR merges
-its semantic frame beside OpenXR before shared scene application. Steam Deck
-is the ordinary Linux path, not a separate engine target.
+macOS uses Apple's GameController framework instead. Real-device bring-up on
+2026-07-24 found that GilRs 0.11.2 could enumerate a USB Xbox controller through
+IOKit but had no exact SDL mapping for its UUID, emitted no useful control
+events, and applied a generic HID fallback whose Z/Rz assumptions also explain
+right-stick/trigger swaps on an 8BitDo SN30 Pro. Apple documents that modern
+macOS may expose real and optional synthetic compatibility HID devices; its
+GameController extended profile is the stable normalized boundary. The native
+client now embeds the required controller-support `Info.plist`, enumerates
+extended profiles, retains ordered value-change snapshots, and polls terminal
+state for recovery.
+
+Desktop flat and desktop XR are in the same native app. The app-local
+OS-specific collector serves both without adding GameController or GilRs to
+`mclone-input`; desktop XR merges its semantic frame beside OpenXR before
+shared scene application. Steam Deck remains the ordinary Linux path, not a
+separate engine target.
 
 ### Web
 
@@ -574,9 +586,9 @@ HapticRequest { target, low_frequency, high_frequency, duration }
 ```
 
 Scene/gameplay code decides when and why feedback occurs. Platform collectors
-execute it through GilRs, Paddleboat, OpenXR, or Steam Input. A request may
-target the active gamepad, a specific source, or an XR hand. Capability absence
-is a normal no-op, not a gameplay fork.
+execute it through Apple GameController, GilRs, Paddleboat, OpenXR, or Steam
+Input. A request may target the active gamepad, a specific source, or an XR
+hand. Capability absence is a normal no-op, not a gameplay fork.
 
 Gyro, controller touchpads, adaptive triggers, lights, and battery display are
 extensions of source capabilities. They must not complicate the initial
@@ -594,9 +606,10 @@ standard snapshot or make the shared gameplay path conditional on a vendor.
 3. **Shared UI completion.** Add navigation, confirm/back/page actions, focus
    traversal, repeat policy, and action/layout-based prompts. Prove every
    non-text menu with scripted controller input.
-4. **Synthetic and desktop proof.** Canonical scripted snapshots and the GilRs
-   desktop-flat/XR collector are implemented. Physical desktop/Steam Deck
-   validation remains open.
+4. **Synthetic and desktop proof.** Canonical scripted snapshots, the macOS
+   GameController collector, and the Linux/Windows GilRs desktop-flat/XR
+   collector are implemented. Physical desktop/Steam Deck validation remains
+   open.
 5. **Browser adoption.** Implemented in browser Rust with standard-mapping
    mocks, live capability/activity, and domain-blind TypeScript. Physical
    browser/controller validation remains open.
@@ -681,6 +694,12 @@ layouts require device testing.
 
 ## External Evidence
 
+- [Apple Game Controller documentation](https://developer.apple.com/documentation/gamecontroller)
+  — normalized controller profiles, discovery, polling/callback input, and
+  controller-support metadata.
+- [Apple game-controller backward compatibility](https://developer.apple.com/documentation/gamecontroller/understanding-game-controller-backward-compatibility)
+  — macOS 14+ real versus synthetic HID devices and the limits of generic
+  IOKit controller interpretation.
 - [GilRs documentation](https://docs.rs/gilrs/latest/gilrs/) — current
   desktop/Wasm platform support, normalized layout, hotplugging, SDL mappings,
   Steam mapping environment support, and explicit lack of Android support.
@@ -725,6 +744,8 @@ layouts require device testing.
   — current UI key vocabulary, focus visuals, HUD, and literal gamepad prompts.
 - [`../../native/apps/mclone-native-client/src/winit_frame_driver.rs`](../../native/apps/mclone-native-client/src/winit_frame_driver.rs)
   — desktop flat input/cadence rim.
+- [`../../native/apps/mclone-native-client/src/desktop_gamepad.rs`](../../native/apps/mclone-native-client/src/desktop_gamepad.rs)
+  — macOS GameController and Linux/Windows GilRs collection.
 - [`../../native/apps/mclone-web-client/src/web_scene_host.rs`](../../native/apps/mclone-web-client/src/web_scene_host.rs)
   — browser Rust scene/input owner and animation-frame boundary.
 - [`../../native/apps/mclone-android-client/src/surface_driver.rs`](../../native/apps/mclone-android-client/src/surface_driver.rs)
@@ -791,6 +812,28 @@ This closes the Quest action-set creation and application-launch regression. It
 does not close tracked or ordinary-controller physical interaction acceptance;
 the app reported two active tracked controllers, but their input behavior was
 not exercised in-headset during this bring-up.
+
+## macOS Xbox Bring-Up Evidence
+
+On 2026-07-24, macOS 26.5.2 exposed the connected USB Microsoft controller as
+vendor/product `045e:0b00`. GilRs 0.11.2 enumerated it but reported no mapping
+for UUID `03000000-5e04-0000-000b-000017050000`, selected its generic HID
+fallback, and emitted no control changes during the initial capture. The same
+fallback maps generic Z/Rz usages as right-stick axes, matching the reported
+SN30 Pro symptom in which triggers acted like a stick and the right stick
+appeared absent.
+
+A small bundled probe with controller-support metadata enumerated the same
+hardware through Apple GameController as one `Xbox One` extended profile with
+independent left stick, right stick, and trigger values. The native client now
+embeds that metadata and the rebuilt product window reports one
+`Xbox One`/`XboxLike` source through the new collector. macOS-specific unit
+tests prove semantic stick/trigger/button projection and bounded ordered
+callback recovery. A live product trace then showed independent left- and
+right-stick motion plus face and Menu button transitions, and the operator
+confirmed that the Xbox controller and all bindings worked correctly in the
+game. Hotplug/reconnect and the separate SN30 Pro pass remain physical
+acceptance items.
 
 ## Definition Of Done
 

@@ -69,6 +69,9 @@ use mclone_render::headless::{HeadlessClearOptions, write_headless_clear_png};
 #[cfg(test)]
 use mclone_render_session::snapshot_mesh_block_state_ids;
 
+#[cfg(target_os = "macos")]
+embed_plist::embed_info_plist!("../Info.plist");
+
 const MIN_RENDER_DISTANCE: i32 = 2;
 const MAX_RENDER_DISTANCE: i32 = 32;
 const DEFAULT_MOVEMENT_PERF_STEPS: usize = 12;

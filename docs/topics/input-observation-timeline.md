@@ -72,7 +72,7 @@ timestamped, sequenced 60 Hz PlayerCommands
 local prediction             local recording/tests
 ```
 
-## Current State (Verified 2026-07-23)
+## Current State (Verified 2026-07-24)
 
 All interactive hosts already use the correct broad ordering:
 
@@ -94,7 +94,8 @@ discontinuous batches without inventing a press.
 | Platform | API shape available | Current projection | Information lost |
 | --- | --- | --- | --- |
 | Browser | `navigator.getGamepads()` current snapshots, normally polled once per `requestAnimationFrame` | Rust/Wasm emits one timestamped W3C standard-mapped observation plus terminal state per source before scene advance | Transitions between browser samples remain unavailable to the application |
-| Desktop | GilRs ordered events plus cached gamepad state | The host captures canonical state after each drained event and supplies final cached state for recovery | Backend history is preserved; hardware/driver acceptance remains |
+| macOS desktop | Apple GameController extended-profile value-change callbacks plus current state | The host captures one canonical snapshot per callback and polls final profile state for recovery | Framework history is preserved between main-queue drains; real-device feel and lifecycle acceptance remain |
+| Linux/Windows desktop | GilRs ordered events plus cached gamepad state | The host captures canonical state after each drained event and supplies final cached state for recovery | Backend history is preserved; hardware/driver acceptance remains |
 | Android | Java `KeyEvent` and `MotionEvent` callbacks queued through JNI | Java forwards event times and historical motion samples; Rust emits canonical state after each queued sample and terminal state | Backend history is preserved within the bounded queue; hardware/driver acceptance remains |
 | OpenXR | Action state observed at `sync_actions` cadence, including runtime change/time facts where exposed | The host reads current action state once per XR frame and retains changed-since-sync/source-time metadata per action | The runtime does not promise arbitrary physical event history |
 | Scripted/offscreen | Fully controlled synthetic input | Usually one requested snapshot per frame | Nothing inherent; it can exercise the richer contract deterministically |
@@ -107,10 +108,18 @@ lane: browsers may throttle timers, the Gamepad API remains snapshot-based,
 and the extra callbacks still need ordering against scene time. Polling once
 per animation frame is the honest browser behavior.
 
-Desktop uses GilRs rather than SDL for ordinary controllers. GilRs events
-carry source identity, event kind, and a timestamp. The drain loop now
+Linux and Windows desktop use GilRs rather than SDL for ordinary controllers.
+GilRs events carry source identity, event kind, and a timestamp. The drain loop
 captures the canonical cached state after every event and appends a final
 cached snapshot for recovery.
+
+macOS uses Apple GameController extended profiles. The framework normalizes
+sticks, triggers, buttons, and controller families instead of exposing generic
+HID usage guesses. A copied value-change handler appends a bounded canonical
+snapshot after each changed element, and the render/input drain polls terminal
+profile state for loss recovery. The native binary embeds controller-support
+metadata so direct Cargo-launched builds receive the same framework enumeration
+as a bundled application.
 
 Android Java remains correctly domain-blind. It now forwards Android event
 times and historical controller-axis samples through JNI. The Rust collector
@@ -245,17 +254,20 @@ limit, not a reason to lower fidelity on native targets.
 
 ### Desktop
 
-- Retain every meaningful GilRs event in drain order.
-- After each event, project the resulting cached source state into a canonical
-  observation, or project an equivalent canonical control delta.
-- Normalize GilRs event time onto the local monotonic input timeline.
+- On macOS, retain every Apple GameController extended-profile value-change
+  callback in dispatch order.
+- On Linux and Windows, retain every meaningful GilRs event in drain order.
+- After each callback/event, project the resulting source state into a
+  canonical observation, or project an equivalent canonical control delta.
+- Normalize backend sample time onto the local monotonic input timeline.
 - Emit a terminal snapshot for resynchronization.
 - Preserve hotplug/source lifecycle order.
 
-No separate input thread is required for the first implementation: GilRs
-already queues events between render-loop drains. A collector thread becomes
-useful only if measurement shows backend queue loss or latency that draining
-at the host event boundary cannot address.
+No separate input thread is required for the current implementation:
+GameController dispatches copied handlers and GilRs queues events between
+render-loop drains. A collector thread becomes useful only if measurement shows
+backend queue loss or latency that draining at the host event boundary cannot
+address.
 
 ### Android
 
@@ -331,12 +343,20 @@ event shape, timestamps, noise, and lifecycle behavior.
 
 ### Automated evidence (2026-07-23)
 
+- On 2026-07-24, macOS-specific native-client tests proved Apple extended
+  profile projection for both sticks, independent triggers, face/menu buttons,
+  and bounded callback overflow reporting. A rebuilt direct-launch product
+  binary embedded the required controller metadata and enumerated the attached
+  Xbox source through GameController. A physical product trace showed
+  independent left/right stick and button transitions, and the operator
+  accepted all Xbox bindings in-game.
 - The full native Rust workspace test suite passes, including scripted
   controller ordering, Android historical samples, scene command assignment,
   fly/no-clip historical pitch, queue overflow recovery, epoch reset, command
   gaps, cadence-independent traces, and local command replay.
-- `pnpm native:thin-adapters:purity` passes, confirming input policy remains
-  in shared owners rather than platform rims.
+- The 2026-07-24 `pnpm native:thin-adapters:purity` rerun still reports the
+  pre-existing player-pose publication-policy finding in
+  `winit_frame_driver.rs`; it did not flag the controller adapter.
 - `pnpm native:web:build` and `pnpm native:web:typecheck` pass for
   `wasm32-unknown-unknown`. The browser collector test proves that one rAF poll
   emits exactly one timestamped snapshot and terminal state rather than
@@ -364,9 +384,9 @@ and driver facts; they do not require another architecture.
 2. Complete: teach `ControllerInputSession` to consume multiple ordered
    observations per source while preserving final state and all observed
    edges.
-3. Complete: adapt desktop GilRs and Android Java/JNI/Rust collectors to
-   retain their event histories; project browser and OpenXR honestly onto the
-   same contract.
+3. Complete: adapt macOS GameController, Linux/Windows GilRs, and Android
+   Java/JNI/Rust collectors to retain their event histories; project browser
+   and OpenXR honestly onto the same contract.
 4. Complete: extend scene routing with a bounded semantic timeline and
    materialize one sequenced command per fixed movement quantum.
 5. Complete: record/replay those semantic commands locally and prove
@@ -386,7 +406,8 @@ but no preparatory network or server complexity is required now.
 
 - `native/crates/mclone-input/src/controller_session.rs`: canonical controller
   reduction, semantic edges, held state, repeat, and active-source policy.
-- `native/apps/mclone-native-client/src/desktop_gamepad.rs`: GilRs collection.
+- `native/apps/mclone-native-client/src/desktop_gamepad.rs`: macOS
+  GameController and Linux/Windows GilRs collection.
 - `native/crates/mclone-android-platform/src/android_controller.rs`: Android
   Rust queue and source state.
 - `android-common/src/main/java/com/kzahel/mclone/controller/ControllerInputBridge.java`:
@@ -406,8 +427,8 @@ but no preparatory network or server complexity is required now.
 
 - Polling every backend on a dedicated high-frequency thread by default.
 - Pretending browser gamepad snapshots contain events they cannot expose.
-- Moving bindings or gameplay action names into JavaScript, Java, GilRs, or
-  OpenXR adapters.
+- Moving bindings or gameplay action names into JavaScript, Java, Apple
+  GameController, GilRs, or OpenXR adapters.
 - Sending raw device events over the network or storing them as portable
   gameplay replays.
 - Coupling player command rate to render rate, AI/world tick rate, or packet

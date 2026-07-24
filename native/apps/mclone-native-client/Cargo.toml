@@ -23,7 +23,6 @@ xr = [
 anyhow.workspace = true
 env_logger.workspace = true
 glam.workspace = true
-gilrs.workspace = true
 image.workspace = true
 libc.workspace = true
 libloading = { workspace = true, optional = true }
@@ -59,6 +58,15 @@ winit.workspace = true
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
 metal = { workspace = true, optional = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2.workspace = true
+embed_plist.workspace = true
+objc2.workspace = true
+objc2-game-controller.workspace = true
+
+[target.'cfg(not(target_os = "macos"))'.dependencies]
+gilrs.workspace = true
 
 [[bin]]
 name = "mclone-native-client"
