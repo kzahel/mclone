@@ -227,6 +227,27 @@ function summarizeRow(manifest) {
       workValues(work, "render_timing.terrain_encode_ms"),
       0.95,
     ),
+    terrain_direct_draw_calls_average: average(
+      workValues(work, "render_timing.terrain_direct_draw_calls"),
+    ),
+    terrain_multi_draw_calls_average: average(
+      workValues(work, "render_timing.terrain_multi_draw_calls"),
+    ),
+    terrain_indirect_draw_count_average: average(
+      workValues(work, "render_timing.terrain_indirect_draw_count"),
+    ),
+    terrain_arena_vertex_used_bytes_average: average(
+      workValues(work, "render_timing.terrain_arena_vertex_used_bytes"),
+    ),
+    terrain_arena_vertex_capacity_bytes_max: maximum(
+      workValues(work, "render_timing.terrain_arena_vertex_capacity_bytes"),
+    ),
+    terrain_arena_index_used_bytes_average: average(
+      workValues(work, "render_timing.terrain_arena_index_used_bytes"),
+    ),
+    terrain_arena_index_capacity_bytes_max: maximum(
+      workValues(work, "render_timing.terrain_arena_index_capacity_bytes"),
+    ),
     scheduler_tick_p95_ms: percentile(workValues(work, "scheduler.tick_ms"), 0.95),
     scheduler_tick_max_ms: maximum(workValues(work, "scheduler.tick_ms")),
     scheduler_reconcile_holders_p95_ms: percentile(
@@ -363,6 +384,13 @@ const markdown = [
   ...rows.map(
     (row) =>
       `| ${row.case} | ${fixed(row.world_scale_percent, 0)}% | ${row.freeze_fluids ? "frozen" : "live"} | ${fixed(row.pending_render_count_p95_ms)} | ${fixed(row.traversal_ready_p95_ms)} | ${fixed(row.terrain_records_p95_ms)} | ${fixed(row.terrain_cull_cache_hits, 0)} / ${fixed(row.terrain_cull_cache_lookups, 0)} | ${fixed(row.scheduler_reconcile_holders_p95_ms)} | ${fixed(row.submitted_compile_sections, 0)} / ${fixed(row.completed_compile_sections, 0)} / ${fixed(row.stale_compile_sections, 0)} | ${fixed(row.gpu_total_p50_ms)} / ${fixed(row.gpu_total_p95_ms)} | ${fixed(row.fluid_due_ticks, 0)} / ${fixed(row.fluid_executed_ticks, 0)} / ${fixed(row.fluid_mutated_blocks, 0)} |`,
+  ),
+  "",
+  "| Submission case | Direct / multi calls avg | Indirect draws avg | Vertex used / cap MiB | Index used / cap MiB |",
+  "|---|---:|---:|---:|---:|",
+  ...rows.map(
+    (row) =>
+      `| ${row.case} | ${fixed(row.terrain_direct_draw_calls_average, 1)} / ${fixed(row.terrain_multi_draw_calls_average, 1)} | ${fixed(row.terrain_indirect_draw_count_average, 1)} | ${fixed(row.terrain_arena_vertex_used_bytes_average / 1048576, 1)} / ${fixed(row.terrain_arena_vertex_capacity_bytes_max / 1048576, 1)} | ${fixed(row.terrain_arena_index_used_bytes_average / 1048576, 1)} / ${fixed(row.terrain_arena_index_capacity_bytes_max / 1048576, 1)} |`,
   ),
   "",
   "| Worker case | Capacity | Workers | Busy ms | Completed | Task max ms | Compile q max |",

@@ -380,6 +380,13 @@ struct WindowFrameWorkSample {
     terrain_cull_cache_hits: usize,
     terrain_prepare_ms: f64,
     terrain_encode_ms: f64,
+    terrain_direct_draw_calls: usize,
+    terrain_multi_draw_calls: usize,
+    terrain_indirect_draw_count: usize,
+    terrain_arena_vertex_used_bytes: u64,
+    terrain_arena_vertex_capacity_bytes: u64,
+    terrain_arena_index_used_bytes: u64,
+    terrain_arena_index_capacity_bytes: u64,
     terrain_opaque_ms: f64,
     terrain_translucent_ms: f64,
 }
@@ -464,6 +471,17 @@ impl WindowFrameWorkSample {
             terrain_cull_cache_hits: summary.render_timing.terrain_cull_cache_hits,
             terrain_prepare_ms: summary.render_timing.terrain_prepare_ms,
             terrain_encode_ms: summary.render_timing.terrain_encode_ms,
+            terrain_direct_draw_calls: summary.render_timing.terrain_direct_draw_calls,
+            terrain_multi_draw_calls: summary.render_timing.terrain_multi_draw_calls,
+            terrain_indirect_draw_count: summary.render_timing.terrain_indirect_draw_count,
+            terrain_arena_vertex_used_bytes: summary.render_timing.terrain_arena_vertex_used_bytes,
+            terrain_arena_vertex_capacity_bytes: summary
+                .render_timing
+                .terrain_arena_vertex_capacity_bytes,
+            terrain_arena_index_used_bytes: summary.render_timing.terrain_arena_index_used_bytes,
+            terrain_arena_index_capacity_bytes: summary
+                .render_timing
+                .terrain_arena_index_capacity_bytes,
             terrain_opaque_ms: summary.render_timing.terrain_opaque_ms,
             terrain_translucent_ms: summary.render_timing.terrain_translucent_ms,
         }
@@ -547,6 +565,13 @@ impl WindowFrameWorkSample {
                 "terrain_cull_cache_hits": self.terrain_cull_cache_hits,
                 "terrain_prepare_ms": self.terrain_prepare_ms,
                 "terrain_encode_ms": self.terrain_encode_ms,
+                "terrain_direct_draw_calls": self.terrain_direct_draw_calls,
+                "terrain_multi_draw_calls": self.terrain_multi_draw_calls,
+                "terrain_indirect_draw_count": self.terrain_indirect_draw_count,
+                "terrain_arena_vertex_used_bytes": self.terrain_arena_vertex_used_bytes,
+                "terrain_arena_vertex_capacity_bytes": self.terrain_arena_vertex_capacity_bytes,
+                "terrain_arena_index_used_bytes": self.terrain_arena_index_used_bytes,
+                "terrain_arena_index_capacity_bytes": self.terrain_arena_index_capacity_bytes,
                 "terrain_opaque_ms": self.terrain_opaque_ms,
                 "terrain_translucent_ms": self.terrain_translucent_ms,
             },

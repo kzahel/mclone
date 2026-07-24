@@ -240,6 +240,13 @@ pub struct FullFrameRenderTiming {
     pub terrain_translucent_sort_ms: f64,
     pub terrain_prepare_ms: f64,
     pub terrain_encode_ms: f64,
+    pub terrain_direct_draw_calls: usize,
+    pub terrain_multi_draw_calls: usize,
+    pub terrain_indirect_draw_count: usize,
+    pub terrain_arena_vertex_used_bytes: u64,
+    pub terrain_arena_vertex_capacity_bytes: u64,
+    pub terrain_arena_index_used_bytes: u64,
+    pub terrain_arena_index_capacity_bytes: u64,
     pub placed_cull_ms: f64,
     pub placed_draw_ms: f64,
     pub actor_ms: f64,
@@ -1039,6 +1046,13 @@ fn add_terrain_timing(frame: &mut FullFrameRenderTiming, terrain: TexturedSectio
     frame.terrain_translucent_sort_ms += terrain.translucent_sort_ms;
     frame.terrain_prepare_ms += terrain.prepare_ms;
     frame.terrain_encode_ms += terrain.encode_ms;
+    frame.terrain_direct_draw_calls += terrain.direct_draw_calls;
+    frame.terrain_multi_draw_calls += terrain.multi_draw_calls;
+    frame.terrain_indirect_draw_count += terrain.indirect_draw_count;
+    frame.terrain_arena_vertex_used_bytes = terrain.arena_vertex_used_bytes;
+    frame.terrain_arena_vertex_capacity_bytes = terrain.arena_vertex_capacity_bytes;
+    frame.terrain_arena_index_used_bytes = terrain.arena_index_used_bytes;
+    frame.terrain_arena_index_capacity_bytes = terrain.arena_index_capacity_bytes;
 }
 
 #[allow(clippy::too_many_arguments)]

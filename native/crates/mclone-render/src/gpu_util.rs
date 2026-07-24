@@ -6,6 +6,9 @@ pub(crate) fn optional_gpu_features(adapter_features: wgpu::Features) -> wgpu::F
     if adapter_features.contains(wgpu::Features::MULTIVIEW) {
         features |= wgpu::Features::MULTIVIEW;
     }
+    if adapter_features.contains(wgpu::Features::MULTI_DRAW_INDIRECT) {
+        features |= wgpu::Features::MULTI_DRAW_INDIRECT;
+    }
     features
 }
 
