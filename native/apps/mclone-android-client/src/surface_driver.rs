@@ -596,6 +596,7 @@ impl AndroidGpuState {
             },
             frame_timing: self.frame_timing,
             render_scale: 1.0,
+            flat_presentation: None,
             hud_visible: true,
             touch_overlay: TouchOverlay {
                 visible: true,

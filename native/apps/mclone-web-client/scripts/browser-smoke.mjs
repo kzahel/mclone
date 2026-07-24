@@ -6644,7 +6644,8 @@ async function exerciseMobileTouchControls(page, canvas) {
       && (openedNativeMenu.menuHidden === true || openedNativeMenu.menuHidden === null)
       && nativeMenuCanvasPixels.nonClearInteriorPixelCount > 128
       && nativeMenuCanvasPixels.distinctInteriorColorCount > 2
-      && closedNativeMenu.uiActive === false,
+      && closedNativeMenu.uiActive === false
+      && closedNativeMenu.touchControlsVisible === false,
     initial,
     firstTap: firstTapProbe,
     movement: movementProbe,
@@ -6899,6 +6900,7 @@ async function readNativeUiState(page) {
       nativeUiScreen: state.nativeUiScreen,
       nativeUiOptionsParent: state.nativeUiOptionsParent,
       lastUiAction: state.lastUiAction,
+      touchControlsVisible: state.touchControlsVisible,
       sessionState: state.sessionState,
       sessionKind: state.sessionKind,
       sessionSeed: state.sessionSeed,
@@ -7928,7 +7930,7 @@ function assertMobileAppLoopResult(
     throw new Error(`native web mobile app did not expose compile timing diagnostics:\n${JSON.stringify(result, null, 2)}`);
   }
   assertCompileTimingDiagnostics(result.lastCompileTiming, "mobile last compile timing");
-  if (result.touchControlsVisible !== true || result.debugOverlayVisible !== false) {
+  if (result.touchControlsVisible !== false || result.debugOverlayVisible !== false) {
     throw new Error(`native web mobile native UI/touch state ended in an unexpected state:\n${JSON.stringify(result, null, 2)}`);
   }
   if (!Number.isFinite(result.cameraX) || !Number.isFinite(result.cameraY) || !Number.isFinite(result.cameraZ)) {
