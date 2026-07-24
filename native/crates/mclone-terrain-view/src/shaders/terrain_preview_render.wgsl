@@ -3,6 +3,7 @@ struct TerrainPreviewParams {
     seed_source_view: vec4<u32>,
     layer_samples_size: vec4<u32>,
     camera: vec4<f32>,
+    viewport_center_extent: vec4<i32>,
 };
 
 struct TerrainPreviewSample {
@@ -174,13 +175,22 @@ fn vertex_main(
     let right = selected_sample(sample_z * samples_per_axis + right_x, instance_index);
     let north = selected_sample(north_z * samples_per_axis + sample_x, instance_index);
     let south = selected_sample(south_z * samples_per_axis + sample_x, instance_index);
-    let slope_x = (right.terrain.y - left.terrain.y) / max(f32(right_x - left_x), 1.0);
-    let slope_z = (south.terrain.y - north.terrain.y) / max(f32(south_z - north_z), 1.0);
-    let normal = normalize(vec3<f32>(-slope_x * 0.12, 1.0, -slope_z * 0.12));
+    let sample_spacing = max(f32(params.origin_spacing_cells.z), 1.0);
+    let slope_x = (right.terrain.y - left.terrain.y)
+        / max(f32(right_x - left_x) * sample_spacing, 1.0);
+    let slope_z = (south.terrain.y - north.terrain.y)
+        / max(f32(south_z - north_z) * sample_spacing, 1.0);
+    let normal = normalize(vec3<f32>(-slope_x * 4.0, 1.0, -slope_z * 4.0));
     let light = clamp(dot(normal, normalize(vec3<f32>(-0.45, 0.82, -0.35))) * 0.48 + 0.58, 0.34, 1.05);
 
-    let grid_x = f32(sample_x) / f32(cells) * 2.0 - 1.0;
-    let grid_z = f32(sample_z) / f32(cells) * 2.0 - 1.0;
+    let world_x = params.origin_spacing_cells.x
+        + i32(sample_x) * params.origin_spacing_cells.z;
+    let world_z = params.origin_spacing_cells.y
+        + i32(sample_z) * params.origin_spacing_cells.z;
+    let viewport_width = max(f32(params.viewport_center_extent.z), 1.0);
+    let viewport_height = max(f32(params.viewport_center_extent.w), 1.0);
+    let grid_x = f32(world_x - params.viewport_center_extent.x) / (viewport_width * 0.5);
+    let grid_z = f32(world_z - params.viewport_center_extent.y) / (viewport_height * 0.5);
     let width = max(f32(params.layer_samples_size.z), 1.0);
     let height = max(f32(params.layer_samples_size.w), 1.0);
     let compare = params.seed_source_view.z == 2u;
@@ -203,10 +213,13 @@ fn vertex_main(
         let pitch = params.camera.y;
         let view_right = vec2<f32>(cos(yaw), -sin(yaw));
         let view_depth = vec2<f32>(sin(yaw), cos(yaw));
-        let horizontal = vec2<f32>(grid_x, grid_z);
+        let world_grid_z = f32(world_z - params.viewport_center_extent.y)
+            / (viewport_width * 0.5);
+        let horizontal = vec2<f32>(grid_x, world_grid_z);
         let camera_x = dot(horizontal, view_right);
         let camera_depth = dot(horizontal, view_depth);
-        let world_height = (sample.terrain.y - 63.0) / 72.0;
+        let height_exaggeration = clamp(2048.0 / viewport_width, 0.08, 4.0);
+        let world_height = (sample.terrain.y - 63.0) / 72.0 * height_exaggeration;
         clip_x = camera_x * 0.72;
         clip_y = (world_height * cos(pitch) - camera_depth * sin(pitch)) * 0.78;
         clip_z = clamp(

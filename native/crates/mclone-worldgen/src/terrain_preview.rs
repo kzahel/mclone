@@ -324,11 +324,18 @@ impl TerrainPreviewComparison {
         reference: &TerrainPreviewReferenceGrid,
         candidate: &[TerrainPreviewSample],
     ) -> Result<Self, String> {
-        if candidate.len() != reference.samples.len() {
+        Self::compare_samples(reference.samples(), candidate)
+    }
+
+    pub fn compare_samples(
+        reference: &[TerrainPreviewSample],
+        candidate: &[TerrainPreviewSample],
+    ) -> Result<Self, String> {
+        if candidate.len() != reference.len() {
             return Err(format!(
                 "terrain preview candidate has {} samples, reference has {}",
                 candidate.len(),
-                reference.samples.len()
+                reference.len()
             ));
         }
         if candidate.is_empty() {
@@ -348,7 +355,7 @@ impl TerrainPreviewComparison {
         let mut temperature_error_sum = 0.0_f64;
         let mut moisture_error_sum = 0.0_f64;
         let mut ruggedness_error_sum = 0.0_f64;
-        for (expected, actual) in reference.samples.iter().zip(candidate) {
+        for (expected, actual) in reference.iter().zip(candidate) {
             if !actual.packed().iter().all(|value| value.is_finite()) {
                 return Err("terrain preview candidate contains a non-finite field".to_owned());
             }

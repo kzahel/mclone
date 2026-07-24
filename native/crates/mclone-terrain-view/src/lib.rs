@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod viewport;
+mod viewport_renderer;
 
 use std::fmt::Write;
 use std::num::NonZeroU64;
@@ -18,13 +19,17 @@ pub use viewport::{
     TERRAIN_VIEWPORT_PRELOAD_MARGIN_TILES, TerrainViewportDetail, TerrainViewportLevel,
     TerrainViewportPlan, TerrainViewportRequest, TerrainViewportTileId, plan_terrain_viewport,
 };
+pub use viewport_renderer::{
+    EncodedTerrainViewportReadbacks, TerrainViewportCompletedComparison, TerrainViewportFrameStats,
+    TerrainViewportRenderer,
+};
 
 pub const TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION: &str = "mclone-overworld-v1-gpu-preview-a2";
 pub const TERRAIN_PREVIEW_COMPUTE_WGSL_TEMPLATE: &str =
     include_str!("shaders/terrain_preview_compute.wgsl");
 pub const TERRAIN_PREVIEW_RENDER_WGSL: &str = include_str!("shaders/terrain_preview_render.wgsl");
 
-const TERRAIN_PREVIEW_UNIFORM_BYTES: u64 = 64;
+const TERRAIN_PREVIEW_UNIFORM_BYTES: u64 = 80;
 const TERRAIN_PREVIEW_SAMPLE_BYTES: u64 =
     (TERRAIN_PREVIEW_SAMPLE_FLOATS * std::mem::size_of::<f32>()) as u64;
 const TERRAIN_PREVIEW_WORKGROUP_AXIS: u32 = 8;
@@ -698,6 +703,32 @@ fn uniform_bytes(
     camera: TerrainPreviewCamera,
 ) -> Vec<u8> {
     let request = reference.request();
+    viewport_uniform_bytes(
+        reference,
+        width,
+        height,
+        options,
+        camera,
+        request.request().center_x,
+        request.request().center_z,
+        request.footprint_blocks(),
+        request.footprint_blocks(),
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn viewport_uniform_bytes(
+    reference: &TerrainPreviewReferenceGrid,
+    width: u32,
+    height: u32,
+    options: TerrainPreviewDrawOptions,
+    camera: TerrainPreviewCamera,
+    viewport_center_x: i32,
+    viewport_center_z: i32,
+    viewport_width_blocks: u32,
+    viewport_height_blocks: u32,
+) -> Vec<u8> {
+    let request = reference.request();
     let source = request.request();
     let seed = source.seed as u64;
     let words = [
@@ -719,6 +750,14 @@ fn uniform_bytes(
         bytes.extend_from_slice(&word.to_le_bytes());
     }
     for value in [camera.yaw_radians, camera.pitch_radians, 0.0, 0.0] {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    for value in [
+        viewport_center_x,
+        viewport_center_z,
+        i32::try_from(viewport_width_blocks).expect("terrain viewport width fits i32"),
+        i32::try_from(viewport_height_blocks).expect("terrain viewport height fits i32"),
+    ] {
         bytes.extend_from_slice(&value.to_le_bytes());
     }
     bytes
@@ -802,6 +841,11 @@ mod tests {
         assert_eq!(u32::from_le_bytes(bytes[36..40].try_into().unwrap()), 65);
         assert_eq!(f32::from_le_bytes(bytes[48..52].try_into().unwrap()), -0.75);
         assert_eq!(f32::from_le_bytes(bytes[52..56].try_into().unwrap()), 0.65);
+        assert_eq!(
+            i32::from_le_bytes(bytes[64..68].try_into().unwrap()),
+            reference.request().request().center_x
+        );
+        assert_eq!(i32::from_le_bytes(bytes[72..76].try_into().unwrap()), 1_024);
     }
 
     #[test]
