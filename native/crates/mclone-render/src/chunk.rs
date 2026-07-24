@@ -2180,6 +2180,24 @@ pub struct ChunkTextureAtlas<'a> {
     pub rgba: &'a [u8],
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum ChunkTextureSampling {
+    #[default]
+    Vanilla,
+    TerrainOverview,
+}
+
+fn chunk_texture_filter_modes(
+    sampling: ChunkTextureSampling,
+) -> (wgpu::FilterMode, wgpu::FilterMode) {
+    match sampling {
+        ChunkTextureSampling::Vanilla => (wgpu::FilterMode::Nearest, wgpu::FilterMode::Nearest),
+        ChunkTextureSampling::TerrainOverview => {
+            (wgpu::FilterMode::Linear, wgpu::FilterMode::Linear)
+        }
+    }
+}
+
 struct GpuChunkTextureAtlas {
     _texture: wgpu::Texture,
     _view: wgpu::TextureView,
@@ -2193,6 +2211,16 @@ impl GpuChunkTextureAtlas {
         queue: &wgpu::Queue,
         layout: &wgpu::BindGroupLayout,
         atlas: ChunkTextureAtlas<'_>,
+    ) -> Result<Self> {
+        Self::new_with_sampling(device, queue, layout, atlas, ChunkTextureSampling::Vanilla)
+    }
+
+    fn new_with_sampling(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        layout: &wgpu::BindGroupLayout,
+        atlas: ChunkTextureAtlas<'_>,
+        sampling: ChunkTextureSampling,
     ) -> Result<Self> {
         let width = atlas.width.max(1);
         let height = atlas.height.max(1);
@@ -2245,17 +2273,19 @@ impl GpuChunkTextureAtlas {
         }
         let view = texture.create_view(&Default::default());
         let lod_max_clamp = mip_levels.len().saturating_sub(1) as f32;
+        let (min_filter, mipmap_filter) = chunk_texture_filter_modes(sampling);
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             label: Some("mclone_chunk_texture_sampler"),
             address_mode_u: wgpu::AddressMode::ClampToEdge,
             address_mode_v: wgpu::AddressMode::ClampToEdge,
             address_mode_w: wgpu::AddressMode::ClampToEdge,
             mag_filter: wgpu::FilterMode::Nearest,
-            min_filter: wgpu::FilterMode::Nearest,
+            min_filter,
             // Java's AbstractTexture.setFilter(false, true) uses
             // GL_NEAREST_MIPMAP_NEAREST, preserving pixelated blocks while
-            // still selecting a lower-detail mip for distant terrain.
-            mipmap_filter: wgpu::FilterMode::Nearest,
+            // still selecting a lower-detail mip for distant terrain. The
+            // Terrain Lab opts into trilinear minification for macro views.
+            mipmap_filter,
             lod_max_clamp,
             ..Default::default()
         });
@@ -3717,10 +3747,31 @@ impl TexturedSectionSharedResources {
         color_format: wgpu::TextureFormat,
         atlas: ChunkTextureAtlas<'_>,
     ) -> Result<Arc<Self>> {
+        Self::new_with_texture_sampling(
+            device,
+            queue,
+            color_format,
+            atlas,
+            ChunkTextureSampling::Vanilla,
+        )
+    }
+
+    pub fn new_with_texture_sampling(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        atlas: ChunkTextureAtlas<'_>,
+        sampling: ChunkTextureSampling,
+    ) -> Result<Arc<Self>> {
         let renderer = TexturedChunkRenderer::new(device, color_format);
-        let atlas =
-            GpuChunkTextureAtlas::new(device, queue, &renderer.texture_bind_group_layout, atlas)
-                .context("failed to upload chunk texture atlas")?;
+        let atlas = GpuChunkTextureAtlas::new_with_sampling(
+            device,
+            queue,
+            &renderer.texture_bind_group_layout,
+            atlas,
+            sampling,
+        )
+        .context("failed to upload chunk texture atlas")?;
         Ok(Arc::new(Self { renderer, atlas }))
     }
 
@@ -3772,6 +3823,24 @@ impl TexturedSectionDrawResources {
         atlas: ChunkTextureAtlas<'_>,
     ) -> Result<Self> {
         let shared = TexturedSectionSharedResources::new(device, queue, color_format, atlas)?;
+        Self::new_with_shared_resources(device, queue, sections, shared)
+    }
+
+    pub fn new_with_texture_sampling(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        sections: &[TexturedRenderSectionMesh],
+        atlas: ChunkTextureAtlas<'_>,
+        sampling: ChunkTextureSampling,
+    ) -> Result<Self> {
+        let shared = TexturedSectionSharedResources::new_with_texture_sampling(
+            device,
+            queue,
+            color_format,
+            atlas,
+            sampling,
+        )?;
         Self::new_with_shared_resources(device, queue, sections, shared)
     }
 
@@ -6187,6 +6256,18 @@ mod tests {
     use mclone_mesh::{
         ChunkMeshInput, TexturedChunkVertex, TexturedVisibleChunkMesh, build_visible_chunk_mesh,
     };
+
+    #[test]
+    fn terrain_overview_sampling_does_not_change_vanilla_defaults() {
+        assert_eq!(
+            chunk_texture_filter_modes(ChunkTextureSampling::Vanilla),
+            (wgpu::FilterMode::Nearest, wgpu::FilterMode::Nearest)
+        );
+        assert_eq!(
+            chunk_texture_filter_modes(ChunkTextureSampling::TerrainOverview),
+            (wgpu::FilterMode::Linear, wgpu::FilterMode::Linear)
+        );
+    }
 
     #[test]
     fn camera_matrix_serializes_to_uniform_size() {

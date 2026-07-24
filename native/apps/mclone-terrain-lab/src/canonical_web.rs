@@ -8,7 +8,7 @@ use mclone_mesh::{
     load_first_party_textured_terrain_assets,
 };
 use mclone_render::chunk::{
-    ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkTextureAtlas,
+    ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkTextureAtlas, ChunkTextureSampling,
     TexturedSectionDrawResources, TexturedSectionRenderOptions,
 };
 use mclone_terrain_view::{
@@ -324,7 +324,7 @@ impl CanonicalTerrainLab {
             &surface_configuration(format, width, height, present_mode, alpha_mode),
         );
 
-        let draw = TexturedSectionDrawResources::new(
+        let draw = TexturedSectionDrawResources::new_with_texture_sampling(
             &device,
             &queue,
             format,
@@ -334,6 +334,7 @@ impl CanonicalTerrainLab {
                 height: assets.atlas.height,
                 rgba: assets.atlas.rgba(),
             },
+            ChunkTextureSampling::TerrainOverview,
         )
         .map_err(|error| format!("failed to initialize canonical terrain renderer: {error}"))?;
         let depth = ChunkDepthTarget::new(&device, width, height);
