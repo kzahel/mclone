@@ -159,6 +159,22 @@ pub enum ClientActivityDemand {
     Suspended,
 }
 
+impl ClientActivityDemand {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Dormant => "dormant",
+            Self::StaticUi => "static-ui",
+            Self::AnimatedUi { .. } => "animated-ui",
+            Self::ActiveSession => "active-session",
+            Self::Suspended => "suspended",
+        }
+    }
+
+    pub const fn requires_continuous_frames(self) -> bool {
+        matches!(self, Self::AnimatedUi { .. } | Self::ActiveSession)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ClientEntryEffect {
     EnterTitle { status: Option<ClientEntryStatus> },
@@ -324,6 +340,9 @@ mod tests {
             controller.activity_demand(false),
             ClientActivityDemand::StaticUi
         );
+        assert_eq!(ClientActivityDemand::StaticUi.label(), "static-ui");
+        assert!(!ClientActivityDemand::StaticUi.requires_continuous_frames());
+        assert!(ClientActivityDemand::ActiveSession.requires_continuous_frames());
     }
 
     #[test]

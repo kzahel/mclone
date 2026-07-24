@@ -56,7 +56,7 @@ use winit::event::{
     DeviceEvent, DeviceId, ElementState, MouseButton, MouseScrollDelta, Touch, TouchPhase,
     WindowEvent,
 };
-use winit::event_loop::{ActiveEventLoop, DeviceEvents};
+use winit::event_loop::{ActiveEventLoop, ControlFlow, DeviceEvents};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowAttributes, WindowId};
 
@@ -67,6 +67,7 @@ use crate::startup::{
 
 const ANDROID_FIXED_FPS_CAP: u32 = 60;
 const ANDROID_TARGET_FRAME_MS: f64 = 1_000.0 / ANDROID_FIXED_FPS_CAP as f64;
+const STATIC_CONTROLLER_POLL_INTERVAL: Duration = Duration::from_millis(33);
 
 pub(crate) enum AndroidRenderError {
     Surface(wgpu::SurfaceError),
@@ -134,6 +135,7 @@ pub(crate) struct AndroidSurfaceDriver {
     last_cursor: Option<PhysicalPosition<f64>>,
     controller_input: AndroidControllerCollector,
     controller_started_at: Instant,
+    next_controller_poll_at: Option<Instant>,
 }
 
 impl AndroidSurfaceDriver {
@@ -145,6 +147,7 @@ impl AndroidSurfaceDriver {
             last_cursor: None,
             controller_input: AndroidControllerCollector::new(),
             controller_started_at: Instant::now(),
+            next_controller_poll_at: None,
         }
     }
 
@@ -162,6 +165,41 @@ impl AndroidSurfaceDriver {
             Err(error) => {
                 log::error!("failed to handle Mclone Android {context}: {error:#}");
                 event_loop.exit();
+            }
+        }
+    }
+
+    fn poll_controller_input(
+        &mut self,
+        event_loop: &ActiveEventLoop,
+        window: &Window,
+        request_redraw_on_change: bool,
+    ) -> bool {
+        self.controller_input
+            .handle_events(drain_android_controller_events());
+        let controller_poll = self
+            .controller_input
+            .poll(self.controller_started_at.elapsed());
+        let topology_changed =
+            !controller_poll.connected.is_empty() || !controller_poll.disconnected.is_empty();
+        let Some(gpu) = self.gpu.as_mut() else {
+            return true;
+        };
+        match gpu.route_controller_poll(controller_poll) {
+            Ok(outcome) if outcome.exit => {
+                event_loop.exit();
+                false
+            }
+            Ok(outcome) => {
+                if request_redraw_on_change && (topology_changed || outcome.handled) {
+                    window.request_redraw();
+                }
+                true
+            }
+            Err(error) => {
+                log::error!("failed to route Mclone Android controller input: {error:#}");
+                event_loop.exit();
+                false
             }
         }
     }
@@ -199,6 +237,7 @@ impl ApplicationHandler for AndroidSurfaceDriver {
                 }
             }
             event_loop.listen_device_events(DeviceEvents::WhenFocused);
+            self.next_controller_poll_at = None;
             window.request_redraw();
         }
     }
@@ -216,6 +255,7 @@ impl ApplicationHandler for AndroidSurfaceDriver {
         self.gpu = None;
         self.window = None;
         self.last_cursor = None;
+        self.next_controller_poll_at = None;
     }
 
     fn window_event(
@@ -233,28 +273,18 @@ impl ApplicationHandler for AndroidSurfaceDriver {
         match event {
             WindowEvent::CloseRequested => event_loop.exit(),
             WindowEvent::RedrawRequested => {
-                self.controller_input
-                    .handle_events(drain_android_controller_events());
-                let controller_poll = self
-                    .controller_input
-                    .poll(self.controller_started_at.elapsed());
+                if !self.poll_controller_input(event_loop, &window, false) {
+                    return;
+                }
                 let Some(gpu) = self.gpu.as_mut() else {
                     return;
                 };
-                match gpu.route_controller_poll(controller_poll) {
-                    Ok(outcome) if outcome.exit => {
-                        event_loop.exit();
-                        return;
-                    }
-                    Ok(_) => {}
-                    Err(error) => {
-                        log::error!("failed to route Mclone Android controller input: {error:#}");
-                        event_loop.exit();
-                        return;
-                    }
-                }
                 match gpu.render_mclone_frame() {
-                    Ok(()) => window.request_redraw(),
+                    Ok(()) => {
+                        if gpu.continuous_redraw_required() {
+                            window.request_redraw();
+                        }
+                    }
                     Err(AndroidRenderError::Surface(wgpu::SurfaceError::OutOfMemory)) => {
                         event_loop.exit();
                     }
@@ -279,6 +309,7 @@ impl ApplicationHandler for AndroidSurfaceDriver {
                     size.width,
                     size.height
                 );
+                window.request_redraw();
             }
             WindowEvent::Touch(touch) => {
                 let result = self
@@ -338,6 +369,36 @@ impl ApplicationHandler for AndroidSurfaceDriver {
             }
             _ => {}
         }
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        let Some(window) = self.window.as_ref().cloned() else {
+            event_loop.set_control_flow(ControlFlow::Wait);
+            return;
+        };
+        if self
+            .gpu
+            .as_ref()
+            .is_some_and(AndroidGpuState::continuous_redraw_required)
+        {
+            self.next_controller_poll_at = None;
+            return;
+        }
+
+        let now = Instant::now();
+        let controller_poll_due = self
+            .next_controller_poll_at
+            .is_none_or(|deadline| now >= deadline);
+        if controller_poll_due {
+            self.next_controller_poll_at = Some(now + STATIC_CONTROLLER_POLL_INTERVAL);
+            if !self.poll_controller_input(event_loop, &window, true) {
+                return;
+            }
+        }
+        let deadline = *self
+            .next_controller_poll_at
+            .get_or_insert_with(|| Instant::now() + STATIC_CONTROLLER_POLL_INTERVAL);
+        event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
     }
 
     fn device_event(
@@ -575,6 +636,10 @@ impl AndroidGpuState {
             frame_index: 0,
             announced_session,
         })
+    }
+
+    fn continuous_redraw_required(&self) -> bool {
+        self.host.activity_demand().requires_continuous_frames()
     }
 
     fn resize(&mut self, size: PhysicalSize<u32>) {

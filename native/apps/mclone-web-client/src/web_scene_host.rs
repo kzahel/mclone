@@ -948,6 +948,17 @@ impl WebSceneSmokeHarness {
 
 #[wasm_bindgen]
 impl WebSceneHost {
+    #[wasm_bindgen(js_name = pollControllerInput)]
+    pub fn poll_controller_input_only(&mut self, now_millis: f64) -> Result<JsValue, JsValue> {
+        let handled = self.poll_controller_input(now_millis)?;
+        let value = self
+            .finish_frame_operational_report(false, 0.0, false)
+            .map_err(JsValue::from)?;
+        let object: js_sys::Object = value.unchecked_into();
+        report_set_bool(&object, "handled", handled).map_err(JsValue::from)?;
+        Ok(object.into())
+    }
+
     #[wasm_bindgen(js_name = renderFrame)]
     pub fn render_frame(&mut self, now_millis: f64) -> Result<JsValue, JsValue> {
         self.render_worker
@@ -978,7 +989,7 @@ impl WebSceneHost {
         self.last_visible_frame_millis = Some(now_millis);
         self.frame_count = self.frame_count.saturating_add(1);
         self.dom_input_frame_count = self.dom_input_frame_count.saturating_add(1);
-        self.poll_controller_input(now_millis)?;
+        let _ = self.poll_controller_input(now_millis)?;
 
         let supplemental = self
             .touch_controls_visible()
@@ -2350,9 +2361,9 @@ impl WebSceneHost {
         }
     }
 
-    fn poll_controller_input(&mut self, now_millis: f64) -> Result<(), JsValue> {
+    fn poll_controller_input(&mut self, now_millis: f64) -> Result<bool, JsValue> {
         if self.host.is_none() {
-            return Ok(());
+            return Ok(false);
         }
         let poll = match self.gamepad_collector.poll_browser(now_millis) {
             Ok(poll) => poll,
@@ -2361,9 +2372,10 @@ impl WebSceneHost {
                     &JsValue::from_str("browser Gamepad API poll failed"),
                     &error,
                 );
-                return Ok(());
+                return Ok(false);
             }
         };
+        let topology_changed = !poll.connected.is_empty() || !poll.disconnected.is_empty();
         self.input_capability_state
             .set_present(InputDeviceKind::Gamepad, poll.connected_count() > 0);
         for (source_id, descriptor) in poll.connected {
@@ -2392,13 +2404,22 @@ impl WebSceneHost {
             self.input_capability_state
                 .note_activity(InputDeviceKind::Gamepad);
         }
+        let should_redraw = topology_changed
+            || disposition.handled
+            || disposition.scene_changed
+            || disposition.meaningful_controller_activity
+            || effects.mouse_lock_requested.is_some()
+            || effects.touch_controls_mode.is_some()
+            || effects.quit_to_title
+            || effects.exit;
         self.frame_input_effects.clear_transient_input |= disposition.clear_transient_input;
         if effects.mouse_lock_requested.is_some() {
             self.frame_input_effects.pointer_capture_desired = effects.mouse_lock_requested;
         }
         self.frame_input_effects.exit_requested |= effects.exit;
         self.apply_input_effect_state(disposition, effects)
-            .map_err(JsValue::from)
+            .map_err(JsValue::from)?;
+        Ok(should_redraw)
     }
 
     fn route_touch_input_event(
@@ -2914,8 +2935,16 @@ impl WebSceneHost {
         if let Some(host) = self.host.as_ref() {
             let ui_active = host.mono_ui_is_active();
             let movement_cadence = host.player_movement_cadence();
+            let activity_demand = host.activity_demand();
             report_set_bool(&object, "active", ui_active)?;
             report_set_bool(&object, "uiActive", ui_active)?;
+            report_set_string(&object, "activityDemand", activity_demand.label())?;
+            if let mclone_app_runtime::client_entry::ClientActivityDemand::AnimatedUi {
+                maximum_hz,
+            } = activity_demand
+            {
+                report_set_number(&object, "activityMaximumHz", f64::from(maximum_hz))?;
+            }
             report_set_number(
                 &object,
                 "playerMovementRateHz",

@@ -5,7 +5,8 @@ Topic: `client-entry-lifecycle`
 Status: active. The product decision, shared entry/lifecycle policy, bounded
 accounting correction, desktop/SteamOS, flat-Android, and browser menu-first
 entry, XR entry normalization, and Steam Deck Devkit process ownership are
-implemented. Idle-cadence migration remains active.
+implemented. Shared activity demand and demand-driven flat-client cadence are
+implemented; physical Steam Deck and headset acceptance remain active.
 
 ## Scope
 
@@ -162,13 +163,13 @@ As of 2026-07-24:
 | Desktop/Android XR | title menu; explicit launch intent, remote destination, direct world, or automation workload starts a session | shared `ClientEntryResolution` projected from desktop CLI or Android activity/managed-launch syntax |
 | Offscreen/smoke/perf | intentionally starts the requested workload | harness-specific options |
 
-This matrix is evidence of missing shared entry policy, not justification for
-platform defaults.
+The platform syntax differs, but all rows now resolve through the same shared
+entry policy rather than defining platform defaults.
 
 ## Idle And Frame-Demand Contract
 
-The shared product state should expose useful activity demand without trying to
-replace the host event loop. The likely vocabulary is:
+The shared product state exposes useful activity demand without trying to
+replace the host event loop. Its vocabulary is:
 
 - `Dormant`;
 - `StaticUi`;
@@ -186,6 +187,24 @@ Adapters map that meaning to their real mechanics:
   skips unnecessary world work.
 
 One universal event loop is not a goal. One shared statement of useful work is.
+
+`McloneSceneHost::activity_demand` now reports `StaticUi` for a session-free
+settled title, `AnimatedUi` for bounded pending UI/catalog/asset operations, and
+`ActiveSession` while a session is starting or active. Desktop/winit and flat
+Android stop requesting product redraws for `StaticUi`; browser stops its
+`requestAnimationFrame` chain. All three retain a 30 Hz input-only controller
+poll so sleeping the scene and GPU does not make controller-driven menus
+unresponsive. A meaningful input or platform completion requests one product
+frame, while active sessions retain continuous cadence. Browser visibility
+continues to suspend both rendering and controller polling.
+
+The headed-Wayland menu probe now waits for one-shot catalog completion, then
+proves that the title remains `static-ui` with no additional product frame
+during a 500 ms idle window. The x86_64 Android AVD renders the same title and
+passes its lifecycle smoke after the cadence change. The active-session browser
+smoke and arm64 Android APK build also pass. Physical Steam Deck CPU evidence is
+still required below because host-side builds cannot substitute for Gamescope,
+Steam Input, and Deck power behavior.
 
 ## Baseline Sanity Contract
 

@@ -1,6 +1,6 @@
 use std::fs;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use anyhow::{Context, Result};
 use glam::Vec2;
@@ -59,6 +59,7 @@ const RENDER_SCALE_PRESET_EPSILON: f32 = 0.000_1;
 const STEAMOS_WORLD_RENDER_MAX_HEIGHT: u32 = 1080;
 const STEAMOS_WORLD_RENDER_MAX_PIXELS: u64 = 1920 * 1080;
 const UI_V2_HIT_DEBUG_ENV: &str = "MCLONE_UI_V2_HIT_DEBUG";
+const STATIC_CONTROLLER_POLL_INTERVAL: Duration = Duration::from_millis(33);
 
 pub(crate) fn run_window(
     scene: SceneOptions,
@@ -270,6 +271,7 @@ struct ChunkApp {
     ui_v2_hit_debug: bool,
     last_frame: Instant,
     next_redraw_at: Option<Instant>,
+    next_controller_poll_at: Option<Instant>,
     start_intent: WindowStartIntent,
     startup_wait: StartupWaitPolicy,
     frame_report: Option<WindowFrameReportRecorder>,
@@ -733,6 +735,7 @@ impl ChunkApp {
             ui_v2_hit_debug,
             last_frame: Instant::now(),
             next_redraw_at: None,
+            next_controller_poll_at: None,
             start_intent,
             startup_wait,
             frame_report: frame_report.map(WindowFrameReportRecorder::new),
@@ -743,6 +746,7 @@ impl ChunkApp {
         let Some(window) = self.window.clone() else {
             return;
         };
+        self.next_controller_poll_at = None;
 
         if self.frame_pacing.mode != FramePacingMode::Capped {
             self.next_redraw_at = None;
@@ -759,7 +763,43 @@ impl ChunkApp {
         }
     }
 
+    fn continuous_redraw_required(&self) -> bool {
+        self.frame_report.is_some()
+            || self
+                .scene_driver
+                .as_ref()
+                .is_some_and(|driver| driver.activity_demand().requires_continuous_frames())
+    }
+
+    fn wait_for_product_event(&mut self, event_loop: &ActiveEventLoop) {
+        self.next_redraw_at = None;
+        if self.gamepad_collector.is_some() {
+            let deadline = *self
+                .next_controller_poll_at
+                .get_or_insert_with(|| Instant::now() + STATIC_CONTROLLER_POLL_INTERVAL);
+            event_loop.set_control_flow(ControlFlow::WaitUntil(deadline));
+        } else {
+            event_loop.set_control_flow(ControlFlow::Wait);
+        }
+    }
+
+    fn poll_static_controller_if_due(&mut self, event_loop: &ActiveEventLoop) {
+        let now = Instant::now();
+        if self
+            .next_controller_poll_at
+            .is_some_and(|deadline| now < deadline)
+        {
+            return;
+        }
+        self.next_controller_poll_at = Some(now + STATIC_CONTROLLER_POLL_INTERVAL);
+        self.poll_controller_input(event_loop);
+    }
+
     fn finish_redraw(&mut self, event_loop: &ActiveEventLoop, frame_start: Instant) {
+        if !self.continuous_redraw_required() {
+            self.wait_for_product_event(event_loop);
+            return;
+        }
         if let Some(frame_duration) = self.frame_pacing.target_frame_duration() {
             let next_redraw_at = next_capped_redraw_deadline(
                 frame_start,
@@ -925,6 +965,7 @@ impl ChunkApp {
             },
             None => return,
         };
+        let topology_changed = !poll.connected.is_empty() || !poll.disconnected.is_empty();
         self.flat_input
             .set_gamepad_present(poll.connected_count() > 0);
         let result = match (self.surface.as_ref(), self.scene_driver.as_mut()) {
@@ -933,7 +974,10 @@ impl ChunkApp {
             }
             _ => return,
         };
-        self.apply_input_outcome("gamepad input", result, event_loop);
+        let handled = self.apply_input_outcome("gamepad input", result, event_loop);
+        if topology_changed && !handled {
+            self.schedule_next_redraw(event_loop);
+        }
     }
 
     fn clear_flat_gameplay_input(&mut self) {
@@ -1166,10 +1210,20 @@ impl ChunkApp {
             }
         };
         let handled = result.scene.handled;
+        let material = handled
+            || result.scene.clear_transient_input
+            || result.controller_activity
+            || result.host != WinitHostEffectOutcome::default();
         if result.controller_activity {
             self.flat_input.note_gamepad_activity();
         }
-        self.apply_host_effect_outcome(result.host, result.scene.clear_transient_input, event_loop);
+        if material {
+            self.apply_host_effect_outcome(
+                result.host,
+                result.scene.clear_transient_input,
+                event_loop,
+            );
+        }
         handled
     }
 
@@ -2021,7 +2075,16 @@ impl ApplicationHandler for ChunkApp {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        self.schedule_next_redraw(event_loop);
+        if self.continuous_redraw_required() {
+            self.schedule_next_redraw(event_loop);
+        } else {
+            self.poll_static_controller_if_due(event_loop);
+            if self.continuous_redraw_required() {
+                self.schedule_next_redraw(event_loop);
+            } else {
+                self.wait_for_product_event(event_loop);
+            }
+        }
     }
 }
 

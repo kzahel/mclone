@@ -375,6 +375,33 @@ impl McloneSceneHost {
         self.session.state()
     }
 
+    /// Shared statement of whether another product frame is useful.
+    ///
+    /// Platform hosts remain responsible for mapping this onto winit waits,
+    /// Android lifecycle events, browser animation frames, or OpenXR runtime
+    /// sequencing.
+    pub fn activity_demand(&self) -> mclone_app_runtime::client_entry::ClientActivityDemand {
+        use mclone_app_runtime::client_entry::ClientActivityDemand;
+
+        if self.active_world.runtime.is_some()
+            || matches!(
+                self.session.state(),
+                GameSessionState::Starting { .. } | GameSessionState::Active { .. }
+            )
+        {
+            return ClientActivityDemand::ActiveSession;
+        }
+        if self.lobby_launch.is_some()
+            || self.asset_replacement.is_some()
+            || self.pending_external_asset_pack_selection.is_some()
+            || !self.external_asset_pack_operations.is_empty()
+            || self.pending_external_catalog_operation_count() > 0
+        {
+            return ClientActivityDemand::AnimatedUi { maximum_hz: 30 };
+        }
+        ClientActivityDemand::StaticUi
+    }
+
     pub fn scene_options(&self) -> &McloneSceneHostOptions {
         &self.active_world.scene
     }

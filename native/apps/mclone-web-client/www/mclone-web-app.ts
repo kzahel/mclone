@@ -132,6 +132,8 @@ class WebFrameDriver {
   pointerDragging: boolean;
   pointerDown: { button: number, enabled: boolean, movement: number } | null;
   animationFrame: number;
+  controllerPollTimer: number;
+  renderingPaused: boolean;
   lastFrameTime: number;
   tickFrameBusy: boolean;
   pendingSceneOperations: Set<Promise<void>>;
@@ -146,6 +148,8 @@ class WebFrameDriver {
     this.pointerDragging = false;
     this.pointerDown = null;
     this.animationFrame = 0;
+    this.controllerPollTimer = 0;
+    this.renderingPaused = false;
     this.lastFrameTime = 0;
     this.tickFrameBusy = false;
     this.pendingSceneOperations = new Set();
@@ -213,6 +217,11 @@ class WebFrameDriver {
           this.lastFrameTime = performance.now();
         }
         this.applyNativeUiReport(report);
+        if (hidden) {
+          this.pauseRendering();
+        } else {
+          this.resumeRendering();
+        }
       } catch (error) {
         runtime.state.ok = false;
         runtime.state.status = stringifyError(error);
@@ -233,35 +242,92 @@ class WebFrameDriver {
   }
 
   start(): void {
-    if (this.animationFrame !== 0) {
+    this.renderingPaused = false;
+    this.requestFrame(false);
+  }
+
+  requestFrame(force: boolean): void {
+    if (
+      this.renderingPaused
+      || document.visibilityState === "hidden"
+      || this.animationFrame !== 0
+    ) {
       return;
     }
+    const demand = String(runtime.state.activityDemand ?? "dormant");
+    if (!force && demand !== "active-session" && demand !== "animated-ui") {
+      this.scheduleControllerPoll();
+      return;
+    }
+    if (this.controllerPollTimer !== 0) {
+      window.clearTimeout(this.controllerPollTimer);
+      this.controllerPollTimer = 0;
+    }
     this.lastFrameTime = performance.now();
-    const frame = (now: number) => {
-      if (!this.tickFrameBusy) {
-        this.tickFrameBusy = true;
-        runtime.state.tickFrameBusy = true;
-        void this.tickFrame(now).finally(() => {
-          this.tickFrameBusy = false;
-          runtime.state.tickFrameBusy = false;
-          runtime.state.tickPhase = "idle";
-          publishRuntimeState(runtime.state);
-        });
+    this.animationFrame = requestAnimationFrame((now: number) => {
+      this.animationFrame = 0;
+      if (this.tickFrameBusy) {
+        this.requestFrame(true);
+        return;
       }
-      this.animationFrame = requestAnimationFrame(frame);
-    };
-    this.animationFrame = requestAnimationFrame(frame);
+      this.tickFrameBusy = true;
+      runtime.state.tickFrameBusy = true;
+      void this.tickFrame(now).finally(() => {
+        this.tickFrameBusy = false;
+        runtime.state.tickFrameBusy = false;
+        runtime.state.tickPhase = "idle";
+        publishRuntimeState(runtime.state);
+        this.requestFrame(false);
+      });
+    });
+  }
+
+  scheduleControllerPoll(): void {
+    if (
+      this.renderingPaused
+      || document.visibilityState === "hidden"
+      || this.controllerPollTimer !== 0
+      || !this.session
+      || String(runtime.state.activityDemand ?? "dormant") !== "static-ui"
+    ) {
+      return;
+    }
+    this.controllerPollTimer = window.setTimeout(() => {
+      this.controllerPollTimer = 0;
+      if (this.tickFrameBusy || !this.session) {
+        this.scheduleControllerPoll();
+        return;
+      }
+      try {
+        const report = this.session.pollControllerInput(performance.now()) as WasmReport;
+        this.applyRawInputReport(report);
+        if (report?.handled === true) {
+          this.requestFrame(true);
+        } else {
+          this.scheduleControllerPoll();
+        }
+      } catch (error) {
+        console.error("browser controller poll failed", error);
+        this.scheduleControllerPoll();
+      }
+    }, 33);
   }
 
   pauseRendering(): void {
+    this.renderingPaused = true;
     if (this.animationFrame !== 0) {
       cancelAnimationFrame(this.animationFrame);
       this.animationFrame = 0;
     }
+    if (this.controllerPollTimer !== 0) {
+      window.clearTimeout(this.controllerPollTimer);
+      this.controllerPollTimer = 0;
+    }
   }
 
   resumeRendering(): void {
-    this.start();
+    this.renderingPaused = false;
+    this.requestFrame(true);
   }
 
   sceneHostForObserver(): WebSceneHost | null {
@@ -500,6 +566,7 @@ class WebFrameDriver {
     smokeObserver?.observeReport(frame);
     const wasPointerCaptureBlocked = runtime.state.pointerCaptureBlocked === true;
     runtime.state.pointerCaptureBlocked = Boolean(frame.active ?? frame.uiActive);
+    runtime.state.activityDemand = String(frame.activityDemand ?? "dormant");
     if (frame.clearTransientInput === true) {
       this.pointerDragging = false;
       this.pointerDown = null;
@@ -546,6 +613,7 @@ class WebFrameDriver {
     smokeObserver?.observeReport(report);
     const wasPointerCaptureBlocked = runtime.state.pointerCaptureBlocked === true;
     runtime.state.pointerCaptureBlocked = Boolean(report.active ?? report.uiActive);
+    runtime.state.activityDemand = String(report.activityDemand ?? "dormant");
     if (runtime.state.pointerCaptureBlocked) {
       this.releasePointerLockForUi();
       if (!wasPointerCaptureBlocked) {
@@ -657,6 +725,7 @@ class WebFrameDriver {
     }
     const report = operation(this.session);
     this.applyRawInputReport(report);
+    this.requestFrame(true);
     return Boolean(report?.handled);
   }
 

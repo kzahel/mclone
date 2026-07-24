@@ -634,7 +634,13 @@ async function run() {
           undefined,
           { timeout: 20_000 },
         );
-        await page.waitForTimeout(250);
+        // Let one-shot catalog/asset completions deliver their event-driven
+        // redraw before measuring the steady static-title cadence.
+        await page.waitForTimeout(750);
+        const frameCountBeforeIdle = await page.evaluate(
+          () => globalThis.__mcloneWebApp.state.frameCount,
+        );
+        await page.waitForTimeout(500);
         const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
         const pageScreenshotCaptured = await page.screenshot({
           path: screenshotPath,
@@ -646,10 +652,16 @@ async function run() {
           timeout: 60_000,
         });
         const canvasPixels = analyzePng(canvasPng);
-        if (pageErrors.length > 0 || canvasPixels.distinctInteriorColorCount < 2) {
+        if (
+          pageErrors.length > 0
+          || canvasPixels.distinctInteriorColorCount < 2
+          || result.activityDemand !== "static-ui"
+          || result.frameCount !== frameCountBeforeIdle
+        ) {
           throw new Error(`browser menu-entry probe failed:\n${JSON.stringify({
             pageErrors,
             canvasPixels,
+            frameCountBeforeIdle,
             result,
           }, null, 2)}`);
         }
@@ -659,6 +671,7 @@ async function run() {
           pageScreenshotCaptured,
           canvasScreenshotPath,
           menuEntryProbe,
+          frameCountBeforeIdle,
           canvasPixels,
           result,
         }, null, 2));

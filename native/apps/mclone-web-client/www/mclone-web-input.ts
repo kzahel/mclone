@@ -31,6 +31,7 @@ export interface InputBindingApp {
   requestPointerLock(): void;
   updatePointerLockState(): void;
   syncCanvasSize(): void;
+  resumeRendering(): void;
 }
 
 interface InputRuntimeState extends Record<string, any> {
@@ -145,6 +146,7 @@ export function bindInput(
   });
   window.addEventListener("resize", () => {
     app.syncCanvasSize();
+    app.resumeRendering();
     publishRuntimeState();
   });
 }

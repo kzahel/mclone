@@ -3,7 +3,8 @@
 
 use anyhow::Result;
 use mclone_app_runtime::client_entry::{
-    ClientEntryController, ClientEntryEffect, ClientEntryResolution, ClientHostAvailability,
+    ClientActivityDemand, ClientEntryController, ClientEntryEffect, ClientEntryResolution,
+    ClientHostAvailability,
 };
 use mclone_app_runtime::frame_pipeline_accounting::FramePipelineAccountant;
 use mclone_app_runtime::frame_render::{
@@ -679,6 +680,10 @@ impl WinitFrameDriver {
 
     pub(crate) fn has_runtime(&self) -> bool {
         self.host.has_runtime()
+    }
+
+    pub(crate) fn activity_demand(&self) -> ClientActivityDemand {
+        self.host.activity_demand()
     }
 
     pub(crate) fn ui_is_active(&self) -> bool {
