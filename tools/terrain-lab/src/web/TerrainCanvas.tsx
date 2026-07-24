@@ -39,6 +39,8 @@ export interface TerrainLabRenderReport {
   requestedSpacing: number;
   effectiveSpacing: number;
   publishedSpacing: number;
+  cpuPublishedSpacing: number;
+  gpuPublishedSpacing: number;
   sampleSpacing: number;
   cellsPerAxis: number;
   samplesPerAxis: number;
@@ -51,11 +53,20 @@ export interface TerrainLabRenderReport {
   levelCount: number;
   visibleTileCount: number;
   publishedTileCount: number;
+  cpuPublishedTileCount: number;
+  gpuPublishedTileCount: number;
   residentTileCount: number;
   queuedTileCount: number;
+  cpuQueuedTileCount: number;
+  gpuQueuedTileCount: number;
   pendingReadbackCount: number;
-  compiledTiles: number;
-  compiledTilesTotal: number;
+  cpuCompiledTiles: number;
+  cpuCompiledTilesTotal: number;
+  gpuDispatchedTiles: number;
+  gpuDispatchedTilesTotal: number;
+  requestCpuCompiledTiles: number;
+  requestGpuDispatchedTiles: number;
+  requestCacheHitTiles: number;
   evictedTilesTotal: number;
   source: string;
   view: string;
@@ -70,6 +81,11 @@ export interface TerrainLabRenderReport {
   requestMs: number;
   coarseReadyMs: number | null;
   targetReadyMs: number | null;
+  cpuCoarseReadyMs: number | null;
+  cpuTargetReadyMs: number | null;
+  gpuCoarseReadyMs: number | null;
+  gpuTargetReadyMs: number | null;
+  requestCpuReferenceMs: number;
   referenceBytes: number;
   gpuSampleBytes: number;
   readbackBytes: number;
@@ -78,6 +94,11 @@ export interface TerrainLabRenderReport {
   staleResultCount: number;
   coarseReady: boolean;
   targetReady: boolean;
+  cpuCoarseReady: boolean;
+  cpuTargetReady: boolean;
+  gpuCoarseReady: boolean;
+  gpuTargetReady: boolean;
+  cacheEnabled: boolean;
   budgetLimited: boolean;
   needsRedraw: boolean;
   gpuExecutionTimingAvailable: boolean;
@@ -107,6 +128,9 @@ export interface TerrainLabComparisonReport {
 interface TerrainCanvasProps {
   state: TerrainLabState;
   camera: TerrainLabCamera;
+  cacheEnabled: boolean;
+  cacheEpoch: number;
+  maxVisibleTilesPerAxis: number;
   onStateChange: (state: TerrainLabState) => void;
   onCameraChange: (camera: TerrainLabCamera) => void;
   onAdapter: (report: TerrainLabAdapterReport) => void;
@@ -138,6 +162,9 @@ interface PinchStart {
 export function TerrainCanvas({
   state,
   camera,
+  cacheEnabled,
+  cacheEpoch,
+  maxVisibleTilesPerAxis,
   onStateChange,
   onCameraChange,
   onAdapter,
@@ -157,6 +184,7 @@ export function TerrainCanvas({
   const orbitFrameRef = useRef(0);
   const pendingStateRef = useRef<TerrainLabState | undefined>(undefined);
   const pendingCameraRef = useRef<TerrainLabCamera | undefined>(undefined);
+  const appliedCacheEpochRef = useRef(0);
   const [canvasSize, setCanvasSize] = useState({ width: 1280, height: 720 });
   const [initialized, setInitialized] = useState(false);
   const [latestReport, setLatestReport] = useState<TerrainLabRenderReport>();
@@ -228,12 +256,17 @@ export function TerrainCanvas({
     let cancelled = false;
     let pumpFrame = 0;
     let needsRender = true;
-    let comparisonComplete = false;
+    let comparisonComplete = state.source !== "split";
     const revision = ++revisionRef.current;
     onStatus("rendering");
     onError(undefined);
     onComparison(undefined);
     lab.resize(canvasSize.width, canvasSize.height);
+    lab.setCacheEnabled(cacheEnabled);
+    if (appliedCacheEpochRef.current !== cacheEpoch) {
+      lab.clearCache();
+      appliedCacheEpochRef.current = cacheEpoch;
+    }
 
     const pump = (): void => {
       if (cancelled) {
@@ -257,6 +290,7 @@ export function TerrainCanvas({
               String(state.detail),
               Math.max(1, Math.round(panel.width)),
               Math.max(1, Math.round(panel.height)),
+              maxVisibleTilesPerAxis,
               state.source,
               state.view,
               state.layer,
@@ -294,12 +328,15 @@ export function TerrainCanvas({
     };
   }, [
     canvasSize,
+    cacheEnabled,
+    cacheEpoch,
     camera,
     initialized,
     onComparison,
     onError,
     onRender,
     onStatus,
+    maxVisibleTilesPerAxis,
     state,
   ]);
 
@@ -509,8 +546,18 @@ export function TerrainCanvas({
       </div>
       {state.source === "split" ? (
         <div className="splitLabels" aria-hidden="true">
-          <span>CPU production base</span>
-          <span>GPU production base</span>
+          <span>
+            CPU production base · {panelReadiness(
+              latestReport?.cpuPublishedSpacing,
+              latestReport?.cpuTargetReady,
+            )}
+          </span>
+          <span>
+            GPU production base · {panelReadiness(
+              latestReport?.gpuPublishedSpacing,
+              latestReport?.gpuTargetReady,
+            )}
+          </span>
         </div>
       ) : null}
       <div className="canvasHint" aria-hidden="true">
@@ -568,6 +615,16 @@ function firstPointerPair(
 
 function pointerDistance(first: ActivePointer, second: ActivePointer): number {
   return Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY);
+}
+
+function panelReadiness(
+  publishedSpacing: number | undefined,
+  targetReady: boolean | undefined,
+): string {
+  if (!publishedSpacing) {
+    return "waiting";
+  }
+  return targetReady ? `target 1:${publishedSpacing}` : `1:${publishedSpacing} · refining`;
 }
 
 function parseJson<T>(value: string): T {

@@ -9,6 +9,7 @@ use mclone_worldgen::{
 pub const TERRAIN_VIEWPORT_MIN_BLOCKS_ACROSS: u32 = 64;
 pub const TERRAIN_VIEWPORT_MAX_BLOCKS_ACROSS: u32 = 131_072;
 pub const TERRAIN_VIEWPORT_MAX_VISIBLE_TILES_PER_AXIS: u32 = 8;
+pub const TERRAIN_VIEWPORT_MAX_DIAGNOSTIC_TILES_PER_AXIS: u32 = 16;
 pub const TERRAIN_VIEWPORT_PRELOAD_MARGIN_TILES: i32 = 1;
 pub const TERRAIN_VIEWPORT_AUTO_PIXELS_PER_CELL: f64 = 2.0;
 
@@ -27,6 +28,7 @@ pub struct TerrainViewportRequest {
     pub panel_width_css: u32,
     pub panel_height_css: u32,
     pub detail: TerrainViewportDetail,
+    pub max_visible_tiles_per_axis: u32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -126,6 +128,14 @@ pub fn plan_terrain_viewport(
     if request.panel_width_css == 0 || request.panel_height_css == 0 {
         return Err("terrain viewport panel dimensions must be non-zero".to_owned());
     }
+    if !(1..=TERRAIN_VIEWPORT_MAX_DIAGNOSTIC_TILES_PER_AXIS)
+        .contains(&request.max_visible_tiles_per_axis)
+    {
+        return Err(format!(
+            "terrain viewport tile-axis budget must be 1 through {}, got {}",
+            TERRAIN_VIEWPORT_MAX_DIAGNOSTIC_TILES_PER_AXIS, request.max_visible_tiles_per_axis
+        ));
+    }
 
     let view_height_blocks = u32::try_from(
         u64::from(request.blocks_across)
@@ -158,13 +168,13 @@ pub fn plan_terrain_viewport(
             view_height_blocks,
             effective_spacing,
         )?;
-        if tiles_x.max(tiles_z) <= TERRAIN_VIEWPORT_MAX_VISIBLE_TILES_PER_AXIS {
+        if tiles_x.max(tiles_z) <= request.max_visible_tiles_per_axis {
             break;
         }
         if effective_spacing == TERRAIN_PREVIEW_MAX_SAMPLE_SPACING {
             return Err(format!(
                 "terrain viewport cannot fit within the {}-tile axis budget at spacing {}",
-                TERRAIN_VIEWPORT_MAX_VISIBLE_TILES_PER_AXIS, effective_spacing
+                request.max_visible_tiles_per_axis, effective_spacing
             ));
         }
         effective_spacing *= 2;
@@ -401,6 +411,7 @@ mod tests {
             panel_width_css: 800,
             panel_height_css: 600,
             detail,
+            max_visible_tiles_per_axis: TERRAIN_VIEWPORT_MAX_VISIBLE_TILES_PER_AXIS,
         }
     }
 
@@ -432,6 +443,18 @@ mod tests {
         assert!(
             plan.target_level().visible_tile_count()
                 <= usize::try_from(TERRAIN_VIEWPORT_MAX_VISIBLE_TILES_PER_AXIS.pow(2)).unwrap()
+        );
+    }
+
+    #[test]
+    fn diagnostic_axis_budget_admits_more_cold_stress_work() {
+        let normal = plan_terrain_viewport(request(TerrainViewportDetail::Manual(1))).unwrap();
+        let mut stress = request(TerrainViewportDetail::Manual(1));
+        stress.max_visible_tiles_per_axis = TERRAIN_VIEWPORT_MAX_DIAGNOSTIC_TILES_PER_AXIS;
+        let stress = plan_terrain_viewport(stress).unwrap();
+        assert!(stress.effective_spacing < normal.effective_spacing);
+        assert!(
+            stress.target_level().visible_tile_count() > normal.target_level().visible_tile_count()
         );
     }
 

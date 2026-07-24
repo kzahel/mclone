@@ -512,6 +512,18 @@ select {
   gap: 8px;
 }
 
+.controlNote {
+  margin: 0;
+  color: var(--muted);
+  font-size: 10px;
+  line-height: 1.5;
+}
+
+.benchmarkButtons button:last-child {
+  border-color: rgba(183, 220, 108, 0.42);
+  color: #e1f4b8;
+}
+
 .cameraResetButton {
   width: 100%;
 }

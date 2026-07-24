@@ -10,18 +10,18 @@ use std::sync::mpsc;
 use mclone_worldgen::levelgen::{MCLONE_OVERWORLD_LARGE_FIELD_SPEC, McloneOverworldLargeFieldBand};
 use mclone_worldgen::terrain_preview::{
     TERRAIN_PREVIEW_SAMPLE_FLOATS, TerrainPreviewComparison, TerrainPreviewReferenceGrid,
-    TerrainPreviewSample,
+    TerrainPreviewSample, ValidatedTerrainPreviewRequest,
 };
 
 pub use viewport::{
     TERRAIN_VIEWPORT_AUTO_PIXELS_PER_CELL, TERRAIN_VIEWPORT_MAX_BLOCKS_ACROSS,
-    TERRAIN_VIEWPORT_MAX_VISIBLE_TILES_PER_AXIS, TERRAIN_VIEWPORT_MIN_BLOCKS_ACROSS,
-    TERRAIN_VIEWPORT_PRELOAD_MARGIN_TILES, TerrainViewportDetail, TerrainViewportLevel,
-    TerrainViewportPlan, TerrainViewportRequest, TerrainViewportTileId, plan_terrain_viewport,
+    TERRAIN_VIEWPORT_MAX_DIAGNOSTIC_TILES_PER_AXIS, TERRAIN_VIEWPORT_MAX_VISIBLE_TILES_PER_AXIS,
+    TERRAIN_VIEWPORT_MIN_BLOCKS_ACROSS, TERRAIN_VIEWPORT_PRELOAD_MARGIN_TILES,
+    TerrainViewportDetail, TerrainViewportLevel, TerrainViewportPlan, TerrainViewportRequest,
+    TerrainViewportTileId, plan_terrain_viewport,
 };
 pub use viewport_renderer::{
-    EncodedTerrainViewportReadbacks, TerrainViewportCompletedComparison, TerrainViewportFrameStats,
-    TerrainViewportRenderer,
+    TerrainViewportCompletedComparison, TerrainViewportFrameStats, TerrainViewportRenderer,
 };
 
 pub const TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION: &str = "mclone-overworld-v1-gpu-preview-a2";
@@ -728,7 +728,31 @@ fn viewport_uniform_bytes(
     viewport_width_blocks: u32,
     viewport_height_blocks: u32,
 ) -> Vec<u8> {
-    let request = reference.request();
+    viewport_uniform_bytes_for_request(
+        reference.request(),
+        width,
+        height,
+        options,
+        camera,
+        viewport_center_x,
+        viewport_center_z,
+        viewport_width_blocks,
+        viewport_height_blocks,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn viewport_uniform_bytes_for_request(
+    request: ValidatedTerrainPreviewRequest,
+    width: u32,
+    height: u32,
+    options: TerrainPreviewDrawOptions,
+    camera: TerrainPreviewCamera,
+    viewport_center_x: i32,
+    viewport_center_z: i32,
+    viewport_width_blocks: u32,
+    viewport_height_blocks: u32,
+) -> Vec<u8> {
     let source = request.request();
     let seed = source.seed as u64;
     let words = [

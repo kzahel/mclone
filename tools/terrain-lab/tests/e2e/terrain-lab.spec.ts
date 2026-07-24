@@ -44,7 +44,7 @@ test("generates terrain, round-trips controls, and completes comparison", async 
   expect(compareStageBox).not.toBeNull();
 
   await page.getByRole("button", { name: "CPU final" }).click();
-  await waitForCurrentComparison(page);
+  await waitForLane(page, "cpu");
   await expect(shell).toHaveAttribute("data-compare-layout", "single");
   const singleStageBox = await page.getByTestId("terrain-stage").boundingBox();
   expect(singleStageBox).not.toBeNull();
@@ -152,17 +152,82 @@ test("generates terrain, round-trips controls, and completes comparison", async 
     fullPage: true,
   });
 
+  await page.evaluate(() => {
+    const race: string[] = [];
+    const shell = document.querySelector(".appShell");
+    const record = (): void => {
+      const state = `${shell?.getAttribute("data-cpu-target-ready")}/${
+        shell?.getAttribute("data-gpu-target-ready")
+      }`;
+      if (race.at(-1) !== state) {
+        race.push(state);
+      }
+    };
+    record();
+    const observer = new MutationObserver(record);
+    if (shell) {
+      observer.observe(shell, {
+        attributes: true,
+        attributeFilter: ["data-cpu-target-ready", "data-gpu-target-ready"],
+      });
+    }
+    Object.assign(window, { terrainLabRaceStates: race, terrainLabRaceObserver: observer });
+  });
+  const beforeStressRevision = Number(await shell.getAttribute("data-render-revision"));
+  await page.getByRole("button", { name: "Run stress race" }).click();
+  await expect(shell).toHaveAttribute("data-cache-enabled", "false");
+  await expect(page).toHaveURL(/blocks=2048/u);
+  await expect(page).toHaveURL(/detail=2/u);
+  await expect(page).toHaveURL(/source=split/u);
+  await expect(page).toHaveURL(/view=map/u);
+  await waitForCurrentComparison(page, beforeStressRevision);
+  await expect(shell).toHaveAttribute("data-cpu-target-ready", "true");
+  await expect(shell).toHaveAttribute("data-gpu-target-ready", "true");
+  await expect(page.getByTestId("lab-status")).toContainText("ready");
+  await expect(shell).toHaveAttribute("data-cache-hits", "0");
+  const raceStates = await page.evaluate(() => {
+    const holder = window as typeof window & {
+      terrainLabRaceObserver?: MutationObserver;
+      terrainLabRaceStates?: string[];
+    };
+    holder.terrainLabRaceObserver?.disconnect();
+    return holder.terrainLabRaceStates ?? [];
+  });
+  expect(raceStates.some((entry) => entry === "true/false" || entry === "false/true")).toBe(true);
+  await settlePaint(page);
+  await canvas.screenshot({
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-stress-race.png`,
+  });
+
   expect(pageErrors).toEqual([]);
 });
 
-async function waitForCurrentComparison(page: import("@playwright/test").Page): Promise<void> {
-  await page.waitForFunction(() => {
+async function waitForLane(
+  page: import("@playwright/test").Page,
+  lane: "cpu" | "gpu",
+): Promise<void> {
+  await page.waitForFunction((requestedLane) => {
+    const shell = document.querySelector(".appShell");
+    const render = Number(shell?.getAttribute("data-render-revision") ?? "0");
+    return render > 0
+      && shell?.getAttribute(`data-${requestedLane}-target-ready`) === "true";
+  }, lane);
+}
+
+async function waitForCurrentComparison(
+  page: import("@playwright/test").Page,
+  afterRevision = 0,
+): Promise<void> {
+  await page.waitForFunction((previousRevision) => {
     const shell = document.querySelector(".appShell");
     const render = Number(shell?.getAttribute("data-render-revision") ?? "0");
     const comparison = Number(shell?.getAttribute("data-comparison-revision") ?? "0");
-    const diagnostics = document.querySelector("[data-testid='terrain-diagnostics']");
-    return render > 0
-      && comparison === render
-      && !diagnostics?.textContent?.includes("pending");
-  });
+    return render > previousRevision && comparison === render;
+  }, afterRevision);
+}
+
+async function settlePaint(page: import("@playwright/test").Page): Promise<void> {
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+  }));
 }

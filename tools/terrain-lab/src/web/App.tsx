@@ -25,6 +25,7 @@ import {
 } from "./TerrainCanvas";
 
 type LabStatus = "loading" | "ready" | "rendering" | "error";
+type BenchmarkProfile = "interactive" | "stress";
 
 const SOURCE_OPTIONS: Array<{ value: TerrainLabSource; label: string; note: string }> = [
   { value: "reference", label: "CPU final", note: "Complete production CPU sampler" },
@@ -50,6 +51,10 @@ export function App(): React.JSX.Element {
   const [comparison, setComparison] = useState<TerrainLabComparisonReport>();
   const [error, setError] = useState<string>();
   const [camera, setCamera] = useState<TerrainLabCamera>(DEFAULT_TERRAIN_LAB_CAMERA);
+  const [cacheEnabled, setCacheEnabled] = useState(true);
+  const [cacheEpoch, setCacheEpoch] = useState(0);
+  const [benchmarkProfile, setBenchmarkProfile] =
+    useState<BenchmarkProfile>("interactive");
 
   useEffect(() => {
     const search = terrainLabSearch(state);
@@ -106,6 +111,17 @@ export function App(): React.JSX.Element {
       data-resident-tiles={renderReport?.residentTileCount ?? 0}
       data-queued-tiles={renderReport?.queuedTileCount ?? 0}
       data-target-ready={renderReport?.targetReady ? "true" : "false"}
+      data-cpu-target-ready={renderReport?.cpuTargetReady ? "true" : "false"}
+      data-gpu-target-ready={renderReport?.gpuTargetReady ? "true" : "false"}
+      data-cpu-target-ms={renderReport?.cpuTargetReadyMs ?? ""}
+      data-gpu-target-ms={renderReport?.gpuTargetReadyMs ?? ""}
+      data-cpu-request-ms={renderReport?.requestCpuReferenceMs ?? ""}
+      data-cache-enabled={cacheEnabled ? "true" : "false"}
+      data-cache-hits={renderReport?.requestCacheHitTiles ?? 0}
+      data-visible-tiles={renderReport?.visibleTileCount ?? 0}
+      data-request-cpu-tiles={renderReport?.requestCpuCompiledTiles ?? 0}
+      data-request-gpu-tiles={renderReport?.requestGpuDispatchedTiles ?? 0}
+      data-samples-per-axis={renderReport?.samplesPerAxis ?? 0}
     >
       <header className="topBar">
         <div className="brandLockup">
@@ -201,6 +217,9 @@ export function App(): React.JSX.Element {
           <TerrainCanvas
             state={state}
             camera={camera}
+            cacheEnabled={cacheEnabled}
+            cacheEpoch={cacheEpoch}
+            maxVisibleTilesPerAxis={benchmarkProfile === "stress" ? 12 : 8}
             onStateChange={updateState}
             onCameraChange={setCamera}
             onAdapter={setAdapter}
@@ -296,7 +315,86 @@ export function App(): React.JSX.Element {
             </button>
           </ControlSection>
 
-          <ControlSection number="04" title="Evidence" subdued>
+          <ControlSection number="04" title="Cache & benchmark">
+            <SegmentedControl<"on" | "off">
+              label="Session tile cache"
+              value={cacheEnabled ? "on" : "off"}
+              options={[
+                {
+                  value: "on",
+                  label: "Cache on",
+                  note: "Reuse up to 192 generated tiles while navigating",
+                },
+                {
+                  value: "off",
+                  label: "Cache off",
+                  note: "Regenerate whenever the generation viewport changes",
+                },
+              ]}
+              onChange={(value) => setCacheEnabled(value === "on")}
+            />
+            <p className="controlNote">
+              On keeps a session-local 192-tile LRU keyed by seed, aligned
+              origin, and spacing. Off retains only the active request and
+              disables speculative preload.
+            </p>
+            <SegmentedControl<BenchmarkProfile>
+              label="Workload budget"
+              value={benchmarkProfile}
+              options={[
+                {
+                  value: "interactive",
+                  label: "Interactive",
+                  note: "At most eight visible tiles per axis",
+                },
+                {
+                  value: "stress",
+                  label: "Stress",
+                  note: "At most twelve visible tiles per axis",
+                },
+              ]}
+              onChange={setBenchmarkProfile}
+            />
+            <div className="buttonRow benchmarkButtons">
+              <button
+                type="button"
+                onClick={() => {
+                  setComparison(undefined);
+                  setCacheEpoch((current) => current + 1);
+                }}
+              >
+                Cold current view
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setComparison(undefined);
+                  setCacheEnabled(false);
+                  setBenchmarkProfile("stress");
+                  setCacheEpoch((current) => current + 1);
+                  setState((current) => ({
+                    ...current,
+                    seed: REVIEW_TERRAIN_LAB_STATE.seed,
+                    centerX: REVIEW_TERRAIN_LAB_STATE.centerX,
+                    centerZ: REVIEW_TERRAIN_LAB_STATE.centerZ,
+                    blocksAcross: 2_048,
+                    detail: 2,
+                    source: "split",
+                    view: "map",
+                    layer: "terrain",
+                  }));
+                }}
+              >
+                Run stress race
+              </button>
+            </div>
+            <p className="controlNote">
+              Stress uses the fixed review seed/site, a cold 2 km Compare map
+              at requested 1:2, and independent CPU/GPU publication.
+            </p>
+          </ControlSection>
+
+          <ControlSection number="05" title="Evidence" subdued>
             <Diagnostics
               adapter={adapter}
               report={renderReport}
@@ -315,11 +413,10 @@ function SourceGuide({ source }: { source: TerrainLabSource }): React.JSX.Elemen
       <div className="sourceGuide">
         <strong>Same coordinates, paired views</strong>
         <span>
-          CPU production base is first; GPU production base is second. Both panels
-          render the exact same world coordinates with one shared seed, center, scale,
-          camera, and layer. Wide screens place them left and right; phones stack
-          full-width panels to preserve detail. Orbit or pan once to move both
-          together, then compare matching terrain directly.
+          CPU production base is first; GPU production base is second. Each
+          panel appears as its own complete level becomes ready instead of
+          waiting for the other. Both retain the exact same world coordinates,
+          seed, center, scale, camera, and layer.
         </span>
       </div>
     );
@@ -536,6 +633,13 @@ function Diagnostics({
   comparison: TerrainLabComparisonReport | undefined;
 }): React.JSX.Element {
   const memory = report ? formatBytes(report.residentBytes) : "—";
+  const samplesPerTile = report ? report.samplesPerAxis ** 2 : 0;
+  const cpuRequestSamples = report
+    ? report.requestCpuCompiledTiles * samplesPerTile
+    : 0;
+  const gpuRequestSamples = report
+    ? report.requestGpuDispatchedTiles * samplesPerTile
+    : 0;
   const adapterLabel = useMemo(() => {
     if (!adapter) {
       return "requesting adapter";
@@ -547,13 +651,41 @@ function Diagnostics({
       <div className="metricGrid">
         <Metric label="CPU compile / frame" value={formatMs(report?.cpuReferenceMs)} />
         <Metric label="Encode + submit" value={formatMs(report?.encodeSubmitMs)} />
-        <Metric label="Coarse pixel" value={formatMs(report?.coarseReadyMs)} />
-        <Metric label="Target pixel" value={formatMs(report?.targetReadyMs)} />
+        <Metric label="CPU coarse" value={formatMs(report?.cpuCoarseReadyMs)} />
+        <Metric label="GPU coarse + readback" value={formatMs(report?.gpuCoarseReadyMs)} />
+        <Metric label="CPU target" value={formatMs(report?.cpuTargetReadyMs)} />
+        <Metric label="GPU target + readback" value={formatMs(report?.gpuTargetReadyMs)} />
+        <Metric
+          label="CPU end-to-end"
+          value={formatSampleRate(
+            cpuRequestSamples,
+            report?.cpuTargetReadyMs,
+            report?.cpuTargetReady,
+          )}
+        />
+        <Metric
+          label="GPU end-to-end"
+          value={formatSampleRate(
+            gpuRequestSamples,
+            report?.gpuTargetReadyMs,
+            report?.gpuTargetReady,
+          )}
+        />
         <Metric label="GPU execution" value="unavailable" />
         <Metric
-          label="Tile progress"
+          label="CPU level"
           value={report
-            ? `${report.publishedTileCount}/${report.visibleTileCount} visible`
+            ? `${report.cpuPublishedTileCount}/${report.visibleTileCount} · ${
+                report.cpuPublishedSpacing ? `1:${report.cpuPublishedSpacing}` : "waiting"
+              }`
+            : "—"}
+        />
+        <Metric
+          label="GPU level"
+          value={report
+            ? `${report.gpuPublishedTileCount}/${report.visibleTileCount} · ${
+                report.gpuPublishedSpacing ? `1:${report.gpuPublishedSpacing}` : "waiting"
+              }`
             : "—"}
         />
         <Metric label="Base mean Δ" value={formatBlocks(comparison?.meanAbsoluteBaseSurfaceError)} />
@@ -567,8 +699,12 @@ function Diagnostics({
         <Metric label="Final P95 Δ" value={formatBlocks(comparison?.p95AbsoluteSurfaceError)} />
         <Metric label="GPU resident" value={memory} />
         <Metric
-          label="Queue"
-          value={report ? `${formatInteger(report.queuedTileCount)} queued` : "—"}
+          label="CPU / GPU queue"
+          value={report
+            ? `${formatInteger(report.cpuQueuedTileCount)} / ${
+                formatInteger(report.gpuQueuedTileCount)
+              }`
+            : "—"}
         />
       </div>
       <dl className="detailList">
@@ -586,7 +722,9 @@ function Diagnostics({
           <dt>Published</dt>
           <dd>
             {report
-              ? `1:${report.publishedSpacing} · ${report.publishedTileCount} tiles`
+              ? `CPU 1:${report.cpuPublishedSpacing || "—"} · GPU 1:${
+                  report.gpuPublishedSpacing || "—"
+                }`
               : "—"}
           </dd>
         </div>
@@ -594,11 +732,23 @@ function Diagnostics({
           <dt>Cache</dt>
           <dd>
             {report
-              ? `${report.residentTileCount} resident · ${report.evictedTilesTotal} evicted`
+              ? `${report.cacheEnabled ? "on" : "off"} · ${
+                  report.requestCacheHitTiles
+                } hits · ${report.residentTileCount} resident`
               : "—"}
           </dd>
         </div>
         <div><dt>Samples</dt><dd>{report ? formatInteger(report.sampleCount) : "—"}</dd></div>
+        <div>
+          <dt>CPU compile rate</dt>
+          <dd>
+            {formatSampleRate(
+              cpuRequestSamples,
+              report?.requestCpuReferenceMs,
+              report?.cpuTargetReady,
+            )}
+          </dd>
+        </div>
         <div><dt>Field</dt><dd>{shortRevision(report?.fieldRevision)}</dd></div>
         <div><dt>GPU evaluator</dt><dd>{shortRevision(report?.gpuEvaluatorRevision)}</dd></div>
       </dl>
@@ -630,6 +780,24 @@ function formatMs(value: number | null | undefined): string {
   return value === undefined || value === null
     ? "—"
     : `${value.toFixed(value >= 10 ? 1 : 2)} ms`;
+}
+
+function formatSampleRate(
+  samples: number,
+  milliseconds: number | null | undefined,
+  targetReady: boolean | undefined,
+): string {
+  if (!samples && targetReady) {
+    return "cache hit";
+  }
+  if (!samples || milliseconds === undefined || milliseconds === null || milliseconds <= 0) {
+    return "pending";
+  }
+  const samplesPerSecond = samples / (milliseconds / 1_000);
+  if (samplesPerSecond >= 1_000_000) {
+    return `${(samplesPerSecond / 1_000_000).toFixed(2)} M/s`;
+  }
+  return `${(samplesPerSecond / 1_000).toFixed(1)} K/s`;
 }
 
 function formatBlocks(value: number | undefined): string {

@@ -44,6 +44,8 @@ struct TerrainLabRenderReport<'a> {
     requested_spacing: u32,
     effective_spacing: u32,
     published_spacing: u32,
+    cpu_published_spacing: u32,
+    gpu_published_spacing: u32,
     sample_spacing: u32,
     cells_per_axis: u32,
     samples_per_axis: u32,
@@ -56,11 +58,20 @@ struct TerrainLabRenderReport<'a> {
     level_count: u32,
     visible_tile_count: u32,
     published_tile_count: u32,
+    cpu_published_tile_count: u32,
+    gpu_published_tile_count: u32,
     resident_tile_count: u32,
     queued_tile_count: u32,
+    cpu_queued_tile_count: u32,
+    gpu_queued_tile_count: u32,
     pending_readback_count: u32,
-    compiled_tiles: u32,
-    compiled_tiles_total: u64,
+    cpu_compiled_tiles: u32,
+    cpu_compiled_tiles_total: u64,
+    gpu_dispatched_tiles: u32,
+    gpu_dispatched_tiles_total: u64,
+    request_cpu_compiled_tiles: u32,
+    request_gpu_dispatched_tiles: u32,
+    request_cache_hit_tiles: u32,
     evicted_tiles_total: u64,
     source: &'static str,
     view: &'static str,
@@ -75,6 +86,11 @@ struct TerrainLabRenderReport<'a> {
     request_ms: f64,
     coarse_ready_ms: Option<f64>,
     target_ready_ms: Option<f64>,
+    cpu_coarse_ready_ms: Option<f64>,
+    cpu_target_ready_ms: Option<f64>,
+    gpu_coarse_ready_ms: Option<f64>,
+    gpu_target_ready_ms: Option<f64>,
+    request_cpu_reference_ms: f64,
     reference_bytes: u64,
     gpu_sample_bytes: u64,
     readback_bytes: u64,
@@ -83,6 +99,11 @@ struct TerrainLabRenderReport<'a> {
     stale_result_count: u64,
     coarse_ready: bool,
     target_ready: bool,
+    cpu_coarse_ready: bool,
+    cpu_target_ready: bool,
+    gpu_coarse_ready: bool,
+    gpu_target_ready: bool,
+    cache_enabled: bool,
     budget_limited: bool,
     needs_redraw: bool,
     gpu_execution_timing_available: bool,
@@ -132,6 +153,10 @@ pub struct TerrainLab {
     request_started_ms: f64,
     coarse_ready_ms: Option<f64>,
     target_ready_ms: Option<f64>,
+    cpu_coarse_ready_ms: Option<f64>,
+    cpu_target_ready_ms: Option<f64>,
+    gpu_coarse_ready_ms: Option<f64>,
+    gpu_target_ready_ms: Option<f64>,
 }
 
 #[wasm_bindgen]
@@ -155,6 +180,16 @@ impl TerrainLab {
         self.resize_surface(width, height);
     }
 
+    #[wasm_bindgen(js_name = setCacheEnabled)]
+    pub fn set_cache_enabled(&mut self, enabled: bool) {
+        self.renderer.set_cache_enabled(enabled);
+    }
+
+    #[wasm_bindgen(js_name = clearCache)]
+    pub fn clear_cache(&mut self) {
+        self.renderer.clear_cache();
+    }
+
     #[allow(clippy::too_many_arguments)]
     #[wasm_bindgen]
     pub fn render(
@@ -167,6 +202,7 @@ impl TerrainLab {
         detail: String,
         panel_width_css: u32,
         panel_height_css: u32,
+        max_visible_tiles_per_axis: u32,
         source: String,
         view: String,
         layer: String,
@@ -189,6 +225,7 @@ impl TerrainLab {
             panel_width_css,
             panel_height_css,
             detail: viewport_detail,
+            max_visible_tiles_per_axis,
         })
         .map_err(js_error)?;
         let revision = u64::from(revision);
@@ -197,6 +234,10 @@ impl TerrainLab {
             self.request_started_ms = request_start;
             self.coarse_ready_ms = None;
             self.target_ready_ms = None;
+            self.cpu_coarse_ready_ms = None;
+            self.cpu_target_ready_ms = None;
+            self.gpu_coarse_ready_ms = None;
+            self.gpu_target_ready_ms = None;
         }
         self.renderer.set_viewport(revision, plan);
 
@@ -210,7 +251,7 @@ impl TerrainLab {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("mclone_terrain_lab_encoder"),
             });
-        let (stats, readbacks) = self
+        let stats = self
             .renderer
             .encode(
                 &self.device,
@@ -226,13 +267,24 @@ impl TerrainLab {
             .map_err(js_error)?;
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
-        self.renderer.mark_submitted(readbacks);
         let finished = now_ms()?;
         if stats.coarse_ready && self.coarse_ready_ms.is_none() {
             self.coarse_ready_ms = Some(finished - self.request_started_ms);
         }
         if stats.target_ready && self.target_ready_ms.is_none() {
             self.target_ready_ms = Some(finished - self.request_started_ms);
+        }
+        if stats.cpu_coarse_ready && self.cpu_coarse_ready_ms.is_none() {
+            self.cpu_coarse_ready_ms = Some(finished - self.request_started_ms);
+        }
+        if stats.cpu_target_ready && self.cpu_target_ready_ms.is_none() {
+            self.cpu_target_ready_ms = Some(finished - self.request_started_ms);
+        }
+        if stats.gpu_coarse_ready && self.gpu_coarse_ready_ms.is_none() {
+            self.gpu_coarse_ready_ms = Some(finished - self.request_started_ms);
+        }
+        if stats.gpu_target_ready && self.gpu_target_ready_ms.is_none() {
+            self.gpu_target_ready_ms = Some(finished - self.request_started_ms);
         }
         let (source, view, layer) = terrain_preview_option_labels(options);
         let report = render_report(
@@ -252,6 +304,10 @@ impl TerrainLab {
             finished - self.request_started_ms,
             self.coarse_ready_ms,
             self.target_ready_ms,
+            self.cpu_coarse_ready_ms,
+            self.cpu_target_ready_ms,
+            self.gpu_coarse_ready_ms,
+            self.gpu_target_ready_ms,
         );
         json(&report)
     }
@@ -352,6 +408,10 @@ impl TerrainLab {
             request_started_ms: 0.0,
             coarse_ready_ms: None,
             target_ready_ms: None,
+            cpu_coarse_ready_ms: None,
+            cpu_target_ready_ms: None,
+            gpu_coarse_ready_ms: None,
+            gpu_target_ready_ms: None,
         })
     }
 
@@ -450,6 +510,10 @@ fn render_report<'a>(
     request_ms: f64,
     coarse_ready_ms: Option<f64>,
     target_ready_ms: Option<f64>,
+    cpu_coarse_ready_ms: Option<f64>,
+    cpu_target_ready_ms: Option<f64>,
+    gpu_coarse_ready_ms: Option<f64>,
+    gpu_target_ready_ms: Option<f64>,
 ) -> TerrainLabRenderReport<'a> {
     TerrainLabRenderReport {
         revision: stats.revision,
@@ -464,6 +528,8 @@ fn render_report<'a>(
         requested_spacing: stats.requested_spacing,
         effective_spacing: stats.effective_spacing,
         published_spacing: stats.published_spacing,
+        cpu_published_spacing: stats.cpu_published_spacing,
+        gpu_published_spacing: stats.gpu_published_spacing,
         sample_spacing: stats.effective_spacing,
         cells_per_axis: TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS,
         samples_per_axis: TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS + 1,
@@ -476,11 +542,20 @@ fn render_report<'a>(
         level_count: stats.level_count,
         visible_tile_count: stats.visible_tile_count,
         published_tile_count: stats.published_tile_count,
+        cpu_published_tile_count: stats.cpu_published_tile_count,
+        gpu_published_tile_count: stats.gpu_published_tile_count,
         resident_tile_count: stats.resident_tile_count,
         queued_tile_count: stats.queued_tile_count,
+        cpu_queued_tile_count: stats.cpu_queued_tile_count,
+        gpu_queued_tile_count: stats.gpu_queued_tile_count,
         pending_readback_count: stats.pending_readback_count,
-        compiled_tiles: stats.compiled_tiles,
-        compiled_tiles_total: stats.compiled_tiles_total,
+        cpu_compiled_tiles: stats.cpu_compiled_tiles,
+        cpu_compiled_tiles_total: stats.cpu_compiled_tiles_total,
+        gpu_dispatched_tiles: stats.gpu_dispatched_tiles,
+        gpu_dispatched_tiles_total: stats.gpu_dispatched_tiles_total,
+        request_cpu_compiled_tiles: stats.request_cpu_compiled_tiles,
+        request_gpu_dispatched_tiles: stats.request_gpu_dispatched_tiles,
+        request_cache_hit_tiles: stats.request_cache_hit_tiles,
         evicted_tiles_total: stats.evicted_tiles_total,
         source,
         view,
@@ -495,6 +570,11 @@ fn render_report<'a>(
         request_ms,
         coarse_ready_ms,
         target_ready_ms,
+        cpu_coarse_ready_ms,
+        cpu_target_ready_ms,
+        gpu_coarse_ready_ms,
+        gpu_target_ready_ms,
+        request_cpu_reference_ms: stats.request_cpu_reference_micros as f64 / 1_000.0,
         reference_bytes: stats.reference_bytes,
         gpu_sample_bytes: stats.gpu_sample_bytes,
         readback_bytes: stats.readback_bytes,
@@ -503,6 +583,11 @@ fn render_report<'a>(
         stale_result_count: stats.stale_result_count,
         coarse_ready: stats.coarse_ready,
         target_ready: stats.target_ready,
+        cpu_coarse_ready: stats.cpu_coarse_ready,
+        cpu_target_ready: stats.cpu_target_ready,
+        gpu_coarse_ready: stats.gpu_coarse_ready,
+        gpu_target_ready: stats.gpu_target_ready,
+        cache_enabled: stats.cache_enabled,
         budget_limited: stats.budget_limited,
         needs_redraw: stats.needs_redraw,
         gpu_execution_timing_available: false,

@@ -92,6 +92,7 @@ try {
   const orbitCapture = `/tmp/mclone-terrain-lab-${label}-orbit.png`;
   const errorCapture = `/tmp/mclone-terrain-lab-${label}-map-error.png`;
   const continentScaleCapture = `/tmp/mclone-terrain-lab-${label}-continent-scale.png`;
+  const stressRaceCapture = `/tmp/mclone-terrain-lab-${label}-stress-race.png`;
   await page.screenshot({ path: pageCapture, fullPage: true });
   await page.locator("canvas[aria-label='Live GPU terrain preview']").screenshot({
     path: canvasCapture,
@@ -168,6 +169,63 @@ try {
       || !finalUrl.includes("detail=auto")) {
     throw new Error(`Terrain Lab controls did not round-trip through the URL: ${finalUrl}`);
   }
+
+  await page.evaluate(() => {
+    const race = [];
+    const shell = document.querySelector(".appShell");
+    const record = () => {
+      const state = `${shell?.getAttribute("data-cpu-target-ready")}/${
+        shell?.getAttribute("data-gpu-target-ready")
+      }`;
+      if (race.at(-1) !== state) {
+        race.push(state);
+      }
+    };
+    record();
+    const observer = new MutationObserver(record);
+    observer.observe(shell, {
+      attributes: true,
+      attributeFilter: ["data-cpu-target-ready", "data-gpu-target-ready"],
+    });
+    window.terrainLabRaceStates = race;
+    window.terrainLabRaceObserver = observer;
+  });
+  const beforeStressRevision = Number(await shell.getAttribute("data-render-revision"));
+  await page.getByRole("button", { name: "Run stress race" }).click();
+  await waitForStressRace(shell, beforeStressRevision);
+  const stressMetrics = await readComparisonMetrics(shell);
+  assertLargeFieldMetrics(stressMetrics, "cold stress race");
+  const raceStates = await page.evaluate(() => {
+    window.terrainLabRaceObserver?.disconnect();
+    return window.terrainLabRaceStates ?? [];
+  });
+  if (!raceStates.some((state) => state === "true/false" || state === "false/true")) {
+    throw new Error(`CPU/GPU panels never published independently: ${raceStates.join(", ")}`);
+  }
+  await settlePaint(page);
+  await page.locator("canvas[aria-label='Live GPU terrain preview']").screenshot({
+    path: stressRaceCapture,
+  });
+  const stressBenchmark = {
+    cacheEnabled: await shell.getAttribute("data-cache-enabled"),
+    cacheHits: Number(await shell.getAttribute("data-cache-hits")),
+    cpuRequestMs: Number(await shell.getAttribute("data-cpu-request-ms")),
+    cpuTargetMs: Number(await shell.getAttribute("data-cpu-target-ms")),
+    cpuTiles: Number(await shell.getAttribute("data-request-cpu-tiles")),
+    effectiveSpacing: Number(await shell.getAttribute("data-effective-spacing")),
+    gpuTargetMs: Number(await shell.getAttribute("data-gpu-target-ms")),
+    gpuTiles: Number(await shell.getAttribute("data-request-gpu-tiles")),
+    raceStates,
+    samplesPerAxis: Number(await shell.getAttribute("data-samples-per-axis")),
+    stressUrl: page.url(),
+    visibleTiles: Number(await shell.getAttribute("data-visible-tiles")),
+  };
+  if (stressBenchmark.cacheEnabled !== "false"
+      || stressBenchmark.cacheHits !== 0
+      || stressBenchmark.cpuTargetMs <= 0
+      || stressBenchmark.gpuTargetMs <= 0) {
+    throw new Error(`Cold stress benchmark is incomplete: ${JSON.stringify(stressBenchmark)}`);
+  }
   if (pageErrors.length > 0) {
     throw new Error(`Browser errors:\n${pageErrors.join("\n")}`);
   }
@@ -180,11 +238,14 @@ try {
       errorCapture,
       orbitCapture,
       pageCapture,
+      stressRaceCapture,
     },
     comparison: await page.locator("[data-testid='terrain-diagnostics']").innerText(),
     comparisonMetrics,
     continentScaleMetrics,
     finalUrl,
+    stressBenchmark,
+    stressMetrics,
     target: externalBaseUrl ? "hosted" : "local-preview",
     launch: {
       autoConfiguredWayland: launch.autoConfiguredWayland,
@@ -279,10 +340,7 @@ async function waitForComparison(shell) {
       const comparisonRevision = Number(
         element?.getAttribute("data-comparison-revision") ?? "0",
       );
-      const diagnostics = document.querySelector("[data-testid='terrain-diagnostics']");
-      return renderRevision > 0
-        && comparisonRevision === renderRevision
-        && !diagnostics?.textContent?.includes("pending");
+      return renderRevision > 0 && comparisonRevision === renderRevision;
     },
   );
 }
@@ -296,10 +354,25 @@ async function waitForRevision(shell, previousRevision) {
       const comparison = document
         .querySelector(".appShell")
         ?.getAttribute("data-comparison-revision");
-      const diagnostics = document.querySelector("[data-testid='terrain-diagnostics']");
       return Number(value ?? "0") > previous
-        && Number(comparison ?? "0") === Number(value ?? "0")
-        && !diagnostics?.textContent?.includes("pending");
+        && Number(comparison ?? "0") === Number(value ?? "0");
+    },
+    previousRevision,
+  );
+}
+
+async function waitForStressRace(shell, previousRevision) {
+  await shell.page().waitForFunction(
+    (previous) => {
+      const element = document.querySelector(".appShell");
+      const render = Number(element?.getAttribute("data-render-revision") ?? "0");
+      const comparison = Number(element?.getAttribute("data-comparison-revision") ?? "0");
+      return render > previous
+        && comparison === render
+        && element?.getAttribute("data-cpu-target-ready") === "true"
+        && element?.getAttribute("data-gpu-target-ready") === "true"
+        && document.querySelector("[data-testid='lab-status']")
+          ?.textContent?.toLowerCase().includes("ready");
     },
     previousRevision,
   );
