@@ -74,6 +74,21 @@ asset-epoch replacement, and commits only after replacement succeeds. Native
 preparation is background work; browser preparation uses the portable
 synchronous replacement implementation behind the same scene contract.
 
+Live choices are serialized with every other asset-epoch replacement. If a
+replacement is already active, the scene records the latest requested leaf
+detail and reports successful handling to the input router. The pending choice
+survives the active commit and begins on the next replacement poll. Repeated
+clicks coalesce, while reversing from `Bushy` to `Blocky` during a Bushy
+compile queues the reversal instead of losing it.
+
+This serialization closes a 2026-07-24 Steam Deck/macOS regression. A Leaf
+Detail click could previously reach `begin_prepared_asset_replacement` while
+another replacement was active, propagate `an asset replacement is already in
+progress` through desktop pointer routing, and trigger the desktop host's
+intentional exit-on-unexpected-input-error policy. The host policy remains
+strict; Leaf Detail contention is now an expected shared scene state rather
+than an input error.
+
 Schema-1 `ClientGraphicsPreferences` currently owns only leaf detail. Native
 hosts use the atomic `graphics-preferences.v1.json` document, browser uses
 `mclone.graphics.preferences.v1` in `localStorage`, and Factory Reset removes
@@ -430,6 +445,11 @@ Passing gates include:
 - wasm build, generated-glue typecheck, headed WebGPU worker-backed app smoke,
   and inspected browser pixels;
 - flat Android debug APK and Android XR release APK builds.
+
+Post-closeout contention regression validation passed the full `mclone-scene`
+and `mclone-native-client` cargo test suites, including the busy/same-detail
+and busy/changed-detail request contracts. This was shared-state and
+input-routing validation; no new pixels were introduced by the fix.
 
 The ordinary cutout section mesh is shared by mono, per-eye, and full-frame
 multiview; no Bushy renderer or per-eye branch exists. The Android XR release

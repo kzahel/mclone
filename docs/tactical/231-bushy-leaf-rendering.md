@@ -155,7 +155,11 @@ The tactical shipped in these feature commits:
   schema-1 machine-local preference, platform storage, and Factory Reset;
 - `2f6a5721` — first-poll local-startup catalog restoration and independent
   desktop graphics-preference discovery; and
-- `f66a9183` — wasm action coverage and repeatable headed-browser Bushy smoke.
+- `f66a9183` — wasm action coverage and repeatable headed-browser Bushy smoke;
+  and
+- `de03445d` — live Leaf Detail choices coalesced behind an active asset
+  replacement instead of escaping through desktop pointer routing as a fatal
+  busy error.
 
 The final implementation derives all six current leaf families from the active
 pack with no species-specific Bushy art. `Blocky` emits no decorative cards.
