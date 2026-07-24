@@ -10,6 +10,7 @@
 //! worldgen mailbox live in their own sibling modules.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+use std::sync::Arc;
 use std::time::Duration;
 
 use mclone_core::{
@@ -529,6 +530,8 @@ pub struct ChunkScheduler {
     pending_player_saves: BTreeMap<PersistenceRequestId, PlayerRecordKey>,
     entity_unload_saves: BTreeSet<ChunkPos>,
     pub(crate) distance_manager: ChunkDistanceManager,
+    reconciled_ticket_generation: Option<u64>,
+    runtime_target_plan: Arc<[ChunkPos]>,
     jobs: BTreeMap<ChunkJobId, ChunkStatusJob>,
     job_timings: BTreeMap<ChunkJobId, OverworldFeatureBatchTiming>,
     worldgen_mailbox: WorldgenMailbox,
@@ -797,6 +800,8 @@ impl ChunkScheduler {
             pending_player_saves: BTreeMap::new(),
             entity_unload_saves: BTreeSet::new(),
             distance_manager: ChunkDistanceManager::new(),
+            reconciled_ticket_generation: None,
+            runtime_target_plan: Arc::from([]),
             jobs: BTreeMap::new(),
             job_timings: BTreeMap::new(),
             worldgen_mailbox: WorldgenMailbox::new(),
@@ -857,6 +862,8 @@ impl ChunkScheduler {
             pending_player_saves: BTreeMap::new(),
             entity_unload_saves: BTreeSet::new(),
             distance_manager: ChunkDistanceManager::new(),
+            reconciled_ticket_generation: None,
+            runtime_target_plan: Arc::from([]),
             jobs: BTreeMap::new(),
             job_timings: BTreeMap::new(),
             worldgen_mailbox: WorldgenMailbox::with_wasm_job_worker(config.clone()),
@@ -987,7 +994,11 @@ impl ChunkScheduler {
     }
 
     pub fn set_lighting_enabled(&mut self, enabled: bool) {
+        if self.lighting_enabled == enabled {
+            return;
+        }
         self.lighting_enabled = enabled;
+        self.reconciled_ticket_generation = None;
     }
 
     pub const fn light_status_batch_size(&self) -> usize {
@@ -2863,119 +2874,120 @@ impl ChunkScheduler {
     fn reconcile_ticketed_holders_with_timing(
         &mut self,
     ) -> ChunkStoreResult<(Vec<ChunkSchedulerEvent>, ReconcileHoldersTiming)> {
-        let active_levels_start = simulation_timing_start();
-        let (active_levels, cache_hit) = self.distance_manager.active_levels_with_cache_status();
-        let active_levels_us = simulation_timing_elapsed_us(active_levels_start);
-
-        let holder_updates_start = simulation_timing_start();
-        let desired_set = active_levels.keys().copied().collect::<BTreeSet<_>>();
-        let client_visible_set = self.distance_manager.player_interest_positions();
+        let ticket_generation = self.distance_manager.ticket_generation();
         let priority_centers = self
             .distance_manager
             .player_interest_priority_centers()
             .to_vec();
-        let lighting_enabled = self.lighting_enabled;
         let mut events = Vec::new();
-        let mut holder_update_count = 0_usize;
+        let mut timing = ReconcileHoldersTiming::default();
 
-        for pos in self
-            .holders
-            .keys()
-            .copied()
-            .filter(|pos| !desired_set.contains(pos))
-            .collect::<Vec<_>>()
-        {
-            holder_update_count = holder_update_count.saturating_add(1);
-            let holder = self.holders.get_mut(&pos).expect("holder key disappeared");
-            holder.set_ticket_level(UNLOADED_CHUNK_LEVEL);
-            if holder.client_visible {
-                events.push(ChunkSchedulerEvent::Unloaded { pos });
-                holder.set_client_visible(false);
-            }
-            self.pending_unloads.insert(pos);
-        }
+        if self.reconciled_ticket_generation != Some(ticket_generation) {
+            let active_levels_start = simulation_timing_start();
+            let (active_levels, cache_hit) =
+                self.distance_manager.active_levels_with_cache_status();
+            timing.active_levels_us = simulation_timing_elapsed_us(active_levels_start);
+            timing.active_levels_calls = 1;
+            timing.active_levels_cache_hits = usize::from(cache_hit);
 
-        let mut runtime_targets = BTreeSet::new();
-        for (&pos, &ticket_level) in active_levels.iter() {
-            holder_update_count = holder_update_count.saturating_add(1);
-            self.pending_unloads.remove(&pos);
-            let should_be_client_visible = client_visible_set.contains(&pos);
-            let full_status = full_chunk_status_for_ticket_level(ticket_level);
-            let has_direct_feature_ticket =
-                self.distance_manager.ticket_level_at(pos) <= CHUNK_LEVEL_FULL + 1;
-            let should_run_block_ticks = full_status.is_or_after(FullChunkStatus::Ticking);
-            let target_status = if should_be_client_visible
-                || has_direct_feature_ticket
-                || should_run_block_ticks
+            let holder_updates_start = simulation_timing_start();
+            let client_visible_set = self.distance_manager.player_interest_positions();
+            let lighting_enabled = self.lighting_enabled;
+
+            for pos in self
+                .holders
+                .keys()
+                .copied()
+                .filter(|pos| !active_levels.contains_key(pos))
+                .collect::<Vec<_>>()
             {
-                self.runtime_chunk_target_status()
-            } else {
-                ticket_level_dependency_status_target(ticket_level)
-            };
-            let mut snapshot_to_publish = None;
-            {
-                let holder = self
-                    .holders
-                    .entry(pos)
-                    .or_insert_with(|| ChunkHolder::new(pos));
-                holder.set_ticket_level(ticket_level);
-                holder.set_target_status(target_status);
-
-                if !should_be_client_visible && holder.client_visible {
-                    holder.set_client_visible(false);
+                timing.holder_update_count = timing.holder_update_count.saturating_add(1);
+                let holder = self.holders.get_mut(&pos).expect("holder key disappeared");
+                holder.set_ticket_level(UNLOADED_CHUNK_LEVEL);
+                if holder.client_visible {
                     events.push(ChunkSchedulerEvent::Unloaded { pos });
-                } else if should_be_client_visible
-                    && !holder.client_visible
-                    && holder.published_snapshot.as_ref().is_some_and(|snapshot| {
-                        snapshot_is_client_ready_for_lighting_mode(snapshot, lighting_enabled)
-                    })
+                    holder.set_client_visible(false);
+                }
+                self.pending_unloads.insert(pos);
+            }
+
+            let mut runtime_targets = BTreeSet::new();
+            for (&pos, &ticket_level) in active_levels.iter() {
+                timing.holder_update_count = timing.holder_update_count.saturating_add(1);
+                self.pending_unloads.remove(&pos);
+                let should_be_client_visible = client_visible_set.contains(&pos);
+                let full_status = full_chunk_status_for_ticket_level(ticket_level);
+                let has_direct_feature_ticket =
+                    self.distance_manager.ticket_level_at(pos) <= CHUNK_LEVEL_FULL + 1;
+                let should_run_block_ticks = full_status.is_or_after(FullChunkStatus::Ticking);
+                let target_status = if should_be_client_visible
+                    || has_direct_feature_ticket
+                    || should_run_block_ticks
                 {
-                    holder.set_client_visible(true);
-                    snapshot_to_publish = holder.published_snapshot.clone();
+                    self.runtime_chunk_target_status()
+                } else {
+                    ticket_level_dependency_status_target(ticket_level)
+                };
+                let mut snapshot_to_publish = None;
+                {
+                    let holder = self
+                        .holders
+                        .entry(pos)
+                        .or_insert_with(|| ChunkHolder::new(pos));
+                    holder.set_ticket_level(ticket_level);
+                    holder.set_target_status(target_status);
+
+                    if !should_be_client_visible && holder.client_visible {
+                        holder.set_client_visible(false);
+                        events.push(ChunkSchedulerEvent::Unloaded { pos });
+                    } else if should_be_client_visible
+                        && !holder.client_visible
+                        && holder.published_snapshot.as_ref().is_some_and(|snapshot| {
+                            snapshot_is_client_ready_for_lighting_mode(snapshot, lighting_enabled)
+                        })
+                    {
+                        holder.set_client_visible(true);
+                        snapshot_to_publish = holder.published_snapshot.clone();
+                    }
+                }
+
+                if let Some(snapshot) = snapshot_to_publish {
+                    events.push(ChunkSchedulerEvent::SnapshotReady(snapshot));
+                }
+
+                if target_status >= ChunkStatus::Features {
+                    runtime_targets.insert(pos);
+                } else {
+                    self.ensure_dependency_status_scheduled(pos, target_status);
                 }
             }
-
-            if let Some(snapshot) = snapshot_to_publish {
-                events.push(ChunkSchedulerEvent::SnapshotReady(snapshot));
-            }
-
-            if target_status >= ChunkStatus::Features {
-                runtime_targets.insert(pos);
-            } else {
-                self.ensure_dependency_status_scheduled(pos, target_status);
-            }
+            timing.holder_updates_us = simulation_timing_elapsed_us(holder_updates_start);
+            self.runtime_target_plan = Arc::from(
+                sorted_chunk_positions_by_priority_in(
+                    self.topology,
+                    runtime_targets,
+                    &priority_centers,
+                )
+                .into_boxed_slice(),
+            );
+            self.reconciled_ticket_generation = Some(ticket_generation);
         }
-        let holder_updates_us = simulation_timing_elapsed_us(holder_updates_start);
 
-        let runtime_target_count = runtime_targets.len();
+        let runtime_targets = Arc::clone(&self.runtime_target_plan);
+        timing.runtime_target_count = runtime_targets.len();
         let runtime_enqueue_start = simulation_timing_start();
         events.extend(self.enqueue_runtime_chunks(
-            sorted_chunk_positions_by_priority_in(
-                self.topology,
-                runtime_targets,
-                &priority_centers,
-            ),
+            runtime_targets.as_ref(),
             self.runtime_chunk_target_status(),
             &priority_centers,
         )?);
-        let runtime_enqueue_us = simulation_timing_elapsed_us(runtime_enqueue_start);
-        Ok((
-            events,
-            ReconcileHoldersTiming {
-                active_levels_us,
-                holder_updates_us,
-                runtime_enqueue_us,
-                active_levels_calls: 1,
-                active_levels_cache_hits: usize::from(cache_hit),
-                holder_update_count,
-                runtime_target_count,
-            },
-        ))
+        timing.runtime_enqueue_us = simulation_timing_elapsed_us(runtime_enqueue_start);
+        Ok((events, timing))
     }
 
     fn enqueue_runtime_chunks(
         &mut self,
-        desired_chunks: Vec<ChunkPos>,
+        desired_chunks: &[ChunkPos],
         target_status: ChunkStatus,
         priority_centers: &[ChunkPos],
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
@@ -2985,7 +2997,7 @@ impl ChunkScheduler {
         let mut scheduled_chunk_loads = 0_usize;
         let mut scheduled_entity_loads = 0_usize;
 
-        for pos in desired_chunks {
+        for &pos in desired_chunks {
             self.holders
                 .entry(pos)
                 .or_insert_with(|| ChunkHolder::new(pos))
@@ -4651,9 +4663,10 @@ mod tests {
         assert_eq!(rebuilt.timing.holder_update_count, 1);
 
         let cached = scheduler.tick_report().unwrap();
-        assert_eq!(cached.timing.active_levels_calls, 1);
-        assert_eq!(cached.timing.active_levels_cache_hits, 1);
-        assert_eq!(cached.timing.holder_update_count, 1);
+        assert_eq!(cached.timing.active_levels_calls, 0);
+        assert_eq!(cached.timing.active_levels_cache_hits, 0);
+        assert_eq!(cached.timing.holder_update_count, 0);
+        assert_eq!(cached.timing.runtime_target_count, 0);
     }
 
     #[test]
@@ -5033,7 +5046,7 @@ mod tests {
             .stored_chunk_misses
             .extend(targets.iter().copied());
         scheduler
-            .enqueue_runtime_chunks(targets.clone(), ChunkStatus::Light, &[center])
+            .enqueue_runtime_chunks(&targets, ChunkStatus::Light, &[center])
             .unwrap();
 
         let metrics = scheduler.metrics();
@@ -5052,7 +5065,7 @@ mod tests {
         );
 
         scheduler
-            .enqueue_runtime_chunks(targets, ChunkStatus::Light, &[center])
+            .enqueue_runtime_chunks(&targets, ChunkStatus::Light, &[center])
             .unwrap();
         assert_eq!(
             scheduler.job_count(),
@@ -5075,7 +5088,7 @@ mod tests {
             .stored_chunk_misses
             .extend(targets.iter().copied());
         scheduler
-            .enqueue_runtime_chunks(targets, ChunkStatus::Features, &[center])
+            .enqueue_runtime_chunks(&targets, ChunkStatus::Features, &[center])
             .unwrap();
         let first_job_id = scheduler.metrics().latest_feature_job_id.unwrap();
         assert!(scheduler.wait_for_worldgen_completion(std::time::Duration::from_secs(30)));
@@ -5520,7 +5533,7 @@ mod tests {
             .stored_chunk_misses
             .extend(targets.iter().copied());
         scheduler
-            .enqueue_runtime_chunks(targets, ChunkStatus::Light, &[center])
+            .enqueue_runtime_chunks(&targets, ChunkStatus::Light, &[center])
             .unwrap();
         let first_job_id = scheduler.metrics().latest_feature_job_id.unwrap();
         scheduler.mark_job_complete(

@@ -55,6 +55,10 @@ impl ChunkDistanceManager {
         self.ticket_tick
     }
 
+    pub(crate) fn ticket_generation(&self) -> u64 {
+        self.ticket_generation
+    }
+
     pub(crate) fn set_aggregate_interest_positions_with_priority(
         &mut self,
         new_resident_positions: BTreeSet<ChunkPos>,
@@ -62,6 +66,12 @@ impl ChunkDistanceManager {
         priority_centers: Vec<ChunkPos>,
     ) {
         debug_assert!(new_simulation_positions.is_subset(&new_resident_positions));
+        let priority_centers = priority_centers
+            .into_iter()
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+        let priority_changed = self.aggregate_interest_priority_centers != priority_centers;
         let old_resident_positions = std::mem::take(&mut self.aggregate_resident_positions);
         let old_simulation_positions =
             std::mem::take(&mut self.aggregate_simulation_ticket_positions);
@@ -118,11 +128,10 @@ impl ChunkDistanceManager {
 
         self.aggregate_resident_positions = new_resident_positions;
         self.aggregate_simulation_ticket_positions = new_simulation_positions;
-        self.aggregate_interest_priority_centers = priority_centers
-            .into_iter()
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect();
+        self.aggregate_interest_priority_centers = priority_centers;
+        if priority_changed {
+            self.mark_tickets_changed();
+        }
     }
 
     pub(crate) fn add_region_ticket(
@@ -356,5 +365,26 @@ mod tests {
         let after = manager.active_levels();
         assert!(!Arc::ptr_eq(&before, &after));
         assert!(after.is_empty());
+    }
+
+    #[test]
+    fn changed_priority_center_invalidates_reconciliation_generation() {
+        let mut manager = ChunkDistanceManager::new();
+        let positions = [ChunkPos::new(0, 0), ChunkPos::new(1, 0)]
+            .into_iter()
+            .collect::<BTreeSet<_>>();
+        manager.set_aggregate_interest_positions_with_priority(
+            positions.clone(),
+            positions.clone(),
+            vec![ChunkPos::new(0, 0)],
+        );
+        let first_generation = manager.ticket_generation();
+        manager.set_aggregate_interest_positions_with_priority(
+            positions.clone(),
+            positions,
+            vec![ChunkPos::new(1, 0)],
+        );
+
+        assert_ne!(manager.ticket_generation(), first_generation);
     }
 }
