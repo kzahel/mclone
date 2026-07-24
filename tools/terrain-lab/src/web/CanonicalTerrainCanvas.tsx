@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+} from "react";
 import type { CanonicalTerrainLab } from "../../generated/pkg/mclone_terrain_lab";
 import initTerrainLab, {
   canonicalTerrainChunkOrder,
@@ -8,7 +11,8 @@ import initTerrainLab, {
 
 import {
   footprintBlocks,
-  grabPanTerrainLabState,
+  arrowPanTerrainLabState,
+  grabPanTerrainLabStateInView,
   orbitTerrainLabCamera,
   zoomTerrainLabState,
   type TerrainLabCamera,
@@ -429,10 +433,11 @@ export function CanonicalTerrainCanvas({
   }, [onStateChange, state]);
 
   const beginPointer = (event: ReactPointerEvent<HTMLDivElement>): void => {
-    if (event.button !== 0 && event.button !== 1) {
+    if (event.button !== 0 && event.button !== 1 && event.button !== 2) {
       return;
     }
     event.preventDefault();
+    event.currentTarget.focus({ preventScroll: true });
     event.currentTarget.setPointerCapture(event.pointerId);
     if (event.pointerType === "touch") {
       activePointersRef.current.set(event.pointerId, {
@@ -501,8 +506,9 @@ export function CanonicalTerrainCanvas({
         rect.height,
       ));
     } else {
-      onStateChange(grabPanTerrainLabState(
+      onStateChange(grabPanTerrainLabStateInView(
         start.state,
+        start.camera,
         event.clientX - start.clientX,
         event.clientY - start.clientY,
         rect.width,
@@ -512,12 +518,25 @@ export function CanonicalTerrainCanvas({
     }
   };
 
+  const handleKeyDown = (
+    event: ReactKeyboardEvent<HTMLDivElement>,
+  ): void => {
+    const next = arrowPanTerrainLabState(state, event.key);
+    if (next === state) {
+      return;
+    }
+    event.preventDefault();
+    onStateChange(next);
+  };
+
   return (
     <div
       ref={stageRef}
       className="terrainStage canonicalTerrainStage"
       data-testid="canonical-terrain-stage"
       data-render-ready={initialized ? "true" : "false"}
+      tabIndex={0}
+      aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
       onPointerDown={beginPointer}
       onPointerMove={movePointer}
       onPointerUp={(event) => {
@@ -527,6 +546,7 @@ export function CanonicalTerrainCanvas({
         finishPointer(event.pointerId);
       }}
       onContextMenu={(event) => event.preventDefault()}
+      onKeyDown={handleKeyDown}
     >
       <canvas
         ref={canvasRef}

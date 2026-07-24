@@ -334,6 +334,11 @@ h1 {
   cursor: grabbing;
 }
 
+.terrainStage:focus-visible {
+  outline: 2px solid rgba(183, 220, 108, 0.9);
+  outline-offset: -2px;
+}
+
 .terrainStage.compareMode::after {
   content: "";
   position: absolute;

@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import type { PointerEvent as ReactPointerEvent } from "react";
+import type {
+  KeyboardEvent as ReactKeyboardEvent,
+  PointerEvent as ReactPointerEvent,
+} from "react";
 import type { TerrainLab } from "../../generated/pkg/mclone_terrain_lab";
 import initTerrainLab, {
   mclone_terrain_lab_create,
@@ -7,7 +10,8 @@ import initTerrainLab, {
 
 import {
   footprintBlocks,
-  grabPanTerrainLabState,
+  arrowPanTerrainLabState,
+  grabPanTerrainLabStateInView,
   orbitTerrainLabCamera,
   zoomTerrainLabState,
   type TerrainLabCamera,
@@ -356,10 +360,11 @@ export function TerrainCanvas({
   };
 
   const beginInteraction = (event: ReactPointerEvent<HTMLDivElement>): void => {
-    if (event.button !== 0 && event.button !== 1) {
+    if (event.button !== 0 && event.button !== 1 && event.button !== 2) {
       return;
     }
     event.preventDefault();
+    event.currentTarget.focus({ preventScroll: true });
     event.currentTarget.setPointerCapture(event.pointerId);
     if (event.pointerType === "touch") {
       activePointersRef.current.set(event.pointerId, {
@@ -435,8 +440,9 @@ export function TerrainCanvas({
       const panel = terrainPanelSize(rect.width, rect.height, start.state.source);
       const panelAspect = panel.width / Math.max(panel.height, 1);
       queueState(
-        grabPanTerrainLabState(
+        grabPanTerrainLabStateInView(
           start.state,
+          start.camera,
           event.clientX - start.clientX,
           event.clientY - start.clientY,
           panel.width,
@@ -485,6 +491,17 @@ export function TerrainCanvas({
     }
   };
 
+  const handleKeyDown = (
+    event: ReactKeyboardEvent<HTMLDivElement>,
+  ): void => {
+    const next = arrowPanTerrainLabState(state, event.key);
+    if (next === state) {
+      return;
+    }
+    event.preventDefault();
+    onStateChange(next);
+  };
+
   useEffect(() => {
     const stage = stageRef.current;
     if (!stage) {
@@ -520,11 +537,14 @@ export function TerrainCanvas({
       className={`terrainStage${state.source === "split" ? " compareMode" : ""}`}
       data-testid="terrain-stage"
       data-render-ready={initialized ? "true" : "false"}
+      tabIndex={0}
+      aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
       onPointerDown={beginInteraction}
       onPointerMove={moveInteraction}
       onPointerUp={finishInteraction}
       onPointerCancel={finishInteraction}
       onContextMenu={(event) => event.preventDefault()}
+      onKeyDown={handleKeyDown}
     >
       <canvas
         ref={canvasRef}
@@ -563,8 +583,8 @@ export function TerrainCanvas({
       <div className="canvasHint" aria-hidden="true">
         <span className="desktopHint">
           {state.view === "3d"
-            ? "left drag orbit · shift + left or middle drag pan · wheel zoom"
-            : "left drag pan · wheel zoom at pointer"}
+            ? "left drag orbit · right, shift + left, or middle drag pan · arrows pan · wheel zoom"
+            : "left or right drag pan · arrows pan · wheel zoom at pointer"}
         </span>
         <span className="mobileHint">
           {state.view === "3d" ? "drag orbit · pinch zoom" : "drag pan · pinch zoom"}

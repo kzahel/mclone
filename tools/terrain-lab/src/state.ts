@@ -226,6 +226,56 @@ export function grabPanTerrainLabState(
   );
 }
 
+export function grabPanTerrainLabStateInView(
+  state: TerrainLabState,
+  camera: TerrainLabCamera,
+  pointerDeltaX: number,
+  pointerDeltaY: number,
+  panelWidth: number,
+  panelHeight: number,
+  panelAspect: number,
+): TerrainLabState {
+  if (state.view === "map") {
+    return grabPanTerrainLabState(
+      state,
+      pointerDeltaX,
+      pointerDeltaY,
+      panelWidth,
+      panelHeight,
+      panelAspect,
+    );
+  }
+  const horizontal =
+    (pointerDeltaX / Math.max(panelWidth, 1)) * state.blocksAcross;
+  const depth =
+    (pointerDeltaY / Math.max(panelHeight, 1))
+    * (state.blocksAcross / Math.max(panelAspect, 0.01));
+  return panTerrainLabState(
+    state,
+    Math.sin(camera.yaw) * horizontal + Math.cos(camera.yaw) * depth,
+    Math.cos(camera.yaw) * horizontal - Math.sin(camera.yaw) * depth,
+  );
+}
+
+export function arrowPanTerrainLabState(
+  state: TerrainLabState,
+  key: string,
+): TerrainLabState {
+  const distance = footprintBlocks(state) / 8;
+  switch (key) {
+    case "ArrowUp":
+      return panTerrainLabState(state, 0, -distance);
+    case "ArrowDown":
+      return panTerrainLabState(state, 0, distance);
+    case "ArrowLeft":
+      return panTerrainLabState(state, -distance, 0);
+    case "ArrowRight":
+      return panTerrainLabState(state, distance, 0);
+    default:
+      return state;
+  }
+}
+
 export function orbitTerrainLabCamera(
   camera: TerrainLabCamera,
   deltaX: number,

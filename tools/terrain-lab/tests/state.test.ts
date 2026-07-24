@@ -5,8 +5,10 @@ import {
   DEFAULT_TERRAIN_LAB_STATE,
   DEFAULT_TERRAIN_LAB_CAMERA,
   REVIEW_TERRAIN_LAB_STATE,
+  arrowPanTerrainLabState,
   footprintBlocks,
   grabPanTerrainLabState,
+  grabPanTerrainLabStateInView,
   nextBlocksAcross,
   orbitTerrainLabCamera,
   panTerrainLabState,
@@ -87,6 +89,36 @@ test("map grab follows the pointer on both screen axes", () => {
   );
   assert.equal(moved.centerX, -368);
   assert.equal(moved.centerZ, 288);
+});
+
+test("3d grab pans in the camera ground plane", () => {
+  const state = { ...DEFAULT_TERRAIN_LAB_STATE, view: "3d" as const };
+  const moved = grabPanTerrainLabStateInView(
+    state,
+    { yaw: 0, pitch: 0.5 },
+    100,
+    75,
+    800,
+    600,
+    4 / 3,
+  );
+  assert.equal(moved.centerX, -256);
+  assert.equal(moved.centerZ, 400);
+});
+
+test("arrow keys pan an eighth of the visible footprint", () => {
+  assert.equal(
+    arrowPanTerrainLabState(DEFAULT_TERRAIN_LAB_STATE, "ArrowRight").centerX,
+    -240,
+  );
+  assert.equal(
+    arrowPanTerrainLabState(DEFAULT_TERRAIN_LAB_STATE, "ArrowUp").centerZ,
+    272,
+  );
+  assert.equal(
+    arrowPanTerrainLabState(DEFAULT_TERRAIN_LAB_STATE, "Enter"),
+    DEFAULT_TERRAIN_LAB_STATE,
+  );
 });
 
 test("anchors map zoom under the pointer", () => {
