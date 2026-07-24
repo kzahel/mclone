@@ -2,7 +2,10 @@
 
 Topic: `gpu-procedural-terrain`
 
-Status: canonical multi-pane Terrain Lab workspace completed local and hosted
+Status: textured projection and navigation follow-up active 2026-07-24 under
+Tactical
+[`233-terrain-lab-projection-materials-and-navigation.md`](../tactical/233-terrain-lab-projection-materials-and-navigation.md).
+The canonical multi-pane Terrain Lab workspace completed local and hosted
 desktop/mobile headed-WebGPU validation 2026-07-24 under Tactical
 [`232-terrain-lab-canonical-workspace.md`](../tactical/232-terrain-lab-canonical-workspace.md).
 Independent CPU/GPU Terrain Lab publication, cache controls, and cold
@@ -1167,7 +1170,13 @@ boundary. It does not yet prove a truthful far summary. The 65.5 km
 continentalness image still evaluates sub-footprint field energy at points, so
 aliasing and temporal stability remain open correctness problems.
 
-The next implementation direction is:
+Tactical 233 is the immediate fidelity follow-up. It removes the remaining
+presentation mismatch before far-summary work: one physical camera projection
+for exact and LOD panes, production surface-material identities and
+first-party atlas sampling in CPU/GPU LOD, an explicit smooth overview mip
+policy for the Lab, and right-drag plus arrow-key panning in map and 3D.
+
+After that fidelity slice, the next implementation direction is:
 
 1. define a CPU/GPU scale-aware summary target distinct from exact point
    parity;
