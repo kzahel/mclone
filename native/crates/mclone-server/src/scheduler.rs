@@ -2846,7 +2846,7 @@ impl ChunkScheduler {
         }
 
         let mut runtime_targets = BTreeSet::new();
-        for (pos, ticket_level) in active_levels {
+        for (&pos, &ticket_level) in active_levels.iter() {
             self.pending_unloads.remove(&pos);
             let should_be_client_visible = client_visible_set.contains(&pos);
             let full_status = full_chunk_status_for_ticket_level(ticket_level);

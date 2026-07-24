@@ -6,7 +6,9 @@
 //! Ticket data types (`ChunkTicket`/`ChunkTicketType`/`ChunkTicketKey`) live in
 //! `crate::types`; the scheduler drives this through `pub(crate)` methods.
 
+use std::cell::RefCell;
 use std::collections::{BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use mclone_core::{ChunkPos, HorizontalTopology};
 
@@ -23,6 +25,8 @@ pub(crate) struct ChunkDistanceManager {
     aggregate_simulation_ticket_positions: BTreeSet<ChunkPos>,
     aggregate_interest_priority_centers: Vec<ChunkPos>,
     ticket_tick: u64,
+    ticket_generation: u64,
+    active_levels_cache: RefCell<Option<(u64, Arc<BTreeMap<ChunkPos, i32>>)>>,
 }
 
 impl ChunkDistanceManager {
@@ -34,11 +38,16 @@ impl ChunkDistanceManager {
             aggregate_simulation_ticket_positions: BTreeSet::new(),
             aggregate_interest_priority_centers: Vec::new(),
             ticket_tick: 0,
+            ticket_generation: 0,
+            active_levels_cache: RefCell::new(None),
         }
     }
 
     pub(crate) fn set_topology(&mut self, topology: HorizontalTopology) {
         debug_assert!(self.tickets.is_empty());
+        if self.topology != topology {
+            self.mark_tickets_changed();
+        }
         self.topology = topology;
     }
 
@@ -147,6 +156,7 @@ impl ChunkDistanceManager {
         ticket.created_tick = self.ticket_tick;
         let tickets = self.tickets.entry(pos).or_default();
         tickets.replace(ticket);
+        self.mark_tickets_changed();
     }
 
     pub(crate) fn remove_ticket(
@@ -157,11 +167,15 @@ impl ChunkDistanceManager {
         key: ChunkTicketKey,
     ) {
         let ticket = ChunkTicket::new(ticket_type, level, key);
+        let mut changed = false;
         if let Some(tickets) = self.tickets.get_mut(&pos) {
-            tickets.remove(&ticket);
+            changed = tickets.remove(&ticket);
             if tickets.is_empty() {
                 self.tickets.remove(&pos);
             }
+        }
+        if changed {
+            self.mark_tickets_changed();
         }
     }
 
@@ -169,9 +183,12 @@ impl ChunkDistanceManager {
         self.ticket_tick += 1;
         let ticket_tick = self.ticket_tick;
         let mut empty_chunks = Vec::new();
+        let mut changed = false;
 
         for (pos, tickets) in &mut self.tickets {
+            let before = tickets.len();
             tickets.retain(|ticket| !ticket.timed_out(ticket_tick));
+            changed |= tickets.len() != before;
             if tickets.is_empty() {
                 empty_chunks.push(*pos);
             }
@@ -180,9 +197,18 @@ impl ChunkDistanceManager {
         for pos in empty_chunks {
             self.tickets.remove(&pos);
         }
+        if changed {
+            self.mark_tickets_changed();
+        }
     }
 
-    pub(crate) fn active_levels(&self) -> BTreeMap<ChunkPos, i32> {
+    pub(crate) fn active_levels(&self) -> Arc<BTreeMap<ChunkPos, i32>> {
+        if let Some((generation, levels)) = self.active_levels_cache.borrow().as_ref()
+            && *generation == self.ticket_generation
+        {
+            return Arc::clone(levels);
+        }
+
         let mut levels: BTreeMap<ChunkPos, i32> = BTreeMap::new();
 
         for (source_pos, tickets) in &self.tickets {
@@ -213,6 +239,9 @@ impl ChunkDistanceManager {
             }
         }
 
+        let levels = Arc::new(levels);
+        *self.active_levels_cache.borrow_mut() =
+            Some((self.ticket_generation, Arc::clone(&levels)));
         levels
     }
 
@@ -251,5 +280,73 @@ impl ChunkDistanceManager {
             .get(&pos)
             .copied()
             .unwrap_or(UNLOADED_CHUNK_LEVEL)
+    }
+
+    fn mark_tickets_changed(&mut self) {
+        self.ticket_generation = self.ticket_generation.wrapping_add(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn active_levels_reuse_one_map_until_ticket_state_changes() {
+        let mut manager = ChunkDistanceManager::new();
+        let center = ChunkPos::new(0, 0);
+        manager.add_ticket(
+            ChunkTicketType::Forced,
+            center,
+            MAX_CHUNK_DISTANCE,
+            ChunkTicketKey::Chunk(center),
+        );
+
+        let first = manager.active_levels();
+        let second = manager.active_levels();
+        assert!(Arc::ptr_eq(&first, &second));
+        assert_eq!(first.get(&center), Some(&MAX_CHUNK_DISTANCE));
+
+        let east = ChunkPos::new(1, 0);
+        manager.add_ticket(
+            ChunkTicketType::Forced,
+            east,
+            MAX_CHUNK_DISTANCE,
+            ChunkTicketKey::Chunk(east),
+        );
+        let after_add = manager.active_levels();
+        assert!(!Arc::ptr_eq(&first, &after_add));
+        assert_eq!(after_add.get(&east), Some(&MAX_CHUNK_DISTANCE));
+
+        manager.remove_ticket(
+            ChunkTicketType::Forced,
+            east,
+            MAX_CHUNK_DISTANCE,
+            ChunkTicketKey::Chunk(east),
+        );
+        let after_remove = manager.active_levels();
+        assert!(!Arc::ptr_eq(&after_add, &after_remove));
+        assert!(!after_remove.contains_key(&east));
+    }
+
+    #[test]
+    fn timed_out_ticket_invalidates_cached_active_levels() {
+        let mut manager = ChunkDistanceManager::new();
+        let center = ChunkPos::new(0, 0);
+        manager.add_ticket(
+            ChunkTicketType::Unknown,
+            center,
+            MAX_CHUNK_DISTANCE,
+            ChunkTicketKey::Chunk(center),
+        );
+        let before = manager.active_levels();
+
+        manager.purge_stale_tickets();
+        assert!(Arc::ptr_eq(&before, &manager.active_levels()));
+        manager.purge_stale_tickets();
+
+        let after = manager.active_levels();
+        assert!(!Arc::ptr_eq(&before, &after));
+        assert!(after.is_empty());
     }
 }
