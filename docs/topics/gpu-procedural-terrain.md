@@ -2,8 +2,9 @@
 
 Topic: `gpu-procedural-terrain`
 
-Status: viewport-driven progressive Terrain Lab implementation and hosted
-desktop/mobile headed-WebGPU validation completed 2026-07-24. Tactical
+Status: independent CPU/GPU Terrain Lab publication, cache controls, and cold
+benchmark implementation completed local desktop/mobile headed-WebGPU
+validation 2026-07-24; Tactical 230 hosted receipt is pending. Tactical
 [`227-web-terrain-lab-vertical-slice.md`](../tactical/227-web-terrain-lab-vertical-slice.md)
 landed the deployable, web-first Terrain Lab, shared production-reference grid,
 and one shared Rust/WGPU resident tile. Tactical
@@ -17,7 +18,11 @@ continentalness error. Tactical
 then added continuous viewport zoom, aligned resident tiles, Auto/manual
 detail, coverage-first progressive publication, epoch cancellation, bounded
 residency, full-target comparison, and first coarse/target pixel timing. Final
-river/wetland/planned-stream disagreement remains explicit. The next useful
+river/wetland/planned-stream disagreement remains explicit. Tactical
+[`230-terrain-lab-independent-race-and-benchmarks.md`](../tactical/230-terrain-lab-independent-race-and-benchmarks.md)
+then separated CPU/GPU scheduling and publication, exposed cache bypass and
+invalidation, added a repeatable cold race, and fixed trackpad/page-scroll and
+vertical map-grab behavior. The next useful
 work is scale-aware coarse summarization and band limiting, followed by
 shader/edit hot-reload latency. A thin native profiling host and eventual
 in-game LOD/map consumers should reuse the shared engine rather than becoming
@@ -1034,6 +1039,28 @@ the final 65.5 km request at `1:512`, published all 12 visible tiles, and
 drained the queue. The hosted desktop/mobile runs retained about 46/43 MiB
 after their multi-interaction caches; their first complete coarse pixels
 arrived within 79 ms and target pixels within 230 ms.
+
+Tactical 230 corrects the misleading synchronized result. CPU reference
+compilation and GPU dispatch now have independent queues; GPU work is
+submitted before the bounded CPU compiler runs, and each panel publishes its
+own finest complete level. Comparison identity is unchanged, and aggregate
+error remains pending until both target sample sets exist.
+
+The default cache is explicitly a session-local 192-tile LRU keyed by seed,
+aligned origin, and spacing within the fixed field/evaluator revision. It
+retains CPU samples, uploaded reference buffers, GPU-computed buffers, and
+validation readbacks. `Cache off` invalidates residency when the generation
+viewport changes, keeps only the active request, and skips preload. `Cold
+current view` invalidates without changing coordinates.
+
+The fixed local cold stress race disables cache and uses seed `-98765`, center
+`(-304, 336)`, a 2 km Compare map, requested `1:2`, and a 12-tile-per-axis
+diagnostic budget. Both desktop and phone recorded
+`neither -> GPU only -> both` target readiness. Desktop GPU
+target-plus-readback completed in 287.9 ms versus 2,595.5 ms for CPU target
+publication; phone measured 665.6 ms versus 1,881.3 ms. Both retained
+effectively zero base mean/P95 error and 100% ocean agreement. These are
+end-to-end fixed-workload timings, not pure GPU execution measurements.
 
 This proves useful navigation, bounded resident generation, and progressive
 point-sampled detail. It does not yet prove a truthful far summary. The 65.5

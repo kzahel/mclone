@@ -1,6 +1,7 @@
 # Terrain Lab Independent Race And Benchmarks
 
-Status: active implementation 2026-07-24.
+Status: implementation and local headed-WebGPU validation complete 2026-07-24;
+hosted deployment receipt pending.
 
 Topic: `gpu-procedural-terrain`
 
@@ -141,3 +142,52 @@ Stop for review only if:
 - cancellation leaves stale tiles publishable in either panel; or
 - native wheel cancellation conflicts with pinch/pointer behavior on the
   tested phone viewport.
+
+## Local Validation Receipt
+
+The implementation landed through commits `93ce5851` and `67c32a05`.
+
+Validated locally:
+
+- `cargo test -p mclone-worldgen terrain_preview --lib`;
+- `cargo test -p mclone-terrain-view --lib`;
+- `cargo check -p mclone-terrain-lab --target wasm32-unknown-unknown`;
+- scoped Wasm clippy with the pre-existing `manual_is_multiple_of` lint
+  permitted;
+- Terrain Lab state tests and TypeScript/Wasm typecheck;
+- headed-Wayland desktop and phone Playwright interaction flows;
+- dedicated headed-Wayland desktop and mobile BrowserWebGPU smokes; and
+- inspected initial, map/error, continent-scale, and cold-race captures.
+
+The interaction flow proves that wheel zoom changes the terrain URL while
+document `scrollY` remains unchanged and that downward map grab decreases
+world Z, matching horizontal grab semantics.
+
+The fixed cold race uses seed `-98765`, center `(-304, 336)`, a 2 km Compare
+map, requested `1:2`, cache off, zero cache hits, and a 12-tile-per-axis
+diagnostic budget. The observed target-readiness sequence was:
+
+```text
+neither ready -> GPU ready -> both ready
+```
+
+The desktop run selected effective `1:8`, with 35 visible target tiles and 51
+total nested-level tiles:
+
+- GPU target plus validation readback: 287.9 ms;
+- CPU target publication: 2,595.5 ms;
+- GPU end-to-end target rate: 748.4 K samples/s; and
+- CPU end-to-end target rate: 83.0 K samples/s.
+
+The phone run selected effective `1:4`, with 81 visible target tiles and 119
+total nested-level tiles:
+
+- GPU target plus validation readback: 665.6 ms;
+- CPU target publication: 1,881.3 ms;
+- GPU end-to-end target rate: 755.4 K samples/s; and
+- CPU end-to-end target rate: 267.2 K samples/s.
+
+Both settled with empty queues, effectively zero base mean/P95 height error,
+100% ocean agreement, and matching inspected CPU/GPU terrain. These are
+end-to-end browser results for this fixed workload, not portable GPU execution
+timings or a general promise of the same ratio on every adapter.
