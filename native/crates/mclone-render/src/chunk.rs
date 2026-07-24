@@ -537,6 +537,8 @@ impl TexturedSectionRenderPhase {
 pub struct TexturedSectionRenderTiming {
     pub records_ms: f64,
     pub cull_ms: f64,
+    pub cull_cache_lookup: bool,
+    pub cull_cache_hit: bool,
     pub uniform_write_ms: f64,
     pub translucent_collect_ms: f64,
     pub translucent_sort_ms: f64,
@@ -972,6 +974,31 @@ pub struct TexturedSectionRecordPrepareStats {
 struct TexturedSectionCullingResult {
     stats: TexturedSectionRenderStats,
     drawn_keys: FxHashSet<RenderSectionKey>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct TexturedSectionMonoCullingCacheKey {
+    render_view: ChunkRenderView,
+    section_occlusion_culling: bool,
+    force_fullbright: bool,
+    topology: HorizontalTopology,
+}
+
+#[derive(Clone, Debug)]
+struct TexturedSectionMonoCullingCache {
+    key: TexturedSectionMonoCullingCacheKey,
+    records: Arc<PreparedTexturedSectionRecords>,
+    result: Arc<TexturedSectionCullingResult>,
+}
+
+impl TexturedSectionMonoCullingCache {
+    fn matches(
+        &self,
+        key: TexturedSectionMonoCullingCacheKey,
+        records: &Arc<PreparedTexturedSectionRecords>,
+    ) -> bool {
+        self.key == key && Arc::ptr_eq(&self.records, records)
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -3578,6 +3605,10 @@ pub struct TexturedSectionDrawResources {
     records_dirty: Cell<bool>,
     record_dirty_causes: Cell<TexturedSectionRecordDirtyCauses>,
     record_cache_stats: Cell<TexturedSectionRecordCacheStats>,
+    // Retain the mono visibility/traversal result while both the exact view
+    // and immutable prepared-record generation stay unchanged. This also
+    // shares one cull between the opaque and translucent phases of a frame.
+    mono_culling_cache: RefCell<Option<TexturedSectionMonoCullingCache>>,
     // Slice G: reusable per-eye cull scratch (cleared each call). `RefCell`
     // because the render path borrows `&self`; the scratch is only ever touched
     // synchronously inside one cull call, never aliased.
@@ -3613,6 +3644,7 @@ impl TexturedSectionDrawResources {
             records_dirty: Cell::new(true),
             record_dirty_causes: Cell::new(TexturedSectionRecordDirtyCauses::INITIAL),
             record_cache_stats: Cell::new(TexturedSectionRecordCacheStats::default()),
+            mono_culling_cache: RefCell::new(None),
             cull_scratch: RefCell::new(CullScratch::default()),
         };
         let _ = resources.update_sections(device, sections)?;
@@ -3722,9 +3754,20 @@ impl TexturedSectionDrawResources {
             return Ok((TexturedSectionUploadReport::default(), timing));
         }
         let dirty_start = timing_now();
-        self.section_set_generation = self.section_set_generation.wrapping_add(1);
-        // Slice F: the section set / meshes change here, so the cached culling
-        // records must be rebuilt on the next prepare.
+        let membership_changed = removed
+            .iter()
+            .any(|key| self.visibility_sections.contains_key(key))
+            || sections
+                .iter()
+                .any(|section| !self.visibility_sections.contains_key(&section.key));
+        if membership_changed {
+            self.section_set_generation = self.section_set_generation.wrapping_add(1);
+        }
+        // Keep failure handling conservative by marking the cache dirty before
+        // GPU mutation. A successful bounded update patches only the affected
+        // records below; an early error leaves the full lazy rebuild armed.
+        let can_patch_cached_records =
+            !self.records_dirty.get() && self.cached_records.borrow().is_some();
         let mut dirty_causes = TexturedSectionRecordDirtyCauses::empty();
         if !sections.is_empty() {
             dirty_causes = dirty_causes.with(TexturedSectionRecordDirtyCauses::SECTION_UPLOAD);
@@ -3738,6 +3781,11 @@ impl TexturedSectionDrawResources {
         }
         self.mark_records_dirty(dirty_causes);
         timing.dirty_mark_ms = timing_elapsed_ms(dirty_start);
+        let changed_record_keys = removed
+            .iter()
+            .copied()
+            .chain(sections.iter().map(|section| section.key))
+            .collect::<BTreeSet<_>>();
         let mut report = TexturedSectionUploadReport::default();
         let remove_start = timing_now();
         for key in removed {
@@ -3779,6 +3827,11 @@ impl TexturedSectionDrawResources {
             drop(old_mesh);
             timing.mesh_insert_ms += timing_elapsed_ms(mesh_insert_start);
         }
+        if can_patch_cached_records && self.patch_cached_records(&changed_record_keys) {
+            self.records_dirty.set(false);
+            self.record_dirty_causes
+                .set(TexturedSectionRecordDirtyCauses::empty());
+        }
         timing.total_ms = timing_elapsed_ms(total_start);
         Ok((report, timing))
     }
@@ -3798,7 +3851,7 @@ impl TexturedSectionDrawResources {
         ready_sections: &BTreeSet<RenderSectionKey>,
         upload_backpressured: bool,
     ) {
-        let filtered_ready_sections = self
+        let filtered_ready_sections: BTreeSet<_> = self
             .visibility_sections
             .keys()
             .copied()
@@ -3814,6 +3867,12 @@ impl TexturedSectionDrawResources {
         self.record_cache_stats.set(stats);
         // Slice F follow-up: readiness flips change cached `traversal_ready`.
         // Reasserting the same ready set should not rebuild prepared records.
+        let changed_record_keys = filtered_ready_sections
+            .symmetric_difference(&self.traversal_ready_sections)
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let can_patch_cached_records =
+            !self.records_dirty.get() && self.cached_records.borrow().is_some();
         let mut dirty_causes = TexturedSectionRecordDirtyCauses::TRAVERSAL_READY;
         if upload_backpressured {
             dirty_causes =
@@ -3821,6 +3880,11 @@ impl TexturedSectionDrawResources {
         }
         self.mark_records_dirty(dirty_causes);
         self.traversal_ready_sections = filtered_ready_sections;
+        if can_patch_cached_records && self.patch_cached_records(&changed_record_keys) {
+            self.records_dirty.set(false);
+            self.record_dirty_causes
+                .set(TexturedSectionRecordDirtyCauses::empty());
+        }
     }
 
     pub fn traversal_ready_section_count(&self) -> usize {
@@ -3840,6 +3904,46 @@ impl TexturedSectionDrawResources {
         dirty_causes = dirty_causes.with(causes);
         self.record_dirty_causes.set(dirty_causes);
         self.records_dirty.set(true);
+    }
+
+    fn patch_cached_records(&self, changed_keys: &BTreeSet<RenderSectionKey>) -> bool {
+        // The mono cull cache retains the previous records Arc so pointer
+        // identity can safely identify its generation. Drop that internal
+        // reference before Arc::make_mut so bounded mesh/readiness updates
+        // normally patch the map in place instead of cloning every record.
+        *self.mono_culling_cache.borrow_mut() = None;
+        let mut cached = self.cached_records.borrow_mut();
+        let Some(cached) = cached.as_mut() else {
+            return false;
+        };
+        let prepared = Arc::make_mut(cached);
+        for key in changed_keys {
+            if let Some(previous) = prepared.records.remove(key)
+                && previous.drawable
+            {
+                prepared.loaded_section_count = prepared.loaded_section_count.saturating_sub(1);
+                prepared.loaded_index_count = prepared
+                    .loaded_index_count
+                    .saturating_sub(previous.index_count);
+            }
+            let Some(visibility) = self.visibility_sections.get(key).copied() else {
+                continue;
+            };
+            let mesh = self.sections.get(key);
+            let next = TexturedSectionCullingRecord {
+                index_count: mesh.map_or(0, GpuTexturedChunkMesh::index_count),
+                visibility,
+                drawable: mesh.is_some(),
+                traversal_ready: self.traversal_ready_sections.contains(key),
+            };
+            if next.drawable {
+                prepared.loaded_section_count = prepared.loaded_section_count.saturating_add(1);
+                prepared.loaded_index_count =
+                    prepared.loaded_index_count.saturating_add(next.index_count);
+            }
+            prepared.records.insert(*key, next);
+        }
+        true
     }
 
     pub fn section_count(&self) -> usize {
@@ -5148,25 +5252,70 @@ impl TexturedSectionDrawResources {
         phase: TexturedSectionRenderPhase,
     ) -> Result<TexturedSectionRenderStats> {
         let prepare_start = timing.as_ref().map(|_| timing_now());
-        let records_storage;
+        let records_storage = if prepared_records.is_none() {
+            let records_start = timing.as_ref().map(|_| timing_now());
+            let records = self.prepare_render_records();
+            if let (Some(timing), Some(records_start)) = (&mut timing, records_start) {
+                timing.records_ms = timing_elapsed_ms(records_start);
+            }
+            Some(records)
+        } else {
+            None
+        };
         let records: &PreparedTexturedSectionRecords = match prepared_records {
             Some(records) => records,
-            None => {
-                // Slice F shared with all single-view clients: go through the
-                // cross-frame cache instead of rebuilding the records every frame.
-                let records_start = timing.as_ref().map(|_| timing_now());
-                records_storage = self.prepare_render_records();
-                if let (Some(timing), Some(records_start)) = (&mut timing, records_start) {
-                    timing.records_ms = timing_elapsed_ms(records_start);
-                }
-                &records_storage
-            }
+            None => records_storage
+                .as_deref()
+                .expect("owned prepared records created for the direct render path"),
         };
         let cull_start = timing.as_ref().map(|_| timing_now());
-        let culling = {
-            let mut scratch = self.cull_scratch.borrow_mut();
-            cull_textured_sections(records, render_view, options, &mut scratch)
-        };
+        let (culling, cull_cache_lookup, cull_cache_hit) =
+            if let Some(records_storage) = records_storage.as_ref() {
+                let key = TexturedSectionMonoCullingCacheKey {
+                    render_view,
+                    section_occlusion_culling: options.section_occlusion_culling,
+                    force_fullbright: options.force_fullbright,
+                    topology: options.topology,
+                };
+                let mut cache = self.mono_culling_cache.borrow_mut();
+                if let Some(cached) = cache.as_ref()
+                    && cached.matches(key, records_storage)
+                {
+                    (Arc::clone(&cached.result), true, true)
+                } else {
+                    let result = {
+                        let mut scratch = self.cull_scratch.borrow_mut();
+                        Arc::new(cull_textured_sections(
+                            records,
+                            render_view,
+                            options,
+                            &mut scratch,
+                        ))
+                    };
+                    *cache = Some(TexturedSectionMonoCullingCache {
+                        key,
+                        records: Arc::clone(records_storage),
+                        result: Arc::clone(&result),
+                    });
+                    (result, true, false)
+                }
+            } else {
+                let mut scratch = self.cull_scratch.borrow_mut();
+                (
+                    Arc::new(cull_textured_sections(
+                        records,
+                        render_view,
+                        options,
+                        &mut scratch,
+                    )),
+                    false,
+                    false,
+                )
+            };
+        if let Some(timing) = &mut timing {
+            timing.cull_cache_lookup = cull_cache_lookup;
+            timing.cull_cache_hit = cull_cache_hit;
+        }
         if let (Some(timing), Some(cull_start)) = (&mut timing, cull_start) {
             timing.cull_ms = timing_elapsed_ms(cull_start);
         }
@@ -6350,6 +6499,45 @@ mod tests {
         };
 
         assert_eq!(external.with_fov_multiplier(0.85714287), external);
+    }
+
+    #[test]
+    fn mono_culling_cache_requires_identical_view_options_and_record_generation() {
+        let records = Arc::new(PreparedTexturedSectionRecords {
+            records: BTreeMap::new(),
+            loaded_section_count: 0,
+            loaded_index_count: 0,
+        });
+        let render_view = ChunkCamera::overview_for_chunk(0, 0).render_view(640, 480);
+        let key = TexturedSectionMonoCullingCacheKey {
+            render_view,
+            section_occlusion_culling: true,
+            force_fullbright: false,
+            topology: HorizontalTopology::UNBOUNDED,
+        };
+        let cache = TexturedSectionMonoCullingCache {
+            key,
+            records: Arc::clone(&records),
+            result: Arc::new(TexturedSectionCullingResult {
+                stats: TexturedSectionRenderStats::default(),
+                drawn_keys: FxHashSet::default(),
+            }),
+        };
+
+        assert!(cache.matches(key, &records));
+
+        let moved_key = TexturedSectionMonoCullingCacheKey {
+            render_view: ChunkCamera::overview_for_chunk(1, 0).render_view(640, 480),
+            ..key
+        };
+        assert!(!cache.matches(moved_key, &records));
+
+        let replacement = Arc::new(PreparedTexturedSectionRecords {
+            records: BTreeMap::new(),
+            loaded_section_count: 0,
+            loaded_index_count: 0,
+        });
+        assert!(!cache.matches(key, &replacement));
     }
 
     #[test]

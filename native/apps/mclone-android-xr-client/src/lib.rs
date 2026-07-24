@@ -6403,6 +6403,9 @@ mod android {
                 .poll_server_reported_total_ms
                 .max(b.poll_server_reported_total_ms),
             poll_scheduler_tick_ms: a.poll_scheduler_tick_ms.max(b.poll_scheduler_tick_ms),
+            poll_scheduler_reconcile_holders_ms: a
+                .poll_scheduler_reconcile_holders_ms
+                .max(b.poll_scheduler_reconcile_holders_ms),
             poll_scheduler_adaptive_publication_budget_enabled: a
                 .poll_scheduler_adaptive_publication_budget_enabled
                 || b.poll_scheduler_adaptive_publication_budget_enabled,

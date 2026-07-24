@@ -215,12 +215,24 @@ function summarizeRow(manifest) {
       workValues(work, "render_timing.terrain_cull_ms"),
       0.95,
     ),
+    terrain_cull_cache_lookups: workValues(
+      work,
+      "render_timing.terrain_cull_cache_lookups",
+    ).reduce((sum, value) => sum + value, 0),
+    terrain_cull_cache_hits: workValues(
+      work,
+      "render_timing.terrain_cull_cache_hits",
+    ).reduce((sum, value) => sum + value, 0),
     terrain_encode_p95_ms: percentile(
       workValues(work, "render_timing.terrain_encode_ms"),
       0.95,
     ),
     scheduler_tick_p95_ms: percentile(workValues(work, "scheduler.tick_ms"), 0.95),
     scheduler_tick_max_ms: maximum(workValues(work, "scheduler.tick_ms")),
+    scheduler_reconcile_holders_p95_ms: percentile(
+      workValues(work, "scheduler.reconcile_holders_ms"),
+      0.95,
+    ),
     server_total_p95_ms: percentile(workValues(work, "server.reported_total_ms"), 0.95),
     drawn_sections_average: average(workValues(work, "render.drawn_section_count")),
     drawn_sections_p95: percentile(workValues(work, "render.drawn_section_count"), 0.95),
@@ -273,6 +285,18 @@ function summarizeRow(manifest) {
       (sum, value) => sum + value,
       0,
     ),
+    submitted_compile_sections: workValues(
+      work,
+      "render_stream.submitted_compile_sections",
+    ).reduce((sum, value) => sum + value, 0),
+    completed_compile_sections: workValues(
+      work,
+      "render_stream.completed_compile_sections",
+    ).reduce((sum, value) => sum + value, 0),
+    stale_compile_sections: workValues(
+      work,
+      "render_stream.stale_compile_sections",
+    ).reduce((sum, value) => sum + value, 0),
     fluid_due_ticks: workValues(work, "render_stream.fluid_due_ticks").reduce(
       (sum, value) => sum + value,
       0,
@@ -334,11 +358,11 @@ const markdown = [
     return `| ${row.case} | ${row.render_distance} | ${motion} | ${fixed(row.average_fps, 1)} | ${fixed(row.frame_wall_p95_ms)} / ${fixed(row.frame_wall_p99_ms)} | ${fixed(row.surface_encode_p95_ms)} | ${fixed(row.terrain_cull_p95_ms)} / ${fixed(row.terrain_encode_p95_ms)} | ${fixed(row.gpu_terrain_p50_ms)} / ${fixed(row.gpu_terrain_p95_ms)} | ${fixed(row.drawn_sections_average, 0)} | ${fixed(row.rebuilt_sections, 0)} | ${fixed(row.system?.average_cpu_cores)} | ${fixed(row.system?.gpu_busy_average_percent, 1)}% |`;
   }),
   "",
-  "| Attribution case | Scale | Fluids | Pending count p95 | Ready stamp p95 | Records p95 | GPU total p50 / p95 | Fluid due / run / mutations |",
-  "|---|---:|---|---:|---:|---:|---:|---:|",
+  "| Attribution case | Scale | Fluids | Pending count p95 | Ready stamp p95 | Records p95 | Cull cache hits | Reconcile p95 | Compile submit / done / stale | GPU total p50 / p95 | Fluid due / run / mutations |",
+  "|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|",
   ...rows.map(
     (row) =>
-      `| ${row.case} | ${fixed(row.world_scale_percent, 0)}% | ${row.freeze_fluids ? "frozen" : "live"} | ${fixed(row.pending_render_count_p95_ms)} | ${fixed(row.traversal_ready_p95_ms)} | ${fixed(row.terrain_records_p95_ms)} | ${fixed(row.gpu_total_p50_ms)} / ${fixed(row.gpu_total_p95_ms)} | ${fixed(row.fluid_due_ticks, 0)} / ${fixed(row.fluid_executed_ticks, 0)} / ${fixed(row.fluid_mutated_blocks, 0)} |`,
+      `| ${row.case} | ${fixed(row.world_scale_percent, 0)}% | ${row.freeze_fluids ? "frozen" : "live"} | ${fixed(row.pending_render_count_p95_ms)} | ${fixed(row.traversal_ready_p95_ms)} | ${fixed(row.terrain_records_p95_ms)} | ${fixed(row.terrain_cull_cache_hits, 0)} / ${fixed(row.terrain_cull_cache_lookups, 0)} | ${fixed(row.scheduler_reconcile_holders_p95_ms)} | ${fixed(row.submitted_compile_sections, 0)} / ${fixed(row.completed_compile_sections, 0)} / ${fixed(row.stale_compile_sections, 0)} | ${fixed(row.gpu_total_p50_ms)} / ${fixed(row.gpu_total_p95_ms)} | ${fixed(row.fluid_due_ticks, 0)} / ${fixed(row.fluid_executed_ticks, 0)} / ${fixed(row.fluid_mutated_blocks, 0)} |`,
   ),
   "",
   "| Worker case | Capacity | Workers | Busy ms | Completed | Task max ms | Compile q max |",
