@@ -977,6 +977,9 @@ footprint twice: CPU production base and GPU production base share identical
 coordinates and camera state in labeled side-by-side panels. Local hosted-lane
 desktop and phone BrowserWebGPU flows prove two instances, shared orbit,
 preview-adjacent guidance, and the unchanged fixed 2 km / 65.5 km parity gates.
+The exact aggregate bundle was built from code commit `57f52b50` with asset
+version `57f52b5055b0-20260724050832`. Hosted desktop and phone runs passed
+against Cloudflare Worker version `c039e593-08ce-44d8-94a3-bfbd0e59c462`.
 
 The next tactical should therefore:
 
