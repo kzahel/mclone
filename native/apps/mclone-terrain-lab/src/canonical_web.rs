@@ -1,13 +1,15 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use mclone_assets::{AssetSourceChain, PackedAssetSource};
 use mclone_core::BlockStateId;
 use mclone_mesh::{
-    TexturedChunkMeshInput, TexturedMeshCatalog, TexturedVisibleChunkMesh,
-    build_textured_visible_chunk_area_mesh, load_first_party_textured_terrain_assets,
+    TexturedChunkMeshInput, TexturedMeshCatalog, TexturedRenderSectionMesh,
+    TexturedVisibleChunkMesh, build_textured_render_sections_for_chunk_set,
+    load_first_party_textured_terrain_assets,
 };
 use mclone_render::chunk::{
-    ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkTextureAtlas, TexturedChunkDrawResources,
+    ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkTextureAtlas,
+    TexturedSectionDrawResources, TexturedSectionRenderOptions,
 };
 use mclone_terrain_view::{
     CanonicalTerrainVisibility, TerrainPreviewCamera, canonical_terrain_presentation_blocks,
@@ -70,7 +72,7 @@ pub struct CanonicalTerrainLab {
     catalog: TexturedMeshCatalog,
     chunks: BTreeMap<(i32, i32), ResidentCanonicalChunk>,
     visibility: CanonicalTerrainVisibility,
-    draw: TexturedChunkDrawResources,
+    draw: TexturedSectionDrawResources,
     depth: ChunkDepthTarget,
     vertex_count: u32,
     index_count: u32,
@@ -87,7 +89,12 @@ impl CanonicalTerrainLab {
     pub fn reset_chunks(&mut self, seed: String) -> Result<(), JsValue> {
         self.seed = parse_seed(&seed)?;
         self.chunks.clear();
-        self.rebuild_mesh().map(|_| ())
+        self.draw
+            .update_sections(&self.device, &[])
+            .map_err(|error| js_error(format!("failed to clear canonical terrain: {error}")))?;
+        self.vertex_count = 0;
+        self.index_count = 0;
+        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -135,7 +142,8 @@ impl CanonicalTerrainLab {
             },
         );
         let started = now_ms()?;
-        let (vertex_count, index_count) = self.rebuild_mesh()?;
+        let targets = canonical_remesh_targets(&self.chunks, chunk_x, chunk_z);
+        let (vertex_count, index_count) = self.rebuild_chunks(&targets)?;
         let report = CanonicalAcceptReport {
             chunk_x,
             chunk_z,
@@ -160,7 +168,8 @@ impl CanonicalTerrainLab {
         };
         if self.visibility != visibility {
             self.visibility = visibility;
-            self.rebuild_mesh()?;
+            let targets = self.chunks.keys().copied().collect::<BTreeSet<_>>();
+            self.rebuild_chunks(&targets)?;
         }
         json(&CanonicalAcceptReport {
             chunk_x: 0,
@@ -204,7 +213,7 @@ impl CanonicalTerrainLab {
                 label: Some("mclone_terrain_lab_canonical_encoder"),
             });
         self.draw
-            .render(
+            .render_with_options(
                 &self.queue,
                 &mut encoder,
                 ChunkRenderTarget::new(
@@ -219,6 +228,11 @@ impl CanonicalTerrainLab {
                     },
                 ),
                 render_camera.render_view(self.width, self.height),
+                TexturedSectionRenderOptions {
+                    section_occlusion_culling: false,
+                    force_fullbright: true,
+                    ..TexturedSectionRenderOptions::default()
+                },
             )
             .map_err(|error| js_error(format!("failed to draw canonical terrain: {error}")))?;
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -309,11 +323,11 @@ impl CanonicalTerrainLab {
             &surface_configuration(format, width, height, present_mode, alpha_mode),
         );
 
-        let draw = TexturedChunkDrawResources::new(
+        let draw = TexturedSectionDrawResources::new(
             &device,
             &queue,
             format,
-            &TexturedVisibleChunkMesh::default(),
+            &[],
             ChunkTextureAtlas {
                 width: assets.atlas.width,
                 height: assets.atlas.height,
@@ -343,7 +357,10 @@ impl CanonicalTerrainLab {
         })
     }
 
-    fn rebuild_mesh(&mut self) -> Result<(u32, u32), JsValue> {
+    fn rebuild_chunks(&mut self, targets: &BTreeSet<(i32, i32)>) -> Result<(u32, u32), JsValue> {
+        if targets.is_empty() {
+            return Ok((self.vertex_count, self.index_count));
+        }
         let presented = self
             .chunks
             .values()
@@ -365,13 +382,15 @@ impl CanonicalTerrainLab {
                     .with_fluids_visible(self.visibility.water)
             })
             .collect::<Vec<_>>();
-        let mesh = build_textured_visible_chunk_area_mesh(&inputs, &self.catalog)
-            .map_err(|error| js_error(format!("failed to mesh canonical terrain: {error}")))?;
-        let vertex_count = mesh.vertices.len().min(u32::MAX as usize) as u32;
-        let index_count = mesh.indices.len().min(u32::MAX as usize) as u32;
+        let mut sections =
+            build_textured_render_sections_for_chunk_set(&inputs, &self.catalog, targets)
+                .map_err(|error| js_error(format!("failed to mesh canonical terrain: {error}")))?;
+        suppress_missing_footprint_walls(&mut sections, &self.chunks);
         self.draw
-            .update_mesh(&self.device, &self.queue, &mesh)
+            .apply_section_updates(&self.device, &sections, &BTreeSet::new())
             .map_err(|error| js_error(format!("failed to upload canonical terrain: {error}")))?;
+        let vertex_count = self.draw.vertex_count();
+        let index_count = self.draw.index_count();
         self.vertex_count = vertex_count;
         self.index_count = index_count;
         Ok((vertex_count, index_count))
@@ -479,6 +498,91 @@ fn canonical_camera(
         z_near: 0.25,
         z_far: distance,
     })
+}
+
+fn canonical_remesh_targets(
+    chunks: &BTreeMap<(i32, i32), ResidentCanonicalChunk>,
+    chunk_x: i32,
+    chunk_z: i32,
+) -> BTreeSet<(i32, i32)> {
+    [
+        (chunk_x, chunk_z),
+        (chunk_x - 1, chunk_z),
+        (chunk_x + 1, chunk_z),
+        (chunk_x, chunk_z - 1),
+        (chunk_x, chunk_z + 1),
+    ]
+    .into_iter()
+    .filter(|position| chunks.contains_key(position))
+    .collect()
+}
+
+fn suppress_missing_footprint_walls(
+    sections: &mut [TexturedRenderSectionMesh],
+    chunks: &BTreeMap<(i32, i32), ResidentCanonicalChunk>,
+) {
+    let Some(min_chunk_x) = chunks.keys().map(|(chunk_x, _)| *chunk_x).min() else {
+        return;
+    };
+    let Some(max_chunk_x) = chunks.keys().map(|(chunk_x, _)| *chunk_x).max() else {
+        return;
+    };
+    let Some(min_chunk_z) = chunks.keys().map(|(_, chunk_z)| *chunk_z).min() else {
+        return;
+    };
+    let Some(max_chunk_z) = chunks.keys().map(|(_, chunk_z)| *chunk_z).max() else {
+        return;
+    };
+    let bounds = [
+        min_chunk_x as f32 * 16.0,
+        (max_chunk_x + 1) as f32 * 16.0,
+        min_chunk_z as f32 * 16.0,
+        (max_chunk_z + 1) as f32 * 16.0,
+    ];
+    for section in sections {
+        suppress_mesh_boundary_quads(&mut section.mesh, bounds);
+    }
+}
+
+fn suppress_mesh_boundary_quads(mesh: &mut TexturedVisibleChunkMesh, bounds: [f32; 4]) {
+    let old_indices = std::mem::take(&mut mesh.indices);
+    let solid_end = mesh.solid_index_count.min(old_indices.len() as u32) as usize;
+    let opaque_end = mesh.opaque_index_count.min(old_indices.len() as u32) as usize;
+    append_non_boundary_quads(mesh, &old_indices[..solid_end], bounds);
+    mesh.solid_index_count = mesh.indices.len() as u32;
+    append_non_boundary_quads(mesh, &old_indices[solid_end..opaque_end], bounds);
+    mesh.opaque_index_count = mesh.indices.len() as u32;
+    append_non_boundary_quads(mesh, &old_indices[opaque_end..], bounds);
+}
+
+fn append_non_boundary_quads(
+    mesh: &mut TexturedVisibleChunkMesh,
+    indices: &[u32],
+    [min_x, max_x, min_z, max_z]: [f32; 4],
+) {
+    for quad in indices.chunks_exact(6) {
+        let positions = quad.iter().filter_map(|index| {
+            mesh.vertices
+                .get(*index as usize)
+                .map(|vertex| vertex.position)
+        });
+        let mut count = 0;
+        let mut on_min_x = true;
+        let mut on_max_x = true;
+        let mut on_min_z = true;
+        let mut on_max_z = true;
+        for position in positions {
+            count += 1;
+            on_min_x &= position[0] == min_x;
+            on_max_x &= position[0] == max_x;
+            on_min_z &= position[2] == min_z;
+            on_max_z &= position[2] == max_z;
+        }
+        if count == 6 && (on_min_x || on_max_x || on_min_z || on_max_z) {
+            continue;
+        }
+        mesh.indices.extend_from_slice(quad);
+    }
 }
 
 fn parse_seed(seed: &str) -> Result<i64, JsValue> {

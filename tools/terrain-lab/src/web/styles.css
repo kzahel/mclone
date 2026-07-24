@@ -294,6 +294,28 @@ h1 {
   font-weight: 600;
 }
 
+.paneWorkspace {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1px;
+  min-width: 0;
+  background: var(--line-strong);
+}
+
+.paneWorkspace.logicalPanes1 {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.paneWorkspace.threePaneWorkspace {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 2fr);
+}
+
+.paneFrame {
+  min-width: 0;
+  overflow: hidden;
+  background: #071012;
+}
+
 .terrainStage {
   position: relative;
   min-height: clamp(540px, calc(100vh - 220px), 900px);
@@ -651,6 +673,18 @@ button:hover {
   color: #e1f4b8;
 }
 
+.visibilityToggles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.visibilityToggles button.active {
+  border-color: rgba(183, 220, 108, 0.48);
+  background: rgba(90, 135, 60, 0.26);
+  color: #e1f4b8;
+}
+
 .metricGrid {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -776,6 +810,11 @@ button:hover {
   .labWorkbench {
     margin-top: 12px;
     grid-template-columns: 1fr;
+  }
+
+  .paneWorkspace,
+  .paneWorkspace.threePaneWorkspace {
+    grid-template-columns: minmax(0, 1fr);
   }
 
   .terrainStage {

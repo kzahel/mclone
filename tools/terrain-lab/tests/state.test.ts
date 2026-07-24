@@ -10,24 +10,35 @@ import {
   nextBlocksAcross,
   orbitTerrainLabCamera,
   panTerrainLabState,
+  proceduralSourceForPanes,
   parseTerrainLabState,
   terrainLabSearch,
   validSeed,
+  toggleTerrainLabPane,
   zoomTerrainLabState,
+  type TerrainLabState,
 } from "../src/state";
 
 test("round-trips complete URL state", () => {
-  const state = {
+  const state: TerrainLabState = {
     seed: "-9223372036854775808",
     centerX: -1024,
     centerZ: 2048,
     blocksAcross: 16_384,
     detail: 16 as const,
     source: "gpu" as const,
+    panes: ["canonical", "gpu"],
+    canonicalStage: "surface" as const,
+    canonicalRadius: 1,
+    waterVisible: false,
+    vegetationVisible: true,
     view: "map" as const,
     layer: "continentalness" as const,
   };
-  assert.deepEqual(parseTerrainLabState(terrainLabSearch(state)), state);
+  assert.deepEqual(parseTerrainLabState(terrainLabSearch(state)), {
+    ...state,
+    panes: [...state.panes],
+  });
 });
 
 test("falls back independently for invalid URL fields", () => {
@@ -74,15 +85,15 @@ test("map grab follows the pointer on both screen axes", () => {
     600,
     4 / 3,
   );
-  assert.equal(moved.centerX, -560);
-  assert.equal(moved.centerZ, 144);
+  assert.equal(moved.centerX, -368);
+  assert.equal(moved.centerZ, 288);
 });
 
 test("anchors map zoom under the pointer", () => {
   const zoomed = zoomTerrainLabState(DEFAULT_TERRAIN_LAB_STATE, 0.5, 0.5, -0.5, 2);
-  assert.equal(zoomed.blocksAcross, 1_024);
-  assert.equal(zoomed.centerX, 208);
-  assert.equal(zoomed.centerZ, 80);
+  assert.equal(zoomed.blocksAcross, 256);
+  assert.equal(zoomed.centerX, -176);
+  assert.equal(zoomed.centerZ, 272);
 });
 
 test("accepts old spacing links without changing their visible footprint", () => {
@@ -91,10 +102,23 @@ test("accepts old spacing links without changing their visible footprint", () =>
   assert.equal(legacy.detail, 32);
 });
 
-test("defaults to production truth and gives the fixed comparison site a name", () => {
-  assert.equal(DEFAULT_TERRAIN_LAB_STATE.source, "reference");
+test("defaults to the three-pane workspace and gives the review site a name", () => {
+  assert.equal(DEFAULT_TERRAIN_LAB_STATE.source, "split");
+  assert.deepEqual(DEFAULT_TERRAIN_LAB_STATE.panes, ["canonical", "cpu", "gpu"]);
   assert.equal(REVIEW_TERRAIN_LAB_STATE.seed, "-98765");
   assert.equal(REVIEW_TERRAIN_LAB_STATE.source, "split");
+});
+
+test("maps legacy source links and keeps at least one pane visible", () => {
+  assert.deepEqual(parseTerrainLabState("?source=gpu").panes, ["gpu"]);
+  assert.deepEqual(parseTerrainLabState("?source=split").panes, ["cpu", "gpu"]);
+  assert.equal(proceduralSourceForPanes(["canonical"]), "reference");
+  const onlyCanonical: TerrainLabState = {
+    ...DEFAULT_TERRAIN_LAB_STATE,
+    panes: ["canonical"],
+  };
+  assert.equal(toggleTerrainLabPane(onlyCanonical, "canonical"), onlyCanonical);
+  assert.deepEqual(toggleTerrainLabPane(onlyCanonical, "gpu").panes, ["canonical", "gpu"]);
 });
 
 test("orbits independently from URL-addressed terrain state", () => {
@@ -111,9 +135,14 @@ test("orbits independently from URL-addressed terrain state", () => {
     seed: "-98765",
     centerX: -304,
     centerZ: 336,
-    blocksAcross: 2_048,
+    blocksAcross: 512,
     detail: "auto",
-    source: "reference",
+    source: "split",
+    panes: ["canonical", "cpu", "gpu"],
+    canonicalStage: "final",
+    canonicalRadius: 2,
+    waterVisible: true,
+    vegetationVisible: true,
     view: "3d",
     layer: "terrain",
   });

@@ -8,15 +8,22 @@ import {
   nextBlocksAcross,
   panTerrainLabState,
   parseTerrainLabState,
+  proceduralSourceForPanes,
   terrainLabSearch,
+  toggleTerrainLabPane,
   validSeed,
+  type CanonicalTerrainStage,
   type TerrainLabDetail,
   type TerrainLabLayer,
   type TerrainLabCamera,
-  type TerrainLabSource,
+  type TerrainLabPane,
   type TerrainLabState,
   type TerrainLabView,
 } from "../state";
+import {
+  CanonicalTerrainCanvas,
+  type CanonicalTerrainReport,
+} from "./CanonicalTerrainCanvas";
 import {
   TerrainCanvas,
   type TerrainLabAdapterReport,
@@ -27,10 +34,10 @@ import {
 type LabStatus = "loading" | "ready" | "rendering" | "error";
 type BenchmarkProfile = "interactive" | "stress";
 
-const SOURCE_OPTIONS: Array<{ value: TerrainLabSource; label: string; note: string }> = [
-  { value: "reference", label: "CPU final", note: "Complete production CPU sampler" },
-  { value: "split", label: "Compare", note: "Same coordinates: CPU base left, GPU base right" },
-  { value: "gpu", label: "GPU base", note: "Production fields through base surface" },
+const PANE_OPTIONS: Array<{ value: TerrainLabPane; label: string; note: string }> = [
+  { value: "canonical", label: "Real terrain", note: "Exact final chunks with textures" },
+  { value: "cpu", label: "CPU LOD", note: "Production CPU surface evaluator" },
+  { value: "gpu", label: "GPU LOD", note: "GPU-resident production base fields" },
 ];
 
 const LAYER_OPTIONS: Array<{ value: TerrainLabLayer; label: string }> = [
@@ -53,6 +60,9 @@ export function App(): React.JSX.Element {
   const [camera, setCamera] = useState<TerrainLabCamera>(DEFAULT_TERRAIN_LAB_CAMERA);
   const [cacheEnabled, setCacheEnabled] = useState(true);
   const [cacheEpoch, setCacheEpoch] = useState(0);
+  const [canonicalCacheEnabled, setCanonicalCacheEnabled] = useState(true);
+  const [canonicalCacheEpoch, setCanonicalCacheEpoch] = useState(0);
+  const [canonicalReport, setCanonicalReport] = useState<CanonicalTerrainReport>();
   const [benchmarkProfile, setBenchmarkProfile] =
     useState<BenchmarkProfile>("interactive");
 
@@ -84,8 +94,22 @@ export function App(): React.JSX.Element {
 
   const footprint = footprintBlocks(state);
   const chunkWidth = footprint / 16;
-  const renderStatus = status === "rendering" ? "updating" : status;
-  const compareLayout = state.source !== "split"
+  const canonicalVisible = state.panes.includes("canonical");
+  const cpuVisible = state.panes.includes("cpu");
+  const gpuVisible = state.panes.includes("gpu");
+  const proceduralVisible = cpuVisible || gpuVisible;
+  const proceduralSource = proceduralSourceForPanes(state.panes);
+  const proceduralState = { ...state, source: proceduralSource };
+  const workspaceStatus: LabStatus = error
+    ? "error"
+    : (!proceduralVisible || status === "ready")
+      && (!canonicalVisible || canonicalReport?.complete)
+      ? "ready"
+      : status === "loading" && proceduralVisible
+        ? "loading"
+        : "rendering";
+  const renderStatus = workspaceStatus === "rendering" ? "updating" : workspaceStatus;
+  const compareLayout = proceduralSource !== "split"
     ? "single"
     : renderReport && renderReport.width <= renderReport.height
       ? "stacked"
@@ -122,6 +146,12 @@ export function App(): React.JSX.Element {
       data-request-cpu-tiles={renderReport?.requestCpuCompiledTiles ?? 0}
       data-request-gpu-tiles={renderReport?.requestGpuDispatchedTiles ?? 0}
       data-samples-per-axis={renderReport?.samplesPerAxis ?? 0}
+      data-panes={state.panes.join(",")}
+      data-canonical-published={canonicalReport?.publishedChunks ?? 0}
+      data-canonical-requested={canonicalReport?.requestedChunks ?? 0}
+      data-canonical-complete={canonicalReport?.complete ? "true" : "false"}
+      data-canonical-cache-enabled={canonicalCacheEnabled ? "true" : "false"}
+      data-canonical-cache-hits={canonicalReport?.cacheHits ?? 0}
     >
       <header className="topBar">
         <div className="brandLockup">
@@ -136,7 +166,7 @@ export function App(): React.JSX.Element {
           </div>
         </div>
         <div className="headerMeta">
-          <div className={`statusPill ${status}`} data-testid="lab-status">
+          <div className={`statusPill ${workspaceStatus}`} data-testid="lab-status">
             <span className="statusDot" />
             {renderStatus}
           </div>
@@ -154,13 +184,11 @@ export function App(): React.JSX.Element {
       <main className="labWorkbench">
         <section className="viewerColumn" aria-label="Terrain preview">
           <div className="previewToolbar" data-testid="preview-source-controls">
-            <SegmentedControl<TerrainLabSource>
-              label="Preview source"
-              value={state.source}
-              options={SOURCE_OPTIONS}
-              onChange={(source) => patchState({ source })}
+            <PaneToggles
+              panes={state.panes}
+              onToggle={(pane) => updateState(toggleTerrainLabPane(state, pane))}
             />
-            <SourceGuide source={state.source} />
+            <WorkspaceGuide panes={state.panes} />
           </div>
           <div className="mapToolbar" data-testid="viewport-controls">
             <SegmentedControl<TerrainLabView>
@@ -214,20 +242,49 @@ export function App(): React.JSX.Element {
               </button>
             </div>
           </div>
-          <TerrainCanvas
-            state={state}
-            camera={camera}
-            cacheEnabled={cacheEnabled}
-            cacheEpoch={cacheEpoch}
-            maxVisibleTilesPerAxis={benchmarkProfile === "stress" ? 12 : 8}
-            onStateChange={updateState}
-            onCameraChange={setCamera}
-            onAdapter={setAdapter}
-            onRender={setRenderReport}
-            onComparison={setComparison}
-            onError={setError}
-            onStatus={setStatus}
-          />
+          <div
+            className={`paneWorkspace logicalPanes${state.panes.length}${
+              canonicalVisible && cpuVisible && gpuVisible ? " threePaneWorkspace" : ""
+            }`}
+            data-testid="pane-workspace"
+          >
+            {canonicalVisible ? (
+              <div className="paneFrame canonicalPaneFrame">
+                <CanonicalTerrainCanvas
+                  state={state}
+                  camera={camera}
+                  cacheEnabled={canonicalCacheEnabled}
+                  cacheEpoch={canonicalCacheEpoch}
+                  onStateChange={updateState}
+                  onCameraChange={setCamera}
+                  onReport={setCanonicalReport}
+                  onError={setError}
+                />
+              </div>
+            ) : null}
+            {proceduralVisible ? (
+              <div
+                className={`paneFrame proceduralPaneFrame${
+                  cpuVisible && gpuVisible ? " twoLogicalPanes" : ""
+                }`}
+              >
+                <TerrainCanvas
+                  state={proceduralState}
+                  camera={camera}
+                  cacheEnabled={cacheEnabled}
+                  cacheEpoch={cacheEpoch}
+                  maxVisibleTilesPerAxis={benchmarkProfile === "stress" ? 12 : 8}
+                  onStateChange={updateState}
+                  onCameraChange={setCamera}
+                  onAdapter={setAdapter}
+                  onRender={setRenderReport}
+                  onComparison={setComparison}
+                  onError={setError}
+                  onStatus={setStatus}
+                />
+              </div>
+            ) : null}
+          </div>
           <div className="viewerFooter">
             <div>
               <span className="footerLabel">footprint</span>
@@ -252,7 +309,7 @@ export function App(): React.JSX.Element {
               </strong>
             </div>
             <div className="approximationNote">
-              <SourceFootnote source={state.source} />
+              <SourceFootnote panes={state.panes} />
             </div>
           </div>
         </section>
@@ -295,17 +352,73 @@ export function App(): React.JSX.Element {
           </ControlSection>
 
           <ControlSection number="03" title="Presentation">
-            <label className="fieldLabel">
-              <span>Diagnostic layer</span>
-              <select
-                value={state.layer}
-                onChange={(event) => patchState({ layer: event.target.value as TerrainLabLayer })}
-              >
-                {LAYER_OPTIONS.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </label>
+            {canonicalVisible ? (
+              <>
+                <SegmentedControl<CanonicalTerrainStage>
+                  label="Real terrain checkpoint"
+                  value={state.canonicalStage}
+                  options={[
+                    {
+                      value: "final",
+                      label: "Final features",
+                      note: "Production final chunks, including decorations",
+                    },
+                    {
+                      value: "surface",
+                      label: "Surface",
+                      note: "Production terrain and surface checkpoint",
+                    },
+                  ]}
+                  onChange={(canonicalStage) => patchState({ canonicalStage })}
+                />
+                <label className="fieldLabel">
+                  <span>Exact chunk radius</span>
+                  <select
+                    aria-label="Exact chunk radius"
+                    value={state.canonicalRadius}
+                    onChange={(event) =>
+                      patchState({ canonicalRadius: Number(event.target.value) })
+                    }
+                  >
+                    <option value={0}>0 · 1 chunk</option>
+                    <option value={1}>1 · 9 chunks</option>
+                    <option value={2}>2 · 25 chunks</option>
+                  </select>
+                </label>
+                <div className="visibilityToggles">
+                  <ToggleButton
+                    label="Water"
+                    pressed={state.waterVisible}
+                    onChange={(waterVisible) => patchState({ waterVisible })}
+                  />
+                  <ToggleButton
+                    label="Vegetation"
+                    pressed={state.vegetationVisible}
+                    onChange={(vegetationVisible) => patchState({ vegetationVisible })}
+                  />
+                </div>
+                <p className="controlNote">
+                  Visibility remeshes retained exact blocks. It never reruns or
+                  changes feature generation.
+                </p>
+              </>
+            ) : null}
+            {proceduralVisible ? (
+              <label className="fieldLabel">
+                <span>LOD diagnostic layer</span>
+                <select
+                  aria-label="Diagnostic layer"
+                  value={state.layer}
+                  onChange={(event) =>
+                    patchState({ layer: event.target.value as TerrainLabLayer })
+                  }
+                >
+                  {LAYER_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+            ) : null}
             <button
               type="button"
               className="cameraResetButton"
@@ -316,6 +429,38 @@ export function App(): React.JSX.Element {
           </ControlSection>
 
           <ControlSection number="04" title="Cache & benchmark">
+            {canonicalVisible ? (
+              <>
+                <SegmentedControl<"on" | "off">
+                  label="Real terrain cache"
+                  value={canonicalCacheEnabled ? "on" : "off"}
+                  options={[
+                    {
+                      value: "on",
+                      label: "Exact cache on",
+                      note: "Reuse exact chunks for this browser session",
+                    },
+                    {
+                      value: "off",
+                      label: "Exact cache off",
+                      note: "Regenerate exact chunks after every footprint change",
+                    },
+                  ]}
+                  onChange={(value) => setCanonicalCacheEnabled(value === "on")}
+                />
+                <button
+                  type="button"
+                  onClick={() => {
+                    setCanonicalReport(undefined);
+                    setCanonicalCacheEpoch((current) => current + 1);
+                  }}
+                >
+                  Regenerate real terrain
+                </button>
+              </>
+            ) : null}
+            {proceduralVisible ? (
+              <>
             <SegmentedControl<"on" | "off">
               label="Session tile cache"
               value={cacheEnabled ? "on" : "off"}
@@ -338,6 +483,8 @@ export function App(): React.JSX.Element {
               origin, and spacing. Off retains only the active request and
               disables speculative preload.
             </p>
+              </>
+            ) : null}
             <SegmentedControl<BenchmarkProfile>
               label="Workload budget"
               value={benchmarkProfile}
@@ -361,6 +508,8 @@ export function App(): React.JSX.Element {
                 onClick={() => {
                   setComparison(undefined);
                   setCacheEpoch((current) => current + 1);
+                  setCanonicalReport(undefined);
+                  setCanonicalCacheEpoch((current) => current + 1);
                 }}
               >
                 Cold current view
@@ -380,6 +529,7 @@ export function App(): React.JSX.Element {
                     blocksAcross: 2_048,
                     detail: 2,
                     source: "split",
+                    panes: ["cpu", "gpu"],
                     view: "map",
                     layer: "terrain",
                   }));
@@ -399,6 +549,7 @@ export function App(): React.JSX.Element {
               adapter={adapter}
               report={renderReport}
               comparison={comparison}
+              canonical={canonicalReport}
             />
           </ControlSection>
         </aside>
@@ -407,63 +558,69 @@ export function App(): React.JSX.Element {
   );
 }
 
-function SourceGuide({ source }: { source: TerrainLabSource }): React.JSX.Element {
-  if (source === "split") {
-    return (
-      <div className="sourceGuide">
-        <strong>Same coordinates, paired views</strong>
-        <span>
-          CPU production base is first; GPU production base is second. Each
-          panel appears as its own complete level becomes ready instead of
-          waiting for the other. Both retain the exact same world coordinates,
-          seed, center, scale, camera, and layer.
-        </span>
+function PaneToggles({
+  panes,
+  onToggle,
+}: {
+  panes: TerrainLabPane[];
+  onToggle: (pane: TerrainLabPane) => void;
+}): React.JSX.Element {
+  return (
+    <fieldset className="segmentedField paneToggleField">
+      <legend>Visible panes</legend>
+      <div className="segmentedControl">
+        {PANE_OPTIONS.map((option) => {
+          const visible = panes.includes(option.value);
+          return (
+            <button
+              type="button"
+              key={option.value}
+              className={visible ? "active" : ""}
+              aria-pressed={visible}
+              title={option.note}
+              onClick={() => onToggle(option.value)}
+            >
+              {option.label}
+            </button>
+          );
+        })}
       </div>
-    );
-  }
-  if (source === "gpu") {
-    return (
-      <div className="sourceGuide">
-        <strong>GPU production base</strong>
-        <span>
-          Production large-scale fields through bathymetry. Final rivers, wetlands,
-          and planned streams are not ported yet.
-        </span>
-      </div>
-    );
-  }
+    </fieldset>
+  );
+}
+
+function WorkspaceGuide({ panes }: { panes: TerrainLabPane[] }): React.JSX.Element {
+  const exact = panes.includes("canonical");
+  const cpu = panes.includes("cpu");
+  const gpu = panes.includes("gpu");
   return (
     <div className="sourceGuide">
-      <strong>CPU final reference</strong>
+      <strong>Same coordinates, independent readiness</strong>
       <span>
-        Complete production CPU terrain, including final rivers, wetlands, and planned
-        streams.
+        {exact
+          ? "Real terrain uses final production chunks, the first-party atlas, water, and features. Uncurated materials remain visibly marked by generated fallback tiles. "
+          : ""}
+        {cpu && gpu
+          ? "CPU and GPU LOD panes publish independently at the exact same coordinates. "
+          : cpu
+            ? "CPU LOD shows the broad production surface. "
+            : gpu
+              ? "GPU LOD stays resident for broad visual coverage. "
+              : ""}
+        Every visible pane shares seed, center, scale, camera, and navigation.
       </span>
     </div>
   );
 }
 
-function SourceFootnote({ source }: { source: TerrainLabSource }): React.JSX.Element {
-  if (source === "split") {
-    return (
-      <>
-        Compare uses CPU base versus GPU base. Final rivers, wetlands, and planned
-        streams are excluded from both panels.
-      </>
-    );
-  }
-  if (source === "gpu") {
-    return (
-      <>
-        GPU A2 ports production base fields. Final rivers, wetlands, and planned
-        streams are not ported yet.
-      </>
-    );
-  }
+function SourceFootnote({ panes }: { panes: TerrainLabPane[] }): React.JSX.Element {
   return (
     <>
-      CPU final includes rivers, wetlands, and planned streams. Base-field parity is
-      reported separately in Evidence.
+      Real terrain is exact generated blocks with the production first-party
+      atlas and preview lighting. Generated fallback tiles identify materials
+      that do not have curated textures yet. LOD panes remain
+      presentation-only; their final rivers, wetlands, and planned-stream
+      overlay is still absent from the GPU path.
     </>
   );
 }
@@ -600,6 +757,27 @@ function SegmentedControl<T extends string>({
   );
 }
 
+function ToggleButton({
+  label,
+  pressed,
+  onChange,
+}: {
+  label: string;
+  pressed: boolean;
+  onChange: (pressed: boolean) => void;
+}): React.JSX.Element {
+  return (
+    <button
+      type="button"
+      className={pressed ? "active" : ""}
+      aria-pressed={pressed}
+      onClick={() => onChange(!pressed)}
+    >
+      {label} {pressed ? "shown" : "hidden"}
+    </button>
+  );
+}
+
 function PanPad({
   state,
   onChange,
@@ -627,10 +805,12 @@ function Diagnostics({
   adapter,
   report,
   comparison,
+  canonical,
 }: {
   adapter: TerrainLabAdapterReport | undefined;
   report: TerrainLabRenderReport | undefined;
   comparison: TerrainLabComparisonReport | undefined;
+  canonical: CanonicalTerrainReport | undefined;
 }): React.JSX.Element {
   const memory = report ? formatBytes(report.residentBytes) : "—";
   const samplesPerTile = report ? report.samplesPerAxis ** 2 : 0;
@@ -649,6 +829,20 @@ function Diagnostics({
   return (
     <div className="diagnostics" data-testid="terrain-diagnostics">
       <div className="metricGrid">
+        <Metric
+          label="Real chunks"
+          value={canonical
+            ? `${canonical.publishedChunks}/${canonical.requestedChunks}`
+            : "hidden"}
+        />
+        <Metric label="Real first chunk" value={formatMs(canonical?.firstChunkMs)} />
+        <Metric label="Real complete" value={formatMs(canonical?.completeMs)} />
+        <Metric label="Real generation" value={formatMs(canonical?.generationMs)} />
+        <Metric label="Real mesh + upload" value={formatMs(canonical?.meshUploadMs)} />
+        <Metric
+          label="Real cache"
+          value={canonical ? `${canonical.cacheHits} hits` : "—"}
+        />
         <Metric label="CPU compile / frame" value={formatMs(report?.cpuReferenceMs)} />
         <Metric label="Encode + submit" value={formatMs(report?.encodeSubmitMs)} />
         <Metric label="CPU coarse" value={formatMs(report?.cpuCoarseReadyMs)} />
