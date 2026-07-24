@@ -2431,12 +2431,14 @@ fn grown_arena_capacity(current: u32, requested: u32, maximum: u32) -> Result<u3
     let minimum = current
         .checked_add(requested)
         .context("terrain GPU arena element count overflow")?;
-    let doubled = current.saturating_mul(2).max(minimum);
-    let capacity = doubled.checked_next_power_of_two().unwrap_or(maximum);
-    if capacity > maximum || minimum > maximum {
+    if minimum > maximum {
         bail!("terrain GPU arena exhausted at {current} elements (requested {requested})");
     }
-    Ok(capacity)
+    let doubled = current.saturating_mul(2).max(minimum);
+    Ok(doubled
+        .checked_next_power_of_two()
+        .unwrap_or(maximum)
+        .min(maximum))
 }
 
 fn indirect_buffer_size(draw_capacity_per_slot: u32) -> Result<wgpu::BufferAddress> {
@@ -8118,6 +8120,12 @@ mod tests {
         assert_eq!(allocator.used(), 0);
         assert_eq!(allocator.allocate(16), Some(0..16));
         assert_eq!(allocator.allocate(1), None);
+    }
+
+    #[test]
+    fn terrain_arena_growth_can_use_a_non_power_of_two_adapter_limit() {
+        assert_eq!(grown_arena_capacity(4, 1, 6).expect("bounded growth"), 6);
+        assert!(grown_arena_capacity(6, 1, 6).is_err());
     }
 
     #[test]
