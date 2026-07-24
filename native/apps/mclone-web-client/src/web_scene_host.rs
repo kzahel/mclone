@@ -1089,7 +1089,7 @@ impl WebSceneHost {
             presentation.present(&mut encoder, output_target);
             summary
         } else {
-            if !host.auxiliary_split_mode().is_split() {
+            if !host.flat_split_selected() {
                 self.split_presentation = None;
             }
             host.set_mono_ui_scale(GuiScale::from_pixels(

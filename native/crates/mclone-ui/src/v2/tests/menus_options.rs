@@ -1,6 +1,8 @@
 use super::*;
 use crate::{
-    GameAuxiliarySplitMode, GameFlatPresentationState, GameLeafDetail, GameWorldRenderScaleMode,
+    GameAuxiliarySplitMode, GameFlatPresentationState, GameLeafDetail,
+    GameLocalPlayControllerFamily, GameLocalPlayGuestInput, GameLocalPlayLayout,
+    GameLocalPlayState, GameWorldRenderScaleMode,
 };
 
 #[test]
@@ -275,6 +277,125 @@ fn debug_options_cycles_the_flat_auxiliary_view_mode() {
             GameAuxiliarySplitMode::Horizontal
         ))
     );
+}
+
+#[test]
+fn local_play_options_make_the_initial_assignments_and_profile_scope_explicit() {
+    let mut surface = UiSurface::new();
+    surface.set_screen(Some(UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::LocalPlay,
+    }));
+    surface.set_scale(GuiScale::from_pixels(960, 540));
+    let state = GameUiRenderState {
+        local_play: Some(GameLocalPlayState::default()),
+        ..GameUiRenderState::default()
+    };
+    surface.set_render_state(state);
+
+    let layout = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_LOCAL_PLAY_LAYOUT)
+        .expect("local play layout row")
+        .clone();
+    assert!(layout.enabled);
+    assert_eq!(layout.value.as_deref(), Some("Left / Right"));
+    assert!(surface.pointer_down(point_in(layout.rect), state));
+    assert_eq!(
+        surface.pointer_up(point_in(layout.rect), state).1,
+        Some(GameUiAction::SetLocalPlayLayout(
+            GameLocalPlayLayout::TopBottom
+        ))
+    );
+
+    let player_one = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_LOCAL_PLAY_PLAYER_ONE)
+        .expect("player one assignment row");
+    assert!(!player_one.enabled);
+    assert_eq!(player_one.value.as_deref(), Some("Keyboard + Mouse"));
+
+    let guest = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_LOCAL_PLAY_GUEST)
+        .expect("guest assignment row")
+        .clone();
+    assert!(guest.enabled);
+    assert_eq!(guest.value.as_deref(), Some("Off"));
+    assert!(surface.pointer_down(point_in(guest.rect), state));
+    assert_eq!(
+        surface.pointer_up(point_in(guest.rect), state).1,
+        Some(GameUiAction::ToggleLocalPlayGuest)
+    );
+
+    let profile = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_LOCAL_PLAY_STATUS)
+        .expect("guest profile scope row");
+    assert!(!profile.enabled);
+    assert_eq!(profile.value.as_deref(), Some("Session Only"));
+    let access = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_LOCAL_PLAY_ACCESS)
+        .expect("guest access scope row");
+    assert!(!access.enabled);
+    assert_eq!(access.value.as_deref(), Some("View Only"));
+}
+
+#[test]
+fn local_play_options_show_controller_assignment_and_unavailable_state() {
+    let mut surface = UiSurface::new();
+    surface.set_screen(Some(UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::LocalPlay,
+    }));
+    surface.set_scale(GuiScale::from_pixels(960, 540));
+    let state = GameUiRenderState {
+        local_play: Some(GameLocalPlayState {
+            layout: GameLocalPlayLayout::TopBottom,
+            guest_input: GameLocalPlayGuestInput::Assigned {
+                family: GameLocalPlayControllerFamily::Xbox,
+                device_number: 2,
+            },
+        }),
+        ..GameUiRenderState::default()
+    };
+    surface.set_render_state(state);
+    assert_eq!(
+        surface
+            .layout()
+            .widget(UI_V2_OPTIONS_LOCAL_PLAY_LAYOUT)
+            .expect("layout row")
+            .value
+            .as_deref(),
+        Some("Top / Bottom")
+    );
+    assert_eq!(
+        surface
+            .layout()
+            .widget(UI_V2_OPTIONS_LOCAL_PLAY_GUEST)
+            .expect("guest row")
+            .value
+            .as_deref(),
+        Some("Xbox gamepad 2")
+    );
+
+    surface.set_render_state(GameUiRenderState::default());
+    for id in [
+        UI_V2_OPTIONS_LOCAL_PLAY_LAYOUT,
+        UI_V2_OPTIONS_LOCAL_PLAY_PLAYER_ONE,
+        UI_V2_OPTIONS_LOCAL_PLAY_GUEST,
+        UI_V2_OPTIONS_LOCAL_PLAY_STATUS,
+        UI_V2_OPTIONS_LOCAL_PLAY_ACCESS,
+    ] {
+        assert!(
+            !surface
+                .layout()
+                .widget(id)
+                .expect("unavailable local play row")
+                .enabled
+        );
+    }
 }
 
 #[test]

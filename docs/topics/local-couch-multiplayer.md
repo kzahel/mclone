@@ -18,8 +18,10 @@ stopping before product couch enablement and unresolved profile/cache policy.
 [`Tactical 219`](../tactical/219-live-auxiliary-split-mode.md) completed the
 first live consumer on 2026-07-22: a menu-controlled single-player auxiliary
 view through one Rust scene/render path for desktop, browser, and flat Android.
+[`Tactical 235`](../tactical/235-local-play-ux-preview.md) completed the first
+explicit Local Play UX and input-isolated Guest 2 view preview on 2026-07-24.
 Browser TypeScript remains unaware of split semantics, and authoritative
-player-two support remains outside the slice.
+player-two support remains outside the completed preview slice.
 
 This topic owns local participant cardinality, participant-to-input assignment,
 participant-versus-view separation, shared split-screen presentation policy,
@@ -173,6 +175,17 @@ presentation:
   Left / Right, and Top / Bottom. Unobscured gameplay prepares once and renders
   an ordinary primary HUD view plus a separately culled elevated world-only
   view; full-screen menus and visible embedded previews suppress composition;
+- the shared Options menu now has a dedicated Local Play setup sheet. Player 1
+  is explicitly keyboard/mouse for the first consumer, Guest 2 claims one
+  confirming controller source, layout remains independently selectable, and
+  profile/access rows say `Session Only` and `View Only`;
+- the live flat router removes the claimed source from Player 1, drives a
+  separate semantic controller session for Guest 2, clears safely on
+  disconnect/removal, and restores the source to the primary pool;
+- the active drawable slot retains one optional non-authoritative Guest 2
+  presentation controller. It moves independently against already resident
+  client facts, contributes no command stream or interest, and feeds the same
+  shared two-pane presenter used by the Debug auxiliary view;
 - headed WebGPU, native horizontal/vertical, and Android arm64 packaging gates
   pass, while a browser ownership lock keeps split semantics out of production
   TypeScript; and
@@ -181,22 +194,23 @@ presentation:
   drives two participant-local semantic sessions and renders independent
   cameras through horizontal and vertical layouts with one shared preparation.
 
-The client/presentation side remains singleton in the places couch play must
-change:
+The client/presentation side remains singleton in the authoritative places
+couch play must change:
 
-- one `DrawableWorldSlot` still retains exactly one participant presentation
-  envelope;
-- the live multi-flat consumer is still an auxiliary two-view diagnostic, not
-  two participant presentations, and intentionally rejects simultaneous
-  retained embedded-world preview composition;
+- one `DrawableWorldSlot` still retains exactly one authoritative participant
+  presentation envelope plus the explicitly non-authoritative Guest 2 preview;
+- the live Local Play consumer is an input-isolated two-view preview, not two
+  logical clients, and intentionally rejects simultaneous retained
+  embedded-world preview composition;
 - `LocalIntegratedSceneRuntime` owns one `SingleViewRuntime` and one
   `IntegratedRunnerConnection`;
 - the local profile layer exposes one installation/browser-origin profile,
-  not a local participant/profile group;
+  while the initial Guest 2 is explicitly session-only rather than a local
+  participant/profile group;
 - flat HUD/menu state still belongs to the one ordinary participant; the live
-  auxiliary pane deliberately has no HUD or menu ownership; and
-- product hosts still arbitrate multiple ordinary controllers into one local
-  player's semantic input session rather than assigning them to participants.
+  Guest 2 pane deliberately has no HUD or menu ownership; and
+- unassigned ordinary controllers still feed Player 1, while the one explicitly
+  claimed Guest 2 source now has isolated routing.
 
 These are explicit refactor points, not permission to stage the feature in
 `mclone-native-client`.
@@ -452,6 +466,12 @@ Each ordinary participant's realm record remains keyed by that profile UUID.
 Player two is not saved under player one's identity, and leaving one
 participant must not tear down the other participants or the integrated realm.
 
+The initial Tactical 235 preview deliberately does not wait for that durable
+owner. Player 1 continues using the existing installation profile. Guest 2 is
+a session-only, view-only label with no UUID, realm record, save promise, or
+platform-account association. This is a bounded UX/input/presentation proof,
+not a substitute for the future local profile group.
+
 UI must consume a viewport rectangle and safe area, not assume full-surface
 dimensions. Participant-scoped state includes HUD, hotbar/inventory, prompts,
 death/respawn, selected camera, and focus. Device-global overlays include
@@ -506,9 +526,10 @@ The sequence is intentionally staged so each milestone is useful on its own:
 3. **Participantize singleton client-experience state.** Tactical 217 completed
    the bounded participant group, cardinality-one
    camera/interaction/player-model envelope, and scripted source assignment to
-   isolated semantic input sessions. Expanding the scene beyond cardinality
-   one awaits an actual consumer; durable profiles and global UI policy remain
-   unresolved.
+   isolated semantic input sessions. Tactical 235 added the first live optional
+   Guest 2 presentation envelope and explicit controller claim, while keeping
+   it non-authoritative and session-only. Durable profiles and participant HUD
+   policy remain unresolved.
 4. **Add a local client group.** Join two distinct ordinary identities to one
    Tactical 217 now proves 1-4 distinct ordinary identities against one realm
    through independent logical endpoints, including owner-only updates,
@@ -550,8 +571,10 @@ Rendered acceptance began with the inspected Tactical 217 single-player
 auxiliary proof. Tactical 219 promoted it to the live shared GPU presenter and
 proved horizontal/vertical native pixels plus a menu-selected headed WebGPU
 frame with aspect-correct cameras, separate depth, primary-only HUD, exact
-layout-bound composition, and an unchanged direct mono branch. Remaining
-product acceptance includes:
+layout-bound composition, and an unchanged direct mono branch. Tactical 235
+added an inspected full-width Local Play setup screen, source-isolation tests,
+and native horizontal/vertical shared-presenter captures for the Guest 2
+preview contract. Remaining product acceptance includes:
 
 - authoritative per-participant HUD, owner state, and view-local effects;
 - live resize/orientation and controller-first interaction on target hardware;

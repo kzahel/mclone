@@ -1345,16 +1345,18 @@ pub enum GameOptionsCategory {
     Graphics,
     Movement,
     Display,
+    LocalPlay,
     Debug,
     StorageProfile,
 }
 
 impl GameOptionsCategory {
     /// Categories in the order the hub lists them.
-    pub const ALL: [Self; 5] = [
+    pub const ALL: [Self; 6] = [
         Self::Graphics,
         Self::Movement,
         Self::Display,
+        Self::LocalPlay,
         Self::Debug,
         Self::StorageProfile,
     ];
@@ -1364,6 +1366,7 @@ impl GameOptionsCategory {
             Self::Graphics => "Graphics",
             Self::Movement => "Movement",
             Self::Display => "Display",
+            Self::LocalPlay => "Local Play",
             Self::Debug => "Debug",
             Self::StorageProfile => "Storage & Profile",
         }
@@ -1375,6 +1378,7 @@ impl GameOptionsCategory {
             Self::Graphics => "GRAPHICS",
             Self::Movement => "MOVEMENT",
             Self::Display => "DISPLAY",
+            Self::LocalPlay => "LOCAL PLAY",
             Self::Debug => "DEBUG",
             Self::StorageProfile => "STORAGE & PROFILE",
         }
@@ -1685,6 +1689,115 @@ pub enum GameAuxiliarySplitMode {
     Vertical,
 }
 
+/// Session-local layout for two flat local-play participants.
+///
+/// Participant/input assignment is intentionally separate: changing layout
+/// never changes which source belongs to which participant.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameLocalPlayLayout {
+    #[default]
+    LeftRight,
+    TopBottom,
+}
+
+impl GameLocalPlayLayout {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::LeftRight => "Left / Right",
+            Self::TopBottom => "Top / Bottom",
+        }
+    }
+
+    pub const fn next(self) -> Self {
+        match self {
+            Self::LeftRight => Self::TopBottom,
+            Self::TopBottom => Self::LeftRight,
+        }
+    }
+
+    pub const fn auxiliary_mode(self) -> GameAuxiliarySplitMode {
+        match self {
+            Self::LeftRight => GameAuxiliarySplitMode::Horizontal,
+            Self::TopBottom => GameAuxiliarySplitMode::Vertical,
+        }
+    }
+}
+
+/// Controller-family label projected into the UI without exposing a backend
+/// handle or persisting a session-local input-source ID.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameLocalPlayControllerFamily {
+    Xbox,
+    PlayStation,
+    Nintendo,
+    #[default]
+    Gamepad,
+}
+
+impl GameLocalPlayControllerFamily {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Xbox => "Xbox gamepad",
+            Self::PlayStation => "PlayStation gamepad",
+            Self::Nintendo => "Nintendo gamepad",
+            Self::Gamepad => "Gamepad",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameLocalPlayGuestInput {
+    #[default]
+    Off,
+    Waiting,
+    Assigned {
+        family: GameLocalPlayControllerFamily,
+        device_number: u8,
+    },
+    Disconnected {
+        family: GameLocalPlayControllerFamily,
+        device_number: u8,
+    },
+}
+
+impl GameLocalPlayGuestInput {
+    pub const fn active(self) -> bool {
+        matches!(self, Self::Assigned { .. } | Self::Disconnected { .. })
+    }
+
+    pub fn label(self) -> String {
+        match self {
+            Self::Off => "Off".to_owned(),
+            Self::Waiting => "Press A on a gamepad".to_owned(),
+            Self::Assigned {
+                family,
+                device_number,
+            } => numbered_controller_label(family, device_number),
+            Self::Disconnected {
+                family,
+                device_number,
+            } => format!(
+                "{} — disconnected",
+                numbered_controller_label(family, device_number)
+            ),
+        }
+    }
+}
+
+fn numbered_controller_label(family: GameLocalPlayControllerFamily, device_number: u8) -> String {
+    if device_number <= 1 {
+        family.label().to_owned()
+    } else {
+        format!("{} {device_number}", family.label())
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct GameLocalPlayState {
+    pub layout: GameLocalPlayLayout,
+    pub guest_input: GameLocalPlayGuestInput,
+}
+
 impl GameAuxiliarySplitMode {
     pub const fn label(self) -> &'static str {
         match self {
@@ -1900,6 +2013,8 @@ pub enum GameUiAction {
     ToggleFramePipelineOverlay,
     ToggleDebugDiagnostics,
     SetAuxiliarySplitMode(GameAuxiliarySplitMode),
+    SetLocalPlayLayout(GameLocalPlayLayout),
+    ToggleLocalPlayGuest,
     SetPlayerModel(GamePlayerModel),
     SetMovementMode(GameMovementMode),
     SetCollisionMode(GameCollisionMode),
@@ -2143,6 +2258,8 @@ pub struct GameUiRenderState {
     pub debug_diagnostics_visible: bool,
     /// `None` projects this flat-only setting as unavailable (for example XR).
     pub auxiliary_split_mode: Option<GameAuxiliarySplitMode>,
+    /// `None` projects local flat participant assignment as unavailable.
+    pub local_play: Option<GameLocalPlayState>,
     pub player_model: GamePlayerModel,
     pub movement_mode: GameMovementMode,
     pub collision_mode: Option<GameCollisionMode>,
@@ -2189,6 +2306,7 @@ impl Default for GameUiRenderState {
             frame_pipeline_overlay_visible: false,
             debug_diagnostics_visible: false,
             auxiliary_split_mode: None,
+            local_play: None,
             player_model: GamePlayerModel::Player,
             movement_mode: GameMovementMode::Walk,
             collision_mode: None,

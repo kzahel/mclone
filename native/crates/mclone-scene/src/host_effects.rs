@@ -104,7 +104,9 @@ where
             }
             // Flat presentation topology is retained by `MonoUiContext` and
             // applied before this generic engine/platform dispatcher.
-            ClientExperienceSettingEffect::SetAuxiliarySplitMode(_) => {}
+            ClientExperienceSettingEffect::SetAuxiliarySplitMode(_)
+            | ClientExperienceSettingEffect::SetLocalPlayLayout(_)
+            | ClientExperienceSettingEffect::SetLocalPlayGuestInput(_) => {}
             ClientExperienceSettingEffect::SetPlayerModel(model) => {
                 target.set_player_model(model)?;
             }

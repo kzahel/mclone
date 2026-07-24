@@ -409,7 +409,7 @@ impl WinitFrameDriver {
             presentation.present(encoder, output_target);
             summary
         } else {
-            if !self.host.auxiliary_split_mode().is_split() {
+            if !self.host.flat_split_selected() {
                 self.split_presentation = None;
             }
             if let Some(scale) = &mut self.scale_presentation {

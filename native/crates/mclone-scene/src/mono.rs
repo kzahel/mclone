@@ -58,6 +58,8 @@ pub struct MonoUiContext {
     /// Shared flat presentation topology. Platform callers update the other
     /// context facts every frame; the scene preserves this menu-owned value.
     pub auxiliary_split_mode: GameAuxiliarySplitMode,
+    /// Session-local Local Play layout and Guest 2 assignment projection.
+    pub local_play: GameLocalPlayState,
 }
 
 impl Default for MonoUiContext {
@@ -82,6 +84,7 @@ impl Default for MonoUiContext {
             touch_controls_mode: None,
             touch_settings: None,
             auxiliary_split_mode: GameAuxiliarySplitMode::Off,
+            local_play: GameLocalPlayState::default(),
         }
     }
 }
@@ -249,14 +252,13 @@ impl McloneSceneHost {
     }
 
     pub fn set_mono_ui_context(&mut self, context: MonoUiContext) {
-        let auxiliary_split_mode = self
-            .mono_ui_context
-            .as_ref()
-            .map_or(context.auxiliary_split_mode, |current| {
-                current.auxiliary_split_mode
-            });
+        let (auxiliary_split_mode, local_play) = self.mono_ui_context.as_ref().map_or(
+            (context.auxiliary_split_mode, context.local_play),
+            |current| (current.auxiliary_split_mode, current.local_play),
+        );
         self.mono_ui_context = Some(MonoUiContext {
             auxiliary_split_mode,
+            local_play,
             ..context
         });
     }
@@ -690,6 +692,160 @@ impl McloneSceneHost {
         .render_view(size[0].max(1), size[1].max(1))
     }
 
+    pub fn local_play_state(&self) -> GameLocalPlayState {
+        self.mono_ui_context
+            .as_ref()
+            .map_or_else(GameLocalPlayState::default, |context| context.local_play)
+    }
+
+    pub fn local_play_waiting_for_gamepad(&self) -> bool {
+        self.local_play_state().guest_input == GameLocalPlayGuestInput::Waiting
+    }
+
+    pub fn local_play_guest_active(&self) -> bool {
+        self.local_play_state().guest_input.active()
+            && self.active_world.local_guest_preview.is_some()
+    }
+
+    pub fn assign_local_play_guest_gamepad(
+        &mut self,
+        family: GameLocalPlayControllerFamily,
+        device_number: u8,
+    ) -> bool {
+        let assigned = GameLocalPlayGuestInput::Assigned {
+            family,
+            device_number: device_number.max(1),
+        };
+        let before = self.local_play_state();
+        let context = self
+            .mono_ui_context
+            .get_or_insert_with(MonoUiContext::default);
+        context.local_play.guest_input = assigned;
+        self.ensure_local_guest_preview();
+        self.sync_local_play_ui_projection();
+        before.guest_input != assigned
+    }
+
+    pub fn mark_local_play_guest_gamepad_disconnected(&mut self) -> bool {
+        let before = self.local_play_state();
+        let disconnected = match before.guest_input {
+            GameLocalPlayGuestInput::Assigned {
+                family,
+                device_number,
+            } => GameLocalPlayGuestInput::Disconnected {
+                family,
+                device_number,
+            },
+            _ => return false,
+        };
+        self.mono_ui_context
+            .get_or_insert_with(MonoUiContext::default)
+            .local_play
+            .guest_input = disconnected;
+        if let Some(guest) = self.active_world.local_guest_preview.as_mut() {
+            guest.reset_movement();
+        }
+        self.sync_local_play_ui_projection();
+        true
+    }
+
+    pub fn remove_local_play_guest(&mut self) -> bool {
+        let before = self.local_play_state();
+        self.mono_ui_context
+            .get_or_insert_with(MonoUiContext::default)
+            .local_play
+            .guest_input = GameLocalPlayGuestInput::Off;
+        self.active_world.local_guest_preview = None;
+        self.sync_local_play_ui_projection();
+        before.guest_input != GameLocalPlayGuestInput::Off
+    }
+
+    fn ensure_local_guest_preview(&mut self) {
+        if self.active_world.local_guest_preview.is_some() {
+            return;
+        }
+        let primary = self
+            .active_world
+            .local_participant
+            .presentation_camera_snapshot();
+        let mut camera = EngineCameraController::from_eye_pose(
+            Vec3d::new(primary.eye.x + 1.5, primary.eye.y, primary.eye.z),
+            primary.yaw_radians,
+            primary.pitch_radians,
+            primary.speed_blocks_per_second,
+        );
+        camera.set_view_mode(self.active_world.local_participant.camera.view_mode());
+        camera.set_movement_mode(self.active_world.local_participant.camera.movement_mode());
+        camera.set_collision_mode(self.active_world.local_participant.camera.collision_mode());
+        self.active_world.local_guest_preview = Some(LocalParticipantPresentation::new(
+            camera,
+            self.active_world.scene.player_movement_cadence,
+        ));
+    }
+
+    fn sync_local_play_ui_projection(&mut self) {
+        let mut settings = self.client_experience.settings().state();
+        settings.local_play = Some(self.local_play_state());
+        self.client_experience.set_settings_state(settings);
+        self.ui
+            .commit_render_state(self.current_mono_ui_render_state());
+    }
+
+    pub fn advance_local_play_guest_input_frame(
+        &mut self,
+        frame: FlatInputFrame,
+        dt_seconds: f64,
+    ) -> bool {
+        if !self.gameplay_startup_complete()
+            || self.mono_ui_is_active()
+            || !self.local_play_guest_active()
+        {
+            if let Some(guest) = self.active_world.local_guest_preview.as_mut() {
+                guest.reset_movement();
+            }
+            return false;
+        }
+        let runtime = self
+            .active_world
+            .runtime
+            .as_ref()
+            .expect("startup completion requires runtime");
+        let frame_end = self.services.clock.now();
+        let input = engine_camera_input_from_flat_frame(frame, dt_seconds);
+        self.active_world
+            .local_guest_preview
+            .as_mut()
+            .expect("active local guest has presentation state")
+            .advance_movement(runtime.client(), input, dt_seconds, frame_end)
+            .0
+    }
+
+    pub fn observe_local_play_guest_movement_frame_ago(
+        &mut self,
+        frame: FlatInputFrame,
+        look_rate_mouse_delta_per_second: [f64; 2],
+        age: Duration,
+    ) {
+        if !self.gameplay_startup_complete()
+            || self.mono_ui_is_active()
+            || !self.local_play_guest_active()
+        {
+            return;
+        }
+        let now = self.services.clock.now();
+        let age_nanos = u64::try_from(age.as_nanos()).unwrap_or(u64::MAX);
+        let observed_at = MonotonicInstant::from_nanos(now.as_nanos().saturating_sub(age_nanos));
+        self.active_world
+            .local_guest_preview
+            .as_mut()
+            .expect("active local guest has presentation state")
+            .observe_movement(
+                engine_camera_input_from_flat_frame(frame, 0.0),
+                look_rate_mouse_delta_per_second,
+                observed_at,
+            );
+    }
+
     pub fn auxiliary_split_mode(&self) -> GameAuxiliarySplitMode {
         self.mono_ui_context
             .as_ref()
@@ -698,10 +854,16 @@ impl McloneSceneHost {
             })
     }
 
+    /// Whether either the Local Play guest or the Debug auxiliary view has
+    /// selected a split, including while a full-surface menu hides the panes.
+    pub fn flat_split_selected(&self) -> bool {
+        self.effective_flat_split_mode().is_split()
+    }
+
     /// Menus remain full-surface. This avoids silently deciding future couch
     /// pause/menu ownership while making the debug mode directly reversible.
     pub fn auxiliary_split_gameplay_active(&self) -> bool {
-        self.auxiliary_split_mode().is_split()
+        self.flat_split_selected()
             && !self.mono_ui_is_active()
             && !self
                 .embedded_world_preview
@@ -717,10 +879,18 @@ impl McloneSceneHost {
         surface_size: [u32; 2],
     ) -> Result<Option<FlatSurfaceLayout>> {
         auxiliary_split_layout_for_mode(
-            self.auxiliary_split_mode(),
+            self.effective_flat_split_mode(),
             self.auxiliary_split_gameplay_active(),
             surface_size,
         )
+    }
+
+    fn effective_flat_split_mode(&self) -> GameAuxiliarySplitMode {
+        if self.local_play_guest_active() {
+            self.local_play_state().layout.auxiliary_mode()
+        } else {
+            self.auxiliary_split_mode()
+        }
     }
 
     /// Primary participant view plus a non-authoritative elevated follow view.
@@ -732,7 +902,21 @@ impl McloneSceneHost {
         auxiliary_size: [u32; 2],
     ) -> Result<[ChunkRenderView; 2]> {
         let primary = self.mono_render_view(primary_size)?;
-        let auxiliary = auxiliary_follow_render_view(primary, auxiliary_size);
+        let auxiliary = if let Some(guest) = self
+            .active_world
+            .local_guest_preview
+            .as_ref()
+            .filter(|_| self.local_play_guest_active())
+        {
+            render_pose_from_snapshot_with_view_mode(
+                guest.presentation_camera_snapshot(),
+                guest.camera.view_mode(),
+                self.current_render_distance(),
+            )
+            .render_view(auxiliary_size[0].max(1), auxiliary_size[1].max(1))?
+        } else {
+            auxiliary_follow_render_view(primary, auxiliary_size)
+        };
         Ok([primary, auxiliary])
     }
 
@@ -1336,10 +1520,34 @@ impl McloneSceneHost {
         H: HostEffects,
     {
         for effect in &effects.settings.setting_effects {
-            if let ClientExperienceSettingEffect::SetAuxiliarySplitMode(mode) = effect {
-                self.mono_ui_context
-                    .get_or_insert_with(MonoUiContext::default)
-                    .auxiliary_split_mode = *mode;
+            match effect {
+                ClientExperienceSettingEffect::SetAuxiliarySplitMode(mode) => {
+                    self.mono_ui_context
+                        .get_or_insert_with(MonoUiContext::default)
+                        .auxiliary_split_mode = *mode;
+                }
+                ClientExperienceSettingEffect::SetLocalPlayLayout(layout) => {
+                    self.mono_ui_context
+                        .get_or_insert_with(MonoUiContext::default)
+                        .local_play
+                        .layout = *layout;
+                }
+                ClientExperienceSettingEffect::SetLocalPlayGuestInput(input) => {
+                    self.mono_ui_context
+                        .get_or_insert_with(MonoUiContext::default)
+                        .local_play
+                        .guest_input = *input;
+                    match input {
+                        GameLocalPlayGuestInput::Off | GameLocalPlayGuestInput::Waiting => {
+                            self.active_world.local_guest_preview = None;
+                        }
+                        GameLocalPlayGuestInput::Assigned { .. }
+                        | GameLocalPlayGuestInput::Disconnected { .. } => {
+                            self.ensure_local_guest_preview();
+                        }
+                    }
+                }
+                _ => {}
             }
         }
         let catalog_scene_replaced =
@@ -2658,7 +2866,10 @@ impl McloneSceneHost {
         state.flat_presentation = context.flat_presentation;
         state.touch_controls_mode = context.touch_controls_mode;
         state.touch_settings = context.touch_settings;
-        state.auxiliary_split_mode = Some(context.auxiliary_split_mode);
+        state.auxiliary_split_mode = (context.local_play.guest_input
+            == GameLocalPlayGuestInput::Off)
+            .then_some(context.auxiliary_split_mode);
+        state.local_play = Some(context.local_play);
         state.server_cadence = self.active_world.runtime.as_ref().and_then(|runtime| {
             runtime
                 .simulation_cadence()

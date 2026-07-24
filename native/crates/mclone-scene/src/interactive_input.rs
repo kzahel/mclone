@@ -1,14 +1,17 @@
 use anyhow::Result;
 use mclone_input::{
     AgedPlayerActionFrame, ControllerActionBatch, ControllerInputBatch, ControllerInputError,
-    ControllerInputPreferences, ControllerInputSession, FlatInputAction, FlatInputFrame,
-    InputContext, InputSourceDescriptor, InputSourceId, KEYBOARD_TURN_MOUSE_DELTA_PER_SECOND,
-    KeyboardKey, KeyboardMouseInputAdapter, MouseWheelDirection, PlayerActionFrame,
-    PlayerActionFrameCombiner, PointerButton, StandardGamepadSnapshot, TouchLookDelta,
-    XrInputFrame,
+    ControllerInputObservation, ControllerInputPreferences, ControllerInputSession,
+    ControllerLayoutFamily, FlatInputAction, FlatInputFrame, InputContext, InputSourceDescriptor,
+    InputSourceId, KEYBOARD_TURN_MOUSE_DELTA_PER_SECOND, KeyboardKey, KeyboardMouseInputAdapter,
+    MouseWheelDirection, PlayerAction, PlayerActionFrame, PlayerActionFrameCombiner, PointerButton,
+    StandardGamepadSnapshot, TouchLookDelta, XrInputFrame,
 };
-use mclone_ui::{GameHelpParent, GameUiAction, GuiKey, GuiNavigation, Point};
-use std::time::Duration;
+use mclone_ui::{
+    GameHelpParent, GameLocalPlayControllerFamily, GameLocalPlayGuestInput, GameUiAction, GuiKey,
+    GuiNavigation, Point,
+};
+use std::{collections::BTreeMap, time::Duration};
 
 use crate::{
     HostEffects, McloneSceneHost, MonoInputFrameOutcome, MonoUiActionOutcome, MonoWorldActionStatus,
@@ -240,11 +243,25 @@ impl MonoInputDisposition {
 /// Winit, browser, and other leaf adapters normalize their physical APIs into
 /// these host-neutral values. The router owns keyboard/mouse held state and
 /// asks `McloneSceneHost` to select UI, camera, hotbar, or world behavior.
+#[derive(Clone, Copy, Debug)]
+struct LocalGuestControllerAssignment {
+    source_id: InputSourceId,
+    family: GameLocalPlayControllerFamily,
+    device_number: u8,
+    connected: bool,
+}
+
 #[derive(Clone, Debug, Default)]
 pub struct MonoInteractiveInputRouter {
     keyboard_mouse: KeyboardMouseInputAdapter,
     controller: ControllerInputSession,
     latest_controller_actions: PlayerActionFrame,
+    controller_descriptors: BTreeMap<InputSourceId, InputSourceDescriptor>,
+    controller_numbers: BTreeMap<InputSourceId, u8>,
+    local_guest_controller: ControllerInputSession,
+    local_guest_assignment: Option<LocalGuestControllerAssignment>,
+    latest_local_guest_actions: PlayerActionFrame,
+    local_guest_lifecycle_dirty: bool,
 }
 
 impl MonoInteractiveInputRouter {
@@ -255,19 +272,24 @@ impl MonoInteractiveInputRouter {
     pub fn with_controller_preferences(preferences: &ControllerInputPreferences) -> Self {
         Self {
             controller: ControllerInputSession::with_preferences(preferences),
+            local_guest_controller: ControllerInputSession::with_preferences(preferences),
             ..Self::default()
         }
     }
 
     pub fn apply_controller_preferences(&mut self, preferences: &ControllerInputPreferences) {
         self.controller.apply_preferences(preferences);
+        self.local_guest_controller.apply_preferences(preferences);
         self.latest_controller_actions = PlayerActionFrame::default();
+        self.latest_local_guest_actions = PlayerActionFrame::default();
     }
 
     pub fn clear_transient_input(&mut self) {
         self.keyboard_mouse.clear_held();
         self.controller.clear_held();
+        self.local_guest_controller.clear_held();
         self.latest_controller_actions = PlayerActionFrame::default();
+        self.latest_local_guest_actions = PlayerActionFrame::default();
     }
 
     pub fn held_frame(&self) -> Option<FlatInputFrame> {
@@ -279,6 +301,7 @@ impl MonoInteractiveInputRouter {
     pub fn has_continuous_movement_input(&self) -> bool {
         self.keyboard_mouse.has_continuous_movement_input()
             || self.latest_controller_actions.movement != Default::default()
+            || self.latest_local_guest_actions.movement != Default::default()
             || self.latest_controller_actions.held.iter().any(|action| {
                 matches!(
                     action,
@@ -288,6 +311,15 @@ impl MonoInteractiveInputRouter {
                         | mclone_input::PlayerAction::Descend
                 )
             })
+            || self.latest_local_guest_actions.held.iter().any(|action| {
+                matches!(
+                    action,
+                    PlayerAction::Jump
+                        | PlayerAction::Sprint
+                        | PlayerAction::Sneak
+                        | PlayerAction::Descend
+                )
+            })
     }
 
     pub fn connect_controller_source(
@@ -295,22 +327,64 @@ impl MonoInteractiveInputRouter {
         source_id: InputSourceId,
         descriptor: InputSourceDescriptor,
     ) -> bool {
-        self.controller.connect_source(source_id, descriptor)
+        self.controller_descriptors
+            .insert(source_id, descriptor.clone());
+        if !self.controller_numbers.contains_key(&source_id) {
+            let next = self
+                .controller_numbers
+                .values()
+                .copied()
+                .max()
+                .unwrap_or(0)
+                .saturating_add(1)
+                .max(1);
+            self.controller_numbers.insert(source_id, next);
+        }
+        if self
+            .local_guest_assignment
+            .is_some_and(|assignment| assignment.source_id == source_id)
+        {
+            let changed = self
+                .local_guest_controller
+                .connect_source(source_id, descriptor);
+            if let Some(assignment) = self.local_guest_assignment.as_mut() {
+                assignment.connected = true;
+            }
+            self.local_guest_lifecycle_dirty = true;
+            self.local_guest_controller.clear_held();
+            changed
+        } else {
+            self.controller.connect_source(source_id, descriptor)
+        }
     }
 
     pub fn disconnect_controller_source(
         &mut self,
         source_id: InputSourceId,
     ) -> std::result::Result<bool, ControllerInputError> {
-        let changed = self.controller.disconnect_source(source_id)?;
+        let changed = if self
+            .local_guest_assignment
+            .is_some_and(|assignment| assignment.source_id == source_id)
+        {
+            let changed = self.local_guest_controller.disconnect_source(source_id)?;
+            if let Some(assignment) = self.local_guest_assignment.as_mut() {
+                assignment.connected = false;
+            }
+            self.latest_local_guest_actions = PlayerActionFrame::default();
+            self.local_guest_lifecycle_dirty = true;
+            changed
+        } else {
+            self.controller.disconnect_source(source_id)?
+        };
         if self.latest_controller_actions.active_source == Some(source_id) {
             self.latest_controller_actions = PlayerActionFrame::default();
         }
+        self.controller_descriptors.remove(&source_id);
         Ok(changed)
     }
 
     pub fn controller_source_count(&self) -> usize {
-        self.controller.source_count()
+        self.controller_descriptors.len()
     }
 
     pub fn latest_controller_actions(&self) -> &PlayerActionFrame {
@@ -324,7 +398,14 @@ impl MonoInteractiveInputRouter {
         dt_seconds: f64,
     ) -> Result<MonoInputFrameOutcome> {
         let frame = self.composed_held_frame(supplemental, dt_seconds);
-        host.advance_mono_input_frame(frame, dt_seconds)
+        let mut outcome = host.advance_mono_input_frame(frame, dt_seconds)?;
+        if host.local_play_guest_active() {
+            outcome.camera_changed |= host.advance_local_play_guest_input_frame(
+                self.latest_local_guest_actions.to_flat_frame(dt_seconds),
+                dt_seconds,
+            );
+        }
+        Ok(outcome)
     }
 
     pub fn observe_supplemental_movement(
@@ -414,6 +495,39 @@ impl MonoInteractiveInputRouter {
     where
         H: HostEffects,
     {
+        self.reconcile_local_guest_assignment(host)?;
+        if let Some(assignment) = self.local_guest_assignment {
+            let primary_batch = controller_batch_without_source(batch, assignment.source_id);
+            let local_guest_batch = controller_batch_for_source(batch, assignment.source_id);
+            let mut disposition =
+                self.route_primary_controller_batch(host, &primary_batch, device, queue, effects)?;
+            disposition.merge(self.route_local_guest_controller_batch(
+                host,
+                &local_guest_batch,
+                device,
+                queue,
+                effects,
+            )?);
+            self.reconcile_local_guest_assignment(host)?;
+            return Ok(disposition);
+        }
+        let disposition =
+            self.route_primary_controller_batch(host, batch, device, queue, effects)?;
+        self.reconcile_local_guest_assignment(host)?;
+        Ok(disposition)
+    }
+
+    fn route_primary_controller_batch<H>(
+        &mut self,
+        host: &mut McloneSceneHost,
+        batch: &ControllerInputBatch,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        effects: &mut H,
+    ) -> Result<MonoInputDisposition>
+    where
+        H: HostEffects,
+    {
         let context = if host.mono_ui_is_active() {
             InputContext::Menu
         } else {
@@ -429,6 +543,19 @@ impl MonoInteractiveInputRouter {
                 ..MonoInputDisposition::default()
             };
             'observations: for observation in action_batch.observations {
+                if host.local_play_waiting_for_gamepad()
+                    && observation
+                        .actions
+                        .pressed
+                        .contains(&PlayerAction::UiConfirm)
+                {
+                    if let Some(source_id) = observation.source_id {
+                        disposition.scene_changed |=
+                            self.assign_local_guest_source(host, source_id)?;
+                        disposition.handled = true;
+                        break 'observations;
+                    }
+                }
                 for action in observation.actions.pressed {
                     let Some(navigation) = gui_navigation_from_player_action(action) else {
                         continue;
@@ -437,9 +564,18 @@ impl MonoInteractiveInputRouter {
                     disposition.handled |= handled;
                     disposition.scene_changed |= handled;
                     if let Some(ui_action) = ui_action {
+                        let capture_source = (ui_action == GameUiAction::ToggleLocalPlayGuest)
+                            .then_some(observation.source_id)
+                            .flatten();
                         disposition.merge(Self::apply_ui_action(
                             host, ui_action, false, device, queue, effects,
                         )?);
+                        if host.local_play_waiting_for_gamepad() {
+                            if let Some(source_id) = capture_source {
+                                disposition.scene_changed |=
+                                    self.assign_local_guest_source(host, source_id)?;
+                            }
+                        }
                     }
                     if disposition.clear_transient_input {
                         break 'observations;
@@ -490,6 +626,165 @@ impl MonoInteractiveInputRouter {
         disposition.meaningful_controller_activity = meaningful_controller_activity;
         self.clear_if_requested(disposition);
         Ok(disposition)
+    }
+
+    fn route_local_guest_controller_batch<H>(
+        &mut self,
+        host: &mut McloneSceneHost,
+        batch: &ControllerInputBatch,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        effects: &mut H,
+    ) -> Result<MonoInputDisposition>
+    where
+        H: HostEffects,
+    {
+        let context = if host.mono_ui_is_active() {
+            InputContext::Menu
+        } else {
+            InputContext::Gameplay
+        };
+        self.local_guest_controller.set_context(context);
+        let action_batch = self.local_guest_controller.sample_batch(batch)?;
+        self.latest_local_guest_actions = action_batch.actions.clone();
+        let mut disposition = MonoInputDisposition {
+            meaningful_controller_activity: action_batch.actions.activity_source.is_some(),
+            ..MonoInputDisposition::default()
+        };
+        if context == InputContext::Menu {
+            'observations: for observation in action_batch.observations {
+                for action in observation.actions.pressed {
+                    let Some(navigation) = gui_navigation_from_player_action(action) else {
+                        continue;
+                    };
+                    let (handled, ui_action) = host.mono_ui_navigate(navigation);
+                    disposition.handled |= handled;
+                    disposition.scene_changed |= handled;
+                    if let Some(ui_action) = ui_action {
+                        disposition.merge(Self::apply_ui_action(
+                            host, ui_action, false, device, queue, effects,
+                        )?);
+                    }
+                    if disposition.clear_transient_input {
+                        break 'observations;
+                    }
+                }
+            }
+            self.clear_if_requested(disposition);
+            return Ok(disposition);
+        }
+
+        for observation in &action_batch.observations {
+            host.observe_local_play_guest_movement_frame_ago(
+                observation.actions.to_flat_frame(0.0),
+                [
+                    f64::from(observation.actions.look_rate.x),
+                    f64::from(observation.actions.look_rate.y),
+                ],
+                batch.sample_time().saturating_sub(observation.sample_time),
+            );
+        }
+        if action_batch.observations.iter().any(|observation| {
+            observation
+                .actions
+                .pressed
+                .contains(&PlayerAction::OpenMenu)
+        }) {
+            host.open_mono_pause_menu();
+            disposition.handled = true;
+            disposition.scene_changed = true;
+            disposition.clear_transient_input = true;
+        }
+        self.clear_if_requested(disposition);
+        Ok(disposition)
+    }
+
+    fn assign_local_guest_source(
+        &mut self,
+        host: &mut McloneSceneHost,
+        source_id: InputSourceId,
+    ) -> Result<bool> {
+        let Some(descriptor) = self.controller_descriptors.get(&source_id).cloned() else {
+            return Ok(false);
+        };
+        if self.local_guest_assignment.is_some() {
+            return Ok(false);
+        }
+        let _ = self.controller.disconnect_source(source_id);
+        self.local_guest_controller
+            .connect_source(source_id, descriptor.clone());
+        self.local_guest_controller.clear_held();
+        self.latest_local_guest_actions = PlayerActionFrame::default();
+        let family = local_play_controller_family(descriptor.controller_layout);
+        let device_number = self
+            .controller_numbers
+            .get(&source_id)
+            .copied()
+            .unwrap_or(1);
+        self.local_guest_assignment = Some(LocalGuestControllerAssignment {
+            source_id,
+            family,
+            device_number,
+            connected: true,
+        });
+        log::info!(
+            "assigned {} to local Guest 2",
+            descriptor
+                .display_label
+                .as_deref()
+                .unwrap_or(family.label())
+        );
+        Ok(host.assign_local_play_guest_gamepad(family, device_number))
+    }
+
+    fn reconcile_local_guest_assignment(&mut self, host: &mut McloneSceneHost) -> Result<()> {
+        if host.local_play_state().guest_input == GameLocalPlayGuestInput::Off {
+            if let Some(assignment) = self.local_guest_assignment.take() {
+                let _ = self
+                    .local_guest_controller
+                    .disconnect_source(assignment.source_id);
+                self.latest_local_guest_actions = PlayerActionFrame::default();
+                if assignment.connected {
+                    if let Some(descriptor) = self
+                        .controller_descriptors
+                        .get(&assignment.source_id)
+                        .cloned()
+                    {
+                        self.controller
+                            .connect_source(assignment.source_id, descriptor);
+                        self.controller.clear_held();
+                    }
+                }
+            }
+            self.local_guest_lifecycle_dirty = false;
+            return Ok(());
+        }
+        if self.local_guest_lifecycle_dirty {
+            if let Some(assignment) = self.local_guest_assignment {
+                if assignment.connected {
+                    host.assign_local_play_guest_gamepad(
+                        assignment.family,
+                        assignment.device_number,
+                    );
+                } else {
+                    host.mark_local_play_guest_gamepad_disconnected();
+                }
+            }
+            self.local_guest_lifecycle_dirty = false;
+        }
+        if let Some(assignment) = self
+            .local_guest_assignment
+            .filter(|assignment| assignment.connected)
+        {
+            if matches!(
+                host.local_play_state().guest_input,
+                GameLocalPlayGuestInput::Assigned { .. }
+            ) && !host.local_play_guest_active()
+            {
+                host.assign_local_play_guest_gamepad(assignment.family, assignment.device_number);
+            }
+        }
+        Ok(())
     }
 
     #[cfg(test)]
@@ -955,6 +1250,60 @@ fn gui_navigation_from_player_action(action: mclone_input::PlayerAction) -> Opti
     }
 }
 
+fn local_play_controller_family(layout: ControllerLayoutFamily) -> GameLocalPlayControllerFamily {
+    match layout {
+        ControllerLayoutFamily::XboxLike | ControllerLayoutFamily::SteamDeckLike => {
+            GameLocalPlayControllerFamily::Xbox
+        }
+        ControllerLayoutFamily::PlayStationLike => GameLocalPlayControllerFamily::PlayStation,
+        ControllerLayoutFamily::NintendoLike => GameLocalPlayControllerFamily::Nintendo,
+        ControllerLayoutFamily::Generic | ControllerLayoutFamily::Unknown => {
+            GameLocalPlayControllerFamily::Gamepad
+        }
+    }
+}
+
+fn controller_batch_for_source(
+    batch: &ControllerInputBatch,
+    source_id: InputSourceId,
+) -> ControllerInputBatch {
+    filtered_controller_batch(batch, |candidate| candidate == source_id)
+}
+
+fn controller_batch_without_source(
+    batch: &ControllerInputBatch,
+    source_id: InputSourceId,
+) -> ControllerInputBatch {
+    filtered_controller_batch(batch, |candidate| candidate != source_id)
+}
+
+fn filtered_controller_batch(
+    batch: &ControllerInputBatch,
+    mut include: impl FnMut(InputSourceId) -> bool,
+) -> ControllerInputBatch {
+    let mut filtered = ControllerInputBatch::new(batch.sample_time());
+    if batch.is_discontinuous() {
+        filtered.note_dropped_observations(batch.dropped_observations());
+    } else {
+        for observation in batch.observations() {
+            if include(observation.source_id) {
+                filtered.push_observation(ControllerInputObservation {
+                    source_id: observation.source_id,
+                    sample_time: observation.sample_time,
+                    sequence: observation.sequence,
+                    snapshot: observation.snapshot,
+                });
+            }
+        }
+    }
+    for (source_id, snapshot) in batch.terminal_snapshots() {
+        if include(source_id) {
+            filtered.set_terminal_snapshot(source_id, snapshot);
+        }
+    }
+    filtered
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1046,6 +1395,10 @@ mod tests {
 
         router.clear_transient_input();
         assert!(router.held_frame().is_none());
+        router
+            .disconnect_controller_source(source_id)
+            .expect("disconnect controller");
+        assert_eq!(router.controller_source_count(), 0);
     }
 
     #[test]
@@ -1114,6 +1467,76 @@ mod tests {
                 .contains(&mclone_input::PlayerAction::Jump)
         );
         assert!(!router.has_continuous_movement_input());
+    }
+
+    #[test]
+    fn local_guest_batch_isolated_from_primary_controller_batch() {
+        let mut allocator = InputSourceIdAllocator::new();
+        let primary_source = allocator.allocate().expect("primary source");
+        let guest_source = allocator.allocate().expect("guest source");
+        let primary_snapshot = StandardGamepadSnapshot {
+            left_stick: Vec2::Y,
+            ..StandardGamepadSnapshot::default()
+        };
+        let guest_snapshot = StandardGamepadSnapshot {
+            left_stick: Vec2::X,
+            ..StandardGamepadSnapshot::default()
+        };
+        let mut batch = ControllerInputBatch::new(Duration::from_millis(16));
+        batch.push_observation(ControllerInputObservation {
+            source_id: primary_source,
+            sample_time: Duration::from_millis(4),
+            sequence: 10,
+            snapshot: primary_snapshot,
+        });
+        batch.push_observation(ControllerInputObservation {
+            source_id: guest_source,
+            sample_time: Duration::from_millis(8),
+            sequence: 11,
+            snapshot: guest_snapshot,
+        });
+        batch.set_terminal_snapshot(primary_source, primary_snapshot);
+        batch.set_terminal_snapshot(guest_source, guest_snapshot);
+
+        let primary = controller_batch_without_source(&batch, guest_source);
+        assert_eq!(primary.observations().len(), 1);
+        assert_eq!(primary.observations()[0].source_id, primary_source);
+        assert_eq!(
+            primary.terminal_snapshots().collect::<Vec<_>>(),
+            vec![(primary_source, primary_snapshot)]
+        );
+
+        let guest = controller_batch_for_source(&batch, guest_source);
+        assert_eq!(guest.observations().len(), 1);
+        assert_eq!(guest.observations()[0].source_id, guest_source);
+        assert_eq!(
+            guest.terminal_snapshots().collect::<Vec<_>>(),
+            vec![(guest_source, guest_snapshot)]
+        );
+    }
+
+    #[test]
+    fn local_play_uses_neutral_controller_family_labels() {
+        assert_eq!(
+            local_play_controller_family(ControllerLayoutFamily::XboxLike),
+            GameLocalPlayControllerFamily::Xbox
+        );
+        assert_eq!(
+            local_play_controller_family(ControllerLayoutFamily::SteamDeckLike),
+            GameLocalPlayControllerFamily::Xbox
+        );
+        assert_eq!(
+            local_play_controller_family(ControllerLayoutFamily::PlayStationLike),
+            GameLocalPlayControllerFamily::PlayStation
+        );
+        assert_eq!(
+            local_play_controller_family(ControllerLayoutFamily::NintendoLike),
+            GameLocalPlayControllerFamily::Nintendo
+        );
+        assert_eq!(
+            local_play_controller_family(ControllerLayoutFamily::Unknown),
+            GameLocalPlayControllerFamily::Gamepad
+        );
     }
 
     #[test]

@@ -66,6 +66,7 @@ const DRAWABLE_WORLD_SLOT_FIELDS: &[&str] = &[
     "local_startup",
     "external_runtime_startup_pending",
     "local_participant",
+    "local_guest_preview",
     "draw",
     "actors",
     "actor_interpolation",
@@ -180,7 +181,7 @@ fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
     let slot_fields = field_names(slot);
     let host_fields = field_names(host);
     assert_eq!(slot_fields, DRAWABLE_WORLD_SLOT_FIELDS);
-    assert_eq!(slot_fields.len(), 21);
+    assert_eq!(slot_fields.len(), 22);
     assert_eq!(host_fields, SCENE_HOST_FIELDS);
     assert_eq!(host_fields.len(), 90);
     assert_eq!(host.matches("active_world: DrawableWorldSlot").count(), 1);
@@ -207,7 +208,7 @@ fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
 }
 
 #[test]
-fn participant_private_scene_state_has_a_cardinality_one_envelope() {
+fn participant_private_scene_state_has_primary_and_guest_preview_envelopes() {
     let source = read("src/lib.rs");
     let participant = braced_item(&source, "struct LocalParticipantPresentation {");
     let slot = braced_item(&source, "struct DrawableWorldSlot {");
@@ -217,6 +218,7 @@ fn participant_private_scene_state_has_a_cardinality_one_envelope() {
         ["camera", "movement", "interaction", "player_model"]
     );
     assert!(slot.contains("local_participant: LocalParticipantPresentation"));
+    assert!(slot.contains("local_guest_preview: Option<LocalParticipantPresentation>"));
     assert!(!slot.contains("camera: EngineCameraController"));
     assert!(!slot.contains("interaction: ClientInteractionController"));
     assert!(!slot.contains("player_model: GamePlayerModel"));

@@ -178,13 +178,13 @@ use mclone_server::{SimulationCadenceConfig, WorkerFrameMetrics};
 use mclone_ui::{
     Color, DEFAULT_JOIN_REMOTE_ADDR, DebugActorTool, DebugOverlay, FlatHotbarOverlay, FlatHud,
     FlatHudDebugOverlay, GameAuxiliarySplitMode, GameCollisionMode, GameDeathCause,
-    GameFlatPresentationState, GameFramePacingMode, GameLeafDetail, GameMovementMode,
-    GamePlayerModel, GameScreen, GameSimulationCadence, GameTouchSettings, GameTravelAssistMode,
-    GameTurnMode, GameUiAction, GameUiHost, GameUiRenderState, GameWorldRenderScaleMode,
-    GameXrTurnMode, GamepadHudOverlay, GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay,
-    Point, Rect, StatusOverlay, StorageProfileBackend, StorageProfileUiState, TouchOverlay,
-    UiDebugSnapshot, UiDrawCacheStats, UiPanelRevision, WorldCatalogUiStatus,
-    render_loading_progress_overlay, render_status_overlay,
+    GameFlatPresentationState, GameFramePacingMode, GameLeafDetail, GameLocalPlayControllerFamily,
+    GameLocalPlayGuestInput, GameLocalPlayState, GameMovementMode, GamePlayerModel, GameScreen,
+    GameSimulationCadence, GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameUiAction,
+    GameUiHost, GameUiRenderState, GameWorldRenderScaleMode, GameXrTurnMode, GamepadHudOverlay,
+    GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay, Point, Rect, StatusOverlay,
+    StorageProfileBackend, StorageProfileUiState, TouchOverlay, UiDebugSnapshot, UiDrawCacheStats,
+    UiPanelRevision, WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
 };
 
 mod asset_replacement;
@@ -514,6 +514,13 @@ struct DrawableWorldSlot {
     /// making ownership explicit before the bounded participant group admits
     /// more than one presentation state.
     local_participant: LocalParticipantPresentation,
+    /// First live consumer of the bounded local-participant foundation.
+    ///
+    /// This tactical keeps Guest 2 presentation-only until the live session
+    /// boundary can expose a second ordinary client connection. The accepted
+    /// durable cardinality remains 1-4; this optional preview is not the
+    /// participant collection itself.
+    local_guest_preview: Option<LocalParticipantPresentation>,
     draw: TexturedSectionDrawResources,
     actors: Option<ActorDrawResources>,
     actor_interpolation: ActorInterpolationState,
@@ -635,6 +642,7 @@ impl DrawableWorldSlot {
             local_startup: install.local_startup,
             external_runtime_startup_pending: install.external_runtime_startup_pending,
             local_participant,
+            local_guest_preview: None,
             draw: install.draw,
             actors: install.actors,
             actor_interpolation: ActorInterpolationState::new(),
@@ -664,6 +672,7 @@ impl DrawableWorldSlot {
             self.scene.player_movement_cadence,
             self.camera.snapshot(),
         );
+        self.local_guest_preview = None;
         self.draw = install.draw;
         self.actors = install.actors;
         self.actor_interpolation = ActorInterpolationState::new();

@@ -2946,6 +2946,8 @@ impl GameUiHost {
             | GameUiAction::ToggleFramePipelineOverlay
             | GameUiAction::ToggleDebugDiagnostics
             | GameUiAction::SetAuxiliarySplitMode(_)
+            | GameUiAction::SetLocalPlayLayout(_)
+            | GameUiAction::ToggleLocalPlayGuest
             | GameUiAction::SetPlayerModel(_)
             | GameUiAction::SetMovementMode(_)
             | GameUiAction::SetCollisionMode(_)
@@ -3155,9 +3157,15 @@ const UI_V2_OPTIONS_COLLISION_MODE: UiWidgetId = UiWidgetId(122);
 const UI_V2_OPTIONS_TRAVEL_ASSIST: UiWidgetId = UiWidgetId(123);
 const UI_V2_OPTIONS_DEBUG_DIAGNOSTICS: UiWidgetId = UiWidgetId(124);
 const UI_V2_OPTIONS_AUXILIARY_SPLIT: UiWidgetId = UiWidgetId(143);
+const UI_V2_OPTIONS_LOCAL_PLAY_LAYOUT: UiWidgetId = UiWidgetId(148);
+const UI_V2_OPTIONS_LOCAL_PLAY_PLAYER_ONE: UiWidgetId = UiWidgetId(149);
+const UI_V2_OPTIONS_LOCAL_PLAY_GUEST: UiWidgetId = UiWidgetId(150);
+const UI_V2_OPTIONS_LOCAL_PLAY_STATUS: UiWidgetId = UiWidgetId(151);
+const UI_V2_OPTIONS_LOCAL_PLAY_ACCESS: UiWidgetId = UiWidgetId(153);
 const UI_V2_OPTIONS_CAT_GRAPHICS: UiWidgetId = UiWidgetId(125);
 const UI_V2_OPTIONS_CAT_MOVEMENT: UiWidgetId = UiWidgetId(126);
 const UI_V2_OPTIONS_CAT_DISPLAY: UiWidgetId = UiWidgetId(127);
+const UI_V2_OPTIONS_CAT_LOCAL_PLAY: UiWidgetId = UiWidgetId(152);
 const UI_V2_OPTIONS_CAT_DEBUG: UiWidgetId = UiWidgetId(128);
 const UI_V2_OPTIONS_ASSET_PACKS: UiWidgetId = UiWidgetId(129);
 const UI_V2_OPTIONS_FAR_LOD_DETAIL: UiWidgetId = UiWidgetId(131);
@@ -3786,6 +3794,7 @@ const fn options_category_widget_id(category: GameOptionsCategory) -> UiWidgetId
         GameOptionsCategory::Graphics => UI_V2_OPTIONS_CAT_GRAPHICS,
         GameOptionsCategory::Movement => UI_V2_OPTIONS_CAT_MOVEMENT,
         GameOptionsCategory::Display => UI_V2_OPTIONS_CAT_DISPLAY,
+        GameOptionsCategory::LocalPlay => UI_V2_OPTIONS_CAT_LOCAL_PLAY,
         GameOptionsCategory::Debug => UI_V2_OPTIONS_CAT_DEBUG,
         GameOptionsCategory::StorageProfile => UI_V2_OPTIONS_CAT_STORAGE,
     }
@@ -3800,6 +3809,7 @@ const fn options_category_row_count(category: GameOptionsCategory) -> usize {
         GameOptionsCategory::Graphics => 11,
         GameOptionsCategory::Movement => 8,
         GameOptionsCategory::Display => 3,
+        GameOptionsCategory::LocalPlay => 5,
         GameOptionsCategory::Debug => 5,
         GameOptionsCategory::StorageProfile => 8,
     }
@@ -4149,6 +4159,82 @@ fn options_category_rows(
                 widget
             }),
         ],
+        GameOptionsCategory::LocalPlay => {
+            let local_play = state.local_play;
+            let local_play_state = local_play.unwrap_or_default();
+            vec![
+                (
+                    20.0,
+                    UiWidget::cycle(
+                        UI_V2_OPTIONS_LOCAL_PLAY_LAYOUT,
+                        ph,
+                        "Layout",
+                        local_play
+                            .map(|state| state.layout.label())
+                            .unwrap_or("N/A"),
+                    )
+                    .enabled(local_play.is_some())
+                    .action(GameUiAction::SetLocalPlayLayout(
+                        local_play_state.layout.next(),
+                    )),
+                ),
+                (
+                    20.0,
+                    UiWidget::cycle(
+                        UI_V2_OPTIONS_LOCAL_PLAY_PLAYER_ONE,
+                        ph,
+                        "Player 1",
+                        if local_play.is_some() {
+                            "Keyboard + Mouse"
+                        } else {
+                            "N/A"
+                        },
+                    )
+                    .enabled(false),
+                ),
+                (
+                    20.0,
+                    UiWidget::cycle(
+                        UI_V2_OPTIONS_LOCAL_PLAY_GUEST,
+                        ph,
+                        "Guest 2",
+                        local_play
+                            .map(|state| state.guest_input.label())
+                            .unwrap_or_else(|| "N/A".to_owned()),
+                    )
+                    .enabled(local_play.is_some())
+                    .action(GameUiAction::ToggleLocalPlayGuest),
+                ),
+                (
+                    20.0,
+                    UiWidget::cycle(
+                        UI_V2_OPTIONS_LOCAL_PLAY_STATUS,
+                        ph,
+                        "Guest 2 Profile",
+                        if local_play.is_some() {
+                            "Session Only"
+                        } else {
+                            "N/A"
+                        },
+                    )
+                    .enabled(false),
+                ),
+                (
+                    20.0,
+                    UiWidget::cycle(
+                        UI_V2_OPTIONS_LOCAL_PLAY_ACCESS,
+                        ph,
+                        "Guest Access",
+                        if local_play.is_some() {
+                            "View Only"
+                        } else {
+                            "N/A"
+                        },
+                    )
+                    .enabled(false),
+                ),
+            ]
+        }
         GameOptionsCategory::Debug => vec![
             (
                 20.0,
@@ -4372,7 +4458,7 @@ fn options_category_layout(
         place_option_rows(
             &mut layout,
             panel,
-            options_category_columns(panel),
+            options_category_columns(panel, category),
             rows,
             scroll_offset,
         )
@@ -4539,7 +4625,7 @@ fn options_panel_rect(scale: GuiScale, _state: GameUiRenderState) -> Rect {
     // The hub is a fixed short list: categories + Asset Packs + Server
     // Settings + Controls Help + Back.
     let panel_width = (scale.width - 18.0).clamp(242.0, 360.0);
-    let panel_height = 238.0f32.min((scale.height - 4.0).max(1.0));
+    let panel_height = 262.0f32.min((scale.height - 4.0).max(1.0));
     centered_panel(scale, panel_width, panel_height)
 }
 
@@ -4608,12 +4694,10 @@ fn options_category_panel_rect(scale: GuiScale, category: GameOptionsCategory) -
         6
     } else {
         options_category_row_count(category)
-            .div_ceil(options_category_columns(Rect::new(
-                0.0,
-                0.0,
-                panel_width,
-                1.0,
-            )))
+            .div_ceil(options_category_columns(
+                Rect::new(0.0, 0.0, panel_width, 1.0),
+                category,
+            ))
             .max(1)
     };
     // title band + flowed rows + Back button + bottom padding
@@ -4622,8 +4706,12 @@ fn options_category_panel_rect(scale: GuiScale, category: GameOptionsCategory) -
     centered_panel(scale, panel_width, panel_height)
 }
 
-fn options_category_columns(panel: Rect) -> usize {
-    if panel.width < 340.0 { 1 } else { 2 }
+fn options_category_columns(panel: Rect, category: GameOptionsCategory) -> usize {
+    if category == GameOptionsCategory::LocalPlay || panel.width < 340.0 {
+        1
+    } else {
+        2
+    }
 }
 
 fn server_settings_panel_rect(scale: GuiScale, state: GameUiRenderState) -> Rect {

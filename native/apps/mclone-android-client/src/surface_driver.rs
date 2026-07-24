@@ -726,6 +726,7 @@ impl AndroidGpuState {
                 TouchInputSettings::MAX_LOOK_SENSITIVITY,
             )),
             auxiliary_split_mode: GameAuxiliarySplitMode::Off,
+            local_play: self.host.local_play_state(),
         }
     }
 
@@ -792,7 +793,7 @@ impl AndroidGpuState {
             presentation.present(&mut encoder, output_target);
             summary
         } else {
-            if !self.host.auxiliary_split_mode().is_split() {
+            if !self.host.flat_split_selected() {
                 self.split_presentation = None;
             }
             self.host.set_mono_ui_scale(self.gui_scale());

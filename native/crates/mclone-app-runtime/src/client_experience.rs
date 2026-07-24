@@ -11,9 +11,10 @@ use crate::far_lod::{
 use mclone_input::TouchControlsMode;
 use mclone_ui::{
     DebugActorTool, GameAuxiliarySplitMode, GameCollisionMode, GameFarLodDetailMode,
-    GameFramePacingMode, GameLeafDetail, GameMovementMode, GamePlayerModel, GameScenarioId,
-    GameSimulationCadence, GameStorageAction, GameTouchSettings, GameTravelAssistMode,
-    GameTurnMode, GameUiAction, GameUiRenderState, GameWorldRenderScaleMode, GameXrTurnMode,
+    GameFramePacingMode, GameLeafDetail, GameLocalPlayGuestInput, GameLocalPlayLayout,
+    GameLocalPlayState, GameMovementMode, GamePlayerModel, GameScenarioId, GameSimulationCadence,
+    GameStorageAction, GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameUiAction,
+    GameUiRenderState, GameWorldRenderScaleMode, GameXrTurnMode,
 };
 
 use crate::asset_pack_ui::{ClientAssetPackController, ClientAssetPackEffect};
@@ -162,6 +163,8 @@ impl ClientExperienceController {
             | GameUiAction::ToggleFramePipelineOverlay
             | GameUiAction::ToggleDebugDiagnostics
             | GameUiAction::SetAuxiliarySplitMode(_)
+            | GameUiAction::SetLocalPlayLayout(_)
+            | GameUiAction::ToggleLocalPlayGuest
             | GameUiAction::SetPlayerModel(_)
             | GameUiAction::SetMovementMode(_)
             | GameUiAction::SetCollisionMode(_)
@@ -846,6 +849,41 @@ impl ClientExperienceSettingsController {
                     .setting_effects
                     .push(ClientExperienceSettingEffect::SetAuxiliarySplitMode(mode));
             }
+            GameUiAction::SetLocalPlayLayout(layout) => {
+                let Some(local_play) = self.state.local_play.as_mut() else {
+                    effects.capability_projection.push(
+                        kind,
+                        ClientExperienceCapabilityStatus::Unsupported(
+                            "Local Play is unavailable for this profile",
+                        ),
+                    );
+                    return effects;
+                };
+                local_play.layout = layout;
+                effects
+                    .setting_effects
+                    .push(ClientExperienceSettingEffect::SetLocalPlayLayout(layout));
+            }
+            GameUiAction::ToggleLocalPlayGuest => {
+                let Some(local_play) = self.state.local_play.as_mut() else {
+                    effects.capability_projection.push(
+                        kind,
+                        ClientExperienceCapabilityStatus::Unsupported(
+                            "Local Play is unavailable for this profile",
+                        ),
+                    );
+                    return effects;
+                };
+                local_play.guest_input = match local_play.guest_input {
+                    GameLocalPlayGuestInput::Off => GameLocalPlayGuestInput::Waiting,
+                    GameLocalPlayGuestInput::Waiting
+                    | GameLocalPlayGuestInput::Assigned { .. }
+                    | GameLocalPlayGuestInput::Disconnected { .. } => GameLocalPlayGuestInput::Off,
+                };
+                effects.setting_effects.push(
+                    ClientExperienceSettingEffect::SetLocalPlayGuestInput(local_play.guest_input),
+                );
+            }
             GameUiAction::SetPlayerModel(model) => {
                 self.state.player_model = model;
                 effects
@@ -1113,6 +1151,19 @@ impl ClientExperienceSettingsController {
                 ),
             );
         }
+        if self.state.local_play.is_none() {
+            for kind in [
+                ClientExperienceActionKind::SetLocalPlayLayout,
+                ClientExperienceActionKind::ToggleLocalPlayGuest,
+            ] {
+                projection.push(
+                    kind,
+                    ClientExperienceCapabilityStatus::Unsupported(
+                        "Local Play is unavailable for this profile",
+                    ),
+                );
+            }
+        }
         if profile.xr_turn.is_supported() && self.state.xr_turn_mode.is_none() {
             projection.push(
                 ClientExperienceActionKind::SetXrTurnMode,
@@ -1192,6 +1243,7 @@ pub struct ClientExperienceSettingsState {
     pub frame_pipeline_overlay_visible: bool,
     pub debug_diagnostics_visible: bool,
     pub auxiliary_split_mode: Option<GameAuxiliarySplitMode>,
+    pub local_play: Option<GameLocalPlayState>,
     pub player_model: GamePlayerModel,
     pub movement_mode: GameMovementMode,
     pub collision_mode: GameCollisionMode,
@@ -1237,6 +1289,7 @@ impl From<GameUiRenderState> for ClientExperienceSettingsState {
             frame_pipeline_overlay_visible: state.frame_pipeline_overlay_visible,
             debug_diagnostics_visible: state.debug_diagnostics_visible,
             auxiliary_split_mode: state.auxiliary_split_mode,
+            local_play: state.local_play,
             player_model: state.player_model,
             movement_mode: state.movement_mode,
             collision_mode: state
@@ -1283,6 +1336,7 @@ impl ClientExperienceSettingsState {
         state.frame_pipeline_overlay_visible = self.frame_pipeline_overlay_visible;
         state.debug_diagnostics_visible = self.debug_diagnostics_visible;
         state.auxiliary_split_mode = self.auxiliary_split_mode;
+        state.local_play = self.local_play;
         state.player_model = self.player_model;
         state.movement_mode = self.movement_mode;
         state.collision_mode = Some(self.collision_mode);
@@ -1537,6 +1591,8 @@ pub enum ClientExperienceSettingEffect {
     SetFramePipelineOverlayVisible(bool),
     SetDebugDiagnosticsVisible(bool),
     SetAuxiliarySplitMode(GameAuxiliarySplitMode),
+    SetLocalPlayLayout(GameLocalPlayLayout),
+    SetLocalPlayGuestInput(GameLocalPlayGuestInput),
     SetPlayerModel(GamePlayerModel),
     SyncPlayerAppearance,
     SetMovementMode(GameMovementMode),
@@ -1625,6 +1681,8 @@ pub enum ClientExperienceActionKind {
     ToggleFramePipelineOverlay,
     ToggleDebugDiagnostics,
     SetAuxiliarySplitMode,
+    SetLocalPlayLayout,
+    ToggleLocalPlayGuest,
     SetPlayerModel,
     SetMovementMode,
     SetCollisionMode,
@@ -1707,6 +1765,8 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
         }
         GameUiAction::ToggleDebugDiagnostics => ClientExperienceActionKind::ToggleDebugDiagnostics,
         GameUiAction::SetAuxiliarySplitMode(_) => ClientExperienceActionKind::SetAuxiliarySplitMode,
+        GameUiAction::SetLocalPlayLayout(_) => ClientExperienceActionKind::SetLocalPlayLayout,
+        GameUiAction::ToggleLocalPlayGuest => ClientExperienceActionKind::ToggleLocalPlayGuest,
         GameUiAction::SetPlayerModel(_) => ClientExperienceActionKind::SetPlayerModel,
         GameUiAction::SetMovementMode(_) => ClientExperienceActionKind::SetMovementMode,
         GameUiAction::SetCollisionMode(_) => ClientExperienceActionKind::SetCollisionMode,
@@ -1782,6 +1842,8 @@ pub const fn classify_client_experience_action_kind(
         | ClientExperienceActionKind::ToggleFramePipelineOverlay
         | ClientExperienceActionKind::ToggleDebugDiagnostics
         | ClientExperienceActionKind::SetAuxiliarySplitMode
+        | ClientExperienceActionKind::SetLocalPlayLayout
+        | ClientExperienceActionKind::ToggleLocalPlayGuest
         | ClientExperienceActionKind::SetTurnMode
         | ClientExperienceActionKind::SetXrTurnMode
         | ClientExperienceActionKind::CycleFramePacing
@@ -2424,6 +2486,78 @@ mod tests {
                 kind: ClientExperienceActionKind::SetAuxiliarySplitMode,
                 status: ClientExperienceCapabilityStatus::Unsupported(
                     "Auxiliary split presentation is unavailable for this profile"
+                ),
+            }]
+        );
+    }
+
+    #[test]
+    fn local_play_settings_are_session_local_explicit_and_state_gated() {
+        let mut state = ClientExperienceSettingsState::default();
+        state.local_play = Some(GameLocalPlayState::default());
+        let mut settings = ClientExperienceSettingsController::new(state);
+
+        let effects = settings.apply_ui_action(
+            GameUiAction::SetLocalPlayLayout(GameLocalPlayLayout::TopBottom),
+            ClientExperienceSettingsProfile::default(),
+        );
+        assert_eq!(
+            settings.state().local_play,
+            Some(GameLocalPlayState {
+                layout: GameLocalPlayLayout::TopBottom,
+                guest_input: GameLocalPlayGuestInput::Off,
+            })
+        );
+        assert_eq!(
+            effects.setting_effects,
+            vec![ClientExperienceSettingEffect::SetLocalPlayLayout(
+                GameLocalPlayLayout::TopBottom
+            )]
+        );
+
+        let effects = settings.apply_ui_action(
+            GameUiAction::ToggleLocalPlayGuest,
+            ClientExperienceSettingsProfile::default(),
+        );
+        assert_eq!(
+            settings.state().local_play.unwrap().guest_input,
+            GameLocalPlayGuestInput::Waiting
+        );
+        assert_eq!(
+            effects.setting_effects,
+            vec![ClientExperienceSettingEffect::SetLocalPlayGuestInput(
+                GameLocalPlayGuestInput::Waiting
+            )]
+        );
+
+        let effects = settings.apply_ui_action(
+            GameUiAction::ToggleLocalPlayGuest,
+            ClientExperienceSettingsProfile::default(),
+        );
+        assert_eq!(
+            settings.state().local_play.unwrap().guest_input,
+            GameLocalPlayGuestInput::Off
+        );
+        assert_eq!(
+            effects.setting_effects,
+            vec![ClientExperienceSettingEffect::SetLocalPlayGuestInput(
+                GameLocalPlayGuestInput::Off
+            )]
+        );
+
+        let mut unavailable = ClientExperienceSettingsController::default();
+        let effects = unavailable.apply_ui_action(
+            GameUiAction::ToggleLocalPlayGuest,
+            ClientExperienceSettingsProfile::default(),
+        );
+        assert_eq!(unavailable.state().local_play, None);
+        assert!(effects.setting_effects.is_empty());
+        assert_eq!(
+            effects.capability_projection.actions,
+            vec![ClientExperienceActionAvailability {
+                kind: ClientExperienceActionKind::ToggleLocalPlayGuest,
+                status: ClientExperienceCapabilityStatus::Unsupported(
+                    "Local Play is unavailable for this profile"
                 ),
             }]
         );
