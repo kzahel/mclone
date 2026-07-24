@@ -14,6 +14,7 @@ import {
   arrowPanTerrainLabState,
   grabPanTerrainLabStateInView,
   orbitTerrainLabCamera,
+  pinchPanZoomTerrainLabState,
   zoomTerrainLabState,
   type TerrainLabCamera,
   type TerrainLabState,
@@ -78,6 +79,9 @@ interface ActivePointer {
 
 interface PinchStart {
   distance: number;
+  clientX: number;
+  clientY: number;
+  camera: TerrainLabCamera;
   state: TerrainLabState;
 }
 
@@ -446,8 +450,12 @@ export function CanonicalTerrainCanvas({
       });
       const pair = firstPointerPair(activePointersRef.current);
       if (pair) {
+        const midpoint = pointerMidpoint(pair[0], pair[1]);
         pinchStartRef.current = {
           distance: pointerDistance(pair[0], pair[1]),
+          clientX: midpoint.clientX,
+          clientY: midpoint.clientY,
+          camera,
           state,
         };
         pointerStartRef.current = undefined;
@@ -479,13 +487,17 @@ export function CanonicalTerrainCanvas({
         const distance = pointerDistance(pair[0], pair[1]);
         if (distance > 1) {
           const rect = stage.getBoundingClientRect();
-          const midpointX = (pair[0].clientX + pair[1].clientX) * 0.5 - rect.left;
-          const midpointY = (pair[0].clientY + pair[1].clientY) * 0.5 - rect.top;
-          onStateChange(zoomTerrainLabState(
+          const midpoint = pointerMidpoint(pair[0], pair[1]);
+          onStateChange(pinchPanZoomTerrainLabState(
             pinch.state,
+            pinch.camera,
             pinch.distance / distance,
-            state.view === "map" ? midpointX / Math.max(rect.width, 1) - 0.5 : 0,
-            state.view === "map" ? midpointY / Math.max(rect.height, 1) - 0.5 : 0,
+            (pinch.clientX - rect.left) / Math.max(rect.width, 1) - 0.5,
+            (pinch.clientY - rect.top) / Math.max(rect.height, 1) - 0.5,
+            midpoint.clientX - pinch.clientX,
+            midpoint.clientY - pinch.clientY,
+            rect.width,
+            rect.height,
             rect.width / Math.max(rect.height, 1),
           ));
         }
@@ -567,7 +579,7 @@ export function CanonicalTerrainCanvas({
         </span>
       </div>
       <div className="canvasHint" aria-hidden="true">
-        exact blocks + biomes · first-party atlas · preview light
+        exact blocks + biomes · two-finger pan + zoom · preview light
       </div>
     </div>
   );
@@ -607,6 +619,16 @@ function firstPointerPair(
 
 function pointerDistance(first: ActivePointer, second: ActivePointer): number {
   return Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY);
+}
+
+function pointerMidpoint(
+  first: ActivePointer,
+  second: ActivePointer,
+): ActivePointer {
+  return {
+    clientX: (first.clientX + second.clientX) * 0.5,
+    clientY: (first.clientY + second.clientY) * 0.5,
+  };
 }
 
 async function fetchPack(url: string): Promise<Uint8Array> {

@@ -14,6 +14,7 @@ import {
   arrowPanTerrainLabState,
   grabPanTerrainLabStateInView,
   orbitTerrainLabCamera,
+  pinchPanZoomTerrainLabState,
   zoomTerrainLabState,
   type TerrainLabCamera,
   type TerrainLabSource,
@@ -223,6 +224,9 @@ interface ActivePointer {
 
 interface PinchStart {
   distance: number;
+  clientX: number;
+  clientY: number;
+  camera: TerrainLabCamera;
   state: TerrainLabState;
 }
 
@@ -463,8 +467,12 @@ export function TerrainCanvas({
       });
       const pair = firstPointerPair(activePointersRef.current);
       if (pair) {
+        const midpoint = pointerMidpoint(pair[0], pair[1]);
         pinchStartRef.current = {
           distance: pointerDistance(pair[0], pair[1]),
+          clientX: midpoint.clientX,
+          clientY: midpoint.clientY,
+          camera,
           state,
         };
         pointerStartRef.current = undefined;
@@ -499,21 +507,25 @@ export function TerrainCanvas({
         const distance = pointerDistance(pair[0], pair[1]);
         if (distance > 1) {
           const rect = stage.getBoundingClientRect();
-          const midpointX = (pair[0].clientX + pair[1].clientX) * 0.5 - rect.left;
-          const midpointY = (pair[0].clientY + pair[1].clientY) * 0.5 - rect.top;
+          const midpoint = pointerMidpoint(pair[0], pair[1]);
           const panel = terrainPanelAtPointer(
             rect.width,
             rect.height,
-            midpointX,
-            midpointY,
-            state.source,
+            pinch.clientX - rect.left,
+            pinch.clientY - rect.top,
+            pinch.state.source,
           );
           queueState(
-            zoomTerrainLabState(
+            pinchPanZoomTerrainLabState(
               pinch.state,
+              pinch.camera,
               pinch.distance / distance,
-              state.view === "map" ? panel.normalizedX : 0,
-              state.view === "map" ? panel.normalizedZ : 0,
+              panel.normalizedX,
+              panel.normalizedZ,
+              midpoint.clientX - pinch.clientX,
+              midpoint.clientY - pinch.clientY,
+              panel.width,
+              panel.height,
               panel.width / Math.max(panel.height, 1),
             ),
           );
@@ -718,8 +730,8 @@ export function TerrainCanvas({
         </span>
         <span className="mobileHint">
           {state.view === "3d"
-            ? "tap inspect · drag orbit · pinch zoom"
-            : "tap inspect · drag pan · pinch zoom"}
+            ? "tap inspect · drag orbit · two-finger pan + zoom"
+            : "tap inspect · drag pan · two-finger pan + zoom"}
         </span>
       </div>
     </div>
@@ -767,6 +779,16 @@ function firstPointerPair(
 
 function pointerDistance(first: ActivePointer, second: ActivePointer): number {
   return Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY);
+}
+
+function pointerMidpoint(
+  first: ActivePointer,
+  second: ActivePointer,
+): ActivePointer {
+  return {
+    clientX: (first.clientX + second.clientX) * 0.5,
+    clientY: (first.clientY + second.clientY) * 0.5,
+  };
 }
 
 async function fetchPack(url: string): Promise<Uint8Array> {

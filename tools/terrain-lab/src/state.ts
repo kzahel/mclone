@@ -292,6 +292,36 @@ export function grabPanTerrainLabStateInView(
   );
 }
 
+export function pinchPanZoomTerrainLabState(
+  state: TerrainLabState,
+  camera: TerrainLabCamera,
+  zoomFactor: number,
+  anchorX: number,
+  anchorZ: number,
+  centroidDeltaX: number,
+  centroidDeltaY: number,
+  panelWidth: number,
+  panelHeight: number,
+  panelAspect: number,
+): TerrainLabState {
+  const zoomed = zoomTerrainLabState(
+    state,
+    zoomFactor,
+    state.view === "map" ? anchorX : 0,
+    state.view === "map" ? anchorZ : 0,
+    panelAspect,
+  );
+  return grabPanTerrainLabStateInView(
+    zoomed,
+    camera,
+    centroidDeltaX,
+    centroidDeltaY,
+    panelWidth,
+    panelHeight,
+    panelAspect,
+  );
+}
+
 export function arrowPanTerrainLabState(
   state: TerrainLabState,
   key: string,

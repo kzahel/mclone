@@ -296,6 +296,59 @@ test("reconstructs one planned stream for both LOD lanes", async ({
   expect(pageErrors).toEqual([]);
 });
 
+test("two-finger gestures pan and zoom procedural and real terrain", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "phone-chrome", "touch-only interaction contract");
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      pageErrors.push(message.text());
+    }
+  });
+  await page.goto(
+    "/terrain/?seed=-98765&x=-304&z=336&blocks=512&detail=auto"
+      + "&panes=canonical%2Cgpu&canonical=surface&radius=0"
+      + "&water=1&vegetation=1&stage=hydrology&view=map&layer=terrain",
+  );
+  await waitForLane(page, "gpu");
+  await waitForCanonical(page, 1);
+  const shell = page.locator(".appShell");
+  const proceduralStage = page.getByTestId("terrain-stage");
+  const canonicalStage = page.getByTestId("canonical-terrain-stage");
+
+  await assertTouchPanZoom(page, proceduralStage);
+  await expect(shell).toHaveAttribute("data-inspected-x", "");
+  await waitForLane(page, "gpu");
+
+  await assertTouchPanZoom(page, canonicalStage);
+  await expect(shell).toHaveAttribute("data-inspected-x", "");
+  await waitForCanonical(page, 1);
+
+  await page.getByRole("button", { name: "3D terrain", exact: true }).click();
+  await expect(page).toHaveURL(/view=3d/u);
+  const initialYaw = Number(await shell.getAttribute("data-camera-yaw"));
+  const initialPitch = Number(await shell.getAttribute("data-camera-pitch"));
+
+  await assertTouchPanZoom(page, proceduralStage);
+  await expect.poll(
+    async () => Number(await shell.getAttribute("data-camera-yaw")),
+  ).toBe(initialYaw);
+  await expect.poll(
+    async () => Number(await shell.getAttribute("data-camera-pitch")),
+  ).toBe(initialPitch);
+
+  await assertTouchPanZoom(page, canonicalStage);
+  await expect.poll(
+    async () => Number(await shell.getAttribute("data-camera-yaw")),
+  ).toBe(initialYaw);
+  await expect.poll(
+    async () => Number(await shell.getAttribute("data-camera-pitch")),
+  ).toBe(initialPitch);
+  expect(pageErrors).toEqual([]);
+});
+
 async function waitForCanonical(
   page: import("@playwright/test").Page,
   requestedChunks: number,
@@ -306,6 +359,89 @@ async function waitForCanonical(
       && Number(shell.getAttribute("data-canonical-published")) === requested
       && Number(shell.getAttribute("data-canonical-requested")) === requested;
   }, requestedChunks);
+}
+
+async function assertTouchPanZoom(
+  page: import("@playwright/test").Page,
+  stage: import("@playwright/test").Locator,
+): Promise<void> {
+  await stage.scrollIntoViewIfNeeded();
+  const bounds = await stage.boundingBox();
+  expect(bounds).not.toBeNull();
+  const before = new URL(page.url());
+  const beforeBlocks = Number(before.searchParams.get("blocks"));
+  const beforeX = Number(before.searchParams.get("x"));
+  const beforeZ = Number(before.searchParams.get("z"));
+  const beforeScroll = await page.evaluate(() => window.scrollY);
+  const centerX = bounds!.x + bounds!.width * 0.5;
+  const centerY = bounds!.y + Math.min(bounds!.height * 0.45, 260);
+
+  await dispatchTwoFingerGesture(
+    page,
+    [
+      { x: centerX - 36, y: centerY },
+      { x: centerX + 36, y: centerY },
+    ],
+    [
+      { x: centerX - 42, y: centerY + 28 },
+      { x: centerX + 92, y: centerY + 28 },
+    ],
+  );
+
+  await expect.poll(
+    () => Number(new URL(page.url()).searchParams.get("blocks")),
+  ).toBeLessThan(beforeBlocks);
+  await expect.poll(() => {
+    const current = new URL(page.url());
+    return Number(current.searchParams.get("x")) !== beforeX
+      || Number(current.searchParams.get("z")) !== beforeZ;
+  }).toBe(true);
+  expect(await page.evaluate(() => window.scrollY)).toBe(beforeScroll);
+}
+
+async function dispatchTwoFingerGesture(
+  page: import("@playwright/test").Page,
+  start: Array<{ x: number; y: number }>,
+  end: Array<{ x: number; y: number }>,
+): Promise<void> {
+  const session = await page.context().newCDPSession(page);
+  try {
+    await session.send("Input.dispatchTouchEvent", {
+      type: "touchStart",
+      touchPoints: touchPoints(start),
+    });
+    for (let step = 1; step <= 4; step += 1) {
+      const amount = step / 4;
+      await session.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: touchPoints(start.map((point, index) => ({
+          x: point.x + (end[index]!.x - point.x) * amount,
+          y: point.y + (end[index]!.y - point.y) * amount,
+        }))),
+      });
+    }
+    await session.send("Input.dispatchTouchEvent", {
+      type: "touchEnd",
+      touchPoints: [],
+    });
+  } finally {
+    await session.detach();
+  }
+}
+
+function touchPoints(points: Array<{ x: number; y: number }>): Array<{
+  x: number;
+  y: number;
+  id: number;
+  radiusX: number;
+  radiusY: number;
+}> {
+  return points.map((point, id) => ({
+    ...point,
+    id,
+    radiusX: 4,
+    radiusY: 4,
+  }));
 }
 
 async function waitForLane(

@@ -12,6 +12,7 @@ import {
   nextBlocksAcross,
   orbitTerrainLabCamera,
   panTerrainLabState,
+  pinchPanZoomTerrainLabState,
   proceduralSourceForPanes,
   parseTerrainLabState,
   terrainLabSearch,
@@ -127,6 +128,42 @@ test("anchors map zoom under the pointer", () => {
   assert.equal(zoomed.blocksAcross, 256);
   assert.equal(zoomed.centerX, -176);
   assert.equal(zoomed.centerZ, 272);
+});
+
+test("two-finger map gesture pans and zooms from one start state", () => {
+  const moved = pinchPanZoomTerrainLabState(
+    { ...DEFAULT_TERRAIN_LAB_STATE, view: "map" },
+    DEFAULT_TERRAIN_LAB_CAMERA,
+    0.5,
+    -0.25,
+    0.25,
+    80,
+    60,
+    800,
+    600,
+    4 / 3,
+  );
+  assert.equal(moved.blocksAcross, 256);
+  assert.equal(moved.centerX, -394);
+  assert.equal(moved.centerZ, 365);
+});
+
+test("two-finger 3d gesture pans in the captured camera plane while zooming", () => {
+  const moved = pinchPanZoomTerrainLabState(
+    { ...DEFAULT_TERRAIN_LAB_STATE, view: "3d" },
+    { yaw: 0, pitch: 0.5 },
+    0.5,
+    -0.25,
+    0.25,
+    80,
+    60,
+    800,
+    600,
+    4 / 3,
+  );
+  assert.equal(moved.blocksAcross, 256);
+  assert.equal(moved.centerX, -285);
+  assert.equal(moved.centerZ, 362);
 });
 
 test("accepts old spacing links without changing their visible footprint", () => {
