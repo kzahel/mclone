@@ -37,6 +37,10 @@ pub fn reference_asset_pack_selection() -> AssetPackSelection {
     AssetPackSelection::new([AssetPackId::new(MINECRAFT_REFERENCE_PACK_ID)])
 }
 
+pub fn original_asset_pack_selection() -> AssetPackSelection {
+    AssetPackSelection::new([AssetPackId::new(AUTHORED_FIRST_PARTY_PACK_ID)])
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PreparedAssetCoverage {
     pub block_states: usize,

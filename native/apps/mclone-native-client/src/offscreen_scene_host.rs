@@ -758,7 +758,10 @@ impl OffscreenDriver {
                         camera_position.y as f32,
                         camera_position.z as f32,
                     ));
-                    if pending == 0 && summary.render.drawn_section_count > 0 {
+                    if pending == 0
+                        && !driver.host.asset_replacement_in_progress()
+                        && summary.render.drawn_section_count > 0
+                    {
                         stable += 1;
                     } else {
                         stable = 0;

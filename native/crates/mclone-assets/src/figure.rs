@@ -6,13 +6,16 @@ use crate::{AssetError, AssetPath, AssetResult, AssetSource};
 
 pub const DEFAULT_PLAYER_FIGURE_PATH: &str = "assets/mclone/figures/player.figure.json";
 pub const UPRIGHT_BEAR_FIGURE_PATH: &str = "assets/mclone/figures/upright_bear.figure.json";
+pub const COW_FIGURE_PATH: &str = "assets/mclone/figures/cow.figure.json";
 pub const CHICKEN_FIGURE_PATH: &str = "assets/mclone/figures/chicken.figure.json";
 pub const DEFAULT_PLAYER_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:player");
 pub const UPRIGHT_BEAR_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:upright_bear");
+pub const COW_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:cow");
 pub const CHICKEN_FIGURE_ID: ActorFigureId = ActorFigureId::from_static("mclone:chicken");
-pub const FIRST_PARTY_ACTOR_FIGURE_IDS: [ActorFigureId; 3] = [
+pub const FIRST_PARTY_ACTOR_FIGURE_IDS: [ActorFigureId; 4] = [
     DEFAULT_PLAYER_FIGURE_ID,
     UPRIGHT_BEAR_FIGURE_ID,
+    COW_FIGURE_ID,
     CHICKEN_FIGURE_ID,
 ];
 
@@ -200,6 +203,10 @@ pub fn upright_bear_figure_path() -> AssetPath {
     AssetPath::new(UPRIGHT_BEAR_FIGURE_PATH)
 }
 
+pub fn cow_figure_path() -> AssetPath {
+    AssetPath::new(COW_FIGURE_PATH)
+}
+
 pub fn chicken_figure_path() -> AssetPath {
     AssetPath::new(CHICKEN_FIGURE_PATH)
 }
@@ -212,6 +219,10 @@ pub const fn upright_bear_figure_id() -> ActorFigureId {
     UPRIGHT_BEAR_FIGURE_ID
 }
 
+pub const fn cow_figure_id() -> ActorFigureId {
+    COW_FIGURE_ID
+}
+
 pub const fn chicken_figure_id() -> ActorFigureId {
     CHICKEN_FIGURE_ID
 }
@@ -220,6 +231,7 @@ pub fn actor_figure_path(id: ActorFigureId) -> Option<AssetPath> {
     match id.as_str() {
         "mclone:player" => Some(default_player_figure_path()),
         "mclone:upright_bear" => Some(upright_bear_figure_path()),
+        "mclone:cow" => Some(cow_figure_path()),
         "mclone:chicken" => Some(chicken_figure_path()),
         _ => None,
     }
@@ -346,5 +358,14 @@ mod tests {
             chicken_figure_path()
         );
         assert!(actor_figure_path(ActorFigureId::from_static("mclone:missing")).is_none());
+    }
+
+    #[test]
+    fn cow_figure_has_a_stable_runtime_mapping() {
+        assert_eq!(cow_figure_id().as_str(), "mclone:cow");
+        assert_eq!(
+            actor_figure_path(cow_figure_id()).unwrap(),
+            cow_figure_path()
+        );
     }
 }

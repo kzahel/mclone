@@ -136,6 +136,37 @@ fn chicken_entity_actor_uses_chicken_figure() {
 }
 
 #[test]
+fn cow_entity_actor_uses_authored_cow_figure() {
+    let client = ClientRuntime::local_integrated();
+    let presentation = ActorPresentation {
+        id: ActorPresentationId::Entity(mclone_protocol::EntityId(8)),
+        kind: ActorPresentationKind::Entity(mclone_protocol::EntityKind::Cow),
+        appearance: ActorAppearance::NONE,
+        item_stack: None,
+        feet_position: Vec3d::new(1.0, 64.0, 2.0),
+        y_rot_degrees: 45.0,
+        x_rot_degrees: 0.0,
+        rotation: None,
+        on_ground: true,
+        width: 0.9,
+        height: 1.4,
+        walk_animation_distance: 0.25,
+        chicken_wing_flap_radians: None,
+    };
+
+    let actors = actor_instances_from_presentations(&[presentation], &client);
+
+    assert_eq!(actors.len(), 1);
+    assert_eq!(
+        actors[0].shape,
+        mclone_render::entity::ActorInstanceShape::Figure(mclone_assets::cow_figure_id())
+    );
+    assert_eq!(actors[0].width, 0.9);
+    assert_eq!(actors[0].height, 1.4);
+    assert!(actors[0].animation.is_some());
+}
+
+#[test]
 fn actor_instance_identity_is_stable_across_presentation_reordering() {
     let client = ClientRuntime::local_integrated();
     let make = |id, kind| ActorPresentation {

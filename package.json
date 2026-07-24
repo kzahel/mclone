@@ -55,6 +55,7 @@
     "native:lobby-scenario:catalog-smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --lobby-scenario-catalog-smoke /tmp/mclone-lobby-scenario-catalog-smoke --width 640 --height 400 --day-time 6000 --freeze-time --lighting false --fullbright true",
     "native:lobby-scenario:stereo-smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --lobby-scenario-stereo-smoke /tmp/mclone-lobby-scenario-stereo-smoke --width 640 --height 640 --day-time 6000 --freeze-time --lighting false --fullbright true",
     "native:lobby-scenario:run": "cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --menu",
+    "native:original-assets": "pnpm assets:pack:first-party && cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --asset-pack original --start-in-world true",
     "native:worldgen:smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-worldgen --bin worldgen_perf --",
     "native:worldgen:perf": "cargo run --release --manifest-path native/Cargo.toml -p mclone-worldgen --bin worldgen_perf --",
     "native:worldgen:find-biome-seed": "cargo run --manifest-path native/Cargo.toml -p mclone-worldgen --bin find_biome_seed --",

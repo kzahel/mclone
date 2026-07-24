@@ -1,5 +1,5 @@
 use super::*;
-use crate::cli::DESKTOP_LOCAL_ARG_FLAGS;
+use crate::cli::{AssetPackLaunchProfile, DESKTOP_LOCAL_ARG_FLAGS};
 use std::collections::BTreeSet;
 
 fn collect_cli_source_flags(source: &str) -> BTreeSet<String> {
@@ -149,6 +149,35 @@ fn cli_defaults_to_window() {
             frame_report: None,
         }
     );
+}
+
+#[test]
+fn cli_parses_forced_original_asset_pack() {
+    let cli = Cli::parse([
+        "--asset-pack".to_owned(),
+        "original".to_owned(),
+        "--start-in-world".to_owned(),
+        "true".to_owned(),
+    ])
+    .unwrap();
+    let Cli::Window {
+        scene,
+        start_intent,
+        ..
+    } = cli
+    else {
+        panic!("expected window mode");
+    };
+    assert_eq!(scene.asset_pack, AssetPackLaunchProfile::Original);
+    assert_eq!(start_intent, WindowStartIntent::InWorld);
+}
+
+#[test]
+fn cli_rejects_unknown_asset_pack_profile() {
+    let error = Cli::parse(["--asset-pack".to_owned(), "mystery".to_owned()])
+        .unwrap_err()
+        .to_string();
+    assert!(error.contains("--asset-pack expects saved or original"));
 }
 
 #[test]

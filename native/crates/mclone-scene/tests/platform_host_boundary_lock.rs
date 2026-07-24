@@ -3,6 +3,7 @@ const DESKTOP_DRIVER: &str =
     include_str!("../../../apps/mclone-native-client/src/winit_frame_driver.rs");
 const FLAT_ANDROID: &str =
     include_str!("../../../apps/mclone-android-client/src/surface_driver.rs");
+const MONO_HOST: &str = include_str!("../src/mono.rs");
 
 fn braced_item<'a>(source: &'a str, marker: &str) -> &'a str {
     let start = source.find(marker).expect("item marker present");
@@ -97,5 +98,15 @@ fn native_hosts_do_not_clamp_player_elapsed_time_before_the_scene() {
     assert!(
         !android_advance.contains("clamp("),
         "flat Android silently dropped player elapsed time before shared catch-up"
+    );
+}
+
+#[test]
+fn mono_ui_profile_setup_preserves_discovered_client_state() {
+    let configure = braced_item(MONO_HOST, "pub fn configure_mono_ui_with_profile(");
+    assert!(configure.contains("self.set_client_experience_profile(profile);"));
+    assert!(
+        !configure.contains("ClientExperienceController::new(profile)"),
+        "mono UI setup replaced the asset-pack catalog and other discovered client state"
     );
 }

@@ -27,6 +27,19 @@ prepared-set ledger now reports 26 first-party and 126 generated resolutions,
 with zero Minecraft-reference or unknown resolutions; Structure Lab preview
 receipts report 22 first-party and 122 generated resolutions.
 
+Post-closeout extension (2026-07-24): desktop mono UI configuration now
+preserves the already-discovered asset-pack catalog instead of replacing the
+entire client-experience controller. This fixes the title/pause screen
+incorrectly showing staged first-party packs as unavailable. The process-local
+`--asset-pack original` launch profile preflights and forces Mclone Original
+without reading or rewriting the saved preference; `pnpm native:original-assets`
+builds the packs and launches that profile. Cow has joined player, chicken, and
+upright bear as a promoted authored runtime figure, and ordinary cow actors now
+select that prepared figure. The strict prepared-set ledger reports 27
+first-party and 126 generated resolutions, four figures, zero resolved
+Minecraft-reference/unknown assets, two suppressed sounds, and one optional
+missing colormap.
+
 Scope: client-side discovery, selection, composition, provenance, preparation,
 and replacement of visual/audio asset packs. This topic owns the product truth
 behind “Minecraft reference assets are disabled” and the continuing path from
@@ -95,12 +108,12 @@ Minecraft pack is not sufficient.
   `mclone-authored.pbp` and `mclone-generated-fallback.pbp` artifacts without a
   Minecraft reference prerequisite. Their manifests declare stable identity,
   origin, roles, `mclone-visuals-v1`, and payload fingerprints.
-- The authored pack currently contains 94 canonical namespaced PNGs, 21
-  compatibility PNGs, far-LOD metadata, and three first-party figures (119
-  payload files). Canonical authored `mclone:block/*` materials can shadow the
-  generated layer. The fallback pack contains 139 labeled PNGs, the figures,
-  209 block visual records, a short-code registry, coverage facts, and
-  suppressed-audio policy (146 payload files).
+- The authored pack currently contains canonical namespaced and compatibility
+  PNGs, far-LOD metadata, Structure Lab preview artifacts, and four first-party
+  figures (187 payload files). Canonical authored `mclone:block/*` materials
+  can shadow the generated layer. The fallback pack contains 139 labeled PNGs,
+  the figures, 209 block visual records, a short-code registry, coverage facts,
+  and suppressed-audio policy (152 payload files).
 - Generated PNGs use deterministic checker colors, alternating magenta border,
   and a checked-in 3x5 font. Prefix collisions extend deterministically and
   full-hash collisions fail. Both PNG encoders use stored-DEFLATE streams to
@@ -139,8 +152,8 @@ Minecraft pack is not sufficient.
   Preference failures are machine-readable diagnostics rather than asset
   transaction failures.
 - `pnpm assets:validate:first-party` emits a strict JSON ledger and fails on any
-  resolved Minecraft-reference or unknown source. The verified 149-entry
-  ledger contains 11 first-party and 135 generated resolutions, two suppressed
+  resolved Minecraft-reference or unknown source. The verified 156-entry
+  ledger contains 27 first-party and 126 generated resolutions, two suppressed
   sounds, one optional missing result, and no resolved reference/unknown source.
 - Reload diagnostics record stage timings plus estimated simultaneous retained
   CPU/GPU payloads. The measured native Vanilla reload took 68.190 ms prepare,
@@ -165,8 +178,8 @@ Minecraft pack is not sufficient.
   workers, GPU upload, and prepared replacement requests remain in their
   existing native/platform owners. The Tactical 169 epoch and transactional
   replacement contract is unchanged.
-- A real authored-plus-generated prepare resolved 11 unique paths from the
-  authored pack and 135 from the generated pack, explicitly suppressed two
+- A real authored-plus-generated prepare resolved 27 unique paths from the
+  authored pack and 126 from the generated pack, explicitly suppressed two
   sounds, and reported zero Minecraft-reference or unknown resolutions. All
   resolved generated PNGs were checked against the 139-entry registry.
 - A 960x540 first-party-only native offscreen capture rendered 11 terrain

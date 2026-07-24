@@ -109,6 +109,26 @@ with Minecraft Java 1.17.1 so it can be oracle-tested against reference output.
 - [`test/fixtures/`](test/fixtures/) - shared oracle fixture data consumed by Rust tests
 - `reference/minecraft-1.17.1/` - generated, gitignored Minecraft reference tree
 
+## Previewing First-Party Assets
+
+Build the current first-party packs and launch the desktop client with the
+proprietary-free **Mclone Original** selection forced for this process:
+
+```bash
+pnpm native:original-assets
+```
+
+This selection enables authored Mclone assets over the generated fallback and
+does not make the local Minecraft reference pack eligible. Missing authored
+art therefore remains conspicuous instead of silently falling back to
+Minecraft content.
+
+For the ordinary persisted selection, first run
+`pnpm assets:pack:first-party`, launch the client, then open **Options → Asset
+Packs**, enable **Mclone Original Assets**, disable **Minecraft 1.17.1
+Reference**, and choose **Apply**. `pnpm assets:validate:first-party` is the
+strict provenance check for the same authored-plus-generated selection.
+
 ## Validation
 
 The shared Rust workspace gate is:

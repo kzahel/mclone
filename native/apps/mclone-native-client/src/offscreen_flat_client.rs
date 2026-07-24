@@ -19,8 +19,8 @@ use mclone_ui::{GameTravelAssistMode, GuiNavigation, Point};
 
 use crate::camera::SpectatorCamera;
 use crate::cli::{
-    HeadlessScreenshotOptions, HeadlessScreenshotUi, LobbyScenarioSmokeOptions, SceneOptions,
-    StartupWaitPolicy, WarmWorldSwapSmokeOptions,
+    AssetPackLaunchProfile, HeadlessScreenshotOptions, HeadlessScreenshotUi,
+    LobbyScenarioSmokeOptions, SceneOptions, StartupWaitPolicy, WarmWorldSwapSmokeOptions,
 };
 use crate::offscreen_scene_host::OffscreenDriver;
 use crate::render_cache::load_asset_source;
@@ -1648,46 +1648,48 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
                 &asset_source,
                 startup_camera,
             )?;
-            let mut asset_packs_configured = false;
-            if let Some(registry) = mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::discover_native_with_reference(asset_source.clone())? {
-                host.driver.host_mut().configure_asset_pack_sources(
-                    registry,
-                    mclone_app_runtime::prepared_assets::reference_asset_pack_selection(),
-                )?;
-                asset_packs_configured = true;
-            }
-            if let Some((authored, fallback)) = &asset_pack_ui_sources {
-                let registry = mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::from_files_with_reference(
-                    authored,
-                    fallback,
-                    asset_source.clone(),
-                )?;
-                host.driver.host_mut().configure_asset_pack_sources(
-                    registry,
-                    mclone_app_runtime::prepared_assets::reference_asset_pack_selection(),
-                )?;
-                asset_packs_configured = true;
-            }
-            if asset_packs_configured {
-                if let Some(path) =
-                    mclone_app_runtime::asset_pack_preferences::native_asset_pack_preference_path(
-                        scene.world_root.as_deref(),
-                    )
-                {
-                    let storage = mclone_app_runtime::asset_pack_preferences::FileAssetPackPreferenceStorage::new(path);
-                    if asset_pack_preference_smoke {
-                        mclone_app_runtime::asset_pack_preferences::AssetPackPreferenceStorage::store(
-                            &storage,
-                            &mclone_app_runtime::asset_pack_preferences::AssetPackPreference::new([
-                                mclone_assets::AssetPackId::new(
-                                    mclone_app_runtime::prepared_assets::AUTHORED_FIRST_PARTY_PACK_ID,
-                                ),
-                            ]),
-                        )?;
+            if scene.asset_pack == crate::cli::AssetPackLaunchProfile::Saved {
+                let mut asset_packs_configured = false;
+                if let Some(registry) = mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::discover_native_with_reference(asset_source.clone())? {
+                    host.driver.host_mut().configure_asset_pack_sources(
+                        registry,
+                        mclone_app_runtime::prepared_assets::reference_asset_pack_selection(),
+                    )?;
+                    asset_packs_configured = true;
+                }
+                if let Some((authored, fallback)) = &asset_pack_ui_sources {
+                    let registry = mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::from_files_with_reference(
+                        authored,
+                        fallback,
+                        asset_source.clone(),
+                    )?;
+                    host.driver.host_mut().configure_asset_pack_sources(
+                        registry,
+                        mclone_app_runtime::prepared_assets::reference_asset_pack_selection(),
+                    )?;
+                    asset_packs_configured = true;
+                }
+                if asset_packs_configured {
+                    if let Some(path) =
+                        mclone_app_runtime::asset_pack_preferences::native_asset_pack_preference_path(
+                            scene.world_root.as_deref(),
+                        )
+                    {
+                        let storage = mclone_app_runtime::asset_pack_preferences::FileAssetPackPreferenceStorage::new(path);
+                        if asset_pack_preference_smoke {
+                            mclone_app_runtime::asset_pack_preferences::AssetPackPreferenceStorage::store(
+                                &storage,
+                                &mclone_app_runtime::asset_pack_preferences::AssetPackPreference::new([
+                                    mclone_assets::AssetPackId::new(
+                                        mclone_app_runtime::prepared_assets::AUTHORED_FIRST_PARTY_PACK_ID,
+                                    ),
+                                ]),
+                            )?;
+                        }
+                        host.driver
+                            .host_mut()
+                            .configure_asset_pack_preference_storage(Box::new(storage))?;
                     }
-                    host.driver
-                        .host_mut()
-                        .configure_asset_pack_preference_storage(Box::new(storage))?;
                 }
             }
             host.start_scene_with_wait_policy(device, queue, startup_wait)?;
@@ -1933,6 +1935,21 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
         println!(
             "asset pack preference smoke restored {} at epoch {} with no reference/unknown provenance",
             diagnostics.active_ids.join(","),
+            diagnostics.epoch,
+        );
+    }
+
+    if options.scene.asset_pack == AssetPackLaunchProfile::Original {
+        let diagnostics = host.driver.host().asset_pack_runtime_diagnostics();
+        if diagnostics.active_ids
+            != [mclone_app_runtime::prepared_assets::AUTHORED_FIRST_PARTY_PACK_ID.to_owned()]
+            || diagnostics.preferred_ids != diagnostics.active_ids
+            || !diagnostics.proprietary_free
+        {
+            bail!("forced Original screenshot retained non-original assets: {diagnostics:?}");
+        }
+        println!(
+            "forced Original asset pack active at epoch {} with proprietary-free provenance",
             diagnostics.epoch,
         );
     }

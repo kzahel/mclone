@@ -247,7 +247,7 @@ impl McloneSceneHost {
     ) {
         self.ui = ui;
         self.mono_ui_context = Some(context);
-        self.client_experience = ClientExperienceController::new(profile);
+        self.set_client_experience_profile(profile);
         self.refresh_world_catalog_ui(WorldCatalogUiStatus::hidden());
     }
 

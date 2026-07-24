@@ -115,6 +115,11 @@ fn direct_asset_requirements() -> Vec<CanonicalAssetRequirement> {
             Required,
         ),
         (
+            "assets/mclone/figures/cow.figure.json",
+            ActorFigure,
+            Required,
+        ),
+        (
             "assets/mclone/figures/chicken.figure.json",
             ActorFigure,
             Required,

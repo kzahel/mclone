@@ -216,13 +216,16 @@ pub fn actor_instances_from_presentations_near_observer(
                         },
                     )
                     .with_packed_light(packed_light),
-                ActorPresentationKind::Entity(EntityKind::Cow) => ActorInstance::cow_model(
-                    glam_vec3_from_vec3d(feet_position),
-                    actor.y_rot_degrees,
-                    actor.width,
-                    actor.height,
-                )
-                .with_packed_light(packed_light),
+                ActorPresentationKind::Entity(EntityKind::Cow) => {
+                    ActorInstance::remote_player_with_figure(
+                        glam_vec3_from_vec3d(feet_position),
+                        actor.y_rot_degrees,
+                        mclone_assets::cow_figure_id(),
+                    )
+                    .with_dimensions(actor.width, actor.height)
+                    .with_walk_animation_distance(actor.walk_animation_distance)
+                    .with_packed_light(packed_light)
+                }
                 ActorPresentationKind::Entity(EntityKind::Chicken) => {
                     ActorInstance::remote_player_with_figure(
                         glam_vec3_from_vec3d(feet_position),

@@ -70,6 +70,7 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
     "--actor-walk-review-video",
     "--adaptive-chunk-publication-budget",
     "--adaptive-render-admission-budget",
+    "--asset-pack",
     "--cadence",
     "--desktop-xr",
     "--first-person-player",
@@ -165,6 +166,10 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct SceneOptions {
     pub(crate) startup: StartupSceneOptions,
+    /// Desktop launch-only asset selection. The default restores the ordinary
+    /// persisted preference; `Original` forces the authored-plus-generated
+    /// first-party selection for this process.
+    pub(crate) asset_pack: AssetPackLaunchProfile,
     /// Launch-only Tactical 174 harness. `None` preserves the one-world path;
     /// `Some` asks the shared scene host for one detached local standby.
     pub(crate) warm_world_standby_seed: Option<i64>,
@@ -204,6 +209,13 @@ pub(crate) enum RenderCompileCapacityMode {
     Default,
     Manual,
     DerivedApplied,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum AssetPackLaunchProfile {
+    #[default]
+    Saved,
+    Original,
 }
 
 impl RenderCompileCapacityMode {
@@ -709,6 +721,7 @@ impl Default for SceneOptions {
     fn default() -> Self {
         Self {
             startup: StartupSceneOptions::default(),
+            asset_pack: AssetPackLaunchProfile::Saved,
             warm_world_standby_seed: None,
             warm_world_standby_cadence: None,
             live_diorama: None,
@@ -740,6 +753,7 @@ impl SceneOptions {
     fn with_startup(startup: StartupSceneOptions) -> Self {
         Self {
             startup,
+            asset_pack: AssetPackLaunchProfile::Saved,
             warm_world_standby_seed: None,
             warm_world_standby_cadence: None,
             live_diorama: None,
@@ -975,6 +989,7 @@ impl Cli {
         let mut live_diorama_scale = None;
         let mut live_diorama_soak_seconds = 0;
         let mut warm_world_cost_sample_ms = 0;
+        let mut asset_pack = AssetPackLaunchProfile::Saved;
         let mut args = args.into_iter();
 
         while let Some(arg) = args.next() {
@@ -1550,6 +1565,9 @@ impl Cli {
                         args.next(),
                     )?);
                 }
+                "--asset-pack" => {
+                    asset_pack = parse_asset_pack_launch_profile_arg(&arg, args.next())?;
+                }
                 "--render-compile-worker-timing" => {
                     render_compile_worker_timing_enabled = Some(parse_bool_arg(
                         "--render-compile-worker-timing",
@@ -1874,6 +1892,7 @@ impl Cli {
         let startup_camera = startup_options.camera;
         let startup_storage = startup_options.storage;
         let mut scene = SceneOptions::with_startup(startup_options.scene);
+        scene.asset_pack = asset_pack;
         scene.first_person_player_visible = first_person_player_visible;
         scene.warm_world_standby_seed = warm_world_standby_seed;
         scene.warm_world_standby_cadence = warm_world_standby_cadence;
@@ -2371,6 +2390,18 @@ fn parse_window_platform_profile_arg(
         Some("steamos") => Ok(WindowPlatformProfile::SteamOs),
         Some(value) => bail!("{flag} expects desktop or steamos, got `{value}`"),
         None => bail!("{flag} requires desktop or steamos"),
+    }
+}
+
+fn parse_asset_pack_launch_profile_arg(
+    flag: &str,
+    value: Option<String>,
+) -> Result<AssetPackLaunchProfile> {
+    match value.as_deref() {
+        Some("saved") => Ok(AssetPackLaunchProfile::Saved),
+        Some("original") => Ok(AssetPackLaunchProfile::Original),
+        Some(value) => bail!("{flag} expects saved or original, got `{value}`"),
+        None => bail!("{flag} requires saved or original"),
     }
 }
 
@@ -2915,11 +2946,11 @@ fn print_help() {
     println!(
         "mclone-native-client\n\n\
          Usage:\n\
-           mclone-native-client [--platform-profile desktop|steamos] [--width 1280] [--height 900] [--menu|--start-in-world true|false] [--startup-wait none|progress|playable|idle|frames:N] [--window-frame-report /tmp/mclone-window.json] [--window-frame-report-frames 3600|--window-frame-report-seconds 20] [--window-world-render-scale 50|67|75|100] [--window-freeze-scheduled-fluid-ticks] [--window-camera-eye x,y,z --window-camera-target x,y,z] [--window-camera-velocity x,y,z] [--seed 12345] [--generation-profile overworld|flat-grass-v1|small-island-v1|mclone-overworld-v1|alpha-v1|beta-v1|authored-only] [--world-topology plane|cylinder-x|cylinder-x:PERIOD_CHUNKS] [--alpha-winter true|false] [--warm-world-standby-seed -98765|--live-diorama-world-dir ./island-b] [--live-diorama-source-region 0,0,0,3,5] [--live-diorama-source-anchor 8.5,65,8.5] [--live-diorama-composition-anchor 8,65.03125,8] [--live-diorama-scale 0.0625] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-capacity default|derived] [--render-compile-workers 1] [--render-compile-max-pending-jobs 4] [--world-root ./worlds] [--world-dir ./world|--transient] [--far-lod true|false] [--startup-lod-prewarm true|false] [--movement-mode walk|fly|hand-push|thruster] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--adaptive-render-admission-budget true|false] [--debug-passive-showcase true|false] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
+           mclone-native-client [--platform-profile desktop|steamos] [--width 1280] [--height 900] [--menu|--start-in-world true|false] [--asset-pack saved|original] [--startup-wait none|progress|playable|idle|frames:N] [--window-frame-report /tmp/mclone-window.json] [--window-frame-report-frames 3600|--window-frame-report-seconds 20] [--window-world-render-scale 50|67|75|100] [--window-freeze-scheduled-fluid-ticks] [--window-camera-eye x,y,z --window-camera-target x,y,z] [--window-camera-velocity x,y,z] [--seed 12345] [--generation-profile overworld|flat-grass-v1|small-island-v1|mclone-overworld-v1|alpha-v1|beta-v1|authored-only] [--world-topology plane|cylinder-x|cylinder-x:PERIOD_CHUNKS] [--alpha-winter true|false] [--warm-world-standby-seed -98765|--live-diorama-world-dir ./island-b] [--live-diorama-source-region 0,0,0,3,5] [--live-diorama-source-anchor 8.5,65,8.5] [--live-diorama-composition-anchor 8,65.03125,8] [--live-diorama-scale 0.0625] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-capacity default|derived] [--render-compile-workers 1] [--render-compile-max-pending-jobs 4] [--world-root ./worlds] [--world-dir ./world|--transient] [--far-lod true|false] [--startup-lod-prewarm true|false] [--movement-mode walk|fly|hand-push|thruster] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--adaptive-render-admission-budget true|false] [--debug-passive-showcase true|false] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --actor-review-sheet /tmp/mclone-actor-review.png [--width 1152] [--height 512] [--fullbright true|false]\n\
            mclone-native-client --actor-walk-review /tmp/mclone-actor-walk-review.png [--actor-walk-review-video /tmp/mclone-actor-walk-review.mp4] [--width 360] [--height 360] [--walk-review-frames 24] [--walk-review-fps 12] [--walk-review-cycles 2] [--fullbright true|false]\n\
-          mclone-native-client --screenshot /tmp/mclone-frame.png [--width 1280] [--height 720] [--startup-wait none|progress|playable|idle|frames:N] [--warm-world-standby-seed -98765] [--screenshot-ui none|title|world-list|world-create|world-delete-confirm|new-world|join-remote|pause|death|help|controls|block-palette|options-title|options-pause|options-local-play|storage-profile-title|storage-factory-confirm|server-settings-pause|asset-packs-pause] [--screenshot-hud true|false] [--screenshot-frame-pipeline-overlay true|false] [--screenshot-debug-pane true|false] [--screenshot-worldgen-lens off|biome|landform|surface|hydrology] [--screenshot-player-box true|false] [--screenshot-blink-debug true|false] [--screenshot-controller-focus true|false] [--screenshot-scripted-interaction true|false] [--screenshot-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--first-person-player true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--far-lod true|false] [--far-lod-detail auto|4|8|16] [--startup-lod-prewarm true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
+          mclone-native-client --screenshot /tmp/mclone-frame.png [--asset-pack saved|original] [--width 1280] [--height 720] [--startup-wait none|progress|playable|idle|frames:N] [--warm-world-standby-seed -98765] [--screenshot-ui none|title|world-list|world-create|world-delete-confirm|new-world|join-remote|pause|death|help|controls|block-palette|options-title|options-pause|options-local-play|storage-profile-title|storage-factory-confirm|server-settings-pause|asset-packs-pause] [--screenshot-hud true|false] [--screenshot-frame-pipeline-overlay true|false] [--screenshot-debug-pane true|false] [--screenshot-worldgen-lens off|biome|landform|surface|hydrology] [--screenshot-player-box true|false] [--screenshot-blink-debug true|false] [--screenshot-controller-focus true|false] [--screenshot-scripted-interaction true|false] [--screenshot-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--first-person-player true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--far-lod true|false] [--far-lod-detail auto|4|8|16] [--startup-lod-prewarm true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --worldgen-showcase-card /tmp/mclone-worldgen-showcase [--width 640] [--height 400] [--generation-profile small-island-v1] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 16] [--day-time 6000] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --warm-world-swap-smoke /tmp/mclone-warm-world-swap --warm-world-standby-seed 67890 [--warm-world-standby-cadence 5/5/5] [--warm-world-cost-sample-ms 3000] [--width 1280] [--height 720] [scene/render options as --screenshot]\n\
            mclone-native-client --live-diorama-smoke /tmp/mclone-live-diorama --world-dir ./table-a --live-diorama-world-dir ./island-b [--live-diorama-scale 0.125] [--live-diorama-soak-seconds 600] [--width 960] [--height 640]\n\

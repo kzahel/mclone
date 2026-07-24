@@ -60,6 +60,14 @@ impl McloneSceneHost {
         &self.asset_replacement_status
     }
 
+    pub fn asset_replacement_in_progress(&self) -> bool {
+        matches!(
+            self.asset_replacement_status,
+            AssetReplacementStatus::PreparingAssets { .. }
+                | AssetReplacementStatus::PreparingMeshes { .. }
+        )
+    }
+
     pub fn asset_pack_ui_state(&self) -> mclone_ui::AssetPacksUiState {
         self.client_experience.asset_packs().ui_state()
     }
@@ -160,14 +168,7 @@ impl McloneSceneHost {
                     preference.reconcile(self.client_experience.asset_packs().catalog());
                 self.asset_pack_preference = preference;
                 if resolution.selection != self.active_assets.selection {
-                    self.client_experience
-                        .asset_packs_mut()
-                        .begin_preferred_selection(resolution.selection.clone())?;
-                    if self.active_world.runtime.is_some() {
-                        self.request_asset_pack_selection(resolution.selection)?;
-                    } else {
-                        self.pending_restored_asset_pack_selection = Some(resolution.selection);
-                    }
+                    self.begin_asset_pack_selection(resolution.selection)?;
                 }
             }
             Ok(None) => {}
@@ -177,6 +178,24 @@ impl McloneSceneHost {
             }
         }
         self.asset_pack_preference_storage = Some(storage);
+        Ok(())
+    }
+
+    /// Stage a complete logical selection for this host and begin preparing it
+    /// as soon as an active world/runtime is available.
+    ///
+    /// Platform launch adapters use this for an explicit process-local
+    /// selection override. Persistence adapters remain separate so a launch
+    /// override does not need to rewrite the user's saved preference.
+    pub fn begin_asset_pack_selection(&mut self, selection: AssetPackSelection) -> Result<()> {
+        self.client_experience
+            .asset_packs_mut()
+            .begin_preferred_selection(selection.clone())?;
+        if self.active_world.runtime.is_some() {
+            self.request_asset_pack_selection(selection)?;
+        } else {
+            self.pending_restored_asset_pack_selection = Some(selection);
+        }
         Ok(())
     }
 

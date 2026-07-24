@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use mclone_app_runtime::client_experience::desktop_native_client_experience_profile;
 use mclone_app_runtime::native_service_assembly::NativeSessionServices;
 use mclone_app_runtime::prepared_assets::{
-    AssetPackSourceRegistry, reference_asset_pack_selection,
+    AssetPackSourceRegistry, original_asset_pack_selection, reference_asset_pack_selection,
 };
 use mclone_app_runtime::scenario::BuiltInScenarioId;
 use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionStartRequest};
@@ -21,7 +21,7 @@ use mclone_scene::{
 };
 use mclone_server::{AuthoredWorldFixtureManifest, authored_world_fixture_marker_path};
 
-use crate::cli::SceneOptions;
+use crate::cli::{AssetPackLaunchProfile, SceneOptions};
 use crate::render_cache::load_asset_source;
 use crate::scene_runtime::{WindowSceneAssets, native_window_scene_runtime_with_mesh_assets};
 
@@ -70,7 +70,7 @@ pub(crate) fn create_desktop_title_scene_host(
             runtime,
         )
     });
-    configure_desktop_asset_pack_sources(&mut host, scene.world_root.as_deref())?;
+    configure_desktop_asset_pack_sources(&mut host, scene.world_root.as_deref(), scene.asset_pack)?;
     Ok(host)
 }
 
@@ -141,7 +141,7 @@ pub(crate) fn create_desktop_scene_host_with_overrides(
             runtime,
         )
     });
-    configure_desktop_asset_pack_sources(&mut host, scene.world_root.as_deref())?;
+    configure_desktop_asset_pack_sources(&mut host, scene.world_root.as_deref(), scene.asset_pack)?;
     if let Some(diorama) = scene.live_diorama.as_ref() {
         let marker_path = authored_world_fixture_marker_path(&diorama.world_dir);
         let marker = fs::read(&marker_path).with_context(|| {
@@ -186,6 +186,7 @@ pub(crate) fn create_desktop_scene_host_with_overrides(
 pub(crate) fn configure_desktop_asset_pack_sources(
     host: &mut McloneSceneHost,
     world_root: Option<&std::path::Path>,
+    launch_profile: AssetPackLaunchProfile,
 ) -> Result<()> {
     if let Some(path) =
         mclone_app_runtime::graphics_preferences::native_graphics_preference_path(world_root)
@@ -200,8 +201,22 @@ pub(crate) fn configure_desktop_asset_pack_sources(
         load_asset_source().context("reload native reference source for asset-pack discovery")?,
     );
     let Some(registry) = AssetPackSourceRegistry::discover_native_with_reference(reference)? else {
+        if launch_profile == AssetPackLaunchProfile::Original {
+            anyhow::bail!(
+                "the Original asset-pack launch requires staged first-party packs; run `pnpm assets:pack:first-party` from the repository root"
+            );
+        }
         return Ok(());
     };
+    if launch_profile == AssetPackLaunchProfile::Original {
+        let selection = original_asset_pack_selection();
+        registry
+            .prepare(1, selection.clone())
+            .context("validate the forced Original asset-pack selection")?;
+        host.configure_asset_pack_sources(registry, reference_asset_pack_selection())?;
+        host.begin_asset_pack_selection(selection)?;
+        return Ok(());
+    }
     host.configure_asset_pack_sources(registry, reference_asset_pack_selection())?;
     if let Some(path) =
         mclone_app_runtime::asset_pack_preferences::native_asset_pack_preference_path(world_root)

@@ -14,6 +14,11 @@ catalogue is available at
 `https://mclone.kzahel.com/animals/`, delivered by the existing native-web
 bundle and after-main-push deployment path.
 
+Runtime promotion extended on 2026-07-24: cow now joins player, chicken, and
+upright bear in the first-party pack, bringing the catalogue's Runtime-only
+filter to four entries. The promotion itself remains owned by the shared
+figure/runtime pipeline rather than this browser topic.
+
 ## Scope
 
 This topic owns the browser catalogue for canonical Asset Lab figures: static

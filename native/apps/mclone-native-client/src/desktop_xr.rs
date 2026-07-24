@@ -853,6 +853,7 @@ fn create_mclone_terrain_state(
     )?;
     let entry_world_dir = scene.world_dir.clone();
     let asset_pack_world_root = scene.world_root.clone();
+    let asset_pack_launch_profile = options.scene.asset_pack;
     let startup_view_pose = options.view_pose.map(|view_pose| XrStartupViewPose {
         position: view_pose.position,
         yaw_degrees: view_pose.yaw_degrees,
@@ -890,6 +891,7 @@ fn create_mclone_terrain_state(
     crate::desktop_scene_host::configure_desktop_asset_pack_sources(
         &mut state,
         asset_pack_world_root.as_deref(),
+        asset_pack_launch_profile,
     )?;
     let mut entry_controller = ClientEntryController::new(entry);
     let entry_effect = entry_controller

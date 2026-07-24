@@ -21,14 +21,15 @@ pub use block_registry::{
     MultipartCase, MultipartWhen,
 };
 pub use figure::{
-    ActorFigureId, CHICKEN_FIGURE_ID, CHICKEN_FIGURE_PATH, DEFAULT_PLAYER_FIGURE_ID,
-    DEFAULT_PLAYER_FIGURE_PATH, FIRST_PARTY_ACTOR_FIGURE_IDS, FigureAlphaCoverage, FigureAlphaMode,
-    FigureAsciiTexture, FigureAsset, FigureClip, FigureClipContact, FigureClipKey,
-    FigureClipLocomotion, FigureClipRole, FigureClipTransform, FigureFace, FigureJoint,
-    FigureMaterial, FigurePart, FigurePlaneSidedness, FigurePrimitive, UPRIGHT_BEAR_FIGURE_ID,
-    UPRIGHT_BEAR_FIGURE_PATH, actor_figure_path, chicken_figure_id, chicken_figure_path,
-    default_player_figure_id, default_player_figure_path, load_figure_asset,
-    upright_bear_figure_id, upright_bear_figure_path,
+    ActorFigureId, CHICKEN_FIGURE_ID, CHICKEN_FIGURE_PATH, COW_FIGURE_ID, COW_FIGURE_PATH,
+    DEFAULT_PLAYER_FIGURE_ID, DEFAULT_PLAYER_FIGURE_PATH, FIRST_PARTY_ACTOR_FIGURE_IDS,
+    FigureAlphaCoverage, FigureAlphaMode, FigureAsciiTexture, FigureAsset, FigureClip,
+    FigureClipContact, FigureClipKey, FigureClipLocomotion, FigureClipRole, FigureClipTransform,
+    FigureFace, FigureJoint, FigureMaterial, FigurePart, FigurePlaneSidedness, FigurePrimitive,
+    UPRIGHT_BEAR_FIGURE_ID, UPRIGHT_BEAR_FIGURE_PATH, actor_figure_path, chicken_figure_id,
+    chicken_figure_path, cow_figure_id, cow_figure_path, default_player_figure_id,
+    default_player_figure_path, load_figure_asset, upright_bear_figure_id,
+    upright_bear_figure_path,
 };
 pub use first_party::{
     FIRST_PARTY_AUDIO_POLICY_PATH, FIRST_PARTY_MISSING_REGISTRY_PATH,

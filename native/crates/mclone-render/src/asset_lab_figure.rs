@@ -1117,7 +1117,7 @@ mod tests {
         let source = mclone_assets::FilesystemAssetSource::new("../../..");
         let figures = load_first_party_actor_figures(&source).unwrap();
 
-        assert_eq!(figures.len(), 3);
+        assert_eq!(figures.len(), 4);
         assert!(
             figures
                 .get(mclone_assets::default_player_figure_id())
@@ -1129,6 +1129,7 @@ mod tests {
                 .is_some()
         );
         assert!(figures.get(mclone_assets::chicken_figure_id()).is_some());
+        assert!(figures.get(mclone_assets::cow_figure_id()).is_some());
     }
 
     #[test]
@@ -1260,6 +1261,10 @@ mod tests {
         source.insert_text(
             mclone_assets::upright_bear_figure_path(),
             include_str!("../../../../assets/mclone/figures/upright_bear.figure.json"),
+        );
+        source.insert_text(
+            mclone_assets::cow_figure_path(),
+            include_str!("../../../../assets/mclone/figures/cow.figure.json"),
         );
         source.insert_text(mclone_assets::chicken_figure_path(), CHICKEN_FIGURE_JSON);
         source
