@@ -21,10 +21,10 @@ use mclone_core::{
     block_to_section_coord, chunk_block_coord, chunk_middle_block_coord,
 };
 use mclone_mesh::{
-    RenderSectionKey, TexturedChunkMeshInput, TexturedChunkVertex, TexturedMeshCatalog,
-    TexturedRenderSectionBuildReport, TexturedRenderSectionMesh, TexturedRenderSectionMetadata,
-    TexturedVisibleChunkMesh, VisibilityGraphBuildStats, VisibilitySet,
-    build_textured_render_sections_for_section_set_with_stats,
+    GrassPatch, RenderSectionKey, TexturedChunkMeshInput, TexturedChunkVertex, TexturedMeshCatalog,
+    TexturedRenderSectionBuildOptions, TexturedRenderSectionBuildReport, TexturedRenderSectionMesh,
+    TexturedRenderSectionMetadata, TexturedVisibleChunkMesh, VisibilityGraphBuildStats,
+    VisibilitySet, build_textured_render_sections_for_section_set_with_stats_and_options,
     build_textured_render_sections_with_stats, quad_face_count_from_indices,
 };
 use mclone_protocol::{
@@ -35,7 +35,7 @@ use mclone_render::chunk::{ChunkCamera, PerspectiveRenderPose};
 use mclone_render::entity::{ActorInstance, ActorInstanceId};
 use mclone_render::gui::WorldGuiLine;
 
-const PACKED_BUILD_REPORT_MAGIC: &[u8; 8] = b"MCRSBR2\0";
+const PACKED_BUILD_REPORT_MAGIC: &[u8; 8] = b"MCRSBR3\0";
 pub const LANDING_MIN_IMPACT_SPEED: f64 = 0.5;
 const THIRD_PERSON_CAMERA_DISTANCE: f64 = 4.0;
 

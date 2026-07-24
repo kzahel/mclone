@@ -9,18 +9,19 @@ use crate::catalog::{
     TexturedMeshCatalog, TexturedMeshError, TexturedTerrainRenderLayer,
 };
 use crate::data::{
-    ChunkVertex, RenderSectionKey, TexturedChunkVertex, TexturedRenderSectionBuildReport,
-    TexturedRenderSectionMesh, TexturedVisibleChunkMesh, VisibilityGraphBuildStats,
-    VisibleChunkMesh,
+    ChunkVertex, GrassPatch, RenderSectionKey, TexturedChunkVertex,
+    TexturedRenderSectionBuildReport, TexturedRenderSectionMesh, TexturedVisibleChunkMesh,
+    VisibilityGraphBuildStats, VisibleChunkMesh,
 };
 use crate::tint::{blended_liquid_color, block_tint};
 use crate::visibility::{VisGraph, VisibilityGraphTimer, VisibilitySet};
 use crate::{AIR_BLOCK_ID, CAVE_AIR_BLOCK_ID, CAVE_AIR_BLOCK_STATE_ID};
 use mclone_assets::ModelFaceDirection;
 use mclone_core::{
-    AIR_BLOCK_STATE_ID, BlockStateId, CHUNK_WIDTH, DEFAULT_BIOME_ID, PackedLightSection,
-    SECTION_HEIGHT as RENDER_SECTION_HEIGHT, block_to_chunk_coord, block_to_section_coord,
-    chunk_block_index, chunk_min_block_coord, local_block_coord, obfuscate_biome_zoom_seed,
+    AIR_BLOCK_STATE_ID, BlockPos as CoreBlockPos, BlockStateId, CHUNK_WIDTH, DEFAULT_BIOME_ID,
+    HorizontalTopology, PackedLightSection, SECTION_HEIGHT as RENDER_SECTION_HEIGHT,
+    block_to_chunk_coord, block_to_section_coord, chunk_block_index, chunk_min_block_coord,
+    local_block_coord, obfuscate_biome_zoom_seed,
 };
 use mclone_light::{
     FULL_BRIGHT, pack_light, packed_block_light, packed_light_at_local_block_or_fullbright,
@@ -30,6 +31,29 @@ use mclone_light::{
 const LCG_MULTIPLIER: i64 = 6364136223846793005;
 const LCG_INCREMENT: i64 = 1442695040888963407;
 pub const BUSHY_LEAF_CARD_OVERHANG: f32 = 0.25;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TexturedRenderSectionBuildOptions {
+    pub grass_patches: bool,
+    pub topology: HorizontalTopology,
+}
+
+impl TexturedRenderSectionBuildOptions {
+    pub const OFF: Self = Self {
+        grass_patches: false,
+        topology: HorizontalTopology::UNBOUNDED,
+    };
+
+    pub const fn with_grass_patches(mut self, grass_patches: bool) -> Self {
+        self.grass_patches = grass_patches;
+        self
+    }
+
+    pub const fn with_topology(mut self, topology: HorizontalTopology) -> Self {
+        self.topology = topology;
+        self
+    }
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct ChunkMeshInput<'a> {
@@ -247,7 +271,13 @@ pub fn build_textured_render_sections_with_stats(
     inputs: &[TexturedChunkMeshInput<'_>],
     catalog: &TexturedMeshCatalog,
 ) -> Result<TexturedRenderSectionBuildReport, TexturedMeshError> {
-    build_textured_render_sections_for_chunks(inputs, catalog, None, None)
+    build_textured_render_sections_for_chunks(
+        inputs,
+        catalog,
+        None,
+        None,
+        TexturedRenderSectionBuildOptions::OFF,
+    )
 }
 
 pub fn build_textured_render_sections_for_chunk_set_with_stats(
@@ -255,7 +285,13 @@ pub fn build_textured_render_sections_for_chunk_set_with_stats(
     catalog: &TexturedMeshCatalog,
     target_chunks: &BTreeSet<(i32, i32)>,
 ) -> Result<TexturedRenderSectionBuildReport, TexturedMeshError> {
-    build_textured_render_sections_for_chunks(inputs, catalog, Some(target_chunks), None)
+    build_textured_render_sections_for_chunks(
+        inputs,
+        catalog,
+        Some(target_chunks),
+        None,
+        TexturedRenderSectionBuildOptions::OFF,
+    )
 }
 
 pub fn build_textured_render_sections_for_section_set_with_stats(
@@ -263,7 +299,21 @@ pub fn build_textured_render_sections_for_section_set_with_stats(
     catalog: &TexturedMeshCatalog,
     target_sections: &BTreeSet<RenderSectionKey>,
 ) -> Result<TexturedRenderSectionBuildReport, TexturedMeshError> {
-    build_textured_render_sections_for_chunks(inputs, catalog, None, Some(target_sections))
+    build_textured_render_sections_for_section_set_with_stats_and_options(
+        inputs,
+        catalog,
+        target_sections,
+        TexturedRenderSectionBuildOptions::OFF,
+    )
+}
+
+pub fn build_textured_render_sections_for_section_set_with_stats_and_options(
+    inputs: &[TexturedChunkMeshInput<'_>],
+    catalog: &TexturedMeshCatalog,
+    target_sections: &BTreeSet<RenderSectionKey>,
+    options: TexturedRenderSectionBuildOptions,
+) -> Result<TexturedRenderSectionBuildReport, TexturedMeshError> {
+    build_textured_render_sections_for_chunks(inputs, catalog, None, Some(target_sections), options)
 }
 
 fn build_textured_render_sections_for_chunks(
@@ -271,6 +321,7 @@ fn build_textured_render_sections_for_chunks(
     catalog: &TexturedMeshCatalog,
     target_chunks: Option<&BTreeSet<(i32, i32)>>,
     target_sections: Option<&BTreeSet<RenderSectionKey>>,
+    options: TexturedRenderSectionBuildOptions,
 ) -> Result<TexturedRenderSectionBuildReport, TexturedMeshError> {
     let mut sections = Vec::new();
     let mut visibility_graph = VisibilityGraphBuildStats::default();
@@ -293,6 +344,7 @@ fn build_textured_render_sections_for_chunks(
                 sections.push(TexturedRenderSectionMesh {
                     key,
                     mesh: TexturedVisibleChunkMesh::default(),
+                    grass_patches: Vec::new(),
                     visibility: VisibilitySet::all_visible(),
                 });
                 continue;
@@ -310,9 +362,22 @@ fn build_textured_render_sections_for_chunks(
                 local_y_start,
                 local_y_end,
             )?;
+            let grass_patches = if options.grass_patches {
+                discover_grass_patches(
+                    *input,
+                    inputs,
+                    catalog,
+                    local_y_start,
+                    local_y_end,
+                    options.topology,
+                )
+            } else {
+                Vec::new()
+            };
             sections.push(TexturedRenderSectionMesh {
                 key,
                 mesh,
+                grass_patches,
                 visibility,
             });
         }
@@ -321,6 +386,81 @@ fn build_textured_render_sections_for_chunks(
         sections,
         visibility_graph,
     })
+}
+
+fn discover_grass_patches(
+    input: TexturedChunkMeshInput<'_>,
+    area: &[TexturedChunkMeshInput<'_>],
+    catalog: &TexturedMeshCatalog,
+    local_y_start: i32,
+    local_y_end: i32,
+    topology: HorizontalTopology,
+) -> Vec<GrassPatch> {
+    let world_origin_x = chunk_min_block_coord(input.chunk_x);
+    let world_origin_z = chunk_min_block_coord(input.chunk_z);
+    let mut patches = Vec::new();
+
+    for local_y in local_y_start..local_y_end {
+        for local_z in 0..CHUNK_WIDTH {
+            for local_x in 0..CHUNK_WIDTH {
+                let state_id = input.block_at_or_air(local_x, local_y, local_z);
+                if !catalog.is_grass_patch_surface(state_id) {
+                    continue;
+                }
+                let world_x = world_origin_x + local_x;
+                let world_y = input.min_y + local_y;
+                let world_z = world_origin_z + local_z;
+                let above = block_state_at_world_or_air(area, world_x, world_y + 1, world_z);
+                if catalog.occludes(above) {
+                    continue;
+                }
+                let canonical = topology
+                    .canonicalize_block(CoreBlockPos::new(world_x, world_y, world_z))
+                    .unwrap_or(CoreBlockPos::new(world_x, world_y, world_z));
+                let tint = block_tint(
+                    catalog,
+                    crate::catalog::TexturedBlockTint::Grass,
+                    world_x,
+                    world_y,
+                    world_z,
+                    |x, y, z| biome_id_at_world_or_default(area, x, y, z),
+                );
+                patches.push(GrassPatch {
+                    root: [world_x, world_y + 1, world_z],
+                    packed_tint: pack_rgb8(tint),
+                    packed_light: packed_light_at_world_or_fullbright(
+                        area,
+                        world_x,
+                        world_y + 1,
+                        world_z,
+                    ),
+                    seed: fold_position_hash(stable_position_hash(
+                        canonical.x,
+                        canonical.y,
+                        canonical.z,
+                    )),
+                    flags: 0,
+                    reserved: 0,
+                });
+            }
+        }
+    }
+
+    patches
+}
+
+fn pack_rgb8(color: [f32; 3]) -> u32 {
+    color
+        .into_iter()
+        .enumerate()
+        .fold(0, |packed, (shift, value)| {
+            let channel = (value.clamp(0.0, 1.0) * 255.0).round() as u32;
+            packed | channel << (shift * 8)
+        })
+}
+
+fn fold_position_hash(hash: u64) -> u32 {
+    (hash as u32) ^ (hash >> 32) as u32
 }
 
 fn build_textured_section_visibility(

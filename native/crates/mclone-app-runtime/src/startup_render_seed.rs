@@ -122,6 +122,7 @@ mod tests {
                 solid_index_count: 6,
                 opaque_index_count: 6,
             },
+            grass_patches: Vec::new(),
             visibility: VisibilitySet::all_visible(),
         }
     }
@@ -130,6 +131,7 @@ mod tests {
         TexturedRenderSectionMesh {
             key: k,
             mesh: TexturedVisibleChunkMesh::default(),
+            grass_patches: Vec::new(),
             visibility: VisibilitySet::all_visible(),
         }
     }

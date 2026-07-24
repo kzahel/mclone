@@ -116,6 +116,7 @@ fn cached_sections_retain_metadata_without_owning_cpu_mesh_bytes() {
             solid_index_count: 6,
             opaque_index_count: 6,
         },
+        grass_patches: Vec::new(),
         visibility: VisibilitySet::all_visible(),
     };
 
@@ -135,6 +136,7 @@ fn cached_sections_retain_metadata_without_owning_cpu_mesh_bytes() {
         resident_section_count: 1,
         resident_vertex_count: 1,
         resident_index_count: 6,
+        resident_grass_patch_count: 0,
         resident_mesh_owned_bytes: 0,
     };
     assert_eq!(cache.resident_mesh_stats(), expected);
@@ -275,6 +277,7 @@ fn render_section_session_owns_dirty_compile_and_cache_updates() {
                             solid_index_count: 1,
                             opaque_index_count: 1,
                         },
+                        grass_patches: Vec::new(),
                         visibility: VisibilitySet::all_visible(),
                     }],
                     visibility_graph: VisibilityGraphBuildStats::default(),
@@ -323,6 +326,7 @@ fn render_section_session_collects_known_keys_and_requeues_stale_sections() {
             sections: vec![TexturedRenderSectionMesh {
                 key: cached,
                 mesh: TexturedVisibleChunkMesh::default(),
+                grass_patches: Vec::new(),
                 visibility: VisibilitySet::all_visible(),
             }],
             visibility_graph: VisibilityGraphBuildStats::default(),

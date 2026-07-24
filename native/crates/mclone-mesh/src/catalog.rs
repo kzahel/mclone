@@ -188,6 +188,7 @@ pub struct TexturedBlockModel {
     pub faces: Vec<TexturedBlockFace>,
     pub fluid: Option<TexturedFluidModel>,
     pub leaf_cards: Option<TexturedLeafCardModel>,
+    pub grass_patch_surface: bool,
     pub render_layer: TexturedTerrainRenderLayer,
     pub occludes: bool,
     pub ambient_occlusion: bool,
@@ -324,6 +325,7 @@ impl TexturedMeshCatalog {
                     faces,
                     fluid,
                     leaf_cards,
+                    grass_patch_surface: record.block.path() == "grass_block",
                     render_layer: textured_terrain_render_layer(
                         record.block.path(),
                         facts.solid_render,
@@ -435,6 +437,7 @@ impl TexturedMeshCatalog {
                     faces,
                     fluid,
                     leaf_cards,
+                    grass_patch_surface: record.block.path() == "grass_block",
                     render_layer,
                     occludes: facts.occludes,
                     ambient_occlusion,
@@ -505,6 +508,12 @@ impl TexturedMeshCatalog {
         self.blocks
             .get(&state_id)
             .is_some_and(|model| model.leaf_cards.is_some())
+    }
+
+    pub(crate) fn is_grass_patch_surface(&self, state_id: BlockStateId) -> bool {
+        self.blocks
+            .get(&state_id)
+            .is_some_and(|model| model.grass_patch_surface)
     }
 
     pub(crate) fn light_block(&self, state_id: BlockStateId) -> u8 {

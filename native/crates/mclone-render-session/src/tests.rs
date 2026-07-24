@@ -37,6 +37,7 @@ fn test_build_report(
             .map(|key| TexturedRenderSectionMesh {
                 key,
                 mesh: TexturedVisibleChunkMesh::default(),
+                grass_patches: Vec::new(),
                 visibility: VisibilitySet::all_visible(),
             })
             .collect(),

@@ -13,9 +13,11 @@ use mclone_core::BlockStateId;
 
 pub use builder::{
     BUSHY_LEAF_CARD_OVERHANG, ChunkMeshInput, TexturedChunkMeshInput,
-    build_textured_render_sections, build_textured_render_sections_for_chunk_set,
+    TexturedRenderSectionBuildOptions, build_textured_render_sections,
+    build_textured_render_sections_for_chunk_set,
     build_textured_render_sections_for_chunk_set_with_stats,
     build_textured_render_sections_for_section_set_with_stats,
+    build_textured_render_sections_for_section_set_with_stats_and_options,
     build_textured_render_sections_with_stats, build_textured_visible_chunk_area_mesh,
     build_textured_visible_chunk_mesh, build_visible_chunk_area_mesh, build_visible_chunk_mesh,
 };
@@ -25,7 +27,7 @@ pub use catalog::{
     TexturedMeshCatalog, TexturedMeshError, TexturedTerrainRenderLayer,
 };
 pub use data::{
-    ChunkVertex, RenderSectionKey, SectionMeshStats, TexturedChunkVertex,
+    ChunkVertex, GrassPatch, RenderSectionKey, SectionMeshStats, TexturedChunkVertex,
     TexturedRenderSectionBuildReport, TexturedRenderSectionMesh, TexturedRenderSectionMetadata,
     TexturedVisibleChunkMesh, VisibilityGraphBuildStats, VisibleChunkMesh,
     quad_face_count_from_indices,

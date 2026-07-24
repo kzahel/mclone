@@ -59,6 +59,27 @@ pub struct TexturedChunkVertex {
     pub packed_light: u32,
 }
 
+/// Compact, section-owned presentation root for dense grass rendering.
+///
+/// Integer world coordinates retain exact identity at large and negative
+/// positions. `root[1]` is the exposed top surface, one block above the
+/// qualifying grass block. The explicit reserved word keeps the CPU/worker/GPU
+/// ABI at 32 bytes while leaving room for an additive presentation fact.
+#[repr(C)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct GrassPatch {
+    pub root: [i32; 3],
+    pub packed_tint: u32,
+    pub packed_light: u32,
+    pub seed: u32,
+    pub flags: u32,
+    pub reserved: u32,
+}
+
+impl GrassPatch {
+    pub const BYTE_SIZE: usize = 32;
+}
+
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TexturedVisibleChunkMesh {
     pub vertices: Vec<TexturedChunkVertex>,
@@ -160,6 +181,7 @@ impl RenderSectionKey {
 pub struct TexturedRenderSectionMesh {
     pub key: RenderSectionKey,
     pub mesh: TexturedVisibleChunkMesh,
+    pub grass_patches: Vec<GrassPatch>,
     pub visibility: VisibilitySet,
 }
 
@@ -169,7 +191,11 @@ impl TexturedRenderSectionMesh {
     }
 
     pub fn estimated_owned_bytes(&self) -> usize {
-        self.mesh.estimated_owned_bytes()
+        self.mesh.estimated_owned_bytes().saturating_add(
+            self.grass_patches
+                .capacity()
+                .saturating_mul(std::mem::size_of::<GrassPatch>()),
+        )
     }
 
     pub fn stats(&self) -> SectionMeshStats {
@@ -185,6 +211,7 @@ impl TexturedRenderSectionMesh {
             visibility: self.visibility,
             stats: self.mesh.stats(),
             drawable: !self.mesh.is_empty(),
+            grass_patch_count: self.grass_patches.len() as u32,
         }
     }
 }
@@ -198,6 +225,7 @@ pub struct TexturedRenderSectionMetadata {
     pub visibility: VisibilitySet,
     pub stats: SectionMeshStats,
     pub drawable: bool,
+    pub grass_patch_count: u32,
 }
 
 impl TexturedRenderSectionMetadata {

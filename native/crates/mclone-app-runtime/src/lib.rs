@@ -3291,6 +3291,7 @@ mod tests {
                     .map(|key| mclone_mesh::TexturedRenderSectionMesh {
                         key,
                         mesh: mclone_mesh::TexturedVisibleChunkMesh::default(),
+                        grass_patches: Vec::new(),
                         visibility: mclone_mesh::VisibilitySet::all_visible(),
                     })
                     .collect(),

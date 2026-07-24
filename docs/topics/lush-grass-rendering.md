@@ -2,7 +2,7 @@
 
 Topic: `lush-grass-rendering`
 
-Status: research complete; implementation not started.
+Status: implementation active; tactical and Off baseline complete.
 
 ## Scope
 
@@ -29,8 +29,36 @@ the two effects. Grass and leaves may eventually share world-space wind facts,
 but they should not share eligibility, geometry caches, or a mandatory on/off
 switch.
 
-No implementation is present yet. Future work should create a bounded tactical
-before changing runtime behavior.
+Implementation is governed by
+[`../tactical/238-lush-grass-rendering.md`](../tactical/238-lush-grass-rendering.md).
+The shared patch artifact and worker ABI are the first active slice; every
+runtime still requests `Off` until the renderer and shared setting host land.
+
+## 2026-07-24 Off Baseline
+
+The baseline was captured from tactical commit `70a74978` before an enabled
+grass path existed. Existing unrelated documentation edits made the worktree
+dirty; the executable and source revision were otherwise fixed.
+
+- `pnpm --silent native:desktop-offscreen:smoke`: `64` resident sections,
+  `12` drawn sections, `0` GUI commands, `2` drawn actors. The inspected
+  `/tmp/mclone-desktop-offscreen.png` showed the expected grass-block terrain
+  with no presentation blades.
+- `pnpm --silent native:xr-emulation:smoke`: `42` resident sections, `8` drawn
+  sections, `249,588` differing eye pixels, `32` GUI commands, and `2` eye UI
+  composites. The inspected side-by-side image had coherent terrain and
+  ordinary binocular disparity.
+- `pnpm --silent native:timedemo:smoke`: `1,936` compiled sections,
+  `2,084,964` vertices, `521,241` faces, `664` loaded sections, `309.300`
+  average drawn sections, and `3.539 ms` average frame time across `60`
+  debug-optimized frames. This is a conservation baseline, not a release GPU
+  performance claim.
+- Grass patch, resident, upload, draw, template, wind, and interaction counts
+  are all structurally zero because no such runtime resource existed.
+
+The initial implementation preserves that Off result by carrying an explicit
+request bit through both native and browser compilers. An Off request never
+calls patch discovery and serializes no patch payload.
 
 ## Attribution And External References
 

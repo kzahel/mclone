@@ -2593,6 +2593,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         TexturedRenderSectionMesh {
             key: RenderSectionKey::new(0, 0, 0),
             mesh,
+            grass_patches: Vec::new(),
             visibility: VisibilitySet::all_visible(),
         }
     }
@@ -2615,6 +2616,7 @@ fn fs_main(in: VertexOut) -> @location(0) vec4<f32> {
         TexturedRenderSectionMesh {
             key: RenderSectionKey::new(0, 0, 0),
             mesh,
+            grass_patches: Vec::new(),
             visibility: VisibilitySet::all_visible(),
         }
     }

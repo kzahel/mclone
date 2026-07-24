@@ -56,6 +56,14 @@ fn packed_build_report_roundtrips_section_mesh_payload() {
                 solid_index_count: 1,
                 opaque_index_count: 1,
             },
+            grass_patches: vec![GrassPatch {
+                root: [-31, 81, 127],
+                packed_tint: 0x00ab_cdef,
+                packed_light: 0x00f0_0070,
+                seed: 0x1234_5678,
+                flags: 3,
+                reserved: 0,
+            }],
             visibility,
         }],
         visibility_graph: VisibilityGraphBuildStats {
@@ -74,6 +82,7 @@ fn packed_build_report_roundtrips_section_mesh_payload() {
     assert_eq!(summary.non_empty_section_count, 1);
     assert_eq!(summary.vertex_count, 2);
     assert_eq!(summary.index_count, 3);
+    assert_eq!(summary.grass_patch_count, 1);
 }
 
 #[test]

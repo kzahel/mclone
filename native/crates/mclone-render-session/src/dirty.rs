@@ -71,6 +71,7 @@ impl RenderSectionDirtyState {
             snapshots,
             biome_zoom_seed: None,
             topology: HorizontalTopology::UNBOUNDED,
+            grass_patches: false,
         }
     }
 

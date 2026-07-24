@@ -7,6 +7,7 @@ pub struct RenderSectionCompileRequest {
     pub snapshots: Vec<ChunkSnapshot>,
     pub biome_zoom_seed: Option<i64>,
     pub topology: HorizontalTopology,
+    pub grass_patches: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -27,6 +28,11 @@ impl RenderSectionCompileRequest {
 
     pub fn with_topology(mut self, topology: HorizontalTopology) -> Self {
         self.topology = topology;
+        self
+    }
+
+    pub fn with_grass_patches(mut self, grass_patches: bool) -> Self {
+        self.grass_patches = grass_patches;
         self
     }
 
@@ -415,6 +421,7 @@ impl<C> RenderSectionCompileRequestState<C> {
                 snapshots: Vec::new(),
                 biome_zoom_seed: None,
                 topology: HorizontalTopology::UNBOUNDED,
+                grass_patches: false,
             },
         )
     }
@@ -476,6 +483,7 @@ pub struct PackedRenderSectionBuildReportSummary {
     pub non_empty_section_count: usize,
     pub vertex_count: u32,
     pub index_count: u32,
+    pub grass_patch_count: u32,
     pub visibility_graph_stats: VisibilityGraphBuildStats,
 }
 
@@ -494,6 +502,7 @@ pub fn summarize_textured_render_section_build_report(
         ..PackedRenderSectionBuildReportSummary::default()
     };
     for section in &report.sections {
+        summary.grass_patch_count += section.grass_patches.len() as u32;
         if section.is_empty() {
             continue;
         }
@@ -523,6 +532,17 @@ pub fn encode_textured_render_section_build_report(
         write_u32(&mut out, section.mesh.indices.len() as u32);
         write_u32(&mut out, section.mesh.solid_index_count());
         write_u32(&mut out, section.mesh.opaque_index_count());
+        write_u32(&mut out, section.grass_patches.len() as u32);
+        for patch in &section.grass_patches {
+            for value in patch.root {
+                write_i32(&mut out, value);
+            }
+            write_u32(&mut out, patch.packed_tint);
+            write_u32(&mut out, patch.packed_light);
+            write_u32(&mut out, patch.seed);
+            write_u32(&mut out, patch.flags);
+            write_u32(&mut out, patch.reserved);
+        }
         for vertex in &section.mesh.vertices {
             for value in vertex.position {
                 write_f32(&mut out, value);
@@ -559,6 +579,18 @@ pub fn decode_textured_render_section_build_report(
         let index_count = reader.read_u32()? as usize;
         let solid_index_count = reader.read_u32()?;
         let opaque_index_count = reader.read_u32()?;
+        let grass_patch_count = reader.read_u32()? as usize;
+        let mut grass_patches = Vec::with_capacity(grass_patch_count);
+        for _ in 0..grass_patch_count {
+            grass_patches.push(GrassPatch {
+                root: [reader.read_i32()?, reader.read_i32()?, reader.read_i32()?],
+                packed_tint: reader.read_u32()?,
+                packed_light: reader.read_u32()?,
+                seed: reader.read_u32()?,
+                flags: reader.read_u32()?,
+                reserved: reader.read_u32()?,
+            });
+        }
         let mut vertices = Vec::with_capacity(vertex_count);
         for _ in 0..vertex_count {
             let position = [reader.read_f32()?, reader.read_f32()?, reader.read_f32()?];
@@ -589,6 +621,7 @@ pub fn decode_textured_render_section_build_report(
                 solid_index_count,
                 opaque_index_count,
             },
+            grass_patches,
             visibility,
         });
     }

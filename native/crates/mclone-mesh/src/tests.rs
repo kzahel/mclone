@@ -4,7 +4,7 @@ use mclone_assets::{
     AssetPath, BlockModelLibrary, BlockStateAssetIndex, BlockStateRecord, BlockStateRegistry,
     MemoryAssetSource, ModelFaceDirection, ResourceLocation, TextureAtlasPlan, TextureMaterial,
 };
-use mclone_core::{AIR_BLOCK_STATE_ID, PackedLightSection, chunk_block_index};
+use mclone_core::{AIR_BLOCK_STATE_ID, HorizontalTopology, PackedLightSection, chunk_block_index};
 use mclone_light::{DataLayer, FULL_BRIGHT, pack_light};
 use std::collections::BTreeSet;
 
@@ -51,16 +51,113 @@ fn textured_section_mesh_estimated_owned_bytes_tracks_vector_capacity() {
         solid_index_count: 3,
         opaque_index_count: 3,
     };
-    let expected_bytes =
+    let mesh_bytes =
         3 * std::mem::size_of::<TexturedChunkVertex>() + 7 * std::mem::size_of::<u32>();
-    assert_eq!(mesh.estimated_owned_bytes(), expected_bytes);
+    assert_eq!(mesh.estimated_owned_bytes(), mesh_bytes);
+
+    let mut grass_patches = Vec::with_capacity(5);
+    grass_patches.push(GrassPatch::default());
+    let expected_bytes = mesh_bytes + 5 * std::mem::size_of::<GrassPatch>();
 
     let section = TexturedRenderSectionMesh {
         key: RenderSectionKey::new(0, 4, 0),
         mesh,
+        grass_patches,
         visibility: VisibilitySet::all_visible(),
     };
     assert_eq!(section.estimated_owned_bytes(), expected_bytes);
+}
+
+#[test]
+fn grass_patch_layout_is_compact_and_stable() {
+    assert_eq!(std::mem::size_of::<GrassPatch>(), GrassPatch::BYTE_SIZE);
+    assert_eq!(GrassPatch::BYTE_SIZE, 32);
+    assert_eq!(std::mem::align_of::<GrassPatch>(), 4);
+}
+
+#[test]
+fn grass_patch_discovery_is_request_gated_and_surface_correct() {
+    let catalog = grass_textured_catalog();
+    let blocks = textured_chunk_blocks(16, &[(3, 4, 5, BlockStateId(1))]);
+    let input = TexturedChunkMeshInput::new(0, 0, 0, 16, &blocks);
+    let targets = BTreeSet::from([RenderSectionKey::new(0, 0, 0)]);
+
+    let off = build_textured_render_sections_for_section_set_with_stats_and_options(
+        &[input],
+        &catalog,
+        &targets,
+        TexturedRenderSectionBuildOptions::OFF,
+    )
+    .unwrap();
+    assert!(off.sections[0].grass_patches.is_empty());
+
+    let enabled = build_textured_render_sections_for_section_set_with_stats_and_options(
+        &[input],
+        &catalog,
+        &targets,
+        TexturedRenderSectionBuildOptions::OFF.with_grass_patches(true),
+    )
+    .unwrap();
+    let patch = enabled.sections[0].grass_patches.as_slice();
+    assert_eq!(patch.len(), 1);
+    assert_eq!(patch[0].root, [3, 5, 5]);
+    assert_ne!(patch[0].packed_tint, 0);
+    assert_eq!(patch[0].packed_light, FULL_BRIGHT);
+    assert_ne!(patch[0].seed, 0);
+    assert_eq!(patch[0].flags, 0);
+    assert_eq!(patch[0].reserved, 0);
+}
+
+#[test]
+fn covered_grass_at_a_section_boundary_emits_no_patch() {
+    let catalog = grass_textured_catalog();
+    let blocks = textured_chunk_blocks(
+        32,
+        &[(4, 15, 6, BlockStateId(1)), (4, 16, 6, BlockStateId(1))],
+    );
+    let input = TexturedChunkMeshInput::new(0, 0, 0, 32, &blocks);
+    let targets = BTreeSet::from([RenderSectionKey::new(0, 0, 0)]);
+    let report = build_textured_render_sections_for_section_set_with_stats_and_options(
+        &[input],
+        &catalog,
+        &targets,
+        TexturedRenderSectionBuildOptions::OFF.with_grass_patches(true),
+    )
+    .unwrap();
+
+    assert_eq!(report.sections.len(), 1);
+    assert!(report.sections[0].grass_patches.is_empty());
+}
+
+#[test]
+fn periodic_aliases_share_canonical_grass_seed() {
+    let catalog = grass_textured_catalog();
+    let blocks = textured_chunk_blocks(16, &[(1, 3, 7, BlockStateId(1))]);
+    let inputs = [
+        TexturedChunkMeshInput::new(0, 0, 0, 16, &blocks),
+        TexturedChunkMeshInput::new(32, 0, 0, 16, &blocks),
+    ];
+    let targets = BTreeSet::from([
+        RenderSectionKey::new(0, 0, 0),
+        RenderSectionKey::new(32, 0, 0),
+    ]);
+    let report = build_textured_render_sections_for_section_set_with_stats_and_options(
+        &inputs,
+        &catalog,
+        &targets,
+        TexturedRenderSectionBuildOptions::OFF
+            .with_grass_patches(true)
+            .with_topology(HorizontalTopology::cylinder_x(0, 32)),
+    )
+    .unwrap();
+
+    assert_eq!(report.sections.len(), 2);
+    let first = report.sections[0].grass_patches[0];
+    let alias = report.sections[1].grass_patches[0];
+    assert_eq!(first.seed, alias.seed);
+    assert_eq!(first.packed_tint, alias.packed_tint);
+    assert_eq!(first.root, [1, 4, 7]);
+    assert_eq!(alias.root, [513, 4, 7]);
 }
 
 fn textured_chunk_blocks(
@@ -79,18 +176,26 @@ fn stone_textured_catalog() -> TexturedMeshCatalog {
 }
 
 fn stone_textured_catalog_with_ambient_occlusion(ambient_occlusion: bool) -> TexturedMeshCatalog {
+    cube_textured_catalog("stone", ambient_occlusion)
+}
+
+fn grass_textured_catalog() -> TexturedMeshCatalog {
+    cube_textured_catalog("grass_block", true)
+}
+
+fn cube_textured_catalog(block_path: &str, ambient_occlusion: bool) -> TexturedMeshCatalog {
     let mut registry = BlockStateRegistry::new();
     registry
         .register(BlockStateRecord::new(
             BlockStateId(1),
-            ResourceLocation::parse("minecraft:stone").unwrap(),
+            ResourceLocation::new("minecraft", block_path).unwrap(),
             [] as [(&str, &str); 0],
         ))
         .unwrap();
     let mut source = MemoryAssetSource::new();
     source.insert_text(
-        AssetPath::new("assets/minecraft/blockstates/stone.json"),
-        r#"{"variants":{"":{"model":"minecraft:block/stone"}}}"#,
+        AssetPath::new(format!("assets/minecraft/blockstates/{block_path}.json")),
+        format!(r#"{{"variants":{{"":{{"model":"minecraft:block/{block_path}"}}}}}}"#),
     );
     source.insert_text(
         AssetPath::new("assets/minecraft/models/block/block.json"),
@@ -130,17 +235,21 @@ fn stone_textured_catalog_with_ambient_occlusion(ambient_occlusion: bool) -> Tex
         }"##,
     );
     source.insert_text(
-        AssetPath::new("assets/minecraft/models/block/stone.json"),
+        AssetPath::new(format!(
+            "assets/minecraft/models/block/{block_path}.json"
+        )),
         if ambient_occlusion {
-            r##"{"parent":"minecraft:block/cube_all","textures":{"all":"minecraft:block/stone"}}"##
-                .to_owned()
+            format!(
+                r##"{{"parent":"minecraft:block/cube_all","textures":{{"all":"minecraft:block/{block_path}"}}}}"##
+            )
         } else {
-            r##"{"ambientocclusion":false,"parent":"minecraft:block/cube_all","textures":{"all":"minecraft:block/stone"}}"##
-                .to_owned()
+            format!(
+                r##"{{"ambientocclusion":false,"parent":"minecraft:block/cube_all","textures":{{"all":"minecraft:block/{block_path}"}}}}"##
+            )
         },
     );
     source.insert(
-        AssetPath::new("assets/minecraft/textures/block/stone.png"),
+        AssetPath::new(format!("assets/minecraft/textures/block/{block_path}.png")),
         png_header(16, 16),
     );
 

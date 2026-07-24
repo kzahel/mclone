@@ -417,6 +417,7 @@ fn render_section_sync_update_applies_removals_for_native_style_sync() {
             sections: vec![TexturedRenderSectionMesh {
                 key: cached,
                 mesh: TexturedVisibleChunkMesh::default(),
+                grass_patches: Vec::new(),
                 visibility: VisibilitySet::all_visible(),
             }],
             visibility_graph: VisibilityGraphBuildStats::default(),
@@ -466,6 +467,7 @@ fn render_section_sync_update_can_defer_removals_for_combined_web_uploads() {
             sections: vec![TexturedRenderSectionMesh {
                 key: cached,
                 mesh: TexturedVisibleChunkMesh::default(),
+                grass_patches: Vec::new(),
                 visibility: VisibilitySet::all_visible(),
             }],
             visibility_graph: VisibilityGraphBuildStats::default(),

@@ -49,6 +49,26 @@ pub fn build_render_sections_from_snapshots_with_biome_zoom_seed_and_topology<
     biome_zoom_seed: Option<i64>,
     topology: HorizontalTopology,
 ) -> Result<TexturedRenderSectionBuildReport> {
+    build_render_sections_from_snapshots_with_biome_zoom_seed_topology_and_grass(
+        snapshots,
+        catalog,
+        target_sections,
+        biome_zoom_seed,
+        topology,
+        false,
+    )
+}
+
+pub fn build_render_sections_from_snapshots_with_biome_zoom_seed_topology_and_grass<
+    S: std::borrow::Borrow<ChunkSnapshot>,
+>(
+    snapshots: &[S],
+    catalog: &TexturedMeshCatalog,
+    target_sections: &BTreeSet<RenderSectionKey>,
+    biome_zoom_seed: Option<i64>,
+    topology: HorizontalTopology,
+    grass_patches: bool,
+) -> Result<TexturedRenderSectionBuildReport> {
     // Generic over `Borrow<ChunkSnapshot>` so a caller holding owned snapshots
     // (`&[ChunkSnapshot]`, desktop + the web full-view helpers) and one holding borrowed
     // snapshots (`&[&ChunkSnapshot]`, the web worker's resident mirror, 067 Stage 4) both
@@ -59,8 +79,15 @@ pub fn build_render_sections_from_snapshots_with_biome_zoom_seed_and_topology<
         .collect::<Result<Vec<_>>>()?;
     let inputs =
         textured_mesh_inputs_with_biome_zoom_seed_and_topology(&chunks, biome_zoom_seed, topology);
-    build_textured_render_sections_for_section_set_with_stats(&inputs, catalog, target_sections)
-        .context("failed to build queued textured render sections")
+    build_textured_render_sections_for_section_set_with_stats_and_options(
+        &inputs,
+        catalog,
+        target_sections,
+        TexturedRenderSectionBuildOptions::OFF
+            .with_topology(topology)
+            .with_grass_patches(grass_patches),
+    )
+    .context("failed to build queued textured render sections")
 }
 
 pub fn mesh_chunks_from_client(client: &ClientRuntime) -> Result<Vec<MeshChunkBlocks>> {

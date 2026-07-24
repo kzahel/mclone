@@ -7684,6 +7684,7 @@ mod tests {
                 solid_index_count: index_count as u32,
                 opaque_index_count: index_count as u32,
             },
+            grass_patches: Vec::new(),
             visibility,
         }
         .metadata()

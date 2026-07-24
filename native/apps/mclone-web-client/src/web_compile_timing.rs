@@ -103,6 +103,7 @@ pub struct WebCompileTiming {
     worker_visibility_graph_worst_ms: f64,
     worker_vertex_count: f64,
     worker_index_count: f64,
+    worker_grass_patch_count: f64,
     worker_face_count: f64,
     max_frame_gap_ms: f64,
     frame_count_before: f64,
@@ -206,6 +207,7 @@ impl WebCompileTiming {
             worker_visibility_graph_worst_ms: 0.0,
             worker_vertex_count: 0.0,
             worker_index_count: 0.0,
+            worker_grass_patch_count: 0.0,
             worker_face_count: 0.0,
             max_frame_gap_ms: 0.0,
             frame_count_before,
@@ -347,6 +349,7 @@ impl WebCompileTiming {
         self.worker_visibility_graph_worst_ms = coerce_number(&summary, "visibilityGraphWorstMs");
         self.worker_vertex_count = coerce_number(&summary, "vertexCount");
         self.worker_index_count = coerce_number(&summary, "indexCount");
+        self.worker_grass_patch_count = coerce_number(&summary, "grassPatchCount");
         self.worker_face_count = coerce_number(&summary, "faceCount");
     }
 
@@ -741,6 +744,11 @@ impl WebCompileTiming {
         )?;
         set_number(&object, "workerVertexCount", self.worker_vertex_count)?;
         set_number(&object, "workerIndexCount", self.worker_index_count)?;
+        set_number(
+            &object,
+            "workerGrassPatchCount",
+            self.worker_grass_patch_count,
+        )?;
         set_number(&object, "workerFaceCount", self.worker_face_count)?;
         set_number(
             &object,

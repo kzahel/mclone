@@ -502,6 +502,7 @@ fn fixture_section(palette: FixturePalette) -> TexturedRenderSectionMesh {
     TexturedRenderSectionMesh {
         key: RenderSectionKey::new(0, 0, 0),
         mesh,
+        grass_patches: Vec::new(),
         visibility: VisibilitySet::all_visible(),
     }
 }

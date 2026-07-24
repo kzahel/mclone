@@ -18,6 +18,7 @@ fn startup_seed_conversion_conserves_meshes_without_compile_releases() {
             solid_index_count: 6,
             opaque_index_count: 6,
         },
+        grass_patches: Vec::new(),
         visibility: VisibilitySet::all_visible(),
     };
     let empty = test_section_mesh(empty_key);
@@ -158,6 +159,7 @@ fn upload_coordinator_stats_track_pending_upload_mesh_bytes() {
             solid_index_count: 6,
             opaque_index_count: 6,
         },
+        grass_patches: Vec::new(),
         visibility: VisibilitySet::all_visible(),
     };
     let expected_owned_bytes = section.estimated_owned_bytes();

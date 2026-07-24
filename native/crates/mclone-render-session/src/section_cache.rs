@@ -5,6 +5,7 @@ pub struct RenderSectionResidentMeshStats {
     pub resident_section_count: usize,
     pub resident_vertex_count: u32,
     pub resident_index_count: u32,
+    pub resident_grass_patch_count: u32,
     pub resident_mesh_owned_bytes: usize,
 }
 
@@ -28,6 +29,7 @@ pub struct RenderSectionCacheUpdate {
     pub removed_section_keys: BTreeSet<RenderSectionKey>,
     pub rebuilt_vertex_count: u32,
     pub rebuilt_index_count: u32,
+    pub rebuilt_grass_patch_count: u32,
     pub neighbor_ready_section_count: usize,
     pub near_exception_section_count: usize,
     pub deferred_section_count: usize,
@@ -51,20 +53,23 @@ impl RenderSectionCacheUpdate {
     /// totals still describe the payload exactly for diagnostics and
     /// conservation checks.
     pub fn from_startup_seed(rebuilt_sections: Vec<TexturedRenderSectionMesh>) -> Self {
-        let (rebuilt_vertex_count, rebuilt_index_count) =
-            rebuilt_sections
-                .iter()
-                .fold((0_u32, 0_u32), |(vertices, indices), section| {
+        let (rebuilt_vertex_count, rebuilt_index_count, rebuilt_grass_patch_count) =
+            rebuilt_sections.iter().fold(
+                (0_u32, 0_u32, 0_u32),
+                |(vertices, indices, grass_patches), section| {
                     let stats = section.stats();
                     (
                         vertices.saturating_add(stats.vertex_count),
                         indices.saturating_add(stats.index_count),
+                        grass_patches.saturating_add(section.grass_patches.len() as u32),
                     )
-                });
+                },
+            );
         Self {
             rebuilt_sections,
             rebuilt_vertex_count,
             rebuilt_index_count,
+            rebuilt_grass_patch_count,
             ..Self::default()
         }
     }
@@ -86,6 +91,7 @@ impl RenderSectionCacheUpdate {
         self.removed_section_keys.extend(other.removed_section_keys);
         self.rebuilt_vertex_count += other.rebuilt_vertex_count;
         self.rebuilt_index_count += other.rebuilt_index_count;
+        self.rebuilt_grass_patch_count += other.rebuilt_grass_patch_count;
         self.neighbor_ready_section_count += other.neighbor_ready_section_count;
         self.near_exception_section_count += other.near_exception_section_count;
         self.deferred_section_count += other.deferred_section_count;
@@ -156,6 +162,9 @@ impl CachedTexturedRenderSections {
             stats.resident_index_count = stats
                 .resident_index_count
                 .saturating_add(section_stats.index_count);
+            stats.resident_grass_patch_count = stats
+                .resident_grass_patch_count
+                .saturating_add(metadata.grass_patch_count);
             // docs/tactical/163: the resident cache no longer owns vertex/index
             // vectors, so its retained CPU mesh byte pressure is zero. The
             // transient compile/upload payloads still carry those bytes and are
@@ -224,6 +233,7 @@ impl CachedTexturedRenderSections {
             removed_section_keys: resident_update.removed_tile_keys,
             rebuilt_vertex_count: 0,
             rebuilt_index_count: 0,
+            rebuilt_grass_patch_count: 0,
             visibility_graph_stats: rebuilt_report.visibility_graph,
             neighbor_ready_section_count: ready_section_keys.len(),
             completed_compile_section_count: ready_section_keys.len(),
@@ -235,6 +245,7 @@ impl CachedTexturedRenderSections {
             let stats = section.stats();
             report.rebuilt_vertex_count += stats.vertex_count;
             report.rebuilt_index_count += stats.index_count;
+            report.rebuilt_grass_patch_count += section.grass_patches.len() as u32;
         }
         report.resident_mesh_stats = Some(self.resident_mesh_stats());
         report
