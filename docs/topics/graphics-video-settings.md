@@ -3,8 +3,9 @@
 Topic: `graphics-video-settings`
 
 Status: active product and implementation ledger. The first live flat-screen
-graphics page and SteamOS automatic presentation profile are implemented.
-Graphics preferences, selectable output modes, adjustable GUI scale, and most
+graphics page, SteamOS automatic presentation profile, and first
+schema-versioned graphics preference are implemented. Selectable output modes,
+adjustable GUI scale, persistence for the other live rows, and most
 renderer-quality controls are not.
 
 ## Scope
@@ -31,7 +32,7 @@ are the source baseline for the inventory below.
 
 ## Current Product Behavior
 
-The shared Graphics page currently exposes ten rows:
+The shared Graphics page currently exposes eleven rows:
 
 | Setting | Current behavior | Runtime owner | Durable? |
 |---|---|---|---|
@@ -39,6 +40,7 @@ The shared Graphics page currently exposes ten rows:
 | World Resolution | Read-only internal 3D target extent | flat presentation host plus shared render path | derived, not stored |
 | World Scale | Live `Auto`, 50%, 67%, 75%, or 100% selection | shared typed action, desktop `HostEffects`, native flat surface | no; relaunch returns to `Auto` |
 | Section Occlusion | Live on/off renderer option | shared settings controller and scene/render host | no |
+| Leaf Detail | Live `Blocky` / `Bushy`; changes derived active-pack leaf geometry through a transactional asset epoch | shared catalog/compiler, settings controller, and scene | yes; schema-1 machine-local graphics preference |
 | Far LOD | Live on/off | shared settings controller and scene | no |
 | LOD Detail | Live Auto/fixed detail selection | shared settings controller and scene | no |
 | Far LOD Range | Live range slider | shared settings controller and scene | no |
@@ -112,10 +114,10 @@ when a panel is reopened rather than becoming a durable preference.
 
 ### Conclusion
 
-Mclone has real settings-persistence building blocks, but no general client
-settings document and no graphics-preference codec. Current graphics,
-movement, display, debug, frame-pacing, and audio choices are runtime state
-unless called out below.
+Mclone has feature-specific settings-persistence building blocks and now has a
+schema-1 graphics-preference codec. Its first and currently only field is Leaf
+Detail. Other graphics, movement, display, debug, frame-pacing, and audio
+choices remain runtime state unless called out below.
 
 The implemented model is deliberately feature-specific: shared Rust owns typed
 documents, schemas, defaults, validation, and reconciliation; platform code
@@ -127,6 +129,7 @@ semantics in a launcher.
 
 | Domain | Shared contract | Native storage | Browser storage | Actual save wiring |
 |---|---|---|---|---|
+| Graphics preferences | schema-1 `ClientGraphicsPreferences`, currently `Leaf Detail: Blocky/Bushy` | atomic `preferences/graphics-preferences.v1.json`, with an environment path override | `mclone.graphics.preferences.v1` in `localStorage` | loaded by desktop flat/XR, flat Android, Android XR, and web; saved only after a successful catalog/asset-epoch change |
 | Input preferences | schema-1 `ClientInputPreferences`: touch sensitivity/mode plus semantic controller preferences | atomic `preferences/input-preferences.v1.json`, with an environment path override | `mclone.input.preferences.v1` plus synchronized legacy touch keys in `localStorage` | loaded by desktop flat/XR, flat Android, Android XR, and web; touch changes are saved by flat Android and web |
 | Asset-pack selection | schema-1 logical pack-id set with availability reconciliation | atomic `preferences/asset-packs.v1.json`, with an environment path override | `mclone.assetPacks.v1` in `localStorage` | saved only after a successful asset-epoch apply; restored by interactive native and web hosts which configure pack discovery |
 | Local player profile | schema-1 stable local UUID, display name, and creation time | atomic `preferences/player-profile.v1.json`, with an environment path override | `mclone.playerProfile.v1` in `localStorage` | loaded or created at client/session startup; explicit identity reset replaces it |
@@ -149,8 +152,8 @@ Important limitations:
   page;
 - `ClientExperienceSettingsState` is a live reducer/projection, not a durable
   preferences object;
-- native Factory Reset removes registered input and asset-pack files before
-  replacing the local profile; and
+- native Factory Reset removes registered graphics, input, and asset-pack
+  files before replacing the local profile; and
 - web Factory Reset currently removes the asset-pack key and replaces the
   profile, but does **not** remove the versioned input document or its two
   legacy touch keys. That is a known correctness cleanup.
@@ -169,25 +172,27 @@ from the parent of the configured client-global world root:
 APP_ROOT/
   preferences/
     asset-packs.v1.json
+    graphics-preferences.v1.json
     input-preferences.v1.json
     player-profile.v1.json
   worlds/
 ```
 
 Android uses the same native-file codecs under its app-private root. Browser
-hosts adapt shared codecs to `localStorage`. Graphics preferences should follow
-the same app-global, machine-local shape and must not be stored inside an
-individual world.
+hosts adapt shared codecs to `localStorage`. Graphics preferences follow the
+same app-global, machine-local shape and are not stored inside an individual
+world.
 
-## Recommended Graphics-Preference Direction
+## Implemented Foundation And Expansion Direction
 
-Add a feature-specific, schema-versioned `ClientGraphicsPreferences` contract
-under `mclone-app-runtime`. Platform adapters should provide opaque storage;
-they must not choose graphics defaults, validate ranges, or interpret enum
+`mclone-app-runtime` now owns the feature-specific, schema-versioned
+`ClientGraphicsPreferences` contract. Platform adapters provide opaque storage;
+they do not choose graphics defaults, validate ranges, or interpret enum
 values.
 
-The first schema should cover only controls with working effects. A reasonable
-first slice is:
+Schema 1 deliberately began with only the working Leaf Detail effect. Expand
+it only with controls whose live effect and capability contract are complete.
+Likely next fields are:
 
 - world render scale mode;
 - render distance;
@@ -241,9 +246,9 @@ game-resolution envelope is not equivalent to changing a desktop monitor mode.
 The UI should present only choices the active host can honor and must preserve
 a safe `Auto`/native path across dock and undock.
 
-The graphics file/key must be added to explicit Factory Reset. The web input
-keys omitted by the current reset should be corrected in the same preference
-registry/cleanup slice so future documents are not forgotten one by one.
+The graphics file/key is registered with explicit Factory Reset. The web input
+keys omitted by the current reset should still be corrected so future
+documents are not forgotten one by one.
 
 ## Settings Inventory And Remaining Work
 
@@ -277,7 +282,7 @@ inventory is:
 | Mipmaps and texture filtering | absent control; define reload/apply cost and sampler ownership |
 | Entity shadows and entity distance | absent controls; require real renderer hooks |
 | Biome blend | absent control; requires renderer/mesh policy rather than a cosmetic row |
-| Leaf and grass detail | absent; keep `Leaf Detail: Blocky/Bushy` independent from `Grass Detail: Off/Sparse/Lush/Ultra`, then let a later overall quality preset project both; see [`bushy-leaf-rendering.md`](bushy-leaf-rendering.md) and [`lush-grass-rendering.md`](lush-grass-rendering.md) |
+| Leaf and grass detail | Leaf Detail is live, transactional, persisted, and defaults Blocky; Grass Detail remains absent and should add an independent field/effect before a later overall preset projects both; see [`bushy-leaf-rendering.md`](bushy-leaf-rendering.md) and [`lush-grass-rendering.md`](lush-grass-rendering.md) |
 | View bobbing | absent control |
 | Screen-effect and FOV-effect strength | absent controls; likely shared accessibility/presentation preferences |
 | Camera FOV | absent player control; likely Display or Accessibility rather than a Deck-only graphics row |
@@ -286,11 +291,12 @@ inventory is:
 
 ### Suggested implementation order
 
-1. Add the shared graphics preference codec, native atomic file adapter, web
-   key/value adapter, load/apply/save flow, Factory Reset registration, and
-   malformed/future-schema tests.
-2. Persist the already-live controls. Prove relaunch restoration on desktop,
-   browser, flat Android where supported, and SteamOS `Auto`/fixed behavior.
+1. Extend the existing graphics preference codec one working field at a time;
+   preserve its native/web adapters, accepted-effect save rule, Factory Reset
+   registration, and malformed/future-schema coverage.
+2. Persist the other already-live controls. Prove relaunch restoration on
+   desktop, browser, flat Android where supported, and SteamOS `Auto`/fixed
+   behavior.
 3. Add GUI Scale because it materially affects controller/touch readability
    and already has a shared automatic calculation.
 4. Add host video-mode capability enumeration, Display Mode, output
@@ -327,6 +333,8 @@ trackpad/controller scrolling.
 
 - shared settings reducer and capability projection:
   [`client_experience.rs`](../../native/crates/mclone-app-runtime/src/client_experience.rs)
+- implemented graphics preference model:
+  [`graphics_preferences.rs`](../../native/crates/mclone-app-runtime/src/graphics_preferences.rs)
 - existing input preference model:
   [`input_preferences.rs`](../../native/crates/mclone-app-runtime/src/input_preferences.rs)
 - existing asset-pack preference model:

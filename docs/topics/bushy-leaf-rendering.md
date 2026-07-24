@@ -2,7 +2,8 @@
 
 Topic: `bushy-leaf-rendering`
 
-Status: research complete; implementation not started.
+Status: implemented 2026-07-24; `Blocky` remains the default while physical
+Quest acceptance and broader hardware profiling remain open.
 
 ## Scope
 
@@ -18,13 +19,15 @@ be a client-side mclone presentation option: authoritative blocks, collision,
 lighting opacity, decay, persistence, protocol state, and world generation
 would remain unchanged.
 
-No runtime or asset implementation is present. Future work should begin with a
-bounded tactical and fresh performance evidence.
+The implementation record is
+[`tactical/231-bushy-leaf-rendering.md`](../tactical/231-bushy-leaf-rendering.md).
 
 ## Bottom Line
 
-Mclone does **not** need hand-painted bushy textures before it can implement
-this effect.
+Mclone does **not** need hand-painted bushy textures for this effect. The
+implemented path derives an original doubled sprite from each active square
+leaf texture in memory, then uses that sprite on two double-sided cards.
+Whichever pack supplied the leaf remains the art authority.
 
 There are three viable asset approaches:
 
@@ -45,6 +48,39 @@ leaf materials come from the generated fallback unless another selected pack
 supplies them. That distribution requirement is separate from the rendering
 technique. A derived sprite must inherit the provenance of its source texture;
 deriving Minecraft-reference pixels does not make them first-party content.
+
+## Implemented Mclone Contract
+
+The shipped shared contract is:
+
+- `LeafDetail::{Blocky, Bushy}` is catalog policy in `mclone-mesh`.
+- Every resolved square `_leaves` material receives an in-memory 2x derivative
+  made from the source pixels and an original analytic mask. No derived PNG is
+  checked in.
+- The ordinary cube keeps the source sprite. `Bushy` appends two double-sided
+  vertical cards, exactly four quads, using the derivative.
+- A stable world-position hash selects one of four original layouts.
+- A leaf with leaf neighbors on all six sides emits no decorative cards.
+- The cards use the ordinary foliage tint, packed light, cutout phase, section
+  mesh, and draw submission.
+- Ordinary and placed section culling bounds include the exact 0.25-block
+  overhang. Mono, flat multi-view, stereo/per-eye, and full-frame multiview all
+  consume that same resident mesh.
+- Far LOD is unchanged.
+
+`Leaf Detail: Blocky / Bushy` is a shared Graphics row. A change clones the
+active prepared bundle, changes catalog policy, rebuilds through the existing
+asset-epoch replacement, and commits only after replacement succeeds. Native
+preparation is background work; browser preparation uses the portable
+synchronous replacement implementation behind the same scene contract.
+
+Schema-1 `ClientGraphicsPreferences` currently owns only leaf detail. Native
+hosts use the atomic `graphics-preferences.v1.json` document, browser uses
+`mclone.graphics.preferences.v1` in `localStorage`, and Factory Reset removes
+both forms. Desktop flat/XR, flat Android, Android XR, and web restore the
+choice. Direct-to-world startup may replace its compile catalog before the
+first poll, so a stored Bushy choice affects the first compiled epoch rather
+than triggering a throwaway Blocky epoch.
 
 ## Sources And Pinned Evidence
 
@@ -202,7 +238,7 @@ implicitly or change vanilla-target base-leaf semantics as a side effect.
 Skipping only optional bush cards for provably enclosed leaves is a narrower
 optimization.
 
-## Existing Mclone Fit And Gaps
+## Existing Mclone Fit And Resolved Gaps
 
 Useful foundations:
 
@@ -219,21 +255,23 @@ Useful foundations:
 - Asset epochs and transactional replacement already bind one selected source
   chain, prepared atlas/catalog, compiler, and resident scene lifetime.
 
-Important gaps mean the Better Leaves ZIP is not a drop-in mclone feature:
+The research also established why the Better Leaves ZIP was not a drop-in
+mclone feature:
 
 - the Minecraft JSON adapter currently keeps only the first weighted blockstate
   variant instead of selecting a stable position-dependent variant;
 - the model parser supports blockstate rotations but not per-element model
   rotations, which the outer Better Leaves planes use;
-- the first-party visual catalog classifies leaves as ordinary solid cubes and
-  has no optional leaf-detail contract; and
-- a graphics-quality change that alters compiled leaf geometry needs a shared
-  background remesh/commit path rather than an app-local toggle.
+- the first-party visual catalog originally classified leaves as ordinary
+  solid cubes and had no optional leaf-detail contract; and
+- a graphics-quality change that alters compiled leaf geometry needed a shared
+  remesh/commit path rather than an app-local toggle.
 
-The feature should therefore be expressed as native shared mesh/asset policy,
-not by copying the external resource pack into one client target.
+The implementation deliberately bypasses those resource-model gaps: it is
+native shared mesh/asset policy, not a parser expansion or a copied external
+pack.
 
-## Recommended Mclone Direction
+## Implemented Design
 
 ### Asset preparation
 
@@ -250,14 +288,13 @@ committed in the same asset epoch as the source pack. Switching between
 Mclone Original, Vanilla Reference, Hybrid Authoring, or another future pack
 must never leave derivatives from the retired source in the active atlas.
 
-For a first visual proof, applying the ordinary leaf sprite directly to two
-large cards is acceptable. It will show whether the silhouette and render path
-are valuable before mask art is finalized. It should not be mistaken for the
-production-quality/performance result.
+The current analytic mask and four layout variants are the accepted first
+implementation. Further art-direction work may revise them, but bespoke
+species textures are not an engine prerequisite.
 
 ### Shared mesh compilation
 
-The simplest first production shape is:
+The implemented production shape is:
 
 1. identify supported leaf states in `mclone-mesh`;
 2. use the section halo to reject fully enclosed leaves;
@@ -273,8 +310,8 @@ renderer. It automatically follows the existing terrain mono/stereo/multiview
 contract. The section culling bounds must account for the maximum protrusion,
 especially for cards emitted by blocks on a section edge.
 
-If measurement shows baked-card memory, remesh latency, or distance control is
-unacceptable, the next option is a compact section-keyed
+If broader measurement later shows baked-card memory, remesh latency, or
+distance control is unacceptable, the next option is a compact section-keyed
 `BushyLeafInstance` artifact and shared instanced template. That would make a
 distance cutoff cheaper and reduce bytes per leaf, but it adds a new resident
 resource and draw path. Do not pay that complexity before the baked path is
@@ -299,7 +336,7 @@ cost and platform fit differ substantially:
 Do not require expensive grass to obtain bushy leaves, and do not disable a
 measured-cheap leaf silhouette merely because a platform defaults grass Off.
 A future overall Graphics Quality preset may project both settings after the
-individual runtime effects and preference fields exist:
+grass runtime effect and preference field exist:
 
 | Overall preset | Leaf Detail | Grass Detail |
 |---|---|---|
@@ -312,84 +349,103 @@ This table is a suggested projection, not a current product default. Manual
 edits should eventually make an overall preset report `Custom`, consistent
 with [`graphics-video-settings.md`](graphics-video-settings.md).
 
-Leaf Detail belongs in the planned machine-local
-`ClientGraphicsPreferences`, not world persistence or asset-pack selection.
-Platform profiles may supply different defaults while preserving an explicit
-player choice. A conservative initial policy is Blocky on Quest/mobile and no
-non-Blocky default anywhere until A/B evidence exists. Desktop, desktop XR,
-Steam Deck, browser, and mobile defaults should then be decided from their own
-measurements.
+Leaf Detail now lives in machine-local `ClientGraphicsPreferences`, not world
+persistence or asset-pack selection. Grass should add its own independent
+field to that existing document when implemented. `Blocky` remains the
+default on every platform; the current measurements do not justify changing
+that default on any profile.
 
-Changing Leaf Detail may require derived-asset preparation and section
-recompilation. Apply it transactionally in the background: keep the old
-drawable scene until the new compiler/atlas/sections are ready, commit at a
-shared frame boundary, persist only the accepted result, and retain the old
-setting/resources on failure.
+Changing Leaf Detail uses derived-asset preparation and section recompilation.
+The scene keeps the old drawable epoch until the replacement is ready, commits
+at a shared frame boundary, persists only the accepted result, and retains the
+old setting/resources on failure.
 
-## Suggested Implementation Sequence
+## Measured Closeout
 
-### Slice 0: visual and accounting proof
+The deterministic desktop comparison used seed 12345, RD2, frozen noon,
+1600x1000 output, and the same eye/target. Passive actors were disabled.
 
-- Create an original two-card layout and temporary derived-mask experiment
-  outside tracked runtime behavior.
-- Capture close, middle, and canopy-interior images using oak, birch, spruce,
-  dark oak, acacia, and jungle leaves.
-- Establish counters for total leaves, surface-admitted leaves, rejected
-  enclosed leaves, added quads/bytes, cutout draws, atlas dimensions, and
-  preparation/compile/upload timings.
+| Exact mono mesh fact | Blocky | Bushy | Delta |
+|---|---:|---:|---:|
+| resident sections | 64 | 64 | 0 |
+| drawn sections | 13 | 13 | 0 |
+| total faces | 63,892 | 72,288 | +8,396 / +13.14% |
+| total vertices | 255,568 | 289,152 | +33,584 |
+| total indices | 383,352 | 433,728 | +50,376 |
+| drawn faces | 15,454 | 20,638 | +5,184 / +33.55% |
+| drawn indices | 92,724 | 123,828 | +31,104 / +33.55% |
 
-### Slice 1: shared static geometry
+The exact +8,396 faces are 2,099 admitted surface leaves at four quads each.
+At the current 40-byte vertex and 32-bit index layout, the added raw section
+mesh is 1,544,864 bytes, exactly 736 bytes per admitted leaf. The fixed camera
+drew 1,296 of those admitted leaves.
 
-- Add Blocky/Bushy compilation policy to the shared owner.
-- Emit deterministic surface-only cards in the existing cutout mesh.
-- Preserve a zero-extra-geometry Blocky path.
-- Validate section-edge culling, lighting, tint, asset replacement, mono,
-  per-eye, and full-frame multiview at the first drawable milestone.
+Both policies produced a 1024x2048 atlas: 8,388,608 base bytes and 11,173,888
+bytes across five mip levels. Derivatives are prepared in both modes so a live
+change can be catalog-only; the six current leaf derivatives fit existing
+packing without increasing atlas dimensions or allocated bytes.
 
-### Slice 2: derived assets and setting
+The inspected Blocky and Bushy captures differ in 181,793 of 1,600,000 pixels
+(11.36%, ImageMagick RMSE 0.0717617). Bushy visibly changes the spruce canopy
+from regular cubes to a fuller irregular silhouette while retaining the
+active source art. The stereo capture is 1600x800, with two 800x800 eyes and
+392,174 differing eye pixels; both eyes show the cards with normal parallax.
 
-- Generate and provenance-track bushy sprites for the active asset epoch.
-- Add the shared Leaf Detail effect and eventual graphics-preference field.
-- Make live apply transactional and prove Blocky/Bushy/Blocky restoration in
-  one session without changing world state.
+A headed Wayland WebGPU app smoke restored a Bushy browser preference before
+Web Worker compilation, completed ordinary streaming/movement/block-edit and
+native-UI probes, and produced an inspected non-clear 1280x720 canvas with
+bushy foliage. The smoke harness accepts `--leaf-detail blocky|bushy` for
+repeatable captures.
 
-### Slice 3: measured optimization only if needed
+### Performance samples
 
-- Compare broader surface admission, baked geometry, compact instancing, and a
-  near-distance cutoff using actual bottleneck evidence.
-- Consider shared vegetation wind only after the static effect and lush-grass
-  base paths are independently accepted.
+These Linux-host samples characterize this scene, not every GPU:
 
-## Validation Expectations
+- Three warmed, frozen-runtime 960x600 RD2 timedemos had a median average frame
+  time of 0.506 ms Blocky versus 0.535 ms Bushy: +0.029 ms / +5.7%.
+- Average drawn indices in that lane were 284,233 versus 321,556: +13.13%.
+- One 240-frame movement sample measured 1.087 ms average / 1.847 ms p95
+  Blocky and 1.401 ms / 3.090 ms p95 Bushy. Render time rose from 0.173 to
+  0.238 ms and drawn indices by 10.62%.
+- A stationary-orbit sample was noisy enough to make Bushy appear faster.
+  Neither policy exceeded the 16.67 ms budget, all 240 frames were accounted,
+  and conservation violations were zero.
 
-An eventual implementation needs:
+The increased geometry and the noisy sub-millisecond host results support
+keeping `Blocky` as the default. They do not justify a more complex instanced
+path or stricter surface admission yet.
 
-- deterministic world-position layout selection;
-- eligibility tests across air, leaves, logs, solids, section boundaries, and
-  fully enclosed canopy cells;
-- exact Off/Blocky conservation and zero added-geometry counters;
-- foliage tint checks for ordinary, birch, spruce, swamp, and biome-boundary
-  cases;
-- asset-epoch tests proving derivatives follow selected source and provenance;
-- atlas dimension/mip inspection and close/far shimmer review;
-- section compile, upload, resident-byte, cutout GPU, overdraw, and movement
-  frame A/B evidence;
-- rendered mono, stereo, and full-frame multiview captures with expanded
-  section bounds; and
-- physical Quest evidence before any Bushy mobile/XR default.
+### Validation record
 
-Screenshots and temporary artifacts belong under `/tmp`, following the
-repository rendered-output guardrail.
+Passing gates include:
 
-## Open Decisions
+- 92 `mclone-mesh` tests, including generator, policy, exact face, layout, and
+  enclosed-leaf contracts;
+- 166 `mclone-render` tests, with eight GPU characterization tests ignored by
+  default;
+- 323 `mclone-app-runtime`, 153 `mclone-scene`, and 100 `mclone-ui` tests plus
+  scene integration suites;
+- native workspace checks and the native client all-target check;
+- exact mono and headset-free stereo captures inspected under `/tmp`;
+- wasm build, generated-glue typecheck, headed WebGPU worker-backed app smoke,
+  and inspected browser pixels;
+- flat Android debug APK and Android XR release APK builds.
 
-- The original mclone mask family and whether all leaf species share one shape.
-- Exact card count, dimensions, angles, and deterministic variation.
-- Whether source-pack preparation or a dedicated derived-material overlay is
-  the cleanest asset-epoch boundary.
-- Whether fully enclosed rejection is enough for dense-canopy overdraw.
-- Whether the first measured implementation should bake quads or begin with
-  compact instances.
-- The final player-facing name: `Leaf Detail`, `Leaf Shape`, or another clear
-  Blocky/Bushy label.
-- Platform defaults after representative A/B captures and frame probes.
+The ordinary cutout section mesh is shared by mono, per-eye, and full-frame
+multiview; no Bushy renderer or per-eye branch exists. The Android XR release
+build proves the full-frame multiview compile boundary. No Quest was attached,
+so physical headset pixels and timing remain open and are required before any
+mobile/XR default change.
+
+## Remaining Follow-up
+
+- Measure on representative Steam Deck, Android, desktop XR, and physical Quest
+  hardware before considering a non-Blocky platform default.
+- Revisit enclosed-only admission or compact instances only if those
+  measurements identify leaf geometry, memory, or cutout overdraw as a real
+  bottleneck.
+- Treat mask/layout art-direction changes as versioned generator work and keep
+  derivatives tied to source-pack provenance.
+- Keep any future world-space vegetation wind shared only at the deformation
+  fact level; leaf and grass settings, eligibility, and caches stay
+  independent.

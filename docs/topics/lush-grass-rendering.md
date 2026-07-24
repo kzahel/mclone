@@ -22,9 +22,12 @@ mono/stereo/multiview contracts.
 
 Bushy canopy geometry is a related but independent presentation concern.
 [`bushy-leaf-rendering.md`](bushy-leaf-rendering.md) records the Better Leaves
-research and recommends a separate `Leaf Detail: Blocky / Bushy` control.
-Grass and leaves may eventually share world-space wind facts, but they should
-not share eligibility, geometry caches, or a mandatory on/off switch.
+research and the implemented separate `Leaf Detail: Blocky / Bushy` control.
+Leaf Detail is now the first field in schema-1 `ClientGraphicsPreferences`;
+Grass Detail should add its own field to that document rather than coupling
+the two effects. Grass and leaves may eventually share world-space wind facts,
+but they should not share eligibility, geometry caches, or a mandatory on/off
+switch.
 
 No implementation is present yet. Future work should create a bounded tactical
 before changing runtime behavior.
@@ -525,8 +528,11 @@ Ultra based on the desktop GPU; “desktop-oriented” does not mean flat-only.
 Keep this `Grass Detail` profile independent from bushy `Leaf Detail`. Their
 cost scales differently, especially on Quest/mobile, so a player should be
 able to retain bushy leaves while reducing or disabling dense ground blades.
-A future overall Graphics Quality preset may project both only after both
-individual effects and their shared preference fields exist.
+A future overall Graphics Quality preset may project both only after Grass
+Detail has a real runtime effect and its independent graphics-preference
+field. The existing Leaf Detail implementation supplies the storage,
+accepted-effect save, native/web adapter, and Factory Reset pattern; it does
+not supply grass geometry, caches, defaults, or performance assumptions.
 
 Quest should remain Off by default. Instancing reduces CPU and buffer traffic,
 but does not remove stereo vertex work, fragment/overdraw pressure, or the

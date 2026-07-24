@@ -1,6 +1,6 @@
 # Tactical 231: Bushy Leaf Rendering
 
-Status: active implementation, opened 2026-07-24
+Status: completed 2026-07-24
 
 Topic: [`../topics/bushy-leaf-rendering.md`](../topics/bushy-leaf-rendering.md)
 
@@ -145,6 +145,51 @@ builds. Android and physical-XR validation may use their documented build/smoke
 lanes; unavailable hardware evidence stays explicitly open rather than being
 simulated.
 
+## Outcome
+
+The tactical shipped in these feature commits:
+
+- `42dd7da9` — active-pack derivatives, `LeafDetail` catalog policy, exact
+  surface-only cards, shared cutout topology, and inflated section culling;
+- `fcd89577` — shared Graphics row/effect, transactional replacement,
+  schema-1 machine-local preference, platform storage, and Factory Reset;
+- `2f6a5721` — first-poll local-startup catalog restoration and independent
+  desktop graphics-preference discovery; and
+- `f66a9183` — wasm action coverage and repeatable headed-browser Bushy smoke.
+
+The final implementation derives all six current leaf families from the active
+pack with no species-specific Bushy art. `Blocky` emits no decorative cards.
+`Bushy` emits four quads per admitted leaf and rejects six-neighbor enclosed
+leaves. The active selection persists on desktop flat/XR, flat Android,
+Android XR, and web.
+
+Inspected captures:
+
+- `/tmp/mclone-bushy-leaves-blocky.png`
+- `/tmp/mclone-bushy-leaves-bushy.png`
+- `/tmp/mclone-bushy-leaves-stereo.png`
+- `/tmp/mclone-bushy-leaves-web-canvas.png`
+
+The exact mono scene added 8,396 faces, 33,584 vertices, 50,376 indices, and
+1,544,864 raw mesh bytes for 2,099 admitted leaves. The atlas stayed
+1024x2048 with the same 11,173,888 mip-inclusive bytes. The fixed-camera
+captures changed 11.36% of pixels.
+
+Three warmed frozen-runtime timedemos measured a median 0.506 ms Blocky versus
+0.535 ms Bushy (+0.029 ms / +5.7%) and +13.13% average drawn indices. A
+240-frame movement sample measured 1.087 ms versus 1.401 ms average, while a
+stationary sample showed enough sub-millisecond noise to reverse the apparent
+winner. Both modes stayed below the 16.67 ms budget with complete accounting.
+`Blocky` therefore remains the default everywhere.
+
+Passing closeout gates covered the focused mesh/render/UI/runtime/scene suites,
+native all-target and workspace checks, mono and synthetic stereo pixels, wasm
+build/typecheck, headed WebGPU worker-backed app pixels, flat Android APK, and
+Android XR APK. The same ordinary section mesh feeds full-frame multiview, and
+the Android XR target compiles that boundary. No Quest was attached; physical
+headset pixels/timing remain a living-topic follow-up and are required before
+changing a mobile/XR default.
+
 ## Completion conditions
 
 - The generated silhouette is visibly original and not a traced source mask.
@@ -158,4 +203,3 @@ simulated.
   renderer code all consume the same mesh contract.
 - Captured pixels are inspected before closeout, and the topic document records
   measured costs plus the final default decision.
-
