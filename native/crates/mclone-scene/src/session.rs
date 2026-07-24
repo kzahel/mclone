@@ -1089,6 +1089,24 @@ impl McloneSceneHost {
         self.start_pending_session(device, queue)
     }
 
+    /// Start an explicit native local-world destination at its adapter-owned
+    /// storage path.
+    ///
+    /// The path stays out of `SessionStartRequest`: entry destination and
+    /// platform storage configuration are separate launch axes. Callers must
+    /// use the ordinary method when no direct native path was supplied.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn start_session_for_request_with_native_world_dir(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        request: SessionStartRequest,
+        world_dir: &std::path::Path,
+    ) -> Result<bool> {
+        self.request_session_start_with_native_world_dir(request, Some(world_dir))?;
+        self.start_pending_session(device, queue)
+    }
+
     #[cfg(target_arch = "wasm32")]
     pub fn start_session_for_request(
         &mut self,
@@ -1631,9 +1649,23 @@ impl McloneSceneHost {
 
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn request_session_start(&mut self, request: SessionStartRequest) -> Result<()> {
+        self.request_session_start_with_native_world_dir(request, None)
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn request_session_start_with_native_world_dir(
+        &mut self,
+        request: SessionStartRequest,
+        native_world_dir: Option<&std::path::Path>,
+    ) -> Result<()> {
         let plan = plan_session_start(
             request,
-            |options| Ok(self.local_world_options(options)),
+            |options| {
+                Ok(bind_native_entry_world_dir(
+                    self.local_world_options(options),
+                    native_world_dir,
+                ))
+            },
             |id| {
                 let summary = self
                     .client_experience
@@ -6548,6 +6580,17 @@ pub(crate) fn normalized_xr_remote_addr(addr: &str) -> String {
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn bind_native_entry_world_dir(
+    mut scene: McloneSceneHostOptions,
+    world_dir: Option<&std::path::Path>,
+) -> McloneSceneHostOptions {
+    if let Some(world_dir) = world_dir {
+        scene.world_dir = Some(world_dir.to_owned());
+    }
+    scene
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn local_integrated_scene_options(
     scene: &McloneSceneHostOptions,
 ) -> LocalIntegratedSceneOptions {
@@ -6686,6 +6729,17 @@ pub(crate) fn active_session_label(session: Option<&ActiveSessionDescriptor>) ->
 mod camera_config_tests {
     use super::*;
     use mclone_server::WorldGenerationProfile;
+
+    #[test]
+    #[cfg(not(target_arch = "wasm32"))]
+    fn direct_native_entry_binds_the_requested_world_directory() {
+        let scene = bind_native_entry_world_dir(
+            McloneSceneHostOptions::default(),
+            Some(std::path::Path::new("/worlds/direct-save")),
+        );
+
+        assert_eq!(scene.world_dir, Some(PathBuf::from("/worlds/direct-save")));
+    }
 
     #[test]
     fn private_lobby_fallback_reuses_the_legacy_storage_location() {

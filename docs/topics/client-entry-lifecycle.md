@@ -203,8 +203,30 @@ proves that the title remains `static-ui` with no additional product frame
 during a 500 ms idle window. The x86_64 Android AVD renders the same title and
 passes its lifecycle smoke after the cadence change. The active-session browser
 smoke and arm64 Android APK build also pass. Physical Steam Deck CPU evidence is
-still required below because host-side builds cannot substitute for Gamescope,
-Steam Input, and Deck power behavior.
+recorded below because host-side builds cannot substitute for Gamescope, Steam
+Input, and Deck power behavior.
+
+The pinned SteamRT4 payload was then built from a clean worktree containing
+commit `2d4bbc6d` and deployed through the managed Devkit path. On the physical
+Steam Deck it launched exactly
+`mclone-native-client --platform-profile steamos --menu`, owned no child
+process, and rendered an inspected 1280x800 Gamescope title capture. A
+ten-second sample used 1.80% of one logical CPU; a later thirty-second sample
+used 1.73%. RSS stayed exactly 98,024 KiB and `VmData` exactly 171,796 KiB
+across both samples. This is approximately 0.22% aggregate CPU over the Deck's
+eight logical CPUs. The SteamRT4 binary SHA-256 was
+`60c79823424fb6a81ce061073723c2008574263fba6cd7f1141435fe8ae0b70d`.
+
+Direct native saved-world launch keeps its path on the separate startup
+configuration axis. The shared `SessionStartRequest` remains path-free, while
+the four native adapters bind an explicitly supplied world directory when
+executing the initial local-session effect. A native scene unit test locks that
+binding; desktop-XR feature compilation and both flat-Android and Android-XR
+APK builds pass. A local live launch also created its SQLite world store at the
+exact requested directory. Host compositor automation did not deliver redraw
+callbacks to that standalone window, so the finite window-report portion was
+terminated after the persistent store evidence appeared rather than treated
+as rendered-output acceptance.
 
 ## Baseline Sanity Contract
 

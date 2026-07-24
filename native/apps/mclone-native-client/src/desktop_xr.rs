@@ -851,6 +851,7 @@ fn create_mclone_terrain_state(
         options.underwater_mode,
         options.debug_ui_screen,
     )?;
+    let entry_world_dir = scene.world_dir.clone();
     let asset_pack_world_root = scene.world_root.clone();
     let startup_view_pose = options.view_pose.map(|view_pose| XrStartupViewPose {
         position: view_pose.position,
@@ -908,7 +909,13 @@ fn create_mclone_terrain_state(
             state.set_client_entry_status(status);
         }
         ClientEntryEffect::StartSession(request) => {
-            state.start_session_for_request(device, queue, request)?;
+            if let Some(world_dir) = entry_world_dir.as_deref() {
+                state.start_session_for_request_with_native_world_dir(
+                    device, queue, request, world_dir,
+                )?;
+            } else {
+                state.start_session_for_request(device, queue, request)?;
+            }
         }
         ClientEntryEffect::LaunchScenario(intent) => {
             state.begin_lobby_launch(intent)?;

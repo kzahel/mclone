@@ -2158,6 +2158,7 @@ mod android {
             mclone_app_runtime::asset_pack_preferences::native_asset_pack_preference_path(
                 scene_options.world_root.as_deref(),
             );
+        let entry_world_dir = scene_options.world_dir.clone();
         let mut terrain = McloneSceneHost::start_native_without_session(
             device,
             queue,
@@ -2218,7 +2219,13 @@ mod android {
                 terrain.set_client_entry_status(status);
             }
             ClientEntryEffect::StartSession(request) => {
-                terrain.start_session_for_request(device, queue, request)?;
+                if let Some(world_dir) = entry_world_dir.as_deref() {
+                    terrain.start_session_for_request_with_native_world_dir(
+                        device, queue, request, world_dir,
+                    )?;
+                } else {
+                    terrain.start_session_for_request(device, queue, request)?;
+                }
             }
             ClientEntryEffect::LaunchScenario(intent) => {
                 terrain.begin_lobby_launch(intent)?;

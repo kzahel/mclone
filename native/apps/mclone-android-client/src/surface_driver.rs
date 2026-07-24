@@ -575,7 +575,13 @@ impl AndroidGpuState {
                 host.set_client_entry_status(status);
             }
             ClientEntryEffect::StartSession(request) => {
-                host.start_session_for_request(&device, &queue, request)?;
+                if let Some(world_dir) = startup.scene.world_dir.as_deref() {
+                    host.start_session_for_request_with_native_world_dir(
+                        &device, &queue, request, world_dir,
+                    )?;
+                } else {
+                    host.start_session_for_request(&device, &queue, request)?;
+                }
             }
             ClientEntryEffect::LaunchScenario(intent) => {
                 host.begin_lobby_launch(intent)?;
