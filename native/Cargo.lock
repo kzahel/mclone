@@ -1888,6 +1888,7 @@ dependencies = [
 name = "mclone-terrain-view"
 version = "0.0.0"
 dependencies = [
+ "mclone-core",
  "mclone-worldgen",
  "naga",
  "wgpu",

@@ -102,6 +102,20 @@ fn textured_liquid_top_emits_reverse_face_for_underwater_surface_visibility() {
 }
 
 #[test]
+fn textured_liquid_visibility_can_be_suppressed_without_changing_blocks() {
+    let catalog = liquid_textured_catalog();
+    let blocks = textured_chunk_blocks(16, &[(0, 0, 0, BlockStateId(2))]);
+    let mesh = build_textured_visible_chunk_mesh(
+        TexturedChunkMeshInput::new(0, 0, 0, 16, &blocks).with_fluids_visible(false),
+        &catalog,
+    )
+    .unwrap();
+
+    assert!(mesh.is_empty());
+    assert_eq!(blocks[0], BlockStateId(2));
+}
+
+#[test]
 fn textured_liquid_top_renders_below_overhanging_solid_block() {
     let catalog = liquid_textured_catalog();
     let blocks = textured_chunk_blocks(

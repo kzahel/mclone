@@ -94,6 +94,7 @@ pub struct TexturedChunkMeshInput<'a> {
     pub biomes: &'a [i32],
     pub light_sections: &'a [PackedLightSection],
     pub biome_zoom_seed: Option<i64>,
+    pub fluids_visible: bool,
 }
 
 impl<'a> TexturedChunkMeshInput<'a> {
@@ -123,6 +124,7 @@ impl<'a> TexturedChunkMeshInput<'a> {
             biomes: &[],
             light_sections: &[],
             biome_zoom_seed: None,
+            fluids_visible: true,
         }
     }
 
@@ -143,6 +145,14 @@ impl<'a> TexturedChunkMeshInput<'a> {
 
     pub fn with_light_sections(mut self, light_sections: &'a [PackedLightSection]) -> Self {
         self.light_sections = light_sections;
+        self
+    }
+
+    /// Include or suppress liquid geometry without changing the canonical
+    /// block-state input. Diagnostic and preview clients use this to inspect
+    /// the same generated chunk with water presentation hidden.
+    pub fn with_fluids_visible(mut self, fluids_visible: bool) -> Self {
+        self.fluids_visible = fluids_visible;
         self
     }
 
@@ -400,7 +410,9 @@ fn add_textured_chunk_range_to_mesh(
                 let world_x = world_origin_x + local_x;
                 let world_y = input.min_y + local_y;
                 let world_z = world_origin_z + local_z;
-                if let Some(fluid) = block_model.fluid {
+                if input.fluids_visible
+                    && let Some(fluid) = block_model.fluid
+                {
                     add_textured_liquid_block_to_mesh(
                         &mut translucent_mesh,
                         area,

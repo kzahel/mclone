@@ -1,5 +1,6 @@
 #![forbid(unsafe_code)]
 
+mod canonical;
 mod viewport;
 mod viewport_renderer;
 
@@ -13,6 +14,10 @@ use mclone_worldgen::terrain_preview::{
     TerrainPreviewSample, ValidatedTerrainPreviewRequest,
 };
 
+pub use canonical::{
+    CANONICAL_TERRAIN_MAX_CHUNK_RADIUS, CanonicalTerrainChunk, CanonicalTerrainCompiler,
+    CanonicalTerrainStage, CanonicalTerrainVisibility, canonical_terrain_chunk_order,
+};
 pub use viewport::{
     TERRAIN_VIEWPORT_AUTO_PIXELS_PER_CELL, TERRAIN_VIEWPORT_MAX_BLOCKS_ACROSS,
     TERRAIN_VIEWPORT_MAX_DIAGNOSTIC_TILES_PER_AXIS, TERRAIN_VIEWPORT_MAX_VISIBLE_TILES_PER_AXIS,
