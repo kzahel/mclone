@@ -976,13 +976,16 @@ impl WebSceneHost {
         self.dom_input_frame_count = self.dom_input_frame_count.saturating_add(1);
         self.poll_controller_input(now_millis)?;
 
+        let supplemental = self
+            .touch_controls_visible()
+            .then(|| self.touch_input.held_frame())
+            .flatten();
         let Some(host) = self.host.as_mut() else {
             self.frame_policy.shutdown();
             return self
                 .finish_frame_operational_report(false, delta_seconds, first_after_resume)
                 .map_err(JsValue::from);
         };
-        let supplemental = self.touch_input.held_frame();
         self.movement_input_applied |= self
             .interactive_input
             .advance_held_frame(host, supplemental, delta_seconds)
@@ -1359,6 +1362,7 @@ impl WebSceneHost {
     ) -> Result<JsValue, JsValue> {
         self.input_capability_state
             .note_activity(InputDeviceKind::Touch);
+        self.touch_settings_available = true;
         let phase = web_touch_contact_phase(phase)?;
         let id = u64::from(id);
         let scale = GuiScale::from_pixels(self.context.width, self.context.height);
@@ -1409,6 +1413,18 @@ impl WebSceneHost {
                 ..MonoInputDisposition::default()
             },
             TouchUiContactRoute::Gameplay => {
+                if !self.touch_controls_visible() {
+                    self.touch_input.end_contact(id, true);
+                    return self
+                        .input_disposition_report(
+                            MonoInputDisposition {
+                                handled: true,
+                                ..MonoInputDisposition::default()
+                            },
+                            effects,
+                        )
+                        .map_err(JsValue::from);
+                }
                 let event = match phase {
                     TouchContactPhase::Started => {
                         let control = touch_control_at(scale, point);
@@ -1675,6 +1691,8 @@ impl WebSceneHost {
         self.touch_input
             .set_look_sensitivity(self.touch_look_sensitivity);
         self.touch_settings_available = available;
+        self.input_capability_state
+            .set_present(InputDeviceKind::Touch, available);
         self.refresh_touch_overlay_from_input()?;
         self.ui_report(false, None).map_err(JsValue::from)
     }
@@ -1690,6 +1708,8 @@ impl WebSceneHost {
     #[wasm_bindgen(js_name = setTouchInputAvailable)]
     pub fn set_touch_input_available(&mut self, available: bool) -> Result<JsValue, JsValue> {
         self.touch_settings_available = available;
+        self.input_capability_state
+            .set_present(InputDeviceKind::Touch, available);
         self.refresh_touch_overlay_from_input()?;
         self.ui_report(false, None).map_err(JsValue::from)
     }
@@ -2527,9 +2547,11 @@ impl WebSceneHost {
     }
 
     fn refresh_touch_overlay_from_input(&mut self) -> Result<(), JsValue> {
+        let visible = self.touch_controls_visible();
+        if !visible {
+            self.touch_input.clear();
+        }
         let state = self.touch_input.overlay_state();
-        let visible = self.touch_settings_available
-            && !matches!(self.touch_controls_mode, TouchControlsMode::Off);
         self.touch_overlay = TouchOverlay {
             visible,
             menu_pressed: state.menu_pressed,
@@ -2554,6 +2576,17 @@ impl WebSceneHost {
             hotbar_icons: mclone_ui::EMPTY_HOTBAR_ICONS,
         };
         self.refresh_mono_ui_context()
+    }
+
+    fn touch_controls_visible(&self) -> bool {
+        let mut preferences = InputPreferences::AUTO;
+        preferences.preferred_scheme = self.input_preferences.controller.preferred_input;
+        preferences.touch_controls = self.touch_controls_mode;
+        self.touch_settings_available
+            && self
+                .input_capability_state
+                .resolve(preferences)
+                .touch_controls_visible
     }
 
     fn complete_started_runtime(

@@ -884,11 +884,14 @@ impl AndroidGpuState {
     }
 
     fn drive_held_input(&mut self, dt_seconds: f64) -> Result<()> {
-        self.interactive_input.advance_held_frame(
-            &mut self.host,
-            self.touch.held_frame(),
-            dt_seconds,
-        )?;
+        let supplemental = self
+            .input_capabilities
+            .resolve(self.input_preferences)
+            .touch_controls_visible
+            .then(|| self.touch.held_frame())
+            .flatten();
+        self.interactive_input
+            .advance_held_frame(&mut self.host, supplemental, dt_seconds)?;
         if !self.host.mono_ui_is_active() {
             self.host.update_mono_blink_debug();
         }
@@ -973,6 +976,13 @@ impl AndroidGpuState {
         if let Some(settings) = self.host.mono_ui_render_state().touch_settings {
             self.touch
                 .set_look_sensitivity(settings.clamped_look_sensitivity());
+        }
+        if !self
+            .input_capabilities
+            .resolve(self.input_preferences)
+            .touch_controls_visible
+        {
+            self.touch.clear();
         }
         self.persist_input_preferences_if_changed();
         if disposition.clear_transient_input || effects.outcome.quit_to_title {
@@ -1132,6 +1142,17 @@ impl AndroidGpuState {
                 exit: false,
             }),
             TouchUiContactRoute::Gameplay => {
+                if !self
+                    .input_capabilities
+                    .resolve(self.input_preferences)
+                    .touch_controls_visible
+                {
+                    self.touch.end_contact(touch.id, true);
+                    return Ok(AndroidInputOutcome {
+                        handled: true,
+                        exit: false,
+                    });
+                }
                 let event = match touch.phase {
                     TouchPhase::Started => {
                         let control = touch_control_at(scale, point);

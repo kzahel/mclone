@@ -97,7 +97,7 @@ fn native_key_codes_map_to_shared_flat_input_controls() {
 
 #[test]
 fn desktop_adapter_normalizes_keyboard_facts_without_assigning_actions() {
-    let mut input = DesktopFlatInputAdapter::new();
+    let mut input = DesktopFlatInputAdapter::default();
 
     assert_eq!(
         input.normalize_keyboard_input(KeyCode::KeyW, ElementState::Pressed, false),
@@ -120,7 +120,7 @@ fn desktop_adapter_normalizes_keyboard_facts_without_assigning_actions() {
 
 #[test]
 fn desktop_adapter_normalizes_pointer_motion_and_wheel_facts() {
-    let mut input = DesktopFlatInputAdapter::new();
+    let mut input = DesktopFlatInputAdapter::default();
 
     assert_eq!(
         input.normalize_mouse_button(MouseButton::Left, ElementState::Pressed),
@@ -146,7 +146,7 @@ fn desktop_adapter_normalizes_pointer_motion_and_wheel_facts() {
 
 #[test]
 fn desktop_touch_events_feed_shared_capability_resolution() {
-    let mut input = DesktopFlatInputAdapter::new();
+    let mut input = DesktopFlatInputAdapter::default();
 
     input.note_touch_activity();
     let resolved = input
@@ -179,8 +179,46 @@ fn desktop_touch_events_feed_shared_capability_resolution() {
 }
 
 #[test]
+fn steamos_profile_advertises_touch_before_first_contact() {
+    assert!(desktop_startup_touch_present(
+        WindowPlatformProfile::SteamOs
+    ));
+    assert!(!desktop_startup_touch_present(
+        WindowPlatformProfile::Desktop
+    ));
+
+    let input = DesktopFlatInputAdapter::with_touch_present(true);
+    let automatic = input.capability_state.resolve(InputPreferences::AUTO);
+    assert!(automatic.accepts_touch);
+    assert!(!automatic.touch_controls_visible);
+
+    let forced = input.capability_state.resolve(InputPreferences {
+        touch_controls: TouchControlsMode::On,
+        ..InputPreferences::AUTO
+    });
+    assert!(forced.touch_controls_visible);
+}
+
+#[test]
+fn desktop_touch_preference_updates_preserve_controller_fields() {
+    let mut baseline = ClientInputPreferences::default();
+    baseline.controller.settings.invert_look_vertical = true;
+    baseline.controller.settings.look_deadzone = 0.23;
+    let expected_controller = baseline.controller.clone();
+
+    let updated = desktop_touch_preferences(&baseline, TouchControlsMode::Off, 8.0);
+
+    assert_eq!(updated.controller, expected_controller);
+    assert_eq!(updated.touch_controls_mode, TouchControlsMode::Off);
+    assert_eq!(
+        updated.touch_look_sensitivity,
+        TouchInputSettings::MAX_LOOK_SENSITIVITY
+    );
+}
+
+#[test]
 fn desktop_gamepad_capability_requires_connection_and_meaningful_activity() {
-    let mut input = DesktopFlatInputAdapter::new();
+    let mut input = DesktopFlatInputAdapter::default();
 
     input.set_gamepad_present(true);
     let connected = input.capability_state.resolve(InputPreferences::AUTO);

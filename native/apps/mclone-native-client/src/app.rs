@@ -3,19 +3,24 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::{Context, Result};
+use glam::Vec2;
 use mclone_app_runtime::frame_render::{MIN_FLAT_RENDER_SCALE, scaled_frame_size};
+use mclone_app_runtime::input_preferences::ClientInputPreferences;
 use mclone_app_runtime::{DEFAULT_STARTUP_READINESS_TIMEOUT, RuntimePollDiagnostics};
 use mclone_assets::AssetSource;
 use mclone_input::{
     ControllerInputPreferences, InputCapabilities, InputCapabilityState, InputDeviceKind,
     InputPreferences, KeyboardKey, MouseWheelDirection, PointerButton, TouchContactPhase,
-    TouchUiContactRoute, TouchUiContactTracker,
+    TouchControlsMode, TouchInputAdapter, TouchInputEvent, TouchInputSettings, TouchUiContactRoute,
+    TouchUiContactTracker,
 };
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render::color_profile::DEFAULT_RENDER_SCALE;
 use mclone_render::native::{NativeSurfaceContext, SurfaceFrameStatus};
 use mclone_ui::{
-    GameFlatPresentationState, GameUiAction, GameWorldRenderScaleMode, GuiScale, Point,
+    EMPTY_HOTBAR_ICONS, GameFlatPresentationState, GameTouchSettings, GameUiAction,
+    GameWorldRenderScaleMode, GuiScale, Point, TouchJoystickOverlay, TouchOverlay,
+    touch_control_at, touch_menu_button_rect,
 };
 use serde_json::{Value, json};
 use winit::application::ApplicationHandler;
@@ -135,6 +140,21 @@ fn world_render_scale(
     })
 }
 
+const fn desktop_startup_touch_present(profile: WindowPlatformProfile) -> bool {
+    matches!(profile, WindowPlatformProfile::SteamOs)
+}
+
+fn desktop_touch_preferences(
+    baseline: &ClientInputPreferences,
+    mode: TouchControlsMode,
+    look_sensitivity: f32,
+) -> ClientInputPreferences {
+    let mut current = baseline.clone();
+    current.touch_look_sensitivity = look_sensitivity;
+    current.touch_controls_mode = mode;
+    current.normalized()
+}
+
 #[derive(Clone, Debug)]
 struct DesktopFlatInputAdapter {
     capability_state: InputCapabilityState,
@@ -155,8 +175,12 @@ impl Default for DesktopFlatInputAdapter {
 }
 
 impl DesktopFlatInputAdapter {
-    fn new() -> Self {
-        Self::default()
+    fn with_touch_present(touch_present: bool) -> Self {
+        let mut input = Self::default();
+        input
+            .capability_state
+            .set_present(InputDeviceKind::Touch, touch_present);
+        input
     }
 
     fn note_keyboard_activity(&mut self) {
@@ -231,7 +255,9 @@ struct ChunkApp {
     gamepad_collector: Option<crate::desktop_gamepad::DesktopGamepadCollector>,
     flat_input: DesktopFlatInputAdapter,
     input_preferences: InputPreferences,
+    client_input_preferences: ClientInputPreferences,
     controller_preferences: ControllerInputPreferences,
+    touch: TouchInputAdapter,
     frame_pacing: FramePacing,
     world_render_scale_mode: GameWorldRenderScaleMode,
     window: Option<Arc<Window>>,
@@ -678,6 +704,11 @@ impl ChunkApp {
         let mut input_preferences = InputPreferences::AUTO;
         input_preferences.preferred_scheme = client_input_preferences.controller.preferred_input;
         input_preferences.touch_controls = client_input_preferences.touch_controls_mode;
+        let touch = TouchInputAdapter::with_settings(TouchInputSettings {
+            look_sensitivity: client_input_preferences.touch_look_sensitivity,
+            ..TouchInputSettings::default()
+        });
+        let startup_touch_present = desktop_startup_touch_present(window_options.platform_profile);
         Self {
             scene: scene.clone(),
             render_options,
@@ -685,9 +716,11 @@ impl ChunkApp {
             scene_driver: None,
             gamepad_collector,
             assets,
-            flat_input: DesktopFlatInputAdapter::new(),
+            flat_input: DesktopFlatInputAdapter::with_touch_present(startup_touch_present),
             input_preferences,
-            controller_preferences: client_input_preferences.controller,
+            client_input_preferences: client_input_preferences.clone(),
+            controller_preferences: client_input_preferences.controller.clone(),
+            touch,
             frame_pacing: FramePacing::default(),
             world_render_scale_mode: GameWorldRenderScaleMode::Automatic,
             window: None,
@@ -778,6 +811,47 @@ impl ChunkApp {
         fallback
     }
 
+    fn touch_gameplay_enabled(&self) -> bool {
+        self.flat_input
+            .capability_state
+            .resolve(self.input_preferences)
+            .touch_controls_visible
+            && self
+                .scene_driver
+                .as_ref()
+                .is_some_and(|driver| driver.has_runtime() && !driver.ui_is_active())
+    }
+
+    fn touch_overlay(&self) -> TouchOverlay {
+        let state = self.touch.overlay_state();
+        TouchOverlay {
+            visible: true,
+            menu_pressed: state.menu_pressed,
+            movement: state
+                .movement
+                .map(|movement| TouchJoystickOverlay {
+                    active: true,
+                    base: point_from_vec2(movement.base),
+                    thumb: point_from_vec2(movement.thumb),
+                })
+                .unwrap_or_default(),
+            jump_pressed: state.jump_pressed,
+            sprint_pressed: state.sprint_pressed,
+            sneak_pressed: state.sneak_pressed,
+            descend_pressed: state.descend_pressed,
+            interaction_visible: true,
+            attack_pressed: state.attack_pressed,
+            use_pressed: state.use_pressed,
+            hotbar_visible: true,
+            selected_hotbar_slot: self
+                .scene_driver
+                .as_ref()
+                .map_or(0, |driver| driver.host().selected_mono_hotbar_slot()),
+            hotbar_pressed_slot: state.hotbar_pressed_slot,
+            hotbar_icons: EMPTY_HOTBAR_ICONS,
+        }
+    }
+
     fn apply_world_render_scale(&mut self) {
         let Some(surface) = &mut self.surface else {
             return;
@@ -823,10 +897,14 @@ impl ChunkApp {
             self.frame_pacing.target_frame_ms(),
         );
 
+        let supplemental = self
+            .touch_gameplay_enabled()
+            .then(|| self.touch.held_frame())
+            .flatten();
         let Some(driver) = self.scene_driver.as_mut() else {
             return Ok(());
         };
-        driver.advance_held_input(frame_dt.as_secs_f64())?;
+        driver.advance_held_input(supplemental, frame_dt.as_secs_f64())?;
         if !driver.ui_is_active() {
             driver.update_blink_debug();
         }
@@ -859,6 +937,7 @@ impl ChunkApp {
     }
 
     fn clear_flat_gameplay_input(&mut self) {
+        self.touch.clear();
         if let Some(driver) = &mut self.scene_driver {
             driver.clear_interactive_input();
             driver.clear_blink_debug();
@@ -912,6 +991,32 @@ impl ChunkApp {
         self.apply_input_outcome("touch pointer button input", result, event_loop)
     }
 
+    fn route_touch_look_input(
+        &mut self,
+        delta: mclone_input::TouchLookDelta,
+        event_loop: &ActiveEventLoop,
+    ) -> bool {
+        let result = match self.scene_driver.as_mut() {
+            Some(driver) => driver.route_touch_look(delta),
+            None => return false,
+        };
+        self.apply_input_outcome("touch look input", result, event_loop)
+    }
+
+    fn route_flat_frame_input(
+        &mut self,
+        frame: mclone_input::FlatInputFrame,
+        event_loop: &ActiveEventLoop,
+    ) -> bool {
+        let result = match (self.surface.as_ref(), self.scene_driver.as_mut()) {
+            (Some(surface), Some(driver)) => {
+                driver.route_flat_frame(frame, &surface.device, &surface.queue)
+            }
+            _ => return false,
+        };
+        self.apply_input_outcome("touch action input", result, event_loop)
+    }
+
     fn route_pointer_move_input(&mut self, point: Point, event_loop: &ActiveEventLoop) -> bool {
         let result = match (self.surface.as_ref(), self.scene_driver.as_mut()) {
             (Some(surface), Some(driver)) => {
@@ -962,18 +1067,20 @@ impl ChunkApp {
 
     fn handle_touch_input(&mut self, touch: Touch, event_loop: &ActiveEventLoop) {
         self.flat_input.note_touch_activity();
+        let phase = touch_contact_phase(touch.phase);
         let ui_active = self
             .scene_driver
             .as_ref()
             .is_some_and(WinitFrameDriver::ui_is_active);
+        let Some(scale) = self.gui_scale() else {
+            self.schedule_next_redraw(event_loop);
+            return;
+        };
         let Some(point) = self.gui_point(touch.location.x, touch.location.y) else {
             self.schedule_next_redraw(event_loop);
             return;
         };
-        match self
-            .ui_touch
-            .route(touch.id, touch_contact_phase(touch.phase), ui_active)
-        {
+        match self.ui_touch.route(touch.id, phase, ui_active) {
             TouchUiContactRoute::PointerDown => {
                 self.route_touch_pointer_button_input(true, point, event_loop);
             }
@@ -989,10 +1096,59 @@ impl ChunkApp {
                 }
                 self.schedule_next_redraw(event_loop);
             }
-            TouchUiContactRoute::Ignore | TouchUiContactRoute::Gameplay => {
-                self.schedule_next_redraw(event_loop)
+            TouchUiContactRoute::Ignore => self.schedule_next_redraw(event_loop),
+            TouchUiContactRoute::Gameplay => {
+                if !self.touch_gameplay_enabled() {
+                    if matches!(
+                        phase,
+                        TouchContactPhase::Ended | TouchContactPhase::Cancelled
+                    ) {
+                        self.touch
+                            .end_contact(touch.id, phase == TouchContactPhase::Cancelled);
+                    }
+                    self.schedule_next_redraw(event_loop);
+                    return;
+                }
+                let position = Vec2::new(point.x, point.y);
+                self.touch
+                    .set_viewport_size(Vec2::new(scale.width, scale.height));
+                let event = match phase {
+                    TouchContactPhase::Started => {
+                        let control = touch_control_at(scale, point);
+                        self.touch.begin_contact(touch.id, control, position)
+                    }
+                    TouchContactPhase::Moved => {
+                        let menu_active = touch_menu_button_rect().contains(point);
+                        self.touch.move_contact(touch.id, position, menu_active)
+                    }
+                    TouchContactPhase::Ended | TouchContactPhase::Cancelled => self
+                        .touch
+                        .end_contact(touch.id, phase == TouchContactPhase::Cancelled),
+                };
+                self.apply_touch_input_event(event, event_loop);
             }
         }
+    }
+
+    fn apply_touch_input_event(
+        &mut self,
+        event: TouchInputEvent,
+        event_loop: &ActiveEventLoop,
+    ) -> bool {
+        if let Some(driver) = &mut self.scene_driver {
+            driver.observe_supplemental_movement(self.touch.held_frame());
+        }
+        let mut handled = event.handled;
+        if let Some(delta) = event.look_delta {
+            handled |= self.route_touch_look_input(delta, event_loop);
+        }
+        if let Some(frame) = event.frame {
+            handled |= self.route_flat_frame_input(frame, event_loop);
+        }
+        if handled {
+            self.schedule_next_redraw(event_loop);
+        }
+        handled
     }
 
     fn apply_input_outcome(
@@ -1168,7 +1324,19 @@ impl ChunkApp {
         }
         if let Some(mode) = outcome.touch_controls_mode {
             self.input_preferences.touch_controls = mode;
+            if mode == TouchControlsMode::Off {
+                self.touch.clear();
+            }
         }
+        if let Some(settings) = self
+            .scene_driver
+            .as_ref()
+            .and_then(|driver| driver.host().mono_ui_render_state().touch_settings)
+        {
+            self.touch
+                .set_look_sensitivity(settings.clamped_look_sensitivity());
+        }
+        self.persist_input_preferences_if_changed();
         if let Some(mouse_lock_requested) = outcome.mouse_lock_requested {
             self.mouse_lock_requested = mouse_lock_requested;
         }
@@ -1179,6 +1347,30 @@ impl ChunkApp {
         }
         self.sync_mouse_lock();
         self.schedule_next_redraw(event_loop);
+    }
+
+    fn persist_input_preferences_if_changed(&mut self) {
+        let current = desktop_touch_preferences(
+            &self.client_input_preferences,
+            self.input_preferences.touch_controls,
+            self.touch.settings.look_sensitivity,
+        );
+        if current == self.client_input_preferences {
+            return;
+        }
+        match mclone_app_runtime::input_preferences::store_native_input_preferences(
+            self.scene.world_root.as_deref(),
+            &current,
+        ) {
+            Ok(true) => {}
+            Ok(false) => {
+                log::debug!("desktop input preferences have no configured storage path");
+            }
+            Err(error) => {
+                log::warn!("failed to store desktop input preferences: {error:#}");
+            }
+        }
+        self.client_input_preferences = current;
     }
 
     fn sync_mouse_lock(&mut self) {
@@ -1692,17 +1884,27 @@ impl ApplicationHandler for ChunkApp {
                         self.world_render_scale_mode,
                     )
                 });
+                let resolved_input = self
+                    .flat_input
+                    .capability_state
+                    .resolve(self.input_preferences);
+                let touch_settings_available = resolved_input.accepts_touch;
                 let ui_context = MonoUiContext {
-                    resolved_input: self
-                        .flat_input
-                        .capability_state
-                        .resolve(self.input_preferences),
+                    resolved_input,
                     frame_pacing: self.frame_pacing.ui_state(),
                     pacing_debug: self.frame_pacing.debug_stats(),
                     frame_timing: self.frame_timing,
                     render_scale: self.current_render_scale(),
                     flat_presentation,
                     hud_visible: true,
+                    touch_overlay: self.touch_overlay(),
+                    touch_controls_mode: touch_settings_available
+                        .then_some(self.input_preferences.touch_controls),
+                    touch_settings: touch_settings_available.then_some(GameTouchSettings::new(
+                        self.touch.settings.look_sensitivity,
+                        TouchInputSettings::MIN_LOOK_SENSITIVITY,
+                        TouchInputSettings::MAX_LOOK_SENSITIVITY,
+                    )),
                     ..MonoUiContext::default()
                 };
                 let render_start = Instant::now();
@@ -1854,6 +2056,13 @@ fn touch_contact_phase(phase: TouchPhase) -> TouchContactPhase {
         TouchPhase::Moved => TouchContactPhase::Moved,
         TouchPhase::Ended => TouchContactPhase::Ended,
         TouchPhase::Cancelled => TouchContactPhase::Cancelled,
+    }
+}
+
+fn point_from_vec2(point: Vec2) -> Point {
+    Point {
+        x: point.x,
+        y: point.y,
     }
 }
 

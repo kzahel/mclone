@@ -9,7 +9,8 @@ use mclone_app_runtime::frame_render::{
 use mclone_audio::AudioEngine;
 use mclone_diagnostics::FrameHostKind;
 use mclone_input::{
-    ControllerInputPreferences, KeyboardKey, MouseWheelDirection, PointerButton, TouchControlsMode,
+    ControllerInputPreferences, FlatInputFrame, KeyboardKey, MouseWheelDirection, PointerButton,
+    TouchControlsMode, TouchLookDelta,
 };
 use mclone_render::chunk::{ChunkDepthTarget, TexturedSectionRenderOptions};
 use mclone_render::color_profile::RenderConfig;
@@ -538,6 +539,36 @@ impl WinitFrameDriver {
         Ok(self.finish_input_outcome(scene, effects))
     }
 
+    pub(crate) fn observe_supplemental_movement(&mut self, supplemental: Option<FlatInputFrame>) {
+        self.interactive_input
+            .observe_supplemental_movement(&mut self.host, supplemental);
+    }
+
+    pub(crate) fn route_touch_look(&mut self, delta: TouchLookDelta) -> Result<WinitInputOutcome> {
+        let effects = WinitHostEffects::default();
+        let scene = self
+            .interactive_input
+            .route_touch_look(&mut self.host, delta);
+        Ok(self.finish_input_outcome(scene, effects))
+    }
+
+    pub(crate) fn route_flat_frame(
+        &mut self,
+        frame: FlatInputFrame,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<WinitInputOutcome> {
+        let mut effects = WinitHostEffects::default();
+        let scene = self.interactive_input.route_flat_frame(
+            &mut self.host,
+            frame,
+            device,
+            queue,
+            &mut effects,
+        )?;
+        Ok(self.finish_input_outcome(scene, effects))
+    }
+
     pub(crate) fn route_controller_poll(
         &mut self,
         poll: crate::desktop_gamepad::DesktopGamepadPoll,
@@ -566,10 +597,14 @@ impl WinitFrameDriver {
         Ok(outcome)
     }
 
-    pub(crate) fn advance_held_input(&mut self, dt_seconds: f64) -> Result<bool> {
+    pub(crate) fn advance_held_input(
+        &mut self,
+        supplemental: Option<FlatInputFrame>,
+        dt_seconds: f64,
+    ) -> Result<bool> {
         Ok(self
             .interactive_input
-            .advance_held_frame(&mut self.host, None, dt_seconds)?
+            .advance_held_frame(&mut self.host, supplemental, dt_seconds)?
             .changed())
     }
 
