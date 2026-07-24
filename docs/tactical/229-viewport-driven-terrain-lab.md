@@ -1,6 +1,7 @@
 # Viewport-Driven Terrain Lab
 
-Status: active 2026-07-24.
+Status: implementation and local headed-WebGPU validation complete 2026-07-24;
+hosted deployment receipt pending.
 
 Topic: `gpu-procedural-terrain`
 
@@ -182,3 +183,35 @@ Stop for review only if one of these becomes true:
 - inspected coarse-to-fine transitions expose a correctness gap that requires
   a mixed-level seam design beyond this tactical.
 
+## Local Validation Receipt
+
+The implementation landed through commits `c6f80e24`, `9bf31e2c`, and
+`2ef406af`.
+
+Validated locally:
+
+- `cargo test -p mclone-terrain-view --lib`;
+- `cargo test -p mclone-worldgen terrain_preview --lib`;
+- `cargo check -p mclone-terrain-lab --target wasm32-unknown-unknown`;
+- Terrain Lab state tests and TypeScript/Wasm typecheck;
+- two-project headed-Wayland Playwright desktop/Pixel 7 flow;
+- dedicated headed-Wayland desktop and mobile BrowserWebGPU smokes; and
+- inspected desktop side-by-side, phone stacked, map-error, orbit, and
+  continent-scale captures under `/tmp`.
+
+The fixed seed `-98765` / center `(-304, 336)` Auto viewport selected `1:16`
+at about 2 km on both tested layouts. The 65.5 km map selected `1:512` and
+retained 12 complete visible tiles. Its BrowserWebGPU comparison measured:
+
+- base mean/P95 error effectively zero;
+- 100% ocean agreement;
+- continentalness mean error around `1.8e-8`; and
+- no invented GPU execution duration.
+
+A manual `1:1` request at 4.1 km visibly reported an effective `1:16` under
+the eight-tile-per-axis safety budget. This is the intended diagnostic
+contract, not a failure to honor manual detail silently.
+
+The first Wasm pixel attempt exposed `std::time::Instant` as unsupported on
+this target. Timing now comes from an injected browser performance clock; the
+shared scheduler no longer depends on a host time implementation.

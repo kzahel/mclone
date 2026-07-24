@@ -2,7 +2,9 @@
 
 Topic: `gpu-procedural-terrain`
 
-Status: production large-field GPU port completed 2026-07-23. Tactical
+Status: viewport-driven progressive Terrain Lab implementation and local
+headed-WebGPU validation completed 2026-07-24; hosted Tactical 229 receipt is
+pending. Tactical
 [`227-web-terrain-lab-vertical-slice.md`](../tactical/227-web-terrain-lab-vertical-slice.md)
 landed the deployable, web-first Terrain Lab, shared production-reference grid,
 and one shared Rust/WGPU resident tile. Tactical
@@ -11,13 +13,17 @@ then replaced its unrelated approximation with the production 64-bit field
 hash, value/gradient noises, field warps, base surface, climate, and
 bathymetry. Fixed 2 km and 65.5 km BrowserWebGPU receipts now measure zero
 base-height mean/P95 error, 100% ocean agreement, and about `2e-8` mean
-continentalness error. Final river/wetland/planned-stream disagreement remains
-explicit. The next useful work is scale-aware coarse summarization and
-edit-to-first-pixel instrumentation, followed by progressive refinement. A
-thin native profiling host and eventual in-game LOD/map consumers should reuse
-the shared engine rather than becoming separate implementations. Optional
-GPU-backed canonical chunk generation and volumetric terrain remain separate
-later experiments.
+continentalness error. Tactical
+[`229-viewport-driven-terrain-lab.md`](../tactical/229-viewport-driven-terrain-lab.md)
+then added continuous viewport zoom, aligned resident tiles, Auto/manual
+detail, coverage-first progressive publication, epoch cancellation, bounded
+residency, full-target comparison, and first coarse/target pixel timing. Final
+river/wetland/planned-stream disagreement remains explicit. The next useful
+work is scale-aware coarse summarization and band limiting, followed by
+shader/edit hot-reload latency. A thin native profiling host and eventual
+in-game LOD/map consumers should reuse the shared engine rather than becoming
+separate implementations. Optional GPU-backed canonical chunk generation and
+volumetric terrain remain separate later experiments.
 
 ## Scope
 
@@ -131,7 +137,7 @@ most of its facts.
 The terrain compute pipeline now exists in
 [`mclone-terrain-view`](../../native/crates/mclone-terrain-view/). It:
 
-- accepts the shared 65-by-65 production-reference grid;
+- accepts aligned 64-cell / 65-sample production-reference tiles;
 - evaluates the separately revisioned `mclone-overworld-v1-gpu-preview-a2`
   production graph through `base_surface_y` into GPU-resident storage;
 - emulates the production unsigned 64-bit lattice hash with pairs of portable
@@ -139,35 +145,42 @@ The terrain compute pipeline now exists in
   field specification;
 - retains separate base-surface/ocean and final-surface/watercourse comparison
   facts so an omitted field family cannot masquerade as arithmetic error;
-- draws 24,576 vertices for one view or two 24,576-vertex instances for
-  synchronized Compare without CPU vertex or index arrays;
+- draws 24,576 generated vertices per resident tile and panel without CPU
+  vertex or index arrays;
 - supports terrain, height, continentalness, climate, and error layers in map
   or oblique views; and
-- performs an optional bounded asynchronous readback for lab comparison.
+- progressively publishes complete nested levels while retaining a complete
+  coarser parent;
+- retains up to 192 stable tile identities, with center-first visible
+  admission and a target-level preload margin;
+- rejects obsolete queued work when the viewport epoch changes; and
+- performs bounded asynchronous readbacks aggregated over the complete target
+  viewport for lab comparison.
 
 [`mclone-terrain-lab`](../../native/apps/mclone-terrain-lab/) owns the narrow
 browser surface/device facade. [`tools/terrain-lab`](../../tools/terrain-lab/)
-owns URL state and responsive presentation. Three-dimensional left drag now
+owns URL state and responsive presentation. Three-dimensional left drag
 orbits with conventional pitch direction without changing URL-addressed
-geography; Shift+left or middle drag pans, map drag pans, and camera reset is
-distinct from the named fixed-site action. The source selector and its live
-comparison contract sit directly above the preview on every viewport. Compare
-draws two synchronized instances of the complete requested footprint: CPU
-production base first and GPU production base second. Both panels
-share exact world coordinates, seed, center, spacing, camera, and diagnostic
-layer. Wide canvases place them side by side; phone-sized portrait canvases
-stack full-width panels in a double-height stage so packing two views does not
-halve their screen-space detail. The surface grid uses outward-facing
-counter-clockwise triangles, back-face culling, and an above-surface oblique
-projection. CPU Final remains a separate full-width source for reviewing the
-intentionally omitted river, wetland, and planned-stream layer. Production
-Reference is the initial source. The deployed product route is `/terrain/`;
-it does not load the game client, asset packs, a server, canonical chunks,
-lighting, collision, or persistence.
+geography; Shift+left or middle drag pans, map drag pans, wheel and pinch
+change a separate continuous viewport, and map zoom is cursor anchored.
+Map/3D, Auto/manual resolution, and zoom controls sit immediately above the
+preview on every viewport. Auto targets approximately two CSS pixels per
+sample cell; an explicit manual request remains visible when the
+eight-tile-per-axis safety budget raises its effective spacing. Compare draws
+every published tile twice: CPU production base first and GPU production base
+second. Both panels share exact world coordinates, seed, center, viewport,
+effective spacing, camera, and diagnostic layer. Wide canvases place them
+side by side; phone-sized portrait canvases stack full-width panels in a
+double-height stage. The surface grid uses outward-facing counter-clockwise
+triangles, back-face culling, and an above-surface oblique projection. CPU
+Final remains a separate full-width source for reviewing the intentionally
+omitted river, wetland, and planned-stream layer. The deployed product route
+is `/terrain/`; it does not load the game client, asset packs, a server,
+canonical chunks, lighting, collision, or persistence.
 
 Normal terrain and the current Far LOD path still arrive at `mclone-render` as
-CPU-constructed mesh products. The new tile is a reusable experimental
-service, not yet an in-game replacement.
+CPU-constructed mesh products. The viewport planner and resident renderer are
+a reusable experimental service, not yet an in-game replacement.
 
 Existing performance records motivate measurement without proving a GPU win:
 
@@ -815,12 +828,16 @@ The shared-first boundary should be:
 - game app/platform crates: adapter/device creation, surface/session
   lifecycle, raw capability collection, and presentation only.
 
-The exact crate and app names are deferred until the first proof identifies a
-real shared API. A small shared terrain-view crate may become justified if the
-request, hierarchy, summary, and diagnostics contracts do not fit cleanly in
-the owners above. Terrain rules must not be hand-copied into app crates, a
-standalone TypeScript package, or hidden as renderer policy merely because
-WGSL consumes them.
+The first proof established
+[`mclone-terrain-view`](../../native/crates/mclone-terrain-view/) as that small
+shared service. It owns the pure viewport/tile plan, stable tile identity,
+progressive complete-level publication, bounded WGPU residency, production
+compute and generated-grid draw, and aggregate comparison. The narrow
+`mclone-terrain-lab` Wasm app owns the browser surface/device facade;
+`tools/terrain-lab` owns URL/DOM mechanics and the animation-frame pump.
+Terrain rules must not be hand-copied into app crates, a standalone
+TypeScript package, or hidden as renderer policy merely because WGSL consumes
+them.
 
 GPU meshing of ordinary CPU-authoritative chunks is adjacent but independent.
 It may produce a larger near-field throughput win and applies to every profile,
@@ -860,6 +877,12 @@ Status: completed for production fields through base surface by Tacticals
 - compare the tile against CPU source samples.
 
 ### Experiment 2: Coverage-First Progressive Refinement
+
+Status: first unfiltered viewport-driven slice completed locally by Tactical
+229. Complete nested levels, retained parents, stable aligned identities,
+bounded scheduling/residency, 1-through-1,024 spacing, and 65.5 km coverage
+are proven. Scale-aware summaries, band limiting, mixed-level seams, and
+in-game structural/depth coverage remain open.
 
 - cover a fixed visible region immediately with a bounded 64-cell-style grid;
 - prove at least one extreme level where one tile represents hundreds of
@@ -954,59 +977,60 @@ submission.
 
 ## Latest Receipt And Next Direction
 
-The fixed review request uses seed `-98765`, center `(-304, 336)`, a 64-by-64
-cell tile, and 32-block spacing. On the headed-Wayland BrowserWebGPU adapter,
-the A2 evaluator measured:
+Tactical 229 replaces the fixed single tile with a continuous viewport over
+aligned 64-cell tiles. The URL now separates `blocks` across from `detail`;
+legacy `spacing=` links retain their prior visible footprint. Auto chooses a
+power-of-two spacing from panel CSS density. Manual `1:1` through `1:1024`
+remains explicit, and the UI reports when the eight-tile-per-axis safety
+budget raises effective detail.
 
-- 4,225 samples and 49,152 procedural Compare vertices across two synchronized
-  24,576-vertex panels;
-- zero base-surface mean, P95, and maximum height error;
-- 100% ocean-presence agreement;
-- `2.07e-8` mean continentalness error;
-- 0.5 blocks final mean and 3 blocks final P95 error from omitted
-  watercourses; and
-- about 396.2 KiB resident for GPU, reference, and uniform buffers.
+The shared scheduler:
 
-The 1,024-block-spacing / 65.5 km receipt retained zero base mean/P95 error,
-100% ocean agreement, and `1.91e-8` mean continentalness error. That proves
-the same production point evaluator across the complete current spacing
-range. It does not prove a truthful coarse summary: point-sampled 512-block
-and smaller bands visibly alias at the 65.5 km extreme.
+- starts with a level requiring at most two visible tiles per axis;
+- admits center-first missing tiles under a four-tile and 8 ms CPU reference
+  budget per browser frame;
+- retains that complete parent while finer levels compile;
+- publishes only complete levels;
+- preloads one target-level tile margin;
+- keeps up to 192 stable resident tiles keyed by seed, origin, and spacing
+  within the renderer's fixed field/evaluator revision;
+- discards obsolete queued work by viewport epoch; and
+- aggregates asynchronous GPU readback over the complete target footprint.
 
-The first 2026-07-24 mobile review correction moved source controls beside the
-preview and fixed orbit pitch, but follow-up review correctly rejected its
-single-patch seam as too vague to compare. Compare now submits the complete
-footprint twice: CPU production base and GPU production base share identical
-coordinates and camera state in labeled paired panels.
+The fixed seed `-98765`, center `(-304, 336)`, and about 2 km Auto view selected
+`1:16` on both the desktop and Pixel 7 layouts. Headed-Wayland BrowserWebGPU
+desktop side-by-side and phone stacked Compare pixels were inspected. Both
+show the same geography, and map view fills each panel instead of letterboxing
+an already aspect-correct viewport.
 
-A second phone review found that CPU Final appeared more detailed and that the
-surface read as if its faces were inverted. Both observations were grounded in
-presentation defects rather than a different reference-grid resolution:
+The local 65.5 km Auto map selected `1:512` with 12 complete visible tiles.
+Desktop and mobile receipts measured:
 
-- every source still uses the same 64-by-64 cells and 65-by-65 point samples;
-- packing two views across one narrow row halved each Compare panel's pixel
-  width, while CPU Final retained the whole canvas;
-- CPU Final additionally exposes narrow watercourse and bank fields that
-  visibly alias when point-sampled at 32-block spacing; and
-- the procedural triangle order had a downward geometric normal, while the 3D
-  projection put camera-depth motion on the wrong screen axis and disabled
-  culling.
+- base mean/P95 height error effectively zero;
+- 100% ocean agreement;
+- mean continentalness error around `1.8e-8`; and
+- roughly 43–46 MiB of resident reference/GPU tile buffers after the complete
+  multi-interaction smoke cache.
 
-The renderer now uses an above-surface projection, upward counter-clockwise
-triangles, and back-face culling. Portrait Compare stacks two full-width panels
-in a stage twice as tall as the single view; wide Compare remains side by side.
-Headed-Wayland BrowserWebGPU desktop and Pixel 7 flows pass, the phone gate
-proves the Compare stage is at least 1.9 times the single-view height, and
-inspected CPU Final and paired captures retain drawable outward terrain. The
-narrow hydrology aliases remain honest evidence for the next scale-aware
-summary slice, not a reason to blur the exact CPU reference silently.
+A manual `1:1` request at 4.1 km selected effective `1:16` and displayed
+`1:1 -> 1:16` with its visible tile count. This is an explicit bounded-budget
+result. At a close viewport, the same requested level becomes admissible.
 
-The prior local hosted-lane desktop and phone BrowserWebGPU flows prove two
-instances, shared orbit, preview-adjacent guidance, and the unchanged fixed
-2 km / 65.5 km parity gates.
-The exact aggregate bundle was built from code commit `57f52b50` with asset
-version `57f52b5055b0-20260724050832`. Hosted desktop and phone runs passed
-against Cloudflare Worker version `c039e593-08ce-44d8-94a3-bfbd0e59c462`.
+The Lab now reports CPU reference compile wall time, WGPU encode/submit wall
+time, first complete coarse pixel, first target pixel, resident/queued/evicted
+tiles, and stale work. It does not label encode/submit as GPU execution:
+portable timestamp queries are absent, so `GPU execution: unavailable` is the
+honest answer to the earlier observation that CPU and GPU appeared equally
+instantaneous.
+
+The first Wasm run exposed `std::time::Instant` as an unsupported host call.
+The renderer now accepts an injected monotonic clock from the Wasm facade;
+scheduler policy remains shared and host-neutral.
+
+This proves useful navigation, bounded resident generation, and progressive
+point-sampled detail. It does not yet prove a truthful far summary. The 65.5
+km continentalness image still evaluates sub-footprint field energy at points,
+so aliasing and temporal stability remain the next correctness problem.
 
 The next tactical should therefore:
 
@@ -1014,9 +1038,10 @@ The next tactical should therefore:
    parity;
 2. band-limit or aggregate sub-sample field energy while preserving coast and
    mountain silhouettes;
-3. instrument source-edit to first updated coarse pixel;
-4. add coverage-first parent/child refinement only after the extreme parent
-   is visually stable; and
+3. add a Rust/WGSL edit watcher and measure source-edit to first updated
+   coarse pixel;
+4. choose explicit mixed-level seam/transition behavior before using partial
+   child coverage; and
 5. keep final rivers and bounded planned-stream records as explicit structured
    overlays rather than weakening the exact large-field evaluator.
 
