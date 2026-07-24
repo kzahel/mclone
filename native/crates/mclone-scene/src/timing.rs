@@ -271,6 +271,16 @@ pub struct XrTerrainUploadSummary {
     pub poll_server_tick_ms: f64,
     pub poll_server_reported_total_ms: f64,
     pub poll_scheduler_tick_ms: f64,
+    pub poll_scheduler_adaptive_publication_budget_enabled: bool,
+    pub poll_scheduler_feature_publish_budget_max_units: usize,
+    pub poll_scheduler_feature_publish_budget_ms: f64,
+    pub poll_scheduler_feature_publish_spent_units: usize,
+    pub poll_scheduler_feature_publish_spent_ms: f64,
+    pub poll_scheduler_light_publish_budget_max_units: usize,
+    pub poll_scheduler_light_publish_budget_ms: f64,
+    pub poll_scheduler_light_publish_spent_units: usize,
+    pub poll_scheduler_light_publish_spent_ms: f64,
+    pub poll_scheduler_pending_worldgen_publication_chunk_limit: usize,
     pub poll_scheduler_completed_feature_jobs_drained: usize,
     pub poll_scheduler_feature_chunks_published: usize,
     pub poll_scheduler_feature_chunks_skipped: usize,
@@ -548,6 +558,21 @@ pub(crate) fn xr_poll_diagnostics_upload_summary(
         poll_server_tick_ms: diagnostics.server_tick_ms,
         poll_server_reported_total_ms: diagnostics.server_reported_total_ms,
         poll_scheduler_tick_ms: diagnostics.scheduler_tick_ms,
+        poll_scheduler_adaptive_publication_budget_enabled: diagnostics
+            .scheduler_adaptive_publication_budget_enabled,
+        poll_scheduler_feature_publish_budget_max_units: diagnostics
+            .scheduler_feature_publish_budget_max_units,
+        poll_scheduler_feature_publish_budget_ms: diagnostics.scheduler_feature_publish_budget_ms,
+        poll_scheduler_feature_publish_spent_units: diagnostics
+            .scheduler_feature_publish_spent_units,
+        poll_scheduler_feature_publish_spent_ms: diagnostics.scheduler_feature_publish_spent_ms,
+        poll_scheduler_light_publish_budget_max_units: diagnostics
+            .scheduler_light_publish_budget_max_units,
+        poll_scheduler_light_publish_budget_ms: diagnostics.scheduler_light_publish_budget_ms,
+        poll_scheduler_light_publish_spent_units: diagnostics.scheduler_light_publish_spent_units,
+        poll_scheduler_light_publish_spent_ms: diagnostics.scheduler_light_publish_spent_ms,
+        poll_scheduler_pending_worldgen_publication_chunk_limit: diagnostics
+            .scheduler_pending_worldgen_publication_chunk_limit,
         poll_scheduler_completed_feature_jobs_drained: diagnostics
             .scheduler_completed_feature_jobs_drained,
         poll_scheduler_feature_chunks_published: diagnostics.scheduler_feature_chunks_published,

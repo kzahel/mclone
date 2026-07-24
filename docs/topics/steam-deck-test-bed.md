@@ -124,6 +124,8 @@ pnpm steamdeck:launch
 pnpm steamdeck:stop
 pnpm steamdeck:smoke
 pnpm steamdeck:perf
+pnpm steamdeck:matrix
+pnpm steamdeck:matrix:smoke
 pnpm steamdeck:pull-results -- RUN_ID
 
 pnpm steamdeck:build:steamrt4
@@ -706,6 +708,121 @@ the screenshot happened during severe main-thread/accounting collapse, with a
 separate Gamescope or explicit-sync failure possible. Keep the controlled
 repro lane and automatic session recovery, but do not treat screenshot capture
 as the root cause without a panel-enabled recurrence.
+
+## 2026-07-24 Stationary And Traversal Matrix
+
+The Deck lane now drives stationary and moving camera tests without a human
+loading a world, changing render distance, flying, or positioning the view.
+`--window-camera-velocity X,Y,Z` translates the diagnostic eye and target in
+world units per second and immediately reconciles the local player/server
+interest center. `--window-frame-report-seconds` gives moving cases the same
+wall-clock duration and therefore the same travel distance even when their
+frame rates differ.
+
+An idle-gated report now settles twice: once through ordinary startup and once
+after restoring and reconciling the exact diagnostic camera. The gate requires
+the target loading radius, server generation/publication queues, target render
+work, compile work, and upload work to remain clear across three simulation
+ticks. This prevents a fast but visibly incomplete row from being accepted as
+a rendering improvement. It deliberately does not wait for all scheduled
+fluid simulation to end.
+
+`pnpm steamdeck:matrix` builds in SteamRT4, wakes the native panel, and runs:
+
+- stationary oblique and top-down views at RD5, RD8, RD10, and RD13;
+- top-down traversal at 16 blocks/second for 20 seconds at the same distances;
+- RD13 oblique traversal; and
+- an RD13 top-down traversal A/B with adaptive render admission enabled.
+
+Each row records frame/surface timing, render and culling load, server and
+publication-budget state, generation/update/render queues, rebuild/upload
+work, process CPU use, GPU busy/clock/temperature, memory, and thread count.
+The summarizer trims system samples to the measured frame interval. The smoke
+variant proves the settled stationary-to-traversal transition with two RD5
+rows.
+
+The first distance-correct full run was
+`20260724T122203Z-93ce5851e860-perf-matrix-3546078`. It used dirty-tree
+SteamRT4 artifact SHA-256
+`e0c3b3b34c6f49a6a1ce5da6df97575c539bd00b6bf91e21b42bda8164a3e871`,
+completed all 14 rows, restored the interactive shortcut, slept only the
+internal panel, and left SSH reachable. Key native-panel results were:
+
+| Case | FPS | p95 frame | p95 encode | Avg drawn sections | Avg CPU cores | Avg GPU |
+|---|---:|---:|---:|---:|---:|---:|
+| stationary top-down RD5 | 89.8 | 12.50 ms | 5.34 ms | 282 | 0.70 | 15.2% |
+| stationary top-down RD10 | 86.1 | 16.29 ms | 13.32 ms | 1,053 | 1.28 | 27.5% |
+| stationary top-down RD13 | 68.2 | 21.10 ms | 20.09 ms | 1,151 | 1.61 | 39.5% |
+| traverse top-down RD5 | 89.8 | 13.12 ms | 6.71 ms | 320 | 1.74 | 29.7% |
+| traverse top-down RD10 | 68.4 | 21.26 ms | 16.20 ms | 1,047 | 2.59 | 48.5% |
+| traverse top-down RD13 | 46.1 | 28.02 ms | 26.09 ms | 1,178 | 2.96 | 55.9% |
+| traverse oblique RD13 | 54.0 | 24.62 ms | 21.90 ms | 546 | 2.83 | 38.2% |
+
+Every traversal covered approximately 320 blocks. RD5/RD8/RD10/RD13 published
+253/343/403/489 feature chunks respectively. The maximum publication backlog
+was 2/14/17/22 chunks and the worldgen mailbox itself never exceeded one job.
+The client update queue stayed almost empty, with maximum oldest-applied ages
+between 47 and 121 ms. At RD13 the pending render-chunk set nevertheless grew
+to 250 while only two compile jobs were pending. Adaptive render admission did
+not improve this row: 45.8 versus 46.1 FPS, near-identical frame tails, draw
+counts, publication counts, and render queue depth.
+
+Disabling adaptive publication from process start is not a valid RD13
+comparison. In reconnaissance run
+`20260724T120439Z-93ce5851e860-perf-matrix-3533259`, that row could not reach
+the complete idle gate within 120 seconds and wrote no frame report. Earlier
+incomplete-camera runs made the same policy look artificially fast because
+most terrain had not reached the renderer. Keep completeness and equal travel
+as benchmark invariants.
+
+### Interpretation and next optimization order
+
+The high-altitude loss is primarily CPU draw preparation/encoding, not simple
+fill rate. Top-down RD13 traversal raises average visible draws from 546 to
+1,178 sections and encode p95 from 21.90 to 26.09 ms. GPU busy also rises from
+38.2% to 55.9%, so view-dependent fragment/geometry load is real, but the GPU
+is not saturated while the CPU encode time already exceeds the 11.125 ms
+90 Hz period. A five-second live RD13 sample measured the main/render thread at
+93.6% of one logical CPU, the integrated-server thread at 57.1%, and one render
+compile worker at 16.6%. That is only about 1.67 of the Deck's eight logical
+CPUs, explaining a low aggregate meter while the latency-critical main thread
+is effectively full.
+
+Freshly idle does not mean terrain-static. Stationary rows began with zero
+generation jobs and publications, yet rebuilt 400-834 sections in 20 seconds
+and ended with 116-367 scheduled fluid ticks. Top-down RD13 improved from
+59.4 FPS in the first quarter to 77.9 in the last as quarter rebuilds fell from
+237 to 67. Frames that happened to accept no rebuilt section averaged 80.1 FPS;
+frames accepting rebuild work averaged 53.6 FPS. The older ten-minute soak
+eventually held 90 Hz once this activity decayed. Therefore benchmark both a
+freshly settled world and a time-soaked world, and add a scheduled-fluid freeze
+A/B before treating remesh cost as unavoidable steady-state rendering.
+
+The measured low-hanging CPU candidates, in order, are:
+
+1. Cache `ChunkDistanceManager::active_levels` across unchanged tickets.
+   Stationary server ticks currently rebuild the full propagated `BTreeMap`
+   repeatedly; RD13 scheduler p95 was 40-42 ms stationary and 82-120 ms during
+   traversal.
+2. Remove diagnostic full-set scans from every frame. Scene preparation calls
+   `pending_render_chunk_count` before and after work; each call allocates a
+   `BTreeSet`, walks dirty/resident/inflight sections, and repeatedly looks up
+   client snapshots. The traversal-ready stamp similarly reconstructs the
+   complete loaded-chunk set before discovering that a stationary frame did
+   not change it. Use mutation generations/cached counters and refresh rich
+   diagnostics at their publication cadence.
+3. Cache static-camera cull/draw plans by camera and render-generation stamp.
+   For moving top-down views, reduce per-section CPU encoding with spatial
+   hierarchy plus batching/indirect or multi-draw work; cache reuse alone
+   cannot solve traversal.
+4. Attribute scheduled-fluid mutations separately, then coalesce dirty-section
+   marking and avoid rebuilding unchanged or offscreen sections. Preserve
+   vanilla simulation semantics; a freeze row is diagnostic, not a proposed
+   gameplay default.
+
+No renderer or scheduler optimization was applied in this matrix slice. These
+are measured candidates for focused A/B changes, with RD5 traversal retained
+as the frame-pacing guardrail and RD13 as the pressure case.
 
 ## Bring-up Ledger
 

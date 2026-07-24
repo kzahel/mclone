@@ -53,6 +53,7 @@ const DEFAULT_XR_EMULATION_INPUT_FRAMES: usize = 8;
 const MAX_XR_EMULATION_INPUT_FRAMES: usize = 600;
 const DEFAULT_WINDOW_FRAME_REPORT_FRAMES: usize = 3600;
 const MAX_WINDOW_FRAME_REPORT_FRAMES: usize = 72000;
+const MAX_WINDOW_FRAME_REPORT_SECONDS: f64 = 3600.0;
 const MIN_WORLDGEN_SHOWCASE_RENDER_DISTANCE: u32 = 16;
 const DEFAULT_WINDOW_WIDTH: u32 = 1280;
 const DEFAULT_WINDOW_HEIGHT: u32 = 900;
@@ -144,8 +145,10 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
     "--warm-world-swap-smoke",
     "--window-frame-report",
     "--window-frame-report-frames",
+    "--window-frame-report-seconds",
     "--window-camera-eye",
     "--window-camera-target",
+    "--window-camera-velocity",
     "--worldgen-showcase-card",
     "--xr-clear-smoke",
     "--xr-debug-ui",
@@ -627,7 +630,9 @@ pub(crate) enum StartupWaitPolicy {
 pub(crate) struct WindowFrameReportOptions {
     pub(crate) path: PathBuf,
     pub(crate) frames: usize,
+    pub(crate) duration_seconds: Option<f64>,
     pub(crate) camera_pose: Option<WindowCameraPose>,
+    pub(crate) camera_velocity: Option<[f32; 3]>,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -908,8 +913,10 @@ impl Cli {
         let mut window_frame_report_path = None;
         let mut window_frame_report_frames = DEFAULT_WINDOW_FRAME_REPORT_FRAMES;
         let mut window_frame_report_frames_explicit = false;
+        let mut window_frame_report_seconds = None;
         let mut window_camera_eye = None;
         let mut window_camera_target = None;
+        let mut window_camera_velocity = None;
         let mut movement_perf = false;
         let mut timedemo = false;
         let mut frame_budget_probe = false;
@@ -1493,11 +1500,18 @@ impl Cli {
                     window_frame_report_frames =
                         parse_window_frame_report_frames_arg(&arg, args.next())?;
                 }
+                "--window-frame-report-seconds" => {
+                    window_frame_report_seconds =
+                        Some(parse_window_frame_report_seconds_arg(&arg, args.next())?);
+                }
                 "--window-camera-eye" => {
                     window_camera_eye = Some(parse_f32_vec3_arg(&arg, args.next())?);
                 }
                 "--window-camera-target" => {
                     window_camera_target = Some(parse_f32_vec3_arg(&arg, args.next())?);
+                }
+                "--window-camera-velocity" => {
+                    window_camera_velocity = Some(parse_f32_vec3_arg(&arg, args.next())?);
                 }
                 "--platform-profile" => {
                     platform_profile_explicit = true;
@@ -1684,6 +1698,14 @@ impl Cli {
         if window_frame_report_frames_explicit && window_frame_report_path.is_none() {
             bail!("--window-frame-report-frames requires --window-frame-report");
         }
+        if window_frame_report_seconds.is_some() && window_frame_report_path.is_none() {
+            bail!("--window-frame-report-seconds requires --window-frame-report");
+        }
+        if window_frame_report_frames_explicit && window_frame_report_seconds.is_some() {
+            bail!(
+                "--window-frame-report-frames and --window-frame-report-seconds are mutually exclusive"
+            );
+        }
         let window_camera_pose = match (window_camera_eye, window_camera_target) {
             (None, None) => None,
             (Some(_), None) => {
@@ -1704,6 +1726,16 @@ impl Cli {
                 Some(WindowCameraPose { eye, target })
             }
         };
+        if let Some(velocity) = window_camera_velocity {
+            if window_camera_pose.is_none() {
+                bail!(
+                    "--window-camera-velocity requires --window-camera-eye and --window-camera-target"
+                );
+            }
+            if velocity == [0.0; 3] {
+                bail!("--window-camera-velocity must contain a non-zero component");
+            }
+        }
         if platform_profile_explicit
             && (mode.is_some()
                 || perf_mode_count > 0
@@ -2287,7 +2319,9 @@ impl Cli {
                 frame_report: window_frame_report_path.map(|path| WindowFrameReportOptions {
                     path,
                     frames: window_frame_report_frames,
+                    duration_seconds: window_frame_report_seconds,
                     camera_pose: window_camera_pose,
+                    camera_velocity: window_camera_velocity,
                 }),
             }),
         }
@@ -2481,6 +2515,17 @@ fn parse_window_frame_report_frames_arg(flag: &str, value: Option<String>) -> Re
         bail!("{flag} must be between 1 and {MAX_WINDOW_FRAME_REPORT_FRAMES}");
     }
     Ok(parsed)
+}
+
+fn parse_window_frame_report_seconds_arg(flag: &str, value: Option<String>) -> Result<f64> {
+    let raw = value.with_context(|| format!("{flag} requires seconds"))?;
+    let seconds = raw
+        .parse::<f64>()
+        .with_context(|| format!("invalid {flag} value `{raw}`"))?;
+    if !seconds.is_finite() || seconds <= 0.0 || seconds > MAX_WINDOW_FRAME_REPORT_SECONDS {
+        bail!("{flag} must be finite and in (0, {MAX_WINDOW_FRAME_REPORT_SECONDS}]");
+    }
+    Ok(seconds)
 }
 
 fn parse_frame_budget_frames_arg(flag: &str, value: Option<String>) -> Result<usize> {
@@ -2821,7 +2866,7 @@ fn print_help() {
     println!(
         "mclone-native-client\n\n\
          Usage:\n\
-           mclone-native-client [--platform-profile desktop|steamos] [--width 1280] [--height 900] [--menu|--start-in-world true|false] [--startup-wait none|progress|playable|idle|frames:N] [--window-frame-report /tmp/mclone-window.json] [--window-frame-report-frames 3600] [--window-camera-eye x,y,z --window-camera-target x,y,z] [--seed 12345] [--generation-profile overworld|flat-grass-v1|small-island-v1|mclone-overworld-v1|alpha-v1|beta-v1|authored-only] [--world-topology plane|cylinder-x|cylinder-x:PERIOD_CHUNKS] [--alpha-winter true|false] [--warm-world-standby-seed -98765|--live-diorama-world-dir ./island-b] [--live-diorama-source-region 0,0,0,3,5] [--live-diorama-source-anchor 8.5,65,8.5] [--live-diorama-composition-anchor 8,65.03125,8] [--live-diorama-scale 0.0625] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-capacity default|derived] [--render-compile-workers 1] [--render-compile-max-pending-jobs 4] [--world-root ./worlds] [--world-dir ./world|--transient] [--far-lod true|false] [--startup-lod-prewarm true|false] [--movement-mode walk|fly|hand-push|thruster] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--adaptive-render-admission-budget true|false] [--debug-passive-showcase true|false] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
+           mclone-native-client [--platform-profile desktop|steamos] [--width 1280] [--height 900] [--menu|--start-in-world true|false] [--startup-wait none|progress|playable|idle|frames:N] [--window-frame-report /tmp/mclone-window.json] [--window-frame-report-frames 3600|--window-frame-report-seconds 20] [--window-camera-eye x,y,z --window-camera-target x,y,z] [--window-camera-velocity x,y,z] [--seed 12345] [--generation-profile overworld|flat-grass-v1|small-island-v1|mclone-overworld-v1|alpha-v1|beta-v1|authored-only] [--world-topology plane|cylinder-x|cylinder-x:PERIOD_CHUNKS] [--alpha-winter true|false] [--warm-world-standby-seed -98765|--live-diorama-world-dir ./island-b] [--live-diorama-source-region 0,0,0,3,5] [--live-diorama-source-anchor 8.5,65,8.5] [--live-diorama-composition-anchor 8,65.03125,8] [--live-diorama-scale 0.0625] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-capacity default|derived] [--render-compile-workers 1] [--render-compile-max-pending-jobs 4] [--world-root ./worlds] [--world-dir ./world|--transient] [--far-lod true|false] [--startup-lod-prewarm true|false] [--movement-mode walk|fly|hand-push|thruster] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--adaptive-render-admission-budget true|false] [--debug-passive-showcase true|false] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --actor-review-sheet /tmp/mclone-actor-review.png [--width 1152] [--height 512] [--fullbright true|false]\n\
            mclone-native-client --actor-walk-review /tmp/mclone-actor-walk-review.png [--actor-walk-review-video /tmp/mclone-actor-walk-review.mp4] [--width 360] [--height 360] [--walk-review-frames 24] [--walk-review-fps 12] [--walk-review-cycles 2] [--fullbright true|false]\n\
@@ -2846,6 +2891,6 @@ fn print_help() {
            mclone-native-client --desktop-xr [--no-window] [--frames N|--xr-forever] [--view-pose X,Y,Z,YAW_DEGREES] [--xr-underwater-mode midpoint|per-eye] [--xr-debug-ui none|pause|controls] [scene/render options as --xr-mclone-smoke]\n\n\
         --desktop-xr is the real desktop OpenXR run verb: it renders the same mclone world as --xr-mclone-smoke but is persistent by default (unbounded frames; pass --frames N only to bound a run) and spawns a desktop companion window unless --no-window is passed. Quit the run by closing the companion window (a non-headset quit) or from the headset system menu; both shut the OpenXR session down gracefully. --xr-clear-smoke and --xr-mclone-smoke remain the frame-bounded CI/liveness gates.\n\
          Window --width and --height select the initial physical extent. --platform-profile steamos requests borderless fullscreen and caps only the internal world render above a 1080p-class budget; screen-space UI remains at native output resolution.\n\
-         Window mode streams chunks around a collision-backed local player with F1 controls, WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, F5 camera view toggle, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane and loading-progress toggle, F3 Mclone worldgen-lens toggle, F4 worldgen-lens layer cycle, O section-occlusion toggle, L fullbright toggle, F7 debug physics cube shot, F8 developer renderer-resource rebuild, and F9 developer render-scale rebuild cycle. Use --world-root to choose the menu-managed local world catalog directory. Use --world-dir to open a persistent SQLite-backed local world directory directly; with --transient, local worlds and the menu catalog use transient storage. Use --generation-profile authored-only for a persistence-backed world whose missing chunks are deterministic void instead of overworld terrain. Use --world-topology cylinder-x for the internal 32-chunk Flat Grass cylinder authority fixture; cylinder-x:PERIOD_CHUNKS overrides its period. Use --worldgen-showcase-card to capture top-down, coastline, and elevated views from one warmed transient world, write the labeled card and source PNGs, and record a JSON receipt for repeatable seed comparison. Use --warm-world-standby-seed to create one launch-only detached local standby and a runtime-only opaque gate near each world's accepted spawn; the gate stays closed while CPU/GPU state warms, then walking through selects the other retained world. Use --live-diorama-world-dir instead to open a persistent authored fixture as bounded, placed opaque/cutout geometry; source-region, source-anchor, composition-anchor, and scale flags override its provisional 0,0 radius-zero / sections 3..5 / 1:16 table placement. Gate and diorama presentations are mutually exclusive. Aim at a fully warmed diorama and use/right-click to select it through a short scene-owned blink; the old active world appears on the paired table and can be selected to return. --live-diorama-smoke writes A-only, front/side/behind A+B, synthetic-stereo, flat and stereo A-to-B-to-A activation, and before/after authoritative B-mutation PNGs plus a schema-versioned JSON receipt. --live-diorama-soak-seconds adds a capture-free post-mutation orbit/bounds soak. The tilde debug pane shows readiness/failure state. --warm-world-standby-cadence optionally slows only the retained standby and restores the authored active cadence before selection. --warm-world-swap-smoke performs the deterministic walking A-to-B-to-A proof; --warm-world-cost-sample-ms adds paired one-world/two-world process sampling to that lane. Use --movement-mode to choose the shared initial movement model; collision compatibility follows the shared settings reducer. Use --movement-speed-multiplier to scale local-player walking speed; no-clip fly speed remains a separate menu control. Use --first-person-player true to render the local player body in first-person while hiding head-authored figure parts. Use --startup-wait to select host startup readiness; desktop defaults to playable, screenshots default to idle, and frames:N adds offscreen warmup frames before saving the last capture. --xr-emulation-screenshot renders the shared stereo scene without initializing OpenXR; --width and --height are per-eye, and repeatable --xr-emulation-key physical codes feed the shared keyboard adapter into XR locomotion before capture. Use --window-frame-report to run the live winit/swapchain path for N rendered frames, write surface acquire/encode/submit/present timing JSON, then exit. Use --simulation-cadence HOST/GAMEPLAY/PHYSICS (alias --cadence) to pick a local integrated-server developer cadence such as 60/20/60; lower-rate lanes must divide the host rate, and higher-rate lanes must be integer substeps. The shared scheduler publication controller is the local-integrated default; use --adaptive-chunk-publication-budget false to force the fixed floor for comparison, and remote dedicated sessions keep it off. Use --adaptive-render-admission-budget true to test the shared render admission controller on the live local-integrated desktop path. Render compile in-flight capacity defaults to 4 jobs; use --render-compile-capacity derived to apply the shared host-derived worker/max-pending capacity before startup, or use --render-compile-workers and --render-compile-max-pending-jobs as manual overrides. Use --render-compile-worker-timing false only for meter-tax A/B perf captures; it disables render compile worker busy counters without changing queueing or compile work. Use --freeze-scheduled-fluid-ticks only in startup-streaming perf to isolate initial render-streaming from water/lava scheduled tick mutation. Use --debug-passive-showcase false to disable the default nearby passive-mob showcase for spawn-parity testing. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget. Startup-streaming perf runs the local startup pump to playable, then advances a paced desktop-shaped frame loop while the requested view streams in. With --startup-streaming-persisted-world it first prewarms a temp SQLite world, reopens it through the same startup pump, and measures already-generated persisted startup/streaming."
+         Window mode streams chunks around a collision-backed local player with F1 controls, WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, F5 camera view toggle, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane and loading-progress toggle, F3 Mclone worldgen-lens toggle, F4 worldgen-lens layer cycle, O section-occlusion toggle, L fullbright toggle, F7 debug physics cube shot, F8 developer renderer-resource rebuild, and F9 developer render-scale rebuild cycle. Use --world-root to choose the menu-managed local world catalog directory. Use --world-dir to open a persistent SQLite-backed local world directory directly; with --transient, local worlds and the menu catalog use transient storage. Use --generation-profile authored-only for a persistence-backed world whose missing chunks are deterministic void instead of overworld terrain. Use --world-topology cylinder-x for the internal 32-chunk Flat Grass cylinder authority fixture; cylinder-x:PERIOD_CHUNKS overrides its period. Use --worldgen-showcase-card to capture top-down, coastline, and elevated views from one warmed transient world, write the labeled card and source PNGs, and record a JSON receipt for repeatable seed comparison. Use --warm-world-standby-seed to create one launch-only detached local standby and a runtime-only opaque gate near each world's accepted spawn; the gate stays closed while CPU/GPU state warms, then walking through selects the other retained world. Use --live-diorama-world-dir instead to open a persistent authored fixture as bounded, placed opaque/cutout geometry; source-region, source-anchor, composition-anchor, and scale flags override its provisional 0,0 radius-zero / sections 3..5 / 1:16 table placement. Gate and diorama presentations are mutually exclusive. Aim at a fully warmed diorama and use/right-click to select it through a short scene-owned blink; the old active world appears on the paired table and can be selected to return. --live-diorama-smoke writes A-only, front/side/behind A+B, synthetic-stereo, flat and stereo A-to-B-to-A activation, and before/after authoritative B-mutation PNGs plus a schema-versioned JSON receipt. --live-diorama-soak-seconds adds a capture-free post-mutation orbit/bounds soak. The tilde debug pane shows readiness/failure state. --warm-world-standby-cadence optionally slows only the retained standby and restores the authored active cadence before selection. --warm-world-swap-smoke performs the deterministic walking A-to-B-to-A proof; --warm-world-cost-sample-ms adds paired one-world/two-world process sampling to that lane. Use --movement-mode to choose the shared initial movement model; collision compatibility follows the shared settings reducer. Use --movement-speed-multiplier to scale local-player walking speed; no-clip fly speed remains a separate menu control. Use --first-person-player true to render the local player body in first-person while hiding head-authored figure parts. Use --startup-wait to select host startup readiness; desktop defaults to playable, screenshots default to idle, and frames:N adds offscreen warmup frames before saving the last capture. --xr-emulation-screenshot renders the shared stereo scene without initializing OpenXR; --width and --height are per-eye, and repeatable --xr-emulation-key physical codes feed the shared keyboard adapter into XR locomotion before capture. Use --window-frame-report with either --window-frame-report-frames or --window-frame-report-seconds to run the live winit/swapchain path to that bound, write surface acquire/encode/submit/present timing JSON, then exit. A paired --window-camera-eye/--window-camera-target fixes the diagnostic view; --window-camera-velocity translates both points at the requested world-space blocks per second while reconciling player/server interest for a live traversal test. Use --simulation-cadence HOST/GAMEPLAY/PHYSICS (alias --cadence) to pick a local integrated-server developer cadence such as 60/20/60; lower-rate lanes must divide the host rate, and higher-rate lanes must be integer substeps. The shared scheduler publication controller is the local-integrated default; use --adaptive-chunk-publication-budget false to force the fixed floor for comparison, and remote dedicated sessions keep it off. Use --adaptive-render-admission-budget true to test the shared render admission controller on the live local-integrated desktop path. Render compile in-flight capacity defaults to 4 jobs; use --render-compile-capacity derived to apply the shared host-derived worker/max-pending capacity before startup, or use --render-compile-workers and --render-compile-max-pending-jobs as manual overrides. Use --render-compile-worker-timing false only for meter-tax A/B perf captures; it disables render compile worker busy counters without changing queueing or compile work. Use --freeze-scheduled-fluid-ticks only in startup-streaming perf to isolate initial render-streaming from water/lava scheduled tick mutation. Use --debug-passive-showcase false to disable the default nearby passive-mob showcase for spawn-parity testing. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget. Startup-streaming perf runs the local startup pump to playable, then advances a paced desktop-shaped frame loop while the requested view streams in. With --startup-streaming-persisted-world it first prewarms a temp SQLite world, reopens it through the same startup pump, and measures already-generated persisted startup/streaming."
     );
 }

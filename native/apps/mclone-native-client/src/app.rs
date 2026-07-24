@@ -45,7 +45,7 @@ use crate::render_cache::load_asset_source;
 use crate::scene_runtime::{WindowRuntimeStats, WindowSceneAssets};
 use crate::winit_frame_driver::{WinitFrameDriver, WinitHostEffectOutcome, WinitInputOutcome};
 use mclone_audio::{AudioEngine, AudioSettings};
-use mclone_scene::{MonoBlinkCommitStatus, MonoUiContext};
+use mclone_scene::{MonoBlinkCommitStatus, MonoSceneFrameSummary, MonoUiContext};
 
 const NO_CLIP_TOGGLE_KEY: KeyCode = KeyCode::KeyN;
 const DESKTOP_BLINK_DEBUG_KEY: KeyCode = KeyCode::KeyT;
@@ -275,6 +275,7 @@ struct ChunkApp {
     start_intent: WindowStartIntent,
     startup_wait: StartupWaitPolicy,
     frame_report: Option<WindowFrameReportRecorder>,
+    camera_traversal_elapsed_seconds: f64,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -290,6 +291,171 @@ struct WindowFrameSample {
     surface_encode_ms: f64,
     surface_submit_ms: f64,
     surface_present_ms: f64,
+    camera_eye: Option<[f32; 3]>,
+    work: Option<WindowFrameWorkSample>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct WindowFrameWorkSample {
+    section_count: usize,
+    drawn_section_count: usize,
+    frustum_section_count: usize,
+    drawn_index_count: u32,
+    server_tick_ms: f64,
+    server_reported_total_ms: f64,
+    scheduler_tick_ms: f64,
+    scheduler_adaptive_publication_budget_enabled: bool,
+    scheduler_feature_publish_budget_max_units: usize,
+    scheduler_feature_publish_budget_ms: f64,
+    scheduler_feature_publish_spent_units: usize,
+    scheduler_feature_publish_spent_ms: f64,
+    scheduler_light_publish_budget_max_units: usize,
+    scheduler_light_publish_budget_ms: f64,
+    scheduler_light_publish_spent_units: usize,
+    scheduler_light_publish_spent_ms: f64,
+    scheduler_pending_worldgen_publication_chunk_limit: usize,
+    scheduler_pending_worldgen_publication_jobs: usize,
+    scheduler_pending_worldgen_publication_chunks: usize,
+    scheduler_pending_light_publications: usize,
+    scheduler_cumulative_feature_chunks_published: u64,
+    scheduler_cumulative_light_statuses_published: u64,
+    worldgen_mailbox_pending_jobs: usize,
+    light_mailbox_pending_statuses: usize,
+    server_update_queue_depth: usize,
+    server_update_queue_bytes: usize,
+    server_update_oldest_applied_age_ms: f64,
+    update_pump_stalled: bool,
+    update_pump_stall_count: usize,
+    server_pending_jobs: usize,
+    server_pending_publications: usize,
+    pending_render_chunks_before: usize,
+    pending_render_chunks_after: usize,
+    pending_compile_jobs_before: usize,
+    pending_compile_jobs_after: usize,
+    submitted_compile_sections: usize,
+    deadline_skipped_compile_requests: usize,
+    rebuilt_sections: usize,
+    uploaded_sections: usize,
+    uploaded_vertices: u32,
+    uploaded_indices: u32,
+    upload_limited: bool,
+    upload_backpressured: bool,
+}
+
+impl WindowFrameWorkSample {
+    fn from_summary(summary: &MonoSceneFrameSummary) -> Self {
+        let upload = summary.upload;
+        Self {
+            section_count: summary.render.section_count,
+            drawn_section_count: summary.render.drawn_section_count,
+            frustum_section_count: summary.render.frustum_section_count,
+            drawn_index_count: summary.render.drawn_index_count,
+            server_tick_ms: upload.poll_server_tick_ms,
+            server_reported_total_ms: upload.poll_server_reported_total_ms,
+            scheduler_tick_ms: upload.poll_scheduler_tick_ms,
+            scheduler_adaptive_publication_budget_enabled: upload
+                .poll_scheduler_adaptive_publication_budget_enabled,
+            scheduler_feature_publish_budget_max_units: upload
+                .poll_scheduler_feature_publish_budget_max_units,
+            scheduler_feature_publish_budget_ms: upload.poll_scheduler_feature_publish_budget_ms,
+            scheduler_feature_publish_spent_units: upload
+                .poll_scheduler_feature_publish_spent_units,
+            scheduler_feature_publish_spent_ms: upload.poll_scheduler_feature_publish_spent_ms,
+            scheduler_light_publish_budget_max_units: upload
+                .poll_scheduler_light_publish_budget_max_units,
+            scheduler_light_publish_budget_ms: upload.poll_scheduler_light_publish_budget_ms,
+            scheduler_light_publish_spent_units: upload.poll_scheduler_light_publish_spent_units,
+            scheduler_light_publish_spent_ms: upload.poll_scheduler_light_publish_spent_ms,
+            scheduler_pending_worldgen_publication_chunk_limit: upload
+                .poll_scheduler_pending_worldgen_publication_chunk_limit,
+            scheduler_pending_worldgen_publication_jobs: upload
+                .poll_scheduler_pending_worldgen_publication_jobs,
+            scheduler_pending_worldgen_publication_chunks: upload
+                .poll_scheduler_pending_worldgen_publication_chunks,
+            scheduler_pending_light_publications: upload.poll_scheduler_pending_light_publications,
+            scheduler_cumulative_feature_chunks_published: upload
+                .poll_scheduler_cumulative_feature_chunks_published,
+            scheduler_cumulative_light_statuses_published: upload
+                .poll_scheduler_cumulative_light_statuses_published,
+            worldgen_mailbox_pending_jobs: upload.poll_scheduler_worldgen_mailbox_pending_jobs,
+            light_mailbox_pending_statuses: upload.poll_scheduler_light_mailbox_pending_statuses,
+            server_update_queue_depth: upload.server_update_queue_depth,
+            server_update_queue_bytes: upload.server_update_queue_bytes,
+            server_update_oldest_applied_age_ms: upload.server_update_oldest_applied_age_ms,
+            update_pump_stalled: upload.update_pump_stalled,
+            update_pump_stall_count: upload.update_pump_stall_count,
+            server_pending_jobs: upload.server_pending_jobs,
+            server_pending_publications: upload.server_pending_publications,
+            pending_render_chunks_before: upload.pending_render_chunks_before,
+            pending_render_chunks_after: upload.pending_render_chunks_after,
+            pending_compile_jobs_before: upload.pending_compile_jobs_before,
+            pending_compile_jobs_after: upload.pending_compile_jobs_after,
+            submitted_compile_sections: upload.submitted_compile_section_count,
+            deadline_skipped_compile_requests: upload.deadline_skipped_compile_request_count,
+            rebuilt_sections: upload.rebuilt_section_count,
+            uploaded_sections: upload.uploaded_section_count,
+            uploaded_vertices: upload.uploaded_vertex_count,
+            uploaded_indices: upload.uploaded_index_count,
+            upload_limited: upload.upload_limited,
+            upload_backpressured: upload.upload_backpressured,
+        }
+    }
+
+    fn json(self) -> Value {
+        json!({
+            "render": {
+                "section_count": self.section_count,
+                "drawn_section_count": self.drawn_section_count,
+                "frustum_section_count": self.frustum_section_count,
+                "drawn_index_count": self.drawn_index_count,
+            },
+            "server": {
+                "tick_ms": self.server_tick_ms,
+                "reported_total_ms": self.server_reported_total_ms,
+                "update_queue_depth": self.server_update_queue_depth,
+                "update_queue_bytes": self.server_update_queue_bytes,
+                "update_oldest_applied_age_ms": self.server_update_oldest_applied_age_ms,
+                "update_pump_stalled": self.update_pump_stalled,
+                "update_pump_stall_count": self.update_pump_stall_count,
+                "pending_jobs": self.server_pending_jobs,
+                "pending_publications": self.server_pending_publications,
+            },
+            "scheduler": {
+                "tick_ms": self.scheduler_tick_ms,
+                "adaptive_publication_budget_enabled": self.scheduler_adaptive_publication_budget_enabled,
+                "feature_publish_budget_max_units": self.scheduler_feature_publish_budget_max_units,
+                "feature_publish_budget_ms": self.scheduler_feature_publish_budget_ms,
+                "feature_publish_spent_units": self.scheduler_feature_publish_spent_units,
+                "feature_publish_spent_ms": self.scheduler_feature_publish_spent_ms,
+                "light_publish_budget_max_units": self.scheduler_light_publish_budget_max_units,
+                "light_publish_budget_ms": self.scheduler_light_publish_budget_ms,
+                "light_publish_spent_units": self.scheduler_light_publish_spent_units,
+                "light_publish_spent_ms": self.scheduler_light_publish_spent_ms,
+                "pending_worldgen_publication_chunk_limit": self.scheduler_pending_worldgen_publication_chunk_limit,
+                "pending_worldgen_publication_jobs": self.scheduler_pending_worldgen_publication_jobs,
+                "pending_worldgen_publication_chunks": self.scheduler_pending_worldgen_publication_chunks,
+                "pending_light_publications": self.scheduler_pending_light_publications,
+                "cumulative_feature_chunks_published": self.scheduler_cumulative_feature_chunks_published,
+                "cumulative_light_statuses_published": self.scheduler_cumulative_light_statuses_published,
+                "worldgen_mailbox_pending_jobs": self.worldgen_mailbox_pending_jobs,
+                "light_mailbox_pending_statuses": self.light_mailbox_pending_statuses,
+            },
+            "render_stream": {
+                "pending_render_chunks_before": self.pending_render_chunks_before,
+                "pending_render_chunks_after": self.pending_render_chunks_after,
+                "pending_compile_jobs_before": self.pending_compile_jobs_before,
+                "pending_compile_jobs_after": self.pending_compile_jobs_after,
+                "submitted_compile_sections": self.submitted_compile_sections,
+                "deadline_skipped_compile_requests": self.deadline_skipped_compile_requests,
+                "rebuilt_sections": self.rebuilt_sections,
+                "uploaded_sections": self.uploaded_sections,
+                "uploaded_vertices": self.uploaded_vertices,
+                "uploaded_indices": self.uploaded_indices,
+                "upload_limited": self.upload_limited,
+                "upload_backpressured": self.upload_backpressured,
+            },
+        })
+    }
 }
 
 impl WindowFrameSample {
@@ -306,6 +472,8 @@ impl WindowFrameSample {
             "surface_encode_ms": self.surface_encode_ms,
             "surface_submit_ms": self.surface_submit_ms,
             "surface_present_ms": self.surface_present_ms,
+            "camera_eye": self.camera_eye,
+            "work": self.work.map(WindowFrameWorkSample::json),
         })
     }
 }
@@ -313,22 +481,26 @@ impl WindowFrameSample {
 #[derive(Debug)]
 struct WindowFrameReportRecorder {
     options: WindowFrameReportOptions,
-    start: Instant,
+    recorded_wall_ms: f64,
     frames: Vec<WindowFrameSample>,
 }
 
 impl WindowFrameReportRecorder {
     fn new(options: WindowFrameReportOptions) -> Self {
         Self {
-            frames: Vec::with_capacity(options.frames),
+            frames: Vec::with_capacity(options.frames.min(72000)),
             options,
-            start: Instant::now(),
+            recorded_wall_ms: 0.0,
         }
     }
 
     fn record(&mut self, sample: WindowFrameSample) -> bool {
+        self.recorded_wall_ms += sample.frame_wall_ms;
         self.frames.push(sample);
-        self.frames.len() >= self.options.frames
+        self.options.duration_seconds.map_or_else(
+            || self.frames.len() >= self.options.frames,
+            |seconds| self.recorded_wall_ms >= seconds * 1_000.0,
+        )
     }
 
     fn write(&self, app: &ChunkApp) -> Result<()> {
@@ -394,6 +566,19 @@ impl WindowFrameReportRecorder {
             json!({
                 "eye": pose.eye,
                 "target": pose.target,
+                "velocity_blocks_per_second": self.options.camera_velocity,
+            })
+        });
+        let final_camera_pose_json = self.options.camera_pose.map(|pose| {
+            let delta = self
+                .options
+                .camera_velocity
+                .unwrap_or([0.0; 3])
+                .map(|component| component * app.camera_traversal_elapsed_seconds as f32);
+            json!({
+                "eye": translate_camera_point(pose.eye, delta),
+                "target": translate_camera_point(pose.target, delta),
+                "traversal_elapsed_seconds": app.camera_traversal_elapsed_seconds,
             })
         });
         let render_options_json = json!({
@@ -480,11 +665,13 @@ impl WindowFrameReportRecorder {
             "git_commit": crate::git_short_commit(),
             "git_dirty": crate::git_dirty(),
             "debug_assertions": cfg!(debug_assertions),
-            "requested_frames": self.options.frames,
+            "requested_frames": self.options.duration_seconds.is_none().then_some(self.options.frames),
+            "requested_seconds": self.options.duration_seconds,
             "frames": self.frames.len(),
-            "elapsed_wall_ms": elapsed_ms(self.start.elapsed()),
+            "elapsed_wall_ms": self.recorded_wall_ms,
             "scene": scene_json,
             "camera_pose": camera_pose_json,
+            "final_camera_pose": final_camera_pose_json,
             "render_options": render_options_json,
             "window": window_json,
             "surface": surface_json,
@@ -597,6 +784,14 @@ fn window_percentile(sorted_values: &[f64], quantile: f64) -> f64 {
     sorted_values[index]
 }
 
+fn translate_camera_point(point: [f32; 3], delta: [f32; 3]) -> [f32; 3] {
+    [
+        point[0] + delta[0],
+        point[1] + delta[1],
+        point[2] + delta[2],
+    ]
+}
+
 fn runtime_stats_json(stats: WindowRuntimeStats) -> Value {
     json!({
         "host_mode": format!("{:?}", stats.host_mode),
@@ -647,10 +842,17 @@ fn runtime_stats_json(stats: WindowRuntimeStats) -> Value {
         "entity_ticking_chunks": stats.entity_ticking_chunks,
         "last_tick": stats.last_tick,
         "last_simulation_tick": stats.last_simulation_tick,
+        "last_tick_unloads_processed": stats.last_tick_unloads_processed,
+        "last_simulation_block_tick_chunks": stats.last_simulation_block_tick_chunks,
+        "last_simulation_entity_tick_chunks": stats.last_simulation_entity_tick_chunks,
         "last_simulation_scheduler_tick_ms": stats.last_simulation_scheduler_tick_ms,
         "last_simulation_block_tick_ms": stats.last_simulation_block_tick_ms,
         "last_simulation_fluid_tick_ms": stats.last_simulation_fluid_tick_ms,
         "last_simulation_entity_tick_ms": stats.last_simulation_entity_tick_ms,
+        "last_simulation_fluid_ticks_executed": stats.last_simulation_fluid_ticks_executed,
+        "last_simulation_deferred_fluid_ticks": stats.last_simulation_deferred_fluid_ticks,
+        "last_simulation_fluid_mutated_blocks": stats.last_simulation_fluid_mutated_blocks,
+        "scheduled_fluid_ticks": stats.scheduled_fluid_ticks,
     })
 }
 
@@ -660,6 +862,9 @@ fn runtime_scheduler_json(diagnostics: RuntimePollDiagnostics) -> Value {
         "server_update_queue_bytes": diagnostics.server_update_queue_bytes,
         "server_pending_jobs": diagnostics.server_pending_jobs,
         "server_pending_publications": diagnostics.server_pending_publications,
+        "server_tick_ms": diagnostics.server_tick_ms,
+        "server_reported_total_ms": diagnostics.server_reported_total_ms,
+        "scheduler_tick_ms": diagnostics.scheduler_tick_ms,
         "adaptive_publication_budget_enabled": diagnostics.scheduler_adaptive_publication_budget_enabled,
         "feature_publish_budget_min_units": diagnostics.scheduler_feature_publish_budget_min_units,
         "feature_publish_budget_max_units": diagnostics.scheduler_feature_publish_budget_max_units,
@@ -673,6 +878,22 @@ fn runtime_scheduler_json(diagnostics: RuntimePollDiagnostics) -> Value {
         "light_publish_spent_units": diagnostics.scheduler_light_publish_spent_units,
         "light_publish_spent_ms": diagnostics.scheduler_light_publish_spent_ms,
         "light_publish_estimated_unit_ms": diagnostics.scheduler_light_publish_estimated_unit_ms,
+        "pending_worldgen_publication_chunk_limit": diagnostics.scheduler_pending_worldgen_publication_chunk_limit,
+        "pending_worldgen_publication_jobs": diagnostics.scheduler_pending_worldgen_publication_jobs,
+        "pending_worldgen_publication_chunks": diagnostics.scheduler_pending_worldgen_publication_chunks,
+        "pending_light_publications": diagnostics.scheduler_pending_light_publications,
+        "worldgen_mailbox_pending_jobs": diagnostics.scheduler_worldgen_mailbox_pending_jobs,
+        "light_mailbox_pending_statuses": diagnostics.scheduler_light_mailbox_pending_statuses,
+        "cumulative_feature_chunks_published": diagnostics.scheduler_cumulative_feature_chunks_published,
+        "cumulative_light_statuses_published": diagnostics.scheduler_cumulative_light_statuses_published,
+        "block_tick_ms": diagnostics.block_tick_ms,
+        "fluid_tick_ms": diagnostics.fluid_tick_ms,
+        "entity_tick_ms": diagnostics.entity_tick_ms,
+        "fluid_due_ticks": diagnostics.fluid_due_ticks,
+        "fluid_executed_ticks": diagnostics.fluid_executed_ticks,
+        "fluid_deferred_ticks": diagnostics.fluid_deferred_ticks,
+        "fluid_mutated_blocks": diagnostics.fluid_mutated_blocks,
+        "scheduled_fluid_ticks": diagnostics.scheduled_fluid_ticks,
     })
 }
 
@@ -746,6 +967,7 @@ impl ChunkApp {
             start_intent,
             startup_wait,
             frame_report: frame_report.map(WindowFrameReportRecorder::new),
+            camera_traversal_elapsed_seconds: 0.0,
         }
     }
 
@@ -821,7 +1043,21 @@ impl ChunkApp {
         self.schedule_next_redraw(event_loop);
     }
 
-    fn record_window_frame_report_sample(&mut self, status: SurfaceFrameStatus) -> bool {
+    fn record_window_frame_report_sample(
+        &mut self,
+        status: SurfaceFrameStatus,
+        summary: Option<&MonoSceneFrameSummary>,
+    ) -> bool {
+        let camera_eye = self.frame_report.as_ref().and_then(|recorder| {
+            recorder.options.camera_pose.map(|pose| {
+                let delta = recorder
+                    .options
+                    .camera_velocity
+                    .unwrap_or([0.0; 3])
+                    .map(|component| component * self.camera_traversal_elapsed_seconds as f32);
+                translate_camera_point(pose.eye, delta)
+            })
+        });
         let Some(recorder) = &mut self.frame_report else {
             return false;
         };
@@ -838,6 +1074,8 @@ impl ChunkApp {
             surface_encode_ms: timing.last_surface_encode_ms,
             surface_submit_ms: timing.last_surface_submit_ms,
             surface_present_ms: timing.last_surface_present_ms,
+            camera_eye,
+            work: summary.map(WindowFrameWorkSample::from_summary),
         })
     }
 
@@ -951,7 +1189,24 @@ impl ChunkApp {
         let Some(driver) = self.scene_driver.as_mut() else {
             return Ok(());
         };
-        driver.advance_held_input(supplemental, frame_dt.as_secs_f64())?;
+        let camera_traversal = self.frame_report.as_ref().and_then(|recorder| {
+            recorder
+                .options
+                .camera_pose
+                .zip(recorder.options.camera_velocity)
+        });
+        if let Some((pose, velocity)) = camera_traversal {
+            self.camera_traversal_elapsed_seconds += frame_dt.as_secs_f64();
+            let delta =
+                velocity.map(|component| component * self.camera_traversal_elapsed_seconds as f32);
+            driver.set_capture_camera_pose(crate::cli::WindowCameraPose {
+                eye: translate_camera_point(pose.eye, delta),
+                target: translate_camera_point(pose.target, delta),
+            })?;
+            driver.reconcile_capture_camera_pose()?;
+        } else {
+            driver.advance_held_input(supplemental, frame_dt.as_secs_f64())?;
+        }
         if !driver.ui_is_active() {
             driver.update_blink_debug();
         }
@@ -1657,6 +1912,17 @@ impl ApplicationHandler for ChunkApp {
                 event_loop.exit();
                 return;
             }
+            if self.startup_wait == StartupWaitPolicy::Idle
+                && let Err(error) = scene_driver.drive_until_idle(
+                    &surface.device,
+                    &surface.queue,
+                    DEFAULT_STARTUP_READINESS_TIMEOUT,
+                )
+            {
+                log::error!("failed to settle restored window report camera pose: {error:#}");
+                event_loop.exit();
+                return;
+            }
         }
         let audio = match AudioEngine::new(&asset_source, AudioSettings::default()) {
             Ok(audio) => Some(audio),
@@ -2028,6 +2294,10 @@ impl ApplicationHandler for ChunkApp {
                             report.submit_ms,
                             report.present_ms,
                         );
+                        let frame_report_ready = self.record_window_frame_report_sample(
+                            report.status,
+                            scene_summary.as_ref(),
+                        );
                         if let Some(driver) = &mut self.scene_driver {
                             driver.record_frame_pipeline(frame_wall_ms, rendered, scene_summary);
                         }
@@ -2049,8 +2319,6 @@ impl ApplicationHandler for ChunkApp {
                             self.mouse_lock_requested = requested;
                             self.sync_mouse_lock();
                         }
-                        let frame_report_ready =
-                            self.record_window_frame_report_sample(report.status);
                         match report.status {
                             SurfaceFrameStatus::Presented | SurfaceFrameStatus::Skipped => {
                                 if frame_report_ready {

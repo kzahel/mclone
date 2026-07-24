@@ -124,7 +124,7 @@ case "$MODE" in
         claim_interactive_instance
         exec "$BIN" --platform-profile steamos --menu
         ;;
-    smoke|perf|gamescope-repro)
+    smoke|perf|gamescope-repro|perf-matrix|perf-matrix-smoke)
         ;;
     stop)
         stop_interactive_instance
@@ -151,6 +151,127 @@ finish()
     exit "$status"
 }
 trap finish EXIT
+
+sample_client_process()
+{
+    client_pid=$1
+    output=$2
+    clock_ticks=$(getconf CLK_TCK 2>/dev/null || printf '100')
+    cpu_count=$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '1')
+    printf '# clk_tck=%s cpu_count=%s\n' "$clock_ticks" "$cpu_count" >"$output"
+    printf \
+        'unix_seconds\tprocess_ticks\tsystem_ticks\trss_kib\tdata_kib\tthreads\tgpu_busy_percent\tgpu_clock_mhz\tgpu_temp_millic\n' \
+        >>"$output"
+    while kill -0 "$client_pid" 2>/dev/null; do
+        unix_seconds=$(date +%s.%N)
+        process_ticks=$(awk '{print $14 + $15}' "/proc/$client_pid/stat" 2>/dev/null || true)
+        system_ticks=$(awk \
+            'NR == 1 { total = 0; for (i = 2; i <= NF; i++) total += $i; print total }' \
+            /proc/stat 2>/dev/null || true)
+        rss_kib=$(awk '/^VmRSS:/ {print $2}' "/proc/$client_pid/status" 2>/dev/null || true)
+        data_kib=$(awk '/^VmData:/ {print $2}' "/proc/$client_pid/status" 2>/dev/null || true)
+        threads=$(awk '/^Threads:/ {print $2}' "/proc/$client_pid/status" 2>/dev/null || true)
+        gpu_busy_percent=
+        gpu_clock_mhz=
+        gpu_temp_millic=
+        for gpu_path in /sys/class/drm/card*/device/gpu_busy_percent; do
+            [ -r "$gpu_path" ] || continue
+            gpu_busy_percent=$(cat "$gpu_path" 2>/dev/null || true)
+            gpu_device=${gpu_path%/gpu_busy_percent}
+            if [ -r "$gpu_device/pp_dpm_sclk" ]; then
+                gpu_clock_mhz=$(awk '/\*/ {gsub(/Mhz/, "", $2); print $2; exit}' \
+                    "$gpu_device/pp_dpm_sclk" 2>/dev/null || true)
+            fi
+            for temp_path in "$gpu_device"/hwmon/hwmon*/temp1_input; do
+                [ -r "$temp_path" ] || continue
+                gpu_temp_millic=$(cat "$temp_path" 2>/dev/null || true)
+                break
+            done
+            break
+        done
+        if [ -n "$process_ticks" ] && [ -n "$system_ticks" ]; then
+            printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+                "$unix_seconds" \
+                "$process_ticks" \
+                "$system_ticks" \
+                "${rss_kib:-}" \
+                "${data_kib:-}" \
+                "${threads:-}" \
+                "${gpu_busy_percent:-}" \
+                "${gpu_clock_mhz:-}" \
+                "${gpu_temp_millic:-}" \
+                >>"$output"
+        fi
+        sleep 1
+    done
+}
+
+run_matrix_case()
+{
+    case_name=$1
+    kind=$2
+    view=$3
+    render_distance=$4
+    eye=$5
+    target=$6
+    velocity=$7
+    adaptive_publication=$8
+    adaptive_admission=$9
+    report="$RESULT_DIR/$case_name.json"
+    system_samples="$RESULT_DIR/$case_name.system.tsv"
+
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+        "$case_name" \
+        "$kind" \
+        "$view" \
+        "$render_distance" \
+        "$velocity" \
+        "$adaptive_publication" \
+        "$adaptive_admission" \
+        "$case_name.json" \
+        >>"$RESULT_DIR/matrix.tsv"
+
+    set -- \
+        --platform-profile steamos \
+        --start-in-world true \
+        --startup-wait idle \
+        --transient \
+        --seed 12345 \
+        --chunk-x 0 \
+        --chunk-z 0 \
+        --render-distance "$render_distance" \
+        --simulation-cadence 60/20/60 \
+        --adaptive-chunk-publication-budget "$adaptive_publication" \
+        --adaptive-render-admission-budget "$adaptive_admission" \
+        --debug-passive-showcase false \
+        --window-camera-eye "$eye" \
+        --window-camera-target "$target" \
+        --window-frame-report "$report"
+    if [ -n "$MATRIX_SECONDS" ]; then
+        set -- "$@" --window-frame-report-seconds "$MATRIX_SECONDS"
+    else
+        set -- "$@" --window-frame-report-frames "$MATRIX_FRAMES"
+    fi
+    if [ "$velocity" != stationary ]; then
+        set -- "$@" --window-camera-velocity "$velocity"
+    fi
+
+    "$BIN" "$@" \
+        >"$RESULT_DIR/$case_name.stdout.log" \
+        2>"$RESULT_DIR/$case_name.stderr.log" &
+    client_pid=$!
+    sample_client_process "$client_pid" "$system_samples" &
+    sampler_pid=$!
+    case_status=0
+    wait "$client_pid" || case_status=$?
+    kill "$sampler_pid" 2>/dev/null || true
+    wait "$sampler_pid" 2>/dev/null || true
+    if [ ! -s "$report" ]; then
+        echo "steam-deck: matrix case $case_name did not write $report" >&2
+        return 1
+    fi
+    return "$case_status"
+}
 
 if [ "$MODE" = smoke ]; then
     "$BIN" \
@@ -202,6 +323,95 @@ elif [ "$MODE" = gamescope-repro ]; then
         --window-frame-report-frames 72000 \
         >"$RESULT_DIR/window.stdout.log" \
         2>"$RESULT_DIR/window.stderr.log"
+elif [ "$MODE" = perf-matrix ] || [ "$MODE" = perf-matrix-smoke ]; then
+    printf \
+        'case\tkind\tview\trender_distance\tvelocity\tadaptive_publication\tadaptive_admission\treport\n' \
+        >"$RESULT_DIR/matrix.tsv"
+
+    if [ "$MODE" = perf-matrix-smoke ]; then
+        MATRIX_FRAMES=300
+        MATRIX_SECONDS=
+        run_matrix_case \
+            stationary-topdown-rd5 \
+            stationary \
+            topdown \
+            5 \
+            8,196,8 \
+            8,64,8 \
+            stationary \
+            true \
+            false
+        run_matrix_case \
+            traversal-topdown-rd5 \
+            traversal \
+            topdown \
+            5 \
+            8,196,8 \
+            8,64,8 \
+            16,0,0 \
+            true \
+            false
+        exit 0
+    fi
+
+    MATRIX_FRAMES=1800
+    MATRIX_SECONDS=20
+    for render_distance in 5 8 10 13; do
+        run_matrix_case \
+            "stationary-oblique-rd$render_distance" \
+            stationary \
+            oblique \
+            "$render_distance" \
+            8,88,8 \
+            72,64,8 \
+            stationary \
+            true \
+            false
+        run_matrix_case \
+            "stationary-topdown-rd$render_distance" \
+            stationary \
+            topdown \
+            "$render_distance" \
+            8,196,8 \
+            8,64,8 \
+            stationary \
+            true \
+            false
+    done
+
+    for render_distance in 5 8 10 13; do
+        run_matrix_case \
+            "traversal-topdown-rd$render_distance" \
+            traversal \
+            topdown \
+            "$render_distance" \
+            8,196,8 \
+            8,64,8 \
+            16,0,0 \
+            true \
+            false
+    done
+
+    run_matrix_case \
+        traversal-oblique-rd13 \
+        traversal \
+        oblique \
+        13 \
+        8,88,8 \
+        72,64,8 \
+        16,0,0 \
+        true \
+        false
+    run_matrix_case \
+        traversal-topdown-rd13-admission \
+        traversal \
+        topdown \
+        13 \
+        8,196,8 \
+        8,64,8 \
+        16,0,0 \
+        true \
+        true
 else
     "$BIN" \
         --timedemo \

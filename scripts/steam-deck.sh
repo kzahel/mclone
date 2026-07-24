@@ -8,6 +8,7 @@ PAYLOAD_RUN="$REPO_ROOT/scripts/steam-deck/payload-run.sh"
 ASSET_PACK="$REPO_ROOT/reference/minecraft-1.17.1/extracted.zip"
 STEAMRT4_BUILD_SCRIPT="$REPO_ROOT/scripts/steam-deck-build-steamrt4.sh"
 SCREEN_WAKE_HELPER="$REPO_ROOT/scripts/steam-deck/screen-wake.py"
+MATRIX_SUMMARIZER="$REPO_ROOT/scripts/steam-deck/summarize-perf-matrix.mjs"
 
 DECK_BUILDER=${MCLONE_STEAM_DECK_BUILDER:-host}
 case "$DECK_BUILDER" in
@@ -66,6 +67,9 @@ Commands:
   gamescope-repro
                 Stage/upload and run the bounded elevated RD13 window used
                 for controlled Gamescope screenshot reproduction.
+  matrix        Run and summarize the native-panel stationary/traversal
+                render-distance and scheduling-policy performance matrix.
+  matrix-smoke  Run the two-row RD5 settled-start/traversal matrix smoke.
   pull-results  Pull the newest Deck result, or the optional RUN_ID argument.
 
 Environment:
@@ -576,7 +580,8 @@ pull_result()
         -av \
         -e "ssh ${SSH_OPTIONS[*]}" \
         "$DECK_USER@$DECK_HOST:$REMOTE_RESULT_ROOT/$run_id/" \
-        "$destination/"
+        "$destination/" \
+        >&2
     echo "$destination"
 }
 
@@ -611,6 +616,10 @@ run_bounded()
     register_title "$remote_dir" play
     destination=$(pull_result "$run_id")
     echo "Pulled Deck result: $destination"
+    if [[ $mode == perf-matrix || $mode == perf-matrix-smoke ]]; then
+        require_command node
+        node "$MATRIX_SUMMARIZER" "$destination"
+    fi
     set_deck_internal_screen_sleep true disabled off
     trap - EXIT
     return "$status"
@@ -690,6 +699,14 @@ case "$command" in
     gamescope-repro)
         [[ $# == 0 ]] || die "gamescope-repro takes no arguments"
         run_bounded_workflow gamescope-repro 1200
+        ;;
+    matrix)
+        [[ $# == 0 ]] || die "matrix takes no arguments"
+        run_bounded_workflow perf-matrix 5400
+        ;;
+    matrix-smoke)
+        [[ $# == 0 ]] || die "matrix-smoke takes no arguments"
+        run_bounded_workflow perf-matrix-smoke 900
         ;;
     pull-results)
         [[ $# -le 1 ]] || die "pull-results accepts at most one RUN_ID"

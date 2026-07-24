@@ -256,6 +256,7 @@ impl WinitFrameDriver {
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let start = std::time::Instant::now();
+        let mut idle_since_simulation_tick = None;
         loop {
             let render_view = self.host.mono_render_view(self.target_size)?;
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
@@ -274,10 +275,31 @@ impl WinitFrameDriver {
             )?;
             queue.submit(std::iter::once(encoder.finish()));
             device.poll(wgpu::PollType::Poll)?;
-            if self.host.local_startup_complete()
-                && self.host.pending_stream_work(render_view.camera_position) == 0
-            {
-                return Ok(());
+            let runtime_stats = self.host.runtime_stats();
+            let runtime_target_ready = runtime_stats.is_some_and(|stats| {
+                stats.loading_progress.is_none_or(|progress| {
+                    progress.target_ready_chunks >= progress.target_chunk_count
+                }) && stats.pending_jobs == 0
+                    && stats.pending_publications == 0
+                    && stats.server_update_queue_depth == 0
+            });
+            let target_render_work = self
+                .host
+                .mono_target_render_work_stats(render_view.camera_position);
+            let idle_now = self.host.local_startup_complete()
+                && runtime_target_ready
+                && target_render_work.pending_render_chunks == 0
+                && self.host.pending_stream_work(render_view.camera_position) == 0;
+            if idle_now {
+                let simulation_tick = runtime_stats
+                    .map(|stats| stats.last_simulation_tick)
+                    .unwrap_or_default();
+                let idle_tick = *idle_since_simulation_tick.get_or_insert(simulation_tick);
+                if simulation_tick.saturating_sub(idle_tick) >= 3 {
+                    return Ok(());
+                }
+            } else {
+                idle_since_simulation_tick = None;
             }
             if start.elapsed() >= timeout {
                 anyhow::bail!("desktop Mono scene did not reach idle startup before {timeout:?}");

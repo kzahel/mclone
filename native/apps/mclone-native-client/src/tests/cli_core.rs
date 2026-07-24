@@ -491,7 +491,9 @@ fn cli_parses_window_frame_report_options() {
             frame_report: Some(WindowFrameReportOptions {
                 path: PathBuf::from("/tmp/mclone-window-report.json"),
                 frames: 120,
+                duration_seconds: None,
                 camera_pose: None,
+                camera_velocity: None,
             }),
         }
     );
@@ -521,6 +523,47 @@ fn cli_parses_window_frame_report_camera_pose() {
             target: [8.0, 64.0, 8.0],
         })
     );
+    assert_eq!(frame_report.camera_velocity, None);
+}
+
+#[test]
+fn cli_parses_duration_bounded_window_frame_report() {
+    let Cli::Window {
+        frame_report: Some(frame_report),
+        ..
+    } = Cli::parse([
+        "--window-frame-report".to_owned(),
+        "/tmp/mclone-window-report.json".to_owned(),
+        "--window-frame-report-seconds".to_owned(),
+        "20".to_owned(),
+    ])
+    .unwrap()
+    else {
+        panic!("expected window frame report");
+    };
+    assert_eq!(frame_report.duration_seconds, Some(20.0));
+}
+
+#[test]
+fn cli_parses_window_frame_report_camera_velocity() {
+    let Cli::Window {
+        frame_report: Some(frame_report),
+        ..
+    } = Cli::parse([
+        "--window-frame-report".to_owned(),
+        "/tmp/mclone-window-report.json".to_owned(),
+        "--window-camera-eye".to_owned(),
+        "8,196,8".to_owned(),
+        "--window-camera-target".to_owned(),
+        "8,64,8".to_owned(),
+        "--window-camera-velocity".to_owned(),
+        "16,0,-4".to_owned(),
+    ])
+    .unwrap()
+    else {
+        panic!("expected window frame report");
+    };
+    assert_eq!(frame_report.camera_velocity, Some([16.0, 0.0, -4.0]));
 }
 
 #[test]
@@ -546,6 +589,36 @@ fn cli_rejects_incomplete_or_unbounded_window_camera_pose() {
 }
 
 #[test]
+fn cli_rejects_window_camera_velocity_without_pose_or_motion() {
+    for args in [
+        vec![
+            "--window-frame-report",
+            "/tmp/mclone-window-report.json",
+            "--window-camera-velocity",
+            "16,0,0",
+        ],
+        vec![
+            "--window-frame-report",
+            "/tmp/mclone-window-report.json",
+            "--window-camera-eye",
+            "8,196,8",
+            "--window-camera-target",
+            "8,64,8",
+            "--window-camera-velocity",
+            "0,0,0",
+        ],
+    ] {
+        let error = Cli::parse(args.into_iter().map(str::to_owned))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("requires") || error.contains("non-zero"),
+            "unexpected error for camera velocity: {error}"
+        );
+    }
+}
+
+#[test]
 fn cli_rejects_window_frame_report_for_non_window_modes() {
     let err = Cli::parse([
         "--window-frame-report".to_owned(),
@@ -560,6 +633,18 @@ fn cli_rejects_window_frame_report_for_non_window_modes() {
         .unwrap_err()
         .to_string();
     assert!(err.contains("requires --window-frame-report"));
+
+    let err = Cli::parse([
+        "--window-frame-report".to_owned(),
+        "/tmp/mclone-window-report.json".to_owned(),
+        "--window-frame-report-frames".to_owned(),
+        "120".to_owned(),
+        "--window-frame-report-seconds".to_owned(),
+        "20".to_owned(),
+    ])
+    .unwrap_err()
+    .to_string();
+    assert!(err.contains("mutually exclusive"));
 }
 
 #[test]
