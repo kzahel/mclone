@@ -1,7 +1,7 @@
 # Viewport-Driven Terrain Lab
 
-Status: implementation and local headed-WebGPU validation complete 2026-07-24;
-hosted deployment receipt pending.
+Status: completed 2026-07-24, including local and hosted headed-WebGPU
+desktop/mobile validation.
 
 Topic: `gpu-procedural-terrain`
 
@@ -215,3 +215,39 @@ contract, not a failure to honor manual detail silently.
 The first Wasm pixel attempt exposed `std::time::Instant` as unsupported on
 this target. Timing now comes from an injected browser performance clock; the
 shared scheduler no longer depends on a host time implementation.
+
+## Hosted Validation Receipt
+
+The aggregate production build emitted asset version
+`4cff438b1e95-20260724111946`. The immutable Terrain Lab payload is:
+
+- `terrain/assets/index-Cg7i8Bfp.css`;
+- `terrain/assets/index-DrdVoT1R.js`; and
+- `terrain/assets/mclone_terrain_lab_bg-B2UTZgLf.wasm`.
+
+Those assets and `terrain/index.html` were uploaded to production R2. The
+serving Worker was deployed as version
+`5575a252-3d41-48f9-b308-fa42f65220f7`.
+
+Both dedicated hosted smokes passed against
+`https://mclone.kzahel.com/terrain/` in real headed Wayland Chrome. They
+exercised synchronized comparison, map and 3D presentation, orbit, pan,
+cursor-anchored wheel zoom, Auto and manual detail, diagnostic layers, and
+continent-scale loading at desktop and phone viewports. The resulting captures
+were inspected.
+
+At the final 65.5 km Auto map request, both layouts selected `1:512`, published
+all 12 visible tiles, and settled with an empty queue. The hosted comparison
+reported:
+
+- effectively zero base mean/P95 height error;
+- 100% ocean agreement;
+- about `1.8e-8` continentalness mean error;
+- 42.56 MiB resident after the mobile multi-interaction run and 46.04 MiB
+  after desktop;
+- desktop coarse/target pixels at 49.7/229.2 ms;
+- mobile coarse/target pixels at 78.3/206.7 ms; and
+- `GPU execution: unavailable`, preserving the measurement contract.
+
+The hosted route therefore satisfies the bounded first version and closes this
+tactical.

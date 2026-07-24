@@ -2,9 +2,8 @@
 
 Topic: `gpu-procedural-terrain`
 
-Status: viewport-driven progressive Terrain Lab implementation and local
-headed-WebGPU validation completed 2026-07-24; hosted Tactical 229 receipt is
-pending. Tactical
+Status: viewport-driven progressive Terrain Lab implementation and hosted
+desktop/mobile headed-WebGPU validation completed 2026-07-24. Tactical
 [`227-web-terrain-lab-vertical-slice.md`](../tactical/227-web-terrain-lab-vertical-slice.md)
 landed the deployable, web-first Terrain Lab, shared production-reference grid,
 and one shared Rust/WGPU resident tile. Tactical
@@ -1003,8 +1002,8 @@ desktop side-by-side and phone stacked Compare pixels were inspected. Both
 show the same geography, and map view fills each panel instead of letterboxing
 an already aspect-correct viewport.
 
-The local 65.5 km Auto map selected `1:512` with 12 complete visible tiles.
-Desktop and mobile receipts measured:
+The local and hosted 65.5 km Auto maps selected `1:512` with 12 complete
+visible tiles. Desktop and mobile receipts measured:
 
 - base mean/P95 height error effectively zero;
 - 100% ocean agreement;
@@ -1026,6 +1025,15 @@ instantaneous.
 The first Wasm run exposed `std::time::Instant` as an unsupported host call.
 The renderer now accepts an injected monotonic clock from the Wasm facade;
 scheduler policy remains shared and host-neutral.
+
+Production asset version `4cff438b1e95-20260724111946` is live at
+`https://mclone.kzahel.com/terrain/`, served by Worker version
+`5575a252-3d41-48f9-b308-fa42f65220f7`. Dedicated hosted headed-Wayland
+desktop and phone smokes exercised the complete interaction flow. Both settled
+the final 65.5 km request at `1:512`, published all 12 visible tiles, and
+drained the queue. The hosted desktop/mobile runs retained about 46/43 MiB
+after their multi-interaction caches; their first complete coarse pixels
+arrived within 79 ms and target pixels within 230 ms.
 
 This proves useful navigation, bounded resident generation, and progressive
 point-sampled detail. It does not yet prove a truthful far summary. The 65.5
