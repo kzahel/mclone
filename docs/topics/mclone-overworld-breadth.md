@@ -142,6 +142,50 @@ or persistence needs it.
 | ecology | debug/passive demonstrations | biome-owned natural spawn tables, ambient life, predators, aquatic life |
 | ambience | common sky/fog/audio | climate weather, regional fog/sky/water color, particles, biome sound |
 
+## First-Party Idea Garden
+
+This is a deliberately low-commitment inbox for original Mclone world ideas.
+An entry records a feeling or possibility worth preserving; it is not an
+accepted design, promised feature, priority change, or implementation
+tactical. Promote an idea into the regional ledger, generation topic,
+Structure Lab, or its own focused topic only after it gains a concrete owner
+and review direction.
+
+### Paths, trails, and traces
+
+- Human paths could include old dirt roads, desire lines, switchbacks,
+  bridges, milestones, and routes connecting settlements, resources, and
+  ruins.
+- Animal paths could include narrow deer trails between cover, water, grazing
+  areas, salt or mineral sites, and favored ridge crossings. They should be
+  subtler, more meandering, and less completely connected than human roads.
+- Different histories should leave different marks: hoof-worn earth, a path
+  widened by carts, a road fading into grass, or a surviving bridge whose
+  destination has disappeared.
+
+### Ruined fortifications
+
+- Broken-down old castles could appear as incomplete curtain walls, isolated
+  gatehouses, collapsed towers, overgrown keeps, half-buried foundations, and
+  fragments incorporated into later paths or settlements.
+- A ruin should not need to materialize as one pristine template with a
+  random damage pass. Site plan, surviving pieces, collapse, erosion,
+  vegetation, and later reuse can be separate deterministic layers.
+
+### Layered landscape history
+
+The motivating visual is compelling because it shows more than a castle
+placed on terrain. A circulation network follows the slopes, crosses gates,
+and connects partial walls and enclosures, making the whole landscape imply a
+past use.
+
+Preserve that as a first-party design principle: generated landmarks should
+invite movement and suggest what may have happened there. Paths and ruins are
+therefore especially interesting as related regional systems rather than
+isolated decorations. A future recipe might layer natural terrain, animal
+movement traces, human routes, built landmarks, collapse, vegetation, and
+reuse while keeping each result traversable and legible at block scale.
+
 ## Three-Dimensional Geology And Rock Formations
 
 ### Current truth
