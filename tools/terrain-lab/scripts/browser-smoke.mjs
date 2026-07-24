@@ -209,17 +209,6 @@ try {
   const beforeStressRevision = Number(await shell.getAttribute("data-render-revision"));
   await page.getByRole("button", { name: "Run stress race" }).click();
   await waitForStressRace(shell, beforeStressRevision);
-  const stressMetrics = await readComparisonMetrics(shell);
-  assertLargeFieldMetrics(stressMetrics, "cold stress race");
-  const raceStates = await page.evaluate(() => {
-    window.terrainLabRaceObserver?.disconnect();
-    return window.terrainLabRaceStates ?? [];
-  });
-  if (!raceStates.some((state) => state === "true/false" || state === "false/true")) {
-    throw new Error(`CPU/GPU panels never published independently: ${raceStates.join(", ")}`);
-  }
-  await settlePaint(page);
-  await page.screenshot({ path: stressRaceCapture, fullPage: true });
   const stressBenchmark = {
     cacheEnabled: await shell.getAttribute("data-cache-enabled"),
     cacheHits: Number(await shell.getAttribute("data-cache-hits")),
@@ -229,11 +218,26 @@ try {
     effectiveSpacing: Number(await shell.getAttribute("data-effective-spacing")),
     gpuTargetMs: Number(await shell.getAttribute("data-gpu-target-ms")),
     gpuTiles: Number(await shell.getAttribute("data-request-gpu-tiles")),
-    raceStates,
+    raceStates: [],
     samplesPerAxis: Number(await shell.getAttribute("data-samples-per-axis")),
     stressUrl: page.url(),
     visibleTiles: Number(await shell.getAttribute("data-visible-tiles")),
   };
+  const stressComparison = await page
+    .locator("[data-testid='terrain-diagnostics']")
+    .innerText();
+  const stressMetrics = await readComparisonMetrics(shell);
+  assertLargeFieldMetrics(stressMetrics, "cold stress race");
+  const raceStates = await page.evaluate(() => {
+    window.terrainLabRaceObserver?.disconnect();
+    return window.terrainLabRaceStates ?? [];
+  });
+  if (!raceStates.some((state) => state === "true/false" || state === "false/true")) {
+    throw new Error(`CPU/GPU panels never published independently: ${raceStates.join(", ")}`);
+  }
+  stressBenchmark.raceStates = raceStates;
+  await settlePaint(page);
+  await page.screenshot({ path: stressRaceCapture, fullPage: true });
   if (stressBenchmark.cacheEnabled !== "false"
       || stressBenchmark.cacheHits !== 0
       || stressBenchmark.cpuTargetMs <= 0
@@ -255,7 +259,7 @@ try {
       pageCapture,
       stressRaceCapture,
     },
-    comparison: await page.locator("[data-testid='terrain-diagnostics']").innerText(),
+    comparison: stressComparison,
     comparisonMetrics,
     continentScaleMetrics,
     finalUrl,
@@ -398,6 +402,10 @@ async function waitForStressRace(shell, previousRevision) {
         && comparison === render
         && element?.getAttribute("data-cpu-target-ready") === "true"
         && element?.getAttribute("data-gpu-target-ready") === "true"
+        && Number(element?.getAttribute("data-cpu-target-ms") ?? "0") > 0
+        && Number(element?.getAttribute("data-gpu-target-ms") ?? "0") > 0
+        && Number(element?.getAttribute("data-request-cpu-tiles") ?? "0") > 0
+        && Number(element?.getAttribute("data-request-gpu-tiles") ?? "0") > 0
         && document.querySelector("[data-testid='lab-status']")
           ?.textContent?.toLowerCase().includes("ready");
     },
