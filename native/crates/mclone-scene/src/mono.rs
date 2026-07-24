@@ -89,6 +89,7 @@ impl Default for MonoUiContext {
 #[derive(Clone, Debug)]
 pub struct MonoSceneFrameSummary {
     pub render: FullFrameRenderSummary,
+    pub render_timing: FullFrameRenderTiming,
     pub timing: XrTerrainFrameTiming,
     pub upload: XrTerrainUploadSummary,
 }
@@ -781,6 +782,7 @@ impl McloneSceneHost {
             .render;
         Ok(MonoSceneFrameSummary {
             render: primary_render,
+            render_timing: FullFrameRenderTiming::default(),
             timing: summary.timing,
             upload: summary.upload,
         })
@@ -2157,7 +2159,7 @@ impl McloneSceneHost {
                 rendered
                     .map(|(summary, timing)| (summary, Some(timing), translucent_order_snapshot))
             } else {
-                render_full_frame_for_view_with_far_lod_and_opaque_gate(
+                render_full_frame_for_view_with_far_lod_and_opaque_gate_timed(
                     RenderFrameContext::new(device, queue, encoder, target),
                     depth,
                     &self.sky,
@@ -2182,12 +2184,13 @@ impl McloneSceneHost {
                     render_options,
                     world_gui,
                     |_| GuiDrawList::new(),
+                    &self.services.clock,
                     &mut render_stats,
                 )
-                .map(|summary| {
+                .map(|(summary, timing)| {
                     (
                         summary,
-                        None,
+                        Some(timing),
                         EmbeddedWorldPreviewTranslucentOrderSnapshot::default(),
                     )
                 })
@@ -2384,6 +2387,7 @@ impl McloneSceneHost {
         self.record_embedded_world_activation_frame(summary.drawn_section_count, upload, 1);
         Ok(MonoSceneFrameSummary {
             render: summary,
+            render_timing: preview_render_timing.unwrap_or_default(),
             timing,
             upload,
         })

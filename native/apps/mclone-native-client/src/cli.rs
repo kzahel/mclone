@@ -20,7 +20,7 @@ use mclone_scene::WorldgenLensLayer;
 use mclone_server::SimulationCadenceConfig;
 use mclone_ui::{
     GameDeathCause, GameHelpParent, GameOptionsCategory, GameOptionsParent, GameScreen,
-    GameStorageAction,
+    GameStorageAction, GameWorldRenderScaleMode,
 };
 
 use crate::camera::{SPECTATOR_BASE_SPEED, SPECTATOR_MAX_SPEED, SPECTATOR_MIN_SPEED};
@@ -146,6 +146,8 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
     "--window-frame-report",
     "--window-frame-report-frames",
     "--window-frame-report-seconds",
+    "--window-freeze-scheduled-fluid-ticks",
+    "--window-world-render-scale",
     "--window-camera-eye",
     "--window-camera-target",
     "--window-camera-velocity",
@@ -633,6 +635,8 @@ pub(crate) struct WindowFrameReportOptions {
     pub(crate) duration_seconds: Option<f64>,
     pub(crate) camera_pose: Option<WindowCameraPose>,
     pub(crate) camera_velocity: Option<[f32; 3]>,
+    pub(crate) world_render_scale_mode: Option<GameWorldRenderScaleMode>,
+    pub(crate) freeze_scheduled_fluid_ticks: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -914,6 +918,8 @@ impl Cli {
         let mut window_frame_report_frames = DEFAULT_WINDOW_FRAME_REPORT_FRAMES;
         let mut window_frame_report_frames_explicit = false;
         let mut window_frame_report_seconds = None;
+        let mut window_world_render_scale_mode = None;
+        let mut window_freeze_scheduled_fluid_ticks = false;
         let mut window_camera_eye = None;
         let mut window_camera_target = None;
         let mut window_camera_velocity = None;
@@ -1504,6 +1510,13 @@ impl Cli {
                     window_frame_report_seconds =
                         Some(parse_window_frame_report_seconds_arg(&arg, args.next())?);
                 }
+                "--window-world-render-scale" => {
+                    window_world_render_scale_mode =
+                        Some(parse_window_world_render_scale_arg(&arg, args.next())?);
+                }
+                "--window-freeze-scheduled-fluid-ticks" => {
+                    window_freeze_scheduled_fluid_ticks = true;
+                }
                 "--window-camera-eye" => {
                     window_camera_eye = Some(parse_f32_vec3_arg(&arg, args.next())?);
                 }
@@ -1705,6 +1718,12 @@ impl Cli {
             bail!(
                 "--window-frame-report-frames and --window-frame-report-seconds are mutually exclusive"
             );
+        }
+        if window_world_render_scale_mode.is_some() && window_frame_report_path.is_none() {
+            bail!("--window-world-render-scale requires --window-frame-report");
+        }
+        if window_freeze_scheduled_fluid_ticks && window_frame_report_path.is_none() {
+            bail!("--window-freeze-scheduled-fluid-ticks requires --window-frame-report");
         }
         let window_camera_pose = match (window_camera_eye, window_camera_target) {
             (None, None) => None,
@@ -2322,6 +2341,8 @@ impl Cli {
                     duration_seconds: window_frame_report_seconds,
                     camera_pose: window_camera_pose,
                     camera_velocity: window_camera_velocity,
+                    world_render_scale_mode: window_world_render_scale_mode,
+                    freeze_scheduled_fluid_ticks: window_freeze_scheduled_fluid_ticks,
                 }),
             }),
         }
@@ -2526,6 +2547,26 @@ fn parse_window_frame_report_seconds_arg(flag: &str, value: Option<String>) -> R
         bail!("{flag} must be finite and in (0, {MAX_WINDOW_FRAME_REPORT_SECONDS}]");
     }
     Ok(seconds)
+}
+
+fn parse_window_world_render_scale_arg(
+    flag: &str,
+    value: Option<String>,
+) -> Result<GameWorldRenderScaleMode> {
+    match value.as_deref() {
+        Some("50") | Some("0.5") | Some("half") => Ok(GameWorldRenderScaleMode::Half),
+        Some("67") | Some("0.667") | Some("two-thirds") => Ok(GameWorldRenderScaleMode::TwoThirds),
+        Some("75") | Some("0.75") | Some("three-quarters") => {
+            Ok(GameWorldRenderScaleMode::ThreeQuarters)
+        }
+        Some("100") | Some("1") | Some("1.0") | Some("native") => {
+            Ok(GameWorldRenderScaleMode::Native)
+        }
+        Some(value) => {
+            bail!("{flag} must be one of 50, 67, 75, or 100 (got `{value}`)")
+        }
+        None => bail!("{flag} requires 50, 67, 75, or 100"),
+    }
 }
 
 fn parse_frame_budget_frames_arg(flag: &str, value: Option<String>) -> Result<usize> {
@@ -2866,7 +2907,7 @@ fn print_help() {
     println!(
         "mclone-native-client\n\n\
          Usage:\n\
-           mclone-native-client [--platform-profile desktop|steamos] [--width 1280] [--height 900] [--menu|--start-in-world true|false] [--startup-wait none|progress|playable|idle|frames:N] [--window-frame-report /tmp/mclone-window.json] [--window-frame-report-frames 3600|--window-frame-report-seconds 20] [--window-camera-eye x,y,z --window-camera-target x,y,z] [--window-camera-velocity x,y,z] [--seed 12345] [--generation-profile overworld|flat-grass-v1|small-island-v1|mclone-overworld-v1|alpha-v1|beta-v1|authored-only] [--world-topology plane|cylinder-x|cylinder-x:PERIOD_CHUNKS] [--alpha-winter true|false] [--warm-world-standby-seed -98765|--live-diorama-world-dir ./island-b] [--live-diorama-source-region 0,0,0,3,5] [--live-diorama-source-anchor 8.5,65,8.5] [--live-diorama-composition-anchor 8,65.03125,8] [--live-diorama-scale 0.0625] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-capacity default|derived] [--render-compile-workers 1] [--render-compile-max-pending-jobs 4] [--world-root ./worlds] [--world-dir ./world|--transient] [--far-lod true|false] [--startup-lod-prewarm true|false] [--movement-mode walk|fly|hand-push|thruster] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--adaptive-render-admission-budget true|false] [--debug-passive-showcase true|false] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
+           mclone-native-client [--platform-profile desktop|steamos] [--width 1280] [--height 900] [--menu|--start-in-world true|false] [--startup-wait none|progress|playable|idle|frames:N] [--window-frame-report /tmp/mclone-window.json] [--window-frame-report-frames 3600|--window-frame-report-seconds 20] [--window-world-render-scale 50|67|75|100] [--window-freeze-scheduled-fluid-ticks] [--window-camera-eye x,y,z --window-camera-target x,y,z] [--window-camera-velocity x,y,z] [--seed 12345] [--generation-profile overworld|flat-grass-v1|small-island-v1|mclone-overworld-v1|alpha-v1|beta-v1|authored-only] [--world-topology plane|cylinder-x|cylinder-x:PERIOD_CHUNKS] [--alpha-winter true|false] [--warm-world-standby-seed -98765|--live-diorama-world-dir ./island-b] [--live-diorama-source-region 0,0,0,3,5] [--live-diorama-source-anchor 8.5,65,8.5] [--live-diorama-composition-anchor 8,65.03125,8] [--live-diorama-scale 0.0625] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-capacity default|derived] [--render-compile-workers 1] [--render-compile-max-pending-jobs 4] [--world-root ./worlds] [--world-dir ./world|--transient] [--far-lod true|false] [--startup-lod-prewarm true|false] [--movement-mode walk|fly|hand-push|thruster] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--adaptive-render-admission-budget true|false] [--debug-passive-showcase true|false] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --actor-review-sheet /tmp/mclone-actor-review.png [--width 1152] [--height 512] [--fullbright true|false]\n\
            mclone-native-client --actor-walk-review /tmp/mclone-actor-walk-review.png [--actor-walk-review-video /tmp/mclone-actor-walk-review.mp4] [--width 360] [--height 360] [--walk-review-frames 24] [--walk-review-fps 12] [--walk-review-cycles 2] [--fullbright true|false]\n\

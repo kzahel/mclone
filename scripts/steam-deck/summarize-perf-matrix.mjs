@@ -171,6 +171,11 @@ function summarizeRow(manifest) {
     velocity: manifest.velocity,
     adaptive_publication: manifest.adaptive_publication === "true",
     adaptive_admission: manifest.adaptive_admission === "true",
+    world_scale_percent: Number(manifest.world_scale),
+    freeze_fluids: manifest.freeze_fluids === "true",
+    compile_capacity: manifest.compile_capacity,
+    compile_workers: Number(manifest.compile_workers),
+    compile_max_pending: Number(manifest.compile_max_pending),
     frames: report.frames,
     elapsed_wall_ms: report.elapsed_wall_ms,
     average_fps:
@@ -190,6 +195,30 @@ function summarizeRow(manifest) {
     render_p95_ms: report.render.p95_ms,
     surface_acquire_p95_ms: report.surface_acquire.p95_ms,
     surface_encode_p95_ms: report.surface_encode.p95_ms,
+    gpu_total_p50_ms: report.gpu_total?.p50_ms ?? null,
+    gpu_total_p95_ms: report.gpu_total?.p95_ms ?? null,
+    gpu_terrain_p50_ms: report.gpu_terrain?.p50_ms ?? null,
+    gpu_terrain_p95_ms: report.gpu_terrain?.p95_ms ?? null,
+    pending_render_count_p95_ms: percentile(
+      workValues(work, "render_stream.pending_render_count_ms"),
+      0.95,
+    ),
+    traversal_ready_p95_ms: percentile(
+      workValues(work, "render_stream.traversal_ready_sections_ms"),
+      0.95,
+    ),
+    terrain_records_p95_ms: percentile(
+      workValues(work, "render_timing.terrain_records_ms"),
+      0.95,
+    ),
+    terrain_cull_p95_ms: percentile(
+      workValues(work, "render_timing.terrain_cull_ms"),
+      0.95,
+    ),
+    terrain_encode_p95_ms: percentile(
+      workValues(work, "render_timing.terrain_encode_ms"),
+      0.95,
+    ),
     scheduler_tick_p95_ms: percentile(workValues(work, "scheduler.tick_ms"), 0.95),
     scheduler_tick_max_ms: maximum(workValues(work, "scheduler.tick_ms")),
     server_total_p95_ms: percentile(workValues(work, "server.reported_total_ms"), 0.95),
@@ -244,6 +273,30 @@ function summarizeRow(manifest) {
       (sum, value) => sum + value,
       0,
     ),
+    fluid_due_ticks: workValues(work, "render_stream.fluid_due_ticks").reduce(
+      (sum, value) => sum + value,
+      0,
+    ),
+    fluid_executed_ticks: workValues(work, "render_stream.fluid_executed_ticks").reduce(
+      (sum, value) => sum + value,
+      0,
+    ),
+    fluid_mutated_blocks: workValues(work, "render_stream.fluid_mutated_blocks").reduce(
+      (sum, value) => sum + value,
+      0,
+    ),
+    compile_worker_count_max: maximum(
+      workValues(work, "render_stream.compile_worker_count"),
+    ),
+    completed_compile_tasks: delta(
+      workValues(work, "render_stream.completed_compile_tasks"),
+    ),
+    compile_worker_busy_ms: delta(
+      workValues(work, "render_stream.total_compile_worker_busy_ms"),
+    ),
+    compile_worker_task_max_ms: maximum(
+      workValues(work, "render_stream.max_compile_worker_task_ms"),
+    ),
     update_pump_stall_count_max: maximum(
       workValues(work, "server.update_pump_stall_count"),
     ),
@@ -274,12 +327,26 @@ fs.writeFileSync(
 );
 
 const markdown = [
-  "| Case | RD | Motion/view | FPS | p95 / p99 ms | Encode p95 | Poll p95 | Sched p95 | Draw sections | Rebuilt | CPU cores | GPU avg |",
+  "| Case | RD | Motion/view | FPS | p95 / p99 ms | Surface encode p95 | Terrain cull / encode p95 | GPU terrain p50 / p95 | Draw sections | Rebuilt | CPU cores | GPU avg |",
   "|---|---:|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",
   ...rows.map((row) => {
     const motion = `${row.kind}/${row.view}`;
-    return `| ${row.case} | ${row.render_distance} | ${motion} | ${fixed(row.average_fps, 1)} | ${fixed(row.frame_wall_p95_ms)} / ${fixed(row.frame_wall_p99_ms)} | ${fixed(row.surface_encode_p95_ms)} | ${fixed(row.runtime_poll_p95_ms)} | ${fixed(row.scheduler_tick_p95_ms)} | ${fixed(row.drawn_sections_average, 0)} | ${fixed(row.rebuilt_sections, 0)} | ${fixed(row.system?.average_cpu_cores)} | ${fixed(row.system?.gpu_busy_average_percent, 1)}% |`;
+    return `| ${row.case} | ${row.render_distance} | ${motion} | ${fixed(row.average_fps, 1)} | ${fixed(row.frame_wall_p95_ms)} / ${fixed(row.frame_wall_p99_ms)} | ${fixed(row.surface_encode_p95_ms)} | ${fixed(row.terrain_cull_p95_ms)} / ${fixed(row.terrain_encode_p95_ms)} | ${fixed(row.gpu_terrain_p50_ms)} / ${fixed(row.gpu_terrain_p95_ms)} | ${fixed(row.drawn_sections_average, 0)} | ${fixed(row.rebuilt_sections, 0)} | ${fixed(row.system?.average_cpu_cores)} | ${fixed(row.system?.gpu_busy_average_percent, 1)}% |`;
   }),
+  "",
+  "| Attribution case | Scale | Fluids | Pending count p95 | Ready stamp p95 | Records p95 | GPU total p50 / p95 | Fluid due / run / mutations |",
+  "|---|---:|---|---:|---:|---:|---:|---:|",
+  ...rows.map(
+    (row) =>
+      `| ${row.case} | ${fixed(row.world_scale_percent, 0)}% | ${row.freeze_fluids ? "frozen" : "live"} | ${fixed(row.pending_render_count_p95_ms)} | ${fixed(row.traversal_ready_p95_ms)} | ${fixed(row.terrain_records_p95_ms)} | ${fixed(row.gpu_total_p50_ms)} / ${fixed(row.gpu_total_p95_ms)} | ${fixed(row.fluid_due_ticks, 0)} / ${fixed(row.fluid_executed_ticks, 0)} / ${fixed(row.fluid_mutated_blocks, 0)} |`,
+  ),
+  "",
+  "| Worker case | Capacity | Workers | Busy ms | Completed | Task max ms | Compile q max |",
+  "|---|---|---:|---:|---:|---:|---:|",
+  ...rows.map(
+    (row) =>
+      `| ${row.case} | ${row.compile_capacity} | ${fixed(row.compile_worker_count_max ?? row.compile_workers, 0)} | ${fixed(row.compile_worker_busy_ms)} | ${fixed(row.completed_compile_tasks, 0)} | ${fixed(row.compile_worker_task_max_ms)} | ${fixed(row.render_compile_queue_max, 0)} |`,
+  ),
   "",
   "| Traversal case | Travel | Jobs / pubs max | Gen queue / mailbox max | Feature / light published | Budget avg max/spent | Saturated samples | Update max KiB / age ms | Render / compile q max | Rebuilt / uploaded |",
   "|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|",

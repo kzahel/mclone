@@ -128,6 +128,7 @@ impl WinitFrameDriver {
         entry: ClientEntryResolution,
         ui_v2_debug_overlay: bool,
         controller_preferences: &ControllerInputPreferences,
+        freeze_scheduled_fluid_ticks: bool,
     ) -> Result<Self> {
         let mut host = create_desktop_title_scene_host(
             device,
@@ -138,6 +139,9 @@ impl WinitFrameDriver {
             assets,
             asset_source,
             None,
+            crate::desktop_scene_host::DesktopSceneHostOverrides {
+                freeze_scheduled_fluid_ticks,
+            },
         )?;
         let mut ui = GameUiHost::new();
         ui.set_join_remote_addr(

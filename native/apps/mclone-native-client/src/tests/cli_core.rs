@@ -494,6 +494,8 @@ fn cli_parses_window_frame_report_options() {
                 duration_seconds: None,
                 camera_pose: None,
                 camera_velocity: None,
+                world_render_scale_mode: None,
+                freeze_scheduled_fluid_ticks: false,
             }),
         }
     );
@@ -564,6 +566,45 @@ fn cli_parses_window_frame_report_camera_velocity() {
         panic!("expected window frame report");
     };
     assert_eq!(frame_report.camera_velocity, Some([16.0, 0.0, -4.0]));
+}
+
+#[test]
+fn cli_parses_window_frame_report_attribution_controls() {
+    let Cli::Window {
+        frame_report: Some(frame_report),
+        ..
+    } = Cli::parse([
+        "--window-frame-report".to_owned(),
+        "/tmp/mclone-window-report.json".to_owned(),
+        "--window-world-render-scale".to_owned(),
+        "50".to_owned(),
+        "--window-freeze-scheduled-fluid-ticks".to_owned(),
+    ])
+    .unwrap()
+    else {
+        panic!("expected window frame report");
+    };
+    assert_eq!(
+        frame_report.world_render_scale_mode,
+        Some(mclone_ui::GameWorldRenderScaleMode::Half)
+    );
+    assert!(frame_report.freeze_scheduled_fluid_ticks);
+}
+
+#[test]
+fn cli_rejects_window_attribution_controls_without_report() {
+    for args in [
+        vec!["--window-world-render-scale", "50"],
+        vec!["--window-freeze-scheduled-fluid-ticks"],
+    ] {
+        let error = Cli::parse(args.into_iter().map(str::to_owned))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("requires --window-frame-report"),
+            "unexpected error: {error}"
+        );
+    }
 }
 
 #[test]

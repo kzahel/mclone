@@ -124,7 +124,7 @@ case "$MODE" in
         claim_interactive_instance
         exec "$BIN" --platform-profile steamos --menu
         ;;
-    smoke|perf|gamescope-repro|perf-matrix|perf-matrix-smoke)
+    smoke|perf|gamescope-repro|perf-matrix|perf-matrix-smoke|perf-matrix-attribution|perf-matrix-workers)
         ;;
     stop)
         stop_interactive_instance
@@ -217,10 +217,15 @@ run_matrix_case()
     velocity=$7
     adaptive_publication=$8
     adaptive_admission=$9
+    world_scale=${MATRIX_WORLD_SCALE:-100}
+    freeze_fluids=${MATRIX_FREEZE_FLUIDS:-false}
+    compile_capacity=${MATRIX_COMPILE_CAPACITY:-manual}
+    compile_workers=${MATRIX_COMPILE_WORKERS:-1}
+    compile_max_pending=${MATRIX_COMPILE_MAX_PENDING:-4}
     report="$RESULT_DIR/$case_name.json"
     system_samples="$RESULT_DIR/$case_name.system.tsv"
 
-    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
+    printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' \
         "$case_name" \
         "$kind" \
         "$view" \
@@ -228,6 +233,11 @@ run_matrix_case()
         "$velocity" \
         "$adaptive_publication" \
         "$adaptive_admission" \
+        "$world_scale" \
+        "$freeze_fluids" \
+        "$compile_capacity" \
+        "$compile_workers" \
+        "$compile_max_pending" \
         "$case_name.json" \
         >>"$RESULT_DIR/matrix.tsv"
 
@@ -243,10 +253,22 @@ run_matrix_case()
         --simulation-cadence 60/20/60 \
         --adaptive-chunk-publication-budget "$adaptive_publication" \
         --adaptive-render-admission-budget "$adaptive_admission" \
+        --window-world-render-scale "$world_scale" \
         --debug-passive-showcase false \
         --window-camera-eye "$eye" \
         --window-camera-target "$target" \
         --window-frame-report "$report"
+    if [ "$freeze_fluids" = true ]; then
+        set -- "$@" --window-freeze-scheduled-fluid-ticks
+    fi
+    if [ "$compile_capacity" = derived ]; then
+        set -- "$@" --render-compile-capacity derived
+    else
+        set -- \
+            "$@" \
+            --render-compile-workers "$compile_workers" \
+            --render-compile-max-pending-jobs "$compile_max_pending"
+    fi
     if [ -n "$MATRIX_SECONDS" ]; then
         set -- "$@" --window-frame-report-seconds "$MATRIX_SECONDS"
     else
@@ -323,10 +345,19 @@ elif [ "$MODE" = gamescope-repro ]; then
         --window-frame-report-frames 72000 \
         >"$RESULT_DIR/window.stdout.log" \
         2>"$RESULT_DIR/window.stderr.log"
-elif [ "$MODE" = perf-matrix ] || [ "$MODE" = perf-matrix-smoke ]; then
+elif [ "$MODE" = perf-matrix ] ||
+    [ "$MODE" = perf-matrix-smoke ] ||
+    [ "$MODE" = perf-matrix-attribution ] ||
+    [ "$MODE" = perf-matrix-workers ]; then
     printf \
-        'case\tkind\tview\trender_distance\tvelocity\tadaptive_publication\tadaptive_admission\treport\n' \
+        'case\tkind\tview\trender_distance\tvelocity\tadaptive_publication\tadaptive_admission\tworld_scale\tfreeze_fluids\tcompile_capacity\tcompile_workers\tcompile_max_pending\treport\n' \
         >"$RESULT_DIR/matrix.tsv"
+
+    MATRIX_WORLD_SCALE=100
+    MATRIX_FREEZE_FLUIDS=false
+    MATRIX_COMPILE_CAPACITY=manual
+    MATRIX_COMPILE_WORKERS=1
+    MATRIX_COMPILE_MAX_PENDING=4
 
     if [ "$MODE" = perf-matrix-smoke ]; then
         MATRIX_FRAMES=300
@@ -351,6 +382,54 @@ elif [ "$MODE" = perf-matrix ] || [ "$MODE" = perf-matrix-smoke ]; then
             16,0,0 \
             true \
             false
+        exit 0
+    fi
+
+    if [ "$MODE" = perf-matrix-attribution ]; then
+        MATRIX_FRAMES=1800
+        MATRIX_SECONDS=20
+        run_matrix_case \
+            stationary-topdown-rd13-native \
+            stationary topdown 13 8,196,8 8,64,8 stationary true false
+        MATRIX_WORLD_SCALE=50
+        run_matrix_case \
+            stationary-topdown-rd13-half \
+            stationary topdown 13 8,196,8 8,64,8 stationary true false
+        MATRIX_WORLD_SCALE=100
+        MATRIX_FREEZE_FLUIDS=true
+        run_matrix_case \
+            stationary-topdown-rd13-frozen-fluid \
+            stationary topdown 13 8,196,8 8,64,8 stationary true false
+        MATRIX_FREEZE_FLUIDS=false
+        run_matrix_case \
+            traversal-topdown-rd13-native \
+            traversal topdown 13 8,196,8 8,64,8 16,0,0 true false
+        MATRIX_WORLD_SCALE=50
+        run_matrix_case \
+            traversal-topdown-rd13-half \
+            traversal topdown 13 8,196,8 8,64,8 16,0,0 true false
+        exit 0
+    fi
+
+    if [ "$MODE" = perf-matrix-workers ]; then
+        MATRIX_FRAMES=1800
+        MATRIX_SECONDS=20
+        for render_distance in 10 13; do
+            MATRIX_COMPILE_CAPACITY=manual
+            MATRIX_COMPILE_WORKERS=1
+            MATRIX_COMPILE_MAX_PENDING=4
+            run_matrix_case \
+                "traversal-topdown-rd${render_distance}-workers1" \
+                traversal topdown "$render_distance" 8,196,8 8,64,8 16,0,0 true false
+            MATRIX_COMPILE_WORKERS=2
+            run_matrix_case \
+                "traversal-topdown-rd${render_distance}-workers2" \
+                traversal topdown "$render_distance" 8,196,8 8,64,8 16,0,0 true false
+            MATRIX_COMPILE_CAPACITY=derived
+            run_matrix_case \
+                "traversal-topdown-rd${render_distance}-derived" \
+                traversal topdown "$render_distance" 8,196,8 8,64,8 16,0,0 true false
+        done
         exit 0
     fi
 

@@ -70,6 +70,10 @@ Commands:
   matrix        Run and summarize the native-panel stationary/traversal
                 render-distance and scheduling-policy performance matrix.
   matrix-smoke  Run the two-row RD5 settled-start/traversal matrix smoke.
+  matrix-attribution
+                Run RD13 native/half-resolution and live/frozen-fluid A/Bs.
+  matrix-workers
+                Run RD10/RD13 traversal with one, two, and derived workers.
   pull-results  Pull the newest Deck result, or the optional RUN_ID argument.
 
 Environment:
@@ -616,7 +620,7 @@ run_bounded()
     register_title "$remote_dir" play
     destination=$(pull_result "$run_id")
     echo "Pulled Deck result: $destination"
-    if [[ $mode == perf-matrix || $mode == perf-matrix-smoke ]]; then
+    if [[ $mode == perf-matrix* ]]; then
         require_command node
         node "$MATRIX_SUMMARIZER" "$destination"
     fi
@@ -707,6 +711,14 @@ case "$command" in
     matrix-smoke)
         [[ $# == 0 ]] || die "matrix-smoke takes no arguments"
         run_bounded_workflow perf-matrix-smoke 900
+        ;;
+    matrix-attribution)
+        [[ $# == 0 ]] || die "matrix-attribution takes no arguments"
+        run_bounded_workflow perf-matrix-attribution 2700
+        ;;
+    matrix-workers)
+        [[ $# == 0 ]] || die "matrix-workers takes no arguments"
+        run_bounded_workflow perf-matrix-workers 3600
         ;;
     pull-results)
         [[ $# -le 1 ]] || die "pull-results accepts at most one RUN_ID"

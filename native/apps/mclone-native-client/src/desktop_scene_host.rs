@@ -42,8 +42,10 @@ pub(crate) fn create_desktop_title_scene_host(
     assets: &WindowSceneAssets,
     asset_source: &impl mclone_assets::AssetSource,
     startup_view_pose: Option<XrStartupViewPose>,
+    overrides: DesktopSceneHostOverrides,
 ) -> Result<DesktopSceneHost> {
-    let host_scene = scene_host_options_from_desktop(scene)?;
+    let mut host_scene = scene_host_options_from_desktop(scene)?;
+    host_scene.freeze_scheduled_fluid_ticks = overrides.freeze_scheduled_fluid_ticks;
     let mut host = McloneSceneHost::start_native_without_session(
         device,
         queue,

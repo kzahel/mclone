@@ -1410,6 +1410,70 @@ where
     )
 }
 
+/// Timed variant of
+/// [`render_full_frame_for_view_with_far_lod_and_opaque_gate`].
+///
+/// This keeps live flat-client attribution on the same render entry used by
+/// ordinary frames; it does not introduce a diagnostic-only renderer.
+#[allow(clippy::too_many_arguments)]
+pub fn render_full_frame_for_view_with_far_lod_and_opaque_gate_timed<BuildGuiDraw>(
+    frame: RenderFrameContext<'_>,
+    depth: &ChunkDepthTarget,
+    sky: &SkyRenderer,
+    draw: &mut TexturedSectionDrawResources,
+    far_lod: Option<&mut FarTerrainLodRenderer>,
+    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
+    opaque_world_gate: Option<(&OpaqueWorldGateRenderer, OpaqueWorldGate)>,
+    actors: Option<&mut ActorDrawResources>,
+    screen_effects: Option<&mut ScreenEffectsRenderer>,
+    gui_renderer: Option<&mut GuiRenderer>,
+    render_view: ChunkRenderView,
+    actor_instances: &[ActorInstance],
+    underwater_overlay: Option<UnderwaterOverlay>,
+    sky_clear_color: wgpu::Color,
+    time_of_day: f32,
+    sun_angle: f32,
+    render_options: TexturedSectionRenderOptions,
+    gui: FullFrameGui,
+    build_gui_draw: BuildGuiDraw,
+    clock: &MonotonicClockHandle,
+    render_stats: &mut RenderStreamStats,
+) -> Result<(FullFrameRenderSummary, FullFrameRenderTiming)>
+where
+    BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+{
+    let mut timing = FullFrameRenderTiming::default();
+    let render_view = render_view_with_underwater_effect(render_view, underwater_overlay);
+    let summary = render_full_frame_for_view_inner(
+        frame,
+        depth,
+        sky,
+        draw,
+        actors,
+        screen_effects,
+        gui_renderer,
+        render_view,
+        actor_instances,
+        underwater_overlay,
+        sky_clear_color,
+        time_of_day,
+        sun_angle,
+        render_options,
+        gui,
+        build_gui_draw,
+        SINGLE_VIEW_SLOT,
+        far_lod,
+        far_lod_mesh,
+        None,
+        None,
+        opaque_world_gate.map(|(renderer, gate)| OpaqueWorldInsertion::Gate(renderer, gate)),
+        Some(clock),
+        Some(&mut timing),
+        render_stats,
+    )?;
+    Ok((summary, timing))
+}
+
 /// Scene-owned composition variant with one placed opaque/cutout terrain
 /// source inserted into the active world's shared color/depth frame.
 #[allow(clippy::too_many_arguments)]

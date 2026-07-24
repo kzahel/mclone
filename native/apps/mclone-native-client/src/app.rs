@@ -8,6 +8,7 @@ use mclone_app_runtime::frame_render::{MIN_FLAT_RENDER_SCALE, scaled_frame_size}
 use mclone_app_runtime::input_preferences::ClientInputPreferences;
 use mclone_app_runtime::{DEFAULT_STARTUP_READINESS_TIMEOUT, RuntimePollDiagnostics};
 use mclone_assets::AssetSource;
+use mclone_diagnostics::{GpuPassId, GpuTimestampPanelReport};
 use mclone_input::{
     ControllerInputPreferences, InputCapabilities, InputCapabilityState, InputDeviceKind,
     InputPreferences, KeyboardKey, MouseWheelDirection, PointerButton, TouchContactPhase,
@@ -291,8 +292,23 @@ struct WindowFrameSample {
     surface_encode_ms: f64,
     surface_submit_ms: f64,
     surface_present_ms: f64,
+    gpu: WindowGpuTimestampSample,
     camera_eye: Option<[f32; 3]>,
     work: Option<WindowFrameWorkSample>,
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+struct WindowGpuTimestampSample {
+    supported: bool,
+    frames_resolved: u64,
+    dropped_frames: u64,
+    total_ms: Option<f64>,
+    terrain_ms: Option<f64>,
+    terrain_opaque_ms: Option<f64>,
+    terrain_translucent_ms: Option<f64>,
+    sky_ms: Option<f64>,
+    actor_ms: Option<f64>,
+    ui_ms: Option<f64>,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -340,6 +356,27 @@ struct WindowFrameWorkSample {
     uploaded_indices: u32,
     upload_limited: bool,
     upload_backpressured: bool,
+    compile_worker_count: usize,
+    completed_compile_tasks: usize,
+    total_compile_worker_busy_ms: f64,
+    max_compile_worker_task_ms: f64,
+    fluid_due_ticks: usize,
+    fluid_executed_ticks: usize,
+    fluid_deferred_ticks: usize,
+    fluid_mutated_blocks: usize,
+    scheduled_fluid_ticks: usize,
+    pending_render_count_ms: f64,
+    render_sync_ms: f64,
+    render_dirty_seed_ms: f64,
+    render_prepare_ms: f64,
+    traversal_ready_sections_ms: f64,
+    traversal_ready_publish_ms: f64,
+    terrain_records_ms: f64,
+    terrain_cull_ms: f64,
+    terrain_prepare_ms: f64,
+    terrain_encode_ms: f64,
+    terrain_opaque_ms: f64,
+    terrain_translucent_ms: f64,
 }
 
 impl WindowFrameWorkSample {
@@ -398,6 +435,27 @@ impl WindowFrameWorkSample {
             uploaded_indices: upload.uploaded_index_count,
             upload_limited: upload.upload_limited,
             upload_backpressured: upload.upload_backpressured,
+            compile_worker_count: upload.dispatcher_compile_worker_count,
+            completed_compile_tasks: upload.dispatcher_completed_compile_tasks,
+            total_compile_worker_busy_ms: upload.dispatcher_total_compile_worker_busy_ms,
+            max_compile_worker_task_ms: upload.dispatcher_max_compile_worker_task_ms,
+            fluid_due_ticks: upload.poll_fluid_due_ticks,
+            fluid_executed_ticks: upload.poll_fluid_executed_ticks,
+            fluid_deferred_ticks: upload.poll_fluid_deferred_ticks,
+            fluid_mutated_blocks: upload.poll_fluid_mutated_blocks,
+            scheduled_fluid_ticks: upload.poll_scheduled_fluid_ticks,
+            pending_render_count_ms: summary.timing.runtime_pending_render_count_ms,
+            render_sync_ms: summary.timing.runtime_sync_ms,
+            render_dirty_seed_ms: summary.timing.runtime_dirty_seed_ms,
+            render_prepare_ms: summary.timing.runtime_prepare_ms,
+            traversal_ready_sections_ms: summary.timing.runtime_ready_sections_ms,
+            traversal_ready_publish_ms: summary.timing.runtime_ready_publish_ms,
+            terrain_records_ms: summary.render_timing.terrain_records_ms,
+            terrain_cull_ms: summary.render_timing.terrain_cull_ms,
+            terrain_prepare_ms: summary.render_timing.terrain_prepare_ms,
+            terrain_encode_ms: summary.render_timing.terrain_encode_ms,
+            terrain_opaque_ms: summary.render_timing.terrain_opaque_ms,
+            terrain_translucent_ms: summary.render_timing.terrain_translucent_ms,
         }
     }
 
@@ -453,7 +511,96 @@ impl WindowFrameWorkSample {
                 "uploaded_indices": self.uploaded_indices,
                 "upload_limited": self.upload_limited,
                 "upload_backpressured": self.upload_backpressured,
+                "compile_worker_count": self.compile_worker_count,
+                "completed_compile_tasks": self.completed_compile_tasks,
+                "total_compile_worker_busy_ms": self.total_compile_worker_busy_ms,
+                "max_compile_worker_task_ms": self.max_compile_worker_task_ms,
+                "fluid_due_ticks": self.fluid_due_ticks,
+                "fluid_executed_ticks": self.fluid_executed_ticks,
+                "fluid_deferred_ticks": self.fluid_deferred_ticks,
+                "fluid_mutated_blocks": self.fluid_mutated_blocks,
+                "scheduled_fluid_ticks": self.scheduled_fluid_ticks,
+                "pending_render_count_ms": self.pending_render_count_ms,
+                "sync_ms": self.render_sync_ms,
+                "dirty_seed_ms": self.render_dirty_seed_ms,
+                "prepare_ms": self.render_prepare_ms,
+                "traversal_ready_sections_ms": self.traversal_ready_sections_ms,
+                "traversal_ready_publish_ms": self.traversal_ready_publish_ms,
             },
+            "render_timing": {
+                "terrain_records_ms": self.terrain_records_ms,
+                "terrain_cull_ms": self.terrain_cull_ms,
+                "terrain_prepare_ms": self.terrain_prepare_ms,
+                "terrain_encode_ms": self.terrain_encode_ms,
+                "terrain_opaque_ms": self.terrain_opaque_ms,
+                "terrain_translucent_ms": self.terrain_translucent_ms,
+            },
+        })
+    }
+}
+
+impl WindowGpuTimestampSample {
+    fn from_panel(panel: &GpuTimestampPanelReport) -> Self {
+        let mut sample = Self {
+            supported: panel.supported,
+            frames_resolved: panel.frames_resolved,
+            dropped_frames: panel.dropped_frames,
+            ..Self::default()
+        };
+        if panel.latest_passes.is_empty() {
+            return sample;
+        }
+        let mut total_ms = 0.0;
+        let mut terrain_ms = 0.0;
+        let mut terrain_opaque_ms = 0.0;
+        let mut terrain_translucent_ms = 0.0;
+        let mut sky_ms = 0.0;
+        let mut actor_ms = 0.0;
+        let mut ui_ms = 0.0;
+        let mut valid_passes = 0;
+        for pass in panel.latest_passes.iter().filter(|pass| pass.valid) {
+            valid_passes += 1;
+            total_ms += pass.elapsed_ms;
+            match &pass.pass {
+                GpuPassId::Terrain => terrain_ms += pass.elapsed_ms,
+                GpuPassId::TerrainOpaque => {
+                    terrain_ms += pass.elapsed_ms;
+                    terrain_opaque_ms += pass.elapsed_ms;
+                }
+                GpuPassId::TerrainTranslucent => {
+                    terrain_ms += pass.elapsed_ms;
+                    terrain_translucent_ms += pass.elapsed_ms;
+                }
+                GpuPassId::Sky => sky_ms += pass.elapsed_ms,
+                GpuPassId::Actor => actor_ms += pass.elapsed_ms,
+                GpuPassId::Ui => ui_ms += pass.elapsed_ms,
+                _ => {}
+            }
+        }
+        if valid_passes > 0 {
+            sample.total_ms = Some(total_ms);
+            sample.terrain_ms = Some(terrain_ms);
+            sample.terrain_opaque_ms = Some(terrain_opaque_ms);
+            sample.terrain_translucent_ms = Some(terrain_translucent_ms);
+            sample.sky_ms = Some(sky_ms);
+            sample.actor_ms = Some(actor_ms);
+            sample.ui_ms = Some(ui_ms);
+        }
+        sample
+    }
+
+    fn json(self) -> Value {
+        json!({
+            "supported": self.supported,
+            "frames_resolved": self.frames_resolved,
+            "dropped_frames": self.dropped_frames,
+            "total_ms": self.total_ms,
+            "terrain_ms": self.terrain_ms,
+            "terrain_opaque_ms": self.terrain_opaque_ms,
+            "terrain_translucent_ms": self.terrain_translucent_ms,
+            "sky_ms": self.sky_ms,
+            "actor_ms": self.actor_ms,
+            "ui_ms": self.ui_ms,
         })
     }
 }
@@ -472,6 +619,7 @@ impl WindowFrameSample {
             "surface_encode_ms": self.surface_encode_ms,
             "surface_submit_ms": self.surface_submit_ms,
             "surface_present_ms": self.surface_present_ms,
+            "gpu": self.gpu.json(),
             "camera_eye": self.camera_eye,
             "work": self.work.map(WindowFrameWorkSample::json),
         })
@@ -555,6 +703,11 @@ impl WindowFrameReportRecorder {
             "adaptive_chunk_publication_budget": scene.adaptive_chunk_publication_budget,
             "adaptive_render_admission_budget": scene.adaptive_render_admission_budget,
             "debug_passive_showcase": scene.debug_passive_showcase,
+            "window_freeze_scheduled_fluid_ticks": self.options.freeze_scheduled_fluid_ticks,
+            "window_world_render_scale_mode": self
+                .options
+                .world_render_scale_mode
+                .map(|mode| format!("{mode:?}")),
             "startup_wait": format!("{:?}", app.startup_wait),
             "simulation_cadence": {
                 "host_rate_hz": scene.simulation_cadence.host_rate_hz,
@@ -653,6 +806,11 @@ impl WindowFrameReportRecorder {
             .as_ref()
             .and_then(|driver| driver.host().runtime_poll_diagnostics())
             .map(runtime_scheduler_json);
+        let gpu_timestamp_panel = app
+            .surface
+            .as_ref()
+            .map(NativeSurfaceContext::gpu_timestamp_panel_report)
+            .unwrap_or_else(GpuTimestampPanelReport::unsupported);
         let samples_json = self
             .frames
             .iter()
@@ -690,6 +848,9 @@ impl WindowFrameReportRecorder {
             "surface_encode": window_series_summary(self.frames.iter().map(|sample| sample.surface_encode_ms)),
             "surface_submit": window_series_summary(self.frames.iter().map(|sample| sample.surface_submit_ms)),
             "surface_present": window_series_summary(self.frames.iter().map(|sample| sample.surface_present_ms)),
+            "gpu_total": window_series_summary(self.frames.iter().filter_map(|sample| sample.gpu.total_ms)),
+            "gpu_terrain": window_series_summary(self.frames.iter().filter_map(|sample| sample.gpu.terrain_ms)),
+            "gpu_timestamp_panel": gpu_timestamp_panel,
             "final_frame_timing": final_frame_timing_json,
             "final_runtime": final_runtime_json,
             "final_scheduler": final_scheduler_json,
@@ -911,6 +1072,10 @@ impl ChunkApp {
         if ui_v2_hit_debug {
             log::info!("{UI_V2_HIT_DEBUG_ENV}=1; UI v2 hit debug overlay/logging enabled");
         }
+        let world_render_scale_mode = frame_report
+            .as_ref()
+            .and_then(|report| report.world_render_scale_mode)
+            .unwrap_or(GameWorldRenderScaleMode::Automatic);
         let gamepad_collector = match crate::desktop_gamepad::DesktopGamepadCollector::new() {
             Ok(collector) => {
                 log::info!("desktop gamepad collector initialized");
@@ -952,7 +1117,7 @@ impl ChunkApp {
             controller_preferences: client_input_preferences.controller.clone(),
             touch,
             frame_pacing: FramePacing::default(),
-            world_render_scale_mode: GameWorldRenderScaleMode::Automatic,
+            world_render_scale_mode,
             window: None,
             surface: None,
             frame_timing: FrameTimingStats::default(),
@@ -1058,6 +1223,13 @@ impl ChunkApp {
                 translate_camera_point(pose.eye, delta)
             })
         });
+        let gpu = self
+            .surface
+            .as_ref()
+            .map(|surface| {
+                WindowGpuTimestampSample::from_panel(&surface.gpu_timestamp_panel_report())
+            })
+            .unwrap_or_default();
         let Some(recorder) = &mut self.frame_report else {
             return false;
         };
@@ -1074,6 +1246,7 @@ impl ChunkApp {
             surface_encode_ms: timing.last_surface_encode_ms,
             surface_submit_ms: timing.last_surface_submit_ms,
             surface_present_ms: timing.last_surface_present_ms,
+            gpu,
             camera_eye,
             work: summary.map(WindowFrameWorkSample::from_summary),
         })
@@ -1867,6 +2040,9 @@ impl ApplicationHandler for ChunkApp {
             self.start_intent.resolve(&self.scene),
             self.ui_v2_hit_debug,
             &self.controller_preferences,
+            self.frame_report
+                .as_ref()
+                .is_some_and(|report| report.options.freeze_scheduled_fluid_ticks),
         ) {
             Ok(driver) => driver,
             Err(err) => {

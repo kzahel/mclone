@@ -241,6 +241,7 @@ mod tests {
             true,
             Some(MonoSceneFrameSummary {
                 render: Default::default(),
+                render_timing: Default::default(),
                 timing: XrTerrainFrameTiming {
                     runtime_poll_ms: 0.75,
                     render_views_ms: 2.5,

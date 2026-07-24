@@ -51,9 +51,9 @@ use mclone_app_runtime::frame_pacing::{
 };
 use mclone_app_runtime::frame_render::{
     FlatSurfacePresentation, FrameActorPreparation, FullFrameGui, FullFrameRenderSummary,
-    PlacedActorFrame, PlacedTerrainFrame, PlacedTerrainPrepared, RenderStreamStats,
-    TerrainCompositionFrame, TerrainCompositionSource, TerrainTranslucentSubmission,
-    render_full_frame_for_view_with_far_lod_and_opaque_gate,
+    FullFrameRenderTiming, PlacedActorFrame, PlacedTerrainFrame, PlacedTerrainPrepared,
+    RenderStreamStats, TerrainCompositionFrame, TerrainCompositionSource,
+    TerrainTranslucentSubmission, render_full_frame_for_view_with_far_lod_and_opaque_gate_timed,
     render_full_frame_for_view_with_far_lod_and_placed_terrain_timed,
     render_full_frame_for_view_with_far_lod_and_prepared_records_in_slot,
     render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_in_slot,
@@ -3213,6 +3213,7 @@ impl McloneSceneHost {
         policy: &WorldPreparationPolicy,
         timing: &mut XrTerrainFrameTiming,
     ) -> Result<XrTerrainUploadSummary> {
+        let pending_render_count_start = policy.clock.now();
         let (
             pending_render_chunks_before,
             pending_compile_jobs_before,
@@ -3226,6 +3227,8 @@ impl McloneSceneHost {
                 runtime.render_compile_available_pending_job_slots(),
             )
         } else {
+            timing.runtime_pending_render_count_ms +=
+                elapsed_ms(policy.clock.elapsed_since(pending_render_count_start));
             let upload_queue = slot.section_uploads.stats();
             return Ok(XrTerrainUploadSummary {
                 host_mode: XrTerrainHostMode::LocalIntegrated,
@@ -3240,6 +3243,8 @@ impl McloneSceneHost {
                 ..XrTerrainUploadSummary::default()
             });
         };
+        timing.runtime_pending_render_count_ms +=
+            elapsed_ms(policy.clock.elapsed_since(pending_render_count_start));
         let poll_start = policy.clock.now();
         let poll_changed = slot
             .runtime
@@ -3306,10 +3311,14 @@ impl McloneSceneHost {
                 .expect("runtime presence checked before poll");
             let compile_health = runtime.render_compile_queue_health();
             let upload_queue = slot.section_uploads.stats();
+            let pending_render_count_start = policy.clock.now();
+            let pending_render_chunks_after = runtime.pending_render_chunk_count();
+            timing.runtime_pending_render_count_ms +=
+                elapsed_ms(policy.clock.elapsed_since(pending_render_count_start));
             return Ok(XrTerrainUploadSummary {
                 poll_changed,
                 pending_render_chunks_before,
-                pending_render_chunks_after: runtime.pending_render_chunk_count(),
+                pending_render_chunks_after,
                 pending_compile_jobs_before,
                 pending_compile_jobs_after: runtime.render_compile_pending_job_count(),
                 max_pending_compile_jobs,
@@ -3712,10 +3721,14 @@ impl McloneSceneHost {
         slot.render_stats.last_uploaded_face_count = upload_report.uploaded_face_count();
         slot.render_stats.last_uploaded_index_count = upload_report.uploaded_index_count;
         let upload_queue = slot.section_uploads.stats();
+        let pending_render_count_start = policy.clock.now();
+        let pending_render_chunks_after = runtime.pending_render_chunk_count();
+        timing.runtime_pending_render_count_ms +=
+            elapsed_ms(policy.clock.elapsed_since(pending_render_count_start));
         Ok(XrTerrainUploadSummary {
             poll_changed,
             pending_render_chunks_before,
-            pending_render_chunks_after: runtime.pending_render_chunk_count(),
+            pending_render_chunks_after,
             pending_compile_jobs_before,
             pending_compile_jobs_after: pending_compile_jobs_after_sync,
             max_pending_compile_jobs,

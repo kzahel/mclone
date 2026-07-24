@@ -21,6 +21,8 @@
     "steamdeck:gamescope-repro": "MCLONE_STEAM_DECK_BUILDER=steamrt4 bash ./scripts/steam-deck.sh gamescope-repro",
     "steamdeck:matrix": "MCLONE_STEAM_DECK_BUILDER=steamrt4 bash ./scripts/steam-deck.sh matrix",
     "steamdeck:matrix:smoke": "MCLONE_STEAM_DECK_BUILDER=steamrt4 bash ./scripts/steam-deck.sh matrix-smoke",
+    "steamdeck:matrix:attribution": "MCLONE_STEAM_DECK_BUILDER=steamrt4 bash ./scripts/steam-deck.sh matrix-attribution",
+    "steamdeck:matrix:workers": "MCLONE_STEAM_DECK_BUILDER=steamrt4 bash ./scripts/steam-deck.sh matrix-workers",
     "steamdeck:pull-results": "bash ./scripts/steam-deck.sh pull-results",
     "steamdeck:build:steamrt4": "bash ./scripts/steam-deck-build-steamrt4.sh",
     "steamdeck:stage:steamrt4": "MCLONE_STEAM_DECK_BUILDER=steamrt4 bash ./scripts/steam-deck.sh stage",

@@ -228,7 +228,7 @@ fn ordinary_frame_paths_keep_explicit_active_only_and_preview_branches() {
     let mono = braced_item(&mono_source, "fn render_mono_frame_inner(");
     assert!(mono.contains("&mut self.active_world.draw,"));
     assert!(mono.contains("if let Some(preview_records) = preview_records.as_ref()"));
-    assert!(mono.contains("render_full_frame_for_view_with_far_lod_and_opaque_gate("));
+    assert!(mono.contains("render_full_frame_for_view_with_far_lod_and_opaque_gate_timed("));
     assert!(mono.contains("render_full_frame_for_view_with_far_lod_and_placed_terrain_timed("));
 
     let xr_source = read("src/lib.rs");
