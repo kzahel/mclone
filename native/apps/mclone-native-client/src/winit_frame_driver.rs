@@ -2,6 +2,9 @@
 //! topology (tactical 168 Slice 7c).
 
 use anyhow::Result;
+use mclone_app_runtime::client_entry::{
+    ClientEntryController, ClientEntryEffect, ClientEntryResolution, ClientHostAvailability,
+};
 use mclone_app_runtime::frame_pipeline_accounting::FramePipelineAccountant;
 use mclone_app_runtime::frame_render::{
     FlatScalePresentation, FlatSurfacePresentation, scaled_frame_size,
@@ -25,8 +28,8 @@ use mclone_ui::{
     GameUiAction, GameUiHost, GameWorldRenderScaleMode, GuiScale, Point, UiDebugSnapshot,
 };
 
-use crate::cli::{SceneOptions, WindowStartIntent};
-use crate::desktop_scene_host::{DesktopSceneHost, create_desktop_scene_host};
+use crate::cli::SceneOptions;
+use crate::desktop_scene_host::{DesktopSceneHost, create_desktop_title_scene_host};
 use crate::scene_runtime::WindowSceneAssets;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -120,32 +123,21 @@ impl WinitFrameDriver {
         render_options: TexturedSectionRenderOptions,
         assets: &WindowSceneAssets,
         asset_source: &impl mclone_assets::AssetSource,
-        start_intent: WindowStartIntent,
+        entry: ClientEntryResolution,
         ui_v2_debug_overlay: bool,
         controller_preferences: &ControllerInputPreferences,
     ) -> Result<Self> {
-        let mut initial_scene = scene.clone();
-        if start_intent == WindowStartIntent::Menu {
-            initial_scene.remote_addr = None;
-        }
-        let mut host = create_desktop_scene_host(
+        let mut host = create_desktop_title_scene_host(
             device,
             queue,
             render_config.color_format,
-            &initial_scene,
+            scene,
             render_options,
             assets,
             asset_source,
             None,
         )?;
-
-        if start_intent == WindowStartIntent::Menu {
-            host.enter_mono_title(device, queue)?;
-        }
-        let mut ui = match start_intent {
-            WindowStartIntent::InWorld => GameUiHost::new_ingame(),
-            WindowStartIntent::Menu => GameUiHost::new(),
-        };
+        let mut ui = GameUiHost::new();
         ui.set_join_remote_addr(
             scene
                 .remote_addr
@@ -154,6 +146,30 @@ impl WinitFrameDriver {
         );
         ui.set_v2_debug_overlay(ui_v2_debug_overlay);
         host.configure_mono_ui(ui, MonoUiContext::default());
+        let mut entry_controller = ClientEntryController::new(entry);
+        let entry_effect = entry_controller
+            .update_host(ClientHostAvailability {
+                bootstrapped: true,
+                foreground: true,
+                presentation_available: true,
+            })
+            .expect("ready host dispatches its entry exactly once");
+        log::info!(
+            "client entry source={} intent={}",
+            entry_controller.resolution().source.label(),
+            entry_controller.resolution().intent.label(),
+        );
+        match entry_effect {
+            ClientEntryEffect::EnterTitle { status } => {
+                host.set_client_entry_status(status);
+            }
+            ClientEntryEffect::StartSession(request) => {
+                host.start_session_for_request(device, queue, request)?;
+            }
+            ClientEntryEffect::LaunchScenario(intent) => {
+                host.begin_lobby_launch(intent)?;
+            }
+        }
         host.set_frame_host_kind(FrameHostKind::DesktopFlatWinit);
         host.set_display_refresh_hz(None);
 

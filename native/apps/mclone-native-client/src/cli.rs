@@ -2,7 +2,11 @@ use std::ops::{Deref, DerefMut};
 use std::path::PathBuf;
 
 use anyhow::{Context, Result, bail};
+use mclone_app_runtime::client_entry::{
+    ClientEntryIntent, ClientEntryResolution, ClientEntrySource,
+};
 use mclone_app_runtime::frame_render::{MAX_FLAT_RENDER_SCALE, MIN_FLAT_RENDER_SCALE};
+use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionStartRequest};
 use mclone_app_runtime::startup_args::{
     RenderCompileCapacityRequest, RenderDistanceLimits, StartupArgState, StartupSceneOptions,
     parse_bool_arg, parse_i32_arg, parse_i64_arg, parse_u32_arg, parse_u64_arg,
@@ -546,8 +550,33 @@ impl HeadlessScreenshotUi {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub(crate) enum WindowStartIntent {
     #[default]
-    InWorld,
     Menu,
+    InWorld,
+}
+
+impl WindowStartIntent {
+    pub(crate) fn resolve(self, scene: &SceneOptions) -> ClientEntryResolution {
+        match self {
+            Self::Menu => ClientEntryResolution::ordinary(),
+            Self::InWorld => {
+                let request = scene.remote_addr.as_ref().map_or_else(
+                    || {
+                        SessionStartRequest::new_seed_local_world_with_generation_profile(
+                            scene.seed,
+                            scene.world_generation_profile,
+                        )
+                    },
+                    |address| SessionStartRequest::JoinRemote {
+                        endpoint: RemoteSessionEndpoint::new(address.clone()),
+                    },
+                );
+                ClientEntryResolution::explicit(
+                    ClientEntryIntent::StartSession(request),
+                    ClientEntrySource::CommandLine,
+                )
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -863,7 +892,8 @@ impl Cli {
         let mut simulation_cadence_explicit = false;
         let mut platform_profile = WindowPlatformProfile::Desktop;
         let mut platform_profile_explicit = false;
-        let mut window_start_intent = WindowStartIntent::InWorld;
+        let mut window_start_intent = WindowStartIntent::Menu;
+        let mut window_start_intent_explicit = false;
         let mut startup_wait = None;
         let mut window_frame_report_path = None;
         let mut window_frame_report_frames = DEFAULT_WINDOW_FRAME_REPORT_FRAMES;
@@ -1425,9 +1455,11 @@ impl Cli {
                     simulation_cadence = parse_simulation_cadence_arg(&arg, args.next())?;
                 }
                 "--menu" => {
+                    window_start_intent_explicit = true;
                     window_start_intent = WindowStartIntent::Menu;
                 }
                 "--start-in-world" => {
+                    window_start_intent_explicit = true;
                     window_start_intent = if parse_bool_arg("--start-in-world", args.next())? {
                         WindowStartIntent::InWorld
                     } else {
@@ -1643,7 +1675,8 @@ impl Cli {
         {
             bail!("--platform-profile applies only to window mode");
         }
-        if window_start_intent == WindowStartIntent::Menu
+        if window_start_intent_explicit
+            && window_start_intent == WindowStartIntent::Menu
             && (mode.is_some()
                 || perf_mode_count > 0
                 || xr_clear_smoke
@@ -1773,6 +1806,13 @@ impl Cli {
         let startup_storage = startup_storage.project(Some(default_native_world_root()));
         scene.world_root = startup_storage.world_root.clone();
         scene.world_dir = startup_storage.world_dir.clone();
+        if !window_start_intent_explicit
+            && (scene.remote_addr.is_some()
+                || scene.world_dir.is_some()
+                || window_frame_report_path.is_some())
+        {
+            window_start_intent = WindowStartIntent::InWorld;
+        }
         let live_diorama_detail_was_set = live_diorama_source_region.is_some()
             || live_diorama_source_anchor.is_some()
             || live_diorama_composition_anchor.is_some()

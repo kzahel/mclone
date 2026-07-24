@@ -144,7 +144,7 @@ fn cli_defaults_to_window() {
             scene: SceneOptions::default(),
             render_options: TexturedSectionRenderOptions::default(),
             window: NativeWindowOptions::default(),
-            start_intent: WindowStartIntent::InWorld,
+            start_intent: WindowStartIntent::Menu,
             startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
             frame_report: None,
         }
@@ -218,6 +218,26 @@ fn cli_parses_window_menu_start_intent() {
             frame_report: None,
         }
     );
+
+    let Cli::Window {
+        scene,
+        start_intent,
+        ..
+    } = Cli::parse(["--start-in-world".to_owned(), "true".to_owned()]).unwrap()
+    else {
+        panic!("expected window mode");
+    };
+    assert_eq!(start_intent, WindowStartIntent::InWorld);
+    assert!(matches!(
+        start_intent.resolve(&scene),
+        mclone_app_runtime::client_entry::ClientEntryResolution {
+            intent: mclone_app_runtime::client_entry::ClientEntryIntent::StartSession(
+                mclone_app_runtime::session::SessionStartRequest::CreateLocalWorld { .. }
+            ),
+            source: mclone_app_runtime::client_entry::ClientEntrySource::CommandLine,
+            title_status: None,
+        }
+    ));
 }
 
 #[test]
@@ -228,7 +248,7 @@ fn cli_parses_startup_wait_policy() {
             scene: SceneOptions::default(),
             render_options: TexturedSectionRenderOptions::default(),
             window: NativeWindowOptions::default(),
-            start_intent: WindowStartIntent::InWorld,
+            start_intent: WindowStartIntent::Menu,
             startup_wait: StartupWaitPolicy::Idle,
             frame_report: None,
         }
@@ -240,7 +260,7 @@ fn cli_parses_startup_wait_policy() {
             scene: SceneOptions::default(),
             render_options: TexturedSectionRenderOptions::default(),
             window: NativeWindowOptions::default(),
-            start_intent: WindowStartIntent::InWorld,
+            start_intent: WindowStartIntent::Menu,
             startup_wait: StartupWaitPolicy::Progress,
             frame_report: None,
         }
@@ -429,7 +449,7 @@ fn cli_parses_world_root_and_transient_catalog_mode() {
             },
             render_options: TexturedSectionRenderOptions::default(),
             window: NativeWindowOptions::default(),
-            start_intent: WindowStartIntent::InWorld,
+            start_intent: WindowStartIntent::Menu,
             startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
             frame_report: None,
         }
@@ -445,7 +465,7 @@ fn cli_parses_world_root_and_transient_catalog_mode() {
             },
             render_options: TexturedSectionRenderOptions::default(),
             window: NativeWindowOptions::default(),
-            start_intent: WindowStartIntent::InWorld,
+            start_intent: WindowStartIntent::Menu,
             startup_wait: StartupWaitPolicy::DESKTOP_DEFAULT,
             frame_report: None,
         }

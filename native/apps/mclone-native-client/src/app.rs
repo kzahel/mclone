@@ -1548,7 +1548,7 @@ impl ApplicationHandler for ChunkApp {
             self.render_options,
             &self.assets,
             &asset_source,
-            self.start_intent,
+            self.start_intent.resolve(&self.scene),
             self.ui_v2_hit_debug,
             &self.controller_preferences,
         ) {

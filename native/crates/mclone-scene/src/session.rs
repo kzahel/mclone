@@ -277,6 +277,56 @@ impl McloneSceneHost {
 }
 
 impl McloneSceneHost {
+    /// Build the retained native scene shell used by a session-free title.
+    ///
+    /// Asset preparation and catalog services are available to the menu, but
+    /// no integrated server, client runtime, or world worker is started.
+    #[cfg(not(target_arch = "wasm32"))]
+    #[allow(clippy::too_many_arguments)]
+    pub fn start_native_without_session(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        clock: MonotonicClockHandle,
+        scene: McloneSceneHostOptions,
+        render_options: TexturedSectionRenderOptions,
+        mesh_assets: TexturedMeshAssets,
+        actor_atlas: ActorTextureImage,
+        actor_figures: ActorFigureSet,
+        asset_source: &impl AssetSource,
+        client_experience_profile: ClientExperienceProfile,
+        startup_view_pose: Option<XrStartupViewPose>,
+    ) -> Result<Self> {
+        let scene = scene.validated()?;
+        let active_assets = PreparedSceneAssets::startup(
+            0,
+            mesh_assets,
+            ActorTextureAssets {
+                atlas: actor_atlas,
+                figures: actor_figures,
+            },
+            load_screen_effect_texture_assets(asset_source)
+                .context("prepare title scene screen-effect assets")?,
+            PreparedAudioAssets::load(asset_source).context("prepare title scene audio assets")?,
+        );
+        let catalog_operations = scene
+            .world_root
+            .clone()
+            .map(native_world_catalog_operations);
+        Self::without_session(
+            device,
+            queue,
+            color_format,
+            clock,
+            scene,
+            render_options,
+            active_assets,
+            client_experience_profile,
+            catalog_operations,
+            startup_view_pose,
+        )
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub fn start_local_async(
         device: &wgpu::Device,
@@ -684,6 +734,38 @@ impl McloneSceneHost {
         Ok(state)
     }
 
+    /// Construct a session-free shared scene for an ordinary title-menu entry.
+    ///
+    /// This creates only retained render/UI resources. It does not construct a
+    /// local runtime, integrated server, remote connection, or world worker.
+    #[allow(clippy::too_many_arguments)]
+    pub fn without_session(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        clock: MonotonicClockHandle,
+        scene: McloneSceneHostOptions,
+        render_options: TexturedSectionRenderOptions,
+        active_assets: PreparedSceneAssets,
+        client_experience_profile: ClientExperienceProfile,
+        catalog_operations: Option<WorldCatalogOperationService>,
+        startup_view_pose: Option<XrStartupViewPose>,
+    ) -> Result<Self> {
+        Self::with_optional_scene_runtime(
+            device,
+            queue,
+            color_format,
+            clock,
+            scene,
+            None,
+            render_options,
+            active_assets,
+            client_experience_profile,
+            catalog_operations,
+            startup_view_pose,
+        )
+    }
+
     /// Construct the shared scene around an already-started, platform-neutral
     /// runtime. Browser assembly uses this seam after its worker/socket promise
     /// has completed; native callers may continue to use the startup pumps above.
@@ -702,12 +784,48 @@ impl McloneSceneHost {
         catalog_operations: Option<WorldCatalogOperationService>,
         startup_view_pose: Option<XrStartupViewPose>,
     ) -> Result<Self> {
+        Self::with_optional_scene_runtime(
+            device,
+            queue,
+            color_format,
+            clock,
+            scene,
+            Some(runtime),
+            render_options,
+            active_assets,
+            client_experience_profile,
+            catalog_operations,
+            startup_view_pose,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn with_optional_scene_runtime(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        clock: MonotonicClockHandle,
+        scene: McloneSceneHostOptions,
+        runtime: Option<SceneSessionRuntime>,
+        render_options: TexturedSectionRenderOptions,
+        active_assets: PreparedSceneAssets,
+        client_experience_profile: ClientExperienceProfile,
+        catalog_operations: Option<WorldCatalogOperationService>,
+        startup_view_pose: Option<XrStartupViewPose>,
+    ) -> Result<Self> {
         let scene = scene.validated()?;
         let active_session = runtime
-            .active_session()
-            .cloned()
-            .context("scene runtime did not expose an active session")?;
-        if active_assets.mesh.catalog.len() != runtime.mesh_assets().catalog.len() {
+            .as_ref()
+            .map(|runtime| {
+                runtime
+                    .active_session()
+                    .cloned()
+                    .context("scene runtime did not expose an active session")
+            })
+            .transpose()?;
+        if let Some(runtime) = runtime.as_ref()
+            && active_assets.mesh.catalog.len() != runtime.mesh_assets().catalog.len()
+        {
             bail!(
                 "prepared scene/runtime terrain catalogs disagree: prepared={} runtime={}",
                 active_assets.mesh.catalog.len(),
@@ -715,8 +833,10 @@ impl McloneSceneHost {
             );
         }
         let mesh_assets = active_assets.mesh.clone();
-        let mut camera =
-            SceneCameraConfig::from_scene(&scene).spawn_for_chunk(runtime.interest_center());
+        let interest_center = runtime
+            .as_ref()
+            .map_or_else(|| scene.center(), SceneSessionRuntime::interest_center);
+        let mut camera = SceneCameraConfig::from_scene(&scene).spawn_for_chunk(interest_center);
         if let Some(view_pose) = startup_view_pose {
             apply_xr_startup_view_pose(&mut camera, view_pose.position, view_pose.yaw_degrees)
                 .context("apply initial scene startup view pose")?;
@@ -749,19 +869,26 @@ impl McloneSceneHost {
             &active_assets.screen_effects,
         )
         .context("initialize scene screen effects")?;
-        let ui = xr_game_ui_for_session(Some(&active_session), scene.seed);
+        let ui = xr_game_ui_for_session(active_session.as_ref(), scene.seed);
         let mut session = GameSessionCoordinator::new();
-        session.complete_start(active_session.clone());
+        if let Some(active_session) = active_session.as_ref() {
+            session.complete_start(active_session.clone());
+        }
+        let runtime_present = runtime.is_some();
         let active_world = DrawableWorldSlot::new(
             DrawableWorldSlotInstall {
                 id: WorldInstanceId::new(1),
-                descriptor: Some(active_session),
-                lifecycle: WorldSlotLifecycle::Starting,
+                descriptor: active_session,
+                lifecycle: if runtime_present {
+                    WorldSlotLifecycle::Starting
+                } else {
+                    WorldSlotLifecycle::Empty
+                },
                 asset_epoch: active_assets.epoch,
                 scene: scene.clone(),
-                runtime: Some(runtime),
+                runtime,
                 local_startup: None,
-                external_runtime_startup_pending: true,
+                external_runtime_startup_pending: runtime_present,
                 camera,
                 draw,
                 actors: Some(actors),
@@ -892,6 +1019,15 @@ impl McloneSceneHost {
 
     pub fn set_teleport_preview_capability(&mut self, capability: TeleportPreviewCapability) {
         self.services.teleport_preview = capability;
+    }
+
+    pub fn set_client_entry_status(
+        &mut self,
+        status: Option<mclone_app_runtime::client_entry::ClientEntryStatus>,
+    ) {
+        self.status_overlay = status.map_or_else(StatusOverlay::hidden, |status| {
+            StatusOverlay::new(status.message, status.ok)
+        });
     }
 
     pub fn set_frame_pipeline_report(&mut self, report: Arc<FramePipelineReport>, revision: u64) {

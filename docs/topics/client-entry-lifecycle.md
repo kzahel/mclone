@@ -2,8 +2,10 @@
 
 Topic: `client-entry-lifecycle`
 
-Status: active. The product decision and ownership boundary are accepted;
-implementation is pending except for Steam Deck Devkit process ownership.
+Status: active. The product decision, shared entry/lifecycle policy, bounded
+accounting correction, desktop/SteamOS menu-first entry, and Steam Deck Devkit
+process ownership are implemented. Android, web, XR, and idle-cadence
+migration remain active.
 
 ## Scope
 
@@ -153,8 +155,8 @@ As of 2026-07-24:
 
 | Lane | Current ordinary entry | Current decision point |
 |---|---|---|
-| Desktop flat | starts in a world unless `--menu` or `--start-in-world false` | desktop `WindowStartIntent` |
-| Steam Deck interactive Devkit payload | title menu | payload supplies `--menu` separately from the `steamos` presentation profile |
+| Desktop flat | title menu; explicit `--start-in-world true`, remote address, world directory, or automation frame report starts a session | shared `ClientEntryResolution` projected from desktop CLI syntax |
+| Steam Deck interactive Devkit payload | title menu | the managed payload and ordinary desktop default resolve through the same shared entry policy; `steamos` remains only a presentation profile |
 | Flat Android | starts a local session and constructs in-game UI | Android surface driver |
 | Web | constructs local/remote runtime and then clears the UI screen | browser scene-host startup |
 | Desktop/Android XR | session construction and visible UI selection are not one consistent entry policy | XR app/scene assembly |
@@ -205,13 +207,16 @@ Every interactive client must prove:
 10. quit-to-title tears down the active session and returns to a genuinely
     session-free title state.
 
-The current native frame accountant violates items 6 and 7:
-`FrameAccumulator` retains an unbounded observation vector and the live
-accountant rebuilds percentile and worst-frame reports every frame. The
-accepted correction is a bounded rolling live collector with O(1),
-allocation-free per-frame recording, incremental lifetime counters, bounded
-top-K worst frames, and decimated rich-report publication. Finite exact
-benchmark capture remains a separate explicitly bounded mode.
+Items 6 and 7 now use a bounded rolling live collector with O(1) steady-state
+recording, incremental lifetime counters, bounded top-K worst frames, 512
+recent percentile observations, and decimated rich-report publication. Finite
+exact benchmark capture remains a separate explicitly bounded mode.
+
+The desktop/SteamOS host now constructs a session-free scene shell for title
+entry. It prepares retained UI/render/audio assets and catalog services, but
+does not construct a client runtime, integrated server, remote connection, or
+world worker. Explicit session entry starts afterward through the shared
+`SessionStartRequest` path. Source-contract tests lock this distinction.
 
 ## Steam Deck Devkit Process Ownership
 

@@ -5,6 +5,7 @@
 use std::fs;
 
 use anyhow::{Context, Result};
+use mclone_app_runtime::client_experience::desktop_native_client_experience_profile;
 use mclone_app_runtime::native_service_assembly::NativeSessionServices;
 use mclone_app_runtime::prepared_assets::{
     AssetPackSourceRegistry, reference_asset_pack_selection,
@@ -32,7 +33,7 @@ pub(crate) struct DesktopSceneHostOverrides {
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn create_desktop_scene_host(
+pub(crate) fn create_desktop_title_scene_host(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     color_format: wgpu::TextureFormat,
@@ -42,17 +43,33 @@ pub(crate) fn create_desktop_scene_host(
     asset_source: &impl mclone_assets::AssetSource,
     startup_view_pose: Option<XrStartupViewPose>,
 ) -> Result<DesktopSceneHost> {
-    create_desktop_scene_host_with_overrides(
+    let host_scene = scene_host_options_from_desktop(scene)?;
+    let mut host = McloneSceneHost::start_native_without_session(
         device,
         queue,
         color_format,
-        scene,
+        mclone_app_runtime::monotonic::system_monotonic_clock(),
+        host_scene,
         render_options,
-        assets,
+        assets.mesh_assets.clone(),
+        assets.actor_textures.atlas.clone(),
+        assets.actor_textures.figures.clone(),
         asset_source,
+        desktop_native_client_experience_profile(),
         startup_view_pose,
-        DesktopSceneHostOverrides::default(),
     )
+    .context("initialize desktop title scene host")?;
+    host.set_teleport_preview_capability(mclone_client::native_teleport_preview_capability());
+    host.set_session_runtime_factory(|endpoint, scene, mesh_assets| {
+        let desktop_scene = desktop_scene_options_for_remote(&endpoint, &scene);
+        let runtime = native_window_scene_runtime_with_mesh_assets(&desktop_scene, mesh_assets)?;
+        NativeSessionServices::from_active_runtime(
+            SessionStartRequest::JoinRemote { endpoint },
+            runtime,
+        )
+    });
+    configure_desktop_asset_pack_sources(&mut host, scene.world_root.as_deref())?;
+    Ok(host)
 }
 
 #[allow(clippy::too_many_arguments)]

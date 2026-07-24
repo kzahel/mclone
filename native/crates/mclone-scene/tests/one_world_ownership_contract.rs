@@ -301,7 +301,7 @@ fn every_initial_host_path_constructs_the_same_drawable_slot() {
     for marker in [
         "pub fn start_local_async(",
         "pub fn with_runtime<S>(",
-        "pub fn with_scene_runtime(",
+        "fn with_optional_scene_runtime(",
     ] {
         let constructor = braced_item(&source, marker);
         assert!(constructor.contains("let active_world = DrawableWorldSlot::new("));
@@ -322,6 +322,21 @@ fn every_initial_host_path_constructs_the_same_drawable_slot() {
         assert!(constructor.contains("warm_world_switch_sequence: 0,"));
         assert!(constructor.contains("last_warm_world_switch: None,"));
     }
+}
+
+#[test]
+fn title_host_path_constructs_an_empty_slot_without_starting_a_runtime() {
+    let source = read("src/session.rs");
+    let native_title = braced_item(&source, "pub fn start_native_without_session(");
+    let title = braced_item(&source, "pub fn without_session(");
+    let shared_constructor = braced_item(&source, "fn with_optional_scene_runtime(");
+
+    assert!(native_title.contains("Self::without_session("));
+    assert!(!native_title.contains("start_local_async("));
+    assert!(title.contains("Self::with_optional_scene_runtime("));
+    assert!(title.contains("None,"));
+    assert!(shared_constructor.contains("WorldSlotLifecycle::Empty"));
+    assert!(shared_constructor.contains("runtime,"));
 }
 
 #[test]
