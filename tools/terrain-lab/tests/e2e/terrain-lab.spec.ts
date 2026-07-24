@@ -19,10 +19,12 @@ test("generates terrain, round-trips controls, and completes comparison", async 
 
   const sourceControls = page.getByTestId("preview-source-controls");
   await expect(sourceControls).toBeVisible();
-  await expect(sourceControls).toContainText("The thin pale line is only the seam");
+  await expect(sourceControls).toContainText("exact same world coordinates");
   const diagnostics = page.locator("[data-testid='terrain-diagnostics']");
   await expect(diagnostics).not.toContainText("Base mean Δpending");
   const shell = page.locator(".appShell");
+  await expect(shell).toHaveAttribute("data-compare-layout", "side-by-side");
+  await expect(shell).toHaveAttribute("data-vertex-count", "49152");
   expect(Number(await shell.getAttribute("data-base-mean-error"))).toBeLessThanOrEqual(0.01);
   expect(Number(await shell.getAttribute("data-base-p95-error"))).toBeLessThanOrEqual(0.01);
   expect(Number(await shell.getAttribute("data-ocean-agreement"))).toBeGreaterThanOrEqual(0.999);

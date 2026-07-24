@@ -20,6 +20,13 @@ encode/submit time, resident buffer size, and an asynchronous readback
 comparison. The GPU evaluator is a preview experiment, not authoritative world
 generation.
 
+`split` is a synchronized side-by-side comparison, despite the retained URL
+vocabulary: the complete requested footprint is drawn twice with identical
+world coordinates and camera state. The left panel uses the CPU production
+base and the right uses the GPU production base. `reference` separately shows
+CPU-final terrain including rivers, wetlands, and planned streams. The error
+layer reports CPU-base versus GPU-base height disagreement.
+
 ## Develop
 
 From the repository root:

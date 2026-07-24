@@ -27,14 +27,14 @@ type LabStatus = "loading" | "ready" | "rendering" | "error";
 
 const SOURCE_OPTIONS: Array<{ value: TerrainLabSource; label: string; note: string }> = [
   { value: "reference", label: "CPU final", note: "Complete production CPU sampler" },
-  { value: "split", label: "Compare", note: "CPU final left, GPU production base right" },
+  { value: "split", label: "Compare", note: "Same coordinates: CPU base left, GPU base right" },
   { value: "gpu", label: "GPU base", note: "Production fields through base surface" },
 ];
 
 const LAYER_OPTIONS: Array<{ value: TerrainLabLayer; label: string }> = [
   { value: "terrain", label: "Terrain" },
   { value: "height", label: "Height" },
-  { value: "error", label: "Error" },
+  { value: "error", label: "Base error" },
   { value: "continentalness", label: "Continents" },
   { value: "climate", label: "Climate" },
 ];
@@ -92,6 +92,8 @@ export function App(): React.JSX.Element {
       data-base-p95-error={comparison?.p95AbsoluteBaseSurfaceError ?? ""}
       data-ocean-agreement={comparison?.oceanWaterPresenceAgreement ?? ""}
       data-continentalness-error={comparison?.meanAbsoluteContinentalnessError ?? ""}
+      data-compare-layout={state.source === "split" ? "side-by-side" : "single"}
+      data-vertex-count={renderReport?.vertexCount ?? 0}
     >
       <header className="topBar">
         <div className="brandLockup">
@@ -157,8 +159,7 @@ export function App(): React.JSX.Element {
               <strong>{state.spacing} blocks</strong>
             </div>
             <div className="approximationNote">
-              GPU A2 ports production base fields. Final rivers, wetlands, and planned
-              streams remain visible reference-only residuals.
+              <SourceFootnote source={state.source} />
             </div>
           </div>
         </section>
@@ -276,12 +277,12 @@ function SourceGuide({ source }: { source: TerrainLabSource }): React.JSX.Elemen
   if (source === "split") {
     return (
       <div className="sourceGuide">
-        <strong>Compare split</strong>
+        <strong>Same coordinates, side by side</strong>
         <span>
-          CPU final is on the labeled left side; GPU production base is on the right.
-          The thin pale line is only the seam and orbits with the terrain. Compare
-          coastlines, broad elevations, and mountain shapes. Final rivers and wetlands
-          may appear only on the CPU side.
+          CPU production base is on the left; GPU production base is on the right.
+          Both panels render the exact same world coordinates with one shared seed,
+          center, scale, camera, and layer. Orbit or pan once to move both together,
+          then compare matching terrain directly.
         </span>
       </div>
     );
@@ -305,6 +306,31 @@ function SourceGuide({ source }: { source: TerrainLabSource }): React.JSX.Elemen
         streams.
       </span>
     </div>
+  );
+}
+
+function SourceFootnote({ source }: { source: TerrainLabSource }): React.JSX.Element {
+  if (source === "split") {
+    return (
+      <>
+        Compare uses CPU base versus GPU base. Final rivers, wetlands, and planned
+        streams are excluded from both panels.
+      </>
+    );
+  }
+  if (source === "gpu") {
+    return (
+      <>
+        GPU A2 ports production base fields. Final rivers, wetlands, and planned
+        streams are not ported yet.
+      </>
+    );
+  }
+  return (
+    <>
+      CPU final includes rivers, wetlands, and planned streams. Base-field parity is
+      reported separately in Evidence.
+    </>
   );
 }
 

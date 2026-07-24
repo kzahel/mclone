@@ -23,7 +23,6 @@ var<storage, read> reference_samples: array<TerrainPreviewSample>;
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec3<f32>,
-    @location(1) split_coordinate: f32,
 };
 
 fn grid_corner(vertex_in_cell: u32) -> vec2<u32> {
@@ -37,13 +36,22 @@ fn grid_corner(vertex_in_cell: u32) -> vec2<u32> {
     }
 }
 
-fn selected_sample(index: u32, sample_x: u32) -> TerrainPreviewSample {
+fn reference_base_sample(index: u32) -> TerrainPreviewSample {
+    let final_sample = reference_samples[index];
+    var base_sample = final_sample;
+    base_sample.terrain.x = final_sample.large_fields.x;
+    base_sample.terrain.y = final_sample.large_fields.y;
+    base_sample.climate.z = final_sample.large_fields.z;
+    return base_sample;
+}
+
+fn selected_sample(index: u32, instance_index: u32) -> TerrainPreviewSample {
     let source_mode = params.seed_source_view.z;
     if source_mode == 1u {
         return reference_samples[index];
     }
-    if source_mode == 2u && sample_x <= u32(params.origin_spacing_cells.w) / 2u {
-        return reference_samples[index];
+    if source_mode == 2u && instance_index == 0u {
+        return reference_base_sample(index);
     }
     return gpu_samples[index];
 }
@@ -127,7 +135,7 @@ fn sample_color(
         return height_color(sample.terrain.y);
     }
     if layer == 2u {
-        return error_color(abs(reference.terrain.x - gpu.terrain.x));
+        return error_color(abs(reference.large_fields.x - gpu.large_fields.x));
     }
     if layer == 3u {
         return continentalness_color(sample.terrain.z);
@@ -141,7 +149,10 @@ fn sample_color(
 }
 
 @vertex
-fn vertex_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
+fn vertex_main(
+    @builtin(vertex_index) vertex_index: u32,
+    @builtin(instance_index) instance_index: u32,
+) -> VertexOutput {
     let cells = u32(params.origin_spacing_cells.w);
     let samples_per_axis = params.layer_samples_size.y;
     let cell_index = vertex_index / 6u;
@@ -151,7 +162,7 @@ fn vertex_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     let sample_x = cell_x + corner.x;
     let sample_z = cell_z + corner.y;
     let index = sample_z * samples_per_axis + sample_x;
-    let sample = selected_sample(index, sample_x);
+    let sample = selected_sample(index, instance_index);
     let reference = reference_samples[index];
     let gpu = gpu_samples[index];
 
@@ -159,10 +170,10 @@ fn vertex_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     let right_x = min(sample_x + 1u, samples_per_axis - 1u);
     let north_z = select(sample_z - 1u, sample_z, sample_z == 0u);
     let south_z = min(sample_z + 1u, samples_per_axis - 1u);
-    let left = selected_sample(sample_z * samples_per_axis + left_x, left_x);
-    let right = selected_sample(sample_z * samples_per_axis + right_x, right_x);
-    let north = selected_sample(north_z * samples_per_axis + sample_x, sample_x);
-    let south = selected_sample(south_z * samples_per_axis + sample_x, sample_x);
+    let left = selected_sample(sample_z * samples_per_axis + left_x, instance_index);
+    let right = selected_sample(sample_z * samples_per_axis + right_x, instance_index);
+    let north = selected_sample(north_z * samples_per_axis + sample_x, instance_index);
+    let south = selected_sample(south_z * samples_per_axis + sample_x, instance_index);
     let slope_x = (right.terrain.y - left.terrain.y) / max(f32(right_x - left_x), 1.0);
     let slope_z = (south.terrain.y - north.terrain.y) / max(f32(south_z - north_z), 1.0);
     let normal = normalize(vec3<f32>(-slope_x * 0.12, 1.0, -slope_z * 0.12));
@@ -172,7 +183,9 @@ fn vertex_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     let grid_z = f32(sample_z) / f32(cells) * 2.0 - 1.0;
     let width = max(f32(params.layer_samples_size.z), 1.0);
     let height = max(f32(params.layer_samples_size.w), 1.0);
-    let aspect = width / height;
+    let compare = params.seed_source_view.z == 2u;
+    let view_width = select(width, width * 0.5, compare);
+    let aspect = view_width / height;
     var clip_x = grid_x;
     var clip_y = -grid_z;
     var clip_z = 0.5;
@@ -198,21 +211,18 @@ fn vertex_main(@builtin(vertex_index) vertex_index: u32) -> VertexOutput {
     } else {
         clip_y = clip_y * aspect;
     }
+    if compare {
+        let panel_center = select(-0.5, 0.5, instance_index == 1u);
+        clip_x = clip_x * 0.46 + panel_center;
+    }
 
     var out: VertexOutput;
     out.position = vec4<f32>(clip_x, clip_y, clip_z, 1.0);
     out.color = sample_color(sample, reference, gpu, light);
-    out.split_coordinate = f32(sample_x) - f32(cells) * 0.5;
     return out;
 }
 
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
-    var seam = 0.0;
-    if params.seed_source_view.z == 2u {
-        let pixel_width = max(fwidth(input.split_coordinate) * 1.15, 0.0001);
-        seam = 1.0 - smoothstep(0.0, pixel_width, abs(input.split_coordinate));
-    }
-    let color = mix(input.color, vec3<f32>(0.84, 0.89, 0.81), seam * 0.42);
-    return vec4<f32>(color, 1.0);
+    return vec4<f32>(input.color, 1.0);
 }

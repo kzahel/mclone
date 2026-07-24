@@ -252,6 +252,17 @@ h1 {
   cursor: grabbing;
 }
 
+.terrainStage.compareMode::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  pointer-events: none;
+  background: rgba(206, 225, 216, 0.1);
+}
+
 .terrainCanvas {
   position: absolute;
   inset: 0;
@@ -309,6 +320,14 @@ h1 {
   font-size: 9px;
   text-transform: uppercase;
   letter-spacing: 0.12em;
+}
+
+.splitLabels span {
+  justify-self: center;
+  padding: 4px 7px;
+  border-radius: 3px;
+  background: rgba(5, 14, 15, 0.66);
+  backdrop-filter: blur(8px);
 }
 
 .canvasHint {

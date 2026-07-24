@@ -329,7 +329,7 @@ export function TerrainCanvas({
   return (
     <div
       ref={stageRef}
-      className="terrainStage"
+      className={`terrainStage${state.source === "split" ? " compareMode" : ""}`}
       data-testid="terrain-stage"
       data-render-ready={initialized ? "true" : "false"}
       onPointerDown={beginInteraction}
@@ -355,7 +355,7 @@ export function TerrainCanvas({
       </div>
       {state.source === "split" ? (
         <div className="splitLabels" aria-hidden="true">
-          <span>CPU final reference</span>
+          <span>CPU production base</span>
           <span>GPU production base</span>
         </div>
       ) : null}

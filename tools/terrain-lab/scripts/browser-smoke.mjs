@@ -66,8 +66,12 @@ try {
   const sourceControls = page.locator("[data-testid='preview-source-controls']");
   await sourceControls.waitFor({ state: "visible" });
   const sourceGuide = await sourceControls.innerText();
-  if (!sourceGuide.includes("The thin pale line is only the seam")) {
+  if (!sourceGuide.includes("exact same world coordinates")) {
     throw new Error(`Terrain Lab compare guidance is missing:\n${sourceGuide}`);
+  }
+  if (await shell.getAttribute("data-compare-layout") !== "side-by-side"
+      || Number(await shell.getAttribute("data-vertex-count")) !== 49_152) {
+    throw new Error("Terrain Lab Compare did not submit two synchronized terrain views");
   }
   await page.locator("[data-testid='terrain-diagnostics']").scrollIntoViewIfNeeded();
   await settlePaint(page);

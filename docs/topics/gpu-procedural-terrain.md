@@ -139,7 +139,8 @@ The terrain compute pipeline now exists in
   field specification;
 - retains separate base-surface/ocean and final-surface/watercourse comparison
   facts so an omitted field family cannot masquerade as arithmetic error;
-- draws 24,576 vertices from `vertex_index` without CPU vertex or index arrays;
+- draws 24,576 vertices for one view or two 24,576-vertex instances for
+  synchronized Compare without CPU vertex or index arrays;
 - supports terrain, height, continentalness, climate, and error layers in map
   or oblique views; and
 - performs an optional bounded asynchronous readback for lab comparison.
@@ -151,14 +152,15 @@ orbits with conventional pitch direction without changing URL-addressed
 geography; Shift+left or middle drag pans, map drag pans, and camera reset is
 distinct from the named fixed-site action. The source selector and its live
 comparison contract sit directly above the preview on every viewport. Compare
-splices CPU-final terrain on the left and GPU production-base terrain on the
-right, with a subdued center seam; its guidance names coastlines, broad
-elevation, and mountain shape as the intended comparison and calls out the
-expected CPU-only river and wetland residual. The seam is derivative-sized to
-remain a thin screen-space line while still orbiting with the sampled terrain.
-Production Reference is the initial source. The deployed product route is
-`/terrain/`; it does not load the game client, asset packs, a server, canonical
-chunks, lighting, collision, or persistence.
+draws two synchronized instances of the complete requested footprint: CPU
+production base on the left and GPU production base on the right. Both panels
+share exact world coordinates, seed, center, spacing, camera, and diagnostic
+layer, so matching terrain can be inspected directly instead of inferring
+continuity between unrelated halves. CPU Final remains a separate full-width
+source for reviewing the intentionally omitted river, wetland, and
+planned-stream layer. Production Reference is the initial source. The deployed
+product route is `/terrain/`; it does not load the game client, asset packs, a
+server, canonical chunks, lighting, collision, or persistence.
 
 Normal terrain and the current Far LOD path still arrive at `mclone-render` as
 CPU-constructed mesh products. The new tile is a reusable experimental
@@ -953,7 +955,8 @@ The fixed review request uses seed `-98765`, center `(-304, 336)`, a 64-by-64
 cell tile, and 32-block spacing. On the headed-Wayland BrowserWebGPU adapter,
 the A2 evaluator measured:
 
-- 4,225 samples and 24,576 procedural vertices;
+- 4,225 samples and 49,152 procedural Compare vertices across two synchronized
+  24,576-vertex panels;
 - zero base-surface mean, P95, and maximum height error;
 - 100% ocean-presence agreement;
 - `2.07e-8` mean continentalness error;
@@ -967,14 +970,13 @@ the same production point evaluator across the complete current spacing
 range. It does not prove a truthful coarse summary: point-sampled 512-block
 and smaller bands visibly alias at the 65.5 km extreme.
 
-The 2026-07-24 mobile review correction is deployed from code commit
-`69cf25fa` and aggregate asset version
-`69cf25fa2739-20260724043243`. Hosted desktop and phone BrowserWebGPU flows
-prove that source controls and comparison guidance immediately precede the
-preview, upward drag uses conventional pitch direction, the thin seam remains
-an orbiting divider rather than terrain, and the fixed 2 km / 65.5 km parity
-gates still pass. The deployed Cloudflare Worker version is
-`d0304204-25ee-4639-aba1-ed0efe0b2a1a`.
+The first 2026-07-24 mobile review correction moved source controls beside the
+preview and fixed orbit pitch, but follow-up review correctly rejected its
+single-patch seam as too vague to compare. Compare now submits the complete
+footprint twice: CPU production base and GPU production base share identical
+coordinates and camera state in labeled side-by-side panels. Local hosted-lane
+desktop and phone BrowserWebGPU flows prove two instances, shared orbit,
+preview-adjacent guidance, and the unchanged fixed 2 km / 65.5 km parity gates.
 
 The next tactical should therefore:
 

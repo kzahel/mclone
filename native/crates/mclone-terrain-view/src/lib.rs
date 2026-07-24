@@ -502,6 +502,7 @@ impl TerrainPreviewRenderer {
             self.sample_byte_len,
         );
 
+        let instance_count = preview_instance_count(options.source);
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("mclone_terrain_preview_render_pass"),
@@ -530,7 +531,10 @@ impl TerrainPreviewRenderer {
             });
             pass.set_pipeline(&self.render_pipeline);
             pass.set_bind_group(0, &self.render_bind_group, &[]);
-            pass.draw(0..self.cells_per_axis * self.cells_per_axis * 6, 0..1);
+            pass.draw(
+                0..self.cells_per_axis * self.cells_per_axis * 6,
+                0..instance_count,
+            );
         }
 
         let stats = TerrainPreviewFrameStats {
@@ -538,7 +542,7 @@ impl TerrainPreviewRenderer {
             cells_per_axis: self.cells_per_axis,
             samples_per_axis: self.samples_per_axis,
             sample_count: self.sample_count,
-            vertex_count: self.cells_per_axis * self.cells_per_axis * 6,
+            vertex_count: self.cells_per_axis * self.cells_per_axis * 6 * instance_count,
             footprint_blocks: request.footprint_blocks(),
             reference_bytes: self.sample_byte_len,
             gpu_sample_bytes: self.sample_byte_len,
@@ -631,6 +635,13 @@ impl TerrainPreviewRenderer {
             .and_then(|samples| TerrainPreviewComparison::compare(&pending.reference, &samples));
         drop(mapped);
         result
+    }
+}
+
+const fn preview_instance_count(source: TerrainPreviewSource) -> u32 {
+    match source {
+        TerrainPreviewSource::Split => 2,
+        TerrainPreviewSource::Gpu | TerrainPreviewSource::Reference => 1,
     }
 }
 
@@ -823,5 +834,9 @@ mod tests {
         assert!(shader.contains("fn gradient_noise"));
         assert!(!shader.contains("band_weight"));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("error_color"));
+        assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("@builtin(instance_index)"));
+        assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("fn reference_base_sample"));
+        assert_eq!(preview_instance_count(TerrainPreviewSource::Split), 2);
+        assert_eq!(preview_instance_count(TerrainPreviewSource::Reference), 1);
     }
 }
