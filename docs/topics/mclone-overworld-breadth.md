@@ -151,6 +151,13 @@ tactical. Promote an idea into the regional ledger, generation topic,
 Structure Lab, or its own focused topic only after it gains a concrete owner
 and review direction.
 
+### Coastal traces and small finds
+
+- Seashells could gather in sparse clusters along sandy beaches, especially
+  near strand lines, sheltered coves, and storm-tossed patches. Their first
+  purpose is to make the boundary between sea and land feel inhabited;
+  collectibility, crafting, and respawn behavior can remain separate ideas.
+
 ### Paths, trails, and traces
 
 - Human paths could include old dirt roads, desire lines, switchbacks,
