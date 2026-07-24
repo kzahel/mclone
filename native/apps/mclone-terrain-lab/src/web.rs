@@ -1,7 +1,8 @@
 use mclone_terrain_view::{
-    TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION, TerrainPreviewCamera,
+    CanonicalTerrainCompiler, TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION, TerrainPreviewCamera,
     TerrainViewportCompletedComparison, TerrainViewportDetail, TerrainViewportFrameStats,
-    TerrainViewportRenderer, TerrainViewportRequest, plan_terrain_viewport,
+    TerrainViewportRenderer, TerrainViewportRequest, canonical_terrain_chunk_order,
+    plan_terrain_viewport,
 };
 use mclone_worldgen::{
     levelgen::McloneOverworldSamplingTopology,
@@ -14,7 +15,148 @@ use serde::Serialize;
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 use web_sys::HtmlCanvasElement;
 
-use crate::{terrain_preview_option_labels, terrain_preview_options};
+use crate::{
+    canonical_terrain_stage, canonical_terrain_stage_label, terrain_preview_option_labels,
+    terrain_preview_options,
+};
+
+#[wasm_bindgen(js_name = CanonicalTerrainCompiler)]
+pub struct TerrainLabCanonicalCompiler {
+    compiler: CanonicalTerrainCompiler,
+}
+
+#[wasm_bindgen(js_class = CanonicalTerrainCompiler)]
+impl TerrainLabCanonicalCompiler {
+    #[wasm_bindgen(constructor)]
+    pub fn new(seed: String, stage: String) -> Result<TerrainLabCanonicalCompiler, JsValue> {
+        let seed = seed
+            .trim()
+            .parse::<i64>()
+            .map_err(|error| js_error(format!("invalid signed 64-bit seed {seed:?}: {error}")))?;
+        let stage = canonical_terrain_stage(&stage).map_err(js_error)?;
+        Ok(Self {
+            compiler: CanonicalTerrainCompiler::new(seed, stage),
+        })
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn stage(&self) -> String {
+        canonical_terrain_stage_label(self.compiler.stage()).to_owned()
+    }
+
+    #[wasm_bindgen(getter, js_name = retainedDependencyChunks)]
+    pub fn retained_dependency_chunks(&self) -> u32 {
+        self.compiler
+            .retained_dependency_chunks()
+            .min(u32::MAX as usize) as u32
+    }
+
+    #[wasm_bindgen(js_name = clearCache)]
+    pub fn clear_cache(&mut self) {
+        self.compiler.clear_cache();
+    }
+
+    pub fn compile(&mut self, chunk_x: i32, chunk_z: i32) -> TerrainLabCanonicalChunkPayload {
+        TerrainLabCanonicalChunkPayload {
+            chunk: self.compiler.compile(chunk_x, chunk_z),
+        }
+    }
+}
+
+#[wasm_bindgen(js_name = CanonicalTerrainChunkPayload)]
+pub struct TerrainLabCanonicalChunkPayload {
+    chunk: mclone_terrain_view::CanonicalTerrainChunk,
+}
+
+#[wasm_bindgen(js_class = CanonicalTerrainChunkPayload)]
+impl TerrainLabCanonicalChunkPayload {
+    #[wasm_bindgen(getter, js_name = chunkX)]
+    pub fn chunk_x(&self) -> i32 {
+        self.chunk.chunk_x
+    }
+
+    #[wasm_bindgen(getter, js_name = chunkZ)]
+    pub fn chunk_z(&self) -> i32 {
+        self.chunk.chunk_z
+    }
+
+    #[wasm_bindgen(getter, js_name = minY)]
+    pub fn min_y(&self) -> i32 {
+        self.chunk.min_y
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn height(&self) -> i32 {
+        self.chunk.height
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn stage(&self) -> String {
+        canonical_terrain_stage_label(self.chunk.stage).to_owned()
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn fingerprint(&self) -> String {
+        format!("{:016x}", self.chunk.fingerprint)
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn blocks(&self) -> js_sys::Uint8Array {
+        js_sys::Uint8Array::from(self.chunk.blocks.as_slice())
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn biomes(&self) -> js_sys::Int32Array {
+        js_sys::Int32Array::from(self.chunk.biomes.as_slice())
+    }
+
+    #[wasm_bindgen(getter, js_name = dependencyCacheHits)]
+    pub fn dependency_cache_hits(&self) -> u32 {
+        self.chunk
+            .dependency_cache
+            .cache_hits
+            .min(u32::MAX as usize) as u32
+    }
+
+    #[wasm_bindgen(getter, js_name = generatedDependencyChunks)]
+    pub fn generated_dependency_chunks(&self) -> u32 {
+        self.chunk
+            .dependency_cache
+            .generated_dependency_chunks
+            .min(u32::MAX as usize) as u32
+    }
+
+    #[wasm_bindgen(getter, js_name = retainedDependencyChunks)]
+    pub fn retained_dependency_chunks(&self) -> u32 {
+        self.chunk
+            .dependency_cache
+            .retained_dependency_chunks
+            .min(u32::MAX as usize) as u32
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerrainLabCanonicalChunkCoordinate {
+    chunk_x: i32,
+    chunk_z: i32,
+}
+
+#[wasm_bindgen(js_name = canonicalTerrainChunkOrder)]
+pub fn canonical_terrain_chunk_order_json(
+    center_x: i32,
+    center_z: i32,
+    radius: u32,
+) -> Result<String, JsValue> {
+    let coordinates = canonical_terrain_chunk_order(center_x, center_z, radius)
+        .into_iter()
+        .map(|position| TerrainLabCanonicalChunkCoordinate {
+            chunk_x: position.x,
+            chunk_z: position.z,
+        })
+        .collect::<Vec<_>>();
+    json(&coordinates)
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]

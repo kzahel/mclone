@@ -1,7 +1,8 @@
 #![forbid(unsafe_code)]
 
 use mclone_terrain_view::{
-    TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource, TerrainPreviewView,
+    CanonicalTerrainStage, TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource,
+    TerrainPreviewView,
 };
 
 #[cfg(target_arch = "wasm32")]
@@ -72,6 +73,23 @@ pub fn terrain_preview_option_labels(
     (source, view, layer)
 }
 
+pub fn canonical_terrain_stage(value: &str) -> Result<CanonicalTerrainStage, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "surface" => Ok(CanonicalTerrainStage::Surface),
+        "final" | "features" | "final-features" => Ok(CanonicalTerrainStage::FinalFeatures),
+        other => Err(format!(
+            "unsupported canonical terrain stage {other:?}; expected surface or final"
+        )),
+    }
+}
+
+pub fn canonical_terrain_stage_label(stage: CanonicalTerrainStage) -> &'static str {
+    match stage {
+        CanonicalTerrainStage::Surface => "surface",
+        CanonicalTerrainStage::FinalFeatures => "final",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -102,5 +120,21 @@ mod tests {
         assert!(terrain_preview_options("both-ish", "3d", "terrain").is_err());
         assert!(terrain_preview_options("gpu", "perspective", "terrain").is_err());
         assert!(terrain_preview_options("gpu", "3d", "biomes").is_err());
+    }
+
+    #[test]
+    fn parses_canonical_stage_vocabulary() {
+        assert_eq!(
+            canonical_terrain_stage("surface").unwrap(),
+            CanonicalTerrainStage::Surface
+        );
+        assert_eq!(
+            canonical_terrain_stage("Final Features").unwrap_err(),
+            "unsupported canonical terrain stage \"final features\"; expected surface or final"
+        );
+        assert_eq!(
+            canonical_terrain_stage_label(canonical_terrain_stage("features").unwrap()),
+            "final"
+        );
     }
 }
