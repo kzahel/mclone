@@ -6403,6 +6403,36 @@ mod android {
                 .poll_server_reported_total_ms
                 .max(b.poll_server_reported_total_ms),
             poll_scheduler_tick_ms: a.poll_scheduler_tick_ms.max(b.poll_scheduler_tick_ms),
+            poll_scheduler_adaptive_publication_budget_enabled: a
+                .poll_scheduler_adaptive_publication_budget_enabled
+                || b.poll_scheduler_adaptive_publication_budget_enabled,
+            poll_scheduler_feature_publish_budget_max_units: a
+                .poll_scheduler_feature_publish_budget_max_units
+                .max(b.poll_scheduler_feature_publish_budget_max_units),
+            poll_scheduler_feature_publish_budget_ms: a
+                .poll_scheduler_feature_publish_budget_ms
+                .max(b.poll_scheduler_feature_publish_budget_ms),
+            poll_scheduler_feature_publish_spent_units: a
+                .poll_scheduler_feature_publish_spent_units
+                .max(b.poll_scheduler_feature_publish_spent_units),
+            poll_scheduler_feature_publish_spent_ms: a
+                .poll_scheduler_feature_publish_spent_ms
+                .max(b.poll_scheduler_feature_publish_spent_ms),
+            poll_scheduler_light_publish_budget_max_units: a
+                .poll_scheduler_light_publish_budget_max_units
+                .max(b.poll_scheduler_light_publish_budget_max_units),
+            poll_scheduler_light_publish_budget_ms: a
+                .poll_scheduler_light_publish_budget_ms
+                .max(b.poll_scheduler_light_publish_budget_ms),
+            poll_scheduler_light_publish_spent_units: a
+                .poll_scheduler_light_publish_spent_units
+                .max(b.poll_scheduler_light_publish_spent_units),
+            poll_scheduler_light_publish_spent_ms: a
+                .poll_scheduler_light_publish_spent_ms
+                .max(b.poll_scheduler_light_publish_spent_ms),
+            poll_scheduler_pending_worldgen_publication_chunk_limit: a
+                .poll_scheduler_pending_worldgen_publication_chunk_limit
+                .max(b.poll_scheduler_pending_worldgen_publication_chunk_limit),
             poll_scheduler_completed_feature_jobs_drained: a
                 .poll_scheduler_completed_feature_jobs_drained
                 .max(b.poll_scheduler_completed_feature_jobs_drained),
@@ -6462,6 +6492,13 @@ mod android {
             poll_unload_updates: a.poll_unload_updates.max(b.poll_unload_updates),
             poll_other_updates: a.poll_other_updates.max(b.poll_other_updates),
             poll_mixed_updates: a.poll_mixed_updates.max(b.poll_mixed_updates),
+            poll_fluid_due_ticks: a.poll_fluid_due_ticks.max(b.poll_fluid_due_ticks),
+            poll_fluid_executed_ticks: a.poll_fluid_executed_ticks.max(b.poll_fluid_executed_ticks),
+            poll_fluid_deferred_ticks: a.poll_fluid_deferred_ticks.max(b.poll_fluid_deferred_ticks),
+            poll_fluid_mutated_blocks: a.poll_fluid_mutated_blocks.max(b.poll_fluid_mutated_blocks),
+            poll_scheduled_fluid_ticks: a
+                .poll_scheduled_fluid_ticks
+                .max(b.poll_scheduled_fluid_ticks),
             server_command_queue_depth: a
                 .server_command_queue_depth
                 .max(b.server_command_queue_depth),
