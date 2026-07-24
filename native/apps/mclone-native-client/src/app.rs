@@ -390,6 +390,12 @@ impl WindowFrameReportRecorder {
                 "physics_rate_hz": scene.simulation_cadence.physics_rate_hz,
             },
         });
+        let camera_pose_json = self.options.camera_pose.map(|pose| {
+            json!({
+                "eye": pose.eye,
+                "target": pose.target,
+            })
+        });
         let render_options_json = json!({
             "section_occlusion_culling": render_options.section_occlusion_culling,
             "force_fullbright": render_options.force_fullbright,
@@ -478,6 +484,7 @@ impl WindowFrameReportRecorder {
             "frames": self.frames.len(),
             "elapsed_wall_ms": elapsed_ms(self.start.elapsed()),
             "scene": scene_json,
+            "camera_pose": camera_pose_json,
             "render_options": render_options_json,
             "window": window_json,
             "surface": surface_json,
@@ -1613,6 +1620,16 @@ impl ApplicationHandler for ChunkApp {
                 return;
             }
         };
+        if let Some(camera_pose) = self
+            .frame_report
+            .as_ref()
+            .and_then(|recorder| recorder.options.camera_pose)
+            && let Err(error) = scene_driver.set_capture_camera_pose(camera_pose)
+        {
+            log::error!("failed to apply window report camera pose: {error:#}");
+            event_loop.exit();
+            return;
+        }
         if self.start_intent == WindowStartIntent::InWorld
             && self.startup_wait == StartupWaitPolicy::Idle
             && let Err(error) = scene_driver.drive_until_idle(
@@ -1624,6 +1641,22 @@ impl ApplicationHandler for ChunkApp {
             log::error!("failed to complete idle desktop startup: {error:#}");
             event_loop.exit();
             return;
+        }
+        if let Some(camera_pose) = self
+            .frame_report
+            .as_ref()
+            .and_then(|recorder| recorder.options.camera_pose)
+        {
+            if let Err(error) = scene_driver.set_capture_camera_pose(camera_pose) {
+                log::error!("failed to restore window report camera pose after startup: {error:#}");
+                event_loop.exit();
+                return;
+            }
+            if let Err(error) = scene_driver.reconcile_capture_camera_pose() {
+                log::error!("failed to reconcile window report camera pose: {error:#}");
+                event_loop.exit();
+                return;
+            }
         }
         let audio = match AudioEngine::new(&asset_source, AudioSettings::default()) {
             Ok(audio) => Some(audio),

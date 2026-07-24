@@ -29,7 +29,8 @@ use mclone_ui::{
     GameUiAction, GameUiHost, GameWorldRenderScaleMode, GuiScale, Point, UiDebugSnapshot,
 };
 
-use crate::cli::SceneOptions;
+use crate::camera::SPECTATOR_BASE_SPEED;
+use crate::cli::{SceneOptions, WindowCameraPose};
 use crate::desktop_scene_host::{DesktopSceneHost, create_desktop_title_scene_host};
 use crate::scene_runtime::WindowSceneAssets;
 
@@ -210,6 +211,27 @@ impl WinitFrameDriver {
             || mclone_audio::AudioOutputCapability::Unavailable,
             mclone_audio::AudioOutputCapability::available,
         ));
+    }
+
+    pub(crate) fn set_capture_camera_pose(&mut self, pose: WindowCameraPose) -> Result<()> {
+        let eye = glam::Vec3::from_array(pose.eye);
+        let direction = (glam::Vec3::from_array(pose.target) - eye).normalize_or_zero();
+        if !direction.is_finite() || direction.length_squared() <= f32::EPSILON {
+            anyhow::bail!("window camera eye and target must be finite and differ");
+        }
+        let yaw_radians = direction.x.atan2(direction.z);
+        let pitch_radians = direction.y.clamp(-1.0, 1.0).asin();
+        self.host.set_mono_capture_camera(
+            mclone_core::Vec3d::new(f64::from(eye.x), f64::from(eye.y), f64::from(eye.z)),
+            f64::from(yaw_radians),
+            f64::from(pitch_radians),
+            f64::from(SPECTATOR_BASE_SPEED),
+        );
+        Ok(())
+    }
+
+    pub(crate) fn reconcile_capture_camera_pose(&mut self) -> Result<bool> {
+        self.host.force_mono_player_pose_reconcile_for_diagnostics()
     }
 
     pub(crate) fn drive_until_idle(

@@ -9,7 +9,7 @@ use mclone_app_runtime::frame_render::{MAX_FLAT_RENDER_SCALE, MIN_FLAT_RENDER_SC
 use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionStartRequest};
 use mclone_app_runtime::startup_args::{
     RenderCompileCapacityRequest, RenderDistanceLimits, StartupArgState, StartupSceneOptions,
-    parse_bool_arg, parse_i32_arg, parse_i64_arg, parse_u32_arg, parse_u64_arg,
+    parse_bool_arg, parse_f32_vec3_arg, parse_i32_arg, parse_i64_arg, parse_u32_arg, parse_u64_arg,
 };
 use mclone_core::{ChunkPos, Vec3d};
 use mclone_input::KeyboardKey;
@@ -144,6 +144,8 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
     "--warm-world-swap-smoke",
     "--window-frame-report",
     "--window-frame-report-frames",
+    "--window-camera-eye",
+    "--window-camera-target",
     "--worldgen-showcase-card",
     "--xr-clear-smoke",
     "--xr-debug-ui",
@@ -625,6 +627,13 @@ pub(crate) enum StartupWaitPolicy {
 pub(crate) struct WindowFrameReportOptions {
     pub(crate) path: PathBuf,
     pub(crate) frames: usize,
+    pub(crate) camera_pose: Option<WindowCameraPose>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct WindowCameraPose {
+    pub(crate) eye: [f32; 3],
+    pub(crate) target: [f32; 3],
 }
 
 impl StartupWaitPolicy {
@@ -899,6 +908,8 @@ impl Cli {
         let mut window_frame_report_path = None;
         let mut window_frame_report_frames = DEFAULT_WINDOW_FRAME_REPORT_FRAMES;
         let mut window_frame_report_frames_explicit = false;
+        let mut window_camera_eye = None;
+        let mut window_camera_target = None;
         let mut movement_perf = false;
         let mut timedemo = false;
         let mut frame_budget_probe = false;
@@ -1482,6 +1493,12 @@ impl Cli {
                     window_frame_report_frames =
                         parse_window_frame_report_frames_arg(&arg, args.next())?;
                 }
+                "--window-camera-eye" => {
+                    window_camera_eye = Some(parse_f32_vec3_arg(&arg, args.next())?);
+                }
+                "--window-camera-target" => {
+                    window_camera_target = Some(parse_f32_vec3_arg(&arg, args.next())?);
+                }
                 "--platform-profile" => {
                     platform_profile_explicit = true;
                     platform_profile = parse_window_platform_profile_arg(&arg, args.next())?;
@@ -1667,6 +1684,26 @@ impl Cli {
         if window_frame_report_frames_explicit && window_frame_report_path.is_none() {
             bail!("--window-frame-report-frames requires --window-frame-report");
         }
+        let window_camera_pose = match (window_camera_eye, window_camera_target) {
+            (None, None) => None,
+            (Some(_), None) => {
+                bail!("--window-camera-eye requires --window-camera-target");
+            }
+            (None, Some(_)) => {
+                bail!("--window-camera-target requires --window-camera-eye");
+            }
+            (Some(eye), Some(target)) => {
+                if eye == target {
+                    bail!("--window-camera-eye and --window-camera-target must differ");
+                }
+                if window_frame_report_path.is_none() {
+                    bail!(
+                        "--window-camera-eye/--window-camera-target require --window-frame-report"
+                    );
+                }
+                Some(WindowCameraPose { eye, target })
+            }
+        };
         if platform_profile_explicit
             && (mode.is_some()
                 || perf_mode_count > 0
@@ -2250,6 +2287,7 @@ impl Cli {
                 frame_report: window_frame_report_path.map(|path| WindowFrameReportOptions {
                     path,
                     frames: window_frame_report_frames,
+                    camera_pose: window_camera_pose,
                 }),
             }),
         }
@@ -2783,7 +2821,7 @@ fn print_help() {
     println!(
         "mclone-native-client\n\n\
          Usage:\n\
-           mclone-native-client [--platform-profile desktop|steamos] [--width 1280] [--height 900] [--menu|--start-in-world true|false] [--startup-wait none|progress|playable|idle|frames:N] [--window-frame-report /tmp/mclone-window.json] [--window-frame-report-frames 3600] [--seed 12345] [--generation-profile overworld|flat-grass-v1|small-island-v1|mclone-overworld-v1|alpha-v1|beta-v1|authored-only] [--world-topology plane|cylinder-x|cylinder-x:PERIOD_CHUNKS] [--alpha-winter true|false] [--warm-world-standby-seed -98765|--live-diorama-world-dir ./island-b] [--live-diorama-source-region 0,0,0,3,5] [--live-diorama-source-anchor 8.5,65,8.5] [--live-diorama-composition-anchor 8,65.03125,8] [--live-diorama-scale 0.0625] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-capacity default|derived] [--render-compile-workers 1] [--render-compile-max-pending-jobs 4] [--world-root ./worlds] [--world-dir ./world|--transient] [--far-lod true|false] [--startup-lod-prewarm true|false] [--movement-mode walk|fly|hand-push|thruster] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--adaptive-render-admission-budget true|false] [--debug-passive-showcase true|false] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
+           mclone-native-client [--platform-profile desktop|steamos] [--width 1280] [--height 900] [--menu|--start-in-world true|false] [--startup-wait none|progress|playable|idle|frames:N] [--window-frame-report /tmp/mclone-window.json] [--window-frame-report-frames 3600] [--window-camera-eye x,y,z --window-camera-target x,y,z] [--seed 12345] [--generation-profile overworld|flat-grass-v1|small-island-v1|mclone-overworld-v1|alpha-v1|beta-v1|authored-only] [--world-topology plane|cylinder-x|cylinder-x:PERIOD_CHUNKS] [--alpha-winter true|false] [--warm-world-standby-seed -98765|--live-diorama-world-dir ./island-b] [--live-diorama-source-region 0,0,0,3,5] [--live-diorama-source-anchor 8.5,65,8.5] [--live-diorama-composition-anchor 8,65.03125,8] [--live-diorama-scale 0.0625] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-capacity default|derived] [--render-compile-workers 1] [--render-compile-max-pending-jobs 4] [--world-root ./worlds] [--world-dir ./world|--transient] [--far-lod true|false] [--startup-lod-prewarm true|false] [--movement-mode walk|fly|hand-push|thruster] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--adaptive-render-admission-budget true|false] [--debug-passive-showcase true|false] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --actor-review-sheet /tmp/mclone-actor-review.png [--width 1152] [--height 512] [--fullbright true|false]\n\
            mclone-native-client --actor-walk-review /tmp/mclone-actor-walk-review.png [--actor-walk-review-video /tmp/mclone-actor-walk-review.mp4] [--width 360] [--height 360] [--walk-review-frames 24] [--walk-review-fps 12] [--walk-review-cycles 2] [--fullbright true|false]\n\

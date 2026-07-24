@@ -491,9 +491,58 @@ fn cli_parses_window_frame_report_options() {
             frame_report: Some(WindowFrameReportOptions {
                 path: PathBuf::from("/tmp/mclone-window-report.json"),
                 frames: 120,
+                camera_pose: None,
             }),
         }
     );
+}
+
+#[test]
+fn cli_parses_window_frame_report_camera_pose() {
+    let Cli::Window {
+        frame_report: Some(frame_report),
+        ..
+    } = Cli::parse([
+        "--window-frame-report".to_owned(),
+        "/tmp/mclone-window-report.json".to_owned(),
+        "--window-camera-eye".to_owned(),
+        "8,196,8".to_owned(),
+        "--window-camera-target".to_owned(),
+        "8,64,8".to_owned(),
+    ])
+    .unwrap()
+    else {
+        panic!("expected window frame report");
+    };
+    assert_eq!(
+        frame_report.camera_pose,
+        Some(crate::cli::WindowCameraPose {
+            eye: [8.0, 196.0, 8.0],
+            target: [8.0, 64.0, 8.0],
+        })
+    );
+}
+
+#[test]
+fn cli_rejects_incomplete_or_unbounded_window_camera_pose() {
+    for args in [
+        vec!["--window-camera-eye", "8,196,8"],
+        vec!["--window-camera-target", "8,64,8"],
+        vec![
+            "--window-camera-eye",
+            "8,196,8",
+            "--window-camera-target",
+            "8,64,8",
+        ],
+    ] {
+        let error = Cli::parse(args.into_iter().map(str::to_owned))
+            .unwrap_err()
+            .to_string();
+        assert!(
+            error.contains("require"),
+            "unexpected error for camera arguments: {error}"
+        );
+    }
 }
 
 #[test]
