@@ -5,7 +5,7 @@ use mclone_worldgen::levelgen::{
     McloneOverworldFeatureDependencyCacheReport, generate_mclone_overworld_surface_chunk,
 };
 
-pub const CANONICAL_TERRAIN_MAX_CHUNK_RADIUS: u32 = 2;
+pub const CANONICAL_TERRAIN_MAX_CHUNK_RADIUS: u32 = 4;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub enum CanonicalTerrainStage {
@@ -214,7 +214,7 @@ mod tests {
     #[test]
     fn canonical_order_is_center_first_and_radius_bounded() {
         let positions = canonical_terrain_chunk_order(-1, 17, 99);
-        assert_eq!(positions.len(), 25);
+        assert_eq!(positions.len(), 81);
         assert_eq!(positions[0], ChunkPos::new(-1, 1));
         assert!(
             positions[1..9]

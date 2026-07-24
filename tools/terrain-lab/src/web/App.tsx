@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   DEFAULT_TERRAIN_LAB_CAMERA,
   REVIEW_TERRAIN_LAB_STATE,
+  TERRAIN_LAB_CANONICAL_RADII,
   TERRAIN_LAB_SPACINGS,
   footprintBlocks,
   nextBlocksAcross,
@@ -391,17 +392,23 @@ export function App(): React.JSX.Element {
                   onChange={(canonicalStage) => patchState({ canonicalStage })}
                 />
                 <label className="fieldLabel">
-                  <span>Exact chunk radius</span>
+                  <span>Exact chunk footprint</span>
                   <select
-                    aria-label="Exact chunk radius"
+                    aria-label="Exact chunk footprint"
                     value={state.canonicalRadius}
                     onChange={(event) =>
                       patchState({ canonicalRadius: Number(event.target.value) })
                     }
                   >
-                    <option value={0}>0 · 1 chunk</option>
-                    <option value={1}>1 · 9 chunks</option>
-                    <option value={2}>2 · 25 chunks</option>
+                    {TERRAIN_LAB_CANONICAL_RADII.map((radius) => {
+                      const side = radius * 2 + 1;
+                      const chunks = side * side;
+                      return (
+                        <option key={radius} value={radius}>
+                          {side} × {side} · {chunks} {chunks === 1 ? "chunk" : "chunks"}
+                        </option>
+                      );
+                    })}
                   </select>
                 </label>
                 <div className="visibilityToggles">

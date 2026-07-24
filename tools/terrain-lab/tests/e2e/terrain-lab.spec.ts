@@ -349,6 +349,70 @@ test("two-finger gestures pan and zoom procedural and real terrain", async ({
   expect(pageErrors).toEqual([]);
 });
 
+test("publishes an 81-chunk real-terrain footprint progressively", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "phone-chrome", "phone-sized exact-footprint proof");
+  test.slow();
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      pageErrors.push(message.text());
+    }
+  });
+  await page.goto(
+    "/terrain/?seed=-98765&x=-304&z=336&blocks=512&detail=auto"
+      + "&panes=canonical&canonical=final&radius=0"
+      + "&water=1&vegetation=1&stage=hydrology&view=3d&layer=terrain",
+  );
+  await waitForCanonical(page, 1);
+  const shell = page.locator(".appShell");
+  await page.evaluate(() => {
+    const counts: number[] = [];
+    const element = document.querySelector(".appShell");
+    const record = (): void => {
+      const count = Number(element?.getAttribute("data-canonical-published") ?? "0");
+      if (counts.at(-1) !== count) {
+        counts.push(count);
+      }
+    };
+    record();
+    const observer = new MutationObserver(record);
+    if (element) {
+      observer.observe(element, {
+        attributes: true,
+        attributeFilter: ["data-canonical-published"],
+      });
+    }
+    Object.assign(window, {
+      terrainLabCanonicalCounts: counts,
+      terrainLabCanonicalObserver: observer,
+    });
+  });
+
+  const footprint = page.getByLabel("Exact chunk footprint");
+  await expect(footprint.locator("option")).toHaveCount(5);
+  await footprint.selectOption("4");
+  await expect(page).toHaveURL(/radius=4/u);
+  await expect(shell).toHaveAttribute("data-canonical-requested", "81");
+  await waitForCanonical(page, 81);
+  const counts = await page.evaluate(() => {
+    const holder = window as typeof window & {
+      terrainLabCanonicalCounts?: number[];
+      terrainLabCanonicalObserver?: MutationObserver;
+    };
+    holder.terrainLabCanonicalObserver?.disconnect();
+    return holder.terrainLabCanonicalCounts ?? [];
+  });
+  expect(counts.some((count) => count > 0 && count < 81)).toBe(true);
+  await expect(footprint).toHaveValue("4");
+  await page.getByTestId("canonical-terrain-stage").screenshot({
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-canonical-81.png`,
+  });
+  expect(pageErrors).toEqual([]);
+});
+
 async function waitForCanonical(
   page: import("@playwright/test").Page,
   requestedChunks: number,

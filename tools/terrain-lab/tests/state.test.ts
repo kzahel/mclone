@@ -172,6 +172,12 @@ test("accepts old spacing links without changing their visible footprint", () =>
   assert.equal(legacy.detail, 32);
 });
 
+test("accepts bounded 49- and 81-chunk exact footprints", () => {
+  assert.equal(parseTerrainLabState("?radius=3").canonicalRadius, 3);
+  assert.equal(parseTerrainLabState("?radius=4").canonicalRadius, 4);
+  assert.equal(parseTerrainLabState("?radius=5").canonicalRadius, 2);
+});
+
 test("defaults to the three-pane workspace and gives the review site a name", () => {
   assert.equal(DEFAULT_TERRAIN_LAB_STATE.source, "split");
   assert.deepEqual(DEFAULT_TERRAIN_LAB_STATE.panes, ["canonical", "cpu", "gpu"]);

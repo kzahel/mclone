@@ -25,7 +25,8 @@ The URL owns the review state:
   blocks
 - `panes`: comma-separated `canonical`, `cpu`, and/or `gpu`
 - `canonical`: `surface` or `final`
-- `radius`: exact chunk radius from `0` through `2`
+- `radius`: exact chunk radius from `0` through `4`, corresponding to `1`,
+  `9`, `25`, `49`, or `81` centered chunks
 - `water` and `vegetation`: `1` to show or `0` to hide retained exact blocks
 - `source`: legacy/procedural compatibility value (`reference`, `gpu`, or
   `split`); new links should use `panes`
@@ -37,7 +38,8 @@ The URL owns the review state:
 Legacy `spacing=` links still load with their original `spacing × 64`
 footprint and fixed detail. New links keep coverage and resolution independent.
 
-Wheel and pinch zoom the continuous viewport. The stage captures wheel events
+Wheel and two-finger gestures zoom the continuous viewport; centroid movement
+pans during the same gesture. The stage captures wheel events
 through a non-passive native listener, so a Mac trackpad or mouse wheel zooms
 terrain without scrolling the document. Map zoom is anchored under the
 pointer; map drag follows grab semantics on both axes; 3D left drag orbits;
