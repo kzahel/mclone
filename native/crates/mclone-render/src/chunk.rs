@@ -7535,13 +7535,10 @@ mod tests {
 
     #[test]
     fn bounded_placed_grass_centers_interaction_on_the_source_presentation() {
-        let placement =
-            WorldPlacement::new(Vec3d::new(8.0, 0.0, 8.0), Vec3d::ZERO, 0.2).unwrap();
-        let bounds = WorldSourceBounds::new(
-            Vec3d::new(0.0, 0.0, 0.0),
-            Vec3d::new(32.0, 16.0, 64.0),
-        )
-        .unwrap();
+        let placement = WorldPlacement::new(Vec3d::new(8.0, 0.0, 8.0), Vec3d::ZERO, 0.2).unwrap();
+        let bounds =
+            WorldSourceBounds::new(Vec3d::new(0.0, 0.0, 0.0), Vec3d::new(32.0, 16.0, 64.0))
+                .unwrap();
         let context = WorldCompositionContext::unbounded(placement, Some(bounds));
 
         assert_eq!(

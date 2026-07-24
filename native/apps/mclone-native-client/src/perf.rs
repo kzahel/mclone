@@ -17,8 +17,8 @@ use mclone_app_runtime::{RenderSectionSyncTiming, RuntimeUpdatePumpBudget};
 use mclone_core::{CHUNK_WIDTH, ChunkPos};
 use mclone_diagnostics::{
     BudgetDecisionPanelReport, FrameAccountingConfig, FrameAccumulator, FrameObservation,
-    FramePipelineReport, FrameSummaryReport, PercentileMethod, QueuePanelReport, StageId,
-    StageSpan,
+    FramePipelineReport, FrameSummaryReport, PercentileMethod, PercentileSummary, QueuePanelReport,
+    StageId, StageSpan,
 };
 use mclone_frame_budget::RenderCompileMeshFootprint;
 use mclone_mesh::{TexturedChunkVertex, VisibilityGraphBuildStats, quad_face_count_from_indices};
@@ -397,6 +397,7 @@ impl MovementPerfReport {
 #[derive(Clone, Debug)]
 pub(crate) struct TimedemoReport {
     options: TimedemoOptions,
+    grass_detail: mclone_render::GrassQuality,
     loaded_render_distance: i32,
     visibility_graph_stats: VisibilityGraphBuildStats,
     scene_build_ms: f64,
@@ -404,6 +405,16 @@ pub(crate) struct TimedemoReport {
     vertex_count: u32,
     face_count: u32,
     index_count: u32,
+    frame_wall: PercentileSummary,
+    grass_resident_patch_count: u32,
+    grass_resident_bytes: u64,
+    average_grass_drawn_patch_count: f64,
+    average_grass_estimated_blade_count: f64,
+    average_grass_draw_calls: f64,
+    average_grass_interaction_field_count: f64,
+    average_grass_interaction_active_cell_count: f64,
+    grass_interaction_stamp_count: u64,
+    grass_interaction_uploaded_bytes: u64,
     render: mclone_render::headless::HeadlessTimedemoReport,
 }
 
@@ -844,6 +855,15 @@ struct TimedemoState {
     max_frustum_indices: u32,
     graph_culled_indices: u64,
     max_graph_culled_indices: u32,
+    grass_resident_patches: u32,
+    grass_resident_bytes: u64,
+    grass_drawn_patches: u64,
+    grass_estimated_blades: u64,
+    grass_draw_calls: usize,
+    grass_interaction_fields: u64,
+    grass_interaction_active_cells: u64,
+    grass_interaction_stamps: u64,
+    grass_interaction_uploaded_bytes: u64,
 }
 
 impl TimedemoReport {
@@ -893,6 +913,15 @@ impl TimedemoReport {
             self.options.render_options.color_profile.as_str()
         );
         println!(
+            "  \"grass_detail\": \"{}\",",
+            match self.grass_detail {
+                mclone_render::GrassQuality::Off => "off",
+                mclone_render::GrassQuality::Sparse => "sparse",
+                mclone_render::GrassQuality::Lush => "lush",
+                mclone_render::GrassQuality::Ultra => "ultra",
+            }
+        );
+        println!(
             "  \"path_radius_chunks\": {},",
             self.options.path_radius_chunks
         );
@@ -928,6 +957,9 @@ impl TimedemoReport {
             "    \"average_frame_ms\": {:.3},",
             self.render.average_frame_ms
         );
+        println!("    \"p50_frame_ms\": {:.3},", self.frame_wall.p50_ms);
+        println!("    \"p95_frame_ms\": {:.3},", self.frame_wall.p95_ms);
+        println!("    \"p99_frame_ms\": {:.3},", self.frame_wall.p99_ms);
         println!("    \"min_frame_ms\": {:.3},", self.render.min_frame_ms);
         println!("    \"max_frame_ms\": {:.3},", self.render.max_frame_ms);
         println!(
@@ -989,6 +1021,41 @@ impl TimedemoReport {
         println!(
             "    \"max_graph_culled_index_count\": {}",
             self.render.max_graph_culled_index_count
+        );
+        println!("  }},");
+        println!("  \"grass\": {{");
+        println!(
+            "    \"resident_patch_count\": {},",
+            self.grass_resident_patch_count
+        );
+        println!("    \"resident_bytes\": {},", self.grass_resident_bytes);
+        println!(
+            "    \"average_drawn_patch_count\": {:.3},",
+            self.average_grass_drawn_patch_count
+        );
+        println!(
+            "    \"average_estimated_blade_count\": {:.3},",
+            self.average_grass_estimated_blade_count
+        );
+        println!(
+            "    \"average_draw_calls\": {:.3},",
+            self.average_grass_draw_calls
+        );
+        println!(
+            "    \"average_interaction_field_count\": {:.3},",
+            self.average_grass_interaction_field_count
+        );
+        println!(
+            "    \"average_interaction_active_cell_count\": {:.3},",
+            self.average_grass_interaction_active_cell_count
+        );
+        println!(
+            "    \"interaction_stamp_count\": {},",
+            self.grass_interaction_stamp_count
+        );
+        println!(
+            "    \"interaction_uploaded_bytes\": {}",
+            self.grass_interaction_uploaded_bytes
         );
         println!("  }}");
         println!("}}");
@@ -3900,6 +3967,15 @@ pub(crate) fn run_timedemo(options: &TimedemoOptions) -> Result<TimedemoReport> 
                 max_frustum_indices: 0,
                 graph_culled_indices: 0,
                 max_graph_culled_indices: 0,
+                grass_resident_patches: 0,
+                grass_resident_bytes: 0,
+                grass_drawn_patches: 0,
+                grass_estimated_blades: 0,
+                grass_draw_calls: 0,
+                grass_interaction_fields: 0,
+                grass_interaction_active_cells: 0,
+                grass_interaction_stamps: 0,
+                grass_interaction_uploaded_bytes: 0,
             })
         },
         |index, frame, state| {
@@ -3927,13 +4003,28 @@ pub(crate) fn run_timedemo(options: &TimedemoOptions) -> Result<TimedemoReport> 
             state.max_graph_culled_indices = state
                 .max_graph_culled_indices
                 .max(render.graph_culled_index_count);
+            state.grass_resident_patches = state
+                .grass_resident_patches
+                .max(render.grass_resident_patch_count);
+            state.grass_resident_bytes =
+                state.grass_resident_bytes.max(render.grass_resident_bytes);
+            state.grass_drawn_patches += u64::from(render.grass_drawn_patch_count);
+            state.grass_estimated_blades += u64::from(render.grass_estimated_blade_count);
+            state.grass_draw_calls += render.grass_draw_calls;
+            state.grass_interaction_fields += u64::from(render.grass_interaction_field_count);
+            state.grass_interaction_active_cells +=
+                u64::from(render.grass_interaction_active_cell_count);
+            state.grass_interaction_stamps += u64::from(render.grass_interaction_stamp_count);
+            state.grass_interaction_uploaded_bytes += render.grass_interaction_uploaded_bytes;
             Ok(())
         },
     )?;
 
     let frame_count = headless.frame_count.max(1);
     let divisor = frame_count as f64;
+    let frame_wall = headless_frame_accounting_report(&headless.frames, 1_000.0 / 60.0).frame_wall;
     let stream = state.driver.host().render_stats();
+    let grass_detail = state.driver.host().grass_detail();
     let section_count = stream
         .resident_cpu_mesh_section_count
         .max(stream.section_count);
@@ -3966,6 +4057,7 @@ pub(crate) fn run_timedemo(options: &TimedemoOptions) -> Result<TimedemoReport> 
     };
     Ok(TimedemoReport {
         options: options.clone(),
+        grass_detail,
         loaded_render_distance: i32::try_from(loaded_render_distance)
             .context("loaded render distance exceeds i32")?,
         visibility_graph_stats: state.warmup.visibility_graph,
@@ -3974,6 +4066,17 @@ pub(crate) fn run_timedemo(options: &TimedemoOptions) -> Result<TimedemoReport> 
         vertex_count,
         face_count: quad_face_count_from_indices(index_count),
         index_count,
+        frame_wall,
+        grass_resident_patch_count: state.grass_resident_patches,
+        grass_resident_bytes: state.grass_resident_bytes,
+        average_grass_drawn_patch_count: state.grass_drawn_patches as f64 / divisor,
+        average_grass_estimated_blade_count: state.grass_estimated_blades as f64 / divisor,
+        average_grass_draw_calls: state.grass_draw_calls as f64 / divisor,
+        average_grass_interaction_field_count: state.grass_interaction_fields as f64 / divisor,
+        average_grass_interaction_active_cell_count: state.grass_interaction_active_cells as f64
+            / divisor,
+        grass_interaction_stamp_count: state.grass_interaction_stamps,
+        grass_interaction_uploaded_bytes: state.grass_interaction_uploaded_bytes,
         render,
     })
 }
