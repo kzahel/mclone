@@ -1,8 +1,11 @@
 use super::biomes::{McloneOverworldBiomeDecision, mclone_overworld_biome_decision};
 use super::fields::{
     MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldLandformSample, McloneOverworldSampler,
+    McloneOverworldSamplingTopology,
 };
 use super::surface::{McloneOverworldSurfaceRecipe, mclone_overworld_surface_recipe};
+use super::terrain::sample_mclone_overworld_landform_with_streams;
+use mclone_core::ChunkPos;
 
 pub const MCLONE_OVERWORLD_DEBUG_CELL_SIZE: i32 = 4;
 
@@ -71,6 +74,7 @@ pub struct McloneOverworldDebugSample {
     pub landform: McloneOverworldLandformKind,
     pub surface: McloneOverworldSurfaceRecipe,
     pub hydrology: McloneOverworldHydrologyKind,
+    pub planned_stream_start: Option<ChunkPos>,
 }
 
 pub fn mclone_overworld_debug_sample(
@@ -79,6 +83,31 @@ pub fn mclone_overworld_debug_sample(
     world_z: i32,
 ) -> McloneOverworldDebugSample {
     let landform_sample = sampler.sample_landform(world_x, world_z);
+    debug_sample_from_landform(world_x, world_z, landform_sample, None)
+}
+
+pub fn mclone_overworld_debug_sample_with_streams(
+    seed: i64,
+    topology: McloneOverworldSamplingTopology,
+    world_x: i32,
+    world_z: i32,
+) -> Result<McloneOverworldDebugSample, String> {
+    let (landform_sample, planned_stream_start) =
+        sample_mclone_overworld_landform_with_streams(seed, topology, world_x, world_z)?;
+    Ok(debug_sample_from_landform(
+        world_x,
+        world_z,
+        landform_sample,
+        planned_stream_start,
+    ))
+}
+
+fn debug_sample_from_landform(
+    world_x: i32,
+    world_z: i32,
+    landform_sample: McloneOverworldLandformSample,
+    planned_stream_start: Option<ChunkPos>,
+) -> McloneOverworldDebugSample {
     McloneOverworldDebugSample {
         world_x,
         world_z,
@@ -88,6 +117,7 @@ pub fn mclone_overworld_debug_sample(
         landform: debug_landform_kind(landform_sample),
         surface: mclone_overworld_surface_recipe(landform_sample),
         hydrology: debug_hydrology_kind(landform_sample),
+        planned_stream_start,
         landform_sample,
     }
 }
@@ -139,8 +169,10 @@ fn debug_hydrology_kind(sample: McloneOverworldLandformSample) -> McloneOverworl
 mod tests {
     use super::*;
     use crate::levelgen::{
-        McloneOverworldBiomeRecipe, mclone_overworld_biome_recipe, mclone_overworld_surface_recipe,
+        McloneOverworldBiomeRecipe, McloneOverworldStreamPlanner, mclone_overworld_biome_recipe,
+        mclone_overworld_surface_recipe,
     };
+    use mclone_core::ChunkPos;
 
     #[test]
     fn diagnostic_sample_uses_production_classifiers() {
@@ -189,5 +221,25 @@ mod tests {
         assert!(recipes.contains(&McloneOverworldBiomeRecipe::TemperateMeadow));
         assert!(recipes.len() >= 5, "recipes={recipes:?}");
         assert!(reasons.len() >= recipes.len(), "reasons={reasons:?}");
+    }
+
+    #[test]
+    fn diagnostic_stream_sample_names_the_owning_start() {
+        let seed = -98_765;
+        let topology = McloneOverworldSamplingTopology::Unbounded;
+        let plan = McloneOverworldStreamPlanner::new(seed, topology)
+            .plans_intersecting_chunks(ChunkPos::new(148, -125), ChunkPos::new(150, -123))
+            .unwrap()
+            .into_iter()
+            .next()
+            .expect("review region has a planned stream");
+        let node = plan.nodes[plan.nodes.len() / 2];
+        let debug =
+            mclone_overworld_debug_sample_with_streams(seed, topology, node.x, node.z).unwrap();
+        assert_eq!(debug.hydrology, McloneOverworldHydrologyKind::PlannedStream);
+        assert_eq!(
+            debug.planned_stream_start,
+            Some(plan.structure.key.canonical_start)
+        );
     }
 }

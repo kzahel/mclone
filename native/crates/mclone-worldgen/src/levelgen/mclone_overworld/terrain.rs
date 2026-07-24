@@ -400,7 +400,7 @@ impl ChunkLandformSamples {
                 let world_x = min_x + offset_x;
                 let world_z = min_z + offset_z;
                 let mut sample = sampler.sample(world_x, world_z);
-                apply_stream_plans(&mut sample, world_x, world_z, &stream_plans);
+                let _ = apply_stream_plans(&mut sample, world_x, world_z, &stream_plans);
                 terrain.push(sample);
             }
         }
@@ -430,12 +430,47 @@ impl ChunkLandformSamples {
     }
 }
 
+pub(super) fn sample_mclone_overworld_landform_with_streams(
+    seed: i64,
+    topology: McloneOverworldSamplingTopology,
+    world_x: i32,
+    world_z: i32,
+) -> Result<(McloneOverworldLandformSample, Option<ChunkPos>), String> {
+    let sampler = McloneOverworldSampler::new_with_topology(seed, topology);
+    let center = ChunkPos::new(block_to_chunk_coord(world_x), block_to_chunk_coord(world_z));
+    let mut cache = McloneOverworldStreamPlanCache::new(seed, topology);
+    let plans = cache
+        .plans_intersecting_chunks(
+            ChunkPos::new(center.x - 1, center.z - 1),
+            ChunkPos::new(center.x + 1, center.z + 1),
+        )
+        .map_err(|error| format!("failed to reconstruct planned streams: {error}"))?;
+    let radius = MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS;
+    let mut center_sample = sampler.sample(world_x, world_z);
+    let planned_stream_start = apply_stream_plans(&mut center_sample, world_x, world_z, &plans);
+    let sample_at = |x: i32, z: i32| {
+        let mut sample = sampler.sample(x, z);
+        let _ = apply_stream_plans(&mut sample, x, z, &plans);
+        sample
+    };
+    Ok((
+        McloneOverworldLandformSample::from_cardinal_samples(
+            center_sample,
+            sample_at(world_x - radius, world_z),
+            sample_at(world_x + radius, world_z),
+            sample_at(world_x, world_z - radius),
+            sample_at(world_x, world_z + radius),
+        ),
+        planned_stream_start,
+    ))
+}
+
 fn apply_stream_plans(
     sample: &mut McloneOverworldTerrainSample,
     world_x: i32,
     world_z: i32,
     plans: &[McloneOverworldStreamPlan],
-) {
+) -> Option<ChunkPos> {
     let intent = plans
         .iter()
         .filter(|plan| {
@@ -444,10 +479,13 @@ fn apply_stream_plans(
                 && world_z >= plan.structure.bounds.min_z
                 && world_z <= plan.structure.bounds.max_z
         })
-        .filter_map(|plan| plan.terrain_intent(world_x, world_z, sample.base_surface_y))
-        .max_by(|left, right| left.influence.total_cmp(&right.influence));
-    let Some(intent) = intent else {
-        return;
+        .filter_map(|plan| {
+            plan.terrain_intent(world_x, world_z, sample.base_surface_y)
+                .map(|intent| (plan, intent))
+        })
+        .max_by(|left, right| left.1.influence.total_cmp(&right.1.influence));
+    let Some((plan, intent)) = intent else {
+        return None;
     };
 
     sample.surface_y = sample.surface_y.min(intent.target_surface_y);
@@ -459,7 +497,7 @@ fn apply_stream_plans(
         .planned_stream_influence
         .max(intent.influence);
     if intent.channel_influence == 0.0 {
-        return;
+        return Some(plan.structure.key.canonical_start);
     }
 
     sample.watercourse.channel_influence = sample
@@ -487,6 +525,7 @@ fn apply_stream_plans(
     sample.watercourse.drop_height = intent.drop_height;
     sample.watercourse.drop_upper_y = intent.drop_upper_y;
     sample.watercourse.drop_lower_y = intent.drop_lower_y;
+    Some(plan.structure.key.canonical_start)
 }
 
 #[cfg(test)]

@@ -12,6 +12,9 @@ struct TerrainPreviewSample {
     terrain: vec4<f32>,
     climate: vec4<f32>,
     large_fields: vec4<f32>,
+    hydrology: vec4<f32>,
+    hydrology_detail: vec4<f32>,
+    semantics: vec4<f32>,
 };
 
 struct U64 {
@@ -513,6 +516,14 @@ fn evaluate(world_x: i32, world_z: i32) -> TerrainPreviewSample {
             temperature,
         ),
     );
+    sample.hydrology = vec4<f32>(512.0, 0.0, 0.0, 6.0);
+    sample.hydrology_detail = vec4<f32>(
+        0.0,
+        0.0,
+        0.0,
+        sample.large_fields.w,
+    );
+    sample.semantics = vec4<f32>(0.0, 7.0, 0.08, 5.0);
     return sample;
 }
 

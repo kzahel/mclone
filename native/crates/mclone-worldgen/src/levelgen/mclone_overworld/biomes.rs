@@ -283,6 +283,7 @@ mod tests {
                 bathymetry: McloneOverworldBathymetrySample::LAND,
                 base_surface_y: surface_y,
                 watercourse: McloneOverworldWatercourseSample {
+                    signed_distance: 512.0,
                     distance: 512.0,
                     channel_influence: 0.0,
                     major_channel_influence: 0.0,

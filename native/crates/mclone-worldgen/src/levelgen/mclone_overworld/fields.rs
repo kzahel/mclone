@@ -272,6 +272,7 @@ impl McloneOverworldClimateSample {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct McloneOverworldWatercourseSample {
+    pub signed_distance: f64,
     pub distance: f64,
     pub channel_influence: f64,
     pub major_channel_influence: f64,
@@ -838,6 +839,7 @@ impl McloneOverworldSampler {
 
         (
             McloneOverworldWatercourseSample {
+                signed_distance: geometry.signed_distance,
                 distance: geometry.distance,
                 channel_influence: major_channel_influence,
                 major_channel_influence,
@@ -1092,6 +1094,7 @@ fn inactive_watercourse(
 ) -> (McloneOverworldWatercourseSample, i32) {
     (
         McloneOverworldWatercourseSample {
+            signed_distance: geometry.signed_distance,
             distance: geometry.distance,
             channel_influence: 0.0,
             major_channel_influence: 0.0,
@@ -1147,6 +1150,9 @@ mod tests {
         assert!((left.bathymetry.seabed_relief - right.bathymetry.seabed_relief).abs() < 1.0e-12);
         assert_eq!(left.bathymetry.water_depth, right.bathymetry.water_depth);
         assert_eq!(left.base_surface_y, right.base_surface_y);
+        assert!(
+            (left.watercourse.signed_distance - right.watercourse.signed_distance).abs() < 1.0e-9
+        );
         assert!((left.watercourse.distance - right.watercourse.distance).abs() < 1.0e-9);
         assert!(
             (left.watercourse.channel_influence - right.watercourse.channel_influence).abs()

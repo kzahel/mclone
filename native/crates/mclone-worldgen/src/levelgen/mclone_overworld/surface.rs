@@ -126,6 +126,30 @@ pub fn mclone_overworld_macro_surface_top_material(
     GRASS_BLOCK
 }
 
+/// Selects the material visible from above after natural or planned
+/// watercourse carving, without requiring block-scale slope samples.
+///
+/// This is a preview/LOD contract. Canonical chunks continue to use
+/// [`mclone_overworld_surface_recipe`] and the full column writer.
+pub fn mclone_overworld_preview_visible_material(
+    terrain: super::fields::McloneOverworldTerrainSample,
+) -> RawBlockId {
+    if terrain.continentalness <= 0.0 || terrain.watercourse.is_water() {
+        return WATER;
+    }
+    if terrain.watercourse.is_bank() && terrain.surface_y <= terrain.watercourse.water_surface_y + 3
+    {
+        return if terrain.base_surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 5
+            && !terrain.watercourse.is_planned_stream()
+        {
+            SAND
+        } else {
+            GRASS_BLOCK
+        };
+    }
+    mclone_overworld_macro_surface_top_material(terrain)
+}
+
 pub(super) fn mclone_overworld_surface_top_material(
     sample: McloneOverworldLandformSample,
 ) -> RawBlockId {
@@ -319,6 +343,7 @@ mod tests {
                 bathymetry: McloneOverworldBathymetrySample::LAND,
                 base_surface_y: surface_y,
                 watercourse: McloneOverworldWatercourseSample {
+                    signed_distance: 512.0,
                     distance: 512.0,
                     channel_influence: 0.0,
                     major_channel_influence: 0.0,

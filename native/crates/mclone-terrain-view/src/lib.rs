@@ -997,6 +997,18 @@ mod tests {
             base_display_y: 64.0,
             ocean_water: 0.0,
             macro_surface_material: 4.0,
+            river_signed_distance: -2.0,
+            channel_influence: 0.8,
+            bank_influence: 1.0,
+            river_half_width: 6.0,
+            wetland_influence: 0.2,
+            wetland_pool_influence: 0.0,
+            submerged_outlet_influence: 0.0,
+            visible_surface_material: 2.0,
+            planned_stream_influence: 0.0,
+            biome_recipe: 2.0,
+            vegetation_coverage: 0.0,
+            surface_recipe: 2.0,
         };
         let mut bytes = Vec::new();
         for value in sample.packed() {

@@ -1,16 +1,50 @@
 use crate::levelgen::{
-    MCLONE_OVERWORLD_FIELD_REVISION, MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldSampler,
-    McloneOverworldSamplingTopology, mclone_overworld_macro_surface_top_material,
+    MCLONE_OVERWORLD_FIELD_REVISION, MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldBiomeRecipe,
+    McloneOverworldLandformSample, McloneOverworldSampler, McloneOverworldSamplingTopology,
+    McloneOverworldSurfaceRecipe, mclone_overworld_biome_recipe,
+    mclone_overworld_macro_surface_top_material, mclone_overworld_preview_visible_material,
+    mclone_overworld_surface_recipe,
 };
 
 pub const TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION: &str =
-    "mclone-terrain-preview-reference-grid-v3";
+    "mclone-terrain-preview-reference-grid-v4";
 pub const TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS: u32 = 64;
 pub const TERRAIN_PREVIEW_MIN_CELLS_PER_AXIS: u32 = 8;
 pub const TERRAIN_PREVIEW_MAX_CELLS_PER_AXIS: u32 = 128;
 pub const TERRAIN_PREVIEW_MIN_SAMPLE_SPACING: u32 = 1;
 pub const TERRAIN_PREVIEW_MAX_SAMPLE_SPACING: u32 = 1_024;
-pub const TERRAIN_PREVIEW_SAMPLE_FLOATS: usize = 12;
+pub const TERRAIN_PREVIEW_SAMPLE_FLOATS: usize = 24;
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[repr(u32)]
+pub enum TerrainPreviewContentStage {
+    #[default]
+    Base = 0,
+    Hydrology = 1,
+    Structured = 2,
+    Surface = 3,
+    Cover = 4,
+}
+
+impl TerrainPreviewContentStage {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Base => "base",
+            Self::Hydrology => "hydrology",
+            Self::Structured => "structured",
+            Self::Surface => "surface",
+            Self::Cover => "cover",
+        }
+    }
+
+    pub const fn includes_natural_hydrology(self) -> bool {
+        self as u32 >= Self::Hydrology as u32
+    }
+
+    pub const fn includes_structured_hydrology(self) -> bool {
+        self as u32 >= Self::Structured as u32
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TerrainPreviewRequest {
@@ -20,6 +54,7 @@ pub struct TerrainPreviewRequest {
     pub sample_spacing: u32,
     pub cells_per_axis: u32,
     pub topology: McloneOverworldSamplingTopology,
+    pub content_stage: TerrainPreviewContentStage,
 }
 
 impl TerrainPreviewRequest {
@@ -31,7 +66,13 @@ impl TerrainPreviewRequest {
             sample_spacing,
             cells_per_axis: TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS,
             topology: McloneOverworldSamplingTopology::Unbounded,
+            content_stage: TerrainPreviewContentStage::Base,
         }
+    }
+
+    pub const fn with_content_stage(mut self, content_stage: TerrainPreviewContentStage) -> Self {
+        self.content_stage = content_stage;
+        self
     }
 
     pub fn validate(self) -> Result<ValidatedTerrainPreviewRequest, String> {
@@ -164,6 +205,18 @@ pub struct TerrainPreviewSample {
     pub base_display_y: f32,
     pub ocean_water: f32,
     pub macro_surface_material: f32,
+    pub river_signed_distance: f32,
+    pub channel_influence: f32,
+    pub bank_influence: f32,
+    pub river_half_width: f32,
+    pub wetland_influence: f32,
+    pub wetland_pool_influence: f32,
+    pub submerged_outlet_influence: f32,
+    pub visible_surface_material: f32,
+    pub planned_stream_influence: f32,
+    pub biome_recipe: f32,
+    pub vegetation_coverage: f32,
+    pub surface_recipe: f32,
 }
 
 impl TerrainPreviewSample {
@@ -181,6 +234,18 @@ impl TerrainPreviewSample {
             self.base_display_y,
             self.ocean_water,
             self.macro_surface_material,
+            self.river_signed_distance,
+            self.channel_influence,
+            self.bank_influence,
+            self.river_half_width,
+            self.wetland_influence,
+            self.wetland_pool_influence,
+            self.submerged_outlet_influence,
+            self.visible_surface_material,
+            self.planned_stream_influence,
+            self.biome_recipe,
+            self.vegetation_coverage,
+            self.surface_recipe,
         ]
     }
 
@@ -198,6 +263,18 @@ impl TerrainPreviewSample {
             base_display_y: values[9],
             ocean_water: values[10],
             macro_surface_material: values[11],
+            river_signed_distance: values[12],
+            channel_influence: values[13],
+            bank_influence: values[14],
+            river_half_width: values[15],
+            wetland_influence: values[16],
+            wetland_pool_influence: values[17],
+            submerged_outlet_influence: values[18],
+            visible_surface_material: values[19],
+            planned_stream_influence: values[20],
+            biome_recipe: values[21],
+            vegetation_coverage: values[22],
+            surface_recipe: values[23],
         }
     }
 
@@ -213,6 +290,16 @@ impl TerrainPreviewSample {
         self.macro_surface_material
             .round()
             .clamp(0.0, f32::from(u8::MAX)) as u8
+    }
+
+    pub fn visible_surface_material(self) -> u8 {
+        self.visible_surface_material
+            .round()
+            .clamp(0.0, f32::from(u8::MAX)) as u8
+    }
+
+    pub fn is_channel(self) -> bool {
+        self.channel_influence > 0.0
     }
 }
 
@@ -249,6 +336,12 @@ impl TerrainPreviewReferenceGrid {
                     MCLONE_OVERWORLD_SEA_LEVEL
                 };
                 let ocean_water = terrain.continentalness <= 0.0;
+                let macro_landform = McloneOverworldLandformSample {
+                    terrain,
+                    slope: 0.0,
+                };
+                let biome_recipe = mclone_overworld_biome_recipe(macro_landform);
+                let surface_recipe = mclone_overworld_surface_recipe(macro_landform);
                 samples.push(TerrainPreviewSample {
                     surface_y: terrain.surface_y as f32,
                     display_y: if water {
@@ -272,6 +365,21 @@ impl TerrainPreviewReferenceGrid {
                     macro_surface_material: f32::from(mclone_overworld_macro_surface_top_material(
                         terrain,
                     )),
+                    river_signed_distance: terrain.watercourse.signed_distance as f32,
+                    channel_influence: terrain.watercourse.channel_influence as f32,
+                    bank_influence: terrain.watercourse.bank_influence as f32,
+                    river_half_width: terrain.watercourse.half_width as f32,
+                    wetland_influence: terrain.watercourse.wetland_influence as f32,
+                    wetland_pool_influence: terrain.watercourse.wetland_pool_influence as f32,
+                    submerged_outlet_influence: terrain.watercourse.submerged_outlet_influence
+                        as f32,
+                    visible_surface_material: f32::from(mclone_overworld_preview_visible_material(
+                        terrain,
+                    )),
+                    planned_stream_influence: terrain.watercourse.planned_stream_influence as f32,
+                    biome_recipe: biome_recipe_code(biome_recipe),
+                    vegetation_coverage: vegetation_coverage(biome_recipe),
+                    surface_recipe: surface_recipe_code(surface_recipe),
                 });
             }
         }
@@ -309,6 +417,46 @@ impl TerrainPreviewReferenceGrid {
             }
         }
         bytes
+    }
+}
+
+const fn biome_recipe_code(recipe: McloneOverworldBiomeRecipe) -> f32 {
+    match recipe {
+        McloneOverworldBiomeRecipe::Ocean => 0.0,
+        McloneOverworldBiomeRecipe::Shore => 1.0,
+        McloneOverworldBiomeRecipe::River => 2.0,
+        McloneOverworldBiomeRecipe::SnowyAlpine => 3.0,
+        McloneOverworldBiomeRecipe::CoolWetConifer => 4.0,
+        McloneOverworldBiomeRecipe::WarmDrySteppe => 5.0,
+        McloneOverworldBiomeRecipe::TemperateWoodland => 6.0,
+        McloneOverworldBiomeRecipe::TemperateMeadow => 7.0,
+    }
+}
+
+const fn vegetation_coverage(recipe: McloneOverworldBiomeRecipe) -> f32 {
+    match recipe {
+        McloneOverworldBiomeRecipe::CoolWetConifer => 0.82,
+        McloneOverworldBiomeRecipe::TemperateWoodland => 0.68,
+        McloneOverworldBiomeRecipe::WarmDrySteppe => 0.16,
+        McloneOverworldBiomeRecipe::TemperateMeadow => 0.08,
+        McloneOverworldBiomeRecipe::Ocean
+        | McloneOverworldBiomeRecipe::Shore
+        | McloneOverworldBiomeRecipe::River
+        | McloneOverworldBiomeRecipe::SnowyAlpine => 0.0,
+    }
+}
+
+const fn surface_recipe_code(recipe: McloneOverworldSurfaceRecipe) -> f32 {
+    match recipe {
+        McloneOverworldSurfaceRecipe::OceanFloor => 0.0,
+        McloneOverworldSurfaceRecipe::Beach => 1.0,
+        McloneOverworldSurfaceRecipe::RiverBed => 2.0,
+        McloneOverworldSurfaceRecipe::WetlandBed => 3.0,
+        McloneOverworldSurfaceRecipe::RiverBank => 4.0,
+        McloneOverworldSurfaceRecipe::GrassSoil => 5.0,
+        McloneOverworldSurfaceRecipe::ErodedSlope => 6.0,
+        McloneOverworldSurfaceRecipe::AlpineSnow => 7.0,
+        McloneOverworldSurfaceRecipe::ExposedStone => 8.0,
     }
 }
 
@@ -555,7 +703,7 @@ mod tests {
         );
         assert_eq!(
             TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION,
-            "mclone-terrain-preview-reference-grid-v3"
+            "mclone-terrain-preview-reference-grid-v4"
         );
     }
 }

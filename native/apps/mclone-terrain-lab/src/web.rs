@@ -373,6 +373,7 @@ impl TerrainLab {
             panel_height_css,
             detail: viewport_detail,
             max_visible_tiles_per_axis,
+            content_stage: mclone_worldgen::terrain_preview::TerrainPreviewContentStage::Base,
         })
         .map_err(js_error)?;
         let revision = u64::from(revision);

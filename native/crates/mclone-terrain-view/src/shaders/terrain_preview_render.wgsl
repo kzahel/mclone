@@ -12,6 +12,9 @@ struct TerrainPreviewSample {
     terrain: vec4<f32>,
     climate: vec4<f32>,
     large_fields: vec4<f32>,
+    hydrology: vec4<f32>,
+    hydrology_detail: vec4<f32>,
+    semantics: vec4<f32>,
 };
 
 @group(0) @binding(0)

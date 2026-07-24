@@ -2,7 +2,7 @@ use mclone_worldgen::{
     levelgen::McloneOverworldSamplingTopology,
     terrain_preview::{
         TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS, TERRAIN_PREVIEW_MAX_SAMPLE_SPACING,
-        TERRAIN_PREVIEW_MIN_SAMPLE_SPACING, TerrainPreviewRequest,
+        TERRAIN_PREVIEW_MIN_SAMPLE_SPACING, TerrainPreviewContentStage, TerrainPreviewRequest,
     },
 };
 
@@ -29,6 +29,7 @@ pub struct TerrainViewportRequest {
     pub panel_height_css: u32,
     pub detail: TerrainViewportDetail,
     pub max_visible_tiles_per_axis: u32,
+    pub content_stage: TerrainPreviewContentStage,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -37,6 +38,7 @@ pub struct TerrainViewportTileId {
     pub tile_x: i32,
     pub tile_z: i32,
     pub sample_spacing: u32,
+    pub content_stage: TerrainPreviewContentStage,
 }
 
 impl TerrainViewportTileId {
@@ -70,6 +72,7 @@ impl TerrainViewportTileId {
             sample_spacing: self.sample_spacing,
             cells_per_axis: TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS,
             topology: McloneOverworldSamplingTopology::Unbounded,
+            content_stage: self.content_stage,
         }
     }
 }
@@ -205,6 +208,7 @@ pub fn plan_terrain_viewport(
             request.blocks_across,
             view_height_blocks,
             spacing,
+            request.content_stage,
         )?);
         if spacing == effective_spacing {
             break;
@@ -277,6 +281,7 @@ fn plan_level(
     width_blocks: u32,
     height_blocks: u32,
     sample_spacing: u32,
+    content_stage: TerrainPreviewContentStage,
 ) -> Result<TerrainViewportLevel, String> {
     let footprint = TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS
         .checked_mul(sample_spacing)
@@ -297,6 +302,7 @@ fn plan_level(
         min_tile_z,
         max_tile_z,
         sample_spacing,
+        content_stage,
         center_tile_x,
         center_tile_z,
     )?;
@@ -307,6 +313,7 @@ fn plan_level(
         min_tile_z.saturating_sub(TERRAIN_VIEWPORT_PRELOAD_MARGIN_TILES),
         max_tile_z.saturating_add(TERRAIN_VIEWPORT_PRELOAD_MARGIN_TILES),
         sample_spacing,
+        content_stage,
         center_tile_x,
         center_tile_z,
     )?;
@@ -357,6 +364,7 @@ fn ordered_tiles(
     min_tile_z: i32,
     max_tile_z: i32,
     sample_spacing: u32,
+    content_stage: TerrainPreviewContentStage,
     center_tile_x: i32,
     center_tile_z: i32,
 ) -> Result<Vec<TerrainViewportTileId>, String> {
@@ -375,6 +383,7 @@ fn ordered_tiles(
                 tile_x,
                 tile_z,
                 sample_spacing,
+                content_stage,
             });
         }
     }
@@ -412,6 +421,7 @@ mod tests {
             panel_height_css: 600,
             detail,
             max_visible_tiles_per_axis: TERRAIN_VIEWPORT_MAX_VISIBLE_TILES_PER_AXIS,
+            content_stage: TerrainPreviewContentStage::Base,
         }
     }
 
@@ -481,6 +491,7 @@ mod tests {
             tile_x: -2,
             tile_z: -1,
             sample_spacing: 16,
+            content_stage: TerrainPreviewContentStage::Hydrology,
         };
         assert_eq!(tile.min_x(), -2_048);
         assert_eq!(tile.min_z(), -1_024);

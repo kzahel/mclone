@@ -26,7 +26,7 @@ pub use biomes::{
 };
 pub use debug::{
     McloneOverworldDebugSample, McloneOverworldHydrologyKind, McloneOverworldLandformKind,
-    mclone_overworld_debug_sample,
+    mclone_overworld_debug_sample, mclone_overworld_debug_sample_with_streams,
 };
 pub use decoration::MCLONE_OVERWORLD_DECORATION_REVISION;
 pub use feature_batch::{
@@ -60,7 +60,8 @@ pub use surface::{
     MCLONE_OVERWORLD_ALPINE_EXPOSED_STONE_MIN_SLOPE, MCLONE_OVERWORLD_ERODED_SLOPE_MIN_STRENGTH,
     MCLONE_OVERWORLD_ERODED_SLOPE_MIN_Y, MCLONE_OVERWORLD_EXPOSED_STONE_MIN_STRENGTH,
     MCLONE_OVERWORLD_EXPOSED_STONE_MIN_Y, McloneOverworldSurfaceRecipe,
-    mclone_overworld_macro_surface_top_material, mclone_overworld_surface_recipe,
+    mclone_overworld_macro_surface_top_material, mclone_overworld_preview_visible_material,
+    mclone_overworld_surface_recipe,
 };
 pub use terrain::{
     McloneOverworldHydraulicClosureReport, analyze_mclone_overworld_hydraulic_closure,
