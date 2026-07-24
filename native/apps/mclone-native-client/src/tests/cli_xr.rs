@@ -280,6 +280,7 @@ fn cli_parses_desktop_xr_persistent_with_window_by_default() {
                 debug_ui_screen: None,
             },
             window: true,
+            start_intent: WindowStartIntent::Menu,
         }
     );
 }
@@ -308,6 +309,25 @@ fn cli_parses_desktop_xr_frame_bound() {
                 ..
             },
             window: true,
+            start_intent: WindowStartIntent::Menu,
+        }
+    ));
+}
+
+#[test]
+fn cli_parses_explicit_desktop_xr_world_entry() {
+    let cli = Cli::parse([
+        "--desktop-xr".to_owned(),
+        "--start-in-world".to_owned(),
+        "true".to_owned(),
+    ])
+    .unwrap();
+
+    assert!(matches!(
+        cli,
+        Cli::DesktopXr {
+            start_intent: WindowStartIntent::InWorld,
+            ..
         }
     ));
 }

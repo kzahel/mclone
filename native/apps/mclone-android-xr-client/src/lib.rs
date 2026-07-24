@@ -6,6 +6,7 @@
 const ANDROID_XR_LOCAL_ARG_FLAGS: &[&str] = &[
     "--adaptive-chunk-publication-budget",
     "--frame-accounting",
+    "--menu",
     "--multiview-proof",
     "--perf-chunk-view-churn",
     "--perf-churn-interval-seconds",
@@ -25,6 +26,7 @@ const ANDROID_XR_LOCAL_ARG_FLAGS: &[&str] = &[
     "--sky-terrain-multiview-perf",
     "--terrain-multiview-perf",
     "--terrain-multiview-proof",
+    "--start-in-world",
     "--xr-debug-ui",
     "--xr-display-refresh-rate",
     "--xr-foveation",
@@ -63,6 +65,11 @@ mod android {
     };
 
     mclone_android_platform::export_android_controller_jni_bridge!();
+    use mclone_app_runtime::client_entry::{
+        ClientEntryController, ClientEntryEffect, ClientEntryIntent, ClientEntryResolution,
+        ClientEntrySource, ClientHostAvailability,
+    };
+    use mclone_app_runtime::client_experience::xr_native_client_experience_profile;
     use mclone_app_runtime::frame_render::scaled_frame_size;
     use mclone_app_runtime::native_remote_session::NativeRemoteServerSession;
     use mclone_app_runtime::native_service_assembly::NativeSessionServices;
@@ -314,6 +321,7 @@ mod android {
         scene: McloneSceneHostOptions,
         render_options: TexturedSectionRenderOptions,
         remote_addr: Option<String>,
+        entry: ClientEntryResolution,
         default_world_root_enabled: bool,
         session_smoke: Option<AndroidXrSessionSmoke>,
         perf_seconds: Option<u64>,
@@ -351,6 +359,7 @@ mod android {
                 scene: McloneSceneHostOptions::default(),
                 render_options: TexturedSectionRenderOptions::default(),
                 remote_addr: None,
+                entry: ClientEntryResolution::ordinary(),
                 default_world_root_enabled: true,
                 session_smoke: None,
                 perf_seconds: None,
@@ -566,6 +575,7 @@ mod android {
         let mut underwater_detection_mode = XrUnderwaterDetectionMode::default();
         let mut debug_ui_screen = None;
         let mut adaptive_chunk_publication_budget = None;
+        let mut start_in_world = None;
         let mut argv = argv.into_iter();
         while let Some(arg) = argv.next() {
             if shared_args.parse_next_arg(
@@ -576,6 +586,15 @@ mod android {
                 continue;
             }
             match arg.as_str() {
+                "--menu" => {
+                    start_in_world = Some(false);
+                }
+                "--start-in-world" => {
+                    start_in_world = Some(parse_bool_arg(
+                        "--start-in-world",
+                        Some(parse_next_string(&mut argv, "--start-in-world")?),
+                    )?);
+                }
                 "--session-smoke" => {
                     options.session_smoke = Some(parse_session_smoke_arg(parse_next_string(
                         &mut argv,
@@ -936,6 +955,46 @@ mod android {
             }
         }
         resolve_android_xr_frame_overlap(&mut options)?;
+        let automation_session = options.session_smoke.is_some()
+            || options.perf_seconds.is_some()
+            || options.terrain_multiview_proof
+            || options.terrain_multiview_perf
+            || options.sky_terrain_multiview_perf
+            || options.sky_terrain_actors_multiview_perf;
+        let implied_session = options.remote_addr.is_some()
+            || options.scene.world_dir.is_some()
+            || automation_session;
+        let starts_session = start_in_world.unwrap_or(implied_session);
+        if !starts_session {
+            options.entry = if start_in_world.is_some() {
+                ClientEntryResolution::explicit(
+                    ClientEntryIntent::Title,
+                    ClientEntrySource::XrLaunchIntent,
+                )
+            } else {
+                ClientEntryResolution::ordinary()
+            };
+        } else {
+            let request = options.remote_addr.as_ref().map_or_else(
+                || {
+                    SessionStartRequest::new_seed_local_world_with_generation_profile(
+                        options.scene.seed,
+                        options.scene.world_generation_profile,
+                    )
+                },
+                |address| SessionStartRequest::JoinRemote {
+                    endpoint: RemoteSessionEndpoint::new(address.clone()),
+                },
+            );
+            options.entry = ClientEntryResolution::explicit(
+                ClientEntryIntent::StartSession(request),
+                if automation_session && start_in_world.is_none() {
+                    ClientEntrySource::Automation
+                } else {
+                    ClientEntrySource::XrLaunchIntent
+                },
+            );
+        }
         Ok(options)
     }
 
@@ -1235,6 +1294,20 @@ mod android {
             .remote_addr
             .clone()
             .or_else(|| legacy_remote_addr.clone());
+        let entry = if startup_options.entry.source == ClientEntrySource::ProductDefault {
+            remote_addr
+                .as_ref()
+                .map_or_else(ClientEntryResolution::ordinary, |address| {
+                    ClientEntryResolution::explicit(
+                        ClientEntryIntent::StartSession(SessionStartRequest::JoinRemote {
+                            endpoint: RemoteSessionEndpoint::new(address.clone()),
+                        }),
+                        ClientEntrySource::ManagedLaunch,
+                    )
+                })
+        } else {
+            startup_options.entry.clone()
+        };
         let storage = StartupWorldStorageProjection::from_parts(
             startup_options.default_world_root_enabled,
             startup_options.scene.world_root.clone(),
@@ -1259,6 +1332,11 @@ mod android {
         } else {
             log::info!("Android XR remote dedicated address: <none>");
         }
+        log::info!(
+            "Android XR client entry source={} intent={}",
+            entry.source.label(),
+            entry.intent.label(),
+        );
         if let Some(smoke) = startup_options.session_smoke {
             log::info!("Android XR session smoke: {}", smoke.label());
         } else {
@@ -1422,7 +1500,7 @@ mod android {
             scene_options,
             startup_options.render_options,
             startup_view_pose,
-            remote_addr,
+            entry,
             startup_options.session_smoke,
             startup_options.perf_seconds,
             startup_options.perf_flight,
@@ -1461,7 +1539,7 @@ mod android {
         scene_options: McloneSceneHostOptions,
         render_options: TexturedSectionRenderOptions,
         startup_view_pose: Option<XrStartupViewPose>,
-        remote_addr: Option<String>,
+        client_entry: ClientEntryResolution,
         session_smoke: Option<AndroidXrSessionSmoke>,
         perf_seconds: Option<u64>,
         perf_flight: Option<AndroidXrPerfFlight>,
@@ -1801,7 +1879,7 @@ mod android {
                 startup_view_pose,
                 scene_options.clone(),
                 render_options,
-                remote_addr,
+                client_entry.clone(),
             )
             .context("initialize Android XR terrain multiview proof runtime")?;
             terrain.set_display_refresh_hz(display_refresh.current_rate);
@@ -1825,7 +1903,7 @@ mod android {
                 startup_view_pose,
                 scene_options.clone(),
                 render_options,
-                remote_addr,
+                client_entry.clone(),
             )
             .context("initialize Android XR terrain multiview perf runtime")?;
             terrain.set_display_refresh_hz(display_refresh.current_rate);
@@ -1884,7 +1962,7 @@ mod android {
                 startup_view_pose,
                 scene_options.clone(),
                 render_options,
-                remote_addr,
+                client_entry.clone(),
             )
             .context("initialize Android XR full-frame multiview terrain runtime")?;
             let terrain_summary = terrain.frame_summary();
@@ -1991,7 +2069,7 @@ mod android {
             startup_view_pose,
             scene_options.clone(),
             render_options,
-            remote_addr,
+            client_entry,
         )
         .context("initialize Android XR terrain runtime")?;
         let terrain_summary = terrain.frame_summary();
@@ -2069,7 +2147,7 @@ mod android {
         startup_view_pose: Option<XrStartupViewPose>,
         scene_options: McloneSceneHostOptions,
         render_options: TexturedSectionRenderOptions,
-        remote_addr: Option<String>,
+        entry: ClientEntryResolution,
     ) -> Result<AndroidXrTerrainState> {
         let AndroidXrRuntimeAssets {
             mesh_assets,
@@ -2080,55 +2158,21 @@ mod android {
             mclone_app_runtime::asset_pack_preferences::native_asset_pack_preference_path(
                 scene_options.world_root.as_deref(),
             );
-        let mut terrain = if let Some(remote_addr) = remote_addr {
-            let profile =
-                mclone_app_runtime::local_profile::load_or_create_native_local_player_profile(
-                    scene_options.world_root.as_deref(),
-                )?;
-            let session = NativeRemoteServerSession::connect_with_identity(
-                remote_addr.as_str(),
-                "Android XR",
-                profile.client_identity(),
-            )?;
-            let runtime = AndroidXrSceneRuntime::remote_dedicated_with_mesh_assets(
-                RemoteSessionEndpoint::new(remote_addr.clone()),
-                single_view_host_options(&scene_options),
-                session,
-                mesh_assets,
-            )
-            .with_context(|| {
-                format!(
-                    "failed to initialize Android XR remote dedicated runtime from {remote_addr}"
-                )
-            })?;
-            McloneSceneHost::with_runtime(
-                device,
-                queue,
-                XR_COLOR_FORMAT,
-                mclone_app_runtime::monotonic::system_monotonic_clock(),
-                scene_options.clone(),
-                runtime,
-                render_options,
-                actor_assets.atlas.clone(),
-                actor_assets.figures.clone(),
-                &asset_source,
-                startup_view_pose,
-            )?
-        } else {
-            McloneSceneHost::start_local_async(
-                device,
-                queue,
-                XR_COLOR_FORMAT,
-                mclone_app_runtime::monotonic::system_monotonic_clock(),
-                scene_options,
-                render_options,
-                mesh_assets,
-                actor_assets.atlas.clone(),
-                actor_assets.figures.clone(),
-                &asset_source,
-                startup_view_pose,
-            )?
-        };
+        let mut terrain = McloneSceneHost::start_native_without_session(
+            device,
+            queue,
+            XR_COLOR_FORMAT,
+            mclone_app_runtime::monotonic::system_monotonic_clock(),
+            scene_options,
+            render_options,
+            mesh_assets,
+            actor_assets.atlas.clone(),
+            actor_assets.figures.clone(),
+            &asset_source,
+            xr_native_client_experience_profile(),
+            startup_view_pose,
+        )
+        .context("initialize Android XR session-free scene host")?;
         if let Some(registry) = mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::discover_native_with_reference(
             mclone_assets::SharedAssetSource::new(
                 load_asset_source().context("reload Android XR reference source for asset-pack discovery")?,
@@ -2161,6 +2205,25 @@ mod android {
         terrain.set_session_runtime_factory(|endpoint, scene_options, mesh_assets| {
             android_xr_remote_scene_runtime(endpoint, scene_options, mesh_assets)
         });
+        let mut entry_controller = ClientEntryController::new(entry);
+        let entry_effect = entry_controller
+            .update_host(ClientHostAvailability {
+                bootstrapped: true,
+                foreground: true,
+                presentation_available: true,
+            })
+            .expect("ready Android XR host dispatches its entry exactly once");
+        match entry_effect {
+            ClientEntryEffect::EnterTitle { status } => {
+                terrain.set_client_entry_status(status);
+            }
+            ClientEntryEffect::StartSession(request) => {
+                terrain.start_session_for_request(device, queue, request)?;
+            }
+            ClientEntryEffect::LaunchScenario(intent) => {
+                terrain.begin_lobby_launch(intent)?;
+            }
+        }
         Ok(terrain)
     }
 

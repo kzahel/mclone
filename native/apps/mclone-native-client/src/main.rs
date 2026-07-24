@@ -412,7 +412,11 @@ fn main() -> Result<()> {
         }
         Cli::XrClearSmoke { options } => run_xr_clear_smoke(options),
         Cli::XrMcloneSmoke { options } => run_xr_mclone_smoke(options),
-        Cli::DesktopXr { options, window } => run_desktop_xr(options, window),
+        Cli::DesktopXr {
+            options,
+            window,
+            start_intent,
+        } => run_desktop_xr(options, window, start_intent),
         Cli::Window {
             scene,
             render_options,
@@ -505,12 +509,20 @@ fn run_xr_mclone_smoke(_options: crate::cli::XrMcloneSmokeOptions) -> Result<()>
 }
 
 #[cfg(feature = "xr")]
-fn run_desktop_xr(options: crate::cli::XrMcloneSmokeOptions, window: bool) -> Result<()> {
-    desktop_xr::run_desktop(options, window)
+fn run_desktop_xr(
+    options: crate::cli::XrMcloneSmokeOptions,
+    window: bool,
+    start_intent: crate::cli::WindowStartIntent,
+) -> Result<()> {
+    desktop_xr::run_desktop(options, window, start_intent)
 }
 
 #[cfg(not(feature = "xr"))]
-fn run_desktop_xr(_options: crate::cli::XrMcloneSmokeOptions, _window: bool) -> Result<()> {
+fn run_desktop_xr(
+    _options: crate::cli::XrMcloneSmokeOptions,
+    _window: bool,
+    _start_intent: crate::cli::WindowStartIntent,
+) -> Result<()> {
     anyhow::bail!("rebuild with `--features xr` to use --desktop-xr")
 }
 

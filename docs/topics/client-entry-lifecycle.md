@@ -4,8 +4,8 @@ Topic: `client-entry-lifecycle`
 
 Status: active. The product decision, shared entry/lifecycle policy, bounded
 accounting correction, desktop/SteamOS, flat-Android, and browser menu-first
-entry, and Steam Deck Devkit process ownership are implemented. XR and
-idle-cadence migration remain active.
+entry, XR entry normalization, and Steam Deck Devkit process ownership are
+implemented. Idle-cadence migration remains active.
 
 ## Scope
 
@@ -159,7 +159,7 @@ As of 2026-07-24:
 | Steam Deck interactive Devkit payload | title menu | the managed payload and ordinary desktop default resolve through the same shared entry policy; `steamos` remains only a presentation profile |
 | Flat Android | title menu; activity argv, remote address, direct world destination, and perf harnesses can explicitly start a session | shared `ClientEntryResolution` projected from Android intent/property syntax |
 | Web | title menu; explicit `startInWorld`, remote address, or IndexedDB world destination starts a session | shared `ClientEntryResolution` projected from browser query/deep-link syntax |
-| Desktop/Android XR | session construction and visible UI selection are not one consistent entry policy | XR app/scene assembly |
+| Desktop/Android XR | title menu; explicit launch intent, remote destination, direct world, or automation workload starts a session | shared `ClientEntryResolution` projected from desktop CLI or Android activity/managed-launch syntax |
 | Offscreen/smoke/perf | intentionally starts the requested workload | harness-specific options |
 
 This matrix is evidence of missing shared entry policy, not justification for
@@ -231,6 +231,14 @@ The headed-Wayland menu probe rendered the title, reported `sessionState=none`
 and zero world sections, and produced an inspected WebGPU screenshot. The
 complementary app smoke used `startInWorld=true`, reached an active local
 session, and produced an inspected in-game screenshot on 2026-07-24.
+
+Desktop and Android XR now construct that same session-free shell before
+dispatching one normalized entry effect. Ordinary `--desktop-xr` and Android
+XR activity launch select title; `--start-in-world true`, remote/direct-world
+destinations, and named XR automation workloads select a session. The desktop
+XR feature build and CLI tests pass, and the release Android XR APK builds.
+Visual and lifecycle acceptance on a physical headset remains a human/device
+validation gate.
 
 ## Steam Deck Devkit Process Ownership
 

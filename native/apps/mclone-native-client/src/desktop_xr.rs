@@ -27,15 +27,19 @@ use mclone_xr_host::{
 use openxr as xr;
 
 use crate::cli::{
-    SceneOptions, XrClearSmokeOptions, XrDebugUiScreen as CliXrDebugUiScreen, XrMcloneSmokeOptions,
+    SceneOptions, WindowStartIntent, XrClearSmokeOptions, XrDebugUiScreen as CliXrDebugUiScreen,
+    XrMcloneSmokeOptions,
 };
 #[cfg(not(target_os = "android"))]
 use crate::render_cache::load_asset_source;
 #[cfg(not(target_os = "android"))]
-use crate::scene_runtime::{
-    native_window_scene_runtime, native_window_scene_runtime_with_mesh_assets,
+use crate::scene_runtime::native_window_scene_runtime_with_mesh_assets;
+#[cfg(not(target_os = "android"))]
+use mclone_app_runtime::client_entry::{
+    ClientEntryController, ClientEntryEffect, ClientHostAvailability,
 };
 #[cfg(not(target_os = "android"))]
+use mclone_app_runtime::client_experience::xr_native_client_experience_profile;
 #[cfg(not(target_os = "android"))]
 use mclone_app_runtime::native_service_assembly::NativeSessionServices;
 #[cfg(not(target_os = "android"))]
@@ -120,6 +124,7 @@ enum DesktopXrMode {
     Real {
         options: XrMcloneSmokeOptions,
         window: bool,
+        start_intent: WindowStartIntent,
     },
 }
 
@@ -136,8 +141,16 @@ pub(crate) fn run_mclone(options: XrMcloneSmokeOptions) -> Result<()> {
 }
 
 #[cfg(not(target_os = "android"))]
-pub(crate) fn run_desktop(options: XrMcloneSmokeOptions, window: bool) -> Result<()> {
-    run_desktop_xr(DesktopXrMode::Real { options, window })
+pub(crate) fn run_desktop(
+    options: XrMcloneSmokeOptions,
+    window: bool,
+    start_intent: WindowStartIntent,
+) -> Result<()> {
+    run_desktop_xr(DesktopXrMode::Real {
+        options,
+        window,
+        start_intent,
+    })
 }
 
 #[cfg(not(target_os = "android"))]
@@ -685,11 +698,20 @@ fn run_smoke_frames(
     let mut mclone = match mode {
         DesktopXrMode::Clear { .. } => None,
         DesktopXrMode::Mclone { options } => Some(
-            create_mclone_terrain_state(&graphics.device, &graphics.queue, options)
-                .context("initialize mclone XR terrain state")?,
+            create_mclone_terrain_state(
+                &graphics.device,
+                &graphics.queue,
+                options,
+                WindowStartIntent::InWorld,
+            )
+            .context("initialize mclone XR terrain state")?,
         ),
-        DesktopXrMode::Real { options, .. } => Some(
-            create_mclone_terrain_state(&graphics.device, &graphics.queue, options)
+        DesktopXrMode::Real {
+            options,
+            start_intent,
+            ..
+        } => Some(
+            create_mclone_terrain_state(&graphics.device, &graphics.queue, options, start_intent)
                 .context("initialize mclone XR terrain state")?,
         ),
     };
@@ -812,6 +834,7 @@ fn create_mclone_terrain_state(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
     options: XrMcloneSmokeOptions,
+    start_intent: WindowStartIntent,
 ) -> Result<DesktopXrSceneHost> {
     let asset_source = load_asset_source().context("load mclone XR asset source")?;
     let actor_assets = load_actor_texture_assets_from_asset_source(&asset_source)
@@ -833,41 +856,22 @@ fn create_mclone_terrain_state(
         position: view_pose.position,
         yaw_degrees: view_pose.yaw_degrees,
     });
-    let mut state = if options.scene.remote_addr.is_some() {
-        let request = session_start_request_for_desktop_scene(&options.scene);
-        let runtime = NativeSessionServices::from_active_runtime(
-            request,
-            native_window_scene_runtime(&options.scene)?,
-        )?;
-        McloneSceneHost::with_runtime(
-            device,
-            queue,
-            XR_COLOR_FORMAT,
-            mclone_app_runtime::monotonic::system_monotonic_clock(),
-            scene,
-            runtime,
-            options.render_options,
-            actor_assets.atlas.clone(),
-            actor_assets.figures.clone(),
-            &asset_source,
-            startup_view_pose,
-        )
-    } else {
-        McloneSceneHost::start_local_async(
-            device,
-            queue,
-            XR_COLOR_FORMAT,
-            mclone_app_runtime::monotonic::system_monotonic_clock(),
-            scene,
-            options.render_options,
-            load_textured_mesh_assets_from_source(&asset_source)?,
-            actor_assets.atlas.clone(),
-            actor_assets.figures.clone(),
-            &asset_source,
-            startup_view_pose,
-        )
-    }
-    .context("initialize shared mclone XR terrain scene")?;
+    let entry = start_intent.resolve(&options.scene);
+    let mut state = McloneSceneHost::start_native_without_session(
+        device,
+        queue,
+        XR_COLOR_FORMAT,
+        mclone_app_runtime::monotonic::system_monotonic_clock(),
+        scene,
+        options.render_options,
+        load_textured_mesh_assets_from_source(&asset_source)?,
+        actor_assets.atlas.clone(),
+        actor_assets.figures.clone(),
+        &asset_source,
+        xr_native_client_experience_profile(),
+        startup_view_pose,
+    )
+    .context("initialize shared session-free mclone XR scene")?;
     state.set_audio_output(audio.map_or_else(
         || mclone_audio::AudioOutputCapability::Unavailable,
         mclone_audio::AudioOutputCapability::available,
@@ -886,17 +890,31 @@ fn create_mclone_terrain_state(
         &mut state,
         asset_pack_world_root.as_deref(),
     )?;
+    let mut entry_controller = ClientEntryController::new(entry);
+    let entry_effect = entry_controller
+        .update_host(ClientHostAvailability {
+            bootstrapped: true,
+            foreground: true,
+            presentation_available: true,
+        })
+        .expect("ready desktop XR host dispatches its entry exactly once");
+    println!(
+        "desktop XR client entry source={} intent={}",
+        entry_controller.resolution().source.label(),
+        entry_controller.resolution().intent.label(),
+    );
+    match entry_effect {
+        ClientEntryEffect::EnterTitle { status } => {
+            state.set_client_entry_status(status);
+        }
+        ClientEntryEffect::StartSession(request) => {
+            state.start_session_for_request(device, queue, request)?;
+        }
+        ClientEntryEffect::LaunchScenario(intent) => {
+            state.begin_lobby_launch(intent)?;
+        }
+    }
     Ok(state)
-}
-
-#[cfg(not(target_os = "android"))]
-fn session_start_request_for_desktop_scene(scene: &SceneOptions) -> SessionStartRequest {
-    scene.remote_addr.as_ref().map_or(
-        SessionStartRequest::new_seed_local_world(scene.seed),
-        |remote_addr| SessionStartRequest::JoinRemote {
-            endpoint: RemoteSessionEndpoint::new(remote_addr.clone()),
-        },
-    )
 }
 
 #[cfg(not(target_os = "android"))]

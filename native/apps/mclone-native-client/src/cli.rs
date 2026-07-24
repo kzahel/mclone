@@ -835,6 +835,7 @@ pub(crate) enum Cli {
     DesktopXr {
         options: XrMcloneSmokeOptions,
         window: bool,
+        start_intent: WindowStartIntent,
     },
 }
 
@@ -1677,13 +1678,9 @@ impl Cli {
         }
         if window_start_intent_explicit
             && window_start_intent == WindowStartIntent::Menu
-            && (mode.is_some()
-                || perf_mode_count > 0
-                || xr_clear_smoke
-                || xr_mclone_smoke
-                || desktop_xr)
+            && (mode.is_some() || perf_mode_count > 0 || xr_clear_smoke || xr_mclone_smoke)
         {
-            bail!("--menu/--start-in-world false only apply to window mode");
+            bail!("--menu/--start-in-world false only apply to window and desktop XR modes");
         }
         if no_window_explicit && !desktop_xr {
             bail!("--no-window requires --desktop-xr");
@@ -2238,6 +2235,7 @@ impl Cli {
                     debug_ui_screen: xr_debug_ui_screen,
                 },
                 window: !no_window_explicit,
+                start_intent: window_start_intent,
             }),
             None => Ok(Self::Window {
                 scene,
