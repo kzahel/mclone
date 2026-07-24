@@ -832,8 +832,15 @@ tests prove semantic stick/trigger/button projection and bounded ordered
 callback recovery. A live product trace then showed independent left- and
 right-stick motion plus face and Menu button transitions, and the operator
 confirmed that the Xbox controller and all bindings worked correctly in the
-game. Hotplug/reconnect and the separate SN30 Pro pass remain physical
-acceptance items.
+game.
+
+The 8BitDo SN30 Pro was then connected in its current XInput mode. macOS
+exposed its synthetic HID side as Microsoft `045e:028e` / `Xbox360Controller`
+and its semantic GameController side as one `Xbox One` extended profile. The
+rebuilt client selected that semantic profile as one `XboxLike` source, and the
+operator confirmed correct in-game behavior. This closes the original
+right-stick/trigger symptom for the tested SN30 Pro mode. Hotplug/reconnect and
+other connection modes remain physical acceptance items.
 
 ## Definition Of Done
 

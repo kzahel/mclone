@@ -329,9 +329,10 @@ These adapters advertise only compatible connected devices and feed the shared
 scene router. Flat Android feeds that router from a shared Java/JNI and pure
 Rust source-aware collector. Desktop and Android XR merge their corresponding
 ordinary collectors with semantic OpenXR action frames while retaining tracked
-poses and XR-only mechanics separately. The macOS USB Xbox path and its in-game
-bindings passed physical operator acceptance on 2026-07-24; broader controller,
-hotplug, and non-desktop hardware validation remains recorded in
+poses and XR-only mechanics separately. The macOS USB Xbox path and an 8BitDo
+SN30 Pro in XInput mode passed physical in-game acceptance on 2026-07-24;
+broader controller, mode, hotplug, and non-desktop hardware validation remains
+recorded in
 [`topics/controller-input.md`](topics/controller-input.md).
 
 `mclone-app-runtime::ClientInputPreferences` persists the same normalized

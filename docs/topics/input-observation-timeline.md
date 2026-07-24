@@ -349,7 +349,9 @@ event shape, timestamps, noise, and lifecycle behavior.
   binary embedded the required controller metadata and enumerated the attached
   Xbox source through GameController. A physical product trace showed
   independent left/right stick and button transitions, and the operator
-  accepted all Xbox bindings in-game.
+  accepted all Xbox bindings in-game. The 8BitDo SN30 Pro was then accepted
+  in-game in XInput mode through the same semantic profile; its former
+  right-stick/trigger swap did not recur.
 - The full native Rust workspace test suite passes, including scripted
   controller ordering, Android historical samples, scene command assignment,
   fly/no-clip historical pitch, queue overflow recovery, epoch reset, command

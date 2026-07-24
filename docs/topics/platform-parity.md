@@ -138,8 +138,9 @@ burn-down.
 > mapping failure. Desktop macOS now uses Apple GameController extended
 > profiles with embedded support metadata, ordered callbacks, and terminal
 > snapshots; Linux/Windows and Steam Deck retain GilRs. The USB Xbox path and
-> all in-game bindings passed operator acceptance; hotplug/reconnect and the
-> separate SN30 Pro pass remain physical acceptance items.
+> an 8BitDo SN30 Pro in XInput mode passed in-game operator acceptance;
+> hotplug/reconnect and other controller modes remain physical acceptance
+> items.
 > When a slice closes a gap, update the affected cell **and** link the tactical.
 > If a cell and the code disagree, the code wins — fix the cell.
 
@@ -208,7 +209,7 @@ A cell is a **parity gap** when it is not ✅ and its class targets it above.
 | Lighting (sky+block, render integ.) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 | Day/night + sky | ✅ | ✅ | ✅ | ◐ (frozen) | ✅ | ✅ |
 | Player movement + collision | ✅ | ◐ (perf/scripted paths; no real host loop) | ✅ | ✅ (shared touch + AVD swipe) | ✅ | ✅ |
-| Ordinary controller input | ◐ (GameController on macOS, GilRs on Linux/Windows; USB Xbox accepted, broader hardware pending) | ✅ (canonical scripted snapshots) | ◐ (same desktop OS collector + semantic OpenXR merge; hardware pending) | ◐ (shared Android collector; hardware pending) | ◐ (Android collector + semantic OpenXR merge; hardware pending) | ◐ (standard Gamepad API mocks; hardware pending) |
+| Ordinary controller input | ◐ (GameController on macOS, GilRs on Linux/Windows; USB Xbox + SN30 Pro XInput accepted, broader hardware pending) | ✅ (canonical scripted snapshots) | ◐ (same desktop OS collector + semantic OpenXR merge; hardware pending) | ◐ (shared Android collector; hardware pending) | ◐ (Android collector + semantic OpenXR merge; hardware pending) | ◐ (standard Gamepad API mocks; hardware pending) |
 | Block interaction (break/place) | ✅ | ◐ (scripted `FlatInputFrame`, no real host loop) | ✗ | ◐ (shared path + touch controls; action smoke pending) | ✗ | ✅ |
 | Remote-player rendering | ✅ | ◐ (render path, scenario coverage thin) | ◐ (path, unspawned) | ◐ (shared path, unspawned) | ◐ (path, unspawned; device smoke pending) | ✅ |
 | Passive entities (cow/chicken) | ✅ | ◐ (render path, scenario coverage thin) | ◐ (path, unspawned) | ◐ (shared path, unspawned) | ◐ (path, unspawned; device smoke pending) | ◐ (placeholder) |
