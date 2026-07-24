@@ -20,7 +20,7 @@ The URL owns the review state:
 
 - `seed`: signed 64-bit world seed
 - `x` and `z`: preview center in blocks
-- `blocks`: continuous viewport width from 64 through 131,072 blocks
+- `blocks`: continuous viewport width from 1 through 131,072 blocks
 - `detail`: `auto` or a power-of-two sample spacing from 1 through 1,024
   blocks
 - `panes`: comma-separated `canonical`, `cpu`, and/or `gpu`
@@ -56,15 +56,23 @@ request remains visible even when the bounded eight-tile-per-axis interactive
 budget must raise its effective spacing; zooming in eventually admits every
 manual level, including `1:1`.
 
-The exact scheduler terminates and replaces its Worker when generation
-identity changes, so stale chunks cannot land after a seed, center, checkpoint,
-radius, or cold-cache change. Water and vegetation switches only remesh
-retained chunks; they do not rerun or mutate generation. The shared LOD
-scheduler has independent CPU compilation and GPU dispatch queues. Each lane
-covers the viewport coarsely before refining through nested power-of-two
-levels, and each publishes its finest complete level without waiting for the
-other. The evidence panel reports exact arrival/generation/upload timing and
-the LOD queues, readiness, throughput, and published detail.
+Canonical camera motion is independent from exact desired coverage. Moving
+within one center chunk redraws the retained terrain without changing the
+generation epoch. Crossing a chunk boundary preserves the old/new footprint
+intersection, removes only departed chunks, and schedules only the entering
+edge. Cached and Worker-produced results share a one-chunk-per-animation-frame
+admission queue with bounded Worker backpressure, so a large cached footprint
+cannot replay synchronously on the UI thread. Hard seed, checkpoint,
+cache-mode, or cold-cache changes still replace the Worker and reject stale
+results. Water and vegetation switches only remesh retained chunks; they do
+not rerun or mutate generation.
+
+The shared LOD scheduler has independent CPU compilation and GPU dispatch
+queues. Each lane covers the viewport coarsely before refining through nested
+power-of-two levels, and each publishes its finest complete level without
+waiting for the other. The evidence panel reports canonical resident reuse,
+admission frames, arrival/generation/upload timing, and the LOD queues,
+readiness, throughput, and published detail.
 
 CPU reference wall time and WGPU encode/submit wall time are not GPU execution
 time. Portable timestamp queries are not enabled in this Lab slice, so the UI
@@ -86,14 +94,19 @@ nested at the same world center and scale. Generated fallback atlas tiles
 intentionally remain visible for block materials that do not yet have curated
 first-party textures.
 
-The exact and LOD caches are independent. `Exact cache on` retains generated
-chunks by seed, checkpoint, and chunk coordinate; `Exact cache off` compiles
-the current patch cold. `Cache on` uses a session-local 192-tile LRU keyed by
-seed, aligned origin, sample spacing, and content stage. It retains CPU samples, uploaded
-reference data, GPU-computed buffers, and completed validation readbacks while
-panning and zooming. Camera, layer, and pane visibility are not LOD cache
-identity. `Cache off` retains only the active request and disables speculative
-preload. `Cold current view` invalidates both cache domains explicitly.
+The exact and LOD caches are independent. `Exact cache on` retains raw
+generated chunks by seed, checkpoint, and chunk coordinate; exact GPU
+residency remains a separate bounded desired set. Returning to an evicted
+exact coordinate admits its raw cache result through the same paced queue.
+`Exact cache off` compiles entering coordinates cold while still preserving
+the current old/new resident overlap.
+
+`Cache on` uses a session-local 192-tile LRU keyed by seed, aligned origin,
+sample spacing, and content stage. It retains CPU samples, uploaded reference
+data, GPU-computed buffers, and completed validation readbacks while panning
+and zooming. Camera, layer, and pane visibility are not LOD cache identity.
+`Cache off` retains only the active request and disables speculative preload.
+`Cold current view` invalidates both cache domains explicitly.
 
 `Run stress race` selects the fixed review seed/site, turns cache off, and
 uses a larger 12-tile-per-axis diagnostic budget over a 2 km requested-`1:2`

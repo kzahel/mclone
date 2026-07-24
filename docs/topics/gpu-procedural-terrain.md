@@ -1266,6 +1266,18 @@ same one-block footprint across canonical, CPU LOD, and GPU LOD panes. The
 byte-verified `/terrain/` bundle also passed hosted desktop and phone
 headed-WebGPU regression smokes.
 
+Tactical
+[`239`](../tactical/239-terrain-lab-canonical-pan-responsiveness.md) is
+complete. Canonical camera motion no longer restarts exact generation at every
+block. Desired coverage changes at chunk boundaries, preserves the old/new
+resident intersection, and admits cached or Worker-produced entering chunks
+at one per animation frame under bounded backpressure. Direct hosted desktop
+and phone `9x9` proofs kept 72 of 81 chunks across each one-chunk move,
+published the nine entering chunks over nine frames, and never changed the
+epoch for sub-chunk motion. Border-aware mesh construction remains
+main-thread work for one paced admission; Worker-side section meshing is the
+next escalation only if individual arrivals still hitch.
+
 The next implementation direction is:
 
 1. band-limit or aggregate other sub-sample field energy while preserving
