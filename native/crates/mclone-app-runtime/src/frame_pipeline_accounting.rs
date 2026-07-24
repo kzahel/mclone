@@ -176,7 +176,9 @@ pub struct FramePipelineAccountant {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum FramePipelineAccountingMode {
-    Exact,
+    Exact {
+        publish_on_record: bool,
+    },
     Live {
         history_capacity: usize,
         report_interval_frames: u64,
@@ -190,9 +192,32 @@ impl Default for FramePipelineAccountant {
 }
 
 impl FramePipelineAccountant {
-    /// Exact accumulator for explicitly bounded benchmark/report reconstruction.
+    /// Exact accumulator that publishes a rich report after every observation.
+    ///
+    /// This is intended for tests and non-frame-critical reconstruction.
+    /// Frame-critical finite benchmarks should use [`Self::new_exact_on_demand`].
     pub fn new(config: FrameAccountingConfig) -> Self {
-        Self::with_mode(config, FramePipelineAccountingMode::Exact)
+        Self::with_mode(
+            config,
+            FramePipelineAccountingMode::Exact {
+                publish_on_record: true,
+            },
+        )
+    }
+
+    /// Exact accumulator that defers rich report construction until explicitly
+    /// requested.
+    ///
+    /// This is the finite benchmark mode for frame-critical capture loops:
+    /// recording remains incremental while percentile sorting and report
+    /// allocation happen once, after the measured window.
+    pub fn new_exact_on_demand(config: FrameAccountingConfig) -> Self {
+        Self::with_mode(
+            config,
+            FramePipelineAccountingMode::Exact {
+                publish_on_record: false,
+            },
+        )
     }
 
     /// Bounded always-on accumulator for interactive clients.
@@ -340,8 +365,32 @@ impl FramePipelineAccountant {
             .map(|report| (report.clone(), self.revision))
     }
 
+    /// Builds and publishes a rich report from all observations retained by an
+    /// exact on-demand accountant.
+    ///
+    /// Callers should invoke this outside the measured frame loop. Live and
+    /// publish-on-record accountants may also use it for an explicit refresh.
+    pub fn publish_report_now(
+        &mut self,
+        extras: FramePipelineReportExtras,
+    ) -> Option<(Arc<FramePipelineReport>, u64)> {
+        if self.accumulator.is_empty() {
+            return None;
+        }
+        let report = self.build_report(extras);
+        Some((report, self.revision))
+    }
+
     pub fn latest_budget_signal(&self) -> Option<FramePipelineBudgetSignal> {
         self.latest_budget_signal
+    }
+
+    /// Largest current depth among the tracked pipeline queues.
+    ///
+    /// This scalar query avoids constructing a rich queue/report panel in
+    /// frame-critical benchmark loops.
+    pub fn current_max_queue_depth(&self) -> u64 {
+        self.queue_trackers.current_max_depth()
     }
 
     pub fn retained_frame_count(&self) -> usize {
@@ -408,23 +457,33 @@ impl FramePipelineAccountant {
             render_queue_oldest_age_ms,
         };
         self.latest_budget_signal = Some(budget_signal);
-        let should_publish = self.latest_report.is_none()
-            || match self.mode {
-                FramePipelineAccountingMode::Exact => true,
-                FramePipelineAccountingMode::Live {
-                    report_interval_frames,
-                    ..
-                } => self
-                    .accumulator
-                    .frames_recorded()
-                    .is_multiple_of(report_interval_frames),
-            };
+        let should_publish = match self.mode {
+            FramePipelineAccountingMode::Exact { publish_on_record } => publish_on_record,
+            FramePipelineAccountingMode::Live {
+                report_interval_frames,
+                ..
+            } => {
+                self.latest_report.is_none()
+                    || self
+                        .accumulator
+                        .frames_recorded()
+                        .is_multiple_of(report_interval_frames)
+            }
+        };
         if !should_publish {
             return FramePipelineAccountingUpdate {
                 budget_signal,
                 published_report: None,
             };
         }
+        let report = self.build_report(extras);
+        FramePipelineAccountingUpdate {
+            budget_signal,
+            published_report: Some((report, self.revision)),
+        }
+    }
+
+    fn build_report(&mut self, extras: FramePipelineReportExtras) -> Arc<FramePipelineReport> {
         let queue_panel = self.queue_trackers.report(self.now_ms);
         let peer_thread_panel = extras.peer_threads.map_or_else(
             PeerThreadPanelReport::empty,
@@ -436,10 +495,7 @@ impl FramePipelineAccountant {
         self.revision = self.revision.saturating_add(1);
         let report = Arc::new(report);
         self.latest_report = Some(report.clone());
-        FramePipelineAccountingUpdate {
-            budget_signal,
-            published_report: Some((report, self.revision)),
-        }
+        report
     }
 }
 
@@ -448,7 +504,7 @@ fn accumulator_for_mode(
     mode: FramePipelineAccountingMode,
 ) -> FrameAccumulator {
     match mode {
-        FramePipelineAccountingMode::Exact => FrameAccumulator::new(config),
+        FramePipelineAccountingMode::Exact { .. } => FrameAccumulator::new(config),
         FramePipelineAccountingMode::Live {
             history_capacity, ..
         } => FrameAccumulator::new_rolling(config, history_capacity),
@@ -560,6 +616,27 @@ impl FramePipelineQueueTrackers {
             },
             self.render_compile_jobs.report(now_ms),
         ])
+    }
+
+    fn current_max_depth(&self) -> u64 {
+        let host_publication_depth = if self.server_owned_lanes_remote {
+            0
+        } else {
+            self.host_publication_runner
+                .depth()
+                .saturating_add(self.host_publication_worldgen.depth())
+                .saturating_add(self.host_publication_light.depth())
+        };
+        [
+            self.inbound_updates.depth(),
+            host_publication_depth,
+            self.render_compile_jobs.depth(),
+            self.completed_results.depth(),
+            self.upload_work.depth(),
+        ]
+        .into_iter()
+        .max()
+        .unwrap_or(0)
     }
 
     fn render_queue_pressure(&self, now_ms: f64) -> (u64, Option<f64>) {
@@ -983,6 +1060,57 @@ mod tests {
             report.frame_summary.percentile_window_capacity,
             Some(LIVE_FRAME_HISTORY_CAPACITY as u64)
         );
+    }
+
+    #[test]
+    fn exact_on_demand_accountant_defers_rich_report_construction() {
+        let mut accounting = FramePipelineAccountant::new_exact_on_demand(
+            FrameAccountingConfig::from_target_period_ms(10.0),
+        );
+        for frame_index in 1..=3 {
+            let update = accounting.record_prebuilt(
+                FrameObservation::new(frame_index, frame_index as f64),
+                FramePipelineQueueDepths::default(),
+                FramePipelineReportExtras::default(),
+            );
+            assert_eq!(update.budget_signal.frame_index, frame_index);
+            assert!(update.published_report.is_none());
+        }
+
+        assert!(accounting.latest_report().is_none());
+        assert_eq!(accounting.retained_frame_count(), 3);
+        let (report, revision) = accounting
+            .publish_report_now(FramePipelineReportExtras::default())
+            .expect("on-demand report");
+        assert_eq!(revision, 1);
+        assert_eq!(report.frame_summary.frames, 3);
+        assert_eq!(report.frame_summary.percentile_window_frames, 3);
+        assert_eq!(report.frame_summary.percentile_window_capacity, None);
+        assert_eq!(
+            accounting.latest_report().expect("published report").1,
+            revision
+        );
+    }
+
+    #[test]
+    fn current_max_queue_depth_does_not_require_report_publication() {
+        let mut accounting = FramePipelineAccountant::new_exact_on_demand(
+            FrameAccountingConfig::from_target_period_ms(10.0),
+        );
+        accounting.record_prebuilt(
+            FrameObservation::new(1, 2.0),
+            FramePipelineQueueDepths {
+                observed: true,
+                host_publication_runner: 3,
+                host_publication_worldgen: 4,
+                render_compile_jobs: 5,
+                ..FramePipelineQueueDepths::default()
+            },
+            FramePipelineReportExtras::default(),
+        );
+
+        assert_eq!(accounting.current_max_queue_depth(), 7);
+        assert!(accounting.latest_report().is_none());
     }
 
     #[test]

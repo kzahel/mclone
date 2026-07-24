@@ -240,7 +240,7 @@ impl OffscreenDriver {
             view_topology: options.view_topology,
             clock: OffscreenFrameClock::default(),
             frame_timing: FrameTimingStats::default(),
-            frame_pipeline_accounting: FramePipelineAccountant::new(
+            frame_pipeline_accounting: FramePipelineAccountant::new_live(
                 xr_frame_pipeline_accounting_config(None),
             ),
             last_summary: None,
@@ -318,7 +318,7 @@ impl OffscreenDriver {
     pub(crate) fn set_clock(&mut self, clock: OffscreenFrameClock) {
         self.clock = clock;
         self.frame_pipeline_accounting =
-            FramePipelineAccountant::new(xr_frame_pipeline_accounting_config(
+            FramePipelineAccountant::new_live(xr_frame_pipeline_accounting_config(
                 clock
                     .target_frame_ms
                     .filter(|period_ms| period_ms.is_finite() && *period_ms > 0.0)

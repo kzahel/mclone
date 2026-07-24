@@ -3014,7 +3014,7 @@ fn startup_streaming_frame_pipeline_report(
     budget_decision_panel: BudgetDecisionPanelReport,
 ) -> FramePipelineReport {
     let peer_threads = startup_streaming_peer_threads(frames, wall_ms);
-    let mut accountant = FramePipelineAccountant::new(
+    let mut accountant = FramePipelineAccountant::new_exact_on_demand(
         FrameAccountingConfig::from_target_period_ms(target_frame_ms)
             .with_percentile_method(PercentileMethod::InclusiveCeil),
     );
@@ -3034,14 +3034,16 @@ fn startup_streaming_frame_pipeline_report(
         accountant.record_prebuilt_at(
             observation,
             startup_streaming_queue_depths(*frame),
-            FramePipelineReportExtras::default()
-                .with_peer_threads(peer_threads)
-                .with_budget_decision_panel(budget_decision_panel.clone()),
+            FramePipelineReportExtras::default(),
             frame.elapsed_ms,
         );
     }
     accountant
-        .latest_report()
+        .publish_report_now(
+            FramePipelineReportExtras::default()
+                .with_peer_threads(peer_threads)
+                .with_budget_decision_panel(budget_decision_panel),
+        )
         .map(|(report, _)| (*report).clone())
         .expect("startup streaming report has at least one frame")
 }

@@ -410,13 +410,46 @@ The durable live contract is therefore:
 The correction now keeps 512 recent observations in the live ring, maintains
 lifetime counters and the configured top-K worst frames incrementally,
 publishes a lightweight render-admission signal every frame, and rebuilds the
-rich report once per 30 frames. Exact finite collectors remain a separate
-constructor. A ten-minute static Steam Deck RD13 aerial A/B held 90 Hz after
-the correction where the prior implementation declined from about 87 to 65
-FPS by five and a half minutes; the late profile no longer contained frame
-history sorting. The prior RD5 A/B remains evidence only for its finite
-recorded interval. Re-run the Quest RD5 accounting on/off overhead guardrail
-before treating the cross-platform `<= 0.2 ms` ceiling as revalidated.
+rich report once per 30 frames. Exact finite collectors remain separate and
+must use the on-demand constructor in frame-critical benchmark loops: retain
+the bounded exact observations incrementally, then sort percentiles and build
+the rich report once after the measured interval. The publish-on-record exact
+constructor remains available for reconstruction and tests outside a live
+frame loop.
+
+A ten-minute static Steam Deck RD13 aerial A/B held 90 Hz after the live
+correction where the prior implementation declined from about 87 to 65 FPS by
+five and a half minutes; the late profile no longer contained frame history
+sorting.
+
+The 2026-07-24 Quest revalidation found and corrected a second instance of the
+same measurement defect. The Android XR finite perf probe used the exact
+collector inside `after_frame`, rebuilding and sorting its entire growing
+history every submitted frame. That work ran after the OpenXR driver's
+`frame_wall`/thread-CPU measurement boundary, so it could lower actual
+submission cadence without appearing in `app_work_*`. At frozen RD10, the
+old exact-on run submitted only `925` frames in `20.002s` (`46.25 FPS`), while
+disabling accounting submitted `1440` frames with identical `284` drawn
+sections and `2,008,398` drawn indices. Moving the exact collector to
+on-demand publication restored `1440` submissions in `20.012s`
+(`71.96 FPS`). The matched fixed accounting-off run submitted `1441` frames
+(`72.01 FPS`); thread-CPU p95 was `5.888ms` on versus `5.917ms` off.
+
+The active-terrain RD5 flight guardrail also held cadence: accounting on/off
+submitted `1441/1440` frames over 20 seconds, with app-work p95
+`5.669/5.750ms`. The measured delta is therefore `-0.081ms`, within benchmark
+noise and below the `<= 0.2ms` ceiling. Android XR now also freezes
+`sample_seconds` before final report construction; the old fallback report
+added `176ms` of reconstruction time to the nominal 20-second interval and
+incorrectly reported `71.37 FPS` for 1440 submissions.
+
+The follow-up constructor audit removed publish-on-record exact accounting
+from every non-test frame loop. The offscreen host now uses bounded live
+accounting. The flat Android pacing probe accumulates exact data on demand,
+queries current maximum queue depth through an O(1) scalar path, publishes
+once at completion, and restores bounded live accounting afterward.
+Desktop startup-streaming report reconstruction also publishes once after
+replaying its recorded frames.
 
 Schema v10 makes the rolling interpretation explicit:
 `frameSummary.frames` and each metric's count, average, minimum, and maximum

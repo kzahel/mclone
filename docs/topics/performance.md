@@ -42,9 +42,9 @@ first improvement. Start here when looking for high-value, low-hanging work.
 
 ### HP-0: Bound Live Frame Accounting Cost
 
-**Priority: immediate. Status: corrected and Steam Deck soak-clean; Quest RD5
-overhead revalidation pending. Scope: shared live native frame accounting, not
-world simulation.**
+**Priority: immediate. Status: corrected, Steam Deck soak-clean, and Quest
+overhead revalidated. Scope: shared live native frame accounting, not world
+simulation.**
 
 The old always-on `FramePipelineAccountant` recorded every observation in an
 unbounded `FrameAccumulator`, then rebuilt percentile inputs and sorted both
@@ -64,7 +64,8 @@ The implemented correction:
 5. sends a lightweight per-frame budget signal distinct from the rich
    diagnostic report;
 6. publishes the rich report once per 30 frames; and
-7. keeps an explicit exact constructor for finite benchmark output.
+7. keeps exact finite benchmark accumulation but defers rich report
+   construction until the measured interval has ended.
 
 The fixed SteamRT4 RD13 aerial run stayed at 89.98-90.01 FPS through ten
 minutes. `VmData` stayed exactly 792,936 KiB across the measured four-to-ten
@@ -77,8 +78,19 @@ sorting frame history.
 Preserve the measurement semantics and overhead ceiling in
 [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md). The
 menu-first lifecycle and idle sanity gate are tracked in
-[`client-entry-lifecycle.md`](client-entry-lifecycle.md). A Quest RD5
-accounting on/off pass remains the cross-platform acceptance gate.
+[`client-entry-lifecycle.md`](client-entry-lifecycle.md).
+
+The 2026-07-24 Quest pass found that its finite exact collector was still
+rebuilding the growing rich report in `after_frame`, outside the reported
+OpenXR frame-work boundary. At identical frozen RD10 geometry this suppressed
+actual submission cadence from `1440` to `925` frames per 20 seconds while
+remaining invisible in `app_work_*`. Exact-on-demand publication restored
+`1440` submissions. The active RD5 traversal accounting on/off guardrail then
+measured app-work p95 `5.669/5.750ms` at `72.01/72.00 FPS`, revalidating the
+cross-platform `<= 0.2ms` ceiling. A constructor audit also moved the
+offscreen host to bounded live mode, changed desktop startup report replay to
+one final publication, and made the flat Android pacing probe restore bounded
+live accounting after its one on-demand exact report.
 
 ### HP-1: Split Actor Pose Updates From Whole-Mesh Rebuilds
 

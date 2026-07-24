@@ -88,7 +88,9 @@ mod android {
         parse_string_arg,
     };
     use mclone_app_runtime::{
-        frame_pipeline_accounting::{FramePipelineAccountant, FramePipelinePeerThreadAccumulator},
+        frame_pipeline_accounting::{
+            FramePipelineAccountant, FramePipelinePeerThreadAccumulator, FramePipelineReportExtras,
+        },
         frame_pipeline_presentation::frame_pipeline_report_lines,
     };
     use mclone_assets::AssetSourceChain;
@@ -4630,10 +4632,13 @@ mod android {
             }
         }
 
-        fn frame_pipeline_report(&self) -> FramePipelineReport {
-            if let Some(frame_accounting) = self.frame_accounting.as_ref() {
+        fn frame_pipeline_report(&mut self) -> FramePipelineReport {
+            let extras = FramePipelineReportExtras::default()
+                .with_peer_threads(self.peer_thread_accounting.report())
+                .with_budget_decision_panel(self.latest_budget_decision_panel.clone());
+            if let Some(frame_accounting) = self.frame_accounting.as_mut() {
                 return frame_accounting
-                    .latest_report()
+                    .publish_report_now(extras)
                     .map(|(report, _)| (*report).clone())
                     .unwrap_or_else(empty_android_xr_frame_pipeline_report);
             }
@@ -4655,16 +4660,22 @@ mod android {
                 );
             }
             frame_accounting
-                .latest_report()
+                .publish_report_now(
+                    FramePipelineReportExtras::default()
+                        .with_peer_threads(self.peer_thread_accounting.report())
+                        .with_budget_decision_panel(self.latest_budget_decision_panel.clone()),
+                )
                 .map(|(report, _)| (*report).clone())
                 .unwrap_or_else(empty_android_xr_frame_pipeline_report)
         }
 
         fn log_summary(&mut self, frame_stats: XrFrameStats) {
+            // Freeze the measured interval before exact percentile/report
+            // construction so summary formatting cannot lower reported FPS.
+            let sample_seconds = self.started.elapsed().as_secs_f64();
             let full_frame_pipeline_report = self.frame_pipeline_report();
             let frame_accounting = full_frame_pipeline_report.frame_summary.clone();
             let frame_pipeline_report = self.detail.is_full().then_some(full_frame_pipeline_report);
-            let sample_seconds = self.started.elapsed().as_secs_f64();
             let frame_count = frame_accounting.frames;
             let submitted_delta = frame_stats.submitted_frames - self.start_stats.submitted_frames;
             let runtime_delta = frame_stats.runtime_frames - self.start_stats.runtime_frames;
@@ -5660,7 +5671,7 @@ mod android {
     }
 
     fn android_xr_frame_pipeline_accountant(target_hz: f64) -> FramePipelineAccountant {
-        FramePipelineAccountant::new(
+        FramePipelineAccountant::new_exact_on_demand(
             xr_frame_pipeline_accounting_config(Some(target_hz))
                 .with_worst_frame_capacity(ANDROID_XR_PERF_WORST_FRAME_COUNT),
         )

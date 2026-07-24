@@ -109,6 +109,70 @@ force-stops the app and sleeps the headset during cleanup.
 
 ## Records
 
+### 2026-07-24 - Exact Frame-Accounting Measurement Defect
+
+Benchmarked runtime endpoint: `696a4271`. The corrected APK was built from a
+detached worktree at that exact endpoint with only the
+`FramePipelineAccountant::new_exact_on_demand` and Android XR report-boundary
+patch applied. The main worktree contained unrelated concurrent changes, so
+these are explicitly uncommitted-patch measurements; the two Quest-relevant
+runtime files in the main worktree contain the same code.
+
+The finite Android XR perf probe accidentally used the publish-on-record exact
+collector in `after_frame`. Every submitted frame therefore rebuilt
+percentiles, sorted the growing exact history, cloned worst-frame detail, and
+allocated the complete report. `OpenXrFrameDriver` had already stopped its
+`frame_wall` and thread-CPU clocks, so the overhead reduced real submission
+cadence without appearing in `app_work_*`. This is a measurement defect, not
+an RD10 render optimization.
+
+Device/runtime:
+
+| Field | Value |
+|---|---|
+| Device | Meta Quest 3 `2G0YC1ZF93041Z` |
+| Android API | 34 |
+| OpenXR runtime | Oculus |
+| Stereo view config | `1680x1760` per eye, `1x` render scale |
+| Current/target refresh | `72.0 Hz` / `13.889ms` |
+| World | local integrated, seed `12345`, center chunk `(0, 0)`, noon, frozen time |
+
+Frozen RD10 causality and correction:
+
+| Runtime / accounting | Frames / interval | Submitted FPS | App p95 | Thread CPU p95 | Meta GPU | Drawn sections / indices |
+|---|---:|---:|---:|---:|---:|---:|
+| Old exact, on | `925 / 20.002s` | `46.25` | `14.294ms` | `6.237ms` | `7.514ms` | `284 / 2,008,398` |
+| Old exact, off | `1440 / 20.176s` | `71.37` reported | `14.558ms` | `6.042ms` | `7.785ms` | `284 / 2,008,398` |
+| Fixed on-demand, on | `1440 / 20.012s` | `71.96` | `14.161ms` | `5.888ms` | `7.540ms` | `284 / 2,008,398` |
+| Fixed on-demand, off | `1441 / 20.012s` | `72.01` | `14.059ms` | `5.917ms` | `7.448ms` | `284 / 2,008,398` |
+
+The old accounting-off row did submit 1440 frames during the intended
+20-second window. Its reported `20.176s` denominator incorrectly included the
+one-time fallback report reconstruction, producing `71.37 FPS`; the fix
+freezes the sample duration before report construction. The fixed on/off
+thread-CPU p95 delta is `-0.029ms`. App-work p95 differs by `+0.102ms`, below
+the `<= 0.2ms` accounting ceiling.
+
+An accounting-on repeat after a 48-second settle reached `67.04 FPS`, with
+app-work p95 `16.094ms`, Meta GPU `8.694ms`, and 10 actors rather than 2. It
+remained far above the old exact collector's `46.25 FPS`, but is retained as
+evidence that thermal/runtime and entity variance matter near the RD10
+72-Hz edge; do not treat one sequential run as an optimization verdict.
+
+Active-terrain RD5 flight guardrail (`--xr-skip-actors`, `4.3 blocks/s`,
+approximately 86 blocks traversed):
+
+| Accounting | Frames / interval | Submitted FPS | App p95 | Thread CPU p95 | Drawn sections / indices |
+|---|---:|---:|---:|---:|---:|
+| On-demand exact on | `1441 / 20.010s` | `72.01` | `5.669ms` | `5.135ms` | `43 / 232,104` |
+| Off | `1440 / 20.000s` | `72.00` | `5.750ms` | `5.178ms` | `43 / 232,104` |
+
+The traversal delta is `-0.081ms` app-work p95, i.e. benchmark noise, while
+the exact schema still reports all 12 stages, 8 queues, 4 peer threads, and 9
+budget decisions. This revalidates the Quest RD5 measurement-overhead
+guardrail while terrain generation, compilation, admission, and upload are
+active.
+
 ### 2026-07-08 - Tactical 155 P0 Fix A Quest Free-Movement + Churn Memory Soak
 
 Benchmarked runtime commit: `8343d960` (the P0 Fix A eviction runtime is

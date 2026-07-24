@@ -13,7 +13,9 @@ use mclone_app_runtime::client_experience::android_flat_native_client_experience
 use mclone_app_runtime::frame_pacing::{
     FramePacingDebugStats, FramePacingMode, FramePacingUiState, FrameTimingStats,
 };
-use mclone_app_runtime::frame_pipeline_accounting::FramePipelineAccountant;
+use mclone_app_runtime::frame_pipeline_accounting::{
+    FramePipelineAccountant, FramePipelineReportExtras,
+};
 use mclone_app_runtime::frame_render::FlatSurfacePresentation;
 use mclone_app_runtime::host_mode::SingleViewHostOptions;
 use mclone_app_runtime::input_preferences::ClientInputPreferences;
@@ -857,9 +859,10 @@ impl AndroidGpuState {
                 >= Duration::from_secs(perf.options.warmup_seconds)
         {
             perf.active_started = Some(now);
-            self.frame_pipeline = FramePipelineAccountant::new(
+            self.frame_pipeline = FramePipelineAccountant::new_exact_on_demand(
                 xr_frame_pipeline_accounting_config(Some(ANDROID_FIXED_FPS_CAP as f64)),
             );
+            self.host.clear_frame_pipeline_report();
             log::info!(
                 "MCLONE_ANDROID_PACING_PERF_START label={} workload=chunk-view-churn warmup_seconds={} sample_seconds={} churn_interval_seconds={:.3} churn_offset_chunks={} target_hz={} adapter={} backend={}",
                 perf.options.label,
@@ -921,32 +924,35 @@ impl AndroidGpuState {
     }
 
     fn finish_pacing_perf_frame(&mut self, now: Instant) {
-        let Some(perf) = self.pacing_perf.as_mut() else {
-            return;
-        };
-        let Some(active_started) = perf.active_started else {
-            return;
-        };
-        let Some((report, _)) = self.frame_pipeline.latest_report() else {
-            return;
-        };
-        perf.max_queue_depth = perf.max_queue_depth.max(
-            report
-                .queue_panel
-                .queues
-                .iter()
-                .map(|queue| queue.depth)
-                .max()
-                .unwrap_or(0),
-        );
-        if perf.completed
-            || now.saturating_duration_since(active_started)
-                < Duration::from_secs(perf.options.sample_seconds)
+        let current_max_queue_depth = self.frame_pipeline.current_max_queue_depth();
         {
-            return;
+            let Some(perf) = self.pacing_perf.as_mut() else {
+                return;
+            };
+            let Some(active_started) = perf.active_started else {
+                return;
+            };
+            perf.max_queue_depth = perf.max_queue_depth.max(current_max_queue_depth);
+            if perf.completed
+                || now.saturating_duration_since(active_started)
+                    < Duration::from_secs(perf.options.sample_seconds)
+            {
+                return;
+            }
         }
+        let Some((report, _)) = self
+            .frame_pipeline
+            .publish_report_now(FramePipelineReportExtras::default())
+        else {
+            return;
+        };
+        let perf = self.pacing_perf.as_mut().expect("pacing perf exists");
         log_android_pacing_perf_summary(perf, &report);
         perf.completed = true;
+        self.frame_pipeline = FramePipelineAccountant::new_live(
+            xr_frame_pipeline_accounting_config(Some(ANDROID_FIXED_FPS_CAP as f64)),
+        );
+        self.host.clear_frame_pipeline_report();
     }
 
     fn record_frame_timing(
