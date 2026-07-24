@@ -113,6 +113,16 @@ impl QueueAgeTracker {
         age
     }
 
+    pub fn depth(&self) -> u64 {
+        self.enqueue_times_ms.len() as u64
+    }
+
+    pub fn oldest_age_ms(&self, now_ms: f64) -> Option<f64> {
+        self.enqueue_times_ms
+            .front()
+            .map(|queued_at| (sanitize_ms(now_ms) - *queued_at).max(0.0))
+    }
+
     pub fn report(&mut self, now_ms: f64) -> QueueAgeReport {
         let oldest_age_ms = self.observe_oldest_age(now_ms);
         let expected_depth = self.enqueued_total.saturating_sub(self.dequeued_total);

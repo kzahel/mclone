@@ -902,6 +902,15 @@ impl McloneSceneHost {
             .set_frame_pipeline_report(report, revision);
     }
 
+    pub fn set_frame_pipeline_budget_signal(
+        &mut self,
+        signal: mclone_app_runtime::frame_pipeline_accounting::FramePipelineBudgetSignal,
+    ) {
+        self.active_world
+            .render_admission_policy
+            .set_frame_pipeline_budget_signal(signal);
+    }
+
     pub fn clear_frame_pipeline_report(&mut self) {
         self.active_world
             .render_admission_policy

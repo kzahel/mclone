@@ -680,14 +680,18 @@ impl OffscreenDriver {
             0.0,
             0.0,
         );
-        let (report, revision) = record_mono_frame_pipeline(
+        let update = record_mono_frame_pipeline(
             &mut self.frame_pipeline_accounting,
             frame_ms,
             true,
             Some(summary.clone()),
             self.host.latest_budget_decision_panel(),
         );
-        self.host.set_frame_pipeline_report(report, revision);
+        self.host
+            .set_frame_pipeline_budget_signal(update.budget_signal);
+        if let Some((report, revision)) = update.published_report {
+            self.host.set_frame_pipeline_report(report, revision);
+        }
         self.last_summary = Some(summary.clone());
         Ok(summary)
     }

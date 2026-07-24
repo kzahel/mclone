@@ -1,12 +1,10 @@
-use std::sync::Arc;
-
 use mclone_app_runtime::frame_pipeline_accounting::{
-    FramePipelineAccountant, FramePipelinePeerThreadInput, FramePipelineQueueDepths,
-    FramePipelineReportExtras, FramePipelineStageTiming, frame_pipeline_stage_spans,
+    FramePipelineAccountant, FramePipelineAccountingUpdate, FramePipelinePeerThreadInput,
+    FramePipelineQueueDepths, FramePipelineReportExtras, FramePipelineStageTiming,
+    frame_pipeline_stage_spans,
 };
 use mclone_diagnostics::{
-    BudgetDecisionPanelReport, FrameAccountingConfig, FrameObservation, FramePipelineReport,
-    PercentileMethod, StageSpan,
+    BudgetDecisionPanelReport, FrameAccountingConfig, FrameObservation, PercentileMethod, StageSpan,
 };
 
 use crate::{
@@ -36,7 +34,7 @@ pub fn record_xr_frame_pipeline(
     host: XrFramePipelineHostTiming,
     summary: Option<XrTerrainFrameSummary>,
     budget_decision_panel: BudgetDecisionPanelReport,
-) -> (Arc<FramePipelineReport>, u64) {
+) -> FramePipelineAccountingUpdate {
     record_xr_frame_pipeline_with_peer_threads(
         accountant,
         host,
@@ -52,7 +50,7 @@ pub fn record_mono_frame_pipeline(
     rendered: bool,
     summary: Option<MonoSceneFrameSummary>,
     budget_decision_panel: BudgetDecisionPanelReport,
-) -> (Arc<FramePipelineReport>, u64) {
+) -> FramePipelineAccountingUpdate {
     let frame_index = accountant.next_frame_index();
     let frame_wall_ms = sanitize_ms(frame_wall_ms);
     let mut observation = FrameObservation::new(frame_index, frame_wall_ms)
@@ -80,7 +78,7 @@ pub fn record_xr_frame_pipeline_with_peer_threads(
     summary: Option<XrTerrainFrameSummary>,
     budget_decision_panel: BudgetDecisionPanelReport,
     peer_threads: Option<FramePipelinePeerThreadInput>,
-) -> (Arc<FramePipelineReport>, u64) {
+) -> FramePipelineAccountingUpdate {
     let observation = xr_frame_pipeline_observation(accountant.next_frame_index(), host, summary);
     let queues = xr_frame_pipeline_queue_depths(summary.map(|summary| summary.upload));
     let mut extras =
@@ -212,7 +210,7 @@ mod tests {
     fn reporter_records_visible_frame_report() {
         let mut accountant =
             FramePipelineAccountant::new(xr_frame_pipeline_accounting_config(Some(90.0)));
-        let (report, revision) = record_xr_frame_pipeline(
+        let update = record_xr_frame_pipeline(
             &mut accountant,
             XrFramePipelineHostTiming {
                 frame_wall_ms: 11.0,
@@ -224,6 +222,7 @@ mod tests {
             None,
             BudgetDecisionPanelReport::empty(),
         );
+        let (report, revision) = update.published_report.expect("exact report");
         assert_eq!(revision, 1);
         assert_eq!(report.frame_summary.frames, 1);
         assert_eq!(report.queue_panel.queues.len(), 8);
@@ -236,7 +235,7 @@ mod tests {
     fn mono_reporter_records_shared_timing_and_queue_depths() {
         let mut accountant =
             FramePipelineAccountant::new(xr_frame_pipeline_accounting_config(Some(60.0)));
-        let (report, revision) = record_mono_frame_pipeline(
+        let update = record_mono_frame_pipeline(
             &mut accountant,
             16.0,
             true,
@@ -255,6 +254,7 @@ mod tests {
             }),
             BudgetDecisionPanelReport::empty(),
         );
+        let (report, revision) = update.published_report.expect("exact report");
 
         assert_eq!(revision, 1);
         assert_eq!(report.frame_summary.frames, 1);
@@ -276,7 +276,7 @@ mod tests {
     fn reporter_marks_remote_host_lanes_as_unavailable_locally() {
         let mut accountant =
             FramePipelineAccountant::new(xr_frame_pipeline_accounting_config(Some(72.0)));
-        let (report, _revision) = record_xr_frame_pipeline(
+        let update = record_xr_frame_pipeline(
             &mut accountant,
             XrFramePipelineHostTiming {
                 frame_wall_ms: 13.0,
@@ -309,6 +309,7 @@ mod tests {
             }),
             BudgetDecisionPanelReport::empty(),
         );
+        let (report, _revision) = update.published_report.expect("exact report");
 
         for queue_id in [
             QueueId::HostPublication,
@@ -415,7 +416,7 @@ mod tests {
                 ..XrTerrainUploadSummary::default()
             },
         };
-        let (report, _) = record_xr_frame_pipeline(
+        let update = record_xr_frame_pipeline(
             &mut accountant,
             XrFramePipelineHostTiming {
                 frame_wall_ms: 10.0,
@@ -425,6 +426,7 @@ mod tests {
             Some(summary),
             BudgetDecisionPanelReport::empty(),
         );
+        let (report, _) = update.published_report.expect("exact report");
         let completed = report
             .queue_panel
             .queues
@@ -470,7 +472,7 @@ mod tests {
             Some(summary),
             BudgetDecisionPanelReport::empty(),
         );
-        let (report, _) = record_xr_frame_pipeline(
+        let update = record_xr_frame_pipeline(
             &mut accountant,
             XrFramePipelineHostTiming {
                 frame_wall_ms: 10.0,
@@ -480,6 +482,7 @@ mod tests {
             None,
             BudgetDecisionPanelReport::empty(),
         );
+        let (report, _) = update.published_report.expect("exact report");
         let upload = report
             .queue_panel
             .queues

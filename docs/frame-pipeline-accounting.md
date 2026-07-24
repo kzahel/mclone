@@ -418,6 +418,13 @@ history sorting. The prior RD5 A/B remains evidence only for its finite
 recorded interval. Re-run the Quest RD5 accounting on/off overhead guardrail
 before treating the cross-platform `<= 0.2 ms` ceiling as revalidated.
 
+Schema v10 makes the rolling interpretation explicit:
+`frameSummary.frames` and each metric's count, average, minimum, and maximum
+are lifetime values, while percentile fields cover
+`percentileWindowFrames` recent observations, bounded by
+`percentileWindowCapacity`. Exact finite collectors serialize a null capacity,
+so their lifetime and percentile windows are the same set.
+
 ## Validating The Instrumentation
 
 Wrong measurements are worse than missing ones: they redirect optimization

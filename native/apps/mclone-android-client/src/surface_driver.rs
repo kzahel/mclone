@@ -545,7 +545,7 @@ impl AndroidGpuState {
             touch,
             ui_touch: TouchUiContactTracker::default(),
             frame_timing: FrameTimingStats::default(),
-            frame_pipeline: FramePipelineAccountant::new(xr_frame_pipeline_accounting_config(
+            frame_pipeline: FramePipelineAccountant::new_live(xr_frame_pipeline_accounting_config(
                 Some(ANDROID_FIXED_FPS_CAP as f64),
             )),
             pacing_perf: startup.pacing_perf.map(|options| {
@@ -874,14 +874,18 @@ impl AndroidGpuState {
         );
         let wall_ms = frame_start.elapsed().as_secs_f64() * 1_000.0;
         let budget = self.host.latest_budget_decision_panel();
-        let (report, revision) = record_mono_frame_pipeline(
+        let update = record_mono_frame_pipeline(
             &mut self.frame_pipeline,
             wall_ms,
             true,
             Some(summary.clone()),
             budget,
         );
-        self.host.set_frame_pipeline_report(report, revision);
+        self.host
+            .set_frame_pipeline_budget_signal(update.budget_signal);
+        if let Some((report, revision)) = update.published_report {
+            self.host.set_frame_pipeline_report(report, revision);
+        }
     }
 
     fn drive_held_input(&mut self, dt_seconds: f64) -> Result<()> {

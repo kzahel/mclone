@@ -166,7 +166,7 @@ impl WinitFrameDriver {
             depth: ChunkDepthTarget::new(device, target_size[0], target_size[1]),
             target_size,
             adaptive_render_admission_budget: scene.adaptive_render_admission_budget,
-            frame_pipeline_accounting: FramePipelineAccountant::new(
+            frame_pipeline_accounting: FramePipelineAccountant::new_live(
                 xr_frame_pipeline_accounting_config(None),
             ),
             scale_presentation: FlatScalePresentation::new(
@@ -639,14 +639,18 @@ impl WinitFrameDriver {
         summary: Option<MonoSceneFrameSummary>,
     ) {
         let budget = self.host.latest_budget_decision_panel();
-        let (report, revision) = record_mono_frame_pipeline(
+        let update = record_mono_frame_pipeline(
             &mut self.frame_pipeline_accounting,
             frame_wall_ms,
             rendered,
             summary,
             budget,
         );
-        self.host.set_frame_pipeline_report(report, revision);
+        self.host
+            .set_frame_pipeline_budget_signal(update.budget_signal);
+        if let Some((report, revision)) = update.published_report {
+            self.host.set_frame_pipeline_report(report, revision);
+        }
     }
 
     pub(crate) fn host(&self) -> &DesktopSceneHost {

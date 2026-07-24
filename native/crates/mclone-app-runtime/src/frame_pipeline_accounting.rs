@@ -18,6 +18,9 @@ use mclone_server::WorkerFrameMetrics;
 use crate::frame_render::RenderStreamStats;
 use crate::{RenderSectionSyncTiming, SingleViewRuntimeStats};
 
+pub const LIVE_FRAME_HISTORY_CAPACITY: usize = 512;
+pub const LIVE_RICH_REPORT_INTERVAL_FRAMES: u64 = 30;
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct FramePipelineQueueDepths {
     pub observed: bool,
@@ -128,6 +131,22 @@ impl FramePipelineReportExtras {
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct FramePipelineBudgetSignal {
+    pub frame_index: u64,
+    pub frame_wall_ms: f64,
+    pub app_work_ms: f64,
+    pub headroom_ms: Option<f64>,
+    pub render_queue_depth: u64,
+    pub render_queue_oldest_age_ms: Option<f64>,
+}
+
+#[derive(Clone, Debug)]
+pub struct FramePipelineAccountingUpdate {
+    pub budget_signal: FramePipelineBudgetSignal,
+    pub published_report: Option<(Arc<FramePipelineReport>, u64)>,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FramePipelineStageTiming {
     pub host_session_commands_ms: f64,
     pub completed_result_acceptance_ms: f64,
@@ -144,31 +163,60 @@ pub struct FramePipelineStageTiming {
 #[derive(Clone, Debug)]
 pub struct FramePipelineAccountant {
     config: FrameAccountingConfig,
+    mode: FramePipelineAccountingMode,
     accumulator: FrameAccumulator,
     pending: Option<FrameObservation>,
     pending_clock_advance_ms: f64,
     queue_trackers: FramePipelineQueueTrackers,
     now_ms: f64,
     latest_report: Option<Arc<FramePipelineReport>>,
+    latest_budget_signal: Option<FramePipelineBudgetSignal>,
     revision: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum FramePipelineAccountingMode {
+    Exact,
+    Live {
+        history_capacity: usize,
+        report_interval_frames: u64,
+    },
 }
 
 impl Default for FramePipelineAccountant {
     fn default() -> Self {
-        Self::new(frame_accounting_config(None))
+        Self::new_live(frame_accounting_config(None))
     }
 }
 
 impl FramePipelineAccountant {
+    /// Exact accumulator for explicitly bounded benchmark/report reconstruction.
     pub fn new(config: FrameAccountingConfig) -> Self {
+        Self::with_mode(config, FramePipelineAccountingMode::Exact)
+    }
+
+    /// Bounded always-on accumulator for interactive clients.
+    pub fn new_live(config: FrameAccountingConfig) -> Self {
+        Self::with_mode(
+            config,
+            FramePipelineAccountingMode::Live {
+                history_capacity: LIVE_FRAME_HISTORY_CAPACITY,
+                report_interval_frames: LIVE_RICH_REPORT_INTERVAL_FRAMES,
+            },
+        )
+    }
+
+    fn with_mode(config: FrameAccountingConfig, mode: FramePipelineAccountingMode) -> Self {
         Self {
             config,
-            accumulator: FrameAccumulator::new(config),
+            mode,
+            accumulator: accumulator_for_mode(config, mode),
             pending: None,
             pending_clock_advance_ms: 0.0,
             queue_trackers: FramePipelineQueueTrackers::new(),
             now_ms: 0.0,
             latest_report: None,
+            latest_budget_signal: None,
             revision: 0,
         }
     }
@@ -178,12 +226,13 @@ impl FramePipelineAccountant {
             return;
         }
         self.config = config;
-        self.accumulator = FrameAccumulator::new(config);
+        self.accumulator = accumulator_for_mode(config, self.mode);
         self.pending = None;
         self.pending_clock_advance_ms = 0.0;
         self.queue_trackers = FramePipelineQueueTrackers::new();
         self.now_ms = 0.0;
         self.latest_report = None;
+        self.latest_budget_signal = None;
     }
 
     /// Opens a new frame. `frame_period_ms` is the real inter-frame interval and
@@ -193,7 +242,7 @@ impl FramePipelineAccountant {
     pub fn begin_frame(&mut self, frame_period_ms: f64, target_period_ms: Option<f64>) {
         self.refresh_target(target_period_ms);
         self.pending_clock_advance_ms = sanitize_ms(frame_period_ms);
-        let frame_index = self.accumulator.len() as u64 + 1;
+        let frame_index = self.accumulator.frames_recorded().saturating_add(1);
         self.pending = Some(FrameObservation::new(frame_index, 0.0));
     }
 
@@ -230,7 +279,7 @@ impl FramePipelineAccountant {
         runtime_stats: Option<SingleViewRuntimeStats>,
         render_stats: RenderStreamStats,
         budget_decision_panel: BudgetDecisionPanelReport,
-    ) {
+    ) -> Option<FramePipelineAccountingUpdate> {
         let present_wait_ms = sanitize_ms(surface_acquire_ms)
             + sanitize_ms(surface_submit_ms)
             + sanitize_ms(surface_present_ms);
@@ -244,7 +293,7 @@ impl FramePipelineAccountant {
         ));
 
         let Some(mut observation) = self.pending.take() else {
-            return;
+            return None;
         };
         let frame_active_ms = sanitize_ms(frame_active_ms);
         observation.frame_wall_ms = frame_active_ms;
@@ -252,12 +301,12 @@ impl FramePipelineAccountant {
         let queues = frame_pipeline_queue_depths(runtime_stats.as_ref(), render_stats);
         let clock_advance_ms = self.pending_clock_advance_ms;
         self.pending_clock_advance_ms = 0.0;
-        self.record_prebuilt_with_clock_advance(
+        Some(self.record_prebuilt_with_clock_advance(
             observation,
             queues,
             FramePipelineReportExtras::default().with_budget_decision_panel(budget_decision_panel),
             clock_advance_ms,
-        );
+        ))
     }
 
     /// Records a complete observation from XR, offscreen, or another driver
@@ -267,7 +316,7 @@ impl FramePipelineAccountant {
         observation: FrameObservation,
         queues: FramePipelineQueueDepths,
         extras: FramePipelineReportExtras,
-    ) -> (Arc<FramePipelineReport>, u64) {
+    ) -> FramePipelineAccountingUpdate {
         let clock_advance_ms = observation.frame_wall_ms;
         self.record_prebuilt_with_clock_advance(observation, queues, extras, clock_advance_ms)
     }
@@ -280,7 +329,7 @@ impl FramePipelineAccountant {
         queues: FramePipelineQueueDepths,
         extras: FramePipelineReportExtras,
         observed_at_ms: f64,
-    ) -> (Arc<FramePipelineReport>, u64) {
+    ) -> FramePipelineAccountingUpdate {
         self.now_ms = sanitize_ms(observed_at_ms).max(self.now_ms);
         self.record_prebuilt_at_current_clock(observation, queues, extras)
     }
@@ -291,8 +340,16 @@ impl FramePipelineAccountant {
             .map(|report| (report.clone(), self.revision))
     }
 
+    pub fn latest_budget_signal(&self) -> Option<FramePipelineBudgetSignal> {
+        self.latest_budget_signal
+    }
+
+    pub fn retained_frame_count(&self) -> usize {
+        self.accumulator.retained_len()
+    }
+
     pub fn next_frame_index(&self) -> u64 {
-        self.accumulator.len() as u64 + 1
+        self.accumulator.frames_recorded().saturating_add(1)
     }
 
     fn refresh_target(&mut self, target_period_ms: Option<f64>) {
@@ -302,10 +359,11 @@ impl FramePipelineAccountant {
         }
         let config = frame_accounting_config(target_period_ms);
         self.config = config;
-        self.accumulator = FrameAccumulator::new(config);
+        self.accumulator = accumulator_for_mode(config, self.mode);
         self.pending = None;
         self.pending_clock_advance_ms = 0.0;
         self.latest_report = None;
+        self.latest_budget_signal = None;
     }
 
     fn push_stage(&mut self, span: StageSpan) {
@@ -322,7 +380,7 @@ impl FramePipelineAccountant {
         queues: FramePipelineQueueDepths,
         extras: FramePipelineReportExtras,
         clock_advance_ms: f64,
-    ) -> (Arc<FramePipelineReport>, u64) {
+    ) -> FramePipelineAccountingUpdate {
         self.now_ms += sanitize_ms(clock_advance_ms);
         self.record_prebuilt_at_current_clock(observation, queues, extras)
     }
@@ -332,9 +390,42 @@ impl FramePipelineAccountant {
         observation: FrameObservation,
         queues: FramePipelineQueueDepths,
         extras: FramePipelineReportExtras,
-    ) -> (Arc<FramePipelineReport>, u64) {
+    ) -> FramePipelineAccountingUpdate {
+        let frame_index = observation.frame_index;
+        let frame_wall_ms = observation.frame_wall_ms;
+        let app_work_ms = observation.computed_app_work_ms();
+        let headroom_ms = observation.headroom_ms(self.config.target_period_ms);
         self.accumulator.record_frame(observation);
-        let queue_panel = self.queue_trackers.report(queues, self.now_ms);
+        self.queue_trackers.reconcile(queues, self.now_ms);
+        let (render_queue_depth, render_queue_oldest_age_ms) =
+            self.queue_trackers.render_queue_pressure(self.now_ms);
+        let budget_signal = FramePipelineBudgetSignal {
+            frame_index,
+            frame_wall_ms,
+            app_work_ms,
+            headroom_ms,
+            render_queue_depth,
+            render_queue_oldest_age_ms,
+        };
+        self.latest_budget_signal = Some(budget_signal);
+        let should_publish = self.latest_report.is_none()
+            || match self.mode {
+                FramePipelineAccountingMode::Exact => true,
+                FramePipelineAccountingMode::Live {
+                    report_interval_frames,
+                    ..
+                } => self
+                    .accumulator
+                    .frames_recorded()
+                    .is_multiple_of(report_interval_frames),
+            };
+        if !should_publish {
+            return FramePipelineAccountingUpdate {
+                budget_signal,
+                published_report: None,
+            };
+        }
+        let queue_panel = self.queue_trackers.report(self.now_ms);
         let peer_thread_panel = extras.peer_threads.map_or_else(
             PeerThreadPanelReport::empty,
             frame_pipeline_peer_thread_panel,
@@ -345,12 +436,28 @@ impl FramePipelineAccountant {
         self.revision = self.revision.saturating_add(1);
         let report = Arc::new(report);
         self.latest_report = Some(report.clone());
-        (report, self.revision)
+        FramePipelineAccountingUpdate {
+            budget_signal,
+            published_report: Some((report, self.revision)),
+        }
+    }
+}
+
+fn accumulator_for_mode(
+    config: FrameAccountingConfig,
+    mode: FramePipelineAccountingMode,
+) -> FrameAccumulator {
+    match mode {
+        FramePipelineAccountingMode::Exact => FrameAccumulator::new(config),
+        FramePipelineAccountingMode::Live {
+            history_capacity, ..
+        } => FrameAccumulator::new_rolling(config, history_capacity),
     }
 }
 
 #[derive(Clone, Debug)]
 struct FramePipelineQueueTrackers {
+    server_owned_lanes_remote: bool,
     inbound_updates: QueueAgeTracker,
     host_publication: QueueAgeTracker,
     host_publication_runner: QueueAgeTracker,
@@ -364,6 +471,7 @@ struct FramePipelineQueueTrackers {
 impl FramePipelineQueueTrackers {
     fn new() -> Self {
         Self {
+            server_owned_lanes_remote: false,
             inbound_updates: QueueAgeTracker::new(QueueId::InboundUpdates),
             host_publication: QueueAgeTracker::new(QueueId::HostPublication),
             host_publication_runner: QueueAgeTracker::new(QueueId::HostPublicationRunner),
@@ -375,8 +483,9 @@ impl FramePipelineQueueTrackers {
         }
     }
 
-    fn report(&mut self, queues: FramePipelineQueueDepths, now_ms: f64) -> QueuePanelReport {
+    fn reconcile(&mut self, queues: FramePipelineQueueDepths, now_ms: f64) {
         let host_publication_remote = queues.server_owned_lanes_remote;
+        self.server_owned_lanes_remote = host_publication_remote;
         if queues.observed {
             self.inbound_updates
                 .reconcile_depth(usize_to_u64(queues.inbound_updates), now_ms);
@@ -421,7 +530,10 @@ impl FramePipelineQueueTrackers {
             self.upload_work
                 .reconcile_depth(usize_to_u64(queues.upload_work), now_ms);
         }
+    }
 
+    fn report(&mut self, now_ms: f64) -> QueuePanelReport {
+        let host_publication_remote = self.server_owned_lanes_remote;
         QueuePanelReport::new(vec![
             self.inbound_updates.report(now_ms),
             self.completed_results.report(now_ms),
@@ -448,6 +560,23 @@ impl FramePipelineQueueTrackers {
             },
             self.render_compile_jobs.report(now_ms),
         ])
+    }
+
+    fn render_queue_pressure(&self, now_ms: f64) -> (u64, Option<f64>) {
+        let depth = self
+            .render_compile_jobs
+            .depth()
+            .saturating_add(self.completed_results.depth())
+            .saturating_add(self.upload_work.depth());
+        let oldest_age_ms = [
+            self.render_compile_jobs.oldest_age_ms(now_ms),
+            self.completed_results.oldest_age_ms(now_ms),
+            self.upload_work.oldest_age_ms(now_ms),
+        ]
+        .into_iter()
+        .flatten()
+        .max_by(f64::total_cmp);
+        (depth, oldest_age_ms)
     }
 }
 
@@ -800,6 +929,93 @@ mod tests {
         assert_eq!(spans.len(), 6);
         assert_eq!(spans[0].stage, StageId::CompletedResultAcceptance);
         assert_eq!(spans[5].stage, StageId::RenderSectionAdmission);
+    }
+
+    #[test]
+    fn live_accountant_bounds_history_and_decimates_rich_reports() {
+        let mut accounting =
+            FramePipelineAccountant::new_live(FrameAccountingConfig::from_target_period_ms(10.0));
+        let frame_count = LIVE_FRAME_HISTORY_CAPACITY as u64 + 88;
+        let mut published_frames = Vec::new();
+        for frame_index in 1..=frame_count {
+            let update = accounting.record_prebuilt(
+                FrameObservation::new(frame_index, frame_index as f64),
+                FramePipelineQueueDepths::default(),
+                FramePipelineReportExtras::default(),
+            );
+            assert_eq!(update.budget_signal.frame_index, frame_index);
+            if update.published_report.is_some() {
+                published_frames.push(frame_index);
+            }
+        }
+
+        assert_eq!(published_frames.first(), Some(&1));
+        assert!(
+            published_frames
+                .iter()
+                .skip(1)
+                .all(|frame| frame.is_multiple_of(LIVE_RICH_REPORT_INTERVAL_FRAMES))
+        );
+        assert_eq!(
+            accounting.retained_frame_count(),
+            LIVE_FRAME_HISTORY_CAPACITY
+        );
+        assert_eq!(accounting.next_frame_index(), frame_count + 1);
+        assert_eq!(
+            accounting
+                .latest_budget_signal()
+                .expect("budget signal")
+                .frame_index,
+            frame_count
+        );
+        let (report, revision) = accounting.latest_report().expect("rich report");
+        let expected_last_publish = frame_count - frame_count % LIVE_RICH_REPORT_INTERVAL_FRAMES;
+        assert_eq!(report.frame_summary.frames, expected_last_publish);
+        assert_eq!(
+            revision,
+            1 + expected_last_publish / LIVE_RICH_REPORT_INTERVAL_FRAMES
+        );
+        assert_eq!(
+            report.frame_summary.percentile_window_frames,
+            LIVE_FRAME_HISTORY_CAPACITY as u64
+        );
+        assert_eq!(
+            report.frame_summary.percentile_window_capacity,
+            Some(LIVE_FRAME_HISTORY_CAPACITY as u64)
+        );
+    }
+
+    #[test]
+    fn live_accountant_stays_bounded_for_one_hour_at_sixty_hz() {
+        const ONE_HOUR_AT_SIXTY_HZ: u64 = 60 * 60 * 60;
+        let mut accounting = FramePipelineAccountant::new_live(
+            FrameAccountingConfig::from_target_period_ms(1000.0 / 60.0),
+        );
+
+        for frame_index in 1..=ONE_HOUR_AT_SIXTY_HZ {
+            let update = accounting.record_prebuilt(
+                FrameObservation::new(frame_index, 4.0),
+                FramePipelineQueueDepths::default(),
+                FramePipelineReportExtras::default(),
+            );
+            assert_eq!(update.budget_signal.frame_index, frame_index);
+        }
+
+        assert_eq!(
+            accounting.retained_frame_count(),
+            LIVE_FRAME_HISTORY_CAPACITY
+        );
+        assert_eq!(accounting.next_frame_index(), ONE_HOUR_AT_SIXTY_HZ + 1);
+        let (report, revision) = accounting.latest_report().expect("rich report");
+        assert_eq!(report.frame_summary.frames, ONE_HOUR_AT_SIXTY_HZ);
+        assert_eq!(
+            report.frame_summary.percentile_window_frames,
+            LIVE_FRAME_HISTORY_CAPACITY as u64
+        );
+        assert_eq!(
+            revision,
+            1 + ONE_HOUR_AT_SIXTY_HZ / LIVE_RICH_REPORT_INTERVAL_FRAMES
+        );
     }
 
     fn runtime_stats(host_mode: crate::host_mode::SingleViewHostMode) -> SingleViewRuntimeStats {

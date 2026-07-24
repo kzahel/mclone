@@ -5,7 +5,7 @@ use crate::{
     QueuePanelReport, StageSpan, WorstFrameDetail,
 };
 
-pub const FRAME_PIPELINE_SCHEMA_VERSION: u32 = 9;
+pub const FRAME_PIPELINE_SCHEMA_VERSION: u32 = 10;
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -91,6 +91,11 @@ mod tests {
         assert_eq!(
             json["budgetDecisionPanel"]["schemaVersion"],
             FRAME_PIPELINE_SCHEMA_VERSION
+        );
+        assert_eq!(json["frameSummary"]["percentileWindowFrames"], 1);
+        assert_eq!(
+            json["frameSummary"]["percentileWindowCapacity"],
+            serde_json::Value::Null
         );
     }
 }

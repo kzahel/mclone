@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use mclone_app_runtime::frame_pipeline_accounting::FramePipelineBudgetSignal;
 use mclone_app_runtime::{RenderSectionSyncTiming, TimedRenderSectionCacheUpdate};
 use mclone_diagnostics::{
     BudgetDecisionFamily, BudgetDecisionPanelReport, BudgetHostMode, FrameHostKind,
@@ -35,7 +36,7 @@ pub struct RenderAdmissionPolicy {
     admission_window: WorkWindow,
     controller: BudgetController,
     estimator: EwmaCostEstimator,
-    latest_report: Option<Arc<FramePipelineReport>>,
+    latest_budget_signal: Option<FramePipelineBudgetSignal>,
     last_panel: BudgetDecisionPanelReport,
     lod_build_queue_depth: u64,
     lod_build_oldest_age_ms: Option<f64>,
@@ -52,7 +53,7 @@ impl RenderAdmissionPolicy {
                 admission_window,
             )),
             estimator: EwmaCostEstimator::new(DEFAULT_COST_EWMA_ALPHA),
-            latest_report: None,
+            latest_budget_signal: None,
             last_panel: BudgetDecisionPanelReport::empty(),
             lod_build_queue_depth: 0,
             lod_build_oldest_age_ms: None,
@@ -69,11 +70,15 @@ impl RenderAdmissionPolicy {
     }
 
     pub fn set_frame_pipeline_report(&mut self, report: Arc<FramePipelineReport>) {
-        self.latest_report = Some(report);
+        self.latest_budget_signal = Some(frame_pipeline_budget_signal(&report));
+    }
+
+    pub fn set_frame_pipeline_budget_signal(&mut self, signal: FramePipelineBudgetSignal) {
+        self.latest_budget_signal = Some(signal);
     }
 
     pub fn clear_frame_pipeline_report(&mut self) {
-        self.latest_report = None;
+        self.latest_budget_signal = None;
     }
 
     pub fn set_lod_producer_active(&mut self, active: bool) {
@@ -120,9 +125,9 @@ impl RenderAdmissionPolicy {
         let mut input = BudgetControllerInput::new(target_period_ms);
         input.host_mode = host_mode;
         input.costs = self.estimator.estimates;
-        if let Some(report) = &self.latest_report {
+        if let Some(signal) = self.latest_budget_signal {
             input = input.with_window(render_admission_budget_window(
-                report,
+                signal,
                 target_period_ms,
                 self.host_kind,
                 self.admission_window,
@@ -190,7 +195,7 @@ impl RenderAdmissionPolicy {
         // Startup prewarm feeds the same producer/upload queues before a frame
         // accountant report exists. Give that cold backlog one bounded burst;
         // subsequent reported frames use the adaptive family decisions.
-        if self.latest_report.is_none() {
+        if self.latest_budget_signal.is_none() {
             if grant.build_tiles > 0 && self.lod_build_queue_depth > 0 {
                 grant.build_tiles = grant.build_tiles.max(4);
             }
@@ -211,7 +216,7 @@ impl RenderAdmissionPolicy {
             self.admission_window,
         ));
         self.estimator = EwmaCostEstimator::new(DEFAULT_COST_EWMA_ALPHA);
-        self.latest_report = None;
+        self.latest_budget_signal = None;
         self.last_panel = BudgetDecisionPanelReport::empty();
         self.lod_build_queue_depth = 0;
         self.lod_build_oldest_age_ms = None;
@@ -230,28 +235,39 @@ pub fn merge_budget_decision_panels(
 }
 
 fn render_admission_budget_window(
-    report: &FramePipelineReport,
+    signal: FramePipelineBudgetSignal,
     target_period_ms: f64,
     host_kind: FrameHostKind,
     admission_window: WorkWindow,
 ) -> BudgetTelemetryWindow {
-    let summary = &report.frame_summary;
-    let (queue_depth, oldest_queue_age_ms) = render_queue_pressure(report);
     let mut window = BudgetTelemetryWindow::new(host_kind, admission_window)
-        .with_app_work_p95_ms(summary.latest_app_work_ms);
-    if let Some(headroom_ms) = summary.latest_headroom_ms {
+        .with_app_work_p95_ms(signal.app_work_ms);
+    if let Some(headroom_ms) = signal.headroom_ms {
         window = window.with_headroom_p05_ms(headroom_ms);
     }
-    window.app_over_period_pct = if summary.latest_app_work_ms > target_period_ms {
+    window.app_over_period_pct = if signal.app_work_ms > target_period_ms {
         100.0
     } else {
         0.0
     };
-    window.missed_frames = u64::from(summary.latest_frame_wall_ms > target_period_ms);
-    window.over_2x_frames = u64::from(summary.latest_frame_wall_ms > target_period_ms * 2.0);
-    window.queue_depth = queue_depth;
-    window.oldest_queue_age_ms = oldest_queue_age_ms;
+    window.missed_frames = u64::from(signal.frame_wall_ms > target_period_ms);
+    window.over_2x_frames = u64::from(signal.frame_wall_ms > target_period_ms * 2.0);
+    window.queue_depth = signal.render_queue_depth;
+    window.oldest_queue_age_ms = signal.render_queue_oldest_age_ms;
     window
+}
+
+fn frame_pipeline_budget_signal(report: &FramePipelineReport) -> FramePipelineBudgetSignal {
+    let summary = &report.frame_summary;
+    let (render_queue_depth, render_queue_oldest_age_ms) = render_queue_pressure(report);
+    FramePipelineBudgetSignal {
+        frame_index: summary.frames,
+        frame_wall_ms: summary.latest_frame_wall_ms,
+        app_work_ms: summary.latest_app_work_ms,
+        headroom_ms: summary.latest_headroom_ms,
+        render_queue_depth,
+        render_queue_oldest_age_ms,
+    }
 }
 
 fn render_queue_pressure(report: &FramePipelineReport) -> (u64, Option<f64>) {

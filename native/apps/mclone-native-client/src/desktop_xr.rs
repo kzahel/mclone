@@ -569,7 +569,7 @@ impl mclone_xr_host::OpenXrFrameLoopHandler<platform_graphics::AppGraphics>
                     (output.summary, output.controller_poll_ms)
                 });
             let budget_decision_panel = mclone.latest_budget_decision_panel();
-            let (frame_pipeline_report, frame_pipeline_revision) = record_xr_frame_pipeline(
+            let update = record_xr_frame_pipeline(
                 &mut self.frame_pipeline_accountant,
                 XrFramePipelineHostTiming {
                     frame_wall_ms: elapsed_ms(outcome.timing.frame_wall),
@@ -583,7 +583,10 @@ impl mclone_xr_host::OpenXrFrameLoopHandler<platform_graphics::AppGraphics>
                 rendered_summary,
                 budget_decision_panel,
             );
-            mclone.set_frame_pipeline_report(frame_pipeline_report, frame_pipeline_revision);
+            mclone.set_frame_pipeline_budget_signal(update.budget_signal);
+            if let Some((report, revision)) = update.published_report {
+                mclone.set_frame_pipeline_report(report, revision);
+            }
         }
         Ok(mclone_xr_host::OpenXrFrameLoopControl::Continue)
     }
@@ -747,7 +750,7 @@ fn run_smoke_frames(
             &controller_preferences,
         ),
         controller_summary: XrControllerInputSummary::default(),
-        frame_pipeline_accountant: FramePipelineAccountant::new(
+        frame_pipeline_accountant: FramePipelineAccountant::new_live(
             xr_frame_pipeline_accounting_config(display_refresh.current_rate.map(f64::from)),
         ),
         companion: &mut companion,
