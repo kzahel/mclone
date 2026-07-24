@@ -1205,19 +1205,24 @@ readback in 847.6/1,123.8 ms on desktop/Pixel versus CPU target publication in
 14,134.1/12,758.1 ms. These remain end-to-end boundaries rather than pure GPU
 execution.
 
+Human review of the exact/LOD workspace then selected hydrology as the next
+macro-content campaign. Tactical
+[`234`](../tactical/234-terrain-lab-hydrology-and-provenance.md) owns
+dependency-ordered preview stages, natural CPU/GPU watercourse parity,
+scale-aware signed-contour preservation, sparse planned-stream overlays, and
+production-derived diagnostic receipts. These are preview compiler stages,
+not authoritative gameplay generator flags.
+
 The next implementation direction is:
 
-1. define a CPU/GPU scale-aware summary target distinct from exact point
-   parity;
-2. band-limit or aggregate sub-sample field energy while preserving coast and
-   mountain silhouettes;
+1. complete Tactical 234's natural and structured hydrology slice;
+2. band-limit or aggregate other sub-sample field energy while preserving
+   coast and mountain silhouettes;
 3. add a Rust/WGSL edit watcher and measure source-edit to first updated
    coarse pixel;
 4. choose explicit mixed-level seam/transition behavior before using partial
-   child coverage;
-5. keep final rivers and bounded planned-stream records as explicit structured
-   overlays rather than weakening the exact large-field evaluator; and
-6. decide whether the current Far LOD control plane should adopt the shared
+   child coverage; and
+5. decide whether the current Far LOD control plane should adopt the shared
    procedural content and exact-handoff contracts proven in the Lab.
 
 ## Open Questions
