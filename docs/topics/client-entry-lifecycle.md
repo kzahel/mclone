@@ -3,9 +3,9 @@
 Topic: `client-entry-lifecycle`
 
 Status: active. The product decision, shared entry/lifecycle policy, bounded
-accounting correction, desktop/SteamOS menu-first entry, and Steam Deck Devkit
-process ownership are implemented. Android, web, XR, and idle-cadence
-migration remain active.
+accounting correction, desktop/SteamOS and flat-Android menu-first entry, and
+Steam Deck Devkit process ownership are implemented. Web, XR, and
+idle-cadence migration remain active.
 
 ## Scope
 
@@ -157,7 +157,7 @@ As of 2026-07-24:
 |---|---|---|
 | Desktop flat | title menu; explicit `--start-in-world true`, remote address, world directory, or automation frame report starts a session | shared `ClientEntryResolution` projected from desktop CLI syntax |
 | Steam Deck interactive Devkit payload | title menu | the managed payload and ordinary desktop default resolve through the same shared entry policy; `steamos` remains only a presentation profile |
-| Flat Android | starts a local session and constructs in-game UI | Android surface driver |
+| Flat Android | title menu; activity argv, remote address, direct world destination, and perf harnesses can explicitly start a session | shared `ClientEntryResolution` projected from Android intent/property syntax |
 | Web | constructs local/remote runtime and then clears the UI screen | browser scene-host startup |
 | Desktop/Android XR | session construction and visible UI selection are not one consistent entry policy | XR app/scene assembly |
 | Offscreen/smoke/perf | intentionally starts the requested workload | harness-specific options |
@@ -217,6 +217,14 @@ entry. It prepares retained UI/render/audio assets and catalog services, but
 does not construct a client runtime, integrated server, remote connection, or
 world worker. Explicit session entry starts afterward through the shared
 `SessionStartRequest` path. Source-contract tests lock this distinction.
+
+Flat Android now uses the same session-free construction path. On the
+`jstorrent-tablet` AVD, an ordinary no-extra activity launch logged
+`source=product-default intent=title`, rendered the title with zero world
+sections, and emitted no active-session marker. A complementary
+`--start-in-world true` activity intent logged
+`source=activity-intent intent=start-session`, created the local world, and
+rendered the in-game scene. Both screenshots were inspected on 2026-07-24.
 
 ## Steam Deck Devkit Process Ownership
 

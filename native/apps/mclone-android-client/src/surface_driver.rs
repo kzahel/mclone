@@ -6,6 +6,9 @@ use glam::Vec2;
 use mclone_android_platform::{
     AndroidControllerCollector, AndroidControllerPoll, drain_android_controller_events,
 };
+use mclone_app_runtime::client_entry::{
+    ClientEntryController, ClientEntryEffect, ClientHostAvailability,
+};
 use mclone_app_runtime::client_experience::android_flat_native_client_experience_profile;
 use mclone_app_runtime::frame_pacing::{
     FramePacingDebugStats, FramePacingMode, FramePacingUiState, FrameTimingStats,
@@ -467,7 +470,6 @@ impl AndroidGpuState {
             &queue,
             format,
             &startup.scene,
-            startup.remote_addr.as_deref(),
             startup.render_options,
             mesh_assets,
             actor_assets.atlas,
@@ -486,7 +488,7 @@ impl AndroidGpuState {
             }
         }
         apply_startup_camera_options(&mut host, startup.camera);
-        let mut ui = GameUiHost::new_ingame();
+        let mut ui = GameUiHost::new();
         ui.set_new_world_seed(startup.scene.seed);
         ui.set_join_remote_addr(
             startup
@@ -499,6 +501,25 @@ impl AndroidGpuState {
             MonoUiContext::default(),
             android_flat_native_client_experience_profile(),
         );
+        let mut entry_controller = ClientEntryController::new(startup.entry.clone());
+        let entry_effect = entry_controller
+            .update_host(ClientHostAvailability {
+                bootstrapped: true,
+                foreground: true,
+                presentation_available: true,
+            })
+            .expect("ready Android host dispatches its entry exactly once");
+        match entry_effect {
+            ClientEntryEffect::EnterTitle { status } => {
+                host.set_client_entry_status(status);
+            }
+            ClientEntryEffect::StartSession(request) => {
+                host.start_session_for_request(&device, &queue, request)?;
+            }
+            ClientEntryEffect::LaunchScenario(intent) => {
+                host.begin_lobby_launch(intent)?;
+            }
+        }
         host.set_frame_host_kind(FrameHostKind::FlatAndroidWinit);
         host.set_display_refresh_hz(Some(ANDROID_FIXED_FPS_CAP as f32));
         let audio = match AudioEngine::new(&asset_source, AudioSettings::default()) {
@@ -519,12 +540,7 @@ impl AndroidGpuState {
             adapter_info.name,
             adapter_info.backend
         );
-        let announced_session = Some(startup.remote_addr.as_ref().map_or_else(
-            || ActiveSessionDescriptor::new_seed_local_world(startup.scene.seed),
-            |address| ActiveSessionDescriptor::Remote {
-                endpoint: RemoteSessionEndpoint::new(address.clone()),
-            },
-        ));
+        let announced_session = None;
         let depth = ChunkDepthTarget::new(&device, config.width, config.height);
         Ok(Self {
             surface,
@@ -1322,45 +1338,27 @@ fn create_android_scene_host(
     queue: &wgpu::Queue,
     color_format: wgpu::TextureFormat,
     scene: &McloneSceneHostOptions,
-    remote_addr: Option<&str>,
     render_options: TexturedSectionRenderOptions,
     mesh_assets: TexturedMeshAssets,
     actor_atlas: mclone_render::actor_assets::ActorTextureImage,
     actor_figures: mclone_render::entity::ActorFigureSet,
     asset_source: &impl mclone_assets::AssetSource,
 ) -> Result<AndroidSceneHost> {
-    let mut host: AndroidSceneHost = if let Some(remote_addr) = remote_addr {
-        let endpoint = RemoteSessionEndpoint::new(remote_addr);
-        let runtime = android_remote_runtime(&endpoint, scene, mesh_assets)?;
-        McloneSceneHost::with_runtime(
-            device,
-            queue,
-            color_format,
-            mclone_app_runtime::monotonic::system_monotonic_clock(),
-            scene.clone(),
-            runtime,
-            render_options,
-            actor_atlas,
-            actor_figures,
-            asset_source,
-            None,
-        )
-    } else {
-        McloneSceneHost::start_local_async(
-            device,
-            queue,
-            color_format,
-            mclone_app_runtime::monotonic::system_monotonic_clock(),
-            scene.clone(),
-            render_options,
-            mesh_assets,
-            actor_atlas,
-            actor_figures,
-            asset_source,
-            None,
-        )
-    }
-    .context("initialize Android shared Mono scene host")?;
+    let mut host: AndroidSceneHost = McloneSceneHost::start_native_without_session(
+        device,
+        queue,
+        color_format,
+        mclone_app_runtime::monotonic::system_monotonic_clock(),
+        scene.clone(),
+        render_options,
+        mesh_assets,
+        actor_atlas,
+        actor_figures,
+        asset_source,
+        android_flat_native_client_experience_profile(),
+        None,
+    )
+    .context("initialize Android session-free scene host")?;
     host.set_teleport_preview_capability(mclone_client::native_teleport_preview_capability());
     host.set_session_runtime_factory(|endpoint, scene, mesh_assets| {
         android_remote_runtime(&endpoint, &scene, mesh_assets)

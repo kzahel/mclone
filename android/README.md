@@ -15,9 +15,11 @@ Current status:
   scene owners.
 - Runtime, render-section streaming, texture/mesh asset loading, and full-frame
   sky/terrain composition come from shared Rust crates.
-- The default host mode is local integrated. Launch-scoped startup arguments
-  are passed as JSON argv through intent extra `mclone.startup.argv`; the flat
-  Android app feeds those tokens into the shared startup parser.
+- An ordinary activity launch constructs a session-free shared host and opens
+  the title menu. Launch-scoped startup arguments are passed as JSON argv
+  through intent extra `mclone.startup.argv`; `--start-in-world true`, a
+  remote endpoint, a direct world destination, or a perf harness explicitly
+  requests a session through the shared client-entry contract.
 - AVD validation builds an APK for the selected device or AVD ABI, stages
   assets, verifies the app-rendered frame marker, and captures a screenshot.
 - APK builds regenerate and embed the authored and generated-fallback logical
@@ -93,7 +95,7 @@ By default this uses the `jstorrent-tablet` AVD, infers that AVD's ABI from its
 config when no `--abi` is passed, builds the APK, stages
 `reference/minecraft-1.17.1/extracted.zip`, repairs staged asset ownership on
 rootable emulator images, launches the app, requires a rendered-frame log
-marker, and captures:
+marker, verifies the ordinary title entry, and captures:
 
 ```text
 /tmp/mclone-android-avd-chunk.png
@@ -110,6 +112,13 @@ Run the deterministic touch-orbit smoke:
 
 ```bash
 pnpm native:android:avd-touch-smoke -- --skip-build
+```
+
+The touch and session smokes pass `--start-in-world true` because their
+workloads require an active local session. For a custom explicit start:
+
+```bash
+pnpm native:android:avd-smoke -- --skip-build --start-in-world true
 ```
 
 It captures:

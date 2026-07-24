@@ -4,13 +4,18 @@ use std::str::FromStr;
 
 use anyhow::{Context, Result, bail};
 use mclone_android_platform::{android_app_data_world_root, normalize_android_legacy_remote_addr};
+use mclone_app_runtime::client_entry::{
+    ClientEntryIntent, ClientEntryResolution, ClientEntrySource,
+};
 use mclone_app_runtime::render_compile_capacity::{
     RenderCompileCapacityHostKind, host_total_memory_bytes,
     preflight_render_compile_capacity_report,
 };
+use mclone_app_runtime::session::{RemoteSessionEndpoint, SessionStartRequest};
 use mclone_app_runtime::startup_args::{
     RenderCompileCapacityRequest, RenderDistanceLimits, StartupArgState, StartupCameraOptions,
     StartupSceneOptions, StartupWorldStorageProjection, format_optional_startup_path,
+    parse_bool_arg,
 };
 use mclone_core::Vec3d;
 use mclone_render::chunk::TexturedSectionRenderOptions;
@@ -36,6 +41,7 @@ unsafe extern "C" {
 pub(crate) struct AndroidStartupOptions {
     pub(crate) scene: McloneSceneHostOptions,
     pub(crate) remote_addr: Option<String>,
+    pub(crate) entry: ClientEntryResolution,
     pub(crate) render_options: TexturedSectionRenderOptions,
     pub(crate) camera: StartupCameraOptions,
     pub(crate) pacing_perf: Option<AndroidPacingPerfOptions>,
@@ -60,7 +66,7 @@ pub(crate) fn prepare_android_startup(app: &AndroidApp) -> Result<AndroidStartup
         }
         _ => log::info!("Android startup argv from {STARTUP_ARGV_INTENT_EXTRA}: <none>"),
     }
-    let (mut options, default_world_root_enabled) =
+    let (mut options, default_world_root_enabled, start_in_world) =
         parse_android_startup_options(startup_argv.as_deref())?;
     let argv_remote_addr = options.remote_addr.clone();
     let legacy_remote_addr = android_remote_addr();
@@ -82,6 +88,12 @@ pub(crate) fn prepare_android_startup(app: &AndroidApp) -> Result<AndroidStartup
         options.scene.world_dir.clone(),
     )
     .validate_local_integrated_world(options.remote_addr.as_deref())?;
+    options.entry = resolve_android_entry(
+        start_in_world,
+        &options,
+        argv_remote_addr.is_some() || startup_argv.is_some(),
+        legacy_remote_addr.is_some(),
+    );
 
     if let Some(remote_addr) = argv_remote_addr.as_deref() {
         log::info!(
@@ -119,6 +131,11 @@ pub(crate) fn prepare_android_startup(app: &AndroidApp) -> Result<AndroidStartup
         options.render_options.force_fullbright,
         options.render_options.color_profile.as_str()
     );
+    log::info!(
+        "Mclone Android client entry source={} intent={}",
+        options.entry.source.label(),
+        options.entry.intent.label(),
+    );
     if let Some(perf) = &options.pacing_perf {
         log::info!(
             "Mclone Android pacing perf: label={} warmup_seconds={} sample_seconds={} churn_interval_seconds={:.3} churn_offset_chunks={} base_center=({}, {})",
@@ -136,7 +153,7 @@ pub(crate) fn prepare_android_startup(app: &AndroidApp) -> Result<AndroidStartup
 
 fn parse_android_startup_options(
     startup_argv_json: Option<&str>,
-) -> Result<(AndroidStartupOptions, bool)> {
+) -> Result<(AndroidStartupOptions, bool, Option<bool>)> {
     let mut shared_args = StartupArgState::new(
         android_startup_scene_defaults(),
         TexturedSectionRenderOptions::default(),
@@ -146,12 +163,21 @@ fn parse_android_startup_options(
     let mut pacing_perf_sample_seconds = None;
     let mut pacing_perf_churn_interval_seconds = None;
     let mut pacing_perf_churn_offset_chunks = None;
+    let mut start_in_world = None;
     if let Some(json) = startup_argv_json.filter(|json| !json.trim().is_empty()) {
         let argv =
             serde_json::from_str::<Vec<String>>(json).context("parse Android startup argv JSON")?;
         let mut argv = argv.into_iter();
         while let Some(arg) = argv.next() {
             match arg.as_str() {
+                "--menu" => {
+                    start_in_world = Some(false);
+                    continue;
+                }
+                "--start-in-world" => {
+                    start_in_world = Some(parse_bool_arg(&arg, argv.next())?);
+                    continue;
+                }
                 "--pacing-perf-label" => {
                     pacing_perf_label = Some(parse_android_arg(&mut argv, &arg)?);
                     continue;
@@ -220,12 +246,52 @@ fn parse_android_startup_options(
         AndroidStartupOptions {
             scene,
             remote_addr,
+            entry: ClientEntryResolution::ordinary(),
             render_options: parsed.render_options,
             camera: parsed.camera,
             pacing_perf,
         },
         default_world_root_enabled,
+        start_in_world,
     ))
+}
+
+fn resolve_android_entry(
+    start_in_world: Option<bool>,
+    options: &AndroidStartupOptions,
+    activity_intent_present: bool,
+    managed_remote_present: bool,
+) -> ClientEntryResolution {
+    let implied_session = options.remote_addr.is_some()
+        || options.scene.world_dir.is_some()
+        || options.pacing_perf.is_some();
+    let starts_session = start_in_world.unwrap_or(implied_session);
+    let source = if start_in_world.is_some() || activity_intent_present {
+        ClientEntrySource::ActivityIntent
+    } else if managed_remote_present {
+        ClientEntrySource::ManagedLaunch
+    } else {
+        ClientEntrySource::ProductDefault
+    };
+    if !starts_session {
+        return if source == ClientEntrySource::ProductDefault {
+            ClientEntryResolution::ordinary()
+        } else {
+            ClientEntryResolution::explicit(ClientEntryIntent::Title, source)
+        };
+    }
+    let request = options.remote_addr.as_ref().map_or_else(
+        || {
+            SessionStartRequest::new_seed_local_world_with_generation_profile(
+                options.scene.seed,
+                options.scene.world_generation_profile,
+            )
+        },
+        |address| SessionStartRequest::JoinRemote {
+            endpoint: RemoteSessionEndpoint::new(address.clone()),
+        },
+    );
+    ClientEntryResolution::explicit(ClientEntryIntent::StartSession(request), source)
 }
 
 fn parse_android_arg<T>(args: &mut impl Iterator<Item = String>, flag: &str) -> Result<T>
@@ -407,6 +473,17 @@ fn android_startup_argv_json(app: &AndroidApp) -> Result<Option<String>> {
             return Ok(None);
         }
         let key = jni::objects::JObject::from(env.new_string(STARTUP_ARGV_INTENT_EXTRA)?);
+        let has_extra = env
+            .call_method(
+                &intent,
+                jni::jni_str!("hasExtra"),
+                jni::jni_sig!("(Ljava/lang/String;)Z"),
+                &[jni::objects::JValue::Object(&key)],
+            )?
+            .z()?;
+        if !has_extra {
+            return Ok(None);
+        }
         let object = env
             .call_method(
                 &intent,

@@ -53,6 +53,9 @@ Options:
   --smoke-seconds N   Seconds to wait after launch before validation.
   --asset-pack PATH   Local packed assets file to stage before launch.
   --skip-assets       Do not stage the packed Minecraft assets before launch.
+  --menu              Explicitly launch at the session-free title menu.
+  --start-in-world true|false
+                      Add an explicit client entry request to startup argv.
   --remote-addr ADDR  Add --remote-addr ADDR to mclone.startup.argv.
   --seed SEED         Add --seed SEED to startup argv.
   --chunk-x X         Add --chunk-x X to startup argv.
@@ -173,6 +176,15 @@ while [[ $# -gt 0 ]]; do
         --remote-addr)
             mclone_require_arg "$1" "${2:-}"
             MCLONE_ANDROID_REMOTE_ADDR="$2"
+            shift 2
+            ;;
+        --menu)
+            MCLONE_ANDROID_STARTUP_ARGV+=("$1")
+            shift
+            ;;
+        --start-in-world)
+            mclone_require_arg "$1" "${2:-}"
+            MCLONE_ANDROID_STARTUP_ARGV+=("$1" "$2")
             shift 2
             ;;
         --seed|--chunk-x|--chunk-z|--render-distance|--world-topology|--movement-speed-multiplier|--day-time|--lighting|--section-occlusion|--fullbright|--render-color-profile|--generation-profile|--screenshot-eye|--screenshot-target|--pacing-perf-label|--pacing-perf-warmup-seconds|--pacing-perf-churn-interval-seconds|--pacing-perf-churn-offset-chunks)
