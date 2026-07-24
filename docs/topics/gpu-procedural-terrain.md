@@ -153,14 +153,17 @@ geography; Shift+left or middle drag pans, map drag pans, and camera reset is
 distinct from the named fixed-site action. The source selector and its live
 comparison contract sit directly above the preview on every viewport. Compare
 draws two synchronized instances of the complete requested footprint: CPU
-production base on the left and GPU production base on the right. Both panels
+production base first and GPU production base second. Both panels
 share exact world coordinates, seed, center, spacing, camera, and diagnostic
-layer, so matching terrain can be inspected directly instead of inferring
-continuity between unrelated halves. CPU Final remains a separate full-width
-source for reviewing the intentionally omitted river, wetland, and
-planned-stream layer. Production Reference is the initial source. The deployed
-product route is `/terrain/`; it does not load the game client, asset packs, a
-server, canonical chunks, lighting, collision, or persistence.
+layer. Wide canvases place them side by side; phone-sized portrait canvases
+stack full-width panels in a double-height stage so packing two views does not
+halve their screen-space detail. The surface grid uses outward-facing
+counter-clockwise triangles, back-face culling, and an above-surface oblique
+projection. CPU Final remains a separate full-width source for reviewing the
+intentionally omitted river, wetland, and planned-stream layer. Production
+Reference is the initial source. The deployed product route is `/terrain/`;
+it does not load the game client, asset packs, a server, canonical chunks,
+lighting, collision, or persistence.
 
 Normal terrain and the current Far LOD path still arrive at `mclone-render` as
 CPU-constructed mesh products. The new tile is a reusable experimental
@@ -974,9 +977,33 @@ The first 2026-07-24 mobile review correction moved source controls beside the
 preview and fixed orbit pitch, but follow-up review correctly rejected its
 single-patch seam as too vague to compare. Compare now submits the complete
 footprint twice: CPU production base and GPU production base share identical
-coordinates and camera state in labeled side-by-side panels. Local hosted-lane
-desktop and phone BrowserWebGPU flows prove two instances, shared orbit,
-preview-adjacent guidance, and the unchanged fixed 2 km / 65.5 km parity gates.
+coordinates and camera state in labeled paired panels.
+
+A second phone review found that CPU Final appeared more detailed and that the
+surface read as if its faces were inverted. Both observations were grounded in
+presentation defects rather than a different reference-grid resolution:
+
+- every source still uses the same 64-by-64 cells and 65-by-65 point samples;
+- packing two views across one narrow row halved each Compare panel's pixel
+  width, while CPU Final retained the whole canvas;
+- CPU Final additionally exposes narrow watercourse and bank fields that
+  visibly alias when point-sampled at 32-block spacing; and
+- the procedural triangle order had a downward geometric normal, while the 3D
+  projection put camera-depth motion on the wrong screen axis and disabled
+  culling.
+
+The renderer now uses an above-surface projection, upward counter-clockwise
+triangles, and back-face culling. Portrait Compare stacks two full-width panels
+in a stage twice as tall as the single view; wide Compare remains side by side.
+Headed-Wayland BrowserWebGPU desktop and Pixel 7 flows pass, the phone gate
+proves the Compare stage is at least 1.9 times the single-view height, and
+inspected CPU Final and paired captures retain drawable outward terrain. The
+narrow hydrology aliases remain honest evidence for the next scale-aware
+summary slice, not a reason to blur the exact CPU reference silently.
+
+The prior local hosted-lane desktop and phone BrowserWebGPU flows prove two
+instances, shared orbit, preview-adjacent guidance, and the unchanged fixed
+2 km / 65.5 km parity gates.
 The exact aggregate bundle was built from code commit `57f52b50` with asset
 version `57f52b5055b0-20260724050832`. Hosted desktop and phone runs passed
 against Cloudflare Worker version `c039e593-08ce-44d8-94a3-bfbd0e59c462`.

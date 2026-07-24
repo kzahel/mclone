@@ -23,7 +23,10 @@ test("generates terrain, round-trips controls, and completes comparison", async 
   const diagnostics = page.locator("[data-testid='terrain-diagnostics']");
   await expect(diagnostics).not.toContainText("Base mean Δpending");
   const shell = page.locator(".appShell");
-  await expect(shell).toHaveAttribute("data-compare-layout", "side-by-side");
+  await expect(shell).toHaveAttribute(
+    "data-compare-layout",
+    testInfo.project.name === "phone-chrome" ? "stacked" : "side-by-side",
+  );
   await expect(shell).toHaveAttribute("data-vertex-count", "49152");
   expect(Number(await shell.getAttribute("data-base-mean-error"))).toBeLessThanOrEqual(0.01);
   expect(Number(await shell.getAttribute("data-base-p95-error"))).toBeLessThanOrEqual(0.01);
@@ -34,6 +37,27 @@ test("generates terrain, round-trips controls, and completes comparison", async 
   await canvas.screenshot({
     path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-initial.png`,
   });
+  const compareStageBox = await page.getByTestId("terrain-stage").boundingBox();
+  expect(compareStageBox).not.toBeNull();
+
+  await page.getByRole("button", { name: "CPU final" }).click();
+  await waitForCurrentComparison(page);
+  await expect(shell).toHaveAttribute("data-compare-layout", "single");
+  const singleStageBox = await page.getByTestId("terrain-stage").boundingBox();
+  expect(singleStageBox).not.toBeNull();
+  if (testInfo.project.name === "phone-chrome") {
+    expect(compareStageBox!.height).toBeGreaterThanOrEqual(singleStageBox!.height * 1.9);
+  }
+  await canvas.screenshot({
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-cpu-final.png`,
+  });
+
+  await page.getByRole("button", { name: "Compare" }).click();
+  await waitForCurrentComparison(page);
+  await expect(shell).toHaveAttribute(
+    "data-compare-layout",
+    testInfo.project.name === "phone-chrome" ? "stacked" : "side-by-side",
+  );
 
   const initialRevision = Number(await shell.getAttribute("data-render-revision"));
   const initialYaw = Number(await shell.getAttribute("data-camera-yaw"));

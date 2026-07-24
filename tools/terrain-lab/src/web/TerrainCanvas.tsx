@@ -167,7 +167,7 @@ export function TerrainCanvas({
       const rect = stage.getBoundingClientRect();
       const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
       const width = Math.max(1, Math.min(2048, Math.round(rect.width * pixelRatio)));
-      const height = Math.max(1, Math.min(1536, Math.round(rect.height * pixelRatio)));
+      const height = Math.max(1, Math.min(2048, Math.round(rect.height * pixelRatio)));
       setCanvasSize((current) =>
         current.width === width && current.height === height ? current : { width, height }
       );

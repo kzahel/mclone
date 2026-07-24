@@ -79,6 +79,11 @@ export function App(): React.JSX.Element {
   const footprint = footprintBlocks(state);
   const chunkWidth = footprint / 16;
   const renderStatus = status === "rendering" ? "updating" : status;
+  const compareLayout = state.source !== "split"
+    ? "single"
+    : renderReport && renderReport.width <= renderReport.height
+      ? "stacked"
+      : "side-by-side";
 
   return (
     <div
@@ -92,7 +97,7 @@ export function App(): React.JSX.Element {
       data-base-p95-error={comparison?.p95AbsoluteBaseSurfaceError ?? ""}
       data-ocean-agreement={comparison?.oceanWaterPresenceAgreement ?? ""}
       data-continentalness-error={comparison?.meanAbsoluteContinentalnessError ?? ""}
-      data-compare-layout={state.source === "split" ? "side-by-side" : "single"}
+      data-compare-layout={compareLayout}
       data-vertex-count={renderReport?.vertexCount ?? 0}
     >
       <header className="topBar">
@@ -277,12 +282,13 @@ function SourceGuide({ source }: { source: TerrainLabSource }): React.JSX.Elemen
   if (source === "split") {
     return (
       <div className="sourceGuide">
-        <strong>Same coordinates, side by side</strong>
+        <strong>Same coordinates, paired views</strong>
         <span>
-          CPU production base is on the left; GPU production base is on the right.
-          Both panels render the exact same world coordinates with one shared seed,
-          center, scale, camera, and layer. Orbit or pan once to move both together,
-          then compare matching terrain directly.
+          CPU production base is first; GPU production base is second. Both panels
+          render the exact same world coordinates with one shared seed, center, scale,
+          camera, and layer. Wide screens place them left and right; phones stack
+          full-width panels to preserve detail. Orbit or pan once to move both
+          together, then compare matching terrain directly.
         </span>
       </div>
     );

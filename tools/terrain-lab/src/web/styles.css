@@ -729,6 +729,41 @@ button:hover {
     min-height: 47vh;
   }
 
+  .terrainStage.compareMode {
+    min-height: 94vh;
+    max-height: 1160px;
+  }
+
+  .terrainStage.compareMode::after {
+    top: 50%;
+    right: 0;
+    bottom: auto;
+    left: 0;
+    width: auto;
+    height: 1px;
+  }
+
+  .splitLabels {
+    top: 0;
+    bottom: 0;
+    display: block;
+  }
+
+  .splitLabels span {
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
+    white-space: nowrap;
+  }
+
+  .splitLabels span:first-child {
+    top: 58px;
+  }
+
+  .splitLabels span:last-child {
+    top: calc(50% + 16px);
+  }
+
   .previewToolbar {
     grid-template-columns: 1fr;
     gap: 9px;

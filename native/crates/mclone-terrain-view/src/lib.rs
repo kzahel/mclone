@@ -383,7 +383,8 @@ impl TerrainPreviewRenderer {
             }),
             primitive: wgpu::PrimitiveState {
                 topology: wgpu::PrimitiveTopology::TriangleList,
-                cull_mode: None,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
                 ..Default::default()
             },
             depth_stencil: Some(wgpu::DepthStencilState {
@@ -836,6 +837,14 @@ mod tests {
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("error_color"));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("@builtin(instance_index)"));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("fn reference_base_sample"));
+        assert!(
+            TERRAIN_PREVIEW_RENDER_WGSL
+                .contains("clip_y = (world_height * cos(pitch) - camera_depth * sin(pitch))")
+        );
+        assert!(
+            TERRAIN_PREVIEW_RENDER_WGSL
+                .contains("let stacked_compare = compare && width <= height")
+        );
         assert_eq!(preview_instance_count(TerrainPreviewSource::Split), 2);
         assert_eq!(preview_instance_count(TerrainPreviewSource::Reference), 1);
     }

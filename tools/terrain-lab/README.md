@@ -20,12 +20,21 @@ encode/submit time, resident buffer size, and an asynchronous readback
 comparison. The GPU evaluator is a preview experiment, not authoritative world
 generation.
 
-`split` is a synchronized side-by-side comparison, despite the retained URL
+`split` is a synchronized paired comparison, despite the retained URL
 vocabulary: the complete requested footprint is drawn twice with identical
-world coordinates and camera state. The left panel uses the CPU production
-base and the right uses the GPU production base. `reference` separately shows
-CPU-final terrain including rivers, wetlands, and planned streams. The error
-layer reports CPU-base versus GPU-base height disagreement.
+world coordinates and camera state. Wide canvases place the views side by
+side; phone-sized portrait canvases stack two full-width views so Compare does
+not halve their screen-space detail. The first panel uses the CPU production
+base and the second uses the GPU production base. `reference` separately
+shows CPU-final terrain including rivers, wetlands, and planned streams. The
+error layer reports CPU-base versus GPU-base height disagreement.
+
+The preview surface uses upward-facing counter-clockwise triangles, rejects
+back faces, and projects the oblique camera from above the height field.
+CPU-final and Compare still share the same 65-by-65 sample lattice. CPU-final
+can look busier because narrow watercourse and bank fields are point sampled;
+those aliases are evidence for the planned scale-aware summary rather than
+additional mesh resolution.
 
 ## Develop
 

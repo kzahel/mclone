@@ -69,9 +69,12 @@ try {
   if (!sourceGuide.includes("exact same world coordinates")) {
     throw new Error(`Terrain Lab compare guidance is missing:\n${sourceGuide}`);
   }
-  if (await shell.getAttribute("data-compare-layout") !== "side-by-side"
+  const expectedCompareLayout = mobile ? "stacked" : "side-by-side";
+  if (await shell.getAttribute("data-compare-layout") !== expectedCompareLayout
       || Number(await shell.getAttribute("data-vertex-count")) !== 49_152) {
-    throw new Error("Terrain Lab Compare did not submit two synchronized terrain views");
+    throw new Error(
+      `Terrain Lab Compare did not submit two synchronized ${expectedCompareLayout} terrain views`,
+    );
   }
   await page.locator("[data-testid='terrain-diagnostics']").scrollIntoViewIfNeeded();
   await settlePaint(page);

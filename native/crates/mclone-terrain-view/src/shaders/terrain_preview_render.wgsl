@@ -28,11 +28,11 @@ struct VertexOutput {
 fn grid_corner(vertex_in_cell: u32) -> vec2<u32> {
     switch vertex_in_cell {
         case 0u: { return vec2<u32>(0u, 0u); }
-        case 1u: { return vec2<u32>(1u, 0u); }
-        case 2u: { return vec2<u32>(0u, 1u); }
+        case 1u: { return vec2<u32>(0u, 1u); }
+        case 2u: { return vec2<u32>(1u, 0u); }
         case 3u: { return vec2<u32>(0u, 1u); }
-        case 4u: { return vec2<u32>(1u, 0u); }
-        default: { return vec2<u32>(1u, 1u); }
+        case 4u: { return vec2<u32>(1u, 1u); }
+        default: { return vec2<u32>(1u, 0u); }
     }
 }
 
@@ -184,8 +184,17 @@ fn vertex_main(
     let width = max(f32(params.layer_samples_size.z), 1.0);
     let height = max(f32(params.layer_samples_size.w), 1.0);
     let compare = params.seed_source_view.z == 2u;
-    let view_width = select(width, width * 0.5, compare);
-    let aspect = view_width / height;
+    let stacked_compare = compare && width <= height;
+    var view_width = width;
+    var view_height = height;
+    if compare {
+        if stacked_compare {
+            view_height = height * 0.5;
+        } else {
+            view_width = width * 0.5;
+        }
+    }
+    let aspect = view_width / view_height;
     var clip_x = grid_x;
     var clip_y = -grid_z;
     var clip_z = 0.5;
@@ -199,9 +208,9 @@ fn vertex_main(
         let camera_depth = dot(horizontal, view_depth);
         let world_height = (sample.terrain.y - 63.0) / 72.0;
         clip_x = camera_x * 0.72;
-        clip_y = (world_height * cos(pitch) + camera_depth * sin(pitch)) * 0.78;
+        clip_y = (world_height * cos(pitch) - camera_depth * sin(pitch)) * 0.78;
         clip_z = clamp(
-            0.5 - camera_depth * cos(pitch) * 0.24 + world_height * sin(pitch) * 0.08,
+            0.5 - camera_depth * cos(pitch) * 0.24 - world_height * sin(pitch) * 0.08,
             0.02,
             0.98,
         );
@@ -212,8 +221,13 @@ fn vertex_main(
         clip_y = clip_y * aspect;
     }
     if compare {
-        let panel_center = select(-0.5, 0.5, instance_index == 1u);
-        clip_x = clip_x * 0.46 + panel_center;
+        if stacked_compare {
+            let panel_center = select(0.5, -0.5, instance_index == 1u);
+            clip_y = clip_y * 0.46 + panel_center;
+        } else {
+            let panel_center = select(-0.5, 0.5, instance_index == 1u);
+            clip_x = clip_x * 0.46 + panel_center;
+        }
     }
 
     var out: VertexOutput;
