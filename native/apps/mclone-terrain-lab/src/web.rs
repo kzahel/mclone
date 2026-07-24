@@ -4,12 +4,16 @@ use mclone_mesh::load_first_party_textured_terrain_assets;
 use mclone_terrain_view::{
     CanonicalTerrainCompiler, TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION,
     TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainPreviewCamera, TerrainPreviewMaterialAtlas,
-    TerrainViewportCompletedComparison, TerrainViewportDetail, TerrainViewportFrameStats,
-    TerrainViewportRenderer, TerrainViewportRequest, canonical_terrain_chunk_order,
-    plan_terrain_viewport,
+    TerrainPreviewSource, TerrainPreviewView, TerrainViewportCompletedComparison,
+    TerrainViewportDetail, TerrainViewportFrameStats, TerrainViewportRenderer,
+    TerrainViewportRequest, canonical_terrain_chunk_order, plan_terrain_viewport,
+    terrain_preview_projection,
 };
 use mclone_worldgen::{
-    levelgen::McloneOverworldSamplingTopology,
+    levelgen::{
+        McloneOverworldDebugSample, McloneOverworldSampler, McloneOverworldSamplingTopology,
+        mclone_overworld_debug_sample_with_streams,
+    },
     terrain_preview::{
         TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS, TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION,
         terrain_preview_field_revision,
@@ -20,8 +24,8 @@ use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 use web_sys::HtmlCanvasElement;
 
 use crate::{
-    canonical_terrain_stage, canonical_terrain_stage_label, terrain_preview_option_labels,
-    terrain_preview_options,
+    canonical_terrain_stage, canonical_terrain_stage_label, terrain_preview_content_stage,
+    terrain_preview_option_labels, terrain_preview_options,
 };
 
 #[wasm_bindgen(js_name = CanonicalTerrainCompiler)]
@@ -222,6 +226,8 @@ struct TerrainLabRenderReport<'a> {
     source: &'static str,
     view: &'static str,
     layer: &'static str,
+    content_stage: &'static str,
+    structured_hydrology_available: bool,
     topology: &'static str,
     width: u32,
     height: u32,
@@ -276,7 +282,58 @@ struct TerrainLabComparisonReport {
     mean_absolute_moisture_error: f32,
     mean_absolute_ruggedness_error: f32,
     macro_surface_material_agreement: f32,
+    channel_presence_agreement: f32,
+    mean_absolute_river_signed_distance_error: f32,
+    mean_absolute_channel_influence_error: f32,
+    mean_absolute_bank_influence_error: f32,
+    mean_absolute_wetland_influence_error: f32,
+    visible_surface_material_agreement: f32,
+    biome_recipe_agreement: f32,
+    surface_recipe_agreement: f32,
     stale_result_count: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerrainLabPointReceipt {
+    field_revision: &'static str,
+    world_x: i32,
+    world_z: i32,
+    chunk_x: i32,
+    chunk_z: i32,
+    quart_x: i32,
+    quart_z: i32,
+    landform: &'static str,
+    hydrology: &'static str,
+    biome_recipe: &'static str,
+    biome_reason: &'static str,
+    surface_recipe: &'static str,
+    planned_stream_start: Option<TerrainLabCanonicalChunkCoordinate>,
+    base_surface_y: i32,
+    surface_y: i32,
+    slope: f64,
+    continentalness: f64,
+    relief: f64,
+    ruggedness: f64,
+    ridges: f64,
+    mountain_detail: f64,
+    temperature: f64,
+    moisture: f64,
+    river_signed_distance: f64,
+    river_distance: f64,
+    river_half_width: f64,
+    channel_influence: f64,
+    major_channel_influence: f64,
+    bank_influence: f64,
+    wetland_influence: f64,
+    wetland_pool_influence: f64,
+    submerged_outlet_influence: f64,
+    planned_stream_influence: f64,
+    water_surface_y: i32,
+    bed_y: i32,
+    flow_x: f64,
+    flow_z: f64,
+    grade: f64,
 }
 
 #[wasm_bindgen]
@@ -353,6 +410,7 @@ impl TerrainLab {
         source: String,
         view: String,
         layer: String,
+        content_stage: String,
         camera_yaw: f32,
         camera_pitch: f32,
     ) -> Result<String, JsValue> {
@@ -362,6 +420,7 @@ impl TerrainLab {
             .parse::<i64>()
             .map_err(|error| js_error(format!("invalid signed 64-bit seed {seed:?}: {error}")))?;
         let options = terrain_preview_options(&source, &view, &layer).map_err(js_error)?;
+        let content_stage = terrain_preview_content_stage(&content_stage).map_err(js_error)?;
         let camera = TerrainPreviewCamera::new(camera_yaw, camera_pitch).map_err(js_error)?;
         let viewport_detail = parse_viewport_detail(&detail).map_err(js_error)?;
         let plan = plan_terrain_viewport(TerrainViewportRequest {
@@ -373,7 +432,7 @@ impl TerrainLab {
             panel_height_css,
             detail: viewport_detail,
             max_visible_tiles_per_axis,
-            content_stage: mclone_worldgen::terrain_preview::TerrainPreviewContentStage::Base,
+            content_stage,
         })
         .map_err(js_error)?;
         let revision = u64::from(revision);
@@ -444,6 +503,7 @@ impl TerrainLab {
             source,
             view,
             layer,
+            content_stage.label(),
             self.width,
             self.height,
             camera.yaw_radians,
@@ -637,6 +697,259 @@ impl TerrainLab {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
+#[wasm_bindgen(js_name = terrainLabInspectPoint)]
+pub fn terrain_lab_inspect_point(
+    seed: String,
+    center_x: i32,
+    center_z: i32,
+    blocks_across: u32,
+    panel_width_css: u32,
+    panel_height_css: u32,
+    source: String,
+    view: String,
+    camera_yaw: f32,
+    camera_pitch: f32,
+    pointer_x_css: f32,
+    pointer_y_css: f32,
+) -> Result<String, JsValue> {
+    let seed = seed
+        .trim()
+        .parse::<i64>()
+        .map_err(|error| js_error(format!("invalid signed 64-bit seed {seed:?}: {error}")))?;
+    let options = terrain_preview_options(&source, &view, "terrain").map_err(js_error)?;
+    let camera = TerrainPreviewCamera::new(camera_yaw, camera_pitch).map_err(js_error)?;
+    let (panel_width, panel_height, local_x, local_y) = local_inspection_panel(
+        options.source,
+        panel_width_css.max(1),
+        panel_height_css.max(1),
+        pointer_x_css,
+        pointer_y_css,
+    );
+    let (world_x, world_z) = inspection_world_coordinate(
+        seed,
+        center_x,
+        center_z,
+        blocks_across,
+        panel_width,
+        panel_height,
+        options.view,
+        camera,
+        local_x,
+        local_y,
+    );
+    let sample = mclone_overworld_debug_sample_with_streams(
+        seed,
+        McloneOverworldSamplingTopology::Unbounded,
+        world_x,
+        world_z,
+    )
+    .map_err(js_error)?;
+    json(&point_receipt(sample))
+}
+
+fn local_inspection_panel(
+    source: TerrainPreviewSource,
+    width: u32,
+    height: u32,
+    pointer_x: f32,
+    pointer_y: f32,
+) -> (u32, u32, f32, f32) {
+    if source != TerrainPreviewSource::Split {
+        return (
+            width,
+            height,
+            pointer_x.clamp(0.0, width as f32),
+            pointer_y.clamp(0.0, height as f32),
+        );
+    }
+    if width <= height {
+        let panel_height = (height / 2).max(1);
+        (
+            width,
+            panel_height,
+            pointer_x.clamp(0.0, width as f32),
+            pointer_y.rem_euclid(panel_height as f32),
+        )
+    } else {
+        let panel_width = (width / 2).max(1);
+        (
+            panel_width,
+            height,
+            pointer_x.rem_euclid(panel_width as f32),
+            pointer_y.clamp(0.0, height as f32),
+        )
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn inspection_world_coordinate(
+    seed: i64,
+    center_x: i32,
+    center_z: i32,
+    blocks_across: u32,
+    panel_width: u32,
+    panel_height: u32,
+    view: TerrainPreviewView,
+    camera: TerrainPreviewCamera,
+    pointer_x: f32,
+    pointer_y: f32,
+) -> (i32, i32) {
+    let projection =
+        terrain_preview_projection(blocks_across, view, camera, panel_width, panel_height);
+    let normalized_x = pointer_x / panel_width.max(1) as f32;
+    let normalized_y = pointer_y / panel_height.max(1) as f32;
+    if view == TerrainPreviewView::Map {
+        let width = blocks_across as f32;
+        let height = width / projection.aspect.max(0.01);
+        return (
+            saturating_world_coordinate(center_x, (normalized_x * 2.0 - 1.0) * width * 0.5),
+            saturating_world_coordinate(center_z, (normalized_y * 2.0 - 1.0) * height * 0.5),
+        );
+    }
+
+    let eye = projection.eye_offset;
+    let forward = normalize3([-eye[0], projection.target_y - eye[1], -eye[2]]);
+    let right = normalize3(cross3(forward, projection.up));
+    let camera_up = normalize3(cross3(right, forward));
+    let half_height = (projection.fov_y_radians * 0.5).tan();
+    let ndc_x = normalized_x * 2.0 - 1.0;
+    let ndc_y = 1.0 - normalized_y * 2.0;
+    let direction = normalize3(add3(
+        forward,
+        add3(
+            scale3(right, ndc_x * half_height * projection.aspect),
+            scale3(camera_up, ndc_y * half_height),
+        ),
+    ));
+    let sampler =
+        McloneOverworldSampler::new_with_topology(seed, McloneOverworldSamplingTopology::Unbounded);
+    let ray_height = |distance: f32| {
+        let relative_x = eye[0] + direction[0] * distance;
+        let relative_y = eye[1] + direction[1] * distance;
+        let relative_z = eye[2] + direction[2] * distance;
+        let world_x = saturating_world_coordinate(center_x, relative_x);
+        let world_z = saturating_world_coordinate(center_z, relative_z);
+        let terrain = sampler.sample(world_x, world_z);
+        let display_y = if terrain.watercourse.is_water()
+            || terrain.surface_y < mclone_worldgen::levelgen::MCLONE_OVERWORLD_SEA_LEVEL
+        {
+            terrain.surface_y.max(terrain.watercourse.water_surface_y)
+        } else {
+            terrain.surface_y
+        };
+        (relative_y - display_y as f32, world_x, world_z)
+    };
+    let mut previous_distance = projection.z_near;
+    let mut previous = ray_height(previous_distance);
+    for step in 1..=128 {
+        let distance =
+            projection.z_near + (projection.z_far - projection.z_near) * step as f32 / 128.0;
+        let current = ray_height(distance);
+        if previous.0 >= 0.0 && current.0 <= 0.0 {
+            let mut low = previous_distance;
+            let mut high = distance;
+            for _ in 0..10 {
+                let middle = (low + high) * 0.5;
+                if ray_height(middle).0 >= 0.0 {
+                    low = middle;
+                } else {
+                    high = middle;
+                }
+            }
+            let hit = ray_height((low + high) * 0.5);
+            return (hit.1, hit.2);
+        }
+        previous_distance = distance;
+        previous = current;
+    }
+    let plane_distance = ((projection.target_y - eye[1]) / direction[1]).max(0.0);
+    (
+        saturating_world_coordinate(center_x, eye[0] + direction[0] * plane_distance),
+        saturating_world_coordinate(center_z, eye[2] + direction[2] * plane_distance),
+    )
+}
+
+fn point_receipt(sample: McloneOverworldDebugSample) -> TerrainLabPointReceipt {
+    let landform = sample.landform_sample;
+    let terrain = landform.terrain;
+    let watercourse = terrain.watercourse;
+    TerrainLabPointReceipt {
+        field_revision: terrain_preview_field_revision(),
+        world_x: sample.world_x,
+        world_z: sample.world_z,
+        chunk_x: sample.world_x.div_euclid(16),
+        chunk_z: sample.world_z.div_euclid(16),
+        quart_x: sample.quart_x,
+        quart_z: sample.quart_z,
+        landform: sample.landform.label(),
+        hydrology: sample.hydrology.label(),
+        biome_recipe: sample.biome.recipe.label(),
+        biome_reason: sample.biome.reason.label(),
+        surface_recipe: sample.surface.label(),
+        planned_stream_start: sample.planned_stream_start.map(|start| {
+            TerrainLabCanonicalChunkCoordinate {
+                chunk_x: start.x,
+                chunk_z: start.z,
+            }
+        }),
+        base_surface_y: terrain.base_surface_y,
+        surface_y: terrain.surface_y,
+        slope: landform.slope,
+        continentalness: terrain.continentalness,
+        relief: terrain.relief,
+        ruggedness: terrain.ruggedness,
+        ridges: terrain.ridges,
+        mountain_detail: terrain.mountain_detail,
+        temperature: terrain.climate.temperature,
+        moisture: terrain.climate.moisture,
+        river_signed_distance: watercourse.signed_distance,
+        river_distance: watercourse.distance,
+        river_half_width: watercourse.half_width,
+        channel_influence: watercourse.channel_influence,
+        major_channel_influence: watercourse.major_channel_influence,
+        bank_influence: watercourse.bank_influence,
+        wetland_influence: watercourse.wetland_influence,
+        wetland_pool_influence: watercourse.wetland_pool_influence,
+        submerged_outlet_influence: watercourse.submerged_outlet_influence,
+        planned_stream_influence: watercourse.planned_stream_influence,
+        water_surface_y: watercourse.water_surface_y,
+        bed_y: watercourse.bed_y,
+        flow_x: watercourse.flow_x,
+        flow_z: watercourse.flow_z,
+        grade: watercourse.grade,
+    }
+}
+
+fn saturating_world_coordinate(center: i32, offset: f32) -> i32 {
+    (center as f64 + f64::from(offset.round())).clamp(f64::from(i32::MIN), f64::from(i32::MAX))
+        as i32
+}
+
+fn add3(left: [f32; 3], right: [f32; 3]) -> [f32; 3] {
+    [left[0] + right[0], left[1] + right[1], left[2] + right[2]]
+}
+
+fn scale3(vector: [f32; 3], factor: f32) -> [f32; 3] {
+    [vector[0] * factor, vector[1] * factor, vector[2] * factor]
+}
+
+fn cross3(left: [f32; 3], right: [f32; 3]) -> [f32; 3] {
+    [
+        left[1] * right[2] - left[2] * right[1],
+        left[2] * right[0] - left[0] * right[2],
+        left[0] * right[1] - left[1] * right[0],
+    ]
+}
+
+fn normalize3(vector: [f32; 3]) -> [f32; 3] {
+    let length = (vector[0] * vector[0] + vector[1] * vector[1] + vector[2] * vector[2]).sqrt();
+    if length <= f32::EPSILON {
+        return [0.0, 1.0, 0.0];
+    }
+    scale3(vector, length.recip())
+}
+
 #[wasm_bindgen]
 pub fn mclone_terrain_lab_create(
     canvas: HtmlCanvasElement,
@@ -687,6 +1000,7 @@ fn render_report<'a>(
     source: &'static str,
     view: &'static str,
     layer: &'static str,
+    content_stage: &'static str,
     width: u32,
     height: u32,
     camera_yaw: f32,
@@ -745,6 +1059,9 @@ fn render_report<'a>(
         source,
         view,
         layer,
+        content_stage,
+        structured_hydrology_available: stats.effective_spacing <= 4
+            && matches!(content_stage, "structured" | "surface" | "cover"),
         topology: McloneOverworldSamplingTopology::Unbounded.label(),
         width,
         height,
@@ -804,6 +1121,20 @@ fn comparison_report(
         mean_absolute_moisture_error: completed.comparison.mean_absolute_moisture_error,
         mean_absolute_ruggedness_error: completed.comparison.mean_absolute_ruggedness_error,
         macro_surface_material_agreement: completed.comparison.macro_surface_material_agreement,
+        channel_presence_agreement: completed.comparison.channel_presence_agreement,
+        mean_absolute_river_signed_distance_error: completed
+            .comparison
+            .mean_absolute_river_signed_distance_error,
+        mean_absolute_channel_influence_error: completed
+            .comparison
+            .mean_absolute_channel_influence_error,
+        mean_absolute_bank_influence_error: completed.comparison.mean_absolute_bank_influence_error,
+        mean_absolute_wetland_influence_error: completed
+            .comparison
+            .mean_absolute_wetland_influence_error,
+        visible_surface_material_agreement: completed.comparison.visible_surface_material_agreement,
+        biome_recipe_agreement: completed.comparison.biome_recipe_agreement,
+        surface_recipe_agreement: completed.comparison.surface_recipe_agreement,
         stale_result_count,
     }
 }

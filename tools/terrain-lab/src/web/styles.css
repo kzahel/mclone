@@ -17,6 +17,102 @@
   --warning: #f0bd66;
 }
 
+.pointReceipt {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--line));
+  background: color-mix(in srgb, var(--panel) 82%, var(--accent) 4%);
+}
+
+.pointReceipt.empty {
+  color: var(--muted);
+}
+
+.pointReceipt.empty strong,
+.pointReceipt.empty span {
+  display: block;
+}
+
+.pointReceipt.empty span {
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.pointReceiptHeading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pointReceiptHeading strong {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.pointReceiptHeading span {
+  color: var(--muted);
+  font-size: 10px;
+}
+
+.pointReceiptGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px 10px;
+  margin: 0;
+}
+
+.pointReceiptGrid div {
+  min-width: 0;
+}
+
+.pointReceiptGrid dt {
+  color: var(--muted);
+  font-size: 9px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.pointReceiptGrid dd {
+  margin: 2px 0 0;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+}
+
+.inspectionMarker {
+  position: absolute;
+  z-index: 5;
+  width: 17px;
+  height: 17px;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  box-shadow: 0 0 0 2px rgba(5, 13, 16, 0.72);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.inspectionMarker::before,
+.inspectionMarker::after {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  background: #fff;
+  content: "";
+  transform: translate(-50%, -50%);
+}
+
+.inspectionMarker::before {
+  width: 23px;
+  height: 1px;
+}
+
+.inspectionMarker::after {
+  width: 1px;
+  height: 23px;
+}
+
 * {
   box-sizing: border-box;
 }

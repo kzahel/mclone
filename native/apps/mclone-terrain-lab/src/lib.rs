@@ -4,6 +4,7 @@ use mclone_terrain_view::{
     CanonicalTerrainStage, TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource,
     TerrainPreviewView,
 };
+use mclone_worldgen::terrain_preview::TerrainPreviewContentStage;
 
 #[cfg(target_arch = "wasm32")]
 mod canonical_web;
@@ -46,9 +47,15 @@ pub fn terrain_preview_options(
             "error" | "difference" => TerrainPreviewLayer::Error,
             "continentalness" | "continent" => TerrainPreviewLayer::Continentalness,
             "climate" => TerrainPreviewLayer::Climate,
+            "rivers" | "river" => TerrainPreviewLayer::Rivers,
+            "wetlands" | "wetland" => TerrainPreviewLayer::Wetlands,
+            "biomes" | "biome" => TerrainPreviewLayer::Biomes,
+            "surface" | "surface-recipe" => TerrainPreviewLayer::SurfaceRecipe,
+            "streams" | "planned-streams" => TerrainPreviewLayer::PlannedStreams,
             other => {
                 return Err(format!(
-                    "unsupported terrain preview layer {other:?}; expected terrain, height, error, continentalness, or climate"
+                    "unsupported terrain preview layer {other:?}; expected terrain, height, error, \
+                     continentalness, climate, rivers, wetlands, biomes, surface, or streams"
                 ));
             }
         },
@@ -73,8 +80,27 @@ pub fn terrain_preview_option_labels(
         TerrainPreviewLayer::Error => "error",
         TerrainPreviewLayer::Continentalness => "continentalness",
         TerrainPreviewLayer::Climate => "climate",
+        TerrainPreviewLayer::Rivers => "rivers",
+        TerrainPreviewLayer::Wetlands => "wetlands",
+        TerrainPreviewLayer::Biomes => "biomes",
+        TerrainPreviewLayer::SurfaceRecipe => "surface",
+        TerrainPreviewLayer::PlannedStreams => "streams",
     };
     (source, view, layer)
+}
+
+pub fn terrain_preview_content_stage(value: &str) -> Result<TerrainPreviewContentStage, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "base" => Ok(TerrainPreviewContentStage::Base),
+        "hydrology" | "water" => Ok(TerrainPreviewContentStage::Hydrology),
+        "structured" | "streams" => Ok(TerrainPreviewContentStage::Structured),
+        "surface" => Ok(TerrainPreviewContentStage::Surface),
+        "cover" | "vegetation" => Ok(TerrainPreviewContentStage::Cover),
+        other => Err(format!(
+            "unsupported LOD content stage {other:?}; expected base, hydrology, structured, \
+             surface, or cover"
+        )),
+    }
 }
 
 pub fn canonical_terrain_stage(value: &str) -> Result<CanonicalTerrainStage, String> {
@@ -123,7 +149,12 @@ mod tests {
     fn rejects_unknown_browser_options() {
         assert!(terrain_preview_options("both-ish", "3d", "terrain").is_err());
         assert!(terrain_preview_options("gpu", "perspective", "terrain").is_err());
-        assert!(terrain_preview_options("gpu", "3d", "biomes").is_err());
+        assert!(terrain_preview_options("gpu", "3d", "geology").is_err());
+        assert!(terrain_preview_content_stage("lighting").is_err());
+        assert_eq!(
+            terrain_preview_content_stage("streams").unwrap(),
+            TerrainPreviewContentStage::Structured
+        );
     }
 
     #[test]

@@ -34,6 +34,7 @@ test("round-trips complete URL state", () => {
     canonicalRadius: 1,
     waterVisible: false,
     vegetationVisible: true,
+    contentStage: "cover" as const,
     view: "map" as const,
     layer: "continentalness" as const,
   };
@@ -175,6 +176,7 @@ test("orbits independently from URL-addressed terrain state", () => {
     canonicalRadius: 2,
     waterVisible: true,
     vegetationVisible: true,
+    contentStage: "hydrology",
     view: "3d",
     layer: "terrain",
   });

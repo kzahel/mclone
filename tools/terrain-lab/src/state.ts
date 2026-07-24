@@ -9,7 +9,23 @@ export type TerrainLabSource = "gpu" | "reference" | "split";
 export type TerrainLabPane = "canonical" | "cpu" | "gpu";
 export type CanonicalTerrainStage = "surface" | "final";
 export type TerrainLabView = "map" | "3d";
-export type TerrainLabLayer = "terrain" | "height" | "error" | "continentalness" | "climate";
+export type TerrainLabContentStage =
+  | "base"
+  | "hydrology"
+  | "structured"
+  | "surface"
+  | "cover";
+export type TerrainLabLayer =
+  | "terrain"
+  | "height"
+  | "error"
+  | "continentalness"
+  | "climate"
+  | "rivers"
+  | "wetlands"
+  | "biomes"
+  | "surface"
+  | "streams";
 
 export interface TerrainLabState {
   seed: string;
@@ -23,6 +39,7 @@ export interface TerrainLabState {
   canonicalRadius: number;
   waterVisible: boolean;
   vegetationVisible: boolean;
+  contentStage: TerrainLabContentStage;
   view: TerrainLabView;
   layer: TerrainLabLayer;
 }
@@ -44,6 +61,7 @@ export const DEFAULT_TERRAIN_LAB_STATE: TerrainLabState = {
   canonicalRadius: 2,
   waterVisible: true,
   vegetationVisible: true,
+  contentStage: "hydrology",
   view: "3d",
   layer: "terrain",
 };
@@ -66,12 +84,24 @@ const SOURCES = new Set<TerrainLabSource>(["gpu", "reference", "split"]);
 const PANES = new Set<TerrainLabPane>(["canonical", "cpu", "gpu"]);
 const CANONICAL_STAGES = new Set<CanonicalTerrainStage>(["surface", "final"]);
 const VIEWS = new Set<TerrainLabView>(["map", "3d"]);
+const CONTENT_STAGES = new Set<TerrainLabContentStage>([
+  "base",
+  "hydrology",
+  "structured",
+  "surface",
+  "cover",
+]);
 const LAYERS = new Set<TerrainLabLayer>([
   "terrain",
   "height",
   "error",
   "continentalness",
   "climate",
+  "rivers",
+  "wetlands",
+  "biomes",
+  "surface",
+  "streams",
 ]);
 
 export function parseTerrainLabState(
@@ -103,6 +133,8 @@ export function parseTerrainLabState(
     waterVisible: validBoolean(params.get("water")) ?? fallback.waterVisible,
     vegetationVisible:
       validBoolean(params.get("vegetation")) ?? fallback.vegetationVisible,
+    contentStage:
+      validMember(params.get("stage"), CONTENT_STAGES) ?? fallback.contentStage,
     view: validMember(params.get("view"), VIEWS) ?? fallback.view,
     layer: validMember(params.get("layer"), LAYERS) ?? fallback.layer,
   };
@@ -121,6 +153,7 @@ export function terrainLabSearch(state: TerrainLabState): string {
   params.set("radius", String(state.canonicalRadius));
   params.set("water", state.waterVisible ? "1" : "0");
   params.set("vegetation", state.vegetationVisible ? "1" : "0");
+  params.set("stage", state.contentStage);
   params.set("view", state.view);
   params.set("layer", state.layer);
   return `?${params.toString()}`;

@@ -14,6 +14,7 @@ import {
   validSeed,
   type CanonicalTerrainStage,
   type TerrainLabDetail,
+  type TerrainLabContentStage,
   type TerrainLabLayer,
   type TerrainLabCamera,
   type TerrainLabPane,
@@ -28,6 +29,7 @@ import {
   TerrainCanvas,
   type TerrainLabAdapterReport,
   type TerrainLabComparisonReport,
+  type TerrainLabPointReceipt,
   type TerrainLabRenderReport,
 } from "./TerrainCanvas";
 
@@ -36,16 +38,21 @@ type BenchmarkProfile = "interactive" | "stress";
 
 const PANE_OPTIONS: Array<{ value: TerrainLabPane; label: string; note: string }> = [
   { value: "canonical", label: "Real terrain", note: "Exact final chunks with textures" },
-  { value: "cpu", label: "CPU LOD", note: "Production CPU surface evaluator" },
-  { value: "gpu", label: "GPU LOD", note: "GPU-resident production base fields" },
+  { value: "cpu", label: "CPU LOD", note: "Production CPU preview evaluator" },
+  { value: "gpu", label: "GPU LOD", note: "GPU-resident production preview evaluator" },
 ];
 
 const LAYER_OPTIONS: Array<{ value: TerrainLabLayer; label: string }> = [
   { value: "terrain", label: "Terrain" },
   { value: "height", label: "Height" },
-  { value: "error", label: "Base error" },
+  { value: "error", label: "CPU/GPU height error" },
   { value: "continentalness", label: "Continents" },
   { value: "climate", label: "Climate" },
+  { value: "rivers", label: "River channels & banks" },
+  { value: "wetlands", label: "Wetlands & pools" },
+  { value: "biomes", label: "Biome recipe" },
+  { value: "surface", label: "Surface recipe" },
+  { value: "streams", label: "Planned streams" },
 ];
 
 export function App(): React.JSX.Element {
@@ -56,6 +63,7 @@ export function App(): React.JSX.Element {
   const [adapter, setAdapter] = useState<TerrainLabAdapterReport>();
   const [renderReport, setRenderReport] = useState<TerrainLabRenderReport>();
   const [comparison, setComparison] = useState<TerrainLabComparisonReport>();
+  const [pointReceipt, setPointReceipt] = useState<TerrainLabPointReceipt>();
   const [error, setError] = useState<string>();
   const [camera, setCamera] = useState<TerrainLabCamera>(DEFAULT_TERRAIN_LAB_CAMERA);
   const [cacheEnabled, setCacheEnabled] = useState(true);
@@ -130,6 +138,10 @@ export function App(): React.JSX.Element {
       data-base-p95-error={comparison?.p95AbsoluteBaseSurfaceError ?? ""}
       data-ocean-agreement={comparison?.oceanWaterPresenceAgreement ?? ""}
       data-material-agreement={comparison?.macroSurfaceMaterialAgreement ?? ""}
+      data-channel-agreement={comparison?.channelPresenceAgreement ?? ""}
+      data-stage={state.contentStage}
+      data-inspected-x={pointReceipt?.worldX ?? ""}
+      data-inspected-z={pointReceipt?.worldZ ?? ""}
       data-continentalness-error={comparison?.meanAbsoluteContinentalnessError ?? ""}
       data-compare-layout={compareLayout}
       data-vertex-count={renderReport?.vertexCount ?? 0}
@@ -283,6 +295,7 @@ export function App(): React.JSX.Element {
                   onAdapter={setAdapter}
                   onRender={setRenderReport}
                   onComparison={setComparison}
+                  onInspect={setPointReceipt}
                   onError={setError}
                   onStatus={setStatus}
                 />
@@ -408,20 +421,47 @@ export function App(): React.JSX.Element {
               </>
             ) : null}
             {proceduralVisible ? (
-              <label className="fieldLabel">
-                <span>LOD diagnostic layer</span>
-                <select
-                  aria-label="Diagnostic layer"
-                  value={state.layer}
-                  onChange={(event) =>
-                    patchState({ layer: event.target.value as TerrainLabLayer })
-                  }
-                >
-                  {LAYER_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-              </label>
+              <>
+                <label className="fieldLabel">
+                  <span>LOD content checkpoint</span>
+                  <select
+                    aria-label="LOD content checkpoint"
+                    value={state.contentStage}
+                    onChange={(event) =>
+                      patchState({
+                        contentStage: event.target.value as TerrainLabContentStage,
+                      })
+                    }
+                  >
+                    <option value="base">Base · land and ocean fields</option>
+                    <option value="hydrology">Hydrology · rivers and wetlands</option>
+                    <option value="structured">
+                      Structured · planned streams near 1:1–1:4
+                    </option>
+                    <option value="surface">Surface · biome materials</option>
+                    <option value="cover">Cover · vegetation summary</option>
+                  </select>
+                </label>
+                <p className="controlNote">
+                  Checkpoints are ordered preview content, not gameplay switches.
+                  Planned streams are reconstructed only through 1:4; coarser
+                  views say unavailable instead of inventing them.
+                </p>
+                <label className="fieldLabel">
+                  <span>LOD diagnostic layer</span>
+                  <select
+                    aria-label="Diagnostic layer"
+                    value={state.layer}
+                    onChange={(event) =>
+                      patchState({ layer: event.target.value as TerrainLabLayer })
+                    }
+                  >
+                    {LAYER_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+              </>
             ) : null}
             <button
               type="button"
@@ -536,6 +576,7 @@ export function App(): React.JSX.Element {
                     panes: ["cpu", "gpu"],
                     view: "map",
                     layer: "terrain",
+                    contentStage: "hydrology",
                   }));
                 }}
               >
@@ -549,6 +590,7 @@ export function App(): React.JSX.Element {
           </ControlSection>
 
           <ControlSection number="05" title="Evidence" subdued>
+            <PointReceipt receipt={pointReceipt} />
             <Diagnostics
               adapter={adapter}
               report={renderReport}
@@ -558,6 +600,64 @@ export function App(): React.JSX.Element {
           </ControlSection>
         </aside>
       </main>
+    </div>
+  );
+}
+
+function PointReceipt({
+  receipt,
+}: {
+  receipt: TerrainLabPointReceipt | undefined;
+}): React.JSX.Element {
+  if (!receipt) {
+    return (
+      <div className="pointReceipt empty" data-testid="point-receipt">
+        <strong>Tap terrain to inspect it</strong>
+        <span>
+          The receipt is rebuilt from the production CPU generator, including
+          nearby planned-stream records.
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="pointReceipt" data-testid="point-receipt">
+      <div className="pointReceiptHeading">
+        <strong>{receipt.worldX}, {receipt.worldZ}</strong>
+        <span>chunk {receipt.chunkX}, {receipt.chunkZ}</span>
+      </div>
+      <dl className="pointReceiptGrid">
+        <div><dt>Landform</dt><dd>{receipt.landform}</dd></div>
+        <div><dt>Hydrology</dt><dd>{receipt.hydrology}</dd></div>
+        <div><dt>Biome</dt><dd>{receipt.biomeRecipe}</dd></div>
+        <div><dt>Why</dt><dd>{receipt.biomeReason}</dd></div>
+        <div><dt>Surface</dt><dd>{receipt.surfaceRecipe}</dd></div>
+        <div><dt>Height</dt><dd>{receipt.baseSurfaceY} → {receipt.surfaceY}</dd></div>
+        <div>
+          <dt>River contour</dt>
+          <dd>
+            {receipt.riverSignedDistance.toFixed(2)} / ±
+            {receipt.riverHalfWidth.toFixed(2)}
+          </dd>
+        </div>
+        <div><dt>Channel</dt><dd>{receipt.channelInfluence.toFixed(3)}</dd></div>
+        <div><dt>Bank</dt><dd>{receipt.bankInfluence.toFixed(3)}</dd></div>
+        <div><dt>Wetland</dt><dd>{receipt.wetlandInfluence.toFixed(3)}</dd></div>
+        <div>
+          <dt>Planned stream</dt>
+          <dd>
+            {receipt.plannedStreamStart
+              ? `${receipt.plannedStreamStart.chunkX}, ${
+                  receipt.plannedStreamStart.chunkZ
+                } · ${receipt.plannedStreamInfluence.toFixed(3)}`
+              : "none"}
+          </dd>
+        </div>
+        <div>
+          <dt>Climate</dt>
+          <dd>{receipt.temperature.toFixed(3)} / {receipt.moisture.toFixed(3)}</dd>
+        </div>
+      </dl>
     </div>
   );
 }
@@ -623,8 +723,9 @@ function SourceFootnote({ panes }: { panes: TerrainLabPane[] }): React.JSX.Eleme
       Real terrain is exact generated blocks with the production first-party
       atlas and preview lighting. Generated fallback tiles identify materials
       that do not have curated textures yet. LOD panes remain
-      presentation-only; their final rivers, wetlands, and planned-stream
-      overlay is still absent from the GPU path.
+      presentation-only. CPU and GPU LOD share natural rivers and wetlands;
+      planned streams are reconstructed from production route records at
+      near-detail checkpoints.
     </>
   );
 }
@@ -901,6 +1002,34 @@ function Diagnostics({
         />
         <Metric label="Final mean Δ" value={formatBlocks(comparison?.meanAbsoluteSurfaceError)} />
         <Metric label="Final P95 Δ" value={formatBlocks(comparison?.p95AbsoluteSurfaceError)} />
+        <Metric
+          label="River agreement"
+          value={comparison
+            ? `${(comparison.channelPresenceAgreement * 100).toFixed(1)}%`
+            : "pending"}
+        />
+        <Metric
+          label="River contour mean Δ"
+          value={formatBlocks(comparison?.meanAbsoluteRiverSignedDistanceError)}
+        />
+        <Metric
+          label="Channel influence Δ"
+          value={formatDecimal(comparison?.meanAbsoluteChannelInfluenceError)}
+        />
+        <Metric
+          label="Bank influence Δ"
+          value={formatDecimal(comparison?.meanAbsoluteBankInfluenceError)}
+        />
+        <Metric
+          label="Wetland influence Δ"
+          value={formatDecimal(comparison?.meanAbsoluteWetlandInfluenceError)}
+        />
+        <Metric
+          label="Visible material"
+          value={comparison
+            ? `${(comparison.visibleSurfaceMaterialAgreement * 100).toFixed(1)}%`
+            : "pending"}
+        />
         <Metric label="GPU resident" value={memory} />
         <Metric
           label="CPU / GPU queue"
@@ -914,6 +1043,16 @@ function Diagnostics({
       <dl className="detailList">
         <div><dt>Adapter</dt><dd data-testid="adapter-name">{adapterLabel}</dd></div>
         <div><dt>Backend</dt><dd>{adapter?.backend ?? "—"}</dd></div>
+        <div>
+          <dt>Content</dt>
+          <dd>
+            {report
+              ? `${report.contentStage} · planned streams ${
+                  report.structuredHydrologyAvailable ? "available" : "unavailable at this LOD"
+                }`
+              : "—"}
+          </dd>
+        </div>
         <div>
           <dt>Detail</dt>
           <dd>
@@ -1007,6 +1146,10 @@ function formatSampleRate(
 
 function formatBlocks(value: number | undefined): string {
   return value === undefined ? "pending" : `${value.toFixed(1)} blocks`;
+}
+
+function formatDecimal(value: number | undefined): string {
+  return value === undefined ? "pending" : value.toFixed(5);
 }
 
 function formatBytes(bytes: number): string {

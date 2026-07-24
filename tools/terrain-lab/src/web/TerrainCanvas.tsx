@@ -6,6 +6,7 @@ import type {
 import type { TerrainLab } from "../../generated/pkg/mclone_terrain_lab";
 import initTerrainLab, {
   mclone_terrain_lab_create,
+  terrainLabInspectPoint,
 } from "../../generated/pkg/mclone_terrain_lab";
 
 import {
@@ -75,6 +76,8 @@ export interface TerrainLabRenderReport {
   source: string;
   view: string;
   layer: string;
+  contentStage: string;
+  structuredHydrologyAvailable: boolean;
   topology: string;
   width: number;
   height: number;
@@ -127,7 +130,56 @@ export interface TerrainLabComparisonReport {
   meanAbsoluteMoistureError: number;
   meanAbsoluteRuggednessError: number;
   macroSurfaceMaterialAgreement: number;
+  channelPresenceAgreement: number;
+  meanAbsoluteRiverSignedDistanceError: number;
+  meanAbsoluteChannelInfluenceError: number;
+  meanAbsoluteBankInfluenceError: number;
+  meanAbsoluteWetlandInfluenceError: number;
+  visibleSurfaceMaterialAgreement: number;
+  biomeRecipeAgreement: number;
+  surfaceRecipeAgreement: number;
   staleResultCount: number;
+}
+
+export interface TerrainLabPointReceipt {
+  fieldRevision: string;
+  worldX: number;
+  worldZ: number;
+  chunkX: number;
+  chunkZ: number;
+  quartX: number;
+  quartZ: number;
+  landform: string;
+  hydrology: string;
+  biomeRecipe: string;
+  biomeReason: string;
+  surfaceRecipe: string;
+  plannedStreamStart: { chunkX: number; chunkZ: number } | null;
+  baseSurfaceY: number;
+  surfaceY: number;
+  slope: number;
+  continentalness: number;
+  relief: number;
+  ruggedness: number;
+  ridges: number;
+  mountainDetail: number;
+  temperature: number;
+  moisture: number;
+  riverSignedDistance: number;
+  riverDistance: number;
+  riverHalfWidth: number;
+  channelInfluence: number;
+  majorChannelInfluence: number;
+  bankInfluence: number;
+  wetlandInfluence: number;
+  wetlandPoolInfluence: number;
+  submergedOutletInfluence: number;
+  plannedStreamInfluence: number;
+  waterSurfaceY: number;
+  bedY: number;
+  flowX: number;
+  flowZ: number;
+  grade: number;
 }
 
 interface TerrainCanvasProps {
@@ -141,6 +193,7 @@ interface TerrainCanvasProps {
   onAdapter: (report: TerrainLabAdapterReport) => void;
   onRender: (report: TerrainLabRenderReport) => void;
   onComparison: (report: TerrainLabComparisonReport | undefined) => void;
+  onInspect: (receipt: TerrainLabPointReceipt) => void;
   onError: (error: string | undefined) => void;
   onStatus: (status: "loading" | "ready" | "rendering" | "error") => void;
 }
@@ -152,6 +205,7 @@ interface PointerStart {
   camera: TerrainLabCamera;
   mode: "orbit" | "pan";
   state: TerrainLabState;
+  button: number;
 }
 
 interface ActivePointer {
@@ -178,6 +232,7 @@ export function TerrainCanvas({
   onAdapter,
   onRender,
   onComparison,
+  onInspect,
   onError,
   onStatus,
 }: TerrainCanvasProps): React.JSX.Element {
@@ -196,6 +251,20 @@ export function TerrainCanvas({
   const [canvasSize, setCanvasSize] = useState({ width: 1280, height: 720 });
   const [initialized, setInitialized] = useState(false);
   const [latestReport, setLatestReport] = useState<TerrainLabRenderReport>();
+  const [inspectionMarker, setInspectionMarker] = useState<{ x: number; y: number }>();
+
+  useEffect(() => {
+    setInspectionMarker(undefined);
+  }, [
+    camera.pitch,
+    camera.yaw,
+    state.blocksAcross,
+    state.centerX,
+    state.centerZ,
+    state.seed,
+    state.source,
+    state.view,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -310,6 +379,7 @@ export function TerrainCanvas({
               state.source,
               state.view,
               state.layer,
+              state.contentStage,
               camera.yaw,
               camera.pitch,
             ),
@@ -401,6 +471,7 @@ export function TerrainCanvas({
       camera,
       mode: orbit ? "orbit" : "pan",
       state,
+      button: event.button,
     };
   };
 
@@ -484,6 +555,38 @@ export function TerrainCanvas({
   };
 
   const finishInteraction = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const start = pointerStartRef.current;
+    const wasTap = start?.pointerId === event.pointerId
+      && start.button === 0
+      && Math.hypot(event.clientX - start.clientX, event.clientY - start.clientY) < 6
+      && !pinchStartRef.current;
+    if (wasTap) {
+      const stage = stageRef.current;
+      if (stage) {
+        const rect = stage.getBoundingClientRect();
+        try {
+          const x = event.clientX - rect.left;
+          const y = event.clientY - rect.top;
+          onInspect(parseJson<TerrainLabPointReceipt>(terrainLabInspectPoint(
+              state.seed,
+              state.centerX,
+              state.centerZ,
+              state.blocksAcross,
+              Math.max(1, Math.round(rect.width)),
+              Math.max(1, Math.round(rect.height)),
+              state.source,
+              state.view,
+              camera.yaw,
+              camera.pitch,
+              x,
+              y,
+            )));
+          setInspectionMarker({ x, y });
+        } catch (error: unknown) {
+          onError(errorMessage(error));
+        }
+      }
+    }
     activePointersRef.current.delete(event.pointerId);
     if (activePointersRef.current.size < 2) {
       pinchStartRef.current = undefined;
@@ -565,6 +668,13 @@ export function TerrainCanvas({
         height={canvasSize.height}
         aria-label="Live GPU terrain preview"
       />
+      {inspectionMarker ? (
+        <span
+          className="inspectionMarker"
+          aria-hidden="true"
+          style={{ left: inspectionMarker.x, top: inspectionMarker.y }}
+        />
+      ) : null}
       <div className="canvasTopline" aria-hidden="true">
         <span className="canvasBadge primary">
           {latestReport?.targetReady ? "target detail" : "refining"}
@@ -579,13 +689,13 @@ export function TerrainCanvas({
       {state.source === "split" ? (
         <div className="splitLabels" aria-hidden="true">
           <span>
-            CPU production base · {panelReadiness(
+            CPU production {state.contentStage} · {panelReadiness(
               latestReport?.cpuPublishedSpacing,
               latestReport?.cpuTargetReady,
             )}
           </span>
           <span>
-            GPU production base · {panelReadiness(
+            GPU production {state.contentStage} · {panelReadiness(
               latestReport?.gpuPublishedSpacing,
               latestReport?.gpuTargetReady,
             )}
@@ -595,11 +705,13 @@ export function TerrainCanvas({
       <div className="canvasHint" aria-hidden="true">
         <span className="desktopHint">
           {state.view === "3d"
-            ? "left drag orbit · right, shift + left, or middle drag pan · arrows pan · wheel zoom"
-            : "left or right drag pan · arrows pan · wheel zoom at pointer"}
+            ? "tap inspect · left drag orbit · right/shift/middle drag pan · arrows pan · wheel zoom"
+            : "tap inspect · drag pan · arrows pan · wheel zoom at pointer"}
         </span>
         <span className="mobileHint">
-          {state.view === "3d" ? "drag orbit · pinch zoom" : "drag pan · pinch zoom"}
+          {state.view === "3d"
+            ? "tap inspect · drag orbit · pinch zoom"
+            : "tap inspect · drag pan · pinch zoom"}
         </span>
       </div>
     </div>

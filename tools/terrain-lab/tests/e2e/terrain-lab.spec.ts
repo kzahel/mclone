@@ -14,7 +14,7 @@ test("generates terrain, round-trips controls, and completes comparison", async 
   await page.goto(
     "/terrain/?seed=-98765&x=-304&z=336&blocks=512&detail=auto"
       + "&panes=canonical%2Ccpu%2Cgpu&canonical=final&radius=1"
-      + "&water=1&vegetation=1&view=3d&layer=terrain",
+      + "&water=1&vegetation=1&stage=hydrology&view=3d&layer=terrain",
   );
   await waitForCurrentComparison(page);
   await waitForCanonical(page, 9);
@@ -41,6 +41,7 @@ test("generates terrain, round-trips controls, and completes comparison", async 
   expect(Number(await shell.getAttribute("data-base-mean-error"))).toBeLessThanOrEqual(0.01);
   expect(Number(await shell.getAttribute("data-base-p95-error"))).toBeLessThanOrEqual(0.01);
   expect(Number(await shell.getAttribute("data-ocean-agreement"))).toBeGreaterThanOrEqual(0.999);
+  expect(Number(await shell.getAttribute("data-channel-agreement"))).toBeGreaterThanOrEqual(0.999);
   expect(Number(await shell.getAttribute("data-continentalness-error"))).toBeLessThanOrEqual(0.001);
   const canvas = page.locator("canvas[aria-label='Live GPU terrain preview']");
   const canonicalCanvas = page.locator(
@@ -164,6 +165,10 @@ test("generates terrain, round-trips controls, and completes comparison", async 
     ),
   );
   await page.mouse.move(pointerX, pointerY);
+  await page.mouse.click(pointerX, pointerY);
+  await expect(shell).not.toHaveAttribute("data-inspected-x", "");
+  await expect(page.getByTestId("point-receipt")).not.toContainText("Tap terrain");
+  await expect(page.locator(".inspectionMarker")).toBeVisible();
   await page.mouse.wheel(0, 120);
   await expect.poll(() => new URL(page.url()).searchParams.get("blocks"))
     .not.toBe(beforeWheelBlocks);

@@ -6,8 +6,10 @@ visible panes are independently configurable but coordinate-locked:
 - `Real terrain` compiles exact first-party chunks through the production
   generator and renders their blocks, biomes, fluids, and final features with
   the production first-party texture atlas and cheap preview lighting.
-- `CPU LOD` samples the production large-scale surface fields.
-- `GPU LOD` evaluates the aligned, explicitly approximate WebGPU fields.
+- `CPU LOD` samples the production preview fields and near-detail structured
+  records.
+- `GPU LOD` evaluates the aligned natural fields in WebGPU and consumes the
+  same sparse structured records.
 
 The exact compiler runs in a replaceable Web Worker and publishes chunks
 center-first as they finish. The LOD panes use 64 × 64 cell / 65 × 65 sample
@@ -28,7 +30,9 @@ The URL owns the review state:
 - `source`: legacy/procedural compatibility value (`reference`, `gpu`, or
   `split`); new links should use `panes`
 - `view`: `3d` or `map`
-- `layer`: `terrain`, `height`, `error`, `continentalness`, or `climate`
+- `stage`: `base`, `hydrology`, `structured`, `surface`, or `cover`
+- `layer`: `terrain`, `height`, `error`, `continentalness`, `climate`,
+  `rivers`, `wetlands`, `biomes`, `surface`, or `streams`
 
 Legacy `spacing=` links still load with their original `spacing × 64`
 footprint and fixed detail. New links keep coverage and resolution independent.
@@ -37,10 +41,13 @@ Wheel and pinch zoom the continuous viewport. The stage captures wheel events
 through a non-passive native listener, so a Mac trackpad or mouse wheel zooms
 terrain without scrolling the document. Map zoom is anchored under the
 pointer; map drag follows grab semantics on both axes; 3D left drag orbits;
-and Shift+left or middle drag pans in 3D. `Auto` selects approximately two CSS
-pixels per sample cell. A manual detail request remains visible even when the
-bounded eight-tile-per-axis interactive budget must raise its effective
-spacing; zooming in eventually admits every manual level, including `1:1`.
+and right, Shift+left, or middle drag pans in 3D. Arrow keys pan both views.
+A click or tap without a drag selects a production point receipt using analytic
+map picking or the shared 3D projection and a bounded heightfield ray.
+`Auto` selects approximately two CSS pixels per sample cell. A manual detail
+request remains visible even when the bounded eight-tile-per-axis interactive
+budget must raise its effective spacing; zooming in eventually admits every
+manual level, including `1:1`.
 
 The exact scheduler terminates and replaces its Worker when generation
 identity changes, so stale chunks cannot land after a seed, center, checkpoint,
@@ -56,7 +63,11 @@ CPU reference wall time and WGPU encode/submit wall time are not GPU execution
 time. Portable timestamp queries are not enabled in this Lab slice, so the UI
 says `GPU execution: unavailable` rather than inferring a GPU/CPU speed ratio.
 The GPU evaluator remains a preview experiment, not authoritative world
-generation.
+generation. Content checkpoints are dependency-ordered preview compiler
+stages, not gameplay generator flags. Natural rivers, banks, wetlands, pools,
+and submerged outlets are pure CPU/GPU fields. Planned streams remain bounded
+CPU route records reconstructed only through `1:4`, then merged into either
+LOD lane. Coarser structured views explicitly report them unavailable.
 
 When both LOD panes are visible, wide canvases place them side by side and
 portrait canvases stack two full-width views. The CPU and GPU panels publish
@@ -70,7 +81,7 @@ textures.
 The exact and LOD caches are independent. `Exact cache on` retains generated
 chunks by seed, checkpoint, and chunk coordinate; `Exact cache off` compiles
 the current patch cold. `Cache on` uses a session-local 192-tile LRU keyed by
-seed, aligned origin, and sample spacing. It retains CPU samples, uploaded
+seed, aligned origin, sample spacing, and content stage. It retains CPU samples, uploaded
 reference data, GPU-computed buffers, and completed validation readbacks while
 panning and zooming. Camera, layer, and pane visibility are not LOD cache
 identity. `Cache off` retains only the active request and disables speculative
@@ -86,9 +97,12 @@ boundaries; neither is presented as pure GPU execution time.
 The LOD preview surface uses upward-facing counter-clockwise triangles,
 rejects back faces, and projects the oblique camera from above the height
 field. CPU and GPU LOD share the same per-tile sample lattices and viewport
-plan. Final rivers, wetlands, and planned streams remain absent from the GPU
-LOD path; exact final chunks include those production features wherever the
-generator places them.
+plan. The sample payload retains natural river signed distance and width, so
+the renderer preserves a bounded river contour at levels coarser than the
+physical channel. Comparison reports both base and final height/water/material
+agreement plus channel, bank, wetland, biome, and surface agreement. Full
+provenance remains point-local in the inspector rather than bloating every
+tile.
 
 ## Develop
 
