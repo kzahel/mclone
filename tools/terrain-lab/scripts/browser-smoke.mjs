@@ -182,12 +182,20 @@ try {
       orbitStartY + 50,
     );
     await page.mouse.up({ button: "right" });
+    await page.waitForFunction(
+      (previous) => window.location.href !== previous,
+      beforePanUrl,
+    );
     await waitForRevision(shell, resetRevision);
     navigationRevision = Number(await shell.getAttribute("data-render-revision"));
-    if (page.url() === beforePanUrl
-        || Number(await shell.getAttribute("data-camera-yaw")) !== beforePanYaw
-        || Number(await shell.getAttribute("data-camera-pitch")) !== beforePanPitch) {
-      throw new Error("Right-button 3D pan did not move terrain independently from orbit");
+    const afterPanYaw = Number(await shell.getAttribute("data-camera-yaw"));
+    const afterPanPitch = Number(await shell.getAttribute("data-camera-pitch"));
+    if (Math.abs(afterPanYaw - beforePanYaw) > 1e-6
+        || Math.abs(afterPanPitch - beforePanPitch) > 1e-6) {
+      throw new Error(
+        `Right-button pan changed orbit: yaw ${beforePanYaw} -> ${afterPanYaw}, `
+        + `pitch ${beforePanPitch} -> ${afterPanPitch}`,
+      );
     }
   }
   const beforeArrowUrl = page.url();
