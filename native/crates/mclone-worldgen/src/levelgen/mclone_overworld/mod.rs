@@ -27,6 +27,7 @@ pub use biomes::{
 pub use debug::{
     McloneOverworldDebugSample, McloneOverworldHydrologyKind, McloneOverworldLandformKind,
     mclone_overworld_debug_sample, mclone_overworld_debug_sample_with_streams,
+    mclone_overworld_landform_kind,
 };
 pub use decoration::MCLONE_OVERWORLD_DECORATION_REVISION;
 pub use feature_batch::{

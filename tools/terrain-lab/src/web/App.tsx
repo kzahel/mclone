@@ -50,6 +50,7 @@ const LAYER_OPTIONS: Array<{ value: TerrainLabLayer; label: string }> = [
   { value: "climate", label: "Climate" },
   { value: "rivers", label: "River channels & banks" },
   { value: "wetlands", label: "Wetlands & pools" },
+  { value: "landforms", label: "Landform class" },
   { value: "biomes", label: "Biome recipe" },
   { value: "surface", label: "Surface recipe" },
   { value: "streams", label: "Planned streams" },
@@ -139,6 +140,7 @@ export function App(): React.JSX.Element {
       data-ocean-agreement={comparison?.oceanWaterPresenceAgreement ?? ""}
       data-material-agreement={comparison?.macroSurfaceMaterialAgreement ?? ""}
       data-channel-agreement={comparison?.channelPresenceAgreement ?? ""}
+      data-landform-agreement={comparison?.landformKindAgreement ?? ""}
       data-stage={state.contentStage}
       data-inspected-x={pointReceipt?.worldX ?? ""}
       data-inspected-z={pointReceipt?.worldZ ?? ""}
@@ -1067,6 +1069,24 @@ function Diagnostics({
           label="Visible material"
           value={comparison
             ? `${(comparison.visibleSurfaceMaterialAgreement * 100).toFixed(1)}%`
+            : "pending"}
+        />
+        <Metric
+          label="Landform agreement"
+          value={comparison
+            ? `${(comparison.landformKindAgreement * 100).toFixed(3)}%`
+            : "pending"}
+        />
+        <Metric
+          label="Biome agreement"
+          value={comparison
+            ? `${(comparison.biomeRecipeAgreement * 100).toFixed(1)}%`
+            : "pending"}
+        />
+        <Metric
+          label="Surface agreement"
+          value={comparison
+            ? `${(comparison.surfaceRecipeAgreement * 100).toFixed(1)}%`
             : "pending"}
         />
         <Metric label="GPU resident" value={memory} />

@@ -1,15 +1,16 @@
 use crate::levelgen::apply_stream_plans;
 use crate::levelgen::{
     MCLONE_OVERWORLD_FIELD_REVISION, MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldBiomeRecipe,
-    McloneOverworldLandformSample, McloneOverworldSampler, McloneOverworldSamplingTopology,
-    McloneOverworldStreamPlan, McloneOverworldStreamPlanCache, McloneOverworldSurfaceRecipe,
-    mclone_overworld_biome_recipe, mclone_overworld_macro_surface_top_material,
-    mclone_overworld_preview_visible_material, mclone_overworld_surface_recipe,
+    McloneOverworldLandformKind, McloneOverworldLandformSample, McloneOverworldSampler,
+    McloneOverworldSamplingTopology, McloneOverworldStreamPlan, McloneOverworldStreamPlanCache,
+    McloneOverworldSurfaceRecipe, mclone_overworld_biome_recipe, mclone_overworld_landform_kind,
+    mclone_overworld_macro_surface_top_material, mclone_overworld_preview_visible_material,
+    mclone_overworld_surface_recipe,
 };
 use mclone_core::ChunkPos;
 
 pub const TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION: &str =
-    "mclone-terrain-preview-reference-grid-v4";
+    "mclone-terrain-preview-reference-grid-v5";
 pub const TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS: u32 = 64;
 pub const TERRAIN_PREVIEW_MIN_CELLS_PER_AXIS: u32 = 8;
 pub const TERRAIN_PREVIEW_MAX_CELLS_PER_AXIS: u32 = 128;
@@ -217,7 +218,7 @@ pub struct TerrainPreviewSample {
     pub visible_surface_material: f32,
     pub planned_stream_influence: f32,
     pub biome_recipe: f32,
-    pub vegetation_coverage: f32,
+    pub landform_kind: f32,
     pub surface_recipe: f32,
 }
 
@@ -246,7 +247,7 @@ impl TerrainPreviewSample {
             self.visible_surface_material,
             self.planned_stream_influence,
             self.biome_recipe,
-            self.vegetation_coverage,
+            self.landform_kind,
             self.surface_recipe,
         ]
     }
@@ -275,7 +276,7 @@ impl TerrainPreviewSample {
             visible_surface_material: values[19],
             planned_stream_influence: values[20],
             biome_recipe: values[21],
-            vegetation_coverage: values[22],
+            landform_kind: values[22],
             surface_recipe: values[23],
         }
     }
@@ -384,7 +385,9 @@ impl TerrainPreviewReferenceGrid {
                     )),
                     planned_stream_influence: terrain.watercourse.planned_stream_influence as f32,
                     biome_recipe: biome_recipe_code(biome_recipe),
-                    vegetation_coverage: vegetation_coverage(biome_recipe),
+                    landform_kind: landform_kind_code(mclone_overworld_landform_kind(
+                        macro_landform,
+                    )),
                     surface_recipe: surface_recipe_code(surface_recipe),
                 });
             }
@@ -472,16 +475,17 @@ const fn biome_recipe_code(recipe: McloneOverworldBiomeRecipe) -> f32 {
     }
 }
 
-const fn vegetation_coverage(recipe: McloneOverworldBiomeRecipe) -> f32 {
-    match recipe {
-        McloneOverworldBiomeRecipe::CoolWetConifer => 0.82,
-        McloneOverworldBiomeRecipe::TemperateWoodland => 0.68,
-        McloneOverworldBiomeRecipe::WarmDrySteppe => 0.16,
-        McloneOverworldBiomeRecipe::TemperateMeadow => 0.08,
-        McloneOverworldBiomeRecipe::Ocean
-        | McloneOverworldBiomeRecipe::Shore
-        | McloneOverworldBiomeRecipe::River
-        | McloneOverworldBiomeRecipe::SnowyAlpine => 0.0,
+const fn landform_kind_code(kind: McloneOverworldLandformKind) -> f32 {
+    match kind {
+        McloneOverworldLandformKind::Ocean => 0.0,
+        McloneOverworldLandformKind::Coast => 1.0,
+        McloneOverworldLandformKind::River => 2.0,
+        McloneOverworldLandformKind::Wetland => 3.0,
+        McloneOverworldLandformKind::Lowland => 4.0,
+        McloneOverworldLandformKind::Upland => 5.0,
+        McloneOverworldLandformKind::MountainValley => 6.0,
+        McloneOverworldLandformKind::MountainShoulder => 7.0,
+        McloneOverworldLandformKind::MountainMassif => 8.0,
     }
 }
 
@@ -522,6 +526,7 @@ pub struct TerrainPreviewComparison {
     pub mean_absolute_bank_influence_error: f32,
     pub mean_absolute_wetland_influence_error: f32,
     pub visible_surface_material_agreement: f32,
+    pub landform_kind_agreement: f32,
     pub biome_recipe_agreement: f32,
     pub surface_recipe_agreement: f32,
 }
@@ -569,6 +574,7 @@ impl TerrainPreviewComparison {
         let mut bank_influence_error_sum = 0.0_f64;
         let mut wetland_influence_error_sum = 0.0_f64;
         let mut visible_material_matches = 0_usize;
+        let mut landform_matches = 0_usize;
         let mut biome_matches = 0_usize;
         let mut surface_recipe_matches = 0_usize;
         for (expected, actual) in reference.iter().zip(candidate) {
@@ -605,6 +611,9 @@ impl TerrainPreviewComparison {
                 f64::from((expected.wetland_influence - actual.wetland_influence).abs());
             visible_material_matches += usize::from(
                 expected.visible_surface_material() == actual.visible_surface_material(),
+            );
+            landform_matches += usize::from(
+                expected.landform_kind.round() as i32 == actual.landform_kind.round() as i32,
             );
             biome_matches += usize::from(
                 expected.biome_recipe.round() as i32 == actual.biome_recipe.round() as i32,
@@ -645,6 +654,7 @@ impl TerrainPreviewComparison {
                 as f32,
             visible_surface_material_agreement: visible_material_matches as f32
                 / candidate.len() as f32,
+            landform_kind_agreement: landform_matches as f32 / candidate.len() as f32,
             biome_recipe_agreement: biome_matches as f32 / candidate.len() as f32,
             surface_recipe_agreement: surface_recipe_matches as f32 / candidate.len() as f32,
         })
@@ -823,7 +833,7 @@ mod tests {
         );
         assert_eq!(
             TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION,
-            "mclone-terrain-preview-reference-grid-v4"
+            "mclone-terrain-preview-reference-grid-v5"
         );
     }
 }

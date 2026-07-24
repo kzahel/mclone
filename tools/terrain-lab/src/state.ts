@@ -23,6 +23,7 @@ export type TerrainLabLayer =
   | "climate"
   | "rivers"
   | "wetlands"
+  | "landforms"
   | "biomes"
   | "surface"
   | "streams";
@@ -99,6 +100,7 @@ const LAYERS = new Set<TerrainLabLayer>([
   "climate",
   "rivers",
   "wetlands",
+  "landforms",
   "biomes",
   "surface",
   "streams",

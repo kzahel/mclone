@@ -49,13 +49,15 @@ pub fn terrain_preview_options(
             "climate" => TerrainPreviewLayer::Climate,
             "rivers" | "river" => TerrainPreviewLayer::Rivers,
             "wetlands" | "wetland" => TerrainPreviewLayer::Wetlands,
+            "landforms" | "landform" => TerrainPreviewLayer::Landforms,
             "biomes" | "biome" => TerrainPreviewLayer::Biomes,
             "surface" | "surface-recipe" => TerrainPreviewLayer::SurfaceRecipe,
             "streams" | "planned-streams" => TerrainPreviewLayer::PlannedStreams,
             other => {
                 return Err(format!(
                     "unsupported terrain preview layer {other:?}; expected terrain, height, error, \
-                     continentalness, climate, rivers, wetlands, biomes, surface, or streams"
+                     continentalness, climate, rivers, wetlands, landforms, biomes, surface, \
+                     or streams"
                 ));
             }
         },
@@ -82,6 +84,7 @@ pub fn terrain_preview_option_labels(
         TerrainPreviewLayer::Climate => "climate",
         TerrainPreviewLayer::Rivers => "rivers",
         TerrainPreviewLayer::Wetlands => "wetlands",
+        TerrainPreviewLayer::Landforms => "landforms",
         TerrainPreviewLayer::Biomes => "biomes",
         TerrainPreviewLayer::SurfaceRecipe => "surface",
         TerrainPreviewLayer::PlannedStreams => "streams",
@@ -142,6 +145,12 @@ mod tests {
                 view: TerrainPreviewView::Map,
                 layer: TerrainPreviewLayer::Error,
             }
+        );
+        assert_eq!(
+            terrain_preview_option_labels(
+                terrain_preview_options("gpu", "map", "landform").unwrap()
+            ),
+            ("gpu", "map", "landforms")
         );
     }
 

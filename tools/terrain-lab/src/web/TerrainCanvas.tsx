@@ -136,6 +136,7 @@ export interface TerrainLabComparisonReport {
   meanAbsoluteBankInfluenceError: number;
   meanAbsoluteWetlandInfluenceError: number;
   visibleSurfaceMaterialAgreement: number;
+  landformKindAgreement: number;
   biomeRecipeAgreement: number;
   surfaceRecipeAgreement: number;
   staleResultCount: number;

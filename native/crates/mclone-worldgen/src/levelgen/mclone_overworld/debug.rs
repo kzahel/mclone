@@ -114,7 +114,7 @@ fn debug_sample_from_landform(
         quart_x: world_x.div_euclid(MCLONE_OVERWORLD_DEBUG_CELL_SIZE),
         quart_z: world_z.div_euclid(MCLONE_OVERWORLD_DEBUG_CELL_SIZE),
         biome: mclone_overworld_biome_decision(landform_sample),
-        landform: debug_landform_kind(landform_sample),
+        landform: mclone_overworld_landform_kind(landform_sample),
         surface: mclone_overworld_surface_recipe(landform_sample),
         hydrology: debug_hydrology_kind(landform_sample),
         planned_stream_start,
@@ -122,7 +122,9 @@ fn debug_sample_from_landform(
     }
 }
 
-fn debug_landform_kind(sample: McloneOverworldLandformSample) -> McloneOverworldLandformKind {
+pub fn mclone_overworld_landform_kind(
+    sample: McloneOverworldLandformSample,
+) -> McloneOverworldLandformKind {
     let terrain = sample.terrain;
     if terrain.watercourse.is_channel() {
         McloneOverworldLandformKind::River

@@ -31,7 +31,7 @@ pub use viewport_renderer::{
     TerrainViewportCompletedComparison, TerrainViewportFrameStats, TerrainViewportRenderer,
 };
 
-pub const TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION: &str = "mclone-overworld-v1-gpu-preview-a4";
+pub const TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION: &str = "mclone-overworld-v1-gpu-preview-a5";
 pub const TERRAIN_PREVIEW_COMPUTE_WGSL_TEMPLATE: &str =
     include_str!("shaders/terrain_preview_compute.wgsl");
 pub const TERRAIN_PREVIEW_RENDER_WGSL: &str = include_str!("shaders/terrain_preview_render.wgsl");
@@ -122,6 +122,7 @@ pub enum TerrainPreviewLayer {
     Biomes = 7,
     SurfaceRecipe = 8,
     PlannedStreams = 9,
+    Landforms = 10,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1025,7 +1026,7 @@ mod tests {
             visible_surface_material: 2.0,
             planned_stream_influence: 0.0,
             biome_recipe: 2.0,
-            vegetation_coverage: 0.0,
+            landform_kind: 2.0,
             surface_recipe: 2.0,
         };
         let mut bytes = Vec::new();
@@ -1041,7 +1042,7 @@ mod tests {
     fn evaluator_revision_and_production_spec_are_explicit() {
         assert_eq!(
             TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION,
-            "mclone-overworld-v1-gpu-preview-a4"
+            "mclone-overworld-v1-gpu-preview-a5"
         );
         let shader = terrain_preview_compute_wgsl();
         assert!(!shader.contains("__MCLONE_PRODUCTION_FIELD_CONSTANTS__"));

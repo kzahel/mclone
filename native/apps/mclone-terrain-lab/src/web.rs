@@ -288,6 +288,7 @@ struct TerrainLabComparisonReport {
     mean_absolute_bank_influence_error: f32,
     mean_absolute_wetland_influence_error: f32,
     visible_surface_material_agreement: f32,
+    landform_kind_agreement: f32,
     biome_recipe_agreement: f32,
     surface_recipe_agreement: f32,
     stale_result_count: u64,
@@ -1149,6 +1150,7 @@ fn comparison_report(
             .comparison
             .mean_absolute_wetland_influence_error,
         visible_surface_material_agreement: completed.comparison.visible_surface_material_agreement,
+        landform_kind_agreement: completed.comparison.landform_kind_agreement,
         biome_recipe_agreement: completed.comparison.biome_recipe_agreement,
         surface_recipe_agreement: completed.comparison.surface_recipe_agreement,
         stale_result_count,

@@ -171,6 +171,22 @@ fn error_color(error: f32) -> vec3<f32> {
     );
 }
 
+fn vegetation_coverage(biome: f32) -> f32 {
+    if biome == 4.0 {
+        return 0.82;
+    }
+    if biome == 6.0 {
+        return 0.68;
+    }
+    if biome == 5.0 {
+        return 0.16;
+    }
+    if biome == 7.0 {
+        return 0.08;
+    }
+    return 0.0;
+}
+
 fn sample_color(
     sample: TerrainPreviewSample,
     reference: TerrainPreviewSample,
@@ -237,6 +253,21 @@ fn sample_color(
     if layer == 9u {
         let planned = clamp(sample.semantics.x, 0.0, 1.0);
         return mix(vec3<f32>(0.055, 0.075, 0.11), vec3<f32>(0.95, 0.20, 0.76), planned);
+    }
+    if layer == 10u {
+        let landform = u32(round(sample.semantics.z));
+        let colors = array<vec3<f32>, 9>(
+            vec3<f32>(0.08, 0.22, 0.90),
+            vec3<f32>(0.94, 0.76, 0.24),
+            vec3<f32>(0.02, 0.78, 1.00),
+            vec3<f32>(0.05, 0.68, 0.55),
+            vec3<f32>(0.40, 0.86, 0.16),
+            vec3<f32>(0.76, 0.58, 0.13),
+            vec3<f32>(0.55, 0.30, 0.82),
+            vec3<f32>(0.90, 0.24, 0.62),
+            vec3<f32>(0.82, 0.82, 0.86),
+        );
+        return colors[min(landform, 8u)] * light;
     }
     return terrain_color(sample, light);
 }
@@ -354,7 +385,7 @@ fn vertex_main(
         sample.hydrology_detail.x,
         sample.hydrology_detail.y,
         sample.semantics.x,
-        sample.semantics.z,
+        vegetation_coverage(sample.semantics.y),
     );
     return out;
 }

@@ -32,7 +32,7 @@ The URL owns the review state:
 - `view`: `3d` or `map`
 - `stage`: `base`, `hydrology`, `structured`, `surface`, or `cover`
 - `layer`: `terrain`, `height`, `error`, `continentalness`, `climate`,
-  `rivers`, `wetlands`, `biomes`, `surface`, or `streams`
+  `rivers`, `wetlands`, `landforms`, `biomes`, `surface`, or `streams`
 
 Legacy `spacing=` links still load with their original `spacing × 64`
 footprint and fixed detail. New links keep coverage and resolution independent.

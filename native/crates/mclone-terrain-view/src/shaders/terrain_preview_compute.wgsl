@@ -598,20 +598,41 @@ fn biome_recipe_code(
     return 7.0;
 }
 
-fn vegetation_coverage(biome: f32) -> f32 {
-    if biome == 4.0 {
-        return 0.82;
+fn landform_kind_code(
+    surface_y: f32,
+    channel_influence: f32,
+    wetland_pool_influence: f32,
+    wetland_influence: f32,
+    continentalness: f32,
+    ruggedness: f32,
+    ridges: f32,
+) -> f32 {
+    if channel_influence > 0.0 {
+        return 2.0;
     }
-    if biome == 6.0 {
-        return 0.68;
+    if wetland_pool_influence >= 0.55 || wetland_influence > 0.25 {
+        return 3.0;
     }
-    if biome == 5.0 {
-        return 0.16;
+    if surface_y <= 61.0 {
+        return 0.0;
     }
-    if biome == 7.0 {
-        return 0.08;
+    if surface_y <= 66.0 {
+        return 1.0;
     }
-    return 0.0;
+    let mountain = mountain_strength(continentalness, ruggedness);
+    if mountain >= 0.35 && ridges <= 0.28 {
+        return 6.0;
+    }
+    if mountain >= 0.15 && ridges >= 0.65 {
+        return 7.0;
+    }
+    if mountain >= 0.35 || surface_y >= 96.0 {
+        return 8.0;
+    }
+    if surface_y >= 75.0 {
+        return 5.0;
+    }
+    return 4.0;
 }
 
 fn complete_hydrology(
@@ -782,6 +803,15 @@ fn complete_hydrology(
         temperature,
         moisture,
     );
+    let landform = landform_kind_code(
+        surface_y,
+        channel_influence,
+        wetland_pool_influence,
+        wetland_influence,
+        continentalness,
+        ruggedness,
+        ridges,
+    );
     return HydrologyResult(
         vec4<f32>(
             surface_y,
@@ -801,7 +831,7 @@ fn complete_hydrology(
             submerged_outlet_influence,
             visible_material,
         ),
-        vec4<f32>(0.0, biome, vegetation_coverage(biome), surface_recipe),
+        vec4<f32>(0.0, biome, landform, surface_recipe),
     );
 }
 

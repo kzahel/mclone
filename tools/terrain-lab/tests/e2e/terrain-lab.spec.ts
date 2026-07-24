@@ -261,6 +261,9 @@ test("reconstructs one planned stream for both LOD lanes", async ({
   await waitForCurrentComparison(page);
   const shell = page.locator(".appShell");
   await expect(shell).toHaveAttribute("data-channel-agreement", "1");
+  await expect.poll(
+    async () => Number(await shell.getAttribute("data-landform-agreement")),
+  ).toBeGreaterThan(0.9999);
   await expect(page.getByTestId("terrain-diagnostics")).toContainText(
     "planned streams available",
   );
@@ -276,10 +279,19 @@ test("reconstructs one planned stream for both LOD lanes", async ({
   await expect(page.getByTestId("point-receipt")).toContainText("planned stream");
   await expect(page.getByTestId("point-receipt")).toContainText("147, -126");
   await page.getByText("Production fields and revisions").click();
-  await expect(page.getByTestId("point-receipt")).toContainText("gpu-preview-a4");
+  await expect(page.getByTestId("point-receipt")).toContainText("gpu-preview-a5");
   await expect(page.getByTestId("point-receipt")).toContainText("Carve delta");
   await stage.screenshot({
     path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-structured-stream.png`,
+  });
+  const streamRevision = Number(await shell.getAttribute("data-render-revision"));
+  await page.getByLabel("Diagnostic layer").selectOption("landforms");
+  await expect(page).toHaveURL(/layer=landforms/u);
+  await expect.poll(
+    async () => Number(await shell.getAttribute("data-render-revision")),
+  ).toBeGreaterThan(streamRevision);
+  await stage.screenshot({
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-landforms.png`,
   });
   expect(pageErrors).toEqual([]);
 });
