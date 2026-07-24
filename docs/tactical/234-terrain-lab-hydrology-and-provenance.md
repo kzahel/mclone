@@ -1,6 +1,7 @@
 # Terrain Lab Hydrology And Provenance
 
-Status: active 2026-07-24.
+Status: completed 2026-07-24, including targeted hosted desktop and phone
+BrowserWebGPU validation.
 
 Topic: `gpu-procedural-terrain`
 
@@ -179,3 +180,83 @@ Commit every coherent slice with `Topic: gpu-procedural-terrain`.
   stage, and cache-off remains a real cold-generation path.
 - Desktop and phone controls retain independent progressive publication,
   orbit, pan, zoom, and page-scroll suppression.
+
+## Implementation Receipt
+
+The dependency-ordered stage contract is live as preview schema
+`mclone-terrain-preview-reference-grid-v5` and GPU evaluator
+`mclone-overworld-v1-gpu-preview-a5`. `Base`, `Hydrology`, `Structured`,
+`Surface`, and `Cover` are tile/cache identities and remain outside
+authoritative world-generation configuration.
+
+Natural hydrology now has one fixed-work CPU/WGSL contract covering river
+geometry, analytic warp derivatives, variable width, channel and bank carving,
+wetlands, pools, submerged outlets, final height/water state, visible
+material, biome recipe, surface recipe, and landform class. Signed centerline
+distance preserves a narrow river contour at coarse display levels without
+changing canonical geometry.
+
+Planned streams remain CPU-owned bounded records. At `1:1` through `1:4`, the
+preview compiler reconstructs intersecting production routes once, samples a
+compact influence into the reference payload, and lets either LOD lane consume
+that structured result. Coarser requests explicitly report planned streams as
+unavailable. The reviewed seed `-98765` point `(2369, -1977)` identifies
+planned-stream owner chunk `(147, -126)` in the point receipt and appears in
+both panes.
+
+The Lab now exposes terrain, height/error, continents, climate, river,
+wetland, landform, biome, surface, and planned-stream views. Landform colors
+reuse the in-engine Worldgen Lens vocabulary. Click/tap inspection works in
+map and 3D and reports block/chunk/quart coordinates, ordered production
+decisions, structured ownership, carve and climate values, detailed hydrology
+fields, and field/preview/GPU/decoration revisions. The selected point alone
+receives this full receipt.
+
+Final local validation passed:
+
+- 8 focused `mclone-worldgen` preview tests;
+- all 16 `mclone-terrain-view` library tests, including WGSL validation;
+- all 3 `mclone-terrain-lab` library tests;
+- TypeScript typecheck and all 13 URL/input state tests; and
+- all 4 headed-Wayland Playwright cases across desktop and Pixel layouts.
+
+The structured-stream captures were inspected at desktop and phone sizes. The
+CPU/GPU river, bank, coast, lowland, and planned-stream shapes align. Natural
+channel agreement is 100%. The near structured landform grid records one
+honest f64/f32 category-boundary disagreement per layout, for greater than
+99.99% agreement, rather than substituting CPU categories into the GPU pane.
+
+The targeted production upload changed only Terrain Lab objects. The
+unchanged Worker serves:
+
+- `terrain/assets/canonical-worker-BQgpcAAp.js`, SHA-256
+  `3ac3e63408cd8f3886a4d8dd091f5fc764bbc92c2c64a778eb124179d3315141`;
+- `terrain/assets/index-K-isbiIr.css`, SHA-256
+  `6f5faf8a7f3a76004a68ceca6aba710a6c8c93afd6ab97e22985ffdab3fbdd48`;
+- `terrain/assets/index-V8OlCP6Y.js`, SHA-256
+  `dacbe0f1b212f0d9a9528adbeddc209d71ba5ac6c977ce9d4f0061abf0d77abd`;
+- `terrain/assets/mclone_terrain_lab_bg-DVyvzS8N.wasm`, SHA-256
+  `5f571bcaa58236f278d457c036ad20563286d79f27a4216a2f0cc62758676e6f`;
+  and
+- `terrain/index.html`, SHA-256
+  `35cb3505804b963c5ac25aa05efd58437ea49a1b1be15dd76b15cf9ae67953b1`.
+
+Every hashed object was downloaded and byte-verified before the HTML switch.
+Hosted headed-Wayland desktop and Pixel smokes then passed against
+`https://mclone.kzahel.com/terrain/`. Both reported zero natural final/base
+height error, 100% river, visible-material, biome, surface, and reviewed
+landform agreement, and no cache hits in the cold race. Desktop GPU target
+plus validation readback completed in 1,579.4 ms versus 22,341.6 ms for CPU
+target publication. Pixel measured 2,010.3 ms versus 21,050.8 ms. These are
+different end-to-end publication boundaries, not pure GPU execution timing.
+
+The implementation series is:
+
+- `e289f102` — plan the hydrology/provenance contract;
+- `bb42f605` — expand the shared semantic payload;
+- `a24ae14f` — port production natural hydrology to WGSL;
+- `0d51f40e` — merge planned-stream records into both LOD lanes;
+- `d56b297f` — expose stages, layers, picking, and provenance;
+- `c216db53` — pin the reviewed planned-stream evidence;
+- `a9b3aa0e` — complete detailed production point receipts; and
+- `feb11eb6` — add the final production landform diagnostic.

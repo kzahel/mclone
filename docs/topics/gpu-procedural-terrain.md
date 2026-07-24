@@ -1213,11 +1213,36 @@ scale-aware signed-contour preservation, sparse planned-stream overlays, and
 production-derived diagnostic receipts. These are preview compiler stages,
 not authoritative gameplay generator flags.
 
+Tactical 234 is now complete. Natural rivers, variable banks, wetlands, pools,
+submerged outlets, final materials, biome/surface recipes, and production
+landform classes run in the GPU evaluator and the CPU reference lane. Planned
+streams remain bounded CPU-produced records and are merged into both panes at
+`1:1` through `1:4`. The reviewed stream at seed `-98765`, point
+`(2369, -1977)`, is visible in both panes and names owner chunk `(147, -126)`.
+
+The Lab exposes dependency-ordered `Base`, `Hydrology`, `Structured`,
+`Surface`, and `Cover` stages plus river, wetland, landform, biome, surface,
+and planned-stream diagnostics. Map/3D point picking returns a
+production-derived receipt with ordered semantic decisions, hydrology fields,
+structured ownership, and field/schema/evaluator/decoration revisions.
+Content stage is part of URL and tile/cache identity; cache-off remains a real
+cold path.
+
+The final targeted upload serves preview schema v5 and GPU evaluator A5. Hosted
+desktop and Pixel headed-WebGPU smokes reported zero natural final/base height
+error and 100% river, visible-material, biome, surface, and reviewed landform
+agreement. In the fixed uncached race, desktop GPU target plus readback took
+1,579.4 ms versus 22,341.6 ms for CPU target publication; Pixel measured
+2,010.3 ms versus 21,050.8 ms. These are end-to-end publication boundaries,
+not pure GPU execution timing. The complete object hashes and validation
+receipt live in Tactical 234.
+
 The next implementation direction is:
 
-1. complete Tactical 234's natural and structured hydrology slice;
-2. band-limit or aggregate other sub-sample field energy while preserving
+1. band-limit or aggregate other sub-sample field energy while preserving
    coast and mountain silhouettes;
+2. add sparse structure and macro vegetation records/layers without moving
+   bounded placement search into WGSL;
 3. add a Rust/WGSL edit watcher and measure source-edit to first updated
    coarse pixel;
 4. choose explicit mixed-level seam/transition behavior before using partial
