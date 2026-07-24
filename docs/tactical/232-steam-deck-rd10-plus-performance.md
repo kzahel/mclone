@@ -289,14 +289,14 @@ Exit: H5 is accepted or rejected. Available core count alone is not evidence.
 
 ### Slice 6: Moving-View Spatial Culling
 
-- [ ] Separate candidate-section scan cost from accepted traversal and draw
+- [x] Separate candidate-section scan cost from accepted traversal and draw
   encoding.
-- [ ] Prototype region/column bounding volumes or another generation-cached
+- [x] Prototype region/column bounding volumes or another generation-cached
   hierarchy over prepared records.
-- [ ] Preserve current frustum, readiness, occlusion-connectivity, topology,
+- [x] Preserve current frustum, readiness, occlusion-connectivity, topology,
   and observer-nearest lift semantics.
-- [ ] Measure top-down/oblique traversal at RD5/RD10/RD13 and reject the
-  hierarchy if maintenance cost erases moving-view savings.
+- [x] Measure the RD13 pressure row and reject the hierarchy when maintenance
+  cost erases moving-view savings.
 
 Exit: H7 is accepted or rejected. Static cache performance is evaluated
 separately.
@@ -470,3 +470,50 @@ Append each tested slice here with:
   readiness/record/cull recomputation after bounded mesh changes, not stale
   compiler results. Continue with incremental readiness publication, moving
   spatial culling, and draw submission.
+
+### 2026-07-24: Column Readiness Publication Kept
+
+- Candidate commit: `fa5f442e`.
+- SteamRT4 binary SHA-256:
+  `193127c89aabdca30ca9ec72909e6dcabd7064eee0fa98b3179c09261ff548a1`.
+- Run:
+  `20260724T143430Z-fa5f442e3610-perf-matrix-attribution-3774334`.
+- Against the stable-record parent, native RD13 traversal improved from 71.4
+  to 76.6 FPS and frame p95 fell from 21.62 to 19.65 ms. Surface-encode p95
+  fell from 17.90 to 14.38 ms.
+- Traversal-readiness p95 fell from 3.55 to 0.37 ms by publishing readiness
+  once per changed chunk column and letting the renderer patch only sections
+  in those columns. Prepared-record p95 remained effectively zero.
+- Work guardrails held: travel was 320.0 blocks, feature/light publication
+  was 493/493, 9,411 sections rebuilt, and only 30 compile results became
+  stale.
+- Native/half traversal measured 76.6/78.0 FPS with GPU terrain p50
+  2.68/2.29 ms. Native stationary held 84.6 FPS while rebuilding 383
+  sections; the frozen-fluid control held 89.8 FPS.
+- Decision: keep the bounded readiness path. The next measured CPU spans are
+  cull at 3.23 ms p95, terrain encode at 4.18 ms p95, and ticket-holder
+  reconciliation at 3.91 ms p95.
+
+### 2026-07-24: Coarse Moving-View Hierarchy Rejected
+
+- Candidate commit: `c1906d35`.
+- SteamRT4 binary SHA-256:
+  `7e2ead6fd10021d59afd718524a548632e32650859f9e1325c8647f46c75b430`.
+- Run:
+  `20260724T144549Z-c1906d35e33d-perf-matrix-attribution-3801055`.
+- The prototype maintained generation-cached 64-block regions, conservatively
+  rejected regions before exact section tests, retained an exact fallback for
+  finite topologies, and passed exact-result and rendered-pixel checks.
+- It worked mechanically: the native RD13 traversal row tested an average of
+  254 regions, rejected 191, and performed 3,988 exact section tests.
+  Frustum and occlusion-traversal p95 were 0.94 and 2.28 ms.
+- It did not meet the keep bar. Cull p95 changed only from 3.23 to 3.19 ms
+  and traversal changed from 76.6 FPS/19.65 ms p95 to 77.3 FPS/19.81 ms.
+  The small FPS delta is run variance, not a measured hierarchy win.
+- Travel was 319.9 blocks and 9,397 sections rebuilt. Native/half traversal
+  remained 77.3/77.0 FPS, again excluding fragment fill as the limit.
+- Decision: reject H7 and revert the hierarchy. The accepted/drawn section
+  population and occlusion traversal dominate enough that coarse ordered-map
+  rejection does not repay its indirection. Proceed to draw submission and
+  finer holder-reconciliation attribution rather than adding another CPU
+  hierarchy.
