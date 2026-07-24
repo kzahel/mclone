@@ -550,6 +550,23 @@ test("keeps a 9x9 real footprint resident and paces pan admission", async ({
   await page.getByTestId("canonical-terrain-stage").screenshot({
     path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-canonical-responsive-pan.png`,
   });
+
+  const cacheOnEpoch = Number(await shell.getAttribute("data-canonical-epoch"));
+  await page.getByRole("button", { name: "Exact cache off", exact: true }).click();
+  await expect(shell).toHaveAttribute("data-canonical-cache-enabled", "false");
+  await expect.poll(
+    async () => Number(await shell.getAttribute("data-canonical-epoch")),
+  ).toBeGreaterThan(cacheOnEpoch);
+  await waitForCanonical(page, 81);
+  await expect(shell).toHaveAttribute("data-canonical-resident-hits", "0");
+  await expect(shell).toHaveAttribute("data-canonical-cache-hits", "0");
+  await centerX.fill("-288");
+  await centerX.press("Enter");
+  await expect(page).toHaveURL(/x=-288/u);
+  await expect(shell).toHaveAttribute("data-canonical-resident-hits", "72");
+  await waitForCanonical(page, 81);
+  await expect(shell).toHaveAttribute("data-canonical-cache-hits", "0");
+  await expect(shell).toHaveAttribute("data-canonical-admission-frames", "9");
   expect(pageErrors).toEqual([]);
 });
 
