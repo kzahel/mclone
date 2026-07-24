@@ -57,6 +57,13 @@ if (worldTopology && !/^(plane|cylinder-x(?::[1-9][0-9]*)?)$/.test(worldTopology
     `--world-topology requires plane, cylinder-x, or cylinder-x:<period-chunks>; got ${worldTopology}`,
   );
 }
+const leafDetailArgIndex = process.argv.indexOf("--leaf-detail");
+const initialLeafDetail = leafDetailArgIndex >= 0
+  ? String(process.argv[leafDetailArgIndex + 1] ?? "")
+  : "";
+if (initialLeafDetail && !["blocky", "bushy"].includes(initialLeafDetail)) {
+  throw new Error(`--leaf-detail requires blocky or bushy; got ${initialLeafDetail}`);
+}
 const movementPerf = process.argv.includes("--movement-perf")
   || process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF === "1";
 const blockEditProbe = process.argv.includes("--block-edit-probe")
@@ -346,6 +353,14 @@ async function run() {
         }
       : undefined);
     const page = await context.newPage();
+    if (initialLeafDetail) {
+      await page.addInitScript((leafDetail) => {
+        globalThis.localStorage?.setItem("mclone.graphics.preferences.v1", JSON.stringify({
+          schema: 1,
+          preferences: { leafDetail },
+        }));
+      }, initialLeafDetail);
+    }
     if (deathUiProbe) {
       await page.addInitScript(() => {
         globalThis.localStorage?.setItem("mclone.playerProfile.v1", JSON.stringify({
@@ -1664,6 +1679,7 @@ async function run() {
         canvasScreenshotPath,
         nativeUiCanvasScreenshotPath,
         appLoop,
+        initialLeafDetail: initialLeafDetail || null,
         remoteWebSocket,
         remoteWebSocketUrl: remoteServer?.websocketUrl ?? null,
         canvasPixels,

@@ -2960,6 +2960,7 @@ pub(super) fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::QuitToTitle => "quitToTitle",
         GameUiAction::Respawn => "respawn",
         GameUiAction::ToggleSectionOcclusion => "toggleSectionOcclusion",
+        GameUiAction::SetLeafDetail(_) => "setLeafDetail",
         GameUiAction::ToggleFullbright => "toggleFullbright",
         GameUiAction::ToggleFarLod => "toggleFarLod",
         GameUiAction::CycleFarLodDetail => "cycleFarLodDetail",
