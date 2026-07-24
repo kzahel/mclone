@@ -11,9 +11,9 @@ use mclone_worldgen::terrain_preview::{
 use super::{
     TERRAIN_PREVIEW_DEPTH_FORMAT, TERRAIN_PREVIEW_RENDER_WGSL, TERRAIN_PREVIEW_SAMPLE_BYTES,
     TERRAIN_PREVIEW_UNIFORM_BYTES, TERRAIN_PREVIEW_WORKGROUP_AXIS, TerrainPreviewCamera,
-    TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource, TerrainViewportPlan,
-    TerrainViewportTileId, parse_samples, terrain_preview_compute_wgsl, terrain_preview_focus_y,
-    viewport_uniform_bytes_for_request,
+    TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource,
+    TerrainPreviewSplitLayout, TerrainViewportPlan, TerrainViewportTileId, parse_samples,
+    terrain_preview_compute_wgsl, terrain_preview_focus_y, viewport_uniform_bytes_for_request,
 };
 
 pub const TERRAIN_PREVIEW_MATERIAL_UV_COUNT: usize = 256;
@@ -1300,7 +1300,7 @@ impl TerrainViewportRenderer {
         });
         pass.set_pipeline(&self.render_pipeline);
         pass.set_bind_group(1, &self._material_resources.bind_group, &[]);
-        let panels = render_panels(options.source, width, height);
+        let panels = render_panels(options.source, options.split_layout, width, height);
         for panel in panels {
             pass.set_scissor_rect(panel.x, panel.y, panel.width, panel.height);
             let tiles = if options.source == TerrainPreviewSource::Reference
@@ -1377,7 +1377,12 @@ struct RenderPanel {
     instance: u32,
 }
 
-fn render_panels(source: TerrainPreviewSource, width: u32, height: u32) -> Vec<RenderPanel> {
+fn render_panels(
+    source: TerrainPreviewSource,
+    split_layout: TerrainPreviewSplitLayout,
+    width: u32,
+    height: u32,
+) -> Vec<RenderPanel> {
     if source != TerrainPreviewSource::Split {
         return vec![RenderPanel {
             x: 0,
@@ -1387,7 +1392,7 @@ fn render_panels(source: TerrainPreviewSource, width: u32, height: u32) -> Vec<R
             instance: 0,
         }];
     }
-    if width <= height {
+    if split_layout == TerrainPreviewSplitLayout::Rows {
         let first_height = (height / 2).max(1);
         let second_height = height.saturating_sub(first_height).max(1);
         vec![
@@ -1490,14 +1495,39 @@ mod tests {
     #[test]
     fn compare_panels_match_shader_layout() {
         assert_eq!(
-            render_panels(TerrainPreviewSource::Split, 1200, 700).len(),
+            render_panels(
+                TerrainPreviewSource::Split,
+                TerrainPreviewSplitLayout::Columns,
+                1200,
+                700
+            )
+            .len(),
             2
         );
-        let wide = render_panels(TerrainPreviewSource::Split, 1200, 700);
+        let wide = render_panels(
+            TerrainPreviewSource::Split,
+            TerrainPreviewSplitLayout::Columns,
+            1200,
+            900,
+        );
         assert_eq!((wide[0].width, wide[1].x), (600, 600));
-        let tall = render_panels(TerrainPreviewSource::Split, 400, 900);
+        let tall = render_panels(
+            TerrainPreviewSource::Split,
+            TerrainPreviewSplitLayout::Rows,
+            1200,
+            900,
+        );
         assert_eq!((tall[0].height, tall[1].y), (450, 450));
-        assert_eq!(render_panels(TerrainPreviewSource::Gpu, 400, 900).len(), 1);
+        assert_eq!(
+            render_panels(
+                TerrainPreviewSource::Gpu,
+                TerrainPreviewSplitLayout::Rows,
+                400,
+                900
+            )
+            .len(),
+            1
+        );
     }
 
     #[test]

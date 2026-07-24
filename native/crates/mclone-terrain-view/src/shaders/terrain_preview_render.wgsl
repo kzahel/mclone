@@ -317,7 +317,7 @@ fn vertex_main(
     let width = max(f32(params.layer_samples_size.z), 1.0);
     let height = max(f32(params.layer_samples_size.w), 1.0);
     let compare = params.seed_source_view.z == 2u;
-    let stacked_compare = compare && width <= height;
+    let stacked_compare = compare && params.content_stage_flags.z == 1u;
     var view_width = width;
     var view_height = height;
     if compare {
@@ -348,7 +348,10 @@ fn vertex_main(
         );
         let from_eye = position - eye;
         let depth = max(dot(from_eye, forward), params.camera_projection.x);
-        let half_height = depth * tan(params.camera_up_fov.w * 0.5);
+        var half_height = params.camera_projection.w;
+        if params.content_stage_flags.y == 1u {
+            half_height = depth * tan(params.camera_up_fov.w * 0.5);
+        }
         clip_x = dot(from_eye, right) / max(half_height * aspect, 0.001);
         clip_y = dot(from_eye, camera_up) / max(half_height, 0.001);
         clip_z = clamp(

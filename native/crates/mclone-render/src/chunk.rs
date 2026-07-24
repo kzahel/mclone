@@ -65,6 +65,19 @@ pub fn reversed_z_perspective_rh(fov_y_radians: f32, aspect: f32, z_near: f32, z
     REVERSE_Z * Mat4::perspective_rh(fov_y_radians, aspect, z_near, z_far)
 }
 
+/// Right-handed orthographic projection using the renderer's reversed-Z depth
+/// convention.
+pub fn reversed_z_orthographic_rh(
+    left: f32,
+    right: f32,
+    bottom: f32,
+    top: f32,
+    z_near: f32,
+    z_far: f32,
+) -> Mat4 {
+    REVERSE_Z * Mat4::orthographic_rh(left, right, bottom, top, z_near, z_far)
+}
+
 const VERTEX_FLOAT_COUNT: usize = 7;
 const VERTEX_BYTE_SIZE: wgpu::BufferAddress =
     (VERTEX_FLOAT_COUNT * std::mem::size_of::<f32>()) as wgpu::BufferAddress;
@@ -136,12 +149,45 @@ impl ChunkCamera {
     pub fn render_view(self, width: u32, height: u32) -> ChunkRenderView {
         let aspect = width.max(1) as f32 / height.max(1) as f32;
         let aspect = aspect.max(0.01);
+        let projection =
+            reversed_z_perspective_rh(self.fov_y_radians, aspect, self.z_near, self.z_far);
+        self.render_view_with_projection(aspect, projection, ChunkProjectionKind::CameraPerspective)
+    }
+
+    pub fn render_orthographic_view(
+        self,
+        width: u32,
+        height: u32,
+        vertical_span: f32,
+    ) -> ChunkRenderView {
+        let aspect = (width.max(1) as f32 / height.max(1) as f32).max(0.01);
+        let half_height = (vertical_span * 0.5).max(0.001);
+        let half_width = half_height * aspect;
+        let projection = reversed_z_orthographic_rh(
+            -half_width,
+            half_width,
+            -half_height,
+            half_height,
+            self.z_near,
+            self.z_far,
+        );
+        self.render_view_with_projection(
+            aspect,
+            projection,
+            ChunkProjectionKind::CameraOrthographic,
+        )
+    }
+
+    fn render_view_with_projection(
+        self,
+        aspect: f32,
+        projection: Mat4,
+        projection_kind: ChunkProjectionKind,
+    ) -> ChunkRenderView {
         let eye = Vec3::from_array(self.eye);
         let target = Vec3::from_array(self.target);
         let world_up = Vec3::from_array(self.up);
         let view = Mat4::look_at_rh(eye, target, world_up);
-        let projection =
-            reversed_z_perspective_rh(self.fov_y_radians, aspect, self.z_near, self.z_far);
         let forward = (target - eye).normalize_or_zero();
         let right = forward.cross(world_up).normalize_or_zero();
         let up = right.cross(forward).normalize_or_zero();
@@ -158,7 +204,7 @@ impl ChunkCamera {
             fov_y_radians: self.fov_y_radians,
             z_near: self.z_near,
             z_far: self.z_far,
-            projection_kind: ChunkProjectionKind::CameraPerspective,
+            projection_kind,
         };
         debug_assert!(
             render_view.is_finite(),
@@ -310,6 +356,7 @@ impl PerspectiveRenderPose {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ChunkProjectionKind {
     CameraPerspective,
+    CameraOrthographic,
     External,
 }
 
@@ -7853,6 +7900,30 @@ mod tests {
         assert_eq!(narrowed.view, base.view);
         assert_ne!(narrowed.projection, base.projection);
         assert_ne!(narrowed.view_projection, base.view_projection);
+    }
+
+    #[test]
+    fn orthographic_camera_preserves_scale_across_depth() {
+        let camera = ChunkCamera {
+            eye: [0.0, 0.0, 10.0],
+            target: [0.0, 0.0, 0.0],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 58.0_f32.to_radians(),
+            z_near: 0.1,
+            z_far: 100.0,
+        };
+        let view = camera.render_orthographic_view(1_000, 500, 10.0);
+        let near = view.view_projection * Vec4::new(4.0, 2.0, 0.0, 1.0);
+        let far = view.view_projection * Vec4::new(4.0, 2.0, -20.0, 1.0);
+
+        assert_eq!(
+            view.projection_kind,
+            ChunkProjectionKind::CameraOrthographic
+        );
+        assert!((near.x / near.w - far.x / far.w).abs() < 1.0e-6);
+        assert!((near.y / near.w - far.y / far.w).abs() < 1.0e-6);
+        assert!((near.x / near.w - 0.4).abs() < 1.0e-6);
+        assert!((near.y / near.w - 0.4).abs() < 1.0e-6);
     }
 
     #[test]

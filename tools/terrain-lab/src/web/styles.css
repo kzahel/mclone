@@ -335,7 +335,11 @@ h1 {
 .mapToolbar {
   min-height: 62px;
   display: grid;
-  grid-template-columns: minmax(240px, 0.8fr) minmax(230px, 1fr) 188px;
+  grid-template-columns:
+    minmax(210px, 0.75fr)
+    minmax(250px, 0.9fr)
+    minmax(230px, 1fr)
+    188px;
   gap: 14px;
   align-items: end;
   padding: 10px 18px 11px;
@@ -938,6 +942,11 @@ button:hover {
   .terrainStage {
     min-height: 52vh;
     max-height: 580px;
+  }
+
+  .proceduralPaneFrame.twoLogicalPanes.splitRows .terrainStage {
+    min-height: 104vh;
+    max-height: 1160px;
   }
 
   .previewToolbar {

@@ -31,6 +31,8 @@ The URL owns the review state:
 - `source`: legacy/procedural compatibility value (`reference`, `gpu`, or
   `split`); new links should use `panes`
 - `view`: `3d` or `map`
+- `projection`: `orthographic` (the default) or `perspective`; map view is
+  always orthographic
 - `stage`: `base`, `hydrology`, `structured`, `surface`, or `cover`
 - `layer`: `terrain`, `height`, `error`, `continentalness`, `climate`,
   `rivers`, `wetlands`, `landforms`, `biomes`, `surface`, or `streams`
@@ -44,6 +46,9 @@ through a non-passive native listener, so a Mac trackpad or mouse wheel zooms
 terrain without scrolling the document. Map zoom is anchored under the
 pointer; map drag follows grab semantics on both axes; 3D left drag orbits;
 and right, Shift+left, or middle drag pans in 3D. Arrow keys pan both views.
+A shared projection selector applies the same orthographic or perspective
+camera to exact, CPU LOD, and GPU LOD panes. Orthographic is the default so
+aligned terrain keeps one scale from the near edge to the far edge.
 A click or tap without a drag selects a production point receipt using analytic
 map picking or the shared 3D projection and a bounded heightfield ray.
 `Auto` selects approximately two CSS pixels per sample cell. A manual detail
@@ -71,14 +76,15 @@ and submerged outlets are pure CPU/GPU fields. Planned streams remain bounded
 CPU route records reconstructed only through `1:4`, then merged into either
 LOD lane. Coarser structured views explicitly report them unavailable.
 
-When both LOD panes are visible, wide canvases place them side by side and
-portrait canvases stack two full-width views. The CPU and GPU panels publish
-independently at identical coordinates; their labels expose the race while
-the final comparison waits for matching target samples. The exact pane is not
-another height field: it is a bounded block-and-feature patch nested at the
-same world center and scale. Generated fallback atlas tiles intentionally
-remain visible for block materials that do not yet have curated first-party
-textures.
+When both LOD panes are visible, desktop workspaces place them beside the
+canonical pane as equal-height logical columns. Responsive phone workspaces
+stack canonical, CPU LOD, and GPU LOD as equal-size logical rows. The CPU and
+GPU panels publish independently at identical coordinates; their labels expose
+the race while the final comparison waits for matching target samples. The
+exact pane is not another height field: it is a bounded block-and-feature patch
+nested at the same world center and scale. Generated fallback atlas tiles
+intentionally remain visible for block materials that do not yet have curated
+first-party textures.
 
 The exact and LOD caches are independent. `Exact cache on` retains generated
 chunks by seed, checkpoint, and chunk coordinate; `Exact cache off` compiles

@@ -8,16 +8,19 @@ use mclone_mesh::{
     load_first_party_textured_terrain_assets,
 };
 use mclone_render::chunk::{
-    ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkTextureAtlas, ChunkTextureSampling,
-    TexturedSectionDrawResources, TexturedSectionRenderOptions,
+    ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkRenderView, ChunkTextureAtlas,
+    ChunkTextureSampling, TexturedSectionDrawResources, TexturedSectionRenderOptions,
 };
 use mclone_terrain_view::{
-    CanonicalTerrainVisibility, TerrainPreviewCamera, TerrainPreviewView,
-    canonical_terrain_presentation_blocks, terrain_preview_focus_y, terrain_preview_projection,
+    CanonicalTerrainVisibility, TerrainPreviewCamera, TerrainPreviewProjectionKind,
+    TerrainPreviewView, canonical_terrain_presentation_blocks, terrain_preview_focus_y,
+    terrain_preview_projection,
 };
 use serde::Serialize;
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 use web_sys::HtmlCanvasElement;
+
+use crate::terrain_preview_projection_kind;
 
 use crate::web::surface_configuration;
 
@@ -193,10 +196,13 @@ impl CanonicalTerrainLab {
         view: String,
         camera_yaw: f32,
         camera_pitch: f32,
+        projection: String,
     ) -> Result<String, JsValue> {
-        let camera = TerrainPreviewCamera::new(camera_yaw, camera_pitch).map_err(js_error)?;
+        let projection_kind = terrain_preview_projection_kind(&projection).map_err(js_error)?;
+        let camera = TerrainPreviewCamera::new(camera_yaw, camera_pitch, projection_kind)
+            .map_err(js_error)?;
         let focus_y = terrain_preview_focus_y(self.seed, center_x, center_z);
-        let render_camera = canonical_camera(
+        let render_view = canonical_render_view(
             center_x,
             center_z,
             blocks_across,
@@ -230,7 +236,7 @@ impl CanonicalTerrainLab {
                         a: 1.0,
                     },
                 ),
-                render_camera.render_view(self.width, self.height),
+                render_view,
                 TexturedSectionRenderOptions {
                     section_occlusion_culling: false,
                     force_fullbright: true,
@@ -455,7 +461,7 @@ pub fn mclone_terrain_lab_create_canonical(
     })
 }
 
-fn canonical_camera(
+fn canonical_render_view(
     center_x: i32,
     center_z: i32,
     blocks_across: u32,
@@ -464,7 +470,7 @@ fn canonical_camera(
     width: u32,
     height: u32,
     focus_y: f32,
-) -> Result<ChunkCamera, JsValue> {
+) -> Result<ChunkRenderView, JsValue> {
     // Integer Terrain Lab centers identify block columns. Aim exact geometry
     // at that column's center so a one-block viewport frames one complete top
     // face rather than four quarters around a block boundary.
@@ -481,7 +487,7 @@ fn canonical_camera(
     };
     let projection =
         terrain_preview_projection(blocks_across, preview_view, camera, width, height, focus_y);
-    Ok(ChunkCamera {
+    let render_camera = ChunkCamera {
         eye: [
             center_x + projection.eye_offset[0],
             projection.target_y + projection.eye_offset[1],
@@ -492,6 +498,14 @@ fn canonical_camera(
         fov_y_radians: projection.fov_y_radians,
         z_near: projection.z_near,
         z_far: projection.z_far,
+    };
+    Ok(match projection.kind {
+        TerrainPreviewProjectionKind::Orthographic => render_camera.render_orthographic_view(
+            width,
+            height,
+            projection.vertical_half_extent * 2.0,
+        ),
+        TerrainPreviewProjectionKind::Perspective => render_camera.render_view(width, height),
     })
 }
 

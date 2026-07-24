@@ -19,6 +19,7 @@ import {
   type TerrainLabLayer,
   type TerrainLabCamera,
   type TerrainLabPane,
+  type TerrainLabProjection,
   type TerrainLabState,
   type TerrainLabView,
 } from "../state";
@@ -75,6 +76,7 @@ export function App(): React.JSX.Element {
   const [canonicalReport, setCanonicalReport] = useState<CanonicalTerrainReport>();
   const [benchmarkProfile, setBenchmarkProfile] =
     useState<BenchmarkProfile>("interactive");
+  const splitLayout = useResponsiveSplitLayout();
 
   useEffect(() => {
     const search = terrainLabSearch(state);
@@ -124,7 +126,7 @@ export function App(): React.JSX.Element {
   const renderStatus = workspaceStatus === "rendering" ? "updating" : workspaceStatus;
   const compareLayout = proceduralSource !== "split"
     ? "single"
-    : renderReport && renderReport.width <= renderReport.height
+    : splitLayout === "rows"
       ? "stacked"
       : "side-by-side";
 
@@ -136,6 +138,7 @@ export function App(): React.JSX.Element {
       data-render-revision={renderReport?.revision ?? 0}
       data-camera-yaw={camera.yaw}
       data-camera-pitch={camera.pitch}
+      data-projection={state.projection}
       data-base-mean-error={comparison?.meanAbsoluteBaseSurfaceError ?? ""}
       data-base-p95-error={comparison?.p95AbsoluteBaseSurfaceError ?? ""}
       data-ocean-agreement={comparison?.oceanWaterPresenceAgreement ?? ""}
@@ -219,6 +222,23 @@ export function App(): React.JSX.Element {
               ]}
               onChange={(view) => patchState({ view })}
             />
+            <SegmentedControl<TerrainLabProjection>
+              label="3D projection"
+              value={state.projection}
+              options={[
+                {
+                  value: "orthographic",
+                  label: "Orthographic",
+                  note: "Preserve scale across the whole terrain view",
+                },
+                {
+                  value: "perspective",
+                  label: "Perspective",
+                  note: "Use distance foreshortening",
+                },
+              ]}
+              onChange={(projection) => patchState({ projection })}
+            />
             <label className="fieldLabel compactField">
               <span>Resolution</span>
               <select
@@ -285,11 +305,13 @@ export function App(): React.JSX.Element {
               <div
                 className={`paneFrame proceduralPaneFrame${
                   cpuVisible && gpuVisible ? " twoLogicalPanes" : ""
+                }${splitLayout === "rows" ? " splitRows" : ""
                 }`}
               >
                 <TerrainCanvas
                   state={proceduralState}
                   camera={camera}
+                  splitLayout={splitLayout}
                   cacheEnabled={cacheEnabled}
                   cacheEpoch={cacheEpoch}
                   maxVisibleTilesPerAxis={benchmarkProfile === "stress" ? 12 : 8}
@@ -611,6 +633,21 @@ export function App(): React.JSX.Element {
       </main>
     </div>
   );
+}
+
+function useResponsiveSplitLayout(): "columns" | "rows" {
+  const query = "(max-width: 1040px)";
+  const [layout, setLayout] = useState<"columns" | "rows">(() =>
+    window.matchMedia(query).matches ? "rows" : "columns"
+  );
+  useEffect(() => {
+    const media = window.matchMedia(query);
+    const update = (): void => setLayout(media.matches ? "rows" : "columns");
+    update();
+    media.addEventListener("change", update);
+    return () => media.removeEventListener("change", update);
+  }, []);
+  return layout;
 }
 
 function PointReceipt({

@@ -37,6 +37,7 @@ test("round-trips complete URL state", () => {
     vegetationVisible: true,
     contentStage: "cover" as const,
     view: "map" as const,
+    projection: "perspective" as const,
     layer: "continentalness" as const,
   };
   assert.deepEqual(parseTerrainLabState(terrainLabSearch(state)), {
@@ -231,6 +232,19 @@ test("orbits independently from URL-addressed terrain state", () => {
     vegetationVisible: true,
     contentStage: "hydrology",
     view: "3d",
+    projection: "orthographic",
     layer: "terrain",
   });
+});
+
+test("defaults to orthographic and validates projection links", () => {
+  assert.equal(DEFAULT_TERRAIN_LAB_STATE.projection, "orthographic");
+  assert.equal(
+    parseTerrainLabState("?projection=perspective").projection,
+    "perspective",
+  );
+  assert.equal(
+    parseTerrainLabState("?projection=isometric").projection,
+    "orthographic",
+  );
 });

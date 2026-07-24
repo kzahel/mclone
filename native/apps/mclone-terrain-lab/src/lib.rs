@@ -1,7 +1,8 @@
 #![forbid(unsafe_code)]
 
 use mclone_terrain_view::{
-    CanonicalTerrainStage, TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource,
+    CanonicalTerrainStage, TerrainPreviewDrawOptions, TerrainPreviewLayer,
+    TerrainPreviewProjectionKind, TerrainPreviewSource, TerrainPreviewSplitLayout,
     TerrainPreviewView,
 };
 use mclone_worldgen::terrain_preview::TerrainPreviewContentStage;
@@ -61,6 +62,7 @@ pub fn terrain_preview_options(
                 ));
             }
         },
+        split_layout: TerrainPreviewSplitLayout::Columns,
     })
 }
 
@@ -106,6 +108,28 @@ pub fn terrain_preview_content_stage(value: &str) -> Result<TerrainPreviewConten
     }
 }
 
+pub fn terrain_preview_projection_kind(
+    value: &str,
+) -> Result<TerrainPreviewProjectionKind, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "orthographic" | "ortho" => Ok(TerrainPreviewProjectionKind::Orthographic),
+        "perspective" => Ok(TerrainPreviewProjectionKind::Perspective),
+        other => Err(format!(
+            "unsupported terrain preview projection {other:?}; expected orthographic or perspective"
+        )),
+    }
+}
+
+pub fn terrain_preview_split_layout(value: &str) -> Result<TerrainPreviewSplitLayout, String> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "columns" | "side-by-side" => Ok(TerrainPreviewSplitLayout::Columns),
+        "rows" | "stacked" => Ok(TerrainPreviewSplitLayout::Rows),
+        other => Err(format!(
+            "unsupported Terrain Lab split layout {other:?}; expected columns or rows"
+        )),
+    }
+}
+
 pub fn canonical_terrain_stage(value: &str) -> Result<CanonicalTerrainStage, String> {
     match value.trim().to_ascii_lowercase().as_str() {
         "surface" => Ok(CanonicalTerrainStage::Surface),
@@ -144,6 +168,7 @@ mod tests {
                 source: TerrainPreviewSource::Reference,
                 view: TerrainPreviewView::Map,
                 layer: TerrainPreviewLayer::Error,
+                split_layout: TerrainPreviewSplitLayout::Columns,
             }
         );
         assert_eq!(
@@ -160,9 +185,23 @@ mod tests {
         assert!(terrain_preview_options("gpu", "perspective", "terrain").is_err());
         assert!(terrain_preview_options("gpu", "3d", "geology").is_err());
         assert!(terrain_preview_content_stage("lighting").is_err());
+        assert!(terrain_preview_projection_kind("isometric").is_err());
+        assert!(terrain_preview_split_layout("diagonal").is_err());
         assert_eq!(
             terrain_preview_content_stage("streams").unwrap(),
             TerrainPreviewContentStage::Structured
+        );
+        assert_eq!(
+            terrain_preview_projection_kind("ortho").unwrap(),
+            TerrainPreviewProjectionKind::Orthographic
+        );
+        assert_eq!(
+            terrain_preview_projection_kind("perspective").unwrap(),
+            TerrainPreviewProjectionKind::Perspective
+        );
+        assert_eq!(
+            terrain_preview_split_layout("stacked").unwrap(),
+            TerrainPreviewSplitLayout::Rows
         );
     }
 
@@ -180,5 +219,110 @@ mod tests {
             canonical_terrain_stage_label(canonical_terrain_stage("features").unwrap()),
             "final"
         );
+    }
+
+    #[test]
+    fn exact_and_lod_landmarks_share_projection_and_rotation() {
+        let target_y = 73.0;
+        for kind in [
+            TerrainPreviewProjectionKind::Orthographic,
+            TerrainPreviewProjectionKind::Perspective,
+        ] {
+            let camera = mclone_terrain_view::TerrainPreviewCamera::new(0.83, 0.57, kind).unwrap();
+            let projection = mclone_terrain_view::terrain_preview_projection(
+                64,
+                TerrainPreviewView::ThreeDimensional,
+                camera,
+                341,
+                529,
+                target_y,
+            );
+            let chunk_camera = mclone_render::chunk::ChunkCamera {
+                eye: [
+                    0.5 + projection.eye_offset[0],
+                    projection.target_y + projection.eye_offset[1],
+                    0.5 + projection.eye_offset[2],
+                ],
+                target: [0.5, projection.target_y, 0.5],
+                up: projection.up,
+                fov_y_radians: projection.fov_y_radians,
+                z_near: projection.z_near,
+                z_far: projection.z_far,
+            };
+            let render_view = match kind {
+                TerrainPreviewProjectionKind::Orthographic => chunk_camera
+                    .render_orthographic_view(341, 529, projection.vertical_half_extent * 2.0),
+                TerrainPreviewProjectionKind::Perspective => chunk_camera.render_view(341, 529),
+            };
+
+            for relative in [[12.0, 88.0, -8.0], [-19.0, 61.0, 23.0]] {
+                let exact = project_matrix(
+                    render_view.uniform_matrix(),
+                    [relative[0] + 0.5, relative[1], relative[2] + 0.5, 1.0],
+                );
+                let lod = project_preview(projection, relative);
+                assert!(
+                    (exact[0] - lod[0]).abs() < 1.0e-5 && (exact[1] - lod[1]).abs() < 1.0e-5,
+                    "{kind:?} landmark drifted: exact={exact:?}, lod={lod:?}"
+                );
+            }
+        }
+    }
+
+    fn project_matrix(matrix: [[f32; 4]; 4], point: [f32; 4]) -> [f32; 2] {
+        let clip = [0, 1, 2, 3].map(|row| {
+            (0..4)
+                .map(|column| matrix[column][row] * point[column])
+                .sum::<f32>()
+        });
+        [clip[0] / clip[3], clip[1] / clip[3]]
+    }
+
+    fn project_preview(
+        projection: mclone_terrain_view::TerrainPreviewProjection,
+        point: [f32; 3],
+    ) -> [f32; 2] {
+        let eye = [
+            projection.eye_offset[0],
+            projection.target_y + projection.eye_offset[1],
+            projection.eye_offset[2],
+        ];
+        let target = [0.0, projection.target_y, 0.0];
+        let forward = normalize(subtract(target, eye));
+        let right = normalize(cross(forward, projection.up));
+        let up = normalize(cross(right, forward));
+        let from_eye = subtract(point, eye);
+        let depth = dot(from_eye, forward).max(projection.z_near);
+        let half_height = match projection.kind {
+            TerrainPreviewProjectionKind::Orthographic => projection.vertical_half_extent,
+            TerrainPreviewProjectionKind::Perspective => {
+                depth * (projection.fov_y_radians * 0.5).tan()
+            }
+        };
+        [
+            dot(from_eye, right) / (half_height * projection.aspect),
+            dot(from_eye, up) / half_height,
+        ]
+    }
+
+    fn subtract(left: [f32; 3], right: [f32; 3]) -> [f32; 3] {
+        [left[0] - right[0], left[1] - right[1], left[2] - right[2]]
+    }
+
+    fn cross(left: [f32; 3], right: [f32; 3]) -> [f32; 3] {
+        [
+            left[1] * right[2] - left[2] * right[1],
+            left[2] * right[0] - left[0] * right[2],
+            left[0] * right[1] - left[1] * right[0],
+        ]
+    }
+
+    fn dot(left: [f32; 3], right: [f32; 3]) -> f32 {
+        left[0] * right[0] + left[1] * right[1] + left[2] * right[2]
+    }
+
+    fn normalize(vector: [f32; 3]) -> [f32; 3] {
+        let length = dot(vector, vector).sqrt();
+        [vector[0] / length, vector[1] / length, vector[2] / length]
     }
 }

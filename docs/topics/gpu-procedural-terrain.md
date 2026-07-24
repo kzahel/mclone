@@ -2,8 +2,11 @@
 
 Topic: `gpu-procedural-terrain`
 
-Status: textured projection and navigation follow-up completed with local and
-hosted desktop/mobile validation 2026-07-24 under
+Status: shared orthographic/perspective projection and equal logical-pane
+layout correction completed local desktop/mobile headed-WebGPU validation
+2026-07-25. Orthographic is now the default. The earlier textured projection
+and navigation follow-up completed with local and hosted desktop/mobile
+validation 2026-07-24 under
 Tactical
 [`233-terrain-lab-projection-materials-and-navigation.md`](../tactical/233-terrain-lab-projection-materials-and-navigation.md).
 The canonical multi-pane Terrain Lab workspace completed local and hosted
@@ -184,9 +187,12 @@ chunk order.
 [`tools/terrain-lab`](../../tools/terrain-lab/) owns URL state, replaceable
 Worker epochs, responsive presentation, and cache controls. The workspace
 shows any unique subset of canonical, CPU LOD, and GPU LOD panes. Every pane
-shares seed, center, viewport, camera, and navigation; the exact radius remains
-separately bounded from the broad visual footprint. Water and vegetation
-switches remesh retained exact blocks without changing generation.
+shares seed, center, viewport, camera yaw/pitch, projection kind, logical-pane
+aspect, and navigation; the exact radius remains separately bounded from the
+broad visual footprint. Orthographic is the default 3D projection and
+perspective remains URL-addressable and selectable. Map mode stays
+orthographic. Water and vegetation switches remesh retained exact blocks
+without changing generation.
 
 Three-dimensional left drag orbits with conventional pitch direction without
 changing URL-addressed geography; right drag, Shift+left, or middle drag pan,
@@ -195,8 +201,11 @@ change a separate continuous viewport, and map zoom is cursor anchored. Auto
 targets approximately two CSS pixels per sample cell;
 an explicit manual request remains visible when the interactive tile budget
 raises effective spacing. CPU and GPU LOD publish independently at exact
-matching coordinates. Wide procedural canvases place them side by side;
-portrait canvases stack full-width panels.
+matching coordinates. Desktop comparison uses equal-height logical columns;
+the responsive phone layout uses equal-size logical rows, including a
+double-height procedural host when both LOD panes are visible. This prevents
+the old half-height LOD view from changing physical block scale relative to
+canonical terrain.
 
 The deployed `/terrain/` product remains independent of the game client,
 server, collision, persistence, and authoritative propagated lighting. It now

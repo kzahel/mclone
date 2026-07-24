@@ -32,8 +32,9 @@ test("generates terrain, round-trips controls, and completes comparison", async 
   await expect(shell).toHaveAttribute("data-canonical-complete", "true");
   await expect(shell).toHaveAttribute(
     "data-compare-layout",
-    "stacked",
+    testInfo.project.name === "phone-chrome" ? "stacked" : "side-by-side",
   );
+  await expect(shell).toHaveAttribute("data-projection", "orthographic");
   expect(Number(await shell.getAttribute("data-vertex-count"))).toBeGreaterThan(49_152);
   await expect(shell).toHaveAttribute("data-target-ready", "true");
   expect(Number(await shell.getAttribute("data-resident-tiles"))).toBeGreaterThan(1);
@@ -59,6 +60,12 @@ test("generates terrain, round-trips controls, and completes comparison", async 
   await canvas.screenshot({
     path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-initial.png`,
   });
+  await page.getByRole("button", { name: "Perspective", exact: true }).click();
+  await expect(page).toHaveURL(/projection=perspective/u);
+  await expect(shell).toHaveAttribute("data-projection", "perspective");
+  await page.getByRole("button", { name: "Orthographic", exact: true }).click();
+  await expect(page).toHaveURL(/projection=orthographic/u);
+  await expect(shell).toHaveAttribute("data-projection", "orthographic");
   const compareStageBox = await page.getByTestId("terrain-stage").boundingBox();
   expect(compareStageBox).not.toBeNull();
 
@@ -87,7 +94,7 @@ test("generates terrain, round-trips controls, and completes comparison", async 
   await expect(shell).toHaveAttribute("data-panes", "canonical,cpu,gpu");
   await expect(shell).toHaveAttribute(
     "data-compare-layout",
-    "stacked",
+    testInfo.project.name === "phone-chrome" ? "stacked" : "side-by-side",
   );
 
   const initialRevision = Number(await shell.getAttribute("data-render-revision"));
@@ -270,7 +277,7 @@ test("reconstructs one planned stream for both LOD lanes", async ({
   const stage = page.getByTestId("terrain-stage");
   const bounds = await stage.boundingBox();
   expect(bounds).not.toBeNull();
-  const stacked = bounds!.width <= bounds!.height;
+  const stacked = testInfo.project.name === "phone-chrome";
   const pointerX = bounds!.x + bounds!.width * (stacked ? 0.5 : 0.25);
   const pointerY = bounds!.y + bounds!.height * (stacked ? 0.25 : 0.5);
   await page.mouse.click(pointerX, pointerY);

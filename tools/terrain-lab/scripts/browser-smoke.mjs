@@ -83,7 +83,7 @@ try {
   if (!sourceGuide.includes("Same coordinates, independent readiness")) {
     throw new Error(`Terrain Lab compare guidance is missing:\n${sourceGuide}`);
   }
-  const expectedCompareLayout = "stacked";
+  const expectedCompareLayout = mobile ? "stacked" : "side-by-side";
   if (await shell.getAttribute("data-compare-layout") !== expectedCompareLayout
       || Number(await shell.getAttribute("data-vertex-count")) <= 49_152
       || await shell.getAttribute("data-target-ready") !== "true") {

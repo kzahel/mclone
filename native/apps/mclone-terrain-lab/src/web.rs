@@ -4,10 +4,10 @@ use mclone_mesh::load_first_party_textured_terrain_assets;
 use mclone_terrain_view::{
     CanonicalTerrainCompiler, TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION,
     TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainPreviewCamera, TerrainPreviewMaterialAtlas,
-    TerrainPreviewSource, TerrainPreviewView, TerrainViewportCompletedComparison,
-    TerrainViewportDetail, TerrainViewportFrameStats, TerrainViewportRenderer,
-    TerrainViewportRequest, canonical_terrain_chunk_order, plan_terrain_viewport,
-    terrain_preview_focus_y, terrain_preview_projection,
+    TerrainPreviewProjectionKind, TerrainPreviewSource, TerrainPreviewView,
+    TerrainViewportCompletedComparison, TerrainViewportDetail, TerrainViewportFrameStats,
+    TerrainViewportRenderer, TerrainViewportRequest, canonical_terrain_chunk_order,
+    plan_terrain_viewport, terrain_preview_focus_y, terrain_preview_projection,
 };
 use mclone_worldgen::{
     levelgen::{
@@ -25,7 +25,8 @@ use web_sys::HtmlCanvasElement;
 
 use crate::{
     canonical_terrain_stage, canonical_terrain_stage_label, terrain_preview_content_stage,
-    terrain_preview_option_labels, terrain_preview_options,
+    terrain_preview_option_labels, terrain_preview_options, terrain_preview_projection_kind,
+    terrain_preview_split_layout,
 };
 
 #[wasm_bindgen(js_name = CanonicalTerrainCompiler)]
@@ -421,15 +422,20 @@ impl TerrainLab {
         content_stage: String,
         camera_yaw: f32,
         camera_pitch: f32,
+        projection: String,
+        split_layout: String,
     ) -> Result<String, JsValue> {
         let request_start = now_ms()?;
         let seed_value = seed
             .trim()
             .parse::<i64>()
             .map_err(|error| js_error(format!("invalid signed 64-bit seed {seed:?}: {error}")))?;
-        let options = terrain_preview_options(&source, &view, &layer).map_err(js_error)?;
+        let mut options = terrain_preview_options(&source, &view, &layer).map_err(js_error)?;
+        options.split_layout = terrain_preview_split_layout(&split_layout).map_err(js_error)?;
         let content_stage = terrain_preview_content_stage(&content_stage).map_err(js_error)?;
-        let camera = TerrainPreviewCamera::new(camera_yaw, camera_pitch).map_err(js_error)?;
+        let projection_kind = terrain_preview_projection_kind(&projection).map_err(js_error)?;
+        let camera = TerrainPreviewCamera::new(camera_yaw, camera_pitch, projection_kind)
+            .map_err(js_error)?;
         let viewport_detail = parse_viewport_detail(&detail).map_err(js_error)?;
         let plan = plan_terrain_viewport(TerrainViewportRequest {
             seed: seed_value,
@@ -718,6 +724,8 @@ pub fn terrain_lab_inspect_point(
     view: String,
     camera_yaw: f32,
     camera_pitch: f32,
+    projection: String,
+    split_layout: String,
     pointer_x_css: f32,
     pointer_y_css: f32,
 ) -> Result<String, JsValue> {
@@ -725,10 +733,14 @@ pub fn terrain_lab_inspect_point(
         .trim()
         .parse::<i64>()
         .map_err(|error| js_error(format!("invalid signed 64-bit seed {seed:?}: {error}")))?;
-    let options = terrain_preview_options(&source, &view, "terrain").map_err(js_error)?;
-    let camera = TerrainPreviewCamera::new(camera_yaw, camera_pitch).map_err(js_error)?;
+    let mut options = terrain_preview_options(&source, &view, "terrain").map_err(js_error)?;
+    options.split_layout = terrain_preview_split_layout(&split_layout).map_err(js_error)?;
+    let projection_kind = terrain_preview_projection_kind(&projection).map_err(js_error)?;
+    let camera =
+        TerrainPreviewCamera::new(camera_yaw, camera_pitch, projection_kind).map_err(js_error)?;
     let (panel_width, panel_height, local_x, local_y) = local_inspection_panel(
         options.source,
+        options.split_layout,
         panel_width_css.max(1),
         panel_height_css.max(1),
         pointer_x_css,
@@ -758,6 +770,7 @@ pub fn terrain_lab_inspect_point(
 
 fn local_inspection_panel(
     source: TerrainPreviewSource,
+    split_layout: mclone_terrain_view::TerrainPreviewSplitLayout,
     width: u32,
     height: u32,
     pointer_x: f32,
@@ -771,7 +784,7 @@ fn local_inspection_panel(
             pointer_y.clamp(0.0, height as f32),
         );
     }
-    if width <= height {
+    if split_layout == mclone_terrain_view::TerrainPreviewSplitLayout::Rows {
         let panel_height = (height / 2).max(1);
         (
             width,
@@ -831,16 +844,36 @@ fn inspection_world_coordinate(
     let forward = normalize3([-eye[0], projection.target_y - eye[1], -eye[2]]);
     let right = normalize3(cross3(forward, projection.up));
     let camera_up = normalize3(cross3(right, forward));
-    let half_height = (projection.fov_y_radians * 0.5).tan();
     let ndc_x = normalized_x * 2.0 - 1.0;
     let ndc_y = 1.0 - normalized_y * 2.0;
-    let direction = normalize3(add3(
-        forward,
-        add3(
-            scale3(right, ndc_x * half_height * projection.aspect),
-            scale3(camera_up, ndc_y * half_height),
+    let (eye, direction) = match projection.kind {
+        TerrainPreviewProjectionKind::Orthographic => (
+            add3(
+                eye,
+                add3(
+                    scale3(
+                        right,
+                        ndc_x * projection.vertical_half_extent * projection.aspect,
+                    ),
+                    scale3(camera_up, ndc_y * projection.vertical_half_extent),
+                ),
+            ),
+            forward,
         ),
-    ));
+        TerrainPreviewProjectionKind::Perspective => {
+            let half_height = (projection.fov_y_radians * 0.5).tan();
+            (
+                eye,
+                normalize3(add3(
+                    forward,
+                    add3(
+                        scale3(right, ndc_x * half_height * projection.aspect),
+                        scale3(camera_up, ndc_y * half_height),
+                    ),
+                )),
+            )
+        }
+    };
     let sampler =
         McloneOverworldSampler::new_with_topology(seed, McloneOverworldSamplingTopology::Unbounded);
     let ray_height = |distance: f32| {

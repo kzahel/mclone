@@ -188,6 +188,7 @@ export function CanonicalTerrainCanvas({
         state.view,
         camera.yaw,
         camera.pitch,
+        state.projection,
       );
     } catch (error: unknown) {
       onError(errorMessage(error));
@@ -200,6 +201,7 @@ export function CanonicalTerrainCanvas({
     state.blocksAcross,
     state.centerX,
     state.centerZ,
+    state.projection,
     state.view,
   ]);
 
@@ -217,6 +219,7 @@ export function CanonicalTerrainCanvas({
         state.view,
         camera.yaw,
         camera.pitch,
+        state.projection,
       );
     } catch (error: unknown) {
       onError(errorMessage(error));
@@ -229,6 +232,7 @@ export function CanonicalTerrainCanvas({
     state.blocksAcross,
     state.centerX,
     state.centerZ,
+    state.projection,
     state.vegetationVisible,
     state.view,
     state.waterVisible,
@@ -408,6 +412,7 @@ export function CanonicalTerrainCanvas({
         current.state.view,
         current.camera.yaw,
         current.camera.pitch,
+        current.state.projection,
       );
     }
   }, [

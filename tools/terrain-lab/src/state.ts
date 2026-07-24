@@ -10,6 +10,7 @@ export type TerrainLabSource = "gpu" | "reference" | "split";
 export type TerrainLabPane = "canonical" | "cpu" | "gpu";
 export type CanonicalTerrainStage = "surface" | "final";
 export type TerrainLabView = "map" | "3d";
+export type TerrainLabProjection = "orthographic" | "perspective";
 export type TerrainLabContentStage =
   | "base"
   | "hydrology"
@@ -43,6 +44,7 @@ export interface TerrainLabState {
   vegetationVisible: boolean;
   contentStage: TerrainLabContentStage;
   view: TerrainLabView;
+  projection: TerrainLabProjection;
   layer: TerrainLabLayer;
 }
 
@@ -65,6 +67,7 @@ export const DEFAULT_TERRAIN_LAB_STATE: TerrainLabState = {
   vegetationVisible: true,
   contentStage: "hydrology",
   view: "3d",
+  projection: "orthographic",
   layer: "terrain",
 };
 
@@ -86,6 +89,7 @@ const SOURCES = new Set<TerrainLabSource>(["gpu", "reference", "split"]);
 const PANES = new Set<TerrainLabPane>(["canonical", "cpu", "gpu"]);
 const CANONICAL_STAGES = new Set<CanonicalTerrainStage>(["surface", "final"]);
 const VIEWS = new Set<TerrainLabView>(["map", "3d"]);
+const PROJECTIONS = new Set<TerrainLabProjection>(["orthographic", "perspective"]);
 const CONTENT_STAGES = new Set<TerrainLabContentStage>([
   "base",
   "hydrology",
@@ -139,6 +143,8 @@ export function parseTerrainLabState(
     contentStage:
       validMember(params.get("stage"), CONTENT_STAGES) ?? fallback.contentStage,
     view: validMember(params.get("view"), VIEWS) ?? fallback.view,
+    projection:
+      validMember(params.get("projection"), PROJECTIONS) ?? fallback.projection,
     layer: validMember(params.get("layer"), LAYERS) ?? fallback.layer,
   };
 }
@@ -158,6 +164,7 @@ export function terrainLabSearch(state: TerrainLabState): string {
   params.set("vegetation", state.vegetationVisible ? "1" : "0");
   params.set("stage", state.contentStage);
   params.set("view", state.view);
+  params.set("projection", state.projection);
   params.set("layer", state.layer);
   return `?${params.toString()}`;
 }

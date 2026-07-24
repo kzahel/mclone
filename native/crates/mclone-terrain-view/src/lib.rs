@@ -112,6 +112,31 @@ pub enum TerrainPreviewView {
     ThreeDimensional = 1,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[repr(u32)]
+pub enum TerrainPreviewProjectionKind {
+    #[default]
+    Orthographic = 0,
+    Perspective = 1,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[repr(u32)]
+pub enum TerrainPreviewSplitLayout {
+    #[default]
+    Columns = 0,
+    Rows = 1,
+}
+
+impl TerrainPreviewProjectionKind {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Orthographic => "orthographic",
+            Self::Perspective => "perspective",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 #[repr(u32)]
 pub enum TerrainPreviewLayer {
@@ -133,6 +158,7 @@ pub struct TerrainPreviewDrawOptions {
     pub source: TerrainPreviewSource,
     pub view: TerrainPreviewView,
     pub layer: TerrainPreviewLayer,
+    pub split_layout: TerrainPreviewSplitLayout,
 }
 
 impl Default for TerrainPreviewDrawOptions {
@@ -141,6 +167,7 @@ impl Default for TerrainPreviewDrawOptions {
             source: TerrainPreviewSource::Reference,
             view: TerrainPreviewView::ThreeDimensional,
             layer: TerrainPreviewLayer::Terrain,
+            split_layout: TerrainPreviewSplitLayout::Columns,
         }
     }
 }
@@ -149,16 +176,22 @@ impl Default for TerrainPreviewDrawOptions {
 pub struct TerrainPreviewCamera {
     pub yaw_radians: f32,
     pub pitch_radians: f32,
+    pub projection: TerrainPreviewProjectionKind,
 }
 
 impl TerrainPreviewCamera {
-    pub fn new(yaw_radians: f32, pitch_radians: f32) -> Result<Self, String> {
+    pub fn new(
+        yaw_radians: f32,
+        pitch_radians: f32,
+        projection: TerrainPreviewProjectionKind,
+    ) -> Result<Self, String> {
         if !yaw_radians.is_finite() || !pitch_radians.is_finite() {
             return Err("terrain preview camera angles must be finite".to_owned());
         }
         Ok(Self {
             yaw_radians,
             pitch_radians: pitch_radians.clamp(0.12, 1.25),
+            projection,
         })
     }
 }
@@ -168,16 +201,19 @@ impl Default for TerrainPreviewCamera {
         Self {
             yaw_radians: std::f32::consts::FRAC_PI_4,
             pitch_radians: 0.48,
+            projection: TerrainPreviewProjectionKind::Orthographic,
         }
     }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TerrainPreviewProjection {
+    pub kind: TerrainPreviewProjectionKind,
     pub eye_offset: [f32; 3],
     pub target_y: f32,
     pub up: [f32; 3],
     pub fov_y_radians: f32,
+    pub vertical_half_extent: f32,
     pub z_near: f32,
     pub z_far: f32,
     pub aspect: f32,
@@ -208,13 +244,19 @@ pub fn terrain_preview_projection(
 
     let blocks_across = blocks_across.max(1) as f32;
     let aspect = panel_width.max(1) as f32 / panel_height.max(1) as f32;
-    let (eye_offset, up, fov_y_radians) = match view {
+    let (kind, eye_offset, up, fov_y_radians, vertical_half_extent) = match view {
         TerrainPreviewView::Map => {
             let vertical_blocks = blocks_across / aspect.max(0.2);
             let half_height = vertical_blocks * 0.5;
             let distance = half_height / (OVERVIEW_FOV_Y * 0.5).tan() + MAP_CAMERA_CLEARANCE;
             let fov_y_radians = 2.0 * (half_height / distance).atan();
-            ([0.0, distance, 0.0], [0.0, 0.0, -1.0], fov_y_radians)
+            (
+                TerrainPreviewProjectionKind::Orthographic,
+                [0.0, distance, 0.0],
+                [0.0, 0.0, -1.0],
+                fov_y_radians,
+                half_height,
+            )
         }
         TerrainPreviewView::ThreeDimensional => {
             let overview_distance = CLOSE_3D_THRESHOLD_BLOCKS * 0.9 + 64.0;
@@ -230,6 +272,7 @@ pub fn terrain_preview_projection(
             };
             let horizontal = camera.pitch_radians.cos() * distance;
             (
+                camera.projection,
                 [
                     camera.yaw_radians.cos() * horizontal,
                     camera.pitch_radians.sin() * distance,
@@ -237,14 +280,17 @@ pub fn terrain_preview_projection(
                 ],
                 [0.0, 1.0, 0.0],
                 fov_y_radians,
+                distance * (fov_y_radians * 0.5).tan(),
             )
         }
     };
     TerrainPreviewProjection {
+        kind,
         eye_offset,
         target_y,
         up,
         fov_y_radians,
+        vertical_half_extent,
         z_near: 0.1,
         z_far: eye_offset[0].hypot(eye_offset[1]).hypot(eye_offset[2])
             + blocks_across.max(128.0) * 6.0
@@ -879,7 +925,8 @@ fn viewport_uniform_bytes_for_request(
         width.max(1),
         height.max(1),
     ];
-    let (panel_width, panel_height) = terrain_preview_panel_size(width, height, options.source);
+    let (panel_width, panel_height) =
+        terrain_preview_panel_size(width, height, options.source, options.split_layout);
     let projection = terrain_preview_projection(
         viewport_width_blocks,
         options.view,
@@ -908,7 +955,12 @@ fn viewport_uniform_bytes_for_request(
     ] {
         bytes.extend_from_slice(&value.to_le_bytes());
     }
-    for value in [projection.z_near, projection.z_far, projection.aspect, 0.0] {
+    for value in [
+        projection.z_near,
+        projection.z_far,
+        projection.aspect,
+        projection.vertical_half_extent,
+    ] {
         bytes.extend_from_slice(&value.to_le_bytes());
     }
     for value in [
@@ -919,20 +971,29 @@ fn viewport_uniform_bytes_for_request(
     ] {
         bytes.extend_from_slice(&value.to_le_bytes());
     }
-    for word in [source.content_stage as u32, 0, 0, 0] {
+    for word in [
+        source.content_stage as u32,
+        projection.kind as u32,
+        options.split_layout as u32,
+        0,
+    ] {
         bytes.extend_from_slice(&word.to_le_bytes());
     }
     bytes
 }
 
-fn terrain_preview_panel_size(width: u32, height: u32, source: TerrainPreviewSource) -> (u32, u32) {
+fn terrain_preview_panel_size(
+    width: u32,
+    height: u32,
+    source: TerrainPreviewSource,
+    split_layout: TerrainPreviewSplitLayout,
+) -> (u32, u32) {
     if source != TerrainPreviewSource::Split {
         return (width.max(1), height.max(1));
     }
-    if width <= height {
-        (width.max(1), (height / 2).max(1))
-    } else {
-        ((width / 2).max(1), height.max(1))
+    match split_layout {
+        TerrainPreviewSplitLayout::Columns => ((width / 2).max(1), height.max(1)),
+        TerrainPreviewSplitLayout::Rows => (width.max(1), (height / 2).max(1)),
     }
 }
 
@@ -995,6 +1056,8 @@ mod tests {
         let map = terrain_preview_projection(1, TerrainPreviewView::Map, camera, 800, 400, focus_y);
         let projected_map_height = map.eye_offset[1] * (map.fov_y_radians * 0.5).tan() * 2.0;
         assert!((projected_map_height - 0.5).abs() < 1.0e-5);
+        assert_eq!(map.kind, TerrainPreviewProjectionKind::Orthographic);
+        assert!((map.vertical_half_extent - 0.25).abs() < 1.0e-5);
         assert_eq!(map.target_y, focus_y);
         assert!(map.fov_y_radians < 1.0_f32.to_radians());
         assert!(map.z_near > 0.0 && map.z_far > map.z_near);
@@ -1024,10 +1087,28 @@ mod tests {
             focus_y,
         );
         assert_eq!(close.eye_offset, threshold.eye_offset);
+        assert_eq!(close.kind, TerrainPreviewProjectionKind::Orthographic);
         assert!(close.fov_y_radians < 1.0_f32.to_radians());
         assert!((threshold.fov_y_radians - 58.0_f32.to_radians()).abs() < f32::EPSILON);
         assert!((overview.fov_y_radians - 58.0_f32.to_radians()).abs() < f32::EPSILON);
         assert!(overview.eye_offset[1] > threshold.eye_offset[1]);
+
+        let perspective = terrain_preview_projection(
+            512,
+            TerrainPreviewView::ThreeDimensional,
+            TerrainPreviewCamera {
+                projection: TerrainPreviewProjectionKind::Perspective,
+                ..camera
+            },
+            800,
+            400,
+            focus_y,
+        );
+        assert_eq!(perspective.kind, TerrainPreviewProjectionKind::Perspective);
+        assert_eq!(
+            perspective.vertical_half_extent,
+            overview.vertical_half_extent
+        );
     }
 
     #[test]
@@ -1035,7 +1116,9 @@ mod tests {
         let reference =
             TerrainPreviewReferenceGrid::compile(TerrainPreviewRequest::new(12_345, -64, 96, 16))
                 .unwrap();
-        let camera = TerrainPreviewCamera::new(-0.75, 0.65).unwrap();
+        let camera =
+            TerrainPreviewCamera::new(-0.75, 0.65, TerrainPreviewProjectionKind::Perspective)
+                .unwrap();
         let bytes = uniform_bytes(
             &reference,
             1280,
@@ -1087,6 +1170,7 @@ mod tests {
             u32::from_le_bytes(bytes[112..116].try_into().unwrap()),
             mclone_worldgen::terrain_preview::TerrainPreviewContentStage::Base as u32
         );
+        assert_eq!(u32::from_le_bytes(bytes[116..120].try_into().unwrap()), 1);
     }
 
     #[test]
@@ -1158,7 +1242,7 @@ mod tests {
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("sample.terrain.y + 1.0"));
         assert!(
             TERRAIN_PREVIEW_RENDER_WGSL
-                .contains("let stacked_compare = compare && width <= height")
+                .contains("let stacked_compare = compare && params.content_stage_flags.z == 1u")
         );
         assert_eq!(preview_instance_count(TerrainPreviewSource::Split), 2);
         assert_eq!(preview_instance_count(TerrainPreviewSource::Reference), 1);

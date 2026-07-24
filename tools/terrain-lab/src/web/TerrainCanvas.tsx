@@ -194,6 +194,7 @@ export interface TerrainLabPointReceipt {
 interface TerrainCanvasProps {
   state: TerrainLabState;
   camera: TerrainLabCamera;
+  splitLayout: "columns" | "rows";
   cacheEnabled: boolean;
   cacheEpoch: number;
   maxVisibleTilesPerAxis: number;
@@ -236,6 +237,7 @@ const FALLBACK_PACK_URL = "/first-party-packs/mclone-generated-fallback.pbp";
 export function TerrainCanvas({
   state,
   camera,
+  splitLayout,
   cacheEnabled,
   cacheEpoch,
   maxVisibleTilesPerAxis,
@@ -376,7 +378,12 @@ export function TerrainCanvas({
             return;
           }
           const rect = stage.getBoundingClientRect();
-          const panel = terrainPanelSize(rect.width, rect.height, state.source);
+          const panel = terrainPanelSize(
+            rect.width,
+            rect.height,
+            state.source,
+            splitLayout,
+          );
           const report = parseJson<TerrainLabRenderReport>(
             lab.render(
               revision,
@@ -394,6 +401,8 @@ export function TerrainCanvas({
               state.contentStage,
               camera.yaw,
               camera.pitch,
+              state.projection,
+              splitLayout,
             ),
           );
           setLatestReport(report);
@@ -435,6 +444,7 @@ export function TerrainCanvas({
     onRender,
     onStatus,
     maxVisibleTilesPerAxis,
+    splitLayout,
     state,
   ]);
 
@@ -514,6 +524,7 @@ export function TerrainCanvas({
             pinch.clientX - rect.left,
             pinch.clientY - rect.top,
             pinch.state.source,
+            splitLayout,
           );
           queueState(
             pinchPanZoomTerrainLabState(
@@ -540,7 +551,12 @@ export function TerrainCanvas({
     }
     const rect = stage.getBoundingClientRect();
     if (start.mode === "pan") {
-      const panel = terrainPanelSize(rect.width, rect.height, start.state.source);
+      const panel = terrainPanelSize(
+        rect.width,
+        rect.height,
+        start.state.source,
+        splitLayout,
+      );
       const panelAspect = panel.width / Math.max(panel.height, 1);
       queueState(
         grabPanTerrainLabStateInView(
@@ -598,6 +614,8 @@ export function TerrainCanvas({
               state.view,
               camera.yaw,
               camera.pitch,
+              state.projection,
+              splitLayout,
               x,
               y,
             )));
@@ -651,6 +669,7 @@ export function TerrainCanvas({
         event.clientX - rect.left,
         event.clientY - rect.top,
         state.source,
+        splitLayout,
       );
       onStateChange(
         zoomTerrainLabState(
@@ -664,7 +683,7 @@ export function TerrainCanvas({
     };
     stage.addEventListener("wheel", zoomWithWheel, { passive: false });
     return () => stage.removeEventListener("wheel", zoomWithWheel);
-  }, [onStateChange, state]);
+  }, [onStateChange, splitLayout, state]);
 
   return (
     <div
@@ -744,11 +763,14 @@ function terrainPanelSize(
   width: number,
   height: number,
   source: TerrainLabSource,
+  splitLayout: "columns" | "rows",
 ): { width: number; height: number } {
   if (source !== "split") {
     return { width, height };
   }
-  return width <= height ? { width, height: height / 2 } : { width: width / 2, height };
+  return splitLayout === "rows"
+    ? { width, height: height / 2 }
+    : { width: width / 2, height };
 }
 
 function terrainPanelAtPointer(
@@ -757,12 +779,13 @@ function terrainPanelAtPointer(
   pointerX: number,
   pointerY: number,
   source: TerrainLabSource,
+  splitLayout: "columns" | "rows",
 ): { width: number; height: number; normalizedX: number; normalizedZ: number } {
-  const panel = terrainPanelSize(width, height, source);
-  const localX = source === "split" && width > height
+  const panel = terrainPanelSize(width, height, source, splitLayout);
+  const localX = source === "split" && splitLayout === "columns"
     ? pointerX % Math.max(panel.width, 1)
     : pointerX;
-  const localY = source === "split" && width <= height
+  const localY = source === "split" && splitLayout === "rows"
     ? pointerY % Math.max(panel.height, 1)
     : pointerY;
   return {
