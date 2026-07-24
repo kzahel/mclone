@@ -278,11 +278,11 @@ silencing simulation.
 
 ### Slice 5: Render Compiler Capacity
 
-- [ ] Compare one worker, two workers, and shared derived capacity with equal
+- [x] Compare one worker, two workers, and shared derived capacity with equal
   max-pending policy.
-- [ ] Record worker busy time, queue age/depth, completed/stale results,
+- [x] Record worker busy time, queue age/depth, completed/stale results,
   publication/application pressure, frame tails, and total settle/travel work.
-- [ ] Keep a new default only if queue evidence and multiple rows show a
+- [x] Keep a new default only if queue evidence and multiple rows show a
   repeatable net win without starving the render or server critical paths.
 
 Exit: H5 is accepted or rejected. Available core count alone is not evidence.
@@ -384,3 +384,23 @@ Append each tested slice here with:
 - Next action: run the corrected worker matrix, then implement bookkeeping,
   static-cull, active-level, and fluid/remesh slices against these named
   spans.
+
+### 2026-07-24: Compiler Worker Capacity Rejected
+
+- Diagnostic-build commit: `43d6964d`.
+- SteamRT4 binary SHA-256:
+  `248a99d96d64ac97042a99b76eacb8a6e926fc05e91c1777a5b760bb12785c36`.
+- Run: `20260724T133622Z-43d6964d5639-perf-matrix-workers-3670064`.
+- RD10 one/two/derived-worker traversal measured 72.0/71.4/70.7 FPS and
+  20.13/21.26/21.44 ms frame p95.
+- RD13 one/two/derived-worker traversal measured 46.9/46.8/46.9 FPS and
+  27.47/28.50/27.90 ms frame p95.
+- Equal-distance and work guardrails held: every row traveled approximately
+  320 blocks; RD10 rebuilt 7,633-7,663 sections and RD13 rebuilt
+  8,685-8,735.
+- One worker was busy for 8.19 seconds at RD10 and 8.03 seconds at RD13, but
+  the compile queue stayed bounded at four and three jobs. More workers only
+  lowered instantaneous queue depth; they did not improve completion totals,
+  travel, or frame pacing.
+- Decision: reject H5 and retain the one-worker default. The limiting path is
+  main-thread integration/preparation/submission, not compiler throughput.
