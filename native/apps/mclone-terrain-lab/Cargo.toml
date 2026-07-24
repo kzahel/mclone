@@ -6,6 +6,10 @@ rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
+mclone-assets.workspace = true
+mclone-core.workspace = true
+mclone-mesh.workspace = true
+mclone-render.workspace = true
 mclone-terrain-view.workspace = true
 mclone-worldgen.workspace = true
 serde.workspace = true

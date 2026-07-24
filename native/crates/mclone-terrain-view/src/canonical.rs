@@ -66,15 +66,22 @@ impl CanonicalTerrainChunk {
     }
 
     pub fn presentation_blocks(&self, visibility: CanonicalTerrainVisibility) -> Vec<u8> {
-        if visibility.vegetation {
-            return self.blocks.clone();
-        }
-        self.blocks
-            .iter()
-            .copied()
-            .map(canonical_preview_without_vegetation)
-            .collect()
+        canonical_terrain_presentation_blocks(&self.blocks, visibility)
     }
+}
+
+pub fn canonical_terrain_presentation_blocks(
+    blocks: &[u8],
+    visibility: CanonicalTerrainVisibility,
+) -> Vec<u8> {
+    if visibility.vegetation {
+        return blocks.to_vec();
+    }
+    blocks
+        .iter()
+        .copied()
+        .map(canonical_preview_without_vegetation)
+        .collect()
 }
 
 #[derive(Debug)]

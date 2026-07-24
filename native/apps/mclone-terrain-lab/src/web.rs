@@ -615,7 +615,7 @@ pub fn start() {
     }));
 }
 
-fn surface_configuration(
+pub(crate) fn surface_configuration(
     format: wgpu::TextureFormat,
     width: u32,
     height: u32,

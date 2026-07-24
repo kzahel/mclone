@@ -17,6 +17,7 @@ use mclone_worldgen::terrain_preview::{
 pub use canonical::{
     CANONICAL_TERRAIN_MAX_CHUNK_RADIUS, CanonicalTerrainChunk, CanonicalTerrainCompiler,
     CanonicalTerrainStage, CanonicalTerrainVisibility, canonical_terrain_chunk_order,
+    canonical_terrain_presentation_blocks,
 };
 pub use viewport::{
     TERRAIN_VIEWPORT_AUTO_PIXELS_PER_CELL, TERRAIN_VIEWPORT_MAX_BLOCKS_ACROSS,

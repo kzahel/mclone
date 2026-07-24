@@ -1874,6 +1874,10 @@ name = "mclone-terrain-lab"
 version = "0.0.0"
 dependencies = [
  "js-sys",
+ "mclone-assets",
+ "mclone-core",
+ "mclone-mesh",
+ "mclone-render",
  "mclone-terrain-view",
  "mclone-worldgen",
  "serde",

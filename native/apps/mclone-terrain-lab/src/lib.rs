@@ -6,8 +6,12 @@ use mclone_terrain_view::{
 };
 
 #[cfg(target_arch = "wasm32")]
+mod canonical_web;
+#[cfg(target_arch = "wasm32")]
 mod web;
 
+#[cfg(target_arch = "wasm32")]
+pub use canonical_web::{CanonicalTerrainLab, mclone_terrain_lab_create_canonical};
 #[cfg(target_arch = "wasm32")]
 pub use web::{TerrainLab, mclone_terrain_lab_create};
 
