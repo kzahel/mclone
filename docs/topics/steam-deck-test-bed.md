@@ -558,6 +558,35 @@ confirm that Gamescope reports a fullscreen 1280x800 output/world target,
 scale `1.0`, native UI, and no recurrence of the old 2667x1875 X11 logical-DPI
 surface before this becomes the release baseline.
 
+## 2026-07-24 Touchscreen Input
+
+The original physical Deck report was that a direct touchscreen tap on Quit
+at the title screen did nothing. The native desktop host observed
+`WindowEvent::Touch` only as capability activity and discarded its position
+and phase. Under the Deck's Gamescope X11/Xwayland presentation, winit emits
+native touch while suppressing pointer-emulated mouse buttons, so the missing
+touch route could not fall back to a click.
+
+The `touchscreen-input` series now:
+
+- routes the first menu contact as direct pointer down/move/up and cancels
+  without activation;
+- uses the same gameplay touch adapter, HUD, settings, and preference document
+  as Android and browser clients;
+- advertises touch at startup for `--platform-profile steamos`;
+- leaves menu tapping available when gameplay Touch Controls is Off; and
+- keeps Auto source switching shared across flat hosts.
+
+No Steamworks API is needed. Standard winit/OS touch events are authoritative;
+future Steam Input support remains optional controller work for action sets,
+trackpads, gyro, rear buttons, rebinding, and glyph origins.
+
+Host Rust tests, native and WASM builds, an ARM64/x86_64 Android APK, Android
+AVD touch smoke, and headed-Wayland mobile-browser touch smoke passed. Android
+and browser touch HUD/menu/options captures were inspected. The remaining gate
+is a physical Gaming Mode pass using the checklist in
+[`touchscreen-input.md`](touchscreen-input.md#physical-steam-deck-acceptance).
+
 ## Bring-up Ledger
 
 - [x] Retail Steam Deck Developer Mode enabled.
@@ -573,4 +602,5 @@ surface before this becomes the release baseline.
 - [x] Record SteamRT4 timedemo and live presentation evidence.
 - [ ] Validate the SteamOS presentation profile at native 1280x800.
 - [ ] Record interactive Linux/Gamescope/controller acceptance.
+- [ ] Record physical touchscreen menu/gameplay acceptance.
 - [ ] Record the first reproducible release performance baseline.

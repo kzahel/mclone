@@ -2,13 +2,13 @@
 
 Topic: `touchscreen-input`
 
-Status: active implementation as of 2026-07-24. The shared touch gameplay
-adapter, touch HUD, and Android/browser consumers already exist. Native desktop
-currently observes touch capability but discards every
-`winit::WindowEvent::Touch` before it reaches menu or gameplay semantics. The
-first physical Steam Deck report is that tapping Quit on the title screen does
-not activate it. Automated host validation and rendered-output acceptance will
-land in this series; physical Deck acceptance remains pending afterward.
+Status: automated implementation and host validation complete as of
+2026-07-24; physical Steam Deck acceptance remains pending. The first Deck
+report was that tapping Quit on the title screen did not activate it. Native
+desktop now routes standard `winit` touch events through the shared menu
+contact lifecycle and the existing `mclone-input` gameplay adapter, exposes
+and persists touch settings, and renders the shared touch HUD. Android and
+browser hosts use the same contact and `Auto`/`On`/`Off` policy.
 
 ## Scope
 
@@ -134,37 +134,79 @@ glyphs. That optional backend should emit the existing shared semantic action
 frame and de-duplicate its virtual gamepad. It is not the owner of touchscreen
 menu or gameplay behavior.
 
-## Implementation And Validation Plan
+## Implemented Shape
 
-1. Route first-contact native desktop touch through shared UI pointer
-   down/move/up semantics, including non-activating cancellation and lifecycle
-   clearing.
-2. Add the shared touch adapter to the desktop host, compose held movement,
-   route look and one-shot frames, and render the existing touch overlay.
-3. Expose mode and sensitivity settings on capable desktop hosts and persist
-   changes through the shared input-preference codec.
-4. Add focused tests for capability discovery, SteamOS startup projection,
-   contact ownership/cancellation, visibility policy, coordinate conversion,
-   preference preservation, and source switching.
-5. Run native-client, input, UI, scene, and app-runtime tests plus the affected
-   workspace/platform boundary gates.
-6. Capture and inspect the first desktop frame that renders the touch overlay.
-7. Record physical Gaming Mode acceptance on the Steam Deck:
-   - every title/menu button activates exactly once;
-   - press-drag-off does not activate;
-   - a second contact cannot steal the active UI press;
-   - controller, trackpad/mouse, and touch switch cleanly in `Auto`;
-   - in-world move/look/jump/attack/use/hotbar/pause controls work;
-   - `Off` hides and disables gameplay controls but menus still work; and
-   - focus loss and suspend/resume leave no stuck contact or action.
+- `mclone-input` owns first-contact UI tracking and cancellation. Desktop,
+  Android, and browser adapters translate their platform phase enum into that
+  neutral contract.
+- `MonoInteractiveInputRouter` has a touch-primary-button route that cannot
+  request mouse capture. Ordinary mouse clicks retain their existing capture
+  behavior.
+- Native desktop translates touch coordinates into shared GUI space, routes
+  menu contacts unconditionally, and sends in-world contacts through
+  `TouchInputAdapter`. Held movement composes with keyboard/mouse and gamepad
+  state at the existing scene boundary; touch look and action frames use the
+  existing shared routes.
+- The SteamOS presentation profile advertises touch at startup. Generic
+  desktop profiles discover it only after a real event. This makes touch
+  settings visible on Deck before the first tap without classifying every
+  Linux or Windows desktop as touch-capable.
+- Native desktop renders the existing `TouchOverlay`, reads mode and
+  sensitivity from the versioned native preference document, and writes only
+  those touch fields while preserving the controller profile.
+- Every flat host now admits gameplay touch only while shared capability
+  resolution says controls are visible. Direct menu touch remains available
+  in `Off`. In `Auto`, a later keyboard, mouse, or controller input hides and
+  stops the touch HUD until touch becomes active again.
+
+## Automated Evidence
+
+The series is commits `cdcc649f`, `1ecb78c0`, `048ad9db`, `7b83b076`, and
+`3015c017` under `Topic: touchscreen-input`.
+
+Validation completed on 2026-07-24:
+
+- `mclone-input`, `mclone-ui`, `mclone-app-runtime`, `mclone-scene`, and
+  `mclone-native-client` tests passed, including contact ownership,
+  non-activating cancellation, SteamOS startup capability, coordinate mapping,
+  and controller-preference preservation.
+- Native desktop compiled on the host and `mclone-web-client` compiled for
+  `wasm32-unknown-unknown`.
+- `pnpm native:android:apk:avd` built ARM64 and x86_64 libraries plus the APK.
+  `pnpm native:android:avd-touch-smoke -- --skip-build` then installed it,
+  injected a touch swipe, and passed.
+- After `pnpm host:check` selected headed Wayland,
+  `pnpm native:web:mobile-smoke` passed movement, look, jump, attack, use,
+  touch-opened pause UI, touch-look slider persistence, and the `Auto` switch
+  to keyboard after Escape.
+- The Android touch frame and headed-browser world, active joystick, pause
+  menu, and touch-options captures under `/tmp` were inspected. They show the
+  shared touch controls and touch settings over live rendered terrain.
+
+The current Linux host has no desktop touchscreen, so it cannot produce a real
+`winit` desktop-touch capture. The two other consumers validate the same touch
+adapter, UI renderer, and scene routes; the Deck pass below remains the
+authoritative validation of the desktop platform collector and Gamescope event
+projection.
+
+## Physical Steam Deck Acceptance
+
+Record a Gaming Mode pass on the Steam Deck:
+
+- every title/menu button activates exactly once;
+- press-drag-off does not activate;
+- a second contact cannot steal the active UI press;
+- controller, trackpad/mouse, and touch switch cleanly in `Auto`;
+- in-world move/look/jump/attack/use/hotbar/pause controls work;
+- `Off` hides and disables gameplay controls but menus still work; and
+- focus loss and suspend/resume leave no stuck contact or action.
 
 ## Current Gaps
 
-- Native desktop implementation and automated validation are in progress.
 - Direct touch-drag scrolling and touch-specific larger menu geometry have not
   yet been accepted as requirements; physical Deck use should determine
   whether they need a follow-up.
 - Published-App-ID behavior under both Steam touchscreen configuration modes
   remains future distribution acceptance.
-- Physical Steam Deck evidence is pending the user's manual pass after this
-  implementation series lands.
+- Physical Steam Deck evidence, including the original title-screen Quit
+  reproduction, is pending the user's manual pass.
