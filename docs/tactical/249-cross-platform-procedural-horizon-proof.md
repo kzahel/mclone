@@ -345,3 +345,21 @@ sub-cell retention, axial and diagonal bands, negative-coordinate wrapping,
 retained-slot identity, teleport recovery, nested bounds, and a long
 positive/negative walk. The controller allocates no platform or GPU objects
 and is ready to drive both native and Wasm render sessions.
+
+### 2026-07-25: first drawable native horizon
+
+`TerrainHorizonRenderer` now binds ten shared toroidal levels to `160`
+preallocated GPU slots and refills them coarsest-first in bounded batches of
+`16`. Ready coarser levels remain visible until the next finer level is
+complete; the render shader then cuts the exact finer footprint from the
+coarser level. The same shared shader and renderer now use reversed-Z
+(`GreaterEqual`, clear zero), and the Explorer depth validator follows that
+contract.
+
+The inspected first offscreen capture at
+`/tmp/mclone-world-explorer-clipmap-first.png` was visually coherent at
+`1280x720`, with no blank rings or rectangular coarse/fine holes. It reached
+all `160/160` ready slots in ten frames, reported a fixed `173,079,040`-byte
+allocation, and produced meaningful reversed depth over `875,273` pixels with
+a `0.000000..0.934411` range on the Radeon 890M Vulkan adapter. Vegetation,
+explicit frontier skirts, movement receipts, and browser proof remain open.

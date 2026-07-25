@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::{Context, Result};
-use mclone_terrain_view::TerrainViewportFrameStats;
+use mclone_terrain_view::TerrainHorizonFrameStats;
 use mclone_view_control::{
     ViewPoint, ViewportMetrics, WorldViewIntent, WorldViewMode, WorldViewState,
 };
@@ -62,7 +62,7 @@ impl SmokeSequence {
         Ok(true)
     }
 
-    pub fn after_frame(&mut self, stats: TerrainViewportFrameStats) -> SmokeFrameOutcome {
+    pub fn after_frame(&mut self, stats: TerrainHorizonFrameStats) -> SmokeFrameOutcome {
         let Some(stage) = SMOKE_STAGES.get(self.stage_index).copied() else {
             return SmokeFrameOutcome::Complete;
         };
@@ -158,7 +158,7 @@ pub enum SmokeFrameOutcome {
 
 pub struct SmokeCheckpoint {
     pub state: WorldViewState,
-    pub stats: TerrainViewportFrameStats,
+    pub stats: TerrainHorizonFrameStats,
     pub pixels: PixelStats,
     pub depth: DepthStats,
 }
@@ -209,7 +209,7 @@ impl SmokeRecorder {
         &mut self,
         frame_time: Duration,
         input_applied: bool,
-        stats: TerrainViewportFrameStats,
+        stats: TerrainHorizonFrameStats,
     ) {
         self.frame_count = self.frame_count.saturating_add(1);
         let frame_ms = frame_time.as_secs_f64() * 1_000.0;
@@ -219,9 +219,7 @@ impl SmokeRecorder {
             self.settling_frame_ms.push(frame_ms);
         }
         self.peak_resident_bytes = self.peak_resident_bytes.max(stats.resident_bytes);
-        self.peak_pending_work = self
-            .peak_pending_work
-            .max(stats.queued_tile_count + stats.pending_readback_count);
+        self.peak_pending_work = self.peak_pending_work.max(stats.pending_refills);
     }
 
     pub fn checkpoint_path(&self, label: &str) -> PathBuf {
@@ -258,8 +256,13 @@ impl SmokeRecorder {
             "blocks_across": state.blocks_across_u32(),
             "yaw_radians": state.yaw_radians,
             "pitch_radians": state.pitch_radians,
-            "published_spacing": stats.published_spacing,
+            "finest_spacing": stats.finest_sample_spacing,
             "resident_bytes": stats.resident_bytes,
+            "allocation_slots": stats.allocation_slots,
+            "ready_slots": stats.ready_slots,
+            "pending_refills": stats.pending_refills,
+            "total_refills": stats.residency.total_refills,
+            "total_rebases": stats.residency.total_rebases,
             "rgb_min": pixels.min_rgb,
             "rgb_max": pixels.max_rgb,
             "opaque_pixels": pixels.opaque_pixels,
@@ -277,7 +280,7 @@ impl SmokeRecorder {
             .context("World Explorer smoke completed without frame statistics")?;
         let path = self.root.join("receipt.json");
         let receipt = json!({
-            "schema": "mclone-world-explorer-smoke-v1",
+            "schema": "mclone-world-explorer-smoke-v2",
             "target": self.target,
             "adapter": {
                 "name": self.adapter_name,
@@ -305,9 +308,11 @@ impl SmokeRecorder {
             "peak_resident_bytes": self.peak_resident_bytes,
             "peak_pending_work": self.peak_pending_work,
             "final_resident_bytes": final_stats.resident_bytes,
-            "final_resident_tiles": final_stats.resident_tile_count,
-            "final_pending_work":
-                final_stats.queued_tile_count + final_stats.pending_readback_count,
+            "allocation_slots": final_stats.allocation_slots,
+            "final_ready_slots": final_stats.ready_slots,
+            "final_pending_work": final_stats.pending_refills,
+            "total_refills": final_stats.residency.total_refills,
+            "total_rebases": final_stats.residency.total_rebases,
             "captures": self.captures,
             "sequence": [
                 "initial 3D",

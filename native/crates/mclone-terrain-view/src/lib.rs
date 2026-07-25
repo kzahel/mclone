@@ -37,9 +37,9 @@ pub use viewport::{
     TerrainViewportTileId, plan_terrain_viewport,
 };
 pub use viewport_renderer::{
-    TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainPreviewMaterialAtlas,
-    TerrainViewportCompletedComparison, TerrainViewportExternalCpuRequest,
-    TerrainViewportFrameStats, TerrainViewportRenderer,
+    TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainHorizonFrameStats, TerrainHorizonRenderer,
+    TerrainPreviewMaterialAtlas, TerrainViewportCompletedComparison,
+    TerrainViewportExternalCpuRequest, TerrainViewportFrameStats, TerrainViewportRenderer,
 };
 
 pub const TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION: &str = "mclone-overworld-v1-gpu-preview-a7";
@@ -48,7 +48,7 @@ pub const TERRAIN_PREVIEW_COMPUTE_WGSL_TEMPLATE: &str =
 pub const TERRAIN_PREVIEW_RENDER_WGSL: &str = include_str!("shaders/terrain_preview_render.wgsl");
 pub const TERRAIN_PREVIEW_TREE_WGSL: &str = include_str!("shaders/terrain_preview_tree.wgsl");
 
-const TERRAIN_PREVIEW_UNIFORM_BYTES: u64 = 128;
+const TERRAIN_PREVIEW_UNIFORM_BYTES: u64 = 144;
 const TERRAIN_PREVIEW_SAMPLE_BYTES: u64 =
     (TERRAIN_PREVIEW_SAMPLE_FLOATS * std::mem::size_of::<f32>()) as u64;
 const TERRAIN_PREVIEW_WORKGROUP_AXIS: u32 = 8;
@@ -595,7 +595,7 @@ impl TerrainPreviewRenderer {
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: TERRAIN_PREVIEW_DEPTH_FORMAT,
                 depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::LessEqual,
+                depth_compare: wgpu::CompareFunction::GreaterEqual,
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
@@ -728,7 +728,7 @@ impl TerrainPreviewRenderer {
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                     view: &self.depth.view,
                     depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(1.0),
+                        load: wgpu::LoadOp::Clear(0.0),
                         store: wgpu::StoreOp::Discard,
                     }),
                     stencil_ops: None,
@@ -954,6 +954,35 @@ fn viewport_uniform_bytes_for_request(
     viewport_height_blocks: u32,
     focus_y: f32,
 ) -> Vec<u8> {
+    viewport_uniform_bytes_for_request_with_hole(
+        request,
+        width,
+        height,
+        options,
+        camera,
+        viewport_center_x,
+        viewport_center_z,
+        viewport_width_blocks,
+        viewport_height_blocks,
+        focus_y,
+        None,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn viewport_uniform_bytes_for_request_with_hole(
+    request: ValidatedTerrainPreviewRequest,
+    width: u32,
+    height: u32,
+    options: TerrainPreviewDrawOptions,
+    camera: TerrainPreviewCamera,
+    viewport_center_x: i32,
+    viewport_center_z: i32,
+    viewport_width_blocks: u32,
+    viewport_height_blocks: u32,
+    focus_y: f32,
+    inner_hole: Option<clipmap::TerrainClipmapBounds>,
+) -> Vec<u8> {
     let source = request.request();
     let seed = source.seed as u64;
     let words = [
@@ -1027,6 +1056,23 @@ fn viewport_uniform_bytes_for_request(
     ] {
         bytes.extend_from_slice(&word.to_le_bytes());
     }
+    let hole = inner_hole.unwrap_or(clipmap::TerrainClipmapBounds {
+        min_x: 0,
+        min_z: 0,
+        max_x: 0,
+        max_z: 0,
+    });
+    for value in [hole.min_x, hole.min_z, hole.max_x, hole.max_z] {
+        let value = i32::try_from(value).unwrap_or_else(|_| {
+            if value.is_negative() {
+                i32::MIN
+            } else {
+                i32::MAX
+            }
+        });
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    debug_assert_eq!(bytes.len(), TERRAIN_PREVIEW_UNIFORM_BYTES as usize);
     bytes
 }
 

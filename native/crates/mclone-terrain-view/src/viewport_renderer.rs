@@ -18,10 +18,11 @@ use mclone_worldgen::terrain_preview::{
 use super::{
     TERRAIN_PREVIEW_DEPTH_FORMAT, TERRAIN_PREVIEW_RENDER_WGSL, TERRAIN_PREVIEW_SAMPLE_BYTES,
     TERRAIN_PREVIEW_TREE_WGSL, TERRAIN_PREVIEW_UNIFORM_BYTES, TERRAIN_PREVIEW_WORKGROUP_AXIS,
+    TerrainClipmap, TerrainClipmapConfig, TerrainClipmapDiagnostics, TerrainClipmapTile,
     TerrainPreviewCamera, TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource,
-    TerrainPreviewSplitLayout, TerrainViewportPlan, TerrainViewportTileId, parse_samples,
-    terrain_preview_compute_wgsl, terrain_preview_focus_y_for_profile,
-    viewport_uniform_bytes_for_request,
+    TerrainPreviewSplitLayout, TerrainPreviewView, TerrainViewportPlan, TerrainViewportTileId,
+    parse_samples, terrain_preview_compute_wgsl, terrain_preview_focus_y_for_profile,
+    viewport_uniform_bytes_for_request, viewport_uniform_bytes_for_request_with_hole,
 };
 
 pub const TERRAIN_PREVIEW_MATERIAL_UV_COUNT: usize = 256;
@@ -125,6 +126,25 @@ pub struct TerrainViewportCompletedComparison {
 pub struct TerrainViewportExternalCpuRequest {
     pub revision: u64,
     pub tile: TerrainViewportTileId,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TerrainHorizonFrameStats {
+    pub revision: u64,
+    pub allocation_slots: u32,
+    pub ready_slots: u32,
+    pub pending_refills: u32,
+    pub dispatched_refills: u32,
+    pub dispatched_refills_total: u64,
+    pub drawn_levels: u32,
+    pub drawn_tiles: u32,
+    pub vertex_count: u32,
+    pub resident_bytes: u64,
+    pub finest_sample_spacing: u32,
+    pub coarse_ready: bool,
+    pub target_ready: bool,
+    pub needs_redraw: bool,
+    pub residency: TerrainClipmapDiagnostics,
 }
 
 struct EncodedTerrainViewportReadbacks {
@@ -686,7 +706,7 @@ impl TerrainViewportRenderer {
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: TERRAIN_PREVIEW_DEPTH_FORMAT,
                 depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::LessEqual,
+                depth_compare: wgpu::CompareFunction::GreaterEqual,
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
@@ -742,7 +762,7 @@ impl TerrainViewportRenderer {
             depth_stencil: Some(wgpu::DepthStencilState {
                 format: TERRAIN_PREVIEW_DEPTH_FORMAT,
                 depth_write_enabled: true,
-                depth_compare: wgpu::CompareFunction::LessEqual,
+                depth_compare: wgpu::CompareFunction::GreaterEqual,
                 stencil: Default::default(),
                 bias: Default::default(),
             }),
@@ -1902,7 +1922,7 @@ impl TerrainViewportRenderer {
             depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
                 view: &self.depth.view,
                 depth_ops: Some(wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(1.0),
+                    load: wgpu::LoadOp::Clear(0.0),
                     store: if self.depth_capture_enabled {
                         wgpu::StoreOp::Store
                     } else {
@@ -2010,6 +2030,350 @@ impl TerrainViewportRenderer {
                 },
             ),
         )
+    }
+}
+
+pub struct TerrainHorizonRenderer {
+    renderer: TerrainViewportRenderer,
+    clipmap: TerrainClipmap,
+    slots: Vec<TerrainViewportGpuTile>,
+    assignments: Vec<Option<TerrainClipmapTile>>,
+    ready: Vec<bool>,
+    pending: VecDeque<TerrainClipmapTile>,
+    seed: i64,
+    center_x: i32,
+    center_z: i32,
+    view_width_blocks: u32,
+    view_height_blocks: u32,
+    content_stage: TerrainPreviewContentStage,
+    dispatched_refills_total: u64,
+}
+
+impl TerrainHorizonRenderer {
+    pub fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+        material_atlas: TerrainPreviewMaterialAtlas<'_>,
+        config: TerrainClipmapConfig,
+    ) -> Result<Self, String> {
+        let clipmap = TerrainClipmap::new(config)?;
+        let config = clipmap.config();
+        let renderer = TerrainViewportRenderer::new(
+            device,
+            queue,
+            color_format,
+            width,
+            height,
+            material_atlas,
+        )?;
+        let mut slots = Vec::with_capacity(config.allocation_slots() as usize);
+        for level in 0..config.level_count {
+            for physical_z in 0..config.tiles_per_axis {
+                for physical_x in 0..config.tiles_per_axis {
+                    slots.push(TerrainViewportGpuTile::new(
+                        device,
+                        &renderer.compute_layout,
+                        &renderer.render_layout,
+                        renderer.sample_byte_len,
+                        TerrainViewportTileId {
+                            profile: TerrainPreviewProfile::McloneOverworldV1,
+                            seed: 0,
+                            tile_x: physical_x as i32,
+                            tile_z: physical_z as i32,
+                            sample_spacing: config.sample_spacing(level),
+                            content_stage: TerrainPreviewContentStage::Cover,
+                        },
+                    )?);
+                }
+            }
+        }
+        let slot_count = config.allocation_slots() as usize;
+        Ok(Self {
+            renderer,
+            clipmap,
+            slots,
+            assignments: vec![None; slot_count],
+            ready: vec![false; slot_count],
+            pending: VecDeque::with_capacity(slot_count),
+            seed: 0,
+            center_x: 0,
+            center_z: 0,
+            view_width_blocks: 1,
+            view_height_blocks: 1,
+            content_stage: TerrainPreviewContentStage::Cover,
+            dispatched_refills_total: 0,
+        })
+    }
+
+    pub const fn config(&self) -> TerrainClipmapConfig {
+        self.clipmap.config()
+    }
+
+    pub const fn diagnostics(&self) -> TerrainClipmapDiagnostics {
+        self.clipmap.diagnostics()
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn set_view(
+        &mut self,
+        seed: i64,
+        center_x: i32,
+        center_z: i32,
+        view_width_blocks: u32,
+        view_height_blocks: u32,
+        content_stage: TerrainPreviewContentStage,
+    ) {
+        let source_changed = self.seed != seed || self.content_stage != content_stage;
+        if source_changed {
+            self.clipmap = TerrainClipmap::new(self.clipmap.config())
+                .expect("an already validated terrain clipmap config remains valid");
+            self.assignments.fill(None);
+            self.ready.fill(false);
+            self.pending.clear();
+        }
+        self.seed = seed;
+        self.center_x = center_x;
+        self.center_z = center_z;
+        self.view_width_blocks = view_width_blocks.max(1);
+        self.view_height_blocks = view_height_blocks.max(1);
+        self.content_stage = content_stage;
+
+        let update = self.clipmap.update_center(center_x, center_z);
+        for tile in &update.refills {
+            let slot = tile.physical_slot as usize;
+            self.assignments[slot] = Some(*tile);
+            self.ready[slot] = false;
+        }
+        self.pending.retain(|tile| {
+            self.assignments
+                .get(tile.physical_slot as usize)
+                .copied()
+                .flatten()
+                == Some(*tile)
+        });
+        for tile in update.refills {
+            if !self.pending.contains(&tile) {
+                self.pending.push_back(tile);
+            }
+        }
+    }
+
+    pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
+        self.renderer.resize(device, width, height);
+    }
+
+    pub fn set_depth_capture_enabled(&mut self, enabled: bool) {
+        self.renderer.set_depth_capture_enabled(enabled);
+    }
+
+    pub fn copy_depth_to_buffer(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        destination: &wgpu::Buffer,
+        bytes_per_row: u32,
+    ) -> Result<(), String> {
+        self.renderer
+            .copy_depth_to_buffer(encoder, destination, bytes_per_row)
+    }
+
+    pub fn encode(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        color_view: &wgpu::TextureView,
+        width: u32,
+        height: u32,
+        view: TerrainPreviewView,
+        camera: TerrainPreviewCamera,
+    ) -> Result<TerrainHorizonFrameStats, String> {
+        self.resize(device, width, height);
+        let options = TerrainPreviewDrawOptions {
+            source: TerrainPreviewSource::Gpu,
+            view,
+            layer: TerrainPreviewLayer::Terrain,
+            split_layout: TerrainPreviewSplitLayout::Columns,
+        };
+        let focus_y = terrain_preview_focus_y_for_profile(
+            TerrainPreviewProfile::McloneOverworldV1,
+            self.seed,
+            self.center_x,
+            self.center_z,
+        );
+        let mut dispatched_refills = 0_u32;
+        for _ in 0..TERRAIN_VIEWPORT_GPU_DISPATCHES_PER_FRAME {
+            let Some(tile) = self.pending.pop_front() else {
+                break;
+            };
+            let slot_index = tile.physical_slot as usize;
+            if self.assignments[slot_index] != Some(tile) {
+                continue;
+            }
+            let tile_id = TerrainViewportTileId {
+                profile: TerrainPreviewProfile::McloneOverworldV1,
+                seed: self.seed,
+                tile_x: tile.tile_x,
+                tile_z: tile.tile_z,
+                sample_spacing: tile.sample_spacing,
+                content_stage: self.content_stage,
+            };
+            let slot = &mut self.slots[slot_index];
+            slot.request = tile_id.preview_request().validate()?;
+            queue.write_buffer(
+                &slot.uniform_buffer,
+                0,
+                &viewport_uniform_bytes_for_request(
+                    slot.request,
+                    width,
+                    height,
+                    options,
+                    camera,
+                    self.center_x,
+                    self.center_z,
+                    self.view_width_blocks,
+                    self.view_height_blocks,
+                    focus_y,
+                ),
+            );
+            {
+                let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("mclone_terrain_horizon_compute_pass"),
+                    timestamp_writes: None,
+                });
+                pass.set_pipeline(&self.renderer.compute_pipeline);
+                pass.set_bind_group(0, &slot.compute_bind_group, &[]);
+                let workgroups = (TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS + 1)
+                    .div_ceil(TERRAIN_PREVIEW_WORKGROUP_AXIS);
+                pass.dispatch_workgroups(workgroups, workgroups, 1);
+            }
+            slot.gpu_submitted = true;
+            self.ready[slot_index] = true;
+            dispatched_refills = dispatched_refills.saturating_add(1);
+        }
+        self.clipmap.note_refills_completed(dispatched_refills);
+        self.dispatched_refills_total = self
+            .dispatched_refills_total
+            .saturating_add(u64::from(dispatched_refills));
+
+        let levels = self.clipmap.levels();
+        let mut level_ready = vec![false; levels.len()];
+        for level in &levels {
+            level_ready[level.level as usize] = level.tiles.iter().all(|tile| {
+                let slot = tile.physical_slot as usize;
+                self.assignments[slot] == Some(*tile) && self.ready[slot]
+            });
+        }
+        for level in &levels {
+            if !level_ready[level.level as usize] {
+                continue;
+            }
+            let inner_hole = if level.level > 0 && level_ready[level.level as usize - 1] {
+                level.inner_hole
+            } else {
+                None
+            };
+            for tile in &level.tiles {
+                let slot_index = tile.physical_slot as usize;
+                let slot = &self.slots[slot_index];
+                queue.write_buffer(
+                    &slot.uniform_buffer,
+                    0,
+                    &viewport_uniform_bytes_for_request_with_hole(
+                        slot.request,
+                        width,
+                        height,
+                        options,
+                        camera,
+                        self.center_x,
+                        self.center_z,
+                        self.view_width_blocks,
+                        self.view_height_blocks,
+                        focus_y,
+                        inner_hole,
+                    ),
+                );
+            }
+        }
+
+        let mut drawn_levels = 0_u32;
+        let mut drawn_tiles = 0_u32;
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("mclone_terrain_horizon_render_pass"),
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: color_view,
+                    resolve_target: None,
+                    ops: wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(wgpu::Color {
+                            r: 0.025,
+                            g: 0.035,
+                            b: 0.055,
+                            a: 1.0,
+                        }),
+                        store: wgpu::StoreOp::Store,
+                    },
+                })],
+                depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
+                    view: &self.renderer.depth.view,
+                    depth_ops: Some(wgpu::Operations {
+                        load: wgpu::LoadOp::Clear(0.0),
+                        store: if self.renderer.depth_capture_enabled {
+                            wgpu::StoreOp::Store
+                        } else {
+                            wgpu::StoreOp::Discard
+                        },
+                    }),
+                    stencil_ops: None,
+                }),
+                ..Default::default()
+            });
+            pass.set_pipeline(&self.renderer.render_pipeline);
+            pass.set_bind_group(1, &self.renderer._material_resources.bind_group, &[]);
+            for level in levels.iter().rev() {
+                if !level_ready[level.level as usize] {
+                    continue;
+                }
+                drawn_levels = drawn_levels.saturating_add(1);
+                for tile in &level.tiles {
+                    let slot_index = tile.physical_slot as usize;
+                    pass.set_bind_group(0, &self.slots[slot_index].render_bind_group, &[]);
+                    pass.draw(0..TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS.pow(2) * 6, 0..1);
+                    drawn_tiles = drawn_tiles.saturating_add(1);
+                }
+            }
+        }
+
+        let ready_slots = self.ready.iter().filter(|ready| **ready).count() as u32;
+        let allocation_slots = self.clipmap.config().allocation_slots();
+        let vertex_count =
+            drawn_tiles.saturating_mul(TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS.pow(2) * 6);
+        let resident_bytes = u64::from(allocation_slots).saturating_mul(
+            self.renderer
+                .sample_byte_len
+                .saturating_mul(2)
+                .saturating_add(TERRAIN_PREVIEW_UNIFORM_BYTES),
+        );
+        let target_ready = ready_slots == allocation_slots && self.pending.is_empty();
+        Ok(TerrainHorizonFrameStats {
+            revision: self.clipmap.diagnostics().revision,
+            allocation_slots,
+            ready_slots,
+            pending_refills: self.pending.len() as u32,
+            dispatched_refills,
+            dispatched_refills_total: self.dispatched_refills_total,
+            drawn_levels,
+            drawn_tiles,
+            vertex_count,
+            resident_bytes,
+            finest_sample_spacing: self.clipmap.config().base_sample_spacing,
+            coarse_ready: drawn_levels > 0,
+            target_ready,
+            needs_redraw: !target_ready,
+            residency: self.clipmap.diagnostics(),
+        })
     }
 }
 

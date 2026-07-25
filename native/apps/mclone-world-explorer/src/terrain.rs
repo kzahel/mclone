@@ -12,22 +12,19 @@ use mclone_mesh::{
     TexturedTerrainAssets, load_first_party_textured_terrain_assets_with_presentation,
 };
 use mclone_terrain_view::{
-    TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainPreviewCamera, TerrainPreviewDrawOptions,
-    TerrainPreviewLayer, TerrainPreviewMaterialAtlas, TerrainPreviewSource,
-    TerrainPreviewSplitLayout, TerrainPreviewView, TerrainViewportDetail,
-    TerrainViewportFrameStats, TerrainViewportRenderer, TerrainViewportRequest,
-    plan_terrain_viewport,
+    TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainClipmapConfig, TerrainHorizonFrameStats,
+    TerrainHorizonRenderer, TerrainPreviewCamera, TerrainPreviewMaterialAtlas, TerrainPreviewView,
 };
 use mclone_view_control::{
     ViewPoint, ViewportMetrics, WorldViewIntent, WorldViewMode, WorldViewProjection,
     WorldViewReducer, WorldViewSignal, WorldViewState,
 };
-use mclone_worldgen::terrain_preview::{TerrainPreviewContentStage, TerrainPreviewProfile};
+use mclone_worldgen::terrain_preview::TerrainPreviewContentStage;
 
 use crate::options::{ExplorerAssetProfile, ExplorerOptions};
 
 pub struct ExplorerTerrain {
-    renderer: TerrainViewportRenderer,
+    renderer: TerrainHorizonRenderer,
     options: ExplorerOptions,
     view_state: WorldViewState,
     view_reducer: WorldViewReducer,
@@ -37,7 +34,7 @@ pub struct ExplorerTerrain {
     target_ready_at: Option<Duration>,
     process_first_coarse_ready_at: Option<Duration>,
     process_first_target_ready_at: Option<Duration>,
-    last_stats: Option<TerrainViewportFrameStats>,
+    last_stats: Option<TerrainHorizonFrameStats>,
 }
 
 impl ExplorerTerrain {
@@ -55,7 +52,7 @@ impl ExplorerTerrain {
                 *target = [sprite.u0, sprite.v0, sprite.u1, sprite.v1];
             }
         }
-        let renderer = TerrainViewportRenderer::new(
+        let renderer = TerrainHorizonRenderer::new(
             device,
             queue,
             color_format,
@@ -67,6 +64,7 @@ impl ExplorerTerrain {
                 rgba: assets.atlas.rgba(),
                 material_uvs: &material_uvs,
             },
+            TerrainClipmapConfig::default(),
         )
         .map_err(anyhow::Error::msg)?;
         let view_reducer = WorldViewReducer::default();
@@ -137,8 +135,7 @@ impl ExplorerTerrain {
         queue: &wgpu::Queue,
         encoder: &mut wgpu::CommandEncoder,
         color_view: &wgpu::TextureView,
-    ) -> Result<TerrainViewportFrameStats> {
-        let now = Instant::now();
+    ) -> Result<TerrainHorizonFrameStats> {
         let stats = self
             .renderer
             .encode(
@@ -148,14 +145,9 @@ impl ExplorerTerrain {
                 color_view,
                 self.options.width,
                 self.options.height,
-                TerrainPreviewDrawOptions {
-                    source: TerrainPreviewSource::Gpu,
-                    view: match self.view_state.mode {
-                        WorldViewMode::Map => TerrainPreviewView::Map,
-                        WorldViewMode::Orbit => TerrainPreviewView::ThreeDimensional,
-                    },
-                    layer: TerrainPreviewLayer::Terrain,
-                    split_layout: TerrainPreviewSplitLayout::Columns,
+                match self.view_state.mode {
+                    WorldViewMode::Map => TerrainPreviewView::Map,
+                    WorldViewMode::Orbit => TerrainPreviewView::ThreeDimensional,
                 },
                 TerrainPreviewCamera::new(
                     self.view_state.yaw_radians as f32,
@@ -170,7 +162,6 @@ impl ExplorerTerrain {
                     },
                 )
                 .map_err(anyhow::Error::msg)?,
-                || now.elapsed().as_secs_f64() * 1_000.0,
             )
             .map_err(anyhow::Error::msg)?;
         self.note_readiness(stats);
@@ -179,9 +170,7 @@ impl ExplorerTerrain {
     }
 
     pub fn poll_completed(&mut self, device: &wgpu::Device) -> Result<()> {
-        for result in self.renderer.poll_completed(device) {
-            result.map_err(anyhow::Error::msg)?;
-        }
+        let _ = device;
         Ok(())
     }
 
@@ -200,7 +189,7 @@ impl ExplorerTerrain {
         self.renderer.set_depth_capture_enabled(enabled);
     }
 
-    pub const fn last_stats(&self) -> Option<TerrainViewportFrameStats> {
+    pub const fn last_stats(&self) -> Option<TerrainHorizonFrameStats> {
         self.last_stats
     }
 
@@ -217,7 +206,8 @@ impl ExplorerTerrain {
         format!(
             "seed={} center=({}, {}) blocks={} view={} revision={} \
              coarse_ready_ms={} target_ready_ms={} resident_bytes={} \
-             resident_tiles={} pending={} published_spacing={}",
+             allocation_slots={} ready_slots={} pending={} finest_spacing={} \
+             refills_total={} rebases_total={}",
             self.options.seed,
             self.view_state.center_x_i32(),
             self.view_state.center_z_i32(),
@@ -227,30 +217,32 @@ impl ExplorerTerrain {
             duration_ms(self.coarse_ready_at),
             duration_ms(self.target_ready_at),
             stats.map_or(0, |stats| stats.resident_bytes),
-            stats.map_or(0, |stats| stats.resident_tile_count),
-            stats.map_or(0, |stats| {
-                stats.queued_tile_count + stats.pending_readback_count
-            }),
-            stats.map_or(0, |stats| stats.published_spacing),
+            stats.map_or(0, |stats| stats.allocation_slots),
+            stats.map_or(0, |stats| stats.ready_slots),
+            stats.map_or(0, |stats| stats.pending_refills),
+            stats.map_or(0, |stats| stats.finest_sample_spacing),
+            stats.map_or(0, |stats| stats.residency.total_refills),
+            stats.map_or(0, |stats| stats.residency.total_rebases),
         )
     }
 
     fn replan(&mut self) -> Result<()> {
-        let plan = plan_terrain_viewport(TerrainViewportRequest {
-            profile: TerrainPreviewProfile::McloneOverworldV1,
-            seed: self.options.seed,
-            center_x: self.view_state.center_x_i32(),
-            center_z: self.view_state.center_z_i32(),
-            blocks_across: self.view_state.blocks_across_u32(),
-            panel_width_css: self.options.width,
-            panel_height_css: self.options.height,
-            detail: TerrainViewportDetail::Auto,
-            max_visible_tiles_per_axis: 8,
-            content_stage: TerrainPreviewContentStage::Cover,
-        })
-        .map_err(anyhow::Error::msg)?;
+        let view_height_blocks = u32::try_from(
+            u64::from(self.view_state.blocks_across_u32())
+                .saturating_mul(u64::from(self.options.height))
+                .div_ceil(u64::from(self.options.width)),
+        )
+        .unwrap_or(u32::MAX)
+        .max(1);
+        self.renderer.set_view(
+            self.options.seed,
+            self.view_state.center_x_i32(),
+            self.view_state.center_z_i32(),
+            self.view_state.blocks_across_u32(),
+            view_height_blocks,
+            TerrainPreviewContentStage::Cover,
+        );
         self.revision = self.revision.saturating_add(1);
-        self.renderer.set_viewport(self.revision, plan);
         self.coarse_ready_at = None;
         self.target_ready_at = None;
         Ok(())
@@ -290,7 +282,7 @@ impl ExplorerTerrain {
             .state;
     }
 
-    fn note_readiness(&mut self, stats: TerrainViewportFrameStats) {
+    fn note_readiness(&mut self, stats: TerrainHorizonFrameStats) {
         let elapsed = self.started.elapsed();
         if stats.coarse_ready && self.coarse_ready_at.is_none() {
             self.coarse_ready_at = Some(elapsed);

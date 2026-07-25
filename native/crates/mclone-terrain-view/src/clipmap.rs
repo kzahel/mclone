@@ -6,7 +6,7 @@ use mclone_worldgen::terrain_preview::{
 };
 
 pub const TERRAIN_CLIPMAP_DEFAULT_TILES_PER_AXIS: u32 = 4;
-pub const TERRAIN_CLIPMAP_DEFAULT_LEVEL_COUNT: u32 = 8;
+pub const TERRAIN_CLIPMAP_DEFAULT_LEVEL_COUNT: u32 = 10;
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct TerrainClipmapTile {

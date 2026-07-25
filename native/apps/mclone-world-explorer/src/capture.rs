@@ -366,7 +366,7 @@ impl DepthReadback {
                 }
                 min_depth = min_depth.min(depth);
                 max_depth = max_depth.max(depth);
-                if depth < 1.0 - 1.0e-6 {
+                if depth > 1.0e-6 {
                     covered_pixels = covered_pixels.saturating_add(1);
                 } else {
                     clear_pixels = clear_pixels.saturating_add(1);

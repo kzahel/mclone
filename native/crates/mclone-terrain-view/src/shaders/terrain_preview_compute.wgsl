@@ -7,6 +7,7 @@ struct TerrainPreviewParams {
     camera_projection: vec4<f32>,
     viewport_center_extent: vec4<i32>,
     content_stage_flags: vec4<u32>,
+    clipmap_inner_bounds: vec4<i32>,
 };
 
 struct TerrainPreviewSample {

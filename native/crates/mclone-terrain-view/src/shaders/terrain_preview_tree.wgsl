@@ -7,6 +7,7 @@ struct TerrainPreviewParams {
     camera_projection: vec4<f32>,
     viewport_center_extent: vec4<i32>,
     content_stage_flags: vec4<u32>,
+    clipmap_inner_bounds: vec4<i32>,
 };
 
 @group(0) @binding(0)
@@ -118,7 +119,7 @@ fn vertex_main(
     let grid_z = (world.z - f32(params.viewport_center_extent.y)) / (viewport_height * 0.5);
     var clip_x = grid_x;
     var clip_y = -grid_z;
-    var clip_z = 0.42;
+    var clip_z = 0.58;
     if params.seed_source_view.w == 1u {
         let eye = vec3<f32>(
             params.camera_eye_target.x,
@@ -142,7 +143,7 @@ fn vertex_main(
         }
         clip_x = dot(from_eye, right) / max(half_height * params.camera_projection.z, 0.001);
         clip_y = dot(from_eye, camera_up) / max(half_height, 0.001);
-        clip_z = clamp(
+        clip_z = 1.0 - clamp(
             (depth - params.camera_projection.x)
                 / (params.camera_projection.y - params.camera_projection.x),
             0.0,

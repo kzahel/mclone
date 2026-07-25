@@ -7,6 +7,7 @@ struct TerrainPreviewParams {
     camera_projection: vec4<f32>,
     viewport_center_extent: vec4<i32>,
     content_stage_flags: vec4<u32>,
+    clipmap_inner_bounds: vec4<i32>,
 };
 
 struct TerrainPreviewSample {
@@ -408,7 +409,7 @@ fn vertex_main(
         }
         clip_x = dot(from_eye, right) / max(half_height * aspect, 0.001);
         clip_y = dot(from_eye, camera_up) / max(half_height, 0.001);
-        clip_z = clamp(
+        clip_z = 1.0 - clamp(
             (depth - params.camera_projection.x)
                 / (params.camera_projection.y - params.camera_projection.x),
             0.0,
@@ -457,6 +458,14 @@ fn vertex_main(
 
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    if params.clipmap_inner_bounds.z > params.clipmap_inner_bounds.x
+        && params.clipmap_inner_bounds.w > params.clipmap_inner_bounds.y
+        && input.world_xz.x >= f32(params.clipmap_inner_bounds.x)
+        && input.world_xz.x < f32(params.clipmap_inner_bounds.z)
+        && input.world_xz.y >= f32(params.clipmap_inner_bounds.y)
+        && input.world_xz.y < f32(params.clipmap_inner_bounds.w) {
+        discard;
+    }
     let world_dx = dpdx(input.world_xz);
     let world_dy = dpdy(input.world_xz);
     let blocks_per_pixel = max(length(world_dx), length(world_dy));
