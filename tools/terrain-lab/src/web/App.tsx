@@ -361,6 +361,19 @@ export function App(): React.JSX.Element {
       data-canonical-mesh-target-chunks={canonicalReport?.meshTargetChunks ?? 0}
       data-canonical-warm-hits={canonicalReport?.warmHits ?? 0}
       data-canonical-warm-chunks={canonicalReport?.warmChunks ?? 0}
+      data-canonical-transport-kind={canonicalReport?.transportKind ?? "unavailable"}
+      data-canonical-cross-origin-isolated={
+        canonicalReport?.crossOriginIsolated ? "true" : "false"
+      }
+      data-canonical-result-arena-capacity={
+        canonicalReport?.resultArenaCapacityBytes ?? 0
+      }
+      data-canonical-result-arena-high-water={
+        canonicalReport?.resultArenaHighWaterBytes ?? 0
+      }
+      data-canonical-result-arena-overflows={
+        canonicalReport?.resultArenaOverflowCount ?? 0
+      }
     >
       <header className="topBar">
         <div className="brandLockup">
@@ -1522,6 +1535,18 @@ function Diagnostics({
         <Metric label="Real Worker mesh" value={formatMs(canonical?.workerMeshMs)} />
         <Metric label="Real Worker pack" value={formatMs(canonical?.workerPackMs)} />
         <Metric label="Real Worker transfer" value={formatMs(canonical?.workerTransferMs)} />
+        <Metric
+          label="Real Worker transport"
+          value={canonical
+            ? `${canonical.transportKind} · ${canonical.crossOriginIsolated ? "isolated" : "not isolated"}`
+            : "—"}
+        />
+        <Metric
+          label="Real result arena"
+          value={canonical
+            ? `${formatBytes(canonical.resultArenaHighWaterBytes)} / ${formatBytes(canonical.resultArenaCapacityBytes)} · ${canonical.resultArenaOverflowCount} overflow`
+            : "—"}
+        />
         <Metric label="Real main decode" value={formatMs(canonical?.mainDecodeMs)} />
         <Metric label="Real GPU upload" value={formatMs(canonical?.meshUploadMs)} />
         <Metric label="Real max admission" value={formatMs(canonical?.maxAdmissionMs)} />

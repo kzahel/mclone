@@ -4,6 +4,13 @@ use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
 use wasm_bindgen::{JsCast, JsValue, prelude::wasm_bindgen};
 
 use crate::{
+    canonical_batch_codec::{
+        CanonicalEncodedAdmission, CanonicalEncodedBatch, encode_canonical_batch,
+    },
+    canonical_mailbox_web::{
+        CANONICAL_SHARED_RESULT_TRANSPORT_KIND, mark_canonical_shared_result_failed,
+        publish_canonical_shared_result,
+    },
     canonical_mesh::{CanonicalMeshBatch, CanonicalMeshCoordinate, CanonicalMeshSession},
     canonical_terrain_stage,
     visual_assets::load_terrain_lab_visual_assets,
@@ -96,7 +103,10 @@ impl CanonicalTerrainWorkerActor {
         let epoch = u32_property(&frame, "epoch").unwrap_or_default();
         match self.handle_message_inner(&frame) {
             Ok(dispatch) => dispatch,
-            Err(reason) => error_dispatch(epoch, reason),
+            Err(reason) => {
+                mark_canonical_shared_result_failed(&frame);
+                error_dispatch(epoch, reason)
+            }
         }
     }
 }
@@ -172,7 +182,7 @@ impl CanonicalTerrainWorkerActor {
                     "canonical terrain Worker actor is not initialized".to_owned()
                 })?;
                 let batch = session.compile_batch(&coordinates)?;
-                batch_dispatch(epoch, batch)
+                batch_dispatch(frame, epoch, batch)
             }
             other => Err(format!(
                 "unsupported canonical terrain Worker frame {other:?}"
@@ -207,6 +217,10 @@ pub struct CanonicalTerrainWorkerResponse {
 
 #[wasm_bindgen(js_class = CanonicalTerrainWorkerResponse)]
 impl CanonicalTerrainWorkerResponse {
+    pub(crate) fn raw_message(&self) -> &JsValue {
+        &self.message
+    }
+
     pub fn decode(message: JsValue) -> Result<CanonicalTerrainWorkerResponse, JsValue> {
         let kind = string_property(&message, "kind").map_err(js_error)?;
         if !matches!(
@@ -346,74 +360,74 @@ fn error_dispatch(epoch: u32, reason: String) -> CanonicalTerrainWorkerDispatch 
 }
 
 fn batch_dispatch(
+    frame: &JsValue,
     epoch: u32,
     batch: CanonicalMeshBatch,
 ) -> Result<CanonicalTerrainWorkerDispatch, String> {
     let transfer_started = js_sys::Date::now();
+    let encoded_batch = CanonicalEncodedBatch {
+        generation_ms: batch.generation_ms,
+        presentation_ms: batch.presentation_ms,
+        mesh_ms: batch.mesh_ms,
+        pack_ms: batch.pack_ms,
+        transfer_ms: 0.0,
+        deduplicated_target_chunks: batch.deduplicated_target_chunks.min(u32::MAX as usize) as u32,
+        raw_cache_chunks: batch.raw_cache_chunks.min(u32::MAX as usize) as u32,
+        raw_cache_bytes: batch.raw_cache_bytes,
+        admissions: batch
+            .admissions
+            .into_iter()
+            .map(|admission| CanonicalEncodedAdmission {
+                chunk_x: admission.requested.coordinate.chunk_x,
+                chunk_z: admission.requested.coordinate.chunk_z,
+                fingerprint: admission.requested.fingerprint,
+                raw_cache_hit: admission.requested.raw_cache_hit,
+                retained_dependency_chunks: admission
+                    .requested
+                    .retained_dependency_chunks
+                    .min(u32::MAX as usize) as u32,
+                packed_sections: admission.packed_sections,
+            })
+            .collect(),
+    };
+    let mut encoded = encode_canonical_batch(&encoded_batch)?;
+    let publication =
+        publish_canonical_shared_result(frame, epoch, &mut encoded, transfer_started)?;
     let dispatch = response_dispatch(RESPONSE_BATCH, epoch)?;
-    set_f64(
+    set_string(
         &dispatch.message_object,
-        "generationMs",
-        batch.generation_ms,
-    )
-    .map_err(js_message)?;
-    set_f64(
-        &dispatch.message_object,
-        "presentationMs",
-        batch.presentation_ms,
-    )
-    .map_err(js_message)?;
-    set_f64(&dispatch.message_object, "meshMs", batch.mesh_ms).map_err(js_message)?;
-    set_f64(&dispatch.message_object, "packMs", batch.pack_ms).map_err(js_message)?;
-    set_u32(
-        &dispatch.message_object,
-        "deduplicatedTargetChunks",
-        batch.deduplicated_target_chunks.min(u32::MAX as usize) as u32,
+        "transportKind",
+        CANONICAL_SHARED_RESULT_TRANSPORT_KIND,
     )
     .map_err(js_message)?;
     set_u32(
         &dispatch.message_object,
-        "rawCacheChunks",
-        batch.raw_cache_chunks.min(u32::MAX as usize) as u32,
+        "sharedResultByteLength",
+        publication.byte_length,
     )
     .map_err(js_message)?;
-    set_f64(
+    set_u32(
         &dispatch.message_object,
-        "rawCacheBytes",
-        batch.raw_cache_bytes as f64,
+        "sharedResultBufferCapacityBytes",
+        publication.capacity,
     )
     .map_err(js_message)?;
-    let admissions = Array::new();
-    for admission in batch.admissions {
-        let object = Object::new();
-        set_i32(&object, "chunkX", admission.requested.coordinate.chunk_x).map_err(js_message)?;
-        set_i32(&object, "chunkZ", admission.requested.coordinate.chunk_z).map_err(js_message)?;
-        set_string(
-            &object,
-            "fingerprint",
-            &format!("{:016x}", admission.requested.fingerprint),
-        )
-        .map_err(js_message)?;
-        set_bool(&object, "rawCacheHit", admission.requested.raw_cache_hit).map_err(js_message)?;
-        set_u32(
-            &object,
-            "retainedDependencyChunks",
-            admission
-                .requested
-                .retained_dependency_chunks
-                .min(u32::MAX as usize) as u32,
-        )
-        .map_err(js_message)?;
-        let packed = Uint8Array::from(admission.packed_sections.as_slice());
-        dispatch.transferables.push(&packed.buffer());
-        set(&object, "packedSections", packed.as_ref()).map_err(js_message)?;
-        admissions.push(&object);
-    }
-    set(&dispatch.message_object, "admissions", admissions.as_ref()).map_err(js_message)?;
+    set_bool(
+        &dispatch.message_object,
+        "sharedResultOverflow",
+        publication.overflow,
+    )
+    .map_err(js_message)?;
     set_f64(
         &dispatch.message_object,
         "transferMs",
-        js_sys::Date::now() - transfer_started,
+        publication.transfer_ms,
+    )
+    .map_err(js_message)?;
+    set(
+        &dispatch.message_object,
+        "sharedResultBuffer",
+        publication.buffer.as_ref(),
     )
     .map_err(js_message)?;
     Ok(dispatch)
@@ -566,10 +580,6 @@ fn set_f64(object: &Object, name: &str, value: f64) -> Result<(), JsValue> {
 }
 
 fn set_u32(object: &Object, name: &str, value: u32) -> Result<(), JsValue> {
-    set_f64(object, name, f64::from(value))
-}
-
-fn set_i32(object: &Object, name: &str, value: i32) -> Result<(), JsValue> {
     set_f64(object, name, f64::from(value))
 }
 

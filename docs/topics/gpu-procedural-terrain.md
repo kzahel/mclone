@@ -5,9 +5,15 @@ Topic: `gpu-procedural-terrain`
 Status: Tactical
 [`242`](../tactical/242-terrain-lab-worker-canonical-meshing.md) completed
 Worker-owned canonical meshing, warm GPU residency, and local/hosted
-desktop/mobile headed-WebGPU proof 2026-07-25. A subsequent touch UX follow-up
-adds narrow page-scroll corridors between stacked terrain views and
-direct-grab two-finger 3D panning without changing mouse navigation. Tactical
+desktop/mobile headed-WebGPU proof 2026-07-25. Tactical
+[`248`](../tactical/248-terrain-lab-navigation-and-worker-modernization.md)
+has since moved navigation and exact-coverage coordination into shared/domain
+Rust, reused the game's opaque Worker transport, and replaced transferable
+per-chunk mesh arrays with a persistent external-SAB result arena while
+preserving separate exact/LOD panes. Its deletion and closeout gates remain
+active. A touch UX follow-up also adds narrow page-scroll corridors between
+stacked terrain views and direct-grab two-finger 3D panning without changing
+mouse navigation. Tactical
 [`241`](../tactical/241-terrain-lab-large-canonical-footprints.md) previously
 completed a deployed `31x31 = 961` exact-footprint review mode with bounded
 raw caching and tracked-memory telemetry. Shared orthographic/perspective

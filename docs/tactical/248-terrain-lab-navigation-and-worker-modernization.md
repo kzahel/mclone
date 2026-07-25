@@ -540,6 +540,53 @@ Transferable packed arrays remain the active result transport at this
 checkpoint. Adding external SAB mailboxes, removing the legacy raw compiler
 exports, and adding broader source-ownership gates remain active work.
 
+### Slice 4 complete: persistent external shared-result arena
+
+The exact Worker now encodes each Rust `CanonicalMeshBatch` as one versioned,
+bounds-checked `MCTB` byte stream and copies it directly from Worker Rust into
+a persistent external `SharedArrayBuffer`. Main Rust owns the 16 MiB resident
+arena plus its four-word atomic control block, attaches those opaque handles
+to compile doorbells, validates epoch/status/length/capacity on completion,
+copies the published bytes into its private Wasm heap, decodes them there, and
+hands owned packed-section bytes directly to the renderer. JavaScript neither
+sees admissions nor constructs/transfers per-chunk arrays.
+
+Both Wasm instances retain private heaps. The ordinary result path now has
+two explicit bulk copies: Worker Rust to the external SAB and the external
+SAB to main Rust. It removes the former Worker Rust-to-JS typed-array copy,
+transferable handoff, and JS typed-array-to-main-Rust copy. Initialization
+assets remain rare structured-clone inputs.
+
+The arena reports capacity, high-water, overflow count, transport kind, and
+cross-origin isolation. A result that exceeds the resident arena is published
+into an explicitly sized one-off SAB, admitted from that validated buffer, and
+grows the bounded resident arena for later work. Results above 128 MiB are
+rejected. Nothing truncates or silently falls back to transferables. The
+result-arena capacity is included in the tracked-memory lower bound.
+
+Local Vite development and preview now send the same COOP, COEP, and CORP
+headers as the aggregate hosted deployment's existing global `_headers`
+contract. Exact coverage fails clearly when cross-origin isolation is absent.
+
+Focused evidence on 2026-07-25:
+
+- three codec tests passed round trip, post-publication timing patching, and
+  malformed/truncated/trailing-byte rejection;
+- the full 10-test Terrain Lab Rust suite, Wasm check, TypeScript typecheck,
+  and 14 URL/state tests passed;
+- the desktop `9x9` responsive-pan proof passed with the external-SAB
+  transport, a positive arena high-water, and zero overflow;
+- the full comparison/navigation case passed on desktop in 25.5 seconds and
+  phone in 57.1 seconds while asserting `crossOriginIsolated === true`,
+  external-SAB transport, positive capacity/high-water, and zero overflow;
+  and
+- fresh desktop and phone workspace screenshots under `/tmp` were inspected;
+  both show the expected exact/CPU/GPU views and responsive layout.
+
+The legacy public raw canonical compiler/admission surface and transitional
+packed-response getters remain for the deletion/gate slice; neither is used by
+the current browser path.
+
 ## Validation Plan
 
 The exact commands may be refined as ownership moves, but closeout includes at

@@ -54,6 +54,11 @@ export interface CanonicalTerrainReport {
   cacheRawBytes: number;
   residentMeshUsedBytes: number;
   trackedBytes: number;
+  transportKind: string;
+  crossOriginIsolated: boolean;
+  resultArenaCapacityBytes: number;
+  resultArenaHighWaterBytes: number;
+  resultArenaOverflowCount: number;
   complete: boolean;
 }
 

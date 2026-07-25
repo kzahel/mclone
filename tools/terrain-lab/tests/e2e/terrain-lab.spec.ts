@@ -34,6 +34,25 @@ test("generates terrain, round-trips controls, and completes comparison", async 
   await expect(shell).toHaveAttribute("data-canonical-requested", "9");
   await expect(shell).toHaveAttribute("data-canonical-complete", "true");
   await expect(shell).toHaveAttribute(
+    "data-canonical-transport-kind",
+    "external-shared-result",
+  );
+  await expect(shell).toHaveAttribute(
+    "data-canonical-cross-origin-isolated",
+    "true",
+  );
+  expect(await page.evaluate(() => crossOriginIsolated)).toBe(true);
+  expect(
+    Number(await shell.getAttribute("data-canonical-result-arena-capacity")),
+  ).toBeGreaterThan(0);
+  expect(
+    Number(await shell.getAttribute("data-canonical-result-arena-high-water")),
+  ).toBeGreaterThan(0);
+  await expect(shell).toHaveAttribute(
+    "data-canonical-result-arena-overflows",
+    "0",
+  );
+  await expect(shell).toHaveAttribute(
     "data-compare-layout",
     testInfo.project.name === "phone-chrome" ? "stacked" : "side-by-side",
   );
@@ -652,6 +671,18 @@ test("keeps a 9x9 real footprint resident and paces pan admission", async ({
   );
   await waitForCanonical(page, 81);
   const shell = page.locator(".appShell");
+  await expect(shell).toHaveAttribute(
+    "data-canonical-transport-kind",
+    "external-shared-result",
+  );
+  await expect(shell).toHaveAttribute(
+    "data-canonical-cross-origin-isolated",
+    "true",
+  );
+  await expect(shell).toHaveAttribute(
+    "data-canonical-result-arena-overflows",
+    "0",
+  );
   const centerX = page.getByLabel("Center X");
   const initialEpoch = await shell.getAttribute("data-canonical-epoch");
   expect(Number(await shell.getAttribute("data-canonical-worker-mesh-ms")))

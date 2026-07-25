@@ -1,11 +1,15 @@
 use std::collections::{BTreeSet, VecDeque};
 
-use js_sys::{Function, Reflect, Uint8Array};
+use js_sys::{Function, Object, Reflect, Uint8Array};
 use mclone_terrain_view::canonical_terrain_chunk_order;
 use serde::Serialize;
 use wasm_bindgen::{JsCast, JsValue};
 
 use crate::{
+    canonical_batch_codec::decode_canonical_batch,
+    canonical_mailbox_web::{
+        CANONICAL_SHARED_RESULT_TRANSPORT_KIND, CanonicalSharedResultArena, shared_memory_supported,
+    },
     canonical_web::{
         CanonicalChunkCoordinate, CanonicalPackedAcceptReport, CanonicalPackedPrepareReport,
         CanonicalTerrainLab,
@@ -44,7 +48,7 @@ enum PendingCanonicalAdmission {
         coordinate: CanonicalChunkCoordinate,
         fingerprint: String,
         retained_dependency_chunks: u32,
-        packed_sections: Uint8Array,
+        packed_sections: Vec<u8>,
     },
 }
 
@@ -81,6 +85,11 @@ pub(crate) struct CanonicalCoverageReport {
     cache_raw_bytes: f64,
     resident_mesh_used_bytes: u64,
     tracked_bytes: f64,
+    transport_kind: &'static str,
+    cross_origin_isolated: bool,
+    result_arena_capacity_bytes: u32,
+    result_arena_high_water_bytes: u32,
+    result_arena_overflow_count: u32,
     complete: bool,
     needs_pump: bool,
     render_changed: bool,
@@ -89,6 +98,7 @@ pub(crate) struct CanonicalCoverageReport {
 
 pub(crate) struct CanonicalTerrainWorkerCoordinator {
     transport: JsValue,
+    shared_result: CanonicalSharedResultArena,
     epoch: u32,
     resident_identity: Option<String>,
     presentation_identity: Option<String>,
@@ -110,9 +120,10 @@ pub(crate) struct CanonicalTerrainWorkerCoordinator {
 }
 
 impl CanonicalTerrainWorkerCoordinator {
-    pub(crate) fn new(transport: JsValue) -> Self {
-        Self {
+    pub(crate) fn new(transport: JsValue) -> Result<Self, String> {
+        Ok(Self {
             transport,
+            shared_result: CanonicalSharedResultArena::new()?,
             epoch: 0,
             resident_identity: None,
             presentation_identity: None,
@@ -131,7 +142,7 @@ impl CanonicalTerrainWorkerCoordinator {
             resident: BTreeSet::new(),
             request_started_ms: 0.0,
             report: empty_report(),
-        }
+        })
     }
 
     pub(crate) fn begin(
@@ -244,7 +255,13 @@ impl CanonicalTerrainWorkerCoordinator {
             resident_raw_bytes: 0,
             cache_raw_bytes: 0.0,
             resident_mesh_used_bytes: prepared.resident_mesh_used_bytes,
-            tracked_bytes: prepared.resident_mesh_used_bytes as f64,
+            tracked_bytes: prepared.resident_mesh_used_bytes as f64
+                + self.shared_result.capacity() as f64,
+            transport_kind: CANONICAL_SHARED_RESULT_TRANSPORT_KIND,
+            cross_origin_isolated: shared_memory_supported(),
+            result_arena_capacity_bytes: self.shared_result.capacity(),
+            result_arena_high_water_bytes: self.shared_result.high_water(),
+            result_arena_overflow_count: self.shared_result.overflow_count(),
             complete: false,
             needs_pump: true,
             render_changed: false,
@@ -356,36 +373,35 @@ impl CanonicalTerrainWorkerCoordinator {
             }
             "batch" => {
                 self.worker_in_flight = false;
-                self.report.generation_ms += response.generation_ms().map_err(js_message)?;
-                self.report.worker_presentation_ms +=
-                    response.presentation_ms().map_err(js_message)?;
-                self.report.worker_mesh_ms += response.mesh_ms().map_err(js_message)?;
-                self.report.worker_pack_ms += response.pack_ms().map_err(js_message)?;
-                self.report.worker_transfer_ms += response.transfer_ms().map_err(js_message)?;
-                self.report.mesh_target_chunks +=
-                    response.deduplicated_target_chunks().map_err(js_message)? as usize;
-                self.report.cached_chunks = response.raw_cache_chunks().map_err(js_message)?;
-                self.report.cache_raw_bytes = response.raw_cache_bytes().map_err(js_message)?;
-                let admission_count = response.admission_count().map_err(js_message)?;
-                for index in 0..admission_count {
-                    let raw_cache_hit = response
-                        .admission_raw_cache_hit(index)
-                        .map_err(js_message)?;
-                    if raw_cache_hit {
+                let decode_started = now_ms();
+                let shared = self
+                    .shared_result
+                    .read_published(response.raw_message(), self.epoch)?;
+                let batch = decode_canonical_batch(&shared.bytes)?;
+                self.report.main_decode_ms += now_ms() - decode_started;
+                self.report.generation_ms += batch.generation_ms;
+                self.report.worker_presentation_ms += batch.presentation_ms;
+                self.report.worker_mesh_ms += batch.mesh_ms;
+                self.report.worker_pack_ms += batch.pack_ms;
+                self.report.worker_transfer_ms += batch.transfer_ms;
+                self.report.mesh_target_chunks += batch.deduplicated_target_chunks as usize;
+                self.report.cached_chunks = batch.raw_cache_chunks;
+                self.report.cache_raw_bytes = batch.raw_cache_bytes as f64;
+                self.report.result_arena_capacity_bytes = shared.capacity;
+                self.report.result_arena_high_water_bytes = shared.high_water;
+                self.report.result_arena_overflow_count = shared.overflow_count;
+                for admission in batch.admissions {
+                    if admission.raw_cache_hit {
                         self.report.cache_hits += 1;
                     }
                     self.pending.push_back(PendingCanonicalAdmission::Mesh {
                         coordinate: CanonicalChunkCoordinate {
-                            chunk_x: response.admission_chunk_x(index).map_err(js_message)?,
-                            chunk_z: response.admission_chunk_z(index).map_err(js_message)?,
+                            chunk_x: admission.chunk_x,
+                            chunk_z: admission.chunk_z,
                         },
-                        fingerprint: response.admission_fingerprint(index).map_err(js_message)?,
-                        retained_dependency_chunks: response
-                            .admission_retained_dependency_chunks(index)
-                            .map_err(js_message)?,
-                        packed_sections: response
-                            .admission_packed_sections(index)
-                            .map_err(js_message)?,
+                        fingerprint: format!("{:016x}", admission.fingerprint),
+                        retained_dependency_chunks: admission.retained_dependency_chunks,
+                        packed_sections: admission.packed_sections,
                     });
                 }
             }
@@ -442,6 +458,12 @@ impl CanonicalTerrainWorkerCoordinator {
             serde_json::to_string(batch).map_err(|error| error.to_string())?,
         )
         .map_err(js_message)?;
+        let frame_object = frame
+            .clone()
+            .dyn_into::<Object>()
+            .map_err(|_| "canonical compile frame is not an object".to_owned())?;
+        self.shared_result
+            .arm_and_attach(&frame_object, self.epoch)?;
         self.post(frame)?;
         self.worker_in_flight = true;
         Ok(())
@@ -452,11 +474,13 @@ impl CanonicalTerrainWorkerCoordinator {
             return Ok(());
         };
         let started = now_ms();
-        let (coordinate, retained_dependency_chunks, accepted_json, warm) = match admission {
+        let (coordinate, retained_dependency_chunks, accepted, warm) = match admission {
             PendingCanonicalAdmission::Warm(coordinate) => {
-                let accepted = renderer
+                let accepted_json = renderer
                     .activate_packed_chunk(coordinate.chunk_x, coordinate.chunk_z)
                     .map_err(js_message)?;
+                let accepted = serde_json::from_str::<CanonicalPackedAcceptReport>(&accepted_json)
+                    .map_err(|error| format!("invalid canonical accept report: {error}"))?;
                 (coordinate, 0, accepted, true)
             }
             PendingCanonicalAdmission::Mesh {
@@ -466,7 +490,7 @@ impl CanonicalTerrainWorkerCoordinator {
                 packed_sections,
             } => {
                 let accepted = renderer
-                    .accept_packed_mesh(
+                    .accept_packed_mesh_bytes(
                         coordinate.chunk_x,
                         coordinate.chunk_z,
                         fingerprint,
@@ -476,8 +500,6 @@ impl CanonicalTerrainWorkerCoordinator {
                 (coordinate, retained_dependency_chunks, accepted, false)
             }
         };
-        let accepted = serde_json::from_str::<CanonicalPackedAcceptReport>(&accepted_json)
-            .map_err(|error| format!("invalid canonical accept report: {error}"))?;
         self.resident.insert(coordinate.tuple());
         self.report.published_chunks = self.resident.len();
         self.report.queued_chunks = self
@@ -525,7 +547,8 @@ impl CanonicalTerrainWorkerCoordinator {
     fn update_tracked_bytes(&mut self) {
         self.report.tracked_bytes = self.report.resident_raw_bytes as f64
             + self.report.cache_raw_bytes
-            + self.report.resident_mesh_used_bytes as f64;
+            + self.report.resident_mesh_used_bytes as f64
+            + self.report.result_arena_capacity_bytes as f64;
     }
 
     fn post(&self, frame: JsValue) -> Result<(), String> {
@@ -574,6 +597,11 @@ fn empty_report() -> CanonicalCoverageReport {
         cache_raw_bytes: 0.0,
         resident_mesh_used_bytes: 0,
         tracked_bytes: 0.0,
+        transport_kind: CANONICAL_SHARED_RESULT_TRANSPORT_KIND,
+        cross_origin_isolated: false,
+        result_arena_capacity_bytes: 0,
+        result_arena_high_water_bytes: 0,
+        result_arena_overflow_count: 0,
         complete: false,
         needs_pump: false,
         render_changed: false,

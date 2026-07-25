@@ -19,6 +19,11 @@ const minecraftReferencePack = path.join(
   "minecraft-1.17.1",
   "extracted.zip",
 );
+const crossOriginIsolationHeaders = {
+  "Cross-Origin-Opener-Policy": "same-origin",
+  "Cross-Origin-Embedder-Policy": "require-corp",
+  "Cross-Origin-Resource-Policy": "same-origin",
+};
 
 export default defineConfig({
   base: "/terrain/",
@@ -27,10 +32,12 @@ export default defineConfig({
   server: {
     host: "127.0.0.1",
     port: 5180,
+    headers: crossOriginIsolationHeaders,
   },
   preview: {
     host: "127.0.0.1",
     port: 4180,
+    headers: crossOriginIsolationHeaders,
   },
   build: {
     outDir: path.join(terrainLabRoot, "dist", "web"),

@@ -204,10 +204,10 @@ impl CanonicalTerrainLab {
         cache_enabled: bool,
         cache_epoch: u32,
     ) -> Result<String, JsValue> {
-        let mut coordinator = self
-            .exact_coordinator
-            .take()
-            .unwrap_or_else(|| CanonicalTerrainWorkerCoordinator::new(worker_transport));
+        let mut coordinator = match self.exact_coordinator.take() {
+            Some(coordinator) => coordinator,
+            None => CanonicalTerrainWorkerCoordinator::new(worker_transport).map_err(js_error)?,
+        };
         let report = coordinator
             .begin(
                 self,
@@ -359,8 +359,25 @@ impl CanonicalTerrainLab {
         fingerprint: String,
         packed_sections: js_sys::Uint8Array,
     ) -> Result<String, JsValue> {
+        json(&self.accept_packed_mesh_bytes(
+            chunk_x,
+            chunk_z,
+            fingerprint,
+            packed_sections.to_vec(),
+        )?)
+    }
+}
+
+impl CanonicalTerrainLab {
+    pub(crate) fn accept_packed_mesh_bytes(
+        &mut self,
+        chunk_x: i32,
+        chunk_z: i32,
+        fingerprint: String,
+        packed_sections: Vec<u8>,
+    ) -> Result<CanonicalPackedAcceptReport, JsValue> {
         let decode_started = now_ms()?;
-        let sections = unpack_textured_render_sections(&packed_sections.to_vec())
+        let sections = unpack_textured_render_sections(&packed_sections)
             .map_err(|error| js_error(format!("invalid canonical packed mesh: {error}")))?;
         let decode_ms = now_ms()? - decode_started;
         let target_chunks = sections
@@ -395,7 +412,7 @@ impl CanonicalTerrainLab {
         self.refresh_packed_readiness();
         self.vertex_count = self.draw.vertex_count();
         self.index_count = self.draw.index_count();
-        json(&CanonicalPackedAcceptReport {
+        Ok(CanonicalPackedAcceptReport {
             chunk_x,
             chunk_z,
             fingerprint,
@@ -410,7 +427,10 @@ impl CanonicalTerrainLab {
             resident_mesh_used_bytes: self.draw.resident_mesh_used_bytes(),
         })
     }
+}
 
+#[wasm_bindgen]
+impl CanonicalTerrainLab {
     #[wasm_bindgen(js_name = retainChunks)]
     pub fn retain_chunks(&mut self, coordinates_json: String) -> Result<String, JsValue> {
         let coordinates = serde_json::from_str::<Vec<CanonicalChunkCoordinate>>(&coordinates_json)

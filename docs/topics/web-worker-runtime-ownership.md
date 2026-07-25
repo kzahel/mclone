@@ -36,9 +36,13 @@ aggregation. React submits desired coverage and pumps once per animation
 frame. The hand-authored TypeScript protocol, semantic Worker switch, and
 React coordinator are deleted. Terrain Lab and the game now consume the same
 domain-blind `PolledWorkerTransport` source while keeping platform-visible
-Worker construction at their respective module/bundler seams. Mesh results
-still use transferables; the switch to persistent external SAB remains the
-active next checkpoint.
+Worker construction at their respective module/bundler seams. Terrain Lab's
+ordinary exact-mesh result path now also uses a persistent external SAB:
+Worker Rust writes one versioned batch, main Rust validates and decodes it,
+and JavaScript forwards only the opaque doorbell. Capacity, high-water,
+overflow, cross-origin isolation, and the bounded one-off overflow recovery
+are explicit. Removing legacy raw admission exports and locking the new
+ownership boundary are the active next checkpoint.
 
 ## Scope
 
