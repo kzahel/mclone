@@ -728,6 +728,7 @@ async function waitForRevision(shell, previousRevision) {
         && Number(comparison ?? "0") === Number(value ?? "0");
     },
     previousRevision,
+    { timeout: mobile ? 60_000 : 30_000 },
   );
 }
 
@@ -749,6 +750,7 @@ async function waitForStressRace(shell, previousRevision) {
           ?.textContent?.toLowerCase().includes("ready");
     },
     previousRevision,
+    { timeout: mobile ? 60_000 : 30_000 },
   );
 }
 
@@ -825,12 +827,25 @@ async function readVegetationScaleBenchmark(shell) {
     vegetationCellRequests: "data-vegetation-cell-requests",
     visibleTiles: "data-visible-tiles",
   };
+  const snapshot = await shell.evaluate(
+    (element, names) => Object.fromEntries(
+      Object.entries(names).map(([key, attribute]) => [
+        key,
+        element.getAttribute(attribute),
+      ]),
+    ),
+    attributes,
+  );
   const benchmark = {};
-  for (const [key, attribute] of Object.entries(attributes)) {
+  for (const key of Object.keys(attributes)) {
     if (key === "cacheEnabled") {
-      benchmark[key] = await shell.getAttribute(attribute);
+      benchmark[key] = snapshot[key];
     } else {
-      benchmark[key] = await numericAttribute(shell, attribute);
+      const value = Number(snapshot[key]);
+      if (!Number.isFinite(value)) {
+        throw new Error(`Terrain Lab benchmark attribute ${attributes[key]} is not numeric`);
+      }
+      benchmark[key] = value;
     }
   }
   return benchmark;

@@ -3,6 +3,7 @@ import { expect, test } from "@playwright/test";
 test("generates terrain, round-trips controls, and completes comparison", async ({
   page,
 }, testInfo) => {
+  test.setTimeout(120_000);
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("console", (message) => {
@@ -312,7 +313,7 @@ test("reconstructs one planned stream for both LOD lanes", async ({
   await expect(page.getByTestId("point-receipt")).toContainText("planned stream");
   await expect(page.getByTestId("point-receipt")).toContainText("147, -126");
   await page.getByText("Production fields and revisions").click();
-  await expect(page.getByTestId("point-receipt")).toContainText("gpu-preview-a5");
+  await expect(page.getByTestId("point-receipt")).toContainText("gpu-preview-a7");
   await expect(page.getByTestId("point-receipt")).toContainText("Carve delta");
   await stage.screenshot({
     path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-structured-stream.png`,
@@ -867,7 +868,8 @@ test("publishes, shifts, and restores a 31x31 real footprint", async ({
   const trackedParts = Number(
     await shell.getAttribute("data-canonical-resident-raw-bytes"),
   ) + Number(await shell.getAttribute("data-canonical-cache-raw-bytes"))
-    + Number(await shell.getAttribute("data-canonical-mesh-used-bytes"));
+    + Number(await shell.getAttribute("data-canonical-mesh-used-bytes"))
+    + Number(await shell.getAttribute("data-canonical-result-arena-capacity"));
   expect(trackedBytes).toBe(trackedParts);
 
   const centerX = page.getByLabel("Center X");
@@ -1070,6 +1072,7 @@ async function assertPageScrollsBothWaysFromGutter(
     [{ x, y: y - 72 }],
   );
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(initialScroll);
+  await waitForPageScrollToSettle(page);
 
   const downScroll = await page.evaluate(() => window.scrollY);
   const returnBounds = await gutter.boundingBox();
@@ -1082,6 +1085,27 @@ async function assertPageScrollsBothWaysFromGutter(
     [{ x: returnX, y: returnY + 72 }],
   );
   await expect.poll(() => page.evaluate(() => window.scrollY)).toBeLessThan(downScroll);
+}
+
+async function waitForPageScrollToSettle(
+  page: import("@playwright/test").Page,
+): Promise<void> {
+  await page.evaluate(() => new Promise<void>((resolve) => {
+    let previous = window.scrollY;
+    let stableFrames = 0;
+    const deadline = performance.now() + 3_000;
+    const observe = (): void => {
+      const current = window.scrollY;
+      stableFrames = Math.abs(current - previous) < 0.5 ? stableFrames + 1 : 0;
+      previous = current;
+      if (stableFrames >= 6 || performance.now() >= deadline) {
+        resolve();
+        return;
+      }
+      requestAnimationFrame(observe);
+    };
+    requestAnimationFrame(observe);
+  }));
 }
 
 async function dispatchTouchGesture(

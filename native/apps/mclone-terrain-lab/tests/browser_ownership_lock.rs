@@ -11,8 +11,7 @@ const CANONICAL_WORKER_RUST: &str = include_str!("../src/canonical_worker_web.rs
 const CANONICAL_COORDINATOR: &str = include_str!("../src/canonical_coordinator_web.rs");
 const CANONICAL_MAILBOX: &str = include_str!("../src/canonical_mailbox_web.rs");
 const TERRAIN_WEB: &str = include_str!("../src/web.rs");
-const VITE_CONFIG: &str =
-    include_str!("../../../../tools/terrain-lab/src/web/vite.config.ts");
+const VITE_CONFIG: &str = include_str!("../../../../tools/terrain-lab/src/web/vite.config.ts");
 
 #[test]
 fn browser_typescript_has_no_exact_worker_policy() {
@@ -34,9 +33,8 @@ fn browser_typescript_has_no_exact_worker_policy() {
         );
     }
     assert!(
-        CANONICAL_CANVAS.contains(
-            "../../../../native/apps/mclone-web-client/www/mclone-worker-transport"
-        ),
+        CANONICAL_CANVAS
+            .contains("../../../../native/apps/mclone-web-client/www/mclone-worker-transport"),
         "Terrain Lab must consume the same opaque Worker transport source as the game"
     );
     assert_eq!(
@@ -124,13 +122,7 @@ fn legacy_raw_admission_and_domain_aware_transport_stay_deleted() {
     }
 
     for forbidden in [
-        "terrain",
-        "chunk",
-        "mesh",
-        "profile",
-        "epoch",
-        "cache",
-        "resident",
+        "terrain", "chunk", "mesh", "profile", "epoch", "cache", "resident",
     ] {
         assert!(
             !SHARED_TRANSPORT.to_ascii_lowercase().contains(forbidden),
