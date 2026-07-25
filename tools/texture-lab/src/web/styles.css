@@ -382,6 +382,22 @@ h3 {
   background: var(--accent-soft);
 }
 
+.lifecycleChip.candidate {
+  border-color: var(--toolbar-border);
+  background: var(--warning-bg);
+  color: var(--warning-text);
+}
+
+.lifecycleChip.provisional {
+  border-color: #718ab0;
+  background: color-mix(in srgb, #718ab0 18%, var(--chip-bg));
+}
+
+.lifecycleChip.curated {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
 .artSourceChip {
   max-width: 180px;
   overflow: hidden;
@@ -824,6 +840,19 @@ button.mcCoverageCard {
   background: var(--card);
 }
 
+.lifecycleGrid {
+  margin-top: 14px;
+}
+
+.lifecycleCard {
+  overflow: hidden;
+}
+
+.lifecycleCard .imageFrame,
+.lifecycleCard .missingImage {
+  min-height: 150px;
+}
+
 .imageCard.wide {
   grid-column: 1 / -1;
 }
@@ -942,6 +971,12 @@ button.mcCoverageCard {
 .inlineButton:disabled {
   cursor: not-allowed;
   opacity: 0.5;
+}
+
+.inlineButton.primaryAction {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+  color: var(--text);
 }
 
 .candidateActions {

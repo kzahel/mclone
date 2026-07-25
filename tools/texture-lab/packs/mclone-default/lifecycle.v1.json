@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "updatedAt": "2026-07-25T00:00:00.000Z",
+  "textures": {
+    "grass_block_top": {
+      "state": "curated",
+      "runtimeMaterials": [
+        "mclone:block/grass_block"
+      ],
+      "asset": "frozen/block/grass_block_top.png",
+      "sha256": "2e361a434f83d7dbe5c8b810880897bb5308f4243394e03777e86d47b2d7c190",
+      "codename": "G5101S74",
+      "candidateId": "candidate-seed5101-strength0p740"
+    },
+    "stone": {
+      "state": "curated",
+      "runtimeMaterials": [
+        "mclone:block/stone"
+      ],
+      "asset": "frozen/block/stone.png",
+      "sha256": "859c3e931f339b0ca47e1ffc7fcd8de45430b2d70ad963977d4b974144cdcf63",
+      "codename": "H4106S58",
+      "candidateId": "candidate-seed4106-strength0p580"
+    }
+  }
+}

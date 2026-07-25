@@ -45,6 +45,10 @@ export interface TextureLabIndexSummary {
   archivedCandidateCount: number;
   curatedSelectionCount: number;
   frozenTextureCount: number;
+  candidateLifecycleCount: number;
+  provisionalLifecycleCount: number;
+  curatedLifecycleCount: number;
+  legacyDerivedTextureCount: number;
 }
 
 export interface VanillaCoverageIndex {
@@ -110,6 +114,7 @@ export interface TextureIndexEntry {
   rotation: TextureCatalogRotation;
   tags: string[];
   notes: string[];
+  lifecycle: TextureLifecycleRef;
   frozen: TextureFrozenRef | null;
   authoringRoles: string[];
   blockUsages: TextureBlockUsage[];
@@ -118,8 +123,19 @@ export interface TextureIndexEntry {
     currentExport: TextureImageRef;
     runtimeExport: TextureImageRef;
     minecraftReference: TextureImageRef;
+    provisional: TextureImageRef;
+    curated: TextureImageRef;
     sheet: TextureImageRef;
   };
+}
+
+export type TextureLifecycleIndexState = "candidate" | "provisional" | "curated" | "legacy-derived";
+
+export interface TextureLifecycleRef {
+  state: TextureLifecycleIndexState;
+  runtimeMaterials: string[];
+  promotable: boolean;
+  note: string;
 }
 
 export type TextureArtSourceKind = "frozen" | "authored-structure" | "authored-baseline" | "procedural-placeholder";

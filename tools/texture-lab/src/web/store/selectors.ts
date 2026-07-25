@@ -1,5 +1,5 @@
 import type { TextureCandidateEntry, TextureIndexEntry, TextureLabIndex } from "../../core/index-model";
-import type { QueueFilter, TextureLabState } from "./textureLabStore";
+import type { LifecycleFilter, QueueFilter, TextureLabState } from "./textureLabStore";
 
 export const selectIndex = (state: TextureLabState): TextureLabIndex | null => state.index;
 export const selectLoadStatus = (state: TextureLabState): TextureLabState["loadStatus"] => state.loadStatus;
@@ -15,6 +15,15 @@ export const selectSearch = (state: TextureLabState): string => state.search;
 export const selectMaterialFilter = (state: TextureLabState): string => state.materialFilter;
 export const selectStatusFilter = (state: TextureLabState): string => state.statusFilter;
 export const selectQueueFilter = (state: TextureLabState): TextureLabState["queueFilter"] => state.queueFilter;
+export const selectLifecycleFilter = (state: TextureLabState): TextureLabState["lifecycleFilter"] =>
+  state.lifecycleFilter;
+
+export const LIFECYCLE_FILTER_OPTIONS: { value: LifecycleFilter; label: string }[] = [
+  { value: "all", label: "All active materials" },
+  { value: "candidate", label: "Candidate" },
+  { value: "provisional", label: "Provisional" },
+  { value: "curated", label: "Curated" },
+];
 
 export const QUEUE_FILTER_OPTIONS: { value: QueueFilter; label: string }[] = [
   { value: "all", label: "All" },
@@ -56,10 +65,10 @@ export function filteredTextures(state: TextureLabState): TextureIndexEntry[] {
     if (state.materialFilter !== "all" && texture.materialFamily !== state.materialFilter) {
       return false;
     }
-    if (state.statusFilter !== "all" && texture.status !== state.statusFilter) {
+    if (texture.lifecycle.state === "legacy-derived") {
       return false;
     }
-    if (!matchesQueueFilter(texture, state.queueFilter, candidateCounts.get(texture.name) ?? 0)) {
+    if (state.lifecycleFilter !== "all" && texture.lifecycle.state !== state.lifecycleFilter) {
       return false;
     }
     if (!search) {

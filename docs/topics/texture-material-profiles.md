@@ -52,6 +52,22 @@ synchronized Mclone Original/Minecraft Reference view;
 flat representation. The focused Playwright contract also asserts the two
 source renders differ and Coverage Debug forces textured presentation.
 
+Implementation update (2026-07-25): Texture Lab now has one committed
+Candidate/Provisional/Curated lifecycle manifest. The primary UI replaces the
+old Status and Queue filters plus Select/Apply/Freeze action cluster with one
+Lifecycle filter and **Use as Provisional**, **Accept as Curated**, and
+**Return to Candidate**. Its material comparison grid keeps Minecraft
+Reference explicitly local and read-only.
+
+Promotions validate image dimensions and tint-source policy, write a
+pack-local provisional or frozen PNG, and commit an explicit canonical runtime
+material binding. Exact inventory matches may be suggested, while ambiguous
+textures remain unpromotable. The initial accepted mapping makes the important
+non-filename relationship `grass_block_top` ->
+`mclone:block/grass_block` visible. Historical custom Far LOD tiles are
+excluded from the active lifecycle. Browser promotion tests operate on an
+isolated copy of the source pack and all ten headed Chrome tests pass.
+
 ## Scope
 
 This topic owns the meaning, selection, and authoring lifecycle of block
@@ -298,7 +314,7 @@ face-specific asset as active.
 3. Adopt the same URL-backed controls and synchronized comparison in Terrain
    Lab. **Completed 2026-07-25.**
 4. Replace Texture Lab's overlapping pack/status controls with the canonical
-   material lifecycle.
+   material lifecycle. **Completed 2026-07-25.**
 5. Derive flat colors and Far LOD summaries from resolved textures, retain
    automatic mip generation, and remove the separate LOD-texture assumption
    from the active path.

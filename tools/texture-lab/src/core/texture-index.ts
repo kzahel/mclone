@@ -4,9 +4,10 @@ import { discoverTextureCandidates } from "./candidate-index";
 import { buildTextureCurationState } from "./curation";
 import { blockSheetName, deriveVanillaPreviewBlocks, writeVanillaPreviewBlockSheets } from "./vanilla-preview-blocks";
 import { buildVanillaCoverageIndex } from "./vanilla-coverage";
+import { isLegacyDerivedTexture } from "./texture-lifecycle";
 import type { BlockSpec, TexturePackAsset, TextureSpec } from "../dsl";
 import { loadTexturePack } from "../load";
-import { textureLabOutputRoot } from "../output-root";
+import { defaultTextureLabOutputRoot, textureLabOutputRoot } from "../output-root";
 import { findOrCreateReferencePreviewFile, runtimeCompatTexturePath } from "../reference";
 import { buildVanillaUsageSemantics, vanillaTextureResourceForExportPath } from "../usage-semantics";
 import {
@@ -32,13 +33,22 @@ export async function buildTextureLabIndex(options: BuildTextureLabIndexOptions)
   const pack = await loadTexturePack(inputPath);
   const candidateDiscovery = await discoverTextureCandidates(outputRoot, { textureNames: Object.keys(pack.textures) });
   const curation = await buildTextureCurationState(outputRoot, candidateDiscovery.candidates);
+  const canonicalRuntimeMaterials = await readCanonicalRuntimeMaterials(outputRoot);
   const blockUsagesByTexture = collectBlockUsages(pack);
   const vanillaUsageSemantics = await buildVanillaUsageSemantics();
   const textures = await Promise.all(
     Object.entries(pack.textures)
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([name, texture]) =>
-        textureEntryFrom(pack, name, texture, outputRoot, blockUsagesByTexture.get(name) ?? [], vanillaUsageSemantics.byTexture),
+        textureEntryFrom(
+          pack,
+          name,
+          texture,
+          outputRoot,
+          blockUsagesByTexture.get(name) ?? [],
+          vanillaUsageSemantics.byTexture,
+          canonicalRuntimeMaterials,
+        ),
       ),
   );
   const vanillaPreviewBlocks = deriveVanillaPreviewBlocks(pack, textures);
@@ -81,6 +91,10 @@ export async function buildTextureLabIndex(options: BuildTextureLabIndexOptions)
       archivedCandidateCount: candidateDiscovery.candidates.filter((candidate) => candidate.archived).length,
       curatedSelectionCount: curation.selectedCount,
       frozenTextureCount: Object.keys(pack.frozenTextures ?? {}).length,
+      candidateLifecycleCount: textures.filter((texture) => texture.lifecycle.state === "candidate").length,
+      provisionalLifecycleCount: textures.filter((texture) => texture.lifecycle.state === "provisional").length,
+      curatedLifecycleCount: textures.filter((texture) => texture.lifecycle.state === "curated").length,
+      legacyDerivedTextureCount: textures.filter((texture) => texture.lifecycle.state === "legacy-derived").length,
     },
     curation,
     textures,
@@ -120,6 +134,7 @@ async function textureEntryFrom(
   outputRoot: string,
   blockUsages: TextureBlockUsage[],
   vanillaUsageByTexture: Map<string, TextureIndexEntry["vanillaUsage"]>,
+  canonicalRuntimeMaterials: Set<string>,
 ): Promise<TextureIndexEntry> {
   const runtimeCompatPath = runtimeCompatTexturePath(texture.exportPath);
   const currentExportPath = path.join(outputRoot, "pack", texture.exportPath);
@@ -132,6 +147,8 @@ async function textureEntryFrom(
   const source = texture.source ?? "final-color";
   const tint = texture.tintRole ? pack.tints[texture.tintRole] : undefined;
   const frozen = frozenRef(pack, name);
+  const lifecycle = lifecycleRef(pack, name, texture, canonicalRuntimeMaterials);
+  const promoted = pack.lifecycleTextures?.[name];
   const authoringRoles = authoringRolesFrom(texture);
   const vanillaTexture = vanillaTextureResourceForExportPath(texture.exportPath);
 
@@ -160,6 +177,7 @@ async function textureEntryFrom(
     rotation: catalog?.rotation ?? "unknown",
     tags,
     notes,
+    lifecycle,
     frozen,
     authoringRoles,
     blockUsages: blockUsages.sort(compareBlockUsages),
@@ -171,10 +189,95 @@ async function textureEntryFrom(
         runtimeExportPath,
         runtimeCompatPath ? "pnpm texture-lab:runtime-compat" : null,
       ),
-      minecraftReference: await imageRef("Minecraft reference", referencePath, "./scripts/extract-assets.sh"),
+      minecraftReference: await imageRef("Minecraft Reference · local/read-only", referencePath, "./scripts/extract-assets.sh"),
+      provisional: await imageRef(
+        "Provisional Mclone",
+        promoted?.state === "provisional" ? promoted.path : null,
+        null,
+      ),
+      curated: await imageRef(
+        "Curated Mclone",
+        promoted?.state === "curated" ? promoted.path : null,
+        null,
+      ),
       sheet: await imageRef("Review sheet", sheetPath, "pnpm texture-lab:sheet"),
     },
   };
+}
+
+function lifecycleRef(
+  pack: TexturePackAsset,
+  textureName: string,
+  texture: TextureSpec,
+  canonicalRuntimeMaterials: Set<string>,
+): TextureIndexEntry["lifecycle"] {
+  if (isLegacyDerivedTexture(texture)) {
+    return {
+      state: "legacy-derived",
+      runtimeMaterials: [],
+      promotable: false,
+      note: "Historical custom Far LOD tile. Runtime Far LOD is derived from the resolved material texture.",
+    };
+  }
+  const binding = pack.textureLifecycle?.[textureName];
+  if (!binding) {
+    const suggested = suggestedRuntimeMaterial(texture);
+    const runtimeMaterials =
+      suggested && canonicalRuntimeMaterials.has(suggested) ? [suggested] : [];
+    return {
+      state: "candidate",
+      runtimeMaterials,
+      promotable: runtimeMaterials.length > 0,
+      note:
+        runtimeMaterials.length > 0
+          ? `Authoring candidate only. Promotion commits the suggested '${runtimeMaterials[0]}' binding.`
+          : "Authoring candidate only. Add an explicit canonical runtime-material binding before promotion.",
+    };
+  }
+  return {
+    state: binding.state,
+    runtimeMaterials: [...binding.runtimeMaterials],
+    promotable: true,
+    note:
+      binding.state === "curated"
+        ? "Manually accepted first-party art."
+        : "Validated first-party art allowed in the default profile.",
+  };
+}
+
+function suggestedRuntimeMaterial(texture: TextureSpec): string | null {
+  const prefix = "assets/mclone/textures/block/";
+  if (!texture.exportPath.startsWith(prefix) || !texture.exportPath.endsWith(".png")) {
+    return null;
+  }
+  return `mclone:block/${texture.exportPath.slice(prefix.length, -".png".length)}`;
+}
+
+async function readCanonicalRuntimeMaterials(outputRoot: string): Promise<Set<string>> {
+  const candidates = [
+    path.join(outputRoot, "first-party-inventory.v1.json"),
+    path.join(defaultTextureLabOutputRoot(), "first-party-inventory.v1.json"),
+  ];
+  for (const inventoryPath of candidates) {
+    try {
+      const payload = JSON.parse(await fs.readFile(inventoryPath, "utf8")) as {
+        schema_version?: unknown;
+        materials?: unknown;
+      };
+      if (
+        payload.schema_version === 1 &&
+        Array.isArray(payload.materials) &&
+        payload.materials.every((material) => typeof material === "string")
+      ) {
+        return new Set(payload.materials);
+      }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+        throw error;
+      }
+    }
+  }
+  return new Set();
 }
 
 function emptyVanillaUsage(texture: string): TextureIndexEntry["vanillaUsage"] {

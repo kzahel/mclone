@@ -12,22 +12,26 @@ import {
   selectCurationStatus,
   selectIndex,
   selectLoadStatus,
+  selectLifecycleFilter,
   selectMaterialFilter,
   selectPreviewMode,
   selectPreviewSelectionsByTexture,
-  selectQueueFilter,
   selectSearch,
   selectedCandidate as selectedCandidateSelector,
   selectedTexture,
   selectSelectedCandidateId,
   selectSelectedTextureName,
-  selectStatusFilter,
   selectThemeMode,
-  QUEUE_FILTER_OPTIONS,
-  statusOptions,
+  LIFECYCLE_FILTER_OPTIONS,
 } from "./store/selectors";
-import type { QueueFilter, ThemeMode } from "./store/textureLabStore";
-import { imageRefUrl, imageUrl, useTextureLabStore } from "./store/textureLabStore";
+import type { LifecycleFilter, ThemeMode } from "./store/textureLabStore";
+import { imageRefUrl, useTextureLabStore } from "./store/textureLabStore";
+
+type TextureLifecyclePromotionHandler = (
+  textureName: string,
+  candidateId: string | null,
+  state: "provisional" | "curated",
+) => Promise<void>;
 
 export function App(): JSX.Element {
   const index = useTextureLabStore(selectIndex);
@@ -41,33 +45,27 @@ export function App(): JSX.Element {
   const selectedTextureName = useTextureLabStore(selectSelectedTextureName);
   const selectedCandidateId = useTextureLabStore(selectSelectedCandidateId);
   const previewSelectionsByTexture = useTextureLabStore(selectPreviewSelectionsByTexture);
-  const curatedSelectionsByTexture = curationSelectionsByTexture(index);
-  const visibleSelectionsByTexture = { ...curatedSelectionsByTexture, ...previewSelectionsByTexture };
+  const visibleSelectionsByTexture = previewSelectionsByTexture;
   const themeMode = useTextureLabStore(selectThemeMode);
   const previewMode = useTextureLabStore(selectPreviewMode);
   const search = useTextureLabStore(selectSearch);
   const materialFilter = useTextureLabStore(selectMaterialFilter);
-  const statusFilter = useTextureLabStore(selectStatusFilter);
-  const queueFilter = useTextureLabStore(selectQueueFilter);
+  const lifecycleFilter = useTextureLabStore(selectLifecycleFilter);
   const materials = useTextureLabStore(useShallow(materialOptions));
-  const statuses = useTextureLabStore(useShallow(statusOptions));
   const loadIndex = useTextureLabStore((state) => state.loadIndex);
   const reindex = useTextureLabStore((state) => state.reindex);
   const selectTexture = useTextureLabStore((state) => state.selectTexture);
   const selectCandidate = useTextureLabStore((state) => state.selectCandidate);
   const setPreviewCandidate = useTextureLabStore((state) => state.setPreviewCandidate);
   const clearPreviewCandidate = useTextureLabStore((state) => state.clearPreviewCandidate);
-  const selectCurationCandidate = useTextureLabStore((state) => state.selectCurationCandidate);
-  const clearCurationSelection = useTextureLabStore((state) => state.clearCurationSelection);
-  const applyCuration = useTextureLabStore((state) => state.applyCuration);
-  const requestFreeze = useTextureLabStore((state) => state.requestFreeze);
+  const promoteLifecycle = useTextureLabStore((state) => state.promoteLifecycle);
+  const returnToCandidate = useTextureLabStore((state) => state.returnToCandidate);
   const setPreviewMode = useTextureLabStore((state) => state.setPreviewMode);
   const syncSystemTheme = useTextureLabStore((state) => state.syncSystemTheme);
   const toggleTheme = useTextureLabStore((state) => state.toggleTheme);
   const setSearch = useTextureLabStore((state) => state.setSearch);
   const setMaterialFilter = useTextureLabStore((state) => state.setMaterialFilter);
-  const setStatusFilter = useTextureLabStore((state) => state.setStatusFilter);
-  const setQueueFilter = useTextureLabStore((state) => state.setQueueFilter);
+  const setLifecycleFilter = useTextureLabStore((state) => state.setLifecycleFilter);
 
   useEffect(() => {
     void loadIndex();
@@ -91,14 +89,10 @@ export function App(): JSX.Element {
           <h1>{index?.pack.name ?? "mclone-default"}</h1>
         </div>
         <div className="summaryStrip" aria-label="Pack summary">
-          <SummaryItem label="textures" value={index?.summary.authoredTextures ?? 0} />
-          <SummaryItem label="placeholders" value={index?.summary.proceduralPlaceholderCount ?? 0} />
-          <SummaryItem label="exports" value={index?.summary.currentExportsPresent ?? 0} />
-          <SummaryItem label="sheets" value={index?.summary.sheetsPresent ?? 0} />
-          <SummaryItem label="runtime" value={index?.summary.runtimeExportsPresent ?? 0} />
-          <SummaryItem label="candidates" value={index?.summary.associatedCandidateCount ?? 0} />
-          <SummaryItem label="selected" value={index?.summary.curatedSelectionCount ?? 0} />
-          <SummaryItem label="frozen" value={index?.summary.frozenTextureCount ?? 0} />
+          <SummaryItem label="candidate" value={index?.summary.candidateLifecycleCount ?? 0} />
+          <SummaryItem label="provisional" value={index?.summary.provisionalLifecycleCount ?? 0} />
+          <SummaryItem label="curated" value={index?.summary.curatedLifecycleCount ?? 0} />
+          <SummaryItem label="legacy LOD" value={index?.summary.legacyDerivedTextureCount ?? 0} />
         </div>
         <div className="toolbarActions">
           <button
@@ -144,20 +138,13 @@ export function App(): JSX.Element {
               </select>
             </label>
             <label>
-              Status
-              <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>
-                <option value="all">All</option>
-                {statuses.map((status) => (
-                  <option key={status} value={status}>
-                    {status}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Queue
-              <select value={queueFilter} onChange={(event) => setQueueFilter(event.target.value as QueueFilter)}>
-                {QUEUE_FILTER_OPTIONS.map((option) => (
+              Lifecycle
+              <select
+                aria-label="Lifecycle filter"
+                value={lifecycleFilter}
+                onChange={(event) => setLifecycleFilter(event.target.value as LifecycleFilter)}
+              >
+                {LIFECYCLE_FILTER_OPTIONS.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
@@ -178,7 +165,7 @@ export function App(): JSX.Element {
               >
                 <span className="textureName">{texture.name}</span>
                 <span className="textureMeta">
-                  {texture.materialFamily} / {texture.size}px / {texture.source} / {texture.artSource.label}
+                  {texture.lifecycle.state} / {texture.materialFamily} / {texture.size}px
                 </span>
               </button>
             ))}
@@ -223,16 +210,12 @@ export function App(): JSX.Element {
                   selectedCandidateId={selectedCandidateId}
                   previewCandidateId={previewSelectionsByTexture[activeTexture.name] ?? null}
                   previewSelectionsByTexture={visibleSelectionsByTexture}
-                  curationCandidateId={curatedSelectionsByTexture[activeTexture.name] ?? null}
-                  curationSelectedCount={index.curation.selectedCount}
                   onSelectTexture={selectTexture}
                   onSelectCandidate={selectCandidate}
                   onUsePreview={setPreviewCandidate}
                   onClearPreview={clearPreviewCandidate}
-                  onSelectCuration={selectCurationCandidate}
-                  onClearCuration={clearCurationSelection}
-                  onApplyCuration={applyCuration}
-                  onRequestFreeze={requestFreeze}
+                  onPromote={promoteLifecycle}
+                  onReturnToCandidate={returnToCandidate}
                 />
               ) : activeTexture ? (
                 <TexturePreview
@@ -240,15 +223,11 @@ export function App(): JSX.Element {
                   candidates={activeCandidates}
                   selectedCandidateId={selectedCandidateId}
                   previewCandidateId={previewSelectionsByTexture[activeTexture.name] ?? null}
-                  curationCandidateId={curatedSelectionsByTexture[activeTexture.name] ?? null}
-                  curationSelectedCount={index.curation.selectedCount}
                   onSelectCandidate={selectCandidate}
                   onUsePreview={setPreviewCandidate}
                   onClearPreview={clearPreviewCandidate}
-                  onSelectCuration={selectCurationCandidate}
-                  onClearCuration={clearCurationSelection}
-                  onApplyCuration={applyCuration}
-                  onRequestFreeze={requestFreeze}
+                  onPromote={promoteLifecycle}
+                  onReturnToCandidate={returnToCandidate}
                 />
               ) : (
                 <EmptyState loadStatus={loadStatus} />
@@ -288,60 +267,44 @@ function SummaryItem({ label, value }: { label: string; value: number }): JSX.El
   );
 }
 
-function curationSelectionsByTexture(index: ReturnType<typeof selectIndex>): Record<string, string> {
-  if (!index) {
-    return {};
-  }
-  return Object.fromEntries(index.curation.selections.map((selection) => [selection.textureName, selection.candidateId]));
-}
-
 function TexturePreview({
   texture,
   candidates,
   selectedCandidateId,
   previewCandidateId,
-  curationCandidateId,
-  curationSelectedCount,
   onSelectCandidate,
   onUsePreview,
   onClearPreview,
-  onSelectCuration,
-  onClearCuration,
-  onApplyCuration,
-  onRequestFreeze,
+  onPromote,
+  onReturnToCandidate,
 }: {
   texture: TextureIndexEntry;
   candidates: TextureCandidateEntry[];
   selectedCandidateId: string | null;
   previewCandidateId: string | null;
-  curationCandidateId: string | null;
-  curationSelectedCount: number;
   onSelectCandidate: (id: string) => void;
   onUsePreview: (textureName: string, candidateId: string) => void;
   onClearPreview: (textureName: string) => void;
-  onSelectCuration: (textureName: string, candidateId: string) => Promise<void>;
-  onClearCuration: (textureName: string) => Promise<void>;
-  onApplyCuration: () => Promise<void>;
-  onRequestFreeze: (textureName: string) => Promise<void>;
+  onPromote: TextureLifecyclePromotionHandler;
+  onReturnToCandidate: (textureName: string) => Promise<void>;
 }): JSX.Element {
   return (
     <>
       <TexturePreviewHeader texture={texture} />
-      <TextureAssetGrid texture={texture} />
+      <TextureLifecycleGrid
+        texture={texture}
+        candidate={candidates.find((entry) => entry.id === selectedCandidateId) ?? null}
+      />
       <CandidateSection
         texture={texture}
         candidates={candidates}
         selectedCandidateId={selectedCandidateId}
         previewCandidateId={previewCandidateId}
-        curationCandidateId={curationCandidateId}
-        curationSelectedCount={curationSelectedCount}
         onSelectCandidate={onSelectCandidate}
         onUsePreview={onUsePreview}
         onClearPreview={onClearPreview}
-        onSelectCuration={onSelectCuration}
-        onClearCuration={onClearCuration}
-        onApplyCuration={onApplyCuration}
-        onRequestFreeze={onRequestFreeze}
+        onPromote={onPromote}
+        onReturnToCandidate={onReturnToCandidate}
       />
     </>
   );
@@ -354,16 +317,12 @@ function AutoTexturePreview({
   selectedCandidateId,
   previewCandidateId,
   previewSelectionsByTexture,
-  curationCandidateId,
-  curationSelectedCount,
   onSelectTexture,
   onSelectCandidate,
   onUsePreview,
   onClearPreview,
-  onSelectCuration,
-  onClearCuration,
-  onApplyCuration,
-  onRequestFreeze,
+  onPromote,
+  onReturnToCandidate,
 }: {
   texture: TextureIndexEntry;
   blocks: BlockIndexEntry[];
@@ -371,16 +330,12 @@ function AutoTexturePreview({
   selectedCandidateId: string | null;
   previewCandidateId: string | null;
   previewSelectionsByTexture: Record<string, string>;
-  curationCandidateId: string | null;
-  curationSelectedCount: number;
   onSelectTexture: (name: string) => void;
   onSelectCandidate: (id: string) => void;
   onUsePreview: (textureName: string, candidateId: string) => void;
   onClearPreview: (textureName: string) => void;
-  onSelectCuration: (textureName: string, candidateId: string) => Promise<void>;
-  onClearCuration: (textureName: string) => Promise<void>;
-  onApplyCuration: () => Promise<void>;
-  onRequestFreeze: (textureName: string) => Promise<void>;
+  onPromote: TextureLifecyclePromotionHandler;
+  onReturnToCandidate: (textureName: string) => Promise<void>;
 }): JSX.Element {
   const focusedBlocks = blocks.filter((block) => block.faces.some((face) => face.textureName === texture.name));
   return (
@@ -400,23 +355,21 @@ function AutoTexturePreview({
             emptyMessage="No rendered uses found for this texture."
           />
         </div>
-      ) : (
-        <TextureAssetGrid texture={texture} />
-      )}
+      ) : null}
+      <TextureLifecycleGrid
+        texture={texture}
+        candidate={candidates.find((entry) => entry.id === selectedCandidateId) ?? null}
+      />
       <CandidateSection
         texture={texture}
         candidates={candidates}
         selectedCandidateId={selectedCandidateId}
         previewCandidateId={previewCandidateId}
-        curationCandidateId={curationCandidateId}
-        curationSelectedCount={curationSelectedCount}
         onSelectCandidate={onSelectCandidate}
         onUsePreview={onUsePreview}
         onClearPreview={onClearPreview}
-        onSelectCuration={onSelectCuration}
-        onClearCuration={onClearCuration}
-        onApplyCuration={onApplyCuration}
-        onRequestFreeze={onRequestFreeze}
+        onPromote={onPromote}
+        onReturnToCandidate={onReturnToCandidate}
       />
     </>
   );
@@ -424,7 +377,7 @@ function AutoTexturePreview({
 
 function TexturePreviewHeader({
   texture,
-  subtitle = `${texture.exportPath} / ${texture.status}`,
+  subtitle = lifecycleSubtitle(texture),
 }: {
   texture: TextureIndexEntry;
   subtitle?: string;
@@ -436,8 +389,8 @@ function TexturePreviewHeader({
         <p>{subtitle}</p>
       </div>
       <div className="chipGroup">
-        <span className={artSourceChipClass(texture)} title={texture.artSource.description}>
-          {texture.artSource.label}
+        <span className={`chip lifecycleChip ${texture.lifecycle.state}`} title={texture.lifecycle.note}>
+          {lifecycleLabel(texture.lifecycle.state)}
         </span>
         <span className="chip">{texture.materialFamily}</span>
         {texture.vanillaUsage && texture.vanillaUsage.previewHint !== "unknown" ? (
@@ -451,12 +404,62 @@ function TexturePreviewHeader({
   );
 }
 
-function TextureAssetGrid({ texture }: { texture: TextureIndexEntry }): JSX.Element {
+function TextureLifecycleGrid({
+  texture,
+  candidate,
+}: {
+  texture: TextureIndexEntry;
+  candidate: TextureCandidateEntry | null;
+}): JSX.Element {
+  const candidateImage = candidate ? primaryCandidateImage(candidate) : null;
+  const candidateRef =
+    candidateImage ??
+    (texture.lifecycle.state === "candidate"
+      ? { ...texture.images.currentExport, label: "Candidate · not runtime eligible" }
+      : { label: "Candidate", path: null, exists: false, missingCommand: null });
   return (
-    <div className="imageGrid">
-      <ImageCard texture={texture} imageKind="currentExport" refInfo={texture.images.currentExport} />
-      <ImageCard texture={texture} imageKind="runtimeExport" refInfo={texture.images.runtimeExport} />
-      <ImageCard texture={texture} imageKind="sheet" refInfo={texture.images.sheet} wide />
+    <div className="imageGrid lifecycleGrid" aria-label="Texture lifecycle comparison">
+      <LifecycleImageCard texture={texture} refInfo={candidateRef} stage="Candidate" />
+      <LifecycleImageCard texture={texture} refInfo={texture.images.provisional} stage="Provisional" />
+      <LifecycleImageCard texture={texture} refInfo={texture.images.curated} stage="Curated" />
+      <LifecycleImageCard
+        texture={texture}
+        refInfo={texture.images.minecraftReference}
+        stage="Minecraft Reference"
+        readOnly
+      />
+    </div>
+  );
+}
+
+function LifecycleImageCard({
+  texture,
+  refInfo,
+  stage,
+  readOnly = false,
+}: {
+  texture: TextureIndexEntry;
+  refInfo: TextureImageRef;
+  stage: string;
+  readOnly?: boolean;
+}): JSX.Element {
+  const url = imageRefUrl(refInfo);
+  return (
+    <div className="imageCard lifecycleCard">
+      <div className="imageCardHeader">
+        <strong>{stage}</strong>
+        <span>{readOnly ? "local · read-only" : refInfo.exists ? "available" : "empty"}</span>
+      </div>
+      {url ? (
+        <div className="imageFrame">
+          <img src={url} alt={`${texture.name} ${stage}`} />
+        </div>
+      ) : (
+        <div className="missingImage">
+          <span>{readOnly ? "Reference unavailable" : "No promoted texture"}</span>
+          {refInfo.missingCommand ? <code>{refInfo.missingCommand}</code> : null}
+        </div>
+      )}
     </div>
   );
 }
@@ -464,9 +467,23 @@ function TextureAssetGrid({ texture }: { texture: TextureIndexEntry }): JSX.Elem
 function autoPreviewSubtitle(texture: TextureIndexEntry): string {
   const hint = texture.vanillaUsage?.previewHint;
   if (!hint || hint === "unknown") {
-    return `${texture.exportPath} / ${texture.status}`;
+    return lifecycleSubtitle(texture);
   }
-  return `${hint} preview / ${texture.exportPath} / ${texture.status}`;
+  return `${hint} preview / ${lifecycleSubtitle(texture)}`;
+}
+
+function lifecycleSubtitle(texture: TextureIndexEntry): string {
+  const bindings = texture.lifecycle.runtimeMaterials.length
+    ? texture.lifecycle.runtimeMaterials.join(", ")
+    : "no runtime binding";
+  return `${lifecycleLabel(texture.lifecycle.state)} / ${bindings}`;
+}
+
+function lifecycleLabel(state: TextureIndexEntry["lifecycle"]["state"]): string {
+  if (state === "legacy-derived") {
+    return "Legacy derived LOD";
+  }
+  return `${state[0]!.toUpperCase()}${state.slice(1)}`;
 }
 
 function autoRenderedUsesSummary(texture: TextureIndexEntry, blocks: BlockIndexEntry[]): string {
@@ -477,71 +494,34 @@ function autoRenderedUsesSummary(texture: TextureIndexEntry, blocks: BlockIndexE
   return `${hint && hint !== "unknown" ? `${hint} / ` : ""}${blocks.length} ${blockWord} / ${faces} ${faceWord}`;
 }
 
-function ImageCard({
-  texture,
-  imageKind,
-  refInfo,
-  wide = false,
-}: {
-  texture: TextureIndexEntry;
-  imageKind: keyof TextureIndexEntry["images"];
-  refInfo: TextureImageRef;
-  wide?: boolean;
-}): JSX.Element {
-  const url = imageUrl(texture, imageKind);
-  return (
-    <div className={wide ? "imageCard wide" : "imageCard"}>
-      <div className="imageCardHeader">
-        <strong>{refInfo.label}</strong>
-        <span>{refInfo.exists ? "found" : "missing"}</span>
-      </div>
-      {url ? (
-        <div className="imageFrame">
-          <img src={url} alt={`${texture.name} ${refInfo.label}`} />
-        </div>
-      ) : (
-        <div className="missingImage">
-          <span>Missing</span>
-          {refInfo.missingCommand ? <code>{refInfo.missingCommand}</code> : <span>No runtime-compatible path</span>}
-        </div>
-      )}
-      {refInfo.path ? <code className="pathLine">{refInfo.path}</code> : null}
-    </div>
-  );
-}
-
 function CandidateSection({
   texture,
   candidates,
   selectedCandidateId,
   previewCandidateId,
-  curationCandidateId,
-  curationSelectedCount,
   onSelectCandidate,
   onUsePreview,
   onClearPreview,
-  onSelectCuration,
-  onClearCuration,
-  onApplyCuration,
-  onRequestFreeze,
+  onPromote,
+  onReturnToCandidate,
 }: {
   texture: TextureIndexEntry;
   candidates: TextureCandidateEntry[];
   selectedCandidateId: string | null;
   previewCandidateId: string | null;
-  curationCandidateId: string | null;
-  curationSelectedCount: number;
   onSelectCandidate: (id: string) => void;
   onUsePreview: (textureName: string, candidateId: string) => void;
   onClearPreview: (textureName: string) => void;
-  onSelectCuration: (textureName: string, candidateId: string) => Promise<void>;
-  onClearCuration: (textureName: string) => Promise<void>;
-  onApplyCuration: () => Promise<void>;
-  onRequestFreeze: (textureName: string) => Promise<void>;
+  onPromote: TextureLifecyclePromotionHandler;
+  onReturnToCandidate: (textureName: string) => Promise<void>;
 }): JSX.Element {
   const sortedCandidates = [...candidates].sort(compareCandidateDisplay);
   const selectedCandidate = sortedCandidates.find((candidate) => candidate.id === selectedCandidateId) ?? null;
-  const canSelectForPack = Boolean(selectedCandidate?.promotable && selectedCandidate.images.projected.exists);
+  const selectedCandidateIdForPromotion =
+    selectedCandidate?.promotable && selectedCandidate.images.projected.exists
+      ? selectedCandidate.id
+      : null;
+  const canPromote = texture.lifecycle.promotable;
   return (
     <section className="candidateSection">
       <div className="subsectionHeader">
@@ -549,36 +529,40 @@ function CandidateSection({
           <h3>Generated Candidates</h3>
           <p>
             {sortedCandidates.length ? `${sortedCandidates.length} linked to ${texture.name}` : "No local candidates linked yet."}
-            {curationCandidateId ? ` / pack ${candidateCodename(sortedCandidates, curationCandidateId)}` : ""}
+            {` / ${texture.lifecycle.note}`}
           </p>
         </div>
         <div className="candidateActions">
-          {selectedCandidate ? (
-            <button
-              className="inlineButton"
-              type="button"
-              disabled={!canSelectForPack}
-              onClick={() => void onSelectCuration(texture.name, selectedCandidate.id)}
-            >
-              Select for Pack
-            </button>
-          ) : null}
-          {curationCandidateId ? (
-            <button className="inlineButton" type="button" onClick={() => void onClearCuration(texture.name)}>
-              Clear Pack
-            </button>
-          ) : null}
-          <button className="inlineButton" type="button" disabled={!curationCandidateId} onClick={() => void onRequestFreeze(texture.name)}>
-            Request Freeze
+          <button
+            className="inlineButton"
+            type="button"
+            disabled={!canPromote}
+            title={canPromote ? "Promote the selected candidate or current recipe render" : texture.lifecycle.note}
+            onClick={() =>
+              void onPromote(texture.name, selectedCandidateIdForPromotion, "provisional")
+            }
+          >
+            Use as Provisional
           </button>
+          <button
+            className="inlineButton primaryAction"
+            type="button"
+            disabled={!canPromote}
+            title={canPromote ? "Accept the selected candidate or current recipe render" : texture.lifecycle.note}
+            onClick={() => void onPromote(texture.name, selectedCandidateIdForPromotion, "curated")}
+          >
+            Accept as Curated
+          </button>
+          {texture.lifecycle.state === "provisional" || texture.lifecycle.state === "curated" ? (
+            <button className="inlineButton" type="button" onClick={() => void onReturnToCandidate(texture.name)}>
+              Return to Candidate
+            </button>
+          ) : null}
           {previewCandidateId ? (
             <button className="inlineButton" type="button" onClick={() => onClearPreview(texture.name)}>
               Clear Preview
             </button>
           ) : null}
-          <button className="inlineButton" type="button" disabled={curationSelectedCount === 0} onClick={() => void onApplyCuration()}>
-            Apply Pack
-          </button>
         </div>
       </div>
       {sortedCandidates.length ? (
@@ -589,7 +573,7 @@ function CandidateSection({
               candidate={candidate}
               selected={candidate.id === selectedCandidateId}
               previewed={candidate.id === previewCandidateId}
-              active={candidate.id === curationCandidateId}
+              active={false}
               onSelect={onSelectCandidate}
               onUsePreview={onUsePreview}
             />
@@ -668,10 +652,6 @@ function candidateCardClassName(selected: boolean, previewed: boolean, active: b
   return ["candidateCard", selected ? "selected" : "", previewed ? "previewed" : "", active ? "active" : ""].filter(Boolean).join(" ");
 }
 
-function candidateCodename(candidates: TextureCandidateEntry[], candidateId: string): string {
-  return candidates.find((candidate) => candidate.id === candidateId)?.codename ?? "selected";
-}
-
 function compareCandidateDisplay(left: TextureCandidateEntry, right: TextureCandidateEntry): number {
   return (
     sourceOrder(left.source) - sourceOrder(right.source) ||
@@ -705,19 +685,18 @@ function TextureInspector({
     <div className="inspectorStack">
       <InspectorSection title="Texture">
         <Field label="name" value={texture.name} />
+        <Field label="lifecycle" value={lifecycleLabel(texture.lifecycle.state)} />
+        <Field label="runtime material" value={joinOrNone(texture.lifecycle.runtimeMaterials)} />
+        <Field label="lifecycle note" value={texture.lifecycle.note} />
         <Field label="size" value={`${texture.size}x${texture.size}`} />
         <Field label="source" value={texture.source} />
         <Field label="palette" value={texture.palette} />
         <Field label="base" value={texture.base} />
         <Field label="tint" value={texture.tintRole ?? "none"} />
-        <Field label="art source" value={texture.artSource.label} />
-        <Field label="art note" value={texture.artSource.description} />
         <Field label="source policy" value={sourcePolicyLabel(texture)} />
-        <Field label="frozen" value={frozenLabel(texture)} />
       </InspectorSection>
 
       <InspectorSection title="Catalog">
-        <Field label="status" value={texture.status} />
         <Field label="material" value={texture.materialFamily} />
         <Field label="tiling" value={texture.tiling} />
         <Field label="rotation" value={texture.rotation} />
@@ -801,17 +780,6 @@ function sourcePolicyLabel(texture: TextureIndexEntry): string {
     parts.push(`pixel <= ${neutrality.maxPixelSaturation}`);
   }
   return parts.join(", ");
-}
-
-function artSourceChipClass(texture: TextureIndexEntry): string {
-  return texture.artSource.kind === "procedural-placeholder" ? "chip artSourceChip placeholderChip" : "chip artSourceChip";
-}
-
-function frozenLabel(texture: TextureIndexEntry): string {
-  if (!texture.frozen) {
-    return "none";
-  }
-  return texture.frozen.codename ? `${texture.frozen.codename} / ${texture.frozen.asset}` : texture.frozen.asset;
 }
 
 function joinOrNone(values: (string | number)[]): string {

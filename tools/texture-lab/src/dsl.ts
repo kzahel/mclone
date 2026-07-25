@@ -8,6 +8,9 @@ export interface TexturePackAsset {
   blocks: Record<string, BlockSpec>;
   frozenCurationPath?: string;
   frozenTextures?: Record<string, TextureFrozenAsset>;
+  lifecycleManifestPath?: string;
+  textureLifecycle?: Record<string, TextureLifecycleBinding>;
+  lifecycleTextures?: Record<string, TexturePromotedAsset>;
 }
 
 export type PaletteSpec = Record<string, string>;
@@ -47,6 +50,20 @@ export interface TextureFrozenAsset {
   height: number;
   data: Uint8Array;
   metadata: TextureFrozenMetadata;
+}
+
+export type TextureLifecycleState = "provisional" | "curated";
+
+export interface TextureLifecycleBinding {
+  state: TextureLifecycleState;
+  runtimeMaterials: string[];
+  asset: string;
+  sha256: string;
+}
+
+export interface TexturePromotedAsset extends TextureFrozenAsset {
+  state: TextureLifecycleState;
+  runtimeMaterials: string[];
 }
 
 export interface TextureFrozenMetadata {

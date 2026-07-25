@@ -16,6 +16,12 @@ import { parseHexColor, tintTexture } from "../image";
 import { textureLabOutputRoot } from "../output-root";
 import { decodePng, encodePng } from "../png";
 import { contentTypeForImage, ImageFileError, resolveAllowedImageFile } from "./image-files";
+import {
+  promoteTextureLifecycle,
+  returnTextureLifecycleToCandidate,
+  TextureLifecycleError,
+} from "../core/texture-lifecycle";
+import type { TextureFrozenMetadata, TextureLifecycleState } from "../dsl";
 
 export interface TextureLabApiOptions {
   textureLabRoot: string;
@@ -70,6 +76,76 @@ export function createTextureLabApi(options: TextureLabApiOptions): TextureLabAp
       }
 
       if (request.method === "POST" && url.pathname === "/api/reindex") {
+        sendJson(response, await loadIndex(true));
+        return true;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/lifecycle/promote") {
+        const body = await readJsonBody<{
+          textureName?: unknown;
+          candidateId?: unknown;
+          state?: unknown;
+        }>(request);
+        if (
+          typeof body.textureName !== "string" ||
+          (body.state !== "provisional" && body.state !== "curated") ||
+          (body.candidateId !== undefined && typeof body.candidateId !== "string")
+        ) {
+          sendJson(response, { error: "Expected textureName, optional candidateId, and provisional or curated state" }, 400);
+          return true;
+        }
+        const index = await loadIndex();
+        const texture = index.textures.find((entry) => entry.name === body.textureName);
+        if (!texture) {
+          sendJson(response, { error: `Texture '${body.textureName}' not found` }, 404);
+          return true;
+        }
+        const candidate =
+          typeof body.candidateId === "string"
+            ? index.candidates.find(
+                (entry) => entry.id === body.candidateId && entry.textureName === body.textureName,
+              )
+            : null;
+        if (body.candidateId && !candidate) {
+          sendJson(response, { error: `Candidate '${body.candidateId}' is not linked to '${body.textureName}'` }, 404);
+          return true;
+        }
+        const candidateImage = candidate?.images.projected;
+        const imagePath =
+          candidateImage?.exists && candidateImage.path
+            ? candidateImage.path
+            : texture.images.currentExport.exists
+              ? texture.images.currentExport.path
+              : null;
+        if (!imagePath) {
+          sendJson(response, { error: `No promotable first-party candidate image exists for '${body.textureName}'` }, 400);
+          return true;
+        }
+        const pack = await loadTexturePack(inputPath);
+        const promoteOptions: Parameters<typeof promoteTextureLifecycle>[0] = {
+          pack,
+          packInputPath: inputPath,
+          textureName: body.textureName,
+          imagePath,
+          state: body.state as TextureLifecycleState,
+          runtimeMaterials: texture.lifecycle.runtimeMaterials,
+        };
+        const metadata = candidateMetadata(candidate ?? null);
+        if (metadata) {
+          promoteOptions.metadata = metadata;
+        }
+        const result = await promoteTextureLifecycle(promoteOptions);
+        sendJson(response, { result, index: await loadIndex(true) });
+        return true;
+      }
+
+      if (request.method === "POST" && url.pathname === "/api/lifecycle/candidate") {
+        const body = await readJsonBody<{ textureName?: unknown }>(request);
+        if (typeof body.textureName !== "string") {
+          sendJson(response, { error: "Expected textureName" }, 400);
+          return true;
+        }
+        await returnTextureLifecycleToCandidate(inputPath, body.textureName);
         sendJson(response, await loadIndex(true));
         return true;
       }
@@ -237,6 +313,32 @@ function sendError(response: ServerResponse, error: unknown): void {
     sendJson(response, { error: error.message }, error.statusCode);
     return;
   }
+  if (error instanceof TextureLifecycleError) {
+    sendJson(response, { error: error.message }, error.statusCode);
+    return;
+  }
   const message = error instanceof Error ? error.message : String(error);
   sendJson(response, { error: message }, 500);
+}
+
+function candidateMetadata(
+  candidate: TextureLabIndex["candidates"][number] | null,
+): TextureFrozenMetadata | undefined {
+  if (!candidate) {
+    return undefined;
+  }
+  const metadata: TextureFrozenMetadata = {
+    codename: candidate.codename,
+    candidateId: candidate.candidateId,
+  };
+  if (candidate.promptPreset) metadata.promptPreset = candidate.promptPreset;
+  if (candidate.prompt) metadata.prompt = candidate.prompt;
+  if (candidate.negativePrompt) metadata.negativePrompt = candidate.negativePrompt;
+  if (candidate.modelId) metadata.modelId = candidate.modelId;
+  if (candidate.scheduler) metadata.scheduler = candidate.scheduler;
+  if (candidate.steps !== null) metadata.steps = candidate.steps;
+  if (candidate.seed !== null) metadata.seed = candidate.seed;
+  if (candidate.strength !== null) metadata.strength = candidate.strength;
+  if (candidate.resolution !== null) metadata.resolution = candidate.resolution;
+  return metadata;
 }

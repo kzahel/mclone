@@ -11,16 +11,20 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
   const index = await indexResponse.json();
 
   expect(index.pack.name).toBe("mclone-default");
-  expect(index.summary.authoredTextures).toBe(94);
+  expect(index.summary.authoredTextures).toBe(108);
   expect(index.summary.candidateCount).toBe(4);
   expect(index.summary.associatedCandidateCount).toBe(4);
   expect(index.summary.archivedCandidateCount).toBe(1);
   expect(index.summary.curatedSelectionCount).toBe(0);
   expect(index.summary.frozenTextureCount).toBe(2);
   expect(index.summary.proceduralPlaceholderCount).toBeGreaterThan(40);
+  expect(index.summary.candidateLifecycleCount).toBe(33);
+  expect(index.summary.provisionalLifecycleCount).toBe(0);
+  expect(index.summary.curatedLifecycleCount).toBe(2);
+  expect(index.summary.legacyDerivedTextureCount).toBe(73);
   expect(index.curation.selectedCount).toBe(0);
   expect(index.curation.manifestPath).toContain("generated-assets/texture-lab-playwright/curation/selections.v1.json");
-  expect(index.pack.blockCount).toBe(13);
+  expect(index.pack.blockCount).toBe(27);
   expect(index.blocks.length).toBeGreaterThan(index.pack.blockCount);
   expect(index.vanillaCoverage.summary.vanillaTextureCount).toBeGreaterThan(700);
   expect(index.vanillaCoverage.summary.missingTextureCount).toBeGreaterThan(500);
@@ -66,6 +70,13 @@ test("indexes authored textures, generated candidates, and allowlisted images", 
     kind: "frozen",
     label: "frozen asset",
   });
+  expect(grass?.lifecycle).toMatchObject({
+    state: "curated",
+    runtimeMaterials: ["mclone:block/grass_block"],
+    promotable: true,
+  });
+  expect(grass?.images.curated.exists).toBe(true);
+  expect(grass?.images.provisional.exists).toBe(false);
   expect(grass?.images.minecraftReference.exists).toBe(true);
   expect(grass?.tint.normal).toBe("#79b34e");
   expect(grass?.tint.sourceNeutrality).toEqual({
@@ -318,7 +329,7 @@ test("defaults to the system theme and toggles light or dark mode", async ({ pag
   const shell = page.locator(".appShell");
   await expect(shell).toHaveAttribute("data-theme", "dark");
   await expect(page.getByRole("button", { name: "Switch to light mode" })).toHaveText("Light");
-  await expect(page.getByRole("heading", { name: "Andesite" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Carved Pumpkin" })).toBeVisible();
   await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-dark-mode.png", fullPage: true });
 
   await page.getByRole("button", { name: "Switch to light mode" }).click();
@@ -331,7 +342,7 @@ test("defaults to the system theme and toggles light or dark mode", async ({ pag
 
 test("keeps the texture list in its own scroll pane", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Andesite" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Carved Pumpkin" })).toBeVisible();
 
   const before = await layoutMetrics(page);
   expect(before.documentScrollHeight).toBeLessThanOrEqual(before.viewportHeight + 1);
@@ -409,7 +420,7 @@ test("shows shape-specific automatic previews for partial block families", async
     ["oak_trapdoor", "oak-trapdoor", "top", "Oak Trapdoor", "trapdoor"],
   ] as const) {
     await page.getByLabel("Search").fill(textureName);
-    await page.getByRole("button", { name: new RegExp(textureName) }).click();
+    await page.getByRole("button", { name: new RegExp(`^${textureName} `) }).click();
     const bundle = page.locator(".blockBundleCard").filter({ hasText: displayName });
     await expect(bundle).toContainText(`${kind} / 1 faces`);
     await expect(page.getByRole("button", { name: `${blockName} ${faceName} uses ${displayName}`, exact: true })).toBeVisible();
@@ -419,15 +430,15 @@ test("shows shape-specific automatic previews for partial block families", async
 
 test("shows atlas and block bundle overview comparisons", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Andesite" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Carved Pumpkin" })).toBeVisible();
 
   await page.getByRole("button", { name: "Atlas" }).click();
   await expect(page.getByRole("heading", { name: "Texture Atlas" })).toBeVisible();
   expect(await page.locator(".atlasCard").count()).toBeGreaterThan(20);
 
-  const andesiteCard = page.getByRole("button", { name: "Andesite atlas comparison", exact: true });
-  await expect(andesiteCard).toContainText("noise placeholder");
-  await expect(andesiteCard).toContainText("placeholder");
+  const coalOreCard = page.getByRole("button", { name: "Coal Ore atlas comparison", exact: true });
+  await expect(coalOreCard).toContainText("candidate");
+  await expect(coalOreCard).toContainText("mclone:block/coal_ore");
 
   const stoneCard = page.getByRole("button", { name: "Stone atlas comparison", exact: true });
   await expect(stoneCard).toBeVisible();
@@ -438,8 +449,8 @@ test("shows atlas and block bundle overview comparisons", async ({ page }) => {
   await expect(stoneCard).toHaveAttribute("aria-pressed", "true");
   await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-atlas.png", fullPage: true });
 
-  await page.getByRole("button", { name: "MC" }).click();
-  await expect(page.getByRole("heading", { name: "MC Atlas" })).toBeVisible();
+  await page.getByRole("button", { name: "Minecraft Reference" }).click();
+  await expect(page.getByRole("heading", { name: "Minecraft Reference Atlas" })).toBeVisible();
   await expect(page.locator(".overviewHeader")).toContainText("vanilla textures");
   await expect(page.locator(".overviewHeader")).toContainText("missing");
   const unfilteredCoverageSummary = await page.locator(".overviewHeader").innerText();
@@ -472,13 +483,6 @@ test("shows atlas and block bundle overview comparisons", async ({ page }) => {
   await page.getByLabel("Search").fill("acacia_planks");
   await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-mc-atlas.png", fullPage: true });
 
-  await page.getByRole("button", { name: "Atlas" }).click();
-  await page.getByLabel("Search").fill("pointed_dripstone");
-  const pointedCard = page.getByRole("button", { name: "Pointed Dripstone atlas comparison", exact: true });
-  await expect(pointedCard).toBeVisible();
-  await expect(pointedCard).not.toContainText("Missing");
-  await expect(pointedCard.locator("img")).toHaveCount(2);
-  await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-pointed-dripstone-reference.png", fullPage: true });
   await page.getByLabel("Search").fill("");
 
   await page.getByRole("button", { name: "Blocks" }).click();
@@ -486,7 +490,7 @@ test("shows atlas and block bundle overview comparisons", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Authored Pack Blocks" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Vanilla-Derived Review Blocks" })).toBeVisible();
   expect(await page.locator(".blockBundleCard").count()).toBeGreaterThan(0);
-  const stoneBundle = page.locator(".blockBundleCard").filter({ hasText: "Stone" }).filter({ hasText: "cube / 1 faces" });
+  const stoneBundle = page.getByRole("region", { name: "stone block bundle", exact: true });
   await expect(stoneBundle).toContainText("authored block");
   await expect(page.getByRole("button", { name: "stone all uses Stone", exact: true })).toBeVisible();
   await page.getByLabel("Search").fill("pumpkin");
@@ -518,36 +522,29 @@ test("shows atlas and block bundle overview comparisons", async ({ page }) => {
   await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-blocks.png", fullPage: true });
 });
 
-test("filters texture replacement queues", async ({ page }) => {
+test("filters the first-party texture lifecycle", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: "Andesite" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Carved Pumpkin" })).toBeVisible();
   const textureList = page.locator(".textureList");
 
-  await page.getByLabel("Queue").selectOption({ label: "Has candidates" });
-  await expect(page.locator(".filterCount")).toHaveText("1 texture");
-  await expect(textureList.getByRole("button", { name: /grass_block_top/ })).toBeVisible();
-  await expect(textureList.getByRole("button", { name: /andesite/ })).toHaveCount(0);
-
-  await page.getByLabel("Queue").selectOption({ label: "Frozen assets" });
+  await page.getByLabel("Lifecycle filter").selectOption({ label: "Curated" });
   await expect(page.locator(".filterCount")).toHaveText("2 textures");
   await expect(textureList.getByRole("button", { name: /grass_block_top/ })).toBeVisible();
   await expect(textureList.getByRole("button", { name: /stone/ })).toBeVisible();
-  await expect(textureList.getByRole("button", { name: /andesite/ })).toHaveCount(0);
+  await expect(textureList.getByRole("button", { name: /coal_ore/ })).toHaveCount(0);
 
-  await page.getByLabel("Queue").selectOption({ label: "Needs candidates" });
-  await expect(page.locator(".filterCount")).toHaveText("92 textures");
-  await expect(textureList.getByRole("button", { name: /andesite/ })).toBeVisible();
+  await page.getByLabel("Lifecycle filter").selectOption({ label: "Candidate" });
+  await expect(page.locator(".filterCount")).toHaveText("33 textures");
+  await expect(textureList.getByRole("button", { name: /coal_ore/ })).toBeVisible();
   await expect(textureList.getByRole("button", { name: /grass_block_top/ })).toHaveCount(0);
   await expect(textureList.getByRole("button", { name: /^stone/ })).toHaveCount(0);
 
-  await page.getByLabel("Search").fill("dripstone");
-  await expect(textureList.getByRole("button", { name: /dripstone_block/ })).toBeVisible();
-  await expect(textureList.getByRole("button", { name: /pointed_dripstone/ })).toBeVisible();
+  await page.getByLabel("Search").fill("torch");
+  await expect(textureList.getByRole("button", { name: /farmstead_wall_torch/ })).toBeVisible();
+  await expect(textureList.getByRole("button", { name: /^torch / })).toBeVisible();
 
-  await page.getByLabel("Queue").selectOption({ label: "Noise placeholders" });
-  await expect(textureList.getByRole("button", { name: /pointed_dripstone/ })).toBeVisible();
   await page.getByLabel("Search").fill("");
-  await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-queue-filter.png", fullPage: true });
+  await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-lifecycle-filter.png", fullPage: true });
 });
 
 test("uses generated candidates as temporary atlas and block previews", async ({ page }) => {
@@ -579,7 +576,7 @@ test("uses generated candidates as temporary atlas and block previews", async ({
   await page.getByRole("button", { name: "Detail" }).click();
   await page.getByRole("button", { name: "Clear Preview" }).click();
   await page.getByRole("button", { name: "Atlas" }).click();
-  await expect(grassCard).toContainText("frozen G5101S74");
+  await expect(grassCard).toContainText("Curated Mclone");
   await expect(grassCard).not.toContainText("preview G5101S74");
 });
 
@@ -588,13 +585,10 @@ test("supports texture filtering, candidate selection, inspector details, keyboa
 }) => {
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: "Andesite" })).toBeVisible();
-  await expect(page.locator(".chipGroup")).toContainText("noise placeholder");
-  await expect(page.locator(".inspector")).toContainText("Seeded macro-noise and speckle coverage art");
+  await expect(page.getByRole("heading", { name: "Carved Pumpkin" })).toBeVisible();
+  await expect(page.locator(".chipGroup")).toContainText("Candidate");
+  await expect(page.locator(".inspector")).toContainText("Authoring candidate only");
   await expect(page.getByText("No local generated candidates are present for this texture.")).toBeVisible();
-
-  await page.getByLabel("Search").fill("noise placeholder");
-  await expect(page.getByRole("button", { name: /andesite/ })).toBeVisible();
 
   await page.getByLabel("Search").fill("grass_block_top");
   await page.getByRole("button", { name: /grass_block_top/ }).click();
@@ -618,22 +612,17 @@ test("supports texture filtering, candidate selection, inspector details, keyboa
   await expect(inspector).toContainText("diffusion-archive");
   await expect(page.locator(".paletteSwatches span")).toHaveCount(4);
 
-  await page.getByRole("button", { name: "Select for Pack" }).click();
-  await expect(page.getByText("Selected candidate for grass_block_top")).toBeVisible();
-  await expect(archiveCard).toContainText("Pack");
-  await expect(page.getByText("pack G5101S74")).toBeVisible();
+  await page.getByRole("button", { name: "Use as Provisional" }).click();
+  await expect(page.getByText("Using grass_block_top as Provisional Mclone")).toBeVisible();
+  await expect(page.locator(".chipGroup")).toContainText("Provisional");
+  await expect(page.locator(".lifecycleCard").filter({ hasText: "Provisional" }).locator("img")).toHaveCount(1);
 
-  await page.getByRole("button", { name: "Request Freeze" }).click();
-  await expect(page.locator(".statusBanner")).toContainText("Freeze request written:");
-  await expect(page.locator(".statusBanner")).toContainText("freeze-requests");
-  await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-freeze-request.png", fullPage: true });
-
-  await page.getByRole("button", { name: "Apply Pack" }).click();
-  await expect(page.getByText("Applied 1 selection to generated pack")).toBeVisible();
-  await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-curation-pack.png", fullPage: true });
-
-  await page.getByRole("button", { name: "Clear Pack" }).click();
-  await expect(page.getByText("Cleared pack selection for grass_block_top")).toBeVisible();
+  await page.getByRole("button", { name: "Accept as Curated" }).click();
+  await expect(page.getByText("Accepted grass_block_top as Curated Mclone")).toBeVisible();
+  await expect(page.locator(".chipGroup")).toContainText("Curated");
+  await expect(page.locator(".lifecycleCard").filter({ hasText: "Curated" }).locator("img")).toHaveCount(1);
+  await expect(page.locator(".lifecycleCard").filter({ hasText: "Minecraft Reference" })).toContainText("local · read-only");
+  await page.screenshot({ path: "/tmp/mclone-texture-lab-playwright-lifecycle.png", fullPage: true });
 
   const diffusionCard = page.getByRole("button", { name: "G5102S62 diffusion candidate" });
   await diffusionCard.focus();
@@ -660,10 +649,10 @@ test("clears candidate detail when selecting a texture without generated candida
   await page.getByRole("button", { name: "G5101S74 archive candidate" }).click();
   await expect(page.locator(".inspector")).toContainText("G5101S74");
 
-  await page.getByLabel("Search").fill("andesite");
-  await page.getByRole("button", { name: /andesite/ }).click();
+  await page.getByLabel("Search").fill("carved_pumpkin");
+  await page.getByRole("button", { name: /^carved_pumpkin / }).click();
 
-  await expect(page.getByRole("heading", { name: "Andesite" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Carved Pumpkin" })).toBeVisible();
   await expect(page.getByText("No local generated candidates are present for this texture.")).toBeVisible();
   await expect(page.locator(".inspector")).toContainText("No generated candidate selected.");
   await expect(page.locator(".candidateCard.selected")).toHaveCount(0);

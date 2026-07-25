@@ -25,7 +25,7 @@ export function PreviewModeTabs({
     { mode: "auto", label: "Auto" },
     { mode: "detail", label: "Detail" },
     { mode: "atlas", label: "Atlas" },
-    { mode: "mc", label: "MC" },
+    { mode: "mc", label: "Minecraft Reference" },
     { mode: "blocks", label: "Blocks" },
   ];
   return (
@@ -219,11 +219,11 @@ export function MinecraftCoverageAtlas({
       <div className="overviewStack">
         <div className="sectionHeader overviewHeader">
           <div>
-            <h2>MC Atlas</h2>
+            <h2>Minecraft Reference Atlas</h2>
             <p>Coverage index unavailable</p>
           </div>
         </div>
-        <div className="candidateEmpty">MC coverage is not indexed yet. Reindex after restarting the texture-lab server.</div>
+        <div className="candidateEmpty">Minecraft reference coverage is not indexed yet. Reindex after restarting the texture-lab server.</div>
       </div>
     );
   }
@@ -233,7 +233,7 @@ export function MinecraftCoverageAtlas({
     <div className="overviewStack">
       <div className="sectionHeader overviewHeader">
         <div>
-          <h2>MC Atlas</h2>
+          <h2>Minecraft Reference Atlas</h2>
           <p>
             {entries.length} shown / {coverage.summary.vanillaTextureCount} vanilla textures / {coverage.summary.missingTextureCount} missing
           </p>
@@ -290,19 +290,15 @@ function AtlasTextureCard({
     >
       <div className="atlasCardHeader">
         <strong>{texture.displayName}</strong>
-        <span className={texture.artSource.kind === "procedural-placeholder" ? "placeholderHeaderBadge" : undefined}>
-          {texture.artSource.kind === "procedural-placeholder" ? "placeholder" : texture.status}
-        </span>
+        <span>{texture.lifecycle.state}</span>
       </div>
       <SplitTextureCompare texture={texture} previewCandidate={previewCandidate} />
       <div className="atlasCardMeta">
-        <span className={artSourceMetaClass(texture)} title={texture.artSource.description}>
-          {texture.artSource.label}
-        </span>
+        <span>{texture.lifecycle.runtimeMaterials.join(", ") || "unbound candidate"}</span>
         <span>{texture.size}px</span>
         <span>{texture.tiling}</span>
         {texture.tintRole ? <span>{texture.tintRole}</span> : null}
-        {texture.frozen ? <span>{texture.frozen.codename ? `frozen ${texture.frozen.codename}` : "frozen"}</span> : null}
+        {texture.lifecycle.state === "curated" ? <span>Curated Mclone</span> : null}
         {candidateCount > 0 ? <span>{candidateCount} candidates</span> : null}
         {previewCandidate ? <span>preview {previewCandidate.codename}</span> : null}
       </div>
@@ -367,10 +363,6 @@ function MinecraftCoverageCard({
       {body}
     </button>
   );
-}
-
-function artSourceMetaClass(texture: TextureIndexEntry): string {
-  return texture.artSource.kind === "procedural-placeholder" ? "artSourceMeta placeholderMeta" : "artSourceMeta";
 }
 
 function groupBlocksByPreviewSource(entries: VisibleBlockEntry[]): {

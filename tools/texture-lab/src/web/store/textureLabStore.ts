@@ -1,10 +1,12 @@
 import { create } from "zustand";
 import type { TextureCandidateEntry, TextureImageRef, TextureIndexEntry, TextureLabIndex } from "../../core/index-model";
+import type { TextureLifecycleState } from "../../dsl";
 
 type LoadStatus = "idle" | "loading" | "ready" | "error";
 export type ThemeMode = "light" | "dark";
 export type PreviewMode = "auto" | "detail" | "atlas" | "mc" | "blocks";
 export type QueueFilter = "all" | "noise-placeholder" | "authored-structure" | "frozen-asset" | "has-candidates" | "needs-candidates";
+export type LifecycleFilter = "all" | "candidate" | "provisional" | "curated";
 type ThemeSource = "system" | "manual";
 
 export interface TextureLabState {
@@ -19,6 +21,7 @@ export interface TextureLabState {
   materialFilter: string;
   statusFilter: string;
   queueFilter: QueueFilter;
+  lifecycleFilter: LifecycleFilter;
   loadStatus: LoadStatus;
   error: string | null;
   curationStatus: string | null;
@@ -32,6 +35,8 @@ export interface TextureLabState {
   clearCurationSelection: (textureName: string) => Promise<void>;
   applyCuration: () => Promise<void>;
   requestFreeze: (textureName: string) => Promise<void>;
+  promoteLifecycle: (textureName: string, candidateId: string | null, state: TextureLifecycleState) => Promise<void>;
+  returnToCandidate: (textureName: string) => Promise<void>;
   setPreviewMode: (mode: PreviewMode) => void;
   syncSystemTheme: (themeMode: ThemeMode) => void;
   toggleTheme: () => void;
@@ -39,6 +44,7 @@ export interface TextureLabState {
   setMaterialFilter: (material: string) => void;
   setStatusFilter: (status: string) => void;
   setQueueFilter: (queueFilter: QueueFilter) => void;
+  setLifecycleFilter: (lifecycleFilter: LifecycleFilter) => void;
 }
 
 export const useTextureLabStore = create<TextureLabState>((set, get) => ({
@@ -53,6 +59,7 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
   materialFilter: "all",
   statusFilter: "all",
   queueFilter: "all",
+  lifecycleFilter: "all",
   loadStatus: "idle",
   error: null,
   curationStatus: null,
@@ -199,6 +206,45 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
     }
   },
 
+  async promoteLifecycle(textureName, candidateId, state) {
+    set({ loadStatus: "loading", error: null, curationStatus: null });
+    try {
+      const response = await postLifecyclePromotion(textureName, candidateId, state);
+      set({
+        index: response.index,
+        selectedTextureName: selectTextureAfterLoad(response.index, textureName),
+        selectedCandidateId: selectCandidateAfterLoad(response.index, textureName, candidateId),
+        previewSelectionsByTexture: prunePreviewSelections(response.index, get().previewSelectionsByTexture),
+        loadStatus: "ready",
+        error: null,
+        curationStatus:
+          state === "curated"
+            ? `Accepted ${textureName} as Curated Mclone`
+            : `Using ${textureName} as Provisional Mclone`,
+      });
+    } catch (error) {
+      set({ loadStatus: "error", error: error instanceof Error ? error.message : String(error) });
+    }
+  },
+
+  async returnToCandidate(textureName) {
+    set({ loadStatus: "loading", error: null, curationStatus: null });
+    try {
+      const index = await postIndex("/api/lifecycle/candidate", { textureName });
+      set({
+        index,
+        selectedTextureName: selectTextureAfterLoad(index, textureName),
+        selectedCandidateId: selectCandidateAfterLoad(index, textureName, get().selectedCandidateId),
+        previewSelectionsByTexture: prunePreviewSelections(index, get().previewSelectionsByTexture),
+        loadStatus: "ready",
+        error: null,
+        curationStatus: `Returned ${textureName} to Candidate`,
+      });
+    } catch (error) {
+      set({ loadStatus: "error", error: error instanceof Error ? error.message : String(error) });
+    }
+  },
+
   setPreviewMode(previewMode) {
     set({ previewMode });
   },
@@ -231,6 +277,10 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
   setQueueFilter(queueFilter) {
     set({ queueFilter });
   },
+
+  setLifecycleFilter(lifecycleFilter) {
+    set({ lifecycleFilter });
+  },
 }));
 
 async function fetchIndex(url: string, init?: RequestInit): Promise<TextureLabIndex> {
@@ -262,6 +312,24 @@ async function postFreezeRequest(textureName: string): Promise<{
   });
 }
 
+async function postLifecyclePromotion(
+  textureName: string,
+  candidateId: string | null,
+  state: TextureLifecycleState,
+): Promise<{
+  index: TextureLabIndex;
+}> {
+  return fetchJson("/api/lifecycle/promote", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      textureName,
+      state,
+      ...(candidateId ? { candidateId } : {}),
+    }),
+  });
+}
+
 async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
   const response = await fetch(url, init);
   if (!response.ok) {
@@ -272,10 +340,15 @@ async function fetchJson<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 function selectTextureAfterLoad(index: TextureLabIndex, current: string | null): string | null {
-  if (current && index.textures.some((texture) => texture.name === current)) {
+  if (
+    current &&
+    index.textures.some(
+      (texture) => texture.name === current && texture.lifecycle.state !== "legacy-derived",
+    )
+  ) {
     return current;
   }
-  return index.textures[0]?.name ?? null;
+  return index.textures.find((texture) => texture.lifecycle.state !== "legacy-derived")?.name ?? null;
 }
 
 function selectCandidateAfterLoad(

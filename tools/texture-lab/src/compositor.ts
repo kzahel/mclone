@@ -84,7 +84,8 @@ export function renderTexture(pack: TexturePackAsset, name: string, texture: Tex
     }
   }
 
-  const frozen = pack.frozenTextures?.[name];
+  const frozen = pack.lifecycleTextures?.[name] ??
+    (pack.textureLifecycle === undefined ? pack.frozenTextures?.[name] : undefined);
   const rendered: RenderedTexture = {
     name,
     exportPath: texture.exportPath,

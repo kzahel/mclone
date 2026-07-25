@@ -16,7 +16,9 @@ const vite = await createViteServer({
 });
 const api = createTextureLabApi({
   textureLabRoot,
-  inputPath: path.join(textureLabRoot, "packs", "mclone-default", "texture.ts"),
+  inputPath:
+    process.env.MCLONE_TEXTURE_LAB_INPUT_PATH ??
+    path.join(textureLabRoot, "packs", "mclone-default", "texture.ts"),
 });
 
 const server = http.createServer(async (request, response) => {

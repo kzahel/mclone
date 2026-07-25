@@ -169,72 +169,44 @@ with the native runtime:
 MCLONE_FIRST_PARTY_ASSET_ROOT=generated-assets/texture-lab/runtime-pack pnpm native:timedemo:smoke
 ```
 
-The browser UI can persist active candidate choices without mutating pack
-source. `Select for Pack` writes a local manifest:
+The browser UI uses one source-controlled lifecycle:
+
+1. **Candidate** is an authoring recipe or generated image and is not used by
+   the runtime.
+2. **Provisional** is validated first-party art allowed in the default visual
+   profile.
+3. **Curated** is manually accepted first-party art that shadows provisional.
+
+The main page shows Candidate, Provisional, Curated, and the real local
+Minecraft Reference together. Minecraft Reference is read-only and local-only;
+it is never a promotion source. Historical custom Far LOD tiles are hidden
+from the active lifecycle because mipmaps, flat colors, and Far LOD are derived
+from the selected runtime material.
+
+`Use as Provisional` and `Accept as Curated` write the pack-local lifecycle
+manifest and promoted PNG:
 
 ```text
-generated-assets/texture-lab/curation/selections.v1.json
-```
-
-`Apply Pack` or the matching CLI command regenerates `pack/` and
-`runtime-pack/` from the authored pack plus those selected projected candidate
-PNGs. Diffusion-only raw candidates are preview-only; candidates must have a
-projected image before they can be selected for pack output.
-
-```sh
-pnpm texture-lab:apply-curation
-```
-
-Tintable selections are validated with the same `sourceNeutrality` policy as
-authored tintable textures before the generated pack is written.
-
-`Request Freeze` writes a local provenance manifest for the selected pack
-candidate without editing TypeScript source:
-
-```text
-generated-assets/texture-lab/freeze-requests/*.freeze-request.v1.json
-```
-
-The request records texture metadata, prompt/seed/model/projection provenance,
-projected and raw PNG hashes, source-policy validation, and a source-file hint.
-The matching CLI command writes the same request from the current curation
-manifest:
-
-```sh
-pnpm texture-lab:freeze-request -- --texture grass_block_top
-```
-
-Accepted generated textures are promoted into committed frozen assets, not into
-rewritten TypeScript masks. The default pack stores the canonical overlay here:
-
-```text
+tools/texture-lab/packs/mclone-default/lifecycle.v1.json
+tools/texture-lab/packs/mclone-default/provisional/**/*.png
 tools/texture-lab/packs/mclone-default/curation.v1.json
 tools/texture-lab/packs/mclone-default/frozen/**/*.png
 ```
 
-`texture.ts` and the block modules still own structure, export paths, tint
-policy, palettes, and fallback authored rendering. `curation.v1.json` maps a
-texture name to a committed frozen PNG plus prompt/seed/hash/source-context
-metadata. Normal export reads the TypeScript pack and then applies that frozen
-overlay, so future edits to the TypeScript authoring layers do not silently
-change accepted frozen pixels.
+Every promoted entry records an explicit canonical engine material id. Thus
+`grass_block_top` deliberately binds to `mclone:block/grass_block` instead of
+relying on its filename. Exact inventory matches are offered as visible
+suggestions; ambiguous authoring textures remain unpromotable until a binding
+is chosen. Tintable promotions use the same `sourceNeutrality` policy as
+normal exports.
 
-To promote the current selected pack candidate:
+`curation.v1.json` remains the detailed provenance record for frozen curated
+PNGs. The older selection/apply/freeze-request APIs and CLI commands remain
+available for provenance and compatibility work, but they are no longer the
+primary browser workflow. The matching low-level promotion command is:
 
 ```sh
 pnpm texture-lab:promote-frozen -- --texture grass_block_top
-```
-
-To promote a reviewed freeze request:
-
-```sh
-pnpm texture-lab:promote-freeze-request -- generated-assets/texture-lab/freeze-requests/grass_block_top-G5101S74-....freeze-request.v1.json
-```
-
-To promote an explicit image:
-
-```sh
-pnpm texture-lab:promote-frozen -- --texture grass_block_top --image generated-assets/texture-lab/pack/assets/mclone/textures/block/grass_block_top.png
 ```
 
 The packed overlay command builds the same overrides into a first-party-only
@@ -266,15 +238,14 @@ pnpm --dir tools/texture-lab web:test
 
 The test harness builds a deterministic fixture under the gitignored
 `generated-assets/texture-lab-playwright/` root, starts the local texture-lab
-server, verifies authored texture indexing, committed frozen overlay metadata,
-generated candidate discovery, allowlisted image serving, candidate selection,
-inspector details, keyboard activation, persisted active-pack selection,
-generated-pack apply, reindex preservation, freeze-request writing,
-empty-candidate behavior, system-default dark mode, and manual light/dark
-toggling. Validation screenshots are written to
+server, verifies authored texture indexing, lifecycle metadata, committed
+frozen overlay metadata, generated candidate discovery, allowlisted image
+serving, Candidate/Provisional/Curated promotion, the read-only Minecraft
+comparison, lifecycle filtering, reindex preservation, empty-candidate
+behavior, system-default dark mode, and manual light/dark toggling. Validation
+screenshots are written to
 `/tmp/mclone-texture-lab-playwright-a2.png`,
-`/tmp/mclone-texture-lab-playwright-curation-pack.png`,
-`/tmp/mclone-texture-lab-playwright-freeze-request.png`, and
+`/tmp/mclone-texture-lab-playwright-lifecycle.png`, and
 `/tmp/mclone-texture-lab-playwright-dark-mode.png`.
 
 ## Source Format
@@ -394,9 +365,10 @@ and Auto previews, so generated vanilla-context cards do not read as source
 definitions. Pane/door/rail/torch review no longer needs hand-authored
 `block(...)` fixture entries.
 
-The browser UI also has a separate `MC` atlas view for full vanilla block-texture
+The browser UI also has a separate **Minecraft Reference** atlas view for full
+vanilla block-texture
 coverage. The normal `Atlas` tab shows only textures authored by this pack; the
-`MC` tab enumerates every local vanilla `assets/minecraft/textures/block/*.png`
+reference tab enumerates every local vanilla `assets/minecraft/textures/block/*.png`
 reference and marks whether mclone has no matching texture, only placeholder
 coverage, candidate coverage, or frozen/accepted coverage. This is the view for
 finding zero-coverage vanilla textures before deciding what to generate next.

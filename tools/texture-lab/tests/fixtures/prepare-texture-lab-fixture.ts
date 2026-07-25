@@ -11,12 +11,18 @@ const outputRoot = path.resolve(
 
 await fs.rm(outputRoot, { recursive: true, force: true });
 await fs.mkdir(outputRoot, { recursive: true });
+const fixturePackRoot = path.join(outputRoot, "pack-source", "mclone-default");
+const fixturePackInput = path.join(fixturePackRoot, "texture.ts");
+await fs.cp(path.join(textureLabRoot, "packs", "mclone-default"), fixturePackRoot, {
+  recursive: true,
+});
+await fs.symlink(path.join(textureLabRoot, "src"), path.join(outputRoot, "src"), "dir");
 
 await run("pnpm", [
   "exec",
   "tsx",
   "src/export.ts",
-  "packs/mclone-default/texture.ts",
+  fixturePackInput,
   "--out",
   outputRoot,
   "--runtime-compat",

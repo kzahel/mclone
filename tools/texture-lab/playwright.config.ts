@@ -6,6 +6,7 @@ const textureLabRoot = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(textureLabRoot, "..", "..");
 const port = Number.parseInt(process.env.TEXTURE_LAB_PLAYWRIGHT_PORT ?? "5187", 10);
 const outputRoot = path.join(repoRoot, "generated-assets", "texture-lab-playwright");
+const inputPath = path.join(outputRoot, "pack-source", "mclone-default", "texture.ts");
 const chromeChannel = process.env.PLAYWRIGHT_CHROME_CHANNEL ?? "chrome";
 
 if (!Number.isInteger(port) || port <= 0) {
@@ -32,6 +33,7 @@ export default defineConfig({
     cwd: textureLabRoot,
     env: {
       MCLONE_TEXTURE_LAB_OUTPUT_ROOT: outputRoot,
+      MCLONE_TEXTURE_LAB_INPUT_PATH: inputPath,
     },
     reuseExistingServer: false,
     timeout: 120_000,
