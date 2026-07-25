@@ -5,7 +5,8 @@ Topic: `far-lod-settle-contract`
 Living status for the synthetic far-terrain LOD system: the coarse,
 non-authoritative surface shell drawn outside normal render distance.
 
-Last reconciled: 2026-07-11 (first moving-coverage class fixed; tactical active).
+Last reconciled: 2026-07-25 (Mclone vegetation payload adopted; settle tactical
+active).
 
 ## Coverage Correctness Goal
 
@@ -173,6 +174,18 @@ bands. Each fixed mode uses one level and one spacing over the whole shell,
 bypassing band hysteresis. Switching clears retained LOD and rebuilds from a
 mode-specific source identity.
 
+`mclone-overworld-v1` now adds vegetation to that same tile payload. Each
+surface lattice sample carries a production forest-intent tint. Auto level-one
+tiles append all stable intersecting tree records, level two retains landmark
+ranks 2 and 3, and level three stays summary-only. Broadleaf, conifer, and
+acacia records become blocky trunk/crown volumes clipped to each 16-by-16 tile.
+Cross-chunk crowns are therefore independently present in every touched tile
+and disappear through the existing whole-tile painted-capable arbitration.
+There is no vegetation scheduler, owner-chunk handoff, or view-specific
+renderer. Native compile workers and persistent browser compiler sessions
+reuse one bounded vegetation planning cache beside their existing surface
+cache. All other generation profiles retain their previous tile bytes.
+
 ## Ownership
 
 - Producer/cache, band policy, coordinator, prewarm:
@@ -199,6 +212,11 @@ desired set, painted coverage completeness at settle from any camera pose,
 set coherence, view-independent suppression, replacement-before-suppress,
 no silent caps, bounded steady state, and release-active real/LOD mutual
 exclusion.
+
+Vegetation is presentation-only and currently applies only to
+`mclone-overworld-v1`. It must remain part of the terrain tile atom: summary
+color and clipped proxy fragments are admitted, suppressed, uploaded, and
+drawn with that tile through the existing mono, per-eye, and multiview paths.
 
 ## Validation
 
@@ -291,6 +309,20 @@ exclusion.
   flight passed three consecutive zero-allowance runs with no uncovered frame
   or missing chunk. This evidence comes from GPU depth and lifecycle state,
   not screenshot interpretation.
+- Landed with the Mclone vegetation payload: 40 focused Far LOD tests and the
+  complete 333-test `mclone-app-runtime` suite pass. The unchanged
+  Java-overworld tile is pinned at 100 vertices, 150 indices, and
+  fingerprint `0x5c1c22da08c489e6`; direct fixtures cover level admission,
+  zero coarse queries, cache/source invalidation, and both clipped fragments
+  of a cross-chunk crown. `native:lod-settle:smoke` passes all four waypoints
+  with zero pending work and zero clear-depth samples across 441 projected
+  chunks. Native Far-on/Far-off captures were inspected; Far-on reports
+  12 region draws and 114,648 uploaded bytes while Far-off reports zero.
+  The headed-Wayland browser Worker produced and visibly rendered the Mclone
+  proxy payload, but the broader movement probe remains red on the existing C5
+  assertion after exact rendering stalls with 32 dirty chunks and 10
+  suppressed-without-replacement tiles. Do not weaken that gate; the native
+  depth lane remains the passing moving-coverage evidence.
 
 ## Recommended Next Direction
 

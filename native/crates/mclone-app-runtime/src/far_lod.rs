@@ -14,18 +14,21 @@ use mclone_render_session::{
 };
 use mclone_server::WorldGenerationProfile;
 use mclone_worldgen::block::{
-    ANDESITE, BEDROCK, BLACK_TERRACOTTA, BLUE_TERRACOTTA, BROWN_TERRACOTTA, CLAY, COARSE_DIRT,
-    CYAN_TERRACOTTA, DIORITE, DIRT, GRANITE, GRASS_BLOCK, GRAVEL, GRAY_TERRACOTTA,
-    GREEN_TERRACOTTA, GeneratedBlockId, ICE, LIGHT_BLUE_TERRACOTTA, LIGHT_GRAY_TERRACOTTA,
-    LIME_TERRACOTTA, MAGENTA_TERRACOTTA, MYCELIUM, ORANGE_TERRACOTTA, PACKED_ICE, PINK_TERRACOTTA,
-    PODZOL, PURPLE_TERRACOTTA, RED_SAND, RED_SANDSTONE, RED_TERRACOTTA, SAND, SANDSTONE, SNOW,
-    SNOW_BLOCK, STONE, TERRACOTTA, WHITE_TERRACOTTA, YELLOW_TERRACOTTA, base_block_id, has_fluid,
-    is_air_like, is_lava, is_water,
+    ACACIA_LEAVES, ACACIA_LOG, ANDESITE, BEDROCK, BLACK_TERRACOTTA, BLUE_TERRACOTTA,
+    BROWN_TERRACOTTA, CLAY, COARSE_DIRT, CYAN_TERRACOTTA, DIORITE, DIRT, GRANITE, GRASS_BLOCK,
+    GRAVEL, GRAY_TERRACOTTA, GREEN_TERRACOTTA, GeneratedBlockId, ICE, LIGHT_BLUE_TERRACOTTA,
+    LIGHT_GRAY_TERRACOTTA, LIME_TERRACOTTA, MAGENTA_TERRACOTTA, MYCELIUM, OAK_LEAVES, OAK_LOG,
+    ORANGE_TERRACOTTA, PACKED_ICE, PINK_TERRACOTTA, PODZOL, PURPLE_TERRACOTTA, RED_SAND,
+    RED_SANDSTONE, RED_TERRACOTTA, SAND, SANDSTONE, SNOW, SNOW_BLOCK, SPRUCE_LEAVES, SPRUCE_LOG,
+    STONE, TERRACOTTA, WHITE_TERRACOTTA, YELLOW_TERRACOTTA, base_block_id, has_fluid, is_air_like,
+    is_lava, is_water,
 };
 use mclone_worldgen::levelgen::{
-    AlphaGenerationStage, BetaGenerationStage, GeneratedChunk, McloneOverworldSamplingTopology,
-    McloneOverworldStreamPlanCache, generate_alpha_stage_chunk, generate_beta_stage_chunk,
-    generate_flat_grass_chunk, generate_mclone_overworld_surface_chunk,
+    AlphaGenerationStage, BetaGenerationStage, GeneratedChunk, McloneForestIntentSample,
+    McloneOverworldSamplingTopology, McloneOverworldStreamPlanCache,
+    McloneOverworldVegetationPlanCache, McloneTreeFamily, McloneTreeOccurrence,
+    McloneVegetationBounds, McloneVegetationSource, generate_alpha_stage_chunk,
+    generate_beta_stage_chunk, generate_flat_grass_chunk, generate_mclone_overworld_surface_chunk,
     generate_mclone_overworld_surface_chunk_with_stream_cache, generate_overworld_surface_chunk,
     generate_small_island_surface_chunk,
 };
@@ -1816,6 +1819,7 @@ fn square_chunk_count(radius: u32) -> usize {
 fn build_retained_far_terrain_lod_patch<S: FarTerrainSurfaceSource>(
     surface_chunks: &mut S,
     pos: ChunkPos,
+    lod_level: u8,
     source_key: FarTerrainLodSourceKey,
     neighbor_sample_spacings: [u32; 4],
     materials: Option<&FarTerrainLodMaterialPalette>,
@@ -1828,6 +1832,7 @@ fn build_retained_far_terrain_lod_patch<S: FarTerrainSurfaceSource>(
         surface_chunks,
         source_key.seed,
         pos,
+        lod_level,
         source_key.patch_build_key(pos),
         neighbor_sample_spacings,
         FarTerrainNormalCoverage::NoNormalChunks,
@@ -1852,34 +1857,18 @@ pub(crate) fn compile_far_terrain_lod_request_cached(
     cache: &mut FarTerrainLodWorkerCache,
 ) -> FarTerrainLodBuildResult {
     let input = request.worker_input();
-    let source_key = FarTerrainLodSourceKey {
-        seed: input.seed,
-        generation_profile: input.generation_profile,
-        sample_spacing_blocks: input.sample_spacing_blocks.max(1),
-        detail_mode: FarLodDetailMode::Auto,
-        materials_available: request.materials.is_some(),
-    };
-    let patch = build_retained_far_terrain_lod_patch(
-        cache,
-        input.key.chunk,
-        source_key,
-        input.neighbor_sample_spacings,
-        request.materials.as_deref(),
-    );
+    let mesh =
+        compile_far_terrain_lod_worker_input_cached(input, request.materials.as_deref(), cache);
     request
-        .complete_worker_mesh(FarTerrainLodTileMesh::new(
-            input.key,
-            patch.vertices,
-            patch.indices,
-        ))
+        .complete_worker_mesh(mesh)
         .expect("cached far LOD compiler preserves the request tile key")
 }
 
-pub fn compile_far_terrain_lod_worker_input(
+pub fn compile_far_terrain_lod_worker_input_cached(
     input: FarTerrainLodWorkerInput,
     materials: Option<&FarTerrainLodMaterialPalette>,
+    cache: &mut FarTerrainLodWorkerCache,
 ) -> FarTerrainLodTileMesh {
-    let mut surface_chunks = FarTerrainLodWorkerCache::default();
     let source_key = FarTerrainLodSourceKey {
         seed: input.seed,
         generation_profile: input.generation_profile,
@@ -1888,13 +1877,22 @@ pub fn compile_far_terrain_lod_worker_input(
         materials_available: materials.is_some(),
     };
     let patch = build_retained_far_terrain_lod_patch(
-        &mut surface_chunks,
+        cache,
         input.key.chunk,
+        input.key.level,
         source_key,
         input.neighbor_sample_spacings,
         materials,
     );
     FarTerrainLodTileMesh::new(input.key, patch.vertices, patch.indices)
+}
+
+pub fn compile_far_terrain_lod_worker_input(
+    input: FarTerrainLodWorkerInput,
+    materials: Option<&FarTerrainLodMaterialPalette>,
+) -> FarTerrainLodTileMesh {
+    let mut surface_chunks = FarTerrainLodWorkerCache::default();
+    compile_far_terrain_lod_worker_input_cached(input, materials, &mut surface_chunks)
 }
 
 #[cfg(test)]
@@ -1925,11 +1923,12 @@ fn append_far_terrain_lod_chunk_patch<S: FarTerrainSurfaceSource>(
     surface_chunks: &mut S,
     seed: i64,
     pos: ChunkPos,
+    lod_level: u8,
     key: FarTerrainLodBuildKey,
     neighbor_sample_spacings: [u32; 4],
     normal_coverage: FarTerrainNormalCoverage,
     materials: Option<&FarTerrainLodMaterialPalette>,
-) {
+) -> FarTerrainLodVegetationReport {
     let spacing = key.sample_spacing_blocks.max(1);
     let offsets = chunk_sample_offsets(spacing);
     debug_assert!(offsets.len() >= 2);
@@ -1959,6 +1958,14 @@ fn append_far_terrain_lod_chunk_patch<S: FarTerrainSurfaceSource>(
     for cell in cells.iter().flatten() {
         append_top_face(vertices, indices, cell);
     }
+    let mut vegetation_report = FarTerrainLodVegetationReport {
+        summary_cells: cells
+            .iter()
+            .flatten()
+            .filter(|cell| cell.sample.forest_summary_available)
+            .count(),
+        ..FarTerrainLodVegetationReport::default()
+    };
 
     let cells_per_axis = offsets.len() - 1;
     for z_cell in 0..cells_per_axis {
@@ -2016,6 +2023,38 @@ fn append_far_terrain_lod_chunk_patch<S: FarTerrainSurfaceSource>(
             }
         }
     }
+
+    let first_proxy_vertex = vertices.len() / 7;
+    let first_proxy_index = indices.len();
+    if key.generation_profile == WorldGenerationProfile::McloneOverworldV1
+        && far_lod_tree_record_level_admitted(lod_level)
+        && let Some(bounds) = far_lod_chunk_vegetation_bounds(pos)
+    {
+        let occurrences =
+            surface_chunks.mclone_tree_occurrences(seed, key.generation_profile, bounds);
+        vegetation_report.record_queries = 1;
+        for occurrence in occurrences {
+            if !far_lod_tree_record_admitted(lod_level, occurrence.record.landmark_rank) {
+                continue;
+            }
+            vegetation_report.admitted_occurrences += 1;
+            vegetation_report.proxy_boxes +=
+                append_far_lod_tree_proxy(vertices, indices, occurrence, pos, materials);
+        }
+    }
+    vegetation_report.proxy_vertices = vertices.len() / 7 - first_proxy_vertex;
+    vegetation_report.proxy_indices = indices.len() - first_proxy_index;
+    vegetation_report
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct FarTerrainLodVegetationReport {
+    summary_cells: usize,
+    record_queries: usize,
+    admitted_occurrences: usize,
+    proxy_boxes: usize,
+    proxy_vertices: usize,
+    proxy_indices: usize,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -2306,6 +2345,296 @@ fn shade_color(mut color: [f32; 4], shade: f32) -> [f32; 4] {
     color
 }
 
+fn forest_summary_colors(
+    mut terrain: FarTerrainLodSurfaceColors,
+    intent: McloneForestIntentSample,
+    materials: Option<&FarTerrainLodMaterialPalette>,
+) -> FarTerrainLodSurfaceColors {
+    let Some(family) = intent.dominant_family else {
+        return terrain;
+    };
+    let (_, crown) = far_lod_tree_colors(family, materials);
+    let summary_weight = (intent.coverage * (0.30 + intent.density * 0.24)).clamp(0.0, 0.52);
+    terrain.top = mix_color(terrain.top, crown, summary_weight);
+    terrain.side = mix_color(terrain.side, crown, summary_weight * 0.42);
+    terrain
+}
+
+fn mix_color(from: [f32; 4], to: [f32; 4], amount: f32) -> [f32; 4] {
+    let amount = amount.clamp(0.0, 1.0);
+    [
+        from[0] + (to[0] - from[0]) * amount,
+        from[1] + (to[1] - from[1]) * amount,
+        from[2] + (to[2] - from[2]) * amount,
+        from[3] + (to[3] - from[3]) * amount,
+    ]
+}
+
+const fn far_lod_tree_record_level_admitted(lod_level: u8) -> bool {
+    matches!(lod_level, 1 | 2)
+}
+
+const fn far_lod_tree_record_admitted(lod_level: u8, landmark_rank: u8) -> bool {
+    match lod_level {
+        1 => true,
+        2 => landmark_rank >= 2,
+        _ => false,
+    }
+}
+
+fn far_lod_chunk_vegetation_bounds(pos: ChunkPos) -> Option<McloneVegetationBounds> {
+    let min_x = chunk_min_block_coord(pos.x);
+    let min_z = chunk_min_block_coord(pos.z);
+    McloneVegetationBounds::new(
+        min_x,
+        min_z,
+        min_x.checked_add(CHUNK_WIDTH - 1)?,
+        min_z.checked_add(CHUNK_WIDTH - 1)?,
+    )
+    .ok()
+}
+
+fn far_lod_tree_colors(
+    family: McloneTreeFamily,
+    materials: Option<&FarTerrainLodMaterialPalette>,
+) -> ([f32; 4], [f32; 4]) {
+    let (log, leaves, trunk_fallback, crown_fallback) = match family {
+        McloneTreeFamily::TemperateBroadleaf => (
+            OAK_LOG,
+            OAK_LEAVES,
+            [0.34, 0.20, 0.09, 1.0],
+            [0.16, 0.45, 0.20, 1.0],
+        ),
+        McloneTreeFamily::CoolWetConifer => (
+            SPRUCE_LOG,
+            SPRUCE_LEAVES,
+            [0.28, 0.17, 0.08, 1.0],
+            [0.10, 0.30, 0.18, 1.0],
+        ),
+        McloneTreeFamily::WarmDryAcacia => (
+            ACACIA_LOG,
+            ACACIA_LEAVES,
+            [0.43, 0.26, 0.11, 1.0],
+            [0.37, 0.50, 0.16, 1.0],
+        ),
+    };
+    let trunk = materials
+        .and_then(|palette| palette.colors_for_block(GeneratedBlockId(log), 64))
+        .map_or(trunk_fallback, |colors| colors.side);
+    let crown = materials
+        .and_then(|palette| palette.colors_for_block(GeneratedBlockId(leaves), 64))
+        .map_or(crown_fallback, |colors| colors.top);
+    (trunk, crown)
+}
+
+fn append_far_lod_tree_proxy(
+    vertices: &mut Vec<f32>,
+    indices: &mut Vec<u32>,
+    occurrence: McloneTreeOccurrence,
+    tile: ChunkPos,
+    materials: Option<&FarTerrainLodMaterialPalette>,
+) -> usize {
+    let Ok(base) = occurrence.working_base() else {
+        return 0;
+    };
+    let record = occurrence.record;
+    let (trunk_color, crown_color) = far_lod_tree_colors(record.family, materials);
+    let tile_min_x = chunk_min_block_coord(tile.x) as f32;
+    let tile_min_z = chunk_min_block_coord(tile.z) as f32;
+    let tile_max_x = tile_min_x + CHUNK_WIDTH as f32;
+    let tile_max_z = tile_min_z + CHUNK_WIDTH as f32;
+    let mut boxes = 0;
+    boxes += usize::from(append_clipped_box(
+        vertices,
+        indices,
+        [base.x as f32, base.y as f32, base.z as f32],
+        [
+            base.x as f32 + 1.0,
+            base.y as f32 + f32::from(record.trunk_height),
+            base.z as f32 + 1.0,
+        ],
+        tile_min_x,
+        tile_max_x,
+        tile_min_z,
+        tile_max_z,
+        trunk_color,
+    ));
+
+    let radius = f32::from(record.crown_radius);
+    let depth = f32::from(record.crown_depth);
+    let crown_top = base.y as f32 + f32::from(record.trunk_height) + 1.0;
+    match record.family {
+        McloneTreeFamily::TemperateBroadleaf => {
+            boxes += usize::from(append_clipped_box(
+                vertices,
+                indices,
+                [
+                    base.x as f32 - radius,
+                    crown_top - depth,
+                    base.z as f32 - radius,
+                ],
+                [
+                    base.x as f32 + radius + 1.0,
+                    crown_top,
+                    base.z as f32 + radius + 1.0,
+                ],
+                tile_min_x,
+                tile_max_x,
+                tile_min_z,
+                tile_max_z,
+                crown_color,
+            ));
+            let upper_radius = (radius - 1.0).max(1.0);
+            boxes += usize::from(append_clipped_box(
+                vertices,
+                indices,
+                [
+                    base.x as f32 - upper_radius,
+                    crown_top - depth * 0.45,
+                    base.z as f32 - upper_radius,
+                ],
+                [
+                    base.x as f32 + upper_radius + 1.0,
+                    crown_top + 1.0,
+                    base.z as f32 + upper_radius + 1.0,
+                ],
+                tile_min_x,
+                tile_max_x,
+                tile_min_z,
+                tile_max_z,
+                shade_color(crown_color, 1.06),
+            ));
+        }
+        McloneTreeFamily::CoolWetConifer => {
+            boxes += usize::from(append_clipped_box(
+                vertices,
+                indices,
+                [
+                    base.x as f32 - radius,
+                    crown_top - depth,
+                    base.z as f32 - radius,
+                ],
+                [
+                    base.x as f32 + radius + 1.0,
+                    crown_top - depth * 0.30,
+                    base.z as f32 + radius + 1.0,
+                ],
+                tile_min_x,
+                tile_max_x,
+                tile_min_z,
+                tile_max_z,
+                shade_color(crown_color, 0.90),
+            ));
+            let upper_radius = (radius * 0.62).max(1.0);
+            boxes += usize::from(append_clipped_box(
+                vertices,
+                indices,
+                [
+                    base.x as f32 - upper_radius,
+                    crown_top - depth * 0.42,
+                    base.z as f32 - upper_radius,
+                ],
+                [
+                    base.x as f32 + upper_radius + 1.0,
+                    crown_top,
+                    base.z as f32 + upper_radius + 1.0,
+                ],
+                tile_min_x,
+                tile_max_x,
+                tile_min_z,
+                tile_max_z,
+                crown_color,
+            ));
+        }
+        McloneTreeFamily::WarmDryAcacia => {
+            let directions = [[0.0, -1.0], [1.0, 0.0], [0.0, 1.0], [-1.0, 0.0]];
+            let direction = directions[usize::from(record.orientation & 3)];
+            let side = [-direction[1], direction[0]];
+            for (offset, y_offset, shade) in [
+                ([direction[0] * 2.0, direction[1] * 2.0], 0.0, 1.0),
+                ([side[0] * 1.5, side[1] * 1.5], -1.0, 0.92),
+            ] {
+                boxes += usize::from(append_clipped_box(
+                    vertices,
+                    indices,
+                    [
+                        base.x as f32 + offset[0] - radius,
+                        crown_top - 2.0 + y_offset,
+                        base.z as f32 + offset[1] - radius,
+                    ],
+                    [
+                        base.x as f32 + offset[0] + radius + 1.0,
+                        crown_top + y_offset,
+                        base.z as f32 + offset[1] + radius + 1.0,
+                    ],
+                    tile_min_x,
+                    tile_max_x,
+                    tile_min_z,
+                    tile_max_z,
+                    shade_color(crown_color, shade),
+                ));
+            }
+        }
+    }
+    boxes
+}
+
+#[allow(clippy::too_many_arguments)]
+fn append_clipped_box(
+    vertices: &mut Vec<f32>,
+    indices: &mut Vec<u32>,
+    min: [f32; 3],
+    max: [f32; 3],
+    tile_min_x: f32,
+    tile_max_x: f32,
+    tile_min_z: f32,
+    tile_max_z: f32,
+    color: [f32; 4],
+) -> bool {
+    let min = [min[0].max(tile_min_x), min[1], min[2].max(tile_min_z)];
+    let max = [max[0].min(tile_max_x), max[1], max[2].min(tile_max_z)];
+    if max[0] <= min[0] || max[1] <= min[1] || max[2] <= min[2] {
+        return false;
+    }
+    append_box(vertices, indices, min, max, color);
+    true
+}
+
+fn append_box(
+    vertices: &mut Vec<f32>,
+    indices: &mut Vec<u32>,
+    min: [f32; 3],
+    max: [f32; 3],
+    color: [f32; 4],
+) {
+    let base = u32::try_from(vertices.len() / 7).expect("far terrain LOD vertex count fits u32");
+    for position in [
+        [min[0], min[1], min[2]],
+        [max[0], min[1], min[2]],
+        [min[0], max[1], min[2]],
+        [max[0], max[1], min[2]],
+        [min[0], min[1], max[2]],
+        [max[0], min[1], max[2]],
+        [min[0], max[1], max[2]],
+        [max[0], max[1], max[2]],
+    ] {
+        vertices.extend_from_slice(&position);
+        vertices.extend_from_slice(&color);
+    }
+    indices.extend(
+        [
+            0, 1, 4, 1, 5, 4, // bottom
+            2, 6, 3, 3, 6, 7, // top
+            0, 2, 1, 1, 2, 3, // north
+            4, 5, 6, 5, 7, 6, // south
+            0, 4, 2, 4, 6, 2, // west
+            1, 3, 5, 3, 7, 5, // east
+        ]
+        .into_iter()
+        .map(|index| base + index),
+    );
+}
+
 fn chunk_sample_offsets(spacing: u32) -> Vec<i32> {
     let spacing = spacing.max(1).min(CHUNK_WIDTH as u32);
     let mut offsets = Vec::new();
@@ -2325,6 +2654,7 @@ struct FarTerrainSurfaceSample {
     y: f32,
     top_color: [f32; 4],
     side_color: [f32; 4],
+    forest_summary_available: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -2342,6 +2672,15 @@ trait FarTerrainSurfaceSource {
         world_z: i32,
         materials: Option<&FarTerrainLodMaterialPalette>,
     ) -> Option<FarTerrainSurfaceSample>;
+
+    fn mclone_tree_occurrences(
+        &mut self,
+        _seed: i64,
+        _generation_profile: WorldGenerationProfile,
+        _bounds: McloneVegetationBounds,
+    ) -> Vec<McloneTreeOccurrence> {
+        Vec::new()
+    }
 }
 
 impl FarTerrainSurfaceSource for BTreeMap<ChunkPos, GeneratedChunk> {
@@ -2402,11 +2741,12 @@ fn generate_far_lod_surface_chunk(
 }
 
 #[derive(Debug, Default)]
-pub(crate) struct FarTerrainLodWorkerCache {
+pub struct FarTerrainLodWorkerCache {
     source: Option<(i64, WorldGenerationProfile)>,
     chunks: BTreeMap<ChunkPos, Vec<Option<FarTerrainSurfaceColumn>>>,
     insertion_order: VecDeque<ChunkPos>,
     mclone_stream_plans: Option<McloneOverworldStreamPlanCache>,
+    mclone_vegetation: Option<McloneOverworldVegetationPlanCache>,
 }
 
 impl FarTerrainLodWorkerCache {
@@ -2424,6 +2764,13 @@ impl FarTerrainLodWorkerCache {
                     seed,
                     McloneOverworldSamplingTopology::Unbounded,
                 )
+            });
+        self.mclone_vegetation = (generation_profile == WorldGenerationProfile::McloneOverworldV1)
+            .then(|| {
+                McloneOverworldVegetationPlanCache::new(McloneVegetationSource::new(
+                    seed,
+                    McloneOverworldSamplingTopology::Unbounded,
+                ))
             });
     }
 
@@ -2480,12 +2827,35 @@ impl FarTerrainSurfaceSource for FarTerrainLodWorkerCache {
         let local_z = world_z - chunk_min_block_coord(pos.z);
         let index = (local_z * CHUNK_WIDTH + local_x) as usize;
         let column = self.chunks.get(&pos)?.get(index).copied().flatten()?;
-        let colors = surface_colors(column.block, column.y, materials);
+        let mut colors = surface_colors(column.block, column.y, materials);
+        let forest_summary_available =
+            generation_profile == WorldGenerationProfile::McloneOverworldV1;
+        if let Some(intent) = self
+            .mclone_vegetation
+            .as_mut()
+            .and_then(|cache| cache.forest_intent_at(world_x, world_z).ok())
+        {
+            colors = forest_summary_colors(colors, intent, materials);
+        }
         Some(FarTerrainSurfaceSample {
             y: column.y as f32,
             top_color: colors.top,
             side_color: colors.side,
+            forest_summary_available,
         })
+    }
+
+    fn mclone_tree_occurrences(
+        &mut self,
+        seed: i64,
+        generation_profile: WorldGenerationProfile,
+        bounds: McloneVegetationBounds,
+    ) -> Vec<McloneTreeOccurrence> {
+        self.reset_for_source(seed, generation_profile);
+        self.mclone_vegetation
+            .as_mut()
+            .and_then(|cache| cache.tree_records_intersecting(bounds).ok())
+            .unwrap_or_default()
     }
 }
 
@@ -2515,6 +2885,7 @@ fn surface_sample(
         y: column.y as f32,
         top_color: colors.top,
         side_color: colors.side,
+        forest_summary_available: false,
     })
 }
 
@@ -2613,6 +2984,16 @@ fn surface_color(block: GeneratedBlockId, surface_y: i32) -> [f32; 4] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn far_lod_mesh_fingerprint(mesh: &FarTerrainLodTileMesh) -> u64 {
+        mesh.vertices()
+            .iter()
+            .map(|value| u64::from(value.to_bits()))
+            .chain(mesh.indices().iter().copied().map(u64::from))
+            .fold(0xcbf2_9ce4_8422_2325, |hash, value| {
+                (hash ^ value).wrapping_mul(0x1000_0000_01b3)
+            })
+    }
 
     #[derive(Default)]
     struct ImmediateFarLodCompiler {
@@ -3089,6 +3470,215 @@ mod tests {
     }
 
     #[test]
+    fn overworld_far_lod_payload_baseline_is_pinned() {
+        let source = FarTerrainLodSourceKey::new_with_profile(
+            12_345,
+            WorldGenerationProfile::Overworld,
+            FarTerrainLodConfig::enabled(),
+            false,
+        );
+        let mesh = compile_far_terrain_lod_request(FarTerrainLodBuildRequest::new_for_tile(
+            LodTileKey::new(ChunkPos::new(1, 0), 1),
+            source,
+            [4; 4],
+            None,
+            MonotonicInstant::ZERO,
+        ))
+        .mesh;
+        assert_eq!(mesh.vertex_count(), 100);
+        assert_eq!(mesh.index_count(), 150);
+        assert_eq!(far_lod_mesh_fingerprint(&mesh), 0x5c1c_22da_08c4_89e6);
+    }
+
+    #[test]
+    fn mclone_far_lod_uses_summary_and_level_rank_admission() {
+        let seed = 12_345;
+        let source = McloneVegetationSource::new(seed, McloneOverworldSamplingTopology::Unbounded);
+        let mut discovery = McloneOverworldVegetationPlanCache::new(source);
+        let occurrences = discovery
+            .tree_records_intersecting(McloneVegetationBounds::new(-512, -512, 511, 511).unwrap())
+            .unwrap();
+        let any = occurrences.first().copied().expect("review area has trees");
+        let ranked = occurrences
+            .iter()
+            .copied()
+            .find(|occurrence| occurrence.record.landmark_rank >= 2)
+            .expect("review area has a rank-two-or-higher tree");
+        let compile =
+            |occurrence: McloneTreeOccurrence, level: u8, cache: &mut FarTerrainLodWorkerCache| {
+                let base = occurrence.working_base().unwrap();
+                let pos = ChunkPos::from_block_coords(base.x, base.z);
+                let spacing = far_lod_sample_spacing_for_level(4, level);
+                let key = FarTerrainLodBuildKey {
+                    seed,
+                    generation_profile: WorldGenerationProfile::McloneOverworldV1,
+                    center: pos,
+                    render_distance: 0,
+                    start_margin_chunks: 0,
+                    extra_radius_chunks: 1,
+                    sample_spacing_blocks: spacing,
+                    detail_mode: FarLodDetailMode::Auto,
+                };
+                let mut vertices = Vec::new();
+                let mut indices = Vec::new();
+                let report = append_far_terrain_lod_chunk_patch(
+                    &mut vertices,
+                    &mut indices,
+                    cache,
+                    seed,
+                    pos,
+                    level,
+                    key,
+                    [spacing; 4],
+                    FarTerrainNormalCoverage::NoNormalChunks,
+                    None,
+                );
+                (report, vertices, indices)
+            };
+
+        let mut cache = FarTerrainLodWorkerCache::default();
+        let any_base = any.working_base().unwrap();
+        let summary_sample = surface_sample_world(
+            &mut cache,
+            seed,
+            WorldGenerationProfile::McloneOverworldV1,
+            any_base.x,
+            any_base.z,
+            None,
+        )
+        .expect("tree base has a Far LOD surface sample");
+        let any_chunk = ChunkPos::from_block_coords(any_base.x, any_base.z);
+        let local_x = any_base.x - chunk_min_block_coord(any_chunk.x);
+        let local_z = any_base.z - chunk_min_block_coord(any_chunk.z);
+        let column = cache.chunks[&any_chunk][(local_z * CHUNK_WIDTH + local_x) as usize]
+            .expect("tree base surface column exists");
+        let untinted = surface_colors(column.block, column.y, None);
+        assert!(summary_sample.forest_summary_available);
+        assert_ne!(summary_sample.top_color, untinted.top);
+
+        let (level_one, level_one_vertices, level_one_indices) = compile(any, 1, &mut cache);
+        assert!(level_one.summary_cells > 0);
+        assert_eq!(level_one.record_queries, 1);
+        assert!(level_one.admitted_occurrences > 0);
+        assert!(level_one.proxy_boxes > 0);
+        assert_eq!(level_one.proxy_vertices, level_one.proxy_boxes * 8);
+        assert_eq!(level_one.proxy_indices, level_one.proxy_boxes * 36);
+        assert!(level_one_vertices.len() / 7 > level_one.proxy_vertices);
+        assert!(level_one_indices.len() > level_one.proxy_indices);
+
+        let (level_two, _, _) = compile(ranked, 2, &mut cache);
+        assert!(level_two.summary_cells > 0);
+        assert_eq!(level_two.record_queries, 1);
+        assert!(level_two.admitted_occurrences > 0);
+
+        let record_requests_before = cache
+            .mclone_vegetation
+            .as_ref()
+            .unwrap()
+            .report()
+            .cell_requests;
+        let (level_three, _, _) = compile(any, 3, &mut cache);
+        let record_requests_after = cache
+            .mclone_vegetation
+            .as_ref()
+            .unwrap()
+            .report()
+            .cell_requests;
+        assert!(level_three.summary_cells > 0);
+        assert_eq!(level_three.record_queries, 0);
+        assert_eq!(level_three.admitted_occurrences, 0);
+        assert_eq!(level_three.proxy_boxes, 0);
+        assert_eq!(record_requests_after, record_requests_before);
+    }
+
+    #[test]
+    fn far_lod_tree_record_admission_is_global_and_monotonic() {
+        for rank in 0..=3 {
+            assert!(far_lod_tree_record_admitted(1, rank));
+            assert_eq!(far_lod_tree_record_admitted(2, rank), rank >= 2);
+            assert!(!far_lod_tree_record_admitted(3, rank));
+        }
+    }
+
+    #[test]
+    fn cross_chunk_tree_proxy_fragments_are_clipped_to_each_tile() {
+        let source =
+            McloneVegetationSource::new(12_345, McloneOverworldSamplingTopology::Unbounded);
+        let occurrence = McloneOverworldVegetationPlanCache::new(source)
+            .tree_records_intersecting(McloneVegetationBounds::new(-512, -512, 511, 511).unwrap())
+            .unwrap()
+            .into_iter()
+            .find(|occurrence| {
+                let bounds = occurrence.working_bounds;
+                bounds.min_x.div_euclid(CHUNK_WIDTH) != bounds.max_x.div_euclid(CHUNK_WIDTH)
+                    || bounds.min_z.div_euclid(CHUNK_WIDTH) != bounds.max_z.div_euclid(CHUNK_WIDTH)
+            })
+            .expect("review area has a cross-chunk tree");
+        let bounds = occurrence.working_bounds;
+        let (first, second, boundary, x_axis) =
+            if bounds.min_x.div_euclid(CHUNK_WIDTH) != bounds.max_x.div_euclid(CHUNK_WIDTH) {
+                let first = ChunkPos::new(
+                    bounds.min_x.div_euclid(CHUNK_WIDTH),
+                    occurrence.working_base().unwrap().z.div_euclid(CHUNK_WIDTH),
+                );
+                (
+                    first,
+                    ChunkPos::new(first.x + 1, first.z),
+                    chunk_min_block_coord(first.x + 1) as f32,
+                    true,
+                )
+            } else {
+                let first = ChunkPos::new(
+                    occurrence.working_base().unwrap().x.div_euclid(CHUNK_WIDTH),
+                    bounds.min_z.div_euclid(CHUNK_WIDTH),
+                );
+                (
+                    first,
+                    ChunkPos::new(first.x, first.z + 1),
+                    chunk_min_block_coord(first.z + 1) as f32,
+                    false,
+                )
+            };
+        let compile_fragment = |tile| {
+            let mut vertices = Vec::new();
+            let mut indices = Vec::new();
+            let boxes =
+                append_far_lod_tree_proxy(&mut vertices, &mut indices, occurrence, tile, None);
+            (boxes, vertices, indices)
+        };
+        let (first_boxes, first_vertices, first_indices) = compile_fragment(first);
+        let (second_boxes, second_vertices, second_indices) = compile_fragment(second);
+
+        assert!(first_boxes > 0 && second_boxes > 0);
+        assert_eq!(first_vertices.len() / 7, first_boxes * 8);
+        assert_eq!(second_vertices.len() / 7, second_boxes * 8);
+        assert_eq!(first_indices.len(), first_boxes * 36);
+        assert_eq!(second_indices.len(), second_boxes * 36);
+        for (tile, vertices) in [
+            (first, first_vertices.as_slice()),
+            (second, second_vertices.as_slice()),
+        ] {
+            let min_x = chunk_min_block_coord(tile.x) as f32;
+            let min_z = chunk_min_block_coord(tile.z) as f32;
+            for vertex in vertices.chunks_exact(7) {
+                assert!((min_x..=min_x + CHUNK_WIDTH as f32).contains(&vertex[0]));
+                assert!((min_z..=min_z + CHUNK_WIDTH as f32).contains(&vertex[2]));
+            }
+        }
+        let axis_offset = if x_axis { 0 } else { 2 };
+        assert!(
+            first_vertices
+                .chunks_exact(7)
+                .any(|vertex| vertex[axis_offset] == boundary)
+        );
+        assert!(
+            second_vertices
+                .chunks_exact(7)
+                .any(|vertex| vertex[axis_offset] == boundary)
+        );
+    }
+
+    #[test]
     fn far_lod_worker_cache_reuses_neighbor_surface_facts() {
         let source = FarTerrainLodSourceKey::new(12345, FarTerrainLodConfig::enabled(), false);
         let mut cache = FarTerrainLodWorkerCache::default();
@@ -3182,6 +3772,30 @@ mod tests {
             mclone_cache.source,
             Some((seed, WorldGenerationProfile::McloneOverworldV1))
         );
+        assert_eq!(
+            mclone_cache
+                .mclone_vegetation
+                .as_ref()
+                .expect("Mclone LOD owns a vegetation cache")
+                .source(),
+            McloneVegetationSource::new(seed, McloneOverworldSamplingTopology::Unbounded)
+        );
+
+        surface_sample_world(
+            &mut mclone_cache,
+            seed + 1,
+            WorldGenerationProfile::Overworld,
+            0,
+            0,
+            None,
+        )
+        .expect("replacement source sample exists");
+        assert_eq!(
+            mclone_cache.source,
+            Some((seed + 1, WorldGenerationProfile::Overworld))
+        );
+        assert!(mclone_cache.mclone_stream_plans.is_none());
+        assert!(mclone_cache.mclone_vegetation.is_none());
     }
 
     #[test]
@@ -3242,6 +3856,7 @@ mod tests {
             &mut chunks,
             12345,
             ChunkPos::new(1, 0),
+            1,
             key,
             [DEFAULT_FAR_TERRAIN_LOD_SAMPLE_SPACING_BLOCKS; 4],
             FarTerrainNormalCoverage::Radius,
@@ -3285,6 +3900,7 @@ mod tests {
                 y: 72.0,
                 top_color: [0.30, 0.50, 0.22, 1.0],
                 side_color: [0.36, 0.25, 0.15, 1.0],
+                forest_summary_available: false,
             },
         };
         let mut vertices = Vec::new();

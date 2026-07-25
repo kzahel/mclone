@@ -192,18 +192,44 @@ Milestone record:
 
 ### Slice 3: in-game Far LOD adoption
 
-- [ ] Add forest summary tint/mass to Mclone Far LOD lattice cells.
-- [ ] Reuse the worker-owned vegetation cache for admitted exact records.
-- [ ] Append family-specific proxy volumes clipped to each tile.
-- [ ] Prove cross-chunk fragments, level admission, and source invalidation.
-- [ ] Prove Far-LOD-off and non-Mclone payloads remain unchanged.
+- [x] Add forest summary tint/mass to Mclone Far LOD lattice cells.
+- [x] Reuse the worker-owned vegetation cache for admitted exact records.
+- [x] Append family-specific proxy volumes clipped to each tile.
+- [x] Prove cross-chunk fragments, level admission, and source invalidation.
+- [x] Prove Far-LOD-off and non-Mclone payloads remain unchanged.
 
 Gate: current Far LOD renders Mclone vegetation through its existing resident
 and painted-coverage lifecycle.
 
+Milestone record:
+
+- every Mclone Far LOD lattice sample evaluates production forest intent and
+  blends bounded dominant-family canopy color into terrain top/side color;
+  other profiles skip the evaluation;
+- native compile workers and each persistent browser render-compiler session
+  own one bounded `McloneOverworldVegetationPlanCache`, reset it with the
+  surface/stream cache on source changes, and return the same packed tile
+  contract;
+- auto level one admits all intersecting records, level two admits rank `2`
+  and `3`, and level three makes zero record queries; broadleaf, conifer, and
+  acacia each emit a trunk plus two silhouette volumes;
+- each volume is clipped independently to the owning 16-by-16 Far LOD tile.
+  A cross-chunk fixture proves both adjacent fragments exist and no vertex
+  escapes its tile, without owner-chunk suppression;
+- the representative level-one tile has 16 summary cells, one record query,
+  two admitted occurrences, six boxes, 48 proxy vertices, and 216 proxy
+  indices. Level two retains the two ranked occurrences and six boxes from
+  four summary cells; level three has one summary cell and zero queries or
+  proxy geometry;
+- a repeated two-tile source fixture records 32 planning-cell requests,
+  16 hits, 16 misses, 16 retained cells, and 91 fixed candidates; and
+- the pre-change Java-overworld payload remains exactly 100 vertices,
+  150 indices, and fingerprint `0x5c1c22da08c489e6`. A Far-LOD-off native
+  capture reports zero Far LOD draws/uploads and retains only exact terrain.
+
 ### Slice 4: rendered and platform closeout
 
-- [ ] Inspect Terrain Lab desktop and phone map/3D pixels through summary and
+- [x] Inspect Terrain Lab desktop and phone map/3D pixels through summary and
   individual levels, including meadow, woodland, conifer, steppe, streams,
   and forest edges.
 - [ ] Inspect in-game stationary and moving exact/proxy handoff pixels.

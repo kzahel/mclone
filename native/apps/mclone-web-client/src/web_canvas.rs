@@ -21,8 +21,8 @@ use mclone_app_runtime::deferred_drop::{
 };
 use mclone_app_runtime::far_lod::{
     FarTerrainLodBuildRequest, FarTerrainLodBuildResult, FarTerrainLodCache, FarTerrainLodCompiler,
-    FarTerrainLodConfig, FarTerrainLodMaterialPalette, FarTerrainLodWorkerInput,
-    compile_far_terrain_lod_worker_input,
+    FarTerrainLodConfig, FarTerrainLodMaterialPalette, FarTerrainLodWorkerCache,
+    FarTerrainLodWorkerInput, compile_far_terrain_lod_worker_input_cached,
 };
 use mclone_app_runtime::host_mode::SingleViewHostMode;
 use mclone_app_runtime::lod_coverage::{LodCoverageCoordinator, LodTileAvailability};
@@ -284,6 +284,7 @@ pub struct WebRenderCompilerSession {
     asset_pack_byte_length: usize,
     asset_load_count: usize,
     compile_count: usize,
+    far_lod_cache: FarTerrainLodWorkerCache,
     // 067 Stage 4: resident snapshot mirror. Created once with the session and persisted
     // across compiles, so the per-frame input is a delta (upserts + evictions) instead of
     // the whole loaded world. `compileSnapshotSectionsForTargets` applies each delta here
@@ -311,6 +312,7 @@ impl WebRenderCompilerSession {
             asset_pack_byte_length,
             asset_load_count: 1,
             compile_count: 0,
+            far_lod_cache: FarTerrainLodWorkerCache::default(),
             snapshot_mirror: BTreeMap::new(),
             mirror_generation: 0,
             biome_zoom_seed: None,
@@ -356,6 +358,7 @@ impl WebRenderCompilerSession {
             asset_pack_byte_length,
             asset_load_count: 4,
             compile_count: 0,
+            far_lod_cache: FarTerrainLodWorkerCache::default(),
             snapshot_mirror: BTreeMap::new(),
             mirror_generation: 0,
             biome_zoom_seed: None,
@@ -400,6 +403,7 @@ impl WebRenderCompilerSession {
             asset_pack_byte_length: self.asset_pack_byte_length,
             asset_load_count: 0,
             compile_count: 0,
+            far_lod_cache: FarTerrainLodWorkerCache::default(),
             snapshot_mirror: BTreeMap::new(),
             mirror_generation: 0,
             biome_zoom_seed: None,
@@ -525,7 +529,7 @@ impl WebRenderCompilerSession {
             .map_err(|error| JsValue::from_str(&format!("invalid far LOD seed: {error}")))?;
         let generation_profile = WorldGenerationProfile::parse_label(&generation_profile_label)
             .map_err(JsValue::from)?;
-        let mesh = compile_far_terrain_lod_worker_input(
+        let mesh = compile_far_terrain_lod_worker_input_cached(
             FarTerrainLodWorkerInput {
                 key: LodTileKey::new(ChunkPos::new(chunk_x, chunk_z), level),
                 seed,
@@ -539,6 +543,7 @@ impl WebRenderCompilerSession {
                 ],
             },
             self.mesh_assets.far_lod_materials.as_ref(),
+            &mut self.far_lod_cache,
         );
         encode_web_far_lod_tile_mesh(&mesh).map_err(JsValue::from)
     }
