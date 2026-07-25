@@ -2,11 +2,13 @@
 
 Topic: `vanilla-terrain-lod`
 
-Status: first pass implemented and validated on 2026-07-25 under Tactical
-[`240`](../tactical/240-vanilla-terrain-lod-in-terrain-lab.md). Tactical
-[`246`](../tactical/246-vanilla-fast-macro-terrain-preview.md) is active to
-remove aligned exact-sampler waste and develop independently selectable fast
-macro versus sampled-exact Terrain Lab products.
+Status: sampled-exact and fast-macro products implemented and validated on
+2026-07-25. Tactical
+[`240`](../tactical/240-vanilla-terrain-lod-in-terrain-lab.md) records the
+first direct sampler; Tactical
+[`246`](../tactical/246-vanilla-fast-macro-terrain-preview.md) records the
+exact-path optimization, accepted macro algorithm, comparison evidence, and
+independent browser products.
 
 ## Scope
 
@@ -24,9 +26,10 @@ Terrain Lab has one global terrain profile:
 
 - `mclone-overworld-v1` selects exact Mclone terrain, Mclone CPU LOD, and the
   optional Mclone GPU LOD;
-- `overworld` selects exact Java 1.17.1 reference terrain and the direct
-  vanilla CPU LOD sampler; and
-- GPU LOD is unavailable for `overworld`.
+- `overworld` selects exact Java 1.17.1 reference terrain, `Sampled exact`,
+  and `Fast macro`; and
+- the two vanilla procedural products can be shown independently or together,
+  while Mclone GPU LOD remains unavailable for `overworld`.
 
 One workspace never mixes exact terrain from one profile with LOD from the
 other. Seed, center, footprint, camera, cache identity, Worker epoch,
@@ -34,6 +37,26 @@ diagnostics, inspector receipts, and URL state all carry the selected profile.
 
 The browser may display and transport the selection. Shared Rust owns profile
 semantics, supported stages/layers, sampling, and canonical generation.
+
+## Current Two-Fidelity Contract
+
+`Sampled exact` preserves the direct Java 1.17.1 density result at each
+requested point. It generates only columns with non-zero horizontal
+interpolation weight: one at an aligned density-lattice corner, two on a
+single-axis interior position, or four at an arbitrary interior block.
+
+`Fast macro` is revisioned
+`vanilla-1.17.1-sparse-density-column-lod-v1`. For each retained horizontal
+column it uses one center noise biome and nine ordinary vanilla blended-noise
+nodes spaced four vertical cells apart. It interpolates across the resulting
+32-block intervals and retains vanilla water fill, biome lookup, and
+approximate visible-material semantics.
+
+The macro sampler is deliberately presentation-only. Fixed 2 km native
+fixtures show a 3.45-3.87x cold compile speedup over the optimized exact path,
+94.18-96.59% water agreement, 3.63-4.92-block mean solid error, and 11-16-block
+P95 solid error. The headed Pixel 7 viewport reached macro target in 462 ms
+and exact target in 1,948 ms.
 
 ## First-Pass Included Contract
 
@@ -88,15 +111,16 @@ vanilla-parity claim.
 
 ## Direct Sampler Contract
 
-The Java reference operation evaluates four density columns surrounding one
-block coordinate, trilinearly interpolates their vertical cells, and scans
-from the top for a matching base state. The Rust sampler should expose the
-same operation without allocating a `16 x 16 x 256` block buffer:
+The Java reference operation conceptually evaluates four density columns
+surrounding one block coordinate, trilinearly interpolates their vertical
+cells, and scans from the top for a matching base state. The Rust exact
+sampler exposes the same result without allocating a `16 x 16 x 256` block
+buffer and skips columns whose interpolation weight is zero:
 
 ```text
 seed + absolute X/Z
   -> 5 x 5 biome-depth/scale neighborhoods at density lattice corners
-  -> four cached vertical vanilla density columns
+  -> one, two, or four cached vertical vanilla density columns
   -> trilinear interpolation and top-down vertical scan
   -> solid surface + visible water + biome + approximate material
 ```
@@ -114,15 +138,22 @@ mesh construction is still the material win.
 
 For `overworld`:
 
-- visible pane choices are `Real terrain` and `CPU LOD`;
+- visible pane choices are `Real terrain`, `Sampled exact`, and `Fast macro`;
 - canonical stage remains `Surface` or `Final features`;
 - the procedural content checkpoint is the bounded vanilla macro surface;
-- supported diagnostic layers are terrain, height, biomes, and surface;
-- Mclone hydrology, streams, wetlands, landforms, climate, cover, error, and
+- supported diagnostic layers are terrain, height, exact/macro error, biomes,
+  and surface;
+- Mclone hydrology, streams, wetlands, landforms, climate, cover, and
   GPU controls are unavailable rather than zero-filled;
 - cache keys and reports include `overworld`; and
 - switching profiles cancels incompatible Worker work and cannot publish a
   stale result.
+
+Sampled exact and Fast macro own separate Wasm compilers, Workers, queues,
+in-flight revision maps, resident buffers, target/coarse readiness, compile
+timings, and source revisions. Their split view shares coordinates, camera,
+footprint, spacing, and rendering, but neither product waits for the other to
+publish a complete level.
 
 Returning to `mclone-overworld-v1` restores the ordinary Mclone pane,
 checkpoint, and layer choices. URL normalization must be deterministic and
@@ -148,6 +179,17 @@ The first pass was validated with:
 - visual inspection of
   `/tmp/mclone-terrain-lab-desktop-chrome-vanilla-workspace.png` and
   `/tmp/mclone-terrain-lab-phone-chrome-vanilla-workspace.png`.
+
+Tactical 246 additionally validated:
+
+- exact one/two/four-column selection against complete noise-column and chunk
+  output;
+- deterministic cold/warm macro sampling and bounded sparse-column reuse;
+- two signed-coordinate 65-by-65 native timing/error fixtures;
+- mean, P95, and maximum solid/display height comparison metrics;
+- independent exact/macro Worker admission and stale-result rejection;
+- headed desktop and Pixel 7 viewport WebGPU comparison at 2 km; and
+- a production Wasm/Vite build with profile-specific pane vocabulary.
 
 The direct sampler contains no `GeneratedChunk` or chunk-buffer ownership.
 Whole chunks remain confined to the separate canonical compiler.
@@ -185,6 +227,10 @@ pnpm --dir tools/terrain-lab exec playwright test \
   production terrain profile.
 - `84726929` adds the global browser switch, vanilla Worker, asynchronous CPU
   tile admission, profile-aware rendering, capability UI, and browser proof.
+- `92cd71cd` records the two-fidelity workstream.
+- `3b056495` removes exact columns with zero interpolation weight.
+- `44af6f29` adds the nine-node fast macro sampler and repeatable benchmark.
+- `6182bb60` adds independent exact/macro renderer and Worker products.
 
 The browser main thread shares one Wasm initialization promise between its
 exact and LOD canvases. The vanilla Worker owns a separate Wasm instance and a
@@ -199,11 +245,13 @@ does not expose a zero-filled Mclone receipt as if it described vanilla.
 
 Possible follow-ups, each requiring its own explicit contract, are:
 
+- a predicted-height bracket that improves rare peak/coast outliers within a
+  similarly bounded density-probe budget;
+- a GPU implementation of the stable macro semantics;
 - specialized surface-builder geometry and closer material parity;
 - footprint-aware relief summaries and truthful parent roll-ups;
 - sparse semantic proxies for selected vanilla structures or vegetation;
 - first-party biome tinting;
-- a native profiling host; and
 - use by a future footprint-growing in-game terrain hierarchy, if that
   architecture can preserve the sampler's bounded direct-column contract.
 

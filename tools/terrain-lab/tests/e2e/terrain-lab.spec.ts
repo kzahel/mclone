@@ -469,6 +469,23 @@ test("switches the whole lab to worker-backed vanilla terrain", async ({
   await expect(page.locator(".splitLabels")).toContainText("Sampled exact");
   await expect(page.locator(".splitLabels")).toContainText("Fast macro");
   await expect(shell).toHaveAttribute("data-comparison-ready", "true");
+  if (process.env.TERRAIN_LAB_EVIDENCE === "1") {
+    console.log("vanilla-lod-evidence", testInfo.project.name, await shell.evaluate((element) => ({
+      exactTargetMs: element.getAttribute("data-cpu-target-ms"),
+      macroTargetMs: element.getAttribute("data-gpu-target-ms"),
+      exactCompileMs: element.getAttribute("data-cpu-request-ms"),
+      macroCompileMs: element.getAttribute("data-macro-request-ms"),
+      exactTiles: element.getAttribute("data-request-cpu-tiles"),
+      macroTiles: element.getAttribute("data-request-macro-tiles"),
+      solidMeanError: element.getAttribute("data-solid-mean-error"),
+      solidP95Error: element.getAttribute("data-solid-p95-error"),
+      solidMaxError: element.getAttribute("data-solid-max-error"),
+      displayMeanError: element.getAttribute("data-display-mean-error"),
+      displayP95Error: element.getAttribute("data-display-p95-error"),
+      displayMaxError: element.getAttribute("data-display-max-error"),
+      waterAgreement: element.getAttribute("data-ocean-agreement"),
+    })));
+  }
   await expect(page.getByLabel("Diagnostic layer")).toHaveValue("terrain");
   await expect(page.getByTestId("point-receipt")).toContainText(
     "Vanilla point receipts are not in the first pass",

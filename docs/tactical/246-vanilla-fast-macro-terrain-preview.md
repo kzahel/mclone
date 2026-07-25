@@ -1,6 +1,6 @@
 # Vanilla Fast Macro Terrain Preview
 
-Status: active (2026-07-25).
+Status: completed (2026-07-25).
 
 Topic: `vanilla-terrain-lod`
 
@@ -152,3 +152,122 @@ No app or renderer crate owns the approximation's terrain policy.
    deployment receipt, and remaining experiments.
 
 Commit each coherent slice with `Topic: vanilla-terrain-lod`.
+
+## Selected Algorithm
+
+The accepted `vanilla-1.17.1-sparse-density-column-lod-v1` macro sampler is a
+hybrid of the first two candidates:
+
+- select the center noise biome instead of evaluating vanilla's complete
+  5-by-5 weighted biome neighborhood;
+- evaluate the ordinary vanilla random density offset and blended 3D noise;
+- retain 9 vertical density nodes per column, every fourth vanilla vertical
+  cell, instead of all 33 nodes;
+- linearly reconstruct the intervening 32-block vertical intervals;
+- preserve vanilla solid/fluid resolution, block-position biome selection,
+  water presence, and approximate top-material classification; and
+- retain columns in the same bounded absolute-coordinate cache as sampled
+  exact.
+
+A five-node candidate using every eighth vertical cell was rejected. On the
+two fixed 2 km fixtures it improved host speed only modestly beyond the
+nine-node candidate but reduced water agreement to 84.8-87.8%, raised mean
+solid error to 13.8-19.9 blocks, and raised P95 solid error to 42 blocks.
+That changed coastlines and broad relief too aggressively.
+
+## Performance And Error Receipt
+
+The repeatable native command is:
+
+```sh
+cargo run -p mclone-worldgen --bin vanilla_lod_perf -- \
+  --seed <seed> --center-x <x> --center-z <z> \
+  --spacing 32 --cells 64
+```
+
+The optimized development-profile host results for 65-by-65, 2,048-block
+grids were:
+
+| Seed and center | Exact | Macro | Speedup | Solid mean / P95 / max | Display mean / P95 / max | Water |
+|---|---:|---:|---:|---:|---:|---:|
+| `12345`, `0,0` | 163.8 ms | 47.5 ms | 3.45x | 3.63 / 11 / 38 | 3.51 / 11 / 38 | 96.59% |
+| `-98765`, `-304,336` | 289.7 ms | 74.8 ms | 3.87x | 4.92 / 16 / 58 | 1.68 / 8 / 58 | 94.18% |
+
+The headed Chrome Pixel 7 viewport lane used the production Wasm Workers and
+the same 2,048-block comparison:
+
+- Fast macro reached target detail in 462.3 ms;
+- Sampled exact reached target detail in 1,947.7 ms, 4.21x later;
+- solid error was 3.72 mean, 12 P95, and 38 maximum blocks;
+- display error was 3.26 mean, 11 P95, and 38 maximum blocks; and
+- water-presence agreement was 96.30%.
+
+The corresponding desktop viewport reached macro target in 2,526.2 ms and
+exact target in 9,425.4 ms. Its comparison reported 4.22 / 13 / 69 solid
+error, 2.92 / 11 / 69 display error, and 95.86% water agreement. Browser
+target times include progressive viewport planning, Worker startup, transfer,
+admission, and publication; the native command isolates cold grid compilation.
+
+## Implemented Product
+
+- Sampled exact now generates only the one, two, or four horizontal density
+  columns with non-zero interpolation weight.
+- Fast macro and Sampled exact have distinct shared samplers, revisions, Wasm
+  compilers, Workers, queues, in-flight maps, resident buffers, timers, and
+  stale-result validation.
+- `overworld` exposes `Real terrain`, `Sampled exact`, and `Fast macro`.
+  Selecting both procedural products uses the existing synchronized split
+  presentation and exact-versus-candidate error layer.
+- Comparison reports now include mean, P95, and maximum solid and display
+  height error plus water agreement.
+- `mclone-overworld-v1` retains its CPU/GPU labels, sources, normalization,
+  compute dispatch, and comparison behavior.
+
+## Validation Receipt
+
+Passed:
+
+```sh
+cargo test -p mclone-worldgen --lib
+cargo test -p mclone-terrain-view --lib
+cargo test -p mclone-terrain-lab --lib
+cargo check --target wasm32-unknown-unknown -p mclone-terrain-lab
+pnpm --dir tools/terrain-lab test
+pnpm --dir tools/terrain-lab typecheck
+pnpm --dir tools/terrain-lab web:build
+pnpm host:check -- --probe-browser-webgpu
+pnpm --dir tools/terrain-lab exec playwright test \
+  -c playwright.config.ts \
+  --grep "switches the whole lab to worker-backed vanilla terrain"
+```
+
+The focused headed-WebGPU test passed for desktop Chrome and the Pixel 7
+phone viewport. The ordinary Mclone comparison regression passed on desktop
+under the normal cap and on the phone viewport with a 180-second cap; the
+complete phone interaction/stress workflow took 1.6 minutes. The focused
+vanilla phone acceptance path passed in 14.1 seconds.
+
+Pixel evidence was captured and inspected at:
+
+- `/tmp/mclone-terrain-lab-desktop-chrome-vanilla-workspace.png`
+- `/tmp/mclone-terrain-lab-phone-chrome-vanilla-workspace.png`
+
+The captures show matching broad land/water masses with the intended smoother
+and locally shifted macro relief, correct independent readiness labels, and a
+usable side-by-side desktop and stacked phone layout.
+
+## Commit Receipt
+
+- `92cd71cd` records this tactical and reopens the durable topic.
+- `3b056495` removes zero-weight sampled-exact density columns.
+- `44af6f29` adds the shared macro sampler, metrics, tests, and benchmark.
+- `6182bb60` adds independent renderer, Wasm Worker, URL, and pane products.
+
+## Remaining Experiments
+
+The nine-node revision is the accepted first fast product, not the end of the
+accuracy workstream. A bounded predicted-height bracket may improve peaks and
+coast transitions without returning to the 33-node exact budget. Any
+replacement must receive a new macro revision and beat the fixed timing/error
+receipt. A GPU implementation remains optional follow-up work after the CPU
+semantics are stable.

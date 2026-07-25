@@ -259,7 +259,12 @@ export function App(): React.JSX.Element {
       data-projection={state.projection}
       data-base-mean-error={comparison?.meanAbsoluteBaseSurfaceError ?? ""}
       data-base-p95-error={comparison?.p95AbsoluteBaseSurfaceError ?? ""}
+      data-solid-mean-error={comparison?.meanAbsoluteSurfaceError ?? ""}
+      data-solid-p95-error={comparison?.p95AbsoluteSurfaceError ?? ""}
+      data-solid-max-error={comparison?.maxAbsoluteSurfaceError ?? ""}
+      data-display-mean-error={comparison?.meanAbsoluteDisplayError ?? ""}
       data-display-p95-error={comparison?.p95AbsoluteDisplayError ?? ""}
+      data-display-max-error={comparison?.maxAbsoluteDisplayError ?? ""}
       data-ocean-agreement={comparison?.oceanWaterPresenceAgreement ?? ""}
       data-material-agreement={comparison?.macroSurfaceMaterialAgreement ?? ""}
       data-channel-agreement={comparison?.channelPresenceAgreement ?? ""}
