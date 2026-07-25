@@ -307,6 +307,22 @@ fn sample_color(
         );
         return colors[min(landform, 8u)] * light;
     }
+    if layer == 11u {
+        let coverage = clamp(sample.forest_summary.x, 0.0, 1.0);
+        let family = u32(round(sample.forest_summary.z));
+        let family_colors = array<vec3<f32>, 4>(
+            vec3<f32>(0.09, 0.11, 0.14),
+            vec3<f32>(0.20, 0.76, 0.30),
+            vec3<f32>(0.12, 0.55, 0.46),
+            vec3<f32>(0.82, 0.66, 0.19),
+        );
+        let grove = clamp(sample.forest_detail.z, 0.0, 1.0);
+        let family_mix = clamp(sample.forest_summary.w, 0.0, 1.0);
+        var forest_color = family_colors[min(family, 3u)];
+        forest_color *= 0.68 + grove * 0.32;
+        forest_color = mix(forest_color, vec3<f32>(0.78, 0.84, 0.60), family_mix * 0.42);
+        return mix(vec3<f32>(0.035, 0.055, 0.075), forest_color, coverage);
+    }
     return terrain_color(sample, light);
 }
 
@@ -434,7 +450,7 @@ fn vertex_main(
         sample.hydrology_detail.x,
         sample.hydrology_detail.y,
         sample.semantics.x,
-        select(0.0, reference.forest_summary.x, params.content_stage_flags.x >= 4u),
+        select(0.0, sample.forest_summary.x, params.content_stage_flags.x >= 4u),
     );
     return out;
 }

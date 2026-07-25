@@ -38,7 +38,8 @@ export type TerrainLabLayer =
   | "landforms"
   | "biomes"
   | "surface"
-  | "streams";
+  | "streams"
+  | "forests";
 
 export interface TerrainLabState {
   profile: TerrainLabProfile;
@@ -141,6 +142,7 @@ const LAYERS = new Set<TerrainLabLayer>([
   "biomes",
   "surface",
   "streams",
+  "forests",
 ]);
 
 export function parseTerrainLabState(

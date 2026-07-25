@@ -572,6 +572,8 @@ struct TerrainLabRenderReport<'a> {
     sample_count: u32,
     vertex_count: u32,
     vegetation_summary_tile_count: u32,
+    cpu_vegetation_summary_tile_count: u32,
+    gpu_vegetation_summary_tile_count: u32,
     vegetation_record_tile_count: u32,
     vegetation_aggregated_tile_count: u32,
     tree_instance_count: u32,
@@ -602,6 +604,14 @@ struct TerrainLabRenderReport<'a> {
     request_cpu_compiled_tiles: u32,
     request_gpu_dispatched_tiles: u32,
     request_cache_hit_tiles: u32,
+    request_cpu_sample_lattice_points: u64,
+    request_cpu_terrain_sample_evaluations: u64,
+    request_cpu_forest_intent_evaluations: u64,
+    request_cpu_forest_footprint_summaries: u64,
+    request_gpu_sample_lattice_points: u64,
+    request_gpu_terrain_sample_evaluations: u64,
+    request_gpu_forest_intent_evaluations: u64,
+    request_gpu_forest_footprint_summaries: u64,
     evicted_tiles_total: u64,
     source: &'static str,
     view: &'static str,
@@ -614,6 +624,8 @@ struct TerrainLabRenderReport<'a> {
     camera_yaw: f32,
     camera_pitch: f32,
     cpu_reference_ms: f64,
+    cpu_vegetation_ms: f64,
+    cpu_pack_upload_ms: f64,
     encode_submit_ms: f64,
     request_ms: f64,
     coarse_ready_ms: Option<f64>,
@@ -623,9 +635,12 @@ struct TerrainLabRenderReport<'a> {
     gpu_coarse_ready_ms: Option<f64>,
     gpu_target_ready_ms: Option<f64>,
     request_cpu_reference_ms: f64,
+    request_cpu_vegetation_ms: f64,
+    request_cpu_pack_upload_ms: f64,
     reference_bytes: u64,
     gpu_sample_bytes: u64,
     readback_bytes: u64,
+    request_readback_bytes: u64,
     resident_bytes: u64,
     comparison_pending: bool,
     stale_result_count: u64,
@@ -1605,6 +1620,8 @@ fn render_report<'a>(
         sample_count: stats.sample_count,
         vertex_count: stats.vertex_count,
         vegetation_summary_tile_count: stats.vegetation_summary_tile_count,
+        cpu_vegetation_summary_tile_count: stats.cpu_vegetation_summary_tile_count,
+        gpu_vegetation_summary_tile_count: stats.gpu_vegetation_summary_tile_count,
         vegetation_record_tile_count: stats.vegetation_record_tile_count,
         vegetation_aggregated_tile_count: stats.vegetation_aggregated_tile_count,
         tree_instance_count: stats.tree_instance_count,
@@ -1635,6 +1652,26 @@ fn render_report<'a>(
         request_cpu_compiled_tiles: stats.request_cpu_compiled_tiles,
         request_gpu_dispatched_tiles: stats.request_gpu_dispatched_tiles,
         request_cache_hit_tiles: stats.request_cache_hit_tiles,
+        request_cpu_sample_lattice_points: stats.request_cpu_compile_work.sample_lattice_points,
+        request_cpu_terrain_sample_evaluations: stats
+            .request_cpu_compile_work
+            .terrain_sample_evaluations,
+        request_cpu_forest_intent_evaluations: stats
+            .request_cpu_compile_work
+            .forest_intent_evaluations,
+        request_cpu_forest_footprint_summaries: stats
+            .request_cpu_compile_work
+            .forest_footprint_summaries,
+        request_gpu_sample_lattice_points: stats.request_gpu_compile_work.sample_lattice_points,
+        request_gpu_terrain_sample_evaluations: stats
+            .request_gpu_compile_work
+            .terrain_sample_evaluations,
+        request_gpu_forest_intent_evaluations: stats
+            .request_gpu_compile_work
+            .forest_intent_evaluations,
+        request_gpu_forest_footprint_summaries: stats
+            .request_gpu_compile_work
+            .forest_footprint_summaries,
         evicted_tiles_total: stats.evicted_tiles_total,
         source,
         view,
@@ -1649,6 +1686,8 @@ fn render_report<'a>(
         camera_yaw,
         camera_pitch,
         cpu_reference_ms: stats.cpu_reference_micros as f64 / 1_000.0,
+        cpu_vegetation_ms: stats.cpu_vegetation_micros as f64 / 1_000.0,
+        cpu_pack_upload_ms: stats.cpu_pack_upload_micros as f64 / 1_000.0,
         encode_submit_ms,
         request_ms,
         coarse_ready_ms,
@@ -1658,9 +1697,12 @@ fn render_report<'a>(
         gpu_coarse_ready_ms,
         gpu_target_ready_ms,
         request_cpu_reference_ms: stats.request_cpu_reference_micros as f64 / 1_000.0,
+        request_cpu_vegetation_ms: stats.request_cpu_vegetation_micros as f64 / 1_000.0,
+        request_cpu_pack_upload_ms: stats.request_cpu_pack_upload_micros as f64 / 1_000.0,
         reference_bytes: stats.reference_bytes,
         gpu_sample_bytes: stats.gpu_sample_bytes,
         readback_bytes: stats.readback_bytes,
+        request_readback_bytes: stats.request_readback_bytes,
         resident_bytes: stats.resident_bytes,
         comparison_pending: stats.pending_readback_count > 0,
         stale_result_count: stats.stale_result_count,

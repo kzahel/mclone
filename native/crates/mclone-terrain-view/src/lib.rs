@@ -166,6 +166,7 @@ pub enum TerrainPreviewLayer {
     SurfaceRecipe = 8,
     PlannedStreams = 9,
     Landforms = 10,
+    Forests = 11,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

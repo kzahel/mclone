@@ -65,6 +65,7 @@ const LAYER_OPTIONS: Array<{ value: TerrainLabLayer; label: string }> = [
   { value: "biomes", label: "Biome recipe" },
   { value: "surface", label: "Surface recipe" },
   { value: "streams", label: "Planned streams" },
+  { value: "forests", label: "Forest summary" },
 ];
 
 const VISUAL_PROFILE_OPTIONS: Array<{
@@ -272,6 +273,8 @@ export function App(): React.JSX.Element {
       data-compare-layout={compareLayout}
       data-vertex-count={renderReport?.vertexCount ?? 0}
       data-vegetation-summary-tiles={renderReport?.vegetationSummaryTileCount ?? 0}
+      data-cpu-vegetation-summary-tiles={renderReport?.cpuVegetationSummaryTileCount ?? 0}
+      data-gpu-vegetation-summary-tiles={renderReport?.gpuVegetationSummaryTileCount ?? 0}
       data-vegetation-record-tiles={renderReport?.vegetationRecordTileCount ?? 0}
       data-vegetation-aggregated-tiles={renderReport?.vegetationAggregatedTileCount ?? 0}
       data-tree-instances={renderReport?.treeInstanceCount ?? 0}
@@ -284,6 +287,7 @@ export function App(): React.JSX.Element {
       data-requested-spacing={renderReport?.requestedSpacing ?? 0}
       data-effective-spacing={renderReport?.effectiveSpacing ?? 0}
       data-published-spacing={renderReport?.publishedSpacing ?? 0}
+      data-footprint-blocks={renderReport?.footprintBlocks ?? 0}
       data-resident-tiles={renderReport?.residentTileCount ?? 0}
       data-queued-tiles={renderReport?.queuedTileCount ?? 0}
       data-target-ready={renderReport?.targetReady ? "true" : "false"}
@@ -292,12 +296,27 @@ export function App(): React.JSX.Element {
       data-cpu-target-ms={renderReport?.cpuTargetReadyMs ?? ""}
       data-gpu-target-ms={renderReport?.gpuTargetReadyMs ?? ""}
       data-cpu-request-ms={renderReport?.requestCpuReferenceMs ?? ""}
+      data-cpu-vegetation-request-ms={renderReport?.requestCpuVegetationMs ?? ""}
+      data-cpu-pack-upload-request-ms={renderReport?.requestCpuPackUploadMs ?? ""}
+      data-cpu-lattice-points={renderReport?.requestCpuSampleLatticePoints ?? 0}
+      data-cpu-terrain-evaluations={renderReport?.requestCpuTerrainSampleEvaluations ?? 0}
+      data-cpu-forest-evaluations={renderReport?.requestCpuForestIntentEvaluations ?? 0}
+      data-cpu-footprint-summaries={renderReport?.requestCpuForestFootprintSummaries ?? 0}
+      data-gpu-lattice-points={renderReport?.requestGpuSampleLatticePoints ?? 0}
+      data-gpu-terrain-evaluations={renderReport?.requestGpuTerrainSampleEvaluations ?? 0}
+      data-gpu-forest-evaluations={renderReport?.requestGpuForestIntentEvaluations ?? 0}
+      data-gpu-footprint-summaries={renderReport?.requestGpuForestFootprintSummaries ?? 0}
       data-cache-enabled={cacheEnabled ? "true" : "false"}
       data-cache-hits={renderReport?.requestCacheHitTiles ?? 0}
       data-visible-tiles={renderReport?.visibleTileCount ?? 0}
       data-request-cpu-tiles={renderReport?.requestCpuCompiledTiles ?? 0}
       data-request-gpu-tiles={renderReport?.requestGpuDispatchedTiles ?? 0}
       data-samples-per-axis={renderReport?.samplesPerAxis ?? 0}
+      data-reference-bytes={renderReport?.referenceBytes ?? 0}
+      data-gpu-sample-bytes={renderReport?.gpuSampleBytes ?? 0}
+      data-readback-bytes={renderReport?.readbackBytes ?? 0}
+      data-request-readback-bytes={renderReport?.requestReadbackBytes ?? 0}
+      data-resident-bytes={renderReport?.residentBytes ?? 0}
       data-panes={state.panes.join(",")}
       data-canonical-published={canonicalReport?.publishedChunks ?? 0}
       data-canonical-requested={canonicalReport?.requestedChunks ?? 0}
@@ -1497,7 +1516,9 @@ function Diagnostics({
             ? `${canonical.admissionFrames} frames · max ${canonical.maxFrameAdmissions}/frame`
             : "—"}
         />
-        <Metric label="CPU compile / frame" value={formatMs(report?.cpuReferenceMs)} />
+        <Metric label="CPU reference / frame" value={formatMs(report?.cpuReferenceMs)} />
+        <Metric label="CPU vegetation / frame" value={formatMs(report?.cpuVegetationMs)} />
+        <Metric label="CPU pack + upload / frame" value={formatMs(report?.cpuPackUploadMs)} />
         <Metric label="Encode + submit" value={formatMs(report?.encodeSubmitMs)} />
         <Metric label="CPU coarse" value={formatMs(report?.cpuCoarseReadyMs)} />
         <Metric label="GPU coarse + readback" value={formatMs(report?.gpuCoarseReadyMs)} />
@@ -1604,6 +1625,34 @@ function Diagnostics({
             ? `${formatInteger(report.vegetationSummaryTileCount)} summary · ${
                 formatInteger(report.vegetationRecordTileCount)
               } records · ${formatInteger(report.vegetationAggregatedTileCount)} aggregated`
+            : "—"}
+        />
+        <Metric
+          label="Vegetation summary lanes"
+          value={report
+            ? `${formatInteger(report.cpuVegetationSummaryTileCount)} CPU · ${
+                formatInteger(report.gpuVegetationSummaryTileCount)
+              } GPU`
+            : "—"}
+        />
+        <Metric
+          label="CPU Cover work"
+          value={report
+            ? `${formatInteger(report.requestCpuTerrainSampleEvaluations)} terrain · ${
+                formatInteger(report.requestCpuForestIntentEvaluations)
+              } forest · ${
+                formatInteger(report.requestCpuForestFootprintSummaries)
+              } footprints`
+            : "—"}
+        />
+        <Metric
+          label="GPU Cover work"
+          value={report
+            ? `${formatInteger(report.requestGpuTerrainSampleEvaluations)} terrain · ${
+                formatInteger(report.requestGpuForestIntentEvaluations)
+              } forest · ${
+                formatInteger(report.requestGpuForestFootprintSummaries)
+              } footprints`
             : "—"}
         />
         <Metric

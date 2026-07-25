@@ -219,24 +219,108 @@ try {
   await page.screenshot({ path: errorCapture, fullPage: true });
 
   const localMapRevision = Number(await shell.getAttribute("data-render-revision"));
-  await page.getByLabel("Diagnostic layer").selectOption("continentalness");
+  await page.getByLabel("LOD content checkpoint").selectOption("cover");
+  await waitForRevision(shell, localMapRevision);
+  const coverRevision = Number(await shell.getAttribute("data-render-revision"));
+  await page.getByLabel("Diagnostic layer").selectOption("terrain");
+  await waitForRevision(shell, coverRevision);
+  const continentStartRevision = Number(await shell.getAttribute("data-render-revision"));
   for (let index = 0; index < 6; index += 1) {
     await page.getByRole("button", { name: "Zoom out" }).click();
   }
-  await waitForRevision(shell, localMapRevision);
+  await waitForRevision(shell, continentStartRevision);
+  let vegetationRevision = Number(await shell.getAttribute("data-render-revision"));
+  await page.getByRole("button", { name: "Cold current view" }).click();
+  await waitForRevision(shell, vegetationRevision);
   const continentScaleMetrics = await readComparisonMetrics(shell);
-  assertLargeFieldMetrics(continentScaleMetrics, "65.5 km continent");
+  assertLargeFieldMetrics(continentScaleMetrics, "65.5 km Cover");
+  const vegetationScaleCold = await readVegetationScaleBenchmark(shell);
+  assertVegetationScaleBenchmark(vegetationScaleCold, "65.5 km cold Cover", {
+    expectCpu: true,
+    expectCold: true,
+  });
   await page.locator("canvas[aria-label='Live GPU terrain preview']").screenshot({
     path: continentScaleCapture,
   });
 
+  vegetationRevision = Number(await shell.getAttribute("data-render-revision"));
+  await page.getByRole("button", { name: "Zoom in" }).click();
+  await waitForRevision(shell, vegetationRevision);
+  vegetationRevision = Number(await shell.getAttribute("data-render-revision"));
+  await page.getByRole("button", { name: "Zoom out" }).click();
+  await waitForRevision(shell, vegetationRevision);
+  const vegetationScaleWarm = await readVegetationScaleBenchmark(shell);
+  if (vegetationScaleWarm.cacheHits <= 0) {
+    throw new Error(
+      `65.5 km warm Cover did not reuse cached tiles: ${
+        JSON.stringify(vegetationScaleWarm)
+      }`,
+    );
+  }
+
+  await page.getByRole("button", { name: "Cache off", exact: true }).click();
+  vegetationRevision = Number(await shell.getAttribute("data-render-revision"));
+  await page.getByRole("button", { name: "Cold current view" }).click();
+  await waitForRevision(shell, vegetationRevision);
+  const vegetationScaleCacheOff = await readVegetationScaleBenchmark(shell);
+  assertVegetationScaleBenchmark(vegetationScaleCacheOff, "65.5 km cache-off Cover", {
+    expectCpu: true,
+    expectCacheOff: true,
+  });
+
   const finalUrl = page.url();
-  if (!finalUrl.includes("layer=continentalness")
+  if (!finalUrl.includes("layer=terrain")
       || !finalUrl.includes("view=map")
       || !finalUrl.includes("blocks=65536")
-      || !finalUrl.includes("detail=auto")) {
+      || !finalUrl.includes("detail=auto")
+      || !finalUrl.includes("stage=cover")) {
     throw new Error(`Terrain Lab controls did not round-trip through the URL: ${finalUrl}`);
   }
+
+  const gpuOnlyUrl = new URL(finalUrl);
+  gpuOnlyUrl.searchParams.set("panes", "gpu");
+  await page.goto(gpuOnlyUrl.href, { waitUntil: "networkidle" });
+  await page.locator("[data-testid='lab-status']").waitFor({ state: "visible" });
+  await waitForTerrainTarget(shell);
+  const vegetationScaleGpuOnly = await readVegetationScaleBenchmark(shell);
+  assertVegetationScaleBenchmark(vegetationScaleGpuOnly, "65.5 km GPU-only Cover", {
+    expectCpu: false,
+  });
+  const gpuIndependentCapture =
+    `/tmp/mclone-terrain-lab-${label}-vegetation-cover-gpu-independent.png`;
+  await page.locator("canvas[aria-label='Live GPU terrain preview']").screenshot({
+    path: gpuIndependentCapture,
+  });
+  let gpuRevision = Number(await shell.getAttribute("data-render-revision"));
+  await page.getByLabel("Diagnostic layer").selectOption("forests");
+  await waitForTerrainTarget(shell, gpuRevision);
+  const forestScaleCaptures = {};
+  for (const spacing of [1024, 512, 256]) {
+    gpuRevision = Number(await shell.getAttribute("data-render-revision"));
+    await page.getByLabel("Terrain resolution").selectOption(String(spacing));
+    await waitForTerrainTarget(shell, gpuRevision, false);
+    const effectiveSpacing = Number(await shell.getAttribute("data-effective-spacing"));
+    if (effectiveSpacing !== spacing) {
+      throw new Error(
+        `Forest scale matrix requested 1:${spacing}, got 1:${effectiveSpacing}`,
+      );
+    }
+    const capture =
+      `/tmp/mclone-terrain-lab-${label}-forest-summary-map-${spacing}.png`;
+    await page.locator("canvas[aria-label='Live GPU terrain preview']").screenshot({
+      path: capture,
+    });
+    forestScaleCaptures[`map${spacing}`] = capture;
+  }
+  gpuRevision = Number(await shell.getAttribute("data-render-revision"));
+  await page.getByRole("button", { name: "3D terrain", exact: true }).click();
+  await waitForTerrainTarget(shell, gpuRevision, false);
+  const forestThreeDimensionalCapture =
+    `/tmp/mclone-terrain-lab-${label}-forest-summary-3d-256.png`;
+  await page.locator("canvas[aria-label='Live GPU terrain preview']").screenshot({
+    path: forestThreeDimensionalCapture,
+  });
+  forestScaleCaptures.threeDimensional256 = forestThreeDimensionalCapture;
 
   await page.evaluate(() => {
     const race = [];
@@ -316,6 +400,8 @@ try {
       canvasCapture,
       continentScaleCapture,
       errorCapture,
+      forestScaleCaptures,
+      gpuIndependentCapture,
       orbitCapture,
       pageCapture,
       stressRaceCapture,
@@ -327,6 +413,12 @@ try {
     largeCanonical: largeCanonicalReport,
     stressBenchmark,
     stressMetrics,
+    vegetationScale: {
+      cacheOff: vegetationScaleCacheOff,
+      cold: vegetationScaleCold,
+      gpuOnly: vegetationScaleGpuOnly,
+      warm: vegetationScaleWarm,
+    },
     target: externalBaseUrl ? "hosted" : "local-preview",
     launch: {
       autoConfiguredWayland: launch.autoConfiguredWayland,
@@ -660,6 +752,23 @@ async function waitForStressRace(shell, previousRevision) {
   );
 }
 
+async function waitForTerrainTarget(shell, previousRevision = 0, requireWork = true) {
+  await shell.page().waitForFunction(
+    ([previous, workRequired]) => {
+      const element = document.querySelector(".appShell");
+      return Number(element?.getAttribute("data-render-revision") ?? "0") > previous
+        && element?.getAttribute("data-target-ready") === "true"
+        && element?.getAttribute("data-gpu-target-ready") === "true"
+        && (!workRequired
+          || (Number(element?.getAttribute("data-request-gpu-tiles") ?? "0") > 0
+            && Number(element?.getAttribute("data-gpu-target-ms") ?? "0") > 0))
+        && document.querySelector("[data-testid='lab-status']")
+          ?.textContent?.toLowerCase().includes("ready");
+    },
+    [previousRevision, requireWork],
+  );
+}
+
 async function settlePaint(page) {
   await page.evaluate(() => new Promise((resolve) => {
     requestAnimationFrame(() => requestAnimationFrame(resolve));
@@ -682,6 +791,104 @@ async function readComparisonMetrics(shell) {
     oceanAgreement: await numericAttribute(shell, "data-ocean-agreement"),
     materialAgreement: await numericAttribute(shell, "data-material-agreement"),
   };
+}
+
+async function readVegetationScaleBenchmark(shell) {
+  const attributes = {
+    cacheEnabled: "data-cache-enabled",
+    cacheHits: "data-cache-hits",
+    cpuForestEvaluations: "data-cpu-forest-evaluations",
+    cpuFootprintSummaries: "data-cpu-footprint-summaries",
+    cpuLatticePoints: "data-cpu-lattice-points",
+    cpuPackUploadMs: "data-cpu-pack-upload-request-ms",
+    cpuReferenceMs: "data-cpu-request-ms",
+    cpuSummaryTiles: "data-cpu-vegetation-summary-tiles",
+    cpuTerrainEvaluations: "data-cpu-terrain-evaluations",
+    cpuTiles: "data-request-cpu-tiles",
+    cpuVegetationMs: "data-cpu-vegetation-request-ms",
+    effectiveSpacing: "data-effective-spacing",
+    footprintBlocks: "data-footprint-blocks",
+    gpuForestEvaluations: "data-gpu-forest-evaluations",
+    gpuFootprintSummaries: "data-gpu-footprint-summaries",
+    gpuLatticePoints: "data-gpu-lattice-points",
+    gpuSampleBytes: "data-gpu-sample-bytes",
+    gpuSummaryTiles: "data-gpu-vegetation-summary-tiles",
+    gpuTargetMs: "data-gpu-target-ms",
+    gpuTerrainEvaluations: "data-gpu-terrain-evaluations",
+    gpuTiles: "data-request-gpu-tiles",
+    readbackBytes: "data-request-readback-bytes",
+    recordTiles: "data-vegetation-record-tiles",
+    referenceBytes: "data-reference-bytes",
+    residentBytes: "data-resident-bytes",
+    retainedVegetationCells: "data-retained-vegetation-cells",
+    treeInstances: "data-tree-instances",
+    vegetationCellRequests: "data-vegetation-cell-requests",
+    visibleTiles: "data-visible-tiles",
+  };
+  const benchmark = {};
+  for (const [key, attribute] of Object.entries(attributes)) {
+    if (key === "cacheEnabled") {
+      benchmark[key] = await shell.getAttribute(attribute);
+    } else {
+      benchmark[key] = await numericAttribute(shell, attribute);
+    }
+  }
+  return benchmark;
+}
+
+function assertVegetationScaleBenchmark(benchmark, label, {
+  expectCpu,
+  expectCacheOff = false,
+  expectCold = false,
+}) {
+  const expectedGpuLattice = benchmark.gpuTiles * 65 * 65;
+  if (benchmark.footprintBlocks !== 65_536
+      || benchmark.effectiveSpacing < 8
+      || (benchmark.effectiveSpacing & (benchmark.effectiveSpacing - 1)) !== 0
+      || benchmark.gpuTiles <= 0
+      || benchmark.gpuLatticePoints !== expectedGpuLattice
+      || benchmark.gpuTerrainEvaluations !== benchmark.gpuLatticePoints * 5
+      || benchmark.gpuForestEvaluations !== benchmark.gpuLatticePoints * 4
+      || benchmark.gpuFootprintSummaries !== benchmark.gpuLatticePoints
+      || benchmark.gpuSummaryTiles <= 0
+      || benchmark.gpuTargetMs <= 0
+      || benchmark.gpuSampleBytes <= 0
+      || benchmark.readbackBytes <= 0
+      || benchmark.recordTiles !== 0
+      || benchmark.treeInstances !== 0
+      || benchmark.vegetationCellRequests !== 0
+      || benchmark.retainedVegetationCells !== 0) {
+    throw new Error(`${label} violated GPU summary bounds: ${JSON.stringify(benchmark)}`);
+  }
+  if (expectCpu) {
+    const expectedCpuLattice = benchmark.cpuTiles * 65 * 65;
+    if (benchmark.cpuTiles <= 0
+        || benchmark.cpuLatticePoints !== expectedCpuLattice
+        || benchmark.cpuTerrainEvaluations !== benchmark.cpuLatticePoints * 5
+        || benchmark.cpuForestEvaluations !== benchmark.cpuLatticePoints * 4
+        || benchmark.cpuFootprintSummaries !== benchmark.cpuLatticePoints
+        || benchmark.cpuSummaryTiles <= 0
+        || benchmark.cpuReferenceMs <= 0
+        || benchmark.cpuPackUploadMs <= 0
+        || benchmark.referenceBytes <= 0) {
+      throw new Error(`${label} violated CPU summary bounds: ${JSON.stringify(benchmark)}`);
+    }
+  } else if (benchmark.cpuTiles !== 0
+      || benchmark.cpuLatticePoints !== 0
+      || benchmark.cpuTerrainEvaluations !== 0
+      || benchmark.cpuForestEvaluations !== 0
+      || benchmark.cpuFootprintSummaries !== 0
+      || benchmark.cpuSummaryTiles !== 0
+      || benchmark.referenceBytes !== 0) {
+    throw new Error(`${label} waited for CPU vegetation: ${JSON.stringify(benchmark)}`);
+  }
+  if (expectCacheOff
+      && (benchmark.cacheEnabled !== "false" || benchmark.cacheHits !== 0)) {
+    throw new Error(`${label} did not stay cold with cache off: ${JSON.stringify(benchmark)}`);
+  }
+  if (expectCold && benchmark.cacheHits !== 0) {
+    throw new Error(`${label} inherited cached tiles: ${JSON.stringify(benchmark)}`);
+  }
 }
 
 function assertLargeFieldMetrics(metrics, label) {

@@ -64,6 +64,8 @@ export interface TerrainLabRenderReport {
   sampleCount: number;
   vertexCount: number;
   vegetationSummaryTileCount: number;
+  cpuVegetationSummaryTileCount: number;
+  gpuVegetationSummaryTileCount: number;
   vegetationRecordTileCount: number;
   vegetationAggregatedTileCount: number;
   treeInstanceCount: number;
@@ -94,6 +96,14 @@ export interface TerrainLabRenderReport {
   requestCpuCompiledTiles: number;
   requestGpuDispatchedTiles: number;
   requestCacheHitTiles: number;
+  requestCpuSampleLatticePoints: number;
+  requestCpuTerrainSampleEvaluations: number;
+  requestCpuForestIntentEvaluations: number;
+  requestCpuForestFootprintSummaries: number;
+  requestGpuSampleLatticePoints: number;
+  requestGpuTerrainSampleEvaluations: number;
+  requestGpuForestIntentEvaluations: number;
+  requestGpuForestFootprintSummaries: number;
   evictedTilesTotal: number;
   source: string;
   view: string;
@@ -106,6 +116,8 @@ export interface TerrainLabRenderReport {
   cameraYaw: number;
   cameraPitch: number;
   cpuReferenceMs: number;
+  cpuVegetationMs: number;
+  cpuPackUploadMs: number;
   encodeSubmitMs: number;
   requestMs: number;
   coarseReadyMs: number | null;
@@ -115,9 +127,12 @@ export interface TerrainLabRenderReport {
   gpuCoarseReadyMs: number | null;
   gpuTargetReadyMs: number | null;
   requestCpuReferenceMs: number;
+  requestCpuVegetationMs: number;
+  requestCpuPackUploadMs: number;
   referenceBytes: number;
   gpuSampleBytes: number;
   readbackBytes: number;
+  requestReadbackBytes: number;
   residentBytes: number;
   comparisonPending: boolean;
   staleResultCount: number;
