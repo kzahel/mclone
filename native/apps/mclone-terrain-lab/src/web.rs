@@ -38,14 +38,33 @@ pub struct TerrainLabCanonicalCompiler {
 impl TerrainLabCanonicalCompiler {
     #[wasm_bindgen(constructor)]
     pub fn new(seed: String, stage: String) -> Result<TerrainLabCanonicalCompiler, JsValue> {
+        Self::with_profile(
+            seed,
+            TerrainPreviewProfile::McloneOverworldV1.label().to_owned(),
+            stage,
+        )
+    }
+
+    #[wasm_bindgen(js_name = withProfile)]
+    pub fn with_profile(
+        seed: String,
+        profile: String,
+        stage: String,
+    ) -> Result<TerrainLabCanonicalCompiler, JsValue> {
         let seed = seed
             .trim()
             .parse::<i64>()
             .map_err(|error| js_error(format!("invalid signed 64-bit seed {seed:?}: {error}")))?;
+        let profile = TerrainPreviewProfile::parse_label(&profile).map_err(js_error)?;
         let stage = canonical_terrain_stage(&stage).map_err(js_error)?;
         Ok(Self {
-            compiler: CanonicalTerrainCompiler::new(seed, stage),
+            compiler: CanonicalTerrainCompiler::new_with_profile(profile, seed, stage),
         })
+    }
+
+    #[wasm_bindgen(getter)]
+    pub fn profile(&self) -> String {
+        self.compiler.profile().label().to_owned()
     }
 
     #[wasm_bindgen(getter)]
@@ -79,6 +98,11 @@ pub struct TerrainLabCanonicalChunkPayload {
 
 #[wasm_bindgen(js_class = CanonicalTerrainChunkPayload)]
 impl TerrainLabCanonicalChunkPayload {
+    #[wasm_bindgen(getter)]
+    pub fn profile(&self) -> String {
+        self.chunk.profile.label().to_owned()
+    }
+
     #[wasm_bindgen(getter, js_name = chunkX)]
     pub fn chunk_x(&self) -> i32 {
         self.chunk.chunk_x

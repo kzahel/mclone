@@ -2,8 +2,11 @@ use mclone_core::{CHUNK_WIDTH, ChunkPos};
 use mclone_worldgen::block::{AIR, WATER};
 use mclone_worldgen::levelgen::{
     GeneratedChunk, McloneOverworldFeatureDependencyCache,
-    McloneOverworldFeatureDependencyCacheReport, generate_mclone_overworld_surface_chunk,
+    McloneOverworldFeatureDependencyCacheReport, OverworldFeatureDependencyCache,
+    OverworldFeatureDependencyCacheReport, generate_mclone_overworld_surface_chunk,
+    generate_overworld_surface_chunk,
 };
+use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
 
 pub const CANONICAL_TERRAIN_MAX_CHUNK_RADIUS: u32 = 4;
 
@@ -31,6 +34,7 @@ impl Default for CanonicalTerrainVisibility {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CanonicalTerrainChunk {
+    pub profile: TerrainPreviewProfile,
     pub seed: i64,
     pub stage: CanonicalTerrainStage,
     pub chunk_x: i32,
@@ -40,18 +44,20 @@ pub struct CanonicalTerrainChunk {
     pub blocks: Vec<u8>,
     pub biomes: Vec<i32>,
     pub fingerprint: u64,
-    pub dependency_cache: McloneOverworldFeatureDependencyCacheReport,
+    pub dependency_cache: CanonicalTerrainDependencyCacheReport,
 }
 
 impl CanonicalTerrainChunk {
     fn from_generated(
+        profile: TerrainPreviewProfile,
         seed: i64,
         stage: CanonicalTerrainStage,
         chunk: GeneratedChunk,
-        dependency_cache: McloneOverworldFeatureDependencyCacheReport,
+        dependency_cache: CanonicalTerrainDependencyCacheReport,
     ) -> Self {
         let fingerprint = canonical_terrain_fingerprint(&chunk);
         Self {
+            profile,
             seed,
             stage,
             chunk_x: chunk.chunk_x,
@@ -84,20 +90,81 @@ pub fn canonical_terrain_presentation_blocks(
         .collect()
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct CanonicalTerrainDependencyCacheReport {
+    pub requested_dependency_chunks: usize,
+    pub cache_hits: usize,
+    pub generated_dependency_chunks: usize,
+    pub retained_dependency_chunks: usize,
+}
+
+impl From<McloneOverworldFeatureDependencyCacheReport> for CanonicalTerrainDependencyCacheReport {
+    fn from(report: McloneOverworldFeatureDependencyCacheReport) -> Self {
+        Self {
+            requested_dependency_chunks: report.requested_dependency_chunks,
+            cache_hits: report.cache_hits,
+            generated_dependency_chunks: report.generated_dependency_chunks,
+            retained_dependency_chunks: report.retained_dependency_chunks,
+        }
+    }
+}
+
+impl From<OverworldFeatureDependencyCacheReport> for CanonicalTerrainDependencyCacheReport {
+    fn from(report: OverworldFeatureDependencyCacheReport) -> Self {
+        Self {
+            requested_dependency_chunks: report.requested_dependency_chunks,
+            cache_hits: report.cache_hits,
+            generated_dependency_chunks: report.generated_dependency_chunks,
+            retained_dependency_chunks: report.retained_dependency_chunks,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub struct CanonicalTerrainCompiler {
+    profile: TerrainPreviewProfile,
     seed: i64,
     stage: CanonicalTerrainStage,
-    feature_dependencies: McloneOverworldFeatureDependencyCache,
+    feature_dependencies: CanonicalTerrainFeatureDependencies,
+}
+
+#[derive(Debug)]
+enum CanonicalTerrainFeatureDependencies {
+    Mclone(McloneOverworldFeatureDependencyCache),
+    Vanilla(OverworldFeatureDependencyCache),
 }
 
 impl CanonicalTerrainCompiler {
     pub fn new(seed: i64, stage: CanonicalTerrainStage) -> Self {
+        Self::new_with_profile(TerrainPreviewProfile::McloneOverworldV1, seed, stage)
+    }
+
+    pub fn new_with_profile(
+        profile: TerrainPreviewProfile,
+        seed: i64,
+        stage: CanonicalTerrainStage,
+    ) -> Self {
         Self {
+            profile,
             seed,
             stage,
-            feature_dependencies: McloneOverworldFeatureDependencyCache::new(),
+            feature_dependencies: match profile {
+                TerrainPreviewProfile::McloneOverworldV1 => {
+                    CanonicalTerrainFeatureDependencies::Mclone(
+                        McloneOverworldFeatureDependencyCache::new(),
+                    )
+                }
+                TerrainPreviewProfile::VanillaOverworld => {
+                    CanonicalTerrainFeatureDependencies::Vanilla(
+                        OverworldFeatureDependencyCache::new(),
+                    )
+                }
+            },
         }
+    }
+
+    pub fn profile(&self) -> TerrainPreviewProfile {
+        self.profile
     }
 
     pub fn seed(&self) -> i64 {
@@ -109,35 +176,65 @@ impl CanonicalTerrainCompiler {
     }
 
     pub fn retained_dependency_chunks(&self) -> usize {
-        self.feature_dependencies.retained_chunk_count()
+        match &self.feature_dependencies {
+            CanonicalTerrainFeatureDependencies::Mclone(cache) => cache.retained_chunk_count(),
+            CanonicalTerrainFeatureDependencies::Vanilla(cache) => cache.retained_chunk_count(),
+        }
     }
 
     pub fn clear_cache(&mut self) {
-        self.feature_dependencies.clear();
+        match &mut self.feature_dependencies {
+            CanonicalTerrainFeatureDependencies::Mclone(cache) => cache.clear(),
+            CanonicalTerrainFeatureDependencies::Vanilla(cache) => cache.clear(),
+        }
     }
 
     pub fn compile(&mut self, chunk_x: i32, chunk_z: i32) -> CanonicalTerrainChunk {
         match self.stage {
             CanonicalTerrainStage::Surface => CanonicalTerrainChunk::from_generated(
+                self.profile,
                 self.seed,
                 self.stage,
-                generate_mclone_overworld_surface_chunk(self.seed, chunk_x, chunk_z),
-                McloneOverworldFeatureDependencyCacheReport::default(),
+                match self.profile {
+                    TerrainPreviewProfile::McloneOverworldV1 => {
+                        generate_mclone_overworld_surface_chunk(self.seed, chunk_x, chunk_z)
+                    }
+                    TerrainPreviewProfile::VanillaOverworld => {
+                        generate_overworld_surface_chunk(self.seed, chunk_x, chunk_z)
+                    }
+                },
+                CanonicalTerrainDependencyCacheReport::default(),
             ),
             CanonicalTerrainStage::FinalFeatures => {
                 let position = ChunkPos::new(chunk_x, chunk_z);
-                let mut batch = self
-                    .feature_dependencies
-                    .generate_features_chunks(self.seed, [position]);
-                let chunk = batch
-                    .chunks
-                    .remove(&position)
-                    .expect("the feature batch returns every requested chunk");
+                let (chunk, cache_report) = match &mut self.feature_dependencies {
+                    CanonicalTerrainFeatureDependencies::Mclone(cache) => {
+                        let mut batch = cache.generate_features_chunks(self.seed, [position]);
+                        (
+                            batch
+                                .chunks
+                                .remove(&position)
+                                .expect("the feature batch returns every requested chunk"),
+                            batch.cache_report.into(),
+                        )
+                    }
+                    CanonicalTerrainFeatureDependencies::Vanilla(cache) => {
+                        let mut batch = cache.generate_features_chunks(self.seed, [position]);
+                        (
+                            batch
+                                .chunks
+                                .remove(&position)
+                                .expect("the feature batch returns every requested chunk"),
+                            batch.cache_report.into(),
+                        )
+                    }
+                };
                 CanonicalTerrainChunk::from_generated(
+                    self.profile,
                     self.seed,
                     self.stage,
                     chunk,
-                    batch.cache_report,
+                    cache_report,
                 )
             }
         }
@@ -238,6 +335,7 @@ mod tests {
     #[test]
     fn visibility_changes_presentation_without_changing_identity() {
         let chunk = CanonicalTerrainChunk {
+            profile: TerrainPreviewProfile::McloneOverworldV1,
             seed: 1,
             stage: CanonicalTerrainStage::FinalFeatures,
             chunk_x: 0,
@@ -247,7 +345,7 @@ mod tests {
             blocks: vec![STONE, OAK_LOG, OAK_LEAVES, SEAGRASS],
             biomes: Vec::new(),
             fingerprint: 42,
-            dependency_cache: McloneOverworldFeatureDependencyCacheReport::default(),
+            dependency_cache: CanonicalTerrainDependencyCacheReport::default(),
         };
         let presented = chunk.presentation_blocks(CanonicalTerrainVisibility {
             water: true,
@@ -257,5 +355,41 @@ mod tests {
         assert_eq!(presented, vec![STONE, AIR, AIR, WATER]);
         assert_eq!(chunk.blocks, vec![STONE, OAK_LOG, OAK_LEAVES, SEAGRASS]);
         assert_eq!(chunk.fingerprint, 42);
+    }
+
+    #[test]
+    fn vanilla_surface_compiler_returns_production_chunk_unchanged() {
+        let seed = 12_345;
+        let mut compiler = CanonicalTerrainCompiler::new_with_profile(
+            TerrainPreviewProfile::VanillaOverworld,
+            seed,
+            CanonicalTerrainStage::Surface,
+        );
+        let result = compiler.compile(5, 115);
+        let direct = generate_overworld_surface_chunk(seed, 5, 115);
+
+        assert_eq!(result.profile, TerrainPreviewProfile::VanillaOverworld);
+        assert_eq!(result.blocks, direct.blocks());
+        assert_eq!(result.biomes, direct.biomes());
+        assert_eq!(result.fingerprint, canonical_terrain_fingerprint(&direct));
+    }
+
+    #[test]
+    fn vanilla_final_compiler_returns_production_chunk_unchanged() {
+        use mclone_worldgen::levelgen::generate_overworld_features_chunk;
+
+        let seed = 16;
+        let mut compiler = CanonicalTerrainCompiler::new_with_profile(
+            TerrainPreviewProfile::VanillaOverworld,
+            seed,
+            CanonicalTerrainStage::FinalFeatures,
+        );
+        let result = compiler.compile(0, 0);
+        let direct = generate_overworld_features_chunk(seed, 0, 0);
+
+        assert_eq!(result.blocks, direct.blocks());
+        assert_eq!(result.biomes, direct.biomes());
+        assert_eq!(result.fingerprint, canonical_terrain_fingerprint(&direct));
+        assert!(result.dependency_cache.generated_dependency_chunks > 0);
     }
 }
