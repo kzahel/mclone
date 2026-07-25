@@ -633,14 +633,14 @@ The existing authored-only fixture path in
 is useful evidence that authored chunks and cow/chicken entity records can flow
 through shared persistence. It is not the target farmstead authoring format.
 
-## Far LOD Contract
+## Distant Presentation Contract
 
-Current Far LOD is a non-authoritative surface shell. Its documented first
-profiles omit exact features and structures, and its visibility profile drops
-structures and block edits. Therefore:
+The rejected chunk-based Far LOD is pending removal under Tactical
+[`245`](../tactical/245-retire-chunk-far-lod-runtime.md). Its documented
+profiles omit exact features, structures, and edits. Therefore:
 
 - the farmstead landscape, buildings, special trees, and residents are absent
-  from current Far LOD;
+  from that historical runtime;
 - avoiding ordinary trees inside the site makes near composition deterministic
   but does not by itself solve far representation;
 - the first farmstead may accept appearance at the normal-terrain handoff, and
@@ -650,12 +650,14 @@ structures and block edits. Therefore:
 
 A later **settlement LOD proxy** may derive a coarse graded surface/water patch
 and landmark silhouettes for the barn, chapel, and focal oak from the same site
-plan. That proxy remains presentation-only and must obey Far LOD's real/LOD
-mutual-exclusion and settle contracts. It is explicitly deferred; do not add a
-farmstead-specific second authority world or ad hoc app-rendered model.
+plan. That proxy remains presentation-only and must use the spatial identity,
+coverage ledger, and exact/procedural handoff of a future multiscale terrain
+architecture. It must not preserve the current `ChunkPos + level` coordinator.
+It is explicitly deferred; do not add a farmstead-specific second authority
+world or ad hoc app-rendered model.
 
 See [`far-lod.md`](far-lod.md) and
-[`../lod-architecture.md`](../lod-architecture.md).
+[`gpu-procedural-terrain.md`](gpu-procedural-terrain.md).
 
 ## Implementation Tracking Model
 
@@ -727,7 +729,7 @@ approved; do not reserve a block of numbers in advance.
 | `FS-09` | cross-profile and topology adaptation | `deferred` | same engine contract accepted; first composition must land before breadth | Flat Grass, Small Island, Mclone, and explicit Overworld-overlay cases prove fit/fallback/rejection; admitted topology cases pass |
 | `FS-10` | maximal parcels, church, outbuildings, richer animals, and visual mill | `deferred` | named destination and optional parcels are preserved | additions pass composition, persistence, and performance reviews without replacing the first hierarchy |
 | `FS-11` | functional farm simulation and machinery | `deferred` | deliberately outside first visual/worldgen acceptance | shared gameplay contracts own crops, roles, power, inputs, and outputs |
-| `FS-12` | settlement Far LOD proxy | `deferred` | current Far LOD honestly omits structures and edits | shared presentation-only proxy passes real/LOD exclusion and settle evidence |
+| `FS-12` | settlement distant-presentation proxy | `deferred` | rejected chunk Far LOD omits structures and edits and is pending removal | a future multiscale terrain architecture exists, then a shared presentation-only proxy passes its spatial handoff and coverage gates |
 
 The `ready` rows are not an instruction to start all of them. They identify
 work that can be scheduled without inventing a missing predecessor. The topic's
@@ -935,7 +937,8 @@ each composition expansion before moving on.
   central start; allow a wider read-only scenic survey ring.
 - Allow a visual watermill before animation or functional machinery, and keep
   gameplay mechanics outside world-generation ownership.
-- Record current Far LOD omission honestly and defer a shared settlement proxy.
+- Record the retired Far LOD omission honestly and defer a shared settlement
+  proxy until a new multiscale terrain architecture exists.
 - Start building art as complete authored stamps with controlled transforms,
   semantic themes, markers, and bounded optional modules; do not require final
   terrain or the full structure lifecycle for that standalone iteration.

@@ -2,13 +2,15 @@
 
 Status: active 2026-07-25. Terrain Lab proxy presentation is landed; coarse
 hierarchy, footprint summary, budget, and cache proof are the current gate.
+The chunk-based in-game adapter is rejected and scheduled for removal by
+Tactical 245.
 
 Topic: `lod-native-vegetation`
 
 Workstream: shared footprint-scale forest summaries, bounded stable tree-proxy
 admission, Terrain Lab CPU/GPU cost and cache proof, multi-scale rendered
-evidence, and a quarantined compatibility adapter for the current in-game Far
-LOD system.
+evidence, and historical evidence from a rejected in-game compatibility
+adapter.
 
 ## Objective
 
@@ -90,9 +92,9 @@ a view-specific renderer.
 
 Commit `b1db968c` implements this behavior, but it is a disposable
 compatibility adapter rather than the destination architecture. Do not expand
-or close it out while the Terrain Lab hierarchy/budget gate is open. A later
-in-game LOD tactical may retain, replace, quarantine, or revert it after the
-representation and terrain-LOD architecture are chosen deliberately.
+or close it out. Tactical
+[`245-retire-chunk-far-lod-runtime.md`](245-retire-chunk-far-lod-runtime.md)
+removes it with the rest of the chunk-granular in-game system.
 
 ## Shared Ownership
 
@@ -267,17 +269,17 @@ Required evidence:
 - inspected `/tmp` captures at the first working 65.5 km `Cover` milestone and
   after any filtering change.
 
-### Slice 4: current in-game compatibility adapter — landed, paused
+### Slice 4: rejected in-game compatibility adapter — landed, removal planned
 
 - [x] Add local forest tint and clipped proxy volumes to Mclone Far LOD tiles.
 - [x] Reuse bounded native/browser worker vegetation caches.
 - [x] Prove cross-chunk clipping, level admission, source invalidation,
   Far-LOD-off, and non-Mclone byte stability.
-- [ ] Do not expand, polish, or treat this adapter as final architecture while
-  Slice 3 remains open.
+- [x] Stop expanding or polishing this adapter.
+- [ ] Remove it through Tactical 245.
 
-Gate: none for the target architecture. Commit `b1db968c` is retained only as
-a reversible compatibility experiment.
+Gate: none for the target architecture. Commit `b1db968c` is historical
+evidence until Tactical 245 deletes its runtime path.
 
 Recorded adapter facts:
 
@@ -299,8 +301,6 @@ Recorded adapter facts:
 - [ ] Choose whether a future in-game LOD system consumes these summaries and
   records directly, needs a different terrain hierarchy, or should omit
   individual vegetation beyond a nearer distance.
-- [ ] Decide explicitly whether to retain, quarantine behind compatibility
-  scope, replace, or revert `b1db968c`.
 - [ ] Open a separate in-game terrain-LOD tactical if architecture changes are
   warranted; do not continue them inside this Terrain Lab proof.
 

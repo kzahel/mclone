@@ -1,5 +1,9 @@
 # 162: Real-Chunk LOD Reduction Draft
 
+Supersession note 2026-07-25: do not resume this design. Tactical
+[`245`](245-retire-chunk-far-lod-runtime.md) removes the chunk-based LOD
+runtime and retains this file only as historical evidence.
+
 Status: deferred at Slice 4 by user direction on 2026-07-11. There is no
 current commitment to resume reduced-real, persisted-source, reducer, extents,
 or protocol work after Tactical 172; basic pure-synthetic far-LOD correctness

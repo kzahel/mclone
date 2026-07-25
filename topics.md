@@ -194,3 +194,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   real local Minecraft comparison, opt-in numbered diagnostics, named shared
   visual profiles, derived detail representations, and one canonical Texture
   Lab promotion lifecycle
+- `retire-chunk-far-lod` — aggressive removal of the experimental
+  chunk-granular in-game Far LOD vertical feature while retaining only worker,
+  budget, upload, and exact-render machinery with active non-LOD consumers

@@ -4,7 +4,7 @@ Topic: `lod-native-vegetation`
 
 Status: Terrain Lab hierarchy proof active 2026-07-25. Exact records and the
 initial Lab proxy path are landed; the current in-game Far LOD adapter is
-quarantined pending coarse representation proof.
+rejected and scheduled for removal by Tactical 245.
 
 ## Scope
 
@@ -14,7 +14,7 @@ worldgen-owned semantic plan that can serve:
 
 - exact canonical chunk generation;
 - Terrain Lab CPU and GPU LOD panes;
-- future in-game Far LOD;
+- a future multiscale in-game terrain presentation;
 - overview maps, minimaps, and tabletop views; and
 - later natural-feature overlays that need stable identity across detail
   levels.
@@ -146,7 +146,7 @@ lane evaluates 109,850 lattice points, 549,250 terrain points, 439,400 forest
 intents, and 109,850 footprint summaries with zero record/cache traffic.
 GPU-only auto detail publishes spacing `256` with every CPU counter at zero.
 
-### Far LOD
+### Rejected in-game compatibility adapter
 
 The current synthetic Far LOD now evaluates production forest intent at each
 Mclone lattice sample and appends stable record-derived tree volumes to the
@@ -166,8 +166,9 @@ pinned.
 This is commit `b1db968c`, a disposable compatibility adapter rather than the
 future vegetation architecture. It added substantial logic to the legacy
 per-chunk compiler before Terrain Lab proved the summary hierarchy. Do not
-expand or close it out now. A later, separate in-game terrain-LOD decision may
-retain, replace, quarantine, or revert it after the representation is measured.
+expand or close it out. Tactical
+[`245-retire-chunk-far-lod-runtime.md`](../tactical/245-retire-chunk-far-lod-runtime.md)
+removes it with the rest of that runtime.
 
 ### Compatibility
 
@@ -702,14 +703,10 @@ generation slices, but the source identity must leave room for it.
 - `tools/terrain-lab` owns controls, URL projection, labels, inspector
   presentation, and browser assertions. It must not classify forests or
   generate records.
-- `mclone-app-runtime` owns eventual in-game vegetation coverage/refinement
-  requests and capability policy through the existing Far LOD control plane.
-- `mclone-render-session` owns eventual resident proxy lifecycle and
-  replacement readiness.
-- `mclone-render` owns eventual shared proxy draw pipelines and
-  mono/per-eye/multiview resources.
-- `mclone-scene` owns exact/proxy arbitration, frame budgets, and final
-  representation diagnostics.
+- A future in-game tactical must assign multiscale vegetation
+  coverage/refinement, resident proxy lifecycle, draw pipelines, and
+  exact/proxy arbitration only after choosing the terrain hierarchy. The
+  rejected chunk Far LOD control plane does not own that future contract.
 
 Do not put this policy in `mclone-native-client`, browser TypeScript, an app
 crate, or a renderer-only WGSL implementation.
@@ -790,13 +787,14 @@ to prove `Cover` at 65.5 km, add direct work/cost evidence, filter summaries by
 sample footprint where point sampling aliases, and inspect fixed anchors
 through the spacing hierarchy.
 
-### Slice 4: In-game Far LOD compatibility adapter — decision deferred
+### Slice 4: rejected in-game compatibility adapter — removal planned
 
 The landed adapter feeds local intent and record-derived proxies into the
 shared Far LOD request and resident lifecycle. It proves that stable records
 can cross the current renderer boundary, not that chunk tiles are the right
-future hierarchy. No further in-game work belongs in this tactical until Slice
-3 establishes the representation worth adopting.
+future hierarchy. No further in-game work belongs in this tactical. Tactical
+245 removes the adapter; a later architecture may consume the semantic
+vegetation products through a different spatial hierarchy.
 
 ### Later generalization
 
@@ -951,9 +949,9 @@ pixels:
   [`mclone-overworld-breadth.md`](mclone-overworld-breadth.md)
 - compatibility safety ledger:
   [`world-generation-profiles.md`](world-generation-profiles.md)
-- current synthetic Far LOD:
+- rejected synthetic Far LOD and its removal plan:
   [`far-lod.md`](far-lod.md) and
-  [`../lod-architecture.md`](../lod-architecture.md)
+  [`../tactical/245-retire-chunk-far-lod-runtime.md`](../tactical/245-retire-chunk-far-lod-runtime.md)
 - leaf-block presentation, deliberately separate:
   [`bushy-leaf-rendering.md`](bushy-leaf-rendering.md)
 - tree mutation/physics, deliberately separate:

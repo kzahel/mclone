@@ -1,5 +1,10 @@
 # 172: Far LOD Settle Contract And Detail Modes
 
+Status update 2026-07-25: superseded; stop implementation. The chunk-based Far
+LOD architecture is rejected for multikilometer presentation, and Tactical
+[`245`](245-retire-chunk-far-lod-runtime.md) owns its removal. The receipts
+below remain useful historical evidence, not a queue of unfinished fixes.
+
 Status: active 2026-07-11. Slice 0 (documentation consolidation), Slice 1A
 (pull-only exact-set accessors plus the per-chunk ledger), and Slice 1B (first
 executable offscreen settle probe with the pinned fly-up repro) are complete.

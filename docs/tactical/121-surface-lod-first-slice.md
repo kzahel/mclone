@@ -10,6 +10,11 @@ Reduction Draft Slice 6. Product hardening (settle contract, coverage
 correctness, detail modes) now lives in Tactical 172 — Far LOD Settle
 Contract And Detail Modes. Shared native Rust renderer/runtime workstream.
 
+Retirement note 2026-07-25: the experiment is now rejected as a scalable
+far-horizon architecture. Tactical
+[`245`](245-retire-chunk-far-lod-runtime.md) owns removal of its runtime
+surface. This file remains an execution record, not implementation guidance.
+
 ## Purpose
 
 Add a deliberately small, opt-in far-terrain LOD path so we can measure whether

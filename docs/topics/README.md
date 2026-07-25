@@ -258,11 +258,10 @@ series implements the same concern, normally reuse the document slug in its
   both-language scoreboard every pass must report, and the standalone-audit
   closure protocol that keeps implementing tacticals from declaring the
   whole concern done.
-- [`far-lod.md`](far-lod.md): synthetic far-terrain LOD status — the landed
-  resident-tile producer mechanism, the settle contract, the confirmed
-  coverage-defect ledger (altitude graph-cull voids, suppression/painted
-  mismatch), planned settle-state validation lanes, and the tactical 172 →
-  162 ordering.
+- [`far-lod.md`](far-lod.md): retirement status for the rejected chunk-based
+  synthetic Far LOD, the aggressive Tactical 245 removal boundary, machinery
+  retained for active non-LOD consumers, and requirements a separate future
+  multiscale design must prove.
 - [`gpu-procedural-terrain.md`](gpu-procedural-terrain.md): accepted research
   direction for immediate GPU-generated first-party terrain, coverage-first
   16/8/4/2 refinement, authoritative chunk replacement, approximate GPU
@@ -271,7 +270,8 @@ series implements the same concern, normally reuse the document slug in its
 - [`lod-native-vegetation.md`](lod-native-vegetation.md): accepted immediate
   migration of original-profile trees from vanilla-shaped chunk decoration to
   worldgen-owned forest intent and stable tree records shared by exact chunks,
-  Terrain Lab summaries/instances, and eventual in-game Far LOD.
+  Terrain Lab summaries/instances, and a later in-game multiscale terrain
+  architecture; the rejected chunk-Far-LOD adapter is removal scope.
 - [`lighting.md`](lighting.md): native Java-shaped stored-light system,
   render handoff, solver/status/rendering gaps, and next slices.
 - [`dynamic-point-lights.md`](dynamic-point-lights.md): presentation-side

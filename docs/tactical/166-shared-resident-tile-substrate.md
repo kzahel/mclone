@@ -1,5 +1,11 @@
 # 166: Shared Resident-Tile Substrate (Real Sections + LOD)
 
+Retirement note 2026-07-25: the extraction remains a useful execution record,
+but its synthetic chunk-based LOD producer is rejected and scheduled for
+removal by Tactical [`245`](245-retire-chunk-far-lod-runtime.md). Only the
+ordinary real-section consumers of generic residency, upload, budgeting, and
+compile machinery remain supported.
+
 Status: complete 2026-07-11. Slices 1–3 landed the behavior-preserving
 resident-tile/cache extraction, shared budget vocabulary, and synthetic far-LOD
 producer on shared workers, admission, residency, and per-tile region arenas.

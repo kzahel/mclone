@@ -77,8 +77,9 @@ It does not own:
 
 - creative terrain, biome, hydrology, geology, or structure rules, which remain
   with [`mclone-overworld-generation.md`](mclone-overworld-generation.md);
-- the current synthetic Far LOD lifecycle, coverage, suppression, and settle
-  defects, which remain with [`far-lod.md`](far-lod.md);
+- retirement of the rejected chunk-based Far LOD runtime, which remains with
+  [`far-lod.md`](far-lod.md) and Tactical
+  [`245`](../tactical/245-retire-chunk-far-lod-runtime.md);
 - exact authoritative light propagation, which remains with
   [`lighting.md`](lighting.md);
 - general point-light and shadow policy, which remains with
@@ -87,10 +88,10 @@ It does not own:
   or
 - a blanket replacement of the portable CPU generator.
 
-The first experiment may reuse the current Far LOD lifecycle, but this topic is
-broader than Far LOD. It distinguishes visual readiness, collision readiness,
-and canonical simulation readiness instead of requiring one fully generated,
-lit, meshed chunk to satisfy all three.
+A future in-game experiment must define a new multiscale lifecycle rather than
+reuse the chunk-based Far LOD control plane. This topic distinguishes visual
+readiness, collision readiness, and canonical simulation readiness instead of
+requiring one fully generated, lit, meshed chunk to satisfy all three.
 
 ## Motivation
 
@@ -109,9 +110,10 @@ Mclone's first-party generator changes the premise:
   seed, coordinate, and sparse planned-feature metadata.
 - Coarse terrain does not need to become a `GeneratedChunk`, client replica
   snapshot, collision view, or save record merely to be visible.
-- The existing Far LOD producer already proves bounded residency, detail
-  levels, movement guards, native/browser workers, real-versus-LOD exclusion,
-  and mono/per-eye/multiview rendering.
+- The rejected Far LOD experiment produced useful evidence about bounded
+  residency, stale work, replacement ordering, real-versus-approximate
+  exclusion, and mono/per-eye/multiview rendering. Its chunk-sized identity and
+  control plane are not reusable architecture.
 
 That creates a product opportunity unavailable to a generic Minecraft LOD
 consumer: a new seed can show recognizable geography to the horizon
@@ -145,7 +147,8 @@ See
 and
 [`terrain.rs`](../../native/crates/mclone-worldgen/src/levelgen/mclone_overworld/terrain.rs).
 
-The current synthetic Far LOD compiler is still CPU materialization:
+The chunk-based synthetic Far LOD compiler scheduled for removal by Tactical
+245 is CPU materialization:
 
 1. select a generation profile and seed;
 2. generate and retain complete surface-stage `GeneratedChunk` values;
@@ -228,9 +231,10 @@ fallback tiles remain visible for materials without curated first-party
 textures, and final rivers/wetlands/planned streams remain absent from the GPU
 LOD path rather than being hidden by the exact pane.
 
-Normal terrain and the current Far LOD path still arrive at `mclone-render` as
-CPU-constructed mesh products. The viewport planner and resident renderer are
-a reusable experimental service, not yet an in-game replacement.
+Normal terrain and the pending-removal Far LOD path still arrive at
+`mclone-render` as CPU-constructed mesh products. The Terrain Lab viewport
+planner and resident renderer are a reusable experimental service, not yet an
+in-game replacement.
 
 Existing performance records motivate measurement without proving a GPU win:
 
@@ -296,15 +300,15 @@ isolated fine tiles:
    and
 6. never trade a missing representation for real/LOD co-rendering.
 
-This extends the existing Far LOD settle invariant:
+The rejected Far LOD experiment established a useful conceptual invariant:
 
 ```text
 painted real terrain XOR visible procedural terrain
 ```
 
-The GPU path must reuse or deliberately extend the same representation ledger.
-It must not create a second independent coverage scheduler with different
-handoff truth.
+The new GPU path must define one extent-aware representation ledger around that
+invariant. It must not reuse the current chunk-keyed coordinator or create
+independent coverage schedulers with different handoff truth.
 
 ### Nested Refinement
 
@@ -325,9 +329,10 @@ neighbor-level metadata, and complete parent-to-child ownership.
 A camera-centered geometry clipmap is a strong candidate for kilometer-scale
 surface terrain because it bounds GPU memory and work while each outer ring
 represents exponentially more area. The current chunk-granular resident-tile
-system remains a valid first implementation substrate. A tactical should
-measure tile, clipmap, and hybrid shapes before choosing a durable cache
-identity.
+system is explicitly not a valid implementation substrate: every level still
+covers one chunk and merely changes the sampling density inside it. A tactical
+should measure clipmap, quadtree, and hybrid shapes before choosing a durable
+cache identity.
 
 ### Extreme-Distance Scale Hierarchy
 
@@ -685,10 +690,10 @@ visible distant terrain
   + sparse authoritative edit/structure overlay
 ```
 
-The first implementation may ignore edits outside normal chunks, matching the
-current Far LOD contract. Later overlays need their own revisions,
-invalidation, bounds, cache identity, and server privacy policy. They must
-remain rebuildable presentation data unless explicitly promoted elsewhere.
+The first implementation may ignore edits outside normal chunks. Later
+overlays need their own revisions, invalidation, bounds, cache identity, and
+server privacy policy. They must remain rebuildable presentation data unless
+explicitly promoted elsewhere.
 
 ## Platform Posture
 
@@ -727,7 +732,7 @@ shared generator semantics + terrain summary/evaluation contracts
   |
   +-> web Terrain Lab: primary exploration and iteration product
   +-> native diagnostic host: precise profiling, capture, and adapter testing
-  `-> game consumers: Far LOD, overview map, minimap, or tabletop view
+  `-> game consumers: future horizon renderer, overview map, minimap, or tabletop view
 ```
 
 The working product name is **Terrain Lab**; **Terrain Generation Lab** is a
@@ -858,7 +863,7 @@ its own terrain evaluator, level policy, or UI model.
 The game should consume the shared terrain-view service, not embed the complete
 Terrain Lab UI. Candidate consumers include:
 
-- the current Far LOD replacement;
+- a future multiscale horizon renderer;
 - an overview or world-map renderer;
 - a minimap;
 - an XR tabletop or god-view presentation; and
@@ -899,6 +904,10 @@ The shared-first boundary should be:
 - game app/platform crates: adapter/device creation, surface/session
   lifecycle, raw capability collection, and presentation only.
 
+These are prospective ownership boundaries for a new system. They do not mean
+that the current chunk-keyed `far_lod` modules, queues, payloads, or renderer
+should survive Tactical 245.
+
 The first proof established
 [`mclone-terrain-view`](../../native/crates/mclone-terrain-view/) as that small
 shared service. It owns the pure viewport/tile plan, stable tile identity,
@@ -924,8 +933,8 @@ Status: completed for the hosted single-tile boundary by Tacticals 227-228.
 - define the visual source identity and logical surface sample;
 - define the scale-aware summary, parent/child identity, and screen-space error
   inputs;
-- record the current CPU Far LOD generation, CPU mesh, payload, upload, and
-  settled draw costs for `mclone-overworld-v1`;
+- preserve the existing CPU Far LOD generation, CPU mesh, payload, upload, and
+  settled draw records for `mclone-overworld-v1` as historical baselines;
 - add or reuse GPU timestamp attribution for compute and draw;
 - select fixed plane and periodic-cylinder seeds/sites; and
 - retain the existing CPU path as a bit-for-bit off/fallback control;
@@ -1381,14 +1390,14 @@ The next implementation direction is:
    coarse pixel;
 6. choose explicit mixed-level seam/transition behavior before using partial
    child coverage; and
-7. decide whether the current Far LOD control plane should adopt the shared
+7. open a separately measured in-game horizon architecture around the shared
    procedural content and exact-handoff contracts proven in the Lab.
 
 ## Open Questions
 
-- Should the first resident shape remain chunk-granular, use a geometry
-  clipmap, or combine chunk identities near the handoff with clipmap rings far
-  away?
+- Should the first resident shape use a geometry clipmap, a quadtree, or a
+  hybrid whose near handoff aligns with chunks without making every far
+  resident identity one chunk?
 - Is an approximate current-profile evaluator visually close enough, or should
   the first experiment introduce a deliberately GPU-compatible field revision?
 - Which structured records are small and stable enough to upload for streams,

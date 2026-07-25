@@ -1,14 +1,18 @@
 # Far Terrain LOD Architecture
 
-Durable guidance for distant terrain LOD in `mclone`.
+Status: retired experiment architecture 2026-07-25.
 
-This document records the current target shape after reviewing Distant Horizons
-and Voxy. It is not an implementation tactical. The initial implementation
-should be a small shared-engine experiment, with flat, Quest, web, and XR
-constraints represented from the start and validation chosen by the boundary
-under test.
+This document preserves the research and original experimental target shape
+after reviewing Distant Horizons and Voxy. It is not current implementation
+guidance. The resulting chunk-granular in-game system is scheduled for removal
+by
+[`docs/tactical/245-retire-chunk-far-lod-runtime.md`](tactical/245-retire-chunk-far-lod-runtime.md).
+Current status lives in
+[`docs/topics/far-lod.md`](topics/far-lod.md); future multiscale work starts
+from Terrain Lab and
+[`docs/topics/gpu-procedural-terrain.md`](topics/gpu-procedural-terrain.md).
 
-## Decision
+## Historical Decision
 
 Start with **minimal surface terrain LOD**, not a Distant Horizons clone.
 

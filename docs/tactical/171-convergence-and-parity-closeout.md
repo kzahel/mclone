@@ -1,5 +1,10 @@
 # 171: Convergence And Parity Closeout
 
+Supersession note 2026-07-25: the Far LOD branch described here is historical.
+Do not continue its hardening or reduced-real follow-ups; Tactical
+[`245`](245-retire-chunk-far-lod-runtime.md) owns aggressive removal of that
+runtime. Unrelated parity records in this parent remain historical evidence.
+
 Status: active coordinating parent 2026-07-11. Milestones A–D and the first
 step of Milestone E have landed. The
 native and browser scene-host convergence series and runtime asset-pack
