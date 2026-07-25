@@ -11,6 +11,7 @@ const terrainLabRoot = path.resolve(
   "..",
 );
 const mobile = process.argv.includes("--mobile");
+const largeCanonical = process.argv.includes("--large-canonical");
 const label = mobile ? "mobile" : "desktop";
 const port = Number.parseInt(
   process.env.TERRAIN_LAB_SMOKE_PORT ?? (mobile ? "4182" : "4181"),
@@ -295,12 +296,21 @@ try {
       || stressBenchmark.gpuTargetMs <= 0) {
     throw new Error(`Cold stress benchmark is incomplete: ${JSON.stringify(stressBenchmark)}`);
   }
+  const adapterName = await page.locator("[data-testid='adapter-name']").textContent();
+  const viewport = await page.evaluate(() => ({
+    devicePixelRatio: window.devicePixelRatio,
+    height: window.innerHeight,
+    width: window.innerWidth,
+  }));
+  const largeCanonicalReport = largeCanonical
+    ? await proveLargeCanonicalFootprint(page, shell, label)
+    : undefined;
   if (pageErrors.length > 0) {
     throw new Error(`Browser errors:\n${pageErrors.join("\n")}`);
   }
 
   const report = {
-    adapter: await page.locator("[data-testid='adapter-name']").textContent(),
+    adapter: adapterName,
     captures: {
       canonicalCapture,
       canvasCapture,
@@ -314,6 +324,7 @@ try {
     comparisonMetrics,
     continentScaleMetrics,
     finalUrl,
+    largeCanonical: largeCanonicalReport,
     stressBenchmark,
     stressMetrics,
     target: externalBaseUrl ? "hosted" : "local-preview",
@@ -323,11 +334,7 @@ try {
       useWayland: launch.useWayland,
       waylandDisplay: launch.waylandDisplay,
     },
-    viewport: await page.evaluate(() => ({
-      devicePixelRatio: window.devicePixelRatio,
-      height: window.innerHeight,
-      width: window.innerWidth,
-    })),
+    viewport,
   };
   const reportPath = `/tmp/mclone-terrain-lab-${label}-report.json`;
   await writeFile(reportPath, `${JSON.stringify(report, null, 2)}\n`);
@@ -415,7 +422,7 @@ async function waitForComparison(shell) {
   );
 }
 
-async function waitForCanonical(shell, requestedChunks) {
+async function waitForCanonical(shell, requestedChunks, timeout = 30_000) {
   await shell.page().waitForFunction(
     (requested) => {
       const element = document.querySelector(".appShell");
@@ -424,6 +431,87 @@ async function waitForCanonical(shell, requestedChunks) {
         && Number(element.getAttribute("data-canonical-requested")) === requested;
     },
     requestedChunks,
+    { timeout },
+  );
+}
+
+async function proveLargeCanonicalFootprint(page, shell, label) {
+  await page.goto(
+    `${baseUrl}/terrain/?seed=-98765&profile=mclone-overworld-v1`
+      + "&x=-304&z=336&blocks=512&detail=auto"
+      + "&panes=canonical&canonical=final&radius=0"
+      + "&water=1&vegetation=1&stage=hydrology&view=map&layer=terrain",
+    { waitUntil: "networkidle" },
+  );
+  await waitForCanonical(shell, 1);
+  const footprint = page.getByLabel("Exact chunk footprint");
+  if (await footprint.locator("option").count() !== 9) {
+    throw new Error("The exact footprint selector does not expose nine stepped sizes");
+  }
+
+  const initialStarted = performance.now();
+  await footprint.selectOption("15");
+  await waitForCanonical(shell, 961, 180_000);
+  const initialMs = performance.now() - initialStarted;
+  const residentRawBytes = await numericAttribute(
+    shell,
+    "data-canonical-resident-raw-bytes",
+  );
+  const cacheRawBytes = await numericAttribute(shell, "data-canonical-cache-raw-bytes");
+  const meshUsedBytes = await numericAttribute(shell, "data-canonical-mesh-used-bytes");
+  const trackedBytes = await numericAttribute(shell, "data-canonical-tracked-bytes");
+  if (trackedBytes !== residentRawBytes + cacheRawBytes + meshUsedBytes) {
+    throw new Error("The large exact tracked-memory lower bound is inconsistent");
+  }
+
+  const centerX = page.getByLabel("Center X");
+  const shiftStarted = performance.now();
+  await centerX.fill("-288");
+  await centerX.press("Enter");
+  await waitForCanonicalAttribute(shell, "data-canonical-resident-hits", "930");
+  await waitForCanonical(shell, 961, 120_000);
+  const shiftMs = performance.now() - shiftStarted;
+  if (await shell.getAttribute("data-canonical-admission-frames") !== "31"
+      || await shell.getAttribute("data-canonical-max-frame-admissions") !== "1") {
+    throw new Error("The large exact entering edge was not admitted one chunk per frame");
+  }
+
+  const returnStarted = performance.now();
+  await centerX.fill("-304");
+  await centerX.press("Enter");
+  await waitForCanonicalAttribute(shell, "data-canonical-resident-hits", "930");
+  await waitForCanonical(shell, 961, 120_000);
+  const returnMs = performance.now() - returnStarted;
+  const cachedChunks = await numericAttribute(shell, "data-canonical-cached-chunks");
+  if (await shell.getAttribute("data-canonical-cache-hits") !== "31"
+      || await shell.getAttribute("data-canonical-admission-frames") !== "31"
+      || cachedChunks > 1_024) {
+    throw new Error("The large exact cached return violated its bounded paced contract");
+  }
+
+  const capture = `/tmp/mclone-terrain-lab-hosted-${label}-canonical-961.png`;
+  await page.getByTestId("canonical-terrain-stage").screenshot({ path: capture });
+  return {
+    admissionFrames: 31,
+    cacheHits: 31,
+    cachedChunks,
+    capture,
+    initialMs,
+    meshUsedBytes,
+    residentHits: 930,
+    residentRawBytes,
+    returnMs,
+    shiftMs,
+    trackedBytes,
+    cacheRawBytes,
+  };
+}
+
+async function waitForCanonicalAttribute(shell, name, expected) {
+  await shell.page().waitForFunction(
+    ([attribute, value]) =>
+      document.querySelector(".appShell")?.getAttribute(attribute) === value,
+    [name, expected],
   );
 }
 
