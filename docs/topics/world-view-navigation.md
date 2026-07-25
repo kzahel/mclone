@@ -341,6 +341,24 @@ The exact path is already functional, but its ownership is split:
   [`canonical_web.rs`](../../native/apps/mclone-terrain-lab/src/canonical_web.rs)
   owns the current Web/WGPU upload and draw orchestration.
 
+Do not lift that Lab orchestration wholesale into a new shared cache or worker
+framework. The game already has the stronger reusable lifecycle:
+`mclone-client` owns loaded `ChunkSnapshot` values,
+`mclone-render-session` owns desired/dirty section state, compact resident
+metadata, compile acceptance, and upload backpressure, and the production web
+client owns a Rust-directed render Worker with a resident Wasm snapshot mirror
+and shared-memory delta/result arenas. Native uses the same render-session
+contract with ordinary worker threads.
+
+The reusable extraction should instead adapt locally compiled canonical chunks
+into the game's neutral snapshot/section pipeline, plus retain only the small
+Explorer-specific policy for a generated desired set and optional warm
+near-field residency. Cache authoritative raw chunks in Rust-owned memory on
+the execution host. On the web that means Worker Wasm memory, not a semantic
+JavaScript cache; JavaScript should provide only Worker/DOM mechanics.
+Transferable buffers remain a valid fallback transport, while the production
+shared-memory render-worker path is the convergence target.
+
 Therefore, “migrate Terrain Lab” means replacing its duplicated browser
 camera and gesture policy while preserving both its procedural and canonical
 renderers. That navigation work does not need to wait for exact chunks in the
@@ -608,10 +626,11 @@ adding another host.
    over the shared reducer while preserving current visuals, inspection,
    scroll containment, URL state, and diagnostics. Delete superseded
    TypeScript camera and gesture policy.
-3. **Extract a reusable exact-view session.** Move the canonical desired-set,
-   cache, compilation, presentation, and draw preparation boundary out of
-   Terrain Lab-specific orchestration without regressing the Lab's working
-   canonical view.
+3. **Extract a reusable exact-view source.** Adapt locally compiled canonical
+   chunks into the shared snapshot, render-session, compile, upload, and draw
+   lifecycle. Do not promote Terrain Lab's TypeScript scheduler or duplicate
+   the game's cache and Worker framework. Preserve the Lab's working canonical
+   view while proving the narrower boundary.
 4. **Build the minimal Web Explorer smoke.** Keep JavaScript or TypeScript
    limited to canvas, rAF, lifecycle, URL, raw-observation forwarding, and
    mechanical browser dispositions. Add a deployment smoke and measure the
