@@ -33,7 +33,6 @@ impl CanonicalMeshCoordinate {
 #[derive(Clone, Debug)]
 pub(crate) struct CanonicalMeshRequestReceipt {
     pub coordinate: CanonicalMeshCoordinate,
-    pub fingerprint: u64,
     pub raw_cache_hit: bool,
     pub retained_dependency_chunks: usize,
 }
@@ -145,7 +144,6 @@ impl CanonicalMeshSession {
                 .expect("the requested canonical raw chunk is resident");
             receipts.push(CanonicalMeshRequestReceipt {
                 coordinate: *coordinate,
-                fingerprint: chunk.fingerprint,
                 raw_cache_hit,
                 retained_dependency_chunks: chunk.dependency_cache.retained_dependency_chunks,
             });

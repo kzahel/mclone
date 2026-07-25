@@ -30,11 +30,7 @@ mod web;
 #[cfg(target_arch = "wasm32")]
 pub use canonical_web::{CanonicalTerrainLab, mclone_terrain_lab_create_canonical};
 #[cfg(target_arch = "wasm32")]
-pub use canonical_worker_web::{
-    CanonicalTerrainWorkerActor, CanonicalTerrainWorkerDispatch, CanonicalTerrainWorkerResponse,
-    canonical_terrain_worker_begin_frame, canonical_terrain_worker_compile_frame,
-    canonical_terrain_worker_init_frame,
-};
+pub use canonical_worker_web::{CanonicalTerrainWorkerActor, CanonicalTerrainWorkerDispatch};
 #[cfg(target_arch = "wasm32")]
 pub use navigation_web::{TerrainLabNavigationSession, TerrainLabNavigationUpdate};
 #[cfg(target_arch = "wasm32")]

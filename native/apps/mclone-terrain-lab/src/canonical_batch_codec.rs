@@ -1,14 +1,13 @@
 const CANONICAL_BATCH_MAGIC: [u8; 4] = *b"MCTB";
 const CANONICAL_BATCH_VERSION: u16 = 1;
 const CANONICAL_BATCH_HEADER_BYTES: usize = 72;
-const CANONICAL_BATCH_ADMISSION_HEADER_BYTES: usize = 28;
+const CANONICAL_BATCH_ADMISSION_HEADER_BYTES: usize = 20;
 const TRANSFER_MS_OFFSET: usize = 40;
 
 #[derive(Clone, Debug, PartialEq)]
 pub(crate) struct CanonicalEncodedAdmission {
     pub chunk_x: i32,
     pub chunk_z: i32,
-    pub fingerprint: u64,
     pub raw_cache_hit: bool,
     pub retained_dependency_chunks: u32,
     pub packed_sections: Vec<u8>,
@@ -62,7 +61,6 @@ pub(crate) fn encode_canonical_batch(batch: &CanonicalEncodedBatch) -> Result<Ve
     for admission in &batch.admissions {
         push_i32(&mut encoded, admission.chunk_x);
         push_i32(&mut encoded, admission.chunk_z);
-        push_u64(&mut encoded, admission.fingerprint);
         encoded.push(u8::from(admission.raw_cache_hit));
         encoded.extend_from_slice(&[0; 3]);
         push_u32(&mut encoded, admission.retained_dependency_chunks);
@@ -121,7 +119,6 @@ pub(crate) fn decode_canonical_batch(bytes: &[u8]) -> Result<CanonicalEncodedBat
     for _ in 0..admission_count {
         let chunk_x = decoder.read_i32()?;
         let chunk_z = decoder.read_i32()?;
-        let fingerprint = decoder.read_u64()?;
         let raw_cache_hit = match decoder.read_u8()? {
             0 => false,
             1 => true,
@@ -138,7 +135,6 @@ pub(crate) fn decode_canonical_batch(bytes: &[u8]) -> Result<CanonicalEncodedBat
         batch.admissions.push(CanonicalEncodedAdmission {
             chunk_x,
             chunk_z,
-            fingerprint,
             raw_cache_hit,
             retained_dependency_chunks,
             packed_sections,
@@ -263,7 +259,6 @@ mod tests {
                 CanonicalEncodedAdmission {
                     chunk_x: -19,
                     chunk_z: 21,
-                    fingerprint: 0x0123_4567_89ab_cdef,
                     raw_cache_hit: false,
                     retained_dependency_chunks: 9,
                     packed_sections: vec![1, 2, 3, 4],
@@ -271,7 +266,6 @@ mod tests {
                 CanonicalEncodedAdmission {
                     chunk_x: -18,
                     chunk_z: 21,
-                    fingerprint: 0xfedc_ba98_7654_3210,
                     raw_cache_hit: true,
                     retained_dependency_chunks: 12,
                     packed_sections: vec![5; 257],

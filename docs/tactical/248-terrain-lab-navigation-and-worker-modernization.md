@@ -587,6 +587,44 @@ The legacy public raw canonical compiler/admission surface and transitional
 packed-response getters remain for the deletion/gate slice; neither is used by
 the current browser path.
 
+### Slice 5 complete: legacy deletion and ownership locks
+
+The unused `CanonicalTerrainCompiler`/`CanonicalTerrainChunkPayload` Wasm
+facade and JSON chunk-order export are deleted. Main Wasm no longer contains a
+second raw canonical chunk map, block/biome payload admission, presentation
+remesher, dependency-neighbor remesh planner, footprint-wall suppressor, or
+raw-cache byte counter. Canonical block generation, presentation transforms,
+neighbor meshing, and the bounded raw cache now exist only in the
+Worker-resident Rust session.
+
+Packed renderer prepare, warm activation, reset, and mesh admission are
+crate-private Rust calls. Their public bindgen exports and JSON encode/decode
+round trips are gone. The transitional public response wrapper, per-admission
+getters, fingerprint field, frame-builder exports, and Worker transfer-list
+surface are also gone. The Worker shell posts only the Rust dispatch message;
+bulk bytes remain exclusively in the shared arena.
+
+Four host-compiled source locks now prevent:
+
+- exact-worker epochs, queues, batching, cache/residency, or packed-section
+  vocabulary from returning to Terrain Lab TypeScript;
+- semantic fields from entering the shared game/Terrain Lab Worker transport;
+- raw main-thread canonical compiler/admission/remesh APIs from returning;
+- external-SAB status/capacity/failure and Vite isolation contracts from
+  disappearing.
+
+Focused evidence on 2026-07-25:
+
+- 10 Terrain Lab unit tests and four new ownership locks passed;
+- the Wasm check, regenerated-bindings TypeScript check, and 14 URL/state
+  tests passed;
+- the desktop `9x9` external-SAB/reuse/admission proof passed in 8.6 seconds;
+- authored Terrain Lab web source is 4,105 lines;
+- the production build emits a roughly 300 KiB main JavaScript bundle, 48 KiB
+  canonical Worker module, and 4.1 MiB Terrain Lab Wasm module; and
+- this deletion checkpoint removes 691 net production-source lines before
+  documentation and the new ownership-lock test.
+
 ## Validation Plan
 
 The exact commands may be refined as ownership moves, but closeout includes at

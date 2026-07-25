@@ -41,8 +41,17 @@ ordinary exact-mesh result path now also uses a persistent external SAB:
 Worker Rust writes one versioned batch, main Rust validates and decodes it,
 and JavaScript forwards only the opaque doorbell. Capacity, high-water,
 overflow, cross-origin isolation, and the bounded one-off overflow recovery
-are explicit. Removing legacy raw admission exports and locking the new
-ownership boundary are the active next checkpoint.
+are explicit. The remaining implementation checkpoint was removal of legacy
+raw admission exports plus ownership locks.
+
+That deletion checkpoint is now complete. Main Terrain Lab Wasm no longer
+exports or retains raw canonical chunk compilation/admission/remeshing, and
+the transitional response getters and transfer-list surface are gone. Packed
+prepare/admission stays crate-private between the Rust coordinator and
+renderer. Four host source locks enforce the domain-blind TypeScript
+transport, Rust coordinator/mailbox ownership, deleted raw path, and local
+cross-origin-isolation headers. Tactical 248 now needs only its complete
+validation and hosted closeout.
 
 ## Scope
 

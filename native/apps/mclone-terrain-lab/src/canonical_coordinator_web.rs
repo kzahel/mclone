@@ -10,10 +10,7 @@ use crate::{
     canonical_mailbox_web::{
         CANONICAL_SHARED_RESULT_TRANSPORT_KIND, CanonicalSharedResultArena, shared_memory_supported,
     },
-    canonical_web::{
-        CanonicalChunkCoordinate, CanonicalPackedAcceptReport, CanonicalPackedPrepareReport,
-        CanonicalTerrainLab,
-    },
+    canonical_web::{CanonicalChunkCoordinate, CanonicalTerrainLab},
     canonical_worker_web::{
         CanonicalTerrainWorkerResponse, canonical_terrain_worker_begin_frame,
         canonical_terrain_worker_compile_frame, canonical_terrain_worker_init_frame,
@@ -46,7 +43,6 @@ enum PendingCanonicalAdmission {
     Warm(CanonicalChunkCoordinate),
     Mesh {
         coordinate: CanonicalChunkCoordinate,
-        fingerprint: String,
         retained_dependency_chunks: u32,
         packed_sections: Vec<u8>,
     },
@@ -168,6 +164,7 @@ impl CanonicalTerrainWorkerCoordinator {
             self.presentation_identity.as_deref() != Some(presentation_identity.as_str());
         self.resident_identity = Some(resident_identity);
         self.presentation_identity = Some(presentation_identity);
+        renderer.set_exact_visibility(request.water_visible, request.vegetation_visible);
         if hard_reset || presentation_reset {
             renderer
                 .reset_profile(request.seed.clone(), request.profile.clone())
@@ -189,13 +186,9 @@ impl CanonicalTerrainWorkerCoordinator {
             .map(CanonicalChunkCoordinate::tuple)
             .collect::<BTreeSet<_>>();
         self.resident.retain(|position| desired.contains(position));
-        let coordinates_json =
-            serde_json::to_string(&self.coordinates).map_err(|error| error.to_string())?;
-        let prepared_json = renderer
-            .prepare_packed_chunks(coordinates_json)
+        let prepared = renderer
+            .prepare_packed_chunks(&self.coordinates)
             .map_err(js_message)?;
-        let prepared = serde_json::from_str::<CanonicalPackedPrepareReport>(&prepared_json)
-            .map_err(|error| format!("invalid canonical prepare report: {error}"))?;
         let warm = prepared
             .warm_available
             .iter()
@@ -344,9 +337,9 @@ impl CanonicalTerrainWorkerCoordinator {
     }
 
     fn accept_response(&mut self, message: JsValue) -> Result<(), String> {
-        let response = CanonicalTerrainWorkerResponse::decode(message).map_err(js_message)?;
-        let kind = response.kind().map_err(js_message)?;
-        let response_epoch = response.epoch().map_err(js_message)?;
+        let response = CanonicalTerrainWorkerResponse::decode(message)?;
+        let kind = response.kind()?;
+        let response_epoch = response.epoch()?;
         if kind == "ready" {
             self.worker_ready = true;
             if !self.begin_sent {
@@ -365,11 +358,11 @@ impl CanonicalTerrainWorkerCoordinator {
         match kind.as_str() {
             "began" => {
                 self.session_began = true;
-                self.report.cached_chunks = response.raw_cache_chunks().map_err(js_message)?;
-                self.report.cache_raw_bytes = response.raw_cache_bytes().map_err(js_message)?;
+                self.report.cached_chunks = response.raw_cache_chunks()?;
+                self.report.cache_raw_bytes = response.raw_cache_bytes()?;
             }
             "error" => {
-                self.report.error = Some(response.message().map_err(js_message)?);
+                self.report.error = Some(response.message()?);
             }
             "batch" => {
                 self.worker_in_flight = false;
@@ -399,7 +392,6 @@ impl CanonicalTerrainWorkerCoordinator {
                             chunk_x: admission.chunk_x,
                             chunk_z: admission.chunk_z,
                         },
-                        fingerprint: format!("{:016x}", admission.fingerprint),
                         retained_dependency_chunks: admission.retained_dependency_chunks,
                         packed_sections: admission.packed_sections,
                     });
@@ -476,16 +468,13 @@ impl CanonicalTerrainWorkerCoordinator {
         let started = now_ms();
         let (coordinate, retained_dependency_chunks, accepted, warm) = match admission {
             PendingCanonicalAdmission::Warm(coordinate) => {
-                let accepted_json = renderer
+                let accepted = renderer
                     .activate_packed_chunk(coordinate.chunk_x, coordinate.chunk_z)
                     .map_err(js_message)?;
-                let accepted = serde_json::from_str::<CanonicalPackedAcceptReport>(&accepted_json)
-                    .map_err(|error| format!("invalid canonical accept report: {error}"))?;
                 (coordinate, 0, accepted, true)
             }
             PendingCanonicalAdmission::Mesh {
                 coordinate,
-                fingerprint,
                 retained_dependency_chunks,
                 packed_sections,
             } => {
@@ -493,7 +482,6 @@ impl CanonicalTerrainWorkerCoordinator {
                     .accept_packed_mesh_bytes(
                         coordinate.chunk_x,
                         coordinate.chunk_z,
-                        fingerprint,
                         packed_sections,
                     )
                     .map_err(js_message)?;

@@ -1,4 +1,4 @@
-use js_sys::{Array, Object, Reflect, Uint8Array};
+use js_sys::{Object, Reflect, Uint8Array};
 use mclone_terrain_view::CanonicalTerrainVisibility;
 use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
 use wasm_bindgen::{JsCast, JsValue, prelude::wasm_bindgen};
@@ -26,8 +26,7 @@ const RESPONSE_STALE: &str = "stale";
 const RESPONSE_ERROR: &str = "error";
 
 #[allow(clippy::too_many_arguments)]
-#[wasm_bindgen(js_name = canonicalTerrainWorkerInitFrame)]
-pub fn canonical_terrain_worker_init_frame(
+pub(crate) fn canonical_terrain_worker_init_frame(
     epoch: u32,
     authored_bytes: Uint8Array,
     reference_bytes: Uint8Array,
@@ -54,8 +53,7 @@ pub fn canonical_terrain_worker_init_frame(
     Ok(frame.into())
 }
 
-#[wasm_bindgen(js_name = canonicalTerrainWorkerBeginFrame)]
-pub fn canonical_terrain_worker_begin_frame(
+pub(crate) fn canonical_terrain_worker_begin_frame(
     epoch: u32,
     coordinates_json: String,
     water_visible: bool,
@@ -72,8 +70,7 @@ pub fn canonical_terrain_worker_begin_frame(
     Ok(frame.into())
 }
 
-#[wasm_bindgen(js_name = canonicalTerrainWorkerCompileFrame)]
-pub fn canonical_terrain_worker_compile_frame(
+pub(crate) fn canonical_terrain_worker_compile_frame(
     epoch: u32,
     coordinates_json: String,
 ) -> Result<JsValue, JsValue> {
@@ -194,7 +191,6 @@ impl CanonicalTerrainWorkerActor {
 #[wasm_bindgen(js_name = CanonicalTerrainWorkerDispatch)]
 pub struct CanonicalTerrainWorkerDispatch {
     message_object: Object,
-    transferables: Array,
 }
 
 #[wasm_bindgen(js_class = CanonicalTerrainWorkerDispatch)]
@@ -203,141 +199,51 @@ impl CanonicalTerrainWorkerDispatch {
     pub fn message(&self) -> JsValue {
         self.message_object.clone().into()
     }
-
-    #[wasm_bindgen(getter)]
-    pub fn transferables(&self) -> Array {
-        self.transferables.clone()
-    }
 }
 
-#[wasm_bindgen(js_name = CanonicalTerrainWorkerResponse)]
-pub struct CanonicalTerrainWorkerResponse {
+pub(crate) struct CanonicalTerrainWorkerResponse {
     message: JsValue,
 }
 
-#[wasm_bindgen(js_class = CanonicalTerrainWorkerResponse)]
 impl CanonicalTerrainWorkerResponse {
     pub(crate) fn raw_message(&self) -> &JsValue {
         &self.message
     }
 
-    pub fn decode(message: JsValue) -> Result<CanonicalTerrainWorkerResponse, JsValue> {
-        let kind = string_property(&message, "kind").map_err(js_error)?;
+    pub(crate) fn decode(message: JsValue) -> Result<Self, String> {
+        let kind = string_property(&message, "kind")?;
         if !matches!(
             kind.as_str(),
             RESPONSE_READY | RESPONSE_BEGAN | RESPONSE_BATCH | RESPONSE_STALE | RESPONSE_ERROR
         ) {
-            return Err(js_error(format!(
+            return Err(format!(
                 "unsupported canonical terrain Worker response {kind:?}"
-            )));
+            ));
         }
-        u32_property(&message, "epoch").map_err(js_error)?;
+        u32_property(&message, "epoch")?;
         Ok(Self { message })
     }
 
-    #[wasm_bindgen(getter)]
-    pub fn kind(&self) -> Result<String, JsValue> {
-        string_property(&self.message, "kind").map_err(js_error)
+    pub(crate) fn kind(&self) -> Result<String, String> {
+        string_property(&self.message, "kind")
     }
 
-    #[wasm_bindgen(getter)]
-    pub fn epoch(&self) -> Result<u32, JsValue> {
-        u32_property(&self.message, "epoch").map_err(js_error)
+    pub(crate) fn epoch(&self) -> Result<u32, String> {
+        u32_property(&self.message, "epoch")
     }
 
-    #[wasm_bindgen(getter)]
-    pub fn message(&self) -> Result<String, JsValue> {
+    pub(crate) fn message(&self) -> Result<String, String> {
         optional_string_property(&self.message, "message")
             .map(|message| message.unwrap_or_default())
-            .map_err(js_error)
     }
 
-    #[wasm_bindgen(getter, js_name = rawCacheChunks)]
-    pub fn raw_cache_chunks(&self) -> Result<u32, JsValue> {
+    pub(crate) fn raw_cache_chunks(&self) -> Result<u32, String> {
         optional_u32_property(&self.message, "rawCacheChunks")
             .map(|value| value.unwrap_or_default())
-            .map_err(js_error)
     }
 
-    #[wasm_bindgen(getter, js_name = rawCacheBytes)]
-    pub fn raw_cache_bytes(&self) -> Result<f64, JsValue> {
-        optional_f64_property(&self.message, "rawCacheBytes")
-            .map(|value| value.unwrap_or_default())
-            .map_err(js_error)
-    }
-
-    #[wasm_bindgen(getter, js_name = generationMs)]
-    pub fn generation_ms(&self) -> Result<f64, JsValue> {
-        f64_property(&self.message, "generationMs").map_err(js_error)
-    }
-
-    #[wasm_bindgen(getter, js_name = presentationMs)]
-    pub fn presentation_ms(&self) -> Result<f64, JsValue> {
-        f64_property(&self.message, "presentationMs").map_err(js_error)
-    }
-
-    #[wasm_bindgen(getter, js_name = meshMs)]
-    pub fn mesh_ms(&self) -> Result<f64, JsValue> {
-        f64_property(&self.message, "meshMs").map_err(js_error)
-    }
-
-    #[wasm_bindgen(getter, js_name = packMs)]
-    pub fn pack_ms(&self) -> Result<f64, JsValue> {
-        f64_property(&self.message, "packMs").map_err(js_error)
-    }
-
-    #[wasm_bindgen(getter, js_name = transferMs)]
-    pub fn transfer_ms(&self) -> Result<f64, JsValue> {
-        f64_property(&self.message, "transferMs").map_err(js_error)
-    }
-
-    #[wasm_bindgen(getter, js_name = deduplicatedTargetChunks)]
-    pub fn deduplicated_target_chunks(&self) -> Result<u32, JsValue> {
-        u32_property(&self.message, "deduplicatedTargetChunks").map_err(js_error)
-    }
-
-    #[wasm_bindgen(getter, js_name = admissionCount)]
-    pub fn admission_count(&self) -> Result<u32, JsValue> {
-        Ok(admissions_property(&self.message)?.length())
-    }
-
-    #[wasm_bindgen(js_name = admissionChunkX)]
-    pub fn admission_chunk_x(&self, index: u32) -> Result<i32, JsValue> {
-        i32_property(&admission(&self.message, index)?, "chunkX").map_err(js_error)
-    }
-
-    #[wasm_bindgen(js_name = admissionChunkZ)]
-    pub fn admission_chunk_z(&self, index: u32) -> Result<i32, JsValue> {
-        i32_property(&admission(&self.message, index)?, "chunkZ").map_err(js_error)
-    }
-
-    #[wasm_bindgen(js_name = admissionFingerprint)]
-    pub fn admission_fingerprint(&self, index: u32) -> Result<String, JsValue> {
-        string_property(&admission(&self.message, index)?, "fingerprint").map_err(js_error)
-    }
-
-    #[wasm_bindgen(js_name = admissionRawCacheHit)]
-    pub fn admission_raw_cache_hit(&self, index: u32) -> Result<bool, JsValue> {
-        bool_property(&admission(&self.message, index)?, "rawCacheHit").map_err(js_error)
-    }
-
-    #[wasm_bindgen(js_name = admissionRetainedDependencyChunks)]
-    pub fn admission_retained_dependency_chunks(&self, index: u32) -> Result<u32, JsValue> {
-        u32_property(
-            &admission(&self.message, index)?,
-            "retainedDependencyChunks",
-        )
-        .map_err(js_error)
-    }
-
-    #[wasm_bindgen(js_name = admissionPackedSections)]
-    pub fn admission_packed_sections(&self, index: u32) -> Result<Uint8Array, JsValue> {
-        Reflect::get(
-            &admission(&self.message, index)?,
-            &JsValue::from_str("packedSections"),
-        )?
-        .dyn_into::<Uint8Array>()
-        .map_err(|_| js_error("canonical Worker packedSections is not a Uint8Array"))
+    pub(crate) fn raw_cache_bytes(&self) -> Result<f64, String> {
+        optional_f64_property(&self.message, "rawCacheBytes").map(|value| value.unwrap_or_default())
     }
 }
 
@@ -345,10 +251,7 @@ fn response_dispatch(kind: &str, epoch: u32) -> Result<CanonicalTerrainWorkerDis
     let message_object = Object::new();
     set(&message_object, "kind", &JsValue::from_str(kind)).map_err(js_message)?;
     set_u32(&message_object, "epoch", epoch).map_err(js_message)?;
-    Ok(CanonicalTerrainWorkerDispatch {
-        message_object,
-        transferables: Array::new(),
-    })
+    Ok(CanonicalTerrainWorkerDispatch { message_object })
 }
 
 fn error_dispatch(epoch: u32, reason: String) -> CanonicalTerrainWorkerDispatch {
@@ -380,7 +283,6 @@ fn batch_dispatch(
             .map(|admission| CanonicalEncodedAdmission {
                 chunk_x: admission.requested.coordinate.chunk_x,
                 chunk_z: admission.requested.coordinate.chunk_z,
-                fingerprint: admission.requested.fingerprint,
                 raw_cache_hit: admission.requested.raw_cache_hit,
                 retained_dependency_chunks: admission
                     .requested
@@ -451,22 +353,6 @@ fn coordinates_property(frame: &JsValue) -> Result<Vec<CanonicalMeshCoordinate>,
                 .collect()
         })
         .map_err(|error| format!("invalid canonical Worker coordinates: {error}"))
-}
-
-fn admission(message: &JsValue, index: u32) -> Result<JsValue, JsValue> {
-    let admissions = admissions_property(message)?;
-    if index >= admissions.length() {
-        return Err(js_error(format!(
-            "canonical Worker admission index {index} is out of bounds"
-        )));
-    }
-    Ok(admissions.get(index))
-}
-
-fn admissions_property(message: &JsValue) -> Result<Array, JsValue> {
-    Reflect::get(message, &JsValue::from_str("admissions"))?
-        .dyn_into::<Array>()
-        .map_err(|_| js_error("canonical Worker admissions is not an Array"))
 }
 
 fn bytes_property(value: &JsValue, name: &str) -> Result<Vec<u8>, String> {
@@ -553,16 +439,6 @@ fn optional_u32_property(value: &JsValue, name: &str) -> Result<Option<u32>, Str
     Ok(Some(number as u32))
 }
 
-fn i32_property(value: &JsValue, name: &str) -> Result<i32, String> {
-    let value = f64_property(value, name)?;
-    if value.fract() != 0.0 || !(f64::from(i32::MIN)..=f64::from(i32::MAX)).contains(&value) {
-        return Err(format!(
-            "canonical Worker property {name:?} is not a signed 32-bit integer"
-        ));
-    }
-    Ok(value as i32)
-}
-
 fn set(object: &Object, name: &str, value: &JsValue) -> Result<(), JsValue> {
     Reflect::set(object, &JsValue::from_str(name), value).map(|_| ())
 }
@@ -587,8 +463,4 @@ fn js_message(value: JsValue) -> String {
     value
         .as_string()
         .unwrap_or_else(|| "browser object operation failed".to_owned())
-}
-
-fn js_error(message: impl Into<String>) -> JsValue {
-    js_sys::Error::new(&message.into()).into()
 }

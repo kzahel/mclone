@@ -1,23 +1,18 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use mclone_assets::{TexturePresentation, TextureVisualProfile};
-use mclone_core::{BlockStateId, ChunkPos};
-use mclone_mesh::{
-    RENDER_SECTION_HEIGHT, RenderSectionKey, TexturedChunkMeshInput, TexturedMeshCatalog,
-    TexturedRenderSectionMesh, TexturedVisibleChunkMesh,
-    build_textured_render_sections_for_chunk_set, unpack_textured_render_sections,
-};
+use mclone_core::ChunkPos;
+use mclone_mesh::{RenderSectionKey, unpack_textured_render_sections};
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkRenderView, ChunkTextureAtlas,
     ChunkTextureSampling, TexturedSectionDrawResources, TexturedSectionRenderOptions,
 };
 use mclone_terrain_view::{
-    CanonicalTerrainVisibility, TerrainPreviewCamera, TerrainPreviewProjectionKind,
-    TerrainPreviewView, canonical_terrain_presentation_blocks, terrain_preview_focus_y_for_profile,
-    terrain_preview_projection,
+    TerrainPreviewCamera, TerrainPreviewProjectionKind, TerrainPreviewView,
+    terrain_preview_focus_y_for_profile, terrain_preview_projection,
 };
 use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 use web_sys::HtmlCanvasElement;
 
@@ -31,75 +26,28 @@ use crate::web::surface_configuration;
 
 const CANONICAL_WARM_MESH_MAX_CHUNKS: usize = 64;
 
-#[derive(Clone, Debug)]
-struct ResidentCanonicalChunk {
-    min_y: i32,
-    height: i32,
-    blocks: Vec<u8>,
-    biomes: Vec<i32>,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct CanonicalAcceptReport {
-    chunk_x: i32,
-    chunk_z: i32,
-    fingerprint: String,
-    resident_chunks: usize,
-    vertex_count: u32,
-    index_count: u32,
-    mesh_upload_ms: f64,
-    resident_raw_bytes: u64,
-    resident_mesh_used_bytes: u64,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct CanonicalChunkCoordinate {
     pub(crate) chunk_x: i32,
     pub(crate) chunk_z: i32,
 }
 
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub(crate) struct CanonicalPackedPrepareReport {
-    pub(crate) active_chunks: usize,
     pub(crate) warm_chunks: usize,
     pub(crate) warm_available: Vec<CanonicalChunkCoordinate>,
-    pub(crate) evicted_chunks: usize,
-    pub(crate) removed_sections: usize,
     pub(crate) vertex_count: u32,
     pub(crate) index_count: u32,
     pub(crate) resident_mesh_used_bytes: u64,
 }
 
-#[derive(Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
 pub(crate) struct CanonicalPackedAcceptReport {
-    pub(crate) chunk_x: i32,
-    pub(crate) chunk_z: i32,
-    pub(crate) fingerprint: String,
-    pub(crate) active_chunks: usize,
     pub(crate) warm_chunks: usize,
-    pub(crate) target_chunks: usize,
-    pub(crate) section_count: usize,
     pub(crate) vertex_count: u32,
     pub(crate) index_count: u32,
     pub(crate) decode_ms: f64,
     pub(crate) mesh_upload_ms: f64,
     pub(crate) resident_mesh_used_bytes: u64,
-}
-
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-struct CanonicalRetainReport {
-    resident_chunks: usize,
-    removed_chunks: usize,
-    removed_sections: usize,
-    vertex_count: u32,
-    index_count: u32,
-    resident_raw_bytes: u64,
-    resident_mesh_used_bytes: u64,
 }
 
 #[derive(Serialize)]
@@ -138,12 +86,11 @@ pub struct CanonicalTerrainLab {
     seed: i64,
     visual_profile: TextureVisualProfile,
     texture_presentation: TexturePresentation,
-    catalog: TexturedMeshCatalog,
-    chunks: BTreeMap<(i32, i32), ResidentCanonicalChunk>,
     packed_chunk_sections: BTreeMap<(i32, i32), BTreeSet<RenderSectionKey>>,
     active_packed_chunks: BTreeSet<(i32, i32)>,
     warm_packed_chunks: VecDeque<(i32, i32)>,
-    visibility: CanonicalTerrainVisibility,
+    water_visible: bool,
+    vegetation_visible: bool,
     draw: TexturedSectionDrawResources,
     depth: ChunkDepthTarget,
     vertex_count: u32,
@@ -156,30 +103,6 @@ impl CanonicalTerrainLab {
     #[wasm_bindgen]
     pub fn resize(&mut self, width: u32, height: u32) {
         self.resize_surface(width, height);
-    }
-
-    #[wasm_bindgen(js_name = resetChunks)]
-    pub fn reset_chunks(&mut self, seed: String) -> Result<(), JsValue> {
-        self.reset_profile(
-            seed,
-            TerrainPreviewProfile::McloneOverworldV1.label().to_owned(),
-        )
-    }
-
-    #[wasm_bindgen(js_name = resetProfile)]
-    pub fn reset_profile(&mut self, seed: String, profile: String) -> Result<(), JsValue> {
-        self.profile = TerrainPreviewProfile::parse_label(&profile).map_err(js_error)?;
-        self.seed = parse_seed(&seed)?;
-        self.chunks.clear();
-        self.packed_chunk_sections.clear();
-        self.active_packed_chunks.clear();
-        self.warm_packed_chunks.clear();
-        self.draw
-            .update_sections(&self.device, &[])
-            .map_err(|error| js_error(format!("failed to clear canonical terrain: {error}")))?;
-        self.vertex_count = 0;
-        self.index_count = 0;
-        Ok(())
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -253,15 +176,32 @@ impl CanonicalTerrainLab {
         }
         Ok(())
     }
+}
 
-    #[wasm_bindgen(js_name = preparePackedChunks)]
-    pub fn prepare_packed_chunks(&mut self, coordinates_json: String) -> Result<String, JsValue> {
-        let coordinates = serde_json::from_str::<Vec<CanonicalChunkCoordinate>>(&coordinates_json)
-            .map_err(|error| {
-                js_error(format!(
-                    "invalid packed canonical desired coordinates: {error}"
-                ))
-            })?;
+impl CanonicalTerrainLab {
+    pub(crate) fn reset_profile(&mut self, seed: String, profile: String) -> Result<(), JsValue> {
+        self.profile = TerrainPreviewProfile::parse_label(&profile).map_err(js_error)?;
+        self.seed = parse_seed(&seed)?;
+        self.packed_chunk_sections.clear();
+        self.active_packed_chunks.clear();
+        self.warm_packed_chunks.clear();
+        self.draw
+            .update_sections(&self.device, &[])
+            .map_err(|error| js_error(format!("failed to clear canonical terrain: {error}")))?;
+        self.vertex_count = 0;
+        self.index_count = 0;
+        Ok(())
+    }
+
+    pub(crate) fn set_exact_visibility(&mut self, water_visible: bool, vegetation_visible: bool) {
+        self.water_visible = water_visible;
+        self.vegetation_visible = vegetation_visible;
+    }
+
+    pub(crate) fn prepare_packed_chunks(
+        &mut self,
+        coordinates: &[CanonicalChunkCoordinate],
+    ) -> Result<CanonicalPackedPrepareReport, JsValue> {
         let desired = coordinates
             .iter()
             .map(|coordinate| (coordinate.chunk_x, coordinate.chunk_z))
@@ -287,7 +227,6 @@ impl CanonicalTerrainLab {
             })
             .collect::<Vec<_>>();
         let mut removed = BTreeSet::new();
-        let mut evicted_chunks = 0;
         let mut eviction_attempts = self.warm_packed_chunks.len();
         while self.warm_packed_chunks.len() > CANONICAL_WARM_MESH_MAX_CHUNKS
             && eviction_attempts > 0
@@ -302,7 +241,6 @@ impl CanonicalTerrainLab {
             }
             if let Some(keys) = self.packed_chunk_sections.remove(&position) {
                 removed.extend(keys);
-                evicted_chunks += 1;
             }
         }
         self.draw
@@ -311,20 +249,20 @@ impl CanonicalTerrainLab {
         self.refresh_packed_readiness();
         self.vertex_count = self.draw.vertex_count();
         self.index_count = self.draw.index_count();
-        json(&CanonicalPackedPrepareReport {
-            active_chunks: self.active_packed_chunks.len(),
+        Ok(CanonicalPackedPrepareReport {
             warm_chunks: self.warm_packed_chunks.len(),
             warm_available,
-            evicted_chunks,
-            removed_sections: removed.len(),
             vertex_count: self.vertex_count,
             index_count: self.index_count,
             resident_mesh_used_bytes: self.draw.resident_mesh_used_bytes(),
         })
     }
 
-    #[wasm_bindgen(js_name = activatePackedChunk)]
-    pub fn activate_packed_chunk(&mut self, chunk_x: i32, chunk_z: i32) -> Result<String, JsValue> {
+    pub(crate) fn activate_packed_chunk(
+        &mut self,
+        chunk_x: i32,
+        chunk_z: i32,
+    ) -> Result<CanonicalPackedAcceptReport, JsValue> {
         let position = (chunk_x, chunk_z);
         if !self.packed_chunk_sections.contains_key(&position) {
             return Err(js_error(format!(
@@ -335,14 +273,8 @@ impl CanonicalTerrainLab {
             .retain(|candidate| *candidate != position);
         self.active_packed_chunks.insert(position);
         self.refresh_packed_readiness();
-        json(&CanonicalPackedAcceptReport {
-            chunk_x,
-            chunk_z,
-            fingerprint: String::new(),
-            active_chunks: self.active_packed_chunks.len(),
+        Ok(CanonicalPackedAcceptReport {
             warm_chunks: self.warm_packed_chunks.len(),
-            target_chunks: 0,
-            section_count: 0,
             vertex_count: self.draw.vertex_count(),
             index_count: self.draw.index_count(),
             decode_ms: 0.0,
@@ -351,29 +283,10 @@ impl CanonicalTerrainLab {
         })
     }
 
-    #[wasm_bindgen(js_name = acceptPackedMesh)]
-    pub fn accept_packed_mesh(
-        &mut self,
-        chunk_x: i32,
-        chunk_z: i32,
-        fingerprint: String,
-        packed_sections: js_sys::Uint8Array,
-    ) -> Result<String, JsValue> {
-        json(&self.accept_packed_mesh_bytes(
-            chunk_x,
-            chunk_z,
-            fingerprint,
-            packed_sections.to_vec(),
-        )?)
-    }
-}
-
-impl CanonicalTerrainLab {
     pub(crate) fn accept_packed_mesh_bytes(
         &mut self,
         chunk_x: i32,
         chunk_z: i32,
-        fingerprint: String,
         packed_sections: Vec<u8>,
     ) -> Result<CanonicalPackedAcceptReport, JsValue> {
         let decode_started = now_ms()?;
@@ -413,13 +326,7 @@ impl CanonicalTerrainLab {
         self.vertex_count = self.draw.vertex_count();
         self.index_count = self.draw.index_count();
         Ok(CanonicalPackedAcceptReport {
-            chunk_x,
-            chunk_z,
-            fingerprint,
-            active_chunks: self.active_packed_chunks.len(),
             warm_chunks: self.warm_packed_chunks.len(),
-            target_chunks: target_chunks.len(),
-            section_count: sections.len(),
             vertex_count: self.vertex_count,
             index_count: self.index_count,
             decode_ms,
@@ -431,138 +338,6 @@ impl CanonicalTerrainLab {
 
 #[wasm_bindgen]
 impl CanonicalTerrainLab {
-    #[wasm_bindgen(js_name = retainChunks)]
-    pub fn retain_chunks(&mut self, coordinates_json: String) -> Result<String, JsValue> {
-        let coordinates = serde_json::from_str::<Vec<CanonicalChunkCoordinate>>(&coordinates_json)
-            .map_err(|error| js_error(format!("invalid canonical retain coordinates: {error}")))?;
-        let retained = coordinates
-            .into_iter()
-            .map(|coordinate| (coordinate.chunk_x, coordinate.chunk_z))
-            .collect::<BTreeSet<_>>();
-        let removed_chunks = self
-            .chunks
-            .keys()
-            .copied()
-            .filter(|position| !retained.contains(position))
-            .collect::<Vec<_>>();
-        let mut removed_sections = BTreeSet::new();
-        for position in &removed_chunks {
-            let Some(chunk) = self.chunks.remove(position) else {
-                continue;
-            };
-            for local_y_start in (0..chunk.height).step_by(RENDER_SECTION_HEIGHT as usize) {
-                removed_sections.insert(RenderSectionKey::new(
-                    position.0,
-                    (chunk.min_y + local_y_start).div_euclid(RENDER_SECTION_HEIGHT),
-                    position.1,
-                ));
-            }
-        }
-        self.draw
-            .apply_section_updates(&self.device, &[], &removed_sections)
-            .map_err(|error| js_error(format!("failed to retain canonical terrain: {error}")))?;
-        self.vertex_count = self.draw.vertex_count();
-        self.index_count = self.draw.index_count();
-        json(&CanonicalRetainReport {
-            resident_chunks: self.chunks.len(),
-            removed_chunks: removed_chunks.len(),
-            removed_sections: removed_sections.len(),
-            vertex_count: self.vertex_count,
-            index_count: self.index_count,
-            resident_raw_bytes: self.resident_raw_bytes(),
-            resident_mesh_used_bytes: self.draw.resident_mesh_used_bytes(),
-        })
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    #[wasm_bindgen(js_name = acceptChunk)]
-    pub fn accept_chunk(
-        &mut self,
-        seed: String,
-        chunk_x: i32,
-        chunk_z: i32,
-        min_y: i32,
-        height: i32,
-        blocks: js_sys::Uint8Array,
-        biomes: js_sys::Int32Array,
-        fingerprint: String,
-        water_visible: bool,
-        vegetation_visible: bool,
-    ) -> Result<String, JsValue> {
-        let seed = parse_seed(&seed)?;
-        if self.seed != seed {
-            self.seed = seed;
-            self.chunks.clear();
-        }
-        let expected_blocks = usize::try_from(height)
-            .ok()
-            .and_then(|height| height.checked_mul(16 * 16))
-            .ok_or_else(|| js_error(format!("invalid canonical chunk height {height}")))?;
-        let blocks = blocks.to_vec();
-        if blocks.len() != expected_blocks {
-            return Err(js_error(format!(
-                "canonical chunk ({chunk_x}, {chunk_z}) has {} blocks; expected {expected_blocks}",
-                blocks.len()
-            )));
-        }
-        self.visibility = CanonicalTerrainVisibility {
-            water: water_visible,
-            vegetation: vegetation_visible,
-        };
-        self.chunks.insert(
-            (chunk_x, chunk_z),
-            ResidentCanonicalChunk {
-                min_y,
-                height,
-                blocks,
-                biomes: biomes.to_vec(),
-            },
-        );
-        let started = now_ms()?;
-        let targets = canonical_remesh_targets(&self.chunks, chunk_x, chunk_z);
-        let (vertex_count, index_count) = self.rebuild_chunks(&targets)?;
-        let report = CanonicalAcceptReport {
-            chunk_x,
-            chunk_z,
-            fingerprint,
-            resident_chunks: self.chunks.len(),
-            vertex_count,
-            index_count,
-            mesh_upload_ms: now_ms()? - started,
-            resident_raw_bytes: self.resident_raw_bytes(),
-            resident_mesh_used_bytes: self.draw.resident_mesh_used_bytes(),
-        };
-        json(&report)
-    }
-
-    #[wasm_bindgen(js_name = setPresentation)]
-    pub fn set_presentation(
-        &mut self,
-        water_visible: bool,
-        vegetation_visible: bool,
-    ) -> Result<String, JsValue> {
-        let visibility = CanonicalTerrainVisibility {
-            water: water_visible,
-            vegetation: vegetation_visible,
-        };
-        if self.visibility != visibility {
-            self.visibility = visibility;
-            let targets = self.chunks.keys().copied().collect::<BTreeSet<_>>();
-            self.rebuild_chunks(&targets)?;
-        }
-        json(&CanonicalAcceptReport {
-            chunk_x: 0,
-            chunk_z: 0,
-            fingerprint: String::new(),
-            resident_chunks: self.chunks.len(),
-            vertex_count: self.vertex_count,
-            index_count: self.index_count,
-            mesh_upload_ms: 0.0,
-            resident_raw_bytes: self.resident_raw_bytes(),
-            resident_mesh_used_bytes: self.draw.resident_mesh_used_bytes(),
-        })
-    }
-
     #[allow(clippy::too_many_arguments)]
     #[wasm_bindgen]
     pub fn render(
@@ -625,10 +400,10 @@ impl CanonicalTerrainLab {
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
         json(&CanonicalRenderReport {
-            resident_chunks: self.chunks.len(),
+            resident_chunks: self.active_packed_chunks.len(),
             vertex_count: self.vertex_count,
             index_count: self.index_count,
-            resident_raw_bytes: self.resident_raw_bytes(),
+            resident_raw_bytes: 0,
             resident_mesh_used_bytes: self.draw.resident_mesh_used_bytes(),
             width: self.width,
             height: self.height,
@@ -636,8 +411,8 @@ impl CanonicalTerrainLab {
             center_z,
             blocks_across,
             view,
-            water_visible: self.visibility.water,
-            vegetation_visible: self.visibility.vegetation,
+            water_visible: self.water_visible,
+            vegetation_visible: self.vegetation_visible,
             visual_profile: self.visual_profile.id(),
             texture_presentation: self.texture_presentation.id(),
             preview_lighting: "fullbright + face shade + ambient occlusion",
@@ -744,27 +519,16 @@ impl CanonicalTerrainLab {
             seed: 0,
             visual_profile: visual_assets.profile,
             texture_presentation: visual_assets.presentation,
-            catalog: assets.catalog,
-            chunks: BTreeMap::new(),
             packed_chunk_sections: BTreeMap::new(),
             active_packed_chunks: BTreeSet::new(),
             warm_packed_chunks: VecDeque::new(),
-            visibility: CanonicalTerrainVisibility::default(),
+            water_visible: true,
+            vegetation_visible: true,
             draw,
             depth,
             vertex_count: 0,
             index_count: 0,
             exact_coordinator: None,
-        })
-    }
-
-    fn resident_raw_bytes(&self) -> u64 {
-        self.chunks.values().fold(0_u64, |bytes, chunk| {
-            bytes
-                .saturating_add(chunk.blocks.len() as u64)
-                .saturating_add(
-                    (chunk.biomes.len() as u64).saturating_mul(std::mem::size_of::<i32>() as u64),
-                )
         })
     }
 
@@ -782,66 +546,6 @@ impl CanonicalTerrainLab {
             .collect::<BTreeSet<_>>();
         self.draw
             .set_traversal_ready_columns_with_context(&ready, false);
-    }
-
-    fn rebuild_chunks(&mut self, targets: &BTreeSet<(i32, i32)>) -> Result<(u32, u32), JsValue> {
-        if targets.is_empty() {
-            return Ok((self.vertex_count, self.index_count));
-        }
-        let input_positions = targets
-            .iter()
-            .flat_map(|(chunk_x, chunk_z)| {
-                [
-                    (*chunk_x, *chunk_z),
-                    (*chunk_x - 1, *chunk_z),
-                    (*chunk_x + 1, *chunk_z),
-                    (*chunk_x, *chunk_z - 1),
-                    (*chunk_x, *chunk_z + 1),
-                ]
-            })
-            .filter(|position| self.chunks.contains_key(position))
-            .collect::<BTreeSet<_>>();
-        let presented = input_positions
-            .iter()
-            .filter_map(|position| {
-                let chunk = self.chunks.get(position)?;
-                let blocks = canonical_terrain_presentation_blocks(&chunk.blocks, self.visibility)
-                    .into_iter()
-                    .map(|block| BlockStateId(u32::from(block)))
-                    .collect::<Vec<_>>();
-                Some((*position, blocks))
-            })
-            .collect::<Vec<_>>();
-        let inputs = presented
-            .iter()
-            .filter_map(|((chunk_x, chunk_z), blocks)| {
-                let chunk = self.chunks.get(&(*chunk_x, *chunk_z))?;
-                Some(
-                    TexturedChunkMeshInput::new(
-                        *chunk_x,
-                        *chunk_z,
-                        chunk.min_y,
-                        chunk.height,
-                        blocks,
-                    )
-                    .with_biomes(&chunk.biomes)
-                    .with_world_seed(self.seed)
-                    .with_fluids_visible(self.visibility.water),
-                )
-            })
-            .collect::<Vec<_>>();
-        let mut sections =
-            build_textured_render_sections_for_chunk_set(&inputs, &self.catalog, targets)
-                .map_err(|error| js_error(format!("failed to mesh canonical terrain: {error}")))?;
-        suppress_missing_footprint_walls(&mut sections, &self.chunks);
-        self.draw
-            .apply_section_updates(&self.device, &sections, &BTreeSet::new())
-            .map_err(|error| js_error(format!("failed to upload canonical terrain: {error}")))?;
-        let vertex_count = self.draw.vertex_count();
-        let index_count = self.draw.index_count();
-        self.vertex_count = vertex_count;
-        self.index_count = index_count;
-        Ok((vertex_count, index_count))
     }
 
     fn resize_surface(&mut self, width: u32, height: u32) {
@@ -957,91 +661,6 @@ fn canonical_render_view(
         ),
         TerrainPreviewProjectionKind::Perspective => render_camera.render_view(width, height),
     })
-}
-
-fn canonical_remesh_targets(
-    chunks: &BTreeMap<(i32, i32), ResidentCanonicalChunk>,
-    chunk_x: i32,
-    chunk_z: i32,
-) -> BTreeSet<(i32, i32)> {
-    [
-        (chunk_x, chunk_z),
-        (chunk_x - 1, chunk_z),
-        (chunk_x + 1, chunk_z),
-        (chunk_x, chunk_z - 1),
-        (chunk_x, chunk_z + 1),
-    ]
-    .into_iter()
-    .filter(|position| chunks.contains_key(position))
-    .collect()
-}
-
-fn suppress_missing_footprint_walls(
-    sections: &mut [TexturedRenderSectionMesh],
-    chunks: &BTreeMap<(i32, i32), ResidentCanonicalChunk>,
-) {
-    let Some(min_chunk_x) = chunks.keys().map(|(chunk_x, _)| *chunk_x).min() else {
-        return;
-    };
-    let Some(max_chunk_x) = chunks.keys().map(|(chunk_x, _)| *chunk_x).max() else {
-        return;
-    };
-    let Some(min_chunk_z) = chunks.keys().map(|(_, chunk_z)| *chunk_z).min() else {
-        return;
-    };
-    let Some(max_chunk_z) = chunks.keys().map(|(_, chunk_z)| *chunk_z).max() else {
-        return;
-    };
-    let bounds = [
-        min_chunk_x as f32 * 16.0,
-        (max_chunk_x + 1) as f32 * 16.0,
-        min_chunk_z as f32 * 16.0,
-        (max_chunk_z + 1) as f32 * 16.0,
-    ];
-    for section in sections {
-        suppress_mesh_boundary_quads(&mut section.mesh, bounds);
-    }
-}
-
-fn suppress_mesh_boundary_quads(mesh: &mut TexturedVisibleChunkMesh, bounds: [f32; 4]) {
-    let old_indices = std::mem::take(&mut mesh.indices);
-    let solid_end = mesh.solid_index_count.min(old_indices.len() as u32) as usize;
-    let opaque_end = mesh.opaque_index_count.min(old_indices.len() as u32) as usize;
-    append_non_boundary_quads(mesh, &old_indices[..solid_end], bounds);
-    mesh.solid_index_count = mesh.indices.len() as u32;
-    append_non_boundary_quads(mesh, &old_indices[solid_end..opaque_end], bounds);
-    mesh.opaque_index_count = mesh.indices.len() as u32;
-    append_non_boundary_quads(mesh, &old_indices[opaque_end..], bounds);
-}
-
-fn append_non_boundary_quads(
-    mesh: &mut TexturedVisibleChunkMesh,
-    indices: &[u32],
-    [min_x, max_x, min_z, max_z]: [f32; 4],
-) {
-    for quad in indices.chunks_exact(6) {
-        let positions = quad.iter().filter_map(|index| {
-            mesh.vertices
-                .get(*index as usize)
-                .map(|vertex| vertex.position)
-        });
-        let mut count = 0;
-        let mut on_min_x = true;
-        let mut on_max_x = true;
-        let mut on_min_z = true;
-        let mut on_max_z = true;
-        for position in positions {
-            count += 1;
-            on_min_x &= position[0] == min_x;
-            on_max_x &= position[0] == max_x;
-            on_min_z &= position[2] == min_z;
-            on_max_z &= position[2] == max_z;
-        }
-        if count == 6 && (on_min_x || on_max_x || on_min_z || on_max_z) {
-            continue;
-        }
-        mesh.indices.extend_from_slice(quad);
-    }
 }
 
 fn parse_seed(seed: &str) -> Result<i64, JsValue> {

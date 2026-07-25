@@ -39,9 +39,7 @@ async function forwardToRust(frame: unknown): Promise<void> {
   actor ??= new CanonicalTerrainWorkerActor();
   const dispatch = actor.handleMessage(frame);
   try {
-    workerSelf.postMessage(dispatch.message, {
-      transfer: Array.from(dispatch.transferables) as Transferable[],
-    });
+    workerSelf.postMessage(dispatch.message);
   } finally {
     dispatch.free();
   }
