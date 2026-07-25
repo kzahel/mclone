@@ -460,8 +460,56 @@ async function proveLargeCanonicalFootprint(page, shell, label) {
   const cacheRawBytes = await numericAttribute(shell, "data-canonical-cache-raw-bytes");
   const meshUsedBytes = await numericAttribute(shell, "data-canonical-mesh-used-bytes");
   const trackedBytes = await numericAttribute(shell, "data-canonical-tracked-bytes");
+  const initialWorkerGenerationMs = await numericAttribute(
+    shell,
+    "data-canonical-worker-generation-ms",
+  );
+  const initialWorkerMeshMs = await numericAttribute(
+    shell,
+    "data-canonical-worker-mesh-ms",
+  );
+  const initialWorkerPresentationMs = await numericAttribute(
+    shell,
+    "data-canonical-worker-presentation-ms",
+  );
+  const initialWorkerPackMs = await numericAttribute(
+    shell,
+    "data-canonical-worker-pack-ms",
+  );
+  const initialWorkerTransferMs = await numericAttribute(
+    shell,
+    "data-canonical-worker-transfer-ms",
+  );
+  const initialMainDecodeMs = await numericAttribute(
+    shell,
+    "data-canonical-main-decode-ms",
+  );
+  const initialMeshUploadMs = await numericAttribute(
+    shell,
+    "data-canonical-mesh-upload-ms",
+  );
+  const initialMaxAdmissionMs = await numericAttribute(
+    shell,
+    "data-canonical-max-admission-ms",
+  );
+  const initialMeshTargetChunks = await numericAttribute(
+    shell,
+    "data-canonical-mesh-target-chunks",
+  );
   if (trackedBytes !== residentRawBytes + cacheRawBytes + meshUsedBytes) {
     throw new Error("The large exact tracked-memory lower bound is inconsistent");
+  }
+  if (residentRawBytes !== 0
+      || initialWorkerMeshMs <= 0
+      || initialWorkerGenerationMs <= 0
+      || initialWorkerPresentationMs <= 0
+      || initialWorkerPackMs <= 0
+      || initialWorkerTransferMs <= 0
+      || initialMainDecodeMs <= 0
+      || initialMeshUploadMs <= 0
+      || initialMaxAdmissionMs <= 0
+      || initialMeshTargetChunks <= 961) {
+    throw new Error("The large exact Worker/main timing evidence is incomplete");
   }
 
   const centerX = page.getByLabel("Center X");
@@ -473,8 +521,24 @@ async function proveLargeCanonicalFootprint(page, shell, label) {
   await waitForCanonicalAttribute(shell, "data-canonical-resident-hits", "930");
   await waitForCanonical(shell, 961, 120_000);
   const shiftMs = performance.now() - shiftStarted;
+  const shiftWorkerMeshMs = await numericAttribute(
+    shell,
+    "data-canonical-worker-mesh-ms",
+  );
+  const shiftMainDecodeMs = await numericAttribute(
+    shell,
+    "data-canonical-main-decode-ms",
+  );
+  const shiftMeshTargetChunks = await numericAttribute(
+    shell,
+    "data-canonical-mesh-target-chunks",
+  );
   if (await shell.getAttribute("data-canonical-admission-frames") !== "31"
-      || await shell.getAttribute("data-canonical-max-frame-admissions") !== "1") {
+      || await shell.getAttribute("data-canonical-max-frame-admissions") !== "1"
+      || shiftWorkerMeshMs <= 0
+      || shiftMainDecodeMs <= 0
+      || shiftMeshTargetChunks <= 31
+      || shiftMeshTargetChunks >= 155) {
     throw new Error("The large exact entering edge was not admitted one chunk per frame");
   }
 
@@ -515,11 +579,23 @@ async function proveLargeCanonicalFootprint(page, shell, label) {
     cachedChunks,
     capture,
     initialMs,
+    initialWorkerGenerationMs,
+    initialWorkerMeshMs,
+    initialWorkerPresentationMs,
+    initialWorkerPackMs,
+    initialWorkerTransferMs,
+    initialMainDecodeMs,
+    initialMeshUploadMs,
+    initialMaxAdmissionMs,
+    initialMeshTargetChunks,
     meshUsedBytes,
     residentHits: 930,
     residentRawBytes,
     returnMs,
     shiftMs,
+    shiftWorkerMeshMs,
+    shiftMainDecodeMs,
+    shiftMeshTargetChunks,
     trackedBytes,
     cacheRawBytes,
     warmHits,

@@ -190,8 +190,15 @@ export function App(): React.JSX.Element {
       data-canonical-cache-raw-bytes={canonicalReport?.cacheRawBytes ?? 0}
       data-canonical-mesh-used-bytes={canonicalReport?.residentMeshUsedBytes ?? 0}
       data-canonical-tracked-bytes={canonicalReport?.trackedBytes ?? 0}
+      data-canonical-worker-generation-ms={canonicalReport?.generationMs ?? 0}
+      data-canonical-worker-presentation-ms={
+        canonicalReport?.workerPresentationMs ?? 0
+      }
       data-canonical-worker-mesh-ms={canonicalReport?.workerMeshMs ?? 0}
+      data-canonical-worker-pack-ms={canonicalReport?.workerPackMs ?? 0}
+      data-canonical-worker-transfer-ms={canonicalReport?.workerTransferMs ?? 0}
       data-canonical-main-decode-ms={canonicalReport?.mainDecodeMs ?? 0}
+      data-canonical-mesh-upload-ms={canonicalReport?.meshUploadMs ?? 0}
       data-canonical-max-admission-ms={canonicalReport?.maxAdmissionMs ?? 0}
       data-canonical-mesh-target-chunks={canonicalReport?.meshTargetChunks ?? 0}
       data-canonical-warm-hits={canonicalReport?.warmHits ?? 0}

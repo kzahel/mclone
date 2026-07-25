@@ -703,6 +703,16 @@ test("publishes, shifts, and restores a 31x31 real footprint", async ({
     .toBeGreaterThan(0);
   expect(Number(await shell.getAttribute("data-canonical-mesh-used-bytes")))
     .toBeGreaterThan(0);
+  expect(Number(await shell.getAttribute("data-canonical-worker-mesh-ms")))
+    .toBeGreaterThan(0);
+  expect(Number(await shell.getAttribute("data-canonical-main-decode-ms")))
+    .toBeGreaterThan(0);
+  expect(Number(await shell.getAttribute("data-canonical-mesh-upload-ms")))
+    .toBeGreaterThan(0);
+  expect(Number(await shell.getAttribute("data-canonical-max-admission-ms")))
+    .toBeGreaterThan(0);
+  expect(Number(await shell.getAttribute("data-canonical-mesh-target-chunks")))
+    .toBeGreaterThan(961);
   const trackedBytes = Number(await shell.getAttribute("data-canonical-tracked-bytes"));
   const trackedParts = Number(
     await shell.getAttribute("data-canonical-resident-raw-bytes"),
@@ -719,6 +729,15 @@ test("publishes, shifts, and restores a 31x31 real footprint", async ({
   await expect(shell).toHaveAttribute("data-canonical-admission-frames", "31");
   await expect(shell).toHaveAttribute("data-canonical-max-frame-admissions", "1");
   await expect(shell).toHaveAttribute("data-canonical-warm-chunks", "31");
+  expect(Number(await shell.getAttribute("data-canonical-worker-mesh-ms")))
+    .toBeGreaterThan(0);
+  expect(Number(await shell.getAttribute("data-canonical-main-decode-ms")))
+    .toBeGreaterThan(0);
+  const shiftMeshTargets = Number(
+    await shell.getAttribute("data-canonical-mesh-target-chunks"),
+  );
+  expect(shiftMeshTargets).toBeGreaterThan(31);
+  expect(shiftMeshTargets).toBeLessThan(155);
   expect(Number(await shell.getAttribute("data-canonical-cached-chunks")))
     .toBeLessThanOrEqual(1_024);
 
