@@ -1,8 +1,4 @@
 import { useEffect, useRef, useState } from "react";
-import type {
-  KeyboardEvent as ReactKeyboardEvent,
-  PointerEvent as ReactPointerEvent,
-} from "react";
 import type { CanonicalTerrainLab } from "../../generated/pkg/mclone_terrain_lab";
 import {
   canonicalTerrainChunkOrder,
@@ -10,13 +6,8 @@ import {
 } from "../../generated/pkg/mclone_terrain_lab";
 
 import {
-  arrowPanTerrainLabState,
   canonicalTerrainCenterChunk,
   footprintBlocks,
-  grabPanTerrainLabStateInView,
-  orbitTerrainLabCamera,
-  pinchPanZoomTerrainLabState,
-  zoomTerrainLabState,
   type TerrainLabCamera,
   type TerrainLabState,
   type TerrainLabTexturePresentation,
@@ -32,6 +23,7 @@ import {
   loadTerrainVisualAssets,
   optionalReferenceBytes,
 } from "./visual-assets";
+import { useWorldViewNavigation } from "./use-world-view-navigation";
 
 export interface CanonicalTerrainReport {
   epoch: number;
@@ -120,28 +112,6 @@ type PendingCanonicalChunk =
   | { kind: "warm"; coordinate: CanonicalCoordinate }
   | { kind: "mesh"; admission: CanonicalWorkerPackedAdmission };
 
-interface PointerStart {
-  pointerId: number;
-  clientX: number;
-  clientY: number;
-  camera: TerrainLabCamera;
-  mode: "orbit" | "pan";
-  state: TerrainLabState;
-}
-
-interface ActivePointer {
-  clientX: number;
-  clientY: number;
-}
-
-interface PinchStart {
-  distance: number;
-  clientX: number;
-  clientY: number;
-  camera: TerrainLabCamera;
-  state: TerrainLabState;
-}
-
 const CANONICAL_PENDING_HIGH_WATER = 2;
 const CANONICAL_WORKER_MAX_BATCH = 16;
 
@@ -169,14 +139,32 @@ export function CanonicalTerrainCanvas({
   const residentIdentityRef = useRef<string | undefined>(undefined);
   const presentationIdentityRef = useRef<string | undefined>(undefined);
   const renderFrameRef = useRef<number | undefined>(undefined);
-  const pointerStartRef = useRef<PointerStart | undefined>(undefined);
-  const activePointersRef = useRef(new Map<number, ActivePointer>());
-  const pinchStartRef = useRef<PinchStart | undefined>(undefined);
   const currentViewRef = useRef({ state, camera });
   currentViewRef.current = { state, camera };
   const [initialized, setInitialized] = useState(false);
   const [canvasSize, setCanvasSize] = useState({ width: 900, height: 700 });
   const [latestReport, setLatestReport] = useState<CanonicalTerrainReport>();
+  const navigation = useWorldViewNavigation({
+    stageRef,
+    enabled: initialized,
+    state,
+    camera,
+    onStateChange,
+    onCameraChange,
+    resolveViewport: (clientX, clientY) => {
+      const stage = stageRef.current;
+      if (!stage) {
+        return undefined;
+      }
+      const rect = stage.getBoundingClientRect();
+      return {
+        x: clientX - rect.left,
+        y: clientY - rect.top,
+        width: rect.width,
+        height: rect.height,
+      };
+    },
+  });
   const coverageCenterChunkX = canonicalTerrainCenterChunk(state.centerX);
   const coverageCenterChunkZ = canonicalTerrainCenterChunk(state.centerZ);
   const scheduleRenderRef = useRef<() => void>(() => undefined);
@@ -650,124 +638,6 @@ export function CanonicalTerrainCanvas({
     visualProfile,
   ]);
 
-  useEffect(() => {
-    const stage = stageRef.current;
-    if (!stage) {
-      return;
-    }
-    const zoom = (event: WheelEvent): void => {
-      event.preventDefault();
-      onStateChange(zoomTerrainLabState(state, Math.exp(event.deltaY * 0.0015)));
-    };
-    stage.addEventListener("wheel", zoom, { passive: false });
-    return () => stage.removeEventListener("wheel", zoom);
-  }, [onStateChange, state]);
-
-  const beginPointer = (event: ReactPointerEvent<HTMLDivElement>): void => {
-    if (event.button !== 0 && event.button !== 1 && event.button !== 2) {
-      return;
-    }
-    event.preventDefault();
-    event.currentTarget.focus({ preventScroll: true });
-    event.currentTarget.setPointerCapture(event.pointerId);
-    if (event.pointerType === "touch") {
-      activePointersRef.current.set(event.pointerId, {
-        clientX: event.clientX,
-        clientY: event.clientY,
-      });
-      const pair = firstPointerPair(activePointersRef.current);
-      if (pair) {
-        const midpoint = pointerMidpoint(pair[0], pair[1]);
-        pinchStartRef.current = {
-          distance: pointerDistance(pair[0], pair[1]),
-          clientX: midpoint.clientX,
-          clientY: midpoint.clientY,
-          camera,
-          state,
-        };
-        pointerStartRef.current = undefined;
-        return;
-      }
-    }
-    pointerStartRef.current = {
-      pointerId: event.pointerId,
-      clientX: event.clientX,
-      clientY: event.clientY,
-      camera,
-      mode: state.view === "3d" && event.button === 0 && !event.shiftKey ? "orbit" : "pan",
-      state,
-    };
-  };
-  const movePointer = (event: ReactPointerEvent<HTMLDivElement>): void => {
-    const stage = stageRef.current;
-    if (!stage) {
-      return;
-    }
-    if (event.pointerType === "touch" && activePointersRef.current.has(event.pointerId)) {
-      activePointersRef.current.set(event.pointerId, {
-        clientX: event.clientX,
-        clientY: event.clientY,
-      });
-      const pair = firstPointerPair(activePointersRef.current);
-      const pinch = pinchStartRef.current;
-      if (pair && pinch) {
-        const distance = pointerDistance(pair[0], pair[1]);
-        if (distance > 1) {
-          const rect = stage.getBoundingClientRect();
-          const midpoint = pointerMidpoint(pair[0], pair[1]);
-          onStateChange(pinchPanZoomTerrainLabState(
-            pinch.state,
-            pinch.camera,
-            pinch.distance / distance,
-            (pinch.clientX - rect.left) / Math.max(rect.width, 1) - 0.5,
-            (pinch.clientY - rect.top) / Math.max(rect.height, 1) - 0.5,
-            midpoint.clientX - pinch.clientX,
-            midpoint.clientY - pinch.clientY,
-            rect.width,
-            rect.height,
-            rect.width / Math.max(rect.height, 1),
-          ));
-        }
-        return;
-      }
-    }
-    const start = pointerStartRef.current;
-    if (!start || start.pointerId !== event.pointerId) {
-      return;
-    }
-    const rect = stage.getBoundingClientRect();
-    if (start.mode === "orbit") {
-      onCameraChange(orbitTerrainLabCamera(
-        start.camera,
-        event.clientX - start.clientX,
-        event.clientY - start.clientY,
-        rect.width,
-        rect.height,
-      ));
-    } else {
-      onStateChange(grabPanTerrainLabStateInView(
-        start.state,
-        start.camera,
-        event.clientX - start.clientX,
-        event.clientY - start.clientY,
-        rect.width,
-        rect.height,
-        rect.width / Math.max(rect.height, 1),
-      ));
-    }
-  };
-
-  const handleKeyDown = (
-    event: ReactKeyboardEvent<HTMLDivElement>,
-  ): void => {
-    const next = arrowPanTerrainLabState(state, event.key);
-    if (next === state) {
-      return;
-    }
-    event.preventDefault();
-    onStateChange(next);
-  };
-
   return (
     <div
       ref={stageRef}
@@ -779,16 +649,12 @@ export function CanonicalTerrainCanvas({
       data-render-ready={initialized ? "true" : "false"}
       tabIndex={0}
       aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
-      onPointerDown={beginPointer}
-      onPointerMove={movePointer}
-      onPointerUp={(event) => {
-        finishPointer(event.pointerId);
-      }}
-      onPointerCancel={(event) => {
-        finishPointer(event.pointerId);
-      }}
+      onPointerDown={navigation.onPointerDown}
+      onPointerMove={navigation.onPointerMove}
+      onPointerUp={navigation.onPointerUp}
+      onPointerCancel={navigation.onPointerCancel}
       onContextMenu={(event) => event.preventDefault()}
-      onKeyDown={handleKeyDown}
+      onKeyDown={navigation.onKeyDown}
     >
       <canvas
         ref={canvasRef}
@@ -820,15 +686,6 @@ export function CanonicalTerrainCanvas({
     </div>
   );
 
-  function finishPointer(pointerId: number): void {
-    activePointersRef.current.delete(pointerId);
-    if (activePointersRef.current.size < 2) {
-      pinchStartRef.current = undefined;
-    }
-    if (pointerStartRef.current?.pointerId === pointerId) {
-      pointerStartRef.current = undefined;
-    }
-  }
 }
 
 function updateTrackedBytes(report: CanonicalTerrainReport): void {
@@ -841,27 +698,6 @@ function canonicalCoordinateKey(
   coordinate: CanonicalCoordinate,
 ): string {
   return `${coordinate.chunkX}:${coordinate.chunkZ}`;
-}
-
-function firstPointerPair(
-  pointers: Map<number, ActivePointer>,
-): [ActivePointer, ActivePointer] | undefined {
-  const pair = [...pointers.values()].slice(0, 2);
-  return pair.length === 2 ? [pair[0]!, pair[1]!] : undefined;
-}
-
-function pointerDistance(first: ActivePointer, second: ActivePointer): number {
-  return Math.hypot(second.clientX - first.clientX, second.clientY - first.clientY);
-}
-
-function pointerMidpoint(
-  first: ActivePointer,
-  second: ActivePointer,
-): ActivePointer {
-  return {
-    clientX: (first.clientX + second.clientX) * 0.5,
-    clientY: (first.clientY + second.clientY) * 0.5,
-  };
 }
 
 function parseJson<T>(value: string): T {

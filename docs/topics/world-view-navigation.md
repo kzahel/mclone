@@ -3,17 +3,18 @@
 Topic: `world-view-navigation`
 
 Status: native foundation implemented and validated on 2026-07-25 by Tactical
-[`247`](../tactical/247-standalone-world-explorer-foundation.md).
-`mclone-view-control` now owns shared map/orbit/contact semantics, and the
-standalone native `mclone-world-explorer` consumes it with the shared
-procedural terrain renderer. The browser input-shell audit completed on
-2026-07-25: do not reuse the main game's complete web shell and do not build a
-third throwaway gesture implementation. Migrate Terrain Lab through
-`mclone-view-control` first, retain thin app-specific DOM mechanics, and
-extract only physical browser helpers proven common by the later Web Explorer.
-Gamepad support is deferred from that browser slice. The native Explorer is
-currently a procedural-view smoke and architecture host, not a replacement for
-Terrain Lab's already functioning exact-chunk view.
+[`247`](../tactical/247-standalone-world-explorer-foundation.md); Terrain Lab
+navigation migration implemented and validated on 2026-07-25 by the first
+slice of active Tactical
+[`248`](../tactical/248-terrain-lab-navigation-and-worker-modernization.md).
+`mclone-view-control` now owns shared map/orbit/contact semantics for both the
+standalone native `mclone-world-explorer` and Terrain Lab's procedural and
+canonical panes. Terrain Lab retains thin DOM focus, capture, local-coordinate,
+scroll, and inspection mechanics through one shared React hook; its former
+TypeScript camera arithmetic and duplicated contact reducers are deleted.
+Gamepad support remains deferred. The native Explorer is currently a
+procedural-view smoke and architecture host, not a replacement for Terrain
+Lab's already functioning exact-chunk view.
 
 ## Scope
 
@@ -79,17 +80,18 @@ The Lab remains a deliberately small host. It does not need full lighting,
 client/server authority, persistence, collision, entities, or simulation ticks
 to present a useful map.
 
-The remaining Lab weak point is navigation. Pure camera math currently lives in
-[`state.ts`](../../tools/terrain-lab/src/state.ts), while pointer gesture state
-is duplicated between
-[`TerrainCanvas.tsx`](../../tools/terrain-lab/src/web/TerrainCanvas.tsx) and
-[`CanonicalTerrainCanvas.tsx`](../../tools/terrain-lab/src/web/CanonicalTerrainCanvas.tsx).
-That code has been valuable for discovery, but copying it into the engine
-would make its janky edge cases permanent.
+Terrain Lab previously kept camera math in `state.ts` and duplicated pointer
+and pinch state across `TerrainCanvas.tsx` and
+`CanonicalTerrainCanvas.tsx`. Tactical 248 removed those paths. The browser
+now forwards pane-local numeric facts into a Wasm
+`TerrainLabNavigationSession`, and one `useWorldViewNavigation` hook serves
+both canvases. URL state, tap-to-inspect, focus, pointer capture,
+`preventDefault`, split-panel coordinates, and scroll gutters remain
+browser-host concerns.
 
-The first shared Rust semantics now exist; the direction is to migrate the Lab
-through the selected browser-input boundary and leave DOM components as event
-adapters.
+Focused Rust, Wasm, desktop mouse/wheel/keyboard, and phone two-finger/gutter
+evidence passed at the migration checkpoint. Worker and cache modernization
+continues independently under Tactical 248.
 
 ## Implemented Native Foundation
 
@@ -289,9 +291,9 @@ Poll neutral/static state at a low cadence, switch to rAF while a controller
 is active or terrain is refining, and return to the low cadence when neutral.
 That demand pattern is worth reusing; the full scene host is not.
 
-### Terrain Lab first
+### Terrain Lab first — implemented
 
-The next bounded implementation should focus on Terrain Lab:
+The first Tactical 248 implementation slice completed this sequence:
 
 1. expose a narrow Wasm view-control session from the existing
    `mclone-terrain-lab` app without adding the full client or a new web app;

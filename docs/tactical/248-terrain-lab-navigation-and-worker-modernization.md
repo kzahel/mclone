@@ -434,6 +434,42 @@ path before that fallback is removed.
 - No blank, transparent, headless-only, or stale pre-migration capture counts
   as evidence.
 
+## Execution Record
+
+### Slice 0 complete: execution contract
+
+Commit `01cf925a` established this tactical before implementation. It records
+the parity checkpoints, the isolated-Wasm/external-SAB interpretation, cache
+ownership, deletion gates, and explicit non-goals.
+
+### Slice 1 complete: shared navigation adoption
+
+Terrain Lab now depends on `mclone-view-control`. A narrow
+`TerrainLabNavigationSession` Wasm adapter owns synchronized Lab-facing view
+state, contact reduction, pointer purpose, arrow pan, centered UI pan/zoom,
+and integer-facing results. One React hook is used by both procedural and
+canonical canvases; it retains only DOM focus, pointer capture,
+`preventDefault`, pane-local coordinates, rAF publication, and the
+tap-to-inspect host reaction.
+
+The former TypeScript pan, grab, orbit, anchored zoom, pinch, arrow, pitch
+clamp, active-pointer maps, pinch snapshots, and duplicated pointer helpers
+were deleted. Pan-pad and zoom buttons call the same Rust session rather than
+retaining a second UI arithmetic path.
+
+Focused evidence on 2026-07-25:
+
+- `cargo test -p mclone-view-control -p mclone-terrain-lab`: 18 tests passed;
+- `cargo check -p mclone-terrain-lab --target wasm32-unknown-unknown` passed;
+- Terrain Lab TypeScript typecheck and 14 remaining URL/state tests passed;
+- the headed Wayland WebGPU probe returned `[0,89,255,255]`;
+- the full desktop comparison/navigation case passed in 25.5 seconds;
+- the phone scroll-gutter and two-finger test passed in 13.6 seconds; and
+- `/tmp/mclone-terrain-lab-desktop-chrome-workspace.png` was inspected and
+  showed the expected canonical/CPU/GPU workspace with nonblank terrain.
+
+Worker protocol, cache, and admission behavior were unchanged in this slice.
+
 ## Validation Plan
 
 The exact commands may be refined as ownership moves, but closeout includes at

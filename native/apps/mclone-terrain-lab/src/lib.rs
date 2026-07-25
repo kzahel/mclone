@@ -11,12 +11,18 @@ use mclone_worldgen::terrain_preview::TerrainPreviewContentStage;
 mod canonical_mesh;
 #[cfg(target_arch = "wasm32")]
 mod canonical_web;
+#[cfg(any(target_arch = "wasm32", test))]
+mod navigation;
+#[cfg(target_arch = "wasm32")]
+mod navigation_web;
 mod visual_assets;
 #[cfg(target_arch = "wasm32")]
 mod web;
 
 #[cfg(target_arch = "wasm32")]
 pub use canonical_web::{CanonicalTerrainLab, mclone_terrain_lab_create_canonical};
+#[cfg(target_arch = "wasm32")]
+pub use navigation_web::{TerrainLabNavigationSession, TerrainLabNavigationUpdate};
 #[cfg(target_arch = "wasm32")]
 pub use web::{TerrainLab, mclone_terrain_lab_create};
 

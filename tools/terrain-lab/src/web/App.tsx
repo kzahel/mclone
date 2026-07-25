@@ -6,8 +6,6 @@ import {
   TERRAIN_LAB_CANONICAL_RADII,
   TERRAIN_LAB_SPACINGS,
   footprintBlocks,
-  nextBlocksAcross,
-  panTerrainLabState,
   parseTerrainLabState,
   proceduralSourceForPanes,
   switchTerrainLabProfile,
@@ -32,6 +30,10 @@ import {
   CanonicalTerrainCanvas,
   type CanonicalTerrainReport,
 } from "./CanonicalTerrainCanvas";
+import {
+  panTerrainLabByFraction,
+  zoomTerrainLabByFactor,
+} from "./use-world-view-navigation";
 import {
   TerrainCanvas,
   type TerrainLabAdapterReport,
@@ -449,9 +451,11 @@ export function App(): React.JSX.Element {
             <div className="mapZoom" aria-label="Viewport zoom controls">
               <button
                 type="button"
-                onClick={() =>
-                  patchState({ blocksAcross: nextBlocksAcross(state.blocksAcross, "in") })
-                }
+                onClick={() => {
+                  void zoomTerrainLabByFactor(state, camera, 0.5)
+                    .then(updateState)
+                    .catch((zoomError: unknown) => setError(errorMessage(zoomError)));
+                }}
                 aria-label="Zoom in"
               >
                 +
@@ -462,9 +466,11 @@ export function App(): React.JSX.Element {
               </div>
               <button
                 type="button"
-                onClick={() =>
-                  patchState({ blocksAcross: nextBlocksAcross(state.blocksAcross, "out") })
-                }
+                onClick={() => {
+                  void zoomTerrainLabByFactor(state, camera, 2)
+                    .then(updateState)
+                    .catch((zoomError: unknown) => setError(errorMessage(zoomError)));
+                }}
                 aria-label="Zoom out"
               >
                 −
@@ -674,7 +680,12 @@ export function App(): React.JSX.Element {
                 {state.detail === "auto" ? "automatic" : `fixed at 1:${state.detail}`}.
               </small>
             </div>
-            <PanPad state={state} onChange={updateState} />
+            <PanPad
+              state={state}
+              camera={camera}
+              onChange={updateState}
+              onError={(panError) => setError(errorMessage(panError))}
+            />
           </ControlSection>
 
           <ControlSection number="03" title="Presentation">
@@ -1439,14 +1450,20 @@ function ToggleButton({
 
 function PanPad({
   state,
+  camera,
   onChange,
+  onError,
 }: {
   state: TerrainLabState;
+  camera: TerrainLabCamera;
   onChange: (state: TerrainLabState) => void;
+  onError: (error: unknown) => void;
 }): React.JSX.Element {
-  const distance = footprintBlocks(state) / 4;
-  const pan = (x: number, z: number): void =>
-    onChange(panTerrainLabState(state, x * distance, z * distance));
+  const pan = (x: number, z: number): void => {
+    void panTerrainLabByFraction(state, camera, x, z, 0.25)
+      .then(onChange)
+      .catch(onError);
+  };
   return (
     <div className="panControl">
       <span>Pan a quarter view</span>
