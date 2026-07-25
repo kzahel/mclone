@@ -336,7 +336,61 @@ impl<B: NoiseBiomeSource> NoiseBasedChunkGenerator<B> {
         )
     }
 
-    fn resolve_terrain_block(&self, y: i32, noise: f64) -> u8 {
+    pub(crate) fn fill_lod_noise_column(&self, cell_x: i32, cell_z: i32, noise_values: &mut [f64]) {
+        assert_eq!(
+            noise_values.len(),
+            (self.cell_count_y + 1) as usize,
+            "vanilla LOD density column has the generator's vertical sample count"
+        );
+        let noise_settings = self.settings.noise_settings();
+        let center_depth = self
+            .sampler
+            .biome_source
+            .get_noise_biome(cell_x, self.sea_level, cell_z)
+            .get_depth();
+        let density = compute_biome_density_from_neighborhood(
+            center_depth,
+            noise_settings,
+            |offset_x, offset_z| {
+                self.sampler.biome_source.get_noise_biome(
+                    cell_x + offset_x,
+                    self.sea_level,
+                    cell_z + offset_z,
+                )
+            },
+        );
+        self.sampler.fill_noise_column_with_density(
+            noise_values,
+            cell_x,
+            cell_z,
+            noise_settings,
+            self.min_cell_y,
+            self.cell_count_y,
+            density,
+        );
+    }
+
+    pub(crate) const fn lod_cell_width(&self) -> i32 {
+        self.cell_width
+    }
+
+    pub(crate) const fn lod_cell_height(&self) -> i32 {
+        self.cell_height
+    }
+
+    pub(crate) const fn lod_cell_count_y(&self) -> i32 {
+        self.cell_count_y
+    }
+
+    pub(crate) const fn lod_min_cell_y(&self) -> i32 {
+        self.min_cell_y
+    }
+
+    pub(crate) const fn lod_min_y(&self) -> i32 {
+        self.min_y
+    }
+
+    pub(crate) fn resolve_terrain_block(&self, y: i32, noise: f64) -> u8 {
         let mut density = (noise / 200.0).clamp(-1.0, 1.0);
         density = density / 2.0 - density * density * density / 24.0;
         if density > 0.0 {

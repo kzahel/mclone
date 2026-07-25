@@ -16,7 +16,7 @@ use mclone_worldgen::{
     },
     terrain_preview::{
         TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS, TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION,
-        terrain_preview_field_revision,
+        TerrainPreviewProfile, terrain_preview_field_revision,
     },
 };
 use serde::Serialize;
@@ -438,6 +438,7 @@ impl TerrainLab {
             .map_err(js_error)?;
         let viewport_detail = parse_viewport_detail(&detail).map_err(js_error)?;
         let plan = plan_terrain_viewport(TerrainViewportRequest {
+            profile: TerrainPreviewProfile::McloneOverworldV1,
             seed: seed_value,
             center_x,
             center_z,

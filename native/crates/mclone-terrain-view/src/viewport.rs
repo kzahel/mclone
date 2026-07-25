@@ -2,7 +2,8 @@ use mclone_worldgen::{
     levelgen::McloneOverworldSamplingTopology,
     terrain_preview::{
         TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS, TERRAIN_PREVIEW_MAX_SAMPLE_SPACING,
-        TERRAIN_PREVIEW_MIN_SAMPLE_SPACING, TerrainPreviewContentStage, TerrainPreviewRequest,
+        TERRAIN_PREVIEW_MIN_SAMPLE_SPACING, TerrainPreviewContentStage, TerrainPreviewProfile,
+        TerrainPreviewRequest,
     },
 };
 
@@ -21,6 +22,7 @@ pub enum TerrainViewportDetail {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TerrainViewportRequest {
+    pub profile: TerrainPreviewProfile,
     pub seed: i64,
     pub center_x: i32,
     pub center_z: i32,
@@ -34,6 +36,7 @@ pub struct TerrainViewportRequest {
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct TerrainViewportTileId {
+    pub profile: TerrainPreviewProfile,
     pub seed: i64,
     pub tile_x: i32,
     pub tile_z: i32,
@@ -60,6 +63,7 @@ impl TerrainViewportTileId {
         let half = i32::try_from(self.footprint_blocks() / 2)
             .expect("terrain viewport tile half footprint fits i32");
         TerrainPreviewRequest {
+            profile: self.profile,
             seed: self.seed,
             center_x: self
                 .min_x()
@@ -202,6 +206,7 @@ pub fn plan_terrain_viewport(
     let mut spacing = coarsest_spacing;
     loop {
         levels.push(plan_level(
+            request.profile,
             request.seed,
             request.center_x,
             request.center_z,
@@ -275,6 +280,7 @@ fn validate_view_bounds(
 }
 
 fn plan_level(
+    profile: TerrainPreviewProfile,
     seed: i64,
     center_x: i32,
     center_z: i32,
@@ -296,6 +302,7 @@ fn plan_level(
     );
 
     let visible_tiles = ordered_tiles(
+        profile,
         seed,
         min_tile_x,
         max_tile_x,
@@ -307,6 +314,7 @@ fn plan_level(
         center_tile_z,
     )?;
     let preload_tiles = ordered_tiles(
+        profile,
         seed,
         min_tile_x.saturating_sub(TERRAIN_VIEWPORT_PRELOAD_MARGIN_TILES),
         max_tile_x.saturating_add(TERRAIN_VIEWPORT_PRELOAD_MARGIN_TILES),
@@ -358,6 +366,7 @@ fn tile_range(center: i32, extent: u32, footprint: u32) -> Result<(i32, i32), St
 
 #[allow(clippy::too_many_arguments)]
 fn ordered_tiles(
+    profile: TerrainPreviewProfile,
     seed: i64,
     min_tile_x: i32,
     max_tile_x: i32,
@@ -379,6 +388,7 @@ fn ordered_tiles(
                 continue;
             }
             tiles.push(TerrainViewportTileId {
+                profile,
                 seed,
                 tile_x,
                 tile_z,
@@ -413,6 +423,7 @@ mod tests {
 
     fn request(detail: TerrainViewportDetail) -> TerrainViewportRequest {
         TerrainViewportRequest {
+            profile: TerrainPreviewProfile::McloneOverworldV1,
             seed: -98_765,
             center_x: 0,
             center_z: 0,
@@ -504,6 +515,7 @@ mod tests {
     #[test]
     fn negative_tiles_produce_exact_preview_origins() {
         let tile = TerrainViewportTileId {
+            profile: TerrainPreviewProfile::McloneOverworldV1,
             seed: 7,
             tile_x: -2,
             tile_z: -1,

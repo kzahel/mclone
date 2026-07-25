@@ -10,6 +10,7 @@ mod sampler;
 mod settings;
 mod surface_dependency_cache;
 mod timing;
+mod vanilla_overworld_lod;
 
 pub use crate::biome::{ConstantBiomeSource, NoiseBiome, NoiseBiomeSource};
 pub use chunk::{GeneratedChunk, MutableChunkBlockBuffer, ScheduledTick};
@@ -84,6 +85,10 @@ pub use settings::{
 };
 pub use timing::{
     OverworldDependencyGenerationTiming, OverworldFeatureBatchTiming, SurfaceFillTiming,
+};
+pub use vanilla_overworld_lod::{
+    VANILLA_OVERWORLD_LOD_MAX_RETAINED_DENSITY_COLUMNS, VANILLA_OVERWORLD_LOD_REVISION,
+    VanillaOverworldLodSample, VanillaOverworldLodSampler,
 };
 
 #[cfg(test)]

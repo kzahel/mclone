@@ -7,16 +7,54 @@ use crate::levelgen::{
     mclone_overworld_macro_surface_top_material, mclone_overworld_preview_visible_material,
     mclone_overworld_surface_recipe,
 };
+use crate::levelgen::{VANILLA_OVERWORLD_LOD_REVISION, VanillaOverworldLodSampler};
 use mclone_core::ChunkPos;
 
 pub const TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION: &str =
-    "mclone-terrain-preview-reference-grid-v5";
+    "mclone-terrain-preview-reference-grid-v6";
 pub const TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS: u32 = 64;
 pub const TERRAIN_PREVIEW_MIN_CELLS_PER_AXIS: u32 = 8;
 pub const TERRAIN_PREVIEW_MAX_CELLS_PER_AXIS: u32 = 128;
 pub const TERRAIN_PREVIEW_MIN_SAMPLE_SPACING: u32 = 1;
 pub const TERRAIN_PREVIEW_MAX_SAMPLE_SPACING: u32 = 1_024;
 pub const TERRAIN_PREVIEW_SAMPLE_FLOATS: usize = 24;
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum TerrainPreviewProfile {
+    #[default]
+    McloneOverworldV1,
+    VanillaOverworld,
+}
+
+impl TerrainPreviewProfile {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::McloneOverworldV1 => "mclone-overworld-v1",
+            Self::VanillaOverworld => "overworld",
+        }
+    }
+
+    pub const fn source_revision(self) -> &'static str {
+        match self {
+            Self::McloneOverworldV1 => MCLONE_OVERWORLD_FIELD_REVISION,
+            Self::VanillaOverworld => VANILLA_OVERWORLD_LOD_REVISION,
+        }
+    }
+
+    pub fn parse_label(value: &str) -> Result<Self, String> {
+        match value.trim() {
+            "mclone-overworld-v1" | "mclone" => Ok(Self::McloneOverworldV1),
+            "overworld" | "vanilla" | "vanilla-1.17.1" => Ok(Self::VanillaOverworld),
+            other => Err(format!(
+                "terrain preview profile must be mclone-overworld-v1 or overworld, got {other:?}"
+            )),
+        }
+    }
+
+    pub const fn supports_gpu_lod(self) -> bool {
+        matches!(self, Self::McloneOverworldV1)
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 #[repr(u32)]
@@ -51,6 +89,7 @@ impl TerrainPreviewContentStage {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TerrainPreviewRequest {
+    pub profile: TerrainPreviewProfile,
     pub seed: i64,
     pub center_x: i32,
     pub center_z: i32,
@@ -63,6 +102,7 @@ pub struct TerrainPreviewRequest {
 impl TerrainPreviewRequest {
     pub const fn new(seed: i64, center_x: i32, center_z: i32, sample_spacing: u32) -> Self {
         Self {
+            profile: TerrainPreviewProfile::McloneOverworldV1,
             seed,
             center_x,
             center_z,
@@ -75,6 +115,11 @@ impl TerrainPreviewRequest {
 
     pub const fn with_content_stage(mut self, content_stage: TerrainPreviewContentStage) -> Self {
         self.content_stage = content_stage;
+        self
+    }
+
+    pub const fn with_profile(mut self, profile: TerrainPreviewProfile) -> Self {
+        self.profile = profile;
         self
     }
 
@@ -314,6 +359,14 @@ pub struct TerrainPreviewReferenceGrid {
 
 impl TerrainPreviewReferenceGrid {
     pub fn compile(request: TerrainPreviewRequest) -> Result<Self, String> {
+        if request.profile == TerrainPreviewProfile::VanillaOverworld {
+            let mut sampler = VanillaOverworldLodSampler::new(request.seed);
+            return Self::compile_with_vanilla_sampler(request, &mut sampler);
+        }
+        Self::compile_mclone(request)
+    }
+
+    fn compile_mclone(request: TerrainPreviewRequest) -> Result<Self, String> {
         let request = request.validate()?;
         let source = request.request();
         let sampler = McloneOverworldSampler::new_with_topology(source.seed, source.topology);
@@ -393,6 +446,71 @@ impl TerrainPreviewReferenceGrid {
             }
         }
 
+        Ok(Self { request, samples })
+    }
+
+    pub fn compile_with_vanilla_sampler(
+        request: TerrainPreviewRequest,
+        sampler: &mut VanillaOverworldLodSampler,
+    ) -> Result<Self, String> {
+        if request.profile != TerrainPreviewProfile::VanillaOverworld {
+            return Err(format!(
+                "vanilla terrain preview compiler cannot compile profile {}",
+                request.profile.label()
+            ));
+        }
+        if request.seed != sampler.seed() {
+            return Err(format!(
+                "vanilla terrain preview seed {} does not match sampler seed {}",
+                request.seed,
+                sampler.seed()
+            ));
+        }
+        if request.topology != McloneOverworldSamplingTopology::Unbounded {
+            return Err("vanilla terrain preview supports only unbounded topology".to_owned());
+        }
+        let request = request.validate()?;
+        let mut samples = Vec::with_capacity(
+            usize::try_from(request.sample_count())
+                .map_err(|_| "terrain preview sample count does not fit usize")?,
+        );
+        for sample_z in 0..request.samples_per_axis() {
+            let world_z = request
+                .world_z(sample_z)
+                .expect("validated terrain preview Z coordinate");
+            for sample_x in 0..request.samples_per_axis() {
+                let world_x = request
+                    .world_x(sample_x)
+                    .expect("validated terrain preview X coordinate");
+                let sample = sampler.sample(world_x, world_z);
+                samples.push(TerrainPreviewSample {
+                    surface_y: sample.solid_surface_y as f32,
+                    display_y: sample.display_y as f32,
+                    continentalness: 0.0,
+                    relief: 0.0,
+                    temperature: 0.0,
+                    moisture: 0.0,
+                    water: if sample.water { 1.0 } else { 0.0 },
+                    ruggedness: 0.0,
+                    base_surface_y: sample.solid_surface_y as f32,
+                    base_display_y: sample.display_y as f32,
+                    ocean_water: if sample.water { 1.0 } else { 0.0 },
+                    macro_surface_material: f32::from(sample.visible_material),
+                    river_signed_distance: 0.0,
+                    channel_influence: 0.0,
+                    bank_influence: 0.0,
+                    river_half_width: 0.0,
+                    wetland_influence: 0.0,
+                    wetland_pool_influence: 0.0,
+                    submerged_outlet_influence: 0.0,
+                    visible_surface_material: f32::from(sample.visible_material),
+                    planned_stream_influence: 0.0,
+                    biome_recipe: sample.biome.id() as f32,
+                    landform_kind: 0.0,
+                    surface_recipe: f32::from(sample.approximate_surface_material),
+                });
+            }
+        }
         Ok(Self { request, samples })
     }
 
@@ -758,6 +876,52 @@ mod tests {
     }
 
     #[test]
+    fn vanilla_reference_grid_uses_direct_density_samples() {
+        let mut request = TerrainPreviewRequest::new(12_345, -1, -1, 1)
+            .with_profile(TerrainPreviewProfile::VanillaOverworld);
+        request.cells_per_axis = 8;
+        request.content_stage = TerrainPreviewContentStage::Surface;
+        let grid = TerrainPreviewReferenceGrid::compile(request).unwrap();
+        let validated = request.validate().unwrap();
+        let mut sampler = VanillaOverworldLodSampler::new(request.seed);
+
+        for (sample_x, sample_z) in [(0, 0), (1, 7), (4, 4), (8, 8)] {
+            let world_x = validated.world_x(sample_x).unwrap();
+            let world_z = validated.world_z(sample_z).unwrap();
+            let direct = sampler.sample(world_x, world_z);
+            let sample = grid.sample(sample_x, sample_z).unwrap();
+            assert_eq!(sample.surface_y, direct.solid_surface_y as f32);
+            assert_eq!(sample.display_y, direct.display_y as f32);
+            assert_eq!(sample.is_water(), direct.water);
+            assert_eq!(sample.visible_surface_material(), direct.visible_material);
+            assert_eq!(sample.biome_recipe, direct.biome.id() as f32);
+        }
+        assert_eq!(
+            grid.packed_bytes().len(),
+            81 * TERRAIN_PREVIEW_SAMPLE_FLOATS * std::mem::size_of::<f32>()
+        );
+    }
+
+    #[test]
+    fn vanilla_grid_is_identical_across_sampler_cache_boundaries() {
+        let mut request = TerrainPreviewRequest::new(-98_765, -304, 336, 4)
+            .with_profile(TerrainPreviewProfile::VanillaOverworld);
+        request.cells_per_axis = 8;
+        request.content_stage = TerrainPreviewContentStage::Surface;
+        let cold = TerrainPreviewReferenceGrid::compile(request).unwrap();
+        let mut sampler = VanillaOverworldLodSampler::new(request.seed);
+        let warm = TerrainPreviewReferenceGrid::compile_with_vanilla_sampler(request, &mut sampler)
+            .unwrap();
+        let repeated =
+            TerrainPreviewReferenceGrid::compile_with_vanilla_sampler(request, &mut sampler)
+                .unwrap();
+
+        assert_eq!(cold, warm);
+        assert_eq!(warm, repeated);
+        assert!(sampler.reused_density_columns() > 0);
+    }
+
+    #[test]
     fn structured_near_detail_reconstructs_planned_stream_records() {
         let seed = -98_765;
         let plan =
@@ -833,7 +997,11 @@ mod tests {
         );
         assert_eq!(
             TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION,
-            "mclone-terrain-preview-reference-grid-v5"
+            "mclone-terrain-preview-reference-grid-v6"
+        );
+        assert_eq!(
+            TerrainPreviewProfile::VanillaOverworld.source_revision(),
+            VANILLA_OVERWORLD_LOD_REVISION
         );
     }
 }
