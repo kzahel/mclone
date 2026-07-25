@@ -391,7 +391,7 @@ color and depth targets above a block-built table. B may be a local integrated
 runtime or an ordinary joined remote dedicated runtime. It keeps a fixed chunk
 interest center, pumps live updates, and prepares terrain under background
 budgets, but receives no physical camera, movement, interaction, actor, audio,
-Far-LOD, or underwater authority.
+future distant-terrain, or underwater authority.
 
 The deterministic first fixture uses two persistence-backed authored worlds:
 a grass/table world A and a grass/stone-island world B. A new server-owned
@@ -457,7 +457,7 @@ optional scene-owned `EmbeddedWorldPreview` publishes only after bounded source
 records, source-anchor GPU/traversal coverage, asset epoch, and eager topology
 are coherent. Mono, per-eye, and multiview composition insert B opaque/cutout
 after A opaque/cutout and before A's actors/translucent phase, while B retains
-no physical authority or second sky/Far-LOD/overlay stack. The launch
+no physical authority or second sky/distant-terrain/overlay stack. The launch
 diagnostic exposes B root, region, anchors, scale, and standby cadence without
 allocating preview state in the ordinary path. The deterministic smoke draws
 two B sections / 5,112 indices in three table views and both stereo eyes;
@@ -632,11 +632,12 @@ Confirmed against the renderer (see Seams for file:line):
   This is enough only for an unbounded opaque terrain proof. The shader must
   also publish the transformed position as `world_position`; otherwise fog is
   computed from world B's original coordinates. CPU culling, traversal,
-  distance ordering, translucent sorting, chunk interest, and Far LOD currently
-  use untransformed section/camera coordinates. They need a world-local camera
-  derived with the inverse placement transform, or transformed bounds. Actors,
-  particles, outlines, world UI, debug geometry, and audio need the same
-  placement contract before this is a complete embedded world.
+  distance ordering, translucent sorting, chunk interest, and any future
+  distant terrain currently use untransformed section/camera coordinates. They
+  need a world-local camera derived with the inverse placement transform, or
+  transformed bounds. Actors, particles, outlines, world UI, debug geometry,
+  and audio need the same placement contract before this is a complete
+  embedded world.
 - **Shared depth / occlusion:** one `depth_view` per pass
   (`mclone-render/src/chunk.rs:376`, bound at `:2441` opaque / `:2539`
   translucent) — second-world draws added to the pass occlude for free.
@@ -717,7 +718,6 @@ struct WorldSlot {
     terrain: TexturedSectionDrawResources,
     traversal: TraversalReadySectionCache,
     uploads: RenderSectionUploadCoordinator,
-    far_lod: FarTerrainLodRenderer,
     placement: WorldPlacement,
     lifecycle: WorldLifecycle,
     authority: PlayerAuthorityRole,

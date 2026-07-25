@@ -99,7 +99,7 @@ Minecraft pack is not sufficient.
   platform discovery supplies an explicit trusted identity.
 - The repo-owned canonical first-party inventory covers the 209 checked-in
   runtime block states using engine-owned fallback material ids/visual classes
-  and explicitly lists direct LOD, actor, figure, effect, colormap, and sound
+  and explicitly lists direct actor, figure, effect, colormap, and sound
   inputs. Constructing it performs no filesystem or Minecraft JSON reads.
 - The `mclone-assets` focused suite includes a static native app/runtime source
   scan that rejects texture-lab TypeScript and pack-builder Python
@@ -109,11 +109,10 @@ Minecraft pack is not sufficient.
   Minecraft reference prerequisite. Their manifests declare stable identity,
   origin, roles, `mclone-visuals-v1`, and payload fingerprints.
 - The authored pack currently contains canonical namespaced and compatibility
-  PNGs, far-LOD metadata, Structure Lab preview artifacts, and four first-party
-  figures (187 payload files). Canonical authored `mclone:block/*` materials
-  can shadow the generated layer. The fallback pack contains 139 labeled PNGs,
-  the figures, 209 block visual records, a short-code registry, coverage facts,
-  and suppressed-audio policy (152 payload files).
+  PNGs, Structure Lab preview artifacts, and four first-party figures.
+  Canonical authored `mclone:block/*` materials can shadow the generated
+  layer. The fallback pack contains labeled PNGs, the figures, block visual
+  records, a short-code registry, coverage facts, and suppressed-audio policy.
 - Generated PNGs use deterministic checker colors, alternating magenta border,
   and a checked-in 3x5 font. Prefix collisions extend deterministically and
   full-hash collisions fail. Both PNG encoders use stored-DEFLATE streams to
@@ -168,10 +167,10 @@ Minecraft pack is not sufficient.
   Minecraft JSON adapter. It builds the ordinary texture atlas directly from
   `mclone:block/*` materials; no blockstate/model JSON is required.
 - `mclone-app-runtime::PreparedAssetSet` now groups one epoch/selection with
-  the composed source chain, terrain catalog/atlas, far-LOD palette, actors,
-  figures, decoded screen effect, audio policy, missing-resource registry,
-  exact resolution ledger, and aggregate coverage. It remains the CPU-side
-  preparation layer consumed by the separate live scene replacement request.
+  the composed source chain, terrain catalog/atlas, actors, figures, decoded
+  screen effect, audio policy, missing-resource registry, exact resolution
+  ledger, and aggregate coverage. It remains the CPU-side preparation layer
+  consumed by the separate live scene replacement request.
 - Tactical 170 Slice 1 moved `TexturedMeshAssets`, its CPU atlas wrapper, and
   source-backed CPU preparation into always-compiled
   `mclone_app_runtime::render_asset_data`. Filesystem discovery, native compile
@@ -192,9 +191,9 @@ Minecraft pack is not sufficient.
   active scene continues drawing. Relevant snapshot/target changes restart the
   candidate compile rather than allowing a stale commit.
 - `mclone-scene` owns one frame-boundary commit for terrain/catalog/compiler,
-  actor atlas/figures, mono and world GUI atlas users, effects, far LOD, and
-  prepared audio. Compiler-instance replacement plus render-session reset
-  prevents retired queued results or in-flight markers from crossing epochs.
+  actor atlas/figures, mono and world GUI atlas users, effects, and prepared
+  audio. Compiler-instance replacement plus render-session reset prevents
+  retired queued results or in-flight markers from crossing epochs.
 - Apply failure retains the old active epoch/resources and exposes a concise
   shared Failed status. Successful commit diagnostics verify that session,
   camera, command count, and update count are unchanged.
@@ -223,10 +222,10 @@ Minecraft pack is not sufficient.
 - The generated `mclone-default-overlay.pbp` is deliberately partial. It
   supplies authored texture-lab outputs but still needs local Minecraft
   blockstate/model JSON and missing textures from the later source chain.
-- Terrain preparation couples a baked `TexturedMeshCatalog`, texture atlas, and
-  far-LOD material palette in `TexturedMeshAssets`. Native render compile
-  workers capture the catalog at construction, and draw resources own their GPU
-  atlas. Replacing only source-chain state would leave stale derived resources.
+- Terrain preparation couples a baked `TexturedMeshCatalog` and texture atlas
+  in `TexturedMeshAssets`. Native render compile workers capture the catalog at
+  construction, and draw resources own their GPU atlas. Replacing only
+  source-chain state would leave stale derived resources.
 - Actor, underwater-effect, figure, and landing-audio preparation all resolve
   through the selected named source chain. First-party packs provide actor,
   effect, and figure replacements plus explicit silent-audio policy, so the
@@ -346,8 +345,7 @@ Applying a staged selection is transactional:
 3. Recompile the current visible render set under a new asset epoch while the
    old selection remains drawable.
 4. At a frame boundary, replace terrain atlas/meshes, actor resources,
-   effects, UI texture consumers, far-LOD palette/cache, and audio resolver as
-   one logical commit.
+   effects, UI texture consumers, and audio resolver as one logical commit.
 5. Discard stale old-epoch compile results. On failure, keep the previous
    active selection and show the error in the Asset Packs screen.
 

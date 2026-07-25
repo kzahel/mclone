@@ -65,12 +65,10 @@ pass. Field revision 12 and decoration revision 9 remove the dead revision-11
 contour/berm solver, adopt planned-stream vocabulary, update intentional raw
 field fingerprints, and prove exact seam-crossing realization on the
 384-chunk cylinder.
-Synthetic far LOD now carries the active generation profile through startup,
-scene runtime, native workers, browser doorbells, and Web Workers. Its Mclone
-source reuses the same immutable bounded stream-plan cache and matches
-authoritative stream columns at the reviewed route. A reviewed mid-route
-chunk also survives native SQLite close/reopen as an exactly equal snapshot
-loaded from storage. Deterministic plan reconstruction is accepted while the
+The now-retired synthetic Far LOD experiment also matched authoritative stream
+columns at the reviewed route. A reviewed mid-route chunk survives native
+SQLite close/reopen as an exactly equal snapshot loaded from storage.
+Deterministic plan reconstruction is accepted while the
 profile remains internal-mutable; versioned queryable start/reference records
 are required before release freeze. The final same-host comparison isolates
 the accepted-stream cost to the new structure-shaped terrain: cold generation
@@ -86,8 +84,7 @@ Tactical
 periodic temperature and moisture, altitude cooling, and the first
 cool-wet-conifer, snowy-alpine, and warm-dry-steppe recipes. Field revision 13
 and decoration revision 10 first carried taiga, snowy-mountain, and
-savanna-compatible
-biome IDs through Mclone-owned surfaces and feature tables. Far-LOD snow,
+savanna-compatible biome IDs through Mclone-owned surfaces and feature tables.
 SQLite reopen, exact periodic seams, browser WASM compilation, same-host
 generation benchmarks, a mixed-climate one-minute movement soak, and fully
 warmed RD16 cards pass. Human Review 1 accepted the vocabulary but found the
@@ -878,8 +875,8 @@ subsystem horizontally.
    - Compare placed features, bounded structure-shaped volumes, and selective
      regional density modifiers before choosing one universal mechanism.
    - Use cheap macro selectors, bounded 3D influence, coarse lattice
-     interpolation, and explicit far-LOD silhouettes so ordinary chunks do
-     not pay dense 3D-noise cost.
+     interpolation, and explicit summary facts for a future distant-terrain
+     hierarchy so ordinary chunks do not pay dense 3D-noise cost.
 8. **Caves and subsurface geology**
    - Add independently seeded 3D subtractive fields or carvers after the first
      surface-rock density experiments.

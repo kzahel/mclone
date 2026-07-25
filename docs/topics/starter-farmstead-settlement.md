@@ -29,17 +29,18 @@ demo starting world centered on a small farmstead settlement. It covers:
 - terrain grading, hydrology, and decoration reservation;
 - initial resident and player-spawn intent;
 - generated source-of-truth versus materialized persistence;
-- the relationship to normal terrain and Far LOD; and
+- the relationship to normal terrain and future distant presentation; and
 - the staged path from one art-directed settlement to placement on arbitrary
   suitable seeds.
 
 Generic vanilla-shaped structure statuses, starts, references, pieces, and
 persistence remain owned by [`../structures.md`](../structures.md). Original
 terrain fields and their sequencing remain owned by
-[`mclone-overworld-generation.md`](mclone-overworld-generation.md). Creature,
-persistence, and Far LOD behavior remain owned by their existing subsystem
-documents. This topic records how the farmstead should consume those systems;
-it does not silently redefine them.
+[`mclone-overworld-generation.md`](mclone-overworld-generation.md). Creature
+and persistence behavior remain owned by their existing subsystem documents.
+A future multiscale terrain architecture will own distant presentation. This
+topic records how the farmstead should consume those systems; it does not
+silently redefine them.
 
 ## Accepted Product Direction
 
@@ -148,9 +149,9 @@ The direction is accepted before all of its consumers are ready:
   actual shared simulation, persistence, protocol, asset, and render paths are
   ready. Ducks are original mclone content rather than a Java 1.17.1 parity
   port.
-- The current synthetic Far LOD deliberately omits exact features, structures,
-  and player/block edits. The settlement, its pond/grade changes, and its
-  authored trees therefore have no honest far representation yet.
+- The retired synthetic Far LOD omitted exact features, structures, and
+  player/block edits. The settlement, its pond/grade changes, and its authored
+  trees therefore have no honest distant representation yet.
 
 None of these gaps should shrink the maximal vision. They control staging and
 acceptance claims.
@@ -175,7 +176,7 @@ system is complete.
 | cows and chickens | enough to prove persistent residents | sheep, pigs, horses, ducks, and richer habitat behavior join when ready |
 | fence collision, gates, and entity navigation | required before enclosures are claimed to contain active residents | supports larger paddocks and routine animal movement |
 | crop hydration, growth, and harvesting | not required for a visual first garden | required before the farm claims complete crop gameplay |
-| Far LOD structure/edit representation | not required at the ordinary-terrain spawn experience | needed for honest distant landmark continuity |
+| distant structure/edit representation | not required at the ordinary-terrain spawn experience | needed for honest distant landmark continuity |
 
 Mountains/valleys and hydrology are therefore upstream quality investments,
 not excuses to postpone the reusable structure machinery. Natural-stream,
@@ -635,9 +636,9 @@ through shared persistence. It is not the target farmstead authoring format.
 
 ## Distant Presentation Contract
 
-The rejected chunk-based Far LOD is pending removal under Tactical
-[`245`](../tactical/245-retire-chunk-far-lod-runtime.md). Its documented
-profiles omit exact features, structures, and edits. Therefore:
+Tactical [`245`](../tactical/245-retire-chunk-far-lod-runtime.md) removed the
+rejected chunk-based Far LOD. Its historical profiles omitted exact features,
+structures, and edits. Therefore:
 
 - the farmstead landscape, buildings, special trees, and residents are absent
   from that historical runtime;
@@ -669,9 +670,10 @@ Track this concern at four levels, each with a different owner:
 2. **Subsystem topics own upstream truth.** Original terrain and hydrology stay
    in [`mclone-overworld-generation.md`](mclone-overworld-generation.md), true
    structure lifecycle stays in [`../structures.md`](../structures.md), and
-   liquids, entities, persistence, and Far LOD stay in their own documents.
-   This dashboard records the capability revision or evidence the settlement
-   consumes; it does not copy their detailed implementation checklist.
+   liquids, entities, and persistence stay in their own documents; a future
+   multiscale terrain architecture owns distant presentation. This dashboard
+   records the capability revision or evidence the settlement consumes; it
+   does not copy their detailed implementation checklist.
 3. **Numbered tactical docs own bounded execution.** Open one zero-padded
    tactical only after its inputs and acceptance contract are known. A
    farmstead tactical should produce one reviewable layer, not attempt the
@@ -729,7 +731,7 @@ approved; do not reserve a block of numbers in advance.
 | `FS-09` | cross-profile and topology adaptation | `deferred` | same engine contract accepted; first composition must land before breadth | Flat Grass, Small Island, Mclone, and explicit Overworld-overlay cases prove fit/fallback/rejection; admitted topology cases pass |
 | `FS-10` | maximal parcels, church, outbuildings, richer animals, and visual mill | `deferred` | named destination and optional parcels are preserved | additions pass composition, persistence, and performance reviews without replacing the first hierarchy |
 | `FS-11` | functional farm simulation and machinery | `deferred` | deliberately outside first visual/worldgen acceptance | shared gameplay contracts own crops, roles, power, inputs, and outputs |
-| `FS-12` | settlement distant-presentation proxy | `deferred` | rejected chunk Far LOD omits structures and edits and is pending removal | a future multiscale terrain architecture exists, then a shared presentation-only proxy passes its spatial handoff and coverage gates |
+| `FS-12` | settlement distant-presentation proxy | `deferred` | the removed chunk Far LOD omitted structures and edits | a future multiscale terrain architecture exists, then a shared presentation-only proxy passes its spatial handoff and coverage gates |
 
 The `ready` rows are not an instruction to start all of them. They identify
 work that can be scheduled without inventing a missing predecessor. The topic's
@@ -871,8 +873,8 @@ plan. It does not need recursive jigsaw assembly.
 
 - Add richer habitat/role behavior only through shared entity systems.
 - Add horses and original ducks when their complete contracts are ready.
-- Evaluate a settlement LOD proxy through the shared Far LOD producer and
-  renderer.
+- Evaluate a settlement LOD proxy only after a shared multiscale terrain
+  producer and renderer exist.
 - Consider upgrade provenance only when a real shipped-world migration requires
   it.
 
@@ -900,7 +902,7 @@ Settlement tacticals should additionally plan for:
 - foundation, terrace, retaining-edge, and maximum-grade-budget checks;
 - rendered aerial, arrival, ground-circulation, water, barn, church, and
   enclosure reviews as those pieces land; and
-- explicit Far LOD captures only when a real proxy exists.
+- explicit distant-presentation captures only when a real proxy exists.
 
 Rendered-output review is part of authoring, not a final cosmetic check. Inspect
 the first graded pad, then the first building, then circulation/water, and then
@@ -964,7 +966,7 @@ each composition expansion before moving on.
 - Which compact composition tier is the intended Small Island fallback?
 - Which residents belong in Stage 1 beyond cows and chickens if their shared
   implementations advance first?
-- When Far LOD landmark work begins, should the proxy include only silhouettes
+- When distant-landmark work begins, should the proxy include only silhouettes
   or also the settlement's terrain/water delta?
 
 ## Related

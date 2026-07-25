@@ -239,16 +239,13 @@ Slice 7e moved XR camera-commit attribution into the shared optional
 their meanings are unchanged; this is instrumentation ownership convergence,
 not a new performance baseline.
 
-Tactical 166 — Shared Resident-Tile Substrate is complete through Slice 4.
-Synthetic Far LOD now uses shared workers/admission/uploads plus 4/8/16 rings
-with two-chunk hysteresis and bounded replacement residency. Its attached Quest
-3 RD1 30-second moving orbit recorded zero skipped frames, zero dropped-frame
-delta, zero over-period frames, app-work p95 `6.697ms`, average headroom
-`8.254ms`, and GPU `2.665ms`; full-frame multiview also passed. Production
-local-worker, IndexedDB, and remote browser movement probes recorded zero
-replacement blanks. The next LOD performance judgment belongs to Tactical 162
-— Real-Chunk LOD Reduction Draft Slice 4, the first reduced-real producer on
-this substrate; do not reopen a parallel budget or worker path.
+Tactical 166's shared resident-tile experiment completed through Slice 4 and
+recorded useful Quest/browser evidence, but its synthetic chunk-based Far LOD
+consumer was retired by Tactical 245. The retained generic budget controller,
+normal render-section workers, and resident upload coordination remain active.
+Future distant-terrain performance work starts from a new bounded,
+footprint-growing hierarchy; it must not resume Tactical 162's reduced-real
+chunk producer.
 
 Standalone Quest Android XR is not covered by the desktop/headless
 movement-frame, timedemo, or desktop-hosted OpenXR baselines. Track headset

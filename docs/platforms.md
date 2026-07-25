@@ -369,39 +369,12 @@ The thin-adapter command includes the enforced browser scene-host adoption
 inventory; it is the default source-shape gate for every display client.
 
 `native:desktop-offscreen:smoke` is the current full-frame offscreen
-flat-client smoke. It runs the real offscreen host path and writes its screenshot
-under `/tmp`.
+flat-client smoke. It runs the real offscreen host path and writes its
+screenshot under `/tmp`.
 
-Far-LOD changes must additionally run the checked-in four-waypoint settle gate:
-
-```bash
-pnpm native:lod-settle:smoke
-```
-
-It writes per-waypoint PNGs and `lod-settle-report.json` under
-`/tmp/mclone-lod-settle-smoke`, requires zero pending lifecycle work and exact
-set coherence. Its top-down assertions read GPU depth at the expected real or
-LOD surface across all 441 RD4 + range-6 chunks; RGB/screenshot interpretation
-is not coverage evidence. The high→spawn→high revisit must also remain
-pixel-identical.
-
-Run the full movement/configuration matrix when changing the harness, desired
-LOD bands, toggle/range behavior, or lifecycle transitions:
-
-```bash
-pnpm native:lod-settle:probe
-```
-
-It produces 14 captures and three reports under
-`/tmp/mclone-lod-settle-probe/{smoke,movement,mutations}`. The movement script
-pins desired levels across one-chunk, hysteresis/band, and eight-chunk moves,
-then interpolates those poses into a paced 220-frame flight plus a 120-frame
-stationary tail. GPU depth is checked at the expected representation surface
-for every configured chunk on every smooth frame, with first-failure lifecycle
-rows and per-chunk missing age retained in the report; no transient missing
-frame is allowed;
-the mutation script pins complete off teardown, deterministic on
-repopulation, and range-3/range-8 coverage counts.
+The experimental chunk-based Far LOD settle and mutation lanes were retired
+with Tactical 245. Distant-terrain work must define validation from its new
+spatial identity and lifecycle instead of reviving those chunk-keyed probes.
 
 Platform-specific gates:
 

@@ -311,7 +311,8 @@ All claimed world-space consumers must agree:
 - actors, player bodies, held items, particles, fluids, and block outlines;
 - ray casts and interaction hit conversion;
 - shadows and screen/world effects when those features exist;
-- sky, fog, clouds, Far LOD, frustum culling, and interest selection; and
+- sky, fog, clouds, future distant terrain, frustum culling, and interest
+  selection; and
 - mono, separate per-eye, and full-frame multiview paths.
 
 The scene can inverse-transform an observer into each nearby patch for culling,
@@ -501,8 +502,8 @@ reviewable:
   them useful rather than arbitrary surprises?
 - What shape and thickness does the mantle require relative to generation,
   mining, fluid, spawn, and interaction radii?
-- How do sky, clouds, weather, sunlight, Far LOD, and audio behave when several
-  orthogonal faces are simultaneously visible?
+- How do sky, clouds, weather, sunlight, future distant terrain, and audio
+  behave when several orthogonal faces are simultaneously visible?
 - What face width makes the global shape legible while leaving enough ordinary
   Minecraft-like exploration space?
 - Which mixed patch graphs receive a faithful non-overlap/closure validator,

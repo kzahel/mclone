@@ -146,9 +146,9 @@ The host owns one direct active `DrawableWorldSlot` and one optional detached
 standby slot. Each aggregate retains stable world identity, descriptor,
 storage and lifecycle facts, the asset epoch, canonical scene options,
 runtime/startup state, camera, interaction/player model, terrain draw store,
-traversal readiness, upload coordinator, Far LOD state, render statistics,
-accepted entry pose, and any detached CPU startup seed. All existing frame
-methods still address `active_world` directly. All initial, local-completion,
+traversal readiness, upload coordinator, render statistics, accepted entry
+pose, and any detached CPU startup seed. All existing frame methods still
+address `active_world` directly. All initial, local-completion,
 external/web-completion, and native-replacement paths stage the same
 target-neutral core install aggregate before publication. Shared assets and
 renderers, physical presentation state, UI/session coordination, clocks, and
@@ -175,8 +175,8 @@ terrain renderer. It creates no gate renderer. Scene composition has explicit
 mono, per-eye, and multiview branches that submit B opaque/cutout after A
 opaque/cutout and before A actors/translucent terrain into the same targets.
 The no-preview branch still calls the established active-world frame functions
-directly. B contributes no sky, Far LOD, actor, interaction, UI, overlay,
-audio, or physical-camera authority.
+directly. B contributes no sky, actor, interaction, UI, overlay, audio, or
+physical-camera authority.
 
 Built-in product scenarios sit above the single-world session leaf. A
 path-free `ScenarioLaunchIntent` is reduced by shared client-experience policy;

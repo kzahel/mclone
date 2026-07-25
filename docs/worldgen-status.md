@@ -55,7 +55,7 @@ it with a bounded multi-chunk stream that follows and carves an existing
 valley through reusable procedural structure starts and clipped pieces.
 Field revision 12 now realizes deterministic 91-96-block routes with
 monotonic reaches, zero required fill, shallow carved valleys, fixed-point
-drop stencils, matching far LOD, and exact SQLite reopen. Closure,
+drop stencils, and exact SQLite reopen. Closure,
 authoritative wake, partition, periodic seam, release performance, movement,
 and fully warmed RD16 evidence pass. Human Review 1 accepted its peaceful
 spring-fed-creek language, completing Tactical 222; general drainage
@@ -69,9 +69,9 @@ shoulder around the original steppe core; decoration revision 11 realizes
 cool-wet conifer, snowy alpine, and core/shoulder steppe through
 taiga/snowy-mountain/savanna-compatible biome IDs, alpine snow and exposed
 rock, spruce/pine/fern/berry language, and sparse
-acacia/tall-grass/flower language. Exact cylinder seams, far-LOD snow, SQLite
-reopen, browser WASM compilation, alternating generation performance, and
-fully warmed RD16 cards pass.
+acacia/tall-grass/flower language. Exact cylinder seams, SQLite reopen, browser
+WASM compilation, alternating generation performance, and fully warmed RD16
+cards pass.
 
 Compatibility safety is recorded in the
 [`world-generation-profiles` ledger](topics/world-generation-profiles.md#compatibility-safety-ledger).
@@ -148,15 +148,15 @@ Landed native coverage:
   prove the ordinary river and landmark are quiescent. Revision 12 replaces
   its rejected containment shelf with a reusable procedural start and a
   95-block reviewed valley stream: four calm reaches, three drops, a rounded
-  headwater, grassed cut shoulders, and a widened Y63 confluence. Full chunks,
-  far LOD, and persisted reopen agree. General highland networks,
+  headwater, grassed cut shoulders, and a widened Y63 confluence. Full chunks
+  and persisted reopen agree. General highland networks,
   drainage-network identity, accumulated discharge, and arbitrary
   confluences remain absent.
 - Its first climate family adds independent periodic temperature and moisture
   fields, derived altitude cooling, and broad conifer, alpine, steppe,
   woodland, and meadow recipes. New regions emit taiga `5`, snowy mountains
-  `13`, and savanna `35`; alpine snow remains visible in synthetic far LOD,
-  while conifer and steppe use Mclone-owned decoration density. Human Review
+  `13`, and savanna `35`; conifer and steppe use Mclone-owned decoration
+  density. Human Review
   1 accepted the vocabulary but requested larger steppe country. The live
   correction preserves its dense core and adds a continuous, sparser
   shoulder; Human Review 2 is pending.

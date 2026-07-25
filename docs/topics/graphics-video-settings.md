@@ -32,7 +32,7 @@ are the source baseline for the inventory below.
 
 ## Current Product Behavior
 
-The shared Graphics page currently exposes eleven rows:
+The shared Graphics page currently exposes eight rows:
 
 | Setting | Current behavior | Runtime owner | Durable? |
 |---|---|---|---|
@@ -41,9 +41,6 @@ The shared Graphics page currently exposes eleven rows:
 | World Scale | Live `Auto`, 50%, 67%, 75%, or 100% selection | shared typed action, desktop `HostEffects`, native flat surface | no; relaunch returns to `Auto` |
 | Section Occlusion | Live on/off renderer option | shared settings controller and scene/render host | no |
 | Leaf Detail | Live `Blocky` / `Bushy`; changes derived active-pack leaf geometry through a transactional asset epoch | shared catalog/compiler, settings controller, and scene | yes; schema-1 machine-local graphics preference |
-| Far LOD | Pending removal by Tactical 245; do not extend | rejected chunk-based runtime | no |
-| LOD Detail | Pending removal by Tactical 245; do not extend | rejected chunk-based runtime | no |
-| Far LOD Range | Pending removal by Tactical 245; do not extend | rejected chunk-based runtime | no |
 | Render Distance | Live chunk-distance slider | shared settings controller and scene/runtime | no |
 | Frame Pacing | Live VSync / Max FPS / Uncapped cycle when supported | shared action and platform cadence/surface host | no |
 | FPS Cap | Live discrete cap cycle when supported | shared action and platform cadence host | no |
@@ -197,7 +194,6 @@ Likely next fields are:
 - world render scale mode;
 - render distance;
 - section occlusion;
-- removal of the experimental Far LOD enabled/detail/range rows;
 - frame-pacing mode and FPS cap where the host supports them; and
 - later GUI scale, display mode, and output-mode intent once those controls
   exist.
@@ -257,9 +253,9 @@ biome blend, graphics quality, render distance, ambient occlusion, frame cap,
 VSync, view bobbing, GUI scale, attack indicator, gamma, clouds, fullscreen,
 particles, mipmaps, entity shadows, screen-effect strength, entity distance,
 and FOV-effect strength. Mclone currently implements only a subset and adds
-world scale and section occlusion. Its experimental Far LOD rows are pending
-removal under Tactical
-[`245`](../tactical/245-retire-chunk-far-lod-runtime.md).
+world scale and section occlusion. Tactical
+[`245`](../tactical/245-retire-chunk-far-lod-runtime.md) removed the
+experimental chunk-based distant-terrain rows.
 
 Rows should be added only after their runtime contract exists. The target
 inventory is:
@@ -270,7 +266,6 @@ inventory is:
 | Internal world scale | live; add persistence and optional later adaptive/dynamic mode |
 | Render distance | live; add persistence and ensure server view and renderer limits remain coordinated |
 | Section occlusion | live; add persistence |
-| Far LOD enabled/detail/range | remove with Tactical 245; do not add persistence |
 | VSync, frame pacing, FPS cap | live on supported flat hosts; add typed persistence and finer cap selection |
 | Display mode | add Windowed / Borderless / Fullscreen capabilities rather than assuming one desktop model |
 | Output resolution and refresh rate | add mode enumeration plus safe apply/revert; preserve Gamescope semantics |

@@ -419,8 +419,8 @@ The height increase is a major product choice, not a free parameter:
 - that is 524 vertical density cells versus 48, about **10.9 times** as many
   per XZ lattice column before accounting for the more complex function graph;
 - lighting, biome samples, features, structures, serialization, networking,
-  client section residency, meshing, culling, and far-LOD all inherit some of
-  the expanded coordinate range; and
+  client section residency, meshing, culling, and future distant-terrain
+  presentation all inherit some of the expanded coordinate range; and
 - empty-section compression helps storage but does not remove density sampling
   or worst-case tall-mountain costs.
 
@@ -504,8 +504,8 @@ signals.
    regions can test the Underlands idea inside the existing 256-block world.
 4. Consider greater dimension height only after that scaled proof. Audit
    generation, spawn, interaction caps, lighting, persistence, network payload,
-   renderer section residency, XR culling, Far LOD, and logical-height gameplay
-   as one explicit platform-neutral campaign.
+   renderer section residency, XR culling, future distant terrain, and
+   logical-height gameplay as one explicit platform-neutral campaign.
 
 The research does not change the current tactical boundary: mountains and
 valleys remain next; rivers, caves, geology, and structures remain later

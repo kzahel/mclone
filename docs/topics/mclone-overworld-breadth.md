@@ -266,7 +266,8 @@ voxel noise:
 - sample coarse 3D lattices and interpolate rather than evaluating many
   octaves independently for every block;
 - skip unaffected sections and preserve exact target partition/order output;
-- expose silhouette/material facts to synthetic far LOD;
+- expose silhouette/material facts to a future footprint-growing distant
+  terrain hierarchy;
 - benchmark no-formation controls and dense formation hotspots separately;
 - retain exact plane and 384-chunk-X periodic behavior; and
 - stop for pixel review at boulder, outcrop, arch, and regional-density
@@ -301,7 +302,8 @@ Every live family should eventually record:
 - deterministic field, biome, surface, and feature maps;
 - exact output fingerprints and partition/order/periodic seams;
 - representative surface, vegetation, water, and landmark block counts;
-- far-LOD agreement for terrain-scale facts;
+- agreement between exact output and any future distant representation for
+  terrain-scale facts;
 - cold/warm generation cost and a movement soak when work is substantial;
 - fully warmed high-view-distance pixels; and
 - the human description worth preserving, including both peaceful and

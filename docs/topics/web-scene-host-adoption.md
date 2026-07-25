@@ -12,10 +12,10 @@ persistence, strict provenance, and reload diagnostics through this host.
 The final audit added browser enforcement to the default purity gate, locked
 the exact feature-gap ledger, removed obsolete aliases/dead compatibility
 paths, stabilized actionable render-work accounting, and refreshed durable
-operating/architecture docs. Structural adoption is closed. Tactical 171 —
-Convergence And Parity Closeout Milestone D subsequently promoted Far LOD
-through the same production host and worker/compiler seams without reopening
-this adoption series.
+operating/architecture docs. Structural adoption is closed. Tactical 171
+subsequently promoted the historical Far LOD experiment through the same host
+and worker/compiler seams; Tactical 245 later removed that chunk-based product
+without reopening this adoption series.
 
 Post-closeout feature follow-up (2026-07-14): Tactical
 [`178-shared-web-lobby-scenario-parity.md`](../tactical/178-shared-web-lobby-scenario-parity.md)
@@ -102,8 +102,7 @@ the native display clients:
   projects their catalog into the shared host, and replaces the selected scene
   resources plus resident compiler transactionally at one asset epoch.
 - Browser audio and teleport preview remain explicit absent capabilities. The
-  reason-bearing web feature profile now has exactly four gaps after the
-  separately proven Far LOD promotion.
+  reason-bearing web feature profile has exactly four gaps.
 
 The direct acceptance gate is green after browser service assembly:
 
@@ -248,9 +247,9 @@ browser host or cutover toggle.
   shutdown, supersession, retry, and terminal failure explicit epoch-safe
   states. Deferred typed catalog operations accept out-of-order completions
   while rejecting superseded and post-teardown work.
-- Browser teleport preview and audio remain explicitly unavailable. Far LOD,
-  cadence control, and worker-owned persistence also report their current
-  capabilities honestly; Slice 3 did not promote any web feature exception.
+- Browser teleport preview and audio remain explicitly unavailable. At this
+  historical Slice 3 point, Far LOD, cadence control, and worker-owned
+  persistence also reported their capabilities honestly.
 - `pnpm native:web:scene-adapters` passed its five-bit contract report
   (`31`): monotonic clamp, superseded-completion rejection, explicit reconnect,
   typed catalog completion, and post-teardown rejection. Its resident compiler
@@ -570,13 +569,11 @@ app-fatal marker.
 
 ## Recommended Next Work
 
-The adoption series is closed. Continue through Tactical 171 — Convergence And
-Parity Closeout. Its Milestone D production browser proof passed and removed
-only the `FarLod` ledger entry. Tactical 166 — Shared Resident-Tile Substrate
-Slice 4 subsequently landed multi-level rings while preserving the proven
-native and browser worker/admission/upload paths. The macro next step is
-Tactical 162 — Real-Chunk LOD Reduction Draft Slice 4; keep the remaining four
-web exceptions unchanged until their own complete proofs land.
+The adoption series is closed. Preserve its browser service boundaries and
+burn down the remaining four web exceptions only through their own complete
+proofs. Tactical 245 removed the chunk-based Far LOD product; future
+distant-terrain work must start from a new footprint-growing architecture
+instead of Tactical 162.
 
 ## Mobile Touch Follow-Up (2026-07-12)
 

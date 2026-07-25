@@ -3,8 +3,8 @@
 Topic: `lod-native-vegetation`
 
 Status: Terrain Lab hierarchy proof active 2026-07-25. Exact records and the
-initial Lab proxy path are landed; the current in-game Far LOD adapter is
-rejected and scheduled for removal by Tactical 245.
+initial Lab proxy path are landed. The rejected in-game chunk-based adapter was
+removed by Tactical 245.
 
 ## Scope
 
@@ -146,29 +146,25 @@ lane evaluates 109,850 lattice points, 549,250 terrain points, 439,400 forest
 intents, and 109,850 footprint summaries with zero record/cache traffic.
 GPU-only auto detail publishes spacing `256` with every CPU counter at zero.
 
-### Rejected in-game compatibility adapter
+### Removed in-game compatibility adapter
 
-The current synthetic Far LOD now evaluates production forest intent at each
-Mclone lattice sample and appends stable record-derived tree volumes to the
-existing tile payload. Auto level one admits all records, level two admits
-landmark ranks `2/3`, and level three is summary-only. Native compile workers
-and persistent browser compiler sessions reuse one bounded vegetation plan
+The retired synthetic Far LOD evaluated production forest intent at each
+Mclone lattice sample and appended stable record-derived tree volumes to its
+chunk-tile payload. Auto level one admitted all records, level two admitted
+landmark ranks `2/3`, and level three was summary-only. Native compile workers
+and persistent browser compiler sessions reused one bounded vegetation plan
 cache beside their surface cache.
 
-Every trunk/crown volume is clipped to its 16-by-16 tile. Cross-chunk crowns
-are queried and clipped in every intersecting tile, so the existing
-painted-capable whole-tile arbitration replaces the exact footprint without an
-owner-chunk shortcut or vegetation scheduler. The same payload follows the
-existing mono, per-eye, and full-frame multiview renderer. Far-off and all
-non-Mclone profiles remain unchanged; the Java-overworld tile fingerprint is
-pinned.
+Every trunk/crown volume was clipped to its 16-by-16 tile. Cross-chunk crowns
+were queried and clipped in every intersecting tile, so its painted-capable
+whole-tile arbitration replaced the exact footprint without an owner-chunk
+shortcut or vegetation scheduler. The same payload followed the mono, per-eye,
+and full-frame multiview renderer.
 
-This is commit `b1db968c`, a disposable compatibility adapter rather than the
-future vegetation architecture. It added substantial logic to the legacy
-per-chunk compiler before Terrain Lab proved the summary hierarchy. Do not
-expand or close it out. Tactical
+Commit `b1db968c` was a disposable compatibility adapter rather than the future
+vegetation architecture. Tactical
 [`245-retire-chunk-far-lod-runtime.md`](../tactical/245-retire-chunk-far-lod-runtime.md)
-removes it with the rest of that runtime.
+removed it with the rest of that runtime.
 
 ### Compatibility
 
@@ -672,9 +668,9 @@ stable throughout the transition.
 
 The tree planner is canonical generation policy for untouched natural
 `mclone-overworld-v1` terrain. The resulting exact blocks become authoritative
-world state. Terrain Lab and Far LOD copies remain removable presentation
-data and cannot satisfy collision, raycasts, harvesting, decay, lighting,
-ticks, persistence, or AI.
+world state. Terrain Lab copies remain removable presentation data and cannot
+satisfy collision, raycasts, harvesting, decay, lighting, ticks, persistence,
+or AI.
 
 For remote worlds:
 
@@ -743,10 +739,9 @@ is the completed execution record.
 
 Tactical
 [`244-lod-native-vegetation-presentation.md`](../tactical/244-lod-native-vegetation-presentation.md)
-owns the bounded Terrain Lab and in-game presentation implementation. It locks
-globally consistent landmark-rank admission, CPU-owned vegetation products for
-both displayed Lab lanes, and per-chunk proxy clipping through the existing
-painted-capable Far LOD lifecycle.
+records the bounded Terrain Lab presentation implementation and the now-removed
+compatibility adapter. Its durable result is globally consistent landmark-rank
+admission and CPU-owned vegetation products for both displayed Lab lanes.
 
 1. replace shader-side biome constants with production forest intent;
 2. extend `Cover` preview/cache identity and comparison facts;
@@ -787,14 +782,12 @@ to prove `Cover` at 65.5 km, add direct work/cost evidence, filter summaries by
 sample footprint where point sampling aliases, and inspect fixed anchors
 through the spacing hierarchy.
 
-### Slice 4: rejected in-game compatibility adapter — removal planned
+### Slice 4: rejected in-game compatibility adapter — removed
 
-The landed adapter feeds local intent and record-derived proxies into the
-shared Far LOD request and resident lifecycle. It proves that stable records
-can cross the current renderer boundary, not that chunk tiles are the right
-future hierarchy. No further in-game work belongs in this tactical. Tactical
-245 removes the adapter; a later architecture may consume the semantic
-vegetation products through a different spatial hierarchy.
+The adapter proved that stable records could cross a game renderer boundary,
+not that chunk tiles were the right future hierarchy. Tactical 245 removed it.
+A later architecture may consume the semantic vegetation products through a
+different spatial hierarchy.
 
 ### Later generalization
 

@@ -1019,7 +1019,7 @@ This is a question ledger, not a commitment list:
 | A build page becomes playable immediately | No exact peer in the reviewed set | Can a catalogue page enter the actual web client quickly enough to outperform video or screenshots? | [`structure-catalogue-product.md`](structure-catalogue-product.md) |
 | Friends can return without the world owner | LEGO Fortnite Odyssey, dedicated servers | Which host topology gives small groups durable convenience without mandatory central hosting? | Multiplayer and browser-hosted session topics |
 | Detailed voxel construction can escape cube aesthetics | Enshrouded, Reforj | Which first-party blocks, trims, compiled structures, or sculpting tools create identity without losing block readability? | Asset, mesh, structure, and original-world topics |
-| Huge sightlines change world meaning | Distant Horizons, Voxy | Which landmarks, navigation, and terrain composition make far LOD a product feature rather than only optimization? | Far LOD and original Overworld topics |
+| Huge sightlines change world meaning | Distant Horizons, Voxy | Which landmarks, navigation, and terrain composition make distant terrain a product feature rather than only optimization? | retired Far LOD evidence and procedural-terrain/original Overworld topics |
 
 ## Review Template
 

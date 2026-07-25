@@ -833,8 +833,6 @@ Decided in this revision (2026-07-05):
 | `QuitToTitle` | core action | Session helper emits teardown/quit-to-title host effect. |
 | `ToggleSectionOcclusion` | core action | Settings controller. |
 | `ToggleFullbright` | core action | Settings controller. |
-| `ToggleFarLod` | capability-gated | Settings controller; unsupported profiles project shared unavailable state. |
-| `SetFarLodRange` | capability-gated | Settings controller; unsupported profiles project shared unavailable state. |
 | `TogglePlayerCollisionBox` | core action | Settings controller. |
 | `ToggleFirstPersonPlayer` | core action | Settings controller. |
 | `ToggleCrosshair` | capability-gated | Settings controller; hidden/unsupported profiles project shared unavailable state. |

@@ -367,15 +367,15 @@ apply/revert path. Do not turn the read-only row into a window-size control and
 call that display-mode switching.
 
 The Graphics page also retains the already-live render distance, section
-occlusion, Far LOD/detail/range, frame pacing, and FPS cap controls. Settings
-categories and Controls Help now use a shared clipped scroll region: wheel or
-trackpad input scrolls it, controller focus brings hidden rows into view,
-headings and Back/Done remain fixed, and compact widths switch from two columns
-to one. Direct touch-drag and draggable-scrollbar interaction remain future
-input work; Deck controller focus and the mouse-emulating trackpads are covered.
-Future detailed settings should be added only with real runtime ownership and
-effects (for example particles, clouds, entity distance, mipmaps, UI scale,
-ambient occlusion, and fullscreen/video modes), not as cosmetic menu rows.
+occlusion, frame pacing, and FPS cap controls. Settings categories and Controls
+Help now use a shared clipped scroll region: wheel or trackpad input scrolls
+it, controller focus brings hidden rows into view, headings and Back/Done
+remain fixed, and compact widths switch from two columns to one. Direct
+touch-drag and draggable-scrollbar interaction remain future input work; Deck
+controller focus and the mouse-emulating trackpads are covered. Future
+detailed settings should be added only with real runtime ownership and effects
+(for example particles, clouds, entity distance, mipmaps, UI scale, ambient
+occlusion, and fullscreen/video modes), not as cosmetic menu rows.
 
 `smoke` temporarily registers a bounded command that:
 

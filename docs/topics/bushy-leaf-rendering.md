@@ -66,7 +66,6 @@ The shipped shared contract is:
 - Ordinary and placed section culling bounds include the exact 0.25-block
   overhang. Mono, flat multi-view, stereo/per-eye, and full-frame multiview all
   consume that same resident mesh.
-- Far LOD is unchanged.
 
 `Leaf Detail: Blocky / Bushy` is a shared Graphics row. A change clones the
 active prepared bundle, changes catalog policy, rebuilds through the existing
@@ -241,8 +240,9 @@ Useful mclone-specific conservation:
 - do not emit outer cards for a leaf completely enclosed by leaf neighbors;
 - consider a stricter, measured canopy-surface admission rule only if the
   fully-enclosed rule is insufficient;
-- leave Far LOD unchanged rather than preserving tiny bush cards at distances
-  where they cannot contribute useful silhouette;
+- let any future distant-terrain system derive its own canopy summary rather
+  than preserving tiny bush cards where they cannot contribute useful
+  silhouette;
 - retain a true Blocky mode that emits no extra vertices or indices; and
 - measure desktop, Steam Deck, browser WebGPU, Android, and physical Quest
   independently before choosing defaults.

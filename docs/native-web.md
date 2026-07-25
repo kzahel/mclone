@@ -48,8 +48,10 @@ records the deletion of the former managed provisioning Worker and TypeScript
 workflow. Tactical
 [`178-shared-web-lobby-scenario-parity.md`](tactical/178-shared-web-lobby-scenario-parity.md)
 records the underlying parity refactor and feature-off/scenario-on performance
-evidence. Far LOD is supported through the production shared resident
-compiler/cache/render path.
+evidence. The experimental chunk-based Far LOD product was subsequently
+removed by
+[`245-retire-chunk-far-lod-runtime.md`](tactical/245-retire-chunk-far-lod-runtime.md);
+the browser retains only the normal render-section compiler path.
 
 The high-value lower-level Worker ownership campaign is complete. Each Worker
 keeps its private Wasm heap and current external `SharedArrayBuffer` mailboxes,
@@ -64,9 +66,8 @@ and Tactical
 A new human decision is required before further browser-native long-tail
 reduction or one shared Wasm linear memory.
 
-Far LOD uses 4/8/16 rings with two-chunk hysteresis and
-replacement-before-suppress transitions. Browser audio and teleport preview
-remain explicit absent service capabilities.
+Browser audio and teleport preview remain explicit absent service
+capabilities.
 
 Tactical
 [`179-composable-world-presentation-and-live-preview-actors.md`](tactical/179-composable-world-presentation-and-live-preview-actors.md)
@@ -125,13 +126,6 @@ pnpm native:web:auxiliary-split-smoke
 # reinitialize the resident compiler at the same epoch, and capture the native
 # Asset Packs screen under /tmp.
 pnpm native:web:asset-pack-smoke
-
-# Toggle Far LOD through the production Graphics UI; prove resident shared-
-# result compilation, complete 4/8/16 coverage, and a three-chunk hysteretic
-# movement transition; compare inspected off/on/moved captures in every mode.
-pnpm native:web:far-lod-smoke
-pnpm native:web:far-lod-indexeddb-smoke
-pnpm native:web:far-lod-remote-smoke
 
 # Validate Rust menu-driven world catalog create/open/delete over IndexedDB.
 pnpm native:web:catalog-smoke

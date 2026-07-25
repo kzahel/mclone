@@ -252,8 +252,9 @@ U = union(R_0, R_1, ... R_n)
 Each view then derives its own visible set from `U`. Overlapping views reuse
 one compatible mesh/resource; separated players enlarge `U` and therefore
 increase generation, publication, compile, upload, traversal, actor, and GPU
-residency cost. Per-participant render distance, Far LOD policy, and adaptive
-render scale may bound cost, but must be explicit and observable.
+residency cost. Per-participant render distance, any future distant-terrain
+policy, and adaptive render scale may bound cost, but must be explicit and
+observable.
 
 Preparation budgets require fairness. Participant zero cannot permanently
 consume every compile/upload grant while another pane remains empty. Prefer a
@@ -494,7 +495,7 @@ per pane, but gameplay facts cannot disappear silently.
 Performance controls may include:
 
 - per-view render scale and upscaling;
-- per-participant near render distance and Far LOD detail;
+- per-participant near render distance and future distant-terrain detail;
 - shared overlap-aware compile/upload admission;
 - per-view actor, particle, shadow, and post-effect quality tiers;
 - bounded auxiliary-view refresh rates when their product contract permits;

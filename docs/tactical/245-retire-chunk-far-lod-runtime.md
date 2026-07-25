@@ -1,7 +1,7 @@
 # Tactical 245: Retire Chunk-Based In-Game Far LOD
 
-Status: proposed 2026-07-25; dependency audit complete, implementation not
-started.
+Status: complete 2026-07-25. Audit recorded in `44f5a59b`; runtime removal
+landed in `ab1750de`.
 
 Topic: `retire-chunk-far-lod`
 
@@ -302,33 +302,33 @@ the current runtime as future architecture.
 
 ### Slice 1: remove the product surface and diagnostic contract
 
-- [ ] Remove CLI, UI, settings, capabilities, startup prewarm, and scene
+- [x] Remove CLI, UI, settings, capabilities, startup prewarm, and scene
   options.
-- [ ] Remove settle-probe modes, fixtures, package scripts, browser assertions,
+- [x] Remove settle-probe modes, fixtures, package scripts, browser assertions,
   and platform proof requirements.
-- [ ] Remove Far LOD fields from public diagnostics and host receipts.
+- [x] Remove Far LOD fields from public diagnostics and host receipts.
 
 Gate: no user or validation surface can enable, configure, or require the
 retired feature.
 
 ### Slice 2: delete the runtime, worker, and renderer vertical path
 
-- [ ] Delete `LodTileKey`, both app-runtime modules, the renderer module, and
+- [x] Delete `LodTileKey`, both app-runtime modules, the renderer module, and
   the scene settle module.
-- [ ] Remove native/browser compile request/result branches and packed codecs.
-- [ ] Remove local/remote/web cache, coverage, preparation, and render paths.
-- [ ] Collapse frame composition APIs and remove Far LOD timing/stats.
+- [x] Remove native/browser compile request/result branches and packed codecs.
+- [x] Remove local/remote/web cache, coverage, preparation, and render paths.
+- [x] Collapse frame composition APIs and remove Far LOD timing/stats.
 
 Gate: all clients render normal terrain with no dormant Far LOD runtime types,
 jobs, buffers, or branches.
 
 ### Slice 3: simplify retained machinery and assets
 
-- [ ] Remove LOD-specific budget families and render-admission grants.
-- [ ] Remove LOD implementations/comments from resident cache/upload code.
-- [ ] Remove the LOD material sidecar, palette preparation, inventory entries,
+- [x] Remove LOD-specific budget families and render-admission grants.
+- [x] Remove LOD implementations/comments from resident cache/upload code.
+- [x] Remove the LOD material sidecar, palette preparation, inventory entries,
   and LOD-only Texture Lab placeholder family.
-- [ ] Prove normal render-section workers, residency, uploads, asset
+- [x] Prove normal render-section workers, residency, uploads, asset
   replacement, and budgets retain their existing behavior.
 
 Gate: retained machinery is justified by a current consumer and contains no
@@ -336,12 +336,12 @@ placeholder contract for the unknown replacement.
 
 ### Slice 4: platform and documentation closeout
 
-- [ ] Run shared native tests and direct browser/WASM checks.
-- [ ] Build desktop, web, flat Android, and Android XR boundaries selected by
+- [x] Run shared native tests and direct browser/WASM checks.
+- [x] Build desktop, web, flat Android, and Android XR boundaries selected by
   the removed cross-platform APIs.
-- [ ] Inspect normal-terrain flat and synthetic-stereo captures.
-- [ ] Update platform, web, architecture, parity, asset, and topic docs.
-- [ ] Run an exhaustive old-symbol/path search and record intentional
+- [x] Inspect normal-terrain flat, synthetic-stereo, and browser captures.
+- [x] Update platform, web, architecture, parity, asset, and topic docs.
+- [x] Run an exhaustive old-symbol/path search and record intentional
   historical references only.
 
 Gate: every first-class client builds without the feature, normal terrain
@@ -355,7 +355,7 @@ At minimum:
 cargo test --manifest-path native/Cargo.toml
 cargo check --manifest-path native/Cargo.toml \
   -p mclone-web-client --target wasm32-unknown-unknown
-pnpm native:thin-adapters:check
+pnpm native:thin-adapters:purity
 pnpm native:web:build
 pnpm native:android:apk
 pnpm native:android-xr:apk
@@ -364,6 +364,31 @@ pnpm native:android-xr:apk
 Also run the smallest current desktop flat, offscreen, synthetic-stereo, and
 browser rendered lanes that exercise shared frame composition after the
 parameter/pipeline deletion. Save and inspect captures under `/tmp`.
+
+Completed evidence:
+
+- `cargo test --workspace --quiet -- --test-threads=1` passed. One parallel
+  run missed the unrelated asynchronous valley-stream publication once; its
+  exact rerun and the serial suite passed.
+- `pnpm native:thin-adapters:purity`, `pnpm texture-lab:typecheck`,
+  `pnpm native:web:typecheck`, `pnpm native:web:build`, Worker tests, and the
+  first-party pack Python suite passed.
+- `pnpm native:desktop-offscreen:smoke` produced and passed visual inspection
+  at `/tmp/mclone-desktop-offscreen.png`.
+- `pnpm native:xr-emulation:smoke` produced two distinct, visually correct
+  eyes at `/tmp/mclone-xr-emulation.png`.
+- `pnpm host:check -- --probe-browser-webgpu` selected headed Wayland and
+  captured opaque WebGPU pixels. `pnpm native:web:app-smoke` passed with
+  `/tmp/mclone-native-web-app-canvas.png`, normal section work, and no retired
+  work kind or diagnostics.
+- `pnpm native:android:apk` and `pnpm native:android-xr:apk` both completed
+  their scripted NDK and Gradle builds.
+- The narrower standalone `native:web:chunk-smoke` was run twice and stalled
+  before session/runtime work in its catalog bootstrap. The production app
+  lane, Wasm build, browser typecheck, worker ownership, and rendered app path
+  pass; this catalog-smoke issue is outside the removed terrain feature.
+- The final non-document source/fixture/script/tool search contains no retired
+  feature symbols or `assets/mclone/lod` paths.
 
 Record:
 

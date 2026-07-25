@@ -488,8 +488,8 @@ pass by accidentally retaining either legacy boundary.
 2. Measure whether procedural generation can emit sections/implicit fills
    without permanently materializing a dense complete column.
 3. Audit biome storage, heightmaps, light sources, persistence/network bytes,
-   physics extraction, and far LOD for work proportional to legal height rather
-   than occupied or interested sections.
+   physics extraction, and future distant terrain for work proportional to
+   legal height rather than occupied or interested sections.
 4. Benchmark 256, 384, 512, and 768-block fixtures on desktop, web/WASM,
    Android, and XR before selecting presets.
 5. Only after this evidence, consider section-addressed snapshots/unloads and
@@ -563,7 +563,8 @@ normal native validation policy.
   analysis.
 - [`lighting.md`](lighting.md) owns solver/storage parity and the missing
   vertical-gap skylight behavior.
-- [`far-lod.md`](far-lod.md) owns non-authoritative distant surface
-  representation, not authoritative cubic residency.
+- [`far-lod.md`](far-lod.md) records retirement of the old non-authoritative
+  distant surface representation; it does not own authoritative cubic
+  residency.
 - [`../persistence-architecture.md`](../persistence-architecture.md) owns
   durable record families and migration policy.

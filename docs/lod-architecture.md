@@ -4,8 +4,7 @@ Status: retired experiment architecture 2026-07-25.
 
 This document preserves the research and original experimental target shape
 after reviewing Distant Horizons and Voxy. It is not current implementation
-guidance. The resulting chunk-granular in-game system is scheduled for removal
-by
+guidance. The resulting chunk-granular in-game system was removed by
 [`docs/tactical/245-retire-chunk-far-lod-runtime.md`](tactical/245-retire-chunk-far-lod-runtime.md).
 Current status lives in
 [`docs/topics/far-lod.md`](topics/far-lod.md); future multiscale work starts

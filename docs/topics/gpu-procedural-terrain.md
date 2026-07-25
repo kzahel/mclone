@@ -77,7 +77,8 @@ It does not own:
 
 - creative terrain, biome, hydrology, geology, or structure rules, which remain
   with [`mclone-overworld-generation.md`](mclone-overworld-generation.md);
-- retirement of the rejected chunk-based Far LOD runtime, which remains with
+- retirement history of the rejected chunk-based Far LOD runtime, which lives
+  in
   [`far-lod.md`](far-lod.md) and Tactical
   [`245`](../tactical/245-retire-chunk-far-lod-runtime.md);
 - exact authoritative light propagation, which remains with
@@ -147,8 +148,8 @@ See
 and
 [`terrain.rs`](../../native/crates/mclone-worldgen/src/levelgen/mclone_overworld/terrain.rs).
 
-The chunk-based synthetic Far LOD compiler scheduled for removal by Tactical
-245 is CPU materialization:
+The chunk-based synthetic Far LOD compiler removed by Tactical 245 used CPU
+materialization:
 
 1. select a generation profile and seed;
 2. generate and retain complete surface-stage `GeneratedChunk` values;
@@ -156,11 +157,10 @@ The chunk-based synthetic Far LOD compiler scheduled for removal by Tactical
 4. build CPU `Vec<f32>` vertices and `Vec<u32>` indices; and
 5. return a packed mesh for GPU upload.
 
-The relevant entry points are
-[`compile_far_terrain_lod_worker_input`](../../native/crates/mclone-app-runtime/src/far_lod.rs)
-and `FarTerrainLodWorkerCache` in the same file. Even 4-, 8-, or 16-block
-surface sampling currently pays for a full surface chunk before discarding
-most of its facts.
+The removed `compile_far_terrain_lod_worker_input` and
+`FarTerrainLodWorkerCache` entry points are preserved only in repository
+history and the retirement tactical. Even 4-, 8-, or 16-block surface sampling
+paid for a full surface chunk before discarding most of its facts.
 
 The terrain compute pipeline now exists in
 [`mclone-terrain-view`](../../native/crates/mclone-terrain-view/). It:
@@ -231,10 +231,9 @@ fallback tiles remain visible for materials without curated first-party
 textures, and final rivers/wetlands/planned streams remain absent from the GPU
 LOD path rather than being hidden by the exact pane.
 
-Normal terrain and the pending-removal Far LOD path still arrive at
-`mclone-render` as CPU-constructed mesh products. The Terrain Lab viewport
-planner and resident renderer are a reusable experimental service, not yet an
-in-game replacement.
+Normal terrain still arrives at `mclone-render` as CPU-constructed section mesh
+products. The Terrain Lab viewport planner and resident renderer are a reusable
+experimental service, not yet an in-game replacement.
 
 Existing performance records motivate measurement without proving a GPU win:
 
@@ -904,9 +903,9 @@ The shared-first boundary should be:
 - game app/platform crates: adapter/device creation, surface/session
   lifecycle, raw capability collection, and presentation only.
 
-These are prospective ownership boundaries for a new system. They do not mean
-that the current chunk-keyed `far_lod` modules, queues, payloads, or renderer
-should survive Tactical 245.
+These are prospective ownership boundaries for a new system. Tactical 245
+removed the old chunk-keyed `far_lod` modules, queues, payloads, and renderer;
+none of them are a starting point for this work.
 
 The first proof established
 [`mclone-terrain-view`](../../native/crates/mclone-terrain-view/) as that small
@@ -933,11 +932,12 @@ Status: completed for the hosted single-tile boundary by Tacticals 227-228.
 - define the visual source identity and logical surface sample;
 - define the scale-aware summary, parent/child identity, and screen-space error
   inputs;
-- preserve the existing CPU Far LOD generation, CPU mesh, payload, upload, and
-  settled draw records for `mclone-overworld-v1` as historical baselines;
+- preserve recorded CPU Far LOD generation, mesh, payload, upload, and settled
+  draw evidence for `mclone-overworld-v1` as historical baselines without
+  retaining the implementation;
 - add or reuse GPU timestamp attribution for compute and draw;
 - select fixed plane and periodic-cylinder seeds/sites; and
-- retain the existing CPU path as a bit-for-bit off/fallback control;
+- retain Terrain Lab's CPU reference path as an explicit fallback/control;
 - establish a URL-addressed Terrain Lab shell that can show CPU reference
   output before the GPU kernel exists; and
 - define rebuild-to-first-redraw latency as an explicit iteration metric.

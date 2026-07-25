@@ -139,11 +139,11 @@ remain unchanged.
 
 Slice 3 subsequently moved the worker-side render authority into
 `WebRenderWorkerActor`. Worker Rust now owns the selected asset template,
-per-world compiler sessions and release, render-section versus Far LOD
-dispatch, target normalization, compile diagnostics, shared-input validation,
-and atomic shared-result publication. The Worker TypeScript is a 69-line Wasm
-loader and opaque frame forwarder; it no longer names asset selection, world
-priority, work kinds, compiler methods, or per-world sessions.
+per-world compiler sessions and release, render-section dispatch, target
+normalization, compile diagnostics, shared-input validation, and atomic
+shared-result publication. The Worker TypeScript remains a Wasm loader and
+opaque frame forwarder; it does not own asset selection, world priority,
+compiler methods, or per-world sessions.
 
 The cut also removed one real production copy. Compiler internals now return
 their packed Rust bytes to the actor, diagnostics inspect those bytes in place,

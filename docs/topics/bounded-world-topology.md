@@ -11,10 +11,10 @@ actors, meshes, and uploads. Movement, collision, targeting, lighting, fluids,
 multiplayer, save/reopen, TCP/WebSocket transport, mono/stereo/multiview
 rendering, and opt-in diagnostics agree on the seam. Crossing performs no bulk
 geometry shift or remesh. Tactical 196 subsequently completed the exact
-384-chunk periodic Mclone terrain, surface, and vegetation caller. Far LOD,
-natural spawning, multiple visible
-lifts, torus topology, nonlinear horizon bending, and patch atlases remain
-explicit follow-ups. The selected long-term model remains an exact locally
+384-chunk periodic Mclone terrain, surface, and vegetation caller. Future
+distant-terrain presentation, natural spawning, multiple visible lifts, torus
+topology, nonlinear horizon bending, and patch atlases remain explicit
+follow-ups. The selected long-term model remains an exact locally
 Euclidean voxel world with dimension-owned finite, periodic, or later
 patch-glued horizontal topology. A flat torus follows the cylinder; a six-face
 cube atlas with inaccessible vertex regions comes before any true spherical
@@ -31,7 +31,7 @@ regional-atlas integration.**
 | Authored Only generation | supported | fixture support | fixture support | design only |
 | Mclone Overworld generation | supported | unsupported | supported at 384 chunks | design only |
 | Reference/Alpha/Beta/Small Island | supported | unsupported | unsupported | unsupported |
-| Far LOD | supported | unclaimed | explicit rejection | pending |
+| Distant terrain presentation | no current product | unclaimed | unclaimed | new architecture pending |
 | Natural spawning | supported | unclaimed | explicit rejection | pending |
 | Particles | supported baseline | unclaimed | unclaimed | pending |
 
@@ -350,9 +350,9 @@ Multiple lift instances remain opt-in work for intentionally tiny worlds.
 
 Meshing must query canonical topology neighbors at a seam so face culling,
 ambient occlusion, biome sampling, and packed light do not expose an artificial
-edge. Renderer traversal, Far LOD, actors, particles, world overlays, block
-outlines, fluids, shadows, and interaction presentation must all choose lifts
-coherently.
+edge. Renderer traversal, future distant terrain, actors, particles, world
+overlays, block outlines, fluids, shadows, and interaction presentation must
+all choose lifts coherently.
 
 ## Presentation-Only Visual Curvature
 
@@ -622,8 +622,8 @@ validation policy.
   experience after circling an excluded vertex cap?
 - How large must the cube exclusion regions be relative to interaction,
   tracking, generation dependency, and fog radii?
-- Do Far LOD and sky rendering wrap, terminate, or use topology-specific
-  presentation in each initial profile?
+- Do future distant terrain and sky rendering wrap, terminate, or use
+  topology-specific presentation in each initial profile?
 - When multiple visible lifts are admitted, which render/interaction instance
   wins at exact half-period ties without duplicating authoritative identity?
 

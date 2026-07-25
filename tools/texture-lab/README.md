@@ -52,15 +52,12 @@ Distance between candidate and vanilla luminance/hue histograms), and
 alpha/cutout discipline (semi-alpha share — vanilla cutout alpha is binary —
 plus silhouette island structure and dark-fringe halo detection, all measured
 at the tile's native resolution since downsampling manufactures semi-alpha
-edges). The candidate is downsampled to the vanilla grid first,
-so a 32x32 tile and a 16x16 vanilla texture are compared apples-to-apples.
-Far-LOD material tiles (`assets/mclone/lod/...`) resolve a vanilla counterpart
-too — the `_lod` authoring suffix is stripped for the lookup — so the whole LOD
-family is measured against vanilla, not only the runtime-replacement textures;
-hue rows report n/a below the neutral-saturation floor (tint-driven grayscale
-like vanilla leaves has no meaningful hue direction to chase). The
-numbers are directional guidance, not a pass/fail gate. Scope it to one or a few
-textures with `--texture <name>`, or add `--json` for tool consumption.
+edges). The candidate is downsampled to the vanilla grid first, so a 32x32 tile
+and a 16x16 vanilla texture are compared apples-to-apples. Hue rows report n/a
+below the neutral-saturation floor (tint-driven grayscale like vanilla leaves
+has no meaningful hue direction to chase). The numbers are directional
+guidance, not a pass/fail gate. Scope it to one or a few textures with
+`--texture <name>`, or add `--json` for tool consumption.
 
 To choose between two candidate PNGs (for example two iterations or two
 variants), use compare mode:
@@ -179,9 +176,7 @@ The browser UI uses one source-controlled lifecycle:
 
 The main page shows Candidate, Provisional, Curated, and the real local
 Minecraft Reference together. Minecraft Reference is read-only and local-only;
-it is never a promotion source. Historical custom Far LOD tiles are hidden
-from the active lifecycle because mipmaps, flat colors, and Far LOD are derived
-from the selected runtime material.
+it is never a promotion source.
 
 `Use as Provisional` and `Accept as Curated` write the pack-local lifecycle
 manifest and promoted PNG:
@@ -408,10 +403,10 @@ The starter DSL now includes broader authored structure beyond speckles:
 - compositional textures, such as base stone plus ore/mineral masks
 
 The web index classifies the current art source for each texture. Textures that
-are only seeded macro-noise/speckle coverage, including the broad
-`far-lod-material` set, are labeled `noise placeholder` in the sidebar, detail
-view, atlas cards, inspector, and search. They are useful for coverage and
-layout review, but should not be mistaken for curated/frozen texture art.
+are only seeded macro-noise/speckle coverage are labeled `noise placeholder`
+in the sidebar, detail view, atlas cards, inspector, and search. They are
+useful for coverage and layout review, but should not be mistaken for
+curated/frozen texture art.
 The sidebar Queue filter turns those labels into replacement queues: `Noise
 placeholders`, `Authored structure`, `Frozen assets`, `Has candidates`, and
 `Needs candidates`. `Needs candidates` means the texture is not frozen and has

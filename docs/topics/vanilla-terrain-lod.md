@@ -12,8 +12,8 @@ terrain sampler and its first product use in Terrain Lab.
 
 The sampler exists to review recognizable vanilla macro geography without
 generating complete chunks and discarding almost all of their block data. It
-does not replace canonical vanilla generation, the existing chunk-backed Far
-LOD fallback, or Mclone's independent procedural CPU/GPU preview graph.
+does not replace canonical vanilla generation or Mclone's independent
+procedural CPU/GPU preview graph.
 
 ## Product Decision
 
@@ -201,7 +201,8 @@ Possible follow-ups, each requiring its own explicit contract, are:
 - sparse semantic proxies for selected vanilla structures or vegetation;
 - first-party biome tinting;
 - a native profiling host; and
-- adoption by the in-game Far LOD control plane.
+- use by a future footprint-growing in-game terrain hierarchy, if that
+  architecture can preserve the sampler's bounded direct-column contract.
 
 None is required to accept the bounded Terrain Lab first pass.
 

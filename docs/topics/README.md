@@ -122,7 +122,7 @@ series implements the same concern, normally reuse the document slug in its
   structure vocabulary, hydrology and authored-water fallbacks, site grading,
   exact touched-chunk scheduling, authored-tree reservation, persistent
   residents, an `FS-*` dependency/proof ledger, tactical completion gates, and
-  the deliberately deferred Far LOD proxy.
+  deliberately deferred distant-presentation proxies.
 - [`structure-lab.md`](structure-lab.md): accepted source-first Structure Lab
   direction—agent-authored TypeScript DSL, mandatory generated-JSON drift
   gates, Rust build-time baked meshes, a polished read-only
@@ -210,9 +210,8 @@ series implements the same concern, normally reuse the document slug in its
 - [`web-scene-host-adoption.md`](web-scene-host-adoption.md): completed browser
   adoption of the shared `McloneSceneHost`, including landed service and
   typed-async boundaries, preserved worker/compiler topology, production
-  cutover evidence, the subsequently proven browser Far LOD producer, and the
-  exact remaining four-row browser feature ledger. Macro sequencing now lives
-  in Tactical 171 — Convergence And Parity Closeout.
+  cutover evidence, the subsequently retired browser Far LOD experiment, and
+  the exact remaining four-row browser feature ledger.
 - [`web-worker-runtime-ownership.md`](web-worker-runtime-ownership.md): accepted
   isolated-Rust-actor and domain-blind-TypeScript direction for browser
   Workers, including the landed server-job actor and main-side Rust render
@@ -271,7 +270,7 @@ series implements the same concern, normally reuse the document slug in its
   migration of original-profile trees from vanilla-shaped chunk decoration to
   worldgen-owned forest intent and stable tree records shared by exact chunks,
   Terrain Lab summaries/instances, and a later in-game multiscale terrain
-  architecture; the rejected chunk-Far-LOD adapter is removal scope.
+  architecture; Tactical 245 removed the rejected chunk-Far-LOD adapter.
 - [`lighting.md`](lighting.md): native Java-shaped stored-light system,
   render handoff, solver/status/rendering gaps, and next slices.
 - [`dynamic-point-lights.md`](dynamic-point-lights.md): presentation-side
@@ -329,8 +328,8 @@ series implements the same concern, normally reuse the document slug in its
   standalone first-party boundary.
 - [`texture-material-profiles.md`](texture-material-profiles.md): accepted
   curated/provisional/Minecraft/diagnostic texture taxonomy, shared named
-  engine and Terrain Lab profiles, derived mip/flat/Far LOD representations,
-  and simplified Texture Lab promotion lifecycle.
+  engine and Terrain Lab profiles, derived mip/flat representations, and
+  simplified Texture Lab promotion lifecycle.
 - [`falling-tree-physics.md`](falling-tree-physics.md): Dynamic Falling Tree
   and Sable reference investigation for future tree felling, moving voxel
   assemblies, and impact effects.

@@ -116,9 +116,10 @@ burn-down.
 > shared native/web transactional asset replacement, UI, persistence, and
 > provenance. The structural matrix and prose below no longer describe the
 > retired browser runtime/render-policy fork. Tactical 171 — Convergence And
-> Parity Closeout Milestone D then promoted production browser Far LOD through
-> the shared resident-tile worker/runtime/render path. It owns the exact
-> remaining four-row browser feature ledger and active LOD sequence.
+> Parity Closeout Milestone D then promoted the historical browser Far LOD
+> experiment through the shared resident-tile worker/runtime/render path. The
+> chunk-based product was later removed by Tactical 245; the four-row browser
+> feature ledger remains.
 > Refreshed on 2026-07-21 after Tacticals 203-206 completed the shared
 > platform-host boundary. Desktop, flat Android, and browser now use one
 > `MonoInteractiveInputRouter`; browser TypeScript forwards raw input and owns
@@ -285,7 +286,7 @@ use (and should) · — n/a.
 | `app-runtime::client_catalog_policy` (world catalog UI/action policy) | ✅ (desktop adapter and desktop XR scene execute native catalog effects) | ✅ (IndexedDB promise adapter executes controller effects; TS storage executor delegates id validation, id generation, ordering, active-delete, and message text to Rust wasm policy helpers) | ✅ (shared Mono host executes native catalog effects against the Android app-private world root; AVD New World flow covered) | ✅ (scene host executes shared catalog effects with an Android app-private world root) | `cargo test -p mclone-app-runtime client_catalog_policy`; `cargo test -p mclone-scene`; `pnpm native:web:typecheck`; `pnpm native:web:catalog-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:xr:mac:wivrn:mclone`; `pnpm native:android-xr:apk`; tactical 141 Slice 3; tactical 143 Slice 3; tactical 143 Slice 6; tactical 143 Slice 7; tactical 143 Slice 7a |
 | `app-runtime::client_experience` (catalog/session/settings facade) | ✅ (desktop/offscreen adapter and desktop XR scene execute facade effects; host window/runtime/pointer-lock/OpenXR work remains adapter-local) | ✅ (web adapter executes facade effects; IndexedDB promises, worker startup, and JS result writing remain adapter-local) | ✅ (shared Mono host executes facade effects; Android activity, raw touch translation, surface, and storage roots remain adapter-local) | ✅ (scene host executes facade catalog/session/settings/capability effects; Android activity/session adapters and app-private storage roots remain host-local) | `cargo test -p mclone-app-runtime`; `cargo test -p mclone-native-client ui_action_routing`; `cargo test -p mclone-native-client catalog_`; `cargo test -p mclone-scene`; `pnpm native:desktop-offscreen:smoke`; `pnpm native:web:typecheck`; `pnpm native:web:smoke`; `pnpm native:web:catalog-smoke`; `pnpm native:android:avd-smoke`; `pnpm native:android:avd-session-smoke`; `pnpm native:xr:mac:wivrn:smoke`; `pnpm native:android-xr:session-smoke`; tactical 143 Slice 2; tactical 143 Slice 4; tactical 143 Slice 6; tactical 143 Slice 7 |
 | `app-runtime::render_assets` | ✅ | — (wasm has own) | ✅ | ✅ | `cargo test -p mclone-app-runtime` |
-| `app-runtime::render_asset_data` (CPU mesh/atlas/far-LOD bundle) | ✅ | ✅ (production epoch replacement through scene host) | ✅ | ✅ | `cargo test -p mclone-app-runtime`; Tactical 169 — Runtime Asset Pack Selection; Tactical 170 — Web Scene-Host Adoption |
+| `app-runtime::render_asset_data` (CPU mesh/atlas bundle) | ✅ | ✅ (production epoch replacement through scene host) | ✅ | ✅ | `cargo test -p mclone-app-runtime`; Tactical 169 — Runtime Asset Pack Selection; Tactical 170 — Web Scene-Host Adoption |
 | `mclone-audio` | ✅ (desktop flat + desktop XR code wired; listen validation pending) | ✗ (web deferred) | ✅ (code wired; device audio validation pending) | ✅ (code wired; device audio validation pending) | `cargo test -p mclone-audio`; tactical 091 build gates |
 | `mclone-ui` (GuiDrawList) | ✅ | ✅ | ✅ (shared touch menu+controls, AVD touch/session smoke) | ✅ (XR world panel + pointer, user-validated; automation/tuning pending) | `native:web:app-smoke`; `cargo test -p mclone-ui`; `cargo test -p mclone-scene`; `native:android:avd-session-smoke` |
 | `mclone-input` controller session + `app-runtime::input_preferences` | ✅ (macOS GameController, Linux/Windows GilRs desktop flat/XR; scripted offscreen; native profile) | ✅ (standard Gamepad API; schema-1 browser profile) | ✅ (shared Android collector; native profile) | ✅ (Android collector + semantic OpenXR; native profile) | `cargo test -p mclone-input`; `cargo test -p mclone-app-runtime input_preferences`; `cargo test -p mclone-scene`; `native:web:app-smoke`; `native:android:apk`; `native:android-xr:apk`; Tactical 216 |
@@ -495,17 +496,12 @@ lower-level render residency and explicit product/evidence gaps:
    text-input/connect-world UI needed to choose endpoints in app instead of via
    CLI/properties/query params. World catalog selection now has focused web
    menu smoke coverage through tactical 141. (tactical 095)
-3. **Finish shared resident-tile/LOD convergence, then burn down browser feature
-   exceptions.** Browser worker/WebSocket/IndexedDB mechanisms are now typed
-   services below `McloneSceneHost`; the old browser policy host is gone. The
-   architectural fork is now closed: Tactical 166 — Shared Resident-Tile
-   Substrate Slices 1–3 moved synthetic far LOD onto shared workers, admission,
-   residency, and region-arena uploads, and Tactical 171 — Convergence And
-   Parity Closeout Milestone D proved that path in production browser modes.
-   Tactical 166 — Shared Resident-Tile Substrate Slice 4 then landed 4/8/16
-   rings, hysteresis, replacement-before-suppress, and cross-level seam proof.
-   Next resume Tactical 162 — Real-Chunk LOD Reduction Draft Slice 4, then the
-   remaining exact browser feature promotions.
+3. **Keep the chunk-based Far LOD product retired while burning down browser
+   feature exceptions.** Browser Worker/WebSocket/IndexedDB mechanisms remain
+   typed services below `McloneSceneHost`, and normal render-section compilation
+   retains the shared worker, budget, residency, and upload paths. Future
+   distant-terrain work starts from Terrain Lab and a footprint-growing
+   hierarchy; do not resume Tactical 162's reduced-real chunk producer.
 4. **Finish the shared menu surface before adding more menu features.** XR now
    has a shared world-panel pause/options menu with pointer input, and user
    headset validation says it works mostly fine. Flat Android consumes

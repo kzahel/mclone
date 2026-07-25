@@ -63,41 +63,31 @@ pack-local provisional or frozen PNG, and commit an explicit canonical runtime
 material binding. Exact inventory matches may be suggested, while ambiguous
 textures remain unpromotable. The initial accepted mapping makes the important
 non-filename relationship `grass_block_top` ->
-`mclone:block/grass_block` visible. Historical custom Far LOD tiles are
-excluded from the active lifecycle. Browser promotion tests operate on an
-isolated copy of the source pack and all ten headed Chrome tests pass.
+`mclone:block/grass_block` visible. The retired custom LOD-only tile family was
+removed from the source pack. Browser promotion tests operate on an isolated
+copy of the source pack and all ten headed Chrome tests pass.
 
 Implementation update (2026-07-25): first-party pack construction now consumes
 only lifecycle distribution roots. A full Texture Lab runtime-compatible
 export writes accepted canonical ids into
 `lifecycle-curated-root` or `lifecycle-provisional-root`; the broad authoring
-and historical LOD export remains a review artifact and no longer enters the
-authored pack.
+export remains a review artifact and no longer enters the authored pack.
 
 The resulting authored archive has 46 payload files: the two actually curated
 canonical textures (`grass_block` and `stone`) plus 44 repository-owned
-non-texture assets. It contains no Minecraft block PNG and no static custom
-Far LOD palette. The provisional archive still covers all canonical materials
-with deterministic generated art and overlays any lifecycle-provisional
-textures. The three-pack build, six deterministic pack tests, and strict
-first-party preparation pass; preparation reports the two accepted materials
-as first-party and the other 143 requested texture assets as provisional.
+non-texture assets. It contains no Minecraft block PNG. The provisional
+archive still covers all canonical materials with deterministic generated art
+and overlays any lifecycle-provisional textures. The three-pack build, six
+deterministic pack tests, and strict first-party preparation pass; preparation
+reports the two accepted materials as first-party and the other requested
+texture assets as provisional.
 
-Implementation update (2026-07-25): Far LOD no longer loads
-`assets/mclone/lod/materials.v1.json` during scene or legacy render-asset
-preparation. `mclone-mesh` derives representative top and side colors from the
-resolved atlas sprite for each block state, using the same alpha-weighted
-average as Flat Colors and a stable plains sample of the normal block/fluid
-tint policy. The shared runtime turns those summaries into the Far LOD palette
-for every selected profile and presentation.
-
-Strict first-party preparation now reports 219 derived Far LOD colors from the
-221-state terrain catalog (air and cave air intentionally have no material),
-despite neither distributable pack containing a static Far LOD palette. All
-100 `mclone-mesh` and 329 `mclone-app-runtime` unit tests pass. Terrain Lab's
-exact and LOD renderers already receive the same selected profile and
-presentation through their shared Wasm asset preparation, so they retain the
-same derived-source invariant.
+Implementation update (2026-07-25): Tactical 245 removed the chunk-based Far
+LOD palette and its `assets/mclone/lod/materials.v1.json` sidecar entirely.
+`mclone-mesh` still derives representative colors from resolved atlas sprites
+for Flat Colors, using alpha-weighted averages and the normal block/fluid tint
+policy. Terrain Lab's exact and procedural renderers continue to receive the
+same selected profile and presentation through shared Wasm asset preparation.
 
 Implementation update (2026-07-25): final profile captures exposed that Hybrid
 Authoring's source order was correct but its curated layer could not shadow
@@ -132,12 +122,8 @@ Final validation (2026-07-25):
   `/tmp/mclone-terrain-lab-desktop-chrome-*`;
 - the headed browser asset-profile probe applies and persists Mclone Original
   at asset epoch 1 while its render worker reloads all four source archives;
-- the native Far LOD settle probe passes all four waypoints with zero pending
-  stream work, zero coherence failures, 12 Far LOD region draws, and
-  deterministic revisit pixels;
-- the deterministic first-party build and strict validation pass with 219
-  derived non-air Far LOD colors, no Minecraft provenance, and no diagnostic
-  provenance in Mclone Original; and
+- the deterministic first-party build and strict validation pass with no
+  Minecraft provenance and no diagnostic provenance in Mclone Original; and
 - the full Rust workspace, native thin-adapter boundary, native-client tests,
   Rust/Wasm web build, Terrain Lab typecheck and unit tests, focused headed
   Terrain Lab browser test, Texture Lab browser tests, and pack tests pass.
@@ -151,7 +137,7 @@ textures across the runtime and terrain tools. It covers:
 - real local Minecraft 1.17.1 textures used for parity and comparison;
 - conspicuous numbered missing-texture diagnostics;
 - textured versus flat-color presentation;
-- automatic mipmaps and Far LOD material summaries;
+- automatic mipmaps and flat-color material summaries;
 - the shared named profiles exposed by the engine and Terrain Lab; and
 - the simplified promotion model exposed by Texture Lab.
 
@@ -191,12 +177,10 @@ art, not a product fallback, and not a normal player-facing source.
 - Ordinary textured rendering automatically builds and samples mip chains.
 - Flat-color rendering derives representative colors from the resolved source
   texture.
-- Far LOD derives its material summary from the resolved source texture and
-  may add stable aggregate facts such as opacity or variation.
 
-Mipmaps, flat colors, and Far LOD are therefore representations of a selected
-source, not separately curated texture families. A custom hand-authored “LOD
-texture” is not part of the normal material lifecycle.
+Mipmaps and flat colors are therefore representations of a selected source,
+not separately curated texture families. A custom hand-authored distant
+texture is not part of the normal material lifecycle.
 
 ## Named Visual Profiles
 
@@ -261,7 +245,7 @@ Every resolved canonical material records:
 - source family: curated, provisional, Minecraft, or diagnostic;
 - concrete pack/source provenance;
 - whether a lower-priority fallback was required; and
-- the derived representative color used by flat and Far LOD paths.
+- the derived representative color used by flat-color paths.
 
 The current first-party pack split is refined as follows:
 
@@ -340,9 +324,7 @@ Before this implementation:
   face-specific grass assets such as `grass_block_top`; accepting that texture
   again cannot fix the canonical runtime miss by itself.
 - ordinary chunk textures already receive automatic mip chains in
-  `mclone-render`;
-- Far LOD consumes representative colors, while Texture Lab also emits a
-  historical hand-defined LOD texture family; and
+  `mclone-render`; and
 - engine, Terrain Lab native/Wasm entry points, and Texture Lab use overlapping
   but not identical selection terminology.
 
@@ -371,8 +353,8 @@ face-specific asset as active.
 - Provisional Audit cannot accidentally resolve curated or Minecraft art.
 - Engine and Terrain Lab resolve the same canonical material to the same source
   family for an equivalent profile.
-- Textured, flat-color, ordinary mip, and Far LOD representations agree on the
-  selected source.
+- Textured, flat-color, and ordinary mip representations agree on the selected
+  source.
 - First-party packs build and validate with the Minecraft reference tree
   absent.
 - No distributable artifact contains Minecraft texture bytes.
@@ -389,9 +371,9 @@ face-specific asset as active.
    Lab. **Completed 2026-07-25.**
 4. Replace Texture Lab's overlapping pack/status controls with the canonical
    material lifecycle. **Completed 2026-07-25.**
-5. Derive flat colors and Far LOD summaries from resolved textures, retain
-   automatic mip generation, and remove the separate LOD-texture assumption
-   from the active path. **Completed 2026-07-25.**
+5. Derive flat colors from resolved textures, retain automatic mip generation,
+   and remove the separate LOD-texture assumption from the active path.
+   **Completed 2026-07-25.**
 6. Validate deterministic first-party builds, shared native/Wasm behavior, and
    rendered output for Original, Minecraft, Hybrid, Coverage, and Provisional
    Audit. **Completed 2026-07-25.**

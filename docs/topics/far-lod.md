@@ -1,17 +1,17 @@
 # Far Terrain Presentation
 
-Topic: `far-lod-settle-contract`
+Topic: `retire-chunk-far-lod`
 
-Status: chunk-based in-game Far LOD rejected for product use on 2026-07-25.
+Status: chunk-based in-game Far LOD rejected and removed on 2026-07-25 by
 Tactical
-[`245`](../tactical/245-retire-chunk-far-lod-runtime.md)
-owns its complete removal. No replacement in-game distant-terrain system is
-currently selected or active.
+[`245`](../tactical/245-retire-chunk-far-lod-runtime.md).
+No replacement in-game distant-terrain system is currently selected or
+active.
 
 ## Decision
 
-Remove the current synthetic Far LOD vertical feature instead of continuing to
-fix, tune, or generalize it.
+Record the removal of the synthetic Far LOD vertical feature and prevent its
+accidental revival.
 
 The experiment is irreducibly chunk-granular:
 
@@ -35,28 +35,20 @@ raising sample spacing. The eventual game design should be informed by that
 pipeline and by footprint-aware coarse summaries. It should not be constrained
 by the current runtime's `ChunkPos + level` identity.
 
-## Current Implementation Pending Removal
+## Removal Result
 
-The rejected implementation is still present until Tactical 245 lands:
+Commit `ab1750de` deleted the complete vertical feature:
 
-- `mclone-app-runtime::far_lod` owns chunk-band selection, 4/8/16 spacing,
-  hysteresis, movement guards, startup prewarm, CPU tile compilation, retained
-  cache, upload admission, and Mclone vegetation proxies;
-- `mclone-app-runtime::lod_coverage` selects real or LOD visibility per
-  `ChunkPos`;
-- native and browser render compilers carry a second Far LOD work/result lane;
-- `mclone-render::far_lod` owns fixed 16-by-16-chunk region arenas and
-  mono/per-eye/multiview draw pipelines;
-- `mclone-scene` owns Far LOD resources, frame preparation, arbitration,
-  timing, and settle snapshots;
-- desktop, web, Android, and XR hosts expose configuration, metrics, and proof
-  plumbing; and
-- a dedicated settle-probe suite and three checked-in fixture scripts validate
-  the old product.
+- both app-runtime producer/coverage modules and the renderer/settle modules;
+- `LodTileKey`, chunk-band policy, caches, arbitration, and CPU tile payloads;
+- native and browser compile work/result branches and packed codecs;
+- scene/runtime preparation, prewarm, timing, diagnostics, and draw plumbing;
+- desktop, web, Android, and XR settings, receipts, probes, and scripts; and
+- the LOD material sidecar, palette, inventory entry, and Texture Lab
+  placeholder family.
 
-The direct implementation/probe files contain more than 8,000 lines, with
-cross-cutting references in dozens of shared and platform files. This is a
-vertical feature removal, not a one-file renderer deletion.
+The implementation removal deleted 12,722 lines across 77 files. An exhaustive
+non-document search now finds no old feature symbols or asset paths.
 
 Do not land further:
 
@@ -156,18 +148,20 @@ The future system must prove:
    and
 8. a renderer path whose CPU/GPU data movement is justified by measurements.
 
-## Validation Direction
+## Validation Result
 
-The retirement is complete only when:
+The retirement is complete:
 
 - every first-class client builds without Far LOD types or host plumbing;
-- normal exact terrain renders in flat, synthetic-stereo, browser, Android,
-  and XR boundaries selected by the removed APIs;
-- real-section worker, residency, upload, and frame-budget tests remain green;
+- normal exact terrain rendered in inspected flat, synthetic-stereo, and
+  headed-Wayland browser captures;
+- flat Android and Android XR APK builds passed through their scripted NDK
+  lanes;
+- the serial full workspace suite, real-section worker, residency, upload,
+  frame-budget, asset-pack, Texture Lab, Wasm, and adapter-purity gates passed;
 - asset preparation no longer produces or expects the LOD material sidecar;
-- no UI, CLI, preference, diagnostic, or package-script surface can enable
-  the feature; and
-- an exhaustive search finds old-system names only in intentional historical
-  documentation.
+- no UI, CLI, preference, diagnostic, or package-script surface can enable the
+  feature; and
+- old-system names remain only in intentional historical documentation.
 
 Current commands and slice ordering live in Tactical 245.

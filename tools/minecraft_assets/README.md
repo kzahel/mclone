@@ -68,9 +68,9 @@ generated-assets/texture-lab/mclone-diagnostic-missing.pbp
 ```
 
 The command first performs a clean texture-lab runtime export with
-`--no-reference`, packages the accepted authored PNGs, far-LOD metadata, and
-repo-owned figures, exports the shared Rust inventory, and builds the generated
-sources. `generated-assets/` remains ignored.
+`--no-reference`, packages the accepted authored PNGs and repo-owned figures,
+exports the shared Rust inventory, and builds the generated sources.
+`generated-assets/` remains ignored.
 
 The legacy-named generated fallback is now the provisional source. It contains
 restrained deterministic color/noise textures for every canonical material,
