@@ -1310,7 +1310,7 @@ on the browser main thread for each paced chunk.
 
 Tactical
 [`242`](../tactical/242-terrain-lab-worker-canonical-meshing.md) is
-implemented and locally validated. The persistent canonical Worker now owns
+complete. The persistent canonical Worker now owns
 raw production chunks, presentation conversion, production textured meshing,
 and versioned packed section bundles. It compiles growing bounded batches and
 deduplicates each batch's requested plus cardinal correction targets before
@@ -1326,26 +1326,38 @@ separate Worker generation/presentation/mesh/pack/transfer, main decode,
 upload, maximum admission duration, deduplicated target fan-out, Worker raw
 cache, and warm reuse.
 
-The complete local desktop/phone headed-WebGPU matrix passed with inspected
-961-chunk pixels. Initial production wall time remains roughly comparable
-with the prior single-Worker path, as expected; the gain is interaction
-isolation, lower main-thread/raw memory ownership, batched deduplication, and
-activation-only immediate returns. Hosted stage evidence will determine
-whether a small Worker pool is the next worthwhile throughput experiment.
+The complete local and byte-verified hosted desktop/phone headed-WebGPU
+matrices passed with inspected 961-chunk pixels. The hosted initial footprint
+took 142.05 seconds on desktop and 138.67 seconds at Pixel dimensions. Worker
+generation plus mesh accounted for about 51--52 seconds; aggregate
+main-thread decode plus upload took about 2.5 seconds and the maximum one-chunk
+admission remained below 7.3 ms. The tracked lower bound fell from
+326,036,232 to 259,119,880 bytes because the main renderer no longer owns a
+second 66,916,352-byte raw copy.
+
+The entering 31-chunk edge used 69 deduplicated targets rather than the old
+155-target upper bound. Returning retained 992 Worker raw chunks and
+reactivated 31 warm GPU chunks with zero Worker mesh and zero main decode, but
+still took 6.87 seconds on desktop and 7.63 seconds on phone. That isolates
+the next likely bottleneck: repeated full-footprint render
+traversal/encoding/submission and animation-frame cadence, not admission or
+meshing. A Worker pool should wait until that render boundary is measured.
 
 The next implementation direction is:
 
-1. use the canonical stage evidence to decide whether a bounded Worker pool
-   is worth its duplicate compiler/asset memory;
-2. band-limit or aggregate other sub-sample field energy while preserving
+1. instrument and reduce progressive canonical full-footprint
+   traversal/encode/submit cost while preserving visible per-chunk pop-in;
+2. decide from the remaining generation/mesh evidence whether a bounded
+   Worker pool is worth its duplicate compiler/asset memory;
+3. band-limit or aggregate other sub-sample field energy while preserving
    coast and mountain silhouettes;
-3. add sparse structure and macro vegetation records/layers without moving
+4. add sparse structure and macro vegetation records/layers without moving
    bounded placement search into WGSL;
-4. add a Rust/WGSL edit watcher and measure source-edit to first updated
+5. add a Rust/WGSL edit watcher and measure source-edit to first updated
    coarse pixel;
-5. choose explicit mixed-level seam/transition behavior before using partial
+6. choose explicit mixed-level seam/transition behavior before using partial
    child coverage; and
-6. decide whether the current Far LOD control plane should adopt the shared
+7. decide whether the current Far LOD control plane should adopt the shared
    procedural content and exact-handoff contracts proven in the Lab.
 
 ## Open Questions

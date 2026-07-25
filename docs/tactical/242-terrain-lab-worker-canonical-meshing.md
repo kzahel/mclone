@@ -1,7 +1,7 @@
 # Terrain Lab Worker Canonical Meshing
 
-Status: implemented and locally validated 2026-07-25; hosted closeout
-pending.
+Status: completed 2026-07-25, including byte-verified hosted desktop/phone
+standard and `31x31` proofs.
 
 Topic: `gpu-procedural-terrain`
 
@@ -270,5 +270,76 @@ The single Worker does not materially reduce initial 961-chunk wall time.
 That result is expected: production generation and mesh construction still
 perform comparable total math. This slice instead removes that math from the
 UI thread, deduplicates within batches, eliminates main-thread raw copies, and
-makes immediate return work activation-only. Hosted stage timings will decide
-whether the next throughput experiment should be a small Worker pool.
+makes immediate return work activation-only.
+
+## Hosted Closeout
+
+The first hosted maximum proof exposed one evidence-only defect: a warm-only
+return sends no mesh batch, so a fresh browser report reset the displayed
+Worker raw-cache count to zero even though the persistent session retained the
+chunks. The Worker `begin` receipt now includes current raw-cache count and
+bytes. Focused `9x9` acceptance requires 90 retained chunks after its return;
+maximum acceptance requires exactly 992. The corrected behavior was committed
+and the production bundle rebuilt before final closeout.
+
+The bundle was built from `ecba6ee84e76` and uploaded only under `/terrain/`.
+Every content-addressed object was fetched from the public route and
+byte-compared before `terrain/index.html` was published last:
+
+| Object | SHA-256 |
+| --- | --- |
+| `index.html` | `837aad22e880ad44a423df86a51fad91c9f12083a299c187d6bfdf35c00c7ae2` |
+| `assets/canonical-worker-D6Lr1DES.js` | `e3020046a55419e2962abb223f15a5367ac9d835e57a6b2fb978c633e5431bdd` |
+| `assets/index-C-nQ4XBZ.js` | `5c812dbd14076be38669f7eb996d74e6c82c73b2c75f1a9a2835ccdd02693b74` |
+| `assets/index-CoWCOr4c.css` | `63ee48983f72ded10cfeb1b5891f1da019576678e7059e2f74dc7fb1c70ad343` |
+| `assets/lod-worker-DXBDkrmV.js` | `cd1f476fbc263e93d1b06b3fc960ea38ed2bcd97ca7f79d998d854ca232777ee` |
+| `assets/mclone_terrain_lab_bg-Cb2v90dg.wasm` | `a385c69a6ac341848d10a48bcca3a4c807985bbd35248460b4cfb3f734494c44` |
+
+Hosted headed-Wayland desktop and Pixel-sized standard smokes passed with zero
+browser errors. They exercised the exact, CPU LOD, and GPU LOD workspace,
+navigation, cold-cache race, production field agreement, and the new stage
+diagnostics. Both reported zero main-thread canonical raw bytes and a maximum
+of one admission per frame.
+
+The opt-in hosted maximum proof then produced:
+
+| Hosted lane | Initial 961 | Worker generation | Worker mesh | Main decode | GPU upload | Max admission |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| desktop | 142.05 s | 38.37 s | 12.61 s | 1.18 s | 1.34 s | 7.28 ms |
+| phone | 138.67 s | 38.09 s | 13.71 s | 1.12 s | 1.40 s | 7.23 ms |
+
+Both initial passes formed 2,229 deduplicated mesh targets across their
+growing batches. Both used 66,916,352 Worker raw-cache bytes, zero
+main-thread raw bytes, and 192,203,528 used mesh bytes, for a 259,119,880-byte
+tracked lower bound. This removes one entire 66,916,352-byte raw copy from the
+old browser/main-renderer split.
+
+The generated one-chunk shift retained 930 chunks and used 69 deduplicated
+targets rather than the old 155-target per-arrival upper bound:
+
+| Hosted lane | Generated shift | Worker mesh | Main decode |
+| --- | ---: | ---: | ---: |
+| desktop | 7.11 s | 748 ms | 35.8 ms |
+| phone | 7.54 s | 841 ms | 38.5 ms |
+
+The return retained all 992 Worker raw chunks and reactivated 31 warm chunks
+over 31 frames. Both returned zero Worker mesh and zero main decode; desktop
+took 6.87 seconds and phone took 7.63 seconds.
+
+Those return totals are the decisive next diagnostic. Removing mesh, transfer,
+decode, and upload did not reduce the paced return wall time relative to the
+old raw-cache replay. Initial Worker generation plus mesh also accounts for
+only about 51--52 seconds of a 139--142-second request. The next optimization
+should therefore measure progressive canonical render traversal,
+encoding/submission, React evidence publication, and animation-frame cadence
+before adding a Worker pool. The likely waste is redrawing an increasingly
+large exact footprint after every single activation, not one slow admission.
+
+Final hosted captures were inspected at:
+
+- `/tmp/mclone-terrain-lab-hosted-desktop-canonical-961.png`; and
+- `/tmp/mclone-terrain-lab-hosted-mobile-canonical-961.png`.
+
+The implementation series is `061c14e1`, `ce5da7b7`, `4723a5bb`,
+`4ca14275`, `6c3a5cd8`, `e5611f2e`, `5b2ba4e6`, and `ecba6ee8`, followed by
+this final receipt.
