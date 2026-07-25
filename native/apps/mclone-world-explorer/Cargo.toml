@@ -8,3 +8,17 @@ publish.workspace = true
 [[bin]]
 name = "mclone-world-explorer"
 path = "src/main.rs"
+
+[dependencies]
+anyhow.workspace = true
+env_logger.workspace = true
+image.workspace = true
+log.workspace = true
+mclone-assets.workspace = true
+mclone-core.workspace = true
+mclone-mesh.workspace = true
+mclone-terrain-view.workspace = true
+mclone-worldgen.workspace = true
+pollster.workspace = true
+wgpu.workspace = true
+winit.workspace = true

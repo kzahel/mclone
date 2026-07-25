@@ -1947,6 +1947,20 @@ dependencies = [
 [[package]]
 name = "mclone-world-explorer"
 version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "env_logger",
+ "image",
+ "log",
+ "mclone-assets",
+ "mclone-core",
+ "mclone-mesh",
+ "mclone-terrain-view",
+ "mclone-worldgen",
+ "pollster",
+ "wgpu",
+ "winit",
+]
 
 [[package]]
 name = "mclone-worldgen"
