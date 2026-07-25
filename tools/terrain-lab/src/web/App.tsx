@@ -185,6 +185,11 @@ export function App(): React.JSX.Element {
       data-canonical-resident-hits={canonicalReport?.residentHits ?? 0}
       data-canonical-admission-frames={canonicalReport?.admissionFrames ?? 0}
       data-canonical-max-frame-admissions={canonicalReport?.maxFrameAdmissions ?? 0}
+      data-canonical-cached-chunks={canonicalReport?.cachedChunks ?? 0}
+      data-canonical-resident-raw-bytes={canonicalReport?.residentRawBytes ?? 0}
+      data-canonical-cache-raw-bytes={canonicalReport?.cacheRawBytes ?? 0}
+      data-canonical-mesh-used-bytes={canonicalReport?.residentMeshUsedBytes ?? 0}
+      data-canonical-tracked-bytes={canonicalReport?.trackedBytes ?? 0}
     >
       <header className="topBar">
         <div className="brandLockup">
@@ -1117,7 +1122,25 @@ function Diagnostics({
         <Metric label="Real mesh + upload" value={formatMs(canonical?.meshUploadMs)} />
         <Metric
           label="Real cache"
-          value={canonical ? `${canonical.cacheHits} hits` : "—"}
+          value={canonical
+            ? `${canonical.cacheHits} hits · ${canonical.cachedChunks} chunks`
+            : "—"}
+        />
+        <Metric
+          label="Real tracked (lower bound)"
+          value={canonical ? formatBytes(canonical.trackedBytes) : "—"}
+        />
+        <Metric
+          label="Real resident raw"
+          value={canonical ? formatBytes(canonical.residentRawBytes) : "—"}
+        />
+        <Metric
+          label="Real raw cache"
+          value={canonical ? formatBytes(canonical.cacheRawBytes) : "—"}
+        />
+        <Metric
+          label="Real mesh used"
+          value={canonical ? formatBytes(canonical.residentMeshUsedBytes) : "—"}
         />
         <Metric
           label="Real resident reuse"

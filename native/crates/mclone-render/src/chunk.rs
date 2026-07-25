@@ -15,7 +15,7 @@ use mclone_core::{
 };
 use mclone_diagnostics::GpuPassId;
 use mclone_mesh::{
-    BUSHY_LEAF_CARD_OVERHANG, CHUNK_WIDTH as MESH_CHUNK_WIDTH, RENDER_SECTION_HEIGHT,
+    BUSHY_LEAF_CARD_OVERHANG, CHUNK_WIDTH as MESH_CHUNK_WIDTH, GrassPatch, RENDER_SECTION_HEIGHT,
     RenderSectionKey, SectionFace, TexturedRenderSectionMesh, TexturedRenderSectionMetadata,
     TexturedVisibleChunkMesh, VisibilitySet, VisibleChunkMesh, quad_face_count_from_indices,
 };
@@ -4460,6 +4460,18 @@ impl TexturedSectionDrawResources {
 
     pub fn shared_resource_owner_count(&self) -> usize {
         Arc::strong_count(&self.shared)
+    }
+
+    /// Bytes occupied by live terrain vertices, indices, and optional grass
+    /// patches. This reports used arena ranges, not allocated GPU capacity or
+    /// shared atlas and pipeline resources.
+    pub fn resident_mesh_used_bytes(&self) -> u64 {
+        self.section_arena
+            .vertex_used_bytes()
+            .saturating_add(self.section_arena.index_used_bytes())
+            .saturating_add(
+                u64::from(self.grass.resident_patch_count()) * GrassPatch::BYTE_SIZE as u64,
+            )
     }
 
     /// Immediately release presentation-only grass residency. Off quality uses

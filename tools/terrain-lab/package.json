@@ -6,7 +6,7 @@
   "scripts": {
     "wasm:build": "node scripts/build-wasm.mjs",
     "typecheck": "pnpm wasm:build && tsc --noEmit",
-    "test": "tsx --test tests/state.test.ts",
+    "test": "tsx --test tests/*.test.ts",
     "web:dev": "pnpm wasm:build && vite --config src/web/vite.config.ts",
     "web:build": "pnpm wasm:build && vite build --config src/web/vite.config.ts",
     "web:preview": "vite preview --config src/web/vite.config.ts",

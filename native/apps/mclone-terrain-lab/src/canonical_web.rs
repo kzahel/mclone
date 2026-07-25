@@ -43,6 +43,8 @@ struct CanonicalAcceptReport {
     vertex_count: u32,
     index_count: u32,
     mesh_upload_ms: f64,
+    resident_raw_bytes: u64,
+    resident_mesh_used_bytes: u64,
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd)]
@@ -60,6 +62,8 @@ struct CanonicalRetainReport {
     removed_sections: usize,
     vertex_count: u32,
     index_count: u32,
+    resident_raw_bytes: u64,
+    resident_mesh_used_bytes: u64,
 }
 
 #[derive(Serialize)]
@@ -68,6 +72,8 @@ struct CanonicalRenderReport {
     resident_chunks: usize,
     vertex_count: u32,
     index_count: u32,
+    resident_raw_bytes: u64,
+    resident_mesh_used_bytes: u64,
     width: u32,
     height: u32,
     center_x: i32,
@@ -167,6 +173,8 @@ impl CanonicalTerrainLab {
             removed_sections: removed_sections.len(),
             vertex_count: self.vertex_count,
             index_count: self.index_count,
+            resident_raw_bytes: self.resident_raw_bytes(),
+            resident_mesh_used_bytes: self.draw.resident_mesh_used_bytes(),
         })
     }
 
@@ -225,6 +233,8 @@ impl CanonicalTerrainLab {
             vertex_count,
             index_count,
             mesh_upload_ms: now_ms()? - started,
+            resident_raw_bytes: self.resident_raw_bytes(),
+            resident_mesh_used_bytes: self.draw.resident_mesh_used_bytes(),
         };
         json(&report)
     }
@@ -252,6 +262,8 @@ impl CanonicalTerrainLab {
             vertex_count: self.vertex_count,
             index_count: self.index_count,
             mesh_upload_ms: 0.0,
+            resident_raw_bytes: self.resident_raw_bytes(),
+            resident_mesh_used_bytes: self.draw.resident_mesh_used_bytes(),
         })
     }
 
@@ -320,6 +332,8 @@ impl CanonicalTerrainLab {
             resident_chunks: self.chunks.len(),
             vertex_count: self.vertex_count,
             index_count: self.index_count,
+            resident_raw_bytes: self.resident_raw_bytes(),
+            resident_mesh_used_bytes: self.draw.resident_mesh_used_bytes(),
             width: self.width,
             height: self.height,
             center_x,
@@ -435,6 +449,16 @@ impl CanonicalTerrainLab {
             depth,
             vertex_count: 0,
             index_count: 0,
+        })
+    }
+
+    fn resident_raw_bytes(&self) -> u64 {
+        self.chunks.values().fold(0_u64, |bytes, chunk| {
+            bytes
+                .saturating_add(chunk.blocks.len() as u64)
+                .saturating_add(
+                    (chunk.biomes.len() as u64).saturating_mul(std::mem::size_of::<i32>() as u64),
+                )
         })
     }
 

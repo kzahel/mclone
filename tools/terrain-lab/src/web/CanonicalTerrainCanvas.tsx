@@ -24,6 +24,7 @@ import type {
   CanonicalWorkerResponse,
   CanonicalWorkerResult,
 } from "./canonical-worker-protocol";
+import { CanonicalRawCache } from "./canonical-raw-cache";
 import { initializeTerrainLab } from "./terrain-lab-wasm";
 
 export interface CanonicalTerrainReport {
@@ -43,6 +44,11 @@ export interface CanonicalTerrainReport {
   vertexCount: number;
   indexCount: number;
   retainedDependencyChunks: number;
+  cachedChunks: number;
+  residentRawBytes: number;
+  cacheRawBytes: number;
+  residentMeshUsedBytes: number;
+  trackedBytes: number;
   complete: boolean;
 }
 
@@ -66,6 +72,8 @@ interface CanonicalAcceptReport {
   vertexCount: number;
   indexCount: number;
   meshUploadMs: number;
+  residentRawBytes: number;
+  residentMeshUsedBytes: number;
 }
 
 interface CanonicalRetainReport {
@@ -74,6 +82,8 @@ interface CanonicalRetainReport {
   removedSections: number;
   vertexCount: number;
   indexCount: number;
+  residentRawBytes: number;
+  residentMeshUsedBytes: number;
 }
 
 interface ResponsiveCanonicalTerrainLab extends CanonicalTerrainLab {
@@ -127,7 +137,7 @@ export function CanonicalTerrainCanvas({
   const labRef = useRef<ResponsiveCanonicalTerrainLab | undefined>(undefined);
   const workerRef = useRef<Worker | undefined>(undefined);
   const epochRef = useRef(0);
-  const cacheRef = useRef(new Map<string, CanonicalWorkerResult>());
+  const cacheRef = useRef(new CanonicalRawCache());
   const residentRef = useRef(new Set<string>());
   const residentIdentityRef = useRef<string | undefined>(undefined);
   const renderFrameRef = useRef<number | undefined>(undefined);
@@ -330,8 +340,14 @@ export function CanonicalTerrainCanvas({
       vertexCount: retained.vertexCount,
       indexCount: retained.indexCount,
       retainedDependencyChunks: 0,
+      cachedChunks: cacheRef.current.size,
+      residentRawBytes: retained.residentRawBytes,
+      cacheRawBytes: cacheRef.current.rawBytes,
+      residentMeshUsedBytes: retained.residentMeshUsedBytes,
+      trackedBytes: 0,
       complete: false,
     };
+    updateTrackedBytes(report);
     publishReport(report);
     const pending: PendingCanonicalChunk[] = [];
     const missing: CanonicalCoordinate[] = [];
@@ -339,7 +355,9 @@ export function CanonicalTerrainCanvas({
       if (residentRef.current.has(canonicalCoordinateKey(coordinate))) {
         continue;
       }
-      const cached = cacheRef.current.get(cacheKey(state, coordinate));
+      const cached = cacheEnabled
+        ? cacheRef.current.get(cacheKey(state, coordinate))
+        : undefined;
       if (cacheEnabled && cached) {
         pending.push({ result: cached, cacheHit: true });
       } else {
@@ -496,6 +514,11 @@ export function CanonicalTerrainCanvas({
       current.vertexCount = accepted.vertexCount;
       current.indexCount = accepted.indexCount;
       current.retainedDependencyChunks = result.retainedDependencyChunks;
+      current.cachedChunks = cacheRef.current.size;
+      current.residentRawBytes = accepted.residentRawBytes;
+      current.cacheRawBytes = cacheRef.current.rawBytes;
+      current.residentMeshUsedBytes = accepted.residentMeshUsedBytes;
+      updateTrackedBytes(current);
       current.firstChunkMs ??= performance.now() - requestStarted;
     }
 
@@ -726,6 +749,12 @@ function cacheKey(
   return `${
     state.profile
   }:${state.seed}:${state.canonicalStage}:${coordinate.chunkX}:${coordinate.chunkZ}`;
+}
+
+function updateTrackedBytes(report: CanonicalTerrainReport): void {
+  report.trackedBytes = report.residentRawBytes
+    + report.cacheRawBytes
+    + report.residentMeshUsedBytes;
 }
 
 function canonicalCoordinateKey(
