@@ -614,16 +614,116 @@ test("keeps a 9x9 real footprint resident and paces pan admission", async ({
   expect(pageErrors).toEqual([]);
 });
 
+test("publishes, shifts, and restores a 31x31 real footprint", async ({
+  page,
+}, testInfo) => {
+  test.slow();
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      pageErrors.push(message.text());
+    }
+  });
+  await page.goto(
+    "/terrain/?seed=-98765&profile=mclone-overworld-v1"
+      + "&x=-304&z=336&blocks=512&detail=auto"
+      + "&panes=canonical&canonical=final&radius=0"
+      + "&water=1&vegetation=1&stage=hydrology&view=map&layer=terrain",
+  );
+  await waitForCanonical(page, 1);
+  const shell = page.locator(".appShell");
+  const footprint = page.getByLabel("Exact chunk footprint");
+  await expect(footprint.locator("option")).toHaveCount(9);
+  await page.evaluate(() => {
+    const counts: number[] = [];
+    const element = document.querySelector(".appShell");
+    const record = (): void => {
+      const count = Number(element?.getAttribute("data-canonical-published") ?? "0");
+      if (counts.at(-1) !== count) {
+        counts.push(count);
+      }
+    };
+    record();
+    const observer = new MutationObserver(record);
+    if (element) {
+      observer.observe(element, {
+        attributes: true,
+        attributeFilter: ["data-canonical-published"],
+      });
+    }
+    Object.assign(window, {
+      terrainLabCanonicalLargeCounts: counts,
+      terrainLabCanonicalLargeObserver: observer,
+    });
+  });
+
+  await footprint.selectOption("15");
+  await expect(page).toHaveURL(/radius=15/u);
+  await expect(shell).toHaveAttribute("data-canonical-requested", "961");
+  await waitForCanonical(page, 961, 180_000);
+  const initialCounts = await page.evaluate(() => {
+    const holder = window as typeof window & {
+      terrainLabCanonicalLargeCounts?: number[];
+      terrainLabCanonicalLargeObserver?: MutationObserver;
+    };
+    holder.terrainLabCanonicalLargeObserver?.disconnect();
+    return holder.terrainLabCanonicalLargeCounts ?? [];
+  });
+  expect(initialCounts.some((count) => count > 1 && count < 961)).toBe(true);
+  await expect(footprint).toHaveValue("15");
+  await expect(shell).toHaveAttribute("data-canonical-cached-chunks", "961");
+  expect(Number(await shell.getAttribute("data-canonical-resident-raw-bytes")))
+    .toBeGreaterThan(0);
+  expect(Number(await shell.getAttribute("data-canonical-cache-raw-bytes")))
+    .toBeGreaterThan(0);
+  expect(Number(await shell.getAttribute("data-canonical-mesh-used-bytes")))
+    .toBeGreaterThan(0);
+  const trackedBytes = Number(await shell.getAttribute("data-canonical-tracked-bytes"));
+  const trackedParts = Number(
+    await shell.getAttribute("data-canonical-resident-raw-bytes"),
+  ) + Number(await shell.getAttribute("data-canonical-cache-raw-bytes"))
+    + Number(await shell.getAttribute("data-canonical-mesh-used-bytes"));
+  expect(trackedBytes).toBe(trackedParts);
+
+  const centerX = page.getByLabel("Center X");
+  await centerX.fill("-288");
+  await centerX.press("Enter");
+  await expect(page).toHaveURL(/x=-288/u);
+  await expect(shell).toHaveAttribute("data-canonical-resident-hits", "930");
+  await waitForCanonical(page, 961, 120_000);
+  await expect(shell).toHaveAttribute("data-canonical-admission-frames", "31");
+  await expect(shell).toHaveAttribute("data-canonical-max-frame-admissions", "1");
+  expect(Number(await shell.getAttribute("data-canonical-cached-chunks")))
+    .toBeLessThanOrEqual(1_024);
+
+  await centerX.fill("-304");
+  await centerX.press("Enter");
+  await expect(page).toHaveURL(/x=-304/u);
+  await expect(shell).toHaveAttribute("data-canonical-resident-hits", "930");
+  await waitForCanonical(page, 961, 120_000);
+  await expect(shell).toHaveAttribute("data-canonical-cache-hits", "31");
+  await expect(shell).toHaveAttribute("data-canonical-admission-frames", "31");
+  await expect(shell).toHaveAttribute("data-canonical-max-frame-admissions", "1");
+  expect(Number(await shell.getAttribute("data-canonical-cached-chunks")))
+    .toBeLessThanOrEqual(1_024);
+  await page.getByTestId("canonical-terrain-stage").screenshot({
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-canonical-961.png`,
+  });
+  expect(pageErrors).toEqual([]);
+});
+
 async function waitForCanonical(
   page: import("@playwright/test").Page,
   requestedChunks: number,
+  timeout = 30_000,
 ): Promise<void> {
   await page.waitForFunction((requested) => {
     const shell = document.querySelector(".appShell");
     return shell?.getAttribute("data-canonical-complete") === "true"
       && Number(shell.getAttribute("data-canonical-published")) === requested
       && Number(shell.getAttribute("data-canonical-requested")) === requested;
-  }, requestedChunks);
+  }, requestedChunks, { timeout });
 }
 
 async function assertTouchPanZoom(
