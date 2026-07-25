@@ -379,6 +379,25 @@ The exact module/package location should be selected by the implementation
 tactical; importing files from the game app's deployment directory is not a
 shared boundary.
 
+Terrain Lab itself is now the first additional consumer of that Worker boundary,
+not merely a temporary host to leave unchanged after navigation migration.
+Modernize it as a parity-preserving follow-on: keep the current panes,
+controls, URLs, diagnostics, exact footprints, pixels, raw-cache behavior, and
+warm GPU returns while moving Worker lifecycle, epochs, batching,
+backpressure, cache ownership, and result interpretation out of React and into
+Rust. Replace transferred packed-mesh results with persistent external
+`SharedArrayBuffer` mailboxes after the Rust actor boundary is green. This
+continues the production isolated-heap architecture; it does not introduce one
+shared Wasm linear memory.
+
+The hosted `/terrain/` deployment already receives COOP/COEP/CORP headers from
+the aggregate web deployment. Terrain Lab's direct Vite development server
+does not currently set them, so the SAB slice must add and assert local
+cross-origin isolation. Extend the Worker ownership inventory to cover the Lab
+before removing its old TypeScript protocol. Delete the unused main-thread
+raw-chunk admission/remeshing facade only after the packed/SAB path has parity
+evidence.
+
 Therefore, “migrate Terrain Lab” means replacing its duplicated browser
 camera and gesture policy while preserving both its procedural and canonical
 renderers. That navigation work does not need to wait for exact chunks in the
@@ -646,31 +665,37 @@ adding another host.
    over the shared reducer while preserving current visuals, inspection,
    scroll containment, URL state, and diagnostics. Delete superseded
    TypeScript camera and gesture policy.
-3. **Extract a reusable exact-view source.** Adapt locally compiled canonical
+3. **Converge Terrain Lab's Worker runtime.** Reuse the generic browser
+   transport, move exact-worker coordination and caches into Rust actors, adopt
+   persistent external SAB mailboxes, extend ownership gates, and delete
+   superseded TypeScript and legacy raw-admission code. Preserve the current UI,
+   separate-pane rendering, URLs, diagnostics, cache behavior, and pixels at
+   each checkpoint.
+4. **Extract a reusable exact-view source.** Adapt locally compiled canonical
    chunks into the shared snapshot, render-session, compile, upload, and draw
    lifecycle. Do not promote Terrain Lab's TypeScript scheduler or duplicate
    the game's cache and Worker framework. Preserve the Lab's working canonical
    view while proving the narrower boundary.
-4. **Build the minimal Web Explorer smoke.** Keep JavaScript or TypeScript
+5. **Build the minimal Web Explorer smoke.** Keep JavaScript or TypeScript
    limited to canvas, rAF, lifecycle, URL, raw-observation forwarding, and
    mechanical browser dispositions. Add a deployment smoke and measure the
    independent Wasm/asset payload. A procedural-only result remains a smoke,
    not the player-facing replacement for Terrain Lab.
-5. **Compose procedural and exact terrain.** Add the reusable exact near field
+6. **Compose procedural and exact terrain.** Add the reusable exact near field
    to an Explorer host and validate masking, skirts, replacement, and
    movement before calling it the real map-to-world view.
-6. **Connect tabletop Slice 2.** Reuse the same manipulation contract while
+7. **Connect tabletop Slice 2.** Reuse the same manipulation contract while
    retaining scene-owned follow, authority, and target mapping.
-7. **Build the player-facing Explorer UI.** Use the shared terrain view,
+8. **Build the player-facing Explorer UI.** Use the shared terrain view,
    accessible controls, shareable view state, and a deliberately small Wasm
    payload.
-8. **Add validated local handoff.** Turn a selected X/Z into a safe,
+9. **Add validated local handoff.** Turn a selected X/Z into a safe,
    authoritative integrated-world arrival.
-9. **Design remote preview descriptors.** Do this only when a concrete remote
+10. **Design remote preview descriptors.** Do this only when a concrete remote
    product needs seed privacy and server-controlled destinations.
-10. **Explore continuous transitions.** Preserve GPU/device/residency state
+11. **Explore continuous transitions.** Preserve GPU/device/residency state
    only after the simple load-or-navigate flow is useful and measured.
-11. **Add gamepad navigation when demanded.** Consume canonical
+12. **Add gamepad navigation when demanded.** Consume canonical
     `mclone-input` snapshots and emit tested view intents without inheriting
     gameplay bindings or putting semantics in the browser shell.
 

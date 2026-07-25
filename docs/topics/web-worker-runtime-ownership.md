@@ -13,6 +13,16 @@ stopped before managed provisioning or integrated-server persistence. Its
 remote actor, ordinary catalog continuation, and closeout validation are
 complete.
 
+On 2026-07-25 human review selected one focused continuation: migrate Terrain
+Lab's exact-terrain Worker to the same isolated Rust-actor, opaque browser
+transport, Rust-owned coordinator, and external `SharedArrayBuffer` mailbox
+shape while preserving the Lab's UI and rendered behavior. This is not a
+shared-Wasm-heap experiment and does not authorize importing the complete game
+web bootstrap. The conversion should proceed behind parity checkpoints:
+generic transport reuse, Rust actor/coordinator ownership, persistent SAB
+mailboxes, cache consolidation, and deletion of superseded TypeScript and
+legacy raw-admission paths.
+
 ## Scope
 
 This topic owns the boundary among:
