@@ -100,6 +100,22 @@ exact and LOD renderers already receive the same selected profile and
 presentation through their shared Wasm asset preparation, so they retain the
 same derived-source invariant.
 
+Implementation update (2026-07-25): final profile captures exposed that Hybrid
+Authoring's source order was correct but its curated layer could not shadow
+Minecraft model faces: reference models request `minecraft:block/*`, while
+lifecycle output intentionally stores distributable canonical art under
+`mclone:block/*`. The shared source chain now gives only curated first-party
+sources a canonical alias view for reference block-face requests. Exact names
+bridge directly, and common face derivatives such as `_top`, `_side`,
+`_bottom`, `_still`, and `_flow` bridge to their canonical block material.
+Reference and provisional sources keep exact-path behavior.
+
+This preserves real Minecraft models and all uncurated reference faces while
+allowing accepted canonical art to win in Hybrid. Fresh native captures show
+Hybrid differs from both Mclone Original and Minecraft Reference; Coverage
+remains numbered, Provisional Audit remains label-free, and Minecraft
+Reference remains unchanged when curated first-party is not selected.
+
 ## Scope
 
 This topic owns the meaning, selection, and authoring lifecycle of block

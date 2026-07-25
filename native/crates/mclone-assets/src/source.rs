@@ -146,6 +146,16 @@ impl AssetSourceChain {
                     source: entry.identity.clone(),
                 }));
             }
+            if entry.identity.origin == AssetPackOrigin::FirstParty {
+                for alias in first_party_canonical_texture_aliases(path) {
+                    if let Some(bytes) = entry.source.read(&alias)? {
+                        return Ok(Some(NamedAssetResolution {
+                            bytes,
+                            source: entry.identity.clone(),
+                        }));
+                    }
+                }
+            }
         }
         Ok(None)
     }
@@ -169,6 +179,40 @@ impl AssetSourceChain {
             source,
         });
     }
+}
+
+/// Bridge canonical first-party block materials into reference model faces.
+///
+/// A namespace identifies a model's lookup contract, not the copyright owner
+/// of the bytes that satisfy it. Hybrid rendering uses Minecraft models, whose
+/// faces request `minecraft:block/*`, while lifecycle output deliberately
+/// stores distributable art as `mclone:block/*`. Only curated first-party
+/// sources receive this alias view: reference and provisional sources retain
+/// their ordinary exact-path behavior.
+fn first_party_canonical_texture_aliases(path: &AssetPath) -> Vec<AssetPath> {
+    const REFERENCE_BLOCK_PREFIX: &str = "assets/minecraft/textures/block/";
+    const CANONICAL_BLOCK_PREFIX: &str = "assets/mclone/textures/block/";
+    const FACE_SUFFIXES: [&str; 5] = ["_top", "_side", "_bottom", "_still", "_flow"];
+
+    let Some(relative) = path
+        .as_str()
+        .strip_prefix(REFERENCE_BLOCK_PREFIX)
+        .and_then(|relative| relative.strip_suffix(".png"))
+    else {
+        return Vec::new();
+    };
+    let mut aliases = vec![AssetPath::new(format!(
+        "{CANONICAL_BLOCK_PREFIX}{relative}.png"
+    ))];
+    if let Some(canonical) = FACE_SUFFIXES
+        .iter()
+        .find_map(|suffix| relative.strip_suffix(suffix))
+    {
+        aliases.push(AssetPath::new(format!(
+            "{CANONICAL_BLOCK_PREFIX}{canonical}.png"
+        )));
+    }
+    aliases
 }
 
 impl std::fmt::Debug for AssetSourceChain {
@@ -559,6 +603,101 @@ mod tests {
 
         assert!(chain.resolve(&reference_only).unwrap().is_none());
         assert_eq!(chain.len(), 2, "disabled source was not admitted to chain");
+    }
+
+    #[test]
+    fn curated_source_aliases_canonical_materials_into_reference_faces() {
+        let authored_id = AssetPackId::new("mclone-authored");
+        let reference_id = AssetPackId::new("minecraft-1.17.1-reference");
+        let catalog = AssetPackCatalog::new([
+            AssetPackDescriptor::new(
+                authored_id.clone(),
+                "Mclone authored",
+                AssetPackOrigin::FirstParty,
+                10,
+            )
+            .unwrap(),
+            AssetPackDescriptor::new(
+                reference_id.clone(),
+                "Minecraft reference",
+                AssetPackOrigin::MinecraftReference,
+                20,
+            )
+            .unwrap(),
+        ])
+        .unwrap();
+        let mut authored = MemoryAssetSource::new();
+        authored.insert_text(
+            AssetPath::new("assets/mclone/textures/block/stone.png"),
+            "curated stone",
+        );
+        authored.insert_text(
+            AssetPath::new("assets/mclone/textures/block/grass_block.png"),
+            "curated grass",
+        );
+        let mut reference = MemoryAssetSource::new();
+        reference.insert_text(
+            AssetPath::new("assets/minecraft/textures/block/stone.png"),
+            "reference stone",
+        );
+        reference.insert_text(
+            AssetPath::new("assets/minecraft/textures/block/grass_block_top.png"),
+            "reference grass",
+        );
+        let chain = AssetSourceChain::from_selection(
+            &catalog,
+            &AssetPackSelection::new([authored_id.clone(), reference_id.clone()]),
+            [
+                (
+                    authored_id.clone(),
+                    Box::new(authored.clone()) as Box<dyn AssetSource>,
+                ),
+                (
+                    reference_id.clone(),
+                    Box::new(reference.clone()) as Box<dyn AssetSource>,
+                ),
+            ],
+        )
+        .unwrap();
+
+        let stone = chain
+            .resolve(&AssetPath::new("assets/minecraft/textures/block/stone.png"))
+            .unwrap()
+            .unwrap();
+        let grass = chain
+            .resolve(&AssetPath::new(
+                "assets/minecraft/textures/block/grass_block_top.png",
+            ))
+            .unwrap()
+            .unwrap();
+        assert_eq!(stone.bytes, b"curated stone");
+        assert_eq!(grass.bytes, b"curated grass");
+        assert_eq!(stone.source.pack_id, Some(authored_id));
+        assert_eq!(stone.source.origin, AssetPackOrigin::FirstParty);
+
+        let reference_only = AssetSourceChain::from_selection(
+            &catalog,
+            &AssetPackSelection::new([reference_id.clone()]),
+            [
+                (
+                    AssetPackId::new("mclone-authored"),
+                    Box::new(authored) as Box<dyn AssetSource>,
+                ),
+                (
+                    reference_id.clone(),
+                    Box::new(reference) as Box<dyn AssetSource>,
+                ),
+            ],
+        )
+        .unwrap();
+        assert_eq!(
+            reference_only
+                .read(&AssetPath::new(
+                    "assets/minecraft/textures/block/grass_block_top.png",
+                ))
+                .unwrap(),
+            Some(b"reference grass".to_vec())
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]
