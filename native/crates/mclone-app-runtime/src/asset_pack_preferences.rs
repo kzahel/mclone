@@ -1,8 +1,11 @@
 use std::collections::BTreeSet;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use mclone_assets::{AssetPackAvailability, AssetPackCatalog, AssetPackId, AssetPackSelection};
+use mclone_assets::{
+    AssetPackAvailability, AssetPackCatalog, AssetPackId, AssetPackSelection, TexturePresentation,
+};
 use serde::{Deserialize, Serialize};
 
 pub const ASSET_PACK_PREFERENCE_SCHEMA: u32 = 1;
@@ -11,12 +14,21 @@ pub const ASSET_PACK_PREFERENCE_FILE_NAME: &str = "asset-packs.v1.json";
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AssetPackPreference {
     enabled_ids: BTreeSet<AssetPackId>,
+    presentation: TexturePresentation,
 }
 
 impl AssetPackPreference {
     pub fn new(enabled_ids: impl IntoIterator<Item = AssetPackId>) -> Self {
+        Self::with_presentation(enabled_ids, TexturePresentation::Textured)
+    }
+
+    pub fn with_presentation(
+        enabled_ids: impl IntoIterator<Item = AssetPackId>,
+        presentation: TexturePresentation,
+    ) -> Self {
         Self {
             enabled_ids: enabled_ids.into_iter().collect(),
+            presentation,
         }
     }
 
@@ -24,8 +36,16 @@ impl AssetPackPreference {
         Self::new(selection.enabled_ids().cloned())
     }
 
+    pub fn from_profile(selection: &AssetPackSelection, presentation: TexturePresentation) -> Self {
+        Self::with_presentation(selection.enabled_ids().cloned(), presentation)
+    }
+
     pub fn enabled_ids(&self) -> impl Iterator<Item = &AssetPackId> {
         self.enabled_ids.iter()
+    }
+
+    pub const fn presentation(&self) -> TexturePresentation {
+        self.presentation
     }
 
     pub fn reconcile(&self, catalog: &AssetPackCatalog) -> AssetPackPreferenceResolution {
@@ -47,6 +67,7 @@ impl AssetPackPreference {
         }
         AssetPackPreferenceResolution {
             selection: AssetPackSelection::new(applicable),
+            presentation: self.presentation,
             unavailable,
             undiscovered,
         }
@@ -56,6 +77,7 @@ impl AssetPackPreference {
         &self,
         catalog: &AssetPackCatalog,
         selection: &AssetPackSelection,
+        presentation: TexturePresentation,
     ) -> Self {
         let mut enabled_ids = selection.enabled_ids().cloned().collect::<BTreeSet<_>>();
         for id in &self.enabled_ids {
@@ -65,7 +87,10 @@ impl AssetPackPreference {
                 enabled_ids.insert(id.clone());
             }
         }
-        Self { enabled_ids }
+        Self {
+            enabled_ids,
+            presentation,
+        }
     }
 
     pub fn to_json(&self) -> Result<String> {
@@ -76,6 +101,7 @@ impl AssetPackPreference {
                 .iter()
                 .map(|id| id.as_str().to_owned())
                 .collect(),
+            presentation: self.presentation,
         };
         serde_json::to_string_pretty(&document).context("serialize asset-pack preference")
     }
@@ -95,13 +121,14 @@ impl AssetPackPreference {
             .map(AssetPackId::try_new)
             .collect::<Result<Vec<_>, _>>()
             .context("validate persisted asset-pack id")?;
-        Ok(Self::new(enabled_ids))
+        Ok(Self::with_presentation(enabled_ids, document.presentation))
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AssetPackPreferenceResolution {
     pub selection: AssetPackSelection,
+    pub presentation: TexturePresentation,
     pub unavailable: Vec<AssetPackId>,
     pub undiscovered: Vec<AssetPackId>,
 }
@@ -116,6 +143,8 @@ pub trait AssetPackPreferenceStorage {
 struct AssetPackPreferenceDocument {
     schema: u32,
     enabled_ids: Vec<String>,
+    #[serde(default)]
+    presentation: TexturePresentation,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -243,9 +272,16 @@ mod tests {
         );
         assert_eq!(resolution.undiscovered, [AssetPackId::new("later-pack")]);
 
-        let retained =
-            preference.after_successful_apply(&catalog(false), &AssetPackSelection::default());
-        assert_eq!(retained, preference);
+        let retained = preference.after_successful_apply(
+            &catalog(false),
+            &AssetPackSelection::default(),
+            TexturePresentation::FlatColors,
+        );
+        assert_eq!(retained.presentation(), TexturePresentation::FlatColors);
+        assert_eq!(
+            retained.enabled_ids().collect::<Vec<_>>(),
+            preference.enabled_ids().collect::<Vec<_>>()
+        );
         let restored = retained.reconcile(&catalog(true));
         assert!(
             restored

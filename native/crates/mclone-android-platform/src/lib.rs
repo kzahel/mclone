@@ -14,6 +14,7 @@ pub const ANDROID_WORLD_ROOT_DIR_NAME: &str = "worlds";
 pub const ANDROID_REMOTE_ADDR_NONE_SENTINEL: &str = "__mclone_none__";
 pub const ANDROID_BUNDLED_AUTHORED_PACK: &str = "first-party-packs/mclone-authored.pbp";
 pub const ANDROID_BUNDLED_FALLBACK_PACK: &str = "first-party-packs/mclone-generated-fallback.pbp";
+pub const ANDROID_BUNDLED_DIAGNOSTIC_PACK: &str = "first-party-packs/mclone-diagnostic-missing.pbp";
 
 pub fn normalize_android_legacy_remote_addr(value: &str) -> Option<String> {
     let value = value.trim();
@@ -79,6 +80,10 @@ pub fn stage_android_bundled_first_party_packs(
         (
             ANDROID_BUNDLED_FALLBACK_PACK,
             "mclone-generated-fallback.pbp",
+        ),
+        (
+            ANDROID_BUNDLED_DIAGNOSTIC_PACK,
+            "mclone-diagnostic-missing.pbp",
         ),
     ] {
         let bundled_name = CString::new(bundled).expect("bundled asset path contains no nul");

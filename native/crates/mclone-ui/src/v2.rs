@@ -1,23 +1,23 @@
 use crate::{
-    AssetPackUiApplyState, AssetPackUiRow, AssetPackUiRowStatus, AssetPacksUiState,
-    BLOCK_PALETTE_ENTRY_CAPACITY, BLOCK_PALETTE_PADDING, BlockPaletteEntry, BlockPaletteOverlay,
-    Button, Checkbox, Color, CycleButton, DebugPaletteItem, FlatHud, Font, GameDeathCause,
-    GameFlatPresentationState, GameHelpParent, GameOptionsCategory, GameOptionsParent,
-    GameScenarioId, GameScreen, GameStorageAction, GameTurnMode, GameUiAction, GameUiRenderState,
-    GuiDrawList, GuiKey, GuiScale, GuiTextureUv, HOTBAR_SLOT_COUNT_USIZE, Interaction,
-    LoadingProgressOverlay, Point, Rect, Slider, WidgetId, WorldCatalogUiEntry,
-    WorldCatalogUiState, WorldCatalogUiWorldId, block_palette_panel_rect, block_palette_slot_rect,
-    centered_panel, far_lod_range_from_slider_value, far_lod_range_label,
-    far_lod_range_slider_value, fly_speed_from_slider_value, fly_speed_label,
-    fly_speed_slider_value, movement_speed_from_slider_value, movement_speed_label,
-    movement_speed_slider_value, next_touch_controls_mode, render_block_palette_tooltip,
-    render_distance_from_slider_value, render_distance_label, render_distance_slider_value,
-    render_flat_hud_debug_layer, render_flat_hud_frame_pipeline_layer,
-    render_flat_hud_hotbar_layer, render_flat_hud_prompt_layer, render_flat_hud_retained_layer,
-    render_flat_hud_status_layer, render_flat_hud_transient_layers,
-    render_loading_progress_overlay, render_loading_progress_panel_at,
-    render_palette_slot_contents, render_touch_panel, touch_controls_mode_label,
-    touch_look_from_slider_value, touch_look_label, touch_look_slider_value,
+    AssetPackUiRow, AssetPackUiRowStatus, AssetPacksUiState, BLOCK_PALETTE_ENTRY_CAPACITY,
+    BLOCK_PALETTE_PADDING, BlockPaletteEntry, BlockPaletteOverlay, Button, Checkbox, Color,
+    CycleButton, DebugPaletteItem, FlatHud, Font, GameDeathCause, GameFlatPresentationState,
+    GameHelpParent, GameOptionsCategory, GameOptionsParent, GameScenarioId, GameScreen,
+    GameStorageAction, GameTurnMode, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey,
+    GuiScale, GuiTextureUv, HOTBAR_SLOT_COUNT_USIZE, Interaction, LoadingProgressOverlay, Point,
+    Rect, Slider, WidgetId, WorldCatalogUiEntry, WorldCatalogUiState, WorldCatalogUiWorldId,
+    block_palette_panel_rect, block_palette_slot_rect, centered_panel,
+    far_lod_range_from_slider_value, far_lod_range_label, far_lod_range_slider_value,
+    fly_speed_from_slider_value, fly_speed_label, fly_speed_slider_value,
+    movement_speed_from_slider_value, movement_speed_label, movement_speed_slider_value,
+    next_touch_controls_mode, render_block_palette_tooltip, render_distance_from_slider_value,
+    render_distance_label, render_distance_slider_value, render_flat_hud_debug_layer,
+    render_flat_hud_frame_pipeline_layer, render_flat_hud_hotbar_layer,
+    render_flat_hud_prompt_layer, render_flat_hud_retained_layer, render_flat_hud_status_layer,
+    render_flat_hud_transient_layers, render_loading_progress_overlay,
+    render_loading_progress_panel_at, render_palette_slot_contents, render_touch_panel,
+    touch_controls_mode_label, touch_look_from_slider_value, touch_look_label,
+    touch_look_slider_value,
 };
 use mclone_input::{
     FLAT_HOTBAR_SLOT_COUNT, ShortcutHelpGroup, ShortcutHelpRow,
@@ -1738,7 +1738,6 @@ impl UiSurface {
             Rect::new(0.0, 0.0, self.scale.width, self.scale.height),
             Color::rgba(0, 0, 0, 150),
         );
-        let state = self.render_state.asset_packs;
         let panel = asset_packs_panel_rect(self.scale);
         draw.fill_gradient(
             panel,
@@ -1748,7 +1747,7 @@ impl UiSurface {
         draw.outline(panel, Color::rgba(130, 166, 154, 255));
         self.font.draw_centered_atlas(
             draw,
-            "ASSET PACKS",
+            "VISUAL PROFILES",
             panel.center_x(),
             panel.y + 10.0,
             Color::rgba(245, 252, 234, 255),
@@ -1759,67 +1758,6 @@ impl UiSurface {
             self.render_widget(draw, widget, interaction);
         }
 
-        let summary_y = panel.bottom() - 70.0;
-        self.font.draw_shadow_atlas(
-            draw,
-            &format!("Effective: {}", state.effective_label.as_str()),
-            panel.x + 14.0,
-            summary_y,
-            Color::rgba(226, 239, 219, 255),
-        );
-        self.font.draw_shadow_atlas(
-            draw,
-            &format!(
-                "Authored {} / Required {} / Generated {} / Minecraft {}",
-                state.coverage.authored,
-                state.coverage.required,
-                state.coverage.generated,
-                state.coverage.minecraft
-            ),
-            panel.x + 14.0,
-            summary_y + 12.0,
-            Color::rgba(178, 204, 190, 255),
-        );
-        let staged_minecraft =
-            state.rows.iter().flatten().any(|row| {
-                row.enabled && row.origin == crate::AssetPackUiOrigin::MinecraftReference
-            });
-        let provenance_label = if staged_minecraft {
-            "STAGED: LOCAL / PROPRIETARY REFERENCE CONTENT"
-        } else if state.coverage.proprietary_free {
-            "ACTIVE PROVENANCE: PROPRIETARY-FREE"
-        } else {
-            "ACTIVE PROVENANCE: REFERENCE OR UNKNOWN CONTENT"
-        };
-        self.font.draw_shadow_atlas(
-            draw,
-            provenance_label,
-            panel.x + 14.0,
-            summary_y + 24.0,
-            if staged_minecraft {
-                Color::rgba(255, 198, 142, 255)
-            } else {
-                Color::rgba(178, 204, 190, 255)
-            },
-        );
-        let status = match state.apply_state {
-            AssetPackUiApplyState::Idle if state.dirty => "CHANGES STAGED",
-            AssetPackUiApplyState::Idle => "ACTIVE SELECTION",
-            AssetPackUiApplyState::PreparingAssets => "PREPARING ASSETS...",
-            AssetPackUiApplyState::PreparingMeshes => "PREPARING VISIBLE MESHES...",
-            AssetPackUiApplyState::Failed => state.message.as_str(),
-        };
-        self.font.draw_shadow_atlas(
-            draw,
-            status,
-            panel.x + 14.0,
-            summary_y + 36.0,
-            if state.apply_state == AssetPackUiApplyState::Failed {
-                Color::rgba(255, 178, 178, 255)
-            } else {
-                Color::rgba(190, 224, 196, 255)
-            },
-        );
         let _ = parent;
     }
 
@@ -2099,7 +2037,13 @@ impl UiSurface {
                 };
                 draw.fill(widget.rect, fill);
                 draw.outline(widget.rect, border);
-                let box_rect = Rect::new(widget.rect.x + 6.0, widget.rect.y + 10.0, 10.0, 10.0);
+                let compact = widget.rect.height < 30.0;
+                let box_rect = Rect::new(
+                    widget.rect.x + 6.0,
+                    widget.rect.y + (widget.rect.height - 10.0) * 0.5,
+                    10.0,
+                    10.0,
+                );
                 draw.fill(box_rect, Color::rgba(8, 12, 13, 255));
                 draw.outline(box_rect, border);
                 if *checked {
@@ -2115,7 +2059,7 @@ impl UiSurface {
                     draw,
                     &widget.label,
                     widget.rect.x + 22.0,
-                    widget.rect.y + 5.0,
+                    widget.rect.y + if compact { 2.0 } else { 5.0 },
                     text_color,
                 );
                 if let Some(value) = widget.value.as_deref() {
@@ -2123,7 +2067,7 @@ impl UiSurface {
                         draw,
                         value,
                         widget.rect.x + 22.0,
-                        widget.rect.y + 18.0,
+                        widget.rect.y + if compact { 13.0 } else { 18.0 },
                         Color::rgba(166, 190, 179, 255),
                     );
                 }
@@ -2132,7 +2076,7 @@ impl UiSurface {
                         draw,
                         "LOCKED",
                         widget.rect.right() - 48.0,
-                        widget.rect.y + 5.0,
+                        widget.rect.y + if compact { 2.0 } else { 5.0 },
                         Color::rgba(222, 205, 126, 255),
                     );
                 }
@@ -2935,6 +2879,7 @@ impl GameUiHost {
             | GameUiAction::SetLeafDetail(_)
             | GameUiAction::SetGrassDetail(_)
             | GameUiAction::ToggleAssetPack(_)
+            | GameUiAction::CycleTexturePresentation
             | GameUiAction::ApplyAssetPacks
             | GameUiAction::ClearRebuildableCache
             | GameUiAction::ToggleFullbright
@@ -3847,7 +3792,7 @@ fn options_layout(
         UiWidget::button(
             UI_V2_OPTIONS_ASSET_PACKS,
             Rect::new(x, y, width, 20.0),
-            "Asset Packs",
+            "Visual Profiles",
         )
         .action(GameUiAction::OpenAssetPacks(parent)),
     );
@@ -4633,7 +4578,7 @@ fn push_cycle(
 }
 
 fn options_panel_rect(scale: GuiScale, _state: GameUiRenderState) -> Rect {
-    // The hub is a fixed short list: categories + Asset Packs + Server
+    // The hub is a fixed short list: categories + Visual Profiles + Server
     // Settings + Controls Help + Back.
     let panel_width = (scale.width - 18.0).clamp(242.0, 360.0);
     let panel_height = 262.0f32.min((scale.height - 4.0).max(1.0));
@@ -4661,14 +4606,18 @@ fn asset_packs_layout(
     let mut layout = UiLayout::new(Some(UiScreenId::AssetPacks { parent }), revision);
     let panel = asset_packs_panel_rect(scale);
     let row_count = state.row_count().max(1);
-    let available_height = (panel.height - 116.0).max(72.0);
-    let row_height = (available_height / row_count as f32).clamp(32.0, 42.0);
+    let row_gap = 3.0;
+    let rows_top = 28.0;
+    let presentation_top = panel.height - 52.0;
+    let available_height =
+        presentation_top - rows_top - 8.0 - row_gap * row_count.saturating_sub(1) as f32;
+    let row_height = (available_height / row_count as f32).clamp(24.0, 42.0);
     for (index, row) in state.rows.iter().flatten().copied().enumerate() {
         let mut widget = UiWidget::asset_pack_row(
             asset_pack_row_id(index),
             Rect::new(
                 panel.x + 14.0,
-                panel.y + 28.0 + index as f32 * (row_height + 3.0),
+                panel.y + rows_top + index as f32 * (row_height + row_gap),
                 panel.width - 28.0,
                 row_height,
             ),
@@ -4677,6 +4626,20 @@ fn asset_packs_layout(
         widget.enabled &= !state.apply_state.is_preparing();
         layout.push(widget);
     }
+    layout.push(
+        UiWidget::button(
+            UiWidgetId(UI_V2_ASSET_PACK_APPLY.0 - 2),
+            Rect::new(
+                panel.x + 14.0,
+                panel.bottom() - 52.0,
+                panel.width - 28.0,
+                20.0,
+            ),
+            format!("Presentation: {}", state.presentation_label.as_str()),
+        )
+        .enabled(!state.apply_state.is_preparing())
+        .action(GameUiAction::CycleTexturePresentation),
+    );
     let footer_y = panel.bottom() - 27.0;
     layout.push(
         UiWidget::button(

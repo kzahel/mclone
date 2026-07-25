@@ -6,8 +6,9 @@ use wasm_bindgen::prelude::wasm_bindgen;
 const REFERENCE_PACK_REQUEST_ID: u32 = 1;
 const AUTHORED_PACK_REQUEST_ID: u32 = 2;
 const FALLBACK_PACK_REQUEST_ID: u32 = 3;
+const DIAGNOSTIC_PACK_REQUEST_ID: u32 = 4;
 
-const RESOURCE_REQUESTS: [(u32, &str); 3] = [
+const RESOURCE_REQUESTS: [(u32, &str); 4] = [
     (
         REFERENCE_PACK_REQUEST_ID,
         "/reference/minecraft-1.17.1/extracted.zip",
@@ -20,12 +21,17 @@ const RESOURCE_REQUESTS: [(u32, &str); 3] = [
         FALLBACK_PACK_REQUEST_ID,
         "/first-party-packs/mclone-generated-fallback.pbp",
     ),
+    (
+        DIAGNOSTIC_PACK_REQUEST_ID,
+        "/first-party-packs/mclone-diagnostic-missing.pbp",
+    ),
 ];
 
 pub(crate) struct InitialAssetPacks {
     pub reference: Vec<u8>,
     pub authored: Vec<u8>,
     pub fallback: Vec<u8>,
+    pub diagnostic: Vec<u8>,
 }
 
 /// Raw browser facts used by Rust-owned initial presentation policy.
@@ -113,6 +119,7 @@ impl WebBootstrapResources {
             reference: take(REFERENCE_PACK_REQUEST_ID, "reference asset pack")?,
             authored: take(AUTHORED_PACK_REQUEST_ID, "authored asset pack")?,
             fallback: take(FALLBACK_PACK_REQUEST_ID, "fallback asset pack")?,
+            diagnostic: take(DIAGNOSTIC_PACK_REQUEST_ID, "diagnostic asset pack")?,
         })
     }
 }

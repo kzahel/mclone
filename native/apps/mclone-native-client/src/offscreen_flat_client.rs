@@ -404,33 +404,33 @@ impl OffscreenFlatClientHost {
             );
         }
         let active_epoch = self.driver.host().active_asset_epoch();
-        let authored = self.asset_pack_ui_row_id(
-            mclone_app_runtime::prepared_assets::AUTHORED_FIRST_PARTY_PACK_ID,
-        )?;
-        let reference = self.asset_pack_ui_row_id(
-            mclone_app_runtime::prepared_assets::MINECRAFT_REFERENCE_PACK_ID,
-        )?;
+        let original =
+            self.asset_pack_ui_row_id(mclone_assets::TextureVisualProfile::McloneOriginal.id())?;
+        let hybrid =
+            self.asset_pack_ui_row_id(mclone_assets::TextureVisualProfile::HybridAuthoring.id())?;
+        let provisional =
+            self.asset_pack_ui_row_id(mclone_assets::TextureVisualProfile::ProvisionalAudit.id())?;
+        let reference = self
+            .asset_pack_ui_row_id(mclone_assets::TextureVisualProfile::MinecraftReference.id())?;
         let actions: Option<(AssetPackUiSmokePhase, Vec<mclone_ui::GameUiAction>)> = match phase {
             AssetPackUiSmokePhase::Start if active_epoch == 0 => Some((
                 AssetPackUiSmokePhase::WaitingOriginal,
                 vec![
-                    mclone_ui::GameUiAction::ToggleAssetPack(authored),
-                    mclone_ui::GameUiAction::ToggleAssetPack(reference),
+                    mclone_ui::GameUiAction::ToggleAssetPack(original),
                     mclone_ui::GameUiAction::ApplyAssetPacks,
                 ],
             )),
             AssetPackUiSmokePhase::WaitingOriginal if active_epoch == 1 => Some((
                 AssetPackUiSmokePhase::WaitingHybrid,
                 vec![
-                    mclone_ui::GameUiAction::ToggleAssetPack(reference),
+                    mclone_ui::GameUiAction::ToggleAssetPack(hybrid),
                     mclone_ui::GameUiAction::ApplyAssetPacks,
                 ],
             )),
             AssetPackUiSmokePhase::WaitingHybrid if active_epoch == 2 => Some((
                 AssetPackUiSmokePhase::WaitingFallback,
                 vec![
-                    mclone_ui::GameUiAction::ToggleAssetPack(authored),
-                    mclone_ui::GameUiAction::ToggleAssetPack(reference),
+                    mclone_ui::GameUiAction::ToggleAssetPack(provisional),
                     mclone_ui::GameUiAction::ApplyAssetPacks,
                 ],
             )),
@@ -443,7 +443,7 @@ impl OffscreenFlatClientHost {
             )),
             AssetPackUiSmokePhase::WaitingVanilla if active_epoch == 4 => Some((
                 AssetPackUiSmokePhase::Complete,
-                vec![mclone_ui::GameUiAction::ToggleAssetPack(authored)],
+                vec![mclone_ui::GameUiAction::ToggleAssetPack(hybrid)],
             )),
             _ => None,
         };

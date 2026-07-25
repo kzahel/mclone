@@ -2401,7 +2401,6 @@ async function applyBrowserAssetSelectionWithoutReload(page) {
   await clickNativeUiPoint(page, assetPackOptionsButtonPoint(geometry));
   await waitForNativeUiScreen(page, "assetPacks");
   await clickNativeUiPoint(page, assetPackRowPoint(geometry, 0));
-  await clickNativeUiPoint(page, assetPackRowPoint(geometry, 1));
   const applyReport = await clickNativeUiPoint(page, assetPackApplyPoint(geometry));
   try {
     await page.waitForFunction(
@@ -5242,7 +5241,6 @@ async function runAssetPackUiProbe(page, canvas) {
   await clickNativeUiPoint(page, assetPackOptionsButtonPoint(geometry));
   await waitForNativeUiScreen(page, "assetPacks");
   await clickNativeUiPoint(page, assetPackRowPoint(geometry, 0));
-  await clickNativeUiPoint(page, assetPackRowPoint(geometry, 1));
   let applyReport = null;
   const operationProgressTrace = await traceSceneProgressDuringOperation(page, async () => {
     applyReport = await clickNativeUiPoint(page, assetPackApplyPoint(geometry));
@@ -5257,7 +5255,7 @@ async function runAssetPackUiProbe(page, canvas) {
         && report?.assetReplacementState === "active"
         && state?.streamingSettled === true
         && Number(compiler?.assetEpoch) === epoch
-        && Number(compiler?.workerAssetLoadCount) === 3;
+        && Number(compiler?.workerAssetLoadCount) === 4;
     },
     { epoch: before.activeAssetEpoch + 1, completionCount: before.completionCount },
     { timeout: 120_000 },
@@ -5301,7 +5299,7 @@ async function runAssetPackUiProbe(page, canvas) {
           && Number(report?.activeAssetEpoch) === 1
           && report?.assetPackActiveAuthored === true
           && report?.assetPackActiveReference === false
-          && report?.assetPackPreferredIds === "mclone-authored"
+          && report?.assetPackPreferredIds === "mclone-authored,mclone-generated-fallback"
           && !report?.assetPackPreferenceError
           && state?.streamingSettled === true;
       },
@@ -5362,7 +5360,7 @@ async function runAssetPackUiProbe(page, canvas) {
       && after.sessionState === "active"
       && after.nativeUiScreen === "assetPacks"
       && after.streamingSettled === true
-      && Number(after.compiler?.workerAssetLoadCount) === 3
+      && Number(after.compiler?.workerAssetLoadCount) === 4
       && Number(after.compiler?.assetEpoch) === after.activeAssetEpoch
       && after.compiler?.generatedViewFallbackUsed === false
       && after.diagnostics.proprietaryFree === true
@@ -5372,11 +5370,12 @@ async function runAssetPackUiProbe(page, canvas) {
       && after.diagnostics.peakRetainedGpuBytes > 0
       && typeof persistedJson === "string"
       && persistedJson.includes("mclone-authored")
+      && persistedJson.includes("mclone-generated-fallback")
       && restored.activeAssetEpoch === 1
       && restored.assetReplacementState === "active"
       && restored.activeAuthored === true
       && restored.activeReference === false
-      && restored.preferredIds === "mclone-authored"
+      && restored.preferredIds === "mclone-authored,mclone-generated-fallback"
       && restored.preferenceError === null
       && restored.completionCount > 0
       && restored.sessionKind === before.sessionKind
@@ -5679,11 +5678,11 @@ function worldDeleteConfirmPoint(geometry) {
 /** @param {{ width: number, height: number }} geometry */
 function assetPackOptionsButtonPoint(geometry) {
   const panelWidth = Math.min(Math.max(geometry.width - 18.0, 242.0), 360.0);
-  const panelHeight = Math.min(238.0, Math.max(geometry.height - 4.0, 1.0));
+  const panelHeight = Math.min(262.0, Math.max(geometry.height - 4.0, 1.0));
   const panel = centeredPanel(geometry, panelWidth, panelHeight);
-  // Five category rows start at y=30 with a 24 px stride. Asset Packs is
+  // Six category rows start at y=30 with a 24 px stride. Visual Profiles is
   // the next 20 px row.
-  return { x: panel.x + panel.width * 0.5, y: panel.y + 160.0 };
+  return { x: panel.x + panel.width * 0.5, y: panel.y + 184.0 };
 }
 
 /**
@@ -5694,10 +5693,16 @@ function assetPackRowPoint(geometry, index) {
   const width = Math.min(Math.max(geometry.width - 12.0, 300.0), 456.0);
   const height = Math.min(Math.max(geometry.height - 4.0, 220.0), 286.0);
   const panel = centeredPanel(geometry, width, height);
-  const rowHeight = Math.min(Math.max((panel.height - 116.0) / 3.0, 32.0), 42.0);
+  const rowGap = 3.0;
+  const rowsTop = 28.0;
+  const presentationTop = panel.height - 52.0;
+  const rowHeight = Math.min(
+    Math.max((presentationTop - rowsTop - 8.0 - rowGap * 4.0) / 5.0, 24.0),
+    42.0,
+  );
   return {
     x: panel.x + panel.width * 0.5,
-    y: panel.y + 28.0 + index * (rowHeight + 3.0) + rowHeight * 0.5,
+    y: panel.y + rowsTop + index * (rowHeight + rowGap) + rowHeight * 0.5,
   };
 }
 

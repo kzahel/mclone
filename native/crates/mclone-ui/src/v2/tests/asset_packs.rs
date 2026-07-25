@@ -86,7 +86,7 @@ fn options_hub_opens_asset_packs_from_title_and_pause() {
         let rect = surface
             .layout()
             .widget(UI_V2_OPTIONS_ASSET_PACKS)
-            .expect("Asset Packs options entry")
+            .expect("Visual Profiles options entry")
             .rect;
         let point = point_in(rect);
         assert!(surface.pointer_down(point, GameUiRenderState::default()));
@@ -164,10 +164,13 @@ fn apply_cancel_progress_and_keyboard_back_use_shared_contracts() {
 }
 
 #[test]
-fn rendered_screen_contains_identity_origin_coverage_and_failure_text() {
+fn rendered_screen_contains_profiles_presentation_and_failure_text() {
     let mut state = asset_pack_state(true);
     state.apply_state = AssetPackUiApplyState::Failed;
     state.message = WorldCatalogUiText::new("Pack decode failed");
+    let failed_row = state.rows[0].as_mut().expect("staged profile row");
+    failed_row.status = AssetPackUiRowStatus::Failed;
+    failed_row.detail = state.message;
     let mut surface = surface_with_state(state);
     let draw = surface.render_draw_list(GameUiRenderState {
         asset_packs: state,
@@ -182,10 +185,10 @@ fn rendered_screen_contains_identity_origin_coverage_and_failure_text() {
         })
         .collect::<Vec<_>>()
         .join("\n");
-    assert!(text.contains("ASSET PACKS"));
+    assert!(text.contains("VISUAL PROFILES"));
     assert!(text.contains("mclone-authored"));
     assert!(text.contains("Local only / proprietary"));
     assert!(text.contains("Generated Fallback Only") || text.contains("Mclone Original"));
-    assert!(text.contains("Authored 11 / Required 146"));
+    assert!(text.contains("Presentation:"));
     assert!(text.contains("Pack decode failed"));
 }

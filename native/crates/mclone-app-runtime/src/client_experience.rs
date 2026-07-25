@@ -185,6 +185,7 @@ impl ClientExperienceController {
             }
             GameUiAction::OpenAssetPacks(_)
             | GameUiAction::ToggleAssetPack(_)
+            | GameUiAction::CycleTexturePresentation
             | GameUiAction::ApplyAssetPacks
             | GameUiAction::CancelAssetPacks => {
                 if let Some(effect) =
@@ -1680,6 +1681,7 @@ pub enum ClientExperienceActionKind {
     OpenServerSettings,
     OpenAssetPacks,
     ToggleAssetPack,
+    CycleTexturePresentation,
     ApplyAssetPacks,
     CancelAssetPacks,
     ConfirmStorageAction,
@@ -1755,6 +1757,9 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
         GameUiAction::OpenServerSettings(_) => ClientExperienceActionKind::OpenServerSettings,
         GameUiAction::OpenAssetPacks(_) => ClientExperienceActionKind::OpenAssetPacks,
         GameUiAction::ToggleAssetPack(_) => ClientExperienceActionKind::ToggleAssetPack,
+        GameUiAction::CycleTexturePresentation => {
+            ClientExperienceActionKind::CycleTexturePresentation
+        }
         GameUiAction::ApplyAssetPacks => ClientExperienceActionKind::ApplyAssetPacks,
         GameUiAction::CancelAssetPacks => ClientExperienceActionKind::CancelAssetPacks,
         GameUiAction::ConfirmStorageAction(_, _) => {
@@ -1829,6 +1834,7 @@ pub const fn classify_client_experience_action_kind(
         | ClientExperienceActionKind::CancelDeleteWorld
         | ClientExperienceActionKind::OpenAssetPacks
         | ClientExperienceActionKind::ToggleAssetPack
+        | ClientExperienceActionKind::CycleTexturePresentation
         | ClientExperienceActionKind::ApplyAssetPacks
         | ClientExperienceActionKind::CancelAssetPacks
         | ClientExperienceActionKind::ConfirmStorageAction

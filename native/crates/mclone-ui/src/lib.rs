@@ -1233,6 +1233,7 @@ impl AssetPackUiRow {
 pub struct AssetPacksUiState {
     pub rows: [Option<AssetPackUiRow>; ASSET_PACK_UI_ROW_CAPACITY],
     pub effective_label: WorldCatalogUiText,
+    pub presentation_label: WorldCatalogUiText,
     pub coverage: AssetPackUiCoverage,
     pub dirty: bool,
     pub apply_state: AssetPackUiApplyState,
@@ -1244,6 +1245,7 @@ impl AssetPacksUiState {
         Self {
             rows: [None; ASSET_PACK_UI_ROW_CAPACITY],
             effective_label: WorldCatalogUiText::empty(),
+            presentation_label: WorldCatalogUiText::empty(),
             coverage: AssetPackUiCoverage {
                 authored: 0,
                 required: 0,
@@ -2002,6 +2004,7 @@ pub enum GameUiAction {
     OpenServerSettings(GameOptionsParent),
     OpenAssetPacks(GameOptionsParent),
     ToggleAssetPack(AssetPackUiId),
+    CycleTexturePresentation,
     ApplyAssetPacks,
     CancelAssetPacks,
     ConfirmStorageAction(GameOptionsParent, GameStorageAction),

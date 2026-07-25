@@ -295,8 +295,9 @@ struct WebAssetPackPreparationEffect {
     authored: Vec<u8>,
     reference: Vec<u8>,
     fallback: Vec<u8>,
-    authored_enabled: bool,
-    reference_enabled: bool,
+    diagnostic: Vec<u8>,
+    selection: mclone_assets::AssetPackSelection,
+    presentation: mclone_assets::TexturePresentation,
     render_worker: WebRenderWorkerCoordinator,
 }
 
@@ -473,18 +474,22 @@ async fn execute_web_asset_pack_preparation(
         authored,
         reference,
         fallback,
-        authored_enabled,
-        reference_enabled,
+        diagnostic,
+        selection,
+        presentation,
         render_worker,
     } = effect;
+    let profile = mclone_assets::TextureVisualProfile::from_selection(&selection)
+        .ok_or_else(|| "browser asset request is not a named visual profile".to_owned())?;
     render_worker
         .prepare_asset_candidate(
             content_generation,
             authored.clone(),
             reference.clone(),
             fallback.clone(),
-            authored_enabled,
-            reference_enabled,
+            diagnostic.clone(),
+            profile,
+            presentation,
         )
         .await?;
     prepare_web_scene_assets_from_selection(
@@ -492,8 +497,9 @@ async fn execute_web_asset_pack_preparation(
         authored,
         reference,
         fallback,
-        authored_enabled,
-        reference_enabled,
+        diagnostic,
+        selection,
+        presentation,
     )
     .inspect_err(|_| render_worker.settle_asset_epoch(content_generation, false))
 }
@@ -2094,15 +2100,15 @@ fn take_asset_pack_preparation(
             .selection
             .is_enabled(&mclone_assets::AssetPackId::new(id))
     };
-    let authored_enabled = enabled(AUTHORED_FIRST_PARTY_PACK_ID);
-    let reference_enabled = enabled(MINECRAFT_REFERENCE_PACK_ID);
     let authored = host.initial_asset_packs.authored.clone();
     let reference = host.initial_asset_packs.reference.clone();
     let fallback = host.initial_asset_packs.fallback.clone();
+    let diagnostic = host.initial_asset_packs.diagnostic.clone();
     let selected_file_count = [
-        authored_enabled.then_some(authored.as_slice()),
-        reference_enabled.then_some(reference.as_slice()),
-        Some(fallback.as_slice()),
+        enabled(AUTHORED_FIRST_PARTY_PACK_ID).then_some(authored.as_slice()),
+        enabled(MINECRAFT_REFERENCE_PACK_ID).then_some(reference.as_slice()),
+        enabled(mclone_assets::PROVISIONAL_FIRST_PARTY_PACK_ID).then_some(fallback.as_slice()),
+        enabled(mclone_assets::DIAGNOSTIC_MISSING_PACK_ID).then_some(diagnostic.as_slice()),
     ]
     .into_iter()
     .flatten()
@@ -2120,8 +2126,9 @@ fn take_asset_pack_preparation(
             authored,
             reference,
             fallback,
-            authored_enabled,
-            reference_enabled,
+            diagnostic,
+            selection: pending.kind.selection,
+            presentation: pending.kind.presentation,
             render_worker: host.render_worker.clone(),
         },
     }))
@@ -2228,6 +2235,7 @@ async fn create_scene_host(
         initial_asset_packs.authored.clone(),
         initial_asset_packs.reference.clone(),
         initial_asset_packs.fallback.clone(),
+        initial_asset_packs.diagnostic.clone(),
     )
     .map_err(JsValue::from)?;
     let active_assets = prepare_web_scene_assets_from_pack(initial_asset_packs.reference.clone())

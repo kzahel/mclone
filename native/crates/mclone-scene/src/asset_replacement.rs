@@ -48,6 +48,7 @@ pub struct ExternalAssetPackSelection {
     /// is not platform-operation identity; the surrounding operation token is.
     pub content_generation: u64,
     pub selection: mclone_assets::AssetPackSelection,
+    pub presentation: mclone_assets::TexturePresentation,
 }
 
 pub(crate) enum SceneAssetReplacementPending {
@@ -122,14 +123,18 @@ impl McloneSceneHost {
             .context("active asset selection is invalid for configured sources")?;
         self.active_assets.selection = active_selection.clone();
         self.active_assets.provenance.selection = active_selection.clone();
-        self.client_experience.asset_packs_mut().configure(
-            registry.catalog().clone(),
-            active_selection.clone(),
-            &self.active_assets.provenance,
-            self.active_assets.coverage,
-        )?;
+        self.client_experience
+            .asset_packs_mut()
+            .configure_with_presentation(
+                registry.catalog().clone(),
+                active_selection.clone(),
+                self.active_assets.presentation,
+                &self.active_assets.provenance,
+                self.active_assets.coverage,
+            )?;
         self.asset_pack_sources = Some(registry);
-        self.asset_pack_preference = AssetPackPreference::from_selection(&active_selection);
+        self.asset_pack_preference =
+            AssetPackPreference::from_profile(&active_selection, self.active_assets.presentation);
         self.external_asset_pack_preparation = false;
         self.pending_external_asset_pack_selection = None;
         let _ = self.external_asset_pack_operations.teardown();
@@ -152,14 +157,18 @@ impl McloneSceneHost {
             .context("active asset selection is invalid for external preparation")?;
         self.active_assets.selection = active_selection.clone();
         self.active_assets.provenance.selection = active_selection.clone();
-        self.client_experience.asset_packs_mut().configure(
-            catalog,
-            active_selection.clone(),
-            &self.active_assets.provenance,
-            self.active_assets.coverage,
-        )?;
+        self.client_experience
+            .asset_packs_mut()
+            .configure_with_presentation(
+                catalog,
+                active_selection.clone(),
+                self.active_assets.presentation,
+                &self.active_assets.provenance,
+                self.active_assets.coverage,
+            )?;
         self.asset_pack_sources = None;
-        self.asset_pack_preference = AssetPackPreference::from_selection(&active_selection);
+        self.asset_pack_preference =
+            AssetPackPreference::from_profile(&active_selection, self.active_assets.presentation);
         self.external_asset_pack_preparation = true;
         self.pending_external_asset_pack_selection = None;
         let _ = self.external_asset_pack_operations.teardown();
@@ -189,7 +198,9 @@ impl McloneSceneHost {
                     preference.reconcile(self.client_experience.asset_packs().catalog());
                 self.asset_pack_preference = preference;
                 if resolution.selection != self.active_assets.selection {
-                    self.begin_asset_pack_selection(resolution.selection)?;
+                    self.begin_asset_pack_profile(resolution.selection, resolution.presentation)?;
+                } else if resolution.presentation != self.active_assets.presentation {
+                    self.begin_asset_pack_profile(resolution.selection, resolution.presentation)?;
                 }
             }
             Ok(None) => {}
@@ -209,13 +220,22 @@ impl McloneSceneHost {
     /// selection override. Persistence adapters remain separate so a launch
     /// override does not need to rewrite the user's saved preference.
     pub fn begin_asset_pack_selection(&mut self, selection: AssetPackSelection) -> Result<()> {
+        self.begin_asset_pack_profile(selection, mclone_assets::TexturePresentation::Textured)
+    }
+
+    pub fn begin_asset_pack_profile(
+        &mut self,
+        selection: AssetPackSelection,
+        presentation: mclone_assets::TexturePresentation,
+    ) -> Result<()> {
+        let selection = mclone_assets::TextureVisualProfile::normalize_legacy_selection(&selection);
         self.client_experience
             .asset_packs_mut()
-            .begin_preferred_selection(selection.clone())?;
+            .begin_preferred_profile(selection.clone(), presentation)?;
         if self.active_world.runtime.is_some() {
-            self.request_asset_pack_selection(selection)?;
+            self.request_asset_pack_selection(selection, presentation)?;
         } else {
-            self.pending_restored_asset_pack_selection = Some(selection);
+            self.pending_restored_asset_pack_selection = Some((selection, presentation));
         }
         Ok(())
     }
@@ -328,10 +348,18 @@ impl McloneSceneHost {
             }
         };
         self.pending_external_asset_pack_selection = None;
-        if assets.epoch != pending.content_generation || assets.selection != pending.selection {
+        if assets.epoch != pending.content_generation
+            || assets.selection != pending.selection
+            || assets.presentation != pending.presentation
+        {
             let message = format!(
-                "external asset preparation mismatch: expected epoch {} selection {:?}, got epoch {} selection {:?}",
-                pending.content_generation, pending.selection, assets.epoch, assets.selection
+                "external asset preparation mismatch: expected epoch {} selection {:?} presentation {:?}, got epoch {} selection {:?} presentation {:?}",
+                pending.content_generation,
+                pending.selection,
+                pending.presentation,
+                assets.epoch,
+                assets.selection,
+                assets.presentation,
             );
             self.fail_asset_replacement(message.clone());
             bail!(message);
@@ -362,8 +390,11 @@ impl McloneSceneHost {
     pub(crate) fn apply_asset_pack_effects(&mut self, effects: Vec<ClientAssetPackEffect>) {
         for effect in effects {
             match effect {
-                ClientAssetPackEffect::ApplySelection(selection) => {
-                    let result = self.request_asset_pack_selection(selection);
+                ClientAssetPackEffect::ApplySelection {
+                    selection,
+                    presentation,
+                } => {
+                    let result = self.request_asset_pack_selection(selection, presentation);
                     if let Err(error) = result {
                         self.client_experience
                             .asset_packs_mut()
@@ -374,7 +405,11 @@ impl McloneSceneHost {
         }
     }
 
-    fn request_asset_pack_selection(&mut self, selection: AssetPackSelection) -> Result<()> {
+    fn request_asset_pack_selection(
+        &mut self,
+        selection: AssetPackSelection,
+        presentation: mclone_assets::TexturePresentation,
+    ) -> Result<()> {
         let epoch = self.active_assets.epoch.saturating_add(1);
         self.asset_replacement_started_at = Some(self.services.clock.now());
         self.asset_replacement_assets_ready_at = None;
@@ -386,6 +421,7 @@ impl McloneSceneHost {
                 ExternalAssetPackSelection {
                     content_generation: epoch,
                     selection,
+                    presentation,
                 },
                 (),
             );
@@ -397,7 +433,8 @@ impl McloneSceneHost {
             .asset_pack_sources
             .clone()
             .context("asset pack sources are not configured on this platform")?;
-        let request = PreparedSceneAssetsRequest::from_registry(epoch, registry, selection)?;
+        let request =
+            PreparedSceneAssetsRequest::from_registry(epoch, registry, selection, presentation)?;
         self.begin_asset_replacement(request)
     }
 
@@ -550,9 +587,10 @@ impl McloneSceneHost {
         }
         if self.asset_replacement.is_none()
             && self.active_world.runtime.is_some()
-            && let Some(selection) = self.pending_restored_asset_pack_selection.take()
+            && let Some((selection, presentation)) =
+                self.pending_restored_asset_pack_selection.take()
         {
-            if let Err(error) = self.request_asset_pack_selection(selection) {
+            if let Err(error) = self.request_asset_pack_selection(selection, presentation) {
                 self.fail_asset_replacement(format!("restore preferred asset packs: {error:#}"));
             }
         }
@@ -878,14 +916,18 @@ impl McloneSceneHost {
         self.asset_replacement_status = AssetReplacementStatus::Active {
             epoch: self.active_assets.epoch,
         };
-        self.client_experience.asset_packs_mut().mark_active(
-            self.active_assets.selection.clone(),
-            &self.active_assets.provenance,
-            self.active_assets.coverage,
-        );
+        self.client_experience
+            .asset_packs_mut()
+            .mark_active_with_presentation(
+                self.active_assets.selection.clone(),
+                self.active_assets.presentation,
+                &self.active_assets.provenance,
+                self.active_assets.coverage,
+            );
         let preference = self.asset_pack_preference.after_successful_apply(
             self.client_experience.asset_packs().catalog(),
             &self.active_assets.selection,
+            self.active_assets.presentation,
         );
         if let Some(storage) = self.asset_pack_preference_storage.as_ref() {
             if let Err(error) = storage.store(&preference) {

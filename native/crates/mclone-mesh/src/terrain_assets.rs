@@ -5,7 +5,7 @@ use std::fmt;
 use mclone_assets::{
     AssetError, AssetPath, AssetSource, BlockModelLibrary, BlockStateAssetIndex,
     BlockStateRegistry, FirstPartyVisualCatalog, MemoryAssetSource, ResourceLocation,
-    TextureAtlasPlan, TextureMaterial,
+    TextureAtlasPlan, TextureMaterial, TexturePresentation,
 };
 
 use crate::catalog::bushy_leaf_material;
@@ -118,6 +118,13 @@ impl From<TexturedMeshError> for TexturedTerrainAssetError {
 pub fn load_textured_terrain_assets(
     source: &impl AssetSource,
 ) -> Result<TexturedTerrainAssets, TexturedTerrainAssetError> {
+    load_textured_terrain_assets_with_presentation(source, TexturePresentation::Textured)
+}
+
+pub fn load_textured_terrain_assets_with_presentation(
+    source: &impl AssetSource,
+    presentation: TexturePresentation,
+) -> Result<TexturedTerrainAssets, TexturedTerrainAssetError> {
     let registry = BlockStateRegistry::terrain_mvp();
     let blockstates = BlockStateAssetIndex::load_namespace(source, "minecraft")?;
     registry.validate_blockstate_assets(&blockstates)?;
@@ -130,7 +137,8 @@ pub fn load_textured_terrain_assets(
     let overlay = DerivedAssetOverlay::new(source, derived);
     let atlas_plan = TextureAtlasPlan::build(&overlay, materials)?;
     let atlas_sprite_count = atlas_plan.len();
-    let atlas = stitch_texture_atlas(&overlay, &atlas_plan)?;
+    let mut atlas = stitch_texture_atlas(&overlay, &atlas_plan)?;
+    apply_texture_presentation(&mut atlas, &atlas_plan, presentation);
     let mut catalog =
         TexturedMeshCatalog::from_assets(&registry, &blockstates, &models, &atlas_plan)?;
     if let Some(color_maps) = load_color_maps(source)? {
@@ -147,6 +155,16 @@ pub fn load_textured_terrain_assets(
 pub fn load_first_party_textured_terrain_assets(
     source: &impl AssetSource,
 ) -> Result<TexturedTerrainAssets, TexturedTerrainAssetError> {
+    load_first_party_textured_terrain_assets_with_presentation(
+        source,
+        TexturePresentation::Textured,
+    )
+}
+
+pub fn load_first_party_textured_terrain_assets_with_presentation(
+    source: &impl AssetSource,
+    presentation: TexturePresentation,
+) -> Result<TexturedTerrainAssets, TexturedTerrainAssetError> {
     let registry = BlockStateRegistry::terrain_mvp();
     let visuals = FirstPartyVisualCatalog::load(source)?;
     let materials = visuals
@@ -162,7 +180,8 @@ pub fn load_first_party_textured_terrain_assets(
     let overlay = DerivedAssetOverlay::new(source, derived);
     let atlas_plan = TextureAtlasPlan::build(&overlay, materials)?;
     let atlas_sprite_count = atlas_plan.len();
-    let atlas = stitch_texture_atlas(&overlay, &atlas_plan)?;
+    let mut atlas = stitch_texture_atlas(&overlay, &atlas_plan)?;
+    apply_texture_presentation(&mut atlas, &atlas_plan, presentation);
     let mut catalog =
         TexturedMeshCatalog::from_first_party_visuals(&registry, &visuals, &atlas_plan)?;
     if let Some(color_maps) = load_color_maps(source)? {
@@ -498,6 +517,43 @@ fn copy_sprite_with_gutter(
     }
 }
 
+fn apply_texture_presentation(
+    atlas: &mut TextureAtlasImage,
+    plan: &TextureAtlasPlan,
+    presentation: TexturePresentation,
+) {
+    if presentation == TexturePresentation::Textured {
+        return;
+    }
+    for sprite in plan.sprites() {
+        let mut weighted = [0_u64; 3];
+        let mut alpha_sum = 0_u64;
+        for y in sprite.y..sprite.y + sprite.info.height {
+            for x in sprite.x..sprite.x + sprite.info.width {
+                let offset = ((y * atlas.width + x) * 4) as usize;
+                let pixel = &atlas.rgba[offset..offset + 4];
+                let alpha = u64::from(pixel[3]);
+                alpha_sum += alpha;
+                for channel in 0..3 {
+                    weighted[channel] += u64::from(pixel[channel]) * alpha;
+                }
+            }
+        }
+        if alpha_sum == 0 {
+            continue;
+        }
+        let average = weighted.map(|channel| (channel / alpha_sum) as u8);
+        for y in sprite.padded_y()..sprite.padded_y() + sprite.padded_height() {
+            for x in sprite.padded_x()..sprite.padded_x() + sprite.padded_width() {
+                let offset = ((y * atlas.width + x) * 4) as usize;
+                if atlas.rgba[offset + 3] != 0 {
+                    atlas.rgba[offset..offset + 3].copy_from_slice(&average);
+                }
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -628,6 +684,34 @@ mod tests {
         );
     }
 
+    #[test]
+    fn flat_color_presentation_preserves_alpha_and_uses_sprite_average() {
+        let material =
+            TextureMaterial::blocks(ResourceLocation::parse("minecraft:block/flat").unwrap());
+        let mut source = mclone_assets::MemoryAssetSource::new();
+        let mut rgba = Vec::new();
+        rgba.extend_from_slice(&[200, 20, 10, 255]);
+        rgba.extend_from_slice(&[100, 40, 30, 255]);
+        rgba.extend_from_slice(&[5, 6, 7, 0]);
+        rgba.extend_from_slice(&[100, 60, 50, 255]);
+        source.insert(
+            AssetPath::new("assets/minecraft/textures/block/flat.png"),
+            test_png_rgba_pixels(2, 2, &rgba),
+        );
+        let plan = TextureAtlasPlan::build(&source, [material.clone()]).unwrap();
+        let sprite = plan.sprite(&material).unwrap();
+        let mut atlas = stitch_texture_atlas(&source, &plan).unwrap();
+
+        apply_texture_presentation(&mut atlas, &plan, TexturePresentation::FlatColors);
+
+        assert_eq!(atlas_pixel(&atlas, sprite.x, sprite.y), [133, 40, 30, 255]);
+        assert_eq!(
+            atlas_pixel(&atlas, sprite.x + 1, sprite.y + 1),
+            [133, 40, 30, 255]
+        );
+        assert_eq!(atlas_pixel(&atlas, sprite.x, sprite.y + 1), [5, 6, 7, 0]);
+    }
+
     fn test_png_rgba(width: u32, height: u32, pixel: &[u8; 4]) -> Vec<u8> {
         let mut rgba = Vec::with_capacity(width as usize * height as usize * 4);
         for _ in 0..width * height {
@@ -636,6 +720,14 @@ mod tests {
         let mut bytes = Vec::new();
         image::codecs::png::PngEncoder::new(&mut bytes)
             .write_image(&rgba, width, height, image::ColorType::Rgba8.into())
+            .unwrap();
+        bytes
+    }
+
+    fn test_png_rgba_pixels(width: u32, height: u32, rgba: &[u8]) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        image::codecs::png::PngEncoder::new(&mut bytes)
+            .write_image(rgba, width, height, image::ColorType::Rgba8.into())
             .unwrap();
         bytes
     }

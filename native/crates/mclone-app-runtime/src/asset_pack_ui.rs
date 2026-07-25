@@ -1,7 +1,9 @@
 use anyhow::{Context, Result, bail};
 use mclone_assets::{
-    AssetPackAvailability, AssetPackCatalog, AssetPackDescriptor, AssetPackId, AssetPackOrigin,
-    AssetPackSelection, AssetProvenanceReport, AssetProvenanceSummary,
+    AUTHORED_FIRST_PARTY_PACK_ID, AssetPackAvailability, AssetPackCatalog, AssetPackDescriptor,
+    AssetPackId, AssetPackOrigin, AssetPackSelection, AssetProvenanceReport,
+    AssetProvenanceSummary, DIAGNOSTIC_MISSING_PACK_ID, MINECRAFT_REFERENCE_PACK_ID,
+    PROVISIONAL_FIRST_PARTY_PACK_ID, TexturePresentation, TextureVisualProfile,
 };
 use mclone_ui::{
     ASSET_PACK_UI_ROW_CAPACITY, AssetPackUiApplyState, AssetPackUiCoverage, AssetPackUiId,
@@ -9,14 +11,14 @@ use mclone_ui::{
     WorldCatalogUiText,
 };
 
-use crate::prepared_assets::{
-    AUTHORED_FIRST_PARTY_PACK_ID, GENERATED_FALLBACK_PACK_ID, MINECRAFT_REFERENCE_PACK_ID,
-    PreparedAssetCoverage,
-};
+use crate::prepared_assets::PreparedAssetCoverage;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum ClientAssetPackEffect {
-    ApplySelection(AssetPackSelection),
+    ApplySelection {
+        selection: AssetPackSelection,
+        presentation: TexturePresentation,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -24,6 +26,8 @@ pub struct ClientAssetPackController {
     catalog: AssetPackCatalog,
     active: AssetPackSelection,
     staged: AssetPackSelection,
+    active_presentation: TexturePresentation,
+    staged_presentation: TexturePresentation,
     apply_state: AssetPackUiApplyState,
     message: String,
     provenance: AssetProvenanceSummary,
@@ -34,7 +38,7 @@ impl Default for ClientAssetPackController {
     fn default() -> Self {
         let authored = AssetPackDescriptor::new(
             AssetPackId::new(AUTHORED_FIRST_PARTY_PACK_ID),
-            "Mclone Original Assets",
+            "Mclone Curated Textures",
             AssetPackOrigin::FirstParty,
             10,
         )
@@ -47,21 +51,31 @@ impl Default for ClientAssetPackController {
             20,
         )
         .expect("built-in reference descriptor");
-        let fallback = AssetPackDescriptor::new(
-            AssetPackId::new(GENERATED_FALLBACK_PACK_ID),
-            "Generated Missing Assets",
-            AssetPackOrigin::Generated,
+        let provisional = AssetPackDescriptor::new(
+            AssetPackId::new(PROVISIONAL_FIRST_PARTY_PACK_ID),
+            "Mclone Provisional Textures",
+            AssetPackOrigin::FirstPartyProvisional,
             30,
         )
-        .expect("built-in fallback descriptor")
-        .required();
-        let catalog = AssetPackCatalog::new([authored, reference, fallback])
+        .expect("built-in provisional descriptor")
+        .unavailable("Not installed by this platform");
+        let diagnostic = AssetPackDescriptor::new(
+            AssetPackId::new(DIAGNOSTIC_MISSING_PACK_ID),
+            "Numbered Missing Diagnostics",
+            AssetPackOrigin::Diagnostic,
+            40,
+        )
+        .expect("built-in diagnostic descriptor")
+        .unavailable("Not installed by this platform");
+        let catalog = AssetPackCatalog::new([authored, reference, provisional, diagnostic])
             .expect("built-in asset pack catalog");
-        let active = AssetPackSelection::new([AssetPackId::new(MINECRAFT_REFERENCE_PACK_ID)]);
+        let active = TextureVisualProfile::MinecraftReference.selection();
         Self {
             catalog,
             active: active.clone(),
             staged: active,
+            active_presentation: TexturePresentation::Textured,
+            staged_presentation: TexturePresentation::Textured,
             apply_state: AssetPackUiApplyState::Idle,
             message: String::new(),
             provenance: AssetProvenanceSummary {
@@ -81,13 +95,35 @@ impl ClientAssetPackController {
         provenance: &AssetProvenanceReport,
         coverage: Option<PreparedAssetCoverage>,
     ) -> Result<()> {
+        self.configure_with_presentation(
+            catalog,
+            active,
+            TexturePresentation::Textured,
+            provenance,
+            coverage,
+        )
+    }
+
+    pub fn configure_with_presentation(
+        &mut self,
+        catalog: AssetPackCatalog,
+        active: AssetPackSelection,
+        presentation: TexturePresentation,
+        provenance: &AssetProvenanceReport,
+        coverage: Option<PreparedAssetCoverage>,
+    ) -> Result<()> {
         validate_asset_pack_ui_catalog(&catalog)?;
+        let active = TextureVisualProfile::normalize_legacy_selection(&active);
         catalog
             .source_order(&active)
-            .context("active asset selection is invalid for the UI catalog")?;
+            .context("active visual profile is invalid for the UI catalog")?;
+        TextureVisualProfile::from_selection(&active)
+            .context("active asset selection is not a named visual profile")?;
         self.catalog = catalog;
         self.active = active.clone();
         self.staged = active;
+        self.active_presentation = presentation;
+        self.staged_presentation = presentation;
         self.apply_state = AssetPackUiApplyState::Idle;
         self.message.clear();
         self.provenance = provenance.summary();
@@ -107,6 +143,14 @@ impl ClientAssetPackController {
         &self.staged
     }
 
+    pub const fn active_presentation(&self) -> TexturePresentation {
+        self.active_presentation
+    }
+
+    pub const fn staged_presentation(&self) -> TexturePresentation {
+        self.staged_presentation
+    }
+
     pub fn apply_ui_action(
         &mut self,
         action: GameUiAction,
@@ -116,20 +160,30 @@ impl ClientAssetPackController {
                 if self.apply_state.is_preparing() {
                     return Ok(None);
                 }
-                let descriptor = self
-                    .descriptor_for_ui_id(ui_id)
-                    .context("asset pack row no longer exists in the current catalog")?;
-                if !descriptor.disableable || !descriptor.availability.is_available() {
+                let profile =
+                    profile_for_ui_id(ui_id).context("visual profile row no longer exists")?;
+                self.catalog
+                    .source_order(&profile.selection())
+                    .context("selected visual profile is unavailable")?;
+                self.staged = profile.selection();
+                if profile == TextureVisualProfile::FirstPartyCoverage {
+                    self.staged_presentation = TexturePresentation::Textured;
+                }
+                self.apply_state = AssetPackUiApplyState::Idle;
+                self.message.clear();
+                Ok(None)
+            }
+            GameUiAction::CycleTexturePresentation => {
+                if self.apply_state.is_preparing()
+                    || TextureVisualProfile::from_selection(&self.staged)
+                        == Some(TextureVisualProfile::FirstPartyCoverage)
+                {
                     return Ok(None);
                 }
-                let id = descriptor.id.clone();
-                let mut enabled = self.staged.enabled_ids().cloned().collect::<Vec<_>>();
-                if self.staged.is_enabled(&id) {
-                    enabled.retain(|enabled_id| enabled_id != &id);
-                } else {
-                    enabled.push(id);
-                }
-                self.staged = AssetPackSelection::new(enabled);
+                self.staged_presentation = match self.staged_presentation {
+                    TexturePresentation::Textured => TexturePresentation::FlatColors,
+                    TexturePresentation::FlatColors => TexturePresentation::Textured,
+                };
                 self.apply_state = AssetPackUiApplyState::Idle;
                 self.message.clear();
                 Ok(None)
@@ -137,41 +191,56 @@ impl ClientAssetPackController {
             GameUiAction::CancelAssetPacks => {
                 if !self.apply_state.is_preparing() {
                     self.staged = self.active.clone();
+                    self.staged_presentation = self.active_presentation;
                     self.apply_state = AssetPackUiApplyState::Idle;
                     self.message.clear();
                 }
                 Ok(None)
             }
             GameUiAction::ApplyAssetPacks => {
-                if self.apply_state.is_preparing() || self.staged == self.active {
+                if self.apply_state.is_preparing() || !self.is_dirty() {
                     return Ok(None);
                 }
                 self.catalog
                     .source_order(&self.staged)
-                    .context("staged asset selection is invalid")?;
+                    .context("staged visual profile is invalid")?;
                 self.apply_state = AssetPackUiApplyState::PreparingAssets;
-                self.message = "Preparing selected packs".to_owned();
-                Ok(Some(ClientAssetPackEffect::ApplySelection(
-                    self.staged.clone(),
-                )))
+                self.message = "Preparing visual profile".to_owned();
+                Ok(Some(ClientAssetPackEffect::ApplySelection {
+                    selection: self.staged.clone(),
+                    presentation: self.staged_presentation,
+                }))
             }
             _ => Ok(None),
         }
     }
 
     pub fn begin_preferred_selection(&mut self, selection: AssetPackSelection) -> Result<()> {
+        self.begin_preferred_profile(selection, self.active_presentation)
+    }
+
+    pub fn begin_preferred_profile(
+        &mut self,
+        selection: AssetPackSelection,
+        presentation: TexturePresentation,
+    ) -> Result<()> {
+        let selection = TextureVisualProfile::normalize_legacy_selection(&selection);
         self.catalog
             .source_order(&selection)
-            .context("preferred asset selection is invalid")?;
-        if selection == self.active {
+            .context("preferred visual profile is invalid")?;
+        TextureVisualProfile::from_selection(&selection)
+            .context("preferred asset selection is not a named visual profile")?;
+        if selection == self.active && presentation == self.active_presentation {
             self.staged = selection;
+            self.staged_presentation = presentation;
             self.apply_state = AssetPackUiApplyState::Idle;
             self.message.clear();
             return Ok(());
         }
         self.staged = selection;
+        self.staged_presentation = presentation;
         self.apply_state = AssetPackUiApplyState::PreparingAssets;
-        self.message = "Restoring preferred packs".to_owned();
+        self.message = "Restoring visual profile".to_owned();
         Ok(())
     }
 
@@ -191,8 +260,25 @@ impl ClientAssetPackController {
         provenance: &AssetProvenanceReport,
         coverage: Option<PreparedAssetCoverage>,
     ) {
+        self.mark_active_with_presentation(
+            selection,
+            TexturePresentation::Textured,
+            provenance,
+            coverage,
+        );
+    }
+
+    pub fn mark_active_with_presentation(
+        &mut self,
+        selection: AssetPackSelection,
+        presentation: TexturePresentation,
+        provenance: &AssetProvenanceReport,
+        coverage: Option<PreparedAssetCoverage>,
+    ) {
         self.active = selection.clone();
         self.staged = selection;
+        self.active_presentation = presentation;
+        self.staged_presentation = presentation;
         self.apply_state = AssetPackUiApplyState::Idle;
         self.message.clear();
         self.provenance = provenance.summary();
@@ -200,54 +286,55 @@ impl ClientAssetPackController {
     }
 
     pub fn ui_state(&self) -> AssetPacksUiState {
-        let mut descriptors = self.catalog.descriptors().collect::<Vec<_>>();
-        descriptors.sort_by(|left, right| {
-            left.priority
-                .cmp(&right.priority)
-                .then_with(|| left.id.cmp(&right.id))
-        });
-        let mut rows = Vec::with_capacity(descriptors.len());
-        for descriptor in descriptors {
-            let staged = !descriptor.disableable || self.staged.is_enabled(&descriptor.id);
-            let active = !descriptor.disableable || self.active.is_enabled(&descriptor.id);
-            let available = descriptor.availability.is_available();
+        let staged_profile = TextureVisualProfile::from_selection(&self.staged);
+        let active_profile = TextureVisualProfile::from_selection(&self.active);
+        let mut rows = Vec::with_capacity(TextureVisualProfile::ALL.len());
+        for profile in TextureVisualProfile::ALL {
+            let selection = profile.selection();
+            let availability = profile_availability(&self.catalog, profile);
+            let available = availability.is_none();
+            let staged = staged_profile == Some(profile);
+            let active = active_profile == Some(profile);
             let status = if !available {
                 AssetPackUiRowStatus::Unavailable
             } else if self.apply_state.is_preparing() && staged {
                 AssetPackUiRowStatus::Preparing
             } else if self.apply_state == AssetPackUiApplyState::Failed && staged != active {
                 AssetPackUiRowStatus::Failed
-            } else if staged == active && active {
+            } else if staged && active && !self.is_dirty() {
                 AssetPackUiRowStatus::Active
             } else if staged {
                 AssetPackUiRowStatus::Enabled
             } else {
                 AssetPackUiRowStatus::Disabled
             };
-            let detail = match &descriptor.availability {
-                AssetPackAvailability::Available if !descriptor.disableable => "Always active",
-                AssetPackAvailability::Available => "",
-                AssetPackAvailability::Unavailable { reason } => reason,
-            };
             let mut row = AssetPackUiRow::new(
-                asset_pack_ui_id(&descriptor.id),
-                descriptor.id.as_str(),
-                &descriptor.display_name,
-                ui_origin(descriptor.origin),
+                profile_ui_id(profile),
+                profile.id(),
+                profile.label(),
+                profile_origin(profile),
             );
             row.status = status;
             row.enabled = staged;
             row.active = active;
             row.available = available;
-            row.disableable = descriptor.disableable;
-            row.detail = WorldCatalogUiText::new(detail);
+            row.disableable = true;
+            row.detail = WorldCatalogUiText::new(if status == AssetPackUiRowStatus::Failed {
+                self.message.as_str()
+            } else {
+                availability
+                    .as_deref()
+                    .unwrap_or_else(|| profile_detail(profile))
+            });
+            debug_assert_eq!(selection, profile.selection());
             rows.push(row);
         }
         let coverage = ui_coverage(self.provenance, self.coverage);
         let mut state = AssetPacksUiState {
             effective_label: WorldCatalogUiText::new(effective_selection_label(&self.staged)),
+            presentation_label: WorldCatalogUiText::new(self.staged_presentation.label()),
             coverage,
-            dirty: self.staged != self.active,
+            dirty: self.is_dirty(),
             apply_state: self.apply_state,
             message: WorldCatalogUiText::new(&self.message),
             ..AssetPacksUiState::empty()
@@ -256,27 +343,68 @@ impl ClientAssetPackController {
         state
     }
 
-    fn descriptor_for_ui_id(&self, ui_id: AssetPackUiId) -> Option<&AssetPackDescriptor> {
-        self.catalog
-            .descriptors()
-            .find(|descriptor| asset_pack_ui_id(&descriptor.id) == ui_id)
+    fn is_dirty(&self) -> bool {
+        self.staged != self.active || self.staged_presentation != self.active_presentation
     }
 }
 
 pub fn effective_selection_label(selection: &AssetPackSelection) -> &'static str {
-    let authored = selection.is_enabled(&AssetPackId::new(AUTHORED_FIRST_PARTY_PACK_ID));
-    let reference = selection.is_enabled(&AssetPackId::new(MINECRAFT_REFERENCE_PACK_ID));
-    match (authored, reference) {
-        (true, false) => "Mclone Original",
-        (false, true) => "Vanilla Reference",
-        (true, true) => "Hybrid Authoring",
-        (false, false) => "Generated Fallback Only",
+    TextureVisualProfile::from_selection(selection)
+        .map(TextureVisualProfile::label)
+        .unwrap_or("Custom asset selection")
+}
+
+fn profile_availability(
+    catalog: &AssetPackCatalog,
+    profile: TextureVisualProfile,
+) -> Option<String> {
+    for id in profile.selection().enabled_ids() {
+        match catalog.get(id) {
+            None => return Some(format!("{} is not discovered", id.as_str())),
+            Some(descriptor) => match &descriptor.availability {
+                AssetPackAvailability::Available => {}
+                AssetPackAvailability::Unavailable { reason } => return Some(reason.clone()),
+            },
+        }
+    }
+    None
+}
+
+const fn profile_detail(profile: TextureVisualProfile) -> &'static str {
+    match profile {
+        TextureVisualProfile::McloneOriginal => "Curated → provisional",
+        TextureVisualProfile::MinecraftReference => "Minecraft → provisional gaps",
+        TextureVisualProfile::HybridAuthoring => "Curated → Minecraft → provisional",
+        TextureVisualProfile::FirstPartyCoverage => "Curated → numbered missing",
+        TextureVisualProfile::ProvisionalAudit => "Provisional only",
     }
 }
 
-fn asset_pack_ui_id(id: &AssetPackId) -> AssetPackUiId {
+const fn profile_origin(profile: TextureVisualProfile) -> AssetPackUiOrigin {
+    match profile {
+        TextureVisualProfile::McloneOriginal => AssetPackUiOrigin::FirstParty,
+        TextureVisualProfile::MinecraftReference | TextureVisualProfile::HybridAuthoring => {
+            AssetPackUiOrigin::MinecraftReference
+        }
+        TextureVisualProfile::FirstPartyCoverage | TextureVisualProfile::ProvisionalAudit => {
+            AssetPackUiOrigin::Generated
+        }
+    }
+}
+
+fn profile_ui_id(profile: TextureVisualProfile) -> AssetPackUiId {
+    compact_ui_id(profile.id())
+}
+
+fn profile_for_ui_id(ui_id: AssetPackUiId) -> Option<TextureVisualProfile> {
+    TextureVisualProfile::ALL
+        .into_iter()
+        .find(|profile| profile_ui_id(*profile) == ui_id)
+}
+
+fn compact_ui_id(value: &str) -> AssetPackUiId {
     let mut hash = 0xcbf2_9ce4_8422_2325_u64;
-    for byte in id.as_str().as_bytes() {
+    for byte in value.as_bytes() {
         hash ^= u64::from(*byte);
         hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
     }
@@ -284,34 +412,23 @@ fn asset_pack_ui_id(id: &AssetPackId) -> AssetPackUiId {
 }
 
 fn validate_asset_pack_ui_catalog(catalog: &AssetPackCatalog) -> Result<()> {
-    let mut ids = std::collections::BTreeMap::new();
-    for descriptor in catalog.descriptors() {
-        if ids
-            .insert(asset_pack_ui_id(&descriptor.id), descriptor.id.clone())
-            .is_some()
-        {
-            bail!("asset pack catalog contains colliding compact UI ids");
+    let mut ids = std::collections::BTreeSet::new();
+    for profile in TextureVisualProfile::ALL {
+        if !ids.insert(profile_ui_id(profile)) {
+            bail!("visual profile catalog contains colliding compact UI ids");
         }
     }
     if ids.len() > ASSET_PACK_UI_ROW_CAPACITY {
         bail!(
-            "asset pack catalog has {} rows; UI capacity is {}",
+            "visual profile catalog has {} rows; UI capacity is {}",
             ids.len(),
             ASSET_PACK_UI_ROW_CAPACITY
         );
     }
-    Ok(())
-}
-
-const fn ui_origin(origin: AssetPackOrigin) -> AssetPackUiOrigin {
-    match origin {
-        AssetPackOrigin::FirstParty => AssetPackUiOrigin::FirstParty,
-        AssetPackOrigin::FirstPartyProvisional
-        | AssetPackOrigin::Diagnostic
-        | AssetPackOrigin::Generated => AssetPackUiOrigin::Generated,
-        AssetPackOrigin::MinecraftReference => AssetPackUiOrigin::MinecraftReference,
-        AssetPackOrigin::Unknown => AssetPackUiOrigin::Unknown,
+    if catalog.descriptors().count() == 0 {
+        bail!("asset pack catalog is empty");
     }
+    Ok(())
 }
 
 fn ui_coverage(
@@ -321,10 +438,15 @@ fn ui_coverage(
     let authored = coverage.map_or(provenance.first_party, |facts| {
         facts.first_party_resolutions
     });
-    let generated = coverage.map_or(provenance.generated, |facts| facts.generated_resolutions);
+    let generated = coverage.map_or(
+        provenance.generated + provenance.provisional + provenance.diagnostic,
+        |facts| facts.generated_resolutions,
+    );
     AssetPackUiCoverage {
         authored,
         required: provenance.first_party
+            + provenance.provisional
+            + provenance.diagnostic
             + provenance.generated
             + provenance.minecraft_reference
             + provenance.unknown,
@@ -342,98 +464,159 @@ mod tests {
     use super::*;
 
     fn available_controller() -> ClientAssetPackController {
-        let authored = AssetPackDescriptor::new(
-            AssetPackId::new(AUTHORED_FIRST_PARTY_PACK_ID),
-            "Mclone Original Assets",
-            AssetPackOrigin::FirstParty,
-            10,
-        )
+        let catalog = AssetPackCatalog::new([
+            AssetPackDescriptor::new(
+                AssetPackId::new(AUTHORED_FIRST_PARTY_PACK_ID),
+                "Curated",
+                AssetPackOrigin::FirstParty,
+                10,
+            )
+            .unwrap(),
+            AssetPackDescriptor::new(
+                AssetPackId::new(MINECRAFT_REFERENCE_PACK_ID),
+                "Minecraft",
+                AssetPackOrigin::MinecraftReference,
+                20,
+            )
+            .unwrap(),
+            AssetPackDescriptor::new(
+                AssetPackId::new(PROVISIONAL_FIRST_PARTY_PACK_ID),
+                "Provisional",
+                AssetPackOrigin::FirstPartyProvisional,
+                30,
+            )
+            .unwrap(),
+            AssetPackDescriptor::new(
+                AssetPackId::new(DIAGNOSTIC_MISSING_PACK_ID),
+                "Diagnostic",
+                AssetPackOrigin::Diagnostic,
+                40,
+            )
+            .unwrap(),
+        ])
         .unwrap();
-        let reference = AssetPackDescriptor::new(
-            AssetPackId::new(MINECRAFT_REFERENCE_PACK_ID),
-            "Minecraft Reference",
-            AssetPackOrigin::MinecraftReference,
-            20,
-        )
-        .unwrap();
-        let fallback = AssetPackDescriptor::new(
-            AssetPackId::new(GENERATED_FALLBACK_PACK_ID),
-            "Generated Missing Assets",
-            AssetPackOrigin::Generated,
-            30,
-        )
-        .unwrap()
-        .required();
-        let catalog = AssetPackCatalog::new([authored, reference, fallback]).unwrap();
+        let active = TextureVisualProfile::McloneOriginal.selection();
         let mut controller = ClientAssetPackController::default();
         controller
             .configure(
                 catalog,
-                AssetPackSelection::default(),
-                &AssetProvenanceReport::new(0, AssetPackSelection::default()),
+                active.clone(),
+                &AssetProvenanceReport::new(0, active),
                 None,
             )
             .unwrap();
         controller
     }
 
-    fn row_id(controller: &ClientAssetPackController, pack_id: &str) -> AssetPackUiId {
+    fn row_id(
+        controller: &ClientAssetPackController,
+        profile: TextureVisualProfile,
+    ) -> AssetPackUiId {
         controller
             .ui_state()
             .rows
             .iter()
             .flatten()
-            .find(|row| row.pack_id.as_str() == pack_id)
+            .find(|row| row.pack_id.as_str() == profile.id())
             .unwrap()
             .ui_id
     }
 
     #[test]
-    fn stages_and_applies_all_four_well_known_optional_selections() {
+    fn selects_and_applies_each_named_visual_profile() {
         let mut controller = available_controller();
-        let authored = row_id(&controller, AUTHORED_FIRST_PARTY_PACK_ID);
-        let reference = row_id(&controller, MINECRAFT_REFERENCE_PACK_ID);
-        let steps = [
-            (authored, "Mclone Original"),
-            (reference, "Hybrid Authoring"),
-            (authored, "Vanilla Reference"),
-            (reference, "Generated Fallback Only"),
-        ];
-
-        for (ui_id, label) in steps {
+        for profile in TextureVisualProfile::ALL {
             controller
-                .apply_ui_action(GameUiAction::ToggleAssetPack(ui_id))
+                .apply_ui_action(GameUiAction::ToggleAssetPack(row_id(&controller, profile)))
                 .unwrap();
-            assert_eq!(controller.ui_state().effective_label.as_str(), label);
-            let effect = controller
-                .apply_ui_action(GameUiAction::ApplyAssetPacks)
-                .unwrap()
-                .expect("every step changes the active selection");
-            let ClientAssetPackEffect::ApplySelection(selection) = effect;
-            let report = AssetProvenanceReport::new(1, selection.clone());
-            controller.mark_active(selection, &report, None);
+            assert_eq!(
+                controller.ui_state().effective_label.as_str(),
+                profile.label()
+            );
+            if controller.ui_state().dirty {
+                let effect = controller
+                    .apply_ui_action(GameUiAction::ApplyAssetPacks)
+                    .unwrap()
+                    .expect("changed profile emits apply");
+                let ClientAssetPackEffect::ApplySelection {
+                    selection,
+                    presentation,
+                } = effect;
+                let report = AssetProvenanceReport::new(1, selection.clone());
+                controller.mark_active_with_presentation(selection, presentation, &report, None);
+            }
         }
     }
 
     #[test]
-    fn fallback_is_locked_and_cancel_restores_active_selection() {
+    fn flat_colors_are_orthogonal_but_coverage_stays_legible() {
         let mut controller = available_controller();
-        let authored = row_id(&controller, AUTHORED_FIRST_PARTY_PACK_ID);
-        let fallback = row_id(&controller, GENERATED_FALLBACK_PACK_ID);
         controller
-            .apply_ui_action(GameUiAction::ToggleAssetPack(authored))
+            .apply_ui_action(GameUiAction::CycleTexturePresentation)
             .unwrap();
+        assert_eq!(
+            controller.staged_presentation(),
+            TexturePresentation::FlatColors
+        );
         controller
-            .apply_ui_action(GameUiAction::ToggleAssetPack(fallback))
+            .apply_ui_action(GameUiAction::ToggleAssetPack(row_id(
+                &controller,
+                TextureVisualProfile::FirstPartyCoverage,
+            )))
             .unwrap();
-        assert!(controller.ui_state().dirty);
-        let fallback_row = *controller.ui_state().row(fallback).unwrap();
-        assert!(fallback_row.enabled);
-        assert!(!fallback_row.disableable);
+        assert_eq!(
+            controller.staged_presentation(),
+            TexturePresentation::Textured
+        );
+        controller
+            .apply_ui_action(GameUiAction::CycleTexturePresentation)
+            .unwrap();
+        assert_eq!(
+            controller.staged_presentation(),
+            TexturePresentation::Textured
+        );
+    }
 
-        controller
-            .apply_ui_action(GameUiAction::CancelAssetPacks)
+    #[test]
+    fn unavailable_reference_disables_reference_profiles() {
+        let mut controller = available_controller();
+        let mut descriptors = controller
+            .catalog
+            .descriptors()
+            .cloned()
+            .collect::<Vec<_>>();
+        let reference = descriptors
+            .iter_mut()
+            .find(|descriptor| descriptor.id.as_str() == MINECRAFT_REFERENCE_PACK_ID)
             .unwrap();
-        assert!(!controller.ui_state().dirty);
+        reference.availability = AssetPackAvailability::Unavailable {
+            reason: "Local Minecraft assets not installed".to_owned(),
+        };
+        let catalog = AssetPackCatalog::new(descriptors).unwrap();
+        let active = TextureVisualProfile::McloneOriginal.selection();
+        controller
+            .configure(
+                catalog,
+                active.clone(),
+                &AssetProvenanceReport::new(0, active),
+                None,
+            )
+            .unwrap();
+        let state = controller.ui_state();
+        assert!(
+            !state
+                .row(row_id(
+                    &controller,
+                    TextureVisualProfile::MinecraftReference
+                ))
+                .unwrap()
+                .available
+        );
+        assert!(
+            state
+                .row(row_id(&controller, TextureVisualProfile::McloneOriginal))
+                .unwrap()
+                .available
+        );
     }
 }

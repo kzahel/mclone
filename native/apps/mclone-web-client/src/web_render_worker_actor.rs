@@ -409,14 +409,20 @@ fn compiler_template_from_init(message: &JsValue) -> Result<WebRenderCompilerSes
     let authored = uint8_array_property(message, "authoredPack");
     let reference = uint8_array_property(message, "referencePack");
     let fallback = uint8_array_property(message, "fallbackPack");
-    match (authored, reference, fallback) {
-        (Some(authored), Some(reference), Some(fallback)) => {
+    let diagnostic = uint8_array_property(message, "diagnosticPack");
+    match (authored, reference, fallback, diagnostic) {
+        (Some(authored), Some(reference), Some(fallback), Some(diagnostic)) => {
             WebRenderCompilerSession::new_selected(
                 authored,
                 reference,
                 fallback,
-                boolean(message, "authoredEnabled"),
-                boolean(message, "referenceEnabled"),
+                diagnostic,
+                string(message, "visualProfile").ok_or_else(|| {
+                    JsValue::from_str("render compiler init has no visual profile")
+                })?,
+                string(message, "texturePresentation").ok_or_else(|| {
+                    JsValue::from_str("render compiler init has no texture presentation")
+                })?,
             )
         }
         _ => {
@@ -594,10 +600,6 @@ fn number(value: &JsValue, key: &str) -> f64 {
 fn nonzero_number(value: &JsValue, key: &str, fallback: f64) -> f64 {
     let value = number(value, key);
     if value == 0.0 { fallback } else { value }
-}
-
-fn boolean(value: &JsValue, key: &str) -> bool {
-    property(value, key).as_bool().unwrap_or(false)
 }
 
 fn byte_length(value: &JsValue) -> u32 {

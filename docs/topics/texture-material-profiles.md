@@ -15,6 +15,25 @@ five named source orders plus textured/flat presentation vocabulary and exact
 provisional/diagnostic provenance. The canonical build stages all three
 first-party archives and still succeeds without reading Minecraft content.
 
+Implementation update (2026-07-25): the shared runtime slice is implemented
+across native, Android, and browser hosts. Asset preparation accepts a named
+profile plus presentation, persists both fields, and sends all four source
+archives plus the selected contract to browser render workers. The in-game
+screen is now **Visual Profiles**: one row selects one complete source order,
+and a separate control cycles Textured or Flat Colors. First-party Coverage
+forces Textured so its numbered diagnostics stay legible. Flat Colors is
+derived from alpha-weighted sprite averages while preserving transparent and
+cutout pixels.
+
+Native rendered evidence in `/tmp/mclone-profile-original-textured.png`,
+`/tmp/mclone-profile-original-flat.png`, and
+`/tmp/mclone-profile-coverage.png` confirms the three visibly distinct
+presentations. `/tmp/mclone-visual-profiles-ui.png` confirms the compact
+five-profile UI. The headed Wayland browser asset-replacement probe also
+passes with four worker-loaded sources, persists Mclone Original, reloads it
+at asset epoch 1, and records its screenshot and receipt under
+`/tmp/mclone-native-web-asset-pack-ui-probe*`.
+
 ## Scope
 
 This topic owns the meaning, selection, and authoring lifecycle of block

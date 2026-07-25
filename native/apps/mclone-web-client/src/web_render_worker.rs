@@ -29,8 +29,9 @@ enum WorkerAssetPayload {
         authored: Vec<u8>,
         reference: Vec<u8>,
         fallback: Vec<u8>,
-        authored_enabled: bool,
-        reference_enabled: bool,
+        diagnostic: Vec<u8>,
+        profile: mclone_assets::TextureVisualProfile,
+        presentation: mclone_assets::TexturePresentation,
         epoch: u64,
     },
 }
@@ -43,11 +44,13 @@ impl WorkerAssetPayload {
                 authored,
                 reference,
                 fallback,
+                diagnostic,
                 ..
             } => authored
                 .len()
                 .saturating_add(reference.len())
-                .saturating_add(fallback.len()),
+                .saturating_add(fallback.len())
+                .saturating_add(diagnostic.len()),
         }
     }
 }
@@ -278,15 +281,17 @@ impl WebRenderWorkerCoordinator {
         authored: Vec<u8>,
         reference: Vec<u8>,
         fallback: Vec<u8>,
-        authored_enabled: bool,
-        reference_enabled: bool,
+        diagnostic: Vec<u8>,
+        profile: mclone_assets::TextureVisualProfile,
+        presentation: mclone_assets::TexturePresentation,
     ) -> Result<(), String> {
         let payload = WorkerAssetPayload::Selection {
             authored,
             reference,
             fallback,
-            authored_enabled,
-            reference_enabled,
+            diagnostic,
+            profile,
+            presentation,
             epoch,
         };
         {
@@ -998,15 +1003,17 @@ fn init_message(
             authored,
             reference,
             fallback,
-            authored_enabled,
-            reference_enabled,
+            diagnostic,
+            profile,
+            presentation,
             epoch,
         } => {
             attach_bytes(&message, &transfer, "authoredPack", authored)?;
             attach_bytes(&message, &transfer, "referencePack", reference)?;
             attach_bytes(&message, &transfer, "fallbackPack", fallback)?;
-            set_bool(&message, "authoredEnabled", *authored_enabled)?;
-            set_bool(&message, "referenceEnabled", *reference_enabled)?;
+            attach_bytes(&message, &transfer, "diagnosticPack", diagnostic)?;
+            set_string(&message, "visualProfile", profile.id())?;
+            set_string(&message, "texturePresentation", presentation.id())?;
             set_number(&message, "assetEpoch", *epoch as f64)?;
         }
     }

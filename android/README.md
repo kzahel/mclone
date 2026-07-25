@@ -60,8 +60,8 @@ pnpm native:android:apk
 ```
 
 The build runs `pnpm assets:pack:first-party` and packages the staged catalog,
-pack sidecars, `mclone-authored.pbp`, and
-`mclone-generated-fallback.pbp` under APK `assets/first-party-packs/`.
+pack sidecars, `mclone-authored.pbp`, `mclone-generated-fallback.pbp`, and
+`mclone-diagnostic-missing.pbp` under APK `assets/first-party-packs/`.
 
 The default APK build targets `arm64-v8a`, which is the physical device/Quest
 path. Build a broadly compatible emulator APK explicitly with:

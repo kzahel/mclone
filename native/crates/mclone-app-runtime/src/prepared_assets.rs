@@ -7,12 +7,15 @@ use mclone_assets::{
     AssetPackSelection, AssetProvenanceReport, AssetResolutionOutcome, AssetSource,
     AssetSourceChain, FIRST_PARTY_AUDIO_POLICY_PATH, FirstPartyAudioPolicy, MissingAssetRegistry,
     PROVISIONAL_FIRST_PARTY_PACK_ID, PackedAssetSource, ProvenanceTrackingAssetSource,
-    TextureVisualProfile,
+    TexturePresentation, TextureVisualProfile,
 };
 use mclone_assets::{AssetProvenanceEntry, AssetResolutionOrigin, SharedAssetSource};
 use mclone_audio::PreparedAudioAssets;
-use mclone_mesh::load_textured_terrain_assets;
-use mclone_mesh::{TexturedTerrainAssets, load_first_party_textured_terrain_assets};
+use mclone_mesh::{
+    TexturedTerrainAssets, load_first_party_textured_terrain_assets,
+    load_first_party_textured_terrain_assets_with_presentation,
+    load_textured_terrain_assets_with_presentation,
+};
 use mclone_render::actor_assets::{ActorTextureAssets, load_actor_texture_assets};
 use mclone_render::screen_effect::{ScreenEffectTextureAssets, load_screen_effect_texture_assets};
 
@@ -62,6 +65,7 @@ pub struct PreparedAssetCoverage {
 pub struct PreparedAssetSet {
     pub epoch: u64,
     pub selection: AssetPackSelection,
+    pub presentation: TexturePresentation,
     pub source: AssetSourceChain,
     pub terrain: TexturedTerrainAssets,
     pub far_lod_materials: Option<FarTerrainLodMaterialPalette>,
@@ -77,6 +81,7 @@ pub struct PreparedAssetSet {
 pub struct PreparedSceneAssets {
     pub epoch: u64,
     pub selection: AssetPackSelection,
+    pub presentation: TexturePresentation,
     pub mesh: TexturedMeshAssets,
     pub actors: ActorTextureAssets,
     pub screen_effects: ScreenEffectTextureAssets,
@@ -107,6 +112,7 @@ impl PreparedSceneAssets {
         Self {
             epoch,
             selection: selection.clone(),
+            presentation: TexturePresentation::Textured,
             mesh,
             actors,
             screen_effects,
@@ -125,6 +131,7 @@ impl PreparedAssetSet {
         PreparedSceneAssets {
             epoch: self.epoch,
             selection: self.selection,
+            presentation: self.presentation,
             mesh: TexturedMeshAssets {
                 catalog: self.terrain.catalog,
                 atlas: self.terrain.atlas.into(),
@@ -301,10 +308,20 @@ impl AssetPackSourceRegistry {
         epoch: u64,
         selection: AssetPackSelection,
     ) -> Result<PreparedSceneAssets> {
+        self.prepare_with_presentation(epoch, selection, TexturePresentation::Textured)
+    }
+
+    pub fn prepare_with_presentation(
+        &self,
+        epoch: u64,
+        selection: AssetPackSelection,
+        presentation: TexturePresentation,
+    ) -> Result<PreparedSceneAssets> {
         prepare_scene_asset_selection(
             epoch,
             &self.catalog,
             TextureVisualProfile::normalize_legacy_selection(&selection),
+            presentation,
             &self.sources,
         )
     }
@@ -406,8 +423,11 @@ impl PreparedSceneAssetsRequest {
         epoch: u64,
         registry: AssetPackSourceRegistry,
         selection: AssetPackSelection,
+        presentation: TexturePresentation,
     ) -> Result<Self> {
-        Self::spawn(epoch, move || registry.prepare(epoch, selection))
+        Self::spawn(epoch, move || {
+            registry.prepare_with_presentation(epoch, selection, presentation)
+        })
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -415,6 +435,7 @@ impl PreparedSceneAssetsRequest {
         _epoch: u64,
         _registry: AssetPackSourceRegistry,
         _selection: AssetPackSelection,
+        _presentation: TexturePresentation,
     ) -> Result<Self> {
         bail!("browser asset preparation must complete through the injected worker/promise adapter")
     }
@@ -457,6 +478,7 @@ fn prepare_scene_asset_selection(
     epoch: u64,
     catalog: &AssetPackCatalog,
     selection: AssetPackSelection,
+    presentation: TexturePresentation,
     registered_sources: &BTreeMap<AssetPackId, SharedAssetSource>,
 ) -> Result<PreparedSceneAssets> {
     let source_order = catalog.source_order(&selection)?;
@@ -471,11 +493,18 @@ fn prepare_scene_asset_selection(
             .map(|(id, source)| (id.clone(), Box::new(source.clone()) as Box<dyn AssetSource>)),
     )?;
     let tracker = ProvenanceTrackingAssetSource::new(&source);
+    let effective_presentation = if TextureVisualProfile::from_selection(&selection)
+        == Some(TextureVisualProfile::FirstPartyCoverage)
+    {
+        TexturePresentation::Textured
+    } else {
+        presentation
+    };
     let terrain = if reference_enabled {
-        load_textured_terrain_assets(&tracker)
+        load_textured_terrain_assets_with_presentation(&tracker, effective_presentation)
             .context("failed to prepare Minecraft-reference terrain assets")?
     } else {
-        load_first_party_textured_terrain_assets(&tracker)
+        load_first_party_textured_terrain_assets_with_presentation(&tracker, effective_presentation)
             .context("failed to prepare first-party terrain assets")?
     };
     let far_lod_materials = FarTerrainLodMaterialPalette::load_from_asset_source(&tracker)
@@ -549,6 +578,7 @@ fn prepare_scene_asset_selection(
     Ok(PreparedSceneAssets {
         epoch,
         selection,
+        presentation: effective_presentation,
         mesh: TexturedMeshAssets {
             catalog: terrain.catalog,
             atlas: terrain.atlas.into(),
@@ -766,6 +796,7 @@ pub fn prepare_first_party_asset_set(
     Ok(PreparedAssetSet {
         epoch,
         selection,
+        presentation: TexturePresentation::Textured,
         source,
         terrain,
         far_lod_materials,

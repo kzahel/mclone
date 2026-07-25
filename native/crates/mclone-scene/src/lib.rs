@@ -804,7 +804,8 @@ pub struct McloneSceneHost {
     graphics_preference_storage: Option<Box<dyn ClientGraphicsPreferenceStorage>>,
     graphics_preference_error: Option<String>,
     pending_leaf_detail: Option<mclone_mesh::LeafDetail>,
-    pending_restored_asset_pack_selection: Option<AssetPackSelection>,
+    pending_restored_asset_pack_selection:
+        Option<(AssetPackSelection, mclone_assets::TexturePresentation)>,
     external_asset_pack_preparation: bool,
     pending_external_asset_pack_selection: Option<PlatformOperation<ExternalAssetPackSelection>>,
     external_asset_pack_operations: PlatformOperationLedger<ExternalAssetPackSelection, ()>,
