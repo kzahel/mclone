@@ -26,6 +26,9 @@ test("generates terrain, round-trips controls, and completes comparison", async 
   const diagnostics = page.locator("[data-testid='terrain-diagnostics']");
   await expect(diagnostics).not.toContainText("Base mean Δpending");
   const shell = page.locator(".appShell");
+  const settledRevision = await shell.getAttribute("data-render-revision");
+  await page.waitForTimeout(500);
+  await expect(shell).toHaveAttribute("data-render-revision", settledRevision ?? "");
   await expect(shell).toHaveAttribute("data-panes", "canonical,cpu,gpu");
   await expect(shell).toHaveAttribute("data-canonical-published", "9");
   await expect(shell).toHaveAttribute("data-canonical-requested", "9");

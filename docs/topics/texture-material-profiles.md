@@ -395,3 +395,21 @@ face-specific asset as active.
 6. Validate deterministic first-party builds, shared native/Wasm behavior, and
    rendered output for Original, Minecraft, Hybrid, Coverage, and Provisional
    Audit. **Completed 2026-07-25.**
+
+## Terrain Lab Render-Cadence Follow-Up
+
+A 2026-07-25 follow-up fixes a Terrain Lab responsiveness regression from the
+profile-control integration. The App constructed an inline procedural state
+object while `TerrainCanvas` used that object as a render-effect dependency.
+Every render report therefore created a new prop identity, restarted the LOD
+request, published another report, and repeated GPU submission and CPU/GPU
+comparison work after the view was already ready.
+
+The procedural state, including the effective texture presentation, now has a
+stable memoized identity. The headed BrowserWebGPU regression requires the
+render revision to remain unchanged after readiness. In a direct production
+probe the default three-pane revision remained `1`; after all 25 default exact
+chunks completed, a one-second document scroll delivered 55 animation frames
+with no frame over 50 ms. The same probe before the fix advanced through
+hundreds of redundant revisions and could delay one scroll frame by more than
+30 seconds.

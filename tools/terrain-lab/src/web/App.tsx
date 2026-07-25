@@ -214,8 +214,12 @@ export function App(): React.JSX.Element {
     ? texturePresentationForProfile(compareVisualProfile, state.texturePresentation)
     : state.texturePresentation;
   const proceduralState = useMemo(
-    () => ({ ...state, source: proceduralSource }),
-    [proceduralSource, state],
+    () => ({
+      ...state,
+      source: proceduralSource,
+      texturePresentation: primaryTexturePresentation,
+    }),
+    [primaryTexturePresentation, proceduralSource, state],
   );
   const workspaceStatus: LabStatus = error
     ? "error"
@@ -523,10 +527,7 @@ export function App(): React.JSX.Element {
                   />
                 ) : (
                   <TerrainCanvas
-                    state={{
-                      ...proceduralState,
-                      texturePresentation: primaryTexturePresentation,
-                    }}
+                    state={proceduralState}
                     camera={camera}
                     splitLayout={splitLayout}
                     cacheEnabled={cacheEnabled}
