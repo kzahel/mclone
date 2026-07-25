@@ -204,22 +204,56 @@ Milestone record:
 
 ### Slice 3: hierarchy, footprint summaries, budgets, and cache proof
 
-- [ ] Run `Cover` at the existing 65.5 km/65,536-block Terrain Lab footprint.
-- [ ] Record CPU compile, GPU dispatch/validation, packing, upload, sample,
+- [x] Run `Cover` at the existing 65.5 km/65,536-block Terrain Lab footprint.
+- [x] Record CPU compile, GPU dispatch/validation, packing, upload, sample,
   tile, and vegetation-cache costs for that exact request.
-- [ ] Replace pointwise values with filtered footprint summaries where the
+- [x] Replace pointwise values with filtered footprint summaries where the
   inspected coarse result aliases forest edges, openings, or family mix.
-- [ ] Prove summary work is proportional to the visible sample lattice and
+- [x] Prove summary work is proportional to the visible sample lattice and
   has no tree-record, chunk-generation, or hidden footprint-area walk.
-- [ ] Preserve exact records only at spacings `1/2/4` and prove zero record
+- [x] Preserve exact records only at spacings `1/2/4` and prove zero record
   planning/cache traffic at every coarser level.
-- [ ] Inspect the same forest edges, openings, meadow, conifer, and steppe
+- [x] Inspect the same forest edges, openings, meadow, conifer, and steppe
   anchors across multiple power-of-two spacings in map and 3D.
-- [ ] Decide whether the displayed GPU `Cover` lane can consume an independent
+- [x] Decide whether the displayed GPU `Cover` lane can consume an independent
   portable summary product or must report its CPU dependency explicitly.
 
 Gate: a 65.5 km `Cover` request is visibly useful, measured, and bounded by its
 sample lattice rather than merely returning point samples without records.
+
+Milestone record:
+
+- reference schema `mclone-terrain-preview-reference-grid-v8` keeps exact
+  point/slope intent through spacing `4`, then uses four footprint quadrature
+  taps at one-quarter spacing; CPU terrain work remains exactly five
+  evaluations per output point at every `Cover` level;
+- GPU evaluator `mclone-overworld-v1-gpu-preview-a7` applies the same coarse
+  filter, and a GPU-only coarse pane consumes that product with zero CPU
+  tiles, bytes, samples, or summary residency;
+- the 65,536-block cache-off receipt at effective spacing `512` compiles 26
+  tiles per lane: 109,850 lattice points, 549,250 terrain evaluations,
+  439,400 forest-intent evaluations, and 109,850 footprint summaries;
+- that cache-off run records 953.4 ms CPU reference generation, 23.1 ms
+  host-side packing/upload, 14,060,800 bytes per CPU/GPU sample lane, and
+  3,250.6 ms GPU dispatch-to-validation readiness; timestamp-query GPU
+  execution time remains explicitly unavailable;
+- the cold cache-on receipt has zero hits; a zoom-away/return warm receipt has
+  26 hits, dispatches zero GPU tiles, and reaches the target in 40.0 ms;
+- the GPU-only auto-detail receipt publishes effective spacing `256` with 52
+  dispatches, 219,700 lattice points, 1,098,500 terrain evaluations, 878,800
+  forest evaluations, 219,700 footprint summaries, and 28,121,600 bytes of
+  validation readback while every CPU counter remains zero;
+- every 65.5 km receipt has zero record tiles, tree instances, planning-cell
+  requests, and retained vegetation cells; desktop and phone browser tests
+  separately preserve exact spacing-`4` records and spacing-`8` aggregation;
+  and
+- inspected map captures at
+  `/tmp/mclone-terrain-lab-desktop-forest-summary-map-{1024,512,256}.png`
+  retain the same forest masses, openings, and broad family regions as edges
+  refine. The corresponding 3D evidence is
+  `/tmp/mclone-terrain-lab-desktop-forest-summary-3d-256.png`, and the
+  independent GPU terrain presentation is
+  `/tmp/mclone-terrain-lab-desktop-vegetation-cover-gpu-independent.png`.
 
 Required evidence:
 

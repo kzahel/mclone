@@ -23,12 +23,18 @@ The profiles cannot be mixed in one workspace. Within the selected profile:
 
 At the Mclone `Cover` checkpoint, every preview point also carries production
 forest coverage, density, family mix, canopy height/variation, and
-grove/opening influence. These are currently local intent samples, not
-accepted footprint-filtered summaries. Each CPU point samples center terrain
-plus four fixed-radius cardinal neighbors for slope. Both displayed LOD panes
-then use that CPU-produced vegetation product. The GPU lane evaluates its
-portable macro forest fields for diagnostics, but it is not yet an independent
-vegetation presentation path and does not invent a second tree planner.
+grove/opening influence. Spacings `1`, `2`, and `4` use exact point intent
+with center terrain plus four fixed-radius cardinal neighbors for slope.
+Spacing `8` and above use four footprint quadrature taps at one quarter of the
+sample spacing, combining coverage, density, family mixture, canopy
+statistics, and grove influence. Both CPU modes therefore perform exactly five
+terrain evaluations per output lattice point; neither walks the covered area.
+
+The GPU evaluator applies the same coarse quadrature through its portable
+macro fields. A GPU-only coarse `Cover` view consumes that GPU summary without
+waiting for CPU samples. Near structured views still request CPU products
+because stable individual records and planned stream records are shared Rust
+products; WGSL does not invent a second tree planner.
 
 Individual stable tree records are included only at sample spacings `1`, `2`,
 and `4`. Spacing `1` admits every record, spacing `2` retains landmark ranks
@@ -38,9 +44,13 @@ broadleaf, conifer, and acacia trunks/crowns in map and 3D; CPU and GPU panes
 therefore preserve the same base, family, dimensions, and orientation while
 their terrain compilers remain independent.
 
-The current 65.5 km browser proof uses `Hydrology`, not `Cover`. Continent-scale
-vegetation cost, filtering, and forest-edge/opening stability remain active
-work; do not cite that existing proof as coarse vegetation acceptance.
+The headed-Wayland smoke runs `Cover` at 65.5 km with cold, warm, cache-off,
+and GPU-only receipts. It directly checks CPU/GPU terrain, forest, and
+footprint work counts; packing, upload, and readback bytes; zero record/cache
+traffic at coarse scale; and independent GPU publication. The `Forest
+summary` diagnostic layer exposes family-colored coverage and openings. The
+same fixed 65.5 km anchor is captured in map view at `1:1024`, `1:512`, and
+`1:256`, plus 3D at `1:256`.
 
 The exact compiler runs in a replaceable Web Worker and publishes chunks
 center-first as they finish. The LOD panes use 64 × 64 cell / 65 × 65 sample

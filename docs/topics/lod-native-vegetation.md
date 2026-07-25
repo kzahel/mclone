@@ -117,19 +117,19 @@ receipts.
 
 ### Terrain Lab
 
-`Cover` now carries production forest coverage, density, family mix, canopy
+`Cover` carries production forest coverage, density, family mix, canopy
 height/variation, and grove/opening influence in
-`mclone-terrain-preview-reference-grid-v7`. The GPU evaluator computes its
-portable macro counterpart, while both displayed CPU/GPU panes consume the
-same uploaded CPU vegetation product rather than inventing independent trees.
+`mclone-terrain-preview-reference-grid-v8`. Spacings `1/2/4` retain exact
+point intent with fixed-radius local slope. Coarser samples use a four-tap
+footprint quadrature at one-quarter spacing, including coverage-weighted
+family and canopy statistics. Both CPU cases remain fixed at five terrain
+evaluations per output point.
 
-Those fields are still point samples, not accepted footprint summaries. Each
-CPU `Cover` point evaluates the center terrain plus four fixed-radius cardinal
-terrain samples to reconstruct slope before evaluating forest intent. The
-existing 65.5 km browser proof selects `Hydrology`, not `Cover`, so it does not
-measure continent-scale vegetation. The displayed GPU `Cover` result also
-waits for the CPU vegetation product; its portable forest calculation is
-diagnostic, not yet an independent fast presentation path.
+GPU evaluator `mclone-overworld-v1-gpu-preview-a7` applies the same coarse
+filter to portable macro fields. Coarse GPU-only `Cover` is now an independent
+presentation path with zero CPU sample, byte, or tile dependency. Near GPU
+views still request shared Rust products for exact records and planned streams;
+WGSL does not plan semantic trees.
 
 Near requests query stable records only at spacings `1`, `2`, and `4`.
 Admission is globally deterministic by landmark rank: all records, ranks
@@ -140,10 +140,11 @@ and 3D views. The viewport LRU retains the summary/record product and reports
 source revision, packing, upload, residency, proxy, and planning-cache facts.
 
 All 21 terrain-view tests and the targeted desktop/Pixel 7 headed-WebGPU
-contracts pass. Four inspected map/3D captures prove the initial proxy path in
-both responsive layouts. They do not close scale-aware filtering, the 65.5 km
-`Cover` cost, or multi-spacing forest-edge/opening stability. Tactical 244
-keeps those as the active gate.
+contracts pass. The 65.5 km `Cover` smoke now records cold, warm, cache-off,
+and GPU-only CPU/GPU work and byte receipts. At cache-off spacing `512`, each
+lane evaluates 109,850 lattice points, 549,250 terrain points, 439,400 forest
+intents, and 109,850 footprint summaries with zero record/cache traffic.
+GPU-only auto detail publishes spacing `256` with every CPU counter at zero.
 
 ### Far LOD
 
