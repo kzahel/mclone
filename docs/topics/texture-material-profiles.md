@@ -84,6 +84,22 @@ textures. The three-pack build, six deterministic pack tests, and strict
 first-party preparation pass; preparation reports the two accepted materials
 as first-party and the other 143 requested texture assets as provisional.
 
+Implementation update (2026-07-25): Far LOD no longer loads
+`assets/mclone/lod/materials.v1.json` during scene or legacy render-asset
+preparation. `mclone-mesh` derives representative top and side colors from the
+resolved atlas sprite for each block state, using the same alpha-weighted
+average as Flat Colors and a stable plains sample of the normal block/fluid
+tint policy. The shared runtime turns those summaries into the Far LOD palette
+for every selected profile and presentation.
+
+Strict first-party preparation now reports 219 derived Far LOD colors from the
+221-state terrain catalog (air and cave air intentionally have no material),
+despite neither distributable pack containing a static Far LOD palette. All
+100 `mclone-mesh` and 329 `mclone-app-runtime` unit tests pass. Terrain Lab's
+exact and LOD renderers already receive the same selected profile and
+presentation through their shared Wasm asset preparation, so they retain the
+same derived-source invariant.
+
 ## Scope
 
 This topic owns the meaning, selection, and authoring lifecycle of block
@@ -333,7 +349,7 @@ face-specific asset as active.
    material lifecycle. **Completed 2026-07-25.**
 5. Derive flat colors and Far LOD summaries from resolved textures, retain
    automatic mip generation, and remove the separate LOD-texture assumption
-   from the active path.
+   from the active path. **Completed 2026-07-25.**
 6. Validate deterministic first-party builds, shared native/Wasm behavior, and
    rendered output for Original, Minecraft, Hybrid, Coverage, and Provisional
    Audit.

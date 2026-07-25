@@ -1286,6 +1286,13 @@ mod tests {
 
         assert!(assets.atlas.width > 0);
         assert!(assets.atlas.height > 0);
+        assert!(
+            assets
+                .far_lod_materials
+                .as_ref()
+                .is_some_and(|palette| palette.color_count() > 0),
+            "Far LOD colors are derived from the resolved terrain atlas"
+        );
         assert!(assets.catalog.get(mclone_core::BlockStateId(105)).is_some());
         assert!(assets.catalog.get(mclone_core::BlockStateId(106)).is_some());
         assert!(assets.catalog.get(mclone_core::BlockStateId(107)).is_some());

@@ -7,6 +7,7 @@ use std::time::Duration;
 use anyhow::{Context, Result, bail};
 use mclone_assets::{AssetPath, AssetSource};
 use mclone_core::{CHUNK_WIDTH, ChunkPos, LodTileKey, chunk_min_block_coord};
+use mclone_mesh::TexturedTerrainAssets;
 use mclone_render::far_lod::{FarTerrainLodFrameUpdate, FarTerrainLodTileMesh};
 use mclone_render_session::{
     ResidentTileCache, ResidentTileUploadCoordinator, ResidentTileUploadPayload,
@@ -424,11 +425,41 @@ impl FarTerrainLodCoverage {
 
 #[derive(Clone, Debug, Default)]
 pub struct FarTerrainLodMaterialPalette {
+    derived_state_colors: BTreeMap<u8, FarTerrainLodSurfaceColors>,
     block_colors: BTreeMap<String, FarTerrainLodSurfaceColors>,
     texture_colors: BTreeMap<String, FarTerrainLodSurfaceColors>,
 }
 
 impl FarTerrainLodMaterialPalette {
+    /// Derive distant-terrain colors from the terrain source and presentation
+    /// that actually won resolution for this asset epoch.
+    pub fn from_textured_terrain_assets(assets: &TexturedTerrainAssets) -> Self {
+        let derived_state_colors = (u8::MIN..=u8::MAX)
+            .filter_map(|raw| {
+                assets
+                    .material_summary(GeneratedBlockId(raw).block_state_id())
+                    .map(|summary| {
+                        (
+                            raw,
+                            FarTerrainLodSurfaceColors {
+                                top: summary.top,
+                                side: summary.side,
+                            },
+                        )
+                    })
+            })
+            .collect();
+        Self {
+            derived_state_colors,
+            block_colors: BTreeMap::new(),
+            texture_colors: BTreeMap::new(),
+        }
+    }
+
+    /// Legacy reader retained for old standalone asset sources and fixtures.
+    ///
+    /// Profile-driven scene preparation derives this palette from the resolved
+    /// terrain atlas instead.
     pub fn load_from_asset_source(source: &impl AssetSource) -> Result<Option<Self>> {
         let path = AssetPath::new(FAR_TERRAIN_LOD_MATERIALS_PATH);
         let Some(bytes) = source
@@ -441,7 +472,7 @@ impl FarTerrainLodMaterialPalette {
     }
 
     pub fn color_count(&self) -> usize {
-        self.block_colors.len() + self.texture_colors.len()
+        self.derived_state_colors.len() + self.block_colors.len() + self.texture_colors.len()
     }
 
     fn from_json_bytes(bytes: &[u8]) -> Result<Self> {
@@ -491,6 +522,7 @@ impl FarTerrainLodMaterialPalette {
         }
 
         Self {
+            derived_state_colors: BTreeMap::new(),
             block_colors,
             texture_colors,
         }
@@ -502,6 +534,9 @@ impl FarTerrainLodMaterialPalette {
         surface_y: i32,
     ) -> Option<FarTerrainLodSurfaceColors> {
         let block_id = base_block_id(block.raw());
+        if let Some(colors) = self.derived_state_colors.get(&block_id) {
+            return Some(*colors);
+        }
         let block_name = GeneratedBlockId(block_id).name();
         if let Some(colors) = self.block_colors.get(block_name) {
             return Some(*colors);

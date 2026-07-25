@@ -507,8 +507,9 @@ fn prepare_scene_asset_selection(
         load_first_party_textured_terrain_assets_with_presentation(&tracker, effective_presentation)
             .context("failed to prepare first-party terrain assets")?
     };
-    let far_lod_materials = FarTerrainLodMaterialPalette::load_from_asset_source(&tracker)
-        .context("failed to prepare selected Far LOD metadata")?;
+    let far_lod_materials = Some(FarTerrainLodMaterialPalette::from_textured_terrain_assets(
+        &terrain,
+    ));
     let actors = load_actor_texture_assets(&tracker)
         .context("failed to prepare selected actor and figure assets")?;
     let screen_effects = load_screen_effect_texture_assets(&tracker)
@@ -752,8 +753,9 @@ pub fn prepare_first_party_asset_set(
 
     let terrain = load_first_party_textured_terrain_assets(&tracker)
         .context("failed to prepare first-party terrain assets")?;
-    let far_lod_materials = FarTerrainLodMaterialPalette::load_from_asset_source(&tracker)
-        .context("failed to prepare first-party Far LOD metadata")?;
+    let far_lod_materials = Some(FarTerrainLodMaterialPalette::from_textured_terrain_assets(
+        &terrain,
+    ));
     let actors = load_actor_texture_assets(&tracker)
         .context("failed to prepare first-party actor and figure assets")?;
     let screen_effects = load_screen_effect_texture_assets(&tracker)

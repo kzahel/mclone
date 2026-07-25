@@ -4,18 +4,75 @@ use std::fmt;
 
 use mclone_assets::{
     AssetError, AssetPath, AssetSource, BlockModelLibrary, BlockStateAssetIndex,
-    BlockStateRegistry, FirstPartyVisualCatalog, MemoryAssetSource, ResourceLocation,
-    TextureAtlasPlan, TextureMaterial, TexturePresentation,
+    BlockStateRegistry, FirstPartyVisualCatalog, MemoryAssetSource, ModelFaceDirection,
+    ResourceLocation, TextureAtlasPlan, TextureMaterial, TexturePresentation,
 };
+use mclone_core::{BlockStateId, DEFAULT_BIOME_ID};
 
 use crate::catalog::bushy_leaf_material;
-use crate::{TexturedColorMap, TexturedColorMaps, TexturedMeshCatalog, TexturedMeshError};
+use crate::tint::{blended_liquid_color, block_tint};
+use crate::{
+    AtlasSpriteUv, TexturedBlockFace, TexturedColorMap, TexturedColorMaps, TexturedMeshCatalog,
+    TexturedMeshError,
+};
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TexturedTerrainAssets {
     pub catalog: TexturedMeshCatalog,
     pub atlas: TextureAtlasImage,
     pub atlas_sprite_count: usize,
+}
+
+/// Representative colors derived from the resolved terrain atlas.
+///
+/// These are presentation derivatives for distant geometry, previews, and
+/// similar summaries. They are deliberately not another authored asset type.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TexturedTerrainMaterialSummary {
+    pub top: [f32; 4],
+    pub side: [f32; 4],
+}
+
+impl TexturedTerrainAssets {
+    pub fn material_summary(
+        &self,
+        state_id: BlockStateId,
+    ) -> Option<TexturedTerrainMaterialSummary> {
+        let model = self.catalog.get(state_id)?;
+        if let Some(fluid) = model.fluid {
+            let base = average_atlas_sprite(&self.atlas, fluid.still)?;
+            let tint = blended_liquid_color(fluid.kind, 0, 64, 0, 1.0, |_, _, _| DEFAULT_BIOME_ID);
+            let color = multiply_rgba(base, tint);
+            return Some(TexturedTerrainMaterialSummary {
+                top: color,
+                side: color,
+            });
+        }
+
+        let top_face = model
+            .faces
+            .iter()
+            .find(|face| face.direction == ModelFaceDirection::Up)
+            .or_else(|| model.faces.first())?;
+        let side_face = model
+            .faces
+            .iter()
+            .find(|face| {
+                matches!(
+                    face.direction,
+                    ModelFaceDirection::North
+                        | ModelFaceDirection::South
+                        | ModelFaceDirection::East
+                        | ModelFaceDirection::West
+                )
+            })
+            .unwrap_or(top_face);
+
+        Some(TexturedTerrainMaterialSummary {
+            top: representative_face_color(self, top_face)?,
+            side: representative_face_color(self, side_face)?,
+        })
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -33,6 +90,67 @@ impl TextureAtlasImage {
     pub fn into_rgba(self) -> Vec<u8> {
         self.rgba
     }
+}
+
+fn representative_face_color(
+    assets: &TexturedTerrainAssets,
+    face: &TexturedBlockFace,
+) -> Option<[f32; 4]> {
+    let base = average_atlas_sprite(&assets.atlas, face.sprite)?;
+    let tint = block_tint(&assets.catalog, face.tint, 0, 64, 0, |_, _, _| {
+        DEFAULT_BIOME_ID
+    });
+    Some([
+        base[0] * tint[0],
+        base[1] * tint[1],
+        base[2] * tint[2],
+        base[3],
+    ])
+}
+
+fn average_atlas_sprite(atlas: &TextureAtlasImage, sprite: AtlasSpriteUv) -> Option<[f32; 4]> {
+    let x0 = ((sprite.u0 * atlas.width as f32).round() as u32).min(atlas.width);
+    let y0 = ((sprite.v0 * atlas.height as f32).round() as u32).min(atlas.height);
+    let x1 = ((sprite.u1 * atlas.width as f32).round() as u32).min(atlas.width);
+    let y1 = ((sprite.v1 * atlas.height as f32).round() as u32).min(atlas.height);
+    if x0 >= x1 || y0 >= y1 {
+        return None;
+    }
+
+    let mut weighted = [0_u64; 3];
+    let mut alpha_sum = 0_u64;
+    let mut pixel_count = 0_u64;
+    for y in y0..y1 {
+        for x in x0..x1 {
+            let offset = ((y * atlas.width + x) * 4) as usize;
+            let pixel = &atlas.rgba[offset..offset + 4];
+            let alpha = u64::from(pixel[3]);
+            alpha_sum += alpha;
+            pixel_count += 1;
+            for channel in 0..3 {
+                weighted[channel] += u64::from(pixel[channel]) * alpha;
+            }
+        }
+    }
+    if alpha_sum == 0 {
+        return None;
+    }
+
+    Some([
+        weighted[0] as f32 / alpha_sum as f32 / 255.0,
+        weighted[1] as f32 / alpha_sum as f32 / 255.0,
+        weighted[2] as f32 / alpha_sum as f32 / 255.0,
+        alpha_sum as f32 / pixel_count as f32 / 255.0,
+    ])
+}
+
+fn multiply_rgba(left: [f32; 4], right: [f32; 4]) -> [f32; 4] {
+    [
+        left[0] * right[0],
+        left[1] * right[1],
+        left[2] * right[2],
+        left[3] * right[3],
+    ]
 }
 
 #[derive(Debug)]
@@ -613,6 +731,12 @@ mod tests {
         );
         assert!(assets.atlas_sprite_count > 0);
         assert!(assets.catalog.get(mclone_core::BlockStateId(1)).is_some());
+        assert!(
+            assets
+                .material_summary(mclone_core::BlockStateId(1))
+                .is_some(),
+            "resolved stone texture produces a derived material summary"
+        );
     }
 
     #[test]
@@ -710,6 +834,33 @@ mod tests {
             [133, 40, 30, 255]
         );
         assert_eq!(atlas_pixel(&atlas, sprite.x, sprite.y + 1), [5, 6, 7, 0]);
+    }
+
+    #[test]
+    fn material_summary_average_is_alpha_weighted_and_excludes_gutters() {
+        let atlas = TextureAtlasImage {
+            width: 4,
+            height: 1,
+            rgba: vec![
+                1, 2, 3, 255, 200, 20, 10, 255, 100, 60, 50, 128, 9, 8, 7, 255,
+            ],
+        };
+        let color = average_atlas_sprite(
+            &atlas,
+            AtlasSpriteUv {
+                u0: 0.25,
+                v0: 0.0,
+                u1: 0.75,
+                v1: 1.0,
+            },
+        )
+        .unwrap();
+        let alpha_sum = 383.0_f32;
+
+        assert!((color[0] - ((200.0 * 255.0 + 100.0 * 128.0) / alpha_sum / 255.0)).abs() < 1e-6);
+        assert!((color[1] - ((20.0 * 255.0 + 60.0 * 128.0) / alpha_sum / 255.0)).abs() < 1e-6);
+        assert!((color[2] - ((10.0 * 255.0 + 50.0 * 128.0) / alpha_sum / 255.0)).abs() < 1e-6);
+        assert!((color[3] - alpha_sum / 2.0 / 255.0).abs() < 1e-6);
     }
 
     fn test_png_rgba(width: u32, height: u32, pixel: &[u8; 4]) -> Vec<u8> {

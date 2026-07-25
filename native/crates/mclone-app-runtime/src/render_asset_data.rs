@@ -83,8 +83,9 @@ pub fn load_textured_mesh_assets_from_source(
     } else {
         load_textured_terrain_assets(source).context("failed to load textured terrain assets")?
     };
-    let far_lod_materials = FarTerrainLodMaterialPalette::load_from_asset_source(source)
-        .context("failed to load Far LOD material metadata")?;
+    let far_lod_materials = Some(FarTerrainLodMaterialPalette::from_textured_terrain_assets(
+        &assets,
+    ));
 
     Ok(TexturedMeshAssets {
         catalog: assets.catalog,
