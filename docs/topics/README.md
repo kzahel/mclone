@@ -32,6 +32,10 @@ series implements the same concern, normally reuse the document slug in its
 
 ## Current Topics
 
+- [`vanilla-terrain-lod.md`](vanilla-terrain-lod.md): active bounded direct
+  Java 1.17.1 density-column LOD sampler and global Terrain Lab profile switch,
+  with CPU-worker generation and explicit first-pass surface/content
+  exclusions.
 - [`persistent-actor-identity.md`](persistent-actor-identity.md): open,
   vanilla-classified actor save/load contract — runtime IDs and generic tick
   counters may reset, UUID-equivalent identity and per-kind gameplay state must

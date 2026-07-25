@@ -181,6 +181,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `gpu-procedural-terrain` — GPU-reconstructible first-party terrain,
   coverage-first progressive refinement, authoritative chunk handoff, optional
   asynchronous canonical generation, and later volumetric residency research
+- `vanilla-terrain-lod` — direct Java 1.17.1 density-column terrain previews,
+  a global Terrain Lab profile switch, CPU-worker tile generation, bounded
+  macro fidelity, and explicit first-pass surface/content exclusions
 - `scripting-and-mod-platform` — one cross-platform package ecosystem spanning
   declarative content, portable capability-sandboxed gameplay, trusted
   server/desktop extensions, source forks, reproducible profiles, an open
