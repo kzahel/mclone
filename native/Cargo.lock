@@ -1917,6 +1917,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "mclone-view-control"
+version = "0.0.0"
+
+[[package]]
 name = "mclone-web-client"
 version = "0.0.0"
 dependencies = [
