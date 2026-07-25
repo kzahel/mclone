@@ -1,6 +1,6 @@
 # Vanilla Terrain LOD In Terrain Lab
 
-Status: active.
+Status: complete (2026-07-25).
 
 Topic: `vanilla-terrain-lod`
 
@@ -62,3 +62,22 @@ Commit each coherent slice with `Topic: vanilla-terrain-lod`.
   interpreted as zero-valued vanilla facts.
 - Desktop and phone captures show coherent, coordinate-locked vanilla exact
   and LOD terrain with no GPU pane.
+
+## Result
+
+All bounded acceptance items are implemented. Terrain Lab now has a
+URL-addressed global profile switch. `overworld` combines the production
+vanilla exact compiler with a direct, Worker-backed vanilla CPU LOD and removes
+the GPU and Mclone-semantic capabilities. `mclone-overworld-v1` remains the
+default and preserves the existing exact/CPU/GPU comparison workspace.
+
+The direct sampler queries vanilla density columns without constructing
+chunks, reuses a bounded density-lattice cache, and transports packed grids
+back to the renderer. Profile is part of exact, viewport, tile, cache, Worker,
+focus, report, and presentation identity. Stale or cross-profile Worker
+results cannot be admitted.
+
+Rust, TypeScript, Wasm, production web build, headed desktop/phone vanilla
+browser proofs, and the existing headed Mclone comparison proof pass. The
+validation receipt and deliberately deferred systems are recorded in
+[`vanilla-terrain-lod.md`](../topics/vanilla-terrain-lod.md).

@@ -2,7 +2,7 @@
 
 Topic: `vanilla-terrain-lod`
 
-Status: active first-pass implementation under Tactical
+Status: first pass implemented and validated on 2026-07-25 under Tactical
 [`240`](../tactical/240-vanilla-terrain-lod-in-terrain-lab.md).
 
 ## Scope
@@ -127,20 +127,70 @@ must never preserve a hidden vanilla/Mclone pane mixture.
 
 ## Validation
 
-The first pass requires:
+The first pass was validated with:
 
-- Rust point fixtures against the existing full vanilla noise/surface path;
-- negative-coordinate, cell-edge, ocean, high-relief, and different-seed
-  cases;
-- cold/warm and request-partition determinism;
-- proof that direct LOD compilation does not construct `GeneratedChunk`;
-- TypeScript URL/profile/pane/layer normalization tests;
-- Worker stale-epoch and transferable-payload coverage;
-- exact canonical Mclone and vanilla production equivalence tests;
-- Wasm compilation and the existing Terrain Lab unit/browser suites;
-- a headed-WebGPU desktop and phone vanilla profile capture; and
-- visual inspection confirming coherent macro geography, water, profile
-  labels, and the absence of a GPU pane.
+- direct-sampler fixtures against full vanilla noise columns across different
+  seeds, negative coordinates, density-cell edges, ocean floor, water surface,
+  and far coordinates;
+- cold/warm sampler equivalence and bounded density-column cache reuse;
+- canonical vanilla `Surface` and `Final features` equivalence against their
+  production generators;
+- packed Worker-grid length and finite-value validation;
+- viewport profile and cache identity tests plus shader validation;
+- TypeScript URL, pane, checkpoint, layer, and profile normalization tests;
+- Wasm type checking and a production Vite build;
+- the existing headed-WebGPU Mclone comparison/browser test;
+- headed-WebGPU vanilla profile tests on desktop and phone, including a
+  profile change while vanilla preload work may still be in flight; and
+- visual inspection of
+  `/tmp/mclone-terrain-lab-desktop-chrome-vanilla-workspace.png` and
+  `/tmp/mclone-terrain-lab-phone-chrome-vanilla-workspace.png`.
+
+The direct sampler contains no `GeneratedChunk` or chunk-buffer ownership.
+Whole chunks remain confined to the separate canonical compiler.
+
+The inspected LOD captures show coherent large relief, valleys, water,
+profile labels, and no GPU pane. Vanilla terrain uses the approximate material
+palette without the Mclone river overlay or Mclone LOD texture modulation.
+The exact radius-zero patch is intentionally small within the 512-block
+capture; it proves the independently generated canonical pane rather than
+claiming an equal-footprint exact comparison.
+
+Commands used:
+
+```sh
+cargo test -p mclone-worldgen terrain_preview --lib
+cargo test -p mclone-terrain-view --lib
+cargo check -p mclone-terrain-lab
+pnpm --dir tools/terrain-lab typecheck
+pnpm --dir tools/terrain-lab test
+pnpm --dir tools/terrain-lab web:build
+pnpm host:check -- --probe-browser-webgpu
+pnpm --dir tools/terrain-lab exec playwright test \
+  -c playwright.config.ts -g "worker-backed vanilla"
+pnpm --dir tools/terrain-lab exec playwright test \
+  -c playwright.config.ts --project desktop-chrome \
+  -g "generates terrain, round-trips"
+```
+
+## Implementation Receipt
+
+- `64e28914` records the bounded inclusion/exclusion contract.
+- `cdb4ebed` adds the direct cached vanilla density-column sampler and
+  profile-aware preview/tile identity.
+- `00383533` routes exact Surface/Final compilation through the selected
+  production terrain profile.
+- `84726929` adds the global browser switch, vanilla Worker, asynchronous CPU
+  tile admission, profile-aware rendering, capability UI, and browser proof.
+
+The browser main thread shares one Wasm initialization promise between its
+exact and LOD canvases. The vanilla Worker owns a separate Wasm instance and a
+retained sampler. Tiles cross the Worker boundary as transferable packed
+`Float32Array` payloads and are checked against the active revision, profile,
+seed, tile coordinate, spacing, and stage before upload.
+
+Point receipts remain explicitly unavailable for vanilla in this pass. The UI
+does not expose a zero-filled Mclone receipt as if it described vanilla.
 
 ## Known Follow-Ups
 

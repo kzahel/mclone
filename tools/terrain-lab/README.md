@@ -1,15 +1,25 @@
 # Terrain Lab
 
 Terrain Lab is the browser-hosted terrain workspace at `/terrain/`. Its
-visible panes are independently configurable but coordinate-locked:
+visible panes are independently configurable but coordinate-locked. One
+global terrain profile selects the terrain family for every visible pane:
+
+- `mclone-overworld-v1` (the default) provides exact Mclone terrain, Mclone CPU
+  LOD, and optional Mclone GPU LOD.
+- `overworld` provides exact Minecraft Java 1.17.1 terrain and a direct
+  Worker-backed vanilla CPU LOD. It has no GPU LOD.
+
+The profiles cannot be mixed in one workspace. Within the selected profile:
 
 - `Real terrain` compiles exact first-party chunks through the production
   generator and renders their blocks, biomes, fluids, and final features with
   the production first-party texture atlas and cheap preview lighting.
-- `CPU LOD` samples the production preview fields and near-detail structured
-  records.
-- `GPU LOD` evaluates the aligned natural fields in WebGPU and consumes the
-  same sparse structured records.
+- `CPU LOD` samples the selected production preview. Mclone uses its preview
+  fields and near-detail structured records; vanilla directly samples density
+  columns, water, biome, and approximate surface material without generating
+  chunks.
+- `GPU LOD` evaluates Mclone's aligned natural fields in WebGPU and consumes
+  the same sparse structured records.
 
 The exact compiler runs in a replaceable Web Worker and publishes chunks
 center-first as they finish. The LOD panes use 64 × 64 cell / 65 × 65 sample
@@ -19,6 +29,7 @@ shares seed, center, footprint, camera, and navigation.
 The URL owns the review state:
 
 - `seed`: signed 64-bit world seed
+- `profile`: `mclone-overworld-v1` or `overworld`
 - `x` and `z`: preview center in blocks
 - `blocks`: continuous viewport width from 1 through 131,072 blocks
 - `detail`: `auto` or a power-of-two sample spacing from 1 through 1,024
@@ -49,8 +60,10 @@ and right, Shift+left, or middle drag pans in 3D. Arrow keys pan both views.
 A shared projection selector applies the same orthographic or perspective
 camera to exact, CPU LOD, and GPU LOD panes. Orthographic is the default so
 aligned terrain keeps one scale from the near edge to the far edge.
-A click or tap without a drag selects a production point receipt using analytic
-map picking or the shared 3D projection and a bounded heightfield ray.
+A click or tap without a drag selects a Mclone production point receipt using
+analytic map picking or the shared 3D projection and a bounded heightfield
+ray. Vanilla point receipts are explicitly unavailable in the bounded first
+pass.
 `Auto` selects approximately two CSS pixels per sample cell. A manual detail
 request remains visible even when the bounded eight-tile-per-axis interactive
 budget must raise its effective spacing; zooming in eventually admits every
@@ -68,7 +81,10 @@ results. Water and vegetation switches only remesh retained chunks; they do
 not rerun or mutate generation.
 
 The shared LOD scheduler has independent CPU compilation and GPU dispatch
-queues. Each lane covers the viewport coarsely before refining through nested
+queues. Mclone CPU tiles compile through the ordinary shared path. Vanilla CPU
+tiles leave the render loop, compile in a retained Web Worker sampler, and
+return through profile- and revision-checked asynchronous tile admission.
+Each lane covers the viewport coarsely before refining through nested
 power-of-two levels, and each publishes its finest complete level without
 waiting for the other. The evidence panel reports canonical resident reuse,
 admission frames, arrival/generation/upload timing, and the LOD queues,
@@ -101,12 +117,12 @@ exact coordinate admits its raw cache result through the same paced queue.
 `Exact cache off` compiles entering coordinates cold while still preserving
 the current old/new resident overlap.
 
-`Cache on` uses a session-local 192-tile LRU keyed by seed, aligned origin,
-sample spacing, and content stage. It retains CPU samples, uploaded reference
-data, GPU-computed buffers, and completed validation readbacks while panning
-and zooming. Camera, layer, and pane visibility are not LOD cache identity.
-`Cache off` retains only the active request and disables speculative preload.
-`Cold current view` invalidates both cache domains explicitly.
+`Cache on` uses a session-local 192-tile LRU keyed by profile, seed, aligned
+origin, sample spacing, and content stage. It retains CPU samples, uploaded
+reference data, GPU-computed buffers, and completed validation readbacks while
+panning and zooming. Camera, layer, and pane visibility are not LOD cache
+identity. `Cache off` retains only the active request and disables speculative
+preload. `Cold current view` invalidates both cache domains explicitly.
 
 `Run stress race` selects the fixed review seed/site, turns cache off, and
 uses a larger 12-tile-per-axis diagnostic budget over a 2 km requested-`1:2`
