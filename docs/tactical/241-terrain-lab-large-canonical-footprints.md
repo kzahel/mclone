@@ -1,6 +1,7 @@
 # Terrain Lab Large Canonical Footprints
 
-Status: active 2026-07-25.
+Status: completed 2026-07-25, including local and hosted desktop/phone
+headed-WebGPU maximum-footprint proof.
 
 Topic: `gpu-procedural-terrain`
 
@@ -155,3 +156,82 @@ viewport-derived exact radius may later choose among these same steps, but
 this slice leaves selection explicit so generation and memory cost stay under
 reviewer control.
 
+## Implementation Receipt
+
+The shared exact order now clamps arbitrary callers to radius 15 and returns
+961 center-first chunk coordinates. Browser URL state intentionally accepts
+only the nine stepped product choices, and each selector label states side,
+chunk count, and exact block width.
+
+Canonical renderer residency continues to use the desired-set diff from
+Tactical 239. The Wasm renderer now reports raw block/biome bytes and used
+vertex/index/grass mesh-arena ranges after retain, accept, presentation, and
+render operations. The browser raw-result cache is a tested access-ordered
+LRU capped at 1,024 entries. Browser diagnostics expose cache count, both raw
+domains, mesh used bytes, and their explicitly lower-bound tracked sum.
+
+The headed browser regression starts at radius zero, observes progressive
+publication after selecting radius 15, and waits for all 961 chunks. It then
+moves exactly one chunk and requires 930 resident hits, 31 admission frames,
+and a maximum of one admission per frame. Returning requires the same 930
+resident chunks plus 31 cache hits over 31 frames. Desktop and phone both
+passed. The complete local suite result was 14 passed and 2
+platform-inapplicable cases skipped in 6.7 minutes.
+
+Local validation passed:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-terrain-view
+  -p mclone-terrain-lab --lib`: 24 passed;
+- `cargo check --manifest-path native/Cargo.toml -p mclone-terrain-lab
+  --target wasm32-unknown-unknown`;
+- `pnpm --dir tools/terrain-lab test`: 23 passed;
+- `pnpm --dir tools/terrain-lab typecheck`; and
+- the full headed-Wayland desktop/phone WebGPU suite: 14 passed, 2 skipped.
+
+The complete local captures were inspected at:
+
+- `/tmp/mclone-terrain-lab-desktop-chrome-canonical-961.png`; and
+- `/tmp/mclone-terrain-lab-phone-chrome-canonical-961.png`.
+
+The production bundle built from `48128e5af0cf` was uploaded only under
+`/terrain/`. Every immutable object was fetched from the public route and
+byte-compared before `index.html` was published last:
+
+| Object | SHA-256 |
+| --- | --- |
+| `index.html` | `02d3dc459a67f97559f0ae0ffaa7977869b59bb6b0bd4aa081d126f014bd4866` |
+| `assets/canonical-worker-BQ6kSMVs.js` | `b30aba96dd7a337d8a4997e4d1959b9eab4a242bb739d30bc61381dbc51b2dad` |
+| `assets/index-CoWCOr4c.css` | `63ee48983f72ded10cfeb1b5891f1da019576678e7059e2f74dc7fb1c70ad343` |
+| `assets/index-DUxEAYZs.js` | `992ebefa1da6fa8bc47a8d0966764052fc6f648d561a0d41d5743872a7c24710` |
+| `assets/lod-worker-DsChIzJJ.js` | `163c8df4a49368733c7a9bdfacf57c547b046cd10f0716b74fb0f514d542bf4d` |
+| `assets/mclone_terrain_lab_bg-DmE252FX.wasm` | `22b08569c9c2b05479f6f5d57dfb3b014ed669c12259ac9916ee86eb3d7e348f` |
+
+Standard hosted desktop and phone smokes passed with zero browser errors and
+showed the new memory diagnostics. The opt-in maximum proof then exercised
+the deployed bundle:
+
+| Hosted lane | Initial 961 | Generated shift | Cached return |
+| --- | ---: | ---: | ---: |
+| desktop | 123.47 s | 6.72 s | 6.52 s |
+| phone | 120.92 s | 7.16 s | 7.24 s |
+
+Both lanes retained 930 chunks per move, admitted 31 chunks over 31 frames,
+recorded 31 return cache hits, and ended with 992 cached chunks. Both measured
+the same footprint:
+
+| Tracked domain | Bytes | Approximate |
+| --- | ---: | ---: |
+| Wasm resident raw | 66,916,352 | 63.82 MiB |
+| Browser raw cache | 66,916,352 | 63.82 MiB |
+| GPU mesh used | 192,203,528 | 183.30 MiB |
+| Tracked lower bound | 326,036,232 | 310.93 MiB |
+
+Hosted completed-footprint captures were inspected at:
+
+- `/tmp/mclone-terrain-lab-hosted-desktop-canonical-961.png`; and
+- `/tmp/mclone-terrain-lab-hosted-mobile-canonical-961.png`.
+
+Implementation commits are `c1064d2b` (contract), `5831f442` (shared radius
+and controls), `bad0ac9f` (bounded cache and memory), `48128e5a` (browser
+proof), `c6a12a37` (hosted proof lane), and `adcde5bb` (epoch-keyed wait),
+followed by this receipt.

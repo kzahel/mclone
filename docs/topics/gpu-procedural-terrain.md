@@ -2,11 +2,15 @@
 
 Topic: `gpu-procedural-terrain`
 
-Status: shared orthographic/perspective projection and equal logical-pane
-layout correction completed local desktop/mobile headed-WebGPU validation
-2026-07-25. Orthographic is now the default. The earlier textured projection
-and navigation follow-up completed with local and hosted desktop/mobile
-validation 2026-07-24 under
+Status: Tactical
+[`241`](../tactical/241-terrain-lab-large-canonical-footprints.md) completed a
+deployed `31x31 = 961` exact-footprint review mode with bounded raw caching,
+tracked-memory telemetry, and local/hosted desktop/mobile headed-WebGPU proof
+2026-07-25. Shared orthographic/perspective projection and equal logical-pane
+layout correction also completed local desktop/mobile headed-WebGPU
+validation 2026-07-25. Orthographic is now the default. The earlier textured
+projection and navigation follow-up completed with local and hosted
+desktop/mobile validation 2026-07-24 under
 Tactical
 [`233-terrain-lab-projection-materials-and-navigation.md`](../tactical/233-terrain-lab-projection-materials-and-navigation.md).
 The canonical multi-pane Terrain Lab workspace completed local and hosted
@@ -1277,6 +1281,32 @@ published the nine entering chunks over nine frames, and never changed the
 epoch for sub-chunk motion. Border-aware mesh construction remains
 main-thread work for one paced admission; Worker-side section meshing is the
 next escalation only if individual arrivals still hitch.
+
+Tactical
+[`241`](../tactical/241-terrain-lab-large-canonical-footprints.md) is
+complete. Exact review now offers deliberate centered sides `1`, `3`, `5`,
+`7`, `9`, `11`, `15`, `21`, and `31`; the maximum covers 496 blocks with 961
+ordinary production chunks. A one-chunk pan retains 930 chunks and schedules
+only the 31 entering coordinates. Generated and cached arrivals still admit at
+most one chunk per animation frame. The browser raw-result cache is a
+1,024-chunk LRU, while renderer residency remains exactly the desired set.
+
+The evidence panel now separates Wasm-resident raw bytes, browser raw-cache
+bytes, and used GPU mesh-arena bytes, and labels their sum as a tracked lower
+bound. On the fixed Mclone final-feature proof, a complete maximum footprint
+used 66,916,352 resident raw bytes, the same amount in the raw cache, and
+192,203,528 used mesh bytes: 326,036,232 bytes tracked in total. This excludes
+allocator overhead, spare GPU capacity, shared rendering resources, generator
+dependency caches, and browser memory.
+
+The deployed headed-WebGPU proof completed the initial footprint in 123.5
+seconds on the desktop viewport and 120.9 seconds on the phone viewport. The
+generated entering edge took 6.72/7.16 seconds and the 31-hit cached return
+took 6.52/7.24 seconds. Those results confirm that the maximum is a useful
+explicit inspection mode, not a suitable default. They also sharpen the next
+performance boundary: Worker generation is progressive and navigation
+remains cancelable, but border-aware textured meshing and upload still occur
+on the browser main thread for each paced chunk.
 
 The next implementation direction is:
 

@@ -36,8 +36,9 @@ The URL owns the review state:
   blocks
 - `panes`: comma-separated `canonical`, `cpu`, and/or `gpu`
 - `canonical`: `surface` or `final`
-- `radius`: exact chunk radius from `0` through `4`, corresponding to `1`,
-  `9`, `25`, `49`, or `81` centered chunks
+- `radius`: one of `0`, `1`, `2`, `3`, `4`, `5`, `7`, `10`, or `15`,
+  corresponding to centered footprints from `1x1` through `31x31 = 961`
+  exact chunks
 - `water` and `vegetation`: `1` to show or `0` to hide retained exact blocks
 - `source`: legacy/procedural compatibility value (`reference`, `gpu`, or
   `split`); new links should use `panes`
@@ -111,11 +112,15 @@ intentionally remain visible for block materials that do not yet have curated
 first-party textures.
 
 The exact and LOD caches are independent. `Exact cache on` retains raw
-generated chunks by seed, checkpoint, and chunk coordinate; exact GPU
-residency remains a separate bounded desired set. Returning to an evicted
-exact coordinate admits its raw cache result through the same paced queue.
-`Exact cache off` compiles entering coordinates cold while still preserving
-the current old/new resident overlap.
+generated chunks by profile, seed, checkpoint, and chunk coordinate in a
+session-local 1,024-chunk LRU; exact GPU residency remains the separate current
+desired set. Returning to a cached exact coordinate admits its raw result
+through the same paced queue. `Exact cache off` compiles entering coordinates
+cold while still preserving the current old/new resident overlap. The
+evidence panel reports Wasm-resident raw bytes, browser-cache raw bytes, and
+used vertex/index/grass mesh ranges. Their `Real tracked (lower bound)` sum
+does not claim Wasm/JavaScript allocator overhead, spare GPU arena capacity,
+the atlas, pipelines, render targets, dependency caches, or browser memory.
 
 `Cache on` uses a session-local 192-tile LRU keyed by profile, seed, aligned
 origin, sample spacing, and content stage. It retains CPU samples, uploaded
@@ -173,3 +178,9 @@ starting Vite:
 TERRAIN_LAB_SMOKE_BASE_URL=https://mclone.kzahel.com \
   pnpm terrain-lab:web:smoke
 ```
+
+Add `-- --large-canonical` (and optionally `--mobile` after it) to the smoke
+command when an explicit, multi-minute production-route proof of the `31x31`
+exact footprint is wanted. That lane verifies 930-chunk overlap, a 31-frame
+entering edge, a 31-hit cached return, bounded cache and tracked-memory facts,
+and saves the completed pane under `/tmp`.
