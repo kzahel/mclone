@@ -235,7 +235,7 @@ impl WinitFrameDriver {
     }
 
     pub(crate) fn reconcile_capture_camera_pose(&mut self) -> Result<bool> {
-        self.host.force_mono_player_pose_reconcile_for_diagnostics()
+        self.advance_held_input(None, 0.0)
     }
 
     pub(crate) fn drive_until_idle(
