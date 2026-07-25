@@ -178,8 +178,8 @@ pnpm terrain-lab:web:test
 pnpm terrain-lab:web:smoke
 pnpm terrain-lab:web:smoke -- --mobile
 
-# Build, upload the native web bundle and asset pack to the mclone R2 bucket,
-# deploy the Cloudflare Worker, and make it available at mclone.kzahel.com.
+# Build the native web bundle and deploy it with Cloudflare Workers Static
+# Assets at mclone.kzahel.com.
 pnpm run deploy
 ```
 
@@ -220,7 +220,18 @@ even when a persisted first-party selection is restored immediately afterward.
 “Proprietary-free” describes the active resolution ledger, not an assertion
 that reference bytes were absent from the deploy or network bootstrap.
 
-The Cloudflare Worker in [`../worker/index.js`](../worker/index.js) serves the bundle with COOP/COEP/CORP headers so browser worker and `SharedArrayBuffer` paths can run. Wrangler must be authenticated for the Cloudflare account before deploy.
+Wrangler publishes the aggregate directory through Workers Static Assets. It
+hashes the files, uploads only missing content in batches, and activates the new
+manifest with the Worker deployment instead of issuing one R2 command per file.
+[`../worker/_headers`](../worker/_headers) supplies COOP/COEP/CORP headers so
+browser worker and `SharedArrayBuffer` paths can run without routing normal
+asset requests through Worker code. Hashed Vite assets, bindgen payloads, and
+versioned asset-pack URLs are immutable; HTML, top-level JavaScript, and stable
+catalogue metadata use Static Assets' revalidation default.
+
+Deploy uses the existing Wrangler login. On the local push-deploy host,
+Wrangler's stored OAuth session is sufficient; no separate R2 token or access
+key is required.
 
 ## Local Post-Push Deploy Hook
 

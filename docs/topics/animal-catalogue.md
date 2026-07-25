@@ -127,13 +127,13 @@ deployed data.
 
 `pnpm asset-lab:web:build` produces the exact `/animals/` subtree. The root
 `native:web:bundle` command builds it and copies it into
-`dist-native-web/animals/` before R2 upload. Vite uses `/animals/` as its base,
-and all catalogue/data URLs derive from that base rather than root-relative
-development paths.
+`dist-native-web/animals/` before the aggregate Workers Static Assets deploy.
+Vite uses `/animals/` as its base, and all catalogue/data URLs derive from that
+base rather than root-relative development paths.
 
-The Cloudflare Worker continues serving directory paths as `index.html` and
-supplying the site's isolation headers. Its immutable-cache recognition must
-cover hashed Vite assets nested below `/animals/`; HTML and stable catalogue
+Workers Static Assets serves directory paths as `index.html`.
+`worker/_headers` supplies the site's isolation headers and immutable caching
+for hashed Vite assets nested below `/animals/`; HTML and stable catalogue
 metadata must not remain stale across a deploy.
 
 The existing local after-main-push hook remains the deployment coordinator.

@@ -8,9 +8,10 @@ reference assets, build caches, and physical hardware.
 ## Why This Exists
 
 The project already deploys with `pnpm run deploy`, which builds the Rust/WASM web
-bundle, uploads it to R2, and deploys the Cloudflare Worker. That command depends
-on this machine's Rust/pnpm setup, Cloudflare authentication, ignored
-Minecraft reference assets, and incremental build cache.
+bundle, uploads its manifest diff with Workers Static Assets, and deploys the
+Cloudflare Worker. That command depends on this machine's Rust/pnpm setup,
+existing Wrangler authentication, ignored Minecraft reference assets, and
+incremental build cache.
 
 The usual wrapper, `git push && pnpm run deploy`, does not work well when another
 tool performs the push. Git also has no normal client-side `post-push` hook.

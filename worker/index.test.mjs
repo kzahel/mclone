@@ -1,49 +1,40 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import test from "node:test";
 import worker from "./index.js";
 
-test("serves the animal catalogue directory entry without stale HTML", async () => {
-  const fixture = bucketFixture();
-  const response = await worker.fetch(new Request("https://mclone.example/animals/"), fixture.env);
+test("fallback Worker returns an isolated 404 without an R2 binding", async () => {
+  const response = await worker.fetch(new Request("https://mclone.example/missing"));
 
-  assert.equal(fixture.keys[0], "animals/index.html");
-  assert.equal(response.status, 200);
-  assert.equal(response.headers.get("cache-control"), "no-cache, max-age=0, must-revalidate");
+  assert.equal(response.status, 404);
+  assert.equal(await response.text(), "Not Found");
   assert.equal(response.headers.get("cross-origin-opener-policy"), "same-origin");
+  assert.equal(response.headers.get("cross-origin-embedder-policy"), "require-corp");
+  assert.equal(response.headers.get("cross-origin-resource-policy"), "same-origin");
 });
 
-test("caches nested Vite assets immutably and revalidates catalogue data", async () => {
-  const fixture = bucketFixture();
-  const asset = await worker.fetch(
-    new Request("https://mclone.example/animals/assets/index-AbCd1234.js"),
-    fixture.env,
-  );
-  const catalog = await worker.fetch(
-    new Request("https://mclone.example/animals/catalog/catalog.v1.json"),
-    fixture.env,
-  );
+test("Wrangler serves the aggregate bundle as static assets without R2", async () => {
+  const config = await readFile(new URL("./wrangler.toml", import.meta.url), "utf8");
 
-  assert.equal(asset.headers.get("cache-control"), "public, max-age=31536000, immutable");
-  assert.equal(catalog.headers.get("cache-control"), "no-cache, max-age=0, must-revalidate");
+  assert.match(config, /\[assets\]\s+directory = "\.\.\/dist-native-web"/);
+  assert.doesNotMatch(config, /\[\[r2_buckets\]\]/);
 });
 
-function bucketFixture() {
-  const keys = [];
-  return {
-    keys,
-    env: {
-      BUCKET: {
-        async get(key) {
-          keys.push(key);
-          return {
-            body: `fixture:${key}`,
-            httpEtag: `etag-${key}`,
-            writeHttpMetadata(headers) {
-              headers.set("Content-Type", key.endsWith(".html") ? "text/html" : "application/octet-stream");
-            },
-          };
-        },
-      },
-    },
-  };
-}
+test("static assets retain isolation and immutable hashed/runtime caching", async () => {
+  const headers = await readFile(new URL("./_headers", import.meta.url), "utf8");
+
+  assert.match(headers, /\/\*\s+Cross-Origin-Opener-Policy: same-origin/);
+  assert.match(headers, /Cross-Origin-Embedder-Policy: require-corp/);
+  assert.match(headers, /Cross-Origin-Resource-Policy: same-origin/);
+  for (const path of [
+    "/assets/*",
+    "/animals/assets/*",
+    "/structures/assets/*",
+    "/terrain/assets/*",
+    "/pkg/*",
+    "/reference/minecraft-1.17.1/extracted.zip",
+    "/first-party-packs/*",
+  ]) {
+    assert.ok(headers.includes(`${path}\n  Cache-Control: public, max-age=31536000, immutable`));
+  }
+});
