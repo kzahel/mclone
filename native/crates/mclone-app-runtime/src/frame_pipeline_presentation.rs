@@ -140,8 +140,6 @@ pub const fn budget_decision_family_label(family: BudgetDecisionFamily) -> &'sta
         BudgetDecisionFamily::CompletedResultAcceptance => "completed-result-acceptance",
         BudgetDecisionFamily::SectionUpload => "section-upload",
         BudgetDecisionFamily::RenderCompileWorkers => "render-compile-workers",
-        BudgetDecisionFamily::LodBuildAdmission => "lod-build-admission",
-        BudgetDecisionFamily::LodUpload => "lod-upload",
     }
 }
 

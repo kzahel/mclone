@@ -12,7 +12,6 @@ use mclone_render_session::{
 use mclone_server::{DEFAULT_LIGHT_STATUS_BATCH_SIZE, WorldGenerationProfile};
 use mclone_ui::GameMovementMode;
 
-use crate::far_lod::{FarLodDetailMode, FarTerrainLodConfig};
 use crate::{
     DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS, DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
 };
@@ -38,8 +37,6 @@ pub const ARG_MOVEMENT_MODE: &str = "--movement-mode";
 pub const ARG_DEBUG_PASSIVE_SHOWCASE: &str = "--debug-passive-showcase";
 pub const ARG_LIGHTING: &str = "--lighting";
 pub const ARG_LIGHT_STATUS_BATCH_SIZE: &str = "--light-status-batch-size";
-pub const ARG_FAR_LOD: &str = "--far-lod";
-pub const ARG_FAR_LOD_DETAIL: &str = "--far-lod-detail";
 pub const ARG_SECTION_OCCLUSION: &str = "--section-occlusion";
 pub const ARG_FULLBRIGHT: &str = "--fullbright";
 pub const ARG_RENDER_COLOR_PROFILE: &str = "--render-color-profile";
@@ -71,8 +68,6 @@ pub const STARTUP_ARG_FLAGS: &[&str] = &[
     ARG_DEBUG_PASSIVE_SHOWCASE,
     ARG_LIGHTING,
     ARG_LIGHT_STATUS_BATCH_SIZE,
-    ARG_FAR_LOD,
-    ARG_FAR_LOD_DETAIL,
     ARG_SECTION_OCCLUSION,
     ARG_FULLBRIGHT,
     ARG_RENDER_COLOR_PROFILE,
@@ -169,10 +164,6 @@ pub struct StartupSceneOptions {
     pub debug_auxiliary_player_script: bool,
     pub lighting_enabled: bool,
     pub light_status_batch_size: usize,
-    /// Shared far-terrain LOD startup config. Disabled by default on every
-    /// native target; the shared owner so far-LOD is injected uniformly instead
-    /// of via per-app scene-option forks.
-    pub far_lod: FarTerrainLodConfig,
 }
 
 impl Default for StartupSceneOptions {
@@ -196,7 +187,6 @@ impl Default for StartupSceneOptions {
             debug_auxiliary_player_script: false,
             lighting_enabled: true,
             light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
-            far_lod: FarTerrainLodConfig::default(),
         }
     }
 }
@@ -479,13 +469,6 @@ impl StartupArgState {
                 self.scene.light_status_batch_size =
                     parse_usize_arg(ARG_LIGHT_STATUS_BATCH_SIZE, args.next())?;
             }
-            ARG_FAR_LOD => {
-                self.scene.far_lod.enabled = parse_bool_arg(ARG_FAR_LOD, args.next())?;
-            }
-            ARG_FAR_LOD_DETAIL => {
-                self.scene.far_lod.detail_mode =
-                    parse_far_lod_detail_mode_arg(ARG_FAR_LOD_DETAIL, args.next())?;
-            }
             ARG_SECTION_OCCLUSION => {
                 self.render_options.section_occlusion_culling =
                     parse_bool_arg(ARG_SECTION_OCCLUSION, args.next())?;
@@ -737,21 +720,6 @@ pub fn parse_render_color_profile_arg(
         .map_err(|message| anyhow::anyhow!("{flag} {message}"))
 }
 
-pub fn parse_far_lod_detail_mode_arg(
-    flag: &str,
-    value: Option<String>,
-) -> Result<FarLodDetailMode> {
-    let value = parse_string_arg(flag, value)?;
-    match value.as_str() {
-        "auto" => Ok(FarLodDetailMode::Auto),
-        "4" => Ok(FarLodDetailMode::Fixed4),
-        "8" => Ok(FarLodDetailMode::Fixed8),
-        "16" => Ok(FarLodDetailMode::Fixed16),
-        "1" | "2" => bail!("{flag} detail {value} is reserved for a later debug mode"),
-        _ => bail!("{flag} must be auto, 4, 8, or 16, got `{value}`"),
-    }
-}
-
 pub fn parse_f32_vec3_arg(flag: &str, value: Option<String>) -> Result<[f32; 3]> {
     let raw = value.with_context(|| format!("{flag} requires x,y,z"))?;
     let parts = raw
@@ -902,7 +870,6 @@ mod tests {
                 debug_auxiliary_player_script: false,
                 lighting_enabled: true,
                 light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
-                far_lod: FarTerrainLodConfig::default(),
             }
         );
         assert_eq!(
@@ -1018,10 +985,6 @@ mod tests {
             "false",
             ARG_LIGHT_STATUS_BATCH_SIZE,
             "5",
-            ARG_FAR_LOD,
-            "true",
-            ARG_FAR_LOD_DETAIL,
-            "16",
             ARG_REMOTE_ADDR,
             "127.0.0.1:25565",
             ARG_SCREENSHOT_EYE,
@@ -1053,7 +1016,6 @@ mod tests {
                 debug_auxiliary_player_script: false,
                 lighting_enabled: true,
                 light_status_batch_size: 5,
-                far_lod: FarTerrainLodConfig::enabled().with_detail_mode(FarLodDetailMode::Fixed16),
             }
         );
         assert_eq!(
@@ -1164,29 +1126,6 @@ mod tests {
                 .to_string()
                 .contains("walk, fly, hand-push, or thruster")
         );
-    }
-
-    #[test]
-    fn far_lod_detail_parser_accepts_product_modes_and_reserves_debug_modes() {
-        for (value, expected) in [
-            ("auto", FarLodDetailMode::Auto),
-            ("4", FarLodDetailMode::Fixed4),
-            ("8", FarLodDetailMode::Fixed8),
-            ("16", FarLodDetailMode::Fixed16),
-        ] {
-            assert_eq!(
-                parse_far_lod_detail_mode_arg(ARG_FAR_LOD_DETAIL, Some(value.to_owned())).unwrap(),
-                expected
-            );
-        }
-        for value in ["1", "2"] {
-            assert!(
-                parse_far_lod_detail_mode_arg(ARG_FAR_LOD_DETAIL, Some(value.to_owned()))
-                    .unwrap_err()
-                    .to_string()
-                    .contains("reserved")
-            );
-        }
     }
 
     #[test]
@@ -1405,7 +1344,6 @@ mod tests {
                 debug_auxiliary_player_script: true,
                 lighting_enabled: false,
                 light_status_batch_size: 5,
-                far_lod: FarTerrainLodConfig::default(),
             }
         );
         assert!(!options.render_options.section_occlusion_culling);

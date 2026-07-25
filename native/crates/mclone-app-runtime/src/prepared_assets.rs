@@ -19,8 +19,6 @@ use mclone_mesh::{
 use mclone_render::actor_assets::{ActorTextureAssets, load_actor_texture_assets};
 use mclone_render::screen_effect::{ScreenEffectTextureAssets, load_screen_effect_texture_assets};
 
-use crate::far_lod::FarTerrainLodMaterialPalette;
-
 use std::collections::BTreeMap;
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
@@ -51,7 +49,6 @@ pub struct PreparedAssetCoverage {
     pub block_states: usize,
     pub atlas_sprites: usize,
     pub actor_figures: usize,
-    pub far_lod_colors: usize,
     pub missing_registry_entries: usize,
     pub first_party_resolutions: usize,
     pub generated_resolutions: usize,
@@ -68,7 +65,6 @@ pub struct PreparedAssetSet {
     pub presentation: TexturePresentation,
     pub source: AssetSourceChain,
     pub terrain: TexturedTerrainAssets,
-    pub far_lod_materials: Option<FarTerrainLodMaterialPalette>,
     pub actors: ActorTextureAssets,
     pub screen_effects: ScreenEffectTextureAssets,
     pub audio_policy: FirstPartyAudioPolicy,
@@ -135,7 +131,6 @@ impl PreparedAssetSet {
             mesh: TexturedMeshAssets {
                 catalog: self.terrain.catalog,
                 atlas: self.terrain.atlas.into(),
-                far_lod_materials: self.far_lod_materials,
             },
             actors: self.actors,
             screen_effects: self.screen_effects,
@@ -507,9 +502,6 @@ fn prepare_scene_asset_selection(
         load_first_party_textured_terrain_assets_with_presentation(&tracker, effective_presentation)
             .context("failed to prepare first-party terrain assets")?
     };
-    let far_lod_materials = Some(FarTerrainLodMaterialPalette::from_textured_terrain_assets(
-        &terrain,
-    ));
     let actors = load_actor_texture_assets(&tracker)
         .context("failed to prepare selected actor and figure assets")?;
     let screen_effects = load_screen_effect_texture_assets(&tracker)
@@ -564,9 +556,6 @@ fn prepare_scene_asset_selection(
         block_states: terrain.catalog.len(),
         atlas_sprites: terrain.atlas_sprite_count,
         actor_figures: actors.figures.len(),
-        far_lod_colors: far_lod_materials
-            .as_ref()
-            .map_or(0, FarTerrainLodMaterialPalette::color_count),
         missing_registry_entries: missing_registry
             .as_ref()
             .map_or(0, MissingAssetRegistry::len),
@@ -583,7 +572,6 @@ fn prepare_scene_asset_selection(
         mesh: TexturedMeshAssets {
             catalog: terrain.catalog,
             atlas: terrain.atlas.into(),
-            far_lod_materials,
         },
         actors,
         screen_effects,
@@ -753,9 +741,6 @@ pub fn prepare_first_party_asset_set(
 
     let terrain = load_first_party_textured_terrain_assets(&tracker)
         .context("failed to prepare first-party terrain assets")?;
-    let far_lod_materials = Some(FarTerrainLodMaterialPalette::from_textured_terrain_assets(
-        &terrain,
-    ));
     let actors = load_actor_texture_assets(&tracker)
         .context("failed to prepare first-party actor and figure assets")?;
     let screen_effects = load_screen_effect_texture_assets(&tracker)
@@ -782,9 +767,6 @@ pub fn prepare_first_party_asset_set(
         block_states: terrain.catalog.len(),
         atlas_sprites: terrain.atlas_sprite_count,
         actor_figures: actors.figures.len(),
-        far_lod_colors: far_lod_materials
-            .as_ref()
-            .map_or(0, FarTerrainLodMaterialPalette::color_count),
         missing_registry_entries: missing_registry
             .as_ref()
             .map_or(0, MissingAssetRegistry::len),
@@ -801,7 +783,6 @@ pub fn prepare_first_party_asset_set(
         presentation: TexturePresentation::Textured,
         source,
         terrain,
-        far_lod_materials,
         actors,
         screen_effects,
         audio_policy,

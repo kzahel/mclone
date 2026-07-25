@@ -10,10 +10,6 @@ impl ResidentTileKey for TestTileKey {
     fn chunk_pos(self) -> ChunkPos {
         self.chunk
     }
-
-    fn lod_level(self) -> u8 {
-        self.level
-    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

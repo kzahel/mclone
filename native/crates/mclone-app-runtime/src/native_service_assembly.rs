@@ -17,13 +17,12 @@ use anyhow::{Context, Result, bail};
 use glam::Vec3;
 use mclone_client::ClientRuntime;
 use mclone_core::HorizontalTopology;
-use mclone_core::{BlockStateId, ChunkPos, ChunkSnapshot, LodTileKey};
+use mclone_core::{BlockStateId, ChunkPos, ChunkSnapshot};
 use mclone_mesh::{
     RenderSectionKey, TexturedRenderSectionBuildReport, TexturedRenderSectionMesh,
     TexturedRenderSectionMetadata,
 };
 use mclone_protocol::{ClientCommand, ClientEphemeralMessage, ServerUpdate, encode_server_update};
-use mclone_render::far_lod::FarTerrainLodFrameUpdate;
 use mclone_render_session::{RenderSectionCacheUpdate, RenderSectionCompileQueueHealth};
 use mclone_server::{
     DEFAULT_LIGHT_STATUS_BATCH_SIZE, IntegratedServerRunner, NativeIntegratedServerRunner,
@@ -41,16 +40,11 @@ use crate::client_connection::{
 use crate::deferred_drop::{
     DEFAULT_DEFERRED_DROP_MAX_ITEMS, DeferredDropBacklog, DeferredDropService,
 };
-use crate::far_lod::{
-    FarTerrainLodCache, FarTerrainLodCompiler, FarTerrainLodConfig, FarTerrainLodCoverage,
-    FarTerrainLodProducerStats, STARTUP_LOD_PREWARM_CHUNK_BUILD_BUDGET, StartupLodPrewarmConfig,
-};
 use crate::host_mode::{
     RemoteDedicatedServerSession, RemoteServerUpdateBatch, RemoteUpdateQueueMetrics,
     SingleViewHostMode, SingleViewHostOptions, deferred_command_exchange,
     prepare_remote_dedicated_resync_command, reconnect_remote_dedicated_session_and_resync,
 };
-use crate::lod_coverage::{LodCoverageCoordinator, LodReplacementCounters, LodTileAvailability};
 use crate::monotonic::{MonotonicDeadline, system_monotonic_clock};
 use crate::render_asset_data::TexturedMeshAssets;
 use crate::render_assets::{
@@ -58,8 +52,8 @@ use crate::render_assets::{
     NativeRenderSectionCompileDispatcher, load_textured_mesh_assets,
 };
 use crate::scene_session_runtime::{
-    DEFAULT_STARTUP_READINESS_TIMEOUT, FarLodRuntimeSettleSnapshot, SceneRuntimeService,
-    SceneSessionRuntime, StartupReadinessPolicy,
+    DEFAULT_STARTUP_READINESS_TIMEOUT, SceneRuntimeService, SceneSessionRuntime,
+    StartupReadinessPolicy,
 };
 use crate::session::{ActiveSessionDescriptor, RemoteSessionEndpoint, SessionStartRequest};
 use crate::startup_render_seed::StartupRenderSectionSeed;
@@ -105,7 +99,6 @@ pub struct LocalIntegratedSceneOptions {
     pub render_compile_worker_count: usize,
     pub render_compile_max_pending_jobs: Option<usize>,
     pub render_compile_worker_timing_enabled: bool,
-    pub startup_lod_prewarm: StartupLodPrewarmConfig,
     pub local_player_identity: Option<mclone_protocol::ClientIdentity>,
     pub observer_only: bool,
 }
@@ -179,7 +172,6 @@ impl LocalIntegratedSceneOptions {
             render_compile_worker_count: DEFAULT_RENDER_SECTION_COMPILE_WORKERS,
             render_compile_max_pending_jobs: Some(DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS),
             render_compile_worker_timing_enabled: true,
-            startup_lod_prewarm: StartupLodPrewarmConfig::disabled(),
             local_player_identity: None,
             observer_only: false,
         }
@@ -312,11 +304,6 @@ impl LocalIntegratedSceneOptions {
         self
     }
 
-    pub const fn with_startup_lod_prewarm(mut self, prewarm: StartupLodPrewarmConfig) -> Self {
-        self.startup_lod_prewarm = prewarm;
-        self
-    }
-
     pub fn chunk_tracking_radius(&self) -> u32 {
         chunk_tracking_radius_for_render_distance(self.render_distance)
     }
@@ -333,8 +320,6 @@ pub struct LocalIntegratedSceneRuntime<R = NativeIntegratedServerRunner> {
     connection: IntegratedRunnerConnection<R>,
     mesh_assets: TexturedMeshAssets,
     render_compile_dispatcher: NativeRenderSectionCompileDispatcher,
-    far_lod_cache: FarTerrainLodCache,
-    lod_coverage: LodCoverageCoordinator,
     deferred_chunk_drops: Box<dyn DeferredDropService>,
     simulation_cadence: SimulationCadenceConfig,
     last_runner_diagnostics: Option<ServerRunnerDiagnostics>,
@@ -483,23 +468,10 @@ pub struct LocalIntegratedStartupStep {
     pub poll_count: usize,
     pub poll_ms: f64,
     pub changed: bool,
-    /// Combined gate the driver waits on: spawn authority plus prewarm settled.
+    /// Combined gate the driver waits on: spawn authority plus drawable terrain.
     pub playable_ready: bool,
-    /// Spawn-authority readiness: underfoot/near real chunks are honest. This is
-    /// the only gate that gameplay honesty depends on; prewarm never sets it.
+    /// Spawn-authority readiness: underfoot/near real chunks are honest.
     pub spawn_authority_ready: bool,
-    /// Whether startup LOD prewarm is active this session.
-    pub lod_prewarm_enabled: bool,
-    /// Prewarm reached its desired (tile-capped) visual coverage.
-    pub lod_prewarm_complete: bool,
-    /// Prewarm hit its time cap before completing coverage.
-    pub lod_prewarm_timeout: bool,
-    /// Wall-clock spent on prewarm so far (`lod_prewarm_ms`).
-    pub lod_prewarm_ms: f64,
-    /// Retained prewarm tiles drawable so far (`startup_lod_tiles_ready`).
-    pub startup_lod_tiles_ready: usize,
-    /// Desired prewarm tiles, tile-capped (`startup_lod_tiles_target`).
-    pub startup_lod_tiles_target: usize,
     pub cached_section_count: usize,
     pub rebuilt_section_count: usize,
     pub submitted_compile_section_count: usize,
@@ -512,93 +484,11 @@ pub struct LocalIntegratedStartupStep {
     pub progress: Option<LoadingProgressOverlay>,
 }
 
-/// Startup visual-coverage prewarm tracker (tactical 162 Slice 1).
-///
-/// Runs alongside spawn-authority loading, building cheap retained far-LOD
-/// coverage around the spawn center so the first playable frame has less blank
-/// space. It is bounded by a hard time cap and tile cap, and never contributes
-/// to the spawn-authority gate. When it times out, startup degrades to current
-/// behavior (playable as soon as spawn authority is ready).
-#[derive(Clone, Copy, Debug)]
-struct StartupLodPrewarm {
-    config: StartupLodPrewarmConfig,
-    far_lod: FarTerrainLodConfig,
-    seed: i64,
-    generation_profile: WorldGenerationProfile,
-    center: ChunkPos,
-    started_at: Option<Instant>,
-    elapsed_ms: f64,
-    tiles_ready: usize,
-    tiles_target: usize,
-    complete: bool,
-    timed_out: bool,
-}
-
-impl StartupLodPrewarm {
-    fn new(
-        config: StartupLodPrewarmConfig,
-        seed: i64,
-        generation_profile: WorldGenerationProfile,
-        center: ChunkPos,
-    ) -> Self {
-        Self {
-            config,
-            far_lod: config.far_lod_config(),
-            seed,
-            generation_profile,
-            center,
-            started_at: None,
-            elapsed_ms: 0.0,
-            tiles_ready: 0,
-            tiles_target: 0,
-            complete: false,
-            timed_out: false,
-        }
-    }
-
-    const fn enabled(&self) -> bool {
-        self.config.enabled
-    }
-
-    /// Whether the prewarm no longer blocks the playable transition: disabled,
-    /// coverage complete, or the time cap has been hit.
-    const fn settled(&self) -> bool {
-        !self.config.enabled || self.complete || self.timed_out
-    }
-
-    fn advance(&mut self, runtime: &mut LocalIntegratedSceneRuntime, camera_position: Vec3) {
-        if self.settled() {
-            return;
-        }
-        let started = *self.started_at.get_or_insert_with(Instant::now);
-        let budget = STARTUP_LOD_PREWARM_CHUNK_BUILD_BUDGET;
-        let coverage = runtime.prewarm_far_lod(
-            self.far_lod,
-            self.seed,
-            self.generation_profile,
-            self.center,
-            camera_position,
-            budget,
-        );
-        self.record(coverage, started.elapsed());
-    }
-
-    fn record(&mut self, coverage: FarTerrainLodCoverage, elapsed: Duration) {
-        let effective_target = coverage.target_tiles.min(self.config.tile_cap);
-        self.tiles_target = effective_target;
-        self.tiles_ready = coverage.ready_tiles.min(effective_target);
-        self.elapsed_ms = elapsed_ms(elapsed);
-        self.complete = self.tiles_ready >= effective_target;
-        self.timed_out = !self.complete && elapsed >= self.config.time_cap;
-    }
-}
-
 /// One shared startup step over a [`NativeSessionServices`] (docs/tactical/167).
 ///
-/// Host-neutral: `local_progress` and the `lod_prewarm_*` / `spawn_authority_*`
-/// fields carry local-integrated diagnostics and stay `None`/zeroed for remote
-/// dedicated startup. `startup_ready` is the one gate every lane waits on under
-/// the shared [`StartupReadinessPolicy`].
+/// Host-neutral: `local_progress` and `spawn_authority_ready` carry
+/// local-integrated diagnostics and stay `None`/false for remote dedicated
+/// startup. `startup_ready` is the one gate every lane waits on.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct NativeSessionStartupStep {
     pub host_mode: SingleViewHostMode,
@@ -606,23 +496,11 @@ pub struct NativeSessionStartupStep {
     pub poll_ms: f64,
     pub changed: bool,
     /// Combined gate the driver waits on for the active [`StartupReadinessPolicy`]:
-    /// host-mode evidence plus a drawable render seed plus prewarm settled.
+    /// host-mode evidence plus a drawable render seed.
     pub startup_ready: bool,
     /// Host-mode readiness evidence alone (local spawn authority / remote drained
-    /// active view), before the render-seed and prewarm gates are applied.
+    /// active view), before the render-seed gate is applied.
     pub host_ready: bool,
-    /// Whether startup LOD prewarm is active this session (local only).
-    pub lod_prewarm_enabled: bool,
-    /// Prewarm reached its desired (tile-capped) visual coverage.
-    pub lod_prewarm_complete: bool,
-    /// Prewarm hit its time cap before completing coverage.
-    pub lod_prewarm_timeout: bool,
-    /// Wall-clock spent on prewarm so far.
-    pub lod_prewarm_ms: f64,
-    /// Retained prewarm tiles drawable so far.
-    pub startup_lod_tiles_ready: usize,
-    /// Desired prewarm tiles, tile-capped.
-    pub startup_lod_tiles_target: usize,
     pub cached_section_count: usize,
     pub rebuilt_section_count: usize,
     pub submitted_compile_section_count: usize,
@@ -648,12 +526,6 @@ impl NativeSessionStartupStep {
             changed: self.changed,
             playable_ready: self.startup_ready,
             spawn_authority_ready: self.host_ready,
-            lod_prewarm_enabled: self.lod_prewarm_enabled,
-            lod_prewarm_complete: self.lod_prewarm_complete,
-            lod_prewarm_timeout: self.lod_prewarm_timeout,
-            lod_prewarm_ms: self.lod_prewarm_ms,
-            startup_lod_tiles_ready: self.startup_lod_tiles_ready,
-            startup_lod_tiles_target: self.startup_lod_tiles_target,
             cached_section_count: self.cached_section_count,
             rebuilt_section_count: self.rebuilt_section_count,
             submitted_compile_section_count: self.submitted_compile_section_count,
@@ -669,16 +541,11 @@ impl NativeSessionStartupStep {
 /// Host-neutral native world startup pump (docs/tactical/167).
 ///
 /// Owns a [`NativeSessionServices`] plus the transient render-section seed, the
-/// startup LOD prewarm policy (local-integrated only), the poll/sync/compile-job
-/// release loop, and the shared readiness gate. Both local integrated and remote
-/// dedicated startup reach ready through this one contract: remote never falls
-/// back to `poll_until_idle` + `sync_all_render_sections`.
+/// poll/sync/compile-job release loop and the shared readiness gate. Both local
+/// integrated and remote dedicated startup reach ready through this contract.
 #[derive(Debug)]
 pub struct NativeSessionStartupPump<S> {
     runtime: NativeSessionServices<S>,
-    // Local-integrated startup LOD prewarm; remote pumps carry a disabled prewarm
-    // that is always settled so the shared gate collapses to host evidence + seed.
-    prewarm: StartupLodPrewarm,
     readiness: StartupReadinessPolicy,
     // docs/tactical/167: accumulate the transient CPU section meshes the pump
     // compiles so the platform adapter can seed draw resources at completion
@@ -715,17 +582,10 @@ where
         options: LocalIntegratedSceneOptions,
         mesh_assets: TexturedMeshAssets,
     ) -> Result<Self> {
-        let prewarm = StartupLodPrewarm::new(
-            options.startup_lod_prewarm,
-            options.seed,
-            options.world_generation_profile,
-            options.center,
-        );
         let runtime = NativeSessionServices::local_with_mesh_assets(options, mesh_assets)?;
         Ok(Self::from_session_runtime(
             runtime,
             StartupReadinessPolicy::Playable,
-            prewarm,
         ))
     }
 
@@ -744,40 +604,25 @@ where
         session: S,
         mesh_assets: TexturedMeshAssets,
     ) -> Result<Self> {
-        let center = options.center;
         let runtime = NativeSessionServices::remote_dedicated_with_mesh_assets(
             endpoint,
             options,
             session,
             mesh_assets,
         )?;
-        // Remote startup carries a disabled prewarm: startup LOD prewarm is a
-        // local-integrated policy only (docs/tactical/167).
-        let prewarm = StartupLodPrewarm::new(
-            StartupLodPrewarmConfig::disabled(),
-            0,
-            WorldGenerationProfile::Overworld,
-            center,
-        );
         Ok(Self::from_session_runtime(
             runtime,
             StartupReadinessPolicy::Playable,
-            prewarm,
         ))
     }
 
-    /// Wrap an already-constructed session runtime. Prewarm should be disabled for
-    /// remote runtimes; for local runtimes pass a prewarm built from the local
-    /// options so startup coverage matches the direct constructors.
     fn from_session_runtime(
         runtime: NativeSessionServices<S>,
         readiness: StartupReadinessPolicy,
-        prewarm: StartupLodPrewarm,
     ) -> Self {
         let host_mode = runtime.host_mode();
         Self {
             runtime,
-            prewarm,
             readiness,
             render_seed: StartupRenderSectionSeed::new(),
             poll_count: 0,
@@ -791,20 +636,9 @@ where
 
     /// Wrap an already-constructed session runtime for a synchronous startup
     /// drive (docs/tactical/167 Slice 3: XR remote/replacement, Android remote,
-    /// and any lane that builds the runtime up front). Startup LOD prewarm is
-    /// disabled — it is a local-first-construction policy owned by the `local*`
-    /// constructors, so wrapping an existing runtime preserves the pre-tactical
-    /// `poll_until_idle` behavior (no prewarm) for these lanes while still routing
-    /// them through the shared readiness gate and render seed.
+    /// and any lane that builds the runtime up front).
     pub fn from_runtime(runtime: NativeSessionServices<S>) -> Self {
-        let center = runtime.interest_center();
-        let prewarm = StartupLodPrewarm::new(
-            StartupLodPrewarmConfig::disabled(),
-            0,
-            WorldGenerationProfile::Overworld,
-            center,
-        );
-        Self::from_session_runtime(runtime, StartupReadinessPolicy::Playable, prewarm)
+        Self::from_session_runtime(runtime, StartupReadinessPolicy::Playable)
     }
 
     /// Select the startup readiness policy. `Playable` is the default for every
@@ -843,23 +677,16 @@ where
             || section_update.completed_compile_section_count > 0;
         changed |= render_changed;
 
-        // Startup LOD prewarm is a local-integrated policy; remote runtimes have a
-        // disabled prewarm and are skipped here.
-        if let Some(local) = self.runtime.as_local_mut() {
-            self.prewarm.advance(local, camera_position);
-        }
-
         let local_progress = self.runtime.startup_progress_overlay();
         let host_ready = self
             .runtime
             .startup_host_ready(self.readiness, camera_position);
         let render_seed_drawable = self.render_seed.drawable_section_count();
-        // Every lane uses the same gate: host-mode evidence, a drawable render
-        // seed, and prewarm settled (always true when prewarm is disabled).
+        // Every lane uses the same gate: host-mode evidence and a drawable
+        // render seed.
         let startup_ready = crate::StartupAdmissionEvidence {
             host_ready,
             drawable_section_count: render_seed_drawable,
-            presentation_settled: self.prewarm.settled(),
         }
         .ready();
 
@@ -870,12 +697,6 @@ where
             changed,
             startup_ready,
             host_ready,
-            lod_prewarm_enabled: self.prewarm.enabled(),
-            lod_prewarm_complete: self.prewarm.complete,
-            lod_prewarm_timeout: self.prewarm.timed_out,
-            lod_prewarm_ms: self.prewarm.elapsed_ms,
-            startup_lod_tiles_ready: self.prewarm.tiles_ready,
-            startup_lod_tiles_target: self.prewarm.tiles_target,
             cached_section_count: self.runtime.cached_section_count(),
             rebuilt_section_count: section_update.rebuilt_section_count(),
             submitted_compile_section_count: section_update.submitted_compile_section_count,
@@ -1211,7 +1032,7 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
     /// Runner-generic local-integrated scene construction (docs/tactical/168
     /// Slice 2). The caller supplies an already-started [`IntegratedServerRunner`]
     /// so the local host mode no longer hard-codes the native runner. The scene
-    /// wiring (render-compile dispatcher, far-LOD, deferred drop worker, initial
+    /// wiring (render-compile dispatcher, deferred drop worker, and initial
     /// chunk view) is identical across runners.
     pub fn with_mesh_assets_and_runner(
         options: LocalIntegratedSceneOptions,
@@ -1233,14 +1054,11 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
             options.render_distance,
             options.chunk_tracking_radius(),
         );
-        let far_lod_cache = FarTerrainLodCache::with_clock(core.monotonic_clock().clone());
         let mut scene = Self {
             core,
             connection: IntegratedRunnerConnection::new(server_runner),
             mesh_assets,
             render_compile_dispatcher,
-            far_lod_cache,
-            lod_coverage: LodCoverageCoordinator::new(),
             deferred_chunk_drops: Box::new(NativeDeferredDropService::new()?),
             simulation_cadence: options.cadence,
             last_runner_diagnostics: None,
@@ -1320,9 +1138,8 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
                 health.compile_worker_count.max(1),
                 health.max_pending_jobs.max(1),
                 self.render_compile_dispatcher.worker_timing_enabled(),
-            )?;
+        )?;
         self.mesh_assets = mesh_assets;
-        self.clear_far_lod();
         Ok(())
     }
 
@@ -1343,113 +1160,7 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
         let _ = self.core.replace_asset_epoch_sections(epoch, sections);
         self.render_compile_dispatcher = replacement;
         self.mesh_assets = mesh_assets;
-        self.clear_far_lod();
         Ok(())
-    }
-
-    pub fn clear_far_lod(&mut self) {
-        let abandoned = self.far_lod_cache.clear();
-        self.render_compile_dispatcher
-            .release_completed_far_lod_jobs(abandoned);
-        self.lod_coverage.clear();
-    }
-
-    /// Cumulative LOD coverage replacement/pop counters (tactical 162 Slice 2).
-    pub fn lod_coverage_counters(&self) -> LodReplacementCounters {
-        self.lod_coverage.counters()
-    }
-
-    pub fn prepare_far_lod_frame(
-        &mut self,
-        config: FarTerrainLodConfig,
-        seed: i64,
-        generation_profile: WorldGenerationProfile,
-        center: ChunkPos,
-        camera_position: Vec3,
-        build_budget: usize,
-        upload_budget: usize,
-    ) -> Result<Option<&FarTerrainLodFrameUpdate>> {
-        if !config.enabled {
-            self.clear_far_lod();
-            return Ok(None);
-        }
-        let normal_terrain_chunks = traversal_ready_chunks(
-            &self
-                .core
-                .traversal_ready_render_section_keys(camera_position),
-        );
-        let materials = self.mesh_assets.far_lod_materials.clone();
-        self.far_lod_cache.advance_for_camera_with_profile(
-            config,
-            seed,
-            generation_profile,
-            center,
-            self.core.render_distance(),
-            materials.as_ref(),
-            &mut self.render_compile_dispatcher,
-            build_budget,
-        )?;
-        self.far_lod_cache
-            .drain_render_uploads(upload_budget, &mut self.render_compile_dispatcher);
-        let visible = self.resolve_lod_coverage(&normal_terrain_chunks);
-        let frame = self.far_lod_cache.prepare_render_update(&visible);
-        assert_no_real_far_lod_overlap(&normal_terrain_chunks, &frame.visible_tiles);
-        Ok(Some(frame))
-    }
-
-    /// Drive the shared LOD coverage coordinator with this frame's drawable
-    /// normal chunks, loaded chunks, and synthetic tile availability. This makes
-    /// per-tile precedence (normal drawable > reduced real > synthetic > nothing)
-    /// explicit and records replacement/pop diagnostics; it does not rebuild the
-    /// mesh (a derived product of the synthetic cache).
-    fn resolve_lod_coverage(&mut self, normal_drawable: &BTreeSet<ChunkPos>) -> BTreeSet<ChunkPos> {
-        let normal_loaded: BTreeSet<ChunkPos> =
-            self.core.client().loaded_chunk_positions().collect();
-        let synthetic: Vec<LodTileAvailability> = self
-            .far_lod_cache
-            .drawable_lod_tiles()
-            .map(LodTileAvailability::synthetic)
-            .collect();
-        self.lod_coverage
-            .resolve(normal_drawable, &normal_loaded, synthetic)
-            .visible_lod_tiles
-    }
-
-    /// Build cheap retained far-LOD coverage during startup with an explicit
-    /// build budget, sharing the same retained patches the live far-LOD path
-    /// reuses. Presentation only: this never satisfies spawn authority.
-    pub fn prewarm_far_lod(
-        &mut self,
-        config: FarTerrainLodConfig,
-        seed: i64,
-        generation_profile: WorldGenerationProfile,
-        center: ChunkPos,
-        _camera_position: Vec3,
-        chunk_budget: usize,
-    ) -> FarTerrainLodCoverage {
-        self.far_lod_cache.prewarm_with_profile(
-            config,
-            seed,
-            generation_profile,
-            center,
-            self.core.render_distance(),
-            self.mesh_assets.far_lod_materials.as_ref(),
-            chunk_budget,
-            &mut self.render_compile_dispatcher,
-        )
-    }
-
-    pub fn far_lod_stats(&self) -> FarTerrainLodProducerStats {
-        self.far_lod_cache.stats()
-    }
-
-    pub fn far_lod_settle_snapshot(&self, camera_position: Vec3) -> FarLodRuntimeSettleSnapshot {
-        far_lod_runtime_settle_snapshot(
-            &self.core,
-            &self.far_lod_cache,
-            &self.lod_coverage,
-            camera_position,
-        )
     }
 
     pub fn render_distance(&self) -> u32 {
@@ -1919,8 +1630,8 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
     }
 
     /// Honest local spawn-authority gate: the playable chunk is server-ready and
-    /// its client snapshot is present. Render-seed drawability and startup LOD
-    /// prewarm are layered on by the shared startup pump, never here.
+    /// its client snapshot is present. Render-seed drawability is layered on by
+    /// the shared startup pump, never here.
     fn startup_spawn_authority_ready(&self) -> bool {
         let Some(progress) = self
             .last_runner_diagnostics
@@ -2069,10 +1780,10 @@ where
         }
     }
 
-    /// Host-mode startup readiness evidence, excluding the render seed and startup
-    /// LOD prewarm which the shared startup pump owns (docs/tactical/167). Every
-    /// lane uses the same [`StartupReadinessPolicy`]; the only divergence is the
-    /// host-mode evidence (local spawn authority vs. remote drained active view).
+    /// Host-mode startup readiness evidence, excluding the render seed which the
+    /// shared startup pump owns (docs/tactical/167). Every lane uses the same
+    /// [`StartupReadinessPolicy`]; the only divergence is the host-mode evidence
+    /// (local spawn authority vs. remote drained active view).
     pub(crate) fn startup_host_ready(
         &self,
         policy: StartupReadinessPolicy,
@@ -2129,67 +1840,6 @@ where
         match self {
             Self::Local(scene) => scene.replace_asset_epoch(epoch, mesh_assets, sections),
             Self::RemoteDedicated(scene) => scene.replace_asset_epoch(epoch, mesh_assets, sections),
-        }
-    }
-
-    pub fn clear_far_lod(&mut self) {
-        match self {
-            Self::Local(scene) => scene.clear_far_lod(),
-            Self::RemoteDedicated(scene) => scene.clear_far_lod(),
-        }
-    }
-
-    pub fn prepare_far_lod_frame(
-        &mut self,
-        config: FarTerrainLodConfig,
-        seed: i64,
-        generation_profile: WorldGenerationProfile,
-        center: ChunkPos,
-        camera_position: Vec3,
-        build_budget: usize,
-        upload_budget: usize,
-    ) -> Result<Option<&FarTerrainLodFrameUpdate>> {
-        match self {
-            Self::Local(scene) => scene.prepare_far_lod_frame(
-                config,
-                seed,
-                generation_profile,
-                center,
-                camera_position,
-                build_budget,
-                upload_budget,
-            ),
-            Self::RemoteDedicated(scene) => scene.prepare_far_lod_frame(
-                config,
-                seed,
-                generation_profile,
-                center,
-                camera_position,
-                build_budget,
-                upload_budget,
-            ),
-        }
-    }
-
-    pub fn far_lod_stats(&self) -> FarTerrainLodProducerStats {
-        match self {
-            Self::Local(scene) => scene.far_lod_stats(),
-            Self::RemoteDedicated(scene) => scene.far_lod_stats(),
-        }
-    }
-
-    pub fn far_lod_settle_snapshot(&self, camera_position: Vec3) -> FarLodRuntimeSettleSnapshot {
-        match self {
-            Self::Local(scene) => scene.far_lod_settle_snapshot(camera_position),
-            Self::RemoteDedicated(scene) => scene.far_lod_settle_snapshot(camera_position),
-        }
-    }
-
-    /// Cumulative LOD coverage replacement/pop counters (tactical 162 Slice 2).
-    pub fn lod_coverage_counters(&self) -> LodReplacementCounters {
-        match self {
-            Self::Local(scene) => scene.lod_coverage_counters(),
-            Self::RemoteDedicated(scene) => scene.lod_coverage_counters(),
         }
     }
 
@@ -2794,8 +2444,6 @@ pub struct RemoteDedicatedSceneRuntime<S> {
     connection: RemoteDedicatedConnection<S>,
     mesh_assets: TexturedMeshAssets,
     render_compile_dispatcher: NativeRenderSectionCompileDispatcher,
-    far_lod_cache: FarTerrainLodCache,
-    lod_coverage: LodCoverageCoordinator,
 }
 
 #[derive(Debug)]
@@ -2999,14 +2647,11 @@ where
                 .context("failed to initialize remote dedicated scene runtime")?;
             core.apply_exchange(deferred_command_exchange());
         }
-        let far_lod_cache = FarTerrainLodCache::with_clock(core.monotonic_clock().clone());
         Ok(Self {
             core,
             connection,
             mesh_assets,
             render_compile_dispatcher,
-            far_lod_cache,
-            lod_coverage: LodCoverageCoordinator::new(),
         })
     }
 
@@ -3043,81 +2688,7 @@ where
         let _ = self.core.replace_asset_epoch_sections(epoch, sections);
         self.render_compile_dispatcher = replacement;
         self.mesh_assets = mesh_assets;
-        self.clear_far_lod();
         Ok(())
-    }
-
-    pub fn clear_far_lod(&mut self) {
-        let abandoned = self.far_lod_cache.clear();
-        self.render_compile_dispatcher
-            .release_completed_far_lod_jobs(abandoned);
-        self.lod_coverage.clear();
-    }
-
-    /// Cumulative LOD coverage replacement/pop counters (tactical 162 Slice 2).
-    pub fn lod_coverage_counters(&self) -> LodReplacementCounters {
-        self.lod_coverage.counters()
-    }
-
-    pub fn prepare_far_lod_frame(
-        &mut self,
-        config: FarTerrainLodConfig,
-        seed: i64,
-        generation_profile: WorldGenerationProfile,
-        center: ChunkPos,
-        camera_position: Vec3,
-        build_budget: usize,
-        upload_budget: usize,
-    ) -> Result<Option<&FarTerrainLodFrameUpdate>> {
-        if !config.enabled {
-            self.clear_far_lod();
-            return Ok(None);
-        }
-        let normal_terrain_chunks = traversal_ready_chunks(
-            &self
-                .core
-                .traversal_ready_render_section_keys(camera_position),
-        );
-        let materials = self.mesh_assets.far_lod_materials.clone();
-        self.far_lod_cache.advance_for_camera_with_profile(
-            config,
-            seed,
-            generation_profile,
-            center,
-            self.core.render_distance(),
-            materials.as_ref(),
-            &mut self.render_compile_dispatcher,
-            build_budget,
-        )?;
-        self.far_lod_cache
-            .drain_render_uploads(upload_budget, &mut self.render_compile_dispatcher);
-        let normal_loaded: BTreeSet<ChunkPos> =
-            self.core.client().loaded_chunk_positions().collect();
-        let synthetic: Vec<LodTileAvailability> = self
-            .far_lod_cache
-            .drawable_lod_tiles()
-            .map(LodTileAvailability::synthetic)
-            .collect();
-        let visible = self
-            .lod_coverage
-            .resolve(&normal_terrain_chunks, &normal_loaded, synthetic)
-            .visible_lod_tiles;
-        let frame = self.far_lod_cache.prepare_render_update(&visible);
-        assert_no_real_far_lod_overlap(&normal_terrain_chunks, &frame.visible_tiles);
-        Ok(Some(frame))
-    }
-
-    pub fn far_lod_stats(&self) -> FarTerrainLodProducerStats {
-        self.far_lod_cache.stats()
-    }
-
-    pub fn far_lod_settle_snapshot(&self, camera_position: Vec3) -> FarLodRuntimeSettleSnapshot {
-        far_lod_runtime_settle_snapshot(
-            &self.core,
-            &self.far_lod_cache,
-            &self.lod_coverage,
-            camera_position,
-        )
     }
 
     pub fn render_distance(&self) -> u32 {
@@ -3593,42 +3164,6 @@ fn runner_idle(diagnostics: &ServerRunnerDiagnostics) -> bool {
         && diagnostics.pending_publications == 0
 }
 
-fn traversal_ready_chunks(sections: &BTreeSet<RenderSectionKey>) -> BTreeSet<ChunkPos> {
-    sections
-        .iter()
-        .map(|key| ChunkPos::new(key.chunk_x, key.chunk_z))
-        .collect()
-}
-
-fn assert_no_real_far_lod_overlap(
-    traversal_ready_real_chunks: &BTreeSet<ChunkPos>,
-    visible_far_lod_tiles: &BTreeSet<LodTileKey>,
-) {
-    if let Some(tile) = visible_far_lod_tiles
-        .iter()
-        .find(|tile| traversal_ready_real_chunks.contains(&tile.chunk))
-    {
-        panic!(
-            "far LOD invariant violated: chunk ({}, {}) is visible as far LOD while real terrain is traversal-ready; real and LOD terrain must never co-render",
-            tile.chunk.x, tile.chunk.z
-        );
-    }
-}
-
-fn far_lod_runtime_settle_snapshot(
-    core: &SingleViewRuntime,
-    cache: &FarTerrainLodCache,
-    coverage: &LodCoverageCoordinator,
-    camera_position: Vec3,
-) -> FarLodRuntimeSettleSnapshot {
-    FarLodRuntimeSettleSnapshot {
-        producer: cache.settle_snapshot(),
-        loaded_chunks: core.client().loaded_chunk_positions().collect(),
-        traversal_ready_sections: core.traversal_ready_render_section_keys(camera_position),
-        suppressed_chunks: coverage.normal_coverage().drawable_chunks().collect(),
-    }
-}
-
 impl<S> SceneRuntimeService for NativeSceneServices<S>
 where
     S: RemoteDedicatedServerSession + 'static,
@@ -3660,44 +3195,6 @@ where
         sections: TexturedRenderSectionBuildReport,
     ) -> Result<()> {
         NativeSceneServices::replace_asset_epoch(self, epoch, mesh_assets, sections)
-    }
-
-    fn clear_far_lod(&mut self) {
-        NativeSceneServices::clear_far_lod(self);
-    }
-
-    fn prepare_far_lod_frame(
-        &mut self,
-        config: FarTerrainLodConfig,
-        seed: i64,
-        generation_profile: WorldGenerationProfile,
-        center: ChunkPos,
-        camera_position: Vec3,
-        build_budget: usize,
-        upload_budget: usize,
-    ) -> Result<Option<&FarTerrainLodFrameUpdate>> {
-        NativeSceneServices::prepare_far_lod_frame(
-            self,
-            config,
-            seed,
-            generation_profile,
-            center,
-            camera_position,
-            build_budget,
-            upload_budget,
-        )
-    }
-
-    fn far_lod_stats(&self) -> FarTerrainLodProducerStats {
-        NativeSceneServices::far_lod_stats(self)
-    }
-
-    fn far_lod_settle_snapshot(&self, camera_position: Vec3) -> FarLodRuntimeSettleSnapshot {
-        NativeSceneServices::far_lod_settle_snapshot(self, camera_position)
-    }
-
-    fn lod_coverage_counters(&self) -> LodReplacementCounters {
-        NativeSceneServices::lod_coverage_counters(self)
     }
 
     fn release_render_compile_jobs(&mut self, count: usize) -> usize {
@@ -3956,24 +3453,6 @@ mod tests {
         fn reconnect(&mut self) -> Result<()> {
             match *self {}
         }
-    }
-
-    #[test]
-    fn real_and_far_lod_visibility_may_be_disjoint() {
-        let real = BTreeSet::from([ChunkPos::new(0, 0)]);
-        let lod = BTreeSet::from([LodTileKey::new(ChunkPos::new(1, 0), 1)]);
-
-        assert_no_real_far_lod_overlap(&real, &lod);
-    }
-
-    #[test]
-    #[should_panic(expected = "real and LOD terrain must never co-render")]
-    fn real_and_far_lod_visibility_overlap_panics() {
-        let overlap = ChunkPos::new(3, -2);
-        let real = BTreeSet::from([overlap]);
-        let lod = BTreeSet::from([LodTileKey::new(overlap, 3)]);
-
-        assert_no_real_far_lod_overlap(&real, &lod);
     }
 
     #[test]
@@ -4644,45 +4123,6 @@ mod tests {
     }
 
     #[test]
-    fn startup_pump_prewarms_far_lod_before_playable() {
-        if !extracted_asset_root().exists() {
-            return;
-        }
-
-        let prewarm = StartupLodPrewarmConfig::for_far_lod(FarTerrainLodConfig::enabled(), true)
-            .with_extra_chunks(3);
-        let mesh_assets = load_textured_mesh_assets().unwrap();
-        let mut pump = LocalIntegratedStartupPump::with_mesh_assets(
-            LocalIntegratedSceneOptions::new(12345, ChunkPos::new(0, 0), 0)
-                .with_lighting_enabled(false)
-                .with_startup_lod_prewarm(prewarm),
-            mesh_assets,
-        )
-        .unwrap();
-        let camera_position = Vec3::new(8.0, 80.0, 8.0);
-
-        for _ in 0..2_000 {
-            let step = pump.step(camera_position).unwrap();
-            assert!(step.lod_prewarm_enabled);
-            // Spawn authority never depends on prewarm; playable requires both
-            // spawn authority and the prewarm settling (complete or timed out).
-            if step.playable_ready {
-                assert!(step.spawn_authority_ready);
-                assert!(step.lod_prewarm_complete || step.lod_prewarm_timeout);
-                assert!(step.startup_lod_tiles_target > 0);
-                assert!(step.startup_lod_tiles_ready <= step.startup_lod_tiles_target);
-                if step.lod_prewarm_complete {
-                    assert_eq!(step.startup_lod_tiles_ready, step.startup_lod_tiles_target);
-                }
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(1));
-        }
-
-        panic!("startup pump did not reach playable center with prewarm enabled");
-    }
-
-    #[test]
     fn high_render_distance_startup_pump_reaches_playable_before_full_view_settles() {
         if !extracted_asset_root().exists() {
             return;
@@ -5046,7 +4486,6 @@ mod tests {
                 assert!(step.host_ready);
                 // Remote startup carries no local loading-progress overlay.
                 assert!(step.local_progress.is_none());
-                assert!(!step.lod_prewarm_enabled);
                 assert!(step.render_seed_drawable_section_count > 0);
 
                 let completion = pump.complete();

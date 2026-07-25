@@ -1,4 +1,4 @@
-//! Worker-resident Rust authority for render-section and far-LOD compilation.
+//! Worker-resident Rust authority for render-section compilation.
 //!
 //! The browser Worker loads this crate's independent Wasm instance and forwards
 //! opaque structured-clone frames here. This actor owns asset/session lifetime,
@@ -132,7 +132,6 @@ impl WebRenderWorkerActor {
                 .insert(world_instance_id.clone(), session);
         }
 
-        let work_kind = WorkKind::from_message(message);
         let target_sections = normalize_target_sections(&property(message, "targetSections"));
         let center_x = number(message, "centerX") as i32;
         let center_z = number(message, "centerZ") as i32;
@@ -146,35 +145,17 @@ impl WebRenderWorkerActor {
         let shared_input_buffer_capacity_bytes = shared_input
             .as_ref()
             .map_or(0, |input| input.capacity_bytes);
-        let snapshot_input_compile_used = work_kind == WorkKind::RenderSections
-            && shared_input.is_some()
-            && target_sections.length() > 0;
-        let generated_targeted_compile_used = work_kind == WorkKind::RenderSections
-            && !snapshot_input_compile_used
-            && target_sections.length() > 0;
+        let snapshot_input_compile_used = shared_input.is_some() && target_sections.length() > 0;
+        let generated_targeted_compile_used =
+            !snapshot_input_compile_used && target_sections.length() > 0;
 
         let (packed, summary, upserts, evictions, mirror_chunks, grass_patches_requested) = {
             let session = self
                 .compiler_sessions
                 .get_mut(&world_instance_id)
                 .expect("world compiler session was inserted above");
-            let packed = match work_kind {
-                WorkKind::FarLod => session
-                    .compile_far_lod_tile_bytes(
-                        string(message, "farLodSeed").unwrap_or_else(|| "0".to_owned()),
-                        string(message, "farLodGenerationProfile")
-                            .unwrap_or_else(|| "overworld".to_owned()),
-                        number(message, "farLodChunkX") as i32,
-                        number(message, "farLodChunkZ") as i32,
-                        nonzero_number(message, "farLodLevel", 1.0) as u8,
-                        nonzero_number(message, "farLodSampleSpacingBlocks", 4.0) as u32,
-                        nonzero_number(message, "farLodWestSampleSpacingBlocks", 4.0) as u32,
-                        nonzero_number(message, "farLodEastSampleSpacingBlocks", 4.0) as u32,
-                        nonzero_number(message, "farLodNorthSampleSpacingBlocks", 4.0) as u32,
-                        nonzero_number(message, "farLodSouthSampleSpacingBlocks", 4.0) as u32,
-                    )
-                    .map_err(js_error_string)?,
-                WorkKind::RenderSections if snapshot_input_compile_used => session
+            let packed = if snapshot_input_compile_used {
+                session
                     .compile_snapshot_sections_for_targets_bytes(
                         &shared_input
                             .as_ref()
@@ -182,27 +163,24 @@ impl WebRenderWorkerActor {
                             .bytes,
                         &target_sections,
                     )
-                    .map_err(js_error_string)?,
-                WorkKind::RenderSections if generated_targeted_compile_used => {
-                    let targets =
-                        crate::web_canvas::render_section_keys_from_int32_array(&target_sections)?;
-                    session
-                        .compile_generated_chunk_sections_bytes(
-                            center_x,
-                            center_z,
-                            radius_chunks,
-                            Some(&targets),
-                        )
-                        .map_err(js_error_string)?
-                }
-                WorkKind::RenderSections => session
+                    .map_err(js_error_string)?
+            } else if generated_targeted_compile_used {
+                let targets =
+                    crate::web_canvas::render_section_keys_from_int32_array(&target_sections)?;
+                session
+                    .compile_generated_chunk_sections_bytes(
+                        center_x,
+                        center_z,
+                        radius_chunks,
+                        Some(&targets),
+                    )
+                    .map_err(js_error_string)?
+            } else {
+                session
                     .compile_generated_chunk_sections_bytes(center_x, center_z, radius_chunks, None)
-                    .map_err(js_error_string)?,
+                    .map_err(js_error_string)?
             };
-            let summary = match work_kind {
-                WorkKind::FarLod => far_lod_summary(packed.len())?,
-                WorkKind::RenderSections => packed_compile_report_summary_from_bytes(&packed)?,
-            };
+            let summary = packed_compile_report_summary_from_bytes(&packed)?;
             (
                 packed,
                 summary,
@@ -220,7 +198,7 @@ impl WebRenderWorkerActor {
         copy_property(&report, message, "clientRequestId")?;
         set_string(&report, "worldInstanceId", &world_instance_id)?;
         copy_property(&report, message, "worldPriority")?;
-        set_string(&report, "workKind", work_kind.label())?;
+        set_string(&report, "workKind", "render-sections")?;
         self.set_common_metrics(&report)?;
         set_bool(&report, "persistentAssetCatalog", true)?;
         set_number(
@@ -283,7 +261,7 @@ impl WebRenderWorkerActor {
         set_bool(
             &report,
             "generatedViewFallbackUsed",
-            work_kind == WorkKind::RenderSections && !snapshot_input_compile_used,
+            !snapshot_input_compile_used,
         )?;
         set_bool(&report, "sharedResultBufferUsed", true)?;
         set_number(
@@ -310,7 +288,6 @@ impl WebRenderWorkerActor {
             "targetedCompileUsed",
             snapshot_input_compile_used || generated_targeted_compile_used,
         )?;
-        set_bool(&report, "farLodCompileUsed", work_kind == WorkKind::FarLod)?;
         set_value(&report, "summary", &summary)?;
         set_value(&report, "sharedResultBuffer", response.buffer.as_ref())?;
         Ok(report.into())
@@ -367,29 +344,6 @@ impl WebRenderWorkerActor {
             self.worker_asset_pack_file_count as f64,
         )?;
         set_number(report, "assetEpoch", self.worker_asset_epoch as f64)
-    }
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum WorkKind {
-    RenderSections,
-    FarLod,
-}
-
-impl WorkKind {
-    fn from_message(message: &JsValue) -> Self {
-        if string(message, "workKind").as_deref() == Some("far-lod") {
-            Self::FarLod
-        } else {
-            Self::RenderSections
-        }
-    }
-
-    const fn label(self) -> &'static str {
-        match self {
-            Self::RenderSections => "render-sections",
-            Self::FarLod => "far-lod",
-        }
     }
 }
 
@@ -575,13 +529,6 @@ fn normalize_target_sections(value: &JsValue) -> Int32Array {
     Int32Array::new_with_length(0)
 }
 
-fn far_lod_summary(packed_byte_length: usize) -> Result<JsValue, String> {
-    let summary = Object::new();
-    set_bool(&summary, "farLodTile", true)?;
-    set_number(&summary, "packedByteLength", packed_byte_length as f64)?;
-    Ok(summary.into())
-}
-
 fn property(value: &JsValue, key: &str) -> JsValue {
     Reflect::get(value, &JsValue::from_str(key)).unwrap_or(JsValue::UNDEFINED)
 }
@@ -595,11 +542,6 @@ fn number(value: &JsValue, key: &str) -> f64 {
         .as_f64()
         .filter(|value| value.is_finite())
         .unwrap_or(0.0)
-}
-
-fn nonzero_number(value: &JsValue, key: &str, fallback: f64) -> f64 {
-    let value = number(value, key);
-    if value == 0.0 { fallback } else { value }
 }
 
 fn byte_length(value: &JsValue) -> u32 {

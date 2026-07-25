@@ -4,17 +4,13 @@ use crate::client_catalog_policy::{
 use crate::client_session_policy::{
     ClientSessionActionContext, ClientSessionEffects, client_session_effects_for_action,
 };
-use crate::far_lod::{
-    FarLodDetailMode, MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
-    MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
-};
 use mclone_input::TouchControlsMode;
 use mclone_ui::{
-    DebugActorTool, GameAuxiliarySplitMode, GameCollisionMode, GameFarLodDetailMode,
-    GameFramePacingMode, GameGrassDetail, GameLeafDetail, GameLocalPlayGuestInput,
-    GameLocalPlayLayout, GameLocalPlayState, GameMovementMode, GamePlayerModel, GameScenarioId,
-    GameSimulationCadence, GameStorageAction, GameTouchSettings, GameTravelAssistMode,
-    GameTurnMode, GameUiAction, GameUiRenderState, GameWorldRenderScaleMode, GameXrTurnMode,
+    DebugActorTool, GameAuxiliarySplitMode, GameCollisionMode, GameFramePacingMode,
+    GameGrassDetail, GameLeafDetail, GameLocalPlayGuestInput, GameLocalPlayLayout,
+    GameLocalPlayState, GameMovementMode, GamePlayerModel, GameScenarioId, GameSimulationCadence,
+    GameStorageAction, GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameUiAction,
+    GameUiRenderState, GameWorldRenderScaleMode, GameXrTurnMode,
 };
 
 use crate::asset_pack_ui::{ClientAssetPackController, ClientAssetPackEffect};
@@ -155,9 +151,6 @@ impl ClientExperienceController {
             | GameUiAction::SetLeafDetail(_)
             | GameUiAction::SetGrassDetail(_)
             | GameUiAction::ToggleFullbright
-            | GameUiAction::ToggleFarLod
-            | GameUiAction::CycleFarLodDetail
-            | GameUiAction::SetFarLodRange(_)
             | GameUiAction::TogglePlayerCollisionBox
             | GameUiAction::ToggleFirstPersonPlayer
             | GameUiAction::ToggleCrosshair
@@ -360,7 +353,6 @@ pub struct ClientExperienceSettingsProfile {
     pub leaf_detail: ClientExperienceCapabilityStatus,
     pub grass_detail: ClientExperienceCapabilityStatus,
     pub fullbright: ClientExperienceCapabilityStatus,
-    pub far_lod: ClientExperienceCapabilityStatus,
     pub player_collision_box: ClientExperienceCapabilityStatus,
     pub first_person_player: ClientExperienceCapabilityStatus,
     pub crosshair: ClientExperienceCapabilityStatus,
@@ -396,7 +388,6 @@ impl ClientExperienceSettingsProfile {
             leaf_detail: ClientExperienceCapabilityStatus::Supported,
             grass_detail: ClientExperienceCapabilityStatus::Supported,
             fullbright: ClientExperienceCapabilityStatus::Supported,
-            far_lod: ClientExperienceCapabilityStatus::Supported,
             player_collision_box: ClientExperienceCapabilityStatus::Supported,
             first_person_player: ClientExperienceCapabilityStatus::Supported,
             crosshair: ClientExperienceCapabilityStatus::Supported,
@@ -429,9 +420,6 @@ impl ClientExperienceSettingsProfile {
             ClientExperienceActionKind::SetLeafDetail => self.leaf_detail,
             ClientExperienceActionKind::SetGrassDetail => self.grass_detail,
             ClientExperienceActionKind::ToggleFullbright => self.fullbright,
-            ClientExperienceActionKind::ToggleFarLod
-            | ClientExperienceActionKind::CycleFarLodDetail
-            | ClientExperienceActionKind::SetFarLodRange => self.far_lod,
             ClientExperienceActionKind::TogglePlayerCollisionBox => self.player_collision_box,
             ClientExperienceActionKind::ToggleFirstPersonPlayer => self.first_person_player,
             ClientExperienceActionKind::ToggleCrosshair => self.crosshair,
@@ -473,14 +461,13 @@ impl ClientExperienceSettingsProfile {
     ) -> [(
         ClientExperienceFeatureCapability,
         ClientExperienceCapabilityStatus,
-    ); 17] {
+    ); 16] {
         use ClientExperienceFeatureCapability as F;
         [
             (F::SectionOcclusion, self.section_occlusion),
             (F::LeafDetail, self.leaf_detail),
             (F::GrassDetail, self.grass_detail),
             (F::Fullbright, self.fullbright),
-            (F::FarLod, self.far_lod),
             (F::PlayerCollisionBox, self.player_collision_box),
             (F::FirstPersonPlayer, self.first_person_player),
             (F::FramePipelineOverlay, self.frame_pipeline_overlay),
@@ -505,7 +492,6 @@ pub enum ClientExperienceFeatureCapability {
     LeafDetail,
     GrassDetail,
     Fullbright,
-    FarLod,
     PlayerCollisionBox,
     FirstPersonPlayer,
     FramePipelineOverlay,
@@ -779,25 +765,6 @@ impl ClientExperienceSettingsController {
                     .push(ClientExperienceSettingEffect::SetFullbright(
                         self.state.force_fullbright,
                     ));
-            }
-            GameUiAction::ToggleFarLod => {
-                self.state.far_lod_enabled = !self.state.far_lod_enabled;
-                effects.push_far_lod(self.state.far_lod_enabled, self.state.far_lod_range_chunks);
-            }
-            GameUiAction::CycleFarLodDetail => {
-                self.state.far_lod_detail_mode = self.state.far_lod_detail_mode.next();
-                effects
-                    .setting_effects
-                    .push(ClientExperienceSettingEffect::SetFarLodDetailMode(
-                        far_lod_detail_mode_from_game(self.state.far_lod_detail_mode),
-                    ));
-                effects
-                    .setting_effects
-                    .push(ClientExperienceSettingEffect::ClearFarLod);
-            }
-            GameUiAction::SetFarLodRange(range_chunks) => {
-                self.state.far_lod_range_chunks = self.state.clamp_far_lod_range(range_chunks);
-                effects.push_far_lod(self.state.far_lod_enabled, self.state.far_lod_range_chunks);
             }
             GameUiAction::TogglePlayerCollisionBox => {
                 self.state.player_collision_box_visible = !self.state.player_collision_box_visible;
@@ -1074,12 +1041,6 @@ impl ClientExperienceSettingsController {
                 ClientExperienceActionKind::ToggleFullbright,
                 profile.fullbright,
             ),
-            (ClientExperienceActionKind::ToggleFarLod, profile.far_lod),
-            (
-                ClientExperienceActionKind::CycleFarLodDetail,
-                profile.far_lod,
-            ),
-            (ClientExperienceActionKind::SetFarLodRange, profile.far_lod),
             (
                 ClientExperienceActionKind::TogglePlayerCollisionBox,
                 profile.player_collision_box,
@@ -1250,11 +1211,6 @@ pub struct ClientExperienceSettingsState {
     pub leaf_detail: GameLeafDetail,
     pub grass_detail: GameGrassDetail,
     pub force_fullbright: bool,
-    pub far_lod_enabled: bool,
-    pub far_lod_detail_mode: GameFarLodDetailMode,
-    pub far_lod_range_chunks: i32,
-    pub min_far_lod_range_chunks: i32,
-    pub max_far_lod_range_chunks: i32,
     pub player_collision_box_visible: bool,
     pub first_person_player_visible: bool,
     pub crosshair_visible: Option<bool>,
@@ -1297,11 +1253,6 @@ impl From<GameUiRenderState> for ClientExperienceSettingsState {
             leaf_detail: state.leaf_detail,
             grass_detail: state.grass_detail,
             force_fullbright: state.force_fullbright,
-            far_lod_enabled: state.far_lod_enabled,
-            far_lod_detail_mode: state.far_lod_detail_mode,
-            far_lod_range_chunks: state.far_lod_range_chunks,
-            min_far_lod_range_chunks: state.min_far_lod_range_chunks,
-            max_far_lod_range_chunks: state.max_far_lod_range_chunks,
             player_collision_box_visible: state.player_collision_box_visible,
             first_person_player_visible: state.first_person_player_visible,
             crosshair_visible: state.crosshair_visible,
@@ -1345,11 +1296,6 @@ impl ClientExperienceSettingsState {
         state.leaf_detail = self.leaf_detail;
         state.grass_detail = self.grass_detail;
         state.force_fullbright = self.force_fullbright;
-        state.far_lod_enabled = self.far_lod_enabled;
-        state.far_lod_detail_mode = self.far_lod_detail_mode;
-        state.far_lod_range_chunks = self.far_lod_range_chunks;
-        state.min_far_lod_range_chunks = self.min_far_lod_range_chunks;
-        state.max_far_lod_range_chunks = self.max_far_lod_range_chunks;
         state.player_collision_box_visible = self.player_collision_box_visible;
         state.first_person_player_visible = self.first_person_player_visible;
         state.crosshair_visible = self.crosshair_visible;
@@ -1385,16 +1331,6 @@ impl ClientExperienceSettingsState {
         let min = self.min_render_distance.min(self.max_render_distance);
         let max = self.min_render_distance.max(self.max_render_distance);
         render_distance.clamp(min, max)
-    }
-
-    fn clamp_far_lod_range(self, range_chunks: i32) -> i32 {
-        let min = self
-            .min_far_lod_range_chunks
-            .min(self.max_far_lod_range_chunks);
-        let max = self
-            .min_far_lod_range_chunks
-            .max(self.max_far_lod_range_chunks);
-        range_chunks.clamp(min, max)
     }
 
     fn clamp_fly_speed(self, multiplier: f32) -> f32 {
@@ -1558,40 +1494,6 @@ impl ClientExperienceSettingsEffects {
             }
         }
     }
-
-    fn push_far_lod(&mut self, enabled: bool, range_chunks: i32) {
-        let extra_radius_chunks = u32::try_from(range_chunks)
-            .unwrap_or(MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS)
-            .clamp(
-                MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
-                MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
-            );
-        self.setting_effects
-            .push(ClientExperienceSettingEffect::SetFarLod {
-                enabled,
-                extra_radius_chunks,
-            });
-        self.setting_effects
-            .push(ClientExperienceSettingEffect::ClearFarLod);
-    }
-}
-
-pub const fn far_lod_detail_mode_from_game(mode: GameFarLodDetailMode) -> FarLodDetailMode {
-    match mode {
-        GameFarLodDetailMode::Auto => FarLodDetailMode::Auto,
-        GameFarLodDetailMode::Fixed4 => FarLodDetailMode::Fixed4,
-        GameFarLodDetailMode::Fixed8 => FarLodDetailMode::Fixed8,
-        GameFarLodDetailMode::Fixed16 => FarLodDetailMode::Fixed16,
-    }
-}
-
-pub const fn game_far_lod_detail_mode(mode: FarLodDetailMode) -> GameFarLodDetailMode {
-    match mode {
-        FarLodDetailMode::Auto => GameFarLodDetailMode::Auto,
-        FarLodDetailMode::Fixed4 => GameFarLodDetailMode::Fixed4,
-        FarLodDetailMode::Fixed8 => GameFarLodDetailMode::Fixed8,
-        FarLodDetailMode::Fixed16 => GameFarLodDetailMode::Fixed16,
-    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1600,12 +1502,6 @@ pub enum ClientExperienceSettingEffect {
     SetLeafDetail(GameLeafDetail),
     SetGrassDetail(GameGrassDetail),
     SetFullbright(bool),
-    SetFarLod {
-        enabled: bool,
-        extra_radius_chunks: u32,
-    },
-    SetFarLodDetailMode(FarLodDetailMode),
-    ClearFarLod,
     SetPlayerCollisionBoxVisible(bool),
     SetFirstPersonPlayerVisible(bool),
     SetCrosshairVisible(bool),
@@ -1695,9 +1591,6 @@ pub enum ClientExperienceActionKind {
     SetLeafDetail,
     SetGrassDetail,
     ToggleFullbright,
-    ToggleFarLod,
-    CycleFarLodDetail,
-    SetFarLodRange,
     TogglePlayerCollisionBox,
     ToggleFirstPersonPlayer,
     ToggleCrosshair,
@@ -1777,9 +1670,6 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
         GameUiAction::SetLeafDetail(_) => ClientExperienceActionKind::SetLeafDetail,
         GameUiAction::SetGrassDetail(_) => ClientExperienceActionKind::SetGrassDetail,
         GameUiAction::ToggleFullbright => ClientExperienceActionKind::ToggleFullbright,
-        GameUiAction::ToggleFarLod => ClientExperienceActionKind::ToggleFarLod,
-        GameUiAction::CycleFarLodDetail => ClientExperienceActionKind::CycleFarLodDetail,
-        GameUiAction::SetFarLodRange(_) => ClientExperienceActionKind::SetFarLodRange,
         GameUiAction::TogglePlayerCollisionBox => {
             ClientExperienceActionKind::TogglePlayerCollisionBox
         }
@@ -1864,10 +1754,7 @@ pub const fn classify_client_experience_action_kind(
         | ClientExperienceActionKind::SetMovementSpeed => {
             ClientExperienceActionClassification::CoreAction
         }
-        ClientExperienceActionKind::ToggleFarLod
-        | ClientExperienceActionKind::CycleFarLodDetail
-        | ClientExperienceActionKind::SetFarLodRange
-        | ClientExperienceActionKind::ToggleCrosshair
+        ClientExperienceActionKind::ToggleCrosshair
         | ClientExperienceActionKind::ToggleFramePipelineOverlay
         | ClientExperienceActionKind::ToggleDebugDiagnostics
         | ClientExperienceActionKind::SetAuxiliarySplitMode
@@ -1930,7 +1817,6 @@ fn finite_or(value: f32, fallback: f32) -> f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::far_lod::DEFAULT_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS;
     use crate::world_catalog::{LocalWorldId, WorldCatalogCapabilities, WorldCatalogRequest};
     use mclone_ui::{
         AssetPackUiId, GameHelpParent, GameOptionsCategory, GameOptionsParent, GameScenarioId,
@@ -2129,9 +2015,6 @@ mod tests {
             GameUiAction::ToggleSectionOcclusion,
             GameUiAction::SetLeafDetail(GameLeafDetail::Bushy),
             GameUiAction::ToggleFullbright,
-            GameUiAction::ToggleFarLod,
-            GameUiAction::CycleFarLodDetail,
-            GameUiAction::SetFarLodRange(8),
             GameUiAction::TogglePlayerCollisionBox,
             GameUiAction::ToggleFirstPersonPlayer,
             GameUiAction::ToggleCrosshair,
@@ -2155,14 +2038,10 @@ mod tests {
             GameUiAction::Quit,
         ];
 
-        assert_eq!(samples.len(), 63);
+        assert_eq!(samples.len(), 60);
         for sample in samples {
             let _ = classify_game_ui_action(sample);
         }
-        assert_eq!(
-            classify_game_ui_action(GameUiAction::ToggleFarLod),
-            ClientExperienceActionClassification::CapabilityGated
-        );
         assert_eq!(
             classify_game_ui_action(GameUiAction::ToggleFramePipelineOverlay),
             ClientExperienceActionClassification::CapabilityGated
@@ -2427,12 +2306,11 @@ mod tests {
     }
 
     #[test]
-    fn settings_clamp_render_and_far_lod_effects() {
+    fn settings_clamp_render_distance_effects() {
         let mut settings = ClientExperienceSettingsController::new(ClientExperienceSettingsState {
             render_distance: 4,
             min_render_distance: 2,
             max_render_distance: 16,
-            far_lod_range_chunks: DEFAULT_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
             ..ClientExperienceSettingsState::default()
         });
 
@@ -2445,51 +2323,6 @@ mod tests {
             effects.setting_effects,
             vec![ClientExperienceSettingEffect::SetRenderDistance(16)]
         );
-
-        let effects = settings.apply_ui_action(
-            GameUiAction::SetFarLodRange(-5),
-            ClientExperienceSettingsProfile::default(),
-        );
-        assert_eq!(
-            settings.state().far_lod_range_chunks,
-            MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32
-        );
-        assert_eq!(
-            effects.setting_effects,
-            vec![
-                ClientExperienceSettingEffect::SetFarLod {
-                    enabled: false,
-                    extra_radius_chunks: MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
-                },
-                ClientExperienceSettingEffect::ClearFarLod,
-            ]
-        );
-    }
-
-    #[test]
-    fn settings_cycle_far_lod_detail_resets_lod() {
-        let mut settings = ClientExperienceSettingsController::default();
-        let expected = [
-            (GameFarLodDetailMode::Fixed4, FarLodDetailMode::Fixed4),
-            (GameFarLodDetailMode::Fixed8, FarLodDetailMode::Fixed8),
-            (GameFarLodDetailMode::Fixed16, FarLodDetailMode::Fixed16),
-            (GameFarLodDetailMode::Auto, FarLodDetailMode::Auto),
-        ];
-
-        for (game_mode, engine_mode) in expected {
-            let effects = settings.apply_ui_action(
-                GameUiAction::CycleFarLodDetail,
-                ClientExperienceSettingsProfile::default(),
-            );
-            assert_eq!(settings.state().far_lod_detail_mode, game_mode);
-            assert_eq!(
-                effects.setting_effects,
-                vec![
-                    ClientExperienceSettingEffect::SetFarLodDetailMode(engine_mode),
-                    ClientExperienceSettingEffect::ClearFarLod,
-                ]
-            );
-        }
     }
 
     #[test]
@@ -2607,9 +2440,6 @@ mod tests {
     #[test]
     fn capability_gated_actions_project_unsupported_without_mutating() {
         let profile = ClientExperienceSettingsProfile {
-            far_lod: ClientExperienceCapabilityStatus::Unsupported(
-                "Far LOD is unavailable for this profile",
-            ),
             frame_pipeline_overlay: ClientExperienceCapabilityStatus::Unsupported(
                 "Frame pipeline overlay is unavailable for this profile",
             ),
@@ -2619,20 +2449,6 @@ mod tests {
             ..ClientExperienceSettingsProfile::default()
         };
         let mut settings = ClientExperienceSettingsController::default();
-
-        let effects = settings.apply_ui_action(GameUiAction::ToggleFarLod, profile);
-
-        assert!(!settings.state().far_lod_enabled);
-        assert!(effects.setting_effects.is_empty());
-        assert_eq!(
-            effects.capability_projection.actions,
-            vec![ClientExperienceActionAvailability {
-                kind: ClientExperienceActionKind::ToggleFarLod,
-                status: ClientExperienceCapabilityStatus::Unsupported(
-                    "Far LOD is unavailable for this profile"
-                ),
-            }]
-        );
 
         let effects = settings.apply_ui_action(GameUiAction::ToggleFramePipelineOverlay, profile);
         assert!(!settings.state().frame_pipeline_overlay_visible);

@@ -519,7 +519,6 @@ fn compact_options_scroll_and_controller_focus_reveals_hidden_rows() {
             1.0,
             GameWorldRenderScaleMode::Automatic,
         )),
-        far_lod_enabled: true,
         ..GameUiRenderState::default()
     };
     surface.set_render_state(state);
@@ -908,57 +907,6 @@ fn server_settings_without_cadence_keeps_only_back_action() {
 }
 
 #[test]
-fn options_disabled_far_lod_range_is_not_hit() {
-    let mut surface = UiSurface::new();
-    surface.set_screen(Some(UiScreenId::OptionsCategory {
-        parent: GameOptionsParent::Pause,
-        category: GameOptionsCategory::Graphics,
-    }));
-    surface.set_scale(GuiScale::from_pixels(960, 540));
-    surface.set_render_state(GameUiRenderState {
-        far_lod_enabled: false,
-        ..GameUiRenderState::default()
-    });
-    let far_lod_range = surface
-        .layout()
-        .widget(UI_V2_OPTIONS_FAR_LOD_RANGE)
-        .expect("far lod range row")
-        .rect;
-
-    assert!(surface.pointer_down(point_in(far_lod_range), surface.render_state));
-    let (_handled, action) = surface.pointer_up(point_in(far_lod_range), surface.render_state);
-
-    assert_eq!(action, None);
-}
-
-#[test]
-fn options_far_lod_detail_cycle_follows_far_lod_availability() {
-    let mut surface = UiSurface::new();
-    surface.set_screen(Some(UiScreenId::OptionsCategory {
-        parent: GameOptionsParent::Pause,
-        category: GameOptionsCategory::Graphics,
-    }));
-    surface.set_scale(GuiScale::from_pixels(960, 540));
-
-    for (enabled, expected) in [(false, None), (true, Some(GameUiAction::CycleFarLodDetail))] {
-        surface.set_render_state(GameUiRenderState {
-            far_lod_enabled: enabled,
-            ..GameUiRenderState::default()
-        });
-        let detail = surface
-            .layout()
-            .widget(UI_V2_OPTIONS_FAR_LOD_DETAIL)
-            .expect("far lod detail row")
-            .rect;
-        assert!(surface.pointer_down(point_in(detail), surface.render_state));
-        assert_eq!(
-            surface.pointer_up(point_in(detail), surface.render_state).1,
-            expected
-        );
-    }
-}
-
-#[test]
 fn options_render_distance_slider_uses_committed_rect() {
     let mut surface = UiSurface::new();
     surface.set_screen(Some(UiScreenId::OptionsCategory {
@@ -1050,21 +998,11 @@ fn every_options_slider_retains_capture_through_release() {
         category: GameOptionsCategory::Graphics,
     };
     let graphics_state = GameUiRenderState {
-        far_lod_enabled: true,
         render_distance: 8,
         min_render_distance: 2,
         max_render_distance: 16,
-        far_lod_range_chunks: 8,
-        min_far_lod_range_chunks: 4,
-        max_far_lod_range_chunks: 32,
         ..GameUiRenderState::default()
     };
-    assert_slider_capture_lifecycle(
-        graphics,
-        graphics_state,
-        UI_V2_OPTIONS_FAR_LOD_RANGE,
-        GameUiAction::SetFarLodRange(32),
-    );
     assert_slider_capture_lifecycle(
         graphics,
         graphics_state,

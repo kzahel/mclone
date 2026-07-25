@@ -12,7 +12,6 @@ pub mod client_experience;
 pub mod client_session_policy;
 pub mod debug_overlay;
 pub mod deferred_drop;
-pub mod far_lod;
 pub mod frame_pacing;
 pub mod frame_pipeline_accounting;
 pub mod frame_pipeline_presentation;
@@ -24,7 +23,6 @@ pub mod local_client_group;
 pub mod local_participant;
 pub mod local_participant_input;
 pub mod local_profile;
-pub mod lod_coverage;
 pub mod monotonic;
 #[cfg(not(target_arch = "wasm32"))]
 pub mod native_remote_session;

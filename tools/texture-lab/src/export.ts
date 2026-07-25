@@ -2,7 +2,6 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import type { AuthoringLayerRole } from "./dsl";
 import { loadTexturePack } from "./load";
-import { makeLodMaterialsJson } from "./lod-materials";
 import { textureLabOutputRoot } from "./output-root";
 import { encodePng } from "./png";
 import { loadReferenceTexture, runtimeCompatTexturePath } from "./reference";
@@ -104,17 +103,6 @@ if (!args.authoringOnly) {
   await fs.writeFile(reportJsonPath, makeMetadataReportJson(pack));
   console.log(`Wrote ${reportJsonPath}`);
 
-  const lodMaterialsJson = makeLodMaterialsJson(pack, allTextures);
-  const lodMaterialsReportPath = path.join(args.outDir, `${pack.name}-lod-materials.v1.json`);
-  await fs.writeFile(lodMaterialsReportPath, lodMaterialsJson);
-  console.log(`Wrote ${lodMaterialsReportPath}`);
-
-  if (!args.sheetOnly && args.runtimeCompat) {
-    const lodMaterialsPackPath = path.join(args.outDir, "runtime-pack", "assets/mclone/lod/materials.v1.json");
-    await fs.mkdir(path.dirname(lodMaterialsPackPath), { recursive: true });
-    await fs.writeFile(lodMaterialsPackPath, lodMaterialsJson);
-    console.log(`Wrote ${lodMaterialsPackPath}`);
-  }
 }
 
 async function writeLifecycleDistributionRoots(

@@ -288,7 +288,11 @@ fn browser_compiler_broker_and_shared_renderer_boundary_are_singular() {
     assert!(!WEB_RENDER_COMPILER_WORKER.contains("workKind"));
     assert!(WEB_RENDER_COMPILER_WORKER.contains("new module.WebRenderWorkerActor"));
     assert!(WEB_RENDER_WORKER_ACTOR.contains("compiler_sessions: BTreeMap"));
-    assert!(WEB_RENDER_WORKER_ACTOR.contains("enum WorkKind"));
+    assert!(!WEB_RENDER_WORKER_ACTOR.contains("enum WorkKind"));
+    assert!(
+        WEB_RENDER_WORKER_ACTOR
+            .contains("set_string(&report, \"workKind\", \"render-sections\")?;")
+    );
     assert!(WEB_RENDER_WORKER_ACTOR.contains("view.copy_from(packed)"));
     assert!(WEB_CANVAS.contains("WebRenderWorkerWorldHandle"));
 

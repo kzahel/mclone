@@ -21,8 +21,6 @@ pub struct XrTerrainFrameSummary {
 
 #[derive(Clone, Copy, Debug, Default)]
 pub struct XrTerrainFrameTiming {
-    pub far_lod_region_draw_count: usize,
-    pub far_lod_uploaded_bytes: usize,
     pub render_views_ms: f64,
     pub menu_pointer_ms: f64,
     pub runtime_upload_ms: f64,
@@ -120,7 +118,6 @@ pub struct XrTerrainFrameTiming {
     pub overlap_runtime_prefetch_gpu_upload_ms: f64,
     pub overlap_runtime_prefetch_ready_sections_ms: f64,
     pub multiview_sky_ms: f64,
-    pub multiview_far_lod_ms: f64,
     pub multiview_terrain_ms: f64,
     pub multiview_actor_ms: f64,
     pub multiview_screen_effect_ms: f64,
@@ -205,7 +202,6 @@ impl XrLocomotionTiming {
 pub struct XrTerrainEyeRenderTiming {
     pub full_frame_ms: f64,
     pub sky_ms: f64,
-    pub far_lod_ms: f64,
     pub terrain_opaque_ms: f64,
     pub terrain_translucent_ms: f64,
     pub prepare_ms: f64,
@@ -452,11 +448,9 @@ impl McloneSceneHost {
 
     pub(crate) fn frame_summary_with_timing(
         &self,
-        mut timing: XrTerrainFrameTiming,
+        timing: XrTerrainFrameTiming,
         upload: XrTerrainUploadSummary,
     ) -> XrTerrainFrameSummary {
-        timing.far_lod_region_draw_count = self.active_world.render_stats.far_lod_region_draw_count;
-        timing.far_lod_uploaded_bytes = self.active_world.render_stats.far_lod_uploaded_bytes;
         if let Some(summary) = self.first_eye_summary {
             return XrTerrainFrameSummary {
                 rendered_frames: self.rendered_frames,
@@ -498,10 +492,8 @@ impl McloneSceneHost {
     pub(crate) fn frame_summary_from_multiview(
         &self,
         summary: XrTerrainMultiviewFrameSummary,
-        mut timing: XrTerrainFrameTiming,
+        timing: XrTerrainFrameTiming,
     ) -> XrTerrainFrameSummary {
-        timing.far_lod_region_draw_count = self.active_world.render_stats.far_lod_region_draw_count;
-        timing.far_lod_uploaded_bytes = self.active_world.render_stats.far_lod_uploaded_bytes;
         XrTerrainFrameSummary {
             rendered_frames: summary.rendered_frames,
             section_count: summary.section_count,

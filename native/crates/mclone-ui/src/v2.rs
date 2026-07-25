@@ -6,12 +6,11 @@ use crate::{
     GameStorageAction, GameTurnMode, GameUiAction, GameUiRenderState, GuiDrawList, GuiKey,
     GuiScale, GuiTextureUv, HOTBAR_SLOT_COUNT_USIZE, Interaction, LoadingProgressOverlay, Point,
     Rect, Slider, WidgetId, WorldCatalogUiEntry, WorldCatalogUiState, WorldCatalogUiWorldId,
-    block_palette_panel_rect, block_palette_slot_rect, centered_panel,
-    far_lod_range_from_slider_value, far_lod_range_label, far_lod_range_slider_value,
-    fly_speed_from_slider_value, fly_speed_label, fly_speed_slider_value,
-    movement_speed_from_slider_value, movement_speed_label, movement_speed_slider_value,
-    next_touch_controls_mode, render_block_palette_tooltip, render_distance_from_slider_value,
-    render_distance_label, render_distance_slider_value, render_flat_hud_debug_layer,
+    block_palette_panel_rect, block_palette_slot_rect, centered_panel, fly_speed_from_slider_value,
+    fly_speed_label, fly_speed_slider_value, movement_speed_from_slider_value,
+    movement_speed_label, movement_speed_slider_value, next_touch_controls_mode,
+    render_block_palette_tooltip, render_distance_from_slider_value, render_distance_label,
+    render_distance_slider_value, render_flat_hud_debug_layer,
     render_flat_hud_frame_pipeline_layer, render_flat_hud_hotbar_layer,
     render_flat_hud_prompt_layer, render_flat_hud_retained_layer, render_flat_hud_status_layer,
     render_flat_hud_transient_layers, render_loading_progress_overlay,
@@ -323,7 +322,6 @@ enum UiWidgetAction {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum UiSliderAction {
     RenderDistance,
-    FarLodRange,
     FlySpeed,
     MovementSpeed,
     TouchLook,
@@ -2140,9 +2138,6 @@ impl UiSurface {
                     UiSliderAction::RenderDistance => GameUiAction::SetRenderDistance(
                         render_distance_from_slider_value(value, self.render_state),
                     ),
-                    UiSliderAction::FarLodRange => GameUiAction::SetFarLodRange(
-                        far_lod_range_from_slider_value(value, self.render_state),
-                    ),
                     UiSliderAction::FlySpeed => GameUiAction::SetFlySpeed(
                         fly_speed_from_slider_value(value, self.render_state),
                     ),
@@ -2883,8 +2878,6 @@ impl GameUiHost {
             | GameUiAction::ApplyAssetPacks
             | GameUiAction::ClearRebuildableCache
             | GameUiAction::ToggleFullbright
-            | GameUiAction::ToggleFarLod
-            | GameUiAction::CycleFarLodDetail
             | GameUiAction::TogglePlayerCollisionBox
             | GameUiAction::ToggleFirstPersonPlayer
             | GameUiAction::ToggleCrosshair
@@ -2903,7 +2896,6 @@ impl GameUiHost {
             | GameUiAction::CycleFpsCap
             | GameUiAction::SetWorldRenderScaleMode(_)
             | GameUiAction::SetRenderDistance(_)
-            | GameUiAction::SetFarLodRange(_)
             | GameUiAction::SetFlySpeed(_)
             | GameUiAction::SetMovementSpeed(_)
             | GameUiAction::SetTouchLookSensitivity(_)
@@ -3079,8 +3071,6 @@ const UI_V2_DEATH_RESPAWN: UiWidgetId = UiWidgetId(4);
 const UI_V2_DEATH_QUIT_TO_TITLE: UiWidgetId = UiWidgetId(5);
 const UI_V2_OPTIONS_OCCLUSION: UiWidgetId = UiWidgetId(101);
 const UI_V2_OPTIONS_FULLBRIGHT: UiWidgetId = UiWidgetId(102);
-const UI_V2_OPTIONS_FAR_LOD: UiWidgetId = UiWidgetId(103);
-const UI_V2_OPTIONS_FAR_LOD_RANGE: UiWidgetId = UiWidgetId(104);
 const UI_V2_OPTIONS_PLAYER_BOX: UiWidgetId = UiWidgetId(105);
 const UI_V2_OPTIONS_FIRST_PERSON_PLAYER: UiWidgetId = UiWidgetId(106);
 const UI_V2_OPTIONS_CROSSHAIR: UiWidgetId = UiWidgetId(107);
@@ -3113,7 +3103,6 @@ const UI_V2_OPTIONS_CAT_DISPLAY: UiWidgetId = UiWidgetId(127);
 const UI_V2_OPTIONS_CAT_LOCAL_PLAY: UiWidgetId = UiWidgetId(152);
 const UI_V2_OPTIONS_CAT_DEBUG: UiWidgetId = UiWidgetId(128);
 const UI_V2_OPTIONS_ASSET_PACKS: UiWidgetId = UiWidgetId(129);
-const UI_V2_OPTIONS_FAR_LOD_DETAIL: UiWidgetId = UiWidgetId(131);
 const UI_V2_OPTIONS_CAT_STORAGE: UiWidgetId = UiWidgetId(132);
 const UI_V2_OPTIONS_OUTPUT_RESOLUTION: UiWidgetId = UiWidgetId(144);
 const UI_V2_OPTIONS_WORLD_RESOLUTION: UiWidgetId = UiWidgetId(145);
@@ -3925,33 +3914,6 @@ fn options_category_rows(
                     state.grass_detail.label(),
                 )
                 .action(GameUiAction::SetGrassDetail(state.grass_detail.next())),
-            ),
-            (
-                18.0,
-                UiWidget::checkbox(UI_V2_OPTIONS_FAR_LOD, ph, "Far LOD", state.far_lod_enabled)
-                    .action(GameUiAction::ToggleFarLod),
-            ),
-            (
-                20.0,
-                UiWidget::cycle(
-                    UI_V2_OPTIONS_FAR_LOD_DETAIL,
-                    ph,
-                    "LOD Detail",
-                    state.far_lod_detail_mode.label(),
-                )
-                .enabled(state.far_lod_enabled)
-                .action(GameUiAction::CycleFarLodDetail),
-            ),
-            (
-                20.0,
-                UiWidget::slider(
-                    UI_V2_OPTIONS_FAR_LOD_RANGE,
-                    ph,
-                    far_lod_range_label(state),
-                    far_lod_range_slider_value(state),
-                )
-                .enabled(state.far_lod_enabled)
-                .slider_action(UiSliderAction::FarLodRange),
             ),
             (
                 20.0,

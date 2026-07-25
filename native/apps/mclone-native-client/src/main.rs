@@ -14,7 +14,6 @@ mod desktop_xr;
 mod frame_pacing;
 mod headless;
 mod live_diorama_smoke;
-mod lod_settle_probe;
 mod offscreen_flat_client;
 mod offscreen_scene_host;
 mod perf;
@@ -46,7 +45,6 @@ use crate::headless::{
     write_actor_walk_review, write_headless_dual_view,
 };
 use crate::live_diorama_smoke::run_live_diorama_smoke;
-use crate::lod_settle_probe::run_lod_settle_probe;
 use crate::offscreen_flat_client::run_lobby_scenario_smoke;
 use crate::offscreen_flat_client::run_offscreen_warm_world_swap_smoke;
 use crate::perf::{
@@ -114,7 +112,7 @@ fn main() -> Result<()> {
         Cli::HeadlessScreenshot { options } => {
             let report = run_headless_screenshot(&options)?;
             println!(
-                "headless full-frame screenshot saved to {} ({}x{}, {} bytes, {} sections, {} drawn sections, {} GUI commands, {} flat HUD retained rebuilds, {} flat HUD retained cache hits, {} remote players, {} entities, {} actors, {} drawn actors, {} far LOD region draws, {} far LOD upload bytes, underwater={})",
+                "headless full-frame screenshot saved to {} ({}x{}, {} bytes, {} sections, {} drawn sections, {} GUI commands, {} flat HUD retained rebuilds, {} flat HUD retained cache hits, {} remote players, {} entities, {} actors, {} drawn actors, underwater={})",
                 report.path.display(),
                 report.width,
                 report.height,
@@ -128,8 +126,6 @@ fn main() -> Result<()> {
                 report.entity_count,
                 report.actor_count,
                 report.drawn_actor_count,
-                report.far_lod_region_draw_count,
-                report.far_lod_uploaded_bytes,
                 report.underwater
             );
             Ok(())
@@ -377,11 +373,6 @@ fn main() -> Result<()> {
                 report.remote_actor_walk_animation_distances
             );
             Ok(())
-        }
-        Cli::LodSettleProbe { options } => {
-            let report = run_lod_settle_probe(&options)?;
-            report.print_json()?;
-            report.validate()
         }
         Cli::MovementPerf { options } => {
             let report = run_movement_perf_smoke(&options)?;

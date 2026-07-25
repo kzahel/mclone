@@ -286,8 +286,5 @@ function sourceFileHintForTexture(textureName: string): string | null {
   if (textureName.includes("stone") || textureName.includes("_ore") || textureName === "coal_ore" || textureName === "iron_ore") {
     return "tools/texture-lab/packs/mclone-default/block/stone.ts";
   }
-  if (textureName.endsWith("_lod")) {
-    return "tools/texture-lab/packs/mclone-default/block/far-lod-materials.ts";
-  }
   return null;
 }

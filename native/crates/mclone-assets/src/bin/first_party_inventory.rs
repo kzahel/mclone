@@ -73,7 +73,6 @@ const fn visual_class_name(class: FirstPartyVisualClass) -> &'static str {
 
 const fn consumer_name(consumer: AssetConsumerKind) -> &'static str {
     match consumer {
-        AssetConsumerKind::FarLod => "far_lod",
         AssetConsumerKind::ActorTexture => "actor_texture",
         AssetConsumerKind::ActorFigure => "actor_figure",
         AssetConsumerKind::ScreenEffect => "screen_effect",

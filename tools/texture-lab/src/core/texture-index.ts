@@ -4,7 +4,6 @@ import { discoverTextureCandidates } from "./candidate-index";
 import { buildTextureCurationState } from "./curation";
 import { blockSheetName, deriveVanillaPreviewBlocks, writeVanillaPreviewBlockSheets } from "./vanilla-preview-blocks";
 import { buildVanillaCoverageIndex } from "./vanilla-coverage";
-import { isLegacyDerivedTexture } from "./texture-lifecycle";
 import type { BlockSpec, TexturePackAsset, TextureSpec } from "../dsl";
 import { loadTexturePack } from "../load";
 import { defaultTextureLabOutputRoot, textureLabOutputRoot } from "../output-root";
@@ -211,14 +210,6 @@ function lifecycleRef(
   texture: TextureSpec,
   canonicalRuntimeMaterials: Set<string>,
 ): TextureIndexEntry["lifecycle"] {
-  if (isLegacyDerivedTexture(texture)) {
-    return {
-      state: "legacy-derived",
-      runtimeMaterials: [],
-      promotable: false,
-      note: "Historical custom Far LOD tile. Runtime Far LOD is derived from the resolved material texture.",
-    };
-  }
   const binding = pack.textureLifecycle?.[textureName];
   if (!binding) {
     const suggested = suggestedRuntimeMaterial(texture);
@@ -332,7 +323,7 @@ function artSourceFrom(
 }
 
 function isProceduralPlaceholder(texture: TextureSpec, tags: string[]): boolean {
-  if (tags.includes("placeholder") || tags.includes("far-lod-material")) {
+  if (tags.includes("placeholder")) {
     return true;
   }
   const layers = texture.layers ?? [];
@@ -460,9 +451,6 @@ function inferMaterialFamily(name: string, texture: TextureSpec, usages: Texture
   }
   if (name.includes("stone") || usages.some((usage) => usage.blockName.includes("stone"))) {
     return "stone";
-  }
-  if (texture.exportPath.includes("/lod/")) {
-    return "far-lod";
   }
   return "misc";
 }

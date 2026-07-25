@@ -216,13 +216,6 @@ const domainDebt = [
     destination: "worker-resident Rust render actor",
   },
   {
-    id: "render-worker-kind-selection",
-    file: "mclone-render-compiler-worker.ts",
-    needle: 'message.workKind === "far-lod"',
-    maximum: 0,
-    destination: "worker-resident Rust render actor",
-  },
-  {
     id: "integrated-worker-generation-profile-field",
     file: "mclone-integrated-server-worker.ts",
     needle: "generationProfile?:",
@@ -594,7 +587,6 @@ const copyFacts = [
 const genericTransportForbidden = [
   "assetEpoch",
   "compile",
-  "farLod",
   "requestId",
   "worldInstance",
   "worldPriority",

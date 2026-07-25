@@ -12,8 +12,6 @@ pub enum BudgetDecisionFamily {
     CompletedResultAcceptance,
     SectionUpload,
     RenderCompileWorkers,
-    LodBuildAdmission,
-    LodUpload,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]

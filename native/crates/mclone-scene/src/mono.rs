@@ -9,7 +9,7 @@
 //! one-view case of the shared host, not a separate orchestrator.
 //!
 //! The mono path renders through the shared
-//! [`render_full_frame_for_view_with_far_lod`] entry (the same one the desktop
+//! shared full-frame render entry (the same one the desktop
 //! flat `FlatRenderResources` uses), so terrain, actors, sky, screen effects,
 //! and the far-terrain LOD shell all match the flat pipeline. UI is drawn as a
 //! conventional screen-space HUD — the counterpart to the stereo world-quad
@@ -328,7 +328,6 @@ impl McloneSceneHost {
             )
             .context("rebuild Mono actor draw resources")?,
         );
-        self.active_world.far_lod = FarTerrainLodRenderer::new(device, self.color_format);
         self.selection_outline = SelectionOutlineRenderer::new(device, self.color_format);
         self.worldgen_lens_renderer = WorldColorMeshRenderer::new(device, self.color_format);
         self.world_gui_renderer = WorldGuiRenderer::new(device, self.color_format);
@@ -418,44 +417,6 @@ impl McloneSceneHost {
             .runtime
             .as_ref()
             .map(|runtime| runtime.stats())
-    }
-
-    pub fn far_lod_stats(&self) -> FarTerrainLodProducerStats {
-        self.active_world
-            .runtime
-            .as_ref()
-            .map(|runtime| runtime.far_lod_stats())
-            .unwrap_or_default()
-    }
-
-    /// Pull the exact far-LOD lifecycle and real-terrain paint sets for a mono
-    /// view. The renderer reuses its cached culling records and only materializes
-    /// the section-key set for this explicit diagnostic call.
-    pub fn mono_far_lod_settle_snapshot(
-        &self,
-        render_view: ChunkRenderView,
-    ) -> Option<FarLodSettleSnapshot> {
-        let runtime = self.active_world.runtime.as_ref()?;
-        let render_options = self.effective_render_options(render_view.camera_position);
-        let view_sets = self
-            .active_world
-            .draw
-            .section_view_set_snapshot(render_view, render_options);
-        Some(FarLodSettleSnapshot::new(
-            runtime.far_lod_settle_snapshot(render_view.camera_position),
-            view_sets.paintable_frustum_keys,
-            view_sets.drawn_keys,
-        ))
-    }
-
-    pub fn lod_coverage_counters(
-        &self,
-    ) -> mclone_app_runtime::lod_coverage::LodReplacementCounters {
-        self.active_world
-            .runtime
-            .as_ref()
-            .map(|runtime| runtime.lod_coverage_counters())
-            .unwrap_or_default()
     }
 
     pub fn runtime_poll_diagnostics(&self) -> Option<RuntimePollDiagnostics> {
@@ -1719,7 +1680,7 @@ impl McloneSceneHost {
     /// Render one flat (mono) view — the one-view case of the host's
     /// views-as-data topology. Advances the local startup pump and streams
     /// sections live, then renders `render_view` through the shared
-    /// [`render_full_frame_for_view_with_far_lod`] entry with the chosen UI
+    /// shared full-frame render entry with the chosen UI
     /// presentation strategy. Encodes into the caller-owned `frame`; the caller
     /// submits. Returns the shared [`FullFrameRenderSummary`] so flat drivers
     /// get the same section/actor/GUI accounting the windowed desktop path
@@ -1897,26 +1858,6 @@ impl McloneSceneHost {
         let sun_angle = self.sun_angle();
         let actor_instances = self.current_actor_instances();
         let prepared_records = self.active_world.draw.prepare_render_records();
-        let far_lod_config = self.active_world.scene.far_lod;
-        let far_lod_seed = self.active_world.scene.seed;
-        let far_lod_generation_profile = self.active_world.scene.world_generation_profile;
-        let far_lod_center = self.active_world.camera.snapshot().chunk_pos;
-        let lod_grant = self.active_world.render_admission_policy.lod_grant();
-        let far_lod_mesh = if let Some(runtime) = self.active_world.runtime.as_mut() {
-            runtime
-                .prepare_far_lod_frame(
-                    far_lod_config,
-                    far_lod_seed,
-                    far_lod_generation_profile,
-                    far_lod_center,
-                    center_position,
-                    lod_grant.build_tiles,
-                    lod_grant.upload_tiles,
-                )?
-                .cloned()
-        } else {
-            None
-        };
         let uniform_frame = self.next_per_view_uniform_frame();
         let render_start = self.services.clock.now();
         let mut view_summaries = Vec::with_capacity(views.len());
@@ -1942,9 +1883,6 @@ impl McloneSceneHost {
             } else {
                 FrameActorPreparation::ReusePrepared
             };
-            let far_lod = far_lod_mesh
-                .as_ref()
-                .map(|_| &mut self.active_world.far_lod);
             #[cfg(not(target_arch = "wasm32"))]
             let opaque_world_gate = self
                 .opaque_world_gate_renderer
@@ -1952,37 +1890,36 @@ impl McloneSceneHost {
                 .zip(self.world_gate.as_ref().map(WorldGate::render_gate));
             #[cfg(target_arch = "wasm32")]
             let opaque_world_gate = None;
-            let mut summary = render_full_frame_for_view_with_far_lod_and_prepared_records_in_slot(
-                RenderFrameContext::new(device, queue, encoder, view.target),
-                view.depth,
-                &self.sky,
-                &mut self.active_world.draw,
-                &prepared_records,
-                far_lod,
-                far_lod_mesh.as_ref(),
-                opaque_world_gate,
-                Some(
-                    self.active_world
-                        .actors
-                        .as_mut()
-                        .expect("active world owns actor draw state"),
-                ),
-                Some(&mut self.screen_effects),
-                None,
-                view.render_view,
-                &actor_instances,
-                underwater_overlay,
-                sky_clear_color,
-                time_of_day,
-                sun_angle,
-                render_options,
-                world_gui,
-                |_| GuiDrawList::new(),
-                &mut render_stats,
-                view_slot,
-                actor_preparation,
-            )
-            .with_context(|| format!("render flat presentation view {index}"))?;
+            let mut summary =
+                render_full_frame_for_view_with_prepared_records_and_opaque_gate_in_slot(
+                    RenderFrameContext::new(device, queue, encoder, view.target),
+                    view.depth,
+                    &self.sky,
+                    &mut self.active_world.draw,
+                    &prepared_records,
+                    opaque_world_gate,
+                    Some(
+                        self.active_world
+                            .actors
+                            .as_mut()
+                            .expect("active world owns actor draw state"),
+                    ),
+                    Some(&mut self.screen_effects),
+                    None,
+                    view.render_view,
+                    &actor_instances,
+                    underwater_overlay,
+                    sky_clear_color,
+                    time_of_day,
+                    sun_angle,
+                    render_options,
+                    world_gui,
+                    |_| GuiDrawList::new(),
+                    &mut render_stats,
+                    view_slot,
+                    actor_preparation,
+                )
+                .with_context(|| format!("render flat presentation view {index}"))?;
 
             if !full_frame_gui.covers_world {
                 let selection_view =
@@ -2164,14 +2101,10 @@ impl McloneSceneHost {
         };
         let target = runtime.target_render_work_stats(camera_position);
         let upload = self.active_world.section_uploads.stats();
-        let far_lod = runtime.far_lod_stats();
         target.inflight_render_sections
             + usize::from(target.ready_render_work_pending)
             + upload.queued_upload_sections
             + upload.queued_lifecycle_items
-            + far_lod.pending_builds
-            + far_lod.inflight_builds
-            + far_lod.queued_uploads
     }
 
     fn render_mono_frame_inner(
@@ -2228,30 +2161,10 @@ impl McloneSceneHost {
         }
 
         let render_start = self.services.clock.now();
-        let far_lod_config = self.active_world.scene.far_lod;
-        let far_lod_seed = self.active_world.scene.seed;
-        let far_lod_generation_profile = self.active_world.scene.world_generation_profile;
-        let far_lod_center = self.active_world.camera.snapshot().chunk_pos;
-
         let mut render_stats = self.active_world.render_stats;
 
-        // `runtime`, `far_lod`, `mono_gui`, `sky`, `draw`, `actors`, and
-        // `screen_effects` are disjoint fields, so these borrows coexist.
-        let lod_grant = self.active_world.render_admission_policy.lod_grant();
-        let far_lod_mesh = if let Some(runtime) = self.active_world.runtime.as_mut() {
-            runtime.prepare_far_lod_frame(
-                far_lod_config,
-                far_lod_seed,
-                far_lod_generation_profile,
-                far_lod_center,
-                render_view.camera_position,
-                lod_grant.build_tiles,
-                lod_grant.upload_tiles,
-            )?
-        } else {
-            None
-        };
-        let far_lod = far_lod_mesh.map(|_| &mut self.active_world.far_lod);
+        // `runtime`, `mono_gui`, `sky`, `draw`, `actors`, and `screen_effects`
+        // are disjoint fields, so these borrows coexist.
         #[cfg(not(target_arch = "wasm32"))]
         let opaque_world_gate = self
             .opaque_world_gate_renderer
@@ -2347,13 +2260,11 @@ impl McloneSceneHost {
                             render_options: preview_options,
                         })
                     });
-                let rendered = render_full_frame_for_view_with_far_lod_and_placed_terrain_timed(
+                let rendered = render_full_frame_for_view_with_placed_terrain_timed(
                     RenderFrameContext::new(device, queue, encoder, target),
                     depth,
                     &self.sky,
                     &mut self.active_world.draw,
-                    far_lod,
-                    far_lod_mesh,
                     TerrainCompositionFrame {
                         placed: PlacedTerrainFrame {
                             draw: &standby.draw,
@@ -2388,13 +2299,11 @@ impl McloneSceneHost {
                 rendered
                     .map(|(summary, timing)| (summary, Some(timing), translucent_order_snapshot))
             } else {
-                render_full_frame_for_view_with_far_lod_and_opaque_gate_timed(
+                render_full_frame_for_view_with_opaque_gate_timed(
                     RenderFrameContext::new(device, queue, encoder, target),
                     depth,
                     &self.sky,
                     &mut self.active_world.draw,
-                    far_lod,
-                    far_lod_mesh,
                     opaque_world_gate,
                     Some(
                         self.active_world

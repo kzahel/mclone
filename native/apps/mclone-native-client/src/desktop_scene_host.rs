@@ -243,7 +243,6 @@ pub(crate) fn scene_host_options_from_desktop(
         freeze_scheduled_fluid_ticks: false,
         adaptive_chunk_publication_budget: scene.adaptive_chunk_publication_budget,
         adaptive_render_admission_budget: scene.adaptive_render_admission_budget,
-        startup_lod_prewarm: scene.startup_lod_prewarm,
         underwater_detection_mode: mclone_scene::XrUnderwaterDetectionMode::Midpoint,
         debug_ui_screen: None,
         skip_actors: false,
@@ -268,7 +267,6 @@ fn desktop_scene_options_for_remote(
         first_person_player_visible: scene.first_person_player_visible,
         adaptive_chunk_publication_budget: scene.adaptive_chunk_publication_budget,
         adaptive_render_admission_budget: scene.adaptive_render_admission_budget,
-        startup_lod_prewarm: scene.startup_lod_prewarm,
         world_root: scene.world_root.clone(),
         world_dir: None,
         ..SceneOptions::default()
@@ -279,7 +277,6 @@ fn desktop_scene_options_for_remote(
 mod tests {
     use std::path::PathBuf;
 
-    use mclone_app_runtime::far_lod::FarTerrainLodConfig;
     use mclone_server::SimulationCadenceConfig;
 
     use super::*;
@@ -299,7 +296,6 @@ mod tests {
                 debug_passive_showcase: false,
                 lighting_enabled: false,
                 light_status_batch_size: 5,
-                far_lod: FarTerrainLodConfig::enabled().with_extra_radius_chunks(8),
                 ..Default::default()
             },
             render_compile_worker_timing_enabled: false,
@@ -308,7 +304,6 @@ mod tests {
             first_person_player_visible: true,
             adaptive_chunk_publication_budget: false,
             adaptive_render_admission_budget: true,
-            startup_lod_prewarm: false,
             world_root: Some(PathBuf::from("world-root")),
             world_dir: Some(PathBuf::from("world-dir")),
             ..SceneOptions::default()
@@ -361,8 +356,6 @@ mod tests {
             mono.adaptive_render_admission_budget,
             scene.adaptive_render_admission_budget
         );
-        assert_eq!(mono.far_lod, scene.far_lod);
-        assert_eq!(mono.startup_lod_prewarm, scene.startup_lod_prewarm);
         assert_eq!(mono.world_root, scene.world_root);
         assert_eq!(mono.world_dir, scene.world_dir);
     }
@@ -389,8 +382,6 @@ mod tests {
             remote.adaptive_render_admission_budget,
             scene.adaptive_render_admission_budget
         );
-        assert_eq!(remote.far_lod, scene.far_lod);
-        assert_eq!(remote.startup_lod_prewarm, scene.startup_lod_prewarm);
         assert_eq!(remote.world_root, scene.world_root);
         assert_eq!(remote.world_dir, None);
     }

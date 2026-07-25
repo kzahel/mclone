@@ -128,12 +128,6 @@ export async function promoteTextureLifecycle(options: {
   if (!texture) {
     throw new TextureLifecycleError(`Texture '${options.textureName}' is not authored`);
   }
-  if (isLegacyDerivedTexture(texture)) {
-    throw new TextureLifecycleError(
-      `Texture '${options.textureName}' is a legacy Far LOD tile; Far LOD is derived from resolved runtime materials`,
-    );
-  }
-
   const manifest = await readTextureLifecycleManifest(packDir);
   const existing = manifest.textures[options.textureName];
   const runtimeMaterials = options.runtimeMaterials ?? existing?.runtimeMaterials ?? [];
@@ -271,10 +265,6 @@ export async function writeTextureLifecycleManifest(
 export function defaultProvisionalAssetForTexture(textureName: string, texture: TextureSpec): string {
   const frozen = defaultFrozenAssetForTexture(textureName, texture);
   return frozen.replace(/^frozen(?:[/\\]|$)/, `${TEXTURE_PROVISIONAL_ASSET_RELATIVE_DIR}/`);
-}
-
-export function isLegacyDerivedTexture(texture: TextureSpec): boolean {
-  return texture.catalog?.tags?.includes("far-lod-material") ?? false;
 }
 
 function validateRuntimeMaterials(textureName: string, runtimeMaterials: unknown): asserts runtimeMaterials is string[] {

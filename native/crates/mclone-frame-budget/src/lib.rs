@@ -12,13 +12,11 @@ use serde::{Deserialize, Serialize};
 const TARGET_PERIOD_EPSILON_MS: f64 = 0.001;
 pub const DEFAULT_COST_EWMA_ALPHA: f64 = 0.25;
 
-pub const RENDER_BUDGET_DECISION_FAMILY_ORDER: [BudgetDecisionFamily; 6] = [
+pub const RENDER_BUDGET_DECISION_FAMILY_ORDER: [BudgetDecisionFamily; 4] = [
     BudgetDecisionFamily::RenderAdmission,
     BudgetDecisionFamily::CompletedResultAcceptance,
     BudgetDecisionFamily::SectionUpload,
     BudgetDecisionFamily::RenderCompileWorkers,
-    BudgetDecisionFamily::LodBuildAdmission,
-    BudgetDecisionFamily::LodUpload,
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
@@ -96,7 +94,6 @@ impl BudgetCostEstimates {
             BudgetDecisionFamily::RenderAdmission
             | BudgetDecisionFamily::FeatureJobAdmission
             | BudgetDecisionFamily::RenderCompileWorkers => self.render_admission_scan_ms,
-            BudgetDecisionFamily::LodBuildAdmission | BudgetDecisionFamily::LodUpload => None,
         }
         .map(sanitize_ms)
     }
@@ -167,7 +164,6 @@ impl EwmaCostEstimator {
             | BudgetDecisionFamily::RenderCompileWorkers => {
                 Some(&mut self.estimates.render_admission_scan_ms)
             }
-            BudgetDecisionFamily::LodBuildAdmission | BudgetDecisionFamily::LodUpload => None,
         };
         let Some(slot) = slot else {
             return self.estimates;
@@ -431,30 +427,6 @@ impl Default for BudgetControllerConfig {
                     0.0,
                     0.0,
                 ),
-                FamilyBudgetConfig::new(
-                    LodBuildAdmission,
-                    BudgetDecisionAddress::new(
-                        DesktopFlatWinit,
-                        BeforeRender,
-                        RenderSectionAdmission,
-                    ),
-                    1,
-                    4,
-                    0.01,
-                    0.08,
-                )
-                .with_pending_units(0, 0)
-                .with_producer_active(false),
-                FamilyBudgetConfig::new(
-                    LodUpload,
-                    BudgetDecisionAddress::new(DesktopFlatWinit, BeforeRender, UploadApply),
-                    1,
-                    16,
-                    0.01,
-                    0.08,
-                )
-                .with_pending_units(0, 0)
-                .with_producer_active(false),
             ],
         }
     }
@@ -513,30 +485,6 @@ pub fn render_frame_budget_controller_config(
                 0.0,
                 0.0,
             ),
-            FamilyBudgetConfig::new(
-                LodBuildAdmission,
-                BudgetDecisionAddress::new(
-                    host_kind,
-                    admission_window,
-                    StageId::RenderSectionAdmission,
-                ),
-                1,
-                4,
-                0.01,
-                0.08,
-            )
-            .with_pending_units(0, 0)
-            .with_producer_active(false),
-            FamilyBudgetConfig::new(
-                LodUpload,
-                BudgetDecisionAddress::new(host_kind, admission_window, StageId::UploadApply),
-                1,
-                16,
-                0.01,
-                0.08,
-            )
-            .with_pending_units(0, 0)
-            .with_producer_active(false),
         ],
     }
 }
@@ -1507,7 +1455,7 @@ mod tests {
     }
 
     #[test]
-    fn render_budget_order_places_inert_lod_after_real_work() {
+    fn render_budget_order_matches_the_public_contract() {
         let config = render_frame_budget_controller_config(
             FrameHostKind::AndroidXrOpenXr,
             WorkWindow::PostSubmitOverlapSlack,
@@ -1520,74 +1468,6 @@ mod tests {
                 .collect::<Vec<_>>(),
             RENDER_BUDGET_DECISION_FAMILY_ORDER
         );
-
-        let mut controller = BudgetController::new(config);
-        let panel = controller.decide(
-            &clean_input(11.1).with_window(
-                BudgetTelemetryWindow::new(
-                    FrameHostKind::AndroidXrOpenXr,
-                    WorkWindow::PostSubmitOverlapSlack,
-                )
-                .with_queue_age_ms(27, 300.0),
-            ),
-        );
-        for family in [
-            BudgetDecisionFamily::LodBuildAdmission,
-            BudgetDecisionFamily::LodUpload,
-        ] {
-            let lod = decision(&panel, family);
-            assert_eq!(lod.trace.reason, BudgetDecisionReason::InactiveNoProducer);
-            assert_eq!(lod.grant.elapsed_ms, 0.0);
-            assert_eq!(lod.grant.min_units, 0);
-            assert_eq!(lod.grant.max_units, 0);
-            assert_eq!(lod.grant.max_pending_units, Some(0));
-            assert_eq!(lod.trace.input_snapshot.queue_depth, 0);
-            assert_eq!(lod.trace.input_snapshot.oldest_queue_age_ms, None);
-            assert_eq!(lod.trace.input_snapshot.per_unit_cost_ms, None);
-        }
-    }
-
-    #[test]
-    fn inert_lod_families_do_not_change_real_decision_traces() {
-        let config = render_frame_budget_controller_config(
-            FrameHostKind::DesktopFlatWinit,
-            WorkWindow::BeforeRender,
-        );
-        let mut real_only_config = config.clone();
-        real_only_config
-            .families
-            .retain(|family| family.producer_active);
-        let mut with_lod = BudgetController::new(config);
-        let mut real_only = BudgetController::new(real_only_config);
-        let inputs = [
-            clean_input(10.0),
-            clean_input(10.0),
-            clean_input(10.0).with_window(
-                BudgetTelemetryWindow::new(
-                    FrameHostKind::DesktopFlatWinit,
-                    WorkWindow::BeforeRender,
-                )
-                .with_missed_frames(1),
-            ),
-            clean_input(11.1),
-        ];
-
-        for input in inputs {
-            let with_lod_panel = with_lod.decide(&input);
-            let real_only_panel = real_only.decide(&input);
-            let active_decisions = with_lod_panel
-                .decisions
-                .iter()
-                .filter(|decision| {
-                    !matches!(
-                        decision.family,
-                        BudgetDecisionFamily::LodBuildAdmission | BudgetDecisionFamily::LodUpload
-                    )
-                })
-                .cloned()
-                .collect::<Vec<_>>();
-            assert_eq!(active_decisions, real_only_panel.decisions);
-        }
     }
 
     #[test]

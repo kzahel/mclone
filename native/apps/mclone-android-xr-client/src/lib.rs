@@ -3098,7 +3098,6 @@ mod android {
             runtime_exit_is_error: false,
             idle_poll_interval: mclone_xr_host::SESSION_IDLE_POLL_INTERVAL,
         };
-        let require_far_lod = terrain.scene_options().far_lod.enabled;
         let mut handler = TerrainMultiviewProofLoop {
             app,
             device: &graphics.device,
@@ -3107,7 +3106,6 @@ mod android {
             stereo_target,
             depth: &mut depth,
             terrain,
-            require_far_lod,
             started_at: Instant::now(),
             stats: XrFrameStats::default(),
         };
@@ -3137,7 +3135,6 @@ mod android {
         stereo_target: &'a mut graphics_vulkan::OpenXrStereoState,
         depth: &'a mut ChunkMultiviewDepthTarget,
         terrain: &'a mut AndroidXrTerrainState,
-        require_far_lod: bool,
         started_at: Instant,
         stats: XrFrameStats,
     }
@@ -3197,7 +3194,6 @@ mod android {
                 self.stereo_target,
                 self.depth,
                 self.terrain,
-                self.require_far_lod,
             )
         }
 
@@ -3211,7 +3207,7 @@ mod android {
             };
             if let Some(difference) = proof.difference {
                 log::info!(
-                    "MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PROOF_READY submitted={} runtime_frames={} skipped={} eye={}x{} layers={} sections={} drawn_sections={} drawn_indices={} far_lod_region_draws={} far_lod_upload_bytes={} different_pixels={} minimum_different_pixels={}",
+                    "MCLONE_ANDROID_XR_TERRAIN_MULTIVIEW_PROOF_READY submitted={} runtime_frames={} skipped={} eye={}x{} layers={} sections={} drawn_sections={} drawn_indices={} different_pixels={} minimum_different_pixels={}",
                     outcome.stats.submitted_frames,
                     outcome.stats.runtime_frames,
                     outcome.stats.skipped_frames,
@@ -3221,8 +3217,6 @@ mod android {
                     proof.summary.section_count,
                     proof.summary.drawn_section_count,
                     proof.summary.drawn_index_count,
-                    proof.summary.timing.far_lod_region_draw_count,
-                    proof.summary.timing.far_lod_uploaded_bytes,
                     difference.different_pixels,
                     difference.minimum_expected_different_pixels
                 );
@@ -3230,11 +3224,10 @@ mod android {
             }
             if outcome.stats.submitted_frames % 60 == 0 {
                 log::info!(
-                    "OpenXR terrain multiview proof waiting for drawable terrain: submitted={} sections={} indices={} far_lod_region_draws={} pending_chunks={} pending_jobs={}",
+                    "OpenXR terrain multiview proof waiting for drawable terrain: submitted={} sections={} indices={} pending_chunks={} pending_jobs={}",
                     outcome.stats.submitted_frames,
                     proof.summary.section_count,
                     proof.summary.drawn_index_count,
-                    proof.summary.timing.far_lod_region_draw_count,
                     proof.summary.upload.pending_render_chunks_after,
                     proof.summary.upload.pending_compile_jobs_after
                 );
@@ -3320,7 +3313,6 @@ mod android {
         stereo_target: &mut graphics_vulkan::OpenXrStereoState,
         depth: &mut ChunkMultiviewDepthTarget,
         terrain: &mut AndroidXrTerrainState,
-        require_far_lod: bool,
     ) -> Result<TerrainMultiviewProofFrame> {
         let stereo_views = mclone_xr_host::locate_stereo_views(
             frame.session(),
@@ -3357,9 +3349,7 @@ mod android {
                     }),
                 )
                 .context("render OpenXR terrain multiview proof")?;
-            let difference = if summary.drawn_index_count > 0
-                && (!require_far_lod || summary.timing.far_lod_region_draw_count > 0)
-            {
+            let difference = if summary.drawn_index_count > 0 {
                 Some(
                     mclone_xr_host::read_multiview_layer_difference_proof(
                         device,
@@ -3950,8 +3940,6 @@ mod android {
 
     #[derive(Clone, Copy, Debug, Default)]
     struct AndroidXrRenderFrameTiming {
-        far_lod_region_draw_count: usize,
-        far_lod_uploaded_bytes: usize,
         locate_views_ms: f64,
         locomotion_ms: f64,
         locomotion_input_ms: f64,
@@ -4072,7 +4060,6 @@ mod android {
         terrain_left_eye_section_encode_ms: f64,
         terrain_left_eye_full_frame_ms: f64,
         terrain_left_eye_sky_ms: f64,
-        terrain_left_eye_far_lod_ms: f64,
         terrain_left_eye_opaque_ms: f64,
         terrain_left_eye_translucent_ms: f64,
         terrain_left_eye_actor_ms: f64,
@@ -4094,7 +4081,6 @@ mod android {
         terrain_right_eye_section_encode_ms: f64,
         terrain_right_eye_full_frame_ms: f64,
         terrain_right_eye_sky_ms: f64,
-        terrain_right_eye_far_lod_ms: f64,
         terrain_right_eye_opaque_ms: f64,
         terrain_right_eye_translucent_ms: f64,
         terrain_right_eye_actor_ms: f64,
@@ -4116,7 +4102,6 @@ mod android {
         terrain_overlap_runtime_prefetch_gpu_upload_ms: f64,
         terrain_overlap_runtime_prefetch_ready_sections_ms: f64,
         terrain_multiview_sky_ms: f64,
-        terrain_multiview_far_lod_ms: f64,
         terrain_multiview_terrain_ms: f64,
         terrain_multiview_actor_ms: f64,
         terrain_multiview_screen_effect_ms: f64,
@@ -5113,10 +5098,9 @@ mod android {
                 self.max_render.terrain_right_eye_translucent_sort_ms
             );
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_TERRAIN_EYE_SPLIT max_left_full_frame_ms={:.3} max_left_sky_ms={:.3} max_left_far_lod_ms={:.3} max_left_opaque_ms={:.3} max_left_translucent_ms={:.3} max_left_actor_ms={:.3} max_left_screen_effect_ms={:.3} max_left_gui_ms={:.3} max_left_xr_fade_ms={:.3} max_left_xr_selection_ms={:.3} max_left_xr_world_lines_ms={:.3} max_left_xr_world_panel_ms={:.3} max_left_encoder_finish_ms={:.3} max_right_full_frame_ms={:.3} max_right_sky_ms={:.3} max_right_far_lod_ms={:.3} max_right_opaque_ms={:.3} max_right_translucent_ms={:.3} max_right_actor_ms={:.3} max_right_screen_effect_ms={:.3} max_right_gui_ms={:.3} max_right_xr_fade_ms={:.3} max_right_xr_selection_ms={:.3} max_right_xr_world_lines_ms={:.3} max_right_xr_world_panel_ms={:.3} max_right_encoder_finish_ms={:.3}",
+                "MCLONE_ANDROID_XR_PERF_TERRAIN_EYE_SPLIT max_left_full_frame_ms={:.3} max_left_sky_ms={:.3} max_left_opaque_ms={:.3} max_left_translucent_ms={:.3} max_left_actor_ms={:.3} max_left_screen_effect_ms={:.3} max_left_gui_ms={:.3} max_left_xr_fade_ms={:.3} max_left_xr_selection_ms={:.3} max_left_xr_world_lines_ms={:.3} max_left_xr_world_panel_ms={:.3} max_left_encoder_finish_ms={:.3} max_right_full_frame_ms={:.3} max_right_sky_ms={:.3} max_right_opaque_ms={:.3} max_right_translucent_ms={:.3} max_right_actor_ms={:.3} max_right_screen_effect_ms={:.3} max_right_gui_ms={:.3} max_right_xr_fade_ms={:.3} max_right_xr_selection_ms={:.3} max_right_xr_world_lines_ms={:.3} max_right_xr_world_panel_ms={:.3} max_right_encoder_finish_ms={:.3}",
                 self.max_render.terrain_left_eye_full_frame_ms,
                 self.max_render.terrain_left_eye_sky_ms,
-                self.max_render.terrain_left_eye_far_lod_ms,
                 self.max_render.terrain_left_eye_opaque_ms,
                 self.max_render.terrain_left_eye_translucent_ms,
                 self.max_render.terrain_left_eye_actor_ms,
@@ -5129,7 +5113,6 @@ mod android {
                 self.max_render.terrain_left_eye_encoder_finish_ms,
                 self.max_render.terrain_right_eye_full_frame_ms,
                 self.max_render.terrain_right_eye_sky_ms,
-                self.max_render.terrain_right_eye_far_lod_ms,
                 self.max_render.terrain_right_eye_opaque_ms,
                 self.max_render.terrain_right_eye_translucent_ms,
                 self.max_render.terrain_right_eye_actor_ms,
@@ -5152,20 +5135,14 @@ mod android {
                     .terrain_overlap_runtime_prefetch_ready_sections_ms
             );
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_MULTIVIEW max_multiview_sky_ms={:.3} max_multiview_far_lod_ms={:.3} max_multiview_terrain_ms={:.3} max_multiview_actor_ms={:.3} max_multiview_screen_effect_ms={:.3} max_multiview_world_overlays_ms={:.3} max_multiview_submit_ms={:.3} max_multiview_poll_wait_ms={:.3}",
+                "MCLONE_ANDROID_XR_PERF_MULTIVIEW max_multiview_sky_ms={:.3} max_multiview_terrain_ms={:.3} max_multiview_actor_ms={:.3} max_multiview_screen_effect_ms={:.3} max_multiview_world_overlays_ms={:.3} max_multiview_submit_ms={:.3} max_multiview_poll_wait_ms={:.3}",
                 self.max_render.terrain_multiview_sky_ms,
-                self.max_render.terrain_multiview_far_lod_ms,
                 self.max_render.terrain_multiview_terrain_ms,
                 self.max_render.terrain_multiview_actor_ms,
                 self.max_render.terrain_multiview_screen_effect_ms,
                 self.max_render.terrain_multiview_world_overlays_ms,
                 self.max_render.terrain_multiview_submit_ms,
                 self.max_render.terrain_multiview_poll_wait_ms
-            );
-            log::info!(
-                "MCLONE_ANDROID_XR_PERF_FAR_LOD max_region_draw_count={} max_upload_bytes={}",
-                self.max_render.far_lod_region_draw_count,
-                self.max_render.far_lod_uploaded_bytes
             );
             log::info!(
                 "MCLONE_ANDROID_XR_PERF_UPLOAD_MAX work_frames={} update_pump_stalled={} update_pump_stall_count={} server_update_queue_depth={} server_update_queue_bytes={} server_update_applied_bytes={} server_update_oldest_applied_age_ms={:.3} rebuilt_sections={} removed_sections={} rebuilt_vertices={} rebuilt_indices={} accepted_results={} queued_completed_results={} uploaded_sections={} upload_removed_sections={} uploaded_vertices={} uploaded_indices={} queued_upload_sections={} queued_upload_removed_sections={} ready_sections={}",
@@ -5505,12 +5482,11 @@ mod android {
                     render.terrain_stereo_poll_wait_ms
                 );
                 log::info!(
-                    "MCLONE_ANDROID_XR_PERF_WORST_FRAME_EYE_SPLIT rank={} sample_frame={} left_full_frame_ms={:.3} left_sky_ms={:.3} left_far_lod_ms={:.3} left_opaque_ms={:.3} left_translucent_ms={:.3} left_actor_ms={:.3} left_screen_effect_ms={:.3} left_gui_ms={:.3} left_xr_fade_ms={:.3} left_xr_selection_ms={:.3} left_xr_world_lines_ms={:.3} left_xr_world_panel_ms={:.3} left_encoder_finish_ms={:.3} right_full_frame_ms={:.3} right_sky_ms={:.3} right_far_lod_ms={:.3} right_opaque_ms={:.3} right_translucent_ms={:.3} right_actor_ms={:.3} right_screen_effect_ms={:.3} right_gui_ms={:.3} right_xr_fade_ms={:.3} right_xr_selection_ms={:.3} right_xr_world_lines_ms={:.3} right_xr_world_panel_ms={:.3} right_encoder_finish_ms={:.3}",
+                    "MCLONE_ANDROID_XR_PERF_WORST_FRAME_EYE_SPLIT rank={} sample_frame={} left_full_frame_ms={:.3} left_sky_ms={:.3} left_opaque_ms={:.3} left_translucent_ms={:.3} left_actor_ms={:.3} left_screen_effect_ms={:.3} left_gui_ms={:.3} left_xr_fade_ms={:.3} left_xr_selection_ms={:.3} left_xr_world_lines_ms={:.3} left_xr_world_panel_ms={:.3} left_encoder_finish_ms={:.3} right_full_frame_ms={:.3} right_sky_ms={:.3} right_opaque_ms={:.3} right_translucent_ms={:.3} right_actor_ms={:.3} right_screen_effect_ms={:.3} right_gui_ms={:.3} right_xr_fade_ms={:.3} right_xr_selection_ms={:.3} right_xr_world_lines_ms={:.3} right_xr_world_panel_ms={:.3} right_encoder_finish_ms={:.3}",
                     rank,
                     snapshot.sample_frame,
                     render.terrain_left_eye_full_frame_ms,
                     render.terrain_left_eye_sky_ms,
-                    render.terrain_left_eye_far_lod_ms,
                     render.terrain_left_eye_opaque_ms,
                     render.terrain_left_eye_translucent_ms,
                     render.terrain_left_eye_actor_ms,
@@ -5523,7 +5499,6 @@ mod android {
                     render.terrain_left_eye_encoder_finish_ms,
                     render.terrain_right_eye_full_frame_ms,
                     render.terrain_right_eye_sky_ms,
-                    render.terrain_right_eye_far_lod_ms,
                     render.terrain_right_eye_opaque_ms,
                     render.terrain_right_eye_translucent_ms,
                     render.terrain_right_eye_actor_ms,
@@ -5819,8 +5794,6 @@ mod android {
         b: AndroidXrRenderFrameTiming,
     ) -> AndroidXrRenderFrameTiming {
         AndroidXrRenderFrameTiming {
-            far_lod_region_draw_count: a.far_lod_region_draw_count.max(b.far_lod_region_draw_count),
-            far_lod_uploaded_bytes: a.far_lod_uploaded_bytes.max(b.far_lod_uploaded_bytes),
             locate_views_ms: a.locate_views_ms.max(b.locate_views_ms),
             locomotion_ms: a.locomotion_ms.max(b.locomotion_ms),
             locomotion_input_ms: a.locomotion_input_ms.max(b.locomotion_input_ms),
@@ -6146,9 +6119,6 @@ mod android {
                 .terrain_left_eye_full_frame_ms
                 .max(b.terrain_left_eye_full_frame_ms),
             terrain_left_eye_sky_ms: a.terrain_left_eye_sky_ms.max(b.terrain_left_eye_sky_ms),
-            terrain_left_eye_far_lod_ms: a
-                .terrain_left_eye_far_lod_ms
-                .max(b.terrain_left_eye_far_lod_ms),
             terrain_left_eye_opaque_ms: a
                 .terrain_left_eye_opaque_ms
                 .max(b.terrain_left_eye_opaque_ms),
@@ -6204,9 +6174,6 @@ mod android {
                 .terrain_right_eye_full_frame_ms
                 .max(b.terrain_right_eye_full_frame_ms),
             terrain_right_eye_sky_ms: a.terrain_right_eye_sky_ms.max(b.terrain_right_eye_sky_ms),
-            terrain_right_eye_far_lod_ms: a
-                .terrain_right_eye_far_lod_ms
-                .max(b.terrain_right_eye_far_lod_ms),
             terrain_right_eye_opaque_ms: a
                 .terrain_right_eye_opaque_ms
                 .max(b.terrain_right_eye_opaque_ms),
@@ -6262,9 +6229,6 @@ mod android {
                 .terrain_overlap_runtime_prefetch_ready_sections_ms
                 .max(b.terrain_overlap_runtime_prefetch_ready_sections_ms),
             terrain_multiview_sky_ms: a.terrain_multiview_sky_ms.max(b.terrain_multiview_sky_ms),
-            terrain_multiview_far_lod_ms: a
-                .terrain_multiview_far_lod_ms
-                .max(b.terrain_multiview_far_lod_ms),
             terrain_multiview_terrain_ms: a
                 .terrain_multiview_terrain_ms
                 .max(b.terrain_multiview_terrain_ms),
@@ -6967,8 +6931,6 @@ mod android {
         timing: &mut AndroidXrRenderFrameTiming,
         scene_timing: mclone_scene::XrTerrainFrameTiming,
     ) {
-        timing.far_lod_region_draw_count = scene_timing.far_lod_region_draw_count;
-        timing.far_lod_uploaded_bytes = scene_timing.far_lod_uploaded_bytes;
         timing.terrain_render_views_ms = scene_timing.render_views_ms;
         timing.terrain_menu_pointer_ms = scene_timing.menu_pointer_ms;
         timing.terrain_runtime_upload_ms = scene_timing.runtime_upload_ms;
@@ -7115,7 +7077,6 @@ mod android {
         timing.terrain_left_eye_section_encode_ms = scene_timing.left_eye_render.section_encode_ms;
         timing.terrain_left_eye_full_frame_ms = scene_timing.left_eye_render.full_frame_ms;
         timing.terrain_left_eye_sky_ms = scene_timing.left_eye_render.sky_ms;
-        timing.terrain_left_eye_far_lod_ms = scene_timing.left_eye_render.far_lod_ms;
         timing.terrain_left_eye_opaque_ms = scene_timing.left_eye_render.terrain_opaque_ms;
         timing.terrain_left_eye_translucent_ms =
             scene_timing.left_eye_render.terrain_translucent_ms;
@@ -7141,7 +7102,6 @@ mod android {
             scene_timing.right_eye_render.section_encode_ms;
         timing.terrain_right_eye_full_frame_ms = scene_timing.right_eye_render.full_frame_ms;
         timing.terrain_right_eye_sky_ms = scene_timing.right_eye_render.sky_ms;
-        timing.terrain_right_eye_far_lod_ms = scene_timing.right_eye_render.far_lod_ms;
         timing.terrain_right_eye_opaque_ms = scene_timing.right_eye_render.terrain_opaque_ms;
         timing.terrain_right_eye_translucent_ms =
             scene_timing.right_eye_render.terrain_translucent_ms;
@@ -7171,7 +7131,6 @@ mod android {
         timing.terrain_overlap_runtime_prefetch_ready_sections_ms =
             scene_timing.overlap_runtime_prefetch_ready_sections_ms;
         timing.terrain_multiview_sky_ms = scene_timing.multiview_sky_ms;
-        timing.terrain_multiview_far_lod_ms = scene_timing.multiview_far_lod_ms;
         timing.terrain_multiview_terrain_ms = scene_timing.multiview_terrain_ms;
         timing.terrain_multiview_actor_ms = scene_timing.multiview_actor_ms;
         timing.terrain_multiview_screen_effect_ms = scene_timing.multiview_screen_effect_ms;

@@ -17,7 +17,6 @@ pub mod chunk;
 pub mod color_profile;
 pub mod composition_fixture;
 pub mod entity;
-pub mod far_lod;
 pub mod fog;
 pub mod gpu_timestamps;
 pub mod gui;

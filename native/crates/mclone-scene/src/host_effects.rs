@@ -4,7 +4,6 @@ use mclone_app_runtime::client_experience::{
     ClientExperienceSettingsEffects,
 };
 use mclone_app_runtime::client_session_policy::ClientSessionHostAction;
-use mclone_app_runtime::far_lod::FarLodDetailMode;
 use mclone_input::TouchControlsMode;
 use mclone_ui::{
     GameCollisionMode, GameGrassDetail, GameLeafDetail, GameMovementMode, GamePlayerModel,
@@ -34,9 +33,6 @@ pub trait ClientExperienceSettingsHost {
     fn set_leaf_detail(&mut self, detail: GameLeafDetail) -> Result<()>;
     fn set_grass_detail(&mut self, detail: GameGrassDetail) -> Result<()>;
     fn set_fullbright(&mut self, enabled: bool) -> Result<()>;
-    fn set_far_lod(&mut self, enabled: bool, extra_radius_chunks: u32) -> Result<()>;
-    fn set_far_lod_detail_mode(&mut self, mode: FarLodDetailMode) -> Result<()>;
-    fn clear_far_lod(&mut self) -> Result<()>;
     fn set_player_collision_box_visible(&mut self, visible: bool) -> Result<()>;
     fn set_first_person_player_visible(&mut self, visible: bool) -> Result<()>;
     fn set_crosshair_visible(&mut self, visible: bool) -> Result<()>;
@@ -84,14 +80,6 @@ where
             ClientExperienceSettingEffect::SetFullbright(enabled) => {
                 target.set_fullbright(enabled)?;
             }
-            ClientExperienceSettingEffect::SetFarLod {
-                enabled,
-                extra_radius_chunks,
-            } => target.set_far_lod(enabled, extra_radius_chunks)?,
-            ClientExperienceSettingEffect::SetFarLodDetailMode(mode) => {
-                target.set_far_lod_detail_mode(mode)?;
-            }
-            ClientExperienceSettingEffect::ClearFarLod => target.clear_far_lod()?,
             ClientExperienceSettingEffect::SetPlayerCollisionBoxVisible(visible) => {
                 target.set_player_collision_box_visible(visible)?;
             }
@@ -226,9 +214,6 @@ mod tests {
         record_method!(set_leaf_detail(detail: GameLeafDetail));
         record_method!(set_grass_detail(detail: GameGrassDetail));
         record_method!(set_fullbright(enabled: bool));
-        record_method!(set_far_lod(enabled: bool, extra_radius_chunks: u32));
-        record_method!(set_far_lod_detail_mode(mode: FarLodDetailMode));
-        record_method!(clear_far_lod());
         record_method!(set_player_collision_box_visible(visible: bool));
         record_method!(set_first_person_player_visible(visible: bool));
         record_method!(set_crosshair_visible(visible: bool));

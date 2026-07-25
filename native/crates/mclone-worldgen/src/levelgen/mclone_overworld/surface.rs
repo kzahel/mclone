@@ -80,7 +80,7 @@ pub fn mclone_overworld_surface_recipe(
 ///
 /// The exact surface pass additionally reacts to block-scale slope and
 /// watercourses. This contract deliberately classifies the uncarved base
-/// surface so coarse LOD tiles remain deterministic at every sample spacing.
+/// surface so coarse preview sampling remains deterministic at every spacing.
 pub fn mclone_overworld_macro_surface_top_material(
     terrain: super::fields::McloneOverworldTerrainSample,
 ) -> RawBlockId {

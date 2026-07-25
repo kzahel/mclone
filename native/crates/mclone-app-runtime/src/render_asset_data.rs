@@ -12,8 +12,6 @@ use mclone_mesh::{
 };
 use mclone_render::chunk::ChunkTextureAtlas;
 
-use crate::far_lod::FarTerrainLodMaterialPalette;
-
 #[derive(Clone, Debug)]
 pub struct SceneTexturedSections {
     pub sections: Vec<TexturedRenderSectionMesh>,
@@ -69,7 +67,6 @@ impl From<MeshTextureAtlasImage> for TextureAtlasImage {
 pub struct TexturedMeshAssets {
     pub catalog: TexturedMeshCatalog,
     pub atlas: TextureAtlasImage,
-    pub far_lod_materials: Option<FarTerrainLodMaterialPalette>,
 }
 
 pub fn load_textured_mesh_assets_from_source(
@@ -83,13 +80,8 @@ pub fn load_textured_mesh_assets_from_source(
     } else {
         load_textured_terrain_assets(source).context("failed to load textured terrain assets")?
     };
-    let far_lod_materials = Some(FarTerrainLodMaterialPalette::from_textured_terrain_assets(
-        &assets,
-    ));
-
     Ok(TexturedMeshAssets {
         catalog: assets.catalog,
         atlas: assets.atlas.into(),
-        far_lod_materials,
     })
 }

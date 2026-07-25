@@ -418,7 +418,6 @@ impl McloneSceneHost {
                 accepted_entry_pose: None,
                 pending_startup_sections: Vec::new(),
             },
-            FarTerrainLodRenderer::new(device, color_format),
             RenderAdmissionPolicy::new(
                 FrameHostKind::HeadlessOffscreenPerf,
                 WorkWindow::BeforeRender,
@@ -620,7 +619,6 @@ impl McloneSceneHost {
                 accepted_entry_pose,
                 pending_startup_sections: Vec::new(),
             },
-            FarTerrainLodRenderer::new(device, color_format),
             RenderAdmissionPolicy::new(
                 FrameHostKind::HeadlessOffscreenPerf,
                 WorkWindow::BeforeRender,
@@ -902,7 +900,6 @@ impl McloneSceneHost {
                 accepted_entry_pose: None,
                 pending_startup_sections: Vec::new(),
             },
-            FarTerrainLodRenderer::new(device, color_format),
             RenderAdmissionPolicy::new(
                 FrameHostKind::HeadlessOffscreenPerf,
                 WorkWindow::BeforeRender,
@@ -2438,7 +2435,6 @@ impl McloneSceneHost {
         self.prepared_warm_world_shell = Some(PreparedWarmWorldRendererShell {
             presentation,
             draw,
-            far_lod: FarTerrainLodRenderer::new(device, self.color_format),
             gate_renderer,
             placed_renderer,
             renderer_shell_create_ms,
@@ -2707,7 +2703,6 @@ impl McloneSceneHost {
         let PreparedWarmWorldRendererShell {
             presentation: _,
             draw,
-            far_lod,
             gate_renderer,
             placed_renderer,
             renderer_shell_create_ms,
@@ -2742,7 +2737,6 @@ impl McloneSceneHost {
                 accepted_entry_pose: None,
                 pending_startup_sections: Vec::new(),
             },
-            far_lod,
             RenderAdmissionPolicy::new(
                 FrameHostKind::HeadlessOffscreenPerf,
                 WorkWindow::BeforeRender,
@@ -6219,40 +6213,6 @@ impl ClientExperienceSettingsHost for McloneSceneHost {
         Ok(())
     }
 
-    fn set_far_lod(&mut self, enabled: bool, extra_radius_chunks: u32) -> Result<()> {
-        self.active_world.scene.far_lod = self
-            .active_world
-            .scene
-            .far_lod
-            .with_extra_radius_chunks(extra_radius_chunks);
-        self.active_world.scene.far_lod.enabled = enabled;
-        log::info!(
-            "XR far LOD {}",
-            if enabled { "enabled" } else { "disabled" }
-        );
-        log::info!(
-            "XR far LOD range set to {} chunks beyond render distance",
-            self.active_world.scene.far_lod.extra_radius_chunks
-        );
-        Ok(())
-    }
-
-    fn set_far_lod_detail_mode(
-        &mut self,
-        mode: mclone_app_runtime::far_lod::FarLodDetailMode,
-    ) -> Result<()> {
-        self.active_world.scene.far_lod = self.active_world.scene.far_lod.with_detail_mode(mode);
-        log::info!("XR far LOD detail mode set to {mode:?}");
-        Ok(())
-    }
-
-    fn clear_far_lod(&mut self) -> Result<()> {
-        if let Some(runtime) = &mut self.active_world.runtime {
-            runtime.clear_far_lod();
-        }
-        Ok(())
-    }
-
     fn set_player_collision_box_visible(&mut self, visible: bool) -> Result<()> {
         self.player_collision_box_visible = visible;
         log::info!(
@@ -6642,12 +6602,6 @@ pub fn local_integrated_scene_options(
         .with_render_compile_worker_count(scene.render_compile_worker_count)
         .with_render_compile_max_pending_jobs(scene.render_compile_max_pending_jobs)
         .with_render_compile_worker_timing_enabled(scene.render_compile_worker_timing_enabled)
-        .with_startup_lod_prewarm(
-            mclone_app_runtime::far_lod::StartupLodPrewarmConfig::for_far_lod(
-                scene.far_lod,
-                scene.startup_lod_prewarm,
-            ),
-        )
         .with_integrated_world_session_storage(storage);
     match mclone_app_runtime::local_profile::load_or_create_native_local_player_profile(
         scene.world_root.as_deref(),

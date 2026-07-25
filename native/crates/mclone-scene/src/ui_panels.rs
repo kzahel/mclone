@@ -609,13 +609,6 @@ impl McloneSceneHost {
             leaf_detail: game_leaf_detail(self.mesh_assets.catalog.leaf_detail()),
             grass_detail: game_grass_detail(self.render_options.grass_detail),
             force_fullbright: self.render_options.force_fullbright,
-            far_lod_enabled: self.active_world.scene.far_lod.enabled,
-            far_lod_detail_mode: mclone_app_runtime::client_experience::game_far_lod_detail_mode(
-                self.active_world.scene.far_lod.detail_mode,
-            ),
-            far_lod_range_chunks: self.active_world.scene.far_lod.extra_radius_chunks as i32,
-            min_far_lod_range_chunks: MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
-            max_far_lod_range_chunks: MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS as i32,
             player_collision_box_visible: self.player_collision_box_visible,
             first_person_player_visible: self.active_world.camera.first_person_player_visible(),
             crosshair_visible: None,
@@ -668,12 +661,6 @@ impl McloneSceneHost {
             .runtime
             .as_ref()
             .map(|runtime| runtime.stats());
-        let far_lod_stats = self
-            .active_world
-            .runtime
-            .as_ref()
-            .map(|runtime| runtime.far_lod_stats())
-            .unwrap_or_default();
         let render_distance = runtime_stats
             .map_or(self.active_world.scene.render_distance, |stats| {
                 stats.render_distance
@@ -768,30 +755,6 @@ impl McloneSceneHost {
                 "PENDING R{} C{}",
                 runtime_stats.map_or(0, |stats| stats.pending_render_chunks),
                 self.active_world.render_stats.last_pending_compile_jobs
-            ),
-            format!(
-                "LOD D{} R{} V{} B{}/{} U{} Q{} BY{}",
-                far_lod_stats.desired_tiles,
-                far_lod_stats.resident_tiles,
-                far_lod_stats.visible_tiles,
-                far_lod_stats.pending_builds,
-                far_lod_stats.inflight_builds,
-                far_lod_stats.queued_uploads,
-                self.active_world.render_stats.far_lod_region_draw_count,
-                self.active_world.render_stats.far_lod_uploaded_bytes
-            ),
-            format!(
-                "LOD LEVEL R{}/{}/{} V{}/{}/{} DB{}/{} FLIP{}/{}",
-                far_lod_stats.resident_tiles_by_level[0],
-                far_lod_stats.resident_tiles_by_level[1],
-                far_lod_stats.resident_tiles_by_level[2],
-                far_lod_stats.visible_tiles_by_level[0],
-                far_lod_stats.visible_tiles_by_level[1],
-                far_lod_stats.visible_tiles_by_level[2],
-                far_lod_stats.double_resident_tiles,
-                far_lod_stats.max_double_resident_tiles,
-                far_lod_stats.level_flips,
-                far_lod_stats.max_level_flips_per_tile,
             ),
             format!(
                 "OPTIONS OCC {} FULL {} {}",

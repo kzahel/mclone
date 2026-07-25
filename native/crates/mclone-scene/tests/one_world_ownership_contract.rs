@@ -73,7 +73,6 @@ const DRAWABLE_WORLD_SLOT_FIELDS: &[&str] = &[
     "last_actor_presentation_update",
     "traversal_ready_sections",
     "section_uploads",
-    "far_lod",
     "render_stats",
     "render_admission_policy",
     "accepted_entry_pose",
@@ -181,7 +180,7 @@ fn host_has_one_active_and_one_optional_concrete_drawable_slot() {
     let slot_fields = field_names(slot);
     let host_fields = field_names(host);
     assert_eq!(slot_fields, DRAWABLE_WORLD_SLOT_FIELDS);
-    assert_eq!(slot_fields.len(), 22);
+    assert_eq!(slot_fields.len(), 21);
     assert_eq!(host_fields, SCENE_HOST_FIELDS);
     assert_eq!(host_fields.len(), 90);
     assert_eq!(host.matches("active_world: DrawableWorldSlot").count(), 1);
@@ -230,8 +229,8 @@ fn ordinary_frame_paths_keep_explicit_active_only_and_preview_branches() {
     let mono = braced_item(&mono_source, "fn render_mono_frame_inner(");
     assert!(mono.contains("&mut self.active_world.draw,"));
     assert!(mono.contains("if let Some(preview_records) = preview_records.as_ref()"));
-    assert!(mono.contains("render_full_frame_for_view_with_far_lod_and_opaque_gate_timed("));
-    assert!(mono.contains("render_full_frame_for_view_with_far_lod_and_placed_terrain_timed("));
+    assert!(mono.contains("render_full_frame_for_view_with_opaque_gate_timed("));
+    assert!(mono.contains("render_full_frame_for_view_with_placed_terrain_timed("));
 
     let xr_source = read("src/lib.rs");
     let stereo = braced_item(&xr_source, "fn render_prepared_frame(");
@@ -438,7 +437,6 @@ fn detached_standby_is_opt_in_and_gpu_admission_is_bounded() {
     assert!(prepare.contains("self.active_world.draw.shared_resources()"));
     assert!(prepare.contains("&[],"));
     assert!(prepare.contains("self.prepared_warm_world_shell = Some("));
-    assert!(prepare.contains("FarTerrainLodRenderer::new(device, self.color_format)"));
     assert!(prepare.contains("matches!(presentation, WarmWorldPresentationRequest::OpaqueGate)"));
     assert!(prepare.contains("matches!(presentation, WarmWorldPresentationRequest::Diorama"));
 

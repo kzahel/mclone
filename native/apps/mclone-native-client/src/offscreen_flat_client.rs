@@ -600,14 +600,6 @@ impl OffscreenFlatClientHost {
         Ok(report)
     }
 
-    pub(crate) fn drive_until_streamed(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) -> Result<crate::offscreen_scene_host::OffscreenWarmupReport> {
-        self.driver.drive_until_streamed(device, queue)
-    }
-
     pub(crate) fn drive_until_streamed_at_output_size(
         &mut self,
         device: &wgpu::Device,
@@ -633,21 +625,6 @@ impl OffscreenFlatClientHost {
         self.driver.drive_until_embedded_preview_idle(device, queue)
     }
 
-    pub(crate) fn far_lod_settle_snapshot(&self) -> Result<mclone_scene::FarLodSettleSnapshot> {
-        self.driver.far_lod_settle_snapshot()
-    }
-
-    pub(crate) fn depth_target(&self) -> &mclone_render::chunk::ChunkDepthTarget {
-        self.driver.depth_target()
-    }
-
-    pub(crate) fn render_view(
-        &self,
-        size: [u32; 2],
-    ) -> Result<mclone_render::chunk::ChunkRenderView> {
-        self.driver.host().mono_render_view(size)
-    }
-
     pub(crate) fn apply_ui_action(
         &mut self,
         action: mclone_ui::GameUiAction,
@@ -655,22 +632,6 @@ impl OffscreenFlatClientHost {
         queue: &wgpu::Queue,
     ) -> Result<()> {
         self.driver.apply_ui_action(action, device, queue)
-    }
-
-    pub(crate) fn far_lod_config(&self) -> mclone_app_runtime::far_lod::FarTerrainLodConfig {
-        self.driver.host().scene_options().far_lod
-    }
-
-    pub(crate) fn render_distance(&self) -> u32 {
-        self.driver.host().current_render_distance()
-    }
-
-    pub(crate) fn set_frame_clock(&mut self, frame_ms: f64, target_frame_ms: Option<f64>) {
-        self.driver
-            .set_clock(crate::offscreen_scene_host::OffscreenFrameClock {
-                frame_ms,
-                target_frame_ms,
-            });
     }
 
     pub(crate) fn apply_input_frame(
@@ -688,22 +649,6 @@ impl OffscreenFlatClientHost {
         self.driver
             .host()
             .mono_target_render_work_stats(self.camera.position)
-    }
-
-    pub(crate) fn latest_budget_decision_panel(
-        &self,
-    ) -> mclone_diagnostics::BudgetDecisionPanelReport {
-        self.driver.latest_budget_decision_panel()
-    }
-
-    pub(crate) fn lod_coverage_counters(
-        &self,
-    ) -> mclone_app_runtime::lod_coverage::LodReplacementCounters {
-        self.driver.host().lod_coverage_counters()
-    }
-
-    pub(crate) fn far_lod_stats(&self) -> mclone_app_runtime::far_lod::FarTerrainLodProducerStats {
-        self.driver.host().far_lod_stats()
     }
 
     pub(crate) fn render_frame(
@@ -871,19 +816,6 @@ impl OffscreenFlatClientHost {
 
     pub(crate) fn commit_camera(&mut self) -> Result<bool> {
         self.driver.commit_camera()
-    }
-
-    pub(crate) fn place_camera_above_loaded_surface(&mut self) -> Result<()> {
-        let (world_x, world_z) = self.camera.block_column();
-        let surface_y = self
-            .driver
-            .host()
-            .mono_highest_non_air_block_y_at_world(world_x, world_z)
-            .with_context(|| format!("no loaded spawn surface at ({world_x}, {world_z})"))?;
-        self.camera.place_above_surface(surface_y);
-        self.driver.set_camera(&self.camera);
-        self.driver.commit_camera()?;
-        Ok(())
     }
 
     fn frame_warm_world_source_gate_approach(&mut self) -> Result<()> {

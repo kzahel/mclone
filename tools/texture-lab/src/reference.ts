@@ -77,11 +77,6 @@ const SPECIAL_REFERENCE_COUNTERPARTS = new Map<string, ReferenceCounterpart>([
 ]);
 
 // The vanilla counterpart used for analysis and review-sheet comparison.
-// Broader than the runtime-compat mapping: far-LOD material tiles install under
-// assets/mclone/lod/... and are NOT runtime replacements for vanilla textures,
-// but they target a vanilla material's look, so they still have a counterpart
-// to measure against. The _lod authoring suffix is stripped; vanilla log side
-// textures carry no _side suffix (oak_log.png is the side face).
 export function referenceTexturePath(exportPath: string): string | null {
   const counterpart = referenceCounterpart(exportPath);
   return counterpart?.kind === "single" ? counterpart.path : null;
@@ -89,19 +84,10 @@ export function referenceTexturePath(exportPath: string): string | null {
 
 export function referenceCounterpart(exportPath: string): ReferenceCounterpart | null {
   const authoredPrefix = "assets/mclone/textures/block/";
-  const lodPrefix = "assets/mclone/lod/textures/block/";
-  let name: string;
-  if (exportPath.startsWith(authoredPrefix)) {
-    name = exportPath.slice(authoredPrefix.length).replace(/\.png$/i, "");
-  } else if (exportPath.startsWith(lodPrefix)) {
-    name = exportPath
-      .slice(lodPrefix.length)
-      .replace(/\.png$/i, "")
-      .replace(/_lod$/, "")
-      .replace(/_log_side$/, "_log");
-  } else {
+  if (!exportPath.startsWith(authoredPrefix)) {
     return null;
   }
+  let name = exportPath.slice(authoredPrefix.length).replace(/\.png$/i, "");
   name = REFERENCE_NAME_ALIASES.get(name) ?? name;
   return SPECIAL_REFERENCE_COUNTERPARTS.get(name) ?? {
     kind: "single",

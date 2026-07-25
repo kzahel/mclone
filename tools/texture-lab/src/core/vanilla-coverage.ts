@@ -142,10 +142,6 @@ function candidateCountsByTexture(candidates: TextureCandidateEntry[]): Map<stri
 }
 
 function materialFamilyFrom(name: string, authoredTextures: TextureIndexEntry[], vanillaUsage: TextureVanillaUsage | undefined): string {
-  const nonLodFamily = authoredTextures.map((texture) => texture.materialFamily).find((family) => family !== "far-lod");
-  if (nonLodFamily) {
-    return nonLodFamily;
-  }
   const authoredFamily = authoredTextures[0]?.materialFamily;
   if (authoredFamily) {
     return authoredFamily;

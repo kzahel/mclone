@@ -96,8 +96,6 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
     "--lobby-scenario-smoke",
     "--lobby-scenario-catalog-smoke",
     "--lobby-scenario-stereo-smoke",
-    "--lod-settle-probe",
-    "--lod-settle-script",
     "--menu",
     "--movement-frame-probe",
     "--movement-frame-speed",
@@ -126,7 +124,6 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
     "--settle-distances",
     "--simulation-cadence",
     "--start-in-world",
-    "--startup-lod-prewarm",
     "--startup-streaming-frames",
     "--startup-streaming-perf",
     "--startup-streaming-persisted-world",
@@ -188,11 +185,6 @@ pub(crate) struct SceneOptions {
     pub(crate) adaptive_chunk_publication_budget: bool,
     /// Experimental shared controller for live desktop render admission.
     pub(crate) adaptive_render_admission_budget: bool,
-    /// Startup LOD prewarm (tactical 162 Slice 1): build cheap retained far-LOD
-    /// coverage before the first playable frame. Only active when `far_lod` is
-    /// enabled. Defaults on so `--far-lod true` prewarms; disable with
-    /// `--startup-lod-prewarm false`.
-    pub(crate) startup_lod_prewarm: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -246,16 +238,6 @@ pub(crate) struct TimedemoOptions {
     pub(crate) height: u32,
     pub(crate) frames: usize,
     pub(crate) path_radius_chunks: i32,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub(crate) struct LodSettleProbeOptions {
-    pub(crate) directory: PathBuf,
-    pub(crate) script: Option<PathBuf>,
-    pub(crate) width: u32,
-    pub(crate) height: u32,
-    pub(crate) scene: SceneOptions,
-    pub(crate) render_options: TexturedSectionRenderOptions,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -733,7 +715,6 @@ impl Default for SceneOptions {
             first_person_player_visible: false,
             adaptive_chunk_publication_budget: true,
             adaptive_render_admission_budget: false,
-            startup_lod_prewarm: true,
         }
     }
 }
@@ -765,7 +746,6 @@ impl SceneOptions {
             first_person_player_visible: false,
             adaptive_chunk_publication_budget: true,
             adaptive_render_admission_budget: false,
-            startup_lod_prewarm: true,
         }
     }
 }
@@ -856,9 +836,6 @@ pub(crate) enum Cli {
     LoadingSettlePerf {
         options: LoadingSettlePerfOptions,
     },
-    LodSettleProbe {
-        options: LodSettleProbeOptions,
-    },
     XrClearSmoke {
         options: XrClearSmokeOptions,
     },
@@ -882,7 +859,6 @@ enum HeadlessMode {
     ActorWalkReview(PathBuf),
     Clear(PathBuf),
     DualView(PathBuf),
-    LodSettleProbe(PathBuf),
     Screenshot(PathBuf),
     WorldgenShowcase(PathBuf),
     LiveDioramaSmoke(PathBuf),
@@ -951,7 +927,6 @@ impl Cli {
         let mut startup_streaming_perf = false;
         let mut startup_streaming_persisted_world = false;
         let mut loading_settle_perf = false;
-        let mut lod_settle_script = None;
         let mut movement_steps = DEFAULT_MOVEMENT_PERF_STEPS;
         let mut timedemo_frames = DEFAULT_TIMEDEMO_FRAMES;
         let mut frame_budget_frames = DEFAULT_FRAME_BUDGET_PROBE_FRAMES;
@@ -976,7 +951,6 @@ impl Cli {
         let mut xr_debug_ui_screen_explicit = false;
         let mut xr_debug_ui_screen = None;
         let mut rebuild_render_scale = None;
-        let mut startup_lod_prewarm = true;
         let mut adaptive_chunk_publication_budget = None;
         let mut adaptive_render_admission_budget = None;
         let mut render_compile_worker_timing_enabled = None;
@@ -1223,29 +1197,6 @@ impl Cli {
                 "--headless-dual-view-hud" => {
                     headless_dual_view_hud =
                         parse_bool_arg("--headless-dual-view-hud", args.next())?;
-                }
-                "--lod-settle-probe" => {
-                    let path = args
-                        .next()
-                        .map(PathBuf::from)
-                        .context("--lod-settle-probe requires an output directory")?;
-                    if movement_perf
-                        || timedemo
-                        || frame_budget_probe
-                        || movement_frame_probe
-                        || startup_streaming_perf
-                        || loading_settle_perf
-                    {
-                        bail!("headless output modes cannot be combined with perf modes");
-                    }
-                    set_headless_mode(&mut mode, HeadlessMode::LodSettleProbe(path))?;
-                }
-                "--lod-settle-script" => {
-                    lod_settle_script = Some(
-                        args.next()
-                            .map(PathBuf::from)
-                            .context("--lod-settle-script requires a JSON path")?,
-                    );
                 }
                 "--screenshot" => {
                     let path = args
@@ -1550,9 +1501,6 @@ impl Cli {
                     platform_profile_explicit = true;
                     platform_profile = parse_window_platform_profile_arg(&arg, args.next())?;
                 }
-                "--startup-lod-prewarm" => {
-                    startup_lod_prewarm = parse_bool_arg("--startup-lod-prewarm", args.next())?;
-                }
                 "--adaptive-chunk-publication-budget" => {
                     adaptive_chunk_publication_budget = Some(parse_bool_arg(
                         "--adaptive-chunk-publication-budget",
@@ -1850,7 +1798,6 @@ impl Cli {
                             | HeadlessMode::ActorReviewSheet(_)
                             | HeadlessMode::ActorWalkReview(_)
                             | HeadlessMode::DualView(_)
-                            | HeadlessMode::LodSettleProbe(_)
                             | HeadlessMode::WarmWorldSwapSmoke(_)
                             | HeadlessMode::XrEmulationScreenshot(_)
                             | HeadlessMode::RendererRebuildSmoke(_)
@@ -1860,9 +1807,6 @@ impl Cli {
                 ))
         {
             bail!("--startup-wait applies to window mode and --screenshot");
-        }
-        if lod_settle_script.is_some() && !matches!(mode, Some(HeadlessMode::LodSettleProbe(_))) {
-            bail!("--lod-settle-script requires --lod-settle-probe");
         }
         let render_compile_capacity_request = startup_args.scene().render_compile_capacity_request;
         let render_compile_capacity_manual_fields =
@@ -1897,7 +1841,6 @@ impl Cli {
         scene.warm_world_standby_seed = warm_world_standby_seed;
         scene.warm_world_standby_cadence = warm_world_standby_cadence;
         scene.simulation_cadence = simulation_cadence;
-        scene.startup_lod_prewarm = startup_lod_prewarm;
         scene.adaptive_chunk_publication_budget =
             adaptive_chunk_publication_budget.unwrap_or(scene.remote_addr.is_none());
         scene.adaptive_render_admission_budget = adaptive_render_admission_budget.unwrap_or(false);
@@ -2042,32 +1985,6 @@ impl Cli {
                     hud: headless_dual_view_hud,
                 },
             }),
-            Some(HeadlessMode::LodSettleProbe(directory)) => {
-                if scene.remote_addr.is_some() {
-                    bail!("--lod-settle-probe applies only to local integrated worlds");
-                }
-                scene.render_distance = 4;
-                // Pin the fixture's enabled/radius dimensions without erasing
-                // an explicitly parsed detail mode.
-                scene.far_lod.enabled = true;
-                scene.far_lod.extra_radius_chunks = 6;
-                scene.day_time_override = Some(6000);
-                scene.freeze_time = true;
-                scene.debug_passive_showcase = false;
-                scene.adaptive_render_admission_budget = false;
-                let mut render_options = render_options;
-                render_options.section_occlusion_culling = true;
-                Ok(Self::LodSettleProbe {
-                    options: LodSettleProbeOptions {
-                        directory,
-                        script: lod_settle_script,
-                        width: width.unwrap_or(960),
-                        height: height.unwrap_or(960),
-                        scene,
-                        render_options,
-                    },
-                })
-            }
             Some(HeadlessMode::LobbyScenarioCatalogSmoke(directory)) => {
                 scene.world_root = Some(directory.join("app-data/worlds"));
                 scene.world_dir = None;
@@ -2946,17 +2863,16 @@ fn print_help() {
     println!(
         "mclone-native-client\n\n\
          Usage:\n\
-           mclone-native-client [--platform-profile desktop|steamos] [--width 1280] [--height 900] [--menu|--start-in-world true|false] [--asset-pack saved|original] [--startup-wait none|progress|playable|idle|frames:N] [--window-frame-report /tmp/mclone-window.json] [--window-frame-report-frames 3600|--window-frame-report-seconds 20] [--window-world-render-scale 50|67|75|100] [--window-freeze-scheduled-fluid-ticks] [--window-camera-eye x,y,z --window-camera-target x,y,z] [--window-camera-velocity x,y,z] [--seed 12345] [--generation-profile overworld|flat-grass-v1|small-island-v1|mclone-overworld-v1|alpha-v1|beta-v1|authored-only] [--world-topology plane|cylinder-x|cylinder-x:PERIOD_CHUNKS] [--alpha-winter true|false] [--warm-world-standby-seed -98765|--live-diorama-world-dir ./island-b] [--live-diorama-source-region 0,0,0,3,5] [--live-diorama-source-anchor 8.5,65,8.5] [--live-diorama-composition-anchor 8,65.03125,8] [--live-diorama-scale 0.0625] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-capacity default|derived] [--render-compile-workers 1] [--render-compile-max-pending-jobs 4] [--world-root ./worlds] [--world-dir ./world|--transient] [--far-lod true|false] [--startup-lod-prewarm true|false] [--movement-mode walk|fly|hand-push|thruster] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--adaptive-render-admission-budget true|false] [--debug-passive-showcase true|false] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
+           mclone-native-client [--platform-profile desktop|steamos] [--width 1280] [--height 900] [--menu|--start-in-world true|false] [--asset-pack saved|original] [--startup-wait none|progress|playable|idle|frames:N] [--window-frame-report /tmp/mclone-window.json] [--window-frame-report-frames 3600|--window-frame-report-seconds 20] [--window-world-render-scale 50|67|75|100] [--window-freeze-scheduled-fluid-ticks] [--window-camera-eye x,y,z --window-camera-target x,y,z] [--window-camera-velocity x,y,z] [--seed 12345] [--generation-profile overworld|flat-grass-v1|small-island-v1|mclone-overworld-v1|alpha-v1|beta-v1|authored-only] [--world-topology plane|cylinder-x|cylinder-x:PERIOD_CHUNKS] [--alpha-winter true|false] [--warm-world-standby-seed -98765|--live-diorama-world-dir ./island-b] [--live-diorama-source-region 0,0,0,3,5] [--live-diorama-source-anchor 8.5,65,8.5] [--live-diorama-composition-anchor 8,65.03125,8] [--live-diorama-scale 0.0625] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--render-compile-capacity default|derived] [--render-compile-workers 1] [--render-compile-max-pending-jobs 4] [--world-root ./worlds] [--world-dir ./world|--transient] [--movement-mode walk|fly|hand-push|thruster] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--adaptive-render-admission-budget true|false] [--debug-passive-showcase true|false] [--remote-addr 127.0.0.1:25565] [--section-occlusion true|false] [--lighting true|false] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
            mclone-native-client --headless-clear /tmp/mclone-native-clear.png [--width 96] [--height 64]\n\
            mclone-native-client --actor-review-sheet /tmp/mclone-actor-review.png [--width 1152] [--height 512] [--fullbright true|false]\n\
            mclone-native-client --actor-walk-review /tmp/mclone-actor-walk-review.png [--actor-walk-review-video /tmp/mclone-actor-walk-review.mp4] [--width 360] [--height 360] [--walk-review-frames 24] [--walk-review-fps 12] [--walk-review-cycles 2] [--fullbright true|false]\n\
-          mclone-native-client --screenshot /tmp/mclone-frame.png [--asset-pack saved|original] [--width 1280] [--height 720] [--startup-wait none|progress|playable|idle|frames:N] [--warm-world-standby-seed -98765] [--screenshot-ui none|title|world-list|world-create|world-delete-confirm|new-world|join-remote|pause|death|help|controls|block-palette|options-title|options-pause|options-local-play|storage-profile-title|storage-factory-confirm|server-settings-pause|asset-packs-pause] [--screenshot-hud true|false] [--screenshot-frame-pipeline-overlay true|false] [--screenshot-debug-pane true|false] [--screenshot-worldgen-lens off|biome|landform|surface|hydrology] [--screenshot-player-box true|false] [--screenshot-blink-debug true|false] [--screenshot-controller-focus true|false] [--screenshot-scripted-interaction true|false] [--screenshot-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--first-person-player true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--far-lod true|false] [--far-lod-detail auto|4|8|16] [--startup-lod-prewarm true|false] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
+          mclone-native-client --screenshot /tmp/mclone-frame.png [--asset-pack saved|original] [--width 1280] [--height 720] [--startup-wait none|progress|playable|idle|frames:N] [--warm-world-standby-seed -98765] [--screenshot-ui none|title|world-list|world-create|world-delete-confirm|new-world|join-remote|pause|death|help|controls|block-palette|options-title|options-pause|options-local-play|storage-profile-title|storage-factory-confirm|server-settings-pause|asset-packs-pause] [--screenshot-hud true|false] [--screenshot-frame-pipeline-overlay true|false] [--screenshot-debug-pane true|false] [--screenshot-worldgen-lens off|biome|landform|surface|hydrology] [--screenshot-player-box true|false] [--screenshot-blink-debug true|false] [--screenshot-controller-focus true|false] [--screenshot-scripted-interaction true|false] [--screenshot-settle-ms 0] [--screenshot-eye x,y,z] [--screenshot-target x,y,z] [--screenshot-camera-view first-person|third-person] [--first-person-player true|false] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--movement-speed-multiplier 1.0] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --worldgen-showcase-card /tmp/mclone-worldgen-showcase [--width 640] [--height 400] [--generation-profile small-island-v1] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 16] [--day-time 6000] [--lighting true|false] [--fullbright true|false]\n\
            mclone-native-client --warm-world-swap-smoke /tmp/mclone-warm-world-swap --warm-world-standby-seed 67890 [--warm-world-standby-cadence 5/5/5] [--warm-world-cost-sample-ms 3000] [--width 1280] [--height 720] [scene/render options as --screenshot]\n\
            mclone-native-client --live-diorama-smoke /tmp/mclone-live-diorama --world-dir ./table-a --live-diorama-world-dir ./island-b [--live-diorama-scale 0.125] [--live-diorama-soak-seconds 600] [--width 960] [--height 640]\n\
            mclone-native-client --xr-emulation-screenshot /tmp/mclone-xr-emulation.png [--width 960] [--height 960] [--xr-emulation-key KeyW] [--xr-emulation-key ArrowLeft] [--xr-emulation-input-frames 8] [scene/render options as --screenshot]\n\
            mclone-native-client --torch-light-probe /tmp/mclone-torch-light-probe [--width 1280] [--height 720] [--render-color-profile vanilla|stylized-bright|linear-experimental]\n\
-           mclone-native-client --lod-settle-probe /tmp/mclone-lod-settle [--lod-settle-script test/fixtures/far-lod/settle-smoke.json] [--width 960] [--height 960] [--seed 12345] [--chunk-x 0] [--chunk-z 0]\n\
            mclone-native-client --headless-dual-view /tmp/mclone-dual-view [--headless-dual-view-hud true|false] [--width 960] [--height 640] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--section-occlusion true|false] [--fullbright true|false]\n\
            mclone-native-client --renderer-rebuild-smoke /tmp/mclone-render-rebuild [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--section-occlusion true|false] [--fullbright true|false] [--rebuild-render-scale 0.5]\n\
            mclone-native-client --remote-player-visual-smoke /tmp/mclone-remote-player-visual-smoke.png [--width 960] [--height 540] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--day-time 6000] [--freeze-time] [--lighting true|false] [--section-occlusion true|false] [--fullbright true|false]\n\

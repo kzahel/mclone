@@ -160,7 +160,6 @@ class FirstPartyPackTests(unittest.TestCase):
                     "assets/minecraft/textures/block/stone.png",
                     archive.namelist(),
                 )
-                self.assertNotIn("assets/mclone/lod/materials.v1.json", archive.namelist())
                 self.assertFalse(any("reference/" in name for name in archive.namelist()))
 
     def test_stage_consumes_the_three_canonical_pack_outputs(self) -> None:

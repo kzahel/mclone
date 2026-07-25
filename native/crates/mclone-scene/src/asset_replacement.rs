@@ -856,7 +856,6 @@ impl McloneSceneHost {
         } else {
             None
         };
-        let far_lod = FarTerrainLodRenderer::new(device, self.color_format);
         let audio = self
             .services
             .audio
@@ -876,7 +875,6 @@ impl McloneSceneHost {
         self.world_gui_renderer = world_gui_renderer;
         self.world_gui_overlay_renderer = world_gui_overlay_renderer;
         self.mono_gui = mono_gui;
-        self.active_world.far_lod = far_lod;
         self.services.audio = audio;
         self.active_assets = assets;
         self.active_world.asset_epoch = self.active_assets.epoch;

@@ -1,33 +1,13 @@
 use super::*;
 
-/// Host-neutral identity required by the shared resident-tile substrate.
-///
-/// Producers keep their concrete key and payload types. The substrate needs
-/// only a stable ordering plus the chunk footprint used for residency diffs
-/// and cross-producer precedence. Level zero is reserved for real sections.
+/// Chunk identity required by the render-section residency substrate.
 pub trait ResidentTileKey: Copy + Ord {
     fn chunk_pos(self) -> ChunkPos;
-
-    fn lod_level(self) -> u8;
 }
 
 impl ResidentTileKey for RenderSectionKey {
     fn chunk_pos(self) -> ChunkPos {
         render_section_chunk_pos(self)
-    }
-
-    fn lod_level(self) -> u8 {
-        0
-    }
-}
-
-impl ResidentTileKey for mclone_core::LodTileKey {
-    fn chunk_pos(self) -> ChunkPos {
-        self.chunk
-    }
-
-    fn lod_level(self) -> u8 {
-        self.level
     }
 }
 
@@ -266,18 +246,6 @@ impl ResidentTileUploadPayload<RenderSectionKey> for TexturedRenderSectionMesh {
 
     fn estimated_owned_bytes(&self) -> usize {
         TexturedRenderSectionMesh::estimated_owned_bytes(self)
-    }
-}
-
-impl ResidentTileUploadPayload<mclone_core::LodTileKey>
-    for mclone_render::far_lod::FarTerrainLodTileMesh
-{
-    fn tile_key(&self) -> mclone_core::LodTileKey {
-        self.key()
-    }
-
-    fn estimated_owned_bytes(&self) -> usize {
-        self.estimated_owned_bytes()
     }
 }
 

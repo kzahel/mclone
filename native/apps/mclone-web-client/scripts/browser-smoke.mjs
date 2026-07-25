@@ -125,10 +125,6 @@ const lobbyScenarioProbeLabel = lobbyScenarioLifecycleProbe
   : lobbyScenarioMobileProbe
   ? "mobile"
   : "desktop";
-const farLodProbe = process.argv.includes("--far-lod-probe")
-  || process.env.MCLONE_NATIVE_WEB_FAR_LOD_PROBE === "1";
-const farLodIndexedDb = process.argv.includes("--far-lod-indexeddb")
-  || process.env.MCLONE_NATIVE_WEB_FAR_LOD_INDEXEDDB === "1";
 const remoteWebSocket = process.argv.includes("--remote-websocket")
   || process.env.MCLONE_NATIVE_WEB_REMOTE_WEBSOCKET === "1";
 const menuEntryProbe = process.argv.includes("--menu-entry-probe")
@@ -145,7 +141,6 @@ const appLoop = movementPerf
   || actorCompositionProbe
   || lobbyRuntimeProbe
   || lobbyScenarioProbe
-  || farLodProbe
   || remoteWebSocket
   || menuEntryProbe
   || process.argv.includes("--app-loop")
@@ -179,8 +174,6 @@ const screenshotPath = process.env.MCLONE_NATIVE_WEB_SMOKE_SCREENSHOT
     ? "/tmp/mclone-native-web-lobby-runtime-probe.png"
     : lobbyScenarioProbe
     ? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioProbeLabel}.png`
-    : farLodProbe
-    ? `/tmp/mclone-native-web-far-lod-${remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local"}.png`
     : mobileAppLoop
     ? "/tmp/mclone-native-web-mobile-app.png"
     : menuEntryProbe
@@ -209,8 +202,6 @@ const canvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_CANVAS_SCREENSHOT
     ? "/tmp/mclone-native-web-lobby-runtime-probe-canvas.png"
     : lobbyScenarioProbe
     ? `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioProbeLabel}-preview.png`
-    : farLodProbe
-    ? `/tmp/mclone-native-web-far-lod-${remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local"}-canvas.png`
     : mobileAppLoop
     ? "/tmp/mclone-native-web-mobile-app-canvas.png"
     : menuEntryProbe
@@ -272,13 +263,6 @@ const lobbyScenarioDestinationScreenshotPath =
   `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioProbeLabel}-destination.png`;
 const lobbyScenarioReturnScreenshotPath =
   `/tmp/mclone-native-web-lobby-scenario-${lobbyScenarioProbeLabel}-return.png`;
-const farLodProbeLabel = remoteWebSocket ? "remote" : farLodIndexedDb ? "indexeddb" : "local";
-const farLodProbeReportPath = process.env.MCLONE_NATIVE_WEB_FAR_LOD_PROBE_REPORT
-  ?? `/tmp/mclone-native-web-far-lod-${farLodProbeLabel}.json`;
-const farLodOffCanvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_FAR_LOD_OFF_CANVAS_SCREENSHOT
-  ?? `/tmp/mclone-native-web-far-lod-${farLodProbeLabel}-off-canvas.png`;
-const farLodMovedCanvasScreenshotPath = process.env.MCLONE_NATIVE_WEB_FAR_LOD_MOVED_CANVAS_SCREENSHOT
-  ?? `/tmp/mclone-native-web-far-lod-${farLodProbeLabel}-moved-canvas.png`;
 const movementPerfChunkBoundaries = Math.max(
   1,
   Number.parseInt(process.env.MCLONE_NATIVE_WEB_MOVEMENT_PERF_CHUNKS ?? "3", 10) || 3,
@@ -362,6 +346,7 @@ async function run() {
     const page = await context.newPage();
     if (initialLeafDetail || initialGrassDetail) {
       await page.addInitScript(({ leafDetail, grassDetail }) => {
+        /** @type {{ leafDetail: string, grassDetail?: string }} */
         const preferences = {
           leafDetail: leafDetail || "blocky",
         };
@@ -566,18 +551,12 @@ async function run() {
       const deathUiQuery = deathUiProbe
         ? `?worldStorage=indexeddb&worldId=${encodeURIComponent(deathUiWorldId)}&clearWorldStorage=1`
         : "";
-      const farLodWorldId = farLodIndexedDb
-        ? `far-lod-${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`
-        : "";
-      const farLodQuery = farLodIndexedDb
-        ? `?worldStorage=indexeddb&worldId=${encodeURIComponent(farLodWorldId)}&clearWorldStorage=1`
-        : "";
       const lobbyScenarioQuery = lobbyScenarioProbe
         ? "?debugAuxiliaryPlayerScript=1"
         : "";
       const baseAppUrl = remoteServer
         ? `${baseUrl}/app.html?remoteWsUrl=${encodeURIComponent(remoteServer.websocketUrl)}`
-        : `${baseUrl}/app.html${indexedDbReloadQuery || deathUiQuery || farLodQuery || lobbyScenarioQuery}`;
+        : `${baseUrl}/app.html${indexedDbReloadQuery || deathUiQuery || lobbyScenarioQuery}`;
       const startupParameters = new URLSearchParams();
       startupParameters.set("smokeObserver", "1");
       if (!menuEntryProbe) startupParameters.set("startInWorld", "1");
@@ -1206,38 +1185,6 @@ async function run() {
             `lobby runtime probe failed:\n${JSON.stringify(report, null, 2)}`,
           );
         }
-        console.log(JSON.stringify(report, null, 2));
-        return;
-      }
-      if (farLodProbe) {
-        const farLodProbeResult = await runFarLodProbe(page, canvas);
-        const result = await page.evaluate(() => globalThis.__mcloneWebApp.state);
-        const pageScreenshotCaptured = await page.screenshot({
-          path: screenshotPath,
-          fullPage: false,
-          timeout: 60_000,
-        }).then(() => true, () => false);
-        const canvasPng = await readFile(canvasScreenshotPath);
-        const canvasPixels = analyzePng(canvasPng);
-        const report = {
-          url: appUrl,
-          screenshotPath,
-          pageScreenshotCaptured,
-          canvasScreenshotPath,
-          farLodOffCanvasScreenshotPath,
-          farLodMovedCanvasScreenshotPath,
-          farLodProbeReportPath,
-          farLodProbe,
-          farLodIndexedDb,
-          farLodWorldId: farLodWorldId || null,
-          remoteWebSocket,
-          remoteWebSocketUrl: remoteServer?.websocketUrl ?? null,
-          canvasPixels,
-          farLodProbeResult,
-          result,
-        };
-        await writeFile(farLodProbeReportPath, `${JSON.stringify(report, null, 2)}\n`);
-        assertFarLodProbeResult(report, pageErrors, canvasPixels);
         console.log(JSON.stringify(report, null, 2));
         return;
       }
@@ -4803,232 +4750,6 @@ async function runCatalogUiProbe(page, canvas) {
   };
 }
 
-/**
- * @param {Page} page
- * @param {Locator} canvas
- */
-async function runFarLodProbe(page, canvas) {
-  await waitForWebAppReady(page);
-  await waitForWebAppStreamingSettled(page, 60_000);
-  const before = await page.evaluate(() => {
-    const state = globalThis.__mcloneWebApp?.state ?? {};
-    return {
-      frameCount: Number(state.frameCount) || 0,
-      renderCount: Number(state.renderCount) || 0,
-      maxFrameGapMs: Number(state.maxFrameGapMs) || 0,
-      farLodEnabled: Boolean(state.lastReport?.farLodEnabled),
-      sessionKind: state.sessionKind,
-      hostMode: state.lastReport?.hostMode,
-      runnerKind: state.lastReport?.runnerKind,
-    };
-  });
-  if (before.farLodEnabled) {
-    throw new Error(`far LOD probe requires the production setting to start disabled:\n${JSON.stringify(before, null, 2)}`);
-  }
-  await page.evaluate(() => globalThis.__mcloneWebApp?.setDebugOverlay?.(false));
-  await page.waitForTimeout(50);
-  await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
-  await page.waitForFunction(
-    () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
-    undefined,
-    { timeout: 10_000 },
-  );
-  const offCapture = await captureValidOverviewFrame(
-    page,
-    canvas,
-    farLodOffCanvasScreenshotPath,
-    "far LOD disabled",
-  );
-  await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
-
-  await page.evaluate(() => globalThis.__mcloneWebApp?.openNativePauseUi?.());
-  await waitForNativeUiScreen(page, "pause");
-  const geometry = await nativeUiGeometry(page);
-  await clickNativeUiPoint(page, {
-    x: geometry.width * 0.5,
-    y: geometry.height * 0.5 + 12.0,
-  });
-  await waitForNativeUiScreen(page, "options");
-  await clickNativeUiPoint(page, graphicsOptionsButtonPoint(geometry));
-  await waitForNativeUiScreen(page, "optionsCategory");
-  const toggleReport = await clickNativeUiPoint(page, farLodCheckboxPoint(geometry));
-  try {
-    await page.waitForFunction(
-      () => {
-        const state = globalThis.__mcloneWebApp?.state;
-        return state?.lastReport?.action === "toggleFarLod"
-          && state?.lastReport?.farLodEnabled === true;
-      },
-      undefined,
-      { timeout: 10_000 },
-    );
-  } catch (error) {
-    const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
-    throw new Error(
-      `far LOD toggle did not apply: ${error instanceof Error ? error.message : String(error)}`
-      + `\ntoggleReport=${JSON.stringify(toggleReport, null, 2)}`
-      + `\nstate=${JSON.stringify(state, null, 2)}`,
-    );
-  }
-  await page.evaluate(() => globalThis.__mcloneWebApp?.closeNativeUi?.());
-  await waitForNativeUiScreen(page, "none");
-
-  const workerProofHandle = await page.waitForFunction(
-    () => {
-      const compiler = globalThis.__mcloneWebApp?.state?.lastCompileReport;
-      return compiler?.workKind === "far-lod"
-        && compiler?.farLodCompileUsed === true
-        && compiler?.transportKind === "shared-result-buffer"
-        && compiler?.sharedResultBufferUsed === true
-        && compiler?.generatedViewFallbackUsed === false
-        ? compiler
-        : null;
-    },
-    undefined,
-    { timeout: 120_000 },
-  );
-  const workerProof = await workerProofHandle.jsonValue();
-  await workerProofHandle.dispose();
-
-  try {
-    await page.waitForFunction(
-      () => {
-        const state = globalThis.__mcloneWebApp?.state;
-        const report = state?.lastReport;
-        return state?.ok === true
-          && report?.farLodEnabled === true
-          && Number(report?.farLodDesiredTiles) > 0
-          && Number(report?.farLodResidentTiles) >= Number(report?.farLodDesiredTiles)
-          && Number(report?.farLodVisibleTiles) > 0
-          && Number(report?.farLodVisibleTiles) <= Number(report?.farLodDesiredTiles)
-          && Number(report?.farLodPendingBuilds) === 0
-          && Number(report?.farLodInflightBuilds) === 0
-          && Number(report?.farLodQueuedUploads) === 0
-          && Number(report?.farLodRegionDrawCount) > 0
-          && Number(report?.farLodTotalUploadBytes) > 0
-          && Number(report?.farLodVisibleLevel1Tiles) > 0
-          && Number(report?.farLodVisibleLevel2Tiles) > 0
-          && Number(report?.farLodVisibleLevel3Tiles) > 0
-          && Number(report?.farLodDoubleResidentTiles) <= 256
-          && Number(report?.farLodSuppressedWithoutReplacement) === 0;
-      },
-      undefined,
-      { timeout: 120_000 },
-    );
-  } catch (error) {
-    const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
-    throw new Error(`far LOD worker/render proof did not become drawable: ${error instanceof Error ? error.message : String(error)}\n${JSON.stringify(state, null, 2)}`);
-  }
-  await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
-  await page.waitForFunction(
-    () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
-    undefined,
-    { timeout: 10_000 },
-  );
-  const onCapture = await captureValidOverviewFrame(
-    page,
-    canvas,
-    canvasScreenshotPath,
-    "far LOD enabled",
-  );
-  const pixelDifference = comparePngPixels(offCapture.png, onCapture.png);
-  await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
-  const movement = await runFarLodMovementProbe(page);
-  await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
-  await page.waitForFunction(
-    () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
-    undefined,
-    { timeout: 10_000 },
-  );
-  const movedCapture = await captureValidOverviewFrame(
-    page,
-    canvas,
-    farLodMovedCanvasScreenshotPath,
-    "far LOD enabled after movement",
-  );
-  const after = await page.evaluate(() => {
-    const state = globalThis.__mcloneWebApp?.state ?? {};
-    const report = state.lastReport ?? {};
-    return {
-      frameCount: Number(state.frameCount) || 0,
-      renderCount: Number(state.renderCount) || 0,
-      maxFrameGapMs: Number(state.maxFrameGapMs) || 0,
-      farLodEnabled: report.farLodEnabled,
-      farLodRangeChunks: Number(report.farLodRangeChunks) || 0,
-      desiredTiles: Number(report.farLodDesiredTiles) || 0,
-      residentTiles: Number(report.farLodResidentTiles) || 0,
-      visibleTiles: Number(report.farLodVisibleTiles) || 0,
-      pendingBuilds: Number(report.farLodPendingBuilds) || 0,
-      inflightBuilds: Number(report.farLodInflightBuilds) || 0,
-      queuedUploads: Number(report.farLodQueuedUploads) || 0,
-      regionDrawCount: Number(report.farLodRegionDrawCount) || 0,
-      uploadedBytes: Number(report.farLodUploadedBytes) || 0,
-      totalUploadBytes: Number(report.farLodTotalUploadBytes) || 0,
-      residentTilesByLevel: [1, 2, 3].map(
-        (level) => Number(report[`farLodResidentLevel${level}Tiles`]) || 0,
-      ),
-      visibleTilesByLevel: [1, 2, 3].map(
-        (level) => Number(report[`farLodVisibleLevel${level}Tiles`]) || 0,
-      ),
-      doubleResidentTiles: Number(report.farLodDoubleResidentTiles) || 0,
-      maxDoubleResidentTiles: Number(report.farLodMaxDoubleResidentTiles) || 0,
-      levelFlips: Number(report.farLodLevelFlips) || 0,
-      maxLevelFlipsPerTile: Number(report.farLodMaxLevelFlipsPerTile) || 0,
-      suppressedWithoutReplacement: Number(report.farLodSuppressedWithoutReplacement) || 0,
-      sessionKind: state.sessionKind,
-      hostMode: report.hostMode,
-      runnerKind: report.runnerKind,
-      runnerTransportKind: report.runnerTransportKind,
-      compiler: state.lastCompileReport ?? null,
-      lastUiAction: state.lastUiAction ?? null,
-    };
-  });
-  return {
-    ok: after.farLodEnabled === true
-      && after.desiredTiles > 0
-      && after.residentTiles >= after.desiredTiles
-      && after.visibleTiles > 0
-      && after.visibleTiles <= after.desiredTiles
-      && after.pendingBuilds === 0
-      && after.inflightBuilds === 0
-      && after.queuedUploads === 0
-      && after.regionDrawCount > 0
-      && after.totalUploadBytes > 0
-      && after.visibleTilesByLevel.every((count) => count > 0)
-      && after.doubleResidentTiles <= 256
-      && after.maxDoubleResidentTiles <= 256
-      && after.maxDoubleResidentTiles > 0
-      && after.levelFlips > 0
-      && after.maxLevelFlipsPerTile <= 1
-      && after.suppressedWithoutReplacement === 0
-      && movement.movedChunks >= 3
-      && workerProof?.workKind === "far-lod"
-      && workerProof?.farLodCompileUsed === true
-      && workerProof?.sharedResultBufferUsed === true
-      && workerProof?.sharedResultOverflow === false
-      && workerProof?.generatedViewFallbackUsed === false
-      && pixelDifference.differentPixelCount > 128,
-    before,
-    toggleReport,
-    after,
-    workerProof,
-    offCapture: {
-      attemptCount: offCapture.attemptCount,
-      pixels: offCapture.pixels,
-    },
-    onCapture: {
-      attemptCount: onCapture.attemptCount,
-      pixels: onCapture.pixels,
-    },
-    movement,
-    movedCapture: {
-      attemptCount: movedCapture.attemptCount,
-      pixels: movedCapture.pixels,
-    },
-    pixelDifference,
-  };
-}
-
 /** @param {Page} page @param {Locator} canvas */
 async function runAuxiliarySplitProbe(page, canvas) {
   const geometry = await nativeUiGeometry(page);
@@ -5100,94 +4821,6 @@ async function runAuxiliarySplitProbe(page, canvas) {
       && capture.pairedDifferentPixels > 128),
     captures,
   };
-}
-
-/** @param {Page} page */
-async function runFarLodMovementProbe(page) {
-  const start = await page.evaluate(() => {
-    const state = globalThis.__mcloneWebApp?.state ?? {};
-    return {
-      centerX: Number(state.centerX) || 0,
-      centerZ: Number(state.centerZ) || 0,
-      levelFlips: Number(state.lastReport?.farLodLevelFlips) || 0,
-    };
-  });
-  await dispatchKeyboardEvent(page, "keydown", { code: "KeyN", key: "n" });
-  await dispatchKeyboardEvent(page, "keyup", { code: "KeyN", key: "n" });
-  await page.waitForFunction(
-    () => globalThis.__mcloneWebApp?.state?.movementMode === "FLY",
-    undefined,
-    { timeout: 10_000 },
-  );
-  await page.evaluate(() => {
-    for (let i = 0; i < 4; i += 1) {
-      globalThis.__mcloneWebApp?.adjustCameraSpeed?.(4);
-    }
-  });
-  await dispatchKeyboardEvent(page, "keydown", { code: "KeyW", key: "w" });
-  try {
-    await page.waitForFunction(
-      ({ start }) => {
-        const state = globalThis.__mcloneWebApp?.state;
-        return Math.max(
-          Math.abs(Number(state?.centerX) - start.centerX),
-          Math.abs(Number(state?.centerZ) - start.centerZ),
-        ) >= 3;
-      },
-      { start },
-      { timeout: 90_000 },
-    );
-  } finally {
-    await dispatchKeyboardEvent(page, "keyup", { code: "KeyW", key: "w" });
-  }
-  await waitForWebAppStreamingSettled(page, 120_000);
-  try {
-    await page.waitForFunction(
-      ({ start }) => {
-        const report = globalThis.__mcloneWebApp?.state?.lastReport;
-        return Number(report?.farLodDesiredTiles) > 0
-          && Number(report?.farLodResidentTiles) >= Number(report?.farLodDesiredTiles)
-          && Number(report?.farLodVisibleTiles) > 0
-          && Number(report?.farLodVisibleTiles) <= Number(report?.farLodDesiredTiles)
-          && Number(report?.farLodPendingBuilds) === 0
-          && Number(report?.farLodInflightBuilds) === 0
-          && Number(report?.farLodQueuedUploads) === 0
-          && Number(report?.farLodLevelFlips) > start.levelFlips
-          && Number(report?.farLodMaxDoubleResidentTiles) > 0
-          && Number(report?.farLodMaxDoubleResidentTiles) <= 256
-          && Number(report?.farLodMaxLevelFlipsPerTile) <= 1
-          && Number(report?.farLodSuppressedWithoutReplacement) === 0;
-      },
-      { start },
-      { timeout: 120_000 },
-    );
-  } catch (error) {
-    const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
-    throw new Error(
-      `far LOD movement did not settle: ${error instanceof Error ? error.message : String(error)}`
-      + `\nstart=${JSON.stringify(start, null, 2)}`
-      + `\nstate=${JSON.stringify(state, null, 2)}`,
-    );
-  }
-  return page.evaluate((start) => {
-    const state = globalThis.__mcloneWebApp?.state ?? {};
-    const report = state.lastReport ?? {};
-    const centerX = Number(state.centerX) || 0;
-    const centerZ = Number(state.centerZ) || 0;
-    return {
-      start,
-      centerX,
-      centerZ,
-      movedChunks: Math.max(
-        Math.abs(centerX - start.centerX),
-        Math.abs(centerZ - start.centerZ),
-      ),
-      levelFlips: Number(report.farLodLevelFlips) || 0,
-      maxLevelFlipsPerTile: Number(report.farLodMaxLevelFlipsPerTile) || 0,
-      maxDoubleResidentTiles: Number(report.farLodMaxDoubleResidentTiles) || 0,
-      suppressedWithoutReplacement: Number(report.farLodSuppressedWithoutReplacement) || 0,
-    };
-  }, start);
 }
 
 /**
@@ -5568,30 +5201,6 @@ function auxiliarySplitRowPoint(geometry) {
   return {
     x: panel.x + 18.0 + columnWidth * 0.5,
     y: panel.y + 30.0 + 10.0,
-  };
-}
-
-/** @param {{ width: number, height: number }} geometry */
-function farLodCheckboxPoint(geometry) {
-  const graphicsRowCount = 11;
-  const graphicsColumnCount = 2;
-  const rowsPerColumn = Math.ceil(graphicsRowCount / graphicsColumnCount);
-  const panel = centeredPanel(
-    geometry,
-    Math.min(Math.max(geometry.width - 18.0, 242.0), 420.0),
-    Math.min(
-      30.0 + rowsPerColumn * 24.0 + 34.0,
-      Math.max(geometry.height - 4.0, 1.0),
-    ),
-  );
-  const columnGap = 10.0;
-  const columnWidth = Math.max(
-    (panel.width - 36.0 - columnGap) / 2.0,
-    110.0,
-  );
-  return {
-    x: panel.x + 18.0 + columnWidth + columnGap + columnWidth * 0.5,
-    y: panel.y + 30.0 + 9.0,
   };
 }
 
@@ -7873,6 +7482,8 @@ function assertSmokeResult(result, pageErrors, canvasPixels) {
  * @param {any} generationProfileProbe
  * @param {any} targetPreviewProbe
  * @param {any} blockInteractionProbe
+ * @param {string | null} remoteWebSocketUrl
+ * @param {string | null} expectedGrassDetail
  */
 function assertAppLoopResult(
   result,
@@ -8767,21 +8378,6 @@ function assertOverviewWorkerReport(workerReport, center, label) {
     || Number(summary.visibilityGraphBuildCount) !== Number(workerReport.targetSectionCount)
   ) {
     throw new Error(`${label} render compiler worker summary was malformed:\n${JSON.stringify({ center, workerReport }, null, 2)}`);
-  }
-}
-/**
- * @param {any} report
- * @param {string[]} pageErrors
- * @param {ReturnType<typeof analyzePng>} canvasPixels
- */
-function assertFarLodProbeResult(report, pageErrors, canvasPixels) {
-  if (
-    !report.farLodProbeResult?.ok
-    || pageErrors.length > 0
-    || canvasPixels.nonClearInteriorPixelCount <= 128
-    || canvasPixels.nearBlackInteriorPixelCount >= canvasPixels.width * canvasPixels.height * 0.15
-  ) {
-    throw new Error(`far LOD browser probe failed:\n${JSON.stringify({ report, pageErrors }, null, 2)}`);
   }
 }
 

@@ -146,8 +146,6 @@ Options:
   --freeze-time      Add --freeze-time to startup argv.
   --lighting true|false
                      Add --lighting VALUE to startup argv.
-  --far-lod true|false
-                     Enable or disable the shared synthetic far-LOD producer.
   --section-occlusion true|false
                      Add --section-occlusion VALUE to startup argv.
   --fullbright true|false
@@ -560,7 +558,7 @@ while [[ $# -gt 0 ]]; do
             fi
             shift 2
             ;;
-        --chunk-x|--chunk-z|--render-distance|--render-compile-workers|--render-compile-max-pending-jobs|--render-compile-capacity|--movement-speed-multiplier|--day-time|--lighting|--far-lod|--section-occlusion|--fullbright|--adaptive-chunk-publication-budget|--world-dir|--world-root)
+        --chunk-x|--chunk-z|--render-distance|--render-compile-workers|--render-compile-max-pending-jobs|--render-compile-capacity|--movement-speed-multiplier|--day-time|--lighting|--section-occlusion|--fullbright|--adaptive-chunk-publication-budget|--world-dir|--world-root)
             require_arg "$1" "${2:-}"
             STARTUP_ARGV+=("$1" "$2")
             shift 2

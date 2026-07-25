@@ -330,13 +330,6 @@ impl OffscreenDriver {
         self.last_summary.clone()
     }
 
-    pub(crate) fn far_lod_settle_snapshot(&self) -> Result<mclone_scene::FarLodSettleSnapshot> {
-        let render_view = self.host.mono_render_view(self.size)?;
-        self.host
-            .mono_far_lod_settle_snapshot(render_view)
-            .context("offscreen far LOD settle snapshot requires an active runtime")
-    }
-
     pub(crate) fn set_camera(&mut self, camera: &SpectatorCamera) {
         set_host_camera(&mut self.host, camera);
     }
@@ -361,10 +354,6 @@ impl OffscreenDriver {
         hud_visible: bool,
     ) -> Result<MonoSceneFrameSummary> {
         self.render_inner(frame, ui, hud_visible, true)
-    }
-
-    pub(crate) fn depth_target(&self) -> &ChunkDepthTarget {
-        &self.depth
     }
 
     pub(crate) fn render_stereo(
@@ -741,13 +730,9 @@ impl OffscreenDriver {
                     .is_some_and(|progress| !progress.cells.is_empty())
             }),
             StartupWaitPolicy::Playable => self.drive_until(device, queue, |driver, summary| {
-                let far_lod = driver.host.far_lod_stats();
-                let far_lod_ready = !driver.host.scene_options().far_lod.enabled
-                    || (far_lod.visible_tiles > 0 && far_lod.queued_uploads == 0);
                 driver.host.local_startup_complete()
                     && driver.host.has_runtime()
                     && summary.render.section_count > 0
-                    && far_lod_ready
             }),
             StartupWaitPolicy::Idle => {
                 let mut stable = 0usize;

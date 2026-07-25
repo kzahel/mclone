@@ -18,16 +18,11 @@ use mclone_mesh::{
     TexturedRenderSectionMetadata,
 };
 use mclone_protocol::{ClientCommand, ClientEphemeralMessage, PlayerPositionUpdate};
-use mclone_render::far_lod::FarTerrainLodFrameUpdate;
 use mclone_render_session::{RenderSectionCacheUpdate, RenderSectionCompileQueueHealth};
-use mclone_server::{SimulationCadenceConfig, WorldGenerationProfile};
+use mclone_server::SimulationCadenceConfig;
 use mclone_ui::LoadingProgressOverlay;
 
-use crate::far_lod::{
-    FarTerrainLodConfig, FarTerrainLodProducerStats, FarTerrainLodSettleSnapshot,
-};
 use crate::host_mode::SingleViewHostMode;
-use crate::lod_coverage::LodReplacementCounters;
 use crate::monotonic::MonotonicDeadline;
 use crate::render_asset_data::TexturedMeshAssets;
 use crate::session::{
@@ -69,30 +64,17 @@ impl RuntimeRenderPriority {
 ///
 /// Native startup pumps and asynchronously driven browser startup both use
 /// this contract. Host readiness proves that the authoritative spawn/view is
-/// present; drawable coverage prevents admitting into a blank frame; optional
-/// presentation preparation (currently native far-LOD prewarm) must also have
-/// settled.
+/// present; drawable coverage prevents admitting into a blank frame.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct StartupAdmissionEvidence {
     pub host_ready: bool,
     pub drawable_section_count: usize,
-    pub presentation_settled: bool,
 }
 
 impl StartupAdmissionEvidence {
     pub const fn ready(self) -> bool {
-        self.host_ready && self.drawable_section_count > 0 && self.presentation_settled
+        self.host_ready && self.drawable_section_count > 0
     }
-}
-
-/// Exact runtime-side facts needed to explain far-LOD coverage at settle.
-/// Painted sections remain render-view state and are joined by `mclone-scene`.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct FarLodRuntimeSettleSnapshot {
-    pub producer: FarTerrainLodSettleSnapshot,
-    pub loaded_chunks: BTreeSet<ChunkPos>,
-    pub traversal_ready_sections: BTreeSet<RenderSectionKey>,
-    pub suppressed_chunks: BTreeSet<ChunkPos>,
 }
 
 pub trait SceneRuntimeService {
@@ -107,20 +89,6 @@ pub trait SceneRuntimeService {
         mesh_assets: TexturedMeshAssets,
         sections: TexturedRenderSectionBuildReport,
     ) -> Result<()>;
-    fn clear_far_lod(&mut self);
-    fn prepare_far_lod_frame(
-        &mut self,
-        config: FarTerrainLodConfig,
-        seed: i64,
-        generation_profile: WorldGenerationProfile,
-        center: ChunkPos,
-        camera_position: Vec3,
-        build_budget: usize,
-        upload_budget: usize,
-    ) -> Result<Option<&FarTerrainLodFrameUpdate>>;
-    fn far_lod_stats(&self) -> FarTerrainLodProducerStats;
-    fn far_lod_settle_snapshot(&self, camera_position: Vec3) -> FarLodRuntimeSettleSnapshot;
-    fn lod_coverage_counters(&self) -> LodReplacementCounters;
     fn release_render_compile_jobs(&mut self, count: usize) -> usize;
     fn simulation_cadence(&self) -> Option<SimulationCadenceConfig>;
     fn set_simulation_cadence(&mut self, cadence: SimulationCadenceConfig) -> Result<bool>;
@@ -515,11 +483,10 @@ mod tests {
     }
 
     #[test]
-    fn startup_admission_requires_authority_drawable_coverage_and_settled_presentation() {
+    fn startup_admission_requires_authority_and_drawable_coverage() {
         let ready = StartupAdmissionEvidence {
             host_ready: true,
             drawable_section_count: 1,
-            presentation_settled: true,
         };
         assert!(ready.ready());
         assert!(
@@ -532,13 +499,6 @@ mod tests {
         assert!(
             !StartupAdmissionEvidence {
                 drawable_section_count: 0,
-                ..ready
-            }
-            .ready()
-        );
-        assert!(
-            !StartupAdmissionEvidence {
-                presentation_settled: false,
                 ..ready
             }
             .ready()

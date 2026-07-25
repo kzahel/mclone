@@ -258,8 +258,6 @@ struct LastFrameStats {
     flat_hud_rebuilds: usize,
     flat_hud_cache_hits: usize,
     deferred_drop_backlog: usize,
-    far_lod_region_draw_count: usize,
-    far_lod_uploaded_bytes: usize,
     accepted_compile_section_count: usize,
     poll_updates: usize,
     render_views_ms: f64,
@@ -1158,8 +1156,6 @@ impl WebSceneHost {
             flat_hud_rebuilds: summary.render.flat_hud_retained_cache.rebuild_count as usize,
             flat_hud_cache_hits: summary.render.flat_hud_retained_cache.cache_hit_count as usize,
             deferred_drop_backlog: summary.upload.poll_client_deferred_chunk_drop_backlog_items,
-            far_lod_region_draw_count: summary.render.far_lod_region_draw_count,
-            far_lod_uploaded_bytes: summary.render.far_lod_uploaded_bytes,
             accepted_compile_section_count: summary.upload.completed_compile_section_count,
             poll_updates: summary.upload.poll_updates,
             render_views_ms: summary.timing.render_views_ms,
@@ -2176,7 +2172,6 @@ pub async fn mclone_web_create_scene_host_with_startup(
     let scene = McloneSceneHostOptions {
         startup: scene_startup,
         use_initial_spawn_center: false,
-        startup_lod_prewarm: false,
         ..McloneSceneHostOptions::default()
     };
     create_scene_host(
@@ -3984,81 +3979,6 @@ impl WebSceneHost {
                 ui_state.section_occlusion_culling,
             )?;
             report_set_bool(&object, "forceFullbright", ui_state.force_fullbright)?;
-            report_set_bool(&object, "farLodEnabled", ui_state.far_lod_enabled)?;
-            report_set_string(
-                &object,
-                "farLodDetailMode",
-                ui_state.far_lod_detail_mode.label(),
-            )?;
-            report_set_number(
-                &object,
-                "farLodRangeChunks",
-                f64::from(ui_state.far_lod_range_chunks),
-            )?;
-            let far_lod = host.far_lod_stats();
-            report_set_number(&object, "farLodDesiredTiles", far_lod.desired_tiles as f64)?;
-            report_set_number(
-                &object,
-                "farLodResidentTiles",
-                far_lod.resident_tiles as f64,
-            )?;
-            report_set_number(&object, "farLodVisibleTiles", far_lod.visible_tiles as f64)?;
-            report_set_number(
-                &object,
-                "farLodPendingBuilds",
-                far_lod.pending_builds as f64,
-            )?;
-            report_set_number(
-                &object,
-                "farLodInflightBuilds",
-                far_lod.inflight_builds as f64,
-            )?;
-            report_set_number(
-                &object,
-                "farLodQueuedUploads",
-                far_lod.queued_uploads as f64,
-            )?;
-            report_set_number(
-                &object,
-                "farLodTotalUploadBytes",
-                far_lod.total_upload_bytes as f64,
-            )?;
-            for (index, count) in far_lod.resident_tiles_by_level.into_iter().enumerate() {
-                report_set_number(
-                    &object,
-                    &format!("farLodResidentLevel{}Tiles", index + 1),
-                    count as f64,
-                )?;
-            }
-            for (index, count) in far_lod.visible_tiles_by_level.into_iter().enumerate() {
-                report_set_number(
-                    &object,
-                    &format!("farLodVisibleLevel{}Tiles", index + 1),
-                    count as f64,
-                )?;
-            }
-            report_set_number(
-                &object,
-                "farLodDoubleResidentTiles",
-                far_lod.double_resident_tiles as f64,
-            )?;
-            report_set_number(
-                &object,
-                "farLodMaxDoubleResidentTiles",
-                far_lod.max_double_resident_tiles as f64,
-            )?;
-            report_set_number(&object, "farLodLevelFlips", far_lod.level_flips as f64)?;
-            report_set_number(
-                &object,
-                "farLodMaxLevelFlipsPerTile",
-                far_lod.max_level_flips_per_tile as f64,
-            )?;
-            let lod_replacements = host.lod_coverage_counters();
-            report_set_number(
-                &object,
-                "farLodSuppressedWithoutReplacement",
-                lod_replacements.suppressed_without_replacement as f64,
-            )?;
             report_set_bool(&object, "worldCatalogPersistent", world_catalog.persistent)?;
             report_set_bool(&object, "worldCatalogLoading", world_catalog.loading)?;
             report_set_number(
@@ -4545,16 +4465,6 @@ impl WebSceneHost {
             self.last_frame.render_views_ms,
         )?;
         report_set_bool(&object, "playable", self.last_frame.drawn_section_count > 0)?;
-        report_set_number(
-            &object,
-            "farLodRegionDrawCount",
-            self.last_frame.far_lod_region_draw_count as f64,
-        )?;
-        report_set_number(
-            &object,
-            "farLodUploadedBytes",
-            self.last_frame.far_lod_uploaded_bytes as f64,
-        )?;
         report_set_number(&object, "meshBuildCount", self.mesh_build_count as f64)?;
         self.render_worker.write_report(
             &object,

@@ -53,7 +53,6 @@ pub struct McloneSceneHostOptions {
     pub freeze_scheduled_fluid_ticks: bool,
     pub adaptive_chunk_publication_budget: bool,
     pub adaptive_render_admission_budget: bool,
-    pub startup_lod_prewarm: bool,
     pub underwater_detection_mode: XrUnderwaterDetectionMode,
     pub debug_ui_screen: Option<XrDebugUiScreen>,
     pub skip_actors: bool,
@@ -74,7 +73,6 @@ impl Default for McloneSceneHostOptions {
             freeze_scheduled_fluid_ticks: false,
             adaptive_chunk_publication_budget: true,
             adaptive_render_admission_budget: true,
-            startup_lod_prewarm: true,
             underwater_detection_mode: XrUnderwaterDetectionMode::default(),
             debug_ui_screen: None,
             skip_actors: false,
@@ -101,7 +99,6 @@ impl McloneSceneHostOptions {
             freeze_scheduled_fluid_ticks: false,
             adaptive_chunk_publication_budget: true,
             adaptive_render_admission_budget: true,
-            startup_lod_prewarm: true,
             underwater_detection_mode: XrUnderwaterDetectionMode::default(),
             debug_ui_screen: None,
             skip_actors: false,
@@ -121,9 +118,6 @@ impl McloneSceneHostOptions {
                 self.player_movement_cadence.rate_hz,
                 self.player_movement_cadence.max_catch_up_steps
             );
-        }
-        if !self.world_topology.is_unbounded() && self.far_lod.enabled {
-            bail!("Far LOD is unavailable for bounded or periodic world topology");
         }
         if self.render_distance == 0 || self.render_distance > MAX_XR_RENDER_DISTANCE {
             bail!(

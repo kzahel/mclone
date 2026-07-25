@@ -2018,9 +2018,6 @@ pub enum GameUiAction {
     SetLeafDetail(GameLeafDetail),
     SetGrassDetail(GameGrassDetail),
     ToggleFullbright,
-    ToggleFarLod,
-    CycleFarLodDetail,
-    SetFarLodRange(i32),
     TogglePlayerCollisionBox,
     ToggleFirstPersonPlayer,
     ToggleCrosshair,
@@ -2190,35 +2187,6 @@ pub enum GameFramePacingMode {
     Uncapped,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum GameFarLodDetailMode {
-    #[default]
-    Auto,
-    Fixed4,
-    Fixed8,
-    Fixed16,
-}
-
-impl GameFarLodDetailMode {
-    pub fn label(self) -> &'static str {
-        match self {
-            Self::Auto => "Auto",
-            Self::Fixed4 => "4 blocks",
-            Self::Fixed8 => "8 blocks",
-            Self::Fixed16 => "16 blocks",
-        }
-    }
-
-    pub const fn next(self) -> Self {
-        match self {
-            Self::Auto => Self::Fixed4,
-            Self::Fixed4 => Self::Fixed8,
-            Self::Fixed8 => Self::Fixed16,
-            Self::Fixed16 => Self::Auto,
-        }
-    }
-}
-
 impl GameFramePacingMode {
     pub fn label(self) -> &'static str {
         match self {
@@ -2290,11 +2258,6 @@ pub struct GameUiRenderState {
     pub leaf_detail: GameLeafDetail,
     pub grass_detail: GameGrassDetail,
     pub force_fullbright: bool,
-    pub far_lod_enabled: bool,
-    pub far_lod_detail_mode: GameFarLodDetailMode,
-    pub far_lod_range_chunks: i32,
-    pub min_far_lod_range_chunks: i32,
-    pub max_far_lod_range_chunks: i32,
     pub player_collision_box_visible: bool,
     pub first_person_player_visible: bool,
     pub crosshair_visible: Option<bool>,
@@ -2340,11 +2303,6 @@ impl Default for GameUiRenderState {
             leaf_detail: GameLeafDetail::Blocky,
             grass_detail: GameGrassDetail::Off,
             force_fullbright: false,
-            far_lod_enabled: false,
-            far_lod_detail_mode: GameFarLodDetailMode::Auto,
-            far_lod_range_chunks: 12,
-            min_far_lod_range_chunks: 1,
-            max_far_lod_range_chunks: 64,
             player_collision_box_visible: false,
             first_person_player_visible: false,
             crosshair_visible: Some(true),
@@ -2386,20 +2344,6 @@ impl GameUiRenderState {
     pub fn clamped_render_distance(self) -> i32 {
         let (min, max) = self.render_distance_limits();
         self.render_distance.clamp(min, max)
-    }
-
-    pub fn far_lod_range_limits(self) -> (i32, i32) {
-        (
-            self.min_far_lod_range_chunks
-                .min(self.max_far_lod_range_chunks),
-            self.min_far_lod_range_chunks
-                .max(self.max_far_lod_range_chunks),
-        )
-    }
-
-    pub fn clamped_far_lod_range(self) -> i32 {
-        let (min, max) = self.far_lod_range_limits();
-        self.far_lod_range_chunks.clamp(min, max)
     }
 
     pub fn fly_speed_multiplier_limits(self) -> (f32, f32) {
@@ -3700,30 +3644,6 @@ fn render_distance_label(state: GameUiRenderState) -> String {
     let radius = state.clamped_render_distance();
     let suffix = if radius == 1 { "chunk" } else { "chunks" };
     format!("Render Distance: {radius} {suffix}")
-}
-
-fn far_lod_range_slider_value(state: GameUiRenderState) -> f32 {
-    let (min, max) = state.far_lod_range_limits();
-    if max <= min {
-        0.0
-    } else {
-        (state.clamped_far_lod_range() - min) as f32 / (max - min) as f32
-    }
-}
-
-fn far_lod_range_from_slider_value(value: f32, state: GameUiRenderState) -> i32 {
-    let (min, max) = state.far_lod_range_limits();
-    if max <= min {
-        min
-    } else {
-        min + (value.clamp(0.0, 1.0) * (max - min) as f32).round() as i32
-    }
-}
-
-fn far_lod_range_label(state: GameUiRenderState) -> String {
-    let range = state.clamped_far_lod_range();
-    let suffix = if range == 1 { "chunk" } else { "chunks" };
-    format!("Far LOD Range: {range} {suffix}")
 }
 
 fn fly_speed_slider_value(state: GameUiRenderState) -> f32 {

@@ -288,7 +288,7 @@ function withTimeout(promise, timeout, message, log) {
 }
 
 function parseClientScreenshotReport(stdout) {
-  const report = /headless full-frame screenshot saved to (.+) \((\d+)x(\d+), (\d+) bytes, (\d+) sections, (\d+) drawn sections, (\d+) GUI commands(?:, \d+ flat HUD retained rebuilds, \d+ flat HUD retained cache hits)?, (\d+) remote players, (\d+) entities, (\d+) actors, (\d+) drawn actors(?:, \d+ far LOD region draws, \d+ far LOD upload bytes)?(?:, underwater=(?:true|false))?\)/.exec(stdout);
+  const report = /headless full-frame screenshot saved to (.+) \((\d+)x(\d+), (\d+) bytes, (\d+) sections, (\d+) drawn sections, (\d+) GUI commands(?:, \d+ flat HUD retained rebuilds, \d+ flat HUD retained cache hits)?, (\d+) remote players, (\d+) entities, (\d+) actors, (\d+) drawn actors(?:, underwater=(?:true|false))?\)/.exec(stdout);
   if (!report) {
     throw new Error(`native client did not print screenshot report:\n${stdout}`);
   }

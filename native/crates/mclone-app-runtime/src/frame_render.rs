@@ -13,7 +13,6 @@ use mclone_render::color_profile::{DEFAULT_RENDER_SCALE, RenderConfig};
 use mclone_render::entity::{
     ActorDrawResources, ActorFigureSet, ActorInstance, ActorRenderStats, ActorTextureAtlas,
 };
-use mclone_render::far_lod::{FarTerrainLodFrameUpdate, FarTerrainLodRenderer};
 use mclone_render::fog::RenderFog;
 use mclone_render::gui::{GuiRenderOptions, GuiRenderer, WorldGuiLine, WorldGuiRenderer};
 use mclone_render::opaque_world_gate::{OpaqueWorldGate, OpaqueWorldGateRenderer};
@@ -154,10 +153,6 @@ pub struct RenderStreamStats {
     pub actor_count: usize,
     pub drawn_actor_count: usize,
     pub drawn_actor_index_count: u32,
-    pub far_lod_vertex_count: usize,
-    pub far_lod_index_count: usize,
-    pub far_lod_region_draw_count: usize,
-    pub far_lod_uploaded_bytes: usize,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -186,8 +181,6 @@ pub struct FullFrameRenderSummary {
     pub flat_hud_retained_cache: UiDrawCacheStats,
     pub actor_count: usize,
     pub drawn_actor_count: usize,
-    pub far_lod_region_draw_count: usize,
-    pub far_lod_uploaded_bytes: usize,
     pub placed_drawn_section_count: usize,
     pub placed_drawn_index_count: u32,
     pub placed_grass_drawn_patch_count: u32,
@@ -255,7 +248,6 @@ enum OpaqueWorldInsertion<'a> {
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct FullFrameRenderTiming {
     pub sky_ms: f64,
-    pub far_lod_ms: f64,
     pub terrain_opaque_ms: f64,
     pub terrain_translucent_ms: f64,
     pub terrain_records_ms: f64,
@@ -305,7 +297,6 @@ pub struct FlatRenderResources {
     scaled_color: Option<FlatScaledColorTarget>,
     scale_presenter: Option<FlatScalePresenter>,
     sky: SkyRenderer,
-    far_lod: FarTerrainLodRenderer,
     draw: TexturedSectionDrawResources,
     actors: ActorDrawResources,
     screen_effects: ScreenEffectsRenderer,
@@ -358,7 +349,6 @@ impl FlatRenderResources {
         )
         .context("failed to initialize chunk draw resources")?;
         let sky = SkyRenderer::new_with_config(device, render_config);
-        let far_lod = FarTerrainLodRenderer::new(device, render_config.color_format);
         let actors = ActorDrawResources::new(
             device,
             queue,
@@ -381,7 +371,6 @@ impl FlatRenderResources {
             scaled_color,
             scale_presenter,
             sky,
-            far_lod,
             draw,
             actors,
             screen_effects,
@@ -479,7 +468,6 @@ impl FlatRenderResources {
         render_options: TexturedSectionRenderOptions,
         selection_outline: Option<&SelectionOutline>,
         world_debug_lines: &[WorldGuiLine],
-        far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
         gui: FullFrameGui,
         build_gui_draw: BuildGuiDraw,
         render_stats: &mut RenderStreamStats,
@@ -498,7 +486,6 @@ impl FlatRenderResources {
             render_options,
             selection_outline,
             world_debug_lines,
-            far_lod_mesh,
             gui,
             build_gui_draw,
             render_stats,
@@ -518,7 +505,6 @@ impl FlatRenderResources {
         render_options: TexturedSectionRenderOptions,
         selection_outline: Option<&SelectionOutline>,
         world_debug_lines: &[WorldGuiLine],
-        far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
         gui: FullFrameGui,
         build_gui_draw: BuildGuiDraw,
         render_stats: &mut RenderStreamStats,
@@ -537,7 +523,6 @@ impl FlatRenderResources {
             render_options,
             selection_outline,
             world_debug_lines,
-            far_lod_mesh,
             gui,
             build_gui_draw,
             render_stats,
@@ -557,7 +542,6 @@ impl FlatRenderResources {
         render_options: TexturedSectionRenderOptions,
         selection_outline: Option<&SelectionOutline>,
         world_debug_lines: &[WorldGuiLine],
-        far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
         gui: FullFrameGui,
         build_gui_draw: BuildGuiDraw,
         render_stats: &mut RenderStreamStats,
@@ -602,8 +586,6 @@ impl FlatRenderResources {
             world_pass_gui,
             |_| GuiDrawList::new(),
             SINGLE_VIEW_SLOT,
-            Some(&mut self.far_lod),
-            far_lod_mesh,
             None,
             None,
             None,
@@ -1336,77 +1318,15 @@ where
     )
 }
 
-/// Single-view full-frame render that also draws the retained far-terrain LOD
-/// shell. Same shape as [`render_full_frame_for_view`] with the far-LOD renderer
-/// and prepared mesh threaded in, so flat targets that own their renderers
-/// individually (Android) get the same far-LOD path desktop gets through
-/// [`FlatRenderResources`].
+/// Scene-owned variant with one optional opaque gate inserted after opaque
+/// terrain and before actors and translucent terrain. All resources still
+/// share the caller's depth target.
 #[allow(clippy::too_many_arguments)]
-pub fn render_full_frame_for_view_with_far_lod<BuildGuiDraw>(
+pub fn render_full_frame_for_view_with_opaque_gate<BuildGuiDraw>(
     frame: RenderFrameContext<'_>,
     depth: &ChunkDepthTarget,
     sky: &SkyRenderer,
     draw: &mut TexturedSectionDrawResources,
-    far_lod: Option<&mut FarTerrainLodRenderer>,
-    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
-    actors: Option<&mut ActorDrawResources>,
-    screen_effects: Option<&mut ScreenEffectsRenderer>,
-    gui_renderer: Option<&mut GuiRenderer>,
-    render_view: ChunkRenderView,
-    actor_instances: &[ActorInstance],
-    underwater_overlay: Option<UnderwaterOverlay>,
-    sky_clear_color: wgpu::Color,
-    time_of_day: f32,
-    sun_angle: f32,
-    render_options: TexturedSectionRenderOptions,
-    gui: FullFrameGui,
-    build_gui_draw: BuildGuiDraw,
-    render_stats: &mut RenderStreamStats,
-) -> Result<FullFrameRenderSummary>
-where
-    BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
-{
-    let render_view = render_view_with_underwater_effect(render_view, underwater_overlay);
-    render_full_frame_for_view_inner(
-        frame,
-        depth,
-        sky,
-        draw,
-        actors,
-        screen_effects,
-        gui_renderer,
-        render_view,
-        actor_instances,
-        underwater_overlay,
-        sky_clear_color,
-        time_of_day,
-        sun_angle,
-        render_options,
-        gui,
-        build_gui_draw,
-        SINGLE_VIEW_SLOT,
-        far_lod,
-        far_lod_mesh,
-        None,
-        None,
-        None,
-        None,
-        None,
-        render_stats,
-    )
-}
-
-/// Scene-owned variant of [`render_full_frame_for_view_with_far_lod`] with one
-/// optional opaque gate inserted after opaque terrain and before actors and
-/// translucent terrain. All resources still share the caller's depth target.
-#[allow(clippy::too_many_arguments)]
-pub fn render_full_frame_for_view_with_far_lod_and_opaque_gate<BuildGuiDraw>(
-    frame: RenderFrameContext<'_>,
-    depth: &ChunkDepthTarget,
-    sky: &SkyRenderer,
-    draw: &mut TexturedSectionDrawResources,
-    far_lod: Option<&mut FarTerrainLodRenderer>,
-    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
     opaque_world_gate: Option<(&OpaqueWorldGateRenderer, OpaqueWorldGate)>,
     actors: Option<&mut ActorDrawResources>,
     screen_effects: Option<&mut ScreenEffectsRenderer>,
@@ -1444,8 +1364,6 @@ where
         gui,
         build_gui_draw,
         SINGLE_VIEW_SLOT,
-        far_lod,
-        far_lod_mesh,
         None,
         None,
         opaque_world_gate.map(|(renderer, gate)| OpaqueWorldInsertion::Gate(renderer, gate)),
@@ -1456,18 +1374,16 @@ where
 }
 
 /// Timed variant of
-/// [`render_full_frame_for_view_with_far_lod_and_opaque_gate`].
+/// [`render_full_frame_for_view_with_opaque_gate`].
 ///
 /// This keeps live flat-client attribution on the same render entry used by
 /// ordinary frames; it does not introduce a diagnostic-only renderer.
 #[allow(clippy::too_many_arguments)]
-pub fn render_full_frame_for_view_with_far_lod_and_opaque_gate_timed<BuildGuiDraw>(
+pub fn render_full_frame_for_view_with_opaque_gate_timed<BuildGuiDraw>(
     frame: RenderFrameContext<'_>,
     depth: &ChunkDepthTarget,
     sky: &SkyRenderer,
     draw: &mut TexturedSectionDrawResources,
-    far_lod: Option<&mut FarTerrainLodRenderer>,
-    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
     opaque_world_gate: Option<(&OpaqueWorldGateRenderer, OpaqueWorldGate)>,
     actors: Option<&mut ActorDrawResources>,
     screen_effects: Option<&mut ScreenEffectsRenderer>,
@@ -1507,8 +1423,6 @@ where
         gui,
         build_gui_draw,
         SINGLE_VIEW_SLOT,
-        far_lod,
-        far_lod_mesh,
         None,
         None,
         opaque_world_gate.map(|(renderer, gate)| OpaqueWorldInsertion::Gate(renderer, gate)),
@@ -1522,13 +1436,11 @@ where
 /// Scene-owned composition variant with one placed opaque/cutout terrain
 /// source inserted into the active world's shared color/depth frame.
 #[allow(clippy::too_many_arguments)]
-pub fn render_full_frame_for_view_with_far_lod_and_placed_terrain<BuildGuiDraw>(
+pub fn render_full_frame_for_view_with_placed_terrain<BuildGuiDraw>(
     frame: RenderFrameContext<'_>,
     depth: &ChunkDepthTarget,
     sky: &SkyRenderer,
     draw: &mut TexturedSectionDrawResources,
-    far_lod: Option<&mut FarTerrainLodRenderer>,
-    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
     terrain_composition: TerrainCompositionFrame<'_>,
     actors: Option<&mut ActorDrawResources>,
     screen_effects: Option<&mut ScreenEffectsRenderer>,
@@ -1566,8 +1478,6 @@ where
         gui,
         build_gui_draw,
         SINGLE_VIEW_SLOT,
-        far_lod,
-        far_lod_mesh,
         None,
         None,
         Some(OpaqueWorldInsertion::Composition(terrain_composition)),
@@ -1578,13 +1488,11 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
-pub fn render_full_frame_for_view_with_far_lod_and_placed_terrain_timed<BuildGuiDraw>(
+pub fn render_full_frame_for_view_with_placed_terrain_timed<BuildGuiDraw>(
     frame: RenderFrameContext<'_>,
     depth: &ChunkDepthTarget,
     sky: &SkyRenderer,
     draw: &mut TexturedSectionDrawResources,
-    far_lod: Option<&mut FarTerrainLodRenderer>,
-    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
     terrain_composition: TerrainCompositionFrame<'_>,
     actors: Option<&mut ActorDrawResources>,
     screen_effects: Option<&mut ScreenEffectsRenderer>,
@@ -1624,8 +1532,6 @@ where
         gui,
         build_gui_draw,
         SINGLE_VIEW_SLOT,
-        far_lod,
-        far_lod_mesh,
         None,
         None,
         Some(OpaqueWorldInsertion::Composition(terrain_composition)),
@@ -1679,8 +1585,6 @@ where
         gui,
         build_gui_draw,
         view_slot,
-        None,
-        None,
         None,
         None,
         None,
@@ -1785,8 +1689,6 @@ where
         None,
         None,
         None,
-        None,
-        None,
         Some(clock),
         Some(&mut timing),
         render_stats,
@@ -1885,8 +1787,6 @@ where
         gui,
         build_gui_draw,
         view_slot,
-        None,
-        None,
         Some(prepared_records),
         None,
         None,
@@ -1900,14 +1800,12 @@ where
 /// preparation are owned by the scene caller; this function performs only the
 /// independent cull/draw work for one admitted view.
 #[allow(clippy::too_many_arguments)]
-pub fn render_full_frame_for_view_with_far_lod_and_prepared_records_in_slot<BuildGuiDraw>(
+pub fn render_full_frame_for_view_with_prepared_records_and_opaque_gate_in_slot<BuildGuiDraw>(
     frame: RenderFrameContext<'_>,
     depth: &ChunkDepthTarget,
     sky: &SkyRenderer,
     draw: &mut TexturedSectionDrawResources,
     prepared_records: &PreparedTexturedSectionRecords,
-    far_lod: Option<&mut FarTerrainLodRenderer>,
-    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
     opaque_world_gate: Option<(&OpaqueWorldGateRenderer, OpaqueWorldGate)>,
     actors: Option<&mut ActorDrawResources>,
     screen_effects: Option<&mut ScreenEffectsRenderer>,
@@ -1947,8 +1845,6 @@ where
         gui,
         build_gui_draw,
         view_slot,
-        far_lod,
-        far_lod_mesh,
         Some(prepared_records),
         None,
         opaque_world_gate.map(|(renderer, gate)| OpaqueWorldInsertion::Gate(renderer, gate)),
@@ -1978,8 +1874,6 @@ pub fn render_full_frame_for_view_with_prepared_stereo_draw_in_slot<BuildGuiDraw
     render_options: TexturedSectionRenderOptions,
     gui: FullFrameGui,
     build_gui_draw: BuildGuiDraw,
-    far_lod: Option<&mut FarTerrainLodRenderer>,
-    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
     render_stats: &mut RenderStreamStats,
     view_slot: PerViewSlot,
 ) -> Result<FullFrameRenderSummary>
@@ -2005,8 +1899,6 @@ where
         gui,
         build_gui_draw,
         view_slot,
-        far_lod,
-        far_lod_mesh,
         None,
         Some(prepared_draw),
         None,
@@ -2036,8 +1928,6 @@ pub fn render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_in_s
     render_options: TexturedSectionRenderOptions,
     gui: FullFrameGui,
     build_gui_draw: BuildGuiDraw,
-    far_lod: Option<&mut FarTerrainLodRenderer>,
-    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
     render_stats: &mut RenderStreamStats,
     view_slot: PerViewSlot,
 ) -> Result<FullFrameRenderSummary>
@@ -2063,8 +1953,6 @@ where
         gui,
         build_gui_draw,
         view_slot,
-        far_lod,
-        far_lod_mesh,
         None,
         Some(prepared_draw),
         opaque_world_gate.map(|(renderer, gate)| OpaqueWorldInsertion::Gate(renderer, gate)),
@@ -2096,8 +1984,6 @@ pub fn render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_i
     render_options: TexturedSectionRenderOptions,
     gui: FullFrameGui,
     build_gui_draw: BuildGuiDraw,
-    far_lod: Option<&mut FarTerrainLodRenderer>,
-    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
     render_stats: &mut RenderStreamStats,
     view_slot: PerViewSlot,
 ) -> Result<FullFrameRenderSummary>
@@ -2123,8 +2009,6 @@ where
         gui,
         build_gui_draw,
         view_slot,
-        far_lod,
-        far_lod_mesh,
         None,
         Some(prepared_draw),
         Some(OpaqueWorldInsertion::Composition(terrain_composition)),
@@ -2229,8 +2113,6 @@ where
         gui,
         build_gui_draw,
         view_slot,
-        None,
-        None,
         Some(prepared_records),
         None,
         None,
@@ -2260,8 +2142,6 @@ pub fn render_full_frame_for_view_with_prepared_stereo_draw_timed_in_slot<BuildG
     render_options: TexturedSectionRenderOptions,
     gui: FullFrameGui,
     build_gui_draw: BuildGuiDraw,
-    far_lod: Option<&mut FarTerrainLodRenderer>,
-    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
     clock: &MonotonicClockHandle,
     render_stats: &mut RenderStreamStats,
     view_slot: PerViewSlot,
@@ -2289,8 +2169,6 @@ where
         gui,
         build_gui_draw,
         view_slot,
-        far_lod,
-        far_lod_mesh,
         None,
         Some(prepared_draw),
         None,
@@ -2323,8 +2201,6 @@ pub fn render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_time
     render_options: TexturedSectionRenderOptions,
     gui: FullFrameGui,
     build_gui_draw: BuildGuiDraw,
-    far_lod: Option<&mut FarTerrainLodRenderer>,
-    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
     clock: &MonotonicClockHandle,
     render_stats: &mut RenderStreamStats,
     view_slot: PerViewSlot,
@@ -2352,8 +2228,6 @@ where
         gui,
         build_gui_draw,
         view_slot,
-        far_lod,
-        far_lod_mesh,
         None,
         Some(prepared_draw),
         opaque_world_gate.map(|(renderer, gate)| OpaqueWorldInsertion::Gate(renderer, gate)),
@@ -2386,8 +2260,6 @@ pub fn render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_t
     render_options: TexturedSectionRenderOptions,
     gui: FullFrameGui,
     build_gui_draw: BuildGuiDraw,
-    far_lod: Option<&mut FarTerrainLodRenderer>,
-    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
     clock: &MonotonicClockHandle,
     render_stats: &mut RenderStreamStats,
     view_slot: PerViewSlot,
@@ -2415,8 +2287,6 @@ where
         gui,
         build_gui_draw,
         view_slot,
-        far_lod,
-        far_lod_mesh,
         None,
         Some(prepared_draw),
         Some(OpaqueWorldInsertion::Composition(terrain_composition)),
@@ -2446,8 +2316,6 @@ fn render_full_frame_for_view_inner<BuildGuiDraw>(
     gui: FullFrameGui,
     build_gui_draw: BuildGuiDraw,
     view_slot: PerViewSlot,
-    far_lod: Option<&mut FarTerrainLodRenderer>,
-    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
     prepared_records: Option<&PreparedTexturedSectionRecords>,
     prepared_stereo_draw: Option<&PreparedTexturedSectionStereoDraw>,
     opaque_world_insertion: Option<OpaqueWorldInsertion<'_>>,
@@ -2482,8 +2350,6 @@ where
         gui,
         build_gui_draw,
         view_slot,
-        far_lod,
-        far_lod_mesh,
         prepared_records,
         prepared_stereo_draw,
         opaque_world_insertion,
@@ -2513,8 +2379,6 @@ fn render_full_frame_for_view_inner_with_actor_preparation<BuildGuiDraw>(
     gui: FullFrameGui,
     build_gui_draw: BuildGuiDraw,
     view_slot: PerViewSlot,
-    far_lod: Option<&mut FarTerrainLodRenderer>,
-    far_lod_mesh: Option<&FarTerrainLodFrameUpdate>,
     prepared_records: Option<&PreparedTexturedSectionRecords>,
     prepared_stereo_draw: Option<&PreparedTexturedSectionStereoDraw>,
     mut opaque_world_insertion: Option<OpaqueWorldInsertion<'_>>,
@@ -2572,38 +2436,12 @@ where
         if let (Some(timing), Some(start)) = (timing.as_deref_mut(), sky_start) {
             timing.sky_ms += composition_timing_elapsed_ms(timing_clock, Some(start));
         }
-        let far_lod_depth_ready =
-            far_lod.is_some() && far_lod_mesh.is_some_and(|mesh| !mesh.is_empty());
-        if let Some(far_lod) = far_lod {
-            let far_lod_start = composition_timing_start(timing_clock, timing.is_some());
-            let far_lod_stats = far_lod.render_in_slot(
-                frame.device,
-                frame.queue,
-                frame.encoder,
-                frame.target,
-                depth,
-                render_view,
-                far_lod_mesh,
-                view_slot,
-            );
-            render_stats.far_lod_vertex_count = far_lod_stats.vertex_count;
-            render_stats.far_lod_index_count = far_lod_stats.index_count;
-            render_stats.far_lod_region_draw_count = far_lod_stats.region_draw_count;
-            render_stats.far_lod_uploaded_bytes = far_lod_stats.uploaded_bytes;
-            if let (Some(timing), Some(start)) = (timing.as_deref_mut(), far_lod_start) {
-                timing.far_lod_ms += composition_timing_elapsed_ms(timing_clock, Some(start));
-            }
-        }
         // The sky/clear pass prepared the background; the chunk pass loads it.
-        // When far LOD rendered first, it also prepared depth for real chunks.
-        let mut render_target = ChunkRenderTarget::from_frame_target(
+        let render_target = ChunkRenderTarget::from_frame_target(
             frame.target.with_depth(&depth.view),
             background_clear_color,
         )?
         .with_loaded_color();
-        if far_lod_depth_ready {
-            render_target = render_target.with_loaded_depth();
-        }
         let split_translucent_terrain =
             !actor_instances.is_empty() || opaque_world_insertion.is_some();
         let terrain_phase = if split_translucent_terrain {
@@ -2956,8 +2794,6 @@ where
         flat_hud_retained_cache: UiDrawCacheStats::default(),
         actor_count: actor_instances.len(),
         drawn_actor_count: actor_stats.drawn_actor_count,
-        far_lod_region_draw_count: render_stats.far_lod_region_draw_count,
-        far_lod_uploaded_bytes: render_stats.far_lod_uploaded_bytes,
         placed_drawn_section_count: placed_terrain_stats.drawn_section_count,
         placed_drawn_index_count: placed_terrain_stats.drawn_index_count,
         placed_grass_drawn_patch_count: placed_terrain_stats.grass_drawn_patch_count,

@@ -4,7 +4,6 @@ import type { TexturePackAsset, TextureSpec } from "../dsl";
 import { encodePng, decodePng, type RgbaImage } from "../png";
 import { runtimeCompatTexturePath } from "../reference";
 import { renderAllTextures, type RenderedTexture } from "../compositor";
-import { makeLodMaterialsJson } from "../lod-materials";
 import { assertTextureSourcePolicies } from "../source-policy";
 import type {
   TextureCandidateEntry,
@@ -292,10 +291,4 @@ async function writeActiveTexturePack(
     }
   }
 
-  const lodMaterialsJson = makeLodMaterialsJson(pack, textures);
-  const lodMaterialsReportPath = path.join(outputRoot, `${pack.name}-lod-materials.v1.json`);
-  await fs.writeFile(lodMaterialsReportPath, lodMaterialsJson);
-  const lodMaterialsPackPath = path.join(outputRoot, "runtime-pack", "assets/mclone/lod/materials.v1.json");
-  await fs.mkdir(path.dirname(lodMaterialsPackPath), { recursive: true });
-  await fs.writeFile(lodMaterialsPackPath, lodMaterialsJson);
 }

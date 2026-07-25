@@ -214,7 +214,7 @@ export async function writeFrozenTextureCurationManifest(
 }
 
 export function defaultFrozenAssetForTexture(textureName: string, texture: TextureSpec): string {
-  const prefixes = ["assets/mclone/textures/", "assets/mclone/lod/textures/"];
+  const prefixes = ["assets/mclone/textures/"];
   for (const prefix of prefixes) {
     if (texture.exportPath.startsWith(prefix)) {
       return path.posix.join(TEXTURE_FROZEN_ASSET_RELATIVE_DIR, texture.exportPath.slice(prefix.length));

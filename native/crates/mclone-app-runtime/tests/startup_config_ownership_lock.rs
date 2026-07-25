@@ -57,7 +57,6 @@ const SHARED_FIELD_NAMES: &[&str] = &[
     "debug_passive_showcase",
     "lighting_enabled",
     "light_status_batch_size",
-    "far_lod",
 ];
 
 fn assert_nested_canonical_config(item: &str, owner: &str) {
@@ -104,7 +103,6 @@ fn browser_startup_boundary_stays_opaque() {
         for scalar in [
             "movement_speed_multiplier:",
             "render_distance:",
-            "far_lod_enabled:",
             "section_occlusion_culling:",
             "force_fullbright:",
         ] {

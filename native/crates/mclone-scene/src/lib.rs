@@ -1,11 +1,9 @@
 #![forbid(unsafe_code)]
 
-mod far_lod_settle;
 mod interactive_input;
 mod player_movement;
 mod pose_sync;
 
-pub use far_lod_settle::{FarLodChunkLedgerRow, FarLodSettleSnapshot};
 pub use interactive_input::{
     MonoInputDisposition, MonoInteractiveInputRouter, XrControllerInputDisposition,
     XrControllerInputRouter,
@@ -42,10 +40,6 @@ use mclone_app_runtime::client_session_policy::{
     client_session_status_projection,
 };
 use mclone_app_runtime::debug_overlay::DebugPaneStats;
-use mclone_app_runtime::far_lod::{
-    FarTerrainLodProducerStats, MAX_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
-    MIN_FAR_TERRAIN_LOD_EXTRA_RADIUS_CHUNKS,
-};
 use mclone_app_runtime::frame_pacing::{
     FramePacingDebugStats, FramePacingUiState, FrameTimingStats,
 };
@@ -53,9 +47,9 @@ use mclone_app_runtime::frame_render::{
     FlatSurfacePresentation, FrameActorPreparation, FullFrameGui, FullFrameRenderSummary,
     FullFrameRenderTiming, PlacedActorFrame, PlacedTerrainFrame, PlacedTerrainPrepared,
     RenderStreamStats, TerrainCompositionFrame, TerrainCompositionSource,
-    TerrainTranslucentSubmission, render_full_frame_for_view_with_far_lod_and_opaque_gate_timed,
-    render_full_frame_for_view_with_far_lod_and_placed_terrain_timed,
-    render_full_frame_for_view_with_far_lod_and_prepared_records_in_slot,
+    TerrainTranslucentSubmission, render_full_frame_for_view_with_opaque_gate_timed,
+    render_full_frame_for_view_with_placed_terrain_timed,
+    render_full_frame_for_view_with_prepared_records_and_opaque_gate_in_slot,
     render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_in_slot,
     render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_timed_in_slot,
     render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_in_slot,
@@ -140,7 +134,6 @@ use mclone_render::chunk::{
 use mclone_render::entity::{
     ActorDrawResources, ActorFigureSet, ActorInstance, ActorInstanceId, ActorRenderStats,
 };
-use mclone_render::far_lod::FarTerrainLodRenderer;
 use mclone_render::fog::RenderFog;
 use mclone_render::gui::{
     GuiRenderOptions, GuiRenderer, WorldGuiLine, WorldGuiPanel, WorldGuiPanelRenderStats,
@@ -549,7 +542,6 @@ struct DrawableWorldSlot {
     last_actor_presentation_update: Option<MonotonicInstant>,
     traversal_ready_sections: TraversalReadySectionCache,
     section_uploads: RenderSectionUploadCoordinator,
-    far_lod: FarTerrainLodRenderer,
     render_stats: RenderStreamStats,
     render_admission_policy: RenderAdmissionPolicy,
     accepted_entry_pose: Option<WorldEntryPose>,
@@ -645,7 +637,6 @@ fn changed_remote_player_motion(
 impl DrawableWorldSlot {
     fn new(
         install: DrawableWorldSlotInstall,
-        far_lod: FarTerrainLodRenderer,
         render_admission_policy: RenderAdmissionPolicy,
     ) -> Self {
         let storage = WorldSlotStorage::from_scene(&install.scene, install.descriptor.as_ref());
@@ -671,7 +662,6 @@ impl DrawableWorldSlot {
             last_actor_presentation_update: None,
             traversal_ready_sections: TraversalReadySectionCache::default(),
             section_uploads: RenderSectionUploadCoordinator::default(),
-            far_lod,
             render_stats: install.render_stats,
             render_admission_policy,
             accepted_entry_pose: install.accepted_entry_pose,
@@ -2046,7 +2036,6 @@ impl McloneSceneHost {
                 camera_position,
             ),
             drawable_section_count: self.active_world.draw.section_count().min(traversal_ready),
-            presentation_settled: true,
         };
         if evidence.ready() {
             self.active_world.external_runtime_startup_pending = false;
@@ -2457,29 +2446,9 @@ impl McloneSceneHost {
             .flatten();
         terrain_options = terrain_options
             .map(|options| render_options_with_actor_grass_interactors(options, &actor_instances));
-        let far_lod_config = self.active_world.scene.far_lod;
-        let far_lod_seed = self.active_world.scene.seed;
-        let far_lod_generation_profile = self.active_world.scene.world_generation_profile;
-        let far_lod_center = self.active_world.camera.snapshot().chunk_pos;
         let sky_clear_color = self.sky_clear_color();
         let time_of_day = self.time_of_day();
         let sun_angle = self.sun_angle();
-        let center_position =
-            (terrain_views[0].camera_position + terrain_views[1].camera_position) * 0.5;
-        let lod_grant = self.active_world.render_admission_policy.lod_grant();
-        let far_lod_frame = if let Some(runtime) = self.active_world.runtime.as_mut() {
-            runtime.prepare_far_lod_frame(
-                far_lod_config,
-                far_lod_seed,
-                far_lod_generation_profile,
-                far_lod_center,
-                center_position,
-                lod_grant.build_tiles,
-                lod_grant.upload_tiles,
-            )?
-        } else {
-            None
-        };
         let records_start = self.services.clock.now();
         let (prepared_records, record_cache_prepare) =
             self.active_world.draw.prepare_render_records_with_stats();
@@ -2515,28 +2484,6 @@ impl McloneSceneHost {
                 timing.multiview_sky_ms = elapsed_ms(self.services.clock.elapsed_since(sky_start));
             }
             render_target = render_target.with_loaded_color();
-        }
-        if include_sky && far_lod_frame.is_some_and(|frame| !frame.is_empty()) {
-            let far_lod_start = self.services.clock.now();
-            let far_lod_stats = self.active_world.far_lod.render_multiview(
-                device,
-                queue,
-                &mut encoder,
-                target.color_view,
-                &target.depth.view,
-                terrain_views,
-                far_lod_frame,
-            );
-            self.active_world.render_stats.far_lod_vertex_count = far_lod_stats.vertex_count;
-            self.active_world.render_stats.far_lod_index_count = far_lod_stats.index_count;
-            self.active_world.render_stats.far_lod_region_draw_count =
-                far_lod_stats.region_draw_count;
-            self.active_world.render_stats.far_lod_uploaded_bytes = far_lod_stats.uploaded_bytes;
-            if let Some(timing) = timing.as_deref_mut() {
-                timing.multiview_far_lod_ms +=
-                    elapsed_ms(self.services.clock.elapsed_since(far_lod_start));
-            }
-            render_target = render_target.with_loaded_color().with_loaded_depth();
         }
         let terrain_start = self.services.clock.now();
         let prepared_stereo_draw = self.active_world.draw.prepare_stereo_draw(
@@ -3392,18 +3339,6 @@ impl McloneSceneHost {
                 runtime.has_pending_render_work(camera_position),
             )
         };
-        let far_lod_stats = slot
-            .runtime
-            .as_ref()
-            .expect("runtime presence checked before poll")
-            .far_lod_stats();
-        slot.render_admission_policy.set_lod_queue_telemetry(
-            far_lod_stats
-                .pending_builds
-                .saturating_add(far_lod_stats.inflight_builds),
-            far_lod_stats.oldest_build_age_ms,
-            far_lod_stats.queued_uploads,
-        );
         let target_period_ms = policy.target_period_ms;
         let budget_host_mode = match slot
             .runtime
@@ -3415,8 +3350,6 @@ impl McloneSceneHost {
             XrTerrainHostMode::LocalIntegrated => BudgetHostMode::LocalIntegrated,
             XrTerrainHostMode::RemoteDedicated => BudgetHostMode::RemoteHost,
         };
-        slot.render_admission_policy
-            .set_lod_producer_active(slot.scene.far_lod.enabled);
         let render_admission_grant = slot.render_admission_policy.decide(
             target_period_ms,
             budget_host_mode,
@@ -4271,24 +4204,6 @@ impl McloneSceneHost {
         summary_ui_draw.append(&panel_draw.overlay_draw);
         let selection_outline = self.current_xr_selection_outline();
         let mut render_stats = self.active_world.render_stats;
-        let far_lod_config = self.active_world.scene.far_lod;
-        let far_lod_seed = self.active_world.scene.seed;
-        let far_lod_generation_profile = self.active_world.scene.world_generation_profile;
-        let far_lod_center = self.active_world.camera.snapshot().chunk_pos;
-        let lod_grant = self.active_world.render_admission_policy.lod_grant();
-        let far_lod_mesh = if let Some(runtime) = self.active_world.runtime.as_mut() {
-            runtime.prepare_far_lod_frame(
-                far_lod_config,
-                far_lod_seed,
-                far_lod_generation_profile,
-                far_lod_center,
-                render_view.camera_position,
-                lod_grant.build_tiles,
-                lod_grant.upload_tiles,
-            )?
-        } else {
-            None
-        };
         #[cfg(not(target_arch = "wasm32"))]
         let opaque_world_gate = self
             .opaque_world_gate_renderer
@@ -4352,7 +4267,6 @@ impl McloneSceneHost {
                 });
         let full_frame_start = collect_split_timing.then(|| self.services.clock.now());
         let (summary, frame_timing) = if collect_split_timing {
-            let far_lod = far_lod_mesh.map(|_| &mut self.active_world.far_lod);
             if let Some(terrain_composition) = terrain_composition {
                 render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_timed_in_slot(
                     frame,
@@ -4378,8 +4292,6 @@ impl McloneSceneHost {
                     render_options,
                     FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
                     |_| summary_ui_draw,
-                    far_lod,
-                    far_lod_mesh,
                     &self.services.clock,
                     &mut render_stats,
                     view_slot,
@@ -4409,15 +4321,12 @@ impl McloneSceneHost {
                     render_options,
                     FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
                     |_| summary_ui_draw,
-                    far_lod,
-                    far_lod_mesh,
                     &self.services.clock,
                     &mut render_stats,
                     view_slot,
                 )
             }
         } else {
-            let far_lod = far_lod_mesh.map(|_| &mut self.active_world.far_lod);
             if let Some(terrain_composition) = terrain_composition {
                 render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_in_slot(
                     frame,
@@ -4443,8 +4352,6 @@ impl McloneSceneHost {
                     render_options,
                     FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
                     |_| summary_ui_draw,
-                    far_lod,
-                    far_lod_mesh,
                     &mut render_stats,
                     view_slot,
                 )
@@ -4474,8 +4381,6 @@ impl McloneSceneHost {
                     render_options,
                     FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
                     |_| summary_ui_draw,
-                    far_lod,
-                    far_lod_mesh,
                     &mut render_stats,
                     view_slot,
                 )
@@ -4751,7 +4656,6 @@ impl McloneSceneHost {
             timing: XrTerrainEyeRenderTiming {
                 full_frame_ms,
                 sky_ms: frame_timing.sky_ms,
-                far_lod_ms: frame_timing.far_lod_ms,
                 terrain_opaque_ms: frame_timing.terrain_opaque_ms,
                 terrain_translucent_ms: frame_timing.terrain_translucent_ms,
                 prepare_ms,

@@ -25,7 +25,6 @@ pub struct FirstPartyBlockVisual {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AssetConsumerKind {
-    FarLod,
     ActorTexture,
     ActorFigure,
     ScreenEffect,
@@ -92,13 +91,10 @@ pub fn canonical_first_party_asset_inventory() -> CanonicalFirstPartyAssetInvent
 }
 
 fn direct_asset_requirements() -> Vec<CanonicalAssetRequirement> {
-    use AssetConsumerKind::{
-        ActorFigure, ActorTexture, Audio, FarLod, ScreenEffect, TerrainColorMap,
-    };
+    use AssetConsumerKind::{ActorFigure, ActorTexture, Audio, ScreenEffect, TerrainColorMap};
     use AssetRequirementPolicy::{Optional, Required, Suppressible};
 
     [
-        ("assets/mclone/lod/materials.v1.json", FarLod, Optional),
         (
             "assets/minecraft/textures/entity/cow/cow.png",
             ActorTexture,
@@ -268,7 +264,6 @@ mod tests {
             .collect::<BTreeSet<_>>();
 
         for required in [
-            "assets/mclone/lod/materials.v1.json",
             "assets/minecraft/textures/entity/cow/cow.png",
             "assets/mclone/figures/player.figure.json",
             "assets/minecraft/textures/misc/underwater.png",

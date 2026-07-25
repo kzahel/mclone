@@ -26,7 +26,6 @@ use mclone_protocol::{
 use mclone_render::chunk::TexturedSectionDrawResources;
 use mclone_render::chunk::{PlacedTexturedSectionRenderer, TexturedSectionRenderStats};
 use mclone_render::entity::{ActorDrawResourceSnapshot, ActorRenderStats};
-use mclone_render::far_lod::FarTerrainLodRenderer;
 use mclone_render::opaque_world_gate::{OpaqueWorldGate, OpaqueWorldGateRenderer};
 use mclone_render::placement::{EmbeddedChunkRegion, WorldCompositionContext, WorldPlacement};
 use mclone_render_session::EngineCameraController;
@@ -320,7 +319,6 @@ impl PreparedEmbeddedWorldScenario {
 pub(crate) struct PreparedWarmWorldRendererShell {
     pub presentation: WarmWorldPresentationRequest,
     pub draw: TexturedSectionDrawResources,
-    pub far_lod: FarTerrainLodRenderer,
     pub gate_renderer: Option<OpaqueWorldGateRenderer>,
     pub placed_renderer: Option<PlacedTexturedSectionRenderer>,
     pub renderer_shell_create_ms: f64,
