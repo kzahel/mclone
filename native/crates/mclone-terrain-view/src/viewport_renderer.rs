@@ -3,16 +3,20 @@ use std::mem::size_of;
 use std::num::NonZeroU64;
 use std::sync::mpsc;
 
+use mclone_worldgen::levelgen::{
+    McloneOverworldSamplingTopology, McloneOverworldVegetationPlanCache, McloneTreeFamily,
+    McloneVegetationSource,
+};
 use mclone_worldgen::terrain_preview::{
     TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS, TerrainPreviewComparison, TerrainPreviewContentStage,
     TerrainPreviewProfile, TerrainPreviewReferenceGrid, TerrainPreviewSample,
-    ValidatedTerrainPreviewRequest,
+    TerrainPreviewVegetationProduct, ValidatedTerrainPreviewRequest,
 };
 
 use super::{
     TERRAIN_PREVIEW_DEPTH_FORMAT, TERRAIN_PREVIEW_RENDER_WGSL, TERRAIN_PREVIEW_SAMPLE_BYTES,
-    TERRAIN_PREVIEW_UNIFORM_BYTES, TERRAIN_PREVIEW_WORKGROUP_AXIS, TerrainPreviewCamera,
-    TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource,
+    TERRAIN_PREVIEW_TREE_WGSL, TERRAIN_PREVIEW_UNIFORM_BYTES, TERRAIN_PREVIEW_WORKGROUP_AXIS,
+    TerrainPreviewCamera, TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource,
     TerrainPreviewSplitLayout, TerrainViewportPlan, TerrainViewportTileId, parse_samples,
     terrain_preview_compute_wgsl, terrain_preview_focus_y_for_profile,
     viewport_uniform_bytes_for_request,
@@ -32,6 +36,10 @@ pub const TERRAIN_VIEWPORT_MAX_RESIDENT_TILES: usize = 192;
 pub const TERRAIN_VIEWPORT_TILE_COMPILES_PER_FRAME: usize = 4;
 pub const TERRAIN_VIEWPORT_GPU_DISPATCHES_PER_FRAME: usize = 16;
 pub const TERRAIN_VIEWPORT_CPU_COMPILE_BUDGET_MICROS: u64 = 8_000;
+const TERRAIN_PREVIEW_TREE_INSTANCE_FLOATS: usize = 12;
+const TERRAIN_PREVIEW_TREE_INSTANCE_BYTES: u64 =
+    (TERRAIN_PREVIEW_TREE_INSTANCE_FLOATS * size_of::<f32>()) as u64;
+const TERRAIN_PREVIEW_TREE_VERTICES_PER_INSTANCE: u32 = 108;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TerrainViewportFrameStats {
@@ -64,6 +72,16 @@ pub struct TerrainViewportFrameStats {
     pub stale_result_count: u64,
     pub sample_count: u32,
     pub vertex_count: u32,
+    pub vegetation_summary_tile_count: u32,
+    pub vegetation_record_tile_count: u32,
+    pub vegetation_aggregated_tile_count: u32,
+    pub tree_instance_count: u32,
+    pub tree_instance_bytes: u64,
+    pub tree_proxy_vertex_count: u32,
+    pub vegetation_cell_requests: u64,
+    pub vegetation_cell_hits: u64,
+    pub vegetation_cell_misses: u64,
+    pub retained_vegetation_cells: u32,
     pub reference_bytes: u64,
     pub gpu_sample_bytes: u64,
     pub readback_bytes: u64,
@@ -321,6 +339,7 @@ fn generate_material_mips(
 struct TerrainViewportGpuTile {
     request: ValidatedTerrainPreviewRequest,
     reference: Option<TerrainPreviewReferenceGrid>,
+    vegetation: Option<TerrainPreviewVegetationProduct>,
     gpu_samples: Option<Vec<TerrainPreviewSample>>,
     gpu_submitted: bool,
     uniform_buffer: wgpu::Buffer,
@@ -328,6 +347,9 @@ struct TerrainViewportGpuTile {
     reference_sample_buffer: wgpu::Buffer,
     compute_bind_group: wgpu::BindGroup,
     render_bind_group: wgpu::BindGroup,
+    tree_instance_buffer: Option<wgpu::Buffer>,
+    tree_instance_count: u32,
+    tree_instance_bytes: u64,
     last_used: u64,
 }
 
@@ -393,6 +415,7 @@ impl TerrainViewportGpuTile {
         Ok(Self {
             request,
             reference: None,
+            vegetation: None,
             gpu_samples: None,
             gpu_submitted: false,
             uniform_buffer,
@@ -400,15 +423,20 @@ impl TerrainViewportGpuTile {
             reference_sample_buffer,
             compute_bind_group,
             render_bind_group,
+            tree_instance_buffer: None,
+            tree_instance_count: 0,
+            tree_instance_bytes: 0,
             last_used: 0,
         })
     }
 
     fn upload_reference(
         &mut self,
+        device: &wgpu::Device,
         queue: &wgpu::Queue,
         sample_byte_len: u64,
         reference: TerrainPreviewReferenceGrid,
+        vegetation: TerrainPreviewVegetationProduct,
     ) -> Result<(), String> {
         let reference_bytes = reference.packed_bytes();
         if reference_bytes.len() as u64 != sample_byte_len {
@@ -419,7 +447,23 @@ impl TerrainViewportGpuTile {
             ));
         }
         queue.write_buffer(&self.reference_sample_buffer, 0, &reference_bytes);
+        let (tree_bytes, tree_instance_count) = tree_instance_bytes(&vegetation)?;
+        self.tree_instance_buffer = if tree_bytes.is_empty() {
+            None
+        } else {
+            let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("mclone_terrain_viewport_tree_instances"),
+                size: tree_bytes.len() as u64,
+                usage: wgpu::BufferUsages::VERTEX | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            });
+            queue.write_buffer(&buffer, 0, &tree_bytes);
+            Some(buffer)
+        };
+        self.tree_instance_count = tree_instance_count;
+        self.tree_instance_bytes = tree_bytes.len() as u64;
         self.reference = Some(reference);
+        self.vegetation = Some(vegetation);
         Ok(())
     }
 }
@@ -432,8 +476,10 @@ pub struct TerrainViewportRenderer {
     _material_resources: TerrainPreviewMaterialResources,
     compute_pipeline: wgpu::ComputePipeline,
     render_pipeline: wgpu::RenderPipeline,
+    tree_pipeline: wgpu::RenderPipeline,
     depth: TerrainViewportDepthTarget,
     cache: HashMap<TerrainViewportTileId, TerrainViewportGpuTile>,
+    vegetation_cache: Option<McloneOverworldVegetationPlanCache>,
     pending: Vec<PendingTerrainViewportReadback>,
     plan: Option<TerrainViewportPlan>,
     cpu_queue: VecDeque<TerrainViewportTileId>,
@@ -452,6 +498,9 @@ pub struct TerrainViewportRenderer {
     request_gpu_dispatched_tiles: u32,
     request_cache_hit_tiles: u32,
     request_cpu_reference_micros: u64,
+    request_vegetation_cell_requests: u64,
+    request_vegetation_cell_hits: u64,
+    request_vegetation_cell_misses: u64,
     evicted_tiles_total: u64,
     stale_result_count: u64,
     focus_request: Option<(TerrainPreviewProfile, i64, i32, i32)>,
@@ -535,6 +584,10 @@ impl TerrainViewportRenderer {
             label: Some("mclone_terrain_viewport_render_shader"),
             source: wgpu::ShaderSource::Wgsl(TERRAIN_PREVIEW_RENDER_WGSL.into()),
         });
+        let tree_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mclone_terrain_viewport_tree_shader"),
+            source: wgpu::ShaderSource::Wgsl(TERRAIN_PREVIEW_TREE_WGSL.into()),
+        });
         let compute_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("mclone_terrain_viewport_compute_pipeline_layout"),
@@ -547,6 +600,11 @@ impl TerrainViewportRenderer {
                 bind_group_layouts: &[&render_layout, &material_layout],
                 push_constant_ranges: &[],
             });
+        let tree_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mclone_terrain_viewport_tree_pipeline_layout"),
+            bind_group_layouts: &[&render_layout],
+            push_constant_ranges: &[],
+        });
         let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
             label: Some("mclone_terrain_viewport_compute_pipeline"),
             layout: Some(&compute_pipeline_layout),
@@ -591,6 +649,62 @@ impl TerrainViewportRenderer {
             multiview: None,
             cache: None,
         });
+        let tree_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("mclone_terrain_viewport_tree_pipeline"),
+            layout: Some(&tree_pipeline_layout),
+            vertex: wgpu::VertexState {
+                module: &tree_shader,
+                entry_point: Some("vertex_main"),
+                buffers: &[wgpu::VertexBufferLayout {
+                    array_stride: TERRAIN_PREVIEW_TREE_INSTANCE_BYTES,
+                    step_mode: wgpu::VertexStepMode::Instance,
+                    attributes: &[
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x4,
+                            offset: 0,
+                            shader_location: 0,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x4,
+                            offset: 16,
+                            shader_location: 1,
+                        },
+                        wgpu::VertexAttribute {
+                            format: wgpu::VertexFormat::Float32x4,
+                            offset: 32,
+                            shader_location: 2,
+                        },
+                    ],
+                }],
+                compilation_options: Default::default(),
+            },
+            fragment: Some(wgpu::FragmentState {
+                module: &tree_shader,
+                entry_point: Some("fragment_main"),
+                targets: &[Some(wgpu::ColorTargetState {
+                    format: color_format,
+                    blend: None,
+                    write_mask: wgpu::ColorWrites::ALL,
+                })],
+                compilation_options: Default::default(),
+            }),
+            primitive: wgpu::PrimitiveState {
+                topology: wgpu::PrimitiveTopology::TriangleList,
+                front_face: wgpu::FrontFace::Ccw,
+                cull_mode: Some(wgpu::Face::Back),
+                ..Default::default()
+            },
+            depth_stencil: Some(wgpu::DepthStencilState {
+                format: TERRAIN_PREVIEW_DEPTH_FORMAT,
+                depth_write_enabled: true,
+                depth_compare: wgpu::CompareFunction::LessEqual,
+                stencil: Default::default(),
+                bias: Default::default(),
+            }),
+            multisample: Default::default(),
+            multiview: None,
+            cache: None,
+        });
         Ok(Self {
             sample_count_per_tile,
             sample_byte_len,
@@ -599,8 +713,10 @@ impl TerrainViewportRenderer {
             _material_resources: material_resources,
             compute_pipeline,
             render_pipeline,
+            tree_pipeline,
             depth: TerrainViewportDepthTarget::new(device, width, height),
             cache: HashMap::new(),
+            vegetation_cache: None,
             pending: Vec::new(),
             plan: None,
             cpu_queue: VecDeque::new(),
@@ -619,6 +735,9 @@ impl TerrainViewportRenderer {
             request_gpu_dispatched_tiles: 0,
             request_cache_hit_tiles: 0,
             request_cpu_reference_micros: 0,
+            request_vegetation_cell_requests: 0,
+            request_vegetation_cell_hits: 0,
+            request_vegetation_cell_misses: 0,
             evicted_tiles_total: 0,
             stale_result_count: 0,
             focus_request: None,
@@ -641,6 +760,7 @@ impl TerrainViewportRenderer {
             (self.cpu_queue.len() + self.external_cpu_inflight.len() + self.gpu_queue.len()) as u64,
         );
         self.cache.clear();
+        self.vegetation_cache = None;
         self.cpu_queue.clear();
         self.external_cpu_inflight.clear();
         self.gpu_queue.clear();
@@ -682,6 +802,7 @@ impl TerrainViewportRenderer {
             self.gpu_queue.clear();
         } else {
             self.cache.clear();
+            self.vegetation_cache = None;
             self.cpu_queue.clear();
             self.external_cpu_inflight.clear();
             self.gpu_queue.clear();
@@ -734,6 +855,7 @@ impl TerrainViewportRenderer {
         if reference.request().request() != request.tile.preview_request() {
             return Err("external terrain preview grid does not match its tile request".to_owned());
         }
+        let vegetation = TerrainPreviewVegetationProduct::compile(request.tile.preview_request())?;
         if !self.cache.contains_key(&request.tile) {
             let tile = TerrainViewportGpuTile::new(
                 device,
@@ -748,7 +870,7 @@ impl TerrainViewportRenderer {
             .cache
             .get_mut(&request.tile)
             .expect("created external terrain viewport tile is resident");
-        tile.upload_reference(queue, self.sample_byte_len, reference)?;
+        tile.upload_reference(device, queue, self.sample_byte_len, reference, vegetation)?;
         self.use_clock = self.use_clock.saturating_add(1);
         tile.last_used = self.use_clock;
         self.cpu_compiled_tiles_total = self.cpu_compiled_tiles_total.saturating_add(1);
@@ -905,6 +1027,8 @@ impl TerrainViewportRenderer {
                 };
                 let compile_started = clock_ms();
                 let reference = TerrainPreviewReferenceGrid::compile(tile_id.preview_request())?;
+                let vegetation = self.compile_vegetation_product(tile_id)?;
+                let vegetation_report = vegetation.cache_report();
                 let compile_micros = ((clock_ms() - compile_started).max(0.0) * 1_000.0).round();
                 cpu_reference_micros =
                     cpu_reference_micros.saturating_add(compile_micros.min(u64::MAX as f64) as u64);
@@ -922,12 +1046,21 @@ impl TerrainViewportRenderer {
                     .cache
                     .get_mut(&tile_id)
                     .expect("created terrain viewport CPU tile is resident");
-                tile.upload_reference(queue, self.sample_byte_len, reference)?;
+                tile.upload_reference(device, queue, self.sample_byte_len, reference, vegetation)?;
                 self.use_clock = self.use_clock.saturating_add(1);
                 tile.last_used = self.use_clock;
                 cpu_compiled_tiles = cpu_compiled_tiles.saturating_add(1);
                 self.cpu_compiled_tiles_total = self.cpu_compiled_tiles_total.saturating_add(1);
                 self.request_cpu_compiled_tiles = self.request_cpu_compiled_tiles.saturating_add(1);
+                self.request_vegetation_cell_requests = self
+                    .request_vegetation_cell_requests
+                    .saturating_add(vegetation_report.cell_requests);
+                self.request_vegetation_cell_hits = self
+                    .request_vegetation_cell_hits
+                    .saturating_add(vegetation_report.cell_hits);
+                self.request_vegetation_cell_misses = self
+                    .request_vegetation_cell_misses
+                    .saturating_add(vegetation_report.cell_misses);
             }
         }
         self.request_cpu_reference_micros = self
@@ -996,9 +1129,75 @@ impl TerrainViewportRenderer {
         let sample_count = cpu_published_tile_count
             .max(gpu_published_tile_count)
             .saturating_mul(self.sample_count_per_tile);
-        let vertex_count = cpu_published_tile_count
+        let terrain_vertex_count = cpu_published_tile_count
             .saturating_add(gpu_published_tile_count)
             .saturating_mul(TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS.pow(2) * 6);
+        let vegetation_tiles = drawn_tiles
+            .iter()
+            .filter_map(|tile_id| self.cache.get(tile_id))
+            .filter_map(|tile| tile.vegetation.as_ref())
+            .collect::<Vec<_>>();
+        let vegetation_summary_tile_count = u32::try_from(
+            vegetation_tiles
+                .iter()
+                .filter(|product| product.summary_available())
+                .count(),
+        )
+        .unwrap_or(u32::MAX);
+        let vegetation_record_tile_count = u32::try_from(
+            vegetation_tiles
+                .iter()
+                .filter(|product| product.records_requested())
+                .count(),
+        )
+        .unwrap_or(u32::MAX);
+        let vegetation_aggregated_tile_count = u32::try_from(
+            vegetation_tiles
+                .iter()
+                .filter(|product| product.records_aggregated())
+                .count(),
+        )
+        .unwrap_or(u32::MAX);
+        let tree_instance_count = vegetation_tiles.iter().fold(0_u32, |count, product| {
+            count.saturating_add(u32::try_from(product.occurrences().len()).unwrap_or(u32::MAX))
+        });
+        let tree_instance_bytes = drawn_tiles
+            .iter()
+            .filter_map(|tile_id| self.cache.get(tile_id))
+            .map(|tile| tile.tree_instance_bytes)
+            .sum::<u64>();
+        let tree_proxy_vertex_count = if options.layer == TerrainPreviewLayer::Terrain
+            && plan.request.content_stage == TerrainPreviewContentStage::Cover
+        {
+            render_panels(
+                options.source,
+                options.split_layout,
+                width.max(1),
+                height.max(1),
+            )
+            .iter()
+            .fold(0_u32, |count, panel| {
+                let tiles = if options.source == TerrainPreviewSource::Reference
+                    || (options.source == TerrainPreviewSource::Split && panel.instance == 0)
+                {
+                    &cpu_published_tiles
+                } else {
+                    &gpu_published_tiles
+                };
+                count.saturating_add(tiles.iter().fold(0_u32, |tile_count, tile_id| {
+                    let instances = self
+                        .cache
+                        .get(tile_id)
+                        .map_or(0, |tile| tile.tree_instance_count);
+                    tile_count.saturating_add(
+                        instances.saturating_mul(TERRAIN_PREVIEW_TREE_VERTICES_PER_INSTANCE),
+                    )
+                }))
+            })
+        } else {
+            0
+        };
+        let vertex_count = terrain_vertex_count.saturating_add(tree_proxy_vertex_count);
         let resident_tile_count = u32::try_from(self.cache.len()).unwrap_or(u32::MAX);
         let cpu_queued_tile_count = if cpu_required {
             u32::try_from(self.cpu_queue.len() + self.external_cpu_inflight.len())
@@ -1026,6 +1225,14 @@ impl TerrainViewportRenderer {
             .values()
             .filter(|tile| tile.gpu_submitted)
             .count() as u64;
+        let resident_tree_instance_bytes = self
+            .cache
+            .values()
+            .map(|tile| tile.tree_instance_bytes)
+            .sum::<u64>();
+        let retained_vegetation_cells = self.vegetation_cache.as_ref().map_or(0, |cache| {
+            u32::try_from(cache.report().retained_cells).unwrap_or(u32::MAX)
+        });
         let cpu_published_spacing = self
             .cpu_published_level
             .map(|index| plan.levels[index].sample_spacing)
@@ -1072,11 +1279,22 @@ impl TerrainViewportRenderer {
             stale_result_count: self.stale_result_count,
             sample_count,
             vertex_count,
+            vegetation_summary_tile_count,
+            vegetation_record_tile_count,
+            vegetation_aggregated_tile_count,
+            tree_instance_count,
+            tree_instance_bytes,
+            tree_proxy_vertex_count,
+            vegetation_cell_requests: self.request_vegetation_cell_requests,
+            vegetation_cell_hits: self.request_vegetation_cell_hits,
+            vegetation_cell_misses: self.request_vegetation_cell_misses,
+            retained_vegetation_cells,
             reference_bytes: cpu_ready_tiles * self.sample_byte_len,
             gpu_sample_bytes: gpu_ready_tiles * self.sample_byte_len,
             readback_bytes: u64::from(gpu_dispatched_tiles) * self.sample_byte_len,
             resident_bytes: u64::from(resident_tile_count)
-                * (self.sample_byte_len * 2 + TERRAIN_PREVIEW_UNIFORM_BYTES),
+                * (self.sample_byte_len * 2 + TERRAIN_PREVIEW_UNIFORM_BYTES)
+                + resident_tree_instance_bytes,
             cpu_reference_micros,
             request_cpu_reference_micros: self.request_cpu_reference_micros,
             cpu_coarse_ready,
@@ -1175,11 +1393,32 @@ impl TerrainViewportRenderer {
         completed
     }
 
+    fn compile_vegetation_product(
+        &mut self,
+        tile: TerrainViewportTileId,
+    ) -> Result<TerrainPreviewVegetationProduct, String> {
+        let request = tile.preview_request();
+        if request.profile != TerrainPreviewProfile::McloneOverworldV1
+            || request.content_stage != TerrainPreviewContentStage::Cover
+        {
+            return TerrainPreviewVegetationProduct::compile(request);
+        }
+        let source =
+            McloneVegetationSource::new(request.seed, McloneOverworldSamplingTopology::Unbounded);
+        let cache = self
+            .vegetation_cache
+            .get_or_insert_with(|| McloneOverworldVegetationPlanCache::new(source));
+        TerrainPreviewVegetationProduct::compile_with_cache(request, cache)
+    }
+
     fn reset_request_counters(&mut self) {
         self.request_cpu_compiled_tiles = 0;
         self.request_gpu_dispatched_tiles = 0;
         self.request_cache_hit_tiles = 0;
         self.request_cpu_reference_micros = 0;
+        self.request_vegetation_cell_requests = 0;
+        self.request_vegetation_cell_hits = 0;
+        self.request_vegetation_cell_misses = 0;
     }
 
     fn current_plan_cache_hits(&self) -> u32 {
@@ -1411,7 +1650,7 @@ impl TerrainViewportRenderer {
         pass.set_pipeline(&self.render_pipeline);
         pass.set_bind_group(1, &self._material_resources.bind_group, &[]);
         let panels = render_panels(options.source, options.split_layout, width, height);
-        for panel in panels {
+        for panel in &panels {
             pass.set_scissor_rect(panel.x, panel.y, panel.width, panel.height);
             let tiles = if options.source == TerrainPreviewSource::Reference
                 || (options.source == TerrainPreviewSource::Split && panel.instance == 0)
@@ -1434,6 +1673,36 @@ impl TerrainViewportRenderer {
                 pass.draw(
                     0..TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS.pow(2) * 6,
                     panel.instance..panel.instance + 1,
+                );
+            }
+        }
+        if options.layer != TerrainPreviewLayer::Terrain {
+            return;
+        }
+        pass.set_pipeline(&self.tree_pipeline);
+        for panel in &panels {
+            pass.set_scissor_rect(panel.x, panel.y, panel.width, panel.height);
+            let tiles = if options.source == TerrainPreviewSource::Reference
+                || (options.source == TerrainPreviewSource::Split && panel.instance == 0)
+            {
+                cpu_tiles
+            } else {
+                gpu_tiles
+            };
+            for tile_id in tiles {
+                let tile = self
+                    .cache
+                    .get(tile_id)
+                    .expect("drawn terrain viewport tiles are resident");
+                let Some(instance_buffer) = tile.tree_instance_buffer.as_ref() else {
+                    continue;
+                };
+                pass.set_bind_group(0, &tile.render_bind_group, &[]);
+                pass.set_vertex_buffer(0, instance_buffer.slice(..));
+                let first_instance = panel.instance.saturating_mul(tile.tree_instance_count);
+                pass.draw(
+                    0..TERRAIN_PREVIEW_TREE_VERTICES_PER_INSTANCE,
+                    first_instance..first_instance.saturating_add(tile.tree_instance_count),
                 );
             }
         }
@@ -1476,6 +1745,50 @@ impl TerrainViewportRenderer {
             ),
         )
     }
+}
+
+fn tree_instance_bytes(
+    vegetation: &TerrainPreviewVegetationProduct,
+) -> Result<(Vec<u8>, u32), String> {
+    let instance_count = u32::try_from(vegetation.occurrences().len())
+        .map_err(|_| "terrain preview tree instance count exceeds u32")?;
+    let byte_capacity = vegetation
+        .occurrences()
+        .len()
+        .checked_mul(TERRAIN_PREVIEW_TREE_INSTANCE_BYTES as usize)
+        .and_then(|bytes| bytes.checked_mul(2))
+        .ok_or("terrain preview tree instance byte size overflow")?;
+    let mut bytes = Vec::with_capacity(byte_capacity);
+    for panel in 0..2 {
+        for occurrence in vegetation.occurrences() {
+            let base = occurrence
+                .working_base()
+                .map_err(|error| format!("terrain preview tree base is invalid: {error}"))?;
+            let family = match occurrence.record.family {
+                McloneTreeFamily::TemperateBroadleaf => 1.0,
+                McloneTreeFamily::CoolWetConifer => 2.0,
+                McloneTreeFamily::WarmDryAcacia => 3.0,
+            };
+            let values = [
+                base.x as f32,
+                base.y as f32,
+                base.z as f32,
+                f32::from(occurrence.record.trunk_height),
+                f32::from(occurrence.record.crown_radius),
+                f32::from(occurrence.record.crown_depth),
+                family,
+                f32::from(occurrence.record.orientation),
+                panel as f32,
+                f32::from(occurrence.record.landmark_rank),
+                0.0,
+                0.0,
+            ];
+            for value in values {
+                bytes.extend_from_slice(&value.to_le_bytes());
+            }
+        }
+    }
+    Ok((bytes, instance_count))
 }
 
 #[derive(Clone, Copy)]
@@ -1603,6 +1916,7 @@ fn storage_layout_entry(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mclone_worldgen::terrain_preview::TerrainPreviewRequest;
 
     #[test]
     fn compare_panels_match_shader_layout() {
@@ -1651,6 +1965,32 @@ mod tests {
             mclone_worldgen::terrain_preview::TERRAIN_PREVIEW_SAMPLE_FLOATS,
             usize::try_from(TERRAIN_PREVIEW_SAMPLE_BYTES / 4).unwrap()
         );
+    }
+
+    #[test]
+    fn tree_instances_preserve_semantics_for_both_compare_panels() {
+        let request = TerrainPreviewRequest::new(12_345, -80, 48, 4)
+            .with_content_stage(TerrainPreviewContentStage::Cover);
+        let product = TerrainPreviewVegetationProduct::compile(request).unwrap();
+        let (bytes, instance_count) = tree_instance_bytes(&product).unwrap();
+
+        assert!(instance_count > 0);
+        assert_eq!(
+            bytes.len(),
+            usize::try_from(instance_count).unwrap()
+                * TERRAIN_PREVIEW_TREE_INSTANCE_BYTES as usize
+                * 2
+        );
+        let values = bytes
+            .chunks_exact(size_of::<f32>())
+            .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap()))
+            .collect::<Vec<_>>();
+        let panel_stride =
+            usize::try_from(instance_count).unwrap() * TERRAIN_PREVIEW_TREE_INSTANCE_FLOATS;
+        assert_eq!(values[8], 0.0);
+        assert_eq!(values[panel_stride + 8], 1.0);
+        assert!((1.0..=3.0).contains(&values[6]));
+        assert_eq!(values[9], 3.0);
     }
 
     #[test]

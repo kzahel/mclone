@@ -40,6 +40,7 @@ pub const TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION: &str = "mclone-overworld-v1-gp
 pub const TERRAIN_PREVIEW_COMPUTE_WGSL_TEMPLATE: &str =
     include_str!("shaders/terrain_preview_compute.wgsl");
 pub const TERRAIN_PREVIEW_RENDER_WGSL: &str = include_str!("shaders/terrain_preview_render.wgsl");
+pub const TERRAIN_PREVIEW_TREE_WGSL: &str = include_str!("shaders/terrain_preview_tree.wgsl");
 
 const TERRAIN_PREVIEW_UNIFORM_BYTES: u64 = 128;
 const TERRAIN_PREVIEW_SAMPLE_BYTES: u64 =
@@ -1084,6 +1085,8 @@ mod tests {
         validate_shader(&terrain_preview_compute_wgsl(), "compute_main");
         validate_shader(TERRAIN_PREVIEW_RENDER_WGSL, "vertex_main");
         validate_shader(TERRAIN_PREVIEW_RENDER_WGSL, "fragment_main");
+        validate_shader(TERRAIN_PREVIEW_TREE_WGSL, "vertex_main");
+        validate_shader(TERRAIN_PREVIEW_TREE_WGSL, "fragment_main");
     }
 
     #[test]

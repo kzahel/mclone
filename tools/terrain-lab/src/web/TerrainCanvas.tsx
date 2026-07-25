@@ -47,6 +47,7 @@ export interface TerrainLabRenderReport {
   fieldRevision: string;
   referenceSchemaRevision: string;
   gpuEvaluatorRevision: string;
+  vegetationRevision: string;
   approximation: boolean;
   seed: string;
   centerX: number;
@@ -62,6 +63,16 @@ export interface TerrainLabRenderReport {
   samplesPerAxis: number;
   sampleCount: number;
   vertexCount: number;
+  vegetationSummaryTileCount: number;
+  vegetationRecordTileCount: number;
+  vegetationAggregatedTileCount: number;
+  treeInstanceCount: number;
+  treeInstanceBytes: number;
+  treeProxyVertexCount: number;
+  vegetationCellRequests: number;
+  vegetationCellHits: number;
+  vegetationCellMisses: number;
+  retainedVegetationCells: number;
   footprintBlocks: number;
   footprintChunks: number;
   viewWidthBlocks: number;

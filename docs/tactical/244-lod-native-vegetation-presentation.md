@@ -138,7 +138,7 @@ Baseline record:
 - [x] Add typed forest summary fields to the shared preview sample schema.
 - [x] Evaluate production CPU forest intent and portable GPU macro intent.
 - [x] Add bounded near record products and deterministic admission tests.
-- [ ] Integrate source revision, cache reports, and summary/record byte counts.
+- [x] Integrate source revision, cache reports, and summary/record byte counts.
 - [x] Prove coarse requests issue zero individual record queries.
 
 Gate: `Cover` is a truthful vegetation semantic product, not a biome tint.
@@ -159,13 +159,36 @@ Milestone record:
 
 ### Slice 2: Terrain Lab proxy presentation
 
-- [ ] Upload compact records with each resident preview tile.
-- [ ] Draw one shared archetype family through instancing in map and 3D.
-- [ ] Present the same CPU-produced vegetation overlay in CPU and GPU panes.
-- [ ] Expose summary/record readiness and performance diagnostics.
-- [ ] Prove pan/zoom/cache reuse and stable exact/LOD IDs.
+- [x] Upload compact records with each resident preview tile.
+- [x] Draw one shared archetype family through instancing in map and 3D.
+- [x] Present the same CPU-produced vegetation overlay in CPU and GPU panes.
+- [x] Expose summary/record readiness and performance diagnostics.
+- [x] Prove pan/zoom/cache reuse and stable exact/LOD IDs.
 
 Gate: zooming aggregates trees without moving or changing admitted records.
+
+Milestone record:
+
+- each resident tile uploads one 48-byte semantic instance per admitted tree
+  for each of the two possible comparison panels; the one procedural shader
+  emits trunk and family-specific broadleaf, conifer, or acacia crown boxes
+  without per-tree mesh allocation;
+- CPU and GPU panes draw the same CPU-produced occurrence buffer over their
+  independently compiled terrain, including side-by-side desktop and stacked
+  phone layouts;
+- frame reports expose the vegetation source revision, summary/record/
+  aggregated tile counts, semantic instances, upload bytes, proxy vertices,
+  planning-cell requests/hits/misses, retained cells, and total residency;
+- repeated shared-product tests preserve occurrence identity and hit the
+  vegetation cache, while browser assertions prove spacing `4` has stable
+  rank-3 records and spacing `8` has summary-only aggregation with zero
+  record queries; and
+- all 21 `mclone-terrain-view` tests and Terrain Lab Wasm type checking pass.
+  Headed Wayland WebGPU desktop and Pixel 7 projects both pass the targeted
+  browser contract. Inspected 3D and map captures are
+  `/tmp/mclone-terrain-lab-{desktop-chrome,phone-chrome}-vegetation-cover.png`
+  and
+  `/tmp/mclone-terrain-lab-{desktop-chrome,phone-chrome}-vegetation-map.png`.
 
 ### Slice 3: in-game Far LOD adoption
 

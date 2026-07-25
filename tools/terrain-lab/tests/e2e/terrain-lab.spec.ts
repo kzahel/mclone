@@ -362,6 +362,80 @@ test("zooms shared and canonical terrain to one-block texture detail", async ({
   expect(pageErrors).toEqual([]);
 });
 
+test("renders LOD-native vegetation products and aggregates coarse cover", async ({
+  page,
+}, testInfo) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      pageErrors.push(message.text());
+    }
+  });
+  const shell = page.locator(".appShell");
+  const canvas = page.locator("canvas[aria-label='Live GPU terrain preview']");
+
+  await page.goto(
+    "/terrain/?seed=12345&x=-80&z=48&blocks=256&detail=4"
+      + "&panes=cpu%2Cgpu&water=1&vegetation=1"
+      + "&stage=cover&view=3d&layer=terrain",
+  );
+  await waitForCurrentComparison(page);
+  await expect(shell).toHaveAttribute("data-stage", "cover");
+  await expect(shell).toHaveAttribute("data-effective-spacing", "4");
+  expect(Number(await shell.getAttribute("data-vegetation-summary-tiles")))
+    .toBeGreaterThan(0);
+  expect(Number(await shell.getAttribute("data-vegetation-record-tiles")))
+    .toBeGreaterThan(0);
+  await expect(shell).toHaveAttribute("data-vegetation-aggregated-tiles", "0");
+  const treeInstances = Number(await shell.getAttribute("data-tree-instances"));
+  const treeProxyVertices = Number(
+    await shell.getAttribute("data-tree-proxy-vertices"),
+  );
+  expect(treeInstances).toBeGreaterThan(0);
+  expect(Number(await shell.getAttribute("data-tree-instance-bytes")))
+    .toBe(treeInstances * 96);
+  expect(treeProxyVertices).toBe(treeInstances * 108 * 2);
+  expect(Number(await shell.getAttribute("data-vegetation-cell-requests")))
+    .toBeGreaterThan(0);
+  expect(Number(await shell.getAttribute("data-vegetation-cell-misses")))
+    .toBeGreaterThan(0);
+  expect(Number(await shell.getAttribute("data-vegetation-cell-hits")))
+    .toBeGreaterThan(0);
+  expect(Number(await shell.getAttribute("data-retained-vegetation-cells")))
+    .toBeGreaterThan(0);
+  await page.getByTestId("pane-workspace").screenshot({
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-vegetation-workspace.png`,
+  });
+  await canvas.screenshot({
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-vegetation-cover.png`,
+  });
+  await page.getByRole("button", { name: "Map", exact: true }).click();
+  await expect(page).toHaveURL(/view=map/u);
+  await settlePaint(page);
+  await canvas.screenshot({
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-vegetation-map.png`,
+  });
+
+  await page.goto(
+    "/terrain/?seed=12345&x=-80&z=48&blocks=256&detail=8"
+      + "&panes=cpu%2Cgpu&water=1&vegetation=1"
+      + "&stage=cover&view=3d&layer=terrain",
+  );
+  await waitForCurrentComparison(page);
+  await expect(shell).toHaveAttribute("data-effective-spacing", "8");
+  expect(Number(await shell.getAttribute("data-vegetation-summary-tiles")))
+    .toBeGreaterThan(0);
+  expect(Number(await shell.getAttribute("data-vegetation-aggregated-tiles")))
+    .toBeGreaterThan(0);
+  await expect(shell).toHaveAttribute("data-vegetation-record-tiles", "0");
+  await expect(shell).toHaveAttribute("data-tree-instances", "0");
+  await expect(shell).toHaveAttribute("data-tree-instance-bytes", "0");
+  await expect(shell).toHaveAttribute("data-tree-proxy-vertices", "0");
+  await expect(shell).toHaveAttribute("data-vegetation-cell-requests", "0");
+  expect(pageErrors).toEqual([]);
+});
+
 test("switches the whole lab to worker-backed vanilla terrain", async ({
   page,
 }, testInfo) => {

@@ -271,6 +271,16 @@ export function App(): React.JSX.Element {
       data-continentalness-error={comparison?.meanAbsoluteContinentalnessError ?? ""}
       data-compare-layout={compareLayout}
       data-vertex-count={renderReport?.vertexCount ?? 0}
+      data-vegetation-summary-tiles={renderReport?.vegetationSummaryTileCount ?? 0}
+      data-vegetation-record-tiles={renderReport?.vegetationRecordTileCount ?? 0}
+      data-vegetation-aggregated-tiles={renderReport?.vegetationAggregatedTileCount ?? 0}
+      data-tree-instances={renderReport?.treeInstanceCount ?? 0}
+      data-tree-instance-bytes={renderReport?.treeInstanceBytes ?? 0}
+      data-tree-proxy-vertices={renderReport?.treeProxyVertexCount ?? 0}
+      data-vegetation-cell-requests={renderReport?.vegetationCellRequests ?? 0}
+      data-vegetation-cell-hits={renderReport?.vegetationCellHits ?? 0}
+      data-vegetation-cell-misses={renderReport?.vegetationCellMisses ?? 0}
+      data-retained-vegetation-cells={renderReport?.retainedVegetationCells ?? 0}
       data-requested-spacing={renderReport?.requestedSpacing ?? 0}
       data-effective-spacing={renderReport?.effectiveSpacing ?? 0}
       data-published-spacing={renderReport?.publishedSpacing ?? 0}
@@ -1589,6 +1599,32 @@ function Diagnostics({
         />
         <Metric label="GPU resident" value={memory} />
         <Metric
+          label="Vegetation products"
+          value={report
+            ? `${formatInteger(report.vegetationSummaryTileCount)} summary · ${
+                formatInteger(report.vegetationRecordTileCount)
+              } records · ${formatInteger(report.vegetationAggregatedTileCount)} aggregated`
+            : "—"}
+        />
+        <Metric
+          label="Tree proxies"
+          value={report
+            ? `${formatInteger(report.treeInstanceCount)} trees · ${
+                formatInteger(report.treeProxyVertexCount)
+              } vertices · ${formatBytes(report.treeInstanceBytes)}`
+            : "—"}
+        />
+        <Metric
+          label="Vegetation cache"
+          value={report
+            ? `${formatInteger(report.vegetationCellHits)}/${
+                formatInteger(report.vegetationCellRequests)
+              } hits · ${formatInteger(report.vegetationCellMisses)} misses · ${
+                formatInteger(report.retainedVegetationCells)
+              } retained`
+            : "—"}
+        />
+        <Metric
           label="CPU / GPU queue"
           value={report
             ? `${formatInteger(report.cpuQueuedTileCount)} / ${
@@ -1651,6 +1687,7 @@ function Diagnostics({
         </div>
         <div><dt>Field</dt><dd>{shortRevision(report?.fieldRevision)}</dd></div>
         <div><dt>GPU evaluator</dt><dd>{shortRevision(report?.gpuEvaluatorRevision)}</dd></div>
+        <div><dt>Vegetation</dt><dd>{shortRevision(report?.vegetationRevision)}</dd></div>
         <div><dt>Texture sampling</dt><dd>5 mip · trilinear minification</dd></div>
       </dl>
     </div>
