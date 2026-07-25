@@ -1,11 +1,12 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use mclone_assets::{AssetSourceChain, PackedAssetSource};
-use mclone_core::BlockStateId;
+use mclone_core::{BlockStateId, ChunkPos};
 use mclone_mesh::{
     RENDER_SECTION_HEIGHT, RenderSectionKey, TexturedChunkMeshInput, TexturedMeshCatalog,
     TexturedRenderSectionMesh, TexturedVisibleChunkMesh,
     build_textured_render_sections_for_chunk_set, load_first_party_textured_terrain_assets,
+    unpack_textured_render_sections,
 };
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkRenderView, ChunkTextureAtlas,
@@ -24,6 +25,8 @@ use web_sys::HtmlCanvasElement;
 use crate::terrain_preview_projection_kind;
 
 use crate::web::surface_configuration;
+
+const CANONICAL_WARM_MESH_MAX_CHUNKS: usize = 64;
 
 #[derive(Clone, Debug)]
 struct ResidentCanonicalChunk {
@@ -47,11 +50,41 @@ struct CanonicalAcceptReport {
     resident_mesh_used_bytes: u64,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct CanonicalChunkCoordinate {
     chunk_x: i32,
     chunk_z: i32,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CanonicalPackedPrepareReport {
+    active_chunks: usize,
+    warm_chunks: usize,
+    warm_available: Vec<CanonicalChunkCoordinate>,
+    evicted_chunks: usize,
+    removed_sections: usize,
+    vertex_count: u32,
+    index_count: u32,
+    resident_mesh_used_bytes: u64,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CanonicalPackedAcceptReport {
+    chunk_x: i32,
+    chunk_z: i32,
+    fingerprint: String,
+    active_chunks: usize,
+    warm_chunks: usize,
+    target_chunks: usize,
+    section_count: usize,
+    vertex_count: u32,
+    index_count: u32,
+    decode_ms: f64,
+    mesh_upload_ms: f64,
+    resident_mesh_used_bytes: u64,
 }
 
 #[derive(Serialize)]
@@ -100,6 +133,9 @@ pub struct CanonicalTerrainLab {
     seed: i64,
     catalog: TexturedMeshCatalog,
     chunks: BTreeMap<(i32, i32), ResidentCanonicalChunk>,
+    packed_chunk_sections: BTreeMap<(i32, i32), BTreeSet<RenderSectionKey>>,
+    active_packed_chunks: BTreeSet<(i32, i32)>,
+    warm_packed_chunks: VecDeque<(i32, i32)>,
     visibility: CanonicalTerrainVisibility,
     draw: TexturedSectionDrawResources,
     depth: ChunkDepthTarget,
@@ -127,12 +163,168 @@ impl CanonicalTerrainLab {
         self.profile = TerrainPreviewProfile::parse_label(&profile).map_err(js_error)?;
         self.seed = parse_seed(&seed)?;
         self.chunks.clear();
+        self.packed_chunk_sections.clear();
+        self.active_packed_chunks.clear();
+        self.warm_packed_chunks.clear();
         self.draw
             .update_sections(&self.device, &[])
             .map_err(|error| js_error(format!("failed to clear canonical terrain: {error}")))?;
         self.vertex_count = 0;
         self.index_count = 0;
         Ok(())
+    }
+
+    #[wasm_bindgen(js_name = preparePackedChunks)]
+    pub fn prepare_packed_chunks(&mut self, coordinates_json: String) -> Result<String, JsValue> {
+        let coordinates = serde_json::from_str::<Vec<CanonicalChunkCoordinate>>(&coordinates_json)
+            .map_err(|error| {
+                js_error(format!(
+                    "invalid packed canonical desired coordinates: {error}"
+                ))
+            })?;
+        let desired = coordinates
+            .iter()
+            .map(|coordinate| (coordinate.chunk_x, coordinate.chunk_z))
+            .collect::<BTreeSet<_>>();
+        let departed = self
+            .active_packed_chunks
+            .iter()
+            .copied()
+            .filter(|position| !desired.contains(position))
+            .collect::<Vec<_>>();
+        for position in departed {
+            self.active_packed_chunks.remove(&position);
+            if self.packed_chunk_sections.contains_key(&position) {
+                self.touch_warm_chunk(position);
+            }
+        }
+        let warm_available = coordinates
+            .iter()
+            .copied()
+            .filter(|coordinate| {
+                self.warm_packed_chunks
+                    .contains(&(coordinate.chunk_x, coordinate.chunk_z))
+            })
+            .collect::<Vec<_>>();
+        let mut removed = BTreeSet::new();
+        let mut evicted_chunks = 0;
+        while self.warm_packed_chunks.len() > CANONICAL_WARM_MESH_MAX_CHUNKS {
+            let Some(position) = self.warm_packed_chunks.pop_front() else {
+                break;
+            };
+            if desired.contains(&position) {
+                self.warm_packed_chunks.push_back(position);
+                break;
+            }
+            if let Some(keys) = self.packed_chunk_sections.remove(&position) {
+                removed.extend(keys);
+                evicted_chunks += 1;
+            }
+        }
+        self.draw
+            .apply_section_updates(&self.device, &[], &removed)
+            .map_err(|error| js_error(format!("failed to evict warm canonical meshes: {error}")))?;
+        self.refresh_packed_readiness();
+        self.vertex_count = self.draw.vertex_count();
+        self.index_count = self.draw.index_count();
+        json(&CanonicalPackedPrepareReport {
+            active_chunks: self.active_packed_chunks.len(),
+            warm_chunks: self.warm_packed_chunks.len(),
+            warm_available,
+            evicted_chunks,
+            removed_sections: removed.len(),
+            vertex_count: self.vertex_count,
+            index_count: self.index_count,
+            resident_mesh_used_bytes: self.draw.resident_mesh_used_bytes(),
+        })
+    }
+
+    #[wasm_bindgen(js_name = activatePackedChunk)]
+    pub fn activate_packed_chunk(&mut self, chunk_x: i32, chunk_z: i32) -> Result<String, JsValue> {
+        let position = (chunk_x, chunk_z);
+        if !self.packed_chunk_sections.contains_key(&position) {
+            return Err(js_error(format!(
+                "canonical warm chunk ({chunk_x}, {chunk_z}) is not resident"
+            )));
+        }
+        self.warm_packed_chunks
+            .retain(|candidate| *candidate != position);
+        self.active_packed_chunks.insert(position);
+        self.refresh_packed_readiness();
+        json(&CanonicalPackedAcceptReport {
+            chunk_x,
+            chunk_z,
+            fingerprint: String::new(),
+            active_chunks: self.active_packed_chunks.len(),
+            warm_chunks: self.warm_packed_chunks.len(),
+            target_chunks: 0,
+            section_count: 0,
+            vertex_count: self.draw.vertex_count(),
+            index_count: self.draw.index_count(),
+            decode_ms: 0.0,
+            mesh_upload_ms: 0.0,
+            resident_mesh_used_bytes: self.draw.resident_mesh_used_bytes(),
+        })
+    }
+
+    #[wasm_bindgen(js_name = acceptPackedMesh)]
+    pub fn accept_packed_mesh(
+        &mut self,
+        chunk_x: i32,
+        chunk_z: i32,
+        fingerprint: String,
+        packed_sections: js_sys::Uint8Array,
+    ) -> Result<String, JsValue> {
+        let decode_started = now_ms()?;
+        let sections = unpack_textured_render_sections(&packed_sections.to_vec())
+            .map_err(|error| js_error(format!("invalid canonical packed mesh: {error}")))?;
+        let decode_ms = now_ms()? - decode_started;
+        let target_chunks = sections
+            .iter()
+            .map(|section| (section.key.chunk_x, section.key.chunk_z))
+            .collect::<BTreeSet<_>>();
+        let mut removed = BTreeSet::new();
+        for target in &target_chunks {
+            let next_keys = sections
+                .iter()
+                .filter(|section| (section.key.chunk_x, section.key.chunk_z) == *target)
+                .map(|section| section.key)
+                .collect::<BTreeSet<_>>();
+            if let Some(previous) = self
+                .packed_chunk_sections
+                .insert(*target, next_keys.clone())
+            {
+                removed.extend(previous.difference(&next_keys).copied());
+            }
+        }
+        let upload_started = now_ms()?;
+        self.draw
+            .apply_section_updates(&self.device, &sections, &removed)
+            .map_err(|error| {
+                js_error(format!("failed to upload canonical packed mesh: {error}"))
+            })?;
+        let mesh_upload_ms = now_ms()? - upload_started;
+        let position = (chunk_x, chunk_z);
+        self.warm_packed_chunks
+            .retain(|candidate| *candidate != position);
+        self.active_packed_chunks.insert(position);
+        self.refresh_packed_readiness();
+        self.vertex_count = self.draw.vertex_count();
+        self.index_count = self.draw.index_count();
+        json(&CanonicalPackedAcceptReport {
+            chunk_x,
+            chunk_z,
+            fingerprint,
+            active_chunks: self.active_packed_chunks.len(),
+            warm_chunks: self.warm_packed_chunks.len(),
+            target_chunks: target_chunks.len(),
+            section_count: sections.len(),
+            vertex_count: self.vertex_count,
+            index_count: self.index_count,
+            decode_ms,
+            mesh_upload_ms,
+            resident_mesh_used_bytes: self.draw.resident_mesh_used_bytes(),
+        })
     }
 
     #[wasm_bindgen(js_name = retainChunks)]
@@ -444,6 +636,9 @@ impl CanonicalTerrainLab {
             seed: 0,
             catalog: assets.catalog,
             chunks: BTreeMap::new(),
+            packed_chunk_sections: BTreeMap::new(),
+            active_packed_chunks: BTreeSet::new(),
+            warm_packed_chunks: VecDeque::new(),
             visibility: CanonicalTerrainVisibility::default(),
             draw,
             depth,
@@ -460,6 +655,22 @@ impl CanonicalTerrainLab {
                     (chunk.biomes.len() as u64).saturating_mul(std::mem::size_of::<i32>() as u64),
                 )
         })
+    }
+
+    fn touch_warm_chunk(&mut self, position: (i32, i32)) {
+        self.warm_packed_chunks
+            .retain(|candidate| *candidate != position);
+        self.warm_packed_chunks.push_back(position);
+    }
+
+    fn refresh_packed_readiness(&mut self) {
+        let ready = self
+            .active_packed_chunks
+            .iter()
+            .map(|(chunk_x, chunk_z)| ChunkPos::new(*chunk_x, *chunk_z))
+            .collect::<BTreeSet<_>>();
+        self.draw
+            .set_traversal_ready_columns_with_context(&ready, false);
     }
 
     fn rebuild_chunks(&mut self, targets: &BTreeSet<(i32, i32)>) -> Result<(u32, u32), JsValue> {
