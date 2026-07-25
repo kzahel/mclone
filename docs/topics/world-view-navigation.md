@@ -359,6 +359,26 @@ JavaScript cache; JavaScript should provide only Worker/DOM mechanics.
 Transferable buffers remain a valid fallback transport, while the production
 shared-memory render-worker path is the convergence target.
 
+Reuse the production browser Worker inversion of control as well, but not the
+complete game bootstrap. Today `mclone-web-app.ts` constructs a generic
+`PolledWorkerTransport` factory and supplies it to Rust;
+`WebRenderWorkerCoordinator` owns worker identity, priorities, epochs,
+requests, stale results, failure recovery, and shutdown. The TypeScript
+transport knows only module-Worker construction plus `post`, `poll`, and
+`terminate`, while the Worker entry loads Wasm and forwards opaque frames to a
+Rust actor.
+
+The Explorer should consume that same boundary after its currently app-local
+pieces are made reusable. Its browser boot may supply versioned bindgen and
+Worker URLs and a generic module-Worker factory, but must not manually recreate
+Terrain Lab's `onmessage`, batch, epoch, cache, or admission state machine.
+Rust decides which render or exact-source actors are needed. If more than one
+Worker kind is ultimately required, generalize the factory to accept an opaque
+URL/name or resource handle rather than adding a semantic TypeScript switch.
+The exact module/package location should be selected by the implementation
+tactical; importing files from the game app's deployment directory is not a
+shared boundary.
+
 Therefore, “migrate Terrain Lab” means replacing its duplicated browser
 camera and gesture policy while preserving both its procedural and canonical
 renderers. That navigation work does not need to wait for exact chunks in the
