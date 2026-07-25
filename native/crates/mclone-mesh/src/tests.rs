@@ -1,4 +1,59 @@
 use super::*;
+
+#[test]
+fn packed_textured_sections_round_trip_every_render_fact() {
+    let sections = vec![
+        TexturedRenderSectionMesh {
+            key: RenderSectionKey::new(-7, 3, 11),
+            mesh: TexturedVisibleChunkMesh {
+                vertices: vec![TexturedChunkVertex {
+                    position: [-1.25, 48.0, 9.5],
+                    uv: [0.125, 0.875],
+                    color: [0.1, 0.2, 0.3, 0.4],
+                    packed_light: 0xfedc_ba98,
+                }],
+                indices: vec![0, 0, 0, 0, 0, 0],
+                solid_index_count: 0,
+                opaque_index_count: 6,
+            },
+            grass_patches: vec![GrassPatch {
+                root: [-112, 49, 176],
+                packed_tint: 0x1020_3040,
+                packed_light: 0x5060_7080,
+                seed: 0x90a0_b0c0,
+                flags: 7,
+                reserved: 13,
+            }],
+            visibility: VisibilitySet::from_bits(0x0000_000a_bcde_f012),
+        },
+        TexturedRenderSectionMesh {
+            key: RenderSectionKey::new(-7, 4, 11),
+            mesh: TexturedVisibleChunkMesh::default(),
+            grass_patches: Vec::new(),
+            visibility: VisibilitySet::all_visible(),
+        },
+    ];
+
+    let packed = pack_textured_render_sections(&sections);
+    let unpacked = unpack_textured_render_sections(&packed).unwrap();
+
+    assert_eq!(unpacked, sections);
+}
+
+#[test]
+fn packed_textured_sections_reject_truncated_and_trailing_payloads() {
+    let packed = pack_textured_render_sections(&[TexturedRenderSectionMesh {
+        key: RenderSectionKey::new(1, 2, 3),
+        mesh: TexturedVisibleChunkMesh::default(),
+        grass_patches: Vec::new(),
+        visibility: VisibilitySet::all_visible(),
+    }]);
+    assert!(unpack_textured_render_sections(&packed[..packed.len() - 1]).is_err());
+
+    let mut trailing = packed;
+    trailing.push(0);
+    assert!(unpack_textured_render_sections(&trailing).is_err());
+}
 use crate::builder::block_at_world_or_air;
 use mclone_assets::{
     AssetPath, BlockModelLibrary, BlockStateAssetIndex, BlockStateRecord, BlockStateRegistry,
