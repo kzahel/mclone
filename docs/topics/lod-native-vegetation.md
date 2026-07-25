@@ -2,8 +2,9 @@
 
 Topic: `lod-native-vegetation`
 
-Status: exact record foundation complete 2026-07-25; Terrain Lab and Far LOD
-integration are next.
+Status: Terrain Lab hierarchy proof active 2026-07-25. Exact records and the
+initial Lab proxy path are landed; the current in-game Far LOD adapter is
+quarantined pending coarse representation proof.
 
 ## Scope
 
@@ -116,29 +117,56 @@ receipts.
 
 ### Terrain Lab
 
-Terrain Lab already has dependency-ordered `Base`, `Hydrology`, `Structured`,
-`Surface`, and `Cover` stages. CPU and GPU LOD tiles share seed, aligned
-origin, sample spacing, content stage, and a session-local 192-tile LRU. The
-planned-stream implementation proves that a bounded CPU-produced record can be
-reconstructed only at relevant near levels and consumed by both LOD lanes.
+`Cover` now carries production forest coverage, density, family mix, canopy
+height/variation, and grove/opening influence in
+`mclone-terrain-preview-reference-grid-v7`. The GPU evaluator computes its
+portable macro counterpart, while both displayed CPU/GPU panes consume the
+same uploaded CPU vegetation product rather than inventing independent trees.
 
-`Cover` does not yet contain production vegetation semantics. The preview
-render shader currently infers a constant coverage value from the biome recipe
-code and tints the terrain surface. It has no grove identity, tree family mix,
-canopy height, stable tree records, or individual proxy geometry. This is a
-placeholder to replace, not a contract to preserve.
+Those fields are still point samples, not accepted footprint summaries. Each
+CPU `Cover` point evaluates the center terrain plus four fixed-radius cardinal
+terrain samples to reconstruct slope before evaluating forest intent. The
+existing 65.5 km browser proof selects `Hydrology`, not `Cover`, so it does not
+measure continent-scale vegetation. The displayed GPU `Cover` result also
+waits for the CPU vegetation product; its portable forest calculation is
+diagnostic, not yet an independent fast presentation path.
+
+Near requests query stable records only at spacings `1`, `2`, and `4`.
+Admission is globally deterministic by landmark rank: all records, ranks
+`2/3`, then rank `3`. Coarser requests are summary-only and prove zero record
+queries. One 48-byte instance per admitted tree drives one shared procedural
+trunk/crown archetype pipeline for broadleaf, conifer, and acacia in both map
+and 3D views. The viewport LRU retains the summary/record product and reports
+source revision, packing, upload, residency, proxy, and planning-cache facts.
+
+All 21 terrain-view tests and the targeted desktop/Pixel 7 headed-WebGPU
+contracts pass. Four inspected map/3D captures prove the initial proxy path in
+both responsive layouts. They do not close scale-aware filtering, the 65.5 km
+`Cover` cost, or multi-spacing forest-edge/opening stability. Tactical 244
+keeps those as the active gate.
 
 ### Far LOD
 
-The older Far LOD architecture already named `SurfacePlusApproxTrees` as a
-future worldgen LOD profile. The current in-game synthetic Far LOD remains a
-surface-only presentation cache with strict real/LOD exclusion and settled
-coverage requirements.
+The current synthetic Far LOD now evaluates production forest intent at each
+Mclone lattice sample and appends stable record-derived tree volumes to the
+existing tile payload. Auto level one admits all records, level two admits
+landmark ranks `2/3`, and level three is summary-only. Native compile workers
+and persistent browser compiler sessions reuse one bounded vegetation plan
+cache beside their surface cache.
 
-Terrain Lab is the first implementation and review host for vegetation
-semantics. In-game adoption must later reuse the shared vegetation products
-and the existing Far LOD control plane; it must not create a second scheduler
-or weaken the painted-representation XOR invariant.
+Every trunk/crown volume is clipped to its 16-by-16 tile. Cross-chunk crowns
+are queried and clipped in every intersecting tile, so the existing
+painted-capable whole-tile arbitration replaces the exact footprint without an
+owner-chunk shortcut or vegetation scheduler. The same payload follows the
+existing mono, per-eye, and full-frame multiview renderer. Far-off and all
+non-Mclone profiles remain unchanged; the Java-overworld tile fingerprint is
+pinned.
+
+This is commit `b1db968c`, a disposable compatibility adapter rather than the
+future vegetation architecture. It added substantial logic to the legacy
+per-chunk compiler before Terrain Lab proved the summary hierarchy. Do not
+expand or close it out now. A later, separate in-game terrain-LOD decision may
+retain, replace, quarantine, or revert it after the representation is measured.
 
 ### Compatibility
 
@@ -713,7 +741,7 @@ Exact generation no longer chooses Mclone tree positions through
 [`243-lod-native-vegetation-exact.md`](../tactical/243-lod-native-vegetation-exact.md)
 is the completed execution record.
 
-### Slice 2: Terrain Lab forest summaries and record overlays
+### Slice 2: Terrain Lab forest samples and record overlays — initial path landed
 
 Tactical
 [`244-lod-native-vegetation-presentation.md`](../tactical/244-lod-native-vegetation-presentation.md)
@@ -736,7 +764,12 @@ painted-capable Far LOD lifecycle.
 The GPU-only base/hydrology path must remain independent. `Cover` may wait for
 the CPU-owned record overlay only where individual records are requested.
 
-### Slice 3: Hierarchy, budgets, and cache proof
+Tactical 244 landed the local Cover product, bounded landmark-rank admission,
+one procedural instance pipeline, responsive desktop/phone pixels, and
+planning/packing/upload/residency metrics. Footprint-filtered summaries and
+continent-scale `Cover` evidence remain open under the next slice.
+
+### Slice 3: Hierarchy, budgets, and cache proof — active
 
 1. tune filtered forest summaries and grove/opening stability across sample
    levels;
@@ -749,20 +782,20 @@ the CPU-owned record overlay only where individual records are requested.
 6. select explicit summary/instance transitions from inspected pixels and
    timings.
 
-### Slice 4: In-game Far LOD adoption
+Near admission is explicit and bounded: Terrain Lab uses spacing/rank
+admission, coarse levels issue zero record queries, one viewport LRU owns the
+semantic product, and panning records planning-cell reuse. The active work is
+to prove `Cover` at 65.5 km, add direct work/cost evidence, filter summaries by
+sample footprint where point sampling aliases, and inspect fixed anchors
+through the spacing hierarchy.
 
-Only after Terrain Lab proves the semantic products:
+### Slice 4: In-game Far LOD compatibility adapter — decision deferred
 
-1. feed vegetation summaries/records into the shared Far LOD request and
-   resident lifecycle;
-2. add mono/per-eye/multiview proxy rendering;
-3. implement exact/proxy clipping or atomic bounded replacement;
-4. extend settle ledgers to vegetation representation;
-5. validate stationary, moving, teleport, world-switch, device-rebuild, and
-   source-revision invalidation;
-6. measure desktop, web, Android, Quest, and XR budgets selected by the
-   affected contract; and
-7. retain a clean Far-LOD-off control.
+The landed adapter feeds local intent and record-derived proxies into the
+shared Far LOD request and resident lifecycle. It proves that stable records
+can cross the current renderer boundary, not that chunk tiles are the right
+future hierarchy. No further in-game work belongs in this tactical until Slice
+3 establishes the representation worth adopting.
 
 ### Later generalization
 
@@ -927,12 +960,16 @@ pixels:
 
 ## Recommended Next Work
 
-Open one implementation tactical for Slice 1: record-first exact Mclone
-vegetation. Do not start with a Terrain Lab-only visual approximation. The
-first commit should establish the source identity, conceptual record contract,
-and deterministic planning fixtures; the first drawable milestone should
-replace one Mclone tree family end to end and be captured before broadening to
-all three live families.
+Keep the next implementation entirely in shared worldgen/Terrain Lab:
 
-Use `Topic: lod-native-vegetation` on the implementing commit series and append
-that exact slug to `topics.md` when the first commit is created.
+1. run `Cover` at the existing 65.5 km footprint;
+2. record CPU/GPU, sample-evaluation, packing, upload, and cache costs;
+3. replace pointwise values with scale-aware footprint filtering where coarse
+   forest edges, openings, or family mix alias;
+4. prove work remains proportional to the visible sample lattice;
+5. inspect fixed world anchors across multiple spacings; and
+6. retain exact tree records only at the already bounded near scales.
+
+After that evidence, reconsider in-game terrain LOD as a separate architecture
+decision. Do not use the browser movement C5 defect or the landed adapter as a
+reason to broaden this tactical.

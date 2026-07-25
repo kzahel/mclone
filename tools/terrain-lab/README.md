@@ -21,6 +21,27 @@ The profiles cannot be mixed in one workspace. Within the selected profile:
 - `GPU LOD` evaluates Mclone's aligned natural fields in WebGPU and consumes
   the same sparse structured records.
 
+At the Mclone `Cover` checkpoint, every preview point also carries production
+forest coverage, density, family mix, canopy height/variation, and
+grove/opening influence. These are currently local intent samples, not
+accepted footprint-filtered summaries. Each CPU point samples center terrain
+plus four fixed-radius cardinal neighbors for slope. Both displayed LOD panes
+then use that CPU-produced vegetation product. The GPU lane evaluates its
+portable macro forest fields for diagnostics, but it is not yet an independent
+vegetation presentation path and does not invent a second tree planner.
+
+Individual stable tree records are included only at sample spacings `1`, `2`,
+and `4`. Spacing `1` admits every record, spacing `2` retains landmark ranks
+`2/3`, spacing `4` retains rank `3`, and coarser views are summary-only with
+zero tree-record queries. One shared procedural instancing pipeline draws
+broadleaf, conifer, and acacia trunks/crowns in map and 3D; CPU and GPU panes
+therefore preserve the same base, family, dimensions, and orientation while
+their terrain compilers remain independent.
+
+The current 65.5 km browser proof uses `Hydrology`, not `Cover`. Continent-scale
+vegetation cost, filtering, and forest-edge/opening stability remain active
+work; do not cite that existing proof as coarse vegetation acceptance.
+
 The exact compiler runs in a replaceable Web Worker and publishes chunks
 center-first as they finish. The LOD panes use 64 × 64 cell / 65 × 65 sample
 tiles and may cover and progressively refine many tiles. Every visible pane
@@ -124,10 +145,14 @@ the atlas, pipelines, render targets, dependency caches, or browser memory.
 
 `Cache on` uses a session-local 192-tile LRU keyed by profile, seed, aligned
 origin, sample spacing, and content stage. It retains CPU samples, uploaded
-reference data, GPU-computed buffers, and completed validation readbacks while
-panning and zooming. Camera, layer, and pane visibility are not LOD cache
-identity. `Cache off` retains only the active request and disables speculative
-preload. `Cold current view` invalidates both cache domains explicitly.
+reference data, forest summaries, admitted tree records, GPU-computed buffers,
+and completed validation readbacks while panning and zooming. Vegetation source
+revision participates in product identity; camera, layer, map/3D mode, and
+pane visibility do not. `Cache off` retains only the active request and
+disables speculative preload. `Cold current view` invalidates both cache
+domains explicitly. The evidence panel reports summary/record availability,
+aggregated tiles, semantic instance/upload/proxy counts, planning-cell
+requests/hits/misses, retained cells, and combined residency.
 
 `Run stress race` selects the fixed review seed/site, turns cache off, and
 uses a larger 12-tile-per-axis diagnostic budget over a 2 km requested-`1:2`
