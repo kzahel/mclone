@@ -10,6 +10,7 @@ use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowAttributes, WindowId};
 
 use crate::capture::{TextureReadback, save_validated_png};
+use crate::input::NativeViewInput;
 use crate::options::ExplorerOptions;
 use crate::terrain::ExplorerTerrain;
 
@@ -110,6 +111,92 @@ impl ApplicationHandler for ExplorerApp {
             {
                 event_loop.exit();
             }
+            WindowEvent::KeyboardInput { event, .. } => {
+                if let Some(gpu) = self.gpu.as_mut() {
+                    match gpu.keyboard(&event) {
+                        Ok(redraw) if redraw => {
+                            self.needs_redraw = true;
+                            event_loop.set_control_flow(ControlFlow::Poll);
+                            window.set_title(&gpu.title());
+                            window.request_redraw();
+                        }
+                        Ok(_) => {}
+                        Err(error) => self.fail(event_loop, error),
+                    }
+                }
+            }
+            WindowEvent::ModifiersChanged(modifiers) => {
+                if let Some(gpu) = self.gpu.as_mut() {
+                    gpu.set_modifiers(modifiers.state());
+                }
+            }
+            WindowEvent::CursorMoved { position, .. } => {
+                if let Some(gpu) = self.gpu.as_mut() {
+                    match gpu.cursor_moved(position.x, position.y) {
+                        Ok(true) => {
+                            self.needs_redraw = true;
+                            event_loop.set_control_flow(ControlFlow::Poll);
+                            window.set_title(&gpu.title());
+                            window.request_redraw();
+                        }
+                        Ok(false) => {}
+                        Err(error) => self.fail(event_loop, error),
+                    }
+                }
+            }
+            WindowEvent::MouseInput { state, button, .. } => {
+                if let Some(gpu) = self.gpu.as_mut() {
+                    match gpu.mouse_button(button, state) {
+                        Ok(true) => {
+                            self.needs_redraw = true;
+                            event_loop.set_control_flow(ControlFlow::Poll);
+                            window.set_title(&gpu.title());
+                            window.request_redraw();
+                        }
+                        Ok(false) => {}
+                        Err(error) => self.fail(event_loop, error),
+                    }
+                }
+            }
+            WindowEvent::MouseWheel { delta, .. } => {
+                if let Some(gpu) = self.gpu.as_mut() {
+                    match gpu.mouse_wheel(delta) {
+                        Ok(true) => {
+                            self.needs_redraw = true;
+                            event_loop.set_control_flow(ControlFlow::Poll);
+                            window.set_title(&gpu.title());
+                            window.request_redraw();
+                        }
+                        Ok(false) => {}
+                        Err(error) => self.fail(event_loop, error),
+                    }
+                }
+            }
+            WindowEvent::Touch(touch) => {
+                if let Some(gpu) = self.gpu.as_mut() {
+                    match gpu.touch(touch) {
+                        Ok(true) => {
+                            self.needs_redraw = true;
+                            event_loop.set_control_flow(ControlFlow::Poll);
+                            window.set_title(&gpu.title());
+                            window.request_redraw();
+                        }
+                        Ok(false) => {}
+                        Err(error) => self.fail(event_loop, error),
+                    }
+                }
+            }
+            WindowEvent::Focused(false) => {
+                if let Some(gpu) = self.gpu.as_mut() {
+                    match gpu.cancel_input() {
+                        Ok(_) => {
+                            self.needs_redraw = true;
+                            window.request_redraw();
+                        }
+                        Err(error) => self.fail(event_loop, error),
+                    }
+                }
+            }
             WindowEvent::Resized(size) => {
                 if let Some(gpu) = self.gpu.as_mut()
                     && let Err(error) = gpu.resize(size)
@@ -192,6 +279,7 @@ struct WindowGpu {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     terrain: ExplorerTerrain,
+    input: NativeViewInput,
     capture_path: Option<std::path::PathBuf>,
 }
 
@@ -297,6 +385,7 @@ impl WindowGpu {
             queue,
             config,
             terrain,
+            input: NativeViewInput::new(started),
             capture_path,
         })
     }
@@ -317,7 +406,87 @@ impl WindowGpu {
             .resize(&self.device, self.config.width, self.config.height)
     }
 
+    fn title(&self) -> String {
+        self.terrain.title()
+    }
+
+    fn set_modifiers(&mut self, modifiers: winit::keyboard::ModifiersState) {
+        self.input.set_modifiers(modifiers);
+    }
+
+    fn cursor_moved(&mut self, x: f64, y: f64) -> Result<bool> {
+        let intents = self
+            .input
+            .cursor_moved(x, y, self.terrain.view_state(), self.viewport());
+        self.apply_intents(intents)
+    }
+
+    fn mouse_button(
+        &mut self,
+        button: winit::event::MouseButton,
+        state: ElementState,
+    ) -> Result<bool> {
+        let intents =
+            self.input
+                .mouse_button(button, state, self.terrain.view_state(), self.viewport());
+        self.apply_intents(intents)
+    }
+
+    fn mouse_wheel(&mut self, delta: winit::event::MouseScrollDelta) -> Result<bool> {
+        let intent = self
+            .input
+            .mouse_wheel(delta, self.terrain.view_state(), self.viewport());
+        self.terrain.apply_intent(intent)
+    }
+
+    fn touch(&mut self, touch: winit::event::Touch) -> Result<bool> {
+        let intents = self
+            .input
+            .touch(touch, self.terrain.view_state(), self.viewport());
+        self.apply_intents(intents)
+    }
+
+    fn keyboard(&mut self, event: &winit::event::KeyEvent) -> Result<bool> {
+        let intents = self
+            .input
+            .keyboard(event, self.terrain.view_state(), self.viewport());
+        let changed = self.apply_intents(intents)?;
+        Ok(changed || self.input.has_continuous_input())
+    }
+
+    fn cancel_input(&mut self) -> Result<bool> {
+        let intents = self.input.cancel(self.terrain.view_state());
+        self.apply_intents(intents)
+    }
+
+    fn apply_intents(
+        &mut self,
+        intents: impl IntoIterator<Item = mclone_view_control::WorldViewIntent>,
+    ) -> Result<bool> {
+        let mut changed = false;
+        for intent in intents {
+            changed |= self.terrain.apply_intent(intent)?;
+        }
+        Ok(changed)
+    }
+
+    fn viewport(&self) -> mclone_view_control::ViewportMetrics {
+        mclone_view_control::ViewportMetrics::new(
+            f64::from(self.config.width),
+            f64::from(self.config.height),
+        )
+    }
+
     fn render(&mut self) -> std::result::Result<WindowRenderOutcome, WindowRenderError> {
+        if let Some(intent) = self
+            .input
+            .continuous_intent(Instant::now(), self.terrain.view_state())
+        {
+            self.terrain
+                .apply_intent(intent)
+                .map_err(WindowRenderError::Terrain)?;
+        }
+        let continuous_input = self.input.has_continuous_input();
         log::trace!("World Explorer acquiring surface frame");
         let frame = self
             .surface
@@ -379,7 +548,7 @@ impl WindowGpu {
             false
         };
         Ok(WindowRenderOutcome {
-            needs_redraw: stats.needs_redraw || !stats.target_ready,
+            needs_redraw: continuous_input || stats.needs_redraw || !stats.target_ready,
             capture_completed,
         })
     }

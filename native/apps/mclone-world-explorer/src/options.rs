@@ -3,7 +3,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use mclone_terrain_view::{TerrainPreviewProjectionKind, TerrainPreviewView};
+use mclone_view_control::{WorldViewMode, WorldViewProjection, WorldViewState};
 
 pub const DEFAULT_WIDTH: u32 = 1280;
 pub const DEFAULT_HEIGHT: u32 = 720;
@@ -44,10 +44,10 @@ pub struct ExplorerOptions {
     pub center_x: i32,
     pub center_z: i32,
     pub blocks_across: u32,
-    pub view: TerrainPreviewView,
+    pub view: WorldViewMode,
     pub yaw_radians: f32,
     pub pitch_radians: f32,
-    pub projection: TerrainPreviewProjectionKind,
+    pub projection: WorldViewProjection,
     pub asset_root: PathBuf,
     pub asset_profile: ExplorerAssetProfile,
     pub capture: Option<PathBuf>,
@@ -63,10 +63,10 @@ impl Default for ExplorerOptions {
             center_x: 0,
             center_z: 0,
             blocks_across: DEFAULT_BLOCKS_ACROSS,
-            view: TerrainPreviewView::ThreeDimensional,
+            view: WorldViewMode::Orbit,
             yaw_radians: std::f32::consts::FRAC_PI_4,
             pitch_radians: 0.52,
-            projection: TerrainPreviewProjectionKind::Perspective,
+            projection: WorldViewProjection::Perspective,
             asset_root: default_asset_root(),
             asset_profile: ExplorerAssetProfile::Original,
             capture: None,
@@ -115,16 +115,16 @@ impl ExplorerOptions {
                 "--view" => {
                     let value = utf8_value(value(&mut arguments)?, name)?;
                     options.view = match value.as_str() {
-                        "map" => TerrainPreviewView::Map,
-                        "3d" => TerrainPreviewView::ThreeDimensional,
+                        "map" => WorldViewMode::Map,
+                        "3d" => WorldViewMode::Orbit,
                         _ => bail!("unsupported view {value:?}; expected map or 3d"),
                     };
                 }
                 "--projection" => {
                     let value = utf8_value(value(&mut arguments)?, name)?;
                     options.projection = match value.as_str() {
-                        "orthographic" => TerrainPreviewProjectionKind::Orthographic,
-                        "perspective" => TerrainPreviewProjectionKind::Perspective,
+                        "orthographic" => WorldViewProjection::Orthographic,
+                        "perspective" => WorldViewProjection::Perspective,
                         _ => bail!(
                             "unsupported projection {value:?}; expected orthographic or perspective"
                         ),
@@ -164,8 +164,20 @@ impl ExplorerOptions {
 
     pub fn view_label(&self) -> &'static str {
         match self.view {
-            TerrainPreviewView::Map => "map",
-            TerrainPreviewView::ThreeDimensional => "3d",
+            WorldViewMode::Map => "map",
+            WorldViewMode::Orbit => "3d",
+        }
+    }
+
+    pub fn initial_view_state(&self) -> WorldViewState {
+        WorldViewState {
+            mode: self.view,
+            focus_x: f64::from(self.center_x),
+            focus_z: f64::from(self.center_z),
+            blocks_across: f64::from(self.blocks_across),
+            yaw_radians: f64::from(self.yaw_radians),
+            pitch_radians: f64::from(self.pitch_radians),
+            projection: self.projection,
         }
     }
 

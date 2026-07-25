@@ -1,4 +1,5 @@
 mod capture;
+mod input;
 mod options;
 mod terrain;
 mod window;

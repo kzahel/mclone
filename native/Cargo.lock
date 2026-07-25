@@ -1960,6 +1960,7 @@ dependencies = [
  "mclone-core",
  "mclone-mesh",
  "mclone-terrain-view",
+ "mclone-view-control",
  "mclone-worldgen",
  "pollster",
  "wgpu",

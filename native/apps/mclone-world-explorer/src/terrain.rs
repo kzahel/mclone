@@ -14,8 +14,13 @@ use mclone_mesh::{
 use mclone_terrain_view::{
     TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainPreviewCamera, TerrainPreviewDrawOptions,
     TerrainPreviewLayer, TerrainPreviewMaterialAtlas, TerrainPreviewSource,
-    TerrainPreviewSplitLayout, TerrainViewportDetail, TerrainViewportFrameStats,
-    TerrainViewportRenderer, TerrainViewportRequest, plan_terrain_viewport,
+    TerrainPreviewSplitLayout, TerrainPreviewView, TerrainViewportDetail,
+    TerrainViewportFrameStats, TerrainViewportRenderer, TerrainViewportRequest,
+    plan_terrain_viewport,
+};
+use mclone_view_control::{
+    ViewPoint, ViewportMetrics, WorldViewIntent, WorldViewMode, WorldViewProjection,
+    WorldViewReducer, WorldViewSignal, WorldViewState,
 };
 use mclone_worldgen::terrain_preview::{TerrainPreviewContentStage, TerrainPreviewProfile};
 
@@ -24,6 +29,8 @@ use crate::options::{ExplorerAssetProfile, ExplorerOptions};
 pub struct ExplorerTerrain {
     renderer: TerrainViewportRenderer,
     options: ExplorerOptions,
+    view_state: WorldViewState,
+    view_reducer: WorldViewReducer,
     revision: u64,
     started: Instant,
     coarse_ready_at: Option<Duration>,
@@ -60,9 +67,13 @@ impl ExplorerTerrain {
             },
         )
         .map_err(anyhow::Error::msg)?;
+        let view_reducer = WorldViewReducer::default();
+        let view_state = view_reducer.normalize(options.initial_view_state());
         let mut terrain = Self {
             renderer,
             options,
+            view_state,
+            view_reducer,
             revision: 0,
             started,
             coarse_ready_at: None,
@@ -85,6 +96,37 @@ impl ExplorerTerrain {
         Ok(())
     }
 
+    pub const fn view_state(&self) -> WorldViewState {
+        self.view_state
+    }
+
+    pub fn title(&self) -> String {
+        format!(
+            "Mclone World Explorer — seed {} — ({}, {}) — {} blocks — {}",
+            self.options.seed,
+            self.view_state.center_x_i32(),
+            self.view_state.center_z_i32(),
+            self.view_state.blocks_across_u32(),
+            view_label(self.view_state.mode),
+        )
+    }
+
+    pub fn apply_intent(&mut self, intent: WorldViewIntent) -> Result<bool> {
+        let previous = self.view_state;
+        let reduction = self.view_reducer.reduce(previous, intent);
+        self.view_state = reduction.state;
+        if let Some(WorldViewSignal::DoubleTap { position }) = reduction.signal {
+            self.apply_double_tap(position);
+        }
+        if self.view_state == previous {
+            return Ok(false);
+        }
+        if view_plan_key(self.view_state) != view_plan_key(previous) {
+            self.replan()?;
+        }
+        Ok(true)
+    }
+
     pub fn encode(
         &mut self,
         device: &wgpu::Device,
@@ -104,14 +146,24 @@ impl ExplorerTerrain {
                 self.options.height,
                 TerrainPreviewDrawOptions {
                     source: TerrainPreviewSource::Gpu,
-                    view: self.options.view,
+                    view: match self.view_state.mode {
+                        WorldViewMode::Map => TerrainPreviewView::Map,
+                        WorldViewMode::Orbit => TerrainPreviewView::ThreeDimensional,
+                    },
                     layer: TerrainPreviewLayer::Terrain,
                     split_layout: TerrainPreviewSplitLayout::Columns,
                 },
                 TerrainPreviewCamera::new(
-                    self.options.yaw_radians,
-                    self.options.pitch_radians,
-                    self.options.projection,
+                    self.view_state.yaw_radians as f32,
+                    self.view_state.pitch_radians as f32,
+                    match self.view_state.projection {
+                        WorldViewProjection::Orthographic => {
+                            mclone_terrain_view::TerrainPreviewProjectionKind::Orthographic
+                        }
+                        WorldViewProjection::Perspective => {
+                            mclone_terrain_view::TerrainPreviewProjectionKind::Perspective
+                        }
+                    },
                 )
                 .map_err(anyhow::Error::msg)?,
                 || now.elapsed().as_secs_f64() * 1_000.0,
@@ -136,10 +188,10 @@ impl ExplorerTerrain {
              coarse_ready_ms={} target_ready_ms={} resident_bytes={} \
              resident_tiles={} pending={} published_spacing={}",
             self.options.seed,
-            self.options.center_x,
-            self.options.center_z,
-            self.options.blocks_across,
-            self.options.view_label(),
+            self.view_state.center_x_i32(),
+            self.view_state.center_z_i32(),
+            self.view_state.blocks_across_u32(),
+            view_label(self.view_state.mode),
             self.revision,
             duration_ms(self.coarse_ready_at),
             duration_ms(self.target_ready_at),
@@ -156,9 +208,9 @@ impl ExplorerTerrain {
         let plan = plan_terrain_viewport(TerrainViewportRequest {
             profile: TerrainPreviewProfile::McloneOverworldV1,
             seed: self.options.seed,
-            center_x: self.options.center_x,
-            center_z: self.options.center_z,
-            blocks_across: self.options.blocks_across,
+            center_x: self.view_state.center_x_i32(),
+            center_z: self.view_state.center_z_i32(),
+            blocks_across: self.view_state.blocks_across_u32(),
             panel_width_css: self.options.width,
             panel_height_css: self.options.height,
             detail: TerrainViewportDetail::Auto,
@@ -171,6 +223,40 @@ impl ExplorerTerrain {
         self.coarse_ready_at = None;
         self.target_ready_at = None;
         Ok(())
+    }
+
+    fn apply_double_tap(&mut self, position: ViewPoint) {
+        if self.view_state.mode == WorldViewMode::Map {
+            let viewport = ViewportMetrics::new(
+                f64::from(self.options.width),
+                f64::from(self.options.height),
+            );
+            let anchor = viewport.normalized_anchor(position);
+            let world_x = self.view_state.focus_x + anchor.x * self.view_state.blocks_across;
+            let world_z = self.view_state.focus_z
+                + anchor.y * self.view_state.blocks_across / viewport.aspect();
+            self.view_state = self
+                .view_reducer
+                .reduce(
+                    self.view_state,
+                    WorldViewIntent::FocusAt { world_x, world_z },
+                )
+                .state;
+        }
+        self.view_state = self
+            .view_reducer
+            .reduce(
+                self.view_state,
+                WorldViewIntent::AnchoredZoom {
+                    log_delta: 0.5_f64.ln(),
+                    normalized_anchor: ViewPoint::default(),
+                    viewport: ViewportMetrics::new(
+                        f64::from(self.options.width),
+                        f64::from(self.options.height),
+                    ),
+                },
+            )
+            .state;
     }
 
     fn note_readiness(&mut self, stats: TerrainViewportFrameStats) {
@@ -189,6 +275,21 @@ impl ExplorerTerrain {
                 elapsed.as_secs_f64() * 1_000.0
             );
         }
+    }
+}
+
+fn view_plan_key(state: WorldViewState) -> (i32, i32, u32) {
+    (
+        state.center_x_i32(),
+        state.center_z_i32(),
+        state.blocks_across_u32(),
+    )
+}
+
+fn view_label(mode: WorldViewMode) -> &'static str {
+    match mode {
+        WorldViewMode::Map => "map",
+        WorldViewMode::Orbit => "3d",
     }
 }
 
