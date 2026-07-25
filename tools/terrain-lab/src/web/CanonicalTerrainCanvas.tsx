@@ -1,7 +1,11 @@
 import { useEffect, useRef, useState } from "react";
 import type { CanonicalTerrainLab } from "../../generated/pkg/mclone_terrain_lab";
 import {
+  CanonicalTerrainWorkerResponse,
   canonicalTerrainChunkOrder,
+  canonicalTerrainWorkerBeginFrame,
+  canonicalTerrainWorkerCompileFrame,
+  canonicalTerrainWorkerInitFrame,
   mclone_terrain_lab_create_canonical,
 } from "../../generated/pkg/mclone_terrain_lab";
 
@@ -13,15 +17,11 @@ import {
   type TerrainLabTexturePresentation,
   type TerrainLabVisualProfile,
 } from "../state";
-import type {
-  CanonicalCoordinate,
-  CanonicalWorkerPackedAdmission,
-  CanonicalWorkerResponse,
-} from "./canonical-worker-protocol";
 import { initializeTerrainLab } from "./terrain-lab-wasm";
 import {
   loadTerrainVisualAssets,
   optionalReferenceBytes,
+  type TerrainVisualAssetBytes,
 } from "./visual-assets";
 import { useWorldViewNavigation } from "./use-world-view-navigation";
 
@@ -85,6 +85,20 @@ interface CanonicalPackedAcceptReport {
   residentMeshUsedBytes: number;
 }
 
+interface CanonicalCoordinate {
+  chunkX: number;
+  chunkZ: number;
+}
+
+interface CanonicalWorkerPackedAdmission {
+  chunkX: number;
+  chunkZ: number;
+  fingerprint: string;
+  rawCacheHit: boolean;
+  retainedDependencyChunks: number;
+  packedSections: Uint8Array;
+}
+
 interface CanonicalPackedPrepareReport {
   activeChunks: number;
   warmChunks: number;
@@ -131,6 +145,7 @@ export function CanonicalTerrainCanvas({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
   const labRef = useRef<ResponsiveCanonicalTerrainLab | undefined>(undefined);
+  const visualAssetsRef = useRef<TerrainVisualAssetBytes | undefined>(undefined);
   const workerRef = useRef<Worker | undefined>(undefined);
   const workerIdentityRef = useRef<string | undefined>(undefined);
   const workerReadyRef = useRef(false);
@@ -224,6 +239,7 @@ export function CanonicalTerrainCanvas({
         return;
       }
       labRef.current = lab;
+      visualAssetsRef.current = assets;
       setInitialized(true);
     }).catch((error: unknown) => {
       if (!cancelled) {
@@ -239,6 +255,7 @@ export function CanonicalTerrainCanvas({
       labRef.current?.free();
       workerRef.current = undefined;
       labRef.current = undefined;
+      visualAssetsRef.current = undefined;
     };
   }, [onError, texturePresentation, visualProfile]);
 
@@ -400,74 +417,111 @@ export function CanonicalTerrainCanvas({
       workerReadyRef.current = false;
     }
     if (worker) {
-      worker.onmessage = (event: MessageEvent<CanonicalWorkerResponse>): void => {
-        const response = event.data;
-        if (response.type === "ready") {
-          workerReadyRef.current = true;
-          beginWorker();
+      worker.onmessage = (event: MessageEvent<unknown>): void => {
+        let response: CanonicalTerrainWorkerResponse;
+        try {
+          response = CanonicalTerrainWorkerResponse.decode(event.data);
+        } catch (error: unknown) {
+          finished = true;
+          onError(errorMessage(error));
           return;
         }
-        if (cancelled || response.epoch !== epoch || epochRef.current !== epoch) {
-          report.staleChunks += 1;
-          return;
-        }
-        if (response.type === "began") {
-          sessionBegan = true;
+        try {
+          if (response.kind === "ready") {
+            workerReadyRef.current = true;
+            beginWorker();
+            return;
+          }
+          if (
+            cancelled
+            || response.epoch !== epoch
+            || epochRef.current !== epoch
+            || response.kind === "stale"
+          ) {
+            report.staleChunks += 1;
+            return;
+          }
+          if (response.kind === "began") {
+            sessionBegan = true;
+            report.cachedChunks = response.rawCacheChunks;
+            report.cacheRawBytes = response.rawCacheBytes;
+            updateTrackedBytes(report);
+            publishReport(report);
+            pumpWorker();
+            maybeFinish();
+            return;
+          }
+          if (response.kind === "error") {
+            finished = true;
+            onError(response.message);
+            worker.terminate();
+            if (workerRef.current === worker) {
+              workerRef.current = undefined;
+              workerIdentityRef.current = undefined;
+              workerReadyRef.current = false;
+            }
+            return;
+          }
+          workerInFlight = false;
+          report.generationMs += response.generationMs;
+          report.workerPresentationMs += response.presentationMs;
+          report.workerMeshMs += response.meshMs;
+          report.workerPackMs += response.packMs;
+          report.workerTransferMs += response.transferMs;
+          report.meshTargetChunks += response.deduplicatedTargetChunks;
           report.cachedChunks = response.rawCacheChunks;
           report.cacheRawBytes = response.rawCacheBytes;
+          const admissions = Array.from(
+            { length: response.admissionCount },
+            (_, index): CanonicalWorkerPackedAdmission => ({
+              chunkX: response.admissionChunkX(index),
+              chunkZ: response.admissionChunkZ(index),
+              fingerprint: response.admissionFingerprint(index),
+              rawCacheHit: response.admissionRawCacheHit(index),
+              retainedDependencyChunks:
+                response.admissionRetainedDependencyChunks(index),
+              packedSections: response.admissionPackedSections(index),
+            }),
+          );
+          report.cacheHits += admissions.filter(
+            (admission) => admission.rawCacheHit,
+          ).length;
           updateTrackedBytes(report);
+          pending.push(
+            ...admissions.map(
+              (admission): PendingCanonicalChunk => ({ kind: "mesh", admission }),
+            ),
+          );
           publishReport(report);
+          scheduleAdmission();
           pumpWorker();
-          maybeFinish();
-          return;
+        } finally {
+          response.free();
         }
-        if (response.type === "error") {
-          finished = true;
-          onError(response.message);
-          worker.terminate();
-          if (workerRef.current === worker) {
-            workerRef.current = undefined;
-            workerIdentityRef.current = undefined;
-            workerReadyRef.current = false;
-          }
-          return;
-        }
-        workerInFlight = false;
-        report.generationMs += response.generationMs;
-        report.workerPresentationMs += response.presentationMs;
-        report.workerMeshMs += response.meshMs;
-        report.workerPackMs += response.packMs;
-        report.workerTransferMs += response.transferMs;
-        report.meshTargetChunks += response.deduplicatedTargetChunks;
-        report.cachedChunks = response.rawCacheChunks;
-        report.cacheRawBytes = response.rawCacheBytes;
-        report.cacheHits += response.admissions.filter(
-          (admission) => admission.rawCacheHit,
-        ).length;
-        updateTrackedBytes(report);
-        pending.push(
-          ...response.admissions.map(
-            (admission): PendingCanonicalChunk => ({ kind: "mesh", admission }),
-          ),
-        );
-        publishReport(report);
-        scheduleAdmission();
-        pumpWorker();
       };
       worker.onerror = (event): void => {
         finished = true;
         onError(event.message || "Canonical terrain worker failed.");
       };
       if (needsWorkerInit) {
-        worker.postMessage({
-          type: "init",
+        const assets = visualAssetsRef.current;
+        if (!assets) {
+          finished = true;
+          onError("Canonical terrain visual assets are not initialized.");
+          return;
+        }
+        worker.postMessage(canonicalTerrainWorkerInitFrame(
           epoch,
-          profile: state.profile,
+          assets.authored,
+          optionalReferenceBytes(assets),
+          assets.provisional,
+          assets.diagnostic,
           visualProfile,
           texturePresentation,
-          seed: state.seed,
-          stage: state.canonicalStage,
-        });
+          state.seed,
+          state.profile,
+          state.canonicalStage,
+        ));
       } else if (workerReadyRef.current) {
         beginWorker();
       }
@@ -487,14 +541,13 @@ export function CanonicalTerrainCanvas({
         return;
       }
       beginSent = true;
-      worker.postMessage({
-        type: "begin",
+      worker.postMessage(canonicalTerrainWorkerBeginFrame(
         epoch,
-        coordinates,
-        waterVisible: state.waterVisible,
-        vegetationVisible: state.vegetationVisible,
+        JSON.stringify(coordinates),
+        state.waterVisible,
+        state.vegetationVisible,
         cacheEnabled,
-      });
+      ));
     }
 
     function scheduleAdmission(): void {
@@ -554,11 +607,10 @@ export function CanonicalTerrainCanvas({
       const batch = missing.slice(nextMissingIndex, nextMissingIndex + batchSize);
       nextMissingIndex += batch.length;
       workerInFlight = true;
-      worker.postMessage({
-        type: "compileBatch",
+      worker.postMessage(canonicalTerrainWorkerCompileFrame(
         epoch,
-        coordinates: batch,
-      });
+        JSON.stringify(batch),
+      ));
     }
 
     function acceptChunk(

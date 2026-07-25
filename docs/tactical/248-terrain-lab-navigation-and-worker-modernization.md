@@ -470,6 +470,35 @@ Focused evidence on 2026-07-25:
 
 Worker protocol, cache, and admission behavior were unchanged in this slice.
 
+### Slice 2a complete: Rust-authored worker frames and actor
+
+The canonical exact Worker now loads only the Terrain Lab Wasm module, keeps
+one `CanonicalTerrainWorkerActor`, forwards each opaque incoming frame, and
+posts the actor's opaque dispatch plus its actor-selected transfer list.
+Terrain profile, stage, asset/catalog hydration, epochs, begin semantics,
+canonical session lifetime, compilation, result construction, and structured
+domain errors all moved into worker Rust.
+
+Main Rust now authors initialization, begin, and compile frames and validates
+every response through `CanonicalTerrainWorkerResponse` before transitional
+React coordination consumes its getters. The hand-authored
+`canonical-worker-protocol.ts`, TypeScript semantic request switch, and old
+public `CanonicalTerrainMeshSession`/batch-payload Wasm facade were deleted.
+
+This checkpoint deliberately retains the existing React epoch/batch/admission
+loop and transferable `Uint8Array` mesh results. That isolates actor ownership
+from the coordinator and SAB changes still to follow.
+
+Focused evidence on 2026-07-25:
+
+- the Terrain Lab Wasm check, typecheck, and 14 URL/state tests passed;
+- the Rust Terrain Lab test suite passed;
+- the headed desktop `9x9` responsive-pan case passed in 8.4 seconds;
+- its one-chunk shift retained `72` chunks and paced the `9` entering chunks
+  through the unchanged acceptance assertions; and
+- `/tmp/mclone-terrain-lab-desktop-chrome-canonical-responsive-pan.png` was
+  inspected and showed the complete `81/81` canonical footprint.
+
 ## Validation Plan
 
 The exact commands may be refined as ownership moves, but closeout includes at
