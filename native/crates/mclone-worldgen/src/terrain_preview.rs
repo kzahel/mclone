@@ -15,7 +15,7 @@ use crate::levelgen::{VANILLA_OVERWORLD_LOD_REVISION, VanillaOverworldLodSampler
 use mclone_core::ChunkPos;
 
 pub const TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION: &str =
-    "mclone-terrain-preview-reference-grid-v7";
+    "mclone-terrain-preview-reference-grid-v8";
 pub const TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS: u32 = 64;
 pub const TERRAIN_PREVIEW_MIN_CELLS_PER_AXIS: u32 = 8;
 pub const TERRAIN_PREVIEW_MAX_CELLS_PER_AXIS: u32 = 128;
@@ -380,6 +380,85 @@ impl TerrainPreviewSample {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TerrainPreviewCompileWork {
+    pub sample_lattice_points: u64,
+    pub terrain_sample_evaluations: u64,
+    pub forest_intent_evaluations: u64,
+    pub forest_footprint_summaries: u64,
+}
+
+impl TerrainPreviewCompileWork {
+    pub const fn saturating_add(self, other: Self) -> Self {
+        Self {
+            sample_lattice_points: self
+                .sample_lattice_points
+                .saturating_add(other.sample_lattice_points),
+            terrain_sample_evaluations: self
+                .terrain_sample_evaluations
+                .saturating_add(other.terrain_sample_evaluations),
+            forest_intent_evaluations: self
+                .forest_intent_evaluations
+                .saturating_add(other.forest_intent_evaluations),
+            forest_footprint_summaries: self
+                .forest_footprint_summaries
+                .saturating_add(other.forest_footprint_summaries),
+        }
+    }
+}
+
+pub fn terrain_preview_reference_compile_work(
+    request: ValidatedTerrainPreviewRequest,
+) -> TerrainPreviewCompileWork {
+    let source = request.request();
+    let sample_lattice_points = request.sample_count() as u64;
+    if source.profile != TerrainPreviewProfile::McloneOverworldV1
+        || source.content_stage != TerrainPreviewContentStage::Cover
+    {
+        return TerrainPreviewCompileWork {
+            sample_lattice_points,
+            terrain_sample_evaluations: sample_lattice_points,
+            forest_intent_evaluations: 0,
+            forest_footprint_summaries: 0,
+        };
+    }
+    let coarse = source.sample_spacing > TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING;
+    TerrainPreviewCompileWork {
+        sample_lattice_points,
+        terrain_sample_evaluations: sample_lattice_points.saturating_mul(5),
+        forest_intent_evaluations: sample_lattice_points.saturating_mul(if coarse { 4 } else { 1 }),
+        forest_footprint_summaries: if coarse { sample_lattice_points } else { 0 },
+    }
+}
+
+pub fn terrain_preview_gpu_compile_work(
+    request: ValidatedTerrainPreviewRequest,
+) -> TerrainPreviewCompileWork {
+    let source = request.request();
+    let sample_lattice_points = request.sample_count() as u64;
+    if source.profile != TerrainPreviewProfile::McloneOverworldV1
+        || source.content_stage != TerrainPreviewContentStage::Cover
+    {
+        return TerrainPreviewCompileWork {
+            sample_lattice_points,
+            terrain_sample_evaluations: sample_lattice_points,
+            forest_intent_evaluations: 0,
+            forest_footprint_summaries: 0,
+        };
+    }
+    let coarse = source.sample_spacing > TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING;
+    TerrainPreviewCompileWork {
+        sample_lattice_points,
+        terrain_sample_evaluations: sample_lattice_points.saturating_mul(if coarse {
+            5
+        } else {
+            1
+        }),
+        forest_intent_evaluations: sample_lattice_points.saturating_mul(if coarse { 4 } else { 1 }),
+        forest_footprint_summaries: if coarse { sample_lattice_points } else { 0 },
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct TerrainPreviewReferenceGrid {
     request: ValidatedTerrainPreviewRequest,
@@ -435,27 +514,25 @@ impl TerrainPreviewReferenceGrid {
                 let biome_recipe = mclone_overworld_biome_recipe(macro_landform);
                 let surface_recipe = mclone_overworld_surface_recipe(macro_landform);
                 let forest_intent = if source.content_stage == TerrainPreviewContentStage::Cover {
-                    let radius = MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS;
-                    let west_x = world_x
-                        .checked_sub(radius)
-                        .ok_or("Terrain Lab vegetation west sample overflow")?;
-                    let east_x = world_x
-                        .checked_add(radius)
-                        .ok_or("Terrain Lab vegetation east sample overflow")?;
-                    let north_z = world_z
-                        .checked_sub(radius)
-                        .ok_or("Terrain Lab vegetation north sample overflow")?;
-                    let south_z = world_z
-                        .checked_add(radius)
-                        .ok_or("Terrain Lab vegetation south sample overflow")?;
-                    let forest_landform = McloneOverworldLandformSample::from_cardinal_samples(
-                        terrain,
-                        preview_terrain_sample(&sampler, stream_plans.as_deref(), west_x, world_z),
-                        preview_terrain_sample(&sampler, stream_plans.as_deref(), east_x, world_z),
-                        preview_terrain_sample(&sampler, stream_plans.as_deref(), world_x, north_z),
-                        preview_terrain_sample(&sampler, stream_plans.as_deref(), world_x, south_z),
-                    );
-                    vegetation_planner.forest_intent(forest_landform, world_x, world_z)
+                    if source.sample_spacing <= TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING {
+                        preview_point_forest_intent(
+                            &sampler,
+                            stream_plans.as_deref(),
+                            &vegetation_planner,
+                            terrain,
+                            world_x,
+                            world_z,
+                        )?
+                    } else {
+                        preview_footprint_forest_summary(
+                            &sampler,
+                            stream_plans.as_deref(),
+                            &vegetation_planner,
+                            source.sample_spacing,
+                            world_x,
+                            world_z,
+                        )?
+                    }
                 } else {
                     crate::levelgen::McloneForestIntentSample::EMPTY
                 };
@@ -626,6 +703,10 @@ impl TerrainPreviewReferenceGrid {
         &self.samples
     }
 
+    pub fn compile_work(&self) -> TerrainPreviewCompileWork {
+        terrain_preview_reference_compile_work(self.request)
+    }
+
     pub fn sample(&self, sample_x: u32, sample_z: u32) -> Option<TerrainPreviewSample> {
         if sample_x >= self.request.samples_per_axis()
             || sample_z >= self.request.samples_per_axis()
@@ -669,6 +750,78 @@ fn preview_terrain_sample(
         let _ = apply_stream_plans(&mut terrain, world_x, world_z, plans);
     }
     terrain
+}
+
+fn preview_point_forest_intent(
+    sampler: &McloneOverworldSampler,
+    stream_plans: Option<&[McloneOverworldStreamPlan]>,
+    vegetation_planner: &McloneOverworldVegetationPlanner,
+    terrain: McloneOverworldTerrainSample,
+    world_x: i32,
+    world_z: i32,
+) -> Result<crate::levelgen::McloneForestIntentSample, String> {
+    let radius = MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS;
+    let west_x = world_x
+        .checked_sub(radius)
+        .ok_or("Terrain Lab vegetation west sample overflow")?;
+    let east_x = world_x
+        .checked_add(radius)
+        .ok_or("Terrain Lab vegetation east sample overflow")?;
+    let north_z = world_z
+        .checked_sub(radius)
+        .ok_or("Terrain Lab vegetation north sample overflow")?;
+    let south_z = world_z
+        .checked_add(radius)
+        .ok_or("Terrain Lab vegetation south sample overflow")?;
+    let forest_landform = McloneOverworldLandformSample::from_cardinal_samples(
+        terrain,
+        preview_terrain_sample(sampler, stream_plans, west_x, world_z),
+        preview_terrain_sample(sampler, stream_plans, east_x, world_z),
+        preview_terrain_sample(sampler, stream_plans, world_x, north_z),
+        preview_terrain_sample(sampler, stream_plans, world_x, south_z),
+    );
+    Ok(vegetation_planner.forest_intent(forest_landform, world_x, world_z))
+}
+
+fn preview_footprint_forest_summary(
+    sampler: &McloneOverworldSampler,
+    stream_plans: Option<&[McloneOverworldStreamPlan]>,
+    vegetation_planner: &McloneOverworldVegetationPlanner,
+    sample_spacing: u32,
+    world_x: i32,
+    world_z: i32,
+) -> Result<crate::levelgen::McloneForestIntentSample, String> {
+    let offset = i32::try_from(sample_spacing / 4)
+        .map_err(|_| "Terrain Lab vegetation footprint offset exceeds i32")?;
+    let min_x = world_x
+        .checked_sub(offset)
+        .ok_or("Terrain Lab vegetation footprint minimum X overflow")?;
+    let max_x = world_x
+        .checked_add(offset)
+        .ok_or("Terrain Lab vegetation footprint maximum X overflow")?;
+    let min_z = world_z
+        .checked_sub(offset)
+        .ok_or("Terrain Lab vegetation footprint minimum Z overflow")?;
+    let max_z = world_z
+        .checked_add(offset)
+        .ok_or("Terrain Lab vegetation footprint maximum Z overflow")?;
+    let coordinates = [
+        (min_x, min_z),
+        (max_x, min_z),
+        (min_x, max_z),
+        (max_x, max_z),
+    ];
+    let taps = coordinates.map(|(tap_x, tap_z)| {
+        (
+            McloneOverworldLandformSample {
+                terrain: preview_terrain_sample(sampler, stream_plans, tap_x, tap_z),
+                slope: 0.0,
+            },
+            tap_x,
+            tap_z,
+        )
+    });
+    Ok(vegetation_planner.forest_footprint_summary(taps))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1256,6 +1409,50 @@ mod tests {
     }
 
     #[test]
+    fn cover_compile_work_is_fixed_per_lattice_point() {
+        let near = TerrainPreviewRequest::new(12_345, 0, 0, 4)
+            .with_content_stage(TerrainPreviewContentStage::Cover)
+            .validate()
+            .unwrap();
+        let coarse = TerrainPreviewRequest::new(12_345, 0, 0, 1_024)
+            .with_content_stage(TerrainPreviewContentStage::Cover)
+            .validate()
+            .unwrap();
+
+        assert_eq!(
+            terrain_preview_reference_compile_work(near),
+            TerrainPreviewCompileWork {
+                sample_lattice_points: 4_225,
+                terrain_sample_evaluations: 21_125,
+                forest_intent_evaluations: 4_225,
+                forest_footprint_summaries: 0,
+            }
+        );
+        assert_eq!(
+            terrain_preview_reference_compile_work(coarse),
+            TerrainPreviewCompileWork {
+                sample_lattice_points: 4_225,
+                terrain_sample_evaluations: 21_125,
+                forest_intent_evaluations: 16_900,
+                forest_footprint_summaries: 4_225,
+            }
+        );
+        assert_eq!(
+            terrain_preview_gpu_compile_work(coarse),
+            terrain_preview_reference_compile_work(coarse)
+        );
+        assert_eq!(
+            terrain_preview_gpu_compile_work(near),
+            TerrainPreviewCompileWork {
+                sample_lattice_points: 4_225,
+                terrain_sample_evaluations: 4_225,
+                forest_intent_evaluations: 4_225,
+                forest_footprint_summaries: 0,
+            }
+        );
+    }
+
+    #[test]
     fn coarse_cover_aggregates_without_record_queries() {
         let request = TerrainPreviewRequest::new(12_345, 0, 0, 8)
             .with_content_stage(TerrainPreviewContentStage::Cover);
@@ -1354,7 +1551,7 @@ mod tests {
         );
         assert_eq!(
             TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION,
-            "mclone-terrain-preview-reference-grid-v7"
+            "mclone-terrain-preview-reference-grid-v8"
         );
         assert_eq!(
             TerrainPreviewProfile::VanillaOverworld.source_revision(),

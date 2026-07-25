@@ -32,6 +32,7 @@ pub const MCLONE_VEGETATION_PLANNING_CELL_BLOCKS: i32 = 32;
 pub const MCLONE_VEGETATION_CANDIDATES_PER_CELL: u8 = 32;
 pub const MCLONE_OVERWORLD_GROVE_DOMAIN: u64 = 0x6d63_6f76_6772_6f76;
 pub const MCLONE_OVERWORLD_GROVE_SCALE_BLOCKS: i32 = 256;
+pub const MCLONE_FOREST_SUMMARY_FOOTPRINT_TAPS: usize = 4;
 
 const VEGETATION_PLAN_REVISION: u16 = 2;
 const GROVE_DOMAIN: SeedDomain = SeedDomain::new(MCLONE_OVERWORLD_GROVE_DOMAIN);
@@ -374,6 +375,15 @@ impl McloneOverworldVegetationPlanner {
         world_z: i32,
     ) -> McloneForestIntentSample {
         forest_intent_from_landform(landform, self.grove_field.sample(world_x, world_z) as f32)
+    }
+
+    pub fn forest_footprint_summary(
+        &self,
+        taps: [(McloneOverworldLandformSample, i32, i32); MCLONE_FOREST_SUMMARY_FOOTPRINT_TAPS],
+    ) -> McloneForestIntentSample {
+        forest_footprint_summary(
+            taps.map(|(landform, world_x, world_z)| self.forest_intent(landform, world_x, world_z)),
+        )
     }
 
     fn preliminary_candidates(
@@ -1162,6 +1172,82 @@ fn forest_intent_from_landform(
     }
 }
 
+fn forest_footprint_summary(
+    samples: [McloneForestIntentSample; MCLONE_FOREST_SUMMARY_FOOTPRINT_TAPS],
+) -> McloneForestIntentSample {
+    let sample_weight = 1.0 / MCLONE_FOREST_SUMMARY_FOOTPRINT_TAPS as f32;
+    let coverage = samples.iter().map(|sample| sample.coverage).sum::<f32>() * sample_weight;
+    let density = samples.iter().map(|sample| sample.density).sum::<f32>() * sample_weight;
+    let grove_or_opening_influence = samples
+        .iter()
+        .map(|sample| sample.grove_or_opening_influence)
+        .sum::<f32>()
+        * sample_weight;
+    let mut family_coverage = [0.0_f32; 3];
+    for sample in samples {
+        let Some(family) = sample.dominant_family else {
+            continue;
+        };
+        family_coverage[forest_family_index(family)] += sample.coverage;
+    }
+    let total_family_coverage = family_coverage.iter().sum::<f32>();
+    if total_family_coverage <= f32::EPSILON {
+        return McloneForestIntentSample::EMPTY;
+    }
+
+    let mut ranked_families = [
+        (McloneTreeFamily::TemperateBroadleaf, family_coverage[0]),
+        (McloneTreeFamily::CoolWetConifer, family_coverage[1]),
+        (McloneTreeFamily::WarmDryAcacia, family_coverage[2]),
+    ];
+    ranked_families.sort_by(|left, right| {
+        right
+            .1
+            .total_cmp(&left.1)
+            .then_with(|| left.0.cmp(&right.0))
+    });
+    let dominant_family = ranked_families[0].0;
+    let secondary_family = (ranked_families[1].1 > f32::EPSILON).then_some(ranked_families[1].0);
+    let family_mix = 1.0 - ranked_families[0].1 / total_family_coverage;
+    let mean_canopy_height = samples
+        .iter()
+        .map(|sample| sample.mean_canopy_height * sample.coverage)
+        .sum::<f32>()
+        / total_family_coverage;
+    let canopy_height_variance = samples
+        .iter()
+        .map(|sample| {
+            if sample.dominant_family.is_none() {
+                return 0.0;
+            }
+            let mean_delta = sample.mean_canopy_height - mean_canopy_height;
+            sample.coverage
+                * (sample.canopy_height_variation * sample.canopy_height_variation
+                    + mean_delta * mean_delta)
+        })
+        .sum::<f32>()
+        / total_family_coverage;
+
+    McloneForestIntentSample {
+        coverage,
+        density,
+        dominant_family: Some(dominant_family),
+        secondary_family,
+        family_mix,
+        mean_canopy_height,
+        canopy_height_variation: canopy_height_variance.sqrt(),
+        grove_or_opening_influence,
+    }
+}
+
+const fn forest_family_index(family: McloneTreeFamily) -> usize {
+    match family {
+        McloneTreeFamily::TemperateBroadleaf => 0,
+        McloneTreeFamily::CoolWetConifer => 1,
+        McloneTreeFamily::WarmDryAcacia => 2,
+    }
+}
+
 fn candidate_supports_landform(
     family: McloneTreeFamily,
     landform: McloneOverworldLandformSample,
@@ -1384,6 +1470,41 @@ mod tests {
 
     fn bounds(min_x: i32, min_z: i32, max_x: i32, max_z: i32) -> McloneVegetationBounds {
         McloneVegetationBounds::new(min_x, min_z, max_x, max_z).unwrap()
+    }
+
+    #[test]
+    fn footprint_summary_filters_coverage_family_and_canopy() {
+        let intent = |family, coverage, height, variation, grove| McloneForestIntentSample {
+            coverage,
+            density: coverage * 0.8,
+            dominant_family: Some(family),
+            secondary_family: None,
+            family_mix: 0.0,
+            mean_canopy_height: height,
+            canopy_height_variation: variation,
+            grove_or_opening_influence: grove,
+        };
+        let summary = forest_footprint_summary([
+            intent(McloneTreeFamily::TemperateBroadleaf, 0.8, 8.0, 1.0, 0.8),
+            intent(McloneTreeFamily::CoolWetConifer, 0.4, 10.0, 2.0, 0.4),
+            McloneForestIntentSample::EMPTY,
+            intent(McloneTreeFamily::TemperateBroadleaf, 0.4, 6.0, 1.0, 0.2),
+        ]);
+
+        assert!((summary.coverage - 0.4).abs() < 1.0e-6);
+        assert!((summary.density - 0.32).abs() < 1.0e-6);
+        assert_eq!(
+            summary.dominant_family,
+            Some(McloneTreeFamily::TemperateBroadleaf)
+        );
+        assert_eq!(
+            summary.secondary_family,
+            Some(McloneTreeFamily::CoolWetConifer)
+        );
+        assert!((summary.family_mix - 0.25).abs() < 1.0e-6);
+        assert!((summary.mean_canopy_height - 8.0).abs() < 1.0e-6);
+        assert!(summary.canopy_height_variation > 1.7);
+        assert!((summary.grove_or_opening_influence - 0.35).abs() < 1.0e-6);
     }
 
     #[test]

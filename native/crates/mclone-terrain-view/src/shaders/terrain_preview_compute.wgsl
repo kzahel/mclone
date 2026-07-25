@@ -897,7 +897,7 @@ fn complete_hydrology(
     );
 }
 
-fn evaluate(world_x: i32, world_z: i32) -> TerrainPreviewSample {
+fn evaluate_point(world_x: i32, world_z: i32) -> TerrainPreviewSample {
     let continentalness = clamp(
         value_noise(
             CONTINENT_LARGE_DOMAIN,
@@ -1110,21 +1110,87 @@ fn evaluate(world_x: i32, world_z: i32) -> TerrainPreviewSample {
     sample.hydrology = hydrology.hydrology;
     sample.hydrology_detail = hydrology.hydrology_detail;
     sample.semantics = hydrology.semantics;
-    if params.content_stage_flags.x >= 4u {
-        let forest = forest_intent(
-            world_x,
-            world_z,
-            hydrology.semantics.y,
-            temperature,
-            moisture,
-        );
-        sample.forest_summary = forest.summary;
-        sample.forest_detail = forest.detail;
-    } else {
-        sample.forest_summary = vec4<f32>(0.0);
-        sample.forest_detail = vec4<f32>(0.0);
-    }
+    sample.forest_summary = vec4<f32>(0.0);
+    sample.forest_detail = vec4<f32>(0.0);
     return sample;
+}
+
+fn point_forest_intent(world_x: i32, world_z: i32, sample: TerrainPreviewSample) -> ForestIntent {
+    return forest_intent(
+        world_x,
+        world_z,
+        sample.semantics.y,
+        sample.climate.x,
+        sample.climate.y,
+    );
+}
+
+fn forest_footprint_summary(world_x: i32, world_z: i32, sample_spacing: i32) -> ForestIntent {
+    let offset = sample_spacing / 4;
+    let coordinates = array<vec2<i32>, 4>(
+        vec2<i32>(world_x - offset, world_z - offset),
+        vec2<i32>(world_x + offset, world_z - offset),
+        vec2<i32>(world_x - offset, world_z + offset),
+        vec2<i32>(world_x + offset, world_z + offset),
+    );
+    var intents: array<ForestIntent, 4>;
+    var family_coverage = vec3<f32>(0.0);
+    var coverage = 0.0;
+    var density = 0.0;
+    var grove = 0.0;
+    var total_family_coverage = 0.0;
+    for (var index = 0u; index < 4u; index += 1u) {
+        let coordinate = coordinates[index];
+        let point = evaluate_point(coordinate.x, coordinate.y);
+        let intent = point_forest_intent(coordinate.x, coordinate.y, point);
+        intents[index] = intent;
+        coverage += intent.summary.x;
+        density += intent.summary.y;
+        grove += intent.detail.z;
+        total_family_coverage += intent.summary.x;
+        let family = u32(round(intent.summary.z));
+        if family >= 1u && family <= 3u {
+            family_coverage[family - 1u] += intent.summary.x;
+        }
+    }
+    if total_family_coverage <= 0.000001 {
+        return ForestIntent(vec4<f32>(0.0), vec4<f32>(0.0));
+    }
+    var dominant_index = 0u;
+    if family_coverage.y > family_coverage.x {
+        dominant_index = 1u;
+    }
+    if family_coverage.z > family_coverage[dominant_index] {
+        dominant_index = 2u;
+    }
+    let mean_canopy_height = (
+        intents[0].detail.x * intents[0].summary.x
+        + intents[1].detail.x * intents[1].summary.x
+        + intents[2].detail.x * intents[2].summary.x
+        + intents[3].detail.x * intents[3].summary.x
+    ) / total_family_coverage;
+    var canopy_height_variance = 0.0;
+    for (var index = 0u; index < 4u; index += 1u) {
+        let mean_delta = intents[index].detail.x - mean_canopy_height;
+        canopy_height_variance += intents[index].summary.x * (
+            intents[index].detail.y * intents[index].detail.y
+            + mean_delta * mean_delta
+        );
+    }
+    return ForestIntent(
+        vec4<f32>(
+            coverage * 0.25,
+            density * 0.25,
+            f32(dominant_index + 1u),
+            1.0 - family_coverage[dominant_index] / total_family_coverage,
+        ),
+        vec4<f32>(
+            mean_canopy_height,
+            sqrt(canopy_height_variance / total_family_coverage),
+            grove * 0.25,
+            1.0,
+        ),
+    );
 }
 
 @compute @workgroup_size(8, 8, 1)
@@ -1137,5 +1203,14 @@ fn compute_main(@builtin(global_invocation_id) invocation: vec3<u32>) {
     let world_x = params.origin_spacing_cells.x + i32(invocation.x) * sample_spacing;
     let world_z = params.origin_spacing_cells.y + i32(invocation.y) * sample_spacing;
     let index = invocation.y * samples_per_axis + invocation.x;
-    gpu_samples[index] = evaluate(world_x, world_z);
+    var sample = evaluate_point(world_x, world_z);
+    if params.content_stage_flags.x >= 4u {
+        var forest = point_forest_intent(world_x, world_z, sample);
+        if sample_spacing > 4 {
+            forest = forest_footprint_summary(world_x, world_z, sample_spacing);
+        }
+        sample.forest_summary = forest.summary;
+        sample.forest_detail = forest.detail;
+    }
+    gpu_samples[index] = sample;
 }
