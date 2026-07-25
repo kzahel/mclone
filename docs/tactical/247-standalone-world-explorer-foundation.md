@@ -29,29 +29,31 @@ mclone-worldgen
         v
 mclone-terrain-view <--- mclone-view-control
         |
-        +-- mclone-terrain-lab       browser diagnostic host
-        +-- mclone-world-explorer    standalone native host
-        +-- later game scene         not part of this tactical
+        +-- mclone-world-explorer    standalone native host now
+        +-- mclone-terrain-lab       existing browser diagnostic host
+        +-- later minimal web shell  follow-up after input audit
+        +-- later game scene         follow-up
 ```
 
 The slice adds a standalone native desktop `mclone-world-explorer` binary,
-introduces a pure shared view-control reducer, and makes both the new binary
-and Terrain Lab consume that reducer. It proves that broad terrain viewing is
-a small composable application rather than another startup mode of the full
-game.
+introduces a pure shared view-control reducer, and drives the native host
+through that reducer. It proves that broad terrain viewing is a small
+composable application rather than another startup mode of the full game.
+The contracts remain browser-capable, but this tactical does not choose or
+implement the browser input shell.
 
 Completion requires:
 
 - a native window rendering the existing shared procedural terrain and tree
   presentation;
 - deterministic shared map/orbit/pan/zoom/focus behavior;
-- browser Terrain Lab adoption of the same reducer;
 - a dependency and artifact-size receipt proving the Explorer does not pull
   in the game runtime; and
-- inspected native and headed-browser pixels from the same pinned view.
+- inspected native window and offscreen pixels from the same pinned view.
 
-This tactical establishes the two-host seam needed by later clipmap work. It
-does not implement a toroidal ring, exact chunks, or enter-world authority.
+This tactical establishes the independent native seam needed by later clipmap
+and browser work. It does not implement a toroidal ring, a new web shell,
+Terrain Lab input migration, exact chunks, or enter-world authority.
 
 ## Originating Direction
 
@@ -215,17 +217,22 @@ Durable requirements are:
 - tap/double-tap/drag discrimination and cancellation;
 - pointer-count transition handling;
 - frame-rate-independent damping if inertia is enabled; and
-- deterministic native/Wasm behavior at the request precision actually used
-  by `mclone-terrain-view`.
+- an event and state representation that can compile for Wasm without
+  importing a browser event type into the reducer.
 
 Platform adapters retain pointer capture, context-menu suppression, browser
-scroll prevention, and native event translation. The reducer does not issue a
-teleport, mutate a world, or decide what a selected block means.
+scroll prevention, and native event translation. This tactical implements
+only the `winit` adapter. It does not decide whether future browser contacts
+should travel through `mclone-input`, a shared platform-input shell, or a
+narrow Explorer adapter; that decision follows a focused audit of the main
+game and Terrain Lab browser rims. The reducer does not issue a teleport,
+mutate a world, or decide what a selected block means.
 
 ### One terrain-view request
 
-The Explorer and Terrain Lab must converge on one typed host-neutral request
-for the shared procedural pane. It includes at least:
+The Explorer consumes one typed host-neutral request for the shared
+procedural pane. The request is deliberately suitable for later Terrain Lab,
+minimal-web-shell, and game consumers. It includes at least:
 
 - source/profile identity and revision;
 - seed;
@@ -237,9 +244,10 @@ for the shared procedural pane. It includes at least:
 - content stage and presentation layer; and
 - bounded detail/tile budget.
 
-Remove Wasm string parsing and JSON reporting from the semantic path where a
-typed value can cross the Rust boundary first. Browser serialization may wrap
-the typed request at the adapter rim.
+Do not refactor Terrain Lab's Wasm string parsing or JSON reports merely to
+complete this native slice. The browser input-shell follow-up will decide how
+typed requests and contact observations cross the Wasm boundary after it
+compares the main game and Lab adapters.
 
 Do not move WGPU `Surface` ownership into `mclone-terrain-view`.
 `TerrainViewportRenderer::encode` or its successor continues to consume a
@@ -295,7 +303,10 @@ the proof.
 2. Record the current `mclone-terrain-view` dependency graph.
 3. Add the proposed Explorer dependency allow/deny audit before substantial
    app code lands.
-4. Pin one seed, center, footprint, view, and camera for cross-host evidence.
+4. Pin one seed, center, footprint, view, and camera for repeatable native
+   evidence and later cross-host comparison.
+5. Record the main game and Terrain Lab browser input entry points as
+   follow-up audit targets without refactoring them.
 
 This establishes evidence boundaries without rearranging the existing crates.
 
@@ -323,31 +334,34 @@ This slice should move no browser surface code into a shared crate.
 5. Verify redraw admission follows state and terrain readiness rather than
    spinning avoidable work while idle.
 
-### Slice 3: Terrain Lab convergence
-
-1. Expose the reducer through the Terrain Lab Wasm artifact.
-2. Keep DOM pointer capture and scroll/context-menu behavior in TypeScript.
-3. Route procedural and canonical panes through the same shared navigation
-   state and intent vocabulary.
-4. Port current TypeScript navigation cases into Rust or host-adapter tests.
-5. Remove superseded camera math and duplicated gesture policy instead of
-   retaining two implementations behind a mode flag.
-
-The current Lab URL contract and exact/procedural coordinate lock must remain
-stable unless the tactical explicitly records a compatible replacement.
-
-### Slice 4: smallness and two-host acceptance
+### Slice 3: smallness and native acceptance
 
 1. Run the dependency audit and record the final tree.
 2. Record release executable, asset, startup, readiness, residency, and frame
    evidence.
 3. Capture and inspect native map and 3D views.
-4. Capture and inspect headed-Wayland browser desktop and representative
-   mobile-touch views.
-5. Exercise identical seed/center/footprint/camera facts in both hosts and
-   compare fixed landmark projection.
-6. Update the parent topics with implemented status, evidence, remaining
+4. Exercise the pinned movement, zoom, map, and orbit sequence through both
+   the real window and offscreen target.
+5. Update the parent topics with implemented status, evidence, remaining
    ownership questions, and the next tactical boundary.
+
+### Planned browser follow-up boundary
+
+Tactical 247 records but does not implement the following sequence:
+
+1. audit the main game browser input rim, `mclone-input`, Terrain Lab pointer
+   code, and the native Explorer adapter;
+2. decide whether raw contact collection belongs in an existing shared shell,
+   a new neutral `mclone-input` contract, or thin product-specific adapters
+   above one intent reducer;
+3. build the minimal Web Explorer only after that decision, with TypeScript
+   limited to canvas/rAF/lifecycle and raw input forwarding; and
+4. migrate Terrain Lab navigation through the selected boundary rather than
+   creating a third browser input implementation.
+
+The follow-up must preserve the main game's thin browser rim and must not
+adopt Terrain Lab prototype code as the default merely because it already
+exists.
 
 ## Validation
 
@@ -360,7 +374,7 @@ stable unless the tactical explicitly records a compatible replacement.
 - anchored wheel and pinch zoom;
 - simultaneous pinch centroid pan;
 - tap, double-tap, drag, pointer-count transitions, and cancellation;
-- native/Wasm request equivalence;
+- a Wasm compile check for `mclone-view-control` without a browser host;
 - workspace formatting and clippy for changed crates; and
 - the Explorer forbidden-dependency audit.
 
@@ -379,22 +393,6 @@ Add a focused package smoke command that:
 Inspect the first fixed image before Slice 2. Inspect the final map, 3D, and
 movement images before completion.
 
-### Browser regression evidence
-
-Run at least:
-
-```bash
-pnpm terrain-lab:typecheck
-pnpm terrain-lab:web:test
-pnpm terrain-lab:web:build
-pnpm host:check
-pnpm terrain-lab:web:smoke
-```
-
-The browser smoke must use the headed Wayland/WebGPU path on the current Linux
-host and inspect both desktop and mobile-touch captures. Headless black WebGPU
-output is not acceptance evidence.
-
 ### Platform boundary
 
 This tactical adds a desktop application and a host-neutral crate. It does not
@@ -402,13 +400,14 @@ add Android or XR application behavior. Validate:
 
 - native desktop build and rendered smoke on the current host;
 - compile checks on other available desktop toolchains when practical;
-- `wasm32-unknown-unknown` compilation through the Terrain Lab build;
+- `wasm32-unknown-unknown` compilation of the shared view-control crate;
 - the existing thin-adapter/source-shape gate if shared host boundaries move;
   and
-- the normal game desktop/web build gates if any shared render or asset owner
-  used by the game changes.
+- the normal game or Terrain Lab gates only if their shared render, asset, or
+  browser code actually changes.
 
-Do not claim Android/XR Explorer support from host-neutral compilation alone.
+Do not claim Web, Android, or XR Explorer support from host-neutral
+compilation alone.
 
 ## Completion Gates
 
@@ -419,13 +418,12 @@ The tactical is complete only when:
 2. its dependency audit fails if a forbidden game crate is introduced;
 3. a no-argument launch reaches a useful procedural terrain view;
 4. native map/3D navigation is driven by `mclone-view-control`;
-5. Terrain Lab procedural and canonical navigation use the same reducer;
-6. old duplicated TypeScript navigation policy is removed;
-7. same-state native/browser landmark projection is demonstrated;
-8. native and headed-browser screenshots are inspected;
-9. dependency, executable, asset, startup, readiness, residency, and movement
+5. native window and offscreen paths exercise the same renderer and state;
+6. the shared controller compiles for Wasm without browser dependencies;
+7. native screenshots are inspected;
+8. dependency, executable, asset, startup, readiness, residency, and movement
    receipts are recorded; and
-10. both parent topics identify the next implementation boundary.
+9. both parent topics identify the browser-input audit and clipmap boundaries.
 
 ## Non-Goals
 
@@ -436,6 +434,9 @@ The tactical is complete only when:
 - server admission or **Enter Here**;
 - remote preview descriptors or hidden-seed handling;
 - persisted terrain edits or distant build proxies;
+- a minimal Web Explorer shell or deployment;
+- Terrain Lab input migration;
+- refactoring the main game's browser input shell;
 - polished player-facing web UI;
 - aircraft physics;
 - full lighting parity;
@@ -458,6 +459,13 @@ surface, assets, event adaptation, and reporting.
 
 Control: draw a fixed native image before extracting the shared controller.
 Move only duplication proven by the second consumer.
+
+### Native input accidentally becomes the universal shell
+
+Control: keep platform types out of `mclone-view-control`, treat the `winit`
+collector as a leaf adapter, and require the browser follow-up to compare the
+main game, Terrain Lab, and Explorer input rims before selecting a shared
+contact ABI.
 
 ### Product naming hides a diagnostic-only result
 
@@ -485,8 +493,7 @@ Suggested sequence:
 2. add fixed native Explorer rendering and capture;
 3. add the shared view-control reducer and tests;
 4. adopt shared controls in the native host;
-5. migrate Terrain Lab and delete superseded TypeScript policy; and
-6. record two-host, dependency, size, startup, and rendered closeout.
+5. record native dependency, size, startup, and rendered closeout.
 
 Do not combine the first toroidal ring with this series. It needs its own
 measurements and commit thread under:
@@ -499,8 +506,10 @@ Topic: procedural-horizon-clipmap
 
 On completion, update
 [`world-view-navigation.md`](../topics/world-view-navigation.md) with the
-landed controller API, native/browser evidence, and remaining player-product
-work. Then open bounded follow-ups in this order:
+landed controller API, native evidence, and remaining player-product work.
+Then open two independent follow-up lanes.
+
+The terrain-presentation lane begins with:
 
 1. **Single toroidal ring and native renderer contract** under
    `procedural-horizon-clipmap`: property-test two-dimensional wrapping and
@@ -510,13 +519,30 @@ work. Then open bounded follow-ups in this order:
 2. **Nested rings and skirts** under `procedural-horizon-clipmap`: fixed holes,
    powers-of-two spacing, entering row/column budgets, coarse-first refill,
    precision, and footprint-aware summaries.
-3. **Player-facing Web Explorer** under `world-view-navigation`: replace the
-   diagnostic control rail with accessible product UI, shareable view state,
-   and an independently measured Wasm/asset payload.
-4. **Validated local arrival** under `world-view-navigation`: turn selected
+
+The browser/product lane begins with:
+
+1. **Browser input-shell convergence study** under `world-view-navigation`:
+   compare the main game, `mclone-input`, Terrain Lab, and native Explorer
+   adapters; select a shared raw-contact/intent boundary before adding another
+   TypeScript shell.
+2. **Minimal Web Explorer shell and smoke deployment** under
+   `world-view-navigation`: reuse the selected input boundary; keep JavaScript
+   or TypeScript to canvas, rAF, lifecycle, URL, and observation forwarding;
+   measure and deploy the independent Wasm/asset payload.
+3. **Terrain Lab navigation migration** under `world-view-navigation`: adopt
+   the same input boundary and reducer, then delete superseded TypeScript
+   camera and gesture policy.
+4. **Player-facing Web Explorer** under `world-view-navigation`: replace the
+   minimal shell with accessible product UI and shareable view state without
+   changing the core session.
+5. **Validated local arrival** under `world-view-navigation`: turn selected
    X/Z into an integrated-host-validated safe spawn without making the URL
    authoritative.
-5. **Game exact handoff** under `procedural-horizon-clipmap`: integrate scene
+
+After the ring and product lanes have useful evidence:
+
+1. **Game exact handoff** under `procedural-horizon-clipmap`: integrate scene
    snapshots, exact-painted coverage, frontier collars, vegetation
    arbitration, and mono/stereo/multiview presentation only after ring
    behavior is stable in both proof hosts.

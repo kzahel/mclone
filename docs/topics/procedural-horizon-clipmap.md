@@ -372,10 +372,12 @@ The work should proceed as independently reviewable slices:
 
 Tactical
 [`247`](../tactical/247-standalone-world-explorer-foundation.md) first proves
-that `mclone-terrain-view` and shared navigation compose into both the browser
-Lab and a small native application. It deliberately stops before Step 2 below.
-After it closes, open a separate `procedural-horizon-clipmap` tactical for
-toroidal property tests and the first ring rather than expanding Tactical 247.
+that `mclone-terrain-view` and platform-neutral navigation compose into a
+small native application. Browser-shell convergence remains a separate
+`world-view-navigation` follow-up. Tactical 247 deliberately stops before
+Step 2 below. After it closes, open a separate
+`procedural-horizon-clipmap` tactical for toroidal property tests and the first
+ring rather than expanding Tactical 247.
 
 1. **Protect the old-system removal boundary.** Finish any branch-local
    cleanup before starting the proof, keep Tactical 245 closed, and do not

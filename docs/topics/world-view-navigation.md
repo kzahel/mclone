@@ -8,8 +8,9 @@ its duplicated TypeScript camera and gesture logic is prototype code. No
 shared Rust view-control owner or public World Explorer flow is implemented
 yet. Tactical
 [`247`](../tactical/247-standalone-world-explorer-foundation.md) proposes the
-first two-host implementation: a small native Explorer, shared Rust view
-controller, and Terrain Lab migration.
+first implementation: a small native Explorer and shared Rust view controller.
+It explicitly defers browser-shell and Terrain Lab input migration until a
+follow-up compares the main game's browser rim, `mclone-input`, and the Lab.
 
 ## Scope
 
@@ -308,10 +309,12 @@ the crate name.
 ## Work Streams
 
 Tactical
-[`247`](../tactical/247-standalone-world-explorer-foundation.md) owns work
-streams 1–3 and the first native Explorer shell as one bounded two-host proof.
-Its completion handoff identifies the later player-facing web shell and
-validated-arrival tacticals.
+[`247`](../tactical/247-standalone-world-explorer-foundation.md) owns the
+shared view math, native adapter, and first native Explorer shell as one
+bounded proof. It leaves work stream 2 and all browser-shell implementation
+behind an explicit input-boundary audit, then identifies the minimal web
+shell, Terrain Lab migration, player-facing UI, and validated-arrival
+follow-ups.
 
 1. **Specify and test view math.** Extract a small behavior table from current
    Lab zoom, pan, grab, pinch, and orbit behavior; fix directions and edge

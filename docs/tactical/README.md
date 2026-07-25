@@ -45,7 +45,8 @@ shared map/orbit controls and the standalone Explorer product live in
 [`../topics/world-view-navigation.md`](../topics/world-view-navigation.md).
 Tactical
 [`247`](247-standalone-world-explorer-foundation.md) proposes the first
-two-host implementation proof without yet implementing a clipmap ring.
+standalone native implementation proof without yet selecting a reusable
+browser input shell or implementing a clipmap ring.
 Historical render-worker architecture remains in
 [`067-shared-render-worker-architecture.md`](067-shared-render-worker-architecture.md),
 with the parent thread/Web-Worker topology in
@@ -302,4 +303,4 @@ with the parent thread/Web-Worker topology in
 | [`244-lod-native-vegetation-presentation.md`](244-lod-native-vegetation-presentation.md) | active Terrain Lab hierarchy proof 2026-07-25 | Prove footprint-aware forest summaries, bounded record admission, and CPU/GPU/cache costs through the 65.5 km Terrain Lab path. Its landed chunk-Far-LOD compatibility adapter was removed by Tactical 245. |
 | [`245-retire-chunk-far-lod-runtime.md`](245-retire-chunk-far-lod-runtime.md) | complete 2026-07-25 | Deleted the chunk-granular in-game Far LOD producer, coverage coordinator, renderer, controls, probes, assets, platform plumbing, and special-purpose scheduling while retaining machinery with active non-LOD consumers. |
 | [`246-vanilla-fast-macro-terrain-preview.md`](246-vanilla-fast-macro-terrain-preview.md) | complete 2026-07-25 | Optimized sampled-exact density columns, added the measured nine-node fast macro sampler, and exposed independent fast/exact Terrain Lab panes with headed desktop/phone evidence. |
-| [`247-standalone-world-explorer-foundation.md`](247-standalone-world-explorer-foundation.md) | proposed 2026-07-25 | Add a deliberately small native World Explorer, shared Rust view-control reducer, Terrain Lab adoption, and dependency/artifact proof before beginning toroidal ring implementation. |
+| [`247-standalone-world-explorer-foundation.md`](247-standalone-world-explorer-foundation.md) | proposed 2026-07-25 | Add a deliberately small native World Explorer, platform-neutral Rust view-control reducer, native capture, and dependency/artifact proof; defer the browser shell and Terrain Lab migration until an input-boundary audit. |
