@@ -567,7 +567,7 @@ async function proveLargeCanonicalFootprint(page, shell, label) {
       || returnWorkerMeshMs !== 0
       || returnMainDecodeMs !== 0
       || await shell.getAttribute("data-canonical-admission-frames") !== "31"
-      || cachedChunks > 1_024) {
+      || cachedChunks !== 992) {
     throw new Error("The large exact warm return violated its bounded paced contract");
   }
 

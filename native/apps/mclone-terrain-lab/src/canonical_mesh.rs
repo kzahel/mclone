@@ -317,6 +317,20 @@ impl CanonicalMeshSession {
         })
     }
 
+    pub(crate) fn raw_cache_chunks(&self) -> usize {
+        self.chunks.len()
+    }
+
+    pub(crate) fn raw_cache_bytes(&self) -> u64 {
+        self.chunks.values().fold(0_u64, |bytes, chunk| {
+            bytes
+                .saturating_add(chunk.blocks.len() as u64)
+                .saturating_add(
+                    (chunk.biomes.len() as u64).saturating_mul(std::mem::size_of::<i32>() as u64),
+                )
+        })
+    }
+
     fn touch_raw(&mut self, position: (i32, i32)) {
         self.raw_lru.retain(|candidate| *candidate != position);
         self.raw_lru.push_back(position);
@@ -335,16 +349,6 @@ impl CanonicalMeshSession {
                 self.chunks.remove(&position);
             }
         }
-    }
-
-    fn raw_cache_bytes(&self) -> u64 {
-        self.chunks.values().fold(0_u64, |bytes, chunk| {
-            bytes
-                .saturating_add(chunk.blocks.len() as u64)
-                .saturating_add(
-                    (chunk.biomes.len() as u64).saturating_mul(std::mem::size_of::<i32>() as u64),
-                )
-        })
     }
 }
 

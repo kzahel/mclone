@@ -216,6 +216,16 @@ impl TerrainLabCanonicalMeshSession {
             .map_err(js_error)?;
         Ok(TerrainLabCanonicalMeshBatchPayload { batch })
     }
+
+    #[wasm_bindgen(getter, js_name = rawCacheChunks)]
+    pub fn raw_cache_chunks(&self) -> usize {
+        self.session.raw_cache_chunks()
+    }
+
+    #[wasm_bindgen(getter, js_name = rawCacheBytes)]
+    pub fn raw_cache_bytes(&self) -> u64 {
+        self.session.raw_cache_bytes()
+    }
 }
 
 #[wasm_bindgen(js_name = CanonicalTerrainMeshBatchPayload)]

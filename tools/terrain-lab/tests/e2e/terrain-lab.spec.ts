@@ -612,6 +612,7 @@ test("keeps a 9x9 real footprint resident and paces pan admission", async ({
   await expect(shell).toHaveAttribute("data-canonical-warm-chunks", "9");
   await expect(shell).toHaveAttribute("data-canonical-worker-mesh-ms", "0");
   await expect(shell).toHaveAttribute("data-canonical-main-decode-ms", "0");
+  await expect(shell).toHaveAttribute("data-canonical-cached-chunks", "90");
   await expect(shell).toHaveAttribute("data-canonical-admission-frames", "9");
   await expect(shell).toHaveAttribute("data-canonical-max-frame-admissions", "1");
   await page.getByTestId("canonical-terrain-stage").screenshot({
@@ -753,8 +754,7 @@ test("publishes, shifts, and restores a 31x31 real footprint", async ({
   await expect(shell).toHaveAttribute("data-canonical-main-decode-ms", "0");
   await expect(shell).toHaveAttribute("data-canonical-admission-frames", "31");
   await expect(shell).toHaveAttribute("data-canonical-max-frame-admissions", "1");
-  expect(Number(await shell.getAttribute("data-canonical-cached-chunks")))
-    .toBeLessThanOrEqual(1_024);
+  await expect(shell).toHaveAttribute("data-canonical-cached-chunks", "992");
   await page.getByTestId("canonical-terrain-stage").screenshot({
     path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-canonical-961.png`,
   });

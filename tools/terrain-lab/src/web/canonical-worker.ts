@@ -66,7 +66,12 @@ self.onmessage = (event: MessageEvent<CanonicalWorkerRequest>): void => {
         request.vegetationVisible,
         request.cacheEnabled,
       );
-      post({ type: "began", epoch: request.epoch });
+      post({
+        type: "began",
+        epoch: request.epoch,
+        rawCacheChunks: session.rawCacheChunks,
+        rawCacheBytes: Number(session.rawCacheBytes),
+      });
     } catch (error: unknown) {
       post({
         type: "error",

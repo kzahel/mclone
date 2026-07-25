@@ -44,6 +44,8 @@ export interface CanonicalWorkerReady {
 export interface CanonicalWorkerBegan {
   type: "began";
   epoch: number;
+  rawCacheChunks: number;
+  rawCacheBytes: number;
 }
 
 export interface CanonicalWorkerPackedAdmission {

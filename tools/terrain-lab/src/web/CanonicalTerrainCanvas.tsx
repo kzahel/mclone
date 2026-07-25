@@ -408,6 +408,10 @@ export function CanonicalTerrainCanvas({
         }
         if (response.type === "began") {
           sessionBegan = true;
+          report.cachedChunks = response.rawCacheChunks;
+          report.cacheRawBytes = response.rawCacheBytes;
+          updateTrackedBytes(report);
+          publishReport(report);
           pumpWorker();
           maybeFinish();
           return;
