@@ -35,6 +35,8 @@ pub struct ExplorerTerrain {
     started: Instant,
     coarse_ready_at: Option<Duration>,
     target_ready_at: Option<Duration>,
+    process_first_coarse_ready_at: Option<Duration>,
+    process_first_target_ready_at: Option<Duration>,
     last_stats: Option<TerrainViewportFrameStats>,
 }
 
@@ -78,6 +80,8 @@ impl ExplorerTerrain {
             started,
             coarse_ready_at: None,
             target_ready_at: None,
+            process_first_coarse_ready_at: None,
+            process_first_target_ready_at: None,
             last_stats: None,
         };
         terrain.replan()?;
@@ -181,6 +185,33 @@ impl ExplorerTerrain {
         Ok(())
     }
 
+    pub fn copy_depth_to_buffer(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        destination: &wgpu::Buffer,
+        bytes_per_row: u32,
+    ) -> Result<()> {
+        self.renderer
+            .copy_depth_to_buffer(encoder, destination, bytes_per_row)
+            .map_err(anyhow::Error::msg)
+    }
+
+    pub fn set_depth_capture_enabled(&mut self, enabled: bool) {
+        self.renderer.set_depth_capture_enabled(enabled);
+    }
+
+    pub const fn last_stats(&self) -> Option<TerrainViewportFrameStats> {
+        self.last_stats
+    }
+
+    pub const fn process_first_coarse_ready_at(&self) -> Option<Duration> {
+        self.process_first_coarse_ready_at
+    }
+
+    pub const fn process_first_target_ready_at(&self) -> Option<Duration> {
+        self.process_first_target_ready_at
+    }
+
     pub fn diagnostics(&self) -> String {
         let stats = self.last_stats;
         format!(
@@ -263,17 +294,33 @@ impl ExplorerTerrain {
         let elapsed = self.started.elapsed();
         if stats.coarse_ready && self.coarse_ready_at.is_none() {
             self.coarse_ready_at = Some(elapsed);
-            log::info!(
-                "World Explorer first coarse frame ready in {:.2} ms",
-                elapsed.as_secs_f64() * 1_000.0
-            );
+            if self.process_first_coarse_ready_at.is_none() {
+                self.process_first_coarse_ready_at = Some(elapsed);
+                log::info!(
+                    "World Explorer first coarse frame ready in {:.2} ms",
+                    elapsed.as_secs_f64() * 1_000.0
+                );
+            } else {
+                log::debug!(
+                    "World Explorer request coarse frame ready at {:.2} ms",
+                    elapsed.as_secs_f64() * 1_000.0
+                );
+            }
         }
         if stats.target_ready && self.target_ready_at.is_none() {
             self.target_ready_at = Some(elapsed);
-            log::info!(
-                "World Explorer target frame ready in {:.2} ms",
-                elapsed.as_secs_f64() * 1_000.0
-            );
+            if self.process_first_target_ready_at.is_none() {
+                self.process_first_target_ready_at = Some(elapsed);
+                log::info!(
+                    "World Explorer first target frame ready in {:.2} ms",
+                    elapsed.as_secs_f64() * 1_000.0
+                );
+            } else {
+                log::debug!(
+                    "World Explorer request target frame ready at {:.2} ms",
+                    elapsed.as_secs_f64() * 1_000.0
+                );
+            }
         }
     }
 }

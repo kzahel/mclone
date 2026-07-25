@@ -147,7 +147,7 @@ struct PendingTerrainViewportReadback {
 }
 
 struct TerrainViewportDepthTarget {
-    _texture: wgpu::Texture,
+    texture: wgpu::Texture,
     view: wgpu::TextureView,
     width: u32,
     height: u32,
@@ -168,12 +168,12 @@ impl TerrainViewportDepthTarget {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: TERRAIN_PREVIEW_DEPTH_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         Self {
-            _texture: texture,
+            texture,
             view,
             width,
             height,
@@ -514,6 +514,7 @@ pub struct TerrainViewportRenderer {
     render_pipeline: wgpu::RenderPipeline,
     tree_pipeline: wgpu::RenderPipeline,
     depth: TerrainViewportDepthTarget,
+    depth_capture_enabled: bool,
     cache: HashMap<TerrainViewportTileId, TerrainViewportGpuTile>,
     vegetation_cache: Option<McloneOverworldVegetationPlanCache>,
     pending: Vec<PendingTerrainViewportReadback>,
@@ -759,6 +760,7 @@ impl TerrainViewportRenderer {
             render_pipeline,
             tree_pipeline,
             depth: TerrainViewportDepthTarget::new(device, width, height),
+            depth_capture_enabled: false,
             cache: HashMap::new(),
             vegetation_cache: None,
             pending: Vec::new(),
@@ -1031,6 +1033,54 @@ impl TerrainViewportRenderer {
         if self.depth.width != width || self.depth.height != height {
             self.depth = TerrainViewportDepthTarget::new(device, width, height);
         }
+    }
+
+    pub fn copy_depth_to_buffer(
+        &self,
+        encoder: &mut wgpu::CommandEncoder,
+        destination: &wgpu::Buffer,
+        bytes_per_row: u32,
+    ) -> Result<(), String> {
+        let unpadded_row_bytes = self
+            .depth
+            .width
+            .checked_mul(size_of::<f32>() as u32)
+            .ok_or("terrain viewport depth row byte length overflow")?;
+        if bytes_per_row < unpadded_row_bytes
+            || !bytes_per_row.is_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
+        {
+            return Err(format!(
+                "terrain viewport depth copy row length must be at least \
+                 {unpadded_row_bytes} bytes and {}-byte aligned, got {bytes_per_row}",
+                wgpu::COPY_BYTES_PER_ROW_ALIGNMENT
+            ));
+        }
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: &self.depth.texture,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::DepthOnly,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: destination,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bytes_per_row),
+                    rows_per_image: Some(self.depth.height),
+                },
+            },
+            wgpu::Extent3d {
+                width: self.depth.width,
+                height: self.depth.height,
+                depth_or_array_layers: 1,
+            },
+        );
+        Ok(())
+    }
+
+    pub fn set_depth_capture_enabled(&mut self, enabled: bool) {
+        self.depth_capture_enabled = enabled;
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1853,7 +1903,11 @@ impl TerrainViewportRenderer {
                 view: &self.depth.view,
                 depth_ops: Some(wgpu::Operations {
                     load: wgpu::LoadOp::Clear(1.0),
-                    store: wgpu::StoreOp::Discard,
+                    store: if self.depth_capture_enabled {
+                        wgpu::StoreOp::Store
+                    } else {
+                        wgpu::StoreOp::Discard
+                    },
                 }),
                 stencil_ops: None,
             }),

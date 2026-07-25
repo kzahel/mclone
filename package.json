@@ -67,6 +67,7 @@
     "native:world-explorer:run": "cargo run --manifest-path native/Cargo.toml -p mclone-world-explorer --",
     "native:world-explorer:capture": "cargo run --manifest-path native/Cargo.toml -p mclone-world-explorer -- --capture /tmp/mclone-world-explorer-fixed.png",
     "native:world-explorer:window-capture": "cargo run --manifest-path native/Cargo.toml -p mclone-world-explorer -- --window-capture /tmp/mclone-world-explorer-window.png",
+    "native:world-explorer:smoke": "node ./scripts/world-explorer-smoke.mjs",
     "native:runtime:smoke": "pnpm native:scheduler:smoke",
     "native:runtime:perf": "pnpm native:scheduler:perf",
     "native:movement:smoke": "cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --movement-perf",

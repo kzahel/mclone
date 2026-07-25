@@ -21,5 +21,6 @@ mclone-terrain-view.workspace = true
 mclone-view-control.workspace = true
 mclone-worldgen.workspace = true
 pollster.workspace = true
+serde_json.workspace = true
 wgpu.workspace = true
 winit.workspace = true

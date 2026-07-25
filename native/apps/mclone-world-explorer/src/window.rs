@@ -9,9 +9,10 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, PhysicalKey};
 use winit::window::{Window, WindowAttributes, WindowId};
 
-use crate::capture::{TextureReadback, save_validated_png};
+use crate::capture::{DepthReadback, TextureReadback, save_validated_png};
 use crate::input::NativeViewInput;
 use crate::options::ExplorerOptions;
+use crate::smoke::{SmokeCheckpoint, SmokeFrameOutcome, SmokeRecorder, SmokeSequence};
 use crate::terrain::ExplorerTerrain;
 
 pub fn run_window(options: ExplorerOptions, started: Instant) -> Result<()> {
@@ -281,6 +282,9 @@ struct WindowGpu {
     terrain: ExplorerTerrain,
     input: NativeViewInput,
     capture_path: Option<std::path::PathBuf>,
+    smoke_sequence: Option<SmokeSequence>,
+    smoke_recorder: Option<SmokeRecorder>,
+    smoke_options: Option<ExplorerOptions>,
 }
 
 impl WindowGpu {
@@ -342,7 +346,8 @@ impl WindowGpu {
             })
             .unwrap_or(wgpu::PresentMode::Fifo);
         let capture_path = options.window_capture.clone();
-        let capture_usage = if capture_path.is_some() {
+        let smoke_root = options.window_smoke_dir.clone();
+        let capture_usage = if capture_path.is_some() || smoke_root.is_some() {
             if !capabilities.usages.contains(wgpu::TextureUsages::COPY_SRC) {
                 anyhow::bail!("World Explorer surface does not support capture readback");
             }
@@ -365,7 +370,12 @@ impl WindowGpu {
             desired_maximum_frame_latency: 3,
         };
         surface.configure(&device, &config);
-        let terrain = ExplorerTerrain::new(&device, &queue, format, options.clone(), started)?;
+        let mut terrain = ExplorerTerrain::new(&device, &queue, format, options.clone(), started)?;
+        terrain.set_depth_capture_enabled(capture_path.is_some() || smoke_root.is_some());
+        let smoke_recorder = smoke_root
+            .as_deref()
+            .map(|root| SmokeRecorder::new("native-window", root, &adapter_info, format))
+            .transpose()?;
         log::info!(
             "World Explorer window adapter={:?} backend={:?} device_type={:?} \
              driver={:?} format={format:?} present_mode={present_mode:?} \
@@ -387,6 +397,9 @@ impl WindowGpu {
             terrain,
             input: NativeViewInput::new(started),
             capture_path,
+            smoke_sequence: smoke_root.as_ref().map(|_| SmokeSequence::default()),
+            smoke_recorder,
+            smoke_options: smoke_root.map(|_| options),
         })
     }
 
@@ -415,6 +428,9 @@ impl WindowGpu {
     }
 
     fn cursor_moved(&mut self, x: f64, y: f64) -> Result<bool> {
+        if self.smoke_sequence.is_some() {
+            return Ok(false);
+        }
         let intents = self
             .input
             .cursor_moved(x, y, self.terrain.view_state(), self.viewport());
@@ -426,6 +442,9 @@ impl WindowGpu {
         button: winit::event::MouseButton,
         state: ElementState,
     ) -> Result<bool> {
+        if self.smoke_sequence.is_some() {
+            return Ok(false);
+        }
         let intents =
             self.input
                 .mouse_button(button, state, self.terrain.view_state(), self.viewport());
@@ -433,6 +452,9 @@ impl WindowGpu {
     }
 
     fn mouse_wheel(&mut self, delta: winit::event::MouseScrollDelta) -> Result<bool> {
+        if self.smoke_sequence.is_some() {
+            return Ok(false);
+        }
         let intent = self
             .input
             .mouse_wheel(delta, self.terrain.view_state(), self.viewport());
@@ -440,6 +462,9 @@ impl WindowGpu {
     }
 
     fn touch(&mut self, touch: winit::event::Touch) -> Result<bool> {
+        if self.smoke_sequence.is_some() {
+            return Ok(false);
+        }
         let intents = self
             .input
             .touch(touch, self.terrain.view_state(), self.viewport());
@@ -447,6 +472,9 @@ impl WindowGpu {
     }
 
     fn keyboard(&mut self, event: &winit::event::KeyEvent) -> Result<bool> {
+        if self.smoke_sequence.is_some() {
+            return Ok(false);
+        }
         let intents = self
             .input
             .keyboard(event, self.terrain.view_state(), self.viewport());
@@ -455,6 +483,9 @@ impl WindowGpu {
     }
 
     fn cancel_input(&mut self) -> Result<bool> {
+        if self.smoke_sequence.is_some() {
+            return Ok(false);
+        }
         let intents = self.input.cancel(self.terrain.view_state());
         self.apply_intents(intents)
     }
@@ -478,15 +509,24 @@ impl WindowGpu {
     }
 
     fn render(&mut self) -> std::result::Result<WindowRenderOutcome, WindowRenderError> {
-        if let Some(intent) = self
-            .input
-            .continuous_intent(Instant::now(), self.terrain.view_state())
+        let frame_started = Instant::now();
+        let viewport = self.viewport();
+        let smoke_input_applied = match self.smoke_sequence.as_mut() {
+            Some(sequence) => sequence
+                .prepare_frame(&mut self.terrain, viewport)
+                .map_err(WindowRenderError::Terrain)?,
+            None => false,
+        };
+        if self.smoke_sequence.is_none()
+            && let Some(intent) = self
+                .input
+                .continuous_intent(Instant::now(), self.terrain.view_state())
         {
             self.terrain
                 .apply_intent(intent)
                 .map_err(WindowRenderError::Terrain)?;
         }
-        let continuous_input = self.input.has_continuous_input();
+        let continuous_input = self.smoke_sequence.is_none() && self.input.has_continuous_input();
         log::trace!("World Explorer acquiring surface frame");
         let frame = self
             .surface
@@ -506,8 +546,23 @@ impl WindowGpu {
             .encode(&self.device, &self.queue, &mut encoder, &view)
             .map_err(WindowRenderError::Terrain)?;
         log::trace!("World Explorer encoded surface frame");
-        let capture = if stats.target_ready && !stats.needs_redraw && self.capture_path.is_some() {
-            Some(
+        let smoke_outcome = self
+            .smoke_sequence
+            .as_mut()
+            .map_or(SmokeFrameOutcome::Continue, |sequence| {
+                sequence.after_frame(stats)
+            });
+        let smoke_checkpoint = match smoke_outcome {
+            SmokeFrameOutcome::Capture {
+                label,
+                complete_after_capture,
+            } => Some((label, complete_after_capture)),
+            _ => None,
+        };
+        let single_capture =
+            stats.target_ready && !stats.needs_redraw && self.capture_path.is_some();
+        let capture = if single_capture || smoke_checkpoint.is_some() {
+            Some((
                 TextureReadback::encode(
                     &self.device,
                     &mut encoder,
@@ -517,7 +572,15 @@ impl WindowGpu {
                     self.config.format,
                 )
                 .map_err(WindowRenderError::Terrain)?,
-            )
+                DepthReadback::encode(
+                    &self.device,
+                    &mut encoder,
+                    &self.terrain,
+                    self.config.width,
+                    self.config.height,
+                )
+                .map_err(WindowRenderError::Terrain)?,
+            ))
         } else {
             None
         };
@@ -528,27 +591,93 @@ impl WindowGpu {
             .poll_completed(&self.device)
             .map_err(WindowRenderError::Terrain)?;
         log::trace!("World Explorer polled surface frame");
-        let capture_completed = if let Some(capture) = capture {
-            let path = self
-                .capture_path
-                .take()
-                .expect("capture path exists when its readback was encoded");
-            let pixels = capture
+        let frame_time = frame_started.elapsed();
+        if let Some(recorder) = self.smoke_recorder.as_mut() {
+            recorder.note_frame(frame_time, smoke_input_applied, stats);
+        }
+        let capture_completed = if let Some((color_capture, depth_capture)) = capture {
+            let pixels = color_capture
                 .finish(&self.device)
                 .map_err(WindowRenderError::Terrain)?;
-            save_validated_png(&path, &pixels, self.config.width, self.config.height)
+            let depth = depth_capture
+                .finish_and_validate(
+                    &self.device,
+                    self.terrain.view_state().mode == mclone_view_control::WorldViewMode::Orbit,
+                )
                 .map_err(WindowRenderError::Terrain)?;
-            log::info!(
-                "World Explorer native surface capture={} {}",
-                path.display(),
-                self.terrain.diagnostics()
-            );
-            true
+            if let Some((label, complete_after_capture)) = smoke_checkpoint {
+                let path = self
+                    .smoke_recorder
+                    .as_ref()
+                    .expect("smoke checkpoint has a recorder")
+                    .checkpoint_path(label);
+                let pixel_stats =
+                    save_validated_png(&path, &pixels, self.config.width, self.config.height)
+                        .map_err(WindowRenderError::Terrain)?;
+                let recorder = self
+                    .smoke_recorder
+                    .as_mut()
+                    .expect("smoke checkpoint has a recorder");
+                recorder
+                    .note_checkpoint(
+                        label,
+                        frame_time,
+                        &path,
+                        SmokeCheckpoint {
+                            state: self.terrain.view_state(),
+                            stats,
+                            pixels: pixel_stats,
+                            depth,
+                        },
+                    )
+                    .map_err(WindowRenderError::Terrain)?;
+                if complete_after_capture {
+                    let receipt = recorder
+                        .write(
+                            &self.terrain,
+                            self.smoke_options
+                                .as_ref()
+                                .expect("smoke checkpoint has options"),
+                        )
+                        .map_err(WindowRenderError::Terrain)?;
+                    log::info!(
+                        "World Explorer native smoke receipt={} {}",
+                        receipt.display(),
+                        self.terrain.diagnostics()
+                    );
+                }
+                complete_after_capture
+            } else {
+                let path = self
+                    .capture_path
+                    .take()
+                    .expect("capture path exists when its readback was encoded");
+                save_validated_png(&path, &pixels, self.config.width, self.config.height)
+                    .map_err(WindowRenderError::Terrain)?;
+                log::info!(
+                    "World Explorer native surface capture={} depth_range={:.6}..{:.6} \
+                     depth_covered={} depth_clear={} {}",
+                    path.display(),
+                    depth.min_depth,
+                    depth.max_depth,
+                    depth.covered_pixels,
+                    depth.clear_pixels,
+                    self.terrain.diagnostics()
+                );
+                true
+            }
         } else {
-            false
+            matches!(smoke_outcome, SmokeFrameOutcome::Complete)
         };
+        let smoke_active = self
+            .smoke_sequence
+            .as_ref()
+            .is_some_and(|sequence| !sequence.is_complete());
         Ok(WindowRenderOutcome {
-            needs_redraw: continuous_input || stats.needs_redraw || !stats.target_ready,
+            needs_redraw: smoke_active
+                || continuous_input
+                || stats.needs_redraw
+                || !stats.target_ready,
             capture_completed,
         })
     }

@@ -1963,6 +1963,7 @@ dependencies = [
  "mclone-view-control",
  "mclone-worldgen",
  "pollster",
+ "serde_json",
  "wgpu",
  "winit",
 ]

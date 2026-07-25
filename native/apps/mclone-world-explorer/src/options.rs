@@ -52,6 +52,8 @@ pub struct ExplorerOptions {
     pub asset_profile: ExplorerAssetProfile,
     pub capture: Option<PathBuf>,
     pub window_capture: Option<PathBuf>,
+    pub smoke_dir: Option<PathBuf>,
+    pub window_smoke_dir: Option<PathBuf>,
 }
 
 impl Default for ExplorerOptions {
@@ -71,6 +73,8 @@ impl Default for ExplorerOptions {
             asset_profile: ExplorerAssetProfile::Original,
             capture: None,
             window_capture: None,
+            smoke_dir: None,
+            window_smoke_dir: None,
         }
     }
 }
@@ -139,6 +143,7 @@ impl ExplorerOptions {
                 "--window-capture" => {
                     options.window_capture = Some(PathBuf::from(value(&mut arguments)?))
                 }
+                "--smoke" => options.smoke_dir = Some(PathBuf::from(value(&mut arguments)?)),
                 _ => bail!("unknown World Explorer option {name:?}; use --help"),
             }
         }
@@ -156,8 +161,12 @@ impl ExplorerOptions {
         if self.asset_root.as_os_str().is_empty() {
             bail!("World Explorer asset root must not be empty");
         }
-        if self.capture.is_some() && self.window_capture.is_some() {
-            bail!("--capture and --window-capture cannot be used together");
+        if usize::from(self.capture.is_some())
+            + usize::from(self.window_capture.is_some())
+            + usize::from(self.smoke_dir.is_some())
+            > 1
+        {
+            bail!("--capture, --window-capture, and --smoke are mutually exclusive");
         }
         Ok(())
     }
@@ -263,6 +272,7 @@ Usage: mclone-world-explorer [options]
   --asset-profile PROFILE     original or generated-fallback
   --capture PATH              render an offscreen PNG instead of opening a window
   --window-capture PATH       capture the ready native surface and exit
+  --smoke DIR                 run offscreen and native-surface movement smoke
   -h, --help                  show this help"
     );
 }

@@ -1,6 +1,7 @@
 mod capture;
 mod input;
 mod options;
+mod smoke;
 mod terrain;
 mod window;
 
@@ -15,10 +16,16 @@ fn main() -> Result<()> {
     let Some(options) = ExplorerOptions::parse()? else {
         return Ok(());
     };
-    let process_started = Instant::now();
+    if let Some(path) = options.smoke_dir.clone() {
+        let mut window_options = options.clone();
+        window_options.smoke_dir = None;
+        window_options.window_smoke_dir = Some(path.join("window"));
+        window::run_window(window_options, Instant::now())?;
+        return capture::run_smoke(&options, &path.join("offscreen"), Instant::now());
+    }
     if let Some(path) = options.capture.clone() {
-        capture::run_capture(&options, &path, process_started)
+        capture::run_capture(&options, &path, Instant::now())
     } else {
-        window::run_window(options, process_started)
+        window::run_window(options, Instant::now())
     }
 }
