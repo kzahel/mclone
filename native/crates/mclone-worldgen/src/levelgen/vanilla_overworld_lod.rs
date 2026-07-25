@@ -76,9 +76,10 @@ impl VanillaOverworldLodSampler {
         let x_fraction = f64::from(world_x.rem_euclid(cell_width)) / f64::from(cell_width);
         let z_fraction = f64::from(world_z.rem_euclid(cell_width)) / f64::from(cell_width);
         let x0z0 = self.density_column(cell_x, cell_z);
-        let x0z1 = self.density_column(cell_x, cell_z + 1);
-        let x1z0 = self.density_column(cell_x + 1, cell_z);
-        let x1z1 = self.density_column(cell_x + 1, cell_z + 1);
+        let x0z1 = (z_fraction != 0.0).then(|| self.density_column(cell_x, cell_z + 1));
+        let x1z0 = (x_fraction != 0.0).then(|| self.density_column(cell_x + 1, cell_z));
+        let x1z1 = (x_fraction != 0.0 && z_fraction != 0.0)
+            .then(|| self.density_column(cell_x + 1, cell_z + 1));
         let cell_height = self.generator.lod_cell_height();
         let min_cell_y = self.generator.lod_min_cell_y();
         let mut display_y = self.generator.lod_min_y();
@@ -90,12 +91,24 @@ impl VanillaOverworldLodSampler {
             for y_offset in (0..cell_height).rev() {
                 let y_fraction = f64::from(y_offset) / f64::from(cell_height);
                 let x0z0_density = lerp(y_fraction, x0z0[y_index], x0z0[y_index + 1]);
-                let x0z1_density = lerp(y_fraction, x0z1[y_index], x0z1[y_index + 1]);
-                let x1z0_density = lerp(y_fraction, x1z0[y_index], x1z0[y_index + 1]);
-                let x1z1_density = lerp(y_fraction, x1z1[y_index], x1z1[y_index + 1]);
-                let z0_density = lerp(x_fraction, x0z0_density, x1z0_density);
-                let z1_density = lerp(x_fraction, x0z1_density, x1z1_density);
-                let density = lerp(z_fraction, z0_density, z1_density);
+                let z0_density = x1z0.as_ref().map_or(x0z0_density, |x1z0| {
+                    lerp(
+                        x_fraction,
+                        x0z0_density,
+                        lerp(y_fraction, x1z0[y_index], x1z0[y_index + 1]),
+                    )
+                });
+                let density = x0z1.as_ref().map_or(z0_density, |x0z1| {
+                    let x0z1_density = lerp(y_fraction, x0z1[y_index], x0z1[y_index + 1]);
+                    let z1_density = x1z1.as_ref().map_or(x0z1_density, |x1z1| {
+                        lerp(
+                            x_fraction,
+                            x0z1_density,
+                            lerp(y_fraction, x1z1[y_index], x1z1[y_index + 1]),
+                        )
+                    });
+                    lerp(z_fraction, z0_density, z1_density)
+                });
                 let block_y = (min_cell_y + cell_y) * cell_height + y_offset;
                 let block = self.generator.resolve_terrain_block(block_y, density);
                 if display_y == self.generator.lod_min_y() && block != AIR {
@@ -246,6 +259,25 @@ mod tests {
         let cold = sampler.sample(-1, -1);
         assert_eq!(cold, first);
         assert_eq!(sampler.retained_density_columns(), 4);
+    }
+
+    #[test]
+    fn sample_generates_only_density_columns_with_nonzero_weight() {
+        let mut aligned = VanillaOverworldLodSampler::new(12_345);
+        aligned.sample(-4, 8);
+        assert_eq!(aligned.generated_density_columns(), 1);
+
+        let mut x_interior = VanillaOverworldLodSampler::new(12_345);
+        x_interior.sample(-2, 8);
+        assert_eq!(x_interior.generated_density_columns(), 2);
+
+        let mut z_interior = VanillaOverworldLodSampler::new(12_345);
+        z_interior.sample(-4, 10);
+        assert_eq!(z_interior.generated_density_columns(), 2);
+
+        let mut interior = VanillaOverworldLodSampler::new(12_345);
+        interior.sample(-2, 10);
+        assert_eq!(interior.generated_density_columns(), 4);
     }
 
     #[test]
