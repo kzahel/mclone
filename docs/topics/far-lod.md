@@ -5,8 +5,10 @@ Topic: `retire-chunk-far-lod`
 Status: chunk-based in-game Far LOD rejected and removed on 2026-07-25 by
 Tactical
 [`245`](../tactical/245-retire-chunk-far-lod-runtime.md).
-No replacement in-game distant-terrain system is currently selected or
-active.
+No replacement in-game distant-terrain system is active. A toroidal
+geometry-clipmap is now the preferred first procedural-horizon proof, recorded
+separately in
+[`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md).
 
 ## Decision
 
@@ -132,14 +134,20 @@ replacement.
 
 The later architecture study starts from
 [`gpu-procedural-terrain.md`](gpu-procedural-terrain.md) and measured Terrain
-Lab behavior. A geometry clipmap, quadtree, or hybrid remains a candidate, not
-a decision.
+Lab behavior. The 2026-07-25 synthesis selected a toroidal geometry clipmap as
+the preferred first in-game proof because fixed storage, draw shape, and
+incremental strip updates fit XR frame predictability. A quadtree remains an
+adaptive Lab/map comparator and a possible later hybrid, not a separate
+content pipeline. The detailed ring, seam, exact-mask, vegetation, natural-only
+v1, and shared-ownership contracts live in
+[`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md).
 
 The future system must prove:
 
 1. bounded work by visible sample/patch budget rather than covered chunk area;
 2. increasing world-space node extent with distance;
-3. complete parent coverage before finer children replace it;
+3. complete valid coverage before a finer ring, quadtree child set, or exact
+   chunk representation replaces it;
 4. direct untouched-terrain sampling without full `GeneratedChunk`
    materialization at every far node;
 5. footprint-aware terrain, water, material, and vegetation summaries;

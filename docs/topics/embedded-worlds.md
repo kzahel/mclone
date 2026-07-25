@@ -817,6 +817,14 @@ is a valid first milestone.
 
 Ship independently valuable increments while keeping the one-world path direct:
 
+The seed-explorer and shrink-and-fall product path now has a focused shared
+navigation and authoritative arrival record in
+[`world-view-navigation.md`](world-view-navigation.md). Its terrain horizon is
+owned separately by
+[`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md). Reuse those
+services for a future worldgen console; do not embed Terrain Lab's duplicated
+TypeScript camera policy or make a preview URL authoritative player state.
+
 [`Tactical 201`](../tactical/201-lobby-content-simplification.md) completed the
 content-boundary cleanup: the lobby, preview, activation, and return behavior
 remain on a transient authored primary plus ordinary catalog/app-private

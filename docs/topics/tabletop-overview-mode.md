@@ -800,6 +800,12 @@ it can validate the local-player miniature, flat follow, canonical movement,
 and cheap keyhole without first requiring remote editing authority. Keep its
 initial actions body-centric.
 
+Implement Slice 2's pan, scale, yaw, focus, and recenter semantics through the
+shared view-control direction in
+[`world-view-navigation.md`](world-view-navigation.md), rather than adding a
+tabletop-only mouse/touch reducer. Tabletop retains scene-owned follow,
+targeting, authority, and keyhole policy.
+
 Do not begin with passthrough, hand tracking, circular clipping, distant
 streaming, or survival remote editing. Those depend on the shared presentation
 proof and each introduces an independent authority, lifecycle, input, or
@@ -815,6 +821,10 @@ performance question.
   observer authority and interest.
 - [`controller-input.md`](controller-input.md) — shared semantic input,
   gamepad, touch, and tracked-controller boundaries.
+- [`world-view-navigation.md`](world-view-navigation.md) — shared map/orbit,
+  touch, focus, zoom, and recenter manipulation consumed by overview mode.
+- [`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md) — fixed
+  budget procedural terrain for broad overview and flight-height consumers.
 - [`platform-parity.md`](platform-parity.md) — all-target feature ownership and
   validation expectations.
 - [`distribution-go-to-market.md`](distribution-go-to-market.md) — Discovery 2

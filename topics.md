@@ -197,3 +197,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `retire-chunk-far-lod` — aggressive removal of the experimental
   chunk-granular in-game Far LOD vertical feature while retaining only worker,
   budget, upload, and exact-render machinery with active non-LOD consumers
+- `procedural-horizon-clipmap` — fixed-budget toroidal natural-terrain rings,
+  skirts, exact-painted chunk masking, vegetation handoff, and predictable
+  native/browser/XR frame admission
+- `world-view-navigation` — shared map/orbit/focus/zoom control across Terrain
+  Lab, standalone World Explorer, tabletop, and game consumers, plus the
+  authoritative Explorer-to-play handoff

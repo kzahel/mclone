@@ -1390,14 +1390,17 @@ The next implementation direction is:
    coarse pixel;
 6. choose explicit mixed-level seam/transition behavior before using partial
    child coverage; and
-7. open a separately measured in-game horizon architecture around the shared
-   procedural content and exact-handoff contracts proven in the Lab.
+7. prove the separately recorded toroidal horizon architecture around the
+   shared procedural content and exact-handoff contracts proven in the Lab;
+   see
+   [`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md).
 
 ## Open Questions
 
-- Should the first resident shape use a geometry clipmap, a quadtree, or a
-  hybrid whose near handoff aligns with chunks without making every far
-  resident identity one chunk?
+- How do the preferred toroidal geometry clipmap's measured update cost and
+  visual waste compare with an adaptive quadtree in the Lab? The clipmap is
+  the first runtime proof; a quadtree or hybrid remains a measured comparator,
+  not an unresolved prerequisite.
 - Is an approximate current-profile evaluator visually close enough, or should
   the first experiment introduce a deliberately GPU-compatible field revision?
 - Which structured records are small and stable enough to upload for streams,
@@ -1433,6 +1436,8 @@ The next implementation direction is:
 - [`mclone-overworld-generation.md`](mclone-overworld-generation.md)
 - [`world-generation-profiles.md`](world-generation-profiles.md)
 - [`far-lod.md`](far-lod.md)
+- [`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md)
+- [`world-view-navigation.md`](world-view-navigation.md)
 - [`../lod-architecture.md`](../lod-architecture.md)
 - [`lighting.md`](lighting.md)
 - [`dynamic-point-lights.md`](dynamic-point-lights.md)

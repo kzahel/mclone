@@ -10,6 +10,9 @@ Current status lives in
 [`docs/topics/far-lod.md`](topics/far-lod.md); future multiscale work starts
 from Terrain Lab and
 [`docs/topics/gpu-procedural-terrain.md`](topics/gpu-procedural-terrain.md).
+The preferred first runtime proof is now specified separately in
+[`docs/topics/procedural-horizon-clipmap.md`](topics/procedural-horizon-clipmap.md);
+the architecture below remains historical.
 
 ## Historical Decision
 

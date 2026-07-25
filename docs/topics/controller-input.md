@@ -31,6 +31,10 @@ Real-device acceptance remains a separate recorded gate.
 The loss-aware ordering and timing contract between those physical collectors
 and this topic's semantic reducer lives in
 [`input-observation-timeline.md`](input-observation-timeline.md).
+The map/orbit/touch manipulation reducer is a downstream consumer, not another
+physical input stack; its shared ownership and Terrain Lab migration are
+recorded in
+[`world-view-navigation.md`](world-view-navigation.md).
 
 ## Top-Level Decision
 

@@ -266,6 +266,10 @@ series implements the same concern, normally reuse the document slug in its
   16/8/4/2 refinement, authoritative chunk replacement, approximate GPU
   lighting, optional asynchronous canonical generation, and later volumetric
   residency/rendering experiments.
+- [`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md): preferred
+  toroidal geometry-clipmap proof for fixed-budget natural horizons, nested
+  rings and skirts, exact-painted chunk masking, vegetation handoff,
+  coarse-first XR-safe admission, and one shared Terrain Lab/game service.
 - [`lod-native-vegetation.md`](lod-native-vegetation.md): accepted immediate
   migration of original-profile trees from vanilla-shaped chunk decoration to
   worldgen-owned forest intent and stable tree records shared by exact chunks,
@@ -350,6 +354,10 @@ series implements the same concern, normally reuse the document slug in its
   camera follow and leashed XR recentering, bounded keyhole cutaways, inverse
   target mapping, authority boundaries, platform-neutral input, current gaps,
   and a read-only-first implementation sequence.
+- [`world-view-navigation.md`](world-view-navigation.md): accepted shared
+  map/orbit/focus/zoom reducer direction across Terrain Lab, Explorer,
+  tabletop, and game clients, plus the lightweight web map-to-3D-to-validated
+  enter-world product path.
 - [`visor-vr-reference.md`](visor-vr-reference.md): Visor VR architecture
   research, including reusable lessons for world-space UI surfaces, pointer
   focus/capture, virtual-keyboard text entry, input contexts, render staging,
