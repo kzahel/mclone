@@ -67,8 +67,10 @@ pub struct TerrainViewportFrameStats {
     pub cpu_compiled_tiles_total: u64,
     pub gpu_dispatched_tiles: u32,
     pub gpu_dispatched_tiles_total: u64,
+    pub macro_compiled_tiles_total: u64,
     pub request_cpu_compiled_tiles: u32,
     pub request_gpu_dispatched_tiles: u32,
+    pub request_macro_compiled_tiles: u32,
     pub request_cache_hit_tiles: u32,
     pub request_cpu_compile_work: TerrainPreviewCompileWork,
     pub request_gpu_compile_work: TerrainPreviewCompileWork,
@@ -99,6 +101,7 @@ pub struct TerrainViewportFrameStats {
     pub request_cpu_reference_micros: u64,
     pub request_cpu_vegetation_micros: u64,
     pub request_cpu_pack_upload_micros: u64,
+    pub request_macro_compile_micros: u64,
     pub cpu_coarse_ready: bool,
     pub cpu_target_ready: bool,
     pub gpu_coarse_ready: bool,
@@ -354,7 +357,7 @@ struct TerrainViewportGpuTile {
     gpu_samples: Option<Vec<TerrainPreviewSample>>,
     gpu_submitted: bool,
     uniform_buffer: wgpu::Buffer,
-    _gpu_sample_buffer: wgpu::Buffer,
+    gpu_sample_buffer: wgpu::Buffer,
     reference_sample_buffer: wgpu::Buffer,
     compute_bind_group: wgpu::BindGroup,
     render_bind_group: wgpu::BindGroup,
@@ -382,7 +385,9 @@ impl TerrainViewportGpuTile {
         let gpu_sample_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("mclone_terrain_viewport_gpu_samples"),
             size: sample_byte_len,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_SRC
+                | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
         let reference_sample_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -430,7 +435,7 @@ impl TerrainViewportGpuTile {
             gpu_samples: None,
             gpu_submitted: false,
             uniform_buffer,
-            _gpu_sample_buffer: gpu_sample_buffer,
+            gpu_sample_buffer,
             reference_sample_buffer,
             compute_bind_group,
             render_bind_group,
@@ -477,6 +482,26 @@ impl TerrainViewportGpuTile {
         self.vegetation = Some(vegetation);
         Ok(())
     }
+
+    fn upload_macro(
+        &mut self,
+        queue: &wgpu::Queue,
+        sample_byte_len: u64,
+        macro_grid: TerrainPreviewReferenceGrid,
+    ) -> Result<(), String> {
+        let bytes = macro_grid.packed_bytes();
+        if bytes.len() as u64 != sample_byte_len {
+            return Err(format!(
+                "terrain viewport macro upload is {} bytes, expected {}",
+                bytes.len(),
+                sample_byte_len
+            ));
+        }
+        queue.write_buffer(&self.gpu_sample_buffer, 0, &bytes);
+        self.gpu_samples = Some(macro_grid.samples().to_vec());
+        self.gpu_submitted = true;
+        Ok(())
+    }
 }
 
 pub struct TerrainViewportRenderer {
@@ -495,6 +520,7 @@ pub struct TerrainViewportRenderer {
     plan: Option<TerrainViewportPlan>,
     cpu_queue: VecDeque<TerrainViewportTileId>,
     external_cpu_inflight: HashMap<TerrainViewportTileId, u64>,
+    external_macro_inflight: HashMap<TerrainViewportTileId, u64>,
     gpu_queue: VecDeque<TerrainViewportTileId>,
     cpu_published_level: Option<usize>,
     gpu_published_level: Option<usize>,
@@ -505,14 +531,17 @@ pub struct TerrainViewportRenderer {
     use_clock: u64,
     cpu_compiled_tiles_total: u64,
     gpu_dispatched_tiles_total: u64,
+    macro_compiled_tiles_total: u64,
     request_cpu_compiled_tiles: u32,
     request_gpu_dispatched_tiles: u32,
+    request_macro_compiled_tiles: u32,
     request_cache_hit_tiles: u32,
     request_cpu_compile_work: TerrainPreviewCompileWork,
     request_gpu_compile_work: TerrainPreviewCompileWork,
     request_cpu_reference_micros: u64,
     request_cpu_vegetation_micros: u64,
     request_cpu_pack_upload_micros: u64,
+    request_macro_compile_micros: u64,
     request_vegetation_cell_requests: u64,
     request_vegetation_cell_hits: u64,
     request_vegetation_cell_misses: u64,
@@ -736,6 +765,7 @@ impl TerrainViewportRenderer {
             plan: None,
             cpu_queue: VecDeque::new(),
             external_cpu_inflight: HashMap::new(),
+            external_macro_inflight: HashMap::new(),
             gpu_queue: VecDeque::new(),
             cpu_published_level: None,
             gpu_published_level: None,
@@ -746,14 +776,17 @@ impl TerrainViewportRenderer {
             use_clock: 0,
             cpu_compiled_tiles_total: 0,
             gpu_dispatched_tiles_total: 0,
+            macro_compiled_tiles_total: 0,
             request_cpu_compiled_tiles: 0,
             request_gpu_dispatched_tiles: 0,
+            request_macro_compiled_tiles: 0,
             request_cache_hit_tiles: 0,
             request_cpu_compile_work: TerrainPreviewCompileWork::default(),
             request_gpu_compile_work: TerrainPreviewCompileWork::default(),
             request_cpu_reference_micros: 0,
             request_cpu_vegetation_micros: 0,
             request_cpu_pack_upload_micros: 0,
+            request_macro_compile_micros: 0,
             request_vegetation_cell_requests: 0,
             request_vegetation_cell_hits: 0,
             request_vegetation_cell_misses: 0,
@@ -776,12 +809,16 @@ impl TerrainViewportRenderer {
 
     pub fn clear_cache(&mut self) {
         self.stale_result_count = self.stale_result_count.saturating_add(
-            (self.cpu_queue.len() + self.external_cpu_inflight.len() + self.gpu_queue.len()) as u64,
+            (self.cpu_queue.len()
+                + self.external_cpu_inflight.len()
+                + self.gpu_queue.len()
+                + self.external_macro_inflight.len()) as u64,
         );
         self.cache.clear();
         self.vegetation_cache = None;
         self.cpu_queue.clear();
         self.external_cpu_inflight.clear();
+        self.external_macro_inflight.clear();
         self.gpu_queue.clear();
         self.cpu_published_level = None;
         self.gpu_published_level = None;
@@ -813,17 +850,21 @@ impl TerrainViewportRenderer {
         }
         if self.cache_enabled {
             self.stale_result_count = self.stale_result_count.saturating_add(
-                (self.cpu_queue.len() + self.external_cpu_inflight.len() + self.gpu_queue.len())
-                    as u64,
+                (self.cpu_queue.len()
+                    + self.external_cpu_inflight.len()
+                    + self.gpu_queue.len()
+                    + self.external_macro_inflight.len()) as u64,
             );
             self.cpu_queue.clear();
             self.external_cpu_inflight.clear();
+            self.external_macro_inflight.clear();
             self.gpu_queue.clear();
         } else {
             self.cache.clear();
             self.vegetation_cache = None;
             self.cpu_queue.clear();
             self.external_cpu_inflight.clear();
+            self.external_macro_inflight.clear();
             self.gpu_queue.clear();
             self.cache_epoch = self.cache_epoch.saturating_add(1);
         }
@@ -915,6 +956,75 @@ impl TerrainViewportRenderer {
         }
     }
 
+    pub fn take_external_macro_request(&mut self) -> Option<TerrainViewportExternalCpuRequest> {
+        let plan = self.plan.as_ref()?;
+        if plan.request.profile != TerrainPreviewProfile::VanillaOverworld {
+            return None;
+        }
+        let tile = self.take_next_missing_gpu_tile()?;
+        self.external_macro_inflight
+            .insert(tile, self.latest_revision);
+        Some(TerrainViewportExternalCpuRequest {
+            revision: self.latest_revision,
+            tile,
+        })
+    }
+
+    pub fn accept_external_macro_tile(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        request: TerrainViewportExternalCpuRequest,
+        macro_grid: TerrainPreviewReferenceGrid,
+        compile_micros: u64,
+    ) -> Result<bool, String> {
+        let active = self.external_macro_inflight.get(&request.tile).copied();
+        if active != Some(request.revision) || !self.plan_contains_tile(request.tile) {
+            self.stale_result_count = self.stale_result_count.saturating_add(1);
+            return Ok(false);
+        }
+        self.external_macro_inflight.remove(&request.tile);
+        if macro_grid.request().request() != request.tile.preview_request() {
+            return Err("external terrain macro grid does not match its tile request".to_owned());
+        }
+        if !self.cache.contains_key(&request.tile) {
+            let tile = TerrainViewportGpuTile::new(
+                device,
+                &self.compute_layout,
+                &self.render_layout,
+                self.sample_byte_len,
+                request.tile,
+            )?;
+            self.cache.insert(request.tile, tile);
+        }
+        let tile = self
+            .cache
+            .get_mut(&request.tile)
+            .expect("created external terrain macro tile is resident");
+        tile.upload_macro(queue, self.sample_byte_len, macro_grid)?;
+        self.use_clock = self.use_clock.saturating_add(1);
+        tile.last_used = self.use_clock;
+        self.macro_compiled_tiles_total = self.macro_compiled_tiles_total.saturating_add(1);
+        self.request_macro_compiled_tiles = self.request_macro_compiled_tiles.saturating_add(1);
+        self.request_macro_compile_micros = self
+            .request_macro_compile_micros
+            .saturating_add(compile_micros);
+        self.refresh_published_levels();
+        self.touch_current_tiles();
+        self.evict_unused_tiles();
+        Ok(true)
+    }
+
+    pub fn reject_external_macro_tile(&mut self, request: TerrainViewportExternalCpuRequest) {
+        if self.external_macro_inflight.get(&request.tile).copied() != Some(request.revision) {
+            return;
+        }
+        self.external_macro_inflight.remove(&request.tile);
+        if self.plan_contains_tile(request.tile) {
+            self.gpu_queue.push_front(request.tile);
+        }
+    }
+
     pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
         let width = width.max(1);
         let height = height.max(1);
@@ -948,7 +1058,7 @@ impl TerrainViewportRenderer {
         let mut encoded_readbacks = Vec::new();
         let mut gpu_dispatched_tiles = 0_u32;
 
-        if gpu_required {
+        if gpu_required && plan.request.profile.supports_gpu_lod() {
             let mut compute_encoder =
                 device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
                     label: Some("mclone_terrain_viewport_compute_encoder"),
@@ -1006,7 +1116,7 @@ impl TerrainViewportRenderer {
                     mapped_at_creation: false,
                 });
                 compute_encoder.copy_buffer_to_buffer(
-                    &tile._gpu_sample_buffer,
+                    &tile.gpu_sample_buffer,
                     0,
                     &readback_buffer,
                     0,
@@ -1172,7 +1282,7 @@ impl TerrainViewportRenderer {
         let gpu_published_tile_count = u32::try_from(gpu_published_tiles.len()).unwrap_or(u32::MAX);
         let published_tile_count = match options.source {
             TerrainPreviewSource::Reference => cpu_published_tile_count,
-            TerrainPreviewSource::Gpu => gpu_published_tile_count,
+            TerrainPreviewSource::Gpu | TerrainPreviewSource::Macro => gpu_published_tile_count,
             TerrainPreviewSource::Split => cpu_published_tile_count.min(gpu_published_tile_count),
         };
         let sample_count = cpu_published_tile_count
@@ -1202,7 +1312,9 @@ impl TerrainViewportRenderer {
         .unwrap_or(u32::MAX);
         let vegetation_summary_tile_count = match options.source {
             TerrainPreviewSource::Reference => cpu_vegetation_summary_tile_count,
-            TerrainPreviewSource::Gpu => gpu_vegetation_summary_tile_count,
+            TerrainPreviewSource::Gpu | TerrainPreviewSource::Macro => {
+                gpu_vegetation_summary_tile_count
+            }
             TerrainPreviewSource::Split => {
                 cpu_vegetation_summary_tile_count.max(gpu_vegetation_summary_tile_count)
             }
@@ -1233,7 +1345,9 @@ impl TerrainViewportRenderer {
         .unwrap_or(u32::MAX);
         let vegetation_aggregated_tile_count = match options.source {
             TerrainPreviewSource::Reference => cpu_vegetation_aggregated_tile_count,
-            TerrainPreviewSource::Gpu => gpu_vegetation_aggregated_tile_count,
+            TerrainPreviewSource::Gpu | TerrainPreviewSource::Macro => {
+                gpu_vegetation_aggregated_tile_count
+            }
             TerrainPreviewSource::Split => {
                 cpu_vegetation_aggregated_tile_count.max(gpu_vegetation_aggregated_tile_count)
             }
@@ -1286,7 +1400,8 @@ impl TerrainViewportRenderer {
             0
         };
         let gpu_queued_tile_count = if gpu_required {
-            u32::try_from(self.gpu_queue.len()).unwrap_or(u32::MAX)
+            u32::try_from(self.gpu_queue.len() + self.external_macro_inflight.len())
+                .unwrap_or(u32::MAX)
         } else {
             0
         };
@@ -1323,7 +1438,7 @@ impl TerrainViewportRenderer {
             .unwrap_or(0);
         let published_spacing = match options.source {
             TerrainPreviewSource::Reference => cpu_published_spacing,
-            TerrainPreviewSource::Gpu => gpu_published_spacing,
+            TerrainPreviewSource::Gpu | TerrainPreviewSource::Macro => gpu_published_spacing,
             TerrainPreviewSource::Split => match (cpu_published_spacing, gpu_published_spacing) {
                 (0, _) | (_, 0) => 0,
                 (cpu, gpu) => cpu.max(gpu),
@@ -1352,8 +1467,10 @@ impl TerrainViewportRenderer {
             cpu_compiled_tiles_total: self.cpu_compiled_tiles_total,
             gpu_dispatched_tiles,
             gpu_dispatched_tiles_total: self.gpu_dispatched_tiles_total,
+            macro_compiled_tiles_total: self.macro_compiled_tiles_total,
             request_cpu_compiled_tiles: self.request_cpu_compiled_tiles,
             request_gpu_dispatched_tiles: self.request_gpu_dispatched_tiles,
+            request_macro_compiled_tiles: self.request_macro_compiled_tiles,
             request_cache_hit_tiles: self.request_cache_hit_tiles,
             request_cpu_compile_work: self.request_cpu_compile_work,
             request_gpu_compile_work: self.request_gpu_compile_work,
@@ -1387,6 +1504,7 @@ impl TerrainViewportRenderer {
             request_cpu_reference_micros: self.request_cpu_reference_micros,
             request_cpu_vegetation_micros: self.request_cpu_vegetation_micros,
             request_cpu_pack_upload_micros: self.request_cpu_pack_upload_micros,
+            request_macro_compile_micros: self.request_macro_compile_micros,
             cpu_coarse_ready,
             cpu_target_ready,
             gpu_coarse_ready,
@@ -1504,12 +1622,14 @@ impl TerrainViewportRenderer {
     fn reset_request_counters(&mut self) {
         self.request_cpu_compiled_tiles = 0;
         self.request_gpu_dispatched_tiles = 0;
+        self.request_macro_compiled_tiles = 0;
         self.request_cache_hit_tiles = 0;
         self.request_cpu_compile_work = TerrainPreviewCompileWork::default();
         self.request_gpu_compile_work = TerrainPreviewCompileWork::default();
         self.request_cpu_reference_micros = 0;
         self.request_cpu_vegetation_micros = 0;
         self.request_cpu_pack_upload_micros = 0;
+        self.request_macro_compile_micros = 0;
         self.request_vegetation_cell_requests = 0;
         self.request_vegetation_cell_hits = 0;
         self.request_vegetation_cell_misses = 0;
@@ -1544,8 +1664,7 @@ impl TerrainViewportRenderer {
                 {
                     self.cpu_queue.push_back(*tile);
                 }
-                if plan.request.profile.supports_gpu_lod()
-                    && resident.is_none_or(|resident| !resident.gpu_submitted)
+                if resident.is_none_or(|resident| !resident.gpu_submitted)
                     && gpu_scheduled.insert(*tile)
                 {
                     self.gpu_queue.push_back(*tile);
@@ -1560,8 +1679,7 @@ impl TerrainViewportRenderer {
                 {
                     self.cpu_queue.push_back(*tile);
                 }
-                if plan.request.profile.supports_gpu_lod()
-                    && resident.is_none_or(|resident| !resident.gpu_submitted)
+                if resident.is_none_or(|resident| !resident.gpu_submitted)
                     && gpu_scheduled.insert(*tile)
                 {
                     self.gpu_queue.push_back(*tile);
@@ -1955,16 +2073,29 @@ fn source_needs_cpu(
     content_stage: TerrainPreviewContentStage,
     effective_spacing: u32,
 ) -> bool {
-    options.source != TerrainPreviewSource::Gpu
-        || options.layer == TerrainPreviewLayer::Error
+    !matches!(
+        options.source,
+        TerrainPreviewSource::Gpu | TerrainPreviewSource::Macro
+    ) || options.layer == TerrainPreviewLayer::Error
         || (content_stage.includes_structured_hydrology()
             && effective_spacing <= TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING)
 }
 
 fn source_needs_gpu(options: TerrainPreviewDrawOptions, profile: TerrainPreviewProfile) -> bool {
-    profile.supports_gpu_lod()
-        && (options.source != TerrainPreviewSource::Reference
-            || options.layer == TerrainPreviewLayer::Error)
+    match profile {
+        TerrainPreviewProfile::McloneOverworldV1 => {
+            matches!(
+                options.source,
+                TerrainPreviewSource::Gpu | TerrainPreviewSource::Split
+            ) || options.layer == TerrainPreviewLayer::Error
+        }
+        TerrainPreviewProfile::VanillaOverworld => {
+            matches!(
+                options.source,
+                TerrainPreviewSource::Macro | TerrainPreviewSource::Split
+            ) || options.layer == TerrainPreviewLayer::Error
+        }
+    }
 }
 
 fn uniform_layout_entry(
@@ -2135,7 +2266,18 @@ mod tests {
             options,
             TerrainPreviewProfile::McloneOverworldV1,
         ));
-        assert!(!source_needs_gpu(
+        assert!(source_needs_gpu(
+            options,
+            TerrainPreviewProfile::VanillaOverworld,
+        ));
+        options.layer = TerrainPreviewLayer::Terrain;
+        options.source = TerrainPreviewSource::Macro;
+        assert!(!source_needs_cpu(
+            options,
+            TerrainPreviewContentStage::Surface,
+            32,
+        ));
+        assert!(source_needs_gpu(
             options,
             TerrainPreviewProfile::VanillaOverworld,
         ));

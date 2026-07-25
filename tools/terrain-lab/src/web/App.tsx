@@ -50,6 +50,11 @@ type BenchmarkProfile = "interactive" | "stress";
 const PANE_OPTIONS: Array<{ value: TerrainLabPane; label: string; note: string }> = [
   { value: "canonical", label: "Real terrain", note: "Exact final chunks with textures" },
   { value: "cpu", label: "CPU LOD", note: "Production CPU preview evaluator" },
+  {
+    value: "macro",
+    label: "Fast macro",
+    note: "Bounded approximate vanilla density sampler",
+  },
   { value: "gpu", label: "GPU LOD", note: "GPU-resident production preview evaluator" },
 ];
 
@@ -192,8 +197,9 @@ export function App(): React.JSX.Element {
   const chunkWidth = footprint / 16;
   const canonicalVisible = state.panes.includes("canonical");
   const cpuVisible = state.panes.includes("cpu");
+  const macroVisible = state.panes.includes("macro");
   const gpuVisible = state.panes.includes("gpu");
-  const proceduralVisible = cpuVisible || gpuVisible;
+  const proceduralVisible = cpuVisible || macroVisible || gpuVisible;
   const proceduralSource = proceduralSourceForPanes(state.panes);
   const primaryVisualUnavailable = visualAssetsReady
     && visualProfileUsesMinecraftReference(state.visualProfile)
@@ -253,6 +259,7 @@ export function App(): React.JSX.Element {
       data-projection={state.projection}
       data-base-mean-error={comparison?.meanAbsoluteBaseSurfaceError ?? ""}
       data-base-p95-error={comparison?.p95AbsoluteBaseSurfaceError ?? ""}
+      data-display-p95-error={comparison?.p95AbsoluteDisplayError ?? ""}
       data-ocean-agreement={comparison?.oceanWaterPresenceAgreement ?? ""}
       data-material-agreement={comparison?.macroSurfaceMaterialAgreement ?? ""}
       data-channel-agreement={comparison?.channelPresenceAgreement ?? ""}
@@ -295,6 +302,7 @@ export function App(): React.JSX.Element {
       data-gpu-target-ready={renderReport?.gpuTargetReady ? "true" : "false"}
       data-cpu-target-ms={renderReport?.cpuTargetReadyMs ?? ""}
       data-gpu-target-ms={renderReport?.gpuTargetReadyMs ?? ""}
+      data-macro-request-ms={renderReport?.requestMacroCompileMs ?? ""}
       data-cpu-request-ms={renderReport?.requestCpuReferenceMs ?? ""}
       data-cpu-vegetation-request-ms={renderReport?.requestCpuVegetationMs ?? ""}
       data-cpu-pack-upload-request-ms={renderReport?.requestCpuPackUploadMs ?? ""}
@@ -311,6 +319,7 @@ export function App(): React.JSX.Element {
       data-visible-tiles={renderReport?.visibleTileCount ?? 0}
       data-request-cpu-tiles={renderReport?.requestCpuCompiledTiles ?? 0}
       data-request-gpu-tiles={renderReport?.requestGpuDispatchedTiles ?? 0}
+      data-request-macro-tiles={renderReport?.requestMacroCompiledTiles ?? 0}
       data-samples-per-axis={renderReport?.samplesPerAxis ?? 0}
       data-reference-bytes={renderReport?.referenceBytes ?? 0}
       data-gpu-sample-bytes={renderReport?.gpuSampleBytes ?? 0}
@@ -459,7 +468,9 @@ export function App(): React.JSX.Element {
           </div>
           <div
             className={`paneWorkspace logicalPanes${state.panes.length}${
-              canonicalVisible && cpuVisible && gpuVisible ? " threePaneWorkspace" : ""
+              canonicalVisible && cpuVisible && (macroVisible || gpuVisible)
+                ? " threePaneWorkspace"
+                : ""
             }`}
             data-testid="pane-workspace"
           >
@@ -540,7 +551,7 @@ export function App(): React.JSX.Element {
             {proceduralVisible ? (
               <div
                 className={`paneFrame proceduralPaneFrame${
-                  cpuVisible && gpuVisible ? " twoLogicalPanes" : ""
+                  cpuVisible && (macroVisible || gpuVisible) ? " twoLogicalPanes" : ""
                 }${splitLayout === "rows" ? " splitRows" : ""
                 }`}
               >
@@ -847,9 +858,13 @@ export function App(): React.JSX.Element {
                   >
                     {LAYER_OPTIONS.filter((option) =>
                       state.profile !== "overworld"
-                      || ["terrain", "height", "biomes", "surface"].includes(option.value)
+                      || ["terrain", "height", "error", "biomes", "surface"].includes(option.value)
                     ).map((option) => (
-                      <option key={option.value} value={option.value}>{option.label}</option>
+                      <option key={option.value} value={option.value}>
+                        {state.profile === "overworld" && option.value === "error"
+                          ? "Exact / macro height error"
+                          : option.label}
+                      </option>
                     ))}
                   </select>
                 </label>
@@ -980,7 +995,7 @@ export function App(): React.JSX.Element {
             </div>
             <p className="controlNote">
               {state.profile === "overworld"
-                ? "The CPU/GPU stress race is Mclone-only because the vanilla first pass intentionally has no GPU evaluator."
+                ? "Use Sampled exact and Fast macro together for the vanilla comparison race."
                 : "Stress uses the fixed review seed/site, a cold 2 km Compare map at requested 1:2, and independent CPU/GPU publication."}
             </p>
           </ControlSection>
@@ -1139,19 +1154,25 @@ function PaneToggles({
       <legend>Visible panes</legend>
       <div className="segmentedControl">
         {PANE_OPTIONS.filter((option) =>
-          profile !== "overworld" || option.value !== "gpu"
+          profile === "overworld" ? option.value !== "gpu" : option.value !== "macro"
         ).map((option) => {
           const visible = panes.includes(option.value);
+          const label = profile === "overworld" && option.value === "cpu"
+            ? "Sampled exact"
+            : option.label;
+          const note = profile === "overworld" && option.value === "cpu"
+            ? "Direct vanilla density-column height sampling"
+            : option.note;
           return (
             <button
               type="button"
               key={option.value}
               className={visible ? "active" : ""}
               aria-pressed={visible}
-              title={option.note}
+              title={note}
               onClick={() => onToggle(option.value)}
             >
-              {option.label}
+              {label}
             </button>
           );
         })}
@@ -1171,23 +1192,26 @@ function WorkspaceGuide({
 }): React.JSX.Element {
   const exact = panes.includes("canonical");
   const cpu = panes.includes("cpu");
+  const macro = panes.includes("macro");
   const gpu = panes.includes("gpu");
   return (
     <div className="sourceGuide">
       <strong>Same coordinates, independent readiness</strong>
       <span>
         {profile === "overworld"
-          ? "This workspace is globally vanilla: exact chunks and CPU LOD both use the Java 1.17.1 overworld family. "
+          ? "This workspace is globally vanilla: real chunks, sampled exact, and fast macro use the Java 1.17.1 overworld family. "
           : ""}
         {exact
           ? `Real terrain uses final production chunks with the ${
               visualProfileLabel(visualProfile)
             } material profile, water, and features. `
           : ""}
-        {cpu && gpu
-          ? "CPU and GPU LOD panes publish independently at the exact same coordinates. "
+        {cpu && (macro || gpu)
+          ? `${profile === "overworld" ? "Sampled exact and Fast macro" : "CPU and GPU LOD"} panes publish independently at the exact same coordinates. `
           : cpu
-            ? "CPU LOD shows the broad production surface. "
+            ? `${profile === "overworld" ? "Sampled exact" : "CPU LOD"} shows the broad production surface. `
+            : macro
+              ? "Fast macro shows the bounded sparse-density approximation. "
             : gpu
               ? "GPU LOD stays resident for broad visual coverage. "
               : ""}
@@ -1209,10 +1233,11 @@ function SourceFootnote({
   if (profile === "overworld") {
     return (
       <>
-        Real terrain uses exact vanilla 1.17.1 production chunks. CPU LOD
-        directly samples vanilla density columns in a worker and approximates
-        surface material; it does not generate chunks, features, or vegetation.
-        GPU LOD is intentionally unavailable.
+        Real terrain uses exact vanilla 1.17.1 production chunks. Sampled exact
+        directly samples vanilla density columns; Fast macro uses a center-biome
+        estimate and nine vertical density probes per column. Both run in
+        independent workers and approximate surface material without generating
+        chunks, features, or vegetation.
       </>
     );
   }
@@ -1442,12 +1467,16 @@ function Diagnostics({
   canonical: CanonicalTerrainReport | undefined;
 }): React.JSX.Element {
   const memory = report ? formatBytes(report.residentBytes) : "—";
+  const vanilla = report?.profile === "overworld";
+  const primaryLabel = vanilla ? "Sampled exact" : "CPU";
+  const alternateLabel = vanilla ? "Fast macro" : "GPU";
   const samplesPerTile = report ? report.samplesPerAxis ** 2 : 0;
   const cpuRequestSamples = report
     ? report.requestCpuCompiledTiles * samplesPerTile
     : 0;
-  const gpuRequestSamples = report
-    ? report.requestGpuDispatchedTiles * samplesPerTile
+  const alternateRequestSamples = report
+    ? (vanilla ? report.requestMacroCompiledTiles : report.requestGpuDispatchedTiles)
+      * samplesPerTile
     : 0;
   const adapterLabel = useMemo(() => {
     if (!adapter) {
@@ -1520,12 +1549,12 @@ function Diagnostics({
         <Metric label="CPU vegetation / frame" value={formatMs(report?.cpuVegetationMs)} />
         <Metric label="CPU pack + upload / frame" value={formatMs(report?.cpuPackUploadMs)} />
         <Metric label="Encode + submit" value={formatMs(report?.encodeSubmitMs)} />
-        <Metric label="CPU coarse" value={formatMs(report?.cpuCoarseReadyMs)} />
-        <Metric label="GPU coarse + readback" value={formatMs(report?.gpuCoarseReadyMs)} />
-        <Metric label="CPU target" value={formatMs(report?.cpuTargetReadyMs)} />
-        <Metric label="GPU target + readback" value={formatMs(report?.gpuTargetReadyMs)} />
+        <Metric label={`${primaryLabel} coarse`} value={formatMs(report?.cpuCoarseReadyMs)} />
+        <Metric label={`${alternateLabel} coarse${vanilla ? "" : " + readback"}`} value={formatMs(report?.gpuCoarseReadyMs)} />
+        <Metric label={`${primaryLabel} target`} value={formatMs(report?.cpuTargetReadyMs)} />
+        <Metric label={`${alternateLabel} target${vanilla ? "" : " + readback"}`} value={formatMs(report?.gpuTargetReadyMs)} />
         <Metric
-          label="CPU end-to-end"
+          label={`${primaryLabel} end-to-end`}
           value={formatSampleRate(
             cpuRequestSamples,
             report?.cpuTargetReadyMs,
@@ -1533,16 +1562,19 @@ function Diagnostics({
           )}
         />
         <Metric
-          label="GPU end-to-end"
+          label={`${alternateLabel} end-to-end`}
           value={formatSampleRate(
-            gpuRequestSamples,
-            report?.gpuTargetReadyMs,
+            alternateRequestSamples,
+            vanilla ? report?.requestMacroCompileMs : report?.gpuTargetReadyMs,
             report?.gpuTargetReady,
           )}
         />
-        <Metric label="GPU execution" value="unavailable" />
         <Metric
-          label="CPU level"
+          label={`${alternateLabel} execution`}
+          value={vanilla ? formatMs(report?.requestMacroCompileMs) : "unavailable"}
+        />
+        <Metric
+          label={`${primaryLabel} level`}
           value={report
             ? `${report.cpuPublishedTileCount}/${report.visibleTileCount} · ${
                 report.cpuPublishedSpacing ? `1:${report.cpuPublishedSpacing}` : "waiting"
@@ -1550,7 +1582,7 @@ function Diagnostics({
             : "—"}
         />
         <Metric
-          label="GPU level"
+          label={`${alternateLabel} level`}
           value={report
             ? `${report.gpuPublishedTileCount}/${report.visibleTileCount} · ${
                 report.gpuPublishedSpacing ? `1:${report.gpuPublishedSpacing}` : "waiting"
@@ -1572,6 +1604,9 @@ function Diagnostics({
         />
         <Metric label="Final mean Δ" value={formatBlocks(comparison?.meanAbsoluteSurfaceError)} />
         <Metric label="Final P95 Δ" value={formatBlocks(comparison?.p95AbsoluteSurfaceError)} />
+        <Metric label="Display mean Δ" value={formatBlocks(comparison?.meanAbsoluteDisplayError)} />
+        <Metric label="Display P95 Δ" value={formatBlocks(comparison?.p95AbsoluteDisplayError)} />
+        <Metric label="Display maximum Δ" value={formatBlocks(comparison?.maxAbsoluteDisplayError)} />
         <Metric
           label="River agreement"
           value={comparison
@@ -1618,7 +1653,7 @@ function Diagnostics({
             ? `${(comparison.surfaceRecipeAgreement * 100).toFixed(1)}%`
             : "pending"}
         />
-        <Metric label="GPU resident" value={memory} />
+        <Metric label="LOD resident" value={memory} />
         <Metric
           label="Vegetation products"
           value={report
@@ -1674,7 +1709,7 @@ function Diagnostics({
             : "—"}
         />
         <Metric
-          label="CPU / GPU queue"
+          label={`${primaryLabel} / ${alternateLabel} queue`}
           value={report
             ? `${formatInteger(report.cpuQueuedTileCount)} / ${
                 formatInteger(report.gpuQueuedTileCount)
@@ -1707,7 +1742,7 @@ function Diagnostics({
           <dt>Published</dt>
           <dd>
             {report
-              ? `CPU 1:${report.cpuPublishedSpacing || "—"} · GPU 1:${
+              ? `${primaryLabel} 1:${report.cpuPublishedSpacing || "—"} · ${alternateLabel} 1:${
                   report.gpuPublishedSpacing || "—"
                 }`
               : "—"}
@@ -1735,7 +1770,14 @@ function Diagnostics({
           </dd>
         </div>
         <div><dt>Field</dt><dd>{shortRevision(report?.fieldRevision)}</dd></div>
-        <div><dt>GPU evaluator</dt><dd>{shortRevision(report?.gpuEvaluatorRevision)}</dd></div>
+        <div>
+          <dt>{vanilla ? "Macro evaluator" : "GPU evaluator"}</dt>
+          <dd>
+            {shortRevision(vanilla
+              ? report?.macroEvaluatorRevision
+              : report?.gpuEvaluatorRevision)}
+          </dd>
+        </div>
         <div><dt>Vegetation</dt><dd>{shortRevision(report?.vegetationRevision)}</dd></div>
         <div><dt>Texture sampling</dt><dd>5 mip · trilinear minification</dd></div>
       </dl>

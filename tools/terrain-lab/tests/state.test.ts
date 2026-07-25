@@ -221,6 +221,8 @@ test("maps legacy source links and keeps at least one pane visible", () => {
   assert.deepEqual(parseTerrainLabState("?source=gpu").panes, ["gpu"]);
   assert.deepEqual(parseTerrainLabState("?source=split").panes, ["cpu", "gpu"]);
   assert.equal(proceduralSourceForPanes(["canonical"]), "reference");
+  assert.equal(proceduralSourceForPanes(["macro"]), "macro");
+  assert.equal(proceduralSourceForPanes(["cpu", "macro"]), "split");
   const onlyCanonical: TerrainLabState = {
     ...DEFAULT_TERRAIN_LAB_STATE,
     panes: ["canonical"],
@@ -229,7 +231,7 @@ test("maps legacy source links and keeps at least one pane visible", () => {
   assert.deepEqual(toggleTerrainLabPane(onlyCanonical, "gpu").panes, ["canonical", "gpu"]);
 });
 
-test("the vanilla profile globally excludes GPU and Mclone-only layers", () => {
+test("the vanilla profile replaces GPU with fast macro and excludes Mclone-only layers", () => {
   const vanilla = switchTerrainLabProfile(
     {
       ...DEFAULT_TERRAIN_LAB_STATE,
@@ -239,19 +241,24 @@ test("the vanilla profile globally excludes GPU and Mclone-only layers", () => {
     "overworld",
   );
   assert.equal(vanilla.profile, "overworld");
-  assert.deepEqual(vanilla.panes, ["canonical", "cpu"]);
-  assert.equal(vanilla.source, "reference");
+  assert.deepEqual(vanilla.panes, ["canonical", "cpu", "macro"]);
+  assert.equal(vanilla.source, "split");
   assert.equal(vanilla.contentStage, "surface");
   assert.equal(vanilla.layer, "terrain");
   assert.equal(toggleTerrainLabPane(vanilla, "gpu"), vanilla);
+  assert.deepEqual(
+    toggleTerrainLabPane(vanilla, "cpu").panes,
+    ["canonical", "macro"],
+  );
 });
 
-test("vanilla URL state cannot request a mixed or GPU-only workspace", () => {
+test("vanilla URL state replaces a GPU-only workspace with fast macro", () => {
   const vanilla = parseTerrainLabState(
     "?profile=overworld&panes=gpu&stage=hydrology&layer=continentalness",
   );
   assert.equal(vanilla.profile, "overworld");
-  assert.deepEqual(vanilla.panes, ["cpu"]);
+  assert.deepEqual(vanilla.panes, ["macro"]);
+  assert.equal(vanilla.source, "macro");
   assert.equal(vanilla.contentStage, "surface");
   assert.equal(vanilla.layer, "terrain");
   assert.match(terrainLabSearch(vanilla), /profile=overworld/u);

@@ -1,5 +1,6 @@
 export interface LodWorkerInit {
   type: "init";
+  mode: "exact" | "macro";
   epoch: number;
   seed: string;
 }

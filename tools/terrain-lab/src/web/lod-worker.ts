@@ -2,6 +2,7 @@
 
 import initTerrainLab, {
   VanillaTerrainLodCompiler,
+  VanillaTerrainMacroCompiler,
 } from "../../generated/pkg/mclone_terrain_lab";
 
 import type {
@@ -11,7 +12,9 @@ import type {
   LodWorkerResult,
 } from "./lod-worker-protocol";
 
-let compiler: VanillaTerrainLodCompiler | undefined;
+type VanillaCompiler = VanillaTerrainLodCompiler | VanillaTerrainMacroCompiler;
+
+let compiler: VanillaCompiler | undefined;
 let activeEpoch = 0;
 
 self.onmessage = (event: MessageEvent<LodWorkerRequest>): void => {
@@ -25,7 +28,9 @@ self.onmessage = (event: MessageEvent<LodWorkerRequest>): void => {
         if (activeEpoch !== request.epoch) {
           return;
         }
-        compiler = new VanillaTerrainLodCompiler(request.seed);
+        compiler = request.mode === "macro"
+          ? new VanillaTerrainMacroCompiler(request.seed)
+          : new VanillaTerrainLodCompiler(request.seed);
         post({ type: "ready", epoch: request.epoch });
       })
       .catch((error: unknown) => {
@@ -45,7 +50,7 @@ self.onmessage = (event: MessageEvent<LodWorkerRequest>): void => {
 
 function compile(
   request: LodWorkerCompile,
-  currentCompiler: VanillaTerrainLodCompiler,
+  currentCompiler: VanillaCompiler,
 ): void {
   try {
     const started = performance.now();

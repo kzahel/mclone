@@ -29,10 +29,12 @@ pub fn terrain_preview_options(
         source: match source.trim().to_ascii_lowercase().as_str() {
             "gpu" => TerrainPreviewSource::Gpu,
             "reference" | "cpu" => TerrainPreviewSource::Reference,
+            "macro" | "fast" => TerrainPreviewSource::Macro,
             "split" | "compare" => TerrainPreviewSource::Split,
             other => {
                 return Err(format!(
-                    "unsupported terrain preview source {other:?}; expected gpu, reference, or split"
+                    "unsupported terrain preview source {other:?}; expected gpu, reference, macro, \
+                     or split"
                 ));
             }
         },
@@ -76,6 +78,7 @@ pub fn terrain_preview_option_labels(
     let source = match options.source {
         TerrainPreviewSource::Gpu => "gpu",
         TerrainPreviewSource::Reference => "reference",
+        TerrainPreviewSource::Macro => "macro",
         TerrainPreviewSource::Split => "split",
     };
     let view = match options.view {

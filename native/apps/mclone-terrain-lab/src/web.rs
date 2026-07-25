@@ -12,7 +12,8 @@ use mclone_worldgen::{
     levelgen::{
         MCLONE_OVERWORLD_DECORATION_REVISION, MCLONE_OVERWORLD_VEGETATION_REVISION,
         McloneOverworldDebugSample, McloneOverworldSampler, McloneOverworldSamplingTopology,
-        VanillaOverworldLodSampler, mclone_overworld_debug_sample_with_streams,
+        VANILLA_OVERWORLD_MACRO_LOD_REVISION, VanillaOverworldLodSampler,
+        VanillaOverworldMacroSampler, mclone_overworld_debug_sample_with_streams,
     },
     terrain_preview::{
         TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS, TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION,
@@ -114,6 +115,60 @@ impl TerrainLabVanillaLodPayload {
     #[wasm_bindgen(getter, js_name = retainedDensityColumns)]
     pub fn retained_density_columns(&self) -> u32 {
         self.retained_density_columns.min(u32::MAX as usize) as u32
+    }
+}
+
+#[wasm_bindgen(js_name = VanillaTerrainMacroCompiler)]
+pub struct TerrainLabVanillaMacroCompiler {
+    sampler: VanillaOverworldMacroSampler,
+}
+
+#[wasm_bindgen(js_class = VanillaTerrainMacroCompiler)]
+impl TerrainLabVanillaMacroCompiler {
+    #[wasm_bindgen(constructor)]
+    pub fn new(seed: String) -> Result<TerrainLabVanillaMacroCompiler, JsValue> {
+        let seed = seed
+            .trim()
+            .parse::<i64>()
+            .map_err(|error| js_error(format!("invalid signed 64-bit seed {seed:?}: {error}")))?;
+        Ok(Self {
+            sampler: VanillaOverworldMacroSampler::new(seed),
+        })
+    }
+
+    pub fn compile(
+        &mut self,
+        tile_x: i32,
+        tile_z: i32,
+        sample_spacing: u32,
+    ) -> Result<TerrainLabVanillaLodPayload, JsValue> {
+        let tile = TerrainViewportTileId {
+            profile: TerrainPreviewProfile::VanillaOverworld,
+            seed: self.sampler.seed(),
+            tile_x,
+            tile_z,
+            sample_spacing,
+            content_stage: TerrainPreviewContentStage::Surface,
+        };
+        let generated_before = self.sampler.generated_density_columns();
+        let reused_before = self.sampler.reused_density_columns();
+        let reference = TerrainPreviewReferenceGrid::compile_with_vanilla_macro_sampler(
+            tile.preview_request(),
+            &mut self.sampler,
+        )
+        .map_err(js_error)?;
+        Ok(TerrainLabVanillaLodPayload {
+            samples: reference.packed_f32(),
+            generated_density_columns: self
+                .sampler
+                .generated_density_columns()
+                .saturating_sub(generated_before),
+            reused_density_columns: self
+                .sampler
+                .reused_density_columns()
+                .saturating_sub(reused_before),
+            retained_density_columns: self.sampler.retained_density_columns(),
+        })
     }
 }
 
@@ -545,6 +600,7 @@ struct TerrainLabAdapterReport<'a> {
     field_revision: &'static str,
     reference_schema_revision: &'static str,
     gpu_evaluator_revision: &'static str,
+    macro_evaluator_revision: &'static str,
 }
 
 #[derive(Serialize)]
@@ -555,6 +611,7 @@ struct TerrainLabRenderReport<'a> {
     field_revision: &'static str,
     reference_schema_revision: &'static str,
     gpu_evaluator_revision: &'static str,
+    macro_evaluator_revision: &'static str,
     vegetation_revision: &'static str,
     approximation: bool,
     seed: &'a str,
@@ -601,8 +658,10 @@ struct TerrainLabRenderReport<'a> {
     cpu_compiled_tiles_total: u64,
     gpu_dispatched_tiles: u32,
     gpu_dispatched_tiles_total: u64,
+    macro_compiled_tiles_total: u64,
     request_cpu_compiled_tiles: u32,
     request_gpu_dispatched_tiles: u32,
+    request_macro_compiled_tiles: u32,
     request_cache_hit_tiles: u32,
     request_cpu_sample_lattice_points: u64,
     request_cpu_terrain_sample_evaluations: u64,
@@ -637,6 +696,7 @@ struct TerrainLabRenderReport<'a> {
     request_cpu_reference_ms: f64,
     request_cpu_vegetation_ms: f64,
     request_cpu_pack_upload_ms: f64,
+    request_macro_compile_ms: f64,
     reference_bytes: u64,
     gpu_sample_bytes: u64,
     readback_bytes: u64,
@@ -666,6 +726,9 @@ struct TerrainLabComparisonReport {
     max_absolute_surface_error: f32,
     mean_absolute_surface_error: f32,
     p95_absolute_surface_error: f32,
+    max_absolute_display_error: f32,
+    mean_absolute_display_error: f32,
+    p95_absolute_display_error: f32,
     water_presence_agreement: f32,
     max_absolute_base_surface_error: f32,
     mean_absolute_base_surface_error: f32,
@@ -779,6 +842,7 @@ impl TerrainLab {
             field_revision: terrain_preview_field_revision(),
             reference_schema_revision: TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION,
             gpu_evaluator_revision: TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION,
+            macro_evaluator_revision: VANILLA_OVERWORLD_MACRO_LOD_REVISION,
         })
     }
 
@@ -830,9 +894,9 @@ impl TerrainLab {
         options.split_layout = terrain_preview_split_layout(&split_layout).map_err(js_error)?;
         let content_stage = terrain_preview_content_stage(&content_stage).map_err(js_error)?;
         if profile == TerrainPreviewProfile::VanillaOverworld {
-            if options.source != TerrainPreviewSource::Reference {
+            if options.source == TerrainPreviewSource::Gpu {
                 return Err(js_error(
-                    "vanilla overworld LOD supports only the CPU reference pane",
+                    "vanilla overworld LOD supports sampled exact, fast macro, or compare",
                 ));
             }
             if content_stage != TerrainPreviewContentStage::Surface {
@@ -844,6 +908,7 @@ impl TerrainLab {
                 options.layer,
                 TerrainPreviewLayer::Terrain
                     | TerrainPreviewLayer::Height
+                    | TerrainPreviewLayer::Error
                     | TerrainPreviewLayer::Biomes
                     | TerrainPreviewLayer::SurfaceRecipe
             ) {
@@ -1041,6 +1106,92 @@ impl TerrainLab {
             .map_err(|error| js_error(format!("invalid signed 64-bit seed {seed:?}: {error}")))?;
         self.renderer
             .reject_external_cpu_tile(TerrainViewportExternalCpuRequest {
+                revision: u64::from(revision),
+                tile: TerrainViewportTileId {
+                    profile: TerrainPreviewProfile::VanillaOverworld,
+                    seed,
+                    tile_x,
+                    tile_z,
+                    sample_spacing,
+                    content_stage: TerrainPreviewContentStage::Surface,
+                },
+            });
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = nextMacroTileRequest)]
+    pub fn next_macro_tile_request(&mut self) -> Result<Option<String>, JsValue> {
+        let Some(request) = self.renderer.take_external_macro_request() else {
+            return Ok(None);
+        };
+        json(&TerrainLabExternalCpuTileRequest {
+            revision: request.revision,
+            profile: request.tile.profile.label(),
+            seed: request.tile.seed.to_string(),
+            tile_x: request.tile.tile_x,
+            tile_z: request.tile.tile_z,
+            sample_spacing: request.tile.sample_spacing,
+        })
+        .map(Some)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[wasm_bindgen(js_name = acceptMacroTile)]
+    pub fn accept_macro_tile(
+        &mut self,
+        revision: u32,
+        seed: String,
+        tile_x: i32,
+        tile_z: i32,
+        sample_spacing: u32,
+        samples: js_sys::Float32Array,
+        compile_ms: f64,
+    ) -> Result<bool, JsValue> {
+        let seed = seed
+            .trim()
+            .parse::<i64>()
+            .map_err(|error| js_error(format!("invalid signed 64-bit seed {seed:?}: {error}")))?;
+        let tile = TerrainViewportTileId {
+            profile: TerrainPreviewProfile::VanillaOverworld,
+            seed,
+            tile_x,
+            tile_z,
+            sample_spacing,
+            content_stage: TerrainPreviewContentStage::Surface,
+        };
+        let macro_grid =
+            TerrainPreviewReferenceGrid::from_packed_f32(tile.preview_request(), &samples.to_vec())
+                .map_err(js_error)?;
+        let compile_micros = (compile_ms.max(0.0) * 1_000.0).round().min(u64::MAX as f64) as u64;
+        self.renderer
+            .accept_external_macro_tile(
+                &self.device,
+                &self.queue,
+                TerrainViewportExternalCpuRequest {
+                    revision: u64::from(revision),
+                    tile,
+                },
+                macro_grid,
+                compile_micros,
+            )
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = rejectMacroTile)]
+    pub fn reject_macro_tile(
+        &mut self,
+        revision: u32,
+        seed: String,
+        tile_x: i32,
+        tile_z: i32,
+        sample_spacing: u32,
+    ) -> Result<(), JsValue> {
+        let seed = seed
+            .trim()
+            .parse::<i64>()
+            .map_err(|error| js_error(format!("invalid signed 64-bit seed {seed:?}: {error}")))?;
+        self.renderer
+            .reject_external_macro_tile(TerrainViewportExternalCpuRequest {
                 revision: u64::from(revision),
                 tile: TerrainViewportTileId {
                     profile: TerrainPreviewProfile::VanillaOverworld,
@@ -1603,6 +1754,7 @@ fn render_report<'a>(
         field_revision: profile.source_revision(),
         reference_schema_revision: TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION,
         gpu_evaluator_revision: TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION,
+        macro_evaluator_revision: VANILLA_OVERWORLD_MACRO_LOD_REVISION,
         vegetation_revision: MCLONE_OVERWORLD_VEGETATION_REVISION,
         approximation: true,
         seed,
@@ -1649,8 +1801,10 @@ fn render_report<'a>(
         cpu_compiled_tiles_total: stats.cpu_compiled_tiles_total,
         gpu_dispatched_tiles: stats.gpu_dispatched_tiles,
         gpu_dispatched_tiles_total: stats.gpu_dispatched_tiles_total,
+        macro_compiled_tiles_total: stats.macro_compiled_tiles_total,
         request_cpu_compiled_tiles: stats.request_cpu_compiled_tiles,
         request_gpu_dispatched_tiles: stats.request_gpu_dispatched_tiles,
+        request_macro_compiled_tiles: stats.request_macro_compiled_tiles,
         request_cache_hit_tiles: stats.request_cache_hit_tiles,
         request_cpu_sample_lattice_points: stats.request_cpu_compile_work.sample_lattice_points,
         request_cpu_terrain_sample_evaluations: stats
@@ -1699,6 +1853,7 @@ fn render_report<'a>(
         request_cpu_reference_ms: stats.request_cpu_reference_micros as f64 / 1_000.0,
         request_cpu_vegetation_ms: stats.request_cpu_vegetation_micros as f64 / 1_000.0,
         request_cpu_pack_upload_ms: stats.request_cpu_pack_upload_micros as f64 / 1_000.0,
+        request_macro_compile_ms: stats.request_macro_compile_micros as f64 / 1_000.0,
         reference_bytes: stats.reference_bytes,
         gpu_sample_bytes: stats.gpu_sample_bytes,
         readback_bytes: stats.readback_bytes,
@@ -1731,6 +1886,9 @@ fn comparison_report(
         max_absolute_surface_error: completed.comparison.max_absolute_surface_error,
         mean_absolute_surface_error: completed.comparison.mean_absolute_surface_error,
         p95_absolute_surface_error: completed.comparison.p95_absolute_surface_error,
+        max_absolute_display_error: completed.comparison.max_absolute_display_error,
+        mean_absolute_display_error: completed.comparison.mean_absolute_display_error,
+        p95_absolute_display_error: completed.comparison.p95_absolute_display_error,
         water_presence_agreement: completed.comparison.water_presence_agreement,
         max_absolute_base_surface_error: completed.comparison.max_absolute_base_surface_error,
         mean_absolute_base_surface_error: completed.comparison.mean_absolute_base_surface_error,

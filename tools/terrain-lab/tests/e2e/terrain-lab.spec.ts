@@ -447,20 +447,28 @@ test("switches the whole lab to worker-backed vanilla terrain", async ({
     }
   });
   await page.goto(
-    "/terrain/?profile=overworld&seed=12345&x=0&z=0&blocks=512&detail=8"
-      + "&panes=canonical%2Ccpu%2Cgpu&canonical=surface&radius=0"
+    "/terrain/?profile=overworld&seed=12345&x=0&z=0&blocks=2048&detail=32"
+      + "&panes=canonical%2Ccpu%2Cmacro&canonical=surface&radius=0"
       + "&water=1&vegetation=1&stage=hydrology&view=3d&layer=continentalness",
   );
   await waitForLane(page, "cpu");
+  await waitForLane(page, "gpu");
+  await waitForCurrentComparison(page);
   await waitForCanonical(page, 1);
   const shell = page.locator(".appShell");
   await expect(shell).toHaveAttribute("data-profile", "overworld");
-  await expect(shell).toHaveAttribute("data-panes", "canonical,cpu");
+  await expect(shell).toHaveAttribute("data-panes", "canonical,cpu,macro");
   await expect(shell).toHaveAttribute("data-stage", "surface");
   await expect(shell).toHaveAttribute("data-request-gpu-tiles", "0");
+  expect(Number(await shell.getAttribute("data-request-macro-tiles"))).toBeGreaterThan(0);
   await expect(shell).toHaveAttribute("data-cpu-target-ready", "true");
-  await expect(shell).toHaveAttribute("data-gpu-target-ready", "false");
+  await expect(shell).toHaveAttribute("data-gpu-target-ready", "true");
   await expect(page.getByRole("button", { name: "GPU LOD" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Sampled exact" })).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Fast macro" })).toHaveCount(1);
+  await expect(page.locator(".splitLabels")).toContainText("Sampled exact");
+  await expect(page.locator(".splitLabels")).toContainText("Fast macro");
+  await expect(shell).toHaveAttribute("data-comparison-ready", "true");
   await expect(page.getByLabel("Diagnostic layer")).toHaveValue("terrain");
   await expect(page.getByTestId("point-receipt")).toContainText(
     "Vanilla point receipts are not in the first pass",

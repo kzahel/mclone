@@ -16,8 +16,8 @@ export type TerrainLabVisualProfile =
   | "provisional-audit";
 export type TerrainLabTexturePresentation = "textured" | "flat-colors";
 export type TerrainLabComparisonVisualProfile = "off" | TerrainLabVisualProfile;
-export type TerrainLabSource = "gpu" | "reference" | "split";
-export type TerrainLabPane = "canonical" | "cpu" | "gpu";
+export type TerrainLabSource = "gpu" | "reference" | "macro" | "split";
+export type TerrainLabPane = "canonical" | "cpu" | "macro" | "gpu";
 export type CanonicalTerrainStage = "surface" | "final";
 export type TerrainLabView = "map" | "3d";
 export type TerrainLabProjection = "orthographic" | "perspective";
@@ -118,8 +118,8 @@ const TEXTURE_PRESENTATIONS = new Set<TerrainLabTexturePresentation>([
 ]);
 const COMPARISON_VISUAL_PROFILES =
   new Set<TerrainLabComparisonVisualProfile>(["off", ...VISUAL_PROFILES]);
-const SOURCES = new Set<TerrainLabSource>(["gpu", "reference", "split"]);
-const PANES = new Set<TerrainLabPane>(["canonical", "cpu", "gpu"]);
+const SOURCES = new Set<TerrainLabSource>(["gpu", "reference", "macro", "split"]);
+const PANES = new Set<TerrainLabPane>(["canonical", "cpu", "macro", "gpu"]);
 const CANONICAL_STAGES = new Set<CanonicalTerrainStage>(["surface", "final"]);
 const VIEWS = new Set<TerrainLabView>(["map", "3d"]);
 const PROJECTIONS = new Set<TerrainLabProjection>(["orthographic", "perspective"]);
@@ -219,16 +219,19 @@ export function terrainLabSearch(state: TerrainLabState): string {
 export function proceduralSourceForPanes(panes: readonly TerrainLabPane[]): TerrainLabSource {
   const cpu = panes.includes("cpu");
   const gpu = panes.includes("gpu");
-  if (cpu && gpu) {
+  const macro = panes.includes("macro");
+  if (cpu && (gpu || macro)) {
     return "split";
   }
-  return gpu ? "gpu" : "reference";
+  return macro ? "macro" : gpu ? "gpu" : "reference";
 }
 
 export function panesForProceduralSource(source: TerrainLabSource): TerrainLabPane[] {
   switch (source) {
     case "gpu":
       return ["gpu"];
+    case "macro":
+      return ["macro"];
     case "split":
       return ["cpu", "gpu"];
     case "reference":
@@ -240,7 +243,10 @@ export function toggleTerrainLabPane(
   state: TerrainLabState,
   pane: TerrainLabPane,
 ): TerrainLabState {
-  if (state.profile === "overworld" && pane === "gpu") {
+  if (
+    (state.profile === "overworld" && pane === "gpu")
+    || (state.profile !== "overworld" && pane === "macro")
+  ) {
     return state;
   }
   const visible = state.panes.includes(pane);
@@ -262,21 +268,41 @@ export function switchTerrainLabProfile(
   state: TerrainLabState,
   profile: TerrainLabProfile,
 ): TerrainLabState {
-  return normalizeTerrainLabProfileState({ ...state, profile });
+  const panes = state.panes.map((pane) => {
+    if (profile === "overworld" && pane === "gpu") {
+      return "macro";
+    }
+    if (profile !== "overworld" && pane === "macro") {
+      return "gpu";
+    }
+    return pane;
+  });
+  return normalizeTerrainLabProfileState({
+    ...state,
+    profile,
+    panes: [...new Set(panes)].sort((left, right) => paneOrder(left) - paneOrder(right)),
+  });
 }
 
 export function normalizeTerrainLabProfileState(
   state: TerrainLabState,
 ): TerrainLabState {
-  if (state.profile !== "overworld") {
-    return state;
-  }
-  const panes = state.panes.filter((pane) => pane !== "gpu");
+  const panes = state.panes.filter((pane) =>
+    state.profile === "overworld" ? pane !== "gpu" : pane !== "macro"
+  );
   if (panes.length === 0) {
-    panes.push("cpu");
+    panes.push(state.profile === "overworld" ? "macro" : "gpu");
+  }
+  if (state.profile !== "overworld") {
+    return {
+      ...state,
+      panes,
+      source: proceduralSourceForPanes(panes),
+    };
   }
   const layer = state.layer === "terrain"
     || state.layer === "height"
+    || state.layer === "error"
     || state.layer === "biomes"
     || state.layer === "surface"
     ? state.layer
@@ -531,7 +557,7 @@ function validBoolean(value: string | null): boolean | undefined {
 }
 
 function paneOrder(pane: TerrainLabPane): number {
-  return ["canonical", "cpu", "gpu"].indexOf(pane);
+  return ["canonical", "cpu", "macro", "gpu"].indexOf(pane);
 }
 
 function validMember<T extends string>(value: string | null, values: Set<T>): T | undefined {

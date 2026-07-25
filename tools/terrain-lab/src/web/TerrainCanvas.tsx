@@ -39,6 +39,7 @@ export interface TerrainLabAdapterReport {
   fieldRevision: string;
   referenceSchemaRevision: string;
   gpuEvaluatorRevision: string;
+  macroEvaluatorRevision: string;
 }
 
 export interface TerrainLabRenderReport {
@@ -47,6 +48,7 @@ export interface TerrainLabRenderReport {
   fieldRevision: string;
   referenceSchemaRevision: string;
   gpuEvaluatorRevision: string;
+  macroEvaluatorRevision: string;
   vegetationRevision: string;
   approximation: boolean;
   seed: string;
@@ -93,8 +95,10 @@ export interface TerrainLabRenderReport {
   cpuCompiledTilesTotal: number;
   gpuDispatchedTiles: number;
   gpuDispatchedTilesTotal: number;
+  macroCompiledTilesTotal: number;
   requestCpuCompiledTiles: number;
   requestGpuDispatchedTiles: number;
+  requestMacroCompiledTiles: number;
   requestCacheHitTiles: number;
   requestCpuSampleLatticePoints: number;
   requestCpuTerrainSampleEvaluations: number;
@@ -129,6 +133,7 @@ export interface TerrainLabRenderReport {
   requestCpuReferenceMs: number;
   requestCpuVegetationMs: number;
   requestCpuPackUploadMs: number;
+  requestMacroCompileMs: number;
   referenceBytes: number;
   gpuSampleBytes: number;
   readbackBytes: number;
@@ -156,6 +161,9 @@ export interface TerrainLabComparisonReport {
   maxAbsoluteSurfaceError: number;
   meanAbsoluteSurfaceError: number;
   p95AbsoluteSurfaceError: number;
+  maxAbsoluteDisplayError: number;
+  meanAbsoluteDisplayError: number;
+  p95AbsoluteDisplayError: number;
   waterPresenceAgreement: number;
   maxAbsoluteBaseSurfaceError: number;
   meanAbsoluteBaseSurfaceError: number;
@@ -265,6 +273,23 @@ interface WorkerBackedTerrainLab extends TerrainLab {
     compileMs: number,
   ): boolean;
   rejectCpuTile(
+    revision: number,
+    seed: string,
+    tileX: number,
+    tileZ: number,
+    sampleSpacing: number,
+  ): void;
+  nextMacroTileRequest(): string | undefined;
+  acceptMacroTile(
+    revision: number,
+    seed: string,
+    tileX: number,
+    tileZ: number,
+    sampleSpacing: number,
+    samples: Float32Array,
+    compileMs: number,
+  ): boolean;
+  rejectMacroTile(
     revision: number,
     seed: string,
     tileX: number,
@@ -431,12 +456,20 @@ export function TerrainCanvas({
     let needsRender = true;
     let comparisonComplete = state.source !== "split";
     const revision = ++revisionRef.current;
-    let workerReady = false;
-    let workerInFlight = false;
-    const worker = state.profile === "overworld"
+    let exactWorkerReady = false;
+    let exactWorkerInFlight = false;
+    let macroWorkerReady = false;
+    let macroWorkerInFlight = false;
+    const exactWorker = state.profile === "overworld"
       ? new Worker(new URL("./lod-worker.ts", import.meta.url), {
         type: "module",
-        name: `vanilla-terrain-lod-${revision}`,
+        name: `vanilla-terrain-exact-${revision}`,
+      })
+      : undefined;
+    const macroWorker = state.profile === "overworld"
+      ? new Worker(new URL("./lod-worker.ts", import.meta.url), {
+        type: "module",
+        name: `vanilla-terrain-macro-${revision}`,
       })
       : undefined;
     onStatus("rendering");
@@ -459,35 +492,70 @@ export function TerrainCanvas({
       });
     };
 
-    if (worker) {
-      worker.onmessage = (event: MessageEvent<LodWorkerResponse>): void => {
+    if (exactWorker) {
+      exactWorker.onmessage = (event: MessageEvent<LodWorkerResponse>): void => {
         const response = event.data;
         if (cancelled || response.epoch !== revision) {
           return;
         }
         if (response.type === "ready") {
-          workerReady = true;
+          exactWorkerReady = true;
           schedulePump();
           return;
         }
-        workerInFlight = false;
+        exactWorkerInFlight = false;
         if (response.type === "error") {
-          rejectWorkerTile(lab, response);
+          rejectWorkerTile(lab, "exact", response);
           onStatus("error");
           onError(response.message);
           return;
         }
-        acceptWorkerTile(lab, response);
+        acceptWorkerTile(lab, "exact", response);
         needsRender = true;
         schedulePump();
       };
-      worker.onerror = (event): void => {
-        workerInFlight = false;
+      exactWorker.onerror = (event): void => {
+        exactWorkerInFlight = false;
         onStatus("error");
-        onError(event.message || "Vanilla terrain LOD worker failed.");
+        onError(event.message || "Vanilla sampled-exact worker failed.");
       };
-      worker.postMessage({
+      exactWorker.postMessage({
         type: "init",
+        mode: "exact",
+        epoch: revision,
+        seed: state.seed,
+      });
+    }
+    if (macroWorker) {
+      macroWorker.onmessage = (event: MessageEvent<LodWorkerResponse>): void => {
+        const response = event.data;
+        if (cancelled || response.epoch !== revision) {
+          return;
+        }
+        if (response.type === "ready") {
+          macroWorkerReady = true;
+          schedulePump();
+          return;
+        }
+        macroWorkerInFlight = false;
+        if (response.type === "error") {
+          rejectWorkerTile(lab, "macro", response);
+          onStatus("error");
+          onError(response.message);
+          return;
+        }
+        acceptWorkerTile(lab, "macro", response);
+        needsRender = true;
+        schedulePump();
+      };
+      macroWorker.onerror = (event): void => {
+        macroWorkerInFlight = false;
+        onStatus("error");
+        onError(event.message || "Vanilla fast-macro worker failed.");
+      };
+      macroWorker.postMessage({
+        type: "init",
+        mode: "macro",
         epoch: revision,
         seed: state.seed,
       });
@@ -536,7 +604,7 @@ export function TerrainCanvas({
           onRender(report);
           needsRender = report.needsRedraw;
         }
-        pumpWorker();
+        pumpWorkers();
         const result = lab.pollComparison();
         if (result !== undefined) {
           const comparison = parseJson<TerrainLabComparisonReport>(result);
@@ -550,7 +618,10 @@ export function TerrainCanvas({
         onError(errorMessage(error));
         return;
       }
-      if ((needsRender && !workerInFlight) || !comparisonComplete) {
+      if (
+        (needsRender && (!exactWorkerInFlight || !macroWorkerInFlight))
+        || !comparisonComplete
+      ) {
         schedulePump();
       } else {
         if (!needsRender) {
@@ -562,24 +633,35 @@ export function TerrainCanvas({
     return () => {
       cancelled = true;
       window.cancelAnimationFrame(pumpFrame);
-      worker?.terminate();
+      exactWorker?.terminate();
+      macroWorker?.terminate();
     };
 
-    function pumpWorker(): void {
-      if (!worker || !workerReady || workerInFlight) {
-        return;
+    function pumpWorkers(): void {
+      if (exactWorker && exactWorkerReady && !exactWorkerInFlight) {
+        const serialized = lab!.nextCpuTileRequest();
+        if (serialized !== undefined) {
+          const request = parseJson<TerrainLabExternalCpuTileRequest>(serialized);
+          exactWorkerInFlight = true;
+          exactWorker.postMessage({
+            type: "compile",
+            epoch: revision,
+            ...request,
+          });
+        }
       }
-      const serialized = lab!.nextCpuTileRequest();
-      if (serialized === undefined) {
-        return;
+      if (macroWorker && macroWorkerReady && !macroWorkerInFlight) {
+        const serialized = lab!.nextMacroTileRequest();
+        if (serialized !== undefined) {
+          const request = parseJson<TerrainLabExternalCpuTileRequest>(serialized);
+          macroWorkerInFlight = true;
+          macroWorker.postMessage({
+            type: "compile",
+            epoch: revision,
+            ...request,
+          });
+        }
       }
-      const request = parseJson<TerrainLabExternalCpuTileRequest>(serialized);
-      workerInFlight = true;
-      worker.postMessage({
-        type: "compile",
-        epoch: revision,
-        ...request,
-      });
     }
   }, [
     canvasSize,
@@ -882,13 +964,13 @@ export function TerrainCanvas({
       {state.source === "split" ? (
         <div className="splitLabels" aria-hidden="true">
           <span>
-            CPU production {state.contentStage} · {panelReadiness(
+            {state.profile === "overworld" ? "Sampled exact" : `CPU production ${state.contentStage}`} · {panelReadiness(
               latestReport?.cpuPublishedSpacing,
               latestReport?.cpuTargetReady,
             )}
           </span>
           <span>
-            GPU production {state.contentStage} · {panelReadiness(
+            {state.profile === "overworld" ? "Fast macro" : `GPU production ${state.contentStage}`} · {panelReadiness(
               latestReport?.gpuPublishedSpacing,
               latestReport?.gpuTargetReady,
             )}
@@ -1000,9 +1082,13 @@ function panelReadiness(
 
 function acceptWorkerTile(
   lab: WorkerBackedTerrainLab,
+  mode: "exact" | "macro",
   result: LodWorkerResult,
 ): void {
-  lab.acceptCpuTile(
+  const accept = mode === "macro"
+    ? lab.acceptMacroTile.bind(lab)
+    : lab.acceptCpuTile.bind(lab);
+  accept(
     result.revision,
     result.seed,
     result.tileX,
@@ -1015,6 +1101,7 @@ function acceptWorkerTile(
 
 function rejectWorkerTile(
   lab: WorkerBackedTerrainLab,
+  mode: "exact" | "macro",
   error: Extract<LodWorkerResponse, { type: "error" }>,
 ): void {
   if (
@@ -1026,7 +1113,10 @@ function rejectWorkerTile(
   ) {
     return;
   }
-  lab.rejectCpuTile(
+  const reject = mode === "macro"
+    ? lab.rejectMacroTile.bind(lab)
+    : lab.rejectCpuTile.bind(lab);
+  reject(
     error.revision,
     error.seed,
     error.tileX,

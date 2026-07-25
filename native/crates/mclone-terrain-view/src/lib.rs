@@ -118,6 +118,7 @@ pub enum TerrainPreviewSource {
     Gpu = 0,
     Reference = 1,
     Split = 2,
+    Macro = 3,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -840,7 +841,9 @@ impl TerrainPreviewRenderer {
 const fn preview_instance_count(source: TerrainPreviewSource) -> u32 {
     match source {
         TerrainPreviewSource::Split => 2,
-        TerrainPreviewSource::Gpu | TerrainPreviewSource::Reference => 1,
+        TerrainPreviewSource::Gpu
+        | TerrainPreviewSource::Reference
+        | TerrainPreviewSource::Macro => 1,
     }
 }
 
@@ -1295,5 +1298,6 @@ mod tests {
         );
         assert_eq!(preview_instance_count(TerrainPreviewSource::Split), 2);
         assert_eq!(preview_instance_count(TerrainPreviewSource::Reference), 1);
+        assert_eq!(preview_instance_count(TerrainPreviewSource::Macro), 1);
     }
 }
