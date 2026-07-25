@@ -2,7 +2,7 @@ use mclone_assets::{AssetSourceChain, PackedAssetSource};
 use mclone_core::BlockStateId;
 use mclone_mesh::load_first_party_textured_terrain_assets;
 use mclone_terrain_view::{
-    CanonicalTerrainCompiler, TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION,
+    CanonicalTerrainCompiler, CanonicalTerrainVisibility, TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION,
     TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainPreviewCamera, TerrainPreviewLayer,
     TerrainPreviewMaterialAtlas, TerrainPreviewProjectionKind, TerrainPreviewSource,
     TerrainPreviewView, TerrainViewportCompletedComparison, TerrainViewportDetail,
@@ -22,11 +22,12 @@ use mclone_worldgen::{
         terrain_preview_field_revision,
     },
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 use web_sys::HtmlCanvasElement;
 
 use crate::{
+    canonical_mesh::{CanonicalMeshCoordinate, CanonicalMeshSession},
     canonical_terrain_stage, canonical_terrain_stage_label, terrain_preview_content_stage,
     terrain_preview_option_labels, terrain_preview_options, terrain_preview_projection_kind,
     terrain_preview_split_layout,
@@ -114,6 +115,245 @@ impl TerrainLabVanillaLodPayload {
     #[wasm_bindgen(getter, js_name = retainedDensityColumns)]
     pub fn retained_density_columns(&self) -> u32 {
         self.retained_density_columns.min(u32::MAX as usize) as u32
+    }
+}
+
+#[wasm_bindgen(js_name = CanonicalTerrainMeshSession)]
+pub struct TerrainLabCanonicalMeshSession {
+    session: CanonicalMeshSession,
+}
+
+#[wasm_bindgen(js_class = CanonicalTerrainMeshSession)]
+impl TerrainLabCanonicalMeshSession {
+    #[wasm_bindgen(js_name = withProfile)]
+    pub fn with_profile(
+        authored_bytes: js_sys::Uint8Array,
+        fallback_bytes: js_sys::Uint8Array,
+        seed: String,
+        profile: String,
+        stage: String,
+    ) -> Result<TerrainLabCanonicalMeshSession, JsValue> {
+        let seed = seed
+            .trim()
+            .parse::<i64>()
+            .map_err(|error| js_error(format!("invalid signed 64-bit seed {seed:?}: {error}")))?;
+        let profile = TerrainPreviewProfile::parse_label(&profile).map_err(js_error)?;
+        let stage = canonical_terrain_stage(&stage).map_err(js_error)?;
+        let mut source = AssetSourceChain::new();
+        source.push(
+            PackedAssetSource::from_bytes(authored_bytes.to_vec()).map_err(|error| {
+                js_error(format!(
+                    "failed to parse authored canonical Worker pack: {error}"
+                ))
+            })?,
+        );
+        source.push(
+            PackedAssetSource::from_bytes(fallback_bytes.to_vec()).map_err(|error| {
+                js_error(format!(
+                    "failed to parse fallback canonical Worker pack: {error}"
+                ))
+            })?,
+        );
+        let assets = load_first_party_textured_terrain_assets(&source).map_err(|error| {
+            js_error(format!(
+                "failed to load canonical Worker terrain assets: {error}"
+            ))
+        })?;
+        Ok(Self {
+            session: CanonicalMeshSession::new(profile, seed, stage, assets.catalog),
+        })
+    }
+
+    pub fn begin(
+        &mut self,
+        coordinates_json: String,
+        water_visible: bool,
+        vegetation_visible: bool,
+    ) -> Result<(), JsValue> {
+        let coordinates =
+            serde_json::from_str::<Vec<TerrainLabCanonicalChunkCoordinate>>(&coordinates_json)
+                .map_err(|error| {
+                    js_error(format!(
+                        "invalid canonical Worker desired coordinates: {error}"
+                    ))
+                })?;
+        self.session.begin(
+            coordinates.into_iter().map(|coordinate| {
+                CanonicalMeshCoordinate::new(coordinate.chunk_x, coordinate.chunk_z)
+            }),
+            CanonicalTerrainVisibility {
+                water: water_visible,
+                vegetation: vegetation_visible,
+            },
+        );
+        Ok(())
+    }
+
+    #[wasm_bindgen(js_name = compileBatch)]
+    pub fn compile_batch(
+        &mut self,
+        coordinates_json: String,
+    ) -> Result<TerrainLabCanonicalMeshBatchPayload, JsValue> {
+        let coordinates =
+            serde_json::from_str::<Vec<TerrainLabCanonicalChunkCoordinate>>(&coordinates_json)
+                .map_err(|error| {
+                    js_error(format!(
+                        "invalid canonical Worker batch coordinates: {error}"
+                    ))
+                })?;
+        let batch = self
+            .session
+            .compile_batch(
+                &coordinates
+                    .into_iter()
+                    .map(|coordinate| {
+                        CanonicalMeshCoordinate::new(coordinate.chunk_x, coordinate.chunk_z)
+                    })
+                    .collect::<Vec<_>>(),
+            )
+            .map_err(js_error)?;
+        Ok(TerrainLabCanonicalMeshBatchPayload { batch })
+    }
+}
+
+#[wasm_bindgen(js_name = CanonicalTerrainMeshBatchPayload)]
+pub struct TerrainLabCanonicalMeshBatchPayload {
+    batch: crate::canonical_mesh::CanonicalMeshBatch,
+}
+
+#[wasm_bindgen(js_class = CanonicalTerrainMeshBatchPayload)]
+impl TerrainLabCanonicalMeshBatchPayload {
+    #[wasm_bindgen(getter, js_name = admissionCount)]
+    pub fn admission_count(&self) -> u32 {
+        self.batch.admissions.len().min(u32::MAX as usize) as u32
+    }
+
+    #[wasm_bindgen(getter, js_name = generationMs)]
+    pub fn generation_ms(&self) -> f64 {
+        self.batch.generation_ms
+    }
+
+    #[wasm_bindgen(getter, js_name = presentationMs)]
+    pub fn presentation_ms(&self) -> f64 {
+        self.batch.presentation_ms
+    }
+
+    #[wasm_bindgen(getter, js_name = meshMs)]
+    pub fn mesh_ms(&self) -> f64 {
+        self.batch.mesh_ms
+    }
+
+    #[wasm_bindgen(getter, js_name = packMs)]
+    pub fn pack_ms(&self) -> f64 {
+        self.batch.pack_ms
+    }
+
+    #[wasm_bindgen(getter, js_name = deduplicatedTargetChunks)]
+    pub fn deduplicated_target_chunks(&self) -> u32 {
+        self.batch.deduplicated_target_chunks.min(u32::MAX as usize) as u32
+    }
+
+    #[wasm_bindgen(getter, js_name = rawCacheChunks)]
+    pub fn raw_cache_chunks(&self) -> u32 {
+        self.batch.raw_cache_chunks.min(u32::MAX as usize) as u32
+    }
+
+    #[wasm_bindgen(getter, js_name = rawCacheBytes)]
+    pub fn raw_cache_bytes(&self) -> f64 {
+        self.batch.raw_cache_bytes as f64
+    }
+
+    #[wasm_bindgen(js_name = admissionChunkX)]
+    pub fn admission_chunk_x(&self, index: u32) -> Result<i32, JsValue> {
+        Ok(self.admission(index)?.requested.coordinate.chunk_x)
+    }
+
+    #[wasm_bindgen(js_name = admissionChunkZ)]
+    pub fn admission_chunk_z(&self, index: u32) -> Result<i32, JsValue> {
+        Ok(self.admission(index)?.requested.coordinate.chunk_z)
+    }
+
+    #[wasm_bindgen(js_name = admissionFingerprint)]
+    pub fn admission_fingerprint(&self, index: u32) -> Result<String, JsValue> {
+        Ok(format!(
+            "{:016x}",
+            self.admission(index)?.requested.fingerprint
+        ))
+    }
+
+    #[wasm_bindgen(js_name = admissionRawCacheHit)]
+    pub fn admission_raw_cache_hit(&self, index: u32) -> Result<bool, JsValue> {
+        Ok(self.admission(index)?.requested.raw_cache_hit)
+    }
+
+    #[wasm_bindgen(js_name = admissionDependencyCacheHits)]
+    pub fn admission_dependency_cache_hits(&self, index: u32) -> Result<u32, JsValue> {
+        Ok(self
+            .admission(index)?
+            .requested
+            .dependency_cache_hits
+            .min(u32::MAX as usize) as u32)
+    }
+
+    #[wasm_bindgen(js_name = admissionGeneratedDependencyChunks)]
+    pub fn admission_generated_dependency_chunks(&self, index: u32) -> Result<u32, JsValue> {
+        Ok(self
+            .admission(index)?
+            .requested
+            .generated_dependency_chunks
+            .min(u32::MAX as usize) as u32)
+    }
+
+    #[wasm_bindgen(js_name = admissionRetainedDependencyChunks)]
+    pub fn admission_retained_dependency_chunks(&self, index: u32) -> Result<u32, JsValue> {
+        Ok(self
+            .admission(index)?
+            .requested
+            .retained_dependency_chunks
+            .min(u32::MAX as usize) as u32)
+    }
+
+    #[wasm_bindgen(js_name = admissionTargetChunks)]
+    pub fn admission_target_chunks(&self, index: u32) -> Result<u32, JsValue> {
+        Ok(self
+            .admission(index)?
+            .target_chunk_count
+            .min(u32::MAX as usize) as u32)
+    }
+
+    #[wasm_bindgen(js_name = admissionSectionCount)]
+    pub fn admission_section_count(&self, index: u32) -> Result<u32, JsValue> {
+        Ok(self.admission(index)?.section_count.min(u32::MAX as usize) as u32)
+    }
+
+    #[wasm_bindgen(js_name = admissionVertexCount)]
+    pub fn admission_vertex_count(&self, index: u32) -> Result<u32, JsValue> {
+        Ok(self.admission(index)?.vertex_count.min(u32::MAX as usize) as u32)
+    }
+
+    #[wasm_bindgen(js_name = admissionIndexCount)]
+    pub fn admission_index_count(&self, index: u32) -> Result<u32, JsValue> {
+        Ok(self.admission(index)?.index_count.min(u32::MAX as usize) as u32)
+    }
+
+    #[wasm_bindgen(js_name = admissionPackedSections)]
+    pub fn admission_packed_sections(&self, index: u32) -> Result<js_sys::Uint8Array, JsValue> {
+        Ok(js_sys::Uint8Array::from(
+            self.admission(index)?.packed_sections.as_slice(),
+        ))
+    }
+}
+
+impl TerrainLabCanonicalMeshBatchPayload {
+    fn admission(
+        &self,
+        index: u32,
+    ) -> Result<&crate::canonical_mesh::CanonicalPackedAdmission, JsValue> {
+        self.batch.admissions.get(index as usize).ok_or_else(|| {
+            js_error(format!(
+                "canonical admission index {index} is out of bounds"
+            ))
+        })
     }
 }
 
@@ -256,7 +496,7 @@ impl TerrainLabCanonicalChunkPayload {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Copy, Debug, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct TerrainLabCanonicalChunkCoordinate {
     chunk_x: i32,
