@@ -11,6 +11,9 @@ procedural terrain renderer. The browser input-shell audit completed on
 third throwaway gesture implementation. Migrate Terrain Lab through
 `mclone-view-control` first, retain thin app-specific DOM mechanics, and
 extract only physical browser helpers proven common by the later Web Explorer.
+Gamepad support is deferred from that browser slice. The native Explorer is
+currently a procedural-view smoke and architecture host, not a replacement for
+Terrain Lab's already functioning exact-chunk view.
 
 ## Scope
 
@@ -245,13 +248,18 @@ product-neutral. The main game may keep its relative-pointer/pointer-lock
 adapter even if all three hosts share a few small keyboard, lifecycle, or
 contact helpers.
 
-### Gamepad decision
+### Deferred gamepad boundary
 
-Gamepad support is desirable for the Explorer, Terrain Lab, tabletop, and the
-game, but the game's gameplay action map is not the view-control map. Do not
-translate a controller into fake keyboard events and do not bind left stick
-to `MoveAnalog`, right stick to first-person `Look`, or face buttons to
-Jump/Attack in the Explorer.
+Gamepad support is not required for the Terrain Lab navigation migration or
+the small standalone browser shell. Defer its implementation until a concrete
+Explorer, tabletop, or game product needs it. The opaque browser shell should
+forward pointer, key, wheel, resize, focus, and lifecycle facts without
+learning view semantics; it does not need speculative controller machinery.
+
+When gamepad support is selected later, the game's gameplay action map is not
+the view-control map. Do not translate a controller into fake keyboard events
+and do not bind left stick to `MoveAnalog`, right stick to first-person `Look`,
+or face buttons to Jump/Attack in the Explorer.
 
 Preserve the existing canonical physical boundary in `mclone-input`:
 
@@ -296,12 +304,56 @@ The next bounded implementation should focus on Terrain Lab:
 5. validate mouse buttons/modifiers, continuous anchored wheel, focused
    keyboard input, one-contact map/orbit, simultaneous pinch pan/zoom,
    cancellation, interrupted contacts, and page-scroll containment; and
-6. add the canonical gamepad snapshot/view-intent bridge as a separable slice,
-   without making it a prerequisite for deleting the duplicated touch policy.
+6. leave gamepad support out of this slice.
 
 Only after that migration should a minimal Web Explorer choose whether the
 Lab's DOM adapter is reusable as-is or should be factored into a small shared
 browser module.
+
+### Exact view status and sequencing
+
+The word “Explorer” currently names two different levels of proof:
+
+- the standalone native
+  [`mclone-world-explorer`](../../native/apps/mclone-world-explorer/) exercises
+  crate boundaries, native navigation, procedural terrain, capture, and
+  profiling; and
+- Terrain Lab's canonical pane already exercises real chunk generation,
+  block/biome arrays, textured section meshing, production block assets, and
+  the production chunk renderer.
+
+The native Explorer currently requests the GPU `Cover` stage through
+[`terrain.rs`](../../native/apps/mclone-world-explorer/src/terrain.rs). It does
+not instantiate the canonical compiler, exact chunk cache, textured section
+mesher, or chunk draw resources. First-party terrain textures and procedural
+tree summaries make it visually useful, but they do not make it an exact
+chunk view.
+
+The exact path is already functional, but its ownership is split:
+
+- `mclone-terrain-view` owns `CanonicalTerrainCompiler`;
+- `mclone-render` owns textured chunk meshing and drawing;
+- Terrain Lab's
+  [`canonical_mesh.rs`](../../native/apps/mclone-terrain-lab/src/canonical_mesh.rs)
+  currently owns the exact-chunk desired set, raw cache, compilation session,
+  and presentation assembly; and
+- Terrain Lab's
+  [`canonical_web.rs`](../../native/apps/mclone-terrain-lab/src/canonical_web.rs)
+  owns the current Web/WGPU upload and draw orchestration.
+
+Therefore, “migrate Terrain Lab” means replacing its duplicated browser
+camera and gesture policy while preserving both its procedural and canonical
+renderers. That navigation work does not need to wait for exact chunks in the
+native Explorer.
+
+Conversely, do not retire Terrain Lab or present the procedural-only Explorer
+as its product replacement. Before a standalone Explorer becomes the real
+map-to-world view, extract a reusable exact-view session from the Lab-local
+orchestration, prove it in a small host, and compose its near-field chunks over
+the procedural horizon with the transition and masking rules owned by
+[`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md). A
+procedural-only web shell may still be useful as a deployment smoke, but it
+must be labeled as such.
 
 ## Shared View-Control Contract
 
@@ -524,9 +576,9 @@ The current and prospective split is:
 - `mclone-view-control`: deterministic navigation state, contact-gesture
   classification, view intents, and reducer;
 - `mclone-input`: canonical controller sources, observations, standard
-  snapshots, preferences, and the physical-to-view gamepad bridge or its
-  neutral inputs;
-- `mclone-terrain-view`: bounded terrain presentation and coordinate picking;
+  snapshots, and preferences; a physical-to-view gamepad bridge is deferred;
+- `mclone-terrain-view`: bounded procedural terrain presentation, canonical
+  terrain compilation, and coordinate picking;
 - `mclone-render-session`: final projection/view facts and render lifecycle;
 - `mclone-scene`: in-game mode, active-world focus, follow/recenter, admission,
   and authoritative command routing;
@@ -556,24 +608,32 @@ adding another host.
    over the shared reducer while preserving current visuals, inspection,
    scroll containment, URL state, and diagnostics. Delete superseded
    TypeScript camera and gesture policy.
-3. **Add the world-view gamepad bridge.** Consume canonical
-   `mclone-input` snapshots and emit tested view intents; then prove browser
-   polling without inheriting gameplay bindings.
-4. **Build the minimal Web Explorer.** Keep JavaScript or TypeScript limited
-   to canvas, rAF, lifecycle, URL, raw-observation forwarding, and mechanical
-   browser dispositions. Add a deployment smoke and measure the independent
-   Wasm/asset payload.
-5. **Connect tabletop Slice 2.** Reuse the same manipulation contract while
+3. **Extract a reusable exact-view session.** Move the canonical desired-set,
+   cache, compilation, presentation, and draw preparation boundary out of
+   Terrain Lab-specific orchestration without regressing the Lab's working
+   canonical view.
+4. **Build the minimal Web Explorer smoke.** Keep JavaScript or TypeScript
+   limited to canvas, rAF, lifecycle, URL, raw-observation forwarding, and
+   mechanical browser dispositions. Add a deployment smoke and measure the
+   independent Wasm/asset payload. A procedural-only result remains a smoke,
+   not the player-facing replacement for Terrain Lab.
+5. **Compose procedural and exact terrain.** Add the reusable exact near field
+   to an Explorer host and validate masking, skirts, replacement, and
+   movement before calling it the real map-to-world view.
+6. **Connect tabletop Slice 2.** Reuse the same manipulation contract while
    retaining scene-owned follow, authority, and target mapping.
-6. **Build the player-facing Explorer UI.** Use the shared terrain view,
+7. **Build the player-facing Explorer UI.** Use the shared terrain view,
    accessible controls, shareable view state, and a deliberately small Wasm
    payload.
-7. **Add validated local handoff.** Turn a selected X/Z into a safe,
+8. **Add validated local handoff.** Turn a selected X/Z into a safe,
    authoritative integrated-world arrival.
-8. **Design remote preview descriptors.** Do this only when a concrete remote
+9. **Design remote preview descriptors.** Do this only when a concrete remote
    product needs seed privacy and server-controlled destinations.
-9. **Explore continuous transitions.** Preserve GPU/device/residency state
+10. **Explore continuous transitions.** Preserve GPU/device/residency state
    only after the simple load-or-navigate flow is useful and measured.
+11. **Add gamepad navigation when demanded.** Consume canonical
+    `mclone-input` snapshots and emit tested view intents without inheriting
+    gameplay bindings or putting semantics in the browser shell.
 
 The clipmap work stream in
 [`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md) can progress
@@ -615,13 +675,12 @@ containment, not only a successful pinch in an automated happy path.
 - exposing private server seeds;
 - bundling the full client into the initial map page;
 - moving Terrain Lab diagnostics into the player UI;
+- retiring Terrain Lab before a reusable exact view is proven;
 - solving seamless GPU ownership transfer before basic handoff works; or
 - making overview mode authoritative merely because it can pick terrain.
 
 ## Open Questions
 
-- Should the shared reducer be a new `mclone-view-control` crate or a module in
-  `mclone-input` with a strict renderer-free boundary?
 - Which projection transition best connects a 2D map to perspective orbit
   without disorienting touch users?
 - What URL state is stable and compact enough for long-lived shared links?
