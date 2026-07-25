@@ -21,10 +21,10 @@ import {
   type TerrainLabState,
 } from "../state";
 import type {
+  CanonicalCoordinate,
+  CanonicalWorkerPackedAdmission,
   CanonicalWorkerResponse,
-  CanonicalWorkerResult,
 } from "./canonical-worker-protocol";
-import { CanonicalRawCache } from "./canonical-raw-cache";
 import { initializeTerrainLab } from "./terrain-lab-wasm";
 
 export interface CanonicalTerrainReport {
@@ -38,7 +38,16 @@ export interface CanonicalTerrainReport {
   maxFrameAdmissions: number;
   staleChunks: number;
   generationMs: number;
+  workerPresentationMs: number;
+  workerMeshMs: number;
+  workerPackMs: number;
+  workerTransferMs: number;
   meshUploadMs: number;
+  mainDecodeMs: number;
+  maxAdmissionMs: number;
+  meshTargetChunks: number;
+  warmHits: number;
+  warmChunks: number;
   firstChunkMs: number | null;
   completeMs: number | null;
   vertexCount: number;
@@ -63,38 +72,44 @@ interface CanonicalTerrainCanvasProps {
   onError: (error: string | undefined) => void;
 }
 
-interface CanonicalCoordinate {
-  chunkX: number;
-  chunkZ: number;
-}
-
-interface CanonicalAcceptReport {
+interface CanonicalPackedAcceptReport {
+  activeChunks: number;
+  warmChunks: number;
+  targetChunks: number;
+  sectionCount: number;
   vertexCount: number;
   indexCount: number;
   meshUploadMs: number;
-  residentRawBytes: number;
+  decodeMs: number;
   residentMeshUsedBytes: number;
 }
 
-interface CanonicalRetainReport {
-  residentChunks: number;
-  removedChunks: number;
+interface CanonicalPackedPrepareReport {
+  activeChunks: number;
+  warmChunks: number;
+  warmAvailable: CanonicalCoordinate[];
+  evictedChunks: number;
   removedSections: number;
   vertexCount: number;
   indexCount: number;
-  residentRawBytes: number;
   residentMeshUsedBytes: number;
 }
 
 interface ResponsiveCanonicalTerrainLab extends CanonicalTerrainLab {
-  retainChunks(coordinatesJson: string): string;
+  preparePackedChunks(coordinatesJson: string): string;
+  activatePackedChunk(chunkX: number, chunkZ: number): string;
+  acceptPackedMesh(
+    chunkX: number,
+    chunkZ: number,
+    fingerprint: string,
+    packedSections: Uint8Array,
+  ): string;
   resetProfile(seed: string, profile: string): void;
 }
 
-interface PendingCanonicalChunk {
-  result: CanonicalWorkerResult;
-  cacheHit: boolean;
-}
+type PendingCanonicalChunk =
+  | { kind: "warm"; coordinate: CanonicalCoordinate }
+  | { kind: "mesh"; admission: CanonicalWorkerPackedAdmission };
 
 interface PointerStart {
   pointerId: number;
@@ -121,6 +136,7 @@ interface PinchStart {
 const AUTHORED_PACK_URL = "/first-party-packs/mclone-authored.pbp";
 const FALLBACK_PACK_URL = "/first-party-packs/mclone-generated-fallback.pbp";
 const CANONICAL_PENDING_HIGH_WATER = 2;
+const CANONICAL_WORKER_MAX_BATCH = 16;
 
 export function CanonicalTerrainCanvas({
   state,
@@ -136,10 +152,12 @@ export function CanonicalTerrainCanvas({
   const stageRef = useRef<HTMLDivElement>(null);
   const labRef = useRef<ResponsiveCanonicalTerrainLab | undefined>(undefined);
   const workerRef = useRef<Worker | undefined>(undefined);
+  const workerIdentityRef = useRef<string | undefined>(undefined);
+  const workerReadyRef = useRef(false);
   const epochRef = useRef(0);
-  const cacheRef = useRef(new CanonicalRawCache());
   const residentRef = useRef(new Set<string>());
   const residentIdentityRef = useRef<string | undefined>(undefined);
+  const presentationIdentityRef = useRef<string | undefined>(undefined);
   const renderFrameRef = useRef<number | undefined>(undefined);
   const pointerStartRef = useRef<PointerStart | undefined>(undefined);
   const activePointersRef = useRef(new Map<number, ActivePointer>());
@@ -271,28 +289,8 @@ export function CanonicalTerrainCanvas({
     if (!initialized || !lab) {
       return;
     }
-    try {
-      lab.setPresentation(state.waterVisible, state.vegetationVisible);
-      scheduleRenderRef.current();
-    } catch (error: unknown) {
-      onError(errorMessage(error));
-    }
-  }, [
-    initialized,
-    onError,
-    state.vegetationVisible,
-    state.waterVisible,
-  ]);
-
-  useEffect(() => {
-    const lab = labRef.current;
-    if (!initialized || !lab) {
-      return;
-    }
     const epoch = ++epochRef.current;
     const requestStarted = performance.now();
-    workerRef.current?.terminate();
-    workerRef.current = undefined;
     const residentIdentity = [
       state.profile,
       state.seed,
@@ -300,14 +298,18 @@ export function CanonicalTerrainCanvas({
       cacheEpoch,
       cacheEnabled ? "cache-on" : "cache-off",
     ].join(":");
-    if (residentIdentityRef.current !== residentIdentity) {
+    const presentationIdentity = [
+      state.waterVisible ? "water" : "dry",
+      state.vegetationVisible ? "vegetation" : "bare",
+    ].join(":");
+    const hardReset = residentIdentityRef.current !== residentIdentity;
+    const presentationReset =
+      presentationIdentityRef.current !== presentationIdentity;
+    if (hardReset || presentationReset) {
       residentIdentityRef.current = residentIdentity;
+      presentationIdentityRef.current = presentationIdentity;
       residentRef.current.clear();
-      cacheRef.current.clear();
       lab.resetProfile(state.seed, state.profile);
-    }
-    if (!cacheEnabled) {
-      cacheRef.current.clear();
     }
     const coordinates = JSON.parse(
       canonicalTerrainChunkOrder(
@@ -320,9 +322,10 @@ export function CanonicalTerrainCanvas({
     residentRef.current = new Set(
       [...residentRef.current].filter((key) => desiredKeys.has(key)),
     );
-    const retained = parseJson<CanonicalRetainReport>(
-      lab.retainChunks(JSON.stringify(coordinates)),
+    const prepared = parseJson<CanonicalPackedPrepareReport>(
+      lab.preparePackedChunks(JSON.stringify(coordinates)),
     );
+    const warmKeys = new Set(prepared.warmAvailable.map(canonicalCoordinateKey));
     const report: CanonicalTerrainReport = {
       epoch,
       requestedChunks: coordinates.length,
@@ -334,16 +337,25 @@ export function CanonicalTerrainCanvas({
       maxFrameAdmissions: 0,
       staleChunks: 0,
       generationMs: 0,
+      workerPresentationMs: 0,
+      workerMeshMs: 0,
+      workerPackMs: 0,
+      workerTransferMs: 0,
       meshUploadMs: 0,
+      mainDecodeMs: 0,
+      maxAdmissionMs: 0,
+      meshTargetChunks: 0,
+      warmHits: 0,
+      warmChunks: prepared.warmChunks,
       firstChunkMs: residentRef.current.size > 0 ? 0 : null,
       completeMs: null,
-      vertexCount: retained.vertexCount,
-      indexCount: retained.indexCount,
+      vertexCount: prepared.vertexCount,
+      indexCount: prepared.indexCount,
       retainedDependencyChunks: 0,
-      cachedChunks: cacheRef.current.size,
-      residentRawBytes: retained.residentRawBytes,
-      cacheRawBytes: cacheRef.current.rawBytes,
-      residentMeshUsedBytes: retained.residentMeshUsedBytes,
+      cachedChunks: 0,
+      residentRawBytes: 0,
+      cacheRawBytes: 0,
+      residentMeshUsedBytes: prepared.residentMeshUsedBytes,
       trackedBytes: 0,
       complete: false,
     };
@@ -355,11 +367,8 @@ export function CanonicalTerrainCanvas({
       if (residentRef.current.has(canonicalCoordinateKey(coordinate))) {
         continue;
       }
-      const cached = cacheEnabled
-        ? cacheRef.current.get(cacheKey(state, coordinate))
-        : undefined;
-      if (cacheEnabled && cached) {
-        pending.push({ result: cached, cacheHit: true });
+      if (warmKeys.has(canonicalCoordinateKey(coordinate))) {
+        pending.push({ kind: "warm", coordinate });
       } else {
         missing.push(coordinate);
       }
@@ -368,38 +377,71 @@ export function CanonicalTerrainCanvas({
     let admissionFrame: number | undefined;
     let finished = false;
     let nextMissingIndex = 0;
-    let workerReady = false;
+    let batchIndex = 0;
+    let sessionBegan = false;
+    let beginSent = false;
     let workerInFlight = false;
-    const worker = missing.length > 0
-      ? new Worker(new URL("./canonical-worker.ts", import.meta.url), {
+    let worker = workerRef.current;
+    const needsWorkerInit =
+      !worker || workerIdentityRef.current !== residentIdentity;
+    if (needsWorkerInit) {
+      worker?.terminate();
+      worker = new Worker(new URL("./canonical-worker.ts", import.meta.url), {
         type: "module",
         name: `mclone-canonical-terrain-${epoch}`,
-      })
-      : undefined;
-    if (worker) {
+      });
       workerRef.current = worker;
+      workerIdentityRef.current = residentIdentity;
+      workerReadyRef.current = false;
+    }
+    if (worker) {
       worker.onmessage = (event: MessageEvent<CanonicalWorkerResponse>): void => {
         const response = event.data;
+        if (response.type === "ready") {
+          workerReadyRef.current = true;
+          beginWorker();
+          return;
+        }
         if (cancelled || response.epoch !== epoch || epochRef.current !== epoch) {
           report.staleChunks += 1;
           return;
         }
-        if (response.type === "ready") {
-          workerReady = true;
+        if (response.type === "began") {
+          sessionBegan = true;
           pumpWorker();
+          maybeFinish();
           return;
         }
         if (response.type === "error") {
           finished = true;
           onError(response.message);
           worker.terminate();
+          if (workerRef.current === worker) {
+            workerRef.current = undefined;
+            workerIdentityRef.current = undefined;
+            workerReadyRef.current = false;
+          }
           return;
         }
         workerInFlight = false;
-        if (cacheEnabled) {
-          cacheRef.current.set(cacheKey(state, response), response);
-        }
-        pending.push({ result: response, cacheHit: false });
+        report.generationMs += response.generationMs;
+        report.workerPresentationMs += response.presentationMs;
+        report.workerMeshMs += response.meshMs;
+        report.workerPackMs += response.packMs;
+        report.workerTransferMs += response.transferMs;
+        report.meshTargetChunks += response.deduplicatedTargetChunks;
+        report.cachedChunks = response.rawCacheChunks;
+        report.cacheRawBytes = response.rawCacheBytes;
+        report.cacheHits += response.admissions.filter(
+          (admission) => admission.rawCacheHit,
+        ).length;
+        updateTrackedBytes(report);
+        pending.push(
+          ...response.admissions.map(
+            (admission): PendingCanonicalChunk => ({ kind: "mesh", admission }),
+          ),
+        );
+        publishReport(report);
         scheduleAdmission();
         pumpWorker();
       };
@@ -407,13 +449,17 @@ export function CanonicalTerrainCanvas({
         finished = true;
         onError(event.message || "Canonical terrain worker failed.");
       };
-      worker.postMessage({
-        type: "init",
-        epoch,
-        profile: state.profile,
-        seed: state.seed,
-        stage: state.canonicalStage,
-      });
+      if (needsWorkerInit) {
+        worker.postMessage({
+          type: "init",
+          epoch,
+          profile: state.profile,
+          seed: state.seed,
+          stage: state.canonicalStage,
+        });
+      } else if (workerReadyRef.current) {
+        beginWorker();
+      }
     }
     scheduleAdmission();
     maybeFinish();
@@ -423,11 +469,22 @@ export function CanonicalTerrainCanvas({
       if (admissionFrame !== undefined) {
         cancelAnimationFrame(admissionFrame);
       }
-      worker?.terminate();
-      if (worker && workerRef.current === worker) {
-        workerRef.current = undefined;
-      }
     };
+
+    function beginWorker(): void {
+      if (cancelled || beginSent || !worker) {
+        return;
+      }
+      beginSent = true;
+      worker.postMessage({
+        type: "begin",
+        epoch,
+        coordinates,
+        waterVisible: state.waterVisible,
+        vegetationVisible: state.vegetationVisible,
+        cacheEnabled,
+      });
+    }
 
     function scheduleAdmission(): void {
       if (cancelled || finished || admissionFrame !== undefined) {
@@ -445,9 +502,14 @@ export function CanonicalTerrainCanvas({
         }
         const next = pending.shift();
         if (next) {
-          acceptChunk(lab!, next.result, report, next.cacheHit);
+          const admissionStarted = performance.now();
+          acceptChunk(lab!, next, report);
           report.admissionFrames += 1;
           report.maxFrameAdmissions = Math.max(report.maxFrameAdmissions, 1);
+          report.maxAdmissionMs = Math.max(
+            report.maxAdmissionMs,
+            performance.now() - admissionStarted,
+          );
           publishReport(report);
           scheduleRenderRef.current();
         }
@@ -462,61 +524,62 @@ export function CanonicalTerrainCanvas({
     function pumpWorker(): void {
       if (
         !worker
-        || !workerReady
+        || !sessionBegan
         || workerInFlight
         || pending.length >= CANONICAL_PENDING_HIGH_WATER
       ) {
         return;
       }
-      const coordinate = missing[nextMissingIndex++];
-      if (!coordinate) {
+      if (nextMissingIndex >= missing.length) {
         maybeFinish();
         return;
       }
+      const batchSize = Math.min(
+        CANONICAL_WORKER_MAX_BATCH,
+        2 ** batchIndex,
+        missing.length - nextMissingIndex,
+      );
+      batchIndex += 1;
+      const batch = missing.slice(nextMissingIndex, nextMissingIndex + batchSize);
+      nextMissingIndex += batch.length;
       workerInFlight = true;
       worker.postMessage({
-        type: "compile",
+        type: "compileBatch",
         epoch,
-        chunkX: coordinate.chunkX,
-        chunkZ: coordinate.chunkZ,
+        coordinates: batch,
       });
     }
 
     function acceptChunk(
       currentLab: ResponsiveCanonicalTerrainLab,
-      result: CanonicalWorkerResult,
+      next: PendingCanonicalChunk,
       current: CanonicalTerrainReport,
-      cacheHit: boolean,
     ): void {
-      const accepted = parseJson<CanonicalAcceptReport>(
-        currentLab.acceptChunk(
-          state.seed,
-          result.chunkX,
-          result.chunkZ,
-          result.minY,
-          result.height,
-          result.blocks,
-          result.biomes,
-          result.fingerprint,
-          currentViewRef.current.state.waterVisible,
-          currentViewRef.current.state.vegetationVisible,
-        ),
+      const coordinate = next.kind === "warm" ? next.coordinate : next.admission;
+      const accepted = parseJson<CanonicalPackedAcceptReport>(
+        next.kind === "warm"
+          ? currentLab.activatePackedChunk(coordinate.chunkX, coordinate.chunkZ)
+          : currentLab.acceptPackedMesh(
+            coordinate.chunkX,
+            coordinate.chunkZ,
+            next.admission.fingerprint,
+            next.admission.packedSections,
+          ),
       );
-      residentRef.current.add(canonicalCoordinateKey(result));
+      residentRef.current.add(canonicalCoordinateKey(coordinate));
       current.publishedChunks = residentRef.current.size;
       current.queuedChunks = Math.max(0, current.requestedChunks - current.publishedChunks);
-      if (cacheHit) {
-        current.cacheHits += 1;
+      if (next.kind === "warm") {
+        current.warmHits += 1;
       } else {
-        current.generationMs += result.generationMs;
+        current.retainedDependencyChunks =
+          next.admission.retainedDependencyChunks;
       }
       current.meshUploadMs += accepted.meshUploadMs;
+      current.mainDecodeMs += accepted.decodeMs;
       current.vertexCount = accepted.vertexCount;
       current.indexCount = accepted.indexCount;
-      current.retainedDependencyChunks = result.retainedDependencyChunks;
-      current.cachedChunks = cacheRef.current.size;
-      current.residentRawBytes = accepted.residentRawBytes;
-      current.cacheRawBytes = cacheRef.current.rawBytes;
+      current.warmChunks = accepted.warmChunks;
       current.residentMeshUsedBytes = accepted.residentMeshUsedBytes;
       updateTrackedBytes(current);
       current.firstChunkMs ??= performance.now() - requestStarted;
@@ -529,7 +592,7 @@ export function CanonicalTerrainCanvas({
         || pending.length > 0
         || workerInFlight
         || nextMissingIndex < missing.length
-        || (missing.length > 0 && !workerReady)
+        || !sessionBegan
       ) {
         return;
       }
@@ -539,10 +602,6 @@ export function CanonicalTerrainCanvas({
       report.completeMs = performance.now() - requestStarted;
       publishReport(report);
       scheduleRenderRef.current();
-      worker?.terminate();
-      if (worker && workerRef.current === worker) {
-        workerRef.current = undefined;
-      }
     }
 
     function publishReport(current: CanonicalTerrainReport): void {
@@ -562,6 +621,8 @@ export function CanonicalTerrainCanvas({
     state.canonicalStage,
     state.profile,
     state.seed,
+    state.vegetationVisible,
+    state.waterVisible,
   ]);
 
   useEffect(() => {
@@ -742,15 +803,6 @@ export function CanonicalTerrainCanvas({
   }
 }
 
-function cacheKey(
-  state: TerrainLabState,
-  coordinate: Pick<CanonicalWorkerResult, "chunkX" | "chunkZ">,
-): string {
-  return `${
-    state.profile
-  }:${state.seed}:${state.canonicalStage}:${coordinate.chunkX}:${coordinate.chunkZ}`;
-}
-
 function updateTrackedBytes(report: CanonicalTerrainReport): void {
   report.trackedBytes = report.residentRawBytes
     + report.cacheRawBytes
@@ -758,7 +810,7 @@ function updateTrackedBytes(report: CanonicalTerrainReport): void {
 }
 
 function canonicalCoordinateKey(
-  coordinate: Pick<CanonicalWorkerResult, "chunkX" | "chunkZ">,
+  coordinate: CanonicalCoordinate,
 ): string {
   return `${coordinate.chunkX}:${coordinate.chunkZ}`;
 }

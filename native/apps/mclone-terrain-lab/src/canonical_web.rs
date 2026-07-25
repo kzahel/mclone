@@ -208,13 +208,17 @@ impl CanonicalTerrainLab {
             .collect::<Vec<_>>();
         let mut removed = BTreeSet::new();
         let mut evicted_chunks = 0;
-        while self.warm_packed_chunks.len() > CANONICAL_WARM_MESH_MAX_CHUNKS {
+        let mut eviction_attempts = self.warm_packed_chunks.len();
+        while self.warm_packed_chunks.len() > CANONICAL_WARM_MESH_MAX_CHUNKS
+            && eviction_attempts > 0
+        {
+            eviction_attempts -= 1;
             let Some(position) = self.warm_packed_chunks.pop_front() else {
                 break;
             };
             if desired.contains(&position) {
                 self.warm_packed_chunks.push_back(position);
-                break;
+                continue;
             }
             if let Some(keys) = self.packed_chunk_sections.remove(&position) {
                 removed.extend(keys);

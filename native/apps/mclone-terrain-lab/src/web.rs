@@ -169,6 +169,7 @@ impl TerrainLabCanonicalMeshSession {
         coordinates_json: String,
         water_visible: bool,
         vegetation_visible: bool,
+        cache_enabled: bool,
     ) -> Result<(), JsValue> {
         let coordinates =
             serde_json::from_str::<Vec<TerrainLabCanonicalChunkCoordinate>>(&coordinates_json)
@@ -185,6 +186,7 @@ impl TerrainLabCanonicalMeshSession {
                 water: water_visible,
                 vegetation: vegetation_visible,
             },
+            cache_enabled,
         );
         Ok(())
     }

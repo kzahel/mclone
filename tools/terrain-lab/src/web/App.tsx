@@ -190,6 +190,12 @@ export function App(): React.JSX.Element {
       data-canonical-cache-raw-bytes={canonicalReport?.cacheRawBytes ?? 0}
       data-canonical-mesh-used-bytes={canonicalReport?.residentMeshUsedBytes ?? 0}
       data-canonical-tracked-bytes={canonicalReport?.trackedBytes ?? 0}
+      data-canonical-worker-mesh-ms={canonicalReport?.workerMeshMs ?? 0}
+      data-canonical-main-decode-ms={canonicalReport?.mainDecodeMs ?? 0}
+      data-canonical-max-admission-ms={canonicalReport?.maxAdmissionMs ?? 0}
+      data-canonical-mesh-target-chunks={canonicalReport?.meshTargetChunks ?? 0}
+      data-canonical-warm-hits={canonicalReport?.warmHits ?? 0}
+      data-canonical-warm-chunks={canonicalReport?.warmChunks ?? 0}
     >
       <header className="topBar">
         <div className="brandLockup">
@@ -1119,7 +1125,17 @@ function Diagnostics({
         <Metric label="Real first chunk" value={formatMs(canonical?.firstChunkMs)} />
         <Metric label="Real complete" value={formatMs(canonical?.completeMs)} />
         <Metric label="Real generation" value={formatMs(canonical?.generationMs)} />
-        <Metric label="Real mesh + upload" value={formatMs(canonical?.meshUploadMs)} />
+        <Metric label="Real Worker presentation" value={formatMs(canonical?.workerPresentationMs)} />
+        <Metric label="Real Worker mesh" value={formatMs(canonical?.workerMeshMs)} />
+        <Metric label="Real Worker pack" value={formatMs(canonical?.workerPackMs)} />
+        <Metric label="Real Worker transfer" value={formatMs(canonical?.workerTransferMs)} />
+        <Metric label="Real main decode" value={formatMs(canonical?.mainDecodeMs)} />
+        <Metric label="Real GPU upload" value={formatMs(canonical?.meshUploadMs)} />
+        <Metric label="Real max admission" value={formatMs(canonical?.maxAdmissionMs)} />
+        <Metric
+          label="Real mesh targets"
+          value={canonical ? `${canonical.meshTargetChunks} deduplicated` : "—"}
+        />
         <Metric
           label="Real cache"
           value={canonical
@@ -1131,11 +1147,11 @@ function Diagnostics({
           value={canonical ? formatBytes(canonical.trackedBytes) : "—"}
         />
         <Metric
-          label="Real resident raw"
+          label="Real main raw"
           value={canonical ? formatBytes(canonical.residentRawBytes) : "—"}
         />
         <Metric
-          label="Real raw cache"
+          label="Real Worker raw cache"
           value={canonical ? formatBytes(canonical.cacheRawBytes) : "—"}
         />
         <Metric
@@ -1145,6 +1161,12 @@ function Diagnostics({
         <Metric
           label="Real resident reuse"
           value={canonical ? `${canonical.residentHits} chunks` : "—"}
+        />
+        <Metric
+          label="Real warm reuse"
+          value={canonical
+            ? `${canonical.warmHits} hits · ${canonical.warmChunks} inactive`
+            : "—"}
         />
         <Metric
           label="Real admission"

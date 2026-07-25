@@ -1,4 +1,12 @@
-import type { CanonicalTerrainStage, TerrainLabProfile } from "../state";
+import type {
+  CanonicalTerrainStage,
+  TerrainLabProfile,
+} from "../state";
+
+export interface CanonicalCoordinate {
+  chunkX: number;
+  chunkZ: number;
+}
 
 export interface CanonicalWorkerInit {
   type: "init";
@@ -8,34 +16,63 @@ export interface CanonicalWorkerInit {
   stage: CanonicalTerrainStage;
 }
 
-export interface CanonicalWorkerCompile {
-  type: "compile";
+export interface CanonicalWorkerBegin {
+  type: "begin";
   epoch: number;
-  chunkX: number;
-  chunkZ: number;
+  coordinates: CanonicalCoordinate[];
+  waterVisible: boolean;
+  vegetationVisible: boolean;
+  cacheEnabled: boolean;
 }
 
-export type CanonicalWorkerRequest = CanonicalWorkerInit | CanonicalWorkerCompile;
+export interface CanonicalWorkerCompileBatch {
+  type: "compileBatch";
+  epoch: number;
+  coordinates: CanonicalCoordinate[];
+}
+
+export type CanonicalWorkerRequest =
+  | CanonicalWorkerInit
+  | CanonicalWorkerBegin
+  | CanonicalWorkerCompileBatch;
 
 export interface CanonicalWorkerReady {
   type: "ready";
   epoch: number;
 }
 
-export interface CanonicalWorkerResult {
-  type: "result";
+export interface CanonicalWorkerBegan {
+  type: "began";
   epoch: number;
+}
+
+export interface CanonicalWorkerPackedAdmission {
   chunkX: number;
   chunkZ: number;
-  minY: number;
-  height: number;
   fingerprint: string;
-  generationMs: number;
+  rawCacheHit: boolean;
   dependencyCacheHits: number;
   generatedDependencyChunks: number;
   retainedDependencyChunks: number;
-  blocks: Uint8Array;
-  biomes: Int32Array;
+  targetChunks: number;
+  sectionCount: number;
+  vertexCount: number;
+  indexCount: number;
+  packedSections: Uint8Array;
+}
+
+export interface CanonicalWorkerBatchResult {
+  type: "batch";
+  epoch: number;
+  generationMs: number;
+  presentationMs: number;
+  meshMs: number;
+  packMs: number;
+  transferMs: number;
+  deduplicatedTargetChunks: number;
+  rawCacheChunks: number;
+  rawCacheBytes: number;
+  admissions: CanonicalWorkerPackedAdmission[];
 }
 
 export interface CanonicalWorkerError {
@@ -46,5 +83,6 @@ export interface CanonicalWorkerError {
 
 export type CanonicalWorkerResponse =
   | CanonicalWorkerReady
-  | CanonicalWorkerResult
+  | CanonicalWorkerBegan
+  | CanonicalWorkerBatchResult
   | CanonicalWorkerError;

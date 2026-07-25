@@ -487,17 +487,31 @@ async function proveLargeCanonicalFootprint(page, shell, label) {
   await waitForCanonical(shell, 961, 120_000);
   const returnMs = performance.now() - returnStarted;
   const cachedChunks = await numericAttribute(shell, "data-canonical-cached-chunks");
-  if (await shell.getAttribute("data-canonical-cache-hits") !== "31"
+  const warmHits = await numericAttribute(shell, "data-canonical-warm-hits");
+  const warmChunks = await numericAttribute(shell, "data-canonical-warm-chunks");
+  const returnWorkerMeshMs = await numericAttribute(
+    shell,
+    "data-canonical-worker-mesh-ms",
+  );
+  const returnMainDecodeMs = await numericAttribute(
+    shell,
+    "data-canonical-main-decode-ms",
+  );
+  if (await shell.getAttribute("data-canonical-cache-hits") !== "0"
+      || warmHits !== 31
+      || warmChunks !== 31
+      || returnWorkerMeshMs !== 0
+      || returnMainDecodeMs !== 0
       || await shell.getAttribute("data-canonical-admission-frames") !== "31"
       || cachedChunks > 1_024) {
-    throw new Error("The large exact cached return violated its bounded paced contract");
+    throw new Error("The large exact warm return violated its bounded paced contract");
   }
 
   const capture = `/tmp/mclone-terrain-lab-hosted-${label}-canonical-961.png`;
   await page.getByTestId("canonical-terrain-stage").screenshot({ path: capture });
   return {
     admissionFrames: 31,
-    cacheHits: 31,
+    cacheHits: 0,
     cachedChunks,
     capture,
     initialMs,
@@ -508,6 +522,10 @@ async function proveLargeCanonicalFootprint(page, shell, label) {
     shiftMs,
     trackedBytes,
     cacheRawBytes,
+    warmHits,
+    warmChunks,
+    returnWorkerMeshMs,
+    returnMainDecodeMs,
   };
 }
 

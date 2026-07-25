@@ -92,12 +92,19 @@ impl CanonicalMeshSession {
         &mut self,
         desired: impl IntoIterator<Item = CanonicalMeshCoordinate>,
         visibility: CanonicalTerrainVisibility,
+        cache_enabled: bool,
     ) {
         self.desired = desired
             .into_iter()
             .map(CanonicalMeshCoordinate::tuple)
             .collect();
         self.visibility = visibility;
+        if !cache_enabled {
+            self.chunks
+                .retain(|position, _| self.desired.contains(position));
+            self.raw_lru
+                .retain(|position| self.desired.contains(position));
+        }
         let retained = self
             .raw_lru
             .iter()

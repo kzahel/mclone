@@ -536,6 +536,14 @@ test("keeps a 9x9 real footprint resident and paces pan admission", async ({
   const shell = page.locator(".appShell");
   const centerX = page.getByLabel("Center X");
   const initialEpoch = await shell.getAttribute("data-canonical-epoch");
+  expect(Number(await shell.getAttribute("data-canonical-worker-mesh-ms")))
+    .toBeGreaterThan(0);
+  expect(Number(await shell.getAttribute("data-canonical-main-decode-ms")))
+    .toBeGreaterThan(0);
+  expect(Number(await shell.getAttribute("data-canonical-cache-raw-bytes")))
+    .toBeGreaterThan(0);
+  expect(Number(await shell.getAttribute("data-canonical-resident-raw-bytes")))
+    .toBe(0);
 
   await centerX.fill("-303");
   await centerX.press("Enter");
@@ -550,6 +558,17 @@ test("keeps a 9x9 real footprint resident and paces pan admission", async ({
   await waitForCanonical(page, 81);
   await expect(shell).toHaveAttribute("data-canonical-admission-frames", "9");
   await expect(shell).toHaveAttribute("data-canonical-max-frame-admissions", "1");
+  expect(Number(await shell.getAttribute("data-canonical-worker-mesh-ms")))
+    .toBeGreaterThan(0);
+  expect(Number(await shell.getAttribute("data-canonical-main-decode-ms")))
+    .toBeGreaterThan(0);
+  expect(Number(await shell.getAttribute("data-canonical-max-admission-ms")))
+    .toBeGreaterThan(0);
+  const meshTargets = Number(
+    await shell.getAttribute("data-canonical-mesh-target-chunks"),
+  );
+  expect(meshTargets).toBeGreaterThan(9);
+  expect(meshTargets).toBeLessThan(45);
 
   await page.evaluate(() => {
     const counts: number[] = [];
@@ -588,7 +607,11 @@ test("keeps a 9x9 real footprint resident and paces pan admission", async ({
   });
   expect(Math.min(...counts)).toBeGreaterThanOrEqual(72);
   expect(counts.some((count) => count > 72 && count < 81)).toBe(true);
-  await expect(shell).toHaveAttribute("data-canonical-cache-hits", "9");
+  await expect(shell).toHaveAttribute("data-canonical-cache-hits", "0");
+  await expect(shell).toHaveAttribute("data-canonical-warm-hits", "9");
+  await expect(shell).toHaveAttribute("data-canonical-warm-chunks", "9");
+  await expect(shell).toHaveAttribute("data-canonical-worker-mesh-ms", "0");
+  await expect(shell).toHaveAttribute("data-canonical-main-decode-ms", "0");
   await expect(shell).toHaveAttribute("data-canonical-admission-frames", "9");
   await expect(shell).toHaveAttribute("data-canonical-max-frame-admissions", "1");
   await page.getByTestId("canonical-terrain-stage").screenshot({
@@ -604,6 +627,7 @@ test("keeps a 9x9 real footprint resident and paces pan admission", async ({
   await waitForCanonical(page, 81);
   await expect(shell).toHaveAttribute("data-canonical-resident-hits", "0");
   await expect(shell).toHaveAttribute("data-canonical-cache-hits", "0");
+  await expect(shell).toHaveAttribute("data-canonical-warm-hits", "0");
   await centerX.fill("-288");
   await centerX.press("Enter");
   await expect(page).toHaveURL(/x=-288/u);
@@ -674,7 +698,7 @@ test("publishes, shifts, and restores a 31x31 real footprint", async ({
   await expect(footprint).toHaveValue("15");
   await expect(shell).toHaveAttribute("data-canonical-cached-chunks", "961");
   expect(Number(await shell.getAttribute("data-canonical-resident-raw-bytes")))
-    .toBeGreaterThan(0);
+    .toBe(0);
   expect(Number(await shell.getAttribute("data-canonical-cache-raw-bytes")))
     .toBeGreaterThan(0);
   expect(Number(await shell.getAttribute("data-canonical-mesh-used-bytes")))
@@ -694,6 +718,7 @@ test("publishes, shifts, and restores a 31x31 real footprint", async ({
   await waitForCanonical(page, 961, 120_000);
   await expect(shell).toHaveAttribute("data-canonical-admission-frames", "31");
   await expect(shell).toHaveAttribute("data-canonical-max-frame-admissions", "1");
+  await expect(shell).toHaveAttribute("data-canonical-warm-chunks", "31");
   expect(Number(await shell.getAttribute("data-canonical-cached-chunks")))
     .toBeLessThanOrEqual(1_024);
 
@@ -702,7 +727,11 @@ test("publishes, shifts, and restores a 31x31 real footprint", async ({
   await expect(page).toHaveURL(/x=-304/u);
   await expect(shell).toHaveAttribute("data-canonical-resident-hits", "930");
   await waitForCanonical(page, 961, 120_000);
-  await expect(shell).toHaveAttribute("data-canonical-cache-hits", "31");
+  await expect(shell).toHaveAttribute("data-canonical-cache-hits", "0");
+  await expect(shell).toHaveAttribute("data-canonical-warm-hits", "31");
+  await expect(shell).toHaveAttribute("data-canonical-warm-chunks", "31");
+  await expect(shell).toHaveAttribute("data-canonical-worker-mesh-ms", "0");
+  await expect(shell).toHaveAttribute("data-canonical-main-decode-ms", "0");
   await expect(shell).toHaveAttribute("data-canonical-admission-frames", "31");
   await expect(shell).toHaveAttribute("data-canonical-max-frame-admissions", "1");
   expect(Number(await shell.getAttribute("data-canonical-cached-chunks")))
