@@ -715,6 +715,13 @@ is the completed execution record.
 
 ### Slice 2: Terrain Lab forest summaries and record overlays
 
+Tactical
+[`244-lod-native-vegetation-presentation.md`](../tactical/244-lod-native-vegetation-presentation.md)
+owns the bounded Terrain Lab and in-game presentation implementation. It locks
+globally consistent landmark-rank admission, CPU-owned vegetation products for
+both displayed Lab lanes, and per-chunk proxy clipping through the existing
+painted-capable Far LOD lifecycle.
+
 1. replace shader-side biome constants with production forest intent;
 2. extend `Cover` preview/cache identity and comparison facts;
 3. synthesize scale-aware forest summaries without enumerating trees;
