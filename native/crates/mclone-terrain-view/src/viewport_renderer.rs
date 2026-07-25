@@ -2110,6 +2110,7 @@ pub struct TerrainHorizonRenderer {
     pending: VecDeque<TerrainClipmapTile>,
     pending_vegetation: VecDeque<TerrainClipmapTile>,
     vegetation_cache: Option<McloneOverworldVegetationPlanCache>,
+    vegetation_enabled: bool,
     seed: i64,
     center_x: i32,
     center_z: i32,
@@ -2128,6 +2129,7 @@ impl TerrainHorizonRenderer {
         height: u32,
         material_atlas: TerrainPreviewMaterialAtlas<'_>,
         config: TerrainClipmapConfig,
+        vegetation_enabled: bool,
     ) -> Result<Self, String> {
         let clipmap = TerrainClipmap::new(config)?;
         let config = clipmap.config();
@@ -2170,6 +2172,7 @@ impl TerrainHorizonRenderer {
             pending: VecDeque::with_capacity(slot_count),
             pending_vegetation: VecDeque::with_capacity(config.slots_per_level() as usize),
             vegetation_cache: None,
+            vegetation_enabled,
             seed: 0,
             center_x: 0,
             center_z: 0,
@@ -2333,7 +2336,8 @@ impl TerrainHorizonRenderer {
             }
             slot.gpu_submitted = true;
             self.ready[slot_index] = true;
-            if tile.sample_spacing <= TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING
+            if self.vegetation_enabled
+                && tile.sample_spacing <= TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING
                 && !self.pending_vegetation.contains(&tile)
             {
                 self.pending_vegetation.push_back(tile);

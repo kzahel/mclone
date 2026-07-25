@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#101923">
+    <title>Mclone World Explorer</title>
+    <link rel="stylesheet" href="./world-explorer.css">
+  </head>
+  <body>
+    <main id="world-explorer-shell" aria-busy="true">
+      <canvas
+        id="world-explorer-canvas"
+        tabindex="0"
+        aria-label="Mclone procedural world explorer"
+      ></canvas>
+      <output id="world-explorer-status" aria-live="polite">Starting World Explorer…</output>
+    </main>
+    <script type="module" src="./world-explorer-app.js"></script>
+  </body>
+</html>

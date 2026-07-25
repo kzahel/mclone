@@ -21,16 +21,20 @@ enum SmokeStage {
     MoveX,
     MoveZ,
     MoveDiagonal,
+    NegativeCoordinates,
+    Teleport,
     Zoom,
     Map,
     Orbit,
 }
 
-const SMOKE_STAGES: [SmokeStage; 7] = [
+const SMOKE_STAGES: [SmokeStage; 9] = [
     SmokeStage::Initial3d,
     SmokeStage::MoveX,
     SmokeStage::MoveZ,
     SmokeStage::MoveDiagonal,
+    SmokeStage::NegativeCoordinates,
+    SmokeStage::Teleport,
     SmokeStage::Zoom,
     SmokeStage::Map,
     SmokeStage::Orbit,
@@ -96,7 +100,7 @@ impl SmokeStage {
             Self::Initial3d => 0,
             Self::MoveX | Self::MoveZ | Self::MoveDiagonal => MOVEMENT_FRAMES,
             Self::Zoom => ZOOM_FRAMES,
-            Self::Map | Self::Orbit => 1,
+            Self::NegativeCoordinates | Self::Teleport | Self::Map | Self::Orbit => 1,
         }
     }
 
@@ -104,6 +108,8 @@ impl SmokeStage {
         match self {
             Self::Initial3d => Some("3d"),
             Self::MoveDiagonal => Some("movement"),
+            Self::NegativeCoordinates => Some("negative"),
+            Self::Teleport => Some("teleport"),
             Self::Map => Some("map"),
             Self::Orbit => Some("orbit"),
             Self::MoveX | Self::MoveZ | Self::Zoom => None,
@@ -124,6 +130,14 @@ impl SmokeStage {
             Self::MoveDiagonal => vec![WorldViewIntent::PanWorld {
                 delta_x: state.blocks_across * 0.015,
                 delta_z: state.blocks_across * 0.015,
+            }],
+            Self::NegativeCoordinates => vec![WorldViewIntent::FocusAt {
+                world_x: -8_193.0,
+                world_z: -4_097.0,
+            }],
+            Self::Teleport => vec![WorldViewIntent::FocusAt {
+                world_x: 1_000_000.0,
+                world_z: -1_000_000.0,
             }],
             Self::Zoom => vec![WorldViewIntent::AnchoredZoom {
                 log_delta: 0.5_f64.ln() / f64::from(ZOOM_FRAMES),
@@ -176,6 +190,8 @@ pub struct SmokeRecorder {
     checkpoint_frame_ms: Vec<f64>,
     peak_resident_bytes: u64,
     peak_pending_work: u32,
+    allocation_slots: Option<u32>,
+    fixed_resident_bytes: Option<u64>,
     captures: Vec<Value>,
 }
 
@@ -201,6 +217,8 @@ impl SmokeRecorder {
             checkpoint_frame_ms: Vec::new(),
             peak_resident_bytes: 0,
             peak_pending_work: 0,
+            allocation_slots: None,
+            fixed_resident_bytes: None,
             captures: Vec::new(),
         })
     }
@@ -210,7 +228,7 @@ impl SmokeRecorder {
         frame_time: Duration,
         input_applied: bool,
         stats: TerrainHorizonFrameStats,
-    ) {
+    ) -> Result<()> {
         self.frame_count = self.frame_count.saturating_add(1);
         let frame_ms = frame_time.as_secs_f64() * 1_000.0;
         if input_applied {
@@ -220,6 +238,27 @@ impl SmokeRecorder {
         }
         self.peak_resident_bytes = self.peak_resident_bytes.max(stats.resident_bytes);
         self.peak_pending_work = self.peak_pending_work.max(stats.pending_refills);
+        match self.allocation_slots {
+            Some(expected) if expected != stats.allocation_slots => {
+                anyhow::bail!(
+                    "World Explorer allocation changed from {expected} to {}",
+                    stats.allocation_slots
+                );
+            }
+            None => self.allocation_slots = Some(stats.allocation_slots),
+            _ => {}
+        }
+        match self.fixed_resident_bytes {
+            Some(expected) if expected != stats.fixed_resident_bytes => {
+                anyhow::bail!(
+                    "World Explorer fixed terrain memory changed from {expected} to {}",
+                    stats.fixed_resident_bytes
+                );
+            }
+            None => self.fixed_resident_bytes = Some(stats.fixed_resident_bytes),
+            _ => {}
+        }
+        Ok(())
     }
 
     pub fn checkpoint_path(&self, label: &str) -> PathBuf {
@@ -258,9 +297,14 @@ impl SmokeRecorder {
             "pitch_radians": state.pitch_radians,
             "finest_spacing": stats.finest_sample_spacing,
             "resident_bytes": stats.resident_bytes,
+            "fixed_resident_bytes": stats.fixed_resident_bytes,
+            "vegetation_bytes": stats.vegetation_bytes,
             "allocation_slots": stats.allocation_slots,
             "ready_slots": stats.ready_slots,
             "pending_refills": stats.pending_refills,
+            "vegetation_ready_tiles": stats.vegetation_ready_tiles,
+            "pending_vegetation_tiles": stats.pending_vegetation_tiles,
+            "tree_instance_count": stats.tree_instance_count,
             "total_refills": stats.residency.total_refills,
             "total_rebases": stats.residency.total_rebases,
             "rgb_min": pixels.min_rgb,
@@ -308,6 +352,8 @@ impl SmokeRecorder {
             "peak_resident_bytes": self.peak_resident_bytes,
             "peak_pending_work": self.peak_pending_work,
             "final_resident_bytes": final_stats.resident_bytes,
+            "fixed_resident_bytes": final_stats.fixed_resident_bytes,
+            "final_vegetation_bytes": final_stats.vegetation_bytes,
             "allocation_slots": final_stats.allocation_slots,
             "final_ready_slots": final_stats.ready_slots,
             "final_pending_work": final_stats.pending_refills,
@@ -319,6 +365,8 @@ impl SmokeRecorder {
                 "continuous +X",
                 "continuous -Z",
                 "continuous diagonal",
+                "negative-coordinate rebase",
+                "large teleport",
                 "anchored zoom",
                 "map",
                 "orbit",

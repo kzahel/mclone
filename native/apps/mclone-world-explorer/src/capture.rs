@@ -198,7 +198,7 @@ pub fn run_smoke(options: &ExplorerOptions, root: &Path, started: Instant) -> Re
         queue.submit(std::iter::once(encoder.finish()));
         terrain.poll_completed(&device)?;
         let frame_time = frame_started.elapsed();
-        recorder.note_frame(frame_time, input_applied, stats);
+        recorder.note_frame(frame_time, input_applied, stats)?;
 
         if let Some((label, color, depth)) = captures {
             let pixels = color.finish(&device)?;

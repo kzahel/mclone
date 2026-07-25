@@ -11,16 +11,34 @@ path = "src/main.rs"
 
 [dependencies]
 anyhow.workspace = true
-env_logger.workspace = true
-image.workspace = true
-log.workspace = true
 mclone-assets.workspace = true
 mclone-core.workspace = true
 mclone-mesh.workspace = true
 mclone-terrain-view.workspace = true
 mclone-view-control.workspace = true
 mclone-worldgen.workspace = true
-pollster.workspace = true
 serde_json.workspace = true
 wgpu.workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+env_logger.workspace = true
+image.workspace = true
+log.workspace = true
+pollster.workspace = true
 winit.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys.workspace = true
+serde.workspace = true
+wasm-bindgen.workspace = true
+wasm-bindgen-futures.workspace = true
+web-sys = { workspace = true, features = [
+  "console",
+  "HtmlCanvasElement",
+  "UrlSearchParams",
+] }
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+name = "mclone_world_explorer"
+path = "src/lib.rs"

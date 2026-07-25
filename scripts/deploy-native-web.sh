@@ -11,6 +11,8 @@ WEB_ROOT="$NATIVE_ROOT/target/mclone-web-client-www"
 ANIMAL_CATALOG_WEB_ROOT="$PROJECT_DIR/tools/asset-lab/dist/web"
 STRUCTURE_CATALOG_WEB_ROOT="$PROJECT_DIR/tools/structure-lab/dist/web"
 TERRAIN_LAB_WEB_ROOT="$PROJECT_DIR/tools/terrain-lab/dist/web"
+WORLD_EXPLORER_WEB_ROOT="$NATIVE_ROOT/target/mclone-world-explorer-www"
+WORLD_EXPLORER_BUILD_SCRIPT="$PROJECT_DIR/native/apps/mclone-world-explorer/scripts/build-web.mjs"
 REFERENCE_DIR="$PROJECT_DIR/reference/minecraft-1.17.1"
 ASSET_PACK_ZIP="$REFERENCE_DIR/extracted.zip"
 ASSET_PACK_MANIFEST="$REFERENCE_DIR/extracted.zip.json"
@@ -119,6 +121,7 @@ ensure_structure_lab_dependencies
 pnpm structure-lab:web:build
 ensure_terrain_lab_dependencies
 pnpm terrain-lab:web:build
+node "$WORLD_EXPLORER_BUILD_SCRIPT"
 rm -rf "$DEPLOY_DIR"
 mkdir -p "$DEPLOY_DIR/pkg"
 cp -R "$WEB_ROOT"/. "$DEPLOY_DIR"/
@@ -135,6 +138,8 @@ mkdir -p "$DEPLOY_DIR/structures"
 cp -R "$STRUCTURE_CATALOG_WEB_ROOT"/. "$DEPLOY_DIR/structures"/
 mkdir -p "$DEPLOY_DIR/terrain"
 cp -R "$TERRAIN_LAB_WEB_ROOT"/. "$DEPLOY_DIR/terrain"/
+mkdir -p "$DEPLOY_DIR/explore"
+cp -R "$WORLD_EXPLORER_WEB_ROOT"/. "$DEPLOY_DIR/explore"/
 mkdir -p "$DEPLOY_DIR/reference/minecraft-1.17.1"
 cp "$ASSET_PACK_ZIP" "$DEPLOY_DIR/reference/minecraft-1.17.1/extracted.zip"
 cp "$ASSET_PACK_MANIFEST" "$DEPLOY_DIR/reference/minecraft-1.17.1/extracted.zip.json"

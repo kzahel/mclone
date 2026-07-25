@@ -593,7 +593,9 @@ impl WindowGpu {
         log::trace!("World Explorer polled surface frame");
         let frame_time = frame_started.elapsed();
         if let Some(recorder) = self.smoke_recorder.as_mut() {
-            recorder.note_frame(frame_time, smoke_input_applied, stats);
+            recorder
+                .note_frame(frame_time, smoke_input_applied, stats)
+                .map_err(WindowRenderError::Terrain)?;
         }
         let capture_completed = if let Some((color_capture, depth_capture)) = capture {
             let pixels = color_capture

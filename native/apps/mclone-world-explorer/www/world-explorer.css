@@ -1,0 +1,62 @@
+:root {
+  color-scheme: dark;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  background: #101923;
+  color: #edf5f7;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#world-explorer-shell {
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+#world-explorer-shell {
+  position: relative;
+  background: #07111d;
+}
+
+#world-explorer-canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  outline: none;
+  touch-action: none;
+}
+
+#world-explorer-canvas:focus-visible {
+  box-shadow: inset 0 0 0 2px #8be0df;
+}
+
+#world-explorer-status {
+  position: absolute;
+  top: max(0.75rem, env(safe-area-inset-top));
+  left: max(0.75rem, env(safe-area-inset-left));
+  max-width: min(42rem, calc(100% - 1.5rem));
+  padding: 0.55rem 0.7rem;
+  border: 1px solid rgb(218 244 242 / 25%);
+  border-radius: 0.35rem;
+  background: rgb(7 17 29 / 78%);
+  color: #d9eeee;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  pointer-events: none;
+  white-space: pre-wrap;
+  backdrop-filter: blur(0.3rem);
+}
+
+#world-explorer-shell[data-ready="true"] #world-explorer-status {
+  color: #b8d9d4;
+}
+
+#world-explorer-shell[data-failed="true"] #world-explorer-status {
+  color: #ffd2cc;
+  border-color: rgb(255 124 108 / 55%);
+}
