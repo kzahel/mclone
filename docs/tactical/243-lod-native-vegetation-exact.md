@@ -143,17 +143,34 @@ Baseline record:
 
 ### Slice 1: semantic records and bounded planner
 
-- [ ] Add typed source identity, forest intent, family/archetype, ID, record,
+- [x] Add typed source identity, forest intent, family/archetype, ID, record,
   canonical bounds, and lifted occurrence.
-- [ ] Implement independent hash domains and fixed planning cells.
-- [ ] Implement preliminary terrain/density/family/silhouette decisions.
-- [ ] Implement symmetric integer local-priority inhibition.
-- [ ] Prove single/partitioned/reversed queries, negative coordinates,
+- [x] Implement independent hash domains and fixed planning cells.
+- [x] Implement preliminary terrain/density/family/silhouette decisions.
+- [x] Implement symmetric integer local-priority inhibition.
+- [x] Prove single/partitioned/reversed queries, negative coordinates,
   boundaries, and periodic seam identity.
-- [ ] Add an optional bounded canonical-cell cache and prove cold/warm equality.
+- [x] Add an optional bounded canonical-cell cache and prove cold/warm equality.
 
 Gate: sorted semantic occurrences are a pure bounded function of source and
 query bounds.
+
+Execution record:
+
+- `vegetation.rs` owns a typed source, quantized density boundary, 32-block
+  cells, 32 fixed candidate slots, independent hash lanes, canonical IDs,
+  conservative bounds, and explicit lifted occurrences;
+- the conflict halo is derived from the seven-block maximum family spacing,
+  and survival compares only preliminarily eligible candidates through
+  topology-aware integer squared distance;
+- structured candidate samples reuse the production stream-plan cache through
+  the same landform reconstruction helper as exact surface diagnostics;
+- the optional 4,096-cell FIFO cache retains preliminary semantic candidates
+  only and reports request/hit/miss/retained counts;
+- representative seed `12345` regions pin 149 records: 30 broadleaf, 79
+  conifer, and 40 acacia, fingerprint `10101728880902621857`; and
+- all 338 active `mclone-worldgen` tests pass, with one pre-existing ignored
+  gauntlet, and `mclone-worldgen` checks for `wasm32-unknown-unknown`.
 
 ### Slice 2: exact broadleaf milestone
 

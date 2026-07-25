@@ -6,6 +6,7 @@ mod fields;
 mod streams;
 mod surface;
 mod terrain;
+mod vegetation;
 
 pub use biomes::{
     MCLONE_OVERWORLD_ALPINE_MAX_TEMPERATURE, MCLONE_OVERWORLD_ALPINE_MIN_Y,
@@ -71,4 +72,12 @@ pub use terrain::{
     generate_mclone_overworld_surface_chunk_with_stream_cache,
     generate_mclone_overworld_surface_chunk_with_topology,
     generate_mclone_overworld_surface_chunks_with_topology,
+};
+pub use vegetation::{
+    MCLONE_OVERWORLD_VEGETATION_REVISION, MCLONE_VEGETATION_CANDIDATES_PER_CELL,
+    MCLONE_VEGETATION_PLANNING_CELL_BLOCKS, McloneForestIntentSample,
+    McloneOverworldVegetationPlanCache, McloneOverworldVegetationPlanner, McloneTreeArchetype,
+    McloneTreeBounds, McloneTreeFamily, McloneTreeId, McloneTreeOccurrence, McloneTreeRecord,
+    McloneVegetationBounds, McloneVegetationError, McloneVegetationPlanCacheReport,
+    McloneVegetationSource, tree_records_intersecting,
 };

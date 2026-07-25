@@ -436,10 +436,23 @@ pub(super) fn sample_mclone_overworld_landform_with_streams(
     world_x: i32,
     world_z: i32,
 ) -> Result<(McloneOverworldLandformSample, Option<ChunkPos>), String> {
+    let mut cache = McloneOverworldStreamPlanCache::new(seed, topology);
+    sample_mclone_overworld_landform_with_stream_cache(seed, topology, world_x, world_z, &mut cache)
+}
+
+pub(super) fn sample_mclone_overworld_landform_with_stream_cache(
+    seed: i64,
+    topology: McloneOverworldSamplingTopology,
+    world_x: i32,
+    world_z: i32,
+    stream_cache: &mut McloneOverworldStreamPlanCache,
+) -> Result<(McloneOverworldLandformSample, Option<ChunkPos>), String> {
+    if !stream_cache.matches(seed, topology) {
+        return Err("Mclone stream cache seed/topology does not match landform sample".to_owned());
+    }
     let sampler = McloneOverworldSampler::new_with_topology(seed, topology);
     let center = ChunkPos::new(block_to_chunk_coord(world_x), block_to_chunk_coord(world_z));
-    let mut cache = McloneOverworldStreamPlanCache::new(seed, topology);
-    let plans = cache
+    let plans = stream_cache
         .plans_intersecting_chunks(
             ChunkPos::new(center.x - 1, center.z - 1),
             ChunkPos::new(center.x + 1, center.z + 1),

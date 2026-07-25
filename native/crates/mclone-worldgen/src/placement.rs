@@ -3,7 +3,7 @@ use crate::prng::{RandomSource, WorldgenRandom};
 use std::fmt;
 use std::sync::OnceLock;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct BlockPos {
     pub x: i32,
     pub y: i32,
