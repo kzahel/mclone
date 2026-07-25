@@ -22,6 +22,9 @@ interface ExportArgs {
   referenceRoot: string | undefined;
 }
 
+export const LIFECYCLE_CURATED_ROOT_NAME = "lifecycle-curated-root";
+export const LIFECYCLE_PROVISIONAL_ROOT_NAME = "lifecycle-provisional-root";
+
 const args = parseArgs(process.argv.slice(2));
 const pack = await loadTexturePack(args.input);
 const allTextures = renderAllTextures(pack);
@@ -36,6 +39,8 @@ await fs.mkdir(args.outDir, { recursive: true });
 
 if (args.cleanRuntimePack) {
   await fs.rm(path.join(args.outDir, "runtime-pack"), { force: true, recursive: true });
+  await fs.rm(path.join(args.outDir, LIFECYCLE_CURATED_ROOT_NAME), { force: true, recursive: true });
+  await fs.rm(path.join(args.outDir, LIFECYCLE_PROVISIONAL_ROOT_NAME), { force: true, recursive: true });
 }
 
 for (const texture of textures) {
@@ -69,6 +74,10 @@ for (const texture of textures) {
     await fs.writeFile(sheetPath, encodePng(makeReviewSheet(texture, reference ? { reference } : {})));
     console.log(`Wrote ${sheetPath}`);
   }
+}
+
+if (!args.authoringOnly && !args.sheetOnly && args.runtimeCompat && args.textures.length === 0) {
+  await writeLifecycleDistributionRoots(pack, texturesByName, args.outDir);
 }
 
 if (!args.authoringOnly) {
@@ -106,6 +115,56 @@ if (!args.authoringOnly) {
     await fs.writeFile(lodMaterialsPackPath, lodMaterialsJson);
     console.log(`Wrote ${lodMaterialsPackPath}`);
   }
+}
+
+async function writeLifecycleDistributionRoots(
+  pack: Awaited<ReturnType<typeof loadTexturePack>>,
+  texturesByName: Map<string, RenderedTexture>,
+  outputRoot: string,
+): Promise<void> {
+  const claimedMaterials = new Map<string, string>();
+  for (const [textureName, binding] of Object.entries(pack.textureLifecycle ?? {})) {
+    const texture = texturesByName.get(textureName);
+    if (!texture) {
+      throw new Error(`Lifecycle texture '${textureName}' was not rendered`);
+    }
+    const rootName =
+      binding.state === "curated"
+        ? LIFECYCLE_CURATED_ROOT_NAME
+        : LIFECYCLE_PROVISIONAL_ROOT_NAME;
+    for (const material of binding.runtimeMaterials) {
+      const existing = claimedMaterials.get(material);
+      if (existing) {
+        throw new Error(
+          `Canonical runtime material '${material}' is claimed by both '${existing}' and '${textureName}'`,
+        );
+      }
+      claimedMaterials.set(material, textureName);
+      const outputPath = path.join(outputRoot, rootName, runtimeMaterialAssetPath(material));
+      await fs.mkdir(path.dirname(outputPath), { recursive: true });
+      await fs.writeFile(outputPath, encodePng(texture));
+      console.log(`Wrote ${outputPath}`);
+    }
+  }
+  await fs.mkdir(path.join(outputRoot, LIFECYCLE_CURATED_ROOT_NAME), { recursive: true });
+  await fs.mkdir(path.join(outputRoot, LIFECYCLE_PROVISIONAL_ROOT_NAME), { recursive: true });
+}
+
+function runtimeMaterialAssetPath(material: string): string {
+  const separator = material.indexOf(":");
+  if (separator <= 0 || separator === material.length - 1) {
+    throw new Error(`Invalid canonical runtime material '${material}'`);
+  }
+  const namespace = material.slice(0, separator);
+  const resourcePath = material.slice(separator + 1);
+  if (
+    !/^[a-z0-9_.-]+$/.test(namespace) ||
+    !/^[a-z0-9_./-]+$/.test(resourcePath) ||
+    resourcePath.split("/").includes("..")
+  ) {
+    throw new Error(`Invalid canonical runtime material '${material}'`);
+  }
+  return path.posix.join("assets", namespace, "textures", `${resourcePath}.png`);
 }
 
 function parseArgs(argv: string[]): ExportArgs {

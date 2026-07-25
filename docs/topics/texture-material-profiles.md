@@ -68,6 +68,22 @@ non-filename relationship `grass_block_top` ->
 excluded from the active lifecycle. Browser promotion tests operate on an
 isolated copy of the source pack and all ten headed Chrome tests pass.
 
+Implementation update (2026-07-25): first-party pack construction now consumes
+only lifecycle distribution roots. A full Texture Lab runtime-compatible
+export writes accepted canonical ids into
+`lifecycle-curated-root` or `lifecycle-provisional-root`; the broad authoring
+and historical LOD export remains a review artifact and no longer enters the
+authored pack.
+
+The resulting authored archive has 46 payload files: the two actually curated
+canonical textures (`grass_block` and `stone`) plus 44 repository-owned
+non-texture assets. It contains no Minecraft block PNG and no static custom
+Far LOD palette. The provisional archive still covers all canonical materials
+with deterministic generated art and overlays any lifecycle-provisional
+textures. The three-pack build, six deterministic pack tests, and strict
+first-party preparation pass; preparation reports the two accepted materials
+as first-party and the other 143 requested texture assets as provisional.
+
 ## Scope
 
 This topic owns the meaning, selection, and authoring lifecycle of block

@@ -50,6 +50,12 @@ class FirstPartyPackTests(unittest.TestCase):
             reference_sentinel.write_bytes(b"MINECRAFT_REFERENCE_SENTINEL")
             inventory = root / "inventory.json"
             inventory.write_text(json.dumps(self.fixture_inventory()), encoding="utf-8")
+            provisional_root = root / "lifecycle-provisional-root"
+            provisional_texture = (
+                provisional_root / "assets/mclone/textures/block/stone.png"
+            )
+            provisional_texture.parent.mkdir(parents=True)
+            provisional_texture.write_bytes(b"lifecycle-provisional-png")
 
             outputs = []
             for run in ("one", "two"):
@@ -61,6 +67,7 @@ class FirstPartyPackTests(unittest.TestCase):
                     inventory,
                     repo_assets,
                     staging,
+                    provisional_root,
                     first_party_pack.FONT_PATH,
                     output,
                     sidecar,
@@ -85,10 +92,10 @@ class FirstPartyPackTests(unittest.TestCase):
                 self.assertIn("assets/mclone/provisional/registry.v1.json", names)
                 self.assertNotIn("assets/mclone/missing/registry.v1.json", names)
                 self.assertTrue(
-                    archive.read("assets/mclone/textures/block/stone.png").startswith(
-                        b"\x89PNG\r\n\x1a\n"
-                    )
+                    archive.read("assets/mclone/textures/block/stone.png")
+                    == b"lifecycle-provisional-png"
                 )
+                self.assertEqual(manifest["coverage"]["lifecycle_override_count"], 1)
                 self.assertFalse(any("reference/" in name for name in names))
 
     def test_diagnostic_pack_owns_numbered_missing_registry(self) -> None:
@@ -121,15 +128,8 @@ class FirstPartyPackTests(unittest.TestCase):
     def test_authored_pack_is_deterministic_and_uses_only_first_party_roots(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
-            runtime_root = root / "runtime-pack"
-            runtime_texture = runtime_root / "assets/minecraft/textures/block/stone.png"
-            runtime_texture.parent.mkdir(parents=True)
-            runtime_texture.write_bytes(b"original-authored-png")
-            lod = runtime_root / "assets/mclone/lod/materials.v1.json"
-            lod.parent.mkdir(parents=True)
-            lod.write_text('{"schema_version":1}\n', encoding="utf-8")
-            authored_root = root / "authored-pack"
-            authored_texture = authored_root / "assets/mclone/textures/block/stone.png"
+            curated_root = root / "lifecycle-curated-root"
+            authored_texture = curated_root / "assets/mclone/textures/block/stone.png"
             authored_texture.parent.mkdir(parents=True)
             authored_texture.write_bytes(b"canonical-original-authored-png")
             repo_assets = root / "repo/assets"
@@ -143,7 +143,7 @@ class FirstPartyPackTests(unittest.TestCase):
                 output = root / run / "mclone-authored.pbp"
                 sidecar = Path(f"{output}.json")
                 manifest = first_party_pack.build_authored_pack(
-                    runtime_root, authored_root, repo_assets, output, sidecar
+                    curated_root, repo_assets, output, sidecar
                 )
                 packs.append((output, sidecar, manifest))
 
@@ -153,13 +153,14 @@ class FirstPartyPackTests(unittest.TestCase):
             self.assertNotIn(sentinel.read_bytes(), packs[0][0].read_bytes())
             with zipfile.ZipFile(packs[0][0]) as archive:
                 self.assertEqual(
-                    archive.read("assets/minecraft/textures/block/stone.png"),
-                    b"original-authored-png",
-                )
-                self.assertEqual(
                     archive.read("assets/mclone/textures/block/stone.png"),
                     b"canonical-original-authored-png",
                 )
+                self.assertNotIn(
+                    "assets/minecraft/textures/block/stone.png",
+                    archive.namelist(),
+                )
+                self.assertNotIn("assets/mclone/lod/materials.v1.json", archive.namelist())
                 self.assertFalse(any("reference/" in name for name in archive.namelist()))
 
     def test_stage_consumes_the_three_canonical_pack_outputs(self) -> None:
@@ -167,12 +168,8 @@ class FirstPartyPackTests(unittest.TestCase):
             root = Path(temporary)
             repo_assets = root / "repo/assets"
             self.write_fixture_figure(repo_assets)
-            runtime_root = root / "runtime-pack"
-            texture = runtime_root / "assets/minecraft/textures/block/stone.png"
-            texture.parent.mkdir(parents=True)
-            texture.write_bytes(b"authored")
-            authored_root = root / "authored-pack"
-            canonical_texture = authored_root / "assets/mclone/textures/block/stone.png"
+            curated_root = root / "lifecycle-curated-root"
+            canonical_texture = curated_root / "assets/mclone/textures/block/stone.png"
             canonical_texture.parent.mkdir(parents=True)
             canonical_texture.write_bytes(b"canonical-authored")
             inventory = root / "inventory.json"
@@ -181,8 +178,7 @@ class FirstPartyPackTests(unittest.TestCase):
             fallback = root / "mclone-generated-fallback.pbp"
             diagnostic = root / "mclone-diagnostic-missing.pbp"
             first_party_pack.build_authored_pack(
-                runtime_root,
-                authored_root,
+                curated_root,
                 repo_assets,
                 authored,
                 Path(f"{authored}.json"),
@@ -191,6 +187,7 @@ class FirstPartyPackTests(unittest.TestCase):
                 inventory,
                 repo_assets,
                 root / "generated-fallback-root",
+                self.empty_directory(root / "lifecycle-provisional-root"),
                 first_party_pack.FONT_PATH,
                 fallback,
                 Path(f"{fallback}.json"),
@@ -233,6 +230,11 @@ class FirstPartyPackTests(unittest.TestCase):
         figure = repo_assets / "mclone/figures/player.figure.json"
         figure.parent.mkdir(parents=True)
         figure.write_text('{"name":"fixture"}\n', encoding="utf-8")
+
+    @staticmethod
+    def empty_directory(directory: Path) -> Path:
+        directory.mkdir(parents=True, exist_ok=True)
+        return directory
 
     @staticmethod
     def fixture_inventory() -> dict[str, object]:

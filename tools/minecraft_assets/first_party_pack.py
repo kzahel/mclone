@@ -25,8 +25,8 @@ OUTPUT_ROOT_ENV = "MCLONE_TEXTURE_LAB_OUTPUT_ROOT"
 DEFAULT_OUTPUT_ROOT = Path(
     os.environ.get(OUTPUT_ROOT_ENV, REPO_ROOT / "generated-assets/texture-lab")
 ).expanduser()
-DEFAULT_RUNTIME_ROOT = DEFAULT_OUTPUT_ROOT / "runtime-pack"
-DEFAULT_AUTHORED_ROOT = DEFAULT_OUTPUT_ROOT / "pack"
+DEFAULT_CURATED_ROOT = DEFAULT_OUTPUT_ROOT / "lifecycle-curated-root"
+DEFAULT_PROVISIONAL_ROOT = DEFAULT_OUTPUT_ROOT / "lifecycle-provisional-root"
 DEFAULT_INVENTORY = DEFAULT_OUTPUT_ROOT / "first-party-inventory.v1.json"
 DEFAULT_AUTHORED_OUTPUT = DEFAULT_OUTPUT_ROOT / "mclone-authored.pbp"
 DEFAULT_FALLBACK_OUTPUT = DEFAULT_OUTPUT_ROOT / "mclone-generated-fallback.pbp"
@@ -361,6 +361,7 @@ def prepare_generated_fallback(
     inventory: dict[str, Any],
     repo_assets_root: Path,
     staging_root: Path,
+    provisional_root: Path,
     _font_path: Path,
 ) -> dict[str, Any]:
     """Build the coherent provisional source kept at the legacy pack id."""
@@ -390,6 +391,13 @@ def prepare_generated_fallback(
         destination.write_bytes(provisional_png(resource_id, *dimensions))
         registry_entries.append({"path": path, "resource_id": resource_id})
 
+    lifecycle_override_count = copy_lifecycle_texture_overlay(
+        provisional_root,
+        staging_root,
+        {material_asset_path(material) for material in materials},
+        "provisional",
+    )
+
     write_json(
         staging_root / "assets/mclone/provisional/registry.v1.json",
         {
@@ -413,6 +421,7 @@ def prepare_generated_fallback(
             "suppressed_audio_count": len(suppressed_audio),
             "minecraft_payload_count": 0,
             "unknown_payload_count": 0,
+            "lifecycle_override_count": lifecycle_override_count,
         },
     )
     return {
@@ -420,6 +429,7 @@ def prepare_generated_fallback(
         "block_state_count": len(inventory["block_visuals"]),
         "generated_png_count": len(materials) + len(required_pngs),
         "provisional_entry_count": len(registry_entries),
+        "lifecycle_override_count": lifecycle_override_count,
     }
 
 
@@ -510,6 +520,29 @@ def entries_for_root(root: Path, path_prefix: str = "") -> list[asset_pack.PackE
     ]
 
 
+def copy_lifecycle_texture_overlay(
+    source_root: Path,
+    staging_root: Path,
+    allowed_paths: set[str],
+    label: str,
+) -> int:
+    if not source_root.is_dir():
+        raise SystemExit(f"Required {label} lifecycle root is missing: {source_root}")
+    relative_paths = asset_pack.collect_files(source_root)
+    unexpected = sorted(set(relative_paths) - allowed_paths)
+    if unexpected:
+        raise SystemExit(
+            f"{label.capitalize()} lifecycle root contains non-canonical assets: "
+            + ", ".join(unexpected)
+        )
+    for relative in relative_paths:
+        source = source_root / relative
+        destination = staging_root / relative
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(source, destination)
+    return len(relative_paths)
+
+
 def first_party_manifest(
     pack_id: str,
     display_name: str,
@@ -574,14 +607,12 @@ def write_and_verify_pack(
 
 
 def build_authored_pack(
-    runtime_root: Path,
-    authored_root: Path,
+    curated_root: Path,
     repo_assets_root: Path,
     output: Path,
     sidecar: Path,
 ) -> dict[str, Any]:
-    entries = entries_for_root(runtime_root)
-    entries.extend(entries_for_root(authored_root))
+    entries = entries_for_root(curated_root)
     entries.extend(entries_for_root(repo_assets_root, "assets"))
     asset_pack.assert_unique_entries(entries)
     manifest = first_party_manifest(
@@ -590,7 +621,7 @@ def build_authored_pack(
         "first_party",
         ["authored_override", "render_content", "metadata"],
         entries,
-        ["texture_lab_authored", "texture_lab_runtime_compat", "repo_first_party_assets"],
+        ["texture_lab_curated_lifecycle", "repo_first_party_assets"],
     )
     return write_and_verify_pack(output, sidecar, manifest, entries)
 
@@ -599,12 +630,19 @@ def build_generated_fallback_pack(
     inventory_path: Path,
     repo_assets_root: Path,
     staging_root: Path,
+    provisional_root: Path,
     font_path: Path,
     output: Path,
     sidecar: Path,
 ) -> dict[str, Any]:
     inventory = load_inventory(inventory_path)
-    coverage = prepare_generated_fallback(inventory, repo_assets_root, staging_root, font_path)
+    coverage = prepare_generated_fallback(
+        inventory,
+        repo_assets_root,
+        staging_root,
+        provisional_root,
+        font_path,
+    )
     entries = entries_for_root(staging_root)
     manifest = first_party_manifest(
         FALLBACK_PACK_ID,
@@ -612,7 +650,12 @@ def build_generated_fallback_pack(
         "first_party_provisional",
         ["provisional_base", "render_content", "audio_content", "metadata"],
         entries,
-        ["canonical_first_party_inventory", "first_party_procedural_recipes", "repo_first_party_metadata"],
+        [
+            "canonical_first_party_inventory",
+            "first_party_procedural_recipes",
+            "texture_lab_provisional_lifecycle",
+            "repo_first_party_metadata",
+        ],
         {"coverage": coverage},
     )
     return write_and_verify_pack(output, sidecar, manifest, entries)
@@ -717,8 +760,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     commands = parser.add_subparsers(dest="command", required=True)
 
     authored = commands.add_parser("authored", help="Build mclone-authored.pbp")
-    authored.add_argument("--runtime-root", default=str(DEFAULT_RUNTIME_ROOT))
-    authored.add_argument("--authored-root", default=str(DEFAULT_AUTHORED_ROOT))
+    authored.add_argument("--curated-root", default=str(DEFAULT_CURATED_ROOT))
     authored.add_argument("--repo-assets-root", default=str(REPO_ROOT / "assets"))
     authored.add_argument("--output", default=str(DEFAULT_AUTHORED_OUTPUT))
     authored.add_argument("--manifest-output")
@@ -729,6 +771,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     fallback.add_argument("--inventory", default=str(DEFAULT_INVENTORY))
     fallback.add_argument("--repo-assets-root", default=str(REPO_ROOT / "assets"))
     fallback.add_argument("--staging-root", default=str(DEFAULT_FALLBACK_ROOT))
+    fallback.add_argument("--provisional-root", default=str(DEFAULT_PROVISIONAL_ROOT))
     fallback.add_argument("--font", default=str(FONT_PATH))
     fallback.add_argument("--output", default=str(DEFAULT_FALLBACK_OUTPUT))
     fallback.add_argument("--manifest-output")
@@ -777,8 +820,7 @@ def main(argv: list[str] | None = None) -> int:
     output, sidecar = output_and_sidecar(args.output, args.manifest_output)
     if args.command == "authored":
         manifest = build_authored_pack(
-            Path(args.runtime_root).expanduser(),
-            Path(args.authored_root).expanduser(),
+            Path(args.curated_root).expanduser(),
             Path(args.repo_assets_root).expanduser(),
             output,
             sidecar,
@@ -793,6 +835,7 @@ def main(argv: list[str] | None = None) -> int:
             inventory_path,
             Path(args.repo_assets_root).expanduser(),
             Path(args.staging_root).expanduser(),
+            Path(args.provisional_root).expanduser(),
             Path(args.font).expanduser(),
             output,
             sidecar,
