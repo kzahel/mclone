@@ -22,6 +22,7 @@ struct TreeInstance {
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec3<f32>,
+    @location(1) world_xz: vec2<f32>,
 };
 
 fn cube_corner(vertex: u32) -> vec3<f32> {
@@ -165,10 +166,19 @@ fn vertex_main(
     out.position = vec4<f32>(clip_x, clip_y, clip_z, 1.0);
     let height_shade = clamp(0.78 + corner.y * 0.08, 0.62, 0.92);
     out.color = family_color(family, trunk) * height_shade;
+    out.world_xz = world.xz;
     return out;
 }
 
 @fragment
 fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    if params.clipmap_inner_bounds.z > params.clipmap_inner_bounds.x
+        && params.clipmap_inner_bounds.w > params.clipmap_inner_bounds.y
+        && input.world_xz.x >= f32(params.clipmap_inner_bounds.x)
+        && input.world_xz.x < f32(params.clipmap_inner_bounds.z)
+        && input.world_xz.y >= f32(params.clipmap_inner_bounds.y)
+        && input.world_xz.y < f32(params.clipmap_inner_bounds.w) {
+        discard;
+    }
     return vec4<f32>(input.color, 1.0);
 }

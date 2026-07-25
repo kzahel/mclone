@@ -38,6 +38,7 @@ pub struct TerrainPreviewMaterialAtlas<'a> {
 pub const TERRAIN_VIEWPORT_MAX_RESIDENT_TILES: usize = 192;
 pub const TERRAIN_VIEWPORT_TILE_COMPILES_PER_FRAME: usize = 4;
 pub const TERRAIN_VIEWPORT_GPU_DISPATCHES_PER_FRAME: usize = 16;
+pub const TERRAIN_HORIZON_VEGETATION_COMPILES_PER_FRAME: usize = 1;
 pub const TERRAIN_VIEWPORT_CPU_COMPILE_BUDGET_MICROS: u64 = 8_000;
 const TERRAIN_PREVIEW_TREE_INSTANCE_FLOATS: usize = 12;
 const TERRAIN_PREVIEW_TREE_INSTANCE_BYTES: u64 =
@@ -139,6 +140,12 @@ pub struct TerrainHorizonFrameStats {
     pub drawn_levels: u32,
     pub drawn_tiles: u32,
     pub vertex_count: u32,
+    pub vegetation_ready_tiles: u32,
+    pub pending_vegetation_tiles: u32,
+    pub tree_instance_count: u32,
+    pub tree_proxy_vertex_count: u32,
+    pub fixed_resident_bytes: u64,
+    pub vegetation_bytes: u64,
     pub resident_bytes: u64,
     pub finest_sample_spacing: u32,
     pub coarse_ready: bool,
@@ -378,7 +385,7 @@ struct TerrainViewportGpuTile {
     gpu_submitted: bool,
     uniform_buffer: wgpu::Buffer,
     gpu_sample_buffer: wgpu::Buffer,
-    reference_sample_buffer: wgpu::Buffer,
+    reference_sample_buffer: Option<wgpu::Buffer>,
     compute_bind_group: wgpu::BindGroup,
     render_bind_group: wgpu::BindGroup,
     tree_instance_buffer: Option<wgpu::Buffer>,
@@ -395,6 +402,41 @@ impl TerrainViewportGpuTile {
         sample_byte_len: u64,
         tile_id: TerrainViewportTileId,
     ) -> Result<Self, String> {
+        Self::new_with_reference_buffer(
+            device,
+            compute_layout,
+            render_layout,
+            sample_byte_len,
+            tile_id,
+            true,
+        )
+    }
+
+    fn new_gpu_only(
+        device: &wgpu::Device,
+        compute_layout: &wgpu::BindGroupLayout,
+        render_layout: &wgpu::BindGroupLayout,
+        sample_byte_len: u64,
+        tile_id: TerrainViewportTileId,
+    ) -> Result<Self, String> {
+        Self::new_with_reference_buffer(
+            device,
+            compute_layout,
+            render_layout,
+            sample_byte_len,
+            tile_id,
+            false,
+        )
+    }
+
+    fn new_with_reference_buffer(
+        device: &wgpu::Device,
+        compute_layout: &wgpu::BindGroupLayout,
+        render_layout: &wgpu::BindGroupLayout,
+        sample_byte_len: u64,
+        tile_id: TerrainViewportTileId,
+        allocate_reference_buffer: bool,
+    ) -> Result<Self, String> {
         let request = tile_id.preview_request().validate()?;
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("mclone_terrain_viewport_tile_uniforms"),
@@ -410,11 +452,13 @@ impl TerrainViewportGpuTile {
                 | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
-        let reference_sample_buffer = device.create_buffer(&wgpu::BufferDescriptor {
-            label: Some("mclone_terrain_viewport_reference_samples"),
-            size: sample_byte_len,
-            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
-            mapped_at_creation: false,
+        let reference_sample_buffer = allocate_reference_buffer.then(|| {
+            device.create_buffer(&wgpu::BufferDescriptor {
+                label: Some("mclone_terrain_viewport_reference_samples"),
+                size: sample_byte_len,
+                usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+                mapped_at_creation: false,
+            })
         });
         let compute_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("mclone_terrain_viewport_compute_bind_group"),
@@ -444,7 +488,10 @@ impl TerrainViewportGpuTile {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: reference_sample_buffer.as_entire_binding(),
+                    resource: reference_sample_buffer
+                        .as_ref()
+                        .unwrap_or(&gpu_sample_buffer)
+                        .as_entire_binding(),
                 },
             ],
         });
@@ -482,7 +529,22 @@ impl TerrainViewportGpuTile {
                 sample_byte_len
             ));
         }
-        queue.write_buffer(&self.reference_sample_buffer, 0, &reference_bytes);
+        let reference_sample_buffer = self
+            .reference_sample_buffer
+            .as_ref()
+            .ok_or("terrain viewport reference upload requires a reference buffer")?;
+        queue.write_buffer(reference_sample_buffer, 0, &reference_bytes);
+        self.upload_vegetation(device, queue, vegetation)?;
+        self.reference = Some(reference);
+        Ok(())
+    }
+
+    fn upload_vegetation(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        vegetation: TerrainPreviewVegetationProduct,
+    ) -> Result<(), String> {
         let (tree_bytes, tree_instance_count) = tree_instance_bytes(&vegetation)?;
         self.tree_instance_buffer = if tree_bytes.is_empty() {
             None
@@ -498,9 +560,15 @@ impl TerrainViewportGpuTile {
         };
         self.tree_instance_count = tree_instance_count;
         self.tree_instance_bytes = tree_bytes.len() as u64;
-        self.reference = Some(reference);
         self.vegetation = Some(vegetation);
         Ok(())
+    }
+
+    fn clear_vegetation(&mut self) {
+        self.vegetation = None;
+        self.tree_instance_buffer = None;
+        self.tree_instance_count = 0;
+        self.tree_instance_bytes = 0;
     }
 
     fn upload_macro(
@@ -2040,6 +2108,8 @@ pub struct TerrainHorizonRenderer {
     assignments: Vec<Option<TerrainClipmapTile>>,
     ready: Vec<bool>,
     pending: VecDeque<TerrainClipmapTile>,
+    pending_vegetation: VecDeque<TerrainClipmapTile>,
+    vegetation_cache: Option<McloneOverworldVegetationPlanCache>,
     seed: i64,
     center_x: i32,
     center_z: i32,
@@ -2073,7 +2143,7 @@ impl TerrainHorizonRenderer {
         for level in 0..config.level_count {
             for physical_z in 0..config.tiles_per_axis {
                 for physical_x in 0..config.tiles_per_axis {
-                    slots.push(TerrainViewportGpuTile::new(
+                    slots.push(TerrainViewportGpuTile::new_gpu_only(
                         device,
                         &renderer.compute_layout,
                         &renderer.render_layout,
@@ -2098,6 +2168,8 @@ impl TerrainHorizonRenderer {
             assignments: vec![None; slot_count],
             ready: vec![false; slot_count],
             pending: VecDeque::with_capacity(slot_count),
+            pending_vegetation: VecDeque::with_capacity(config.slots_per_level() as usize),
+            vegetation_cache: None,
             seed: 0,
             center_x: 0,
             center_z: 0,
@@ -2133,6 +2205,8 @@ impl TerrainHorizonRenderer {
             self.assignments.fill(None);
             self.ready.fill(false);
             self.pending.clear();
+            self.pending_vegetation.clear();
+            self.vegetation_cache = None;
         }
         self.seed = seed;
         self.center_x = center_x;
@@ -2146,8 +2220,16 @@ impl TerrainHorizonRenderer {
             let slot = tile.physical_slot as usize;
             self.assignments[slot] = Some(*tile);
             self.ready[slot] = false;
+            self.slots[slot].clear_vegetation();
         }
         self.pending.retain(|tile| {
+            self.assignments
+                .get(tile.physical_slot as usize)
+                .copied()
+                .flatten()
+                == Some(*tile)
+        });
+        self.pending_vegetation.retain(|tile| {
             self.assignments
                 .get(tile.physical_slot as usize)
                 .copied()
@@ -2251,12 +2333,46 @@ impl TerrainHorizonRenderer {
             }
             slot.gpu_submitted = true;
             self.ready[slot_index] = true;
+            if tile.sample_spacing <= TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING
+                && !self.pending_vegetation.contains(&tile)
+            {
+                self.pending_vegetation.push_back(tile);
+            }
             dispatched_refills = dispatched_refills.saturating_add(1);
         }
         self.clipmap.note_refills_completed(dispatched_refills);
         self.dispatched_refills_total = self
             .dispatched_refills_total
             .saturating_add(u64::from(dispatched_refills));
+
+        for _ in 0..TERRAIN_HORIZON_VEGETATION_COMPILES_PER_FRAME {
+            let Some(tile) = self.pending_vegetation.pop_front() else {
+                break;
+            };
+            let slot_index = tile.physical_slot as usize;
+            if self.assignments[slot_index] != Some(tile) || !self.ready[slot_index] {
+                continue;
+            }
+            let tile_id = TerrainViewportTileId {
+                profile: TerrainPreviewProfile::McloneOverworldV1,
+                seed: self.seed,
+                tile_x: tile.tile_x,
+                tile_z: tile.tile_z,
+                sample_spacing: tile.sample_spacing,
+                content_stage: self.content_stage,
+            };
+            let cache = self.vegetation_cache.get_or_insert_with(|| {
+                McloneOverworldVegetationPlanCache::new(McloneVegetationSource::new(
+                    self.seed,
+                    McloneOverworldSamplingTopology::Unbounded,
+                ))
+            });
+            let vegetation = TerrainPreviewVegetationProduct::compile_with_cache(
+                tile_id.preview_request(),
+                cache,
+            )?;
+            self.slots[slot_index].upload_vegetation(device, queue, vegetation)?;
+        }
 
         let levels = self.clipmap.levels();
         let mut level_ready = vec![false; levels.len()];
@@ -2344,19 +2460,57 @@ impl TerrainHorizonRenderer {
                     drawn_tiles = drawn_tiles.saturating_add(1);
                 }
             }
+            pass.set_pipeline(&self.renderer.tree_pipeline);
+            for level in &levels {
+                if !level_ready[level.level as usize]
+                    || level.sample_spacing > TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING
+                {
+                    continue;
+                }
+                for tile in &level.tiles {
+                    let slot = &self.slots[tile.physical_slot as usize];
+                    let Some(instance_buffer) = slot.tree_instance_buffer.as_ref() else {
+                        continue;
+                    };
+                    pass.set_bind_group(0, &slot.render_bind_group, &[]);
+                    pass.set_vertex_buffer(0, instance_buffer.slice(..));
+                    pass.draw(
+                        0..TERRAIN_PREVIEW_TREE_VERTICES_PER_INSTANCE,
+                        0..slot.tree_instance_count,
+                    );
+                }
+            }
         }
 
         let ready_slots = self.ready.iter().filter(|ready| **ready).count() as u32;
         let allocation_slots = self.clipmap.config().allocation_slots();
-        let vertex_count =
-            drawn_tiles.saturating_mul(TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS.pow(2) * 6);
-        let resident_bytes = u64::from(allocation_slots).saturating_mul(
+        let tree_instance_count = self.slots.iter().fold(0_u32, |count, slot| {
+            count.saturating_add(slot.tree_instance_count)
+        });
+        let tree_proxy_vertex_count =
+            tree_instance_count.saturating_mul(TERRAIN_PREVIEW_TREE_VERTICES_PER_INSTANCE);
+        let vertex_count = drawn_tiles
+            .saturating_mul(TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS.pow(2) * 6)
+            .saturating_add(tree_proxy_vertex_count);
+        let fixed_resident_bytes = u64::from(allocation_slots).saturating_mul(
             self.renderer
                 .sample_byte_len
-                .saturating_mul(2)
                 .saturating_add(TERRAIN_PREVIEW_UNIFORM_BYTES),
         );
-        let target_ready = ready_slots == allocation_slots && self.pending.is_empty();
+        let vegetation_bytes = self
+            .slots
+            .iter()
+            .map(|slot| slot.tree_instance_bytes)
+            .sum::<u64>();
+        let resident_bytes = fixed_resident_bytes.saturating_add(vegetation_bytes);
+        let vegetation_ready_tiles = self
+            .slots
+            .iter()
+            .filter(|slot| slot.vegetation.is_some())
+            .count() as u32;
+        let target_ready = ready_slots == allocation_slots
+            && self.pending.is_empty()
+            && self.pending_vegetation.is_empty();
         Ok(TerrainHorizonFrameStats {
             revision: self.clipmap.diagnostics().revision,
             allocation_slots,
@@ -2367,6 +2521,12 @@ impl TerrainHorizonRenderer {
             drawn_levels,
             drawn_tiles,
             vertex_count,
+            vegetation_ready_tiles,
+            pending_vegetation_tiles: self.pending_vegetation.len() as u32,
+            tree_instance_count,
+            tree_proxy_vertex_count,
+            fixed_resident_bytes,
+            vegetation_bytes,
             resident_bytes,
             finest_sample_spacing: self.clipmap.config().base_sample_spacing,
             coarse_ready: drawn_levels > 0,
