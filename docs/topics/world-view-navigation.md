@@ -2,15 +2,16 @@
 
 Topic: `world-view-navigation`
 
-Status: native foundation implemented and validated on 2026-07-25 by Tactical
+Status: cross-platform Explorer foundation completed and deployed on
+2026-07-25 by Tacticals
 [`247`](../tactical/247-standalone-world-explorer-foundation.md); Terrain Lab
 navigation migration and browser-runtime modernization completed and deployed
 on 2026-07-25 by Tactical
 [`248`](../tactical/248-terrain-lab-navigation-and-worker-modernization.md).
 Tactical
-[`249`](../tactical/249-cross-platform-procedural-horizon-proof.md) is now
-extending the lightweight Explorer across native and browser hosts while
-implementing the first shared toroidal horizon. The Explorer is a product
+[`249`](../tactical/249-cross-platform-procedural-horizon-proof.md) extended
+the lightweight Explorer across native and browser hosts with the first
+shared toroidal horizon. The Explorer is a product
 profile, not a native-only application: its Rust runtime must work through the
 same platform boundary that can also host the full browser game.
 `mclone-view-control` now owns shared map/orbit/contact semantics for both the
@@ -665,8 +666,8 @@ Tactical
 shared view math, native adapter, and first native Explorer shell as one
 bounded proof. Tactical 248 subsequently completed the browser input and
 Worker-ownership migration using Terrain Lab's existing product surface.
-Tactical 249 now owns the first cross-platform Explorer and toroidal-horizon
-proof.
+Tactical 249 completed the first cross-platform Explorer and
+toroidal-horizon proof.
 
 1. **Browser input ownership audit — complete.** Keep the main game shell and
    standalone DOM hosts separate; share view semantics and canonical
@@ -682,7 +683,7 @@ proof.
    separate-pane rendering, URLs, diagnostics, cache behavior, and pixels at
    each checkpoint.
 4. **Prove the shared toroidal horizon in the cross-platform Explorer —
-   active.** Treat product scope and platform hosting as independent axes.
+   complete.** Treat product scope and platform hosting as independent axes.
    Drive one shared Rust horizon through the lightweight native and web
    Explorer without creating an Explorer-specific browser ABI. Keep Terrain
    Lab unchanged.
@@ -691,7 +692,8 @@ proof.
    lifecycle. Do not promote Terrain Lab's TypeScript scheduler or duplicate
    the game's cache and Worker framework. Preserve the Lab's working canonical
    view while proving the narrower boundary.
-6. **Build the minimal Web Explorer smoke.** Keep JavaScript or TypeScript
+6. **Build the minimal Web Explorer smoke — complete and deployed.** Keep
+   JavaScript or TypeScript
    limited to canvas, rAF, lifecycle, URL, raw-observation forwarding, and
    mechanical browser dispositions. Add a deployment smoke and measure the
    independent Wasm/asset payload. A procedural-only result remains a smoke,

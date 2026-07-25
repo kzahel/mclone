@@ -26,13 +26,22 @@ dependency-free `mclone-view-control` crate owns its map/orbit/gesture
 semantics and `mclone-terrain-view` owns rendering. Its dependency firewall
 excludes the game runtime and browser stack.
 Tactical
-[`249`](../tactical/249-cross-platform-procedural-horizon-proof.md) now
-extends that proof across native and browser without equating platform with
+[`249`](../tactical/249-cross-platform-procedural-horizon-proof.md) extended
+that proof across native and browser without equating platform with
 product size. A lightweight Explorer and the full game may both use the
 browser host contract; desktop, Android, and XR may likewise host different
 product runtimes. The Explorer stays small through its Rust dependency
 closure, not through an Explorer-specific or semantically reduced JavaScript
 ABI.
+
+The completed Explorer proof adds a useful second browser consumer. One
+shared Rust session owns navigation, contact gestures, clipmap planning,
+rendering, and diagnostics. Native supplies `winit`, filesystem packs, elapsed
+time, and its surface; browser supplies a canvas/WebGPU surface, fetched
+bytes, rAF, resize/visibility facts, and raw observations. Its 6,008-byte
+hand-authored JavaScript shell contains no terrain, LOD, refill, or camera
+gesture policy. The small artifact is selected by its Rust dependency closure,
+not by weakening the browser platform boundary used by the full game.
 
 Initial destination, repeated host lifecycle, and menu-idle semantics are owned
 by the focused

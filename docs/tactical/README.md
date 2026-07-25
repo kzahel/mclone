@@ -53,11 +53,11 @@ parity-preserving Terrain Lab modernization: shared Rust navigation, opaque
 Worker transport, Rust coordination, external `SharedArrayBuffer` mailboxes,
 deletion of superseded browser policy, and local/hosted desktop/phone proof.
 Tactical
-[`249`](249-cross-platform-procedural-horizon-proof.md) is now implementing
+[`249`](249-cross-platform-procedural-horizon-proof.md) completed and deployed
 the first shared toroidal procedural horizon through a lightweight Explorer
 on both native desktop and the browser. It treats product scope and platform
 hosting as independent axes, leaves Terrain Lab unchanged, and defers exact
-replacement until the moving LOD system passes on both targets.
+replacement to the next bounded composition proof.
 Historical render-worker architecture remains in
 [`067-shared-render-worker-architecture.md`](067-shared-render-worker-architecture.md),
 with the parent thread/Web-Worker topology in
@@ -316,4 +316,4 @@ with the parent thread/Web-Worker topology in
 | [`246-vanilla-fast-macro-terrain-preview.md`](246-vanilla-fast-macro-terrain-preview.md) | complete 2026-07-25 | Optimized sampled-exact density columns, added the measured nine-node fast macro sampler, and exposed independent fast/exact Terrain Lab panes with headed desktop/phone evidence. |
 | [`247-standalone-world-explorer-foundation.md`](247-standalone-world-explorer-foundation.md) | completed 2026-07-25, including native-window/offscreen pixel and direct-depth proof | Added a deliberately small native World Explorer, platform-neutral Rust view-control reducer, native capture, and dependency/artifact proof; deferred the browser shell and Terrain Lab migration until an input-boundary audit. |
 | [`248-terrain-lab-navigation-and-worker-modernization.md`](248-terrain-lab-navigation-and-worker-modernization.md) | completed 2026-07-25, including local and hosted desktop/phone headed-WebGPU validation | Preserved Terrain Lab UI/UX while adopting shared Rust navigation, an opaque browser Worker transport, Rust actor/coordinator ownership, external SAB mesh mailboxes, one authoritative cache per layer, and deletion of superseded TypeScript/raw paths. |
-| [`249-cross-platform-procedural-horizon-proof.md`](249-cross-platform-procedural-horizon-proof.md) | active | Implement the shared fixed-budget toroidal horizon and prove the same Rust system through lightweight native and browser Explorer adapters without changing Terrain Lab or coupling product scope to platform. |
+| [`249-cross-platform-procedural-horizon-proof.md`](249-cross-platform-procedural-horizon-proof.md) | completed 2026-07-25, including local/native/hosted browser proof | Implemented the shared fixed-budget toroidal horizon and proved the same Rust session through lightweight native and browser Explorer adapters without changing Terrain Lab or coupling product scope to platform. |

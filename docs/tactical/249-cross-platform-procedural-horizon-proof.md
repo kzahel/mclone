@@ -1,6 +1,6 @@
 # Tactical 249: Cross-Platform Procedural Horizon Proof
 
-Status: active 2026-07-25.
+Status: completed and deployed 2026-07-25.
 
 Topics:
 
@@ -330,10 +330,10 @@ full-game integration follow only after those shared proofs are credible.
 
 - [x] Slice 0: architecture and execution record.
 - [x] Slice 1: shared toroidal planning and residency.
-- [ ] Slice 2: shared moving horizon renderer.
-- [ ] Slice 3: lightweight native Explorer adoption.
-- [ ] Slice 4: lightweight browser Explorer adoption.
-- [ ] Slice 5: evidence, deployment, topic closeout, and clean tree.
+- [x] Slice 2: shared moving horizon renderer.
+- [x] Slice 3: lightweight native Explorer adoption.
+- [x] Slice 4: lightweight browser Explorer adoption.
+- [x] Slice 5: evidence, deployment, topic closeout, and clean tree.
 
 ### 2026-07-25: shared residency checkpoint
 
@@ -363,3 +363,142 @@ all `160/160` ready slots in ten frames, reported a fixed `173,079,040`-byte
 allocation, and produced meaningful reversed depth over `875,273` pixels with
 a `0.000000..0.934411` range on the Radeon 890M Vulkan adapter. Vegetation,
 explicit frontier skirts, movement receipts, and browser proof remain open.
+
+### 2026-07-25: final shared renderer shape
+
+The final GPU-only horizon allocation removed the unused per-slot canonical
+reference buffer. Ten levels of `4x4` slots now retain exactly `160` terrain
+sample buffers and uniforms totaling `86,551,040` bytes. The renderer admits
+at most `16` GPU terrain refills per frame, draws only complete levels, and
+falls back to the next complete coarser level while a finer level is
+incomplete.
+
+Procedural levels use power-of-two aligned footprints and one fixed
+rectangular inner-hole test per coarse level. This is not a quadtree with
+several changing cutouts. Complete finer-level publication and the aligned
+ownership boundary produced continuous inspected pixels across stationary,
+moving, negative-coordinate, and teleport views. No explicit vertical skirt
+was needed to hide a procedural/procedural crack in these captures. The
+exact/procedural frontier still needs the planned collar or skirt because its
+independently generated surfaces will not share this alignment guarantee.
+
+Stable tree records are an optional layer on the same shared renderer. Native
+Explorer refills one vegetation tile per frame over the three levels whose
+sample spacing is at most four. Tree fragments obey the same nested inner
+holes as terrain. Terrain allocation remains fixed; variable tree-instance
+bytes are reported separately. A native movement checkpoint drew `5,267`
+tree proxies using `505,632` bytes beyond the fixed terrain allocation.
+
+The first browser experiment exposed an important limit rather than a reason
+to extend a timeout: synchronous tree-record compilation took about two
+seconds per tile in Wasm and blocked the browser main thread. Browser Explorer
+therefore instantiates the shared renderer with optional vegetation disabled.
+It does not ship the observed stall. Browser tree records remain follow-up
+work for the shared Worker/job contract; terrain generation itself remains
+the same GPU path as native.
+
+### 2026-07-25: shared session and platform adapters
+
+`WorldExplorerSession` now owns view reduction, contact gestures, clipmap
+replanning, readiness, diagnostics, and frame encoding in ordinary Rust. The
+native adapter supplies filesystem asset packs, native elapsed time, `winit`
+events, its surface, and capture mechanics. The Wasm adapter supplies fetched
+pack bytes, browser elapsed time, WebGPU surface acquisition, and raw DOM
+observations.
+
+The standalone browser shell is one canvas and no React. Its JavaScript loads
+opaque resources and Wasm, follows browser resize/visibility/rAF rules,
+forwards raw pointer, wheel, and key observations, and displays a Rust-authored
+report. It contains no clipmap, terrain-source, camera-gesture, LOD, or refill
+policy. This small product does not import the full game, but nothing in the
+browser platform boundary assumes that browser means a reduced product; the
+full game remains another Rust dependency closure over the same kind of
+physical host.
+
+The dependency firewall now evaluates native and
+`wasm32-unknown-unknown` graphs separately. It passed with `159` native and
+`75` browser packages while excluding game-runtime, server, scene, XR, and
+cross-target platform leakage.
+
+### 2026-07-25: native evidence
+
+`pnpm native:world-explorer:smoke` completed the same scripted sequence through
+an offscreen target and a real `winit` surface:
+
+- initial 3D, continuous X, continuous Z, and diagonal movement;
+- focus at `(-8193, -4097)`;
+- teleport to `(1000000, -1000000)`;
+- anchored zoom, map, and changed orbit view; and
+- six color/depth checkpoints in each target.
+
+Both receipts recorded `344` frames, `811` total refills, `26` level rebases,
+`160/160` final slots, zero final terrain work, and exactly `86,551,040`
+fixed terrain bytes at every frame. Peak total residency was `87,056,672`
+bytes with vegetation. The offscreen first coarse/target times were
+`22.95/218.82 ms`. Movement frames averaged `4.20 ms`, reached `11.48 ms`
+P95, and peaked at `14.48 ms` on the Radeon 890M Vulkan adapter.
+
+The window and offscreen PNG hashes matched at all six checkpoints. Reversed
+depth covered `875,274` pixels in the initial 3D view, `875,148` at negative
+coordinates, and `875,421` after teleport. The movement, negative, teleport,
+map, and final orbit captures were inspected. They contain no unpainted ring,
+stale rectangle, or visible fine/coarse crack.
+
+### 2026-07-25: browser and deployment evidence
+
+`pnpm host:check` selected headed Chrome over Wayland `wayland-0` with hardware
+WebGPU. Local desktop and Pixel-sized release smokes then passed initial
+rendering, a real pointer drag, keyboard movement, negative coordinates, and
+teleport. Their inspected initial and teleport images show continuous
+coverage in landscape and narrow portrait presentations.
+
+Each browser checkpoint retained the same `160` allocation slots and
+`86,551,040` fixed bytes. Initial fill recorded `160` refills and `10`
+rebases. The keyboard move retained `92` tiles and reached `228` total
+refills. The negative relocation retained `26` tiles and reached `362`
+refills. The million-block teleport retained zero tiles, reached `522`
+refills and `28` rebases, then returned all ten levels and 160 draws to ready
+state.
+
+The optimized artifact contains:
+
+- `1,551,748` bytes of Wasm;
+- `67,201` bytes of generated Wasm JavaScript; and
+- `6,008` bytes of hand-authored opaque host JavaScript.
+
+The aggregate production bundle preserved the Explorer Wasm SHA-256
+`eccb0267d580684ec71ceda76827a898f3d4fd897f86d7c371829445a9956d6e`
+under `/explore`. Cloudflare Worker version
+`3cb53a27-9f35-4fbc-929c-295fc0b833c1` serves
+`https://mclone.kzahel.com/explore/`. A direct hosted headed-Wayland smoke
+passed the complete pointer, movement, negative, and teleport sequence with
+no page or console errors.
+
+### Validation commands
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-terrain-view --lib`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-world-explorer`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-world-explorer --target x86_64-unknown-linux-gnu`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-world-explorer --lib --target wasm32-unknown-unknown`
+- `pnpm native:world-explorer:deps`
+- `pnpm native:world-explorer:smoke`
+- `pnpm native:world-explorer:web:build`
+- `pnpm native:world-explorer:web:smoke -- --skip-build`
+- `pnpm native:world-explorer:web:smoke:mobile -- --skip-build`
+- `./scripts/deploy-native-web.sh --bundle-only`
+- `./scripts/deploy-native-web.sh`
+- `WORLD_EXPLORER_SMOKE_BASE_URL=https://mclone.kzahel.com/explore node native/apps/mclone-world-explorer/scripts/browser-smoke.mjs --skip-build`
+
+### Handoff
+
+The next tactical should compose exact terrain into this shared session using
+one immutable exact-painted snapshot, one procedural coverage mask, and an
+explicit exact/procedural frontier collar or skirt. It should preserve the
+existing native and browser receipts while adding exact admission and
+eviction.
+
+Independent hardening can add browser Worker-backed tree records, retained
+committed origins instead of coarse fallback during every refill, device-loss
+rebuild evidence, camera-relative large-coordinate precision, stereo and
+multiview, and device-specific clipmap budgets. None requires moving terrain
+or navigation semantics into the browser shell or Terrain Lab.

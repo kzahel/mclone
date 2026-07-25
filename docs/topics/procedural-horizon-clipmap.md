@@ -2,13 +2,15 @@
 
 Topic: `procedural-horizon-clipmap`
 
-Status: preferred first proof direction recorded on 2026-07-25. Tactical
-[`249`](../tactical/249-cross-platform-procedural-horizon-proof.md) is now
-implementing the first shared toroidal horizon through lightweight native and
-browser Explorer adapters. This is not yet an in-game procedural-horizon
-replacement. Product scope and platform hosting are independent: the small
-Explorer and full game may both run in the browser, while the same terrain
-system remains usable on desktop, Android, and XR. Tactical
+Status: first cross-platform proof completed and deployed on 2026-07-25 by
+Tactical
+[`249`](../tactical/249-cross-platform-procedural-horizon-proof.md). Shared
+toroidal planning, a ten-level fixed-budget renderer, native tree proxies, and
+one Rust Explorer session now run through native and browser adapters. This is
+not yet an in-game procedural-horizon replacement. Product scope and platform
+hosting are independent: the small Explorer and full game may both run in the
+browser, while the same terrain system remains usable on desktop, Android,
+and XR. Tactical
 [`245`](../tactical/245-retire-chunk-far-lod-runtime.md) remains the completed
 removal boundary for the rejected chunk-based Far LOD system. Tactical
 [`247`](../tactical/247-standalone-world-explorer-foundation.md) supplied the
@@ -398,24 +400,28 @@ semantic owner.
 1. **Protect the old-system removal boundary.** Finish any branch-local
    cleanup before starting the proof, keep Tactical 245 closed, and do not
    retain compatibility types for an unimplemented replacement.
-2. **Prove toroidal addressing — active in Tactical 249.** Add shared Rust property tests for negative
-   coordinates, rows, columns, diagonal movement, guards, cancellation, and
-   source changes.
-3. **Draw nested rings in the native and browser Explorer.** Reuse the current
-   evaluator and shared renderer while leaving Terrain Lab unchanged. The
-   browser adapter must remain suitable for either this small product or the
-   full web game.
-4. **Promote the renderer contract.** Exercise reversed-Z, caller-owned
-   targets, device rebuild, and fixed-capacity diagnostics across native and
-   browser now. Preserve a direct path to later synthetic stereo and
-   multiview; the Explorer is a cross-platform proof host, not another
+2. **Prove toroidal addressing — complete in Tactical 249.** Shared tests
+   cover negative coordinates, rows, columns, diagonal movement, long wrapping
+   walks, retained slots, and teleports.
+3. **Draw nested rings in the native and browser Explorer — complete.** Reuse
+   the current evaluator and shared renderer while leaving Terrain Lab
+   unchanged. The browser adapter must remain suitable for either this small
+   product or the full web game.
+4. **Promote the renderer contract — first proof complete.** Reversed-Z,
+   caller-owned targets, and fixed-capacity diagnostics are proven across
+   native and browser. Device rebuild, synthetic stereo, and multiview remain
+   hardening work; the Explorer is a cross-platform proof host, not another
    disposable diagnostic.
-5. **Nest levels.** Add fixed holes, skirts, coarse-first refill, precision
-   handling, footprint summaries, and measured budgets.
+5. **Harden nested levels.** Fixed aligned holes and coarse-first refill are
+   proven. Add explicit skirts where independent surfaces require them,
+   retained committed origins, large-coordinate precision handling,
+   footprint summaries, and device-specific budgets.
 6. **Integrate the game scene.** Add exact-painted snapshots, masks, frontier
    collars, normal render ordering, and all-target frame admission.
-7. **Add vegetation.** Reuse stable tree records and make proxy/exact
-   arbitration obey the same coverage snapshot.
+7. **Finish vegetation portability and arbitration.** Native stable proxy
+   records are proven on three near levels. Move browser compilation into
+   Workers, then make proxy/exact arbitration obey the exact coverage
+   snapshot.
 8. **Measure an adaptive comparator only if useful.** A quadtree Lab mode
    should answer a specific waste or quality question, not fork the content
    system.

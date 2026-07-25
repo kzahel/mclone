@@ -16,10 +16,11 @@ complete desktop/phone matrix, and local/hosted production closeout passed on
 `883a0f11-11d6-4c0a-a934-ba80fd66356b`. A touch UX follow-up also adds narrow
 page-scroll corridors between stacked terrain views and direct-grab
 two-finger 3D panning without changing mouse navigation. Tactical
-[`249`](../tactical/249-cross-platform-procedural-horizon-proof.md) now owns
+[`249`](../tactical/249-cross-platform-procedural-horizon-proof.md) completed
 promotion of the procedural evaluator into the first shared, fixed-budget
-toroidal horizon. It proves the same Rust system in lightweight native and
-browser Explorer products while deliberately leaving Terrain Lab unchanged.
+toroidal horizon. The same Rust session and renderer passed lightweight
+native and browser Explorer products while deliberately leaving Terrain Lab
+unchanged.
 The browser proof is not a reduced browser architecture: product dependency
 selection keeps the Explorer small, while the platform contract remains
 capable of hosting the full web game. Tactical
@@ -1419,9 +1420,8 @@ The next implementation direction is:
    coarse pixel;
 6. choose explicit mixed-level seam/transition behavior before using partial
    child coverage; and
-7. prove the separately recorded toroidal horizon architecture around the
-   shared procedural content and exact-handoff contracts proven in the Lab;
-   see
+7. compose exact chunks with the now-proven toroidal horizon using one
+   exact-painted snapshot, one GPU coverage mask, and a frontier collar; see
    [`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md).
 
 ## Open Questions
