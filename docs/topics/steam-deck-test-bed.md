@@ -2,12 +2,15 @@
 
 Topic: steam-deck-test-bed
 
-Status: active test lane. As of 2026-07-23, the first retail Steam Deck is
+Status: active test lane. As of 2026-07-25, the first retail Steam Deck is
 paired with the Linux deployment host. Automated staging, incremental upload,
 SteamRT4 launch, screenshot smoke, and bounded performance collection pass on
-the device. Manual controller, persistence, suspend/resume, and dock/undock
-acceptance remain open. The pinned production-style Steam Runtime SDK builder
-is implemented and its clean-source artifact passes device smoke and perf.
+the device. A Gaming Mode panel-sleep shortcut is installed; its registered
+launch, compositor sleep, helper exit, and armed local wake watcher pass on
+device. Manual launch-button release/wake, controller, persistence,
+suspend/resume, and dock/undock acceptance remain open. The pinned
+production-style Steam Runtime SDK builder is implemented and its clean-source
+artifact passes device smoke and perf.
 
 ## Scope
 
@@ -175,6 +178,26 @@ suspend the Deck. The commands fail explicitly outside an active Gamescope
 session and affect only the internal panel; they do not blank a docked external
 display.
 
+Each payload upload also registers `Devkit Game: screenoff` in
+Gaming Mode. It is a tiny native shortcut, not an mclone gameplay mode: launch
+it like a game after a manual test to arm the same local wake watcher, disable
+the internal connector, and return to the library with SteamOS and SSH still
+running. The watcher waits for the launch-button press to be released before
+arming, so the A press used to start the shortcut cannot immediately wake the
+panel. The next mapped Deck button restores the panel. The physical power
+button deliberately retains its ordinary whole-device suspend behavior.
+The current SteamOS Devkit client accepts simple identifier characters rather
+than a display label with spaces or hyphens, hence the deliberately plain
+`screenoff` registration name. Steam's shortcut properties may give the tile a
+friendlier display name without changing its deployment identity.
+
+The 2026-07-25 on-device registration and remote `run-game` acceptance pass
+started `screenoff`, changed `card0-eDP-1` to `disabled`, returned from the
+short-lived control script, and left the one-shot watcher active on the built-in
+controller. Before the test, no mclone client process was live, GPU busy was
+zero, and the system fan was stopped; an old interactive-owner file referred to
+a dead process and was not evidence of background game work.
+
 The Gamescope convar is a forced state: Gamescope does not clear it merely
 because ordinary input arrives. Before disabling the connector, the wrapper
 therefore deploys and arms a one-shot, non-grabbing user service that watches
@@ -229,10 +252,14 @@ checks again; neither rewrites the tracked lock automatically, so intentional
 source/tool changes still require inspection and an explicit
 `pnpm assets:pack:write-lock`. Once assets pass, both build the ordinary
 `x86_64` client inside the pinned SteamRT4 SDK, stage the binary/pack/receipt,
-upload incrementally, and register `Devkit Game: mclone`.
+upload incrementally, and register `Devkit Game: mclone`. The upload also
+registers `Devkit Game: screenoff` against a small sibling payload
+directory without a compatibility runtime; the shortcut runs only the
+host-side Gamescope panel-control helper.
 
 `steamdeck:install:production` stops there, leaving the title ready for the
-user to launch without changing the current foreground game or display state.
+user to launch and refreshing the screen-off shortcut without changing the
+current foreground game or display state.
 `steamdeck:deploy:production` additionally launches the title and is therefore
 the explicit interactive manual command.
 

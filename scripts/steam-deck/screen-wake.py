@@ -59,14 +59,14 @@ def read_reports(descriptor: int) -> list[bytes]:
         reports.append(data)
 
 
-def is_button_press(report: bytes) -> bool:
+def button_state(report: bytes) -> bool | None:
     if (
         len(report) != REPORT_SIZE
         or report[0] != 0x01
         or report[1] != 0x00
         or report[2] != DECK_REPORT_TYPE
     ):
-        return False
+        return None
 
     # The Deck controller button layout is documented in Linux hid-steam:
     # bytes 8-9 are all buttons; bytes 10, 11, 13, and 14 contain the
@@ -103,6 +103,27 @@ def wait_until_screen_is_disabled(
     raise RuntimeError("internal connector did not become disabled")
 
 
+def wait_until_buttons_released(devices: list[tuple[int, str]]) -> None:
+    """Ignore the button press that launched the Gaming Mode shortcut."""
+    poller = select.poll()
+    paths: dict[int, str] = {}
+    latest_states: dict[int, bool] = {}
+    for descriptor, path in devices:
+        poller.register(descriptor, select.POLLIN)
+        paths[descriptor] = path
+
+    while True:
+        for descriptor, flags in poller.poll():
+            if not flags & select.POLLIN:
+                continue
+            for report in read_reports(descriptor):
+                state = button_state(report)
+                if state is not None:
+                    latest_states[descriptor] = state
+        if len(latest_states) == len(paths) and not any(latest_states.values()):
+            return
+
+
 def wake_screen() -> None:
     environment = os.environ.copy()
     subprocess.run(
@@ -124,7 +145,7 @@ def wait_for_button(devices: list[tuple[int, str]]) -> str:
             if not flags & select.POLLIN:
                 continue
             for report in read_reports(descriptor):
-                if is_button_press(report):
+                if button_state(report):
                     return paths[descriptor]
 
 
@@ -147,6 +168,7 @@ def main() -> int:
 
     try:
         wait_until_screen_is_disabled(devices)
+        wait_until_buttons_released(devices)
         device_path = wait_for_button(devices)
         wake_screen()
         print(f"woke internal screen from button report on {device_path}", flush=True)
