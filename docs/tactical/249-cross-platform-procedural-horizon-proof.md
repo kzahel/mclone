@@ -329,8 +329,19 @@ full-game integration follow only after those shared proofs are credible.
 ## Completion Ledger
 
 - [x] Slice 0: architecture and execution record.
-- [ ] Slice 1: shared toroidal planning and residency.
+- [x] Slice 1: shared toroidal planning and residency.
 - [ ] Slice 2: shared moving horizon renderer.
 - [ ] Slice 3: lightweight native Explorer adoption.
 - [ ] Slice 4: lightweight browser Explorer adoption.
 - [ ] Slice 5: evidence, deployment, topic closeout, and clean tree.
+
+### 2026-07-25: shared residency checkpoint
+
+`mclone-terrain-view::TerrainClipmap` now owns fixed-capacity level state,
+Euclidean logical-to-physical addressing, incremental axial and diagonal
+refill sets, explicit teleport rebases, nested footprint/hole facts, and
+portable diagnostics. Eight focused tests cover initial allocation,
+sub-cell retention, axial and diagonal bands, negative-coordinate wrapping,
+retained-slot identity, teleport recovery, nested bounds, and a long
+positive/negative walk. The controller allocates no platform or GPU objects
+and is ready to drive both native and Wasm render sessions.

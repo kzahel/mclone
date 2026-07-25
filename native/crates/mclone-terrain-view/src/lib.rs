@@ -1,6 +1,7 @@
 #![forbid(unsafe_code)]
 
 mod canonical;
+mod clipmap;
 mod viewport;
 mod viewport_renderer;
 
@@ -22,6 +23,11 @@ pub use canonical::{
     CANONICAL_TERRAIN_MAX_CHUNK_RADIUS, CanonicalTerrainChunk, CanonicalTerrainCompiler,
     CanonicalTerrainDependencyCacheReport, CanonicalTerrainStage, CanonicalTerrainVisibility,
     canonical_terrain_chunk_order, canonical_terrain_presentation_blocks,
+};
+pub use clipmap::{
+    TERRAIN_CLIPMAP_DEFAULT_LEVEL_COUNT, TERRAIN_CLIPMAP_DEFAULT_TILES_PER_AXIS, TerrainClipmap,
+    TerrainClipmapBounds, TerrainClipmapConfig, TerrainClipmapDiagnostics,
+    TerrainClipmapLevelSnapshot, TerrainClipmapTile, TerrainClipmapUpdate,
 };
 pub use viewport::{
     TERRAIN_VIEWPORT_AUTO_PIXELS_PER_CELL, TERRAIN_VIEWPORT_MAX_BLOCKS_ACROSS,
