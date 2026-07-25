@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, VecDeque};
 use std::error::Error;
 use std::fmt;
 
+use mclone_core::{ChunkPos, block_to_chunk_coord};
+
 use crate::block::{
     ACACIA_LEAVES, ACACIA_LOG, AIR, DIRT, OAK_LEAVES, OAK_LOG, RawBlockId, SPRUCE_LEAVES,
     SPRUCE_LOG, is_leaves,
@@ -16,11 +18,14 @@ use super::biomes::{
     mclone_overworld_steppe_band,
 };
 use super::fields::{
-    MCLONE_OVERWORLD_PERIOD_BLOCKS, McloneOverworldLandformSample, McloneOverworldSamplingTopology,
+    MCLONE_OVERWORLD_PERIOD_BLOCKS, MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS,
+    McloneOverworldLandformSample, McloneOverworldSamplingTopology,
 };
-use super::streams::McloneOverworldStreamPlanCache;
+use super::streams::{McloneOverworldStreamPlan, McloneOverworldStreamPlanCache};
 use super::surface::{McloneOverworldSurfaceRecipe, mclone_overworld_surface_recipe};
-use super::terrain::sample_mclone_overworld_landform_with_stream_cache;
+use super::terrain::{
+    apply_stream_plans, sample_mclone_overworld_landform_with_sampler_and_stream_cache,
+};
 
 pub const MCLONE_OVERWORLD_VEGETATION_REVISION: &str = "mclone-overworld-v1-vegetation-2";
 pub const MCLONE_VEGETATION_PLANNING_CELL_BLOCKS: i32 = 32;
@@ -329,6 +334,7 @@ struct PreliminaryCandidate {
 pub struct McloneOverworldVegetationPlanner {
     source: McloneVegetationSource,
     grove_field: ValueNoise2d,
+    terrain_sampler: super::fields::McloneOverworldSampler,
 }
 
 impl McloneOverworldVegetationPlanner {
@@ -347,6 +353,10 @@ impl McloneOverworldVegetationPlanner {
         Self {
             source,
             grove_field,
+            terrain_sampler: super::fields::McloneOverworldSampler::new_with_topology(
+                source.seed,
+                source.topology,
+            ),
         }
     }
 
@@ -376,7 +386,40 @@ impl McloneOverworldVegetationPlanner {
             .z
             .checked_mul(MCLONE_VEGETATION_PLANNING_CELL_BLOCKS)
             .ok_or(McloneVegetationError::CoordinateOverflow)?;
+        // Any structured stream that can influence a center or cardinal slope
+        // sample intersects this one-cell-plus-slope-halo chunk rectangle.
+        // Loading the bounded union once is equivalent to point queries because
+        // `apply_stream_plans` still tests every plan against each exact point.
+        let stream_plans = stream_cache
+            .plans_intersecting_chunks(
+                ChunkPos::new(
+                    block_to_chunk_coord(origin_x)
+                        .checked_sub(1)
+                        .ok_or(McloneVegetationError::CoordinateOverflow)?,
+                    block_to_chunk_coord(origin_z)
+                        .checked_sub(1)
+                        .ok_or(McloneVegetationError::CoordinateOverflow)?,
+                ),
+                ChunkPos::new(
+                    block_to_chunk_coord(
+                        origin_x
+                            .checked_add(MCLONE_VEGETATION_PLANNING_CELL_BLOCKS - 1)
+                            .ok_or(McloneVegetationError::CoordinateOverflow)?,
+                    )
+                    .checked_add(1)
+                    .ok_or(McloneVegetationError::CoordinateOverflow)?,
+                    block_to_chunk_coord(
+                        origin_z
+                            .checked_add(MCLONE_VEGETATION_PLANNING_CELL_BLOCKS - 1)
+                            .ok_or(McloneVegetationError::CoordinateOverflow)?,
+                    )
+                    .checked_add(1)
+                    .ok_or(McloneVegetationError::CoordinateOverflow)?,
+                ),
+            )
+            .map_err(|error| McloneVegetationError::StructuredTerrain(error.to_string()))?;
         let mut candidates = Vec::new();
+        let mut terrain_samples = BTreeMap::new();
         for candidate_slot in 0..MCLONE_VEGETATION_CANDIDATES_PER_CELL {
             let local_x = (candidate_hash(self.source, cell, candidate_slot, HASH_LANE_POSITION_X)
                 % MCLONE_VEGETATION_PLANNING_CELL_BLOCKS as u64) as i32;
@@ -388,17 +431,80 @@ impl McloneOverworldVegetationPlanner {
             let world_z = origin_z
                 .checked_add(local_z)
                 .ok_or(McloneVegetationError::CoordinateOverflow)?;
-            let (landform, _) = sample_mclone_overworld_landform_with_stream_cache(
-                self.source.seed,
-                self.source.topology,
-                world_x,
-                world_z,
-                stream_cache,
-            )
-            .map_err(McloneVegetationError::StructuredTerrain)?;
-            let intent = self.forest_intent(landform, world_x, world_z);
             let density_roll =
                 candidate_hash(self.source, cell, candidate_slot, HASH_LANE_DENSITY) as u16;
+            let center = sample_candidate_terrain_cached(
+                &mut terrain_samples,
+                self.terrain_sampler,
+                world_x,
+                world_z,
+                &stream_plans,
+            );
+            if center.watercourse.is_water() || center.watercourse.bank_influence >= 0.82 {
+                continue;
+            }
+            // Slope can only switch an otherwise eligible woodland recipe to
+            // meadow, whose tree density is lower. Therefore slope zero is a
+            // conservative upper bound: candidates rejected here cannot pass
+            // after the exact cardinal slope samples are reconstructed.
+            let maximum_intent = self.forest_intent(
+                McloneOverworldLandformSample {
+                    terrain: center,
+                    slope: 0.0,
+                },
+                world_x,
+                world_z,
+            );
+            if maximum_intent.dominant_family.is_none()
+                || density_roll > maximum_intent.density_threshold()
+            {
+                continue;
+            }
+            let radius = MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS;
+            let west_x = world_x
+                .checked_sub(radius)
+                .ok_or(McloneVegetationError::CoordinateOverflow)?;
+            let east_x = world_x
+                .checked_add(radius)
+                .ok_or(McloneVegetationError::CoordinateOverflow)?;
+            let north_z = world_z
+                .checked_sub(radius)
+                .ok_or(McloneVegetationError::CoordinateOverflow)?;
+            let south_z = world_z
+                .checked_add(radius)
+                .ok_or(McloneVegetationError::CoordinateOverflow)?;
+            let landform = McloneOverworldLandformSample::from_cardinal_samples(
+                center,
+                sample_candidate_terrain_cached(
+                    &mut terrain_samples,
+                    self.terrain_sampler,
+                    west_x,
+                    world_z,
+                    &stream_plans,
+                ),
+                sample_candidate_terrain_cached(
+                    &mut terrain_samples,
+                    self.terrain_sampler,
+                    east_x,
+                    world_z,
+                    &stream_plans,
+                ),
+                sample_candidate_terrain_cached(
+                    &mut terrain_samples,
+                    self.terrain_sampler,
+                    world_x,
+                    north_z,
+                    &stream_plans,
+                ),
+                sample_candidate_terrain_cached(
+                    &mut terrain_samples,
+                    self.terrain_sampler,
+                    world_x,
+                    south_z,
+                    &stream_plans,
+                ),
+            );
+            let intent = self.forest_intent(landform, world_x, world_z);
             if intent.dominant_family.is_none() || density_roll > intent.density_threshold() {
                 continue;
             }
@@ -472,6 +578,32 @@ impl McloneOverworldVegetationPlanner {
     }
 }
 
+fn sample_candidate_terrain(
+    sampler: super::fields::McloneOverworldSampler,
+    world_x: i32,
+    world_z: i32,
+    stream_plans: &[McloneOverworldStreamPlan],
+) -> super::fields::McloneOverworldTerrainSample {
+    let mut sample = sampler.sample(world_x, world_z);
+    let _ = apply_stream_plans(&mut sample, world_x, world_z, stream_plans);
+    sample
+}
+
+fn sample_candidate_terrain_cached(
+    cache: &mut BTreeMap<(i32, i32), super::fields::McloneOverworldTerrainSample>,
+    sampler: super::fields::McloneOverworldSampler,
+    world_x: i32,
+    world_z: i32,
+    stream_plans: &[McloneOverworldStreamPlan],
+) -> super::fields::McloneOverworldTerrainSample {
+    if let Some(sample) = cache.get(&(world_x, world_z)) {
+        return *sample;
+    }
+    let sample = sample_candidate_terrain(sampler, world_x, world_z, stream_plans);
+    cache.insert((world_x, world_z), sample);
+    sample
+}
+
 #[derive(Clone, Debug)]
 pub struct McloneOverworldVegetationPlanCache {
     planner: McloneOverworldVegetationPlanner,
@@ -527,9 +659,10 @@ impl McloneOverworldVegetationPlanCache {
         world_z: i32,
     ) -> Result<McloneForestIntentSample, McloneVegetationError> {
         let source = self.source();
-        let (landform, _) = sample_mclone_overworld_landform_with_stream_cache(
+        let (landform, _) = sample_mclone_overworld_landform_with_sampler_and_stream_cache(
             source.seed,
             source.topology,
+            self.planner.terrain_sampler,
             world_x,
             world_z,
             &mut self.stream_cache,
@@ -1333,6 +1466,20 @@ mod tests {
             .flat_map(|query| tree_records_intersecting(source, query).unwrap())
             .collect::<BTreeSet<_>>();
         assert_eq!(crossing.into_iter().collect::<BTreeSet<_>>(), columns);
+    }
+
+    #[test]
+    fn record_queries_reject_coordinate_overflow() {
+        let source =
+            McloneVegetationSource::new(12_345, McloneOverworldSamplingTopology::Unbounded);
+
+        assert_eq!(
+            tree_records_intersecting(
+                source,
+                bounds(i32::MAX - 1, i32::MAX - 1, i32::MAX, i32::MAX),
+            ),
+            Err(McloneVegetationError::CoordinateOverflow)
+        );
     }
 
     #[test]

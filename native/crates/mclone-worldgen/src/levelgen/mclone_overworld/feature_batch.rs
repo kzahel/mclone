@@ -551,21 +551,26 @@ fn planned_tree_occurrences_for_centers(
     centers: impl IntoIterator<Item = ChunkPos>,
 ) -> Result<Vec<McloneTreeOccurrence>, McloneVegetationError> {
     let mut occurrences = BTreeMap::<(McloneTreeId, i64), McloneTreeOccurrence>::new();
-    for center in centers {
-        let min_chunk_x = center
-            .x
+    // A solid center rectangle has one solid dependency rectangle. Querying
+    // that union once preserves the occurrence set while avoiding identical
+    // vegetation-cell requests for every center in a normal batch. Runs with
+    // gaps or different row extents remain separate, so disconnected targets
+    // never widen one another's mutable feature footprint.
+    for rectangle in coalesced_center_rectangles(centers) {
+        let min_chunk_x = rectangle
+            .min_x
             .checked_sub(FEATURES_BLOCK_DEPENDENCY_RADIUS)
             .ok_or(McloneVegetationError::CoordinateOverflow)?;
-        let min_chunk_z = center
-            .z
+        let min_chunk_z = rectangle
+            .min_z
             .checked_sub(FEATURES_BLOCK_DEPENDENCY_RADIUS)
             .ok_or(McloneVegetationError::CoordinateOverflow)?;
-        let max_chunk_x = center
-            .x
+        let max_chunk_x = rectangle
+            .max_x
             .checked_add(FEATURES_BLOCK_DEPENDENCY_RADIUS)
             .ok_or(McloneVegetationError::CoordinateOverflow)?;
-        let max_chunk_z = center
-            .z
+        let max_chunk_z = rectangle
+            .max_z
             .checked_add(FEATURES_BLOCK_DEPENDENCY_RADIUS)
             .ok_or(McloneVegetationError::CoordinateOverflow)?;
         let bounds = McloneVegetationBounds::new(
@@ -583,6 +588,67 @@ fn planned_tree_occurrences_for_centers(
         }
     }
     Ok(occurrences.into_values().collect())
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct CenterRectangle {
+    min_x: i32,
+    min_z: i32,
+    max_x: i32,
+    max_z: i32,
+}
+
+fn coalesced_center_rectangles(
+    centers: impl IntoIterator<Item = ChunkPos>,
+) -> Vec<CenterRectangle> {
+    let mut rows = BTreeMap::<i32, Vec<i32>>::new();
+    for center in centers {
+        rows.entry(center.z).or_default().push(center.x);
+    }
+    let mut rectangles = Vec::<CenterRectangle>::new();
+    for (z, mut xs) in rows {
+        xs.sort_unstable();
+        xs.dedup();
+        let mut run_start = xs.first().copied();
+        let mut previous_x = xs.first().copied();
+        for x in xs.into_iter().skip(1) {
+            if previous_x.and_then(|previous| previous.checked_add(1)) == Some(x) {
+                previous_x = Some(x);
+                continue;
+            }
+            if let (Some(min_x), Some(max_x)) = (run_start, previous_x) {
+                extend_or_push_center_rectangle(&mut rectangles, min_x, max_x, z);
+            }
+            run_start = Some(x);
+            previous_x = Some(x);
+        }
+        if let (Some(min_x), Some(max_x)) = (run_start, previous_x) {
+            extend_or_push_center_rectangle(&mut rectangles, min_x, max_x, z);
+        }
+    }
+    rectangles
+}
+
+fn extend_or_push_center_rectangle(
+    rectangles: &mut Vec<CenterRectangle>,
+    min_x: i32,
+    max_x: i32,
+    z: i32,
+) {
+    if let Some(existing) = rectangles.iter_mut().rev().find(|rectangle| {
+        rectangle.min_x == min_x
+            && rectangle.max_x == max_x
+            && rectangle.max_z.checked_add(1) == Some(z)
+    }) {
+        existing.max_z = z;
+    } else {
+        rectangles.push(CenterRectangle {
+            min_x,
+            min_z: z,
+            max_x,
+            max_z: z,
+        });
+    }
 }
 
 fn checked_chunk_min_block_coord(chunk_coord: i32) -> Result<i32, McloneVegetationError> {
@@ -630,6 +696,42 @@ mod tests {
         McloneTreeFamily, McloneVegetationSource, tree_records_intersecting,
     };
     use crate::placement::BlockPos;
+
+    #[test]
+    fn vegetation_queries_coalesce_only_matching_contiguous_center_runs() {
+        let rectangles = coalesced_center_rectangles([
+            ChunkPos::new(0, 0),
+            ChunkPos::new(1, 0),
+            ChunkPos::new(0, 1),
+            ChunkPos::new(1, 1),
+            ChunkPos::new(4, 1),
+            ChunkPos::new(4, 3),
+        ]);
+
+        assert_eq!(
+            rectangles,
+            [
+                CenterRectangle {
+                    min_x: 0,
+                    min_z: 0,
+                    max_x: 1,
+                    max_z: 1,
+                },
+                CenterRectangle {
+                    min_x: 4,
+                    min_z: 1,
+                    max_x: 4,
+                    max_z: 1,
+                },
+                CenterRectangle {
+                    min_x: 4,
+                    min_z: 3,
+                    max_x: 4,
+                    max_z: 3,
+                },
+            ]
+        );
+    }
 
     #[test]
     fn cache_reuses_overlapping_surface_inputs() {

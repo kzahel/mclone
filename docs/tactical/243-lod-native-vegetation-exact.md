@@ -1,6 +1,6 @@
 # Tactical 243: LOD-Native Vegetation Exact Foundation
 
-Status: active 2026-07-25.
+Status: complete 2026-07-25.
 
 Topic: `lod-native-vegetation`
 
@@ -252,17 +252,47 @@ Execution record:
 
 ### Slice 4: worker, integration, and performance closeout
 
-- [ ] Prove feature-batch order/partition/cache equivalence over representative
+- [x] Prove feature-batch order/partition/cache equivalence over representative
   multi-chunk regions.
-- [ ] Prove native/browser Worker-equivalent chunk payloads and wasm checks.
-- [ ] Re-run periodic profile, persistence/scheduler, and reference-overworld
+- [x] Prove native/browser Worker-equivalent chunk payloads and wasm checks.
+- [x] Re-run periodic profile, persistence/scheduler, and reference-overworld
   regression gates selected by the affected contracts.
-- [ ] Record final cold/warm throughput and cache metrics.
-- [ ] Update the living topic with landed types, revisions, evidence, and the
+- [x] Record final cold/warm throughput and cache metrics.
+- [x] Update the living topic with landed types, revisions, evidence, and the
   concrete Terrain Lab handoff.
 
 Gate: the exact foundation is complete, documented, measured, and ready for
 the separate summary/proxy tactical.
+
+Execution record:
+
+- normal solid target batches coalesce matching contiguous center runs into
+  one vegetation query without merging disconnected footprints; one
+  representative 49-target batch now asks for 81 canonical planning cells
+  instead of repeating 2,025 cell requests;
+- a planning cell loads its bounded structured-stream union once, reuses one
+  production terrain sampler and duplicate point samples, rejects water and
+  bank candidates before cardinal slope work, and uses slope-zero forest
+  intent only as a conservative density upper bound; the pinned 161-record
+  receipt and final exact chunk fingerprint remain unchanged;
+- the final independent release run generated 147 cold targets in
+  `232.122 ms` (`633.288` targets/s) and warm targets in `44.810 ms`
+  (`3,280.554` targets/s), respectively 18.9 percent slower and 0.2 percent
+  faster than the recorded pre-migration baseline, within the 25 percent
+  review threshold;
+- a paired same-host run against detached baseline commit `06eefecb` measured
+  `201.992/44.880 ms` baseline cold/warm and `201.804/46.057 ms` final
+  cold/warm, resolving the larger unpaired cold timing noise;
+- batch, native job-frame, resident-delta, scheduler, SQLite reopen, and
+  periodic cylinder fixtures pass, including partition/reverse equivalence,
+  canonical seam payloads, and persisted seam edits;
+- all 339 active `mclone-worldgen` library tests pass with one pre-existing
+  ignored gauntlet; the reference Overworld oracle fixtures in that suite
+  remain unchanged; and
+- `mclone-worldgen`, the `mclone-server` library, and the complete
+  `mclone-web-client` dependency graph check for
+  `wasm32-unknown-unknown`, so the browser Worker consumes the same Rust
+  planner and frame codec as the proven native path.
 
 ## Commit Plan
 

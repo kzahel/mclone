@@ -2,7 +2,8 @@
 
 Topic: `lod-native-vegetation`
 
-Status: accepted direction 2026-07-24; implementation has not started.
+Status: exact record foundation complete 2026-07-25; Terrain Lab and Far LOD
+integration are next.
 
 ## Scope
 
@@ -92,25 +93,26 @@ The following decisions are binding:
 
 ### Exact generation
 
-Mclone tree selection currently lives in
-`mclone-worldgen/src/levelgen/mclone_overworld/decoration.rs`.
-`open_lowland_features`, `wooded_upland_features`,
-`cool_wet_conifer_features`, and the two warm-dry steppe tables insert tree
-features alongside grass and flowers. Counts, square spreading, heightmap
-projection, water-depth checks, family selection, and final placement consume
-the existing vanilla-shaped feature machinery.
+`mclone-worldgen/src/levelgen/mclone_overworld/vegetation.rs` now owns
+production forest intent, 32-block planning cells with 32 fixed candidate
+slots, independent hash domains, deterministic local-priority inhibition,
+stable IDs and records, a bounded optional cell cache, topology-aware lifted
+occurrences, and exact broadleaf, conifer, and acacia realization.
 
-The exact tree builders in `mclone-worldgen/src/feature/tree.rs` support many
-vanilla families. That shared code remains required by the reference
-Overworld. Mclone must stop using its placement semantics; a first migration
-may borrow low-level block-buffer mechanisms only if the Mclone record remains
-the sole owner of position, family, resolved dimensions, orientation, and
-variation.
+`MCLONE_OVERWORLD_VEGETATION_REVISION` is
+`mclone-overworld-v1-vegetation-2`; the surrounding exact output is pinned by
+`mclone-overworld-v1-decoration-14`. Mclone decoration tables contain only
+retained low vegetation. Every natural Mclone tree is realized once in stable
+record-ID order through clipped mutable feature buffers before those remaining
+placed features run.
 
-`MCLONE_OVERWORLD_DECORATION_REVISION` is currently the cache/diagnostic
-revision for the surrounding decoration path. The vegetation migration needs
-its own explicit source revision and an intentional decoration revision bump
-when exact output changes.
+The vanilla-shaped tree machinery remains intact for the reference Overworld
+and other profiles. The complete reference regression suite is unchanged.
+Partitioned/reversed/cold/warm record and exact-output fixtures, native
+job-frame and resident-delta fixtures, browser/WASM builds, negative
+coordinates, persistence, and the 6,144-block periodic seam all pass. Tactical
+243 records the output fingerprints, inspected pixels, and final performance
+receipts.
 
 ### Terrain Lab
 
@@ -685,7 +687,7 @@ crate, or a renderer-only WGSL implementation.
 
 ## Migration Plan
 
-### Slice 1: Record-first exact Mclone vegetation
+### Slice 1: Record-first exact Mclone vegetation — complete
 
 Create a tactical whose first result is a deliberate exact-generation
 migration, not an LOD-only duplicate:
@@ -706,8 +708,10 @@ migration, not an LOD-only duplicate:
 9. capture and inspect representative exact meadow, woodland, conifer, steppe,
    transition, stream-edge, and cylinder-seam pixels.
 
-The slice is incomplete if exact generation still chooses tree positions
-through `ConfiguredDecorator`.
+Exact generation no longer chooses Mclone tree positions through
+`ConfiguredDecorator`. Tactical
+[`243-lod-native-vegetation-exact.md`](../tactical/243-lod-native-vegetation-exact.md)
+is the completed execution record.
 
 ### Slice 2: Terrain Lab forest summaries and record overlays
 
