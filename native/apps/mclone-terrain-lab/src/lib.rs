@@ -11,6 +11,7 @@ use mclone_worldgen::terrain_preview::TerrainPreviewContentStage;
 mod canonical_mesh;
 #[cfg(target_arch = "wasm32")]
 mod canonical_web;
+mod visual_assets;
 #[cfg(target_arch = "wasm32")]
 mod web;
 

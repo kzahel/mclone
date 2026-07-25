@@ -13,6 +13,12 @@ const firstPartyPackRoot = path.join(
   "first-party-stage",
   "first-party-packs",
 );
+const minecraftReferencePack = path.join(
+  repositoryRoot,
+  "reference",
+  "minecraft-1.17.1",
+  "extracted.zip",
+);
 
 export default defineConfig({
   base: "/terrain/",
@@ -43,21 +49,22 @@ function localFirstPartyPacks(): Plugin {
   }): void => {
     middlewares.use((request, response, next) => {
       const pathname = new URL(request.url ?? "/", "http://terrain.local").pathname;
-      const match = /^\/first-party-packs\/(mclone-(?:authored|generated-fallback)\.pbp)$/u
+      if (pathname === "/reference/minecraft-1.17.1/extracted.zip") {
+        streamPack(response, minecraftReferencePack, "Minecraft reference pack");
+        return;
+      }
+      const match =
+        /^\/first-party-packs\/(mclone-(?:authored|generated-fallback|diagnostic-missing)\.pbp)$/u
         .exec(pathname);
       if (!match?.[1]) {
         next();
         return;
       }
-      response.statusCode = 200;
-      response.setHeader("Content-Type", "application/octet-stream");
-      response.setHeader("Cache-Control", "no-cache");
-      const stream = createReadStream(path.join(firstPartyPackRoot, match[1]));
-      stream.on("error", (error) => {
-        response.statusCode = 500;
-        response.end(`Failed to read first-party pack: ${error.message}`);
-      });
-      stream.pipe(response);
+      streamPack(
+        response,
+        path.join(firstPartyPackRoot, match[1]),
+        "first-party pack",
+      );
     });
   };
   return {
@@ -69,4 +76,20 @@ function localFirstPartyPacks(): Plugin {
       install(server.middlewares);
     },
   };
+}
+
+function streamPack(
+  response: import("node:http").ServerResponse,
+  file: string,
+  label: string,
+): void {
+  response.statusCode = 200;
+  response.setHeader("Content-Type", "application/octet-stream");
+  response.setHeader("Cache-Control", "no-cache");
+  const stream = createReadStream(file);
+  stream.on("error", (error) => {
+    response.statusCode = 404;
+    response.end(`Failed to read ${label}: ${error.message}`);
+  });
+  stream.pipe(response);
 }

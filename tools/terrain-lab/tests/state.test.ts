@@ -27,6 +27,9 @@ import {
 test("round-trips complete URL state", () => {
   const state: TerrainLabState = {
     profile: "mclone-overworld-v1",
+    visualProfile: "hybrid-authoring",
+    texturePresentation: "flat-colors",
+    compareVisualProfile: "minecraft-reference",
     seed: "-9223372036854775808",
     centerX: -1024,
     centerZ: 2048,
@@ -171,7 +174,7 @@ test("two-finger map gesture pans and zooms from one start state", () => {
   assert.equal(moved.centerZ, 365);
 });
 
-test("two-finger 3d gesture pans in the captured camera plane while zooming", () => {
+test("two-finger 3d gesture directly grabs the captured camera plane while zooming", () => {
   const moved = pinchPanZoomTerrainLabState(
     { ...DEFAULT_TERRAIN_LAB_STATE, view: "3d" },
     { yaw: 0, pitch: 0.5 },
@@ -185,8 +188,8 @@ test("two-finger 3d gesture pans in the captured camera plane while zooming", ()
     4 / 3,
   );
   assert.equal(moved.blocksAcross, 256);
-  assert.equal(moved.centerX, -285);
-  assert.equal(moved.centerZ, 362);
+  assert.equal(moved.centerX, -323);
+  assert.equal(moved.centerZ, 310);
 });
 
 test("accepts old spacing links without changing their visible footprint", () => {
@@ -205,6 +208,9 @@ test("accepts stepped exact footprints through 31 by 31 chunks", () => {
 
 test("defaults to the three-pane workspace and gives the review site a name", () => {
   assert.equal(DEFAULT_TERRAIN_LAB_STATE.profile, "mclone-overworld-v1");
+  assert.equal(DEFAULT_TERRAIN_LAB_STATE.visualProfile, "mclone-original");
+  assert.equal(DEFAULT_TERRAIN_LAB_STATE.texturePresentation, "textured");
+  assert.equal(DEFAULT_TERRAIN_LAB_STATE.compareVisualProfile, "off");
   assert.equal(DEFAULT_TERRAIN_LAB_STATE.source, "split");
   assert.deepEqual(DEFAULT_TERRAIN_LAB_STATE.panes, ["canonical", "cpu", "gpu"]);
   assert.equal(REVIEW_TERRAIN_LAB_STATE.seed, "-98765");
@@ -263,6 +269,9 @@ test("orbits independently from URL-addressed terrain state", () => {
   assert.ok(camera.pitch < DEFAULT_TERRAIN_LAB_CAMERA.pitch);
   assert.deepEqual(DEFAULT_TERRAIN_LAB_STATE, {
     profile: "mclone-overworld-v1",
+    visualProfile: "mclone-original",
+    texturePresentation: "textured",
+    compareVisualProfile: "off",
     seed: "-98765",
     centerX: -304,
     centerZ: 336,

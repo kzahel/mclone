@@ -9,9 +9,10 @@ import type {
   CanonicalWorkerRequest,
   CanonicalWorkerResponse,
 } from "./canonical-worker-protocol";
-
-const AUTHORED_PACK_URL = "/first-party-packs/mclone-authored.pbp";
-const FALLBACK_PACK_URL = "/first-party-packs/mclone-generated-fallback.pbp";
+import {
+  loadTerrainVisualAssets,
+  optionalReferenceBytes,
+} from "./visual-assets";
 
 let session: CanonicalTerrainMeshSession | undefined;
 let activeEpoch = 0;
@@ -24,16 +25,19 @@ self.onmessage = (event: MessageEvent<CanonicalWorkerRequest>): void => {
     session = undefined;
     void Promise.all([
       initTerrainLab(),
-      fetchPack(AUTHORED_PACK_URL),
-      fetchPack(FALLBACK_PACK_URL),
+      loadTerrainVisualAssets(),
     ])
-      .then(([, authored, fallback]) => {
+      .then(([, assets]) => {
         if (activeEpoch !== request.epoch) {
           return;
         }
         session = CanonicalTerrainMeshSession.withProfile(
-          authored,
-          fallback,
+          assets.authored,
+          optionalReferenceBytes(assets),
+          assets.provisional,
+          assets.diagnostic,
+          request.visualProfile,
+          request.texturePresentation,
           request.seed,
           request.profile,
           request.stage,
@@ -131,14 +135,6 @@ self.onmessage = (event: MessageEvent<CanonicalWorkerRequest>): void => {
     });
   }
 };
-
-async function fetchPack(url: string): Promise<Uint8Array> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to load ${url}: HTTP ${response.status}`);
-  }
-  return new Uint8Array(await response.arrayBuffer());
-}
 
 function post(response: CanonicalWorkerResponse): void {
   self.postMessage(response);

@@ -8,6 +8,14 @@ export const TERRAIN_LAB_CANONICAL_RADII = [0, 1, 2, 3, 4, 5, 7, 10, 15] as cons
 export type TerrainLabSpacing = (typeof TERRAIN_LAB_SPACINGS)[number];
 export type TerrainLabDetail = "auto" | TerrainLabSpacing;
 export type TerrainLabProfile = "mclone-overworld-v1" | "overworld";
+export type TerrainLabVisualProfile =
+  | "mclone-original"
+  | "minecraft-reference"
+  | "hybrid-authoring"
+  | "first-party-coverage"
+  | "provisional-audit";
+export type TerrainLabTexturePresentation = "textured" | "flat-colors";
+export type TerrainLabComparisonVisualProfile = "off" | TerrainLabVisualProfile;
 export type TerrainLabSource = "gpu" | "reference" | "split";
 export type TerrainLabPane = "canonical" | "cpu" | "gpu";
 export type CanonicalTerrainStage = "surface" | "final";
@@ -34,6 +42,9 @@ export type TerrainLabLayer =
 
 export interface TerrainLabState {
   profile: TerrainLabProfile;
+  visualProfile: TerrainLabVisualProfile;
+  texturePresentation: TerrainLabTexturePresentation;
+  compareVisualProfile: TerrainLabComparisonVisualProfile;
   seed: string;
   centerX: number;
   centerZ: number;
@@ -58,6 +69,9 @@ export interface TerrainLabCamera {
 
 export const DEFAULT_TERRAIN_LAB_STATE: TerrainLabState = {
   profile: "mclone-overworld-v1",
+  visualProfile: "mclone-original",
+  texturePresentation: "textured",
+  compareVisualProfile: "off",
   seed: "-98765",
   centerX: -304,
   centerZ: 336,
@@ -90,6 +104,19 @@ const I64_MAX = (1n << 63n) - 1n;
 const I32_MIN = -2_147_483_648;
 const I32_MAX = 2_147_483_647;
 const PROFILES = new Set<TerrainLabProfile>(["mclone-overworld-v1", "overworld"]);
+const VISUAL_PROFILES = new Set<TerrainLabVisualProfile>([
+  "mclone-original",
+  "minecraft-reference",
+  "hybrid-authoring",
+  "first-party-coverage",
+  "provisional-audit",
+]);
+const TEXTURE_PRESENTATIONS = new Set<TerrainLabTexturePresentation>([
+  "textured",
+  "flat-colors",
+]);
+const COMPARISON_VISUAL_PROFILES =
+  new Set<TerrainLabComparisonVisualProfile>(["off", ...VISUAL_PROFILES]);
 const SOURCES = new Set<TerrainLabSource>(["gpu", "reference", "split"]);
 const PANES = new Set<TerrainLabPane>(["canonical", "cpu", "gpu"]);
 const CANONICAL_STAGES = new Set<CanonicalTerrainStage>(["surface", "final"]);
@@ -129,6 +156,14 @@ export function parseTerrainLabState(
       : fallback.panes);
   return normalizeTerrainLabProfileState({
     profile: validMember(params.get("profile"), PROFILES) ?? fallback.profile,
+    visualProfile:
+      validMember(params.get("visual"), VISUAL_PROFILES) ?? fallback.visualProfile,
+    texturePresentation:
+      validMember(params.get("texture"), TEXTURE_PRESENTATIONS)
+      ?? fallback.texturePresentation,
+    compareVisualProfile:
+      validMember(params.get("compareVisual"), COMPARISON_VISUAL_PROFILES)
+      ?? fallback.compareVisualProfile,
     seed: validSeed(params.get("seed")) ?? fallback.seed,
     centerX: validI32(params.get("x")) ?? fallback.centerX,
     centerZ: validI32(params.get("z")) ?? fallback.centerZ,
@@ -158,6 +193,9 @@ export function parseTerrainLabState(
 export function terrainLabSearch(state: TerrainLabState): string {
   const params = new URLSearchParams();
   params.set("profile", state.profile);
+  params.set("visual", state.visualProfile);
+  params.set("texture", state.texturePresentation);
+  params.set("compareVisual", state.compareVisualProfile);
   params.set("seed", state.seed);
   params.set("x", String(state.centerX));
   params.set("z", String(state.centerZ));
@@ -368,8 +406,8 @@ export function pinchPanZoomTerrainLabState(
   return grabPanTerrainLabStateInView(
     zoomed,
     camera,
-    centroidDeltaX,
-    centroidDeltaY,
+    state.view === "3d" ? -centroidDeltaX : centroidDeltaX,
+    state.view === "3d" ? -centroidDeltaY : centroidDeltaY,
     panelWidth,
     panelHeight,
     panelAspect,

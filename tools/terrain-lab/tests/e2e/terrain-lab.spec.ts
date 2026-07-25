@@ -34,6 +34,10 @@ test("generates terrain, round-trips controls, and completes comparison", async 
     "data-compare-layout",
     testInfo.project.name === "phone-chrome" ? "stacked" : "side-by-side",
   );
+  if (testInfo.project.name === "phone-chrome") {
+    await expect(page.getByTestId("pane-scroll-gutter")).toBeVisible();
+    await expect(page.getByTestId("lod-scroll-gutter")).toBeVisible();
+  }
   await expect(shell).toHaveAttribute("data-projection", "orthographic");
   expect(Number(await shell.getAttribute("data-vertex-count"))).toBeGreaterThan(49_152);
   await expect(shell).toHaveAttribute("data-target-ready", "true");
@@ -399,7 +403,7 @@ test("switches the whole lab to worker-backed vanilla terrain", async ({
   expect(pageErrors).toEqual([]);
 });
 
-test("two-finger gestures pan and zoom procedural and real terrain", async ({
+test("touch gutters scroll and two-finger gestures navigate both terrains", async ({
   page,
 }, testInfo) => {
   test.skip(testInfo.project.name !== "phone-chrome", "touch-only interaction contract");
@@ -421,6 +425,10 @@ test("two-finger gestures pan and zoom procedural and real terrain", async ({
   const proceduralStage = page.getByTestId("terrain-stage");
   const canonicalStage = page.getByTestId("canonical-terrain-stage");
 
+  await assertPageScrollsBothWaysFromGutter(
+    page,
+    page.getByTestId("pane-scroll-gutter"),
+  );
   await assertTouchPanZoom(page, proceduralStage);
   await expect(shell).toHaveAttribute("data-inspected-x", "");
   await waitForLane(page, "gpu");
@@ -449,6 +457,14 @@ test("two-finger gestures pan and zoom procedural and real terrain", async ({
   await expect.poll(
     async () => Number(await shell.getAttribute("data-camera-pitch")),
   ).toBe(initialPitch);
+
+  await page.getByRole("button", { name: "Real terrain", exact: true }).click();
+  await page.getByRole("button", { name: "CPU LOD", exact: true }).click();
+  await expect(shell).toHaveAttribute("data-panes", "cpu,gpu");
+  await assertPageScrollsBothWaysFromGutter(
+    page,
+    page.getByTestId("lod-scroll-gutter"),
+  );
   expect(pageErrors).toEqual([]);
 });
 
@@ -761,6 +777,69 @@ test("publishes, shifts, and restores a 31x31 real footprint", async ({
   expect(pageErrors).toEqual([]);
 });
 
+test("switches material profiles and compares Minecraft reference art", async ({
+  page,
+}, testInfo) => {
+  await page.goto(
+    "/terrain/?seed=-98765&x=-304&z=336&blocks=24&detail=auto"
+      + "&panes=canonical&canonical=surface&radius=0"
+      + "&water=1&vegetation=1&view=3d&layer=terrain"
+      + "&visual=mclone-original&texture=textured&compareVisual=off",
+  );
+  const shell = page.locator(".appShell");
+  await waitForCanonical(page, 1);
+  await expect(shell).toHaveAttribute("data-reference-textures-available", "true");
+  const originalCanvas = page.locator(
+    "canvas[aria-label='Canonical textured terrain preview']",
+  );
+  const texturedPixels = await originalCanvas.screenshot();
+
+  await page.getByLabel("Texture representation").selectOption("flat-colors");
+  await expect(shell).toHaveAttribute("data-texture-presentation", "flat-colors");
+  await expect(page.getByTestId("canonical-terrain-stage")).toHaveAttribute(
+    "data-render-ready",
+    "true",
+  );
+  await waitForCanonical(page, 1);
+  const flatPixels = await originalCanvas.screenshot({
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-flat-colors.png`,
+  });
+  expect(flatPixels.equals(texturedPixels)).toBe(false);
+
+  await page.getByLabel("Texture representation").selectOption("textured");
+  await page.getByLabel("Exact material comparison").selectOption(
+    "minecraft-reference",
+  );
+  await expect(shell).toHaveAttribute(
+    "data-compare-visual-profile",
+    "minecraft-reference",
+  );
+  await expect(page.getByTestId("canonical-terrain-stage")).toHaveCount(2);
+  await expect(page.locator("[data-testid='lab-status']")).toContainText("ready");
+  const comparisonStages = page.getByTestId("canonical-terrain-stage");
+  await expect(comparisonStages.nth(1)).toHaveAttribute(
+    "data-visual-profile",
+    "minecraft-reference",
+  );
+  const mclonePixels = await comparisonStages.nth(0).locator("canvas").screenshot();
+  const minecraftPixels = await comparisonStages.nth(1).locator("canvas").screenshot();
+  expect(minecraftPixels.equals(mclonePixels)).toBe(false);
+  await page.getByTestId("pane-workspace").screenshot({
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-material-comparison.png`,
+  });
+  await page.screenshot({
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-material-profiles-ui.png`,
+    fullPage: true,
+  });
+
+  await page.getByLabel("Visual material profile").selectOption(
+    "first-party-coverage",
+  );
+  await expect(shell).toHaveAttribute("data-visual-profile", "first-party-coverage");
+  await expect(shell).toHaveAttribute("data-texture-presentation", "textured");
+  await expect(page.getByLabel("Texture representation")).toBeDisabled();
+});
+
 async function waitForCanonical(
   page: import("@playwright/test").Page,
   requestedChunks: number,
@@ -813,6 +892,49 @@ async function assertTouchPanZoom(
 }
 
 async function dispatchTwoFingerGesture(
+  page: import("@playwright/test").Page,
+  start: Array<{ x: number; y: number }>,
+  end: Array<{ x: number; y: number }>,
+): Promise<void> {
+  await dispatchTouchGesture(page, start, end);
+}
+
+async function assertPageScrollsBothWaysFromGutter(
+  page: import("@playwright/test").Page,
+  gutter: import("@playwright/test").Locator,
+): Promise<void> {
+  await gutter.scrollIntoViewIfNeeded();
+  await expect(gutter).toBeVisible();
+  await expect.poll(
+    () => gutter.evaluate((element) => getComputedStyle(element).touchAction),
+  ).toBe("pan-y");
+  const initialBounds = await gutter.boundingBox();
+  expect(initialBounds).not.toBeNull();
+  const initialScroll = await page.evaluate(() => window.scrollY);
+  const x = initialBounds!.x + initialBounds!.width * 0.5;
+  const y = initialBounds!.y + initialBounds!.height * 0.5;
+
+  await dispatchTouchGesture(
+    page,
+    [{ x, y }],
+    [{ x, y: y - 72 }],
+  );
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeGreaterThan(initialScroll);
+
+  const downScroll = await page.evaluate(() => window.scrollY);
+  const returnBounds = await gutter.boundingBox();
+  expect(returnBounds).not.toBeNull();
+  const returnX = returnBounds!.x + returnBounds!.width * 0.5;
+  const returnY = returnBounds!.y + returnBounds!.height * 0.5;
+  await dispatchTouchGesture(
+    page,
+    [{ x: returnX, y: returnY }],
+    [{ x: returnX, y: returnY + 72 }],
+  );
+  await expect.poll(() => page.evaluate(() => window.scrollY)).toBeLessThan(downScroll);
+}
+
+async function dispatchTouchGesture(
   page: import("@playwright/test").Page,
   start: Array<{ x: number; y: number }>,
   end: Array<{ x: number; y: number }>,

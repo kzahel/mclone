@@ -22,8 +22,11 @@ import {
   type TerrainLabPane,
   type TerrainLabProfile,
   type TerrainLabProjection,
+  type TerrainLabComparisonVisualProfile,
   type TerrainLabState,
+  type TerrainLabTexturePresentation,
   type TerrainLabView,
+  type TerrainLabVisualProfile,
 } from "../state";
 import {
   CanonicalTerrainCanvas,
@@ -36,6 +39,10 @@ import {
   type TerrainLabPointReceipt,
   type TerrainLabRenderReport,
 } from "./TerrainCanvas";
+import {
+  loadTerrainVisualAssets,
+  visualProfileUsesMinecraftReference,
+} from "./visual-assets";
 
 type LabStatus = "loading" | "ready" | "rendering" | "error";
 type BenchmarkProfile = "interactive" | "stress";
@@ -60,6 +67,38 @@ const LAYER_OPTIONS: Array<{ value: TerrainLabLayer; label: string }> = [
   { value: "streams", label: "Planned streams" },
 ];
 
+const VISUAL_PROFILE_OPTIONS: Array<{
+  value: TerrainLabVisualProfile;
+  label: string;
+  note: string;
+}> = [
+  {
+    value: "mclone-original",
+    label: "Mclone Original",
+    note: "Curated first-party art, filled by coherent provisional textures",
+  },
+  {
+    value: "minecraft-reference",
+    label: "Minecraft Reference",
+    note: "Local Minecraft 1.17.1 textures for visual parity work",
+  },
+  {
+    value: "hybrid-authoring",
+    label: "Authoring Hybrid",
+    note: "Curated first-party art, then Minecraft reference, then provisional",
+  },
+  {
+    value: "first-party-coverage",
+    label: "Coverage Debug",
+    note: "Curated art or conspicuous numbered diagnostics; always textured",
+  },
+  {
+    value: "provisional-audit",
+    label: "Provisional Audit",
+    note: "Provisional first-party textures only",
+  },
+];
+
 export function App(): React.JSX.Element {
   const [state, setState] = useState<TerrainLabState>(() =>
     parseTerrainLabState(window.location.search)
@@ -76,9 +115,33 @@ export function App(): React.JSX.Element {
   const [canonicalCacheEnabled, setCanonicalCacheEnabled] = useState(true);
   const [canonicalCacheEpoch, setCanonicalCacheEpoch] = useState(0);
   const [canonicalReport, setCanonicalReport] = useState<CanonicalTerrainReport>();
+  const [comparisonCanonicalReport, setComparisonCanonicalReport] =
+    useState<CanonicalTerrainReport>();
+  const [visualAssetsReady, setVisualAssetsReady] = useState(false);
+  const [minecraftReferenceAvailable, setMinecraftReferenceAvailable] =
+    useState<boolean>();
   const [benchmarkProfile, setBenchmarkProfile] =
     useState<BenchmarkProfile>("interactive");
   const splitLayout = useResponsiveSplitLayout();
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadTerrainVisualAssets()
+      .then((assets) => {
+        if (!cancelled) {
+          setMinecraftReferenceAvailable(assets.reference !== undefined);
+          setVisualAssetsReady(true);
+        }
+      })
+      .catch((loadError: unknown) => {
+        if (!cancelled) {
+          setError(errorMessage(loadError));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const search = terrainLabSearch(state);
@@ -90,6 +153,15 @@ export function App(): React.JSX.Element {
   useEffect(() => {
     setPointReceipt(undefined);
   }, [state.profile]);
+
+  useEffect(() => {
+    setCanonicalReport(undefined);
+    setComparisonCanonicalReport(undefined);
+  }, [
+    state.compareVisualProfile,
+    state.texturePresentation,
+    state.visualProfile,
+  ]);
 
   useEffect(() => {
     const restore = (): void => {
@@ -117,14 +189,38 @@ export function App(): React.JSX.Element {
   const gpuVisible = state.panes.includes("gpu");
   const proceduralVisible = cpuVisible || gpuVisible;
   const proceduralSource = proceduralSourceForPanes(state.panes);
+  const primaryVisualUnavailable = visualAssetsReady
+    && visualProfileUsesMinecraftReference(state.visualProfile)
+    && minecraftReferenceAvailable === false;
+  const compareVisualProfile = state.compareVisualProfile === "off"
+    ? undefined
+    : state.compareVisualProfile;
+  const visualComparisonVisible = canonicalVisible
+    && compareVisualProfile !== undefined;
+  const comparisonVisualUnavailable = visualAssetsReady
+    && compareVisualProfile !== undefined
+    && visualProfileUsesMinecraftReference(compareVisualProfile)
+    && minecraftReferenceAvailable === false;
+  const primaryTexturePresentation = texturePresentationForProfile(
+    state.visualProfile,
+    state.texturePresentation,
+  );
+  const comparisonTexturePresentation = compareVisualProfile
+    ? texturePresentationForProfile(compareVisualProfile, state.texturePresentation)
+    : state.texturePresentation;
   const proceduralState = useMemo(
     () => ({ ...state, source: proceduralSource }),
     [proceduralSource, state],
   );
   const workspaceStatus: LabStatus = error
     ? "error"
-    : (!proceduralVisible || status === "ready")
-      && (!canonicalVisible || canonicalReport?.complete)
+    : !visualAssetsReady
+      ? "loading"
+      : (!proceduralVisible || primaryVisualUnavailable || status === "ready")
+      && (!canonicalVisible || primaryVisualUnavailable || canonicalReport?.complete)
+      && (!visualComparisonVisible
+        || comparisonVisualUnavailable
+        || comparisonCanonicalReport?.complete)
       ? "ready"
       : status === "loading" && proceduralVisible
         ? "loading"
@@ -153,6 +249,14 @@ export function App(): React.JSX.Element {
       data-landform-agreement={comparison?.landformKindAgreement ?? ""}
       data-stage={state.contentStage}
       data-profile={state.profile}
+      data-visual-profile={state.visualProfile}
+      data-texture-presentation={primaryTexturePresentation}
+      data-compare-visual-profile={state.compareVisualProfile}
+      data-reference-textures-available={
+        minecraftReferenceAvailable === undefined
+          ? "loading"
+          : minecraftReferenceAvailable ? "true" : "false"
+      }
       data-inspected-x={state.profile === "overworld" ? "" : pointReceipt?.worldX ?? ""}
       data-inspected-z={state.profile === "overworld" ? "" : pointReceipt?.worldZ ?? ""}
       data-continentalness-error={comparison?.meanAbsoluteContinentalnessError ?? ""}
@@ -240,7 +344,11 @@ export function App(): React.JSX.Element {
               panes={state.panes}
               onToggle={(pane) => updateState(toggleTerrainLabPane(state, pane))}
             />
-            <WorkspaceGuide profile={state.profile} panes={state.panes} />
+            <WorkspaceGuide
+              profile={state.profile}
+              visualProfile={state.visualProfile}
+              panes={state.panes}
+            />
           </div>
           <div className="mapToolbar" data-testid="viewport-controls">
             <SegmentedControl<TerrainLabView>
@@ -319,16 +427,76 @@ export function App(): React.JSX.Element {
           >
             {canonicalVisible ? (
               <div className="paneFrame canonicalPaneFrame">
-                <CanonicalTerrainCanvas
-                  state={state}
-                  camera={camera}
-                  cacheEnabled={canonicalCacheEnabled}
-                  cacheEpoch={canonicalCacheEpoch}
-                  onStateChange={updateState}
-                  onCameraChange={setCamera}
-                  onReport={setCanonicalReport}
-                  onError={setError}
-                />
+                <div
+                  className={`canonicalPaneSet${
+                    visualComparisonVisible ? " comparingMaterials" : ""
+                  }`}
+                >
+                  {!visualAssetsReady ? (
+                    <VisualProfileUnavailable
+                      profile={state.visualProfile}
+                      reason="Loading material sources…"
+                    />
+                  ) : primaryVisualUnavailable ? (
+                    <VisualProfileUnavailable
+                      profile={state.visualProfile}
+                      reason="This profile requires a local Minecraft 1.17.1 reference pack."
+                    />
+                  ) : (
+                    <CanonicalTerrainCanvas
+                      state={state}
+                      visualProfile={state.visualProfile}
+                      texturePresentation={primaryTexturePresentation}
+                      camera={camera}
+                      cacheEnabled={canonicalCacheEnabled}
+                      cacheEpoch={canonicalCacheEpoch}
+                      onStateChange={updateState}
+                      onCameraChange={setCamera}
+                      onReport={setCanonicalReport}
+                      onError={setError}
+                    />
+                  )}
+                  {visualComparisonVisible && compareVisualProfile ? (
+                    !visualAssetsReady ? (
+                      <VisualProfileUnavailable
+                        comparison
+                        profile={compareVisualProfile}
+                        reason="Loading material sources…"
+                      />
+                    ) : comparisonVisualUnavailable ? (
+                      <VisualProfileUnavailable
+                        comparison
+                        profile={compareVisualProfile}
+                        reason="This comparison requires a local Minecraft 1.17.1 reference pack."
+                      />
+                    ) : (
+                      <CanonicalTerrainCanvas
+                        state={state}
+                        visualProfile={compareVisualProfile}
+                        texturePresentation={comparisonTexturePresentation}
+                        comparison
+                        camera={camera}
+                        cacheEnabled={canonicalCacheEnabled}
+                        cacheEpoch={canonicalCacheEpoch}
+                        onStateChange={updateState}
+                        onCameraChange={setCamera}
+                        onReport={setComparisonCanonicalReport}
+                        onError={setError}
+                      />
+                    )
+                  ) : null}
+                </div>
+              </div>
+            ) : null}
+            {canonicalVisible && proceduralVisible ? (
+              <div
+                className="pageScrollGutter panePageScrollGutter"
+                data-testid="pane-scroll-gutter"
+                role="separator"
+                aria-label="Swipe here to scroll the page"
+                aria-orientation="horizontal"
+              >
+                <span aria-hidden="true">↕ scroll page</span>
               </div>
             ) : null}
             {proceduralVisible ? (
@@ -338,22 +506,37 @@ export function App(): React.JSX.Element {
                 }${splitLayout === "rows" ? " splitRows" : ""
                 }`}
               >
-                <TerrainCanvas
-                  state={proceduralState}
-                  camera={camera}
-                  splitLayout={splitLayout}
-                  cacheEnabled={cacheEnabled}
-                  cacheEpoch={cacheEpoch}
-                  maxVisibleTilesPerAxis={benchmarkProfile === "stress" ? 12 : 8}
-                  onStateChange={updateState}
-                  onCameraChange={setCamera}
-                  onAdapter={setAdapter}
-                  onRender={setRenderReport}
-                  onComparison={setComparison}
-                  onInspect={setPointReceipt}
-                  onError={setError}
-                  onStatus={setStatus}
-                />
+                {!visualAssetsReady ? (
+                  <VisualProfileUnavailable
+                    profile={state.visualProfile}
+                    reason="Loading material sources…"
+                  />
+                ) : primaryVisualUnavailable ? (
+                  <VisualProfileUnavailable
+                    profile={state.visualProfile}
+                    reason="This profile requires a local Minecraft 1.17.1 reference pack."
+                  />
+                ) : (
+                  <TerrainCanvas
+                    state={{
+                      ...proceduralState,
+                      texturePresentation: primaryTexturePresentation,
+                    }}
+                    camera={camera}
+                    splitLayout={splitLayout}
+                    cacheEnabled={cacheEnabled}
+                    cacheEpoch={cacheEpoch}
+                    maxVisibleTilesPerAxis={benchmarkProfile === "stress" ? 12 : 8}
+                    onStateChange={updateState}
+                    onCameraChange={setCamera}
+                    onAdapter={setAdapter}
+                    onRender={setRenderReport}
+                    onComparison={setComparison}
+                    onInspect={setPointReceipt}
+                    onError={setError}
+                    onStatus={setStatus}
+                  />
+                )}
               </div>
             ) : null}
           </div>
@@ -381,7 +564,11 @@ export function App(): React.JSX.Element {
               </strong>
             </div>
             <div className="approximationNote">
-              <SourceFootnote profile={state.profile} panes={state.panes} />
+              <SourceFootnote
+                profile={state.profile}
+                visualProfile={state.visualProfile}
+                panes={state.panes}
+              />
             </div>
           </div>
         </section>
@@ -440,6 +627,85 @@ export function App(): React.JSX.Element {
           </ControlSection>
 
           <ControlSection number="03" title="Presentation">
+            <label className="fieldLabel">
+              <span>Visual material profile</span>
+              <select
+                aria-label="Visual material profile"
+                value={state.visualProfile}
+                onChange={(event) =>
+                  patchState({
+                    visualProfile: event.target.value as TerrainLabVisualProfile,
+                  })
+                }
+              >
+                {VISUAL_PROFILE_OPTIONS.map((option) => (
+                  <option
+                    key={option.value}
+                    value={option.value}
+                    disabled={
+                      minecraftReferenceAvailable === false
+                      && visualProfileUsesMinecraftReference(option.value)
+                    }
+                  >
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              <small>{visualProfileNote(state.visualProfile)}</small>
+            </label>
+            <label className="fieldLabel">
+              <span>Texture representation</span>
+              <select
+                aria-label="Texture representation"
+                value={primaryTexturePresentation}
+                disabled={state.visualProfile === "first-party-coverage"}
+                onChange={(event) =>
+                  patchState({
+                    texturePresentation:
+                      event.target.value as TerrainLabTexturePresentation,
+                  })
+                }
+              >
+                <option value="textured">Textured</option>
+                <option value="flat-colors">
+                  Derived flat colors · alpha-weighted texture average
+                </option>
+              </select>
+            </label>
+            <label className="fieldLabel">
+              <span>Exact material comparison</span>
+              <select
+                aria-label="Exact material comparison"
+                value={state.compareVisualProfile}
+                disabled={!canonicalVisible}
+                onChange={(event) =>
+                  patchState({
+                    compareVisualProfile:
+                      event.target.value as TerrainLabComparisonVisualProfile,
+                  })
+                }
+              >
+                <option value="off">Off · one exact material view</option>
+                {VISUAL_PROFILE_OPTIONS.map((option) => (
+                  <option
+                    key={option.value}
+                    value={option.value}
+                    disabled={
+                      minecraftReferenceAvailable === false
+                      && visualProfileUsesMinecraftReference(option.value)
+                    }
+                  >
+                    Compare with {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <p className="controlNote">
+              Profiles are complete source chains, not independent pack
+              checkboxes. Minecraft Reference and Authoring Hybrid require a
+              local extracted 1.17.1 pack. Comparison adds a synchronized exact
+              pane; it does not change terrain generation.
+            </p>
             {canonicalVisible ? (
               <>
                 <SegmentedControl<CanonicalTerrainStage>
@@ -587,6 +853,7 @@ export function App(): React.JSX.Element {
                   type="button"
                   onClick={() => {
                     setCanonicalReport(undefined);
+                    setComparisonCanonicalReport(undefined);
                     setCanonicalCacheEpoch((current) => current + 1);
                   }}
                 >
@@ -644,6 +911,7 @@ export function App(): React.JSX.Element {
                   setComparison(undefined);
                   setCacheEpoch((current) => current + 1);
                   setCanonicalReport(undefined);
+                  setComparisonCanonicalReport(undefined);
                   setCanonicalCacheEpoch((current) => current + 1);
                 }}
               >
@@ -859,9 +1127,11 @@ function PaneToggles({
 
 function WorkspaceGuide({
   profile,
+  visualProfile,
   panes,
 }: {
   profile: TerrainLabProfile;
+  visualProfile: TerrainLabVisualProfile;
   panes: TerrainLabPane[];
 }): React.JSX.Element {
   const exact = panes.includes("canonical");
@@ -875,7 +1145,9 @@ function WorkspaceGuide({
           ? "This workspace is globally vanilla: exact chunks and CPU LOD both use the Java 1.17.1 overworld family. "
           : ""}
         {exact
-          ? "Real terrain uses final production chunks, the first-party atlas, water, and features. Uncurated materials remain visibly marked by generated fallback tiles. "
+          ? `Real terrain uses final production chunks with the ${
+              visualProfileLabel(visualProfile)
+            } material profile, water, and features. `
           : ""}
         {cpu && gpu
           ? "CPU and GPU LOD panes publish independently at the exact same coordinates. "
@@ -892,9 +1164,11 @@ function WorkspaceGuide({
 
 function SourceFootnote({
   profile,
+  visualProfile,
   panes,
 }: {
   profile: TerrainLabProfile;
+  visualProfile: TerrainLabVisualProfile;
   panes: TerrainLabPane[];
 }): React.JSX.Element {
   if (profile === "overworld") {
@@ -909,13 +1183,39 @@ function SourceFootnote({
   }
   return (
     <>
-      Real terrain is exact generated blocks with the production first-party
-      atlas and preview lighting. Generated fallback tiles identify materials
-      that do not have curated textures yet. LOD panes remain
-      presentation-only. CPU and GPU LOD share natural rivers and wetlands;
-      planned streams are reconstructed from production route records at
-      near-detail checkpoints.
+      Real terrain is exact generated blocks with {visualProfileLabel(visualProfile)}
+      {" "}materials and preview lighting. Mclone Original fills uncurated
+      materials with coherent provisional art; Coverage Debug is the opt-in
+      numbered missing-texture view. LOD panes use the same material profile
+      while remaining presentation-only. CPU and GPU LOD share natural rivers
+      and wetlands; planned streams are reconstructed from production route
+      records at near-detail checkpoints.
     </>
+  );
+}
+
+function VisualProfileUnavailable({
+  profile,
+  reason,
+  comparison = false,
+}: {
+  profile: TerrainLabVisualProfile;
+  reason: string;
+  comparison?: boolean;
+}): React.JSX.Element {
+  return (
+    <div
+      className="terrainStage visualProfileUnavailable"
+      data-testid="visual-profile-unavailable"
+      data-comparison={comparison ? "true" : "false"}
+      data-visual-profile={profile}
+    >
+      <div>
+        <span>{comparison ? "Comparison unavailable" : "Material profile unavailable"}</span>
+        <strong>{visualProfileLabel(profile)}</strong>
+        <p>{reason}</p>
+      </div>
+    </div>
   );
 }
 
@@ -1427,4 +1727,25 @@ function randomSeed(): string {
 
 function parseDetail(value: string): TerrainLabDetail {
   return value === "auto" ? "auto" : Number(value) as TerrainLabDetail;
+}
+
+function texturePresentationForProfile(
+  profile: TerrainLabVisualProfile,
+  presentation: TerrainLabTexturePresentation,
+): TerrainLabTexturePresentation {
+  return profile === "first-party-coverage" ? "textured" : presentation;
+}
+
+function visualProfileLabel(profile: TerrainLabVisualProfile): string {
+  return VISUAL_PROFILE_OPTIONS.find((option) => option.value === profile)?.label
+    ?? profile;
+}
+
+function visualProfileNote(profile: TerrainLabVisualProfile): string {
+  return VISUAL_PROFILE_OPTIONS.find((option) => option.value === profile)?.note
+    ?? "";
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

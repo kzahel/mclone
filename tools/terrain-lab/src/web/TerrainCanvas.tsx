@@ -25,6 +25,10 @@ import type {
   LodWorkerResult,
 } from "./lod-worker-protocol";
 import { initializeTerrainLab } from "./terrain-lab-wasm";
+import {
+  loadTerrainVisualAssets,
+  optionalReferenceBytes,
+} from "./visual-assets";
 
 export interface TerrainLabAdapterReport {
   name: string;
@@ -266,9 +270,6 @@ interface PinchStart {
   state: TerrainLabState;
 }
 
-const AUTHORED_PACK_URL = "/first-party-packs/mclone-authored.pbp";
-const FALLBACK_PACK_URL = "/first-party-packs/mclone-generated-fallback.pbp";
-
 export function TerrainCanvas({
   state,
   camera,
@@ -323,22 +324,27 @@ export function TerrainCanvas({
       return;
     }
     onStatus("loading");
+    setInitialized(false);
+    setLatestReport(undefined);
     void (async () => {
       if (!("gpu" in navigator)) {
         throw new Error("This browser does not expose WebGPU.");
       }
-      const [, authored, fallback] = await Promise.all([
+      const [, assets] = await Promise.all([
         initializeTerrainLab(),
-        fetchPack(AUTHORED_PACK_URL),
-        fetchPack(FALLBACK_PACK_URL),
+        loadTerrainVisualAssets(),
       ]);
       if (cancelled) {
         return;
       }
       const lab = await mclone_terrain_lab_create(
         canvas,
-        authored,
-        fallback,
+        assets.authored,
+        optionalReferenceBytes(assets),
+        assets.provisional,
+        assets.diagnostic,
+        state.visualProfile,
+        state.texturePresentation,
       ) as WorkerBackedTerrainLab;
       if (cancelled) {
         lab.free();
@@ -361,7 +367,13 @@ export function TerrainCanvas({
       labRef.current?.free();
       labRef.current = undefined;
     };
-  }, [onAdapter, onError, onStatus]);
+  }, [
+    onAdapter,
+    onError,
+    onStatus,
+    state.texturePresentation,
+    state.visualProfile,
+  ]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -857,6 +869,18 @@ export function TerrainCanvas({
           </span>
         </div>
       ) : null}
+      {state.source === "split" && splitLayout === "rows" ? (
+        <div
+          className="pageScrollGutter splitPageScrollGutter"
+          data-testid="lod-scroll-gutter"
+          role="separator"
+          aria-label="Swipe here to scroll the page"
+          aria-orientation="horizontal"
+          onPointerDown={(event) => event.stopPropagation()}
+        >
+          <span aria-hidden="true">↕ scroll page</span>
+        </div>
+      ) : null}
       <div className="canvasHint" aria-hidden="true">
         <span className="desktopHint">
           {state.profile === "overworld"
@@ -936,14 +960,6 @@ function pointerMidpoint(
     clientX: (first.clientX + second.clientX) * 0.5,
     clientY: (first.clientY + second.clientY) * 0.5,
   };
-}
-
-async function fetchPack(url: string): Promise<Uint8Array> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to load ${url}: HTTP ${response.status}`);
-  }
-  return new Uint8Array(await response.arrayBuffer());
 }
 
 function panelReadiness(

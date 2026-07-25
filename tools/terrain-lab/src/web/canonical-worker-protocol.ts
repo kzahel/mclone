@@ -1,6 +1,8 @@
 import type {
   CanonicalTerrainStage,
   TerrainLabProfile,
+  TerrainLabTexturePresentation,
+  TerrainLabVisualProfile,
 } from "../state";
 
 export interface CanonicalCoordinate {
@@ -12,6 +14,8 @@ export interface CanonicalWorkerInit {
   type: "init";
   epoch: number;
   profile: TerrainLabProfile;
+  visualProfile: TerrainLabVisualProfile;
+  texturePresentation: TerrainLabTexturePresentation;
   seed: string;
   stage: CanonicalTerrainStage;
 }

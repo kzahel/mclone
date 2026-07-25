@@ -3,14 +3,18 @@
 Topic: `gpu-procedural-terrain`
 
 Status: Tactical
-[`241`](../tactical/241-terrain-lab-large-canonical-footprints.md) completed a
-deployed `31x31 = 961` exact-footprint review mode with bounded raw caching,
-tracked-memory telemetry, and local/hosted desktop/mobile headed-WebGPU proof
-2026-07-25. Shared orthographic/perspective projection and equal logical-pane
-layout correction also completed local desktop/mobile headed-WebGPU
-validation 2026-07-25. Orthographic is now the default. The earlier textured
-projection and navigation follow-up completed with local and hosted
-desktop/mobile validation 2026-07-24 under
+[`242`](../tactical/242-terrain-lab-worker-canonical-meshing.md) completed
+Worker-owned canonical meshing, warm GPU residency, and local/hosted
+desktop/mobile headed-WebGPU proof 2026-07-25. A subsequent touch UX follow-up
+adds narrow page-scroll corridors between stacked terrain views and
+direct-grab two-finger 3D panning without changing mouse navigation. Tactical
+[`241`](../tactical/241-terrain-lab-large-canonical-footprints.md) previously
+completed a deployed `31x31 = 961` exact-footprint review mode with bounded
+raw caching and tracked-memory telemetry. Shared orthographic/perspective
+projection and equal logical-pane layout correction also completed local
+desktop/mobile headed-WebGPU validation 2026-07-25. Orthographic is now the
+default. The earlier textured projection and navigation follow-up completed
+with local and hosted desktop/mobile validation 2026-07-24 under
 Tactical
 [`233-terrain-lab-projection-materials-and-navigation.md`](../tactical/233-terrain-lab-projection-materials-and-navigation.md).
 The canonical multi-pane Terrain Lab workspace completed local and hosted
@@ -201,15 +205,21 @@ without changing generation.
 Three-dimensional left drag orbits with conventional pitch direction without
 changing URL-addressed geography; right drag, Shift+left, or middle drag pan,
 focused arrow keys pan in map and 3D, map left drag pans, wheel and pinch
-change a separate continuous viewport, and map zoom is cursor anchored. Auto
-targets approximately two CSS pixels per sample cell;
+change a separate continuous viewport, and map zoom is cursor anchored.
+Two-finger touch pan uses direct-grab motion on both axes in map and 3D while
+mouse pan and one-finger orbit retain their existing directions. Auto targets
+approximately two CSS pixels per sample cell;
 an explicit manual request remains visible when the interactive tile budget
 raises effective spacing. CPU and GPU LOD publish independently at exact
 matching coordinates. Desktop comparison uses equal-height logical columns;
 the responsive phone layout uses equal-size logical rows, including a
 double-height procedural host when both LOD panes are visible. This prevents
 the old half-height LOD view from changing physical block scale relative to
-canonical terrain.
+canonical terrain. Each stacked terrain boundary exposes a 24 CSS-pixel
+`pan-y` page-scroll corridor, including the internal CPU/GPU row boundary.
+The terrain canvases retain `touch-action: none`, so gestures beginning on
+terrain still navigate it while gestures beginning on a corridor scroll the
+page in either direction.
 
 The deployed `/terrain/` product remains independent of the game client,
 server, collision, persistence, and authoritative propagated lighting. It now
@@ -1342,6 +1352,20 @@ still took 6.87 seconds on desktop and 7.63 seconds on phone. That isolates
 the next likely bottleneck: repeated full-footprint render
 traversal/encoding/submission and animation-frame cadence, not admission or
 meshing. A Worker pool should wait until that render boundary is measured.
+
+A 2026-07-25 touch follow-up removes the stacked-view page-scroll trap without
+adding a floating action button. The phone layout now shows a narrow labeled
+scroll corridor between canonical and procedural panes and over the internal
+CPU/GPU seam. Real Chrome touch input scrolled upward and downward from both
+corridor types while two-finger gestures beginning on either terrain canvas
+continued to pan and zoom without moving the page. In 3D, centroid movement
+now directly grabs the camera ground plane on both axes; map, mouse pan, and
+one-finger orbit behavior are unchanged.
+
+The focused TypeScript suite passed 21 tests, the Terrain Lab TypeScript/Wasm
+build passed, and focused headed-Wayland Pixel WebGPU interaction passed. The
+broader phone render test also passed, and the captured stacked canonical,
+CPU, and GPU layout was inspected with both 24-pixel corridors visible.
 
 The next implementation direction is:
 

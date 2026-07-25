@@ -34,6 +34,24 @@ passes with four worker-loaded sources, persists Mclone Original, reloads it
 at asset epoch 1, and records its screenshot and receipt under
 `/tmp/mclone-native-web-asset-pack-ui-probe*`.
 
+Implementation update (2026-07-25): Terrain Lab now consumes the same shared
+profile resolver in both its exact-chunk and CPU/GPU LOD renderers. URL state
+separately records terrain generation (`profile`), visual materials (`visual`),
+texture representation (`texture`), and the optional exact comparison
+(`compareVisual`). All normal panes share the primary visual selection.
+Enabling comparison creates a second exact pane with shared seed, center,
+scale, camera, navigation, checkpoint, and visibility.
+
+The local Minecraft archive is an optional, read-only fourth source. Terrain
+Lab disables its dependent menu entries when absent and renders an explicit
+unavailable surface for a stale shared URL instead of changing profile
+semantics. Headed Wayland evidence at
+`/tmp/mclone-terrain-lab-desktop-chrome-material-profiles-ui.png` confirms the
+synchronized Mclone Original/Minecraft Reference view;
+`/tmp/mclone-terrain-lab-desktop-chrome-flat-colors.png` confirms the derived
+flat representation. The focused Playwright contract also asserts the two
+source renders differ and Coverage Debug forces textured presentation.
+
 ## Scope
 
 This topic owns the meaning, selection, and authoring lifecycle of block
@@ -118,10 +136,10 @@ Rules:
 - Unavailable Minecraft content leaves the Minecraft-dependent profiles
   unavailable; it must not silently change their meaning.
 
-The ordinary in-game Asset Packs screen presents the first three profiles as
-source choices. First-party Coverage and Provisional Audit live under
-diagnostics. Applying any profile continues to use the existing transactional
-asset-epoch replacement.
+The ordinary in-game Visual Profiles screen presents all five complete source
+orders in one compact list, with the two audit profiles visibly named as such.
+Applying any profile continues to use the existing transactional asset-epoch
+replacement.
 
 ## Presentation Detail
 
@@ -133,8 +151,8 @@ A second, orthogonal setting selects:
 
 This setting does not alter source precedence or provenance. For example,
 Minecraft Reference plus Flat colors means colors derived from the real local
-Minecraft textures, while First-party Coverage plus Flat colors preserves an
-obvious diagnostic result for missing entries.
+Minecraft textures. First-party Coverage forces Textured so its numbered
+diagnostics cannot be averaged into plausible-looking colors.
 
 The first implementation uses the existing representative-color material
 pipeline. It should preserve alpha/cutout semantics where needed and must not
@@ -208,8 +226,9 @@ as the runtime and stores them in shareable URL state.
 
 For parity work it also offers a synchronized comparison view:
 
-- left pane defaults to Mclone Original;
-- right pane defaults to Minecraft Reference;
+- comparison is off by default;
+- enabling Minecraft Reference adds it beside the primary Mclone Original
+  pane;
 - camera, world seed, generator profile, and inspected position are shared;
 - either pane may choose any available visual profile; and
 - Minecraft-dependent views clearly report when the local reference pack is
@@ -277,7 +296,7 @@ face-specific asset as active.
 2. Adopt named profiles in runtime preparation, persistence, provenance, and
    the in-game UI.
 3. Adopt the same URL-backed controls and synchronized comparison in Terrain
-   Lab.
+   Lab. **Completed 2026-07-25.**
 4. Replace Texture Lab's overlapping pack/status controls with the canonical
    material lifecycle.
 5. Derive flat colors and Far LOD summaries from resolved textures, retain

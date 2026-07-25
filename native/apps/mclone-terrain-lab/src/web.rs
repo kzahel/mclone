@@ -1,6 +1,4 @@
-use mclone_assets::{AssetSourceChain, PackedAssetSource};
 use mclone_core::BlockStateId;
-use mclone_mesh::load_first_party_textured_terrain_assets;
 use mclone_terrain_view::{
     CanonicalTerrainCompiler, CanonicalTerrainVisibility, TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION,
     TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainPreviewCamera, TerrainPreviewLayer,
@@ -31,6 +29,7 @@ use crate::{
     canonical_terrain_stage, canonical_terrain_stage_label, terrain_preview_content_stage,
     terrain_preview_option_labels, terrain_preview_options, terrain_preview_projection_kind,
     terrain_preview_split_layout,
+    visual_assets::load_terrain_lab_visual_assets,
 };
 
 #[wasm_bindgen(js_name = VanillaTerrainLodCompiler)]
@@ -128,7 +127,11 @@ impl TerrainLabCanonicalMeshSession {
     #[wasm_bindgen(js_name = withProfile)]
     pub fn with_profile(
         authored_bytes: js_sys::Uint8Array,
-        fallback_bytes: js_sys::Uint8Array,
+        reference_bytes: js_sys::Uint8Array,
+        provisional_bytes: js_sys::Uint8Array,
+        diagnostic_bytes: js_sys::Uint8Array,
+        visual_profile: String,
+        texture_presentation: String,
         seed: String,
         profile: String,
         stage: String,
@@ -139,28 +142,17 @@ impl TerrainLabCanonicalMeshSession {
             .map_err(|error| js_error(format!("invalid signed 64-bit seed {seed:?}: {error}")))?;
         let profile = TerrainPreviewProfile::parse_label(&profile).map_err(js_error)?;
         let stage = canonical_terrain_stage(&stage).map_err(js_error)?;
-        let mut source = AssetSourceChain::new();
-        source.push(
-            PackedAssetSource::from_bytes(authored_bytes.to_vec()).map_err(|error| {
-                js_error(format!(
-                    "failed to parse authored canonical Worker pack: {error}"
-                ))
-            })?,
-        );
-        source.push(
-            PackedAssetSource::from_bytes(fallback_bytes.to_vec()).map_err(|error| {
-                js_error(format!(
-                    "failed to parse fallback canonical Worker pack: {error}"
-                ))
-            })?,
-        );
-        let assets = load_first_party_textured_terrain_assets(&source).map_err(|error| {
-            js_error(format!(
-                "failed to load canonical Worker terrain assets: {error}"
-            ))
-        })?;
+        let assets = load_terrain_lab_visual_assets(
+            authored_bytes.to_vec(),
+            reference_bytes.to_vec(),
+            provisional_bytes.to_vec(),
+            diagnostic_bytes.to_vec(),
+            &visual_profile,
+            &texture_presentation,
+        )
+        .map_err(js_error)?;
         Ok(Self {
-            session: CanonicalMeshSession::new(profile, seed, stage, assets.catalog),
+            session: CanonicalMeshSession::new(profile, seed, stage, assets.terrain.catalog),
         })
     }
 
@@ -1041,19 +1033,21 @@ impl TerrainLab {
     async fn new(
         canvas: HtmlCanvasElement,
         authored_bytes: js_sys::Uint8Array,
-        fallback_bytes: js_sys::Uint8Array,
+        reference_bytes: js_sys::Uint8Array,
+        provisional_bytes: js_sys::Uint8Array,
+        diagnostic_bytes: js_sys::Uint8Array,
+        visual_profile: String,
+        texture_presentation: String,
     ) -> Result<Self, String> {
-        let mut source = AssetSourceChain::new();
-        source.push(
-            PackedAssetSource::from_bytes(authored_bytes.to_vec())
-                .map_err(|error| format!("failed to parse authored first-party pack: {error}"))?,
-        );
-        source.push(
-            PackedAssetSource::from_bytes(fallback_bytes.to_vec())
-                .map_err(|error| format!("failed to parse fallback first-party pack: {error}"))?,
-        );
-        let assets = load_first_party_textured_terrain_assets(&source)
-            .map_err(|error| format!("failed to load Terrain Lab LOD materials: {error}"))?;
+        let assets = load_terrain_lab_visual_assets(
+            authored_bytes.to_vec(),
+            reference_bytes.to_vec(),
+            provisional_bytes.to_vec(),
+            diagnostic_bytes.to_vec(),
+            &visual_profile,
+            &texture_presentation,
+        )?
+        .terrain;
         let mut material_uvs = [[0.0_f32, 0.0, 1.0, 1.0]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT];
         for (raw_id, target) in material_uvs.iter_mut().enumerate() {
             if let Some(sprite) = assets.catalog.gui_icon_uv(BlockStateId(raw_id as u32)) {
@@ -1504,13 +1498,25 @@ fn normalize3(vector: [f32; 3]) -> [f32; 3] {
 pub fn mclone_terrain_lab_create(
     canvas: HtmlCanvasElement,
     authored_bytes: js_sys::Uint8Array,
-    fallback_bytes: js_sys::Uint8Array,
+    reference_bytes: js_sys::Uint8Array,
+    provisional_bytes: js_sys::Uint8Array,
+    diagnostic_bytes: js_sys::Uint8Array,
+    visual_profile: String,
+    texture_presentation: String,
 ) -> js_sys::Promise {
     wasm_bindgen_futures::future_to_promise(async move {
-        TerrainLab::new(canvas, authored_bytes, fallback_bytes)
-            .await
-            .map(JsValue::from)
-            .map_err(JsValue::from)
+        TerrainLab::new(
+            canvas,
+            authored_bytes,
+            reference_bytes,
+            provisional_bytes,
+            diagnostic_bytes,
+            visual_profile,
+            texture_presentation,
+        )
+        .await
+        .map(JsValue::from)
+        .map_err(JsValue::from)
     })
 }
 

@@ -1,12 +1,11 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use mclone_assets::{AssetSourceChain, PackedAssetSource};
+use mclone_assets::{TexturePresentation, TextureVisualProfile};
 use mclone_core::{BlockStateId, ChunkPos};
 use mclone_mesh::{
     RENDER_SECTION_HEIGHT, RenderSectionKey, TexturedChunkMeshInput, TexturedMeshCatalog,
     TexturedRenderSectionMesh, TexturedVisibleChunkMesh,
-    build_textured_render_sections_for_chunk_set, load_first_party_textured_terrain_assets,
-    unpack_textured_render_sections,
+    build_textured_render_sections_for_chunk_set, unpack_textured_render_sections,
 };
 use mclone_render::chunk::{
     ChunkCamera, ChunkDepthTarget, ChunkRenderTarget, ChunkRenderView, ChunkTextureAtlas,
@@ -23,6 +22,7 @@ use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 use web_sys::HtmlCanvasElement;
 
 use crate::terrain_preview_projection_kind;
+use crate::visual_assets::load_terrain_lab_visual_assets;
 
 use crate::web::surface_configuration;
 
@@ -115,6 +115,8 @@ struct CanonicalRenderReport {
     view: String,
     water_visible: bool,
     vegetation_visible: bool,
+    visual_profile: &'static str,
+    texture_presentation: &'static str,
     preview_lighting: &'static str,
 }
 
@@ -131,6 +133,8 @@ pub struct CanonicalTerrainLab {
     height: u32,
     profile: TerrainPreviewProfile,
     seed: i64,
+    visual_profile: TextureVisualProfile,
+    texture_presentation: TexturePresentation,
     catalog: TexturedMeshCatalog,
     chunks: BTreeMap<(i32, i32), ResidentCanonicalChunk>,
     packed_chunk_sections: BTreeMap<(i32, i32), BTreeSet<RenderSectionKey>>,
@@ -538,6 +542,8 @@ impl CanonicalTerrainLab {
             view,
             water_visible: self.visibility.water,
             vegetation_visible: self.visibility.vegetation,
+            visual_profile: self.visual_profile.id(),
+            texture_presentation: self.texture_presentation.id(),
             preview_lighting: "fullbright + face shade + ambient occlusion",
         })
     }
@@ -547,19 +553,21 @@ impl CanonicalTerrainLab {
     async fn new(
         canvas: HtmlCanvasElement,
         authored_bytes: js_sys::Uint8Array,
-        fallback_bytes: js_sys::Uint8Array,
+        reference_bytes: js_sys::Uint8Array,
+        provisional_bytes: js_sys::Uint8Array,
+        diagnostic_bytes: js_sys::Uint8Array,
+        visual_profile: String,
+        texture_presentation: String,
     ) -> Result<Self, String> {
-        let mut source = AssetSourceChain::new();
-        source.push(
-            PackedAssetSource::from_bytes(authored_bytes.to_vec())
-                .map_err(|error| format!("failed to parse authored first-party pack: {error}"))?,
-        );
-        source.push(
-            PackedAssetSource::from_bytes(fallback_bytes.to_vec())
-                .map_err(|error| format!("failed to parse fallback first-party pack: {error}"))?,
-        );
-        let assets = load_first_party_textured_terrain_assets(&source)
-            .map_err(|error| format!("failed to load canonical terrain assets: {error}"))?;
+        let visual_assets = load_terrain_lab_visual_assets(
+            authored_bytes.to_vec(),
+            reference_bytes.to_vec(),
+            provisional_bytes.to_vec(),
+            diagnostic_bytes.to_vec(),
+            &visual_profile,
+            &texture_presentation,
+        )?;
+        let assets = visual_assets.terrain;
 
         let width = canvas.width().max(1);
         let height = canvas.height().max(1);
@@ -638,6 +646,8 @@ impl CanonicalTerrainLab {
             height,
             profile: TerrainPreviewProfile::McloneOverworldV1,
             seed: 0,
+            visual_profile: visual_assets.profile,
+            texture_presentation: visual_assets.presentation,
             catalog: assets.catalog,
             chunks: BTreeMap::new(),
             packed_chunk_sections: BTreeMap::new(),
@@ -782,13 +792,25 @@ impl CanonicalTerrainLab {
 pub fn mclone_terrain_lab_create_canonical(
     canvas: HtmlCanvasElement,
     authored_bytes: js_sys::Uint8Array,
-    fallback_bytes: js_sys::Uint8Array,
+    reference_bytes: js_sys::Uint8Array,
+    provisional_bytes: js_sys::Uint8Array,
+    diagnostic_bytes: js_sys::Uint8Array,
+    visual_profile: String,
+    texture_presentation: String,
 ) -> js_sys::Promise {
     wasm_bindgen_futures::future_to_promise(async move {
-        CanonicalTerrainLab::new(canvas, authored_bytes, fallback_bytes)
-            .await
-            .map(JsValue::from)
-            .map_err(JsValue::from)
+        CanonicalTerrainLab::new(
+            canvas,
+            authored_bytes,
+            reference_bytes,
+            provisional_bytes,
+            diagnostic_bytes,
+            visual_profile,
+            texture_presentation,
+        )
+        .await
+        .map(JsValue::from)
+        .map_err(JsValue::from)
     })
 }
 

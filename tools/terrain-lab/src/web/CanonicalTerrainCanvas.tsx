@@ -19,6 +19,8 @@ import {
   zoomTerrainLabState,
   type TerrainLabCamera,
   type TerrainLabState,
+  type TerrainLabTexturePresentation,
+  type TerrainLabVisualProfile,
 } from "../state";
 import type {
   CanonicalCoordinate,
@@ -26,6 +28,10 @@ import type {
   CanonicalWorkerResponse,
 } from "./canonical-worker-protocol";
 import { initializeTerrainLab } from "./terrain-lab-wasm";
+import {
+  loadTerrainVisualAssets,
+  optionalReferenceBytes,
+} from "./visual-assets";
 
 export interface CanonicalTerrainReport {
   epoch: number;
@@ -63,6 +69,9 @@ export interface CanonicalTerrainReport {
 
 interface CanonicalTerrainCanvasProps {
   state: TerrainLabState;
+  visualProfile: TerrainLabVisualProfile;
+  texturePresentation: TerrainLabTexturePresentation;
+  comparison?: boolean;
   camera: TerrainLabCamera;
   cacheEnabled: boolean;
   cacheEpoch: number;
@@ -133,13 +142,14 @@ interface PinchStart {
   state: TerrainLabState;
 }
 
-const AUTHORED_PACK_URL = "/first-party-packs/mclone-authored.pbp";
-const FALLBACK_PACK_URL = "/first-party-packs/mclone-generated-fallback.pbp";
 const CANONICAL_PENDING_HIGH_WATER = 2;
 const CANONICAL_WORKER_MAX_BATCH = 16;
 
 export function CanonicalTerrainCanvas({
   state,
+  visualProfile,
+  texturePresentation,
+  comparison = false,
   camera,
   cacheEnabled,
   cacheEpoch,
@@ -203,18 +213,23 @@ export function CanonicalTerrainCanvas({
     if (!canvas) {
       return;
     }
+    setInitialized(false);
+    setLatestReport(undefined);
     void Promise.all([
       initializeTerrainLab(),
-      fetchPack(AUTHORED_PACK_URL),
-      fetchPack(FALLBACK_PACK_URL),
-    ]).then(async ([, authored, fallback]) => {
+      loadTerrainVisualAssets(),
+    ]).then(async ([, assets]) => {
       if (cancelled) {
         return;
       }
       const lab = await mclone_terrain_lab_create_canonical(
         canvas,
-        authored,
-        fallback,
+        assets.authored,
+        optionalReferenceBytes(assets),
+        assets.provisional,
+        assets.diagnostic,
+        visualProfile,
+        texturePresentation,
       ) as ResponsiveCanonicalTerrainLab;
       if (cancelled) {
         lab.free();
@@ -237,7 +252,7 @@ export function CanonicalTerrainCanvas({
       workerRef.current = undefined;
       labRef.current = undefined;
     };
-  }, [onError]);
+  }, [onError, texturePresentation, visualProfile]);
 
   useEffect(() => {
     const stage = stageRef.current;
@@ -295,6 +310,8 @@ export function CanonicalTerrainCanvas({
       state.profile,
       state.seed,
       state.canonicalStage,
+      visualProfile,
+      texturePresentation,
       cacheEpoch,
       cacheEnabled ? "cache-on" : "cache-off",
     ].join(":");
@@ -458,6 +475,8 @@ export function CanonicalTerrainCanvas({
           type: "init",
           epoch,
           profile: state.profile,
+          visualProfile,
+          texturePresentation,
           seed: state.seed,
           stage: state.canonicalStage,
         });
@@ -627,6 +646,8 @@ export function CanonicalTerrainCanvas({
     state.seed,
     state.vegetationVisible,
     state.waterVisible,
+    texturePresentation,
+    visualProfile,
   ]);
 
   useEffect(() => {
@@ -752,6 +773,9 @@ export function CanonicalTerrainCanvas({
       ref={stageRef}
       className="terrainStage canonicalTerrainStage"
       data-testid="canonical-terrain-stage"
+      data-comparison={comparison ? "true" : "false"}
+      data-visual-profile={visualProfile}
+      data-texture-presentation={texturePresentation}
       data-render-ready={initialized ? "true" : "false"}
       tabIndex={0}
       aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
@@ -775,9 +799,7 @@ export function CanonicalTerrainCanvas({
       />
       <div className="canvasTopline" aria-hidden="true">
         <span className="canvasBadge primary">
-          Canonical · {state.profile === "overworld" ? "Vanilla" : "Mclone"} · {
-            state.canonicalStage
-          }
+          {comparison ? "Compare" : "Canonical"} · {visualProfileLabel(visualProfile)}
         </span>
         <span className="canvasBadge">
           {latestReport
@@ -791,7 +813,9 @@ export function CanonicalTerrainCanvas({
         </span>
       </div>
       <div className="canvasHint" aria-hidden="true">
-        exact blocks + biomes · two-finger pan + zoom · preview light
+        {texturePresentation === "flat-colors" ? "derived flat colors" : "textured"} · {
+          state.canonicalStage
+        } · two-finger pan + zoom
       </div>
     </div>
   );
@@ -840,14 +864,6 @@ function pointerMidpoint(
   };
 }
 
-async function fetchPack(url: string): Promise<Uint8Array> {
-  const response = await fetch(url);
-  if (!response.ok) {
-    throw new Error(`Failed to load ${url}: HTTP ${response.status}`);
-  }
-  return new Uint8Array(await response.arrayBuffer());
-}
-
 function parseJson<T>(value: string): T {
   return JSON.parse(value) as T;
 }
@@ -860,4 +876,19 @@ function formatFootprint(blocks: number): string {
   return blocks >= 1_000
     ? `${(blocks / 1_000).toLocaleString(undefined, { maximumFractionDigits: 1 })} km`
     : `${blocks.toLocaleString()} ${blocks === 1 ? "block" : "blocks"}`;
+}
+
+function visualProfileLabel(profile: TerrainLabVisualProfile): string {
+  switch (profile) {
+    case "mclone-original":
+      return "Mclone Original";
+    case "minecraft-reference":
+      return "Minecraft Reference";
+    case "hybrid-authoring":
+      return "Authoring Hybrid";
+    case "first-party-coverage":
+      return "Coverage Debug";
+    case "provisional-audit":
+      return "Provisional Audit";
+  }
 }
