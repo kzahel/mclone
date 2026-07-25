@@ -48,10 +48,10 @@ Tactical
 standalone native implementation proof without selecting a reusable browser
 input shell or implementing a clipmap ring.
 Tactical
-[`248`](248-terrain-lab-navigation-and-worker-modernization.md) is now
-modernizing Terrain Lab in parity-preserving checkpoints: shared Rust
-navigation, opaque Worker transport, Rust coordination, external
-`SharedArrayBuffer` mailboxes, and deletion of superseded browser policy.
+[`248`](248-terrain-lab-navigation-and-worker-modernization.md) completed the
+parity-preserving Terrain Lab modernization: shared Rust navigation, opaque
+Worker transport, Rust coordination, external `SharedArrayBuffer` mailboxes,
+deletion of superseded browser policy, and local/hosted desktop/phone proof.
 Historical render-worker architecture remains in
 [`067-shared-render-worker-architecture.md`](067-shared-render-worker-architecture.md),
 with the parent thread/Web-Worker topology in
@@ -309,4 +309,4 @@ with the parent thread/Web-Worker topology in
 | [`245-retire-chunk-far-lod-runtime.md`](245-retire-chunk-far-lod-runtime.md) | complete 2026-07-25 | Deleted the chunk-granular in-game Far LOD producer, coverage coordinator, renderer, controls, probes, assets, platform plumbing, and special-purpose scheduling while retaining machinery with active non-LOD consumers. |
 | [`246-vanilla-fast-macro-terrain-preview.md`](246-vanilla-fast-macro-terrain-preview.md) | complete 2026-07-25 | Optimized sampled-exact density columns, added the measured nine-node fast macro sampler, and exposed independent fast/exact Terrain Lab panes with headed desktop/phone evidence. |
 | [`247-standalone-world-explorer-foundation.md`](247-standalone-world-explorer-foundation.md) | completed 2026-07-25, including native-window/offscreen pixel and direct-depth proof | Added a deliberately small native World Explorer, platform-neutral Rust view-control reducer, native capture, and dependency/artifact proof; deferred the browser shell and Terrain Lab migration until an input-boundary audit. |
-| [`248-terrain-lab-navigation-and-worker-modernization.md`](248-terrain-lab-navigation-and-worker-modernization.md) | active 2026-07-25 | Preserve Terrain Lab UI/UX while adopting shared Rust navigation, an opaque browser Worker transport, Rust actor/coordinator ownership, external SAB mesh mailboxes, one authoritative cache per layer, and deletion of superseded TypeScript/raw paths. |
+| [`248-terrain-lab-navigation-and-worker-modernization.md`](248-terrain-lab-navigation-and-worker-modernization.md) | completed 2026-07-25, including local and hosted desktop/phone headed-WebGPU validation | Preserved Terrain Lab UI/UX while adopting shared Rust navigation, an opaque browser Worker transport, Rust actor/coordinator ownership, external SAB mesh mailboxes, one authoritative cache per layer, and deletion of superseded TypeScript/raw paths. |

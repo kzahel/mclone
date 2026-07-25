@@ -44,14 +44,19 @@ overflow, cross-origin isolation, and the bounded one-off overflow recovery
 are explicit. The remaining implementation checkpoint was removal of legacy
 raw admission exports plus ownership locks.
 
-That deletion checkpoint is now complete. Main Terrain Lab Wasm no longer
-exports or retains raw canonical chunk compilation/admission/remeshing, and
+That deletion checkpoint and its closeout are now complete. Main Terrain Lab
+Wasm no longer exports or retains raw canonical chunk
+compilation/admission/remeshing, and
 the transitional response getters and transfer-list surface are gone. Packed
 prepare/admission stays crate-private between the Rust coordinator and
 renderer. Four host source locks enforce the domain-blind TypeScript
 transport, Rust coordinator/mailbox ownership, deleted raw path, and local
-cross-origin-isolation headers. Tactical 248 now needs only its complete
-validation and hosted closeout.
+cross-origin-isolation headers. The full local desktop/phone matrix and
+production smokes passed, and the aggregate route was deployed as Cloudflare
+Worker version `883a0f11-11d6-4c0a-a934-ba80fd66356b`. Direct hosted
+desktop/phone smokes and response-header checks confirmed cross-origin
+isolation and the external-SAB path. No Terrain Lab Worker continuation
+remains active under Tactical 248.
 
 ## Scope
 

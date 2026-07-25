@@ -10,10 +10,12 @@ desktop/mobile headed-WebGPU proof 2026-07-25. Tactical
 has since moved navigation and exact-coverage coordination into shared/domain
 Rust, reused the game's opaque Worker transport, and replaced transferable
 per-chunk mesh arrays with a persistent external-SAB result arena while
-preserving separate exact/LOD panes. Its deletion and closeout gates remain
-active. A touch UX follow-up also adds narrow page-scroll corridors between
-stacked terrain views and direct-grab two-finger 3D panning without changing
-mouse navigation. Tactical
+preserving separate exact/LOD panes. Its legacy deletion, ownership locks,
+complete desktop/phone matrix, and local/hosted production closeout passed on
+2026-07-25; the aggregate route is live in Cloudflare Worker version
+`883a0f11-11d6-4c0a-a934-ba80fd66356b`. A touch UX follow-up also adds narrow
+page-scroll corridors between stacked terrain views and direct-grab
+two-finger 3D panning without changing mouse navigation. Tactical
 [`241`](../tactical/241-terrain-lab-large-canonical-footprints.md) previously
 completed a deployed `31x31 = 961` exact-footprint review mode with bounded
 raw caching and tracked-memory telemetry. Shared orthographic/perspective

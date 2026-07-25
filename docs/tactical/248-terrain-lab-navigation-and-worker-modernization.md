@@ -1,6 +1,6 @@
 # Tactical 248: Terrain Lab Navigation and Worker Modernization
 
-Status: active 2026-07-25.
+Status: completed 2026-07-25.
 
 Topics:
 
@@ -438,7 +438,7 @@ path before that fallback is removed.
 
 ### Slice 0 complete: execution contract
 
-Commit `01cf925a` established this tactical before implementation. It records
+Commit `f5fc25a3` established this tactical before implementation. It records
 the parity checkpoints, the isolated-Wasm/external-SAB interpretation, cache
 ownership, deletion gates, and explicit non-goals.
 
@@ -624,6 +624,51 @@ Focused evidence on 2026-07-25:
   canonical Worker module, and 4.1 MiB Terrain Lab Wasm module; and
 - this deletion checkpoint removes 691 net production-source lines before
   documentation and the new ownership-lock test.
+
+### Slice 6 complete: local and hosted closeout
+
+The completed path is now the only Terrain Lab exact-worker path. The final
+acceptance pass also hardened three evidence races without weakening product
+assertions:
+
+- the maximum-footprint memory receipt now includes the fixed resident result
+  arena;
+- touch-scroll reversal waits for browser inertial scrolling to settle before
+  sampling its second baseline; and
+- smoke benchmark attributes are captured atomically rather than across
+  successive React publications. Phone-only long workloads have explicit
+  budgets while desktop retains its tighter bounds.
+
+Final local evidence on 2026-07-25:
+
+- `mclone-view-control` passed 11 tests; Terrain Lab passed 10 unit tests and
+  four browser-ownership locks;
+- the `wasm32-unknown-unknown` check, Wasm bindgen regeneration, TypeScript
+  typecheck, and 14 URL/state tests passed;
+- the complete headed-Wayland WebGPU matrix passed 18 applicable tests with
+  two expected desktop touch/progressive-footprint skips in 10.8 minutes;
+- desktop and phone each passed navigation, exact/LOD comparison, external-SAB
+  assertions, touch where applicable, `9x9` reuse/admission, and the
+  `31x31 = 961` publish/shift/warm-return proof;
+- local production smokes passed on 1440x1000 desktop and Pixel 7 viewports;
+  and
+- fresh desktop/phone workspace, smoke, and 961-chunk screenshots under
+  `/tmp` were inspected. They show complete textured exact terrain, aligned
+  procedural panes, and the intended responsive layouts.
+
+The aggregate deploy built from commit `3afc1ec4` activated Cloudflare Worker
+version `883a0f11-11d6-4c0a-a934-ba80fd66356b`. Direct hosted desktop and
+phone headed-WebGPU smokes passed at
+`https://mclone.kzahel.com/terrain/`. Both the HTML and hashed canonical
+Worker module returned COOP `same-origin`, COEP `require-corp`, and CORP
+`same-origin`; the live exact path therefore retained the external-SAB
+contract rather than falling back to transferable results.
+
+All Rust files changed by this tactical pass `rustfmt --check`. The broader
+workspace `cargo fmt --all -- --check` remains blocked by a pre-existing
+format difference in
+`native/crates/mclone-server/src/integrated/tests/player_state.rs`, which this
+campaign did not modify.
 
 ## Validation Plan
 

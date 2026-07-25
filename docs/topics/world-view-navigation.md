@@ -4,8 +4,8 @@ Topic: `world-view-navigation`
 
 Status: native foundation implemented and validated on 2026-07-25 by Tactical
 [`247`](../tactical/247-standalone-world-explorer-foundation.md); Terrain Lab
-navigation migration implemented and validated on 2026-07-25 by the first
-slice of active Tactical
+navigation migration and browser-runtime modernization completed and deployed
+on 2026-07-25 by Tactical
 [`248`](../tactical/248-terrain-lab-navigation-and-worker-modernization.md).
 `mclone-view-control` now owns shared map/orbit/contact semantics for both the
 standalone native `mclone-world-explorer` and Terrain Lab's procedural and
@@ -90,8 +90,10 @@ both canvases. URL state, tap-to-inspect, focus, pointer capture,
 browser-host concerns.
 
 Focused Rust, Wasm, desktop mouse/wheel/keyboard, and phone two-finger/gutter
-evidence passed at the migration checkpoint. Worker and cache modernization
-continues independently under Tactical 248.
+evidence passed at the migration checkpoint. Tactical 248 then completed the
+independent Worker/cache modernization without changing this navigation
+contract. The next navigation work remains a player-facing Explorer and
+authoritative enter-world handoff, not more Terrain Lab host policy.
 
 ## Implemented Native Foundation
 
