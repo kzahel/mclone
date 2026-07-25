@@ -3,7 +3,10 @@
 Topic: `vanilla-terrain-lod`
 
 Status: first pass implemented and validated on 2026-07-25 under Tactical
-[`240`](../tactical/240-vanilla-terrain-lod-in-terrain-lab.md).
+[`240`](../tactical/240-vanilla-terrain-lod-in-terrain-lab.md). Tactical
+[`246`](../tactical/246-vanilla-fast-macro-terrain-preview.md) is active to
+remove aligned exact-sampler waste and develop independently selectable fast
+macro versus sampled-exact Terrain Lab products.
 
 ## Scope
 
