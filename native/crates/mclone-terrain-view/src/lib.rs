@@ -9,6 +9,7 @@ use std::num::NonZeroU64;
 use std::sync::mpsc;
 
 use mclone_worldgen::levelgen::{
+    MCLONE_OVERWORLD_GROVE_DOMAIN, MCLONE_OVERWORLD_GROVE_SCALE_BLOCKS,
     MCLONE_OVERWORLD_LARGE_FIELD_SPEC, MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldLargeFieldBand,
     McloneOverworldSampler, VanillaOverworldLodSampler,
 };
@@ -35,7 +36,7 @@ pub use viewport_renderer::{
     TerrainViewportFrameStats, TerrainViewportRenderer,
 };
 
-pub const TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION: &str = "mclone-overworld-v1-gpu-preview-a5";
+pub const TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION: &str = "mclone-overworld-v1-gpu-preview-a6";
 pub const TERRAIN_PREVIEW_COMPUTE_WGSL_TEMPLATE: &str =
     include_str!("shaders/terrain_preview_compute.wgsl");
 pub const TERRAIN_PREVIEW_RENDER_WGSL: &str = include_str!("shaders/terrain_preview_render.wgsl");
@@ -78,6 +79,18 @@ pub fn terrain_preview_compute_wgsl() -> String {
     ] {
         write_field_constants(&mut constants, name, band);
     }
+    let grove_low = MCLONE_OVERWORLD_GROVE_DOMAIN as u32;
+    let grove_high = (MCLONE_OVERWORLD_GROVE_DOMAIN >> 32) as u32;
+    writeln!(
+        constants,
+        "const GROVE_DOMAIN: U64 = U64(0x{grove_low:08x}u, 0x{grove_high:08x}u);"
+    )
+    .expect("writing Terrain Lab grove WGSL domain to String cannot fail");
+    writeln!(
+        constants,
+        "const GROVE_SCALE: i32 = {MCLONE_OVERWORLD_GROVE_SCALE_BLOCKS};"
+    )
+    .expect("writing Terrain Lab grove WGSL scale to String cannot fail");
     TERRAIN_PREVIEW_COMPUTE_WGSL_TEMPLATE
         .replace("// __MCLONE_PRODUCTION_FIELD_CONSTANTS__", &constants)
 }
@@ -1224,6 +1237,14 @@ mod tests {
             biome_recipe: 2.0,
             landform_kind: 2.0,
             surface_recipe: 2.0,
+            forest_coverage: 0.72,
+            forest_density: 0.64,
+            forest_family: 1.0,
+            forest_family_mix: 0.0,
+            mean_canopy_height: 8.0,
+            canopy_height_variation: 1.8,
+            grove_or_opening_influence: 0.5,
+            forest_summary_available: 1.0,
         };
         let mut bytes = Vec::new();
         for value in sample.packed() {
@@ -1238,7 +1259,7 @@ mod tests {
     fn evaluator_revision_and_production_spec_are_explicit() {
         assert_eq!(
             TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION,
-            "mclone-overworld-v1-gpu-preview-a5"
+            "mclone-overworld-v1-gpu-preview-a6"
         );
         let shader = terrain_preview_compute_wgsl();
         assert!(!shader.contains("__MCLONE_PRODUCTION_FIELD_CONSTANTS__"));

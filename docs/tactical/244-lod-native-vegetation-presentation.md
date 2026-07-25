@@ -135,13 +135,27 @@ Baseline record:
 
 ### Slice 1: shared summaries and preview products
 
-- [ ] Add typed forest summary fields to the shared preview sample schema.
-- [ ] Evaluate production CPU forest intent and portable GPU macro intent.
-- [ ] Add bounded near record products and deterministic admission tests.
+- [x] Add typed forest summary fields to the shared preview sample schema.
+- [x] Evaluate production CPU forest intent and portable GPU macro intent.
+- [x] Add bounded near record products and deterministic admission tests.
 - [ ] Integrate source revision, cache reports, and summary/record byte counts.
-- [ ] Prove coarse requests issue zero individual record queries.
+- [x] Prove coarse requests issue zero individual record queries.
 
 Gate: `Cover` is a truthful vegetation semantic product, not a biome tint.
+
+Milestone record:
+
+- reference schema `mclone-terrain-preview-reference-grid-v7` carries eight
+  new production forest fields and reconstructs the exact fixed-radius slope
+  at `Cover`;
+- GPU evaluator `mclone-overworld-v1-gpu-preview-a6` evaluates the same
+  dedicated grove domain and macro family/coverage equations, while displayed
+  cover tint reads the uploaded CPU forest product in both panes;
+- `TerrainPreviewVegetationProduct` requests base-owned stable occurrences
+  only at spacing `1/2/4`, applies the binding global landmark-rank predicate,
+  and returns per-request planning-cell cache deltas; and
+- a spacing-eight `Cover` fixture proves summary availability with zero tree
+  occurrences and zero vegetation planning-cell requests.
 
 ### Slice 2: Terrain Lab proxy presentation
 

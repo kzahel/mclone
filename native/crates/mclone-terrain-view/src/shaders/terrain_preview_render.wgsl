@@ -16,6 +16,8 @@ struct TerrainPreviewSample {
     hydrology: vec4<f32>,
     hydrology_detail: vec4<f32>,
     semantics: vec4<f32>,
+    forest_summary: vec4<f32>,
+    forest_detail: vec4<f32>,
 };
 
 @group(0) @binding(0)
@@ -169,22 +171,6 @@ fn error_color(error: f32) -> vec3<f32> {
         vec3<f32>(0.82, 0.09, 0.38),
         (normalized - 0.65) / 0.35,
     );
-}
-
-fn vegetation_coverage(biome: f32) -> f32 {
-    if biome == 4.0 {
-        return 0.82;
-    }
-    if biome == 6.0 {
-        return 0.68;
-    }
-    if biome == 5.0 {
-        return 0.16;
-    }
-    if biome == 7.0 {
-        return 0.08;
-    }
-    return 0.0;
 }
 
 fn vanilla_biome_color(biome: u32) -> vec3<f32> {
@@ -448,7 +434,7 @@ fn vertex_main(
         sample.hydrology_detail.x,
         sample.hydrology_detail.y,
         sample.semantics.x,
-        vegetation_coverage(sample.semantics.y),
+        select(0.0, reference.forest_summary.x, params.content_stage_flags.x >= 4u),
     );
     return out;
 }

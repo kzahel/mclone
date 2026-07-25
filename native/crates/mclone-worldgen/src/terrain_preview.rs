@@ -1,9 +1,13 @@
 use crate::levelgen::apply_stream_plans;
 use crate::levelgen::{
-    MCLONE_OVERWORLD_FIELD_REVISION, MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldBiomeRecipe,
-    McloneOverworldLandformKind, McloneOverworldLandformSample, McloneOverworldSampler,
-    McloneOverworldSamplingTopology, McloneOverworldStreamPlan, McloneOverworldStreamPlanCache,
-    McloneOverworldSurfaceRecipe, mclone_overworld_biome_recipe, mclone_overworld_landform_kind,
+    MCLONE_OVERWORLD_FIELD_REVISION, MCLONE_OVERWORLD_SEA_LEVEL,
+    MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS, McloneOverworldBiomeRecipe, McloneOverworldLandformKind,
+    McloneOverworldLandformSample, McloneOverworldSampler, McloneOverworldSamplingTopology,
+    McloneOverworldStreamPlan, McloneOverworldStreamPlanCache, McloneOverworldSurfaceRecipe,
+    McloneOverworldTerrainSample, McloneOverworldVegetationPlanCache,
+    McloneOverworldVegetationPlanner, McloneTreeFamily, McloneTreeOccurrence,
+    McloneVegetationBounds, McloneVegetationPlanCacheReport, McloneVegetationSource,
+    mclone_overworld_biome_recipe, mclone_overworld_landform_kind,
     mclone_overworld_macro_surface_top_material, mclone_overworld_preview_visible_material,
     mclone_overworld_surface_recipe,
 };
@@ -11,13 +15,14 @@ use crate::levelgen::{VANILLA_OVERWORLD_LOD_REVISION, VanillaOverworldLodSampler
 use mclone_core::ChunkPos;
 
 pub const TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION: &str =
-    "mclone-terrain-preview-reference-grid-v6";
+    "mclone-terrain-preview-reference-grid-v7";
 pub const TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS: u32 = 64;
 pub const TERRAIN_PREVIEW_MIN_CELLS_PER_AXIS: u32 = 8;
 pub const TERRAIN_PREVIEW_MAX_CELLS_PER_AXIS: u32 = 128;
 pub const TERRAIN_PREVIEW_MIN_SAMPLE_SPACING: u32 = 1;
 pub const TERRAIN_PREVIEW_MAX_SAMPLE_SPACING: u32 = 1_024;
-pub const TERRAIN_PREVIEW_SAMPLE_FLOATS: usize = 24;
+pub const TERRAIN_PREVIEW_SAMPLE_FLOATS: usize = 32;
+pub const TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING: u32 = 4;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum TerrainPreviewProfile {
@@ -265,6 +270,14 @@ pub struct TerrainPreviewSample {
     pub biome_recipe: f32,
     pub landform_kind: f32,
     pub surface_recipe: f32,
+    pub forest_coverage: f32,
+    pub forest_density: f32,
+    pub forest_family: f32,
+    pub forest_family_mix: f32,
+    pub mean_canopy_height: f32,
+    pub canopy_height_variation: f32,
+    pub grove_or_opening_influence: f32,
+    pub forest_summary_available: f32,
 }
 
 impl TerrainPreviewSample {
@@ -294,6 +307,14 @@ impl TerrainPreviewSample {
             self.biome_recipe,
             self.landform_kind,
             self.surface_recipe,
+            self.forest_coverage,
+            self.forest_density,
+            self.forest_family,
+            self.forest_family_mix,
+            self.mean_canopy_height,
+            self.canopy_height_variation,
+            self.grove_or_opening_influence,
+            self.forest_summary_available,
         ]
     }
 
@@ -323,6 +344,14 @@ impl TerrainPreviewSample {
             biome_recipe: values[21],
             landform_kind: values[22],
             surface_recipe: values[23],
+            forest_coverage: values[24],
+            forest_density: values[25],
+            forest_family: values[26],
+            forest_family_mix: values[27],
+            mean_canopy_height: values[28],
+            canopy_height_variation: values[29],
+            grove_or_opening_influence: values[30],
+            forest_summary_available: values[31],
         }
     }
 
@@ -371,6 +400,9 @@ impl TerrainPreviewReferenceGrid {
         let source = request.request();
         let sampler = McloneOverworldSampler::new_with_topology(source.seed, source.topology);
         let stream_plans = preview_stream_plans(request)?;
+        let vegetation_planner = McloneOverworldVegetationPlanner::new(
+            McloneVegetationSource::new(source.seed, source.topology),
+        );
         let mut samples = Vec::with_capacity(
             usize::try_from(request.sample_count())
                 .map_err(|_| "terrain preview sample count does not fit usize")?,
@@ -402,6 +434,31 @@ impl TerrainPreviewReferenceGrid {
                 };
                 let biome_recipe = mclone_overworld_biome_recipe(macro_landform);
                 let surface_recipe = mclone_overworld_surface_recipe(macro_landform);
+                let forest_intent = if source.content_stage == TerrainPreviewContentStage::Cover {
+                    let radius = MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS;
+                    let west_x = world_x
+                        .checked_sub(radius)
+                        .ok_or("Terrain Lab vegetation west sample overflow")?;
+                    let east_x = world_x
+                        .checked_add(radius)
+                        .ok_or("Terrain Lab vegetation east sample overflow")?;
+                    let north_z = world_z
+                        .checked_sub(radius)
+                        .ok_or("Terrain Lab vegetation north sample overflow")?;
+                    let south_z = world_z
+                        .checked_add(radius)
+                        .ok_or("Terrain Lab vegetation south sample overflow")?;
+                    let forest_landform = McloneOverworldLandformSample::from_cardinal_samples(
+                        terrain,
+                        preview_terrain_sample(&sampler, stream_plans.as_deref(), west_x, world_z),
+                        preview_terrain_sample(&sampler, stream_plans.as_deref(), east_x, world_z),
+                        preview_terrain_sample(&sampler, stream_plans.as_deref(), world_x, north_z),
+                        preview_terrain_sample(&sampler, stream_plans.as_deref(), world_x, south_z),
+                    );
+                    vegetation_planner.forest_intent(forest_landform, world_x, world_z)
+                } else {
+                    crate::levelgen::McloneForestIntentSample::EMPTY
+                };
                 samples.push(TerrainPreviewSample {
                     surface_y: terrain.surface_y as f32,
                     display_y: if water {
@@ -442,6 +499,20 @@ impl TerrainPreviewReferenceGrid {
                         macro_landform,
                     )),
                     surface_recipe: surface_recipe_code(surface_recipe),
+                    forest_coverage: forest_intent.coverage,
+                    forest_density: forest_intent.density,
+                    forest_family: forest_family_code(forest_intent.dominant_family),
+                    forest_family_mix: forest_intent.family_mix,
+                    mean_canopy_height: forest_intent.mean_canopy_height,
+                    canopy_height_variation: forest_intent.canopy_height_variation,
+                    grove_or_opening_influence: forest_intent.grove_or_opening_influence,
+                    forest_summary_available: if source.content_stage
+                        == TerrainPreviewContentStage::Cover
+                    {
+                        1.0
+                    } else {
+                        0.0
+                    },
                 });
             }
         }
@@ -508,6 +579,14 @@ impl TerrainPreviewReferenceGrid {
                     biome_recipe: sample.biome.id() as f32,
                     landform_kind: 0.0,
                     surface_recipe: f32::from(sample.approximate_surface_material),
+                    forest_coverage: 0.0,
+                    forest_density: 0.0,
+                    forest_family: 0.0,
+                    forest_family_mix: 0.0,
+                    mean_canopy_height: 0.0,
+                    canopy_height_variation: 0.0,
+                    grove_or_opening_influence: 0.0,
+                    forest_summary_available: 0.0,
                 });
             }
         }
@@ -579,6 +658,152 @@ impl TerrainPreviewReferenceGrid {
     }
 }
 
+fn preview_terrain_sample(
+    sampler: &McloneOverworldSampler,
+    stream_plans: Option<&[McloneOverworldStreamPlan]>,
+    world_x: i32,
+    world_z: i32,
+) -> McloneOverworldTerrainSample {
+    let mut terrain = sampler.sample(world_x, world_z);
+    if let Some(plans) = stream_plans {
+        let _ = apply_stream_plans(&mut terrain, world_x, world_z, plans);
+    }
+    terrain
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TerrainPreviewVegetationProduct {
+    request: ValidatedTerrainPreviewRequest,
+    summary_available: bool,
+    records_requested: bool,
+    records_aggregated: bool,
+    occurrences: Vec<McloneTreeOccurrence>,
+    cache_report: McloneVegetationPlanCacheReport,
+}
+
+impl TerrainPreviewVegetationProduct {
+    pub fn compile(request: TerrainPreviewRequest) -> Result<Self, String> {
+        let source = McloneVegetationSource::new(request.seed, request.topology);
+        let mut cache = McloneOverworldVegetationPlanCache::new(source);
+        Self::compile_with_cache(request, &mut cache)
+    }
+
+    pub fn compile_with_cache(
+        request: TerrainPreviewRequest,
+        cache: &mut McloneOverworldVegetationPlanCache,
+    ) -> Result<Self, String> {
+        let request = request.validate()?;
+        let source = request.request();
+        let summary_available = source.profile == TerrainPreviewProfile::McloneOverworldV1
+            && source.content_stage == TerrainPreviewContentStage::Cover;
+        let records_requested =
+            summary_available && terrain_preview_requests_tree_records(source.sample_spacing);
+        if !records_requested {
+            return Ok(Self {
+                request,
+                summary_available,
+                records_requested: false,
+                records_aggregated: summary_available,
+                occurrences: Vec::new(),
+                cache_report: McloneVegetationPlanCacheReport::default(),
+            });
+        }
+
+        let vegetation_source = McloneVegetationSource::new(source.seed, source.topology);
+        if !cache.matches(vegetation_source) {
+            *cache = McloneOverworldVegetationPlanCache::new(vegetation_source);
+        }
+        let before = cache.report();
+        let footprint = i32::try_from(request.footprint_blocks())
+            .map_err(|_| "terrain preview vegetation footprint exceeds i32")?;
+        let max_x = request
+            .min_x()
+            .checked_add(footprint - 1)
+            .ok_or("terrain preview vegetation maximum X overflow")?;
+        let max_z = request
+            .min_z()
+            .checked_add(footprint - 1)
+            .ok_or("terrain preview vegetation maximum Z overflow")?;
+        let bounds = McloneVegetationBounds::new(request.min_x(), request.min_z(), max_x, max_z)
+            .map_err(|error| error.to_string())?;
+        let mut occurrences = cache
+            .tree_records_intersecting(bounds)
+            .map_err(|error| error.to_string())?;
+        occurrences.retain(|occurrence| {
+            let Ok(base) = occurrence.working_base() else {
+                return false;
+            };
+            base.x >= request.min_x()
+                && base.x < request.min_x() + footprint
+                && base.z >= request.min_z()
+                && base.z < request.min_z() + footprint
+                && terrain_preview_tree_record_admitted(
+                    source.sample_spacing,
+                    occurrence.record.landmark_rank,
+                )
+        });
+        let after = cache.report();
+
+        Ok(Self {
+            request,
+            summary_available,
+            records_requested: true,
+            records_aggregated: false,
+            occurrences,
+            cache_report: McloneVegetationPlanCacheReport {
+                cell_requests: after.cell_requests.saturating_sub(before.cell_requests),
+                cell_hits: after.cell_hits.saturating_sub(before.cell_hits),
+                cell_misses: after.cell_misses.saturating_sub(before.cell_misses),
+                retained_cells: after.retained_cells,
+                retained_preliminary_candidates: after.retained_preliminary_candidates,
+            },
+        })
+    }
+
+    pub const fn request(&self) -> ValidatedTerrainPreviewRequest {
+        self.request
+    }
+
+    pub const fn summary_available(&self) -> bool {
+        self.summary_available
+    }
+
+    pub const fn records_requested(&self) -> bool {
+        self.records_requested
+    }
+
+    pub const fn records_aggregated(&self) -> bool {
+        self.records_aggregated
+    }
+
+    pub fn occurrences(&self) -> &[McloneTreeOccurrence] {
+        &self.occurrences
+    }
+
+    pub const fn cache_report(&self) -> McloneVegetationPlanCacheReport {
+        self.cache_report
+    }
+
+    pub fn estimated_record_bytes(&self) -> usize {
+        self.occurrences
+            .len()
+            .saturating_mul(std::mem::size_of::<McloneTreeOccurrence>())
+    }
+}
+
+pub const fn terrain_preview_requests_tree_records(sample_spacing: u32) -> bool {
+    sample_spacing <= TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING
+}
+
+pub const fn terrain_preview_tree_record_admitted(sample_spacing: u32, landmark_rank: u8) -> bool {
+    match sample_spacing {
+        0 | 1 => true,
+        2 => landmark_rank >= 2,
+        3 | 4 => landmark_rank >= 3,
+        _ => false,
+    }
+}
+
 fn preview_stream_plans(
     request: ValidatedTerrainPreviewRequest,
 ) -> Result<Option<Vec<McloneOverworldStreamPlan>>, String> {
@@ -622,6 +847,15 @@ const fn biome_recipe_code(recipe: McloneOverworldBiomeRecipe) -> f32 {
         McloneOverworldBiomeRecipe::WarmDrySteppe => 5.0,
         McloneOverworldBiomeRecipe::TemperateWoodland => 6.0,
         McloneOverworldBiomeRecipe::TemperateMeadow => 7.0,
+    }
+}
+
+const fn forest_family_code(family: Option<McloneTreeFamily>) -> f32 {
+    match family {
+        None => 0.0,
+        Some(McloneTreeFamily::TemperateBroadleaf) => 1.0,
+        Some(McloneTreeFamily::CoolWetConifer) => 2.0,
+        Some(McloneTreeFamily::WarmDryAcacia) => 3.0,
     }
 }
 
@@ -1000,6 +1234,85 @@ mod tests {
     }
 
     #[test]
+    fn cover_samples_use_production_forest_intent() {
+        let request = TerrainPreviewRequest::new(12_345, -80, 48, 4)
+            .with_content_stage(TerrainPreviewContentStage::Cover);
+        let grid = TerrainPreviewReferenceGrid::compile(request).unwrap();
+        let samples = grid.samples();
+
+        assert!(
+            samples
+                .iter()
+                .all(|sample| sample.forest_summary_available == 1.0)
+        );
+        assert!(samples.iter().any(|sample| sample.forest_coverage > 0.5));
+        assert!(samples.iter().any(|sample| sample.forest_coverage == 0.0));
+        assert!(
+            samples
+                .iter()
+                .filter(|sample| sample.forest_coverage > 0.0)
+                .all(|sample| (1.0..=3.0).contains(&sample.forest_family))
+        );
+    }
+
+    #[test]
+    fn coarse_cover_aggregates_without_record_queries() {
+        let request = TerrainPreviewRequest::new(12_345, 0, 0, 8)
+            .with_content_stage(TerrainPreviewContentStage::Cover);
+        let source =
+            McloneVegetationSource::new(request.seed, McloneOverworldSamplingTopology::Unbounded);
+        let mut cache = McloneOverworldVegetationPlanCache::new(source);
+        let product =
+            TerrainPreviewVegetationProduct::compile_with_cache(request, &mut cache).unwrap();
+
+        assert!(product.summary_available());
+        assert!(!product.records_requested());
+        assert!(product.records_aggregated());
+        assert!(product.occurrences().is_empty());
+        assert_eq!(product.cache_report().cell_requests, 0);
+        assert_eq!(cache.report().cell_requests, 0);
+    }
+
+    #[test]
+    fn near_cover_records_use_stable_rank_admission_and_cache() {
+        let source =
+            McloneVegetationSource::new(12_345, McloneOverworldSamplingTopology::Unbounded);
+        let mut cache = McloneOverworldVegetationPlanCache::new(source);
+        let request = TerrainPreviewRequest::new(12_345, -80, 48, 4)
+            .with_content_stage(TerrainPreviewContentStage::Cover);
+        let first =
+            TerrainPreviewVegetationProduct::compile_with_cache(request, &mut cache).unwrap();
+        let repeated =
+            TerrainPreviewVegetationProduct::compile_with_cache(request, &mut cache).unwrap();
+
+        assert!(first.records_requested());
+        assert!(!first.records_aggregated());
+        assert!(!first.occurrences().is_empty());
+        assert_eq!(first.occurrences(), repeated.occurrences());
+        assert!(
+            first
+                .occurrences()
+                .iter()
+                .all(|occurrence| occurrence.record.landmark_rank == 3)
+        );
+        assert!(repeated.cache_report().cell_hits > 0);
+        assert_eq!(
+            repeated.cache_report().cell_requests,
+            repeated.cache_report().cell_hits + repeated.cache_report().cell_misses
+        );
+    }
+
+    #[test]
+    fn record_admission_is_global_and_monotonic() {
+        for rank in 0..=3 {
+            assert!(terrain_preview_tree_record_admitted(1, rank));
+            assert_eq!(terrain_preview_tree_record_admitted(2, rank), rank >= 2);
+            assert_eq!(terrain_preview_tree_record_admitted(4, rank), rank >= 3);
+            assert!(!terrain_preview_tree_record_admitted(8, rank));
+        }
+    }
+
+    #[test]
     fn comparison_reports_height_and_water_disagreement() {
         let request = TerrainPreviewRequest::new(12_345, 0, 0, 1_024);
         let reference = TerrainPreviewReferenceGrid::compile(request).unwrap();
@@ -1041,7 +1354,7 @@ mod tests {
         );
         assert_eq!(
             TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION,
-            "mclone-terrain-preview-reference-grid-v6"
+            "mclone-terrain-preview-reference-grid-v7"
         );
         assert_eq!(
             TerrainPreviewProfile::VanillaOverworld.source_revision(),

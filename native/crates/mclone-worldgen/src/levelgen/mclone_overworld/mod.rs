@@ -74,6 +74,7 @@ pub use terrain::{
     generate_mclone_overworld_surface_chunks_with_topology,
 };
 pub use vegetation::{
+    MCLONE_OVERWORLD_GROVE_DOMAIN, MCLONE_OVERWORLD_GROVE_SCALE_BLOCKS,
     MCLONE_OVERWORLD_VEGETATION_REVISION, MCLONE_VEGETATION_CANDIDATES_PER_CELL,
     MCLONE_VEGETATION_PLANNING_CELL_BLOCKS, McloneForestIntentSample,
     McloneOverworldVegetationPlanCache, McloneOverworldVegetationPlanner, McloneTreeArchetype,

@@ -16,6 +16,8 @@ struct TerrainPreviewSample {
     hydrology: vec4<f32>,
     hydrology_detail: vec4<f32>,
     semantics: vec4<f32>,
+    forest_summary: vec4<f32>,
+    forest_detail: vec4<f32>,
 };
 
 struct U64 {
@@ -391,6 +393,66 @@ struct HydrologyResult {
     hydrology_detail: vec4<f32>,
     semantics: vec4<f32>,
 };
+
+struct ForestIntent {
+    summary: vec4<f32>,
+    detail: vec4<f32>,
+};
+
+fn forest_intent(
+    world_x: i32,
+    world_z: i32,
+    biome: f32,
+    temperature: f32,
+    moisture: f32,
+) -> ForestIntent {
+    let grove = clamp(
+        value_noise(GROVE_DOMAIN, GROVE_SCALE, world_x, world_z) * 0.5 + 0.5,
+        0.0,
+        1.0,
+    );
+    if biome == 7.0 {
+        let clustered = grove * grove * grove;
+        return ForestIntent(
+            vec4<f32>(
+                0.04 + clustered * 0.16,
+                0.025 + clustered * 0.105,
+                1.0,
+                0.0,
+            ),
+            vec4<f32>(7.0, 1.4, grove, 1.0),
+        );
+    }
+    if biome == 6.0 {
+        return ForestIntent(
+            vec4<f32>(0.58 + grove * 0.30, 0.56 + grove * 0.32, 1.0, 0.0),
+            vec4<f32>(8.0, 1.8, grove, 1.0),
+        );
+    }
+    if biome == 4.0 {
+        return ForestIntent(
+            vec4<f32>(0.68 + grove * 0.29, 0.66 + grove * 0.30, 2.0, 0.0),
+            vec4<f32>(10.0, 2.4, grove, 1.0),
+        );
+    }
+    if biome == 5.0 {
+        let core = temperature >= 0.18 && moisture <= -0.10;
+        let base_density = select(0.045, 0.14, core);
+        let density_span = select(0.075, 0.14, core);
+        let base_coverage = select(0.04, 0.12, core);
+        let coverage_span = select(0.09, 0.16, core);
+        return ForestIntent(
+            vec4<f32>(
+                base_coverage + grove * coverage_span,
+                base_density + grove * density_span,
+                3.0,
+                0.0,
+            ),
+            vec4<f32>(7.5, 1.5, grove, 1.0),
+        );
+    }
+    return ForestIntent(vec4<f32>(0.0), vec4<f32>(0.0));
+}
 
 fn compact_influence(distance: f32, radius: f32, feather: f32) -> f32 {
     if distance >= radius {
@@ -1048,6 +1110,20 @@ fn evaluate(world_x: i32, world_z: i32) -> TerrainPreviewSample {
     sample.hydrology = hydrology.hydrology;
     sample.hydrology_detail = hydrology.hydrology_detail;
     sample.semantics = hydrology.semantics;
+    if params.content_stage_flags.x >= 4u {
+        let forest = forest_intent(
+            world_x,
+            world_z,
+            hydrology.semantics.y,
+            temperature,
+            moisture,
+        );
+        sample.forest_summary = forest.summary;
+        sample.forest_detail = forest.detail;
+    } else {
+        sample.forest_summary = vec4<f32>(0.0);
+        sample.forest_detail = vec4<f32>(0.0);
+    }
     return sample;
 }
 

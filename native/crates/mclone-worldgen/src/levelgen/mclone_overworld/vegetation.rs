@@ -30,10 +30,11 @@ use super::terrain::{
 pub const MCLONE_OVERWORLD_VEGETATION_REVISION: &str = "mclone-overworld-v1-vegetation-2";
 pub const MCLONE_VEGETATION_PLANNING_CELL_BLOCKS: i32 = 32;
 pub const MCLONE_VEGETATION_CANDIDATES_PER_CELL: u8 = 32;
+pub const MCLONE_OVERWORLD_GROVE_DOMAIN: u64 = 0x6d63_6f76_6772_6f76;
+pub const MCLONE_OVERWORLD_GROVE_SCALE_BLOCKS: i32 = 256;
 
 const VEGETATION_PLAN_REVISION: u16 = 2;
-const GROVE_SCALE_BLOCKS: i32 = 256;
-const GROVE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6772_6f76);
+const GROVE_DOMAIN: SeedDomain = SeedDomain::new(MCLONE_OVERWORLD_GROVE_DOMAIN);
 const MAX_CONFLICT_DISTANCE_BLOCKS: i32 = 7;
 const MAX_TREE_HORIZONTAL_OVERHANG: i32 = 6;
 const CONFLICT_CELL_HALO: i32 =
@@ -122,7 +123,7 @@ pub struct McloneForestIntentSample {
 }
 
 impl McloneForestIntentSample {
-    const EMPTY: Self = Self {
+    pub const EMPTY: Self = Self {
         coverage: 0.0,
         density: 0.0,
         dominant_family: None,
@@ -340,13 +341,15 @@ pub struct McloneOverworldVegetationPlanner {
 impl McloneOverworldVegetationPlanner {
     pub fn new(source: McloneVegetationSource) -> Self {
         let grove_field = match source.topology {
-            McloneOverworldSamplingTopology::Unbounded => {
-                ValueNoise2d::new(source.seed, GROVE_DOMAIN, GROVE_SCALE_BLOCKS)
-            }
+            McloneOverworldSamplingTopology::Unbounded => ValueNoise2d::new(
+                source.seed,
+                GROVE_DOMAIN,
+                MCLONE_OVERWORLD_GROVE_SCALE_BLOCKS,
+            ),
             McloneOverworldSamplingTopology::PeriodicX => ValueNoise2d::new_periodic_x(
                 source.seed,
                 GROVE_DOMAIN,
-                GROVE_SCALE_BLOCKS,
+                MCLONE_OVERWORLD_GROVE_SCALE_BLOCKS,
                 MCLONE_OVERWORLD_PERIOD_BLOCKS,
             ),
         };
