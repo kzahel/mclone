@@ -7,12 +7,14 @@ export class PolledWorkerTransport {
   private worker: Worker | null;
   private readonly inbox: PolledWorkerTransportEvent[];
 
-  constructor(workerUrl: URL | string, workerName: string) {
+  constructor(workerOrUrl: Worker | URL | string, workerName?: string) {
     this.inbox = [];
-    this.worker = new Worker(String(workerUrl), {
-      type: "module",
-      name: workerName,
-    });
+    this.worker = workerOrUrl instanceof Worker
+      ? workerOrUrl
+      : new Worker(String(workerOrUrl), {
+        type: "module",
+        ...(workerName === undefined ? {} : { name: workerName }),
+      });
     this.worker.onmessage = (event: MessageEvent<unknown>) => {
       this.inbox.push({ kind: "message", data: event.data });
     };

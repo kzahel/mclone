@@ -1,4 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import {
+  PolledWorkerTransport,
+} from "../../../../native/apps/mclone-web-client/www/mclone-worker-transport";
 import type { CanonicalTerrainLab } from "../../generated/pkg/mclone_terrain_lab";
 import {
   mclone_terrain_lab_create_canonical,
@@ -19,7 +22,6 @@ import {
   type TerrainVisualAssetBytes,
 } from "./visual-assets";
 import { useWorldViewNavigation } from "./use-world-view-navigation";
-import { PolledWorkerTransport } from "./worker-transport";
 
 export interface CanonicalTerrainReport {
   epoch: number;

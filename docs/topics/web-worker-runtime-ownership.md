@@ -34,9 +34,11 @@ coverage ordering, resident/warm/missing state, geometric batch growth,
 in-flight bounds, admission pacing, stale rejection, and diagnostic
 aggregation. React submits desired coverage and pumps once per animation
 frame. The hand-authored TypeScript protocol, semantic Worker switch, and
-React coordinator are deleted. Mesh results still use transferables; generic
-transport source reuse and the switch to persistent external SAB remain the
-active next checkpoints.
+React coordinator are deleted. Terrain Lab and the game now consume the same
+domain-blind `PolledWorkerTransport` source while keeping platform-visible
+Worker construction at their respective module/bundler seams. Mesh results
+still use transferables; the switch to persistent external SAB remains the
+active next checkpoint.
 
 ## Scope
 

@@ -508,13 +508,14 @@ stale-result rejection, one-admission-per-pump pacing, completion, and the
 existing diagnostic aggregate. It drives the existing Rust renderer's packed
 prepare, warm activation, packed-mesh acceptance, and reset methods directly.
 
-The canonical React effect now creates the browser Worker transport, submits
-desired coverage to Rust, calls one opaque coordinator pump per animation
-frame, presents the returned report, and schedules a draw when Rust reports a
-render change. It no longer owns an epoch, semantic Worker callbacks,
-coordinate queues, batch sizing, resident mirrors, packed mesh interpretation,
-or cache accounting. Worker creation remains visibly in the browser adapter
-so Vite can compile the module URL; the generic transport only queues opaque
+The canonical React effect now creates the browser Worker and wraps it in the
+same `PolledWorkerTransport` source used by the main game, submits desired
+coverage to Rust, calls one opaque coordinator pump per animation frame,
+presents the returned report, and schedules a draw when Rust reports a render
+change. It no longer owns an epoch, semantic Worker callbacks, coordinate
+queues, batch sizing, resident mirrors, packed mesh interpretation, or cache
+accounting. Worker creation remains visibly in the browser adapter so Vite can
+compile the module URL; the generic transport only queues opaque
 messages/errors and provides `post`, `poll`, and `terminate`.
 
 The Worker shell now turns its unavoidable Wasm-bootstrap failure into the
@@ -536,9 +537,8 @@ Focused evidence on 2026-07-25:
   chunks.
 
 Transferable packed arrays remain the active result transport at this
-checkpoint. Reusing the game's neutral transport source, adding external SAB
-mailboxes, removing the legacy raw compiler exports, and adding broader
-source-ownership gates remain active work.
+checkpoint. Adding external SAB mailboxes, removing the legacy raw compiler
+exports, and adding broader source-ownership gates remain active work.
 
 ## Validation Plan
 
