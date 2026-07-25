@@ -188,3 +188,7 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   declarative content, portable capability-sandboxed gameplay, trusted
   server/desktop extensions, source forks, reproducible profiles, an open
   registry protocol, and a first-party in-game mod browser
+- `texture-material-profiles` — curated and provisional first-party textures,
+  real local Minecraft comparison, opt-in numbered diagnostics, named shared
+  visual profiles, derived detail representations, and one canonical Texture
+  Lab promotion lifecycle

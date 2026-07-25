@@ -327,6 +327,10 @@ series implements the same concern, normally reuse the document slug in its
 - [`asset-pack-profiles.md`](asset-pack-profiles.md): shared UI asset-pack
   selection, pack-time generated missing assets, runtime provenance, and the
   standalone first-party boundary.
+- [`texture-material-profiles.md`](texture-material-profiles.md): accepted
+  curated/provisional/Minecraft/diagnostic texture taxonomy, shared named
+  engine and Terrain Lab profiles, derived mip/flat/Far LOD representations,
+  and simplified Texture Lab promotion lifecycle.
 - [`falling-tree-physics.md`](falling-tree-physics.md): Dynamic Falling Tree
   and Sable reference investigation for future tree felling, moving voxel
   assemblies, and impact effects.
