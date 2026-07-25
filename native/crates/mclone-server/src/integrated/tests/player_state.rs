@@ -437,18 +437,28 @@ fn sqlite_restart_restores_mclone_profile_before_unseen_generation() {
             .rev()
             .find(|y| expected.block_at_y(local_x, *y, local_z).0 != mclone_worldgen::block::AIR)
             .expect("Mclone unseen chunk column should contain terrain");
+        let expected_state = expected
+            .block_at_y(local_x, expected_surface_y, local_z)
+            .0;
 
         load_chunk_view(&mut reopened, unseen_chunk);
         let world_x = unseen_chunk.min_block_x() + local_x;
         let world_z = unseen_chunk.min_block_z() + local_z;
-        assert_eq!(
-            reopened.scheduler().block_at_world(BlockPos::new(
-                world_x,
-                expected_surface_y,
-                world_z
-            )),
-            Some(expected.block_at_y(local_x, expected_surface_y, local_z).0)
-        );
+        let expected_pos = BlockPos::new(world_x, expected_surface_y, world_z);
+        let mut generated_state = reopened.scheduler().block_at_world(expected_pos);
+        for _ in 0..60_000 {
+            if generated_state.is_some() {
+                break;
+            }
+            let updates = reopened.try_poll().unwrap();
+            accept_player_position_updates(&mut reopened, &updates);
+            if reopened.pending_publication_count() == 0 {
+                reopened.wait_for_worldgen_completion(Duration::from_millis(1));
+            }
+            std::thread::yield_now();
+            generated_state = reopened.scheduler().block_at_world(expected_pos);
+        }
+        assert_eq!(generated_state, Some(expected_state));
         assert_eq!(
             reopened
                 .scheduler()
