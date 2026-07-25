@@ -1,6 +1,7 @@
 # Terrain Lab Worker Canonical Meshing
 
-Status: active 2026-07-25.
+Status: implemented and locally validated 2026-07-25; hosted closeout
+pending.
 
 Topic: `gpu-procedural-terrain`
 
@@ -202,3 +203,72 @@ GPU upload remains on the renderer thread because WebGPU buffers and the
 existing surface/arena owner are not transferable. Moving the full renderer
 to an `OffscreenCanvas` Worker is a different platform experiment, not part of
 this tactical.
+
+## Local Implementation Receipt
+
+Canonical exact generation, presentation conversion, textured section
+construction, and section packing now run in one persistent
+`CanonicalTerrainMeshSession` inside the existing Web Worker. The browser
+sends center-first batches of `1`, `2`, `4`, `8`, then at most `16`
+coordinates under the existing pending-result high-water mark. The Rust
+session compiles each raw batch before forming one deduplicated requested plus
+cardinal-neighbor target set and invoking the production
+`build_textured_render_sections_for_chunk_set` builder once.
+
+`mclone-mesh` now owns a `MCLMSH01` little-endian transfer format. Its decoder
+rejects bad magic, unsupported versions, truncation, trailing bytes, invalid
+layer boundaries, and non-quad index counts. The lossless tests cover section
+keys, traversal visibility, solid/opaque counts, complete packed vertices and
+indices, grass patches, and explicit empty sections.
+
+The main-thread canonical renderer accepts only packed mesh admissions on the
+ordinary browser path. It decodes the bundle, updates shared GPU mesh arenas,
+and marks the requested chunk active. Departed chunks keep their GPU ranges
+but leave traversal readiness; a bounded LRU retains at most 64 of these warm
+chunks. A one-chunk return schedules 31 activation-only admissions and performs
+no Worker mesh, transfer, decode, or upload work.
+
+The evidence panel now separates:
+
+- Worker generation, presentation, mesh, pack, and transfer time;
+- main-thread packed decode and GPU upload time;
+- maximum complete main-thread admission duration;
+- deduplicated Worker mesh-target fan-out;
+- Worker-owned raw cache bytes and chunk count;
+- main-thread raw bytes, which remain zero on the packed path; and
+- warm activation hits and inactive warm chunk count.
+
+The focused `9x9` regression proves nonzero Worker mesh and main decode work
+for a generated entering strip, fewer deduplicated mesh targets than the old
+five-target-per-arrival upper bound, and zero Worker mesh/decode work on the
+warm return. Cache-off replaces both the Worker session and renderer
+residency, so it remains a genuinely cold control.
+
+Local validation passed:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-mesh
+  -p mclone-terrain-lab -p mclone-terrain-view --lib`: 122 passed;
+- `cargo check --manifest-path native/Cargo.toml -p mclone-terrain-lab
+  --target wasm32-unknown-unknown`;
+- `pnpm --dir tools/terrain-lab test`: 21 passed;
+- `pnpm --dir tools/terrain-lab typecheck`;
+- `pnpm host:check -- --probe-browser-webgpu`; and
+- the full headed-Wayland browser matrix: 14 passed and two
+  platform-inapplicable desktop cases skipped in 8.0 minutes.
+
+The maximum proof passed independently on both desktop and phone in about
+2.5 minutes per lane. Each run progressively published 961 chunks, retained
+930 across a one-chunk shift, admitted the 31 generated chunks one per frame,
+kept 31 departed chunks warm, then returned through 31 activation-only frames
+with zero Worker mesh and zero main decode time. The completed local captures
+were inspected at:
+
+- `/tmp/mclone-terrain-lab-desktop-chrome-canonical-961.png`; and
+- `/tmp/mclone-terrain-lab-phone-chrome-canonical-961.png`.
+
+The single Worker does not materially reduce initial 961-chunk wall time.
+That result is expected: production generation and mesh construction still
+perform comparable total math. This slice instead removes that math from the
+UI thread, deduplicates within batches, eliminates main-thread raw copies, and
+makes immediate return work activation-only. Hosted stage timings will decide
+whether the next throughput experiment should be a small Worker pool.

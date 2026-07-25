@@ -1308,17 +1308,44 @@ performance boundary: Worker generation is progressive and navigation
 remains cancelable, but border-aware textured meshing and upload still occur
 on the browser main thread for each paced chunk.
 
+Tactical
+[`242`](../tactical/242-terrain-lab-worker-canonical-meshing.md) is
+implemented and locally validated. The persistent canonical Worker now owns
+raw production chunks, presentation conversion, production textured meshing,
+and versioned packed section bundles. It compiles growing bounded batches and
+deduplicates each batch's requested plus cardinal correction targets before
+one shared builder invocation. The browser main thread retains WebGPU
+ownership but performs only bundle decode, arena upload, traversal activation,
+and drawing; its canonical raw residency is zero.
+
+Renderer residency now distinguishes active from warm inactive exact chunks.
+Up to 64 departed chunks retain GPU ranges outside traversal readiness. A
+one-chunk return to the 31-by-31 footprint reactivates 31 warm chunks over 31
+frames with zero Worker meshing, packed decode, or GPU upload. Diagnostics
+separate Worker generation/presentation/mesh/pack/transfer, main decode,
+upload, maximum admission duration, deduplicated target fan-out, Worker raw
+cache, and warm reuse.
+
+The complete local desktop/phone headed-WebGPU matrix passed with inspected
+961-chunk pixels. Initial production wall time remains roughly comparable
+with the prior single-Worker path, as expected; the gain is interaction
+isolation, lower main-thread/raw memory ownership, batched deduplication, and
+activation-only immediate returns. Hosted stage evidence will determine
+whether a small Worker pool is the next worthwhile throughput experiment.
+
 The next implementation direction is:
 
-1. band-limit or aggregate other sub-sample field energy while preserving
+1. use the canonical stage evidence to decide whether a bounded Worker pool
+   is worth its duplicate compiler/asset memory;
+2. band-limit or aggregate other sub-sample field energy while preserving
    coast and mountain silhouettes;
-2. add sparse structure and macro vegetation records/layers without moving
+3. add sparse structure and macro vegetation records/layers without moving
    bounded placement search into WGSL;
-3. add a Rust/WGSL edit watcher and measure source-edit to first updated
+4. add a Rust/WGSL edit watcher and measure source-edit to first updated
    coarse pixel;
-4. choose explicit mixed-level seam/transition behavior before using partial
+5. choose explicit mixed-level seam/transition behavior before using partial
    child coverage; and
-5. decide whether the current Far LOD control plane should adopt the shared
+6. decide whether the current Far LOD control plane should adopt the shared
    procedural content and exact-handoff contracts proven in the Lab.
 
 ## Open Questions
