@@ -2868,6 +2868,7 @@ pub fn prepare_web_scene_assets_from_selection(
     let registry = AssetPackSourceRegistry::from_packed_with_reference(
         Some(authored),
         fallback,
+        None,
         SharedAssetSource::new(reference),
     )
     .map_err(|error| format!("failed to compose browser asset catalog: {error:#}"))?;
@@ -2893,6 +2894,7 @@ pub fn web_asset_pack_catalog(
     AssetPackSourceRegistry::from_packed_with_reference(
         Some(authored),
         fallback,
+        None,
         SharedAssetSource::new(reference),
     )
     .map(|registry| registry.catalog().clone())

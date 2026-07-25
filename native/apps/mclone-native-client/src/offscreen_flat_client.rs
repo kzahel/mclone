@@ -1661,6 +1661,7 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
                     let registry = mclone_app_runtime::prepared_assets::AssetPackSourceRegistry::from_files_with_reference(
                         authored,
                         fallback,
+                        None::<&std::path::Path>,
                         asset_source.clone(),
                     )?;
                     host.driver.host_mut().configure_asset_pack_sources(

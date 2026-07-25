@@ -145,6 +145,14 @@ impl MissingAssetRegistry {
         Ok(Self { entries })
     }
 
+    pub fn load_optional(source: &impl AssetSource) -> AssetResult<Option<Self>> {
+        let path = AssetPath::new(FIRST_PARTY_MISSING_REGISTRY_PATH);
+        if source.read(&path)?.is_none() {
+            return Ok(None);
+        }
+        Self::load(source).map(Some)
+    }
+
     pub fn get(&self, path: &AssetPath) -> Option<&MissingAssetRegistryEntry> {
         self.entries.get(path)
     }

@@ -31,9 +31,12 @@ DEFAULT_INVENTORY = DEFAULT_OUTPUT_ROOT / "first-party-inventory.v1.json"
 DEFAULT_AUTHORED_OUTPUT = DEFAULT_OUTPUT_ROOT / "mclone-authored.pbp"
 DEFAULT_FALLBACK_OUTPUT = DEFAULT_OUTPUT_ROOT / "mclone-generated-fallback.pbp"
 DEFAULT_FALLBACK_ROOT = DEFAULT_OUTPUT_ROOT / "generated-fallback-root"
+DEFAULT_DIAGNOSTIC_OUTPUT = DEFAULT_OUTPUT_ROOT / "mclone-diagnostic-missing.pbp"
+DEFAULT_DIAGNOSTIC_ROOT = DEFAULT_OUTPUT_ROOT / "diagnostic-missing-root"
 DEFAULT_STAGE_ROOT = REPO_ROOT / "generated-assets/first-party-stage/first-party-packs"
 AUTHORED_PACK_ID = "mclone-authored"
 FALLBACK_PACK_ID = "mclone-generated-fallback"
+DIAGNOSTIC_PACK_ID = "mclone-diagnostic-missing"
 ASSET_SCHEMA = "mclone-visuals-v1"
 SHORT_CODE_MIN_LENGTH = 4
 SHORT_CODE_ALPHABET = "0123456789ABCDEF"
@@ -204,6 +207,93 @@ def missing_png(resource_id: str, code: str, font: dict[str, Any], width: int, h
     return encode_rgba_png(width, height, bytes(pixels))
 
 
+def provisional_base_rgba(resource_id: str) -> tuple[int, int, int, int]:
+    name = resource_id.lower()
+    palettes = (
+        (("water", "underwater"), (54, 112, 180, 190)),
+        (("lava", "magma"), (218, 89, 24, 255)),
+        (("grass", "leaves", "fern", "poppy", "dandelion", "cornflower"), (91, 139, 63, 255)),
+        (("dirt", "podzol", "farmland"), (122, 86, 54, 255)),
+        (("sand", "sandstone"), (196, 178, 119, 255)),
+        (("snow", "ice"), (202, 222, 224, 235)),
+        (("oak", "wood", "log", "planks", "hay"), (151, 113, 67, 255)),
+        (("spruce",), (104, 76, 48, 255)),
+        (("brick", "terracotta"), (153, 84, 65, 255)),
+        (("clay",), (150, 158, 172, 255)),
+        (("coal", "deepslate", "bedrock"), (67, 69, 72, 255)),
+        (("stone", "cobble", "gravel", "ore", "tuff", "andesite"), (126, 128, 125, 255)),
+    )
+    for tokens, color in palettes:
+        if any(token in name for token in tokens):
+            return color
+    digest = hashlib.sha256(resource_id.encode("utf-8")).digest()
+    return (88 + digest[0] % 96, 88 + digest[1] % 96, 88 + digest[2] % 96, 255)
+
+
+def provisional_png(resource_id: str, width: int, height: int) -> bytes:
+    """Create restrained deterministic first-party art, never diagnostic labels."""
+    base = provisional_base_rgba(resource_id)
+    name = resource_id.lower()
+    pixels = bytearray(width * height * 4)
+    plant = any(
+        token in name
+        for token in ("fern", "poppy", "dandelion", "cornflower", "sapling", "grass_cross")
+    )
+    ore_colors = (
+        (("coal",), (45, 45, 43)),
+        (("iron",), (190, 145, 108)),
+        (("gold",), (231, 192, 56)),
+        (("redstone",), (178, 43, 37)),
+        (("lapis",), (45, 80, 164)),
+        (("diamond",), (77, 198, 190)),
+        (("copper",), (184, 107, 76)),
+    )
+    ore_color = next(
+        (color for tokens, color in ore_colors if any(token in name for token in tokens)),
+        None,
+    )
+
+    for y in range(height):
+        for x in range(width):
+            digest = hashlib.sha256(f"{resource_id}:{x // 2}:{y // 2}".encode("utf-8")).digest()
+            variation = (digest[0] % 23) - 11
+            red = max(0, min(255, base[0] + variation))
+            green = max(0, min(255, base[1] + variation))
+            blue = max(0, min(255, base[2] + variation))
+            alpha = base[3]
+
+            if plant:
+                center = width // 2
+                stem = abs(x - center) <= max(0, width // 16) and y >= height // 4
+                leaves = abs(x - center) <= max(1, (height - y) // 3) and (x + y) % 3 != 0
+                if not stem and not leaves:
+                    alpha = 0
+                elif "poppy" in name:
+                    red, green, blue = (184, 47, 43) if y < height // 2 else (70, 126, 55)
+                elif "cornflower" in name:
+                    red, green, blue = (58, 101, 184) if y < height // 2 else (70, 126, 55)
+                elif "dandelion" in name:
+                    red, green, blue = (226, 190, 48) if y < height // 2 else (70, 126, 55)
+            elif any(token in name for token in ("planks", "brick")):
+                seam = y % max(3, height // 4) == 0
+                stagger = (x + (y // max(3, height // 4)) * (width // 3)) % max(4, width // 2) == 0
+                if seam or stagger:
+                    red, green, blue = (max(0, red - 35), max(0, green - 35), max(0, blue - 35))
+            elif "log" in name and ("top" in name or "end" in name):
+                ring = max(abs(x * 2 - width + 1), abs(y * 2 - height + 1))
+                if ring % 5 <= 1:
+                    red, green, blue = (max(0, red - 24), max(0, green - 24), max(0, blue - 24))
+            elif "log" in name and x % max(3, width // 5) == 0:
+                red, green, blue = (max(0, red - 26), max(0, green - 26), max(0, blue - 26))
+
+            if ore_color is not None and digest[1] < 32:
+                red, green, blue = ore_color
+
+            offset = (y * width + x) * 4
+            pixels[offset : offset + 4] = bytes((red, green, blue, alpha))
+    return encode_rgba_png(width, height, bytes(pixels))
+
+
 def material_asset_path(material: str) -> str:
     try:
         namespace, path = material.split(":", 1)
@@ -214,11 +304,11 @@ def material_asset_path(material: str) -> str:
     return f"assets/{namespace}/textures/{path}.png"
 
 
-def reset_staging_root(root: Path) -> None:
+def reset_staging_root(root: Path, expected_names: tuple[str, ...]) -> None:
     if root.exists():
-        if root.name != "generated-fallback-root":
+        if root.name not in expected_names:
             raise SystemExit(
-                f"Refusing to replace staging root {root}; expected basename generated-fallback-root"
+                f"Refusing to replace staging root {root}; expected one of {expected_names!r}"
             )
         shutil.rmtree(root)
     root.mkdir(parents=True)
@@ -236,16 +326,115 @@ def copy_repo_asset(repo_assets_root: Path, pack_path: str, staging_root: Path) 
     destination.write_bytes(asset_pack.pack_file_bytes(source))
 
 
+def write_generated_pack_metadata(
+    inventory: dict[str, Any],
+    repo_assets_root: Path,
+    staging_root: Path,
+) -> tuple[list[dict[str, Any]], list[str]]:
+    direct_assets = inventory["direct_assets"]
+    for asset in direct_assets:
+        path = str(asset.get("path", ""))
+        if asset.get("policy") == "required" and path.endswith(".json"):
+            copy_repo_asset(repo_assets_root, path, staging_root)
+
+    suppressed_audio = sorted(
+        asset["path"]
+        for asset in direct_assets
+        if asset.get("consumer") == "audio" and asset.get("policy") == "suppressible"
+    )
+    write_json(
+        staging_root / "assets/mclone/visuals/blocks.v1.json",
+        {
+            "schema_version": 1,
+            "asset_schema": inventory["asset_schema"],
+            "block_visuals": inventory["block_visuals"],
+        },
+    )
+    write_json(
+        staging_root / "assets/mclone/audio/missing-policy.v1.json",
+        {"schema_version": 1, "suppressed": suppressed_audio},
+    )
+    return direct_assets, suppressed_audio
+
+
 def prepare_generated_fallback(
+    inventory: dict[str, Any],
+    repo_assets_root: Path,
+    staging_root: Path,
+    _font_path: Path,
+) -> dict[str, Any]:
+    """Build the coherent provisional source kept at the legacy pack id."""
+    reset_staging_root(staging_root, ("generated-fallback-root",))
+    materials = sorted(set(inventory["materials"]))
+    direct_assets, suppressed_audio = write_generated_pack_metadata(
+        inventory, repo_assets_root, staging_root
+    )
+    required_pngs = sorted(
+        asset["path"]
+        for asset in direct_assets
+        if asset.get("policy") == "required" and str(asset.get("path", "")).endswith(".png")
+    )
+    registry_entries = []
+    for material in materials:
+        path = material_asset_path(material)
+        destination = staging_root / path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(provisional_png(material, 16, 16))
+        registry_entries.append({"path": path, "resource_id": material})
+
+    for path in required_pngs:
+        resource_id = f"asset:{path}"
+        dimensions = (64, 32) if path.endswith("entity/cow/cow.png") else (16, 16)
+        destination = staging_root / path
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes(provisional_png(resource_id, *dimensions))
+        registry_entries.append({"path": path, "resource_id": resource_id})
+
+    write_json(
+        staging_root / "assets/mclone/provisional/registry.v1.json",
+        {
+            "schema_version": 1,
+            "entries": sorted(registry_entries, key=lambda item: item["resource_id"]),
+        },
+    )
+    write_json(
+        staging_root / "assets/mclone/reports/generated-fallback-coverage.v1.json",
+        {
+            "schema_version": 1,
+            "origin": "first_party_provisional",
+            "block_state_count": len(inventory["block_visuals"]),
+            "material_count": len(materials),
+            "generated_png_count": len(materials) + len(required_pngs),
+            "copied_first_party_metadata_count": sum(
+                1
+                for asset in direct_assets
+                if asset.get("policy") == "required" and str(asset.get("path", "")).endswith(".json")
+            ),
+            "suppressed_audio_count": len(suppressed_audio),
+            "minecraft_payload_count": 0,
+            "unknown_payload_count": 0,
+        },
+    )
+    return {
+        "material_count": len(materials),
+        "block_state_count": len(inventory["block_visuals"]),
+        "generated_png_count": len(materials) + len(required_pngs),
+        "provisional_entry_count": len(registry_entries),
+    }
+
+
+def prepare_diagnostic_missing(
     inventory: dict[str, Any],
     repo_assets_root: Path,
     staging_root: Path,
     font_path: Path,
 ) -> dict[str, Any]:
-    reset_staging_root(staging_root)
+    reset_staging_root(staging_root, ("diagnostic-missing-root",))
     font = load_font(font_path)
     materials = sorted(set(inventory["materials"]))
-    direct_assets = inventory["direct_assets"]
+    direct_assets, suppressed_audio = write_generated_pack_metadata(
+        inventory, repo_assets_root, staging_root
+    )
     required_pngs = sorted(
         asset["path"]
         for asset in direct_assets
@@ -253,8 +442,8 @@ def prepare_generated_fallback(
     )
     visible_resources = materials + [f"asset:{path}" for path in required_pngs]
     short_codes = assign_short_codes(visible_resources)
-
     registry_entries = []
+
     for material in materials:
         path = material_asset_path(material)
         code = short_codes[material]
@@ -276,45 +465,21 @@ def prepare_generated_fallback(
         destination.write_bytes(missing_png(resource_id, code, font, *dimensions))
         registry_entries.append({"code": code, "path": path, "resource_id": resource_id})
 
-    for asset in direct_assets:
-        path = str(asset.get("path", ""))
-        if asset.get("policy") == "required" and path.endswith(".json"):
-            copy_repo_asset(repo_assets_root, path, staging_root)
-
-    suppressed_audio = sorted(
-        asset["path"]
-        for asset in direct_assets
-        if asset.get("consumer") == "audio" and asset.get("policy") == "suppressible"
-    )
     write_json(
-        staging_root / "assets/mclone/visuals/blocks.v1.json",
+        staging_root / "assets/mclone/missing/registry.v1.json",
         {
             "schema_version": 1,
-            "asset_schema": inventory["asset_schema"],
-            "block_visuals": inventory["block_visuals"],
+            "entries": sorted(registry_entries, key=lambda item: item["resource_id"]),
         },
     )
     write_json(
-        staging_root / "assets/mclone/missing/registry.v1.json",
-        {"schema_version": 1, "entries": sorted(registry_entries, key=lambda item: item["resource_id"])},
-    )
-    write_json(
-        staging_root / "assets/mclone/audio/missing-policy.v1.json",
-        {"schema_version": 1, "suppressed": suppressed_audio},
-    )
-    write_json(
-        staging_root / "assets/mclone/reports/generated-fallback-coverage.v1.json",
+        staging_root / "assets/mclone/reports/diagnostic-missing-coverage.v1.json",
         {
             "schema_version": 1,
-            "origin": "generated",
+            "origin": "diagnostic",
             "block_state_count": len(inventory["block_visuals"]),
             "material_count": len(materials),
             "generated_png_count": len(materials) + len(required_pngs),
-            "copied_first_party_metadata_count": sum(
-                1
-                for asset in direct_assets
-                if asset.get("policy") == "required" and str(asset.get("path", "")).endswith(".json")
-            ),
             "suppressed_audio_count": len(suppressed_audio),
             "minecraft_payload_count": 0,
             "unknown_payload_count": 0,
@@ -443,9 +608,34 @@ def build_generated_fallback_pack(
     entries = entries_for_root(staging_root)
     manifest = first_party_manifest(
         FALLBACK_PACK_ID,
-        "Generated Missing Assets",
-        "generated",
-        ["generated_fallback", "render_content", "audio_content", "metadata"],
+        "Mclone Provisional Textures",
+        "first_party_provisional",
+        ["provisional_base", "render_content", "audio_content", "metadata"],
+        entries,
+        ["canonical_first_party_inventory", "first_party_procedural_recipes", "repo_first_party_metadata"],
+        {"coverage": coverage},
+    )
+    return write_and_verify_pack(output, sidecar, manifest, entries)
+
+
+def build_diagnostic_missing_pack(
+    inventory_path: Path,
+    repo_assets_root: Path,
+    staging_root: Path,
+    font_path: Path,
+    output: Path,
+    sidecar: Path,
+) -> dict[str, Any]:
+    inventory = load_inventory(inventory_path)
+    coverage = prepare_diagnostic_missing(
+        inventory, repo_assets_root, staging_root, font_path
+    )
+    entries = entries_for_root(staging_root)
+    manifest = first_party_manifest(
+        DIAGNOSTIC_PACK_ID,
+        "Numbered Missing Diagnostics",
+        "diagnostic",
+        ["diagnostic_fallback", "render_content", "audio_content", "metadata"],
         entries,
         ["canonical_first_party_inventory", "missing_bitmap_font", "repo_first_party_metadata"],
         {"coverage": coverage},
@@ -455,7 +645,11 @@ def build_generated_fallback_pack(
 
 def verify_first_party_pack(output: Path, sidecar: Path | None = None) -> dict[str, Any]:
     manifest = asset_pack.verify_pack(output, sidecar)
-    if manifest.get("origin") not in {"first_party", "generated"}:
+    if manifest.get("origin") not in {
+        "first_party",
+        "first_party_provisional",
+        "diagnostic",
+    }:
         raise SystemExit(f"Unexpected first-party pack origin {manifest.get('origin')!r}")
     if not manifest.get("pack_id") or not manifest.get("content_fingerprint"):
         raise SystemExit("First-party manifest is missing identity/fingerprint metadata")
@@ -479,6 +673,7 @@ def verify_first_party_pack(output: Path, sidecar: Path | None = None) -> dict[s
 def stage_first_party_packs(
     authored: Path,
     fallback: Path,
+    diagnostic: Path,
     stage_root: Path,
 ) -> dict[str, Any]:
     if stage_root.exists():
@@ -490,7 +685,7 @@ def stage_first_party_packs(
     stage_root.mkdir(parents=True)
 
     packs = []
-    for source in (authored, fallback):
+    for source in (authored, fallback, diagnostic):
         sidecar = Path(f"{source}.json")
         manifest = verify_first_party_pack(source, sidecar)
         destination = stage_root / source.name
@@ -538,6 +733,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     fallback.add_argument("--output", default=str(DEFAULT_FALLBACK_OUTPUT))
     fallback.add_argument("--manifest-output")
 
+    diagnostic = commands.add_parser(
+        "diagnostic-missing", help="Build mclone-diagnostic-missing.pbp"
+    )
+    diagnostic.add_argument("--inventory", default=str(DEFAULT_INVENTORY))
+    diagnostic.add_argument("--repo-assets-root", default=str(REPO_ROOT / "assets"))
+    diagnostic.add_argument("--staging-root", default=str(DEFAULT_DIAGNOSTIC_ROOT))
+    diagnostic.add_argument("--font", default=str(FONT_PATH))
+    diagnostic.add_argument("--output", default=str(DEFAULT_DIAGNOSTIC_OUTPUT))
+    diagnostic.add_argument("--manifest-output")
+
     verify = commands.add_parser("verify", help="Verify an existing first-party pack")
     verify.add_argument("pack")
     verify.add_argument("--manifest")
@@ -545,6 +750,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     stage = commands.add_parser("stage", help="Stage canonical first-party release inputs")
     stage.add_argument("--authored", default=str(DEFAULT_AUTHORED_OUTPUT))
     stage.add_argument("--fallback", default=str(DEFAULT_FALLBACK_OUTPUT))
+    stage.add_argument("--diagnostic", default=str(DEFAULT_DIAGNOSTIC_OUTPUT))
     stage.add_argument("--stage-root", default=str(DEFAULT_STAGE_ROOT))
     return parser.parse_args(argv)
 
@@ -562,6 +768,7 @@ def main(argv: list[str] | None = None) -> int:
         catalog = stage_first_party_packs(
             Path(args.authored).expanduser(),
             Path(args.fallback).expanduser(),
+            Path(args.diagnostic).expanduser(),
             Path(args.stage_root).expanduser(),
         )
         print(f"[OK] staged {len(catalog['packs'])} packs at {args.stage_root}")
@@ -576,13 +783,27 @@ def main(argv: list[str] | None = None) -> int:
             output,
             sidecar,
         )
-    else:
+    elif args.command == "generated-fallback":
         inventory_path = Path(args.inventory).expanduser()
         if not inventory_path.is_file():
             raise SystemExit(
                 f"{inventory_path} is missing; run `pnpm assets:inventory:first-party` first"
             )
         manifest = build_generated_fallback_pack(
+            inventory_path,
+            Path(args.repo_assets_root).expanduser(),
+            Path(args.staging_root).expanduser(),
+            Path(args.font).expanduser(),
+            output,
+            sidecar,
+        )
+    else:
+        inventory_path = Path(args.inventory).expanduser()
+        if not inventory_path.is_file():
+            raise SystemExit(
+                f"{inventory_path} is missing; run `pnpm assets:inventory:first-party` first"
+            )
+        manifest = build_diagnostic_missing_pack(
             inventory_path,
             Path(args.repo_assets_root).expanduser(),
             Path(args.staging_root).expanduser(),

@@ -40,7 +40,7 @@ class FirstPartyPackTests(unittest.TestCase):
                 lambda _value: b"\x11" * 32,
             )
 
-    def test_generated_fallback_pack_is_deterministic_and_reference_free(self) -> None:
+    def test_provisional_pack_is_deterministic_and_reference_free(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             repo_assets = root / "repo/assets"
@@ -72,7 +72,7 @@ class FirstPartyPackTests(unittest.TestCase):
             manifest = outputs[0][2]
             payload_sha = manifest["fingerprints"][asset_pack.PAYLOAD_FINGERPRINT_ID]["sha256"]
             self.assertEqual(manifest["content_fingerprint"], f"sha256:{payload_sha}")
-            self.assertEqual(manifest["origin"], "generated")
+            self.assertEqual(manifest["origin"], "first_party_provisional")
             self.assertNotIn(reference_sentinel.read_bytes(), outputs[0][0].read_bytes())
 
             with zipfile.ZipFile(outputs[0][0]) as archive:
@@ -82,13 +82,41 @@ class FirstPartyPackTests(unittest.TestCase):
                 self.assertIn("assets/minecraft/textures/misc/underwater.png", names)
                 self.assertIn("assets/mclone/figures/player.figure.json", names)
                 self.assertIn("assets/mclone/visuals/blocks.v1.json", names)
-                self.assertIn("assets/mclone/missing/registry.v1.json", names)
+                self.assertIn("assets/mclone/provisional/registry.v1.json", names)
+                self.assertNotIn("assets/mclone/missing/registry.v1.json", names)
                 self.assertTrue(
                     archive.read("assets/mclone/textures/block/stone.png").startswith(
                         b"\x89PNG\r\n\x1a\n"
                     )
                 )
                 self.assertFalse(any("reference/" in name for name in names))
+
+    def test_diagnostic_pack_owns_numbered_missing_registry(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            repo_assets = root / "repo/assets"
+            self.write_fixture_figure(repo_assets)
+            inventory = root / "inventory.json"
+            inventory.write_text(json.dumps(self.fixture_inventory()), encoding="utf-8")
+            output = root / "mclone-diagnostic-missing.pbp"
+            manifest = first_party_pack.build_diagnostic_missing_pack(
+                inventory,
+                repo_assets,
+                root / "diagnostic-missing-root",
+                first_party_pack.FONT_PATH,
+                output,
+                Path(f"{output}.json"),
+            )
+
+            self.assertEqual(manifest["origin"], "diagnostic")
+            with zipfile.ZipFile(output) as archive:
+                names = set(archive.namelist())
+                self.assertIn("assets/mclone/missing/registry.v1.json", names)
+                self.assertNotIn("assets/mclone/provisional/registry.v1.json", names)
+                registry = json.loads(
+                    archive.read("assets/mclone/missing/registry.v1.json")
+                )
+                self.assertEqual(len(registry["entries"]), 4)
 
     def test_authored_pack_is_deterministic_and_uses_only_first_party_roots(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
@@ -134,7 +162,7 @@ class FirstPartyPackTests(unittest.TestCase):
                 )
                 self.assertFalse(any("reference/" in name for name in archive.namelist()))
 
-    def test_stage_consumes_the_two_canonical_pack_outputs(self) -> None:
+    def test_stage_consumes_the_three_canonical_pack_outputs(self) -> None:
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             repo_assets = root / "repo/assets"
@@ -151,6 +179,7 @@ class FirstPartyPackTests(unittest.TestCase):
             inventory.write_text(json.dumps(self.fixture_inventory()), encoding="utf-8")
             authored = root / "mclone-authored.pbp"
             fallback = root / "mclone-generated-fallback.pbp"
+            diagnostic = root / "mclone-diagnostic-missing.pbp"
             first_party_pack.build_authored_pack(
                 runtime_root,
                 authored_root,
@@ -166,21 +195,36 @@ class FirstPartyPackTests(unittest.TestCase):
                 fallback,
                 Path(f"{fallback}.json"),
             )
+            first_party_pack.build_diagnostic_missing_pack(
+                inventory,
+                repo_assets,
+                root / "diagnostic-missing-root",
+                first_party_pack.FONT_PATH,
+                diagnostic,
+                Path(f"{diagnostic}.json"),
+            )
 
             stage_root = root / "stage/first-party-packs"
             catalog = first_party_pack.stage_first_party_packs(
-                authored, fallback, stage_root
+                authored, fallback, diagnostic, stage_root
             )
 
             self.assertEqual(
                 [pack["pack_id"] for pack in catalog["packs"]],
-                [first_party_pack.AUTHORED_PACK_ID, first_party_pack.FALLBACK_PACK_ID],
+                [
+                    first_party_pack.AUTHORED_PACK_ID,
+                    first_party_pack.FALLBACK_PACK_ID,
+                    first_party_pack.DIAGNOSTIC_PACK_ID,
+                ],
             )
             self.assertEqual(
                 (stage_root / authored.name).read_bytes(), authored.read_bytes()
             )
             self.assertEqual(
                 (stage_root / fallback.name).read_bytes(), fallback.read_bytes()
+            )
+            self.assertEqual(
+                (stage_root / diagnostic.name).read_bytes(), diagnostic.read_bytes()
             )
             self.assertTrue((stage_root / "asset-pack-catalog.v1.json").is_file())
 

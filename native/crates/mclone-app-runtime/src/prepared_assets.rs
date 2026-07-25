@@ -1,9 +1,13 @@
 use anyhow::{Context, Result, bail};
+pub use mclone_assets::{
+    AUTHORED_FIRST_PARTY_PACK_ID, DIAGNOSTIC_MISSING_PACK_ID, MINECRAFT_REFERENCE_PACK_ID,
+};
 use mclone_assets::{
     AssetPackCatalog, AssetPackDescriptor, AssetPackDiscovery, AssetPackId, AssetPackOrigin,
     AssetPackSelection, AssetProvenanceReport, AssetResolutionOutcome, AssetSource,
     AssetSourceChain, FIRST_PARTY_AUDIO_POLICY_PATH, FirstPartyAudioPolicy, MissingAssetRegistry,
-    PackedAssetSource, ProvenanceTrackingAssetSource,
+    PROVISIONAL_FIRST_PARTY_PACK_ID, PackedAssetSource, ProvenanceTrackingAssetSource,
+    TextureVisualProfile,
 };
 use mclone_assets::{AssetProvenanceEntry, AssetResolutionOrigin, SharedAssetSource};
 use mclone_audio::PreparedAudioAssets;
@@ -29,16 +33,14 @@ use mclone_render_session::{
 
 use crate::render_asset_data::TexturedMeshAssets;
 
-pub const AUTHORED_FIRST_PARTY_PACK_ID: &str = "mclone-authored";
-pub const GENERATED_FALLBACK_PACK_ID: &str = "mclone-generated-fallback";
-pub const MINECRAFT_REFERENCE_PACK_ID: &str = "minecraft-1.17.1-reference";
+pub const GENERATED_FALLBACK_PACK_ID: &str = PROVISIONAL_FIRST_PARTY_PACK_ID;
 
 pub fn reference_asset_pack_selection() -> AssetPackSelection {
-    AssetPackSelection::new([AssetPackId::new(MINECRAFT_REFERENCE_PACK_ID)])
+    TextureVisualProfile::MinecraftReference.selection()
 }
 
 pub fn original_asset_pack_selection() -> AssetPackSelection {
-    AssetPackSelection::new([AssetPackId::new(AUTHORED_FIRST_PARTY_PACK_ID)])
+    TextureVisualProfile::McloneOriginal.selection()
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -66,7 +68,7 @@ pub struct PreparedAssetSet {
     pub actors: ActorTextureAssets,
     pub screen_effects: ScreenEffectTextureAssets,
     pub audio_policy: FirstPartyAudioPolicy,
-    pub missing_registry: MissingAssetRegistry,
+    pub missing_registry: Option<MissingAssetRegistry>,
     pub provenance: AssetProvenanceReport,
     pub coverage: PreparedAssetCoverage,
 }
@@ -165,6 +167,7 @@ impl AssetPackSourceRegistry {
     pub fn from_files_with_reference(
         authored_path: impl AsRef<Path>,
         generated_fallback_path: impl AsRef<Path>,
+        diagnostic_path: Option<impl AsRef<Path>>,
         reference: SharedAssetSource,
     ) -> Result<Self> {
         let authored = PackedAssetSource::from_file(authored_path.as_ref()).with_context(|| {
@@ -180,12 +183,23 @@ impl AssetPackSourceRegistry {
                     generated_fallback_path.as_ref().display()
                 )
             })?;
-        Self::from_packed_with_reference(Some(authored), generated, reference)
+        let diagnostic = diagnostic_path
+            .map(|path| {
+                PackedAssetSource::from_file(path.as_ref()).with_context(|| {
+                    format!(
+                        "failed to open diagnostic missing pack {}",
+                        path.as_ref().display()
+                    )
+                })
+            })
+            .transpose()?;
+        Self::from_packed_with_reference(Some(authored), generated, diagnostic, reference)
     }
 
     pub fn from_packed_with_reference(
         authored: Option<PackedAssetSource>,
-        generated: PackedAssetSource,
+        provisional: PackedAssetSource,
+        diagnostic: Option<PackedAssetSource>,
         reference: SharedAssetSource,
     ) -> Result<Self> {
         let authored_descriptor = match authored.as_ref() {
@@ -209,28 +223,47 @@ impl AssetPackSourceRegistry {
             AssetPackOrigin::MinecraftReference,
             20,
         )?;
-        let fallback_descriptor = first_party_descriptor(
-            &generated,
+        let provisional_descriptor = first_party_descriptor(
+            &provisional,
             GENERATED_FALLBACK_PACK_ID,
-            AssetPackOrigin::Generated,
+            AssetPackOrigin::FirstPartyProvisional,
             30,
-        )?
-        .required();
+        )?;
+        let diagnostic_descriptor = match diagnostic.as_ref() {
+            Some(diagnostic) => first_party_descriptor(
+                diagnostic,
+                DIAGNOSTIC_MISSING_PACK_ID,
+                AssetPackOrigin::Diagnostic,
+                40,
+            )?,
+            None => AssetPackDescriptor::new(
+                AssetPackId::new(DIAGNOSTIC_MISSING_PACK_ID),
+                "Numbered Missing Diagnostics",
+                AssetPackOrigin::Diagnostic,
+                40,
+            )?
+            .unavailable("Diagnostic textures are not installed by this platform"),
+        };
         let authored_id = authored_descriptor.id.clone();
         let reference_id = reference_descriptor.id.clone();
-        let fallback_id = fallback_descriptor.id.clone();
+        let provisional_id = provisional_descriptor.id.clone();
+        let diagnostic_id = diagnostic_descriptor.id.clone();
         let mut sources = vec![
             (reference_id, reference),
-            (fallback_id, SharedAssetSource::new(generated)),
+            (provisional_id, SharedAssetSource::new(provisional)),
         ];
         if let Some(authored) = authored {
             sources.push((authored_id, SharedAssetSource::new(authored)));
+        }
+        if let Some(diagnostic) = diagnostic {
+            sources.push((diagnostic_id, SharedAssetSource::new(diagnostic)));
         }
         Self::new(
             AssetPackCatalog::new([
                 authored_descriptor,
                 reference_descriptor,
-                fallback_descriptor,
+                provisional_descriptor,
+                diagnostic_descriptor,
             ])?,
             sources,
         )
@@ -251,7 +284,12 @@ impl AssetPackSourceRegistry {
         else {
             return Ok(None);
         };
-        Self::from_packed_with_reference(authored, generated, reference).map(Some)
+        let diagnostic = discover_native_first_party_pack(
+            "MCLONE_ASSET_DIAGNOSTIC_PACK",
+            crate::render_assets::DEFAULT_DIAGNOSTIC_MISSING_PACK_FILE,
+            false,
+        )?;
+        Self::from_packed_with_reference(authored, generated, diagnostic, reference).map(Some)
     }
 
     pub fn catalog(&self) -> &AssetPackCatalog {
@@ -263,7 +301,12 @@ impl AssetPackSourceRegistry {
         epoch: u64,
         selection: AssetPackSelection,
     ) -> Result<PreparedSceneAssets> {
-        prepare_scene_asset_selection(epoch, &self.catalog, selection, &self.sources)
+        prepare_scene_asset_selection(
+            epoch,
+            &self.catalog,
+            TextureVisualProfile::normalize_legacy_selection(&selection),
+            &self.sources,
+        )
     }
 }
 
@@ -303,9 +346,7 @@ fn discover_native_first_party_pack(
         );
     }
     if required_for_discovery {
-        log::info!(
-            "generated fallback pack is not installed; Asset Packs Apply remains unavailable"
-        );
+        log::info!("provisional texture pack is not installed; visual profiles are unavailable");
     }
     Ok(None)
 }
@@ -456,8 +497,8 @@ fn prepare_scene_asset_selection(
     } else {
         let policy = FirstPartyAudioPolicy::load(&tracker)
             .context("failed to prepare first-party audio policy")?;
-        let registry = MissingAssetRegistry::load(&tracker)
-            .context("failed to prepare generated missing-resource registry")?;
+        let registry = MissingAssetRegistry::load_optional(&tracker)
+            .context("failed to prepare optional diagnostic missing-resource registry")?;
         let policy_origin = tracker
             .resolved_origin(&mclone_assets::AssetPath::new(
                 FIRST_PARTY_AUDIO_POLICY_PATH,
@@ -466,25 +507,26 @@ fn prepare_scene_asset_selection(
         for path in &policy.suppressed {
             tracker.record_suppressed(path.clone(), policy_origin.clone());
         }
-        (PreparedAudioAssets::silent(), policy, Some(registry))
+        (PreparedAudioAssets::silent(), policy, registry)
     };
 
     let provenance = tracker.report(epoch, selection.clone());
     if !reference_enabled && !provenance.allows_proprietary_free_claim() {
         bail!("reference-disabled preparation resolved reference or unknown content");
     }
-    if let Some(registry) = &missing_registry {
-        for entry in provenance.entries() {
-            if entry.outcome == AssetResolutionOutcome::Resolved
-                && entry.source.origin == AssetPackOrigin::Generated
-                && entry.path.as_str().ends_with(".png")
-                && registry.get(&entry.path).is_none()
-            {
-                bail!(
-                    "generated fallback resource {} has no missing-resource registry id",
-                    entry.path.as_str()
-                );
-            }
+    for entry in provenance.entries() {
+        if entry.outcome == AssetResolutionOutcome::Resolved
+            && entry.source.origin == AssetPackOrigin::Diagnostic
+            && entry.path.as_str().ends_with(".png")
+            && missing_registry
+                .as_ref()
+                .and_then(|registry| registry.get(&entry.path))
+                .is_none()
+        {
+            bail!(
+                "diagnostic resource {} has no missing-resource registry id",
+                entry.path.as_str()
+            );
         }
     }
     let summary = provenance.summary();
@@ -499,7 +541,7 @@ fn prepare_scene_asset_selection(
             .as_ref()
             .map_or(0, MissingAssetRegistry::len),
         first_party_resolutions: summary.first_party,
-        generated_resolutions: summary.generated,
+        generated_resolutions: summary.generated + summary.provisional + summary.diagnostic,
         suppressed_audio: summary.suppressed,
         missing_optional: summary.missing,
     };
@@ -658,14 +700,13 @@ pub fn prepare_first_party_asset_set(
     let fallback_descriptor = first_party_descriptor(
         &generated_fallback,
         GENERATED_FALLBACK_PACK_ID,
-        AssetPackOrigin::Generated,
+        AssetPackOrigin::FirstPartyProvisional,
         30,
-    )?
-    .required();
+    )?;
     let authored_id = authored_descriptor.id.clone();
     let fallback_id = fallback_descriptor.id.clone();
     let catalog = AssetPackCatalog::new([authored_descriptor, fallback_descriptor])?;
-    let selection = AssetPackSelection::new([authored_id.clone()]);
+    let selection = TextureVisualProfile::McloneOriginal.selection();
     let source = AssetSourceChain::from_selection(
         &catalog,
         &selection,
@@ -689,8 +730,8 @@ pub fn prepare_first_party_asset_set(
         .context("failed to prepare first-party screen-effect assets")?;
     let audio_policy = FirstPartyAudioPolicy::load(&tracker)
         .context("failed to prepare first-party audio policy")?;
-    let missing_registry = MissingAssetRegistry::load(&tracker)
-        .context("failed to prepare generated missing-resource registry")?;
+    let missing_registry = MissingAssetRegistry::load_optional(&tracker)
+        .context("failed to prepare optional diagnostic missing-resource registry")?;
 
     let audio_policy_origin = tracker
         .resolved_origin(&mclone_assets::AssetPath::new(
@@ -704,19 +745,6 @@ pub fn prepare_first_party_asset_set(
     if !provenance.allows_proprietary_free_claim() {
         bail!("first-party preparation resolved Minecraft-reference or unknown content");
     }
-    for entry in provenance.entries() {
-        if entry.outcome == AssetResolutionOutcome::Resolved
-            && entry.source.origin == AssetPackOrigin::Generated
-            && entry.path.as_str().ends_with(".png")
-            && missing_registry.get(&entry.path).is_none()
-        {
-            bail!(
-                "generated fallback resource {} has no missing-resource registry id",
-                entry.path.as_str()
-            );
-        }
-    }
-
     let summary = provenance.summary();
     let coverage = PreparedAssetCoverage {
         block_states: terrain.catalog.len(),
@@ -725,9 +753,11 @@ pub fn prepare_first_party_asset_set(
         far_lod_colors: far_lod_materials
             .as_ref()
             .map_or(0, FarTerrainLodMaterialPalette::color_count),
-        missing_registry_entries: missing_registry.len(),
+        missing_registry_entries: missing_registry
+            .as_ref()
+            .map_or(0, MissingAssetRegistry::len),
         first_party_resolutions: summary.first_party,
-        generated_resolutions: summary.generated,
+        generated_resolutions: summary.generated + summary.provisional + summary.diagnostic,
         suppressed_audio: summary.suppressed,
         missing_optional: summary.missing,
     };

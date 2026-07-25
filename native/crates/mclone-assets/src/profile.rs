@@ -1,9 +1,14 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use crate::{AssetError, AssetPath, AssetResult};
+
+pub const AUTHORED_FIRST_PARTY_PACK_ID: &str = "mclone-authored";
+pub const PROVISIONAL_FIRST_PARTY_PACK_ID: &str = "mclone-generated-fallback";
+pub const DIAGNOSTIC_MISSING_PACK_ID: &str = "mclone-diagnostic-missing";
+pub const MINECRAFT_REFERENCE_PACK_ID: &str = "minecraft-1.17.1-reference";
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct AssetPackId(String);
@@ -42,6 +47,8 @@ impl fmt::Display for AssetPackId {
 #[serde(rename_all = "snake_case")]
 pub enum AssetPackOrigin {
     FirstParty,
+    FirstPartyProvisional,
+    Diagnostic,
     Generated,
     MinecraftReference,
     #[default]
@@ -52,11 +59,143 @@ pub enum AssetPackOrigin {
 #[serde(rename_all = "snake_case")]
 pub enum AssetPackRole {
     AuthoredOverride,
+    ProvisionalBase,
+    DiagnosticFallback,
     ReferenceBase,
     GeneratedFallback,
     RenderContent,
     AudioContent,
     Metadata,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TextureVisualProfile {
+    #[default]
+    McloneOriginal,
+    MinecraftReference,
+    HybridAuthoring,
+    FirstPartyCoverage,
+    ProvisionalAudit,
+}
+
+impl TextureVisualProfile {
+    pub const ALL: [Self; 5] = [
+        Self::McloneOriginal,
+        Self::MinecraftReference,
+        Self::HybridAuthoring,
+        Self::FirstPartyCoverage,
+        Self::ProvisionalAudit,
+    ];
+
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::McloneOriginal => "mclone-original",
+            Self::MinecraftReference => "minecraft-reference",
+            Self::HybridAuthoring => "hybrid-authoring",
+            Self::FirstPartyCoverage => "first-party-coverage",
+            Self::ProvisionalAudit => "provisional-audit",
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::McloneOriginal => "Mclone Original",
+            Self::MinecraftReference => "Minecraft Reference",
+            Self::HybridAuthoring => "Hybrid Authoring",
+            Self::FirstPartyCoverage => "First-party Coverage",
+            Self::ProvisionalAudit => "Provisional Audit",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL.into_iter().find(|profile| profile.id() == value)
+    }
+
+    pub fn selection(self) -> AssetPackSelection {
+        let ids: &[&str] = match self {
+            Self::McloneOriginal => &[
+                AUTHORED_FIRST_PARTY_PACK_ID,
+                PROVISIONAL_FIRST_PARTY_PACK_ID,
+            ],
+            Self::MinecraftReference => {
+                &[MINECRAFT_REFERENCE_PACK_ID, PROVISIONAL_FIRST_PARTY_PACK_ID]
+            }
+            Self::HybridAuthoring => &[
+                AUTHORED_FIRST_PARTY_PACK_ID,
+                MINECRAFT_REFERENCE_PACK_ID,
+                PROVISIONAL_FIRST_PARTY_PACK_ID,
+            ],
+            Self::FirstPartyCoverage => &[AUTHORED_FIRST_PARTY_PACK_ID, DIAGNOSTIC_MISSING_PACK_ID],
+            Self::ProvisionalAudit => &[PROVISIONAL_FIRST_PARTY_PACK_ID],
+        };
+        AssetPackSelection::new(ids.iter().map(|id| AssetPackId::new(*id)))
+    }
+
+    pub fn from_selection(selection: &AssetPackSelection) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|profile| profile.selection() == *selection)
+    }
+
+    pub fn normalize_legacy_selection(selection: &AssetPackSelection) -> AssetPackSelection {
+        if Self::from_selection(selection).is_some() {
+            return selection.clone();
+        }
+        let authored = selection.is_enabled(&AssetPackId::new(AUTHORED_FIRST_PARTY_PACK_ID));
+        let reference = selection.is_enabled(&AssetPackId::new(MINECRAFT_REFERENCE_PACK_ID));
+        let only_legacy_ids = selection.enabled_ids().all(|id| {
+            matches!(
+                id.as_str(),
+                AUTHORED_FIRST_PARTY_PACK_ID | MINECRAFT_REFERENCE_PACK_ID
+            )
+        });
+        if !only_legacy_ids {
+            return selection.clone();
+        }
+        match (authored, reference) {
+            (true, false) => Self::McloneOriginal.selection(),
+            (false, true) => Self::MinecraftReference.selection(),
+            (true, true) => Self::HybridAuthoring.selection(),
+            (false, false) => Self::ProvisionalAudit.selection(),
+        }
+    }
+
+    pub const fn is_diagnostic(self) -> bool {
+        matches!(self, Self::FirstPartyCoverage | Self::ProvisionalAudit)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum TexturePresentation {
+    #[default]
+    Textured,
+    FlatColors,
+}
+
+impl TexturePresentation {
+    pub const ALL: [Self; 2] = [Self::Textured, Self::FlatColors];
+
+    pub const fn id(self) -> &'static str {
+        match self {
+            Self::Textured => "textured",
+            Self::FlatColors => "flat-colors",
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Textured => "Textured",
+            Self::FlatColors => "Flat colors",
+        }
+    }
+
+    pub fn parse(value: &str) -> Option<Self> {
+        Self::ALL
+            .into_iter()
+            .find(|presentation| presentation.id() == value)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -296,6 +435,8 @@ pub struct AssetProvenanceEntry {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct AssetProvenanceSummary {
     pub first_party: usize,
+    pub provisional: usize,
+    pub diagnostic: usize,
     pub generated: usize,
     pub minecraft_reference: usize,
     pub unknown: usize,
@@ -335,6 +476,8 @@ impl AssetProvenanceReport {
                 AssetResolutionOutcome::Missing => summary.missing += 1,
                 AssetResolutionOutcome::Resolved => match entry.source.origin {
                     AssetPackOrigin::FirstParty => summary.first_party += 1,
+                    AssetPackOrigin::FirstPartyProvisional => summary.provisional += 1,
+                    AssetPackOrigin::Diagnostic => summary.diagnostic += 1,
                     AssetPackOrigin::Generated => summary.generated += 1,
                     AssetPackOrigin::MinecraftReference => summary.minecraft_reference += 1,
                     AssetPackOrigin::Unknown => summary.unknown += 1,
@@ -387,6 +530,65 @@ mod tests {
                 "minecraft-1.17.1-reference",
                 "mclone-generated"
             ]
+        );
+    }
+
+    #[test]
+    fn named_texture_profiles_have_exact_source_families() {
+        assert_eq!(
+            TextureVisualProfile::McloneOriginal.selection(),
+            AssetPackSelection::new([
+                AssetPackId::new(AUTHORED_FIRST_PARTY_PACK_ID),
+                AssetPackId::new(PROVISIONAL_FIRST_PARTY_PACK_ID),
+            ])
+        );
+        assert_eq!(
+            TextureVisualProfile::FirstPartyCoverage.selection(),
+            AssetPackSelection::new([
+                AssetPackId::new(AUTHORED_FIRST_PARTY_PACK_ID),
+                AssetPackId::new(DIAGNOSTIC_MISSING_PACK_ID),
+            ])
+        );
+        for profile in TextureVisualProfile::ALL {
+            assert_eq!(
+                TextureVisualProfile::parse(profile.id()),
+                Some(profile),
+                "{} did not round-trip",
+                profile.id()
+            );
+            assert_eq!(
+                TextureVisualProfile::from_selection(&profile.selection()),
+                Some(profile)
+            );
+        }
+    }
+
+    #[test]
+    fn texture_presentation_ids_round_trip() {
+        for presentation in TexturePresentation::ALL {
+            assert_eq!(
+                TexturePresentation::parse(presentation.id()),
+                Some(presentation)
+            );
+        }
+    }
+
+    #[test]
+    fn legacy_optional_pack_selections_gain_their_explicit_base() {
+        assert_eq!(
+            TextureVisualProfile::normalize_legacy_selection(&AssetPackSelection::new([
+                AssetPackId::new(AUTHORED_FIRST_PARTY_PACK_ID),
+            ])),
+            TextureVisualProfile::McloneOriginal.selection()
+        );
+        assert_eq!(
+            TextureVisualProfile::normalize_legacy_selection(&AssetPackSelection::default()),
+            TextureVisualProfile::ProvisionalAudit.selection()
+        );
+        let custom = AssetPackSelection::new([AssetPackId::new("community-pack")]);
+        assert_eq!(
+            TextureVisualProfile::normalize_legacy_selection(&custom),
+            custom
         );
     }
 

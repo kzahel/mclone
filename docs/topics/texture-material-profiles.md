@@ -6,6 +6,15 @@ Status: accepted for end-to-end implementation 2026-07-25. The product model
 and profile semantics below are settled; implementation evidence will be
 recorded here as the shared engine, Terrain Lab, and Texture Lab adopt them.
 
+Implementation update (2026-07-25): the first shared slice has landed. The
+legacy-id `mclone-generated-fallback` archive now declares
+`first_party_provisional` provenance and contains label-free deterministic
+material art. A separate `mclone-diagnostic-missing` archive owns the checker,
+magenta border, short codes, and missing registry. `mclone-assets` defines the
+five named source orders plus textured/flat presentation vocabulary and exact
+provisional/diagnostic provenance. The canonical build stages all three
+first-party archives and still succeeds without reading Minecraft content.
+
 ## Scope
 
 This topic owns the meaning, selection, and authoring lifecycle of block
@@ -258,4 +267,3 @@ face-specific asset as active.
 6. Validate deterministic first-party builds, shared native/Wasm behavior, and
    rendered output for Original, Minecraft, Hybrid, Coverage, and Provisional
    Audit.
-

@@ -12,6 +12,7 @@ pnpm texture-lab:pack-overlay
 pnpm texture-lab:coverage
 pnpm texture-lab:pack-authored
 pnpm assets:pack:generated-fallback
+pnpm assets:pack:diagnostic-missing
 pnpm assets:pack:first-party
 pnpm assets:validate:first-party
 pnpm assets:pack:first-party:test
@@ -57,33 +58,38 @@ generated-assets/texture-lab/mclone-default-overlay-coverage.md
 
 ## Standalone First-Party Packs
 
-`pnpm assets:pack:first-party` is the canonical build gate for the two
+`pnpm assets:pack:first-party` is the canonical build gate for the three
 standalone first-party inputs:
 
 ```text
 generated-assets/texture-lab/mclone-authored.pbp
 generated-assets/texture-lab/mclone-generated-fallback.pbp
+generated-assets/texture-lab/mclone-diagnostic-missing.pbp
 ```
 
 The command first performs a clean texture-lab runtime export with
 `--no-reference`, packages the accepted authored PNGs, far-LOD metadata, and
 repo-owned figures, exports the shared Rust inventory, and builds the generated
-fallback. `generated-assets/` remains ignored.
+sources. `generated-assets/` remains ignored.
 
-The fallback contains deterministic labeled PNGs for every canonical material,
-generated cow/effect replacements, all required first-party figures, block
-visual definitions, a short-code registry, coverage/provenance facts, and an
-explicit suppressed-audio policy. Missing codes start at four hexadecimal
-characters; colliding prefixes extend deterministically and full-hash
-collisions fail the build. The tiny checked-in font is
-`missing_font.v1.json`.
+The legacy-named generated fallback is now the provisional source. It contains
+restrained deterministic color/noise textures for every canonical material,
+generated actor/effect replacements, all required first-party figures, block
+visual definitions, a provisional registry, coverage/provenance facts, and an
+explicit suppressed-audio policy.
+
+The separate diagnostic pack contains the conspicuous checker, magenta border,
+and short-code PNGs. Missing codes start at four hexadecimal characters;
+colliding prefixes extend deterministically and full-hash collisions fail the
+build. The tiny checked-in font is `missing_font.v1.json`. Normal Mclone
+Original selection does not include this pack.
 
 Both PNG encoders use stored-DEFLATE streams, and both archives use fixed ZIP
 timestamps and stored entries, so bytes do not vary with host zlib versions.
 Manifests declare pack id, origin, roles, asset schema, and payload fingerprint.
 The builder does not discover, read, fingerprint, or name
 `reference/minecraft-1.17.1/`; isolated tests place a sentinel reference tree
-beside the allowed inputs and prove it cannot enter either archive.
+beside the allowed inputs and prove it cannot enter any archive.
 
 The combined build finishes by staging byte-identical copies and their sidecars
 with a fingerprinted catalog under:

@@ -31,6 +31,7 @@ pub const DEFAULT_NAMED_PACK_FILE: &str = "mclone-game-1.17.1.pbp";
 pub const DEFAULT_OVERLAY_PACK_FILE: &str = "mclone-default-overlay.pbp";
 pub const DEFAULT_AUTHORED_FIRST_PARTY_PACK_FILE: &str = "mclone-authored.pbp";
 pub const DEFAULT_GENERATED_FALLBACK_PACK_FILE: &str = "mclone-generated-fallback.pbp";
+pub const DEFAULT_DIAGNOSTIC_MISSING_PACK_FILE: &str = "mclone-diagnostic-missing.pbp";
 pub const DEFAULT_ANDROID_APP_ID: &str = "com.kzahel.mclone";
 pub const DEFAULT_FIRST_PARTY_ASSET_DIR: &str = "assets";
 pub use crate::{

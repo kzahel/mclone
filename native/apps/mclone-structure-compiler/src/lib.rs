@@ -46,7 +46,7 @@ impl StructurePreviewCompiler {
         let authored_path = asset_pack_root.join(AUTHORED_PACK_FILE);
         let generated_path = asset_pack_root.join(GENERATED_PACK_FILE);
         let authored = load_pack(&authored_path, AssetPackOrigin::FirstParty)?;
-        let generated = load_pack(&generated_path, AssetPackOrigin::Generated)?;
+        let generated = load_pack(&generated_path, AssetPackOrigin::FirstPartyProvisional)?;
         let authored_id = pack_id(&authored, &authored_path)?;
         let generated_id = pack_id(&generated, &generated_path)?;
         let packs = vec![
@@ -56,7 +56,11 @@ impl StructurePreviewCompiler {
 
         let mut chain = AssetSourceChain::new();
         chain.push_named(authored_id.clone(), AssetPackOrigin::FirstParty, authored);
-        chain.push_named(generated_id.clone(), AssetPackOrigin::Generated, generated);
+        chain.push_named(
+            generated_id.clone(),
+            AssetPackOrigin::FirstPartyProvisional,
+            generated,
+        );
         let tracker = ProvenanceTrackingAssetSource::new(&chain);
         let assets = load_first_party_textured_terrain_assets(&tracker)
             .context("failed to prepare first-party structure preview assets")?;
@@ -822,6 +826,8 @@ fn pack_receipt(path: &Path, pack: &PackedAssetSource, id: &AssetPackId) -> Resu
 const fn origin_name(origin: AssetPackOrigin) -> &'static str {
     match origin {
         AssetPackOrigin::FirstParty => "first_party",
+        AssetPackOrigin::FirstPartyProvisional => "first_party_provisional",
+        AssetPackOrigin::Diagnostic => "diagnostic",
         AssetPackOrigin::Generated => "generated",
         AssetPackOrigin::MinecraftReference => "minecraft_reference",
         AssetPackOrigin::Unknown => "unknown",

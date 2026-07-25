@@ -48,6 +48,8 @@ fn main() -> Result<()> {
                 "proprietary_free": prepared.provenance.allows_proprietary_free_claim(),
                 "provenance": {
                     "first_party": summary.first_party,
+                    "provisional": summary.provisional,
+                    "diagnostic": summary.diagnostic,
                     "generated": summary.generated,
                     "minecraft_reference": summary.minecraft_reference,
                     "unknown": summary.unknown,
@@ -95,6 +97,8 @@ fn main() -> Result<()> {
 const fn origin_label(origin: mclone_assets::AssetPackOrigin) -> &'static str {
     match origin {
         mclone_assets::AssetPackOrigin::FirstParty => "first_party",
+        mclone_assets::AssetPackOrigin::FirstPartyProvisional => "first_party_provisional",
+        mclone_assets::AssetPackOrigin::Diagnostic => "diagnostic",
         mclone_assets::AssetPackOrigin::Generated => "generated",
         mclone_assets::AssetPackOrigin::MinecraftReference => "minecraft_reference",
         mclone_assets::AssetPackOrigin::Unknown => "unknown",

@@ -60,9 +60,11 @@ pub use prepared_figure::{
     evaluate_prepared_figure_rest_pose_into, load_prepared_figure, prepare_figure_asset,
 };
 pub use profile::{
-    AssetPackAvailability, AssetPackCatalog, AssetPackDescriptor, AssetPackDiscovery, AssetPackId,
-    AssetPackOrigin, AssetPackRole, AssetPackSelection, AssetProvenanceEntry,
-    AssetProvenanceReport, AssetProvenanceSummary, AssetResolutionOrigin, AssetResolutionOutcome,
+    AUTHORED_FIRST_PARTY_PACK_ID, AssetPackAvailability, AssetPackCatalog, AssetPackDescriptor,
+    AssetPackDiscovery, AssetPackId, AssetPackOrigin, AssetPackRole, AssetPackSelection,
+    AssetProvenanceEntry, AssetProvenanceReport, AssetProvenanceSummary, AssetResolutionOrigin,
+    AssetResolutionOutcome, DIAGNOSTIC_MISSING_PACK_ID, MINECRAFT_REFERENCE_PACK_ID,
+    PROVISIONAL_FIRST_PARTY_PACK_ID, TexturePresentation, TextureVisualProfile,
 };
 pub use resource::{AssetPath, ResourceLocation};
 pub use source::{

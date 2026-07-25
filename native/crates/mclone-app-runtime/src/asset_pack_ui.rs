@@ -306,7 +306,9 @@ fn validate_asset_pack_ui_catalog(catalog: &AssetPackCatalog) -> Result<()> {
 const fn ui_origin(origin: AssetPackOrigin) -> AssetPackUiOrigin {
     match origin {
         AssetPackOrigin::FirstParty => AssetPackUiOrigin::FirstParty,
-        AssetPackOrigin::Generated => AssetPackUiOrigin::Generated,
+        AssetPackOrigin::FirstPartyProvisional
+        | AssetPackOrigin::Diagnostic
+        | AssetPackOrigin::Generated => AssetPackUiOrigin::Generated,
         AssetPackOrigin::MinecraftReference => AssetPackUiOrigin::MinecraftReference,
         AssetPackOrigin::Unknown => AssetPackUiOrigin::Unknown,
     }
