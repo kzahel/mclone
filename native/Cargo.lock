@@ -1945,6 +1945,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "mclone-world-explorer"
+version = "0.1.0"
+
+[[package]]
 name = "mclone-worldgen"
 version = "0.0.0"
 dependencies = [

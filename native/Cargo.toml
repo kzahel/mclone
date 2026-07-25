@@ -33,6 +33,7 @@ members = [
   "apps/mclone-structure-compiler",
   "apps/mclone-terrain-lab",
   "apps/mclone-web-client",
+  "apps/mclone-world-explorer",
 ]
 resolver = "3"
 

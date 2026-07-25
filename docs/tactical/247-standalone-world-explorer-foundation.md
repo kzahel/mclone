@@ -1,6 +1,6 @@
 # Tactical 247: Standalone World Explorer Foundation
 
-Status: proposed 2026-07-25.
+Status: active 2026-07-25.
 
 Topic: `world-view-navigation`
 
@@ -296,6 +296,31 @@ service construction, asset footprint, and startup work together establish
 the proof.
 
 ## Implementation Slices
+
+### Pinned baseline
+
+Slice 0 started from commit `6c3623b3` with this repeatable evidence state:
+
+- the delivered Terrain Lab browser assets were 4,248,122 bytes of Wasm,
+  312,285 bytes of main JavaScript, 52,208 bytes of canonical-worker
+  JavaScript, 50,631 bytes of LOD-worker JavaScript, 16,081 bytes of CSS, and
+  856 bytes of HTML;
+- `mclone-terrain-view` had normal direct dependencies only on `mclone-core`,
+  `mclone-worldgen`, and WGPU;
+- the native first-party authored pack was 7,945,702 bytes, while the
+  generated-fallback and diagnostic-missing packs were 367,463 and 370,428
+  bytes respectively; and
+- the comparison view is seed 12345, center X/Z 0/0, 4,096 blocks across,
+  1,280 by 720 pixels, original Mclone overworld GPU terrain, rendered
+  presentation, cover content, with both map and 3D camera evidence.
+
+The browser-input follow-up begins from
+`native/apps/mclone-web-client/www/mclone-web-input.ts`,
+`native/apps/mclone-web-client/www/mclone-web-touch.ts`,
+`native/apps/mclone-web-client/www/mclone-web-app.ts`,
+`tools/terrain-lab/src/web/TerrainCanvas.tsx`,
+`tools/terrain-lab/src/web/CanonicalTerrainCanvas.tsx`, and the current pure
+camera helpers in `tools/terrain-lab/src/state.ts`.
 
 ### Slice 0: baseline and source-shape guard
 
