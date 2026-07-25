@@ -10,8 +10,7 @@ use crate::block::{
 };
 use crate::feature::{
     ConfiguredFeature, DecorationStep, FeatureRegion, FeatureWorld, PlacedFeature,
-    RandomFeatureConfiguration, RandomPatchConfiguration, RandomPatchStateProvider,
-    TreeConfiguration, WeightedConfiguredFeature,
+    RandomPatchConfiguration, RandomPatchStateProvider,
     apply_feature_table_to_region_with_index_offset_timed, flower_patch, grass_patch,
 };
 use crate::levelgen::profile::PLAINS_BIOME_ID;
@@ -26,7 +25,7 @@ use super::biomes::{
 };
 use super::fields::{McloneOverworldSampler, McloneOverworldSamplingTopology};
 
-pub const MCLONE_OVERWORLD_DECORATION_REVISION: &str = "mclone-overworld-v1-decoration-13";
+pub const MCLONE_OVERWORLD_DECORATION_REVISION: &str = "mclone-overworld-v1-decoration-14";
 
 const MCLONE_OVERWORLD_DECORATION_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6465_6331);
 const MCLONE_OVERWORLD_RIVER_ROCK_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_726f_636b);
@@ -78,7 +77,10 @@ pub(super) fn decorate_mclone_overworld_center_with_topology(
     }
     let preserved_tree_index = i32::from(matches!(
         biome_id,
-        PLAINS_BIOME_ID | MCLONE_OVERWORLD_FOREST_BIOME_ID
+        PLAINS_BIOME_ID
+            | MCLONE_OVERWORLD_FOREST_BIOME_ID
+            | MCLONE_OVERWORLD_TAIGA_BIOME_ID
+            | MCLONE_OVERWORLD_SAVANNA_BIOME_ID
     ));
     apply_feature_table_to_region_with_index_offset_timed(
         MCLONE_OVERWORLD_DECORATION_DOMAIN.derive(seed),
@@ -272,7 +274,6 @@ fn cool_wet_conifer_features() -> &'static [PlacedFeature] {
     FEATURES
         .get_or_init(|| {
             vec![
-                conifer_tree_feature(),
                 grass_patch(FERN, 3),
                 grass_patch(GRASS, 1),
                 rare_large_fern_patch(),
@@ -287,7 +288,6 @@ fn warm_dry_steppe_core_features() -> &'static [PlacedFeature] {
     FEATURES
         .get_or_init(|| {
             vec![
-                acacia_tree_feature(1, 0.25),
                 tall_grass_patch(2),
                 grass_patch(GRASS, 5),
                 occasional_flower_patch(DANDELION, 5),
@@ -302,7 +302,6 @@ fn warm_dry_steppe_shoulder_features() -> &'static [PlacedFeature] {
     FEATURES
         .get_or_init(|| {
             vec![
-                acacia_tree_feature(0, 0.45),
                 tall_grass_patch(1),
                 grass_patch(GRASS, 5),
                 occasional_flower_patch(DANDELION, 6),
@@ -310,37 +309,6 @@ fn warm_dry_steppe_shoulder_features() -> &'static [PlacedFeature] {
             ]
         })
         .as_slice()
-}
-
-fn conifer_tree_feature() -> PlacedFeature {
-    PlacedFeature::new(
-        DecorationStep::VegetalDecoration,
-        ConfiguredFeature::random_selector(RandomFeatureConfiguration::new(
-            [WeightedConfiguredFeature::new(
-                ConfiguredFeature::tree(TreeConfiguration::pine()),
-                0.36,
-            )],
-            ConfiguredFeature::tree(TreeConfiguration::spruce()),
-        )),
-        tree_decorators(6, 0.2, 1),
-    )
-}
-
-fn acacia_tree_feature(count: i32, extra_chance: f32) -> PlacedFeature {
-    PlacedFeature::new(
-        DecorationStep::VegetalDecoration,
-        ConfiguredFeature::tree(TreeConfiguration::acacia()),
-        tree_decorators(count, extra_chance, 1),
-    )
-}
-
-fn tree_decorators(count: i32, extra_chance: f32, extra_count: i32) -> Vec<ConfiguredDecorator> {
-    vec![
-        ConfiguredDecorator::count_extra(count, extra_chance, extra_count),
-        ConfiguredDecorator::square(),
-        ConfiguredDecorator::water_depth_threshold(0),
-        ConfiguredDecorator::heightmap(HeightmapType::OceanFloor),
-    ]
 }
 
 fn tall_grass_patch(count: i32) -> PlacedFeature {
@@ -455,7 +423,7 @@ mod tests {
                 McloneOverworldSteppeBand::Outside,
             )
             .len(),
-            5
+            4
         );
         assert_eq!(
             feature_table(
@@ -463,7 +431,7 @@ mod tests {
                 McloneOverworldSteppeBand::Core,
             )
             .len(),
-            5
+            4
         );
         assert_eq!(
             feature_table(
@@ -471,7 +439,7 @@ mod tests {
                 McloneOverworldSteppeBand::Shoulder,
             )
             .len(),
-            5
+            4
         );
         assert!(
             feature_table(
@@ -489,5 +457,33 @@ mod tests {
         );
         assert!(feature_table(OCEAN_BIOME_ID, McloneOverworldSteppeBand::Outside).is_empty());
         assert!(feature_table(BEACH_BIOME_ID, McloneOverworldSteppeBand::Outside).is_empty());
+        for features in [
+            feature_table(PLAINS_BIOME_ID, McloneOverworldSteppeBand::Outside),
+            feature_table(
+                MCLONE_OVERWORLD_FOREST_BIOME_ID,
+                McloneOverworldSteppeBand::Outside,
+            ),
+            feature_table(
+                MCLONE_OVERWORLD_TAIGA_BIOME_ID,
+                McloneOverworldSteppeBand::Outside,
+            ),
+            feature_table(
+                MCLONE_OVERWORLD_SAVANNA_BIOME_ID,
+                McloneOverworldSteppeBand::Core,
+            ),
+            feature_table(
+                MCLONE_OVERWORLD_SAVANNA_BIOME_ID,
+                McloneOverworldSteppeBand::Shoulder,
+            ),
+        ] {
+            assert!(features.iter().all(|feature| {
+                !matches!(
+                    &feature.feature,
+                    ConfiguredFeature::BasicTree(_)
+                        | ConfiguredFeature::Tree(_)
+                        | ConfiguredFeature::RandomSelector(_)
+                )
+            }));
+        }
     }
 }

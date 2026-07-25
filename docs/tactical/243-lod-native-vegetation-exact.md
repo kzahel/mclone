@@ -213,15 +213,42 @@ Execution record:
 
 ### Slice 3: conifer and acacia completion
 
-- [ ] Add layered conifer and forked/flat-crowned acacia realizers.
-- [ ] Remove the remaining Mclone tree configured features.
-- [ ] Prove every emitted tree family, base, dimension, orientation, and bound
+- [x] Add layered conifer and forked/flat-crowned acacia realizers.
+- [x] Remove the remaining Mclone tree configured features.
+- [x] Prove every emitted tree family, base, dimension, orientation, and bound
   agrees with its record.
-- [ ] Capture and inspect conifer, steppe, mixed transition, and cylinder-seam
+- [x] Capture and inspect conifer, steppe, mixed transition, and cylinder-seam
   pixels.
 
 Gate: Mclone natural tree placement no longer calls the vanilla-shaped
 decorator path.
+
+Execution record:
+
+- exact realization now visits every occurrence once in stable ID order and
+  dispatches only its resolved rounded broadleaf, layered conifer, or oriented
+  forked acacia grammar;
+- the conifer grammar derives its complete tapered crown depth from the record,
+  while the acacia grammar derives both connected forks and flat crowns from
+  record height, radius, orientation, and variant seed;
+- runtime bounds assertions cover every attempted tree block, and the
+  representative integration receipt checks each family's vertical trunk plus
+  every reviewed acacia main-fork block against the source record;
+- all Mclone biome tables now contain only retained low vegetation, a focused
+  test rejects any remaining basic tree, tree, or random tree selector, and
+  `mclone-overworld-v1-decoration-14` preserves their vacated feature index;
+- the final representative exact receipt contains oak/spruce/acacia log counts
+  `199/768/294`, retained low-vegetation counts
+  `1934/272/0/10/45/82/49`, and decorated payload fingerprint
+  `1780731906598478474`;
+- inspected `/tmp/mclone-vegetation-conifer.png` shows the mixed
+  broadleaf/conifer transition and bounded tiered spruce crowns,
+  `/tmp/mclone-vegetation-steppe-record.png` shows connected oriented forks
+  and distinct flat crowns, and
+  `/tmp/mclone-vegetation-cylinder-seam.png` shows canonical woodland trees at
+  cylinder chunk `(383,-128)` without a seam discontinuity; and
+- all 338 active `mclone-worldgen` tests pass, with one pre-existing ignored
+  gauntlet, and `mclone-worldgen` checks for `wasm32-unknown-unknown`.
 
 ### Slice 4: worker, integration, and performance closeout
 

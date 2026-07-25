@@ -21,9 +21,9 @@ use super::terrain::{
     mclone_overworld_chunk_biomes_with_stream_cache,
 };
 use super::vegetation::{
-    McloneOverworldVegetationPlanCache, McloneTreeFamily, McloneTreeId, McloneTreeOccurrence,
-    McloneVegetationBounds, McloneVegetationError, McloneVegetationPlanCacheReport,
-    McloneVegetationSource, realize_mclone_tree_occurrences_for_family,
+    McloneOverworldVegetationPlanCache, McloneTreeId, McloneTreeOccurrence, McloneVegetationBounds,
+    McloneVegetationError, McloneVegetationPlanCacheReport, McloneVegetationSource,
+    realize_mclone_tree_occurrences,
 };
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -184,11 +184,7 @@ impl McloneOverworldFeatureDependencyCache {
             .next()
             .expect("non-empty Mclone Overworld targets");
         let mut region = FeatureRegion::new(first_target.x, first_target.z, region_chunks);
-        realize_mclone_tree_occurrences_for_family(
-            &mut region,
-            &tree_occurrences,
-            McloneTreeFamily::TemperateBroadleaf,
-        );
+        realize_mclone_tree_occurrences(&mut region, &tree_occurrences);
         for center in work_centers {
             region.set_center(center.x, center.z);
             decorate_mclone_overworld_center(seed, &mut region);
@@ -312,11 +308,7 @@ impl McloneOverworldFeatureDependencyCache {
                 work_centers.iter().copied(),
             )
             .expect("periodic Mclone vegetation work bounds are representable");
-            realize_mclone_tree_occurrences_for_family(
-                &mut region,
-                &tree_occurrences,
-                McloneTreeFamily::TemperateBroadleaf,
-            );
+            realize_mclone_tree_occurrences(&mut region, &tree_occurrences);
             for center in work_centers {
                 region.set_center_with_decoration_identity(
                     center.x,
@@ -402,11 +394,7 @@ impl McloneOverworldFeatureDependencyCache {
                 work_centers.iter().copied(),
             )
             .expect("periodic Mclone vegetation work bounds are representable");
-            realize_mclone_tree_occurrences_for_family(
-                &mut region,
-                &tree_occurrences,
-                McloneTreeFamily::TemperateBroadleaf,
-            );
+            realize_mclone_tree_occurrences(&mut region, &tree_occurrences);
             for center in work_centers {
                 region.set_center_with_decoration_identity(
                     center.x,
@@ -638,7 +626,10 @@ mod tests {
         MOSSY_COBBLESTONE, OAK_LOG, POPPY, SPRUCE_LOG, SWEET_BERRY_BUSH, TALL_GRASS_LOWER, WATER,
     };
     use crate::levelgen::MCLONE_OVERWORLD_PERIOD_CHUNKS;
-    use crate::levelgen::mclone_overworld::{McloneVegetationSource, tree_records_intersecting};
+    use crate::levelgen::mclone_overworld::{
+        McloneTreeFamily, McloneVegetationSource, tree_records_intersecting,
+    };
+    use crate::placement::BlockPos;
 
     #[test]
     fn cache_reuses_overlapping_surface_inputs() {
@@ -833,13 +824,13 @@ mod tests {
 
         assert_eq!(
             decoration_counts,
-            [199, 621, 240, 1_969, 366, 6, 11, 42, 73, 54]
+            [199, 768, 294, 1_934, 272, 0, 10, 45, 82, 49]
         );
-        assert_eq!(hash, 1_565_593_964_556_829_038);
+        assert_eq!(hash, 1_780_731_906_598_478_474);
 
         let source =
             McloneVegetationSource::new(12_345, McloneOverworldSamplingTopology::Unbounded);
-        let broadleaf_records = targets
+        let planned_records = targets
             .iter()
             .flat_map(|target| {
                 let min_x = chunk_min_block_coord(target.x);
@@ -857,37 +848,94 @@ mod tests {
                 .unwrap()
             })
             .filter(|occurrence| {
-                occurrence.record.family == McloneTreeFamily::TemperateBroadleaf
-                    && chunks.contains_key(&ChunkPos::new(
-                        mclone_core::block_to_chunk_coord(occurrence.record.canonical_base.x),
-                        mclone_core::block_to_chunk_coord(occurrence.record.canonical_base.z),
-                    ))
+                let base_chunk = ChunkPos::new(
+                    mclone_core::block_to_chunk_coord(occurrence.record.canonical_base.x),
+                    mclone_core::block_to_chunk_coord(occurrence.record.canonical_base.z),
+                );
+                (-1..=1).all(|dz| {
+                    (-1..=1).all(|dx| {
+                        chunks.contains_key(&ChunkPos::new(base_chunk.x + dx, base_chunk.z + dz))
+                    })
+                })
             })
             .collect::<std::collections::BTreeSet<_>>();
-        assert!(!broadleaf_records.is_empty());
-        for occurrence in broadleaf_records {
+        let mut seen_families = [false; 3];
+        for occurrence in planned_records {
+            let family_index = match occurrence.record.family {
+                McloneTreeFamily::TemperateBroadleaf => 0,
+                McloneTreeFamily::CoolWetConifer => 1,
+                McloneTreeFamily::WarmDryAcacia => 2,
+            };
+            seen_families[family_index] = true;
             let base = occurrence.record.canonical_base;
-            let chunk = chunks
-                .get(&ChunkPos::new(
-                    mclone_core::block_to_chunk_coord(base.x),
-                    mclone_core::block_to_chunk_coord(base.z),
-                ))
-                .unwrap();
-            for dy in 0..i32::from(occurrence.record.trunk_height) {
+            let log = match occurrence.record.family {
+                McloneTreeFamily::TemperateBroadleaf => OAK_LOG,
+                McloneTreeFamily::CoolWetConifer => SPRUCE_LOG,
+                McloneTreeFamily::WarmDryAcacia => ACACIA_LOG,
+            };
+            let vertical_height = match occurrence.record.family {
+                McloneTreeFamily::WarmDryAcacia => i32::from(occurrence.record.trunk_height) - 2,
+                McloneTreeFamily::TemperateBroadleaf | McloneTreeFamily::CoolWetConifer => {
+                    i32::from(occurrence.record.trunk_height)
+                }
+            };
+            for dy in 0..vertical_height {
                 assert_eq!(
-                    chunk
-                        .block_at_y(
-                            mclone_core::local_block_coord(base.x),
-                            base.y + dy,
-                            mclone_core::local_block_coord(base.z),
-                        )
-                        .raw(),
-                    OAK_LOG,
+                    block_at_world(&chunks, BlockPos::new(base.x, base.y + dy, base.z)),
+                    Some(log),
                     "record {:?} trunk differs at y {}",
                     occurrence.record.id,
                     base.y + dy
                 );
             }
+            if occurrence.record.family == McloneTreeFamily::WarmDryAcacia {
+                let trunk_height = i32::from(occurrence.record.trunk_height);
+                let (dx, dz) = test_tree_direction(occurrence.record.orientation);
+                for step in 1..=3 {
+                    let pos = BlockPos::new(
+                        base.x + dx * step,
+                        base.y + trunk_height - 3 + step,
+                        base.z + dz * step,
+                    );
+                    assert_eq!(
+                        block_at_world(&chunks, pos),
+                        Some(ACACIA_LOG),
+                        "record {:?} main fork differs at {pos:?}",
+                        occurrence.record.id
+                    );
+                }
+            }
+        }
+        assert_eq!(seen_families, [true; 3]);
+    }
+
+    fn block_at_world(
+        chunks: &BTreeMap<ChunkPos, GeneratedChunk>,
+        pos: BlockPos,
+    ) -> Option<crate::block::RawBlockId> {
+        chunks
+            .get(&ChunkPos::new(
+                mclone_core::block_to_chunk_coord(pos.x),
+                mclone_core::block_to_chunk_coord(pos.z),
+            ))
+            .map(|chunk| {
+                chunk
+                    .block_at_y(
+                        mclone_core::local_block_coord(pos.x),
+                        pos.y,
+                        mclone_core::local_block_coord(pos.z),
+                    )
+                    .raw()
+            })
+    }
+
+    fn test_tree_direction(orientation: u8) -> (i32, i32) {
+        match orientation & 3 {
+            0 => (0, -1),
+            1 => (1, 0),
+            2 => (0, 1),
+            3 => (-1, 0),
+            _ => unreachable!(),
         }
     }
 

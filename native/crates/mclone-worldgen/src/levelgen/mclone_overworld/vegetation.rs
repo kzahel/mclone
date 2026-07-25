@@ -2,7 +2,10 @@ use std::collections::{BTreeMap, VecDeque};
 use std::error::Error;
 use std::fmt;
 
-use crate::block::{AIR, DIRT, OAK_LEAVES, OAK_LOG, RawBlockId, is_leaves};
+use crate::block::{
+    ACACIA_LEAVES, ACACIA_LOG, AIR, DIRT, OAK_LEAVES, OAK_LOG, RawBlockId, SPRUCE_LEAVES,
+    SPRUCE_LOG, is_leaves,
+};
 use crate::feature::FeatureRegion;
 use crate::levelgen::profile::FLAT_GRASS_HEIGHT;
 use crate::noise::{SeedDomain, ValueNoise2d};
@@ -639,30 +642,25 @@ pub fn tree_records_intersecting(
     McloneOverworldVegetationPlanCache::new(source).tree_records_intersecting(bounds)
 }
 
-pub(crate) fn realize_mclone_tree_occurrences_for_family(
+pub(crate) fn realize_mclone_tree_occurrences(
     region: &mut FeatureRegion,
     occurrences: &[McloneTreeOccurrence],
-    family: McloneTreeFamily,
 ) -> McloneTreeRealizationReport {
     let mut report = McloneTreeRealizationReport {
         requested_occurrences: occurrences.len(),
         ..McloneTreeRealizationReport::default()
     };
     for occurrence in occurrences {
-        if occurrence.record.family != family {
-            continue;
-        }
         report.realized_occurrences += 1;
         match occurrence.record.archetype {
             McloneTreeArchetype::RoundedBroadleaf => {
                 realize_rounded_broadleaf(region, *occurrence, &mut report);
             }
-            McloneTreeArchetype::LayeredConifer | McloneTreeArchetype::ForkedAcacia => {
-                panic!(
-                    "tree family {} has mismatched archetype {}",
-                    occurrence.record.family.label(),
-                    occurrence.record.archetype.label()
-                );
+            McloneTreeArchetype::LayeredConifer => {
+                realize_layered_conifer(region, *occurrence, &mut report);
+            }
+            McloneTreeArchetype::ForkedAcacia => {
+                realize_forked_acacia(region, *occurrence, &mut report);
             }
         }
     }
@@ -723,6 +721,188 @@ fn realize_rounded_broadleaf(
             OAK_LOG,
             report,
         );
+    }
+}
+
+fn realize_layered_conifer(
+    region: &mut FeatureRegion,
+    occurrence: McloneTreeOccurrence,
+    report: &mut McloneTreeRealizationReport,
+) {
+    let record = occurrence.record;
+    let base = occurrence
+        .working_base()
+        .expect("validated tree occurrence has a representable working base");
+    write_tree_block(
+        region,
+        occurrence,
+        BlockPos::new(base.x, base.y - 1, base.z),
+        DIRT,
+        report,
+    );
+
+    let crown_top_y = base.y + i32::from(record.trunk_height);
+    let crown_depth = i32::from(record.crown_depth);
+    let crown_radius = i32::from(record.crown_radius);
+    for layer in 0..=crown_depth {
+        let layer_radius = if layer == 0 {
+            0
+        } else {
+            let tapered = (1 + layer * crown_radius / crown_depth.max(1)).min(crown_radius);
+            if layer % 3 == 0 {
+                tapered.saturating_sub(1)
+            } else {
+                tapered
+            }
+        };
+        let y = crown_top_y - layer;
+        for dz in -layer_radius..=layer_radius {
+            for dx in -layer_radius..=layer_radius {
+                if dx.abs() == layer_radius
+                    && dz.abs() == layer_radius
+                    && (tree_voxel_hash(record.variant_seed, dx, -layer, dz) & 1) != 0
+                {
+                    continue;
+                }
+                write_tree_leaf(
+                    region,
+                    occurrence,
+                    BlockPos::new(base.x + dx, y, base.z + dz),
+                    SPRUCE_LEAVES,
+                    report,
+                );
+            }
+        }
+    }
+
+    for dy in 0..i32::from(record.trunk_height) {
+        write_tree_block(
+            region,
+            occurrence,
+            BlockPos::new(base.x, base.y + dy, base.z),
+            SPRUCE_LOG,
+            report,
+        );
+    }
+}
+
+fn realize_forked_acacia(
+    region: &mut FeatureRegion,
+    occurrence: McloneTreeOccurrence,
+    report: &mut McloneTreeRealizationReport,
+) {
+    let record = occurrence.record;
+    let base = occurrence
+        .working_base()
+        .expect("validated tree occurrence has a representable working base");
+    write_tree_block(
+        region,
+        occurrence,
+        BlockPos::new(base.x, base.y - 1, base.z),
+        DIRT,
+        report,
+    );
+
+    let trunk_height = i32::from(record.trunk_height);
+    for dy in 0..=trunk_height - 3 {
+        write_tree_block(
+            region,
+            occurrence,
+            BlockPos::new(base.x, base.y + dy, base.z),
+            ACACIA_LOG,
+            report,
+        );
+    }
+
+    let main_direction = tree_direction(record.orientation);
+    let main_end = realize_acacia_branch(
+        region,
+        occurrence,
+        BlockPos::new(base.x, base.y + trunk_height - 3, base.z),
+        main_direction,
+        3,
+        report,
+    );
+    realize_flat_acacia_crown(region, occurrence, main_end, report);
+
+    let fork_turn = if record.variant_seed & 1 == 0 { 1 } else { 3 };
+    let fork_direction = tree_direction((record.orientation + fork_turn) & 3);
+    let fork_end = realize_acacia_branch(
+        region,
+        occurrence,
+        BlockPos::new(base.x, base.y + trunk_height - 4, base.z),
+        fork_direction,
+        2,
+        report,
+    );
+    realize_flat_acacia_crown(region, occurrence, fork_end, report);
+}
+
+fn realize_acacia_branch(
+    region: &mut FeatureRegion,
+    occurrence: McloneTreeOccurrence,
+    start: BlockPos,
+    direction: (i32, i32),
+    length: i32,
+    report: &mut McloneTreeRealizationReport,
+) -> BlockPos {
+    let mut end = start;
+    for step in 1..=length {
+        end = BlockPos::new(
+            start.x + direction.0 * step,
+            start.y + step,
+            start.z + direction.1 * step,
+        );
+        write_tree_block(region, occurrence, end, ACACIA_LOG, report);
+    }
+    end
+}
+
+fn realize_flat_acacia_crown(
+    region: &mut FeatureRegion,
+    occurrence: McloneTreeOccurrence,
+    center: BlockPos,
+    report: &mut McloneTreeRealizationReport,
+) {
+    let record = occurrence.record;
+    let crown_radius = i32::from(record.crown_radius);
+    for layer in 0..=1 {
+        let layer_radius = crown_radius - layer;
+        for dz in -layer_radius..=layer_radius {
+            for dx in -layer_radius..=layer_radius {
+                if dx.abs() + dz.abs() > layer_radius + 1 {
+                    continue;
+                }
+                if dx.abs() + dz.abs() == layer_radius + 1
+                    && (tree_voxel_hash(
+                        record.variant_seed.rotate_left(17),
+                        center.x + dx,
+                        center.y + layer,
+                        center.z + dz,
+                    ) & 3)
+                        != 0
+                {
+                    continue;
+                }
+                write_tree_leaf(
+                    region,
+                    occurrence,
+                    BlockPos::new(center.x + dx, center.y + layer, center.z + dz),
+                    ACACIA_LEAVES,
+                    report,
+                );
+            }
+        }
+    }
+}
+
+const fn tree_direction(orientation: u8) -> (i32, i32) {
+    match orientation & 3 {
+        0 => (0, -1),
+        1 => (1, 0),
+        2 => (0, 1),
+        3 => (-1, 0),
+        _ => unreachable!(),
     }
 }
 
