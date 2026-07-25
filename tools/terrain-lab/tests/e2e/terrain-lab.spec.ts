@@ -355,6 +355,46 @@ test("zooms shared and canonical terrain to one-block texture detail", async ({
   expect(pageErrors).toEqual([]);
 });
 
+test("switches the whole lab to worker-backed vanilla terrain", async ({
+  page,
+}, testInfo) => {
+  test.skip(testInfo.project.name !== "desktop-chrome", "desktop vanilla profile proof");
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      pageErrors.push(message.text());
+    }
+  });
+  await page.goto(
+    "/terrain/?profile=overworld&seed=12345&x=0&z=0&blocks=512&detail=8"
+      + "&panes=canonical%2Ccpu%2Cgpu&canonical=surface&radius=0"
+      + "&water=1&vegetation=1&stage=hydrology&view=3d&layer=continentalness",
+  );
+  await waitForLane(page, "cpu");
+  await waitForCanonical(page, 1);
+  const shell = page.locator(".appShell");
+  await expect(shell).toHaveAttribute("data-profile", "overworld");
+  await expect(shell).toHaveAttribute("data-panes", "canonical,cpu");
+  await expect(shell).toHaveAttribute("data-stage", "surface");
+  await expect(shell).toHaveAttribute("data-request-gpu-tiles", "0");
+  await expect(shell).toHaveAttribute("data-cpu-target-ready", "true");
+  await expect(shell).toHaveAttribute("data-gpu-target-ready", "false");
+  await expect(page.getByRole("button", { name: "GPU LOD" })).toHaveCount(0);
+  await expect(page.getByLabel("Diagnostic layer")).toHaveValue("terrain");
+  await expect(page.getByTestId("point-receipt")).toContainText(
+    "Vanilla point receipts are not in the first pass",
+  );
+  const vanillaCanvas = page.locator(
+    "canvas[aria-label='Worker-backed vanilla terrain preview']",
+  );
+  await expect(vanillaCanvas).toBeVisible();
+  await page.getByTestId("pane-workspace").screenshot({
+    path: "/tmp/mclone-terrain-lab-desktop-chrome-vanilla-workspace.png",
+  });
+  expect(pageErrors).toEqual([]);
+});
+
 test("two-finger gestures pan and zoom procedural and real terrain", async ({
   page,
 }, testInfo) => {

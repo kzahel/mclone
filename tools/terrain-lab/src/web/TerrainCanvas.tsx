@@ -4,7 +4,7 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from "react";
 import type { TerrainLab } from "../../generated/pkg/mclone_terrain_lab";
-import initTerrainLab, {
+import {
   mclone_terrain_lab_create,
   terrainLabInspectPoint,
 } from "../../generated/pkg/mclone_terrain_lab";
@@ -20,6 +20,11 @@ import {
   type TerrainLabSource,
   type TerrainLabState,
 } from "../state";
+import type {
+  LodWorkerResponse,
+  LodWorkerResult,
+} from "./lod-worker-protocol";
+import { initializeTerrainLab } from "./terrain-lab-wasm";
 
 export interface TerrainLabAdapterReport {
   name: string;
@@ -34,6 +39,7 @@ export interface TerrainLabAdapterReport {
 
 export interface TerrainLabRenderReport {
   revision: number;
+  profile: string;
   fieldRevision: string;
   referenceSchemaRevision: string;
   gpuEvaluatorRevision: string;
@@ -208,6 +214,35 @@ interface TerrainCanvasProps {
   onStatus: (status: "loading" | "ready" | "rendering" | "error") => void;
 }
 
+interface TerrainLabExternalCpuTileRequest {
+  revision: number;
+  profile: "overworld";
+  seed: string;
+  tileX: number;
+  tileZ: number;
+  sampleSpacing: number;
+}
+
+interface WorkerBackedTerrainLab extends TerrainLab {
+  nextCpuTileRequest(): string | undefined;
+  acceptCpuTile(
+    revision: number,
+    seed: string,
+    tileX: number,
+    tileZ: number,
+    sampleSpacing: number,
+    samples: Float32Array,
+    compileMs: number,
+  ): boolean;
+  rejectCpuTile(
+    revision: number,
+    seed: string,
+    tileX: number,
+    tileZ: number,
+    sampleSpacing: number,
+  ): void;
+}
+
 interface PointerStart {
   pointerId: number;
   clientX: number;
@@ -252,7 +287,7 @@ export function TerrainCanvas({
 }: TerrainCanvasProps): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const stageRef = useRef<HTMLDivElement>(null);
-  const labRef = useRef<TerrainLab | undefined>(undefined);
+  const labRef = useRef<WorkerBackedTerrainLab | undefined>(undefined);
   const revisionRef = useRef(0);
   const pointerStartRef = useRef<PointerStart | undefined>(undefined);
   const activePointersRef = useRef(new Map<number, ActivePointer>());
@@ -275,6 +310,7 @@ export function TerrainCanvas({
     state.blocksAcross,
     state.centerX,
     state.centerZ,
+    state.profile,
     state.seed,
     state.source,
     state.view,
@@ -292,7 +328,7 @@ export function TerrainCanvas({
         throw new Error("This browser does not expose WebGPU.");
       }
       const [, authored, fallback] = await Promise.all([
-        initTerrainLab(),
+        initializeTerrainLab(),
         fetchPack(AUTHORED_PACK_URL),
         fetchPack(FALLBACK_PACK_URL),
       ]);
@@ -303,7 +339,7 @@ export function TerrainCanvas({
         canvas,
         authored,
         fallback,
-      ) as TerrainLab;
+      ) as WorkerBackedTerrainLab;
       if (cancelled) {
         lab.free();
         return;
@@ -357,6 +393,14 @@ export function TerrainCanvas({
     let needsRender = true;
     let comparisonComplete = state.source !== "split";
     const revision = ++revisionRef.current;
+    let workerReady = false;
+    let workerInFlight = false;
+    const worker = state.profile === "overworld"
+      ? new Worker(new URL("./lod-worker.ts", import.meta.url), {
+        type: "module",
+        name: `vanilla-terrain-lod-${revision}`,
+      })
+      : undefined;
     onStatus("rendering");
     onError(undefined);
     onComparison(undefined);
@@ -365,6 +409,50 @@ export function TerrainCanvas({
     if (appliedCacheEpochRef.current !== cacheEpoch) {
       lab.clearCache();
       appliedCacheEpochRef.current = cacheEpoch;
+    }
+
+    const schedulePump = (): void => {
+      if (cancelled || pumpFrame !== 0) {
+        return;
+      }
+      pumpFrame = window.requestAnimationFrame(() => {
+        pumpFrame = 0;
+        pump();
+      });
+    };
+
+    if (worker) {
+      worker.onmessage = (event: MessageEvent<LodWorkerResponse>): void => {
+        const response = event.data;
+        if (cancelled || response.epoch !== revision) {
+          return;
+        }
+        if (response.type === "ready") {
+          workerReady = true;
+          schedulePump();
+          return;
+        }
+        workerInFlight = false;
+        if (response.type === "error") {
+          rejectWorkerTile(lab, response);
+          onStatus("error");
+          onError(response.message);
+          return;
+        }
+        acceptWorkerTile(lab, response);
+        needsRender = true;
+        schedulePump();
+      };
+      worker.onerror = (event): void => {
+        workerInFlight = false;
+        onStatus("error");
+        onError(event.message || "Vanilla terrain LOD worker failed.");
+      };
+      worker.postMessage({
+        type: "init",
+        epoch: revision,
+        seed: state.seed,
+      });
     }
 
     const pump = (): void => {
@@ -387,6 +475,7 @@ export function TerrainCanvas({
           const report = parseJson<TerrainLabRenderReport>(
             lab.render(
               revision,
+              state.profile,
               state.seed,
               state.centerX,
               state.centerZ,
@@ -409,6 +498,7 @@ export function TerrainCanvas({
           onRender(report);
           needsRender = report.needsRedraw;
         }
+        pumpWorker();
         const result = lab.pollComparison();
         if (result !== undefined) {
           const comparison = parseJson<TerrainLabComparisonReport>(result);
@@ -422,17 +512,37 @@ export function TerrainCanvas({
         onError(errorMessage(error));
         return;
       }
-      if (needsRender || !comparisonComplete) {
-        pumpFrame = window.requestAnimationFrame(pump);
+      if ((needsRender && !workerInFlight) || !comparisonComplete) {
+        schedulePump();
       } else {
-        onStatus("ready");
+        if (!needsRender) {
+          onStatus("ready");
+        }
       }
     };
     pump();
     return () => {
       cancelled = true;
       window.cancelAnimationFrame(pumpFrame);
+      worker?.terminate();
     };
+
+    function pumpWorker(): void {
+      if (!worker || !workerReady || workerInFlight) {
+        return;
+      }
+      const serialized = lab!.nextCpuTileRequest();
+      if (serialized === undefined) {
+        return;
+      }
+      const request = parseJson<TerrainLabExternalCpuTileRequest>(serialized);
+      workerInFlight = true;
+      worker.postMessage({
+        type: "compile",
+        epoch: revision,
+        ...request,
+      });
+    }
   }, [
     canvasSize,
     cacheEnabled,
@@ -596,7 +706,7 @@ export function TerrainCanvas({
       && start.button === 0
       && Math.hypot(event.clientX - start.clientX, event.clientY - start.clientY) < 6
       && !pinchStartRef.current;
-    if (wasTap) {
+    if (wasTap && state.profile !== "overworld") {
       const stage = stageRef.current;
       if (stage) {
         const rect = stage.getBoundingClientRect();
@@ -705,7 +815,11 @@ export function TerrainCanvas({
         className="terrainCanvas"
         width={canvasSize.width}
         height={canvasSize.height}
-        aria-label="Live GPU terrain preview"
+        aria-label={
+          state.profile === "overworld"
+            ? "Worker-backed vanilla terrain preview"
+            : "Live GPU terrain preview"
+        }
       />
       {inspectionMarker ? (
         <span
@@ -745,12 +859,20 @@ export function TerrainCanvas({
       ) : null}
       <div className="canvasHint" aria-hidden="true">
         <span className="desktopHint">
-          {state.view === "3d"
+          {state.profile === "overworld"
+            ? state.view === "3d"
+              ? "left drag orbit · right/shift/middle drag pan · arrows pan · wheel zoom"
+              : "drag pan · arrows pan · wheel zoom at pointer"
+            : state.view === "3d"
             ? "tap inspect · left drag orbit · right/shift/middle drag pan · arrows pan · wheel zoom"
             : "tap inspect · drag pan · arrows pan · wheel zoom at pointer"}
         </span>
         <span className="mobileHint">
-          {state.view === "3d"
+          {state.profile === "overworld"
+            ? state.view === "3d"
+              ? "drag orbit · two-finger pan + zoom"
+              : "drag pan · two-finger pan + zoom"
+            : state.view === "3d"
             ? "tap inspect · drag orbit · two-finger pan + zoom"
             : "tap inspect · drag pan · two-finger pan + zoom"}
         </span>
@@ -832,6 +954,43 @@ function panelReadiness(
     return "waiting";
   }
   return targetReady ? `target 1:${publishedSpacing}` : `1:${publishedSpacing} · refining`;
+}
+
+function acceptWorkerTile(
+  lab: WorkerBackedTerrainLab,
+  result: LodWorkerResult,
+): void {
+  lab.acceptCpuTile(
+    result.revision,
+    result.seed,
+    result.tileX,
+    result.tileZ,
+    result.sampleSpacing,
+    result.samples,
+    result.compileMs,
+  );
+}
+
+function rejectWorkerTile(
+  lab: WorkerBackedTerrainLab,
+  error: Extract<LodWorkerResponse, { type: "error" }>,
+): void {
+  if (
+    error.revision === undefined
+    || error.seed === undefined
+    || error.tileX === undefined
+    || error.tileZ === undefined
+    || error.sampleSpacing === undefined
+  ) {
+    return;
+  }
+  lab.rejectCpuTile(
+    error.revision,
+    error.seed,
+    error.tileX,
+    error.tileZ,
+    error.sampleSpacing,
+  );
 }
 
 function parseJson<T>(value: string): T {

@@ -4,7 +4,7 @@ import type {
   PointerEvent as ReactPointerEvent,
 } from "react";
 import type { CanonicalTerrainLab } from "../../generated/pkg/mclone_terrain_lab";
-import initTerrainLab, {
+import {
   canonicalTerrainChunkOrder,
   mclone_terrain_lab_create_canonical,
 } from "../../generated/pkg/mclone_terrain_lab";
@@ -24,6 +24,7 @@ import type {
   CanonicalWorkerResponse,
   CanonicalWorkerResult,
 } from "./canonical-worker-protocol";
+import { initializeTerrainLab } from "./terrain-lab-wasm";
 
 export interface CanonicalTerrainReport {
   epoch: number;
@@ -77,6 +78,7 @@ interface CanonicalRetainReport {
 
 interface ResponsiveCanonicalTerrainLab extends CanonicalTerrainLab {
   retainChunks(coordinatesJson: string): string;
+  resetProfile(seed: string, profile: string): void;
 }
 
 interface PendingCanonicalChunk {
@@ -174,7 +176,7 @@ export function CanonicalTerrainCanvas({
       return;
     }
     void Promise.all([
-      initTerrainLab(),
+      initializeTerrainLab(),
       fetchPack(AUTHORED_PACK_URL),
       fetchPack(FALLBACK_PACK_URL),
     ]).then(async ([, authored, fallback]) => {
@@ -282,6 +284,7 @@ export function CanonicalTerrainCanvas({
     workerRef.current?.terminate();
     workerRef.current = undefined;
     const residentIdentity = [
+      state.profile,
       state.seed,
       state.canonicalStage,
       cacheEpoch,
@@ -291,7 +294,7 @@ export function CanonicalTerrainCanvas({
       residentIdentityRef.current = residentIdentity;
       residentRef.current.clear();
       cacheRef.current.clear();
-      lab.resetChunks(state.seed);
+      lab.resetProfile(state.seed, state.profile);
     }
     if (!cacheEnabled) {
       cacheRef.current.clear();
@@ -389,6 +392,7 @@ export function CanonicalTerrainCanvas({
       worker.postMessage({
         type: "init",
         epoch,
+        profile: state.profile,
         seed: state.seed,
         stage: state.canonicalStage,
       });
@@ -533,6 +537,7 @@ export function CanonicalTerrainCanvas({
     onReport,
     state.canonicalRadius,
     state.canonicalStage,
+    state.profile,
     state.seed,
   ]);
 
@@ -681,7 +686,11 @@ export function CanonicalTerrainCanvas({
         aria-label="Canonical textured terrain preview"
       />
       <div className="canvasTopline" aria-hidden="true">
-        <span className="canvasBadge primary">Canonical · {state.canonicalStage}</span>
+        <span className="canvasBadge primary">
+          Canonical · {state.profile === "overworld" ? "Vanilla" : "Mclone"} · {
+            state.canonicalStage
+          }
+        </span>
         <span className="canvasBadge">
           {latestReport
             ? `${latestReport.publishedChunks}/${latestReport.requestedChunks} ${
@@ -714,7 +723,9 @@ function cacheKey(
   state: TerrainLabState,
   coordinate: Pick<CanonicalWorkerResult, "chunkX" | "chunkZ">,
 ): string {
-  return `${state.seed}:${state.canonicalStage}:${coordinate.chunkX}:${coordinate.chunkZ}`;
+  return `${
+    state.profile
+  }:${state.seed}:${state.canonicalStage}:${coordinate.chunkX}:${coordinate.chunkZ}`;
 }
 
 function canonicalCoordinateKey(

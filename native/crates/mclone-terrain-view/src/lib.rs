@@ -10,7 +10,7 @@ use std::sync::mpsc;
 
 use mclone_worldgen::levelgen::{
     MCLONE_OVERWORLD_LARGE_FIELD_SPEC, MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldLargeFieldBand,
-    McloneOverworldSampler,
+    McloneOverworldSampler, VanillaOverworldLodSampler,
 };
 use mclone_worldgen::terrain_preview::{
     TERRAIN_PREVIEW_SAMPLE_FLOATS, TerrainPreviewComparison, TerrainPreviewReferenceGrid,
@@ -31,7 +31,8 @@ pub use viewport::{
 };
 pub use viewport_renderer::{
     TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainPreviewMaterialAtlas,
-    TerrainViewportCompletedComparison, TerrainViewportFrameStats, TerrainViewportRenderer,
+    TerrainViewportCompletedComparison, TerrainViewportExternalCpuRequest,
+    TerrainViewportFrameStats, TerrainViewportRenderer,
 };
 
 pub const TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION: &str = "mclone-overworld-v1-gpu-preview-a5";
@@ -220,6 +221,25 @@ pub struct TerrainPreviewProjection {
 }
 
 pub fn terrain_preview_focus_y(seed: i64, world_x: i32, world_z: i32) -> f32 {
+    terrain_preview_focus_y_for_profile(
+        mclone_worldgen::terrain_preview::TerrainPreviewProfile::McloneOverworldV1,
+        seed,
+        world_x,
+        world_z,
+    )
+}
+
+pub fn terrain_preview_focus_y_for_profile(
+    profile: mclone_worldgen::terrain_preview::TerrainPreviewProfile,
+    seed: i64,
+    world_x: i32,
+    world_z: i32,
+) -> f32 {
+    if profile == mclone_worldgen::terrain_preview::TerrainPreviewProfile::VanillaOverworld {
+        return VanillaOverworldLodSampler::new(seed)
+            .sample(world_x, world_z)
+            .display_y as f32;
+    }
     let terrain = McloneOverworldSampler::new(seed).sample(world_x, world_z);
     let display_y =
         if terrain.watercourse.is_water() || terrain.surface_y < MCLONE_OVERWORLD_SEA_LEVEL {
@@ -877,7 +897,8 @@ fn viewport_uniform_bytes(
     viewport_width_blocks: u32,
     viewport_height_blocks: u32,
 ) -> Vec<u8> {
-    let focus_y = terrain_preview_focus_y(
+    let focus_y = terrain_preview_focus_y_for_profile(
+        reference.request().request().profile,
         reference.request().request().seed,
         viewport_center_x,
         viewport_center_z,
@@ -975,7 +996,10 @@ fn viewport_uniform_bytes_for_request(
         source.content_stage as u32,
         projection.kind as u32,
         options.split_layout as u32,
-        0,
+        match source.profile {
+            mclone_worldgen::terrain_preview::TerrainPreviewProfile::McloneOverworldV1 => 0,
+            mclone_worldgen::terrain_preview::TerrainPreviewProfile::VanillaOverworld => 1,
+        },
     ] {
         bytes.extend_from_slice(&word.to_le_bytes());
     }

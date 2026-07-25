@@ -13,9 +13,10 @@ use mclone_render::chunk::{
 };
 use mclone_terrain_view::{
     CanonicalTerrainVisibility, TerrainPreviewCamera, TerrainPreviewProjectionKind,
-    TerrainPreviewView, canonical_terrain_presentation_blocks, terrain_preview_focus_y,
+    TerrainPreviewView, canonical_terrain_presentation_blocks, terrain_preview_focus_y_for_profile,
     terrain_preview_projection,
 };
+use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
 use serde::{Deserialize, Serialize};
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 use web_sys::HtmlCanvasElement;
@@ -89,6 +90,7 @@ pub struct CanonicalTerrainLab {
     alpha_mode: wgpu::CompositeAlphaMode,
     width: u32,
     height: u32,
+    profile: TerrainPreviewProfile,
     seed: i64,
     catalog: TexturedMeshCatalog,
     chunks: BTreeMap<(i32, i32), ResidentCanonicalChunk>,
@@ -108,6 +110,15 @@ impl CanonicalTerrainLab {
 
     #[wasm_bindgen(js_name = resetChunks)]
     pub fn reset_chunks(&mut self, seed: String) -> Result<(), JsValue> {
+        self.reset_profile(
+            seed,
+            TerrainPreviewProfile::McloneOverworldV1.label().to_owned(),
+        )
+    }
+
+    #[wasm_bindgen(js_name = resetProfile)]
+    pub fn reset_profile(&mut self, seed: String, profile: String) -> Result<(), JsValue> {
+        self.profile = TerrainPreviewProfile::parse_label(&profile).map_err(js_error)?;
         self.seed = parse_seed(&seed)?;
         self.chunks.clear();
         self.draw
@@ -259,7 +270,8 @@ impl CanonicalTerrainLab {
         let projection_kind = terrain_preview_projection_kind(&projection).map_err(js_error)?;
         let camera = TerrainPreviewCamera::new(camera_yaw, camera_pitch, projection_kind)
             .map_err(js_error)?;
-        let focus_y = terrain_preview_focus_y(self.seed, center_x, center_z);
+        let focus_y =
+            terrain_preview_focus_y_for_profile(self.profile, self.seed, center_x, center_z);
         let render_view = canonical_render_view(
             center_x,
             center_z,
@@ -414,6 +426,7 @@ impl CanonicalTerrainLab {
             alpha_mode,
             width,
             height,
+            profile: TerrainPreviewProfile::McloneOverworldV1,
             seed: 0,
             catalog: assets.catalog,
             chunks: BTreeMap::new(),

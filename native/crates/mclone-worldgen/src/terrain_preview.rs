@@ -514,6 +514,31 @@ impl TerrainPreviewReferenceGrid {
         Ok(Self { request, samples })
     }
 
+    pub fn from_packed_f32(request: TerrainPreviewRequest, packed: &[f32]) -> Result<Self, String> {
+        let request = request.validate()?;
+        let expected = usize::try_from(request.sample_count())
+            .map_err(|_| "terrain preview sample count does not fit usize")?
+            .checked_mul(TERRAIN_PREVIEW_SAMPLE_FLOATS)
+            .ok_or("terrain preview packed sample count overflow")?;
+        if packed.len() != expected {
+            return Err(format!(
+                "terrain preview packed grid has {} floats, expected {expected}",
+                packed.len()
+            ));
+        }
+        let mut samples = Vec::with_capacity(expected / TERRAIN_PREVIEW_SAMPLE_FLOATS);
+        for values in packed.chunks_exact(TERRAIN_PREVIEW_SAMPLE_FLOATS) {
+            if !values.iter().all(|value| value.is_finite()) {
+                return Err("terrain preview packed grid contains a non-finite value".to_owned());
+            }
+            let values: [f32; TERRAIN_PREVIEW_SAMPLE_FLOATS] = values
+                .try_into()
+                .expect("chunks_exact returns one complete terrain preview sample");
+            samples.push(TerrainPreviewSample::from_packed(values));
+        }
+        Ok(Self { request, samples })
+    }
+
     pub const fn request(&self) -> ValidatedTerrainPreviewRequest {
         self.request
     }
@@ -544,6 +569,13 @@ impl TerrainPreviewReferenceGrid {
             }
         }
         bytes
+    }
+
+    pub fn packed_f32(&self) -> Vec<f32> {
+        self.samples
+            .iter()
+            .flat_map(|sample| sample.packed())
+            .collect()
     }
 }
 
@@ -900,6 +932,18 @@ mod tests {
             grid.packed_bytes().len(),
             81 * TERRAIN_PREVIEW_SAMPLE_FLOATS * std::mem::size_of::<f32>()
         );
+        let packed = grid.packed_f32();
+        assert_eq!(
+            TerrainPreviewReferenceGrid::from_packed_f32(request, &packed).unwrap(),
+            grid
+        );
+        assert!(
+            TerrainPreviewReferenceGrid::from_packed_f32(request, &packed[..packed.len() - 1])
+                .is_err()
+        );
+        let mut non_finite = packed;
+        non_finite[0] = f32::NAN;
+        assert!(TerrainPreviewReferenceGrid::from_packed_f32(request, &non_finite).is_err());
     }
 
     #[test]

@@ -10,6 +10,7 @@ import {
   panTerrainLabState,
   parseTerrainLabState,
   proceduralSourceForPanes,
+  switchTerrainLabProfile,
   terrainLabSearch,
   toggleTerrainLabPane,
   validSeed,
@@ -19,6 +20,7 @@ import {
   type TerrainLabLayer,
   type TerrainLabCamera,
   type TerrainLabPane,
+  type TerrainLabProfile,
   type TerrainLabProjection,
   type TerrainLabState,
   type TerrainLabView,
@@ -86,6 +88,10 @@ export function App(): React.JSX.Element {
   }, [state]);
 
   useEffect(() => {
+    setPointReceipt(undefined);
+  }, [state.profile]);
+
+  useEffect(() => {
     const restore = (): void => {
       setComparison(undefined);
       setState(parseTerrainLabState(window.location.search));
@@ -146,8 +152,9 @@ export function App(): React.JSX.Element {
       data-channel-agreement={comparison?.channelPresenceAgreement ?? ""}
       data-landform-agreement={comparison?.landformKindAgreement ?? ""}
       data-stage={state.contentStage}
-      data-inspected-x={pointReceipt?.worldX ?? ""}
-      data-inspected-z={pointReceipt?.worldZ ?? ""}
+      data-profile={state.profile}
+      data-inspected-x={state.profile === "overworld" ? "" : pointReceipt?.worldX ?? ""}
+      data-inspected-z={state.profile === "overworld" ? "" : pointReceipt?.worldZ ?? ""}
       data-continentalness-error={comparison?.meanAbsoluteContinentalnessError ?? ""}
       data-compare-layout={compareLayout}
       data-vertex-count={renderReport?.vertexCount ?? 0}
@@ -211,10 +218,11 @@ export function App(): React.JSX.Element {
         <section className="viewerColumn" aria-label="Terrain preview">
           <div className="previewToolbar" data-testid="preview-source-controls">
             <PaneToggles
+              profile={state.profile}
               panes={state.panes}
               onToggle={(pane) => updateState(toggleTerrainLabPane(state, pane))}
             />
-            <WorkspaceGuide panes={state.panes} />
+            <WorkspaceGuide profile={state.profile} panes={state.panes} />
           </div>
           <div className="mapToolbar" data-testid="viewport-controls">
             <SegmentedControl<TerrainLabView>
@@ -355,13 +363,29 @@ export function App(): React.JSX.Element {
               </strong>
             </div>
             <div className="approximationNote">
-              <SourceFootnote panes={state.panes} />
+              <SourceFootnote profile={state.profile} panes={state.panes} />
             </div>
           </div>
         </section>
 
         <aside className="controlRail" aria-label="Terrain Lab controls">
           <ControlSection number="01" title="World">
+            <label className="fieldLabel">
+              <span>Terrain profile</span>
+              <select
+                aria-label="Terrain profile"
+                value={state.profile}
+                onChange={(event) =>
+                  updateState(switchTerrainLabProfile(
+                    state,
+                    event.target.value as TerrainLabProfile,
+                  ))
+                }
+              >
+                <option value="mclone-overworld-v1">Mclone overworld</option>
+                <option value="overworld">Minecraft Java 1.17.1 overworld</option>
+              </select>
+            </label>
             <SeedControl value={state.seed} onCommit={(seed) => patchState({ seed })} />
             <div className="coordinateGrid">
               <NumberControl
@@ -462,25 +486,34 @@ export function App(): React.JSX.Element {
                   <select
                     aria-label="LOD content checkpoint"
                     value={state.contentStage}
+                    disabled={state.profile === "overworld"}
                     onChange={(event) =>
                       patchState({
                         contentStage: event.target.value as TerrainLabContentStage,
                       })
                     }
                   >
-                    <option value="base">Base · land and ocean fields</option>
-                    <option value="hydrology">Hydrology · rivers and wetlands</option>
-                    <option value="structured">
-                      Structured · planned streams near 1:1–1:4
-                    </option>
-                    <option value="surface">Surface · biome materials</option>
-                    <option value="cover">Cover · vegetation summary</option>
+                    {state.profile === "overworld" ? (
+                      <option value="surface">
+                        Surface · direct vanilla density columns
+                      </option>
+                    ) : (
+                      <>
+                        <option value="base">Base · land and ocean fields</option>
+                        <option value="hydrology">Hydrology · rivers and wetlands</option>
+                        <option value="structured">
+                          Structured · planned streams near 1:1–1:4
+                        </option>
+                        <option value="surface">Surface · biome materials</option>
+                        <option value="cover">Cover · vegetation summary</option>
+                      </>
+                    )}
                   </select>
                 </label>
                 <p className="controlNote">
-                  Checkpoints are ordered preview content, not gameplay switches.
-                  Planned streams are reconstructed only through 1:4; coarser
-                  views say unavailable instead of inventing them.
+                  {state.profile === "overworld"
+                    ? "Vanilla LOD samples density, ocean fill, biome, and an approximate surface material directly in a worker. It does not materialize chunks."
+                    : "Checkpoints are ordered preview content, not gameplay switches. Planned streams are reconstructed only through 1:4; coarser views say unavailable instead of inventing them."}
                 </p>
                 <label className="fieldLabel">
                   <span>LOD diagnostic layer</span>
@@ -491,7 +524,10 @@ export function App(): React.JSX.Element {
                       patchState({ layer: event.target.value as TerrainLabLayer })
                     }
                   >
-                    {LAYER_OPTIONS.map((option) => (
+                    {LAYER_OPTIONS.filter((option) =>
+                      state.profile !== "overworld"
+                      || ["terrain", "height", "biomes", "surface"].includes(option.value)
+                    ).map((option) => (
                       <option key={option.value} value={option.value}>{option.label}</option>
                     ))}
                   </select>
@@ -595,6 +631,7 @@ export function App(): React.JSX.Element {
               </button>
               <button
                 type="button"
+                disabled={state.profile === "overworld"}
                 onClick={() => {
                   setComparison(undefined);
                   setCacheEnabled(false);
@@ -619,13 +656,14 @@ export function App(): React.JSX.Element {
               </button>
             </div>
             <p className="controlNote">
-              Stress uses the fixed review seed/site, a cold 2 km Compare map
-              at requested 1:2, and independent CPU/GPU publication.
+              {state.profile === "overworld"
+                ? "The CPU/GPU stress race is Mclone-only because the vanilla first pass intentionally has no GPU evaluator."
+                : "Stress uses the fixed review seed/site, a cold 2 km Compare map at requested 1:2, and independent CPU/GPU publication."}
             </p>
           </ControlSection>
 
           <ControlSection number="05" title="Evidence" subdued>
-            <PointReceipt receipt={pointReceipt} />
+            <PointReceipt profile={state.profile} receipt={pointReceipt} />
             <Diagnostics
               adapter={adapter}
               report={renderReport}
@@ -655,10 +693,23 @@ function useResponsiveSplitLayout(): "columns" | "rows" {
 }
 
 function PointReceipt({
+  profile,
   receipt,
 }: {
+  profile: TerrainLabProfile;
   receipt: TerrainLabPointReceipt | undefined;
 }): React.JSX.Element {
+  if (profile === "overworld") {
+    return (
+      <div className="pointReceipt empty" data-testid="point-receipt">
+        <strong>Vanilla point receipts are not in the first pass</strong>
+        <span>
+          The worker-backed LOD shows height, ocean fill, biome, and approximate
+          surface material. Exact chunk inspection remains available visually.
+        </span>
+      </div>
+    );
+  }
   if (!receipt) {
     return (
       <div className="pointReceipt empty" data-testid="point-receipt">
@@ -752,9 +803,11 @@ function PointReceipt({
 }
 
 function PaneToggles({
+  profile,
   panes,
   onToggle,
 }: {
+  profile: TerrainLabProfile;
   panes: TerrainLabPane[];
   onToggle: (pane: TerrainLabPane) => void;
 }): React.JSX.Element {
@@ -762,7 +815,9 @@ function PaneToggles({
     <fieldset className="segmentedField paneToggleField">
       <legend>Visible panes</legend>
       <div className="segmentedControl">
-        {PANE_OPTIONS.map((option) => {
+        {PANE_OPTIONS.filter((option) =>
+          profile !== "overworld" || option.value !== "gpu"
+        ).map((option) => {
           const visible = panes.includes(option.value);
           return (
             <button
@@ -782,7 +837,13 @@ function PaneToggles({
   );
 }
 
-function WorkspaceGuide({ panes }: { panes: TerrainLabPane[] }): React.JSX.Element {
+function WorkspaceGuide({
+  profile,
+  panes,
+}: {
+  profile: TerrainLabProfile;
+  panes: TerrainLabPane[];
+}): React.JSX.Element {
   const exact = panes.includes("canonical");
   const cpu = panes.includes("cpu");
   const gpu = panes.includes("gpu");
@@ -790,6 +851,9 @@ function WorkspaceGuide({ panes }: { panes: TerrainLabPane[] }): React.JSX.Eleme
     <div className="sourceGuide">
       <strong>Same coordinates, independent readiness</strong>
       <span>
+        {profile === "overworld"
+          ? "This workspace is globally vanilla: exact chunks and CPU LOD both use the Java 1.17.1 overworld family. "
+          : ""}
         {exact
           ? "Real terrain uses final production chunks, the first-party atlas, water, and features. Uncurated materials remain visibly marked by generated fallback tiles. "
           : ""}
@@ -806,7 +870,23 @@ function WorkspaceGuide({ panes }: { panes: TerrainLabPane[] }): React.JSX.Eleme
   );
 }
 
-function SourceFootnote({ panes }: { panes: TerrainLabPane[] }): React.JSX.Element {
+function SourceFootnote({
+  profile,
+  panes,
+}: {
+  profile: TerrainLabProfile;
+  panes: TerrainLabPane[];
+}): React.JSX.Element {
+  if (profile === "overworld") {
+    return (
+      <>
+        Real terrain uses exact vanilla 1.17.1 production chunks. CPU LOD
+        directly samples vanilla density columns in a worker and approximates
+        surface material; it does not generate chunks, features, or vegetation.
+        GPU LOD is intentionally unavailable.
+      </>
+    );
+  }
   return (
     <>
       Real terrain is exact generated blocks with the production first-party

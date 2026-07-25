@@ -16,6 +16,7 @@ import {
   pinchPanZoomTerrainLabState,
   proceduralSourceForPanes,
   parseTerrainLabState,
+  switchTerrainLabProfile,
   terrainLabSearch,
   validSeed,
   toggleTerrainLabPane,
@@ -25,6 +26,7 @@ import {
 
 test("round-trips complete URL state", () => {
   const state: TerrainLabState = {
+    profile: "mclone-overworld-v1",
     seed: "-9223372036854775808",
     centerX: -1024,
     centerZ: 2048,
@@ -200,6 +202,7 @@ test("accepts bounded 49- and 81-chunk exact footprints", () => {
 });
 
 test("defaults to the three-pane workspace and gives the review site a name", () => {
+  assert.equal(DEFAULT_TERRAIN_LAB_STATE.profile, "mclone-overworld-v1");
   assert.equal(DEFAULT_TERRAIN_LAB_STATE.source, "split");
   assert.deepEqual(DEFAULT_TERRAIN_LAB_STATE.panes, ["canonical", "cpu", "gpu"]);
   assert.equal(REVIEW_TERRAIN_LAB_STATE.seed, "-98765");
@@ -218,6 +221,34 @@ test("maps legacy source links and keeps at least one pane visible", () => {
   assert.deepEqual(toggleTerrainLabPane(onlyCanonical, "gpu").panes, ["canonical", "gpu"]);
 });
 
+test("the vanilla profile globally excludes GPU and Mclone-only layers", () => {
+  const vanilla = switchTerrainLabProfile(
+    {
+      ...DEFAULT_TERRAIN_LAB_STATE,
+      layer: "streams",
+      contentStage: "cover",
+    },
+    "overworld",
+  );
+  assert.equal(vanilla.profile, "overworld");
+  assert.deepEqual(vanilla.panes, ["canonical", "cpu"]);
+  assert.equal(vanilla.source, "reference");
+  assert.equal(vanilla.contentStage, "surface");
+  assert.equal(vanilla.layer, "terrain");
+  assert.equal(toggleTerrainLabPane(vanilla, "gpu"), vanilla);
+});
+
+test("vanilla URL state cannot request a mixed or GPU-only workspace", () => {
+  const vanilla = parseTerrainLabState(
+    "?profile=overworld&panes=gpu&stage=hydrology&layer=continentalness",
+  );
+  assert.equal(vanilla.profile, "overworld");
+  assert.deepEqual(vanilla.panes, ["cpu"]);
+  assert.equal(vanilla.contentStage, "surface");
+  assert.equal(vanilla.layer, "terrain");
+  assert.match(terrainLabSearch(vanilla), /profile=overworld/u);
+});
+
 test("orbits independently from URL-addressed terrain state", () => {
   const camera = orbitTerrainLabCamera(
     DEFAULT_TERRAIN_LAB_CAMERA,
@@ -229,6 +260,7 @@ test("orbits independently from URL-addressed terrain state", () => {
   assert.ok(camera.yaw > DEFAULT_TERRAIN_LAB_CAMERA.yaw);
   assert.ok(camera.pitch < DEFAULT_TERRAIN_LAB_CAMERA.pitch);
   assert.deepEqual(DEFAULT_TERRAIN_LAB_STATE, {
+    profile: "mclone-overworld-v1",
     seed: "-98765",
     centerX: -304,
     centerZ: 336,

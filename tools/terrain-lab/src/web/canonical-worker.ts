@@ -24,7 +24,11 @@ self.onmessage = (event: MessageEvent<CanonicalWorkerRequest>): void => {
         if (activeEpoch !== request.epoch) {
           return;
         }
-        compiler = new CanonicalTerrainCompiler(request.seed, request.stage);
+        compiler = CanonicalTerrainCompiler.withProfile(
+          request.seed,
+          request.profile,
+          request.stage,
+        );
         post({ type: "ready", epoch: request.epoch });
       })
       .catch((error: unknown) => {

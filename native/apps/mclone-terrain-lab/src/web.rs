@@ -3,20 +3,23 @@ use mclone_core::BlockStateId;
 use mclone_mesh::load_first_party_textured_terrain_assets;
 use mclone_terrain_view::{
     CanonicalTerrainCompiler, TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION,
-    TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainPreviewCamera, TerrainPreviewMaterialAtlas,
-    TerrainPreviewProjectionKind, TerrainPreviewSource, TerrainPreviewView,
-    TerrainViewportCompletedComparison, TerrainViewportDetail, TerrainViewportFrameStats,
-    TerrainViewportRenderer, TerrainViewportRequest, canonical_terrain_chunk_order,
+    TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainPreviewCamera, TerrainPreviewLayer,
+    TerrainPreviewMaterialAtlas, TerrainPreviewProjectionKind, TerrainPreviewSource,
+    TerrainPreviewView, TerrainViewportCompletedComparison, TerrainViewportDetail,
+    TerrainViewportExternalCpuRequest, TerrainViewportFrameStats, TerrainViewportRenderer,
+    TerrainViewportRequest, TerrainViewportTileId, canonical_terrain_chunk_order,
     plan_terrain_viewport, terrain_preview_focus_y, terrain_preview_projection,
 };
 use mclone_worldgen::{
     levelgen::{
         MCLONE_OVERWORLD_DECORATION_REVISION, McloneOverworldDebugSample, McloneOverworldSampler,
-        McloneOverworldSamplingTopology, mclone_overworld_debug_sample_with_streams,
+        McloneOverworldSamplingTopology, VanillaOverworldLodSampler,
+        mclone_overworld_debug_sample_with_streams,
     },
     terrain_preview::{
         TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS, TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION,
-        TerrainPreviewProfile, terrain_preview_field_revision,
+        TerrainPreviewContentStage, TerrainPreviewProfile, TerrainPreviewReferenceGrid,
+        terrain_preview_field_revision,
     },
 };
 use serde::Serialize;
@@ -28,6 +31,91 @@ use crate::{
     terrain_preview_option_labels, terrain_preview_options, terrain_preview_projection_kind,
     terrain_preview_split_layout,
 };
+
+#[wasm_bindgen(js_name = VanillaTerrainLodCompiler)]
+pub struct TerrainLabVanillaLodCompiler {
+    sampler: VanillaOverworldLodSampler,
+}
+
+#[wasm_bindgen(js_class = VanillaTerrainLodCompiler)]
+impl TerrainLabVanillaLodCompiler {
+    #[wasm_bindgen(constructor)]
+    pub fn new(seed: String) -> Result<TerrainLabVanillaLodCompiler, JsValue> {
+        let seed = seed
+            .trim()
+            .parse::<i64>()
+            .map_err(|error| js_error(format!("invalid signed 64-bit seed {seed:?}: {error}")))?;
+        Ok(Self {
+            sampler: VanillaOverworldLodSampler::new(seed),
+        })
+    }
+
+    pub fn compile(
+        &mut self,
+        tile_x: i32,
+        tile_z: i32,
+        sample_spacing: u32,
+    ) -> Result<TerrainLabVanillaLodPayload, JsValue> {
+        let tile = TerrainViewportTileId {
+            profile: TerrainPreviewProfile::VanillaOverworld,
+            seed: self.sampler.seed(),
+            tile_x,
+            tile_z,
+            sample_spacing,
+            content_stage: TerrainPreviewContentStage::Surface,
+        };
+        let generated_before = self.sampler.generated_density_columns();
+        let reused_before = self.sampler.reused_density_columns();
+        let reference = TerrainPreviewReferenceGrid::compile_with_vanilla_sampler(
+            tile.preview_request(),
+            &mut self.sampler,
+        )
+        .map_err(js_error)?;
+        Ok(TerrainLabVanillaLodPayload {
+            samples: reference.packed_f32(),
+            generated_density_columns: self
+                .sampler
+                .generated_density_columns()
+                .saturating_sub(generated_before),
+            reused_density_columns: self
+                .sampler
+                .reused_density_columns()
+                .saturating_sub(reused_before),
+            retained_density_columns: self.sampler.retained_density_columns(),
+        })
+    }
+}
+
+#[wasm_bindgen(js_name = VanillaTerrainLodPayload)]
+pub struct TerrainLabVanillaLodPayload {
+    samples: Vec<f32>,
+    generated_density_columns: u64,
+    reused_density_columns: u64,
+    retained_density_columns: usize,
+}
+
+#[wasm_bindgen(js_class = VanillaTerrainLodPayload)]
+impl TerrainLabVanillaLodPayload {
+    #[wasm_bindgen(getter)]
+    pub fn samples(&self) -> js_sys::Float32Array {
+        js_sys::Float32Array::from(self.samples.as_slice())
+    }
+
+    #[wasm_bindgen(getter, js_name = generatedDensityColumns)]
+    pub fn generated_density_columns(&self) -> f64 {
+        self.generated_density_columns as f64
+    }
+
+    #[wasm_bindgen(getter, js_name = reusedDensityColumns)]
+    pub fn reused_density_columns(&self) -> f64 {
+        self.reused_density_columns as f64
+    }
+
+    #[wasm_bindgen(getter, js_name = retainedDensityColumns)]
+    pub fn retained_density_columns(&self) -> u32 {
+        self.retained_density_columns.min(u32::MAX as usize) as u32
+    }
+}
 
 #[wasm_bindgen(js_name = CanonicalTerrainCompiler)]
 pub struct TerrainLabCanonicalCompiler {
@@ -175,6 +263,17 @@ struct TerrainLabCanonicalChunkCoordinate {
     chunk_z: i32,
 }
 
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct TerrainLabExternalCpuTileRequest {
+    revision: u64,
+    profile: &'static str,
+    seed: String,
+    tile_x: i32,
+    tile_z: i32,
+    sample_spacing: u32,
+}
+
 #[wasm_bindgen(js_name = canonicalTerrainChunkOrder)]
 pub fn canonical_terrain_chunk_order_json(
     center_x: i32,
@@ -208,6 +307,7 @@ struct TerrainLabAdapterReport<'a> {
 #[serde(rename_all = "camelCase")]
 struct TerrainLabRenderReport<'a> {
     revision: u64,
+    profile: &'static str,
     field_revision: &'static str,
     reference_schema_revision: &'static str,
     gpu_evaluator_revision: &'static str,
@@ -432,6 +532,7 @@ impl TerrainLab {
     pub fn render(
         &mut self,
         revision: u32,
+        profile: String,
         seed: String,
         center_x: i32,
         center_z: i32,
@@ -454,15 +555,39 @@ impl TerrainLab {
             .trim()
             .parse::<i64>()
             .map_err(|error| js_error(format!("invalid signed 64-bit seed {seed:?}: {error}")))?;
+        let profile = TerrainPreviewProfile::parse_label(&profile).map_err(js_error)?;
         let mut options = terrain_preview_options(&source, &view, &layer).map_err(js_error)?;
         options.split_layout = terrain_preview_split_layout(&split_layout).map_err(js_error)?;
         let content_stage = terrain_preview_content_stage(&content_stage).map_err(js_error)?;
+        if profile == TerrainPreviewProfile::VanillaOverworld {
+            if options.source != TerrainPreviewSource::Reference {
+                return Err(js_error(
+                    "vanilla overworld LOD supports only the CPU reference pane",
+                ));
+            }
+            if content_stage != TerrainPreviewContentStage::Surface {
+                return Err(js_error(
+                    "vanilla overworld LOD supports only the surface checkpoint",
+                ));
+            }
+            if !matches!(
+                options.layer,
+                TerrainPreviewLayer::Terrain
+                    | TerrainPreviewLayer::Height
+                    | TerrainPreviewLayer::Biomes
+                    | TerrainPreviewLayer::SurfaceRecipe
+            ) {
+                return Err(js_error(
+                    "vanilla overworld LOD supports terrain, height, biome, and surface layers",
+                ));
+            }
+        }
         let projection_kind = terrain_preview_projection_kind(&projection).map_err(js_error)?;
         let camera = TerrainPreviewCamera::new(camera_yaw, camera_pitch, projection_kind)
             .map_err(js_error)?;
         let viewport_detail = parse_viewport_detail(&detail).map_err(js_error)?;
         let plan = plan_terrain_viewport(TerrainViewportRequest {
-            profile: TerrainPreviewProfile::McloneOverworldV1,
+            profile,
             seed: seed_value,
             center_x,
             center_z,
@@ -535,6 +660,7 @@ impl TerrainLab {
         let (source, view, layer) = terrain_preview_option_labels(options);
         let report = render_report(
             stats,
+            profile,
             &seed,
             center_x,
             center_z,
@@ -570,6 +696,92 @@ impl TerrainLab {
             ));
         }
         latest.map(|report| json(&report)).transpose()
+    }
+
+    #[wasm_bindgen(js_name = nextCpuTileRequest)]
+    pub fn next_cpu_tile_request(&mut self) -> Result<Option<String>, JsValue> {
+        let Some(request) = self.renderer.take_external_cpu_request() else {
+            return Ok(None);
+        };
+        json(&TerrainLabExternalCpuTileRequest {
+            revision: request.revision,
+            profile: request.tile.profile.label(),
+            seed: request.tile.seed.to_string(),
+            tile_x: request.tile.tile_x,
+            tile_z: request.tile.tile_z,
+            sample_spacing: request.tile.sample_spacing,
+        })
+        .map(Some)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[wasm_bindgen(js_name = acceptCpuTile)]
+    pub fn accept_cpu_tile(
+        &mut self,
+        revision: u32,
+        seed: String,
+        tile_x: i32,
+        tile_z: i32,
+        sample_spacing: u32,
+        samples: js_sys::Float32Array,
+        compile_ms: f64,
+    ) -> Result<bool, JsValue> {
+        let seed = seed
+            .trim()
+            .parse::<i64>()
+            .map_err(|error| js_error(format!("invalid signed 64-bit seed {seed:?}: {error}")))?;
+        let tile = TerrainViewportTileId {
+            profile: TerrainPreviewProfile::VanillaOverworld,
+            seed,
+            tile_x,
+            tile_z,
+            sample_spacing,
+            content_stage: TerrainPreviewContentStage::Surface,
+        };
+        let reference =
+            TerrainPreviewReferenceGrid::from_packed_f32(tile.preview_request(), &samples.to_vec())
+                .map_err(js_error)?;
+        let compile_micros = (compile_ms.max(0.0) * 1_000.0).round().min(u64::MAX as f64) as u64;
+        self.renderer
+            .accept_external_cpu_tile(
+                &self.device,
+                &self.queue,
+                TerrainViewportExternalCpuRequest {
+                    revision: u64::from(revision),
+                    tile,
+                },
+                reference,
+                compile_micros,
+            )
+            .map_err(js_error)
+    }
+
+    #[wasm_bindgen(js_name = rejectCpuTile)]
+    pub fn reject_cpu_tile(
+        &mut self,
+        revision: u32,
+        seed: String,
+        tile_x: i32,
+        tile_z: i32,
+        sample_spacing: u32,
+    ) -> Result<(), JsValue> {
+        let seed = seed
+            .trim()
+            .parse::<i64>()
+            .map_err(|error| js_error(format!("invalid signed 64-bit seed {seed:?}: {error}")))?;
+        self.renderer
+            .reject_external_cpu_tile(TerrainViewportExternalCpuRequest {
+                revision: u64::from(revision),
+                tile: TerrainViewportTileId {
+                    profile: TerrainPreviewProfile::VanillaOverworld,
+                    seed,
+                    tile_x,
+                    tile_z,
+                    sample_spacing,
+                    content_stage: TerrainPreviewContentStage::Surface,
+                },
+            });
+        Ok(())
     }
 }
 
@@ -1079,6 +1291,7 @@ pub(crate) fn surface_configuration(
 #[allow(clippy::too_many_arguments)]
 fn render_report<'a>(
     stats: TerrainViewportFrameStats,
+    profile: TerrainPreviewProfile,
     seed: &'a str,
     center_x: i32,
     center_z: i32,
@@ -1102,7 +1315,8 @@ fn render_report<'a>(
 ) -> TerrainLabRenderReport<'a> {
     TerrainLabRenderReport {
         revision: stats.revision,
-        field_revision: terrain_preview_field_revision(),
+        profile: profile.label(),
+        field_revision: profile.source_revision(),
         reference_schema_revision: TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION,
         gpu_evaluator_revision: TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION,
         approximation: true,
@@ -1146,7 +1360,8 @@ fn render_report<'a>(
         view,
         layer,
         content_stage,
-        structured_hydrology_available: stats.effective_spacing <= 4
+        structured_hydrology_available: profile == TerrainPreviewProfile::McloneOverworldV1
+            && stats.effective_spacing <= 4
             && matches!(content_stage, "structured" | "surface" | "cover"),
         topology: McloneOverworldSamplingTopology::Unbounded.label(),
         width,

@@ -1,8 +1,9 @@
-import type { CanonicalTerrainStage } from "../state";
+import type { CanonicalTerrainStage, TerrainLabProfile } from "../state";
 
 export interface CanonicalWorkerInit {
   type: "init";
   epoch: number;
+  profile: TerrainLabProfile;
   seed: string;
   stage: CanonicalTerrainStage;
 }

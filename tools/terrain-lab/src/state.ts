@@ -7,6 +7,7 @@ export const TERRAIN_LAB_CANONICAL_RADII = [0, 1, 2, 3, 4] as const;
 
 export type TerrainLabSpacing = (typeof TERRAIN_LAB_SPACINGS)[number];
 export type TerrainLabDetail = "auto" | TerrainLabSpacing;
+export type TerrainLabProfile = "mclone-overworld-v1" | "overworld";
 export type TerrainLabSource = "gpu" | "reference" | "split";
 export type TerrainLabPane = "canonical" | "cpu" | "gpu";
 export type CanonicalTerrainStage = "surface" | "final";
@@ -32,6 +33,7 @@ export type TerrainLabLayer =
   | "streams";
 
 export interface TerrainLabState {
+  profile: TerrainLabProfile;
   seed: string;
   centerX: number;
   centerZ: number;
@@ -55,6 +57,7 @@ export interface TerrainLabCamera {
 }
 
 export const DEFAULT_TERRAIN_LAB_STATE: TerrainLabState = {
+  profile: "mclone-overworld-v1",
   seed: "-98765",
   centerX: -304,
   centerZ: 336,
@@ -86,6 +89,7 @@ const I64_MIN = -(1n << 63n);
 const I64_MAX = (1n << 63n) - 1n;
 const I32_MIN = -2_147_483_648;
 const I32_MAX = 2_147_483_647;
+const PROFILES = new Set<TerrainLabProfile>(["mclone-overworld-v1", "overworld"]);
 const SOURCES = new Set<TerrainLabSource>(["gpu", "reference", "split"]);
 const PANES = new Set<TerrainLabPane>(["canonical", "cpu", "gpu"]);
 const CANONICAL_STAGES = new Set<CanonicalTerrainStage>(["surface", "final"]);
@@ -123,7 +127,8 @@ export function parseTerrainLabState(
     ?? (legacySource
       ? panesForProceduralSource(legacySource)
       : fallback.panes);
-  return {
+  return normalizeTerrainLabProfileState({
+    profile: validMember(params.get("profile"), PROFILES) ?? fallback.profile,
     seed: validSeed(params.get("seed")) ?? fallback.seed,
     centerX: validI32(params.get("x")) ?? fallback.centerX,
     centerZ: validI32(params.get("z")) ?? fallback.centerZ,
@@ -147,11 +152,12 @@ export function parseTerrainLabState(
     projection:
       validMember(params.get("projection"), PROJECTIONS) ?? fallback.projection,
     layer: validMember(params.get("layer"), LAYERS) ?? fallback.layer,
-  };
+  });
 }
 
 export function terrainLabSearch(state: TerrainLabState): string {
   const params = new URLSearchParams();
+  params.set("profile", state.profile);
   params.set("seed", state.seed);
   params.set("x", String(state.centerX));
   params.set("z", String(state.centerZ));
@@ -194,6 +200,9 @@ export function toggleTerrainLabPane(
   state: TerrainLabState,
   pane: TerrainLabPane,
 ): TerrainLabState {
+  if (state.profile === "overworld" && pane === "gpu") {
+    return state;
+  }
   const visible = state.panes.includes(pane);
   if (visible && state.panes.length === 1) {
     return state;
@@ -206,6 +215,38 @@ export function toggleTerrainLabPane(
     ...state,
     panes,
     source: proceduralSourceForPanes(panes),
+  };
+}
+
+export function switchTerrainLabProfile(
+  state: TerrainLabState,
+  profile: TerrainLabProfile,
+): TerrainLabState {
+  return normalizeTerrainLabProfileState({ ...state, profile });
+}
+
+export function normalizeTerrainLabProfileState(
+  state: TerrainLabState,
+): TerrainLabState {
+  if (state.profile !== "overworld") {
+    return state;
+  }
+  const panes = state.panes.filter((pane) => pane !== "gpu");
+  if (panes.length === 0) {
+    panes.push("cpu");
+  }
+  const layer = state.layer === "terrain"
+    || state.layer === "height"
+    || state.layer === "biomes"
+    || state.layer === "surface"
+    ? state.layer
+    : "terrain";
+  return {
+    ...state,
+    panes,
+    source: proceduralSourceForPanes(panes),
+    contentStage: "surface",
+    layer,
   };
 }
 
