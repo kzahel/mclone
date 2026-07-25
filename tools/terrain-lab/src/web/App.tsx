@@ -455,7 +455,9 @@ export function App(): React.JSX.Element {
                       const chunks = side * side;
                       return (
                         <option key={radius} value={radius}>
-                          {side} × {side} · {chunks} {chunks === 1 ? "chunk" : "chunks"}
+                          {side} × {side} · {chunks} {
+                            chunks === 1 ? "chunk" : "chunks"
+                          } · {side * 16} blocks
                         </option>
                       );
                     })}

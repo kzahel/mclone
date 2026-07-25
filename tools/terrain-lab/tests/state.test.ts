@@ -195,10 +195,12 @@ test("accepts old spacing links without changing their visible footprint", () =>
   assert.equal(legacy.detail, 32);
 });
 
-test("accepts bounded 49- and 81-chunk exact footprints", () => {
-  assert.equal(parseTerrainLabState("?radius=3").canonicalRadius, 3);
-  assert.equal(parseTerrainLabState("?radius=4").canonicalRadius, 4);
-  assert.equal(parseTerrainLabState("?radius=5").canonicalRadius, 2);
+test("accepts stepped exact footprints through 31 by 31 chunks", () => {
+  for (const radius of [0, 1, 2, 3, 4, 5, 7, 10, 15]) {
+    assert.equal(parseTerrainLabState(`?radius=${radius}`).canonicalRadius, radius);
+  }
+  assert.equal(parseTerrainLabState("?radius=6").canonicalRadius, 2);
+  assert.equal(parseTerrainLabState("?radius=16").canonicalRadius, 2);
 });
 
 test("defaults to the three-pane workspace and gives the review site a name", () => {

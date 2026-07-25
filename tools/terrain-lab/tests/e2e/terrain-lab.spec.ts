@@ -495,7 +495,7 @@ test("publishes an 81-chunk real-terrain footprint progressively", async ({
   });
 
   const footprint = page.getByLabel("Exact chunk footprint");
-  await expect(footprint.locator("option")).toHaveCount(5);
+  await expect(footprint.locator("option")).toHaveCount(9);
   await footprint.selectOption("4");
   await expect(page).toHaveURL(/radius=4/u);
   await expect(shell).toHaveAttribute("data-canonical-requested", "81");

@@ -8,7 +8,7 @@ use mclone_worldgen::levelgen::{
 };
 use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
 
-pub const CANONICAL_TERRAIN_MAX_CHUNK_RADIUS: u32 = 4;
+pub const CANONICAL_TERRAIN_MAX_CHUNK_RADIUS: u32 = 15;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, PartialEq)]
 pub enum CanonicalTerrainStage {
@@ -311,13 +311,17 @@ mod tests {
     #[test]
     fn canonical_order_is_center_first_and_radius_bounded() {
         let positions = canonical_terrain_chunk_order(-1, 17, 99);
-        assert_eq!(positions.len(), 81);
+        assert_eq!(positions.len(), 961);
         assert_eq!(positions[0], ChunkPos::new(-1, 1));
         assert!(
             positions[1..9]
                 .iter()
                 .all(|position| { (position.x + 1).abs().max((position.z - 1).abs()) == 1 })
         );
+        assert!(positions.iter().all(|position| {
+            (position.x + 1).abs().max((position.z - 1).abs())
+                <= CANONICAL_TERRAIN_MAX_CHUNK_RADIUS as i32
+        }));
     }
 
     #[test]
