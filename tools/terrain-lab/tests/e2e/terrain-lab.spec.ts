@@ -358,7 +358,6 @@ test("zooms shared and canonical terrain to one-block texture detail", async ({
 test("switches the whole lab to worker-backed vanilla terrain", async ({
   page,
 }, testInfo) => {
-  test.skip(testInfo.project.name !== "desktop-chrome", "desktop vanilla profile proof");
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("console", (message) => {
@@ -390,8 +389,13 @@ test("switches the whole lab to worker-backed vanilla terrain", async ({
   );
   await expect(vanillaCanvas).toBeVisible();
   await page.getByTestId("pane-workspace").screenshot({
-    path: "/tmp/mclone-terrain-lab-desktop-chrome-vanilla-workspace.png",
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-vanilla-workspace.png`,
   });
+  await page.getByLabel("Terrain profile").selectOption("mclone-overworld-v1");
+  await expect(shell).toHaveAttribute("data-profile", "mclone-overworld-v1");
+  await expect(page.getByRole("button", { name: "GPU LOD" })).toHaveCount(1);
+  await waitForLane(page, "cpu");
+  await settlePaint(page);
   expect(pageErrors).toEqual([]);
 });
 

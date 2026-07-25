@@ -433,7 +433,11 @@ fn vertex_main(
         sample.large_fields.w,
         params.content_stage_flags.x == 0u,
     )));
-    out.textured = select(0u, 1u, params.layer_samples_size.x == 0u);
+    out.textured = select(
+        0u,
+        1u,
+        params.layer_samples_size.x == 0u && params.content_stage_flags.w == 0u,
+    );
     out.river = vec4<f32>(
         sample.hydrology.x,
         sample.hydrology.w,
