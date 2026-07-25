@@ -429,7 +429,6 @@ async function renderCanvas() {
     );
     if (
       typeof session.syncOverviewRenderFrame !== "function"
-      || typeof session.pendingChunkRenderCompileJobCount !== "function"
       || typeof session.shutdown !== "function"
     ) {
       return {
@@ -492,7 +491,7 @@ async function renderCanvas() {
         firstCenter: publicOverviewCenter(firstCenter),
         secondCenter: publicOverviewCenter(secondCenter),
         renderCompilerPendingJobCount: Number(report.renderWorkerPendingRequestCount) || 0,
-        sessionPendingCompileJobCount: session.pendingChunkRenderCompileJobCount(),
+        sessionPendingCompileJobCount: Number(report.pendingCompileJobCount) || 0,
         firstReport,
         report,
         shutdownReport,

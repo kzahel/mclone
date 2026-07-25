@@ -285,7 +285,7 @@ fn browser_bootstrap_roles_and_host_selection_stay_in_rust() {
     }
     for required in [
         "mclone_web_create_scene_host_with_startup",
-        "scene_startup.remote_addr",
+        "WebRuntimeStartEffect::Remote(url)",
         "WebRuntime::websocket_remote_at",
         "WebRuntime::web_worker_integrated_at",
     ] {

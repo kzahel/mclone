@@ -1532,8 +1532,7 @@ impl WebSceneHost {
         .map_err(JsValue::from)
     }
 
-    #[wasm_bindgen(js_name = pendingChunkRenderCompileJobCount)]
-    pub fn pending_chunk_render_compile_job_count(&self) -> usize {
+    fn pending_chunk_render_compile_job_count(&self) -> usize {
         self.host
             .as_ref()
             .and_then(McloneSceneHost::runtime_stats)
