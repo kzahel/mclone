@@ -104,6 +104,59 @@ impl<B: NoiseBiomeSource> NoiseSampler<B> {
         cell_count_y: i32,
         density: BiomeDensity,
     ) {
+        self.for_each_noise_column_value(
+            cell_x,
+            cell_z,
+            noise_settings,
+            min_cell_y,
+            density,
+            0..=cell_count_y,
+            |index, noise| noise_values[index as usize] = noise,
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn fill_sparse_noise_column_with_density(
+        &self,
+        noise_values: &mut [f64],
+        cell_x: i32,
+        cell_z: i32,
+        noise_settings: &NoiseSettings,
+        min_cell_y: i32,
+        cell_count_y: i32,
+        vertical_cell_step: i32,
+        density: BiomeDensity,
+    ) {
+        assert!(vertical_cell_step > 0);
+        assert_eq!(cell_count_y.rem_euclid(vertical_cell_step), 0);
+        assert_eq!(
+            noise_values.len(),
+            (cell_count_y / vertical_cell_step + 1) as usize
+        );
+        self.for_each_noise_column_value(
+            cell_x,
+            cell_z,
+            noise_settings,
+            min_cell_y,
+            density,
+            (0..=cell_count_y).step_by(vertical_cell_step as usize),
+            |index, noise| {
+                noise_values[(index / vertical_cell_step) as usize] = noise;
+            },
+        );
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn for_each_noise_column_value(
+        &self,
+        cell_x: i32,
+        cell_z: i32,
+        noise_settings: &NoiseSettings,
+        min_cell_y: i32,
+        density: BiomeDensity,
+        indices: impl IntoIterator<Item = i32>,
+        mut visitor: impl FnMut(i32, f64),
+    ) {
         if self.island_noise.is_some() {
             panic!(
                 "NoiseSampler island noise override is out of scope for the 1.17.1 overworld target"
@@ -129,7 +182,7 @@ impl<B: NoiseBiomeSource> NoiseSampler<B> {
             0.0
         };
 
-        for index in 0..=cell_count_y {
+        for index in indices {
             let y = index + min_cell_y;
             let mut noise = self
                 .blended_noise
@@ -146,7 +199,7 @@ impl<B: NoiseBiomeSource> NoiseSampler<B> {
                 cell_z * self.cell_width,
                 cell_x * self.cell_width,
             );
-            noise_values[index as usize] = self.apply_slide(noise, y);
+            visitor(index, self.apply_slide(noise, y));
         }
     }
 

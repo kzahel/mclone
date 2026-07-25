@@ -11,7 +11,10 @@ use crate::levelgen::{
     mclone_overworld_macro_surface_top_material, mclone_overworld_preview_visible_material,
     mclone_overworld_surface_recipe,
 };
-use crate::levelgen::{VANILLA_OVERWORLD_LOD_REVISION, VanillaOverworldLodSampler};
+use crate::levelgen::{
+    VANILLA_OVERWORLD_LOD_REVISION, VanillaOverworldLodSample, VanillaOverworldLodSampler,
+    VanillaOverworldMacroSampler,
+};
 use mclone_core::ChunkPos;
 
 pub const TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION: &str =
@@ -631,40 +634,48 @@ impl TerrainPreviewReferenceGrid {
                     .world_x(sample_x)
                     .expect("validated terrain preview X coordinate");
                 let sample = sampler.sample(world_x, world_z);
-                samples.push(TerrainPreviewSample {
-                    surface_y: sample.solid_surface_y as f32,
-                    display_y: sample.display_y as f32,
-                    continentalness: 0.0,
-                    relief: 0.0,
-                    temperature: 0.0,
-                    moisture: 0.0,
-                    water: if sample.water { 1.0 } else { 0.0 },
-                    ruggedness: 0.0,
-                    base_surface_y: sample.solid_surface_y as f32,
-                    base_display_y: sample.display_y as f32,
-                    ocean_water: if sample.water { 1.0 } else { 0.0 },
-                    macro_surface_material: f32::from(sample.visible_material),
-                    river_signed_distance: 0.0,
-                    channel_influence: 0.0,
-                    bank_influence: 0.0,
-                    river_half_width: 0.0,
-                    wetland_influence: 0.0,
-                    wetland_pool_influence: 0.0,
-                    submerged_outlet_influence: 0.0,
-                    visible_surface_material: f32::from(sample.visible_material),
-                    planned_stream_influence: 0.0,
-                    biome_recipe: sample.biome.id() as f32,
-                    landform_kind: 0.0,
-                    surface_recipe: f32::from(sample.approximate_surface_material),
-                    forest_coverage: 0.0,
-                    forest_density: 0.0,
-                    forest_family: 0.0,
-                    forest_family_mix: 0.0,
-                    mean_canopy_height: 0.0,
-                    canopy_height_variation: 0.0,
-                    grove_or_opening_influence: 0.0,
-                    forest_summary_available: 0.0,
-                });
+                samples.push(vanilla_preview_sample(sample));
+            }
+        }
+        Ok(Self { request, samples })
+    }
+
+    pub fn compile_with_vanilla_macro_sampler(
+        request: TerrainPreviewRequest,
+        sampler: &mut VanillaOverworldMacroSampler,
+    ) -> Result<Self, String> {
+        if request.profile != TerrainPreviewProfile::VanillaOverworld {
+            return Err(format!(
+                "vanilla macro terrain preview compiler cannot compile profile {}",
+                request.profile.label()
+            ));
+        }
+        if request.seed != sampler.seed() {
+            return Err(format!(
+                "vanilla macro terrain preview seed {} does not match sampler seed {}",
+                request.seed,
+                sampler.seed()
+            ));
+        }
+        if request.topology != McloneOverworldSamplingTopology::Unbounded {
+            return Err(
+                "vanilla macro terrain preview supports only unbounded topology".to_owned(),
+            );
+        }
+        let request = request.validate()?;
+        let mut samples = Vec::with_capacity(
+            usize::try_from(request.sample_count())
+                .map_err(|_| "terrain preview sample count does not fit usize")?,
+        );
+        for sample_z in 0..request.samples_per_axis() {
+            let world_z = request
+                .world_z(sample_z)
+                .expect("validated terrain preview Z coordinate");
+            for sample_x in 0..request.samples_per_axis() {
+                let world_x = request
+                    .world_x(sample_x)
+                    .expect("validated terrain preview X coordinate");
+                samples.push(vanilla_preview_sample(sampler.sample(world_x, world_z)));
             }
         }
         Ok(Self { request, samples })
@@ -822,6 +833,43 @@ fn preview_footprint_forest_summary(
         )
     });
     Ok(vegetation_planner.forest_footprint_summary(taps))
+}
+
+fn vanilla_preview_sample(sample: VanillaOverworldLodSample) -> TerrainPreviewSample {
+    TerrainPreviewSample {
+        surface_y: sample.solid_surface_y as f32,
+        display_y: sample.display_y as f32,
+        continentalness: 0.0,
+        relief: 0.0,
+        temperature: 0.0,
+        moisture: 0.0,
+        water: if sample.water { 1.0 } else { 0.0 },
+        ruggedness: 0.0,
+        base_surface_y: sample.solid_surface_y as f32,
+        base_display_y: sample.display_y as f32,
+        ocean_water: if sample.water { 1.0 } else { 0.0 },
+        macro_surface_material: f32::from(sample.visible_material),
+        river_signed_distance: 0.0,
+        channel_influence: 0.0,
+        bank_influence: 0.0,
+        river_half_width: 0.0,
+        wetland_influence: 0.0,
+        wetland_pool_influence: 0.0,
+        submerged_outlet_influence: 0.0,
+        visible_surface_material: f32::from(sample.visible_material),
+        planned_stream_influence: 0.0,
+        biome_recipe: sample.biome.id() as f32,
+        landform_kind: 0.0,
+        surface_recipe: f32::from(sample.approximate_surface_material),
+        forest_coverage: 0.0,
+        forest_density: 0.0,
+        forest_family: 0.0,
+        forest_family_mix: 0.0,
+        mean_canopy_height: 0.0,
+        canopy_height_variation: 0.0,
+        grove_or_opening_influence: 0.0,
+        forest_summary_available: 0.0,
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1046,6 +1094,9 @@ pub struct TerrainPreviewComparison {
     pub max_absolute_surface_error: f32,
     pub mean_absolute_surface_error: f32,
     pub p95_absolute_surface_error: f32,
+    pub max_absolute_display_error: f32,
+    pub mean_absolute_display_error: f32,
+    pub p95_absolute_display_error: f32,
     pub water_presence_agreement: f32,
     pub max_absolute_base_surface_error: f32,
     pub mean_absolute_base_surface_error: f32,
@@ -1094,6 +1145,9 @@ impl TerrainPreviewComparison {
         let mut errors = Vec::with_capacity(candidate.len());
         let mut error_sum = 0.0_f64;
         let mut max_error = 0.0_f32;
+        let mut display_errors = Vec::with_capacity(candidate.len());
+        let mut display_error_sum = 0.0_f64;
+        let mut max_display_error = 0.0_f32;
         let mut water_matches = 0_usize;
         let mut base_errors = Vec::with_capacity(candidate.len());
         let mut base_error_sum = 0.0_f64;
@@ -1122,6 +1176,10 @@ impl TerrainPreviewComparison {
             errors.push(error);
             error_sum += f64::from(error);
             max_error = max_error.max(error);
+            let display_error = (expected.display_y - actual.display_y).abs();
+            display_errors.push(display_error);
+            display_error_sum += f64::from(display_error);
+            max_display_error = max_display_error.max(display_error);
             water_matches += usize::from(expected.is_water() == actual.is_water());
             let base_error = (expected.base_surface_y - actual.base_surface_y).abs();
             base_errors.push(base_error);
@@ -1160,6 +1218,7 @@ impl TerrainPreviewComparison {
             );
         }
         errors.sort_by(f32::total_cmp);
+        display_errors.sort_by(f32::total_cmp);
         base_errors.sort_by(f32::total_cmp);
         let p95_index = ((errors.len() - 1) * 95) / 100;
         let sample_count = candidate.len() as f64;
@@ -1169,6 +1228,9 @@ impl TerrainPreviewComparison {
             max_absolute_surface_error: max_error,
             mean_absolute_surface_error: (error_sum / sample_count) as f32,
             p95_absolute_surface_error: errors[p95_index],
+            max_absolute_display_error: max_display_error,
+            mean_absolute_display_error: (display_error_sum / sample_count) as f32,
+            p95_absolute_display_error: display_errors[p95_index],
             water_presence_agreement: water_matches as f32 / candidate.len() as f32,
             max_absolute_base_surface_error: max_base_error,
             mean_absolute_base_surface_error: (base_error_sum / sample_count) as f32,
@@ -1353,6 +1415,42 @@ mod tests {
     }
 
     #[test]
+    fn vanilla_macro_grid_is_deterministic_and_comparable_to_exact() {
+        for (seed, center_x, center_z) in [(12_345, 0, 0), (-98_765, -304, 336)] {
+            let mut request = TerrainPreviewRequest::new(seed, center_x, center_z, 32)
+                .with_profile(TerrainPreviewProfile::VanillaOverworld);
+            request.cells_per_axis = 8;
+            request.content_stage = TerrainPreviewContentStage::Surface;
+            let mut exact_sampler = VanillaOverworldLodSampler::new(seed);
+            let exact = TerrainPreviewReferenceGrid::compile_with_vanilla_sampler(
+                request,
+                &mut exact_sampler,
+            )
+            .unwrap();
+            let mut macro_sampler = VanillaOverworldMacroSampler::new(seed);
+            let macro_grid = TerrainPreviewReferenceGrid::compile_with_vanilla_macro_sampler(
+                request,
+                &mut macro_sampler,
+            )
+            .unwrap();
+            let repeated = TerrainPreviewReferenceGrid::compile_with_vanilla_macro_sampler(
+                request,
+                &mut macro_sampler,
+            )
+            .unwrap();
+            let comparison =
+                TerrainPreviewComparison::compare(&exact, macro_grid.samples()).unwrap();
+
+            assert_eq!(macro_grid, repeated);
+            assert_eq!(comparison.sample_count, 81);
+            assert!(comparison.mean_absolute_surface_error.is_finite());
+            assert!(comparison.mean_absolute_display_error.is_finite());
+            assert!((0.0..=1.0).contains(&comparison.water_presence_agreement));
+            assert!(macro_sampler.reused_density_columns() > 0);
+        }
+    }
+
+    #[test]
     fn structured_near_detail_reconstructs_planned_stream_records() {
         let seed = -98_765;
         let plan =
@@ -1516,6 +1614,8 @@ mod tests {
         let mut candidate = reference.samples().to_vec();
         candidate[0].surface_y += 10.0;
         candidate[1].surface_y -= 2.0;
+        candidate[0].display_y += 7.0;
+        candidate[1].display_y -= 3.0;
         candidate[2].water = if candidate[2].is_water() { 0.0 } else { 1.0 };
         candidate[3].base_surface_y += 4.0;
         candidate[4].ocean_water = if candidate[4].is_ocean_water() {
@@ -1530,6 +1630,9 @@ mod tests {
         assert_eq!(report.max_absolute_surface_error, 10.0);
         assert!(report.mean_absolute_surface_error > 0.0);
         assert_eq!(report.p95_absolute_surface_error, 0.0);
+        assert_eq!(report.max_absolute_display_error, 7.0);
+        assert!(report.mean_absolute_display_error > 0.0);
+        assert_eq!(report.p95_absolute_display_error, 0.0);
         assert_eq!(
             report.water_presence_agreement,
             (report.sample_count - 1) as f32 / report.sample_count as f32

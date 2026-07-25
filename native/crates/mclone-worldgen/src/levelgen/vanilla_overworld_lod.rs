@@ -9,6 +9,9 @@ use super::{NoiseBasedChunkGenerator, NoiseGeneratorSettings};
 
 pub const VANILLA_OVERWORLD_LOD_REVISION: &str = "vanilla-1.17.1-density-column-lod-v1";
 pub const VANILLA_OVERWORLD_LOD_MAX_RETAINED_DENSITY_COLUMNS: usize = 4_096;
+pub const VANILLA_OVERWORLD_MACRO_LOD_REVISION: &str =
+    "vanilla-1.17.1-sparse-density-column-lod-v1";
+pub const VANILLA_OVERWORLD_MACRO_VERTICAL_CELL_STEP: i32 = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct VanillaOverworldLodSample {
@@ -80,65 +83,18 @@ impl VanillaOverworldLodSampler {
         let x1z0 = (x_fraction != 0.0).then(|| self.density_column(cell_x + 1, cell_z));
         let x1z1 = (x_fraction != 0.0 && z_fraction != 0.0)
             .then(|| self.density_column(cell_x + 1, cell_z + 1));
-        let cell_height = self.generator.lod_cell_height();
-        let min_cell_y = self.generator.lod_min_cell_y();
-        let mut display_y = self.generator.lod_min_y();
-        let mut solid_surface_y = self.generator.lod_min_y();
-        let mut visible_material = AIR;
-
-        'cells: for cell_y in (0..self.generator.lod_cell_count_y()).rev() {
-            let y_index = cell_y as usize;
-            for y_offset in (0..cell_height).rev() {
-                let y_fraction = f64::from(y_offset) / f64::from(cell_height);
-                let x0z0_density = lerp(y_fraction, x0z0[y_index], x0z0[y_index + 1]);
-                let z0_density = x1z0.as_ref().map_or(x0z0_density, |x1z0| {
-                    lerp(
-                        x_fraction,
-                        x0z0_density,
-                        lerp(y_fraction, x1z0[y_index], x1z0[y_index + 1]),
-                    )
-                });
-                let density = x0z1.as_ref().map_or(z0_density, |x0z1| {
-                    let x0z1_density = lerp(y_fraction, x0z1[y_index], x0z1[y_index + 1]);
-                    let z1_density = x1z1.as_ref().map_or(x0z1_density, |x1z1| {
-                        lerp(
-                            x_fraction,
-                            x0z1_density,
-                            lerp(y_fraction, x1z1[y_index], x1z1[y_index + 1]),
-                        )
-                    });
-                    lerp(z_fraction, z0_density, z1_density)
-                });
-                let block_y = (min_cell_y + cell_y) * cell_height + y_offset;
-                let block = self.generator.resolve_terrain_block(block_y, density);
-                if display_y == self.generator.lod_min_y() && block != AIR {
-                    display_y = block_y + 1;
-                    visible_material = block;
-                }
-                if material_blocks_motion(block) {
-                    solid_surface_y = block_y + 1;
-                    break 'cells;
-                }
-            }
-        }
-
-        let biome = self
-            .biome_source
-            .get_block_position_biome_definition(self.seed, world_x, world_z);
-        let approximate_surface_material = overworld_surface_top_material(biome);
-        let water = visible_material == WATER;
-        VanillaOverworldLodSample {
-            solid_surface_y,
-            display_y,
-            water,
-            biome,
-            approximate_surface_material,
-            visible_material: if water {
-                WATER
-            } else {
-                approximate_surface_material
-            },
-        }
+        sample_density_surface(
+            &self.generator,
+            &self.biome_source,
+            self.seed,
+            world_x,
+            world_z,
+            1,
+            &x0z0,
+            x0z1.as_deref(),
+            x1z0.as_deref(),
+            x1z1.as_deref(),
+        )
     }
 
     fn density_column(&mut self, cell_x: i32, cell_z: i32) -> Arc<[f64]> {
@@ -161,6 +117,186 @@ impl VanillaOverworldLodSampler {
         self.insertion_order.push_back(key);
         self.generated_density_columns = self.generated_density_columns.saturating_add(1);
         values
+    }
+}
+
+pub struct VanillaOverworldMacroSampler {
+    seed: i64,
+    generator: NoiseBasedChunkGenerator<OverworldBiomeSource>,
+    biome_source: OverworldBiomeSource,
+    density_columns: BTreeMap<(i32, i32), Arc<[f64]>>,
+    insertion_order: VecDeque<(i32, i32)>,
+    generated_density_columns: u64,
+    reused_density_columns: u64,
+}
+
+impl VanillaOverworldMacroSampler {
+    pub fn new(seed: i64) -> Self {
+        let biome_source = OverworldBiomeSource::new(seed, false, false);
+        Self {
+            seed,
+            generator: NoiseBasedChunkGenerator::new(
+                biome_source.clone(),
+                seed,
+                NoiseGeneratorSettings::overworld(),
+            ),
+            biome_source,
+            density_columns: BTreeMap::new(),
+            insertion_order: VecDeque::new(),
+            generated_density_columns: 0,
+            reused_density_columns: 0,
+        }
+    }
+
+    pub const fn seed(&self) -> i64 {
+        self.seed
+    }
+
+    pub fn retained_density_columns(&self) -> usize {
+        self.density_columns.len()
+    }
+
+    pub const fn generated_density_columns(&self) -> u64 {
+        self.generated_density_columns
+    }
+
+    pub const fn reused_density_columns(&self) -> u64 {
+        self.reused_density_columns
+    }
+
+    pub fn clear_cache(&mut self) {
+        self.density_columns.clear();
+        self.insertion_order.clear();
+    }
+
+    pub fn sample(&mut self, world_x: i32, world_z: i32) -> VanillaOverworldLodSample {
+        let cell_width = self.generator.lod_cell_width();
+        let cell_x = world_x.div_euclid(cell_width);
+        let cell_z = world_z.div_euclid(cell_width);
+        let x_fraction = f64::from(world_x.rem_euclid(cell_width)) / f64::from(cell_width);
+        let z_fraction = f64::from(world_z.rem_euclid(cell_width)) / f64::from(cell_width);
+        let x0z0 = self.density_column(cell_x, cell_z);
+        let x0z1 = (z_fraction != 0.0).then(|| self.density_column(cell_x, cell_z + 1));
+        let x1z0 = (x_fraction != 0.0).then(|| self.density_column(cell_x + 1, cell_z));
+        let x1z1 = (x_fraction != 0.0 && z_fraction != 0.0)
+            .then(|| self.density_column(cell_x + 1, cell_z + 1));
+        sample_density_surface(
+            &self.generator,
+            &self.biome_source,
+            self.seed,
+            world_x,
+            world_z,
+            VANILLA_OVERWORLD_MACRO_VERTICAL_CELL_STEP,
+            &x0z0,
+            x0z1.as_deref(),
+            x1z0.as_deref(),
+            x1z1.as_deref(),
+        )
+    }
+
+    fn density_column(&mut self, cell_x: i32, cell_z: i32) -> Arc<[f64]> {
+        let key = (cell_x, cell_z);
+        if let Some(column) = self.density_columns.get(&key) {
+            self.reused_density_columns = self.reused_density_columns.saturating_add(1);
+            return Arc::clone(column);
+        }
+        while self.density_columns.len() >= VANILLA_OVERWORLD_LOD_MAX_RETAINED_DENSITY_COLUMNS {
+            let Some(oldest) = self.insertion_order.pop_front() else {
+                break;
+            };
+            self.density_columns.remove(&oldest);
+        }
+        let sparse_cell_count =
+            self.generator.lod_cell_count_y() / VANILLA_OVERWORLD_MACRO_VERTICAL_CELL_STEP;
+        let mut values = vec![0.0; (sparse_cell_count + 1) as usize];
+        self.generator.fill_lod_sparse_noise_column(
+            cell_x,
+            cell_z,
+            VANILLA_OVERWORLD_MACRO_VERTICAL_CELL_STEP,
+            &mut values,
+        );
+        let values = Arc::<[f64]>::from(values);
+        self.density_columns.insert(key, Arc::clone(&values));
+        self.insertion_order.push_back(key);
+        self.generated_density_columns = self.generated_density_columns.saturating_add(1);
+        values
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn sample_density_surface(
+    generator: &NoiseBasedChunkGenerator<OverworldBiomeSource>,
+    biome_source: &OverworldBiomeSource,
+    seed: i64,
+    world_x: i32,
+    world_z: i32,
+    vertical_cell_step: i32,
+    x0z0: &[f64],
+    x0z1: Option<&[f64]>,
+    x1z0: Option<&[f64]>,
+    x1z1: Option<&[f64]>,
+) -> VanillaOverworldLodSample {
+    let cell_width = generator.lod_cell_width();
+    let x_fraction = f64::from(world_x.rem_euclid(cell_width)) / f64::from(cell_width);
+    let z_fraction = f64::from(world_z.rem_euclid(cell_width)) / f64::from(cell_width);
+    let cell_height = generator.lod_cell_height() * vertical_cell_step;
+    let min_cell_y = generator.lod_min_cell_y();
+    let sparse_cell_count = generator.lod_cell_count_y() / vertical_cell_step;
+    let mut display_y = generator.lod_min_y();
+    let mut solid_surface_y = generator.lod_min_y();
+    let mut visible_material = AIR;
+
+    'cells: for cell_y in (0..sparse_cell_count).rev() {
+        let y_index = cell_y as usize;
+        for y_offset in (0..cell_height).rev() {
+            let y_fraction = f64::from(y_offset) / f64::from(cell_height);
+            let x0z0_density = lerp(y_fraction, x0z0[y_index], x0z0[y_index + 1]);
+            let z0_density = x1z0.map_or(x0z0_density, |x1z0| {
+                lerp(
+                    x_fraction,
+                    x0z0_density,
+                    lerp(y_fraction, x1z0[y_index], x1z0[y_index + 1]),
+                )
+            });
+            let density = x0z1.map_or(z0_density, |x0z1| {
+                let x0z1_density = lerp(y_fraction, x0z1[y_index], x0z1[y_index + 1]);
+                let z1_density = x1z1.map_or(x0z1_density, |x1z1| {
+                    lerp(
+                        x_fraction,
+                        x0z1_density,
+                        lerp(y_fraction, x1z1[y_index], x1z1[y_index + 1]),
+                    )
+                });
+                lerp(z_fraction, z0_density, z1_density)
+            });
+            let block_y =
+                (min_cell_y + cell_y * vertical_cell_step) * generator.lod_cell_height() + y_offset;
+            let block = generator.resolve_terrain_block(block_y, density);
+            if display_y == generator.lod_min_y() && block != AIR {
+                display_y = block_y + 1;
+                visible_material = block;
+            }
+            if material_blocks_motion(block) {
+                solid_surface_y = block_y + 1;
+                break 'cells;
+            }
+        }
+    }
+
+    let biome = biome_source.get_block_position_biome_definition(seed, world_x, world_z);
+    let approximate_surface_material = overworld_surface_top_material(biome);
+    let water = visible_material == WATER;
+    VanillaOverworldLodSample {
+        solid_surface_y,
+        display_y,
+        water,
+        biome,
+        approximate_surface_material,
+        visible_material: if water {
+            WATER
+        } else {
+            approximate_surface_material
+        },
     }
 }
 
@@ -278,6 +414,27 @@ mod tests {
         let mut interior = VanillaOverworldLodSampler::new(12_345);
         interior.sample(-2, 10);
         assert_eq!(interior.generated_density_columns(), 4);
+    }
+
+    #[test]
+    fn macro_sample_is_deterministic_and_reuses_sparse_columns() {
+        let mut sampler = VanillaOverworldMacroSampler::new(-98_765);
+        let first = sampler.sample(-301, 339);
+        let generated = sampler.generated_density_columns();
+        assert_eq!(generated, 4);
+        let repeated = sampler.sample(-301, 339);
+
+        assert_eq!(first, repeated);
+        assert_eq!(sampler.generated_density_columns(), generated);
+        assert_eq!(sampler.reused_density_columns(), 4);
+        assert_eq!(
+            sampler.density_columns.values().next().unwrap().len(),
+            (sampler.generator.lod_cell_count_y() / VANILLA_OVERWORLD_MACRO_VERTICAL_CELL_STEP + 1)
+                as usize
+        );
+
+        sampler.clear_cache();
+        assert_eq!(sampler.sample(-301, 339), first);
     }
 
     #[test]

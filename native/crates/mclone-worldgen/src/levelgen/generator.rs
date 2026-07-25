@@ -343,22 +343,7 @@ impl<B: NoiseBiomeSource> NoiseBasedChunkGenerator<B> {
             "vanilla LOD density column has the generator's vertical sample count"
         );
         let noise_settings = self.settings.noise_settings();
-        let center_depth = self
-            .sampler
-            .biome_source
-            .get_noise_biome(cell_x, self.sea_level, cell_z)
-            .get_depth();
-        let density = compute_biome_density_from_neighborhood(
-            center_depth,
-            noise_settings,
-            |offset_x, offset_z| {
-                self.sampler.biome_source.get_noise_biome(
-                    cell_x + offset_x,
-                    self.sea_level,
-                    cell_z + offset_z,
-                )
-            },
-        );
+        let density = self.lod_biome_density(cell_x, cell_z, noise_settings);
         self.sampler.fill_noise_column_with_density(
             noise_values,
             cell_x,
@@ -368,6 +353,85 @@ impl<B: NoiseBiomeSource> NoiseBasedChunkGenerator<B> {
             self.cell_count_y,
             density,
         );
+    }
+
+    pub(crate) fn fill_lod_sparse_noise_column(
+        &self,
+        cell_x: i32,
+        cell_z: i32,
+        vertical_cell_step: i32,
+        noise_values: &mut [f64],
+    ) {
+        assert!(vertical_cell_step > 0);
+        assert_eq!(self.cell_count_y.rem_euclid(vertical_cell_step), 0);
+        assert_eq!(
+            noise_values.len(),
+            (self.cell_count_y / vertical_cell_step + 1) as usize,
+            "vanilla macro LOD density column has the requested sparse vertical sample count"
+        );
+        let noise_settings = self.settings.noise_settings();
+        let density = self.lod_macro_biome_density(cell_x, cell_z, noise_settings);
+        self.sampler.fill_sparse_noise_column_with_density(
+            noise_values,
+            cell_x,
+            cell_z,
+            noise_settings,
+            self.min_cell_y,
+            self.cell_count_y,
+            vertical_cell_step,
+            density,
+        );
+    }
+
+    fn lod_biome_density(
+        &self,
+        cell_x: i32,
+        cell_z: i32,
+        noise_settings: &NoiseSettings,
+    ) -> BiomeDensity {
+        let center_depth = self
+            .sampler
+            .biome_source
+            .get_noise_biome(cell_x, self.sea_level, cell_z)
+            .get_depth();
+        compute_biome_density_from_neighborhood(
+            center_depth,
+            noise_settings,
+            |offset_x, offset_z| {
+                self.sampler.biome_source.get_noise_biome(
+                    cell_x + offset_x,
+                    self.sea_level,
+                    cell_z + offset_z,
+                )
+            },
+        )
+    }
+
+    fn lod_macro_biome_density(
+        &self,
+        cell_x: i32,
+        cell_z: i32,
+        noise_settings: &NoiseSettings,
+    ) -> BiomeDensity {
+        let biome = self
+            .sampler
+            .biome_source
+            .get_noise_biome(cell_x, self.sea_level, cell_z);
+        let biome_depth = biome.get_depth();
+        let biome_scale = biome.get_scale();
+        let (adjusted_depth, adjusted_scale) = if noise_settings.is_amplified() && biome_depth > 0.0
+        {
+            (
+                1.0_f32 + biome_depth * 2.0_f32,
+                1.0_f32 + biome_scale * 4.0_f32,
+            )
+        } else {
+            (biome_depth, biome_scale)
+        };
+        BiomeDensity {
+            depth: f64::from(adjusted_depth * 0.5_f32 - 0.125_f32) * 0.265625,
+            scale: 96.0 / f64::from(adjusted_scale * 0.9_f32 + 0.1_f32),
+        }
     }
 
     pub(crate) const fn lod_cell_width(&self) -> i32 {

@@ -95,7 +95,8 @@ pub use timing::{
 };
 pub use vanilla_overworld_lod::{
     VANILLA_OVERWORLD_LOD_MAX_RETAINED_DENSITY_COLUMNS, VANILLA_OVERWORLD_LOD_REVISION,
-    VanillaOverworldLodSample, VanillaOverworldLodSampler,
+    VANILLA_OVERWORLD_MACRO_LOD_REVISION, VANILLA_OVERWORLD_MACRO_VERTICAL_CELL_STEP,
+    VanillaOverworldLodSample, VanillaOverworldLodSampler, VanillaOverworldMacroSampler,
 };
 
 #[cfg(test)]
