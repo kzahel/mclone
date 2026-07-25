@@ -3,11 +3,13 @@
 Topic: `game-title-and-brand-identity`
 
 Status: **recommendation recorded 2026-07-23; `Wilderfold` is the preferred
-candidate, but it has not been adopted. Domain, storefront, and trademark
-checks are preliminary snapshots only. Formal clearance, name reservation,
-and any product/repository rename remain open.**
+candidate, but it has not been adopted. `Woldenmere` was added 2026-07-24 as a
+live contender that is resonating with the maintainer; it is vetted-and-liked,
+not adopted, and does not displace the `Wilderfold` recommendation. Domain,
+storefront, and trademark checks are preliminary snapshots only. Formal
+clearance, name reservation, and any product/repository rename remain open.**
 
-Last reconciled: **2026-07-23**.
+Last reconciled: **2026-07-24**.
 
 ## Scope
 
@@ -184,6 +186,7 @@ amber until the clearance gates are complete.
 | Candidate | Fit | Preliminary footprint | Disposition |
 |---|---|---|---|
 | **Wilderfold** | Living wilderness, shelter, geology, and nested/folded worlds | Exact title and primary domains looked clear; near-name concerns exist | Preferred |
+| **Woldenmere** | A wooded upland by a lake — a real-feeling North-Sea place-name | `.com` unregistered and no exact game/studio/brand surfaced on 2026-07-24; cross-legible in English and German/Dutch | Live contender; maintainer-liked, not adopted |
 | **Wilderspan** | Wilderness spanning platforms, scales, worlds, and players | Exact title and primary domains looked clear | Stronger availability fallback, but less warm and specific |
 | **Loamward** | Earth, tactility, homeward travel, and landscape | Exact title and primary domains looked clear | Best grounded alternative; weak on the embedded-world hook |
 | **Ravelwild** | An interwoven or tangled wilderness | Primary domains looked clear, but `Ravelwild` has unrelated commercial use as a wallpaper colorway | Retain only as an amber fallback |
@@ -283,6 +286,55 @@ are the standard for the next U.S. step.
   **Seamlands** — existing creative, commercial, fictional-place, or community
   uses made them weaker than the retained shortlist.
 
+### 2026-07-24 fresh-candidate round
+
+A second generation-and-screen round was run on **2026-07-24** after the
+`-fold` shortlist failed to resonate. Same method as above: authoritative RDAP
+`.com` lookups (a `404` means no current registration), followed by exact
+quoted web/Steam/itch.io searches for game, studio, and brand conflicts. Same
+caveats apply — this is a point-in-time screen, not legal clearance.
+
+`Woldenmere` emerged as the maintainer's preferred contender from this round:
+
+- **Semantic fit.** It parses as *wold* (Old English *weald/wald* "forest,"
+  later "high open upland"; cognate German *Wald*, Dutch *woud*) plus *-mere*
+  (Old English *mere* "lake"; cognate Latin *mare*, German *Meer*, Dutch
+  *meer*). It reads as a real North-Sea place-name — "a lake by the wooded
+  upland" — rather than invented fantasy, which suits the living-landscape
+  identity. The `-mere` lake element is familiar from Windermere, Grasmere,
+  and Buttermere.
+- **Cross-language legibility.** The name is transparent and benign to a
+  German/Swiss-German/Dutch ear (decodes as *Wäld(li)* + *Meer/meer*), which
+  partially discharges the target-language screening gate on the Germanic side.
+  Note the shared root split in meaning: English/Dutch *mere/meer* settled on
+  "lake" while German *Meer* settled on "sea," so a German reading lands on
+  "forest-sea" and an English reading on "forest-lake"; both resolve to wooded
+  water and neither is an unfortunate homophone.
+- **Screen result.** `WOLDENMERE.COM` returned RDAP not-found, and exact
+  searches surfaced no existing video game, studio, or obvious brand — only
+  unrelated geographic adjacents (Windermere, De Wolden). It carries no
+  `Wilder-`/`-fold` cadence, so it reads as a clean reset rather than a
+  Wilderfold variation.
+
+Other `.com`-clear, conflict-screened candidates from the same round, retained
+as secondary options:
+
+- `Loamere`, `Woldenholt` — same earthy real-place register as `Woldenmere`.
+- `Nestholt` — the only candidate that encodes the nested-worlds hook (*nest*)
+  and the wilderness (*holt*, a copse) together.
+- `Kithvale`, `Roostvale` — the warm/belonging pole (*kith* = one's land and
+  people; *roost* = a home returned to).
+
+Round rejects worth recording so they are not re-proposed: `Bramblen` (a
+homophone of the Pokémon *Bramblin*, which buries it in search); `Cradlelands`
+(too close to the survival-crafting game *Crashlands*); `Brackenmere` (an
+existing fantasy-fiction setting); `Verdanni` (near *Verdandi* and an ESG
+company); `Hearthmoss` (crowded `Hearth-` space plus a live streamer handle);
+`Holtaria` (near-identical to the live corporate brand *Holtara*). Every rare
+single real word tested (`bield`, `thwaite`, `garth`, `weald`, `combe`, and
+similar) had its `.com` already registered, confirming that this constraint
+pushes strongly toward coined words and non-`-fold` compounds.
+
 ## Clearance And Adoption Gates
 
 Before adopting or announcing `Wilderfold`:
@@ -323,3 +375,8 @@ world territory rather than falling back to `Mine`, `Craft`, `Block`, or
 - **2026-07-23:** Preliminary exact-name, domain, storefront, web, and obvious
   trademark screens recorded. Recommendation remains unadopted pending formal
   clearance and reservation.
+- **2026-07-24:** A fresh candidate round was run after the `-fold` shortlist
+  failed to resonate. `Woldenmere` was screened (`.com` unregistered, no exact
+  game/studio/brand) and recorded as a maintainer-liked live contender
+  alongside `Wilderfold`. It is vetted-and-liked, not adopted; the `Wilderfold`
+  recommendation and all clearance/reservation gates still stand.

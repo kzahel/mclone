@@ -3,6 +3,9 @@
 This document owns Mclone's current platform posture. It is the entrypoint for
 supported client targets, validation
 commands, and the boundaries that keep shared engine crates platform-neutral.
+Eventual iOS, Nintendo, Xbox, and PlayStation candidates are planning concerns,
+not current lanes; their access, feasibility, and promotion gates live in
+[`topics/future-platform-goals.md`](topics/future-platform-goals.md).
 
 The durable engine architecture lives in
 [`native-engine-architecture.md`](native-engine-architecture.md). This page is

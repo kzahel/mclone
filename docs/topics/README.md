@@ -167,6 +167,10 @@ series implements the same concern, normally reuse the document slug in its
   Deck provisioning and validation lane — official Devkit Client deployment,
   native Linux staging and asset-root contracts, Gaming Mode acceptance, and
   reproducible handheld performance evidence.
+- [`future-platform-goals.md`](future-platform-goals.md): planning record for
+  eventual iOS, Nintendo, Xbox, and PlayStation targets — public program and
+  hardware access, current Rust/`wgpu` portability risks, a conditional
+  Switch-versus-Switch-2 decision, cost bands, sequencing, and promotion gates.
 - [`graphics-video-settings.md`](graphics-video-settings.md): active
   player-facing graphics/video contract — current live controls and SteamOS
   profile behavior, settings-persistence investigation, output/UI/world
@@ -260,6 +264,10 @@ series implements the same concern, normally reuse the document slug in its
   16/8/4/2 refinement, authoritative chunk replacement, approximate GPU
   lighting, optional asynchronous canonical generation, and later volumetric
   residency/rendering experiments.
+- [`lod-native-vegetation.md`](lod-native-vegetation.md): accepted immediate
+  migration of original-profile trees from vanilla-shaped chunk decoration to
+  worldgen-owned forest intent and stable tree records shared by exact chunks,
+  Terrain Lab summaries/instances, and eventual in-game Far LOD.
 - [`lighting.md`](lighting.md): native Java-shaped stored-light system,
   render handoff, solver/status/rendering gaps, and next slices.
 - [`dynamic-point-lights.md`](dynamic-point-lights.md): presentation-side
