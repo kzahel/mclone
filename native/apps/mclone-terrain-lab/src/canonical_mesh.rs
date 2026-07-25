@@ -35,8 +35,6 @@ pub(crate) struct CanonicalMeshRequestReceipt {
     pub coordinate: CanonicalMeshCoordinate,
     pub fingerprint: u64,
     pub raw_cache_hit: bool,
-    pub dependency_cache_hits: usize,
-    pub generated_dependency_chunks: usize,
     pub retained_dependency_chunks: usize,
 }
 
@@ -44,10 +42,6 @@ pub(crate) struct CanonicalMeshRequestReceipt {
 pub(crate) struct CanonicalPackedAdmission {
     pub requested: CanonicalMeshRequestReceipt,
     pub packed_sections: Vec<u8>,
-    pub target_chunk_count: usize,
-    pub section_count: usize,
-    pub vertex_count: usize,
-    pub index_count: usize,
 }
 
 #[derive(Clone, Debug)]
@@ -153,8 +147,6 @@ impl CanonicalMeshSession {
                 coordinate: *coordinate,
                 fingerprint: chunk.fingerprint,
                 raw_cache_hit,
-                dependency_cache_hits: chunk.dependency_cache.cache_hits,
-                generated_dependency_chunks: chunk.dependency_cache.generated_dependency_chunks,
                 retained_dependency_chunks: chunk.dependency_cache.retained_dependency_chunks,
             });
         }
@@ -280,27 +272,9 @@ impl CanonicalMeshSession {
             let sections = admission_sections
                 .remove(&receipt.coordinate.tuple())
                 .unwrap_or_default();
-            let target_chunk_count = sections
-                .iter()
-                .map(|section| (section.key.chunk_x, section.key.chunk_z))
-                .collect::<BTreeSet<_>>()
-                .len();
-            let section_count = sections.len();
-            let vertex_count = sections
-                .iter()
-                .map(|section| section.mesh.vertices.len())
-                .sum();
-            let index_count = sections
-                .iter()
-                .map(|section| section.mesh.indices.len())
-                .sum();
             admissions.push(CanonicalPackedAdmission {
                 requested: receipt,
                 packed_sections: pack_textured_render_sections(&sections),
-                target_chunk_count,
-                section_count,
-                vertex_count,
-                index_count,
             });
         }
         let pack_ms = timing_elapsed_ms(pack_started);

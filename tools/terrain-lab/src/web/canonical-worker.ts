@@ -12,11 +12,26 @@ workerSelf.onmessage = (event: MessageEvent<unknown>): void => {
   void forwardToRust(event.data).catch((error: unknown) => {
     // Wasm bootstrap is necessarily browser-owned. Actor-domain failures are
     // returned as Rust-authored opaque frames and never reach this fallback.
-    setTimeout(() => {
-      throw error;
-    }, 0);
+    console.error("Canonical terrain Worker bootstrap failed:", error);
+    workerSelf.postMessage({
+      kind: "error",
+      epoch: frameEpoch(event.data),
+      message: error instanceof Error ? error.message : String(error),
+    });
   });
 };
+
+function frameEpoch(frame: unknown): number {
+  if (
+    typeof frame === "object"
+    && frame !== null
+    && "epoch" in frame
+    && typeof frame.epoch === "number"
+  ) {
+    return frame.epoch;
+  }
+  return 0;
+}
 
 async function forwardToRust(frame: unknown): Promise<void> {
   wasmPromise ??= initTerrainLab();

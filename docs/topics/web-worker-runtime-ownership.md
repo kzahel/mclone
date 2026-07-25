@@ -23,16 +23,20 @@ generic transport reuse, Rust actor/coordinator ownership, persistent SAB
 mailboxes, cache consolidation, and deletion of superseded TypeScript and
 legacy raw-admission paths.
 
-The first worker checkpoint of Tactical
+The first two Worker checkpoints of Tactical
 [`248`](../tactical/248-terrain-lab-navigation-and-worker-modernization.md)
-is now implemented. Terrain Lab's canonical Worker shell is a Wasm loader and
+are now implemented. Terrain Lab's canonical Worker shell is a Wasm loader and
 opaque forwarder into `CanonicalTerrainWorkerActor`; Rust authors request
 frames, owns profile/assets/session/compile behavior, constructs response
-frames and transfer lists, and validates responses on the main side. The
-hand-authored TypeScript protocol and semantic Worker switch are deleted.
-React still owns the transitional epoch/batch/admission coordinator, and mesh
-results still use transferables. Moving that coordinator into Rust and then
-switching its bulk path to external SAB remain the active next checkpoints.
+frames and transfer lists, and validates responses on the main side.
+`CanonicalTerrainWorkerCoordinator` now also owns worker readiness, epochs,
+coverage ordering, resident/warm/missing state, geometric batch growth,
+in-flight bounds, admission pacing, stale rejection, and diagnostic
+aggregation. React submits desired coverage and pumps once per animation
+frame. The hand-authored TypeScript protocol, semantic Worker switch, and
+React coordinator are deleted. Mesh results still use transferables; generic
+transport source reuse and the switch to persistent external SAB remain the
+active next checkpoints.
 
 ## Scope
 

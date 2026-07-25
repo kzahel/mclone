@@ -21,6 +21,9 @@ use serde::{Deserialize, Serialize};
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 use web_sys::HtmlCanvasElement;
 
+use crate::canonical_coordinator_web::{
+    CanonicalCoverageRequest, CanonicalTerrainWorkerCoordinator,
+};
 use crate::terrain_preview_projection_kind;
 use crate::visual_assets::load_terrain_lab_visual_assets;
 
@@ -52,39 +55,39 @@ struct CanonicalAcceptReport {
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct CanonicalChunkCoordinate {
-    chunk_x: i32,
-    chunk_z: i32,
+pub(crate) struct CanonicalChunkCoordinate {
+    pub(crate) chunk_x: i32,
+    pub(crate) chunk_z: i32,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct CanonicalPackedPrepareReport {
-    active_chunks: usize,
-    warm_chunks: usize,
-    warm_available: Vec<CanonicalChunkCoordinate>,
-    evicted_chunks: usize,
-    removed_sections: usize,
-    vertex_count: u32,
-    index_count: u32,
-    resident_mesh_used_bytes: u64,
+pub(crate) struct CanonicalPackedPrepareReport {
+    pub(crate) active_chunks: usize,
+    pub(crate) warm_chunks: usize,
+    pub(crate) warm_available: Vec<CanonicalChunkCoordinate>,
+    pub(crate) evicted_chunks: usize,
+    pub(crate) removed_sections: usize,
+    pub(crate) vertex_count: u32,
+    pub(crate) index_count: u32,
+    pub(crate) resident_mesh_used_bytes: u64,
 }
 
-#[derive(Serialize)]
+#[derive(Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
-struct CanonicalPackedAcceptReport {
-    chunk_x: i32,
-    chunk_z: i32,
-    fingerprint: String,
-    active_chunks: usize,
-    warm_chunks: usize,
-    target_chunks: usize,
-    section_count: usize,
-    vertex_count: u32,
-    index_count: u32,
-    decode_ms: f64,
-    mesh_upload_ms: f64,
-    resident_mesh_used_bytes: u64,
+pub(crate) struct CanonicalPackedAcceptReport {
+    pub(crate) chunk_x: i32,
+    pub(crate) chunk_z: i32,
+    pub(crate) fingerprint: String,
+    pub(crate) active_chunks: usize,
+    pub(crate) warm_chunks: usize,
+    pub(crate) target_chunks: usize,
+    pub(crate) section_count: usize,
+    pub(crate) vertex_count: u32,
+    pub(crate) index_count: u32,
+    pub(crate) decode_ms: f64,
+    pub(crate) mesh_upload_ms: f64,
+    pub(crate) resident_mesh_used_bytes: u64,
 }
 
 #[derive(Serialize)]
@@ -145,6 +148,7 @@ pub struct CanonicalTerrainLab {
     depth: ChunkDepthTarget,
     vertex_count: u32,
     index_count: u32,
+    exact_coordinator: Option<CanonicalTerrainWorkerCoordinator>,
 }
 
 #[wasm_bindgen]
@@ -175,6 +179,78 @@ impl CanonicalTerrainLab {
             .map_err(|error| js_error(format!("failed to clear canonical terrain: {error}")))?;
         self.vertex_count = 0;
         self.index_count = 0;
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    #[wasm_bindgen(js_name = beginExactCoverage)]
+    pub fn begin_exact_coverage(
+        &mut self,
+        worker_transport: JsValue,
+        authored_bytes: js_sys::Uint8Array,
+        reference_bytes: js_sys::Uint8Array,
+        provisional_bytes: js_sys::Uint8Array,
+        diagnostic_bytes: js_sys::Uint8Array,
+        center_x: i32,
+        center_z: i32,
+        radius: u32,
+        profile: String,
+        visual_profile: String,
+        texture_presentation: String,
+        seed: String,
+        stage: String,
+        water_visible: bool,
+        vegetation_visible: bool,
+        cache_enabled: bool,
+        cache_epoch: u32,
+    ) -> Result<String, JsValue> {
+        let mut coordinator = self
+            .exact_coordinator
+            .take()
+            .unwrap_or_else(|| CanonicalTerrainWorkerCoordinator::new(worker_transport));
+        let report = coordinator
+            .begin(
+                self,
+                CanonicalCoverageRequest {
+                    center_x,
+                    center_z,
+                    radius,
+                    profile,
+                    visual_profile,
+                    texture_presentation,
+                    seed,
+                    stage,
+                    water_visible,
+                    vegetation_visible,
+                    cache_enabled,
+                    cache_epoch,
+                    authored_bytes,
+                    reference_bytes,
+                    provisional_bytes,
+                    diagnostic_bytes,
+                },
+            )
+            .map_err(js_error);
+        self.exact_coordinator = Some(coordinator);
+        json(&report?)
+    }
+
+    #[wasm_bindgen(js_name = pumpExactCoverage)]
+    pub fn pump_exact_coverage(&mut self) -> Result<String, JsValue> {
+        let mut coordinator = self
+            .exact_coordinator
+            .take()
+            .ok_or_else(|| js_error("canonical exact coordinator is not initialized"))?;
+        let report = coordinator.pump(self).map_err(js_error);
+        self.exact_coordinator = Some(coordinator);
+        json(&report?)
+    }
+
+    #[wasm_bindgen(js_name = shutdownExactWorker)]
+    pub fn shutdown_exact_worker(&mut self) -> Result<(), JsValue> {
+        if let Some(coordinator) = self.exact_coordinator.take() {
+            coordinator.terminate().map_err(js_error)?;
+        }
         Ok(())
     }
 
@@ -658,6 +734,7 @@ impl CanonicalTerrainLab {
             depth,
             vertex_count: 0,
             index_count: 0,
+            exact_coordinator: None,
         })
     }
 

@@ -499,6 +499,47 @@ Focused evidence on 2026-07-25:
 - `/tmp/mclone-terrain-lab-desktop-chrome-canonical-responsive-pan.png` was
   inspected and showed the complete `81/81` canonical footprint.
 
+### Slice 3 complete: Rust exact-coverage coordinator
+
+`CanonicalTerrainWorkerCoordinator` now owns the exact-coverage epoch,
+worker readiness, desired/resident/missing coordinate sets, warm-residency
+admission, `1/2/4/8/16` batch growth, the two-result high-water limit,
+stale-result rejection, one-admission-per-pump pacing, completion, and the
+existing diagnostic aggregate. It drives the existing Rust renderer's packed
+prepare, warm activation, packed-mesh acceptance, and reset methods directly.
+
+The canonical React effect now creates the browser Worker transport, submits
+desired coverage to Rust, calls one opaque coordinator pump per animation
+frame, presents the returned report, and schedules a draw when Rust reports a
+render change. It no longer owns an epoch, semantic Worker callbacks,
+coordinate queues, batch sizing, resident mirrors, packed mesh interpretation,
+or cache accounting. Worker creation remains visibly in the browser adapter
+so Vite can compile the module URL; the generic transport only queues opaque
+messages/errors and provides `post`, `poll`, and `terminate`.
+
+The Worker shell now turns its unavoidable Wasm-bootstrap failure into the
+same Rust-recognized structured error shape. Actor-domain errors still
+originate in Rust.
+
+Focused evidence on 2026-07-25:
+
+- `cargo test -p mclone-view-control -p mclone-terrain-lab`: 18 tests passed;
+- Terrain Lab Wasm build and TypeScript typecheck passed;
+- the headed desktop `9x9` responsive-pan case passed twice consecutively in
+  8.7 seconds each;
+- a one-chunk shift retained `72` residents and admitted only the entering
+  `9`, while a warm return admitted one chunk per frame without remeshing;
+- main raw bytes remained zero and Worker raw-cache plus packed-render
+  diagnostics remained populated; and
+- `/tmp/mclone-terrain-lab-desktop-chrome-canonical-responsive-pan.png` was
+  inspected again after the coordinator cutover and showed `81/81` exact
+  chunks.
+
+Transferable packed arrays remain the active result transport at this
+checkpoint. Reusing the game's neutral transport source, adding external SAB
+mailboxes, removing the legacy raw compiler exports, and adding broader
+source-ownership gates remain active work.
+
 ## Validation Plan
 
 The exact commands may be refined as ownership moves, but closeout includes at

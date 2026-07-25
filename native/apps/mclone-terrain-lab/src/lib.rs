@@ -8,6 +8,8 @@ use mclone_terrain_view::{
 use mclone_worldgen::terrain_preview::TerrainPreviewContentStage;
 
 #[cfg(target_arch = "wasm32")]
+mod canonical_coordinator_web;
+#[cfg(target_arch = "wasm32")]
 mod canonical_mesh;
 #[cfg(target_arch = "wasm32")]
 mod canonical_web;
