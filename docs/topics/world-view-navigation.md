@@ -7,6 +7,12 @@ Status: native foundation implemented and validated on 2026-07-25 by Tactical
 navigation migration and browser-runtime modernization completed and deployed
 on 2026-07-25 by Tactical
 [`248`](../tactical/248-terrain-lab-navigation-and-worker-modernization.md).
+Tactical
+[`249`](../tactical/249-cross-platform-procedural-horizon-proof.md) is now
+extending the lightweight Explorer across native and browser hosts while
+implementing the first shared toroidal horizon. The Explorer is a product
+profile, not a native-only application: its Rust runtime must work through the
+same platform boundary that can also host the full browser game.
 `mclone-view-control` now owns shared map/orbit/contact semantics for both the
 standalone native `mclone-world-explorer` and Terrain Lab's procedural and
 canonical panes. Terrain Lab retains thin DOM focus, capture, local-coordinate,
@@ -657,49 +663,54 @@ recreating the reducer.
 Tactical
 [`247`](../tactical/247-standalone-world-explorer-foundation.md) completed the
 shared view math, native adapter, and first native Explorer shell as one
-bounded proof. The browser input audit above is also complete. The next
-implementation should migrate Terrain Lab before creating the Web Explorer,
-so the browser boundary is proven by deleting real duplication rather than by
-adding another host.
+bounded proof. Tactical 248 subsequently completed the browser input and
+Worker-ownership migration using Terrain Lab's existing product surface.
+Tactical 249 now owns the first cross-platform Explorer and toroidal-horizon
+proof.
 
 1. **Browser input ownership audit — complete.** Keep the main game shell and
    standalone DOM hosts separate; share view semantics and canonical
    controller facts.
-2. **Migrate Terrain Lab.** Route both panes through one narrow Wasm wrapper
+2. **Migrate Terrain Lab — complete.** Route both panes through one narrow Wasm wrapper
    over the shared reducer while preserving current visuals, inspection,
    scroll containment, URL state, and diagnostics. Delete superseded
    TypeScript camera and gesture policy.
-3. **Converge Terrain Lab's Worker runtime.** Reuse the generic browser
+3. **Converge Terrain Lab's Worker runtime — complete.** Reuse the generic browser
    transport, move exact-worker coordination and caches into Rust actors, adopt
    persistent external SAB mailboxes, extend ownership gates, and delete
    superseded TypeScript and legacy raw-admission code. Preserve the current UI,
    separate-pane rendering, URLs, diagnostics, cache behavior, and pixels at
    each checkpoint.
-4. **Extract a reusable exact-view source.** Adapt locally compiled canonical
+4. **Prove the shared toroidal horizon in the cross-platform Explorer —
+   active.** Treat product scope and platform hosting as independent axes.
+   Drive one shared Rust horizon through the lightweight native and web
+   Explorer without creating an Explorer-specific browser ABI. Keep Terrain
+   Lab unchanged.
+5. **Extract a reusable exact-view source.** Adapt locally compiled canonical
    chunks into the shared snapshot, render-session, compile, upload, and draw
    lifecycle. Do not promote Terrain Lab's TypeScript scheduler or duplicate
    the game's cache and Worker framework. Preserve the Lab's working canonical
    view while proving the narrower boundary.
-5. **Build the minimal Web Explorer smoke.** Keep JavaScript or TypeScript
+6. **Build the minimal Web Explorer smoke.** Keep JavaScript or TypeScript
    limited to canvas, rAF, lifecycle, URL, raw-observation forwarding, and
    mechanical browser dispositions. Add a deployment smoke and measure the
    independent Wasm/asset payload. A procedural-only result remains a smoke,
    not the player-facing replacement for Terrain Lab.
-6. **Compose procedural and exact terrain.** Add the reusable exact near field
+7. **Compose procedural and exact terrain.** Add the reusable exact near field
    to an Explorer host and validate masking, skirts, replacement, and
    movement before calling it the real map-to-world view.
-7. **Connect tabletop Slice 2.** Reuse the same manipulation contract while
+8. **Connect tabletop Slice 2.** Reuse the same manipulation contract while
    retaining scene-owned follow, authority, and target mapping.
-8. **Build the player-facing Explorer UI.** Use the shared terrain view,
+9. **Build the player-facing Explorer UI.** Use the shared terrain view,
    accessible controls, shareable view state, and a deliberately small Wasm
    payload.
-9. **Add validated local handoff.** Turn a selected X/Z into a safe,
+10. **Add validated local handoff.** Turn a selected X/Z into a safe,
    authoritative integrated-world arrival.
-10. **Design remote preview descriptors.** Do this only when a concrete remote
+11. **Design remote preview descriptors.** Do this only when a concrete remote
    product needs seed privacy and server-controlled destinations.
-11. **Explore continuous transitions.** Preserve GPU/device/residency state
+12. **Explore continuous transitions.** Preserve GPU/device/residency state
    only after the simple load-or-navigate flow is useful and measured.
-12. **Add gamepad navigation when demanded.** Consume canonical
+13. **Add gamepad navigation when demanded.** Consume canonical
     `mclone-input` snapshots and emit tested view intents without inheriting
     gameplay bindings or putting semantics in the browser shell.
 

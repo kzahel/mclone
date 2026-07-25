@@ -25,6 +25,14 @@ window/surface, pack selection, raw `winit` conversion, and capture while the
 dependency-free `mclone-view-control` crate owns its map/orbit/gesture
 semantics and `mclone-terrain-view` owns rendering. Its dependency firewall
 excludes the game runtime and browser stack.
+Tactical
+[`249`](../tactical/249-cross-platform-procedural-horizon-proof.md) now
+extends that proof across native and browser without equating platform with
+product size. A lightweight Explorer and the full game may both use the
+browser host contract; desktop, Android, and XR may likewise host different
+product runtimes. The Explorer stays small through its Rust dependency
+closure, not through an Explorer-specific or semantically reduced JavaScript
+ABI.
 
 Initial destination, repeated host lifecycle, and menu-idle semantics are owned
 by the focused
@@ -79,6 +87,14 @@ presentation, asynchronous operations, persistence, networking, audio, and
 diagnostics have different lifetime and performance requirements. They should
 use small coherent contracts assembled at the host edge rather than one
 catch-all `PlatformAdapter` or a browser-shaped ABI imposed on native.
+
+Product composition is an independent layer above this boundary. “Browser”
+does not mean “viewer,” and “native” does not mean “full game.” Browser glue
+must be able to initialize a small hosted terrain application or the complete
+game runtime without learning which terrain, camera, UI, or gameplay systems
+the selected Rust entry point contains. Conversely, shared engine systems
+must not import a lightweight application's policy merely because that
+application was their first proof host.
 
 ## The Important Initialization Distinction
 

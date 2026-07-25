@@ -2,13 +2,18 @@
 
 Topic: `procedural-horizon-clipmap`
 
-Status: preferred first proof direction recorded on 2026-07-25. No in-game
-procedural-horizon replacement is active yet. Tactical
+Status: preferred first proof direction recorded on 2026-07-25. Tactical
+[`249`](../tactical/249-cross-platform-procedural-horizon-proof.md) is now
+implementing the first shared toroidal horizon through lightweight native and
+browser Explorer adapters. This is not yet an in-game procedural-horizon
+replacement. Product scope and platform hosting are independent: the small
+Explorer and full game may both run in the browser, while the same terrain
+system remains usable on desktop, Android, and XR. Tactical
 [`245`](../tactical/245-retire-chunk-far-lod-runtime.md) remains the completed
 removal boundary for the rejected chunk-based Far LOD system. Tactical
-[`247`](../tactical/247-standalone-world-explorer-foundation.md) now supplies
-the small native proof host and shared navigation boundary for the first ring;
-it deliberately implements no clipmap residency yet.
+[`247`](../tactical/247-standalone-world-explorer-foundation.md) supplied the
+small native proof host and shared navigation boundary for the first ring; it
+deliberately implemented no clipmap residency.
 
 ## Scope
 
@@ -383,25 +388,28 @@ The work should proceed as independently reviewable slices:
 
 Tactical
 [`247`](../tactical/247-standalone-world-explorer-foundation.md) proved
-that `mclone-terrain-view` and platform-neutral navigation compose into a
-small native application. Browser-shell convergence remains a separate
-`world-view-navigation` follow-up. Tactical 247 stopped before Step 2 below.
-Open a separate
-`procedural-horizon-clipmap` tactical for toroidal property tests and the first
-ring rather than expanding Tactical 247.
+that `mclone-terrain-view` and platform-neutral navigation compose into a small
+native application. Tactical
+[`249`](../tactical/249-cross-platform-procedural-horizon-proof.md) owns Steps
+2–4 as a cross-platform Explorer proof. It keeps the system in shared Rust and
+requires native and browser evidence rather than making either platform the
+semantic owner.
 
 1. **Protect the old-system removal boundary.** Finish any branch-local
    cleanup before starting the proof, keep Tactical 245 closed, and do not
    retain compatibility types for an unimplemented replacement.
-2. **Prove toroidal addressing.** Add shared Rust property tests for negative
+2. **Prove toroidal addressing — active in Tactical 249.** Add shared Rust property tests for negative
    coordinates, rows, columns, diagonal movement, guards, cancellation, and
    source changes.
-3. **Draw one ring in Explorer and Terrain Lab.** Reuse the current evaluator,
-   the Explorer's native/offscreen targets, and the Lab's GPU evidence while
-   keeping one shared implementation.
-4. **Promote the native renderer contract.** Exercise reversed-Z, timestamps,
-   device rebuild, synthetic stereo, and multiview before game integration;
-   the Explorer is the native proof host, not another disposable diagnostic.
+3. **Draw nested rings in the native and browser Explorer.** Reuse the current
+   evaluator and shared renderer while leaving Terrain Lab unchanged. The
+   browser adapter must remain suitable for either this small product or the
+   full web game.
+4. **Promote the renderer contract.** Exercise reversed-Z, caller-owned
+   targets, device rebuild, and fixed-capacity diagnostics across native and
+   browser now. Preserve a direct path to later synthetic stereo and
+   multiview; the Explorer is a cross-platform proof host, not another
+   disposable diagnostic.
 5. **Nest levels.** Add fixed holes, skirts, coarse-first refill, precision
    handling, footprint summaries, and measured budgets.
 6. **Integrate the game scene.** Add exact-painted snapshots, masks, frontier

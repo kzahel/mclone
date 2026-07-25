@@ -16,6 +16,13 @@ complete desktop/phone matrix, and local/hosted production closeout passed on
 `883a0f11-11d6-4c0a-a934-ba80fd66356b`. A touch UX follow-up also adds narrow
 page-scroll corridors between stacked terrain views and direct-grab
 two-finger 3D panning without changing mouse navigation. Tactical
+[`249`](../tactical/249-cross-platform-procedural-horizon-proof.md) now owns
+promotion of the procedural evaluator into the first shared, fixed-budget
+toroidal horizon. It proves the same Rust system in lightweight native and
+browser Explorer products while deliberately leaving Terrain Lab unchanged.
+The browser proof is not a reduced browser architecture: product dependency
+selection keeps the Explorer small, while the platform contract remains
+capable of hosting the full web game. Tactical
 [`241`](../tactical/241-terrain-lab-large-canonical-footprints.md) previously
 completed a deployed `31x31 = 961` exact-footprint review mode with bounded
 raw caching and tracked-memory telemetry. Shared orthographic/perspective
