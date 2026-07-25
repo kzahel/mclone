@@ -185,6 +185,42 @@ impl FeatureRegion {
         self.chunk_slot_mut(chunk_x, chunk_z).and_then(Option::take)
     }
 
+    pub(crate) fn block_at_world_clipped(&mut self, pos: BlockPos) -> Option<RawBlockId> {
+        let chunk_x = block_to_chunk_coord(pos.x);
+        let chunk_z = block_to_chunk_coord(pos.z);
+        self.metrics.block_reads += 1;
+        let chunk = self.chunk(chunk_x, chunk_z)?;
+        if !(chunk.min_y..chunk.min_y + chunk.height).contains(&pos.y) {
+            return None;
+        }
+        Some(chunk.get_block_at_y(local_block_coord(pos.x), pos.y, local_block_coord(pos.z)))
+    }
+
+    pub(crate) fn set_block_world_clipped(&mut self, pos: BlockPos, block_id: RawBlockId) -> bool {
+        let chunk_x = block_to_chunk_coord(pos.x);
+        let chunk_z = block_to_chunk_coord(pos.z);
+        self.metrics.block_write_attempts += 1;
+        let wrote = {
+            let Some(chunk) = self.chunk_mut(chunk_x, chunk_z) else {
+                return false;
+            };
+            if !(chunk.min_y..chunk.min_y + chunk.height).contains(&pos.y) {
+                return false;
+            }
+            chunk.set_block_at_y(
+                local_block_coord(pos.x),
+                pos.y,
+                local_block_coord(pos.z),
+                block_id,
+            );
+            true
+        };
+        if wrote {
+            self.metrics.block_writes += 1;
+        }
+        wrote
+    }
+
     fn get_chunk(&self, chunk_x: i32, chunk_z: i32) -> &MutableChunkBlockBuffer {
         self.ensure_within_dependency_window(chunk_x, chunk_z);
         self.chunk(chunk_x, chunk_z)

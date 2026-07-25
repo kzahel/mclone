@@ -338,6 +338,11 @@ fn add_mclone_cache_report(
     target.retained_stream_intersection_queries = source.retained_stream_intersection_queries;
     target.accepted_stream_plans = source.accepted_stream_plans;
     target.rejected_stream_candidates = source.rejected_stream_candidates;
+    target.vegetation_cell_requests = source.vegetation_cell_requests;
+    target.vegetation_cell_cache_hits = source.vegetation_cell_cache_hits;
+    target.vegetation_cell_cache_misses = source.vegetation_cell_cache_misses;
+    target.retained_vegetation_cells = source.retained_vegetation_cells;
+    target.retained_preliminary_tree_candidates = source.retained_preliminary_tree_candidates;
 }
 
 fn print_json(
@@ -532,8 +537,28 @@ fn print_mclone_cache_report_json(
         report.accepted_stream_plans
     );
     println!(
-        "{indent}  \"rejected_stream_candidates\": {}",
+        "{indent}  \"rejected_stream_candidates\": {},",
         report.rejected_stream_candidates
+    );
+    println!(
+        "{indent}  \"vegetation_cell_requests\": {},",
+        report.vegetation_cell_requests
+    );
+    println!(
+        "{indent}  \"vegetation_cell_cache_hits\": {},",
+        report.vegetation_cell_cache_hits
+    );
+    println!(
+        "{indent}  \"vegetation_cell_cache_misses\": {},",
+        report.vegetation_cell_cache_misses
+    );
+    println!(
+        "{indent}  \"retained_vegetation_cells\": {},",
+        report.retained_vegetation_cells
+    );
+    println!(
+        "{indent}  \"retained_preliminary_tree_candidates\": {}",
+        report.retained_preliminary_tree_candidates
     );
     let suffix = if trailing_comma { "," } else { "" };
     println!("{indent}}}{suffix}");

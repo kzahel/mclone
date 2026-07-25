@@ -174,15 +174,42 @@ Execution record:
 
 ### Slice 2: exact broadleaf milestone
 
-- [ ] Implement clipped broadleaf realization from records.
-- [ ] Realize planned trees once before retained low vegetation.
-- [ ] Remove broadleaf selection from the Mclone placed-feature tables without
+- [x] Implement clipped broadleaf realization from records.
+- [x] Realize planned trees once before retained low vegetation.
+- [x] Remove broadleaf selection from the Mclone placed-feature tables without
   changing reference `overworld`.
-- [ ] Bump vegetation and decoration revisions and update focused fixtures.
-- [ ] Capture and inspect meadow, woodland, transition, and stream-edge pixels.
+- [x] Bump vegetation and decoration revisions and update focused fixtures.
+- [x] Capture and inspect meadow, woodland, transition, and stream-edge pixels.
 
 Gate: every exact broadleaf block comes from a record and the first drawable
 record/blocks agreement is inspected.
+
+Execution record:
+
+- `mclone-overworld-v1-vegetation-2` expands record bounds through the dirt
+  support block and drives a rounded broadleaf grammar entirely from the
+  record's base, resolved dimensions, and variant seed;
+- one stable-ID-ordered occurrence union fills the complete retained feature
+  footprint through clipped region reads/writes before center-local low
+  vegetation runs;
+- the Mclone plains and woodland tables no longer contain oak configured
+  features, while their remaining plants retain feature index one and the
+  reference `overworld` tables are unchanged;
+- `mclone-overworld-v1-decoration-13` pins 199 oak logs in the representative
+  exact receipt and a decorated payload fingerprint of
+  `1565593964556829038`; the integration fixture also checks every planned
+  broadleaf trunk block against its record;
+- vegetation cell request/hit/miss/residency metrics now travel with the
+  feature dependency cache report;
+- inspected offscreen captures at
+  `/tmp/mclone-vegetation-meadow.png`,
+  `/tmp/mclone-vegetation-woodland.png`,
+  `/tmp/mclone-vegetation-transition.png`, and
+  `/tmp/mclone-vegetation-stream-edge.png` show sparse meadow cover, dense but
+  traversable rounded crowns, a bounded density transition, and tree-free
+  channel/bank space without terrain or crown clipping; and
+- all 338 active `mclone-worldgen` tests pass, with one pre-existing ignored
+  gauntlet, and `mclone-worldgen` checks for `wasm32-unknown-unknown`.
 
 ### Slice 3: conifer and acacia completion
 

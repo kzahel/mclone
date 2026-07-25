@@ -252,7 +252,15 @@ fn apply_overworld_biome_features_with_biomes_timed<W: FeatureWorld, B: FeatureB
     count_added_blocks: bool,
 ) -> TimedDecorationReport {
     let features = tables::overworld_features_for_biome_cached(biome);
-    apply_feature_table_with_biomes_timed(seed, biome, biomes, features, world, count_added_blocks)
+    apply_feature_table_with_biomes_timed(
+        seed,
+        biome,
+        biomes,
+        features,
+        world,
+        count_added_blocks,
+        0,
+    )
 }
 
 pub(crate) fn apply_feature_table_to_region_timed(
@@ -261,8 +269,26 @@ pub(crate) fn apply_feature_table_to_region_timed(
     features: &[PlacedFeature],
     region: &mut FeatureRegion,
 ) -> TimedDecorationReport {
+    apply_feature_table_to_region_with_index_offset_timed(seed, biome, features, region, 0)
+}
+
+pub(crate) fn apply_feature_table_to_region_with_index_offset_timed(
+    seed: i64,
+    biome: BiomeDefinition,
+    features: &[PlacedFeature],
+    region: &mut FeatureRegion,
+    feature_index_offset: i32,
+) -> TimedDecorationReport {
     let biomes = ConstantFeatureBiomeResolver::new(biome);
-    apply_feature_table_with_biomes_timed(seed, biome, &biomes, features, region, false)
+    apply_feature_table_with_biomes_timed(
+        seed,
+        biome,
+        &biomes,
+        features,
+        region,
+        false,
+        feature_index_offset,
+    )
 }
 
 fn apply_feature_table_with_biomes_timed<W: FeatureWorld, B: FeatureBiomeResolver>(
@@ -272,6 +298,7 @@ fn apply_feature_table_with_biomes_timed<W: FeatureWorld, B: FeatureBiomeResolve
     features: &[PlacedFeature],
     world: &mut W,
     count_added_blocks: bool,
+    feature_index_offset: i32,
 ) -> TimedDecorationReport {
     let before = if count_added_blocks {
         world.non_air_block_count()
@@ -291,7 +318,7 @@ fn apply_feature_table_with_biomes_timed<W: FeatureWorld, B: FeatureBiomeResolve
 
     for step in DecorationStep::ALL {
         let step_index = step.index();
-        let mut feature_index = 0;
+        let mut feature_index = feature_index_offset;
         let step_start = feature_timing_start();
         for feature in features
             .iter()

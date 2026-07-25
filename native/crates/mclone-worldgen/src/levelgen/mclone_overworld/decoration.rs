@@ -9,10 +9,10 @@ use crate::block::{
     TALL_GRASS_LOWER, is_water,
 };
 use crate::feature::{
-    BasicTreeConfiguration, ConfiguredFeature, DecorationStep, FeatureRegion, FeatureWorld,
-    PlacedFeature, RandomFeatureConfiguration, RandomPatchConfiguration, RandomPatchStateProvider,
-    TreeConfiguration, WeightedConfiguredFeature, apply_feature_table_to_region_timed,
-    flower_patch, grass_patch, tree_feature,
+    ConfiguredFeature, DecorationStep, FeatureRegion, FeatureWorld, PlacedFeature,
+    RandomFeatureConfiguration, RandomPatchConfiguration, RandomPatchStateProvider,
+    TreeConfiguration, WeightedConfiguredFeature,
+    apply_feature_table_to_region_with_index_offset_timed, flower_patch, grass_patch,
 };
 use crate::levelgen::profile::PLAINS_BIOME_ID;
 use crate::noise::SeedDomain;
@@ -26,7 +26,7 @@ use super::biomes::{
 };
 use super::fields::{McloneOverworldSampler, McloneOverworldSamplingTopology};
 
-pub const MCLONE_OVERWORLD_DECORATION_REVISION: &str = "mclone-overworld-v1-decoration-12";
+pub const MCLONE_OVERWORLD_DECORATION_REVISION: &str = "mclone-overworld-v1-decoration-13";
 
 const MCLONE_OVERWORLD_DECORATION_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6465_6331);
 const MCLONE_OVERWORLD_RIVER_ROCK_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_726f_636b);
@@ -76,11 +76,16 @@ pub(super) fn decorate_mclone_overworld_center_with_topology(
     if features.is_empty() {
         return;
     }
-    apply_feature_table_to_region_timed(
+    let preserved_tree_index = i32::from(matches!(
+        biome_id,
+        PLAINS_BIOME_ID | MCLONE_OVERWORLD_FOREST_BIOME_ID
+    ));
+    apply_feature_table_to_region_with_index_offset_timed(
         MCLONE_OVERWORLD_DECORATION_DOMAIN.derive(seed),
         get_layered_biome_by_id(biome_id),
         features,
         region,
+        preserved_tree_index,
     );
 }
 
@@ -241,7 +246,6 @@ fn open_lowland_features() -> &'static [PlacedFeature] {
     FEATURES
         .get_or_init(|| {
             vec![
-                tree_feature(BasicTreeConfiguration::oak(), 0, 0.20, 1),
                 grass_patch(GRASS, 4),
                 occasional_flower_patch(DANDELION, 3),
                 occasional_flower_patch(POPPY, 5),
@@ -255,7 +259,6 @@ fn wooded_upland_features() -> &'static [PlacedFeature] {
     FEATURES
         .get_or_init(|| {
             vec![
-                tree_feature(BasicTreeConfiguration::oak(), 4, 0.35, 1),
                 grass_patch(GRASS, 2),
                 occasional_flower_patch(DANDELION, 4),
                 occasional_flower_patch(POPPY, 6),
@@ -436,7 +439,7 @@ mod tests {
     fn mclone_tables_own_temperate_conifer_and_steppe_language() {
         assert_eq!(
             feature_table(PLAINS_BIOME_ID, McloneOverworldSteppeBand::Outside).len(),
-            4
+            3
         );
         assert_eq!(
             feature_table(
@@ -444,7 +447,7 @@ mod tests {
                 McloneOverworldSteppeBand::Outside,
             )
             .len(),
-            4
+            3
         );
         assert_eq!(
             feature_table(

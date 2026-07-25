@@ -1,8 +1,8 @@
 use std::collections::BTreeMap;
 
-use mclone_core::{ChunkPos, ChunkStatus, chunk_min_block_coord};
+use mclone_core::{CHUNK_WIDTH, ChunkPos, ChunkStatus, chunk_min_block_coord};
 
-use crate::feature::FeatureRegion;
+use crate::feature::{FEATURES_BLOCK_DEPENDENCY_RADIUS, FeatureRegion};
 use crate::levelgen::feature_batch::sorted_chunk_positions_z_major;
 use crate::levelgen::surface_dependency_cache::{
     PreparedSurfaceDependencies, SurfaceDependencyCache, SurfaceDependencyCacheReport,
@@ -20,6 +20,11 @@ use super::terrain::{
     generate_mclone_overworld_surface_buffer_with_stream_cache,
     mclone_overworld_chunk_biomes_with_stream_cache,
 };
+use super::vegetation::{
+    McloneOverworldVegetationPlanCache, McloneTreeFamily, McloneTreeId, McloneTreeOccurrence,
+    McloneVegetationBounds, McloneVegetationError, McloneVegetationPlanCacheReport,
+    McloneVegetationSource, realize_mclone_tree_occurrences_for_family,
+};
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct McloneOverworldFeatureDependencyCacheReport {
@@ -35,6 +40,11 @@ pub struct McloneOverworldFeatureDependencyCacheReport {
     pub retained_stream_intersection_queries: usize,
     pub accepted_stream_plans: usize,
     pub rejected_stream_candidates: usize,
+    pub vegetation_cell_requests: u64,
+    pub vegetation_cell_cache_hits: u64,
+    pub vegetation_cell_cache_misses: u64,
+    pub retained_vegetation_cells: usize,
+    pub retained_preliminary_tree_candidates: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -48,6 +58,7 @@ pub struct McloneOverworldFeatureBatchResult {
 pub struct McloneOverworldFeatureDependencyCache {
     cache: SurfaceDependencyCache,
     stream_plans: Option<McloneOverworldStreamPlanCache>,
+    vegetation_plans: Option<McloneOverworldVegetationPlanCache>,
 }
 
 impl McloneOverworldFeatureDependencyCache {
@@ -66,6 +77,7 @@ impl McloneOverworldFeatureDependencyCache {
     pub fn clear(&mut self) {
         self.cache.clear();
         self.stream_plans = None;
+        self.vegetation_plans = None;
     }
 
     pub fn generate_features_chunks(
@@ -122,6 +134,7 @@ impl McloneOverworldFeatureDependencyCache {
         let topology = McloneOverworldSamplingTopology::Unbounded;
         let plan = ChunkGenerationPlan::mclone_overworld_features(targets);
         ensure_stream_cache(&mut self.stream_plans, seed, topology);
+        ensure_vegetation_cache(&mut self.vegetation_plans, seed, topology);
         let stream_plans = self
             .stream_plans
             .as_mut()
@@ -140,20 +153,43 @@ impl McloneOverworldFeatureDependencyCache {
             )
         });
         if plan.output_chunks().is_empty() {
+            let vegetation_report = self
+                .vegetation_plans
+                .as_ref()
+                .expect("Mclone vegetation cache was initialized")
+                .report();
             return McloneOverworldFeatureBatchResult {
                 chunks: BTreeMap::new(),
                 retained_dependencies,
-                cache_report: mclone_overworld_cache_report(report, stream_plans.report()),
+                cache_report: mclone_overworld_cache_report(
+                    report,
+                    stream_plans.report(),
+                    vegetation_report,
+                ),
             };
         }
 
+        let work_centers =
+            sorted_chunk_positions_z_major(plan.backend_work_chunks().iter().copied());
+        let tree_occurrences = planned_tree_occurrences_for_centers(
+            self.vegetation_plans
+                .as_mut()
+                .expect("Mclone vegetation cache was initialized"),
+            work_centers.iter().copied(),
+        )
+        .expect("Mclone vegetation work bounds are representable");
         let first_target = *plan
             .output_chunks()
             .iter()
             .next()
             .expect("non-empty Mclone Overworld targets");
         let mut region = FeatureRegion::new(first_target.x, first_target.z, region_chunks);
-        for center in sorted_chunk_positions_z_major(plan.backend_work_chunks().iter().copied()) {
+        realize_mclone_tree_occurrences_for_family(
+            &mut region,
+            &tree_occurrences,
+            McloneTreeFamily::TemperateBroadleaf,
+        );
+        for center in work_centers {
             region.set_center(center.x, center.z);
             decorate_mclone_overworld_center(seed, &mut region);
         }
@@ -184,10 +220,19 @@ impl McloneOverworldFeatureDependencyCache {
             );
         }
 
+        let vegetation_report = self
+            .vegetation_plans
+            .as_ref()
+            .expect("Mclone vegetation cache was initialized")
+            .report();
         McloneOverworldFeatureBatchResult {
             chunks,
             retained_dependencies,
-            cache_report: mclone_overworld_cache_report(report, stream_plans.report()),
+            cache_report: mclone_overworld_cache_report(
+                report,
+                stream_plans.report(),
+                vegetation_report,
+            ),
         }
     }
 
@@ -204,6 +249,7 @@ impl McloneOverworldFeatureDependencyCache {
             .collect::<std::collections::BTreeSet<_>>();
         let plan = canonical_periodic_plan(topology, targets.iter().copied());
         ensure_stream_cache(&mut self.stream_plans, seed, topology);
+        ensure_vegetation_cache(&mut self.vegetation_plans, seed, topology);
         let stream_plans = self
             .stream_plans
             .as_mut()
@@ -257,9 +303,21 @@ impl McloneOverworldFeatureDependencyCache {
                 .expect("non-empty coherent periodic target set");
             let mut region =
                 FeatureRegion::new(first_work_target.x, first_work_target.z, region_chunks);
-            for center in
-                sorted_chunk_positions_z_major(work_plan.backend_work_chunks().iter().copied())
-            {
+            let work_centers =
+                sorted_chunk_positions_z_major(work_plan.backend_work_chunks().iter().copied());
+            let tree_occurrences = planned_tree_occurrences_for_centers(
+                self.vegetation_plans
+                    .as_mut()
+                    .expect("Mclone vegetation cache was initialized"),
+                work_centers.iter().copied(),
+            )
+            .expect("periodic Mclone vegetation work bounds are representable");
+            realize_mclone_tree_occurrences_for_family(
+                &mut region,
+                &tree_occurrences,
+                McloneTreeFamily::TemperateBroadleaf,
+            );
+            for center in work_centers {
                 region.set_center_with_decoration_identity(
                     center.x,
                     center.z,
@@ -293,10 +351,19 @@ impl McloneOverworldFeatureDependencyCache {
                 );
             }
 
+            let vegetation_report = self
+                .vegetation_plans
+                .as_ref()
+                .expect("Mclone vegetation cache was initialized")
+                .report();
             return McloneOverworldFeatureBatchResult {
                 chunks,
                 retained_dependencies,
-                cache_report: mclone_overworld_cache_report(report, stream_plans.report()),
+                cache_report: mclone_overworld_cache_report(
+                    report,
+                    stream_plans.report(),
+                    vegetation_report,
+                ),
             };
         }
 
@@ -326,9 +393,21 @@ impl McloneOverworldFeatureDependencyCache {
                 .collect::<Vec<_>>();
             region_chunks.sort_by_key(|chunk| (chunk.chunk_z, chunk.chunk_x));
             let mut region = FeatureRegion::new(target.x, target.z, region_chunks);
-            for center in
-                sorted_chunk_positions_z_major(work_plan.backend_work_chunks().iter().copied())
-            {
+            let work_centers =
+                sorted_chunk_positions_z_major(work_plan.backend_work_chunks().iter().copied());
+            let tree_occurrences = planned_tree_occurrences_for_centers(
+                self.vegetation_plans
+                    .as_mut()
+                    .expect("Mclone vegetation cache was initialized"),
+                work_centers.iter().copied(),
+            )
+            .expect("periodic Mclone vegetation work bounds are representable");
+            realize_mclone_tree_occurrences_for_family(
+                &mut region,
+                &tree_occurrences,
+                McloneTreeFamily::TemperateBroadleaf,
+            );
+            for center in work_centers {
                 region.set_center_with_decoration_identity(
                     center.x,
                     center.z,
@@ -361,10 +440,19 @@ impl McloneOverworldFeatureDependencyCache {
             );
         }
 
+        let vegetation_report = self
+            .vegetation_plans
+            .as_ref()
+            .expect("Mclone vegetation cache was initialized")
+            .report();
         McloneOverworldFeatureBatchResult {
             chunks,
             retained_dependencies,
-            cache_report: mclone_overworld_cache_report(report, stream_plans.report()),
+            cache_report: mclone_overworld_cache_report(
+                report,
+                stream_plans.report(),
+                vegetation_report,
+            ),
         }
     }
 }
@@ -423,6 +511,7 @@ fn canonical_periodic_plan(
 fn mclone_overworld_cache_report(
     report: SurfaceDependencyCacheReport,
     stream_report: McloneOverworldStreamPlanCacheReport,
+    vegetation_report: McloneVegetationPlanCacheReport,
 ) -> McloneOverworldFeatureDependencyCacheReport {
     McloneOverworldFeatureDependencyCacheReport {
         requested_dependency_chunks: report.requested_dependency_chunks,
@@ -437,6 +526,11 @@ fn mclone_overworld_cache_report(
         retained_stream_intersection_queries: stream_report.retained_intersection_queries,
         accepted_stream_plans: stream_report.accepted_plans,
         rejected_stream_candidates: stream_report.rejected_candidates,
+        vegetation_cell_requests: vegetation_report.cell_requests,
+        vegetation_cell_cache_hits: vegetation_report.cell_hits,
+        vegetation_cell_cache_misses: vegetation_report.cell_misses,
+        retained_vegetation_cells: vegetation_report.retained_cells,
+        retained_preliminary_tree_candidates: vegetation_report.retained_preliminary_candidates,
     }
 }
 
@@ -451,6 +545,61 @@ fn ensure_stream_cache(
     {
         *cache = Some(McloneOverworldStreamPlanCache::new(seed, topology));
     }
+}
+
+fn ensure_vegetation_cache(
+    cache: &mut Option<McloneOverworldVegetationPlanCache>,
+    seed: i64,
+    topology: McloneOverworldSamplingTopology,
+) {
+    let source = McloneVegetationSource::new(seed, topology);
+    if cache.as_ref().is_none_or(|cache| !cache.matches(source)) {
+        *cache = Some(McloneOverworldVegetationPlanCache::new(source));
+    }
+}
+
+fn planned_tree_occurrences_for_centers(
+    cache: &mut McloneOverworldVegetationPlanCache,
+    centers: impl IntoIterator<Item = ChunkPos>,
+) -> Result<Vec<McloneTreeOccurrence>, McloneVegetationError> {
+    let mut occurrences = BTreeMap::<(McloneTreeId, i64), McloneTreeOccurrence>::new();
+    for center in centers {
+        let min_chunk_x = center
+            .x
+            .checked_sub(FEATURES_BLOCK_DEPENDENCY_RADIUS)
+            .ok_or(McloneVegetationError::CoordinateOverflow)?;
+        let min_chunk_z = center
+            .z
+            .checked_sub(FEATURES_BLOCK_DEPENDENCY_RADIUS)
+            .ok_or(McloneVegetationError::CoordinateOverflow)?;
+        let max_chunk_x = center
+            .x
+            .checked_add(FEATURES_BLOCK_DEPENDENCY_RADIUS)
+            .ok_or(McloneVegetationError::CoordinateOverflow)?;
+        let max_chunk_z = center
+            .z
+            .checked_add(FEATURES_BLOCK_DEPENDENCY_RADIUS)
+            .ok_or(McloneVegetationError::CoordinateOverflow)?;
+        let bounds = McloneVegetationBounds::new(
+            checked_chunk_min_block_coord(min_chunk_x)?,
+            checked_chunk_min_block_coord(min_chunk_z)?,
+            checked_chunk_min_block_coord(max_chunk_x)?
+                .checked_add(CHUNK_WIDTH - 1)
+                .ok_or(McloneVegetationError::CoordinateOverflow)?,
+            checked_chunk_min_block_coord(max_chunk_z)?
+                .checked_add(CHUNK_WIDTH - 1)
+                .ok_or(McloneVegetationError::CoordinateOverflow)?,
+        )?;
+        for occurrence in cache.tree_records_intersecting(bounds)? {
+            occurrences.insert((occurrence.record.id, occurrence.x_lift), occurrence);
+        }
+    }
+    Ok(occurrences.into_values().collect())
+}
+
+fn checked_chunk_min_block_coord(chunk_coord: i32) -> Result<i32, McloneVegetationError> {
+    i32::try_from(i64::from(chunk_coord) * i64::from(CHUNK_WIDTH))
+        .map_err(|_| McloneVegetationError::CoordinateOverflow)
 }
 
 pub fn generate_mclone_overworld_chunk(seed: i64, chunk_x: i32, chunk_z: i32) -> GeneratedChunk {
@@ -489,6 +638,7 @@ mod tests {
         MOSSY_COBBLESTONE, OAK_LOG, POPPY, SPRUCE_LOG, SWEET_BERRY_BUSH, TALL_GRASS_LOWER, WATER,
     };
     use crate::levelgen::MCLONE_OVERWORLD_PERIOD_CHUNKS;
+    use crate::levelgen::mclone_overworld::{McloneVegetationSource, tree_records_intersecting};
 
     #[test]
     fn cache_reuses_overlapping_surface_inputs() {
@@ -648,7 +798,7 @@ mod tests {
             })
             .collect::<Vec<_>>();
         let chunks = McloneOverworldFeatureDependencyCache::new()
-            .generate_features_chunks(12_345, targets)
+            .generate_features_chunks(12_345, targets.iter().copied())
             .chunks;
         let decoration_counts = [
             OAK_LOG,
@@ -683,9 +833,62 @@ mod tests {
 
         assert_eq!(
             decoration_counts,
-            [111, 621, 240, 1_985, 376, 6, 11, 42, 73, 54]
+            [199, 621, 240, 1_969, 366, 6, 11, 42, 73, 54]
         );
-        assert_eq!(hash, 11_352_546_092_800_642_539);
+        assert_eq!(hash, 1_565_593_964_556_829_038);
+
+        let source =
+            McloneVegetationSource::new(12_345, McloneOverworldSamplingTopology::Unbounded);
+        let broadleaf_records = targets
+            .iter()
+            .flat_map(|target| {
+                let min_x = chunk_min_block_coord(target.x);
+                let min_z = chunk_min_block_coord(target.z);
+                tree_records_intersecting(
+                    source,
+                    McloneVegetationBounds::new(
+                        min_x,
+                        min_z,
+                        min_x + CHUNK_WIDTH - 1,
+                        min_z + CHUNK_WIDTH - 1,
+                    )
+                    .unwrap(),
+                )
+                .unwrap()
+            })
+            .filter(|occurrence| {
+                occurrence.record.family == McloneTreeFamily::TemperateBroadleaf
+                    && chunks.contains_key(&ChunkPos::new(
+                        mclone_core::block_to_chunk_coord(occurrence.record.canonical_base.x),
+                        mclone_core::block_to_chunk_coord(occurrence.record.canonical_base.z),
+                    ))
+            })
+            .collect::<std::collections::BTreeSet<_>>();
+        assert!(!broadleaf_records.is_empty());
+        for occurrence in broadleaf_records {
+            let base = occurrence.record.canonical_base;
+            let chunk = chunks
+                .get(&ChunkPos::new(
+                    mclone_core::block_to_chunk_coord(base.x),
+                    mclone_core::block_to_chunk_coord(base.z),
+                ))
+                .unwrap();
+            for dy in 0..i32::from(occurrence.record.trunk_height) {
+                assert_eq!(
+                    chunk
+                        .block_at_y(
+                            mclone_core::local_block_coord(base.x),
+                            base.y + dy,
+                            mclone_core::local_block_coord(base.z),
+                        )
+                        .raw(),
+                    OAK_LOG,
+                    "record {:?} trunk differs at y {}",
+                    occurrence.record.id,
+                    base.y + dy
+                );
+            }
+        }
     }
 
     #[test]

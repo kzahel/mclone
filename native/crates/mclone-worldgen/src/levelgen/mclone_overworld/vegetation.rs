@@ -2,6 +2,8 @@ use std::collections::{BTreeMap, VecDeque};
 use std::error::Error;
 use std::fmt;
 
+use crate::block::{AIR, DIRT, OAK_LEAVES, OAK_LOG, RawBlockId, is_leaves};
+use crate::feature::FeatureRegion;
 use crate::levelgen::profile::FLAT_GRASS_HEIGHT;
 use crate::noise::{SeedDomain, ValueNoise2d};
 use crate::placement::BlockPos;
@@ -17,11 +19,11 @@ use super::streams::McloneOverworldStreamPlanCache;
 use super::surface::{McloneOverworldSurfaceRecipe, mclone_overworld_surface_recipe};
 use super::terrain::sample_mclone_overworld_landform_with_stream_cache;
 
-pub const MCLONE_OVERWORLD_VEGETATION_REVISION: &str = "mclone-overworld-v1-vegetation-1";
+pub const MCLONE_OVERWORLD_VEGETATION_REVISION: &str = "mclone-overworld-v1-vegetation-2";
 pub const MCLONE_VEGETATION_PLANNING_CELL_BLOCKS: i32 = 32;
 pub const MCLONE_VEGETATION_CANDIDATES_PER_CELL: u8 = 32;
 
-const VEGETATION_PLAN_REVISION: u16 = 1;
+const VEGETATION_PLAN_REVISION: u16 = 2;
 const GROVE_SCALE_BLOCKS: i32 = 256;
 const GROVE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6f76_6772_6f76);
 const MAX_CONFLICT_DISTANCE_BLOCKS: i32 = 7;
@@ -270,6 +272,15 @@ pub struct McloneVegetationPlanCacheReport {
     pub cell_misses: u64,
     pub retained_cells: usize,
     pub retained_preliminary_candidates: usize,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct McloneTreeRealizationReport {
+    pub requested_occurrences: usize,
+    pub realized_occurrences: usize,
+    pub block_write_attempts: usize,
+    pub block_writes: usize,
+    pub clipped_block_writes: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -628,6 +639,148 @@ pub fn tree_records_intersecting(
     McloneOverworldVegetationPlanCache::new(source).tree_records_intersecting(bounds)
 }
 
+pub(crate) fn realize_mclone_tree_occurrences_for_family(
+    region: &mut FeatureRegion,
+    occurrences: &[McloneTreeOccurrence],
+    family: McloneTreeFamily,
+) -> McloneTreeRealizationReport {
+    let mut report = McloneTreeRealizationReport {
+        requested_occurrences: occurrences.len(),
+        ..McloneTreeRealizationReport::default()
+    };
+    for occurrence in occurrences {
+        if occurrence.record.family != family {
+            continue;
+        }
+        report.realized_occurrences += 1;
+        match occurrence.record.archetype {
+            McloneTreeArchetype::RoundedBroadleaf => {
+                realize_rounded_broadleaf(region, *occurrence, &mut report);
+            }
+            McloneTreeArchetype::LayeredConifer | McloneTreeArchetype::ForkedAcacia => {
+                panic!(
+                    "tree family {} has mismatched archetype {}",
+                    occurrence.record.family.label(),
+                    occurrence.record.archetype.label()
+                );
+            }
+        }
+    }
+    report
+}
+
+fn realize_rounded_broadleaf(
+    region: &mut FeatureRegion,
+    occurrence: McloneTreeOccurrence,
+    report: &mut McloneTreeRealizationReport,
+) {
+    let record = occurrence.record;
+    let base = occurrence
+        .working_base()
+        .expect("validated tree occurrence has a representable working base");
+    write_tree_block(
+        region,
+        occurrence,
+        BlockPos::new(base.x, base.y - 1, base.z),
+        DIRT,
+        report,
+    );
+
+    let crown_center_y = base.y + i32::from(record.trunk_height) - 1;
+    let crown_radius = i32::from(record.crown_radius);
+    for dy in -2_i32..=2 {
+        let layer_radius = match dy {
+            -2..=0 => crown_radius,
+            1 => crown_radius - 1,
+            2 => 1,
+            _ => unreachable!(),
+        };
+        for dz in -layer_radius..=layer_radius {
+            for dx in -layer_radius..=layer_radius {
+                let edge_depth = dx.abs() + dz.abs() - layer_radius;
+                if edge_depth > 1 {
+                    continue;
+                }
+                if edge_depth == 1 && (tree_voxel_hash(record.variant_seed, dx, dy, dz) & 3) != 0 {
+                    continue;
+                }
+                write_tree_leaf(
+                    region,
+                    occurrence,
+                    BlockPos::new(base.x + dx, crown_center_y + dy, base.z + dz),
+                    OAK_LEAVES,
+                    report,
+                );
+            }
+        }
+    }
+
+    for dy in 0..i32::from(record.trunk_height) {
+        write_tree_block(
+            region,
+            occurrence,
+            BlockPos::new(base.x, base.y + dy, base.z),
+            OAK_LOG,
+            report,
+        );
+    }
+}
+
+fn write_tree_leaf(
+    region: &mut FeatureRegion,
+    occurrence: McloneTreeOccurrence,
+    pos: BlockPos,
+    leaves: RawBlockId,
+    report: &mut McloneTreeRealizationReport,
+) {
+    if region
+        .block_at_world_clipped(pos)
+        .is_none_or(|block| block != AIR && !is_leaves(block))
+    {
+        return;
+    }
+    write_tree_block(region, occurrence, pos, leaves, report);
+}
+
+fn write_tree_block(
+    region: &mut FeatureRegion,
+    occurrence: McloneTreeOccurrence,
+    pos: BlockPos,
+    block: RawBlockId,
+    report: &mut McloneTreeRealizationReport,
+) {
+    assert!(
+        tree_bounds_contains(occurrence.working_bounds, pos),
+        "tree {:?} emitted ({}, {}, {}) outside {:?}",
+        occurrence.record.id,
+        pos.x,
+        pos.y,
+        pos.z,
+        occurrence.working_bounds
+    );
+    report.block_write_attempts += 1;
+    if region.set_block_world_clipped(pos, block) {
+        report.block_writes += 1;
+    } else {
+        report.clipped_block_writes += 1;
+    }
+}
+
+const fn tree_bounds_contains(bounds: McloneTreeBounds, pos: BlockPos) -> bool {
+    pos.x >= bounds.min_x
+        && pos.x <= bounds.max_x
+        && pos.y >= bounds.min_y
+        && pos.y <= bounds.max_y
+        && pos.z >= bounds.min_z
+        && pos.z <= bounds.max_z
+}
+
+fn tree_voxel_hash(seed: u64, dx: i32, dy: i32, dz: i32) -> u64 {
+    let mut value = splitmix64(seed ^ dx as u64);
+    value = splitmix64(value ^ (dy as u64).rotate_left(21));
+    splitmix64(value ^ (dz as u64).rotate_left(42))
+}
+
 fn forest_intent_from_landform(
     landform: McloneOverworldLandformSample,
     grove_source: f32,
@@ -766,7 +919,7 @@ fn tree_bounds(
         .checked_add(i32::from(trunk_height))
         .and_then(|value| value.checked_add(extra_height))
         .ok_or(McloneVegetationError::CoordinateOverflow)?;
-    let min_y = match family {
+    let crown_min_y = match family {
         McloneTreeFamily::CoolWetConifer => base
             .y
             .checked_add(i32::from(trunk_height))
@@ -774,6 +927,11 @@ fn tree_bounds(
             .map_or(base.y, |value| value.min(base.y)),
         McloneTreeFamily::TemperateBroadleaf | McloneTreeFamily::WarmDryAcacia => base.y,
     };
+    let support_y = base
+        .y
+        .checked_sub(1)
+        .ok_or(McloneVegetationError::CoordinateOverflow)?;
+    let min_y = crown_min_y.min(support_y);
     McloneTreeBounds::new(
         base.x
             .checked_sub(horizontal_radius)
@@ -1099,7 +1257,7 @@ mod tests {
 
         assert_eq!(
             (records.len(), family_counts, hash),
-            (149, [30, 79, 40], 10_101_728_880_902_621_857)
+            (161, [36, 84, 41], 17_795_349_171_154_903_059)
         );
     }
 }
