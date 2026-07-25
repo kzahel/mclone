@@ -302,8 +302,8 @@ cells rather than chunk-local decorator streams. The first tactical must
 measure and choose the cell size and fixed candidate count; neither is locked
 here. A 32- or 64-block cell is a plausible starting range.
 
-Each cell has a small fixed number of candidate slots. A dedicated seed domain
-hashes:
+Each cell has a small fixed number of candidate slots. Dedicated seed domains
+hash:
 
 ```text
 world seed
@@ -312,9 +312,10 @@ candidate slot
 vegetation-plan revision
 ```
 
-to produce a stable candidate position and ID. A separate domain should derive
-the record's variant seed so future changes to one decision do not silently
-shift every later choice.
+to produce a stable candidate position and ID. Independent domains derive
+density acceptance, conflict priority, family/archetype choice, and the
+record's variant seed so future changes to one decision do not silently shift
+every later choice.
 
 ### Candidate evaluation
 
@@ -334,9 +335,31 @@ A candidate pipeline should:
 The exact acceptance rules belong to the original profile and should be
 visually reviewed. They are not translations of vanilla decorators.
 
-Collision/spacing decisions must have a total stable order, such as candidate
-score followed by `McloneTreeId`. They must not depend on which query saw a
-candidate first.
+### Local-priority spacing
+
+Collision and minimum-spacing decisions use deterministic local-priority
+inhibition. After terrain and forest-intent evaluation, every preliminarily
+eligible candidate receives an independent `u64` conflict priority. A
+candidate survives if and only if no preliminarily eligible candidate with
+which it conflicts has a better lexicographic `(priority, McloneTreeId)`.
+
+Survival never depends on whether the competing candidate itself survives.
+This may leave an occasional additional opening, but it prevents a greedy
+accepted-neighbor chain from extending beyond the query halo. One large query
+and any partition of that query therefore evaluate the same finite candidate
+facts.
+
+The conflict predicate must be symmetric. It uses canonical integer block
+positions, topology-aware horizontal displacement, and integer squared-distance
+comparisons against family/archetype spacing resolved before inhibition. The
+maximum conflict distance determines a fixed neighboring-cell halo. Clustering
+comes from the continuous grove/opening influence and preliminary density, not
+from recursively attaching candidates to already accepted trees.
+
+Candidate position, density acceptance, conflict priority, family/archetype,
+resolved silhouette, and residual variation use independent deterministic hash
+domains. Cache contents, enumeration order, floating-point sort behavior, and
+the survival of another candidate are not inputs to the decision.
 
 ### Query contract
 

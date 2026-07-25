@@ -162,6 +162,8 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `mclone-overworld-breadth` — grouped vanilla breadth reference versus live
   original-profile regional recipes, surfaces, vegetation, water, ecology,
   landmarks, and a dedicated volumetric rock-formation campaign
+- `lod-native-vegetation` — one deterministic tree identity across exact
+  Mclone generation, Terrain Lab summaries/proxies, and later in-game Far LOD
 - `steam-deck-test-bed` — official Devkit Client deployment, native Linux
   staging and asset-root contracts, Gaming Mode playtesting, and reproducible
   physical handheld performance evidence
