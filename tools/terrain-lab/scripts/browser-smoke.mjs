@@ -465,9 +465,11 @@ async function proveLargeCanonicalFootprint(page, shell, label) {
   }
 
   const centerX = page.getByLabel("Center X");
+  const initialEpoch = await numericAttribute(shell, "data-canonical-epoch");
   const shiftStarted = performance.now();
   await centerX.fill("-288");
   await centerX.press("Enter");
+  await waitForCanonicalEpochAfter(shell, initialEpoch);
   await waitForCanonicalAttribute(shell, "data-canonical-resident-hits", "930");
   await waitForCanonical(shell, 961, 120_000);
   const shiftMs = performance.now() - shiftStarted;
@@ -476,9 +478,11 @@ async function proveLargeCanonicalFootprint(page, shell, label) {
     throw new Error("The large exact entering edge was not admitted one chunk per frame");
   }
 
+  const shiftedEpoch = await numericAttribute(shell, "data-canonical-epoch");
   const returnStarted = performance.now();
   await centerX.fill("-304");
   await centerX.press("Enter");
+  await waitForCanonicalEpochAfter(shell, shiftedEpoch);
   await waitForCanonicalAttribute(shell, "data-canonical-resident-hits", "930");
   await waitForCanonical(shell, 961, 120_000);
   const returnMs = performance.now() - returnStarted;
@@ -512,6 +516,16 @@ async function waitForCanonicalAttribute(shell, name, expected) {
     ([attribute, value]) =>
       document.querySelector(".appShell")?.getAttribute(attribute) === value,
     [name, expected],
+  );
+}
+
+async function waitForCanonicalEpochAfter(shell, previous) {
+  await shell.page().waitForFunction(
+    (epoch) =>
+      Number(
+        document.querySelector(".appShell")?.getAttribute("data-canonical-epoch") ?? "0",
+      ) > epoch,
+    previous,
   );
 }
 
