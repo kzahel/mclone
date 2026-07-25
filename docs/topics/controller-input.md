@@ -35,6 +35,14 @@ The map/orbit/touch manipulation reducer is a downstream consumer, not another
 physical input stack; its shared ownership and Terrain Lab migration are
 recorded in
 [`world-view-navigation.md`](world-view-navigation.md).
+The 2026-07-25 browser-shell audit there confirmed that World Explorer and
+Terrain Lab should not reuse the full game `WebSceneHost`. Gamepad convergence
+still begins at this topic's `InputSourceId`, `ControllerInputBatch`, and
+`StandardGamepadSnapshot` boundary. A downstream view-specific adapter should
+map those canonical facts to world-view intents instead of reusing
+Jump/Attack/first-person bindings or synthesizing keyboard events. Browser
+polling remains platform glue; any future extraction must keep `web-sys` out
+of `mclone-input`.
 
 ## Top-Level Decision
 

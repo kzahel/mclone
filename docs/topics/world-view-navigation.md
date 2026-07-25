@@ -6,10 +6,11 @@ Status: native foundation implemented and validated on 2026-07-25 by Tactical
 [`247`](../tactical/247-standalone-world-explorer-foundation.md).
 `mclone-view-control` now owns shared map/orbit/contact semantics, and the
 standalone native `mclone-world-explorer` consumes it with the shared
-procedural terrain renderer. Terrain Lab still uses its duplicated TypeScript
-camera and gesture logic. Browser-shell and Lab migration remain deferred
-until a follow-up compares the main game's browser rim, `mclone-input`, the
-Lab, and the landed native adapter.
+procedural terrain renderer. The browser input-shell audit completed on
+2026-07-25: do not reuse the main game's complete web shell and do not build a
+third throwaway gesture implementation. Migrate Terrain Lab through
+`mclone-view-control` first, retain thin app-specific DOM mechanics, and
+extract only physical browser helpers proven common by the later Web Explorer.
 
 ## Scope
 
@@ -120,6 +121,188 @@ averaged 1.14 ms with 4.97 ms p95; peak bounded-preview residency was
 observations, not product budgets. Full receipts, hashes, artifact sizes, and
 commands are recorded in Tactical 247.
 
+## Browser Input-Shell Audit
+
+The 2026-07-25 audit compared:
+
+- the main game's
+  [`mclone-web-input.ts`](../../native/apps/mclone-web-client/www/mclone-web-input.ts),
+  [`mclone-web-touch.ts`](../../native/apps/mclone-web-client/www/mclone-web-touch.ts),
+  [`mclone-web-app.ts`](../../native/apps/mclone-web-client/www/mclone-web-app.ts),
+  Rust `WebSceneHost`, and browser gamepad collector;
+- `mclone-input` source, snapshot, preference, context, and controller-session
+  contracts;
+- both Terrain Lab React terrain panes and their TypeScript state helpers; and
+- the native Explorer's `winit` adapter over `ContactGestureReducer`.
+
+### What the main game shell actually owns
+
+The main web shell has useful, mature mechanics:
+
+- CSS-to-canvas coordinate conversion;
+- keyboard code forwarding and synchronous handled/default disposition;
+- pointer-lock acquisition, fallback, and release;
+- click-versus-drag classification for gameplay interaction;
+- relative mouse motion;
+- touch/pen pointer capture and synthetic-mouse suppression;
+- blur, visibility, resize, and transient-input clearing;
+- demand-aware rAF rendering plus a 33 ms controller poll while static; and
+- Rust-owned W3C standard-gamepad normalization, source identity, hotplug,
+  dead zones, bindings, prompt activity, and scene/UI contexts.
+
+Those mechanics are assembled around the full `WebSceneHost`. The shell
+expects pointer-locked first-person input, gameplay/UI routing, touch control
+overlays, first-touch fullscreen behavior, scene dispositions, session
+lifecycle, and game-specific frame demand. Its wheel path intentionally
+reduces input to up/down actions, losing the magnitude and cursor anchor a map
+requires.
+
+Terrain Lab has a different physical shape:
+
+- input is scoped to one of several focusable stages in a scrollable page;
+- the procedural pane may contain split subpanels whose local viewport and
+  anchor differ;
+- one shared geographic/camera state drives several independent renderers;
+- absolute contacts, continuous wheel magnitude, and pane-local anchors are
+  required;
+- touch-scroll gutters must remain usable; and
+- pointer lock, gameplay click synthesis, touch overlays, fullscreen, scene
+  sessions, persistence, and game UI contexts are unwanted.
+
+Both Lab panes currently duplicate `PointerStart`, active-contact and pinch
+maps, capture, one/two-contact transitions, orbit/pan selection, wheel,
+keyboard, and pointer helper functions. The pure TypeScript state helpers
+duplicate behavior now tested in `mclone-view-control`. This is the immediate
+convergence target.
+
+The local delivered artifacts also show why importing the game application is
+not a small-shell strategy: the current full web-client Wasm is 13,053,079
+bytes, while Terrain Lab's Wasm is 4,248,122 bytes. These are observations,
+not budgets, and the game's small TypeScript input modules are not themselves
+the size problem. The problem is their current `WebSceneHost` contract and
+product lifecycle.
+
+### Decision
+
+Do **not** reuse the main game's browser input shell as one indivisible module.
+Do **not** make the Explorer depend on the web-client app crate or emulate a
+game session merely to obtain input.
+
+Also do **not** accept a basic demo shell that owns another camera reducer,
+pinch recognizer, or gamepad mapping. A minimal Web Explorer should be a small
+product host, not disposable input code.
+
+Reuse occurs at two narrower boundaries:
+
+```text
+per-app browser DOM mechanics
+  pointer capture / preventDefault / focus / local coordinates / lifecycle
+        |
+        v direct typed calls, no JSON event bus
+mclone-view-control
+  ContactEvent -> WorldViewIntent -> WorldViewState
+
+browser or native controller collector
+        |
+        v
+mclone-input canonical source + StandardGamepadSnapshot
+        |
+        v view-specific mapping
+mclone-view-control intents
+```
+
+The game keeps its existing browser shell. When an in-game overview or
+tabletop mode is active, `mclone-scene` routes the already collected neutral
+input into the shared view controller. The standalone site keeps a minimal
+canvas/DOM host and reaches the same controller directly. They share meaning
+without pretending their lifecycle and surfaces are identical.
+
+### Browser contact contract
+
+The browser adapter should forward only facts needed to construct existing
+shared intents:
+
+- contact ID, start/move/end/cancel phase, pointer kind, local position, and
+  monotonic time;
+- physical button and modifier facts on contact start;
+- local viewport width and height;
+- wheel delta/mode plus local cursor anchor;
+- physical key code, pressed/released state, and repeat;
+- blur, lost-capture, visibility, and mode-transition cancellation; and
+- synchronous handled/redraw/capture dispositions where the browser must make
+  an immediate mechanical decision.
+
+TypeScript may retain active DOM capture IDs and synthetic-mouse suppression.
+It must not retain start camera snapshots, pinch distances, gesture
+thresholds, pan/orbit direction, scale constraints, or view state. Do not
+introduce a universal serialized event stream or make ordinary native input
+pass through browser-shaped records.
+
+The exact reusable DOM module remains deliberately undecided. First implement
+one Terrain Lab hook/adapter used by both panes. When Web Explorer becomes the
+second independent browser consumer, extract only the subset that remains
+product-neutral. The main game may keep its relative-pointer/pointer-lock
+adapter even if all three hosts share a few small keyboard, lifecycle, or
+contact helpers.
+
+### Gamepad decision
+
+Gamepad support is desirable for the Explorer, Terrain Lab, tabletop, and the
+game, but the game's gameplay action map is not the view-control map. Do not
+translate a controller into fake keyboard events and do not bind left stick
+to `MoveAnalog`, right stick to first-person `Look`, or face buttons to
+Jump/Attack in the Explorer.
+
+Preserve the existing canonical physical boundary in `mclone-input`:
+
+- `InputSourceId` and source descriptors;
+- `ControllerInputBatch` and observations;
+- `StandardGamepadSnapshot`;
+- shared dead-zone/response, trigger, lifecycle, layout, and preference facts;
+  and
+- W3C standard-mapping normalization in a browser platform collector.
+
+Add a view-specific downstream adapter that turns adjusted sticks, buttons,
+and frame time into `WorldViewIntent` values. Likely defaults are left-stick/
+D-pad pan, right-stick orbit in 3D, continuous trigger or shoulder zoom, and
+explicit map/3D, focus, and back actions. Lock the exact mapping with
+controller tests and accessibility review rather than inheriting gameplay
+bindings accidentally.
+
+The current `BrowserGamepadCollector` is app-local Rust and has no TypeScript
+button policy. Its normalization and reconnect tests are reusable evidence,
+but physical browser-controller acceptance is still open. Do not put
+`web-sys` into `mclone-input`. When a second browser app needs the collector,
+move or factor its platform-only mechanics into a small browser adapter owner
+that still emits `mclone-input` canonical snapshots.
+
+Like the game, a static Explorer cannot rely only on DOM gamepad events.
+Poll neutral/static state at a low cadence, switch to rAF while a controller
+is active or terrain is refining, and return to the low cadence when neutral.
+That demand pattern is worth reusing; the full scene host is not.
+
+### Terrain Lab first
+
+The next bounded implementation should focus on Terrain Lab:
+
+1. expose a narrow Wasm view-control session from the existing
+   `mclone-terrain-lab` app without adding the full client or a new web app;
+2. replace both panes' TypeScript camera/gesture reducers with one shared Rust
+   state/intent path;
+3. keep pane selection, split-panel local coordinates, pointer capture,
+   `preventDefault`, focus, scroll gutters, URL synchronization, inspection
+   UI, and React scheduling in the Lab host;
+4. preserve tap-to-inspect as a host reaction to the reducer's tap signal;
+5. validate mouse buttons/modifiers, continuous anchored wheel, focused
+   keyboard input, one-contact map/orbit, simultaneous pinch pan/zoom,
+   cancellation, interrupted contacts, and page-scroll containment; and
+6. add the canonical gamepad snapshot/view-intent bridge as a separable slice,
+   without making it a prerequisite for deleting the duplicated touch policy.
+
+Only after that migration should a minimal Web Explorer choose whether the
+Lab's DOM adapter is reusable as-is or should be factored into a small shared
+browser module.
+
 ## Shared View-Control Contract
 
 The small sans-I/O shared owner is `mclone-view-control`. It must continue not
@@ -183,13 +366,17 @@ block means, teleport a player, mutate terrain, or issue a network command.
 Keep the path explicit:
 
 ```text
-raw mouse / touch / gamepad / tracked controller events
-        |
-        v
-mclone-input contacts, capabilities, and semantic sources
-        |
-        v
-shared view-control reducer
+raw mouse / touch                 ordinary gamepad / controller
+        |                                      |
+        v                                      v
+thin platform contact adapter     mclone-input source/snapshot contract
+        |                                      |
+        v                                      v
+ContactEvent / direct intent       view-specific controller intents
+        +----------------------+---------------+
+                               |
+                               v
+                    shared view-control reducer
         |
         v
 product mode policy in Lab UI or mclone-scene
@@ -202,8 +389,9 @@ Platform adapters own pointer capture, browser scroll prevention, lifecycle,
 safe-area behavior, and translation from native events. They must not own
 camera policy.
 
-`mclone-input` owns neutral contact and controller semantics.
-`mclone-view-control` owns manipulation math. `mclone-scene` owns which game
+`mclone-view-control` owns its neutral contact classification and manipulation
+math. `mclone-input` owns controller source identity, canonical snapshots,
+settings, and shared physical normalization. `mclone-scene` owns which game
 mode is active, which world or player is focused, and whether an intent is
 permitted. The renderer consumes the result.
 
@@ -265,11 +453,14 @@ terrain viewport.
 
 ### World Explorer
 
-World Explorer now begins as a small standalone native product/diagnostic
-host built from the same terrain-view and view-control services. It proves the
-crate and lifecycle boundary, but it is not yet the intended public web
-onboarding product. That Web Explorer should reuse these same services and
-must not become the Terrain Lab UI with diagnostic controls hidden.
+World Explorer now begins as a small standalone native foundation and
+acceptance host built from the same terrain-view and view-control services.
+Keep it useful for native profiling, input smoke, capture, and clipmap proof,
+but do not treat that binary as the primary product merely because it landed
+first. The real player surfaces are the lightweight standalone website and
+the view embedded in the game. Both should reuse these same services, and the
+Web Explorer must not become the Terrain Lab UI with diagnostic controls
+hidden.
 
 The first delivery can navigate to or dynamically load the full web client
 when the player selects **Enter Here**. A later version may preserve the GPU
@@ -330,9 +521,11 @@ not silently hand off into a different world generation contract.
 
 The current and prospective split is:
 
-- `mclone-view-control`: deterministic navigation state and intent reducer;
-- `mclone-input`: device-neutral pointer/contact, gamepad, and XR manipulation
-  inputs;
+- `mclone-view-control`: deterministic navigation state, contact-gesture
+  classification, view intents, and reducer;
+- `mclone-input`: canonical controller sources, observations, standard
+  snapshots, preferences, and the physical-to-view gamepad bridge or its
+  neutral inputs;
 - `mclone-terrain-view`: bounded terrain presentation and coordinate picking;
 - `mclone-render-session`: final projection/view facts and render lifecycle;
 - `mclone-scene`: in-game mode, active-world focus, follow/recenter, admission,
@@ -351,30 +544,35 @@ recreating the reducer.
 Tactical
 [`247`](../tactical/247-standalone-world-explorer-foundation.md) completed the
 shared view math, native adapter, and first native Explorer shell as one
-bounded proof. The next implementation must begin with the recorded
-input-boundary audit, then proceed through the minimal web shell, Terrain Lab
-migration, player-facing UI, and validated arrival.
+bounded proof. The browser input audit above is also complete. The next
+implementation should migrate Terrain Lab before creating the Web Explorer,
+so the browser boundary is proven by deleting real duplication rather than by
+adding another host.
 
-1. **Audit browser input ownership.** Compare the main browser client,
-   `mclone-input`, both Terrain Lab panes, and the native Explorer adapter;
-   select the neutral raw-contact/intent boundary before adding another
-   TypeScript implementation.
-2. **Build the minimal Web Explorer.** Keep JavaScript or TypeScript limited
-   to canvas, rAF, lifecycle, URL, and raw-observation forwarding; add a
-   deployment smoke and measure the independent Wasm/asset payload.
-3. **Migrate Terrain Lab.** Route both panes through the selected boundary and
-   shared reducer while preserving current visuals and diagnostics, then
-   delete superseded TypeScript camera and gesture policy.
-4. **Connect tabletop Slice 2.** Reuse the same manipulation contract while
+1. **Browser input ownership audit — complete.** Keep the main game shell and
+   standalone DOM hosts separate; share view semantics and canonical
+   controller facts.
+2. **Migrate Terrain Lab.** Route both panes through one narrow Wasm wrapper
+   over the shared reducer while preserving current visuals, inspection,
+   scroll containment, URL state, and diagnostics. Delete superseded
+   TypeScript camera and gesture policy.
+3. **Add the world-view gamepad bridge.** Consume canonical
+   `mclone-input` snapshots and emit tested view intents; then prove browser
+   polling without inheriting gameplay bindings.
+4. **Build the minimal Web Explorer.** Keep JavaScript or TypeScript limited
+   to canvas, rAF, lifecycle, URL, raw-observation forwarding, and mechanical
+   browser dispositions. Add a deployment smoke and measure the independent
+   Wasm/asset payload.
+5. **Connect tabletop Slice 2.** Reuse the same manipulation contract while
    retaining scene-owned follow, authority, and target mapping.
-5. **Build the player-facing Explorer UI.** Use the shared terrain view,
+6. **Build the player-facing Explorer UI.** Use the shared terrain view,
    accessible controls, shareable view state, and a deliberately small Wasm
    payload.
-6. **Add validated local handoff.** Turn a selected X/Z into a safe,
+7. **Add validated local handoff.** Turn a selected X/Z into a safe,
    authoritative integrated-world arrival.
-7. **Design remote preview descriptors.** Do this only when a concrete remote
+8. **Design remote preview descriptors.** Do this only when a concrete remote
    product needs seed privacy and server-controlled destinations.
-8. **Explore continuous transitions.** Preserve GPU/device/residency state
+9. **Explore continuous transitions.** Preserve GPU/device/residency state
    only after the simple load-or-navigate flow is useful and measured.
 
 The clipmap work stream in

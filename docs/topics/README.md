@@ -356,7 +356,8 @@ series implements the same concern, normally reuse the document slug in its
   and a read-only-first implementation sequence.
 - [`world-view-navigation.md`](world-view-navigation.md): implemented shared
   map/orbit/focus/zoom/contact reducer and standalone native Explorer
-  foundation, plus the remaining Terrain Lab, tabletop, browser
+  foundation; audited the game, Lab, and Explorer browser-input boundaries;
+  and records the Terrain Lab-first, gamepad, tabletop, browser
   map-to-3D-to-validated-enter-world, and game-client adoption path.
 - [`visor-vr-reference.md`](visor-vr-reference.md): Visor VR architecture
   research, including reusable lessons for world-space UI surfaces, pointer
