@@ -47,9 +47,11 @@ native/
     mclone_mesh
     mclone_assets
     mclone_input
+    mclone_view_control
     mclone_audio
     mclone_render
     mclone_render_session
+    mclone_terrain_view
     mclone_app_runtime
     mclone_ui
     mclone_xr_host
@@ -61,6 +63,8 @@ native/
     mclone-web-client
     mclone-android-client
     mclone-android-xr-client
+    mclone-terrain-lab
+    mclone-world-explorer
 ```
 
 Shared engine crates own:
@@ -72,6 +76,11 @@ Shared engine crates own:
 - asset parsing and packed asset-source abstractions
 - render-section meshing, dirty/cache policy, and compile scheduling
 - renderer resources and frame drawing from explicit view/target facts
+- deterministic map/orbit/contact navigation semantics
+  (`mclone-view-control`)
+- shared procedural terrain evaluation, bounded-preview planning, GPU
+  residency, generated-grid presentation, and vegetation summaries
+  (`mclone-terrain-view`)
 - the shared cross-platform scene/session/UI/orchestration host
   (`mclone-scene`)
 - shared flat/XR input application and vanilla-rate local-player pose
@@ -101,6 +110,13 @@ Platform app crates own:
 - surface/swapchain acquisition and presentation pacing
 - platform input collection and translation
 - platform storage, transport setup, package scripts, and device validation
+
+The standalone `mclone-world-explorer` is a concrete leaf-app boundary proof:
+it owns native `winit`/WGPU lifecycle, filesystem pack acquisition, CLI,
+event conversion, and capture while consuming `mclone-view-control` and
+`mclone-terrain-view`. It intentionally does not construct or depend on the
+game scene/runtime. `mclone-terrain-lab` remains the browser diagnostic host
+for the same terrain-view service.
 
 ## Dimension Topology and Presentation Geometry
 

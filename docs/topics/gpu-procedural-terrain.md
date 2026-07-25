@@ -45,10 +45,14 @@ canonical/CPU-LOD/GPU-LOD workspace. It adds bounded exact final chunk
 generation, shared textured block rendering, cheap preview lighting,
 progressive worker publication, and presentation-only feature visibility.
 Scale-aware coarse summarization and band limiting remain the next far-field
-correctness work. A thin native profiling host and eventual in-game LOD/map
-consumers should reuse the shared engine rather than becoming separate
-implementations. Optional GPU-backed authoritative chunk generation and
-volumetric terrain remain separate later experiments.
+correctness work. Tactical
+[`247`](../tactical/247-standalone-world-explorer-foundation.md) subsequently
+added the thin native `mclone-world-explorer` host, proving that the same
+terrain and tree renderer works through native-window and offscreen targets
+without the game runtime. Eventual in-game LOD/map consumers must keep reusing
+that shared engine rather than becoming separate implementations. Optional
+GPU-backed authoritative chunk generation and volumetric terrain remain
+separate later experiments.
 
 ## Scope
 
@@ -194,6 +198,15 @@ updates shared textured section resources, and renders with preview lighting.
 The shared `CanonicalTerrainCompiler` in `mclone-terrain-view` calls the
 production surface or final generator and supplies a Rust-owned center-first
 chunk order.
+
+[`mclone-world-explorer`](../../native/apps/mclone-world-explorer/) is the
+second independent host of the same procedural presentation. Its leaf app
+owns native WGPU/winit lifecycle, native pack acquisition, raw input
+translation, and capture only. Tactical 247's release smoke produced
+byte-identical initial-3D, movement, map, and orbit captures through real
+native-window and offscreen targets, including direct depth evidence. It
+remains a bounded-preview renderer; the toroidal moving horizon belongs to
+[`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md).
 
 [`tools/terrain-lab`](../../tools/terrain-lab/) owns URL state, replaceable
 Worker epochs, responsive presentation, and cache controls. The workspace
@@ -898,8 +911,9 @@ The shared-first boundary should be:
   sampling, timestamps, mono/per-eye/multiview drawing, and resource rebuild;
 - `mclone-scene`: active-world orchestration, real/procedural arbitration,
   frame budgets, world switching, and diagnostics; and
-- Terrain Lab web/native apps: URL/DOM or CLI/capture mechanics, adapter/device
-  creation, surface lifecycle, and presentation of shared diagnostics; and
+- Terrain Lab and World Explorer apps: URL/DOM or CLI/capture mechanics,
+  adapter/device creation, surface lifecycle, raw event adaptation, and
+  presentation of shared diagnostics; and
 - game app/platform crates: adapter/device creation, surface/session
   lifecycle, raw capability collection, and presentation only.
 

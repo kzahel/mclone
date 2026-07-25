@@ -18,6 +18,13 @@ A code-grounded verification pass on 2026-07-21 confirmed the audit against
 the current code and extended it with the browser-Rust dispatch surface, the
 desktop frame-driver dispatch role, the XR emulation path, and the
 undocumented browser input behaviors Stage 0 must record.
+Tactical
+[`247`](../tactical/247-standalone-world-explorer-foundation.md) supplied a
+later independent boundary proof: `mclone-world-explorer` owns native
+window/surface, pack selection, raw `winit` conversion, and capture while the
+dependency-free `mclone-view-control` crate owns its map/orbit/gesture
+semantics and `mclone-terrain-view` owns rendering. Its dependency firewall
+excludes the game runtime and browser stack.
 
 Initial destination, repeated host lifecycle, and menu-idle semantics are owned
 by the focused

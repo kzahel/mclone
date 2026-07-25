@@ -5,7 +5,10 @@ Topic: `procedural-horizon-clipmap`
 Status: preferred first proof direction recorded on 2026-07-25. No in-game
 procedural-horizon replacement is active yet. Tactical
 [`245`](../tactical/245-retire-chunk-far-lod-runtime.md) remains the completed
-removal boundary for the rejected chunk-based Far LOD system.
+removal boundary for the rejected chunk-based Far LOD system. Tactical
+[`247`](../tactical/247-standalone-world-explorer-foundation.md) now supplies
+the small native proof host and shared navigation boundary for the first ring;
+it deliberately implements no clipmap residency yet.
 
 ## Scope
 
@@ -113,6 +116,14 @@ shared terrain-view / clipmap service
 
 Lab-first means using the Lab as the fastest visual and instrumentation host.
 It does not mean landing a second Lab-only clipmap implementation.
+
+Tactical 247 proved the current bounded renderer through both a real native
+surface and an offscreen target in the standalone World Explorer. Its
+continuous-movement closeout peaked at 171,994,752 resident bytes and 159
+tiles, then settled to zero pending work. That is useful portability and
+control evidence, but it is not the fixed-memory moving-horizon contract.
+The first ring should replace this growing bounded-preview residency in both
+proof hosts rather than expand its tile budget.
 
 ## Geometry And Residency
 
@@ -371,11 +382,11 @@ private LOD policy.
 The work should proceed as independently reviewable slices:
 
 Tactical
-[`247`](../tactical/247-standalone-world-explorer-foundation.md) first proves
+[`247`](../tactical/247-standalone-world-explorer-foundation.md) proved
 that `mclone-terrain-view` and platform-neutral navigation compose into a
 small native application. Browser-shell convergence remains a separate
-`world-view-navigation` follow-up. Tactical 247 deliberately stops before
-Step 2 below. After it closes, open a separate
+`world-view-navigation` follow-up. Tactical 247 stopped before Step 2 below.
+Open a separate
 `procedural-horizon-clipmap` tactical for toroidal property tests and the first
 ring rather than expanding Tactical 247.
 
@@ -385,11 +396,12 @@ ring rather than expanding Tactical 247.
 2. **Prove toroidal addressing.** Add shared Rust property tests for negative
    coordinates, rows, columns, diagonal movement, guards, cancellation, and
    source changes.
-3. **Draw one ring in Terrain Lab.** Reuse the current evaluator and GPU
-   evidence while making the implementation engine-shaped.
-4. **Add a minimal native diagnostic.** Exercise native `wgpu`, reversed-Z,
-   timestamps, device rebuild, synthetic stereo, and multiview before game
-   integration.
+3. **Draw one ring in Explorer and Terrain Lab.** Reuse the current evaluator,
+   the Explorer's native/offscreen targets, and the Lab's GPU evidence while
+   keeping one shared implementation.
+4. **Promote the native renderer contract.** Exercise reversed-Z, timestamps,
+   device rebuild, synthetic stereo, and multiview before game integration;
+   the Explorer is the native proof host, not another disposable diagnostic.
 5. **Nest levels.** Add fixed holes, skirts, coarse-first refill, precision
    handling, footprint summaries, and measured budgets.
 6. **Integrate the game scene.** Add exact-painted snapshots, masks, frontier

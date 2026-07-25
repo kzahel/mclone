@@ -2,15 +2,14 @@
 
 Topic: `world-view-navigation`
 
-Status: accepted product and shared-architecture direction recorded on
-2026-07-25. Terrain Lab currently proves much of the terrain presentation, but
-its duplicated TypeScript camera and gesture logic is prototype code. No
-shared Rust view-control owner or public World Explorer flow is implemented
-yet. Tactical
-[`247`](../tactical/247-standalone-world-explorer-foundation.md) proposes the
-first implementation: a small native Explorer and shared Rust view controller.
-It explicitly defers browser-shell and Terrain Lab input migration until a
-follow-up compares the main game's browser rim, `mclone-input`, and the Lab.
+Status: native foundation implemented and validated on 2026-07-25 by Tactical
+[`247`](../tactical/247-standalone-world-explorer-foundation.md).
+`mclone-view-control` now owns shared map/orbit/contact semantics, and the
+standalone native `mclone-world-explorer` consumes it with the shared
+procedural terrain renderer. Terrain Lab still uses its duplicated TypeScript
+camera and gesture logic. Browser-shell and Lab migration remain deferred
+until a follow-up compares the main game's browser rim, `mclone-input`, the
+Lab, and the landed native adapter.
 
 ## Scope
 
@@ -76,7 +75,7 @@ The Lab remains a deliberately small host. It does not need full lighting,
 client/server authority, persistence, collision, entities, or simulation ticks
 to present a useful map.
 
-The weak point is navigation. Pure camera math currently lives in
+The remaining Lab weak point is navigation. Pure camera math currently lives in
 [`state.ts`](../../tools/terrain-lab/src/state.ts), while pointer gesture state
 is duplicated between
 [`TerrainCanvas.tsx`](../../tools/terrain-lab/src/web/TerrainCanvas.tsx) and
@@ -84,13 +83,47 @@ is duplicated between
 That code has been valuable for discovery, but copying it into the engine
 would make its janky edge cases permanent.
 
-The direction is to migrate proven semantics into shared Rust and leave DOM
-components as event adapters.
+The first shared Rust semantics now exist; the direction is to migrate the Lab
+through the selected browser-input boundary and leave DOM components as event
+adapters.
+
+## Implemented Native Foundation
+
+Tactical 247 added two deliberately separate pieces:
+
+- [`mclone-view-control`](../../native/crates/mclone-view-control/) is a
+  dependency-free, sans-I/O state/intent and contact-gesture reducer; and
+- [`mclone-world-explorer`](../../native/apps/mclone-world-explorer/) is a
+  small `winit`/WGPU leaf host over `mclone-terrain-view`.
+
+The controller's landed public vocabulary includes `WorldViewState`,
+`WorldViewMode`, `WorldViewProjection`, `WorldViewIntent`,
+`WorldViewReducer`, `ContactEvent`, and `ContactGestureReducer`. It owns map
+grab, 3D orbit, world pan, anchored logarithmic zoom, simultaneous pinch pan
+and zoom, focus/recenter, tap/double-tap/drag classification, contact
+cancellation, pointer-count transitions, and numeric constraints. Platform
+types and renderer/world facts do not enter the crate.
+
+The native adapter translates mouse, wheel/trackpad, keyboard, and touch
+events into those contracts. The Explorer drives the existing procedural
+terrain and tree renderer in map, orthographic 3D, and perspective 3D modes.
+It is a separate executable with an enforced dependency firewall rather than
+a mode of the game client.
+
+The pinned release acceptance sequence rendered initial 3D, continuous X/Z/
+diagonal movement, anchored zoom, map, and orbit through both a real
+Wayland/Vulkan surface and an offscreen target. Corresponding captures were
+byte-identical and had direct depth coverage. On the closeout host, native
+first-coarse and target-ready times were 83.26 and 103.79 ms; 30 input frames
+averaged 1.14 ms with 4.97 ms p95; peak bounded-preview residency was
+171,994,752 bytes; and final pending work was zero. These are proof-host
+observations, not product budgets. Full receipts, hashes, artifact sizes, and
+commands are recorded in Tactical 247.
 
 ## Shared View-Control Contract
 
-Introduce a small sans-I/O shared owner, tentatively
-`mclone-view-control`. It must not depend on:
+The small sans-I/O shared owner is `mclone-view-control`. It must continue not
+to depend on:
 
 - WGPU or renderer resources;
 - world generation or chunk state;
@@ -99,34 +132,38 @@ Introduce a small sans-I/O shared owner, tentatively
 - DOM, `winit`, Android, or OpenXR; or
 - one product's UI hierarchy.
 
-Its conceptual state includes:
+Its first landed state includes:
 
 ```text
-ViewState {
-  mode: Map | Orbit | Follow | Tabletop
-  focus_world_position
-  scale_or_distance
+WorldViewState {
+  mode: Map | Orbit
+  focus_x
+  focus_z
+  blocks_across
   yaw
   pitch
-  projection
-  optional follow target
+  projection: Orthographic | Perspective
 }
 ```
 
 It consumes semantic intentions rather than platform events:
 
 ```text
-Orbit(delta)
-GrabPan(delta)
-Zoom(log_delta, anchor)
-Recenter
+SetMode(mode)
+SetProjection(projection)
+Orbit(delta, viewport)
+GrabPan(delta, viewport)
+AnchoredZoom(log_delta, anchor, viewport)
+PinchPanZoom(log_delta, anchor, centroid_delta, viewport)
+PanWorld(delta)
 FocusAt(world_position)
-Tap(target)
-DoubleTap(target)
+Recenter(world_position, optional_scale)
+Tap(position)
+DoubleTap(position)
+CancelContacts
 ```
 
-Names are illustrative until a tactical settles the API. The durable
-requirements are that the shared reducer owns:
+The durable requirements are that the shared reducer owns:
 
 - axis and direction conventions;
 - yaw, pitch, distance, and scale constraints;
@@ -228,9 +265,11 @@ terrain viewport.
 
 ### World Explorer
 
-World Explorer should be a small player-facing WASM application or loading
-phase built from the same terrain-view and view-control services. Its UI is
-not the Terrain Lab UI with diagnostic controls hidden.
+World Explorer now begins as a small standalone native product/diagnostic
+host built from the same terrain-view and view-control services. It proves the
+crate and lifecycle boundary, but it is not yet the intended public web
+onboarding product. That Web Explorer should reuse these same services and
+must not become the Terrain Lab UI with diagnostic controls hidden.
 
 The first delivery can navigate to or dynamically load the full web client
 when the player selects **Enter Here**. A later version may preserve the GPU
@@ -289,7 +328,7 @@ not silently hand off into a different world generation contract.
 
 ## Shared Ownership
 
-The prospective split is:
+The current and prospective split is:
 
 - `mclone-view-control`: deterministic navigation state and intent reducer;
 - `mclone-input`: device-neutral pointer/contact, gamepad, and XR manipulation
@@ -302,31 +341,33 @@ The prospective split is:
   input adaptation; and
 - native/Android/XR apps: platform event and session adaptation only.
 
-If a new crate is not justified initially, the reducer may begin as a clean
-module in an existing shared crate. Its dependency boundary matters more than
-the crate name.
+The shared terrain presentation now has a second independent consumer in the
+native Explorer, and its navigation semantics have a clean reusable owner.
+Browser and in-game consumers should adopt those contracts rather than
+recreating the reducer.
 
 ## Work Streams
 
 Tactical
-[`247`](../tactical/247-standalone-world-explorer-foundation.md) owns the
+[`247`](../tactical/247-standalone-world-explorer-foundation.md) completed the
 shared view math, native adapter, and first native Explorer shell as one
-bounded proof. It leaves work stream 2 and all browser-shell implementation
-behind an explicit input-boundary audit, then identifies the minimal web
-shell, Terrain Lab migration, player-facing UI, and validated-arrival
-follow-ups.
+bounded proof. The next implementation must begin with the recorded
+input-boundary audit, then proceed through the minimal web shell, Terrain Lab
+migration, player-facing UI, and validated arrival.
 
-1. **Specify and test view math.** Extract a small behavior table from current
-   Lab zoom, pan, grab, pinch, and orbit behavior; fix directions and edge
-   cases in deterministic Rust tests.
-2. **Migrate one Lab pane.** Route it through the shared reducer while keeping
-   current visuals and diagnostics; then remove duplicated pointer policy from
-   the second pane.
-3. **Add native input adapters.** Prove mouse, trackpad, touch, and gamepad
-   intent parity without importing platform types into the reducer.
+1. **Audit browser input ownership.** Compare the main browser client,
+   `mclone-input`, both Terrain Lab panes, and the native Explorer adapter;
+   select the neutral raw-contact/intent boundary before adding another
+   TypeScript implementation.
+2. **Build the minimal Web Explorer.** Keep JavaScript or TypeScript limited
+   to canvas, rAF, lifecycle, URL, and raw-observation forwarding; add a
+   deployment smoke and measure the independent Wasm/asset payload.
+3. **Migrate Terrain Lab.** Route both panes through the selected boundary and
+   shared reducer while preserving current visuals and diagnostics, then
+   delete superseded TypeScript camera and gesture policy.
 4. **Connect tabletop Slice 2.** Reuse the same manipulation contract while
    retaining scene-owned follow, authority, and target mapping.
-5. **Build a player-facing Explorer shell.** Use the shared terrain view,
+5. **Build the player-facing Explorer UI.** Use the shared terrain view,
    accessible controls, shareable view state, and a deliberately small Wasm
    payload.
 6. **Add validated local handoff.** Turn a selected X/Z into a safe,

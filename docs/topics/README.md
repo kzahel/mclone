@@ -354,10 +354,10 @@ series implements the same concern, normally reuse the document slug in its
   camera follow and leashed XR recentering, bounded keyhole cutaways, inverse
   target mapping, authority boundaries, platform-neutral input, current gaps,
   and a read-only-first implementation sequence.
-- [`world-view-navigation.md`](world-view-navigation.md): accepted shared
-  map/orbit/focus/zoom reducer direction across Terrain Lab, Explorer,
-  tabletop, and game clients, plus the lightweight web map-to-3D-to-validated
-  enter-world product path.
+- [`world-view-navigation.md`](world-view-navigation.md): implemented shared
+  map/orbit/focus/zoom/contact reducer and standalone native Explorer
+  foundation, plus the remaining Terrain Lab, tabletop, browser
+  map-to-3D-to-validated-enter-world, and game-client adoption path.
 - [`visor-vr-reference.md`](visor-vr-reference.md): Visor VR architecture
   research, including reusable lessons for world-space UI surfaces, pointer
   focus/capture, virtual-keyboard text entry, input contexts, render staging,

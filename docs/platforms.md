@@ -40,6 +40,7 @@ Additional host lane:
 |---|---|---|
 | Offscreen flat client | active cleanup | No-window flat-client host for full-frame validation, scripted/network/model input, PNG/video/network/model frame sinks, and future remote UI style use. Current public validation uses the full-frame `--screenshot` offscreen host path with shared `--startup-wait none\|playable\|idle\|frames:N` readiness policy; screenshots default to `idle`, while desktop defaults to `playable`. Older narrow `--headless-ui` / `--headless-chunk` native-client modes are retired. Long-lived host lifetime remains tracked in [`tactical/105-offscreen-flat-client-host.md`](tactical/105-offscreen-flat-client-host.md) and specified in [`offscreen-flat-client.md`](offscreen-flat-client.md). |
 | Headset-free XR emulation | active acceptance lane | The default desktop binary feeds fixed-IPD synthetic Stereo views and optional keyboard-translated controller input through `OffscreenDriver` and the same `McloneSceneHost` used by OpenXR. `pnpm native:xr-emulation:smoke` writes a side-by-side capture to `/tmp/mclone-xr-emulation.png`; it does not initialize or depend on OpenXR. This is a render/input/host seam gate, not an OpenXR runtime substitute. |
+| Standalone World Explorer | native foundation complete | `native/apps/mclone-world-explorer` is an independent `winit`/WGPU host over shared `mclone-terrain-view` and dependency-free `mclone-view-control`. It links no game runtime. `pnpm native:world-explorer:smoke` drives initial 3D, continuous movement, zoom, map, and orbit through both a real native surface and an offscreen target, validates color plus direct depth, and writes captures and JSON receipts under `/tmp/mclone-world-explorer-smoke`. Browser, Android, XR, reversed-Z, stereo, and multiview Explorer lanes remain future work. Tactical [`247`](tactical/247-standalone-world-explorer-foundation.md) records the closeout. |
 | Dedicated server | active | `native/apps/mclone-dedicated-server` owns listener/CLI/process lifecycle around the shared authoritative host. TCP and direct WebSocket peers share one registry, autonomous cadence, and per-peer 64-frame / 64 MiB outbound policy. Transient and persistent SQLite-backed worlds are supported. It is not one of the five client display platforms, but it is part of the shared runtime contract. |
 
 The shared warm-world diagnostic is validated in desktop flat and synthetic
@@ -382,6 +383,10 @@ Platform-specific gates:
 # Desktop flat
 pnpm native:movement:smoke
 pnpm native:timedemo:smoke
+
+# Standalone procedural World Explorer
+pnpm native:world-explorer:deps
+pnpm native:world-explorer:smoke
 
 # Headset-free synthetic stereo
 pnpm native:xr-emulation:smoke

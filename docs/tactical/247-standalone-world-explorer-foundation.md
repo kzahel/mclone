@@ -1,6 +1,6 @@
 # Tactical 247: Standalone World Explorer Foundation
 
-Status: active 2026-07-25.
+Status: completed 2026-07-25.
 
 Topic: `world-view-navigation`
 
@@ -80,7 +80,7 @@ The separate binary is not useful evidence if it merely links the full engine
 and selects a different mode in `main`. Its narrow dependency graph and
 lifecycle are part of the product contract.
 
-## Current Evidence
+## Starting Evidence
 
 The reusable boundary already exists in substantial form:
 
@@ -369,6 +369,130 @@ This slice should move no browser surface code into a shared crate.
    the real window and offscreen target.
 5. Update the parent topics with implemented status, evidence, remaining
    ownership questions, and the next tactical boundary.
+
+## Implemented Closeout
+
+Tactical 247 landed as five coherent implementation commits:
+
+1. `455de091` added the leaf application, dependency firewall, baseline, and
+   pinned view;
+2. `81a9597a` rendered the shared terrain and vegetation through native-window
+   and offscreen targets;
+3. `fd98cd5e` added the sans-I/O `mclone-view-control` reducer and tests;
+4. `eddb819d` adopted that reducer from the native mouse, wheel, keyboard, and
+   touch adapter; and
+5. `b0fcab9b` added the release acceptance sequence, direct depth readback,
+   and structured receipts.
+
+The resulting application is a separate `mclone-world-explorer` executable.
+It does not construct a client, server, scene, simulation, network session,
+audio system, UI stack, persistence layer, XR session, or game runtime. Its
+host-local code owns WGPU surface/device creation, filesystem pack selection,
+`winit` event conversion, CLI parsing, presentation, and capture. Terrain
+evaluation, planning, residency, generated-grid drawing, materials, and
+vegetation stay in the existing shared crates.
+
+The landed shared controller consists of `WorldViewState`,
+`WorldViewConstraints`, `WorldViewIntent`, `WorldViewReducer`,
+`ContactEvent`, and `ContactGestureReducer`. It has no external dependency.
+Its eleven deterministic tests cover normalization at negative and large
+coordinates, direction conventions, pitch/yaw limits, cursor-anchored zoom,
+simultaneous pinch pan and zoom, focus/recenter, contact-mode mapping,
+tap/double-tap/drag/cancel classification, and pointer-count transitions.
+The crate also compiles for `wasm32-unknown-unknown`.
+
+The native adapter provides:
+
+- one-contact map grab or 3D orbit and two-contact pinch/pan;
+- left-drag mode-default manipulation, middle/right/Shift-left pan, and
+  wheel/trackpad anchored zoom;
+- held arrow or WASD continuous movement;
+- `M` map/3D, `P` perspective/orthographic, `Home` recenter, and plus/minus
+  zoom; and
+- cancellation on focus/contact loss.
+
+The terrain request is rebuilt only when reduced view facts change. The
+window uses demand-driven redraw after input or outstanding terrain work; it
+does not spin after target readiness. Surface loss, resize, and the available
+Mailbox/FIFO presentation modes are handled by the leaf host.
+
+### Dependency and artifact evidence
+
+On the Linux closeout host:
+
+- the executable dependency firewall passed with 159 packages;
+- the normal direct graph contained the small support/WGPU/winit dependencies
+  plus `mclone-assets`, `mclone-core`, `mclone-mesh`,
+  `mclone-terrain-view`, `mclone-view-control`, and `mclone-worldgen`;
+- no forbidden game-runtime or browser package was present;
+- the optimized release executable was 15,539,232 bytes unstripped and
+  11,013,120 bytes after GNU `strip`; and
+- the selected original first-party pack set was 8,683,593 bytes, including
+  authored, generated-fallback, and diagnostic-missing packs.
+
+The executable size is an observation, not a hard product budget. The
+dependency firewall and absence of runtime construction remain the stronger
+architecture gates.
+
+### Rendered and runtime evidence
+
+`pnpm native:world-explorer:smoke` built release and ran the same scripted
+sequence first through a real 1,280×720 Wayland/Vulkan window and then through
+an offscreen texture. The closeout adapter was an integrated AMD Radeon 890M
+using RADV Vulkan, `Bgra8UnormSrgb`, and Mailbox presentation.
+
+For the native-window run:
+
+- process-to-first-coarse-ready was 83.26 ms and
+  process-to-target-ready was 103.79 ms;
+- 30 input frames averaged 1.14 ms, with 4.97 ms p95 and 6.08 ms maximum;
+- ten refinement/settling frames averaged 3.97 ms, with 10.29 ms maximum;
+- peak and final terrain residency were 171,994,752 bytes;
+- the final cache held 159 tiles at spacing 8 with zero pending work; and
+- peak queued plus pending work was 100.
+
+The offscreen run, after native startup in the same process, reached first
+coarse and target readiness in 32.79 and 49.05 ms. Its 30 input frames
+averaged 0.75 ms with a 3.96 ms p95 and 4.13 ms maximum. Those figures are
+closeout observations from a warmed host, not portable performance promises.
+
+The initial 3D, continuous-movement, map, and final orbit captures were
+inspected. Each corresponding native-window and offscreen PNG was
+byte-identical. Their SHA-256 values were:
+
+- initial 3D:
+  `bf0663a9fda7bbbbb9f702e4c98cd50dcd67dd651980814401a64bac86ff38e3`;
+- movement:
+  `1323c5bc2755b1ed2ba9654bf46ab2cd8332de1d23468b2b09d59dd1069f987f`;
+- map:
+  `10a1f78d1670a09b8b1a782d81454c1e89bda7e5fed5617be2711e17840f0010`;
+  and
+- orbit:
+  `c95c73297c601570cfa4d9af391c6487f354cfa74a1d5ed1a9865c37641c66dd`.
+
+Direct depth readback found meaningful 3D coverage rather than treating color
+alone as proof. Initial 3D covered 264,819 pixels with depth
+0.0663–1.0; movement covered 378,956 with depth 0.0659–1.0; and the final
+orbit covered 149,595 with depth 0.0826–1.0. The intentional map plane covered
+all 921,600 pixels at depth 0.5. Normal Terrain Lab and Explorer rendering
+continues to discard depth unless a capture host explicitly enables readback.
+
+Closeout validation passed:
+
+```text
+cargo test -p mclone-view-control
+cargo test -p mclone-terrain-view
+cargo test -p mclone-world-explorer
+cargo clippy -p mclone-view-control --no-deps -- -D warnings
+cargo clippy -p mclone-world-explorer --no-deps -- -D warnings
+cargo check -p mclone-view-control --target wasm32-unknown-unknown
+pnpm native:world-explorer:deps
+pnpm native:world-explorer:smoke
+```
+
+The strict whole-`mclone-terrain-view` Clippy lane still reports four
+pre-existing warnings unrelated to this tactical. Its 21 tests pass. No web,
+Android, XR, reversed-Z, stereo, or multiview Explorer support is claimed.
 
 ### Planned browser follow-up boundary
 
