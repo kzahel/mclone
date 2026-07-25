@@ -824,6 +824,23 @@ test("switches material profiles and compares Minecraft reference art", async ({
   const mclonePixels = await comparisonStages.nth(0).locator("canvas").screenshot();
   const minecraftPixels = await comparisonStages.nth(1).locator("canvas").screenshot();
   expect(minecraftPixels.equals(mclonePixels)).toBe(false);
+
+  await page.getByLabel("Visual material profile").selectOption(
+    "hybrid-authoring",
+  );
+  await expect(shell).toHaveAttribute("data-visual-profile", "hybrid-authoring");
+  await expect(comparisonStages.nth(0)).toHaveAttribute(
+    "data-visual-profile",
+    "hybrid-authoring",
+  );
+  await expect(page.locator("[data-testid='lab-status']")).toContainText("ready");
+  await waitForCanonical(page, 1);
+  const hybridPixels = await comparisonStages.nth(0).locator("canvas").screenshot({
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-hybrid-authoring.png`,
+  });
+  expect(hybridPixels.equals(mclonePixels)).toBe(false);
+  expect(hybridPixels.equals(minecraftPixels)).toBe(false);
+
   await page.getByTestId("pane-workspace").screenshot({
     path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-material-comparison.png`,
   });

@@ -4856,7 +4856,7 @@ async function runFarLodProbe(page, canvas) {
     await page.waitForFunction(
       () => {
         const state = globalThis.__mcloneWebApp?.state;
-        return state?.lastUiAction?.action === "toggleFarLod"
+        return state?.lastReport?.action === "toggleFarLod"
           && state?.lastReport?.farLodEnabled === true;
       },
       undefined,
@@ -5573,15 +5573,25 @@ function auxiliarySplitRowPoint(geometry) {
 
 /** @param {{ width: number, height: number }} geometry */
 function farLodCheckboxPoint(geometry) {
+  const graphicsRowCount = 11;
+  const graphicsColumnCount = 2;
+  const rowsPerColumn = Math.ceil(graphicsRowCount / graphicsColumnCount);
   const panel = centeredPanel(
     geometry,
     Math.min(Math.max(geometry.width - 18.0, 242.0), 420.0),
-    Math.min(160.0, Math.max(geometry.height - 4.0, 1.0)),
+    Math.min(
+      30.0 + rowsPerColumn * 24.0 + 34.0,
+      Math.max(geometry.height - 4.0, 1.0),
+    ),
   );
-  const columnWidth = Math.max((panel.width - 46.0) / 2.0, 110.0);
+  const columnGap = 10.0;
+  const columnWidth = Math.max(
+    (panel.width - 36.0 - columnGap) / 2.0,
+    110.0,
+  );
   return {
-    x: panel.x + 18.0 + columnWidth * 0.5,
-    y: panel.y + 30.0 + 24.0 + 9.0,
+    x: panel.x + 18.0 + columnWidth + columnGap + columnWidth * 0.5,
+    y: panel.y + 30.0 + 9.0,
   };
 }
 

@@ -156,11 +156,16 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     setCanonicalReport(undefined);
+  }, [
+    state.texturePresentation,
+    state.visualProfile,
+  ]);
+
+  useEffect(() => {
     setComparisonCanonicalReport(undefined);
   }, [
     state.compareVisualProfile,
     state.texturePresentation,
-    state.visualProfile,
   ]);
 
   useEffect(() => {
