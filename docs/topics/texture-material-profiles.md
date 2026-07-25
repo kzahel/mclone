@@ -2,9 +2,8 @@
 
 Topic: texture-material-profiles
 
-Status: accepted for end-to-end implementation 2026-07-25. The product model
-and profile semantics below are settled; implementation evidence will be
-recorded here as the shared engine, Terrain Lab, and Texture Lab adopt them.
+Status: implemented and validated 2026-07-25. The shared engine, Terrain Lab,
+and Texture Lab now use the product model and profile semantics below.
 
 Implementation update (2026-07-25): the first shared slice has landed. The
 legacy-id `mclone-generated-fallback` archive now declares
@@ -115,6 +114,33 @@ allowing accepted canonical art to win in Hybrid. Fresh native captures show
 Hybrid differs from both Mclone Original and Minecraft Reference; Coverage
 remains numbered, Provisional Audit remains label-free, and Minecraft
 Reference remains unchanged when curated first-party is not selected.
+
+Final validation (2026-07-25):
+
+- fresh native captures at `/tmp/mclone-final-original-textured.png`,
+  `/tmp/mclone-final-reference-textured.png`,
+  `/tmp/mclone-final-hybrid-textured.png`,
+  `/tmp/mclone-final-coverage-textured.png`,
+  `/tmp/mclone-final-provisional-textured.png`, and
+  `/tmp/mclone-final-reference-flat.png` visually confirm every source profile
+  plus the derived flat representation;
+- Hybrid differs from Minecraft Reference by 177,059 pixels and from Mclone
+  Original by 410,970 pixels in the pinned 960 by 540 scene;
+- the headed Terrain Lab contract proves Original, Minecraft, and Hybrid are
+  mutually pixel-distinct, returns both synchronized panes to Ready, forces
+  Coverage to Textured, and records the resulting comparison and full UI under
+  `/tmp/mclone-terrain-lab-desktop-chrome-*`;
+- the headed browser asset-profile probe applies and persists Mclone Original
+  at asset epoch 1 while its render worker reloads all four source archives;
+- the native Far LOD settle probe passes all four waypoints with zero pending
+  stream work, zero coherence failures, 12 Far LOD region draws, and
+  deterministic revisit pixels;
+- the deterministic first-party build and strict validation pass with 219
+  derived non-air Far LOD colors, no Minecraft provenance, and no diagnostic
+  provenance in Mclone Original; and
+- the full Rust workspace, native thin-adapter boundary, native-client tests,
+  Rust/Wasm web build, Terrain Lab typecheck and unit tests, focused headed
+  Terrain Lab browser test, Texture Lab browser tests, and pack tests pass.
 
 ## Scope
 
@@ -356,9 +382,9 @@ face-specific asset as active.
 ## Implementation Sequence
 
 1. Split provisional and numbered diagnostic generation and add shared profile
-   and presentation contracts.
+   and presentation contracts. **Completed 2026-07-25.**
 2. Adopt named profiles in runtime preparation, persistence, provenance, and
-   the in-game UI.
+   the in-game UI. **Completed 2026-07-25.**
 3. Adopt the same URL-backed controls and synchronized comparison in Terrain
    Lab. **Completed 2026-07-25.**
 4. Replace Texture Lab's overlapping pack/status controls with the canonical
@@ -368,4 +394,4 @@ face-specific asset as active.
    from the active path. **Completed 2026-07-25.**
 6. Validate deterministic first-party builds, shared native/Wasm behavior, and
    rendered output for Original, Minecraft, Hybrid, Coverage, and Provisional
-   Audit.
+   Audit. **Completed 2026-07-25.**
