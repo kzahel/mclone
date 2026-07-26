@@ -6,6 +6,7 @@ struct TerrainPreviewParams {
     camera_up_fov: vec4<f32>,
     camera_projection: vec4<f32>,
     viewport_center_extent: vec4<i32>,
+    presentation_center_extent: vec4<f32>,
     content_stage_flags: vec4<u32>,
     clipmap_inner_bounds: vec4<i32>,
 };
@@ -114,10 +115,14 @@ fn vertex_main(
     }
 
     let world = center + corner * half_extent;
-    let viewport_width = max(f32(params.viewport_center_extent.z), 1.0);
-    let viewport_height = max(f32(params.viewport_center_extent.w), 1.0);
-    let grid_x = (world.x - f32(params.viewport_center_extent.x)) / (viewport_width * 0.5);
-    let grid_z = (world.z - f32(params.viewport_center_extent.y)) / (viewport_height * 0.5);
+    let viewport_width = max(params.presentation_center_extent.z, 0.0001);
+    let viewport_height = max(params.presentation_center_extent.w, 0.0001);
+    let relative_x = world.x - f32(params.viewport_center_extent.x)
+        - params.presentation_center_extent.x;
+    let relative_z = world.z - f32(params.viewport_center_extent.y)
+        - params.presentation_center_extent.y;
+    let grid_x = relative_x / (viewport_width * 0.5);
+    let grid_z = relative_z / (viewport_height * 0.5);
     var clip_x = grid_x;
     var clip_y = -grid_z;
     var clip_z = 0.58;
@@ -132,9 +137,9 @@ fn vertex_main(
         let right = normalize(cross(forward, params.camera_up_fov.xyz));
         let camera_up = normalize(cross(right, forward));
         let position = vec3<f32>(
-            world.x - f32(params.viewport_center_extent.x),
+            relative_x,
             world.y,
-            world.z - f32(params.viewport_center_extent.y),
+            relative_z,
         );
         let from_eye = position - eye;
         let depth = max(dot(from_eye, forward), params.camera_projection.x);

@@ -19,11 +19,11 @@ use super::{
     TERRAIN_PREVIEW_DEPTH_FORMAT, TERRAIN_PREVIEW_RENDER_WGSL, TERRAIN_PREVIEW_SAMPLE_BYTES,
     TERRAIN_PREVIEW_TREE_WGSL, TERRAIN_PREVIEW_UNIFORM_BYTES, TERRAIN_PREVIEW_WORKGROUP_AXIS,
     TerrainClipmap, TerrainClipmapConfig, TerrainClipmapDiagnostics, TerrainClipmapTile,
-    TerrainPreviewCamera, TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource,
-    TerrainPreviewSplitLayout, TerrainPreviewView, TerrainViewportPlan, TerrainViewportTileId,
-    parse_samples, terrain_horizon_orbit_target_y, terrain_preview_compute_wgsl,
-    terrain_preview_focus_y_for_profile, viewport_uniform_bytes_for_request,
-    viewport_uniform_bytes_for_request_with_hole,
+    TerrainHorizonPresentation, TerrainPreviewCamera, TerrainPreviewDrawOptions,
+    TerrainPreviewLayer, TerrainPreviewSource, TerrainPreviewSplitLayout, TerrainViewportPlan,
+    TerrainViewportTileId, parse_samples, terrain_horizon_orbit_target_y,
+    terrain_preview_compute_wgsl, terrain_preview_focus_y_for_profile,
+    viewport_uniform_bytes_for_request, viewport_uniform_bytes_for_request_with_presentation,
 };
 
 pub const TERRAIN_PREVIEW_MATERIAL_UV_COUNT: usize = 256;
@@ -2113,10 +2113,6 @@ pub struct TerrainHorizonRenderer {
     vegetation_cache: Option<McloneOverworldVegetationPlanCache>,
     vegetation_enabled: bool,
     seed: i64,
-    center_x: i32,
-    center_z: i32,
-    view_width_blocks: u32,
-    view_height_blocks: u32,
     content_stage: TerrainPreviewContentStage,
     dispatched_refills_total: u64,
 }
@@ -2175,10 +2171,6 @@ impl TerrainHorizonRenderer {
             vegetation_cache: None,
             vegetation_enabled,
             seed: 0,
-            center_x: 0,
-            center_z: 0,
-            view_width_blocks: 1,
-            view_height_blocks: 1,
             content_stage: TerrainPreviewContentStage::Cover,
             dispatched_refills_total: 0,
         })
@@ -2192,14 +2184,11 @@ impl TerrainHorizonRenderer {
         self.clipmap.diagnostics()
     }
 
-    #[allow(clippy::too_many_arguments)]
     pub fn set_view(
         &mut self,
         seed: i64,
         center_x: i32,
         center_z: i32,
-        view_width_blocks: u32,
-        view_height_blocks: u32,
         content_stage: TerrainPreviewContentStage,
     ) {
         let source_changed = self.seed != seed || self.content_stage != content_stage;
@@ -2213,10 +2202,6 @@ impl TerrainHorizonRenderer {
             self.vegetation_cache = None;
         }
         self.seed = seed;
-        self.center_x = center_x;
-        self.center_z = center_z;
-        self.view_width_blocks = view_width_blocks.max(1);
-        self.view_height_blocks = view_height_blocks.max(1);
         self.content_stage = content_stage;
 
         let update = self.clipmap.update_center(center_x, center_z);
@@ -2273,13 +2258,13 @@ impl TerrainHorizonRenderer {
         color_view: &wgpu::TextureView,
         width: u32,
         height: u32,
-        view: TerrainPreviewView,
-        camera: TerrainPreviewCamera,
+        presentation: TerrainHorizonPresentation,
     ) -> Result<TerrainHorizonFrameStats, String> {
         self.resize(device, width, height);
+        let uniform_presentation = presentation.uniform_facts()?;
         let options = TerrainPreviewDrawOptions {
             source: TerrainPreviewSource::Gpu,
-            view,
+            view: presentation.view,
             layer: TerrainPreviewLayer::Terrain,
             split_layout: TerrainPreviewSplitLayout::Columns,
         };
@@ -2306,17 +2291,15 @@ impl TerrainHorizonRenderer {
             queue.write_buffer(
                 &slot.uniform_buffer,
                 0,
-                &viewport_uniform_bytes_for_request(
+                &viewport_uniform_bytes_for_request_with_presentation(
                     slot.request,
                     width,
                     height,
                     options,
-                    camera,
-                    self.center_x,
-                    self.center_z,
-                    self.view_width_blocks,
-                    self.view_height_blocks,
+                    presentation.camera,
+                    uniform_presentation,
                     focus_y,
+                    None,
                 ),
             );
             {
@@ -2397,16 +2380,13 @@ impl TerrainHorizonRenderer {
                 queue.write_buffer(
                     &slot.uniform_buffer,
                     0,
-                    &viewport_uniform_bytes_for_request_with_hole(
+                    &viewport_uniform_bytes_for_request_with_presentation(
                         slot.request,
                         width,
                         height,
                         options,
-                        camera,
-                        self.center_x,
-                        self.center_z,
-                        self.view_width_blocks,
-                        self.view_height_blocks,
+                        presentation.camera,
+                        uniform_presentation,
                         focus_y,
                         inner_hole,
                     ),

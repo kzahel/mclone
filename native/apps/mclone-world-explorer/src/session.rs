@@ -1,8 +1,9 @@
 use std::time::Duration;
 
 use mclone_terrain_view::{
-    TerrainClipmapConfig, TerrainHorizonFrameStats, TerrainHorizonRenderer, TerrainPreviewCamera,
-    TerrainPreviewMaterialAtlas, TerrainPreviewProjectionKind, TerrainPreviewView,
+    TerrainClipmapConfig, TerrainHorizonFrameStats, TerrainHorizonPresentation,
+    TerrainHorizonRenderer, TerrainPreviewCamera, TerrainPreviewMaterialAtlas,
+    TerrainPreviewProjectionKind, TerrainPreviewView,
 };
 use mclone_view_control::{
     ContactEvent, ContactGestureReducer, ViewPoint, ViewportMetrics, WorldViewIntent,
@@ -78,7 +79,6 @@ impl WorldExplorerSession {
         if self.config.width != width || self.config.height != height {
             self.config.width = width;
             self.config.height = height;
-            self.replan();
         }
     }
 
@@ -100,7 +100,9 @@ impl WorldExplorerSession {
         if self.view_state == previous {
             return false;
         }
-        if view_plan_key(self.view_state) != view_plan_key(previous) {
+        if residency_plan_key(self.view_state, self.config.clipmap)
+            != residency_plan_key(previous, self.config.clipmap)
+        {
             self.replan();
         }
         true
@@ -122,13 +124,13 @@ impl WorldExplorerSession {
         color_view: &wgpu::TextureView,
         elapsed: Duration,
     ) -> Result<TerrainHorizonFrameStats, String> {
-        let stats = self.renderer.encode(
-            device,
-            queue,
-            encoder,
-            color_view,
-            self.config.width,
-            self.config.height,
+        let view_height_blocks = self.view_state.blocks_across * f64::from(self.config.height)
+            / f64::from(self.config.width);
+        let presentation = TerrainHorizonPresentation::new(
+            self.view_state.focus_x,
+            self.view_state.focus_z,
+            self.view_state.blocks_across,
+            view_height_blocks,
             match self.view_state.mode {
                 WorldViewMode::Map => TerrainPreviewView::Map,
                 WorldViewMode::Orbit => TerrainPreviewView::ThreeDimensional,
@@ -141,6 +143,15 @@ impl WorldExplorerSession {
                     WorldViewProjection::Perspective => TerrainPreviewProjectionKind::Perspective,
                 },
             )?,
+        )?;
+        let stats = self.renderer.encode(
+            device,
+            queue,
+            encoder,
+            color_view,
+            self.config.width,
+            self.config.height,
+            presentation,
         )?;
         self.note_readiness(stats, elapsed);
         self.last_stats = Some(stats);
@@ -206,19 +217,10 @@ impl WorldExplorerSession {
     }
 
     fn replan(&mut self) {
-        let view_height_blocks = u32::try_from(
-            u64::from(self.view_state.blocks_across_u32())
-                .saturating_mul(u64::from(self.config.height))
-                .div_ceil(u64::from(self.config.width)),
-        )
-        .unwrap_or(u32::MAX)
-        .max(1);
         self.renderer.set_view(
             self.config.seed,
-            self.view_state.center_x_i32(),
-            self.view_state.center_z_i32(),
-            self.view_state.blocks_across_u32(),
-            view_height_blocks,
+            floor_i32(self.view_state.focus_x),
+            floor_i32(self.view_state.focus_z),
             TerrainPreviewContentStage::Cover,
         );
         self.revision = self.revision.saturating_add(1);
@@ -274,12 +276,18 @@ impl WorldExplorerSession {
     }
 }
 
-fn view_plan_key(state: WorldViewState) -> (i32, i32, u32) {
+fn residency_plan_key(state: WorldViewState, config: TerrainClipmapConfig) -> (i32, i32) {
+    let footprint = f64::from(config.finest_tile_footprint_blocks());
     (
-        state.center_x_i32(),
-        state.center_z_i32(),
-        state.blocks_across_u32(),
+        (state.focus_x / footprint).floor() as i32,
+        (state.focus_z / footprint).floor() as i32,
     )
+}
+
+fn floor_i32(value: f64) -> i32 {
+    value
+        .floor()
+        .clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32
 }
 
 fn view_label(mode: WorldViewMode) -> &'static str {
@@ -294,4 +302,67 @@ fn duration_ms(duration: Option<Duration>) -> String {
         || "pending".to_owned(),
         |duration| format!("{:.2}", duration.as_secs_f64() * 1_000.0),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn residency_key_only_changes_at_finest_tile_boundaries() {
+        let config = TerrainClipmapConfig::default();
+        let state = WorldViewState {
+            focus_x: 31.25,
+            focus_z: 47.75,
+            ..WorldViewState::default()
+        };
+        let key = residency_plan_key(state, config);
+
+        for changed in [
+            WorldViewState {
+                focus_x: 63.999,
+                ..state
+            },
+            WorldViewState {
+                focus_z: 0.001,
+                ..state
+            },
+            WorldViewState {
+                blocks_across: 256.5,
+                ..state
+            },
+            WorldViewState {
+                yaw_radians: 1.25,
+                pitch_radians: 0.25,
+                ..state
+            },
+        ] {
+            assert_eq!(residency_plan_key(changed, config), key);
+        }
+
+        assert_ne!(
+            residency_plan_key(
+                WorldViewState {
+                    focus_x: 64.0,
+                    ..state
+                },
+                config,
+            ),
+            key
+        );
+    }
+
+    #[test]
+    fn residency_key_uses_floor_for_negative_coordinates() {
+        let config = TerrainClipmapConfig::default();
+        let state = WorldViewState {
+            focus_x: -0.001,
+            focus_z: -64.0,
+            ..WorldViewState::default()
+        };
+
+        assert_eq!(residency_plan_key(state, config), (-1, -1));
+        assert_eq!(floor_i32(-0.001), -1);
+        assert_eq!(floor_i32(0.001), 0);
+    }
 }

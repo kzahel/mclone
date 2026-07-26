@@ -6,6 +6,7 @@ struct TerrainPreviewParams {
     camera_up_fov: vec4<f32>,
     camera_projection: vec4<f32>,
     viewport_center_extent: vec4<i32>,
+    presentation_center_extent: vec4<f32>,
     content_stage_flags: vec4<u32>,
     clipmap_inner_bounds: vec4<i32>,
 };

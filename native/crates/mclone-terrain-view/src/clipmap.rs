@@ -114,6 +114,10 @@ impl TerrainClipmapConfig {
         self.slots_per_level() * self.level_count
     }
 
+    pub const fn finest_tile_footprint_blocks(self) -> u32 {
+        TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS * self.base_sample_spacing
+    }
+
     pub fn sample_spacing(self, level: u32) -> u32 {
         self.base_sample_spacing << level
     }

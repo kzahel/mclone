@@ -48,7 +48,7 @@ pub const TERRAIN_PREVIEW_COMPUTE_WGSL_TEMPLATE: &str =
 pub const TERRAIN_PREVIEW_RENDER_WGSL: &str = include_str!("shaders/terrain_preview_render.wgsl");
 pub const TERRAIN_PREVIEW_TREE_WGSL: &str = include_str!("shaders/terrain_preview_tree.wgsl");
 
-const TERRAIN_PREVIEW_UNIFORM_BYTES: u64 = 144;
+const TERRAIN_PREVIEW_UNIFORM_BYTES: u64 = 160;
 const TERRAIN_PREVIEW_SAMPLE_BYTES: u64 =
     (TERRAIN_PREVIEW_SAMPLE_FLOATS * std::mem::size_of::<f32>()) as u64;
 const TERRAIN_PREVIEW_WORKGROUP_AXIS: u32 = 8;
@@ -234,6 +234,111 @@ impl Default for TerrainPreviewCamera {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TerrainHorizonPresentation {
+    pub center_x: f64,
+    pub center_z: f64,
+    pub width_blocks: f64,
+    pub height_blocks: f64,
+    pub view: TerrainPreviewView,
+    pub camera: TerrainPreviewCamera,
+}
+
+impl TerrainHorizonPresentation {
+    pub fn new(
+        center_x: f64,
+        center_z: f64,
+        width_blocks: f64,
+        height_blocks: f64,
+        view: TerrainPreviewView,
+        camera: TerrainPreviewCamera,
+    ) -> Result<Self, String> {
+        let presentation = Self {
+            center_x,
+            center_z,
+            width_blocks,
+            height_blocks,
+            view,
+            camera,
+        };
+        presentation.uniform_facts()?;
+        Ok(presentation)
+    }
+
+    fn uniform_facts(self) -> Result<TerrainPreviewUniformPresentation, String> {
+        TerrainPreviewUniformPresentation::continuous(
+            self.center_x,
+            self.center_z,
+            self.width_blocks,
+            self.height_blocks,
+        )
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct TerrainPreviewUniformPresentation {
+    anchor_x: i32,
+    anchor_z: i32,
+    fraction_x: f32,
+    fraction_z: f32,
+    width_blocks: f32,
+    height_blocks: f32,
+}
+
+impl TerrainPreviewUniformPresentation {
+    fn integer(center_x: i32, center_z: i32, width_blocks: u32, height_blocks: u32) -> Self {
+        Self {
+            anchor_x: center_x,
+            anchor_z: center_z,
+            fraction_x: 0.0,
+            fraction_z: 0.0,
+            width_blocks: width_blocks.max(1) as f32,
+            height_blocks: height_blocks.max(1) as f32,
+        }
+    }
+
+    fn continuous(
+        center_x: f64,
+        center_z: f64,
+        width_blocks: f64,
+        height_blocks: f64,
+    ) -> Result<Self, String> {
+        if !center_x.is_finite() || !center_z.is_finite() {
+            return Err("terrain horizon presentation center must be finite".to_owned());
+        }
+        if !width_blocks.is_finite()
+            || !height_blocks.is_finite()
+            || width_blocks <= 0.0
+            || height_blocks <= 0.0
+            || width_blocks > f64::from(f32::MAX)
+            || height_blocks > f64::from(f32::MAX)
+        {
+            return Err(
+                "terrain horizon presentation extent must be finite, positive, and \
+                        representable as f32"
+                    .to_owned(),
+            );
+        }
+        if center_x < f64::from(i32::MIN)
+            || center_x > f64::from(i32::MAX)
+            || center_z < f64::from(i32::MIN)
+            || center_z > f64::from(i32::MAX)
+        {
+            return Err("terrain horizon presentation center exceeds i32 world bounds".to_owned());
+        }
+        let anchor_x = center_x.round() as i32;
+        let anchor_z = center_z.round() as i32;
+        Ok(Self {
+            anchor_x,
+            anchor_z,
+            fraction_x: (center_x - f64::from(anchor_x)) as f32,
+            fraction_z: (center_z - f64::from(anchor_z)) as f32,
+            width_blocks: width_blocks as f32,
+            height_blocks: height_blocks as f32,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TerrainPreviewProjection {
     pub kind: TerrainPreviewProjectionKind,
     pub eye_offset: [f32; 3],
@@ -284,11 +389,29 @@ pub fn terrain_preview_projection(
     panel_height: u32,
     target_y: f32,
 ) -> TerrainPreviewProjection {
+    terrain_preview_projection_for_extent(
+        blocks_across.max(1) as f32,
+        view,
+        camera,
+        panel_width,
+        panel_height,
+        target_y,
+    )
+}
+
+fn terrain_preview_projection_for_extent(
+    blocks_across: f32,
+    view: TerrainPreviewView,
+    camera: TerrainPreviewCamera,
+    panel_width: u32,
+    panel_height: u32,
+    target_y: f32,
+) -> TerrainPreviewProjection {
     const OVERVIEW_FOV_Y: f32 = 58.0_f32.to_radians();
     const MAP_CAMERA_CLEARANCE: f32 = 192.0;
     const CLOSE_3D_THRESHOLD_BLOCKS: f32 = 96.0;
 
-    let blocks_across = blocks_across.max(1) as f32;
+    let blocks_across = blocks_across.max(f32::MIN_POSITIVE);
     let aspect = panel_width.max(1) as f32 / panel_height.max(1) as f32;
     let (kind, eye_offset, up, fov_y_radians, vertical_half_extent) = match view {
         TerrainPreviewView::Map => {
@@ -958,32 +1081,31 @@ fn viewport_uniform_bytes_for_request(
     viewport_height_blocks: u32,
     focus_y: f32,
 ) -> Vec<u8> {
-    viewport_uniform_bytes_for_request_with_hole(
+    viewport_uniform_bytes_for_request_with_presentation(
         request,
         width,
         height,
         options,
         camera,
-        viewport_center_x,
-        viewport_center_z,
-        viewport_width_blocks,
-        viewport_height_blocks,
+        TerrainPreviewUniformPresentation::integer(
+            viewport_center_x,
+            viewport_center_z,
+            viewport_width_blocks,
+            viewport_height_blocks,
+        ),
         focus_y,
         None,
     )
 }
 
 #[allow(clippy::too_many_arguments)]
-fn viewport_uniform_bytes_for_request_with_hole(
+fn viewport_uniform_bytes_for_request_with_presentation(
     request: ValidatedTerrainPreviewRequest,
     width: u32,
     height: u32,
     options: TerrainPreviewDrawOptions,
     camera: TerrainPreviewCamera,
-    viewport_center_x: i32,
-    viewport_center_z: i32,
-    viewport_width_blocks: u32,
-    viewport_height_blocks: u32,
+    presentation: TerrainPreviewUniformPresentation,
     focus_y: f32,
     inner_hole: Option<clipmap::TerrainClipmapBounds>,
 ) -> Vec<u8> {
@@ -1005,8 +1127,8 @@ fn viewport_uniform_bytes_for_request_with_hole(
     ];
     let (panel_width, panel_height) =
         terrain_preview_panel_size(width, height, options.source, options.split_layout);
-    let projection = terrain_preview_projection(
-        viewport_width_blocks,
+    let projection = terrain_preview_projection_for_extent(
+        presentation.width_blocks,
         options.view,
         camera,
         panel_width,
@@ -1042,10 +1164,18 @@ fn viewport_uniform_bytes_for_request_with_hole(
         bytes.extend_from_slice(&value.to_le_bytes());
     }
     for value in [
-        viewport_center_x,
-        viewport_center_z,
-        i32::try_from(viewport_width_blocks).expect("terrain viewport width fits i32"),
-        i32::try_from(viewport_height_blocks).expect("terrain viewport height fits i32"),
+        presentation.anchor_x,
+        presentation.anchor_z,
+        presentation.width_blocks.ceil().min(i32::MAX as f32) as i32,
+        presentation.height_blocks.ceil().min(i32::MAX as f32) as i32,
+    ] {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    for value in [
+        presentation.fraction_x,
+        presentation.fraction_z,
+        presentation.width_blocks,
+        presentation.height_blocks,
     ] {
         bytes.extend_from_slice(&value.to_le_bytes());
     }
@@ -1274,11 +1404,78 @@ mod tests {
             i32::from_le_bytes(bytes[104..108].try_into().unwrap()),
             1_024
         );
+        assert_eq!(f32::from_le_bytes(bytes[112..116].try_into().unwrap()), 0.0);
         assert_eq!(
-            u32::from_le_bytes(bytes[112..116].try_into().unwrap()),
+            f32::from_le_bytes(bytes[120..124].try_into().unwrap()),
+            1_024.0
+        );
+        assert_eq!(
+            u32::from_le_bytes(bytes[128..132].try_into().unwrap()),
             mclone_worldgen::terrain_preview::TerrainPreviewContentStage::Base as u32
         );
-        assert_eq!(u32::from_le_bytes(bytes[116..120].try_into().unwrap()), 1);
+        assert_eq!(u32::from_le_bytes(bytes[132..136].try_into().unwrap()), 1);
+    }
+
+    #[test]
+    fn continuous_presentation_splits_large_centers_from_fractional_motion() {
+        let presentation = TerrainPreviewUniformPresentation::continuous(
+            1_000_000.25,
+            -1_000_000.375,
+            4_096.5,
+            2_304.28125,
+        )
+        .unwrap();
+
+        assert_eq!(presentation.anchor_x, 1_000_000);
+        assert_eq!(presentation.anchor_z, -1_000_000);
+        assert_eq!(presentation.fraction_x, 0.25);
+        assert_eq!(presentation.fraction_z, -0.375);
+        assert_eq!(presentation.width_blocks, 4_096.5);
+        assert_eq!(presentation.height_blocks, 2_304.28125);
+    }
+
+    #[test]
+    fn continuous_presentation_stays_smooth_across_anchor_changes() {
+        let left =
+            TerrainPreviewUniformPresentation::continuous(0.49, -0.49, 512.0, 288.0).unwrap();
+        let right =
+            TerrainPreviewUniformPresentation::continuous(0.51, -0.51, 512.0, 288.0).unwrap();
+        let world_x = 32;
+        let world_z = -24;
+        let left_relative_x = (world_x - left.anchor_x) as f32 - left.fraction_x;
+        let right_relative_x = (world_x - right.anchor_x) as f32 - right.fraction_x;
+        let left_relative_z = (world_z - left.anchor_z) as f32 - left.fraction_z;
+        let right_relative_z = (world_z - right.anchor_z) as f32 - right.fraction_z;
+
+        assert!((left_relative_x - right_relative_x - 0.02).abs() < 0.000_01);
+        assert!((left_relative_z - right_relative_z + 0.02).abs() < 0.000_01);
+    }
+
+    #[test]
+    fn continuous_presentation_rejects_unrepresentable_values() {
+        let camera = TerrainPreviewCamera::default();
+        assert!(
+            TerrainHorizonPresentation::new(
+                f64::NAN,
+                0.0,
+                512.0,
+                288.0,
+                TerrainPreviewView::Map,
+                camera,
+            )
+            .is_err()
+        );
+        assert!(
+            TerrainHorizonPresentation::new(
+                0.0,
+                0.0,
+                f64::from(f32::MAX) * 2.0,
+                288.0,
+                TerrainPreviewView::Map,
+                camera,
+            )
+            .is_err()
+        );
     }
 
     #[test]
