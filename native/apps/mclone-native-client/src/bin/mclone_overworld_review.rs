@@ -600,7 +600,7 @@ fn run() -> Result<()> {
 
     let (commit, dirty) = git_state();
     let receipt = serde_json::json!({
-        "schema": 19,
+        "schema": 20,
         "profile": "mclone-overworld-v1",
         "topology": config.topology.label(),
         "fieldRevision": MCLONE_OVERWORLD_FIELD_REVISION,
@@ -1129,6 +1129,22 @@ fn select_review_sites(
         request.depth,
         McloneOverworldLandformFamily::MountainRange,
     );
+    let inherited_relief_coast = samples
+        .iter()
+        .enumerate()
+        .filter(|(_, sample)| is_dry_review_coast(**sample))
+        .max_by(|(_, left), (_, right)| {
+            incoming_relief_at_coast(**left).total_cmp(&incoming_relief_at_coast(**right))
+        })
+        .map(|(index, _)| index);
+    let low_arrival_coast = samples
+        .iter()
+        .enumerate()
+        .filter(|(_, sample)| is_dry_review_coast(**sample))
+        .min_by(|(_, left), (_, right)| {
+            incoming_relief_at_coast(**left).total_cmp(&incoming_relief_at_coast(**right))
+        })
+        .map(|(index, _)| index);
     let seam_river = if topology == McloneOverworldSamplingTopology::PeriodicX {
         samples
             .iter()
@@ -1193,9 +1209,24 @@ fn select_review_sites(
         "ridgeValleyLandform": review_site_json(ridge_valley, samples, request),
         "broadBasinLandform": review_site_json(broad_basin, samples, request),
         "mountainRangeLandform": review_site_json(mountain_range, samples, request),
+        "inheritedReliefCoast": review_site_json(inherited_relief_coast, samples, request),
+        "lowArrivalCoast": review_site_json(low_arrival_coast, samples, request),
         "periodicSeamRiver": review_site_json(seam_river, samples, request),
         "periodicSeamCoast": review_site_json(seam_coast, samples, request),
     })
+}
+
+fn is_dry_review_coast(sample: McloneOverworldLandformSample) -> bool {
+    sample.terrain.continentalness > 0.0
+        && sample.terrain.coast.family.is_coast()
+        && sample.terrain.coast.proximity >= 0.86
+        && sample.terrain.surface_y > MCLONE_OVERWORLD_SEA_LEVEL
+        && !sample.terrain.watercourse.is_water()
+}
+
+fn incoming_relief_at_coast(sample: McloneOverworldLandformSample) -> f64 {
+    f64::from(sample.terrain.provisional_surface_y)
+        - ordinary_continental_base_y(sample.terrain.continentalness)
 }
 
 fn representative_landform_site(
@@ -1213,6 +1244,8 @@ fn representative_landform_site(
             sample.terrain.coast.family == McloneOverworldCoastFamily::Inland
                 && sample.terrain.surface_y > MCLONE_OVERWORLD_SEA_LEVEL
                 && !sample.terrain.watercourse.is_water()
+                && sample.terrain.watercourse.bank_influence == 0.0
+                && sample.terrain.surface_y == sample.terrain.base_surface_y
                 && sample.terrain.landform_intent().family == family
         })
         .max_by(|(left_index, left), (right_index, right)| {

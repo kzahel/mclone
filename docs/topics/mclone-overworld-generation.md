@@ -1158,6 +1158,31 @@ roughness above 0.75, and radius-32 above 2.0. They require a material move
 out of the current sterile regime without making Minecraft values the Mclone
 target. Inspected geometry retains veto authority.
 
+Tactical
+[`264`](../tactical/264-mclone-ordinary-inland-landform-fabric.md) implements
+that bounded candidate as field revision 21. It adds no noise field: continuous
+quiet, rolling, ridge/valley, basin, and mountain strengths reinterpret the
+existing 384-, 128-, 48-, 32-, and 8-block periodic fields. The dominant
+family is diagnostic, all geometry remains continuous, incoming positive
+relief can replace redundant rocky coast lift, and major rivers and planned
+streams still own the final carve.
+
+The same nine-site corpus now has median span 25, lag-16 RMS 5.537, radius-8
+detrended roughness 1.139, and radius-32 roughness 4.019. Three equal
+6,144-block maps retain every family with approximately 18-36% quiet coverage
+and connected below-baseline corridors. Exact CPU/GPU output, the 6,144-block
+cylinder seam, partition/order behavior, SQLite reopen, WebAssembly
+compilation, established macro/exact performance controls, and completed
+World Explorer streaming all pass.
+
+The implementation is awaiting Human Review A. Internal pixel review finds
+materially richer ordinary land, together with unresolved block-contour
+shelves, sometimes-overlapping rolling/ridge/mountain silhouettes, busy
+quiet-family examples, and basin forms obscured by existing decoration. Do
+not begin new surface/ecology interpretation, plateaus, escarpments, basin
+lakes, compound water, geology, or broad 3D density until that review decides
+whether to accept, retune, or reject the fabric.
+
 The
 [`still-life-and-tectonic-reference.md`](still-life-and-tectonic-reference.md)
 study sharpens that direction: select mutually legible geology families
@@ -1185,3 +1210,4 @@ place of the existing stream contracts.
 - [`../tactical/258-mclone-macro-terrain-performance-baseline.md`](../tactical/258-mclone-macro-terrain-performance-baseline.md)
 - [`../tactical/259-modern-and-historical-coast-reference-survey.md`](../tactical/259-modern-and-historical-coast-reference-survey.md)
 - [`../tactical/263-cross-era-inland-landform-survey.md`](../tactical/263-cross-era-inland-landform-survey.md)
+- [`../tactical/264-mclone-ordinary-inland-landform-fabric.md`](../tactical/264-mclone-ordinary-inland-landform-fabric.md)

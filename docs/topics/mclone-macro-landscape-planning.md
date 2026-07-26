@@ -11,8 +11,10 @@ view. Tactical 259 grounded coastal character in Alpha, Beta, Java 1.17.1,
 Java 26.2, and measured current Mclone evidence. Tactical 260 completed the
 first coast implementation and its visual corrections; Human Review 2 found
 it substantially improved but redirected further work toward the sparse
-inland terrain feeding the coast. Tactical 263 now supplies a cross-era
-inland survey and the selected next landform plan.**
+inland terrain feeding the coast. Tactical 263 supplies the cross-era
+inland survey, and Tactical 264 has implemented its first ordinary-landform
+candidate. Objective validation passes; the campaign is stopped at Human
+Review A before surface, ecology, geology, or 3D-density expansion.**
 
 The motivating July 2026 visual review found four related regional-scale
 weaknesses:
@@ -279,7 +281,30 @@ mountain family. Structure becomes available through ordinary inland terrain
 without turning every location into a peak. Biome, surface, vegetation,
 coast, water, and later geology interpret the accepted terrain facts.
 Selective 3D density follows only after this regional skeleton passes
-undecorated geometry review.
+geometry-isolating review.
+
+Tactical
+[`264`](../tactical/264-mclone-ordinary-inland-landform-fabric.md) implements
+that skeleton as field revision 21 without adding a noise field. Continuous
+quiet, rolling, ridge/valley, basin, and mountain strengths route the existing
+384-, 128-, 48-, 32-, and 8-block fields into provisional terrain; the
+dominant family remains diagnostic rather than a categorical height gate.
+Incoming positive relief also makes the existing rocky-coast lift
+complementary, while rivers and planned streams retain final carve authority.
+
+Across the same nine ordinary-inland sites, median vertical span rises from
+16 to 25 blocks, lag-16 RMS change from 1.657 to 5.537, radius-8 detrended
+roughness from 0.305 to 1.139, and radius-32 from 0.592 to 4.019. Three equal
+6,144-block maps retain every family and approximately 18-36% quiet coverage.
+Exact CPU/GPU parity, the cylinder seam, persistence, streaming completeness,
+and the established performance controls pass.
+
+This is an objective implementation result, not subjective acceptance.
+Inspected production pixels show materially richer connected land, but also
+conspicuous block-contour shelves, overlap between rolling/ridge/mountain
+silhouettes, busy examples within the quiet family, and basin forms that
+existing forest and ponds can obscure. Human Review A must accept, retune, or
+reject the fabric before the sequence advances.
 
 ### Hydrology
 
@@ -1012,6 +1037,15 @@ The completed native-window World Explorer smoke reached coarse terrain in
 at every inspected checkpoint; the six captured views showed continuous
 complete terrain.
 
+Tactical 264 reruns the controls after field revision 21. The
+239,121-point roughly-500-km lane takes 125.785 ms on plane and 124.515 ms on
+the cylinder, approximately 1.3% and 2.4% above the post-coast same-host
+controls. The 954,529-point lane takes 481.445 and 551.418 ms. Fixed-budget
+World Explorer sessions again end with all 160 slots ready and zero pending
+work; movement is 2.928 ms mean / 5.413 ms p95 in the native window and
+2.560 / 3.846 ms offscreen. The tactical retains the raw receipts because
+small-lane host noise does not support a more precise isolated cost claim.
+
 These are baselines, not budgets. Future 3D work must add ordinary-path,
 regional-hotspot, bounded-landmark-hotspot, and far-summary lanes. GPU
 execution, browser transfer, and presentation remain separate measurements;
@@ -1021,10 +1055,10 @@ none is inferred from CPU compile time.
 
 | Concern | Current capability | Planning gap |
 |---|---|---|
-| raw macro fields | continentalness, relief, ruggedness, ridges, mountain detail, climate, bathymetry, water morphology | no unified classified landscape intent |
-| terrain | continuous heightfield with accepted but sparsely gated mountain detail and derived slope/exposure | ordinary inland median span is 16 blocks across the Tactical 263 corpus; no explicit rolling, ridge/valley, basin, range, pass, or terrain-corridor intent |
+| raw macro fields | continentalness, relief, ruggedness, ridges, mountain detail, climate, bathymetry, water morphology, and continuous quiet/rolling/ridge-valley/basin/mountain intent derived without a new noise field | no pass, plateau, escarpment, high-basin, or planned terrain-corridor intent |
+| terrain | field-revision-21 continuous heightfield with live ordinary hills, connected lows, ridge shoulders, broad basin tendency, accepted mountain detail, and derived slope/exposure; the nine-site median span is 25 blocks | Human Review A is pending; repeated block-contour shelves and family silhouette overlap may require retuning before additional terrain families |
 | sampling/representation | cheap absolute-coordinate CPU/GPU heightfield preview, a fixed ten-level 131 km horizon, and normalized point receipts through roughly 500 km | no filtered spacing-2,048 review product or sparse volumetric near/far contract |
-| coast | shared sandy/gravel/ordinary/rocky/cold intent; bounded geometry, locally feathered realization, cross-substrate snow, mixed banks; schema-17 maps; exact CPU/GPU and periodic-seam evidence | Human Review 2 found substantial improvement but deferred finalization until stronger inland terrain can reach the shore; no marsh, frozen-ocean morphology, dunes, deltas, reefs, or sea caves |
+| coast | shared sandy/gravel/ordinary/rocky/cold intent; bounded geometry, locally feathered realization, cross-substrate snow, mixed banks; incoming field-revision-21 landform relief reaches water and can reduce redundant rocky lift; exact CPU/GPU and periodic-seam evidence | Human Review 2 found substantial improvement, and the new inherited-relief coast examples now need review; no marsh, frozen-ocean morphology, dunes, deltas, reefs, or sea caves |
 | major rivers | warped zero-contour corridor with width/depth/bank morphology and receiving-outlet correction | no persistent macro drainage topology, tributary hierarchy, or named major reaches |
 | streams | bounded 91-96-block valley-following source-to-river plan | one peaceful family, not a general network |
 | ponds/lakes | river-adjacent wetland pools and shared local lake mechanism | no closed-basin or spill-level plan |
@@ -1072,14 +1106,16 @@ every row before shipping any smaller improvement.
 3. **Establish ordinary inland landform fabric**
    - Tactical 263 supplies the Alpha/Beta/1.17.1/26.2 mechanism comparison and
      the nine-site Mclone baseline;
-   - derive compact quiet, rolling, ridge/valley, basin, and mountain intent
-     from existing periodic fields before adding another noise field;
-   - route connected 384/128/48-block form and selective 32-block detail
+   - Tactical 264 derives compact quiet, rolling, ridge/valley, basin, and
+     mountain intent from existing periodic fields without adding noise;
+   - it routes connected 384/128/48-block form and selective 32/8-block detail
      through those strengths;
-   - let the result continue toward the coast while accepted water retains
-     final carving authority; and
-   - stop at undecorated Human Review A before surfaces, ecology, plateaus,
-     geology, or broad 3D density expand the slice.
+   - the result continues toward the coast while accepted water retains final
+     carving authority;
+   - objective geometry, parity, topology, persistence, performance, and
+     streaming gates pass; and
+   - the campaign is stopped at Human Review A before surfaces, ecology,
+     plateaus, geology, or broad 3D density expand the slice.
 4. **Select major-water topology**
    - compare hierarchical boundary, terrain-derived drainage, and hybrid
      planned-network maps on the same terrain;
@@ -1178,3 +1214,4 @@ advance.
 - [`../tactical/249-cross-platform-procedural-horizon-proof.md`](../tactical/249-cross-platform-procedural-horizon-proof.md)
 - [`../tactical/259-modern-and-historical-coast-reference-survey.md`](../tactical/259-modern-and-historical-coast-reference-survey.md)
 - [`../tactical/263-cross-era-inland-landform-survey.md`](../tactical/263-cross-era-inland-landform-survey.md)
+- [`../tactical/264-mclone-ordinary-inland-landform-fabric.md`](../tactical/264-mclone-ordinary-inland-landform-fabric.md)
