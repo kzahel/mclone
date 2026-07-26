@@ -10,7 +10,7 @@ at one part of the survival/building proposition. Product status, platforms,
 prices, reviews, and video availability must be rechecked before commercial
 decisions.
 
-Last reconciled: **2026-07-24**.
+Last reconciled: **2026-07-26**.
 
 ## Scope
 
@@ -214,7 +214,7 @@ unofficial mod exists.
 | Dragon Quest Builders 2 | Proprietary game and authored assets | Shareable builds and community islands are central; no first-party code-mod or engine-extension path was identified in the official material reviewed | A narrow sharing format can still create inspiration and retention. Mod breadth is not required for every successful building game |
 | Colony Survival | Proprietary commercial game | The official [product page](https://www.colonysurvival.nl/) advertises mods, Steam Workshop, blueprints, and co-op | Mod and blueprint support strengthens a systems-heavy game, but source openness would be a separate promise |
 | 7 Days to Die | Proprietary commercial game | Longstanding XML/data customization, modlets, code mods, dedicated-server configuration, and an active [official modding forum](https://community.thefunpimps.com/categories/game-modification.48/) | Editable data and server ownership can sustain large unofficial ecosystems even without an open engine. Version migration and compatibility remain the cost |
-| Lay of the Land | Proprietary Early Access game | No first-party mod API or creator distribution path was identified in the official material reviewed | Deep physical simulation is not automatically an extensible platform. Opening implementation code could be valuable, but safe semantic hooks would still be needed |
+| Lay of the Land | Proprietary commercial game | No first-party mod API or creator distribution path was identified in the official material reviewed | Deep physical simulation is not automatically an extensible platform. Opening implementation code could be valuable, but safe semantic hooks would still be needed |
 | Luanti / VoxeLibre / Mineclonia | Luanti is an LGPL-2.1+ open engine. Its official [licensing guide](https://docs.luanti.org/for-creators/licensing/) explains the engine boundary; individual games and assets carry their own free licenses and must be checked package by package | Lua games and mods are fundamental to the architecture. [ContentDB](https://docs.luanti.org/about/contentdb/) is available in-client, only accepts freely licensed packages, manages updates, and supports games, mods, and texture packs. Server-side mods require no separate client install | This is the strongest direct proof that open, moddable voxel infrastructure already exists. Mclone needs a more cohesive authored product, strong presentation, and a distinct cross-device/XR experience as well as openness |
 | Survivalcraft 2 | Proprietary commercial game | World sharing, custom content, and community artifacts exist, but no open client/server or comparable first-party code-mod API was identified in this pass | A focused mobile product can survive through compact design and shareable worlds rather than broad programmability |
 | Discovery 2 / cyubeVR / QuestCraft | Discovery 2 and cyubeVR are proprietary games. QuestCraft is a public community compatibility project, but it still requires the proprietary Minecraft Java game and assets | Discovery 2 has an in-client world gallery. cyubeVR has custom blocks, a native VoxelAPI, Unreal Blueprint mods, and [Steam Workshop integration](https://store.steampowered.com/news/posts/?appgroupname=cyubeVR&appids=619500&enddate=1680879223&feed=steam_community_announcements). QuestCraft preserves much of Java Minecraft's mod ecosystem on standalone Quest | XR does not imply a weak mod story. cyubeVR is a particularly important benchmark for creator tooling in a tracked-controller game; QuestCraft shows that open glue around a closed dependency is not a fully open product |
@@ -632,10 +632,14 @@ Minecraft-like cube grid as the entire visual identity.
 
 **Impressive or distinctive aspects:**
 
+- A custom voxel stack hosted in Unreal Engine 5 combines 10 cm voxel detail,
+  GPU-compute work, a custom PhysX 5 integration, and smooth LOD transitions.
 - Layered world simulations shape naturalistic terrain, watercourses, roads,
   and locations.
 - Destruction, fire, liquids, gravity, weather, and material interaction can
   become combat or traversal tools.
+- Terrain, vegetation, structures, props, debris, and visually block-built
+  enemies share one unusually coherent material and shape language.
 - Voxel building coexists with sculpted-looking terrain and action-RPG
   presentation.
 - Environmental systems create the possibility of memorable emergent events
@@ -647,13 +651,18 @@ Minecraft-like cube grid as the entire visual identity.
 
 - [Current Steam overview](https://store.steampowered.com/app/2776090/Lay_of_the_Land/)
 - [Developer YouTube channel](https://www.youtube.com/@tooley1998)
+- [Detailed engine research](lay-of-the-land-engine-research.md)
 - [Recent unedited gameplay search](https://www.youtube.com/results?search_query=Lay+of+the+Land+unedited+gameplay+2026)
 - [Physics, building, and destruction search](https://www.youtube.com/results?search_query=Lay+of+the+Land+physics+building+destruction)
 
 **Watch for:** whether simulation produces useful choices or spectacle; how
 terrain remains readable when it is not a clean block grid; performance under
-chain reactions; whether player buildings participate in the same physical
-rules.
+chain reactions; whether player buildings and enemies participate in the same
+physical rules; and how much the deliberately bounded, single-player product
+scope subsidizes its simulation density. Current patch notes establish real
+world-save persistence and region unloading, so the competitive limitation is
+not “no disk persistence”; it is the absence of Minecraft-style indefinitely
+streamed terrain and multiplayer authority.
 
 **Mclone question:** which material reactions—falling trees, fire, water,
 moving voxel assemblies, erosion-like presentation—would create the most
@@ -1129,6 +1138,10 @@ specialists inside Minecraft.
 
 ## Related Documents
 
+- [`lay-of-the-land-engine-research.md`](lay-of-the-land-engine-research.md) —
+  focused evidence and hypotheses for Unreal 5 hosting, GPU compute, custom
+  PhysX 5, voxel simulations, persistence, world bounds, shipped-build
+  inspectability, and clean-room Mclone lessons.
 - [`scripting-and-mod-platform.md`](scripting-and-mod-platform.md) — accepted
   package tiers, portable runtime, capability sandbox, gameplay profiles,
   registry, mod browser, and open-source extension direction.

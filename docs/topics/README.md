@@ -204,6 +204,11 @@ series implements the same concern, normally reuse the document slug in its
   access routes, adjacent retention references, source/open-content/mod
   posture, and a Mclone inspiration ledger focused on each product's
   impressive or distinctive aspects.
+- [`lay-of-the-land-engine-research.md`](lay-of-the-land-engine-research.md):
+  dated technical reconstruction of Lay of the Land's Unreal 5 voxel engine,
+  GPU compute, custom PhysX 5 integration, material simulations, persistence,
+  bounded single-player tradeoffs, shipped-build inspectability, and
+  clean-room lessons for Mclone.
 - [`scripting-and-mod-platform.md`](scripting-and-mod-platform.md): accepted
   single-ecosystem mod direction spanning declarative content, portable
   capability-sandboxed gameplay, trusted server/desktop extensions, source

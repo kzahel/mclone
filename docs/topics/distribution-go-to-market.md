@@ -242,8 +242,9 @@ actually available at submission time rather than assumed now.
 
 ## Competitive Landscape Snapshot
 
-This snapshot was checked on 2026-07-22. It should be rechecked before pricing,
-store-page copy, or launch sequencing is approved.
+This snapshot was checked on 2026-07-22, with the Lay of the Land row added
+2026-07-26. It should be rechecked before pricing, store-page copy, or launch
+sequencing is approved.
 The broader design-oriented viewing guide and inspiration ledger live in
 [`voxel-sandbox-competitive-landscape.md`](voxel-sandbox-competitive-landscape.md).
 
@@ -257,6 +258,7 @@ The broader design-oriented viewing guide and inspiration ledger live in
 | [cyubeVR](https://store.steampowered.com/app/619500/cyubeVR/) | Established premium PC-VR voxel sandbox emphasizing visual quality and hands-on VR crafting/building interactions. | It is the quality benchmark for VR-native interaction and presentation, even where it is not a standalone-Quest answer. Mclone cannot treat tracked controls as a gamepad remap. |
 | [Hytale](https://hytale.com/news/2026/1/2026-01-13-hytale-is-finally-here/) | High-mindshare voxel RPG/sandbox, released in paid PC Early Access through its own account, store, and launcher in January 2026. | Direct paid distribution can support a large launch, but Hytale raises PC expectations for original art direction, creator tools, servers, and visible momentum. Mclone still benefits from Steam and XR reach that Hytale's current direct PC offer does not provide. |
 | [Vintage Story](https://vintagestory.info/en/play/) | Deep survival/crafting proposition with paid direct distribution and no Steam release. | Demonstrates durable demand for a focused direct voxel product, while also illustrating the discovery and customer-preference cost of staying off Steam. |
+| [Lay of the Land](https://store.steampowered.com/app/2776090/Lay_of_the_Land/) | A released Windows/Steam single-player voxel adventure whose fine voxel detail, material simulation, destruction, and unusually coherent world/creature art language create strong technical spectacle. | It proves a solo developer can differentiate through one exceptional engine pillar, while its bounded world, Windows-only offer, and explicit no-multiplayer posture leave room for Mclone's persistent streamed world, shared play, cross-device continuity, web, Android, and XR. See the [technical research](lay-of-the-land-engine-research.md). |
 | [Luanti](https://www.luanti.org/en/) and other open voxel projects | Free, open-source voxel engines or games already provide mods, forks, self-hosting, multiple games, and multiplayer. | “Open source” alone is not unique. A fully open first-party client/server/tool/content stack across native, web, Android, and XR could still be a sharp differentiator when paired with a cohesive authored game, excellent onboarding, official tested binaries, and sustainable support. |
 
 Minecraft's own 1.21.40 changelog records the VR/MR sunset:
@@ -696,5 +698,8 @@ Before settling price or launch order:
   — design-oriented competitor profiles, gameplay viewing guide, Minecraft
   mod substitutes, source/open-content/mod posture, and the cross-product
   inspiration ledger.
+- [`lay-of-the-land-engine-research.md`](lay-of-the-land-engine-research.md) —
+  detailed Unreal 5 voxel-engine evidence, persistence and world-scope
+  corrections, shipped-build inspectability, and clean-room Mclone lessons.
 - [`../native-web.md`](../native-web.md) — full web-client build, smoke, and
   deployment mechanics.
