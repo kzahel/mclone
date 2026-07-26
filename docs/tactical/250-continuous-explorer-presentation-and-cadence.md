@@ -1,6 +1,6 @@
 # Tactical 250: Continuous Explorer Presentation And Cadence
 
-Status: active 2026-07-26.
+Status: completed and deployed 2026-07-26.
 
 Topics:
 
@@ -193,7 +193,7 @@ remains host-owned.
 
 ### Slice 4: physical cadence and interaction evidence
 
-- Select FIFO/vsync first for the native Explorer surface.
+- Prefer tear-free Mailbox, then FIFO, for the native Explorer surface.
 - Extend reports with exact continuous focus/scale facts needed by acceptance
   tests.
 - Add a real browser held-key sequence and two-contact strafe sequence.
@@ -244,6 +244,139 @@ Required boundary evidence:
 - native and Wasm checks pass from the same Rust session; and
 - production Wasm matches the locally validated artifact.
 
+## Execution Record
+
+### Continuous presentation and residency
+
+`TerrainHorizonPresentation` now carries continuous `f64` focus and extent
+facts independently of clipmap residency. The uniform keeps integer sample
+origins and adds a nearby integer presentation anchor, fractional X/Z
+remainder, and continuous width/height. Terrain and tree shaders use the same
+camera-relative subtraction.
+
+The Explorer session now replans only when focus crosses a 64-block finest
+tile footprint. Resize, zoom, orbit, fractional pan, and whole-block pan
+inside that footprint do not touch residency. Terrain Lab retains the
+existing integer request path.
+
+The uniform grew from 144 to 160 bytes per fixed slot. With 160 slots, fixed
+terrain memory is therefore `86,553,600` bytes. The allocation count remains
+unchanged.
+
+### Shared held movement and host cadence
+
+`WorldViewHeldMotion` owns four abstract directions, the shared
+`0.4`-footprints-per-second rate, normalized diagonals, elapsed-frame
+integration, a bounded delayed-frame step, and cancellation. Its first active
+frame establishes a fresh clock, so idle time cannot become movement.
+
+Native winit and browser Rust only map raw physical codes to those directions.
+The shared Explorer session advances motion during encode. The browser passes
+the rAF timestamp; its JavaScript shell has no direction table, movement
+speed, camera math, or residency policy. Key repeat is idempotent, and keyup,
+blur, visibility loss, or native focus loss clear held state.
+
+Native returns to `ControlFlow::Wait` when neither motion nor refinement needs
+a frame. Mailbox is preferred when available because it is tear-free and kept
+the unattended Wayland validation surface progressing. A direct FIFO trial
+stopped receiving released images after the second present while that surface
+was compositor-occluded. FIFO remains the tear-free fallback, followed by
+`AutoVsync`; no non-vsync mode is preferred.
+
+### Shared and boundary evidence
+
+Fifty focused shared tests pass:
+
+- 33 `mclone-terrain-view` tests cover uniform packing, shader validation,
+  anchor changes on both axes, large centers, toroidal strips, negative
+  coordinates, and teleports;
+- 15 `mclone-view-control` tests include 60/120 Hz equivalence, normalized
+  diagonal motion, zero stale idle contribution, bounded delayed frames, and
+  complete cancellation; and
+- two Explorer session tests prove the snapped residency key, including
+  negative-coordinate floor behavior. The native adapter additionally proves
+  Arrow/WASD direction equivalence.
+
+Native and `wasm32-unknown-unknown` Explorer checks pass. The dependency
+firewall reports 159 native and 75 browser packages while excluding the game,
+server, scene, XR, and app-runtime closures. The optimized Explorer artifacts
+contain:
+
+- `1,412,789` bytes of Wasm;
+- `67,143` bytes of generated binding JavaScript; and
+- `6,280` bytes of hand-authored host JavaScript.
+
+### Rendered and interaction evidence
+
+The native real-window and offscreen sequence each completed 344 frames and
+six direct color/depth checkpoints. Every checkpoint kept 160 fixed slots and
+`86,553,600` fixed bytes. Window movement frames averaged `3.30 ms`, reached
+`8.64 ms` p95, and peaked at `13.75 ms`; offscreen movement reached
+`9.54 ms` p95. Peak residency including native tree proxies was `87,059,232`
+bytes. Window and offscreen checkpoint PNGs remained byte-identical.
+
+The initial and moved 3D captures cover 875,422 and 874,189 depth pixels.
+Moved, negative-coordinate, million-block teleport, map, and changed-orbit
+captures were inspected. Terrain and tree placement remain aligned, and no
+unpainted hole or fine/coarse seam appears.
+
+Headed Chrome over Wayland passed both desktop and Pixel-sized lanes. Each
+lane exercised:
+
+- a real pointer orbit;
+- a real simultaneous two-contact strafe through DOM pointer forwarding;
+- five successive rAF reports while ArrowRight remained held;
+- negative coordinates; and
+- a million-block teleport.
+
+The desktop two-contact move reached fractional focus without changing
+revision 1, 160 total refills, 10 rebases, or the 160-slot allocation. The
+narrow lane proved the same presentation-only rule. Held samples changed
+continuous focus on at least three display frames, crossed integer and
+64-block residency boundaries, refilled entering strips, and returned to
+`160/160` ready slots after release. Desktop and phone moved captures were
+inspected without a camera discontinuity or procedural gap.
+
+### Deployment
+
+The aggregate production bundle preserved Explorer Wasm SHA-256
+`c437b22fe123edd2f6ea83af760c1b58129c044a81b1679250f80f028ab58f5c`
+under `/explore`. Cloudflare Worker version
+`85daaca2-99de-4abb-9855-4e35e0f1640c` serves
+`https://mclone.kzahel.com/explore/`.
+
+The production artifact hash matches the local inspected artifact. A direct
+hosted headed-Wayland smoke passed pointer orbit, fractional two-contact
+strafe, five-frame held movement, negative coordinates, and teleport without
+page or console errors.
+
+### Validation commands
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-view-control -p mclone-terrain-view -p mclone-world-explorer`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-world-explorer`
+- `cargo check --manifest-path native/Cargo.toml -p mclone-world-explorer --lib --target wasm32-unknown-unknown`
+- `pnpm native:world-explorer:deps`
+- `pnpm host:check -- --probe-browser-webgpu`
+- `pnpm native:world-explorer:smoke`
+- `pnpm native:world-explorer:web:build`
+- `pnpm native:world-explorer:web:smoke --skip-build`
+- `pnpm native:world-explorer:web:smoke:mobile --skip-build`
+- `./scripts/deploy-native-web.sh --bundle-only`
+- `WORLD_EXPLORER_SMOKE_BASE_URL=https://mclone.kzahel.com/explore pnpm native:world-explorer:web:smoke --skip-build`
+
+## Handoff
+
+The next bounded product slice can compose an exact near field into this
+session using one exact-painted frame snapshot and one procedural coverage
+mask. It should preserve the continuous presentation transform and never use
+camera rounding as a residency or masking shortcut.
+
+Independent hardening may add retained committed clipmap origins,
+device-specific budgets, browser Worker-backed vegetation, stereo/multiview,
+or coalesced pointer observations. The current evidence does not justify
+pulling in the full game runtime, adding an Explorer FPS UI, or introducing
+presentation interpolation before the exact/procedural composition proof.
+
 ## Non-Goals
 
 This tactical does not add:
@@ -260,4 +393,3 @@ This tactical does not add:
 Coalesced pointer events or presentation interpolation may be considered only
 if inspected interaction remains visibly stepped after integer presentation
 quantization is removed.
-

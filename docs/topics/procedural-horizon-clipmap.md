@@ -234,11 +234,21 @@ terrain does not jitter as the observer moves far from world zero.
 
 Tactical
 [`250`](../tactical/250-continuous-explorer-presentation-and-cadence.md)
-implements the first explicit presentation/residency split. Fractional camera
-focus and scale update every frame, while toroidal origins change only at
-aligned tile boundaries. Shaders receive a nearby integer anchor plus a small
-fractional remainder so camera motion stays continuous without converting a
-large absolute `f64` coordinate directly to `f32`.
+completed the first explicit presentation/residency split on 2026-07-26.
+Fractional camera focus and scale update every frame, while toroidal origins
+change only at aligned 64-block finest-tile boundaries. Shaders receive a
+nearby integer anchor plus a small fractional remainder so camera motion
+stays continuous without converting a large absolute `f64` coordinate
+directly to `f32`. Terrain and tree vertices share that transform.
+
+Uniform slots grew from 144 to 160 bytes, making the unchanged 160-slot fixed
+allocation `86,553,600` bytes. Same-tile two-contact motion changed exact
+fractional focus without changing revision 1, 160 initial refills, 10 rebases,
+or allocation. Held movement then crossed tile boundaries and produced
+bounded entering-strip refills before returning to full readiness. Native,
+offscreen, desktop-browser, phone-browser, negative-coordinate,
+million-block, and hosted production captures show no unpainted hole,
+fine/coarse seam, or terrain/tree separation.
 
 ## Seams And Transitions
 
@@ -420,10 +430,10 @@ semantic owner.
    native and browser. Device rebuild, synthetic stereo, and multiview remain
    hardening work; the Explorer is a cross-platform proof host, not another
    disposable diagnostic.
-5. **Harden nested levels.** Fixed aligned holes and coarse-first refill are
-   proven. Add explicit skirts where independent surfaces require them,
-   retained committed origins, large-coordinate precision handling,
-   footprint summaries, and device-specific budgets.
+5. **Harden nested levels.** Fixed aligned holes, coarse-first refill, and the
+   first large-coordinate camera-relative precision path are proven. Add
+   explicit skirts where independent surfaces require them, retained
+   committed origins, footprint summaries, and device-specific budgets.
 6. **Integrate the game scene.** Add exact-painted snapshots, masks, frontier
    collars, normal render ordering, and all-target frame admission.
 7. **Finish vegetation portability and arbitration.** Native stable proxy

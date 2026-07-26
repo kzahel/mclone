@@ -59,10 +59,10 @@ on both native desktop and the browser. It treats product scope and platform
 hosting as independent axes, leaves Terrain Lab unchanged, and defers exact
 replacement to the next bounded composition proof.
 Tactical
-[`250`](250-continuous-explorer-presentation-and-cadence.md) is the active
-shared correction for continuous fractional presentation, residency-only
-snapping, frame-rate-independent held view motion, and lightweight native/
-browser cadence without importing the full game runtime.
+[`250`](250-continuous-explorer-presentation-and-cadence.md) completed and
+deployed the shared correction for continuous fractional presentation,
+residency-only snapping, frame-rate-independent held view motion, and
+lightweight native/browser cadence without importing the full game runtime.
 Historical render-worker architecture remains in
 [`067-shared-render-worker-architecture.md`](067-shared-render-worker-architecture.md),
 with the parent thread/Web-Worker topology in
@@ -322,4 +322,4 @@ with the parent thread/Web-Worker topology in
 | [`247-standalone-world-explorer-foundation.md`](247-standalone-world-explorer-foundation.md) | completed 2026-07-25, including native-window/offscreen pixel and direct-depth proof | Added a deliberately small native World Explorer, platform-neutral Rust view-control reducer, native capture, and dependency/artifact proof; deferred the browser shell and Terrain Lab migration until an input-boundary audit. |
 | [`248-terrain-lab-navigation-and-worker-modernization.md`](248-terrain-lab-navigation-and-worker-modernization.md) | completed 2026-07-25, including local and hosted desktop/phone headed-WebGPU validation | Preserved Terrain Lab UI/UX while adopting shared Rust navigation, an opaque browser Worker transport, Rust actor/coordinator ownership, external SAB mesh mailboxes, one authoritative cache per layer, and deletion of superseded TypeScript/raw paths. |
 | [`249-cross-platform-procedural-horizon-proof.md`](249-cross-platform-procedural-horizon-proof.md) | completed 2026-07-25, including local/native/hosted browser proof | Implemented the shared fixed-budget toroidal horizon and proved the same Rust session through lightweight native and browser Explorer adapters without changing Terrain Lab or coupling product scope to platform. |
-| [`250-continuous-explorer-presentation-and-cadence.md`](250-continuous-explorer-presentation-and-cadence.md) | active 2026-07-26 | Separate continuous camera presentation from snapped clipmap residency, unify time-based held navigation across native/browser Explorer hosts, and retain lightweight platform-owned frame loops. |
+| [`250-continuous-explorer-presentation-and-cadence.md`](250-continuous-explorer-presentation-and-cadence.md) | completed and deployed 2026-07-26 | Separated continuous camera presentation from snapped clipmap residency, unified time-based held navigation across native/browser Explorer hosts, and retained lightweight platform-owned frame loops. |

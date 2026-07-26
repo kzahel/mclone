@@ -43,6 +43,24 @@ hand-authored JavaScript shell contains no terrain, LOD, refill, or camera
 gesture policy. The small artifact is selected by its Rust dependency closure,
 not by weakening the browser platform boundary used by the full game.
 
+Tactical
+[`250`](../tactical/250-continuous-explorer-presentation-and-cadence.md)
+completed the cadence side of that proof on 2026-07-26. Browser rAF now passes
+its monotonic timestamp into the shared session; native winit keeps redraw
+demand and surface presentation; shared Rust owns held direction, speed,
+elapsed integration, cancellation, continuous camera facts, and snapped
+residency. The current 6,280-byte hand-authored shell forwards raw
+press/release, pointer, wheel, resize, blur, and visibility observations but
+contains no movement or terrain policy.
+
+Headed desktop, phone, and hosted production smokes exercise the real DOM
+two-contact path and multiple held-key rAF frames. Native real-window and
+offscreen paths exercise the same Rust terrain session. Mailbox is preferred
+when available for tear-free native presentation and unattended progress;
+FIFO and `AutoVsync` are the fallbacks. An occluded Wayland FIFO trial stopped
+releasing images after its second present, so FIFO is not forced merely to
+make the lightweight host resemble the full game loop.
+
 Initial destination, repeated host lifecycle, and menu-idle semantics are owned
 by the focused
 [`client-entry-lifecycle.md`](client-entry-lifecycle.md) topic. This topic

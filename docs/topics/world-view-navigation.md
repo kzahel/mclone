@@ -15,9 +15,9 @@ shared toroidal horizon. The Explorer is a product
 profile, not a native-only application: its Rust runtime must work through the
 same platform boundary that can also host the full browser game.
 Tactical
-[`250`](../tactical/250-continuous-explorer-presentation-and-cadence.md) is
-active to separate continuous fractional presentation from snapped residency
-and replace host-specific keyboard stepping with shared frame-time motion.
+[`250`](../tactical/250-continuous-explorer-presentation-and-cadence.md)
+completed and deployed continuous fractional presentation, snapped-only
+residency, and shared frame-time held motion on 2026-07-26.
 `mclone-view-control` now owns shared map/orbit/contact semantics for both the
 standalone native `mclone-world-explorer` and Terrain Lab's procedural and
 canonical panes. Terrain Lab retains thin DOM focus, capture, local-coordinate,
@@ -143,6 +143,31 @@ Initial, moved, negative-coordinate, and teleported frames were visually
 coherent with consistent vertical framing. Production version
 `d852be90-066e-46a1-895f-9287964c0a45` serves Wasm SHA-256
 `5c6eb01f9ff5f66727e141e83418cc1e75f00777ea090baa833bea7d7d3d2af4`.
+
+Tactical 250 then removed horizontal quantization and host-specific keyboard
+cadence. `WorldViewState` continues to retain `f64` focus and scale, and the
+horizon now receives those facts every frame through an integer camera anchor
+plus fractional remainder. Clipmap residency changes only when focus crosses
+a 64-block finest-tile boundary; zoom, orbit, resize, and same-tile movement
+are presentation-only.
+
+`WorldViewHeldMotion` is the shared sans-I/O held-direction owner. Native
+winit and browser Rust map Arrow/WASD observations into it, while the shared
+Explorer session derives movement from elapsed frame time. Sixty- and
+120-Hz partitions are equivalent; diagonals are normalized; the first active
+frame consumes no idle time; and blur, visibility loss, focus loss, key
+release, or cancellation clears motion. Browser JavaScript forwards rAF time
+and raw events without owning a direction table or speed.
+
+Real two-contact headed-browser gestures produced fractional focus on desktop
+and phone without changing residency revision, refill totals, rebases, or the
+160-slot allocation. Successive held-key rAF reports crossed integer and tile
+boundaries without a camera discontinuity. Native real-window and offscreen
+movement captures remained byte-identical, with an `8.64 ms` window movement
+p95 and `86,553,600` fixed terrain bytes. Production Worker version
+`85daaca2-99de-4abb-9855-4e35e0f1640c` serves byte-verified Explorer Wasm
+SHA-256
+`c437b22fe123edd2f6ea83af760c1b58129c044a81b1679250f80f028ab58f5c`.
 
 The pinned release acceptance sequence rendered initial 3D, continuous X/Z/
 diagonal movement, anchored zoom, map, and orbit through both a real
