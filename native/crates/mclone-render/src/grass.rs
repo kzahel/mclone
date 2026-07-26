@@ -465,7 +465,7 @@ fn create_grass_interaction_layout(device: &wgpu::Device) -> wgpu::BindGroupLayo
 }
 
 fn grass_shader_source(variant: GrassPipelineVariant) -> String {
-    match variant {
+    let template = match variant {
         GrassPipelineVariant::Direct => include_str!("shaders/grass.wgsl").to_owned(),
         GrassPipelineVariant::DirectMultiview => {
             include_str!("shaders/grass_multiview.wgsl").to_owned()
@@ -478,7 +478,9 @@ fn grass_shader_source(variant: GrassPipelineVariant) -> String {
         GrassPipelineVariant::ClippedPlacedMultiview => {
             clipped_placed_multiview_grass_shader_source()
         }
-    }
+    };
+    mclone_render_color::inject_target_color_transfer_wgsl(&template)
+        .expect("grass WGSL has one target-color transfer marker")
 }
 
 fn clipped_placed_grass_shader_source() -> String {

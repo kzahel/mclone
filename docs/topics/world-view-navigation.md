@@ -24,8 +24,10 @@ cross-host correction as three bounded children. Tactical
 [`254`](../tactical/254-ui-less-world-explorer-host.md) completed UI-less
 browser/native presentation on 2026-07-26: initialized content is terrain-only
 and an explicit smoke observer replaces the ordinary semantic frame mirror.
-The remaining children own dark target-independent color output in
-[`255`](../tactical/255-world-explorer-color-output-parity.md) and shared
+Tactical
+[`255`](../tactical/255-world-explorer-color-output-parity.md) completed dark,
+target-independent Explorer color on 2026-07-26 without changing Terrain
+Lab's identity-output entry point. The remaining child owns shared
 native-thread/browser-Worker vegetation execution in
 [`256`](../tactical/256-shared-horizon-vegetation-worker-topology.md).
 `mclone-view-control` now owns shared map/orbit/contact semantics for both the

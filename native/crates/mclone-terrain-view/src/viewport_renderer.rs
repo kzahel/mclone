@@ -3,6 +3,7 @@ use std::mem::size_of;
 use std::num::NonZeroU64;
 use std::sync::mpsc;
 
+use mclone_render_color::{RenderTargetColorTransform, color_transform_wgpu};
 use mclone_worldgen::levelgen::{
     McloneOverworldSamplingTopology, McloneOverworldVegetationPlanCache, McloneTreeFamily,
     McloneVegetationSource,
@@ -16,13 +17,13 @@ use mclone_worldgen::terrain_preview::{
 };
 
 use super::{
-    TERRAIN_PREVIEW_DEPTH_FORMAT, TERRAIN_PREVIEW_RENDER_WGSL, TERRAIN_PREVIEW_SAMPLE_BYTES,
-    TERRAIN_PREVIEW_TREE_WGSL, TERRAIN_PREVIEW_UNIFORM_BYTES, TERRAIN_PREVIEW_WORKGROUP_AXIS,
-    TerrainClipmap, TerrainClipmapConfig, TerrainClipmapDiagnostics, TerrainClipmapTile,
-    TerrainHorizonPresentation, TerrainPreviewCamera, TerrainPreviewDrawOptions,
-    TerrainPreviewLayer, TerrainPreviewSource, TerrainPreviewSplitLayout, TerrainViewportPlan,
-    TerrainViewportTileId, parse_samples, terrain_horizon_orbit_target_y,
-    terrain_preview_compute_wgsl, terrain_preview_focus_y_for_profile,
+    TERRAIN_PREVIEW_DEPTH_FORMAT, TERRAIN_PREVIEW_SAMPLE_BYTES, TERRAIN_PREVIEW_UNIFORM_BYTES,
+    TERRAIN_PREVIEW_WORKGROUP_AXIS, TerrainClipmap, TerrainClipmapConfig,
+    TerrainClipmapDiagnostics, TerrainClipmapTile, TerrainHorizonPresentation,
+    TerrainPreviewCamera, TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource,
+    TerrainPreviewSplitLayout, TerrainViewportPlan, TerrainViewportTileId, parse_samples,
+    terrain_horizon_orbit_target_y, terrain_preview_compute_wgsl,
+    terrain_preview_focus_y_for_profile, terrain_preview_render_wgsl, terrain_preview_tree_wgsl,
     viewport_uniform_bytes_for_request, viewport_uniform_bytes_for_request_with_presentation,
 };
 
@@ -602,6 +603,7 @@ pub struct TerrainViewportRenderer {
     compute_pipeline: wgpu::ComputePipeline,
     render_pipeline: wgpu::RenderPipeline,
     tree_pipeline: wgpu::RenderPipeline,
+    clear_color: wgpu::Color,
     depth: TerrainViewportDepthTarget,
     depth_capture_enabled: bool,
     cache: HashMap<TerrainViewportTileId, TerrainViewportGpuTile>,
@@ -649,6 +651,27 @@ impl TerrainViewportRenderer {
         width: u32,
         height: u32,
         material_atlas: TerrainPreviewMaterialAtlas<'_>,
+    ) -> Result<Self, String> {
+        Self::new_with_target_color_transform(
+            device,
+            queue,
+            color_format,
+            width,
+            height,
+            material_atlas,
+            RenderTargetColorTransform::Identity,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_target_color_transform(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+        material_atlas: TerrainPreviewMaterialAtlas<'_>,
+        target_color_transform: RenderTargetColorTransform,
     ) -> Result<Self, String> {
         let samples_per_axis = TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS + 1;
         let sample_count_per_tile = samples_per_axis
@@ -716,11 +739,15 @@ impl TerrainViewportRenderer {
         });
         let render_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mclone_terrain_viewport_render_shader"),
-            source: wgpu::ShaderSource::Wgsl(TERRAIN_PREVIEW_RENDER_WGSL.into()),
+            source: wgpu::ShaderSource::Wgsl(
+                terrain_preview_render_wgsl(target_color_transform).into(),
+            ),
         });
         let tree_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mclone_terrain_viewport_tree_shader"),
-            source: wgpu::ShaderSource::Wgsl(TERRAIN_PREVIEW_TREE_WGSL.into()),
+            source: wgpu::ShaderSource::Wgsl(
+                terrain_preview_tree_wgsl(target_color_transform).into(),
+            ),
         });
         let compute_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -848,6 +875,15 @@ impl TerrainViewportRenderer {
             compute_pipeline,
             render_pipeline,
             tree_pipeline,
+            clear_color: color_transform_wgpu(
+                wgpu::Color {
+                    r: 0.025,
+                    g: 0.035,
+                    b: 0.055,
+                    a: 1.0,
+                },
+                target_color_transform,
+            ),
             depth: TerrainViewportDepthTarget::new(device, width, height),
             depth_capture_enabled: false,
             cache: HashMap::new(),
@@ -1979,12 +2015,7 @@ impl TerrainViewportRenderer {
                 view: color_view,
                 resolve_target: None,
                 ops: wgpu::Operations {
-                    load: wgpu::LoadOp::Clear(wgpu::Color {
-                        r: 0.025,
-                        g: 0.035,
-                        b: 0.055,
-                        a: 1.0,
-                    }),
+                    load: wgpu::LoadOp::Clear(self.clear_color),
                     store: wgpu::StoreOp::Store,
                 },
             })],
@@ -2128,15 +2159,41 @@ impl TerrainHorizonRenderer {
         config: TerrainClipmapConfig,
         vegetation_enabled: bool,
     ) -> Result<Self, String> {
-        let clipmap = TerrainClipmap::new(config)?;
-        let config = clipmap.config();
-        let renderer = TerrainViewportRenderer::new(
+        Self::new_with_target_color_transform(
             device,
             queue,
             color_format,
             width,
             height,
             material_atlas,
+            config,
+            vegetation_enabled,
+            RenderTargetColorTransform::Identity,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_target_color_transform(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+        material_atlas: TerrainPreviewMaterialAtlas<'_>,
+        config: TerrainClipmapConfig,
+        vegetation_enabled: bool,
+        target_color_transform: RenderTargetColorTransform,
+    ) -> Result<Self, String> {
+        let clipmap = TerrainClipmap::new(config)?;
+        let config = clipmap.config();
+        let renderer = TerrainViewportRenderer::new_with_target_color_transform(
+            device,
+            queue,
+            color_format,
+            width,
+            height,
+            material_atlas,
+            target_color_transform,
         )?;
         let mut slots = Vec::with_capacity(config.allocation_slots() as usize);
         for level in 0..config.level_count {
@@ -2406,12 +2463,7 @@ impl TerrainHorizonRenderer {
                     view: color_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(wgpu::Color {
-                            r: 0.025,
-                            g: 0.035,
-                            b: 0.055,
-                            a: 1.0,
-                        }),
+                        load: wgpu::LoadOp::Clear(self.renderer.clear_color),
                         store: wgpu::StoreOp::Store,
                     },
                 })],

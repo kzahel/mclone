@@ -44,47 +44,13 @@ fn lerp_vec3(left: vec3<f32>, right: vec3<f32>, delta: f32) -> vec3<f32> {
     return left + (right - left) * delta;
 }
 
-fn srgb_decode_channel(value: f32) -> f32 {
-    let clamped = clamp(value, 0.0, 1.0);
-    if (clamped <= 0.04045) {
-        return clamped / 12.92;
-    }
-    return pow((clamped + 0.055) / 1.055, 2.4);
-}
-
-fn srgb_encode_channel(value: f32) -> f32 {
-    let clamped = clamp(value, 0.0, 1.0);
-    if (clamped <= 0.0031308) {
-        return clamped * 12.92;
-    }
-    return 1.055 * pow(clamped, 1.0 / 2.4) - 0.055;
-}
-
-fn srgb_decode(color: vec3<f32>) -> vec3<f32> {
-    return vec3<f32>(
-        srgb_decode_channel(color.r),
-        srgb_decode_channel(color.g),
-        srgb_decode_channel(color.b),
-    );
-}
-
-fn srgb_encode(color: vec3<f32>) -> vec3<f32> {
-    return vec3<f32>(
-        srgb_encode_channel(color.r),
-        srgb_encode_channel(color.g),
-        srgb_encode_channel(color.b),
-    );
-}
+// __MCLONE_TARGET_COLOR_TRANSFER_WGSL__
 
 fn apply_color_profile(color: vec4<f32>, uniforms: ViewUniforms) -> vec4<f32> {
-    let mode = uniforms.render_options.w;
-    if (mode > 1.5) {
-        return vec4<f32>(srgb_encode(color.rgb), color.a);
-    }
-    if (mode > 0.5) {
-        return vec4<f32>(srgb_decode(color.rgb), color.a);
-    }
-    return color;
+    return mclone_apply_target_color_transform_rgba(
+        color,
+        uniforms.render_options.w,
+    );
 }
 
 fn lightmap_color(block_light_level: f32, sky_light_level: f32, sky_darken_value: f32) -> vec3<f32> {

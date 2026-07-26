@@ -65,8 +65,12 @@ successful browser surface contains only the canvas, and a separate
 installing any ordinary-page global. The 5,625-byte production JavaScript
 shell retains only loading, canvas, raw observation, rAF, resize/visibility,
 and generic fatal mechanics. Tactical
-[`255`](../tactical/255-world-explorer-color-output-parity.md) moves the
-selected dark appearance behind an explicit shared target transform. Tactical
+[`255`](../tactical/255-world-explorer-color-output-parity.md) completed on
+2026-07-26. Browser now truthfully reports `Rgba8Unorm` plus identity while
+native reports `Bgra8UnormSrgb` plus sRGB decode; both select the shared
+`vanilla` display-space profile and produce the accepted dark appearance.
+The small `mclone-render-color` dependency owns CPU and generated WGSL
+transfer math without crossing into the full renderer. Tactical
 [`256`](../tactical/256-shared-horizon-vegetation-worker-topology.md) keeps
 browser Worker mechanics domain-blind while making vegetation coordination
 shared with native.

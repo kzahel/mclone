@@ -22,6 +22,9 @@ struct TerrainPreviewSample {
     forest_detail: vec4<f32>,
 };
 
+// __MCLONE_TARGET_COLOR_TRANSFER_WGSL__
+const terrain_target_color_transform: f32 = __MCLONE_TARGET_COLOR_TRANSFORM__;
+
 @group(0) @binding(0)
 var<uniform> params: TerrainPreviewParams;
 
@@ -633,5 +636,8 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
             color = mix(color, color * vec3<f32>(0.57, 0.82, 0.58), cover * 0.36);
         }
     }
-    return vec4<f32>(color, 1.0);
+    return mclone_apply_target_color_transform_rgba(
+        vec4<f32>(color, 1.0),
+        terrain_target_color_transform,
+    );
 }

@@ -1,7 +1,7 @@
 # Tactical 253: World Explorer Cross-Host Parity
 
-Status: active parent; Tactical 254 completed 2026-07-26, with implementation
-continuing in Tacticals 255–256.
+Status: active parent; Tacticals 254–255 completed 2026-07-26, with
+implementation continuing in Tactical 256.
 
 Topics:
 
@@ -80,7 +80,14 @@ returns no semantic frame report, and installs no diagnostic global. An
 explicit query-gated smoke observer reads coherent Rust-authored frame
 snapshots, while desktop/mobile headed-browser and native/offscreen captures
 prove unobstructed terrain. Tactical
-[`255`](255-world-explorer-color-output-parity.md) is the next bounded child.
+[`255`](255-world-explorer-color-output-parity.md) completed on 2026-07-26.
+The explicit `vanilla` display-space profile now preserves the selected dark
+appearance across browser UNORM and native/offscreen sRGB targets. A
+lightweight shared color crate owns the CPU and WGSL transfer definition,
+format-pair GPU evidence passes, and pinned browser/native captures satisfy
+the documented color tolerance. Tactical
+[`256`](256-shared-horizon-vegetation-worker-topology.md) is the next bounded
+child.
 
 ## Campaign Acceptance
 

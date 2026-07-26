@@ -3,6 +3,7 @@ const WEB_SMOKE_OBSERVER: &str = include_str!("../www/world-explorer-smoke-obser
 const WEB_RUST_HOST: &str = include_str!("../src/web.rs");
 const WEB_HTML: &str = include_str!("../www/index.html");
 const WEB_CSS: &str = include_str!("../www/world-explorer.css");
+const EXPLORER_MANIFEST: &str = include_str!("../Cargo.toml");
 
 #[test]
 fn ordinary_browser_host_contains_no_explorer_diagnostic_projection() {
@@ -61,4 +62,12 @@ fn successful_browser_surface_hides_the_generic_startup_fallback() {
     assert!(WEB_APP.contains("void boot().catch(showFatalError);"));
     assert!(WEB_APP.contains("status.hidden = false;"));
     assert!(WEB_APP.contains("shell.dataset.failed = \"true\";"));
+}
+
+#[test]
+fn explorer_color_contract_stays_behind_the_lightweight_firewall() {
+    assert!(EXPLORER_MANIFEST.contains("mclone-render-color.workspace = true"));
+    assert!(!EXPLORER_MANIFEST.contains("\nmclone-render.workspace = true"));
+    assert!(!EXPLORER_MANIFEST.contains("\nmclone-scene.workspace = true"));
+    assert!(!EXPLORER_MANIFEST.contains("\nmclone-ui.workspace = true"));
 }

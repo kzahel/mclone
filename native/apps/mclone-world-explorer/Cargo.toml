@@ -14,6 +14,7 @@ anyhow.workspace = true
 mclone-assets.workspace = true
 mclone-core.workspace = true
 mclone-mesh.workspace = true
+mclone-render-color.workspace = true
 mclone-terrain-view.workspace = true
 mclone-view-control.workspace = true
 mclone-worldgen.workspace = true

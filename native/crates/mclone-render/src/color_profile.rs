@@ -1,66 +1,12 @@
-use std::str::FromStr;
+pub use mclone_render_color::{
+    RenderColorProfile, RenderTargetColorTransform, color_transform_rgb, color_transform_wgpu,
+    preferred_non_srgb_format,
+};
 
 pub const DEFAULT_RENDER_COLOR_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 pub const DEFAULT_RENDER_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 pub const DEFAULT_RENDER_SAMPLE_COUNT: u32 = 1;
 pub const DEFAULT_RENDER_SCALE: f32 = 1.0;
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum RenderColorProfile {
-    #[default]
-    Vanilla,
-    StylizedBright,
-    LinearExperimental,
-}
-
-impl RenderColorProfile {
-    pub const fn as_str(self) -> &'static str {
-        match self {
-            Self::Vanilla => "vanilla",
-            Self::StylizedBright => "stylized-bright",
-            Self::LinearExperimental => "linear-experimental",
-        }
-    }
-
-    pub const fn label(self) -> &'static str {
-        match self {
-            Self::Vanilla => "VANILLA",
-            Self::StylizedBright => "BRIGHT",
-            Self::LinearExperimental => "LINEAR",
-        }
-    }
-
-    pub fn target_color_transform(
-        self,
-        target_format: wgpu::TextureFormat,
-    ) -> RenderTargetColorTransform {
-        match (self, target_format.is_srgb()) {
-            (Self::Vanilla, true) => RenderTargetColorTransform::SrgbDecode,
-            (Self::StylizedBright, false) => RenderTargetColorTransform::SrgbEncode,
-            _ => RenderTargetColorTransform::Identity,
-        }
-    }
-}
-
-impl FromStr for RenderColorProfile {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        let normalized = value
-            .trim()
-            .to_ascii_lowercase()
-            .replace('_', "-")
-            .replace(' ', "-");
-        match normalized.as_str() {
-            "vanilla" | "java" | "minecraft" | "minecraft-vanilla" => Ok(Self::Vanilla),
-            "stylized-bright" | "stylized" | "bright" => Ok(Self::StylizedBright),
-            "linear-experimental" | "linear" | "pbr" | "hdr" => Ok(Self::LinearExperimental),
-            _ => Err(format!(
-                "expected vanilla, stylized-bright, or linear-experimental, got `{value}`"
-            )),
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RenderConfig {
@@ -148,15 +94,7 @@ impl RenderConfig {
         caps: &wgpu::SurfaceCapabilities,
         profile: RenderColorProfile,
     ) -> Option<wgpu::TextureFormat> {
-        let _ = profile;
-        preferred_non_srgb_format(caps.formats.iter().copied())
-            .or_else(|| {
-                caps.formats
-                    .iter()
-                    .copied()
-                    .find(wgpu::TextureFormat::is_srgb)
-            })
-            .or_else(|| caps.formats.first().copied())
+        mclone_render_color::preferred_surface_format_for_profile(caps, profile)
     }
 
     pub fn diagnostic_label(self) -> String {
@@ -199,81 +137,11 @@ impl std::fmt::Display for RenderConfigError {
 
 impl std::error::Error for RenderConfigError {}
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum RenderTargetColorTransform {
-    Identity,
-    SrgbDecode,
-    SrgbEncode,
-}
-
-impl RenderTargetColorTransform {
-    pub const fn shader_code(self) -> f32 {
-        match self {
-            Self::Identity => 0.0,
-            Self::SrgbDecode => 1.0,
-            Self::SrgbEncode => 2.0,
-        }
-    }
-}
-
 pub fn preferred_surface_format_for_profile(
     caps: &wgpu::SurfaceCapabilities,
     profile: RenderColorProfile,
 ) -> Option<wgpu::TextureFormat> {
     RenderConfig::preferred_surface_format_for_profile(caps, profile)
-}
-
-pub fn preferred_non_srgb_format(
-    formats: impl IntoIterator<Item = wgpu::TextureFormat>,
-) -> Option<wgpu::TextureFormat> {
-    let formats = formats.into_iter().collect::<Vec<_>>();
-    [
-        wgpu::TextureFormat::Bgra8Unorm,
-        wgpu::TextureFormat::Rgba8Unorm,
-    ]
-    .into_iter()
-    .find(|format| formats.contains(format))
-    .or_else(|| formats.into_iter().find(|format| !format.is_srgb()))
-}
-
-pub fn color_transform_rgb(color: [f32; 3], transform: RenderTargetColorTransform) -> [f32; 3] {
-    color.map(|channel| match transform {
-        RenderTargetColorTransform::Identity => channel.clamp(0.0, 1.0),
-        RenderTargetColorTransform::SrgbDecode => srgb_decode(channel),
-        RenderTargetColorTransform::SrgbEncode => srgb_encode(channel),
-    })
-}
-
-pub fn color_transform_wgpu(
-    color: wgpu::Color,
-    transform: RenderTargetColorTransform,
-) -> wgpu::Color {
-    let [r, g, b] =
-        color_transform_rgb([color.r as f32, color.g as f32, color.b as f32], transform);
-    wgpu::Color {
-        r: f64::from(r),
-        g: f64::from(g),
-        b: f64::from(b),
-        a: color.a,
-    }
-}
-
-fn srgb_decode(value: f32) -> f32 {
-    let value = value.clamp(0.0, 1.0);
-    if value <= 0.04045 {
-        value / 12.92
-    } else {
-        ((value + 0.055) / 1.055).powf(2.4)
-    }
-}
-
-fn srgb_encode(value: f32) -> f32 {
-    let value = value.clamp(0.0, 1.0);
-    if value <= 0.003_130_8 {
-        value * 12.92
-    } else {
-        1.055 * value.powf(1.0 / 2.4) - 0.055
-    }
 }
 
 #[cfg(test)]

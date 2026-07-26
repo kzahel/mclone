@@ -19,6 +19,7 @@ const allowedMclonePackages = new Set([
   "mclone-core",
   "mclone-light",
   "mclone-mesh",
+  "mclone-render-color",
   "mclone-terrain-view",
   "mclone-view-control",
   "mclone-world-explorer",

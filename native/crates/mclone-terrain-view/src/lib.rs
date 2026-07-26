@@ -106,6 +106,20 @@ pub fn terrain_preview_compute_wgsl() -> String {
         .replace("// __MCLONE_PRODUCTION_FIELD_CONSTANTS__", &constants)
 }
 
+pub fn terrain_preview_render_wgsl(
+    transform: mclone_render_color::RenderTargetColorTransform,
+) -> String {
+    mclone_render_color::inject_target_color_transform_wgsl(TERRAIN_PREVIEW_RENDER_WGSL, transform)
+        .expect("terrain preview render WGSL has one color transfer and transform marker")
+}
+
+pub fn terrain_preview_tree_wgsl(
+    transform: mclone_render_color::RenderTargetColorTransform,
+) -> String {
+    mclone_render_color::inject_target_color_transform_wgsl(TERRAIN_PREVIEW_TREE_WGSL, transform)
+        .expect("terrain preview tree WGSL has one color transfer and transform marker")
+}
+
 fn write_field_constants(
     destination: &mut String,
     name: &str,
@@ -672,7 +686,12 @@ impl TerrainPreviewRenderer {
         });
         let render_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mclone_terrain_preview_render_shader"),
-            source: wgpu::ShaderSource::Wgsl(TERRAIN_PREVIEW_RENDER_WGSL.into()),
+            source: wgpu::ShaderSource::Wgsl(
+                terrain_preview_render_wgsl(
+                    mclone_render_color::RenderTargetColorTransform::Identity,
+                )
+                .into(),
+            ),
         });
         let compute_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -1273,10 +1292,14 @@ mod tests {
     #[test]
     fn compute_and_render_shaders_validate() {
         validate_shader(&terrain_preview_compute_wgsl(), "compute_main");
-        validate_shader(TERRAIN_PREVIEW_RENDER_WGSL, "vertex_main");
-        validate_shader(TERRAIN_PREVIEW_RENDER_WGSL, "fragment_main");
-        validate_shader(TERRAIN_PREVIEW_TREE_WGSL, "vertex_main");
-        validate_shader(TERRAIN_PREVIEW_TREE_WGSL, "fragment_main");
+        let render =
+            terrain_preview_render_wgsl(mclone_render_color::RenderTargetColorTransform::Identity);
+        let tree =
+            terrain_preview_tree_wgsl(mclone_render_color::RenderTargetColorTransform::Identity);
+        validate_shader(&render, "vertex_main");
+        validate_shader(&render, "fragment_main");
+        validate_shader(&tree, "vertex_main");
+        validate_shader(&tree, "fragment_main");
     }
 
     #[test]

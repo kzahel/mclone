@@ -7,6 +7,7 @@ use mclone_assets::{
 };
 use mclone_core::BlockStateId;
 use mclone_mesh::load_first_party_textured_terrain_assets_with_presentation;
+use mclone_render_color::{RenderColorProfile, RenderTargetColorTransform};
 use mclone_terrain_view::{
     TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainClipmapConfig, TerrainHorizonFrameStats,
     TerrainPreviewMaterialAtlas,
@@ -112,6 +113,9 @@ struct WebExplorerReport {
     blocks_across_exact: f64,
     view: &'static str,
     projection: &'static str,
+    color_profile: &'static str,
+    color_format: String,
+    color_transform: &'static str,
     yaw_radians: f64,
     pitch_radians: f64,
     allocation_slots: u32,
@@ -220,6 +224,9 @@ impl WebWorldExplorer {
                 self.session.view_state(),
                 self.session.has_held_motion(),
                 stats,
+                self.session.color_profile(),
+                self.session.color_format(),
+                self.session.target_color_transform(),
             ));
         }
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -454,6 +461,7 @@ impl WebWorldExplorer {
                 initial_view: options.view_state(),
                 clipmap: TerrainClipmapConfig::default(),
                 vegetation_enabled: false,
+                color_profile: RenderColorProfile::Vanilla,
             },
             TerrainPreviewMaterialAtlas {
                 width: assets.atlas.width,
@@ -554,6 +562,9 @@ fn explorer_report(
     state: WorldViewState,
     held_motion: bool,
     stats: TerrainHorizonFrameStats,
+    color_profile: RenderColorProfile,
+    color_format: wgpu::TextureFormat,
+    color_transform: RenderTargetColorTransform,
 ) -> WebExplorerReport {
     WebExplorerReport {
         revision: stats.revision,
@@ -572,6 +583,9 @@ fn explorer_report(
             WorldViewProjection::Orthographic => "orthographic",
             WorldViewProjection::Perspective => "perspective",
         },
+        color_profile: color_profile.as_str(),
+        color_format: format!("{color_format:?}"),
+        color_transform: color_transform.as_str(),
         yaw_radians: state.yaw_radians,
         pitch_radians: state.pitch_radians,
         allocation_slots: stats.allocation_slots,

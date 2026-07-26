@@ -29,8 +29,11 @@ Side-by-side native/browser review also found three proof-host parity gaps.
 Active parent Tactical
 [`253`](../tactical/253-world-explorer-cross-host-parity.md) sequences their
 independent corrections. Tactical
-[`255`](../tactical/255-world-explorer-color-output-parity.md) makes the
-selected dark terrain appearance independent of surface format, and Tactical
+[`255`](../tactical/255-world-explorer-color-output-parity.md) completed the
+shared display-space color contract on 2026-07-26. Terrain, material/river
+overrides, tree proxies, and the background now use one generated target
+transform, preserving the selected dark appearance on UNORM and sRGB targets.
+Tactical
 [`256`](../tactical/256-shared-horizon-vegetation-worker-topology.md) replaces
 native synchronous/browser-disabled tree compilation with one shared
 coordinator over native-thread and browser-Worker executors. UI-less host

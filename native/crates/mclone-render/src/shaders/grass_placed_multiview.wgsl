@@ -94,39 +94,13 @@ fn lightmap_color(
     return clamp(color, vec3<f32>(0.0), vec3<f32>(1.0));
 }
 
-fn srgb_decode_channel(value: f32) -> f32 {
-    let clamped = clamp(value, 0.0, 1.0);
-    if (clamped <= 0.04045) {
-        return clamped / 12.92;
-    }
-    return pow((clamped + 0.055) / 1.055, 2.4);
-}
-
-fn srgb_encode_channel(value: f32) -> f32 {
-    let clamped = clamp(value, 0.0, 1.0);
-    if (clamped <= 0.0031308) {
-        return clamped * 12.92;
-    }
-    return 1.055 * pow(clamped, 1.0 / 2.4) - 0.055;
-}
+// __MCLONE_TARGET_COLOR_TRANSFER_WGSL__
 
 fn apply_color_profile(color: vec3<f32>, uniforms: ViewUniforms) -> vec3<f32> {
-    let mode = uniforms.render_options.w;
-    if (mode > 1.5) {
-        return vec3<f32>(
-            srgb_encode_channel(color.r),
-            srgb_encode_channel(color.g),
-            srgb_encode_channel(color.b),
-        );
-    }
-    if (mode > 0.5) {
-        return vec3<f32>(
-            srgb_decode_channel(color.r),
-            srgb_decode_channel(color.g),
-            srgb_decode_channel(color.b),
-        );
-    }
-    return color;
+    return mclone_apply_target_color_transform_rgb(
+        color,
+        uniforms.render_options.w,
+    );
 }
 
 fn interaction_nearest_periodic_lift(value: f32, observer: f32, period: f32) -> f32 {

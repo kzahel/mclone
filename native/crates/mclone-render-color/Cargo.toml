@@ -1,19 +1,17 @@
 [package]
-name = "mclone-terrain-view"
+name = "mclone-render-color"
 version = "0.0.0"
 edition.workspace = true
 rust-version.workspace = true
 publish.workspace = true
 
 [dependencies]
-mclone-core.workspace = true
-mclone-render-color.workspace = true
-mclone-worldgen.workspace = true
 wgpu.workspace = true
 
 [dev-dependencies]
 naga.workspace = true
+pollster.workspace = true
 
 [lib]
-name = "mclone_terrain_view"
+name = "mclone_render_color"
 path = "src/lib.rs"

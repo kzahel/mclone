@@ -1,6 +1,6 @@
 # Tactical 255: World Explorer Color Output Parity
 
-Status: proposed.
+Status: completed 2026-07-26.
 
 Topics:
 
@@ -118,6 +118,76 @@ semantics silently is not acceptable.
 - Terrain Lab and the full game do not receive an accidental profile change.
 - The Explorer dependency firewall remains focused and records any newly
   allowed lightweight shared rendering crate.
+
+## Implementation Record
+
+The accepted browser baseline was captured before implementation at
+1,280 by 720 pixels. Its SHA-256 was
+`384831ef9bbede9a7ecb22818cb6860562b97223266a3c1077a773098e7c8ea6`;
+the completed headed-browser capture has the same hash.
+
+`mclone-render-color` is now the small authoritative owner for:
+
+- `RenderColorProfile` and `RenderTargetColorTransform`;
+- CPU sRGB encode/decode and target-format selection;
+- the generated WGSL transfer implementation; and
+- strict WGSL marker replacement for fixed or uniform-selected transforms.
+
+`mclone-render` re-exports its existing public color vocabulary and injects
+the shared WGSL into chunk and grass variants. `mclone-terrain-view` injects
+the same WGSL into terrain/material/river and tree-proxy fragments and applies
+the matching CPU transform to the clear color. The old terrain-view
+constructor remains identity-output for Terrain Lab. World Explorer alone
+selects `vanilla`, then derives the physical-target transform in its shared
+session.
+
+The dependency firewall explicitly admits `mclone-render-color`. It still
+rejects `mclone-render`, `mclone-scene`, `mclone-ui`, and the other game
+runtime crates.
+
+Diagnostics now report all three relevant facts:
+
+| Host | Product profile | Physical format | Target transform |
+|---|---|---|---|
+| Headed Chrome/Wayland | `vanilla` | `Rgba8Unorm` | `identity` |
+| Native Wayland/Vulkan | `vanilla` | `Bgra8UnormSrgb` | `srgb-decode` |
+| Native offscreen | `vanilla` | `Rgba8UnormSrgb` | `srgb-decode` |
+
+The explicit GPU format-pair fixture renders a display-space swatch over a
+display-space clear through `Rgba8Unorm` and `Rgba8UnormSrgb`. Their readback
+channels match within one encoded byte.
+
+Pinned native and browser captures used seed `12345`, center `(-304, 336)`,
+4,096 blocks across, perspective 3D, yaw `pi/4`, pitch `0.52`, and
+1,280 by 720 pixels. Both were inspected. ImageMagick comparison reported
+normalized MAE `0.00152386` and RMSE `0.00870103`, within the acceptance
+tolerance of MAE `1/255` and RMSE `3/255`. Native vegetation remained enabled
+while browser vegetation remained deferred to Tactical
+[`256`](256-shared-horizon-vegetation-worker-topology.md), accounting for the
+small tree-proxy differences without changing terrain, material, river,
+lighting, or background color.
+
+Validation:
+
+```text
+cargo test -p mclone-render-color
+cargo test -p mclone-render-color --test wgpu_format_pair -- --ignored
+cargo test -p mclone-render -p mclone-terrain-view --lib
+cargo test -p mclone-render grass::tests::all_grass_pipeline_variants_validate_on_gpu -- --ignored
+cargo test -p mclone-world-explorer
+cargo check -p mclone-terrain-lab
+cargo check -p mclone-world-explorer --lib --target wasm32-unknown-unknown
+pnpm native:world-explorer:deps
+pnpm native:world-explorer:web:build
+pnpm host:check
+pnpm native:world-explorer:web:smoke
+pnpm native:desktop-offscreen:smoke
+```
+
+The native surface and offscreen commands additionally captured and validated
+direct depth alongside the inspected color outputs. The full-game offscreen
+capture and all six full-renderer grass pipeline variants were also inspected
+or GPU-validated after the WGSL extraction.
 
 ## Non-Goals
 

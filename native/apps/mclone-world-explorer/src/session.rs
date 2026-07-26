@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use mclone_render_color::{RenderColorProfile, RenderTargetColorTransform};
 use mclone_terrain_view::{
     TerrainClipmapConfig, TerrainHorizonFrameStats, TerrainHorizonPresentation,
     TerrainHorizonRenderer, TerrainPreviewCamera, TerrainPreviewMaterialAtlas,
@@ -20,11 +21,14 @@ pub struct WorldExplorerConfig {
     pub initial_view: WorldViewState,
     pub clipmap: TerrainClipmapConfig,
     pub vegetation_enabled: bool,
+    pub color_profile: RenderColorProfile,
 }
 
 pub struct WorldExplorerSession {
     renderer: TerrainHorizonRenderer,
     config: WorldExplorerConfig,
+    color_format: wgpu::TextureFormat,
+    target_color_transform: RenderTargetColorTransform,
     view_state: WorldViewState,
     view_reducer: WorldViewReducer,
     contacts: ContactGestureReducer,
@@ -47,7 +51,8 @@ impl WorldExplorerSession {
     ) -> Result<Self, String> {
         let view_reducer = WorldViewReducer::default();
         let view_state = view_reducer.normalize(config.initial_view);
-        let renderer = TerrainHorizonRenderer::new(
+        let target_color_transform = config.color_profile.target_color_transform(color_format);
+        let renderer = TerrainHorizonRenderer::new_with_target_color_transform(
             device,
             queue,
             color_format,
@@ -56,10 +61,13 @@ impl WorldExplorerSession {
             material_atlas,
             config.clipmap,
             config.vegetation_enabled,
+            target_color_transform,
         )?;
         let mut session = Self {
             renderer,
             config,
+            color_format,
+            target_color_transform,
             view_state,
             view_reducer,
             contacts: ContactGestureReducer::default(),
@@ -91,6 +99,18 @@ impl WorldExplorerSession {
 
     pub const fn revision(&self) -> u64 {
         self.revision
+    }
+
+    pub const fn color_profile(&self) -> RenderColorProfile {
+        self.config.color_profile
+    }
+
+    pub const fn color_format(&self) -> wgpu::TextureFormat {
+        self.color_format
+    }
+
+    pub const fn target_color_transform(&self) -> RenderTargetColorTransform {
+        self.target_color_transform
     }
 
     pub fn apply_intent(&mut self, intent: WorldViewIntent) -> bool {
@@ -208,6 +228,7 @@ impl WorldExplorerSession {
         let stats = self.last_stats;
         format!(
             "seed={} center=({}, {}) blocks={} view={} revision={} \
+             color_profile={} color_format={:?} color_transform={} \
              coarse_ready_ms={} target_ready_ms={} resident_bytes={} \
              fixed_resident_bytes={} vegetation_bytes={} allocation_slots={} \
              ready_slots={} pending={} vegetation_ready={} vegetation_pending={} \
@@ -219,6 +240,9 @@ impl WorldExplorerSession {
             self.view_state.blocks_across_u32(),
             view_label(self.view_state.mode),
             self.revision,
+            self.config.color_profile.as_str(),
+            self.color_format,
+            self.target_color_transform.as_str(),
             duration_ms(self.coarse_ready_at),
             duration_ms(self.target_ready_at),
             stats.map_or(0, |stats| stats.resident_bytes),

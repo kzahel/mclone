@@ -1793,6 +1793,7 @@ dependencies = [
  "mclone-core",
  "mclone-diagnostics",
  "mclone-mesh",
+ "mclone-render-color",
  "mclone-ui",
  "naga",
  "pollster",
@@ -1801,6 +1802,15 @@ dependencies = [
  "serde_json",
  "wgpu",
  "winit",
+]
+
+[[package]]
+name = "mclone-render-color"
+version = "0.0.0"
+dependencies = [
+ "naga",
+ "pollster",
+ "wgpu",
 ]
 
 [[package]]
@@ -1904,6 +1914,7 @@ name = "mclone-terrain-view"
 version = "0.0.0"
 dependencies = [
  "mclone-core",
+ "mclone-render-color",
  "mclone-worldgen",
  "naga",
  "wgpu",
@@ -1961,6 +1972,7 @@ dependencies = [
  "mclone-assets",
  "mclone-core",
  "mclone-mesh",
+ "mclone-render-color",
  "mclone-terrain-view",
  "mclone-view-control",
  "mclone-worldgen",

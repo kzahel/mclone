@@ -11,6 +11,7 @@ use mclone_core::BlockStateId;
 use mclone_mesh::{
     TexturedTerrainAssets, load_first_party_textured_terrain_assets_with_presentation,
 };
+use mclone_render_color::RenderColorProfile;
 use mclone_terrain_view::{
     TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainClipmapConfig, TerrainHorizonFrameStats,
     TerrainPreviewMaterialAtlas,
@@ -52,6 +53,7 @@ impl ExplorerTerrain {
                 initial_view: options.initial_view_state(),
                 clipmap: TerrainClipmapConfig::default(),
                 vegetation_enabled: true,
+                color_profile: RenderColorProfile::Vanilla,
             },
             TerrainPreviewMaterialAtlas {
                 width: assets.atlas.width,

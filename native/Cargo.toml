@@ -17,6 +17,7 @@ members = [
   "crates/mclone-physics",
   "crates/mclone-protocol",
   "crates/mclone-render",
+  "crates/mclone-render-color",
   "crates/mclone-render-session",
   "crates/mclone-server",
   "crates/mclone-terrain-view",
@@ -80,6 +81,7 @@ mclone-path = { path = "crates/mclone-path" }
 mclone-physics = { path = "crates/mclone-physics" }
 mclone-protocol = { path = "crates/mclone-protocol" }
 mclone-render = { path = "crates/mclone-render" }
+mclone-render-color = { path = "crates/mclone-render-color" }
 mclone-render-session = { path = "crates/mclone-render-session" }
 mclone-server = { path = "crates/mclone-server" }
 mclone-terrain-view = { path = "crates/mclone-terrain-view" }

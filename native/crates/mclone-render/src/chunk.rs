@@ -3059,7 +3059,9 @@ impl TexturedChunkRenderer {
     pub fn new(device: &wgpu::Device, color_format: wgpu::TextureFormat) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mclone_chunk_textured_shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/chunk_textured.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                textured_shader_source(include_str!("shaders/chunk_textured.wgsl")).into(),
+            ),
         });
         let uniforms = PerViewUniformBuffer::new(
             device,
@@ -3189,7 +3191,8 @@ impl TexturedChunkMultiviewRenderer {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mclone_chunk_textured_multiview_shader"),
             source: wgpu::ShaderSource::Wgsl(
-                include_str!("shaders/chunk_textured_multiview.wgsl").into(),
+                textured_shader_source(include_str!("shaders/chunk_textured_multiview.wgsl"))
+                    .into(),
             ),
         });
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -3304,7 +3307,7 @@ impl PlacedTexturedSectionRenderer {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mclone_placed_textured_chunk_shader"),
             source: wgpu::ShaderSource::Wgsl(
-                include_str!("shaders/chunk_textured_placed.wgsl").into(),
+                textured_shader_source(include_str!("shaders/chunk_textured_placed.wgsl")).into(),
             ),
         });
         let uniforms = PerViewUniformBuffer::new(
@@ -3638,7 +3641,10 @@ impl PlacedTexturedSectionMultiviewRenderer {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mclone_placed_textured_chunk_multiview_shader"),
             source: wgpu::ShaderSource::Wgsl(
-                include_str!("shaders/chunk_textured_placed_multiview.wgsl").into(),
+                textured_shader_source(include_str!(
+                    "shaders/chunk_textured_placed_multiview.wgsl"
+                ))
+                .into(),
             ),
         });
         let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
@@ -3897,6 +3903,11 @@ impl SelectedPlacedMultiviewRenderer<'_> {
     }
 }
 
+fn textured_shader_source(template: &str) -> String {
+    mclone_render_color::inject_target_color_transfer_wgsl(template)
+        .expect("textured chunk WGSL has one target-color transfer marker")
+}
+
 fn clipped_placed_shader_source() -> String {
     let source = include_str!("shaders/chunk_textured_placed.wgsl");
     let source = source.replacen(
@@ -3922,7 +3933,7 @@ fn clipped_placed_shader_source() -> String {
     );
     assert_eq!(source.matches("clip_plane: vec4<f32>").count(), 1);
     assert_eq!(source.matches("uniforms.clip_plane").count(), 4);
-    source
+    textured_shader_source(&source)
 }
 
 fn clipped_placed_multiview_shader_source() -> String {
@@ -3947,7 +3958,7 @@ fn clipped_placed_multiview_shader_source() -> String {
     let source = source.replace(uniforms_and_texel, clipped_uniforms_and_texel);
     assert_eq!(source.matches("clip_plane: vec4<f32>").count(), 1);
     assert_eq!(source.matches("uniforms.clip_plane").count(), 4);
-    source
+    textured_shader_source(&source)
 }
 
 fn create_textured_chunk_pipeline(
