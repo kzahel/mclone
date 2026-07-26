@@ -442,6 +442,42 @@ pub fn terrain_preview_projection(
     )
 }
 
+pub fn terrain_horizon_chunk_render_view(
+    presentation: TerrainHorizonPresentation,
+    width: u32,
+    height: u32,
+) -> Result<mclone_render::chunk::ChunkRenderView, String> {
+    let target_y = terrain_horizon_orbit_target_y();
+    let projection = terrain_preview_projection_for_extent(
+        presentation.width_blocks as f32,
+        presentation.view,
+        presentation.camera,
+        width,
+        height,
+        target_y,
+    );
+    let center_x = presentation.center_x as f32;
+    let center_z = presentation.center_z as f32;
+    let camera = mclone_render::chunk::ChunkCamera {
+        eye: [
+            center_x + projection.eye_offset[0],
+            projection.target_y + projection.eye_offset[1],
+            center_z + projection.eye_offset[2],
+        ],
+        target: [center_x, projection.target_y, center_z],
+        up: projection.up,
+        fov_y_radians: projection.fov_y_radians,
+        z_near: projection.z_near,
+        z_far: projection.z_far,
+    };
+    Ok(match projection.kind {
+        TerrainPreviewProjectionKind::Orthographic => {
+            camera.render_orthographic_view(width, height, projection.vertical_half_extent * 2.0)
+        }
+        TerrainPreviewProjectionKind::Perspective => camera.render_view(width, height),
+    })
+}
+
 fn terrain_preview_projection_for_extent(
     blocks_across: f32,
     view: TerrainPreviewView,

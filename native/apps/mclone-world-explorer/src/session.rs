@@ -2,7 +2,8 @@ use std::time::Duration;
 
 use mclone_render_color::{RenderColorProfile, RenderTargetColorTransform};
 use mclone_terrain_view::{
-    TerrainClipmapConfig, TerrainHorizonFrameStats, TerrainHorizonPresentation,
+    ExactPaintedCoverageSnapshot, TerrainClipmapConfig, TerrainExactCoverageMode,
+    TerrainHorizonFrameStats, TerrainHorizonPresentation, TerrainHorizonRenderTarget,
     TerrainHorizonRenderer, TerrainPreviewCamera, TerrainPreviewMaterialAtlas,
     TerrainPreviewProjectionKind, TerrainPreviewView, TerrainVegetationExecutor,
 };
@@ -22,6 +23,39 @@ pub struct WorldExplorerConfig {
     pub clipmap: TerrainClipmapConfig,
     pub vegetation_enabled: bool,
     pub color_profile: RenderColorProfile,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum WorldExplorerCompositionMode {
+    #[default]
+    Horizon,
+    Exact,
+    Composed,
+    Coverage,
+}
+
+impl WorldExplorerCompositionMode {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Horizon => "horizon",
+            Self::Exact => "exact",
+            Self::Composed => "composed",
+            Self::Coverage => "coverage",
+        }
+    }
+
+    pub fn parse_label(value: &str) -> Result<Self, String> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "horizon" | "procedural" => Ok(Self::Horizon),
+            "exact" => Ok(Self::Exact),
+            "composed" | "composition" => Ok(Self::Composed),
+            "coverage" | "mask" => Ok(Self::Coverage),
+            other => Err(format!(
+                "unsupported World Explorer composition mode {other:?}; expected horizon, exact, \
+                 composed, or coverage"
+            )),
+        }
+    }
 }
 
 pub struct WorldExplorerSession {
@@ -166,6 +200,41 @@ impl WorldExplorerSession {
         color_view: &wgpu::TextureView,
         elapsed: Duration,
     ) -> Result<TerrainHorizonFrameStats, String> {
+        self.encode_horizon(device, queue, encoder, None, color_view, elapsed, None)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn encode_to_target(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: TerrainHorizonRenderTarget<'_>,
+        elapsed: Duration,
+        exact_coverage: Option<(&ExactPaintedCoverageSnapshot, TerrainExactCoverageMode)>,
+    ) -> Result<TerrainHorizonFrameStats, String> {
+        self.encode_horizon(
+            device,
+            queue,
+            encoder,
+            Some(target),
+            target.color_view,
+            elapsed,
+            exact_coverage,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn encode_horizon(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: Option<TerrainHorizonRenderTarget<'_>>,
+        color_view: &wgpu::TextureView,
+        elapsed: Duration,
+        exact_coverage: Option<(&ExactPaintedCoverageSnapshot, TerrainExactCoverageMode)>,
+    ) -> Result<TerrainHorizonFrameStats, String> {
         let motion_state = self.view_state;
         if let Some(intent) = self.held_motion.advance(motion_state, elapsed) {
             self.apply_intent(intent);
@@ -190,18 +259,63 @@ impl WorldExplorerSession {
                 },
             )?,
         )?;
-        let stats = self.renderer.encode(
-            device,
-            queue,
-            encoder,
-            color_view,
-            self.config.width,
-            self.config.height,
-            presentation,
-        )?;
+        if let Some((snapshot, mode)) = exact_coverage {
+            self.renderer
+                .set_exact_painted_coverage(queue, snapshot, mode)?;
+        } else {
+            self.renderer.clear_exact_painted_coverage();
+        }
+        let stats = match target {
+            Some(target) => self.renderer.encode_to_target(
+                device,
+                queue,
+                encoder,
+                target,
+                self.config.width,
+                self.config.height,
+                presentation,
+            )?,
+            None => self.renderer.encode(
+                device,
+                queue,
+                encoder,
+                color_view,
+                self.config.width,
+                self.config.height,
+                presentation,
+            )?,
+        };
         self.note_readiness(stats, elapsed);
         self.last_stats = Some(stats);
         Ok(stats)
+    }
+
+    pub fn exact_render_view(&self) -> Result<mclone_render::chunk::ChunkRenderView, String> {
+        let view_height_blocks = self.view_state.blocks_across * f64::from(self.config.height)
+            / f64::from(self.config.width);
+        let presentation = TerrainHorizonPresentation::new(
+            self.view_state.focus_x,
+            self.view_state.focus_z,
+            self.view_state.blocks_across,
+            view_height_blocks,
+            match self.view_state.mode {
+                WorldViewMode::Map => TerrainPreviewView::Map,
+                WorldViewMode::Orbit => TerrainPreviewView::ThreeDimensional,
+            },
+            TerrainPreviewCamera::new(
+                self.view_state.yaw_radians as f32,
+                self.view_state.pitch_radians as f32,
+                match self.view_state.projection {
+                    WorldViewProjection::Orthographic => TerrainPreviewProjectionKind::Orthographic,
+                    WorldViewProjection::Perspective => TerrainPreviewProjectionKind::Perspective,
+                },
+            )?,
+        )?;
+        mclone_terrain_view::terrain_horizon_chunk_render_view(
+            presentation,
+            self.config.width,
+            self.config.height,
+        )
     }
 
     pub fn copy_depth_to_buffer(

@@ -10,6 +10,6 @@ mod web_vegetation;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_vegetation::NativeTerrainVegetationExecutor;
-pub use session::{WorldExplorerConfig, WorldExplorerSession};
+pub use session::{WorldExplorerCompositionMode, WorldExplorerConfig, WorldExplorerSession};
 #[cfg(target_arch = "wasm32")]
 pub use web::{WebWorldExplorer, mclone_world_explorer_create};

@@ -14,6 +14,7 @@ use crate::input::NativeViewInput;
 use crate::options::ExplorerOptions;
 use crate::smoke::{SmokeCheckpoint, SmokeFrameOutcome, SmokeRecorder, SmokeSequence};
 use crate::terrain::ExplorerTerrain;
+use mclone_world_explorer::WorldExplorerCompositionMode;
 
 pub fn run_window(options: ExplorerOptions, started: Instant) -> Result<()> {
     let event_loop = EventLoop::new().context("failed to create World Explorer event loop")?;
@@ -469,6 +470,21 @@ impl WindowGpu {
     fn keyboard(&mut self, event: &winit::event::KeyEvent) -> Result<bool> {
         if self.smoke_sequence.is_some() {
             return Ok(false);
+        }
+        if event.state == ElementState::Pressed
+            && !event.repeat
+            && let PhysicalKey::Code(code) = event.physical_key
+        {
+            let mode = match code {
+                KeyCode::Digit1 | KeyCode::Numpad1 => Some(WorldExplorerCompositionMode::Horizon),
+                KeyCode::Digit2 | KeyCode::Numpad2 => Some(WorldExplorerCompositionMode::Exact),
+                KeyCode::Digit3 | KeyCode::Numpad3 => Some(WorldExplorerCompositionMode::Composed),
+                KeyCode::Digit4 | KeyCode::Numpad4 => Some(WorldExplorerCompositionMode::Coverage),
+                _ => None,
+            };
+            if let Some(mode) = mode {
+                return Ok(self.terrain.set_composition_mode(mode));
+            }
         }
         if let Some((direction, pressed)) = self.input.held_motion(event) {
             let changed = self.terrain.set_held_motion(direction, pressed);

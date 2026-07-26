@@ -79,13 +79,12 @@ struct VertexOutput {
     @location(8) @interpolate(flat) biome: u32,
 };
 
-fn exact_chunk_painted(world_xz: vec2<f32>) -> bool {
+fn exact_chunk_masked(chunk: vec2<i32>) -> bool {
     if exact_coverage.mode_count_generation.x == 0u
         || exact_coverage.origin_size.z <= 0
         || exact_coverage.origin_size.w <= 0 {
         return false;
     }
-    let chunk = vec2<i32>(floor(world_xz / 16.0));
     let local = chunk - exact_coverage.origin_size.xy;
     if local.x < 0 || local.y < 0
         || local.x >= exact_coverage.origin_size.z
@@ -94,6 +93,32 @@ fn exact_chunk_painted(world_xz: vec2<f32>) -> bool {
     }
     let bit = u32(local.y) * 64u + u32(local.x);
     return (exact_coverage_words[bit / 32u] & (1u << (bit % 32u))) != 0u;
+}
+
+fn exact_chunk_painted(world_xz: vec2<f32>) -> bool {
+    return exact_chunk_masked(vec2<i32>(floor(world_xz / 16.0)));
+}
+
+fn exact_chunk_painted_interior(world_xz: vec2<f32>) -> bool {
+    let chunk = vec2<i32>(floor(world_xz / 16.0));
+    if !exact_chunk_masked(chunk) {
+        return false;
+    }
+    let local = fract(world_xz / 16.0) * 16.0;
+    let collar = 1.5;
+    if local.x < collar && !exact_chunk_masked(chunk + vec2<i32>(-1, 0)) {
+        return false;
+    }
+    if local.x > 16.0 - collar && !exact_chunk_masked(chunk + vec2<i32>(1, 0)) {
+        return false;
+    }
+    if local.y < collar && !exact_chunk_masked(chunk + vec2<i32>(0, -1)) {
+        return false;
+    }
+    if local.y > 16.0 - collar && !exact_chunk_masked(chunk + vec2<i32>(0, 1)) {
+        return false;
+    }
+    return true;
 }
 
 fn grid_corner(vertex_in_cell: u32) -> vec2<u32> {
@@ -691,7 +716,8 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
     let exact_painted = exact_chunk_painted(input.world_xz);
-    if exact_coverage.mode_count_generation.x == 1u && exact_painted {
+    if exact_coverage.mode_count_generation.x == 1u
+        && exact_chunk_painted_interior(input.world_xz) {
         discard;
     }
     let world_dx = dpdx(input.world_xz);

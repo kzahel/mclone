@@ -11,22 +11,28 @@ use mclone_core::BlockStateId;
 use mclone_mesh::{
     TexturedTerrainAssets, load_first_party_textured_terrain_assets_with_presentation,
 };
+use mclone_render::chunk::ChunkTextureAtlas;
 use mclone_render_color::RenderColorProfile;
 use mclone_terrain_view::{
-    TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainClipmapConfig, TerrainHorizonFrameStats,
-    TerrainPreviewMaterialAtlas,
+    TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainClipmapConfig, TerrainExactCoverageMode,
+    TerrainHorizonFrameStats, TerrainHorizonRenderTarget, TerrainPreviewMaterialAtlas,
 };
 use mclone_view_control::{WorldViewHeldDirection, WorldViewIntent, WorldViewState};
 use mclone_world_explorer::{
-    NativeTerrainVegetationExecutor, WorldExplorerConfig, WorldExplorerSession,
+    NativeTerrainVegetationExecutor, WorldExplorerCompositionMode, WorldExplorerConfig,
+    WorldExplorerSession,
 };
 
+use crate::exact::{ExplorerExactStats, ExplorerExactTerrain};
 use crate::options::{ExplorerAssetProfile, ExplorerOptions};
 
 pub struct ExplorerTerrain {
     session: WorldExplorerSession,
     options: ExplorerOptions,
     started: Instant,
+    exact: ExplorerExactTerrain,
+    composition: WorldExplorerCompositionMode,
+    last_exact_stats: ExplorerExactStats,
 }
 
 impl ExplorerTerrain {
@@ -44,6 +50,8 @@ impl ExplorerTerrain {
                 *target = [sprite.u0, sprite.v0, sprite.u1, sprite.v1];
             }
         }
+        let target_color_transform =
+            RenderColorProfile::Vanilla.target_color_transform(color_format);
         let session = WorldExplorerSession::new(
             device,
             queue,
@@ -66,10 +74,31 @@ impl ExplorerTerrain {
             Some(Box::new(NativeTerrainVegetationExecutor::new())),
         )
         .map_err(anyhow::Error::msg)?;
+        let exact = ExplorerExactTerrain::new(
+            device,
+            queue,
+            color_format,
+            options.width,
+            options.height,
+            options.seed,
+            options.exact_radius,
+            Duration::from_millis(options.exact_delay_ms),
+            assets.catalog.clone(),
+            ChunkTextureAtlas {
+                width: assets.atlas.width,
+                height: assets.atlas.height,
+                rgba: assets.atlas.rgba(),
+            },
+            target_color_transform,
+        )?;
+        let composition = options.composition;
         Ok(Self {
             session,
             options,
             started,
+            exact,
+            composition,
+            last_exact_stats: ExplorerExactStats::default(),
         })
     }
 
@@ -77,6 +106,8 @@ impl ExplorerTerrain {
         self.options.width = width.max(1);
         self.options.height = height.max(1);
         self.session
+            .resize(device, self.options.width, self.options.height);
+        self.exact
             .resize(device, self.options.width, self.options.height);
         Ok(())
     }
@@ -88,7 +119,8 @@ impl ExplorerTerrain {
     pub fn title(&self) -> String {
         let state = self.session.view_state();
         format!(
-            "Mclone World Explorer — seed {} — ({}, {}) — {} blocks — {}",
+            "Mclone World Explorer — {} [1–4] — seed {} — ({}, {}) — {} blocks — {}",
+            self.composition.label(),
             self.options.seed,
             state.center_x_i32(),
             state.center_z_i32(),
@@ -98,6 +130,15 @@ impl ExplorerTerrain {
                 mclone_view_control::WorldViewMode::Orbit => "3d",
             },
         )
+    }
+
+    pub fn set_composition_mode(&mut self, mode: WorldExplorerCompositionMode) -> bool {
+        if self.composition == mode {
+            return false;
+        }
+        self.composition = mode;
+        self.options.composition = mode;
+        true
     }
 
     pub fn apply_intent(&mut self, intent: WorldViewIntent) -> Result<bool> {
@@ -123,9 +164,67 @@ impl ExplorerTerrain {
         encoder: &mut wgpu::CommandEncoder,
         color_view: &wgpu::TextureView,
     ) -> Result<TerrainHorizonFrameStats> {
-        self.session
-            .encode(device, queue, encoder, color_view, self.started.elapsed())
-            .map_err(anyhow::Error::msg)
+        if self.composition != WorldExplorerCompositionMode::Horizon {
+            let state = self.session.view_state();
+            self.exact.update_and_pump(
+                device,
+                state.focus_x.floor() as i32,
+                state.focus_z.floor() as i32,
+            )?;
+        }
+        let coverage = self.exact.coverage_snapshot().map_err(anyhow::Error::msg)?;
+        let coverage_mode = match self.composition {
+            WorldExplorerCompositionMode::Composed => {
+                Some((&coverage, TerrainExactCoverageMode::DiscardPainted))
+            }
+            WorldExplorerCompositionMode::Coverage => {
+                Some((&coverage, TerrainExactCoverageMode::VisualizePainted))
+            }
+            WorldExplorerCompositionMode::Horizon | WorldExplorerCompositionMode::Exact => None,
+        };
+        let depth_view = &self.exact.depth().view;
+        let clear_color = self.exact.clear_color();
+        let mut stats = self
+            .session
+            .encode_to_target(
+                device,
+                queue,
+                encoder,
+                TerrainHorizonRenderTarget {
+                    color_view,
+                    depth_view,
+                    color_load: wgpu::LoadOp::Clear(clear_color),
+                    color_store: wgpu::StoreOp::Store,
+                    depth_load: wgpu::LoadOp::Clear(0.0),
+                    depth_store: wgpu::StoreOp::Store,
+                },
+                self.started.elapsed(),
+                coverage_mode,
+            )
+            .map_err(anyhow::Error::msg)?;
+        if matches!(
+            self.composition,
+            WorldExplorerCompositionMode::Exact | WorldExplorerCompositionMode::Composed
+        ) {
+            let render_view = self
+                .session
+                .exact_render_view()
+                .map_err(anyhow::Error::msg)?;
+            self.exact.render(
+                queue,
+                encoder,
+                color_view,
+                render_view,
+                [self.options.width, self.options.height],
+                self.composition == WorldExplorerCompositionMode::Composed,
+            )?;
+        }
+        self.last_exact_stats = self.exact.stats();
+        if self.composition != WorldExplorerCompositionMode::Horizon {
+            stats.target_ready &= self.last_exact_stats.complete;
+            stats.needs_redraw |= !self.last_exact_stats.complete;
+        }
+        Ok(stats)
     }
 
     pub fn poll_completed(&mut self, _device: &wgpu::Device) -> Result<()> {
@@ -138,9 +237,42 @@ impl ExplorerTerrain {
         destination: &wgpu::Buffer,
         bytes_per_row: u32,
     ) -> Result<()> {
-        self.session
-            .copy_depth_to_buffer(encoder, destination, bytes_per_row)
-            .map_err(anyhow::Error::msg)
+        let width = self.exact.depth().width;
+        let height = self.exact.depth().height;
+        let unpadded_row_bytes = width
+            .checked_mul(std::mem::size_of::<f32>() as u32)
+            .context("World Explorer exact depth row byte length overflow")?;
+        if bytes_per_row < unpadded_row_bytes
+            || !bytes_per_row.is_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT)
+        {
+            anyhow::bail!(
+                "World Explorer depth copy row length must be at least {unpadded_row_bytes} bytes \
+                 and {}-byte aligned, got {bytes_per_row}",
+                wgpu::COPY_BYTES_PER_ROW_ALIGNMENT
+            );
+        }
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: self.exact.depth().texture(),
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::DepthOnly,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: destination,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(bytes_per_row),
+                    rows_per_image: Some(height),
+                },
+            },
+            wgpu::Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
+        );
+        Ok(())
     }
 
     pub fn set_depth_capture_enabled(&mut self, enabled: bool) {
@@ -160,7 +292,33 @@ impl ExplorerTerrain {
     }
 
     pub fn diagnostics(&self) -> String {
-        self.session.diagnostics()
+        let exact = self.last_exact_stats;
+        format!(
+            "{} composition={} exact={}/{} exact_queue={} exact_pending={} exact_inflight={} \
+             exact_generation={} exact_admitted={} exact_stale={} exact_sections={} \
+             exact_vertices={} exact_indices={}/{} exact_bytes={} exact_compile_ms={:.2} \
+             exact_present_ms={:.2} exact_mesh_ms={:.2} exact_pack_ms={:.2} \
+             frontier=procedural-collar-1.5-blocks",
+            self.session.diagnostics(),
+            self.composition.label(),
+            exact.painted_chunks,
+            exact.desired_chunks,
+            exact.queued_chunks,
+            exact.pending_admissions,
+            exact.in_flight,
+            exact.coverage_generation,
+            exact.admitted_chunks_total,
+            exact.stale_chunks_total,
+            exact.drawn_sections,
+            exact.vertex_count,
+            exact.drawn_indices,
+            exact.index_count,
+            exact.resident_mesh_bytes,
+            exact.generation_ms,
+            exact.presentation_ms,
+            exact.mesh_ms,
+            exact.pack_ms,
+        )
     }
 }
 

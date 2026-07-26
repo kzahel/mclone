@@ -4,11 +4,13 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use mclone_view_control::{WorldViewMode, WorldViewProjection, WorldViewState};
+use mclone_world_explorer::WorldExplorerCompositionMode;
 
 pub const DEFAULT_WIDTH: u32 = 1280;
 pub const DEFAULT_HEIGHT: u32 = 720;
 pub const DEFAULT_SEED: i64 = 12_345;
 pub const DEFAULT_BLOCKS_ACROSS: u32 = 4_096;
+pub const DEFAULT_EXACT_RADIUS: u32 = 2;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ExplorerAssetProfile {
@@ -48,6 +50,9 @@ pub struct ExplorerOptions {
     pub yaw_radians: f32,
     pub pitch_radians: f32,
     pub projection: WorldViewProjection,
+    pub composition: WorldExplorerCompositionMode,
+    pub exact_radius: u32,
+    pub exact_delay_ms: u64,
     pub asset_root: PathBuf,
     pub asset_profile: ExplorerAssetProfile,
     pub capture: Option<PathBuf>,
@@ -69,6 +74,9 @@ impl Default for ExplorerOptions {
             yaw_radians: std::f32::consts::FRAC_PI_4,
             pitch_radians: 0.52,
             projection: WorldViewProjection::Perspective,
+            composition: WorldExplorerCompositionMode::Horizon,
+            exact_radius: DEFAULT_EXACT_RADIUS,
+            exact_delay_ms: 0,
             asset_root: default_asset_root(),
             asset_profile: ExplorerAssetProfile::Original,
             capture: None,
@@ -134,6 +142,19 @@ impl ExplorerOptions {
                         ),
                     };
                 }
+                "--composition" => {
+                    options.composition = WorldExplorerCompositionMode::parse_label(&utf8_value(
+                        value(&mut arguments)?,
+                        name,
+                    )?)
+                    .map_err(anyhow::Error::msg)?
+                }
+                "--exact-radius" => {
+                    options.exact_radius = parse_value(value(&mut arguments)?, name)?
+                }
+                "--exact-delay-ms" => {
+                    options.exact_delay_ms = parse_value(value(&mut arguments)?, name)?
+                }
                 "--asset-root" => options.asset_root = PathBuf::from(value(&mut arguments)?),
                 "--asset-profile" => {
                     options.asset_profile =
@@ -160,6 +181,9 @@ impl ExplorerOptions {
         }
         if self.asset_root.as_os_str().is_empty() {
             bail!("World Explorer asset root must not be empty");
+        }
+        if self.exact_radius > 8 {
+            bail!("World Explorer exact radius must be at most 8 chunks");
         }
         if usize::from(self.capture.is_some())
             + usize::from(self.window_capture.is_some())
@@ -192,7 +216,8 @@ impl ExplorerOptions {
 
     pub fn title(&self) -> String {
         format!(
-            "Mclone World Explorer — seed {} — ({}, {}) — {} blocks — {}",
+            "Mclone World Explorer — {} — seed {} — ({}, {}) — {} blocks — {}",
+            self.composition.label(),
             self.seed,
             self.center_x,
             self.center_z,
@@ -264,6 +289,9 @@ Usage: mclone-world-explorer [options]
   --blocks-across N           horizontal footprint (default {DEFAULT_BLOCKS_ACROSS})
   --view map|3d               camera mode (default 3d)
   --projection TYPE           perspective or orthographic
+  --composition MODE          horizon, exact, composed, or coverage
+  --exact-radius N            exact near-field chunk radius (default {DEFAULT_EXACT_RADIUS})
+  --exact-delay-ms N          diagnostic delay before each exact batch
   --yaw RADIANS               3D yaw
   --pitch RADIANS             3D pitch
   --width N                   physical width (default {DEFAULT_WIDTH})
