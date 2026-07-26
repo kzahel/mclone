@@ -271,15 +271,22 @@ Final validation on 2026-07-26:
 - `cargo check --workspace --all-targets`: passed with pre-existing warnings;
 - `pnpm native:web:build`: passed for `wasm32-unknown-unknown` with
   pre-existing warnings; and
-- native lit period-32 captures at 1280 by 720 reached playable and were
-  inspected at `/tmp/mclone-topology-probe-arch.png` (26 sections, 11 drawn)
-  and `/tmp/mclone-topology-probe-hydrology.png` (26 sections, 12 drawn).
+- native lit period-32, render-distance-10 captures at 1280 by 720 ran a
+  fixed 4,096-frame warmup and were inspected at
+  `/tmp/mclone-topology-probe-arch-frames.png` (929 sections, 189 drawn) and
+  `/tmp/mclone-topology-probe-hydrology-frames.png` (929 sections, 307 drawn).
 
 The arch capture shows the bounded stone ring and torch through the ordinary
 renderer and lighting path. The hydrology capture shows the split/rejoin
 channel and enclosed island. These pixels are presentation evidence only;
 exact signed-lift, plan, fluid, light, torus-corner, and persistence assertions
 remain the acceptance oracle.
+
+Earlier playable/idle-gated frames were discarded because their hard chunk
+edges showed that the complete server view had not reached the render cache.
+The current offscreen `Idle` policy can observe zero pending render work for
+already-admitted chunks before server-side view streaming completes; it is not
+used as the capture-settlement claim here.
 
 No Mclone terrain output changed. General 3D density, product torus authority,
 periodic distant-terrain presentation, and multiple simultaneously visible
