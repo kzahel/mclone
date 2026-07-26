@@ -8,6 +8,22 @@ pub const MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS: i32 = 2;
 pub const MCLONE_OVERWORLD_PERIOD_BLOCKS: i32 = 6_144;
 pub const MCLONE_OVERWORLD_PERIOD_CHUNKS: u32 = 384;
 
+#[cfg(test)]
+pub(crate) const MCLONE_OVERWORLD_PERIODIC_SEAM_BLOCK_X_CORPUS: [i32; 12] = [
+    -2 * MCLONE_OVERWORLD_PERIOD_BLOCKS - 1,
+    -MCLONE_OVERWORLD_PERIOD_BLOCKS - 1,
+    -MCLONE_OVERWORLD_PERIOD_BLOCKS,
+    -MCLONE_OVERWORLD_PERIOD_BLOCKS / 2,
+    -1,
+    0,
+    MCLONE_OVERWORLD_PERIOD_BLOCKS / 2,
+    MCLONE_OVERWORLD_PERIOD_BLOCKS - 1,
+    MCLONE_OVERWORLD_PERIOD_BLOCKS,
+    MCLONE_OVERWORLD_PERIOD_BLOCKS + 1,
+    2 * MCLONE_OVERWORLD_PERIOD_BLOCKS,
+    2 * MCLONE_OVERWORLD_PERIOD_BLOCKS + 1,
+];
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct McloneOverworldLargeFieldBand {
     pub domain: u64,
@@ -1266,12 +1282,31 @@ mod tests {
             -98_765,
             McloneOverworldSamplingTopology::PeriodicX,
         );
-        for (x, z) in [(-6_145, -517), (-1, 0), (0, 0), (6_143, 929), (8_191, -73)] {
+        let z_corpus = [-517, 0, 929, -73];
+        for (index, x) in MCLONE_OVERWORLD_PERIODIC_SEAM_BLOCK_X_CORPUS
+            .into_iter()
+            .enumerate()
+        {
+            let z = z_corpus[index % z_corpus.len()];
+            let canonical_x = x.rem_euclid(MCLONE_OVERWORLD_PERIOD_BLOCKS);
+            assert_samples_near(sampler.sample(x, z), sampler.sample(canonical_x, z));
             assert_samples_near(
                 sampler.sample(x, z),
                 sampler.sample(x + MCLONE_OVERWORLD_PERIOD_BLOCKS, z),
             );
         }
+
+        let axis = McloneOverworldSamplingTopology::PeriodicX
+            .horizontal_topology()
+            .x;
+        assert_eq!(
+            axis.shortest_block_displacement(0, MCLONE_OVERWORLD_PERIOD_BLOCKS / 2),
+            i64::from(MCLONE_OVERWORLD_PERIOD_BLOCKS / 2)
+        );
+        assert_eq!(
+            axis.shortest_block_displacement(0, -MCLONE_OVERWORLD_PERIOD_BLOCKS / 2),
+            i64::from(MCLONE_OVERWORLD_PERIOD_BLOCKS / 2)
+        );
 
         for z in [-997, 0, 1_337] {
             let before = sampler.sample(-1, z).surface_y;

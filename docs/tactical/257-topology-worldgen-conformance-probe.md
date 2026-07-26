@@ -184,8 +184,8 @@ canonical topology.
 
 ### Slice 4: Mclone defensive corpus and closeout
 
-- [ ] Add the alternating plane/cylinder resident-cache isolation test.
-- [ ] Consolidate reusable seam coordinates without weakening existing
+- [x] Add the alternating plane/cylinder resident-cache isolation test.
+- [x] Consolidate reusable seam coordinates without weakening existing
   field, feature, stream, or vegetation fixtures.
 - [ ] Run focused worldgen/server tests, all affected workspace test targets,
   and the browser/Wasm compile boundary.

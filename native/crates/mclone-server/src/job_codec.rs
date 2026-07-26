@@ -2351,6 +2351,49 @@ mod tests {
     }
 
     #[test]
+    fn resident_mclone_executor_isolates_plane_and_cylinder_cache_scopes() {
+        let seed = -98_765;
+        let target = [ChunkPos::new(
+            mclone_worldgen::levelgen::MCLONE_OVERWORLD_PERIOD_CHUNKS as i32 - 1,
+            0,
+        )];
+        let plane = WorldGenerationDescriptor::new(WorldGenerationProfile::McloneOverworldV1, seed);
+        let cylinder = WorldGenerationDescriptor::with_topology(
+            WorldGenerationProfile::McloneOverworldV1,
+            seed,
+            HorizontalTopology::cylinder_x(
+                0,
+                mclone_worldgen::levelgen::MCLONE_OVERWORLD_PERIOD_CHUNKS,
+            ),
+        );
+        let execute = |executor: &mut WorldGenerationExecutor, descriptor| {
+            executor
+                .execute(execution_request(descriptor, &target, Vec::new()))
+                .unwrap()
+        };
+
+        let mut resident = WorldGenerationExecutor::default();
+        let resident_plane_first = execute(&mut resident, plane);
+        let resident_cylinder_first = execute(&mut resident, cylinder);
+        let resident_plane_second = execute(&mut resident, plane);
+        let resident_cylinder_second = execute(&mut resident, cylinder);
+        let fresh_plane = execute(&mut WorldGenerationExecutor::default(), plane);
+        let fresh_cylinder = execute(&mut WorldGenerationExecutor::default(), cylinder);
+
+        for (actual, expected) in [
+            (&resident_plane_first, &fresh_plane),
+            (&resident_plane_second, &fresh_plane),
+            (&resident_cylinder_first, &fresh_cylinder),
+            (&resident_cylinder_second, &fresh_cylinder),
+        ] {
+            assert_eq!(actual.chunks, expected.chunks);
+            assert_eq!(actual.retained_dependencies, expected.retained_dependencies);
+            assert_eq!(actual.diagnostics, expected.diagnostics);
+        }
+        assert_ne!(fresh_plane.chunks, fresh_cylinder.chunks);
+    }
+
+    #[test]
     fn alpha_frames_preserve_winter_and_batch_order() {
         let targets = [ChunkPos::new(0, 0), ChunkPos::new(1, 0)];
         let temperate_descriptor =
