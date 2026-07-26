@@ -1,6 +1,9 @@
 # Minecraft Reference Bootstrap
 
-The repo uses a local, gitignored Minecraft Java 1.17.1 reference tree for vanilla behavior, assets, oracle fixtures, and visual correctness checks.
+The repo uses a local, gitignored Minecraft Java 1.17.1 reference tree for
+vanilla behavior, assets, oracle fixtures, and visual correctness checks.
+Separately pinned Alpha, Beta, and current-stable trees are historical or
+comparative research inputs; none changes the 1.17.1 parity target.
 
 Root path:
 
@@ -122,6 +125,8 @@ Common commands:
 ./scripts/decompile-mc.sh 1.18.2 --server --parchment
 ./scripts/decompile-mc.sh 1.17.1 --out /tmp/mc-scratch
 ./scripts/decompile-mc.sh 1.17.1 --no-assets
+./scripts/decompile-mc.sh 1.17.1 --no-assets \
+  --only net/minecraft/world/level/newbiome/layer/ShoreLayer
 ./scripts/decompile-mc.sh 1.17.1 --force
 
 # Standalone asset extraction, if client decompilation already ran.
@@ -137,11 +142,20 @@ Pipeline stages:
 
 1. Fetch `piston-meta.mojang.com/mc/game/version_manifest_v2.json` and find the version entry.
 2. Fetch that version's per-version manifest.
-3. Download `client.jar` or `server.jar` plus `client.txt`.
-4. Remap with SpecialSource.
-5. Decompile with Vineflower.
+3. Download and SHA-1-verify `client.jar` or `server.jar`.
+4. When mappings exist, download `client.txt` or `server.txt` and remap with
+   SpecialSource. When mappings are absent, accept the jar only if it contains
+   the expected official unobfuscated class path.
+5. Decompile with Vineflower, optionally limiting work to repeatable `--only`
+   class/package prefixes.
 6. Optionally download Parchment and rewrite mapped method parameters.
 7. For client builds, extract filtered textures, models, blockstates, and structures into `extracted/`.
+
+Selective decompilation writes `decompile-selection.txt`; a different
+selection must use a different output directory so unrelated partial source
+sets never silently mix. Every ordinary run writes `provenance.txt` with the
+version, side, naming mode, input hashes, Vineflower version, release time,
+and full/focused selection mode.
 
 ## Legacy Alpha And Beta Side References
 
@@ -188,9 +202,42 @@ change, dimensions, features, chunk/storage evolution, and measured size. It
 also records the decisions required before any Rust implementation:
 [`topics/beta-1.7.3-reference.md`](topics/beta-1.7.3-reference.md).
 
+## Modern Stable Side Reference
+
+The current comparative specimen is pinned separately from the parity target:
+
+```bash
+# Build a focused current-stable worldgen tree under
+# reference/minecraft-26.2/src/.
+pnpm reference:modern
+
+# Use a scratch destination without changing the pinned wrapper.
+pnpm reference:modern -- --out /tmp/minecraft-modern-research
+```
+
+[`scripts/decompile-modern-mc.sh`](../scripts/decompile-modern-mc.sh) pins Java
+26.2 and selects the Overworld biome builder, surface rules, terrain splines,
+density functions, noise router, aquifer, and chunk-density entry points.
+Run `decompile-mc.sh 26.2 --no-assets` directly only when a whole-client
+decompile is genuinely required.
+
+Mojang stopped obfuscating Java Edition after the Mounts of Mayhem release.
+Current jars carry original class, method, field, parameter, and variable names
+and publish no mappings in the version JSON. The bootstrap therefore verifies
+an expected named class and decompiles the official jar directly. Parchment is
+neither needed nor accepted on this branch.
+
+The modern tree is a source-research convenience, not a new oracle, asset
+source, runtime dependency, or seed-parity target. Its durable selection,
+refresh, licensing, and interpretation boundary lives in
+[`topics/modern-minecraft-reference.md`](topics/modern-minecraft-reference.md).
+
 ## Mappings
 
-Mojang mappings cover class, method, and field names. They do not include method parameter names, javadocs, or true local variable names.
+For mapped releases such as 1.17.1, Mojang mappings cover class, method, and
+field names. They do not include method parameter names, javadocs, or true
+local variable names. Current unobfuscated releases are a separate branch and
+already include the original bytecode-visible names.
 
 The main mapping sets:
 

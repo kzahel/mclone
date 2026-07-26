@@ -48,6 +48,10 @@ series implements the same concern, normally reuse the document slug in its
 - [`beta-1.7.3-reference.md`](beta-1.7.3-reference.md): reproducible Beta
   1.7.3 decompilation, traced old-Beta terrain/biome/cave/population
   architecture, and measured Alpha comparison supporting the implementation.
+- [`modern-minecraft-reference.md`](modern-minecraft-reference.md): pinned
+  current-stable Java 26.2 comparative source lane, official unobfuscated jar
+  bootstrap, focused worldgen selection, provenance and refresh policy, and
+  durable post-1.18 findings without changing the 1.17.1 parity target.
 - [`alpha-era-reference.md`](alpha-era-reference.md): preserved early-worldgen
   study ladder, reproducible Alpha v1.1.2_01 decompilation and terrain oracle,
   detailed generator anatomy, and the Alpha v1.2.6 biome-era comparison that

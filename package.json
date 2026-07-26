@@ -289,6 +289,7 @@
     "typecheck": "pnpm native:web:typecheck",
     "reference:alpha": "bash ./scripts/decompile-alpha-mc.sh",
     "reference:beta": "bash ./scripts/decompile-beta-mc.sh",
+    "reference:modern": "bash ./scripts/decompile-modern-mc.sh",
     "oracle:alpha:terrain": "bash ./oracle/alpha/run-terrain-probe.sh",
     "oracle:beta:terrain": "bash ./oracle/beta/run-terrain-probe.sh",
     "oracle:gen": "bash ./oracle/run.sh",
