@@ -18,6 +18,14 @@ Tactical
 [`250`](../tactical/250-continuous-explorer-presentation-and-cadence.md)
 completed and deployed continuous fractional presentation, snapped-only
 residency, and shared frame-time held motion on 2026-07-26.
+Proposed parent Tactical
+[`253`](../tactical/253-world-explorer-cross-host-parity.md) now tracks the
+next cross-host correction as three bounded children: UI-less browser/native
+presentation in [`254`](../tactical/254-ui-less-world-explorer-host.md), dark
+target-independent color output in
+[`255`](../tactical/255-world-explorer-color-output-parity.md), and shared
+native-thread/browser-Worker vegetation execution in
+[`256`](../tactical/256-shared-horizon-vegetation-worker-topology.md).
 `mclone-view-control` now owns shared map/orbit/contact semantics for both the
 standalone native `mclone-world-explorer` and Terrain Lab's procedural and
 canonical panes. Terrain Lab retains thin DOM focus, capture, local-coordinate,

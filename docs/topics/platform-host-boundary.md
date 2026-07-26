@@ -53,6 +53,20 @@ residency. The current 6,280-byte hand-authored shell forwards raw
 press/release, pointer, wheel, resize, blur, and visibility observations but
 contains no movement or terrain policy.
 
+Side-by-side Explorer review on 2026-07-26 found that its visible browser
+diagnostic panel and surface-dependent color output still violate the desired
+cross-host product boundary. Proposed parent Tactical
+[`253`](../tactical/253-world-explorer-cross-host-parity.md) sequences the
+correction. Tactical
+[`254`](../tactical/254-ui-less-world-explorer-host.md) removes ordinary
+post-startup DOM diagnostics without introducing replacement UI, while
+Tactical
+[`255`](../tactical/255-world-explorer-color-output-parity.md) moves the
+selected dark appearance behind an explicit shared target transform. Tactical
+[`256`](../tactical/256-shared-horizon-vegetation-worker-topology.md) keeps
+browser Worker mechanics domain-blind while making vegetation coordination
+shared with native.
+
 Headed desktop, phone, and hosted production smokes exercise the real DOM
 two-contact path and multiple held-key rAF frames. Native real-window and
 offscreen paths exercise the same Rust terrain session. Mailbox is preferred

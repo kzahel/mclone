@@ -58,6 +58,13 @@ desktop/phone smokes and response-header checks confirmed cross-origin
 isolation and the external-SAB path. No Terrain Lab Worker continuation
 remains active under Tactical 248.
 
+Proposed Tactical
+[`256`](../tactical/256-shared-horizon-vegetation-worker-topology.md) is the
+next focused consumer of this direction. It must reuse the isolated Rust actor,
+domain-blind transport, and external-SAB posture for procedural vegetation
+while sharing coordinator policy with a native threaded executor. It does not
+authorize a shared Wasm heap or a universal Worker framework.
+
 ## Scope
 
 This topic owns the boundary among:

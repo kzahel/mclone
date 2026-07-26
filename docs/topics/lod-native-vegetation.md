@@ -6,6 +6,16 @@ Status: Terrain Lab hierarchy proof active 2026-07-25. Exact records and the
 initial Lab proxy path are landed. The rejected in-game chunk-based adapter was
 removed by Tactical 245.
 
+World Explorer review on 2026-07-26 found that native enables synchronous
+near-level vegetation compilation during frame encoding while browser disables
+vegetation entirely. Proposed Tactical
+[`256`](../tactical/256-shared-horizon-vegetation-worker-topology.md) records
+the replacement direction: one `mclone-terrain-view` coordinator owns job
+identity, budgets, cache lifecycle, stale rejection, and admission, while
+native threads and an isolated browser Rust actor provide equivalent execution
+through platform-appropriate mailboxes. Neither presentation thread remains a
+normal compiler path.
+
 ## Scope
 
 This topic owns the immediate migration of natural trees and forest shape in
