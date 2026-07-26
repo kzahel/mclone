@@ -44,7 +44,9 @@ pub use clipmap::{
     TerrainClipmapLevelSnapshot, TerrainClipmapTile, TerrainClipmapUpdate,
 };
 pub use composition::{
-    ExactPaintedCoverageSnapshot, TERRAIN_EXACT_COVERAGE_MASK_BYTES,
+    BoundedRepresentationBounds, BoundedRepresentationOwner,
+    BoundedRepresentationOwnershipSnapshot, BoundedRepresentationReadiness,
+    BoundedRepresentationUnit, ExactPaintedCoverageSnapshot, TERRAIN_EXACT_COVERAGE_MASK_BYTES,
     TERRAIN_EXACT_COVERAGE_MAX_CHUNKS_PER_AXIS, TERRAIN_EXACT_COVERAGE_WORD_COUNT,
     TerrainCompositionSourceIdentity, TerrainExactCoverageMask, TerrainExactCoverageMode,
 };
