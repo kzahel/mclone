@@ -55,7 +55,6 @@ const TERRAIN_PREVIEW_TREE_INSTANCE_BYTES: u64 =
     (TERRAIN_PREVIEW_TREE_INSTANCE_FLOATS * size_of::<f32>()) as u64;
 const TERRAIN_PREVIEW_TREE_VERTICES_PER_INSTANCE: u32 = 108;
 const TERRAIN_HORIZON_NORMAL_HALO_RADIUS: u32 = 2;
-const TERRAIN_HORIZON_SAMPLE_HALO_FLAG: u32 = 1 << 31;
 const TERRAIN_HORIZON_NORMAL_EDGE_WEST: u32 = 1 << 27;
 const TERRAIN_HORIZON_NORMAL_EDGE_EAST: u32 = 1 << 28;
 const TERRAIN_HORIZON_NORMAL_EDGE_NORTH: u32 = 1 << 29;
@@ -153,6 +152,7 @@ pub struct TerrainHorizonFrameStats {
     pub normal_halo_radius: u32,
     pub normal_halo_samples_per_tile: u32,
     pub normal_halo_fixed_bytes: u64,
+    pub normal_height_fixed_bytes: u64,
     pub ready_slots: u32,
     pub requested_levels: u32,
     pub staged_levels: u32,
@@ -461,6 +461,7 @@ struct TerrainViewportGpuTile {
     uniform_buffer: wgpu::Buffer,
     tree_uniform_buffer: wgpu::Buffer,
     gpu_sample_buffer: wgpu::Buffer,
+    _normal_height_buffer: wgpu::Buffer,
     reference_sample_buffer: Option<wgpu::Buffer>,
     compute_bind_group: wgpu::BindGroup,
     render_bind_group: wgpu::BindGroup,
@@ -477,6 +478,7 @@ impl TerrainViewportGpuTile {
         compute_layout: &wgpu::BindGroupLayout,
         render_layout: &wgpu::BindGroupLayout,
         sample_byte_len: u64,
+        normal_height_buffer: wgpu::Buffer,
         tile_id: TerrainViewportTileId,
     ) -> Result<Self, String> {
         Self::new_with_reference_buffer(
@@ -484,6 +486,7 @@ impl TerrainViewportGpuTile {
             compute_layout,
             render_layout,
             sample_byte_len,
+            normal_height_buffer,
             tile_id,
             true,
         )
@@ -494,13 +497,21 @@ impl TerrainViewportGpuTile {
         compute_layout: &wgpu::BindGroupLayout,
         render_layout: &wgpu::BindGroupLayout,
         sample_byte_len: u64,
+        normal_height_byte_len: u64,
         tile_id: TerrainViewportTileId,
     ) -> Result<Self, String> {
+        let normal_height_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mclone_terrain_horizon_normal_heights"),
+            size: normal_height_byte_len,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
         Self::new_with_reference_buffer(
             device,
             compute_layout,
             render_layout,
             sample_byte_len,
+            normal_height_buffer,
             tile_id,
             false,
         )
@@ -511,6 +522,7 @@ impl TerrainViewportGpuTile {
         compute_layout: &wgpu::BindGroupLayout,
         render_layout: &wgpu::BindGroupLayout,
         sample_byte_len: u64,
+        normal_height_buffer: wgpu::Buffer,
         tile_id: TerrainViewportTileId,
         allocate_reference_buffer: bool,
     ) -> Result<Self, String> {
@@ -555,6 +567,10 @@ impl TerrainViewportGpuTile {
                     binding: 1,
                     resource: gpu_sample_buffer.as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: normal_height_buffer.as_entire_binding(),
+                },
             ],
         });
         let render_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
@@ -575,6 +591,10 @@ impl TerrainViewportGpuTile {
                         .as_ref()
                         .unwrap_or(&gpu_sample_buffer)
                         .as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: normal_height_buffer.as_entire_binding(),
                 },
             ],
         });
@@ -597,6 +617,10 @@ impl TerrainViewportGpuTile {
                         .unwrap_or(&gpu_sample_buffer)
                         .as_entire_binding(),
                 },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: normal_height_buffer.as_entire_binding(),
+                },
             ],
         });
         Ok(Self {
@@ -608,6 +632,7 @@ impl TerrainViewportGpuTile {
             uniform_buffer,
             tree_uniform_buffer,
             gpu_sample_buffer,
+            _normal_height_buffer: normal_height_buffer,
             reference_sample_buffer,
             compute_bind_group,
             render_bind_group,
@@ -701,11 +726,14 @@ impl TerrainViewportGpuTile {
 pub struct TerrainViewportRenderer {
     sample_count_per_tile: u32,
     sample_byte_len: u64,
+    normal_height_scratch_buffer: wgpu::Buffer,
     compute_layout: wgpu::BindGroupLayout,
     render_layout: wgpu::BindGroupLayout,
     _material_resources: TerrainPreviewMaterialResources,
     compute_pipeline: wgpu::ComputePipeline,
+    horizon_compute_pipeline: wgpu::ComputePipeline,
     render_pipeline: wgpu::RenderPipeline,
+    horizon_render_pipeline: wgpu::RenderPipeline,
     tree_pipeline: wgpu::RenderPipeline,
     clear_color: wgpu::Color,
     depth: TerrainViewportDepthTarget,
@@ -784,11 +812,26 @@ impl TerrainViewportRenderer {
         let sample_byte_len = u64::from(sample_count_per_tile)
             .checked_mul(TERRAIN_PREVIEW_SAMPLE_BYTES)
             .ok_or("terrain viewport sample buffer size overflow")?;
+        let normal_height_byte_len = u64::from(sample_count_per_tile)
+            .checked_mul(size_of::<f32>() as u64)
+            .ok_or("terrain viewport normal-height buffer size overflow")?;
+        let normal_height_scratch_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mclone_terrain_viewport_normal_height_scratch"),
+            size: normal_height_byte_len,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
         let compute_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: Some("mclone_terrain_viewport_compute_layout"),
             entries: &[
                 uniform_layout_entry(0, wgpu::ShaderStages::COMPUTE),
                 storage_layout_entry(1, wgpu::ShaderStages::COMPUTE, false, sample_byte_len),
+                storage_layout_entry(
+                    2,
+                    wgpu::ShaderStages::COMPUTE,
+                    false,
+                    normal_height_byte_len,
+                ),
             ],
         });
         let render_layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -806,6 +849,12 @@ impl TerrainViewportRenderer {
                     wgpu::ShaderStages::VERTEX_FRAGMENT,
                     true,
                     sample_byte_len,
+                ),
+                storage_layout_entry(
+                    3,
+                    wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    true,
+                    normal_height_byte_len,
                 ),
             ],
         });
@@ -878,6 +927,22 @@ impl TerrainViewportRenderer {
             compilation_options: Default::default(),
             cache: None,
         });
+        let horizon_pipeline_constants = [(
+            "terrain_sample_halo_radius",
+            f64::from(TERRAIN_HORIZON_NORMAL_HALO_RADIUS),
+        )];
+        let horizon_compute_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("mclone_terrain_horizon_compute_pipeline"),
+                layout: Some(&compute_pipeline_layout),
+                module: &compute_shader,
+                entry_point: Some("compute_main"),
+                compilation_options: wgpu::PipelineCompilationOptions {
+                    constants: &horizon_pipeline_constants,
+                    ..Default::default()
+                },
+                cache: None,
+            });
         let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("mclone_terrain_viewport_render_pipeline"),
             layout: Some(&render_pipeline_layout),
@@ -914,6 +979,46 @@ impl TerrainViewportRenderer {
             multiview: None,
             cache: None,
         });
+        let horizon_render_pipeline =
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("mclone_terrain_horizon_render_pipeline"),
+                layout: Some(&render_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &render_shader,
+                    entry_point: Some("vertex_main"),
+                    buffers: &[],
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants: &horizon_pipeline_constants,
+                        ..Default::default()
+                    },
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &render_shader,
+                    entry_point: Some("fragment_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: color_format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: Some(wgpu::Face::Back),
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: TERRAIN_PREVIEW_DEPTH_FORMAT,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::GreaterEqual,
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                multiview: None,
+                cache: None,
+            });
         let tree_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("mclone_terrain_viewport_tree_pipeline"),
             layout: Some(&tree_pipeline_layout),
@@ -973,11 +1078,14 @@ impl TerrainViewportRenderer {
         Ok(Self {
             sample_count_per_tile,
             sample_byte_len,
+            normal_height_scratch_buffer,
             compute_layout,
             render_layout,
             _material_resources: material_resources,
             compute_pipeline,
+            horizon_compute_pipeline,
             render_pipeline,
+            horizon_render_pipeline,
             tree_pipeline,
             clear_color: color_transform_wgpu(
                 wgpu::Color {
@@ -1154,6 +1262,7 @@ impl TerrainViewportRenderer {
                 &self.compute_layout,
                 &self.render_layout,
                 self.sample_byte_len,
+                self.normal_height_scratch_buffer.clone(),
                 request.tile,
             )?;
             self.cache.insert(request.tile, tile);
@@ -1224,6 +1333,7 @@ impl TerrainViewportRenderer {
                 &self.compute_layout,
                 &self.render_layout,
                 self.sample_byte_len,
+                self.normal_height_scratch_buffer.clone(),
                 request.tile,
             )?;
             self.cache.insert(request.tile, tile);
@@ -1352,6 +1462,7 @@ impl TerrainViewportRenderer {
                         &self.compute_layout,
                         &self.render_layout,
                         self.sample_byte_len,
+                        self.normal_height_scratch_buffer.clone(),
                         tile_id,
                     )?;
                     self.cache.insert(tile_id, tile);
@@ -1464,6 +1575,7 @@ impl TerrainViewportRenderer {
                         &self.compute_layout,
                         &self.render_layout,
                         self.sample_byte_len,
+                        self.normal_height_scratch_buffer.clone(),
                         tile_id,
                     )?;
                     self.cache.insert(tile_id, tile);
@@ -2302,7 +2414,7 @@ impl TerrainHorizonRenderer {
         )?;
         let admission = TerrainHorizonAdmission::new(config.level_count, config.slots_per_level())?;
         let mut slots = Vec::with_capacity(config.allocation_slots() as usize);
-        let horizon_sample_byte_len = terrain_horizon_sample_byte_len()?;
+        let horizon_normal_height_byte_len = terrain_horizon_normal_height_byte_len()?;
         let resource_slots_per_level = config
             .slots_per_level()
             .checked_add(TERRAIN_HORIZON_STAGING_SLOTS_PER_LEVEL)
@@ -2313,7 +2425,8 @@ impl TerrainHorizonRenderer {
                     device,
                     &renderer.compute_layout,
                     &renderer.render_layout,
-                    horizon_sample_byte_len,
+                    renderer.sample_byte_len,
+                    horizon_normal_height_byte_len,
                     TerrainViewportTileId {
                         profile: TerrainPreviewProfile::McloneOverworldV1,
                         seed: 0,
@@ -2495,7 +2608,7 @@ impl TerrainHorizonRenderer {
                     label: Some("mclone_terrain_horizon_compute_pass"),
                     timestamp_writes: None,
                 });
-                pass.set_pipeline(&self.renderer.compute_pipeline);
+                pass.set_pipeline(&self.renderer.horizon_compute_pipeline);
                 pass.set_bind_group(0, &slot.compute_bind_group, &[]);
                 let workgroups =
                     terrain_horizon_samples_per_axis().div_ceil(TERRAIN_PREVIEW_WORKGROUP_AXIS);
@@ -2631,7 +2744,7 @@ impl TerrainHorizonRenderer {
                 }),
                 ..Default::default()
             });
-            pass.set_pipeline(&self.renderer.render_pipeline);
+            pass.set_pipeline(&self.renderer.horizon_render_pipeline);
             pass.set_bind_group(1, &self.renderer._material_resources.bind_group, &[]);
             for level in terrain_levels.iter().rev() {
                 drawn_levels = drawn_levels.saturating_add(1);
@@ -2686,9 +2799,13 @@ impl TerrainHorizonRenderer {
         let normal_halo_samples_per_tile = terrain_horizon_normal_halo_samples_per_tile();
         let normal_halo_fixed_bytes = u64::from(self.admission.resource_slots())
             .saturating_mul(u64::from(normal_halo_samples_per_tile))
-            .saturating_mul(TERRAIN_PREVIEW_SAMPLE_BYTES);
+            .saturating_mul(size_of::<f32>() as u64);
+        let normal_height_fixed_bytes = u64::from(self.admission.resource_slots())
+            .saturating_mul(terrain_horizon_normal_height_byte_len()?);
         let fixed_resident_bytes = u64::from(self.admission.resource_slots()).saturating_mul(
-            terrain_horizon_sample_byte_len()?
+            self.renderer
+                .sample_byte_len
+                .saturating_add(terrain_horizon_normal_height_byte_len()?)
                 .saturating_add(TERRAIN_PREVIEW_UNIFORM_BYTES.saturating_mul(2)),
         );
         let vegetation_bytes = self
@@ -2746,6 +2863,7 @@ impl TerrainHorizonRenderer {
             normal_halo_radius: TERRAIN_HORIZON_NORMAL_HALO_RADIUS,
             normal_halo_samples_per_tile,
             normal_halo_fixed_bytes,
+            normal_height_fixed_bytes,
             ready_slots,
             requested_levels: admission_diagnostics.requested_levels,
             staged_levels: admission_diagnostics.staged_levels,
@@ -2923,15 +3041,15 @@ fn terrain_horizon_normal_halo_samples_per_tile() -> u32 {
         .saturating_sub(drawn_samples_per_axis.saturating_mul(drawn_samples_per_axis))
 }
 
-fn terrain_horizon_sample_byte_len() -> Result<u64, String> {
+fn terrain_horizon_normal_height_byte_len() -> Result<u64, String> {
     let samples_per_axis = terrain_horizon_samples_per_axis();
     u64::from(
         samples_per_axis
             .checked_mul(samples_per_axis)
             .ok_or("terrain horizon halo sample count overflow")?,
     )
-    .checked_mul(TERRAIN_PREVIEW_SAMPLE_BYTES)
-    .ok_or_else(|| "terrain horizon halo sample byte size overflow".to_owned())
+    .checked_mul(size_of::<f32>() as u64)
+    .ok_or_else(|| "terrain horizon normal-height byte size overflow".to_owned())
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -2972,8 +3090,7 @@ fn terrain_horizon_uniform_bytes(
         flag_bytes
             .try_into()
             .expect("terrain preview uniform flag word remains four bytes"),
-    ) | TERRAIN_HORIZON_SAMPLE_HALO_FLAG
-        | normal_edge_flags;
+    ) | normal_edge_flags;
     flag_bytes.copy_from_slice(&flags.to_le_bytes());
     bytes
 }
@@ -3305,8 +3422,8 @@ mod tests {
         assert_eq!(terrain_horizon_samples_per_axis(), 69);
         assert_eq!(terrain_horizon_normal_halo_samples_per_tile(), 536);
         assert_eq!(
-            terrain_horizon_sample_byte_len().unwrap(),
-            u64::from(69_u32.pow(2)) * TERRAIN_PREVIEW_SAMPLE_BYTES
+            terrain_horizon_normal_height_byte_len().unwrap(),
+            u64::from(69_u32.pow(2)) * size_of::<f32>() as u64
         );
     }
 

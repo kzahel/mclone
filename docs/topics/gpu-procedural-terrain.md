@@ -23,9 +23,10 @@ native and browser Explorer products while deliberately leaving Terrain Lab
 unchanged. Tactical
 [`252`](../tactical/252-procedural-horizon-seams-and-transition-admission.md)
 now hardens that Explorer horizon with bounded committed-origin admission and
-a horizon-only `69x69` storage footprint around the unchanged `65x65` drawn
-grid. Terrain Lab retains its original sample layout; both consumers still
-compile the same production evaluator kernel.
+a horizon-only scalar `69x69` normal-height field around the unchanged
+`65x65` semantic/drawn grid. Terrain Lab specializes the same shader at zero
+halo and retains its original sample layout; both consumers still compile the
+same production evaluator kernel.
 The browser proof is not a reduced browser architecture: product dependency
 selection keeps the Explorer small, while the platform contract remains
 capable of hosting the full web game. Tactical

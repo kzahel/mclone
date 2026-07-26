@@ -28,7 +28,7 @@ const TERRAIN_HORIZON_NORMAL_EDGE_WEST: u32 = 0x08000000u;
 const TERRAIN_HORIZON_NORMAL_EDGE_EAST: u32 = 0x10000000u;
 const TERRAIN_HORIZON_NORMAL_EDGE_NORTH: u32 = 0x20000000u;
 const TERRAIN_HORIZON_NORMAL_EDGE_SOUTH: u32 = 0x40000000u;
-const TERRAIN_HORIZON_SAMPLE_HALO_FLAG: u32 = 0x80000000u;
+override terrain_sample_halo_radius: u32 = 0u;
 
 @group(0) @binding(0)
 var<uniform> params: TerrainPreviewParams;
@@ -38,6 +38,9 @@ var<storage, read> gpu_samples: array<TerrainPreviewSample>;
 
 @group(0) @binding(2)
 var<storage, read> reference_samples: array<TerrainPreviewSample>;
+
+@group(0) @binding(3)
+var<storage, read> normal_heights: array<f32>;
 
 struct TerrainPreviewMaterialUvs {
     values: array<vec4<f32>, 256>,
@@ -117,28 +120,29 @@ fn surface_quality() -> u32 {
 }
 
 fn sample_halo_radius() -> i32 {
-    return select(
-        0,
-        2,
-        (params.content_stage_flags.w & TERRAIN_HORIZON_SAMPLE_HALO_FLAG) != 0u,
-    );
+    return i32(terrain_sample_halo_radius);
 }
 
-fn terrain_sample_index(sample_x: i32, sample_z: i32) -> u32 {
+fn normal_height_index(sample_x: i32, sample_z: i32) -> u32 {
     let radius = sample_halo_radius();
     let drawn_max = i32(params.layer_samples_size.y) - 1;
-    let stored_x = clamp(sample_x, -radius, drawn_max + radius) + radius;
-    let stored_z = clamp(sample_z, -radius, drawn_max + radius) + radius;
+    let stored_x = sample_x + radius;
+    let stored_z = sample_z + radius;
     let storage_samples_per_axis = u32(drawn_max + 1 + radius * 2);
     return u32(stored_z) * storage_samples_per_axis + u32(stored_x);
 }
 
-fn selected_grid_sample(
+fn selected_grid_height(
     sample_x: i32,
     sample_z: i32,
     instance_index: u32,
-) -> TerrainPreviewSample {
-    return selected_sample(terrain_sample_index(sample_x, sample_z), instance_index);
+) -> f32 {
+    if terrain_sample_halo_radius > 0u {
+        return normal_heights[normal_height_index(sample_x, sample_z)];
+    }
+    let samples_per_axis = params.layer_samples_size.y;
+    let index = u32(sample_z) * samples_per_axis + u32(sample_x);
+    return selected_sample(index, instance_index).terrain.y;
 }
 
 fn terrain_horizon_coarse_footprint_weight(
@@ -497,7 +501,7 @@ fn vertex_main(
     let sample_z = cell_z + corner.y;
     let logical_x = i32(sample_x);
     let logical_z = i32(sample_z);
-    let index = terrain_sample_index(logical_x, logical_z);
+    let index = sample_z * params.layer_samples_size.y + sample_x;
     let sample = selected_sample(index, instance_index);
     let reference = reference_samples[index];
     let gpu = gpu_samples[index];
@@ -508,34 +512,38 @@ fn vertex_main(
     let right_x = min(logical_x + 1, cells_i + radius);
     let north_z = max(logical_z - 1, -radius);
     let south_z = min(logical_z + 1, cells_i + radius);
-    let left = selected_grid_sample(left_x, logical_z, instance_index);
-    let right = selected_grid_sample(right_x, logical_z, instance_index);
-    let north = selected_grid_sample(logical_x, north_z, instance_index);
-    let south = selected_grid_sample(logical_x, south_z, instance_index);
+    let left = selected_grid_height(left_x, logical_z, instance_index);
+    let right = selected_grid_height(right_x, logical_z, instance_index);
+    let north = selected_grid_height(logical_x, north_z, instance_index);
+    let south = selected_grid_height(logical_x, south_z, instance_index);
     let sample_spacing = max(f32(params.origin_spacing_cells.z), 1.0);
-    let narrow_slope_x = (right.terrain.y - left.terrain.y)
+    let narrow_slope_x = (right - left)
         / max(f32(right_x - left_x) * sample_spacing, 1.0);
-    let narrow_slope_z = (south.terrain.y - north.terrain.y)
+    let narrow_slope_z = (south - north)
         / max(f32(south_z - north_z) * sample_spacing, 1.0);
-    let wide_left_x = max(logical_x - 2, -radius);
-    let wide_right_x = min(logical_x + 2, cells_i + radius);
-    let wide_north_z = max(logical_z - 2, -radius);
-    let wide_south_z = min(logical_z + 2, cells_i + radius);
-    let wide_left = selected_grid_sample(wide_left_x, logical_z, instance_index);
-    let wide_right = selected_grid_sample(wide_right_x, logical_z, instance_index);
-    let wide_north = selected_grid_sample(logical_x, wide_north_z, instance_index);
-    let wide_south = selected_grid_sample(logical_x, wide_south_z, instance_index);
-    let wide_slope_x = (wide_right.terrain.y - wide_left.terrain.y)
-        / max(f32(wide_right_x - wide_left_x) * sample_spacing, 1.0);
-    let wide_slope_z = (wide_south.terrain.y - wide_north.terrain.y)
-        / max(f32(wide_south_z - wide_north_z) * sample_spacing, 1.0);
     let coarse_footprint_weight = terrain_horizon_coarse_footprint_weight(
         logical_x,
         logical_z,
         cells_i,
     );
-    let slope_x = mix(narrow_slope_x, wide_slope_x, coarse_footprint_weight);
-    let slope_z = mix(narrow_slope_z, wide_slope_z, coarse_footprint_weight);
+    var slope_x = narrow_slope_x;
+    var slope_z = narrow_slope_z;
+    if coarse_footprint_weight > 0.0 {
+        let wide_left_x = max(logical_x - 2, -radius);
+        let wide_right_x = min(logical_x + 2, cells_i + radius);
+        let wide_north_z = max(logical_z - 2, -radius);
+        let wide_south_z = min(logical_z + 2, cells_i + radius);
+        let wide_left = selected_grid_height(wide_left_x, logical_z, instance_index);
+        let wide_right = selected_grid_height(wide_right_x, logical_z, instance_index);
+        let wide_north = selected_grid_height(logical_x, wide_north_z, instance_index);
+        let wide_south = selected_grid_height(logical_x, wide_south_z, instance_index);
+        let wide_slope_x = (wide_right - wide_left)
+            / max(f32(wide_right_x - wide_left_x) * sample_spacing, 1.0);
+        let wide_slope_z = (wide_south - wide_north)
+            / max(f32(wide_south_z - wide_north_z) * sample_spacing, 1.0);
+        slope_x = mix(narrow_slope_x, wide_slope_x, coarse_footprint_weight);
+        slope_z = mix(narrow_slope_z, wide_slope_z, coarse_footprint_weight);
+    }
     let normal = normalize(vec3<f32>(-slope_x * 4.0, 1.0, -slope_z * 4.0));
     let light = clamp(dot(normal, normalize(vec3<f32>(-0.45, 0.82, -0.35))) * 0.48 + 0.58, 0.34, 1.05);
 

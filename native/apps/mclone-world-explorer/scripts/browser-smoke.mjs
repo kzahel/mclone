@@ -172,7 +172,10 @@ try {
   );
   let heldFrame = await runtimeSnapshot(page);
   heldSamples.push(heldFrame.report);
-  for (let sample = 0; sample < 4; sample += 1) {
+  // Three advancing frames are the asserted cadence contract below. A fourth
+  // only extends distance on slow high-DPI devices and turns this transition
+  // check into a substantially larger sequential streaming workload.
+  for (let sample = 0; sample < 3; sample += 1) {
     await page.waitForFunction(
       (frame) => (
         globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__?.observer.frame() > frame
@@ -388,7 +391,8 @@ function assertFixedReady(value, stage) {
       || value.stagingSlots !== 70
       || value.normalHaloRadius !== 2
       || value.normalHaloSamplesPerTile !== 536
-      || value.normalHaloFixedBytes !== 15_779_840
+      || value.normalHaloFixedBytes !== 493_120
+      || value.normalHeightFixedBytes !== 4_380_120
       || value.readySlots !== value.allocationSlots
       || value.requestedLevels !== 10
       || value.stagedLevels !== 0
@@ -396,7 +400,7 @@ function assertFixedReady(value, stage) {
       || value.vegetationCommittedLevels !== 3
       || value.pendingRefills !== 0
       || value.drawnLevels !== 10
-      || value.fixedResidentBytes !== 140_237_440
+      || value.fixedResidentBytes !== 128_837_720
       || value.pendingVegetationTiles !== 0
       || value.residentBytes <= 0) {
     throw new Error(`${stage} is not fixed and ready:\n${JSON.stringify(value, null, 2)}`);

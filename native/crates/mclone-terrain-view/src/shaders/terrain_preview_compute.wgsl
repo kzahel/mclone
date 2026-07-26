@@ -27,7 +27,7 @@ struct U64 {
     high: u32,
 };
 
-const TERRAIN_HORIZON_SAMPLE_HALO_FLAG: u32 = 0x80000000u;
+override terrain_sample_halo_radius: u32 = 0u;
 
 // Rust replaces this marker with domains and scales from the production spec.
 // __MCLONE_PRODUCTION_FIELD_CONSTANTS__
@@ -60,6 +60,9 @@ var<uniform> params: TerrainPreviewParams;
 
 @group(0) @binding(1)
 var<storage, read_write> gpu_samples: array<TerrainPreviewSample>;
+
+@group(0) @binding(2)
+var<storage, read_write> normal_heights: array<f32>;
 
 fn add_u64(left: U64, right: U64) -> U64 {
     let low = left.low + right.low;
@@ -1200,11 +1203,7 @@ fn forest_footprint_summary(world_x: i32, world_z: i32, sample_spacing: i32) -> 
 @compute @workgroup_size(8, 8, 1)
 fn compute_main(@builtin(global_invocation_id) invocation: vec3<u32>) {
     let drawn_samples_per_axis = params.layer_samples_size.y;
-    let halo_radius = select(
-        0u,
-        2u,
-        (params.content_stage_flags.w & TERRAIN_HORIZON_SAMPLE_HALO_FLAG) != 0u,
-    );
+    let halo_radius = terrain_sample_halo_radius;
     let storage_samples_per_axis = drawn_samples_per_axis + halo_radius * 2u;
     if invocation.x >= storage_samples_per_axis
         || invocation.y >= storage_samples_per_axis {
@@ -1215,8 +1214,16 @@ fn compute_main(@builtin(global_invocation_id) invocation: vec3<u32>) {
     let logical_z = i32(invocation.y) - i32(halo_radius);
     let world_x = params.origin_spacing_cells.x + logical_x * sample_spacing;
     let world_z = params.origin_spacing_cells.y + logical_z * sample_spacing;
-    let index = invocation.y * storage_samples_per_axis + invocation.x;
+    let height_index = invocation.y * storage_samples_per_axis + invocation.x;
     var sample = evaluate_point(world_x, world_z);
+    normal_heights[height_index] = sample.terrain.y;
+    let interior = logical_x >= 0
+        && logical_z >= 0
+        && logical_x < i32(drawn_samples_per_axis)
+        && logical_z < i32(drawn_samples_per_axis);
+    if !interior {
+        return;
+    }
     if params.content_stage_flags.x >= 4u {
         var forest = point_forest_intent(world_x, world_z, sample);
         if sample_spacing > 4 {
@@ -1225,5 +1232,6 @@ fn compute_main(@builtin(global_invocation_id) invocation: vec3<u32>) {
         sample.forest_summary = forest.summary;
         sample.forest_detail = forest.detail;
     }
+    let index = u32(logical_z) * drawn_samples_per_axis + u32(logical_x);
     gpu_samples[index] = sample;
 }

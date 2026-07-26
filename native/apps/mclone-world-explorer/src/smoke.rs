@@ -310,7 +310,8 @@ impl SmokeRecorder {
             stats.staging_slots == 70
                 && stats.normal_halo_radius == 2
                 && stats.normal_halo_samples_per_tile == 536
-                && stats.normal_halo_fixed_bytes == 15_779_840
+                && stats.normal_halo_fixed_bytes == 493_120
+                && stats.normal_height_fixed_bytes == 4_380_120
                 && stats.staged_levels == 0
                 && stats.committed_levels == 10
                 && stats.vegetation_committed_levels == 3
@@ -355,6 +356,7 @@ impl SmokeRecorder {
             "normal_halo_radius": stats.normal_halo_radius,
             "normal_halo_samples_per_tile": stats.normal_halo_samples_per_tile,
             "normal_halo_fixed_bytes": stats.normal_halo_fixed_bytes,
+            "normal_height_fixed_bytes": stats.normal_height_fixed_bytes,
             "ready_slots": stats.ready_slots,
             "requested_levels": stats.requested_levels,
             "staged_levels": stats.staged_levels,
@@ -417,6 +419,7 @@ impl SmokeRecorder {
             "final_resident_bytes": final_stats.resident_bytes,
             "fixed_resident_bytes": final_stats.fixed_resident_bytes,
             "normal_halo_fixed_bytes": final_stats.normal_halo_fixed_bytes,
+            "normal_height_fixed_bytes": final_stats.normal_height_fixed_bytes,
             "final_vegetation_bytes": final_stats.vegetation_bytes,
             "allocation_slots": final_stats.allocation_slots,
             "final_ready_slots": final_stats.ready_slots,

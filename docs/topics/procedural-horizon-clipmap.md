@@ -28,8 +28,10 @@ separate complete presentations and commit atomically without an uncovered
 frame. Slice 2 stores a fixed two-sample normal halo while retaining the
 `65x65` drawn grid. Same-LOD borders use identical absolute neighbor samples;
 a two-cell fine-ring collar converges to the adjacent coarse normal footprint
-at their shared edge. The combined fixed allocation is `140,237,440` bytes
-and does not rely on a larger per-frame dispatch budget.
+at their shared edge. A dedicated scalar `69x69` normal-height field keeps the
+semantic sample grid at `65x65`; the combined fixed allocation is
+`128,837,720` bytes and does not rely on a larger per-frame dispatch budget.
+Native/offscreen plus headed desktop and Pixel 7 browser closeout passed.
 Side-by-side native/browser review also found three proof-host parity gaps.
 Completed parent Tactical
 [`253`](../tactical/253-world-explorer-cross-host-parity.md) sequences their
@@ -307,7 +309,7 @@ strips and summaries for that step are ready, the level atomically exposes the
 new origin. A guard margin lets ordinary movement remain within already
 prepared coverage.
 
-Tactical 252 Slice 1 implements this as 16 logical and seven guard resources
+Tactical 252 implements this as 16 logical and seven guard resources
 per level. The guard bound is the non-duplicated entering set for a one-tile
 diagonal move. Requested origins converge one tile at a time under the
 existing dispatch budget, while the committed terrain presentation retains

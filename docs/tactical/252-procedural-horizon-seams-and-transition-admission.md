@@ -1,9 +1,9 @@
 # Tactical 252: Procedural Horizon Seams And Transition Admission
 
-Status: active 2026-07-26. The original diagnosis predates Tacticals
+Status: complete 2026-07-26. The original diagnosis predates Tacticals
 253–256; desktop and browser review after the shared vegetation-worker
-cutover confirmed the transition defect on both executors. Slices 0–2 are
-complete and Slice 3 is next.
+cutover confirmed the transition defect on both executors. All four slices
+are complete.
 
 Topic: `procedural-horizon-clipmap`
 
@@ -202,11 +202,16 @@ edge that is exactly the adjacent coarse level's one-sample world footprint.
 The shader changes neither topology nor fragment ownership and uses no alpha
 crossfade.
 
-Each resource stores `536` additional samples, a `12.7%` sample/dispatch
-increase over the drawn grid and `68,608` bytes per resource. Across the 230
-fixed resources this is `15,779,840` bytes. Fixed residency therefore rose
-from the Slice 1 value of `124,457,600` to `140,237,440` bytes and remains
-constant across every transition.
+Each resource evaluates `536` additional height points, a `12.7%`
+sample/dispatch increase over the drawn grid. The final implementation does
+not retain full 128-byte semantic samples for those points. A specialized
+horizon pipeline writes one four-byte height into a `69x69` normal field,
+while Terrain Lab's zero-halo pipeline and every horizon tile's semantic
+buffer remain `65x65`. The full normal fields cost `4,380,120` bytes across
+230 resources; the halo rows and columns are only `493,120` of those bytes.
+Fixed residency therefore rose from the Slice 1 value of `124,457,600` to
+`128,837,720` bytes, a `3.5%` increase, and remains constant across every
+transition.
 
 The shader-layout tests prove the fixed `65`/`69` topology split, outer-edge
 selection, and identical fine-wide/coarse-narrow world footprints. All 49
@@ -214,17 +219,20 @@ terrain-view tests and the native/Wasm Explorer tests pass. The aligned
 native/offscreen smoke completed with the new allocation and visually
 inspected 3D, movement, negative, teleport, map, and orbit captures. In the
 same local lane, process time to the first complete target rose from
-`354.9 ms` to `399.3 ms`; movement mean/P95 encode time rose from
-`2.52/4.19 ms` to `3.31/5.68 ms`.
+`354.9 ms` to `346.5 ms`; movement mean/P95 encode time changed from
+`2.52/4.19 ms` to `2.99/4.54 ms`. These are single-run local receipts, not a
+cross-device performance claim.
 
 The headed Wayland desktop-browser lane also passed initial, pointer,
 shift-pan, two-contact, forced Worker restart plus held motion, negative,
 teleport, and shutdown checks. Its inspected movement capture retained a
 coherent forest and surface; all checkpoints reported the exact
-`15,779,840`-byte halo. The Wasm artifact is `1,708,486` bytes, `4,777` bytes
-larger than Slice 1.
+`493,120`-byte halo extension and `4,380,120`-byte normal-height allocation.
+The final Wasm artifact is `1,712,117` bytes.
 
 ### Slice 3: cross-host closeout
+
+Status: complete 2026-07-26.
 
 1. Add requested/staged/committed transition diagnostics.
 2. Exercise the constrained aligned-boundary transition on native and
@@ -233,6 +241,38 @@ larger than Slice 1.
    pixels.
 4. Record memory/work deltas and close this tactical without starting game
    scene integration.
+
+The final native-window/offscreen smoke starts at the `2047` coincidence
+boundary and exercises continuous X, negative Z, diagonal, negative-coordinate
+rebase, million-block teleport, zoom, map, and orbit states. Every
+continuous-coverage frame asserts 160 ready logical tiles, ten committed and
+drawn terrain levels, and three committed vegetation levels. All captures use
+the fixed `128,837,720`-byte allocation and were visually inspected.
+
+Headed Wayland desktop and Pixel 7 browser profiles run the same Rust session,
+specialized WebGPU pipelines, and isolated vegetation Worker. Both passed
+cold start, pointer, shift-pan, two-contact movement, forced Worker
+termination/restart, three distinct held-motion transitions, negative
+coordinates, teleport, and graceful shutdown. Every held sample retained all
+ten terrain and three vegetation levels. Initial semantic receipts stayed
+exact at `2,609` instances and record hash `2381faa9bec5178f`; later movement
+receipts changed only with the requested world coverage.
+
+The shared shader's other consumer also remains intact: all Terrain Lab tests,
+its Wasm build, and the complete headed WebGPU smoke pass on the zero-halo
+specialization. That receipt still reports `samplesPerAxis: 65`, exact CPU/GPU
+base-height agreement, and 100% ocean/material agreement. Its inspected
+comparison pixels remain coherent. The World Explorer dependency firewall
+remains at 160 native and 76 browser packages.
+
+There is no Android or XR World Explorer host today, and this tactical
+deliberately does not start game-scene integration. The relevant portability
+claim is consequently structural rather than a device-pixel claim: admission
+and normal policy live in the platform-neutral terrain-view crate, add no
+window/browser/OpenXR dependency, preserve the fixed 16-dispatch budget, and
+have fixed resource counts independent of view count. Android, synthetic
+stereo, and multiview Explorer execution remain the future host work already
+recorded in `platforms.md`.
 
 ## Acceptance
 
