@@ -14,6 +14,10 @@ the lightweight Explorer across native and browser hosts with the first
 shared toroidal horizon. The Explorer is a product
 profile, not a native-only application: its Rust runtime must work through the
 same platform boundary that can also host the full browser game.
+Tactical
+[`250`](../tactical/250-continuous-explorer-presentation-and-cadence.md) is
+active to separate continuous fractional presentation from snapped residency
+and replace host-specific keyboard stepping with shared frame-time motion.
 `mclone-view-control` now owns shared map/orbit/contact semantics for both the
 standalone native `mclone-world-explorer` and Terrain Lab's procedural and
 canonical panes. Terrain Lab retains thin DOM focus, capture, local-coordinate,
@@ -492,6 +496,12 @@ The durable requirements are that the shared reducer owns:
 - damping or inertia when enabled;
 - follow/recenter behavior; and
 - frame-rate-independent updates.
+
+Continuous presentation and clipmap residency are separate contracts. The
+view controller retains fractional `f64` focus and scale; the renderer
+receives them every admitted frame. Only procedural residency snaps to
+power-of-two tile boundaries. Platform loops provide monotonic elapsed time
+and held-control facts without assigning speed or accumulating movement.
 
 The reducer produces camera/view facts. It does not choose what a selected
 block means, teleport a player, mutate terrain, or issue a network command.

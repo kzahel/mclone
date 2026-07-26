@@ -232,6 +232,14 @@ should retain integer or double-precision world positions. Shaders should use
 camera-relative coordinates or a high/low origin decomposition so distant
 terrain does not jitter as the observer moves far from world zero.
 
+Tactical
+[`250`](../tactical/250-continuous-explorer-presentation-and-cadence.md)
+implements the first explicit presentation/residency split. Fractional camera
+focus and scale update every frame, while toroidal origins change only at
+aligned tile boundaries. Shaders receive a nearby integer anchor plus a small
+fractional remainder so camera motion stays continuous without converting a
+large absolute `f64` coordinate directly to `f32`.
+
 ## Seams And Transitions
 
 Skirts are the accepted first seam treatment. Vertical faces are already a
