@@ -373,7 +373,8 @@ impl SmokeRecorder {
                             .exact_owned_tree_records
                             .saturating_add(stats.proxy_owned_tree_records)
                     && stats.tree_proxy_suppressed_records == stats.exact_owned_tree_records
-                    && stats.tree_proxy_missing_exact_records == 0,
+                    && stats.tree_proxy_missing_exact_records == 0
+                    && stats.tree_proxy_missing_proxy_records == 0,
                 "World Explorer {label} checkpoint mask does not match exact-painted coverage: \
                  horizon={stats:?} exact={exact:?}"
             );
@@ -444,6 +445,10 @@ impl SmokeRecorder {
             json!(stats.tree_proxy_missing_exact_records),
         );
         fields.insert(
+            "tree_proxy_missing_proxy_records".to_owned(),
+            json!(stats.tree_proxy_missing_proxy_records),
+        );
+        fields.insert(
             "tree_ownership_generation".to_owned(),
             json!(stats.tree_ownership_generation),
         );
@@ -464,7 +469,10 @@ impl SmokeRecorder {
             json!(stats.proxy_owned_tree_records),
         );
         fields.insert("dual_owned_tree_records".to_owned(), json!(0));
-        fields.insert("unowned_tree_records".to_owned(), json!(0));
+        fields.insert(
+            "unowned_tree_records".to_owned(),
+            json!(stats.tree_proxy_missing_proxy_records),
+        );
         fields.insert("composition".to_owned(), json!(composition.label()));
         fields.insert("exact".to_owned(), exact_stats_json(exact));
         fields.insert("frontier".to_owned(), json!("procedural-collar-1.5-blocks"));

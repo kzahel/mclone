@@ -416,9 +416,11 @@ The initial forest checkpoint reported `17` owned records: `12` exact and
 `5` frontier-crossing proxies. The clipmap contained `22` copies of those
 `12` exact-owned IDs across its nested record tiles; every copy was
 suppressed, with `0` missing exact IDs, `0` dual-owned records, and `0`
-unowned records. After delayed movement, the corresponding receipt was `16`
-records (`12` exact and `4` proxy), `27` suppressed clipmap instances for all
-`12` exact IDs, and again zero missing, dual, or unowned records.
+unowned records; all `5` proxy-owned IDs were also resident. After delayed
+movement, the corresponding receipt was `16` records (`12` exact and `4`
+proxy), `27` suppressed clipmap instances for all `12` exact IDs, and again
+zero missing exact-owned or proxy-owned IDs, dual ownership, or unowned
+records.
 
 Both lanes completed axial/diagonal movement, negative coordinates,
 admission/eviction, deliberately delayed work, and million-block teleport.

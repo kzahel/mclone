@@ -373,7 +373,7 @@ impl WorldExplorerSession {
              fixed_resident_bytes={} halo_bytes={} normal_height_bytes={} \
              vegetation_bytes={} allocation_slots={} \
              ready_slots={} pending={} vegetation_ready={} vegetation_pending={} \
-             tree_instances={} tree_suppressed={}:{} tree_missing={} tree_ownership={}:{} \
+             tree_instances={} tree_suppressed={}:{} tree_missing={}:{} tree_ownership={}:{} \
              tree_exact={} tree_proxy={} vegetation_source={:016x} vegetation_hash={:016x} \
              vegetation_queue={} vegetation_compile_ms={:.2} finest_spacing={} \
              refills_total={} rebases_total={}",
@@ -402,6 +402,7 @@ impl WorldExplorerSession {
             stats.map_or(0, |stats| stats.tree_proxy_suppressed_instances),
             stats.map_or(0, |stats| stats.tree_proxy_suppressed_records),
             stats.map_or(0, |stats| stats.tree_proxy_missing_exact_records),
+            stats.map_or(0, |stats| stats.tree_proxy_missing_proxy_records),
             stats.map_or(0, |stats| stats.tree_ownership_generation),
             stats.map_or(0, |stats| stats.tree_ownership_units),
             stats.map_or(0, |stats| stats.exact_owned_tree_records),

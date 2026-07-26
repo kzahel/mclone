@@ -186,6 +186,7 @@ pub struct TerrainHorizonFrameStats {
     pub tree_proxy_suppressed_instances: u32,
     pub tree_proxy_suppressed_records: u32,
     pub tree_proxy_missing_exact_records: u32,
+    pub tree_proxy_missing_proxy_records: u32,
     pub tree_proxy_vertex_count: u32,
     pub tree_ownership_generation: u64,
     pub tree_ownership_units: u32,
@@ -3186,6 +3187,18 @@ impl TerrainHorizonRenderer {
             .count()
             .try_into()
             .unwrap_or(u32::MAX);
+        let proxy_owned_tree_ids = self
+            .tree_ownership
+            .as_ref()
+            .into_iter()
+            .flat_map(BoundedRepresentationOwnershipSnapshot::approximate_owned_ids)
+            .copied()
+            .collect::<BTreeSet<_>>();
+        let tree_proxy_missing_proxy_records = proxy_owned_tree_ids
+            .difference(&resident_tree_ids)
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX);
         let tree_proxy_vertex_count =
             tree_instance_count.saturating_mul(TERRAIN_PREVIEW_TREE_VERTICES_PER_INSTANCE);
         let vertex_count = drawn_tiles
@@ -3299,6 +3312,7 @@ impl TerrainHorizonRenderer {
             tree_proxy_suppressed_instances,
             tree_proxy_suppressed_records,
             tree_proxy_missing_exact_records,
+            tree_proxy_missing_proxy_records,
             tree_proxy_vertex_count,
             tree_ownership_generation,
             tree_ownership_units,
