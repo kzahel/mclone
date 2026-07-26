@@ -42,13 +42,15 @@ semantics, supported stages/layers, sampling, and canonical generation.
 
 ## Current Two-Fidelity Contract
 
-`Sampled exact` preserves the direct Java 1.17.1 density result at each
-requested point. It generates only columns with non-zero horizontal
-interpolation weight: one at an aligned density-lattice corner, two on a
-single-axis interior position, or four at an arbitrary interior block.
+`Sampled exact` is revisioned
+`vanilla-1.17.1-density-column-lod-v2`. It preserves the direct Java 1.17.1
+density result at each requested point and generates only columns with
+non-zero horizontal interpolation weight: one at an aligned density-lattice
+corner, two on a single-axis interior position, or four at an arbitrary
+interior block.
 
 `Fast macro` is revisioned
-`vanilla-1.17.1-sparse-density-column-lod-v1`. For each retained horizontal
+`vanilla-1.17.1-sparse-density-column-lod-v2`. For each retained horizontal
 column it uses one center noise biome and nine ordinary vanilla blended-noise
 nodes spaced four vertical cells apart. It interpolates across the resulting
 32-block intervals and retains vanilla water fill, biome lookup, and
@@ -60,7 +62,7 @@ fixtures show a 3.45-3.87x cold compile speedup over the optimized exact path,
 P95 solid error. The headed Pixel 7 viewport reached macro target in 462 ms
 and exact target in 1,948 ms.
 
-## Active Surface-Appearance Work
+## Surface-Appearance Quality
 
 The first material follow-up preserves three independent quality axes:
 
@@ -75,12 +77,21 @@ evaluation of Vanilla's existing four-octave two-dimensional surface-noise
 field and applies the production mountain, gravelly-mountain,
 giant-tree-taiga, and shattered-savanna thresholds. This can reveal stone,
 gravel, coarse dirt, and podzol without adding density columns, vertical
-probes, neighbor height samples, or footprint taps.
+probes, neighbor height samples, or footprint taps. The shared shader also
+uses derivatives of geometry it already renders to mark steep mountain faces
+as stone; that classifier adds no worldgen sample.
 
 The value is part of request, tile, cache, Worker, URL, and diagnostic
 identity. Basic remains permanently selectable. Inferred becomes the default
-only after fixed timing and canonical visual evidence show that the bounded
+because fixed timing and canonical visual evidence show that the bounded
 lookup is worthwhile.
+
+On the two fixed 65-by-65, 2 km grids, Inferred added 1.4-1.5% to median Fast
+Macro compile time. Sampled Exact ranged from run noise to 3.7%. Across 1,668
+non-water columns in seven relevant production surface fixtures, Basic
+matched 1,309 visible materials and Inferred matched all 1,668. These results
+validate the selected builder decisions, not complete column mutation or
+arbitrary side-wall parity.
 
 Mclone Overworld already emits water, sand, snow, stone, gravel, coarse dirt,
 and grass through its macro surface contract and already supplies
@@ -265,6 +276,9 @@ pnpm --dir tools/terrain-lab exec playwright test \
 - `3b056495` removes exact columns with zero interpolation weight.
 - `44af6f29` adds the nine-node fast macro sampler and repeatable benchmark.
 - `6182bb60` adds independent exact/macro renderer and Worker products.
+- `8f772fff` records the surface-appearance quality contract.
+- `a6fa839d` adds Basic/Inferred request identity, builder classification,
+  grass tint, steep-face exposure, UI control, and evidence.
 
 The browser main thread shares one Wasm initialization promise between its
 exact and LOD canvases. The vanilla Worker owns a separate Wasm instance and a
@@ -285,8 +299,8 @@ Possible follow-ups, each requiring its own explicit contract, are:
 - specialized surface-builder geometry and closer material parity;
 - footprint-aware relief summaries and truthful parent roll-ups;
 - sparse semantic proxies for selected vanilla structures or vegetation;
-- builder-aware basic/inferred surface appearance and reference-shaped grass
-  tint (active in Tactical 251);
+- footprint material coverage or bounded dominant/secondary material taps,
+  if later evidence justifies a quality above Inferred;
 - use by a future footprint-growing in-game terrain hierarchy, if that
   architecture can preserve the sampler's bounded direct-column contract.
 

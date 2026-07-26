@@ -1,6 +1,6 @@
 # LOD Surface Appearance Quality
 
-Status: active (2026-07-26).
+Status: complete (2026-07-26).
 
 Topic: `vanilla-terrain-lod`
 
@@ -18,7 +18,9 @@ The first slice adds two explicit surface-appearance qualities:
 - **Inferred** adds one builder-aware two-dimensional surface-noise evaluation
   per point. It may select stone, gravel, coarse dirt, or podzol for the
   vanilla mountain, gravelly-mountain, giant-tree-taiga, and
-  shattered-savanna builders.
+  shattered-savanna builders. The renderer also marks steep mountain faces
+  from derivatives of the geometry it is already drawing; this adds no
+  worldgen sample.
 
 No quality in this tactical adds neighboring density columns, extra vertical
 density probes, child-tile roll-ups, or footprint taps.
@@ -112,6 +114,9 @@ Basic:
 
 Inferred:
   Basic + one 2D four-octave surface-noise lookup
+
+Inferred renderer:
+  existing triangle geometry + one derivative-based steep-face decision
 ```
 
 The following remain deferred:
@@ -126,6 +131,60 @@ The following remain deferred:
 A future sampled quality may add bounded taps, but it requires its own work
 accounting and mobile evidence. It must not alter what `Basic` or `Inferred`
 mean.
+
+## Result
+
+The landed contract is:
+
+- `Basic` remains permanently selectable and performs no surface-noise
+  lookup;
+- `Inferred` is the default after measurement;
+- both qualities use reference-shaped per-biome grass color without another
+  biome-source query;
+- Inferred reuses the production surface-noise field and shared builder
+  thresholds; and
+- Inferred additionally colors already-rendered steep mountain faces as
+  stone. The face classifier uses shader derivatives only and does not change
+  CPU/Worker sampling.
+
+Seven production surface fixtures cover mountains, mountain relief, gravelly
+mountains, gravelly relief, giant tree taiga, shattered savanna, and shattered
+savanna plateau. Across their 1,668 non-water columns, Basic matched 1,309
+visible top materials. Inferred corrected the other 359 and matched all 1,668.
+This verifies the point classifier on the selected reference-shaped builders;
+it does not claim complete surface-builder or side-wall parity.
+
+Five optimized development-profile runs were recorded for each fixed
+65-by-65, 2,048-block grid. Median cold grid compilation was:
+
+| Seed and center | Basic exact | Inferred exact | Basic macro | Inferred macro |
+|---|---:|---:|---:|---:|
+| `12345`, `0,0` | 172.72 ms | 171.05 ms | 48.08 ms | 48.79 ms |
+| `-98765`, `-304,336` | 273.14 ms | 283.20 ms | 75.55 ms | 76.60 ms |
+
+The macro delta was 1.4-1.5%. Exact ranged from run noise on the first fixture
+to 3.7% on the second. Inferred changed 338 and 62 non-water lattice points,
+respectively. No height, density, biome-neighbor, or footprint work changed.
+
+Headed Chrome passed on desktop and the Pixel 7 profile at 2 km. The inspected
+Basic/Inferred captures show biome grass variation in both modes and coherent
+stone, coarse-dirt, gravel, and podzol regions only in Inferred. A separate
+64-block seed-33 capture compared 25 canonical surface chunks with exact and
+macro LOD; the derivative classifier changed steep heightfield faces from
+grass to the broad stone-cliff read visible in the canonical pane.
+
+Evidence captures:
+
+- `/tmp/mclone-terrain-lab-desktop-chrome-vanilla-basic.png`
+- `/tmp/mclone-terrain-lab-desktop-chrome-vanilla-inferred.png`
+- `/tmp/mclone-terrain-lab-desktop-chrome-vanilla-mountain-close.png`
+- the corresponding `phone-chrome` captures under `/tmp`
+
+## Implementation Receipt
+
+- `8f772fff` records the quality and performance boundary.
+- `a6fa839d` implements shared classification, rendering, request identity,
+  Worker/Wasm routing, UI state, measurements, and browser evidence.
 
 ## Acceptance
 
@@ -159,4 +218,3 @@ mean.
 7. Select the default from evidence and record remaining sampling experiments.
 
 Commit each coherent slice with `Topic: vanilla-terrain-lod`.
-
