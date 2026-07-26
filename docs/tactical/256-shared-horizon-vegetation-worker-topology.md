@@ -646,8 +646,10 @@ ordinary fallback until browser work completes.
 
 ## Later Game-Integration Tactical
 
-After this tactical closes, a separate tactical should integrate the proven
-service into the game through `mclone-scene`. It should own:
+Active coordinating parent
+[`261`](261-procedural-horizon-product-integration-roadmap.md) now owns the
+ordered child campaign that integrates the proven service into the game
+through `mclone-scene`. It should own:
 
 - scene/world lifecycle and source exposure;
 - exact-painted frame snapshots and procedural coverage masks;

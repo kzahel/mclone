@@ -293,6 +293,10 @@ series implements the same concern, normally reuse the document slug in its
   toroidal geometry-clipmap proof for fixed-budget natural horizons, nested
   rings and skirts, exact-painted chunk masking, vegetation handoff,
   coarse-first XR-safe admission, and one shared Terrain Lab/game service.
+  Coordinating parent Tactical
+  [`261`](../tactical/261-procedural-horizon-product-integration-roadmap.md)
+  inventories the completed proof stack and sequences real-game,
+  flat-platform, and XR/multiview integration.
 - [`lod-native-vegetation.md`](lod-native-vegetation.md): accepted immediate
   migration of original-profile trees from vanilla-shaped chunk decoration to
   worldgen-owned forest intent and stable tree records shared by exact chunks,

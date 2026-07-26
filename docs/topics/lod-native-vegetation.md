@@ -1034,12 +1034,14 @@ pixels:
 
 ## Recommended Next Work
 
-Start a focused game-integration tactical only when the exact/procedural
-coverage contract is ready for review. It should construct the proven
-platform executor at the app rim, compose the unchanged coordinator/compiler
-under `mclone-scene`, and add exact-painted coverage, cross-chunk crown XOR,
-authoritative edit invalidation, multiworld budgets, device rebuild, and
-mono/stereo/multiview admission.
+Coordinating parent Tactical
+[`261`](../tactical/261-procedural-horizon-product-integration-roadmap.md) now
+sequences the focused game-integration campaign. Its first child establishes
+the exact/procedural coverage contract for review. Later children construct
+the proven platform executor at the app rim, compose the unchanged
+coordinator/compiler under `mclone-scene`, and add exact-painted coverage,
+cross-chunk crown XOR, authoritative edit invalidation, multiworld budgets,
+device rebuild, and mono/stereo/multiview admission.
 
 The active Terrain Lab hierarchy work remains an independent presentation
 quality track: retain its 65.5 km work receipts, footprint filtering, and

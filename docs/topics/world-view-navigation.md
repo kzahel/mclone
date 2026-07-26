@@ -794,20 +794,24 @@ toroidal-horizon proof.
    Drive one shared Rust horizon through the lightweight native and web
    Explorer without creating an Explorer-specific browser ABI. Keep Terrain
    Lab unchanged.
-5. **Extract a reusable exact-view source.** Adapt locally compiled canonical
-   chunks into the shared snapshot, render-session, compile, upload, and draw
-   lifecycle. Do not promote Terrain Lab's TypeScript scheduler or duplicate
-   the game's cache and Worker framework. Preserve the Lab's working canonical
-   view while proving the narrower boundary.
+5. **Extract a reusable exact-view source.** Parent Tactical
+   [`261`](../tactical/261-procedural-horizon-product-integration-roadmap.md)
+   now begins this boundary with one scene-owned exact-painted frame contract.
+   Adapt locally compiled canonical chunks into the shared snapshot,
+   render-session, compile, upload, and draw lifecycle. Do not promote Terrain
+   Lab's TypeScript scheduler or duplicate the game's cache and Worker
+   framework. Preserve the Lab's working canonical view while proving the
+   narrower boundary.
 6. **Build the minimal Web Explorer smoke — complete and deployed.** Keep
    JavaScript or TypeScript
    limited to canvas, rAF, lifecycle, URL, raw-observation forwarding, and
    mechanical browser dispositions. Add a deployment smoke and measure the
    independent Wasm/asset payload. A procedural-only result remains a smoke,
    not the player-facing replacement for Terrain Lab.
-7. **Compose procedural and exact terrain.** Add the reusable exact near field
-   to an Explorer host and validate masking, skirts, replacement, and
-   movement before calling it the real map-to-world view.
+7. **Compose procedural and exact terrain.** Tactical 261 sequences the
+   scene-owned composition, masking, skirts, replacement, movement, and
+   all-target promotion. Reuse that composition in an Explorer host before
+   calling it the real map-to-world view.
 8. **Connect tabletop Slice 2.** Reuse the same manipulation contract while
    retaining scene-owned follow, authority, and target mapping.
 9. **Build the player-facing Explorer UI.** Use the shared terrain view,

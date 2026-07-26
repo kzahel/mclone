@@ -64,15 +64,15 @@ deployed the shared correction for continuous fractional presentation,
 residency-only snapping, frame-rate-independent held view motion, and
 lightweight native/browser cadence without importing the full game runtime.
 Tactical
-[`251`](251-lod-surface-appearance-quality.md) is the active bounded
+[`251`](251-lod-surface-appearance-quality.md) completed the bounded
 surface-appearance slice: permanent Basic material classification,
 builder-aware Inferred material classification, cheap reference grass tint,
 and explicit deferral of footprint sampling.
 Tactical
-[`252`](252-procedural-horizon-seams-and-transition-admission.md) records the
-diagnosed tile-normal seams and one-frame coarse fallback at aligned
-multi-level origin changes. It is proposed and intentionally defers runtime
-changes until the clipmap hardening slice resumes.
+[`252`](252-procedural-horizon-seams-and-transition-admission.md) completed
+requested/staged/committed admission, retained vegetation coverage, and
+normal-halo seam hardening after native and browser review confirmed the
+transition defect.
 Tactical
 [`253`](253-world-explorer-cross-host-parity.md) completed the Explorer's
 native/browser presentation-parity campaign. Tactical
@@ -83,6 +83,13 @@ and query-gated Rust diagnostic observer on 2026-07-26. Focused children
 completed dark color-output parity and the shared threaded/Worker vegetation
 topology with exact native/offscreen/desktop-browser/phone-browser semantic
 receipts.
+Active coordinating parent Tactical
+[`261`](261-procedural-horizon-product-integration-roadmap.md) is now the
+global procedural-horizon entry point. It records the completed proof stack
+and sequences scene-owned exact/procedural composition, lifecycle and
+vegetation arbitration, flat-platform promotion, XR/multiview validation,
+product handoff, and quality closeout. Its first implementation child is the
+scene-owned exact-painted frame contract.
 Historical render-worker architecture remains in
 [`067-shared-render-worker-architecture.md`](067-shared-render-worker-architecture.md),
 with the parent thread/Web-Worker topology in
@@ -353,3 +360,4 @@ with the parent thread/Web-Worker topology in
 | [`258-mclone-macro-terrain-performance-baseline.md`](258-mclone-macro-terrain-performance-baseline.md) | complete 2026-07-26 | Normalized production Mclone point sampling through explicit 500 km grids, preview compilation/packing, plane/cylinder exact surface/decorated generation, and completed-frame World Explorer streaming receipts without changing terrain output. |
 | [`259-modern-and-historical-coast-reference-survey.md`](259-modern-and-historical-coast-reference-survey.md) | complete 2026-07-26 | Pinned a focused modern Java reference lane, compared Alpha/Beta/1.17.1/26.2 coast mechanisms, measured current Mclone coasts, and selected the first evidence-backed coast-family contract without changing terrain output. |
 | [`260-mclone-coast-intent-and-shore-terrain.md`](260-mclone-coast-intent-and-shore-terrain.md) | active 2026-07-26 | Implement the first shared topology-aware Mclone coast intent, distinct sandy/gravel/rocky/ordinary geometry and surfaces, exact/preview parity, measured topology/performance evidence, and two explicit human visual-review gates. |
+| [`261-procedural-horizon-product-integration-roadmap.md`](261-procedural-horizon-product-integration-roadmap.md) | active coordinating parent 2026-07-26 | Global roadmap from the retired chunk Far LOD through the completed Explorer proof stack to scene-owned exact/procedural composition, native/web/Android promotion, XR/multiview acceptance, product handoff, and quality closeout. |

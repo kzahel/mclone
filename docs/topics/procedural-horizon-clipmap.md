@@ -2,8 +2,12 @@
 
 Topic: `procedural-horizon-clipmap`
 
-Status: first cross-platform proof completed and deployed on 2026-07-25 by
-Tactical
+Status: the standalone cross-platform proof, transition hardening, and shared
+vegetation service are complete. Active coordinating parent Tactical
+[`261`](../tactical/261-procedural-horizon-product-integration-roadmap.md)
+owns the global path into `mclone-scene`, exact/procedural arbitration,
+flat-platform promotion, and XR/multiview acceptance. The first
+cross-platform proof was completed and deployed on 2026-07-25 by Tactical
 [`249`](../tactical/249-cross-platform-procedural-horizon-proof.md). Shared
 toroidal planning, a ten-level fixed-budget renderer, native tree proxies, and
 one Rust Explorer session now run through native and browser adapters. This is
@@ -57,6 +61,14 @@ overflow, large coordinates, and shutdown also passed. UI-less host cleanup
 completed in Tactical
 [`254`](../tactical/254-ui-less-world-explorer-host.md) and remains owned by
 the platform-host topic rather than terrain rendering.
+
+Tactical 261 is the macro source of truth for past and future work. Its first
+child will define one scene-owned exact-painted frame snapshot and
+coverage-mask lifecycle before the first full-game composition pixels. Later
+children own exact/proxy vegetation XOR, world and device lifecycle,
+browser/Android promotion, synthetic stereo, desktop OpenXR, Quest, and
+full-frame multiview. Completed proof tacticals remain historical records and
+are not reopened for that integration.
 
 ## Scope
 
@@ -559,10 +571,12 @@ semantic owner.
    thread executor, and one isolated browser Rust actor. World Explorer proves
    identical source identity, records, failure behavior, and presentation
    without becoming the service owner.
-7. **Integrate the game scene in a later tactical.** Compose the proven service
-   under `mclone-scene`, then add exact-painted snapshots, masks, frontier
-   collars, proxy/exact vegetation XOR, edit invalidation, normal render
-   ordering, and all-target frame admission.
+7. **Integrate the game scene — coordinated by Tactical 261.** Its ordered
+   children compose the proven service under `mclone-scene`, then add
+   exact-painted snapshots, masks, frontier collars, proxy/exact vegetation
+   XOR, edit invalidation, normal render ordering, lifecycle recovery, and
+   all-target frame admission. The scene-frame contract is the next bounded
+   implementation slice.
 8. **Measure an adaptive comparator only if useful.** A quadtree Lab mode
    should answer a specific waste or quality question, not fork the content
    system.

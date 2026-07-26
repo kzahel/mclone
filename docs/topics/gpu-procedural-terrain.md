@@ -1434,7 +1434,9 @@ The next implementation direction is:
    child coverage; and
 7. compose exact chunks with the now-proven toroidal horizon using one
    exact-painted snapshot, one GPU coverage mask, and a frontier collar; see
-   [`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md).
+   [`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md) and
+   coordinating parent Tactical
+   [`261`](../tactical/261-procedural-horizon-product-integration-roadmap.md).
 
 ## Open Questions
 
