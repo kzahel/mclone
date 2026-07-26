@@ -809,11 +809,14 @@ toroidal-horizon proof.
    mechanical browser dispositions. Add a deployment smoke and measure the
    independent Wasm/asset payload. A procedural-only result remains a smoke,
    not the player-facing replacement for Terrain Lab.
-7. **Compose procedural and exact terrain — Human Review 1 candidate.**
+7. **Compose procedural and exact terrain — Human Review 1 correction.**
    Tactical 262 now has native World Explorer masking, shared depth,
-   procedural collar, replacement, and movement proof. Tactical 261
-   sequences browser, later scene-owned, and all-target promotion. Reuse the
-   accepted composition before calling it the real map-to-world view.
+   procedural collar, replacement, and movement proof. Review accepted the
+   terrain behavior but found that one stable tree can be split between exact
+   geometry and a fragment-clipped proxy while the collar occludes it. Prove
+   complete-bound tree ownership in Human Review 1A before Tactical 261
+   sequences browser, later scene-owned, and all-target promotion. Reuse only
+   the accepted composition before calling it the real map-to-world view.
 8. **Connect tabletop Slice 2.** Reuse the same manipulation contract while
    retaining scene-owned follow, authority, and target mapping.
 9. **Build the player-facing Explorer UI.** Use the shared terrain view,

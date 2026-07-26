@@ -1,12 +1,17 @@
 # Tactical 262: World Explorer Exact/Procedural Composition
 
-Status: Human Review 1 candidate 2026-07-26. Slices 0 through 3 are complete:
-one true native exact-plus-procedural frame is inspectable under movement,
-negative coordinates, teleport, and delayed exact admission. Work stops here
-for subjective review. Browser and Terrain Lab promotion remain later slices
-of this tactical after that review.
+Status: Human Review 1 correction active 2026-07-26. Slices 0 through 3
+proved the terrain compositor, shared target, exact-painted mask, and
+procedural collar. Human review accepted that terrain behavior overall but
+found one blocking natural-tree ownership defect: one stable tree can appear
+as an exact/proxy chimera while procedural terrain occludes its exact
+geometry. Slice 3A corrects whole-tree frontier ownership before browser,
+Terrain Lab, or game-scene promotion.
 
-Topic: `procedural-horizon-clipmap`
+Topics:
+
+- `procedural-horizon-clipmap`
+- `lod-native-vegetation`
 
 Parent:
 
@@ -24,6 +29,9 @@ Related directions:
   composition before the player-facing map-to-world view;
 - [`gpu-procedural-terrain.md`](../topics/gpu-procedural-terrain.md) owns the
   Terrain Lab comparison evidence and source-quality work; and
+- [`lod-native-vegetation.md`](../topics/lod-native-vegetation.md) owns stable
+  natural-tree identity, conservative bounds, exact realization, proxy
+  presentation, and the exact/proxy XOR contract; and
 - [`244`](244-lod-native-vegetation-presentation.md) is now the completed
   footprint-summary and vegetation-representation proof rather than an open
   composition owner.
@@ -139,6 +147,30 @@ The first exact near field retains a narrow boundary wall, skirt, or collar
 where exact and approximate heights can disagree. The implementation must
 name and diagnose that treatment rather than hiding cracks with accidental
 overdraw.
+
+### Natural-tree ownership uses complete bounds
+
+Terrain coverage and natural-tree ownership are related but are not the same
+mask. A stable tree may cross chunk edges and may intersect the procedural
+collar even when its base chunk is exact-painted.
+
+An exact natural tree is eligible only when:
+
+- its stable source and tree ID match the current composition source;
+- its complete conservative working bounds lie inside the exact-safe terrain
+  interior, excluding every procedural collar fragment;
+- every exact tree draw resource for the record is drawable now; and
+- the ownership generation participates in the same immutable frame decision
+  as terrain coverage.
+
+Otherwise the complete record remains proxy-owned. Exact and proxy tree
+rendering switch atomically by stable record ID. Neither base-chunk tests nor
+fragment-by-fragment proxy discard satisfy this contract.
+
+Exact natural-tree draw admission must therefore be separable from exact
+terrain admission. The correction must not hide the defect by shrinking
+crowns, expanding the terrain mask blindly, deleting all boundary trees, or
+allowing depth to choose between representations.
 
 ### Shared source, host-specific production
 
@@ -283,6 +315,52 @@ the source identically. The ownership is stable—there is no old full-height
 wall—but this semantic/appearance discontinuity is the main Human Review 1
 question.
 
+## Human Review 1 Result
+
+Interactive review on 2026-07-26 accepted the terrain compositor and collar
+overall. It found one repeatable blocking vegetation defect at the frontier.
+Matched `Exact` and `Composed` views show the same logical natural tree as:
+
+1. exact block geometry admitted with its exact chunk;
+2. exact geometry partly hidden by retained procedural collar terrain; and
+3. the remaining outside portion of its LOD proxy, because proxy fragments
+   are discarded independently by their world-space chunk.
+
+The result is a visually implausible exact/proxy chimera. This is not a depth
+precision failure and not merely final forest quality. Depth is faithfully
+showing two incompatible ownership decisions.
+
+The review changes the sequence. Browser proof, Terrain Lab adoption, and
+game-scene integration remain gated until Slice 3A proves whole-record
+vegetation arbitration. The later PH-5 work still owns authoritative edits,
+production-scene invalidation, and lifecycle; only the reusable untouched
+natural-tree XOR primitive moves forward into this proof.
+
+### Slice 3A: whole-tree frontier arbitration
+
+- [ ] Add a renderer-neutral vegetation-ownership snapshot keyed by source,
+  terrain coverage generation, stable tree ID, and complete working bounds.
+- [ ] Separate exact natural-tree draw admission from exact terrain
+  admission without changing terrain, low-vegetation, or reference-profile
+  semantics.
+- [ ] Keep a complete record proxy-owned whenever its bounds touch unpainted
+  terrain or the procedural collar; make it exact-owned only after its full
+  exact-safe footprint and exact draw resources are ready.
+- [ ] Suppress or admit the complete proxy instance by stable record ID; do
+  not clip it fragment-by-fragment at chunk boundaries.
+- [ ] Switch exact/proxy ownership atomically on admission, eviction,
+  movement, delayed work, and source reset.
+- [ ] Extend `Coverage` and smoke receipts with exact-owned, proxy-owned,
+  frontier-crossing, dual-owned, and unowned record counts.
+- [ ] Add direct edge/corner, cross-chunk crown, negative-coordinate,
+  delayed-admission, eviction, and teleport fixtures.
+- [ ] Capture and inspect the reported forest anchor plus additional dense
+  forest boundaries before requesting Human Review 1A.
+
+Gate: every eligible natural tree has exactly one complete visible
+representation, procedural terrain never cuts an exact-owned tree, and
+Human Review 1A accepts the same boundary views.
+
 ### Slice 4: browser proof
 
 - [ ] Reuse the shared canonical compiler/session behind an isolated browser
@@ -345,6 +423,10 @@ Subjective acceptance does not require final game lighting or a perfect
 frontier treatment. It does require that the ownership model is visually
 credible and that any remaining artifact is stable, localized, and explained
 by diagnostics.
+
+The first review accepted the terrain behavior but failed the natural-tree
+XOR criterion below. Repeat this review as Human Review 1A after Slice 3A,
+using the originally reported forest boundary as a required anchor.
 
 ## Acceptance At The Review Checkpoint
 

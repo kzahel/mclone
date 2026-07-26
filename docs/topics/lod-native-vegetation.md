@@ -6,6 +6,16 @@ Status: Terrain Lab hierarchy proof active 2026-07-25. Exact records and the
 initial Lab proxy path are landed. The rejected in-game chunk-based adapter was
 removed by Tactical 245.
 
+Native World Explorer composition review on 2026-07-26 proved that the first
+chunk/fragment mask is not a valid exact/LOD tree handoff. One stable natural
+tree can appear as exact block geometry partly hidden by retained procedural
+collar terrain plus the outside fragments of its own LOD proxy. Tactical
+[`262`](../tactical/262-world-explorer-exact-procedural-composition.md)
+Slice 3A now owns the focused correction: separable exact natural-tree
+admission and one complete stable-ID representation selected from the
+record's full bounds and the actual exact-safe terrain interior. Browser and
+game-scene promotion wait for Human Review 1A.
+
 World Explorer review on 2026-07-26 found that native enabled synchronous
 near-level vegetation compilation during frame encoding while browser disabled
 vegetation entirely. Tactical
@@ -688,16 +698,26 @@ painted real terrain XOR visible procedural terrain
 Tree bounds frequently cross chunk edges. Suppressing an entire proxy merely
 because its base chunk loaded can leave missing crowns; retaining it merely
 because one touched chunk is missing can overlap exact leaves. The in-game
-tactical must choose and prove one explicit mechanism, such as:
+tactical must use the record's full conservative bounds and drawable
+readiness. Interactive World Explorer review rejected clipping proxy
+fragments against painted chunks: retained procedural collar terrain can
+occlude the wholesale exact tree while fragments of the same proxy survive
+outside the chunk mask.
 
-- clipping proxy fragments/instances against the same painted-real chunk
-  coverage used by terrain arbitration; or
-- separating exact vegetation draw admission sufficiently to replace one
-  bounded record atomically.
+The selected first mechanism is:
+
+- keep exact natural-tree draw admission separate from exact terrain
+  admission;
+- define an exact-safe terrain interior that excludes unpainted terrain and
+  every retained procedural collar fragment;
+- make a record exact-owned only after its complete working bounds lie inside
+  that interior and all exact draw resources are ready;
+- otherwise keep the complete record proxy-owned; and
+- switch the whole record atomically by stable ID and coverage generation.
 
 Loaded, generated, traversal-ready, or resident are not substitutes for
 painted-capable readiness. No owner-chunk shortcut may silently violate the
-XOR contract.
+XOR contract. Per-fragment discard is not tree ownership.
 
 Transitions may cross-fade, dither, or morph only after overlap accounting is
 defined. Position, family, dimensions, and world-anchored variation remain
@@ -871,6 +891,27 @@ exact-painted coverage snapshot, cross-chunk crown XOR, authoritative edit
 invalidation, multiworld budgets, device rebuild, and mono/stereo/multiview
 presentation around the already proven service.
 
+### Slice 6: whole-record frontier arbitration — active
+
+Tactical
+[`262`](../tactical/262-world-explorer-exact-procedural-composition.md)
+Slice 3A owns the reusable untouched-natural-tree proof before browser or
+game-scene promotion.
+
+1. publish source-, coverage-generation-, stable-ID-, and bounds-aware
+   vegetation ownership;
+2. separate exact natural-tree draws from exact terrain draws;
+3. classify against the actual exact-safe interior, including the procedural
+   collar;
+4. admit or suppress complete exact/proxy records rather than fragments;
+5. prove exactly one visible representation during delayed admission,
+   eviction, movement, negative coordinates, teleport, and source reset; and
+6. repeat the reviewed forest boundary in native window/offscreen captures
+   before Human Review 1A.
+
+Authoritative edits, production-scene invalidation, multiworld lifecycle, and
+all-target promotion remain later parent phases.
+
 ### Later generalization
 
 Do not begin with a universal `NaturalFeatureRecord` enum. After trees, planned
@@ -958,6 +999,8 @@ Stop and correct the architecture if:
 
 - a coarse request enumerates individual trees across its full footprint;
 - exact and LOD callers derive family, dimensions, or position independently;
+- exact/proxy arbitration clips one logical tree by base chunk or fragment
+  position instead of selecting its complete stable record;
 - the browser or WGSL owns placement search or tree-family policy;
 - a tree query requires materializing complete `GeneratedChunk` values;
 - cache presence changes records;
@@ -1038,11 +1081,12 @@ Coordinating parent Tactical
 [`261`](../tactical/261-procedural-horizon-product-integration-roadmap.md) now
 sequences the focused integration campaign. Active child Tactical
 [`262`](../tactical/262-world-explorer-exact-procedural-composition.md)
-establishes the exact/procedural coverage contract in World Explorer for
-review. Later children construct the proven platform executor at the app rim,
-compose the unchanged coordinator/compiler under `mclone-scene`, and add
-cross-chunk crown XOR, authoritative edit invalidation, multiworld budgets,
-device rebuild, and mono/stereo/multiview admission.
+has established terrain coverage and now corrects the reviewed exact/proxy
+tree chimera before Human Review 1A. Later children construct the proven
+platform executor at the app rim, compose the unchanged
+coordinator/compiler under `mclone-scene`, and add authoritative edit
+invalidation, multiworld budgets, device rebuild, and mono/stereo/multiview
+admission.
 
 The active Terrain Lab hierarchy work remains an independent presentation
 quality track: retain its 65.5 km work receipts, footprint filtering, and

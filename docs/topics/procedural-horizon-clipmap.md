@@ -27,10 +27,14 @@ mask, caller-owned color/depth target, extracted canonical compiler/codec,
 and native `Horizon`, `Exact`, `Composed`, and `Coverage` modes. The 5-by-5
 exact footprint stays coherent through delayed movement, negative
 coordinates, and teleport. Its explicit 1.5-block procedural collar removes
-the earlier full-height footprint wall, while conspicuous forest,
-surface-color, and especially ocean exact/horizon differences remain the
-subjective promotion question. No game-scene, browser-exact, Android, or XR
-adoption has started.
+the earlier full-height footprint wall. Human review accepted that terrain
+behavior overall but found a blocking natural-tree ownership defect: an exact
+tree can be depth-occluded by the retained collar while fragment masking
+leaves the outside part of the same stable record's LOD proxy visible.
+Tactical 262 Slice 3A will separate natural-tree admission from terrain and
+select one complete exact-or-proxy representation from stable ID, complete
+bounds, exact-safe interior, and drawable readiness. No game-scene,
+browser-exact, Android, or XR adoption has started.
 Interactive review on 2026-07-26 diagnosed two remaining proof defects and
 activated Tactical
 [`252`](../tactical/252-procedural-horizon-seams-and-transition-admission.md):
