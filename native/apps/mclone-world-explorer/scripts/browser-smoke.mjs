@@ -95,7 +95,16 @@ try {
   assertFixedReady(gesture, "raw pointer gesture");
   console.log(`World Explorer ${label} browser smoke: pointer forwarding ready`);
 
-  await twoContactStrafe(context, page, bounds);
+  await page.keyboard.down("Shift");
+  await page.mouse.move(bounds.x + bounds.width * 0.5, bounds.y + bounds.height * 0.43);
+  await page.mouse.down();
+  await page.mouse.move(
+    bounds.x + bounds.width * 0.5,
+    bounds.y + bounds.height * 0.45,
+    { steps: 4 },
+  );
+  await page.mouse.up();
+  await page.keyboard.up("Shift");
   await page.waitForFunction(
     ([focusX, focusZ]) => {
       const report = globalThis.__MCLONE_WORLD_EXPLORER__?.report;
@@ -104,9 +113,26 @@ try {
     },
     [gesture.focusX, gesture.focusZ],
   );
+  await waitReady(page);
+  const shiftPan = await report(page);
+  assertFixedReady(shiftPan, "shift-primary pan");
+  assertShiftPan(gesture, shiftPan);
+  console.log(`World Explorer ${label} browser smoke: shift-primary pan ready`);
+  const shiftPanCapture = `/tmp/mclone-world-explorer-web-${label}-shift-pan.png`;
+  await canvas.screenshot({ path: shiftPanCapture });
+
+  await twoContactStrafe(context, page, bounds);
+  await page.waitForFunction(
+    ([focusX, focusZ]) => {
+      const report = globalThis.__MCLONE_WORLD_EXPLORER__?.report;
+      return Math.abs(report?.focusX - focusX) > 0.001
+        || Math.abs(report?.focusZ - focusZ) > 0.001;
+    },
+    [shiftPan.focusX, shiftPan.focusZ],
+  );
   const touch = await report(page);
   assertFixedReady(touch, "two-contact strafe");
-  assertPresentationOnly(gesture, touch, "two-contact strafe");
+  assertPresentationOnly(shiftPan, touch, "two-contact strafe");
   if (Number.isInteger(touch.focusX) && Number.isInteger(touch.focusZ)) {
     throw new Error(
       `two-contact strafe lost fractional focus:\n${JSON.stringify(touch, null, 2)}`,
@@ -177,6 +203,7 @@ try {
     captures: {
       initial: initialCapture,
       movement: movementCapture,
+      shiftPan: shiftPanCapture,
       teleport: finalCapture,
     },
     gesture,
@@ -189,6 +216,7 @@ try {
     },
     moved,
     negative,
+    shiftPan,
     target: label,
     teleported,
     touch,
@@ -300,6 +328,28 @@ function assertHeldSamples(samples, before) {
     throw new Error(
       `held movement was not smoothly frame-timed and camera-relative:\n`
         + `${JSON.stringify({ before, deltas, samples }, null, 2)}`,
+    );
+  }
+}
+
+function assertShiftPan(before, after) {
+  const deltaX = after.focusX - before.focusX;
+  const deltaZ = after.focusZ - before.focusZ;
+  const expectedX = -Math.cos(before.yawRadians);
+  const expectedZ = Math.sin(before.yawRadians);
+  const alongHeading = deltaX * expectedX + deltaZ * expectedZ;
+  const acrossHeading = deltaX * -expectedZ + deltaZ * expectedX;
+  if (Math.abs(after.yawRadians - before.yawRadians) > 1.0e-10
+      || alongHeading <= 1.0
+      || Math.abs(acrossHeading) > 0.001) {
+    throw new Error(
+      `shift-primary drag did not pan down with the grabbed terrain:\n`
+        + `${JSON.stringify({
+          before,
+          after,
+          alongHeading,
+          acrossHeading,
+        }, null, 2)}`,
     );
   }
 }

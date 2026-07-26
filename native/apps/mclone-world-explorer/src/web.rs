@@ -12,8 +12,8 @@ use mclone_terrain_view::{
     TerrainPreviewMaterialAtlas,
 };
 use mclone_view_control::{
-    ContactEvent, ContactPurpose, ViewPoint, ViewportMetrics, WorldViewHeldDirection,
-    WorldViewIntent, WorldViewMode, WorldViewProjection, WorldViewState,
+    ContactButton, ContactEvent, ViewPoint, ViewportMetrics, WorldViewHeldDirection,
+    WorldViewIntent, WorldViewMode, WorldViewProjection, WorldViewState, pointer_contact_purpose,
 };
 use serde::Serialize;
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
@@ -224,20 +224,20 @@ impl WebWorldExplorer {
         &mut self,
         pointer_id: u32,
         button: i16,
+        shift_key: bool,
         x: f64,
         y: f64,
         time_seconds: f64,
         width: f64,
         height: f64,
     ) -> bool {
+        let Some(button) = web_contact_button(button) else {
+            return false;
+        };
         self.session.contact(ContactEvent::Down {
             id: u64::from(pointer_id),
             position: ViewPoint::new(x, y),
-            purpose: if button == 2 {
-                ContactPurpose::Pan
-            } else {
-                ContactPurpose::ViewDefault
-            },
+            purpose: pointer_contact_purpose(button, shift_key),
             time_seconds,
             viewport: ViewportMetrics::new(width, height),
         })
@@ -582,6 +582,15 @@ fn web_held_direction(code: &str) -> Option<WorldViewHeldDirection> {
         "ArrowDown" | "KeyS" => Some(WorldViewHeldDirection::Backward),
         "ArrowLeft" | "KeyA" => Some(WorldViewHeldDirection::Left),
         "ArrowRight" | "KeyD" => Some(WorldViewHeldDirection::Right),
+        _ => None,
+    }
+}
+
+fn web_contact_button(button: i16) -> Option<ContactButton> {
+    match button {
+        0 => Some(ContactButton::Primary),
+        1 => Some(ContactButton::Auxiliary),
+        2 => Some(ContactButton::Secondary),
         _ => None,
     }
 }

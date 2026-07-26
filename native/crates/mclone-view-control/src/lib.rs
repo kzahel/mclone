@@ -407,6 +407,21 @@ pub enum ContactPurpose {
     Orbit,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ContactButton {
+    Primary,
+    Auxiliary,
+    Secondary,
+}
+
+pub const fn pointer_contact_purpose(button: ContactButton, shift_key: bool) -> ContactPurpose {
+    match button {
+        ContactButton::Primary if shift_key => ContactPurpose::Pan,
+        ContactButton::Primary => ContactPurpose::ViewDefault,
+        ContactButton::Auxiliary | ContactButton::Secondary => ContactPurpose::Pan,
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ContactEvent {
     Down {
@@ -639,8 +654,8 @@ fn grab_pan(state: &mut WorldViewState, delta: ViewPoint, viewport: ViewportMetr
         WorldViewMode::Orbit => {
             let horizontal = delta.x / viewport.width_pixels * state.blocks_across;
             let depth = delta.y / viewport.height_pixels * vertical_blocks;
-            state.focus_x += state.yaw_radians.sin() * horizontal + state.yaw_radians.cos() * depth;
-            state.focus_z += state.yaw_radians.cos() * horizontal - state.yaw_radians.sin() * depth;
+            state.focus_x += state.yaw_radians.sin() * horizontal - state.yaw_radians.cos() * depth;
+            state.focus_z += state.yaw_radians.cos() * horizontal + state.yaw_radians.sin() * depth;
         }
     }
 }
@@ -948,8 +963,24 @@ mod tests {
             },
         );
 
-        assert_near(state.focus_x, 50.0);
+        assert_near(state.focus_x, -50.0);
         assert_near(state.focus_z, 100.0);
+    }
+
+    #[test]
+    fn pointer_buttons_and_shift_have_one_shared_contact_purpose() {
+        assert_eq!(
+            pointer_contact_purpose(ContactButton::Primary, false),
+            ContactPurpose::ViewDefault
+        );
+        assert_eq!(
+            pointer_contact_purpose(ContactButton::Primary, true),
+            ContactPurpose::Pan
+        );
+        for button in [ContactButton::Auxiliary, ContactButton::Secondary] {
+            assert_eq!(pointer_contact_purpose(button, false), ContactPurpose::Pan);
+            assert_eq!(pointer_contact_purpose(button, true), ContactPurpose::Pan);
+        }
     }
 
     #[test]

@@ -1,8 +1,9 @@
 use std::time::Instant;
 
 use mclone_view_control::{
-    ContactEvent, ContactGestureReducer, ContactPurpose, ViewPoint, ViewportMetrics,
+    ContactButton, ContactEvent, ContactGestureReducer, ContactPurpose, ViewPoint, ViewportMetrics,
     WorldViewHeldDirection, WorldViewIntent, WorldViewMode, WorldViewProjection, WorldViewState,
+    pointer_contact_purpose,
 };
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, Touch, TouchPhase};
 use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
@@ -214,12 +215,13 @@ impl NativeViewInput {
 }
 
 fn mouse_purpose(button: MouseButton, modifiers: ModifiersState) -> Option<ContactPurpose> {
-    match button {
-        MouseButton::Left if modifiers.shift_key() => Some(ContactPurpose::Pan),
-        MouseButton::Left => Some(ContactPurpose::ViewDefault),
-        MouseButton::Middle | MouseButton::Right => Some(ContactPurpose::Pan),
-        _ => None,
-    }
+    let button = match button {
+        MouseButton::Left => ContactButton::Primary,
+        MouseButton::Middle => ContactButton::Auxiliary,
+        MouseButton::Right => ContactButton::Secondary,
+        _ => return None,
+    };
+    Some(pointer_contact_purpose(button, modifiers.shift_key()))
 }
 
 fn held_direction(code: KeyCode) -> Option<WorldViewHeldDirection> {
@@ -235,6 +237,30 @@ fn held_direction(code: KeyCode) -> Option<WorldViewHeldDirection> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_pointer_buttons_and_shift_use_the_shared_purpose() {
+        let none = ModifiersState::empty();
+        let shift = ModifiersState::SHIFT;
+
+        assert_eq!(
+            mouse_purpose(MouseButton::Left, none),
+            Some(ContactPurpose::ViewDefault)
+        );
+        assert_eq!(
+            mouse_purpose(MouseButton::Left, shift),
+            Some(ContactPurpose::Pan)
+        );
+        assert_eq!(
+            mouse_purpose(MouseButton::Middle, none),
+            Some(ContactPurpose::Pan)
+        );
+        assert_eq!(
+            mouse_purpose(MouseButton::Right, none),
+            Some(ContactPurpose::Pan)
+        );
+        assert_eq!(mouse_purpose(MouseButton::Back, none), None);
+    }
 
     #[test]
     fn native_arrows_and_wasd_map_to_the_same_held_directions() {

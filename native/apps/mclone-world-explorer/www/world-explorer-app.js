@@ -84,6 +84,7 @@ function bindRawObservations() {
     runtime.session.pointerDown(
       event.pointerId,
       event.button,
+      event.shiftKey,
       point.x,
       point.y,
       event.timeStamp / 1000,

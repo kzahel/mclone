@@ -167,6 +167,13 @@ retains cardinal screen axes because its heading is fixed. The shared reducer
 owns this transform; native and browser hosts continue to forward only
 abstract directions.
 
+Pointer-button classification is also shared. Primary drag uses the current
+view default, Shift+primary drag pans, and auxiliary or secondary drag pans.
+Browser and native hosts map their physical button values and forward the
+Shift modifier; they do not independently choose pan/orbit semantics. Orbit
+grab-pan uses the camera's screen-horizontal and ground-forward axes, with
+both axes following the grabbed terrain under the pointer.
+
 A 2026-07-26 follow-up locked the orbit basis at yaw zero and 90 degrees,
 cardinal map behavior, diagonal normalization, and 60/120-Hz equivalence.
 All 17 focused view-control tests and three Explorer tests passed, as did the
