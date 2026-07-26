@@ -219,7 +219,9 @@ pnpm reference:modern -- --out /tmp/minecraft-modern-research
 26.2 and selects the Overworld biome builder, surface rules, terrain splines,
 density functions, noise router, aquifer, and chunk-density entry points.
 Run `decompile-mc.sh 26.2 --no-assets` directly only when a whole-client
-decompile is genuinely required.
+decompile is genuinely required. The pinned comparative lane is client-side;
+modern bundled-server extraction is deferred until a server-specific research
+question needs it.
 
 Mojang stopped obfuscating Java Edition after the Mounts of Mayhem release.
 Current jars carry original class, method, field, parameter, and variable names

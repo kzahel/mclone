@@ -1087,10 +1087,25 @@ gaps. Cross-system sequencing now lives in
 Tactical 258 now supplies explicit 65.5 km, 131 km, and roughly 500 km
 production sampling baselines, separate preview packing, plane/cylinder exact
 cold and warm generation, and completed-frame World Explorer streaming
-evidence. That evidence does not justify a generic composite review product:
-the next terrain slice should select a concrete coast or major-water question,
-then add only the review facts that question actually needs before the broader
-volumetric-geology campaign.
+evidence.
+
+Tactical
+[`259`](../tactical/259-modern-and-historical-coast-reference-survey.md)
+selected the concrete next terrain question. Alpha, Beta, Java 1.17.1, and
+Java 26.2 source evidence plus three equal current-Mclone field maps show that
+Mclone's sea-level Beach recipe is a structural coast limitation: 89.93%,
+90.18%, and 90.44% of sampled coast-adjacent land was Beach, while every
+remaining sample was a river/wetland recipe and none was Exposed Stone,
+Eroded Slope, or Grass/Soil. Receipt schema 14 now preserves that baseline.
+
+The next implementation should add one cheap topology-aware coast intent with
+sandy depositional, gravel transitional, rocky/exposed, cold-response, and
+ordinary direct-water outcomes. Geometry and material remain separate; a
+broad alongshore selector may create coherent runs only where slope,
+ruggedness, substrate, shelf, climate, and outlet facts make the family
+suitable. It should add coast-specific maps and metrics rather than a generic
+composite review product, rerun Tactical 258's performance controls, and prove
+the exact plane/cylinder seam before the broader volumetric-geology campaign.
 The
 [`still-life-and-tectonic-reference.md`](still-life-and-tectonic-reference.md)
 study sharpens that direction: select mutually legible geology families
@@ -1107,6 +1122,7 @@ place of the existing stream contracts.
 - [`starter-farmstead-settlement.md`](starter-farmstead-settlement.md)
 - [`jjthunder-to-the-max-reference.md`](jjthunder-to-the-max-reference.md)
 - [`still-life-and-tectonic-reference.md`](still-life-and-tectonic-reference.md)
+- [`modern-minecraft-reference.md`](modern-minecraft-reference.md)
 - [`../worldgen-status.md`](../worldgen-status.md)
 - [`../reference-minecraft.md`](../reference-minecraft.md)
 - [`../structures.md`](../structures.md)
@@ -1114,3 +1130,5 @@ place of the existing stream contracts.
 - [`../tactical/191-guarded-generation-planning-refactor.md`](../tactical/191-guarded-generation-planning-refactor.md)
 - [`../tactical/192-mclone-overworld-mountains-and-valleys.md`](../tactical/192-mclone-overworld-mountains-and-valleys.md)
 - [`../tactical/196-periodic-mclone-terrain-fields.md`](../tactical/196-periodic-mclone-terrain-fields.md)
+- [`../tactical/258-mclone-macro-terrain-performance-baseline.md`](../tactical/258-mclone-macro-terrain-performance-baseline.md)
+- [`../tactical/259-modern-and-historical-coast-reference-survey.md`](../tactical/259-modern-and-historical-coast-reference-survey.md)

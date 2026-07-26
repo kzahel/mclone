@@ -52,6 +52,13 @@ Use a stable release for durable conclusions. Snapshots may be inspected in a
 scratch directory for a specific question, but they do not silently replace
 this specimen.
 
+Primary publication evidence:
+
+- [Minecraft Java Edition 26.2 release notes](https://www.minecraft.net/en-us/article/minecraft-java-edition-26-2);
+- [Mojang's unobfuscated Java Edition announcement](https://www.minecraft.net/nl-nl/article/removing-obfuscation-in-java-edition);
+- the SHA-1-verified Piston per-version manifest and official client jar
+  recorded by the generated local `provenance.txt`.
+
 ## Reproducible Bootstrap
 
 Run:
@@ -155,6 +162,10 @@ This is an economical terrain-aware classifier, not a wave, deposition, or
 exposure simulation. It supports Mclone's plan to combine a coherent
 alongshore selector with measured terrain and shelf facts rather than copying
 the complete vanilla climate table.
+
+The selected Mclone implications, cross-era evidence, current three-seed
+baseline, topology/performance contract, and next-tactical acceptance criteria
+live in Tactical 259 rather than this reference-lane topic.
 
 ## Refresh Protocol
 

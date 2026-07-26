@@ -93,6 +93,8 @@ fn run() -> Result<()> {
         .collect::<Vec<_>>();
     let landform_elapsed_ms = landform_start.elapsed().as_secs_f64() * 1_000.0;
     let facts = RegionFacts::from_samples(&landforms, request.width, request.depth);
+    let coast_facts =
+        CoastFacts::from_samples(&landforms, request.width, request.depth, request.step);
     let steppe_components = recipe_component_stats(
         &landforms,
         request.width,
@@ -423,7 +425,7 @@ fn run() -> Result<()> {
 
     let (commit, dirty) = git_state();
     let receipt = serde_json::json!({
-        "schema": 13,
+        "schema": 14,
         "profile": "mclone-overworld-v1",
         "topology": config.topology.label(),
         "fieldRevision": MCLONE_OVERWORLD_FIELD_REVISION,
@@ -511,6 +513,7 @@ fn run() -> Result<()> {
             "shore": facts.shore_columns,
             "dryLand": facts.dry_land_columns,
         },
+        "coastMetrics": coast_facts.to_json(),
         "biomeCounts": {
             "ocean": facts.ocean_biome_columns,
             "beach": facts.beach_biome_columns,
@@ -1195,6 +1198,244 @@ fn usage() -> &'static str {
     "usage: mclone-overworld-review [--output-dir PATH] [--seed I64] \
      [--chunk-x I32] [--chunk-z I32] [--radius-blocks U32] \
      [--step-blocks U32] [--topology plane|cylinder-x:384]"
+}
+
+#[derive(Clone, Debug)]
+struct CoastFacts {
+    ocean_intent_columns: usize,
+    land_intent_columns: usize,
+    shoreline_edges: usize,
+    sampled_shoreline_length_blocks: u64,
+    coast_adjacent_land_columns: usize,
+    coast_adjacent_beach_columns: usize,
+    coast_adjacent_non_beach_columns: usize,
+    coast_adjacent_eroded_slope_columns: usize,
+    coast_adjacent_exposed_stone_columns: usize,
+    coast_adjacent_grass_soil_columns: usize,
+    coast_adjacent_river_columns: usize,
+    coast_adjacent_land_surface_y_p10: i32,
+    coast_adjacent_land_surface_y_p50: i32,
+    coast_adjacent_land_surface_y_p90: i32,
+    coast_adjacent_land_surface_y_max: i32,
+    coast_adjacent_slope_p50: f64,
+    coast_adjacent_slope_p90: f64,
+    coast_adjacent_slope_p99: f64,
+    coast_adjacent_slope_max: f64,
+    beach_columns_with_ocean_distance: usize,
+    beach_distance_blocks_p50: u64,
+    beach_distance_blocks_p90: u64,
+    beach_distance_blocks_p99: u64,
+    beach_distance_blocks_max: u64,
+}
+
+impl CoastFacts {
+    fn from_samples(
+        samples: &[McloneOverworldLandformSample],
+        width: u32,
+        depth: u32,
+        step_blocks: u32,
+    ) -> Self {
+        let width = width as usize;
+        let depth = depth as usize;
+        assert_eq!(samples.len(), width * depth);
+
+        let ocean = samples
+            .iter()
+            .map(|sample| sample.terrain.continentalness <= 0.0)
+            .collect::<Vec<_>>();
+        let ocean_intent_columns = ocean.iter().filter(|value| **value).count();
+        let land_intent_columns = samples.len() - ocean_intent_columns;
+        let mut shoreline_edges = 0usize;
+        let mut coast_adjacent = vec![false; samples.len()];
+        for z in 0..depth {
+            for x in 0..width {
+                let index = z * width + x;
+                for neighbor in [
+                    (x + 1 < width).then_some(index + 1),
+                    (z + 1 < depth).then_some(index + width),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    if ocean[index] == ocean[neighbor] {
+                        continue;
+                    }
+                    shoreline_edges += 1;
+                    coast_adjacent[if ocean[index] { neighbor } else { index }] = true;
+                }
+            }
+        }
+
+        let mut distances = vec![u32::MAX; samples.len()];
+        let mut pending = VecDeque::new();
+        for (index, is_ocean) in ocean.iter().copied().enumerate() {
+            if is_ocean {
+                distances[index] = 0;
+                pending.push_back(index);
+            }
+        }
+        while let Some(index) = pending.pop_front() {
+            let x = index % width;
+            let z = index / width;
+            let next_distance = distances[index].saturating_add(1);
+            for neighbor in [
+                x.checked_sub(1).map(|next_x| z * width + next_x),
+                (x + 1 < width).then_some(index + 1),
+                z.checked_sub(1).map(|next_z| next_z * width + x),
+                (z + 1 < depth).then_some(index + width),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                if next_distance < distances[neighbor] {
+                    distances[neighbor] = next_distance;
+                    pending.push_back(neighbor);
+                }
+            }
+        }
+
+        let mut coast_adjacent_land_columns = 0usize;
+        let mut coast_adjacent_beach_columns = 0usize;
+        let mut coast_adjacent_non_beach_columns = 0usize;
+        let mut coast_adjacent_eroded_slope_columns = 0usize;
+        let mut coast_adjacent_exposed_stone_columns = 0usize;
+        let mut coast_adjacent_grass_soil_columns = 0usize;
+        let mut coast_adjacent_river_columns = 0usize;
+        let mut coast_heights = Vec::new();
+        let mut coast_slopes = Vec::new();
+        let mut beach_distances = Vec::new();
+        for (index, sample) in samples.iter().copied().enumerate() {
+            let recipe = mclone_overworld_surface_recipe(sample);
+            if !ocean[index]
+                && recipe == McloneOverworldSurfaceRecipe::Beach
+                && distances[index] != u32::MAX
+            {
+                beach_distances.push(u64::from(distances[index]) * u64::from(step_blocks));
+            }
+            if !coast_adjacent[index] {
+                continue;
+            }
+            coast_adjacent_land_columns += 1;
+            coast_heights.push(sample.terrain.surface_y);
+            coast_slopes.push(sample.slope);
+            match recipe {
+                McloneOverworldSurfaceRecipe::Beach => {
+                    coast_adjacent_beach_columns += 1;
+                }
+                McloneOverworldSurfaceRecipe::ErodedSlope => {
+                    coast_adjacent_non_beach_columns += 1;
+                    coast_adjacent_eroded_slope_columns += 1;
+                }
+                McloneOverworldSurfaceRecipe::ExposedStone => {
+                    coast_adjacent_non_beach_columns += 1;
+                    coast_adjacent_exposed_stone_columns += 1;
+                }
+                McloneOverworldSurfaceRecipe::GrassSoil => {
+                    coast_adjacent_non_beach_columns += 1;
+                    coast_adjacent_grass_soil_columns += 1;
+                }
+                McloneOverworldSurfaceRecipe::RiverBed
+                | McloneOverworldSurfaceRecipe::RiverBank
+                | McloneOverworldSurfaceRecipe::WetlandBed => {
+                    coast_adjacent_non_beach_columns += 1;
+                    coast_adjacent_river_columns += 1;
+                }
+                McloneOverworldSurfaceRecipe::OceanFloor
+                | McloneOverworldSurfaceRecipe::AlpineSnow => {
+                    coast_adjacent_non_beach_columns += 1;
+                }
+            }
+        }
+        coast_heights.sort_unstable();
+        coast_slopes.sort_by(f64::total_cmp);
+        beach_distances.sort_unstable();
+
+        Self {
+            ocean_intent_columns,
+            land_intent_columns,
+            shoreline_edges,
+            sampled_shoreline_length_blocks: shoreline_edges as u64 * u64::from(step_blocks),
+            coast_adjacent_land_columns,
+            coast_adjacent_beach_columns,
+            coast_adjacent_non_beach_columns,
+            coast_adjacent_eroded_slope_columns,
+            coast_adjacent_exposed_stone_columns,
+            coast_adjacent_grass_soil_columns,
+            coast_adjacent_river_columns,
+            coast_adjacent_land_surface_y_p10: percentile_or_default(
+                &coast_heights,
+                10,
+                MCLONE_OVERWORLD_SEA_LEVEL,
+            ),
+            coast_adjacent_land_surface_y_p50: percentile_or_default(
+                &coast_heights,
+                50,
+                MCLONE_OVERWORLD_SEA_LEVEL,
+            ),
+            coast_adjacent_land_surface_y_p90: percentile_or_default(
+                &coast_heights,
+                90,
+                MCLONE_OVERWORLD_SEA_LEVEL,
+            ),
+            coast_adjacent_land_surface_y_max: coast_heights
+                .last()
+                .copied()
+                .unwrap_or(MCLONE_OVERWORLD_SEA_LEVEL),
+            coast_adjacent_slope_p50: percentile_f64_or_default(&coast_slopes, 50, 0.0),
+            coast_adjacent_slope_p90: percentile_f64_or_default(&coast_slopes, 90, 0.0),
+            coast_adjacent_slope_p99: percentile_f64_or_default(&coast_slopes, 99, 0.0),
+            coast_adjacent_slope_max: coast_slopes.last().copied().unwrap_or_default(),
+            beach_columns_with_ocean_distance: beach_distances.len(),
+            beach_distance_blocks_p50: percentile_u64_or_default(&beach_distances, 50, 0),
+            beach_distance_blocks_p90: percentile_u64_or_default(&beach_distances, 90, 0),
+            beach_distance_blocks_p99: percentile_u64_or_default(&beach_distances, 99, 0),
+            beach_distance_blocks_max: beach_distances.last().copied().unwrap_or_default(),
+        }
+    }
+
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "definition": {
+                "oceanIntent": "continentalness <= 0",
+                "adjacency": "four-neighbor sampled land/ocean-intent edge",
+                "shorelineLength": "Manhattan raster estimate; compare only at equal grid spacing",
+                "beachDistance": "sampled Manhattan distance from a land-intent Beach column to nearest ocean-intent sample",
+                "beachDistancePopulation": "Beach columns with a finite ocean-intent distance inside the sampled raster",
+            },
+            "oceanIntentColumns": self.ocean_intent_columns,
+            "landIntentColumns": self.land_intent_columns,
+            "shorelineEdges": self.shoreline_edges,
+            "sampledShorelineLengthBlocks": self.sampled_shoreline_length_blocks,
+            "coastAdjacentLandColumns": self.coast_adjacent_land_columns,
+            "coastAdjacentSurfaceRecipes": {
+                "beach": self.coast_adjacent_beach_columns,
+                "nonBeach": self.coast_adjacent_non_beach_columns,
+                "erodedSlope": self.coast_adjacent_eroded_slope_columns,
+                "exposedStone": self.coast_adjacent_exposed_stone_columns,
+                "grassSoil": self.coast_adjacent_grass_soil_columns,
+                "riverOrWetland": self.coast_adjacent_river_columns,
+            },
+            "coastAdjacentLandSurfaceY": {
+                "p10": self.coast_adjacent_land_surface_y_p10,
+                "p50": self.coast_adjacent_land_surface_y_p50,
+                "p90": self.coast_adjacent_land_surface_y_p90,
+                "max": self.coast_adjacent_land_surface_y_max,
+            },
+            "coastAdjacentSlope": {
+                "p50": self.coast_adjacent_slope_p50,
+                "p90": self.coast_adjacent_slope_p90,
+                "p99": self.coast_adjacent_slope_p99,
+                "max": self.coast_adjacent_slope_max,
+            },
+            "beachColumnsWithOceanDistance": self.beach_columns_with_ocean_distance,
+            "beachDistanceBlocks": {
+                "p50": self.beach_distance_blocks_p50,
+                "p90": self.beach_distance_blocks_p90,
+                "p99": self.beach_distance_blocks_p99,
+                "max": self.beach_distance_blocks_max,
+            },
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -2044,9 +2285,24 @@ fn percentile_or_default(sorted: &[i32], percentile_value: usize, default: i32) 
         .unwrap_or(default)
 }
 
+fn percentile_u64_or_default(sorted: &[u64], percentile_value: usize, default: u64) -> u64 {
+    (!sorted.is_empty())
+        .then(|| {
+            let index = (sorted.len() - 1) * percentile_value / 100;
+            sorted[index]
+        })
+        .unwrap_or(default)
+}
+
 fn percentile_f64(sorted: &[f64], percentile: usize) -> f64 {
     let index = (sorted.len() - 1) * percentile / 100;
     sorted[index]
+}
+
+fn percentile_f64_or_default(sorted: &[f64], percentile: usize, default: f64) -> f64 {
+    (!sorted.is_empty())
+        .then(|| percentile_f64(sorted, percentile))
+        .unwrap_or(default)
 }
 
 fn render_map(

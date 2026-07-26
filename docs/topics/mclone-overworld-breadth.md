@@ -9,7 +9,9 @@ visual identity. Tactical
 [`223`](../tactical/223-mclone-climate-and-bookend-biomes.md) has completed
 the first climate-driven implementation. Human Review 1 accepted its
 vocabulary but requested a broader steppe; the core/shoulder correction is
-complete and awaiting Human Review 2.
+complete and awaiting Human Review 2. Tactical 259 has since completed the
+cross-era coast survey and selected the first original-profile coast
+vocabulary; those families are planned, not yet live.
 
 ## Scope
 
@@ -109,7 +111,7 @@ decoration language but do not change terrain geometry.
 | temperate wooded upland | forest, wooded hills | sheltered moderate upland | oak woodland | `reviewed`, narrow palette |
 | rugged mountain and open shoulder | mountains, gravelly mountains, shattered savanna | ridges, ruggedness, slope, exposure | grass/stone response | `reviewed`, no alpine climate |
 | ocean, shelf, and deep basin | ocean and deep-ocean families | bathymetry and coast | gravel/sand, no aquatic vegetation | `reviewed`, one climate |
-| beach and shore | beach, stone shore, snowy beach | sea-level band | sand only | `live`, one shore family |
+| beach and shore | beach, stone shore, snowy beach | live sea-level band; planned slope/shelf/substrate coast intent | live sand only; planned sand/gravel/rock/cold response | `live`, one elevation-band family; reference survey complete |
 | major river and wetland | rivers, swamps, lakes | flat Y63 corridor, banks, pools | gravel, sand/grass banks, clay pools | `reviewed`, no climate variants |
 | peaceful spring-fed creek | springs and bounded water landmarks | 91-96-block planned valley stream | grassed shoulders, fixed-point drops | `reviewed` |
 | cool-wet conifer upland | taiga, taiga hills | temperature + moisture + landform | spruce/pine, ferns, berries | `live`, vocabulary accepted in Human Review 1 |
@@ -283,14 +285,21 @@ For geology specifically, retain these obligations:
 
 Cross-system order now lives in
 [`mclone-macro-landscape-planning.md`](mclone-macro-landscape-planning.md).
-That direction places composite review, coast character, and major-water
-topology decisions ahead of the broader geology campaign. Within the breadth
-ledger, retain this content order once those upstream planning facts are
-available:
+That direction places coast character and major-water topology decisions
+ahead of the broader geology campaign. Tactical 259
+resolved the coast research decision without requiring a generic composite
+review product. Within the breadth ledger, retain this content order:
 
 1. Complete Human Review 2 for Tactical 223's bounded steppe-scale
    correction.
-2. Add the first 3D-geology tactical before broad caves:
+2. Implement the first topology-aware coast intent:
+   - prove sandy depositional, gravel transitional, rocky/exposed, cold
+     response, and ordinary direct-water outcomes;
+   - keep geometry separate from surface material;
+   - preserve river and stream outlets; and
+   - inspect ordinary and seam-crossing plane/cylinder pixels before
+     decoration.
+3. Add the first 3D-geology tactical before broad caves:
    - baseline and map the current heightfield limitation;
    - derive a small semantic formation-intent selector from existing macro,
      climate, ruggedness, ridge, and water facts;
@@ -299,12 +308,12 @@ available:
    - compare a small regional density modifier for cliff shelves/overhangs;
    - select the reusable mechanism only after all three are rendered and
      measured.
-3. Expand hot/dry and wet/humid regional corners as coordinated surface,
+4. Expand hot/dry and wet/humid regional corners as coordinated surface,
    vegetation, clutter, and landmark bundles with explicit transition
    shoulders.
-4. Add ocean-climate families and climate-aware water treatment.
-5. Add independent caves, strata, ores, and underground landmarks.
-6. Grow authored and procedural structures on the resulting regional
+5. Add ocean-climate families and climate-aware water treatment.
+6. Add independent caves, strata, ores, and underground landmarks.
+7. Grow authored and procedural structures on the resulting regional
    vocabulary.
 
 ## Evidence Required Per Family
@@ -327,6 +336,7 @@ Every live family should eventually record:
 - [`mclone-macro-landscape-planning.md`](mclone-macro-landscape-planning.md)
 - [`mclone-overworld-generation.md`](mclone-overworld-generation.md)
 - [`still-life-and-tectonic-reference.md`](still-life-and-tectonic-reference.md)
+- [`modern-minecraft-reference.md`](modern-minecraft-reference.md)
 - [`world-generation-profiles.md`](world-generation-profiles.md)
 - [`starter-farmstead-settlement.md`](starter-farmstead-settlement.md)
 - [`../worldgen-status.md`](../worldgen-status.md)
@@ -335,3 +345,4 @@ Every live family should eventually record:
 - [`../tactical/146-overworld-macro-terrain-geometry-parity.md`](../tactical/146-overworld-macro-terrain-geometry-parity.md)
 - [`../tactical/192-mclone-overworld-mountains-and-valleys.md`](../tactical/192-mclone-overworld-mountains-and-valleys.md)
 - [`../tactical/222-bounded-valley-stream-structures.md`](../tactical/222-bounded-valley-stream-structures.md)
+- [`../tactical/259-modern-and-historical-coast-reference-survey.md`](../tactical/259-modern-and-historical-coast-reference-survey.md)

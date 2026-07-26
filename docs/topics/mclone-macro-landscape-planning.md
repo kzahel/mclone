@@ -7,7 +7,9 @@ Overworld has useful independent terrain, climate, bathymetry, river,
 wetland, surface, and bounded-stream facts, but it does not yet have a
 holistic macro landscape plan that coordinates their topology, precedence,
 overlap, and downstream feature permissions. This topic owns that planning
-view.**
+view. Tactical 259 has now grounded coastal character in Alpha, Beta, Java
+1.17.1, Java 26.2, and measured current Mclone evidence; coast implementation
+remains the next selected planning slice.**
 
 The motivating July 2026 visual review found four related regional-scale
 weaknesses:
@@ -381,6 +383,34 @@ combination of:
 Sand should mean deposition on a suitable coast, not merely “top block near
 Y63.” Rocky, gravel, snowy, marsh, and sandy coasts need both material and
 geometry responses.
+
+#### Cross-era coast evidence and selected direction
+
+Tactical
+[`259`](../tactical/259-modern-and-historical-coast-reference-survey.md)
+turns that diagnosis into an implementation contract.
+
+- Alpha v1.1.2_01 and Beta 1.7.3 obtain varied water edges from continuous
+  sea-level geometry plus broad sand/gravel masks, without an explicit shore
+  classifier.
+- Java 1.17.1 inserts categorical shore biomes from four-neighbor biome
+  adjacency. Its exact seed-74739 Stone Shore fixture proves tall, steep
+  direct-water faces rather than a mere gray surface swap.
+- Java 26.2 integrates a coast continentalness band into terrain/climate
+  classification. Stony Shore, Beach, Snowy Beach, shattered coast, ordinary
+  middle terrain, and river outcomes can all occupy the band.
+- Current Mclone's low elevation Beach rule and coastward mountain fade make
+  roughly 90% of sampled coast-adjacent land Beach on all three measured
+  6,144-block regions. Every remaining sample was a river/wetland recipe;
+  Exposed Stone, Eroded Slope, and Grass/Soil were all zero.
+
+The first Mclone vocabulary is therefore sandy depositional, gravel
+transitional, rocky/exposed, a cold modifier, and ordinary terrain allowed
+directly at water. A broad topology-aware alongshore selector should create
+coherent runs, but terrain, shelf, substrate, climate, and outlet suitability
+constrain its choices. The result should be one small shared semantic coast
+fact consumed separately by geometry, surface, review, and distant terrain.
+It does not require universal 3D noise or new persisted biome IDs.
 
 ### River topology and terrain relation
 
@@ -925,7 +955,7 @@ none is inferred from CPU compile time.
 | raw macro fields | continentalness, relief, ruggedness, ridges, mountain detail, climate, bathymetry, water morphology | no unified classified landscape intent |
 | terrain | continuous heightfield with accepted mountain detail and derived slope/exposure | no explicit range, basin, pass, or terrain-corridor plan |
 | sampling/representation | cheap absolute-coordinate CPU/GPU heightfield preview, a fixed ten-level 131 km horizon, and normalized point receipts through roughly 500 km | no filtered spacing-2,048 review product or sparse volumetric near/far contract |
-| coast | land/ocean threshold, shelves, deep basins, sand beach recipe | no coast family, exposure, deposition, rocky-face, or coherent alongshore plan |
+| coast | land/ocean threshold, shelves, deep basins, sand beach recipe, schema-14 coast metrics, and a source-grounded first-family contract | no live coast classifier, geometry response, rocky direct-water outcome, or coherent alongshore transition |
 | major rivers | warped zero-contour corridor with width/depth/bank morphology and receiving-outlet correction | no persistent macro drainage topology, tributary hierarchy, or named major reaches |
 | streams | bounded 91-96-block valley-following source-to-river plan | one peaceful family, not a general network |
 | ponds/lakes | river-adjacent wetland pools and shared local lake mechanism | no closed-basin or spill-level plan |
@@ -955,9 +985,13 @@ every row before shipping any smaller improvement.
    - defer a generic “composite review map” until at least two concrete
      planned systems need facts that existing maps cannot show.
 2. **Resolve coastal character**
-   - separate geometry from surface material;
-   - compare slope, substrate, shelter/exposure, and shelf-grade classifiers;
-   - prove sandy, gravel, and rocky coast families with coherent transitions.
+   - Tactical 259 completed the cross-era survey, current three-seed baseline,
+     and first bounded classifier contract;
+   - implement geometry separately from surface material;
+   - prove sandy, gravel, rocky, cold-response, and ordinary direct-water
+     outcomes with coherent transitions; and
+   - retain the plane/cylinder topology and Tactical 258 performance
+     controls.
 3. **Select major-water topology**
    - compare hierarchical boundary, terrain-derived drainage, and hybrid
      planned-network maps on the same terrain;
@@ -997,9 +1031,9 @@ enormous “finish terrain” change.
 
 - Which river skeleton supplies the best balance of convincing topology,
   terrain relation, deterministic bounded work, and stable water semantics?
-- Should coast families be entirely derived from accepted facts, or should a
-  broad regional selector participate so long rocky and sandy runs remain
-  common?
+- What selector scale, transition width, and suitability thresholds give
+  coherent sandy, gravel, and rocky runs without hiding accepted terrain or
+  outlets?
 - What is the smallest canonical tile and halo that can support drainage
   basins, spill levels, and periodic seams without visible planning cells?
 - Which facts belong in point-sampled regional intent versus bounded plan
@@ -1035,6 +1069,7 @@ advance.
 - [`mclone-overworld-breadth.md`](mclone-overworld-breadth.md)
 - [`world-generation-profiles.md`](world-generation-profiles.md)
 - [`still-life-and-tectonic-reference.md`](still-life-and-tectonic-reference.md)
+- [`modern-minecraft-reference.md`](modern-minecraft-reference.md)
 - [`jjthunder-to-the-max-reference.md`](jjthunder-to-the-max-reference.md)
 - [`starter-farmstead-settlement.md`](starter-farmstead-settlement.md)
 - [`gpu-procedural-terrain.md`](gpu-procedural-terrain.md)
@@ -1050,3 +1085,4 @@ advance.
 - [`../tactical/244-lod-native-vegetation-presentation.md`](../tactical/244-lod-native-vegetation-presentation.md)
 - [`../tactical/246-vanilla-fast-macro-terrain-preview.md`](../tactical/246-vanilla-fast-macro-terrain-preview.md)
 - [`../tactical/249-cross-platform-procedural-horizon-proof.md`](../tactical/249-cross-platform-procedural-horizon-proof.md)
+- [`../tactical/259-modern-and-historical-coast-reference-survey.md`](../tactical/259-modern-and-historical-coast-reference-survey.md)
