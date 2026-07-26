@@ -437,9 +437,7 @@ fn sqlite_restart_restores_mclone_profile_before_unseen_generation() {
             .rev()
             .find(|y| expected.block_at_y(local_x, *y, local_z).0 != mclone_worldgen::block::AIR)
             .expect("Mclone unseen chunk column should contain terrain");
-        let expected_state = expected
-            .block_at_y(local_x, expected_surface_y, local_z)
-            .0;
+        let expected_state = expected.block_at_y(local_x, expected_surface_y, local_z).0;
 
         load_chunk_view(&mut reopened, unseen_chunk);
         let world_x = unseen_chunk.min_block_x() + local_x;
