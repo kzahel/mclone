@@ -6,7 +6,7 @@
 //! publication.
 
 use std::cell::RefCell;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::rc::Rc;
 
 use mclone_core::{
@@ -92,6 +92,10 @@ impl RetainedInitialLightState {
 
         let start = timing_start();
         let active_sections = self.world.borrow().section_statuses_for(&changed_chunks);
+        let light_sections = self
+            .world
+            .borrow()
+            .light_sections_around_data_for(input_chunks.keys().copied());
         timing.active_sections_us = timing_elapsed_us(start);
         let start = timing_start();
         let block_sources = self
@@ -102,6 +106,9 @@ impl RetainedInitialLightState {
 
         let setup_start = timing_start();
         let start = timing_start();
+        for section in light_sections {
+            self.engine.activate_section(section);
+        }
         for (section, is_empty) in active_sections {
             self.engine.update_section_status(section, is_empty);
         }
@@ -490,6 +497,43 @@ impl RetainedLightWorld {
             .collect()
     }
 
+    fn light_sections_around_data_for(
+        &self,
+        chunks: impl IntoIterator<Item = ChunkPos>,
+    ) -> BTreeSet<SectionPosKey> {
+        self.assert_configured();
+        let min_section_y = block_to_section_coord(self.min_y);
+        let section_count = self.height / SECTION_HEIGHT;
+        let mut sections = BTreeSet::new();
+        for chunk_pos in chunks {
+            let Some(blocks) = self.chunks.get(&chunk_pos) else {
+                continue;
+            };
+            for section_offset in 0..section_count {
+                if section_is_empty(blocks, section_offset) {
+                    continue;
+                }
+                let section_y = min_section_y + section_offset;
+                for dz in -1..=1 {
+                    for dx in -1..=1 {
+                        let neighbor = ChunkPos::new(chunk_pos.x + dx, chunk_pos.z + dz);
+                        if !self.chunks.contains_key(&neighbor) {
+                            continue;
+                        }
+                        for dy in -1..=1 {
+                            sections.insert(section_as_long(
+                                neighbor.x,
+                                section_y + dy,
+                                neighbor.z,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        sections
+    }
+
     fn block_emission_sources_for(&self, chunks: &[ChunkPos]) -> Vec<(BlockPosKey, u8)> {
         self.assert_configured();
         let mut sources = Vec::new();
@@ -569,8 +613,11 @@ impl SkyLightWorld for SharedRetainedLightWorld {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use mclone_core::{BlockStateId, CHUNK_SECTION_VOLUME, ChunkRevision, ChunkStatus};
+    use mclone_core::{
+        BlockStateId, CHUNK_SECTION_VOLUME, ChunkRevision, ChunkStatus, HorizontalTopology,
+    };
     use mclone_worldgen::block::{AIR, DIRT, STONE, TORCH};
+    use mclone_worldgen::levelgen::TopologyProbeSource;
 
     fn test_snapshot(pos: ChunkPos, min_y: i32, height: i32) -> mclone_core::ChunkSnapshot {
         let section_count = height / SECTION_HEIGHT;
@@ -678,6 +725,50 @@ mod tests {
         let packed = mclone_light::packed_light_at_local_block_or_fullbright(
             &sections, min_y, height, 15, 4, 1,
         );
+
+        assert_eq!(mclone_light::packed_block_light(packed), 13);
+    }
+
+    #[test]
+    fn topology_probe_arch_light_crosses_the_lifted_cylinder_seam() {
+        let source =
+            TopologyProbeSource::new(12_345, HorizontalTopology::cylinder_x(0, 8)).unwrap();
+        let target = ChunkPos::new(7, -2);
+        let target_blocks = source.generate_buffer(target).blocks;
+        let lifted_source = ChunkPos::new(8, -2);
+        let source_blocks = source.generate_buffer(ChunkPos::new(0, -2)).blocks;
+        assert_eq!(target_blocks[chunk_block_index(15, 80, 8)], AIR);
+        assert_eq!(source_blocks[chunk_block_index(0, 80, 8)], TORCH);
+        assert_eq!(block_light_emission(TORCH), 14);
+        let status = PendingLightStatus::from_parts(
+            target,
+            test_snapshot(target, 0, 256),
+            target_blocks,
+            vec![(lifted_source, source_blocks)],
+        );
+
+        let mut state = RetainedInitialLightState::new();
+        let sections = state
+            .compute_batch(PendingLightStatusBatch::new(vec![status]))
+            .pop()
+            .expect("completed target light status")
+            .1;
+        assert_eq!(
+            state
+                .engine
+                .block_engine()
+                .stored_light(block_pos_as_long(128, 80, -24)),
+            14
+        );
+        assert_eq!(
+            state
+                .engine
+                .block_engine()
+                .stored_light(block_pos_as_long(127, 80, -24)),
+            13
+        );
+        let packed =
+            mclone_light::packed_light_at_local_block_or_fullbright(&sections, 0, 256, 15, 80, 8);
 
         assert_eq!(mclone_light::packed_block_light(packed), 13);
     }

@@ -1,6 +1,42 @@
 use super::*;
 use crate::{ChunkTicketType, MemoryWorldStore, TopologyChunkState};
-use mclone_worldgen::block::GRASS_BLOCK;
+use mclone_worldgen::block::{AIR, GRASS_BLOCK, STONE_BRICKS, TORCH, WATER};
+
+fn topology_probe_definition(topology: HorizontalTopology) -> crate::DimensionDefinition {
+    let mut definition =
+        crate::DimensionDefinition::overworld(12_345, WorldGenerationProfile::TopologyProbeV1);
+    definition.topology = topology;
+    definition
+}
+
+fn load_topology_probe_view(
+    server: &mut LocalRealmSession,
+    center: ChunkPos,
+    radius: u32,
+    lighting_enabled: bool,
+) {
+    server.set_lighting_enabled(lighting_enabled);
+    let updates = server
+        .try_handle_command(ClientCommand::SetChunkView(ChunkView {
+            center,
+            render_distance: radius,
+            chunk_tracking_radius: radius,
+        }))
+        .expect("set topology probe view");
+    accept_player_position_updates(server, &updates);
+    for _ in 0..60_000 {
+        let updates = server.try_poll().expect("poll topology probe view");
+        accept_player_position_updates(server, &updates);
+        if server.pending_job_count() == 0 {
+            return;
+        }
+        if server.pending_publication_count() == 0 {
+            server.wait_for_worldgen_completion(Duration::from_secs(1));
+            server.wait_for_light_completion(Duration::from_secs(1));
+        }
+    }
+    panic!("timed out loading topology probe view");
+}
 
 fn moon_record() -> DimensionRecord {
     DimensionRecord {
@@ -38,6 +74,169 @@ fn cylinder_flat_record() -> DimensionRecord {
         revision: 1,
         definition,
     }
+}
+
+#[test]
+fn topology_probe_cylinder_forces_water_island_arch_and_light_across_the_seam() {
+    let topology = HorizontalTopology::cylinder_x(0, 8);
+    let definition = topology_probe_definition(topology);
+    let mut server = LocalRealmSession::with_player_chunk_tracking_policy_and_dimension_definition(
+        definition.clone(),
+        PlayerChunkTrackingPolicy::default(),
+    );
+    server.set_debug_passive_showcase_enabled(false);
+
+    load_topology_probe_view(&mut server, ChunkPos::new(0, 0), 1, false);
+    for pos in [
+        BlockPos::new(0, 63, 5),
+        BlockPos::new(127, 63, 5),
+        BlockPos::new(-1, 63, 5),
+        BlockPos::new(128, 63, 5),
+    ] {
+        assert_eq!(
+            server.scheduler().block_at_world(pos),
+            Some(WATER),
+            "{pos:?}"
+        );
+    }
+    assert_eq!(
+        server.scheduler().block_at_world(BlockPos::new(0, 66, 0)),
+        Some(GRASS_BLOCK)
+    );
+    assert_eq!(
+        server.scheduler().block_at_world(BlockPos::new(127, 66, 0)),
+        Some(GRASS_BLOCK)
+    );
+
+    drop(server);
+    let mut lit_server =
+        LocalRealmSession::with_player_chunk_tracking_policy_and_dimension_definition(
+            definition,
+            PlayerChunkTrackingPolicy::default(),
+        );
+    lit_server.set_debug_passive_showcase_enabled(false);
+    load_topology_probe_view(&mut lit_server, ChunkPos::new(0, -2), 1, true);
+    let torch = BlockPos::new(0, 80, -24);
+    let seam_neighbor = BlockPos::new(127, 80, -24);
+    assert_eq!(lit_server.scheduler().block_at_world(torch), Some(TORCH));
+    assert_eq!(
+        lit_server
+            .scheduler()
+            .block_at_world(BlockPos::new(0, 79, -24)),
+        Some(STONE_BRICKS)
+    );
+    assert_eq!(
+        lit_server
+            .scheduler()
+            .block_at_world(BlockPos::new(127, 78, -24)),
+        Some(STONE_BRICKS)
+    );
+    assert_eq!(
+        lit_server.scheduler().block_at_world(seam_neighbor),
+        Some(AIR)
+    );
+    assert_eq!(
+        lit_server.scheduler().raw_brightness_at_world(torch, 15),
+        Some(14)
+    );
+    assert_eq!(
+        lit_server
+            .scheduler()
+            .raw_brightness_at_world(seam_neighbor, 15),
+        Some(13)
+    );
+    assert_eq!(
+        lit_server
+            .scheduler()
+            .world_generation_descriptor()
+            .topology,
+        topology
+    );
+}
+
+#[test]
+fn topology_probe_generated_channel_is_quiescent_when_woken_at_the_seam() {
+    let topology = HorizontalTopology::cylinder_x(0, 8);
+    let mut server = LocalRealmSession::with_player_chunk_tracking_policy_and_dimension_definition(
+        topology_probe_definition(topology),
+        PlayerChunkTrackingPolicy::default(),
+    );
+    server.set_debug_passive_showcase_enabled(false);
+    load_topology_probe_view(&mut server, ChunkPos::new(0, 0), 2, false);
+    assert_eq!(server.scheduled_fluid_tick_count(), 0);
+
+    let mut sources = Vec::new();
+    for x in (124..=127).chain(0..=3) {
+        for z in -8..=8 {
+            let pos = BlockPos::new(x, 63, z);
+            if server.scheduler().block_at_world(pos) == Some(WATER) {
+                sources.push(pos);
+            }
+        }
+    }
+    assert!(sources.len() >= 40, "{sources:?}");
+    for source in &sources {
+        server.schedule_fluid_tick(*source, FluidKind::Water, 0);
+    }
+
+    let mut executed = 0;
+    let mut mutated = 0;
+    for _ in 0..2 {
+        let report = server.try_simulation_tick_report().unwrap();
+        executed += report.fluid_ticks_executed;
+        mutated += report.fluid_mutated_blocks;
+    }
+    assert_eq!(executed, sources.len());
+    assert_eq!(mutated, 0);
+    assert_eq!(server.scheduled_fluid_tick_count(), 0);
+}
+
+#[test]
+fn topology_probe_torus_wraps_and_deduplicates_the_corner() {
+    let topology =
+        HorizontalTopology::new(AxisTopology::periodic(0, 8), AxisTopology::periodic(0, 8));
+    let mut server = LocalRealmSession::with_player_chunk_tracking_policy_and_dimension_definition(
+        topology_probe_definition(topology),
+        PlayerChunkTrackingPolicy::default(),
+    );
+    server.set_debug_passive_showcase_enabled(false);
+    load_topology_probe_view(&mut server, ChunkPos::new(0, 0), 1, false);
+
+    let canonical = BlockPos::new(127, 66, 127);
+    let lifted = BlockPos::new(-1, 66, -1);
+    assert_eq!(
+        server.scheduler().block_at_world(canonical),
+        Some(GRASS_BLOCK)
+    );
+    assert_eq!(
+        server.scheduler().block_at_world(lifted),
+        server.scheduler().block_at_world(canonical)
+    );
+    assert!(
+        server
+            .scheduler_mut()
+            .set_block_at_world(BlockPos::new(-1, 90, -1), STONE)
+    );
+    assert_eq!(
+        server
+            .scheduler()
+            .block_at_world(BlockPos::new(127, 90, 127)),
+        Some(STONE)
+    );
+    assert_eq!(
+        server
+            .scheduler()
+            .topology_chunk_state(ChunkPos::new(-1, -1)),
+        TopologyChunkState::Loaded {
+            canonical: ChunkPos::new(7, 7),
+        }
+    );
+    assert_eq!(
+        server
+            .chunk_tracking_diagnostics()
+            .aggregate_resident_chunks,
+        9
+    );
 }
 
 #[test]
@@ -584,6 +783,133 @@ fn periodic_mclone_seam_chunks_and_edits_survive_sqlite_restart() {
             reopened
                 .scheduler()
                 .topology_chunk_state(ChunkPos::new(384, 0)),
+            TopologyChunkState::Loaded {
+                canonical: ChunkPos::new(0, 0),
+            }
+        );
+        reopened.shutdown_persistence().unwrap();
+    }
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn topology_probe_profile_and_canonical_seam_edits_survive_sqlite_restart() {
+    let root = std::env::temp_dir().join(format!(
+        "mclone-topology-probe-restart-{}-{}",
+        std::process::id(),
+        current_unix_millis()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let topology = HorizontalTopology::cylinder_x(0, 8);
+    let definition = topology_probe_definition(topology);
+    let seam_west = BlockPos::new(127, 90, 8);
+    let seam_west_negative_lift = BlockPos::new(-1, 90, 8);
+    let seam_east = BlockPos::new(0, 90, 9);
+    let seam_east_positive_lift = BlockPos::new(128, 90, 9);
+
+    {
+        let mut server = LocalRealmSession::
+            try_with_threaded_sqlite_world_dir_dimension_definition_and_player_chunk_tracking_policy(
+                definition.clone(),
+                &root,
+                PlayerChunkTrackingPolicy::default(),
+            )
+            .unwrap();
+        server.initialize_world_metadata_blocking().unwrap();
+        server.set_debug_passive_showcase_enabled(false);
+        load_topology_probe_view(&mut server, ChunkPos::new(0, 0), 1, false);
+
+        assert_eq!(
+            server.scheduler().block_at_world(BlockPos::new(-1, 63, 5)),
+            Some(WATER)
+        );
+        assert!(
+            server
+                .scheduler_mut()
+                .set_block_at_world(seam_west_negative_lift, STONE)
+        );
+        assert!(
+            server
+                .scheduler_mut()
+                .set_block_at_world(seam_east_positive_lift, DIRT)
+        );
+        assert_eq!(server.scheduler().block_at_world(seam_west), Some(STONE));
+        assert_eq!(server.scheduler().block_at_world(seam_east), Some(DIRT));
+        server.scheduler_mut().flush_persistence().unwrap();
+        server.shutdown_persistence().unwrap();
+    }
+
+    {
+        let mut store = crate::SqliteWorldStore::open_world_dir(&root).unwrap();
+        let overworld = DimensionKey::overworld();
+        let stored = store
+            .load_dimension(&overworld)
+            .unwrap()
+            .expect("stored topology probe dimension definition");
+        assert_eq!(stored.definition, definition);
+        assert!(
+            store
+                .load_chunk(&overworld, ChunkPos::new(7, 0))
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            store
+                .load_chunk(&overworld, ChunkPos::new(0, 0))
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            store
+                .load_chunk(&overworld, ChunkPos::new(-1, 0))
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            store
+                .load_chunk(&overworld, ChunkPos::new(8, 0))
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    {
+        let mut reopened = LocalRealmSession::
+            try_with_threaded_sqlite_world_dir_dimension_definition_and_player_chunk_tracking_policy(
+                definition.clone(),
+                &root,
+                PlayerChunkTrackingPolicy::default(),
+            )
+            .unwrap();
+        reopened.initialize_world_metadata_blocking().unwrap();
+        reopened.set_debug_passive_showcase_enabled(false);
+        load_topology_probe_view(&mut reopened, ChunkPos::new(0, 0), 1, false);
+
+        assert_eq!(reopened.definition(), &definition);
+        assert_eq!(reopened.scheduler().block_at_world(seam_west), Some(STONE));
+        assert_eq!(
+            reopened.scheduler().block_at_world(seam_west_negative_lift),
+            Some(STONE)
+        );
+        assert_eq!(reopened.scheduler().block_at_world(seam_east), Some(DIRT));
+        assert_eq!(
+            reopened.scheduler().block_at_world(seam_east_positive_lift),
+            Some(DIRT)
+        );
+        assert_eq!(
+            reopened
+                .scheduler()
+                .topology_chunk_state(ChunkPos::new(-1, 0)),
+            TopologyChunkState::Loaded {
+                canonical: ChunkPos::new(7, 0),
+            }
+        );
+        assert_eq!(
+            reopened
+                .scheduler()
+                .topology_chunk_state(ChunkPos::new(8, 0)),
             TopologyChunkState::Loaded {
                 canonical: ChunkPos::new(0, 0),
             }

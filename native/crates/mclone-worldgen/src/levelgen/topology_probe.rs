@@ -173,7 +173,7 @@ impl TopologyProbeSource {
         }
     }
 
-    pub fn generate_chunk(self, requested: ChunkPos) -> GeneratedChunk {
+    pub fn generate_buffer(self, requested: ChunkPos) -> MutableChunkBlockBuffer {
         let canonical = self
             .topology
             .canonicalize_chunk(requested)
@@ -224,8 +224,12 @@ impl TopologyProbeSource {
         }
 
         buffer.prime_worldgen_heightmaps();
+        buffer
+    }
+
+    pub fn generate_chunk(self, requested: ChunkPos) -> GeneratedChunk {
         GeneratedChunk::from_mutable_buffer_with_biomes(
-            buffer,
+            self.generate_buffer(requested),
             vec![TOPOLOGY_PROBE_PLAINS_BIOME_ID; expected_chunk_biome_count(TOPOLOGY_PROBE_HEIGHT)],
         )
     }

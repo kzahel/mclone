@@ -15,7 +15,7 @@ use mclone_worldgen::levelgen::{
     MutableChunkBlockBuffer, OverworldDependencyGenerationTiming, OverworldFeatureBatchTiming,
     OverworldFeatureDependencyCache, OverworldFeatureDependencyCacheReport, ScheduledTick,
     SmallIslandFeatureDependencyCache, SmallIslandFeatureDependencyCacheReport, SurfaceFillTiming,
-    generate_flat_grass_chunk, generate_topology_probe_chunks,
+    TopologyProbeSource, generate_flat_grass_chunk,
 };
 
 use crate::level_light_bridge::LevelLightComputationTiming;
@@ -374,19 +374,19 @@ impl WorldGenerationExecutor {
                 })
             }
             WorldGenerationProfile::TopologyProbeV1 => {
-                if !dependencies.is_empty() {
-                    return Err(format!(
-                        "topology-probe-v1 is target-only but received {} dependency chunks",
-                        dependencies.len()
-                    ));
+                let source = TopologyProbeSource::new(descriptor.seed, descriptor.topology)?;
+                let mut retained_dependencies = dependencies
+                    .into_iter()
+                    .map(|chunk| (ChunkPos::new(chunk.chunk_x, chunk.chunk_z), chunk))
+                    .collect::<BTreeMap<_, _>>();
+                for requirement in declared_plan.prerequisites() {
+                    retained_dependencies
+                        .entry(requirement.pos)
+                        .or_insert_with(|| source.generate_buffer(requirement.pos));
                 }
                 Ok(WorldGenerationBatchResult {
-                    chunks: generate_topology_probe_chunks(
-                        descriptor.seed,
-                        descriptor.topology,
-                        targets.iter().copied(),
-                    )?,
-                    retained_dependencies: BTreeMap::new(),
+                    chunks: source.generate_chunks(targets.iter().copied()),
+                    retained_dependencies,
                     diagnostics: None,
                 })
             }
@@ -2126,13 +2126,13 @@ mod tests {
                     .collect::<Vec<_>>(),
                 expected
             );
-            assert!(response.retained_dependencies.is_empty());
+            assert!(!response.retained_dependencies.is_empty());
             assert!(response.diagnostics.is_none());
         }
     }
 
     #[test]
-    fn topology_probe_frames_are_target_only_partition_and_order_independent() {
+    fn topology_probe_frames_are_partition_and_order_independent() {
         let descriptor = WorldGenerationDescriptor::with_topology(
             WorldGenerationProfile::TopologyProbeV1,
             8_675_309,

@@ -108,6 +108,16 @@ impl<B: BlockLightWorld, S: SkyLightWorld> LevelLightEngine<B, S> {
         self.sky_engine.update_section_status(section, empty);
     }
 
+    /// Allocate light-only storage for a section without declaring block data.
+    ///
+    /// Vanilla's section tracker derives these one-section envelopes around
+    /// non-empty data sections. Callers that own an explicit retained world can
+    /// provide the equivalent bounded envelope directly.
+    pub fn activate_section(&mut self, section: SectionPosKey) {
+        self.block_engine.activate_section(section);
+        self.sky_engine.activate_section(section);
+    }
+
     pub fn enable_light_sources(&mut self, section: SectionPosKey, enabled: bool) {
         self.block_engine.enable_light_sources(section, enabled);
         self.sky_engine.enable_light_sources(section, enabled);

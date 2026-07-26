@@ -88,6 +88,11 @@ The same plan queried from `-1`, `period - 1`, `period`, or another lift must
 retain one owner and identity. Combined, reversed, and partitioned target
 batches must produce identical canonical chunks.
 
+The pure probe kernel remains target-independent, while its server generation
+plan declares a one-chunk `Surface` input ring. That ring is the ordinary
+initial-lighting input contract and lets a light source in a canonical seam
+neighbor be unfolded beside the target before light sections are published.
+
 ## Profile And Product Boundary
 
 `topology-probe-v1` is a compiled, persisted, internal-mutable profile so it
@@ -165,13 +170,13 @@ normal product choice.
 
 ### Slice 3: authoritative runtime and persistence
 
-- [ ] Load seam views through the integrated server and inspect generated
+- [x] Load seam views through the integrated server and inspect generated
   canonical/lifted block facts.
-- [ ] Wake the contained water body and prove no seam spill or mutation.
-- [ ] Recompute block light across the generated seam canary.
-- [ ] Save seam chunks and edits through SQLite, reopen, and prove only
+- [x] Wake the contained water body and prove no seam spill or mutation.
+- [x] Recompute block light across the generated seam canary.
+- [x] Save seam chunks and edits through SQLite, reopen, and prove only
   canonical chunk keys exist.
-- [ ] Exercise a small torus corner through canonical views and generated
+- [x] Exercise a small torus corner through canonical views and generated
   chunks.
 
 Gate: generator, simulation, lighting, and persistence agree on the probe's

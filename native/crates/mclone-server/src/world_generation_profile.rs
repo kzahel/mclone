@@ -130,7 +130,9 @@ impl WorldGenerationProfile {
             Self::FlatGrassV1 => ChunkGenerationPlan::target_only(targets),
             Self::SmallIslandV1 => ChunkGenerationPlan::small_island_features(targets),
             Self::McloneOverworldV1 => ChunkGenerationPlan::mclone_overworld_features(targets),
-            Self::TopologyProbeV1 => ChunkGenerationPlan::target_only(targets),
+            Self::TopologyProbeV1 => {
+                ChunkGenerationPlan::feature_region(targets, 0, 1, ChunkStatus::Surface)
+            }
             Self::AlphaV1 { .. } => ChunkGenerationPlan::alpha_features(targets),
             Self::BetaV1 => ChunkGenerationPlan::beta_features(targets),
             Self::AuthoredOnly { .. } => {
@@ -677,5 +679,19 @@ mod tests {
         assert_eq!(plan.output_chunks().len(), 1);
         assert_eq!(plan.backend_work_chunks().len(), 9);
         assert_eq!(plan.prerequisites().len(), 25);
+    }
+
+    #[test]
+    fn topology_probe_declares_the_light_neighbor_ring() {
+        let plan = WorldGenerationProfile::TopologyProbeV1.plan_features([ChunkPos::new(0, 0)]);
+        assert_eq!(plan.output_chunks().len(), 1);
+        assert!(plan.output_chunks().contains(&ChunkPos::new(0, 0)));
+        assert_eq!(plan.backend_work_chunks().len(), 1);
+        assert!(plan.backend_work_chunks().contains(&ChunkPos::new(0, 0)));
+        assert_eq!(plan.prerequisites().len(), 9);
+        assert!(plan.prerequisites().contains(&ChunkStatusRequirement::new(
+            ChunkPos::new(-1, 0),
+            ChunkStatus::Surface
+        )));
     }
 }
