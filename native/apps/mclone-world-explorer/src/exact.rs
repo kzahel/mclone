@@ -5,17 +5,24 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use mclone_core::ChunkPos;
-use mclone_mesh::{RenderSectionKey, TexturedMeshCatalog, unpack_textured_render_sections};
+use mclone_mesh::{
+    RenderSectionKey, TexturedMeshCatalog, TexturedRenderSectionMesh,
+    merge_textured_render_section_meshes, unpack_textured_render_sections,
+};
 use mclone_render::chunk::{
     ChunkDepthTarget, ChunkRenderTarget, ChunkRenderView, ChunkTextureAtlas, ChunkTextureSampling,
     TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionRenderStats,
 };
 use mclone_render_color::{RenderColorProfile, RenderTargetColorTransform, color_transform_wgpu};
 use mclone_terrain_view::{
-    CanonicalMeshBatch, CanonicalMeshCoordinate, CanonicalMeshFrontier, CanonicalMeshSession,
+    BoundedRepresentationOwnershipSnapshot, CanonicalMeshBatch, CanonicalMeshCoordinate,
+    CanonicalMeshFrontier, CanonicalMeshSession, CanonicalNaturalTreePresentation,
     CanonicalPackedAdmission, CanonicalTerrainStage, CanonicalTerrainVisibility,
-    ExactPaintedCoverageSnapshot, TerrainCompositionSourceIdentity, canonical_terrain_chunk_order,
+    ExactPaintedCoverageSnapshot, McloneTreeOccurrenceId, McloneTreeOwnershipCandidate,
+    TERRAIN_EXACT_FRONTIER_COLLAR_BLOCKS, TerrainCompositionSourceIdentity,
+    canonical_terrain_chunk_order, mclone_tree_ownership_snapshot,
 };
+use mclone_worldgen::levelgen::McloneTreeOccurrence;
 use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
 
 const EXACT_COMPILE_BATCH_CHUNKS: usize = 4;
@@ -58,6 +65,7 @@ impl NativeCanonicalExactExecutor {
                     catalog,
                 );
                 session.set_frontier(CanonicalMeshFrontier::SuppressFootprintWalls);
+                session.set_natural_tree_presentation(CanonicalNaturalTreePresentation::Separated);
                 while let Ok(command) = command_receiver.recv() {
                     match command {
                         NativeExactCommand::Compile(request) => {
@@ -146,11 +154,17 @@ pub struct ExplorerExactStats {
     pub index_count: u32,
     pub drawn_sections: u32,
     pub drawn_indices: u32,
+    pub natural_tree_records: u32,
+    pub exact_owned_tree_records: u32,
+    pub proxy_owned_tree_records: u32,
+    pub exact_tree_sections: u32,
+    pub exact_tree_indices: u32,
     pub complete: bool,
 }
 
 pub struct ExplorerExactTerrain {
     draw: TexturedSectionDrawResources,
+    tree_draw: TexturedSectionDrawResources,
     depth: ChunkDepthTarget,
     executor: NativeCanonicalExactExecutor,
     source: TerrainCompositionSourceIdentity,
@@ -163,6 +177,11 @@ pub struct ExplorerExactTerrain {
     pending: VecDeque<PendingExactAdmission>,
     in_flight: bool,
     sections_by_chunk: BTreeMap<ChunkPos, BTreeSet<RenderSectionKey>>,
+    tree_occurrences: BTreeMap<McloneTreeOccurrenceId, McloneTreeOccurrence>,
+    tree_sections:
+        BTreeMap<McloneTreeOccurrenceId, BTreeMap<RenderSectionKey, TexturedRenderSectionMesh>>,
+    tree_gpu_sections: BTreeSet<RenderSectionKey>,
+    tree_ownership: BoundedRepresentationOwnershipSnapshot<McloneTreeOccurrenceId>,
     clear_color: wgpu::Color,
     admitted_chunks_total: u64,
     stale_chunks_total: u64,
@@ -171,6 +190,7 @@ pub struct ExplorerExactTerrain {
     mesh_ms: f64,
     pack_ms: f64,
     last_render: TexturedSectionRenderStats,
+    last_tree_render: TexturedSectionRenderStats,
 }
 
 impl ExplorerExactTerrain {
@@ -189,6 +209,11 @@ impl ExplorerExactTerrain {
         target_color_transform: RenderTargetColorTransform,
     ) -> Result<Self> {
         let executor = NativeCanonicalExactExecutor::new(seed, catalog.clone(), compile_delay)?;
+        let tree_atlas = ChunkTextureAtlas {
+            width: atlas.width,
+            height: atlas.height,
+            rgba: atlas.rgba,
+        };
         let draw = TexturedSectionDrawResources::new_with_texture_sampling(
             device,
             queue,
@@ -198,14 +223,23 @@ impl ExplorerExactTerrain {
             ChunkTextureSampling::TerrainOverview,
         )
         .context("failed to initialize World Explorer exact terrain renderer")?;
+        let tree_draw = TexturedSectionDrawResources::new_with_texture_sampling(
+            device,
+            queue,
+            color_format,
+            &[],
+            tree_atlas,
+            ChunkTextureSampling::TerrainOverview,
+        )
+        .context("failed to initialize World Explorer exact natural-tree renderer")?;
+        let source =
+            TerrainCompositionSourceIdentity::new(TerrainPreviewProfile::McloneOverworldV1, seed);
         Ok(Self {
             draw,
+            tree_draw,
             depth: ChunkDepthTarget::new(device, width, height),
             executor,
-            source: TerrainCompositionSourceIdentity::new(
-                TerrainPreviewProfile::McloneOverworldV1,
-                seed,
-            ),
+            source,
             radius,
             generation: 0,
             coverage_generation: 1,
@@ -215,6 +249,11 @@ impl ExplorerExactTerrain {
             pending: VecDeque::new(),
             in_flight: false,
             sections_by_chunk: BTreeMap::new(),
+            tree_occurrences: BTreeMap::new(),
+            tree_sections: BTreeMap::new(),
+            tree_gpu_sections: BTreeSet::new(),
+            tree_ownership: BoundedRepresentationOwnershipSnapshot::new(source, 1, [])
+                .expect("an empty initial tree ownership snapshot is valid"),
             clear_color: color_transform_wgpu(
                 wgpu::Color {
                     r: 0.025,
@@ -231,6 +270,7 @@ impl ExplorerExactTerrain {
             mesh_ms: 0.0,
             pack_ms: 0.0,
             last_render: TexturedSectionRenderStats::default(),
+            last_tree_render: TexturedSectionRenderStats::default(),
         })
     }
 
@@ -267,6 +307,12 @@ impl ExplorerExactTerrain {
         )
     }
 
+    pub fn tree_ownership(
+        &self,
+    ) -> &BoundedRepresentationOwnershipSnapshot<McloneTreeOccurrenceId> {
+        &self.tree_ownership
+    }
+
     pub fn render(
         &mut self,
         queue: &wgpu::Queue,
@@ -297,6 +343,25 @@ impl ExplorerExactTerrain {
             )
             .context("failed to render World Explorer exact terrain")?;
         self.last_render = stats;
+        let tree_target =
+            ChunkRenderTarget::new(color_view, &self.depth.view, size, self.clear_color)
+                .with_loaded_color()
+                .with_loaded_depth();
+        self.last_tree_render = self
+            .tree_draw
+            .render_with_options(
+                queue,
+                encoder,
+                tree_target,
+                render_view,
+                TexturedSectionRenderOptions {
+                    section_occlusion_culling: false,
+                    force_fullbright: true,
+                    color_profile: RenderColorProfile::Vanilla,
+                    ..TexturedSectionRenderOptions::default()
+                },
+            )
+            .context("failed to render World Explorer exact natural trees")?;
         Ok(stats)
     }
 
@@ -314,15 +379,52 @@ impl ExplorerExactTerrain {
             presentation_ms: self.presentation_ms,
             mesh_ms: self.mesh_ms,
             pack_ms: self.pack_ms,
-            resident_mesh_bytes: self.draw.resident_mesh_used_bytes(),
-            vertex_count: self.draw.vertex_count(),
-            index_count: self.draw.index_count(),
+            resident_mesh_bytes: self
+                .draw
+                .resident_mesh_used_bytes()
+                .saturating_add(self.tree_draw.resident_mesh_used_bytes()),
+            vertex_count: self
+                .draw
+                .vertex_count()
+                .saturating_add(self.tree_draw.vertex_count()),
+            index_count: self
+                .draw
+                .index_count()
+                .saturating_add(self.tree_draw.index_count()),
             drawn_sections: self
                 .last_render
                 .drawn_section_count
+                .saturating_add(self.last_tree_render.drawn_section_count)
                 .try_into()
                 .unwrap_or(u32::MAX),
-            drawn_indices: self.last_render.drawn_index_count,
+            drawn_indices: self
+                .last_render
+                .drawn_index_count
+                .saturating_add(self.last_tree_render.drawn_index_count),
+            natural_tree_records: self
+                .tree_ownership
+                .units()
+                .len()
+                .try_into()
+                .unwrap_or(u32::MAX),
+            exact_owned_tree_records: self
+                .tree_ownership
+                .exact_owned_ids()
+                .count()
+                .try_into()
+                .unwrap_or(u32::MAX),
+            proxy_owned_tree_records: self
+                .tree_ownership
+                .approximate_owned_ids()
+                .count()
+                .try_into()
+                .unwrap_or(u32::MAX),
+            exact_tree_sections: self
+                .last_tree_render
+                .drawn_section_count
+                .try_into()
+                .unwrap_or(u32::MAX),
+            exact_tree_indices: self.last_tree_render.drawn_index_count,
             complete: self.is_complete(),
         }
     }
@@ -348,9 +450,9 @@ impl ExplorerExactTerrain {
             .copied()
             .collect::<Vec<_>>();
         let mut removed = BTreeSet::new();
-        for chunk in departed {
-            self.painted.remove(&chunk);
-            if let Some(keys) = self.sections_by_chunk.remove(&chunk) {
+        for chunk in &departed {
+            self.painted.remove(chunk);
+            if let Some(keys) = self.sections_by_chunk.remove(chunk) {
                 removed.extend(keys);
             }
         }
@@ -359,6 +461,13 @@ impl ExplorerExactTerrain {
                 .apply_section_updates(device, &[], &removed)
                 .context("failed to evict departed World Explorer exact chunks")?;
         }
+        for sections in self.tree_sections.values_mut() {
+            sections.retain(|key, _| !departed.contains(&ChunkPos::new(key.chunk_x, key.chunk_z)));
+        }
+        self.tree_sections
+            .retain(|_, sections| !sections.is_empty());
+        self.tree_occurrences
+            .retain(|id, _| self.tree_sections.contains_key(id));
         self.desired = desired;
         self.queued.extend(
             ordered
@@ -367,6 +476,7 @@ impl ExplorerExactTerrain {
         );
         self.refresh_readiness();
         self.coverage_generation = self.coverage_generation.wrapping_add(1).max(1);
+        self.rebuild_tree_ownership(device)?;
         Ok(())
     }
 
@@ -434,11 +544,22 @@ impl ExplorerExactTerrain {
         self.draw
             .apply_section_updates(device, &sections, &removed)
             .context("failed to upload World Explorer canonical packed mesh")?;
+        for tree in pending.admission.natural_trees {
+            let id = McloneTreeOccurrenceId::from(tree.occurrence);
+            let sections = unpack_textured_render_sections(&tree.packed_sections)
+                .context("invalid World Explorer canonical natural-tree mesh")?;
+            self.tree_occurrences.insert(id, tree.occurrence);
+            let resident = self.tree_sections.entry(id).or_default();
+            for section in sections {
+                resident.insert(section.key, section);
+            }
+        }
         if self.painted.insert(requested) {
             self.coverage_generation = self.coverage_generation.wrapping_add(1).max(1);
         }
         self.admitted_chunks_total = self.admitted_chunks_total.saturating_add(1);
         self.refresh_readiness();
+        self.rebuild_tree_ownership(device)?;
         Ok(())
     }
 
@@ -482,6 +603,56 @@ impl ExplorerExactTerrain {
     fn refresh_readiness(&mut self) {
         self.draw
             .set_traversal_ready_columns_with_context(&self.painted, false);
+        self.tree_draw
+            .set_traversal_ready_columns_with_context(&self.painted, false);
+    }
+
+    fn rebuild_tree_ownership(&mut self, device: &wgpu::Device) -> Result<()> {
+        let coverage = self.coverage_snapshot().map_err(anyhow::Error::msg)?;
+        self.tree_ownership = mclone_tree_ownership_snapshot(
+            self.source,
+            self.coverage_generation,
+            &coverage,
+            TERRAIN_EXACT_FRONTIER_COLLAR_BLOCKS,
+            self.tree_occurrences.values().copied().map(|occurrence| {
+                let id = McloneTreeOccurrenceId::from(occurrence);
+                McloneTreeOwnershipCandidate::new(
+                    occurrence,
+                    self.tree_sections
+                        .get(&id)
+                        .is_some_and(|sections| !sections.is_empty()),
+                    true,
+                )
+            }),
+        )
+        .map_err(anyhow::Error::msg)?;
+
+        let mut grouped = BTreeMap::<RenderSectionKey, Vec<&TexturedRenderSectionMesh>>::new();
+        for id in self.tree_ownership.exact_owned_ids() {
+            if let Some(sections) = self.tree_sections.get(id) {
+                for section in sections.values() {
+                    grouped.entry(section.key).or_default().push(section);
+                }
+            }
+        }
+        let merged = grouped
+            .into_iter()
+            .map(|(key, sections)| merge_textured_render_section_meshes(key, sections))
+            .collect::<Vec<_>>();
+        let next = merged
+            .iter()
+            .map(|section| section.key)
+            .collect::<BTreeSet<_>>();
+        let removed = self
+            .tree_gpu_sections
+            .difference(&next)
+            .copied()
+            .collect::<BTreeSet<_>>();
+        self.tree_draw
+            .apply_section_updates(device, &merged, &removed)
+            .context("failed to upload World Explorer exact natural-tree ownership")?;
+        self.tree_gpu_sections = next;
+        Ok(())
     }
 
     fn is_complete(&self) -> bool {

@@ -190,6 +190,11 @@ impl ExplorerTerrain {
             }
             WorldExplorerCompositionMode::Horizon | WorldExplorerCompositionMode::Exact => None,
         };
+        let tree_ownership = matches!(
+            self.composition,
+            WorldExplorerCompositionMode::Composed | WorldExplorerCompositionMode::Coverage
+        )
+        .then_some(self.exact.tree_ownership());
         let depth_view = &self.exact.depth().view;
         let clear_color = self.exact.clear_color();
         let mut stats = self
@@ -208,6 +213,7 @@ impl ExplorerTerrain {
                 },
                 self.started.elapsed(),
                 coverage_mode,
+                tree_ownership,
             )
             .map_err(anyhow::Error::msg)?;
         if matches!(
@@ -304,7 +310,8 @@ impl ExplorerTerrain {
         format!(
             "{} composition={} exact={}/{} exact_queue={} exact_pending={} exact_inflight={} \
              exact_generation={} exact_admitted={} exact_stale={} exact_sections={} \
-             exact_vertices={} exact_indices={}/{} exact_bytes={} exact_compile_ms={:.2} \
+             exact_vertices={} exact_indices={}/{} exact_bytes={} exact_trees={}:{}:{} \
+             exact_tree_draw={}:{} exact_compile_ms={:.2} \
              exact_present_ms={:.2} exact_mesh_ms={:.2} exact_pack_ms={:.2} \
              frontier=procedural-collar-1.5-blocks",
             self.session.diagnostics(),
@@ -322,6 +329,11 @@ impl ExplorerTerrain {
             exact.drawn_indices,
             exact.index_count,
             exact.resident_mesh_bytes,
+            exact.natural_tree_records,
+            exact.exact_owned_tree_records,
+            exact.proxy_owned_tree_records,
+            exact.exact_tree_sections,
+            exact.exact_tree_indices,
             exact.generation_ms,
             exact.presentation_ms,
             exact.mesh_ms,

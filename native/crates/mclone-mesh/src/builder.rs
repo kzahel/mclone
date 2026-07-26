@@ -701,6 +701,26 @@ fn append_textured_mesh(mesh: &mut TexturedVisibleChunkMesh, source: &TexturedVi
         .extend_from_slice(&adjusted_source[source_opaque_end..]);
 }
 
+pub fn merge_textured_render_section_meshes<'a>(
+    key: RenderSectionKey,
+    sections: impl IntoIterator<Item = &'a TexturedRenderSectionMesh>,
+) -> TexturedRenderSectionMesh {
+    let mut merged = TexturedRenderSectionMesh {
+        key,
+        mesh: TexturedVisibleChunkMesh::default(),
+        grass_patches: Vec::new(),
+        visibility: VisibilitySet::all_visible(),
+    };
+    for section in sections {
+        debug_assert_eq!(section.key, key);
+        append_textured_mesh(&mut merged.mesh, &section.mesh);
+        merged
+            .grass_patches
+            .extend_from_slice(&section.grass_patches);
+    }
+    merged
+}
+
 #[derive(Clone, Copy, Debug)]
 struct Face {
     neighbor: [i32; 3],
@@ -1976,6 +1996,49 @@ fn direction_offset(direction: ModelFaceDirection) -> [i32; 3] {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn phase_section(
+        key: RenderSectionKey,
+        x: f32,
+        solid_index_count: u32,
+        opaque_index_count: u32,
+    ) -> TexturedRenderSectionMesh {
+        TexturedRenderSectionMesh {
+            key,
+            mesh: TexturedVisibleChunkMesh {
+                vertices: (0..3)
+                    .map(|offset| TexturedChunkVertex {
+                        position: [x + offset as f32, 0.0, 0.0],
+                        uv: [0.0, 0.0],
+                        color: [1.0; 4],
+                        packed_light: 0,
+                    })
+                    .collect(),
+                indices: vec![0, 1, 2],
+                solid_index_count,
+                opaque_index_count,
+            },
+            grass_patches: vec![GrassPatch::default()],
+            visibility: VisibilitySet::all_visible(),
+        }
+    }
+
+    #[test]
+    fn merged_tree_sections_preserve_render_phase_ranges() {
+        let key = RenderSectionKey::new(2, 4, 6);
+        let solid = phase_section(key, 0.0, 3, 3);
+        let cutout = phase_section(key, 3.0, 0, 3);
+        let translucent = phase_section(key, 6.0, 0, 0);
+        let merged = merge_textured_render_section_meshes(key, [&solid, &cutout, &translucent]);
+
+        assert_eq!(merged.mesh.vertices.len(), 9);
+        assert_eq!(merged.mesh.indices, (0..9).collect::<Vec<_>>());
+        assert_eq!(merged.mesh.solid_index_range(), 0..3);
+        assert_eq!(merged.mesh.opaque_index_range(), 0..6);
+        assert_eq!(merged.mesh.translucent_index_range(), 6..9);
+        assert_eq!(merged.grass_patches.len(), 3);
+        assert_eq!(merged.visibility, VisibilitySet::all_visible());
+    }
 
     fn empty_textured_blocks(height: i32) -> Vec<BlockStateId> {
         vec![AIR_BLOCK_STATE_ID; CHUNK_WIDTH as usize * CHUNK_WIDTH as usize * height as usize]

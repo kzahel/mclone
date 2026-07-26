@@ -21,6 +21,7 @@ pub use builder::{
     build_textured_render_sections_for_section_set_with_stats_and_options,
     build_textured_render_sections_with_stats, build_textured_visible_chunk_area_mesh,
     build_textured_visible_chunk_mesh, build_visible_chunk_area_mesh, build_visible_chunk_mesh,
+    merge_textured_render_section_meshes,
 };
 pub use catalog::{
     AtlasSpriteUv, LeafDetail, TexturedBlockFace, TexturedBlockModel, TexturedColorMap,

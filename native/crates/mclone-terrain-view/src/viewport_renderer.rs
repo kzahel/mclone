@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{BTreeSet, HashMap, HashSet, VecDeque};
 use std::mem::size_of;
 use std::num::NonZeroU64;
 use std::sync::mpsc;
@@ -20,9 +20,10 @@ use mclone_worldgen::terrain_vegetation::{
 };
 
 use super::{
-    ExactPaintedCoverageSnapshot, TERRAIN_EXACT_COVERAGE_MASK_BYTES, TERRAIN_PREVIEW_DEPTH_FORMAT,
-    TERRAIN_PREVIEW_SAMPLE_BYTES, TERRAIN_PREVIEW_UNIFORM_BYTES, TERRAIN_PREVIEW_WORKGROUP_AXIS,
-    TerrainClipmap, TerrainClipmapConfig, TerrainClipmapDiagnostics, TerrainClipmapTile,
+    BoundedRepresentationOwnershipSnapshot, ExactPaintedCoverageSnapshot, McloneTreeOccurrenceId,
+    TERRAIN_EXACT_COVERAGE_MASK_BYTES, TERRAIN_PREVIEW_DEPTH_FORMAT, TERRAIN_PREVIEW_SAMPLE_BYTES,
+    TERRAIN_PREVIEW_UNIFORM_BYTES, TERRAIN_PREVIEW_WORKGROUP_AXIS, TerrainClipmap,
+    TerrainClipmapConfig, TerrainClipmapDiagnostics, TerrainClipmapTile,
     TerrainCompositionSourceIdentity, TerrainExactCoverageMask, TerrainExactCoverageMode,
     TerrainHorizonPresentation, TerrainPreviewCamera, TerrainPreviewDrawOptions,
     TerrainPreviewLayer, TerrainPreviewSource, TerrainPreviewSplitLayout,
@@ -182,7 +183,14 @@ pub struct TerrainHorizonFrameStats {
     pub vegetation_ready_tiles: u32,
     pub pending_vegetation_tiles: u32,
     pub tree_instance_count: u32,
+    pub tree_proxy_suppressed_instances: u32,
+    pub tree_proxy_suppressed_records: u32,
+    pub tree_proxy_missing_exact_records: u32,
     pub tree_proxy_vertex_count: u32,
+    pub tree_ownership_generation: u64,
+    pub tree_ownership_units: u32,
+    pub exact_owned_tree_records: u32,
+    pub proxy_owned_tree_records: u32,
     pub fixed_resident_bytes: u64,
     pub vegetation_bytes: u64,
     pub resident_bytes: u64,
@@ -579,6 +587,7 @@ struct TerrainViewportGpuTile {
     tree_render_bind_group: wgpu::BindGroup,
     tree_instance_buffer: Option<wgpu::Buffer>,
     tree_instance_count: u32,
+    tree_suppressed_instance_count: u32,
     tree_instance_bytes: u64,
     last_used: u64,
 }
@@ -750,6 +759,7 @@ impl TerrainViewportGpuTile {
             tree_render_bind_group,
             tree_instance_buffer: None,
             tree_instance_count: 0,
+            tree_suppressed_instance_count: 0,
             tree_instance_bytes: 0,
             last_used: 0,
         })
@@ -787,7 +797,58 @@ impl TerrainViewportGpuTile {
         queue: &wgpu::Queue,
         vegetation: TerrainPreviewVegetationProduct,
     ) -> Result<(), String> {
-        let (tree_bytes, tree_instance_count) = tree_instance_bytes(&vegetation)?;
+        self.upload_vegetation_filtered(device, queue, vegetation, &BTreeSet::new())
+    }
+
+    fn upload_vegetation_filtered(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        vegetation: TerrainPreviewVegetationProduct,
+        exact_owned_tree_ids: &BTreeSet<McloneTreeOccurrenceId>,
+    ) -> Result<(), String> {
+        let (tree_bytes, tree_instance_count, tree_suppressed_instance_count) =
+            tree_instance_bytes_filtered(&vegetation, exact_owned_tree_ids)?;
+        self.install_tree_instances(
+            device,
+            queue,
+            tree_bytes,
+            tree_instance_count,
+            tree_suppressed_instance_count,
+        );
+        self.vegetation = Some(vegetation);
+        Ok(())
+    }
+
+    fn refresh_tree_instances(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        exact_owned_tree_ids: &BTreeSet<McloneTreeOccurrenceId>,
+    ) -> Result<(), String> {
+        let Some(vegetation) = self.vegetation.as_ref() else {
+            return Ok(());
+        };
+        let (tree_bytes, tree_instance_count, tree_suppressed_instance_count) =
+            tree_instance_bytes_filtered(vegetation, exact_owned_tree_ids)?;
+        self.install_tree_instances(
+            device,
+            queue,
+            tree_bytes,
+            tree_instance_count,
+            tree_suppressed_instance_count,
+        );
+        Ok(())
+    }
+
+    fn install_tree_instances(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        tree_bytes: Vec<u8>,
+        tree_instance_count: u32,
+        tree_suppressed_instance_count: u32,
+    ) {
         self.tree_instance_buffer = if tree_bytes.is_empty() {
             None
         } else {
@@ -801,15 +862,15 @@ impl TerrainViewportGpuTile {
             Some(buffer)
         };
         self.tree_instance_count = tree_instance_count;
+        self.tree_suppressed_instance_count = tree_suppressed_instance_count;
         self.tree_instance_bytes = tree_bytes.len() as u64;
-        self.vegetation = Some(vegetation);
-        Ok(())
     }
 
     fn clear_vegetation(&mut self) {
         self.vegetation = None;
         self.tree_instance_buffer = None;
         self.tree_instance_count = 0;
+        self.tree_suppressed_instance_count = 0;
         self.tree_instance_bytes = 0;
     }
 
@@ -2497,6 +2558,8 @@ pub struct TerrainHorizonRenderer {
     requested_center_z: i32,
     content_stage: TerrainPreviewContentStage,
     dispatched_refills_total: u64,
+    tree_ownership: Option<BoundedRepresentationOwnershipSnapshot<McloneTreeOccurrenceId>>,
+    exact_owned_tree_ids: BTreeSet<McloneTreeOccurrenceId>,
 }
 
 impl TerrainHorizonRenderer {
@@ -2588,6 +2651,8 @@ impl TerrainHorizonRenderer {
             requested_center_z: 0,
             content_stage: TerrainPreviewContentStage::Cover,
             dispatched_refills_total: 0,
+            tree_ownership: None,
+            exact_owned_tree_ids: BTreeSet::new(),
         })
     }
 
@@ -2616,6 +2681,8 @@ impl TerrainHorizonRenderer {
                 slot.clear_vegetation();
             }
             self.renderer.exact_coverage.disable();
+            self.tree_ownership = None;
+            self.exact_owned_tree_ids.clear();
         }
         self.seed = seed;
         self.requested_center_x = center_x;
@@ -2650,6 +2717,77 @@ impl TerrainHorizonRenderer {
 
     pub fn clear_exact_painted_coverage(&mut self) {
         self.renderer.exact_coverage.disable();
+    }
+
+    pub fn set_tree_ownership(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        snapshot: &BoundedRepresentationOwnershipSnapshot<McloneTreeOccurrenceId>,
+    ) -> Result<(), String> {
+        let expected = TerrainCompositionSourceIdentity::new(
+            TerrainPreviewProfile::McloneOverworldV1,
+            self.seed,
+        );
+        if snapshot.source() != expected {
+            return Err(format!(
+                "tree ownership source {:?} does not match horizon source {:?}",
+                snapshot.source(),
+                expected
+            ));
+        }
+        let coverage_generation = self.renderer.exact_coverage.mask.generation;
+        if self.renderer.exact_coverage.mode != TerrainExactCoverageMode::Disabled
+            && snapshot.generation() != coverage_generation
+        {
+            return Err(format!(
+                "tree ownership generation {} does not match exact coverage generation \
+                 {coverage_generation}",
+                snapshot.generation()
+            ));
+        }
+        let exact_owned_tree_ids = snapshot.exact_owned_ids().copied().collect::<BTreeSet<_>>();
+        if self.tree_ownership.as_ref() == Some(snapshot)
+            && self.exact_owned_tree_ids == exact_owned_tree_ids
+        {
+            return Ok(());
+        }
+        let changed = self
+            .exact_owned_tree_ids
+            .symmetric_difference(&exact_owned_tree_ids)
+            .copied()
+            .collect::<BTreeSet<_>>();
+        for slot in &mut self.slots {
+            if slot.vegetation.as_ref().is_some_and(|vegetation| {
+                vegetation
+                    .occurrences()
+                    .iter()
+                    .any(|occurrence| changed.contains(&McloneTreeOccurrenceId::from(*occurrence)))
+            }) {
+                slot.refresh_tree_instances(device, queue, &exact_owned_tree_ids)?;
+            }
+        }
+        self.tree_ownership = Some(snapshot.clone());
+        self.exact_owned_tree_ids = exact_owned_tree_ids;
+        Ok(())
+    }
+
+    pub fn clear_tree_ownership(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+    ) -> Result<(), String> {
+        if self.tree_ownership.is_none() && self.exact_owned_tree_ids.is_empty() {
+            return Ok(());
+        }
+        self.exact_owned_tree_ids.clear();
+        for slot in &mut self.slots {
+            if slot.tree_suppressed_instance_count > 0 {
+                slot.refresh_tree_instances(device, queue, &self.exact_owned_tree_ids)?;
+            }
+        }
+        self.tree_ownership = None;
+        Ok(())
     }
 
     fn schedule_requested_transition(&mut self) -> Result<(), String> {
@@ -2869,7 +3007,12 @@ impl TerrainHorizonRenderer {
                     "terrain vegetation coordinator admitted a mismatched physical slot".to_owned(),
                 );
             }
-            self.slots[slot_index].upload_vegetation(device, queue, admission.product)?;
+            self.slots[slot_index].upload_vegetation_filtered(
+                device,
+                queue,
+                admission.product,
+                &self.exact_owned_tree_ids,
+            )?;
         }
         let slots = &self.slots;
         let seed = self.seed;
@@ -3014,6 +3157,35 @@ impl TerrainHorizonRenderer {
         let tree_instance_count = vegetation_resources.iter().fold(0_u32, |count, resource| {
             count.saturating_add(self.slots[resource.resource_slot as usize].tree_instance_count)
         });
+        let tree_proxy_suppressed_instances =
+            vegetation_resources.iter().fold(0_u32, |count, resource| {
+                count.saturating_add(
+                    self.slots[resource.resource_slot as usize].tree_suppressed_instance_count,
+                )
+            });
+        let resident_tree_ids = vegetation_resources
+            .iter()
+            .filter_map(|resource| {
+                self.slots[resource.resource_slot as usize]
+                    .vegetation
+                    .as_ref()
+            })
+            .flat_map(|vegetation| vegetation.occurrences())
+            .copied()
+            .map(McloneTreeOccurrenceId::from)
+            .collect::<BTreeSet<_>>();
+        let tree_proxy_suppressed_records = self
+            .exact_owned_tree_ids
+            .intersection(&resident_tree_ids)
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX);
+        let tree_proxy_missing_exact_records = self
+            .exact_owned_tree_ids
+            .difference(&resident_tree_ids)
+            .count()
+            .try_into()
+            .unwrap_or(u32::MAX);
         let tree_proxy_vertex_count =
             tree_instance_count.saturating_mul(TERRAIN_PREVIEW_TREE_VERTICES_PER_INSTANCE);
         let vertex_count = drawn_tiles
@@ -3069,13 +3241,31 @@ impl TerrainHorizonRenderer {
             })
             .unwrap_or((0, true));
         let vegetation_service = self.vegetation_service_stats(&vegetation_levels)?;
-        if vegetation_service.record_count != tree_instance_count {
+        if vegetation_service.record_count
+            != tree_instance_count.saturating_add(tree_proxy_suppressed_instances)
+        {
             return Err(format!(
                 "terrain vegetation receipt counts {} records but GPU slots contain \
-                 {tree_instance_count} instances",
-                vegetation_service.record_count
+                 {tree_instance_count} proxy instances and {tree_proxy_suppressed_instances} \
+                 exact-owned suppressed instances",
+                vegetation_service.record_count,
             ));
         }
+        let tree_ownership_generation = self
+            .tree_ownership
+            .as_ref()
+            .map_or(0, BoundedRepresentationOwnershipSnapshot::generation);
+        let tree_ownership_units = self
+            .tree_ownership
+            .as_ref()
+            .map_or(0, |snapshot| snapshot.units().len() as u32);
+        let exact_owned_tree_records = self
+            .tree_ownership
+            .as_ref()
+            .map_or(0, |snapshot| snapshot.exact_owned_ids().count() as u32);
+        let proxy_owned_tree_records = self.tree_ownership.as_ref().map_or(0, |snapshot| {
+            snapshot.approximate_owned_ids().count() as u32
+        });
         let target_ready = ready_slots == allocation_slots
             && self.pending.is_empty()
             && !self.admission.has_staged_levels()
@@ -3106,7 +3296,14 @@ impl TerrainHorizonRenderer {
             vegetation_ready_tiles,
             pending_vegetation_tiles,
             tree_instance_count,
+            tree_proxy_suppressed_instances,
+            tree_proxy_suppressed_records,
+            tree_proxy_missing_exact_records,
             tree_proxy_vertex_count,
+            tree_ownership_generation,
+            tree_ownership_units,
+            exact_owned_tree_records,
+            proxy_owned_tree_records,
             fixed_resident_bytes,
             vegetation_bytes,
             resident_bytes,
@@ -3410,11 +3607,36 @@ fn terrain_horizon_vegetation_source(
     })
 }
 
+#[cfg(test)]
 fn tree_instance_bytes(
     vegetation: &TerrainPreviewVegetationProduct,
 ) -> Result<(Vec<u8>, u32), String> {
-    let instance_count = u32::try_from(vegetation.occurrences().len())
+    let (bytes, instance_count, suppressed_instance_count) =
+        tree_instance_bytes_filtered(vegetation, &BTreeSet::new())?;
+    debug_assert_eq!(suppressed_instance_count, 0);
+    Ok((bytes, instance_count))
+}
+
+fn tree_instance_bytes_filtered(
+    vegetation: &TerrainPreviewVegetationProduct,
+    exact_owned_tree_ids: &BTreeSet<McloneTreeOccurrenceId>,
+) -> Result<(Vec<u8>, u32, u32), String> {
+    let included_occurrences = vegetation
+        .occurrences()
+        .iter()
+        .filter(|occurrence| {
+            !exact_owned_tree_ids.contains(&McloneTreeOccurrenceId::from(**occurrence))
+        })
+        .collect::<Vec<_>>();
+    let instance_count = u32::try_from(included_occurrences.len())
         .map_err(|_| "terrain preview tree instance count exceeds u32")?;
+    let suppressed_instance_count = u32::try_from(
+        vegetation
+            .occurrences()
+            .len()
+            .saturating_sub(included_occurrences.len()),
+    )
+    .map_err(|_| "terrain preview suppressed tree instance count exceeds u32")?;
     let byte_capacity = vegetation
         .occurrences()
         .len()
@@ -3423,7 +3645,7 @@ fn tree_instance_bytes(
         .ok_or("terrain preview tree instance byte size overflow")?;
     let mut bytes = Vec::with_capacity(byte_capacity);
     for panel in 0..2 {
-        for occurrence in vegetation.occurrences() {
+        for occurrence in &included_occurrences {
             let base = occurrence
                 .working_base()
                 .map_err(|error| format!("terrain preview tree base is invalid: {error}"))?;
@@ -3451,7 +3673,7 @@ fn tree_instance_bytes(
             }
         }
     }
-    Ok((bytes, instance_count))
+    Ok((bytes, instance_count, suppressed_instance_count))
 }
 
 #[derive(Clone, Copy)]
@@ -3748,6 +3970,28 @@ mod tests {
         assert_eq!(values[panel_stride + 8], 1.0);
         assert!((1.0..=3.0).contains(&values[6]));
         assert_eq!(values[9], 3.0);
+    }
+
+    #[test]
+    fn exact_owned_tree_is_removed_as_one_complete_proxy_instance() {
+        let request = TerrainPreviewRequest::new(12_345, -80, 48, 4)
+            .with_content_stage(TerrainPreviewContentStage::Cover);
+        let product = TerrainPreviewVegetationProduct::compile(request).unwrap();
+        let exact_owned = McloneTreeOccurrenceId::from(product.occurrences()[0]);
+        let (bytes, instance_count, suppressed_instance_count) =
+            tree_instance_bytes_filtered(&product, &BTreeSet::from([exact_owned])).unwrap();
+
+        assert_eq!(suppressed_instance_count, 1);
+        assert_eq!(
+            instance_count.saturating_add(suppressed_instance_count),
+            product.occurrences().len() as u32
+        );
+        assert_eq!(
+            bytes.len(),
+            usize::try_from(instance_count).unwrap()
+                * TERRAIN_PREVIEW_TREE_INSTANCE_BYTES as usize
+                * 2
+        );
     }
 
     #[test]

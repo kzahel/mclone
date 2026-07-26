@@ -49,7 +49,8 @@ pub use composition::{
     BoundedRepresentationOwnershipSnapshot, BoundedRepresentationReadiness,
     BoundedRepresentationUnit, ExactPaintedCoverageSnapshot, TERRAIN_EXACT_COVERAGE_MASK_BYTES,
     TERRAIN_EXACT_COVERAGE_MAX_CHUNKS_PER_AXIS, TERRAIN_EXACT_COVERAGE_WORD_COUNT,
-    TerrainCompositionSourceIdentity, TerrainExactCoverageMask, TerrainExactCoverageMode,
+    TERRAIN_EXACT_FRONTIER_COLLAR_BLOCKS, TerrainCompositionSourceIdentity,
+    TerrainExactCoverageMask, TerrainExactCoverageMode,
 };
 pub use terrain_vegetation_coordinator::{
     TerrainVegetationAdmission, TerrainVegetationCoordinator,

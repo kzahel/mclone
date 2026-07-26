@@ -151,6 +151,8 @@ mod tests {
         .unwrap();
         let interior = occurrence(1, 3, 3, 10, 10);
         let crossing = occurrence(2, 1, 3, 7, 10);
+        let cross_chunk_crown = occurrence(3, 14, 4, 18, 10);
+        let corner_crossing = occurrence(4, 24, 24, 30, 30);
         let snapshot = mclone_tree_ownership_snapshot(
             source(),
             4,
@@ -159,6 +161,8 @@ mod tests {
             [
                 McloneTreeOwnershipCandidate::new(interior, true, true),
                 McloneTreeOwnershipCandidate::new(crossing, true, true),
+                McloneTreeOwnershipCandidate::new(cross_chunk_crown, true, true),
+                McloneTreeOwnershipCandidate::new(corner_crossing, true, true),
             ],
         )
         .unwrap();
@@ -168,6 +172,43 @@ mod tests {
         );
         assert_eq!(
             snapshot.owner(&crossing.into()),
+            Some(BoundedRepresentationOwner::Approximate)
+        );
+        assert_eq!(
+            snapshot.owner(&cross_chunk_crown.into()),
+            Some(BoundedRepresentationOwner::Exact)
+        );
+        assert_eq!(
+            snapshot.owner(&corner_crossing.into()),
+            Some(BoundedRepresentationOwner::Approximate)
+        );
+    }
+
+    #[test]
+    fn delayed_exact_draw_keeps_the_complete_proxy() {
+        let coverage = ExactPaintedCoverageSnapshot::new(
+            source(),
+            9,
+            [
+                mclone_core::ChunkPos::new(0, 0),
+                mclone_core::ChunkPos::new(1, 0),
+                mclone_core::ChunkPos::new(0, 1),
+                mclone_core::ChunkPos::new(1, 1),
+            ],
+        )
+        .unwrap();
+        let interior = occurrence(5, 3, 3, 10, 10);
+        let snapshot = mclone_tree_ownership_snapshot(
+            source(),
+            5,
+            &coverage,
+            1.5,
+            [McloneTreeOwnershipCandidate::new(interior, false, true)],
+        )
+        .unwrap();
+
+        assert_eq!(
+            snapshot.owner(&interior.into()),
             Some(BoundedRepresentationOwner::Approximate)
         );
     }

@@ -217,9 +217,6 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         discard;
     }
     let exact_painted = exact_chunk_painted(input.world_xz);
-    if exact_coverage.mode_count_generation.x == 1u && exact_painted {
-        discard;
-    }
     var color = input.color;
     if exact_coverage.mode_count_generation.x == 2u && exact_painted {
         color = mix(color, vec3<f32>(1.0, 0.08, 0.72), 0.86);

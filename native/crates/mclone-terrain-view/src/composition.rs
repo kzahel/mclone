@@ -10,6 +10,7 @@ pub const TERRAIN_EXACT_COVERAGE_WORD_COUNT: usize = (TERRAIN_EXACT_COVERAGE_MAX
     / u32::BITS as usize;
 pub const TERRAIN_EXACT_COVERAGE_MASK_BYTES: u64 =
     (TERRAIN_EXACT_COVERAGE_WORD_COUNT * size_of::<u32>()) as u64;
+pub const TERRAIN_EXACT_FRONTIER_COLLAR_BLOCKS: f32 = 1.5;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BoundedRepresentationBounds {

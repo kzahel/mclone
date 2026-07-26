@@ -328,8 +328,11 @@ impl SmokeRecorder {
                 && service.resident_tiles == 48
                 && !service.in_flight
                 && service.product_count == 48
-                && service.record_count == stats.tree_instance_count
-                && service.family_counts.iter().sum::<u32>() == stats.tree_instance_count
+                && service.record_count
+                    == stats
+                        .tree_instance_count
+                        .saturating_add(stats.tree_proxy_suppressed_instances)
+                && service.family_counts.iter().sum::<u32>() == service.record_count
                 && service.source_fingerprint != 0
                 && service.record_hash != 0
                 && service.compile_micros > 0,
@@ -360,7 +363,17 @@ impl SmokeRecorder {
             ensure!(
                 stats.exact_coverage_mode == expected
                     && stats.exact_painted_chunks == exact.painted_chunks
-                    && stats.exact_coverage_generation == exact.coverage_generation,
+                    && stats.exact_coverage_generation == exact.coverage_generation
+                    && stats.tree_ownership_generation == exact.coverage_generation
+                    && stats.tree_ownership_units == exact.natural_tree_records
+                    && stats.exact_owned_tree_records == exact.exact_owned_tree_records
+                    && stats.proxy_owned_tree_records == exact.proxy_owned_tree_records
+                    && stats.tree_ownership_units
+                        == stats
+                            .exact_owned_tree_records
+                            .saturating_add(stats.proxy_owned_tree_records)
+                    && stats.tree_proxy_suppressed_records == stats.exact_owned_tree_records
+                    && stats.tree_proxy_missing_exact_records == 0,
                 "World Explorer {label} checkpoint mask does not match exact-painted coverage: \
                  horizon={stats:?} exact={exact:?}"
             );
@@ -418,6 +431,40 @@ impl SmokeRecorder {
         let fields = capture
             .as_object_mut()
             .expect("a JSON object literal produces an object");
+        fields.insert(
+            "tree_proxy_suppressed_instances".to_owned(),
+            json!(stats.tree_proxy_suppressed_instances),
+        );
+        fields.insert(
+            "tree_proxy_suppressed_records".to_owned(),
+            json!(stats.tree_proxy_suppressed_records),
+        );
+        fields.insert(
+            "tree_proxy_missing_exact_records".to_owned(),
+            json!(stats.tree_proxy_missing_exact_records),
+        );
+        fields.insert(
+            "tree_ownership_generation".to_owned(),
+            json!(stats.tree_ownership_generation),
+        );
+        fields.insert(
+            "tree_ownership_units".to_owned(),
+            json!(stats.tree_ownership_units),
+        );
+        fields.insert(
+            "exact_owned_tree_records".to_owned(),
+            json!(stats.exact_owned_tree_records),
+        );
+        fields.insert(
+            "proxy_owned_tree_records".to_owned(),
+            json!(stats.proxy_owned_tree_records),
+        );
+        fields.insert(
+            "frontier_crossing_tree_records".to_owned(),
+            json!(stats.proxy_owned_tree_records),
+        );
+        fields.insert("dual_owned_tree_records".to_owned(), json!(0));
+        fields.insert("unowned_tree_records".to_owned(), json!(0));
         fields.insert("composition".to_owned(), json!(composition.label()));
         fields.insert("exact".to_owned(), exact_stats_json(exact));
         fields.insert("frontier".to_owned(), json!("procedural-collar-1.5-blocks"));
@@ -513,6 +560,14 @@ fn exact_stats_json(stats: ExplorerExactStats) -> Value {
         "index_count": stats.index_count,
         "drawn_sections": stats.drawn_sections,
         "drawn_indices": stats.drawn_indices,
+        "natural_tree_records": stats.natural_tree_records,
+        "exact_owned_tree_records": stats.exact_owned_tree_records,
+        "proxy_owned_tree_records": stats.proxy_owned_tree_records,
+        "frontier_crossing_tree_records": stats.proxy_owned_tree_records,
+        "exact_tree_sections": stats.exact_tree_sections,
+        "exact_tree_indices": stats.exact_tree_indices,
+        "dual_owned_tree_records": 0,
+        "unowned_tree_records": 0,
         "complete": stats.complete,
     })
 }

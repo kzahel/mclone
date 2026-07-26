@@ -2,10 +2,11 @@ use std::time::Duration;
 
 use mclone_render_color::{RenderColorProfile, RenderTargetColorTransform};
 use mclone_terrain_view::{
-    ExactPaintedCoverageSnapshot, TerrainClipmapConfig, TerrainExactCoverageMode,
-    TerrainHorizonFrameStats, TerrainHorizonPresentation, TerrainHorizonRenderTarget,
-    TerrainHorizonRenderer, TerrainPreviewCamera, TerrainPreviewMaterialAtlas,
-    TerrainPreviewProjectionKind, TerrainPreviewView, TerrainVegetationExecutor,
+    BoundedRepresentationOwnershipSnapshot, ExactPaintedCoverageSnapshot, McloneTreeOccurrenceId,
+    TerrainClipmapConfig, TerrainExactCoverageMode, TerrainHorizonFrameStats,
+    TerrainHorizonPresentation, TerrainHorizonRenderTarget, TerrainHorizonRenderer,
+    TerrainPreviewCamera, TerrainPreviewMaterialAtlas, TerrainPreviewProjectionKind,
+    TerrainPreviewView, TerrainVegetationExecutor,
 };
 use mclone_view_control::{
     ContactEvent, ContactGestureReducer, ViewPoint, ViewportMetrics, WorldViewHeldDirection,
@@ -200,7 +201,9 @@ impl WorldExplorerSession {
         color_view: &wgpu::TextureView,
         elapsed: Duration,
     ) -> Result<TerrainHorizonFrameStats, String> {
-        self.encode_horizon(device, queue, encoder, None, color_view, elapsed, None)
+        self.encode_horizon(
+            device, queue, encoder, None, color_view, elapsed, None, None,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -212,6 +215,7 @@ impl WorldExplorerSession {
         target: TerrainHorizonRenderTarget<'_>,
         elapsed: Duration,
         exact_coverage: Option<(&ExactPaintedCoverageSnapshot, TerrainExactCoverageMode)>,
+        tree_ownership: Option<&BoundedRepresentationOwnershipSnapshot<McloneTreeOccurrenceId>>,
     ) -> Result<TerrainHorizonFrameStats, String> {
         self.encode_horizon(
             device,
@@ -221,6 +225,7 @@ impl WorldExplorerSession {
             target.color_view,
             elapsed,
             exact_coverage,
+            tree_ownership,
         )
     }
 
@@ -234,6 +239,7 @@ impl WorldExplorerSession {
         color_view: &wgpu::TextureView,
         elapsed: Duration,
         exact_coverage: Option<(&ExactPaintedCoverageSnapshot, TerrainExactCoverageMode)>,
+        tree_ownership: Option<&BoundedRepresentationOwnershipSnapshot<McloneTreeOccurrenceId>>,
     ) -> Result<TerrainHorizonFrameStats, String> {
         let motion_state = self.view_state;
         if let Some(intent) = self.held_motion.advance(motion_state, elapsed) {
@@ -264,6 +270,11 @@ impl WorldExplorerSession {
                 .set_exact_painted_coverage(queue, snapshot, mode)?;
         } else {
             self.renderer.clear_exact_painted_coverage();
+        }
+        if let Some(snapshot) = tree_ownership {
+            self.renderer.set_tree_ownership(device, queue, snapshot)?;
+        } else {
+            self.renderer.clear_tree_ownership(device, queue)?;
         }
         let stats = match target {
             Some(target) => self.renderer.encode_to_target(
@@ -362,7 +373,8 @@ impl WorldExplorerSession {
              fixed_resident_bytes={} halo_bytes={} normal_height_bytes={} \
              vegetation_bytes={} allocation_slots={} \
              ready_slots={} pending={} vegetation_ready={} vegetation_pending={} \
-             tree_instances={} vegetation_source={:016x} vegetation_hash={:016x} \
+             tree_instances={} tree_suppressed={}:{} tree_missing={} tree_ownership={}:{} \
+             tree_exact={} tree_proxy={} vegetation_source={:016x} vegetation_hash={:016x} \
              vegetation_queue={} vegetation_compile_ms={:.2} finest_spacing={} \
              refills_total={} rebases_total={}",
             self.config.seed,
@@ -387,6 +399,13 @@ impl WorldExplorerSession {
             stats.map_or(0, |stats| stats.vegetation_ready_tiles),
             stats.map_or(0, |stats| stats.pending_vegetation_tiles),
             stats.map_or(0, |stats| stats.tree_instance_count),
+            stats.map_or(0, |stats| stats.tree_proxy_suppressed_instances),
+            stats.map_or(0, |stats| stats.tree_proxy_suppressed_records),
+            stats.map_or(0, |stats| stats.tree_proxy_missing_exact_records),
+            stats.map_or(0, |stats| stats.tree_ownership_generation),
+            stats.map_or(0, |stats| stats.tree_ownership_units),
+            stats.map_or(0, |stats| stats.exact_owned_tree_records),
+            stats.map_or(0, |stats| stats.proxy_owned_tree_records),
             stats.map_or(0, |stats| { stats.vegetation_service.source_fingerprint }),
             stats.map_or(0, |stats| stats.vegetation_service.record_hash),
             stats.map_or(0, |stats| stats.vegetation_service.queued_tiles),
