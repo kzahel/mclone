@@ -95,15 +95,57 @@ try {
   assertFixedReady(gesture, "raw pointer gesture");
   console.log(`World Explorer ${label} browser smoke: pointer forwarding ready`);
 
-  await page.keyboard.press("ArrowRight");
+  await twoContactStrafe(context, page, bounds);
   await page.waitForFunction(
-    (centerX) => globalThis.__MCLONE_WORLD_EXPLORER__?.report?.centerX !== centerX,
-    initial.centerX,
+    ([focusX, focusZ]) => {
+      const report = globalThis.__MCLONE_WORLD_EXPLORER__?.report;
+      return Math.abs(report?.focusX - focusX) > 0.001
+        || Math.abs(report?.focusZ - focusZ) > 0.001;
+    },
+    [gesture.focusX, gesture.focusZ],
+  );
+  const touch = await report(page);
+  assertFixedReady(touch, "two-contact strafe");
+  assertPresentationOnly(gesture, touch, "two-contact strafe");
+  if (Number.isInteger(touch.focusX) && Number.isInteger(touch.focusZ)) {
+    throw new Error(
+      `two-contact strafe lost fractional focus:\n${JSON.stringify(touch, null, 2)}`,
+    );
+  }
+  console.log(`World Explorer ${label} browser smoke: two-contact strafe ready`);
+
+  await page.waitForTimeout(100);
+  await canvas.focus();
+  const heldSamples = [];
+  await page.keyboard.down("ArrowRight");
+  await page.waitForFunction(
+    () => globalThis.__MCLONE_WORLD_EXPLORER__?.report?.heldMotion === true,
+  );
+  let heldFrame = await runtimeSnapshot(page);
+  heldSamples.push(heldFrame.report);
+  for (let sample = 0; sample < 4; sample += 1) {
+    await page.waitForFunction(
+      (frame) => globalThis.__MCLONE_WORLD_EXPLORER__?.frame > frame,
+      heldFrame.frame,
+    );
+    heldFrame = await runtimeSnapshot(page);
+    heldSamples.push(heldFrame.report);
+  }
+  await page.keyboard.up("ArrowRight");
+  await page.waitForFunction(
+    () => globalThis.__MCLONE_WORLD_EXPLORER__?.report?.heldMotion === false,
+  );
+  await page.waitForFunction(
+    (focusX) => globalThis.__MCLONE_WORLD_EXPLORER__?.report?.focusX > focusX,
+    touch.focusX,
   );
   await waitReady(page);
   const moved = await report(page);
-  assertFixedReady(moved, "keyboard movement");
-  console.log(`World Explorer ${label} browser smoke: movement ready`);
+  assertFixedReady(moved, "held keyboard movement");
+  assertHeldSamples(heldSamples, touch);
+  console.log(`World Explorer ${label} browser smoke: held movement ready`);
+  const movementCapture = `/tmp/mclone-world-explorer-web-${label}-movement.png`;
+  await canvas.screenshot({ path: movementCapture });
 
   await page.evaluate(() => {
     globalThis.__MCLONE_WORLD_EXPLORER__.session.recenter(-8193, -4097);
@@ -136,8 +178,13 @@ try {
   }
   const receipt = {
     artifacts: await artifactSizes(),
-    captures: { initial: initialCapture, teleport: finalCapture },
+    captures: {
+      initial: initialCapture,
+      movement: movementCapture,
+      teleport: finalCapture,
+    },
     gesture,
+    heldSamples,
     initial,
     launch: {
       headed: launch.headed,
@@ -148,6 +195,7 @@ try {
     negative,
     target: label,
     teleported,
+    touch,
   };
   const receiptPath = `/tmp/mclone-world-explorer-web-${label}-receipt.json`;
   await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
@@ -196,16 +244,86 @@ async function report(page) {
   }));
 }
 
+async function runtimeSnapshot(page) {
+  return await page.evaluate(() => ({
+    frame: globalThis.__MCLONE_WORLD_EXPLORER__.frame,
+    report: {
+      ...globalThis.__MCLONE_WORLD_EXPLORER__.report,
+    },
+  }));
+}
+
 function assertFixedReady(value, stage) {
   if (value.allocationSlots !== 160
       || value.readySlots !== value.allocationSlots
       || value.pendingRefills !== 0
       || value.drawnLevels !== 10
-      || value.fixedResidentBytes !== 86_551_040
+      || value.fixedResidentBytes !== 86_553_600
       || value.pendingVegetationTiles !== 0
       || value.residentBytes <= 0) {
     throw new Error(`${stage} is not fixed and ready:\n${JSON.stringify(value, null, 2)}`);
   }
+}
+
+function assertPresentationOnly(before, after, stage) {
+  if (after.revision !== before.revision
+      || after.totalRefills !== before.totalRefills
+      || after.totalRebases !== before.totalRebases
+      || after.allocationSlots !== before.allocationSlots) {
+    throw new Error(
+      `${stage} changed residency:\n`
+        + `${JSON.stringify({ before, after }, null, 2)}`,
+    );
+  }
+}
+
+function assertHeldSamples(samples, before) {
+  const moving = samples.filter((sample) => sample.focusX > before.focusX);
+  const distinct = new Set(moving.map((sample) => sample.focusX.toFixed(6)));
+  const deltas = moving.map((sample, index) => (
+    sample.focusX - (index === 0 ? before.focusX : moving[index - 1].focusX)
+  ));
+  if (distinct.size < 3
+      || moving.some((sample) => sample.focusZ !== before.focusZ)
+      || deltas.some((delta) => delta < 0.0 || delta > 200.0)) {
+    throw new Error(
+      `held movement was not smoothly frame-timed:\n`
+        + `${JSON.stringify({ before, deltas, samples }, null, 2)}`,
+    );
+  }
+}
+
+async function twoContactStrafe(context, page, bounds) {
+  const client = await context.newCDPSession(page);
+  const first = {
+    x: bounds.x + bounds.width * 0.42,
+    y: bounds.y + bounds.height * 0.48,
+    radiusX: 8,
+    radiusY: 8,
+    force: 1,
+    id: 1,
+  };
+  const second = {
+    ...first,
+    x: bounds.x + bounds.width * 0.58,
+    id: 2,
+  };
+  await client.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [first, second],
+  });
+  await client.send("Input.dispatchTouchEvent", {
+    type: "touchMove",
+    touchPoints: [
+      { ...first, x: first.x - 1 },
+      { ...second, x: second.x - 1 },
+    ],
+  });
+  await client.send("Input.dispatchTouchEvent", {
+    type: "touchEnd",
+    touchPoints: [],
+  });
+  await client.detach();
 }
 
 async function artifactSizes() {

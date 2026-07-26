@@ -213,6 +213,7 @@ impl ApplicationHandler for ExplorerApp {
                 };
                 match gpu.render() {
                     Ok(outcome) => {
+                        window.set_title(&gpu.title());
                         self.needs_redraw = outcome.needs_redraw;
                         event_loop.set_control_flow(if outcome.needs_redraw {
                             ControlFlow::Poll
@@ -322,21 +323,7 @@ impl WindowGpu {
             .present_modes
             .iter()
             .copied()
-            .find(|mode| *mode == wgpu::PresentMode::AutoNoVsync)
-            .or_else(|| {
-                capabilities
-                    .present_modes
-                    .iter()
-                    .copied()
-                    .find(|mode| *mode == wgpu::PresentMode::Immediate)
-            })
-            .or_else(|| {
-                capabilities
-                    .present_modes
-                    .iter()
-                    .copied()
-                    .find(|mode| *mode == wgpu::PresentMode::Mailbox)
-            })
+            .find(|mode| *mode == wgpu::PresentMode::Mailbox)
             .or_else(|| {
                 capabilities
                     .present_modes
@@ -344,6 +331,14 @@ impl WindowGpu {
                     .copied()
                     .find(|mode| *mode == wgpu::PresentMode::Fifo)
             })
+            .or_else(|| {
+                capabilities
+                    .present_modes
+                    .iter()
+                    .copied()
+                    .find(|mode| *mode == wgpu::PresentMode::AutoVsync)
+            })
+            .or_else(|| capabilities.present_modes.first().copied())
             .unwrap_or(wgpu::PresentMode::Fifo);
         let capture_path = options.window_capture.clone();
         let smoke_root = options.window_smoke_dir.clone();
@@ -367,7 +362,7 @@ impl WindowGpu {
                 .copied()
                 .unwrap_or(wgpu::CompositeAlphaMode::Auto),
             view_formats: vec![],
-            desired_maximum_frame_latency: 3,
+            desired_maximum_frame_latency: 2,
         };
         surface.configure(&device, &config);
         let mut terrain = ExplorerTerrain::new(&device, &queue, format, options.clone(), started)?;

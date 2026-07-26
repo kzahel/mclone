@@ -131,6 +131,7 @@ struct WebExplorerReport {
     coarse_ready: bool,
     target_ready: bool,
     needs_redraw: bool,
+    held_motion: bool,
 }
 
 #[wasm_bindgen(js_name = WebWorldExplorer)]
@@ -209,7 +210,12 @@ impl WebWorldExplorer {
             .map_err(js_error)?;
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
-        report_json(self.seed, self.session.view_state(), stats)
+        report_json(
+            self.seed,
+            self.session.view_state(),
+            self.session.has_held_motion(),
+            stats,
+        )
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -518,6 +524,7 @@ fn load_web_assets(
 fn report_json(
     seed: i64,
     state: WorldViewState,
+    held_motion: bool,
     stats: TerrainHorizonFrameStats,
 ) -> Result<String, JsValue> {
     serde_json::to_string(&WebExplorerReport {
@@ -560,6 +567,7 @@ fn report_json(
         coarse_ready: stats.coarse_ready,
         target_ready: stats.target_ready,
         needs_redraw: stats.needs_redraw,
+        held_motion,
     })
     .map_err(|error| {
         js_error(format!(
