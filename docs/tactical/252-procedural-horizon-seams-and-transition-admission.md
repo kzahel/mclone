@@ -1,6 +1,9 @@
 # Tactical 252: Procedural Horizon Seams And Transition Admission
 
-Status: proposed; diagnosed and deferred 2026-07-26.
+Status: active 2026-07-26. The original diagnosis predates Tacticals
+253–256; desktop and browser review after the shared vegetation-worker
+cutover confirmed the transition defect on both executors. Slice 0 is
+complete and Slice 1 is next.
 
 Topic: `procedural-horizon-clipmap`
 
@@ -22,8 +25,8 @@ clipmap for frame-time spikes:
 2. a one-frame coarse-terrain flash when several aligned levels advance
    together.
 
-This document records the diagnosis and likely solution boundaries. Runtime
-implementation is intentionally deferred.
+This document records the diagnosis, the selected implementation boundary,
+and the cross-host acceptance evidence.
 
 ## Reported Evidence
 
@@ -91,6 +94,15 @@ That fallback changes sampled geometry, material decisions, normals, and
 vegetation together. It can resemble a camera-height jump, but the Horizon
 camera target remains fixed at the overworld sea-level datum.
 
+Tactical
+[`256`](256-shared-horizon-vegetation-worker-topology.md) subsequently moved
+tree-record compilation behind the same shared coordinator on a native thread
+and browser Worker. Post-cutover review showed a second expression of the same
+premature-admission defect on both hosts: `set_view` immediately clears tree
+buffers in reassigned toroidal slots, while replacement products arrive
+asynchronously. A level can therefore be terrain-drawable for one frame
+without a complete vegetation representation.
+
 Likely implementation:
 
 - retain distinct requested and committed origins per level;
@@ -100,11 +112,62 @@ Likely implementation:
   the replacement strip is drawable; and
 - preserve bounded per-frame work and explicit stale-request cancellation.
 
+Terrain and vegetation do not need one monolithic commit barrier. Terrain
+should atomically switch from its previous complete origin to its next
+complete origin. Vegetation may retain the previous valid parent/committed
+representation across that terrain switch until the replacement child
+products are drawable, then switch without an uncovered frame. It must never
+draw old-source vegetation after a seed, profile, topology, content-stage, or
+compiler-source change.
+
 Increasing the dispatch budget or merely prioritizing fine tiles may conceal
 selected crossings, but it introduces device-dependent spikes or holes
 between noncontiguous ready levels. Neither is the durable XR-safe solution.
 
-## Acceptance For A Later Implementation
+## Implementation Order
+
+### Slice 0: executable contract and status repair
+
+Status: complete 2026-07-26.
+
+1. Correct the Tactical 253/256 completion status in the tactical index.
+2. Activate this tactical under the existing
+   `procedural-horizon-clipmap` topic.
+3. Refine the original terrain-only staging direction with the now-proven
+   asynchronous vegetation readiness and source-lifetime contract.
+4. Keep platform executors, forest algorithms, and representation thresholds
+   unchanged.
+
+### Slice 1: requested, staged, and committed admission
+
+1. Give every level explicit requested and committed origins.
+2. Preserve currently drawable slot resources while entering strips are
+   generated into bounded staging resources.
+3. Commit a level and its fine/coarse hole ownership atomically.
+4. Retain a valid vegetation representation until replacement products are
+   drawable, with source reset as the only immediate invalidation.
+5. Add deterministic constrained-budget tests at ordinary, aligned,
+   negative, diagonal, and teleport transitions.
+
+### Slice 2: shared normal halo and fine/coarse seam policy
+
+1. Evaluate one world-space sample beyond every drawn tile edge.
+2. Derive same-LOD edge normals from identical absolute neighbor samples.
+3. Keep halo values out of drawn topology and report their fixed cost.
+4. Select and prove a bounded fine/coarse normal policy without alpha
+   crossfades or device-dependent work spikes.
+
+### Slice 3: cross-host closeout
+
+1. Add requested/staged/committed transition diagnostics.
+2. Exercise the constrained aligned-boundary transition on native and
+   browser, including vegetation-worker delay.
+3. Inspect stationary, movement, zoom, negative, diagonal, and teleport
+   pixels.
+4. Record memory/work deltas and close this tactical without starting game
+   scene integration.
+
+## Acceptance
 
 - Same-LOD borders have matching height-derived normals under a diagnostic
   seam visualization and no visible rectangular lighting grid.
@@ -116,6 +179,10 @@ between noncontiguous ready levels. Neither is the durable XR-safe solution.
   continuous fine coverage under an intentionally constrained refill budget.
 - Diagnostics distinguish requested, staged, and committed origins and report
   atomic level admissions.
+- Desktop and browser retain continuous forest presentation through the same
+  transition sequence despite their different executor latency.
+- Old-source vegetation is removed immediately; same-source parent or
+  committed vegetation remains until replacement records are drawable.
 - Native, headed-browser, Android, and XR-relevant frame admission retain
   bounded work; no acceptance relies on raising the dispatch budget until the
   defect disappears.
