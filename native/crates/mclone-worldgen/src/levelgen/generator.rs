@@ -454,6 +454,10 @@ impl<B: NoiseBiomeSource> NoiseBasedChunkGenerator<B> {
         self.min_y
     }
 
+    pub(crate) const fn lod_sea_level(&self) -> i32 {
+        self.sea_level
+    }
+
     pub(crate) fn resolve_terrain_block(&self, y: i32, noise: f64) -> u8 {
         let mut density = (noise / 200.0).clamp(-1.0, 1.0);
         density = density / 2.0 - density * density * density / 24.0;
@@ -464,6 +468,15 @@ impl<B: NoiseBiomeSource> NoiseBasedChunkGenerator<B> {
         } else {
             self.settings.default_fluid()
         }
+    }
+
+    pub(crate) fn lod_surface_noise(&self, world_x: i32, world_z: i32) -> f64 {
+        self.surface_noise.get_surface_noise_value(
+            f64::from(world_x) * 0.0625,
+            f64::from(world_z) * 0.0625,
+            0.0625,
+            f64::from(world_x.rem_euclid(CHUNK_WIDTH)) * 0.0625,
+        ) * 15.0
     }
 
     fn assert_compatible_chunk(&self, chunk: &MutableChunkBlockBuffer) {

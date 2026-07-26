@@ -47,6 +47,7 @@ export interface TerrainLabRenderReport {
   centerX: number;
   centerZ: number;
   requestedDetail: string;
+  surfaceQuality: string;
   requestedSpacing: number;
   effectiveSpacing: number;
   publishedSpacing: number;
@@ -251,6 +252,7 @@ interface TerrainLabExternalCpuTileRequest {
   tileX: number;
   tileZ: number;
   sampleSpacing: number;
+  surfaceQuality: "basic" | "inferred";
 }
 
 interface WorkerBackedTerrainLab extends TerrainLab {
@@ -261,6 +263,7 @@ interface WorkerBackedTerrainLab extends TerrainLab {
     tileX: number,
     tileZ: number,
     sampleSpacing: number,
+    surfaceQuality: string,
     samples: Float32Array,
     compileMs: number,
   ): boolean;
@@ -270,6 +273,7 @@ interface WorkerBackedTerrainLab extends TerrainLab {
     tileX: number,
     tileZ: number,
     sampleSpacing: number,
+    surfaceQuality: string,
   ): void;
   nextMacroTileRequest(): string | undefined;
   acceptMacroTile(
@@ -278,6 +282,7 @@ interface WorkerBackedTerrainLab extends TerrainLab {
     tileX: number,
     tileZ: number,
     sampleSpacing: number,
+    surfaceQuality: string,
     samples: Float32Array,
     compileMs: number,
   ): boolean;
@@ -287,6 +292,7 @@ interface WorkerBackedTerrainLab extends TerrainLab {
     tileX: number,
     tileZ: number,
     sampleSpacing: number,
+    surfaceQuality: string,
   ): void;
 }
 
@@ -609,6 +615,7 @@ export function TerrainCanvas({
               state.centerZ,
               state.blocksAcross,
               String(state.detail),
+              state.surfaceQuality,
               Math.max(1, Math.round(panel.width)),
               Math.max(1, Math.round(panel.height)),
               maxVisibleTilesPerAxis,
@@ -863,6 +870,7 @@ function acceptWorkerTile(
     result.tileX,
     result.tileZ,
     result.sampleSpacing,
+    result.surfaceQuality,
     result.samples,
     result.compileMs,
   );
@@ -879,6 +887,7 @@ function rejectWorkerTile(
     || error.tileX === undefined
     || error.tileZ === undefined
     || error.sampleSpacing === undefined
+    || error.surfaceQuality === undefined
   ) {
     return;
   }
@@ -891,6 +900,7 @@ function rejectWorkerTile(
     error.tileX,
     error.tileZ,
     error.sampleSpacing,
+    error.surfaceQuality,
   );
 }
 

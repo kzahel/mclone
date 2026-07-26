@@ -18,7 +18,7 @@ use mclone_worldgen::{
     terrain_preview::{
         TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS, TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION,
         TerrainPreviewContentStage, TerrainPreviewProfile, TerrainPreviewReferenceGrid,
-        terrain_preview_field_revision,
+        TerrainPreviewSurfaceQuality, terrain_preview_field_revision,
     },
 };
 use serde::Serialize;
@@ -54,7 +54,10 @@ impl TerrainLabVanillaLodCompiler {
         tile_x: i32,
         tile_z: i32,
         sample_spacing: u32,
+        surface_quality: String,
     ) -> Result<TerrainLabVanillaLodPayload, JsValue> {
+        let surface_quality =
+            TerrainPreviewSurfaceQuality::parse_label(&surface_quality).map_err(js_error)?;
         let tile = TerrainViewportTileId {
             profile: TerrainPreviewProfile::VanillaOverworld,
             seed: self.sampler.seed(),
@@ -62,6 +65,7 @@ impl TerrainLabVanillaLodCompiler {
             tile_z,
             sample_spacing,
             content_stage: TerrainPreviewContentStage::Surface,
+            surface_quality,
         };
         let generated_before = self.sampler.generated_density_columns();
         let reused_before = self.sampler.reused_density_columns();
@@ -139,7 +143,10 @@ impl TerrainLabVanillaMacroCompiler {
         tile_x: i32,
         tile_z: i32,
         sample_spacing: u32,
+        surface_quality: String,
     ) -> Result<TerrainLabVanillaLodPayload, JsValue> {
+        let surface_quality =
+            TerrainPreviewSurfaceQuality::parse_label(&surface_quality).map_err(js_error)?;
         let tile = TerrainViewportTileId {
             profile: TerrainPreviewProfile::VanillaOverworld,
             seed: self.sampler.seed(),
@@ -147,6 +154,7 @@ impl TerrainLabVanillaMacroCompiler {
             tile_z,
             sample_spacing,
             content_stage: TerrainPreviewContentStage::Surface,
+            surface_quality,
         };
         let generated_before = self.sampler.generated_density_columns();
         let reused_before = self.sampler.reused_density_columns();
@@ -186,6 +194,7 @@ struct TerrainLabExternalCpuTileRequest {
     tile_x: i32,
     tile_z: i32,
     sample_spacing: u32,
+    surface_quality: &'static str,
 }
 
 #[derive(Serialize)]
@@ -217,6 +226,7 @@ struct TerrainLabRenderReport<'a> {
     center_x: i32,
     center_z: i32,
     requested_detail: &'a str,
+    surface_quality: &'static str,
     requested_spacing: u32,
     effective_spacing: u32,
     published_spacing: u32,
@@ -471,6 +481,7 @@ impl TerrainLab {
         center_z: i32,
         blocks_across: u32,
         detail: String,
+        surface_quality: String,
         panel_width_css: u32,
         panel_height_css: u32,
         max_visible_tiles_per_axis: u32,
@@ -520,6 +531,8 @@ impl TerrainLab {
         let camera = TerrainPreviewCamera::new(camera_yaw, camera_pitch, projection_kind)
             .map_err(js_error)?;
         let viewport_detail = parse_viewport_detail(&detail).map_err(js_error)?;
+        let surface_quality =
+            TerrainPreviewSurfaceQuality::parse_label(&surface_quality).map_err(js_error)?;
         let plan = plan_terrain_viewport(TerrainViewportRequest {
             profile,
             seed: seed_value,
@@ -531,6 +544,7 @@ impl TerrainLab {
             detail: viewport_detail,
             max_visible_tiles_per_axis,
             content_stage,
+            surface_quality,
         })
         .map_err(js_error)?;
         let revision = u64::from(revision);
@@ -599,6 +613,7 @@ impl TerrainLab {
             center_x,
             center_z,
             &detail,
+            surface_quality.label(),
             source,
             view,
             layer,
@@ -644,6 +659,7 @@ impl TerrainLab {
             tile_x: request.tile.tile_x,
             tile_z: request.tile.tile_z,
             sample_spacing: request.tile.sample_spacing,
+            surface_quality: request.tile.surface_quality.label(),
         })
         .map(Some)
     }
@@ -657,6 +673,7 @@ impl TerrainLab {
         tile_x: i32,
         tile_z: i32,
         sample_spacing: u32,
+        surface_quality: String,
         samples: js_sys::Float32Array,
         compile_ms: f64,
     ) -> Result<bool, JsValue> {
@@ -664,6 +681,8 @@ impl TerrainLab {
             .trim()
             .parse::<i64>()
             .map_err(|error| js_error(format!("invalid signed 64-bit seed {seed:?}: {error}")))?;
+        let surface_quality =
+            TerrainPreviewSurfaceQuality::parse_label(&surface_quality).map_err(js_error)?;
         let tile = TerrainViewportTileId {
             profile: TerrainPreviewProfile::VanillaOverworld,
             seed,
@@ -671,6 +690,7 @@ impl TerrainLab {
             tile_z,
             sample_spacing,
             content_stage: TerrainPreviewContentStage::Surface,
+            surface_quality,
         };
         let reference =
             TerrainPreviewReferenceGrid::from_packed_f32(tile.preview_request(), &samples.to_vec())
@@ -698,11 +718,14 @@ impl TerrainLab {
         tile_x: i32,
         tile_z: i32,
         sample_spacing: u32,
+        surface_quality: String,
     ) -> Result<(), JsValue> {
         let seed = seed
             .trim()
             .parse::<i64>()
             .map_err(|error| js_error(format!("invalid signed 64-bit seed {seed:?}: {error}")))?;
+        let surface_quality =
+            TerrainPreviewSurfaceQuality::parse_label(&surface_quality).map_err(js_error)?;
         self.renderer
             .reject_external_cpu_tile(TerrainViewportExternalCpuRequest {
                 revision: u64::from(revision),
@@ -713,6 +736,7 @@ impl TerrainLab {
                     tile_z,
                     sample_spacing,
                     content_stage: TerrainPreviewContentStage::Surface,
+                    surface_quality,
                 },
             });
         Ok(())
@@ -730,6 +754,7 @@ impl TerrainLab {
             tile_x: request.tile.tile_x,
             tile_z: request.tile.tile_z,
             sample_spacing: request.tile.sample_spacing,
+            surface_quality: request.tile.surface_quality.label(),
         })
         .map(Some)
     }
@@ -743,6 +768,7 @@ impl TerrainLab {
         tile_x: i32,
         tile_z: i32,
         sample_spacing: u32,
+        surface_quality: String,
         samples: js_sys::Float32Array,
         compile_ms: f64,
     ) -> Result<bool, JsValue> {
@@ -750,6 +776,8 @@ impl TerrainLab {
             .trim()
             .parse::<i64>()
             .map_err(|error| js_error(format!("invalid signed 64-bit seed {seed:?}: {error}")))?;
+        let surface_quality =
+            TerrainPreviewSurfaceQuality::parse_label(&surface_quality).map_err(js_error)?;
         let tile = TerrainViewportTileId {
             profile: TerrainPreviewProfile::VanillaOverworld,
             seed,
@@ -757,6 +785,7 @@ impl TerrainLab {
             tile_z,
             sample_spacing,
             content_stage: TerrainPreviewContentStage::Surface,
+            surface_quality,
         };
         let macro_grid =
             TerrainPreviewReferenceGrid::from_packed_f32(tile.preview_request(), &samples.to_vec())
@@ -784,11 +813,14 @@ impl TerrainLab {
         tile_x: i32,
         tile_z: i32,
         sample_spacing: u32,
+        surface_quality: String,
     ) -> Result<(), JsValue> {
         let seed = seed
             .trim()
             .parse::<i64>()
             .map_err(|error| js_error(format!("invalid signed 64-bit seed {seed:?}: {error}")))?;
+        let surface_quality =
+            TerrainPreviewSurfaceQuality::parse_label(&surface_quality).map_err(js_error)?;
         self.renderer
             .reject_external_macro_tile(TerrainViewportExternalCpuRequest {
                 revision: u64::from(revision),
@@ -799,6 +831,7 @@ impl TerrainLab {
                     tile_z,
                     sample_spacing,
                     content_stage: TerrainPreviewContentStage::Surface,
+                    surface_quality,
                 },
             });
         Ok(())
@@ -1330,6 +1363,7 @@ fn render_report<'a>(
     center_x: i32,
     center_z: i32,
     requested_detail: &'a str,
+    surface_quality: &'static str,
     source: &'static str,
     view: &'static str,
     layer: &'static str,
@@ -1360,6 +1394,7 @@ fn render_report<'a>(
         center_x,
         center_z,
         requested_detail,
+        surface_quality,
         requested_spacing: stats.requested_spacing,
         effective_spacing: stats.effective_spacing,
         published_spacing: stats.published_spacing,

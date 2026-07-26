@@ -273,6 +273,7 @@ export function App(): React.JSX.Element {
       data-landform-agreement={comparison?.landformKindAgreement ?? ""}
       data-stage={state.contentStage}
       data-profile={state.profile}
+      data-surface-quality={renderReport?.surfaceQuality ?? ""}
       data-visual-profile={state.visualProfile}
       data-texture-presentation={primaryTexturePresentation}
       data-compare-visual-profile={state.compareVisualProfile}
@@ -415,6 +416,7 @@ export function App(): React.JSX.Element {
               profile={state.profile}
               visualProfile={state.visualProfile}
               panes={state.panes}
+              surfaceQuality={state.surfaceQuality}
             />
           </div>
           <div className="mapToolbar" data-testid="viewport-controls">
@@ -459,6 +461,23 @@ export function App(): React.JSX.Element {
                     1:{spacing} · {spacing} block{spacing === 1 ? "" : "s"} per sample
                   </option>
                 ))}
+              </select>
+            </label>
+            <label className="fieldLabel compactField">
+              <span>Surface detail</span>
+              <select
+                aria-label="Terrain surface detail"
+                value={state.surfaceQuality}
+                onChange={(event) =>
+                  patchState({
+                    surfaceQuality: event.target.value === "inferred"
+                      ? "inferred"
+                      : "basic",
+                  })
+                }
+              >
+                <option value="basic">Basic · biome tops</option>
+                <option value="inferred">Inferred · surface builders</option>
               </select>
             </label>
             <div className="mapZoom" aria-label="Viewport zoom controls">
@@ -1214,10 +1233,12 @@ function WorkspaceGuide({
   profile,
   visualProfile,
   panes,
+  surfaceQuality,
 }: {
   profile: TerrainLabProfile;
   visualProfile: TerrainLabVisualProfile;
   panes: TerrainLabPane[];
+  surfaceQuality: TerrainLabState["surfaceQuality"];
 }): React.JSX.Element {
   const exact = panes.includes("canonical");
   const cpu = panes.includes("cpu");
@@ -1244,6 +1265,9 @@ function WorkspaceGuide({
             : gpu
               ? "GPU LOD stays resident for broad visual coverage. "
               : ""}
+        {surfaceQuality === "inferred"
+          ? "Inferred surface detail adds one builder-noise lookup per retained vanilla point. "
+          : "Basic surface detail uses the already-selected biome top material only. "}
         Every visible pane shares seed, center, scale, camera, and navigation.
       </span>
     </div>

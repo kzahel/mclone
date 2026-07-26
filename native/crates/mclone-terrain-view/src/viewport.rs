@@ -3,7 +3,7 @@ use mclone_worldgen::{
     terrain_preview::{
         TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS, TERRAIN_PREVIEW_MAX_SAMPLE_SPACING,
         TERRAIN_PREVIEW_MIN_SAMPLE_SPACING, TerrainPreviewContentStage, TerrainPreviewProfile,
-        TerrainPreviewRequest,
+        TerrainPreviewRequest, TerrainPreviewSurfaceQuality,
     },
 };
 
@@ -32,6 +32,7 @@ pub struct TerrainViewportRequest {
     pub detail: TerrainViewportDetail,
     pub max_visible_tiles_per_axis: u32,
     pub content_stage: TerrainPreviewContentStage,
+    pub surface_quality: TerrainPreviewSurfaceQuality,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -42,6 +43,7 @@ pub struct TerrainViewportTileId {
     pub tile_z: i32,
     pub sample_spacing: u32,
     pub content_stage: TerrainPreviewContentStage,
+    pub surface_quality: TerrainPreviewSurfaceQuality,
 }
 
 impl TerrainViewportTileId {
@@ -77,6 +79,7 @@ impl TerrainViewportTileId {
             cells_per_axis: TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS,
             topology: McloneOverworldSamplingTopology::Unbounded,
             content_stage: self.content_stage,
+            surface_quality: self.surface_quality,
         }
     }
 }
@@ -214,6 +217,7 @@ pub fn plan_terrain_viewport(
             view_height_blocks,
             spacing,
             request.content_stage,
+            request.surface_quality,
         )?);
         if spacing == effective_spacing {
             break;
@@ -288,6 +292,7 @@ fn plan_level(
     height_blocks: u32,
     sample_spacing: u32,
     content_stage: TerrainPreviewContentStage,
+    surface_quality: TerrainPreviewSurfaceQuality,
 ) -> Result<TerrainViewportLevel, String> {
     let footprint = TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS
         .checked_mul(sample_spacing)
@@ -310,6 +315,7 @@ fn plan_level(
         max_tile_z,
         sample_spacing,
         content_stage,
+        surface_quality,
         center_tile_x,
         center_tile_z,
     )?;
@@ -322,6 +328,7 @@ fn plan_level(
         max_tile_z.saturating_add(TERRAIN_VIEWPORT_PRELOAD_MARGIN_TILES),
         sample_spacing,
         content_stage,
+        surface_quality,
         center_tile_x,
         center_tile_z,
     )?;
@@ -374,6 +381,7 @@ fn ordered_tiles(
     max_tile_z: i32,
     sample_spacing: u32,
     content_stage: TerrainPreviewContentStage,
+    surface_quality: TerrainPreviewSurfaceQuality,
     center_tile_x: i32,
     center_tile_z: i32,
 ) -> Result<Vec<TerrainViewportTileId>, String> {
@@ -394,6 +402,7 @@ fn ordered_tiles(
                 tile_z,
                 sample_spacing,
                 content_stage,
+                surface_quality,
             });
         }
     }
@@ -433,6 +442,7 @@ mod tests {
             detail,
             max_visible_tiles_per_axis: TERRAIN_VIEWPORT_MAX_VISIBLE_TILES_PER_AXIS,
             content_stage: TerrainPreviewContentStage::Base,
+            surface_quality: TerrainPreviewSurfaceQuality::Basic,
         }
     }
 
@@ -513,6 +523,22 @@ mod tests {
     }
 
     #[test]
+    fn surface_quality_is_part_of_tile_identity() {
+        let basic = plan_terrain_viewport(request(TerrainViewportDetail::Manual(8))).unwrap();
+        let mut inferred_request = request(TerrainViewportDetail::Manual(8));
+        inferred_request.surface_quality = TerrainPreviewSurfaceQuality::Inferred;
+        let inferred = plan_terrain_viewport(inferred_request).unwrap();
+
+        let basic_tile = basic.target_level().visible_tiles[0];
+        let inferred_tile = inferred.target_level().visible_tiles[0];
+        assert_ne!(basic_tile, inferred_tile);
+        assert_eq!(
+            inferred_tile.preview_request().surface_quality,
+            TerrainPreviewSurfaceQuality::Inferred
+        );
+    }
+
+    #[test]
     fn negative_tiles_produce_exact_preview_origins() {
         let tile = TerrainViewportTileId {
             profile: TerrainPreviewProfile::McloneOverworldV1,
@@ -521,6 +547,7 @@ mod tests {
             tile_z: -1,
             sample_spacing: 16,
             content_stage: TerrainPreviewContentStage::Hydrology,
+            surface_quality: TerrainPreviewSurfaceQuality::Basic,
         };
         assert_eq!(tile.min_x(), -2_048);
         assert_eq!(tile.min_z(), -1_024);

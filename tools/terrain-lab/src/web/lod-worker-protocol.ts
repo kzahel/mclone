@@ -13,6 +13,7 @@ export interface LodWorkerCompile {
   tileX: number;
   tileZ: number;
   sampleSpacing: number;
+  surfaceQuality: "basic" | "inferred";
 }
 
 export type LodWorkerRequest = LodWorkerInit | LodWorkerCompile;
@@ -30,6 +31,7 @@ export interface LodWorkerResult {
   tileX: number;
   tileZ: number;
   sampleSpacing: number;
+  surfaceQuality: "basic" | "inferred";
   compileMs: number;
   generatedDensityColumns: number;
   reusedDensityColumns: number;
@@ -45,6 +47,7 @@ export interface LodWorkerError {
   tileX?: number;
   tileZ?: number;
   sampleSpacing?: number;
+  surfaceQuality?: "basic" | "inferred";
   message: string;
 }
 

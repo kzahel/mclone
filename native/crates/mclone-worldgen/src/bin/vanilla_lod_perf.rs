@@ -7,7 +7,7 @@ use mclone_worldgen::levelgen::{
 };
 use mclone_worldgen::terrain_preview::{
     TerrainPreviewComparison, TerrainPreviewContentStage, TerrainPreviewProfile,
-    TerrainPreviewReferenceGrid, TerrainPreviewRequest,
+    TerrainPreviewReferenceGrid, TerrainPreviewRequest, TerrainPreviewSurfaceQuality,
 };
 
 fn main() {
@@ -26,7 +26,8 @@ fn run() -> Result<(), String> {
         config.spacing,
     )
     .with_profile(TerrainPreviewProfile::VanillaOverworld)
-    .with_content_stage(TerrainPreviewContentStage::Surface);
+    .with_content_stage(TerrainPreviewContentStage::Surface)
+    .with_surface_quality(config.surface_quality);
     request.cells_per_axis = config.cells_per_axis;
     request.validate()?;
 
@@ -44,17 +45,34 @@ fn run() -> Result<(), String> {
     )?;
     let macro_ms = macro_start.elapsed().as_secs_f64() * 1_000.0;
     let comparison = TerrainPreviewComparison::compare(&exact, macro_grid.samples())?;
+    let exact_changed_materials = exact
+        .samples()
+        .iter()
+        .filter(|sample| {
+            !sample.is_water()
+                && sample.visible_surface_material() != sample.surface_recipe.round() as u8
+        })
+        .count();
+    let macro_changed_materials = macro_grid
+        .samples()
+        .iter()
+        .filter(|sample| {
+            !sample.is_water()
+                && sample.visible_surface_material() != sample.surface_recipe.round() as u8
+        })
+        .count();
 
     println!(
         concat!(
             "{{\"seed\":{},\"center_x\":{},\"center_z\":{},\"spacing\":{},",
-            "\"cells_per_axis\":{},\"sample_count\":{},",
+            "\"cells_per_axis\":{},\"sample_count\":{},\"surface_quality\":\"{}\",",
             "\"exact_revision\":\"{}\",\"macro_revision\":\"{}\",",
             "\"macro_vertical_cell_step\":{},\"exact_ms\":{:.3},\"macro_ms\":{:.3},",
             "\"speedup\":{:.3},\"solid_mean_error\":{:.3},\"solid_p95_error\":{:.3},",
             "\"solid_max_error\":{:.3},\"display_mean_error\":{:.3},",
             "\"display_p95_error\":{:.3},\"display_max_error\":{:.3},",
-            "\"water_agreement\":{:.6}}}"
+            "\"water_agreement\":{:.6},\"visible_material_agreement\":{:.6},",
+            "\"exact_changed_land_materials\":{},\"macro_changed_land_materials\":{}}}"
         ),
         config.seed,
         config.center_x,
@@ -62,6 +80,7 @@ fn run() -> Result<(), String> {
         config.spacing,
         config.cells_per_axis,
         comparison.sample_count,
+        config.surface_quality.label(),
         VANILLA_OVERWORLD_LOD_REVISION,
         VANILLA_OVERWORLD_MACRO_LOD_REVISION,
         VANILLA_OVERWORLD_MACRO_VERTICAL_CELL_STEP,
@@ -75,6 +94,9 @@ fn run() -> Result<(), String> {
         comparison.p95_absolute_display_error,
         comparison.max_absolute_display_error,
         comparison.water_presence_agreement,
+        comparison.visible_surface_material_agreement,
+        exact_changed_materials,
+        macro_changed_materials,
     );
     Ok(())
 }
@@ -86,6 +108,7 @@ struct Config {
     center_z: i32,
     spacing: u32,
     cells_per_axis: u32,
+    surface_quality: TerrainPreviewSurfaceQuality,
 }
 
 impl Config {
@@ -96,6 +119,7 @@ impl Config {
             center_z: 0,
             spacing: 32,
             cells_per_axis: 64,
+            surface_quality: TerrainPreviewSurfaceQuality::Basic,
         };
         let mut args = args.into_iter();
         while let Some(argument) = args.next() {
@@ -105,6 +129,11 @@ impl Config {
                 "--center-z" => config.center_z = parse_next(&mut args, "--center-z")?,
                 "--spacing" => config.spacing = parse_next(&mut args, "--spacing")?,
                 "--cells" => config.cells_per_axis = parse_next(&mut args, "--cells")?,
+                "--surface-quality" => {
+                    config.surface_quality = TerrainPreviewSurfaceQuality::parse_label(
+                        &args.next().ok_or("--surface-quality requires a value")?,
+                    )?
+                }
                 "--help" | "-h" => return Err(usage()),
                 _ => return Err(format!("unknown argument {argument}\n{}", usage())),
             }
@@ -125,6 +154,6 @@ where
 
 fn usage() -> String {
     "usage: vanilla_lod_perf [--seed N] [--center-x N] [--center-z N] \
-     [--spacing N] [--cells N]"
+     [--spacing N] [--cells N] [--surface-quality basic|inferred]"
         .to_owned()
 }

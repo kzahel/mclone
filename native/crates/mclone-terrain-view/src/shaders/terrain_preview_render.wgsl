@@ -53,6 +53,8 @@ struct VertexOutput {
     @location(4) @interpolate(flat) textured: u32,
     @location(5) river: vec4<f32>,
     @location(6) semantics: vec4<f32>,
+    @location(7) world_position: vec3<f32>,
+    @location(8) @interpolate(flat) biome: u32,
 };
 
 fn grid_corner(vertex_in_cell: u32) -> vec2<u32> {
@@ -98,11 +100,85 @@ fn selected_sample(index: u32, instance_index: u32) -> TerrainPreviewSample {
     return sample;
 }
 
+fn preview_profile() -> u32 {
+    return params.content_stage_flags.w & 1u;
+}
+
+fn surface_quality() -> u32 {
+    return params.content_stage_flags.w >> 1u;
+}
+
+fn rgb8(color: u32) -> vec3<f32> {
+    return vec3<f32>(
+        f32((color >> 16u) & 255u),
+        f32((color >> 8u) & 255u),
+        f32(color & 255u),
+    ) / 255.0;
+}
+
+fn vanilla_grass_color(biome: u32) -> vec3<f32> {
+    if biome == 0u || biome == 7u || biome == 24u
+        || (biome >= 44u && biome <= 50u) {
+        return rgb8(0x8eb971u);
+    }
+    if biome == 2u || biome == 17u || biome == 130u
+        || biome == 35u || biome == 36u || biome == 163u || biome == 164u {
+        return rgb8(0xb5b755u);
+    }
+    if biome == 3u || biome == 20u || biome == 25u || biome == 26u
+        || biome == 34u || biome == 131u || biome == 162u {
+        return rgb8(0x8ab689u);
+    }
+    if biome == 4u || biome == 18u || biome == 132u {
+        return rgb8(0x79c05au);
+    }
+    if biome == 5u || biome == 19u || biome == 30u || biome == 31u
+        || biome == 32u || biome == 33u || biome == 133u || biome == 158u
+        || biome == 160u || biome == 161u {
+        return rgb8(0x86b783u);
+    }
+    if biome == 6u || biome == 134u {
+        return rgb8(0x647139u);
+    }
+    if biome == 10u || biome == 11u || biome == 12u || biome == 13u
+        || biome == 140u {
+        return rgb8(0x80b497u);
+    }
+    if biome == 14u || biome == 15u {
+        return rgb8(0x55c93fu);
+    }
+    if (biome >= 21u && biome <= 23u) || biome == 149u || biome == 151u
+        || biome == 168u || biome == 169u {
+        return rgb8(0x59c93cu);
+    }
+    if (biome >= 27u && biome <= 28u) || biome == 155u || biome == 156u {
+        return rgb8(0x88bb67u);
+    }
+    if biome == 29u || biome == 157u {
+        return rgb8(0x507a32u);
+    }
+    if (biome >= 37u && biome <= 39u)
+        || (biome >= 165u && biome <= 167u) {
+        return rgb8(0x90814du);
+    }
+    return rgb8(0x91bd59u);
+}
+
+fn vanilla_mountain_exposure_biome(biome: u32) -> bool {
+    return biome == 3u || biome == 20u || biome == 34u
+        || biome == 131u || biome == 162u
+        || biome == 163u || biome == 164u;
+}
+
 fn terrain_color(sample: TerrainPreviewSample, light: f32) -> vec3<f32> {
     let surface_y = sample.terrain.x;
     let temperature = sample.climate.x;
     let moisture = sample.climate.y;
-    let material = u32(round(sample.large_fields.w));
+    let material = u32(round(select(
+        sample.large_fields.w,
+        sample.hydrology_detail.w,
+        surface_quality() >= 1u,
+    )));
     if material == 2u {
         let depth = clamp((63.0 - surface_y) / 52.0, 0.0, 1.0);
         return mix(vec3<f32>(0.16, 0.55, 0.68), vec3<f32>(0.025, 0.17, 0.34), depth) * light;
@@ -110,17 +186,38 @@ fn terrain_color(sample: TerrainPreviewSample, light: f32) -> vec3<f32> {
     if material == 1u {
         return vec3<f32>(0.48, 0.49, 0.47) * light;
     }
+    if material == 5u {
+        return vec3<f32>(0.48, 0.36, 0.23) * light;
+    }
     if material == 6u {
         return vec3<f32>(0.82, 0.76, 0.53) * light;
     }
     if material == 7u {
         return vec3<f32>(0.47, 0.46, 0.43) * light;
     }
-    if material == 8u {
+    if material == 8u || material == 40u {
         return vec3<f32>(0.92, 0.95, 0.96) * light;
     }
     if material == 13u {
         return vec3<f32>(0.45, 0.35, 0.23) * light;
+    }
+    if material == 14u {
+        return vec3<f32>(0.35, 0.27, 0.16) * light;
+    }
+    if material == 15u {
+        return vec3<f32>(0.48, 0.39, 0.48) * light;
+    }
+    if material == 38u {
+        return vec3<f32>(0.76, 0.34, 0.12) * light;
+    }
+    if material >= 16u && material <= 32u {
+        return vec3<f32>(0.62, 0.36, 0.25) * light;
+    }
+    if material != 4u {
+        return vec3<f32>(0.52, 0.48, 0.39) * light;
+    }
+    if preview_profile() == 1u {
+        return vanilla_grass_color(u32(round(sample.semantics.y))) * light;
     }
     let dry = vec3<f32>(0.63, 0.54, 0.29);
     let wet = vec3<f32>(0.17, 0.48, 0.25);
@@ -268,7 +365,7 @@ fn sample_color(
     }
     if layer == 7u {
         let biome = u32(round(sample.semantics.y));
-        if params.content_stage_flags.w == 1u {
+        if preview_profile() == 1u {
             return vanilla_biome_color(biome) * light;
         }
         let colors = array<vec3<f32>, 8>(
@@ -284,7 +381,7 @@ fn sample_color(
         return colors[min(biome, 7u)] * light;
     }
     if layer == 8u {
-        if params.content_stage_flags.w == 1u {
+        if preview_profile() == 1u {
             return terrain_color(sample, light);
         }
         let recipe = clamp(sample.semantics.w / 8.0, 0.0, 1.0);
@@ -437,14 +534,14 @@ fn vertex_main(
     out.world_xz = vec2<f32>(f32(world_x), f32(world_z));
     out.light = light;
     out.material = u32(round(select(
-        sample.hydrology_detail.w,
         sample.large_fields.w,
-        params.content_stage_flags.x == 0u,
+        sample.hydrology_detail.w,
+        surface_quality() >= 1u && params.content_stage_flags.x > 0u,
     )));
     out.textured = select(
         0u,
         1u,
-        params.layer_samples_size.x == 0u && params.content_stage_flags.w == 0u,
+        params.layer_samples_size.x == 0u && preview_profile() == 0u,
     );
     out.river = vec4<f32>(
         sample.hydrology.x,
@@ -458,6 +555,12 @@ fn vertex_main(
         sample.semantics.x,
         select(0.0, sample.forest_summary.x, params.content_stage_flags.x >= 4u),
     );
+    out.world_position = vec3<f32>(
+        f32(world_x),
+        sample.terrain.y + 1.0,
+        f32(world_z),
+    );
+    out.biome = u32(round(sample.semantics.y));
     return out;
 }
 
@@ -476,6 +579,18 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let blocks_per_pixel = max(length(world_dx), length(world_dy));
     let river_anti_alias = max(fwidth(input.river.x), blocks_per_pixel * 0.35);
     var color = input.color;
+    let face_normal = normalize(cross(
+        dpdx(input.world_position),
+        dpdy(input.world_position),
+    ));
+    let steep_mountain_face = abs(face_normal.y) < 0.80
+        && vanilla_mountain_exposure_biome(input.biome);
+    let grass_family = input.material == 4u || input.material == 5u
+        || input.material == 13u || input.material == 14u;
+    if preview_profile() == 1u && surface_quality() >= 1u
+        && steep_mountain_face && grass_family {
+        color = vec3<f32>(0.48, 0.49, 0.47) * input.light;
+    }
     if input.textured != 0u && input.material < 256u {
         let sprite = material_uvs.values[input.material];
         let sprite_size = sprite.zw - sprite.xy;
@@ -500,7 +615,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     }
     if input.textured != 0u
         && params.content_stage_flags.x >= 1u
-        && params.content_stage_flags.w == 0u {
+        && preview_profile() == 0u {
         let visible_half_width = max(input.river.y, blocks_per_pixel * 0.70);
         let river_alpha = 1.0 - smoothstep(
             visible_half_width,

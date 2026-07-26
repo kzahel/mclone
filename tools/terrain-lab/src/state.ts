@@ -7,6 +7,7 @@ export const TERRAIN_LAB_CANONICAL_RADII = [0, 1, 2, 3, 4, 5, 7, 10, 15] as cons
 
 export type TerrainLabSpacing = (typeof TERRAIN_LAB_SPACINGS)[number];
 export type TerrainLabDetail = "auto" | TerrainLabSpacing;
+export type TerrainLabSurfaceQuality = "basic" | "inferred";
 export type TerrainLabProfile = "mclone-overworld-v1" | "overworld";
 export type TerrainLabVisualProfile =
   | "mclone-original"
@@ -51,6 +52,7 @@ export interface TerrainLabState {
   centerZ: number;
   blocksAcross: number;
   detail: TerrainLabDetail;
+  surfaceQuality: TerrainLabSurfaceQuality;
   source: TerrainLabSource;
   panes: TerrainLabPane[];
   canonicalStage: CanonicalTerrainStage;
@@ -78,6 +80,7 @@ export const DEFAULT_TERRAIN_LAB_STATE: TerrainLabState = {
   centerZ: 336,
   blocksAcross: 512,
   detail: "auto",
+  surfaceQuality: "inferred",
   source: "split",
   panes: ["canonical", "cpu", "gpu"],
   canonicalStage: "final",
@@ -119,6 +122,7 @@ const TEXTURE_PRESENTATIONS = new Set<TerrainLabTexturePresentation>([
 const COMPARISON_VISUAL_PROFILES =
   new Set<TerrainLabComparisonVisualProfile>(["off", ...VISUAL_PROFILES]);
 const SOURCES = new Set<TerrainLabSource>(["gpu", "reference", "macro", "split"]);
+const SURFACE_QUALITIES = new Set<TerrainLabSurfaceQuality>(["basic", "inferred"]);
 const PANES = new Set<TerrainLabPane>(["canonical", "cpu", "macro", "gpu"]);
 const CANONICAL_STAGES = new Set<CanonicalTerrainStage>(["surface", "final"]);
 const VIEWS = new Set<TerrainLabView>(["map", "3d"]);
@@ -174,6 +178,8 @@ export function parseTerrainLabState(
       ?? (legacySpacing === undefined ? undefined : legacySpacing * TERRAIN_LAB_CELLS_PER_AXIS)
       ?? fallback.blocksAcross,
     detail: validDetail(params.get("detail")) ?? legacySpacing ?? fallback.detail,
+    surfaceQuality:
+      validMember(params.get("surface"), SURFACE_QUALITIES) ?? fallback.surfaceQuality,
     source: proceduralSourceForPanes(panes),
     panes,
     canonicalStage:
@@ -203,6 +209,7 @@ export function terrainLabSearch(state: TerrainLabState): string {
   params.set("z", String(state.centerZ));
   params.set("blocks", String(state.blocksAcross));
   params.set("detail", String(state.detail));
+  params.set("surface", state.surfaceQuality);
   params.set("source", proceduralSourceForPanes(state.panes));
   params.set("panes", state.panes.join(","));
   params.set("canonical", state.canonicalStage);

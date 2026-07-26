@@ -18,7 +18,7 @@ use crate::levelgen::{
 use mclone_core::ChunkPos;
 
 pub const TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION: &str =
-    "mclone-terrain-preview-reference-grid-v8";
+    "mclone-terrain-preview-reference-grid-v9";
 pub const TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS: u32 = 64;
 pub const TERRAIN_PREVIEW_MIN_CELLS_PER_AXIS: u32 = 8;
 pub const TERRAIN_PREVIEW_MAX_CELLS_PER_AXIS: u32 = 128;
@@ -26,6 +26,33 @@ pub const TERRAIN_PREVIEW_MIN_SAMPLE_SPACING: u32 = 1;
 pub const TERRAIN_PREVIEW_MAX_SAMPLE_SPACING: u32 = 1_024;
 pub const TERRAIN_PREVIEW_SAMPLE_FLOATS: usize = 32;
 pub const TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING: u32 = 4;
+
+#[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
+#[repr(u32)]
+pub enum TerrainPreviewSurfaceQuality {
+    #[default]
+    Basic = 0,
+    Inferred = 1,
+}
+
+impl TerrainPreviewSurfaceQuality {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Basic => "basic",
+            Self::Inferred => "inferred",
+        }
+    }
+
+    pub fn parse_label(value: &str) -> Result<Self, String> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "basic" | "cheap" => Ok(Self::Basic),
+            "inferred" | "builder-aware" => Ok(Self::Inferred),
+            other => Err(format!(
+                "terrain preview surface quality must be basic or inferred, got {other:?}"
+            )),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum TerrainPreviewProfile {
@@ -105,6 +132,7 @@ pub struct TerrainPreviewRequest {
     pub cells_per_axis: u32,
     pub topology: McloneOverworldSamplingTopology,
     pub content_stage: TerrainPreviewContentStage,
+    pub surface_quality: TerrainPreviewSurfaceQuality,
 }
 
 impl TerrainPreviewRequest {
@@ -118,6 +146,7 @@ impl TerrainPreviewRequest {
             cells_per_axis: TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS,
             topology: McloneOverworldSamplingTopology::Unbounded,
             content_stage: TerrainPreviewContentStage::Base,
+            surface_quality: TerrainPreviewSurfaceQuality::Basic,
         }
     }
 
@@ -128,6 +157,14 @@ impl TerrainPreviewRequest {
 
     pub const fn with_profile(mut self, profile: TerrainPreviewProfile) -> Self {
         self.profile = profile;
+        self
+    }
+
+    pub const fn with_surface_quality(
+        mut self,
+        surface_quality: TerrainPreviewSurfaceQuality,
+    ) -> Self {
+        self.surface_quality = surface_quality;
         self
     }
 
@@ -633,7 +670,11 @@ impl TerrainPreviewReferenceGrid {
                 let world_x = request
                     .world_x(sample_x)
                     .expect("validated terrain preview X coordinate");
-                let sample = sampler.sample(world_x, world_z);
+                let sample = sampler.sample_with_surface_inference(
+                    world_x,
+                    world_z,
+                    request.request().surface_quality == TerrainPreviewSurfaceQuality::Inferred,
+                );
                 samples.push(vanilla_preview_sample(sample));
             }
         }
@@ -675,7 +716,13 @@ impl TerrainPreviewReferenceGrid {
                 let world_x = request
                     .world_x(sample_x)
                     .expect("validated terrain preview X coordinate");
-                samples.push(vanilla_preview_sample(sampler.sample(world_x, world_z)));
+                samples.push(vanilla_preview_sample(
+                    sampler.sample_with_surface_inference(
+                        world_x,
+                        world_z,
+                        request.request().surface_quality == TerrainPreviewSurfaceQuality::Inferred,
+                    ),
+                ));
             }
         }
         Ok(Self { request, samples })
@@ -1270,6 +1317,23 @@ mod tests {
     use crate::levelgen::McloneOverworldStreamPlanner;
 
     #[test]
+    fn surface_quality_defaults_to_basic_and_parses_durable_labels() {
+        assert_eq!(
+            TerrainPreviewRequest::new(12_345, 0, 0, 32).surface_quality,
+            TerrainPreviewSurfaceQuality::Basic
+        );
+        assert_eq!(
+            TerrainPreviewSurfaceQuality::parse_label("inferred").unwrap(),
+            TerrainPreviewSurfaceQuality::Inferred
+        );
+        assert_eq!(
+            TerrainPreviewSurfaceQuality::parse_label("cheap").unwrap(),
+            TerrainPreviewSurfaceQuality::Basic
+        );
+        assert!(TerrainPreviewSurfaceQuality::parse_label("sampled").is_err());
+    }
+
+    #[test]
     fn centered_request_uses_shared_corner_grid() {
         let request = TerrainPreviewRequest::new(12_345, -64, 96, 16)
             .validate()
@@ -1654,7 +1718,7 @@ mod tests {
         );
         assert_eq!(
             TERRAIN_PREVIEW_REFERENCE_SCHEMA_REVISION,
-            "mclone-terrain-preview-reference-grid-v8"
+            "mclone-terrain-preview-reference-grid-v9"
         );
         assert_eq!(
             TerrainPreviewProfile::VanillaOverworld.source_revision(),

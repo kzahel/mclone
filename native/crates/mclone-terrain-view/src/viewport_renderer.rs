@@ -11,7 +11,7 @@ use mclone_worldgen::terrain_preview::{
     TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS, TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING,
     TerrainPreviewComparison, TerrainPreviewCompileWork, TerrainPreviewContentStage,
     TerrainPreviewProfile, TerrainPreviewReferenceGrid, TerrainPreviewSample,
-    TerrainPreviewVegetationProduct, ValidatedTerrainPreviewRequest,
+    TerrainPreviewSurfaceQuality, TerrainPreviewVegetationProduct, ValidatedTerrainPreviewRequest,
     terrain_preview_gpu_compile_work,
 };
 
@@ -2154,6 +2154,7 @@ impl TerrainHorizonRenderer {
                             tile_z: physical_z as i32,
                             sample_spacing: config.sample_spacing(level),
                             content_stage: TerrainPreviewContentStage::Cover,
+                            surface_quality: TerrainPreviewSurfaceQuality::Inferred,
                         },
                     )?);
                 }
@@ -2285,6 +2286,7 @@ impl TerrainHorizonRenderer {
                 tile_z: tile.tile_z,
                 sample_spacing: tile.sample_spacing,
                 content_stage: self.content_stage,
+                surface_quality: TerrainPreviewSurfaceQuality::Inferred,
             };
             let slot = &mut self.slots[slot_index];
             slot.request = tile_id.preview_request().validate()?;
@@ -2343,6 +2345,7 @@ impl TerrainHorizonRenderer {
                 tile_z: tile.tile_z,
                 sample_spacing: tile.sample_spacing,
                 content_stage: self.content_stage,
+                surface_quality: TerrainPreviewSurfaceQuality::Inferred,
             };
             let cache = self.vegetation_cache.get_or_insert_with(|| {
                 McloneOverworldVegetationPlanCache::new(McloneVegetationSource::new(

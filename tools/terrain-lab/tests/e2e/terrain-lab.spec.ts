@@ -459,6 +459,7 @@ test("renders LOD-native vegetation products and aggregates coarse cover", async
 test("switches the whole lab to worker-backed vanilla terrain", async ({
   page,
 }, testInfo) => {
+  test.setTimeout(180_000);
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("console", (message) => {
@@ -469,7 +470,8 @@ test("switches the whole lab to worker-backed vanilla terrain", async ({
   await page.goto(
     "/terrain/?profile=overworld&seed=12345&x=0&z=0&blocks=2048&detail=32"
       + "&panes=canonical%2Ccpu%2Cmacro&canonical=surface&radius=0"
-      + "&water=1&vegetation=1&stage=hydrology&view=3d&layer=continentalness",
+      + "&water=1&vegetation=1&stage=hydrology&view=3d&layer=continentalness"
+      + "&surface=inferred",
   );
   await waitForLane(page, "cpu");
   await waitForLane(page, "gpu");
@@ -477,6 +479,8 @@ test("switches the whole lab to worker-backed vanilla terrain", async ({
   await waitForCanonical(page, 1);
   const shell = page.locator(".appShell");
   await expect(shell).toHaveAttribute("data-profile", "overworld");
+  await expect(shell).toHaveAttribute("data-surface-quality", "inferred");
+  await expect(page.getByLabel("Terrain surface detail")).toHaveValue("inferred");
   await expect(shell).toHaveAttribute("data-panes", "canonical,cpu,macro");
   await expect(shell).toHaveAttribute("data-stage", "surface");
   await expect(shell).toHaveAttribute("data-request-gpu-tiles", "0");
@@ -515,7 +519,29 @@ test("switches the whole lab to worker-backed vanilla terrain", async ({
   );
   await expect(vanillaCanvas).toBeVisible();
   await page.getByTestId("pane-workspace").screenshot({
-    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-vanilla-workspace.png`,
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-vanilla-inferred.png`,
+  });
+  const inferredRevision = Number(
+    await shell.getAttribute("data-render-revision"),
+  );
+  await page.getByLabel("Terrain surface detail").selectOption("basic");
+  await expect(page).toHaveURL(/surface=basic/u);
+  await waitForCurrentComparison(page, inferredRevision);
+  await expect(shell).toHaveAttribute("data-surface-quality", "basic");
+  await page.getByTestId("pane-workspace").screenshot({
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-vanilla-basic.png`,
+  });
+  await page.goto(
+    "/terrain/?profile=overworld&seed=33&x=8&z=8&blocks=64&detail=1"
+      + "&panes=canonical%2Ccpu%2Cmacro&canonical=surface&radius=2"
+      + "&water=1&vegetation=0&stage=surface&view=3d&layer=terrain"
+      + "&surface=inferred",
+  );
+  await waitForCurrentComparison(page);
+  await waitForCanonical(page, 25);
+  await expect(shell).toHaveAttribute("data-surface-quality", "inferred");
+  await page.getByTestId("pane-workspace").screenshot({
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-vanilla-mountain-close.png`,
   });
   await page.getByLabel("Terrain profile").selectOption("mclone-overworld-v1");
   await expect(shell).toHaveAttribute("data-profile", "mclone-overworld-v1");

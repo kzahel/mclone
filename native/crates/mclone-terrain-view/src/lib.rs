@@ -1186,7 +1186,7 @@ fn viewport_uniform_bytes_for_request_with_presentation(
         match source.profile {
             mclone_worldgen::terrain_preview::TerrainPreviewProfile::McloneOverworldV1 => 0,
             mclone_worldgen::terrain_preview::TerrainPreviewProfile::VanillaOverworld => 1,
-        },
+        } | ((source.surface_quality as u32) << 1),
     ] {
         bytes.extend_from_slice(&word.to_le_bytes());
     }

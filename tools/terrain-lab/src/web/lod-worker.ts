@@ -58,6 +58,7 @@ function compile(
       request.tileX,
       request.tileZ,
       request.sampleSpacing,
+      request.surfaceQuality,
     );
     const samples = payload.samples;
     const result: LodWorkerResult = {
@@ -68,6 +69,7 @@ function compile(
       tileX: request.tileX,
       tileZ: request.tileZ,
       sampleSpacing: request.sampleSpacing,
+      surfaceQuality: request.surfaceQuality,
       compileMs: performance.now() - started,
       generatedDensityColumns: payload.generatedDensityColumns,
       reusedDensityColumns: payload.reusedDensityColumns,
@@ -85,6 +87,7 @@ function compile(
       tileX: request.tileX,
       tileZ: request.tileZ,
       sampleSpacing: request.sampleSpacing,
+      surfaceQuality: request.surfaceQuality,
       message: errorMessage(error),
     });
   }

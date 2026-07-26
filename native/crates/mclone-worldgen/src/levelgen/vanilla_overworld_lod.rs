@@ -3,14 +3,14 @@ use std::sync::Arc;
 
 use crate::biome::{BiomeDefinition, OverworldBiomeSource};
 use crate::block::{AIR, WATER, material_blocks_motion};
-use crate::surface::overworld_surface_top_material;
+use crate::surface::{overworld_inferred_surface_top_material, overworld_surface_top_material};
 
 use super::{NoiseBasedChunkGenerator, NoiseGeneratorSettings};
 
-pub const VANILLA_OVERWORLD_LOD_REVISION: &str = "vanilla-1.17.1-density-column-lod-v1";
+pub const VANILLA_OVERWORLD_LOD_REVISION: &str = "vanilla-1.17.1-density-column-lod-v2";
 pub const VANILLA_OVERWORLD_LOD_MAX_RETAINED_DENSITY_COLUMNS: usize = 4_096;
 pub const VANILLA_OVERWORLD_MACRO_LOD_REVISION: &str =
-    "vanilla-1.17.1-sparse-density-column-lod-v1";
+    "vanilla-1.17.1-sparse-density-column-lod-v2";
 pub const VANILLA_OVERWORLD_MACRO_VERTICAL_CELL_STEP: i32 = 4;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -73,6 +73,15 @@ impl VanillaOverworldLodSampler {
     }
 
     pub fn sample(&mut self, world_x: i32, world_z: i32) -> VanillaOverworldLodSample {
+        self.sample_with_surface_inference(world_x, world_z, false)
+    }
+
+    pub fn sample_with_surface_inference(
+        &mut self,
+        world_x: i32,
+        world_z: i32,
+        infer_surface: bool,
+    ) -> VanillaOverworldLodSample {
         let cell_width = self.generator.lod_cell_width();
         let cell_x = world_x.div_euclid(cell_width);
         let cell_z = world_z.div_euclid(cell_width);
@@ -94,6 +103,7 @@ impl VanillaOverworldLodSampler {
             x0z1.as_deref(),
             x1z0.as_deref(),
             x1z1.as_deref(),
+            infer_surface,
         )
     }
 
@@ -170,6 +180,15 @@ impl VanillaOverworldMacroSampler {
     }
 
     pub fn sample(&mut self, world_x: i32, world_z: i32) -> VanillaOverworldLodSample {
+        self.sample_with_surface_inference(world_x, world_z, false)
+    }
+
+    pub fn sample_with_surface_inference(
+        &mut self,
+        world_x: i32,
+        world_z: i32,
+        infer_surface: bool,
+    ) -> VanillaOverworldLodSample {
         let cell_width = self.generator.lod_cell_width();
         let cell_x = world_x.div_euclid(cell_width);
         let cell_z = world_z.div_euclid(cell_width);
@@ -191,6 +210,7 @@ impl VanillaOverworldMacroSampler {
             x0z1.as_deref(),
             x1z0.as_deref(),
             x1z1.as_deref(),
+            infer_surface,
         )
     }
 
@@ -235,6 +255,7 @@ fn sample_density_surface(
     x0z1: Option<&[f64]>,
     x1z0: Option<&[f64]>,
     x1z1: Option<&[f64]>,
+    infer_surface: bool,
 ) -> VanillaOverworldLodSample {
     let cell_width = generator.lod_cell_width();
     let x_fraction = f64::from(world_x.rem_euclid(cell_width)) / f64::from(cell_width);
@@ -286,6 +307,16 @@ fn sample_density_surface(
     let biome = biome_source.get_block_position_biome_definition(seed, world_x, world_z);
     let approximate_surface_material = overworld_surface_top_material(biome);
     let water = visible_material == WATER;
+    let inferred_surface_material = if infer_surface {
+        overworld_inferred_surface_top_material(
+            biome,
+            generator.lod_surface_noise(world_x, world_z),
+            solid_surface_y - 1,
+            generator.lod_sea_level(),
+        )
+    } else {
+        approximate_surface_material
+    };
     VanillaOverworldLodSample {
         solid_surface_y,
         display_y,
@@ -295,7 +326,7 @@ fn sample_density_surface(
         visible_material: if water {
             WATER
         } else {
-            approximate_surface_material
+            inferred_surface_material
         },
     }
 }
@@ -308,12 +339,72 @@ fn lerp(delta: f64, start: f64, end: f64) -> f64 {
 mod tests {
     use mclone_core::{ChunkPos, local_block_coord};
 
-    use crate::block::{WATER, material_blocks_motion};
+    use crate::biome::get_layered_biome_by_id;
+    use crate::block::{
+        COARSE_DIRT, DIRT, GRASS_BLOCK, GRAVEL, PODZOL, STONE, WATER, material_blocks_motion,
+    };
     use crate::levelgen::{
         GeneratedChunk, MutableChunkBlockBuffer, generate_overworld_surface_chunk,
     };
 
     use super::*;
+
+    #[test]
+    fn inferred_surface_material_reuses_reference_builder_thresholds() {
+        let mountains = get_layered_biome_by_id(3);
+        assert_eq!(
+            overworld_inferred_surface_top_material(mountains, 1.0, 96, 63),
+            GRASS_BLOCK
+        );
+        assert_eq!(
+            overworld_inferred_surface_top_material(mountains, 1.01, 96, 63),
+            STONE
+        );
+
+        let gravelly = get_layered_biome_by_id(131);
+        assert_eq!(
+            overworld_inferred_surface_top_material(gravelly, -1.01, 96, 63),
+            GRAVEL
+        );
+        assert_eq!(
+            overworld_inferred_surface_top_material(gravelly, 1.5, 96, 63),
+            STONE
+        );
+        assert_eq!(
+            overworld_inferred_surface_top_material(gravelly, 2.01, 96, 63),
+            GRAVEL
+        );
+
+        let giant_taiga = get_layered_biome_by_id(32);
+        assert_eq!(
+            overworld_inferred_surface_top_material(giant_taiga, 1.76, 72, 63),
+            COARSE_DIRT
+        );
+        assert_eq!(
+            overworld_inferred_surface_top_material(giant_taiga, 0.0, 72, 63),
+            PODZOL
+        );
+        assert_eq!(
+            overworld_inferred_surface_top_material(giant_taiga, -0.96, 72, 63),
+            GRASS_BLOCK
+        );
+
+        let shattered_savanna = get_layered_biome_by_id(163);
+        assert_eq!(
+            overworld_inferred_surface_top_material(shattered_savanna, 1.76, 120, 63),
+            STONE
+        );
+        assert_eq!(
+            overworld_inferred_surface_top_material(shattered_savanna, 0.0, 120, 63),
+            COARSE_DIRT
+        );
+
+        let plains = get_layered_biome_by_id(1);
+        assert_eq!(
+            overworld_inferred_surface_top_material(plains, 0.0, 60, 63),
+            DIRT
+        );
+    }
 
     #[test]
     fn direct_samples_match_full_noise_columns() {
@@ -450,6 +541,48 @@ mod tests {
         assert!(actual_top != AIR);
     }
 
+    #[test]
+    fn inferred_material_improves_selected_surface_fixture_agreement() {
+        let cases = [
+            (33, 0, 0),
+            (33, -12, 9),
+            (250, 0, 0),
+            (250, -3, 13),
+            (132, 0, 0),
+            (68, -6, 0),
+            (153, -8, -2),
+        ];
+        let mut basic_matches = 0usize;
+        let mut inferred_matches = 0usize;
+        let mut compared = 0usize;
+        let mut changed = 0usize;
+
+        for (seed, chunk_x, chunk_z) in cases {
+            let chunk = generate_overworld_surface_chunk(seed, chunk_x, chunk_z);
+            let mut sampler = VanillaOverworldLodSampler::new(seed);
+            for local_z in 0..GeneratedChunk::WIDTH {
+                for local_x in 0..GeneratedChunk::WIDTH {
+                    let world_x = chunk_x * GeneratedChunk::WIDTH + local_x;
+                    let world_z = chunk_z * GeneratedChunk::WIDTH + local_z;
+                    let basic = sampler.sample_with_surface_inference(world_x, world_z, false);
+                    if basic.water {
+                        continue;
+                    }
+                    let inferred = sampler.sample_with_surface_inference(world_x, world_z, true);
+                    let actual = top_non_air_block(&chunk, local_x, local_z);
+                    basic_matches += usize::from(basic.visible_material == actual);
+                    inferred_matches += usize::from(inferred.visible_material == actual);
+                    changed += usize::from(basic.visible_material != inferred.visible_material);
+                    compared += 1;
+                }
+            }
+        }
+
+        assert!(changed > 0);
+        assert_eq!(inferred_matches, compared);
+        assert!(inferred_matches > basic_matches);
+    }
+
     fn column_height(
         chunk: &MutableChunkBlockBuffer,
         local_x: i32,
@@ -477,6 +610,16 @@ mod tests {
         for y in (chunk.min_y..chunk.min_y + chunk.height).rev() {
             let block = chunk.block_at_y(local_x, y, local_z).raw();
             if material_blocks_motion(block) {
+                return block;
+            }
+        }
+        AIR
+    }
+
+    fn top_non_air_block(chunk: &GeneratedChunk, local_x: i32, local_z: i32) -> u8 {
+        for y in (chunk.min_y..chunk.min_y + chunk.height).rev() {
+            let block = chunk.block_at_y(local_x, y, local_z).raw();
+            if block != AIR {
                 return block;
             }
         }

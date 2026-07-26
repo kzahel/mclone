@@ -287,6 +287,60 @@ pub fn overworld_surface_top_material(biome: BiomeDefinition) -> u8 {
     resolve_surface_biome_definition(biome).config.top_material
 }
 
+pub fn overworld_inferred_surface_top_material(
+    biome: BiomeDefinition,
+    noise: f64,
+    surface_top_y: i32,
+    sea_level: i32,
+) -> u8 {
+    let definition = resolve_surface_biome_definition(biome);
+    let config = match definition.builder {
+        SurfaceBuilderKind::Mountain => {
+            if noise > 1.0 {
+                CONFIG_STONE
+            } else {
+                CONFIG_GRASS
+            }
+        }
+        SurfaceBuilderKind::GravellyMountain => {
+            if noise < -1.0 || noise > 2.0 {
+                CONFIG_GRAVEL
+            } else if noise > 1.0 {
+                CONFIG_STONE
+            } else {
+                CONFIG_GRASS
+            }
+        }
+        SurfaceBuilderKind::GiantTreeTaiga => {
+            if noise > 1.75 {
+                CONFIG_COARSE_DIRT
+            } else if noise > -0.95 {
+                CONFIG_PODZOL
+            } else {
+                CONFIG_GRASS
+            }
+        }
+        SurfaceBuilderKind::ShatteredSavanna => {
+            if noise > 1.75 {
+                CONFIG_STONE
+            } else if noise > -0.5 {
+                CONFIG_COARSE_DIRT
+            } else {
+                CONFIG_GRASS
+            }
+        }
+        _ => definition.config,
+    };
+
+    if surface_top_y >= sea_level - 1 {
+        config.top_material
+    } else if surface_top_y >= sea_level - 4 {
+        config.under_material
+    } else {
+        config.underwater_material
+    }
+}
+
 fn resolve_surface_biome_definition(biome: BiomeDefinition) -> SurfaceBiomeDefinition {
     match biome.key() {
         "minecraft:mountains" | "minecraft:mountain_edge" | "minecraft:wooded_mountains" => {

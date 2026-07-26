@@ -26,6 +26,7 @@ test("round-trips complete URL state", () => {
     centerZ: 2048,
     blocksAcross: 16_384,
     detail: 16 as const,
+    surfaceQuality: "inferred" as const,
     source: "gpu" as const,
     panes: ["canonical", "gpu"],
     canonicalStage: "surface" as const,
@@ -104,6 +105,7 @@ test("defaults to the three-pane workspace and gives the review site a name", ()
   assert.equal(DEFAULT_TERRAIN_LAB_STATE.visualProfile, "mclone-original");
   assert.equal(DEFAULT_TERRAIN_LAB_STATE.texturePresentation, "textured");
   assert.equal(DEFAULT_TERRAIN_LAB_STATE.compareVisualProfile, "off");
+  assert.equal(DEFAULT_TERRAIN_LAB_STATE.surfaceQuality, "inferred");
   assert.equal(DEFAULT_TERRAIN_LAB_STATE.source, "split");
   assert.deepEqual(DEFAULT_TERRAIN_LAB_STATE.panes, ["canonical", "cpu", "gpu"]);
   assert.equal(REVIEW_TERRAIN_LAB_STATE.seed, "-98765");
@@ -168,6 +170,7 @@ test("keeps camera state outside URL-addressed terrain state", () => {
     centerZ: 336,
     blocksAcross: 512,
     detail: "auto",
+    surfaceQuality: "inferred",
     source: "split",
     panes: ["canonical", "cpu", "gpu"],
     canonicalStage: "final",
@@ -190,5 +193,13 @@ test("defaults to orthographic and validates projection links", () => {
   assert.equal(
     parseTerrainLabState("?projection=isometric").projection,
     "orthographic",
+  );
+});
+
+test("round-trips explicit surface quality and rejects unknown tiers", () => {
+  assert.equal(parseTerrainLabState("?surface=inferred").surfaceQuality, "inferred");
+  assert.equal(
+    parseTerrainLabState("?surface=expensive").surfaceQuality,
+    DEFAULT_TERRAIN_LAB_STATE.surfaceQuality,
   );
 });
