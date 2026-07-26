@@ -1,7 +1,8 @@
 # Tactical 253: World Explorer Cross-Host Parity
 
-Status: active parent; Tacticals 254–255 completed 2026-07-26, with
-implementation continuing in Tactical 256.
+Status: active parent; Tacticals 254–255 completed 2026-07-26. Tactical 256's
+architecture checkpoint completed the same day; its scoped implementation is
+next.
 
 Topics:
 
@@ -87,7 +88,12 @@ lightweight shared color crate owns the CPU and WGSL transfer definition,
 format-pair GPU evidence passes, and pinned browser/native captures satisfy
 the documented color tolerance. Tactical
 [`256`](256-shared-horizon-vegetation-worker-topology.md) is the next bounded
-child.
+child. Its completed architecture checkpoint selects a reusable
+`mclone-terrain-view` vegetation streaming coordinator over a shared
+`mclone-worldgen` compiler session, with World Explorer as the first
+native/browser proof rather than the final owner. Native thread and browser
+Worker cutovers remain implementation work; later game-scene adoption is a
+separate tactical.
 
 ## Campaign Acceptance
 

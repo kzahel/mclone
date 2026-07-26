@@ -58,12 +58,22 @@ desktop/phone smokes and response-header checks confirmed cross-origin
 isolation and the external-SAB path. No Terrain Lab Worker continuation
 remains active under Tactical 248.
 
-Proposed Tactical
+Tactical
 [`256`](../tactical/256-shared-horizon-vegetation-worker-topology.md) is the
-next focused consumer of this direction. It must reuse the isolated Rust actor,
-domain-blind transport, and external-SAB posture for procedural vegetation
-while sharing coordinator policy with a native threaded executor. It does not
-authorize a shared Wasm heap or a universal Worker framework.
+next focused consumer of this direction. Its architecture checkpoint completed
+on 2026-07-26 and selects an engine-owned terrain-vegetation service proven
+first through World Explorer. It reuses the isolated Rust actor, domain-blind
+transport, and external-SAB posture while sharing coordinator policy with a
+native threaded executor. The full game's exact render-section coordinator is
+a lifecycle precedent, not a universal framework or the owner of procedural
+terrain jobs. Tactical 256 does not authorize a shared Wasm heap; later
+`mclone-scene` adoption consumes the shared terrain service through a separate
+integration tactical.
+
+Its actor protocol keeps semantic compiler/product revisions separate from the
+browser-only `MCHV` wire version. Native does not serialize through that ABI,
+and a layout-only wire change does not reset or rename semantic vegetation
+products.
 
 ## Scope
 

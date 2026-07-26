@@ -36,8 +36,12 @@ transform, preserving the selected dark appearance on UNORM and sRGB targets.
 Tactical
 [`256`](../tactical/256-shared-horizon-vegetation-worker-topology.md) replaces
 native synchronous/browser-disabled tree compilation with one shared
-coordinator over native-thread and browser-Worker executors. UI-less host
-cleanup completed in Tactical
+engine terrain-vegetation coordinator over native-thread and browser-Worker
+executors. Its architecture checkpoint completed on 2026-07-26 and explicitly
+defines World Explorer as the first proof host, not the final owner. The
+coordinator, compiler session, job identity, cache policy, and prepared result
+handoff belong in shared crates so a later `mclone-scene` tactical can consume
+the same service. UI-less host cleanup completed in Tactical
 [`254`](../tactical/254-ui-less-world-explorer-host.md) and remains owned by
 the platform-host topic rather than terrain rendering.
 
@@ -148,6 +152,18 @@ shared terrain-view / clipmap service
 Lab-first means using the Lab as the fastest visual and instrumentation host.
 It does not mean landing a second Lab-only clipmap implementation.
 
+Terrain Lab's exact generated-chunk pane has its own
+`CanonicalTerrainWorkerCoordinator`. That coordinator is a useful precedent
+for isolated Rust actors, cache/session ownership, epochs, bounded admission,
+and external-SAB result publication. It is not the procedural LOD service to
+move into the game. The shared procedural CPU/GPU products and viewport
+contracts are the reusable system.
+
+The full web game's `WebRenderWorkerCoordinator` is likewise a specialized
+exact render-section owner, not a universal worker framework. It contributes
+generic browser transport and lifecycle evidence, but procedural terrain must
+not become an artificial render-section job to reuse it.
+
 Tactical 247 proved the current bounded renderer through both a real native
 surface and an offscreen target in the standalone World Explorer. Its
 continuous-movement closeout peaked at 171,994,752 resident bytes and 159
@@ -155,6 +171,61 @@ tiles, then settled to zero pending work. That is useful portability and
 control evidence, but it is not the fixed-memory moving-horizon contract.
 The first ring should replace this growing bounded-preview residency in both
 proof hosts rather than expand its tile budget.
+
+## Reusable Terrain-LOD Streaming Service
+
+World Explorer proves host portability and remains useful on its own, but it
+is not the ownership boundary. Procedural terrain streaming should compose as:
+
+```text
+Terrain Lab / World Explorer / game scene
+                    |
+     shared terrain-LOD coordinator and products
+                mclone-terrain-view
+                    |
+     semantic evaluator and compiler sessions
+                 mclone-worldgen
+                    |
+          native thread | browser Worker
+```
+
+The shared service accepts semantic desired tiles and explicit admission
+tokens. It owns priority, source identity, budgets, stale rejection, cache
+lifecycle, failure state, and prepared products without depending on a WGPU
+device, browser API, `winit`, or one app crate. A presentation owner uploads
+admitted products afterward.
+
+The crate dependency remains one-way: terrain-view owns
+`TerrainViewportTileId`, slot generations, and admission, while worldgen owns
+validated compiler requests, semantic source/product revisions, compiler
+sessions, and product encoding. Browser correlation fields are fixed-width
+opaque scalars at the worldgen codec boundary, not a reason for worldgen to
+import terrain-view.
+
+The service API must not bake in World Explorer's current ten-level,
+four-by-four default. That configuration is the first measured consumer. The
+coordinator derives bounded work from a validated desired set so Terrain Lab,
+the Explorer, and a later game scene can use different measured ring budgets
+without different scheduling semantics.
+
+Platform adapters choose execution mechanics:
+
+- native moves typed jobs and results through bounded channels to one worker
+  thread in the first implementation; and
+- browser keeps isolated Wasm heaps and publishes encoded results through an
+  explicit external `SharedArrayBuffer`.
+
+The same logical service does not require every domain to share one physical
+thread or Worker. Exact chunk meshing and procedural vegetation have different
+resident state and failure lifecycles. A later measured pool may host multiple
+services behind unchanged domain coordinators, but Tactical 256 does not
+create a universal job enum or Worker framework.
+
+The first shared off-thread slice is individual vegetation record planning.
+Coarse continuous forest summaries remain part of terrain evaluation and do
+not enumerate trees. Terrain evaluation, summary filtering, vegetation
+records, and later exact/procedural arbitration remain separable layers behind
+one source identity.
 
 ## Geometry And Residency
 
@@ -409,9 +480,11 @@ patches.
 The intended ownership split is:
 
 - `mclone-worldgen`: semantic terrain source, profiles, source identity, and
-  footprint-aware evaluators;
+  footprint-aware evaluators, plus stateful vegetation compiler sessions and
+  bounded semantic caches;
 - `mclone-terrain-view`: clipmap geometry math, snapped/toroidal addressing,
-  sample planning, procedural summaries, and a renderer-neutral prepared draw
+  sample planning, procedural summaries, WGPU-independent terrain-product
+  coordination, stale/admission policy, and a renderer-neutral prepared draw
   service;
 - `mclone-render`: reversed-Z-compatible terrain, fog, material, vegetation,
   mono/per-eye, and multiview pipelines;
@@ -458,12 +531,15 @@ semantic owner.
    first large-coordinate camera-relative precision path are proven. Add
    explicit skirts where independent surfaces require them, retained
    committed origins, footprint summaries, and device-specific budgets.
-6. **Integrate the game scene.** Add exact-painted snapshots, masks, frontier
-   collars, normal render ordering, and all-target frame admission.
-7. **Finish vegetation portability and arbitration.** Native stable proxy
-   records are proven on three near levels. Move browser compilation into
-   Workers, then make proxy/exact arbitration obey the exact coverage
-   snapshot.
+6. **Build the reusable vegetation streaming service.** Tactical 256 moves
+   semantic tree-record compilation behind one shared coordinator, one native
+   thread executor, and one isolated browser Rust actor. World Explorer proves
+   identical source identity, records, failure behavior, and presentation
+   without becoming the service owner.
+7. **Integrate the game scene in a later tactical.** Compose the proven service
+   under `mclone-scene`, then add exact-painted snapshots, masks, frontier
+   collars, proxy/exact vegetation XOR, edit invalidation, normal render
+   ordering, and all-target frame admission.
 8. **Measure an adaptive comparator only if useful.** A quadtree Lab mode
    should answer a specific waste or quality question, not fork the content
    system.

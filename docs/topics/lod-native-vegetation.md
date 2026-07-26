@@ -8,13 +8,18 @@ removed by Tactical 245.
 
 World Explorer review on 2026-07-26 found that native enables synchronous
 near-level vegetation compilation during frame encoding while browser disables
-vegetation entirely. Proposed Tactical
+vegetation entirely. Tactical
 [`256`](../tactical/256-shared-horizon-vegetation-worker-topology.md) records
 the replacement direction: one `mclone-terrain-view` coordinator owns job
 identity, budgets, cache lifecycle, stale rejection, and admission, while
 native threads and an isolated browser Rust actor provide equivalent execution
 through platform-appropriate mailboxes. Neither presentation thread remains a
-normal compiler path.
+normal compiler path. Its architecture checkpoint completed on 2026-07-26:
+World Explorer is the first parity host for a reusable engine terrain-LOD
+service, not the owner or final destination. A later `mclone-scene` tactical
+will consume the same coordinator/compiler boundary and separately solve
+exact/proxy arbitration, edits, multiworld lifecycle, and all-target
+presentation.
 
 ## Scope
 
@@ -612,6 +617,18 @@ The cache must:
 - expose hit/miss/retained counts; and
 - avoid a second worker round trip inside one worldgen request.
 
+Off-thread LOD compilation wraps this cache in one shared worldgen compiler
+session. The executor thread or Worker actor owns that session; the
+presentation host never mirrors its planning cells. Native moves typed
+products out of the session, while browser encodes the same semantic product
+through a versioned external-SAB result ABI. Serialization is a transport
+concern and must not become a second record definition.
+
+The semantic compiler/source revision, semantic occurrence-product revision,
+and browser `MCHV` wire version are separate. Only the first two participate
+in record/cache identity. The wire version validates isolated-Wasm transport
+compatibility and cannot make native and browser semantic sources differ.
+
 ### Terrain Lab tile cache
 
 The existing viewport LRU should retain the vegetation summary and packed
@@ -700,22 +717,33 @@ generation slices, but the source identity must leave room for it.
 
 - `mclone-worldgen` owns forest intent, seed domains, topology, tree IDs,
   bounded record planning, exact realization, source revisions, summaries,
-  reference comparison, and deterministic tests.
+  stateful LOD compiler sessions, product codecs, reference comparison, and
+  deterministic tests.
 - `mclone-terrain-view` owns vegetation tile products, progressive summary/
-  instance readiness, LRU integration, GPU instance buffers, proxy and map
-  rendering, picking, and comparison aggregation.
+  instance readiness, the WGPU-independent desired-work coordinator, source
+  epochs, slot-generation stale rejection, budgets, LRU integration, GPU
+  instance buffers, proxy and map rendering, picking, and comparison
+  aggregation.
 - `mclone-terrain-lab` owns narrow Wasm serialization and browser-facing
   methods.
 - `tools/terrain-lab` owns controls, URL projection, labels, inspector
   presentation, and browser assertions. It must not classify forests or
   generate records.
-- A future in-game tactical must assign multiscale vegetation
-  coverage/refinement, resident proxy lifecycle, draw pipelines, and
-  exact/proxy arbitration only after choosing the terrain hierarchy. The
-  rejected chunk Far LOD control plane does not own that future contract.
+- World Explorer and later game app crates own only platform executor
+  construction, surface/session cadence, raw events, and presentation
+  mechanics.
+- A future `mclone-scene` tactical composes the proven shared service and owns
+  world lifecycle, multiscale coverage/refinement, resident proxy lifecycle,
+  exact-painted snapshots, and exact/proxy arbitration. The rejected chunk
+  Far LOD control plane does not own that future contract.
 
 Do not put this policy in `mclone-native-client`, browser TypeScript, an app
 crate, or a renderer-only WGSL implementation.
+
+The compiler codec consumes worldgen-owned requests and opaque fixed-width
+correlation scalars. It does not depend on terrain-view tile or slot types;
+`mclone-terrain-view` translates between those compiler facts and its semantic
+tile/admission identity.
 
 ## Migration Plan
 
@@ -798,6 +826,38 @@ The adapter proved that stable records could cross a game renderer boundary,
 not that chunk tiles were the right future hierarchy. Tactical 245 removed it.
 A later architecture may consume the semantic vegetation products through a
 different spatial hierarchy.
+
+### Slice 5: reusable off-thread vegetation service — architecture locked
+
+Tactical
+[`256`](../tactical/256-shared-horizon-vegetation-worker-topology.md)
+owns this portability slice.
+
+1. wrap the existing preview product compiler/cache in a stateful shared
+   worldgen job session;
+2. add one WGPU-independent terrain-view coordinator over semantic desired
+   tiles and explicit physical-slot generations;
+3. preserve deterministic coarse-to-fine priority, one in-flight job, and one
+   admission per pump across executors;
+4. move native execution to one bounded worker thread with typed moved
+   products;
+5. move browser execution to one isolated Rust/Wasm actor with domain-blind
+   transport and a persistent external-SAB result arena;
+6. prove source, record hash, family counts, instances, cache behavior,
+   failure/restart, overflow, and shutdown parity; and
+7. leave a documented service-construction seam for later `mclone-scene`
+   adoption.
+
+The default Explorer currently contributes `48` record-capable tiles: sixteen
+each at sample spacings `1`, `2`, and `4`. Coarser clipmap levels retain
+continuous forest summaries and issue no individual-tree jobs. The
+coordinator accepts a validated desired set rather than baking that Explorer
+configuration into its ABI.
+
+This slice does not integrate the game scene. That later work adds the
+exact-painted coverage snapshot, cross-chunk crown XOR, authoritative edit
+invalidation, multiworld budgets, device rebuild, and mono/stereo/multiview
+presentation around the already proven service.
 
 ### Later generalization
 
@@ -962,16 +1022,22 @@ pixels:
 
 ## Recommended Next Work
 
-Keep the next implementation entirely in shared worldgen/Terrain Lab:
+Proceed with Tactical 256 as the next runtime-portability implementation:
 
-1. run `Cover` at the existing 65.5 km footprint;
-2. record CPU/GPU, sample-evaluation, packing, upload, and cache costs;
-3. replace pointwise values with scale-aware footprint filtering where coarse
-   forest edges, openings, or family mix alias;
-4. prove work remains proportional to the visible sample lattice;
-5. inspect fixed world anchors across multiple spacings; and
-6. retain exact tree records only at the already bounded near scales.
+1. land the shared compiler session and versioned product codec;
+2. prove the shared coordinator against fake executors before touching a
+   platform host;
+3. cut native over to its bounded thread and delete synchronous frame
+   compilation;
+4. add the isolated browser actor/external-SAB executor; and
+5. close on matched native/browser records, diagnostics, timings, and pixels.
 
-After that evidence, reconsider in-game terrain LOD as a separate architecture
-decision. Do not use the browser movement C5 defect or the landed adapter as a
-reason to broaden this tactical.
+The active Terrain Lab hierarchy work remains an independent presentation
+quality track: retain its 65.5 km work receipts, footprint filtering, and
+fixed-anchor inspection. It must not block moving already bounded near record
+compilation off presentation threads, and Tactical 256 must not change forest
+algorithms or representation thresholds merely to exercise the Worker path.
+
+After both bodies of evidence, open a separate `mclone-scene` integration
+tactical. Do not fold exact/proxy arbitration or authoritative edit behavior
+into the Explorer portability proof.
