@@ -17,7 +17,9 @@ use mclone_terrain_view::{
     TerrainPreviewMaterialAtlas,
 };
 use mclone_view_control::{WorldViewHeldDirection, WorldViewIntent, WorldViewState};
-use mclone_world_explorer::{WorldExplorerConfig, WorldExplorerSession};
+use mclone_world_explorer::{
+    NativeTerrainVegetationExecutor, WorldExplorerConfig, WorldExplorerSession,
+};
 
 use crate::options::{ExplorerAssetProfile, ExplorerOptions};
 
@@ -61,6 +63,7 @@ impl ExplorerTerrain {
                 rgba: assets.atlas.rgba(),
                 material_uvs: &material_uvs,
             },
+            Some(Box::new(NativeTerrainVegetationExecutor::new())),
         )
         .map_err(anyhow::Error::msg)?;
         Ok(Self {

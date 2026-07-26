@@ -469,6 +469,7 @@ impl WebWorldExplorer {
                 rgba: assets.atlas.rgba(),
                 material_uvs: &material_uvs,
             },
+            None,
         )?;
         if let Some(error) = device.pop_error_scope().await {
             return Err(format!(

@@ -11,20 +11,23 @@ use mclone_worldgen::levelgen::{
 use mclone_worldgen::terrain_preview::{
     TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS, TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING,
     TerrainPreviewComparison, TerrainPreviewCompileWork, TerrainPreviewContentStage,
-    TerrainPreviewProfile, TerrainPreviewReferenceGrid, TerrainPreviewSample,
-    TerrainPreviewSurfaceQuality, TerrainPreviewVegetationProduct, ValidatedTerrainPreviewRequest,
-    terrain_preview_gpu_compile_work,
+    TerrainPreviewProfile, TerrainPreviewReferenceGrid, TerrainPreviewRequest,
+    TerrainPreviewSample, TerrainPreviewSurfaceQuality, TerrainPreviewVegetationProduct,
+    ValidatedTerrainPreviewRequest, terrain_preview_gpu_compile_work,
 };
+use mclone_worldgen::terrain_vegetation::TerrainVegetationSourceIdentity;
 
 use super::{
     TERRAIN_PREVIEW_DEPTH_FORMAT, TERRAIN_PREVIEW_SAMPLE_BYTES, TERRAIN_PREVIEW_UNIFORM_BYTES,
     TERRAIN_PREVIEW_WORKGROUP_AXIS, TerrainClipmap, TerrainClipmapConfig,
     TerrainClipmapDiagnostics, TerrainClipmapTile, TerrainHorizonPresentation,
     TerrainPreviewCamera, TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource,
-    TerrainPreviewSplitLayout, TerrainViewportPlan, TerrainViewportTileId, parse_samples,
-    terrain_horizon_orbit_target_y, terrain_preview_compute_wgsl,
-    terrain_preview_focus_y_for_profile, terrain_preview_render_wgsl, terrain_preview_tree_wgsl,
-    viewport_uniform_bytes_for_request, viewport_uniform_bytes_for_request_with_presentation,
+    TerrainPreviewSplitLayout, TerrainVegetationCoordinator, TerrainVegetationCoordinatorState,
+    TerrainVegetationDesiredTile, TerrainVegetationExecutor, TerrainVegetationSlotToken,
+    TerrainViewportPlan, TerrainViewportTileId, parse_samples, terrain_horizon_orbit_target_y,
+    terrain_preview_compute_wgsl, terrain_preview_focus_y_for_profile, terrain_preview_render_wgsl,
+    terrain_preview_tree_wgsl, viewport_uniform_bytes_for_request,
+    viewport_uniform_bytes_for_request_with_presentation,
 };
 
 pub const TERRAIN_PREVIEW_MATERIAL_UV_COUNT: usize = 256;
@@ -40,7 +43,6 @@ pub struct TerrainPreviewMaterialAtlas<'a> {
 pub const TERRAIN_VIEWPORT_MAX_RESIDENT_TILES: usize = 192;
 pub const TERRAIN_VIEWPORT_TILE_COMPILES_PER_FRAME: usize = 4;
 pub const TERRAIN_VIEWPORT_GPU_DISPATCHES_PER_FRAME: usize = 16;
-pub const TERRAIN_HORIZON_VEGETATION_COMPILES_PER_FRAME: usize = 1;
 pub const TERRAIN_VIEWPORT_CPU_COMPILE_BUDGET_MICROS: u64 = 8_000;
 const TERRAIN_PREVIEW_TREE_INSTANCE_FLOATS: usize = 12;
 const TERRAIN_PREVIEW_TREE_INSTANCE_BYTES: u64 =
@@ -2138,11 +2140,12 @@ pub struct TerrainHorizonRenderer {
     clipmap: TerrainClipmap,
     slots: Vec<TerrainViewportGpuTile>,
     assignments: Vec<Option<TerrainClipmapTile>>,
+    slot_generations: Vec<u32>,
     ready: Vec<bool>,
     pending: VecDeque<TerrainClipmapTile>,
-    pending_vegetation: VecDeque<TerrainClipmapTile>,
-    vegetation_cache: Option<McloneOverworldVegetationPlanCache>,
-    vegetation_enabled: bool,
+    vegetation_executor: Option<Box<dyn TerrainVegetationExecutor>>,
+    vegetation_coordinator: Option<TerrainVegetationCoordinator>,
+    vegetation_error: Option<String>,
     seed: i64,
     content_stage: TerrainPreviewContentStage,
     dispatched_refills_total: u64,
@@ -2157,7 +2160,7 @@ impl TerrainHorizonRenderer {
         height: u32,
         material_atlas: TerrainPreviewMaterialAtlas<'_>,
         config: TerrainClipmapConfig,
-        vegetation_enabled: bool,
+        vegetation_executor: Option<Box<dyn TerrainVegetationExecutor>>,
     ) -> Result<Self, String> {
         Self::new_with_target_color_transform(
             device,
@@ -2167,7 +2170,7 @@ impl TerrainHorizonRenderer {
             height,
             material_atlas,
             config,
-            vegetation_enabled,
+            vegetation_executor,
             RenderTargetColorTransform::Identity,
         )
     }
@@ -2181,7 +2184,7 @@ impl TerrainHorizonRenderer {
         height: u32,
         material_atlas: TerrainPreviewMaterialAtlas<'_>,
         config: TerrainClipmapConfig,
-        vegetation_enabled: bool,
+        vegetation_executor: Option<Box<dyn TerrainVegetationExecutor>>,
         target_color_transform: RenderTargetColorTransform,
     ) -> Result<Self, String> {
         let clipmap = TerrainClipmap::new(config)?;
@@ -2223,11 +2226,12 @@ impl TerrainHorizonRenderer {
             clipmap,
             slots,
             assignments: vec![None; slot_count],
+            slot_generations: vec![0; slot_count],
             ready: vec![false; slot_count],
             pending: VecDeque::with_capacity(slot_count),
-            pending_vegetation: VecDeque::with_capacity(config.slots_per_level() as usize),
-            vegetation_cache: None,
-            vegetation_enabled,
+            vegetation_executor,
+            vegetation_coordinator: None,
+            vegetation_error: None,
             seed: 0,
             content_stage: TerrainPreviewContentStage::Cover,
             dispatched_refills_total: 0,
@@ -2256,8 +2260,6 @@ impl TerrainHorizonRenderer {
             self.assignments.fill(None);
             self.ready.fill(false);
             self.pending.clear();
-            self.pending_vegetation.clear();
-            self.vegetation_cache = None;
         }
         self.seed = seed;
         self.content_stage = content_stage;
@@ -2265,6 +2267,9 @@ impl TerrainHorizonRenderer {
         let update = self.clipmap.update_center(center_x, center_z);
         for tile in &update.refills {
             let slot = tile.physical_slot as usize;
+            self.slot_generations[slot] = self.slot_generations[slot]
+                .checked_add(1)
+                .expect("terrain vegetation slot generation exhausted");
             self.assignments[slot] = Some(*tile);
             self.ready[slot] = false;
             self.slots[slot].clear_vegetation();
@@ -2276,17 +2281,13 @@ impl TerrainHorizonRenderer {
                 .flatten()
                 == Some(*tile)
         });
-        self.pending_vegetation.retain(|tile| {
-            self.assignments
-                .get(tile.physical_slot as usize)
-                .copied()
-                .flatten()
-                == Some(*tile)
-        });
         for tile in update.refills {
             if !self.pending.contains(&tile) {
                 self.pending.push_back(tile);
             }
+        }
+        if let Err(error) = self.refresh_vegetation_desired(center_x, center_z) {
+            self.vegetation_error = Some(error);
         }
     }
 
@@ -2374,12 +2375,6 @@ impl TerrainHorizonRenderer {
             }
             slot.gpu_submitted = true;
             self.ready[slot_index] = true;
-            if self.vegetation_enabled
-                && tile.sample_spacing <= TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING
-                && !self.pending_vegetation.contains(&tile)
-            {
-                self.pending_vegetation.push_back(tile);
-            }
             dispatched_refills = dispatched_refills.saturating_add(1);
         }
         self.clipmap.note_refills_completed(dispatched_refills);
@@ -2387,34 +2382,31 @@ impl TerrainHorizonRenderer {
             .dispatched_refills_total
             .saturating_add(u64::from(dispatched_refills));
 
-        for _ in 0..TERRAIN_HORIZON_VEGETATION_COMPILES_PER_FRAME {
-            let Some(tile) = self.pending_vegetation.pop_front() else {
-                break;
-            };
-            let slot_index = tile.physical_slot as usize;
-            if self.assignments[slot_index] != Some(tile) || !self.ready[slot_index] {
-                continue;
+        if let Some(error) = self.vegetation_error.take() {
+            return Err(error);
+        }
+        if let Some(coordinator) = self.vegetation_coordinator.as_mut()
+            && let Some(admission) = coordinator.pump()
+        {
+            let slot_index = admission.identity.slot.physical_slot as usize;
+            if self.slot_generations.get(slot_index).copied()
+                != Some(admission.identity.slot.slot_generation)
+                || self
+                    .assignments
+                    .get(slot_index)
+                    .copied()
+                    .flatten()
+                    .is_none_or(|tile| {
+                        tile.tile_x != admission.identity.tile.tile_x
+                            || tile.tile_z != admission.identity.tile.tile_z
+                            || tile.sample_spacing != admission.identity.tile.sample_spacing
+                    })
+            {
+                return Err(
+                    "terrain vegetation coordinator admitted a mismatched physical slot".to_owned(),
+                );
             }
-            let tile_id = TerrainViewportTileId {
-                profile: TerrainPreviewProfile::McloneOverworldV1,
-                seed: self.seed,
-                tile_x: tile.tile_x,
-                tile_z: tile.tile_z,
-                sample_spacing: tile.sample_spacing,
-                content_stage: self.content_stage,
-                surface_quality: TerrainPreviewSurfaceQuality::Inferred,
-            };
-            let cache = self.vegetation_cache.get_or_insert_with(|| {
-                McloneOverworldVegetationPlanCache::new(McloneVegetationSource::new(
-                    self.seed,
-                    McloneOverworldSamplingTopology::Unbounded,
-                ))
-            });
-            let vegetation = TerrainPreviewVegetationProduct::compile_with_cache(
-                tile_id.preview_request(),
-                cache,
-            )?;
-            self.slots[slot_index].upload_vegetation(device, queue, vegetation)?;
+            self.slots[slot_index].upload_vegetation(device, queue, admission.product)?;
         }
 
         let levels = self.clipmap.levels();
@@ -2543,9 +2535,28 @@ impl TerrainHorizonRenderer {
             .iter()
             .filter(|slot| slot.vegetation.is_some())
             .count() as u32;
-        let target_ready = ready_slots == allocation_slots
-            && self.pending.is_empty()
-            && self.pending_vegetation.is_empty();
+        let (pending_vegetation_tiles, vegetation_settled) = self
+            .vegetation_coordinator
+            .as_ref()
+            .map(|coordinator| {
+                let diagnostics = coordinator.diagnostics();
+                let pending = diagnostics
+                    .queued_tiles
+                    .saturating_add(u32::from(diagnostics.in_flight));
+                let settled = match diagnostics.state {
+                    TerrainVegetationCoordinatorState::Running => {
+                        diagnostics.desired_tiles == diagnostics.resident_tiles && pending == 0
+                    }
+                    TerrainVegetationCoordinatorState::Failed
+                    | TerrainVegetationCoordinatorState::Terminated => true,
+                    TerrainVegetationCoordinatorState::Starting
+                    | TerrainVegetationCoordinatorState::ShuttingDown => false,
+                };
+                (pending, settled)
+            })
+            .unwrap_or((0, true));
+        let target_ready =
+            ready_slots == allocation_slots && self.pending.is_empty() && vegetation_settled;
         Ok(TerrainHorizonFrameStats {
             revision: self.clipmap.diagnostics().revision,
             allocation_slots,
@@ -2557,7 +2568,7 @@ impl TerrainHorizonRenderer {
             drawn_tiles,
             vertex_count,
             vegetation_ready_tiles,
-            pending_vegetation_tiles: self.pending_vegetation.len() as u32,
+            pending_vegetation_tiles,
             tree_instance_count,
             tree_proxy_vertex_count,
             fixed_resident_bytes,
@@ -2570,6 +2581,72 @@ impl TerrainHorizonRenderer {
             residency: self.clipmap.diagnostics(),
         })
     }
+
+    fn refresh_vegetation_desired(&mut self, focus_x: i32, focus_z: i32) -> Result<(), String> {
+        if self.vegetation_executor.is_none() && self.vegetation_coordinator.is_none() {
+            return Ok(());
+        }
+        let source = terrain_horizon_vegetation_source(self.seed, self.content_stage)?;
+        let desired = self
+            .clipmap
+            .levels()
+            .into_iter()
+            .filter(|level| level.sample_spacing <= TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING)
+            .flat_map(|level| level.tiles)
+            .map(|tile| TerrainVegetationDesiredTile {
+                tile: TerrainViewportTileId {
+                    profile: TerrainPreviewProfile::McloneOverworldV1,
+                    seed: self.seed,
+                    tile_x: tile.tile_x,
+                    tile_z: tile.tile_z,
+                    sample_spacing: tile.sample_spacing,
+                    content_stage: self.content_stage,
+                    surface_quality: TerrainPreviewSurfaceQuality::Inferred,
+                },
+                slot: TerrainVegetationSlotToken {
+                    physical_slot: tile.physical_slot,
+                    slot_generation: self.slot_generations[tile.physical_slot as usize],
+                },
+            })
+            .collect::<Vec<_>>();
+        if self.vegetation_coordinator.is_none() {
+            let executor = self
+                .vegetation_executor
+                .take()
+                .expect("checked terrain vegetation executor");
+            if desired.is_empty() {
+                return Err(
+                    "terrain vegetation was enabled for a clipmap with no record levels".to_owned(),
+                );
+            }
+            self.vegetation_coordinator = Some(TerrainVegetationCoordinator::new(
+                executor,
+                source,
+                desired.len(),
+            )?);
+        }
+        self.vegetation_coordinator
+            .as_mut()
+            .expect("created terrain vegetation coordinator")
+            .update_desired(source, focus_x, focus_z, desired)
+    }
+}
+
+fn terrain_horizon_vegetation_source(
+    seed: i64,
+    content_stage: TerrainPreviewContentStage,
+) -> Result<TerrainVegetationSourceIdentity, String> {
+    TerrainVegetationSourceIdentity::for_request(TerrainPreviewRequest {
+        profile: TerrainPreviewProfile::McloneOverworldV1,
+        seed,
+        center_x: 0,
+        center_z: 0,
+        sample_spacing: 1,
+        cells_per_axis: TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS,
+        topology: McloneOverworldSamplingTopology::Unbounded,
+        content_stage,
+        surface_quality: TerrainPreviewSurfaceQuality::Inferred,
+    })
 }
 
 fn tree_instance_bytes(

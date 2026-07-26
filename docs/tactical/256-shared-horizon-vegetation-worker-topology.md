@@ -1,7 +1,7 @@
 # Tactical 256: Shared Horizon Vegetation Worker Topology
 
-Status: active; architecture checkpoint and Slices 0–2 completed 2026-07-26.
-Slice 3 is next.
+Status: active; architecture checkpoint and Slices 0–3 completed 2026-07-26.
+Slice 4 is next.
 
 Topics:
 
@@ -509,12 +509,28 @@ complete terrain-view suite and Wasm check pass.
 
 ### Slice 3: native threaded cutover
 
+Status: complete 2026-07-26.
+
 1. Add the native bounded-channel executor and named worker thread.
 2. Pass it into World Explorer through the shared session boundary.
 3. Remove the renderer-owned vegetation queue/cache and every ordinary
    synchronous `compile_with_cache` call from `TerrainHorizonRenderer`.
 4. Prove no vegetation planning occurs on the render thread and inspect native
    movement, teleport, empty-region, and dense-forest pixels.
+
+The native Explorer now constructs one named `mclone-terrain-vegetation`
+thread with capacity-one typed request/completion channels. Source changes
+retire an active generation without joining it on the presentation thread;
+normal shutdown disconnects ingress, finishes active work, and joins on
+executor drop. `TerrainHorizonRenderer` owns no vegetation queue/cache and has
+zero synchronous `compile_with_cache` calls.
+
+Native-window and offscreen smoke passed with the pre-cutover semantic counts:
+the initial view admitted `1,726` trees / `165,696` bytes and the dense
+movement checkpoint admitted `5,267` / `505,632`. Movement frame p95 was
+`3.43 ms`; settle p95 was `3.21 ms`. Initial, movement, negative empty-region,
+teleport, map, and orbit captures were inspected under
+`/tmp/mclone-world-explorer-smoke`.
 
 ### Slice 4: browser Worker cutover
 

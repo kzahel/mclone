@@ -1,8 +1,8 @@
 //! Tactical 256 ownership and pre-cutover debt locks.
 //!
-//! These assertions intentionally pin the two current platform exceptions.
-//! Native and browser cutover slices replace those positive debt assertions
-//! with final-state absence assertions.
+//! These assertions track the staged platform cutovers. Native synchronous
+//! compilation is gone; the browser-disabled configuration remains the one
+//! named exception until Slice 4.
 
 const SESSION: &str = include_str!("../src/session.rs");
 const NATIVE_TERRAIN: &str = include_str!("../src/terrain.rs");
@@ -106,14 +106,14 @@ fn compiler_dependency_direction_stays_worldgen_to_terrain_view_consumer() {
 }
 
 #[test]
-fn pre_cutover_horizon_debt_is_single_and_named() {
+fn native_cutover_removes_horizon_sync_while_browser_debt_stays_named() {
     let horizon = braced_item(TERRAIN_VIEW_RENDERER, "impl TerrainHorizonRenderer {");
     assert_eq!(
         horizon
             .matches("TerrainPreviewVegetationProduct::compile_with_cache(")
             .count(),
-        1,
-        "the Horizon pre-cutover synchronous compiler debt changed"
+        0,
+        "the Horizon renderer regained synchronous vegetation compilation"
     );
     assert_eq!(
         NATIVE_TERRAIN.matches("vegetation_enabled: true").count(),

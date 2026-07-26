@@ -4,7 +4,7 @@ use mclone_render_color::{RenderColorProfile, RenderTargetColorTransform};
 use mclone_terrain_view::{
     TerrainClipmapConfig, TerrainHorizonFrameStats, TerrainHorizonPresentation,
     TerrainHorizonRenderer, TerrainPreviewCamera, TerrainPreviewMaterialAtlas,
-    TerrainPreviewProjectionKind, TerrainPreviewView,
+    TerrainPreviewProjectionKind, TerrainPreviewView, TerrainVegetationExecutor,
 };
 use mclone_view_control::{
     ContactEvent, ContactGestureReducer, ViewPoint, ViewportMetrics, WorldViewHeldDirection,
@@ -48,7 +48,13 @@ impl WorldExplorerSession {
         color_format: wgpu::TextureFormat,
         config: WorldExplorerConfig,
         material_atlas: TerrainPreviewMaterialAtlas<'_>,
+        vegetation_executor: Option<Box<dyn TerrainVegetationExecutor>>,
     ) -> Result<Self, String> {
+        if config.vegetation_enabled != vegetation_executor.is_some() {
+            return Err(
+                "World Explorer vegetation enablement must match executor availability".to_owned(),
+            );
+        }
         let view_reducer = WorldViewReducer::default();
         let view_state = view_reducer.normalize(config.initial_view);
         let target_color_transform = config.color_profile.target_color_transform(color_format);
@@ -60,7 +66,7 @@ impl WorldExplorerSession {
             config.height,
             material_atlas,
             config.clipmap,
-            config.vegetation_enabled,
+            vegetation_executor,
             target_color_transform,
         )?;
         let mut session = Self {
