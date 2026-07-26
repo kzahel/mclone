@@ -5,7 +5,7 @@ use crate::noise::{GradientNoise2d, SeedDomain, ValueNoise2d};
 use super::coast::{McloneOverworldCoastIntent, coast_adjusted_land_surface_y, coast_intent};
 
 pub const MCLONE_OVERWORLD_SEA_LEVEL: i32 = 63;
-pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-19";
+pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-20";
 pub const MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS: i32 = 2;
 pub const MCLONE_OVERWORLD_PERIOD_BLOCKS: i32 = 6_144;
 pub const MCLONE_OVERWORLD_PERIOD_CHUNKS: u32 = 384;
@@ -391,9 +391,50 @@ pub struct McloneOverworldTerrainSample {
     pub surface_y: i32,
 }
 
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub enum McloneOverworldLandformFamily {
+    QuietPlain,
+    RollingUpland,
+    RidgeValley,
+    BroadBasin,
+    MountainRange,
+}
+
+impl McloneOverworldLandformFamily {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::QuietPlain => "quiet plain",
+            Self::RollingUpland => "rolling upland",
+            Self::RidgeValley => "ridge-and-valley",
+            Self::BroadBasin => "broad basin",
+            Self::MountainRange => "mountain range",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct McloneOverworldLandformIntent {
+    pub family: McloneOverworldLandformFamily,
+    pub inland_strength: f64,
+    pub quiet_strength: f64,
+    pub rolling_strength: f64,
+    pub ridge_valley_strength: f64,
+    pub basin_strength: f64,
+    pub mountain_strength: f64,
+}
+
 impl McloneOverworldTerrainSample {
+    pub fn landform_intent(self) -> McloneOverworldLandformIntent {
+        landform_intent(
+            self.continentalness,
+            self.relief,
+            self.ruggedness,
+            self.ridges,
+        )
+    }
+
     pub fn mountain_strength(self) -> f64 {
-        mountain_strength(self.continentalness, self.ruggedness)
+        self.landform_intent().mountain_strength
     }
 
     pub fn exposure(self) -> f64 {
@@ -1117,6 +1158,83 @@ fn mountain_strength(continentalness: f64, ruggedness: f64) -> f64 {
     inland * region
 }
 
+fn landform_intent(
+    continentalness: f64,
+    relief: f64,
+    ruggedness: f64,
+    ridges: f64,
+) -> McloneOverworldLandformIntent {
+    let inland_strength = if continentalness <= 0.0 {
+        0.0
+    } else {
+        0.28 + smoothstep((continentalness / 0.42).clamp(0.0, 1.0)) * 0.72
+    };
+    let relief_energy = smoothstep(((relief.abs() - 0.03) / 0.62).clamp(0.0, 1.0));
+    let rolling_region = 1.0 - smoothstep(((ruggedness + 0.58) / 0.88).clamp(0.0, 1.0));
+    let rolling_strength = inland_strength * rolling_region * (0.28 + relief_energy * 0.72);
+    let ridge_region = smoothstep(((ruggedness + 0.62) / 0.72).clamp(0.0, 1.0))
+        * (1.0 - smoothstep(((ruggedness - 0.08) / 0.62).clamp(0.0, 1.0)));
+    let ridge_expression = smoothstep(((ridges - 0.08) / 0.92).clamp(0.0, 1.0));
+    let ridge_valley_strength = inland_strength * ridge_region * (0.72 + ridge_expression * 0.28);
+    let mountain_strength = mountain_strength(continentalness, ruggedness);
+    let basin_strength = inland_strength
+        * smoothstep(((-relief - 0.04) / 0.56).clamp(0.0, 1.0))
+        * (1.0 - mountain_strength * 0.55);
+    let structural_strength = rolling_strength
+        .max(ridge_valley_strength)
+        .max(basin_strength)
+        .max(mountain_strength);
+    let quiet_strength =
+        inland_strength * (1.0 - smoothstep(((structural_strength - 0.12) / 0.55).clamp(0.0, 1.0)));
+
+    let quiet_family_score = inland_strength
+        * (1.0 - smoothstep(((ruggedness + 0.50) / 0.50).clamp(0.0, 1.0)))
+        * (1.0 - relief_energy * 0.45);
+    let rolling_family_score = inland_strength
+        * smoothstep(((ruggedness + 0.80) / 0.50).clamp(0.0, 1.0))
+        * (1.0 - smoothstep(((ruggedness + 0.10) / 0.35).clamp(0.0, 1.0)))
+        * (0.65 + relief_energy * 0.35);
+    let basin_family_score =
+        inland_strength * smoothstep(((basin_strength - 0.58) / 0.32).clamp(0.0, 1.0));
+    let weighted = [
+        (
+            quiet_family_score,
+            McloneOverworldLandformFamily::QuietPlain,
+        ),
+        (
+            rolling_family_score,
+            McloneOverworldLandformFamily::RollingUpland,
+        ),
+        (
+            ridge_valley_strength,
+            McloneOverworldLandformFamily::RidgeValley,
+        ),
+        (
+            basin_family_score * 1.10,
+            McloneOverworldLandformFamily::BroadBasin,
+        ),
+        (
+            mountain_strength * 1.15,
+            McloneOverworldLandformFamily::MountainRange,
+        ),
+    ];
+    let family = weighted
+        .into_iter()
+        .max_by(|left, right| left.0.total_cmp(&right.0))
+        .expect("landform intent has a fixed non-empty family set")
+        .1;
+
+    McloneOverworldLandformIntent {
+        family,
+        inland_strength,
+        quiet_strength,
+        rolling_strength,
+        ridge_valley_strength,
+        basin_strength,
+        mountain_strength,
+    }
+}
+
 fn smoothstep(value: f64) -> f64 {
     value * value * (3.0 - 2.0 * value)
 }
@@ -1423,6 +1541,61 @@ mod tests {
         assert_eq!(mountain_strength(1.0, 0.7), 1.0);
         assert!(mountain_strength(0.3, 0.3) > 0.0);
         assert!(mountain_strength(0.3, 0.3) < 1.0);
+    }
+
+    #[test]
+    fn landform_intent_names_distinct_existing_field_relations() {
+        let cases = [
+            (
+                landform_intent(0.5, 0.0, -1.0, 0.2),
+                McloneOverworldLandformFamily::QuietPlain,
+            ),
+            (
+                landform_intent(0.5, 0.8, -0.5, 0.2),
+                McloneOverworldLandformFamily::RollingUpland,
+            ),
+            (
+                landform_intent(0.5, 0.4, 0.0, 0.8),
+                McloneOverworldLandformFamily::RidgeValley,
+            ),
+            (
+                landform_intent(0.5, -0.8, -0.2, 0.2),
+                McloneOverworldLandformFamily::BroadBasin,
+            ),
+            (
+                landform_intent(1.0, 0.0, 0.8, 0.8),
+                McloneOverworldLandformFamily::MountainRange,
+            ),
+        ];
+
+        for (intent, expected) in cases {
+            assert_eq!(intent.family, expected, "{intent:?}");
+        }
+    }
+
+    #[test]
+    fn landform_intent_strengths_are_bounded_and_periodic() {
+        let sampler = McloneOverworldSampler::new_with_topology(
+            -98_765,
+            McloneOverworldSamplingTopology::PeriodicX,
+        );
+        for z in [-6_145, -1, 0, 1, 6_145] {
+            let left = sampler.sample(-1, z).landform_intent();
+            let right = sampler
+                .sample(MCLONE_OVERWORLD_PERIOD_BLOCKS - 1, z)
+                .landform_intent();
+            assert_eq!(left, right);
+            for strength in [
+                left.inland_strength,
+                left.quiet_strength,
+                left.rolling_strength,
+                left.ridge_valley_strength,
+                left.basin_strength,
+                left.mountain_strength,
+            ] {
+                assert!((0.0..=1.0).contains(&strength), "{left:?}");
+            }
+        }
     }
 
     #[test]

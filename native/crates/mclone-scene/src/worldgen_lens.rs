@@ -302,11 +302,11 @@ fn landform_color(kind: McloneOverworldLandformKind) -> [f32; 4] {
         McloneOverworldLandformKind::Coast => [0.94, 0.76, 0.24],
         McloneOverworldLandformKind::River => [0.02, 0.78, 1.0],
         McloneOverworldLandformKind::Wetland => [0.05, 0.68, 0.55],
-        McloneOverworldLandformKind::Lowland => [0.40, 0.86, 0.16],
-        McloneOverworldLandformKind::Upland => [0.76, 0.58, 0.13],
-        McloneOverworldLandformKind::MountainValley => [0.55, 0.30, 0.82],
-        McloneOverworldLandformKind::MountainShoulder => [0.90, 0.24, 0.62],
-        McloneOverworldLandformKind::MountainMassif => [0.82, 0.82, 0.86],
+        McloneOverworldLandformKind::QuietPlain => [0.48, 0.78, 0.30],
+        McloneOverworldLandformKind::RollingUpland => [0.78, 0.58, 0.18],
+        McloneOverworldLandformKind::RidgeValley => [0.72, 0.32, 0.76],
+        McloneOverworldLandformKind::BroadBasin => [0.16, 0.62, 0.44],
+        McloneOverworldLandformKind::MountainRange => [0.82, 0.82, 0.86],
     };
     with_alpha(rgb, COLOR_ALPHA)
 }

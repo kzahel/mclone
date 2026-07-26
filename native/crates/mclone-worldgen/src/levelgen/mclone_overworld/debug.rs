@@ -1,6 +1,7 @@
 use super::biomes::{McloneOverworldBiomeDecision, mclone_overworld_biome_decision};
 use super::fields::{
-    McloneOverworldLandformSample, McloneOverworldSampler, McloneOverworldSamplingTopology,
+    McloneOverworldLandformFamily, McloneOverworldLandformIntent, McloneOverworldLandformSample,
+    McloneOverworldSampler, McloneOverworldSamplingTopology,
 };
 use super::surface::{McloneOverworldSurfaceRecipe, mclone_overworld_surface_recipe};
 use super::terrain::sample_mclone_overworld_landform_with_streams;
@@ -14,11 +15,11 @@ pub enum McloneOverworldLandformKind {
     Coast,
     River,
     Wetland,
-    Lowland,
-    Upland,
-    MountainValley,
-    MountainShoulder,
-    MountainMassif,
+    QuietPlain,
+    RollingUpland,
+    RidgeValley,
+    BroadBasin,
+    MountainRange,
 }
 
 impl McloneOverworldLandformKind {
@@ -28,11 +29,11 @@ impl McloneOverworldLandformKind {
             Self::Coast => "coast",
             Self::River => "river channel",
             Self::Wetland => "wetland",
-            Self::Lowland => "lowland",
-            Self::Upland => "upland",
-            Self::MountainValley => "mountain valley",
-            Self::MountainShoulder => "mountain shoulder",
-            Self::MountainMassif => "mountain massif",
+            Self::QuietPlain => "quiet plain",
+            Self::RollingUpland => "rolling upland",
+            Self::RidgeValley => "ridge-and-valley",
+            Self::BroadBasin => "broad basin",
+            Self::MountainRange => "mountain range",
         }
     }
 }
@@ -69,6 +70,7 @@ pub struct McloneOverworldDebugSample {
     pub quart_x: i32,
     pub quart_z: i32,
     pub landform_sample: McloneOverworldLandformSample,
+    pub landform_intent: McloneOverworldLandformIntent,
     pub biome: McloneOverworldBiomeDecision,
     pub landform: McloneOverworldLandformKind,
     pub surface: McloneOverworldSurfaceRecipe,
@@ -107,6 +109,7 @@ fn debug_sample_from_landform(
     landform_sample: McloneOverworldLandformSample,
     planned_stream_start: Option<ChunkPos>,
 ) -> McloneOverworldDebugSample {
+    let landform_intent = landform_sample.terrain.landform_intent();
     McloneOverworldDebugSample {
         world_x,
         world_z,
@@ -118,6 +121,7 @@ fn debug_sample_from_landform(
         hydrology: debug_hydrology_kind(landform_sample),
         planned_stream_start,
         landform_sample,
+        landform_intent,
     }
 }
 
@@ -134,16 +138,18 @@ pub fn mclone_overworld_landform_kind(
         McloneOverworldLandformKind::Ocean
     } else if terrain.coast.family.is_coast() && terrain.coast.proximity >= 0.12 {
         McloneOverworldLandformKind::Coast
-    } else if terrain.is_mountain_valley() {
-        McloneOverworldLandformKind::MountainValley
-    } else if terrain.is_open_mountain_shoulder() {
-        McloneOverworldLandformKind::MountainShoulder
-    } else if terrain.mountain_strength() >= 0.35 || terrain.surface_y >= 96 {
-        McloneOverworldLandformKind::MountainMassif
-    } else if terrain.surface_y >= 75 {
-        McloneOverworldLandformKind::Upland
     } else {
-        McloneOverworldLandformKind::Lowland
+        match terrain.landform_intent().family {
+            McloneOverworldLandformFamily::QuietPlain => McloneOverworldLandformKind::QuietPlain,
+            McloneOverworldLandformFamily::RollingUpland => {
+                McloneOverworldLandformKind::RollingUpland
+            }
+            McloneOverworldLandformFamily::RidgeValley => McloneOverworldLandformKind::RidgeValley,
+            McloneOverworldLandformFamily::BroadBasin => McloneOverworldLandformKind::BroadBasin,
+            McloneOverworldLandformFamily::MountainRange => {
+                McloneOverworldLandformKind::MountainRange
+            }
+        }
     }
 }
 

@@ -1180,11 +1180,11 @@ const fn landform_kind_code(kind: McloneOverworldLandformKind) -> f32 {
         McloneOverworldLandformKind::Coast => 1.0,
         McloneOverworldLandformKind::River => 2.0,
         McloneOverworldLandformKind::Wetland => 3.0,
-        McloneOverworldLandformKind::Lowland => 4.0,
-        McloneOverworldLandformKind::Upland => 5.0,
-        McloneOverworldLandformKind::MountainValley => 6.0,
-        McloneOverworldLandformKind::MountainShoulder => 7.0,
-        McloneOverworldLandformKind::MountainMassif => 8.0,
+        McloneOverworldLandformKind::QuietPlain => 4.0,
+        McloneOverworldLandformKind::RollingUpland => 5.0,
+        McloneOverworldLandformKind::RidgeValley => 6.0,
+        McloneOverworldLandformKind::BroadBasin => 7.0,
+        McloneOverworldLandformKind::MountainRange => 8.0,
     }
 }
 

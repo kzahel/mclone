@@ -1,4 +1,4 @@
-#![recursion_limit = "256"]
+#![recursion_limit = "512"]
 
 use std::collections::{BTreeSet, VecDeque};
 use std::fs;
@@ -15,15 +15,15 @@ use mclone_worldgen::levelgen::{
     MCLONE_OVERWORLD_RIVER_BIOME_ID, MCLONE_OVERWORLD_SAVANNA_BIOME_ID, MCLONE_OVERWORLD_SEA_LEVEL,
     MCLONE_OVERWORLD_SNOWY_MOUNTAINS_BIOME_ID, MCLONE_OVERWORLD_STREAM_REFERENCE_RADIUS_CHUNKS,
     MCLONE_OVERWORLD_TAIGA_BIOME_ID, McloneOverworldBiomeRecipe, McloneOverworldCoastFamily,
-    McloneOverworldLandformSample, McloneOverworldSampleRegion, McloneOverworldSampleRegionRequest,
-    McloneOverworldSampler, McloneOverworldSamplingTopology, McloneOverworldSteppeBand,
-    McloneOverworldStreamPlan, McloneOverworldStreamPlanAttempt, McloneOverworldStreamPlanner,
-    McloneOverworldStreamRejection, McloneOverworldSurfaceRecipe, McloneOverworldTerrainSample,
-    OCEAN_BIOME_ID, PLAINS_BIOME_ID, analyze_mclone_overworld_hydraulic_closure,
-    mclone_overworld_biome_id_for_sample, mclone_overworld_biome_recipe,
-    mclone_overworld_spawn_chunk, mclone_overworld_spawn_chunk_with_topology,
-    mclone_overworld_steppe_band, mclone_overworld_steppe_suitability,
-    mclone_overworld_surface_recipe,
+    McloneOverworldLandformFamily, McloneOverworldLandformSample, McloneOverworldSampleRegion,
+    McloneOverworldSampleRegionRequest, McloneOverworldSampler, McloneOverworldSamplingTopology,
+    McloneOverworldSteppeBand, McloneOverworldStreamPlan, McloneOverworldStreamPlanAttempt,
+    McloneOverworldStreamPlanner, McloneOverworldStreamRejection, McloneOverworldSurfaceRecipe,
+    McloneOverworldTerrainSample, OCEAN_BIOME_ID, PLAINS_BIOME_ID,
+    analyze_mclone_overworld_hydraulic_closure, mclone_overworld_biome_id_for_sample,
+    mclone_overworld_biome_recipe, mclone_overworld_spawn_chunk,
+    mclone_overworld_spawn_chunk_with_topology, mclone_overworld_steppe_band,
+    mclone_overworld_steppe_suitability, mclone_overworld_surface_recipe,
 };
 
 const DEFAULT_OUTPUT_DIR: &str = "/tmp/mclone-overworld-review";
@@ -94,6 +94,7 @@ fn run() -> Result<()> {
         .collect::<Vec<_>>();
     let landform_elapsed_ms = landform_start.elapsed().as_secs_f64() * 1_000.0;
     let facts = RegionFacts::from_samples(&landforms, request.width, request.depth);
+    let landform_intent_facts = LandformIntentFacts::from_samples(&region.samples);
     let coast_facts =
         CoastFacts::from_samples(&landforms, request.width, request.depth, request.step);
     let steppe_components = recipe_component_stats(
@@ -153,6 +154,27 @@ fn run() -> Result<()> {
     let mountain_detail_path = config
         .output_dir
         .join(format!("{prefix}-mountain-detail.png"));
+    let landform_family_path = config
+        .output_dir
+        .join(format!("{prefix}-landform-family.png"));
+    let quiet_strength_path = config
+        .output_dir
+        .join(format!("{prefix}-quiet-strength.png"));
+    let rolling_strength_path = config
+        .output_dir
+        .join(format!("{prefix}-rolling-strength.png"));
+    let ridge_valley_strength_path = config
+        .output_dir
+        .join(format!("{prefix}-ridge-valley-strength.png"));
+    let basin_strength_path = config
+        .output_dir
+        .join(format!("{prefix}-basin-strength.png"));
+    let mountain_strength_path = config
+        .output_dir
+        .join(format!("{prefix}-mountain-strength.png"));
+    let landform_intent_path = config
+        .output_dir
+        .join(format!("{prefix}-landform-intent.png"));
     let coast_selector_path = config
         .output_dir
         .join(format!("{prefix}-coast-selector.png"));
@@ -229,6 +251,12 @@ fn run() -> Result<()> {
     let ruggedness = render_map(&region.samples, ruggedness_color);
     let ridges = render_map(&region.samples, ridges_color);
     let mountain_detail = render_map(&region.samples, mountain_detail_color);
+    let landform_family = render_map(&region.samples, landform_family_color);
+    let quiet_strength = render_map(&region.samples, quiet_strength_color);
+    let rolling_strength = render_map(&region.samples, rolling_strength_color);
+    let ridge_valley_strength = render_map(&region.samples, ridge_valley_strength_color);
+    let basin_strength = render_map(&region.samples, basin_strength_color);
+    let mountain_strength = render_map(&region.samples, mountain_strength_color);
     let coast_selector = render_map(&region.samples, coast_selector_color);
     let coast_family = render_map(&region.samples, coast_family_color);
     let coast_transition = render_map(&region.samples, coast_transition_color);
@@ -272,6 +300,60 @@ fn run() -> Result<()> {
         request.width,
         request.depth,
         &mountain_detail,
+    )?;
+    save_rgba(
+        &landform_family_path,
+        request.width,
+        request.depth,
+        &landform_family,
+    )?;
+    save_rgba(
+        &quiet_strength_path,
+        request.width,
+        request.depth,
+        &quiet_strength,
+    )?;
+    save_rgba(
+        &rolling_strength_path,
+        request.width,
+        request.depth,
+        &rolling_strength,
+    )?;
+    save_rgba(
+        &ridge_valley_strength_path,
+        request.width,
+        request.depth,
+        &ridge_valley_strength,
+    )?;
+    save_rgba(
+        &basin_strength_path,
+        request.width,
+        request.depth,
+        &basin_strength,
+    )?;
+    save_rgba(
+        &mountain_strength_path,
+        request.width,
+        request.depth,
+        &mountain_strength,
+    )?;
+    let landform_intent = combine_maps(
+        request.width,
+        request.depth,
+        [
+            &landform_family,
+            &quiet_strength,
+            &rolling_strength,
+            &ridge_valley_strength,
+            &basin_strength,
+            &mountain_strength,
+        ],
+    );
+    save_rgba(
+        &landform_intent_path,
+        request.width * 6 + MAP_GAP_PIXELS * 5,
+        request.depth,
+        &landform_intent,
     )?;
     save_rgba(
         &coast_selector_path,
@@ -516,7 +598,7 @@ fn run() -> Result<()> {
 
     let (commit, dirty) = git_state();
     let receipt = serde_json::json!({
-        "schema": 17,
+        "schema": 18,
         "profile": "mclone-overworld-v1",
         "topology": config.topology.label(),
         "fieldRevision": MCLONE_OVERWORLD_FIELD_REVISION,
@@ -613,6 +695,7 @@ fn run() -> Result<()> {
             "dryLand": facts.dry_land_columns,
         },
         "coastMetrics": coast_facts.to_json(),
+        "landformIntent": landform_intent_facts.to_json(),
         "biomeCounts": {
             "ocean": facts.ocean_biome_columns,
             "beach": facts.beach_biome_columns,
@@ -720,6 +803,21 @@ fn run() -> Result<()> {
             "ruggedness": ruggedness_path,
             "ridges": ridges_path,
             "mountainDetail": mountain_detail_path,
+            "landformIntentOrder": [
+                "dominantFamily",
+                "quietStrength",
+                "rollingStrength",
+                "ridgeValleyStrength",
+                "basinStrength",
+                "mountainStrength",
+            ],
+            "landformIntent": landform_intent_path,
+            "landformFamily": landform_family_path,
+            "quietStrength": quiet_strength_path,
+            "rollingStrength": rolling_strength_path,
+            "ridgeValleyStrength": ridge_valley_strength_path,
+            "basinStrength": basin_strength_path,
+            "mountainStrength": mountain_strength_path,
             "surfaceY": surface_path,
             "baseSurfaceY": base_surface_path,
             "coastGeometryOrder": [
@@ -1280,6 +1378,7 @@ fn review_site_json(
 
 fn sample_json(sample: McloneOverworldLandformSample) -> serde_json::Value {
     let terrain = sample.terrain;
+    let landform_intent = terrain.landform_intent();
     serde_json::json!({
         "continentalness": terrain.continentalness,
         "relief": terrain.relief,
@@ -1287,6 +1386,15 @@ fn sample_json(sample: McloneOverworldLandformSample) -> serde_json::Value {
         "ridges": terrain.ridges,
         "mountainDetail": terrain.mountain_detail,
         "mountainStrength": terrain.mountain_strength(),
+        "landformIntent": {
+            "family": landform_intent.family.label(),
+            "inlandStrength": landform_intent.inland_strength,
+            "quietStrength": landform_intent.quiet_strength,
+            "rollingStrength": landform_intent.rolling_strength,
+            "ridgeValleyStrength": landform_intent.ridge_valley_strength,
+            "basinStrength": landform_intent.basin_strength,
+            "mountainStrength": landform_intent.mountain_strength,
+        },
         "coast": {
             "family": terrain.coast.family.label(),
             "signedDistanceProxy": terrain.coast.signed_distance_proxy,
@@ -1422,6 +1530,88 @@ fn usage() -> &'static str {
     "usage: mclone-overworld-review [--output-dir PATH] [--seed I64] \
      [--chunk-x I32] [--chunk-z I32] [--radius-blocks U32] \
      [--step-blocks U32] [--topology plane|cylinder-x:384]"
+}
+
+#[derive(Clone, Debug)]
+struct LandformIntentFacts {
+    dry_land_columns: usize,
+    quiet_columns: usize,
+    rolling_columns: usize,
+    ridge_valley_columns: usize,
+    basin_columns: usize,
+    mountain_columns: usize,
+    strength_ranges: [[f64; 2]; 6],
+}
+
+impl LandformIntentFacts {
+    fn from_samples(samples: &[McloneOverworldTerrainSample]) -> Self {
+        let mut facts = Self {
+            dry_land_columns: 0,
+            quiet_columns: 0,
+            rolling_columns: 0,
+            ridge_valley_columns: 0,
+            basin_columns: 0,
+            mountain_columns: 0,
+            strength_ranges: [[f64::INFINITY, f64::NEG_INFINITY]; 6],
+        };
+        for sample in samples.iter().copied() {
+            if sample.continentalness <= 0.0 {
+                continue;
+            }
+            facts.dry_land_columns += 1;
+            let intent = sample.landform_intent();
+            match intent.family {
+                McloneOverworldLandformFamily::QuietPlain => facts.quiet_columns += 1,
+                McloneOverworldLandformFamily::RollingUpland => facts.rolling_columns += 1,
+                McloneOverworldLandformFamily::RidgeValley => {
+                    facts.ridge_valley_columns += 1;
+                }
+                McloneOverworldLandformFamily::BroadBasin => facts.basin_columns += 1,
+                McloneOverworldLandformFamily::MountainRange => facts.mountain_columns += 1,
+            }
+            for (range, strength) in facts.strength_ranges.iter_mut().zip([
+                intent.inland_strength,
+                intent.quiet_strength,
+                intent.rolling_strength,
+                intent.ridge_valley_strength,
+                intent.basin_strength,
+                intent.mountain_strength,
+            ]) {
+                range[0] = range[0].min(strength);
+                range[1] = range[1].max(strength);
+            }
+        }
+        if facts.dry_land_columns == 0 {
+            facts.strength_ranges = [[0.0, 0.0]; 6];
+        }
+        facts
+    }
+
+    fn to_json(&self) -> serde_json::Value {
+        serde_json::json!({
+            "definition": {
+                "family": "weighted diagnostic winner over continuous strengths",
+                "population": "continentalness > 0 sampled columns",
+                "persistence": "reconstructible terrain fact, not a persisted biome ID",
+            },
+            "dryLandColumns": self.dry_land_columns,
+            "dominantFamilyCounts": {
+                "quietPlain": self.quiet_columns,
+                "rollingUpland": self.rolling_columns,
+                "ridgeValley": self.ridge_valley_columns,
+                "broadBasin": self.basin_columns,
+                "mountainRange": self.mountain_columns,
+            },
+            "strengthRanges": {
+                "inland": self.strength_ranges[0],
+                "quiet": self.strength_ranges[1],
+                "rolling": self.strength_ranges[2],
+                "ridgeValley": self.strength_ranges[3],
+                "basin": self.strength_ranges[4],
+                "mountain": self.strength_ranges[5],
+            },
+        })
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -2990,6 +3180,70 @@ fn mountain_detail_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
             sample.mountain_detail,
         )
     }
+}
+
+fn landform_family_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    if sample.continentalness <= 0.0 {
+        return [20, 52, 108, 255];
+    }
+    match sample.landform_intent().family {
+        McloneOverworldLandformFamily::QuietPlain => [122, 199, 77, 255],
+        McloneOverworldLandformFamily::RollingUpland => [199, 148, 46, 255],
+        McloneOverworldLandformFamily::RidgeValley => [184, 82, 194, 255],
+        McloneOverworldLandformFamily::BroadBasin => [41, 158, 112, 255],
+        McloneOverworldLandformFamily::MountainRange => [209, 209, 219, 255],
+    }
+}
+
+fn landform_strength_color(
+    sample: McloneOverworldTerrainSample,
+    strength: f64,
+    color: [u8; 4],
+) -> [u8; 4] {
+    if sample.continentalness <= 0.0 {
+        return [20, 52, 108, 255];
+    }
+    lerp_color([27, 34, 35, 255], color, strength)
+}
+
+fn quiet_strength_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    landform_strength_color(
+        sample,
+        sample.landform_intent().quiet_strength,
+        [122, 199, 77, 255],
+    )
+}
+
+fn rolling_strength_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    landform_strength_color(
+        sample,
+        sample.landform_intent().rolling_strength,
+        [199, 148, 46, 255],
+    )
+}
+
+fn ridge_valley_strength_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    landform_strength_color(
+        sample,
+        sample.landform_intent().ridge_valley_strength,
+        [184, 82, 194, 255],
+    )
+}
+
+fn basin_strength_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    landform_strength_color(
+        sample,
+        sample.landform_intent().basin_strength,
+        [41, 158, 112, 255],
+    )
+}
+
+fn mountain_strength_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    landform_strength_color(
+        sample,
+        sample.landform_intent().mountain_strength,
+        [209, 209, 219, 255],
+    )
 }
 
 fn surface_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {

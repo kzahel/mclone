@@ -286,6 +286,77 @@ fn mountain_strength(continentalness: f32, ruggedness: f32) -> f32 {
     return inland * region;
 }
 
+fn landform_family_code(
+    continentalness: f32,
+    relief: f32,
+    ruggedness: f32,
+    ridges: f32,
+) -> f32 {
+    var inland_strength = 0.0;
+    if continentalness > 0.0 {
+        inland_strength =
+            0.28 + smooth_curve(clamp(continentalness / 0.42, 0.0, 1.0)) * 0.72;
+    }
+    let relief_energy =
+        smooth_curve(clamp((abs(relief) - 0.03) / 0.62, 0.0, 1.0));
+    let rolling_region =
+        1.0 - smooth_curve(clamp((ruggedness + 0.58) / 0.88, 0.0, 1.0));
+    let rolling_strength =
+        inland_strength * rolling_region * (0.28 + relief_energy * 0.72);
+    let ridge_region =
+        smooth_curve(clamp((ruggedness + 0.62) / 0.72, 0.0, 1.0))
+        * (1.0 - smooth_curve(clamp((ruggedness - 0.08) / 0.62, 0.0, 1.0)));
+    let ridge_expression =
+        smooth_curve(clamp((ridges - 0.08) / 0.92, 0.0, 1.0));
+    let ridge_valley_strength =
+        inland_strength * ridge_region * (0.72 + ridge_expression * 0.28);
+    let mountain = mountain_strength(continentalness, ruggedness);
+    let basin_strength =
+        inland_strength
+        * smooth_curve(clamp((-relief - 0.04) / 0.56, 0.0, 1.0))
+        * (1.0 - mountain * 0.55);
+    let structural_strength = max(
+        max(rolling_strength, ridge_valley_strength),
+        max(basin_strength, mountain),
+    );
+    let quiet_strength =
+        inland_strength
+        * (1.0
+            - smooth_curve(clamp((structural_strength - 0.12) / 0.55, 0.0, 1.0)));
+
+    let quiet_family_score =
+        inland_strength
+        * (1.0 - smooth_curve(clamp((ruggedness + 0.50) / 0.50, 0.0, 1.0)))
+        * (1.0 - relief_energy * 0.45);
+    let rolling_family_score =
+        inland_strength
+        * smooth_curve(clamp((ruggedness + 0.80) / 0.50, 0.0, 1.0))
+        * (1.0 - smooth_curve(clamp((ruggedness + 0.10) / 0.35, 0.0, 1.0)))
+        * (0.65 + relief_energy * 0.35);
+    let basin_family_score =
+        inland_strength
+        * smooth_curve(clamp((basin_strength - 0.58) / 0.32, 0.0, 1.0));
+
+    var score = quiet_family_score;
+    var family = 4.0;
+    if rolling_family_score >= score {
+        score = rolling_family_score;
+        family = 5.0;
+    }
+    if ridge_valley_strength >= score {
+        score = ridge_valley_strength;
+        family = 6.0;
+    }
+    if basin_family_score * 1.10 >= score {
+        score = basin_family_score * 1.10;
+        family = 7.0;
+    }
+    if mountain * 1.15 >= score {
+        family = 8.0;
+    }
+    return family;
+}
+
 fn coast_intent(
     continentalness: f32,
     relief: f32,
@@ -995,11 +1066,11 @@ fn biome_recipe_code(
 }
 
 fn landform_kind_code(
-    surface_y: f32,
     channel_influence: f32,
     wetland_pool_influence: f32,
     wetland_influence: f32,
     continentalness: f32,
+    relief: f32,
     ruggedness: f32,
     ridges: f32,
     coast: CoastIntent,
@@ -1018,20 +1089,12 @@ fn landform_kind_code(
         && coast.family <= 4.0 {
         return 1.0;
     }
-    let mountain = mountain_strength(continentalness, ruggedness);
-    if mountain >= 0.35 && ridges <= 0.28 {
-        return 6.0;
-    }
-    if mountain >= 0.15 && ridges >= 0.65 {
-        return 7.0;
-    }
-    if mountain >= 0.35 || surface_y >= 96.0 {
-        return 8.0;
-    }
-    if surface_y >= 75.0 {
-        return 5.0;
-    }
-    return 4.0;
+    return landform_family_code(
+        continentalness,
+        relief,
+        ruggedness,
+        ridges,
+    );
 }
 
 fn complete_hydrology(
@@ -1219,11 +1282,11 @@ fn complete_hydrology(
         coast,
     );
     let landform = landform_kind_code(
-        surface_y,
         channel_influence,
         wetland_pool_influence,
         wetland_influence,
         continentalness,
+        relief,
         ruggedness,
         ridges,
         coast,
