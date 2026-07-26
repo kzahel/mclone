@@ -7,6 +7,7 @@ mod clipmap;
 mod composition;
 mod horizon_admission;
 mod terrain_vegetation_coordinator;
+mod tree_ownership;
 mod viewport;
 mod viewport_renderer;
 
@@ -57,6 +58,10 @@ pub use terrain_vegetation_coordinator::{
     TerrainVegetationExecutorDiagnostics, TerrainVegetationExecutorEvent,
     TerrainVegetationExecutorJob, TerrainVegetationExecutorKind, TerrainVegetationJobIdentity,
     TerrainVegetationSlotToken, TerrainVegetationSubmitError,
+};
+pub use tree_ownership::{
+    McloneTreeOccurrenceId, McloneTreeOwnershipCandidate, mclone_tree_ownership_snapshot,
+    mclone_tree_working_bounds,
 };
 pub use viewport::{
     TERRAIN_VIEWPORT_AUTO_PIXELS_PER_CELL, TERRAIN_VIEWPORT_MAX_BLOCKS_ACROSS,
