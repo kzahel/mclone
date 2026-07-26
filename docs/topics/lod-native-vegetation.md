@@ -1036,10 +1036,11 @@ pixels:
 
 Coordinating parent Tactical
 [`261`](../tactical/261-procedural-horizon-product-integration-roadmap.md) now
-sequences the focused game-integration campaign. Its first child establishes
-the exact/procedural coverage contract for review. Later children construct
-the proven platform executor at the app rim, compose the unchanged
-coordinator/compiler under `mclone-scene`, and add exact-painted coverage,
+sequences the focused integration campaign. Active child Tactical
+[`262`](../tactical/262-world-explorer-exact-procedural-composition.md)
+establishes the exact/procedural coverage contract in World Explorer for
+review. Later children construct the proven platform executor at the app rim,
+compose the unchanged coordinator/compiler under `mclone-scene`, and add
 cross-chunk crown XOR, authoritative edit invalidation, multiworld budgets,
 device rebuild, and mono/stereo/multiview admission.
 

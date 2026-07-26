@@ -1,9 +1,10 @@
 # Tactical 244: LOD-Native Vegetation Presentation
 
-Status: active 2026-07-25. Terrain Lab proxy presentation is landed; coarse
-hierarchy, footprint summary, budget, and cache proof are the current gate.
-The chunk-based in-game adapter is rejected and scheduled for removal by
-Tactical 245.
+Status: complete 2026-07-26. Terrain Lab proxy presentation, coarse
+hierarchy, footprint summaries, bounded budget/cache evidence, and the
+representation decision are complete. Tactical 245 removed the rejected
+chunk-based compatibility adapter; Tacticals 249, 256, 261, and 262 own the
+selected toroidal service and exact/procedural composition path.
 
 Topic: `lod-native-vegetation`
 
@@ -276,7 +277,7 @@ Required evidence:
 - [x] Prove cross-chunk clipping, level admission, source invalidation,
   Far-LOD-off, and non-Mclone byte stability.
 - [x] Stop expanding or polishing this adapter.
-- [ ] Remove it through Tactical 245.
+- [x] Remove it through Tactical 245.
 
 Gate: none for the target architecture. Commit `b1db968c` is historical
 evidence until Tactical 245 deletes its runtime path.
@@ -296,16 +297,27 @@ Recorded adapter facts:
 
 ### Slice 5: representation decision and closeout
 
-- [ ] Reconcile the measured Terrain Lab hierarchy into the topic and product
+- [x] Reconcile the measured Terrain Lab hierarchy into the topic and product
   documentation.
-- [ ] Choose whether a future in-game LOD system consumes these summaries and
+- [x] Choose whether a future in-game LOD system consumes these summaries and
   records directly, needs a different terrain hierarchy, or should omit
   individual vegetation beyond a nearer distance.
-- [ ] Open a separate in-game terrain-LOD tactical if architecture changes are
+- [x] Open a separate in-game terrain-LOD tactical if architecture changes are
   warranted; do not continue them inside this Terrain Lab proof.
 
 Gate: Terrain Lab establishes the representation first; in-game architecture
 follows as a separate decision.
+
+Closeout record:
+
+- Tactical 249 selected and proved the fixed-budget toroidal hierarchy.
+- Tactical 256 moved bounded near-record compilation behind one reusable
+  native-thread/browser-Worker coordinator.
+- Parent Tactical 261 sequences product integration.
+- Tactical 262 extracts the reusable exact-view boundary and proves
+  exact/procedural composition in World Explorer before game adoption.
+- Terrain Lab remains a comparison and quality consumer; it does not own the
+  runtime compositor.
 
 ## Commit Plan
 

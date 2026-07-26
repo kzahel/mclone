@@ -1446,6 +1446,9 @@ The next implementation direction is:
    [`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md) and
    coordinating parent Tactical
    [`261`](../tactical/261-procedural-horizon-product-integration-roadmap.md).
+   Active child Tactical
+   [`262`](../tactical/262-world-explorer-exact-procedural-composition.md)
+   owns the first reusable World Explorer proof before game adoption.
 
 ## Open Questions
 

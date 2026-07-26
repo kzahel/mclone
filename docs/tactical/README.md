@@ -86,10 +86,11 @@ receipts.
 Active coordinating parent Tactical
 [`261`](261-procedural-horizon-product-integration-roadmap.md) is now the
 global procedural-horizon entry point. It records the completed proof stack
-and sequences scene-owned exact/procedural composition, lifecycle and
-vegetation arbitration, flat-platform promotion, XR/multiview validation,
-product handoff, and quality closeout. Its first implementation child is the
-scene-owned exact-painted frame contract.
+and sequences reusable World Explorer composition, later scene-owned
+lifecycle and vegetation arbitration, flat-platform promotion, XR/multiview
+validation, product handoff, and quality closeout. Active child Tactical 262
+owns the shared exact-painted contract and first true composed proof before
+game adoption.
 Historical render-worker architecture remains in
 [`067-shared-render-worker-architecture.md`](067-shared-render-worker-architecture.md),
 with the parent thread/Web-Worker topology in
@@ -343,7 +344,7 @@ with the parent thread/Web-Worker topology in
 | [`241-terrain-lab-large-canonical-footprints.md`](241-terrain-lab-large-canonical-footprints.md) | completed 2026-07-25, including deployed desktop/phone `31x31` proof | Expanded exact review through a centered `31x31 = 961` chunk footprint with 930-chunk pan reuse, bounded raw caching, paced admission, and honest tracked-memory evidence. |
 | [`242-terrain-lab-worker-canonical-meshing.md`](242-terrain-lab-worker-canonical-meshing.md) | completed 2026-07-25, including byte-verified hosted desktop/phone `31x31` proofs | Moved exact CPU meshing into a persistent Worker, deduplicated boundary rebuilds, transferred packed section bundles, and reactivated up to 64 warm GPU-resident chunks without remeshing. |
 | [`243-lod-native-vegetation-exact.md`](243-lod-native-vegetation-exact.md) | complete 2026-07-25 | Replaced Mclone's vanilla-shaped natural tree placement with bounded semantic records, local-priority spacing, clipped exact broadleaf/conifer/acacia realization, and deterministic plane/cylinder/Worker evidence within the accepted performance threshold. |
-| [`244-lod-native-vegetation-presentation.md`](244-lod-native-vegetation-presentation.md) | active Terrain Lab hierarchy proof 2026-07-25 | Prove footprint-aware forest summaries, bounded record admission, and CPU/GPU/cache costs through the 65.5 km Terrain Lab path. Its landed chunk-Far-LOD compatibility adapter was removed by Tactical 245. |
+| [`244-lod-native-vegetation-presentation.md`](244-lod-native-vegetation-presentation.md) | complete 2026-07-26 | Proved footprint-aware forest summaries, bounded record admission, and CPU/GPU/cache costs through the 65.5 km Terrain Lab path; Tactical 245 removed its rejected compatibility adapter and Tacticals 249/256/261/262 own the selected runtime direction. |
 | [`245-retire-chunk-far-lod-runtime.md`](245-retire-chunk-far-lod-runtime.md) | complete 2026-07-25 | Deleted the chunk-granular in-game Far LOD producer, coverage coordinator, renderer, controls, probes, assets, platform plumbing, and special-purpose scheduling while retaining machinery with active non-LOD consumers. |
 | [`246-vanilla-fast-macro-terrain-preview.md`](246-vanilla-fast-macro-terrain-preview.md) | complete 2026-07-25 | Optimized sampled-exact density columns, added the measured nine-node fast macro sampler, and exposed independent fast/exact Terrain Lab panes with headed desktop/phone evidence. |
 | [`247-standalone-world-explorer-foundation.md`](247-standalone-world-explorer-foundation.md) | completed 2026-07-25, including native-window/offscreen pixel and direct-depth proof | Added a deliberately small native World Explorer, platform-neutral Rust view-control reducer, native capture, and dependency/artifact proof; deferred the browser shell and Terrain Lab migration until an input-boundary audit. |
@@ -360,4 +361,5 @@ with the parent thread/Web-Worker topology in
 | [`258-mclone-macro-terrain-performance-baseline.md`](258-mclone-macro-terrain-performance-baseline.md) | complete 2026-07-26 | Normalized production Mclone point sampling through explicit 500 km grids, preview compilation/packing, plane/cylinder exact surface/decorated generation, and completed-frame World Explorer streaming receipts without changing terrain output. |
 | [`259-modern-and-historical-coast-reference-survey.md`](259-modern-and-historical-coast-reference-survey.md) | complete 2026-07-26 | Pinned a focused modern Java reference lane, compared Alpha/Beta/1.17.1/26.2 coast mechanisms, measured current Mclone coasts, and selected the first evidence-backed coast-family contract without changing terrain output. |
 | [`260-mclone-coast-intent-and-shore-terrain.md`](260-mclone-coast-intent-and-shore-terrain.md) | implementation candidate complete 2026-07-26; awaiting Human Review 1 | Implement the first shared topology-aware Mclone coast intent, distinct sandy/gravel/rocky/ordinary geometry and surfaces, exact/preview parity, measured topology/performance evidence, and two explicit human visual-review gates. |
-| [`261-procedural-horizon-product-integration-roadmap.md`](261-procedural-horizon-product-integration-roadmap.md) | active coordinating parent 2026-07-26 | Global roadmap from the retired chunk Far LOD through the completed Explorer proof stack to scene-owned exact/procedural composition, native/web/Android promotion, XR/multiview acceptance, product handoff, and quality closeout. |
+| [`261-procedural-horizon-product-integration-roadmap.md`](261-procedural-horizon-product-integration-roadmap.md) | active coordinating parent 2026-07-26 | Global roadmap from the retired chunk Far LOD through reusable World Explorer composition to later scene-owned adoption, native/web/Android promotion, XR/multiview acceptance, product handoff, and quality closeout. |
+| [`262-world-explorer-exact-procedural-composition.md`](262-world-explorer-exact-procedural-composition.md) | active 2026-07-26 | Prove the reusable exact-painted snapshot, caller-owned shared target, GPU coverage mask, canonical near field, and real exact/procedural World Explorer composition before game-scene adoption. |

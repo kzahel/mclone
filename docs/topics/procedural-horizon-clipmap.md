@@ -62,13 +62,16 @@ completed in Tactical
 [`254`](../tactical/254-ui-less-world-explorer-host.md) and remains owned by
 the platform-host topic rather than terrain rendering.
 
-Tactical 261 is the macro source of truth for past and future work. Its first
-child will define one scene-owned exact-painted frame snapshot and
-coverage-mask lifecycle before the first full-game composition pixels. Later
-children own exact/proxy vegetation XOR, world and device lifecycle,
-browser/Android promotion, synthetic stereo, desktop OpenXR, Quest, and
-full-frame multiview. Completed proof tacticals remain historical records and
-are not reopened for that integration.
+Tactical 261 is the macro source of truth for past and future work. Active
+child Tactical
+[`262`](../tactical/262-world-explorer-exact-procedural-composition.md)
+defines one renderer-neutral exact-painted snapshot, caller-owned shared
+target, coverage-mask lifecycle, and true World Explorer composition before
+the first full-game pixels. Later children own `mclone-scene` adoption,
+exact/proxy vegetation XOR, world and device lifecycle, browser/Android
+promotion, synthetic stereo, desktop OpenXR, Quest, and full-frame multiview.
+Completed proof tacticals remain historical records and are not reopened for
+that integration.
 
 ## Scope
 
@@ -571,12 +574,11 @@ semantic owner.
    thread executor, and one isolated browser Rust actor. World Explorer proves
    identical source identity, records, failure behavior, and presentation
    without becoming the service owner.
-7. **Integrate the game scene — coordinated by Tactical 261.** Its ordered
-   children compose the proven service under `mclone-scene`, then add
-   exact-painted snapshots, masks, frontier collars, proxy/exact vegetation
-   XOR, edit invalidation, normal render ordering, lifecycle recovery, and
-   all-target frame admission. The scene-frame contract is the next bounded
-   implementation slice.
+7. **Prove exact/procedural composition, then integrate the game scene.**
+   Tactical 262 first combines a reusable canonical exact view and the horizon
+   on one World Explorer target. Tactical 261 then sequences `mclone-scene`
+   adoption, proxy/exact vegetation XOR, edit invalidation, lifecycle
+   recovery, and all-target frame admission.
 8. **Measure an adaptive comparator only if useful.** A quadtree Lab mode
    should answer a specific waste or quality question, not fork the content
    system.

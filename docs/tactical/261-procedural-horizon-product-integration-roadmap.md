@@ -2,9 +2,10 @@
 
 Status: active coordinating parent, opened 2026-07-26. The research,
 standalone Explorer, cross-host parity, transition hardening, and reusable
-vegetation-service phases are complete. The next child should establish the
-scene-owned exact/procedural frame contract before the first full-game
-rendering cutover.
+vegetation-service phases are complete. Active child Tactical
+[`262`](262-world-explorer-exact-procedural-composition.md) now establishes
+the reusable exact/procedural compositor in World Explorer before the first
+full-game rendering cutover.
 
 Topics:
 
@@ -65,9 +66,9 @@ bounded procedural products and execution
   mclone-terrain-view clipmap + admission + vegetation coordinator
                               |
                               v
-scene composition                     platform execution
-  mclone-scene exact/procedural       native thread | browser Worker
-  snapshot, mask, XOR, budgets                  |
+shared composition                    platform execution
+  exact-painted snapshot, mask,       native thread | browser Worker
+  target, frontier, draw order                  |
                 \                              /
                  v                            v
 render lifecycle and pipelines
@@ -78,9 +79,11 @@ render lifecycle and pipelines
 desktop | web game | flat Android | desktop XR | Quest
 ```
 
-The top, bottom, and right-hand proof boundaries exist. The missing center is
-the `mclone-scene` composition that combines exact chunks with the procedural
-horizon under one immutable frame snapshot.
+The top, bottom, and right-hand proof boundaries exist. Tactical 262 now
+proves the missing reusable center with a canonical exact near field and the
+procedural horizon on one World Explorer target. After that proof,
+`mclone-scene` will produce the same exact-painted snapshot from real client
+render sections and own product lifecycle.
 
 ## Source-Of-Truth Rule
 
@@ -114,9 +117,9 @@ Tacticals
 [`243`](243-lod-native-vegetation-exact.md) and
 [`244`](244-lod-native-vegetation-presentation.md) established forest intent,
 stable natural tree records, exact realization, and the initial multiscale
-vegetation presentation. Tactical 244's active Terrain Lab hierarchy-quality
-work continues independently. These semantics are shared source facts rather
-than a renderer-owned forest approximation.
+vegetation presentation. Tactical 244's Terrain Lab hierarchy-quality proof is
+now complete. These semantics are shared source facts rather than a
+renderer-owned forest approximation.
 
 ### 2. Rejected architecture removed
 
@@ -241,14 +244,17 @@ quality work must not invent a second LOD or platform execution policy.
   sessions, and bounded semantic caches.
 - `mclone-terrain-view` owns clipmap geometry, toroidal addressing, procedural
   products, requested/staged/committed admission, stale policy, vegetation
-  coordination, and renderer-neutral prepared draws.
+  coordination, the renderer-neutral exact-painted snapshot/mask contract,
+  and prepared procedural draws.
 - `mclone-render` owns procedural terrain, material, water, fog, vegetation,
   depth, mono/per-eye, and multiview pipelines.
 - `mclone-render-session` owns GPU resources, masks, pending and committed
   origins, uploads, device rebuild, and render admission.
-- `mclone-scene` owns exact/procedural arbitration, the immutable frame
-  snapshot, exact-painted coverage, proxy/exact XOR, world switching,
-  locomotion anchors, cross-feature budgets, and feature enablement.
+- proof hosts may publish a bounded exact-painted snapshot from a local
+  canonical source without owning product policy;
+- `mclone-scene` ultimately owns exact/procedural arbitration, the immutable
+  product frame snapshot, proxy/exact XOR, world switching, locomotion
+  anchors, cross-feature budgets, and feature enablement.
 - Platform adapters own only window/canvas/activity/OpenXR cadence, physical
   targets, native threads or browser Workers, raw input translation, and
   presentation.
@@ -259,7 +265,7 @@ types, or OpenXR.
 
 ## Target Frame Contract
 
-One scene frame snapshot must decide all of:
+One composition frame snapshot must decide all of:
 
 1. the exact chunks whose complete opaque/cutout resources are drawable now;
 2. the exact-painted coverage mask derived from that same set;
@@ -293,40 +299,44 @@ ready.
 
 | Child | State | Scope | Exit gate |
 |---|---|---|---|
-| **PH-1 Scene frame contract** | **ready next** | Add the immutable exact-painted snapshot, source identity, desired procedural coverage, exact-only switch, and renderer-neutral composition facts under `mclone-scene`. Define mask and lifecycle ownership without yet hiding incomplete exact replacements. | Unit/integration tests prove one coherent snapshot, stale-source rejection, and exact-only invariance. Human architecture review occurs before PH-2 if ownership differs from this parent. |
-| **PH-2 First full-game composition** | waiting on PH-1 | Construct the existing horizon and platform executor at the app rim, consume them through `mclone-scene`, add the GPU coverage mask, draw order, and first frontier collar/skirt, and render the ordinary native game with exact terrain near and procedural terrain beyond. | Inspected native window and offscreen pixels show a continuous frontier during movement, exact admission, eviction, negative coordinates, and teleport. The horizon-off capture and diagnostics remain equivalent to the pre-feature path. |
-| **PH-3 Vegetation and edit arbitration** | waiting on PH-2 | Atomically XOR procedural proxies with exact natural trees using complete intersecting footprints, reject stale products, and invalidate nearby natural proxy ownership when authoritative exact edits change the replacement facts. | No duplicate or disappearing trees at the frontier, including cross-chunk crowns, delayed exact compilation, edits, movement, and source switches. |
-| **PH-4 Lifecycle, recovery, and budgets** | waiting on PH-2/PH-3 | Integrate world/session replacement, active and bounded standby worlds, device loss/rebuild, dynamic exact-radius changes, cross-feature admission, diagnostics, and stable locomotion budgets. | Rebuild and world-switch smokes recover coarse-first without stale draws or unbounded work; exact-only remains protected. |
-| **PH-5 Flat-platform promotion** | waiting on stable native scene | Wire the same scene contracts through the full browser game and flat Android. Construct native-thread or browser-Worker executors only at platform rims; do not copy Explorer policy. Establish device-specific memory/work defaults from evidence. | Desktop web, representative phone browser, and flat Android render matching source/coverage identities and inspected pixels under movement and replacement. |
-| **PH-6 Stereo and XR promotion** | waiting on PH-2 and stable lifecycle | Feed the same scene snapshot and committed horizon through synthetic stereo, desktop OpenXR, Quest per-eye rendering, and full-frame multiview. Share residency, compilation, masks, and admission across views; only view/projection/targets vary. | Headset-free stereo, desktop XR, Android XR, and capable-device multiview receipts show correct per-view geometry, no one-eye omissions, bounded work independent of view count where appropriate, and accepted headset pixels/performance. |
-| **PH-7 Product view and handoff** | waiting on credible game composition | Reuse the same composition for the player-facing Explorer/map/tabletop direction, accessible navigation, URLs or source recipes, and validated “Enter Here” authority handoff. Preserve the option to load/navigate before attempting seamless GPU residency transfer. | A player can inspect a world broadly and enter an authoritative safe location without the preview claiming authority it does not own. |
-| **PH-8 Quality and scale closeout** | parallel after PH-2 measurements | Tune footprint summaries, coast/river/water transitions, fog, lighting handoff, forest silhouettes, horizon distance, and device tiers. Add an adaptive comparator only for a measured question. | Review fixtures across coast, mountain, water, forest, and large-coordinate cases meet selected desktop/phone/Quest visual and performance budgets. |
+| **PH-1 Shared composition substrate** | **active in Tactical 262** | Add the immutable exact-painted snapshot, source identity, bounded GPU mask, caller-owned color/depth target, explicit load/store behavior, and renderer-neutral draw ordering without importing a product scene. | Unit/offscreen tests prove coherent coverage, negative-coordinate packing, stale rejection, shared depth, and unchanged Horizon mode. |
+| **PH-2 World Explorer composition proof** | **active in Tactical 262** | Extract the useful canonical exact-view source from Terrain Lab, then add `Horizon`, `Exact`, `Composed`, and `Coverage` modes over one World Explorer device/target. | Native movement, delayed admission, eviction, negative, and teleport receipts plus inspected pixels reach Human Review 1; browser and Terrain Lab promotion follow after review. |
+| **PH-3 Terrain Lab adoption** | waiting on PH-2 review | Add the runtime horizon/composed presentation as another consumer while preserving canonical, CPU LOD, fast CPU LOD, and GPU LOD research panes. | Fixed-anchor Lab comparison exercises the same compositor without moving policy into React or browser canvas code. |
+| **PH-4 Full-game scene adoption** | waiting on PH-2 acceptance | Have `mclone-scene` publish the same exact-painted facts from real client render sections, construct platform executors at the app rim, and render the ordinary native game with exact terrain near and procedural terrain beyond. | Native game window/offscreen movement proves the accepted compositor under real scene lifecycle while exact-only stays equivalent. |
+| **PH-5 Vegetation and edit arbitration** | waiting on PH-4 | Atomically XOR procedural proxies with exact natural trees using complete intersecting footprints, reject stale products, and invalidate nearby natural proxy ownership when authoritative exact edits change the replacement facts. | No duplicate or disappearing trees at the frontier, including cross-chunk crowns, delayed exact compilation, edits, movement, and source switches. |
+| **PH-6 Lifecycle, recovery, and budgets** | waiting on PH-4/PH-5 | Integrate world/session replacement, active and bounded standby worlds, device loss/rebuild, dynamic exact-radius changes, cross-feature admission, diagnostics, and stable locomotion budgets. | Rebuild and world-switch smokes recover coarse-first without stale draws or unbounded work; exact-only remains protected. |
+| **PH-7 Flat-platform promotion** | waiting on stable native scene | Wire the same scene contracts through the full browser game and flat Android. Construct native-thread or browser-Worker executors only at platform rims; do not copy Explorer policy. Establish device-specific memory/work defaults from evidence. | Desktop web, representative phone browser, and flat Android render matching source/coverage identities and inspected pixels under movement and replacement. |
+| **PH-8 Stereo and XR promotion** | waiting on PH-4 and stable lifecycle | Feed the same scene snapshot and committed horizon through synthetic stereo, desktop OpenXR, Quest per-eye rendering, and full-frame multiview. Share residency, compilation, masks, and admission across views; only view/projection/targets vary. | Headset-free stereo, desktop XR, Android XR, and capable-device multiview receipts show correct per-view geometry, no one-eye omissions, bounded work independent of view count where appropriate, and accepted headset pixels/performance. |
+| **PH-9 Product view and handoff** | waiting on credible game composition | Reuse the same composition for the player-facing Explorer/map/tabletop direction, accessible navigation, URLs or source recipes, and validated “Enter Here” authority handoff. Preserve the option to load/navigate before attempting seamless GPU residency transfer. | A player can inspect a world broadly and enter an authoritative safe location without the preview claiming authority it does not own. |
+| **PH-10 Quality and scale closeout** | parallel after PH-2 measurements | Tune footprint summaries, coast/river/water transitions, fog, lighting handoff, forest silhouettes, horizon distance, and device tiers. Add an adaptive comparator only for a measured question. | Review fixtures across coast, mountain, water, forest, and large-coordinate cases meet selected desktop/phone/Quest visual and performance budgets. |
 
-PH-1 through PH-6 constitute the first all-target in-game procedural-horizon
-campaign. PH-7 is product use of the capability. PH-8 may supply bounded
+PH-1 through PH-8 constitute the first all-target in-game procedural-horizon
+campaign. PH-9 is product use of the capability. PH-10 may supply bounded
 quality children before or after a platform promotion when evidence identifies
 a specific defect, but it must not block composition on speculative polish.
 
 ## Immediate Next Tactical
 
-The next implementation tactical should be **PH-1: Scene-Owned
-Exact/Procedural Frame Contract**.
+Active Tactical
+[`262`](262-world-explorer-exact-procedural-composition.md) owns **PH-1:
+Shared Composition Substrate** and **PH-2: World Explorer Composition Proof**
+through Human Review 1.
 
 It should:
 
-- identify the existing exact render-section readiness fact used by
-  `mclone-scene`;
-- publish one immutable exact-painted set for frame preparation;
+- extract Terrain Lab's reusable canonical mesh/session facts without
+  importing its browser UI or app-local coordinator policy;
+- publish one immutable exact-painted set for composition;
 - attach world/source/generation identity to that snapshot;
-- describe desired and committed procedural presentations without constructing
-  a platform executor inside the scene;
+- make horizon rendering accept a caller-owned color/depth target;
+- add the bounded GPU mask and explicit frontier treatment;
+- add World Explorer `Horizon`, `Exact`, `Composed`, and `Coverage` modes;
 - define the exact-only feature-off behavior and diagnostic baseline;
-- define the renderer-facing coverage-mask update contract;
-- add stale and world-switch tests; and
-- stop before making a partial exact resource hide procedural terrain.
+- add stale, delayed admission, eviction, negative, and teleport tests; and
+- stop at Human Review 1 before game-scene implementation.
 
-That gives PH-2 a small, reviewable composition boundary rather than forcing
-scene lifecycle, GPU masking, pixels, and XR into one first commit.
+That gives PH-4 a proven composition boundary rather than forcing scene
+lifecycle, GPU masking, proof-host pixels, and XR into one first game commit.
 
 ## XR And Multiview Invariants
 
@@ -354,22 +364,28 @@ Automation owns deterministic identity, coverage, bounded work, stale
 rejection, and platform mechanics. Human review is required where pixels,
 comfort, or product meaning cannot be reduced to those receipts.
 
-### Review 1: first real-game composition
+### Review 1: first true World Explorer composition
 
 After PH-2 first renders:
 
-- walk and fly across the exact/procedural frontier;
-- change view distance so the frontier advances and retreats;
+- toggle Horizon, Exact, Composed, and Coverage at the same camera;
+- move and zoom across the exact/procedural frontier;
 - inspect coast, steep terrain, water, and forest cases;
 - look for cracks, z-fighting, duplicate surfaces, material popping, and
   camera-like one-frame transitions; and
 - compare horizon enabled and exact-only behavior.
 
-Do not defer this review until later platform work.
+Do not begin game-scene adoption until this review.
 
-### Review 2: vegetation and lifecycle
+### Review 2: first real-game composition
 
-After PH-3/PH-4:
+After PH-4, repeat the accepted Explorer scenarios under the ordinary game
+runtime, real exact render-section readiness, movement, and view-distance
+changes.
+
+### Review 3: vegetation and lifecycle
+
+After PH-5/PH-6:
 
 - cross the frontier through dense forest and clearings;
 - edit blocks and natural trees near the frontier;
@@ -377,16 +393,16 @@ After PH-3/PH-4:
 - inspect device/surface rebuild recovery; and
 - confirm old-source terrain or vegetation never survives a source switch.
 
-### Review 3: flat-platform parity
+### Review 4: flat-platform parity
 
-After PH-5, compare equivalent native, desktop-browser, phone-browser, and
+After PH-7, compare equivalent native, desktop-browser, phone-browser, and
 flat-Android views. Pixel identity is not required across physical displays,
 but geometry, source identity, coverage, tree ownership, and display-space
 intent must agree.
 
-### Review 4: XR acceptance
+### Review 5: XR acceptance
 
-After PH-6 synthetic and automated gates:
+After PH-8 synthetic and automated gates:
 
 - inspect desktop OpenXR and Quest in-headset;
 - turn and translate through the frontier at ordinary locomotion speeds;
@@ -398,9 +414,9 @@ After PH-6 synthetic and automated gates:
 This is the gate for claiming the feature is usable in VR, not merely that the
 XR crates compile.
 
-### Review 5: product completion
+### Review 6: product completion
 
-After PH-7/PH-8, judge horizon scale, recognizable geography, navigation,
+After PH-9/PH-10, judge horizon scale, recognizable geography, navigation,
 enter-world expectations, and whether the selected device tiers feel like one
 coherent feature rather than a debug renderer.
 
@@ -453,7 +469,7 @@ coverage.
 - Distant player-built structure summaries, persistent edit pyramids, and
   arbitrary volumetric LOD are later systems.
 
-This boundary delivers broad natural-world scale without making PH-1 depend on
+This boundary delivers broad natural-world scale without making PH-4 depend on
 a persistent planet-wide edit database.
 
 ## Explicitly Later Or Separate
@@ -468,7 +484,7 @@ a persistent planet-wide edit database.
 - Advanced water reflection, atmosphere, cloud, or lighting systems that have
   their own focused topics.
 - Player-facing Explorer menus, tabletop authority, and remote “Enter Here”
-  policy before PH-7.
+  policy before PH-9.
 
 These may become child campaigns later, but they do not invalidate the first
 natural-horizon completion.
@@ -477,7 +493,7 @@ natural-horizon completion.
 
 This parent closes only when:
 
-- PH-1 through PH-6 are complete or an explicit newer product decision removes
+- PH-1 through PH-8 are complete or an explicit newer product decision removes
   a target from scope;
 - the ordinary game uses one `mclone-scene` exact/procedural frame contract;
 - exact terrain, procedural terrain, and vegetation have exclusive,
