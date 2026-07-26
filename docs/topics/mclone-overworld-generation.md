@@ -91,10 +91,10 @@ warmed RD16 cards pass. Human Review 1 accepted the vocabulary but found the
 steppe too small. Field revision 14 and decoration revision 11 retain the old
 warm-dry core and add a continuous, sparser regional shoulder. Multi-seed
 component maps, alternating old/new generation measurements, and three fully
-warmed RD16 cards pass; Human Review 2 is pending. The next recommended
-terrain campaign remains sustained three-dimensional geology work, comparing
-placed rocks, bounded formation structures, and selective regional density
-modifiers before caves.
+warmed RD16 cards pass; Human Review 2 is pending. The previously recommended
+three-dimensional geology campaign is now sequenced behind ordinary inland
+landform work. Tactical 263 shows that accepted mountain detail remains too
+sparsely gated to supply most inland journeys or the coasts they reach.
 Interactive watercourse review then exposed a narrower correction before that
 campaign. At a seed-`8675309` coastal outlet, the three-to-four-block major
 river bed is clipped at the coastline and replaced by bathymetry's initial
@@ -1047,6 +1047,22 @@ uniform fine bustle while retaining varied local peaks. The exact lowland
 control is unchanged. The full RD16 matrix removes the repeated chevrons, and
 Human Review 3 accepted the result as more natural and less geometric.
 
+Tactical
+[`263`](../tactical/263-cross-era-inland-landform-survey.md) extends the same
+offline analyzer to the exact Alpha v1.1.2_01 and Beta 1.7.3 ports. It retains
+all-water windows during broad scans, then compares nine land-conditioned
+17-by-17-chunk sites per runnable profile. Ordinary Mclone inland terrain has
+a median 16-block window span versus 29 in Beta, 44 in Alpha, and 48 in Java
+1.17.1. Radius-8 detrended roughness is 0.305 blocks versus 1.208-2.210, and
+radius-32 is 0.592 versus 3.029-6.038.
+
+That evidence changes the next direction. The accepted mountain implementation
+is not merely a smooth version of a sufficient distribution; its detailed
+geometry is absent from most land. Future characteristic review must keep
+separate corpora for selected signature landforms and ordinary inland fabric.
+Java 26.2 remains source-level evidence for shared semantic terrain
+coordinates rather than a locally executable numeric profile.
+
 ## Acceptance Themes
 
 - distinct profile identity without any reference Overworld output change;
@@ -1096,13 +1112,12 @@ selected the concrete coast question and preserved the schema-14 baseline:
 every remaining sample was a river/wetland recipe.
 
 Tactical
-[`260`](../tactical/260-mclone-coast-intent-and-shore-terrain.md) now has a
-corrected implementation candidate at Human Review 2. One cheap, periodic
-768-block field yields sandy depositional, gravel transitional,
-rocky/exposed, cold-response, and ordinary direct-water intent. Geometry and
-material are separate consumers. Provisional terrain receives bounded coast
-shaping before authoritative watercourse carving; final slope and exposure
-then choose grass-topped versus exposed rock faces.
+[`260`](../tactical/260-mclone-coast-intent-and-shore-terrain.md) is complete.
+One cheap, periodic 768-block field yields sandy depositional, gravel
+transitional, rocky/exposed, cold-response, and ordinary direct-water intent.
+Geometry and material are separate consumers. Provisional terrain receives
+bounded coast shaping before authoritative watercourse carving; final slope
+and exposure then choose grass-topped versus exposed rock faces.
 
 On the same three grids, sandy surfaces now account for roughly 11-31% of
 coast-adjacent land, and every seed has rocky and ordinary direct-water
@@ -1117,9 +1132,32 @@ Receipt schema 17, exact fingerprints, native CPU/GPU conformance,
 the exact 6,144-block cylinder seam, persistence reopen, and hydraulic closure
 all pass. The broad-field cost remains separately recorded; the correction
 adds approximately 6-7% to preview controls and 13-14% to exact cold-region
-controls relative to the first candidate. Human Review 2 should settle the
-remaining transition and broad-stroke questions before the broader
-volumetric-geology campaign.
+controls relative to the first candidate. Human Review 2 found this a
+substantial improvement but did not accept it as final. Further coast-only
+tuning is deferred: sparse inland form gives the coast too little incoming
+ridge, valley, hill, or escarpment structure to inherit.
+
+Tactical
+[`263`](../tactical/263-cross-era-inland-landform-survey.md) selects the next
+bounded terrain direction:
+
+- derive compact quiet, rolling, ridge/valley, basin, and existing mountain
+  intent from the current periodic field inventory before adding noise;
+- route connected 384/128/48-block form and selective 32-block detail through
+  ordinary inland terrain;
+- let that accepted form continue toward water while rivers and planned
+  streams retain final carving authority;
+- keep CPU/GPU previews, exact chunks, maps, and the 384-chunk-X cylinder on
+  one intent; and
+- stop at undecorated Human Review A before surfaces, ecology, plateaus,
+  geology, or broad 3D density expand the slice.
+
+The initial quantitative alarms are deliberately below the Beta corpus:
+median 272-block span above 24, lag-16 RMS above 3.0, radius-8 detrended
+roughness above 0.75, and radius-32 above 2.0. They require a material move
+out of the current sterile regime without making Minecraft values the Mclone
+target. Inspected geometry retains veto authority.
+
 The
 [`still-life-and-tectonic-reference.md`](still-life-and-tectonic-reference.md)
 study sharpens that direction: select mutually legible geology families
@@ -1146,3 +1184,4 @@ place of the existing stream contracts.
 - [`../tactical/196-periodic-mclone-terrain-fields.md`](../tactical/196-periodic-mclone-terrain-fields.md)
 - [`../tactical/258-mclone-macro-terrain-performance-baseline.md`](../tactical/258-mclone-macro-terrain-performance-baseline.md)
 - [`../tactical/259-modern-and-historical-coast-reference-survey.md`](../tactical/259-modern-and-historical-coast-reference-survey.md)
+- [`../tactical/263-cross-era-inland-landform-survey.md`](../tactical/263-cross-era-inland-landform-survey.md)

@@ -1,7 +1,9 @@
 # Tactical 260: Mclone Coast Intent And Shore Terrain
 
-Status: Human Review 1 corrections complete 2026-07-26; awaiting Human
-Review 2.
+Status: complete 2026-07-26. Human Review 2 found the corrected coast a
+substantial improvement but did not accept it as a final terrain language.
+Further coast-only tuning is deferred until stronger inland landforms can
+reach and explain the shore.
 
 Topics:
 
@@ -119,8 +121,9 @@ consumers of one reconstructible semantic fact.
 - [x] Rerun affected topology, determinism, persistence, performance, and
   pixel evidence.
 - [x] Present warmed ordinary and showcase regions for Human Review 2.
-- [ ] Record the accepted visual language and update living topic ledgers.
-- [ ] Close the tactical and commit the execution record.
+- [x] Record the Human Review 2 outcome and its inland-terrain dependency.
+- [x] Close the bounded coast tactical without claiming final visual
+  acceptance.
 
 ## Quantitative Guardrails
 
@@ -360,6 +363,29 @@ Review 2 atlas is `/tmp/mclone-coast-human-review-2.png`; it contains the
 corrected sandy cove, mixed gravel coast, ordinary outlet, two rocky
 silhouettes, cross-substrate cold coast, and centered cylinder seam. This is
 another subjective gate, not an assertion that the coast language is final.
+
+### Human Review 2 response
+
+Human Review 2 found field revision 19 a substantial improvement over both
+the pre-campaign universal sand collar and the first hard-edged candidate.
+The feathering, mixed substrates, cross-substrate snow, varied banks, and
+retained steep-coast silhouette are useful parts of the Mclone language.
+
+The result is not final. The remaining sterility is not primarily another
+coast-classifier defect: most inland terrain is plains or gentle slope, with
+only sparse mountain regions. A locally competent coast therefore has little
+incoming ridge, valley, hill, or escarpment structure to continue into water.
+Its own bounded rocky lift remains visually prominent and can still read as a
+coast-shaped feature rather than the terminus of a larger landform.
+
+This closes the bounded implementation tactical with an accepted engineering
+foundation, not final subjective acceptance. Preserve the shared coast
+intent, topology/performance evidence, and locally feathered realization.
+Do not keep adding coast-only noise or families. Tactical
+[`263`](263-cross-era-inland-landform-survey.md) now compares Alpha, Beta,
+Java 1.17.1, Java 26.2, and current Mclone inland terrain and selects the next
+landform-planning direction. Revisit final coast balance after that terrain
+can reach the shore.
 
 ## Human Review Gates
 

@@ -8,8 +8,11 @@ wetland, surface, and bounded-stream facts, but it does not yet have a
 holistic macro landscape plan that coordinates their topology, precedence,
 overlap, and downstream feature permissions. This topic owns that planning
 view. Tactical 259 grounded coastal character in Alpha, Beta, Java 1.17.1,
-Java 26.2, and measured current Mclone evidence. Tactical 260 has applied the
-first visual-review corrections and is awaiting Human Review 2.**
+Java 26.2, and measured current Mclone evidence. Tactical 260 completed the
+first coast implementation and its visual corrections; Human Review 2 found
+it substantially improved but redirected further work toward the sparse
+inland terrain feeding the coast. Tactical 263 now supplies a cross-era
+inland survey and the selected next landform plan.**
 
 The motivating July 2026 visual review found four related regional-scale
 weaknesses:
@@ -242,6 +245,42 @@ Terrain should provide both destinations and circulation. The best mountain
 is not only a silhouette; it has foothills, approaches, saddles, sheltered
 spaces, exposed faces, and reasons to move around or through it.
 
+#### Cross-era inland evidence and selected direction
+
+Tactical
+[`263`](../tactical/263-cross-era-inland-landform-survey.md) compares Alpha
+v1.1.2_01, Beta 1.7.3, Java 1.17.1, Java 26.2, and current Mclone.
+
+- Alpha keeps continuous 3D terrain structure globally available, but offers
+  little semantic regional control.
+- Beta modulates that continuous fabric with climate, proving that regional
+  conditions can reshape geometry without categorical landform islands.
+- Java 1.17.1 layers explicit depth/scale terrain identities over blended 3D
+  density, giving hills, mountains, plateaus, and shattered terrain
+  recognizable regional roles.
+- Java 26.2 derives offset, factor, and jaggedness from shared
+  continentalness, erosion, ridge, and peaks/valleys facts, then lets biome
+  ecology interpret those same facts.
+- Mclone already has useful periodic continentalness, relief, ruggedness,
+  ridge, and local-detail fields, but its meaningful detail is multiplied by
+  a sparse inland-and-rugged mountain gate. Most land receives only a gentle
+  broad relief term.
+
+Nine land-conditioned 272-by-272-block windows per runnable profile confirm
+that the gap is ordinary terrain, not only rare peaks. Median window span is
+16 blocks in Mclone versus 29 in Beta, 44 in Alpha, and 48 in Java 1.17.1.
+Mclone's radius-8 detrended roughness is 0.305 blocks versus 1.208-2.210; its
+radius-32 value is 0.592 versus 3.029-6.038.
+
+The selected direction retains Mclone's cheap periodic 2D planning spine but
+routes several continuous landform strengths: intentional quiet plain,
+rolling upland, organized ridge/valley, basin tendency, and the existing
+mountain family. Structure becomes available through ordinary inland terrain
+without turning every location into a peak. Biome, surface, vegetation,
+coast, water, and later geology interpret the accepted terrain facts.
+Selective 3D density follows only after this regional skeleton passes
+undecorated geometry review.
+
 ### Hydrology
 
 Hydrology includes several related but non-interchangeable systems:
@@ -432,9 +471,15 @@ cover adjacent cold substrates, and makes river-bank sand reach-dependent.
 The correction adds approximately 6-7% to preview controls and 13-14% to
 exact cold-region controls relative to the first candidate. Native CPU/GPU
 conformance, exact 6,144-block periodicity, persistence reopen, and production
-pixels pass. Human Review 2 now owns the subjective decision about whether
-the resulting transitions are sufficiently geographic without sacrificing
-the broad coast identity.
+pixels pass.
+
+Human Review 2 found that correction a substantial improvement but did not
+accept the coast as a final visual language. The remaining problem is that
+sparse inland form gives the coast little ridge, valley, hill, or escarpment
+structure to inherit. Preserve the coast classifier and correction; defer
+further coast-only tuning until Tactical 263's inland plan can reach the
+shore. The up-to-22-block rocky adjustment should then become complementary
+when incoming terrain already supplies the silhouette.
 
 ### River topology and terrain relation
 
@@ -977,9 +1022,9 @@ none is inferred from CPU compile time.
 | Concern | Current capability | Planning gap |
 |---|---|---|
 | raw macro fields | continentalness, relief, ruggedness, ridges, mountain detail, climate, bathymetry, water morphology | no unified classified landscape intent |
-| terrain | continuous heightfield with accepted mountain detail and derived slope/exposure | no explicit range, basin, pass, or terrain-corridor plan |
+| terrain | continuous heightfield with accepted but sparsely gated mountain detail and derived slope/exposure | ordinary inland median span is 16 blocks across the Tactical 263 corpus; no explicit rolling, ridge/valley, basin, range, pass, or terrain-corridor intent |
 | sampling/representation | cheap absolute-coordinate CPU/GPU heightfield preview, a fixed ten-level 131 km horizon, and normalized point receipts through roughly 500 km | no filtered spacing-2,048 review product or sparse volumetric near/far contract |
-| coast | shared sandy/gravel/ordinary/rocky/cold intent; bounded geometry, locally feathered realization, cross-substrate snow, mixed banks; schema-17 maps; exact CPU/GPU and periodic-seam evidence | corrected candidate awaits Human Review 2; no marsh, frozen-ocean morphology, dunes, deltas, reefs, or sea caves |
+| coast | shared sandy/gravel/ordinary/rocky/cold intent; bounded geometry, locally feathered realization, cross-substrate snow, mixed banks; schema-17 maps; exact CPU/GPU and periodic-seam evidence | Human Review 2 found substantial improvement but deferred finalization until stronger inland terrain can reach the shore; no marsh, frozen-ocean morphology, dunes, deltas, reefs, or sea caves |
 | major rivers | warped zero-contour corridor with width/depth/bank morphology and receiving-outlet correction | no persistent macro drainage topology, tributary hierarchy, or named major reaches |
 | streams | bounded 91-96-block valley-following source-to-river plan | one peaceful family, not a general network |
 | ponds/lakes | river-adjacent wetland pools and shared local lake mechanism | no closed-basin or spill-level plan |
@@ -1017,38 +1062,50 @@ every row before shipping any smaller improvement.
    - Human Review 1 retained steep rocky silhouettes but requested locally
      feathered family/material transitions, cross-substrate snow, and removal
      of uniform water-edge collars;
-   - review the corrected production atlas for remaining broad-stroke masks,
-     rocky/gravel mixture, sandy tongues, snow breadth, and ordinary outlet
-     banks;
-   - record accepted tuning and close only after Human Review 2; and
+   - Human Review 2 found the correction substantially improved but not final;
+     preserve the classifier and pause coast-only tuning while inland form is
+     sparse;
+   - revisit broad-stroke masks, rocky/gravel mixture, and coast-owned uplift
+     after inland ridges, valleys, and hills can terminate at water; and
    - retain the proven plane/cylinder topology and Tactical 258 performance
      controls.
-3. **Select major-water topology**
+3. **Establish ordinary inland landform fabric**
+   - Tactical 263 supplies the Alpha/Beta/1.17.1/26.2 mechanism comparison and
+     the nine-site Mclone baseline;
+   - derive compact quiet, rolling, ridge/valley, basin, and mountain intent
+     from existing periodic fields before adding another noise field;
+   - route connected 384/128/48-block form and selective 32-block detail
+     through those strengths;
+   - let the result continue toward the coast while accepted water retains
+     final carving authority; and
+   - stop at undecorated Human Review A before surfaces, ecology, plateaus,
+     geology, or broad 3D density expand the slice.
+4. **Select major-water topology**
    - compare hierarchical boundary, terrain-derived drainage, and hybrid
      planned-network maps on the same terrain;
    - measure topology, terrain alignment, bounded cost, and periodic seams;
    - select the smallest system that produces convincing connected geography.
-4. **Compose basins and compound water forms**
+5. **Compose basins and compound water forms**
    - add one broad shallow basin/lake family with spill semantics;
    - add one anabranch, braid, or delta family that deliberately creates
      small islands;
    - retain fixed water planes and authoritative wake evidence.
-5. **Add regional geological formation intent**
+6. **Add regional geological formation intent**
    - route a small number of mutually legible formation families;
    - compare placed rocks, structure-shaped volumes, and gated density;
    - benchmark ordinary controls and dense formation hotspots separately;
    - prove exact geometry and its declared near/far summaries together;
    - let geology participate in coast, river substrate, surface, and ecology.
-6. **Expand coordinated ecological regions**
+7. **Expand coordinated ecological regions**
    - add endpoint recipes and explicit shoulders as bundles of surface,
      vegetation, clutter, ambience, and local landmarks;
    - preserve the terrain and water identity beneath them.
-7. **Plan routes, landmarks, settlements, and history**
+8. **Plan routes, landmarks, settlements, and history**
    - expose passes, crossings, shelter, water, resources, and reserved space;
    - prove deterministic overlap and bounded grading;
    - layer paths, ruins, settlements, and regrowth without erasing the
      landscape explanation.
-8. **Grow subsurface relationships**
+9. **Grow subsurface relationships**
    - use overburden, geology, surface water, and regional intent to place
      caves, underground landmarks, and bounded connectors;
    - keep surface and underground topology inspectable rather than globally
@@ -1062,6 +1119,9 @@ enormous “finish terrain” change.
 
 - Which river skeleton supplies the best balance of convincing topology,
   terrain relation, deterministic bounded work, and stable water semantics?
+- What continuous coverage of quiet, rolling, ridge/valley, basin, and
+  mountain intent creates varied journeys without replacing negative space
+  with universal roughness?
 - What selector scale, transition width, and suitability thresholds give
   coherent sandy, gravel, and rocky runs without hiding accepted terrain or
   outlets?
@@ -1117,3 +1177,4 @@ advance.
 - [`../tactical/246-vanilla-fast-macro-terrain-preview.md`](../tactical/246-vanilla-fast-macro-terrain-preview.md)
 - [`../tactical/249-cross-platform-procedural-horizon-proof.md`](../tactical/249-cross-platform-procedural-horizon-proof.md)
 - [`../tactical/259-modern-and-historical-coast-reference-survey.md`](../tactical/259-modern-and-historical-coast-reference-survey.md)
+- [`../tactical/263-cross-era-inland-landform-survey.md`](../tactical/263-cross-era-inland-landform-survey.md)

@@ -1,9 +1,10 @@
 # Worldgen Status
 
-Living status page for Rust world generation. Live procedural profiles
-are the Minecraft Java 1.17.1-shaped overworld, the deliberately minimal
-`flat-grass-v1` proof generator, the seeded `small-island-v1` proof generator,
-and the first continuous `mclone-overworld-v1` terrain caller.
+Living status page for Rust world generation. Live procedural profiles are
+the Minecraft Java 1.17.1-shaped Overworld, historical `alpha-v1` and
+`beta-v1` profiles, the deliberately minimal `flat-grass-v1` proof generator,
+the seeded `small-island-v1` proof generator, and the continuous
+`mclone-overworld-v1` terrain caller.
 
 The current `overworld` profile's durable target is seed parity against vanilla
 1.17.1 overworld output. The accepted follow-up direction is to preserve that
@@ -25,8 +26,11 @@ genuinely periodic Mclone fields and features are complete in
 for the plane and exact 384-chunk X cylinder.
 The selected campaign has now advanced through mountains/valleys, periodic
 fields, rivers/wetlands, a coherent bounded stream, and the first climate
-regions. Three-dimensional geology and rock formations are the recommended
-next terrain phase before broad caves.
+regions. Tactical 260's first coast family is substantially improved but
+awaits stronger inland terrain before final visual tuning. Tactical 263
+therefore makes ordinary inland landform fabric the recommended next terrain
+phase; three-dimensional geology remains sequenced after that regional
+skeleton and before broad caves.
 The active water slice is
 [`tactical/220-mclone-overworld-rivers-and-wetlands.md`](tactical/220-mclone-overworld-rivers-and-wetlands.md).
 Its broad periodic river corridor, terrain carving, banks, local water levels,
@@ -99,10 +103,10 @@ Landed native coverage:
 - Scheduler-owned `FEATURES` publication and clean fixture comparisons for the current target chunks.
 - Generated scheduled tick carry-through for fluids.
 - A stored, descriptor-driven `WorldGenerationProfile` boundary with
-  `Overworld`, `FlatGrassV1`, `SmallIslandV1`, `McloneOverworldV1`, and
-  `AuthoredOnly`; Flat Grass is target-only, Small Island and Mclone use typed
-  feature dependencies, and authored-only maps true persistence misses to
-  void.
+  `Overworld`, `FlatGrassV1`, `SmallIslandV1`, `McloneOverworldV1`,
+  `AlphaV1`, `BetaV1`, and `AuthoredOnly`; Flat Grass is target-only, Small
+  Island, Mclone, Alpha, and Beta use typed feature dependencies, and
+  authored-only maps true persistence misses to void.
 - Exact `flat-grass-v1` bedrock/dirt/grass layers, plains biomes, empty tick
   payloads, origin spawn policy, native/dedicated publication, and save/reopen
   coverage. It now supports authoritative finite dimensions and a persisted,
@@ -130,6 +134,14 @@ Landed native coverage:
   control. Human Review 3 accepted the result as more natural and less
   geometric, and production browser Worker closeout passed. A local
   structure-tensor metric supplements, but does not replace, pixel review.
+- A cross-era ordinary-inland survey now compares nine land-conditioned
+  17-by-17-chunk sites each for the exact Alpha v1.1.2_01, Beta 1.7.3, Java
+  1.17.1, and current Mclone generators. Mclone's median vertical span is 16
+  blocks versus 29-48, its radius-8 detrended roughness is 0.305 versus
+  1.208-2.210, and its radius-32 value is 0.592 versus 3.029-6.038. This
+  establishes that ordinary inland fabric—not only selected mountains—is the
+  current terrain gap. Java 26.2 source separately supports a shared semantic
+  landform-intent direction.
 - Its first watercourse family adds a periodic warped-contour river field,
   analytic centerline distance/tangent sampling, locally graded beds and
   banks, river biome `7`, gravel beds, coastal

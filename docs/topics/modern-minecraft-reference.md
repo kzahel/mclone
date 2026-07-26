@@ -167,6 +167,40 @@ The selected Mclone implications, cross-era evidence, current three-seed
 baseline, topology/performance contract, and next-tactical acceptance criteria
 live in Tactical 259 rather than this reference-lane topic.
 
+## Second Research Result: Inland Landform Semantics
+
+Tactical
+[`263`](../tactical/263-cross-era-inland-landform-survey.md) compares Alpha
+v1.1.2_01, Beta 1.7.3, Java 1.17.1, Java 26.2, and current Mclone inland
+terrain.
+
+The durable modern finding is the separation and later reunion of terrain
+planning and biome interpretation:
+
+- shifted continentalness, erosion, ridges, folded ridges, and weirdness are
+  shared two-dimensional semantic coordinates;
+- `TerrainProvider` maps them into separate offset, factor, and jaggedness
+  splines;
+- its erosion-offset routing contains low-erosion mountains, ordinary
+  mountains, wide and narrow plateaus, plains, extreme hills, and swamps;
+- `NoiseRouterData` combines vertical gradient plus offset into depth,
+  modulates it by factor and jaggedness, and then adds base 3D blended noise;
+  and
+- `OverworldBiomeBuilder` consumes the same coordinates to interpret peaks,
+  slopes, plateaus, middle terrain, lowlands, valleys, coasts, and rivers as
+  ecology.
+
+This is stronger than either “biomes choose terrain” or “terrain and biomes
+use unrelated noise.” Terrain facts exist first, specialized shaping consumes
+them, and biomes describe the result. Base 3D noise remains available for
+local volumetric form.
+
+For Mclone, the bounded lesson is a small original landform-intent vocabulary
+over the existing cheap periodic 2D fields, followed by biome, surface,
+vegetation, coast, water, and selective 3D consumers. It does not justify
+copying the literal spline graph, modern world height, cave/aquifer stack, or
+biome parameter table.
+
 ## Refresh Protocol
 
 When intentionally moving to a newer stable release:
@@ -189,3 +223,4 @@ When intentionally moving to a newer stable release:
 - [`mclone-macro-landscape-planning.md`](mclone-macro-landscape-planning.md)
 - [`mclone-overworld-generation.md`](mclone-overworld-generation.md)
 - [`../tactical/259-modern-and-historical-coast-reference-survey.md`](../tactical/259-modern-and-historical-coast-reference-survey.md)
+- [`../tactical/263-cross-era-inland-landform-survey.md`](../tactical/263-cross-era-inland-landform-survey.md)
