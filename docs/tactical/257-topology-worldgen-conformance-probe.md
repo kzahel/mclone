@@ -138,27 +138,27 @@ production boundary.
 
 ### Slice 1: reusable probe kernel
 
-- [ ] Add the topology-aware sample/plan/generation module in
+- [x] Add the topology-aware sample/plan/generation module in
   `mclone-worldgen`.
-- [ ] Validate supported plane, cylinder, and torus shapes and minimum
+- [x] Validate supported plane, cylinder, and torus shapes and minimum
   periodic extents.
-- [ ] Generate the ridge, channel, island, pond, arch, material, light, and
+- [x] Generate the ridge, channel, island, pond, arch, material, light, and
   fluid canaries from one deterministic implementation.
-- [ ] Prove signed-lift equality, seam adjacency, stable plan ownership,
+- [x] Prove signed-lift equality, seam adjacency, stable plan ownership,
   batch order/partition independence, and torus-corner behavior.
-- [ ] Keep the module free of server, app, persistence, and renderer policy.
+- [x] Keep the module free of server, app, persistence, and renderer policy.
 
 Gate: pure generation makes every selected seam event unavoidable and exact.
 
 ### Slice 2: hidden profile and worker execution
 
-- [ ] Add `topology-probe-v1` to the stored profile enum, labels, parsing,
+- [x] Add `topology-probe-v1` to the stored profile enum, labels, parsing,
   codec tags, planning, spawn, and closed worker dispatch.
-- [ ] Keep it out of normal catalog selection and prove that omission.
-- [ ] Round-trip plane, cylinder, and torus descriptors through the worker
+- [x] Keep it out of normal catalog selection and prove that omission.
+- [x] Round-trip plane, cylinder, and torus descriptors through the worker
   request/response codec.
-- [ ] Reject unsupported probe topology before scheduling generation.
-- [ ] Record the profile as internal-mutable in the compatibility ledger.
+- [x] Reject unsupported probe topology before scheduling generation.
+- [x] Record the profile as internal-mutable in the compatibility ledger.
 
 Gate: the probe is a real descriptor-selected generator without becoming a
 normal product choice.
@@ -245,4 +245,3 @@ requires:
 - [`../topics/mclone-macro-landscape-planning.md`](../topics/mclone-macro-landscape-planning.md)
 - [`195-periodic-cylinder-topology-proof.md`](195-periodic-cylinder-topology-proof.md)
 - [`196-periodic-mclone-terrain-fields.md`](196-periodic-mclone-terrain-fields.md)
-

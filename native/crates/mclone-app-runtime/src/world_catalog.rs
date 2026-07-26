@@ -43,6 +43,7 @@ pub const fn local_world_generation_profile_display_name(
         WorldGenerationProfile::FlatGrassV1 => "Flat Grass",
         WorldGenerationProfile::SmallIslandV1 => "Small Island",
         WorldGenerationProfile::McloneOverworldV1 => "Mclone Overworld",
+        WorldGenerationProfile::TopologyProbeV1 => "Topology Probe",
         WorldGenerationProfile::AlphaV1 { winter: false } => "Alpha (Temperate)",
         WorldGenerationProfile::AlphaV1 { winter: true } => "Alpha (Winter)",
         WorldGenerationProfile::BetaV1 => "Beta 1.7.3",
@@ -63,6 +64,7 @@ pub const fn next_local_world_generation_profile(
         WorldGenerationProfile::BetaV1 | WorldGenerationProfile::AuthoredOnly { .. } => {
             WorldGenerationProfile::Overworld
         }
+        WorldGenerationProfile::TopologyProbeV1 => WorldGenerationProfile::Overworld,
     }
 }
 
@@ -1190,6 +1192,10 @@ mod tests {
             "Mclone Overworld"
         );
         assert_eq!(
+            local_world_generation_profile_display_name(WorldGenerationProfile::TopologyProbeV1),
+            "Topology Probe"
+        );
+        assert_eq!(
             local_world_generation_profile_display_name(WorldGenerationProfile::alpha_v1(false)),
             "Alpha (Temperate)"
         );
@@ -1229,6 +1235,14 @@ mod tests {
             next_local_world_generation_profile(WorldGenerationProfile::BetaV1),
             WorldGenerationProfile::Overworld
         );
+        assert_eq!(
+            next_local_world_generation_profile(WorldGenerationProfile::TopologyProbeV1),
+            WorldGenerationProfile::Overworld
+        );
+        assert!(
+            !LOCAL_WORLD_PROCEDURAL_GENERATION_PROFILES
+                .contains(&WorldGenerationProfile::TopologyProbeV1)
+        );
     }
 
     #[test]
@@ -1237,6 +1251,7 @@ mod tests {
             WorldGenerationProfile::FlatGrassV1,
             WorldGenerationProfile::SmallIslandV1,
             WorldGenerationProfile::McloneOverworldV1,
+            WorldGenerationProfile::TopologyProbeV1,
             WorldGenerationProfile::alpha_v1(false),
             WorldGenerationProfile::alpha_v1(true),
             WorldGenerationProfile::BetaV1,

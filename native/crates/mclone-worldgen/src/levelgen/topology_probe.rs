@@ -87,6 +87,13 @@ impl TopologyProbeSource {
         self.topology
     }
 
+    pub const fn origin_chunk(self) -> ChunkPos {
+        ChunkPos::new(
+            self.origin_x.div_euclid(CHUNK_WIDTH),
+            self.origin_z.div_euclid(CHUNK_WIDTH),
+        )
+    }
+
     pub fn sample_column(self, world_x: i32, world_z: i32) -> TopologyProbeColumnSample {
         let dx = self
             .topology

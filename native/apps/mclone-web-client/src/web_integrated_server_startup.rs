@@ -172,6 +172,7 @@ fn generation_profile_tag(profile: WorldGenerationProfile) -> u8 {
         WorldGenerationProfile::AlphaV1 { winter: true } => 5,
         WorldGenerationProfile::BetaV1 => 6,
         WorldGenerationProfile::AuthoredOnly { .. } => 7,
+        WorldGenerationProfile::TopologyProbeV1 => 8,
     }
 }
 
@@ -185,6 +186,7 @@ fn generation_profile_from_tag(tag: u8) -> Result<WorldGenerationProfile, String
         5 => Ok(WorldGenerationProfile::alpha_v1(true)),
         6 => Ok(WorldGenerationProfile::BetaV1),
         7 => Ok(WorldGenerationProfile::authored_only()),
+        8 => Ok(WorldGenerationProfile::TopologyProbeV1),
         _ => Err(format!(
             "integrated-server startup frame has unknown generation profile {tag}"
         )),

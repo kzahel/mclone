@@ -1,7 +1,7 @@
 use mclone_core::{ChunkPos, ChunkStatus, HorizontalTopology, LiftedChunkPos};
 use mclone_worldgen::levelgen::{
     ChunkGenerationPlan, ChunkStatusRequirement, McloneOverworldSamplingTopology,
-    MutableChunkBlockBuffer,
+    MutableChunkBlockBuffer, validate_topology_probe_topology,
 };
 use serde::{Deserialize, Serialize};
 
@@ -19,6 +19,8 @@ pub enum WorldGenerationProfile {
     SmallIslandV1,
     #[serde(rename = "mclone-overworld-v1")]
     McloneOverworldV1,
+    #[serde(rename = "topology-probe-v1")]
+    TopologyProbeV1,
     #[serde(rename = "alpha-v1")]
     AlphaV1 {
         #[serde(default)]
@@ -56,6 +58,7 @@ impl WorldGenerationProfile {
             Self::FlatGrassV1 => "flat-grass-v1",
             Self::SmallIslandV1 => "small-island-v1",
             Self::McloneOverworldV1 => "mclone-overworld-v1",
+            Self::TopologyProbeV1 => "topology-probe-v1",
             Self::AlphaV1 { winter: false } => "alpha-v1",
             Self::AlphaV1 { winter: true } => "alpha-v1-winter",
             Self::BetaV1 => "beta-v1",
@@ -71,12 +74,15 @@ impl WorldGenerationProfile {
             "mclone-overworld-v1" | "mclone_overworld_v1" | "mcloneOverworldV1" => {
                 Ok(Self::McloneOverworldV1)
             }
+            "topology-probe-v1" | "topology_probe_v1" | "topologyProbeV1" => {
+                Ok(Self::TopologyProbeV1)
+            }
             "alpha-v1" | "alpha_v1" | "alphaV1" => Ok(Self::alpha_v1(false)),
             "alpha-v1-winter" | "alpha_v1_winter" | "alphaV1Winter" => Ok(Self::alpha_v1(true)),
             "beta-v1" | "beta_v1" | "betaV1" => Ok(Self::BetaV1),
             "authored-only" | "authored_only" | "authoredOnly" => Ok(Self::authored_only()),
             value => Err(format!(
-                "world generation profile must be overworld, flat-grass-v1, small-island-v1, mclone-overworld-v1, alpha-v1, beta-v1, or authored-only, got `{value}`"
+                "world generation profile must be overworld, flat-grass-v1, small-island-v1, mclone-overworld-v1, topology-probe-v1, alpha-v1, beta-v1, or authored-only, got `{value}`"
             )),
         }
     }
@@ -87,6 +93,7 @@ impl WorldGenerationProfile {
             | Self::FlatGrassV1
             | Self::SmallIslandV1
             | Self::McloneOverworldV1
+            | Self::TopologyProbeV1
             | Self::AlphaV1 { .. }
             | Self::BetaV1 => None,
             Self::AuthoredOnly { missing_chunk } => Some(missing_chunk),
@@ -97,6 +104,9 @@ impl WorldGenerationProfile {
         topology
             .validate()
             .map_err(|error| format!("invalid dimension topology: {error}"))?;
+        if matches!(self, Self::TopologyProbeV1) {
+            return validate_topology_probe_topology(topology);
+        }
         if topology.is_unbounded()
             || matches!(self, Self::FlatGrassV1 | Self::AuthoredOnly { .. })
             || matches!(self, Self::McloneOverworldV1)
@@ -120,6 +130,7 @@ impl WorldGenerationProfile {
             Self::FlatGrassV1 => ChunkGenerationPlan::target_only(targets),
             Self::SmallIslandV1 => ChunkGenerationPlan::small_island_features(targets),
             Self::McloneOverworldV1 => ChunkGenerationPlan::mclone_overworld_features(targets),
+            Self::TopologyProbeV1 => ChunkGenerationPlan::target_only(targets),
             Self::AlphaV1 { .. } => ChunkGenerationPlan::alpha_features(targets),
             Self::BetaV1 => ChunkGenerationPlan::beta_features(targets),
             Self::AuthoredOnly { .. } => {
@@ -138,6 +149,7 @@ impl WorldGenerationProfile {
             Self::AlphaV1 { winter: false } => 5,
             Self::AlphaV1 { winter: true } => 6,
             Self::BetaV1 => 7,
+            Self::TopologyProbeV1 => 8,
         }
     }
 
@@ -151,6 +163,7 @@ impl WorldGenerationProfile {
             5 => Some(Self::alpha_v1(false)),
             6 => Some(Self::alpha_v1(true)),
             7 => Some(Self::BetaV1),
+            8 => Some(Self::TopologyProbeV1),
             _ => None,
         }
     }
@@ -396,6 +409,10 @@ mod tests {
             WorldGenerationProfile::McloneOverworldV1.label(),
             "mclone-overworld-v1"
         );
+        assert_eq!(
+            WorldGenerationProfile::TopologyProbeV1.label(),
+            "topology-probe-v1"
+        );
         assert_eq!(WorldGenerationProfile::alpha_v1(false).label(), "alpha-v1");
         assert_eq!(
             WorldGenerationProfile::alpha_v1(true).label(),
@@ -425,6 +442,10 @@ mod tests {
         assert_eq!(
             WorldGenerationProfile::parse_label("mclone-overworld-v1").unwrap(),
             WorldGenerationProfile::McloneOverworldV1
+        );
+        assert_eq!(
+            WorldGenerationProfile::parse_label("topology-probe-v1").unwrap(),
+            WorldGenerationProfile::TopologyProbeV1
         );
         assert_eq!(
             WorldGenerationProfile::parse_label("alpha-v1").unwrap(),
@@ -457,6 +478,10 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&WorldGenerationProfile::McloneOverworldV1).unwrap(),
             r#""mclone-overworld-v1""#
+        );
+        assert_eq!(
+            serde_json::to_string(&WorldGenerationProfile::TopologyProbeV1).unwrap(),
+            r#""topology-probe-v1""#
         );
         assert_eq!(
             serde_json::to_string(&WorldGenerationProfile::alpha_v1(false)).unwrap(),
@@ -498,6 +523,10 @@ mod tests {
             WorldGenerationProfile::from_codec_tag(7),
             Some(WorldGenerationProfile::BetaV1)
         );
+        assert_eq!(
+            WorldGenerationProfile::from_codec_tag(8),
+            Some(WorldGenerationProfile::TopologyProbeV1)
+        );
     }
 
     #[test]
@@ -509,6 +538,10 @@ mod tests {
         let cylinder = HorizontalTopology::new(
             mclone_core::AxisTopology::periodic(0, 32),
             mclone_core::AxisTopology::Unbounded,
+        );
+        let torus = HorizontalTopology::new(
+            mclone_core::AxisTopology::periodic(0, 8),
+            mclone_core::AxisTopology::periodic(0, 8),
         );
 
         assert!(
@@ -537,6 +570,31 @@ mod tests {
         assert!(
             WorldGenerationProfile::McloneOverworldV1
                 .validate_topology(cylinder)
+                .is_err()
+        );
+        assert!(
+            WorldGenerationProfile::TopologyProbeV1
+                .validate_topology(HorizontalTopology::UNBOUNDED)
+                .is_ok()
+        );
+        assert!(
+            WorldGenerationProfile::TopologyProbeV1
+                .validate_topology(cylinder)
+                .is_ok()
+        );
+        assert!(
+            WorldGenerationProfile::TopologyProbeV1
+                .validate_topology(torus)
+                .is_ok()
+        );
+        assert!(
+            WorldGenerationProfile::TopologyProbeV1
+                .validate_topology(HorizontalTopology::cylinder_x(0, 7))
+                .is_err()
+        );
+        assert!(
+            WorldGenerationProfile::TopologyProbeV1
+                .validate_topology(finite)
                 .is_err()
         );
         for profile in [

@@ -106,7 +106,7 @@ impl Cli {
                 }
                 "--generation-profile" => {
                     let value = args.next().context(
-                        "--generation-profile requires overworld, flat-grass-v1, small-island-v1, mclone-overworld-v1, alpha-v1, alpha-v1-winter, beta-v1, or authored-only",
+                        "--generation-profile requires overworld, flat-grass-v1, small-island-v1, mclone-overworld-v1, topology-probe-v1, alpha-v1, alpha-v1-winter, beta-v1, or authored-only",
                     )?;
                     cli.world_generation_profile =
                         WorldGenerationProfile::parse_label(&value).map_err(anyhow::Error::msg)?;
@@ -242,7 +242,7 @@ fn print_help() {
     println!(
         "mclone-dedicated-server\n\n\
          Usage:\n\
-           mclone-dedicated-server [--listen 127.0.0.1:25565] [--disable-udp] [--seed 12345] [--generation-profile overworld|flat-grass-v1|small-island-v1|mclone-overworld-v1|alpha-v1|alpha-v1-winter|beta-v1|authored-only] [--world-topology plane|cylinder-x|cylinder-x:32] [--world-dir ./worlds/world] [--serve-once]\n\
+           mclone-dedicated-server [--listen 127.0.0.1:25565] [--disable-udp] [--seed 12345] [--generation-profile overworld|flat-grass-v1|small-island-v1|mclone-overworld-v1|topology-probe-v1|alpha-v1|alpha-v1-winter|beta-v1|authored-only] [--world-topology plane|cylinder-x|cylinder-x:32] [--world-dir ./worlds/world] [--serve-once]\n\
            mclone-dedicated-server [--listen 127.0.0.1:25565] [--listen-ws 127.0.0.1:25566] [--seed 12345] [--world-root ./worlds] [--world-name world]\n\
            mclone-dedicated-server --multi-client-smoke [--seed 12345]\n\n\
          The server accepts persistent native TCP command streams from multiple clients and companion UDP pose traffic on the same numeric port. --disable-udp selects the reliable-only compatibility profile. --generation-profile authored-only makes absent chunks deterministic void instead of running overworld generation. --world-topology selects plane or a periodic X cylinder. --world-dir opens a persistent SQLite-backed world; --world-root/--world-name select a named world directory. Without a world argument, or with --transient, the server uses explicit transient storage. --listen-ws accepts browser clients into the same authoritative host as native peers. --serve-once is intended for loopback smokes and exits after the first connection closes."

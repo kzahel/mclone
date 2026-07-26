@@ -3,7 +3,8 @@
 Topic: `world-generation-profiles`
 
 Status: **Tacticals 187, 188, 191, 193, and 194 are complete.
-`flat-grass-v1`, `small-island-v1`, `alpha-v1`, `beta-v1`, and the
+`flat-grass-v1`, `small-island-v1`, `topology-probe-v1`, `alpha-v1`,
+`beta-v1`, and the
 first `mclone-overworld-v1` terrain language are live, persisted shared-Rust
 generators beside the unchanged Overworld; authored-only misses still produce
 void. Small Island now
@@ -53,7 +54,7 @@ The first alternate generators are intentionally smaller:
 
 ## Current Truth
 
-The stored server-owned `WorldGenerationProfile` has seven values:
+The stored server-owned `WorldGenerationProfile` has eight values:
 
 - `Overworld`: current procedural vanilla-1.17-shaped generation;
 - `FlatGrassV1`: exact bedrock/dirt/dirt/grass layers with plains biomes and no
@@ -65,6 +66,9 @@ The stored server-owned `WorldGenerationProfile` has seven values:
   wooded rolling upland terrain from inspectable profile-owned fields, with
   gravel/sand/grass/stone surface recipes and a profile-owned oak, grass, and
   occasional-flower decoration language;
+- `TopologyProbeV1`: a hidden adversarial plane/cylinder/torus conformance
+  generator that guarantees terrain, water, bounded geometry, material,
+  lighting, and persistence canaries at canonical seams;
 - `AlphaV1 { winter }`: standalone Alpha v1.1.2_01-shaped density terrain,
   surface, caves, and compact deterministic population, with temperate and
   whole-world winter selections;
@@ -76,9 +80,11 @@ The profile already crosses world catalogs, realm/dimension metadata,
 integrated and dedicated startup, native and browser hosts, and persistence.
 It is fixed before chunk scheduling starts.
 
-Product world creation cycles seven procedural selections—the four modern
+Product world creation still cycles seven procedural selections—the four modern
 profiles, Alpha temperate, Alpha winter, and Beta—through shared catalog policy
-and generator-agnostic UI text. Scene replacement, warm-world startup, managed
+and generator-agnostic UI text. The hidden topology probe is available only
+through explicit developer/test configuration and is not part of that cycle.
+Scene replacement, warm-world startup, managed
 previews, and all host adapters copy the selected descriptor before using the
 shared profile-aware spawn policy. Native SQLite and browser IndexedDB reopen
 preserve it; the browser Worker applies stored metadata profiles before
@@ -176,6 +182,7 @@ Dispositions mean:
 | `small-island-v1` | `internal-mutable` | Noise, terrain shape, materials, biomes, spawn, decoration, dependencies, label, tag, and implementation may change in place | It is an internal proving ground; current fingerprints protect accidental drift but do not prohibit intentional improvement | Update fingerprints, seam/order tests, captures, docs, and discard or migrate affected internal worlds |
 | `authored-only` missing-void behavior | `internal-mutable` | Missing-chunk semantics and identity may change after auditing authored scenarios | No shipped consumer exists, although lobby/preview fixtures rely on the current void contract | Update persistence, embedded-world, catalog, and no-worldgen scenario coverage together |
 | `mclone-overworld-v1` | `internal-mutable` | Identity, tag, fields, seed domains, terrain, biome/surface/decoration rules, spawn, dependency plan, fixtures, and implementation may change in place | It is live only in internal builds; no shipped or named retained world requires current output | Update fingerprints, field maps, cards, tests, docs, and discard or explicitly migrate affected internal worlds |
+| `topology-probe-v1` | `internal-mutable` | Identity, binary tag 8, minimum period, diagnostic terrain, plan geometry, materials, and fixtures may change in place | It is a hidden executable conformance instrument with no shipped or named retained world | Update exact conformance fixtures, worker/persistence tests, tactical evidence, and discard affected internal probe worlds |
 | `alpha-v1` | `internal-mutable` | Profile shape, winter option, feature subset, planning shape, fixtures, and output may change while preserving or explicitly revising the documented Alpha flavor/parity boundary | It is live only in internal builds; no shipped or named retained world requires current output. Alpha v1.1.2_01 stage receipts constrain the close-parity core but do not make the whole profile a historical compatibility promise | Re-run the Alpha oracle hashes, mapping/order tests, scheduler/worker/persistence tests, temperate and winter captures, workspace tests, and web build; update fixtures/docs and discard or explicitly migrate affected internal worlds |
 | `beta-v1` | `internal-mutable` | Identity, binary tag 7, parity boundary, population subset, planning shape, fixtures, and output may change while preserving or explicitly revising the documented Beta flavor/parity boundary | It is live only in internal builds; no shipped or named retained world requires current output. Beta 1.7.3 staged receipts constrain the close-parity climate/terrain/surface/cave core but do not make the whole profile a historical compatibility promise | Re-run the Beta oracle hashes, mapping/order tests, scheduler/worker/persistence tests, captures, workspace tests, and web build; update fixtures/docs and discard or explicitly migrate affected internal worlds |
 
@@ -369,7 +376,10 @@ mountain/valley fields.
 Flat Grass explicitly admits finite and periodic-X topology, while Authored
 Only admits fixture use. Mclone Overworld admits the plane and exactly
 `cylinder-x:384`; different cylinder periods and finite axes remain explicit
-errors. Reference Overworld, Small Island, Alpha, and Beta still reject
+errors. The hidden Topology Probe admits the unbounded plane, X-periodic
+cylinders of at least eight chunks, and flat tori whose axes are each at least
+eight chunks; it rejects finite axes and Z-only periodic worlds. Reference
+Overworld, Small Island, Alpha, and Beta still reject
 bounded or periodic topology during dimension registration. Canonical runtime
 wrapping alone does not make a planar field periodic.
 

@@ -4,8 +4,8 @@ use mclone_worldgen::block::{
     GRASS_BLOCK, PODZOL, RawBlockId, has_fluid, is_air_like, material_blocks_motion,
 };
 use mclone_worldgen::levelgen::{
-    McloneOverworldSamplingTopology, beta_biome_id, mclone_overworld_biome_id_with_topology,
-    mclone_overworld_spawn_chunk_with_topology,
+    McloneOverworldSamplingTopology, TopologyProbeSource, beta_biome_id,
+    mclone_overworld_biome_id_with_topology, mclone_overworld_spawn_chunk_with_topology,
 };
 use mclone_worldgen::surface::overworld_surface_top_material;
 
@@ -38,6 +38,9 @@ pub fn initial_spawn_center_for_descriptor(
             McloneOverworldSamplingTopology::from_horizontal_topology(topology)
                 .expect("Mclone spawn topology must pass profile admission"),
         ),
+        WorldGenerationProfile::TopologyProbeV1 => TopologyProbeSource::new(seed, topology)
+            .expect("topology probe spawn topology must pass profile admission")
+            .origin_chunk(),
         WorldGenerationProfile::FlatGrassV1
         | WorldGenerationProfile::SmallIslandV1
         | WorldGenerationProfile::AlphaV1 { .. }
@@ -80,6 +83,7 @@ pub fn find_safe_surface_spawn_for_loaded_descriptor(
         WorldGenerationProfile::FlatGrassV1
             | WorldGenerationProfile::SmallIslandV1
             | WorldGenerationProfile::McloneOverworldV1
+            | WorldGenerationProfile::TopologyProbeV1
             | WorldGenerationProfile::AlphaV1 { .. }
             | WorldGenerationProfile::BetaV1
             | WorldGenerationProfile::AuthoredOnly { .. }
@@ -100,6 +104,7 @@ pub fn find_safe_surface_spawn_for_loaded_descriptor(
         |x, z| match profile {
             WorldGenerationProfile::FlatGrassV1
             | WorldGenerationProfile::SmallIslandV1
+            | WorldGenerationProfile::TopologyProbeV1
             | WorldGenerationProfile::AlphaV1 { .. } => get_layered_biome_by_id(1),
             WorldGenerationProfile::McloneOverworldV1 => {
                 get_layered_biome_by_id(mclone_overworld_biome_id_with_topology(

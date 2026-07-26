@@ -15,7 +15,7 @@ use mclone_worldgen::levelgen::{
     MutableChunkBlockBuffer, OverworldDependencyGenerationTiming, OverworldFeatureBatchTiming,
     OverworldFeatureDependencyCache, OverworldFeatureDependencyCacheReport, ScheduledTick,
     SmallIslandFeatureDependencyCache, SmallIslandFeatureDependencyCacheReport, SurfaceFillTiming,
-    generate_flat_grass_chunk,
+    generate_flat_grass_chunk, generate_topology_probe_chunks,
 };
 
 use crate::level_light_bridge::LevelLightComputationTiming;
@@ -282,9 +282,9 @@ impl WorldGenerationExecutor {
             }
             WorldGenerationProfile::AlphaV1 { .. } => self.alpha_cache.resident_positions(),
             WorldGenerationProfile::BetaV1 => self.beta_cache.resident_positions(),
-            WorldGenerationProfile::FlatGrassV1 | WorldGenerationProfile::AuthoredOnly { .. } => {
-                BTreeSet::new()
-            }
+            WorldGenerationProfile::FlatGrassV1
+            | WorldGenerationProfile::TopologyProbeV1
+            | WorldGenerationProfile::AuthoredOnly { .. } => BTreeSet::new(),
         }
     }
 
@@ -297,7 +297,9 @@ impl WorldGenerationExecutor {
             }
             WorldGenerationProfile::AlphaV1 { .. } => self.alpha_cache.retained_chunk_count(),
             WorldGenerationProfile::BetaV1 => self.beta_cache.retained_chunk_count(),
-            WorldGenerationProfile::FlatGrassV1 | WorldGenerationProfile::AuthoredOnly { .. } => 0,
+            WorldGenerationProfile::FlatGrassV1
+            | WorldGenerationProfile::TopologyProbeV1
+            | WorldGenerationProfile::AuthoredOnly { .. } => 0,
         }
     }
 
@@ -367,6 +369,23 @@ impl WorldGenerationExecutor {
                     .collect();
                 Ok(WorldGenerationBatchResult {
                     chunks,
+                    retained_dependencies: BTreeMap::new(),
+                    diagnostics: None,
+                })
+            }
+            WorldGenerationProfile::TopologyProbeV1 => {
+                if !dependencies.is_empty() {
+                    return Err(format!(
+                        "topology-probe-v1 is target-only but received {} dependency chunks",
+                        dependencies.len()
+                    ));
+                }
+                Ok(WorldGenerationBatchResult {
+                    chunks: generate_topology_probe_chunks(
+                        descriptor.seed,
+                        descriptor.topology,
+                        targets.iter().copied(),
+                    )?,
                     retained_dependencies: BTreeMap::new(),
                     diagnostics: None,
                 })
@@ -1741,6 +1760,20 @@ mod tests {
         .unwrap();
         assert!(flat.diagnostics.is_none());
 
+        let probe = full_worldgen_frame(
+            ChunkJobId(13),
+            WorldGenerationDescriptor::with_topology(
+                WorldGenerationProfile::TopologyProbeV1,
+                12_345,
+                HorizontalTopology::cylinder_x(0, 8),
+            ),
+            &target,
+        )
+        .and_then(|frame| compute_worldgen_job_frame(&frame))
+        .and_then(|frame| decode_worldgen_response(&frame))
+        .unwrap();
+        assert!(probe.diagnostics.is_none());
+
         let mclone = full_worldgen_frame(
             ChunkJobId(10),
             WorldGenerationDescriptor::new(WorldGenerationProfile::McloneOverworldV1, 12_345),
@@ -2043,6 +2076,93 @@ mod tests {
             .compute_delta_job_frame(&changed_without_reset)
             .unwrap_err();
         assert!(error.contains("descriptor changed"), "{error}");
+    }
+
+    #[test]
+    fn topology_probe_frames_roundtrip_plane_cylinder_and_torus_identity() {
+        let plane =
+            WorldGenerationDescriptor::new(WorldGenerationProfile::TopologyProbeV1, -98_765);
+        let cylinder = WorldGenerationDescriptor::with_topology(
+            WorldGenerationProfile::TopologyProbeV1,
+            -98_765,
+            HorizontalTopology::cylinder_x(0, 8),
+        );
+        let torus = WorldGenerationDescriptor::with_topology(
+            WorldGenerationProfile::TopologyProbeV1,
+            -98_765,
+            HorizontalTopology::new(AxisTopology::periodic(0, 8), AxisTopology::periodic(0, 8)),
+        );
+
+        for (job_id, descriptor, targets, expected) in [
+            (
+                ChunkJobId(79),
+                plane,
+                vec![ChunkPos::new(-1, 0), ChunkPos::new(0, 0)],
+                vec![ChunkPos::new(-1, 0), ChunkPos::new(0, 0)],
+            ),
+            (
+                ChunkJobId(80),
+                cylinder,
+                vec![ChunkPos::new(-1, 0), ChunkPos::new(8, 0)],
+                vec![ChunkPos::new(0, 0), ChunkPos::new(7, 0)],
+            ),
+            (
+                ChunkJobId(81),
+                torus,
+                vec![ChunkPos::new(-1, -1), ChunkPos::new(8, 8)],
+                vec![ChunkPos::new(0, 0), ChunkPos::new(7, 7)],
+            ),
+        ] {
+            let response = full_worldgen_frame(job_id, descriptor, &targets)
+                .and_then(|frame| compute_worldgen_job_frame(&frame))
+                .and_then(|frame| decode_worldgen_response(&frame))
+                .unwrap();
+            assert_eq!(response.descriptor, descriptor);
+            assert_eq!(
+                response
+                    .generated_chunks
+                    .keys()
+                    .copied()
+                    .collect::<Vec<_>>(),
+                expected
+            );
+            assert!(response.retained_dependencies.is_empty());
+            assert!(response.diagnostics.is_none());
+        }
+    }
+
+    #[test]
+    fn topology_probe_frames_are_target_only_partition_and_order_independent() {
+        let descriptor = WorldGenerationDescriptor::with_topology(
+            WorldGenerationProfile::TopologyProbeV1,
+            8_675_309,
+            HorizontalTopology::cylinder_x(0, 8),
+        );
+        let targets = [ChunkPos::new(7, 0), ChunkPos::new(0, 0)];
+        let combined = full_worldgen_frame(ChunkJobId(82), descriptor, &targets)
+            .and_then(|frame| compute_worldgen_job_frame(&frame))
+            .and_then(|frame| decode_worldgen_response(&frame))
+            .unwrap()
+            .generated_chunks;
+        let reversed = full_worldgen_frame(ChunkJobId(83), descriptor, &[targets[1], targets[0]])
+            .and_then(|frame| compute_worldgen_job_frame(&frame))
+            .and_then(|frame| decode_worldgen_response(&frame))
+            .unwrap()
+            .generated_chunks;
+        let partitioned = targets
+            .into_iter()
+            .enumerate()
+            .flat_map(|(index, target)| {
+                full_worldgen_frame(ChunkJobId(84 + index as u64), descriptor, &[target])
+                    .and_then(|frame| compute_worldgen_job_frame(&frame))
+                    .and_then(|frame| decode_worldgen_response(&frame))
+                    .unwrap()
+                    .generated_chunks
+            })
+            .collect::<BTreeMap<_, _>>();
+
+        assert_eq!(combined, reversed);
+        assert_eq!(combined, partitioned);
     }
 
     #[test]
