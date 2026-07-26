@@ -516,7 +516,7 @@ fn run() -> Result<()> {
 
     let (commit, dirty) = git_state();
     let receipt = serde_json::json!({
-        "schema": 16,
+        "schema": 17,
         "profile": "mclone-overworld-v1",
         "topology": config.topology.label(),
         "fieldRevision": MCLONE_OVERWORLD_FIELD_REVISION,
@@ -643,7 +643,7 @@ fn run() -> Result<()> {
             "sandyCoast": facts.sandy_coast_surface_columns,
             "gravelCoast": facts.gravel_coast_surface_columns,
             "rockyCoast": facts.rocky_coast_surface_columns,
-            "coldCoast": facts.cold_coast_surface_columns,
+            "snowCover": facts.cold_coast_surface_columns,
             "riverBed": facts.river_bed_columns,
             "wetlandBed": facts.wetland_bed_columns,
             "riverBank": facts.river_bank_columns,
@@ -989,7 +989,7 @@ fn select_review_sites(
         .iter()
         .enumerate()
         .filter(|(_, sample)| {
-            mclone_overworld_surface_recipe(**sample) == McloneOverworldSurfaceRecipe::ColdCoast
+            mclone_overworld_surface_recipe(**sample) == McloneOverworldSurfaceRecipe::SnowCover
         })
         .max_by(|(_, left), (_, right)| {
             left.terrain
@@ -1056,7 +1056,7 @@ fn select_review_sites(
         "gravelCoast": review_site_json(gravel_coast, samples, request),
         "ordinaryCoast": review_site_json(ordinary_coast, samples, request),
         "rockyCoast": review_site_json(rocky_coast, samples, request),
-        "coldCoast": review_site_json(cold_coast, samples, request),
+        "snowCover": review_site_json(cold_coast, samples, request),
         "periodicSeamRiver": review_site_json(seam_river, samples, request),
         "periodicSeamCoast": review_site_json(seam_coast, samples, request),
     })
@@ -1590,7 +1590,7 @@ impl CoastFacts {
                     coast_adjacent_non_sandy_columns += 1;
                     coast_adjacent_rocky_surface_columns += 1;
                 }
-                McloneOverworldSurfaceRecipe::ColdCoast => {
+                McloneOverworldSurfaceRecipe::SnowCover => {
                     coast_adjacent_non_sandy_columns += 1;
                     coast_adjacent_cold_surface_columns += 1;
                 }
@@ -1708,7 +1708,7 @@ impl CoastFacts {
                 "nonSandy": self.coast_adjacent_non_sandy_columns,
                 "gravelCoast": self.coast_adjacent_gravel_surface_columns,
                 "rockyCoast": self.coast_adjacent_rocky_surface_columns,
-                "coldCoast": self.coast_adjacent_cold_surface_columns,
+                "snowCover": self.coast_adjacent_cold_surface_columns,
                 "erodedSlope": self.coast_adjacent_eroded_slope_columns,
                 "exposedStone": self.coast_adjacent_exposed_stone_columns,
                 "grassSoil": self.coast_adjacent_grass_soil_columns,
@@ -2173,7 +2173,7 @@ impl RegionFacts {
                 McloneOverworldSurfaceRecipe::SandyCoast => sandy_coast_surface_columns += 1,
                 McloneOverworldSurfaceRecipe::GravelCoast => gravel_coast_surface_columns += 1,
                 McloneOverworldSurfaceRecipe::RockyCoast => rocky_coast_surface_columns += 1,
-                McloneOverworldSurfaceRecipe::ColdCoast => cold_coast_surface_columns += 1,
+                McloneOverworldSurfaceRecipe::SnowCover => cold_coast_surface_columns += 1,
                 McloneOverworldSurfaceRecipe::RiverBed => river_bed_columns += 1,
                 McloneOverworldSurfaceRecipe::WetlandBed => wetland_bed_columns += 1,
                 McloneOverworldSurfaceRecipe::RiverBank => river_bank_columns += 1,
@@ -3348,7 +3348,7 @@ fn surface_recipe_color(sample: McloneOverworldLandformSample) -> [u8; 4] {
         McloneOverworldSurfaceRecipe::SandyCoast => [222, 207, 143, 255],
         McloneOverworldSurfaceRecipe::GravelCoast => [146, 142, 128, 255],
         McloneOverworldSurfaceRecipe::RockyCoast => [86, 91, 101, 255],
-        McloneOverworldSurfaceRecipe::ColdCoast => [225, 245, 250, 255],
+        McloneOverworldSurfaceRecipe::SnowCover => [225, 245, 250, 255],
         McloneOverworldSurfaceRecipe::RiverBed => [86, 110, 123, 255],
         McloneOverworldSurfaceRecipe::WetlandBed => [117, 137, 139, 255],
         McloneOverworldSurfaceRecipe::RiverBank => [112, 138, 74, 255],
@@ -3372,7 +3372,7 @@ fn surface_recipe_tag(recipe: McloneOverworldSurfaceRecipe) -> u8 {
         McloneOverworldSurfaceRecipe::ExposedStone => 8,
         McloneOverworldSurfaceRecipe::GravelCoast => 9,
         McloneOverworldSurfaceRecipe::RockyCoast => 10,
-        McloneOverworldSurfaceRecipe::ColdCoast => 11,
+        McloneOverworldSurfaceRecipe::SnowCover => 11,
     }
 }
 

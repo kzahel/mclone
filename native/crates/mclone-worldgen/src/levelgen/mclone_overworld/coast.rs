@@ -1,8 +1,8 @@
 const LAND_COAST_CONTINENTALNESS: f64 = 0.16;
 const OCEAN_COAST_CONTINENTALNESS: f64 = 0.10;
-const SANDY_CHARACTER_MAX: f64 = -0.28;
-const GRAVEL_CHARACTER_MAX: f64 = 0.04;
-const ORDINARY_CHARACTER_MAX: f64 = 0.30;
+pub(super) const SANDY_CHARACTER_MAX: f64 = -0.28;
+pub(super) const GRAVEL_CHARACTER_MAX: f64 = 0.04;
+pub(super) const ORDINARY_CHARACTER_MAX: f64 = 0.30;
 const TRANSITION_CHARACTER_WIDTH: f64 = 0.12;
 pub(super) const MCLONE_OVERWORLD_DEPOSITIONAL_COAST_MIN_PROXIMITY: f64 = 0.86;
 pub(super) const MCLONE_OVERWORLD_ROCKY_COAST_MIN_PROXIMITY: f64 = 0.12;
@@ -56,7 +56,8 @@ pub struct McloneOverworldCoastIntent {
     pub rocky_suitability: f64,
     /// One at a family boundary and zero away from the nearest boundary.
     pub transition: f64,
-    /// Low-altitude cold response independent of the base coast family.
+    /// Low-altitude cold-climate response independent of the base coast
+    /// family and coast proximity.
     pub cold_response: f64,
 }
 
@@ -137,8 +138,53 @@ pub(super) fn coast_intent(
         depositional_suitability,
         rocky_suitability,
         transition: transition * proximity,
-        cold_response: cold_response * proximity,
+        cold_response,
     }
+}
+
+pub(super) fn coast_realization_texture(relief: f64, ridges: f64, mountain_detail: f64) -> f64 {
+    (mountain_detail * 0.72 + relief * 0.18 + (ridges * 2.0 - 1.0) * 0.10).clamp(-1.0, 1.0)
+}
+
+pub(super) fn coast_realization_proximity(intent: McloneOverworldCoastIntent, texture: f64) -> f64 {
+    let jitter = 0.06 + intent.transition * 0.04;
+    (intent.proximity + texture * jitter).clamp(0.0, 1.0)
+}
+
+pub(super) fn coast_realization_character(intent: McloneOverworldCoastIntent, texture: f64) -> f64 {
+    let jitter = 0.03 + intent.transition * 0.11;
+    (intent.character + texture * jitter).clamp(-1.0, 1.0)
+}
+
+pub(super) fn coast_realized_family(
+    intent: McloneOverworldCoastIntent,
+    texture: f64,
+) -> McloneOverworldCoastFamily {
+    if !intent.family.is_coast() {
+        return intent.family;
+    }
+    let character = coast_realization_character(intent, texture);
+    if character <= SANDY_CHARACTER_MAX && intent.depositional_suitability >= 0.22 {
+        McloneOverworldCoastFamily::Sandy
+    } else if character <= GRAVEL_CHARACTER_MAX {
+        McloneOverworldCoastFamily::Gravel
+    } else if character <= ORDINARY_CHARACTER_MAX {
+        McloneOverworldCoastFamily::Ordinary
+    } else if intent.rocky_suitability >= 0.26 {
+        McloneOverworldCoastFamily::Rocky
+    } else {
+        McloneOverworldCoastFamily::Ordinary
+    }
+}
+
+pub(super) fn coast_rocky_surface_strength(
+    intent: McloneOverworldCoastIntent,
+    texture: f64,
+) -> f64 {
+    let character = coast_realization_character(intent, texture);
+    let rocky_gate = smoothstep(((character - 0.12) / 0.34).clamp(0.0, 1.0));
+    let rocky_support = smoothstep(((intent.rocky_suitability - 0.12) / 0.50).clamp(0.0, 1.0));
+    rocky_gate * rocky_support * coast_realization_proximity(intent, texture)
 }
 
 pub(super) fn coast_adjusted_land_surface_y(
@@ -151,11 +197,14 @@ pub(super) fn coast_adjusted_land_surface_y(
     if !intent.family.is_coast() || intent.proximity == 0.0 {
         return provisional_surface_y;
     }
+    let texture = coast_realization_texture(relief, ridges, mountain_detail);
+    let realization_proximity = coast_realization_proximity(intent, texture);
     let rocky_gate = smoothstep(((intent.character - 0.18) / 0.22).clamp(0.0, 1.0));
     let rocky_support = smoothstep(((intent.rocky_suitability - 0.18) / 0.52).clamp(0.0, 1.0));
-    let rocky_influence = rocky_gate * rocky_support * intent.proximity;
+    let rocky_shape = 0.82 + (texture * 0.5 + 0.5) * 0.36;
+    let rocky_influence = rocky_gate * rocky_support * realization_proximity * rocky_shape;
     let gravel_rise = if intent.family == McloneOverworldCoastFamily::Gravel {
-        intent.proximity * (0.35 + intent.rocky_suitability * 1.65)
+        realization_proximity * (0.35 + intent.rocky_suitability * 1.65)
     } else {
         0.0
     };
@@ -222,6 +271,43 @@ mod tests {
         assert_eq!(
             coast_intent(0.0, 0.0, 0.0, 0.0, 1.0, 0.0).cold_response,
             0.0
+        );
+        assert_eq!(
+            coast_intent(0.3, 0.0, 0.0, 0.0, -1.0, 0.0).cold_response,
+            1.0,
+            "cold ground must not end at the coast-proximity band"
+        );
+    }
+
+    #[test]
+    fn realization_detail_feathers_only_the_semantic_transition() {
+        let intent = McloneOverworldCoastIntent {
+            family: McloneOverworldCoastFamily::Rocky,
+            signed_distance_proxy: 0.02,
+            proximity: 0.86,
+            selector: 0.0,
+            character: ORDINARY_CHARACTER_MAX,
+            depositional_suitability: 0.5,
+            rocky_suitability: 0.8,
+            transition: 1.0,
+            cold_response: 0.0,
+        };
+
+        assert_eq!(
+            coast_realized_family(intent, -1.0),
+            McloneOverworldCoastFamily::Ordinary
+        );
+        assert_eq!(
+            coast_realized_family(intent, 1.0),
+            McloneOverworldCoastFamily::Rocky
+        );
+        assert!(
+            coast_realization_proximity(intent, -1.0)
+                < MCLONE_OVERWORLD_DEPOSITIONAL_COAST_MIN_PROXIMITY
+        );
+        assert!(
+            coast_realization_proximity(intent, 1.0)
+                > MCLONE_OVERWORLD_DEPOSITIONAL_COAST_MIN_PROXIMITY
         );
     }
 

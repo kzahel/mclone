@@ -1194,7 +1194,7 @@ const fn surface_recipe_code(recipe: McloneOverworldSurfaceRecipe) -> f32 {
         McloneOverworldSurfaceRecipe::SandyCoast => 1.0,
         McloneOverworldSurfaceRecipe::GravelCoast => 9.0,
         McloneOverworldSurfaceRecipe::RockyCoast => 10.0,
-        McloneOverworldSurfaceRecipe::ColdCoast => 11.0,
+        McloneOverworldSurfaceRecipe::SnowCover => 11.0,
         McloneOverworldSurfaceRecipe::RiverBed => 2.0,
         McloneOverworldSurfaceRecipe::WetlandBed => 3.0,
         McloneOverworldSurfaceRecipe::RiverBank => 4.0,

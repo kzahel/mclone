@@ -317,7 +317,7 @@ fn surface_color(recipe: McloneOverworldSurfaceRecipe) -> [f32; 4] {
         McloneOverworldSurfaceRecipe::SandyCoast => [0.96, 0.78, 0.25],
         McloneOverworldSurfaceRecipe::GravelCoast => [0.57, 0.55, 0.50],
         McloneOverworldSurfaceRecipe::RockyCoast => [0.34, 0.36, 0.40],
-        McloneOverworldSurfaceRecipe::ColdCoast => [0.88, 0.96, 0.98],
+        McloneOverworldSurfaceRecipe::SnowCover => [0.88, 0.96, 0.98],
         McloneOverworldSurfaceRecipe::RiverBed => [0.08, 0.74, 0.94],
         McloneOverworldSurfaceRecipe::WetlandBed => [0.16, 0.62, 0.52],
         McloneOverworldSurfaceRecipe::RiverBank => [0.94, 0.45, 0.10],

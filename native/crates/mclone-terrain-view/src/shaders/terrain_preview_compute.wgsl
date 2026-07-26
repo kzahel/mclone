@@ -355,35 +355,156 @@ fn coast_intent(
         depositional_suitability,
         rocky_suitability,
         transition * proximity,
-        cold_response * proximity,
+        cold_response,
     );
 }
 
-fn coast_surface_active(
+fn coast_realization_texture(
+    relief: f32,
+    ridges: f32,
+    mountain_detail: f32,
+) -> f32 {
+    return clamp(
+        mountain_detail * 0.72
+            + relief * 0.18
+            + (ridges * 2.0 - 1.0) * 0.10,
+        -1.0,
+        1.0,
+    );
+}
+
+fn coast_realization_proximity(
+    coast: CoastIntent,
+    texture: f32,
+) -> f32 {
+    let jitter = 0.06 + coast.transition * 0.04;
+    return clamp(coast.proximity + texture * jitter, 0.0, 1.0);
+}
+
+fn coast_realization_character(
+    coast: CoastIntent,
+    texture: f32,
+) -> f32 {
+    let jitter = 0.03 + coast.transition * 0.11;
+    return clamp(coast.character + texture * jitter, -1.0, 1.0);
+}
+
+fn coast_realized_family(
+    coast: CoastIntent,
+    texture: f32,
+) -> f32 {
+    if coast.family == 0.0 || coast.family == 5.0 {
+        return coast.family;
+    }
+    let character = coast_realization_character(coast, texture);
+    if character <= -0.28 && coast.depositional_suitability >= 0.22 {
+        return 1.0;
+    }
+    if character <= 0.04 {
+        return 2.0;
+    }
+    if character <= 0.30 {
+        return 3.0;
+    }
+    if coast.rocky_suitability >= 0.26 {
+        return 4.0;
+    }
+    return 3.0;
+}
+
+fn coast_rocky_surface_strength(
+    coast: CoastIntent,
+    texture: f32,
+) -> f32 {
+    let character = coast_realization_character(coast, texture);
+    let rocky_gate =
+        smooth_curve(clamp((character - 0.12) / 0.34, 0.0, 1.0));
+    let rocky_support = smooth_curve(
+        clamp((coast.rocky_suitability - 0.12) / 0.50, 0.0, 1.0),
+    );
+    return rocky_gate
+        * rocky_support
+        * coast_realization_proximity(coast, texture);
+}
+
+fn macro_snow_cover_active(
+    surface_y: f32,
     continentalness: f32,
     coast: CoastIntent,
+    texture: f32,
 ) -> bool {
-    if continentalness <= 0.0 {
-        return false;
+    let threshold = 0.72 - texture * 0.08;
+    return continentalness > 0.0
+        && surface_y <= 93.0
+        && coast.cold_response >= threshold;
+}
+
+fn coast_sandy_material(
+    coast: CoastIntent,
+    texture: f32,
+) -> f32 {
+    let proximity = coast_realization_proximity(coast, texture);
+    let inland_edge = smooth_curve(
+        clamp((0.96 - proximity) / 0.10, 0.0, 1.0),
+    );
+    if coast.rocky_suitability >= 0.52 && texture >= 0.34 {
+        return 7.0;
     }
-    if coast.family == 1.0 || coast.family == 2.0 {
-        return coast.proximity >= 0.86;
+    if texture < -0.50 + inland_edge * 0.46 {
+        return 4.0;
     }
-    if coast.family == 4.0 {
-        return coast.proximity >= 0.12;
-    }
-    return false;
+    return 6.0;
 }
 
 fn coast_gravel_material(
     coast: CoastIntent,
-    mountain_detail: f32,
+    texture: f32,
 ) -> f32 {
-    if coast.rocky_suitability >= 0.68
-        && mountain_detail >= 0.18 - coast.transition * 0.16 {
+    let proximity = coast_realization_proximity(coast, texture);
+    let inland_edge = smooth_curve(
+        clamp((0.96 - proximity) / 0.10, 0.0, 1.0),
+    );
+    if coast.rocky_suitability >= 0.56
+        && texture >= 0.08 - coast.transition * 0.12 {
         return 1.0;
     }
+    if texture < -0.42 + inland_edge * 0.30 {
+        return 4.0;
+    }
+    if texture < -0.12 + inland_edge * 0.22 {
+        return 13.0;
+    }
     return 7.0;
+}
+
+fn river_bank_material(
+    base_surface_y: f32,
+    distance: f32,
+    half_width: f32,
+    texture: f32,
+    coast: CoastIntent,
+) -> f32 {
+    if base_surface_y > 68.0 {
+        return 4.0;
+    }
+    let bank_run = max(distance - half_width, 0.0);
+    let sand_opportunity = smooth_curve(
+        clamp((0.22 - coast.character) / 0.60, 0.0, 1.0),
+    ) * coast.depositional_suitability;
+    let sandy_run =
+        sand_opportunity * (1.20 + (texture * 0.5 + 0.5) * 1.40);
+    if bank_run <= sandy_run {
+        return 6.0;
+    }
+    if bank_run <= sandy_run + 1.40 {
+        if texture >= 0.18 {
+            return 7.0;
+        }
+        if texture >= -0.18 {
+            return 13.0;
+        }
+    }
+    return 4.0;
 }
 
 fn macro_surface_material(
@@ -399,20 +520,27 @@ fn macro_surface_material(
     if continentalness <= 0.0 {
         return 2.0;
     }
+    let coast_texture =
+        coast_realization_texture(relief, ridges, mountain_detail);
+    let realized_family = coast_realized_family(coast, coast_texture);
+    let realization_proximity =
+        coast_realization_proximity(coast, coast_texture);
     if continentalness > 0.0 {
-        if coast.family >= 1.0
-            && coast.family <= 4.0
-            && coast.proximity >= 0.86
-            && coast.cold_response >= 0.68 {
+        if macro_snow_cover_active(
+            surface_y,
+            continentalness,
+            coast,
+            coast_texture,
+        ) {
             return 8.0;
         }
-        if coast.family == 1.0 && coast.proximity >= 0.86 {
-            return 6.0;
+        if realized_family == 1.0 && realization_proximity >= 0.86 {
+            return coast_sandy_material(coast, coast_texture);
         }
-        if coast.family == 2.0 && coast.proximity >= 0.86 {
-            return coast_gravel_material(coast, mountain_detail);
+        if realized_family == 2.0 && realization_proximity >= 0.86 {
+            return coast_gravel_material(coast, coast_texture);
         }
-        if coast.family == 4.0 && coast.proximity >= 0.12 {
+        if realized_family == 4.0 && realization_proximity >= 0.12 {
             return 4.0;
         }
     }
@@ -479,16 +607,23 @@ fn coast_adjusted_land_surface_height(
     if coast.family == 0.0 || coast.family == 5.0 || coast.proximity == 0.0 {
         return provisional_surface_y;
     }
+    let texture =
+        coast_realization_texture(relief, ridges, mountain_detail);
+    let realization_proximity =
+        coast_realization_proximity(coast, texture);
     let rocky_gate =
         smooth_curve(clamp((coast.character - 0.18) / 0.22, 0.0, 1.0));
     let rocky_support = smooth_curve(
         clamp((coast.rocky_suitability - 0.18) / 0.52, 0.0, 1.0),
     );
-    let rocky_influence = rocky_gate * rocky_support * coast.proximity;
+    let rocky_shape = 0.82 + (texture * 0.5 + 0.5) * 0.36;
+    let rocky_influence =
+        rocky_gate * rocky_support * realization_proximity * rocky_shape;
     var gravel_rise = 0.0;
     if coast.family == 2.0 {
         gravel_rise =
-            coast.proximity * (0.35 + coast.rocky_suitability * 1.65);
+            realization_proximity
+                * (0.35 + coast.rocky_suitability * 1.65);
     }
     let ridge_shoulder =
         smooth_curve(clamp((ridges - 0.16) / 0.84, 0.0, 1.0));
@@ -737,8 +872,10 @@ fn surface_recipe_code(
     bank_influence: f32,
     wetland_pool_influence: f32,
     continentalness: f32,
+    relief: f32,
     ruggedness: f32,
     ridges: f32,
+    mountain_detail: f32,
     temperature: f32,
     coast: CoastIntent,
 ) -> f32 {
@@ -748,32 +885,37 @@ fn surface_recipe_code(
     if wetland_pool_influence >= 0.55 {
         return 3.0;
     }
+    let coast_texture =
+        coast_realization_texture(relief, ridges, mountain_detail);
+    let realized_family = coast_realized_family(coast, coast_texture);
+    let realization_proximity =
+        coast_realization_proximity(coast, coast_texture);
+    if macro_snow_cover_active(
+        surface_y,
+        continentalness,
+        coast,
+        coast_texture,
+    ) {
+        return 11.0;
+    }
     if bank_influence > 0.0 && surface_y <= water_y + 3.0 {
         return 4.0;
     }
     if continentalness <= 0.0 {
         return 0.0;
     }
-    if continentalness > 0.0
-        && coast.family >= 1.0
-        && coast.family <= 4.0
-        && coast.proximity >= 0.86
-        && surface_y <= 93.0
-        && coast.cold_response >= 0.68 {
-        return 11.0;
-    }
-    if coast_surface_active(continentalness, coast)
-        && coast.family == 1.0
+    if realized_family == 1.0
+        && realization_proximity >= 0.86
         && surface_y <= 68.0 {
         return 1.0;
     }
-    if coast_surface_active(continentalness, coast)
-        && coast.family == 2.0
+    if realized_family == 2.0
+        && realization_proximity >= 0.86
         && surface_y <= 73.0 {
         return 9.0;
     }
-    if coast_surface_active(continentalness, coast)
-        && coast.family == 4.0
+    if realization_proximity >= 0.12
+        && coast_rocky_surface_strength(coast, coast_texture) >= 0.06
         && surface_y <= 93.0 {
         return 10.0;
     }
@@ -1035,8 +1177,19 @@ fn complete_hydrology(
     var visible_material = macro_material;
     if continentalness <= 0.0 || watercourse_water {
         visible_material = 2.0;
-    } else if bank_influence > 0.0 && channel_influence == 0.0 && surface_y <= water_y + 3.0 {
-        visible_material = select(4.0, 6.0, base_surface_y <= 68.0);
+    } else if macro_material != 8.0
+        && bank_influence > 0.0
+        && channel_influence == 0.0
+        && surface_y <= water_y + 3.0 {
+        let bank_texture =
+            coast_realization_texture(relief, ridges, mountain_detail);
+        visible_material = river_bank_material(
+            base_surface_y,
+            geometry.distance,
+            half_width,
+            bank_texture,
+            coast,
+        );
     }
     let surface_recipe = surface_recipe_code(
         surface_y,
@@ -1045,8 +1198,10 @@ fn complete_hydrology(
         bank_influence,
         wetland_pool_influence,
         continentalness,
+        relief,
         ruggedness,
         ridges,
+        mountain_detail,
         temperature,
         coast,
     );
