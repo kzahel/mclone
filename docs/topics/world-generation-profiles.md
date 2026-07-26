@@ -2,7 +2,7 @@
 
 Topic: `world-generation-profiles`
 
-Status: **Tacticals 187, 188, 191, 193, and 194 are complete.
+Status: **Tacticals 187, 188, 191, 193, 194, and 257 are complete.
 `flat-grass-v1`, `small-island-v1`, `topology-probe-v1`, `alpha-v1`,
 `beta-v1`, and the
 first `mclone-overworld-v1` terrain language are live, persisted shared-Rust
@@ -48,6 +48,9 @@ The first alternate generators are intentionally smaller:
 - mclone overworld now proves unbounded continuous terrain, a deliberately
   small biome/surface language, and dependency-bearing vegetation through the
   same host contracts as the other profiles;
+- the hidden topology probe proves adversarial plane, cylinder, and flat-torus
+  seams through generation, worker, simulation, lighting, persistence, and
+  native presentation without entering normal world creation; and
 - Alpha and Beta prove that historical generation families can remain
   standalone siblings while sharing neutral chunks, planning, feature-region,
   persistence, and host contracts.
@@ -96,17 +99,24 @@ shared-Rust executor selects the unchanged Overworld cache, flat grass, the
 Small Island, Mclone Overworld, Alpha, or Beta cache, and resident state resets
 when either descriptor fact changes.
 
+Transient native scene startup now builds its `SessionStartRequest` with the
+selected profile instead of describing every direct world as Overworld. Local
+periodic startup also preflights the exact tracking and unload-hysteresis view
+against the topology, so an undersized period fails synchronously rather than
+terminating a background runner and leaving startup pending.
+
 `WorldGenerationProfile::plan_features` is the single closed planning entry.
 It returns a deterministic `ChunkGenerationPlan` containing exact requested
 outputs, generator backend-work chunks, and typed chunk/status prerequisites.
 Overworld, Small Island, Mclone Overworld, Alpha, and Beta declare a 3x3
 feature-center and 5x5 mutable Surface dependency footprint for one target;
-Flat Grass declares target-only work. The scheduler consumes every prerequisite
-generically, then applies its own view priority, deduplication, job admission,
-and publication policy. Planning occurs once for scheduler admission and is
-recomputed once by the worker as request validation; it adds no worker round
-trip, trait-object dispatch, or general graph traversal and never runs per poll
-or publication.
+the Topology Probe declares a one-chunk Surface input ring for its lighting
+canary; Flat Grass declares target-only work. The scheduler consumes every
+prerequisite generically, then applies its own view priority, deduplication,
+job admission, and publication policy. Planning occurs once for scheduler
+admission and is recomputed once by the worker as request validation; it adds
+no worker round trip, trait-object dispatch, or general graph traversal and
+never runs per poll or publication.
 
 The scheduler/worker seam now has two explicit request layers:
 
@@ -128,7 +138,7 @@ Generator implementations remain concrete behind that contract:
 - dependency-bearing profiles publish one generic cache report; detailed
   `OverworldFeatureBatchTiming` remains optional and Overworld-only;
 - resident worker state contains separate Overworld, Small Island, Mclone,
-  Alpha, and Beta caches;
+  Alpha, and Beta caches, while the probe remains stateless;
 - surface, carver, feature-biome, and feature-table internals remain specific
   to `OverworldBiomeSource` and the current Overworld case.
 
@@ -156,7 +166,7 @@ world-generation change is safe. Review it before preserving an algorithm,
 adding a new versioned profile, changing a fixture, or migrating a stored
 world.
 
-- **Reviewed:** 2026-07-22 after Mclone field revision 6 acceptance; no freeze
+- **Reviewed:** 2026-07-26 after the hidden topology probe closeout; no freeze
   trigger or preservation consumer was added
 - **Project release state:** `internal-unshipped`
 - **Known external world/save consumers:** none

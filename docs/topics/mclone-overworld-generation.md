@@ -460,6 +460,22 @@ solving the same radius-eight metadata neighborhood. Benchmark receipts expose
 both plan-cache and clipped-query hit/retention counters so a visually sparse
 structure cannot hide unbounded or redundant planning cost.
 
+### Topology conformance defense
+
+Tactical 257 changed no Mclone output. It added an isolation regression that
+alternates plane and periodic descriptors through one resident Mclone executor
+and compares generated chunks, retained dependencies, and diagnostics with
+fresh executors. This locks the rule that seed, profile revision, and topology
+qualify every output-affecting cache.
+
+The shared seam corpus now includes `-1`, `0`, `P - 1`, `P`, `P + 1`, signed
+whole-period laps, both half-period directions, and the deterministic positive
+half-period tie. Existing field, stream, vegetation, feature, worker, and
+persistence proofs continue to use the real 384-chunk production cylinder.
+The separate hidden topology probe guarantees adversarial seam intersections
+for future mechanisms; it does not substitute synthetic terrain for Mclone's
+own acceptance fixtures.
+
 The 2026-07-22 Linux Slice 0 baseline at commit `8cfa1ac4`, seed `12345`,
 center `(0,0)`, radius one chunk, and three release iterations measured:
 

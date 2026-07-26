@@ -27,12 +27,13 @@ topology-specific distant-terrain constraints. These are contracts for later
 work, not claims that torus generation or periodic horizon rendering has
 landed.
 
-[`Tactical 257`](../tactical/257-topology-worldgen-conformance-probe.md) is
-active. It adds a hidden adversarial generation profile that guarantees
+[`Tactical 257`](../tactical/257-topology-worldgen-conformance-probe.md)
+completed on 2026-07-26. Its hidden adversarial generation profile guarantees
 terrain, water, bounded geometry, lighting, and persistence canaries at
-periodic seams, plus a reusable conformance suite for future terrain
-families. It complements rather than replaces the Flat Grass runtime proof
-and the real Mclone cylinder.
+periodic seams. The pure kernel proves plane, X-cylinder, and flat-torus
+generation; the ordinary runtime proves the period-32 cylinder through worker,
+fluid, light, SQLite, startup, and lit renderer paths. It complements rather
+than replaces the Flat Grass runtime proof and the real Mclone cylinder.
 
 ## Cylinder v0 Support
 
@@ -44,6 +45,7 @@ and the real Mclone cylinder.
 | Flat Grass generation | supported | supported | supported | torus pending |
 | Authored Only generation | supported | fixture support | fixture support | design only |
 | Mclone Overworld generation | supported | unsupported | supported at 384 chunks | design only |
+| Hidden Topology Probe generation | supported | unsupported | supported, default 32 chunks | flat-torus direct tests |
 | Reference/Alpha/Beta/Small Island | supported | unsupported | unsupported | unsupported |
 | Distant terrain presentation | no current product | unclaimed | unclaimed | new architecture pending |
 | Natural spawning | supported | unclaimed | explicit rejection | pending |
@@ -55,6 +57,11 @@ Android APK/AVD, synthetic stereo, OpenXR compile, and Quest APK packaging. A
 physical Quest was not attached for the closeout, so device execution remains
 unclaimed rather than inferred from the proxy lanes. The one-lift invariant
 still rejects views wide enough to show two images of a canonical chunk.
+Local-integrated startup now preflights the accepted tracking radius and
+one-chunk unload hysteresis against the topology before starting a runner. At
+render distance 2, the derived radii are 3 and 4: a period-8 direct generator
+fixture is therefore rejected as an interactive view, while the default
+period-32 probe is admitted.
 
 This topic owns the continuing product and engine direction for finite worlds,
 looping worlds, exact grid-edge identifications, inaccessible topology regions,

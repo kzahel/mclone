@@ -1,6 +1,6 @@
 # Tactical 257: Topology Worldgen Conformance Probe
 
-Status: active; implementation authorized 2026-07-26.
+Status: complete 2026-07-26.
 
 Topics:
 
@@ -46,6 +46,13 @@ The conformance kernel also accepts:
 Finite axes and mixed shapes the probe does not understand fail during
 dimension validation. Periodic axes must be large enough that every bounded
 probe formation has an influence diameter below half the period.
+
+Interactive local sessions also retain the ordinary one-lift view contract.
+Their accepted tracking radius plus unload hysteresis must fit inside the
+period. For example, render distance 2 derives tracking radius 3 and unload
+radius 4, so an eight-chunk period is valid for direct generator/server
+fixtures but rejected before local runtime startup; the 32-chunk default is
+valid.
 
 The generated landscape is intentionally diagnostic rather than attractive.
 It guarantees the following near the canonical seam:
@@ -136,7 +143,7 @@ entry points, but code that owns a dimension descriptor must not call them.
   topology through scheduler and worker boundaries.
 - [x] Confirm Flat Grass and real Mclone seam tests remain complementary
   rather than superseded.
-- [ ] Run focused clean baselines before generator behavior changes.
+- [x] Run focused green baselines before generator behavior changes.
 
 Gate: the tactical adds no second context abstraction and names every intended
 production boundary.
@@ -187,9 +194,9 @@ canonical topology.
 - [x] Add the alternating plane/cylinder resident-cache isolation test.
 - [x] Consolidate reusable seam coordinates without weakening existing
   field, feature, stream, or vegetation fixtures.
-- [ ] Run focused worldgen/server tests, all affected workspace test targets,
+- [x] Run focused worldgen/server tests, all affected workspace test targets,
   and the browser/Wasm compile boundary.
-- [ ] Update topic status, support matrices, compatibility ledger, and this
+- [x] Update topic status, support matrices, compatibility ledger, and this
   execution record with exact results and remaining exclusions.
 
 Gate: future Mclone terrain families have a reusable topology acceptance lane,
@@ -227,6 +234,56 @@ The minimum closeout is:
 
 Screenshots remain under `/tmp`. Pixel evidence is diagnostic; exact generated
 facts are the determinism oracle.
+
+## Execution Record
+
+The implementation landed as the following reviewable sequence:
+
+- `3209c1e1` planned the hidden conformance profile and defensive Mclone
+  boundary;
+- `08318c8c` added the pure plane/cylinder/torus probe kernel;
+- `206a5abb` integrated the hidden stored profile and worker codec;
+- `94db3bec` added authoritative runtime, fluid, lighting, torus, and SQLite
+  proofs;
+- `65268c50` locked Mclone descriptor-qualified caches and the signed seam
+  corpus;
+- `ed4ca50f` added local-view topology preflight and a real period-32 startup
+  pump proof; and
+- `1e4c3b4e` preserved the selected profile in transient scene requests.
+
+The runtime pass exposed two useful defects rather than merely confirming the
+happy path:
+
+- retained lighting lacked a light-only adjacent air section, so the generated
+  torch could not propagate through empty seam-neighbor space; the light engine
+  now activates a bounded envelope around retained nonempty sections; and
+- a local period too small for unload hysteresis failed asynchronously inside
+  the server thread and left startup waiting forever. Shared policy preflight
+  now returns the exact duplicate-lift error before startup.
+
+Final validation on 2026-07-26:
+
+- `cargo test -p mclone-worldgen --lib`: 359 passed, 1 ignored;
+- `cargo test -p mclone-light --lib`: 55 passed;
+- `cargo test -p mclone-server --lib`: 560 passed;
+- `cargo test -p mclone-app-runtime --lib`: 279 passed;
+- `cargo test -p mclone-scene --lib`: 158 passed;
+- `cargo check --workspace --all-targets`: passed with pre-existing warnings;
+- `pnpm native:web:build`: passed for `wasm32-unknown-unknown` with
+  pre-existing warnings; and
+- native lit period-32 captures at 1280 by 720 reached playable and were
+  inspected at `/tmp/mclone-topology-probe-arch.png` (26 sections, 11 drawn)
+  and `/tmp/mclone-topology-probe-hydrology.png` (26 sections, 12 drawn).
+
+The arch capture shows the bounded stone ring and torch through the ordinary
+renderer and lighting path. The hydrology capture shows the split/rejoin
+channel and enclosed island. These pixels are presentation evidence only;
+exact signed-lift, plan, fluid, light, torus-corner, and persistence assertions
+remain the acceptance oracle.
+
+No Mclone terrain output changed. General 3D density, product torus authority,
+periodic distant-terrain presentation, and multiple simultaneously visible
+lifts remain outside this tactical.
 
 ## Stop Conditions
 
