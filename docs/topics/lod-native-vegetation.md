@@ -11,11 +11,12 @@ chunk/fragment mask is not a valid exact/LOD tree handoff. One stable natural
 tree can appear as exact block geometry partly hidden by retained procedural
 collar terrain plus the outside fragments of its own LOD proxy. Tactical
 [`262`](../tactical/262-world-explorer-exact-procedural-composition.md)
-Slice 3A now owns the focused correction. It first adds a small neutral
-bounded-representation ownership envelope, then uses the stable tree record
-as its first feature-specific unit. Exact natural-tree admission remains
-separable and one complete stable-ID representation is selected from the
-record's full bounds and the actual exact-safe terrain interior. Browser and
+Slice 3A now implements the focused correction through a small neutral
+bounded-representation ownership envelope and stable-tree adapter. Exact
+natural-tree admission is separate, and one complete stable-ID
+representation is selected from the record's full bounds and the actual
+exact-safe terrain interior. Delayed native window/offscreen movement has
+zero missing, dual, or unowned records at forest checkpoints. Browser and
 game-scene promotion wait for Human Review 1A.
 
 World Explorer review on 2026-07-26 found that native enabled synchronous
@@ -893,7 +894,7 @@ exact-painted coverage snapshot, cross-chunk crown XOR, authoritative edit
 invalidation, multiworld budgets, device rebuild, and mono/stereo/multiview
 presentation around the already proven service.
 
-### Slice 6: whole-record frontier arbitration — active
+### Slice 6: whole-record frontier arbitration — Human Review 1A candidate
 
 Tactical
 [`262`](../tactical/262-world-explorer-exact-procedural-composition.md)
@@ -1092,8 +1093,9 @@ Coordinating parent Tactical
 [`261`](../tactical/261-procedural-horizon-product-integration-roadmap.md) now
 sequences the focused integration campaign. Active child Tactical
 [`262`](../tactical/262-world-explorer-exact-procedural-composition.md)
-has established terrain coverage and now corrects the reviewed exact/proxy
-tree chimera before Human Review 1A. Later children construct the proven
+has established terrain coverage and corrected the reviewed exact/proxy tree
+chimera in native automation and inspected captures. Human Review 1A is the
+next gate. Later children construct the proven
 platform executor at the app rim, compose the unchanged
 coordinator/compiler under `mclone-scene`, and add authoritative edit
 invalidation, multiworld budgets, device rebuild, and mono/stereo/multiview

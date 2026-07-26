@@ -1,12 +1,13 @@
 # Tactical 262: World Explorer Exact/Procedural Composition
 
-Status: Human Review 1 correction active 2026-07-26. Slices 0 through 3
+Status: Human Review 1A candidate 2026-07-26. Slices 0 through 3
 proved the terrain compositor, shared target, exact-painted mask, and
 procedural collar. Human review accepted that terrain behavior overall but
 found one blocking natural-tree ownership defect: one stable tree can appear
 as an exact/proxy chimera while procedural terrain occludes its exact
-geometry. Slice 3A corrects whole-tree frontier ownership before browser,
-Terrain Lab, or game-scene promotion.
+geometry. Slice 3A now selects one whole exact-or-proxy representation and
+has passed native window/offscreen automation plus inspected captures.
+Browser, Terrain Lab, and game-scene promotion wait for Human Review 1A.
 
 Topics:
 
@@ -357,32 +358,88 @@ natural-tree XOR primitive moves forward into this proof.
 
 ### Slice 3A: whole-tree frontier arbitration
 
-- [ ] Add a renderer-neutral bounded-representation ownership snapshot keyed
+- [x] Add a renderer-neutral bounded-representation ownership snapshot keyed
   by source, ownership generation, stable unit ID, complete working bounds,
   exact/approximate readiness, and selected owner.
-- [ ] Add the first tree adapter keyed by stable occurrence ID, terrain
+- [x] Add the first tree adapter keyed by stable occurrence ID, terrain
   coverage generation, and `McloneTreeRecord` working bounds without putting
   tree payload or rendering policy in the neutral envelope.
-- [ ] Separate exact natural-tree draw admission from exact terrain
+- [x] Separate exact natural-tree draw admission from exact terrain
   admission without changing terrain, low-vegetation, or reference-profile
   semantics.
-- [ ] Keep a complete record proxy-owned whenever its bounds touch unpainted
+- [x] Keep a complete record proxy-owned whenever its bounds touch unpainted
   terrain or the procedural collar; make it exact-owned only after its full
   exact-safe footprint and exact draw resources are ready.
-- [ ] Suppress or admit the complete proxy instance by stable record ID; do
+- [x] Suppress or admit the complete proxy instance by stable record ID; do
   not clip it fragment-by-fragment at chunk boundaries.
-- [ ] Switch exact/proxy ownership atomically on admission, eviction,
+- [x] Switch exact/proxy ownership atomically on admission, eviction,
   movement, delayed work, and source reset.
-- [ ] Extend `Coverage` and smoke receipts with exact-owned, proxy-owned,
+- [x] Extend `Coverage` and smoke receipts with exact-owned, proxy-owned,
   frontier-crossing, dual-owned, and unowned record counts.
-- [ ] Add direct edge/corner, cross-chunk crown, negative-coordinate,
+- [x] Add direct edge/corner, cross-chunk crown, negative-coordinate,
   delayed-admission, eviction, and teleport fixtures.
-- [ ] Capture and inspect the reported forest anchor plus additional dense
+- [x] Capture and inspect the reported forest anchor plus additional dense
   forest boundaries before requesting Human Review 1A.
 
 Gate: every eligible natural tree has exactly one complete visible
 representation, procedural terrain never cuts an exact-owned tree, and
 Human Review 1A accepts the same boundary views.
+
+### Human Review 1A Candidate Evidence
+
+Commit `8c44acaf` completes the native whole-record proof:
+
+- canonical compilation can separate stable natural-tree meshes from exact
+  terrain while leaving low vegetation and other feature families unchanged;
+- one neutral ownership snapshot selects exact or approximate presentation
+  for a complete stable occurrence and generation;
+- exact ownership requires complete working bounds inside the painted
+  terrain's true 1.5-block-collar-safe interior and drawable exact resources;
+- every clipmap copy of an exact-owned ID is removed on the CPU; the tree
+  shader no longer clips a proxy fragment-by-fragment against exact chunks;
+  and
+- exact-tree GPU sections rebuild from the same ownership snapshot used to
+  filter proxies, including admission and eviction.
+
+The delayed native-window and offscreen smoke passed:
+
+```text
+pnpm native:world-explorer:smoke \
+  /tmp/mclone-world-explorer-tree-ownership-review \
+  --composition composed \
+  --blocks-across 256 \
+  --exact-radius 2 \
+  --exact-delay-ms 20
+```
+
+The initial forest checkpoint reported `17` owned records: `12` exact and
+`5` frontier-crossing proxies. The clipmap contained `22` copies of those
+`12` exact-owned IDs across its nested record tiles; every copy was
+suppressed, with `0` missing exact IDs, `0` dual-owned records, and `0`
+unowned records. After delayed movement, the corresponding receipt was `16`
+records (`12` exact and `4` proxy), `27` suppressed clipmap instances for all
+`12` exact IDs, and again zero missing, dual, or unowned records.
+
+Both lanes completed axial/diagonal movement, negative coordinates,
+admission/eviction, deliberately delayed work, and million-block teleport.
+The final receipts retained `25/25` painted exact chunks, rejected `16` stale
+results, and admitted `175` current results. Stationary, closer 128-block,
+moved forest, and `Coverage` captures were inspected. They show complete
+exact trees in the safe interior and complete proxies at the collar; the
+reviewed exact/proxy chimera is not visible.
+
+Focused validation passed:
+
+```text
+cargo test --manifest-path native/Cargo.toml -p mclone-mesh \
+  merged_tree_sections_preserve_render_phase_ranges
+cargo test --manifest-path native/Cargo.toml -p mclone-terrain-view
+cargo check --manifest-path native/Cargo.toml -p mclone-world-explorer
+cargo check --manifest-path native/Cargo.toml \
+  -p mclone-world-explorer --lib --target wasm32-unknown-unknown
+cargo check --manifest-path native/Cargo.toml \
+  -p mclone-terrain-lab --lib --target wasm32-unknown-unknown
+```
 
 ### Slice 4: browser proof
 
@@ -414,7 +471,7 @@ engine owner.
 - [ ] Preserve the exact-only game baseline and app-rim executor rule.
 - [ ] Open a separate game-scene adoption tactical after human acceptance.
 
-## Human Review 1
+## Human Review 1A
 
 Run the native Explorer with:
 
@@ -429,18 +486,23 @@ Use `1` for `Horizon`, `2` for `Exact`, `3` for `Composed`, and `4` for
 `Coverage`. To make admission behavior easier to see, add
 `--exact-delay-ms 100`.
 
-Review the native World Explorer at fixed and moving views:
+Review the native World Explorer at fixed and moving views. The focused
+question is whether the previously reported partial exact/partial proxy tree
+has disappeared:
 
 1. toggle `Horizon`, `Exact`, `Composed`, and `Coverage` without moving the
    camera;
 2. confirm composed terrain is continuous at all four exact edges;
-3. look for cracks, vertical curtains, z-fighting, duplicate water, tree
+3. at each exact edge, confirm a tree is either a complete block tree or a
+   complete proxy, never pieces of both and never an exact tree cut by the
+   collar;
+4. look for cracks, vertical curtains, z-fighting, duplicate water, tree
    duplication, color/lighting discontinuity, or camera-like jumps;
-4. move slowly across a chunk boundary while exact work is delayed;
-5. zoom so the exact footprint is small enough to inspect against multiple
+5. move slowly across a chunk boundary while exact work is delayed;
+6. zoom so the exact footprint is small enough to inspect against multiple
    clipmap levels;
-6. inspect coast, steep terrain, water, and dense forest anchors; and
-7. compare negative-coordinate and post-teleport behavior.
+7. inspect coast, steep terrain, water, and dense forest anchors; and
+8. compare negative-coordinate and post-teleport behavior.
 
 Subjective acceptance does not require final game lighting or a perfect
 frontier treatment. It does require that the ownership model is visually
