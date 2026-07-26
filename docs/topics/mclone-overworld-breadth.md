@@ -26,7 +26,10 @@ The durable terrain architecture remains in
 1.17.1 biome parity remains in
 [`../tactical/135-overworld-biome-palette-matrix.md`](../tactical/135-overworld-biome-palette-matrix.md).
 This ledger is deliberately neither a parity checklist nor a requirement to
-copy all vanilla biome IDs.
+copy all vanilla biome IDs. Cross-system sequencing and the composition of
+terrain, water, geology, ecology, routes, landmarks, structures, and negative
+space live in
+[`mclone-macro-landscape-planning.md`](mclone-macro-landscape-planning.md).
 
 ## Accounting Rule
 
@@ -258,22 +261,32 @@ explicit original-profile system.
 
 ### Performance and LOD contract
 
-Three-dimensional geology must not make every ordinary chunk pay for dense
-voxel noise:
+The shared workload model, recorded preview baselines, selective-density
+direction, 500 km-class projection, distant-summary rules, and benchmark
+vocabulary live in
+[`mclone-macro-landscape-planning.md`](mclone-macro-landscape-planning.md#volumetric-terrain-and-scale-aware-sampling).
+For geology specifically, retain these obligations:
 
 - run a cheap two-dimensional macro selector first;
 - bound every landmark or regional influence in X/Y/Z;
 - sample coarse 3D lattices and interpolate rather than evaluating many
   octaves independently for every block;
 - skip unaffected sections and preserve exact target partition/order output;
-- expose silhouette/material facts to a future footprint-growing distant
-  terrain hierarchy;
+- expose silhouette, opening, material, and coverage summaries to the shared
+  distant terrain hierarchy;
 - benchmark no-formation controls and dense formation hotspots separately;
 - retain exact plane and 384-chunk-X periodic behavior; and
 - stop for pixel review at boulder, outcrop, arch, and regional-density
   milestones rather than tuning all shapes in one pass.
 
-## Recommended Sequence
+## Breadth Expansion Sequence
+
+Cross-system order now lives in
+[`mclone-macro-landscape-planning.md`](mclone-macro-landscape-planning.md).
+That direction places composite review, coast character, and major-water
+topology decisions ahead of the broader geology campaign. Within the breadth
+ledger, retain this content order once those upstream planning facts are
+available:
 
 1. Complete Human Review 2 for Tactical 223's bounded steppe-scale
    correction.
@@ -311,6 +324,7 @@ Every live family should eventually record:
 
 ## Related
 
+- [`mclone-macro-landscape-planning.md`](mclone-macro-landscape-planning.md)
 - [`mclone-overworld-generation.md`](mclone-overworld-generation.md)
 - [`still-life-and-tectonic-reference.md`](still-life-and-tectonic-reference.md)
 - [`world-generation-profiles.md`](world-generation-profiles.md)

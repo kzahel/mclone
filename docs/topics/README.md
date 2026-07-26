@@ -86,9 +86,11 @@ series implements the same concern, normally reuse the document slug in its
   toward section-addressed or cubic residency.
 - [`bounded-world-topology.md`](bounded-world-topology.md): accepted design for
   exact locally Euclidean finite and looping dimensions, including bounded
-  planes and cylinders, flat tori, observer-local lifts, topology-aware
-  generation, presentation-only visual bending, a fog-capped cube atlas, and
-  deliberate deferral of true spherical regional rasterization. Tactical
+  planes and cylinders, flat tori, dimension-scoped topology contexts,
+  canonical/work/presentation lifts, periodic fields and macro plans,
+  topology-aware distant terrain, presentation-only visual bending, a
+  fog-capped cube atlas, and deliberate deferral of true spherical regional
+  rasterization. Tactical
   [`195`](../tactical/195-periodic-cylinder-topology-proof.md) owns the exact
   baseline, finite-bound canary, and first real Flat Grass cylinder.
 - [`faithful-world-embeddings.md`](faithful-world-embeddings.md): complementary
@@ -111,6 +113,12 @@ series implements the same concern, normally reuse the document slug in its
   landmark sequence. Tactical
   [`188`](../tactical/188-mclone-overworld-v1-terrain-foundation.md) owns the
   first bounded terrain foundation.
+- [`mclone-macro-landscape-planning.md`](mclone-macro-landscape-planning.md):
+  active eagle-eye planning direction for composing continental terrain,
+  coasts, drainage, lakes, geology, ecology, routes, landmarks, structures,
+  and negative space through explicit scales, precedence, bounded plans,
+  scale- and topology-aware sampling, selective volumetric terrain, and
+  composite review evidence.
 - [`mclone-overworld-breadth.md`](mclone-overworld-breadth.md): active
   original-profile breadth ledger measured against grouped Java 1.17.1
   families, with explicit mechanism/live/reviewed states, regional recipe

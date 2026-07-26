@@ -20,6 +20,13 @@ patch-glued horizontal topology. A flat torus follows the cylinder; a six-face
 cube atlas with inaccessible vertex regions comes before any true spherical
 regional-atlas integration.**
 
+A 2026-07-26 design follow-up now records the dimension-scoped context,
+canonical/work/presentation-lift split, wrapped 3D-density direction,
+periodic macro-planning obligations, seam-feature policy, and
+topology-specific distant-terrain constraints. These are contracts for later
+work, not claims that torus generation or periodic horizon rendering has
+landed.
+
 ## Cylinder v0 Support
 
 | Family | Plane | Finite | Cylinder X | Later topology |
@@ -223,6 +230,72 @@ topologies. Existing Euclidean values may remain efficient leaf representations
 inside a known runtime, but topology-dependent boundary operations belong to
 the owning dimension.
 
+## Dimension-Scoped Topology Context
+
+Several dimensions may be loaded, generated, simulated, observed, or
+transferred concurrently. There must therefore be no process-global,
+thread-local, app-local, or otherwise implicit “current topology.” Every
+topology-dependent operation receives the immutable dimension fact that owns
+its coordinates.
+
+A useful conceptual split is:
+
+```text
+DimensionSpatialContext
+    dimension key
+    horizontal topology
+    vertical bounds and environment facts
+
+WorldgenContext
+    dimension spatial context
+    seed
+    generation profile descriptor
+```
+
+These names and exact Rust types are not locked. The contract is that a
+server/runtime dimension owns the immutable source facts, asynchronous jobs
+carry a stable snapshot or reference, and samplers/planners retain the compact
+facts they repeatedly need. `HorizontalTopology` is already a small value and
+need not acquire reference counting merely to avoid copying it; a larger
+descriptor may be shared when that is useful.
+
+Topology-aware interfaces should not make every arithmetic leaf accept a
+large context:
+
+- samplers and planners are constructed from the appropriate dimension
+  context and retain topology;
+- bounded algorithms use one coherent target-relative Euclidean work lift;
+- interpolation, local signed-distance arithmetic, and density composition
+  remain ordinary local calculations;
+- reads, writes, ownership, neighborhoods, queries, and cache keys cross
+  through topology-aware operations; and
+- presentation chooses observer lifts only after canonical identity is known.
+
+The reusable operation vocabulary should grow around semantic boundaries
+rather than raw modulo:
+
+- canonical owner for a position, cell, chunk, or plan;
+- topology neighbor and finite/excluded-region rejection;
+- shortest displacement and deterministic half-period tie;
+- nearest observer or target-relative lift;
+- wrapped bounds or the finite set of local lifts intersecting a query;
+- unique canonical cells intersecting a lifted region; and
+- canonical dependency/feature enumeration with stable deduplication.
+
+This keeps three coordinates distinct:
+
+1. **canonical identity** owns persistence, caching, random identity, and
+   authoritative output;
+2. **work lift** gives one local Euclidean neighborhood to a planner,
+   generator, feature, or mesher; and
+3. **presentation lift** places canonical content relative to one observer.
+
+Cache and worker identity must include dimension/profile facts and every
+topology value that affects output. GPU procedural evaluators receive an
+explicit serialized topology mode and periods or reject the profile/topology
+pair; shaders must not infer topology from coordinates or use an unrelated
+floating-point wrap convention.
+
 ## Canonical Identity and Stable Objects
 
 Canonical identity is independent of observer presentation:
@@ -308,11 +381,13 @@ Generation must respect the selected topology:
 - generator diagnostics distinguish topology seams, generation discontinuities,
   and presentation artifacts.
 
-A flat profile is the safest first seam proof. Later periodic terrain can use
-generator-owned periodic fields, such as sampling a circle embedding for one
-periodic axis or two circle embeddings for a torus. A cube atlas can derive a
-shared canonical sample from face coordinates so neighboring faces agree along
-an edge. These are generator implementation techniques, not topology APIs.
+A flat profile is the safest first seam proof. The landed Mclone cylinder uses
+generator-owned wrapped lattice fields whose values and first derivatives meet
+at the seam. Circle embedding remains a possible fallback for an exceptional
+field whose required scales cannot fit an accepted period; it is not the
+default periodic-noise direction. A cube atlas can derive a shared canonical
+sample from face coordinates so neighboring faces agree along an edge. These
+are generator implementation techniques, not topology APIs.
 
 Generator profiles used with a topology need an explicit compatibility policy.
 Not every existing generator must support every topology, and unsupported
@@ -320,6 +395,93 @@ profile/topology pairs must fail at dimension creation or load rather than
 silently produce seams or invalid schedules. Any persisted identity or output
 promise must be entered in the compatibility safety ledger in
 [`world-generation-profiles.md`](world-generation-profiles.md) when allocated.
+
+## Periodic Fields, Density, And Feature Seams
+
+Periodicity does not inherently raise a field's dimensionality. A
+three-dimensional density lattice on an X-periodic cylinder remains a 3D
+lattice: its X lattice identity wraps while Y and Z retain ordinary local
+coordinates. A flat torus wraps both horizontal lattice identities.
+
+Required cylinder identities include:
+
+```text
+D(x + period_x, y, z) = D(x, y, z)
+dD/dx(x + period_x, y, z) = dD/dx(x, y, z)
+```
+
+A torus adds the equivalent Z identities. Matching gradients matters for
+surface normals, slope-derived classification, interpolated density cells, and
+seam-free isosurface geometry, not merely for matching scalar samples.
+
+The current wrapped-lattice implementation requires each periodic horizontal
+scale to divide the block period. The supported 6,144-block Mclone cylinder
+admits many useful scales, including 32, 48, 64, 96, 128, 192, 256, 384, 512,
+768, 1,024, 1,536, and 2,048 blocks. A future density tactical should prefer a
+compatible cell/field vocabulary before introducing higher-dimensional noise.
+Circle embedding would turn a cylinder-periodic 3D field into a 4D evaluation
+and a two-axis-periodic field into a 5D evaluation; that cost requires an
+explicit quality reason and benchmark.
+
+Domain warps are periodic only when every warp affecting a periodic axis and
+every field receiving the warped coordinate preserve the same period. An
+ordinary planar warp feeding a wrapped field is not topology support.
+
+Bounded features and volumetric formations should cross a periodic seam through
+the same canonical-owner/work-lift contract as current stream structures:
+
+- select and randomize one canonical start;
+- choose the local lift relevant to the target query;
+- evaluate ordinary Euclidean bounds, signed distance, or density there;
+- canonicalize outputs and dependency ownership once; and
+- query other features through topology-aware displacement and bounds.
+
+Keeping an ordinary bounded influence below half the relevant period avoids
+nearest-image ambiguity. Larger or non-contractible formations need an
+explicit quotient-space design instead of an oversized planar bounding box.
+
+A periodic seam is not a physical world boundary. Suppressing expensive or
+complex features near the canonical wrap would create a permanent featureless
+meridian and make an arbitrary coordinate convention visible. That is not an
+accepted general fallback. Legitimate exceptions are:
+
+- finite edges, polar caps, and excluded patch-atlas regions that are real
+  topology facts;
+- a deliberately authored ocean belt, tectonic scar, wall, or other named
+  landscape family; or
+- a temporary bounded tactical whose seam exclusion and removal condition are
+  explicit.
+
+Until a family is seam-safe, rejecting that family for the whole periodic
+profile/topology pair is more honest than silently deleting it near one seam.
+
+## Periodic Macro Planning And Hydrology
+
+Macro planners must operate on topology graphs, not planar rectangles whose
+final coordinates happen to be canonicalized.
+
+- canonical planning-cell sizes should divide periodic extents where practical;
+- halos and adjacency wrap and deduplicate at every seam and torus corner;
+- routing heuristics use shortest topology displacement and a stable
+  half-period tie;
+- plan IDs, starts, random identity, claims, and density budgets are canonical;
+- local route geometry uses one coherent work lift; and
+- no point sample performs a new global traversal merely because the query is
+  near a seam.
+
+An X-periodic cylinder remains unbounded in Z, so drainage may cross the X seam
+while retaining ordinary north/south extent and outlets. A flat torus has no
+external edge: every drainage path must terminate in an ocean, lake, wetland,
+closed basin, or other explicit sink, and a finite routed graph must detect
+cycles. A river cannot descend monotonically around a closed
+non-contractible loop and return to its starting elevation. Such a loop must
+be rejected, broken through basin/spill semantics, or deliberately classified
+as flat lake-like, tidal, or otherwise non-river water.
+
+Periodic worlds can make some global summaries easier because their canonical
+domain is finite. That does not justify an unbounded flood fill during a column
+sample. Whole-domain or hierarchical products still need a revisioned bounded
+planner, deterministic construction boundary, and cache policy.
 
 ## Observer Lifts, Interest, and Rendering
 
@@ -353,6 +515,42 @@ ambient occlusion, biome sampling, and packed light do not expose an artificial
 edge. Renderer traversal, future distant terrain, actors, particles, world
 overlays, block outlines, fluids, shadows, and interaction presentation must
 all choose lifts coherently.
+
+## Periodic Distant Terrain
+
+The planar horizon budget cannot be applied to a small periodic world by
+merely canonicalizing every sample. The supported Mclone cylinder is 6,144
+blocks around X. A 131,072-block planar footprint spans more than 21 canonical
+laps, while a 524,288-block footprint spans more than 85. The current one-lift
+product would reject such a view, and generating those samples as unrelated
+terrain would duplicate one world many times.
+
+A future periodic distant-terrain product must select an explicit policy:
+
+- map the canonical fundamental domain once;
+- cap a flat observer horizon to the admitted one-lift range;
+- draw several presentation lifts from one canonical terrain/summary
+  residency without duplicating worldgen or authority; or
+- apply a separately accepted topology-specific visual embedding.
+
+Filtering and LOD neighborhoods also wrap. Footprint taps crossing a seam use
+canonical neighbors, while a footprint comparable to or larger than a period
+summarizes the canonical domain once rather than counting repeated lifts as
+additional terrain. At spacing 2,048 the present cylinder has only three
+unique samples around its circumference; a planar clipmap tile at that spacing
+is therefore not a truthful periodic terrain product merely because its point
+samples repeat.
+
+A flat torus may eventually maintain one finite periodic multiresolution
+pyramid whose coarsest product summarizes the complete canonical world. That
+can be cheaper than an unbounded plane map. In-world observation remains
+harder because multiple lifts, occlusion, interaction eligibility, and optional
+visual curvature still need one coherent presentation policy.
+
+Periodic CPU preview primitives exist, but periodic game-facing distant
+terrain and GPU viewport products remain unclaimed until this representation
+contract is implemented and validated. They must fail or remain unavailable
+rather than silently use the unbounded product.
 
 ## Presentation-Only Visual Curvature
 
@@ -495,6 +693,10 @@ addresses in different dimensions remain isolated by `DimensionKey`.
     ordinary cell or claim true spherical voxelization.
 11. True spherical integration remains a separate final experiment with an
     explicit approximation contract.
+12. Concurrent dimensions never depend on a global or thread-local current
+    topology; jobs and retained services carry their owning dimension facts.
+13. A periodic seam is not a content-exclusion boundary. Supported families
+    cross it through canonical identity and coherent work lifts.
 
 ## Proposed Implementation Ladder
 
@@ -503,9 +705,10 @@ Stages 0-2 as independently reviewable slices: identity topology and
 persistence, a finite-bound canary, then a real Flat Grass cylinder with
 interactive seam diagnostics. Tactical
 [`196`](../tactical/196-periodic-mclone-terrain-fields.md) completed the first
-procedural periodic terrain caller on 2026-07-22. Its next river/wetland fields
-must support the same exact plane/cylinder sampling modes from their first
-production revision. Later topology stages remain unallocated.
+procedural periodic terrain caller on 2026-07-22. Subsequent Mclone
+river/wetland, climate, vegetation, and bounded-stream additions preserve the
+same exact plane/cylinder sampling modes. Later topology stages remain
+unallocated.
 
 ### 0. Contract and Euclidean baseline
 
@@ -591,8 +794,15 @@ Each implementation slice should select proportional tests from this ledger:
 - finite-bound and excluded-region rejection for movement, teleport, spawn,
   placement, pathfinding, and interest;
 - canonical chunk-view and ticket deduplication near seams;
+- simultaneous jobs for dimensions with different topology descriptors and no
+  implicit current-topology state;
 - deterministic generation independent of request order and lift;
+- periodic 3D density value and derivative equality across supported seams;
+- canonical bounded-feature identity and local work geometry on both sides of
+  a seam;
 - periodic terrain and feature seam inspection;
+- periodic filtering that counts the canonical domain once when a footprint
+  crosses or covers a period;
 - seam-crossing mesh face culling, AO, biome tint, lighting, and fluids;
 - local and remote player/entity collision, interaction, interpolation, and
   visibility across a seam;
@@ -622,8 +832,13 @@ validation policy.
   experience after circling an excluded vertex cap?
 - How large must the cube exclusion regions be relative to interaction,
   tracking, generation dependency, and fog radii?
-- Do future distant terrain and sky rendering wrap, terminate, or use
-  topology-specific presentation in each initial profile?
+- Which dimension-scoped context and lifted-query types are the smallest
+  durable interface shared by generation, simulation, and presentation?
+- Does the first periodic distant terrain cap at one lift, instance several
+  lifts from one canonical residency, or introduce topology-specific
+  presentation?
+- Which wrapped 3D density scales and cell sizes supply enough formation
+  vocabulary before circle-embedded noise becomes worth its cost?
 - When multiple visible lifts are admitted, which render/interaction instance
   wins at exact half-period ties without duplicating authoritative identity?
 
@@ -634,6 +849,7 @@ validation policy.
 - [`faithful-world-embeddings.md`](faithful-world-embeddings.md)
 - [`realm-dimension-runtime.md`](realm-dimension-runtime.md)
 - [`world-generation-profiles.md`](world-generation-profiles.md)
+- [`mclone-macro-landscape-planning.md`](mclone-macro-landscape-planning.md)
 - [`embedded-worlds.md`](embedded-worlds.md)
 - [`../native-engine-architecture.md`](../native-engine-architecture.md)
 - [`../runtime-data-model.md`](../runtime-data-model.md)

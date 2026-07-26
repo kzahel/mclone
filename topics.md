@@ -206,3 +206,7 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `world-view-navigation` — shared map/orbit/focus/zoom control across Terrain
   Lab, standalone World Explorer, tabletop, and game consumers, plus the
   authoritative Explorer-to-play handoff
+- `mclone-macro-landscape-planning` — eagle-eye composition of terrain,
+  hydrology, coasts, geology, ecology, landmarks, and negative space with
+  bounded topology-aware plans, scale-aware previews, and selective
+  volumetric terrain

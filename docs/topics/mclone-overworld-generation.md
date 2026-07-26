@@ -122,6 +122,14 @@ Overworld terrain: macro fields, terrain shape, biome placement, surface
 language, decoration, rivers, caves, geology, landmarks, and eventual
 structures.
 
+The cross-system eagle-eye plan—planning scales, provisional versus final
+terrain, terrain/water/geology/ecology precedence, macro feature claims,
+scale-aware sampling, selective volumetric terrain, and composite
+review—lives in
+[`mclone-macro-landscape-planning.md`](mclone-macro-landscape-planning.md).
+This topic retains implementation truth and mechanism history rather than
+duplicating that planning contract.
+
 It does not own generic profile persistence, worker transport, scheduling,
 lighting, or publication. Those contracts and their compatibility safety
 ledger remain in
@@ -1055,9 +1063,14 @@ grass/coarse-dirt/gravel/stone transitions, and sparse rocks without fluid
 work or loss of the accepted peaceful stream. The authoritative wake caught
 and corrected one unstable varied-width fall edge before closeout. Human
 Review 1 now owns the subjective decision; general drainage-network semantics
-remain deliberately absent. After that review, the recommended next terrain
-campaign is sustained volumetric geology: overhangs, outcrops, tors, arches,
-and regional 3D formation recipes.
+remain deliberately absent. The subsequent 2026-07-26 regional water review
+does not invalidate those local corrections, but it exposes broader
+coast-material, coast-geometry, river-topology, basin-pond, and compound-island
+gaps. Cross-system sequencing now lives in
+[`mclone-macro-landscape-planning.md`](mclone-macro-landscape-planning.md).
+Its current direction establishes composite review evidence, coast families,
+and a major-water topology decision before the broader volumetric-geology
+campaign.
 The
 [`still-life-and-tectonic-reference.md`](still-life-and-tectonic-reference.md)
 study sharpens that direction: select mutually legible geology families
@@ -1069,6 +1082,7 @@ place of the existing stream contracts.
 
 ## Related
 
+- [`mclone-macro-landscape-planning.md`](mclone-macro-landscape-planning.md)
 - [`world-generation-profiles.md`](world-generation-profiles.md)
 - [`starter-farmstead-settlement.md`](starter-farmstead-settlement.md)
 - [`jjthunder-to-the-max-reference.md`](jjthunder-to-the-max-reference.md)
