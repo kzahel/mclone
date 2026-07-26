@@ -93,6 +93,7 @@ pub struct TerrainVegetationExecutorDiagnostics {
     pub result_high_water_bytes: u64,
     pub result_overflows: u64,
     pub copied_result_bytes: u64,
+    pub main_decode_micros: u64,
 }
 
 pub trait TerrainVegetationExecutor {
@@ -161,6 +162,11 @@ pub struct TerrainVegetationCoordinatorDiagnostics {
     pub superseded_completions: u64,
     pub submit_full_count: u64,
     pub compile_micros: u64,
+    pub cache_cell_requests: u64,
+    pub cache_cell_hits: u64,
+    pub cache_cell_misses: u64,
+    pub cache_retained_cells: u64,
+    pub cache_retained_preliminary_candidates: u64,
     pub last_error: Option<String>,
     pub executor: TerrainVegetationExecutorDiagnostics,
 }
@@ -193,6 +199,11 @@ pub struct TerrainVegetationCoordinator {
     superseded_completions: u64,
     submit_full_count: u64,
     compile_micros: u64,
+    cache_cell_requests: u64,
+    cache_cell_hits: u64,
+    cache_cell_misses: u64,
+    cache_retained_cells: u64,
+    cache_retained_preliminary_candidates: u64,
     consecutive_transport_failures: u8,
     last_error: Option<String>,
 }
@@ -240,6 +251,11 @@ impl TerrainVegetationCoordinator {
             superseded_completions: 0,
             submit_full_count: 0,
             compile_micros: 0,
+            cache_cell_requests: 0,
+            cache_cell_hits: 0,
+            cache_cell_misses: 0,
+            cache_retained_cells: 0,
+            cache_retained_preliminary_candidates: 0,
             consecutive_transport_failures: 0,
             last_error: None,
         })
@@ -438,6 +454,11 @@ impl TerrainVegetationCoordinator {
             superseded_completions: self.superseded_completions,
             submit_full_count: self.submit_full_count,
             compile_micros: self.compile_micros,
+            cache_cell_requests: self.cache_cell_requests,
+            cache_cell_hits: self.cache_cell_hits,
+            cache_cell_misses: self.cache_cell_misses,
+            cache_retained_cells: self.cache_retained_cells,
+            cache_retained_preliminary_candidates: self.cache_retained_preliminary_candidates,
             last_error: self.last_error.clone(),
             executor: self.executor.diagnostics(),
         }
@@ -460,6 +481,11 @@ impl TerrainVegetationCoordinator {
         self.resident.clear();
         self.in_flight = None;
         self.consecutive_transport_failures = 0;
+        self.cache_cell_requests = 0;
+        self.cache_cell_hits = 0;
+        self.cache_cell_misses = 0;
+        self.cache_retained_cells = 0;
+        self.cache_retained_preliminary_candidates = 0;
         self.last_error = None;
         self.source_resets = self.source_resets.saturating_add(1);
         self.state = TerrainVegetationCoordinatorState::Starting;
@@ -593,6 +619,13 @@ impl TerrainVegetationCoordinator {
             }
         }
         let receipt = terrain_vegetation_product_receipt(source, &product);
+        let cache = product.cache_report();
+        self.cache_cell_requests = self.cache_cell_requests.saturating_add(cache.cell_requests);
+        self.cache_cell_hits = self.cache_cell_hits.saturating_add(cache.cell_hits);
+        self.cache_cell_misses = self.cache_cell_misses.saturating_add(cache.cell_misses);
+        self.cache_retained_cells = u64::try_from(cache.retained_cells).unwrap_or(u64::MAX);
+        self.cache_retained_preliminary_candidates =
+            u64::try_from(cache.retained_preliminary_candidates).unwrap_or(u64::MAX);
         self.resident.insert(identity.tile, identity.slot);
         self.admitted_products = self.admitted_products.saturating_add(1);
         self.rebuild_queue();

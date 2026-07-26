@@ -235,6 +235,15 @@ pub struct TerrainVegetationProductReceipt {
     pub record_count: u32,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TerrainVegetationCoverageReceipt {
+    pub source_fingerprint: u64,
+    pub record_hash: u64,
+    pub family_counts: [u32; 3],
+    pub record_count: u32,
+    pub product_count: u32,
+}
+
 pub fn terrain_vegetation_product_receipt(
     source: TerrainVegetationSourceIdentity,
     product: &TerrainPreviewVegetationProduct,
@@ -252,6 +261,47 @@ pub fn terrain_vegetation_product_receipt(
         family_counts,
         record_count: u32::try_from(product.occurrences().len()).unwrap_or(u32::MAX),
     }
+}
+
+pub fn terrain_vegetation_coverage_receipt<'a>(
+    source: TerrainVegetationSourceIdentity,
+    products: impl IntoIterator<Item = &'a TerrainPreviewVegetationProduct>,
+) -> Result<TerrainVegetationCoverageReceipt, String> {
+    source.validate()?;
+    let mut products = products.into_iter().collect::<Vec<_>>();
+    for product in &products {
+        source.validate_request(product.request().request())?;
+    }
+    products.sort_by_key(|product| request_order_key(product.request().request()));
+
+    let mut record_hash = FNV1A64_OFFSET;
+    let mut source_bytes = FrameWriter::default();
+    source_bytes.write_source(source);
+    hash_bytes(&mut record_hash, &source_bytes.finish());
+    let mut family_counts = [0_u32; 3];
+    let mut record_count = 0_u32;
+    for product in &products {
+        let mut request_bytes = FrameWriter::default();
+        request_bytes.write_request(product.request().request());
+        request_bytes.write_u32(
+            u32::try_from(product.occurrences().len())
+                .map_err(|_| "terrain vegetation coverage record count exceeds u32")?,
+        );
+        hash_bytes(&mut record_hash, &request_bytes.finish());
+        for occurrence in product.occurrences() {
+            family_counts[family_index(occurrence.record.family)] =
+                family_counts[family_index(occurrence.record.family)].saturating_add(1);
+            record_count = record_count.saturating_add(1);
+            hash_occurrence(&mut record_hash, occurrence);
+        }
+    }
+    Ok(TerrainVegetationCoverageReceipt {
+        source_fingerprint: source.stable_fingerprint(),
+        record_hash,
+        family_counts,
+        record_count,
+        product_count: u32::try_from(products.len()).unwrap_or(u32::MAX),
+    })
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -932,6 +982,26 @@ fn hash_occurrence(hash: &mut u64, occurrence: &McloneTreeOccurrence) {
     }
 }
 
+fn hash_bytes(hash: &mut u64, bytes: &[u8]) {
+    for byte in bytes {
+        *hash = fnv1a64_byte(*hash, *byte);
+    }
+}
+
+fn request_order_key(request: TerrainPreviewRequest) -> (u8, u8, u8, u8, i64, u32, i32, i32, u32) {
+    (
+        profile_tag(request.profile),
+        topology_tag(request.topology),
+        content_stage_tag(request.content_stage),
+        surface_quality_tag(request.surface_quality),
+        request.seed,
+        request.sample_spacing,
+        request.center_z,
+        request.center_x,
+        request.cells_per_axis,
+    )
+}
+
 fn shift_x(value: i32, lift: i64) -> Result<i32, String> {
     i32::try_from(
         i64::from(value)
@@ -1148,6 +1218,38 @@ mod tests {
             )
             .unwrap();
         assert_eq!(actual.occurrences(), expected.occurrences());
+    }
+
+    #[test]
+    fn coverage_receipt_is_order_independent_and_record_complete() {
+        let first_request = request(12_345, McloneOverworldSamplingTopology::Unbounded);
+        let second_request = TerrainPreviewRequest {
+            center_x: first_request.center_x + 256,
+            ..first_request
+        };
+        let source = TerrainVegetationSourceIdentity::for_request(first_request).unwrap();
+        let mut session = TerrainVegetationCompilerSession::new(source);
+        let first = session.compile(source, first_request).unwrap();
+        let second = session.compile(source, second_request).unwrap();
+        let forward = terrain_vegetation_coverage_receipt(source, [&first, &second]).unwrap();
+        let reverse = terrain_vegetation_coverage_receipt(source, [&second, &first]).unwrap();
+
+        assert_eq!(forward, reverse);
+        assert_eq!(forward.product_count, 2);
+        assert_eq!(
+            forward.record_count,
+            u32::try_from(first.occurrences().len() + second.occurrences().len()).unwrap()
+        );
+        assert_eq!(
+            forward.family_counts.iter().sum::<u32>(),
+            forward.record_count
+        );
+        assert_ne!(
+            forward.record_hash,
+            terrain_vegetation_coverage_receipt(source, [&first])
+                .unwrap()
+                .record_hash
+        );
     }
 
     #[test]

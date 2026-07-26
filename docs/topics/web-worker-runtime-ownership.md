@@ -59,9 +59,10 @@ isolation and the external-SAB path. No Terrain Lab Worker continuation
 remains active under Tactical 248.
 
 Tactical
-[`256`](../tactical/256-shared-horizon-vegetation-worker-topology.md) is the
-next focused consumer of this direction. Its architecture checkpoint and
-native/browser execution cutovers completed on 2026-07-26 and select an
+[`256`](../tactical/256-shared-horizon-vegetation-worker-topology.md) is a
+completed focused consumer of this direction. Its architecture checkpoint,
+native/browser execution cutovers, and parity closeout completed on
+2026-07-26 and select an
 engine-owned terrain-vegetation service proven first through World Explorer.
 Browser now uses the same domain-blind `PolledWorkerTransport` source, a
 domain-blind bindgen/actor shell, a Rust main-side executor, and a
@@ -74,6 +75,17 @@ render-section coordinator remains a lifecycle precedent, not a universal
 framework or the owner of procedural terrain jobs. Tactical 256 does not
 authorize a shared Wasm heap; later `mclone-scene` adoption consumes the shared
 terrain service through a separate integration tactical.
+
+Pinned desktop and phone runs matched native/offscreen source fingerprint,
+record hash, family counts, `2,609` records/instances, and `281,772` proxy
+vertices. The smoke-only `1 KiB` arena forced four overflows and bounded growth
+to `32 KiB`; each target observed one deliberate transport failure, one
+executor reconstruction, two physical Worker starts, and a final
+`terminated` coordinator. Initial 48-product compiler totals were `619 ms`
+desktop and `438 ms` phone-emulated, with `8 ms` and `7 ms` main-Wasm
+copy/decode totals. Cold Worker/Wasm startup remains materially slower than
+those compiler totals and is a performance follow-up, not a reason to move
+policy or compilation back to the browser main thread.
 
 Its actor protocol keeps semantic compiler/product revisions separate from the
 browser-only `MCHV` wire version. Native does not serialize through that ABI,

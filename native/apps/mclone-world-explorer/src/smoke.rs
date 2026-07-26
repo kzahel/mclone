@@ -1,12 +1,15 @@
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
-use anyhow::{Context, Result};
-use mclone_terrain_view::TerrainHorizonFrameStats;
+use anyhow::{Context, Result, ensure};
+use mclone_terrain_view::{
+    TerrainHorizonFrameStats, TerrainHorizonVegetationServiceStats,
+    TerrainVegetationCoordinatorState, TerrainVegetationExecutorKind,
+};
 use mclone_view_control::{
     ViewPoint, ViewportMetrics, WorldViewIntent, WorldViewMode, WorldViewState,
 };
-use serde_json::{Value, json};
+use serde_json::{Map, Value, json};
 
 use crate::capture::{DepthStats, PixelStats};
 use crate::options::ExplorerOptions;
@@ -278,6 +281,23 @@ impl SmokeRecorder {
             pixels,
             depth,
         } = checkpoint;
+        let service = stats.vegetation_service;
+        ensure!(
+            service.coordinator_state == Some(TerrainVegetationCoordinatorState::Running)
+                && service.executor_kind == Some(TerrainVegetationExecutorKind::NativeThread)
+                && service.desired_tiles == 48
+                && service.queued_tiles == 0
+                && service.resident_tiles == 48
+                && !service.in_flight
+                && service.product_count == 48
+                && service.record_count == stats.tree_instance_count
+                && service.family_counts.iter().sum::<u32>() == stats.tree_instance_count
+                && service.source_fingerprint != 0
+                && service.record_hash != 0
+                && service.compile_micros > 0,
+            "World Explorer {label} checkpoint has incomplete vegetation diagnostics: \
+             {service:?}"
+        );
         self.checkpoint_frame_ms
             .push(frame_time.as_secs_f64() * 1_000.0);
         self.captures.push(json!({
@@ -305,6 +325,8 @@ impl SmokeRecorder {
             "vegetation_ready_tiles": stats.vegetation_ready_tiles,
             "pending_vegetation_tiles": stats.pending_vegetation_tiles,
             "tree_instance_count": stats.tree_instance_count,
+            "tree_proxy_vertex_count": stats.tree_proxy_vertex_count,
+            "vegetation_service": vegetation_service_json(stats.vegetation_service),
             "total_refills": stats.residency.total_refills,
             "total_rebases": stats.residency.total_rebases,
             "rgb_min": pixels.min_rgb,
@@ -384,6 +406,105 @@ impl SmokeRecorder {
 
 fn duration_ms(duration: Option<Duration>) -> Option<f64> {
     duration.map(|duration| duration.as_secs_f64() * 1_000.0)
+}
+
+fn stable_hex(value: u64) -> String {
+    format!("{value:016x}")
+}
+
+fn vegetation_service_json(service: TerrainHorizonVegetationServiceStats) -> Value {
+    let mut fields = Map::new();
+    macro_rules! insert {
+        ($name:literal, $value:expr) => {
+            fields.insert($name.to_owned(), json!($value));
+        };
+    }
+    insert!(
+        "coordinator_state",
+        coordinator_state_label(service.coordinator_state)
+    );
+    insert!("executor_kind", executor_kind_label(service.executor_kind));
+    insert!("source_fingerprint", stable_hex(service.source_fingerprint));
+    insert!(
+        "terrain_source_revision",
+        stable_hex(service.terrain_source_revision)
+    );
+    insert!(
+        "compiler_source_revision",
+        stable_hex(service.compiler_source_revision)
+    );
+    insert!(
+        "vegetation_plan_revision",
+        stable_hex(service.vegetation_plan_revision)
+    );
+    insert!("product_revision", service.product_revision);
+    insert!(
+        "mchv_wire_version",
+        mclone_worldgen::terrain_vegetation::MCHV_WIRE_VERSION
+    );
+    insert!("record_hash", stable_hex(service.record_hash));
+    insert!("family_counts", service.family_counts);
+    insert!("record_count", service.record_count);
+    insert!("product_count", service.product_count);
+    insert!("executor_generation", service.executor_generation);
+    insert!("source_epoch", service.source_epoch);
+    insert!("coverage_revision", service.coverage_revision);
+    insert!("desired_tiles", service.desired_tiles);
+    insert!("queued_tiles", service.queued_tiles);
+    insert!("resident_tiles", service.resident_tiles);
+    insert!("in_flight", service.in_flight);
+    insert!("submitted_jobs", service.submitted_jobs);
+    insert!("completed_jobs", service.completed_jobs);
+    insert!("admitted_products", service.admitted_products);
+    insert!("source_resets", service.source_resets);
+    insert!("transport_failures", service.transport_failures);
+    insert!("executor_restarts", service.executor_restarts);
+    insert!("job_failures", service.job_failures);
+    insert!("stale_completions", service.stale_completions);
+    insert!("superseded_completions", service.superseded_completions);
+    insert!("submit_full_count", service.submit_full_count);
+    insert!("compile_micros", service.compile_micros);
+    insert!("cache_cell_requests", service.cache_cell_requests);
+    insert!("cache_cell_hits", service.cache_cell_hits);
+    insert!("cache_cell_misses", service.cache_cell_misses);
+    insert!("cache_retained_cells", service.cache_retained_cells);
+    insert!(
+        "cache_retained_preliminary_candidates",
+        service.cache_retained_preliminary_candidates
+    );
+    insert!("worker_submitted_jobs", service.executor_submitted_jobs);
+    insert!("worker_completed_jobs", service.executor_completed_jobs);
+    insert!(
+        "worker_transport_failures",
+        service.executor_transport_failures
+    );
+    insert!("worker_restart_count", service.executor_restart_count);
+    insert!("result_capacity_bytes", service.result_capacity_bytes);
+    insert!("result_high_water_bytes", service.result_high_water_bytes);
+    insert!("result_overflow_count", service.result_overflow_count);
+    insert!("copied_result_bytes", service.copied_result_bytes);
+    insert!("main_decode_micros", service.main_decode_micros);
+    Value::Object(fields)
+}
+
+const fn coordinator_state_label(state: Option<TerrainVegetationCoordinatorState>) -> &'static str {
+    match state {
+        None => "disabled",
+        Some(TerrainVegetationCoordinatorState::Starting) => "starting",
+        Some(TerrainVegetationCoordinatorState::Running) => "running",
+        Some(TerrainVegetationCoordinatorState::Failed) => "failed",
+        Some(TerrainVegetationCoordinatorState::ShuttingDown) => "shutting-down",
+        Some(TerrainVegetationCoordinatorState::Terminated) => "terminated",
+    }
+}
+
+const fn executor_kind_label(kind: Option<TerrainVegetationExecutorKind>) -> &'static str {
+    match kind {
+        None => "disabled",
+        Some(TerrainVegetationExecutorKind::InlineTest) => "inline-test",
+        Some(TerrainVegetationExecutorKind::NativeThread) => "native-thread",
+        Some(TerrainVegetationExecutorKind::BrowserWorker) => "browser-worker",
+    }
 }
 
 fn frame_summary(samples: &[f64]) -> Value {

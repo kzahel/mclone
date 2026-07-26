@@ -357,7 +357,13 @@ impl WebTerrainVegetationExecutor {
                             break;
                         }
                     };
-                    if let Err(error) = self.handle_doorbell(data) {
+                    let decode_started = js_sys::Date::now();
+                    let result = self.handle_doorbell(data);
+                    self.diagnostics.main_decode_micros = self
+                        .diagnostics
+                        .main_decode_micros
+                        .saturating_add(millis_to_micros(js_sys::Date::now() - decode_started));
+                    if let Err(error) = result {
                         self.transport_failed(error);
                         break;
                     }

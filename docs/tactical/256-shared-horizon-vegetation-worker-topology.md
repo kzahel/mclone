@@ -1,7 +1,7 @@
 # Tactical 256: Shared Horizon Vegetation Worker Topology
 
-Status: active; architecture checkpoint and Slices 0–4 completed 2026-07-26.
-Slice 5 is next.
+Status: completed 2026-07-26. All five implementation slices and the
+native/offscreen/desktop-browser/phone-browser parity closeout passed.
 
 Topics:
 
@@ -576,6 +576,8 @@ measured follow-up rather than treating smoke success as a throughput claim.
 
 ### Slice 5: parity and closeout
 
+Status: complete 2026-07-26.
+
 1. Add shared source revision, stable record hash, family counts, tree count,
    proxy vertex count, queue, cache, timing, Worker, and SAB diagnostics.
 2. Exercise movement, zoom, teleport, negative/large coordinates, stale
@@ -585,6 +587,58 @@ measured follow-up rather than treating smoke success as a throughput claim.
 4. Record the exact service construction and prepared-product handoff that a
    later `mclone-scene` tactical will consume.
 5. Leave the Explorer and full game app crates with platform mechanics only.
+
+`TerrainHorizonVegetationServiceStats` now projects the complete shared
+service state without making either app an owner: semantic source and product
+revisions, coverage receipt, queue/residency/lifecycle, compiler/cache work,
+executor generations and failures, and browser SAB/copy/decode facts.
+`terrain_vegetation_coverage_receipt` sorts products by semantic request
+identity before hashing source, request, and every canonical occurrence, so
+physical slot and completion order cannot change the receipt. Frame
+diagnostics also reject a coverage-record/GPU-instance count mismatch.
+
+At seed `12345` and center `(-304, 336)`, native window, native offscreen,
+desktop browser, and phone browser agreed exactly on:
+
+| Fact | Result |
+|---|---:|
+| source fingerprint | `7c4721f810355525` |
+| terrain source revision | `6ebde319ff5cdbc9` |
+| compiler source revision | `b9621d996f1cd760` |
+| vegetation-plan revision | `a6c4018c1e864708` |
+| product / MCHV wire versions | `1` / `1` |
+| coverage record hash | `2381faa9bec5178f` |
+| broadleaf / conifer / acacia | `1,726 / 673 / 210` |
+| records / GPU instances | `2,609 / 2,609` |
+| proxy vertices | `281,772` |
+| admitted products | `48` |
+| cache requests / hits / misses | `3,904 / 2,608 / 1,296` |
+
+The aggregate compiler time for those 48 products was `280,996 us` in the
+native window, `267,813 us` offscreen, `619,000 us` in the desktop browser,
+and `438,000 us` in the phone-emulated browser. Browser figures exclude the
+materially larger cold Worker/Wasm startup and surrounding terrain-settle
+latency; they are diagnostics, not a claim that browser throughput now equals
+native. The desktop and phone main-Wasm decode/copy totals were `8,000 us`
+and `7,000 us`.
+
+The smoke-only `1 KiB` result arena forced four bounded overflow publications
+on both browser targets, grew to `32 KiB`, reached `19,388` bytes high-water,
+and copied `217,804` bytes before the initial receipt. Each browser smoke then
+terminated the active transport during held movement and observed exactly one
+coordinator transport failure, one executor reconstruction, executor
+generation `2`, and two physical Worker starts. Negative coordinates, a
+million-block teleport, movement, gestures/zoom, and explicit shutdown
+settled; shutdown diagnostics reached `terminated`.
+
+Unit coverage retains the source-reset, stale source/generation/request/slot,
+superseded completion, bounded-full retry, deterministic job failure,
+consecutive transport failure, cache reset, and idempotent shutdown proofs.
+The complete worldgen, terrain-view, and Explorer tests, the Explorer Wasm
+check/build, dependency firewall, native window/offscreen smoke, and headed
+Wayland desktop/phone browser smokes passed. The native offscreen, browser
+desktop initial/movement, and browser phone initial/movement captures under
+`/tmp` were inspected and show coherent terrain and stable tree proxies.
 
 Each slice should land as an independently reviewable commit. Delete the
 superseded synchronous path in the native cutover rather than retaining an
@@ -609,6 +663,16 @@ That tactical should consume the shared coordinator and compiler unchanged
 unless game evidence exposes a missing host-neutral contract. It must not
 route procedural vegetation through the exact render-section coordinator
 merely because the browser game already owns that Worker.
+
+The exact construction seam is now explicit: each platform adapter constructs
+its `TerrainVegetationExecutor` (native thread or browser Worker) and passes
+it into the shared terrain session/coordinator. In game integration,
+`mclone-scene` should own world/source lifecycle, request the semantic desired
+coverage, and arbitrate exact/proxy XOR; `mclone-terrain-view` should continue
+to admit products and upload only accepted records. App crates retain thread,
+Worker, surface, session, and presentation mechanics. They must not copy the
+Explorer queue, import Explorer policy, or merge procedural jobs into the
+exact render-section Worker merely to reuse a physical lane.
 
 ## Acceptance
 

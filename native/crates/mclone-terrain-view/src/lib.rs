@@ -47,8 +47,9 @@ pub use viewport::{
 };
 pub use viewport_renderer::{
     TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainHorizonFrameStats, TerrainHorizonRenderer,
-    TerrainPreviewMaterialAtlas, TerrainViewportCompletedComparison,
-    TerrainViewportExternalCpuRequest, TerrainViewportFrameStats, TerrainViewportRenderer,
+    TerrainHorizonVegetationServiceStats, TerrainPreviewMaterialAtlas,
+    TerrainViewportCompletedComparison, TerrainViewportExternalCpuRequest,
+    TerrainViewportFrameStats, TerrainViewportRenderer,
 };
 
 pub const TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION: &str = "mclone-overworld-v1-gpu-preview-a7";

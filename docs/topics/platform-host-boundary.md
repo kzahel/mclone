@@ -55,7 +55,7 @@ contains no movement or terrain policy.
 
 Side-by-side Explorer review on 2026-07-26 found that its visible browser
 diagnostic panel and surface-dependent color output violated the desired
-cross-host product boundary. Active parent Tactical
+cross-host product boundary. Completed parent Tactical
 [`253`](../tactical/253-world-explorer-cross-host-parity.md) sequences the
 correction. Tactical
 [`254`](../tactical/254-ui-less-world-explorer-host.md) completed the first
@@ -73,11 +73,15 @@ The small `mclone-render-color` dependency owns CPU and generated WGSL
 transfer math without crossing into the full renderer. Tactical
 [`256`](../tactical/256-shared-horizon-vegetation-worker-topology.md) keeps
 browser Worker mechanics domain-blind while making vegetation coordination
-shared with native. Its native-thread and browser-Worker cutovers completed on
-2026-07-26: app adapters construct platform executors, while shared Rust owns
+shared with native. It completed on 2026-07-26: app adapters construct
+platform executors, while shared Rust owns
 desired work, priority, source epochs, restart, stale admission, and prepared
 products. World Explorer JavaScript constructs the existing generic transport
-and its Worker shell forwards only opaque actor messages and doorbells.
+and its Worker shell forwards only opaque actor messages and doorbells. Pinned
+native/offscreen/desktop-browser/phone-browser receipts agree exactly on the
+semantic vegetation source and products, and deliberate Worker restart plus
+graceful shutdown prove the browser mechanics without giving JavaScript
+terrain policy.
 
 Headed desktop, phone, and hosted production smokes exercise the real DOM
 two-contact path and multiple held-key rAF frames. Native real-window and

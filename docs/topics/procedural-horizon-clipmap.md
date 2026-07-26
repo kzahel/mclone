@@ -26,7 +26,7 @@ The later hardening direction is a bounded sample halo plus explicit
 requested/staged/committed level admission, not a larger unbounded dispatch
 spike.
 Side-by-side native/browser review also found three proof-host parity gaps.
-Active parent Tactical
+Completed parent Tactical
 [`253`](../tactical/253-world-explorer-cross-host-parity.md) sequences their
 independent corrections. Tactical
 [`255`](../tactical/255-world-explorer-color-output-parity.md) completed the
@@ -34,17 +34,19 @@ shared display-space color contract on 2026-07-26. Terrain, material/river
 overrides, tree proxies, and the background now use one generated target
 transform, preserving the selected dark appearance on UNORM and sRGB targets.
 Tactical
-[`256`](../tactical/256-shared-horizon-vegetation-worker-topology.md) replaces
+[`256`](../tactical/256-shared-horizon-vegetation-worker-topology.md) replaced
 native synchronous/browser-disabled tree compilation with one shared
 engine terrain-vegetation coordinator over native-thread and browser-Worker
-executors. Its architecture checkpoint and native/browser cutovers completed
-on 2026-07-26 and explicitly define World Explorer as the first proof host,
-not the final owner. Native uses one named bounded-channel thread; browser
-uses an isolated Rust actor, the shared opaque Worker transport, and a
-persistent external-SAB result arena. The coordinator, compiler session, job
-identity, cache policy, and prepared result handoff belong in shared crates so
-a later `mclone-scene` tactical can consume the same service. Stable
-cross-host receipt/timing closeout remains active. UI-less host cleanup
+executors. It completed on 2026-07-26 and explicitly defines World Explorer as
+the first proof host, not the final owner. Native uses one named
+bounded-channel thread; browser uses an isolated Rust actor, the shared opaque
+Worker transport, and a persistent external-SAB result arena. The
+coordinator, compiler session, job identity, cache policy, and prepared result
+handoff belong in shared crates so a later `mclone-scene` tactical can consume
+the same service. A pinned native/offscreen/desktop-browser/phone-browser
+receipt agreed exactly on the semantic source, `2,609` records/instances,
+family counts, record hash, and `281,772` proxy vertices; failure/restart,
+overflow, large coordinates, and shutdown also passed. UI-less host cleanup
 completed in Tactical
 [`254`](../tactical/254-ui-less-world-explorer-host.md) and remains owned by
 the platform-host topic rather than terrain rendering.
@@ -536,7 +538,8 @@ semantic owner.
    first large-coordinate camera-relative precision path are proven. Add
    explicit skirts where independent surfaces require them, retained
    committed origins, footprint summaries, and device-specific budgets.
-6. **Build the reusable vegetation streaming service.** Tactical 256 moves
+6. **Build the reusable vegetation streaming service — complete.** Tactical
+   256 moved
    semantic tree-record compilation behind one shared coordinator, one native
    thread executor, and one isolated browser Rust actor. World Explorer proves
    identical source identity, records, failure behavior, and presentation

@@ -74,14 +74,15 @@ diagnosed tile-normal seams and one-frame coarse fallback at aligned
 multi-level origin changes. It is proposed and intentionally defers runtime
 changes until the clipmap hardening slice resumes.
 Tactical
-[`253`](253-world-explorer-cross-host-parity.md) is the active parent for
-closing the Explorer's native/browser presentation gap. Tactical
+[`253`](253-world-explorer-cross-host-parity.md) completed the Explorer's
+native/browser presentation-parity campaign. Tactical
 [`254`](254-ui-less-world-explorer-host.md) completed the UI-less browser host
 and query-gated Rust diagnostic observer on 2026-07-26. Focused children
 [`255`](255-world-explorer-color-output-parity.md) and
 [`256`](256-shared-horizon-vegetation-worker-topology.md) separately own the
 completed dark color-output parity and the shared threaded/Worker vegetation
-topology; 256's parity/diagnostic closeout remains active.
+topology with exact native/offscreen/desktop-browser/phone-browser semantic
+receipts.
 Historical render-worker architecture remains in
 [`067-shared-render-worker-architecture.md`](067-shared-render-worker-architecture.md),
 with the parent thread/Web-Worker topology in

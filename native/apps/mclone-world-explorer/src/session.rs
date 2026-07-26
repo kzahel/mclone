@@ -247,7 +247,8 @@ impl WorldExplorerSession {
              coarse_ready_ms={} target_ready_ms={} resident_bytes={} \
              fixed_resident_bytes={} vegetation_bytes={} allocation_slots={} \
              ready_slots={} pending={} vegetation_ready={} vegetation_pending={} \
-             tree_instances={} finest_spacing={} \
+             tree_instances={} vegetation_source={:016x} vegetation_hash={:016x} \
+             vegetation_queue={} vegetation_compile_ms={:.2} finest_spacing={} \
              refills_total={} rebases_total={}",
             self.config.seed,
             self.view_state.center_x_i32(),
@@ -269,6 +270,12 @@ impl WorldExplorerSession {
             stats.map_or(0, |stats| stats.vegetation_ready_tiles),
             stats.map_or(0, |stats| stats.pending_vegetation_tiles),
             stats.map_or(0, |stats| stats.tree_instance_count),
+            stats.map_or(0, |stats| { stats.vegetation_service.source_fingerprint }),
+            stats.map_or(0, |stats| stats.vegetation_service.record_hash),
+            stats.map_or(0, |stats| stats.vegetation_service.queued_tiles),
+            stats.map_or(0.0, |stats| {
+                stats.vegetation_service.compile_micros as f64 / 1_000.0
+            }),
             stats.map_or(0, |stats| stats.finest_sample_spacing),
             stats.map_or(0, |stats| stats.residency.total_refills),
             stats.map_or(0, |stats| stats.residency.total_rebases),

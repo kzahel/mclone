@@ -15,7 +15,9 @@ use mclone_worldgen::terrain_preview::{
     TerrainPreviewSample, TerrainPreviewSurfaceQuality, TerrainPreviewVegetationProduct,
     ValidatedTerrainPreviewRequest, terrain_preview_gpu_compile_work,
 };
-use mclone_worldgen::terrain_vegetation::TerrainVegetationSourceIdentity;
+use mclone_worldgen::terrain_vegetation::{
+    TerrainVegetationSourceIdentity, terrain_vegetation_coverage_receipt,
+};
 
 use super::{
     TERRAIN_PREVIEW_DEPTH_FORMAT, TERRAIN_PREVIEW_SAMPLE_BYTES, TERRAIN_PREVIEW_UNIFORM_BYTES,
@@ -23,11 +25,11 @@ use super::{
     TerrainClipmapDiagnostics, TerrainClipmapTile, TerrainHorizonPresentation,
     TerrainPreviewCamera, TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource,
     TerrainPreviewSplitLayout, TerrainVegetationCoordinator, TerrainVegetationCoordinatorState,
-    TerrainVegetationDesiredTile, TerrainVegetationExecutor, TerrainVegetationSlotToken,
-    TerrainViewportPlan, TerrainViewportTileId, parse_samples, terrain_horizon_orbit_target_y,
-    terrain_preview_compute_wgsl, terrain_preview_focus_y_for_profile, terrain_preview_render_wgsl,
-    terrain_preview_tree_wgsl, viewport_uniform_bytes_for_request,
-    viewport_uniform_bytes_for_request_with_presentation,
+    TerrainVegetationDesiredTile, TerrainVegetationExecutor, TerrainVegetationExecutorKind,
+    TerrainVegetationSlotToken, TerrainViewportPlan, TerrainViewportTileId, parse_samples,
+    terrain_horizon_orbit_target_y, terrain_preview_compute_wgsl,
+    terrain_preview_focus_y_for_profile, terrain_preview_render_wgsl, terrain_preview_tree_wgsl,
+    viewport_uniform_bytes_for_request, viewport_uniform_bytes_for_request_with_presentation,
 };
 
 pub const TERRAIN_PREVIEW_MATERIAL_UV_COUNT: usize = 256;
@@ -151,15 +153,60 @@ pub struct TerrainHorizonFrameStats {
     pub fixed_resident_bytes: u64,
     pub vegetation_bytes: u64,
     pub resident_bytes: u64,
-    pub worker_result_capacity_bytes: u64,
-    pub worker_result_high_water_bytes: u64,
-    pub worker_result_overflow_count: u64,
-    pub worker_copied_result_bytes: u64,
+    pub vegetation_service: TerrainHorizonVegetationServiceStats,
     pub finest_sample_spacing: u32,
     pub coarse_ready: bool,
     pub target_ready: bool,
     pub needs_redraw: bool,
     pub residency: TerrainClipmapDiagnostics,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TerrainHorizonVegetationServiceStats {
+    pub enabled: bool,
+    pub coordinator_state: Option<TerrainVegetationCoordinatorState>,
+    pub executor_kind: Option<TerrainVegetationExecutorKind>,
+    pub source_fingerprint: u64,
+    pub terrain_source_revision: u64,
+    pub compiler_source_revision: u64,
+    pub vegetation_plan_revision: u64,
+    pub product_revision: u32,
+    pub record_hash: u64,
+    pub family_counts: [u32; 3],
+    pub record_count: u32,
+    pub product_count: u32,
+    pub executor_generation: u32,
+    pub source_epoch: u32,
+    pub coverage_revision: u64,
+    pub desired_tiles: u32,
+    pub queued_tiles: u32,
+    pub resident_tiles: u32,
+    pub in_flight: bool,
+    pub submitted_jobs: u64,
+    pub completed_jobs: u64,
+    pub admitted_products: u64,
+    pub source_resets: u64,
+    pub transport_failures: u64,
+    pub executor_restarts: u64,
+    pub job_failures: u64,
+    pub stale_completions: u64,
+    pub superseded_completions: u64,
+    pub submit_full_count: u64,
+    pub compile_micros: u64,
+    pub cache_cell_requests: u64,
+    pub cache_cell_hits: u64,
+    pub cache_cell_misses: u64,
+    pub cache_retained_cells: u64,
+    pub cache_retained_preliminary_candidates: u64,
+    pub executor_submitted_jobs: u64,
+    pub executor_completed_jobs: u64,
+    pub executor_transport_failures: u64,
+    pub executor_restart_count: u64,
+    pub result_capacity_bytes: u64,
+    pub result_high_water_bytes: u64,
+    pub result_overflow_count: u64,
+    pub copied_result_bytes: u64,
+    pub main_decode_micros: u64,
 }
 
 struct EncodedTerrainViewportReadbacks {
@@ -2553,7 +2600,7 @@ impl TerrainHorizonRenderer {
             .iter()
             .filter(|slot| slot.vegetation.is_some())
             .count() as u32;
-        let (pending_vegetation_tiles, vegetation_settled, worker_diagnostics) = self
+        let (pending_vegetation_tiles, vegetation_settled) = self
             .vegetation_coordinator
             .as_ref()
             .map(|coordinator| {
@@ -2570,9 +2617,17 @@ impl TerrainHorizonRenderer {
                     TerrainVegetationCoordinatorState::Starting
                     | TerrainVegetationCoordinatorState::ShuttingDown => false,
                 };
-                (pending, settled, diagnostics.executor)
+                (pending, settled)
             })
-            .unwrap_or((0, true, Default::default()));
+            .unwrap_or((0, true));
+        let vegetation_service = self.vegetation_service_stats()?;
+        if vegetation_service.record_count != tree_instance_count {
+            return Err(format!(
+                "terrain vegetation receipt counts {} records but GPU slots contain \
+                 {tree_instance_count} instances",
+                vegetation_service.record_count
+            ));
+        }
         let target_ready =
             ready_slots == allocation_slots && self.pending.is_empty() && vegetation_settled;
         Ok(TerrainHorizonFrameStats {
@@ -2592,15 +2647,81 @@ impl TerrainHorizonRenderer {
             fixed_resident_bytes,
             vegetation_bytes,
             resident_bytes,
-            worker_result_capacity_bytes: worker_diagnostics.result_capacity_bytes,
-            worker_result_high_water_bytes: worker_diagnostics.result_high_water_bytes,
-            worker_result_overflow_count: worker_diagnostics.result_overflows,
-            worker_copied_result_bytes: worker_diagnostics.copied_result_bytes,
+            vegetation_service,
             finest_sample_spacing: self.clipmap.config().base_sample_spacing,
             coarse_ready: drawn_levels > 0,
             target_ready,
             needs_redraw: !target_ready,
             residency: self.clipmap.diagnostics(),
+        })
+    }
+
+    fn vegetation_service_stats(&self) -> Result<TerrainHorizonVegetationServiceStats, String> {
+        let Some(coordinator) = self.vegetation_coordinator.as_ref() else {
+            return Ok(TerrainHorizonVegetationServiceStats {
+                enabled: self.vegetation_executor.is_some(),
+                ..Default::default()
+            });
+        };
+        let diagnostics = coordinator.diagnostics();
+        let source = coordinator.source();
+        let receipt = terrain_vegetation_coverage_receipt(
+            source,
+            self.slots
+                .iter()
+                .filter_map(|slot| slot.vegetation.as_ref()),
+        )?;
+        let executor = diagnostics.executor;
+        Ok(TerrainHorizonVegetationServiceStats {
+            enabled: true,
+            coordinator_state: Some(diagnostics.state),
+            executor_kind: Some(diagnostics.executor_kind),
+            source_fingerprint: receipt.source_fingerprint,
+            terrain_source_revision: source.terrain_source_revision,
+            compiler_source_revision: source.compiler_source_revision,
+            vegetation_plan_revision: source.vegetation_plan_revision,
+            product_revision: source.product_revision,
+            record_hash: receipt.record_hash,
+            family_counts: receipt.family_counts,
+            record_count: receipt.record_count,
+            product_count: receipt.product_count,
+            executor_generation: diagnostics.executor_generation,
+            source_epoch: diagnostics.source_epoch,
+            coverage_revision: diagnostics.coverage_revision,
+            desired_tiles: diagnostics.desired_tiles,
+            queued_tiles: diagnostics.queued_tiles,
+            resident_tiles: diagnostics.resident_tiles,
+            in_flight: diagnostics.in_flight,
+            submitted_jobs: diagnostics.submitted_jobs,
+            completed_jobs: diagnostics.completed_jobs,
+            admitted_products: diagnostics.admitted_products,
+            source_resets: diagnostics.source_resets,
+            transport_failures: diagnostics.transport_failures,
+            executor_restarts: diagnostics.executor_restarts,
+            job_failures: diagnostics.job_failures,
+            stale_completions: diagnostics
+                .stale_generation_completions
+                .saturating_add(diagnostics.stale_source_completions)
+                .saturating_add(diagnostics.stale_request_completions)
+                .saturating_add(diagnostics.stale_slot_completions),
+            superseded_completions: diagnostics.superseded_completions,
+            submit_full_count: diagnostics.submit_full_count,
+            compile_micros: diagnostics.compile_micros,
+            cache_cell_requests: diagnostics.cache_cell_requests,
+            cache_cell_hits: diagnostics.cache_cell_hits,
+            cache_cell_misses: diagnostics.cache_cell_misses,
+            cache_retained_cells: diagnostics.cache_retained_cells,
+            cache_retained_preliminary_candidates: diagnostics
+                .cache_retained_preliminary_candidates,
+            executor_submitted_jobs: executor.submitted_jobs,
+            executor_completed_jobs: executor.completed_jobs,
+            executor_transport_failures: executor.transport_failures,
+            executor_restart_count: executor.restarts,
+            result_capacity_bytes: executor.result_capacity_bytes,
+            result_high_water_bytes: executor.result_high_water_bytes,
+            result_overflow_count: executor.result_overflows,
+            copied_result_bytes: executor.copied_result_bytes,
+            main_decode_micros: executor.main_decode_micros,
         })
     }
 

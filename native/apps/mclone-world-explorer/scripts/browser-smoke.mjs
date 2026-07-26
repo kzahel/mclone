@@ -1,6 +1,6 @@
 import { spawnSync } from "node:child_process";
 import { createReadStream } from "node:fs";
-import { stat, writeFile } from "node:fs/promises";
+import { readFile, stat, writeFile } from "node:fs/promises";
 import { createServer } from "node:http";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -16,6 +16,7 @@ const webRoot = path.join(nativeRoot, "target", "mclone-world-explorer-www");
 const mobile = process.argv.includes("--mobile");
 const skipBuild = process.argv.includes("--skip-build");
 const externalBaseUrl = process.env.WORLD_EXPLORER_SMOKE_BASE_URL;
+const nativeParityReceipt = process.env.WORLD_EXPLORER_PARITY_RECEIPT;
 const label = mobile ? "mobile" : "desktop";
 const port = Number.parseInt(
   process.env.WORLD_EXPLORER_SMOKE_PORT ?? (mobile ? "4192" : "4191"),
@@ -72,6 +73,8 @@ try {
   await assertTerrainOnlySurface(page);
   const initial = await report(page);
   assertFixedReady(initial, "initial");
+  assertVegetationDiagnostics(initial, "initial");
+  await assertNativeParity(initial);
   if (initial.workerResultOverflowCount < 1
       || initial.workerResultCapacityBytes <= 1024
       || initial.workerResultHighWaterBytes <= 1024) {
@@ -189,6 +192,16 @@ try {
   await waitReady(page);
   const moved = await report(page);
   assertFixedReady(moved, "held keyboard movement");
+  assertVegetationDiagnostics(moved, "held keyboard movement");
+  if (moved.vegetationTransportFailures !== 1
+      || moved.vegetationExecutorRestarts !== 1
+      || moved.vegetationExecutorGeneration !== 2
+      || moved.workerRestartCount !== 2) {
+    throw new Error(
+      `forced Worker reconstruction was not diagnosed:\n`
+        + `${JSON.stringify(moved, null, 2)}`,
+    );
+  }
   console.log(
     `World Explorer ${label} browser smoke: Worker restart and held movement ready`,
   );
@@ -231,6 +244,13 @@ try {
     null,
     { timeout: 30_000 },
   );
+  const shutdown = await report(page);
+  if (shutdown.vegetationCoordinatorState !== "terminated") {
+    throw new Error(
+      `Worker shutdown did not reach terminated diagnostics:\n`
+        + `${JSON.stringify(shutdown, null, 2)}`,
+    );
+  }
   console.log(`World Explorer ${label} browser smoke: Worker shutdown complete`);
   if (pageErrors.length > 0) {
     throw new Error(`browser errors:\n${pageErrors.join("\n")}`);
@@ -254,6 +274,7 @@ try {
     moved,
     negative,
     shiftPan,
+    shutdown,
     target: label,
     teleported,
     touch,
@@ -372,6 +393,88 @@ function assertFixedReady(value, stage) {
       || value.residentBytes <= 0) {
     throw new Error(`${stage} is not fixed and ready:\n${JSON.stringify(value, null, 2)}`);
   }
+}
+
+function assertVegetationDiagnostics(value, stage) {
+  const familyCount = value.vegetationFamilyCounts.reduce(
+    (sum, count) => sum + count,
+    0,
+  );
+  if (value.vegetationCoordinatorState !== "running"
+      || value.vegetationExecutorKind !== "browser-worker"
+      || value.vegetationDesiredTiles !== 48
+      || value.vegetationQueuedTiles !== 0
+      || value.vegetationResidentTiles !== 48
+      || value.vegetationInFlight
+      || value.vegetationProductCount !== 48
+      || value.vegetationRecordCount !== value.treeInstanceCount
+      || familyCount !== value.treeInstanceCount
+      || !/^[0-9a-f]{16}$/u.test(value.vegetationSourceFingerprint)
+      || !/^[0-9a-f]{16}$/u.test(value.vegetationRecordHash)
+      || value.vegetationCompileMicros <= 0
+      || value.vegetationCacheCellRequests <= 0
+      || value.vegetationCacheCellHits + value.vegetationCacheCellMisses
+        !== value.vegetationCacheCellRequests
+      || value.workerSubmittedJobs < 48
+      || value.workerCompletedJobs < 48
+      || value.workerResultHighWaterBytes <= 0
+      || value.workerCopiedResultBytes <= 0
+      || value.workerMainDecodeMicros <= 0) {
+    throw new Error(
+      `${stage} vegetation diagnostics are incomplete:\n`
+        + `${JSON.stringify(value, null, 2)}`,
+    );
+  }
+}
+
+async function assertNativeParity(browserInitial) {
+  if (!nativeParityReceipt) {
+    return;
+  }
+  const native = JSON.parse(await readFile(nativeParityReceipt, "utf8"));
+  const nativeInitial = native.captures.find((capture) => capture.label === "3d");
+  if (!nativeInitial) {
+    throw new Error(`native parity receipt has no initial 3d capture: ${nativeParityReceipt}`);
+  }
+  const pairs = [
+    ["centerX", browserInitial.centerX, nativeInitial.center_x],
+    ["centerZ", browserInitial.centerZ, nativeInitial.center_z],
+    [
+      "source fingerprint",
+      browserInitial.vegetationSourceFingerprint,
+      nativeInitial.vegetation_service.source_fingerprint,
+    ],
+    [
+      "record hash",
+      browserInitial.vegetationRecordHash,
+      nativeInitial.vegetation_service.record_hash,
+    ],
+    [
+      "family counts",
+      JSON.stringify(browserInitial.vegetationFamilyCounts),
+      JSON.stringify(nativeInitial.vegetation_service.family_counts),
+    ],
+    [
+      "tree count",
+      browserInitial.treeInstanceCount,
+      nativeInitial.tree_instance_count,
+    ],
+    [
+      "proxy vertex count",
+      browserInitial.treeProxyVertexCount,
+      nativeInitial.tree_proxy_vertex_count,
+    ],
+  ];
+  const mismatches = pairs.filter(([, browser, expected]) => browser !== expected);
+  if (mismatches.length > 0) {
+    throw new Error(
+      `native/browser vegetation parity mismatch:\n`
+        + `${JSON.stringify(mismatches, null, 2)}`,
+    );
+  }
+  console.log(
+    `World Explorer ${label} browser smoke: native vegetation receipt parity ready`,
+  );
 }
 
 function assertPresentationOnly(before, after, stage) {

@@ -6,20 +6,22 @@ Status: Terrain Lab hierarchy proof active 2026-07-25. Exact records and the
 initial Lab proxy path are landed. The rejected in-game chunk-based adapter was
 removed by Tactical 245.
 
-World Explorer review on 2026-07-26 found that native enables synchronous
-near-level vegetation compilation during frame encoding while browser disables
+World Explorer review on 2026-07-26 found that native enabled synchronous
+near-level vegetation compilation during frame encoding while browser disabled
 vegetation entirely. Tactical
 [`256`](../tactical/256-shared-horizon-vegetation-worker-topology.md) records
-the replacement direction: one `mclone-terrain-view` coordinator owns job
+the completed replacement: one `mclone-terrain-view` coordinator owns job
 identity, budgets, cache lifecycle, stale rejection, and admission, while
 native threads and an isolated browser Rust actor provide equivalent execution
 through platform-appropriate mailboxes. Neither presentation thread remains a
-normal compiler path. Its architecture checkpoint completed on 2026-07-26:
+normal compiler path. Its parity closeout completed on 2026-07-26:
 World Explorer is the first parity host for a reusable engine terrain-LOD
-service, not the owner or final destination. A later `mclone-scene` tactical
-will consume the same coordinator/compiler boundary and separately solve
-exact/proxy arbitration, edits, multiworld lifecycle, and all-target
-presentation.
+service, not the owner or final destination. Native, offscreen, desktop
+browser, and phone browser agreed on the complete pinned semantic receipt,
+including `2,609` records/instances and `281,772` proxy vertices. A later
+`mclone-scene` tactical will consume the same coordinator/compiler boundary
+and separately solve exact/proxy arbitration, edits, multiworld lifecycle,
+and all-target presentation.
 
 ## Scope
 
@@ -827,7 +829,7 @@ not that chunk tiles were the right future hierarchy. Tactical 245 removed it.
 A later architecture may consume the semantic vegetation products through a
 different spatial hierarchy.
 
-### Slice 5: reusable off-thread vegetation service — architecture locked
+### Slice 5: reusable off-thread vegetation service — complete
 
 Tactical
 [`256`](../tactical/256-shared-horizon-vegetation-worker-topology.md)
@@ -1022,22 +1024,16 @@ pixels:
 
 ## Recommended Next Work
 
-Proceed with Tactical 256 as the next runtime-portability implementation:
-
-1. land the shared compiler session and versioned product codec;
-2. prove the shared coordinator against fake executors before touching a
-   platform host;
-3. cut native over to its bounded thread and delete synchronous frame
-   compilation;
-4. add the isolated browser actor/external-SAB executor; and
-5. close on matched native/browser records, diagnostics, timings, and pixels.
+Start a focused game-integration tactical only when the exact/procedural
+coverage contract is ready for review. It should construct the proven
+platform executor at the app rim, compose the unchanged coordinator/compiler
+under `mclone-scene`, and add exact-painted coverage, cross-chunk crown XOR,
+authoritative edit invalidation, multiworld budgets, device rebuild, and
+mono/stereo/multiview admission.
 
 The active Terrain Lab hierarchy work remains an independent presentation
 quality track: retain its 65.5 km work receipts, footprint filtering, and
-fixed-anchor inspection. It must not block moving already bounded near record
-compilation off presentation threads, and Tactical 256 must not change forest
-algorithms or representation thresholds merely to exercise the Worker path.
-
-After both bodies of evidence, open a separate `mclone-scene` integration
-tactical. Do not fold exact/proxy arbitration or authoritative edit behavior
-into the Explorer portability proof.
+fixed-anchor inspection. Do not reopen Tactical 256 to change forest
+algorithms or representation thresholds. The service has moved compilation
+off both presentation threads; the remaining runtime work is scene
+composition and exact/proxy ownership.

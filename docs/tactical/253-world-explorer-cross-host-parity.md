@@ -1,8 +1,7 @@
 # Tactical 253: World Explorer Cross-Host Parity
 
-Status: active parent; Tacticals 254–255 completed 2026-07-26. Tactical 256's
-native and browser execution cutovers completed the same day; its parity
-closeout is next.
+Status: completed 2026-07-26. Tacticals 254–256 closed the UI, color-output,
+and off-thread vegetation parity gaps on native and browser hosts.
 
 Topics:
 
@@ -87,13 +86,17 @@ appearance across browser UNORM and native/offscreen sRGB targets. A
 lightweight shared color crate owns the CPU and WGSL transfer definition,
 format-pair GPU evidence passes, and pinned browser/native captures satisfy
 the documented color tolerance. Tactical
-[`256`](256-shared-horizon-vegetation-worker-topology.md) completed its
-native-thread and browser-Worker cutovers on 2026-07-26. Its reusable
+[`256`](256-shared-horizon-vegetation-worker-topology.md) completed on
+2026-07-26. Its reusable
 `mclone-terrain-view` vegetation streaming coordinator over a shared
 `mclone-worldgen` compiler session, with World Explorer as the first
 native/browser proof rather than the final owner, now drives both products
-without synchronous frame compilation. Cross-host receipt/timing closeout
-remains active; later game-scene adoption is a separate tactical.
+without synchronous frame compilation. A pinned native/offscreen/desktop-
+browser/phone-browser receipt agreed on source fingerprint, stable record
+hash, family counts, `2,609` tree instances, and `281,772` proxy vertices.
+Forced browser overflow, one Worker reconstruction, movement, negative and
+million-block coordinates, and graceful shutdown passed. Later game-scene
+adoption remains a separate tactical.
 
 ## Campaign Acceptance
 

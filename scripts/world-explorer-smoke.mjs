@@ -38,6 +38,7 @@ const result = spawnSync(
     "--",
     "--smoke",
     output,
+    ...process.argv.slice(3),
   ],
   {
     cwd: repoRoot,
