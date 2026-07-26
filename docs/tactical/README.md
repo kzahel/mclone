@@ -68,6 +68,11 @@ Tactical
 surface-appearance slice: permanent Basic material classification,
 builder-aware Inferred material classification, cheap reference grass tint,
 and explicit deferral of footprint sampling.
+Tactical
+[`252`](252-procedural-horizon-seams-and-transition-admission.md) records the
+diagnosed tile-normal seams and one-frame coarse fallback at aligned
+multi-level origin changes. It is proposed and intentionally defers runtime
+changes until the clipmap hardening slice resumes.
 Historical render-worker architecture remains in
 [`067-shared-render-worker-architecture.md`](067-shared-render-worker-architecture.md),
 with the parent thread/Web-Worker topology in
@@ -329,3 +334,4 @@ with the parent thread/Web-Worker topology in
 | [`249-cross-platform-procedural-horizon-proof.md`](249-cross-platform-procedural-horizon-proof.md) | completed 2026-07-25, including local/native/hosted browser proof | Implemented the shared fixed-budget toroidal horizon and proved the same Rust session through lightweight native and browser Explorer adapters without changing Terrain Lab or coupling product scope to platform. |
 | [`250-continuous-explorer-presentation-and-cadence.md`](250-continuous-explorer-presentation-and-cadence.md) | completed and deployed 2026-07-26 | Separated continuous camera presentation from snapped clipmap residency, unified time-based held navigation across native/browser Explorer hosts, and retained lightweight platform-owned frame loops. |
 | [`251-lod-surface-appearance-quality.md`](251-lod-surface-appearance-quality.md) | complete 2026-07-26 | Added permanent Basic and measured-default Inferred LOD surface qualities, reference grass tint, shared material colors, builder-noise and zero-sample steep-face inference, with footprint sampling explicitly deferred. |
+| [`252-procedural-horizon-seams-and-transition-admission.md`](252-procedural-horizon-seams-and-transition-admission.md) | proposed; diagnosed and deferred 2026-07-26 | Records tile-local edge-normal seams and premature origin exposure at aligned multi-level crossings, with halo-normal and requested/committed admission directions for later implementation. |

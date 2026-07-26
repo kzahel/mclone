@@ -16,6 +16,15 @@ removal boundary for the rejected chunk-based Far LOD system. Tactical
 [`247`](../tactical/247-standalone-world-explorer-foundation.md) supplied the
 small native proof host and shared navigation boundary for the first ring; it
 deliberately implemented no clipmap residency.
+Interactive review on 2026-07-26 diagnosed two remaining proof defects and
+recorded them in Tactical
+[`252`](../tactical/252-procedural-horizon-seams-and-transition-admission.md):
+tile-edge normal calculations clamp to local samples and visibly split
+lighting, while aligned multi-level movement can expose requested origins
+before all entering strips are ready and show coarse fallback for one frame.
+The later hardening direction is a bounded sample halo plus explicit
+requested/staged/committed level admission, not a larger unbounded dispatch
+spike.
 
 ## Scope
 
