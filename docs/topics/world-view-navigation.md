@@ -794,27 +794,26 @@ toroidal-horizon proof.
    Drive one shared Rust horizon through the lightweight native and web
    Explorer without creating an Explorer-specific browser ABI. Keep Terrain
    Lab unchanged.
-5. **Extract a reusable exact-view source.** Parent Tactical
+5. **Extract a reusable exact-view source — native proof complete.** Parent Tactical
    [`261`](../tactical/261-procedural-horizon-product-integration-roadmap.md)
-   and active child Tactical
+   and child Tactical
    [`262`](../tactical/262-world-explorer-exact-procedural-composition.md)
-   now begin this boundary with one renderer-neutral exact-painted frame
-   contract. Adapt locally compiled canonical chunks into the shared snapshot,
-   render-session, compile, upload, and draw lifecycle. Do not promote Terrain
-   Lab's TypeScript scheduler or duplicate the game's cache and Worker
-   framework. Preserve the Lab's working canonical view while proving the
-   narrower boundary.
+   extracted the canonical compiler session and packed codec, then adapted
+   locally compiled canonical chunks into one renderer-neutral exact-painted
+   frame contract. The native review candidate now proves its compile,
+   upload, coverage, and draw lifecycle while preserving Terrain Lab's
+   working canonical view. Browser promotion remains after review.
 6. **Build the minimal Web Explorer smoke — complete and deployed.** Keep
    JavaScript or TypeScript
    limited to canvas, rAF, lifecycle, URL, raw-observation forwarding, and
    mechanical browser dispositions. Add a deployment smoke and measure the
    independent Wasm/asset payload. A procedural-only result remains a smoke,
    not the player-facing replacement for Terrain Lab.
-7. **Compose procedural and exact terrain.** Tactical 262 owns the
-   World Explorer masking, shared depth, skirts, replacement, and movement
-   proof. Tactical 261 sequences later scene-owned and all-target promotion.
-   Reuse the accepted composition before calling it the real map-to-world
-   view.
+7. **Compose procedural and exact terrain — Human Review 1 candidate.**
+   Tactical 262 now has native World Explorer masking, shared depth,
+   procedural collar, replacement, and movement proof. Tactical 261
+   sequences browser, later scene-owned, and all-target promotion. Reuse the
+   accepted composition before calling it the real map-to-world view.
 8. **Connect tabletop Slice 2.** Reuse the same manipulation contract while
    retaining scene-owned follow, authority, and target mapping.
 9. **Build the player-facing Explorer UI.** Use the shared terrain view,

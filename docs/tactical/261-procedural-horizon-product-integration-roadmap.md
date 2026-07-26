@@ -1,11 +1,12 @@
 # Tactical 261: Procedural Horizon Product Integration Roadmap
 
 Status: active coordinating parent, opened 2026-07-26. The research,
-standalone Explorer, cross-host parity, transition hardening, and reusable
-vegetation-service phases are complete. Active child Tactical
-[`262`](262-world-explorer-exact-procedural-composition.md) now establishes
-the reusable exact/procedural compositor in World Explorer before the first
-full-game rendering cutover.
+standalone Explorer, cross-host parity, transition hardening, reusable
+vegetation-service, and shared composition-substrate phases are complete.
+Child Tactical
+[`262`](262-world-explorer-exact-procedural-composition.md) has reached Human
+Review 1 with native exact/procedural World Explorer pixels. Full-game
+rendering remains gated on acceptance of that proof.
 
 Topics:
 
@@ -215,17 +216,26 @@ quality work must not invent a second LOD or platform execution policy.
 - Matching native/offscreen/desktop-browser/phone-browser semantic receipts.
 - Caller-owned render targets, reversed-Z depth, and explicit display-space
   color behavior.
+- A renderer-neutral exact-painted snapshot with source/generation identity,
+  negative-coordinate mask packing, and stale-result rejection.
+- One shared canonical compiler session and packed mesh codec consumed by
+  Terrain Lab and the native World Explorer.
+- A bounded threaded exact producer with one-result-per-frame admission and
+  overlap retention during movement.
+- Native `Horizon`, `Exact`, `Composed`, and `Coverage` modes on one
+  color/depth target with a checked GPU mask and explicit procedural collar.
 - A deliberately small World Explorer dependency boundary.
 
 ## What Is Not Yet Proven
 
 - The procedural horizon has not rendered inside the ordinary
   `mclone-scene::McloneSceneHost`.
-- Exact chunk draws and procedural coverage do not yet come from one immutable
-  scene frame snapshot.
-- No production coverage mask hides procedural fragments only after exact
-  terrain is drawable.
-- The exact/procedural frontier has no production collar or skirt.
+- Production exact chunk draws and procedural coverage do not yet come from
+  one immutable game-scene frame snapshot.
+- The ordinary game does not yet publish or consume the proven exact-painted
+  coverage mask.
+- The proof's explicit procedural collar is not yet a production game
+  frontier, and visible exact/horizon surface and water differences remain.
 - Exact trees and procedural proxies are not yet atomically XORed across
   cross-chunk crowns.
 - Authoritative edits do not yet invalidate nearby natural proxy ownership.
@@ -299,8 +309,8 @@ ready.
 
 | Child | State | Scope | Exit gate |
 |---|---|---|---|
-| **PH-1 Shared composition substrate** | **active in Tactical 262** | Add the immutable exact-painted snapshot, source identity, bounded GPU mask, caller-owned color/depth target, explicit load/store behavior, and renderer-neutral draw ordering without importing a product scene. | Unit/offscreen tests prove coherent coverage, negative-coordinate packing, stale rejection, shared depth, and unchanged Horizon mode. |
-| **PH-2 World Explorer composition proof** | **active in Tactical 262** | Extract the useful canonical exact-view source from Terrain Lab, then add `Horizon`, `Exact`, `Composed`, and `Coverage` modes over one World Explorer device/target. | Native movement, delayed admission, eviction, negative, and teleport receipts plus inspected pixels reach Human Review 1; browser and Terrain Lab promotion follow after review. |
+| **PH-1 Shared composition substrate** | **complete in Tactical 262** | Add the immutable exact-painted snapshot, source identity, bounded GPU mask, caller-owned color/depth target, explicit load/store behavior, and renderer-neutral draw ordering without importing a product scene. | Unit/offscreen tests prove coherent coverage, negative-coordinate packing, stale rejection, shared depth, and unchanged Horizon mode. |
+| **PH-2 World Explorer composition proof** | **Human Review 1 candidate in Tactical 262** | Extract the useful canonical exact-view source from Terrain Lab, then add `Horizon`, `Exact`, `Composed`, and `Coverage` modes over one World Explorer device/target. | Native movement, delayed admission, eviction, negative, and teleport receipts plus inspected pixels reach Human Review 1; browser and Terrain Lab promotion follow after review. |
 | **PH-3 Terrain Lab adoption** | waiting on PH-2 review | Add the runtime horizon/composed presentation as another consumer while preserving canonical, CPU LOD, fast CPU LOD, and GPU LOD research panes. | Fixed-anchor Lab comparison exercises the same compositor without moving policy into React or browser canvas code. |
 | **PH-4 Full-game scene adoption** | waiting on PH-2 acceptance | Have `mclone-scene` publish the same exact-painted facts from real client render sections, construct platform executors at the app rim, and render the ordinary native game with exact terrain near and procedural terrain beyond. | Native game window/offscreen movement proves the accepted compositor under real scene lifecycle while exact-only stays equivalent. |
 | **PH-5 Vegetation and edit arbitration** | waiting on PH-4 | Atomically XOR procedural proxies with exact natural trees using complete intersecting footprints, reject stale products, and invalidate nearby natural proxy ownership when authoritative exact edits change the replacement facts. | No duplicate or disappearing trees at the frontier, including cross-chunk crowns, delayed exact compilation, edits, movement, and source switches. |
@@ -315,28 +325,23 @@ campaign. PH-9 is product use of the capability. PH-10 may supply bounded
 quality children before or after a platform promotion when evidence identifies
 a specific defect, but it must not block composition on speculative polish.
 
-## Immediate Next Tactical
+## Immediate Review Gate
 
-Active Tactical
-[`262`](262-world-explorer-exact-procedural-composition.md) owns **PH-1:
-Shared Composition Substrate** and **PH-2: World Explorer Composition Proof**
-through Human Review 1.
+Tactical
+[`262`](262-world-explorer-exact-procedural-composition.md) has completed
+**PH-1: Shared Composition Substrate** and implemented **PH-2: World Explorer
+Composition Proof** through its first native review candidate.
 
-It should:
+The immediate action is Human Review 1, not another implementation slice.
+Review the matched modes, movement with delayed exact admission, forest,
+coast, water, negative-coordinate, and teleport anchors. In particular,
+decide whether the stable but conspicuous exact/horizon source and appearance
+differences are acceptable for promotion or need a focused quality child.
 
-- extract Terrain Lab's reusable canonical mesh/session facts without
-  importing its browser UI or app-local coordinator policy;
-- publish one immutable exact-painted set for composition;
-- attach world/source/generation identity to that snapshot;
-- make horizon rendering accept a caller-owned color/depth target;
-- add the bounded GPU mask and explicit frontier treatment;
-- add World Explorer `Horizon`, `Exact`, `Composed`, and `Coverage` modes;
-- define the exact-only feature-off behavior and diagnostic baseline;
-- add stale, delayed admission, eviction, negative, and teleport tests; and
-- stop at Human Review 1 before game-scene implementation.
-
-That gives PH-4 a proven composition boundary rather than forcing scene
-lifecycle, GPU masking, proof-host pixels, and XR into one first game commit.
+After acceptance, Tactical 262 may continue with the browser proof and
+optional Terrain Lab adoption. A separate child then owns `mclone-scene`
+integration; the proof boundary prevents that child from combining scene
+lifecycle, GPU masking, and first-pixel discovery in one cut.
 
 ## XR And Multiview Invariants
 

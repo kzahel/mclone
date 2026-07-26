@@ -20,6 +20,17 @@ removal boundary for the rejected chunk-based Far LOD system. Tactical
 [`247`](../tactical/247-standalone-world-explorer-foundation.md) supplied the
 small native proof host and shared navigation boundary for the first ring; it
 deliberately implemented no clipmap residency.
+Tactical
+[`262`](../tactical/262-world-explorer-exact-procedural-composition.md) has
+now reached Human Review 1 with a shared exact-painted snapshot, bounded GPU
+mask, caller-owned color/depth target, extracted canonical compiler/codec,
+and native `Horizon`, `Exact`, `Composed`, and `Coverage` modes. The 5-by-5
+exact footprint stays coherent through delayed movement, negative
+coordinates, and teleport. Its explicit 1.5-block procedural collar removes
+the earlier full-height footprint wall, while conspicuous forest,
+surface-color, and especially ocean exact/horizon differences remain the
+subjective promotion question. No game-scene, browser-exact, Android, or XR
+adoption has started.
 Interactive review on 2026-07-26 diagnosed two remaining proof defects and
 activated Tactical
 [`252`](../tactical/252-procedural-horizon-seams-and-transition-admission.md):

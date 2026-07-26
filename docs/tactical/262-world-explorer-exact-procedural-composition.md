@@ -1,10 +1,10 @@
 # Tactical 262: World Explorer Exact/Procedural Composition
 
-Status: active 2026-07-26. Slice 0 records the revised proof-first direction.
-Implementation should stop at Human Review 1 after one true native
-exact-plus-procedural frame is inspectable under movement and delayed exact
-admission. Browser and Terrain Lab promotion remain later slices of this
-tactical after that review.
+Status: Human Review 1 candidate 2026-07-26. Slices 0 through 3 are complete:
+one true native exact-plus-procedural frame is inspectable under movement,
+negative coordinates, teleport, and delayed exact admission. Work stops here
+for subjective review. Browser and Terrain Lab promotion remain later slices
+of this tactical after that review.
 
 Topic: `procedural-horizon-clipmap`
 
@@ -181,13 +181,13 @@ Gate: implementation has one small proof owner and no host-local arbitration.
 
 ### Slice 1: reusable target and coverage substrate
 
-- [ ] Add a platform-neutral exact-painted snapshot with source/generation
+- [x] Add a platform-neutral exact-painted snapshot with source/generation
   checks and negative-coordinate mask packing tests.
-- [ ] Let the horizon encode into caller-owned color/depth attachments with
+- [x] Let the horizon encode into caller-owned color/depth attachments with
   explicit clear/load/store behavior.
-- [ ] Add a bounded exact-coverage GPU resource and procedural terrain/tree
+- [x] Add a bounded exact-coverage GPU resource and procedural terrain/tree
   mask path.
-- [ ] Preserve the existing Horizon convenience path, allocation report, and
+- [x] Preserve the existing Horizon convenience path, allocation report, and
   native/browser builds.
 
 Gate: unit/offscreen tests prove the mask identity and one shared depth
@@ -195,30 +195,93 @@ attachment without exact generation.
 
 ### Slice 2: reusable canonical exact near field
 
-- [ ] Move the canonical mesh compiler/session and packed batch codec out of
+- [x] Move the canonical mesh compiler/session and packed batch codec out of
   Terrain Lab app-local ownership without changing its behavior.
-- [ ] Add a bounded native threaded exact producer for World Explorer.
-- [ ] Admit no more than one exact result per frame and retain valid overlap
+- [x] Add a bounded native threaded exact producer for World Explorer.
+- [x] Admit no more than one exact result per frame and retain valid overlap
   while the desired footprint moves.
-- [ ] Publish exact-painted chunks only after accepted mesh upload.
-- [ ] Retain explicit frontier walls/collar in the composed proof.
+- [x] Publish exact-painted chunks only after accepted mesh upload.
+- [x] Retain an explicit procedural collar at the composed frontier.
 
 Gate: `Exact` mode moves through a bounded near field without presentation-
 thread generation or stale uploads.
 
 ### Slice 3: composed World Explorer and Human Review 1
 
-- [ ] Add `Horizon`, `Exact`, `Composed`, and `Coverage` modes.
-- [ ] Align exact and procedural cameras, color transfer, source identity, and
+- [x] Add `Horizon`, `Exact`, `Composed`, and `Coverage` modes.
+- [x] Align exact and procedural cameras, color transfer, source identity, and
   reversed-Z target.
-- [ ] Exercise stationary, movement, negative coordinates, exact
+- [x] Exercise stationary, movement, negative coordinates, exact
   admission/eviction, deliberately delayed exact work, and teleport.
-- [ ] Capture and inspect native window/offscreen pixels at the first composed
+- [x] Capture and inspect native window/offscreen pixels at the first composed
   frame and after movement.
-- [ ] Record mask population, exact resident/painted chunks, stale results,
+- [x] Record mask population, exact resident/painted chunks, stale results,
   frontier mode, exact draw counts, and fixed/transient bytes.
 
 Gate: pause for Human Review 1. Do not begin game-scene integration.
+
+## Review Candidate Evidence
+
+The implementation series is:
+
+| Commit | Result |
+|---|---|
+| `2edc9f57` | Added the renderer-neutral exact-painted snapshot, negative-coordinate mask packing, caller-owned target contract, and procedural terrain/tree mask. |
+| `c80a45b9` | Moved the canonical compiler session and packed mesh codec from Terrain Lab into `mclone-terrain-view` without changing the Lab's Wasm build. |
+| `39d210e7` | Added the bounded native exact producer and real World Explorer composition on one color/depth target, including the explicit procedural collar. |
+| `116d3189` | Added exact/mask ownership assertions and detailed composition receipts to every native smoke checkpoint. |
+
+The final delayed-work smoke was:
+
+```text
+pnpm native:world-explorer:smoke \
+  /tmp/mclone-world-explorer-composed-review \
+  --composition composed \
+  --blocks-across 256 \
+  --exact-radius 2 \
+  --exact-delay-ms 20
+```
+
+Both native-window and offscreen lanes passed initial 3D, axial and diagonal
+movement, negative coordinates, million-block teleport, zoom, map, and orbit
+checkpoints. The final offscreen receipt reported:
+
+- `25` desired and `25` painted exact chunks;
+- exact coverage generation `146`, with the procedural mask checked against
+  that same generation;
+- zero queued chunks, pending admissions, or in-flight work;
+- `175` admitted results and `16` deliberately stale movement results rejected;
+- `50` drawn exact sections and `154,728` drawn exact indices;
+- `6,383,392` bytes of resident exact mesh data; and
+- frontier mode `procedural-collar-1.5-blocks`.
+
+Focused validation also passed:
+
+```text
+cargo test --manifest-path native/Cargo.toml -p mclone-terrain-view
+cargo test --manifest-path native/Cargo.toml \
+  -p mclone-world-explorer --lib
+cargo check --manifest-path native/Cargo.toml -p mclone-world-explorer
+cargo check --manifest-path native/Cargo.toml \
+  -p mclone-world-explorer --lib --target wasm32-unknown-unknown
+cargo check --manifest-path native/Cargo.toml \
+  -p mclone-terrain-lab --lib --target wasm32-unknown-unknown
+```
+
+Inspected matched `Horizon`, `Exact`, `Composed`, and `Coverage` captures show
+that the 5-by-5 exact footprint and mask agree. `Exact` no longer produces
+full-height footprint walls. `Composed` suppresses procedural terrain inside
+the painted footprint and keeps a 1.5-block procedural collar at its edge.
+Dark stepped bands near some rivers are also visible in `Horizon`, so they
+predate this compositor.
+
+The review candidate is intentionally not visually final. Forest and surface
+detail change conspicuously at the square exact footprint. Ocean and coast
+anchors can show an especially strong blue/gray square because canonical
+exact water/surface output and the procedural horizon do not yet summarize
+the source identically. The ownership is stable—there is no old full-height
+wall—but this semantic/appearance discontinuity is the main Human Review 1
+question.
 
 ### Slice 4: browser proof
 
@@ -251,6 +314,19 @@ engine owner.
 - [ ] Open a separate game-scene adoption tactical after human acceptance.
 
 ## Human Review 1
+
+Run the native Explorer with:
+
+```text
+pnpm native:world-explorer:run \
+  --composition composed \
+  --blocks-across 256 \
+  --exact-radius 2
+```
+
+Use `1` for `Horizon`, `2` for `Exact`, `3` for `Composed`, and `4` for
+`Coverage`. To make admission behavior easier to see, add
+`--exact-delay-ms 100`.
 
 Review the native World Explorer at fixed and moving views:
 
