@@ -167,6 +167,18 @@ retains cardinal screen axes because its heading is fixed. The shared reducer
 owns this transform; native and browser hosts continue to forward only
 abstract directions.
 
+A 2026-07-26 follow-up locked the orbit basis at yaw zero and 90 degrees,
+cardinal map behavior, diagonal normalization, and 60/120-Hz equivalence.
+All 17 focused view-control tests and three Explorer tests passed, as did the
+Wasm check, dependency firewall, native real-window/offscreen smoke, and local
+desktop plus mobile headed-Wayland smokes. A hosted smoke then rotated the
+camera before ArrowRight and proved successive movement samples stayed on the
+camera-right ground vector. The inspected local and hosted movement frames
+were coherent. Production Worker version
+`faa28879-792f-48c2-bc43-f3308efe3dd2` serves the byte-verified 1,411,956-byte
+Explorer Wasm with SHA-256
+`208c15e3159fc35081394b464101788d8e8ffeeb7c21dcf33ce1552e00e89de5`.
+
 Real two-contact headed-browser gestures produced fractional focus on desktop
 and phone without changing residency revision, refill totals, rebases, or the
 160-slot allocation. Successive held-key rAF reports crossed integer and tile
