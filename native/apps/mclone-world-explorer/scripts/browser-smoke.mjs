@@ -135,14 +135,10 @@ try {
   await page.waitForFunction(
     () => globalThis.__MCLONE_WORLD_EXPLORER__?.report?.heldMotion === false,
   );
-  await page.waitForFunction(
-    (focusX) => globalThis.__MCLONE_WORLD_EXPLORER__?.report?.focusX > focusX,
-    touch.focusX,
-  );
+  assertHeldSamples(heldSamples, touch);
   await waitReady(page);
   const moved = await report(page);
   assertFixedReady(moved, "held keyboard movement");
-  assertHeldSamples(heldSamples, touch);
   console.log(`World Explorer ${label} browser smoke: held movement ready`);
   const movementCapture = `/tmp/mclone-world-explorer-web-${label}-movement.png`;
   await canvas.screenshot({ path: movementCapture });
