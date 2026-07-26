@@ -125,6 +125,21 @@ terrain and tree renderer in map, orthographic 3D, and perspective 3D modes.
 It is a separate executable with an enforced dependency firewall rather than
 a mode of the game client.
 
+The procedural horizon's orbit target uses the profile's fixed sea-level
+datum rather than sampling terrain directly beneath the moving view center.
+This keeps horizontal pan and movement vertically stable and avoids coupling
+camera placement to integer clipmap-center changes. Explicit terrain focus or
+ground-following behavior can be added later as a separate navigation action.
+Terrain Lab retains its local sampled focus behavior.
+
+The 2026-07-26 sea-level correction passed all 30 focused terrain-view tests,
+the native real-window and offscreen movement smoke, and local plus hosted
+headed-Wayland browser movement, negative-coordinate, and teleport smokes.
+Initial, moved, negative-coordinate, and teleported frames were visually
+coherent with consistent vertical framing. Production version
+`d852be90-066e-46a1-895f-9287964c0a45` serves Wasm SHA-256
+`5c6eb01f9ff5f66727e141e83418cc1e75f00777ea090baa833bea7d7d3d2af4`.
+
 The pinned release acceptance sequence rendered initial 3D, continuous X/Z/
 diagonal movement, anchored zoom, map, and orbit through both a real
 Wayland/Vulkan surface and an offscreen target. Corresponding captures were

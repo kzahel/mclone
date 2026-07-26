@@ -54,6 +54,10 @@ const TERRAIN_PREVIEW_SAMPLE_BYTES: u64 =
 const TERRAIN_PREVIEW_WORKGROUP_AXIS: u32 = 8;
 const TERRAIN_PREVIEW_DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth32Float;
 
+const fn terrain_horizon_orbit_target_y() -> f32 {
+    MCLONE_OVERWORLD_SEA_LEVEL as f32
+}
+
 pub fn terrain_preview_compute_wgsl() -> String {
     let spec = MCLONE_OVERWORLD_LARGE_FIELD_SPEC;
     let mut constants = String::new();
@@ -1204,6 +1208,14 @@ mod tests {
         assert_eq!(
             perspective.vertical_half_extent,
             overview.vertical_half_extent
+        );
+    }
+
+    #[test]
+    fn horizon_orbit_target_uses_the_profile_sea_level() {
+        assert_eq!(
+            terrain_horizon_orbit_target_y(),
+            MCLONE_OVERWORLD_SEA_LEVEL as f32
         );
     }
 
