@@ -174,6 +174,18 @@ Shift modifier; they do not independently choose pan/orbit semantics. Orbit
 grab-pan uses the camera's screen-horizontal and ground-forward axes, with
 both axes following the grabbed terrain under the pointer.
 
+A second 2026-07-26 follow-up passed all 18 focused view-control tests, four
+Explorer tests, the Wasm check, dependency firewall, native real-window and
+offscreen smoke, and local desktop plus mobile headed-Wayland smokes. The
+browser lane orbits first, holds Shift through a real primary-pointer drag,
+then proves yaw is unchanged and pointer-down motion follows the corrected
+ground-forward vector. The same assertion passed against production, where
+focus moved from `(-304, 336)` to `(-314.052, 380.970)` at fixed yaw. The
+inspected Shift-pan captures were coherent. Production Worker version
+`e4b531ca-ce1e-4c9a-afef-a6bb9a87d0a8` serves the byte-verified
+1,412,013-byte Explorer Wasm with SHA-256
+`0ecb1c4f18ad8953fdd2ee467148e348b9c99e5197e70b9b864bc3050c0551fc`.
+
 A 2026-07-26 follow-up locked the orbit basis at yaw zero and 90 degrees,
 cardinal map behavior, diagonal normalization, and 60/120-Hz equivalence.
 All 17 focused view-control tests and three Explorer tests passed, as did the
