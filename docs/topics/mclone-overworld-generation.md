@@ -1091,21 +1091,27 @@ evidence.
 
 Tactical
 [`259`](../tactical/259-modern-and-historical-coast-reference-survey.md)
-selected the concrete next terrain question. Alpha, Beta, Java 1.17.1, and
-Java 26.2 source evidence plus three equal current-Mclone field maps show that
-Mclone's sea-level Beach recipe is a structural coast limitation: 89.93%,
-90.18%, and 90.44% of sampled coast-adjacent land was Beach, while every
-remaining sample was a river/wetland recipe and none was Exposed Stone,
-Eroded Slope, or Grass/Soil. Receipt schema 14 now preserves that baseline.
+selected the concrete coast question and preserved the schema-14 baseline:
+89.93%, 90.18%, and 90.44% of sampled coast-adjacent land was Beach, while
+every remaining sample was a river/wetland recipe.
 
-The next implementation should add one cheap topology-aware coast intent with
-sandy depositional, gravel transitional, rocky/exposed, cold-response, and
-ordinary direct-water outcomes. Geometry and material remain separate; a
-broad alongshore selector may create coherent runs only where slope,
-ruggedness, substrate, shelf, climate, and outlet facts make the family
-suitable. It should add coast-specific maps and metrics rather than a generic
-composite review product, rerun Tactical 258's performance controls, and prove
-the exact plane/cylinder seam before the broader volumetric-geology campaign.
+Tactical
+[`260`](../tactical/260-mclone-coast-intent-and-shore-terrain.md) now has the
+first implementation candidate at Human Review 1. One cheap, periodic
+768-block field yields sandy depositional, gravel transitional,
+rocky/exposed, cold-response, and ordinary direct-water intent. Geometry and
+material are separate consumers. Provisional terrain receives bounded coast
+shaping before authoritative watercourse carving; final slope and exposure
+then choose grass-topped versus exposed rock faces.
+
+On the same three grids, sandy surfaces now account for roughly 11-31% of
+coast-adjacent land, and every seed has rocky and ordinary direct-water
+outcomes. Receipt schema 16, exact fingerprints, native CPU/GPU conformance,
+the exact 6,144-block cylinder seam, persistence reopen, and hydraulic closure
+all pass. The broad-field cost is measurable: roughly 11-13% on the large
+point control and 7-12% on preview controls. Human Review 1 should settle
+gravel breadth, cliff abruptness, sandy width, and family-transition
+crispness before the broader volumetric-geology campaign.
 The
 [`still-life-and-tectonic-reference.md`](still-life-and-tectonic-reference.md)
 study sharpens that direction: select mutually legible geology families

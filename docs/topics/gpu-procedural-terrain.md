@@ -192,9 +192,9 @@ The terrain compute pipeline now exists in
 [`mclone-terrain-view`](../../native/crates/mclone-terrain-view/). It:
 
 - accepts aligned 64-cell / 65-sample production-reference tiles;
-- evaluates the separately revisioned `mclone-overworld-v1-gpu-preview-a2`
-  `mclone-overworld-v1-gpu-preview-a3` production graph through
-  `base_surface_y` and macro surface material into GPU-resident storage;
+- evaluates the separately revisioned `mclone-overworld-v1-gpu-preview-a8`
+  production graph through provisional/coast/final surface height and macro
+  surface material into GPU-resident storage;
 - emulates the production unsigned 64-bit lattice hash with pairs of portable
   WGSL `u32` values and generates domain/scale constants from a shared Rust
   field specification;
@@ -211,6 +211,15 @@ The terrain compute pipeline now exists in
 - rejects obsolete queued work when the viewport epoch changes; and
 - performs bounded asynchronous readbacks aggregated over the complete target
   viewport for lab comparison.
+
+Tactical
+[`260`](../tactical/260-mclone-coast-intent-and-shore-terrain.md) ports the
+shared coast field, classifier, geometry, surface, biome, and landform
+semantics to that evaluator. Native WGPU comparison over 4,225 points has
+zero height error and complete discrete-channel agreement. The browser/Wasm
+build passes; the current headed Terrain Lab capture reached WebGPU but its
+validation-buffer map failed, so that attempt is not recorded as browser
+pixel proof.
 
 [`mclone-terrain-lab`](../../native/apps/mclone-terrain-lab/) owns the narrow
 browser surface/device facade and exact typed Worker payload. It now exposes a

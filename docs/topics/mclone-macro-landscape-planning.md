@@ -7,9 +7,9 @@ Overworld has useful independent terrain, climate, bathymetry, river,
 wetland, surface, and bounded-stream facts, but it does not yet have a
 holistic macro landscape plan that coordinates their topology, precedence,
 overlap, and downstream feature permissions. This topic owns that planning
-view. Tactical 259 has now grounded coastal character in Alpha, Beta, Java
-1.17.1, Java 26.2, and measured current Mclone evidence; coast implementation
-remains the next selected planning slice.**
+view. Tactical 259 grounded coastal character in Alpha, Beta, Java 1.17.1,
+Java 26.2, and measured current Mclone evidence. Tactical 260 now has the
+first shared coast implementation candidate at Human Review 1.**
 
 The motivating July 2026 visual review found four related regional-scale
 weaknesses:
@@ -361,16 +361,15 @@ matters.
 
 ### Coastlines
 
-Current Mclone beach selection is primarily an elevation band around sea
-level. Mountain strength also fades as continentalness approaches the coast.
-The combination produces two separate symptoms:
+The pre-Tactical-260 Mclone beach selection was primarily an elevation band
+around sea level. Mountain strength also faded as continentalness approached
+the coast. The combination produced two separate symptoms:
 
 1. the surface material becomes sand almost everywhere along the shore; and
 2. the terrain itself tends toward a low coastal shelf, so merely replacing
    sand would often produce grass rather than a rocky face.
 
-A future coast plan should classify a coherent alongshore family using some
-combination of:
+The first coast plan now classifies a coherent alongshore family using:
 
 - land slope and curvature approaching water;
 - coastal signed distance and shoreline orientation;
@@ -380,9 +379,10 @@ combination of:
 - climate and wetness; and
 - regional transition continuity.
 
-Sand should mean deposition on a suitable coast, not merely “top block near
-Y63.” Rocky, gravel, snowy, marsh, and sandy coasts need both material and
-geometry responses.
+Sand now means deposition on a suitable coast, not merely “top block near
+Y63.” Rocky, gravel, ordinary, and cold coasts have distinct material and
+geometry responses. Marsh and more specialized snowy/frozen morphology
+remain future families.
 
 #### Cross-era coast evidence and selected direction
 
@@ -411,6 +411,23 @@ coherent runs, but terrain, shelf, substrate, climate, and outlet suitability
 constrain its choices. The result should be one small shared semantic coast
 fact consumed separately by geometry, surface, review, and distant terrain.
 It does not require universal 3D noise or new persisted biome IDs.
+
+Tactical
+[`260`](../tactical/260-mclone-coast-intent-and-shore-terrain.md) implements
+that vocabulary as one 768-block, topology-aware field plus terrain
+constraints. Provisional height is adjusted before authoritative watercourse
+carving. Narrow depositional material, ordinary climate surfaces,
+grass-topped rock faces, and a cold modifier consume the shared fact
+separately. On the same three review grids, sandy surfaces now account for
+roughly 11-31% of coast-adjacent land instead of roughly 90%; every seed has
+rocky and ordinary direct-water outcomes.
+
+The added field costs roughly 11-13% on the large point-sampling control and
+7-12% on the 65k preview controls. Exact cold/warm generation remains near
+its prior medians. Native CPU/GPU conformance, exact 6,144-block periodicity,
+persistence reopen, and production pixels pass. Human Review 1 now owns the
+subjective decision about gravel breadth, cliff abruptness, sandy width, and
+transition crispness.
 
 ### River topology and terrain relation
 
@@ -955,7 +972,7 @@ none is inferred from CPU compile time.
 | raw macro fields | continentalness, relief, ruggedness, ridges, mountain detail, climate, bathymetry, water morphology | no unified classified landscape intent |
 | terrain | continuous heightfield with accepted mountain detail and derived slope/exposure | no explicit range, basin, pass, or terrain-corridor plan |
 | sampling/representation | cheap absolute-coordinate CPU/GPU heightfield preview, a fixed ten-level 131 km horizon, and normalized point receipts through roughly 500 km | no filtered spacing-2,048 review product or sparse volumetric near/far contract |
-| coast | land/ocean threshold, shelves, deep basins, sand beach recipe, schema-14 coast metrics, and a source-grounded first-family contract | no live coast classifier, geometry response, rocky direct-water outcome, or coherent alongshore transition |
+| coast | shared sandy/gravel/ordinary/rocky/cold intent; bounded geometry and distinct surfaces; schema-16 maps; exact CPU/GPU and periodic-seam evidence | first candidate awaits subjective scale/transition review; no marsh, frozen-ocean morphology, dunes, deltas, reefs, or sea caves |
 | major rivers | warped zero-contour corridor with width/depth/bank morphology and receiving-outlet correction | no persistent macro drainage topology, tributary hierarchy, or named major reaches |
 | streams | bounded 91-96-block valley-following source-to-river plan | one peaceful family, not a general network |
 | ponds/lakes | river-adjacent wetland pools and shared local lake mechanism | no closed-basin or spill-level plan |
@@ -987,10 +1004,13 @@ every row before shipping any smaller improvement.
 2. **Resolve coastal character**
    - Tactical 259 completed the cross-era survey, current three-seed baseline,
      and first bounded classifier contract;
-   - implement geometry separately from surface material;
-   - prove sandy, gravel, rocky, cold-response, and ordinary direct-water
-     outcomes with coherent transitions; and
-   - retain the plane/cylinder topology and Tactical 258 performance
+   - Tactical 260 implements geometry separately from surface material and
+     proves sandy, gravel, rocky, cold-response, and ordinary direct-water
+     outcomes;
+   - review its production atlas, especially gravel scale, cliff abruptness,
+     sand width, and family transitions;
+   - apply accepted tuning and close the warmed Human Review 2 candidate; and
+   - retain the proven plane/cylinder topology and Tactical 258 performance
      controls.
 3. **Select major-water topology**
    - compare hierarchical boundary, terrain-derived drainage, and hybrid

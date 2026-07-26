@@ -11,7 +11,8 @@ the first climate-driven implementation. Human Review 1 accepted its
 vocabulary but requested a broader steppe; the core/shoulder correction is
 complete and awaiting Human Review 2. Tactical 259 has since completed the
 cross-era coast survey and selected the first original-profile coast
-vocabulary; those families are planned, not yet live.
+vocabulary. Tactical 260 has implemented that candidate and is awaiting Human
+Review 1.
 
 ## Scope
 
@@ -111,7 +112,7 @@ decoration language but do not change terrain geometry.
 | temperate wooded upland | forest, wooded hills | sheltered moderate upland | oak woodland | `reviewed`, narrow palette |
 | rugged mountain and open shoulder | mountains, gravelly mountains, shattered savanna | ridges, ruggedness, slope, exposure | grass/stone response | `reviewed`, no alpine climate |
 | ocean, shelf, and deep basin | ocean and deep-ocean families | bathymetry and coast | gravel/sand, no aquatic vegetation | `reviewed`, one climate |
-| beach and shore | beach, stone shore, snowy beach | live sea-level band; planned slope/shelf/substrate coast intent | live sand only; planned sand/gravel/rock/cold response | `live`, one elevation-band family; reference survey complete |
+| beach and shore | beach, stone shore, snowy beach | shared coast intent plus bounded depositional/rocky geometry | sand, gravel, ordinary soil, grass-topped rock, and cold response | `candidate`, topology/performance proof complete; awaiting Human Review 1 |
 | major river and wetland | rivers, swamps, lakes | flat Y63 corridor, banks, pools | gravel, sand/grass banks, clay pools | `reviewed`, no climate variants |
 | peaceful spring-fed creek | springs and bounded water landmarks | 91-96-block planned valley stream | grassed shoulders, fixed-point drops | `reviewed` |
 | cool-wet conifer upland | taiga, taiga hills | temperature + moisture + landform | spruce/pine, ferns, berries | `live`, vocabulary accepted in Human Review 1 |
@@ -292,13 +293,15 @@ review product. Within the breadth ledger, retain this content order:
 
 1. Complete Human Review 2 for Tactical 223's bounded steppe-scale
    correction.
-2. Implement the first topology-aware coast intent:
-   - prove sandy depositional, gravel transitional, rocky/exposed, cold
-     response, and ordinary direct-water outcomes;
-   - keep geometry separate from surface material;
-   - preserve river and stream outlets; and
-   - inspect ordinary and seam-crossing plane/cylinder pixels before
-     decoration.
+2. Review and close the first topology-aware coast intent:
+   - Tactical 260 now proves sandy depositional, gravel transitional,
+     rocky/exposed, cold response, and ordinary direct-water outcomes;
+   - geometry remains separate from surface material and rivers retain
+     authority;
+   - Human Review 1 should judge gravel scale, rocky abruptness, sand width,
+     and transition crispness; and
+   - apply accepted tuning, rerun the bounded controls, and close Human
+     Review 2.
 3. Add the first 3D-geology tactical before broad caves:
    - baseline and map the current heightfield limitation;
    - derive a small semantic formation-intent selector from existing macro,

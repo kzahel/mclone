@@ -1,6 +1,6 @@
 # Tactical 260: Mclone Coast Intent And Shore Terrain
 
-Status: active 2026-07-26.
+Status: implementation candidate complete 2026-07-26; awaiting Human Review 1.
 
 Topics:
 
@@ -71,46 +71,46 @@ consumers of one reconstructible semantic fact.
 - [x] Define a small public coast family/sample with proximity, selector,
   suitability, transition, and cold-response facts.
 - [x] Keep classification deterministic, point-sampled, and primarily 2D.
-- [ ] Preserve accepted river and planned-stream outlet authority.
+- [x] Preserve accepted river and planned-stream outlet authority.
 - [x] Add focused family, transition, and exact periodic-seam tests.
 - [x] Extend production receipts/maps with family coverage and direct-water
   facts.
 
 ### Slice 2: geometry and surface realization
 
-- [ ] Evaluate provisional terrain, coast intent, final coast geometry, then
+- [x] Evaluate provisional terrain, coast intent, final coast geometry, then
   final slope/exposure without cyclic queries.
-- [ ] Give rocky intent enough bounded near-shore relief to create genuine
+- [x] Give rocky intent enough bounded near-shore relief to create genuine
   water-facing terrain instead of a stone-colored beach.
-- [ ] Keep sandy shaping low and depositional; keep gravel intermediate.
-- [ ] Allow ordinary grass/soil terrain directly at water.
-- [ ] Add sand/sandstone, gravel/stone, rock, ordinary, and cold surface
+- [x] Keep sandy shaping low and depositional; keep gravel intermediate.
+- [x] Allow ordinary grass/soil terrain directly at water.
+- [x] Add sand/sandstone, gravel/stone, rock, ordinary, and cold surface
   responses while preserving watercourse precedence.
-- [ ] Bump the internal-mutable Mclone field/fingerprint evidence.
+- [x] Bump the internal-mutable Mclone field/fingerprint evidence.
 
 ### Slice 3: preview and topology parity
 
-- [ ] Carry the shared intent through CPU preview material/height semantics.
-- [ ] Port the same field, classifier, geometry, and material semantics to the
+- [x] Carry the shared intent through CPU preview material/height semantics.
+- [x] Port the same field, classifier, geometry, and material semantics to the
   GPU preview evaluator.
-- [ ] Update Worldgen Lens and review colors/labels.
-- [ ] Prove exact CPU/GPU comparison, plane behavior, and the exact
+- [x] Update Worldgen Lens and review colors/labels.
+- [x] Prove exact CPU/GPU comparison, plane behavior, and the exact
   6,144-block / 384-chunk-X seam.
-- [ ] Prove partition/order output and persistence reopen with the revised
+- [x] Prove partition/order output and persistence reopen with the revised
   internal profile.
 
 ### Slice 4: measured and visual candidate
 
-- [ ] Compare schema-14/15 coast measurements on seeds `12345`, `8675309`,
+- [x] Compare schema-14/16 coast measurements on seeds `12345`, `8675309`,
   and `-98765` at the same 6,144-block, spacing-eight grids.
-- [ ] Record coast-family coverage, coherent run length, depositional width,
+- [x] Record coast-family coverage, coherent run length, depositional width,
   and rocky/ordinary direct-water adjacency.
-- [ ] Rerun Tactical 258's point, preview, exact, and World Explorer
+- [x] Rerun Tactical 258's point, preview, exact, and World Explorer
   performance controls.
-- [ ] Inspect first-drawable and final warmed pixels before presenting them.
-- [ ] Capture a compact review atlas covering ordinary, sandy, gravel, rocky,
+- [x] Inspect first-drawable and final warmed pixels before presenting them.
+- [x] Capture a compact review atlas covering ordinary, sandy, gravel, rocky,
   outlet, positive/negative-seed, and cylinder-seam cases.
-- [ ] Pause for Human Review 1.
+- [x] Pause for Human Review 1.
 
 ### Slice 5: response and closeout
 
@@ -168,6 +168,128 @@ The inspected maps show broad coherent selector regions cut by the irregular
 shoreline rather than sample-scale family chatter. Surface recipes remain at
 their schema-14 baseline in this checkpoint, proving the semantic change is
 independently measurable before geometry/material realization.
+
+### Geometry and surface candidate
+
+Field revision 18 now evaluates:
+
+1. the former land height as a provisional surface;
+2. the shared coast intent and its bounded coast-height response;
+3. authoritative watercourse carving; and
+4. final slope, exposure, biome, and surface selection.
+
+This order avoids cyclic terrain queries and keeps an accepted river or
+planned stream authoritative over coast shaping. Sandy intent remains a low
+depositional response. Gravel may add zero to two blocks. Rocky intent may
+add up to 22 blocks near water; grass remains on sufficiently flat shoulders
+while steep faces expose stone. Ordinary terrain falls through to its climate
+surface at water. Cold is a modifier over the narrow depositional coast, not
+a claim that frozen-ocean morphology is complete.
+
+Sand, gravel, and cold shore material use the narrow high-proximity part of
+the shared intent. Rocky geometry may operate farther inland so a headland
+has a silhouette rather than a stone-colored beach. Watercourse surface
+recipes retain precedence over every coast recipe.
+
+### Equal-grid measurements
+
+Receipt schema 16 adds provisional/base/final surfaces, coast geometry delta,
+coast families, and the distinct surface outcomes. The same 769-by-769,
+spacing-eight maps used by Tactical 259 produced:
+
+| Seed | Sandy surface | Gravel surface | Rocky surface | Cold surface | Grass/soil | River |
+|---:|---:|---:|---:|---:|---:|---:|
+| `12345` | 779 | 622 | 311 | 188 | 477 | 252 |
+| `8675309` | 1,139 | 803 | 415 | 422 | 565 | 355 |
+| `-98765` | 239 | 284 | 586 | 129 | 751 | 203 |
+
+The sandy share of sampled coast-adjacent land is now approximately 30%,
+31%, and 11%, respectively, rather than 89.93-90.44%. Rocky and ordinary
+direct-water results are nonzero on every grid. Inspected family maps retain
+broad regional runs rather than sample-scale checkerboards.
+
+Sandy surface distance from water has seedwise p50 values of 40-48 blocks,
+p90 values of 72-128 blocks, and maxima of 112-272 blocks. Those are
+horizontal sample distances across irregular coves and spits, not a claim of
+physical beach width normal to the shore. Coast geometry deltas remain
+between zero and 22 blocks. Maximum sampled coast height is 86-87; p90 is
+67-75. All three receipts retain hydraulic closure.
+
+### Performance controls
+
+Release measurements use five iterations after one warmup and compare the
+current candidate with the recorded same-host Tactical 258 baseline. Because
+other horizon work landed between the baseline and this tactical, the deltas
+bound the current total change; they do not isolate every millisecond to the
+coast field.
+
+| Lane | Tactical 258 | Candidate | Change |
+|---|---:|---:|---:|
+| plane regional 65k points | 3.229 ms | 4.066 ms | +26.0% |
+| plane roughly-500k medium points | 97.892 ms | 110.403 ms | +12.8% |
+| plane 65k base preview | 1.948 ms | 2.176 ms | +11.7% |
+| plane 65k surface preview | 1.904 ms | 2.139 ms | +12.3% |
+| cylinder regional 65k points | 4.277 ms | 4.371 ms | +2.2% |
+| cylinder roughly-500k medium points | 111.483 ms | 123.862 ms | +11.1% |
+| cylinder 65k base preview | 2.145 ms | 2.304 ms | +7.4% |
+| cylinder 65k surface preview | 2.107 ms | 2.266 ms | +7.5% |
+
+The one added broad field is therefore visible but remains a bounded
+ordinary-path cost: roughly 11-13% on the large point workload and 7-12% on
+the preview workloads. The small plane lane is more sensitive to fixed cost
+and host noise and raised the largest alarm. Repeated exact cold/warm medians
+remained within roughly 8% of Tactical 258; no exact-generation regression
+was inferred from one cold-process outlier.
+
+The fixed-budget World Explorer control completed both native-window and
+offscreen sessions with 160 ready slots and zero pending work. Offscreen
+first-coarse/target times were 42.070/488.932 ms, close to the recorded
+34.176/484.793 ms. Native process first-coarse/target times were
+1,188.197/1,677.934 ms versus 123.906/394.627 ms, but that longitudinal lane
+also includes the subsequently added vegetation pipeline and shader
+construction and cannot attribute the increase to coasts. Movement remained
+bounded at 2.795 ms mean / 4.670 ms p95 native and 2.607 / 4.044 ms
+offscreen. All six completed-frame native captures were inspected and had
+continuous terrain.
+
+### Topology, persistence, and preview evidence
+
+- Exact plane and cylinder field, slope, feature-realization, partition, and
+  fingerprint tests pass with the revised internal profile.
+- The exact 6,144-block cylinder period is continuous at chunk X zero; a
+  production card centered on that seam shows no coast-family or material
+  break.
+- SQLite reopen tests preserve ordinary Mclone terrain and the periodic seam,
+  including edits, after restart.
+- The native WGPU conformance test compared 4,225 points. Base, final, and
+  displayed heights had zero maximum error; water, ocean, material, channel,
+  landform, biome, and surface-recipe agreement were all 1.0.
+- The browser/Wasm build passes. Two headed-Wayland Terrain Lab capture
+  attempts reached WebGPU but failed asynchronous validation-buffer mapping,
+  so their blank panes are not claimed as pixel evidence. Native production
+  pixels and native WGPU compute are the review evidence for this gate.
+- The complete `mclone-worldgen` library suite passes: 369 passed and one
+  ignored. Focused scene, server, persistence, hydraulic-closure, and terrain
+  view suites also pass.
+
+### Human Review 1 candidate
+
+The inspected production atlas is
+`/tmp/mclone-coast-human-review-1.png`. It contains:
+
+- a bounded sandy cove/reach rather than a universal collar;
+- a broad gravel patch whose scale and plainness need subjective judgment;
+- ordinary grass/soil entering the ocean beside a major-river outlet;
+- a green rocky headland with exposed water-facing stone;
+- a dramatic negative-seed grass-topped cliff whose long face may read too
+  straight or abrupt;
+- a bounded cold shore with green/conifer terrain inland; and
+- the cylinder seam centered in an ordinary/cold coast with no visible
+  break.
+
+This is intentionally the pause point. In particular, Human Review 1 should
+decide gravel breadth/plainness, rocky cliff abruptness, sandy width and
+family-transition crispness before any fine tuning is accepted.
 
 ## Human Review Gates
 
