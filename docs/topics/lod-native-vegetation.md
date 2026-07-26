@@ -11,8 +11,10 @@ chunk/fragment mask is not a valid exact/LOD tree handoff. One stable natural
 tree can appear as exact block geometry partly hidden by retained procedural
 collar terrain plus the outside fragments of its own LOD proxy. Tactical
 [`262`](../tactical/262-world-explorer-exact-procedural-composition.md)
-Slice 3A now owns the focused correction: separable exact natural-tree
-admission and one complete stable-ID representation selected from the
+Slice 3A now owns the focused correction. It first adds a small neutral
+bounded-representation ownership envelope, then uses the stable tree record
+as its first feature-specific unit. Exact natural-tree admission remains
+separable and one complete stable-ID representation is selected from the
 record's full bounds and the actual exact-safe terrain interior. Browser and
 game-scene promotion wait for Human Review 1A.
 
@@ -898,19 +900,28 @@ Tactical
 Slice 3A owns the reusable untouched-natural-tree proof before browser or
 game-scene promotion.
 
-1. publish source-, coverage-generation-, stable-ID-, and bounds-aware
-   vegetation ownership;
-2. separate exact natural-tree draws from exact terrain draws;
-3. classify against the actual exact-safe interior, including the procedural
+1. publish a neutral source-, generation-, stable-unit-, bounds-, readiness-,
+   and owner-aware bounded-representation snapshot;
+2. adapt stable tree occurrences to that envelope without creating a
+   universal natural-feature payload enum;
+3. separate exact natural-tree draws from exact terrain draws;
+4. classify against the actual exact-safe interior, including the procedural
    collar;
-4. admit or suppress complete exact/proxy records rather than fragments;
-5. prove exactly one visible representation during delayed admission,
+5. admit or suppress complete exact/proxy records rather than fragments;
+6. prove exactly one visible representation during delayed admission,
    eviction, movement, negative coordinates, teleport, and source reset; and
-6. repeat the reviewed forest boundary in native window/offscreen captures
+7. repeat the reviewed forest boundary in native window/offscreen captures
    before Human Review 1A.
 
 Authoritative edits, production-scene invalidation, multiworld lifecycle, and
 all-target promotion remain later parent phases.
+
+The neutral envelope is deliberately smaller than a `NaturalFeatureRecord`
+system. Trees retain `McloneTreeRecord`; future boulders, structure pieces,
+and route segments may reuse only identity, bounds, readiness, and atomic
+owner selection after their concrete needs exist. Forest summaries, grass,
+dynamic entities, and arbitrary player builds remain separate representation
+and authority families.
 
 ### Later generalization
 

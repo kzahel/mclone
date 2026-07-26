@@ -335,12 +335,19 @@ Tactical
 Composition Proof** through its first native review.
 
 The terrain compositor and collar passed that review overall. The next work
-is Tactical 262 Slice 3A: make exact natural-tree geometry and its stable
-record-derived proxy one whole-record XOR decision against the actual
+is Tactical 262 Slice 3A: add a small neutral bounded-representation
+ownership envelope, then make exact natural-tree geometry and its stable
+record-derived proxy the first whole-unit XOR decision against the actual
 exact-safe terrain interior. The current exact tree is admitted wholesale,
 the procedural collar can depth-occlude it, and the proxy is clipped by
 fragment position. That combination can show pieces of both representations
 for one logical tree.
+
+Do not turn this correction into a universal natural-feature record or
+renderer. The reusable facts are source, stable ownership-unit ID,
+conservative bounds, readiness, generation, and selected owner. Trees retain
+their own record and render payload. Later bounded structures or route pieces
+may adapt different ownership units after their concrete needs are known.
 
 After the same forest anchors pass Human Review 1A, Tactical 262 may continue
 with the browser proof and optional Terrain Lab adoption. A separate child

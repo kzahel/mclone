@@ -148,15 +148,34 @@ where exact and approximate heights can disagree. The implementation must
 name and diagnose that treatment rather than hiding cracks with accidental
 overdraw.
 
-### Natural-tree ownership uses complete bounds
+### Bounded representation ownership, with trees first
 
-Terrain coverage and natural-tree ownership are related but are not the same
-mask. A stable tree may cross chunk edges and may intersect the procedural
-collar even when its base chunk is exact-painted.
+The reusable substrate is a small bounded-representation ownership envelope,
+not a universal natural-feature payload or renderer. An ownership unit
+carries:
+
+- composition source identity;
+- a feature-family-specific stable unit ID;
+- complete conservative working bounds;
+- exact and approximate drawable readiness;
+- the selected owner and ownership generation; and
+- enough diagnostics to prove exactly one visible representation.
+
+Each feature family chooses its useful ownership unit and retains its own
+planner, payload, compiler, and renderer. A tree uses one stable tree record.
+A later route may use a segment, while a large structure may use a bounded
+piece. Aggregate fields and dynamic entities do not become fake bounded
+features merely to reuse this contract.
+
+Trees are the first adapter because they already have stable IDs, exact
+realization, proxy presentation, and conservative bounds. Terrain coverage
+and tree ownership are related but are not the same mask. A tree may cross
+chunk edges and may intersect the procedural collar even when its base chunk
+is exact-painted.
 
 An exact natural tree is eligible only when:
 
-- its stable source and tree ID match the current composition source;
+- its stable source and occurrence ID match the current composition source;
 - its complete conservative working bounds lie inside the exact-safe terrain
   interior, excluding every procedural collar fragment;
 - every exact tree draw resource for the record is drawable now; and
@@ -338,8 +357,12 @@ natural-tree XOR primitive moves forward into this proof.
 
 ### Slice 3A: whole-tree frontier arbitration
 
-- [ ] Add a renderer-neutral vegetation-ownership snapshot keyed by source,
-  terrain coverage generation, stable tree ID, and complete working bounds.
+- [ ] Add a renderer-neutral bounded-representation ownership snapshot keyed
+  by source, ownership generation, stable unit ID, complete working bounds,
+  exact/approximate readiness, and selected owner.
+- [ ] Add the first tree adapter keyed by stable occurrence ID, terrain
+  coverage generation, and `McloneTreeRecord` working bounds without putting
+  tree payload or rendering policy in the neutral envelope.
 - [ ] Separate exact natural-tree draw admission from exact terrain
   admission without changing terrain, low-vegetation, or reference-profile
   semantics.
