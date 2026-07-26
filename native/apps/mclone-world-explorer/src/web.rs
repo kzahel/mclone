@@ -34,6 +34,7 @@ struct WebExplorerOptions {
     projection: WorldViewProjection,
     yaw_radians: f64,
     pitch_radians: f64,
+    diagnostic_observer_enabled: bool,
 }
 
 impl Default for WebExplorerOptions {
@@ -47,6 +48,7 @@ impl Default for WebExplorerOptions {
             projection: WorldViewProjection::Perspective,
             yaw_radians: std::f64::consts::FRAC_PI_4,
             pitch_radians: 0.52,
+            diagnostic_observer_enabled: false,
         }
     }
 }
@@ -63,6 +65,8 @@ impl WebExplorerOptions {
             parse_parameter(&parameters, "blocksAcross", options.blocks_across)?;
         options.yaw_radians = parse_parameter(&parameters, "yaw", options.yaw_radians)?;
         options.pitch_radians = parse_parameter(&parameters, "pitch", options.pitch_radians)?;
+        options.diagnostic_observer_enabled =
+            parameters.get("smokeObserver").as_deref() == Some("1");
         if let Some(value) = parameters.get("view") {
             options.mode = match value.as_str() {
                 "map" | "2d" => WorldViewMode::Map,
@@ -148,6 +152,8 @@ pub struct WebWorldExplorer {
     seed: i64,
     frame_epoch_ms: Option<f64>,
     session: WorldExplorerSession,
+    diagnostic_observer_enabled: bool,
+    last_diagnostic_report: Option<WebExplorerReport>,
 }
 
 #[wasm_bindgen(js_class = WebWorldExplorer)]
@@ -176,7 +182,7 @@ impl WebWorldExplorer {
     }
 
     #[wasm_bindgen(js_name = renderFrame)]
-    pub fn render_frame(&mut self, frame_millis: f64) -> Result<String, JsValue> {
+    pub fn render_frame(&mut self, frame_millis: f64) -> Result<(), JsValue> {
         let frame_millis = if frame_millis.is_finite() {
             frame_millis.max(0.0)
         } else {
@@ -208,14 +214,33 @@ impl WebWorldExplorer {
                 elapsed,
             )
             .map_err(js_error)?;
+        if self.diagnostic_observer_enabled {
+            self.last_diagnostic_report = Some(explorer_report(
+                self.seed,
+                self.session.view_state(),
+                self.session.has_held_motion(),
+                stats,
+            ));
+        }
         self.queue.submit(std::iter::once(encoder.finish()));
         frame.present();
-        report_json(
-            self.seed,
-            self.session.view_state(),
-            self.session.has_held_motion(),
-            stats,
-        )
+        Ok(())
+    }
+
+    /// Rich semantic state for the explicit smoke observer.
+    ///
+    /// Ordinary browser cadence does not consume or return this projection.
+    #[wasm_bindgen(js_name = diagnosticSnapshot)]
+    pub fn diagnostic_snapshot(&self) -> Result<String, JsValue> {
+        if !self.diagnostic_observer_enabled {
+            return Err(js_error(
+                "World Explorer diagnostic observer was not requested",
+            ));
+        }
+        let report = self.last_diagnostic_report.as_ref().ok_or_else(|| {
+            js_error("World Explorer diagnostic snapshot requested before the first frame")
+        })?;
+        report_json(report)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -334,13 +359,14 @@ impl WebWorldExplorer {
         recognized
     }
 
-    pub fn recenter(&mut self, world_x: f64, world_z: f64) -> bool {
-        self.session
-            .apply_intent(WorldViewIntent::FocusAt { world_x, world_z })
-    }
-
-    pub fn diagnostics(&self) -> String {
-        self.session.diagnostics()
+    #[wasm_bindgen(js_name = recenterForSmoke)]
+    pub fn recenter_for_smoke(&mut self, world_x: f64, world_z: f64) -> Result<bool, JsValue> {
+        if !self.diagnostic_observer_enabled {
+            return Err(js_error("World Explorer smoke commands were not requested"));
+        }
+        Ok(self
+            .session
+            .apply_intent(WorldViewIntent::FocusAt { world_x, world_z }))
     }
 }
 
@@ -455,6 +481,8 @@ impl WebWorldExplorer {
             seed: options.seed,
             frame_epoch_ms: None,
             session,
+            diagnostic_observer_enabled: options.diagnostic_observer_enabled,
+            last_diagnostic_report: None,
         })
     }
 }
@@ -521,13 +549,13 @@ fn load_web_assets(
     .map_err(|error| format!("failed to prepare World Explorer browser materials: {error}"))
 }
 
-fn report_json(
+fn explorer_report(
     seed: i64,
     state: WorldViewState,
     held_motion: bool,
     stats: TerrainHorizonFrameStats,
-) -> Result<String, JsValue> {
-    serde_json::to_string(&WebExplorerReport {
+) -> WebExplorerReport {
+    WebExplorerReport {
         revision: stats.revision,
         seed: seed.to_string(),
         center_x: state.center_x_i32(),
@@ -568,8 +596,11 @@ fn report_json(
         target_ready: stats.target_ready,
         needs_redraw: stats.needs_redraw,
         held_motion,
-    })
-    .map_err(|error| {
+    }
+}
+
+fn report_json(report: &WebExplorerReport) -> Result<String, JsValue> {
+    serde_json::to_string(report).map_err(|error| {
         js_error(format!(
             "failed to serialize World Explorer report: {error}"
         ))

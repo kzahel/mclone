@@ -26,7 +26,7 @@ The later hardening direction is a bounded sample halo plus explicit
 requested/staged/committed level admission, not a larger unbounded dispatch
 spike.
 Side-by-side native/browser review also found three proof-host parity gaps.
-Proposed parent Tactical
+Active parent Tactical
 [`253`](../tactical/253-world-explorer-cross-host-parity.md) sequences their
 independent corrections. Tactical
 [`255`](../tactical/255-world-explorer-color-output-parity.md) makes the
@@ -34,9 +34,9 @@ selected dark terrain appearance independent of surface format, and Tactical
 [`256`](../tactical/256-shared-horizon-vegetation-worker-topology.md) replaces
 native synchronous/browser-disabled tree compilation with one shared
 coordinator over native-thread and browser-Worker executors. UI-less host
-cleanup remains owned by Tactical
-[`254`](../tactical/254-ui-less-world-explorer-host.md) and the platform-host
-topic rather than terrain rendering.
+cleanup completed in Tactical
+[`254`](../tactical/254-ui-less-world-explorer-host.md) and remains owned by
+the platform-host topic rather than terrain rendering.
 
 ## Scope
 

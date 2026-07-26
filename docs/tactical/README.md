@@ -74,12 +74,13 @@ diagnosed tile-normal seams and one-frame coarse fallback at aligned
 multi-level origin changes. It is proposed and intentionally defers runtime
 changes until the clipmap hardening slice resumes.
 Tactical
-[`253`](253-world-explorer-cross-host-parity.md) is the proposed parent for
-closing the Explorer's native/browser presentation gap. Focused children
-[`254`](254-ui-less-world-explorer-host.md),
-[`255`](255-world-explorer-color-output-parity.md), and
+[`253`](253-world-explorer-cross-host-parity.md) is the active parent for
+closing the Explorer's native/browser presentation gap. Tactical
+[`254`](254-ui-less-world-explorer-host.md) completed the UI-less browser host
+and query-gated Rust diagnostic observer on 2026-07-26. Focused children
+[`255`](255-world-explorer-color-output-parity.md) and
 [`256`](256-shared-horizon-vegetation-worker-topology.md) separately own the
-UI-less host, dark color-output parity, and shared threaded/Worker vegetation
+remaining dark color-output parity and shared threaded/Worker vegetation
 topology.
 Historical render-worker architecture remains in
 [`067-shared-render-worker-architecture.md`](067-shared-render-worker-architecture.md),
@@ -343,7 +344,7 @@ with the parent thread/Web-Worker topology in
 | [`250-continuous-explorer-presentation-and-cadence.md`](250-continuous-explorer-presentation-and-cadence.md) | completed and deployed 2026-07-26 | Separated continuous camera presentation from snapped clipmap residency, unified time-based held navigation across native/browser Explorer hosts, and retained lightweight platform-owned frame loops. |
 | [`251-lod-surface-appearance-quality.md`](251-lod-surface-appearance-quality.md) | complete 2026-07-26 | Added permanent Basic and measured-default Inferred LOD surface qualities, reference grass tint, shared material colors, builder-noise and zero-sample steep-face inference, with footprint sampling explicitly deferred. |
 | [`252-procedural-horizon-seams-and-transition-admission.md`](252-procedural-horizon-seams-and-transition-admission.md) | proposed; diagnosed and deferred 2026-07-26 | Records tile-local edge-normal seams and premature origin exposure at aligned multi-level crossings, with halo-normal and requested/committed admission directions for later implementation. |
-| [`253-world-explorer-cross-host-parity.md`](253-world-explorer-cross-host-parity.md) | proposed parent | Sequences UI-less host cleanup, dark color-output parity, and shared vegetation execution without combining their implementation concerns. |
-| [`254-ui-less-world-explorer-host.md`](254-ui-less-world-explorer-host.md) | proposed | Removes ordinary HTML/CSS runtime diagnostics, retains only generic startup/fatal fallback, and isolates Rust-authored smoke observations. |
+| [`253-world-explorer-cross-host-parity.md`](253-world-explorer-cross-host-parity.md) | active parent; 254 complete | Sequences UI-less host cleanup, dark color-output parity, and shared vegetation execution without combining their implementation concerns. |
+| [`254-ui-less-world-explorer-host.md`](254-ui-less-world-explorer-host.md) | complete 2026-07-26 | Removed ordinary HTML/CSS runtime diagnostics, retained only generic startup/fatal fallback, and isolated coherent Rust-authored smoke observations. |
 | [`255-world-explorer-color-output-parity.md`](255-world-explorer-color-output-parity.md) | proposed | Makes the darker browser appearance an explicit target-independent output contract and compensates sRGB targets. |
 | [`256-shared-horizon-vegetation-worker-topology.md`](256-shared-horizon-vegetation-worker-topology.md) | proposed; architecture checkpoint required | Moves tree compilation out of frame encoding behind one shared coordinator with native-thread and browser-Worker executors. |

@@ -52,8 +52,8 @@ body,
   backdrop-filter: blur(0.3rem);
 }
 
-#world-explorer-shell[data-ready="true"] #world-explorer-status {
-  color: #b8d9d4;
+#world-explorer-status[hidden] {
+  display: none;
 }
 
 #world-explorer-shell[data-failed="true"] #world-explorer-status {

@@ -1,6 +1,7 @@
 # Tactical 253: World Explorer Cross-Host Parity
 
-Status: proposed parent; implementation belongs to Tacticals 254–256.
+Status: active parent; Tactical 254 completed 2026-07-26, with implementation
+continuing in Tacticals 255–256.
 
 Topics:
 
@@ -70,6 +71,16 @@ topology, reusing the project's established opaque Worker and external
 Tacticals 254 and 255 may complete before 256's architecture checkpoint.
 Exact/procedural composition should not treat the current browser omissions as
 an acceptable baseline.
+
+## Progress
+
+Tactical [`254`](254-ui-less-world-explorer-host.md) completed on 2026-07-26.
+The ordinary browser host now presents only the terrain canvas after startup,
+returns no semantic frame report, and installs no diagnostic global. An
+explicit query-gated smoke observer reads coherent Rust-authored frame
+snapshots, while desktop/mobile headed-browser and native/offscreen captures
+prove unobstructed terrain. Tactical
+[`255`](255-world-explorer-color-output-parity.md) is the next bounded child.
 
 ## Campaign Acceptance
 

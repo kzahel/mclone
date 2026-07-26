@@ -47,6 +47,9 @@ try {
       ? { ...devices["Pixel 7"], isMobile: true }
       : { viewport: { width: 1280, height: 720 }, deviceScaleFactor: 1 },
   );
+  const baseUrl = externalBaseUrl ?? `http://127.0.0.1:${port}/`;
+  const targetUrl = worldExplorerUrl(baseUrl);
+  await assertOrdinaryPageHasNoObserver(context, targetUrl);
   page = await context.newPage();
   page.on("pageerror", (error) => pageErrors.push(error.message));
   page.on("console", (message) => {
@@ -54,19 +57,18 @@ try {
       pageErrors.push(message.text());
     }
   });
-  const baseUrl = externalBaseUrl ?? `http://127.0.0.1:${port}/`;
-  const targetUrl = new URL(
-    "?seed=12345&centerX=-304&centerZ=336"
-      + "&blocksAcross=4096&view=3d&projection=perspective",
-    baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`,
-  );
+  targetUrl.searchParams.set("smokeObserver", "1");
   await page.goto(
     targetUrl.href,
     { waitUntil: "networkidle" },
   );
   const shell = page.locator("#world-explorer-shell");
   await shell.waitFor({ state: "visible" });
+  await page.waitForFunction(
+    () => globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__?.observer,
+  );
   await waitReady(page);
+  await assertTerrainOnlySurface(page);
   const initial = await report(page);
   assertFixedReady(initial, "initial");
   console.log(`World Explorer ${label} browser smoke: initial ready`);
@@ -88,7 +90,9 @@ try {
   );
   await page.mouse.up();
   await page.waitForFunction(
-    (yaw) => globalThis.__MCLONE_WORLD_EXPLORER__?.report?.yawRadians !== yaw,
+    (yaw) => (
+      globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__?.observer.snapshot().yawRadians !== yaw
+    ),
     initial.yawRadians,
   );
   const gesture = await report(page);
@@ -107,7 +111,8 @@ try {
   await page.keyboard.up("Shift");
   await page.waitForFunction(
     ([focusX, focusZ]) => {
-      const report = globalThis.__MCLONE_WORLD_EXPLORER__?.report;
+      const report =
+        globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__?.observer.snapshot();
       return Math.abs(report?.focusX - focusX) > 0.001
         || Math.abs(report?.focusZ - focusZ) > 0.001;
     },
@@ -124,7 +129,8 @@ try {
   await twoContactStrafe(context, page, bounds);
   await page.waitForFunction(
     ([focusX, focusZ]) => {
-      const report = globalThis.__MCLONE_WORLD_EXPLORER__?.report;
+      const report =
+        globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__?.observer.snapshot();
       return Math.abs(report?.focusX - focusX) > 0.001
         || Math.abs(report?.focusZ - focusZ) > 0.001;
     },
@@ -145,13 +151,17 @@ try {
   const heldSamples = [];
   await page.keyboard.down("ArrowRight");
   await page.waitForFunction(
-    () => globalThis.__MCLONE_WORLD_EXPLORER__?.report?.heldMotion === true,
+    () => (
+      globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__?.observer.snapshot().heldMotion === true
+    ),
   );
   let heldFrame = await runtimeSnapshot(page);
   heldSamples.push(heldFrame.report);
   for (let sample = 0; sample < 4; sample += 1) {
     await page.waitForFunction(
-      (frame) => globalThis.__MCLONE_WORLD_EXPLORER__?.frame > frame,
+      (frame) => (
+        globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__?.observer.frame() > frame
+      ),
       heldFrame.frame,
     );
     heldFrame = await runtimeSnapshot(page);
@@ -159,7 +169,9 @@ try {
   }
   await page.keyboard.up("ArrowRight");
   await page.waitForFunction(
-    () => globalThis.__MCLONE_WORLD_EXPLORER__?.report?.heldMotion === false,
+    () => (
+      globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__?.observer.snapshot().heldMotion === false
+    ),
   );
   assertHeldSamples(heldSamples, touch);
   await waitReady(page);
@@ -170,7 +182,7 @@ try {
   await canvas.screenshot({ path: movementCapture });
 
   await page.evaluate(() => {
-    globalThis.__MCLONE_WORLD_EXPLORER__.session.recenter(-8193, -4097);
+    globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__.commands.recenter(-8193, -4097);
   });
   await waitForCenter(page, -8193, -4097);
   await waitReady(page);
@@ -180,7 +192,7 @@ try {
 
   const rebasesBefore = negative.totalRebases;
   await page.evaluate(() => {
-    globalThis.__MCLONE_WORLD_EXPLORER__.session.recenter(1000000, -1000000);
+    globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__.commands.recenter(1000000, -1000000);
   });
   await waitForCenter(page, 1000000, -1000000);
   await waitReady(page);
@@ -226,7 +238,8 @@ try {
   console.log(JSON.stringify({ receipt: receiptPath, ...receipt }, null, 2));
 } catch (error) {
   const runtime = await page?.evaluate(() => ({
-    report: globalThis.__MCLONE_WORLD_EXPLORER__?.report ?? null,
+    report:
+      globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__?.observer.snapshot() ?? null,
     status: document.getElementById("world-explorer-status")?.textContent ?? "",
   })).catch(() => null);
   const failureCapture = `/tmp/mclone-world-explorer-web-${label}-failure.png`;
@@ -244,7 +257,8 @@ try {
 
 async function waitReady(page) {
   await page.waitForFunction(() => {
-    const report = globalThis.__MCLONE_WORLD_EXPLORER__?.report;
+    const report =
+      globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__?.observer.snapshot();
     return report?.targetReady === true
       && report?.pendingRefills === 0
       && report?.readySlots === report?.allocationSlots;
@@ -254,7 +268,8 @@ async function waitReady(page) {
 async function waitForCenter(page, x, z) {
   await page.waitForFunction(
     ([expectedX, expectedZ]) => {
-      const report = globalThis.__MCLONE_WORLD_EXPLORER__?.report;
+      const report =
+        globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__?.observer.snapshot();
       return report?.centerX === expectedX && report?.centerZ === expectedZ;
     },
     [x, z],
@@ -263,18 +278,63 @@ async function waitForCenter(page, x, z) {
 }
 
 async function report(page) {
-  return await page.evaluate(() => ({
-    ...globalThis.__MCLONE_WORLD_EXPLORER__.report,
-  }));
+  return await page.evaluate(
+    () => globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__.observer.snapshot(),
+  );
 }
 
 async function runtimeSnapshot(page) {
   return await page.evaluate(() => ({
-    frame: globalThis.__MCLONE_WORLD_EXPLORER__.frame,
-    report: {
-      ...globalThis.__MCLONE_WORLD_EXPLORER__.report,
-    },
+    frame: globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__.observer.frame(),
+    report: globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__.observer.snapshot(),
   }));
+}
+
+function worldExplorerUrl(baseUrl) {
+  return new URL(
+    "?seed=12345&centerX=-304&centerZ=336"
+      + "&blocksAcross=4096&view=3d&projection=perspective",
+    baseUrl.endsWith("/") ? baseUrl : `${baseUrl}/`,
+  );
+}
+
+async function assertOrdinaryPageHasNoObserver(context, targetUrl) {
+  const ordinaryPage = await context.newPage();
+  try {
+    await ordinaryPage.goto(targetUrl.href, { waitUntil: "networkidle" });
+    await ordinaryPage.locator("#world-explorer-status").waitFor({
+      state: "hidden",
+      timeout: 30_000,
+    });
+    const observerInstalled = await ordinaryPage.evaluate(
+      () => "__MCLONE_WORLD_EXPLORER_SMOKE__" in globalThis,
+    );
+    if (observerInstalled) {
+      throw new Error("ordinary World Explorer page installed the smoke observer");
+    }
+    await assertTerrainOnlySurface(ordinaryPage);
+  } finally {
+    await ordinaryPage.close();
+  }
+}
+
+async function assertTerrainOnlySurface(targetPage) {
+  const visibleChildren = await targetPage.locator("#world-explorer-shell").evaluate(
+    (element) => [...element.children]
+      .filter((child) => {
+        const style = getComputedStyle(child);
+        return !child.hidden
+          && style.display !== "none"
+          && style.visibility !== "hidden";
+      })
+      .map((child) => child.id),
+  );
+  if (visibleChildren.length !== 1
+      || visibleChildren[0] !== "world-explorer-canvas") {
+    throw new Error(
+      `World Explorer content area is not terrain-only: ${visibleChildren.join(", ")}`,
+    );
+  }
 }
 
 function assertFixedReady(value, stage) {

@@ -9,18 +9,11 @@ if (!(shell instanceof HTMLElement)
 }
 
 const runtime = {
-  frame: 0,
-  report: null,
   session: null,
 };
-globalThis.__MCLONE_WORLD_EXPLORER__ = runtime;
+let smokeObserver = null;
 
-void boot().catch((error) => {
-  shell.dataset.failed = "true";
-  shell.setAttribute("aria-busy", "false");
-  status.value = error instanceof Error ? error.stack ?? error.message : String(error);
-  console.error(error);
-});
+void boot().catch(showFatalError);
 
 async function boot() {
   const module = await import("./pkg/mclone_world_explorer.js");
@@ -40,8 +33,10 @@ async function boot() {
     new Uint8Array(),
     globalThis.location.search,
   );
+  await installSmokeObserverIfRequested();
   bindRawObservations();
   shell.setAttribute("aria-busy", "false");
+  status.hidden = true;
   canvas.focus({ preventScroll: true });
   requestAnimationFrame(renderFrame);
 }
@@ -52,28 +47,31 @@ function renderFrame(frameMillis) {
     return;
   }
   syncCanvasSize();
-  const report = JSON.parse(runtime.session.renderFrame(frameMillis));
-  runtime.frame += 1;
-  runtime.report = report;
-  shell.dataset.ready = String(Boolean(report.targetReady));
-  shell.dataset.revision = String(report.revision);
-  shell.dataset.allocationSlots = String(report.allocationSlots);
-  shell.dataset.readySlots = String(report.readySlots);
-  shell.dataset.pendingRefills = String(report.pendingRefills);
-  shell.dataset.totalRefills = String(report.totalRefills);
-  shell.dataset.totalRebases = String(report.totalRebases);
-  shell.dataset.centerX = String(report.centerX);
-  shell.dataset.centerZ = String(report.centerZ);
-  shell.dataset.focusX = String(report.focusX);
-  shell.dataset.focusZ = String(report.focusZ);
-  status.value = [
-    `seed ${report.seed} · ${report.view} · ${report.blocksAcross} blocks`,
-    `center ${report.centerX}, ${report.centerZ}`,
-    `${report.readySlots}/${report.allocationSlots} fixed slots · ${report.pendingRefills} terrain pending`,
-    `${report.drawnLevels} levels · ${report.drawnTiles} draws · ${report.treeInstanceCount} trees`,
-    `${(report.fixedResidentBytes / 1048576).toFixed(1)} MiB fixed terrain · ${report.pendingVegetationTiles} vegetation pending`,
-  ].join("\n");
+  try {
+    runtime.session.renderFrame(frameMillis);
+  } catch (error) {
+    showFatalError(error);
+    return;
+  }
+  smokeObserver?.observeFrame();
   requestAnimationFrame(renderFrame);
+}
+
+async function installSmokeObserverIfRequested() {
+  const parameters = new URLSearchParams(globalThis.location.search);
+  if (parameters.get("smokeObserver") !== "1") {
+    return;
+  }
+  const observer = await import("./world-explorer-smoke-observer.js");
+  smokeObserver = observer.installWorldExplorerSmokeObserver(runtime.session);
+}
+
+function showFatalError(error) {
+  shell.dataset.failed = "true";
+  shell.setAttribute("aria-busy", "false");
+  status.hidden = false;
+  status.value = error instanceof Error ? error.stack ?? error.message : String(error);
+  console.error(error);
 }
 
 function bindRawObservations() {

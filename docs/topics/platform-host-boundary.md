@@ -54,13 +54,17 @@ press/release, pointer, wheel, resize, blur, and visibility observations but
 contains no movement or terrain policy.
 
 Side-by-side Explorer review on 2026-07-26 found that its visible browser
-diagnostic panel and surface-dependent color output still violate the desired
-cross-host product boundary. Proposed parent Tactical
+diagnostic panel and surface-dependent color output violated the desired
+cross-host product boundary. Active parent Tactical
 [`253`](../tactical/253-world-explorer-cross-host-parity.md) sequences the
 correction. Tactical
-[`254`](../tactical/254-ui-less-world-explorer-host.md) removes ordinary
-post-startup DOM diagnostics without introducing replacement UI, while
-Tactical
+[`254`](../tactical/254-ui-less-world-explorer-host.md) completed the first
+child on 2026-07-26: ordinary `renderFrame` returns no semantic report, the
+successful browser surface contains only the canvas, and a separate
+`smokeObserver=1` module reads coherent Rust-authored snapshots without
+installing any ordinary-page global. The 5,625-byte production JavaScript
+shell retains only loading, canvas, raw observation, rAF, resize/visibility,
+and generic fatal mechanics. Tactical
 [`255`](../tactical/255-world-explorer-color-output-parity.md) moves the
 selected dark appearance behind an explicit shared target transform. Tactical
 [`256`](../tactical/256-shared-horizon-vegetation-worker-topology.md) keeps

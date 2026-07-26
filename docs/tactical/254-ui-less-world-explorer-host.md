@@ -1,6 +1,6 @@
 # Tactical 254: UI-Less World Explorer Host
 
-Status: proposed.
+Status: complete 2026-07-26.
 
 Topics:
 
@@ -104,6 +104,63 @@ normal input and rendering.
   produce a frame.
 - The Explorer does not add `mclone-ui`, `mclone-render`, or game-runtime
   dependencies in this UI-removal slice.
+
+## Landed Outcome
+
+The ordinary browser frame loop now calls Rust `renderFrame` for presentation
+only. It receives no semantic result, parses no report, installs no global,
+mirrors no DOM data attributes, and formats no Explorer status. The generic
+startup/fatal `<output>` becomes hidden after successful initialization and is
+shown again only when bootstrap or frame presentation fails.
+
+An explicit `smokeObserver=1` query enables both sides of the diagnostic
+contract:
+
+- Rust retains one coherent report from the last encoded frame rather than
+  combining current camera state with older renderer counters;
+- the separately loaded `world-explorer-smoke-observer.js` exposes that
+  Rust-authored snapshot on demand;
+- frame count is observer-local mechanical evidence rather than a production
+  semantic mirror; and
+- the retained teleport setup command lives under a separately named
+  smoke-command namespace.
+
+An ordinary page does not import the observer module, install
+`__MCLONE_WORLD_EXPLORER_SMOKE__`, or construct the Rust diagnostic report.
+The browser smoke now proves that absence before launching its explicit
+observer page. It also asserts that the only visible child of the initialized
+content area is the canvas.
+
+A native integration source lock rejects representative readiness, residency,
+camera, draw, tree, vegetation, and memory vocabulary in the ordinary browser
+host. The separate observer remains allowed to understand those fields as an
+explicit test client.
+
+The production hand-authored JavaScript shell is 5,625 bytes. The separately
+classified opt-in smoke observer is 824 bytes. No shared dependency was added;
+the firewall remains at 159 native and 75 browser packages.
+
+## Validation
+
+Completed on 2026-07-26:
+
+- `cargo test --manifest-path native/Cargo.toml -p
+  mclone-world-explorer --test web_host_boundary_lock`;
+- `cargo check --manifest-path native/Cargo.toml -p
+  mclone-world-explorer --lib --target wasm32-unknown-unknown`;
+- `pnpm native:world-explorer:deps`;
+- headed-Wayland desktop and Pixel-sized browser smokes, including ordinary
+  observer absence, terrain-only visible content, raw pointer, Shift-pan,
+  two-contact motion, held keyboard motion, negative coordinates, and
+  teleport;
+- native real-window plus offscreen smoke; and
+- JavaScript syntax and crate-local formatting checks.
+
+The desktop browser, mobile browser, native real-window, and offscreen captures
+were inspected. All show unobstructed terrain with no in-frame host overlay.
+The known brighter native sRGB output remains intentionally assigned to
+Tactical [`255`](255-world-explorer-color-output-parity.md). The browser build
+produced a 1,409,361-byte Wasm artifact.
 
 ## Non-Goals
 
