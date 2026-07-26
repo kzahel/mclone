@@ -354,7 +354,7 @@ impl McloneSceneHost {
             PreparedAudioAssets::load(asset_source)
                 .context("prepare initial scene audio assets")?,
         );
-        let request = SessionStartRequest::new_seed_local_world(scene.seed);
+        let request = transient_local_session_start_request(&scene);
         let descriptor = request.active_descriptor();
         let catalog_operations = scene
             .world_root
@@ -6569,6 +6569,14 @@ fn bind_native_entry_world_dir(
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+fn transient_local_session_start_request(scene: &McloneSceneHostOptions) -> SessionStartRequest {
+    SessionStartRequest::new_seed_local_world_with_generation_profile(
+        scene.seed,
+        scene.world_generation_profile,
+    )
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 pub fn local_integrated_scene_options(
     scene: &McloneSceneHostOptions,
 ) -> LocalIntegratedSceneOptions {
@@ -6785,6 +6793,22 @@ mod camera_config_tests {
         let options = local_integrated_scene_options(&scene);
 
         assert_eq!(options.center, ChunkPos::new(3, -2));
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn transient_local_startup_request_keeps_the_selected_generation_profile() {
+        let mut scene = McloneSceneHostOptions::default();
+        scene.seed = 17_501;
+        scene.world_generation_profile = WorldGenerationProfile::TopologyProbeV1;
+
+        assert_eq!(
+            transient_local_session_start_request(&scene),
+            SessionStartRequest::new_seed_local_world_with_generation_profile(
+                scene.seed,
+                WorldGenerationProfile::TopologyProbeV1,
+            )
+        );
     }
 
     #[test]
