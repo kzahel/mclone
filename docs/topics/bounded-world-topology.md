@@ -27,6 +27,13 @@ topology-specific distant-terrain constraints. These are contracts for later
 work, not claims that torus generation or periodic horizon rendering has
 landed.
 
+[`Tactical 257`](../tactical/257-topology-worldgen-conformance-probe.md) is
+active. It adds a hidden adversarial generation profile that guarantees
+terrain, water, bounded geometry, lighting, and persistence canaries at
+periodic seams, plus a reusable conformance suite for future terrain
+families. It complements rather than replaces the Flat Grass runtime proof
+and the real Mclone cylinder.
+
 ## Cylinder v0 Support
 
 | Family | Plane | Finite | Cylinder X | Later topology |
@@ -846,6 +853,7 @@ validation policy.
 
 - [`../tactical/195-periodic-cylinder-topology-proof.md`](../tactical/195-periodic-cylinder-topology-proof.md)
 - [`../tactical/196-periodic-mclone-terrain-fields.md`](../tactical/196-periodic-mclone-terrain-fields.md)
+- [`../tactical/257-topology-worldgen-conformance-probe.md`](../tactical/257-topology-worldgen-conformance-probe.md)
 - [`faithful-world-embeddings.md`](faithful-world-embeddings.md)
 - [`realm-dimension-runtime.md`](realm-dimension-runtime.md)
 - [`world-generation-profiles.md`](world-generation-profiles.md)
