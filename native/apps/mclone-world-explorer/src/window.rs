@@ -644,6 +644,8 @@ impl WindowGpu {
                         SmokeCheckpoint {
                             state: self.terrain.view_state(),
                             stats,
+                            composition: self.terrain.composition_mode(),
+                            exact: self.terrain.exact_stats(),
                             pixels: pixel_stats,
                             depth,
                         },

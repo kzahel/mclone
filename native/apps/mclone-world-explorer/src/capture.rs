@@ -221,6 +221,8 @@ pub fn run_smoke(options: &ExplorerOptions, root: &Path, started: Instant) -> Re
                 SmokeCheckpoint {
                     state: terrain.view_state(),
                     stats,
+                    composition: terrain.composition_mode(),
+                    exact: terrain.exact_stats(),
                     pixels: pixel_stats,
                     depth,
                 },

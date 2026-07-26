@@ -492,6 +492,21 @@ mod tests {
     use super::*;
 
     #[test]
+    fn composition_mode_labels_round_trip() {
+        for mode in [
+            WorldExplorerCompositionMode::Horizon,
+            WorldExplorerCompositionMode::Exact,
+            WorldExplorerCompositionMode::Composed,
+            WorldExplorerCompositionMode::Coverage,
+        ] {
+            assert_eq!(
+                WorldExplorerCompositionMode::parse_label(mode.label()).unwrap(),
+                mode
+            );
+        }
+    }
+
+    #[test]
     fn residency_key_only_changes_at_finest_tile_boundaries() {
         let config = TerrainClipmapConfig::default();
         let state = WorldViewState {

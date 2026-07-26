@@ -3,7 +3,7 @@ use std::time::Duration;
 
 use anyhow::{Context, Result, ensure};
 use mclone_terrain_view::{
-    TerrainHorizonFrameStats, TerrainHorizonVegetationServiceStats,
+    TerrainExactCoverageMode, TerrainHorizonFrameStats, TerrainHorizonVegetationServiceStats,
     TerrainVegetationCoordinatorState, TerrainVegetationExecutorKind,
 };
 use mclone_view_control::{
@@ -12,8 +12,10 @@ use mclone_view_control::{
 use serde_json::{Map, Value, json};
 
 use crate::capture::{DepthStats, PixelStats};
+use crate::exact::ExplorerExactStats;
 use crate::options::ExplorerOptions;
 use crate::terrain::ExplorerTerrain;
+use mclone_world_explorer::WorldExplorerCompositionMode;
 
 const MOVEMENT_FRAMES: u32 = 8;
 const ZOOM_FRAMES: u32 = 4;
@@ -190,6 +192,8 @@ pub enum SmokeFrameOutcome {
 pub struct SmokeCheckpoint {
     pub state: WorldViewState,
     pub stats: TerrainHorizonFrameStats,
+    pub composition: WorldExplorerCompositionMode,
+    pub exact: ExplorerExactStats,
     pub pixels: PixelStats,
     pub depth: DepthStats,
 }
@@ -302,6 +306,8 @@ impl SmokeRecorder {
         let SmokeCheckpoint {
             state,
             stats,
+            composition,
+            exact,
             pixels,
             depth,
         } = checkpoint;
@@ -330,9 +336,38 @@ impl SmokeRecorder {
             "World Explorer {label} checkpoint has incomplete vegetation diagnostics: \
              {service:?}"
         );
+        if composition != WorldExplorerCompositionMode::Horizon {
+            ensure!(
+                exact.complete
+                    && exact.desired_chunks > 0
+                    && exact.painted_chunks == exact.desired_chunks
+                    && !exact.in_flight
+                    && exact.queued_chunks == 0
+                    && exact.pending_admissions == 0,
+                "World Explorer {label} checkpoint has incomplete exact coverage: {exact:?}"
+            );
+        }
+        let expected_coverage_mode = match composition {
+            WorldExplorerCompositionMode::Composed => {
+                Some(TerrainExactCoverageMode::DiscardPainted)
+            }
+            WorldExplorerCompositionMode::Coverage => {
+                Some(TerrainExactCoverageMode::VisualizePainted)
+            }
+            WorldExplorerCompositionMode::Horizon | WorldExplorerCompositionMode::Exact => None,
+        };
+        if let Some(expected) = expected_coverage_mode {
+            ensure!(
+                stats.exact_coverage_mode == expected
+                    && stats.exact_painted_chunks == exact.painted_chunks
+                    && stats.exact_coverage_generation == exact.coverage_generation,
+                "World Explorer {label} checkpoint mask does not match exact-painted coverage: \
+                 horizon={stats:?} exact={exact:?}"
+            );
+        }
         self.checkpoint_frame_ms
             .push(frame_time.as_secs_f64() * 1_000.0);
-        self.captures.push(json!({
+        let mut capture = json!({
             "label": label,
             "path": path.display().to_string(),
             "file_bytes": std::fs::metadata(path)
@@ -379,7 +414,14 @@ impl SmokeRecorder {
             "depth_max": depth.max_depth,
             "depth_covered_pixels": depth.covered_pixels,
             "depth_clear_pixels": depth.clear_pixels,
-        }));
+        });
+        let fields = capture
+            .as_object_mut()
+            .expect("a JSON object literal produces an object");
+        fields.insert("composition".to_owned(), json!(composition.label()));
+        fields.insert("exact".to_owned(), exact_stats_json(exact));
+        fields.insert("frontier".to_owned(), json!("procedural-collar-1.5-blocks"));
+        self.captures.push(capture);
         Ok(())
     }
 
@@ -389,7 +431,7 @@ impl SmokeRecorder {
             .context("World Explorer smoke completed without frame statistics")?;
         let path = self.root.join("receipt.json");
         let receipt = json!({
-            "schema": "mclone-world-explorer-smoke-v2",
+            "schema": "mclone-world-explorer-smoke-v3",
             "target": self.target,
             "adapter": {
                 "name": self.adapter_name,
@@ -400,6 +442,9 @@ impl SmokeRecorder {
             "seed": options.seed,
             "asset_profile": options.asset_profile.label(),
             "asset_bytes": options.asset_bytes()?,
+            "composition": terrain.composition_mode().label(),
+            "exact": exact_stats_json(terrain.exact_stats()),
+            "frontier": "procedural-collar-1.5-blocks",
             "viewport": {
                 "width": options.width,
                 "height": options.height,
@@ -447,6 +492,29 @@ impl SmokeRecorder {
         .with_context(|| format!("failed to write {}", path.display()))?;
         Ok(path)
     }
+}
+
+fn exact_stats_json(stats: ExplorerExactStats) -> Value {
+    json!({
+        "desired_chunks": stats.desired_chunks,
+        "painted_chunks": stats.painted_chunks,
+        "queued_chunks": stats.queued_chunks,
+        "pending_admissions": stats.pending_admissions,
+        "in_flight": stats.in_flight,
+        "coverage_generation": stats.coverage_generation,
+        "admitted_chunks_total": stats.admitted_chunks_total,
+        "stale_chunks_total": stats.stale_chunks_total,
+        "generation_ms": stats.generation_ms,
+        "presentation_ms": stats.presentation_ms,
+        "mesh_ms": stats.mesh_ms,
+        "pack_ms": stats.pack_ms,
+        "resident_mesh_bytes": stats.resident_mesh_bytes,
+        "vertex_count": stats.vertex_count,
+        "index_count": stats.index_count,
+        "drawn_sections": stats.drawn_sections,
+        "drawn_indices": stats.drawn_indices,
+        "complete": stats.complete,
+    })
 }
 
 fn duration_ms(duration: Option<Duration>) -> Option<f64> {

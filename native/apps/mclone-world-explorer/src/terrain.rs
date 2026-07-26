@@ -141,6 +141,14 @@ impl ExplorerTerrain {
         true
     }
 
+    pub const fn composition_mode(&self) -> WorldExplorerCompositionMode {
+        self.composition
+    }
+
+    pub const fn exact_stats(&self) -> ExplorerExactStats {
+        self.last_exact_stats
+    }
+
     pub fn apply_intent(&mut self, intent: WorldViewIntent) -> Result<bool> {
         Ok(self.session.apply_intent(intent))
     }
