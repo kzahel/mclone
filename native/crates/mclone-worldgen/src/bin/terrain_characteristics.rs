@@ -7,8 +7,9 @@ use std::time::Instant;
 use mclone_worldgen::biome::OverworldBiomeSource;
 use mclone_worldgen::block::{has_fluid, is_air_like};
 use mclone_worldgen::levelgen::{
-    GeneratedChunk, MutableChunkBlockBuffer, NoiseBasedChunkGenerator, NoiseGeneratorSettings,
-    generate_mclone_overworld_surface_chunk,
+    AlphaGenerationStage, BetaGenerationStage, GeneratedChunk, MutableChunkBlockBuffer,
+    NoiseBasedChunkGenerator, NoiseGeneratorSettings, generate_alpha_stage_chunk,
+    generate_beta_stage_chunk, generate_mclone_overworld_surface_chunk,
 };
 use mclone_worldgen::terrain_analysis::{
     DEFAULT_TERRAIN_ANALYSIS_LAGS, DEFAULT_TERRAIN_PLANE_RADII, TerrainCharacteristics,
@@ -20,9 +21,11 @@ const DEFAULT_OUTPUT: &str = "/tmp/mclone-terrain-characteristics.json";
 const DEFAULT_RADIUS_CHUNKS: i32 = 8;
 const DEFAULT_LAND_MIN_Y: i32 = 67;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "kebab-case")]
 enum Profile {
+    AlphaV1,
+    BetaV1,
     Overworld,
     McloneOverworldV1,
 }
@@ -30,11 +33,22 @@ enum Profile {
 impl Profile {
     fn parse(value: &str) -> Result<Self, String> {
         match value {
+            "alpha-v1" => Ok(Self::AlphaV1),
+            "beta-v1" => Ok(Self::BetaV1),
             "overworld" => Ok(Self::Overworld),
             "mclone-overworld-v1" => Ok(Self::McloneOverworldV1),
             _ => Err(format!(
-                "unknown terrain-characteristics profile `{value}`; expected overworld or mclone-overworld-v1"
+                "unknown terrain-characteristics profile `{value}`; expected alpha-v1, beta-v1, overworld, or mclone-overworld-v1"
             )),
+        }
+    }
+
+    fn reference(self) -> &'static str {
+        match self {
+            Self::AlphaV1 => "Minecraft Java Alpha v1.1.2_01",
+            Self::BetaV1 => "Minecraft Java Beta 1.7.3",
+            Self::Overworld => "Minecraft Java 1.17.1",
+            Self::McloneOverworldV1 => "Mclone original overworld",
         }
     }
 }
@@ -108,19 +122,24 @@ fn run() -> Result<(), String> {
             site.label, site.profile, site.seed, site.center_chunk[0], site.center_chunk[1]
         );
         let started = Instant::now();
-        let raster = generate_height_raster(site, config.radius_chunks, config.land_min_y)?;
+        let sampled = generate_height_raster(site, config.radius_chunks, config.land_min_y)?;
         let generation_elapsed_ms = started.elapsed().as_secs_f64() * 1_000.0;
         let analysis_started = Instant::now();
-        let characteristics = analyze_terrain_height_raster(
-            &raster,
-            &DEFAULT_TERRAIN_ANALYSIS_LAGS,
-            &DEFAULT_TERRAIN_PLANE_RADII,
-        )?;
+        let characteristics = if sampled.included_columns == 0 {
+            None
+        } else {
+            Some(analyze_terrain_height_raster(
+                &sampled.raster,
+                &DEFAULT_TERRAIN_ANALYSIS_LAGS,
+                &DEFAULT_TERRAIN_PLANE_RADII,
+            )?)
+        };
         let analysis_elapsed_ms = analysis_started.elapsed().as_secs_f64() * 1_000.0;
         site_reports.push(SiteReport {
             site: site.clone(),
             generation_elapsed_ms,
             analysis_elapsed_ms,
+            land_coverage: sampled.included_columns as f64 / sampled.total_columns as f64,
             characteristics,
         });
     }
@@ -139,8 +158,12 @@ fn run() -> Result<(), String> {
     .flatten()
     .collect::<Vec<_>>();
     let report = Report {
-        schema: 1,
-        minecraft_version: mclone_worldgen::target_minecraft_version(),
+        schema: 2,
+        profile_references: config
+            .sites
+            .iter()
+            .map(|site| (site.profile, site.profile.reference()))
+            .collect(),
         stage: "top solid terrain before carvers and decoration; one-block shared grid",
         radius_chunks: config.radius_chunks,
         land_min_y: config.land_min_y,
@@ -295,7 +318,7 @@ fn generate_height_raster(
     site: &SiteSpec,
     radius_chunks: i32,
     land_min_y: i32,
-) -> Result<TerrainHeightRaster, String> {
+) -> Result<SampledTerrain, String> {
     let chunk_diameter = radius_chunks * 2 + 1;
     let width = usize::try_from(chunk_diameter * 16)
         .map_err(|_| "terrain raster width does not fit usize")?;
@@ -305,6 +328,49 @@ fn generate_height_raster(
     let min_chunk_z = site.center_chunk[1] - radius_chunks;
 
     match site.profile {
+        Profile::AlphaV1 => {
+            for chunk_offset_z in 0..chunk_diameter {
+                for chunk_offset_x in 0..chunk_diameter {
+                    let chunk = generate_alpha_stage_chunk(
+                        site.seed,
+                        min_chunk_x + chunk_offset_x,
+                        min_chunk_z + chunk_offset_z,
+                        false,
+                        AlphaGenerationStage::Surface,
+                    );
+                    write_generated_heights(
+                        &chunk,
+                        chunk_offset_x,
+                        chunk_offset_z,
+                        width,
+                        land_min_y,
+                        &mut heights,
+                        &mut included,
+                    );
+                }
+            }
+        }
+        Profile::BetaV1 => {
+            for chunk_offset_z in 0..chunk_diameter {
+                for chunk_offset_x in 0..chunk_diameter {
+                    let chunk = generate_beta_stage_chunk(
+                        site.seed,
+                        min_chunk_x + chunk_offset_x,
+                        min_chunk_z + chunk_offset_z,
+                        BetaGenerationStage::Surface,
+                    );
+                    write_generated_heights(
+                        &chunk,
+                        chunk_offset_x,
+                        chunk_offset_z,
+                        width,
+                        land_min_y,
+                        &mut heights,
+                        &mut included,
+                    );
+                }
+            }
+        }
         Profile::Overworld => {
             let generator = NoiseBasedChunkGenerator::new(
                 OverworldBiomeSource::new(site.seed, false, false),
@@ -350,7 +416,20 @@ fn generate_height_raster(
             }
         }
     }
-    TerrainHeightRaster::new(width, width, heights, included)
+    let included_columns = included.iter().filter(|included| **included).count();
+    let total_columns = included.len();
+    Ok(SampledTerrain {
+        raster: TerrainHeightRaster::new(width, width, heights, included)?,
+        included_columns,
+        total_columns,
+    })
+}
+
+#[derive(Clone, Debug)]
+struct SampledTerrain {
+    raster: TerrainHeightRaster,
+    included_columns: usize,
+    total_columns: usize,
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -449,7 +528,8 @@ struct SiteReport {
     site: SiteSpec,
     generation_elapsed_ms: f64,
     analysis_elapsed_ms: f64,
-    characteristics: TerrainCharacteristics,
+    land_coverage: f64,
+    characteristics: Option<TerrainCharacteristics>,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -552,26 +632,44 @@ fn orientation_diagonal(value: &TerrainCharacteristics, radius: usize) -> f64 {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct GroupSummary {
-    site_count: usize,
-    median: FeatureVector,
+    window_count: usize,
+    analyzed_window_count: usize,
+    land_bearing_window_share: f64,
+    median_land_coverage: f64,
+    median: Option<FeatureVector>,
 }
 
 fn summarize_groups(reports: &[SiteReport]) -> BTreeMap<String, GroupSummary> {
-    let mut grouped = BTreeMap::<String, Vec<FeatureVector>>::new();
+    let mut grouped = BTreeMap::<String, Vec<&SiteReport>>::new();
     for report in reports {
         grouped
             .entry(report.site.group.clone())
             .or_default()
-            .push(FeatureVector::from_characteristics(&report.characteristics));
+            .push(report);
     }
     grouped
         .into_iter()
-        .map(|(group, values)| {
+        .map(|(group, reports)| {
+            let values = reports
+                .iter()
+                .filter_map(|report| report.characteristics.as_ref())
+                .map(FeatureVector::from_characteristics)
+                .collect::<Vec<_>>();
+            let mut land_coverages = reports
+                .iter()
+                .map(|report| report.land_coverage)
+                .collect::<Vec<_>>();
+            land_coverages.sort_by(f64::total_cmp);
+            let window_count = reports.len();
+            let analyzed_window_count = values.len();
             (
                 group,
                 GroupSummary {
-                    site_count: values.len(),
-                    median: median_feature_vector(&values),
+                    window_count,
+                    analyzed_window_count,
+                    land_bearing_window_share: analyzed_window_count as f64 / window_count as f64,
+                    median_land_coverage: land_coverages[(land_coverages.len() - 1) / 2],
+                    median: (!values.is_empty()).then(|| median_feature_vector(&values)),
                 },
             )
         })
@@ -631,8 +729,8 @@ fn compare_groups(
     candidate_group: &'static str,
     groups: &BTreeMap<String, GroupSummary>,
 ) -> Option<Comparison> {
-    let reference = groups.get(reference_group)?.median;
-    let candidate = groups.get(candidate_group)?.median;
+    let reference = groups.get(reference_group)?.median?;
+    let candidate = groups.get(candidate_group)?.median?;
     let reference_rows = reference.rows();
     let candidate_rows = candidate.rows();
     let mut rows = reference_rows
@@ -693,7 +791,7 @@ fn print_comparisons(comparisons: &[Comparison]) {
 #[serde(rename_all = "camelCase")]
 struct Report {
     schema: u32,
-    minecraft_version: &'static str,
+    profile_references: BTreeMap<Profile, &'static str>,
     stage: &'static str,
     radius_chunks: i32,
     land_min_y: i32,
@@ -717,6 +815,22 @@ mod tests {
     }
 
     #[test]
+    fn site_parser_accepts_all_reference_profiles() {
+        assert_eq!(
+            parse_site("alpha,era,alpha-v1,1,2,3").unwrap().profile,
+            Profile::AlphaV1
+        );
+        assert_eq!(
+            parse_site("beta,era,beta-v1,1,2,3").unwrap().profile,
+            Profile::BetaV1
+        );
+        assert_eq!(
+            parse_site("release,era,overworld,1,2,3").unwrap().profile,
+            Profile::Overworld
+        );
+    }
+
+    #[test]
     fn default_suite_has_paired_mountain_and_lowland_groups() {
         let sites = default_sites();
         let groups = sites
@@ -732,5 +846,29 @@ mod tests {
                 "vanilla-mountains",
             ])
         );
+    }
+
+    #[test]
+    fn group_summary_retains_an_all_water_window() {
+        let reports = [SiteReport {
+            site: SiteSpec {
+                label: "ocean".to_owned(),
+                group: "survey".to_owned(),
+                profile: Profile::AlphaV1,
+                seed: 1,
+                center_chunk: [0, 0],
+            },
+            generation_elapsed_ms: 1.0,
+            analysis_elapsed_ms: 0.0,
+            land_coverage: 0.0,
+            characteristics: None,
+        }];
+        let summary = summarize_groups(&reports);
+        let survey = &summary["survey"];
+        assert_eq!(survey.window_count, 1);
+        assert_eq!(survey.analyzed_window_count, 0);
+        assert_eq!(survey.land_bearing_window_share, 0.0);
+        assert_eq!(survey.median_land_coverage, 0.0);
+        assert!(survey.median.is_none());
     }
 }
