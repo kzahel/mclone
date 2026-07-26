@@ -25,8 +25,11 @@ before all entering strips are ready and show coarse fallback for one frame.
 Slice 1 now provides fixed requested/staged/committed admission with seven
 guard resources per level. Terrain and asynchronous vegetation retain
 separate complete presentations and commit atomically without an uncovered
-frame. The remaining hardening direction is a bounded sample halo and
-fine/coarse normal policy, not a larger unbounded dispatch spike.
+frame. Slice 2 stores a fixed two-sample normal halo while retaining the
+`65x65` drawn grid. Same-LOD borders use identical absolute neighbor samples;
+a two-cell fine-ring collar converges to the adjacent coarse normal footprint
+at their shared edge. The combined fixed allocation is `140,237,440` bytes
+and does not rely on a larger per-frame dispatch budget.
 Side-by-side native/browser review also found three proof-host parity gaps.
 Completed parent Tactical
 [`253`](../tactical/253-world-explorer-cross-host-parity.md) sequences their

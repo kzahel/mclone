@@ -386,6 +386,9 @@ async function assertTerrainOnlySurface(targetPage) {
 function assertFixedReady(value, stage) {
   if (value.allocationSlots !== 160
       || value.stagingSlots !== 70
+      || value.normalHaloRadius !== 2
+      || value.normalHaloSamplesPerTile !== 536
+      || value.normalHaloFixedBytes !== 15_779_840
       || value.readySlots !== value.allocationSlots
       || value.requestedLevels !== 10
       || value.stagedLevels !== 0
@@ -393,7 +396,7 @@ function assertFixedReady(value, stage) {
       || value.vegetationCommittedLevels !== 3
       || value.pendingRefills !== 0
       || value.drawnLevels !== 10
-      || value.fixedResidentBytes !== 124_457_600
+      || value.fixedResidentBytes !== 140_237_440
       || value.pendingVegetationTiles !== 0
       || value.residentBytes <= 0) {
     throw new Error(`${stage} is not fixed and ready:\n${JSON.stringify(value, null, 2)}`);

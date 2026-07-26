@@ -245,7 +245,7 @@ impl WorldExplorerSession {
             "seed={} center=({}, {}) blocks={} view={} revision={} \
              color_profile={} color_format={:?} color_transform={} \
              coarse_ready_ms={} target_ready_ms={} resident_bytes={} \
-             fixed_resident_bytes={} vegetation_bytes={} allocation_slots={} \
+             fixed_resident_bytes={} halo_bytes={} vegetation_bytes={} allocation_slots={} \
              ready_slots={} pending={} vegetation_ready={} vegetation_pending={} \
              tree_instances={} vegetation_source={:016x} vegetation_hash={:016x} \
              vegetation_queue={} vegetation_compile_ms={:.2} finest_spacing={} \
@@ -263,6 +263,7 @@ impl WorldExplorerSession {
             duration_ms(self.target_ready_at),
             stats.map_or(0, |stats| stats.resident_bytes),
             stats.map_or(0, |stats| stats.fixed_resident_bytes),
+            stats.map_or(0, |stats| stats.normal_halo_fixed_bytes),
             stats.map_or(0, |stats| stats.vegetation_bytes),
             stats.map_or(0, |stats| stats.allocation_slots),
             stats.map_or(0, |stats| stats.ready_slots),

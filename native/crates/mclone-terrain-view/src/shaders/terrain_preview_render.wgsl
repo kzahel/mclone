@@ -24,6 +24,11 @@ struct TerrainPreviewSample {
 
 // __MCLONE_TARGET_COLOR_TRANSFER_WGSL__
 const terrain_target_color_transform: f32 = __MCLONE_TARGET_COLOR_TRANSFORM__;
+const TERRAIN_HORIZON_NORMAL_EDGE_WEST: u32 = 0x08000000u;
+const TERRAIN_HORIZON_NORMAL_EDGE_EAST: u32 = 0x10000000u;
+const TERRAIN_HORIZON_NORMAL_EDGE_NORTH: u32 = 0x20000000u;
+const TERRAIN_HORIZON_NORMAL_EDGE_SOUTH: u32 = 0x40000000u;
+const TERRAIN_HORIZON_SAMPLE_HALO_FLAG: u32 = 0x80000000u;
 
 @group(0) @binding(0)
 var<uniform> params: TerrainPreviewParams;
@@ -108,7 +113,57 @@ fn preview_profile() -> u32 {
 }
 
 fn surface_quality() -> u32 {
-    return params.content_stage_flags.w >> 1u;
+    return (params.content_stage_flags.w >> 1u) & 3u;
+}
+
+fn sample_halo_radius() -> i32 {
+    return select(
+        0,
+        2,
+        (params.content_stage_flags.w & TERRAIN_HORIZON_SAMPLE_HALO_FLAG) != 0u,
+    );
+}
+
+fn terrain_sample_index(sample_x: i32, sample_z: i32) -> u32 {
+    let radius = sample_halo_radius();
+    let drawn_max = i32(params.layer_samples_size.y) - 1;
+    let stored_x = clamp(sample_x, -radius, drawn_max + radius) + radius;
+    let stored_z = clamp(sample_z, -radius, drawn_max + radius) + radius;
+    let storage_samples_per_axis = u32(drawn_max + 1 + radius * 2);
+    return u32(stored_z) * storage_samples_per_axis + u32(stored_x);
+}
+
+fn selected_grid_sample(
+    sample_x: i32,
+    sample_z: i32,
+    instance_index: u32,
+) -> TerrainPreviewSample {
+    return selected_sample(terrain_sample_index(sample_x, sample_z), instance_index);
+}
+
+fn terrain_horizon_coarse_footprint_weight(
+    sample_x: i32,
+    sample_z: i32,
+    cells: i32,
+) -> f32 {
+    if sample_halo_radius() == 0 {
+        return 0.0;
+    }
+    let flags = params.content_stage_flags.w;
+    var distance = 3;
+    if (flags & TERRAIN_HORIZON_NORMAL_EDGE_WEST) != 0u {
+        distance = min(distance, sample_x);
+    }
+    if (flags & TERRAIN_HORIZON_NORMAL_EDGE_EAST) != 0u {
+        distance = min(distance, cells - sample_x);
+    }
+    if (flags & TERRAIN_HORIZON_NORMAL_EDGE_NORTH) != 0u {
+        distance = min(distance, sample_z);
+    }
+    if (flags & TERRAIN_HORIZON_NORMAL_EDGE_SOUTH) != 0u {
+        distance = min(distance, cells - sample_z);
+    }
+    return clamp((2.0 - f32(distance)) * 0.5, 0.0, 1.0);
 }
 
 fn rgb8(color: u32) -> vec3<f32> {
@@ -434,31 +489,53 @@ fn vertex_main(
     @builtin(instance_index) instance_index: u32,
 ) -> VertexOutput {
     let cells = u32(params.origin_spacing_cells.w);
-    let samples_per_axis = params.layer_samples_size.y;
     let cell_index = vertex_index / 6u;
     let cell_x = cell_index % cells;
     let cell_z = cell_index / cells;
     let corner = grid_corner(vertex_index % 6u);
     let sample_x = cell_x + corner.x;
     let sample_z = cell_z + corner.y;
-    let index = sample_z * samples_per_axis + sample_x;
+    let logical_x = i32(sample_x);
+    let logical_z = i32(sample_z);
+    let index = terrain_sample_index(logical_x, logical_z);
     let sample = selected_sample(index, instance_index);
     let reference = reference_samples[index];
     let gpu = gpu_samples[index];
 
-    let left_x = select(sample_x - 1u, sample_x, sample_x == 0u);
-    let right_x = min(sample_x + 1u, samples_per_axis - 1u);
-    let north_z = select(sample_z - 1u, sample_z, sample_z == 0u);
-    let south_z = min(sample_z + 1u, samples_per_axis - 1u);
-    let left = selected_sample(sample_z * samples_per_axis + left_x, instance_index);
-    let right = selected_sample(sample_z * samples_per_axis + right_x, instance_index);
-    let north = selected_sample(north_z * samples_per_axis + sample_x, instance_index);
-    let south = selected_sample(south_z * samples_per_axis + sample_x, instance_index);
+    let radius = sample_halo_radius();
+    let cells_i = i32(cells);
+    let left_x = max(logical_x - 1, -radius);
+    let right_x = min(logical_x + 1, cells_i + radius);
+    let north_z = max(logical_z - 1, -radius);
+    let south_z = min(logical_z + 1, cells_i + radius);
+    let left = selected_grid_sample(left_x, logical_z, instance_index);
+    let right = selected_grid_sample(right_x, logical_z, instance_index);
+    let north = selected_grid_sample(logical_x, north_z, instance_index);
+    let south = selected_grid_sample(logical_x, south_z, instance_index);
     let sample_spacing = max(f32(params.origin_spacing_cells.z), 1.0);
-    let slope_x = (right.terrain.y - left.terrain.y)
+    let narrow_slope_x = (right.terrain.y - left.terrain.y)
         / max(f32(right_x - left_x) * sample_spacing, 1.0);
-    let slope_z = (south.terrain.y - north.terrain.y)
+    let narrow_slope_z = (south.terrain.y - north.terrain.y)
         / max(f32(south_z - north_z) * sample_spacing, 1.0);
+    let wide_left_x = max(logical_x - 2, -radius);
+    let wide_right_x = min(logical_x + 2, cells_i + radius);
+    let wide_north_z = max(logical_z - 2, -radius);
+    let wide_south_z = min(logical_z + 2, cells_i + radius);
+    let wide_left = selected_grid_sample(wide_left_x, logical_z, instance_index);
+    let wide_right = selected_grid_sample(wide_right_x, logical_z, instance_index);
+    let wide_north = selected_grid_sample(logical_x, wide_north_z, instance_index);
+    let wide_south = selected_grid_sample(logical_x, wide_south_z, instance_index);
+    let wide_slope_x = (wide_right.terrain.y - wide_left.terrain.y)
+        / max(f32(wide_right_x - wide_left_x) * sample_spacing, 1.0);
+    let wide_slope_z = (wide_south.terrain.y - wide_north.terrain.y)
+        / max(f32(wide_south_z - wide_north_z) * sample_spacing, 1.0);
+    let coarse_footprint_weight = terrain_horizon_coarse_footprint_weight(
+        logical_x,
+        logical_z,
+        cells_i,
+    );
+    let slope_x = mix(narrow_slope_x, wide_slope_x, coarse_footprint_weight);
+    let slope_z = mix(narrow_slope_z, wide_slope_z, coarse_footprint_weight);
     let normal = normalize(vec3<f32>(-slope_x * 4.0, 1.0, -slope_z * 4.0));
     let light = clamp(dot(normal, normalize(vec3<f32>(-0.45, 0.82, -0.35))) * 0.48 + 0.58, 0.34, 1.05);
 

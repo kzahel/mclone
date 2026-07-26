@@ -27,6 +27,8 @@ struct U64 {
     high: u32,
 };
 
+const TERRAIN_HORIZON_SAMPLE_HALO_FLAG: u32 = 0x80000000u;
+
 // Rust replaces this marker with domains and scales from the production spec.
 // __MCLONE_PRODUCTION_FIELD_CONSTANTS__
 
@@ -1197,14 +1199,23 @@ fn forest_footprint_summary(world_x: i32, world_z: i32, sample_spacing: i32) -> 
 
 @compute @workgroup_size(8, 8, 1)
 fn compute_main(@builtin(global_invocation_id) invocation: vec3<u32>) {
-    let samples_per_axis = params.layer_samples_size.y;
-    if invocation.x >= samples_per_axis || invocation.y >= samples_per_axis {
+    let drawn_samples_per_axis = params.layer_samples_size.y;
+    let halo_radius = select(
+        0u,
+        2u,
+        (params.content_stage_flags.w & TERRAIN_HORIZON_SAMPLE_HALO_FLAG) != 0u,
+    );
+    let storage_samples_per_axis = drawn_samples_per_axis + halo_radius * 2u;
+    if invocation.x >= storage_samples_per_axis
+        || invocation.y >= storage_samples_per_axis {
         return;
     }
     let sample_spacing = params.origin_spacing_cells.z;
-    let world_x = params.origin_spacing_cells.x + i32(invocation.x) * sample_spacing;
-    let world_z = params.origin_spacing_cells.y + i32(invocation.y) * sample_spacing;
-    let index = invocation.y * samples_per_axis + invocation.x;
+    let logical_x = i32(invocation.x) - i32(halo_radius);
+    let logical_z = i32(invocation.y) - i32(halo_radius);
+    let world_x = params.origin_spacing_cells.x + logical_x * sample_spacing;
+    let world_z = params.origin_spacing_cells.y + logical_z * sample_spacing;
+    let index = invocation.y * storage_samples_per_axis + invocation.x;
     var sample = evaluate_point(world_x, world_z);
     if params.content_stage_flags.x >= 4u {
         var forest = point_forest_intent(world_x, world_z, sample);

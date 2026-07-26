@@ -308,6 +308,9 @@ impl SmokeRecorder {
         let service = stats.vegetation_service;
         ensure!(
             stats.staging_slots == 70
+                && stats.normal_halo_radius == 2
+                && stats.normal_halo_samples_per_tile == 536
+                && stats.normal_halo_fixed_bytes == 15_779_840
                 && stats.staged_levels == 0
                 && stats.committed_levels == 10
                 && stats.vegetation_committed_levels == 3
@@ -349,6 +352,9 @@ impl SmokeRecorder {
             "vegetation_bytes": stats.vegetation_bytes,
             "allocation_slots": stats.allocation_slots,
             "staging_slots": stats.staging_slots,
+            "normal_halo_radius": stats.normal_halo_radius,
+            "normal_halo_samples_per_tile": stats.normal_halo_samples_per_tile,
+            "normal_halo_fixed_bytes": stats.normal_halo_fixed_bytes,
             "ready_slots": stats.ready_slots,
             "requested_levels": stats.requested_levels,
             "staged_levels": stats.staged_levels,
@@ -410,6 +416,7 @@ impl SmokeRecorder {
             "peak_pending_work": self.peak_pending_work,
             "final_resident_bytes": final_stats.resident_bytes,
             "fixed_resident_bytes": final_stats.fixed_resident_bytes,
+            "normal_halo_fixed_bytes": final_stats.normal_halo_fixed_bytes,
             "final_vegetation_bytes": final_stats.vegetation_bytes,
             "allocation_slots": final_stats.allocation_slots,
             "final_ready_slots": final_stats.ready_slots,

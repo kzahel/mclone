@@ -2,8 +2,8 @@
 
 Status: active 2026-07-26. The original diagnosis predates Tacticals
 253–256; desktop and browser review after the shared vegetation-worker
-cutover confirmed the transition defect on both executors. Slices 0–1 are
-complete and Slice 2 is next.
+cutover confirmed the transition defect on both executors. Slices 0–2 are
+complete and Slice 3 is next.
 
 Topic: `procedural-horizon-clipmap`
 
@@ -184,11 +184,45 @@ previous `2,609`-tree presentation until the replacement forest committed.
 
 ### Slice 2: shared normal halo and fine/coarse seam policy
 
+Status: complete 2026-07-26.
+
 1. Evaluate one world-space sample beyond every drawn tile edge.
 2. Derive same-LOD edge normals from identical absolute neighbor samples.
 3. Keep halo values out of drawn topology and report their fixed cost.
 4. Select and prove a bounded fine/coarse normal policy without alpha
    crossfades or device-dependent work spikes.
+
+The horizon now stores a fixed two-sample halo around each tile: `69x69`
+samples for the unchanged `65x65` drawn vertices and `64x64` cells. The first
+halo sample makes both sides of a same-LOD tile border use the same absolute
+central-difference inputs. The second implements the fine/coarse policy: over
+the outer two-cell collar of every fine level except the coarsest ring, the
+normal footprint widens smoothly from one to two fine samples. At the shared
+edge that is exactly the adjacent coarse level's one-sample world footprint.
+The shader changes neither topology nor fragment ownership and uses no alpha
+crossfade.
+
+Each resource stores `536` additional samples, a `12.7%` sample/dispatch
+increase over the drawn grid and `68,608` bytes per resource. Across the 230
+fixed resources this is `15,779,840` bytes. Fixed residency therefore rose
+from the Slice 1 value of `124,457,600` to `140,237,440` bytes and remains
+constant across every transition.
+
+The shader-layout tests prove the fixed `65`/`69` topology split, outer-edge
+selection, and identical fine-wide/coarse-narrow world footprints. All 49
+terrain-view tests and the native/Wasm Explorer tests pass. The aligned
+native/offscreen smoke completed with the new allocation and visually
+inspected 3D, movement, negative, teleport, map, and orbit captures. In the
+same local lane, process time to the first complete target rose from
+`354.9 ms` to `399.3 ms`; movement mean/P95 encode time rose from
+`2.52/4.19 ms` to `3.31/5.68 ms`.
+
+The headed Wayland desktop-browser lane also passed initial, pointer,
+shift-pan, two-contact, forced Worker restart plus held motion, negative,
+teleport, and shutdown checks. Its inspected movement capture retained a
+coherent forest and surface; all checkpoints reported the exact
+`15,779,840`-byte halo. The Wasm artifact is `1,708,486` bytes, `4,777` bytes
+larger than Slice 1.
 
 ### Slice 3: cross-host closeout
 

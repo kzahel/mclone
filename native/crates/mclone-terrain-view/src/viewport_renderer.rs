@@ -54,6 +54,12 @@ const TERRAIN_PREVIEW_TREE_INSTANCE_FLOATS: usize = 12;
 const TERRAIN_PREVIEW_TREE_INSTANCE_BYTES: u64 =
     (TERRAIN_PREVIEW_TREE_INSTANCE_FLOATS * size_of::<f32>()) as u64;
 const TERRAIN_PREVIEW_TREE_VERTICES_PER_INSTANCE: u32 = 108;
+const TERRAIN_HORIZON_NORMAL_HALO_RADIUS: u32 = 2;
+const TERRAIN_HORIZON_SAMPLE_HALO_FLAG: u32 = 1 << 31;
+const TERRAIN_HORIZON_NORMAL_EDGE_WEST: u32 = 1 << 27;
+const TERRAIN_HORIZON_NORMAL_EDGE_EAST: u32 = 1 << 28;
+const TERRAIN_HORIZON_NORMAL_EDGE_NORTH: u32 = 1 << 29;
+const TERRAIN_HORIZON_NORMAL_EDGE_SOUTH: u32 = 1 << 30;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct TerrainViewportFrameStats {
@@ -144,6 +150,9 @@ pub struct TerrainHorizonFrameStats {
     pub revision: u64,
     pub allocation_slots: u32,
     pub staging_slots: u32,
+    pub normal_halo_radius: u32,
+    pub normal_halo_samples_per_tile: u32,
+    pub normal_halo_fixed_bytes: u64,
     pub ready_slots: u32,
     pub requested_levels: u32,
     pub staged_levels: u32,
@@ -2293,6 +2302,7 @@ impl TerrainHorizonRenderer {
         )?;
         let admission = TerrainHorizonAdmission::new(config.level_count, config.slots_per_level())?;
         let mut slots = Vec::with_capacity(config.allocation_slots() as usize);
+        let horizon_sample_byte_len = terrain_horizon_sample_byte_len()?;
         let resource_slots_per_level = config
             .slots_per_level()
             .checked_add(TERRAIN_HORIZON_STAGING_SLOTS_PER_LEVEL)
@@ -2303,7 +2313,7 @@ impl TerrainHorizonRenderer {
                     device,
                     &renderer.compute_layout,
                     &renderer.render_layout,
-                    renderer.sample_byte_len,
+                    horizon_sample_byte_len,
                     TerrainViewportTileId {
                         profile: TerrainPreviewProfile::McloneOverworldV1,
                         seed: 0,
@@ -2468,7 +2478,7 @@ impl TerrainHorizonRenderer {
             queue.write_buffer(
                 &slot.uniform_buffer,
                 0,
-                &viewport_uniform_bytes_for_request_with_presentation(
+                &terrain_horizon_uniform_bytes(
                     slot.request,
                     width,
                     height,
@@ -2477,6 +2487,7 @@ impl TerrainHorizonRenderer {
                     uniform_presentation,
                     focus_y,
                     None,
+                    0,
                 ),
             );
             {
@@ -2486,8 +2497,8 @@ impl TerrainHorizonRenderer {
                 });
                 pass.set_pipeline(&self.renderer.compute_pipeline);
                 pass.set_bind_group(0, &slot.compute_bind_group, &[]);
-                let workgroups = (TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS + 1)
-                    .div_ceil(TERRAIN_PREVIEW_WORKGROUP_AXIS);
+                let workgroups =
+                    terrain_horizon_samples_per_axis().div_ceil(TERRAIN_PREVIEW_WORKGROUP_AXIS);
                 pass.dispatch_workgroups(workgroups, workgroups, 1);
             }
             slot.gpu_submitted = true;
@@ -2549,7 +2560,7 @@ impl TerrainHorizonRenderer {
                 queue.write_buffer(
                     &slot.uniform_buffer,
                     0,
-                    &viewport_uniform_bytes_for_request_with_presentation(
+                    &terrain_horizon_uniform_bytes(
                         slot.request,
                         width,
                         height,
@@ -2558,6 +2569,11 @@ impl TerrainHorizonRenderer {
                         uniform_presentation,
                         focus_y,
                         inner_hole,
+                        terrain_horizon_outer_edge_flags(
+                            level,
+                            resource.tile,
+                            self.clipmap.config().level_count,
+                        ),
                     ),
                 );
             }
@@ -2573,7 +2589,7 @@ impl TerrainHorizonRenderer {
                 queue.write_buffer(
                     &slot.tree_uniform_buffer,
                     0,
-                    &viewport_uniform_bytes_for_request_with_presentation(
+                    &terrain_horizon_uniform_bytes(
                         slot.request,
                         width,
                         height,
@@ -2582,6 +2598,7 @@ impl TerrainHorizonRenderer {
                         uniform_presentation,
                         focus_y,
                         inner_hole,
+                        0,
                     ),
                 );
             }
@@ -2666,9 +2683,12 @@ impl TerrainHorizonRenderer {
         let vertex_count = drawn_tiles
             .saturating_mul(TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS.pow(2) * 6)
             .saturating_add(tree_proxy_vertex_count);
+        let normal_halo_samples_per_tile = terrain_horizon_normal_halo_samples_per_tile();
+        let normal_halo_fixed_bytes = u64::from(self.admission.resource_slots())
+            .saturating_mul(u64::from(normal_halo_samples_per_tile))
+            .saturating_mul(TERRAIN_PREVIEW_SAMPLE_BYTES);
         let fixed_resident_bytes = u64::from(self.admission.resource_slots()).saturating_mul(
-            self.renderer
-                .sample_byte_len
+            terrain_horizon_sample_byte_len()?
                 .saturating_add(TERRAIN_PREVIEW_UNIFORM_BYTES.saturating_mul(2)),
         );
         let vegetation_bytes = self
@@ -2723,6 +2743,9 @@ impl TerrainHorizonRenderer {
             revision: self.clipmap.diagnostics().revision,
             allocation_slots,
             staging_slots: admission_diagnostics.staging_slots,
+            normal_halo_radius: TERRAIN_HORIZON_NORMAL_HALO_RADIUS,
+            normal_halo_samples_per_tile,
+            normal_halo_fixed_bytes,
             ready_slots,
             requested_levels: admission_diagnostics.requested_levels,
             staged_levels: admission_diagnostics.staged_levels,
@@ -2885,6 +2908,126 @@ fn finer_level_bounds(
         .iter()
         .find(|candidate| candidate.snapshot.level == finer)
         .map(|candidate| candidate.snapshot.bounds)
+}
+
+fn terrain_horizon_samples_per_axis() -> u32 {
+    TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS
+        .saturating_add(1)
+        .saturating_add(TERRAIN_HORIZON_NORMAL_HALO_RADIUS.saturating_mul(2))
+}
+
+fn terrain_horizon_normal_halo_samples_per_tile() -> u32 {
+    let drawn_samples_per_axis = TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS.saturating_add(1);
+    terrain_horizon_samples_per_axis()
+        .saturating_mul(terrain_horizon_samples_per_axis())
+        .saturating_sub(drawn_samples_per_axis.saturating_mul(drawn_samples_per_axis))
+}
+
+fn terrain_horizon_sample_byte_len() -> Result<u64, String> {
+    let samples_per_axis = terrain_horizon_samples_per_axis();
+    u64::from(
+        samples_per_axis
+            .checked_mul(samples_per_axis)
+            .ok_or("terrain horizon halo sample count overflow")?,
+    )
+    .checked_mul(TERRAIN_PREVIEW_SAMPLE_BYTES)
+    .ok_or_else(|| "terrain horizon halo sample byte size overflow".to_owned())
+}
+
+#[allow(clippy::too_many_arguments)]
+fn terrain_horizon_uniform_bytes(
+    request: ValidatedTerrainPreviewRequest,
+    width: u32,
+    height: u32,
+    options: TerrainPreviewDrawOptions,
+    camera: TerrainPreviewCamera,
+    presentation: super::TerrainPreviewUniformPresentation,
+    focus_y: f32,
+    inner_hole: Option<super::TerrainClipmapBounds>,
+    normal_edge_flags: u32,
+) -> Vec<u8> {
+    debug_assert_eq!(
+        normal_edge_flags
+            & !(TERRAIN_HORIZON_NORMAL_EDGE_WEST
+                | TERRAIN_HORIZON_NORMAL_EDGE_EAST
+                | TERRAIN_HORIZON_NORMAL_EDGE_NORTH
+                | TERRAIN_HORIZON_NORMAL_EDGE_SOUTH),
+        0
+    );
+    let mut bytes = viewport_uniform_bytes_for_request_with_presentation(
+        request,
+        width,
+        height,
+        options,
+        camera,
+        presentation,
+        focus_y,
+        inner_hole,
+    );
+    const CONTENT_STAGE_FLAGS_W_OFFSET: usize = 8 * 16 + 3 * 4;
+    let flag_bytes = bytes
+        .get_mut(CONTENT_STAGE_FLAGS_W_OFFSET..CONTENT_STAGE_FLAGS_W_OFFSET + 4)
+        .expect("terrain preview uniform content flags remain present");
+    let flags = u32::from_le_bytes(
+        flag_bytes
+            .try_into()
+            .expect("terrain preview uniform flag word remains four bytes"),
+    ) | TERRAIN_HORIZON_SAMPLE_HALO_FLAG
+        | normal_edge_flags;
+    flag_bytes.copy_from_slice(&flags.to_le_bytes());
+    bytes
+}
+
+fn terrain_horizon_outer_edge_flags(
+    level: &TerrainHorizonLevelPresentation,
+    tile: TerrainClipmapTile,
+    level_count: u32,
+) -> u32 {
+    if level.snapshot.level.saturating_add(1) >= level_count {
+        return 0;
+    }
+    let min_tile_x = level
+        .snapshot
+        .tiles
+        .iter()
+        .map(|tile| tile.tile_x)
+        .min()
+        .unwrap_or(tile.tile_x);
+    let max_tile_x = level
+        .snapshot
+        .tiles
+        .iter()
+        .map(|tile| tile.tile_x)
+        .max()
+        .unwrap_or(tile.tile_x);
+    let min_tile_z = level
+        .snapshot
+        .tiles
+        .iter()
+        .map(|tile| tile.tile_z)
+        .min()
+        .unwrap_or(tile.tile_z);
+    let max_tile_z = level
+        .snapshot
+        .tiles
+        .iter()
+        .map(|tile| tile.tile_z)
+        .max()
+        .unwrap_or(tile.tile_z);
+    let mut flags = 0;
+    if tile.tile_x == min_tile_x {
+        flags |= TERRAIN_HORIZON_NORMAL_EDGE_WEST;
+    }
+    if tile.tile_x == max_tile_x {
+        flags |= TERRAIN_HORIZON_NORMAL_EDGE_EAST;
+    }
+    if tile.tile_z == min_tile_z {
+        flags |= TERRAIN_HORIZON_NORMAL_EDGE_NORTH;
+    }
+    if tile.tile_z == max_tile_z {
+        flags |= TERRAIN_HORIZON_NORMAL_EDGE_SOUTH;
+    }
+    flags
 }
 
 fn terrain_horizon_tile_id(
@@ -3153,6 +3296,85 @@ mod tests {
             mclone_worldgen::terrain_preview::TERRAIN_PREVIEW_SAMPLE_FLOATS,
             usize::try_from(TERRAIN_PREVIEW_SAMPLE_BYTES / 4).unwrap()
         );
+    }
+
+    #[test]
+    fn horizon_halo_keeps_draw_topology_fixed_and_reports_its_cost() {
+        let drawn_samples_per_axis = TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS + 1;
+        assert_eq!(drawn_samples_per_axis, 65);
+        assert_eq!(terrain_horizon_samples_per_axis(), 69);
+        assert_eq!(terrain_horizon_normal_halo_samples_per_tile(), 536);
+        assert_eq!(
+            terrain_horizon_sample_byte_len().unwrap(),
+            u64::from(69_u32.pow(2)) * TERRAIN_PREVIEW_SAMPLE_BYTES
+        );
+    }
+
+    #[test]
+    fn horizon_outer_edges_select_the_coarse_normal_footprint() {
+        let mut clipmap = TerrainClipmap::new(TerrainClipmapConfig {
+            level_count: 2,
+            tiles_per_axis: 4,
+            base_sample_spacing: 1,
+        })
+        .unwrap();
+        clipmap.update_center(0, 0);
+        let snapshots = clipmap.levels();
+        let presentation =
+            |snapshot: super::super::TerrainClipmapLevelSnapshot| TerrainHorizonLevelPresentation {
+                tiles: snapshot
+                    .tiles
+                    .iter()
+                    .enumerate()
+                    .map(|(slot, tile)| TerrainHorizonResourceTile {
+                        tile: *tile,
+                        resource_slot: slot as u32,
+                        slot_generation: 1,
+                    })
+                    .collect(),
+                snapshot,
+            };
+        let fine = presentation(snapshots[0].clone());
+        let west_north = fine
+            .tiles
+            .iter()
+            .find(|resource| {
+                resource.tile.tile_x == fine.snapshot.origin_tile_x
+                    && resource.tile.tile_z == fine.snapshot.origin_tile_z
+            })
+            .unwrap()
+            .tile;
+        assert_eq!(
+            terrain_horizon_outer_edge_flags(&fine, west_north, 2),
+            TERRAIN_HORIZON_NORMAL_EDGE_WEST | TERRAIN_HORIZON_NORMAL_EDGE_NORTH
+        );
+        let interior = fine
+            .tiles
+            .iter()
+            .find(|resource| {
+                resource.tile.tile_x == fine.snapshot.origin_tile_x + 1
+                    && resource.tile.tile_z == fine.snapshot.origin_tile_z + 1
+            })
+            .unwrap()
+            .tile;
+        assert_eq!(terrain_horizon_outer_edge_flags(&fine, interior, 2), 0);
+
+        let coarse = presentation(snapshots[1].clone());
+        assert_eq!(
+            terrain_horizon_outer_edge_flags(&coarse, coarse.tiles[0].tile, 2),
+            0
+        );
+
+        let shared_boundary = 256_i32;
+        let fine_wide_footprint = (
+            shared_boundary - 2 * fine.snapshot.sample_spacing as i32,
+            shared_boundary + 2 * fine.snapshot.sample_spacing as i32,
+        );
+        let coarse_narrow_footprint = (
+            shared_boundary - coarse.snapshot.sample_spacing as i32,
+            shared_boundary + coarse.snapshot.sample_spacing as i32,
+        );
+        assert_eq!(fine_wide_footprint, coarse_narrow_footprint);
     }
 
     #[test]
