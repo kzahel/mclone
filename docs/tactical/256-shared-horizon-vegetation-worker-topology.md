@@ -1,7 +1,7 @@
 # Tactical 256: Shared Horizon Vegetation Worker Topology
 
-Status: active; architecture checkpoint and Slice 0 ownership locks completed
-2026-07-26. Slice 1 is next.
+Status: active; architecture checkpoint and Slices 0–1 completed 2026-07-26.
+Slice 2 is next.
 
 Topics:
 
@@ -471,12 +471,23 @@ Status: complete 2026-07-26.
 
 ### Slice 1: shared compiler session and codec
 
+Status: complete 2026-07-26.
+
 1. Extract synchronous vegetation compilation from renderer encoding into a
    stateful `mclone-worldgen` job compiler callable by either executor.
 2. Preserve byte-identical cold/warm products and the existing bounded
    planning-cell cache behavior.
 3. Round-trip and bounds-test the versioned `MCHV` codec, including empty
    products, maximum counts, malformed input, overflow, and stable hashes.
+
+`TerrainVegetationCompilerSession` now owns the existing bounded planning-cell
+cache and resets it on complete semantic source identity changes. The
+worldgen-only MCHV codec carries validated preview requests and opaque numeric
+correlation values without depending on terrain-view. Native/Wasm checks and
+the complete worldgen suite pass, including cold/warm semantic receipts,
+alternating topology/seed sources, every command/result kind, fixed 80-byte
+occurrences, maximum overflow, and malformed magic/version/kind/enum/count/
+reserved/receipt/trailing-byte rejection.
 
 ### Slice 2: shared coordinator
 

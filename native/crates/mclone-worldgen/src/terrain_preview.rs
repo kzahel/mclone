@@ -1037,6 +1037,73 @@ impl TerrainPreviewVegetationProduct {
             .len()
             .saturating_mul(std::mem::size_of::<McloneTreeOccurrence>())
     }
+
+    pub(crate) fn from_codec_parts(
+        request: TerrainPreviewRequest,
+        summary_available: bool,
+        records_requested: bool,
+        records_aggregated: bool,
+        occurrences: Vec<McloneTreeOccurrence>,
+        cache_report: McloneVegetationPlanCacheReport,
+    ) -> Result<Self, String> {
+        let request = request.validate()?;
+        let source = request.request();
+        let expected_summary = source.profile == TerrainPreviewProfile::McloneOverworldV1
+            && source.content_stage == TerrainPreviewContentStage::Cover;
+        let expected_records =
+            expected_summary && terrain_preview_requests_tree_records(source.sample_spacing);
+        if summary_available != expected_summary
+            || records_requested != expected_records
+            || records_aggregated != (expected_summary && !expected_records)
+        {
+            return Err("terrain vegetation product flags do not match its request".to_owned());
+        }
+        if !expected_records && !occurrences.is_empty() {
+            return Err(
+                "terrain vegetation product contains records for an aggregate-only request"
+                    .to_owned(),
+            );
+        }
+        if cache_report.cell_hits > cache_report.cell_requests
+            || cache_report.cell_misses
+                != cache_report
+                    .cell_requests
+                    .saturating_sub(cache_report.cell_hits)
+        {
+            return Err("terrain vegetation cache report is inconsistent".to_owned());
+        }
+
+        let footprint = i32::try_from(request.footprint_blocks())
+            .map_err(|_| "terrain vegetation product footprint exceeds i32")?;
+        for occurrence in &occurrences {
+            let base = occurrence
+                .working_base()
+                .map_err(|error| error.to_string())?;
+            if base.x < request.min_x()
+                || base.x >= request.min_x() + footprint
+                || base.z < request.min_z()
+                || base.z >= request.min_z() + footprint
+                || !terrain_preview_tree_record_admitted(
+                    source.sample_spacing,
+                    occurrence.record.landmark_rank,
+                )
+            {
+                return Err("terrain vegetation occurrence is outside request admission".to_owned());
+            }
+        }
+        if occurrences.windows(2).any(|pair| pair[0] > pair[1]) {
+            return Err("terrain vegetation occurrences are not stably ordered".to_owned());
+        }
+
+        Ok(Self {
+            request,
+            summary_available,
+            records_requested,
+            records_aggregated,
+            occurrences,
+            cache_report,
+        })
+    }
 }
 
 pub const fn terrain_preview_requests_tree_records(sample_spacing: u32) -> bool {
