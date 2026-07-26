@@ -37,6 +37,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `dynamic-point-lights` — presentation-side finite-radius point lights,
   many-light admission, voxel-DDA and entity-shadow experiments, shadow
   technique comparison, and shared mono/XR validation
+- `water-reflections` — optional environment and screen-space water
+  reflections, surface eligibility, shared render architecture, quality tiers,
+  XR constraints, and measurement-led experiments
 - `lush-grass-rendering` — dense biome-tinted procedural grass, patch
   instancing, distance LOD, wind, entity interaction, and cross-view rendering
   research/direction

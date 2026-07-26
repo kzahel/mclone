@@ -280,6 +280,9 @@ series implements the same concern, normally reuse the document slug in its
 - [`dynamic-point-lights.md`](dynamic-point-lights.md): presentation-side
   finite-radius point lights, many-light admission, voxel-DDA and entity-shadow
   options, cubemap/stencil comparisons, and shared mono/XR validation direction.
+- [`water-reflections.md`](water-reflections.md): optional environment and
+  screen-space water reflections, surface eligibility, shared render
+  architecture, quality tiers, XR constraints, and measurement-led experiments.
 - [`performance.md`](performance.md): high-priority known performance issues,
   low-hanging pickup guidance, native baselines, the broader priority queue,
   and Java-shaped render/scheduling follow-ups.
