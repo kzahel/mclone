@@ -159,6 +159,14 @@ frame consumes no idle time; and blur, visibility loss, focus loss, key
 release, or cancellation clears motion. Browser JavaScript forwards rAF time
 and raw events without owning a direction table or speed.
 
+Held directions describe viewport-relative navigation rather than absolute
+world axes. In orbit mode, forward/backward use the camera's ground-plane
+heading and left/right use its ground-plane screen-horizontal axis, so
+rotating the view rotates Arrow/WASD movement with it. Map mode intentionally
+retains cardinal screen axes because its heading is fixed. The shared reducer
+owns this transform; native and browser hosts continue to forward only
+abstract directions.
+
 Real two-contact headed-browser gestures produced fractional focus on desktop
 and phone without changing residency revision, refill totals, rebases, or the
 160-slot allocation. Successive held-key rAF reports crossed integer and tile

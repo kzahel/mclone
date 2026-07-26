@@ -274,16 +274,31 @@ function assertPresentationOnly(before, after, stage) {
 }
 
 function assertHeldSamples(samples, before) {
-  const moving = samples.filter((sample) => sample.focusX > before.focusX);
-  const distinct = new Set(moving.map((sample) => sample.focusX.toFixed(6)));
-  const deltas = moving.map((sample, index) => (
-    sample.focusX - (index === 0 ? before.focusX : moving[index - 1].focusX)
+  const expectedX = -Math.sin(before.yawRadians);
+  const expectedZ = -Math.cos(before.yawRadians);
+  const moving = samples.filter((sample) => (
+    Math.hypot(sample.focusX - before.focusX, sample.focusZ - before.focusZ) > 0.001
   ));
+  const distinct = new Set(moving.map((sample) => (
+    `${sample.focusX.toFixed(6)}:${sample.focusZ.toFixed(6)}`
+  )));
+  const deltas = moving.map((sample, index) => {
+    const previous = index === 0 ? before : moving[index - 1];
+    const deltaX = sample.focusX - previous.focusX;
+    const deltaZ = sample.focusZ - previous.focusZ;
+    return {
+      alongHeading: deltaX * expectedX + deltaZ * expectedZ,
+      acrossHeading: deltaX * -expectedZ + deltaZ * expectedX,
+    };
+  });
   if (distinct.size < 3
-      || moving.some((sample) => sample.focusZ !== before.focusZ)
-      || deltas.some((delta) => delta < 0.0 || delta > 200.0)) {
+      || deltas.some(({ alongHeading, acrossHeading }) => (
+        alongHeading < 0.0
+        || alongHeading > 200.0
+        || Math.abs(acrossHeading) > 0.001
+      ))) {
     throw new Error(
-      `held movement was not smoothly frame-timed:\n`
+      `held movement was not smoothly frame-timed and camera-relative:\n`
         + `${JSON.stringify({ before, deltas, samples }, null, 2)}`,
     );
   }

@@ -128,18 +128,19 @@ impl WorldViewHeldMotion {
             .saturating_sub(previous)
             .as_secs_f64()
             .min(WORLD_VIEW_MAX_HELD_STEP_SECONDS);
-        let horizontal = f64::from(self.right as u8) - f64::from(self.left as u8);
-        let vertical = f64::from(self.backward as u8) - f64::from(self.forward as u8);
-        if (horizontal == 0.0 && vertical == 0.0) || delta_seconds <= 0.0 {
+        let right = f64::from(self.right as u8) - f64::from(self.left as u8);
+        let forward = f64::from(self.forward as u8) - f64::from(self.backward as u8);
+        if (right == 0.0 && forward == 0.0) || delta_seconds <= 0.0 {
             return None;
         }
-        let length = horizontal.hypot(vertical).max(1.0);
+        let length = right.hypot(forward).max(1.0);
         let distance = finite_positive_or_one(state.blocks_across)
             * WORLD_VIEW_HELD_PAN_FOOTPRINTS_PER_SECOND
             * delta_seconds;
+        let (delta_x, delta_z) = held_pan_axes(state, right / length, forward / length);
         Some(WorldViewIntent::PanWorld {
-            delta_x: horizontal / length * distance,
-            delta_z: vertical / length * distance,
+            delta_x: delta_x * distance,
+            delta_z: delta_z * distance,
         })
     }
 }
@@ -644,6 +645,19 @@ fn grab_pan(state: &mut WorldViewState, delta: ViewPoint, viewport: ViewportMetr
     }
 }
 
+fn held_pan_axes(state: WorldViewState, right: f64, forward: f64) -> (f64, f64) {
+    match state.mode {
+        WorldViewMode::Map => (right, -forward),
+        WorldViewMode::Orbit => {
+            let (sin_yaw, cos_yaw) = state.yaw_radians.sin_cos();
+            (
+                -sin_yaw * right - cos_yaw * forward,
+                -cos_yaw * right + sin_yaw * forward,
+            )
+        }
+    }
+}
+
 fn anchored_zoom(
     state: &mut WorldViewState,
     log_delta: f64,
@@ -750,12 +764,73 @@ mod tests {
         let at_120_hz = held_motion_after_steps(120);
         let expected =
             WorldViewState::default().blocks_across * WORLD_VIEW_HELD_PAN_FOOTPRINTS_PER_SECOND;
+        let expected_axis = -expected * std::f64::consts::FRAC_1_SQRT_2;
 
-        assert_near(at_60_hz.focus_x, expected);
-        assert_near(at_120_hz.focus_x, expected);
+        assert_near(at_60_hz.focus_x, expected_axis);
+        assert_near(at_120_hz.focus_x, expected_axis);
         assert_near(at_60_hz.focus_x, at_120_hz.focus_x);
-        assert_eq!(at_60_hz.focus_z, 0.0);
-        assert_eq!(at_120_hz.focus_z, 0.0);
+        assert_near(at_60_hz.focus_z, expected_axis);
+        assert_near(at_120_hz.focus_z, expected_axis);
+        assert_near(at_60_hz.focus_z, at_120_hz.focus_z);
+    }
+
+    #[test]
+    fn held_motion_follows_orbit_heading() {
+        fn delta_for(yaw_radians: f64, direction: WorldViewHeldDirection) -> (f64, f64) {
+            let state = WorldViewState {
+                blocks_across: 1_000.0,
+                yaw_radians,
+                ..WorldViewState::default()
+            };
+            let mut motion = WorldViewHeldMotion::default();
+            motion.set_direction(direction, true);
+            assert_eq!(motion.advance(state, Duration::ZERO), None);
+            let WorldViewIntent::PanWorld { delta_x, delta_z } =
+                motion.advance(state, Duration::from_millis(100)).unwrap()
+            else {
+                panic!("held motion must produce a world pan");
+            };
+            (delta_x, delta_z)
+        }
+
+        let (forward_x, forward_z) = delta_for(0.0, WorldViewHeldDirection::Forward);
+        assert_near(forward_x, -40.0);
+        assert_near(forward_z, 0.0);
+        let (right_x, right_z) = delta_for(0.0, WorldViewHeldDirection::Right);
+        assert_near(right_x, 0.0);
+        assert_near(right_z, -40.0);
+
+        let (rotated_forward_x, rotated_forward_z) =
+            delta_for(std::f64::consts::FRAC_PI_2, WorldViewHeldDirection::Forward);
+        assert_near(rotated_forward_x, 0.0);
+        assert_near(rotated_forward_z, 40.0);
+        let (rotated_right_x, rotated_right_z) =
+            delta_for(std::f64::consts::FRAC_PI_2, WorldViewHeldDirection::Right);
+        assert_near(rotated_right_x, -40.0);
+        assert_near(rotated_right_z, 0.0);
+    }
+
+    #[test]
+    fn held_motion_keeps_map_axes_cardinal() {
+        let state = WorldViewState {
+            mode: WorldViewMode::Map,
+            blocks_across: 1_000.0,
+            yaw_radians: 1.25,
+            ..WorldViewState::default()
+        };
+        let mut motion = WorldViewHeldMotion::default();
+        motion.set_direction(WorldViewHeldDirection::Right, true);
+        motion.set_direction(WorldViewHeldDirection::Forward, true);
+        assert_eq!(motion.advance(state, Duration::ZERO), None);
+        let WorldViewIntent::PanWorld { delta_x, delta_z } =
+            motion.advance(state, Duration::from_millis(100)).unwrap()
+        else {
+            panic!("held motion must produce a world pan");
+        };
+
+        let expected_axis = 40.0 * std::f64::consts::FRAC_1_SQRT_2;
+        assert_near(delta_x, expected_axis);
+        assert_near(delta_z, -expected_axis);
     }
 
     #[test]
@@ -775,14 +850,15 @@ mod tests {
         };
 
         assert_near(delta_x.hypot(delta_z), 40.0);
-        assert!(delta_x > 0.0);
-        assert!(delta_z < 0.0);
+        assert_near(delta_x, -40.0);
+        assert_near(delta_z, 0.0);
     }
 
     #[test]
     fn held_motion_does_not_consume_idle_time_and_caps_delayed_frames() {
         let state = WorldViewState {
             blocks_across: 1_000.0,
+            yaw_radians: 0.0,
             ..WorldViewState::default()
         };
         let mut motion = WorldViewHeldMotion::default();
@@ -798,8 +874,8 @@ mod tests {
             panic!("held motion must produce a world pan");
         };
 
-        assert_eq!(delta_x, 0.0);
-        assert_near(delta_z, -40.0);
+        assert_near(delta_x, -40.0);
+        assert_eq!(delta_z, 0.0);
     }
 
     #[test]
