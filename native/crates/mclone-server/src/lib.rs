@@ -109,7 +109,7 @@ pub use persistence::{SQLITE_WORLD_DATABASE_FILE, SqliteWorldStore, WORLD_WRITER
 pub use player_chunk_tracking::{
     DimensionInterestSource, ObserverChunkTrackingDiagnostics, ObserverId,
     ObserverSimulationInterest, PlayerChunkTrackingDiagnostics,
-    PlayerChunkTrackingPlayerDiagnostics,
+    PlayerChunkTrackingPlayerDiagnostics, validate_local_integrated_chunk_view_topology,
 };
 pub use players::ServerPlayerId;
 pub use runner::{

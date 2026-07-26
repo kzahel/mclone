@@ -761,8 +761,7 @@ mod native {
         }
 
         pub fn with_local_integrated_chunk_tracking(mut self) -> Self {
-            self.player_chunk_tracking_policy =
-                PlayerChunkTrackingPolicy::java_max().with_unload_hysteresis_chunks(1);
+            self.player_chunk_tracking_policy = PlayerChunkTrackingPolicy::local_integrated();
             self
         }
 

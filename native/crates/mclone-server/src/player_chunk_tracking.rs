@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use mclone_core::{ChunkPos, ChunkSnapshot, HorizontalTopology};
+use mclone_core::{ChunkPos, ChunkSnapshot, HorizontalTopology, TopologyError};
 use mclone_protocol::{ChunkView, SectionBlockUpdate, ServerUpdate, encode_server_update};
 
 use crate::players::ServerPlayerId;
@@ -78,6 +78,10 @@ impl PlayerChunkTrackingPolicy {
         Self::new(JAVA_MAX_VIEW_DISTANCE, JAVA_MAX_VIEW_DISTANCE)
     }
 
+    pub(crate) const fn local_integrated() -> Self {
+        Self::java_max().with_unload_hysteresis_chunks(1)
+    }
+
     pub(crate) const fn with_unload_hysteresis_chunks(mut self, chunks: u32) -> Self {
         self.unload_hysteresis_chunks = chunks;
         self
@@ -118,6 +122,17 @@ impl PlayerChunkTrackingPolicy {
             .chunk_tracking_radius
             .saturating_add(self.unload_hysteresis_chunks)
     }
+}
+
+pub fn validate_local_integrated_chunk_view_topology(
+    topology: HorizontalTopology,
+    requested: &ChunkView,
+) -> Result<(), TopologyError> {
+    topology.validate()?;
+    let policy = PlayerChunkTrackingPolicy::local_integrated();
+    let accepted = policy.clamp_view(requested);
+    topology.validate_one_lift_radius(accepted.chunk_tracking_radius)?;
+    topology.validate_one_lift_radius(policy.unload_radius(&accepted))
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -797,6 +812,29 @@ mod tests {
         assert_eq!(
             policy.clamp_view(&view(ChunkPos::new(0, 0), 100)),
             view(ChunkPos::new(0, 0), JAVA_MAX_VIEW_DISTANCE)
+        );
+    }
+
+    #[test]
+    fn local_integrated_topology_preflight_includes_unload_hysteresis() {
+        let requested = view(ChunkPos::new(0, 0), 3);
+
+        assert_eq!(
+            validate_local_integrated_chunk_view_topology(
+                HorizontalTopology::cylinder_x(0, 8),
+                &requested,
+            ),
+            Err(TopologyError::ViewContainsDuplicateLift {
+                radius: 4,
+                period: 8,
+            })
+        );
+        assert!(
+            validate_local_integrated_chunk_view_topology(
+                HorizontalTopology::cylinder_x(0, 9),
+                &requested,
+            )
+            .is_ok()
         );
     }
 

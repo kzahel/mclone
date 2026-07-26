@@ -22,7 +22,9 @@ use mclone_mesh::{
     RenderSectionKey, TexturedRenderSectionBuildReport, TexturedRenderSectionMesh,
     TexturedRenderSectionMetadata,
 };
-use mclone_protocol::{ClientCommand, ClientEphemeralMessage, ServerUpdate, encode_server_update};
+use mclone_protocol::{
+    ChunkView, ClientCommand, ClientEphemeralMessage, ServerUpdate, encode_server_update,
+};
 use mclone_render_session::{RenderSectionCacheUpdate, RenderSectionCompileQueueHealth};
 use mclone_server::{
     DEFAULT_LIGHT_STATUS_BATCH_SIZE, IntegratedServerRunner, NativeIntegratedServerRunner,
@@ -1022,6 +1024,7 @@ impl LocalIntegratedSceneRuntime<NativeIntegratedServerRunner> {
         options: LocalIntegratedSceneOptions,
         mesh_assets: TexturedMeshAssets,
     ) -> Result<Self> {
+        validate_local_integrated_scene_topology(&options)?;
         let server_runner = NativeIntegratedServerRunner::new(native_runner_config(&options))
             .context("failed to start local integrated server runner")?;
         Self::with_mesh_assets_and_runner(options, mesh_assets, server_runner)
@@ -1039,6 +1042,7 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
         mesh_assets: TexturedMeshAssets,
         server_runner: R,
     ) -> Result<Self> {
+        validate_local_integrated_scene_topology(&options)?;
         let render_compile_dispatcher =
             NativeRenderSectionCompileDispatcher::with_worker_count_and_max_pending_jobs_and_timing(
                 mesh_assets.catalog.clone(),
@@ -3077,6 +3081,7 @@ where
 pub fn build_local_integrated_client_runtime(
     options: LocalIntegratedSceneOptions,
 ) -> Result<ClientRuntime> {
+    validate_local_integrated_scene_topology(&options)?;
     let mut runtime = SingleViewRuntime::local_integrated_with_seed(
         options.seed,
         options.center,
@@ -3129,6 +3134,18 @@ pub fn drain_integrated_server_runner_until_idle(
             std::thread::sleep(Duration::from_millis(1));
         }
     }
+}
+
+fn validate_local_integrated_scene_topology(options: &LocalIntegratedSceneOptions) -> Result<()> {
+    mclone_server::validate_local_integrated_chunk_view_topology(
+        options.world_topology,
+        &ChunkView {
+            center: options.center,
+            render_distance: options.render_distance,
+            chunk_tracking_radius: options.chunk_tracking_radius(),
+        },
+    )
+    .context("local integrated chunk view is incompatible with world topology")
 }
 
 fn native_runner_config(
@@ -3619,6 +3636,22 @@ mod tests {
     }
 
     #[test]
+    fn build_local_integrated_client_runtime_accepts_the_topology_probe_descriptor() {
+        let topology = HorizontalTopology::cylinder_x(0, 32);
+        let options = LocalIntegratedSceneOptions::new(12_345, ChunkPos::new(4, -9), 0)
+            .with_world_generation_profile(WorldGenerationProfile::TopologyProbeV1)
+            .with_world_topology(topology)
+            .with_initial_spawn_center()
+            .with_lighting_enabled(false);
+
+        assert_eq!(options.center, ChunkPos::new(0, 0));
+        let client = build_local_integrated_client_runtime(options).unwrap();
+
+        assert_eq!(client.loaded_chunk_count(), 1);
+        assert!(client.chunk_snapshot(ChunkPos::new(0, 0)).is_some());
+    }
+
+    #[test]
     fn local_integrated_runtime_loads_center_chunk() {
         if !extracted_asset_root().exists() {
             return;
@@ -4033,6 +4066,21 @@ mod tests {
         }
     }
 
+    #[test]
+    fn local_integrated_scene_rejects_duplicate_periodic_view_lifts_before_start() {
+        let options = LocalIntegratedSceneOptions::new(12_345, ChunkPos::new(0, 0), 2)
+            .with_world_generation_profile(WorldGenerationProfile::TopologyProbeV1)
+            .with_world_topology(HorizontalTopology::cylinder_x(0, 8));
+
+        let error = validate_local_integrated_scene_topology(&options).unwrap_err();
+
+        assert!(
+            format!("{error:#}").contains(
+                "local integrated chunk view is incompatible with world topology: view radius 4 would contain duplicate lifts for period 8"
+            )
+        );
+    }
+
     fn wait_for_update_queue_depth(runtime: &LocalIntegratedSceneRuntime, min_depth: usize) {
         let deadline = Instant::now() + Duration::from_secs(5);
         loop {
@@ -4092,6 +4140,45 @@ mod tests {
         }
 
         panic!("startup pump did not reach playable center");
+    }
+
+    #[test]
+    fn topology_probe_startup_pump_reaches_playable_center() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let topology = HorizontalTopology::cylinder_x(0, 32);
+        let options = LocalIntegratedSceneOptions::new(12_345, ChunkPos::new(0, 0), 2)
+            .with_world_generation_profile(WorldGenerationProfile::TopologyProbeV1)
+            .with_world_topology(topology)
+            .with_initial_spawn_center()
+            .with_debug_passive_showcase(false)
+            .with_lighting_enabled(false);
+        let center = options.center;
+        let mut pump = LocalIntegratedStartupPump::with_mesh_assets(
+            options,
+            load_textured_mesh_assets().unwrap(),
+        )
+        .unwrap();
+        let camera_position = Vec3::new(8.0, 80.0, 8.0);
+        let deadline = Instant::now() + Duration::from_secs(30);
+
+        loop {
+            let step = pump.step(camera_position).unwrap();
+            if step.playable_ready {
+                assert!(step.cached_section_count > 0);
+                assert!(step.render_seed_drawable_section_count > 0);
+                assert_eq!(topology.canonicalize_chunk(center), Some(center));
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "topology probe startup did not reach playable; last_step={step:?} diagnostics={:?}",
+                pump.runtime().server_runner_diagnostics()
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
     }
 
     #[test]
