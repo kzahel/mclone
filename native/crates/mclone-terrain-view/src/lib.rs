@@ -2,6 +2,7 @@
 
 mod canonical;
 mod clipmap;
+mod terrain_vegetation_coordinator;
 mod viewport;
 mod viewport_renderer;
 
@@ -28,6 +29,14 @@ pub use clipmap::{
     TERRAIN_CLIPMAP_DEFAULT_LEVEL_COUNT, TERRAIN_CLIPMAP_DEFAULT_TILES_PER_AXIS, TerrainClipmap,
     TerrainClipmapBounds, TerrainClipmapConfig, TerrainClipmapDiagnostics,
     TerrainClipmapLevelSnapshot, TerrainClipmapTile, TerrainClipmapUpdate,
+};
+pub use terrain_vegetation_coordinator::{
+    TerrainVegetationAdmission, TerrainVegetationCoordinator,
+    TerrainVegetationCoordinatorDiagnostics, TerrainVegetationCoordinatorState,
+    TerrainVegetationDesiredTile, TerrainVegetationExecutor, TerrainVegetationExecutorActor,
+    TerrainVegetationExecutorDiagnostics, TerrainVegetationExecutorEvent,
+    TerrainVegetationExecutorJob, TerrainVegetationExecutorKind, TerrainVegetationJobIdentity,
+    TerrainVegetationSlotToken, TerrainVegetationSubmitError,
 };
 pub use viewport::{
     TERRAIN_VIEWPORT_AUTO_PIXELS_PER_CELL, TERRAIN_VIEWPORT_MAX_BLOCKS_ACROSS,

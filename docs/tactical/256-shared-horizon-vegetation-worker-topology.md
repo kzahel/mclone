@@ -1,7 +1,7 @@
 # Tactical 256: Shared Horizon Vegetation Worker Topology
 
-Status: active; architecture checkpoint and Slices 0–1 completed 2026-07-26.
-Slice 2 is next.
+Status: active; architecture checkpoint and Slices 0–2 completed 2026-07-26.
+Slice 3 is next.
 
 Topics:
 
@@ -491,11 +491,21 @@ reserved/receipt/trailing-byte rejection.
 
 ### Slice 2: shared coordinator
 
+Status: complete 2026-07-26.
+
 1. Add the WGPU-independent `mclone-terrain-view` coordinator.
 2. Drive it with a fake executor and deterministic desired tile sets.
 3. Prove priority, retained-tile acceptance, toroidal slot reassignment,
    source reset, stale generations, one-in-flight/one-admission bounds,
    restart, failure, and idempotent shutdown.
+
+`TerrainVegetationCoordinator` now consumes bounded semantic desired sets and
+explicit slot-generation tokens through the selected nonblocking executor
+contract. Nine fake-executor tests prove coarse-to-fine/distance/stable
+priority, retained coverage, slot reassignment, source/generation rejection,
+one automatic restart with success reset, consecutive transport and
+deterministic job failure, bounded-full retry, and idempotent shutdown. The
+complete terrain-view suite and Wasm check pass.
 
 ### Slice 3: native threaded cutover
 

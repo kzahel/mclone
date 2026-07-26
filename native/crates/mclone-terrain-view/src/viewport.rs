@@ -35,7 +35,7 @@ pub struct TerrainViewportRequest {
     pub surface_quality: TerrainPreviewSurfaceQuality,
 }
 
-#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct TerrainViewportTileId {
     pub profile: TerrainPreviewProfile,
     pub seed: i64,

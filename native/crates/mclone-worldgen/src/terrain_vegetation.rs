@@ -63,10 +63,29 @@ impl TerrainVegetationSourceIdentity {
     }
 
     pub fn validate_request(self, request: TerrainPreviewRequest) -> Result<(), String> {
+        self.validate()?;
         let expected = Self::for_request(request)?;
         if self != expected {
             return Err(format!(
                 "terrain vegetation source identity {self:?} does not match request source {expected:?}"
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn validate(self) -> Result<(), String> {
+        let expected = Self {
+            terrain_source_revision: revision_fingerprint(self.profile.source_revision()),
+            compiler_source_revision: revision_fingerprint(
+                TERRAIN_VEGETATION_COMPILER_SOURCE_REVISION,
+            ),
+            vegetation_plan_revision: revision_fingerprint(MCLONE_OVERWORLD_VEGETATION_REVISION),
+            product_revision: TERRAIN_VEGETATION_PRODUCT_REVISION,
+            ..self
+        };
+        if self != expected {
+            return Err(format!(
+                "terrain vegetation source revisions {self:?} do not match compiler revisions {expected:?}"
             ));
         }
         Ok(())
