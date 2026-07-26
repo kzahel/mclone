@@ -167,9 +167,11 @@ Host modes provide different evidence:
   lands, remote readiness should not wait for "the stream is forever idle";
   it should wait for a drawable active view.
 
-`StartupReadinessPolicy::Idle` may exist for diagnostics, screenshots, or
-explicit tests, but it must be a named caller option. It must not be the hidden
-reason Android or remote startup behaves differently.
+`StartupReadinessPolicy::ViewSettled` is the explicit diagnostics, screenshot,
+and test barrier. It requires the current accepted server-view request to be
+complete (when local runner diagnostics are available), complete client
+residency for the request, and drained target render work. It must not be the
+hidden reason Android or remote startup behaves differently.
 
 ### Camera And Interest Reconciliation
 
@@ -436,10 +438,12 @@ cargo check --manifest-path native/Cargo.toml -p mclone-web-client --target wasm
   (playable chunk server-ready + client snapshot present), remote uses
   `RemoteDedicatedSceneRuntime::startup_host_ready` (active view produced client
   chunks + response/update backlog drained). The shared gate is
-  `host_ready && render seed has ≥1 drawable section && prewarm settled`. `Idle`
-  additionally waits for no pending render work at the final camera; no lane
-  forks thresholds by platform. Local loading-progress stays optional step data;
-  remote returns `None`.
+  Playable uses
+  `host_ready && render seed has ≥1 drawable section && prewarm settled`.
+  `ViewSettled` instead requires matching, complete requested-view readiness,
+  complete client residency, drawable coverage, and no pending render work at
+  the final camera. No lane forks thresholds by platform. Local
+  loading-progress stays optional step data; remote returns `None`.
 - Startup LOD prewarm is a pump policy active only when the runtime is local
   integrated (remote carries a disabled, always-settled prewarm). Compile-job
   release stays in the pump after accepting results; the seed never holds compile
@@ -561,7 +565,7 @@ Per-consumer migration:
   replaced its `poll_window_runtime_until_idle` + `upload_all_runtime_sections`
   path with a shared blocking drive at the runtime interest center + a
   `upload_startup_seed_sections` seed upload, and takes a `StartupReadinessPolicy`
-  (`Playable` for real starts, `Idle` for screenshots). At this tactical's
+  (`Playable` for real starts, `ViewSettled` for screenshots). At this tactical's
   landing, `finish_pending_session_start` drove both branches from one pump
   maker; tactical 168 Slice 7b later deleted that extra desktop pending queue
   and hands a shared typed session plan directly to the pump factory.
@@ -580,8 +584,8 @@ Per-consumer migration:
   section counters as desktop/XR; no Android-only idle wait remains.
 - **Perf / offscreen**: startup-streaming perf reads `step.startup_ready` /
   `step.local_progress` and completes via the shared `complete()` seed; offscreen
-  playable/idle route through the same driver paths (idle → blocking pump with
-  `Idle`).
+  playable/view-settled route through the same driver paths
+  (`ViewSettled` → blocking pump with end-to-end requested-view readiness).
 
 Tripwires: `cargo test` — app-runtime 183, native-client 179, xr-scene 74
 (unchanged from Slice 2). Workspace `cargo check`, `wasm32` `mclone-web-client`
@@ -599,10 +603,10 @@ sections=N drawable_sections=N`, matching the desktop/XR seed counters.
 
 Rendered validation (desktop, this host): local new-world
 `--startup-wait playable` drew terrain (6 sections, 2 drawn); local blocking
-`--startup-wait idle` drew the full view (64 sections, 11 drawn); remote join
-against a local dedicated server drew terrain at both `Playable` (27 sections, 9
-drawn — the intended earlier drawable-active-view) and `Idle` (664 sections, 93
-drawn). All four are non-blank terrain.
+legacy `--startup-wait idle` drew the full view (64 sections, 11 drawn); remote
+join against a local dedicated server drew terrain at both `Playable`
+(27 sections, 9 drawn — the intended earlier drawable-active-view) and the
+legacy `Idle` policy (664 sections, 93 drawn). All four are non-blank terrain.
 
 Device smokes: the Quest 3 XR `native:android-xr:session-smoke` ran on-device
 this pass and passed. XR local new-world reached `XR local world playable
@@ -878,7 +882,7 @@ is now validated on-device/on-emulator through the shared pump/seed contract.
   setup, surface/swapchain/draw-resource creation, and device validation.
 - Do not split by platform. If behavior differs, it must be either:
   - host-mode evidence (`LocalIntegrated` vs `RemoteDedicated`), or
-  - an explicit caller policy (`Playable` vs `Idle`) with a test name.
+  - an explicit caller policy (`Playable` vs `ViewSettled`) with a test name.
 - Do not use empty draw resources as a substitute for the seed after a startup
   pump accepted resident metadata. Empty draw resources are fine before any
   section is accepted, but the completion seed must carry already-accepted

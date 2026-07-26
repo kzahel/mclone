@@ -96,7 +96,7 @@ pub(crate) fn run_lobby_scenario_stereo_smoke(
                 )?;
             }
             let mut views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
-            driver.drive_stereo_until_streamed(device, queue, views)?;
+            driver.drive_stereo_until_view_settled(device, queue, views)?;
             driver
                 .host_mut()
                 .set_mono_ui_screen(Some(mclone_ui::GameScreen::Title));
@@ -274,7 +274,7 @@ pub(crate) fn run_xr_emulation_screenshot(
                 }
             }
             let mut views = synthetic_stereo_views(driver.host().camera_snapshot(), size);
-            driver.drive_stereo_until_streamed(device, queue, views)?;
+            driver.drive_stereo_until_view_settled(device, queue, views)?;
             drive_embedded_preview_until_visible(
                 &mut driver,
                 device,

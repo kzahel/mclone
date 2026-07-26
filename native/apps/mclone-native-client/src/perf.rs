@@ -3950,7 +3950,7 @@ pub(crate) fn run_timedemo(options: &TimedemoOptions) -> Result<TimedemoReport> 
                 &asset_source,
                 Some(&startup_camera),
             )?;
-            let warmup = driver.drive_until_target_complete(device, queue)?;
+            let warmup = driver.drive_until_view_settled(device, queue)?;
             Ok(TimedemoState {
                 driver,
                 warmup,
@@ -4130,7 +4130,7 @@ pub(crate) fn run_frame_budget_probe(
                 &asset_source,
                 Some(&initial_spectator),
             )?;
-            let warmup = driver.drive_until_target_complete(device, queue)?;
+            let warmup = driver.drive_until_view_settled(device, queue)?;
             driver.set_clock(crate::offscreen_scene_host::OffscreenFrameClock {
                 frame_ms: 1_000.0 / probe_options.target_hz,
                 target_frame_ms: Some(1_000.0 / probe_options.target_hz),

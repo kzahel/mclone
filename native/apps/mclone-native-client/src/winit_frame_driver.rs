@@ -238,14 +238,14 @@ impl WinitFrameDriver {
         self.advance_held_input(None, 0.0)
     }
 
-    pub(crate) fn drive_until_idle(
+    pub(crate) fn drive_until_view_settled(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         timeout: std::time::Duration,
     ) -> Result<()> {
         let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("mclone_winit_startup_idle_target"),
+            label: Some("mclone_winit_startup_view_settled_target"),
             size: wgpu::Extent3d {
                 width: self.target_size[0],
                 height: self.target_size[1],
@@ -260,11 +260,10 @@ impl WinitFrameDriver {
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let start = std::time::Instant::now();
-        let mut idle_since_simulation_tick = None;
         loop {
             let render_view = self.host.mono_render_view(self.target_size)?;
             let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("mclone_winit_startup_idle_encoder"),
+                label: Some("mclone_winit_startup_view_settled_encoder"),
             });
             self.host.render_mono_scene_frame(
                 RenderFrameContext::new(
@@ -279,34 +278,14 @@ impl WinitFrameDriver {
             )?;
             queue.submit(std::iter::once(encoder.finish()));
             device.poll(wgpu::PollType::Poll)?;
-            let runtime_stats = self.host.runtime_stats();
-            let runtime_target_ready = runtime_stats.is_some_and(|stats| {
-                stats.loading_progress.is_none_or(|progress| {
-                    progress.target_ready_chunks >= progress.target_chunk_count
-                }) && stats.pending_jobs == 0
-                    && stats.pending_publications == 0
-                    && stats.server_update_queue_depth == 0
-            });
-            let target_render_work = self
-                .host
-                .mono_target_render_work_stats(render_view.camera_position);
-            let idle_now = self.host.local_startup_complete()
-                && runtime_target_ready
-                && target_render_work.pending_render_chunks == 0
-                && self.host.pending_stream_work(render_view.camera_position) == 0;
-            if idle_now {
-                let simulation_tick = runtime_stats
-                    .map(|stats| stats.last_simulation_tick)
-                    .unwrap_or_default();
-                let idle_tick = *idle_since_simulation_tick.get_or_insert(simulation_tick);
-                if simulation_tick.saturating_sub(idle_tick) >= 3 {
-                    return Ok(());
-                }
-            } else {
-                idle_since_simulation_tick = None;
+            let settled = self.host.view_settled_status(render_view.camera_position);
+            if settled.ready() {
+                return Ok(());
             }
             if start.elapsed() >= timeout {
-                anyhow::bail!("desktop Mono scene did not reach idle startup before {timeout:?}");
+                anyhow::bail!(
+                    "desktop Mono scene did not reach view-settled before {timeout:?}: {settled:?}"
+                );
             }
             std::thread::sleep(std::time::Duration::from_millis(1));
         }

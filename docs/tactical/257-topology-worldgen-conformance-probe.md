@@ -282,11 +282,16 @@ channel and enclosed island. These pixels are presentation evidence only;
 exact signed-lift, plan, fluid, light, torus-corner, and persistence assertions
 remain the acceptance oracle.
 
-Earlier playable/idle-gated frames were discarded because their hard chunk
-edges showed that the complete server view had not reached the render cache.
-The current offscreen `Idle` policy can observe zero pending render work for
-already-admitted chunks before server-side view streaming completes; it is not
-used as the capture-settlement claim here.
+Earlier playable/legacy-idle-gated frames were discarded because their hard
+chunk edges showed that the complete server view had not reached the render
+cache. The later `view-settled` startup policy replaces that ambiguous gate:
+it requires matching, complete server-view readiness, complete requested client
+residency, and drained target render/compile/upload work before capture. Its
+period-32 RD10 integration regression passed with all 529 requested chunks
+server-ready and client-resident. The replacement 1280 by 720 capture at
+`/tmp/probe-view-settled.png` reached 929 resident sections and 307 drawn
+sections; inspection showed continuous terrain with no rectangular holes,
+matching the complete fixed-frame section count without a frame-count delay.
 
 No Mclone terrain output changed. General 3D density, product torus authority,
 periodic distant-terrain presentation, and multiple simultaneously visible

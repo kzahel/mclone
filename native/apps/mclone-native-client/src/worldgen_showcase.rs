@@ -136,7 +136,7 @@ pub(crate) fn run_worldgen_showcase(
                 host.scene_host_mut()
                     .configure_asset_pack_sources(registry, reference_asset_pack_selection())?;
             }
-            let warmup = host.drive_until_target_complete(device, queue)?;
+            let warmup = host.drive_until_view_settled(device, queue)?;
             host.scene_host_mut().set_mono_ui_screen(None);
             if let Some(day_time) = scene.day_time_override {
                 host.force_day_time(day_time);

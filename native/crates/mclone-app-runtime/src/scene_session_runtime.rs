@@ -19,7 +19,7 @@ use mclone_mesh::{
 };
 use mclone_protocol::{ClientCommand, ClientEphemeralMessage, PlayerPositionUpdate};
 use mclone_render_session::{RenderSectionCacheUpdate, RenderSectionCompileQueueHealth};
-use mclone_server::SimulationCadenceConfig;
+use mclone_server::{ChunkLoadingProgressStats, SimulationCadenceConfig};
 use mclone_ui::LoadingProgressOverlay;
 
 use crate::host_mode::SingleViewHostMode;
@@ -41,7 +41,7 @@ pub const DEFAULT_STARTUP_READINESS_TIMEOUT: Duration = Duration::from_secs(120)
 pub enum StartupReadinessPolicy {
     #[default]
     Playable,
-    Idle,
+    ViewSettled,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -74,6 +74,96 @@ pub struct StartupAdmissionEvidence {
 impl StartupAdmissionEvidence {
     pub const fn ready(self) -> bool {
         self.host_ready && self.drawable_section_count > 0
+    }
+}
+
+/// End-to-end readiness for the client's current requested chunk view.
+///
+/// Local-integrated sessions require the authoritative runner snapshot to
+/// describe the same accepted request and report every target chunk ready.
+/// Remote sessions have no local runner diagnostics, so complete
+/// client-resident coverage is the strongest available producer-completion
+/// evidence. Render admission, compilation, and upload settlement are layered
+/// on by `mclone-scene`.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct RequestedViewReadiness {
+    pub host_mode: SingleViewHostMode,
+    pub request_center: Option<ChunkPos>,
+    pub request_tracking_radius: Option<u32>,
+    pub expected_chunk_count: usize,
+    pub loaded_chunk_count: usize,
+    pub server_center: Option<ChunkPos>,
+    pub server_tracking_radius: Option<u32>,
+    pub server_ready_chunk_count: Option<usize>,
+    pub server_chunk_count: Option<usize>,
+}
+
+impl RequestedViewReadiness {
+    pub fn from_runtime(
+        host_mode: SingleViewHostMode,
+        runtime: &crate::SingleViewRuntime,
+        server_view: Option<ChunkLoadingProgressStats>,
+    ) -> Self {
+        let Some(view) = runtime.client().chunk_view() else {
+            return Self {
+                host_mode,
+                ..Self::default()
+            };
+        };
+        let Ok(target_chunks) = runtime
+            .client()
+            .topology()
+            .chunk_view(view.center, view.chunk_tracking_radius)
+        else {
+            return Self {
+                host_mode,
+                request_center: Some(view.center),
+                request_tracking_radius: Some(view.chunk_tracking_radius),
+                ..Self::default()
+            };
+        };
+        let loaded_chunk_count = target_chunks
+            .iter()
+            .filter(|entry| runtime.client().chunk_snapshot(entry.canonical).is_some())
+            .count();
+        Self {
+            host_mode,
+            request_center: Some(view.center),
+            request_tracking_radius: Some(view.chunk_tracking_radius),
+            expected_chunk_count: target_chunks.len(),
+            loaded_chunk_count,
+            server_center: server_view.map(|progress| progress.center),
+            server_tracking_radius: server_view.map(|progress| progress.target_radius),
+            server_ready_chunk_count: server_view.map(|progress| progress.target_ready_chunks),
+            server_chunk_count: server_view.map(|progress| progress.target_chunk_count),
+        }
+    }
+
+    pub fn client_view_complete(self) -> bool {
+        self.request_center.is_some()
+            && self.expected_chunk_count > 0
+            && self.loaded_chunk_count == self.expected_chunk_count
+    }
+
+    pub fn server_view_complete(self) -> bool {
+        match self.host_mode {
+            SingleViewHostMode::LocalIntegrated => {
+                self.server_center == self.request_center
+                    && self.server_tracking_radius == self.request_tracking_radius
+                    && matches!(
+                        (self.server_ready_chunk_count, self.server_chunk_count),
+                        (Some(ready), Some(total))
+                            if total > 0
+                                && ready == total
+                                && total == self.expected_chunk_count
+                    )
+            }
+            SingleViewHostMode::RemoteDedicated => true,
+        }
+    }
+
+    pub fn ready(self) -> bool {
+        self.client_view_complete() && self.server_view_complete()
     }
 }
 
@@ -152,6 +242,7 @@ pub trait SceneRuntimeService {
     fn render_compile_available_pending_job_slots(&self) -> usize;
     fn render_compile_queue_health(&self) -> RenderSectionCompileQueueHealth;
     fn view_readiness_overlay(&self) -> Option<LoadingProgressOverlay>;
+    fn view_readiness_stats(&self) -> Option<ChunkLoadingProgressStats>;
     fn flush_persistence(&mut self) -> Result<usize>;
     fn promote_observer_to_player(&mut self) -> Result<()> {
         anyhow::bail!("scene runtime does not own a promotable local observer")
@@ -224,6 +315,14 @@ impl SceneSessionRuntime {
         camera_position: Vec3,
     ) -> bool {
         self.service.startup_host_ready(policy, camera_position)
+    }
+
+    pub fn requested_view_readiness(&self) -> RequestedViewReadiness {
+        RequestedViewReadiness::from_runtime(
+            self.service.host_mode(),
+            self.service.core(),
+            self.service.view_readiness_stats(),
+        )
     }
 
     pub fn render_distance(&self) -> u32 {
@@ -443,8 +542,10 @@ impl DerefMut for SceneSessionRuntime {
 
 #[cfg(test)]
 mod tests {
-    use super::{StartupAdmissionEvidence, client_session_status};
+    use super::{RequestedViewReadiness, StartupAdmissionEvidence, client_session_status};
+    use crate::host_mode::SingleViewHostMode;
     use mclone_client::{ClientHost, ClientRuntime};
+    use mclone_core::ChunkPos;
     use mclone_protocol::{
         DisconnectReason, DisconnectReasonCode, ServerUpdate, SessionCapabilities,
         SessionConfiguration,
@@ -499,6 +600,66 @@ mod tests {
         assert!(
             !StartupAdmissionEvidence {
                 drawable_section_count: 0,
+                ..ready
+            }
+            .ready()
+        );
+    }
+
+    #[test]
+    fn requested_local_view_requires_matching_server_and_client_completion() {
+        let ready = RequestedViewReadiness {
+            host_mode: SingleViewHostMode::LocalIntegrated,
+            request_center: Some(ChunkPos::new(4, -3)),
+            request_tracking_radius: Some(11),
+            expected_chunk_count: 529,
+            loaded_chunk_count: 529,
+            server_center: Some(ChunkPos::new(4, -3)),
+            server_tracking_radius: Some(11),
+            server_ready_chunk_count: Some(529),
+            server_chunk_count: Some(529),
+        };
+        assert!(ready.ready());
+        assert!(
+            !RequestedViewReadiness {
+                server_ready_chunk_count: Some(31),
+                ..ready
+            }
+            .ready(),
+            "a drained consumer must not settle while the server view is partial"
+        );
+        assert!(
+            !RequestedViewReadiness {
+                loaded_chunk_count: 528,
+                ..ready
+            }
+            .ready(),
+            "server completion must not settle before the full view reaches the client"
+        );
+        assert!(
+            !RequestedViewReadiness {
+                server_center: Some(ChunkPos::new(5, -3)),
+                ..ready
+            }
+            .ready(),
+            "readiness from a stale interest request must not settle the current view"
+        );
+    }
+
+    #[test]
+    fn requested_remote_view_uses_complete_client_residency() {
+        let ready = RequestedViewReadiness {
+            host_mode: SingleViewHostMode::RemoteDedicated,
+            request_center: Some(ChunkPos::new(0, 0)),
+            request_tracking_radius: Some(2),
+            expected_chunk_count: 25,
+            loaded_chunk_count: 25,
+            ..RequestedViewReadiness::default()
+        };
+        assert!(ready.ready());
+        assert!(
+            !RequestedViewReadiness {
+                loaded_chunk_count: 24,
                 ..ready
             }
             .ready()

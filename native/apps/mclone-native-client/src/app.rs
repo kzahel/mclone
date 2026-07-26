@@ -2123,14 +2123,14 @@ impl ApplicationHandler for ChunkApp {
             return;
         }
         if self.start_intent == WindowStartIntent::InWorld
-            && self.startup_wait == StartupWaitPolicy::Idle
-            && let Err(error) = scene_driver.drive_until_idle(
+            && self.startup_wait == StartupWaitPolicy::ViewSettled
+            && let Err(error) = scene_driver.drive_until_view_settled(
                 &surface.device,
                 &surface.queue,
                 DEFAULT_STARTUP_READINESS_TIMEOUT,
             )
         {
-            log::error!("failed to complete idle desktop startup: {error:#}");
+            log::error!("failed to complete view-settled desktop startup: {error:#}");
             event_loop.exit();
             return;
         }
@@ -2149,8 +2149,8 @@ impl ApplicationHandler for ChunkApp {
                 event_loop.exit();
                 return;
             }
-            if self.startup_wait == StartupWaitPolicy::Idle
-                && let Err(error) = scene_driver.drive_until_idle(
+            if self.startup_wait == StartupWaitPolicy::ViewSettled
+                && let Err(error) = scene_driver.drive_until_view_settled(
                     &surface.device,
                     &surface.queue,
                     DEFAULT_STARTUP_READINESS_TIMEOUT,

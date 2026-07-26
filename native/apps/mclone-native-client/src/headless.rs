@@ -842,7 +842,7 @@ pub(crate) fn write_headless_dual_view(
                 &assets,
                 &asset_source,
             )?;
-            driver.drive_until_streamed(device, queue)?;
+            driver.drive_until_view_settled(device, queue)?;
             let actions = scripted_participant_actions()?;
             let cameras =
                 scripted_participant_cameras(driver.host().mono_render_view(size)?, &actions);

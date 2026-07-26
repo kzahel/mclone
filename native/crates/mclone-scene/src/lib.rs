@@ -90,8 +90,9 @@ use mclone_app_runtime::world_catalog::{
 use mclone_app_runtime::{
     EngineCameraCommitContext, EngineCameraCommitTiming, GameplayCommandTiming,
     GameplayCommandUpdatePolicy, RuntimePollDiagnostics, RuntimeUpdatePumpBudget,
-    SingleViewRuntimeStats, TraversalReadySectionCache, debug_block_palette_overlay,
-    debug_hotbar_icons, elapsed_ms, micros_to_ms, set_player_appearance_command_for_ui_model,
+    SingleViewRuntimeStats, TargetRenderWorkStats, TraversalReadySectionCache,
+    debug_block_palette_overlay, debug_hotbar_icons, elapsed_ms, micros_to_ms,
+    set_player_appearance_command_for_ui_model,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_assets::AssetSource;

@@ -478,7 +478,7 @@ impl OffscreenDriver {
         Ok(())
     }
 
-    pub(crate) fn drive_stereo_until_streamed(
+    pub(crate) fn drive_stereo_until_view_settled(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -510,30 +510,21 @@ impl OffscreenDriver {
         let left_view = left.create_view(&wgpu::TextureViewDescriptor::default());
         let right_view = right.create_view(&wgpu::TextureViewDescriptor::default());
         let result = (|| {
-            let mut stable = 0usize;
             for _ in 0..MAX_WARMUP_FRAMES {
                 self.apply_stereo_input_frame(FlatInputFrame::default(), views)?;
-                let summary = self.render_stereo(device, queue, views, &left_view, &right_view)?;
+                self.render_stereo(device, queue, views, &left_view, &right_view)?;
                 let eye = self.host.camera_snapshot().eye;
-                let pending = self.host.pending_stream_work(glam::Vec3::new(
+                let settled = self.host.view_settled_status(glam::Vec3::new(
                     eye.x as f32,
                     eye.y as f32,
                     eye.z as f32,
                 ));
-                if self.host.local_startup_complete()
-                    && self.host.has_runtime()
-                    && summary.drawn_section_count > 0
-                    && pending == 0
+                if settled.ready()
                     && self
                         .host
                         .warm_world_standby_snapshot()
                         .is_none_or(|snapshot| snapshot.phase.terminal())
                 {
-                    stable += 1;
-                } else {
-                    stable = 0;
-                }
-                if stable >= STREAM_STABLE_FRAMES {
                     if let Some(snapshot) = self.host.warm_world_standby_snapshot() {
                         if snapshot.phase != WarmWorldStandbyPhase::Switchable {
                             bail!(
@@ -596,7 +587,15 @@ impl OffscreenDriver {
                 }
                 std::thread::sleep(Duration::from_millis(1));
             }
-            bail!("offscreen stereo scene host did not settle after {MAX_WARMUP_FRAMES} frames")
+            let eye = self.host.camera_snapshot().eye;
+            let settled = self.host.view_settled_status(glam::Vec3::new(
+                eye.x as f32,
+                eye.y as f32,
+                eye.z as f32,
+            ));
+            bail!(
+                "offscreen stereo scene host did not reach view-settled after {MAX_WARMUP_FRAMES} frames: {settled:?}"
+            )
         })();
         self.resize_target(device, output_size);
         result
@@ -734,35 +733,26 @@ impl OffscreenDriver {
                     && driver.host.has_runtime()
                     && summary.render.section_count > 0
             }),
-            StartupWaitPolicy::Idle => {
-                let mut stable = 0usize;
-                self.drive_until(device, queue, move |driver, summary| {
-                    let camera_position = driver.host.camera_snapshot().eye;
-                    let pending = driver.host.pending_stream_work(glam::Vec3::new(
+            StartupWaitPolicy::ViewSettled => self.drive_until(device, queue, move |driver, _| {
+                let camera_position = driver.host.camera_snapshot().eye;
+                driver
+                    .host
+                    .view_settled_status(glam::Vec3::new(
                         camera_position.x as f32,
                         camera_position.y as f32,
                         camera_position.z as f32,
-                    ));
-                    if pending == 0
-                        && !driver.host.asset_replacement_in_progress()
-                        && summary.render.drawn_section_count > 0
-                    {
-                        stable += 1;
-                    } else {
-                        stable = 0;
-                    }
-                    stable >= STREAM_STABLE_FRAMES
-                })
-            }
+                    ))
+                    .ready()
+            }),
         }
     }
 
-    pub(crate) fn drive_until_streamed(
+    pub(crate) fn drive_until_view_settled(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<OffscreenWarmupReport> {
-        self.drive_to_wait_policy(device, queue, StartupWaitPolicy::Idle)
+        self.drive_to_wait_policy(device, queue, StartupWaitPolicy::ViewSettled)
     }
 
     pub(crate) fn drive_until_warm_world_standby_ready(
@@ -833,67 +823,30 @@ impl OffscreenDriver {
         })
     }
 
-    /// Re-run the idle gate at the actual capture size. The normal warmup path
+    /// Re-run the render-settlement gate at the actual capture size. The normal warmup path
     /// intentionally uses a 1x1 target; probes call this once afterward so the
     /// first full-size frustum cannot reveal one last unit of stream work.
-    pub(crate) fn drive_until_streamed_at_output_size(
+    pub(crate) fn drive_until_render_settled_at_output_size(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<OffscreenWarmupReport> {
-        let mut stable = 0usize;
         self.drive_until_with_target_size(
             device,
             queue,
-            move |driver, summary| {
+            move |driver, _| {
                 let camera_position = driver.host.camera_snapshot().eye;
-                let pending = driver.host.pending_stream_work(glam::Vec3::new(
-                    camera_position.x as f32,
-                    camera_position.y as f32,
-                    camera_position.z as f32,
-                ));
-                if pending == 0 && summary.render.drawn_section_count > 0 {
-                    stable += 1;
-                } else {
-                    stable = 0;
-                }
-                stable >= STREAM_STABLE_FRAMES
+                driver
+                    .host
+                    .view_settled_status(glam::Vec3::new(
+                        camera_position.x as f32,
+                        camera_position.y as f32,
+                        camera_position.z as f32,
+                    ))
+                    .ready()
             },
             false,
         )
-    }
-
-    pub(crate) fn drive_until_target_complete(
-        &mut self,
-        device: &wgpu::Device,
-        queue: &wgpu::Queue,
-    ) -> Result<OffscreenWarmupReport> {
-        let mut stable = 0usize;
-        self.drive_until(device, queue, move |driver, summary| {
-            let eye = driver.host.camera_snapshot().eye;
-            let camera_position = glam::Vec3::new(eye.x as f32, eye.y as f32, eye.z as f32);
-            let target_loaded = driver.host.runtime_stats().is_some_and(|stats| {
-                let diameter = stats.render_distance.saturating_mul(2).saturating_add(1);
-                stats.loaded_chunks >= (diameter as usize).saturating_pow(2)
-            });
-            let view_ready = driver
-                .host
-                .mono_view_readiness_overlay()
-                .is_none_or(|progress| {
-                    progress.target_chunk_count > 0
-                        && progress.target_ready_chunks == progress.target_chunk_count
-                });
-            if target_loaded
-                && view_ready
-                && driver.host.pending_stream_work(camera_position) == 0
-                && summary.render.drawn_section_count > 0
-            {
-                stable += 1;
-            } else {
-                stable = 0;
-            }
-            stable >= STREAM_STABLE_FRAMES
-        })
     }
 
     fn drive_until(
@@ -960,19 +913,35 @@ impl OffscreenDriver {
                 std::thread::sleep(Duration::from_millis(1));
             }
             let last = report.last_summary.as_ref();
+            let eye = self.host.camera_snapshot().eye;
+            let settled = self.host.view_settled_status(glam::Vec3::new(
+                eye.x as f32,
+                eye.y as f32,
+                eye.z as f32,
+            ));
             bail!(
-                "offscreen scene host did not reach requested readiness after {MAX_WARMUP_FRAMES} frames: runtime={} sections={} drawn={} pending={}",
+                "offscreen scene host did not reach requested readiness after {MAX_WARMUP_FRAMES} frames: runtime={} sections={} drawn={} startup_complete={} request_center={:?} request_radius={:?} server_center={:?} server_radius={:?} server_ready={:?}/{:?} client_loaded={}/{} runtime_loaded={} server_jobs={} server_publications={} server_updates={} pending_render_chunks={} pending_compile_jobs={} inflight_sections={} pending_stream_work={} asset_replacement={}",
                 self.host.has_runtime(),
                 last.map_or(0, |summary| summary.render.section_count),
                 last.map_or(0, |summary| summary.render.drawn_section_count),
-                {
-                    let eye = self.host.camera_snapshot().eye;
-                    self.host.pending_stream_work(glam::Vec3::new(
-                        eye.x as f32,
-                        eye.y as f32,
-                        eye.z as f32,
-                    ))
-                }
+                settled.startup_complete,
+                settled.requested_view.request_center,
+                settled.requested_view.request_tracking_radius,
+                settled.requested_view.server_center,
+                settled.requested_view.server_tracking_radius,
+                settled.requested_view.server_ready_chunk_count,
+                settled.requested_view.server_chunk_count,
+                settled.requested_view.loaded_chunk_count,
+                settled.requested_view.expected_chunk_count,
+                settled.runtime_loaded_chunk_count,
+                settled.server_pending_jobs,
+                settled.server_pending_publications,
+                settled.server_update_queue_depth,
+                settled.target_render_work.pending_render_chunks,
+                settled.pending_render_compile_jobs,
+                settled.target_render_work.inflight_render_sections,
+                settled.pending_stream_work,
+                settled.asset_replacement_in_progress,
             )
         })();
         if shrink_target {

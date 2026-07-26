@@ -272,15 +272,21 @@ fn cli_parses_window_menu_start_intent() {
 #[test]
 fn cli_parses_startup_wait_policy() {
     assert_eq!(
-        Cli::parse(["--startup-wait".to_owned(), "idle".to_owned()]).unwrap(),
+        Cli::parse(["--startup-wait".to_owned(), "view-settled".to_owned()]).unwrap(),
         Cli::Window {
             scene: SceneOptions::default(),
             render_options: TexturedSectionRenderOptions::default(),
             window: NativeWindowOptions::default(),
             start_intent: WindowStartIntent::Menu,
-            startup_wait: StartupWaitPolicy::Idle,
+            startup_wait: StartupWaitPolicy::ViewSettled,
             frame_report: None,
         }
+    );
+    assert!(
+        Cli::parse(["--startup-wait".to_owned(), "idle".to_owned()])
+            .unwrap_err()
+            .to_string()
+            .contains("view-settled")
     );
 
     assert_eq!(
@@ -314,7 +320,7 @@ fn cli_rejects_startup_wait_for_non_host_modes() {
         "--headless-dual-view".to_owned(),
         "/tmp/mclone-dual-view".to_owned(),
         "--startup-wait".to_owned(),
-        "idle".to_owned(),
+        "view-settled".to_owned(),
     ])
     .unwrap_err()
     .to_string();
@@ -324,7 +330,7 @@ fn cli_rejects_startup_wait_for_non_host_modes() {
         "--torch-light-probe".to_owned(),
         "/tmp/mclone-torch-light-probe".to_owned(),
         "--startup-wait".to_owned(),
-        "idle".to_owned(),
+        "view-settled".to_owned(),
     ])
     .unwrap_err()
     .to_string();

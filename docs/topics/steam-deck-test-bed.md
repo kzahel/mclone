@@ -675,7 +675,7 @@ MCLONE_STEAM_DECK_SKIP_ASSET_CHECK=1 \
 pnpm steamdeck:gamescope-repro
 ```
 
-It launches seed 12345 directly into an idle-settled transient RD13 world,
+It launches seed 12345 directly into a view-settled transient RD13 world,
 places a no-clip camera at `(8, 196, 8)` looking vertically at `(8, 64, 8)`,
 and records a long window-frame report. The corresponding
 `--window-camera-eye` and `--window-camera-target` flags require each other
@@ -746,13 +746,15 @@ interest center. `--window-frame-report-seconds` gives moving cases the same
 wall-clock duration and therefore the same travel distance even when their
 frame rates differ.
 
-An idle-gated report now settles twice: once through ordinary startup and once
+A view-settled report now settles twice: once through ordinary startup and once
 after restoring and reconciling the exact diagnostic camera. The gate requires
-the target loading radius, server generation/publication queues, target render
-work, compile work, and upload work to remain clear across three simulation
-ticks. This prevents a fast but visibly incomplete row from being accepted as
-a rendering improvement. It deliberately does not wait for all scheduled
-fluid simulation to end.
+the accepted server view to be complete, every requested chunk to be
+client-resident, and target render, compile, and upload work to be clear in the
+same driven observation; it does not add a fixed stable-tick delay. Global
+server queue depths remain diagnostics rather than settlement blockers. This
+prevents a fast but visibly incomplete row from being accepted as a rendering
+improvement. It deliberately does not wait for all scheduled fluid simulation
+to end.
 
 `pnpm steamdeck:matrix` builds in SteamRT4, wakes the native panel, and runs:
 
@@ -797,10 +799,10 @@ counts, publication counts, and render queue depth.
 Disabling adaptive publication from process start is not a valid RD13
 comparison. In reconnaissance run
 `20260724T120439Z-93ce5851e860-perf-matrix-3533259`, that row could not reach
-the complete idle gate within 120 seconds and wrote no frame report. Earlier
-incomplete-camera runs made the same policy look artificially fast because
-most terrain had not reached the renderer. Keep completeness and equal travel
-as benchmark invariants.
+the then-current complete idle gate within 120 seconds and wrote no frame
+report. Earlier incomplete-camera runs made the same policy look artificially
+fast because most terrain had not reached the renderer. Keep completeness and
+equal travel as benchmark invariants.
 
 ### Interpretation and next optimization order
 

@@ -89,6 +89,39 @@ impl Default for MonoUiContext {
     }
 }
 
+/// Shared end-to-end settlement facts for the active Mono view.
+///
+/// Requested-view completion is distinct from a momentary empty work queue:
+/// the authoritative local server view (when available) and every requested
+/// client chunk must be complete before drained render work can settle.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ViewSettledStatus {
+    pub startup_complete: bool,
+    pub requested_view: mclone_app_runtime::RequestedViewReadiness,
+    pub runtime_loaded_chunk_count: usize,
+    pub render_section_count: usize,
+    pub server_pending_jobs: usize,
+    pub server_pending_publications: usize,
+    pub server_update_queue_depth: usize,
+    pub pending_render_compile_jobs: usize,
+    pub target_render_work: TargetRenderWorkStats,
+    pub pending_stream_work: usize,
+    pub asset_replacement_in_progress: bool,
+}
+
+impl ViewSettledStatus {
+    pub fn ready(self) -> bool {
+        self.startup_complete
+            && self.requested_view.ready()
+            && !self.asset_replacement_in_progress
+            && self.pending_render_compile_jobs == 0
+            && self.target_render_work.pending_render_chunks == 0
+            && !self.target_render_work.ready_render_work_pending
+            && self.target_render_work.inflight_render_sections == 0
+            && self.pending_stream_work == 0
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct MonoSceneFrameSummary {
     pub render: FullFrameRenderSummary,
@@ -2107,6 +2140,29 @@ impl McloneSceneHost {
             + upload.queued_lifecycle_items
     }
 
+    pub fn view_settled_status(&self, camera_position: Vec3) -> ViewSettledStatus {
+        let Some(runtime) = self.active_world.runtime.as_ref() else {
+            return ViewSettledStatus {
+                pending_stream_work: usize::MAX,
+                ..ViewSettledStatus::default()
+            };
+        };
+        let runtime_stats = runtime.stats();
+        ViewSettledStatus {
+            startup_complete: self.gameplay_startup_complete(),
+            requested_view: runtime.requested_view_readiness(),
+            runtime_loaded_chunk_count: runtime_stats.loaded_chunks,
+            render_section_count: self.active_world.render_stats.section_count,
+            server_pending_jobs: runtime_stats.pending_jobs,
+            server_pending_publications: runtime_stats.pending_publications,
+            server_update_queue_depth: runtime_stats.server_update_queue_depth,
+            pending_render_compile_jobs: runtime_stats.pending_render_compile_jobs,
+            target_render_work: runtime.target_render_work_stats(camera_position),
+            pending_stream_work: self.pending_stream_work(camera_position),
+            asset_replacement_in_progress: self.asset_replacement_in_progress(),
+        }
+    }
+
     fn render_mono_frame_inner(
         &mut self,
         frame: RenderFrameContext<'_>,
@@ -2984,6 +3040,9 @@ fn push_mono_blink_cross(
 
 #[cfg(test)]
 mod tests {
+    use mclone_app_runtime::RequestedViewReadiness;
+    use mclone_app_runtime::host_mode::SingleViewHostMode;
+    use mclone_core::ChunkPos;
     use mclone_input::{LookDelta, MovementImpulse};
 
     use super::*;
@@ -3040,6 +3099,63 @@ mod tests {
         assert!(!context.resolved_input.touch_controls_visible);
         assert!(!context.resolved_input.accepts_touch);
         assert_eq!(context.render_scale, 1.0);
+    }
+
+    #[test]
+    fn view_settled_requires_complete_requested_view_and_drained_render_work() {
+        let ready = ViewSettledStatus {
+            startup_complete: true,
+            requested_view: RequestedViewReadiness {
+                host_mode: SingleViewHostMode::LocalIntegrated,
+                request_center: Some(ChunkPos::new(0, 0)),
+                request_tracking_radius: Some(11),
+                expected_chunk_count: 529,
+                loaded_chunk_count: 529,
+                server_center: Some(ChunkPos::new(0, 0)),
+                server_tracking_radius: Some(11),
+                server_ready_chunk_count: Some(529),
+                server_chunk_count: Some(529),
+            },
+            runtime_loaded_chunk_count: 529,
+            render_section_count: 929,
+            ..ViewSettledStatus::default()
+        };
+        assert!(ready.ready());
+        assert!(
+            !ViewSettledStatus {
+                requested_view: RequestedViewReadiness {
+                    server_ready_chunk_count: Some(31),
+                    ..ready.requested_view
+                },
+                ..ready
+            }
+            .ready(),
+            "empty render queues must not settle a partially generated server view"
+        );
+        assert!(
+            !ViewSettledStatus {
+                pending_render_compile_jobs: 1,
+                ..ready
+            }
+            .ready()
+        );
+        assert!(
+            !ViewSettledStatus {
+                target_render_work: TargetRenderWorkStats {
+                    pending_render_chunks: 1,
+                    ..TargetRenderWorkStats::default()
+                },
+                ..ready
+            }
+            .ready()
+        );
+        assert!(
+            !ViewSettledStatus {
+                pending_stream_work: 1,
+                ..ready
+            }
+            .ready()
+        );
     }
 
     #[test]

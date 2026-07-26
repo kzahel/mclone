@@ -132,7 +132,7 @@ Every performance claim uses the physical Deck in Gaming Mode with:
 - Gamescope FIFO at the reported refresh rate;
 - the same seed, camera, render distance, cadence, lighting, content options,
   and movement distance;
-- the complete idle gate before measurement;
+- the complete view-settled gate before measurement;
 - recorded artifact hash, source commit/dirty state, power state, clock,
   temperature, memory, and queue state; and
 - an automatic restoration of the interactive shortcut and panel-sleep
@@ -140,7 +140,7 @@ Every performance claim uses the physical Deck in Gaming Mode with:
 
 The matrix keeps these distinct:
 
-- **fresh stationary:** begin immediately after the complete idle gate;
+- **fresh stationary:** begin immediately after the complete view-settled gate;
 - **soaked stationary:** wait until fluid/remesh activity reaches the stated
   quiet criterion, then measure;
 - **frozen-fluid diagnostic:** freeze scheduled fluid ticks without changing
@@ -361,8 +361,8 @@ Append each tested slice here with:
   `6a9335fe68cf887e6c9692292a1c0ac4af40ad13694963d81eddbc66271bdbd0`.
 - Run:
   `20260724T132612Z-fc7fbbd05e7f-perf-matrix-attribution-3647962`.
-- All five rows reached the complete idle gate. Both traversal rows covered
-  approximately 320 blocks in 20 seconds.
+- All five rows reached the then-current complete idle gate. Both traversal
+  rows covered approximately 320 blocks in 20 seconds.
 - RD13 stationary native/half/frozen-fluid measured 64.1/69.3/89.7 FPS.
   Native and frozen GPU terrain p50 remained close at 2.48/2.46 ms while
   surface-encode p95 fell from 20.95 to 9.51 ms when fluid-driven rebuilds

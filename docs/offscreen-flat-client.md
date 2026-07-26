@@ -87,8 +87,14 @@ Tactical 168 Slice 7d completed the native convergence:
 The old app-local `FlatClientDriver` and deferred offscreen session-start
 staging are deleted. Desktop and offscreen construction share one native
 local/remote runtime factory. Screenshot readiness remains scenario-selectable
-through `--startup-wait`; performance probes use an explicit target-complete
-warmup while measured frames retain the requested target cadence.
+through `--startup-wait`. `playable` admits the first useful drawable view;
+`view-settled`, the screenshot default, requires the server's accepted startup
+view to match and complete the current center/radius request, every requested
+chunk to be client-resident, and target render admission, compilation, upload,
+and asset replacement to drain. Detached screenshot cameras affect capture
+framing and camera-dependent render settlement without changing authoritative
+startup interest. Performance probes use the same view-settled barrier while
+measured frames retain the requested target cadence.
 
 The remaining product gap is the long-lived exposed offscreen mode: today the
 host is reusable internally, but CLI output is still screenshot/report oriented.
@@ -132,7 +138,7 @@ Target examples:
 cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- \
   --screenshot /tmp/mclone-flat-client.png \
   --width 1280 --height 720 \
-  --startup-wait idle \
+  --startup-wait view-settled \
   --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 \
   --day-time 6000 --freeze-time
 

@@ -590,31 +590,29 @@ impl OffscreenFlatClientHost {
                 standby.gpu_skipped_no_slack_count,
             );
         }
-        if matches!(
-            startup_wait,
-            StartupWaitPolicy::Playable | StartupWaitPolicy::Idle
-        ) && self.driver.host().render_stats().section_count == 0
+        if startup_wait == StartupWaitPolicy::Playable
+            && self.driver.host().render_stats().section_count == 0
         {
             bail!("offscreen flat client reached readiness without render sections");
         }
         Ok(report)
     }
 
-    pub(crate) fn drive_until_streamed_at_output_size(
+    pub(crate) fn drive_until_render_settled_at_output_size(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<crate::offscreen_scene_host::OffscreenWarmupReport> {
         self.driver
-            .drive_until_streamed_at_output_size(device, queue)
+            .drive_until_render_settled_at_output_size(device, queue)
     }
 
-    pub(crate) fn drive_until_target_complete(
+    pub(crate) fn drive_until_view_settled(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<crate::offscreen_scene_host::OffscreenWarmupReport> {
-        self.driver.drive_until_target_complete(device, queue)
+        self.driver.drive_until_view_settled(device, queue)
     }
 
     pub(crate) fn drive_until_embedded_preview_idle(
@@ -1085,7 +1083,7 @@ pub(crate) fn run_offscreen_warm_world_swap_smoke(
     let scene = options.scene.clone();
     let render_options = options.render_options;
     let cost_sample_ms = options.cost_sample_ms;
-    let startup_camera = screenshot_startup_camera(&scene, StartupWaitPolicy::Idle);
+    let startup_camera = screenshot_startup_camera(&scene, StartupWaitPolicy::ViewSettled);
     let script_frame_count = usize::from(WARM_WORLD_GATE_MAX_WALK_FRAMES) * 2 + 5;
     let (loop_report, frame_pixels, state) = run_headless_capture_loop(
         HeadlessFrameLoopOptions {
@@ -1119,7 +1117,7 @@ pub(crate) fn run_offscreen_warm_world_swap_smoke(
             {
                 bail!("scene host lost the lobby auxiliary-player validation option");
             }
-            host.start_scene_with_wait_policy(device, queue, StartupWaitPolicy::Idle)?;
+            host.start_scene_with_wait_policy(device, queue, StartupWaitPolicy::ViewSettled)?;
             let one_world_process =
                 (cost_sample_ms > 0).then(|| sample_idle_process(cost_sample_ms));
 
@@ -1133,7 +1131,7 @@ pub(crate) fn run_offscreen_warm_world_swap_smoke(
             host.driver
                 .host_mut()
                 .begin_warm_world_standby(device, queue, request)?;
-            host.start_scene_with_wait_policy(device, queue, StartupWaitPolicy::Idle)?;
+            host.start_scene_with_wait_policy(device, queue, StartupWaitPolicy::ViewSettled)?;
             let initial_standby = host
                 .driver
                 .host()
@@ -1153,7 +1151,7 @@ pub(crate) fn run_offscreen_warm_world_swap_smoke(
                 process_cost_report(one_world, sample_idle_process(cost_sample_ms))
             });
             host.frame_warm_world_source_gate_approach()?;
-            host.drive_until_streamed_at_output_size(device, queue)?;
+            host.drive_until_render_settled_at_output_size(device, queue)?;
             Ok(WarmWorldSwapSmokeState {
                 host,
                 script: OffscreenScriptRunner::new(warm_world_swap_script()),
@@ -1627,6 +1625,33 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
             }
             host.start_scene_with_wait_policy(device, queue, startup_wait)?;
             configure_screenshot_scene(&mut host, options, device, queue)?;
+            if options.eye.is_some() || options.target.is_some() {
+                let startup_interest = host
+                    .driver
+                    .host()
+                    .mono_client()
+                    .and_then(mclone_client::ClientRuntime::chunk_view)
+                    .map(|view| (view.center, view.chunk_tracking_radius));
+                // Screenshot framing is presentation-only: do not commit it as
+                // authoritative player/world interest. View-settled first
+                // completes the requested startup interest, then drains any
+                // camera-dependent render work exposed by this detached pose.
+                apply_screenshot_camera_override(&mut host, options);
+                if startup_wait == StartupWaitPolicy::ViewSettled {
+                    host.start_scene_with_wait_policy(device, queue, startup_wait)?;
+                    let settled_interest = host
+                        .driver
+                        .host()
+                        .mono_client()
+                        .and_then(mclone_client::ClientRuntime::chunk_view)
+                        .map(|view| (view.center, view.chunk_tracking_radius));
+                    if settled_interest != startup_interest {
+                        bail!(
+                            "detached screenshot camera changed authoritative startup interest from {startup_interest:?} to {settled_interest:?}"
+                        );
+                    }
+                }
+            }
             if let Some((authored, fallback)) = &asset_replacement_smoke {
                 host.enable_asset_replacement_smoke(authored.clone(), fallback.clone());
             }
@@ -1642,12 +1667,7 @@ pub(crate) fn run_offscreen_flat_client_screenshot(
             // capture, not only the setup frame. Runtime spawn reconciliation
             // may update the scene camera while warmup frames stream; reapply
             // the explicit eye/target immediately before every rendered frame.
-            if let Some(eye) = options.eye {
-                host.set_eye_override(eye);
-            }
-            if let Some(target) = options.target {
-                host.set_camera_look_at(host.camera.position, Vec3::from_array(target));
-            }
+            apply_screenshot_camera_override(host, options);
             host.render_frame(frame, OffscreenFlatClientFrameOptions { hud: options.hud })?;
             host.advance_asset_replacement_smoke(index)?;
             host.advance_asset_pack_ui_smoke(device, queue)?;
@@ -1974,7 +1994,7 @@ fn screenshot_startup_camera(
     startup_wait: StartupWaitPolicy,
 ) -> SpectatorCamera {
     if scene.remote_addr.is_some()
-        || matches!(startup_wait, StartupWaitPolicy::Idle)
+        || matches!(startup_wait, StartupWaitPolicy::ViewSettled)
         || scene.world_generation_profile != mclone_server::WorldGenerationProfile::Overworld
     {
         return SpectatorCamera::spawn_for_scene(scene);
@@ -1984,6 +2004,18 @@ fn screenshot_startup_camera(
     startup_scene.chunk_x = spawn.x;
     startup_scene.chunk_z = spawn.z;
     SpectatorCamera::spawn_for_scene(&startup_scene)
+}
+
+fn apply_screenshot_camera_override(
+    host: &mut OffscreenFlatClientHost,
+    options: &HeadlessScreenshotOptions,
+) {
+    if let Some(eye) = options.eye {
+        host.set_eye_override(eye);
+    }
+    if let Some(target) = options.target {
+        host.set_camera_look_at(host.camera.position, Vec3::from_array(target));
+    }
 }
 
 fn configure_screenshot_scene(
@@ -2040,12 +2072,7 @@ fn configure_screenshot_scene(
     } else {
         host.frame_first_actor();
     }
-    if let Some(eye) = options.eye {
-        host.set_eye_override(eye);
-    }
-    if let Some(target) = options.target {
-        host.set_camera_look_at(host.camera.position, Vec3::from_array(target));
-    }
+    apply_screenshot_camera_override(host, options);
     host.driver
         .host_mut()
         .set_mono_player_collision_box_visible(options.player_collision_box);

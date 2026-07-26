@@ -77,7 +77,9 @@ use mclone_render_session::{
     decode_textured_render_section_build_report, encode_textured_render_section_build_report,
     summarize_textured_render_section_build_report,
 };
-use mclone_server::{ServerRunnerKind, SimulationCadenceConfig, WorldGenerationProfile};
+use mclone_server::{
+    ChunkLoadingProgressStats, ServerRunnerKind, SimulationCadenceConfig, WorldGenerationProfile,
+};
 use mclone_ui::{GameUiAction, GuiKey, LoadingProgressOverlay};
 
 const CANVAS_OK_BIT: u32 = 1 << 0;
@@ -2334,8 +2336,17 @@ impl SceneRuntimeService for WebSceneRuntimeService {
         };
         match policy {
             StartupReadinessPolicy::Playable => host_ready,
-            StartupReadinessPolicy::Idle => {
+            StartupReadinessPolicy::ViewSettled => {
                 host_ready
+                    && mclone_app_runtime::RequestedViewReadiness::from_runtime(
+                        self.host_mode(),
+                        self.runtime.scene_core(),
+                        diagnostics
+                            .view_readiness_snapshot
+                            .as_ref()
+                            .map(|snapshot| snapshot.stats),
+                    )
+                    .ready()
                     && diagnostics.command_queue_depth == 0
                     && diagnostics.update_queue_depth == 0
                     && diagnostics.pending_jobs == 0
@@ -2343,6 +2354,13 @@ impl SceneRuntimeService for WebSceneRuntimeService {
                     && self.render_compiler.pending_job_count() == 0
             }
         }
+    }
+
+    fn view_readiness_stats(&self) -> Option<ChunkLoadingProgressStats> {
+        self.diagnostics()
+            .view_readiness_snapshot
+            .as_ref()
+            .map(|snapshot| snapshot.stats)
     }
 
     fn stats(&self) -> mclone_app_runtime::SingleViewRuntimeStats {

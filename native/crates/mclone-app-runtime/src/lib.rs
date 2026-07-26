@@ -54,7 +54,8 @@ pub use crate::native_service_assembly::{
     NativeSessionStartupStep,
 };
 pub use crate::scene_session_runtime::{
-    DEFAULT_STARTUP_READINESS_TIMEOUT, StartupAdmissionEvidence, StartupReadinessPolicy,
+    DEFAULT_STARTUP_READINESS_TIMEOUT, RequestedViewReadiness, StartupAdmissionEvidence,
+    StartupReadinessPolicy,
 };
 pub use crate::startup_render_seed::StartupRenderSectionSeed;
 pub use crate::world_catalog::WorldCatalog;

@@ -27,10 +27,11 @@ use mclone_protocol::{
 };
 use mclone_render_session::{RenderSectionCacheUpdate, RenderSectionCompileQueueHealth};
 use mclone_server::{
-    DEFAULT_LIGHT_STATUS_BATCH_SIZE, IntegratedServerRunner, NativeIntegratedServerRunner,
-    NativeIntegratedServerRunnerConfig, NativeIntegratedServerWorldStorage,
-    ServerRunnerDiagnostics, SimulationCadenceConfig, WorldBehaviorProfile, WorldGenerationProfile,
-    host_tick_interval_for_rate_hz, initial_spawn_center_for_descriptor,
+    ChunkLoadingProgressStats, DEFAULT_LIGHT_STATUS_BATCH_SIZE, IntegratedServerRunner,
+    NativeIntegratedServerRunner, NativeIntegratedServerRunnerConfig,
+    NativeIntegratedServerWorldStorage, ServerRunnerDiagnostics, SimulationCadenceConfig,
+    WorldBehaviorProfile, WorldGenerationProfile, host_tick_interval_for_rate_hz,
+    initial_spawn_center_for_descriptor,
 };
 use mclone_ui::LoadingProgressOverlay;
 
@@ -434,10 +435,10 @@ impl std::fmt::Debug for NativeDeferredDropService {
 ///
 /// `Playable` is the default for desktop, Android, and XR: startup differences
 /// must come from host-mode evidence (`LocalIntegrated` vs `RemoteDedicated`),
-/// not from per-platform threshold forks. `Idle` is a named diagnostics /
-/// screenshot / test option that additionally waits for the active view to have
-/// no pending render work; it must never be the hidden reason a platform startup
-/// behaves differently.
+/// not from per-platform threshold forks. `ViewSettled` is a named diagnostics /
+/// screenshot / test option that additionally waits for complete client view
+/// residency and drained render work; it must never be the hidden reason a
+/// platform startup behaves differently.
 /// Uninhabited [`RemoteDedicatedServerSession`] used to parameterize the shared
 /// startup pump for local-integrated startup, where no remote session exists.
 ///
@@ -644,7 +645,7 @@ where
     }
 
     /// Select the startup readiness policy. `Playable` is the default for every
-    /// lane; `Idle` is a named diagnostics/screenshot/test option.
+    /// lane; `ViewSettled` is a named diagnostics/screenshot/test option.
     pub fn with_readiness(mut self, readiness: StartupReadinessPolicy) -> Self {
         self.readiness = readiness;
         self
@@ -1799,10 +1800,13 @@ where
         };
         match policy {
             StartupReadinessPolicy::Playable => host_evidence,
-            // Idle additionally waits for the active view to have no pending
-            // render work at the final startup camera (screenshots/diagnostics).
-            StartupReadinessPolicy::Idle => {
-                host_evidence && !self.has_pending_render_work(camera_position)
+            // View-settled startup is an end-to-end barrier: the complete
+            // accepted request must be resident in the client before render
+            // work at the final startup camera may declare itself drained.
+            StartupReadinessPolicy::ViewSettled => {
+                host_evidence
+                    && self.requested_view_readiness().ready()
+                    && !self.has_pending_render_work(camera_position)
             }
         }
     }
@@ -2308,6 +2312,25 @@ where
                 .and_then(view_readiness_overlay_from_diagnostics),
             Self::RemoteDedicated(_) => None,
         }
+    }
+
+    pub fn view_readiness_stats(&self) -> Option<ChunkLoadingProgressStats> {
+        match self {
+            Self::Local(scene) => scene
+                .last_runner_diagnostics
+                .as_ref()
+                .and_then(|diagnostics| diagnostics.view_readiness_snapshot.as_ref())
+                .map(|snapshot| snapshot.stats),
+            Self::RemoteDedicated(_) => None,
+        }
+    }
+
+    pub fn requested_view_readiness(&self) -> crate::RequestedViewReadiness {
+        crate::RequestedViewReadiness::from_runtime(
+            self.host_mode(),
+            self.core(),
+            self.view_readiness_stats(),
+        )
     }
 
     pub fn camera_inside_water(&self, position: Vec3) -> bool {
@@ -3372,6 +3395,10 @@ where
         NativeSceneServices::view_readiness_overlay(self)
     }
 
+    fn view_readiness_stats(&self) -> Option<ChunkLoadingProgressStats> {
+        NativeSceneServices::view_readiness_stats(self)
+    }
+
     fn flush_persistence(&mut self) -> Result<usize> {
         NativeSceneServices::flush_persistence(self)
     }
@@ -4176,6 +4203,66 @@ mod tests {
                 Instant::now() < deadline,
                 "topology probe startup did not reach playable; last_step={step:?} diagnostics={:?}",
                 pump.runtime().server_runner_diagnostics()
+            );
+            std::thread::sleep(Duration::from_millis(1));
+        }
+    }
+
+    #[test]
+    fn topology_probe_rd10_view_settled_requires_complete_requested_view() {
+        if !extracted_asset_root().exists() {
+            return;
+        }
+
+        let render_distance = 10;
+        let tracking_radius = chunk_tracking_radius_for_render_distance(render_distance);
+        let expected_chunk_count = (tracking_radius as usize * 2 + 1).pow(2);
+        let topology = HorizontalTopology::cylinder_x(0, 32);
+        let options =
+            LocalIntegratedSceneOptions::new(12_345, ChunkPos::new(0, 0), render_distance)
+                .with_world_generation_profile(WorldGenerationProfile::TopologyProbeV1)
+                .with_world_topology(topology)
+                .with_initial_spawn_center()
+                .with_debug_passive_showcase(false)
+                .with_lighting_enabled(true);
+        let mut pump = NativeSessionStartupPump::<LocalOnlySession>::local_with_mesh_assets(
+            options,
+            load_textured_mesh_assets().unwrap(),
+        )
+        .unwrap()
+        .with_readiness(StartupReadinessPolicy::ViewSettled);
+        let camera_position = Vec3::new(8.0, 124.0, 36.0);
+        let deadline = Instant::now() + Duration::from_secs(120);
+
+        loop {
+            let step = pump.step(camera_position).unwrap();
+            if step.startup_ready {
+                let readiness = pump.runtime().requested_view_readiness();
+                assert!(readiness.ready(), "partial requested view: {readiness:?}");
+                assert_eq!(readiness.request_center, Some(ChunkPos::new(0, 0)));
+                assert_eq!(readiness.request_tracking_radius, Some(tracking_radius));
+                assert_eq!(readiness.expected_chunk_count, expected_chunk_count);
+                assert_eq!(readiness.loaded_chunk_count, expected_chunk_count);
+                assert_eq!(
+                    readiness.server_ready_chunk_count,
+                    Some(expected_chunk_count)
+                );
+                assert_eq!(readiness.server_chunk_count, Some(expected_chunk_count));
+                assert_eq!(step.pending_compile_jobs, 0);
+                assert!(
+                    step.render_seed_section_count >= expected_chunk_count,
+                    "settled topology-probe render seed remained partial: {step:?}"
+                );
+                assert!(step.render_seed_drawable_section_count > 0);
+                return;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "RD10 topology-probe view-settled timed out; last_step={step:?} requested_view={:?} diagnostics={:?}",
+                pump.runtime().requested_view_readiness(),
+                pump.runtime()
+                    .as_local()
+                    .map(LocalIntegratedSceneRuntime::server_runner_diagnostics),
             );
             std::thread::sleep(Duration::from_millis(1));
         }

@@ -336,12 +336,13 @@ Validation run after retiring the public narrow modes:
 
 ### Slice 5a - Shared Startup Readiness Policy
 
-- [x] Add shared `--startup-wait none|playable|idle|frames:N` parsing for
+- [x] Add shared
+  `--startup-wait none|progress|playable|view-settled|frames:N` parsing for
   desktop window mode and full-frame offscreen screenshots.
 - [x] Preserve desktop's default nonblocking startup by defaulting window mode
   to `playable`.
 - [x] Preserve deterministic capture startup by defaulting offscreen
-  screenshots to `idle`.
+  screenshots to `view-settled`.
 - [x] Route offscreen `playable` / `none` / `frames:N` startup through the same
   pending-session and local startup-pump path desktop uses.
 - [x] Treat `frames:N` as offscreen warmup frames and save the last captured

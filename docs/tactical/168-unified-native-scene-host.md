@@ -573,10 +573,11 @@ Landed shape:
   `mclone-native-client` so the flat/offscreen lane links the openxr-free host.
   The transitive `mclone-xr-host -> openxr` link was removed by the 2026-07-10
   post-review dependency correction recorded under Slice 4.
-- **Truthful readiness failure (post-review).** `drive_until_streamed` now errors
-  with its last pending-work/drawn-section counts when the warmup cap is reached;
-  it no longer freezes and captures a partial scene merely because one section
-  happened to draw.
+- **Truthful readiness failure (post-review).**
+  `drive_until_view_settled` now errors with server-view, client-residency,
+  render-section, pending-render, compile, upload, and asset-replacement facts
+  when the warmup cap is reached; it no longer freezes and captures a partial
+  scene merely because one section happened to draw.
 - **Exercised mono HUD (post-review).** `--headless-dual-view-hud true` routes
   the same capture through `MonoUiPresentation::ScreenSpaceHud`, so the new GUI
   renderer/atlas/draw-list path has a reproducible pixel gate before Slice 7.

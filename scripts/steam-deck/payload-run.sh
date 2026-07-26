@@ -244,7 +244,7 @@ run_matrix_case()
     set -- \
         --platform-profile steamos \
         --start-in-world true \
-        --startup-wait idle \
+        --startup-wait view-settled \
         --transient \
         --seed 12345 \
         --chunk-x 0 \
@@ -307,7 +307,7 @@ if [ "$MODE" = smoke ]; then
         --day-time 6000 \
         --freeze-time \
         --transient \
-        --startup-wait idle \
+        --startup-wait view-settled \
         --debug-passive-showcase false \
         --screenshot-eye 24,96,24 \
         --screenshot-target 8,64,8 \
@@ -332,7 +332,7 @@ elif [ "$MODE" = gamescope-repro ]; then
     "$BIN" \
         --platform-profile steamos \
         --start-in-world true \
-        --startup-wait idle \
+        --startup-wait view-settled \
         --transient \
         --seed 12345 \
         --chunk-x 0 \
