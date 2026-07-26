@@ -871,13 +871,60 @@ creek,” “rocky exposed coast,” “broad shallow basin,” or “long quiet
 before the ruined pass” is more useful direction than an unlabelled screenshot
 collection.
 
+## Measured Cost Baseline
+
+Tactical
+[`258`](../tactical/258-mclone-macro-terrain-performance-baseline.md)
+establishes the first normalized same-host baseline. It measures the
+production point sampler, bounded preview compiler and packer, exact
+surface/decorated generation, and fixed-budget World Explorer streaming. It
+does not time a synthetic noise stand-in or imply that a distance alone
+defines a workload.
+
+On the 2026-07-26 Ubuntu / Ryzen AI 9 365 host at `e1d0341b`, release plane
+point sampling took:
+
+| Footprint and spacing | Points | Median |
+|---|---:|---:|
+| 65,536 blocks at spacing 1,024 | 4,225 | 3.229 ms |
+| 131,072 blocks at spacing 1,024 | 16,641 | 9.833 ms |
+| 499,712 blocks at spacing 2,048 | 60,025 | 33.283 ms |
+| 499,712 blocks at spacing 1,024 | 239,121 | 97.892 ms |
+| 499,712 blocks at spacing 512 | 954,529 | 392.000 ms |
+
+The equivalent 384-chunk X-periodic point lanes took 4.277, 11.452, 40.071,
+111.483, and 448.237 ms respectively. The three largest products therefore
+paid about 14-20% for the current periodic embedding. A production 131 km Base
+preview compiled in 7.746 ms on the plane and 8.464 ms on the cylinder, then
+packed its 2,130,048 bytes in 0.477 ms on the plane. A 65 km Cover preview
+declared 4,225 lattice points and 21,125 terrain evaluations and compiled in
+9.563 ms on the plane.
+
+Exact generation remains a separate cost class. Across three independent
+3-by-3 receipts, plane medians were 7.905 ms for surface, 32.643 ms for cold
+decorated generation with 49 dependency chunks, and 3.504 ms for a warm
+49-hit decorated request. Cylinder medians were 13.243, 55.748, and 3.928 ms.
+The topology premium is therefore workload-dependent rather than one global
+factor.
+
+The completed native-window World Explorer smoke reached coarse terrain in
+123.906 ms and its complete target in 394.627 ms. Movement frames averaged
+1.952 ms with a 3.659 ms p95. All 160 slots were ready with zero pending work
+at every inspected checkpoint; the six captured views showed continuous
+complete terrain.
+
+These are baselines, not budgets. Future 3D work must add ordinary-path,
+regional-hotspot, bounded-landmark-hotspot, and far-summary lanes. GPU
+execution, browser transfer, and presentation remain separate measurements;
+none is inferred from CPU compile time.
+
 ## Current Capability And Gap Ledger
 
 | Concern | Current capability | Planning gap |
 |---|---|---|
 | raw macro fields | continentalness, relief, ruggedness, ridges, mountain detail, climate, bathymetry, water morphology | no unified classified landscape intent |
 | terrain | continuous heightfield with accepted mountain detail and derived slope/exposure | no explicit range, basin, pass, or terrain-corridor plan |
-| sampling/representation | cheap absolute-coordinate CPU/GPU heightfield preview and a fixed ten-level 131 km horizon | no filtered spacing-2,048 product, 500 km-class receipt, or sparse volumetric near/far contract |
+| sampling/representation | cheap absolute-coordinate CPU/GPU heightfield preview, a fixed ten-level 131 km horizon, and normalized point receipts through roughly 500 km | no filtered spacing-2,048 review product or sparse volumetric near/far contract |
 | coast | land/ocean threshold, shelves, deep basins, sand beach recipe | no coast family, exposure, deposition, rocky-face, or coherent alongshore plan |
 | major rivers | warped zero-contour corridor with width/depth/bank morphology and receiving-outlet correction | no persistent macro drainage topology, tributary hierarchy, or named major reaches |
 | streams | bounded 91-96-block valley-following source-to-river plan | one peaceful family, not a general network |
@@ -886,7 +933,7 @@ collection.
 | geology | exposed stone response and reusable local/structure mechanisms | no regional formation intent or live 3D formation family |
 | ecology | climate-aware conifer, alpine, steppe, meadow, and woodland recipes | limited coordinated transitions and no shared regional formation permissions |
 | landmarks | bounded stream starts/pieces and generic structure architecture | no natural-landmark, route, claim, or cross-family arbitration layer |
-| review | production field maps, cards, receipts, fingerprints, Terrain Lab, and exact chunks | composite planning maps and topology/overlap metrics remain incomplete |
+| review | production field maps, cards, receipts, fingerprints, Terrain Lab, and exact chunks | no concrete multi-system review contract yet; add facts only when selected consumers need them |
 
 Do not hide these gaps by calling existing mechanisms “supported.” A shared
 lake feature does not make basin lakes live. A structure kernel does not make
@@ -898,12 +945,15 @@ drainage network.
 This sequence is a decision and evidence order, not a promise to implement
 every row before shipping any smaller improvement.
 
-1. **Establish the composite review contract**
-   - choose a small stable multi-seed regional corpus;
-   - add composite terrain/water/coast maps beside existing raw maps;
-   - record the 65.5 km and 131 km scale-aware sampling baseline by stage;
-   - record the planning vocabulary and gaps without introducing a generic
-     framework first.
+1. **Preserve the measured cost contract**
+   - Tactical 258 establishes explicit 65.5 km, 131 km, and roughly 500 km
+     sampling workloads plus exact and streaming controls;
+   - rerun the named lanes when macro planners or selective 3D work change
+     their production paths;
+   - keep generation, packing, transfer, GPU execution, validation, and
+     presentation separate; and
+   - defer a generic “composite review map” until at least two concrete
+     planned systems need facts that existing maps cannot show.
 2. **Resolve coastal character**
    - separate geometry from surface material;
    - compare slope, substrate, shelter/exposure, and shelf-grade classifiers;
@@ -939,9 +989,9 @@ every row before shipping any smaller improvement.
    - keep surface and underground topology inspectable rather than globally
      coupling every density term.
 
-The first implementation after this document should remain a bounded
-tactical. This topic supplies the shared map and precedence; it is not
-authorization for one enormous “finish terrain” change.
+Each continuing implementation should remain a bounded tactical. This topic
+supplies the shared map and precedence; it is not authorization for one
+enormous “finish terrain” change.
 
 ## Open Decisions
 

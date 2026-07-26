@@ -1084,9 +1084,13 @@ does not invalidate those local corrections, but it exposes broader
 coast-material, coast-geometry, river-topology, basin-pond, and compound-island
 gaps. Cross-system sequencing now lives in
 [`mclone-macro-landscape-planning.md`](mclone-macro-landscape-planning.md).
-Its current direction establishes composite review evidence, coast families,
-and a major-water topology decision before the broader volumetric-geology
-campaign.
+Tactical 258 now supplies explicit 65.5 km, 131 km, and roughly 500 km
+production sampling baselines, separate preview packing, plane/cylinder exact
+cold and warm generation, and completed-frame World Explorer streaming
+evidence. That evidence does not justify a generic composite review product:
+the next terrain slice should select a concrete coast or major-water question,
+then add only the review facts that question actually needs before the broader
+volumetric-geology campaign.
 The
 [`still-life-and-tectonic-reference.md`](still-life-and-tectonic-reference.md)
 study sharpens that direction: select mutually legible geology families
