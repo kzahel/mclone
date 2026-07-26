@@ -20,7 +20,9 @@ use serde::Serialize;
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 use web_sys::{HtmlCanvasElement, UrlSearchParams};
 
-use crate::{WorldExplorerConfig, WorldExplorerSession};
+use crate::{
+    WorldExplorerConfig, WorldExplorerSession, web_vegetation::WebTerrainVegetationExecutor,
+};
 
 const DEFAULT_SEED: i64 = 12_345;
 const DEFAULT_BLOCKS_ACROSS: u32 = 4_096;
@@ -36,6 +38,7 @@ struct WebExplorerOptions {
     yaw_radians: f64,
     pitch_radians: f64,
     diagnostic_observer_enabled: bool,
+    worker_overflow_probe_enabled: bool,
 }
 
 impl Default for WebExplorerOptions {
@@ -50,6 +53,7 @@ impl Default for WebExplorerOptions {
             yaw_radians: std::f64::consts::FRAC_PI_4,
             pitch_radians: 0.52,
             diagnostic_observer_enabled: false,
+            worker_overflow_probe_enabled: false,
         }
     }
 }
@@ -68,6 +72,11 @@ impl WebExplorerOptions {
         options.pitch_radians = parse_parameter(&parameters, "pitch", options.pitch_radians)?;
         options.diagnostic_observer_enabled =
             parameters.get("smokeObserver").as_deref() == Some("1");
+        options.worker_overflow_probe_enabled =
+            parameters.get("workerOverflowProbe").as_deref() == Some("1");
+        if options.worker_overflow_probe_enabled && !options.diagnostic_observer_enabled {
+            return Err("World Explorer worker overflow probe requires smokeObserver=1".to_owned());
+        }
         if let Some(value) = parameters.get("view") {
             options.mode = match value.as_str() {
                 "map" | "2d" => WorldViewMode::Map,
@@ -136,6 +145,10 @@ struct WebExplorerReport {
     fixed_resident_bytes: u64,
     vegetation_bytes: u64,
     resident_bytes: u64,
+    worker_result_capacity_bytes: u64,
+    worker_result_high_water_bytes: u64,
+    worker_result_overflow_count: u64,
+    worker_copied_result_bytes: u64,
     coarse_ready: bool,
     target_ready: bool,
     needs_redraw: bool,
@@ -318,6 +331,15 @@ impl WebWorldExplorer {
         self.session.cancel_input()
     }
 
+    pub fn shutdown(&mut self) {
+        self.session.shutdown();
+    }
+
+    #[wasm_bindgen(js_name = shutdownComplete)]
+    pub fn shutdown_complete(&self) -> bool {
+        self.session.shutdown_complete()
+    }
+
     pub fn wheel(
         &mut self,
         delta_y: f64,
@@ -384,8 +406,14 @@ impl WebWorldExplorer {
         provisional_bytes: js_sys::Uint8Array,
         diagnostic_bytes: js_sys::Uint8Array,
         search: String,
+        worker_transport_factory: JsValue,
     ) -> Result<Self, String> {
         let options = WebExplorerOptions::parse(&search)?;
+        let vegetation_executor = if options.worker_overflow_probe_enabled {
+            WebTerrainVegetationExecutor::with_initial_capacity(worker_transport_factory, 1_024)?
+        } else {
+            WebTerrainVegetationExecutor::new(worker_transport_factory)?
+        };
         let assets = load_web_assets(
             authored_bytes.to_vec(),
             provisional_bytes.to_vec(),
@@ -460,7 +488,7 @@ impl WebWorldExplorer {
                 seed: options.seed,
                 initial_view: options.view_state(),
                 clipmap: TerrainClipmapConfig::default(),
-                vegetation_enabled: false,
+                vegetation_enabled: true,
                 color_profile: RenderColorProfile::Vanilla,
             },
             TerrainPreviewMaterialAtlas {
@@ -469,7 +497,7 @@ impl WebWorldExplorer {
                 rgba: assets.atlas.rgba(),
                 material_uvs: &material_uvs,
             },
-            None,
+            Some(Box::new(vegetation_executor)),
         )?;
         if let Some(error) = device.pop_error_scope().await {
             return Err(format!(
@@ -503,6 +531,7 @@ pub fn mclone_world_explorer_create(
     provisional_bytes: js_sys::Uint8Array,
     diagnostic_bytes: js_sys::Uint8Array,
     search: String,
+    worker_transport_factory: JsValue,
 ) -> js_sys::Promise {
     wasm_bindgen_futures::future_to_promise(async move {
         WebWorldExplorer::new(
@@ -511,6 +540,7 @@ pub fn mclone_world_explorer_create(
             provisional_bytes,
             diagnostic_bytes,
             search,
+            worker_transport_factory,
         )
         .await
         .map(JsValue::from)
@@ -607,6 +637,10 @@ fn explorer_report(
         fixed_resident_bytes: stats.fixed_resident_bytes,
         vegetation_bytes: stats.vegetation_bytes,
         resident_bytes: stats.resident_bytes,
+        worker_result_capacity_bytes: stats.worker_result_capacity_bytes,
+        worker_result_high_water_bytes: stats.worker_result_high_water_bytes,
+        worker_result_overflow_count: stats.worker_result_overflow_count,
+        worker_copied_result_bytes: stats.worker_copied_result_bytes,
         coarse_ready: stats.coarse_ready,
         target_ready: stats.target_ready,
         needs_redraw: stats.needs_redraw,

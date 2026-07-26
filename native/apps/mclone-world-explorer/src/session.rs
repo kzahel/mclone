@@ -218,6 +218,15 @@ impl WorldExplorerSession {
         self.renderer.set_depth_capture_enabled(enabled);
     }
 
+    pub fn shutdown(&mut self) {
+        self.cancel_input();
+        self.renderer.shutdown_vegetation();
+    }
+
+    pub fn shutdown_complete(&self) -> bool {
+        self.renderer.vegetation_shutdown_complete()
+    }
+
     pub const fn last_stats(&self) -> Option<TerrainHorizonFrameStats> {
         self.last_stats
     }

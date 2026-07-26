@@ -1,7 +1,7 @@
 # Tactical 256: Shared Horizon Vegetation Worker Topology
 
-Status: active; architecture checkpoint and Slices 0–3 completed 2026-07-26.
-Slice 4 is next.
+Status: active; architecture checkpoint and Slices 0–4 completed 2026-07-26.
+Slice 5 is next.
 
 Topics:
 
@@ -534,12 +534,45 @@ teleport, map, and orbit captures were inspected under
 
 ### Slice 4: browser Worker cutover
 
+Status: complete 2026-07-26.
+
 1. Reuse the generic browser Worker transport source.
 2. Add the worker-resident Rust actor, specialized domain-blind shell, and
    persistent external result SAB.
 3. Enable the same Explorer vegetation product configuration as native.
 4. Prove cross-origin isolation, ordinary capacity, forced overflow/growth,
    worker failure/restart, and clean shutdown.
+
+World Explorer now compiles the existing domain-blind
+`PolledWorkerTransport` TypeScript source into its standalone web root. The
+ordinary JavaScript host constructs only a generic transport factory; its
+specialized Worker shell loads bindgen, retains `WorldExplorerWorkerActor`,
+forwards opaque messages, and posts opaque doorbells. Rust on the main side
+owns the six-word control block, persistent result arena, MCHV validation,
+typed executor events, reconstruction, and shutdown. Worker Rust owns the
+compiler session, source/cache lifetime, typed failure, result encoding, and
+external-SAB publication. Both ordinary JavaScript files remain free of
+vegetation scheduling vocabulary.
+
+The production browser executor fails initialization without cross-origin
+isolation, `SharedArrayBuffer`, and the required Atomics. Its resident result
+arena starts at `256 KiB` and retains the `1 MiB` absolute MCHV bound. The
+explicit smoke-only overflow probe starts at `1 KiB`; real results exercised
+four one-off-SAB publications, grew the resident arena to `32 KiB`, reached a
+`19,388`-byte high-water mark, and copied `217,804` result bytes by the
+initial settled view. The same view admitted all 48 requested vegetation
+tiles, `2,609` tree instances, and `250,464` GPU vegetation bytes.
+
+The headed Wayland desktop smoke then deliberately terminated the active
+generic transport. The next movement request failed nonblockingly, the shared
+coordinator incremented its executor generation, the factory constructed a
+replacement Worker, and the replacement settled the desired set without an
+inline fallback. Negative coordinates and a million-block teleport also
+settled, and an explicit host/session shutdown observed the Rust actor's
+`shutdown-complete` before termination. Browser single-Worker Wasm compilation
+is materially slower than native—the complete 48-tile set needs a longer
+acceptance window—so Slice 5 must retain timing diagnostics and record this as
+measured follow-up rather than treating smoke success as a throughput claim.
 
 ### Slice 5: parity and closeout
 

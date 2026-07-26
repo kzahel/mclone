@@ -1,3 +1,5 @@
+import { PolledWorkerTransport } from "./mclone-worker-transport.js";
+
 const shell = document.getElementById("world-explorer-shell");
 const canvas = document.getElementById("world-explorer-canvas");
 const status = document.getElementById("world-explorer-status");
@@ -10,6 +12,7 @@ if (!(shell instanceof HTMLElement)
 
 const runtime = {
   session: null,
+  transport: null,
 };
 let smokeObserver = null;
 
@@ -26,12 +29,20 @@ async function boot() {
     fetchBytes("./first-party-packs/mclone-generated-fallback.pbp"),
   ]);
   syncCanvasSize();
+  const transportFactory = () => {
+    runtime.transport = new PolledWorkerTransport(
+      new URL("./world-explorer-worker.js", import.meta.url),
+      "mclone-world-explorer-worker",
+    );
+    return runtime.transport;
+  };
   runtime.session = await module.mclone_world_explorer_create(
     canvas,
     authored,
     provisional,
     new Uint8Array(),
     globalThis.location.search,
+    transportFactory,
   );
   await installSmokeObserverIfRequested();
   bindRawObservations();
@@ -63,7 +74,10 @@ async function installSmokeObserverIfRequested() {
     return;
   }
   const observer = await import("./world-explorer-smoke-observer.js");
-  smokeObserver = observer.installWorldExplorerSmokeObserver(runtime.session);
+  smokeObserver = observer.installWorldExplorerSmokeObserver(
+    runtime.session,
+    () => runtime.transport?.terminate(),
+  );
 }
 
 function showFatalError(error) {
@@ -152,6 +166,7 @@ function bindRawObservations() {
       runtime.session.cancelInput();
     }
   });
+  globalThis.addEventListener("pagehide", () => runtime.session?.shutdown());
   globalThis.addEventListener("resize", syncCanvasSize);
 }
 

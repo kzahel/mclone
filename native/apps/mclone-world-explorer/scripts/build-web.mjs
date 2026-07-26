@@ -29,6 +29,19 @@ const firstPartyPacks = path.join(
   "first-party-stage",
   "first-party-packs",
 );
+const sharedWorkerTransport = path.join(
+  nativeRoot,
+  "apps",
+  "mclone-web-client",
+  "www",
+  "mclone-worker-transport.ts",
+);
+const typescriptCompiler = path.join(
+  repositoryRoot,
+  "node_modules",
+  ".bin",
+  "tsc",
+);
 
 run("cargo", [
   "build",
@@ -57,6 +70,18 @@ if (!(await exists(bindgen))) {
 await rm(output, { recursive: true, force: true });
 await cp(path.join(appRoot, "www"), output, { recursive: true });
 await mkdir(pkg, { recursive: true });
+run(typescriptCompiler, [
+  sharedWorkerTransport,
+  "--target",
+  "ES2022",
+  "--module",
+  "ES2022",
+  "--lib",
+  "ES2022,DOM",
+  "--skipLibCheck",
+  "--outDir",
+  output,
+], repositoryRoot);
 await cp(firstPartyPacks, path.join(output, "first-party-packs"), {
   recursive: true,
 });

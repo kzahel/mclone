@@ -37,11 +37,15 @@ Tactical
 [`256`](../tactical/256-shared-horizon-vegetation-worker-topology.md) replaces
 native synchronous/browser-disabled tree compilation with one shared
 engine terrain-vegetation coordinator over native-thread and browser-Worker
-executors. Its architecture checkpoint completed on 2026-07-26 and explicitly
-defines World Explorer as the first proof host, not the final owner. The
-coordinator, compiler session, job identity, cache policy, and prepared result
-handoff belong in shared crates so a later `mclone-scene` tactical can consume
-the same service. UI-less host cleanup completed in Tactical
+executors. Its architecture checkpoint and native/browser cutovers completed
+on 2026-07-26 and explicitly define World Explorer as the first proof host,
+not the final owner. Native uses one named bounded-channel thread; browser
+uses an isolated Rust actor, the shared opaque Worker transport, and a
+persistent external-SAB result arena. The coordinator, compiler session, job
+identity, cache policy, and prepared result handoff belong in shared crates so
+a later `mclone-scene` tactical can consume the same service. Stable
+cross-host receipt/timing closeout remains active. UI-less host cleanup
+completed in Tactical
 [`254`](../tactical/254-ui-less-world-explorer-host.md) and remains owned by
 the platform-host topic rather than terrain rendering.
 

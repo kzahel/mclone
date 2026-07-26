@@ -3,7 +3,7 @@
 // Explorer vocabulary is permitted here because this is not the production
 // platform adapter.
 
-export function installWorldExplorerSmokeObserver(session) {
+export function installWorldExplorerSmokeObserver(session, failWorker) {
   let presentedFrames = 0;
   const observer = Object.freeze({
     frame: () => presentedFrames,
@@ -13,6 +13,9 @@ export function installWorldExplorerSmokeObserver(session) {
   });
   const commands = Object.freeze({
     recenter: (worldX, worldZ) => session.recenterForSmoke(worldX, worldZ),
+    failWorker,
+    shutdown: () => session.shutdown(),
+    shutdownComplete: () => session.shutdownComplete(),
   });
   globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__ = Object.freeze({
     observer,

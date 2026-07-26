@@ -60,15 +60,20 @@ remains active under Tactical 248.
 
 Tactical
 [`256`](../tactical/256-shared-horizon-vegetation-worker-topology.md) is the
-next focused consumer of this direction. Its architecture checkpoint completed
-on 2026-07-26 and selects an engine-owned terrain-vegetation service proven
-first through World Explorer. It reuses the isolated Rust actor, domain-blind
-transport, and external-SAB posture while sharing coordinator policy with a
-native threaded executor. The full game's exact render-section coordinator is
-a lifecycle precedent, not a universal framework or the owner of procedural
-terrain jobs. Tactical 256 does not authorize a shared Wasm heap; later
-`mclone-scene` adoption consumes the shared terrain service through a separate
-integration tactical.
+next focused consumer of this direction. Its architecture checkpoint and
+native/browser execution cutovers completed on 2026-07-26 and select an
+engine-owned terrain-vegetation service proven first through World Explorer.
+Browser now uses the same domain-blind `PolledWorkerTransport` source, a
+domain-blind bindgen/actor shell, a Rust main-side executor, and a
+worker-resident Rust compiler actor. The persistent six-word external-SAB
+mailbox starts at `256 KiB`, grows through bounded one-off publications, and
+retains a `1 MiB` hard limit. Forced overflow/growth, actual transport
+termination and one-generation reconstruction, million-block teleport, and
+graceful actor shutdown passed in headed Wayland Chrome. The full game's exact
+render-section coordinator remains a lifecycle precedent, not a universal
+framework or the owner of procedural terrain jobs. Tactical 256 does not
+authorize a shared Wasm heap; later `mclone-scene` adoption consumes the shared
+terrain service through a separate integration tactical.
 
 Its actor protocol keeps semantic compiler/product revisions separate from the
 browser-only `MCHV` wire version. Native does not serialize through that ABI,

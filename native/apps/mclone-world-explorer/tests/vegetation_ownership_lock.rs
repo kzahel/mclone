@@ -8,6 +8,7 @@ const SESSION: &str = include_str!("../src/session.rs");
 const NATIVE_TERRAIN: &str = include_str!("../src/terrain.rs");
 const WEB_HOST: &str = include_str!("../src/web.rs");
 const WEB_APP: &str = include_str!("../www/world-explorer-app.js");
+const WEB_WORKER: &str = include_str!("../www/world-explorer-worker.js");
 const SHARED_TRANSPORT: &str =
     include_str!("../../mclone-web-client/www/mclone-worker-transport.ts");
 const TERRAIN_VIEW_RENDERER: &str =
@@ -54,6 +55,23 @@ fn explorer_session_does_not_own_vegetation_coordination_policy() {
             "World Explorer session regained vegetation policy through {forbidden:?}"
         );
     }
+    for forbidden in [
+        "vegetation",
+        "tree",
+        "TerrainViewportTileId",
+        "landmarkRank",
+        "sourceEpoch",
+        "cacheHits",
+        "pendingTiles",
+    ] {
+        assert!(
+            !WEB_WORKER.contains(forbidden),
+            "Explorer Worker shell gained domain policy through {forbidden:?}"
+        );
+    }
+    assert!(WEB_APP.contains("new PolledWorkerTransport("));
+    assert!(WEB_WORKER.contains("actor.handleMessage(message)"));
+    assert!(WEB_WORKER.contains("self.postMessage(dispatch.message)"));
 }
 
 #[test]
@@ -106,7 +124,7 @@ fn compiler_dependency_direction_stays_worldgen_to_terrain_view_consumer() {
 }
 
 #[test]
-fn native_cutover_removes_horizon_sync_while_browser_debt_stays_named() {
+fn native_and_browser_cutovers_remove_horizon_sync_compilation() {
     let horizon = braced_item(TERRAIN_VIEW_RENDERER, "impl TerrainHorizonRenderer {");
     assert_eq!(
         horizon
@@ -118,13 +136,13 @@ fn native_cutover_removes_horizon_sync_while_browser_debt_stays_named() {
     assert_eq!(
         NATIVE_TERRAIN.matches("vegetation_enabled: true").count(),
         1,
-        "native must retain exactly one named pre-cutover enable site"
+        "native must retain exactly one named enable site"
     );
     assert_eq!(
-        WEB_HOST.matches("vegetation_enabled: false").count(),
+        WEB_HOST.matches("vegetation_enabled: true").count(),
         1,
-        "browser must retain exactly one named pre-cutover disable site"
+        "browser must retain exactly one named enable site"
     );
     assert!(!NATIVE_TERRAIN.contains("vegetation_enabled: false"));
-    assert!(!WEB_HOST.contains("vegetation_enabled: true"));
+    assert!(!WEB_HOST.contains("vegetation_enabled: false"));
 }

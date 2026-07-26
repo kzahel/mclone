@@ -151,6 +151,10 @@ pub struct TerrainHorizonFrameStats {
     pub fixed_resident_bytes: u64,
     pub vegetation_bytes: u64,
     pub resident_bytes: u64,
+    pub worker_result_capacity_bytes: u64,
+    pub worker_result_high_water_bytes: u64,
+    pub worker_result_overflow_count: u64,
+    pub worker_copied_result_bytes: u64,
     pub finest_sample_spacing: u32,
     pub coarse_ready: bool,
     pub target_ready: bool,
@@ -2309,6 +2313,20 @@ impl TerrainHorizonRenderer {
             .copy_depth_to_buffer(encoder, destination, bytes_per_row)
     }
 
+    pub fn shutdown_vegetation(&mut self) {
+        if let Some(coordinator) = self.vegetation_coordinator.as_mut() {
+            coordinator.shutdown();
+        }
+    }
+
+    pub fn vegetation_shutdown_complete(&self) -> bool {
+        self.vegetation_coordinator
+            .as_ref()
+            .is_none_or(|coordinator| {
+                coordinator.state() == TerrainVegetationCoordinatorState::Terminated
+            })
+    }
+
     pub fn encode(
         &mut self,
         device: &wgpu::Device,
@@ -2535,7 +2553,7 @@ impl TerrainHorizonRenderer {
             .iter()
             .filter(|slot| slot.vegetation.is_some())
             .count() as u32;
-        let (pending_vegetation_tiles, vegetation_settled) = self
+        let (pending_vegetation_tiles, vegetation_settled, worker_diagnostics) = self
             .vegetation_coordinator
             .as_ref()
             .map(|coordinator| {
@@ -2552,9 +2570,9 @@ impl TerrainHorizonRenderer {
                     TerrainVegetationCoordinatorState::Starting
                     | TerrainVegetationCoordinatorState::ShuttingDown => false,
                 };
-                (pending, settled)
+                (pending, settled, diagnostics.executor)
             })
-            .unwrap_or((0, true));
+            .unwrap_or((0, true, Default::default()));
         let target_ready =
             ready_slots == allocation_slots && self.pending.is_empty() && vegetation_settled;
         Ok(TerrainHorizonFrameStats {
@@ -2574,6 +2592,10 @@ impl TerrainHorizonRenderer {
             fixed_resident_bytes,
             vegetation_bytes,
             resident_bytes,
+            worker_result_capacity_bytes: worker_diagnostics.result_capacity_bytes,
+            worker_result_high_water_bytes: worker_diagnostics.result_high_water_bytes,
+            worker_result_overflow_count: worker_diagnostics.result_overflows,
+            worker_copied_result_bytes: worker_diagnostics.copied_result_bytes,
             finest_sample_spacing: self.clipmap.config().base_sample_spacing,
             coarse_ready: drawn_levels > 0,
             target_ready,

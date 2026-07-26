@@ -58,6 +58,7 @@ try {
     }
   });
   targetUrl.searchParams.set("smokeObserver", "1");
+  targetUrl.searchParams.set("workerOverflowProbe", "1");
   await page.goto(
     targetUrl.href,
     { waitUntil: "networkidle" },
@@ -71,6 +72,14 @@ try {
   await assertTerrainOnlySurface(page);
   const initial = await report(page);
   assertFixedReady(initial, "initial");
+  if (initial.workerResultOverflowCount < 1
+      || initial.workerResultCapacityBytes <= 1024
+      || initial.workerResultHighWaterBytes <= 1024) {
+    throw new Error(
+      `forced Worker overflow/growth probe did not publish:\n`
+        + `${JSON.stringify(initial, null, 2)}`,
+    );
+  }
   console.log(`World Explorer ${label} browser smoke: initial ready`);
   const initialCapture = `/tmp/mclone-world-explorer-web-${label}-initial.png`;
   await page.locator("#world-explorer-canvas").screenshot({ path: initialCapture });
@@ -148,6 +157,9 @@ try {
 
   await page.waitForTimeout(100);
   await canvas.focus();
+  await page.evaluate(() => {
+    globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__.commands.failWorker();
+  });
   const heldSamples = [];
   await page.keyboard.down("ArrowRight");
   await page.waitForFunction(
@@ -177,7 +189,9 @@ try {
   await waitReady(page);
   const moved = await report(page);
   assertFixedReady(moved, "held keyboard movement");
-  console.log(`World Explorer ${label} browser smoke: held movement ready`);
+  console.log(
+    `World Explorer ${label} browser smoke: Worker restart and held movement ready`,
+  );
   const movementCapture = `/tmp/mclone-world-explorer-web-${label}-movement.png`;
   await canvas.screenshot({ path: movementCapture });
 
@@ -207,6 +221,17 @@ try {
 
   const finalCapture = `/tmp/mclone-world-explorer-web-${label}-teleport.png`;
   await page.locator("#world-explorer-canvas").screenshot({ path: finalCapture });
+  await page.evaluate(() => {
+    globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__.commands.shutdown();
+  });
+  await page.waitForFunction(
+    () => (
+      globalThis.__MCLONE_WORLD_EXPLORER_SMOKE__.commands.shutdownComplete()
+    ),
+    null,
+    { timeout: 30_000 },
+  );
+  console.log(`World Explorer ${label} browser smoke: Worker shutdown complete`);
   if (pageErrors.length > 0) {
     throw new Error(`browser errors:\n${pageErrors.join("\n")}`);
   }
@@ -262,7 +287,7 @@ async function waitReady(page) {
     return report?.targetReady === true
       && report?.pendingRefills === 0
       && report?.readySlots === report?.allocationSlots;
-  }, null, { timeout: 30_000 });
+  }, null, { timeout: 180_000 });
 }
 
 async function waitForCenter(page, x, z) {

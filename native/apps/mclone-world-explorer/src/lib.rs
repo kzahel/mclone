@@ -5,6 +5,8 @@ mod native_vegetation;
 mod session;
 #[cfg(target_arch = "wasm32")]
 mod web;
+#[cfg(target_arch = "wasm32")]
+mod web_vegetation;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_vegetation::NativeTerrainVegetationExecutor;

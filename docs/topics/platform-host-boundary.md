@@ -73,7 +73,11 @@ The small `mclone-render-color` dependency owns CPU and generated WGSL
 transfer math without crossing into the full renderer. Tactical
 [`256`](../tactical/256-shared-horizon-vegetation-worker-topology.md) keeps
 browser Worker mechanics domain-blind while making vegetation coordination
-shared with native.
+shared with native. Its native-thread and browser-Worker cutovers completed on
+2026-07-26: app adapters construct platform executors, while shared Rust owns
+desired work, priority, source epochs, restart, stale admission, and prepared
+products. World Explorer JavaScript constructs the existing generic transport
+and its Worker shell forwards only opaque actor messages and doorbells.
 
 Headed desktop, phone, and hosted production smokes exercise the real DOM
 two-contact path and multiple held-key rAF frames. Native real-window and
