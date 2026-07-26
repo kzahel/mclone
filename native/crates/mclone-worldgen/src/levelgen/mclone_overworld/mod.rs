@@ -1,4 +1,5 @@
 mod biomes;
+mod coast;
 mod debug;
 mod decoration;
 mod feature_batch;
@@ -25,6 +26,7 @@ pub use biomes::{
     mclone_overworld_biome_recipe, mclone_overworld_steppe_band,
     mclone_overworld_steppe_suitability,
 };
+pub use coast::{McloneOverworldCoastFamily, McloneOverworldCoastIntent};
 pub use debug::{
     McloneOverworldDebugSample, McloneOverworldHydrologyKind, McloneOverworldLandformKind,
     mclone_overworld_debug_sample, mclone_overworld_debug_sample_with_streams,

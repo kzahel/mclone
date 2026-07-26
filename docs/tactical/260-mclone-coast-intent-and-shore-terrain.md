@@ -67,13 +67,13 @@ consumers of one reconstructible semantic fact.
 
 ### Slice 1: semantic coast intent
 
-- [ ] Add a period-compatible broad coast field under a distinct seed domain.
-- [ ] Define a small public coast family/sample with proximity, selector,
+- [x] Add a period-compatible broad coast field under a distinct seed domain.
+- [x] Define a small public coast family/sample with proximity, selector,
   suitability, transition, and cold-response facts.
-- [ ] Keep classification deterministic, point-sampled, and primarily 2D.
+- [x] Keep classification deterministic, point-sampled, and primarily 2D.
 - [ ] Preserve accepted river and planned-stream outlet authority.
-- [ ] Add focused family, transition, and exact periodic-seam tests.
-- [ ] Extend production receipts/maps with family coverage and direct-water
+- [x] Add focused family, transition, and exact periodic-seam tests.
+- [x] Extend production receipts/maps with family coverage and direct-water
   facts.
 
 ### Slice 2: geometry and surface realization
@@ -136,6 +136,38 @@ These are review alarms, not aesthetic targets:
 - the cylinder seam must not become a family boundary or exclusion band; and
 - point/preview cost must remain near Tactical 258's baseline, with any
   material exact-generation increase stated separately.
+
+## Execution Record
+
+### Semantic intent checkpoint
+
+Field revision 18 adds one independent 768-block value-noise field. The
+selected cylinder period contains exactly eight cells, so the ordinary
+topology constructor supplies exact X-periodicity without a seam exception.
+`McloneOverworldCoastIntent` records:
+
+- one of Offshore, Sandy, Gravel, Ordinary, Rocky, or Inland;
+- continentalness as an explicitly named signed-distance proxy, not a false
+  physical block distance;
+- coast proximity, broad selector, terrain-constrained character;
+- depositional and rocky suitability;
+- transition weight; and
+- a separate low-altitude cold response.
+
+Receipt schema 15 and the coast-intent review strip expose those facts before
+they alter terrain. Equal 6,144-block, spacing-eight maps found all four coast
+families at the sampled land/ocean edge:
+
+| Seed | Sandy | Gravel | Ordinary | Rocky |
+|---:|---:|---:|---:|---:|
+| `12345` | 881 | 711 | 667 | 372 |
+| `8675309` | 1,287 | 1,020 | 866 | 532 |
+| `-98765` | 316 | 336 | 914 | 631 |
+
+The inspected maps show broad coherent selector regions cut by the irregular
+shoreline rather than sample-scale family chatter. Surface recipes remain at
+their schema-14 baseline in this checkpoint, proving the semantic change is
+independently measurable before geometry/material realization.
 
 ## Human Review Gates
 

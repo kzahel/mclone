@@ -76,6 +76,7 @@ pub fn terrain_preview_compute_wgsl() -> String {
         ("CONTINENT_LARGE", spec.continent[0]),
         ("CONTINENT_MEDIUM", spec.continent[1]),
         ("CONTINENT_DETAIL", spec.continent[2]),
+        ("COAST", spec.coast),
         ("RELIEF_LARGE", spec.relief[0]),
         ("RELIEF_DETAIL", spec.relief[1]),
         ("RELIEF_FINE", spec.relief[2]),

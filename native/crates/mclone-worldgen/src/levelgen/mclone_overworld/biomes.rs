@@ -266,6 +266,7 @@ pub fn mclone_overworld_biome_decision(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::levelgen::McloneOverworldCoastIntent;
     use crate::levelgen::mclone_overworld::fields::{
         McloneOverworldBathymetrySample, McloneOverworldClimateSample,
         McloneOverworldTerrainSample, McloneOverworldWatercourseSample,
@@ -279,6 +280,7 @@ mod tests {
                 ruggedness: 0.0,
                 ridges: 0.0,
                 mountain_detail: 0.0,
+                coast: McloneOverworldCoastIntent::INLAND,
                 climate: McloneOverworldClimateSample::TEMPERATE,
                 bathymetry: McloneOverworldBathymetrySample::LAND,
                 base_surface_y: surface_y,

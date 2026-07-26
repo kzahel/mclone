@@ -14,15 +14,16 @@ use mclone_worldgen::levelgen::{
     MCLONE_OVERWORLD_FOREST_BIOME_ID, MCLONE_OVERWORLD_PERIOD_BLOCKS,
     MCLONE_OVERWORLD_RIVER_BIOME_ID, MCLONE_OVERWORLD_SAVANNA_BIOME_ID, MCLONE_OVERWORLD_SEA_LEVEL,
     MCLONE_OVERWORLD_SNOWY_MOUNTAINS_BIOME_ID, MCLONE_OVERWORLD_STREAM_REFERENCE_RADIUS_CHUNKS,
-    MCLONE_OVERWORLD_TAIGA_BIOME_ID, McloneOverworldBiomeRecipe, McloneOverworldLandformSample,
-    McloneOverworldSampleRegion, McloneOverworldSampleRegionRequest, McloneOverworldSampler,
-    McloneOverworldSamplingTopology, McloneOverworldSteppeBand, McloneOverworldStreamPlan,
-    McloneOverworldStreamPlanAttempt, McloneOverworldStreamPlanner, McloneOverworldStreamRejection,
-    McloneOverworldSurfaceRecipe, McloneOverworldTerrainSample, OCEAN_BIOME_ID, PLAINS_BIOME_ID,
-    analyze_mclone_overworld_hydraulic_closure, mclone_overworld_biome_id_for_sample,
-    mclone_overworld_biome_recipe, mclone_overworld_spawn_chunk,
-    mclone_overworld_spawn_chunk_with_topology, mclone_overworld_steppe_band,
-    mclone_overworld_steppe_suitability, mclone_overworld_surface_recipe,
+    MCLONE_OVERWORLD_TAIGA_BIOME_ID, McloneOverworldBiomeRecipe, McloneOverworldCoastFamily,
+    McloneOverworldLandformSample, McloneOverworldSampleRegion, McloneOverworldSampleRegionRequest,
+    McloneOverworldSampler, McloneOverworldSamplingTopology, McloneOverworldSteppeBand,
+    McloneOverworldStreamPlan, McloneOverworldStreamPlanAttempt, McloneOverworldStreamPlanner,
+    McloneOverworldStreamRejection, McloneOverworldSurfaceRecipe, McloneOverworldTerrainSample,
+    OCEAN_BIOME_ID, PLAINS_BIOME_ID, analyze_mclone_overworld_hydraulic_closure,
+    mclone_overworld_biome_id_for_sample, mclone_overworld_biome_recipe,
+    mclone_overworld_spawn_chunk, mclone_overworld_spawn_chunk_with_topology,
+    mclone_overworld_steppe_band, mclone_overworld_steppe_suitability,
+    mclone_overworld_surface_recipe,
 };
 
 const DEFAULT_OUTPUT_DIR: &str = "/tmp/mclone-overworld-review";
@@ -152,6 +153,17 @@ fn run() -> Result<()> {
     let mountain_detail_path = config
         .output_dir
         .join(format!("{prefix}-mountain-detail.png"));
+    let coast_selector_path = config
+        .output_dir
+        .join(format!("{prefix}-coast-selector.png"));
+    let coast_family_path = config.output_dir.join(format!("{prefix}-coast-family.png"));
+    let coast_transition_path = config
+        .output_dir
+        .join(format!("{prefix}-coast-transition.png"));
+    let coast_cold_path = config
+        .output_dir
+        .join(format!("{prefix}-coast-cold-response.png"));
+    let coast_intent_path = config.output_dir.join(format!("{prefix}-coast-intent.png"));
     let surface_path = config.output_dir.join(format!("{prefix}-surface-y.png"));
     let base_surface_path = config
         .output_dir
@@ -208,6 +220,10 @@ fn run() -> Result<()> {
     let ruggedness = render_map(&region.samples, ruggedness_color);
     let ridges = render_map(&region.samples, ridges_color);
     let mountain_detail = render_map(&region.samples, mountain_detail_color);
+    let coast_selector = render_map(&region.samples, coast_selector_color);
+    let coast_family = render_map(&region.samples, coast_family_color);
+    let coast_transition = render_map(&region.samples, coast_transition_color);
+    let coast_cold = render_map(&region.samples, coast_cold_color);
     let surface = render_map(&region.samples, surface_color);
     let base_surface = render_map(&region.samples, base_surface_color);
     let river_distance = render_map(&region.samples, river_distance_color);
@@ -245,6 +261,42 @@ fn run() -> Result<()> {
         request.width,
         request.depth,
         &mountain_detail,
+    )?;
+    save_rgba(
+        &coast_selector_path,
+        request.width,
+        request.depth,
+        &coast_selector,
+    )?;
+    save_rgba(
+        &coast_family_path,
+        request.width,
+        request.depth,
+        &coast_family,
+    )?;
+    save_rgba(
+        &coast_transition_path,
+        request.width,
+        request.depth,
+        &coast_transition,
+    )?;
+    save_rgba(&coast_cold_path, request.width, request.depth, &coast_cold)?;
+    let coast_intent = combine_maps(
+        request.width,
+        request.depth,
+        [
+            &continentalness,
+            &coast_selector,
+            &coast_family,
+            &coast_transition,
+            &coast_cold,
+        ],
+    );
+    save_rgba(
+        &coast_intent_path,
+        request.width * 5 + MAP_GAP_PIXELS * 4,
+        request.depth,
+        &coast_intent,
     )?;
     save_rgba(&surface_path, request.width, request.depth, &surface)?;
     save_rgba(
@@ -425,7 +477,7 @@ fn run() -> Result<()> {
 
     let (commit, dirty) = git_state();
     let receipt = serde_json::json!({
-        "schema": 14,
+        "schema": 15,
         "profile": "mclone-overworld-v1",
         "topology": config.topology.label(),
         "fieldRevision": MCLONE_OVERWORLD_FIELD_REVISION,
@@ -1076,6 +1128,17 @@ fn sample_json(sample: McloneOverworldLandformSample) -> serde_json::Value {
         "ridges": terrain.ridges,
         "mountainDetail": terrain.mountain_detail,
         "mountainStrength": terrain.mountain_strength(),
+        "coast": {
+            "family": terrain.coast.family.label(),
+            "signedDistanceProxy": terrain.coast.signed_distance_proxy,
+            "proximity": terrain.coast.proximity,
+            "selector": terrain.coast.selector,
+            "character": terrain.coast.character,
+            "depositionalSuitability": terrain.coast.depositional_suitability,
+            "rockySuitability": terrain.coast.rocky_suitability,
+            "transition": terrain.coast.transition,
+            "coldResponse": terrain.coast.cold_response,
+        },
         "climate": {
             "temperature": terrain.climate.temperature,
             "moisture": terrain.climate.moisture,
@@ -1206,7 +1269,15 @@ struct CoastFacts {
     land_intent_columns: usize,
     shoreline_edges: usize,
     sampled_shoreline_length_blocks: u64,
+    coast_band_sandy_columns: usize,
+    coast_band_gravel_columns: usize,
+    coast_band_ordinary_columns: usize,
+    coast_band_rocky_columns: usize,
     coast_adjacent_land_columns: usize,
+    coast_adjacent_sandy_columns: usize,
+    coast_adjacent_gravel_columns: usize,
+    coast_adjacent_ordinary_columns: usize,
+    coast_adjacent_rocky_columns: usize,
     coast_adjacent_beach_columns: usize,
     coast_adjacent_non_beach_columns: usize,
     coast_adjacent_eroded_slope_columns: usize,
@@ -1295,6 +1366,14 @@ impl CoastFacts {
         }
 
         let mut coast_adjacent_land_columns = 0usize;
+        let mut coast_band_sandy_columns = 0usize;
+        let mut coast_band_gravel_columns = 0usize;
+        let mut coast_band_ordinary_columns = 0usize;
+        let mut coast_band_rocky_columns = 0usize;
+        let mut coast_adjacent_sandy_columns = 0usize;
+        let mut coast_adjacent_gravel_columns = 0usize;
+        let mut coast_adjacent_ordinary_columns = 0usize;
+        let mut coast_adjacent_rocky_columns = 0usize;
         let mut coast_adjacent_beach_columns = 0usize;
         let mut coast_adjacent_non_beach_columns = 0usize;
         let mut coast_adjacent_eroded_slope_columns = 0usize;
@@ -1305,6 +1384,13 @@ impl CoastFacts {
         let mut coast_slopes = Vec::new();
         let mut beach_distances = Vec::new();
         for (index, sample) in samples.iter().copied().enumerate() {
+            match sample.terrain.coast.family {
+                McloneOverworldCoastFamily::Sandy => coast_band_sandy_columns += 1,
+                McloneOverworldCoastFamily::Gravel => coast_band_gravel_columns += 1,
+                McloneOverworldCoastFamily::Ordinary => coast_band_ordinary_columns += 1,
+                McloneOverworldCoastFamily::Rocky => coast_band_rocky_columns += 1,
+                McloneOverworldCoastFamily::Offshore | McloneOverworldCoastFamily::Inland => {}
+            }
             let recipe = mclone_overworld_surface_recipe(sample);
             if !ocean[index]
                 && recipe == McloneOverworldSurfaceRecipe::Beach
@@ -1316,6 +1402,13 @@ impl CoastFacts {
                 continue;
             }
             coast_adjacent_land_columns += 1;
+            match sample.terrain.coast.family {
+                McloneOverworldCoastFamily::Sandy => coast_adjacent_sandy_columns += 1,
+                McloneOverworldCoastFamily::Gravel => coast_adjacent_gravel_columns += 1,
+                McloneOverworldCoastFamily::Ordinary => coast_adjacent_ordinary_columns += 1,
+                McloneOverworldCoastFamily::Rocky => coast_adjacent_rocky_columns += 1,
+                McloneOverworldCoastFamily::Offshore | McloneOverworldCoastFamily::Inland => {}
+            }
             coast_heights.push(sample.terrain.surface_y);
             coast_slopes.push(sample.slope);
             match recipe {
@@ -1355,7 +1448,15 @@ impl CoastFacts {
             land_intent_columns,
             shoreline_edges,
             sampled_shoreline_length_blocks: shoreline_edges as u64 * u64::from(step_blocks),
+            coast_band_sandy_columns,
+            coast_band_gravel_columns,
+            coast_band_ordinary_columns,
+            coast_band_rocky_columns,
             coast_adjacent_land_columns,
+            coast_adjacent_sandy_columns,
+            coast_adjacent_gravel_columns,
+            coast_adjacent_ordinary_columns,
+            coast_adjacent_rocky_columns,
             coast_adjacent_beach_columns,
             coast_adjacent_non_beach_columns,
             coast_adjacent_eroded_slope_columns,
@@ -1401,12 +1502,25 @@ impl CoastFacts {
                 "shorelineLength": "Manhattan raster estimate; compare only at equal grid spacing",
                 "beachDistance": "sampled Manhattan distance from a land-intent Beach column to nearest ocean-intent sample",
                 "beachDistancePopulation": "Beach columns with a finite ocean-intent distance inside the sampled raster",
+                "signedCoastDistance": "continentalness is a monotonic signed proxy, not physical block distance",
             },
             "oceanIntentColumns": self.ocean_intent_columns,
             "landIntentColumns": self.land_intent_columns,
             "shorelineEdges": self.shoreline_edges,
             "sampledShorelineLengthBlocks": self.sampled_shoreline_length_blocks,
+            "coastBandFamilies": {
+                "sandy": self.coast_band_sandy_columns,
+                "gravel": self.coast_band_gravel_columns,
+                "ordinary": self.coast_band_ordinary_columns,
+                "rocky": self.coast_band_rocky_columns,
+            },
             "coastAdjacentLandColumns": self.coast_adjacent_land_columns,
+            "coastAdjacentIntentFamilies": {
+                "sandy": self.coast_adjacent_sandy_columns,
+                "gravel": self.coast_adjacent_gravel_columns,
+                "ordinary": self.coast_adjacent_ordinary_columns,
+                "rocky": self.coast_adjacent_rocky_columns,
+            },
             "coastAdjacentSurfaceRecipes": {
                 "beach": self.coast_adjacent_beach_columns,
                 "nonBeach": self.coast_adjacent_non_beach_columns,
@@ -2896,6 +3010,46 @@ fn adjusted_temperature_color(sample: McloneOverworldLandformSample) -> [u8; 4] 
             (amount - 0.5) * 2.0,
         )
     }
+}
+
+fn coast_selector_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    let amount = sample.coast.selector * 0.5 + 0.5;
+    if amount < 0.5 {
+        lerp_color([225, 207, 145, 255], [123, 132, 112, 255], amount * 2.0)
+    } else {
+        lerp_color(
+            [123, 132, 112, 255],
+            [86, 91, 101, 255],
+            (amount - 0.5) * 2.0,
+        )
+    }
+}
+
+fn coast_family_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    match sample.coast.family {
+        McloneOverworldCoastFamily::Offshore => [34, 78, 126, 255],
+        McloneOverworldCoastFamily::Sandy => [225, 207, 145, 255],
+        McloneOverworldCoastFamily::Gravel => [146, 142, 128, 255],
+        McloneOverworldCoastFamily::Ordinary => [84, 141, 72, 255],
+        McloneOverworldCoastFamily::Rocky => [86, 91, 101, 255],
+        McloneOverworldCoastFamily::Inland => [38, 75, 48, 255],
+    }
+}
+
+fn coast_transition_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    lerp_color(
+        [30, 34, 38, 255],
+        [229, 106, 184, 255],
+        sample.coast.transition,
+    )
+}
+
+fn coast_cold_color(sample: McloneOverworldTerrainSample) -> [u8; 4] {
+    lerp_color(
+        [65, 72, 67, 255],
+        [225, 245, 250, 255],
+        sample.coast.cold_response,
+    )
 }
 
 fn biome_recipe_color(sample: McloneOverworldLandformSample) -> [u8; 4] {
