@@ -53,7 +53,7 @@ pub use viewport_renderer::{
     TerrainViewportFrameStats, TerrainViewportRenderer,
 };
 
-pub const TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION: &str = "mclone-overworld-v1-gpu-preview-a7";
+pub const TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION: &str = "mclone-overworld-v1-gpu-preview-a8";
 pub const TERRAIN_PREVIEW_COMPUTE_WGSL_TEMPLATE: &str =
     include_str!("shaders/terrain_preview_compute.wgsl");
 pub const TERRAIN_PREVIEW_RENDER_WGSL: &str = include_str!("shaders/terrain_preview_render.wgsl");
@@ -1315,6 +1315,176 @@ mod tests {
     }
 
     #[test]
+    #[ignore = "requires a native WGPU adapter"]
+    fn native_gpu_preview_agrees_with_coast_reference_site() {
+        use mclone_worldgen::terrain_preview::{
+            TerrainPreviewContentStage, TerrainPreviewProfile, TerrainPreviewSurfaceQuality,
+        };
+
+        let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::PRIMARY,
+            ..Default::default()
+        });
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        }))
+        .expect("native coast preview conformance requires a WGPU adapter");
+        let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+            label: Some("mclone_coast_preview_conformance_device"),
+            required_features: wgpu::Features::empty(),
+            required_limits: adapter.limits(),
+            ..Default::default()
+        }))
+        .expect("native coast preview conformance device");
+
+        let mut request = TerrainPreviewRequest::new(-98_765, -304, 336, 8)
+            .with_profile(TerrainPreviewProfile::McloneOverworldV1)
+            .with_content_stage(TerrainPreviewContentStage::Hydrology)
+            .with_surface_quality(TerrainPreviewSurfaceQuality::Inferred);
+        request.cells_per_axis = 64;
+        let reference =
+            TerrainPreviewReferenceGrid::compile(request).expect("coast preview reference grid");
+        let sample_count = reference.request().sample_count();
+        let sample_byte_len = u64::from(sample_count) * TERRAIN_PREVIEW_SAMPLE_BYTES;
+        let normal_height_byte_len = u64::from(sample_count) * std::mem::size_of::<f32>() as u64;
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mclone_coast_preview_conformance_uniforms"),
+            size: TERRAIN_PREVIEW_UNIFORM_BYTES,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let gpu_sample_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mclone_coast_preview_conformance_samples"),
+            size: sample_byte_len,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_SRC,
+            mapped_at_creation: false,
+        });
+        let normal_height_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mclone_coast_preview_conformance_normal_heights"),
+            size: normal_height_byte_len,
+            usage: wgpu::BufferUsages::STORAGE,
+            mapped_at_creation: false,
+        });
+        let readback_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mclone_coast_preview_conformance_readback"),
+            size: sample_byte_len,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+        let layout = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+            label: Some("mclone_coast_preview_conformance_layout"),
+            entries: &[
+                uniform_layout_entry(
+                    0,
+                    wgpu::ShaderStages::COMPUTE,
+                    TERRAIN_PREVIEW_UNIFORM_BYTES,
+                ),
+                storage_layout_entry(1, wgpu::ShaderStages::COMPUTE, false, sample_byte_len),
+                storage_layout_entry(
+                    2,
+                    wgpu::ShaderStages::COMPUTE,
+                    false,
+                    normal_height_byte_len,
+                ),
+            ],
+        });
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mclone_coast_preview_conformance_bind_group"),
+            layout: &layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: gpu_sample_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: normal_height_buffer.as_entire_binding(),
+                },
+            ],
+        });
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("mclone_coast_preview_conformance_shader"),
+            source: wgpu::ShaderSource::Wgsl(terrain_preview_compute_wgsl().into()),
+        });
+        let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+            label: Some("mclone_coast_preview_conformance_pipeline_layout"),
+            bind_group_layouts: &[&layout],
+            push_constant_ranges: &[],
+        });
+        let pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("mclone_coast_preview_conformance_pipeline"),
+            layout: Some(&pipeline_layout),
+            module: &shader,
+            entry_point: Some("compute_main"),
+            compilation_options: Default::default(),
+            cache: None,
+        });
+        let options = TerrainPreviewDrawOptions {
+            source: TerrainPreviewSource::Gpu,
+            ..Default::default()
+        };
+        queue.write_buffer(
+            &uniform_buffer,
+            0,
+            &uniform_bytes(
+                &reference,
+                512,
+                512,
+                options,
+                TerrainPreviewCamera::default(),
+            ),
+        );
+        let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("mclone_coast_preview_conformance_encoder"),
+        });
+        {
+            let mut pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                label: Some("mclone_coast_preview_conformance_pass"),
+                timestamp_writes: None,
+            });
+            pass.set_pipeline(&pipeline);
+            pass.set_bind_group(0, &bind_group, &[]);
+            let workgroups = reference
+                .request()
+                .samples_per_axis()
+                .div_ceil(TERRAIN_PREVIEW_WORKGROUP_AXIS);
+            pass.dispatch_workgroups(workgroups, workgroups, 1);
+        }
+        encoder.copy_buffer_to_buffer(&gpu_sample_buffer, 0, &readback_buffer, 0, sample_byte_len);
+        queue.submit(std::iter::once(encoder.finish()));
+        let (sender, receiver) = std::sync::mpsc::channel();
+        readback_buffer
+            .slice(..)
+            .map_async(wgpu::MapMode::Read, move |result| {
+                let _ = sender.send(result);
+            });
+        device
+            .poll(wgpu::PollType::Wait)
+            .expect("wait for coast preview conformance readback");
+        receiver
+            .recv()
+            .expect("coast preview conformance callback")
+            .expect("coast preview conformance map");
+        let mapped = readback_buffer.slice(..).get_mapped_range();
+        let gpu_samples = parse_samples(&mapped).expect("coast preview conformance samples");
+        let comparison = TerrainPreviewComparison::compare(&reference, &gpu_samples)
+            .expect("coast preview comparison");
+
+        eprintln!("coast preview comparison: {comparison:#?}");
+        assert_eq!(comparison.max_absolute_base_surface_error, 0.0);
+        assert_eq!(comparison.macro_surface_material_agreement, 1.0);
+        assert_eq!(comparison.landform_kind_agreement, 1.0);
+        assert_eq!(comparison.biome_recipe_agreement, 1.0);
+        assert_eq!(comparison.surface_recipe_agreement, 1.0);
+    }
+
+    #[test]
     fn close_projection_frames_one_block_at_the_local_surface() {
         let camera = TerrainPreviewCamera::default();
         let focus_y = terrain_preview_focus_y(-98_765, -304, 336);
@@ -1562,7 +1732,7 @@ mod tests {
     fn evaluator_revision_and_production_spec_are_explicit() {
         assert_eq!(
             TERRAIN_PREVIEW_GPU_EVALUATOR_REVISION,
-            "mclone-overworld-v1-gpu-preview-a7"
+            "mclone-overworld-v1-gpu-preview-a8"
         );
         let shader = terrain_preview_compute_wgsl();
         assert!(!shader.contains("__MCLONE_PRODUCTION_FIELD_CONSTANTS__"));

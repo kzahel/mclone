@@ -4,6 +4,8 @@ const SANDY_CHARACTER_MAX: f64 = -0.28;
 const GRAVEL_CHARACTER_MAX: f64 = 0.04;
 const ORDINARY_CHARACTER_MAX: f64 = 0.30;
 const TRANSITION_CHARACTER_WIDTH: f64 = 0.12;
+pub(super) const MCLONE_OVERWORLD_DEPOSITIONAL_COAST_MIN_PROXIMITY: f64 = 0.86;
+pub(super) const MCLONE_OVERWORLD_ROCKY_COAST_MIN_PROXIMITY: f64 = 0.12;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum McloneOverworldCoastFamily {
@@ -139,6 +141,36 @@ pub(super) fn coast_intent(
     }
 }
 
+pub(super) fn coast_adjusted_land_surface_y(
+    provisional_surface_y: i32,
+    intent: McloneOverworldCoastIntent,
+    relief: f64,
+    ridges: f64,
+    mountain_detail: f64,
+) -> i32 {
+    if !intent.family.is_coast() || intent.proximity == 0.0 {
+        return provisional_surface_y;
+    }
+    let rocky_gate = smoothstep(((intent.character - 0.18) / 0.22).clamp(0.0, 1.0));
+    let rocky_support = smoothstep(((intent.rocky_suitability - 0.18) / 0.52).clamp(0.0, 1.0));
+    let rocky_influence = rocky_gate * rocky_support * intent.proximity;
+    let gravel_rise = if intent.family == McloneOverworldCoastFamily::Gravel {
+        intent.proximity * (0.35 + intent.rocky_suitability * 1.65)
+    } else {
+        0.0
+    };
+    let ridge_shoulder = smoothstep(((ridges - 0.16) / 0.84).clamp(0.0, 1.0));
+    let rocky_lift = 4.0
+        + intent.rocky_suitability * 14.0
+        + ridge_shoulder * 6.0
+        + relief.max(0.0) * 4.0
+        + mountain_detail * 3.0;
+    let adjustment = (rocky_influence * rocky_lift + gravel_rise).clamp(0.0, 22.0);
+    (f64::from(provisional_surface_y) + adjustment)
+        .round()
+        .clamp(62.0, 160.0) as i32
+}
+
 const fn smoothstep(value: f64) -> f64 {
     value * value * (3.0 - 2.0 * value)
 }
@@ -191,5 +223,22 @@ mod tests {
             coast_intent(0.0, 0.0, 0.0, 0.0, 1.0, 0.0).cold_response,
             0.0
         );
+    }
+
+    #[test]
+    fn coast_geometry_is_bounded_and_only_raises_supported_families() {
+        let sandy = coast_intent(0.01, 0.0, -0.5, 0.1, 0.2, -0.8);
+        let gravel = coast_intent(0.01, 0.0, 0.0, 0.3, 0.2, -0.1);
+        let ordinary = coast_intent(0.01, 0.0, -0.4, 0.2, 0.2, 0.25);
+        let rocky = coast_intent(0.01, 0.3, 0.7, 0.8, 0.2, 0.8);
+
+        assert_eq!(coast_adjusted_land_surface_y(64, sandy, 0.0, 0.1, 0.0), 64);
+        assert!((64..=66).contains(&coast_adjusted_land_surface_y(64, gravel, 0.0, 0.3, 0.0)));
+        assert_eq!(
+            coast_adjusted_land_surface_y(64, ordinary, 0.0, 0.2, 0.0),
+            64
+        );
+        let rocky_y = coast_adjusted_land_surface_y(64, rocky, 0.3, 0.8, 0.8);
+        assert!((70..=86).contains(&rocky_y), "{rocky_y}");
     }
 }

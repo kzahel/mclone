@@ -1,3 +1,4 @@
+use super::coast::{MCLONE_OVERWORLD_DEPOSITIONAL_COAST_MIN_PROXIMITY, McloneOverworldCoastFamily};
 use super::fields::{
     MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldLandformSample, McloneOverworldSampler,
     McloneOverworldSamplingTopology,
@@ -81,7 +82,7 @@ pub enum McloneOverworldBiomeSelectionReason {
     RiverWater,
     WetlandBank,
     BelowSeaLevel,
-    ShoreElevation,
+    ShoreIntent,
     ColdAlpine,
     CoolWetConifer,
     WarmDrySteppeCore,
@@ -96,7 +97,7 @@ impl McloneOverworldBiomeSelectionReason {
             Self::RiverWater => "watercourse water",
             Self::WetlandBank => "wetland bank",
             Self::BelowSeaLevel => "below sea level",
-            Self::ShoreElevation => "shore elevation",
+            Self::ShoreIntent => "coast intent",
             Self::ColdAlpine => "cold alpine threshold",
             Self::CoolWetConifer => "cool and moist",
             Self::WarmDrySteppeCore => "warm-dry steppe core",
@@ -203,10 +204,15 @@ pub fn mclone_overworld_biome_decision(
             recipe: McloneOverworldBiomeRecipe::Ocean,
             reason: McloneOverworldBiomeSelectionReason::BelowSeaLevel,
         }
-    } else if terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 3 {
+    } else if matches!(
+        terrain.coast.family,
+        McloneOverworldCoastFamily::Sandy | McloneOverworldCoastFamily::Gravel
+    ) && terrain.coast.proximity >= MCLONE_OVERWORLD_DEPOSITIONAL_COAST_MIN_PROXIMITY
+        && terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 8
+    {
         McloneOverworldBiomeDecision {
             recipe: McloneOverworldBiomeRecipe::Shore,
-            reason: McloneOverworldBiomeSelectionReason::ShoreElevation,
+            reason: McloneOverworldBiomeSelectionReason::ShoreIntent,
         }
     } else {
         let adjusted_temperature = terrain
@@ -266,11 +272,11 @@ pub fn mclone_overworld_biome_decision(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::levelgen::McloneOverworldCoastIntent;
     use crate::levelgen::mclone_overworld::fields::{
         McloneOverworldBathymetrySample, McloneOverworldClimateSample,
         McloneOverworldTerrainSample, McloneOverworldWatercourseSample,
     };
+    use crate::levelgen::{McloneOverworldCoastFamily, McloneOverworldCoastIntent};
 
     fn sample(surface_y: i32, slope: f64) -> McloneOverworldLandformSample {
         McloneOverworldLandformSample {
@@ -283,6 +289,7 @@ mod tests {
                 coast: McloneOverworldCoastIntent::INLAND,
                 climate: McloneOverworldClimateSample::TEMPERATE,
                 bathymetry: McloneOverworldBathymetrySample::LAND,
+                provisional_surface_y: surface_y,
                 base_surface_y: surface_y,
                 watercourse: McloneOverworldWatercourseSample {
                     signed_distance: 512.0,
@@ -314,6 +321,22 @@ mod tests {
         }
     }
 
+    fn sandy_coast(mut sample: McloneOverworldLandformSample) -> McloneOverworldLandformSample {
+        sample.terrain.continentalness = 0.01;
+        sample.terrain.coast = McloneOverworldCoastIntent {
+            family: McloneOverworldCoastFamily::Sandy,
+            signed_distance_proxy: 0.01,
+            proximity: 1.0,
+            selector: -0.8,
+            character: -0.6,
+            depositional_suitability: 0.8,
+            rocky_suitability: 0.1,
+            transition: 0.0,
+            cold_response: 0.0,
+        };
+        sample
+    }
+
     #[test]
     fn biome_language_separates_water_shore_lowland_and_wooded_upland() {
         assert_eq!(
@@ -321,11 +344,11 @@ mod tests {
             OCEAN_BIOME_ID
         );
         assert_eq!(
-            mclone_overworld_biome_id_for_sample(sample(62, 0.0)),
+            mclone_overworld_biome_id_for_sample(sandy_coast(sample(62, 0.0))),
             BEACH_BIOME_ID
         );
         assert_eq!(
-            mclone_overworld_biome_id_for_sample(sample(66, 0.0)),
+            mclone_overworld_biome_id_for_sample(sandy_coast(sample(66, 0.0))),
             BEACH_BIOME_ID
         );
         assert_eq!(

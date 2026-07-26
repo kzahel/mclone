@@ -764,9 +764,9 @@ mod tests {
         assert_eq!(
             fingerprints,
             [
-                (17_504_557_926_982_843_921, 540_454_697_130_909_605),
-                (18_313_364_208_202_554_313, 3_995_179_115_581_767_979),
-                (3_293_322_898_442_111_394, 14_722_381_067_837_031_305),
+                (2_583_364_484_576_806_111, 540_454_697_130_909_605),
+                (4_806_583_439_157_746_482, 3_995_179_115_581_767_979),
+                (1_864_260_499_167_123_332, 14_722_381_067_837_031_305),
             ]
         );
     }
@@ -776,7 +776,7 @@ mod tests {
         let receipts = [12_345, -98_765, 8_675_309].map(|seed| {
             let sampler = McloneOverworldSampler::new(seed);
             let mut biome_counts = [0_u32; 8];
-            let mut surface_counts = [0_u32; 9];
+            let mut surface_counts = [0_u32; 12];
             let mut hash = 0xcbf2_9ce4_8422_2325_u64;
             for z in (-2_048..2_048).step_by(16) {
                 for x in (-2_048..2_048).step_by(16) {
@@ -795,7 +795,7 @@ mod tests {
                     };
                     let surface_index = match mclone_overworld_surface_recipe(landform) {
                         McloneOverworldSurfaceRecipe::OceanFloor => 0,
-                        McloneOverworldSurfaceRecipe::Beach => 1,
+                        McloneOverworldSurfaceRecipe::SandyCoast => 1,
                         McloneOverworldSurfaceRecipe::RiverBed => 2,
                         McloneOverworldSurfaceRecipe::WetlandBed => 3,
                         McloneOverworldSurfaceRecipe::RiverBank => 4,
@@ -803,6 +803,9 @@ mod tests {
                         McloneOverworldSurfaceRecipe::ErodedSlope => 6,
                         McloneOverworldSurfaceRecipe::AlpineSnow => 7,
                         McloneOverworldSurfaceRecipe::ExposedStone => 8,
+                        McloneOverworldSurfaceRecipe::GravelCoast => 9,
+                        McloneOverworldSurfaceRecipe::RockyCoast => 10,
+                        McloneOverworldSurfaceRecipe::ColdCoast => 11,
                     };
                     biome_counts[biome_index] += 1;
                     surface_counts[surface_index] += 1;
@@ -832,19 +835,25 @@ mod tests {
             receipts,
             [
                 (
-                    [21_961, 9_295, 12_099, 5_886, 1_441, 8_758, 9, 6_087],
-                    [19_655, 9_897, 1_398, 43, 2_119, 31_784, 605, 9, 26],
-                    3_997_115_657_057_839_270,
+                    [21_961, 1_419, 17_251, 6_248, 1_441, 9_612, 9, 7_595],
+                    [
+                        21_961, 827, 1_398, 43, 2_017, 35_715, 605, 9, 26, 508, 2_316, 111,
+                    ],
+                    15_706_493_122_664_759_584,
                 ),
                 (
-                    [17_223, 7_808, 9_056, 10_363, 1_699, 16_170, 1_022, 2_195],
-                    [15_353, 8_046, 1_585, 114, 2_337, 35_803, 1_247, 999, 52],
-                    11_771_498_767_002_029_931,
+                    [17_223, 782, 11_926, 10_455, 1_699, 20_073, 1_022, 2_356],
+                    [
+                        17_223, 416, 1_585, 114, 2_252, 38_535, 1_247, 999, 52, 324, 2_760, 29,
+                    ],
+                    3_950_433_516_101_462_420,
                 ),
                 (
-                    [33_641, 11_468, 6_346, 5_143, 989, 1_901, 0, 6_048],
-                    [29_838, 14_083, 916, 73, 1_619, 18_796, 211, 0, 0],
-                    5_553_198_139_751_724_371,
+                    [33_641, 2_588, 9_834, 5_560, 989, 4_225, 0, 8_699],
+                    [
+                        33_641, 1_558, 916, 73, 1_566, 25_437, 211, 0, 0, 747, 1_080, 307,
+                    ],
+                    2_615_856_235_821_421_013,
                 ),
             ]
         );
@@ -873,7 +882,7 @@ mod tests {
             fingerprints,
             [
                 3_307_820_178_694_792_859,
-                3_516_601_028_463_849_576,
+                14_452_273_995_309_908_072,
                 17_128_386_512_483_643_946,
             ]
         );

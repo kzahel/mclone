@@ -1556,8 +1556,12 @@ mod tests {
     fn surviving_records_respect_symmetric_minimum_spacing() {
         let source =
             McloneVegetationSource::new(8_675_309, McloneOverworldSamplingTopology::Unbounded);
-        let records = tree_records_intersecting(source, bounds(-512, -512, 511, 511)).unwrap();
-        assert!(records.len() > 16);
+        let records = tree_records_intersecting(source, bounds(-768, -768, 767, 767)).unwrap();
+        assert!(
+            records.len() > 16,
+            "spacing survey requires at least 17 records, got {}",
+            records.len()
+        );
         for (index, left) in records.iter().enumerate() {
             for right in &records[index + 1..] {
                 let dx = i64::from(right.record.canonical_base.x)

@@ -1191,7 +1191,10 @@ const fn landform_kind_code(kind: McloneOverworldLandformKind) -> f32 {
 const fn surface_recipe_code(recipe: McloneOverworldSurfaceRecipe) -> f32 {
     match recipe {
         McloneOverworldSurfaceRecipe::OceanFloor => 0.0,
-        McloneOverworldSurfaceRecipe::Beach => 1.0,
+        McloneOverworldSurfaceRecipe::SandyCoast => 1.0,
+        McloneOverworldSurfaceRecipe::GravelCoast => 9.0,
+        McloneOverworldSurfaceRecipe::RockyCoast => 10.0,
+        McloneOverworldSurfaceRecipe::ColdCoast => 11.0,
         McloneOverworldSurfaceRecipe::RiverBed => 2.0,
         McloneOverworldSurfaceRecipe::WetlandBed => 3.0,
         McloneOverworldSurfaceRecipe::RiverBank => 4.0,

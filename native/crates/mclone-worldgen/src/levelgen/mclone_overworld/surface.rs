@@ -5,6 +5,10 @@ use crate::block::{
 use crate::levelgen::MutableChunkBlockBuffer;
 
 use super::biomes::{McloneOverworldBiomeRecipe, mclone_overworld_biome_recipe};
+use super::coast::{
+    MCLONE_OVERWORLD_DEPOSITIONAL_COAST_MIN_PROXIMITY, MCLONE_OVERWORLD_ROCKY_COAST_MIN_PROXIMITY,
+    McloneOverworldCoastFamily,
+};
 use super::fields::{MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldLandformSample};
 
 pub const MCLONE_OVERWORLD_ERODED_SLOPE_MIN_Y: i32 = 72;
@@ -12,11 +16,15 @@ pub const MCLONE_OVERWORLD_ERODED_SLOPE_MIN_STRENGTH: f64 = 0.18;
 pub const MCLONE_OVERWORLD_EXPOSED_STONE_MIN_Y: i32 = 84;
 pub const MCLONE_OVERWORLD_EXPOSED_STONE_MIN_STRENGTH: f64 = 0.82;
 pub const MCLONE_OVERWORLD_ALPINE_EXPOSED_STONE_MIN_SLOPE: f64 = 1.05;
+pub const MCLONE_OVERWORLD_ROCKY_COAST_STONE_MIN_SLOPE: f64 = 0.55;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum McloneOverworldSurfaceRecipe {
     OceanFloor,
-    Beach,
+    SandyCoast,
+    GravelCoast,
+    RockyCoast,
+    ColdCoast,
     RiverBed,
     WetlandBed,
     RiverBank,
@@ -30,7 +38,10 @@ impl McloneOverworldSurfaceRecipe {
     pub const fn label(self) -> &'static str {
         match self {
             Self::OceanFloor => "oceanFloor",
-            Self::Beach => "beach",
+            Self::SandyCoast => "sandyCoast",
+            Self::GravelCoast => "gravelCoast",
+            Self::RockyCoast => "rockyCoast",
+            Self::ColdCoast => "coldCoast",
             Self::RiverBed => "riverBed",
             Self::WetlandBed => "wetlandBed",
             Self::RiverBank => "riverBank",
@@ -54,10 +65,25 @@ pub fn mclone_overworld_surface_recipe(
         && terrain.surface_y <= terrain.watercourse.water_surface_y + 3
     {
         McloneOverworldSurfaceRecipe::RiverBank
-    } else if terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL - 4 {
+    } else if terrain.continentalness <= 0.0 {
         McloneOverworldSurfaceRecipe::OceanFloor
-    } else if terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 3 {
-        McloneOverworldSurfaceRecipe::Beach
+    } else if coast_cold_surface_active(sample)
+        && terrain.coast.cold_response >= 0.68
+        && sample.slope < 0.85
+    {
+        McloneOverworldSurfaceRecipe::ColdCoast
+    } else if coast_surface_active(sample)
+        && terrain.coast.family == McloneOverworldCoastFamily::Sandy
+    {
+        McloneOverworldSurfaceRecipe::SandyCoast
+    } else if coast_surface_active(sample)
+        && terrain.coast.family == McloneOverworldCoastFamily::Gravel
+    {
+        McloneOverworldSurfaceRecipe::GravelCoast
+    } else if coast_surface_active(sample)
+        && terrain.coast.family == McloneOverworldCoastFamily::Rocky
+    {
+        McloneOverworldSurfaceRecipe::RockyCoast
     } else if mclone_overworld_biome_recipe(sample) == McloneOverworldBiomeRecipe::SnowyAlpine
         && sample.slope < MCLONE_OVERWORLD_ALPINE_EXPOSED_STONE_MIN_SLOPE
     {
@@ -88,8 +114,39 @@ pub fn mclone_overworld_macro_surface_top_material(
         return WATER;
     }
     let surface_y = terrain.base_surface_y;
-    if surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 3 {
-        return SAND;
+    if terrain.continentalness > 0.0 {
+        if terrain.coast.family.is_coast()
+            && terrain.coast.proximity >= MCLONE_OVERWORLD_DEPOSITIONAL_COAST_MIN_PROXIMITY
+            && terrain.coast.cold_response >= 0.68
+        {
+            return SNOW;
+        }
+        match terrain.coast.family {
+            McloneOverworldCoastFamily::Sandy
+                if terrain.coast.proximity >= MCLONE_OVERWORLD_DEPOSITIONAL_COAST_MIN_PROXIMITY =>
+            {
+                return SAND;
+            }
+            McloneOverworldCoastFamily::Gravel
+                if terrain.coast.proximity >= MCLONE_OVERWORLD_DEPOSITIONAL_COAST_MIN_PROXIMITY =>
+            {
+                return coast_gravel_material(terrain);
+            }
+            // Exact terrain exposes the stone body on steep faces. The cheap
+            // macro view has no block-scale slope, so represent the grassy
+            // shoulder instead of painting the whole rocky region bare.
+            McloneOverworldCoastFamily::Rocky
+                if terrain.coast.proximity >= MCLONE_OVERWORLD_ROCKY_COAST_MIN_PROXIMITY =>
+            {
+                return GRASS_BLOCK;
+            }
+            McloneOverworldCoastFamily::Ordinary
+            | McloneOverworldCoastFamily::Sandy
+            | McloneOverworldCoastFamily::Gravel
+            | McloneOverworldCoastFamily::Rocky
+            | McloneOverworldCoastFamily::Offshore
+            | McloneOverworldCoastFamily::Inland => {}
+        }
     }
     let adjusted_temperature = terrain.climate.altitude_adjusted_temperature(surface_y);
     if surface_y >= super::biomes::MCLONE_OVERWORLD_ALPINE_MIN_Y
@@ -155,7 +212,15 @@ pub(super) fn mclone_overworld_surface_top_material(
 ) -> RawBlockId {
     match mclone_overworld_surface_recipe(sample) {
         McloneOverworldSurfaceRecipe::OceanFloor | McloneOverworldSurfaceRecipe::RiverBed => GRAVEL,
-        McloneOverworldSurfaceRecipe::Beach => SAND,
+        McloneOverworldSurfaceRecipe::SandyCoast => SAND,
+        McloneOverworldSurfaceRecipe::GravelCoast => coast_gravel_material(sample.terrain),
+        McloneOverworldSurfaceRecipe::RockyCoast
+            if sample.slope >= MCLONE_OVERWORLD_ROCKY_COAST_STONE_MIN_SLOPE =>
+        {
+            STONE
+        }
+        McloneOverworldSurfaceRecipe::RockyCoast => GRASS_BLOCK,
+        McloneOverworldSurfaceRecipe::ColdCoast => coast_underlying_material(sample.terrain),
         McloneOverworldSurfaceRecipe::WetlandBed => CLAY,
         McloneOverworldSurfaceRecipe::RiverBank
             if sample.terrain.base_surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 5
@@ -184,8 +249,36 @@ pub(super) fn write_surface_column(
         McloneOverworldSurfaceRecipe::OceanFloor => {
             write_subsurface(buffer, local_x, local_z, surface_y, GRAVEL, 3)
         }
-        McloneOverworldSurfaceRecipe::Beach => {
+        McloneOverworldSurfaceRecipe::SandyCoast => {
             write_subsurface(buffer, local_x, local_z, surface_y, SAND, 4)
+        }
+        McloneOverworldSurfaceRecipe::GravelCoast => write_subsurface(
+            buffer,
+            local_x,
+            local_z,
+            surface_y,
+            coast_gravel_material(sample.terrain),
+            3,
+        ),
+        McloneOverworldSurfaceRecipe::RockyCoast => {
+            if sample.slope >= MCLONE_OVERWORLD_ROCKY_COAST_STONE_MIN_SLOPE {
+                for y in 1..=surface_y {
+                    buffer.set_block_at_y(local_x, y, local_z, STONE);
+                }
+            } else {
+                write_subsurface(buffer, local_x, local_z, surface_y - 1, DIRT, 2);
+                buffer.set_block_at_y(local_x, surface_y, local_z, GRASS_BLOCK);
+            }
+        }
+        McloneOverworldSurfaceRecipe::ColdCoast => {
+            let material = coast_underlying_material(sample.terrain);
+            if material == GRASS_BLOCK {
+                write_subsurface(buffer, local_x, local_z, surface_y - 1, DIRT, 2);
+                buffer.set_block_at_y(local_x, surface_y, local_z, GRASS_BLOCK);
+            } else {
+                write_subsurface(buffer, local_x, local_z, surface_y, material, 3);
+            }
+            buffer.set_block_at_y(local_x, surface_y + 1, local_z, SNOW);
         }
         McloneOverworldSurfaceRecipe::RiverBed => {
             write_subsurface(buffer, local_x, local_z, surface_y, GRAVEL, 3)
@@ -258,6 +351,55 @@ fn erosion_strength(sample: McloneOverworldLandformSample) -> f64 {
     slope.max(exposure)
 }
 
+fn coast_surface_active(sample: McloneOverworldLandformSample) -> bool {
+    sample.terrain.continentalness > 0.0
+        && match sample.terrain.coast.family {
+            McloneOverworldCoastFamily::Sandy => {
+                sample.terrain.coast.proximity >= MCLONE_OVERWORLD_DEPOSITIONAL_COAST_MIN_PROXIMITY
+                    && sample.terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 5
+            }
+            McloneOverworldCoastFamily::Gravel => {
+                sample.terrain.coast.proximity >= MCLONE_OVERWORLD_DEPOSITIONAL_COAST_MIN_PROXIMITY
+                    && sample.terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 10
+            }
+            McloneOverworldCoastFamily::Rocky => {
+                sample.terrain.coast.proximity >= MCLONE_OVERWORLD_ROCKY_COAST_MIN_PROXIMITY
+                    && sample.terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 30
+            }
+            McloneOverworldCoastFamily::Ordinary
+            | McloneOverworldCoastFamily::Offshore
+            | McloneOverworldCoastFamily::Inland => false,
+        }
+}
+
+fn coast_cold_surface_active(sample: McloneOverworldLandformSample) -> bool {
+    sample.terrain.continentalness > 0.0
+        && sample.terrain.coast.family.is_coast()
+        && sample.terrain.coast.proximity >= MCLONE_OVERWORLD_DEPOSITIONAL_COAST_MIN_PROXIMITY
+        && sample.terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 30
+}
+
+fn coast_gravel_material(terrain: super::fields::McloneOverworldTerrainSample) -> RawBlockId {
+    if terrain.coast.rocky_suitability >= 0.68
+        && terrain.mountain_detail >= 0.18 - terrain.coast.transition * 0.16
+    {
+        STONE
+    } else {
+        GRAVEL
+    }
+}
+
+fn coast_underlying_material(terrain: super::fields::McloneOverworldTerrainSample) -> RawBlockId {
+    match terrain.coast.family {
+        McloneOverworldCoastFamily::Sandy => SAND,
+        McloneOverworldCoastFamily::Gravel => coast_gravel_material(terrain),
+        McloneOverworldCoastFamily::Rocky => STONE,
+        McloneOverworldCoastFamily::Ordinary
+        | McloneOverworldCoastFamily::Offshore
+        | McloneOverworldCoastFamily::Inland => GRASS_BLOCK,
+    }
+}
+
 fn eroded_slope_material(sample: McloneOverworldLandformSample) -> RawBlockId {
     let terrain = sample.terrain;
     let texture = (terrain.mountain_detail * 0.68
@@ -326,11 +468,11 @@ fn smoothstep(value: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::levelgen::McloneOverworldCoastIntent;
     use crate::levelgen::mclone_overworld::fields::{
         McloneOverworldBathymetrySample, McloneOverworldClimateSample,
         McloneOverworldTerrainSample, McloneOverworldWatercourseSample,
     };
+    use crate::levelgen::{McloneOverworldCoastFamily, McloneOverworldCoastIntent};
 
     fn sample(surface_y: i32, slope: f64) -> McloneOverworldLandformSample {
         McloneOverworldLandformSample {
@@ -343,6 +485,7 @@ mod tests {
                 coast: McloneOverworldCoastIntent::INLAND,
                 climate: McloneOverworldClimateSample::TEMPERATE,
                 bathymetry: McloneOverworldBathymetrySample::LAND,
+                provisional_surface_y: surface_y,
                 base_surface_y: surface_y,
                 watercourse: McloneOverworldWatercourseSample {
                     signed_distance: 512.0,
@@ -374,6 +517,25 @@ mod tests {
         }
     }
 
+    fn with_coast(
+        mut sample: McloneOverworldLandformSample,
+        family: McloneOverworldCoastFamily,
+    ) -> McloneOverworldLandformSample {
+        sample.terrain.continentalness = 0.01;
+        sample.terrain.coast = McloneOverworldCoastIntent {
+            family,
+            signed_distance_proxy: 0.01,
+            proximity: 1.0,
+            selector: 0.0,
+            character: 0.0,
+            depositional_suitability: 0.5,
+            rocky_suitability: 0.5,
+            transition: 0.0,
+            cold_response: 0.0,
+        };
+        sample
+    }
+
     #[test]
     fn macro_surface_materials_preserve_distinct_lod_regions() {
         let mut terrain = sample(70, 0.0).terrain;
@@ -385,10 +547,32 @@ mod tests {
         terrain.continentalness = -0.1;
         assert_eq!(mclone_overworld_macro_surface_top_material(terrain), WATER);
 
-        terrain.continentalness = 0.5;
+        terrain = with_coast(
+            McloneOverworldLandformSample {
+                terrain,
+                slope: 0.0,
+            },
+            McloneOverworldCoastFamily::Sandy,
+        )
+        .terrain;
         terrain.base_surface_y = 65;
         assert_eq!(mclone_overworld_macro_surface_top_material(terrain), SAND);
 
+        terrain = with_coast(
+            McloneOverworldLandformSample {
+                terrain,
+                slope: 0.0,
+            },
+            McloneOverworldCoastFamily::Rocky,
+        )
+        .terrain;
+        assert_eq!(
+            mclone_overworld_macro_surface_top_material(terrain),
+            GRASS_BLOCK
+        );
+
+        terrain.coast = McloneOverworldCoastIntent::INLAND;
+        terrain.continentalness = 0.5;
         terrain.base_surface_y = 110;
         terrain.climate.temperature = -1.0;
         assert_eq!(mclone_overworld_macro_surface_top_material(terrain), SNOW);
@@ -412,13 +596,33 @@ mod tests {
 
     #[test]
     fn surface_language_has_distinct_floor_shore_soil_and_exposure_recipes() {
+        let mut ocean = sample(59, 0.0);
+        ocean.terrain.continentalness = -0.1;
+        ocean.terrain.coast = McloneOverworldCoastIntent::OFFSHORE;
         assert_eq!(
-            mclone_overworld_surface_recipe(sample(59, 0.0)),
+            mclone_overworld_surface_recipe(ocean),
             McloneOverworldSurfaceRecipe::OceanFloor
         );
         assert_eq!(
-            mclone_overworld_surface_recipe(sample(60, 0.0)),
-            McloneOverworldSurfaceRecipe::Beach
+            mclone_overworld_surface_recipe(with_coast(
+                sample(64, 0.0),
+                McloneOverworldCoastFamily::Sandy,
+            )),
+            McloneOverworldSurfaceRecipe::SandyCoast
+        );
+        assert_eq!(
+            mclone_overworld_surface_recipe(with_coast(
+                sample(67, 0.3),
+                McloneOverworldCoastFamily::Gravel,
+            )),
+            McloneOverworldSurfaceRecipe::GravelCoast
+        );
+        assert_eq!(
+            mclone_overworld_surface_recipe(with_coast(
+                sample(74, 1.2),
+                McloneOverworldCoastFamily::Rocky,
+            )),
+            McloneOverworldSurfaceRecipe::RockyCoast
         );
         assert_eq!(
             mclone_overworld_surface_recipe(sample(79, 1.0)),

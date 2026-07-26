@@ -13,6 +13,7 @@ wgpu.workspace = true
 
 [dev-dependencies]
 naga.workspace = true
+pollster.workspace = true
 
 [lib]
 name = "mclone_terrain_view"

@@ -1917,6 +1917,7 @@ dependencies = [
  "mclone-render-color",
  "mclone-worldgen",
  "naga",
+ "pollster",
  "wgpu",
 ]
 

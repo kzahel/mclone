@@ -27,6 +27,17 @@ struct U64 {
     high: u32,
 };
 
+struct CoastIntent {
+    family: f32,
+    proximity: f32,
+    selector: f32,
+    character: f32,
+    depositional_suitability: f32,
+    rocky_suitability: f32,
+    transition: f32,
+    cold_response: f32,
+};
+
 override terrain_sample_halo_radius: u32 = 0u;
 
 // Rust replaces this marker with domains and scales from the production spec.
@@ -275,6 +286,106 @@ fn mountain_strength(continentalness: f32, ruggedness: f32) -> f32 {
     return inland * region;
 }
 
+fn coast_intent(
+    continentalness: f32,
+    relief: f32,
+    ruggedness: f32,
+    ridges: f32,
+    temperature: f32,
+    selector: f32,
+) -> CoastIntent {
+    var proximity = 0.0;
+    if continentalness >= 0.0 {
+        proximity =
+            1.0 - smooth_curve(clamp(continentalness / 0.16, 0.0, 1.0));
+    } else {
+        proximity =
+            1.0 - smooth_curve(clamp(-continentalness / 0.10, 0.0, 1.0));
+    }
+    let rugged =
+        smooth_curve(clamp((ruggedness + 0.30) / 1.10, 0.0, 1.0));
+    let ridge = smooth_curve(clamp((ridges - 0.12) / 0.88, 0.0, 1.0));
+    let relief_energy =
+        smooth_curve(clamp((abs(relief) - 0.04) / 0.72, 0.0, 1.0));
+    let rocky_suitability = clamp(
+        rugged * 0.58 + ridge * 0.27 + relief_energy * 0.15,
+        0.0,
+        1.0,
+    );
+    let depositional_suitability = clamp(
+        1.0 - rocky_suitability * 0.78 - relief_energy * 0.22,
+        0.0,
+        1.0,
+    );
+    let character = clamp(
+        selector * 0.72
+            + ruggedness * 0.18
+            + (ridges * 2.0 - 1.0) * 0.07
+            + relief * 0.03,
+        -1.0,
+        1.0,
+    );
+    var family = 3.0;
+    if continentalness < -0.10 {
+        family = 0.0;
+    } else if continentalness > 0.16 {
+        family = 5.0;
+    } else if character <= -0.28 && depositional_suitability >= 0.22 {
+        family = 1.0;
+    } else if character <= 0.04 {
+        family = 2.0;
+    } else if character <= 0.30 {
+        family = 3.0;
+    } else if rocky_suitability >= 0.26 {
+        family = 4.0;
+    }
+    let nearest_boundary = min(
+        abs(character + 0.28),
+        min(abs(character - 0.04), abs(character - 0.30)),
+    );
+    let transition =
+        1.0 - smooth_curve(clamp(nearest_boundary / 0.12, 0.0, 1.0));
+    let cold_response =
+        smooth_curve(clamp((-temperature - 0.18) / 0.42, 0.0, 1.0));
+    return CoastIntent(
+        family,
+        proximity,
+        selector,
+        character,
+        depositional_suitability,
+        rocky_suitability,
+        transition * proximity,
+        cold_response * proximity,
+    );
+}
+
+fn coast_surface_active(
+    continentalness: f32,
+    coast: CoastIntent,
+) -> bool {
+    if continentalness <= 0.0 {
+        return false;
+    }
+    if coast.family == 1.0 || coast.family == 2.0 {
+        return coast.proximity >= 0.86;
+    }
+    if coast.family == 4.0 {
+        return coast.proximity >= 0.12;
+    }
+    return false;
+}
+
+fn coast_gravel_material(
+    coast: CoastIntent,
+    mountain_detail: f32,
+) -> f32 {
+    if coast.rocky_suitability >= 0.68
+        && mountain_detail >= 0.18 - coast.transition * 0.16 {
+        return 1.0;
+    }
+    return 7.0;
+}
+
 fn macro_surface_material(
     surface_y: f32,
     continentalness: f32,
@@ -283,12 +394,27 @@ fn macro_surface_material(
     ridges: f32,
     mountain_detail: f32,
     temperature: f32,
+    coast: CoastIntent,
 ) -> f32 {
     if continentalness <= 0.0 {
         return 2.0;
     }
-    if surface_y <= 66.0 {
-        return 6.0;
+    if continentalness > 0.0 {
+        if coast.family >= 1.0
+            && coast.family <= 4.0
+            && coast.proximity >= 0.86
+            && coast.cold_response >= 0.68 {
+            return 8.0;
+        }
+        if coast.family == 1.0 && coast.proximity >= 0.86 {
+            return 6.0;
+        }
+        if coast.family == 2.0 && coast.proximity >= 0.86 {
+            return coast_gravel_material(coast, mountain_detail);
+        }
+        if coast.family == 4.0 && coast.proximity >= 0.12 {
+            return 4.0;
+        }
     }
     let altitude_cooling = clamp(max(surface_y - 72.0, 0.0) / 96.0, 0.0, 0.75);
     let adjusted_temperature = clamp(temperature - altitude_cooling, -1.0, 1.0);
@@ -340,6 +466,41 @@ fn land_surface_height(
     let texture = mountain_detail * mountain * (6.0 + shoulder * 14.0);
     return round_away_from_zero(
         clamp(base + rolling_relief + lift + texture, 62.0, 160.0),
+    );
+}
+
+fn coast_adjusted_land_surface_height(
+    provisional_surface_y: f32,
+    coast: CoastIntent,
+    relief: f32,
+    ridges: f32,
+    mountain_detail: f32,
+) -> f32 {
+    if coast.family == 0.0 || coast.family == 5.0 || coast.proximity == 0.0 {
+        return provisional_surface_y;
+    }
+    let rocky_gate =
+        smooth_curve(clamp((coast.character - 0.18) / 0.22, 0.0, 1.0));
+    let rocky_support = smooth_curve(
+        clamp((coast.rocky_suitability - 0.18) / 0.52, 0.0, 1.0),
+    );
+    let rocky_influence = rocky_gate * rocky_support * coast.proximity;
+    var gravel_rise = 0.0;
+    if coast.family == 2.0 {
+        gravel_rise =
+            coast.proximity * (0.35 + coast.rocky_suitability * 1.65);
+    }
+    let ridge_shoulder =
+        smooth_curve(clamp((ridges - 0.16) / 0.84, 0.0, 1.0));
+    let rocky_lift = 4.0
+        + coast.rocky_suitability * 14.0
+        + ridge_shoulder * 6.0
+        + max(relief, 0.0) * 4.0
+        + mountain_detail * 3.0;
+    let adjustment =
+        clamp(rocky_influence * rocky_lift + gravel_rise, 0.0, 22.0);
+    return round_away_from_zero(
+        clamp(provisional_surface_y + adjustment, 62.0, 160.0),
     );
 }
 
@@ -579,6 +740,7 @@ fn surface_recipe_code(
     ruggedness: f32,
     ridges: f32,
     temperature: f32,
+    coast: CoastIntent,
 ) -> f32 {
     if channel_influence > 0.0 {
         return 2.0;
@@ -589,11 +751,31 @@ fn surface_recipe_code(
     if bank_influence > 0.0 && surface_y <= water_y + 3.0 {
         return 4.0;
     }
-    if surface_y <= 59.0 {
+    if continentalness <= 0.0 {
         return 0.0;
     }
-    if surface_y <= 66.0 {
+    if continentalness > 0.0
+        && coast.family >= 1.0
+        && coast.family <= 4.0
+        && coast.proximity >= 0.86
+        && surface_y <= 93.0
+        && coast.cold_response >= 0.68 {
+        return 11.0;
+    }
+    if coast_surface_active(continentalness, coast)
+        && coast.family == 1.0
+        && surface_y <= 68.0 {
         return 1.0;
+    }
+    if coast_surface_active(continentalness, coast)
+        && coast.family == 2.0
+        && surface_y <= 73.0 {
+        return 9.0;
+    }
+    if coast_surface_active(continentalness, coast)
+        && coast.family == 4.0
+        && surface_y <= 93.0 {
+        return 10.0;
     }
     let adjusted_temperature =
         clamp(temperature - clamp(max(surface_y - 72.0, 0.0) / 96.0, 0.0, 0.75), -1.0, 1.0);
@@ -625,6 +807,7 @@ fn biome_recipe_code(
     ridges: f32,
     temperature: f32,
     moisture: f32,
+    coast: CoastIntent,
 ) -> f32 {
     if channel_influence > 0.0 || wetland_pool_influence >= 0.55 {
         return 2.0;
@@ -632,10 +815,12 @@ fn biome_recipe_code(
     if bank_influence > 0.0 && wetland_influence > 0.25 {
         return 7.0;
     }
-    if surface_y <= 61.0 {
+    if continentalness <= 0.0 {
         return 0.0;
     }
-    if surface_y <= 66.0 {
+    if (coast.family == 1.0 || coast.family == 2.0)
+        && coast.proximity >= 0.86
+        && surface_y <= 71.0 {
         return 1.0;
     }
     let adjusted_temperature =
@@ -675,6 +860,7 @@ fn landform_kind_code(
     continentalness: f32,
     ruggedness: f32,
     ridges: f32,
+    coast: CoastIntent,
 ) -> f32 {
     if channel_influence > 0.0 {
         return 2.0;
@@ -682,10 +868,12 @@ fn landform_kind_code(
     if wetland_pool_influence >= 0.55 || wetland_influence > 0.25 {
         return 3.0;
     }
-    if surface_y <= 61.0 {
+    if continentalness <= 0.0 {
         return 0.0;
     }
-    if surface_y <= 66.0 {
+    if coast.proximity >= 0.12
+        && coast.family >= 1.0
+        && coast.family <= 4.0 {
         return 1.0;
     }
     let mountain = mountain_strength(continentalness, ruggedness);
@@ -717,6 +905,7 @@ fn complete_hydrology(
     base_surface_y: f32,
     macro_material: f32,
     geometry: RiverGeometry,
+    coast: CoastIntent,
 ) -> HydrologyResult {
     let depth = clamp(
         round_away_from_zero(
@@ -859,6 +1048,7 @@ fn complete_hydrology(
         ruggedness,
         ridges,
         temperature,
+        coast,
     );
     let biome = biome_recipe_code(
         surface_y,
@@ -871,6 +1061,7 @@ fn complete_hydrology(
         ridges,
         temperature,
         moisture,
+        coast,
     );
     let landform = landform_kind_code(
         surface_y,
@@ -880,6 +1071,7 @@ fn complete_hydrology(
         continentalness,
         ruggedness,
         ridges,
+        coast,
     );
     return HydrologyResult(
         vec4<f32>(
@@ -1050,10 +1242,31 @@ fn evaluate_point(world_x: i32, world_z: i32) -> TerrainPreviewSample {
         1.0,
     );
 
-    var base_surface_y = land_surface_height(
+    let coast_selector = value_noise(
+        COAST_DOMAIN,
+        COAST_SCALE,
+        world_x,
+        world_z,
+    );
+    let coast = coast_intent(
         continentalness,
         relief,
         ruggedness,
+        ridges,
+        temperature,
+        coast_selector,
+    );
+    let provisional_surface_y = land_surface_height(
+        continentalness,
+        relief,
+        ruggedness,
+        ridges,
+        mountain_detail,
+    );
+    var base_surface_y = coast_adjusted_land_surface_height(
+        provisional_surface_y,
+        coast,
+        relief,
         ridges,
         mountain_detail,
     );
@@ -1072,6 +1285,7 @@ fn evaluate_point(world_x: i32, world_z: i32) -> TerrainPreviewSample {
         ridges,
         mountain_detail,
         temperature,
+        coast,
     );
     let geometry = river_geometry(
         world_x,
@@ -1093,6 +1307,7 @@ fn evaluate_point(world_x: i32, world_z: i32) -> TerrainPreviewSample {
         base_surface_y,
         macro_material,
         geometry,
+        coast,
     );
 
     var sample: TerrainPreviewSample;

@@ -2,7 +2,7 @@ use mclone_core::{AxisTopology, ChunkPos, HorizontalTopology};
 
 use crate::noise::{GradientNoise2d, SeedDomain, ValueNoise2d};
 
-use super::coast::{McloneOverworldCoastIntent, coast_intent};
+use super::coast::{McloneOverworldCoastIntent, coast_adjusted_land_surface_y, coast_intent};
 
 pub const MCLONE_OVERWORLD_SEA_LEVEL: i32 = 63;
 pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-18";
@@ -385,6 +385,7 @@ pub struct McloneOverworldTerrainSample {
     pub coast: McloneOverworldCoastIntent,
     pub climate: McloneOverworldClimateSample,
     pub bathymetry: McloneOverworldBathymetrySample,
+    pub provisional_surface_y: i32,
     pub base_surface_y: i32,
     pub watercourse: McloneOverworldWatercourseSample,
     pub surface_y: i32,
@@ -635,10 +636,21 @@ impl McloneOverworldSampler {
             self.coast.sample(world_x as i32, world_z as i32),
         );
         let bathymetry = self.sample_bathymetry(world_x as i32, world_z as i32, continentalness);
-        let base_surface_y = if continentalness <= 0.0 {
+        let provisional_surface_y = if continentalness <= 0.0 {
             bathymetry.floor_y()
         } else {
             land_surface_height(continentalness, relief, ruggedness, ridges, mountain_detail)
+        };
+        let base_surface_y = if continentalness <= 0.0 {
+            provisional_surface_y
+        } else {
+            coast_adjusted_land_surface_y(
+                provisional_surface_y,
+                coast,
+                relief,
+                ridges,
+                mountain_detail,
+            )
         };
         let river_warp_x = relief_detail * 72.0 + ruggedness_detail * 24.0;
         let river_warp_z = ruggedness_detail * 72.0 - relief_large * 24.0;
@@ -661,6 +673,7 @@ impl McloneOverworldSampler {
             coast,
             climate,
             bathymetry,
+            provisional_surface_y,
             base_surface_y,
             watercourse,
             surface_y,
@@ -1210,6 +1223,7 @@ mod tests {
         );
         assert!((left.bathymetry.seabed_relief - right.bathymetry.seabed_relief).abs() < 1.0e-12);
         assert_eq!(left.bathymetry.water_depth, right.bathymetry.water_depth);
+        assert_eq!(left.provisional_surface_y, right.provisional_surface_y);
         assert_eq!(left.base_surface_y, right.base_surface_y);
         assert!(
             (left.watercourse.signed_distance - right.watercourse.signed_distance).abs() < 1.0e-9

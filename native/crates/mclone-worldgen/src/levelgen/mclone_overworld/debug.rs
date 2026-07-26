@@ -1,7 +1,6 @@
 use super::biomes::{McloneOverworldBiomeDecision, mclone_overworld_biome_decision};
 use super::fields::{
-    MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldLandformSample, McloneOverworldSampler,
-    McloneOverworldSamplingTopology,
+    McloneOverworldLandformSample, McloneOverworldSampler, McloneOverworldSamplingTopology,
 };
 use super::surface::{McloneOverworldSurfaceRecipe, mclone_overworld_surface_recipe};
 use super::terrain::sample_mclone_overworld_landform_with_streams;
@@ -131,9 +130,9 @@ pub fn mclone_overworld_landform_kind(
     } else if terrain.watercourse.is_wetland_pool() || terrain.watercourse.wetland_influence > 0.25
     {
         McloneOverworldLandformKind::Wetland
-    } else if terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL - 2 {
+    } else if terrain.continentalness <= 0.0 {
         McloneOverworldLandformKind::Ocean
-    } else if terrain.surface_y <= MCLONE_OVERWORLD_SEA_LEVEL + 3 {
+    } else if terrain.coast.family.is_coast() && terrain.coast.proximity >= 0.12 {
         McloneOverworldLandformKind::Coast
     } else if terrain.is_mountain_valley() {
         McloneOverworldLandformKind::MountainValley
