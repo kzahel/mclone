@@ -32,6 +32,9 @@ presented as a manipulable scale model:
 
 It does **not** own:
 
+- the catalog, detached-preview, live-observer, and embodied-play product
+  continuum; that prospective shell remains in
+  [`universe-product-shell.md`](universe-product-shell.md);
 - general second-world composition, lobby destination previews, warm-world
   transfer, portals, or nested-world recursion; those remain in
   [`embedded-worlds.md`](embedded-worlds.md);
@@ -813,6 +816,8 @@ performance question.
 
 ## Related Documents
 
+- [`universe-product-shell.md`](universe-product-shell.md) — wider product
+  navigation between detached and live representations.
 - [`embedded-worlds.md`](embedded-worlds.md) — placed geometry, live dioramas,
   warm worlds, active-world-source reuse, and the direct-path invariant.
 - [`bounded-world-topology.md`](bounded-world-topology.md) — landed periodic

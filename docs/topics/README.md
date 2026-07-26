@@ -175,6 +175,12 @@ series implements the same concern, normally reuse the document slug in its
   require explicit host-neutral launch intent, platform presentation does not
   select destinations, idle work stays bounded, and managed development
   launchers own at most one interactive process.
+- [`universe-product-shell.md`](universe-product-shell.md): concept-stage
+  product model that names the existing catalog, detached preview, observer,
+  warm-world, dimension, and live-session flows as one navigation continuum;
+  preserves current owners and title-first behavior while defining startup,
+  resume, authority, preview-truth, Lab-workbench, and fresh-entrypoint
+  boundaries.
 - [`steam-deck-test-bed.md`](steam-deck-test-bed.md): active physical Steam
   Deck provisioning and validation lane — official Devkit Client deployment,
   native Linux staging and asset-root contracts, Gaming Mode acceptance, and

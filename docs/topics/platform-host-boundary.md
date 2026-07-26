@@ -145,6 +145,15 @@ the selected Rust entry point contains. Conversely, shared engine systems
 must not import a lightweight application's policy merely because that
 application was their first proof host.
 
+The prospective
+[`Universe product shell`](universe-product-shell.md) remains above this
+boundary as shared product meaning. Specialized web Labs have a narrower
+blessed workbench carve-out: they may own rapid DOM/React control and
+inspection presentation, while engine semantics and anything promoted into
+the cross-platform product remain with shared owners. That carve-out does not
+authorize the ordinary browser game adapter to acquire Universe, terrain,
+asset, or session policy.
+
 ## The Important Initialization Distinction
 
 A thin platform adapter does **not** mean Rust must micromanage the browser or
@@ -1211,6 +1220,9 @@ Current enforcement:
 
 ## Related Documentation
 
+- [`universe-product-shell.md`](universe-product-shell.md) records the
+  prospective product composition and the specialized Lab-workbench carve-out
+  above this platform boundary.
 - [`client-experience-architecture.md`](../client-experience-architecture.md)
   owns the broader one-client-experience rulebook.
 - [`platform-parity.md`](platform-parity.md) owns the feature and shared-contract

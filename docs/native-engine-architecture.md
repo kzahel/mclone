@@ -146,6 +146,15 @@ hard invariants, validation ledger, and spherical deferral live in
 
 ## Host Shapes
 
+The prospective
+[`Universe product shell`](topics/universe-product-shell.md) names the product
+composition above the current host: catalog, detached terrain preview, live
+observer/overview, and embodied play can become one navigation model without
+making `McloneSceneHost` an N-world registry. That direction is not implemented
+and does not currently select a new crate. The session-free title shell and
+bounded active-plus-optional-standby scene below remain the current
+architecture.
+
 All display clients share one `mclone-scene::McloneSceneHost`, configured with
 `McloneSceneHostOptions`, behind thin cadence and surface drivers (Tacticals
 168 and 170). Flat hosts use Mono; the headset-free gate uses synthetic Stereo:

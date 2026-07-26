@@ -58,6 +58,12 @@ owns the reusable view manipulation those products consume.
 It does not own aircraft physics, ordinary embodied locomotion, XR session
 management, world authority, or Terrain Lab's diagnostic UI.
 
+[`universe-product-shell.md`](universe-product-shell.md) owns the prospective
+product state surrounding this journey: catalogs, detached representations,
+live observation, embodied play, and return. This topic remains the owner of
+view manipulation and selected-region handoff rather than becoming that
+product shell.
+
 ## Product Thesis
 
 Terrain Lab has revealed a useful product surface rather than only an internal
@@ -878,6 +884,8 @@ containment, not only a successful pinch in an automated happy path.
 
 ## Related Documents
 
+- [`universe-product-shell.md`](universe-product-shell.md) — product-level
+  catalog, preview, observe, play, and detach continuum.
 - [`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md) — shared
   distant terrain and exact-chunk handoff.
 - [`gpu-procedural-terrain.md`](gpu-procedural-terrain.md) — Terrain Lab

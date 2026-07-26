@@ -178,7 +178,7 @@ World Explorer proves host portability and remains useful on its own, but it
 is not the ownership boundary. Procedural terrain streaming should compose as:
 
 ```text
-Terrain Lab / World Explorer / game scene
+Terrain Lab / World Explorer / Universe preview / game scene
                     |
      shared terrain-LOD coordinator and products
                 mclone-terrain-view
@@ -205,8 +205,9 @@ import terrain-view.
 The service API must not bake in World Explorer's current ten-level,
 four-by-four default. That configuration is the first measured consumer. The
 coordinator derives bounded work from a validated desired set so Terrain Lab,
-the Explorer, and a later game scene can use different measured ring budgets
-without different scheduling semantics.
+the Explorer, a later Universe detached-preview presentation, and the game
+scene can use different measured ring budgets without different scheduling
+semantics.
 
 Platform adapters choose execution mechanics:
 
@@ -606,6 +607,8 @@ and
 
 ## Related Documents
 
+- [`universe-product-shell.md`](universe-product-shell.md) — detached-preview
+  product role, authority transitions, and preview-truth requirements.
 - [`gpu-procedural-terrain.md`](gpu-procedural-terrain.md) — terrain
   evaluation, Terrain Lab evidence, exact comparison, and GPU research.
 - [`far-lod.md`](far-lod.md) — rejected chunk system and removal boundary.

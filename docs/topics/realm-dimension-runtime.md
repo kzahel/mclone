@@ -394,6 +394,7 @@ work; further networking changes should use a new follow-up.
 
 ## Related
 
+- [`universe-product-shell.md`](universe-product-shell.md)
 - [`embedded-worlds.md`](embedded-worlds.md)
 - [`multiplayer-networking.md`](multiplayer-networking.md)
 - [`../persistence-architecture.md`](../persistence-architecture.md)

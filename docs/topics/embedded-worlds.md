@@ -8,6 +8,12 @@ live model of a distant or nearby active-world location, a "palantir" window
 into a network-hosted world, and the shrink-and-fall transition between nested
 worlds.
 
+[`universe-product-shell.md`](universe-product-shell.md) now records the wider
+product/navigation interpretation of these mechanisms. Universe may use the
+current retained preview and activation seam, but it is not itself an
+authoritative lobby world and does not broaden this topic's bounded
+active-plus-optional-standby ownership into an N-world live registry.
+
 The durable realm/dimension/server-topology contract now lives in
 [`realm-dimension-runtime.md`](realm-dimension-runtime.md), with its bounded
 implementation sequence in

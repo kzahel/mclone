@@ -210,3 +210,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   hydrology, coasts, geology, ecology, landmarks, and negative space with
   bounded topology-aware plans, scale-aware previews, and selective
   volumetric terrain
+- `universe-product-shell` — first-class product navigation across catalogs,
+  detached previews, observers, live play, resume policy, and Lab workbenches
+  while preserving current realm, scene, terrain-view, and platform owners

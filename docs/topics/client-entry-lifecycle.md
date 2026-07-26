@@ -28,6 +28,13 @@ the internal implementation of bounded frame telemetry; that remains in
 [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md) and
 [`performance.md`](performance.md).
 
+[`universe-product-shell.md`](universe-product-shell.md) records a prospective
+generalization of this product root: menu focus, catalogs, detached previews,
+live observation, and embodied sessions could become states in one Universe
+navigation model. It does not change the implemented title-first decision
+below. Any adoption must extend this shared entry/lifecycle policy rather than
+introduce a platform-specific startup path.
+
 ## Accepted Product Decision
 
 Every ordinary interactive client starts at the title menu. No platform starts
@@ -350,3 +357,15 @@ Human validation is required before declaring the concern complete for:
 - browser back/forward/deep-link expectations as a product decision;
 - physical OpenXR runtime interruption/resume and headset comfort; and
 - any future resume-last-world UX, privacy, or destructive recovery policy.
+
+## Related Documents
+
+- [`universe-product-shell.md`](universe-product-shell.md) — prospective
+  product root, destination/representation continuum, and explicit
+  restore-view versus rejoin-live distinction.
+- [`platform-host-boundary.md`](platform-host-boundary.md) — platform
+  execution of shared product decisions.
+- [`realm-dimension-runtime.md`](realm-dimension-runtime.md) — authoritative
+  identity and live realm/dimension ownership.
+- [`embedded-worlds.md`](embedded-worlds.md) — bounded retained-preview and
+  warm-activation evidence.

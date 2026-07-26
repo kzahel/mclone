@@ -768,6 +768,12 @@ clear UI title if the shorter name is too ambiguous. `/terrain/` is the natural
 candidate deployment route alongside `/animals/` and `/structures/`, but a
 tactical should lock the final route and package name.
 
+[`universe-product-shell.md`](universe-product-shell.md) records the broader
+product interpretation now suggested by this work. Terrain Lab remains a
+specialized rapid workbench; its shared terrain/view capabilities may later
+serve a Universe detached-preview mode, but its React workspace does not
+become the cross-platform player shell.
+
 ### Primary Web Product
 
 Terrain Lab should be a standalone, deployable web application and the fastest
@@ -1462,6 +1468,7 @@ The next implementation direction is:
 
 ## Related
 
+- [`universe-product-shell.md`](universe-product-shell.md)
 - [`mclone-overworld-generation.md`](mclone-overworld-generation.md)
 - [`world-generation-profiles.md`](world-generation-profiles.md)
 - [`far-lod.md`](far-lod.md)
