@@ -2,6 +2,7 @@
 
 mod canonical;
 mod clipmap;
+mod composition;
 mod horizon_admission;
 mod terrain_vegetation_coordinator;
 mod viewport;
@@ -31,6 +32,11 @@ pub use clipmap::{
     TerrainClipmapBounds, TerrainClipmapConfig, TerrainClipmapDiagnostics,
     TerrainClipmapLevelSnapshot, TerrainClipmapTile, TerrainClipmapUpdate,
 };
+pub use composition::{
+    ExactPaintedCoverageSnapshot, TERRAIN_EXACT_COVERAGE_MASK_BYTES,
+    TERRAIN_EXACT_COVERAGE_MAX_CHUNKS_PER_AXIS, TERRAIN_EXACT_COVERAGE_WORD_COUNT,
+    TerrainCompositionSourceIdentity, TerrainExactCoverageMask, TerrainExactCoverageMode,
+};
 pub use terrain_vegetation_coordinator::{
     TerrainVegetationAdmission, TerrainVegetationCoordinator,
     TerrainVegetationCoordinatorDiagnostics, TerrainVegetationCoordinatorState,
@@ -47,8 +53,8 @@ pub use viewport::{
     TerrainViewportTileId, plan_terrain_viewport,
 };
 pub use viewport_renderer::{
-    TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainHorizonFrameStats, TerrainHorizonRenderer,
-    TerrainHorizonVegetationServiceStats, TerrainPreviewMaterialAtlas,
+    TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainHorizonFrameStats, TerrainHorizonRenderTarget,
+    TerrainHorizonRenderer, TerrainHorizonVegetationServiceStats, TerrainPreviewMaterialAtlas,
     TerrainViewportCompletedComparison, TerrainViewportExternalCpuRequest,
     TerrainViewportFrameStats, TerrainViewportRenderer,
 };

@@ -55,6 +55,17 @@ var material_sampler: sampler;
 @group(1) @binding(2)
 var<uniform> material_uvs: TerrainPreviewMaterialUvs;
 
+struct TerrainExactCoverageParams {
+    origin_size: vec4<i32>,
+    mode_count_generation: vec4<u32>,
+};
+
+@group(2) @binding(0)
+var<uniform> exact_coverage: TerrainExactCoverageParams;
+
+@group(2) @binding(1)
+var<storage, read> exact_coverage_words: array<u32>;
+
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec3<f32>,
@@ -67,6 +78,23 @@ struct VertexOutput {
     @location(7) world_position: vec3<f32>,
     @location(8) @interpolate(flat) biome: u32,
 };
+
+fn exact_chunk_painted(world_xz: vec2<f32>) -> bool {
+    if exact_coverage.mode_count_generation.x == 0u
+        || exact_coverage.origin_size.z <= 0
+        || exact_coverage.origin_size.w <= 0 {
+        return false;
+    }
+    let chunk = vec2<i32>(floor(world_xz / 16.0));
+    let local = chunk - exact_coverage.origin_size.xy;
+    if local.x < 0 || local.y < 0
+        || local.x >= exact_coverage.origin_size.z
+        || local.y >= exact_coverage.origin_size.w {
+        return false;
+    }
+    let bit = u32(local.y) * 64u + u32(local.x);
+    return (exact_coverage_words[bit / 32u] & (1u << (bit % 32u))) != 0u;
+}
 
 fn grid_corner(vertex_in_cell: u32) -> vec2<u32> {
     switch vertex_in_cell {
@@ -662,6 +690,10 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         && input.world_xz.y < f32(params.clipmap_inner_bounds.w) {
         discard;
     }
+    let exact_painted = exact_chunk_painted(input.world_xz);
+    if exact_coverage.mode_count_generation.x == 1u && exact_painted {
+        discard;
+    }
     let world_dx = dpdx(input.world_xz);
     let world_dy = dpdy(input.world_xz);
     let blocks_per_pixel = max(length(world_dx), length(world_dy));
@@ -720,6 +752,16 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
             let cover = clamp(input.semantics.w, 0.0, 1.0);
             color = mix(color, color * vec3<f32>(0.57, 0.82, 0.58), cover * 0.36);
         }
+    }
+    if exact_coverage.mode_count_generation.x == 2u && exact_painted {
+        let checker = (i32(floor(input.world_xz.x / 2.0))
+            + i32(floor(input.world_xz.y / 2.0))) & 1;
+        let diagnostic = select(
+            vec3<f32>(0.96, 0.05, 0.72),
+            vec3<f32>(1.0, 0.72, 0.08),
+            checker == 0,
+        );
+        color = mix(color, diagnostic, 0.82);
     }
     return mclone_apply_target_color_transform_rgba(
         vec4<f32>(color, 1.0),

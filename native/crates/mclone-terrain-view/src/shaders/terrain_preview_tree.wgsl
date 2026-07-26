@@ -17,6 +17,17 @@ const terrain_target_color_transform: f32 = __MCLONE_TARGET_COLOR_TRANSFORM__;
 @group(0) @binding(0)
 var<uniform> params: TerrainPreviewParams;
 
+struct TerrainExactCoverageParams {
+    origin_size: vec4<i32>,
+    mode_count_generation: vec4<u32>,
+};
+
+@group(1) @binding(0)
+var<uniform> exact_coverage: TerrainExactCoverageParams;
+
+@group(1) @binding(1)
+var<storage, read> exact_coverage_words: array<u32>;
+
 struct TreeInstance {
     @location(0) base_height: vec4<f32>,
     @location(1) crown_family: vec4<f32>,
@@ -28,6 +39,23 @@ struct VertexOutput {
     @location(0) color: vec3<f32>,
     @location(1) world_xz: vec2<f32>,
 };
+
+fn exact_chunk_painted(world_xz: vec2<f32>) -> bool {
+    if exact_coverage.mode_count_generation.x == 0u
+        || exact_coverage.origin_size.z <= 0
+        || exact_coverage.origin_size.w <= 0 {
+        return false;
+    }
+    let chunk = vec2<i32>(floor(world_xz / 16.0));
+    let local = chunk - exact_coverage.origin_size.xy;
+    if local.x < 0 || local.y < 0
+        || local.x >= exact_coverage.origin_size.z
+        || local.y >= exact_coverage.origin_size.w {
+        return false;
+    }
+    let bit = u32(local.y) * 64u + u32(local.x);
+    return (exact_coverage_words[bit / 32u] & (1u << (bit % 32u))) != 0u;
+}
 
 fn cube_corner(vertex: u32) -> vec3<f32> {
     let corners = array<vec3<f32>, 36>(
@@ -188,8 +216,16 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         && input.world_xz.y < f32(params.clipmap_inner_bounds.w) {
         discard;
     }
+    let exact_painted = exact_chunk_painted(input.world_xz);
+    if exact_coverage.mode_count_generation.x == 1u && exact_painted {
+        discard;
+    }
+    var color = input.color;
+    if exact_coverage.mode_count_generation.x == 2u && exact_painted {
+        color = mix(color, vec3<f32>(1.0, 0.08, 0.72), 0.86);
+    }
     return mclone_apply_target_color_transform_rgba(
-        vec4<f32>(input.color, 1.0),
+        vec4<f32>(color, 1.0),
         terrain_target_color_transform,
     );
 }

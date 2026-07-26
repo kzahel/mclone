@@ -20,13 +20,15 @@ use mclone_worldgen::terrain_vegetation::{
 };
 
 use super::{
-    TERRAIN_PREVIEW_DEPTH_FORMAT, TERRAIN_PREVIEW_SAMPLE_BYTES, TERRAIN_PREVIEW_UNIFORM_BYTES,
-    TERRAIN_PREVIEW_WORKGROUP_AXIS, TerrainClipmap, TerrainClipmapConfig,
-    TerrainClipmapDiagnostics, TerrainClipmapTile, TerrainHorizonPresentation,
-    TerrainPreviewCamera, TerrainPreviewDrawOptions, TerrainPreviewLayer, TerrainPreviewSource,
-    TerrainPreviewSplitLayout, TerrainVegetationCoordinator, TerrainVegetationCoordinatorState,
-    TerrainVegetationDesiredTile, TerrainVegetationExecutor, TerrainVegetationExecutorKind,
-    TerrainVegetationSlotToken, TerrainViewportPlan, TerrainViewportTileId,
+    ExactPaintedCoverageSnapshot, TERRAIN_EXACT_COVERAGE_MASK_BYTES, TERRAIN_PREVIEW_DEPTH_FORMAT,
+    TERRAIN_PREVIEW_SAMPLE_BYTES, TERRAIN_PREVIEW_UNIFORM_BYTES, TERRAIN_PREVIEW_WORKGROUP_AXIS,
+    TerrainClipmap, TerrainClipmapConfig, TerrainClipmapDiagnostics, TerrainClipmapTile,
+    TerrainCompositionSourceIdentity, TerrainExactCoverageMask, TerrainExactCoverageMode,
+    TerrainHorizonPresentation, TerrainPreviewCamera, TerrainPreviewDrawOptions,
+    TerrainPreviewLayer, TerrainPreviewSource, TerrainPreviewSplitLayout,
+    TerrainVegetationCoordinator, TerrainVegetationCoordinatorState, TerrainVegetationDesiredTile,
+    TerrainVegetationExecutor, TerrainVegetationExecutorKind, TerrainVegetationSlotToken,
+    TerrainViewportPlan, TerrainViewportTileId,
     horizon_admission::{
         TERRAIN_HORIZON_STAGING_SLOTS_PER_LEVEL, TerrainHorizonAdmission,
         TerrainHorizonBeginTransition, TerrainHorizonLevelPresentation, TerrainHorizonResourceTile,
@@ -37,6 +39,17 @@ use super::{
 };
 
 pub const TERRAIN_PREVIEW_MATERIAL_UV_COUNT: usize = 256;
+const TERRAIN_EXACT_COVERAGE_UNIFORM_BYTES: u64 = 32;
+
+#[derive(Clone, Copy, Debug)]
+pub struct TerrainHorizonRenderTarget<'a> {
+    pub color_view: &'a wgpu::TextureView,
+    pub depth_view: &'a wgpu::TextureView,
+    pub color_load: wgpu::LoadOp<wgpu::Color>,
+    pub color_store: wgpu::StoreOp,
+    pub depth_load: wgpu::LoadOp<f32>,
+    pub depth_store: wgpu::StoreOp,
+}
 
 #[derive(Clone, Copy, Debug)]
 pub struct TerrainPreviewMaterialAtlas<'a> {
@@ -173,6 +186,10 @@ pub struct TerrainHorizonFrameStats {
     pub fixed_resident_bytes: u64,
     pub vegetation_bytes: u64,
     pub resident_bytes: u64,
+    pub exact_coverage_mode: TerrainExactCoverageMode,
+    pub exact_coverage_generation: u64,
+    pub exact_painted_chunks: u32,
+    pub exact_coverage_mask_bytes: u64,
     pub vegetation_service: TerrainHorizonVegetationServiceStats,
     pub finest_sample_spacing: u32,
     pub coarse_ready: bool,
@@ -289,6 +306,100 @@ struct TerrainPreviewMaterialResources {
     _sampler: wgpu::Sampler,
     _uv_buffer: wgpu::Buffer,
     bind_group: wgpu::BindGroup,
+}
+
+struct TerrainExactCoverageResources {
+    _uniform_buffer: wgpu::Buffer,
+    _mask_buffer: wgpu::Buffer,
+    bind_group: wgpu::BindGroup,
+    mask: TerrainExactCoverageMask,
+    mode: TerrainExactCoverageMode,
+    uploaded_mode: TerrainExactCoverageMode,
+}
+
+impl TerrainExactCoverageResources {
+    fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        layout: &wgpu::BindGroupLayout,
+    ) -> Result<Self, String> {
+        let snapshot = ExactPaintedCoverageSnapshot::new(
+            TerrainCompositionSourceIdentity::new(TerrainPreviewProfile::McloneOverworldV1, 0),
+            1,
+            [],
+        )?;
+        let mask = snapshot.packed_mask()?;
+        let uniform_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mclone_terrain_exact_coverage_uniform"),
+            size: TERRAIN_EXACT_COVERAGE_UNIFORM_BYTES,
+            usage: wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        let mask_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("mclone_terrain_exact_coverage_mask"),
+            size: TERRAIN_EXACT_COVERAGE_MASK_BYTES,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+        queue.write_buffer(
+            &uniform_buffer,
+            0,
+            &mask.uniform_bytes(TerrainExactCoverageMode::Disabled),
+        );
+        queue.write_buffer(&mask_buffer, 0, &mask.word_bytes());
+        let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("mclone_terrain_exact_coverage_bind_group"),
+            layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: uniform_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: mask_buffer.as_entire_binding(),
+                },
+            ],
+        });
+        Ok(Self {
+            _uniform_buffer: uniform_buffer,
+            _mask_buffer: mask_buffer,
+            bind_group,
+            mask,
+            mode: TerrainExactCoverageMode::Disabled,
+            uploaded_mode: TerrainExactCoverageMode::Disabled,
+        })
+    }
+
+    fn set_snapshot(
+        &mut self,
+        queue: &wgpu::Queue,
+        snapshot: &ExactPaintedCoverageSnapshot,
+        mode: TerrainExactCoverageMode,
+    ) -> Result<(), String> {
+        let mask = snapshot.packed_mask()?;
+        queue.write_buffer(&self._mask_buffer, 0, &mask.word_bytes());
+        queue.write_buffer(&self._uniform_buffer, 0, &mask.uniform_bytes(mode));
+        self.mask = mask;
+        self.mode = mode;
+        self.uploaded_mode = mode;
+        Ok(())
+    }
+
+    fn disable(&mut self) {
+        self.mode = TerrainExactCoverageMode::Disabled;
+    }
+
+    fn sync(&mut self, queue: &wgpu::Queue) {
+        if self.uploaded_mode != self.mode {
+            queue.write_buffer(
+                &self._uniform_buffer,
+                0,
+                &self.mask.uniform_bytes(self.mode),
+            );
+            self.uploaded_mode = self.mode;
+        }
+    }
 }
 
 impl TerrainPreviewMaterialResources {
@@ -730,6 +841,7 @@ pub struct TerrainViewportRenderer {
     compute_layout: wgpu::BindGroupLayout,
     render_layout: wgpu::BindGroupLayout,
     _material_resources: TerrainPreviewMaterialResources,
+    exact_coverage: TerrainExactCoverageResources,
     compute_pipeline: wgpu::ComputePipeline,
     horizon_compute_pipeline: wgpu::ComputePipeline,
     render_pipeline: wgpu::RenderPipeline,
@@ -884,8 +996,27 @@ impl TerrainViewportRenderer {
                 ),
             ],
         });
+        let exact_coverage_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                label: Some("mclone_terrain_exact_coverage_layout"),
+                entries: &[
+                    uniform_layout_entry_with_size(
+                        0,
+                        wgpu::ShaderStages::FRAGMENT,
+                        TERRAIN_EXACT_COVERAGE_UNIFORM_BYTES,
+                    ),
+                    storage_layout_entry(
+                        1,
+                        wgpu::ShaderStages::FRAGMENT,
+                        true,
+                        TERRAIN_EXACT_COVERAGE_MASK_BYTES,
+                    ),
+                ],
+            });
         let material_resources =
             TerrainPreviewMaterialResources::new(device, queue, &material_layout, material_atlas)?;
+        let exact_coverage =
+            TerrainExactCoverageResources::new(device, queue, &exact_coverage_layout)?;
         let compute_shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mclone_terrain_viewport_compute_shader"),
             source: wgpu::ShaderSource::Wgsl(terrain_preview_compute_wgsl().into()),
@@ -911,12 +1042,12 @@ impl TerrainViewportRenderer {
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("mclone_terrain_viewport_render_pipeline_layout"),
-                bind_group_layouts: &[&render_layout, &material_layout],
+                bind_group_layouts: &[&render_layout, &material_layout, &exact_coverage_layout],
                 push_constant_ranges: &[],
             });
         let tree_pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("mclone_terrain_viewport_tree_pipeline_layout"),
-            bind_group_layouts: &[&render_layout],
+            bind_group_layouts: &[&render_layout, &exact_coverage_layout],
             push_constant_ranges: &[],
         });
         let compute_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
@@ -1082,6 +1213,7 @@ impl TerrainViewportRenderer {
             compute_layout,
             render_layout,
             _material_resources: material_resources,
+            exact_coverage,
             compute_pipeline,
             horizon_compute_pipeline,
             render_pipeline,
@@ -2251,6 +2383,7 @@ impl TerrainViewportRenderer {
         });
         pass.set_pipeline(&self.render_pipeline);
         pass.set_bind_group(1, &self._material_resources.bind_group, &[]);
+        pass.set_bind_group(2, &self.exact_coverage.bind_group, &[]);
         let panels = render_panels(options.source, options.split_layout, width, height);
         for panel in &panels {
             pass.set_scissor_rect(panel.x, panel.y, panel.width, panel.height);
@@ -2282,6 +2415,7 @@ impl TerrainViewportRenderer {
             return;
         }
         pass.set_pipeline(&self.tree_pipeline);
+        pass.set_bind_group(1, &self.exact_coverage.bind_group, &[]);
         for panel in &panels {
             pass.set_scissor_rect(panel.x, panel.y, panel.width, panel.height);
             let tiles = if options.source == TerrainPreviewSource::Reference
@@ -2481,6 +2615,7 @@ impl TerrainHorizonRenderer {
             for slot in &mut self.slots {
                 slot.clear_vegetation();
             }
+            self.renderer.exact_coverage.disable();
         }
         self.seed = seed;
         self.requested_center_x = center_x;
@@ -2489,6 +2624,32 @@ impl TerrainHorizonRenderer {
         if let Err(error) = self.schedule_requested_transition() {
             self.vegetation_error = Some(error);
         }
+    }
+
+    pub fn set_exact_painted_coverage(
+        &mut self,
+        queue: &wgpu::Queue,
+        snapshot: &ExactPaintedCoverageSnapshot,
+        mode: TerrainExactCoverageMode,
+    ) -> Result<(), String> {
+        let expected = TerrainCompositionSourceIdentity::new(
+            TerrainPreviewProfile::McloneOverworldV1,
+            self.seed,
+        );
+        if snapshot.source() != expected {
+            return Err(format!(
+                "exact-painted coverage source {:?} does not match horizon source {:?}",
+                snapshot.source(),
+                expected
+            ));
+        }
+        self.renderer
+            .exact_coverage
+            .set_snapshot(queue, snapshot, mode)
+    }
+
+    pub fn clear_exact_painted_coverage(&mut self) {
+        self.renderer.exact_coverage.disable();
     }
 
     fn schedule_requested_transition(&mut self) -> Result<(), String> {
@@ -2556,7 +2717,67 @@ impl TerrainHorizonRenderer {
         height: u32,
         presentation: TerrainHorizonPresentation,
     ) -> Result<TerrainHorizonFrameStats, String> {
+        self.encode_impl(
+            device,
+            queue,
+            encoder,
+            color_view,
+            None,
+            wgpu::LoadOp::Clear(self.renderer.clear_color),
+            wgpu::StoreOp::Store,
+            wgpu::LoadOp::Clear(0.0),
+            None,
+            width,
+            height,
+            presentation,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn encode_to_target(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: TerrainHorizonRenderTarget<'_>,
+        width: u32,
+        height: u32,
+        presentation: TerrainHorizonPresentation,
+    ) -> Result<TerrainHorizonFrameStats, String> {
+        self.encode_impl(
+            device,
+            queue,
+            encoder,
+            target.color_view,
+            Some(target.depth_view),
+            target.color_load,
+            target.color_store,
+            target.depth_load,
+            Some(target.depth_store),
+            width,
+            height,
+            presentation,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn encode_impl(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        color_view: &wgpu::TextureView,
+        external_depth_view: Option<&wgpu::TextureView>,
+        color_load: wgpu::LoadOp<wgpu::Color>,
+        color_store: wgpu::StoreOp,
+        depth_load: wgpu::LoadOp<f32>,
+        depth_store: Option<wgpu::StoreOp>,
+        width: u32,
+        height: u32,
+        presentation: TerrainHorizonPresentation,
+    ) -> Result<TerrainHorizonFrameStats, String> {
         self.resize(device, width, height);
+        self.renderer.exact_coverage.sync(queue);
         if !self.admission.has_staged_levels()
             && (self.clipmap.center() != (self.requested_center_x, self.requested_center_z)
                 || !self.clipmap.origins_settled())
@@ -2726,19 +2947,19 @@ impl TerrainHorizonRenderer {
                     view: color_view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(self.renderer.clear_color),
-                        store: wgpu::StoreOp::Store,
+                        load: color_load,
+                        store: color_store,
                     },
                 })],
                 depth_stencil_attachment: Some(wgpu::RenderPassDepthStencilAttachment {
-                    view: &self.renderer.depth.view,
+                    view: external_depth_view.unwrap_or(&self.renderer.depth.view),
                     depth_ops: Some(wgpu::Operations {
-                        load: wgpu::LoadOp::Clear(0.0),
-                        store: if self.renderer.depth_capture_enabled {
+                        load: depth_load,
+                        store: depth_store.unwrap_or(if self.renderer.depth_capture_enabled {
                             wgpu::StoreOp::Store
                         } else {
                             wgpu::StoreOp::Discard
-                        },
+                        }),
                     }),
                     stencil_ops: None,
                 }),
@@ -2746,6 +2967,7 @@ impl TerrainHorizonRenderer {
             });
             pass.set_pipeline(&self.renderer.horizon_render_pipeline);
             pass.set_bind_group(1, &self.renderer._material_resources.bind_group, &[]);
+            pass.set_bind_group(2, &self.renderer.exact_coverage.bind_group, &[]);
             for level in terrain_levels.iter().rev() {
                 drawn_levels = drawn_levels.saturating_add(1);
                 for resource in &level.tiles {
@@ -2756,6 +2978,7 @@ impl TerrainHorizonRenderer {
                 }
             }
             pass.set_pipeline(&self.renderer.tree_pipeline);
+            pass.set_bind_group(1, &self.renderer.exact_coverage.bind_group, &[]);
             for level in &vegetation_levels {
                 if level.snapshot.sample_spacing > TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING {
                     continue;
@@ -2802,12 +3025,15 @@ impl TerrainHorizonRenderer {
             .saturating_mul(size_of::<f32>() as u64);
         let normal_height_fixed_bytes = u64::from(self.admission.resource_slots())
             .saturating_mul(terrain_horizon_normal_height_byte_len()?);
-        let fixed_resident_bytes = u64::from(self.admission.resource_slots()).saturating_mul(
-            self.renderer
-                .sample_byte_len
-                .saturating_add(terrain_horizon_normal_height_byte_len()?)
-                .saturating_add(TERRAIN_PREVIEW_UNIFORM_BYTES.saturating_mul(2)),
-        );
+        let fixed_resident_bytes = u64::from(self.admission.resource_slots())
+            .saturating_mul(
+                self.renderer
+                    .sample_byte_len
+                    .saturating_add(terrain_horizon_normal_height_byte_len()?)
+                    .saturating_add(TERRAIN_PREVIEW_UNIFORM_BYTES.saturating_mul(2)),
+            )
+            .saturating_add(TERRAIN_EXACT_COVERAGE_UNIFORM_BYTES)
+            .saturating_add(TERRAIN_EXACT_COVERAGE_MASK_BYTES);
         let vegetation_bytes = self
             .slots
             .iter()
@@ -2884,6 +3110,10 @@ impl TerrainHorizonRenderer {
             fixed_resident_bytes,
             vegetation_bytes,
             resident_bytes,
+            exact_coverage_mode: self.renderer.exact_coverage.mode,
+            exact_coverage_generation: self.renderer.exact_coverage.mask.generation,
+            exact_painted_chunks: self.renderer.exact_coverage.mask.painted_chunks,
+            exact_coverage_mask_bytes: TERRAIN_EXACT_COVERAGE_MASK_BYTES,
             vegetation_service,
             finest_sample_spacing: self.clipmap.config().base_sample_spacing,
             coarse_ready: drawn_levels > 0,
