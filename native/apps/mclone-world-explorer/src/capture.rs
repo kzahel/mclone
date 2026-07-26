@@ -169,6 +169,7 @@ pub fn run_smoke(options: &ExplorerOptions, root: &Path, started: Instant) -> Re
     while !sequence.is_complete() {
         let frame_started = Instant::now();
         let input_applied = sequence.prepare_frame(&mut terrain, viewport)?;
+        let continuous_coverage_required = sequence.requires_continuous_coverage();
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("mclone_world_explorer_smoke_frame"),
         });
@@ -198,7 +199,12 @@ pub fn run_smoke(options: &ExplorerOptions, root: &Path, started: Instant) -> Re
         queue.submit(std::iter::once(encoder.finish()));
         terrain.poll_completed(&device)?;
         let frame_time = frame_started.elapsed();
-        recorder.note_frame(frame_time, input_applied, stats)?;
+        recorder.note_frame(
+            frame_time,
+            input_applied,
+            continuous_coverage_required,
+            stats,
+        )?;
 
         if let Some((label, color, depth)) = captures {
             let pixels = color.finish(&device)?;

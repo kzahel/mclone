@@ -2,8 +2,8 @@
 
 Status: active 2026-07-26. The original diagnosis predates Tacticals
 253–256; desktop and browser review after the shared vegetation-worker
-cutover confirmed the transition defect on both executors. Slice 0 is
-complete and Slice 1 is next.
+cutover confirmed the transition defect on both executors. Slices 0–1 are
+complete and Slice 2 is next.
 
 Topic: `procedural-horizon-clipmap`
 
@@ -140,6 +140,8 @@ Status: complete 2026-07-26.
 
 ### Slice 1: requested, staged, and committed admission
 
+Status: complete 2026-07-26.
+
 1. Give every level explicit requested and committed origins.
 2. Preserve currently drawable slot resources while entering strips are
    generated into bounded staging resources.
@@ -148,6 +150,37 @@ Status: complete 2026-07-26.
    drawable, with source reset as the only immediate invalidation.
 5. Add deterministic constrained-budget tests at ordinary, aligned,
    negative, diagonal, and teleport transitions.
+
+The implementation adds seven fixed guard resources to each four-by-four
+level. That is exactly the largest entering set for a one-cell diagonal move:
+four row tiles plus three non-duplicate column tiles. Ten levels therefore
+retain `160` logical resources and add `70` staging resources, for `230`
+bounded terrain/vegetation resource slots. Ordinary movement advances each
+requested origin by at most one tile per frame-state update; a true long jump
+uses the explicit rebase path. The default global rebase threshold is `4,096`
+blocks.
+
+Terrain and vegetation expose separate complete presentations over those
+resources. A terrain level commits its new origin only after all 16 logical
+tiles are drawable. Vegetation retains the previous complete level until
+every replacement product for that level is drawable, then switches the
+whole level without an uncovered frame. A source reset remains the only
+immediate invalidation and removes both presentations before accepting new
+source work.
+
+The fixed allocation rose from `86,553,600` to `124,457,600` bytes:
+`37,904,000` bytes, or `43.8%`, for bounded staging resources and the
+separate vegetation presentation uniform. No transition increases that
+allocation.
+
+Pure admission tests cover partial aligned transitions, diagonal guard
+capacity, retained vegetation, and teleport reuse. Native/offscreen smoke at
+the `2047` to `2048` coincidence boundary retained `160` ready logical tiles,
+ten committed terrain levels, and three committed vegetation levels on every
+movement frame. The headed desktop-browser lane passed the same continuous
+coverage assertions through held motion, Worker termination/restart, negative
+coordinates, and a million-block teleport. Its held-motion frames kept the
+previous `2,609`-tree presentation until the replacement forest committed.
 
 ### Slice 2: shared normal halo and fine/coarse seam policy
 

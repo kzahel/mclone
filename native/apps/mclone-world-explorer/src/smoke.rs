@@ -95,6 +95,20 @@ impl SmokeSequence {
     pub fn is_complete(&self) -> bool {
         self.stage_index >= SMOKE_STAGES.len()
     }
+
+    pub fn requires_continuous_coverage(&self) -> bool {
+        SMOKE_STAGES.get(self.stage_index).is_some_and(|stage| {
+            matches!(
+                stage,
+                SmokeStage::MoveX
+                    | SmokeStage::MoveZ
+                    | SmokeStage::MoveDiagonal
+                    | SmokeStage::Zoom
+                    | SmokeStage::Map
+                    | SmokeStage::Orbit
+            )
+        })
+    }
 }
 
 impl SmokeStage {
@@ -230,6 +244,7 @@ impl SmokeRecorder {
         &mut self,
         frame_time: Duration,
         input_applied: bool,
+        continuous_coverage_required: bool,
         stats: TerrainHorizonFrameStats,
     ) -> Result<()> {
         self.frame_count = self.frame_count.saturating_add(1);
@@ -241,6 +256,15 @@ impl SmokeRecorder {
         }
         self.peak_resident_bytes = self.peak_resident_bytes.max(stats.resident_bytes);
         self.peak_pending_work = self.peak_pending_work.max(stats.pending_refills);
+        ensure!(
+            !continuous_coverage_required
+                || (stats.ready_slots == stats.allocation_slots
+                    && stats.drawn_levels == 10
+                    && stats.committed_levels == 10
+                    && stats.vegetation_committed_levels == 3),
+            "World Explorer exposed incomplete committed coverage during a bounded transition: \
+             {stats:?}"
+        );
         match self.allocation_slots {
             Some(expected) if expected != stats.allocation_slots => {
                 anyhow::bail!(
@@ -283,7 +307,11 @@ impl SmokeRecorder {
         } = checkpoint;
         let service = stats.vegetation_service;
         ensure!(
-            service.coordinator_state == Some(TerrainVegetationCoordinatorState::Running)
+            stats.staging_slots == 70
+                && stats.staged_levels == 0
+                && stats.committed_levels == 10
+                && stats.vegetation_committed_levels == 3
+                && service.coordinator_state == Some(TerrainVegetationCoordinatorState::Running)
                 && service.executor_kind == Some(TerrainVegetationExecutorKind::NativeThread)
                 && service.desired_tiles == 48
                 && service.queued_tiles == 0
@@ -320,7 +348,14 @@ impl SmokeRecorder {
             "fixed_resident_bytes": stats.fixed_resident_bytes,
             "vegetation_bytes": stats.vegetation_bytes,
             "allocation_slots": stats.allocation_slots,
+            "staging_slots": stats.staging_slots,
             "ready_slots": stats.ready_slots,
+            "requested_levels": stats.requested_levels,
+            "staged_levels": stats.staged_levels,
+            "committed_levels": stats.committed_levels,
+            "vegetation_committed_levels": stats.vegetation_committed_levels,
+            "atomic_level_commits": stats.atomic_level_commits,
+            "deferred_transition_attempts": stats.deferred_transition_attempts,
             "pending_refills": stats.pending_refills,
             "vegetation_ready_tiles": stats.vegetation_ready_tiles,
             "pending_vegetation_tiles": stats.pending_vegetation_tiles,

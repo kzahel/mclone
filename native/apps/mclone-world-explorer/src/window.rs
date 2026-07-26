@@ -517,6 +517,10 @@ impl WindowGpu {
                 .map_err(WindowRenderError::Terrain)?,
             None => false,
         };
+        let smoke_continuous_coverage = self
+            .smoke_sequence
+            .as_ref()
+            .is_some_and(SmokeSequence::requires_continuous_coverage);
         let continuous_input = self.smoke_sequence.is_none() && self.terrain.has_held_motion();
         log::trace!("World Explorer acquiring surface frame");
         let frame = self
@@ -585,7 +589,12 @@ impl WindowGpu {
         let frame_time = frame_started.elapsed();
         if let Some(recorder) = self.smoke_recorder.as_mut() {
             recorder
-                .note_frame(frame_time, smoke_input_applied, stats)
+                .note_frame(
+                    frame_time,
+                    smoke_input_applied,
+                    smoke_continuous_coverage,
+                    stats,
+                )
                 .map_err(WindowRenderError::Terrain)?;
         }
         let capture_completed = if let Some((color_capture, depth_capture)) = capture {

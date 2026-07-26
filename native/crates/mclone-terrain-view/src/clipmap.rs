@@ -140,6 +140,8 @@ pub struct TerrainClipmapDiagnostics {
 pub struct TerrainClipmapLevelSnapshot {
     pub level: u32,
     pub sample_spacing: u32,
+    pub requested_origin_tile_x: i32,
+    pub requested_origin_tile_z: i32,
     pub origin_tile_x: i32,
     pub origin_tile_z: i32,
     pub bounds: TerrainClipmapBounds,
@@ -161,6 +163,8 @@ pub struct TerrainClipmapUpdate {
 struct TerrainClipmapLevelState {
     level: u32,
     sample_spacing: u32,
+    requested_origin_tile_x: i32,
+    requested_origin_tile_z: i32,
     origin_tile_x: i32,
     origin_tile_z: i32,
     initialized: bool,
@@ -205,6 +209,8 @@ impl TerrainClipmap {
             .map(|level| TerrainClipmapLevelState {
                 level,
                 sample_spacing: config.sample_spacing(level),
+                requested_origin_tile_x: 0,
+                requested_origin_tile_z: 0,
                 origin_tile_x: 0,
                 origin_tile_z: 0,
                 initialized: false,
@@ -234,7 +240,23 @@ impl TerrainClipmap {
         (self.center_x, self.center_z)
     }
 
+    pub fn origins_settled(&self) -> bool {
+        self.levels.iter().all(|level| {
+            level.origin_tile_x == level.requested_origin_tile_x
+                && level.origin_tile_z == level.requested_origin_tile_z
+        })
+    }
+
     pub fn update_center(&mut self, center_x: i32, center_z: i32) -> TerrainClipmapUpdate {
+        let force_rebase_distance = i64::from(self.config.finest_tile_footprint_blocks())
+            .saturating_mul(i64::from(self.config.tiles_per_axis))
+            .saturating_mul(16);
+        let initialized = self.levels.iter().any(|level| level.initialized);
+        let force_rebase = initialized
+            && ((i64::from(center_x) - i64::from(self.center_x)).unsigned_abs()
+                >= force_rebase_distance as u64
+                || (i64::from(center_z) - i64::from(self.center_z)).unsigned_abs()
+                    >= force_rebase_distance as u64);
         self.center_x = center_x;
         self.center_z = center_z;
         self.revision = self.revision.saturating_add(1);
@@ -249,15 +271,33 @@ impl TerrainClipmap {
             let center_tile_x = i64::from(center_x).div_euclid(footprint);
             let center_tile_z = i64::from(center_z).div_euclid(footprint);
             let half_axis = i64::from(self.config.tiles_per_axis / 2);
-            let new_origin_x = i32::try_from(center_tile_x - half_axis)
+            let requested_origin_x = i32::try_from(center_tile_x - half_axis)
                 .expect("validated clipmap center produces an i32 tile X");
-            let new_origin_z = i32::try_from(center_tile_z - half_axis)
+            let requested_origin_z = i32::try_from(center_tile_z - half_axis)
                 .expect("validated clipmap center produces an i32 tile Z");
-            let delta_x = i64::from(new_origin_x) - i64::from(level.origin_tile_x);
-            let delta_z = i64::from(new_origin_z) - i64::from(level.origin_tile_z);
-            let rebase = !level.initialized
-                || delta_x.unsigned_abs() >= u64::from(self.config.tiles_per_axis)
-                || delta_z.unsigned_abs() >= u64::from(self.config.tiles_per_axis);
+            level.requested_origin_tile_x = requested_origin_x;
+            level.requested_origin_tile_z = requested_origin_z;
+            let delta_x = i64::from(requested_origin_x) - i64::from(level.origin_tile_x);
+            let delta_z = i64::from(requested_origin_z) - i64::from(level.origin_tile_z);
+            let rebase_threshold = u64::from(self.config.tiles_per_axis).saturating_mul(16);
+            let rebase = force_rebase
+                || !level.initialized
+                || delta_x.unsigned_abs() >= rebase_threshold
+                || delta_z.unsigned_abs() >= rebase_threshold;
+            let new_origin_x = if rebase {
+                requested_origin_x
+            } else {
+                level
+                    .origin_tile_x
+                    .saturating_add(i32::try_from(delta_x.clamp(-1, 1)).unwrap_or_default())
+            };
+            let new_origin_z = if rebase {
+                requested_origin_z
+            } else {
+                level
+                    .origin_tile_z
+                    .saturating_add(i32::try_from(delta_z.clamp(-1, 1)).unwrap_or_default())
+            };
 
             let old_origin = (level.origin_tile_x, level.origin_tile_z);
             level.origin_tile_x = new_origin_x;
@@ -350,6 +390,8 @@ impl TerrainClipmap {
             .map(|level| TerrainClipmapLevelSnapshot {
                 level: level.level,
                 sample_spacing: level.sample_spacing,
+                requested_origin_tile_x: level.requested_origin_tile_x,
+                requested_origin_tile_z: level.requested_origin_tile_z,
                 origin_tile_x: level.origin_tile_x,
                 origin_tile_z: level.origin_tile_z,
                 bounds: level.bounds(self.config.tiles_per_axis),

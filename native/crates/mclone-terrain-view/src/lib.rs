@@ -2,6 +2,7 @@
 
 mod canonical;
 mod clipmap;
+mod horizon_admission;
 mod terrain_vegetation_coordinator;
 mod viewport;
 mod viewport_renderer;

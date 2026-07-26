@@ -23,6 +23,16 @@ including `2,609` records/instances and `281,772` proxy vertices. A later
 and separately solve exact/proxy arbitration, edits, multiworld lifecycle,
 and all-target presentation.
 
+Tactical
+[`252`](../tactical/252-procedural-horizon-seams-and-transition-admission.md)
+Slice 1 closes the presentation-side transition gap exposed after that Worker
+cutover. The shared terrain-view admission owner retains a complete
+same-source vegetation level while replacement products are in flight, then
+commits the whole replacement level. Terrain has an independent complete
+presentation, so neither host exposes a forest-free transition frame and
+neither waits for platform-specific executor latency. Source changes still
+invalidate old vegetation immediately.
+
 ## Scope
 
 This topic owns the immediate migration of natural trees and forest shape in

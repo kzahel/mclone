@@ -385,10 +385,15 @@ async function assertTerrainOnlySurface(targetPage) {
 
 function assertFixedReady(value, stage) {
   if (value.allocationSlots !== 160
+      || value.stagingSlots !== 70
       || value.readySlots !== value.allocationSlots
+      || value.requestedLevels !== 10
+      || value.stagedLevels !== 0
+      || value.committedLevels !== 10
+      || value.vegetationCommittedLevels !== 3
       || value.pendingRefills !== 0
       || value.drawnLevels !== 10
-      || value.fixedResidentBytes !== 86_553_600
+      || value.fixedResidentBytes !== 124_457_600
       || value.pendingVegetationTiles !== 0
       || value.residentBytes <= 0) {
     throw new Error(`${stage} is not fixed and ready:\n${JSON.stringify(value, null, 2)}`);
@@ -508,6 +513,12 @@ function assertHeldSamples(samples, before) {
     };
   });
   if (distinct.size < 3
+      || moving.some((sample) => (
+        sample.readySlots !== sample.allocationSlots
+        || sample.drawnLevels !== 10
+        || sample.committedLevels !== 10
+        || sample.vegetationCommittedLevels !== 3
+      ))
       || deltas.some(({ alongHeading, acrossHeading }) => (
         alongHeading < 0.0
         || alongHeading > 200.0

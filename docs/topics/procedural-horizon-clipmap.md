@@ -17,14 +17,16 @@ removal boundary for the rejected chunk-based Far LOD system. Tactical
 small native proof host and shared navigation boundary for the first ring; it
 deliberately implemented no clipmap residency.
 Interactive review on 2026-07-26 diagnosed two remaining proof defects and
-recorded them in Tactical
+activated Tactical
 [`252`](../tactical/252-procedural-horizon-seams-and-transition-admission.md):
 tile-edge normal calculations clamp to local samples and visibly split
 lighting, while aligned multi-level movement can expose requested origins
 before all entering strips are ready and show coarse fallback for one frame.
-The later hardening direction is a bounded sample halo plus explicit
-requested/staged/committed level admission, not a larger unbounded dispatch
-spike.
+Slice 1 now provides fixed requested/staged/committed admission with seven
+guard resources per level. Terrain and asynchronous vegetation retain
+separate complete presentations and commit atomically without an uncovered
+frame. The remaining hardening direction is a bounded sample halo and
+fine/coarse normal policy, not a larger unbounded dispatch spike.
 Side-by-side native/browser review also found three proof-host parity gaps.
 Completed parent Tactical
 [`253`](../tactical/253-world-explorer-cross-host-parity.md) sequences their
@@ -301,6 +303,14 @@ populate the wrapped entering slots under a bounded budget. Once all required
 strips and summaries for that step are ready, the level atomically exposes the
 new origin. A guard margin lets ordinary movement remain within already
 prepared coverage.
+
+Tactical 252 Slice 1 implements this as 16 logical and seven guard resources
+per level. The guard bound is the non-duplicated entering set for a one-tile
+diagonal move. Requested origins converge one tile at a time under the
+existing dispatch budget, while the committed terrain presentation retains
+all 16 old resources until the replacement set is complete. Vegetation owns a
+separate committed presentation so Worker latency can retain the prior valid
+forest without delaying terrain or exposing a forest-free frame.
 
 A teleport or world switch is different from a one-cell move. Cancel stale
 work, establish source identity, refill coarse levels first for immediate
