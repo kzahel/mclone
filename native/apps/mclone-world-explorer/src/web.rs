@@ -12,8 +12,8 @@ use mclone_terrain_view::{
     TerrainPreviewMaterialAtlas,
 };
 use mclone_view_control::{
-    ContactEvent, ContactPurpose, ViewPoint, ViewportMetrics, WorldViewIntent, WorldViewMode,
-    WorldViewProjection, WorldViewState,
+    ContactEvent, ContactPurpose, ViewPoint, ViewportMetrics, WorldViewHeldDirection,
+    WorldViewIntent, WorldViewMode, WorldViewProjection, WorldViewState,
 };
 use serde::Serialize;
 use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
@@ -102,7 +102,10 @@ struct WebExplorerReport {
     seed: String,
     center_x: i32,
     center_z: i32,
+    focus_x: f64,
+    focus_z: f64,
     blocks_across: u32,
+    blocks_across_exact: f64,
     view: &'static str,
     projection: &'static str,
     yaw_radians: f64,
@@ -142,7 +145,7 @@ pub struct WebWorldExplorer {
     width: u32,
     height: u32,
     seed: i64,
-    started_ms: f64,
+    frame_epoch_ms: Option<f64>,
     session: WorldExplorerSession,
 }
 
@@ -172,7 +175,16 @@ impl WebWorldExplorer {
     }
 
     #[wasm_bindgen(js_name = renderFrame)]
-    pub fn render_frame(&mut self) -> Result<String, JsValue> {
+    pub fn render_frame(&mut self, frame_millis: f64) -> Result<String, JsValue> {
+        let frame_millis = if frame_millis.is_finite() {
+            frame_millis.max(0.0)
+        } else {
+            self.frame_epoch_ms.unwrap_or(0.0)
+        };
+        let frame_epoch_ms = *self.frame_epoch_ms.get_or_insert(frame_millis);
+        let elapsed = Duration::from_secs_f64(
+            ((frame_millis - frame_epoch_ms).max(0.0) / 1_000.0).min(f64::from(u32::MAX)),
+        );
         let frame = self
             .surface
             .get_current_texture()
@@ -192,9 +204,7 @@ impl WebWorldExplorer {
                 &self.queue,
                 &mut encoder,
                 &color_view,
-                Duration::from_secs_f64(
-                    ((js_sys::Date::now() - self.started_ms).max(0.0)) / 1_000.0,
-                ),
+                elapsed,
             )
             .map_err(js_error)?;
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -267,7 +277,7 @@ impl WebWorldExplorer {
 
     #[wasm_bindgen(js_name = cancelInput)]
     pub fn cancel_input(&mut self) -> bool {
-        self.session.contact(ContactEvent::CancelAll)
+        self.session.cancel_input()
     }
 
     pub fn wheel(
@@ -299,33 +309,23 @@ impl WebWorldExplorer {
 
     #[wasm_bindgen(js_name = rawKey)]
     pub fn raw_key(&mut self, code: String, pressed: bool, repeat: bool) -> bool {
-        if !pressed || repeat {
-            return false;
+        if let Some(direction) = web_held_direction(&code) {
+            self.session.set_held_motion(direction, pressed);
+            return true;
         }
-        let state = self.session.view_state();
-        let distance = state.blocks_across / 8.0;
+        let recognized = matches!(code.as_str(), "KeyM" | "KeyP");
+        if !pressed || repeat {
+            return recognized;
+        }
         let intent = match code.as_str() {
-            "ArrowUp" => Some(WorldViewIntent::PanWorld {
-                delta_x: 0.0,
-                delta_z: -distance,
-            }),
-            "ArrowDown" => Some(WorldViewIntent::PanWorld {
-                delta_x: 0.0,
-                delta_z: distance,
-            }),
-            "ArrowLeft" => Some(WorldViewIntent::PanWorld {
-                delta_x: -distance,
-                delta_z: 0.0,
-            }),
-            "ArrowRight" => Some(WorldViewIntent::PanWorld {
-                delta_x: distance,
-                delta_z: 0.0,
-            }),
             "KeyM" => Some(WorldViewIntent::SetMode(WorldViewMode::Map)),
             "KeyP" => Some(WorldViewIntent::SetMode(WorldViewMode::Orbit)),
             _ => None,
         };
-        intent.is_some_and(|intent| self.session.apply_intent(intent))
+        if let Some(intent) = intent {
+            self.session.apply_intent(intent);
+        }
+        recognized
     }
 
     pub fn recenter(&mut self, world_x: f64, world_z: f64) -> bool {
@@ -447,7 +447,7 @@ impl WebWorldExplorer {
             width,
             height,
             seed: options.seed,
-            started_ms: js_sys::Date::now(),
+            frame_epoch_ms: None,
             session,
         })
     }
@@ -525,7 +525,10 @@ fn report_json(
         seed: seed.to_string(),
         center_x: state.center_x_i32(),
         center_z: state.center_z_i32(),
+        focus_x: state.focus_x,
+        focus_z: state.focus_z,
         blocks_across: state.blocks_across_u32(),
+        blocks_across_exact: state.blocks_across,
         view: match state.mode {
             WorldViewMode::Map => "map",
             WorldViewMode::Orbit => "3d",
@@ -563,6 +566,16 @@ fn report_json(
             "failed to serialize World Explorer report: {error}"
         ))
     })
+}
+
+fn web_held_direction(code: &str) -> Option<WorldViewHeldDirection> {
+    match code {
+        "ArrowUp" | "KeyW" => Some(WorldViewHeldDirection::Forward),
+        "ArrowDown" | "KeyS" => Some(WorldViewHeldDirection::Backward),
+        "ArrowLeft" | "KeyA" => Some(WorldViewHeldDirection::Left),
+        "ArrowRight" | "KeyD" => Some(WorldViewHeldDirection::Right),
+        _ => None,
+    }
 }
 
 fn surface_configuration(

@@ -15,7 +15,7 @@ use mclone_terrain_view::{
     TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainClipmapConfig, TerrainHorizonFrameStats,
     TerrainPreviewMaterialAtlas,
 };
-use mclone_view_control::{WorldViewIntent, WorldViewState};
+use mclone_view_control::{WorldViewHeldDirection, WorldViewIntent, WorldViewState};
 use mclone_world_explorer::{WorldExplorerConfig, WorldExplorerSession};
 
 use crate::options::{ExplorerAssetProfile, ExplorerOptions};
@@ -97,6 +97,18 @@ impl ExplorerTerrain {
 
     pub fn apply_intent(&mut self, intent: WorldViewIntent) -> Result<bool> {
         Ok(self.session.apply_intent(intent))
+    }
+
+    pub fn set_held_motion(&mut self, direction: WorldViewHeldDirection, pressed: bool) -> bool {
+        self.session.set_held_motion(direction, pressed)
+    }
+
+    pub const fn has_held_motion(&self) -> bool {
+        self.session.has_held_motion()
+    }
+
+    pub fn cancel_input(&mut self) -> bool {
+        self.session.cancel_input()
     }
 
     pub fn encode(

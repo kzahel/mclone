@@ -46,13 +46,13 @@ async function boot() {
   requestAnimationFrame(renderFrame);
 }
 
-function renderFrame() {
+function renderFrame(frameMillis) {
   if (!runtime.session || document.visibilityState === "hidden") {
     requestAnimationFrame(renderFrame);
     return;
   }
   syncCanvasSize();
-  const report = JSON.parse(runtime.session.renderFrame());
+  const report = JSON.parse(runtime.session.renderFrame(frameMillis));
   runtime.frame += 1;
   runtime.report = report;
   shell.dataset.ready = String(Boolean(report.targetReady));
@@ -64,6 +64,8 @@ function renderFrame() {
   shell.dataset.totalRebases = String(report.totalRebases);
   shell.dataset.centerX = String(report.centerX);
   shell.dataset.centerZ = String(report.centerZ);
+  shell.dataset.focusX = String(report.focusX);
+  shell.dataset.focusZ = String(report.focusZ);
   status.value = [
     `seed ${report.seed} · ${report.view} · ${report.blocksAcross} blocks`,
     `center ${report.centerX}, ${report.centerZ}`,
@@ -146,6 +148,11 @@ function bindRawObservations() {
     }
   });
   globalThis.addEventListener("blur", () => runtime.session.cancelInput());
+  document.addEventListener("visibilitychange", () => {
+    if (document.visibilityState === "hidden") {
+      runtime.session.cancelInput();
+    }
+  });
   globalThis.addEventListener("resize", syncCanvasSize);
 }
 

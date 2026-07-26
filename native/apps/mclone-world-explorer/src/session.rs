@@ -6,8 +6,9 @@ use mclone_terrain_view::{
     TerrainPreviewProjectionKind, TerrainPreviewView,
 };
 use mclone_view_control::{
-    ContactEvent, ContactGestureReducer, ViewPoint, ViewportMetrics, WorldViewIntent,
-    WorldViewMode, WorldViewProjection, WorldViewReducer, WorldViewSignal, WorldViewState,
+    ContactEvent, ContactGestureReducer, ViewPoint, ViewportMetrics, WorldViewHeldDirection,
+    WorldViewHeldMotion, WorldViewIntent, WorldViewMode, WorldViewProjection, WorldViewReducer,
+    WorldViewSignal, WorldViewState,
 };
 use mclone_worldgen::terrain_preview::TerrainPreviewContentStage;
 
@@ -27,6 +28,7 @@ pub struct WorldExplorerSession {
     view_state: WorldViewState,
     view_reducer: WorldViewReducer,
     contacts: ContactGestureReducer,
+    held_motion: WorldViewHeldMotion,
     revision: u64,
     coarse_ready_at: Option<Duration>,
     target_ready_at: Option<Duration>,
@@ -61,6 +63,7 @@ impl WorldExplorerSession {
             view_state,
             view_reducer,
             contacts: ContactGestureReducer::default(),
+            held_motion: WorldViewHeldMotion::default(),
             revision: 0,
             coarse_ready_at: None,
             target_ready_at: None,
@@ -116,6 +119,19 @@ impl WorldExplorerSession {
         changed
     }
 
+    pub fn set_held_motion(&mut self, direction: WorldViewHeldDirection, pressed: bool) -> bool {
+        self.held_motion.set_direction(direction, pressed)
+    }
+
+    pub const fn has_held_motion(&self) -> bool {
+        self.held_motion.is_active()
+    }
+
+    pub fn cancel_input(&mut self) -> bool {
+        let contacts_changed = self.contact(ContactEvent::CancelAll);
+        self.held_motion.clear() || contacts_changed
+    }
+
     pub fn encode(
         &mut self,
         device: &wgpu::Device,
@@ -124,6 +140,10 @@ impl WorldExplorerSession {
         color_view: &wgpu::TextureView,
         elapsed: Duration,
     ) -> Result<TerrainHorizonFrameStats, String> {
+        let motion_state = self.view_state;
+        if let Some(intent) = self.held_motion.advance(motion_state, elapsed) {
+            self.apply_intent(intent);
+        }
         let view_height_blocks = self.view_state.blocks_across * f64::from(self.config.height)
             / f64::from(self.config.width);
         let presentation = TerrainHorizonPresentation::new(

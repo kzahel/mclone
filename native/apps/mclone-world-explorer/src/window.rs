@@ -475,11 +475,15 @@ impl WindowGpu {
         if self.smoke_sequence.is_some() {
             return Ok(false);
         }
+        if let Some((direction, pressed)) = self.input.held_motion(event) {
+            let changed = self.terrain.set_held_motion(direction, pressed);
+            return Ok(changed || self.terrain.has_held_motion());
+        }
         let intents = self
             .input
             .keyboard(event, self.terrain.view_state(), self.viewport());
         let changed = self.apply_intents(intents)?;
-        Ok(changed || self.input.has_continuous_input())
+        Ok(changed)
     }
 
     fn cancel_input(&mut self) -> Result<bool> {
@@ -487,7 +491,8 @@ impl WindowGpu {
             return Ok(false);
         }
         let intents = self.input.cancel(self.terrain.view_state());
-        self.apply_intents(intents)
+        let contacts_changed = self.apply_intents(intents)?;
+        Ok(self.terrain.cancel_input() || contacts_changed)
     }
 
     fn apply_intents(
@@ -517,16 +522,7 @@ impl WindowGpu {
                 .map_err(WindowRenderError::Terrain)?,
             None => false,
         };
-        if self.smoke_sequence.is_none()
-            && let Some(intent) = self
-                .input
-                .continuous_intent(Instant::now(), self.terrain.view_state())
-        {
-            self.terrain
-                .apply_intent(intent)
-                .map_err(WindowRenderError::Terrain)?;
-        }
-        let continuous_input = self.smoke_sequence.is_none() && self.input.has_continuous_input();
+        let continuous_input = self.smoke_sequence.is_none() && self.terrain.has_held_motion();
         log::trace!("World Explorer acquiring surface frame");
         let frame = self
             .surface

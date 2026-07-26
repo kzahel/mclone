@@ -9,11 +9,14 @@
 
 use std::collections::BTreeMap;
 use std::f64::consts::{PI, TAU};
+use std::time::Duration;
 
 pub const MIN_PITCH_RADIANS: f64 = 0.12;
 pub const MAX_PITCH_RADIANS: f64 = 1.25;
 pub const DEFAULT_MIN_BLOCKS_ACROSS: f64 = 1.0;
 pub const DEFAULT_MAX_BLOCKS_ACROSS: f64 = 131_072.0;
+pub const WORLD_VIEW_HELD_PAN_FOOTPRINTS_PER_SECOND: f64 = 0.4;
+pub const WORLD_VIEW_MAX_HELD_STEP_SECONDS: f64 = 0.1;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum WorldViewMode {
@@ -65,6 +68,79 @@ impl WorldViewState {
 
     pub fn blocks_across_u32(self) -> u32 {
         self.blocks_across.round().clamp(1.0, f64::from(u32::MAX)) as u32
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum WorldViewHeldDirection {
+    Forward,
+    Backward,
+    Left,
+    Right,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct WorldViewHeldMotion {
+    forward: bool,
+    backward: bool,
+    left: bool,
+    right: bool,
+    last_elapsed: Option<Duration>,
+}
+
+impl WorldViewHeldMotion {
+    pub fn set_direction(&mut self, direction: WorldViewHeldDirection, pressed: bool) -> bool {
+        let was_active = self.is_active();
+        let held = match direction {
+            WorldViewHeldDirection::Forward => &mut self.forward,
+            WorldViewHeldDirection::Backward => &mut self.backward,
+            WorldViewHeldDirection::Left => &mut self.left,
+            WorldViewHeldDirection::Right => &mut self.right,
+        };
+        let changed = *held != pressed;
+        *held = pressed;
+        let is_active = self.is_active();
+        if was_active != is_active {
+            self.last_elapsed = None;
+        }
+        changed
+    }
+
+    pub const fn is_active(self) -> bool {
+        self.forward || self.backward || self.left || self.right
+    }
+
+    pub fn clear(&mut self) -> bool {
+        let changed = self.is_active();
+        *self = Self::default();
+        changed
+    }
+
+    pub fn advance(&mut self, state: WorldViewState, elapsed: Duration) -> Option<WorldViewIntent> {
+        if !self.is_active() {
+            self.last_elapsed = None;
+            return None;
+        }
+        let Some(previous) = self.last_elapsed.replace(elapsed) else {
+            return None;
+        };
+        let delta_seconds = elapsed
+            .saturating_sub(previous)
+            .as_secs_f64()
+            .min(WORLD_VIEW_MAX_HELD_STEP_SECONDS);
+        let horizontal = f64::from(self.right as u8) - f64::from(self.left as u8);
+        let vertical = f64::from(self.backward as u8) - f64::from(self.forward as u8);
+        if (horizontal == 0.0 && vertical == 0.0) || delta_seconds <= 0.0 {
+            return None;
+        }
+        let length = horizontal.hypot(vertical).max(1.0);
+        let distance = finite_positive_or_one(state.blocks_across)
+            * WORLD_VIEW_HELD_PAN_FOOTPRINTS_PER_SECOND
+            * delta_seconds;
+        Some(WorldViewIntent::PanWorld {
+            delta_x: horizontal / length * distance,
+            delta_z: vertical / length * distance,
+        })
     }
 }
 
@@ -651,6 +727,96 @@ mod tests {
         intent: WorldViewIntent,
     ) -> WorldViewState {
         reducer.reduce(state, intent).state
+    }
+
+    fn held_motion_after_steps(steps: u32) -> WorldViewState {
+        let reducer = WorldViewReducer::default();
+        let mut state = WorldViewState::default();
+        let mut motion = WorldViewHeldMotion::default();
+        assert!(motion.set_direction(WorldViewHeldDirection::Right, true));
+        assert_eq!(motion.advance(state, Duration::ZERO), None);
+        for frame in 1..=steps {
+            let elapsed = Duration::from_secs_f64(f64::from(frame) / f64::from(steps));
+            if let Some(intent) = motion.advance(state, elapsed) {
+                state = apply(reducer, state, intent);
+            }
+        }
+        state
+    }
+
+    #[test]
+    fn held_motion_is_partition_independent_at_60_and_120_hz() {
+        let at_60_hz = held_motion_after_steps(60);
+        let at_120_hz = held_motion_after_steps(120);
+        let expected =
+            WorldViewState::default().blocks_across * WORLD_VIEW_HELD_PAN_FOOTPRINTS_PER_SECOND;
+
+        assert_near(at_60_hz.focus_x, expected);
+        assert_near(at_120_hz.focus_x, expected);
+        assert_near(at_60_hz.focus_x, at_120_hz.focus_x);
+        assert_eq!(at_60_hz.focus_z, 0.0);
+        assert_eq!(at_120_hz.focus_z, 0.0);
+    }
+
+    #[test]
+    fn held_diagonal_motion_is_normalized() {
+        let state = WorldViewState {
+            blocks_across: 1_000.0,
+            ..WorldViewState::default()
+        };
+        let mut motion = WorldViewHeldMotion::default();
+        motion.set_direction(WorldViewHeldDirection::Right, true);
+        motion.set_direction(WorldViewHeldDirection::Forward, true);
+        assert_eq!(motion.advance(state, Duration::ZERO), None);
+        let WorldViewIntent::PanWorld { delta_x, delta_z } =
+            motion.advance(state, Duration::from_millis(100)).unwrap()
+        else {
+            panic!("held motion must produce a world pan");
+        };
+
+        assert_near(delta_x.hypot(delta_z), 40.0);
+        assert!(delta_x > 0.0);
+        assert!(delta_z < 0.0);
+    }
+
+    #[test]
+    fn held_motion_does_not_consume_idle_time_and_caps_delayed_frames() {
+        let state = WorldViewState {
+            blocks_across: 1_000.0,
+            ..WorldViewState::default()
+        };
+        let mut motion = WorldViewHeldMotion::default();
+        motion.set_direction(WorldViewHeldDirection::Forward, true);
+        assert_eq!(
+            motion.advance(state, Duration::from_secs(90)),
+            None,
+            "the first active frame establishes a fresh clock"
+        );
+        let WorldViewIntent::PanWorld { delta_x, delta_z } =
+            motion.advance(state, Duration::from_secs(95)).unwrap()
+        else {
+            panic!("held motion must produce a world pan");
+        };
+
+        assert_eq!(delta_x, 0.0);
+        assert_near(delta_z, -40.0);
+    }
+
+    #[test]
+    fn held_motion_release_and_cancel_clear_every_direction() {
+        let state = WorldViewState::default();
+        let mut motion = WorldViewHeldMotion::default();
+        assert!(motion.set_direction(WorldViewHeldDirection::Left, true));
+        assert!(motion.set_direction(WorldViewHeldDirection::Backward, true));
+        assert!(motion.is_active());
+        assert!(motion.clear());
+        assert!(!motion.is_active());
+        assert_eq!(
+            motion.advance(state, Duration::from_secs(10)),
+            None,
+            "cancelled motion remains idle"
+        );
+        assert!(!motion.clear());
     }
 
     #[test]

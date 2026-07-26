@@ -1,24 +1,19 @@
-use std::collections::BTreeSet;
 use std::time::Instant;
 
 use mclone_view_control::{
     ContactEvent, ContactGestureReducer, ContactPurpose, ViewPoint, ViewportMetrics,
-    WorldViewIntent, WorldViewMode, WorldViewProjection, WorldViewState,
+    WorldViewHeldDirection, WorldViewIntent, WorldViewMode, WorldViewProjection, WorldViewState,
 };
 use winit::event::{ElementState, MouseButton, MouseScrollDelta, Touch, TouchPhase};
 use winit::keyboard::{KeyCode, ModifiersState, PhysicalKey};
 
 const MOUSE_CONTACT_ID: u64 = u64::MAX;
-const PAN_FOOTPRINTS_PER_SECOND: f64 = 0.4;
-const MAX_CONTINUOUS_STEP_SECONDS: f64 = 0.1;
 
 pub struct NativeViewInput {
     contacts: ContactGestureReducer,
     cursor: ViewPoint,
     active_mouse_button: Option<MouseButton>,
     modifiers: ModifiersState,
-    held_movement_keys: BTreeSet<KeyCode>,
-    last_continuous_update: Instant,
     started: Instant,
 }
 
@@ -29,8 +24,6 @@ impl NativeViewInput {
             cursor: ViewPoint::default(),
             active_mouse_button: None,
             modifiers: ModifiersState::empty(),
-            held_movement_keys: BTreeSet::new(),
-            last_continuous_update: Instant::now(),
             started,
         }
     }
@@ -165,16 +158,6 @@ impl NativeViewInput {
         let PhysicalKey::Code(code) = event.physical_key else {
             return Vec::new();
         };
-        if is_movement_key(code) {
-            match event.state {
-                ElementState::Pressed => {
-                    self.held_movement_keys.insert(code);
-                }
-                ElementState::Released => {
-                    self.held_movement_keys.remove(&code);
-                }
-            }
-        }
         if event.state != ElementState::Pressed || event.repeat {
             return Vec::new();
         }
@@ -210,44 +193,18 @@ impl NativeViewInput {
         }
     }
 
-    pub fn continuous_intent(
-        &mut self,
-        now: Instant,
-        state: WorldViewState,
-    ) -> Option<WorldViewIntent> {
-        let delta_seconds = now
-            .saturating_duration_since(self.last_continuous_update)
-            .as_secs_f64()
-            .min(MAX_CONTINUOUS_STEP_SECONDS);
-        self.last_continuous_update = now;
-        let horizontal = axis(
-            &self.held_movement_keys,
-            &[KeyCode::ArrowRight, KeyCode::KeyD],
-            &[KeyCode::ArrowLeft, KeyCode::KeyA],
-        );
-        let vertical = axis(
-            &self.held_movement_keys,
-            &[KeyCode::ArrowDown, KeyCode::KeyS],
-            &[KeyCode::ArrowUp, KeyCode::KeyW],
-        );
-        if horizontal == 0.0 && vertical == 0.0 {
+    pub fn held_motion(
+        &self,
+        event: &winit::event::KeyEvent,
+    ) -> Option<(WorldViewHeldDirection, bool)> {
+        let PhysicalKey::Code(code) = event.physical_key else {
             return None;
-        }
-        let length = horizontal.hypot(vertical).max(1.0);
-        let distance = state.blocks_across * PAN_FOOTPRINTS_PER_SECOND * delta_seconds;
-        Some(WorldViewIntent::PanWorld {
-            delta_x: horizontal / length * distance,
-            delta_z: vertical / length * distance,
-        })
-    }
-
-    pub fn has_continuous_input(&self) -> bool {
-        !self.held_movement_keys.is_empty()
+        };
+        held_direction(code).map(|direction| (direction, event.state == ElementState::Pressed))
     }
 
     pub fn cancel(&mut self, state: WorldViewState) -> Vec<WorldViewIntent> {
         self.active_mouse_button = None;
-        self.held_movement_keys.clear();
         self.contacts.handle(state, ContactEvent::CancelAll)
     }
 
@@ -265,22 +222,12 @@ fn mouse_purpose(button: MouseButton, modifiers: ModifiersState) -> Option<Conta
     }
 }
 
-fn is_movement_key(code: KeyCode) -> bool {
-    matches!(
-        code,
-        KeyCode::ArrowUp
-            | KeyCode::ArrowDown
-            | KeyCode::ArrowLeft
-            | KeyCode::ArrowRight
-            | KeyCode::KeyW
-            | KeyCode::KeyA
-            | KeyCode::KeyS
-            | KeyCode::KeyD
-    )
-}
-
-fn axis(keys: &BTreeSet<KeyCode>, positive: &[KeyCode], negative: &[KeyCode]) -> f64 {
-    let positive = positive.iter().any(|key| keys.contains(key)) as u8;
-    let negative = negative.iter().any(|key| keys.contains(key)) as u8;
-    f64::from(positive) - f64::from(negative)
+fn held_direction(code: KeyCode) -> Option<WorldViewHeldDirection> {
+    match code {
+        KeyCode::ArrowUp | KeyCode::KeyW => Some(WorldViewHeldDirection::Forward),
+        KeyCode::ArrowDown | KeyCode::KeyS => Some(WorldViewHeldDirection::Backward),
+        KeyCode::ArrowLeft | KeyCode::KeyA => Some(WorldViewHeldDirection::Left),
+        KeyCode::ArrowRight | KeyCode::KeyD => Some(WorldViewHeldDirection::Right),
+        _ => None,
+    }
 }
