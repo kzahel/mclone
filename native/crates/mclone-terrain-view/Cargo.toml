@@ -7,9 +7,13 @@ publish.workspace = true
 
 [dependencies]
 mclone-core.workspace = true
+mclone-mesh.workspace = true
 mclone-render-color.workspace = true
 mclone-worldgen.workspace = true
 wgpu.workspace = true
+
+[target.'cfg(target_arch = "wasm32")'.dependencies]
+js-sys.workspace = true
 
 [dev-dependencies]
 naga.workspace = true

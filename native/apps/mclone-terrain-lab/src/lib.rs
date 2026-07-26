@@ -7,14 +7,10 @@ use mclone_terrain_view::{
 };
 use mclone_worldgen::terrain_preview::TerrainPreviewContentStage;
 
-#[cfg(any(target_arch = "wasm32", test))]
-mod canonical_batch_codec;
 #[cfg(target_arch = "wasm32")]
 mod canonical_coordinator_web;
 #[cfg(target_arch = "wasm32")]
 mod canonical_mailbox_web;
-#[cfg(target_arch = "wasm32")]
-mod canonical_mesh;
 #[cfg(target_arch = "wasm32")]
 mod canonical_web;
 #[cfg(target_arch = "wasm32")]

@@ -1913,7 +1913,9 @@ dependencies = [
 name = "mclone-terrain-view"
 version = "0.0.0"
 dependencies = [
+ "js-sys",
  "mclone-core",
+ "mclone-mesh",
  "mclone-render-color",
  "mclone-worldgen",
  "naga",

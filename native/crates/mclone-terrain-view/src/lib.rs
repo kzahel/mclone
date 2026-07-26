@@ -1,6 +1,8 @@
 #![forbid(unsafe_code)]
 
 mod canonical;
+mod canonical_batch_codec;
+mod canonical_mesh;
 mod clipmap;
 mod composition;
 mod horizon_admission;
@@ -26,6 +28,15 @@ pub use canonical::{
     CANONICAL_TERRAIN_MAX_CHUNK_RADIUS, CanonicalTerrainChunk, CanonicalTerrainCompiler,
     CanonicalTerrainDependencyCacheReport, CanonicalTerrainStage, CanonicalTerrainVisibility,
     canonical_terrain_chunk_order, canonical_terrain_presentation_blocks,
+};
+pub use canonical_batch_codec::{
+    CanonicalEncodedAdmission, CanonicalEncodedBatch, decode_canonical_batch,
+    encode_canonical_batch, patch_canonical_batch_transfer_ms,
+};
+pub use canonical_mesh::{
+    CanonicalMeshBatch, CanonicalMeshCoordinate, CanonicalMeshFrontier,
+    CanonicalMeshRequestReceipt, CanonicalMeshSession, CanonicalPackedAdmission,
+    suppress_missing_footprint_walls,
 };
 pub use clipmap::{
     TERRAIN_CLIPMAP_DEFAULT_LEVEL_COUNT, TERRAIN_CLIPMAP_DEFAULT_TILES_PER_AXIS, TerrainClipmap,

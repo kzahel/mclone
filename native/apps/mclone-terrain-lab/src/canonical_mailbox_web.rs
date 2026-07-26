@@ -1,7 +1,7 @@
 use js_sys::{Int32Array, Object, Reflect, SharedArrayBuffer, Uint8Array};
 use wasm_bindgen::{JsCast, JsValue};
 
-use crate::canonical_batch_codec::patch_canonical_batch_transfer_ms;
+use mclone_terrain_view::patch_canonical_batch_transfer_ms;
 
 pub(crate) const CANONICAL_SHARED_RESULT_CONTROL_WORDS: u32 = 4;
 pub(crate) const CANONICAL_SHARED_RESULT_STATUS_INDEX: u32 = 0;

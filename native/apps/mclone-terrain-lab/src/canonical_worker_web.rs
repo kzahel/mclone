@@ -1,17 +1,16 @@
 use js_sys::{Object, Reflect, Uint8Array};
-use mclone_terrain_view::CanonicalTerrainVisibility;
+use mclone_terrain_view::{
+    CanonicalEncodedAdmission, CanonicalEncodedBatch, CanonicalMeshBatch, CanonicalMeshCoordinate,
+    CanonicalMeshSession, CanonicalTerrainVisibility, encode_canonical_batch,
+};
 use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
 use wasm_bindgen::{JsCast, JsValue, prelude::wasm_bindgen};
 
 use crate::{
-    canonical_batch_codec::{
-        CanonicalEncodedAdmission, CanonicalEncodedBatch, encode_canonical_batch,
-    },
     canonical_mailbox_web::{
         CANONICAL_SHARED_RESULT_TRANSPORT_KIND, mark_canonical_shared_result_failed,
         publish_canonical_shared_result,
     },
-    canonical_mesh::{CanonicalMeshBatch, CanonicalMeshCoordinate, CanonicalMeshSession},
     canonical_terrain_stage,
     visual_assets::load_terrain_lab_visual_assets,
 };

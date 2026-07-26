@@ -6,22 +6,23 @@ use mclone_mesh::{
     TexturedVisibleChunkMesh, build_textured_render_sections_for_chunk_set,
     pack_textured_render_sections,
 };
-use mclone_terrain_view::{
+use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
+
+use super::{
     CanonicalTerrainChunk, CanonicalTerrainCompiler, CanonicalTerrainStage,
     CanonicalTerrainVisibility, canonical_terrain_presentation_blocks,
 };
-use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
 
 const CANONICAL_WORKER_RAW_CACHE_MAX_CHUNKS: usize = 1_024;
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub(crate) struct CanonicalMeshCoordinate {
+pub struct CanonicalMeshCoordinate {
     pub chunk_x: i32,
     pub chunk_z: i32,
 }
 
 impl CanonicalMeshCoordinate {
-    pub(crate) fn new(chunk_x: i32, chunk_z: i32) -> Self {
+    pub const fn new(chunk_x: i32, chunk_z: i32) -> Self {
         Self { chunk_x, chunk_z }
     }
 
@@ -31,20 +32,20 @@ impl CanonicalMeshCoordinate {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct CanonicalMeshRequestReceipt {
+pub struct CanonicalMeshRequestReceipt {
     pub coordinate: CanonicalMeshCoordinate,
     pub raw_cache_hit: bool,
     pub retained_dependency_chunks: usize,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct CanonicalPackedAdmission {
+pub struct CanonicalPackedAdmission {
     pub requested: CanonicalMeshRequestReceipt,
     pub packed_sections: Vec<u8>,
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct CanonicalMeshBatch {
+pub struct CanonicalMeshBatch {
     pub admissions: Vec<CanonicalPackedAdmission>,
     pub generation_ms: f64,
     pub presentation_ms: f64,
@@ -55,17 +56,25 @@ pub(crate) struct CanonicalMeshBatch {
     pub raw_cache_bytes: u64,
 }
 
-pub(crate) struct CanonicalMeshSession {
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum CanonicalMeshFrontier {
+    #[default]
+    SuppressFootprintWalls,
+    RetainFootprintWalls,
+}
+
+pub struct CanonicalMeshSession {
     compiler: CanonicalTerrainCompiler,
     catalog: TexturedMeshCatalog,
     chunks: BTreeMap<(i32, i32), CanonicalTerrainChunk>,
     raw_lru: VecDeque<(i32, i32)>,
     desired: BTreeSet<(i32, i32)>,
     visibility: CanonicalTerrainVisibility,
+    frontier: CanonicalMeshFrontier,
 }
 
 impl CanonicalMeshSession {
-    pub(crate) fn new(
+    pub fn new(
         profile: TerrainPreviewProfile,
         seed: i64,
         stage: CanonicalTerrainStage,
@@ -78,10 +87,19 @@ impl CanonicalMeshSession {
             raw_lru: VecDeque::new(),
             desired: BTreeSet::new(),
             visibility: CanonicalTerrainVisibility::default(),
+            frontier: CanonicalMeshFrontier::default(),
         }
     }
 
-    pub(crate) fn begin(
+    pub fn set_frontier(&mut self, frontier: CanonicalMeshFrontier) {
+        self.frontier = frontier;
+    }
+
+    pub const fn frontier(&self) -> CanonicalMeshFrontier {
+        self.frontier
+    }
+
+    pub fn begin(
         &mut self,
         desired: impl IntoIterator<Item = CanonicalMeshCoordinate>,
         visibility: CanonicalTerrainVisibility,
@@ -110,7 +128,7 @@ impl CanonicalMeshSession {
         self.evict_raw_cache();
     }
 
-    pub(crate) fn compile_batch(
+    pub fn compile_batch(
         &mut self,
         requested: &[CanonicalMeshCoordinate],
     ) -> Result<CanonicalMeshBatch, String> {
@@ -229,7 +247,9 @@ impl CanonicalMeshSession {
             .copied()
             .filter(|position| self.chunks.contains_key(position))
             .collect::<BTreeSet<_>>();
-        suppress_missing_footprint_walls(&mut sections, &active);
+        if self.frontier == CanonicalMeshFrontier::SuppressFootprintWalls {
+            suppress_missing_footprint_walls(&mut sections, &active);
+        }
         let mesh_ms = timing_elapsed_ms(mesh_started);
 
         let mut sections_by_chunk = BTreeMap::<(i32, i32), Vec<_>>::new();
@@ -289,11 +309,11 @@ impl CanonicalMeshSession {
         })
     }
 
-    pub(crate) fn raw_cache_chunks(&self) -> usize {
+    pub fn raw_cache_chunks(&self) -> usize {
         self.chunks.len()
     }
 
-    pub(crate) fn raw_cache_bytes(&self) -> u64 {
+    pub fn raw_cache_bytes(&self) -> u64 {
         self.chunks.values().fold(0_u64, |bytes, chunk| {
             bytes
                 .saturating_add(chunk.blocks.len() as u64)
@@ -324,7 +344,7 @@ impl CanonicalMeshSession {
     }
 }
 
-pub(crate) fn suppress_missing_footprint_walls(
+pub fn suppress_missing_footprint_walls(
     sections: &mut [TexturedRenderSectionMesh],
     chunks: &BTreeSet<(i32, i32)>,
 ) {

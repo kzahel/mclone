@@ -5,7 +5,7 @@ const CANONICAL_BATCH_ADMISSION_HEADER_BYTES: usize = 20;
 const TRANSFER_MS_OFFSET: usize = 40;
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct CanonicalEncodedAdmission {
+pub struct CanonicalEncodedAdmission {
     pub chunk_x: i32,
     pub chunk_z: i32,
     pub raw_cache_hit: bool,
@@ -14,7 +14,7 @@ pub(crate) struct CanonicalEncodedAdmission {
 }
 
 #[derive(Clone, Debug, PartialEq)]
-pub(crate) struct CanonicalEncodedBatch {
+pub struct CanonicalEncodedBatch {
     pub generation_ms: f64,
     pub presentation_ms: f64,
     pub mesh_ms: f64,
@@ -26,7 +26,7 @@ pub(crate) struct CanonicalEncodedBatch {
     pub admissions: Vec<CanonicalEncodedAdmission>,
 }
 
-pub(crate) fn encode_canonical_batch(batch: &CanonicalEncodedBatch) -> Result<Vec<u8>, String> {
+pub fn encode_canonical_batch(batch: &CanonicalEncodedBatch) -> Result<Vec<u8>, String> {
     validate_timings(batch)?;
     let admission_count = u32::try_from(batch.admissions.len())
         .map_err(|_| "canonical batch has more than u32 admissions".to_owned())?;
@@ -76,7 +76,7 @@ pub(crate) fn encode_canonical_batch(batch: &CanonicalEncodedBatch) -> Result<Ve
     Ok(encoded)
 }
 
-pub(crate) fn patch_canonical_batch_transfer_ms(
+pub fn patch_canonical_batch_transfer_ms(
     encoded: &mut [u8],
     transfer_ms: f64,
 ) -> Result<(), String> {
@@ -90,7 +90,7 @@ pub(crate) fn patch_canonical_batch_transfer_ms(
     Ok(())
 }
 
-pub(crate) fn decode_canonical_batch(bytes: &[u8]) -> Result<CanonicalEncodedBatch, String> {
+pub fn decode_canonical_batch(bytes: &[u8]) -> Result<CanonicalEncodedBatch, String> {
     let mut decoder = Decoder::new(bytes);
     if decoder.read_exact(4)? != CANONICAL_BATCH_MAGIC {
         return Err("canonical batch magic does not match MCTB".to_owned());

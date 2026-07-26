@@ -1,12 +1,11 @@
 use std::collections::{BTreeSet, VecDeque};
 
 use js_sys::{Function, Object, Reflect, Uint8Array};
-use mclone_terrain_view::canonical_terrain_chunk_order;
+use mclone_terrain_view::{canonical_terrain_chunk_order, decode_canonical_batch};
 use serde::Serialize;
 use wasm_bindgen::{JsCast, JsValue};
 
 use crate::{
-    canonical_batch_codec::decode_canonical_batch,
     canonical_mailbox_web::{
         CANONICAL_SHARED_RESULT_TRANSPORT_KIND, CanonicalSharedResultArena, shared_memory_supported,
     },
