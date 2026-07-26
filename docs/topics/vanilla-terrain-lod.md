@@ -8,7 +8,9 @@ Status: sampled-exact and fast-macro products implemented and validated on
 first direct sampler; Tactical
 [`246`](../tactical/246-vanilla-fast-macro-terrain-preview.md) records the
 exact-path optimization, accepted macro algorithm, comparison evidence, and
-independent browser products.
+independent browser products. Tactical
+[`251`](../tactical/251-lod-surface-appearance-quality.md) is the active
+bounded surface-appearance quality slice.
 
 ## Scope
 
@@ -57,6 +59,38 @@ fixtures show a 3.45-3.87x cold compile speedup over the optimized exact path,
 94.18-96.59% water agreement, 3.63-4.92-block mean solid error, and 11-16-block
 P95 solid error. The headed Pixel 7 viewport reached macro target in 462 ms
 and exact target in 1,948 ms.
+
+## Active Surface-Appearance Work
+
+The first material follow-up preserves three independent quality axes:
+
+- Fast macro versus Sampled exact controls vertical density fidelity.
+- Terrain Lab Resolution controls the horizontal sample lattice.
+- Basic versus Inferred surface quality controls material classification at
+  each retained point.
+
+Basic retains the current biome top-material result and adds reference-shaped
+grass color from the biome already selected for the point. Inferred adds one
+evaluation of Vanilla's existing four-octave two-dimensional surface-noise
+field and applies the production mountain, gravelly-mountain,
+giant-tree-taiga, and shattered-savanna thresholds. This can reveal stone,
+gravel, coarse dirt, and podzol without adding density columns, vertical
+probes, neighbor height samples, or footprint taps.
+
+The value is part of request, tile, cache, Worker, URL, and diagnostic
+identity. Basic remains permanently selectable. Inferred becomes the default
+only after fixed timing and canonical visual evidence show that the bounded
+lookup is worthwhile.
+
+Mclone Overworld already emits water, sand, snow, stone, gravel, coarse dirt,
+and grass through its macro surface contract and already supplies
+temperature/moisture grass inputs. The shared palette and quality vocabulary
+must preserve those semantics rather than treating the feature as
+Vanilla-only.
+
+Footprint material coverage, extra slope/height samples, biome-blend lookups,
+and complete surface-builder mutation remain deferred. Their cost cannot be
+hidden inside either first quality.
 
 ## First-Pass Included Contract
 
@@ -251,7 +285,8 @@ Possible follow-ups, each requiring its own explicit contract, are:
 - specialized surface-builder geometry and closer material parity;
 - footprint-aware relief summaries and truthful parent roll-ups;
 - sparse semantic proxies for selected vanilla structures or vegetation;
-- first-party biome tinting;
+- builder-aware basic/inferred surface appearance and reference-shaped grass
+  tint (active in Tactical 251);
 - use by a future footprint-growing in-game terrain hierarchy, if that
   architecture can preserve the sampler's bounded direct-column contract.
 
