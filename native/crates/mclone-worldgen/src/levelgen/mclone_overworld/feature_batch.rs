@@ -770,7 +770,7 @@ mod tests {
     #[test]
     fn planned_stream_chunks_are_partition_order_and_cache_independent() {
         let seed = -98_765;
-        let targets = [ChunkPos::new(148, -124), ChunkPos::new(149, -124)];
+        let targets = [ChunkPos::new(87, 58), ChunkPos::new(88, 58)];
         let mut combined_cache = McloneOverworldFeatureDependencyCache::new();
         let combined = combined_cache.generate_features_chunks(seed, targets);
         let reversed = McloneOverworldFeatureDependencyCache::new()
@@ -854,11 +854,11 @@ mod tests {
 
     #[test]
     fn periodic_stream_realization_repeats_across_seam_lifts() {
-        let seed = 12_345;
+        let seed = -46;
         let topology = McloneOverworldSamplingTopology::PeriodicX;
         let planner = super::super::streams::McloneOverworldStreamPlanner::new(seed, topology);
         let candidate = planner
-            .potential_start(ChunkPos::new(3, -935))
+            .potential_start(ChunkPos::new(1, -47))
             .expect("periodic stream placement");
         let plan = planner
             .plan_start(candidate)
@@ -926,9 +926,9 @@ mod tests {
 
         assert_eq!(
             decoration_counts,
-            [199, 768, 294, 2_237, 272, 0, 10, 47, 113, 72]
+            [50, 446, 208, 1_446, 108, 0, 6, 13, 77, 54]
         );
-        assert_eq!(hash, 1_467_475_714_206_917_072);
+        assert_eq!(hash, 8_335_049_761_842_312_531);
 
         let source =
             McloneVegetationSource::new(12_345, McloneOverworldSamplingTopology::Unbounded);
@@ -1096,8 +1096,8 @@ mod tests {
         assert_eq!(
             receipts,
             [
-                ([0, 0, 0, 0], 2_659_555_282_091_584_435),
-                ([0, 2, 0, 0], 8_727_091_963_656_943_061),
+                ([0, 0, 0, 0], 14_512_218_172_821_283_965),
+                ([0, 2, 0, 0], 5_411_810_371_936_586_166),
                 ([0, 1, 0, 0], 15_834_644_531_338_998_004),
             ]
         );

@@ -1,11 +1,11 @@
-use mclone_core::{AxisTopology, ChunkPos, HorizontalTopology};
+use mclone_core::{AxisTopology, HorizontalTopology};
 
 use crate::noise::{GradientNoise2d, SeedDomain, ValueNoise2d};
 
 use super::coast::{McloneOverworldCoastIntent, coast_adjusted_land_surface_y, coast_intent};
 
 pub const MCLONE_OVERWORLD_SEA_LEVEL: i32 = 63;
-pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-20";
+pub const MCLONE_OVERWORLD_FIELD_REVISION: &str = "mclone-overworld-v1-fields-21";
 pub const MCLONE_OVERWORLD_SLOPE_SAMPLE_RADIUS: i32 = 2;
 pub const MCLONE_OVERWORLD_PERIOD_BLOCKS: i32 = 6_144;
 pub const MCLONE_OVERWORLD_PERIOD_CHUNKS: u32 = 384;
@@ -187,8 +187,6 @@ const RIVER_OUTLET_MIN_DEPTH: i32 = 4;
 const INNER_SHELF_CONTINENTALNESS: f64 = 0.08;
 const STREAM_FALL_MAX_FLOW_LEVEL: f64 = 7.0;
 const MAX_REGION_SAMPLE_COUNT: usize = 16 * 1024 * 1024;
-const SPAWN_SEARCH_RADIUS_CHUNKS: i32 = 128;
-const SPAWN_MIN_SURFACE_Y: i32 = MCLONE_OVERWORLD_SEA_LEVEL + 5;
 
 #[derive(Clone, Copy, Debug, Default, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub enum McloneOverworldSamplingTopology {
@@ -643,15 +641,14 @@ impl McloneOverworldSampler {
         let large_warp_z = ruggedness_detail * 18.0 - relief_fine * 4.0;
         let fine_warp_x = -ruggedness_detail * 7.0 + relief_detail * 3.0;
         let fine_warp_z = relief_fine * 7.0 + relief_detail * 3.0;
-        let mountain_detail = (self
+        let mountain_detail_large = self
             .mountain_detail_large
-            .sample_at(world_x + large_warp_x, world_z + large_warp_z)
-            * 0.70
-            + self
-                .mountain_detail_fine
-                .sample_at(world_x + fine_warp_x, world_z + fine_warp_z)
-                * 0.30)
-            .clamp(-1.0, 1.0);
+            .sample_at(world_x + large_warp_x, world_z + large_warp_z);
+        let mountain_detail_fine = self
+            .mountain_detail_fine
+            .sample_at(world_x + fine_warp_x, world_z + fine_warp_z);
+        let mountain_detail =
+            (mountain_detail_large * 0.70 + mountain_detail_fine * 0.30).clamp(-1.0, 1.0);
         let temperature_detail = self
             .temperature_detail
             .sample(world_x as i32, world_z as i32);
@@ -680,7 +677,14 @@ impl McloneOverworldSampler {
         let provisional_surface_y = if continentalness <= 0.0 {
             bathymetry.floor_y()
         } else {
-            land_surface_height(continentalness, relief, ruggedness, ridges, mountain_detail)
+            land_surface_height(
+                continentalness,
+                relief,
+                ruggedness,
+                ridges,
+                mountain_detail_large,
+                mountain_detail_fine,
+            )
         };
         let base_surface_y = if continentalness <= 0.0 {
             provisional_surface_y
@@ -1058,33 +1062,6 @@ impl McloneOverworldSampler {
     }
 }
 
-pub fn mclone_overworld_spawn_chunk(seed: i64) -> ChunkPos {
-    mclone_overworld_spawn_chunk_with_topology(seed, McloneOverworldSamplingTopology::Unbounded)
-}
-
-pub fn mclone_overworld_spawn_chunk_with_topology(
-    seed: i64,
-    topology: McloneOverworldSamplingTopology,
-) -> ChunkPos {
-    let sampler = McloneOverworldSampler::new_with_topology(seed, topology);
-    for radius in 0..=SPAWN_SEARCH_RADIUS_CHUNKS {
-        for z in -radius..=radius {
-            for x in -radius..=radius {
-                if radius > 0 && x.abs() != radius && z.abs() != radius {
-                    continue;
-                }
-                let world_x = x * 16 + 8;
-                let world_z = z * 16 + 8;
-                let sample = sampler.sample(world_x, world_z);
-                if sample.surface_y >= SPAWN_MIN_SURFACE_Y && !sample.watercourse.is_water() {
-                    return ChunkPos::new(topology.canonical_chunk_x(x), z);
-                }
-            }
-        }
-    }
-    ChunkPos::new(0, 0)
-}
-
 fn bathymetry_sample(
     continentalness: f64,
     basin_selector: f64,
@@ -1121,10 +1098,18 @@ fn land_surface_height(
     relief: f64,
     ruggedness: f64,
     ridges: f64,
-    mountain_detail: f64,
+    mountain_detail_large: f64,
+    mountain_detail_fine: f64,
 ) -> i32 {
-    land_surface_height_f64(continentalness, relief, ruggedness, ridges, mountain_detail).round()
-        as i32
+    land_surface_height_f64(
+        continentalness,
+        relief,
+        ruggedness,
+        ridges,
+        mountain_detail_large,
+        mountain_detail_fine,
+    )
+    .round() as i32
 }
 
 fn land_surface_height_f64(
@@ -1132,17 +1117,45 @@ fn land_surface_height_f64(
     relief: f64,
     ruggedness: f64,
     ridges: f64,
-    mountain_detail: f64,
+    mountain_detail_large: f64,
+    mountain_detail_fine: f64,
 ) -> f64 {
     let land_strength = smoothstep((continentalness / 0.45).clamp(0.0, 1.0));
     let base = 64.0 + land_strength * 18.0;
-    let rolling_relief = relief * (2.0 + land_strength * 7.0);
-    let mountain_strength = mountain_strength(continentalness, ruggedness);
+    let intent = landform_intent(continentalness, relief, ruggedness, ridges);
+    let relief_amplitude = 2.0
+        + land_strength * 7.0
+        + intent.quiet_strength * 10.0
+        + intent.rolling_strength * 20.0
+        + intent.ridge_valley_strength * 6.0;
+    let rolling_relief = relief * relief_amplitude;
+    let ridge_profile = smoothstep(((ridges - 0.12) / 0.88).clamp(0.0, 1.0)) - 0.32;
+    let ridge_relief = intent.ridge_valley_strength * ridge_profile * (14.0 + land_strength * 20.0);
+    let basin_floor = -intent.basin_strength * (3.0 + (-relief).max(0.0) * 7.0);
     let ridge_shoulder = smoothstep(((ridges - 0.22) / 0.78).clamp(0.0, 1.0));
-    let mountain_lift =
-        mountain_strength * (4.0 + ridge_shoulder * 12.0 + ridge_shoulder * ridge_shoulder * 38.0);
-    let mountain_texture = mountain_detail * mountain_strength * (6.0 + ridge_shoulder * 14.0);
-    (base + rolling_relief + mountain_lift + mountain_texture).clamp(62.0, 160.0)
+    let mountain_lift = intent.mountain_strength
+        * (4.0 + ridge_shoulder * 12.0 + ridge_shoulder * ridge_shoulder * 38.0);
+    let ordinary_large_texture = mountain_detail_large
+        * ((intent.quiet_strength * 24.0)
+            .max(intent.rolling_strength * 32.0)
+            .max(intent.ridge_valley_strength * 36.0)
+            + intent.basin_strength * 2.5);
+    let ordinary_fine_texture = mountain_detail_fine
+        * ((intent.rolling_strength * 2.0).max(intent.ridge_valley_strength * 3.5)
+            + intent.basin_strength * 0.35);
+    let mountain_detail =
+        (mountain_detail_large * 0.70 + mountain_detail_fine * 0.30).clamp(-1.0, 1.0);
+    let mountain_texture =
+        mountain_detail * intent.mountain_strength * (6.0 + ridge_shoulder * 14.0);
+    (base
+        + rolling_relief
+        + ridge_relief
+        + basin_floor
+        + mountain_lift
+        + ordinary_large_texture
+        + ordinary_fine_texture
+        + mountain_texture)
+        .clamp(62.0, 160.0)
 }
 
 fn compact_influence(distance: f64, radius: f64, feather: f64) -> f64 {
@@ -1716,7 +1729,7 @@ mod tests {
                     4_604_792_002_519_359_514,
                     4_602_285_638_028_510_205,
                     0,
-                    120,
+                    128,
                 ),
                 (
                     13_814_565_550_205_726_302,
@@ -1813,15 +1826,17 @@ mod tests {
     }
 
     #[test]
-    fn lowlands_ignore_mountain_detail_until_the_region_is_active() {
-        assert_eq!(
-            land_surface_height(0.7, 0.25, -0.2, 1.0, -1.0),
-            land_surface_height(0.7, 0.25, -0.2, 1.0, 1.0)
-        );
-        assert_ne!(
-            land_surface_height(0.7, 0.25, 0.7, 1.0, -1.0),
-            land_surface_height(0.7, 0.25, 0.7, 1.0, 1.0)
-        );
+    fn ordinary_landform_detail_is_available_but_regionally_bounded() {
+        let quiet_delta = land_surface_height(0.7, 0.25, -1.0, 0.2, 1.0, 1.0)
+            - land_surface_height(0.7, 0.25, -1.0, 0.2, -1.0, -1.0);
+        let ridge_delta = land_surface_height(0.7, 0.25, 0.0, 0.8, 1.0, 1.0)
+            - land_surface_height(0.7, 0.25, 0.0, 0.8, -1.0, -1.0);
+        let mountain_delta = land_surface_height(0.7, 0.25, 0.7, 0.8, 1.0, 1.0)
+            - land_surface_height(0.7, 0.25, 0.7, 0.8, -1.0, -1.0);
+
+        assert!(quiet_delta > 0);
+        assert!(ridge_delta > quiet_delta);
+        assert!(mountain_delta > quiet_delta);
     }
 
     #[test]
@@ -1860,16 +1875,6 @@ mod tests {
                 })
                 .is_err()
         );
-    }
-
-    #[test]
-    fn selected_seeds_find_a_dry_spawn_chunk() {
-        for seed in [12_345, -98_765, 8_675_309] {
-            let spawn = mclone_overworld_spawn_chunk(seed);
-            let sample = McloneOverworldSampler::new(seed)
-                .sample(spawn.min_block_x() + 8, spawn.min_block_z() + 8);
-            assert!(sample.surface_y >= SPAWN_MIN_SURFACE_Y, "{seed}: {spawn:?}");
-        }
     }
 
     #[test]

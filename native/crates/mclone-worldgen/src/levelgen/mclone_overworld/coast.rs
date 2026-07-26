@@ -214,7 +214,13 @@ pub(super) fn coast_adjusted_land_surface_y(
         + ridge_shoulder * 6.0
         + relief.max(0.0) * 4.0
         + mountain_detail * 3.0;
-    let adjustment = (rocky_influence * rocky_lift + gravel_rise).clamp(0.0, 22.0);
+    let inland_strength = smoothstep((intent.signed_distance_proxy / 0.45).clamp(0.0, 1.0));
+    let continental_base = 64.0 + inland_strength * 18.0;
+    let incoming_positive_relief = (f64::from(provisional_surface_y) - continental_base).max(0.0);
+    let rocky_complement =
+        1.0 - smoothstep((incoming_positive_relief / 12.0).clamp(0.0, 1.0)) * 0.72;
+    let adjustment =
+        (rocky_influence * rocky_lift * rocky_complement + gravel_rise).clamp(0.0, 22.0);
     (f64::from(provisional_surface_y) + adjustment)
         .round()
         .clamp(62.0, 160.0) as i32
@@ -326,5 +332,7 @@ mod tests {
         );
         let rocky_y = coast_adjusted_land_surface_y(64, rocky, 0.3, 0.8, 0.8);
         assert!((70..=86).contains(&rocky_y), "{rocky_y}");
+        let raised_rocky_y = coast_adjusted_land_surface_y(78, rocky, 0.3, 0.8, 0.8);
+        assert!(raised_rocky_y - 78 < rocky_y - 64);
     }
 }

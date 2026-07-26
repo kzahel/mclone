@@ -612,7 +612,7 @@ fn mclone_valley_stream_chunk_roundtrips_sqlite_across_reopen() {
         mclone_worldgen::levelgen::McloneOverworldSamplingTopology::Unbounded,
     );
     let candidate = planner
-        .potential_start(ChunkPos::new(147, -126))
+        .potential_start(ChunkPos::new(88, 60))
         .expect("stream placement");
     let plan = planner
         .plan_start(candidate)

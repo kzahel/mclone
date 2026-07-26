@@ -104,6 +104,8 @@ fn run() -> Result<()> {
         request.step,
         McloneOverworldBiomeRecipe::WarmDrySteppe,
     );
+    let low_corridor_components =
+        low_corridor_component_stats(&landforms, request.width, request.depth, request.step);
     let review_sites = select_review_sites(&landforms, request, config.topology);
     let center_sample = sampler.sample_landform(center_x, center_z);
     let spawn_chunk = match config.topology {
@@ -598,7 +600,7 @@ fn run() -> Result<()> {
 
     let (commit, dirty) = git_state();
     let receipt = serde_json::json!({
-        "schema": 18,
+        "schema": 19,
         "profile": "mclone-overworld-v1",
         "topology": config.topology.label(),
         "fieldRevision": MCLONE_OVERWORLD_FIELD_REVISION,
@@ -720,6 +722,7 @@ fn run() -> Result<()> {
         },
         "regionalComponents": {
             "warmDrySteppe": steppe_components,
+            "ordinaryInlandLowCorridors": low_corridor_components,
         },
         "surfaceRecipeCounts": {
             "oceanFloor": facts.ocean_floor_columns,
@@ -1096,6 +1099,36 @@ fn select_review_sites(
                 .total_cmp(&right.terrain.coast.cold_response)
         })
         .map(|(index, _)| index);
+    let quiet_plain = representative_landform_site(
+        samples,
+        request.width,
+        request.depth,
+        McloneOverworldLandformFamily::QuietPlain,
+    );
+    let rolling_upland = representative_landform_site(
+        samples,
+        request.width,
+        request.depth,
+        McloneOverworldLandformFamily::RollingUpland,
+    );
+    let ridge_valley = representative_landform_site(
+        samples,
+        request.width,
+        request.depth,
+        McloneOverworldLandformFamily::RidgeValley,
+    );
+    let broad_basin = representative_landform_site(
+        samples,
+        request.width,
+        request.depth,
+        McloneOverworldLandformFamily::BroadBasin,
+    );
+    let mountain_range = representative_landform_site(
+        samples,
+        request.width,
+        request.depth,
+        McloneOverworldLandformFamily::MountainRange,
+    );
     let seam_river = if topology == McloneOverworldSamplingTopology::PeriodicX {
         samples
             .iter()
@@ -1155,9 +1188,54 @@ fn select_review_sites(
         "ordinaryCoast": review_site_json(ordinary_coast, samples, request),
         "rockyCoast": review_site_json(rocky_coast, samples, request),
         "snowCover": review_site_json(cold_coast, samples, request),
+        "quietPlainLandform": review_site_json(quiet_plain, samples, request),
+        "rollingUplandLandform": review_site_json(rolling_upland, samples, request),
+        "ridgeValleyLandform": review_site_json(ridge_valley, samples, request),
+        "broadBasinLandform": review_site_json(broad_basin, samples, request),
+        "mountainRangeLandform": review_site_json(mountain_range, samples, request),
         "periodicSeamRiver": review_site_json(seam_river, samples, request),
         "periodicSeamCoast": review_site_json(seam_coast, samples, request),
     })
+}
+
+fn representative_landform_site(
+    samples: &[McloneOverworldLandformSample],
+    width: u32,
+    depth: u32,
+    family: McloneOverworldLandformFamily,
+) -> Option<usize> {
+    let center_x = i64::from(width) / 2;
+    let center_z = i64::from(depth) / 2;
+    samples
+        .iter()
+        .enumerate()
+        .filter(|(_, sample)| {
+            sample.terrain.coast.family == McloneOverworldCoastFamily::Inland
+                && sample.terrain.surface_y > MCLONE_OVERWORLD_SEA_LEVEL
+                && !sample.terrain.watercourse.is_water()
+                && sample.terrain.landform_intent().family == family
+        })
+        .max_by(|(left_index, left), (right_index, right)| {
+            let strength = |sample: &McloneOverworldLandformSample| {
+                let intent = sample.terrain.landform_intent();
+                match family {
+                    McloneOverworldLandformFamily::QuietPlain => intent.quiet_strength,
+                    McloneOverworldLandformFamily::RollingUpland => intent.rolling_strength,
+                    McloneOverworldLandformFamily::RidgeValley => intent.ridge_valley_strength,
+                    McloneOverworldLandformFamily::BroadBasin => intent.basin_strength,
+                    McloneOverworldLandformFamily::MountainRange => intent.mountain_strength,
+                }
+            };
+            let center_distance = |index: usize| {
+                let x = index as i64 % i64::from(width);
+                let z = index as i64 / i64::from(width);
+                (x - center_x).abs() + (z - center_z).abs()
+            };
+            strength(left)
+                .total_cmp(&strength(right))
+                .then_with(|| center_distance(*right_index).cmp(&center_distance(*left_index)))
+        })
+        .map(|(index, _)| index)
 }
 
 fn representative_coast_site(
@@ -1646,6 +1724,15 @@ struct CoastFacts {
     coast_adjacent_slope_p90: f64,
     coast_adjacent_slope_p99: f64,
     coast_adjacent_slope_max: f64,
+    coast_adjacent_incoming_relief_p10: f64,
+    coast_adjacent_incoming_relief_p50: f64,
+    coast_adjacent_incoming_relief_p90: f64,
+    coast_adjacent_incoming_relief_max: f64,
+    coast_added_relief_y_p10: i32,
+    coast_added_relief_y_p50: i32,
+    coast_added_relief_y_p90: i32,
+    coast_added_relief_y_max: i32,
+    coast_added_zero_columns: usize,
     sandy_columns_with_ocean_distance: usize,
     sandy_distance_blocks_p50: u64,
     sandy_distance_blocks_p90: u64,
@@ -1739,6 +1826,9 @@ impl CoastFacts {
         let mut coast_adjacent_river_columns = 0usize;
         let mut coast_heights = Vec::new();
         let mut coast_slopes = Vec::new();
+        let mut incoming_relief = Vec::new();
+        let mut coast_added_relief_y = Vec::new();
+        let mut coast_added_zero_columns = 0usize;
         let mut sandy_distances = Vec::new();
         for (index, sample) in samples.iter().copied().enumerate() {
             match sample.terrain.coast.family {
@@ -1768,6 +1858,12 @@ impl CoastFacts {
             }
             coast_heights.push(sample.terrain.surface_y);
             coast_slopes.push(sample.slope);
+            let continental_base = ordinary_continental_base_y(sample.terrain.continentalness);
+            incoming_relief
+                .push(f64::from(sample.terrain.provisional_surface_y) - continental_base);
+            let coast_added = sample.terrain.base_surface_y - sample.terrain.provisional_surface_y;
+            coast_added_relief_y.push(coast_added);
+            coast_added_zero_columns += usize::from(coast_added == 0);
             match recipe {
                 McloneOverworldSurfaceRecipe::SandyCoast => {
                     coast_adjacent_sandy_surface_columns += 1;
@@ -1810,6 +1906,8 @@ impl CoastFacts {
         }
         coast_heights.sort_unstable();
         coast_slopes.sort_by(f64::total_cmp);
+        incoming_relief.sort_by(f64::total_cmp);
+        coast_added_relief_y.sort_unstable();
         sandy_distances.sort_unstable();
 
         Self {
@@ -1858,6 +1956,27 @@ impl CoastFacts {
             coast_adjacent_slope_p90: percentile_f64_or_default(&coast_slopes, 90, 0.0),
             coast_adjacent_slope_p99: percentile_f64_or_default(&coast_slopes, 99, 0.0),
             coast_adjacent_slope_max: coast_slopes.last().copied().unwrap_or_default(),
+            coast_adjacent_incoming_relief_p10: percentile_f64_or_default(
+                &incoming_relief,
+                10,
+                0.0,
+            ),
+            coast_adjacent_incoming_relief_p50: percentile_f64_or_default(
+                &incoming_relief,
+                50,
+                0.0,
+            ),
+            coast_adjacent_incoming_relief_p90: percentile_f64_or_default(
+                &incoming_relief,
+                90,
+                0.0,
+            ),
+            coast_adjacent_incoming_relief_max: incoming_relief.last().copied().unwrap_or_default(),
+            coast_added_relief_y_p10: percentile_or_default(&coast_added_relief_y, 10, 0),
+            coast_added_relief_y_p50: percentile_or_default(&coast_added_relief_y, 50, 0),
+            coast_added_relief_y_p90: percentile_or_default(&coast_added_relief_y, 90, 0),
+            coast_added_relief_y_max: coast_added_relief_y.last().copied().unwrap_or_default(),
+            coast_added_zero_columns,
             sandy_columns_with_ocean_distance: sandy_distances.len(),
             sandy_distance_blocks_p50: percentile_u64_or_default(&sandy_distances, 50, 0),
             sandy_distance_blocks_p90: percentile_u64_or_default(&sandy_distances, 90, 0),
@@ -1875,6 +1994,8 @@ impl CoastFacts {
                 "sandyDistance": "sampled Manhattan distance from a land-intent SandyCoast column to nearest ocean-intent sample",
                 "sandyDistancePopulation": "SandyCoast columns with a finite ocean-intent distance inside the sampled raster",
                 "signedCoastDistance": "continentalness is a monotonic signed proxy, not physical block distance",
+                "incomingRelief": "provisional inland surface minus the cheap continental baseline before coast shaping",
+                "coastAddedReliefY": "base surface after coast shaping minus provisional inland surface",
             },
             "oceanIntentColumns": self.ocean_intent_columns,
             "landIntentColumns": self.land_intent_columns,
@@ -1915,6 +2036,19 @@ impl CoastFacts {
                 "p90": self.coast_adjacent_slope_p90,
                 "p99": self.coast_adjacent_slope_p99,
                 "max": self.coast_adjacent_slope_max,
+            },
+            "coastAdjacentIncomingRelief": {
+                "p10": self.coast_adjacent_incoming_relief_p10,
+                "p50": self.coast_adjacent_incoming_relief_p50,
+                "p90": self.coast_adjacent_incoming_relief_p90,
+                "max": self.coast_adjacent_incoming_relief_max,
+            },
+            "coastAddedReliefY": {
+                "p10": self.coast_added_relief_y_p10,
+                "p50": self.coast_added_relief_y_p50,
+                "p90": self.coast_added_relief_y_p90,
+                "max": self.coast_added_relief_y_max,
+                "zeroColumns": self.coast_added_zero_columns,
             },
             "sandyColumnsWithOceanDistance": self.sandy_columns_with_ocean_distance,
             "sandyDistanceBlocks": {
@@ -2672,6 +2806,44 @@ fn recipe_component_stats(
     step: u32,
     recipe: McloneOverworldBiomeRecipe,
 ) -> serde_json::Value {
+    component_stats(samples, width, depth, step, |sample| {
+        mclone_overworld_biome_recipe(sample) == recipe
+    })
+}
+
+fn low_corridor_component_stats(
+    samples: &[McloneOverworldLandformSample],
+    width: u32,
+    depth: u32,
+    step: u32,
+) -> serde_json::Value {
+    let mut facts = component_stats(samples, width, depth, step, |sample| {
+        let terrain = sample.terrain;
+        terrain.coast.family == McloneOverworldCoastFamily::Inland
+            && terrain.surface_y > MCLONE_OVERWORLD_SEA_LEVEL
+            && !terrain.watercourse.is_water()
+            && f64::from(terrain.provisional_surface_y)
+                <= ordinary_continental_base_y(terrain.continentalness) - 2.0
+    });
+    let object = facts
+        .as_object_mut()
+        .expect("component stats must be a JSON object");
+    object.insert(
+        "definition".to_owned(),
+        serde_json::json!(
+            "four-neighbor dry Inland-family samples whose provisional surface is at least two blocks below the cheap continental baseline; diagnostic terrain lows, not planned drainage"
+        ),
+    );
+    facts
+}
+
+fn component_stats(
+    samples: &[McloneOverworldLandformSample],
+    width: u32,
+    depth: u32,
+    step: u32,
+    is_member: impl Fn(McloneOverworldLandformSample) -> bool,
+) -> serde_json::Value {
     let width = width as usize;
     let depth = depth as usize;
     assert_eq!(samples.len(), width * depth);
@@ -2687,7 +2859,7 @@ fn recipe_component_stats(
     let mut visited = vec![false; samples.len()];
     let mut components = Vec::new();
     for start in 0..samples.len() {
-        if visited[start] || mclone_overworld_biome_recipe(samples[start]) != recipe {
+        if visited[start] || !is_member(samples[start]) {
             continue;
         }
 
@@ -2718,8 +2890,7 @@ fn recipe_component_stats(
             .into_iter()
             .flatten()
             {
-                if !visited[neighbor] && mclone_overworld_biome_recipe(samples[neighbor]) == recipe
-                {
+                if !visited[neighbor] && is_member(samples[neighbor]) {
                     visited[neighbor] = true;
                     queue.push_back(neighbor);
                 }
@@ -2773,6 +2944,12 @@ fn recipe_component_stats(
         "largestTouchesBoundary": largest.is_some_and(|component| component.touches_boundary),
         "largestEightColumns": largest_components,
     })
+}
+
+fn ordinary_continental_base_y(continentalness: f64) -> f64 {
+    let t = (continentalness / 0.45).clamp(0.0, 1.0);
+    let land_strength = t * t * (3.0 - 2.0 * t);
+    64.0 + land_strength * 18.0
 }
 
 fn add_slope(

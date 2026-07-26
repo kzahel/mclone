@@ -594,13 +594,13 @@ fn generated_mclone_flat_reach_is_quiescent_when_every_source_is_woken() {
 #[test]
 fn generated_mclone_planned_stream_is_quiescent_when_every_water_cell_is_woken() {
     let seed = -98_765;
-    let center = ChunkPos::new(149, -124);
+    let center = ChunkPos::new(88, 58);
     let planner = mclone_worldgen::levelgen::McloneOverworldStreamPlanner::new(
         seed,
         mclone_worldgen::levelgen::McloneOverworldSamplingTopology::Unbounded,
     );
     let candidate = planner
-        .potential_start(ChunkPos::new(147, -126))
+        .potential_start(ChunkPos::new(88, 60))
         .expect("stream placement");
     let plan = planner
         .plan_start(candidate)

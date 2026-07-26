@@ -235,7 +235,7 @@ mod tests {
         let seed = -98_765;
         let topology = McloneOverworldSamplingTopology::Unbounded;
         let plan = McloneOverworldStreamPlanner::new(seed, topology)
-            .plans_intersecting_chunks(ChunkPos::new(148, -125), ChunkPos::new(150, -123))
+            .plans_intersecting_chunks(ChunkPos::new(86, 54), ChunkPos::new(91, 62))
             .unwrap()
             .into_iter()
             .next()

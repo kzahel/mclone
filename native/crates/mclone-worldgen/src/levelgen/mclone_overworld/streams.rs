@@ -1363,24 +1363,12 @@ mod tests {
     fn accepted_plans_are_downhill_finite_and_bounded() {
         let planner =
             McloneOverworldStreamPlanner::new(-98_765, McloneOverworldSamplingTopology::Unbounded);
-        let mut accepted = None;
-        for z in -240..=-120 {
-            for x in 120..=240 {
-                let query = ChunkPos::new(x, z);
-                let candidate = planner.potential_start(query).unwrap();
-                if candidate.work_start != query {
-                    continue;
-                }
-                if let Some(plan) = planner.plan_start(candidate).unwrap() {
-                    accepted = Some(plan);
-                    break;
-                }
-            }
-            if accepted.is_some() {
-                break;
-            }
-        }
-        let plan = accepted.expect("review seed region should contain an accepted stream plan");
+        let candidate = planner.potential_start(ChunkPos::new(88, 60)).unwrap();
+        assert_eq!(candidate.work_start, ChunkPos::new(88, 60));
+        let plan = planner
+            .plan_start(candidate)
+            .unwrap()
+            .expect("reviewed inland fabric stream plan");
         assert!(
             (MCLONE_OVERWORLD_STREAM_MIN_LENGTH_BLOCKS..=MCLONE_OVERWORLD_STREAM_MAX_LENGTH_BLOCKS)
                 .contains(&plan.metrics.route_length_blocks)
@@ -1467,32 +1455,33 @@ mod tests {
             -98_765,
             McloneOverworldSamplingTopology::Unbounded,
         );
-        let mut accepted = None;
+        let accepted = cache
+            .planner()
+            .potential_start(ChunkPos::new(88, 60))
+            .unwrap();
+        assert_eq!(accepted.work_start, ChunkPos::new(88, 60));
+        assert!(cache.plan_start(accepted).unwrap().is_some());
         let mut rejected = None;
-        for z in -240..=-120 {
-            for x in 120..=240 {
+        for z in 52..=68 {
+            for x in 80..=96 {
                 let query = ChunkPos::new(x, z);
                 let candidate = cache.planner().potential_start(query).unwrap();
                 if candidate.work_start != query {
                     continue;
                 }
                 let plan = cache.plan_start(candidate).unwrap();
-                if plan.is_some() {
-                    accepted.get_or_insert(candidate);
-                } else {
+                if plan.is_none() {
                     rejected.get_or_insert(candidate);
                 }
-                if accepted.is_some() && rejected.is_some() {
+                if rejected.is_some() {
                     break;
                 }
             }
-            if accepted.is_some() && rejected.is_some() {
+            if rejected.is_some() {
                 break;
             }
         }
-        cache
-            .plan_start(accepted.expect("accepted candidate"))
-            .unwrap();
+        cache.plan_start(accepted).unwrap();
         cache
             .plan_start(rejected.expect("rejected candidate"))
             .unwrap();
@@ -1526,7 +1515,7 @@ mod tests {
     #[test]
     fn periodic_seam_uses_one_canonical_start_identity() {
         let planner =
-            McloneOverworldStreamPlanner::new(12_345, McloneOverworldSamplingTopology::PeriodicX);
+            McloneOverworldStreamPlanner::new(-46, McloneOverworldSamplingTopology::PeriodicX);
         let left = planner.potential_start(ChunkPos::new(-1, 12)).unwrap();
         let right = planner
             .potential_start(ChunkPos::new(MCLONE_OVERWORLD_PERIOD_CHUNKS as i32 - 1, 12))
@@ -1534,15 +1523,15 @@ mod tests {
         assert_eq!(left.canonical_start, right.canonical_start);
 
         let candidate = planner
-            .potential_start(ChunkPos::new(3, -935))
+            .potential_start(ChunkPos::new(1, -47))
             .expect("periodic stream placement");
-        assert_eq!(candidate.work_start, ChunkPos::new(3, -935));
+        assert_eq!(candidate.work_start, ChunkPos::new(1, -47));
         let plan = planner
             .plan_start(candidate)
             .expect("periodic stream plan")
             .expect("reviewed seam-crossing stream");
         assert!(plan.structure.bounds.min_x < 0);
         assert!(plan.structure.bounds.max_x >= 0);
-        assert_eq!(plan.structure.key.canonical_start, ChunkPos::new(3, -935));
+        assert_eq!(plan.structure.key.canonical_start, ChunkPos::new(1, -47));
     }
 }

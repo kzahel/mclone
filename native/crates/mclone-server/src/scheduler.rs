@@ -5382,12 +5382,17 @@ mod tests {
         assert_eq!(snapshot.pos, center);
         assert_eq!(snapshot.status, ChunkStatus::Features);
         assert!(snapshot.biomes.contains(&1));
-        let x = center.min_block_x() + 8;
-        let z = center.min_block_z() + 8;
-        let surface_y = mclone_worldgen::levelgen::McloneOverworldSampler::new(seed)
-            .sample(x, z)
-            .surface_y;
-        assert!(surface_y > mclone_worldgen::levelgen::MCLONE_OVERWORLD_SEA_LEVEL);
+        let spawn = crate::spawn::find_safe_surface_spawn_for_loaded_profile(
+            seed,
+            WorldGenerationProfile::McloneOverworldV1,
+            center,
+            |pos| scheduler.block_at_world(pos),
+            |chunk| chunk == center,
+        )
+        .expect("selected Mclone spawn chunk should contain a safe surface");
+        let x = spawn.x.floor() as i32;
+        let surface_y = spawn.y.floor() as i32 - 1;
+        let z = spawn.z.floor() as i32;
         assert_eq!(
             scheduler.block_at_world(WorldBlockPos::new(x, surface_y, z)),
             Some(GRASS_BLOCK)

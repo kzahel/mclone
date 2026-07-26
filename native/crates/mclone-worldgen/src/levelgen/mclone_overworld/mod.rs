@@ -4,6 +4,7 @@ mod debug;
 mod decoration;
 mod feature_batch;
 mod fields;
+mod spawn;
 mod streams;
 mod surface;
 mod terrain;
@@ -46,9 +47,9 @@ pub use fields::{
     McloneOverworldLandformSample, McloneOverworldLargeFieldBand, McloneOverworldLargeFieldSpec,
     McloneOverworldSampleRegion, McloneOverworldSampleRegionRequest, McloneOverworldSampler,
     McloneOverworldSamplingTopology, McloneOverworldTerrainSample,
-    McloneOverworldWatercourseSample, mclone_overworld_spawn_chunk,
-    mclone_overworld_spawn_chunk_with_topology,
+    McloneOverworldWatercourseSample,
 };
+pub use spawn::{mclone_overworld_spawn_chunk, mclone_overworld_spawn_chunk_with_topology};
 pub use streams::{
     MCLONE_OVERWORLD_STREAM_MAX_EXPANDED_NODES, MCLONE_OVERWORLD_STREAM_MAX_LENGTH_BLOCKS,
     MCLONE_OVERWORLD_STREAM_MIN_LENGTH_BLOCKS, MCLONE_OVERWORLD_STREAM_PLACEMENT_SEPARATION_CHUNKS,

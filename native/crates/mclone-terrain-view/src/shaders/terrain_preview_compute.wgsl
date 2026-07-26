@@ -654,23 +654,93 @@ fn land_surface_height(
     relief: f32,
     ruggedness: f32,
     ridges: f32,
-    mountain_detail: f32,
+    mountain_detail_large: f32,
+    mountain_detail_fine: f32,
 ) -> f32 {
     let land_strength = smooth_curve(clamp(continentalness / 0.45, 0.0, 1.0));
     let base = 64.0 + land_strength * 18.0;
-    let rolling_relief = relief * (2.0 + land_strength * 7.0);
+    let inland_strength =
+        select(
+            0.0,
+            0.28 + smooth_curve(clamp(continentalness / 0.42, 0.0, 1.0)) * 0.72,
+            continentalness > 0.0,
+        );
+    let relief_energy =
+        smooth_curve(clamp((abs(relief) - 0.03) / 0.62, 0.0, 1.0));
+    let rolling_region =
+        1.0 - smooth_curve(clamp((ruggedness + 0.58) / 0.88, 0.0, 1.0));
+    let rolling =
+        inland_strength * rolling_region * (0.28 + relief_energy * 0.72);
+    let ridge_region =
+        smooth_curve(clamp((ruggedness + 0.62) / 0.72, 0.0, 1.0))
+        * (1.0 - smooth_curve(clamp((ruggedness - 0.08) / 0.62, 0.0, 1.0)));
+    let ridge_expression =
+        smooth_curve(clamp((ridges - 0.08) / 0.92, 0.0, 1.0));
+    let ridge_valley =
+        inland_strength * ridge_region * (0.72 + ridge_expression * 0.28);
     let mountain = mountain_strength(continentalness, ruggedness);
+    let basin =
+        inland_strength
+        * smooth_curve(clamp((-relief - 0.04) / 0.56, 0.0, 1.0))
+        * (1.0 - mountain * 0.55);
+    let structural_strength = max(
+        max(rolling, ridge_valley),
+        max(basin, mountain),
+    );
+    let quiet_strength =
+        inland_strength
+        * (1.0
+            - smooth_curve(clamp((structural_strength - 0.12) / 0.55, 0.0, 1.0)));
+    let relief_amplitude =
+        2.0
+        + land_strength * 7.0
+        + quiet_strength * 10.0
+        + rolling * 20.0
+        + ridge_valley * 6.0;
+    let rolling_relief = relief * relief_amplitude;
+    let ridge_profile =
+        smooth_curve(clamp((ridges - 0.12) / 0.88, 0.0, 1.0)) - 0.32;
+    let ridge_relief =
+        ridge_valley * ridge_profile * (14.0 + land_strength * 20.0);
+    let basin_floor = -basin * (3.0 + max(-relief, 0.0) * 7.0);
     let shoulder = smooth_curve(clamp((ridges - 0.22) / 0.78, 0.0, 1.0));
     let lift = mountain * (4.0 + shoulder * 12.0 + shoulder * shoulder * 38.0);
-    let texture = mountain_detail * mountain * (6.0 + shoulder * 14.0);
+    let ordinary_large_texture =
+        mountain_detail_large
+        * (
+            max(
+                quiet_strength * 24.0,
+                max(rolling * 32.0, ridge_valley * 36.0),
+            )
+            + basin * 2.5
+        );
+    let ordinary_fine_texture =
+        mountain_detail_fine
+        * (max(rolling * 2.0, ridge_valley * 3.5) + basin * 0.35);
+    let mountain_detail =
+        clamp(mountain_detail_large * 0.70 + mountain_detail_fine * 0.30, -1.0, 1.0);
+    let mountain_texture =
+        mountain_detail * mountain * (6.0 + shoulder * 14.0);
     return round_away_from_zero(
-        clamp(base + rolling_relief + lift + texture, 62.0, 160.0),
+        clamp(
+            base
+                + rolling_relief
+                + ridge_relief
+                + basin_floor
+                + lift
+                + ordinary_large_texture
+                + ordinary_fine_texture
+                + mountain_texture,
+            62.0,
+            160.0,
+        ),
     );
 }
 
 fn coast_adjusted_land_surface_height(
     provisional_surface_y: f32,
     coast: CoastIntent,
+    continentalness: f32,
     relief: f32,
     ridges: f32,
     mountain_detail: f32,
@@ -703,8 +773,21 @@ fn coast_adjusted_land_surface_height(
         + ridge_shoulder * 6.0
         + max(relief, 0.0) * 4.0
         + mountain_detail * 3.0;
+    let inland_strength =
+        smooth_curve(clamp(continentalness / 0.45, 0.0, 1.0));
+    let continental_base = 64.0 + inland_strength * 18.0;
+    let incoming_positive_relief =
+        max(provisional_surface_y - continental_base, 0.0);
+    let rocky_complement =
+        1.0
+        - smooth_curve(clamp(incoming_positive_relief / 12.0, 0.0, 1.0))
+            * 0.72;
     let adjustment =
-        clamp(rocky_influence * rocky_lift + gravel_rise, 0.0, 22.0);
+        clamp(
+            rocky_influence * rocky_lift * rocky_complement + gravel_rise,
+            0.0,
+            22.0,
+        );
     return round_away_from_zero(
         clamp(provisional_surface_y + adjustment, 62.0, 160.0),
     );
@@ -1396,22 +1479,20 @@ fn evaluate_point(world_x: i32, world_z: i32) -> TerrainPreviewSample {
     let large_warp_z = ruggedness_detail * 18.0 - relief_fine * 4.0;
     let fine_warp_x = -ruggedness_detail * 7.0 + relief_detail * 3.0;
     let fine_warp_z = relief_fine * 7.0 + relief_detail * 3.0;
-    let mountain_detail = clamp(
-        gradient_noise(
-            MOUNTAIN_DETAIL_LARGE_DOMAIN,
-            MOUNTAIN_DETAIL_LARGE_SCALE,
-            f32(world_x) + large_warp_x,
-            f32(world_z) + large_warp_z,
-        ) * 0.70
-        + gradient_noise(
-            MOUNTAIN_DETAIL_FINE_DOMAIN,
-            MOUNTAIN_DETAIL_FINE_SCALE,
-            f32(world_x) + fine_warp_x,
-            f32(world_z) + fine_warp_z,
-        ) * 0.30,
-        -1.0,
-        1.0,
+    let mountain_detail_large = gradient_noise(
+        MOUNTAIN_DETAIL_LARGE_DOMAIN,
+        MOUNTAIN_DETAIL_LARGE_SCALE,
+        f32(world_x) + large_warp_x,
+        f32(world_z) + large_warp_z,
     );
+    let mountain_detail_fine = gradient_noise(
+        MOUNTAIN_DETAIL_FINE_DOMAIN,
+        MOUNTAIN_DETAIL_FINE_SCALE,
+        f32(world_x) + fine_warp_x,
+        f32(world_z) + fine_warp_z,
+    );
+    let mountain_detail =
+        clamp(mountain_detail_large * 0.70 + mountain_detail_fine * 0.30, -1.0, 1.0);
 
     let temperature_detail = gradient_noise(
         TEMPERATURE_DETAIL_DOMAIN,
@@ -1479,11 +1560,13 @@ fn evaluate_point(world_x: i32, world_z: i32) -> TerrainPreviewSample {
         relief,
         ruggedness,
         ridges,
-        mountain_detail,
+        mountain_detail_large,
+        mountain_detail_fine,
     );
     var base_surface_y = coast_adjusted_land_surface_height(
         provisional_surface_y,
         coast,
+        continentalness,
         relief,
         ridges,
         mountain_detail,
