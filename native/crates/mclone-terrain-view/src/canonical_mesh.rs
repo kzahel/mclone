@@ -1,16 +1,23 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
-use mclone_core::BlockStateId;
+use mclone_core::{BlockStateId, CHUNK_WIDTH, chunk_block_index};
 use mclone_mesh::{
     TexturedChunkMeshInput, TexturedMeshCatalog, TexturedRenderSectionMesh,
     TexturedVisibleChunkMesh, build_textured_render_sections_for_chunk_set,
     pack_textured_render_sections,
 };
+use mclone_worldgen::block::{
+    ACACIA_LEAVES, ACACIA_LOG, AIR, OAK_LEAVES, OAK_LOG, SPRUCE_LEAVES, SPRUCE_LOG,
+};
+use mclone_worldgen::levelgen::{
+    McloneOverworldSamplingTopology, McloneOverworldVegetationPlanCache, McloneTreeFamily,
+    McloneTreeOccurrence, McloneVegetationBounds, McloneVegetationSource,
+};
 use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
 
 use super::{
     CanonicalTerrainChunk, CanonicalTerrainCompiler, CanonicalTerrainStage,
-    CanonicalTerrainVisibility, canonical_terrain_presentation_blocks,
+    CanonicalTerrainVisibility, McloneTreeOccurrenceId, canonical_terrain_presentation_blocks,
 };
 
 const CANONICAL_WORKER_RAW_CACHE_MAX_CHUNKS: usize = 1_024;
@@ -39,9 +46,16 @@ pub struct CanonicalMeshRequestReceipt {
 }
 
 #[derive(Clone, Debug)]
+pub struct CanonicalPackedNaturalTree {
+    pub occurrence: McloneTreeOccurrence,
+    pub packed_sections: Vec<u8>,
+}
+
+#[derive(Clone, Debug)]
 pub struct CanonicalPackedAdmission {
     pub requested: CanonicalMeshRequestReceipt,
     pub packed_sections: Vec<u8>,
+    pub natural_trees: Vec<CanonicalPackedNaturalTree>,
 }
 
 #[derive(Clone, Debug)]
@@ -63,14 +77,26 @@ pub enum CanonicalMeshFrontier {
     RetainFootprintWalls,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum CanonicalNaturalTreePresentation {
+    #[default]
+    Integrated,
+    Separated,
+}
+
 pub struct CanonicalMeshSession {
     compiler: CanonicalTerrainCompiler,
     catalog: TexturedMeshCatalog,
+    profile: TerrainPreviewProfile,
+    seed: i64,
+    stage: CanonicalTerrainStage,
     chunks: BTreeMap<(i32, i32), CanonicalTerrainChunk>,
     raw_lru: VecDeque<(i32, i32)>,
     desired: BTreeSet<(i32, i32)>,
     visibility: CanonicalTerrainVisibility,
     frontier: CanonicalMeshFrontier,
+    natural_tree_presentation: CanonicalNaturalTreePresentation,
+    vegetation_cache: Option<McloneOverworldVegetationPlanCache>,
 }
 
 impl CanonicalMeshSession {
@@ -83,11 +109,16 @@ impl CanonicalMeshSession {
         Self {
             compiler: CanonicalTerrainCompiler::new_with_profile(profile, seed, stage),
             catalog,
+            profile,
+            seed,
+            stage,
             chunks: BTreeMap::new(),
             raw_lru: VecDeque::new(),
             desired: BTreeSet::new(),
             visibility: CanonicalTerrainVisibility::default(),
             frontier: CanonicalMeshFrontier::default(),
+            natural_tree_presentation: CanonicalNaturalTreePresentation::default(),
+            vegetation_cache: None,
         }
     }
 
@@ -97,6 +128,17 @@ impl CanonicalMeshSession {
 
     pub const fn frontier(&self) -> CanonicalMeshFrontier {
         self.frontier
+    }
+
+    pub fn set_natural_tree_presentation(
+        &mut self,
+        presentation: CanonicalNaturalTreePresentation,
+    ) {
+        self.natural_tree_presentation = presentation;
+    }
+
+    pub const fn natural_tree_presentation(&self) -> CanonicalNaturalTreePresentation {
+        self.natural_tree_presentation
     }
 
     pub fn begin(
@@ -205,8 +247,9 @@ impl CanonicalMeshSession {
             })
             .collect::<BTreeSet<_>>();
 
+        let separated_occurrences = self.separated_natural_tree_occurrences(&input_positions)?;
         let presentation_started = timing_now();
-        let presented = input_positions
+        let mut presented = input_positions
             .iter()
             .filter_map(|position| {
                 let chunk = self.chunks.get(position)?;
@@ -216,7 +259,9 @@ impl CanonicalMeshSession {
                     .collect::<Vec<_>>();
                 Some((*position, blocks))
             })
-            .collect::<Vec<_>>();
+            .collect::<BTreeMap<_, _>>();
+        let natural_tree_blocks =
+            separate_natural_tree_blocks(&self.chunks, &mut presented, &separated_occurrences);
         let inputs = presented
             .iter()
             .filter_map(|((chunk_x, chunk_z), blocks)| {
@@ -241,6 +286,13 @@ impl CanonicalMeshSession {
         let mut sections =
             build_textured_render_sections_for_chunk_set(&inputs, &self.catalog, &targets)
                 .map_err(|error| format!("failed to mesh canonical terrain in Worker: {error}"))?;
+        let natural_tree_meshes = mesh_separated_natural_trees(
+            &self.chunks,
+            &input_positions,
+            &targets,
+            &natural_tree_blocks,
+            &self.catalog,
+        )?;
         let active = self
             .desired
             .iter()
@@ -283,16 +335,49 @@ impl CanonicalMeshSession {
                 .or_default()
                 .extend(correction_sections);
         }
+        let mut admission_trees = requested_positions
+            .iter()
+            .copied()
+            .map(|position| (position, Vec::new()))
+            .collect::<BTreeMap<_, Vec<CanonicalNaturalTreeMesh>>>();
+        for natural_tree in natural_tree_meshes {
+            let base = natural_tree
+                .occurrence
+                .working_base()
+                .map_err(|error| format!("canonical natural-tree base is invalid: {error}"))?;
+            let base_chunk = (base.x.div_euclid(16), base.z.div_euclid(16));
+            let owner = requested_positions
+                .iter()
+                .copied()
+                .min_by_key(|requested| {
+                    (
+                        (requested.0 - base_chunk.0)
+                            .abs()
+                            .saturating_add((requested.1 - base_chunk.1).abs()),
+                        *requested,
+                    )
+                })
+                .expect("a non-empty batch has one requested tree admission");
+            admission_trees.entry(owner).or_default().push(natural_tree);
+        }
 
         let pack_started = timing_now();
         let mut admissions = Vec::with_capacity(receipts.len());
         for receipt in receipts {
-            let sections = admission_sections
-                .remove(&receipt.coordinate.tuple())
-                .unwrap_or_default();
+            let coordinate = receipt.coordinate.tuple();
+            let sections = admission_sections.remove(&coordinate).unwrap_or_default();
             admissions.push(CanonicalPackedAdmission {
                 requested: receipt,
                 packed_sections: pack_textured_render_sections(&sections),
+                natural_trees: admission_trees
+                    .remove(&coordinate)
+                    .unwrap_or_default()
+                    .into_iter()
+                    .map(|tree| CanonicalPackedNaturalTree {
+                        occurrence: tree.occurrence,
+                        packed_sections: pack_textured_render_sections(&tree.sections),
+                    })
+                    .collect(),
             });
         }
         let pack_ms = timing_elapsed_ms(pack_started);
@@ -323,6 +408,70 @@ impl CanonicalMeshSession {
         })
     }
 
+    fn separated_natural_tree_occurrences(
+        &mut self,
+        input_positions: &BTreeSet<(i32, i32)>,
+    ) -> Result<Vec<McloneTreeOccurrence>, String> {
+        if self.natural_tree_presentation != CanonicalNaturalTreePresentation::Separated
+            || self.profile != TerrainPreviewProfile::McloneOverworldV1
+            || self.stage != CanonicalTerrainStage::FinalFeatures
+            || !self.visibility.vegetation
+            || input_positions.is_empty()
+        {
+            return Ok(Vec::new());
+        }
+        let min_chunk_x = input_positions
+            .iter()
+            .map(|(chunk_x, _)| *chunk_x)
+            .min()
+            .expect("non-empty input positions have a minimum X");
+        let max_chunk_x = input_positions
+            .iter()
+            .map(|(chunk_x, _)| *chunk_x)
+            .max()
+            .expect("non-empty input positions have a maximum X");
+        let min_chunk_z = input_positions
+            .iter()
+            .map(|(_, chunk_z)| *chunk_z)
+            .min()
+            .expect("non-empty input positions have a minimum Z");
+        let max_chunk_z = input_positions
+            .iter()
+            .map(|(_, chunk_z)| *chunk_z)
+            .max()
+            .expect("non-empty input positions have a maximum Z");
+        let min_x = min_chunk_x
+            .checked_mul(CHUNK_WIDTH)
+            .ok_or("canonical natural-tree minimum X overflow")?;
+        let min_z = min_chunk_z
+            .checked_mul(CHUNK_WIDTH)
+            .ok_or("canonical natural-tree minimum Z overflow")?;
+        let max_x = max_chunk_x
+            .checked_add(1)
+            .and_then(|value| value.checked_mul(CHUNK_WIDTH))
+            .and_then(|value| value.checked_sub(1))
+            .ok_or("canonical natural-tree maximum X overflow")?;
+        let max_z = max_chunk_z
+            .checked_add(1)
+            .and_then(|value| value.checked_mul(CHUNK_WIDTH))
+            .and_then(|value| value.checked_sub(1))
+            .ok_or("canonical natural-tree maximum Z overflow")?;
+        let source =
+            McloneVegetationSource::new(self.seed, McloneOverworldSamplingTopology::Unbounded);
+        let cache = self
+            .vegetation_cache
+            .get_or_insert_with(|| McloneOverworldVegetationPlanCache::new(source));
+        if !cache.matches(source) {
+            *cache = McloneOverworldVegetationPlanCache::new(source);
+        }
+        cache
+            .tree_records_intersecting(
+                McloneVegetationBounds::new(min_x, min_z, max_x, max_z)
+                    .map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())
+    }
+
     fn touch_raw(&mut self, position: (i32, i32)) {
         self.raw_lru.retain(|candidate| *candidate != position);
         self.raw_lru.push_back(position);
@@ -342,6 +491,146 @@ impl CanonicalMeshSession {
             }
         }
     }
+}
+
+#[derive(Clone, Debug)]
+struct CanonicalNaturalTreeBlocks {
+    occurrence: McloneTreeOccurrence,
+    chunks: BTreeMap<(i32, i32), Vec<BlockStateId>>,
+}
+
+#[derive(Clone, Debug)]
+struct CanonicalNaturalTreeMesh {
+    occurrence: McloneTreeOccurrence,
+    sections: Vec<TexturedRenderSectionMesh>,
+}
+
+fn separate_natural_tree_blocks(
+    chunks: &BTreeMap<(i32, i32), CanonicalTerrainChunk>,
+    presented: &mut BTreeMap<(i32, i32), Vec<BlockStateId>>,
+    occurrences: &[McloneTreeOccurrence],
+) -> BTreeMap<McloneTreeOccurrenceId, CanonicalNaturalTreeBlocks> {
+    let mut assignments = BTreeMap::<[i32; 3], (McloneTreeOccurrenceId, u8)>::new();
+    let mut occurrence_by_id = BTreeMap::new();
+    for occurrence in occurrences {
+        let id = McloneTreeOccurrenceId::from(*occurrence);
+        occurrence_by_id.insert(id, *occurrence);
+        let bounds = occurrence.working_bounds;
+        for world_y in bounds.min_y..=bounds.max_y {
+            for world_z in bounds.min_z..=bounds.max_z {
+                for world_x in bounds.min_x..=bounds.max_x {
+                    let chunk_position = (world_x.div_euclid(16), world_z.div_euclid(16));
+                    let Some(chunk) = chunks.get(&chunk_position) else {
+                        continue;
+                    };
+                    let local_y = world_y - chunk.min_y;
+                    if !(0..chunk.height).contains(&local_y) {
+                        continue;
+                    }
+                    let index =
+                        chunk_block_index(world_x.rem_euclid(16), local_y, world_z.rem_euclid(16));
+                    let block = chunk.blocks[index];
+                    if natural_tree_block_matches(occurrence.record.family, block) {
+                        assignments.insert([world_x, world_y, world_z], (id, block));
+                    }
+                }
+            }
+        }
+    }
+
+    let mut separated = BTreeMap::<McloneTreeOccurrenceId, CanonicalNaturalTreeBlocks>::new();
+    for ([world_x, world_y, world_z], (id, block)) in assignments {
+        let chunk_position = (world_x.div_euclid(16), world_z.div_euclid(16));
+        let Some(chunk) = chunks.get(&chunk_position) else {
+            continue;
+        };
+        let local_y = world_y - chunk.min_y;
+        let index = chunk_block_index(world_x.rem_euclid(16), local_y, world_z.rem_euclid(16));
+        if let Some(blocks) = presented.get_mut(&chunk_position) {
+            blocks[index] = BlockStateId(u32::from(AIR));
+        }
+        let tree = separated
+            .entry(id)
+            .or_insert_with(|| CanonicalNaturalTreeBlocks {
+                occurrence: occurrence_by_id[&id],
+                chunks: BTreeMap::new(),
+            });
+        let blocks = tree
+            .chunks
+            .entry(chunk_position)
+            .or_insert_with(|| vec![BlockStateId(u32::from(AIR)); chunk.blocks.len()]);
+        blocks[index] = BlockStateId(u32::from(block));
+    }
+    separated
+}
+
+fn natural_tree_block_matches(family: McloneTreeFamily, block: u8) -> bool {
+    match family {
+        McloneTreeFamily::TemperateBroadleaf => matches!(block, OAK_LOG | OAK_LEAVES),
+        McloneTreeFamily::CoolWetConifer => matches!(block, SPRUCE_LOG | SPRUCE_LEAVES),
+        McloneTreeFamily::WarmDryAcacia => matches!(block, ACACIA_LOG | ACACIA_LEAVES),
+    }
+}
+
+fn mesh_separated_natural_trees(
+    chunks: &BTreeMap<(i32, i32), CanonicalTerrainChunk>,
+    input_positions: &BTreeSet<(i32, i32)>,
+    targets: &BTreeSet<(i32, i32)>,
+    natural_trees: &BTreeMap<McloneTreeOccurrenceId, CanonicalNaturalTreeBlocks>,
+    catalog: &TexturedMeshCatalog,
+) -> Result<Vec<CanonicalNaturalTreeMesh>, String> {
+    let mut meshes = Vec::new();
+    for tree in natural_trees.values() {
+        let tree_targets = tree
+            .chunks
+            .keys()
+            .copied()
+            .filter(|position| targets.contains(position))
+            .collect::<BTreeSet<_>>();
+        if tree_targets.is_empty() {
+            continue;
+        }
+        let presented = input_positions
+            .iter()
+            .filter_map(|position| {
+                let chunk = chunks.get(position)?;
+                let blocks = tree
+                    .chunks
+                    .get(position)
+                    .cloned()
+                    .unwrap_or_else(|| vec![BlockStateId(u32::from(AIR)); chunk.blocks.len()]);
+                Some((*position, blocks))
+            })
+            .collect::<Vec<_>>();
+        let inputs = presented
+            .iter()
+            .filter_map(|((chunk_x, chunk_z), blocks)| {
+                let chunk = chunks.get(&(*chunk_x, *chunk_z))?;
+                Some(
+                    TexturedChunkMeshInput::new(
+                        *chunk_x,
+                        *chunk_z,
+                        chunk.min_y,
+                        chunk.height,
+                        blocks,
+                    )
+                    .with_biomes(&chunk.biomes)
+                    .with_world_seed(chunk.seed)
+                    .with_fluids_visible(false),
+                )
+            })
+            .collect::<Vec<_>>();
+        let sections =
+            build_textured_render_sections_for_chunk_set(&inputs, catalog, &tree_targets)
+                .map_err(|error| format!("failed to mesh separated canonical tree: {error}"))?;
+        if !sections.is_empty() {
+            meshes.push(CanonicalNaturalTreeMesh {
+                occurrence: tree.occurrence,
+                sections,
+            });
+        }
+    }
+    Ok(meshes)
 }
 
 pub fn suppress_missing_footprint_walls(
@@ -409,6 +698,102 @@ fn append_non_boundary_quads(
             continue;
         }
         mesh.indices.extend_from_slice(quad);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use mclone_worldgen::levelgen::{
+        McloneTreeArchetype, McloneTreeBounds, McloneTreeId, McloneTreeRecord,
+    };
+    use mclone_worldgen::placement::BlockPos;
+
+    use super::*;
+    use crate::CanonicalTerrainDependencyCacheReport;
+
+    fn occurrence(family: McloneTreeFamily) -> McloneTreeOccurrence {
+        let bounds = McloneTreeBounds::new(1, 1, 1, 3, 8, 3).unwrap();
+        McloneTreeOccurrence {
+            record: McloneTreeRecord {
+                id: McloneTreeId {
+                    planning_cell_x: 0,
+                    planning_cell_z: 0,
+                    candidate_slot: 1,
+                    vegetation_revision: 2,
+                },
+                canonical_base: BlockPos::new(2, 1, 2),
+                family,
+                archetype: match family {
+                    McloneTreeFamily::TemperateBroadleaf => McloneTreeArchetype::RoundedBroadleaf,
+                    McloneTreeFamily::CoolWetConifer => McloneTreeArchetype::LayeredConifer,
+                    McloneTreeFamily::WarmDryAcacia => McloneTreeArchetype::ForkedAcacia,
+                },
+                trunk_height: 6,
+                crown_radius: 2,
+                crown_depth: 4,
+                orientation: 0,
+                landmark_rank: 0,
+                variant_seed: 1,
+                bounds,
+            },
+            x_lift: 0,
+            working_bounds: bounds,
+        }
+    }
+
+    #[test]
+    fn separated_tree_blocks_leave_other_feature_families_in_terrain() {
+        let mut raw = vec![AIR; 16 * 16 * 16];
+        let oak_log = chunk_block_index(2, 1, 2);
+        let oak_leaves = chunk_block_index(2, 6, 2);
+        let spruce_log = chunk_block_index(3, 1, 3);
+        raw[oak_log] = OAK_LOG;
+        raw[oak_leaves] = OAK_LEAVES;
+        raw[spruce_log] = SPRUCE_LOG;
+        let chunk = CanonicalTerrainChunk {
+            profile: TerrainPreviewProfile::McloneOverworldV1,
+            seed: 7,
+            stage: CanonicalTerrainStage::FinalFeatures,
+            chunk_x: 0,
+            chunk_z: 0,
+            min_y: 0,
+            height: 16,
+            blocks: raw,
+            biomes: Vec::new(),
+            fingerprint: 1,
+            dependency_cache: CanonicalTerrainDependencyCacheReport::default(),
+        };
+        let chunks = BTreeMap::from([((0, 0), chunk)]);
+        let mut presented = BTreeMap::from([(
+            (0, 0),
+            chunks[&(0, 0)]
+                .blocks
+                .iter()
+                .map(|block| BlockStateId(u32::from(*block)))
+                .collect::<Vec<_>>(),
+        )]);
+        let occurrence = occurrence(McloneTreeFamily::TemperateBroadleaf);
+        let separated = separate_natural_tree_blocks(&chunks, &mut presented, &[occurrence]);
+        let tree = &separated[&McloneTreeOccurrenceId::from(occurrence)];
+
+        assert_eq!(presented[&(0, 0)][oak_log], BlockStateId(u32::from(AIR)));
+        assert_eq!(presented[&(0, 0)][oak_leaves], BlockStateId(u32::from(AIR)));
+        assert_eq!(
+            presented[&(0, 0)][spruce_log],
+            BlockStateId(u32::from(SPRUCE_LOG))
+        );
+        assert_eq!(
+            tree.chunks[&(0, 0)][oak_log],
+            BlockStateId(u32::from(OAK_LOG))
+        );
+        assert_eq!(
+            tree.chunks[&(0, 0)][oak_leaves],
+            BlockStateId(u32::from(OAK_LEAVES))
+        );
+        assert_eq!(
+            tree.chunks[&(0, 0)][spruce_log],
+            BlockStateId(u32::from(AIR))
+        );
     }
 }
 

@@ -36,8 +36,8 @@ pub use canonical_batch_codec::{
 };
 pub use canonical_mesh::{
     CanonicalMeshBatch, CanonicalMeshCoordinate, CanonicalMeshFrontier,
-    CanonicalMeshRequestReceipt, CanonicalMeshSession, CanonicalPackedAdmission,
-    suppress_missing_footprint_walls,
+    CanonicalMeshRequestReceipt, CanonicalMeshSession, CanonicalNaturalTreePresentation,
+    CanonicalPackedAdmission, CanonicalPackedNaturalTree, suppress_missing_footprint_walls,
 };
 pub use clipmap::{
     TERRAIN_CLIPMAP_DEFAULT_LEVEL_COUNT, TERRAIN_CLIPMAP_DEFAULT_TILES_PER_AXIS, TerrainClipmap,
