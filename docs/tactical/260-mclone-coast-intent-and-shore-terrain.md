@@ -1,6 +1,7 @@
 # Tactical 260: Mclone Coast Intent And Shore Terrain
 
-Status: implementation candidate complete 2026-07-26; awaiting Human Review 1.
+Status: Human Review 1 corrections complete 2026-07-26; awaiting Human
+Review 2.
 
 Topics:
 
@@ -114,10 +115,10 @@ consumers of one reconstructible semantic fact.
 
 ### Slice 5: response and closeout
 
-- [ ] Apply Human Review 1 classifier/geometry/material corrections.
-- [ ] Rerun affected topology, determinism, persistence, performance, and
+- [x] Apply Human Review 1 classifier/geometry/material corrections.
+- [x] Rerun affected topology, determinism, persistence, performance, and
   pixel evidence.
-- [ ] Present warmed ordinary and showcase regions for Human Review 2.
+- [x] Present warmed ordinary and showcase regions for Human Review 2.
 - [ ] Record the accepted visual language and update living topic ledgers.
 - [ ] Close the tactical and commit the execution record.
 
@@ -268,7 +269,7 @@ continuous terrain.
   attempts reached WebGPU but failed asynchronous validation-buffer mapping,
   so their blank panes are not claimed as pixel evidence. Native production
   pixels and native WGPU compute are the review evidence for this gate.
-- The complete `mclone-worldgen` library suite passes: 369 passed and one
+- The complete `mclone-worldgen` library suite passes: 371 passed and one
   ignored. Focused scene, server, persistence, hydraulic-closure, and terrain
   view suites also pass.
 
@@ -290,6 +291,75 @@ The inspected production atlas is
 This is intentionally the pause point. In particular, Human Review 1 should
 decide gravel breadth/plainness, rocky cliff abruptness, sandy width and
 family-transition crispness before any fine tuning is accepted.
+
+### Human Review 1 response
+
+Human Review 1 retained the steep-coast idea but did not accept the first
+candidate as final. The specific defects were:
+
+- stone handed abruptly to grass with no transition;
+- sandy, gravel, and rocky masks read as broad sculpted strokes with too
+  little local irregularity;
+- snow covered sand while adjacent grass remained green; and
+- water features acquired a concrete, repeated material “beard.”
+
+Field revision 19 corrects those issues without adding another noise field or
+changing the 768-block coast plan. It reuses the already sampled periodic
+mountain detail, relief, and ridge facts to derive a local coast-realization
+texture. That texture moves the final proximity and character thresholds,
+feathers sandy and gravel inland edges, and selects mixed grass, coarse dirt,
+gravel, and stone on rocky transition shoulders. Rocky height response
+remains continuous and bounded at 22 blocks, so the accepted steep silhouette
+survives.
+
+The cold response is now a climate/altitude fact rather than a
+coast-proximity mask. `SnowCover` can therefore cover sand, grass, gravel,
+coarse dirt, or rock across one cold lowland while retaining the underlying
+substrate. River-bank sand is now a reach-dependent depositional opportunity:
+ordinary reaches may remain grass or use coarse dirt/gravel, while only
+suitable reaches receive short sand traces. Planned streams and water/channel
+recipes remain authoritative.
+
+Receipt schema 17 and GPU evaluator revision
+`mclone-overworld-v1-gpu-preview-a9` carry the same correction. Equal-grid
+coast-adjacent surface counts are:
+
+| Seed | Sandy | Gravel | Rocky | Snow cover | Grass/soil | River |
+|---:|---:|---:|---:|---:|---:|---:|
+| `12345` | 778 | 638 | 426 | 202 | 364 | 223 |
+| `8675309` | 1,129 | 808 | 639 | 412 | 390 | 327 |
+| `-98765` | 242 | 279 | 841 | 120 | 511 | 204 |
+
+The sandy share and its broad alongshore regions remain close to the first
+candidate rather than devolving into sample-scale noise. Sandy-distance p50
+values remain 40-48 blocks, p90 values 72-128 blocks, and maxima 120-280
+blocks across the three grids. Snow now covers 29,839, 30,370, and 45,641
+whole-grid land samples respectively instead of tracing only a narrow shore.
+All three grids retain hydraulic closure.
+
+No new noise field is sampled. Against the Human Review 1 candidate, the
+sequential roughly-500k point controls changed from 110.403 to 124.184 ms on
+plane and from 123.862 to 121.540 ms on cylinder. The 65k preview controls
+rose 5.6-7.2%. Exact cold-region medians rose approximately 13-14% because
+snow materialization now applies across the cold ground region; the very
+small warm controls remained noisy. This is a stated exact-material cost, not
+a hidden increase in macro field dimensionality.
+
+The corrected candidate passes:
+
+- 371 `mclone-worldgen` tests with one ignored;
+- 57 `mclone-terrain-view` tests with one adapter-gated test ignored;
+- five Worldgen Lens tests and 14 server topology/persistence tests;
+- native-client compilation and the Terrain Lab Wasm build; and
+- native GPU conformance over 4,225 points with zero height error and 1.0
+  agreement for every discrete material, biome, landform, water, and surface
+  channel.
+
+The exact 6,144-block cylinder seam remains continuous. The inspected Human
+Review 2 atlas is `/tmp/mclone-coast-human-review-2.png`; it contains the
+corrected sandy cove, mixed gravel coast, ordinary outlet, two rocky
+silhouettes, cross-substrate cold coast, and centered cylinder seam. This is
+another subjective gate, not an assertion that the coast language is final.
 
 ## Human Review Gates
 

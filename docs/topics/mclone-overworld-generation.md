@@ -1096,8 +1096,8 @@ selected the concrete coast question and preserved the schema-14 baseline:
 every remaining sample was a river/wetland recipe.
 
 Tactical
-[`260`](../tactical/260-mclone-coast-intent-and-shore-terrain.md) now has the
-first implementation candidate at Human Review 1. One cheap, periodic
+[`260`](../tactical/260-mclone-coast-intent-and-shore-terrain.md) now has a
+corrected implementation candidate at Human Review 2. One cheap, periodic
 768-block field yields sandy depositional, gravel transitional,
 rocky/exposed, cold-response, and ordinary direct-water intent. Geometry and
 material are separate consumers. Provisional terrain receives bounded coast
@@ -1106,12 +1106,20 @@ then choose grass-topped versus exposed rock faces.
 
 On the same three grids, sandy surfaces now account for roughly 11-31% of
 coast-adjacent land, and every seed has rocky and ordinary direct-water
-outcomes. Receipt schema 16, exact fingerprints, native CPU/GPU conformance,
+outcomes. Human Review 1 retained the steep-coast idea but rejected hard
+stone/grass and broad family boundaries, sand-only snow, and uniform
+water-edge material collars. Field revision 19 reuses existing periodic local
+terrain detail rather than adding another noise field. It feathers material
+realization, mixes transition substrates, applies snow across adjacent cold
+ground, and makes river-bank sand reach-dependent.
+
+Receipt schema 17, exact fingerprints, native CPU/GPU conformance,
 the exact 6,144-block cylinder seam, persistence reopen, and hydraulic closure
-all pass. The broad-field cost is measurable: roughly 11-13% on the large
-point control and 7-12% on preview controls. Human Review 1 should settle
-gravel breadth, cliff abruptness, sandy width, and family-transition
-crispness before the broader volumetric-geology campaign.
+all pass. The broad-field cost remains separately recorded; the correction
+adds approximately 6-7% to preview controls and 13-14% to exact cold-region
+controls relative to the first candidate. Human Review 2 should settle the
+remaining transition and broad-stroke questions before the broader
+volumetric-geology campaign.
 The
 [`still-life-and-tectonic-reference.md`](still-life-and-tectonic-reference.md)
 study sharpens that direction: select mutually legible geology families

@@ -8,8 +8,8 @@ wetland, surface, and bounded-stream facts, but it does not yet have a
 holistic macro landscape plan that coordinates their topology, precedence,
 overlap, and downstream feature permissions. This topic owns that planning
 view. Tactical 259 grounded coastal character in Alpha, Beta, Java 1.17.1,
-Java 26.2, and measured current Mclone evidence. Tactical 260 now has the
-first shared coast implementation candidate at Human Review 1.**
+Java 26.2, and measured current Mclone evidence. Tactical 260 has applied the
+first visual-review corrections and is awaiting Human Review 2.**
 
 The motivating July 2026 visual review found four related regional-scale
 weaknesses:
@@ -423,11 +423,18 @@ roughly 11-31% of coast-adjacent land instead of roughly 90%; every seed has
 rocky and ordinary direct-water outcomes.
 
 The added field costs roughly 11-13% on the large point-sampling control and
-7-12% on the 65k preview controls. Exact cold/warm generation remains near
-its prior medians. Native CPU/GPU conformance, exact 6,144-block periodicity,
-persistence reopen, and production pixels pass. Human Review 1 now owns the
-subjective decision about gravel breadth, cliff abruptness, sandy width, and
-transition crispness.
+7-12% on the 65k preview controls. Human Review 1 retained the steep-coast
+idea but rejected hard stone/grass and broad family boundaries, sand-only
+snow, and uniform water-edge material collars. Field revision 19 adds no new
+noise field: it reuses periodic local terrain detail to feather the semantic
+realization, mixes substrates at sandy/gravel/rocky transitions, lets snow
+cover adjacent cold substrates, and makes river-bank sand reach-dependent.
+The correction adds approximately 6-7% to preview controls and 13-14% to
+exact cold-region controls relative to the first candidate. Native CPU/GPU
+conformance, exact 6,144-block periodicity, persistence reopen, and production
+pixels pass. Human Review 2 now owns the subjective decision about whether
+the resulting transitions are sufficiently geographic without sacrificing
+the broad coast identity.
 
 ### River topology and terrain relation
 
@@ -972,7 +979,7 @@ none is inferred from CPU compile time.
 | raw macro fields | continentalness, relief, ruggedness, ridges, mountain detail, climate, bathymetry, water morphology | no unified classified landscape intent |
 | terrain | continuous heightfield with accepted mountain detail and derived slope/exposure | no explicit range, basin, pass, or terrain-corridor plan |
 | sampling/representation | cheap absolute-coordinate CPU/GPU heightfield preview, a fixed ten-level 131 km horizon, and normalized point receipts through roughly 500 km | no filtered spacing-2,048 review product or sparse volumetric near/far contract |
-| coast | shared sandy/gravel/ordinary/rocky/cold intent; bounded geometry and distinct surfaces; schema-16 maps; exact CPU/GPU and periodic-seam evidence | first candidate awaits subjective scale/transition review; no marsh, frozen-ocean morphology, dunes, deltas, reefs, or sea caves |
+| coast | shared sandy/gravel/ordinary/rocky/cold intent; bounded geometry, locally feathered realization, cross-substrate snow, mixed banks; schema-17 maps; exact CPU/GPU and periodic-seam evidence | corrected candidate awaits Human Review 2; no marsh, frozen-ocean morphology, dunes, deltas, reefs, or sea caves |
 | major rivers | warped zero-contour corridor with width/depth/bank morphology and receiving-outlet correction | no persistent macro drainage topology, tributary hierarchy, or named major reaches |
 | streams | bounded 91-96-block valley-following source-to-river plan | one peaceful family, not a general network |
 | ponds/lakes | river-adjacent wetland pools and shared local lake mechanism | no closed-basin or spill-level plan |
@@ -1007,9 +1014,13 @@ every row before shipping any smaller improvement.
    - Tactical 260 implements geometry separately from surface material and
      proves sandy, gravel, rocky, cold-response, and ordinary direct-water
      outcomes;
-   - review its production atlas, especially gravel scale, cliff abruptness,
-     sand width, and family transitions;
-   - apply accepted tuning and close the warmed Human Review 2 candidate; and
+   - Human Review 1 retained steep rocky silhouettes but requested locally
+     feathered family/material transitions, cross-substrate snow, and removal
+     of uniform water-edge collars;
+   - review the corrected production atlas for remaining broad-stroke masks,
+     rocky/gravel mixture, sandy tongues, snow breadth, and ordinary outlet
+     banks;
+   - record accepted tuning and close only after Human Review 2; and
    - retain the proven plane/cylinder topology and Tactical 258 performance
      controls.
 3. **Select major-water topology**

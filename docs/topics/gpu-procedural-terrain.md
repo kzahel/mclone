@@ -192,7 +192,7 @@ The terrain compute pipeline now exists in
 [`mclone-terrain-view`](../../native/crates/mclone-terrain-view/). It:
 
 - accepts aligned 64-cell / 65-sample production-reference tiles;
-- evaluates the separately revisioned `mclone-overworld-v1-gpu-preview-a8`
+- evaluates the separately revisioned `mclone-overworld-v1-gpu-preview-a9`
   production graph through provisional/coast/final surface height and macro
   surface material into GPU-resident storage;
 - emulates the production unsigned 64-bit lattice hash with pairs of portable
@@ -217,7 +217,10 @@ Tactical
 shared coast field, classifier, geometry, surface, biome, and landform
 semantics to that evaluator. Native WGPU comparison over 4,225 points has
 zero height error and complete discrete-channel agreement. The browser/Wasm
-build passes; the current headed Terrain Lab capture reached WebGPU but its
+build passes. Revision a9 adds the Human Review 1 transition correction:
+topology-aware local coast realization, cross-substrate snow, mixed
+sandy/gravel/rocky materials, and reach-dependent river banks all match the
+CPU evaluator. The current headed Terrain Lab capture reached WebGPU but its
 validation-buffer map failed, so that attempt is not recorded as browser
 pixel proof.
 
