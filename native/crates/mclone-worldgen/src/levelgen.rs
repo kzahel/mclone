@@ -10,6 +10,7 @@ mod sampler;
 mod settings;
 mod surface_dependency_cache;
 mod timing;
+mod topology_probe;
 mod vanilla_overworld_lod;
 
 pub use crate::biome::{ConstantBiomeSource, NoiseBiome, NoiseBiomeSource};
@@ -92,6 +93,13 @@ pub use settings::{
 };
 pub use timing::{
     OverworldDependencyGenerationTiming, OverworldFeatureBatchTiming, SurfaceFillTiming,
+};
+pub use topology_probe::{
+    TOPOLOGY_PROBE_BASE_SURFACE_Y, TOPOLOGY_PROBE_HEIGHT, TOPOLOGY_PROBE_MIN_PERIOD_CHUNKS,
+    TOPOLOGY_PROBE_MIN_Y, TOPOLOGY_PROBE_PLAINS_BIOME_ID, TOPOLOGY_PROBE_SEA_LEVEL,
+    TopologyProbeColumnSample, TopologyProbePlan, TopologyProbePlanKind, TopologyProbeSource,
+    TopologyProbeWorkPlan, generate_topology_probe_chunk, generate_topology_probe_chunks,
+    validate_topology_probe_topology,
 };
 pub use vanilla_overworld_lod::{
     VANILLA_OVERWORLD_LOD_MAX_RETAINED_DENSITY_COLUMNS, VANILLA_OVERWORLD_LOD_REVISION,
