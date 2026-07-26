@@ -231,3 +231,38 @@ fn held_direction(code: KeyCode) -> Option<WorldViewHeldDirection> {
         _ => None,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn native_arrows_and_wasd_map_to_the_same_held_directions() {
+        for (arrow, letter, expected) in [
+            (
+                KeyCode::ArrowUp,
+                KeyCode::KeyW,
+                WorldViewHeldDirection::Forward,
+            ),
+            (
+                KeyCode::ArrowDown,
+                KeyCode::KeyS,
+                WorldViewHeldDirection::Backward,
+            ),
+            (
+                KeyCode::ArrowLeft,
+                KeyCode::KeyA,
+                WorldViewHeldDirection::Left,
+            ),
+            (
+                KeyCode::ArrowRight,
+                KeyCode::KeyD,
+                WorldViewHeldDirection::Right,
+            ),
+        ] {
+            assert_eq!(held_direction(arrow), Some(expected));
+            assert_eq!(held_direction(letter), Some(expected));
+        }
+        assert_eq!(held_direction(KeyCode::KeyM), None);
+    }
+}
