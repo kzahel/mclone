@@ -1,0 +1,326 @@
+use std::collections::BTreeSet;
+
+use anyhow::{Context, Result, bail};
+use mclone_app_runtime::frame_render::{TerrainBackdropRenderContext, TerrainBackdropRenderer};
+use mclone_app_runtime::render_asset_data::TexturedMeshAssets;
+use mclone_core::{BlockStateId, ChunkPos, HorizontalTopology};
+use mclone_render::color_profile::RenderColorProfile;
+use mclone_terrain_view::{
+    ExactPaintedCoverageSnapshot, TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainClipmapConfig,
+    TerrainCompositionSourceIdentity, TerrainExactCoverageMode, TerrainHorizonFrameStats,
+    TerrainHorizonPresentation, TerrainHorizonRenderTarget, TerrainPreparedExactFrame,
+    TerrainPreviewCamera, TerrainPreviewMaterialAtlas, TerrainPreviewView, TerrainViewEngine,
+    TerrainViewEngineConfig, TerrainViewSourceIdentity,
+};
+use mclone_worldgen::terrain_preview::{TerrainPreviewContentStage, TerrainPreviewProfile};
+
+use crate::{McloneSceneHost, WorldInstanceId};
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct SceneTerrainViewDiagnostics {
+    pub source_generation: u64,
+    pub coverage_generation: u64,
+    pub exact_column_count: u32,
+    pub last_frame_revision: u64,
+}
+
+pub(crate) struct SceneTerrainViewState {
+    engine: TerrainViewEngine,
+    world: WorldInstanceId,
+    source: TerrainViewSourceIdentity,
+    exact: TerrainPreparedExactFrame,
+    ready_columns: BTreeSet<ChunkPos>,
+    coverage_generation: u64,
+    anchor: [f64; 2],
+    diagnostics: SceneTerrainViewDiagnostics,
+}
+
+impl SceneTerrainViewState {
+    pub(crate) fn new(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        color_profile: RenderColorProfile,
+        mesh_assets: &TexturedMeshAssets,
+        world: WorldInstanceId,
+        seed: i64,
+        topology: HorizontalTopology,
+    ) -> Result<Self> {
+        let source = live_source(world, seed, topology)?;
+        let coverage_generation = 1;
+        let coverage = ExactPaintedCoverageSnapshot::new(
+            source.composition_source().map_err(anyhow::Error::msg)?,
+            coverage_generation,
+            [],
+        )
+        .map_err(anyhow::Error::msg)?;
+        let exact = TerrainPreparedExactFrame::new(source, coverage).map_err(anyhow::Error::msg)?;
+        let mut material_uvs = [[0.0_f32, 0.0, 1.0, 1.0]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT];
+        for (raw_id, target) in material_uvs.iter_mut().enumerate() {
+            if let Some(sprite) = mesh_assets.catalog.gui_icon_uv(BlockStateId(raw_id as u32)) {
+                *target = [sprite.u0, sprite.v0, sprite.u1, sprite.v1];
+            }
+        }
+        let atlas = mesh_assets.atlas.as_upload();
+        let engine = TerrainViewEngine::new(
+            device,
+            queue,
+            color_format,
+            TerrainViewEngineConfig {
+                width: 1,
+                height: 1,
+                source,
+                clipmap: TerrainClipmapConfig::default(),
+                // Platform executor plumbing lands in Slice 4. Keeping this
+                // false is an explicit no-proxy mode, not a synchronous
+                // browser fallback or a second vegetation implementation.
+                vegetation_enabled: false,
+                color_profile,
+            },
+            TerrainPreviewMaterialAtlas {
+                width: atlas.width,
+                height: atlas.height,
+                rgba: atlas.rgba,
+                material_uvs: &material_uvs,
+            },
+            None,
+        )
+        .map_err(anyhow::Error::msg)
+        .context("create shared live terrain-view engine")?;
+        Ok(Self {
+            engine,
+            world,
+            source,
+            exact,
+            ready_columns: BTreeSet::new(),
+            coverage_generation,
+            anchor: [0.0, 0.0],
+            diagnostics: SceneTerrainViewDiagnostics {
+                source_generation: source.generation(),
+                coverage_generation,
+                ..Default::default()
+            },
+        })
+    }
+
+    pub(crate) fn prepare(
+        &mut self,
+        world: WorldInstanceId,
+        seed: i64,
+        topology: HorizontalTopology,
+        focus: [f64; 3],
+        ready_columns: BTreeSet<ChunkPos>,
+    ) -> Result<()> {
+        if self.world != world
+            || self
+                .source
+                .composition_source()
+                .map_err(anyhow::Error::msg)?
+                .seed
+                != seed
+            || self.source.topology() != topology
+        {
+            self.world = world;
+            self.source = live_source(world, seed, topology)?;
+            self.engine
+                .replace_source(self.source)
+                .map_err(anyhow::Error::msg)?;
+            self.ready_columns.clear();
+            self.coverage_generation = 1;
+        }
+        if ready_columns != self.ready_columns {
+            self.ready_columns = ready_columns;
+            self.coverage_generation = self.coverage_generation.saturating_add(1).max(1);
+        }
+        let coverage = ExactPaintedCoverageSnapshot::new(
+            self.source
+                .composition_source()
+                .map_err(anyhow::Error::msg)?,
+            self.coverage_generation,
+            self.ready_columns.iter().copied(),
+        )
+        .map_err(anyhow::Error::msg)
+        .context("pack live exact-painted terrain coverage")?;
+        self.exact =
+            TerrainPreparedExactFrame::new(self.source, coverage).map_err(anyhow::Error::msg)?;
+        self.anchor = [focus[0], focus[2]];
+        self.engine.set_residency(
+            floor_f64_to_i32(focus[0]),
+            floor_f64_to_i32(focus[2]),
+            TerrainPreviewContentStage::Cover,
+        );
+        self.diagnostics.source_generation = self.source.generation();
+        self.diagnostics.coverage_generation = self.coverage_generation;
+        self.diagnostics.exact_column_count =
+            u32::try_from(self.ready_columns.len()).unwrap_or(u32::MAX);
+        Ok(())
+    }
+
+    pub(crate) const fn diagnostics(&self) -> SceneTerrainViewDiagnostics {
+        self.diagnostics
+    }
+
+    pub(crate) fn shutdown(&mut self) {
+        self.engine.shutdown();
+    }
+}
+
+impl McloneSceneHost {
+    pub(crate) fn prepare_terrain_view_for_frame(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        focus: [f64; 3],
+    ) -> Result<bool> {
+        if self.active_world.scene.startup.terrain_presentation
+            != mclone_app_runtime::startup_args::TerrainPresentationMode::Composed
+        {
+            self.reset_terrain_view();
+            return Ok(false);
+        }
+        let world = self.active_world.id;
+        let seed = self.active_world.scene.seed;
+        let topology = self
+            .active_world
+            .runtime
+            .as_ref()
+            .map_or(self.active_world.scene.world_topology, |runtime| {
+                runtime.client().topology()
+            });
+        let ready_columns = self.active_world.draw.traversal_ready_columns_snapshot();
+        if self.terrain_view.is_none() {
+            self.terrain_view = Some(SceneTerrainViewState::new(
+                device,
+                queue,
+                self.color_format,
+                self.render_options.color_profile,
+                &self.mesh_assets,
+                world,
+                seed,
+                topology,
+            )?);
+        }
+        self.terrain_view
+            .as_mut()
+            .expect("composed terrain view was initialized")
+            .prepare(world, seed, topology, focus, ready_columns)?;
+        Ok(true)
+    }
+
+    pub fn terrain_view_diagnostics(&self) -> Option<SceneTerrainViewDiagnostics> {
+        self.terrain_view
+            .as_ref()
+            .map(SceneTerrainViewState::diagnostics)
+    }
+
+    pub(crate) fn reset_terrain_view(&mut self) {
+        if let Some(mut terrain_view) = self.terrain_view.take() {
+            terrain_view.shutdown();
+        }
+    }
+}
+
+impl TerrainBackdropRenderer for SceneTerrainViewState {
+    fn render(&mut self, context: TerrainBackdropRenderContext<'_>) -> Result<()> {
+        self.engine
+            .resize(context.device, context.size[0], context.size[1]);
+        let presentation = TerrainHorizonPresentation::new(
+            self.anchor[0],
+            self.anchor[1],
+            1_048_576.0,
+            1_048_576.0,
+            TerrainPreviewView::ThreeDimensional,
+            TerrainPreviewCamera::default(),
+        )
+        .and_then(|presentation| presentation.with_render_view(context.render_view))
+        .map_err(anyhow::Error::msg)?;
+        let stats = self
+            .engine
+            .encode_to_target(
+                context.device,
+                context.queue,
+                context.encoder,
+                TerrainHorizonRenderTarget {
+                    color_view: context.color_view,
+                    depth_view: context.depth_view,
+                    color_load: wgpu::LoadOp::Load,
+                    color_store: wgpu::StoreOp::Store,
+                    depth_load: wgpu::LoadOp::Load,
+                    depth_store: wgpu::StoreOp::Store,
+                },
+                presentation,
+                Some((&self.exact, TerrainExactCoverageMode::DiscardPainted)),
+                None,
+            )
+            .map_err(anyhow::Error::msg)
+            .context("render shared live terrain backdrop")?;
+        self.record_stats(stats);
+        Ok(())
+    }
+}
+
+impl SceneTerrainViewState {
+    fn record_stats(&mut self, stats: TerrainHorizonFrameStats) {
+        self.diagnostics.last_frame_revision = stats.revision;
+    }
+}
+
+fn live_source(
+    world: WorldInstanceId,
+    seed: i64,
+    topology: HorizontalTopology,
+) -> Result<TerrainViewSourceIdentity> {
+    if world.get() == 0 {
+        bail!("live terrain-view world generation must be non-zero");
+    }
+    TerrainViewSourceIdentity::live(
+        TerrainCompositionSourceIdentity::new(TerrainPreviewProfile::McloneOverworldV1, seed),
+        topology,
+        world.get(),
+        1,
+    )
+    .map_err(anyhow::Error::msg)
+}
+
+fn floor_f64_to_i32(value: f64) -> i32 {
+    if value.is_nan() {
+        0
+    } else if value <= f64::from(i32::MIN) {
+        i32::MIN
+    } else if value >= f64::from(i32::MAX) {
+        i32::MAX
+    } else {
+        value.floor() as i32
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn live_source_uses_world_identity_as_generation() {
+        let source = live_source(
+            WorldInstanceId::new(17),
+            -98_765,
+            HorizontalTopology::UNBOUNDED,
+        )
+        .unwrap();
+        assert_eq!(source.generation(), 17);
+        assert_eq!(source.source_revision(), 1);
+        assert_eq!(
+            source.truth_role(),
+            mclone_terrain_view::TerrainViewTruthRole::LiveAuthoritative
+        );
+        assert_eq!(source.composition_source().unwrap().seed, -98_765);
+    }
+
+    #[test]
+    fn terrain_focus_conversion_is_saturating_and_flooring() {
+        assert_eq!(floor_f64_to_i32(15.99), 15);
+        assert_eq!(floor_f64_to_i32(-0.01), -1);
+        assert_eq!(floor_f64_to_i32(f64::INFINITY), i32::MAX);
+        assert_eq!(floor_f64_to_i32(f64::NEG_INFINITY), i32::MIN);
+        assert_eq!(floor_f64_to_i32(f64::NAN), 0);
+    }
+}

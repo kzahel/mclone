@@ -79,24 +79,37 @@ detached canonical source       live authoritative source
 
 ### Slice 2: live authoritative source adapter
 
-- Derive exact-painted columns from drawable, traversal-ready client render
+- [x] Derive exact-painted columns from drawable, traversal-ready client render
   sections rather than requested or merely loaded chunks.
-- Qualify the snapshot with active world identity, source generation,
+- [x] Qualify the snapshot with active world identity, source generation,
   topology, and authoritative role.
-- Reset atomically on session/world/source replacement and reject stale
+- [x] Reset atomically on session/world/source replacement and reject stale
   products.
-- Preserve edits and propagated exact lighting by retaining the live draw
+- [x] Preserve edits and propagated exact lighting by retaining the live draw
   store.
 
 ### Slice 3: ordinary scene composition
 
-- Insert the shared procedural terrain submission into the ordinary frame
+- [x] Insert the shared procedural terrain submission into the ordinary mono frame
   after sky and before exact opaque terrain.
-- Anchor residency to the primary player/view focus while allowing auxiliary
+- [x] Anchor residency to the authoritative player focus rather than a
+  diagnostic camera target.
+- [ ] Allow auxiliary
   and stereo views to reuse the committed presentation.
-- Preserve actors, translucent terrain, water, effects, selection, and UI
+- [x] Preserve actors, translucent terrain, water, effects, selection, and UI
   ordering.
-- Add explicit exact-only/composed configuration and diagnostics.
+- [x] Add explicit exact-only/composed configuration and diagnostics.
+
+First drawable evidence on 2026-07-27 uses
+`--generation-profile mclone-overworld-v1 --terrain-presentation composed`.
+The ordinary scene now draws the procedural terrain after sky and exact terrain
+loads the resulting reversed-Z depth. An inspected `1024x576` low-angle native
+capture preserves the exact foreground hill silhouette over the procedural
+horizon; an elevated capture exposes the bounded exact footprint surrounded by
+the fixed-budget horizon. `exact-only` remains the default and never creates
+the terrain-view engine. Procedural vegetation is intentionally still disabled
+until Slice 4 provides platform executors; this milestone is not a human
+checkpoint.
 
 ### Slice 4: ownership, lifecycle, and topology
 

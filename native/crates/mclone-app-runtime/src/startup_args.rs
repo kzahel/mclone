@@ -40,6 +40,7 @@ pub const ARG_LIGHT_STATUS_BATCH_SIZE: &str = "--light-status-batch-size";
 pub const ARG_SECTION_OCCLUSION: &str = "--section-occlusion";
 pub const ARG_FULLBRIGHT: &str = "--fullbright";
 pub const ARG_RENDER_COLOR_PROFILE: &str = "--render-color-profile";
+pub const ARG_TERRAIN_PRESENTATION: &str = "--terrain-presentation";
 pub const ARG_SCREENSHOT_EYE: &str = "--screenshot-eye";
 pub const ARG_SCREENSHOT_TARGET: &str = "--screenshot-target";
 
@@ -71,6 +72,7 @@ pub const STARTUP_ARG_FLAGS: &[&str] = &[
     ARG_SECTION_OCCLUSION,
     ARG_FULLBRIGHT,
     ARG_RENDER_COLOR_PROFILE,
+    ARG_TERRAIN_PRESENTATION,
     ARG_SCREENSHOT_EYE,
     ARG_SCREENSHOT_TARGET,
 ];
@@ -97,6 +99,7 @@ pub const QUERY_LIGHT_STATUS_BATCH_SIZE: &str = "lightStatusBatchSize";
 pub const QUERY_SECTION_OCCLUSION: &str = "sectionOcclusion";
 pub const QUERY_FULLBRIGHT: &str = "fullbright";
 pub const QUERY_RENDER_COLOR_PROFILE: &str = "renderColorProfile";
+pub const QUERY_TERRAIN_PRESENTATION: &str = "terrainPresentation";
 pub const QUERY_SCREENSHOT_EYE: &str = "screenshotEye";
 pub const QUERY_SCREENSHOT_TARGET: &str = "screenshotTarget";
 
@@ -123,6 +126,7 @@ pub const STARTUP_QUERY_KEYS: &[&str] = &[
     QUERY_SECTION_OCCLUSION,
     QUERY_FULLBRIGHT,
     QUERY_RENDER_COLOR_PROFILE,
+    QUERY_TERRAIN_PRESENTATION,
     QUERY_SCREENSHOT_EYE,
     QUERY_SCREENSHOT_TARGET,
 ];
@@ -131,6 +135,22 @@ pub const DEFAULT_STARTUP_SEED: i64 = 12_345;
 pub const DEFAULT_STARTUP_CHUNK_X: i32 = 0;
 pub const DEFAULT_STARTUP_CHUNK_Z: i32 = 0;
 pub const DEFAULT_STARTUP_RENDER_DISTANCE: u32 = 5;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum TerrainPresentationMode {
+    #[default]
+    ExactOnly,
+    Composed,
+}
+
+impl TerrainPresentationMode {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ExactOnly => "exact-only",
+            Self::Composed => "composed",
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RenderDistanceLimits {
@@ -164,6 +184,7 @@ pub struct StartupSceneOptions {
     pub debug_auxiliary_player_script: bool,
     pub lighting_enabled: bool,
     pub light_status_batch_size: usize,
+    pub terrain_presentation: TerrainPresentationMode,
 }
 
 impl Default for StartupSceneOptions {
@@ -187,6 +208,7 @@ impl Default for StartupSceneOptions {
             debug_auxiliary_player_script: false,
             lighting_enabled: true,
             light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
+            terrain_presentation: TerrainPresentationMode::ExactOnly,
         }
     }
 }
@@ -481,6 +503,10 @@ impl StartupArgState {
                 self.render_options.color_profile =
                     parse_render_color_profile_arg(ARG_RENDER_COLOR_PROFILE, args.next())?;
             }
+            ARG_TERRAIN_PRESENTATION => {
+                self.scene.terrain_presentation =
+                    parse_terrain_presentation_mode(ARG_TERRAIN_PRESENTATION, args.next())?;
+            }
             ARG_SCREENSHOT_EYE => {
                 self.camera.eye = Some(parse_f32_vec3_arg(ARG_SCREENSHOT_EYE, args.next())?);
             }
@@ -592,6 +618,10 @@ impl StartupArgState {
             QUERY_RENDER_COLOR_PROFILE => {
                 self.render_options.color_profile =
                     parse_render_color_profile_arg(QUERY_RENDER_COLOR_PROFILE, value)?;
+            }
+            QUERY_TERRAIN_PRESENTATION => {
+                self.scene.terrain_presentation =
+                    parse_terrain_presentation_mode(QUERY_TERRAIN_PRESENTATION, value)?;
             }
             QUERY_SCREENSHOT_EYE => {
                 self.camera.eye = Some(parse_f32_vec3_arg(QUERY_SCREENSHOT_EYE, value)?);
@@ -718,6 +748,18 @@ pub fn parse_render_color_profile_arg(
     value
         .parse::<RenderColorProfile>()
         .map_err(|message| anyhow::anyhow!("{flag} {message}"))
+}
+
+pub fn parse_terrain_presentation_mode(
+    flag: &str,
+    value: Option<String>,
+) -> Result<TerrainPresentationMode> {
+    let value = value.with_context(|| format!("{flag} requires exact-only or composed"))?;
+    match value.trim().to_ascii_lowercase().as_str() {
+        "exact-only" | "exact" | "off" | "false" => Ok(TerrainPresentationMode::ExactOnly),
+        "composed" | "horizon" | "on" | "true" => Ok(TerrainPresentationMode::Composed),
+        _ => bail!("{flag} must be exact-only or composed, got `{value}`"),
+    }
 }
 
 pub fn parse_f32_vec3_arg(flag: &str, value: Option<String>) -> Result<[f32; 3]> {
@@ -870,6 +912,7 @@ mod tests {
                 debug_auxiliary_player_script: false,
                 lighting_enabled: true,
                 light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
+                terrain_presentation: TerrainPresentationMode::ExactOnly,
             }
         );
         assert_eq!(
@@ -1016,6 +1059,7 @@ mod tests {
                 debug_auxiliary_player_script: false,
                 lighting_enabled: true,
                 light_status_batch_size: 5,
+                terrain_presentation: TerrainPresentationMode::ExactOnly,
             }
         );
         assert_eq!(
@@ -1344,6 +1388,7 @@ mod tests {
                 debug_auxiliary_player_script: true,
                 lighting_enabled: false,
                 light_status_batch_size: 5,
+                terrain_presentation: TerrainPresentationMode::ExactOnly,
             }
         );
         assert!(!options.render_options.section_occlusion_culling);
@@ -1372,6 +1417,40 @@ mod tests {
             )
             .unwrap();
         assert!(!state.finish().scene.freeze_time);
+    }
+
+    #[test]
+    fn terrain_presentation_is_explicit_and_host_neutral() {
+        assert_eq!(
+            StartupSceneOptions::default().terrain_presentation,
+            TerrainPresentationMode::ExactOnly
+        );
+        assert_eq!(
+            parse(&[ARG_TERRAIN_PRESENTATION, "composed"])
+                .scene
+                .terrain_presentation,
+            TerrainPresentationMode::Composed
+        );
+        let mut query = StartupArgState::default();
+        assert!(
+            query
+                .parse_query_param(
+                    QUERY_TERRAIN_PRESENTATION,
+                    Some("horizon".to_owned()),
+                    RenderDistanceLimits::new(1, 16),
+                )
+                .unwrap()
+        );
+        assert_eq!(
+            query.finish().scene.terrain_presentation,
+            TerrainPresentationMode::Composed
+        );
+        assert_eq!(
+            parse_terrain_presentation_mode(ARG_TERRAIN_PRESENTATION, Some("sideways".to_owned()))
+                .unwrap_err()
+                .to_string(),
+            "--terrain-presentation must be exact-only or composed, got `sideways`"
+        );
     }
 
     #[test]

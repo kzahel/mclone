@@ -1847,6 +1847,7 @@ dependencies = [
  "mclone-render",
  "mclone-render-session",
  "mclone-server",
+ "mclone-terrain-view",
  "mclone-ui",
  "mclone-worldgen",
  "wgpu",

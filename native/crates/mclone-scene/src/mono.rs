@@ -336,6 +336,7 @@ impl McloneSceneHost {
         actor_figures: &ActorFigureSet,
         screen_effects: &ScreenEffectTextureAssets,
     ) -> Result<()> {
+        self.reset_terrain_view();
         // A retained slot owns resources created by the previous device. Until
         // multi-slot device migration is implemented, cancellation is the
         // explicit safe policy: drop its runtime/compiler/GPU ownership before
@@ -2218,6 +2219,16 @@ impl McloneSceneHost {
 
         let render_start = self.services.clock.now();
         let mut render_stats = self.active_world.render_stats;
+        let authoritative_eye = self.active_world.camera.snapshot().eye;
+        let terrain_view_enabled = self.prepare_terrain_view_for_frame(
+            device,
+            queue,
+            [
+                authoritative_eye.x,
+                authoritative_eye.y,
+                authoritative_eye.z,
+            ],
+        )?;
 
         // `runtime`, `mono_gui`, `sky`, `draw`, `actors`, and `screen_effects`
         // are disjoint fields, so these borrows coexist.
@@ -2355,33 +2366,65 @@ impl McloneSceneHost {
                 rendered
                     .map(|(summary, timing)| (summary, Some(timing), translucent_order_snapshot))
             } else {
-                render_full_frame_for_view_with_opaque_gate_timed(
-                    RenderFrameContext::new(device, queue, encoder, target),
-                    depth,
-                    &self.sky,
-                    &mut self.active_world.draw,
-                    opaque_world_gate,
-                    Some(
-                        self.active_world
-                            .actors
+                let rendered = if terrain_view_enabled {
+                    render_full_frame_for_view_with_terrain_backdrop_and_opaque_gate_timed(
+                        RenderFrameContext::new(device, queue, encoder, target),
+                        depth,
+                        &self.sky,
+                        &mut self.active_world.draw,
+                        self.terrain_view
                             .as_mut()
-                            .expect("active world owns actor draw state"),
-                    ),
-                    Some(&mut self.screen_effects),
-                    None,
-                    render_view,
-                    &actor_instances,
-                    underwater_overlay,
-                    sky_clear_color,
-                    time_of_day,
-                    sun_angle,
-                    render_options,
-                    world_gui,
-                    |_| GuiDrawList::new(),
-                    &self.services.clock,
-                    &mut render_stats,
-                )
-                .map(|(summary, timing)| {
+                            .expect("enabled scene terrain view remains initialized"),
+                        opaque_world_gate,
+                        Some(
+                            self.active_world
+                                .actors
+                                .as_mut()
+                                .expect("active world owns actor draw state"),
+                        ),
+                        Some(&mut self.screen_effects),
+                        None,
+                        render_view,
+                        &actor_instances,
+                        underwater_overlay,
+                        sky_clear_color,
+                        time_of_day,
+                        sun_angle,
+                        render_options,
+                        world_gui,
+                        |_| GuiDrawList::new(),
+                        &self.services.clock,
+                        &mut render_stats,
+                    )
+                } else {
+                    render_full_frame_for_view_with_opaque_gate_timed(
+                        RenderFrameContext::new(device, queue, encoder, target),
+                        depth,
+                        &self.sky,
+                        &mut self.active_world.draw,
+                        opaque_world_gate,
+                        Some(
+                            self.active_world
+                                .actors
+                                .as_mut()
+                                .expect("active world owns actor draw state"),
+                        ),
+                        Some(&mut self.screen_effects),
+                        None,
+                        render_view,
+                        &actor_instances,
+                        underwater_overlay,
+                        sky_clear_color,
+                        time_of_day,
+                        sun_angle,
+                        render_options,
+                        world_gui,
+                        |_| GuiDrawList::new(),
+                        &self.services.clock,
+                        &mut render_stats,
+                    )
+                };
+                rendered.map(|(summary, timing)| {
                     (
                         summary,
                         Some(timing),

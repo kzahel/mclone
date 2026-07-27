@@ -112,6 +112,22 @@ impl McloneSceneHostOptions {
     }
 
     pub fn validated(self) -> Result<Self> {
+        if self.startup.terrain_presentation
+            == mclone_app_runtime::startup_args::TerrainPresentationMode::Composed
+        {
+            if self.startup.world_generation_profile
+                != mclone_server::WorldGenerationProfile::McloneOverworldV1
+            {
+                bail!(
+                    "composed terrain presentation currently requires the mclone-overworld-v1 generation profile"
+                );
+            }
+            if self.startup.remote_addr.is_some() {
+                bail!(
+                    "composed terrain presentation requires a local authoritative source until remote generator identity is published"
+                );
+            }
+        }
         if !self.player_movement_cadence.is_valid() {
             bail!(
                 "player movement cadence must have a rate in 1..=1000 Hz and at least one catch-up step, got {}/{}",

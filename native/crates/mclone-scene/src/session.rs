@@ -497,6 +497,7 @@ impl McloneSceneHost {
             ),
             screen_effects: ScreenEffectsRenderer::new(device, queue, color_format, asset_source)
                 .context("initialize XR screen effects renderer")?,
+            terrain_view: None,
             underwater_effects: XrUnderwaterEffectStates::default(),
             last_underwater_update: None,
             head_comfort: XrHeadComfortState::default(),
@@ -698,6 +699,7 @@ impl McloneSceneHost {
             ),
             screen_effects: ScreenEffectsRenderer::new(device, queue, color_format, asset_source)
                 .context("initialize XR screen effects renderer")?,
+            terrain_view: None,
             underwater_effects: XrUnderwaterEffectStates::default(),
             last_underwater_update: None,
             head_comfort: XrHeadComfortState::default(),
@@ -979,6 +981,7 @@ impl McloneSceneHost {
                 render_options.color_profile,
             ),
             screen_effects,
+            terrain_view: None,
             underwater_effects: XrUnderwaterEffectStates::default(),
             last_underwater_update: None,
             head_comfort: XrHeadComfortState::default(),
@@ -5655,6 +5658,7 @@ impl McloneSceneHost {
         device: &wgpu::Device,
         queue: &wgpu::Queue,
     ) -> Result<()> {
+        self.reset_terrain_view();
         let cancelled_session_starts = self.active_session_start_operations.teardown().len();
         let cancelled_asset_preparations = self.external_asset_pack_operations.teardown().len();
         self.pending_external_asset_pack_selection = None;

@@ -240,6 +240,27 @@ pub struct TerrainCompositionFrame<'a> {
     pub translucent_order: &'a [TerrainTranslucentSubmission],
 }
 
+/// Scene-provided opaque terrain drawn after sky and before exact chunks.
+///
+/// The callback deliberately receives the ordinary frame's color/depth
+/// attachments and physical render view without depending on a concrete
+/// distant-terrain implementation. Once it returns, exact terrain loads both
+/// attachments so the two representations compare values in one depth space.
+pub struct TerrainBackdropRenderContext<'a> {
+    pub device: &'a wgpu::Device,
+    pub queue: &'a wgpu::Queue,
+    pub encoder: &'a mut wgpu::CommandEncoder,
+    pub color_view: &'a wgpu::TextureView,
+    pub depth_view: &'a wgpu::TextureView,
+    pub size: [u32; 2],
+    pub render_view: ChunkRenderView,
+    pub view_slot: PerViewSlot,
+}
+
+pub trait TerrainBackdropRenderer {
+    fn render(&mut self, context: TerrainBackdropRenderContext<'_>) -> Result<()>;
+}
+
 enum OpaqueWorldInsertion<'a> {
     Gate(&'a OpaqueWorldGateRenderer, OpaqueWorldGate),
     Composition(TerrainCompositionFrame<'a>),
@@ -1433,6 +1454,65 @@ where
     Ok((summary, timing))
 }
 
+/// Timed ordinary-scene variant with an opaque terrain backdrop inserted
+/// before the active exact terrain.
+#[allow(clippy::too_many_arguments)]
+pub fn render_full_frame_for_view_with_terrain_backdrop_and_opaque_gate_timed<BuildGuiDraw>(
+    frame: RenderFrameContext<'_>,
+    depth: &ChunkDepthTarget,
+    sky: &SkyRenderer,
+    draw: &mut TexturedSectionDrawResources,
+    terrain_backdrop: &mut dyn TerrainBackdropRenderer,
+    opaque_world_gate: Option<(&OpaqueWorldGateRenderer, OpaqueWorldGate)>,
+    actors: Option<&mut ActorDrawResources>,
+    screen_effects: Option<&mut ScreenEffectsRenderer>,
+    gui_renderer: Option<&mut GuiRenderer>,
+    render_view: ChunkRenderView,
+    actor_instances: &[ActorInstance],
+    underwater_overlay: Option<UnderwaterOverlay>,
+    sky_clear_color: wgpu::Color,
+    time_of_day: f32,
+    sun_angle: f32,
+    render_options: TexturedSectionRenderOptions,
+    gui: FullFrameGui,
+    build_gui_draw: BuildGuiDraw,
+    clock: &MonotonicClockHandle,
+    render_stats: &mut RenderStreamStats,
+) -> Result<(FullFrameRenderSummary, FullFrameRenderTiming)>
+where
+    BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+{
+    let mut timing = FullFrameRenderTiming::default();
+    let render_view = render_view_with_underwater_effect(render_view, underwater_overlay);
+    let summary = render_full_frame_for_view_inner_with_backdrop(
+        frame,
+        depth,
+        sky,
+        draw,
+        actors,
+        screen_effects,
+        gui_renderer,
+        render_view,
+        actor_instances,
+        underwater_overlay,
+        sky_clear_color,
+        time_of_day,
+        sun_angle,
+        render_options,
+        gui,
+        build_gui_draw,
+        SINGLE_VIEW_SLOT,
+        None,
+        None,
+        opaque_world_gate.map(|(renderer, gate)| OpaqueWorldInsertion::Gate(renderer, gate)),
+        Some(terrain_backdrop),
+        Some(clock),
+        Some(&mut timing),
+        render_stats,
+    )?;
+    Ok((summary, timing))
+}
+
 /// Scene-owned composition variant with one placed opaque/cutout terrain
 /// source inserted into the active world's shared color/depth frame.
 #[allow(clippy::too_many_arguments)]
@@ -1848,6 +1928,7 @@ where
         Some(prepared_records),
         None,
         opaque_world_gate.map(|(renderer, gate)| OpaqueWorldInsertion::Gate(renderer, gate)),
+        None,
         None,
         None,
         actor_preparation,
@@ -2326,6 +2407,64 @@ fn render_full_frame_for_view_inner<BuildGuiDraw>(
 where
     BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
 {
+    render_full_frame_for_view_inner_with_backdrop(
+        frame,
+        depth,
+        sky,
+        draw,
+        actors,
+        screen_effects,
+        gui_renderer,
+        render_view,
+        actor_instances,
+        underwater_overlay,
+        sky_clear_color,
+        time_of_day,
+        sun_angle,
+        render_options,
+        gui,
+        build_gui_draw,
+        view_slot,
+        prepared_records,
+        prepared_stereo_draw,
+        opaque_world_insertion,
+        None,
+        timing_clock,
+        timing,
+        render_stats,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+fn render_full_frame_for_view_inner_with_backdrop<BuildGuiDraw>(
+    frame: RenderFrameContext<'_>,
+    depth: &ChunkDepthTarget,
+    sky: &SkyRenderer,
+    draw: &mut TexturedSectionDrawResources,
+    actors: Option<&mut ActorDrawResources>,
+    screen_effects: Option<&mut ScreenEffectsRenderer>,
+    gui_renderer: Option<&mut GuiRenderer>,
+    render_view: ChunkRenderView,
+    actor_instances: &[ActorInstance],
+    underwater_overlay: Option<UnderwaterOverlay>,
+    sky_clear_color: wgpu::Color,
+    time_of_day: f32,
+    sun_angle: f32,
+    render_options: TexturedSectionRenderOptions,
+    gui: FullFrameGui,
+    build_gui_draw: BuildGuiDraw,
+    view_slot: PerViewSlot,
+    prepared_records: Option<&PreparedTexturedSectionRecords>,
+    prepared_stereo_draw: Option<&PreparedTexturedSectionStereoDraw>,
+    opaque_world_insertion: Option<OpaqueWorldInsertion<'_>>,
+    terrain_backdrop: Option<&mut dyn TerrainBackdropRenderer>,
+    timing_clock: Option<&MonotonicClockHandle>,
+    timing: Option<&mut FullFrameRenderTiming>,
+    render_stats: &mut RenderStreamStats,
+) -> Result<FullFrameRenderSummary>
+where
+    BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+{
     let actor_preparation =
         if reuses_stereo_actor_preparation(prepared_stereo_draw.is_some(), view_slot) {
             FrameActorPreparation::ReusePrepared
@@ -2353,6 +2492,7 @@ where
         prepared_records,
         prepared_stereo_draw,
         opaque_world_insertion,
+        terrain_backdrop,
         timing_clock,
         timing,
         actor_preparation,
@@ -2382,6 +2522,7 @@ fn render_full_frame_for_view_inner_with_actor_preparation<BuildGuiDraw>(
     prepared_records: Option<&PreparedTexturedSectionRecords>,
     prepared_stereo_draw: Option<&PreparedTexturedSectionStereoDraw>,
     mut opaque_world_insertion: Option<OpaqueWorldInsertion<'_>>,
+    mut terrain_backdrop: Option<&mut dyn TerrainBackdropRenderer>,
     timing_clock: Option<&MonotonicClockHandle>,
     mut timing: Option<&mut FullFrameRenderTiming>,
     actor_preparation: FrameActorPreparation,
@@ -2442,6 +2583,24 @@ where
             background_clear_color,
         )?
         .with_loaded_color();
+        let terrain_backdrop_drawn = terrain_backdrop.is_some();
+        if let Some(terrain_backdrop) = terrain_backdrop.as_deref_mut() {
+            terrain_backdrop.render(TerrainBackdropRenderContext {
+                device: frame.device,
+                queue: frame.queue,
+                encoder: frame.encoder,
+                color_view: frame.target.color_view,
+                depth_view: &depth.view,
+                size: frame.target.size,
+                render_view,
+                view_slot,
+            })?;
+        }
+        let render_target = if terrain_backdrop_drawn {
+            render_target.with_loaded_depth()
+        } else {
+            render_target
+        };
         let split_translucent_terrain =
             !actor_instances.is_empty() || opaque_world_insertion.is_some();
         let terrain_phase = if split_translucent_terrain {

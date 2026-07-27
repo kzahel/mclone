@@ -86,7 +86,17 @@ hosted Human Review 1 accepted it on 2026-07-27. PH-3 is complete, PH-4
 shared terrain-view engine extraction plus full-game scene adoption is active
 in Tactical
 [`269`](../tactical/269-shared-terrain-engine-scene-adoption.md), and
-Android/XR promotion remains later. PH-4 must make World Explorer and
+Android/XR promotion remains later. PH-4 has now landed its first ordinary
+mono-scene pixels: a source-qualified live adapter derives exact coverage from
+the active draw store's traversal-ready columns, and the shared frame pipeline
+draws the procedural backdrop after sky while exact terrain loads the same
+reversed-Z depth target. The opt-in is `terrainPresentation=composed` /
+`--terrain-presentation composed`, currently restricted to local
+`mclone-overworld-v1`; exact-only remains allocation-free by default.
+Native low-angle and elevated captures show the exact foreground silhouette
+correctly occluding the surrounding procedural terrain. Procedural vegetation,
+multi-flat/stereo reuse, browser executor plumbing, and hosted review remain
+open in Tactical 269. PH-4 must make World Explorer and
 `mclone-scene` peer hosts of one terrain representation/composition owner,
 not preserve a proof renderer and a game renderer that merely exchange the
 same coverage DTO. Canonical exact generation and live authoritative render

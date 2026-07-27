@@ -4845,6 +4845,27 @@ impl TexturedSectionDrawResources {
         }
     }
 
+    /// Authoritative column readiness currently used by the draw store.
+    ///
+    /// This is a source-adapter snapshot, not a request or loaded-chunk list:
+    /// every returned column has passed the same traversal/readiness gate that
+    /// exact rendering consumes. Section-oriented legacy callers return only
+    /// columns whose resident sections are all marked ready.
+    pub fn traversal_ready_columns_snapshot(&self) -> BTreeSet<ChunkPos> {
+        self.traversal_ready_columns.clone().unwrap_or_else(|| {
+            self.visibility_section_keys_by_chunk
+                .iter()
+                .filter_map(|(chunk, keys)| {
+                    (!keys.is_empty()
+                        && keys
+                            .iter()
+                            .all(|key| self.traversal_ready_sections.contains(key)))
+                    .then_some(*chunk)
+                })
+                .collect()
+        })
+    }
+
     pub fn traversal_ready_section_count(&self) -> usize {
         self.traversal_ready_sections.len()
     }

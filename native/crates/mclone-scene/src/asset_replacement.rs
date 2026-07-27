@@ -869,6 +869,9 @@ impl McloneSceneHost {
         let commit_finished_at = self.services.clock.now();
 
         self.mesh_assets = assets.mesh.clone();
+        if let Some(mut terrain_view) = self.terrain_view.take() {
+            terrain_view.shutdown();
+        }
         self.active_world.draw = draw;
         self.active_world.actors = Some(actors);
         self.screen_effects = screen_effects;

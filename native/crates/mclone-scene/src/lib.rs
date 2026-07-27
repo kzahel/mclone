@@ -54,6 +54,7 @@ use mclone_app_runtime::frame_render::{
     render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_timed_in_slot,
     render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_in_slot,
     render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_timed_in_slot,
+    render_full_frame_for_view_with_terrain_backdrop_and_opaque_gate_timed,
     render_view_with_underwater_effect,
 };
 use mclone_app_runtime::graphics_preferences::{
@@ -196,6 +197,7 @@ mod options;
 mod render_admission;
 mod session;
 mod teleport;
+mod terrain_view;
 mod timing;
 mod tracking;
 mod ui_panels;
@@ -242,6 +244,7 @@ pub use options::*;
 pub use render_admission::*;
 pub use session::*;
 pub(crate) use teleport::*;
+pub use terrain_view::SceneTerrainViewDiagnostics;
 pub use timing::*;
 pub use tracking::*;
 pub use ui_panels::*;
@@ -830,6 +833,7 @@ pub struct McloneSceneHost {
     status_overlay: StatusOverlay,
     sky: SkyRenderer,
     screen_effects: ScreenEffectsRenderer,
+    terrain_view: Option<terrain_view::SceneTerrainViewState>,
     underwater_effects: XrUnderwaterEffectStates,
     last_underwater_update: Option<MonotonicInstant>,
     head_comfort: XrHeadComfortState,
