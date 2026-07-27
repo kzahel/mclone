@@ -373,7 +373,7 @@ fn inspect_hierarchical_boundaries(
     })
 }
 
-fn run_candidate_invariance_suite<C>() -> Result<Vec<HarnessComparisonReceipt>, String>
+pub(crate) fn run_candidate_invariance_suite<C>() -> Result<Vec<HarnessComparisonReceipt>, String>
 where
     C: Default + StreamedPlanControl,
 {
