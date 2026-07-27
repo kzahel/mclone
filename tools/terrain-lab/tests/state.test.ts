@@ -8,6 +8,7 @@ import {
   footprintBlocks,
   proceduralSourceForPanes,
   parseTerrainLabState,
+  parseTerrainLabReviewCamera,
   switchTerrainLabProfile,
   terrainLabSearch,
   validSeed,
@@ -124,6 +125,10 @@ test("maps legacy source links and keeps at least one pane visible", () => {
   };
   assert.equal(toggleTerrainLabPane(onlyCanonical, "canonical"), onlyCanonical);
   assert.deepEqual(toggleTerrainLabPane(onlyCanonical, "gpu").panes, ["canonical", "gpu"]);
+  assert.deepEqual(
+    parseTerrainLabState("?panes=runtime,canonical,gpu").panes,
+    ["runtime", "canonical", "gpu"],
+  );
 });
 
 test("the vanilla profile replaces GPU with fast macro and excludes Mclone-only layers", () => {
@@ -141,6 +146,7 @@ test("the vanilla profile replaces GPU with fast macro and excludes Mclone-only 
   assert.equal(vanilla.contentStage, "surface");
   assert.equal(vanilla.layer, "terrain");
   assert.equal(toggleTerrainLabPane(vanilla, "gpu"), vanilla);
+  assert.equal(toggleTerrainLabPane(vanilla, "runtime"), vanilla);
   assert.deepEqual(
     toggleTerrainLabPane(vanilla, "cpu").panes,
     ["canonical", "macro"],
@@ -182,6 +188,22 @@ test("keeps camera state outside URL-addressed terrain state", () => {
     projection: "orthographic",
     layer: "terrain",
   });
+});
+
+test("accepts a static review camera without adding it to terrain state", () => {
+  assert.deepEqual(
+    parseTerrainLabReviewCamera("?reviewYaw=3.1415927&reviewPitch=0.12"),
+    { yaw: 3.1415927, pitch: 0.12 },
+  );
+  assert.equal(
+    parseTerrainLabReviewCamera("?reviewYaw=0&reviewPitch=2"),
+    undefined,
+  );
+  assert.match(
+    terrainLabSearch(DEFAULT_TERRAIN_LAB_STATE, { yaw: 1, pitch: 0.5 }),
+    /reviewYaw=1&reviewPitch=0.5/u,
+  );
+  assert.equal("reviewYaw" in DEFAULT_TERRAIN_LAB_STATE, false);
 });
 
 test("defaults to orthographic and validates projection links", () => {

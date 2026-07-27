@@ -18,7 +18,7 @@ export type TerrainLabVisualProfile =
 export type TerrainLabTexturePresentation = "textured" | "flat-colors";
 export type TerrainLabComparisonVisualProfile = "off" | TerrainLabVisualProfile;
 export type TerrainLabSource = "gpu" | "reference" | "macro" | "split";
-export type TerrainLabPane = "canonical" | "cpu" | "macro" | "gpu";
+export type TerrainLabPane = "runtime" | "canonical" | "cpu" | "macro" | "gpu";
 export type CanonicalTerrainStage = "surface" | "final";
 export type TerrainLabView = "map" | "3d";
 export type TerrainLabProjection = "orthographic" | "perspective";
@@ -103,6 +103,18 @@ export const DEFAULT_TERRAIN_LAB_CAMERA: TerrainLabCamera = {
   pitch: 0.48,
 };
 
+export function parseTerrainLabReviewCamera(
+  search: string,
+): TerrainLabCamera | undefined {
+  const params = new URLSearchParams(search);
+  const yaw = validFiniteNumber(params.get("reviewYaw"));
+  const pitch = validFiniteNumber(params.get("reviewPitch"));
+  if (yaw === undefined || pitch === undefined || pitch < 0.12 || pitch > 1.25) {
+    return undefined;
+  }
+  return { yaw, pitch };
+}
+
 const I64_MIN = -(1n << 63n);
 const I64_MAX = (1n << 63n) - 1n;
 const I32_MIN = -2_147_483_648;
@@ -123,7 +135,7 @@ const COMPARISON_VISUAL_PROFILES =
   new Set<TerrainLabComparisonVisualProfile>(["off", ...VISUAL_PROFILES]);
 const SOURCES = new Set<TerrainLabSource>(["gpu", "reference", "macro", "split"]);
 const SURFACE_QUALITIES = new Set<TerrainLabSurfaceQuality>(["basic", "inferred"]);
-const PANES = new Set<TerrainLabPane>(["canonical", "cpu", "macro", "gpu"]);
+const PANES = new Set<TerrainLabPane>(["runtime", "canonical", "cpu", "macro", "gpu"]);
 const CANONICAL_STAGES = new Set<CanonicalTerrainStage>(["surface", "final"]);
 const VIEWS = new Set<TerrainLabView>(["map", "3d"]);
 const PROJECTIONS = new Set<TerrainLabProjection>(["orthographic", "perspective"]);
@@ -198,7 +210,10 @@ export function parseTerrainLabState(
   });
 }
 
-export function terrainLabSearch(state: TerrainLabState): string {
+export function terrainLabSearch(
+  state: TerrainLabState,
+  reviewCamera?: TerrainLabCamera,
+): string {
   const params = new URLSearchParams();
   params.set("profile", state.profile);
   params.set("visual", state.visualProfile);
@@ -220,6 +235,10 @@ export function terrainLabSearch(state: TerrainLabState): string {
   params.set("view", state.view);
   params.set("projection", state.projection);
   params.set("layer", state.layer);
+  if (reviewCamera) {
+    params.set("reviewYaw", String(reviewCamera.yaw));
+    params.set("reviewPitch", String(reviewCamera.pitch));
+  }
   return `?${params.toString()}`;
 }
 
@@ -252,6 +271,7 @@ export function toggleTerrainLabPane(
 ): TerrainLabState {
   if (
     (state.profile === "overworld" && pane === "gpu")
+    || (state.profile === "overworld" && pane === "runtime")
     || (state.profile !== "overworld" && pane === "macro")
   ) {
     return state;
@@ -276,7 +296,7 @@ export function switchTerrainLabProfile(
   profile: TerrainLabProfile,
 ): TerrainLabState {
   const panes = state.panes.map((pane) => {
-    if (profile === "overworld" && pane === "gpu") {
+    if (profile === "overworld" && (pane === "gpu" || pane === "runtime")) {
       return "macro";
     }
     if (profile !== "overworld" && pane === "macro") {
@@ -295,7 +315,9 @@ export function normalizeTerrainLabProfileState(
   state: TerrainLabState,
 ): TerrainLabState {
   const panes = state.panes.filter((pane) =>
-    state.profile === "overworld" ? pane !== "gpu" : pane !== "macro"
+    state.profile === "overworld"
+      ? pane !== "gpu" && pane !== "runtime"
+      : pane !== "macro"
   );
   if (panes.length === 0) {
     panes.push(state.profile === "overworld" ? "macro" : "gpu");
@@ -410,8 +432,16 @@ function validBoolean(value: string | null): boolean | undefined {
   return undefined;
 }
 
+function validFiniteNumber(value: string | null): number | undefined {
+  if (value === null || value.trim() === "") {
+    return undefined;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 function paneOrder(pane: TerrainLabPane): number {
-  return ["canonical", "cpu", "macro", "gpu"].indexOf(pane);
+  return ["runtime", "canonical", "cpu", "macro", "gpu"].indexOf(pane);
 }
 
 function validMember<T extends string>(value: string | null, values: Set<T>): T | undefined {

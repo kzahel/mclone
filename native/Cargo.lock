@@ -1898,6 +1898,7 @@ dependencies = [
  "mclone-core",
  "mclone-mesh",
  "mclone-render",
+ "mclone-render-color",
  "mclone-terrain-view",
  "mclone-view-control",
  "mclone-worldgen",

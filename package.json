@@ -271,6 +271,7 @@
     "terrain-lab:web:build": "pnpm --dir ./tools/terrain-lab web:build",
     "terrain-lab:web:test": "pnpm --dir ./tools/terrain-lab web:test",
     "terrain-lab:web:smoke": "pnpm --dir ./tools/terrain-lab web:smoke",
+    "terrain-lab:web:smoke-runtime": "pnpm --dir ./tools/terrain-lab web:smoke:runtime",
     "texture-lab:install": "pnpm --dir ./tools/texture-lab install",
     "texture-lab:typecheck": "pnpm --dir ./tools/texture-lab typecheck",
     "texture-lab:export": "pnpm --dir ./tools/texture-lab export",

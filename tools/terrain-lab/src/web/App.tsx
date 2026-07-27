@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import {
   DEFAULT_TERRAIN_LAB_CAMERA,
@@ -7,6 +7,7 @@ import {
   TERRAIN_LAB_SPACINGS,
   footprintBlocks,
   parseTerrainLabState,
+  parseTerrainLabReviewCamera,
   proceduralSourceForPanes,
   switchTerrainLabProfile,
   terrainLabSearch,
@@ -31,6 +32,10 @@ import {
   type CanonicalTerrainReport,
 } from "./CanonicalTerrainCanvas";
 import {
+  RuntimeCompositionCanvas,
+  type RuntimeCompositionReport,
+} from "./RuntimeCompositionCanvas";
+import {
   panTerrainLabByFraction,
   zoomTerrainLabByFactor,
 } from "./use-world-view-navigation";
@@ -50,6 +55,11 @@ type LabStatus = "loading" | "ready" | "rendering" | "error";
 type BenchmarkProfile = "interactive" | "stress";
 
 const PANE_OPTIONS: Array<{ value: TerrainLabPane; label: string; note: string }> = [
+  {
+    value: "runtime",
+    label: "Runtime composed",
+    note: "Production exact terrain and procedural horizon on one depth target",
+  },
   { value: "canonical", label: "Real terrain", note: "Exact final chunks with textures" },
   { value: "cpu", label: "CPU LOD", note: "Production CPU preview evaluator" },
   {
@@ -108,6 +118,9 @@ const VISUAL_PROFILE_OPTIONS: Array<{
 ];
 
 export function App(): React.JSX.Element {
+  const reviewCameraRef = useRef(
+    parseTerrainLabReviewCamera(window.location.search),
+  );
   const [state, setState] = useState<TerrainLabState>(() =>
     parseTerrainLabState(window.location.search)
   );
@@ -117,12 +130,15 @@ export function App(): React.JSX.Element {
   const [comparison, setComparison] = useState<TerrainLabComparisonReport>();
   const [pointReceipt, setPointReceipt] = useState<TerrainLabPointReceipt>();
   const [error, setError] = useState<string>();
-  const [camera, setCamera] = useState<TerrainLabCamera>(DEFAULT_TERRAIN_LAB_CAMERA);
+  const [camera, setCamera] = useState<TerrainLabCamera>(
+    () => reviewCameraRef.current ?? DEFAULT_TERRAIN_LAB_CAMERA,
+  );
   const [cacheEnabled, setCacheEnabled] = useState(true);
   const [cacheEpoch, setCacheEpoch] = useState(0);
   const [canonicalCacheEnabled, setCanonicalCacheEnabled] = useState(true);
   const [canonicalCacheEpoch, setCanonicalCacheEpoch] = useState(0);
   const [canonicalReport, setCanonicalReport] = useState<CanonicalTerrainReport>();
+  const [runtimeReport, setRuntimeReport] = useState<RuntimeCompositionReport>();
   const [comparisonCanonicalReport, setComparisonCanonicalReport] =
     useState<CanonicalTerrainReport>();
   const [visualAssetsReady, setVisualAssetsReady] = useState(false);
@@ -152,7 +168,7 @@ export function App(): React.JSX.Element {
   }, []);
 
   useEffect(() => {
-    const search = terrainLabSearch(state);
+    const search = terrainLabSearch(state, reviewCameraRef.current);
     if (window.location.search !== search) {
       window.history.replaceState(null, "", `${window.location.pathname}${search}`);
     }
@@ -164,7 +180,10 @@ export function App(): React.JSX.Element {
 
   useEffect(() => {
     setCanonicalReport(undefined);
+    setRuntimeReport(undefined);
   }, [
+    state.canonicalRadius,
+    state.seed,
     state.texturePresentation,
     state.visualProfile,
   ]);
@@ -197,6 +216,7 @@ export function App(): React.JSX.Element {
 
   const footprint = footprintBlocks(state);
   const chunkWidth = footprint / 16;
+  const runtimeVisible = state.panes.includes("runtime");
   const canonicalVisible = state.panes.includes("canonical");
   const cpuVisible = state.panes.includes("cpu");
   const macroVisible = state.panes.includes("macro");
@@ -236,6 +256,7 @@ export function App(): React.JSX.Element {
       ? "loading"
       : (!proceduralVisible || primaryVisualUnavailable || status === "ready")
       && (!canonicalVisible || primaryVisualUnavailable || canonicalReport?.complete)
+      && (!runtimeVisible || primaryVisualUnavailable || runtimeReport?.targetReady)
       && (!visualComparisonVisible
         || comparisonVisualUnavailable
         || comparisonCanonicalReport?.complete)
@@ -276,6 +297,8 @@ export function App(): React.JSX.Element {
       data-surface-quality={renderReport?.surfaceQuality ?? ""}
       data-visual-profile={state.visualProfile}
       data-texture-presentation={primaryTexturePresentation}
+      data-runtime-target-ready={runtimeReport?.targetReady ? "true" : "false"}
+      data-runtime-exact-complete={runtimeReport?.exactComplete ? "true" : "false"}
       data-compare-visual-profile={state.compareVisualProfile}
       data-reference-textures-available={
         minecraftReferenceAvailable === undefined
@@ -517,6 +540,32 @@ export function App(): React.JSX.Element {
             }`}
             data-testid="pane-workspace"
           >
+            {runtimeVisible ? (
+              <div className="paneFrame runtimePaneFrame">
+                {!visualAssetsReady ? (
+                  <VisualProfileUnavailable
+                    profile={state.visualProfile}
+                    reason="Loading material sources…"
+                  />
+                ) : primaryVisualUnavailable ? (
+                  <VisualProfileUnavailable
+                    profile={state.visualProfile}
+                    reason="This profile requires a local Minecraft 1.17.1 reference pack."
+                  />
+                ) : (
+                  <RuntimeCompositionCanvas
+                    state={state}
+                    visualProfile={state.visualProfile}
+                    texturePresentation={primaryTexturePresentation}
+                    camera={camera}
+                    onStateChange={updateState}
+                    onCameraChange={setCamera}
+                    onReport={setRuntimeReport}
+                    onError={setError}
+                  />
+                )}
+              </div>
+            ) : null}
             {canonicalVisible ? (
               <div className="paneFrame canonicalPaneFrame">
                 <div
@@ -1202,7 +1251,9 @@ function PaneToggles({
       <legend>Visible panes</legend>
       <div className="segmentedControl">
         {PANE_OPTIONS.filter((option) =>
-          profile === "overworld" ? option.value !== "gpu" : option.value !== "macro"
+          profile === "overworld"
+            ? option.value !== "gpu" && option.value !== "runtime"
+            : option.value !== "macro"
         ).map((option) => {
           const visible = panes.includes(option.value);
           const label = profile === "overworld" && option.value === "cpu"

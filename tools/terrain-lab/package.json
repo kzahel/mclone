@@ -10,6 +10,7 @@
     "web:dev": "pnpm wasm:build && vite --config src/web/vite.config.ts",
     "web:build": "pnpm wasm:build && vite build --config src/web/vite.config.ts",
     "web:preview": "vite preview --config src/web/vite.config.ts",
+    "web:smoke:runtime": "node scripts/runtime-composition-smoke.mjs",
     "web:test": "playwright test -c playwright.config.ts",
     "web:smoke": "node scripts/browser-smoke.mjs"
   },

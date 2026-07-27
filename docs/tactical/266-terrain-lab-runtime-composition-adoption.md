@@ -2,7 +2,8 @@
 
 ## Status
 
-Active; Slice 0 is complete. This is the bounded PH-3 child of
+Active; Slices 0-2 are complete and Slice 3 is at the hosted human-review
+gate. This is the bounded PH-3 child of
 [Tactical 261](261-procedural-horizon-product-integration-roadmap.md),
 following the accepted runtime composition and focus-anchor work recorded by
 [Tactical 262](262-world-explorer-exact-procedural-composition.md).
@@ -75,12 +76,30 @@ Completed in the first implementation commit:
 - Feed both representations the same source identity, focus anchor, camera,
   projection, viewport, and texture/color presentation.
 
+Completed:
+
+- `TerrainRuntimeCompositionLab` owns one browser surface, shared runtime
+  session, shared exact renderer, and shared exact/vegetation executors.
+- It renders both sources against the exact renderer's reversed-Z target,
+  applying painted-coverage discard and whole-tree ownership before drawing.
+- The main host and exact Worker load the same selected Lab visual profile.
+
 ### Slice 2: optional Lab consumer
 
 - Add the `runtime` pane to URL state and pane controls.
 - Add a React canvas adapter that supplies the existing shared navigation state
   and reports composition readiness/diagnostics.
 - Preserve current pane defaults and existing comparison behavior.
+
+Completed:
+
+- `panes=runtime` selects **Runtime composed**; the four prior pane names remain
+  valid and the default remains `canonical,cpu,gpu`.
+- The pane uses the existing shared Lab navigation hook and publishes
+  readiness, exact coverage, and tree-ownership facts without reconstructing
+  policy in TypeScript.
+- Static `reviewYaw` and `reviewPitch` parameters make a deterministic review
+  link reloadable while ordinary camera motion remains outside terrain state.
 
 ### Slice 3: browser evidence and checkpoint
 
@@ -89,6 +108,22 @@ Completed in the first implementation commit:
   again after Worker completion.
 - Deploy the hosted Terrain Lab and provide a fixed query URL showing the
   runtime pane for subjective review.
+
+Local objective evidence passes:
+
+- the 73-test shared terrain-view suite;
+- Terrain Lab's five browser-ownership locks and 16 URL/state tests;
+- Terrain Lab Wasm compilation, TypeScript checking, and production build;
+- the headed WebGPU host capability probe; and
+- desktop runtime smoke at seed `12345`, focus `(0, 0)`,
+  `blocksAcross=96`, yaw `3.1415927`, pitch `0.12`, and radius `2`, including
+  `25/25` exact chunks, non-empty exact/proxy tree ownership, all `160` horizon
+  slots, and a completed synchronized pan/rebuild.
+
+The local headed Chrome screenshot remains the already-documented invalid
+one-color white wgpu-canvas capture seen by World Explorer on this host. It is
+not counted as pixel evidence. The hosted interactive review below remains the
+subjective pixel gate.
 
 ## Human review checkpoint
 

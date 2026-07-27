@@ -182,6 +182,21 @@ impl TerrainRuntimeSession {
         self.view_state
     }
 
+    pub fn set_view_state(&mut self, state: WorldViewState) -> bool {
+        let state = self.view_reducer.normalize(state);
+        let previous = self.view_state;
+        if state == previous {
+            return false;
+        }
+        self.view_state = state;
+        if residency_plan_key(state, self.config.clipmap)
+            != residency_plan_key(previous, self.config.clipmap)
+        {
+            self.replan();
+        }
+        true
+    }
+
     pub const fn revision(&self) -> u64 {
         self.revision
     }

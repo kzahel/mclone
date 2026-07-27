@@ -19,6 +19,10 @@ mod canonical_worker_web;
 mod navigation;
 #[cfg(target_arch = "wasm32")]
 mod navigation_web;
+#[cfg(target_arch = "wasm32")]
+mod runtime_exact_worker_web;
+#[cfg(target_arch = "wasm32")]
+mod runtime_web;
 mod visual_assets;
 #[cfg(target_arch = "wasm32")]
 mod web;
@@ -29,6 +33,14 @@ pub use canonical_web::{CanonicalTerrainLab, mclone_terrain_lab_create_canonical
 pub use canonical_worker_web::{CanonicalTerrainWorkerActor, CanonicalTerrainWorkerDispatch};
 #[cfg(target_arch = "wasm32")]
 pub use navigation_web::{TerrainLabNavigationSession, TerrainLabNavigationUpdate};
+#[cfg(target_arch = "wasm32")]
+pub use runtime_exact_worker_web::{
+    TerrainRuntimeExactWorkerActor, TerrainRuntimeExactWorkerDispatch,
+};
+#[cfg(target_arch = "wasm32")]
+pub use runtime_web::{
+    TerrainRuntimeCompositionLab, mclone_terrain_lab_create_runtime_composition,
+};
 #[cfg(target_arch = "wasm32")]
 pub use web::{TerrainLab, mclone_terrain_lab_create};
 

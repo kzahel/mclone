@@ -11,6 +11,10 @@ global terrain profile selects the terrain family for every visible pane:
 
 The profiles cannot be mixed in one workspace. Within the selected profile:
 
+- `Runtime composed` presents exact Mclone terrain and the procedural horizon
+  on one shared camera and reversed-Z depth target. It uses the production
+  asynchronous exact and vegetation services and is intentionally unavailable
+  for the vanilla profile.
 - `Real terrain` compiles exact first-party chunks through the production
   generator and renders their blocks, biomes, fluids, and final features with
   the production first-party texture atlas and cheap preview lighting.
@@ -65,7 +69,8 @@ The URL owns the review state:
 - `blocks`: continuous viewport width from 1 through 131,072 blocks
 - `detail`: `auto` or a power-of-two sample spacing from 1 through 1,024
   blocks
-- `panes`: comma-separated `canonical`, `cpu`, and/or `gpu`
+- `panes`: comma-separated `runtime`, `canonical`, `cpu`, `macro`, and/or
+  `gpu`; `runtime` is Mclone-only
 - `canonical`: `surface` or `final`
 - `radius`: one of `0`, `1`, `2`, `3`, `4`, `5`, `7`, `10`, or `15`,
   corresponding to centered footprints from `1x1` through `31x31 = 961`
@@ -76,6 +81,8 @@ The URL owns the review state:
 - `view`: `3d` or `map`
 - `projection`: `orthographic` (the default) or `perspective`; map view is
   always orthographic
+- `reviewYaw` and `reviewPitch`: optional static initial/reload camera for
+  fixed review links; ordinary orbit motion remains outside terrain URL state
 - `stage`: `base`, `hydrology`, `structured`, `surface`, or `cover`
 - `layer`: `terrain`, `height`, `error`, `continentalness`, `climate`,
   `rivers`, `wetlands`, `landforms`, `biomes`, `surface`, or `streams`

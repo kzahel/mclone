@@ -12,6 +12,13 @@ const CANONICAL_COORDINATOR: &str = include_str!("../src/canonical_coordinator_w
 const CANONICAL_MAILBOX: &str = include_str!("../src/canonical_mailbox_web.rs");
 const TERRAIN_WEB: &str = include_str!("../src/web.rs");
 const VITE_CONFIG: &str = include_str!("../../../../tools/terrain-lab/src/web/vite.config.ts");
+const RUNTIME_CANVAS: &str =
+    include_str!("../../../../tools/terrain-lab/src/web/RuntimeCompositionCanvas.tsx");
+const RUNTIME_EXACT_WORKER: &str =
+    include_str!("../../../../tools/terrain-lab/src/web/runtime-exact-worker.ts");
+const RUNTIME_VEGETATION_WORKER: &str =
+    include_str!("../../../../tools/terrain-lab/src/web/runtime-vegetation-worker.ts");
+const RUNTIME_WEB: &str = include_str!("../src/runtime_web.rs");
 
 #[test]
 fn browser_typescript_has_no_exact_worker_policy() {
@@ -145,4 +152,44 @@ fn local_terrain_lab_is_cross_origin_isolated() {
     }
     assert!(VITE_CONFIG.contains("server:"));
     assert!(VITE_CONFIG.contains("preview:"));
+}
+
+#[test]
+fn runtime_composition_consumes_shared_rust_owners() {
+    for required in [
+        "TerrainRuntimeSession",
+        "TerrainRuntimeExactRenderer",
+        "BrowserCanonicalExactExecutor",
+        "BrowserTerrainVegetationExecutor",
+        "TerrainHorizonRenderTarget",
+        "TerrainExactCoverageMode::DiscardPainted",
+        "TerrainRuntimeExactAnchor::Focus",
+    ] {
+        assert!(
+            RUNTIME_WEB.contains(required),
+            "runtime Terrain Lab host lost shared owner {required:?}"
+        );
+    }
+    for forbidden in [
+        "CanonicalMeshSession",
+        "TerrainVegetationCompilerSession",
+        "mclone_tree_ownership_snapshot",
+        "ExactPaintedCoverageSnapshot::new",
+    ] {
+        assert!(
+            !RUNTIME_WEB.contains(forbidden),
+            "runtime Terrain Lab host regained engine policy through {forbidden:?}"
+        );
+    }
+    assert_eq!(RUNTIME_CANVAS.matches("new Worker(").count(), 2);
+    assert!(RUNTIME_EXACT_WORKER.contains("actor.handleMessage(frame)"));
+    assert!(RUNTIME_VEGETATION_WORKER.contains("actor.handleMessage(frame)"));
+    for worker in [RUNTIME_EXACT_WORKER, RUNTIME_VEGETATION_WORKER] {
+        for forbidden in ["chunkX", "ownership", "sampleSpacing", "physicalSlot"] {
+            assert!(
+                !worker.contains(forbidden),
+                "runtime Worker shell gained domain policy through {forbidden:?}"
+            );
+        }
+    }
 }
