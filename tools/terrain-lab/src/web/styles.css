@@ -678,6 +678,11 @@ h1 {
   border-color: rgba(183, 220, 108, 0.36);
 }
 
+.canvasBadge.warning {
+  color: #ffd18a;
+  border-color: rgba(255, 179, 77, 0.44);
+}
+
 .splitLabels {
   top: 58px;
   left: 0;

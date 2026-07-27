@@ -21,6 +21,7 @@ import {
   type TerrainLabPane,
   type TerrainLabProfile,
   type TerrainLabProjection,
+  type StreamedPlanAtlasTopology,
   type TerrainLabComparisonVisualProfile,
   type TerrainLabState,
   type TerrainLabTexturePresentation,
@@ -39,6 +40,10 @@ import {
   LandformPlanCanvas,
   type LandformPlanReport,
 } from "./LandformPlanCanvas";
+import {
+  StreamedPlanAtlasCanvas,
+  type StreamedPlanAtlasReport,
+} from "./StreamedPlanAtlasCanvas";
 import type {
   LandformPlanPointReceipt,
 } from "./landform-plan-worker-protocol";
@@ -72,6 +77,11 @@ const PANE_OPTIONS: Array<{ value: TerrainLabPane; label: string; note: string }
     value: "plan",
     label: "Landform plan",
     note: "Research basins, divides, drainage, sinks, and quiet space",
+  },
+  {
+    value: "atlas",
+    label: "Planner atlas",
+    note: "Pannable comparison of fallback, hierarchy, and bounded graphs",
   },
   { value: "cpu", label: "CPU LOD", note: "Production CPU preview evaluator" },
   {
@@ -154,6 +164,8 @@ export function App(): React.JSX.Element {
   const [planReport, setPlanReport] = useState<LandformPlanReport>();
   const [planPointReceipt, setPlanPointReceipt] =
     useState<LandformPlanPointReceipt>();
+  const [atlasReport, setAtlasReport] = useState<StreamedPlanAtlasReport>();
+  const [atlasCacheEpoch, setAtlasCacheEpoch] = useState(0);
   const [comparisonCanonicalReport, setComparisonCanonicalReport] =
     useState<CanonicalTerrainReport>();
   const [visualAssetsReady, setVisualAssetsReady] = useState(false);
@@ -234,13 +246,14 @@ export function App(): React.JSX.Element {
   const runtimeVisible = state.panes.includes("runtime");
   const canonicalVisible = state.panes.includes("canonical");
   const planVisible = state.panes.includes("plan");
+  const atlasVisible = state.panes.includes("atlas");
   const cpuVisible = state.panes.includes("cpu");
   const macroVisible = state.panes.includes("macro");
   const gpuVisible = state.panes.includes("gpu");
   const proceduralVisible = cpuVisible || macroVisible || gpuVisible;
   const terrainPaneVisible =
     runtimeVisible || canonicalVisible || proceduralVisible;
-  const planOnly = planVisible && !terrainPaneVisible;
+  const diagnosticOnly = (planVisible || atlasVisible) && !terrainPaneVisible;
   const proceduralSource = proceduralSourceForPanes(state.panes);
   const primaryVisualUnavailable = visualAssetsReady
     && visualProfileUsesMinecraftReference(state.visualProfile)
@@ -277,6 +290,7 @@ export function App(): React.JSX.Element {
       && (!canonicalVisible || primaryVisualUnavailable || canonicalReport?.complete)
       && (!runtimeVisible || primaryVisualUnavailable || runtimeReport?.targetReady)
       && (!planVisible || planReport)
+      && (!atlasVisible || atlasReport)
       && (!visualComparisonVisible
         || comparisonVisualUnavailable
         || comparisonCanonicalReport?.complete)
@@ -323,6 +337,17 @@ export function App(): React.JSX.Element {
       data-plan-build-ms={planReport?.buildMs ?? ""}
       data-plan-transfer-bytes={planReport?.transferBytes ?? 0}
       data-plan-checksum={planReport?.checksum ?? ""}
+      data-atlas-ready={atlasReport ? "true" : "false"}
+      data-atlas-topology={atlasReport?.topology ?? ""}
+      data-atlas-query-ms={atlasReport?.queryMs ?? ""}
+      data-atlas-clipped={atlasReport?.coverageClipped ? "true" : "false"}
+      data-atlas-witness={atlasReport?.phaseTwoWitnessSha256 ?? ""}
+      data-atlas-fallback-checksum={atlasReport?.fallback.semanticSha256 ?? ""}
+      data-atlas-hierarchy-checksum={atlasReport?.hierarchy.semanticSha256 ?? ""}
+      data-atlas-graph-checksum={atlasReport?.featureGraph.semanticSha256 ?? ""}
+      data-atlas-fallback-hits={atlasReport?.fallback.cacheHits ?? 0}
+      data-atlas-hierarchy-hits={atlasReport?.hierarchy.cacheHits ?? 0}
+      data-atlas-graph-hits={atlasReport?.featureGraph.cacheHits ?? 0}
       data-compare-visual-profile={state.compareVisualProfile}
       data-reference-textures-available={
         minecraftReferenceAvailable === undefined
@@ -467,13 +492,17 @@ export function App(): React.JSX.Element {
             />
           </div>
           <div
-            className={`mapToolbar${planOnly ? " planOnlyToolbar" : ""}`}
+            className={`mapToolbar${diagnosticOnly ? " planOnlyToolbar" : ""}`}
             data-testid="viewport-controls"
           >
-            {planOnly ? (
+            {diagnosticOnly ? (
               <div className="planToolbarNote">
-                <span>Plan projection</span>
-                <strong>2D structural map · fixed 32-block cells</strong>
+                <span>Research projection</span>
+                <strong>
+                  {atlasVisible
+                    ? "2D streamed structural atlas · three synchronized candidates"
+                    : "2D structural map · fixed 32-block cells"}
+                </strong>
                 <small>
                   Terrain view, projection, and surface controls resume when a
                   terrain pane is visible.
@@ -575,6 +604,7 @@ export function App(): React.JSX.Element {
           <div
             className={`paneWorkspace logicalPanes${state.panes.length}${
               !planVisible
+              && !atlasVisible
               && canonicalVisible
               && cpuVisible
               && (macroVisible || gpuVisible)
@@ -696,6 +726,19 @@ export function App(): React.JSX.Element {
                 />
               </div>
             ) : null}
+            {atlasVisible ? (
+              <div className="paneFrame streamedPlanAtlasPaneFrame">
+                <StreamedPlanAtlasCanvas
+                  state={state}
+                  camera={camera}
+                  cacheEpoch={atlasCacheEpoch}
+                  onStateChange={updateState}
+                  onCameraChange={setCamera}
+                  onReport={setAtlasReport}
+                  onError={setError}
+                />
+              </div>
+            ) : null}
             {proceduralVisible ? (
               <div
                 className={`paneFrame proceduralPaneFrame${
@@ -752,7 +795,9 @@ export function App(): React.JSX.Element {
             <div>
               <span className="footerLabel">resolution</span>
               <strong>
-                {planVisible && !proceduralVisible
+                {atlasVisible && !terrainPaneVisible
+                  ? "1:1024 plan regions"
+                  : planVisible && !proceduralVisible
                   ? "1:32 plan cells"
                   : (
                     <>
@@ -913,6 +958,93 @@ export function App(): React.JSX.Element {
               local extracted 1.17.1 pack. Comparison adds a synchronized exact
               pane; it does not change terrain generation.
             </p>
+              </>
+            ) : null}
+            {atlasVisible ? (
+              <>
+                <SegmentedControl<StreamedPlanAtlasTopology>
+                  label="Atlas topology"
+                  value={state.atlasTopology}
+                  options={[
+                    {
+                      value: "plane",
+                      label: "Plane",
+                      note: "Unbounded canonical plan regions",
+                    },
+                    {
+                      value: "cylinder-x",
+                      label: "Cylinder X",
+                      note: "6.144 km periodic X, unbounded Z",
+                    },
+                    {
+                      value: "torus",
+                      label: "Torus",
+                      note: "6.144 km periodic X and Z",
+                    },
+                  ]}
+                  onChange={(atlasTopology) => patchState({ atlasTopology })}
+                />
+                <div className="visibilityToggles atlasVisibilityToggles">
+                  <ToggleButton
+                    label="Regions"
+                    pressed={state.atlasRegionsVisible}
+                    onChange={(atlasRegionsVisible) =>
+                      patchState({ atlasRegionsVisible })}
+                  />
+                  <ToggleButton
+                    label="Samples"
+                    pressed={state.atlasFallbackSamplesVisible}
+                    onChange={(atlasFallbackSamplesVisible) =>
+                      patchState({ atlasFallbackSamplesVisible })}
+                  />
+                  <ToggleButton
+                    label="Features"
+                    pressed={state.atlasFallbackFeaturesVisible}
+                    onChange={(atlasFallbackFeaturesVisible) =>
+                      patchState({ atlasFallbackFeaturesVisible })}
+                  />
+                  <ToggleButton
+                    label="Hierarchy"
+                    pressed={state.atlasHierarchyVisible}
+                    onChange={(atlasHierarchyVisible) =>
+                      patchState({ atlasHierarchyVisible })}
+                  />
+                  <ToggleButton
+                    label="Facets"
+                    pressed={state.atlasFacetsVisible}
+                    onChange={(atlasFacetsVisible) =>
+                      patchState({ atlasFacetsVisible })}
+                  />
+                  <ToggleButton
+                    label="Graph bounds"
+                    pressed={state.atlasGraphBoundsVisible}
+                    onChange={(atlasGraphBoundsVisible) =>
+                      patchState({ atlasGraphBoundsVisible })}
+                  />
+                  <ToggleButton
+                    label="Graph edges"
+                    pressed={state.atlasGraphEdgesVisible}
+                    onChange={(atlasGraphEdgesVisible) =>
+                      patchState({ atlasGraphEdgesVisible })}
+                  />
+                  <ToggleButton
+                    label="Identities"
+                    pressed={state.atlasIdentityVisible}
+                    onChange={(atlasIdentityVisible) =>
+                      patchState({ atlasIdentityVisible })}
+                  />
+                  <ToggleButton
+                    label="Wrap seams"
+                    pressed={state.atlasSeamsVisible}
+                    onChange={(atlasSeamsVisible) =>
+                      patchState({ atlasSeamsVisible })}
+                  />
+                </div>
+                <p className="controlNote">
+                  Every overlay is presentation-only. Panning asks Rust for
+                  canonical regions around the new viewport; it does not
+                  recenter or mutate a solve.
+                </p>
               </>
             ) : null}
             {canonicalVisible ? (
@@ -1090,8 +1222,26 @@ export function App(): React.JSX.Element {
             ) : null}
           </ControlSection>
 
-          {terrainPaneVisible ? (
+          {terrainPaneVisible || atlasVisible ? (
           <ControlSection number="04" title="Cache & benchmark">
+            {atlasVisible ? (
+              <>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setAtlasReport(undefined);
+                    setAtlasCacheEpoch((current) => current + 1);
+                  }}
+                >
+                  Cold rebuild planner atlas
+                </button>
+                <p className="controlNote">
+                  Atlas caches retain 384 canonical plans per candidate.
+                  Cold rebuild clears all three while preserving the same
+                  semantic checksums for the current viewport.
+                </p>
+              </>
+            ) : null}
             {canonicalVisible ? (
               <>
                 <SegmentedControl<"on" | "off">
@@ -1149,6 +1299,8 @@ export function App(): React.JSX.Element {
             </p>
               </>
             ) : null}
+            {terrainPaneVisible ? (
+              <>
             <SegmentedControl<BenchmarkProfile>
               label="Workload budget"
               value={benchmarkProfile}
@@ -1175,6 +1327,8 @@ export function App(): React.JSX.Element {
                   setCanonicalReport(undefined);
                   setComparisonCanonicalReport(undefined);
                   setCanonicalCacheEpoch((current) => current + 1);
+                  setAtlasReport(undefined);
+                  setAtlasCacheEpoch((current) => current + 1);
                 }}
               >
                 Cold current view
@@ -1210,6 +1364,8 @@ export function App(): React.JSX.Element {
                 ? "Use Sampled exact and Fast macro together for the vanilla comparison race."
                 : "Stress uses the fixed review seed/site, a cold 2 km Compare map at requested 1:2, and independent CPU/GPU publication."}
             </p>
+              </>
+            ) : null}
           </ControlSection>
           ) : null}
 
@@ -1219,6 +1375,9 @@ export function App(): React.JSX.Element {
                 receipt={planPointReceipt}
                 report={planReport}
               />
+            ) : null}
+            {atlasVisible ? (
+              <StreamedPlanAtlasEvidence report={atlasReport} />
             ) : null}
             {proceduralVisible ? (
               <PointReceipt profile={state.profile} receipt={pointReceipt} />
@@ -1335,6 +1494,74 @@ function planPointFlags(receipt: LandformPlanPointReceipt): string[] {
     receipt.quietCore && "quiet core",
     receipt.cropEdge && "study edge",
   ].filter((flag): flag is string => flag !== false);
+}
+
+function StreamedPlanAtlasEvidence({
+  report,
+}: {
+  report: StreamedPlanAtlasReport | undefined;
+}): React.JSX.Element {
+  if (!report) {
+    return (
+      <div className="pointReceipt empty" data-testid="streamed-plan-atlas-evidence">
+        <strong>Querying canonical plan regions</strong>
+        <span>
+          Rust is resolving the three research candidates around this viewport.
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="pointReceipt" data-testid="streamed-plan-atlas-evidence">
+      <div className="pointReceiptHeading">
+        <strong>Streamed planner atlas</strong>
+        <span>
+          {report.topology} · {report.queryMs.toFixed(2)} ms
+        </span>
+      </div>
+      <dl className="pointReceiptGrid">
+        <AtlasCandidateEvidence label="Fallback" receipt={report.fallback} />
+        <AtlasCandidateEvidence label="Hierarchy" receipt={report.hierarchy} />
+        <AtlasCandidateEvidence label="Graph" receipt={report.featureGraph} />
+        <div>
+          <dt>Coverage</dt>
+          <dd>{report.coverageClipped ? "cost-capped" : "complete viewport"}</dd>
+        </div>
+        <div>
+          <dt>Phase 2 witness</dt>
+          <dd>{report.phaseTwoWitnessSha256.slice(0, 16)}…</dd>
+        </div>
+      </dl>
+      <span className="pointReceiptPrompt">
+        Checksums cover canonical semantic snapshots, not canvas pixels.
+        Cache hits, eviction, and periodic lifts cannot change them.
+      </span>
+    </div>
+  );
+}
+
+function AtlasCandidateEvidence({
+  label,
+  receipt,
+}: {
+  label: string;
+  receipt: Pick<
+    StreamedPlanAtlasReport["fallback"],
+    | "canonicalPlanCount"
+    | "cacheHits"
+    | "cacheMisses"
+    | "semanticSha256"
+  >;
+}): React.JSX.Element {
+  return (
+    <div>
+      <dt>{label}</dt>
+      <dd>
+        {receipt.canonicalPlanCount} plans · {receipt.cacheHits}h/
+        {receipt.cacheMisses}m · {receipt.semanticSha256.slice(0, 10)}
+      </dd>
+    </div>
+  );
 }
 
 function PointReceipt({
@@ -1465,6 +1692,7 @@ function PaneToggles({
             ? option.value !== "gpu"
               && option.value !== "runtime"
               && option.value !== "plan"
+              && option.value !== "atlas"
             : option.value !== "macro"
         ).map((option) => {
           const visible = panes.includes(option.value);
@@ -1505,6 +1733,7 @@ function WorkspaceGuide({
 }): React.JSX.Element {
   const exact = panes.includes("canonical");
   const plan = panes.includes("plan");
+  const atlas = panes.includes("atlas");
   const cpu = panes.includes("cpu");
   const macro = panes.includes("macro");
   const gpu = panes.includes("gpu");
@@ -1536,6 +1765,9 @@ function WorkspaceGuide({
           : ""}
         {plan
           ? "Landform plan is a research-only 2D structural diagnostic over the fixed 6.144 km study domain. "
+          : ""}
+        {atlas
+          ? "Planner atlas queries deterministic canonical regions around the freely pannable viewport and compares the Phase 2 fallback, hierarchy, and bounded graphs. "
           : ""}
         Every visible pane shares seed, center, scale, and navigation. Terrain
         panes also share camera state.
@@ -1573,6 +1805,15 @@ function SourceFootnote({
       </>
     );
   }
+  if (panes.length === 1 && panes[0] === "atlas") {
+    return (
+      <>
+        Research-only streamed-plan comparison. Rust owns canonical identity,
+        topology lifts, bounded caches, and semantic checksums; the browser
+        draws typed facts. Production terrain consumes none of these candidates.
+      </>
+    );
+  }
   return (
     <>
       Real terrain is exact generated blocks with {visualProfileLabel(visualProfile)}
@@ -1582,7 +1823,8 @@ function SourceFootnote({
       while remaining presentation-only. CPU and GPU LOD share natural rivers
       and wetlands; planned streams are reconstructed from production route
       records at near-detail checkpoints. The Landform plan pane is a
-      research-only 2D summary and is not consumed by production terrain.
+      research-only fixed 2D summary. The Planner atlas is a freely pannable
+      structural comparison. Neither is consumed by production terrain.
     </>
   );
 }

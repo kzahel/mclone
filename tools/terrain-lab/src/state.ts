@@ -18,10 +18,12 @@ export type TerrainLabVisualProfile =
 export type TerrainLabTexturePresentation = "textured" | "flat-colors";
 export type TerrainLabComparisonVisualProfile = "off" | TerrainLabVisualProfile;
 export type TerrainLabSource = "gpu" | "reference" | "macro" | "split";
+export type StreamedPlanAtlasTopology = "plane" | "cylinder-x" | "torus";
 export type TerrainLabPane =
   | "runtime"
   | "canonical"
   | "plan"
+  | "atlas"
   | "cpu"
   | "macro"
   | "gpu";
@@ -75,6 +77,16 @@ export interface TerrainLabState {
   planDividesVisible: boolean;
   planConfluencesVisible: boolean;
   planSinksVisible: boolean;
+  atlasTopology: StreamedPlanAtlasTopology;
+  atlasRegionsVisible: boolean;
+  atlasFallbackSamplesVisible: boolean;
+  atlasFallbackFeaturesVisible: boolean;
+  atlasHierarchyVisible: boolean;
+  atlasFacetsVisible: boolean;
+  atlasGraphBoundsVisible: boolean;
+  atlasGraphEdgesVisible: boolean;
+  atlasIdentityVisible: boolean;
+  atlasSeamsVisible: boolean;
 }
 
 export interface TerrainLabCamera {
@@ -109,6 +121,16 @@ export const DEFAULT_TERRAIN_LAB_STATE: TerrainLabState = {
   planDividesVisible: true,
   planConfluencesVisible: true,
   planSinksVisible: true,
+  atlasTopology: "plane",
+  atlasRegionsVisible: true,
+  atlasFallbackSamplesVisible: true,
+  atlasFallbackFeaturesVisible: true,
+  atlasHierarchyVisible: true,
+  atlasFacetsVisible: true,
+  atlasGraphBoundsVisible: true,
+  atlasGraphEdgesVisible: true,
+  atlasIdentityVisible: false,
+  atlasSeamsVisible: true,
 };
 
 export const REVIEW_TERRAIN_LAB_STATE: TerrainLabState = {
@@ -152,11 +174,17 @@ const TEXTURE_PRESENTATIONS = new Set<TerrainLabTexturePresentation>([
 const COMPARISON_VISUAL_PROFILES =
   new Set<TerrainLabComparisonVisualProfile>(["off", ...VISUAL_PROFILES]);
 const SOURCES = new Set<TerrainLabSource>(["gpu", "reference", "macro", "split"]);
+const ATLAS_TOPOLOGIES = new Set<StreamedPlanAtlasTopology>([
+  "plane",
+  "cylinder-x",
+  "torus",
+]);
 const SURFACE_QUALITIES = new Set<TerrainLabSurfaceQuality>(["basic", "inferred"]);
 const PANES = new Set<TerrainLabPane>([
   "runtime",
   "canonical",
   "plan",
+  "atlas",
   "cpu",
   "macro",
   "gpu",
@@ -245,6 +273,33 @@ export function parseTerrainLabState(
       ?? fallback.planConfluencesVisible,
     planSinksVisible:
       validBoolean(params.get("planSinks")) ?? fallback.planSinksVisible,
+    atlasTopology:
+      validMember(params.get("atlasTopology"), ATLAS_TOPOLOGIES)
+      ?? fallback.atlasTopology,
+    atlasRegionsVisible:
+      validBoolean(params.get("atlasRegions")) ?? fallback.atlasRegionsVisible,
+    atlasFallbackSamplesVisible:
+      validBoolean(params.get("atlasSamples"))
+      ?? fallback.atlasFallbackSamplesVisible,
+    atlasFallbackFeaturesVisible:
+      validBoolean(params.get("atlasFeatures"))
+      ?? fallback.atlasFallbackFeaturesVisible,
+    atlasHierarchyVisible:
+      validBoolean(params.get("atlasHierarchy"))
+      ?? fallback.atlasHierarchyVisible,
+    atlasFacetsVisible:
+      validBoolean(params.get("atlasFacets")) ?? fallback.atlasFacetsVisible,
+    atlasGraphBoundsVisible:
+      validBoolean(params.get("atlasGraphBounds"))
+      ?? fallback.atlasGraphBoundsVisible,
+    atlasGraphEdgesVisible:
+      validBoolean(params.get("atlasGraphEdges"))
+      ?? fallback.atlasGraphEdgesVisible,
+    atlasIdentityVisible:
+      validBoolean(params.get("atlasIdentity"))
+      ?? fallback.atlasIdentityVisible,
+    atlasSeamsVisible:
+      validBoolean(params.get("atlasSeams")) ?? fallback.atlasSeamsVisible,
   });
 }
 
@@ -279,6 +334,16 @@ export function terrainLabSearch(
   params.set("planDivides", state.planDividesVisible ? "1" : "0");
   params.set("planConfluences", state.planConfluencesVisible ? "1" : "0");
   params.set("planSinks", state.planSinksVisible ? "1" : "0");
+  params.set("atlasTopology", state.atlasTopology);
+  params.set("atlasRegions", state.atlasRegionsVisible ? "1" : "0");
+  params.set("atlasSamples", state.atlasFallbackSamplesVisible ? "1" : "0");
+  params.set("atlasFeatures", state.atlasFallbackFeaturesVisible ? "1" : "0");
+  params.set("atlasHierarchy", state.atlasHierarchyVisible ? "1" : "0");
+  params.set("atlasFacets", state.atlasFacetsVisible ? "1" : "0");
+  params.set("atlasGraphBounds", state.atlasGraphBoundsVisible ? "1" : "0");
+  params.set("atlasGraphEdges", state.atlasGraphEdgesVisible ? "1" : "0");
+  params.set("atlasIdentity", state.atlasIdentityVisible ? "1" : "0");
+  params.set("atlasSeams", state.atlasSeamsVisible ? "1" : "0");
   if (reviewCamera) {
     params.set("reviewYaw", String(reviewCamera.yaw));
     params.set("reviewPitch", String(reviewCamera.pitch));
@@ -317,6 +382,7 @@ export function toggleTerrainLabPane(
     (state.profile === "overworld" && pane === "gpu")
     || (state.profile === "overworld" && pane === "runtime")
     || (state.profile === "overworld" && pane === "plan")
+    || (state.profile === "overworld" && pane === "atlas")
     || (state.profile !== "overworld" && pane === "macro")
   ) {
     return state;
@@ -343,7 +409,7 @@ export function switchTerrainLabProfile(
   const panes = state.panes.map((pane) => {
     if (
       profile === "overworld"
-      && (pane === "gpu" || pane === "runtime" || pane === "plan")
+      && (pane === "gpu" || pane === "runtime" || pane === "plan" || pane === "atlas")
     ) {
       return "macro";
     }
@@ -364,7 +430,7 @@ export function normalizeTerrainLabProfileState(
 ): TerrainLabState {
   const panes = state.panes.filter((pane) =>
     state.profile === "overworld"
-      ? pane !== "gpu" && pane !== "runtime" && pane !== "plan"
+      ? pane !== "gpu" && pane !== "runtime" && pane !== "plan" && pane !== "atlas"
       : pane !== "macro"
   );
   if (panes.length === 0) {
@@ -489,7 +555,7 @@ function validFiniteNumber(value: string | null): number | undefined {
 }
 
 function paneOrder(pane: TerrainLabPane): number {
-  return ["runtime", "canonical", "plan", "cpu", "macro", "gpu"].indexOf(pane);
+  return ["runtime", "canonical", "plan", "atlas", "cpu", "macro", "gpu"].indexOf(pane);
 }
 
 function validMember<T extends string>(value: string | null, values: Set<T>): T | undefined {

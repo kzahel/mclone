@@ -25,6 +25,8 @@ mod navigation_web;
 mod runtime_exact_worker_web;
 #[cfg(target_arch = "wasm32")]
 mod runtime_web;
+#[cfg(target_arch = "wasm32")]
+mod streamed_plan_atlas_web;
 mod visual_assets;
 #[cfg(target_arch = "wasm32")]
 mod web;
@@ -45,6 +47,8 @@ pub use runtime_exact_worker_web::{
 pub use runtime_web::{
     TerrainRuntimeCompositionLab, mclone_terrain_lab_create_runtime_composition,
 };
+#[cfg(target_arch = "wasm32")]
+pub use streamed_plan_atlas_web::TerrainLabStreamedPlanAtlasCompiler;
 #[cfg(target_arch = "wasm32")]
 pub use web::{TerrainLab, mclone_terrain_lab_create};
 

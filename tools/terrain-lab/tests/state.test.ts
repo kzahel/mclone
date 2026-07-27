@@ -44,6 +44,16 @@ test("round-trips complete URL state", () => {
     planDividesVisible: true,
     planConfluencesVisible: false,
     planSinksVisible: true,
+    atlasTopology: "torus",
+    atlasRegionsVisible: false,
+    atlasFallbackSamplesVisible: true,
+    atlasFallbackFeaturesVisible: false,
+    atlasHierarchyVisible: true,
+    atlasFacetsVisible: false,
+    atlasGraphBoundsVisible: true,
+    atlasGraphEdgesVisible: false,
+    atlasIdentityVisible: false,
+    atlasSeamsVisible: false,
   };
   assert.deepEqual(parseTerrainLabState(terrainLabSearch(state)), {
     ...state,
@@ -154,6 +164,7 @@ test("the vanilla profile replaces GPU with fast macro and excludes Mclone-only 
   assert.equal(toggleTerrainLabPane(vanilla, "gpu"), vanilla);
   assert.equal(toggleTerrainLabPane(vanilla, "runtime"), vanilla);
   assert.equal(toggleTerrainLabPane(vanilla, "plan"), vanilla);
+  assert.equal(toggleTerrainLabPane(vanilla, "atlas"), vanilla);
   assert.deepEqual(
     toggleTerrainLabPane(vanilla, "cpu").panes,
     ["canonical", "macro"],
@@ -200,6 +211,16 @@ test("keeps camera state outside URL-addressed terrain state", () => {
     planDividesVisible: true,
     planConfluencesVisible: true,
     planSinksVisible: true,
+    atlasTopology: "plane",
+    atlasRegionsVisible: true,
+    atlasFallbackSamplesVisible: true,
+    atlasFallbackFeaturesVisible: true,
+    atlasHierarchyVisible: true,
+    atlasFacetsVisible: true,
+    atlasGraphBoundsVisible: true,
+    atlasGraphEdgesVisible: true,
+    atlasIdentityVisible: false,
+    atlasSeamsVisible: true,
   });
 });
 
@@ -215,6 +236,27 @@ test("round-trips independent landform-plan overlays", () => {
   assert.equal(state.planDividesVisible, true);
   assert.equal(state.planConfluencesVisible, false);
   assert.equal(state.planSinksVisible, true);
+  assert.deepEqual(parseTerrainLabState(terrainLabSearch(state)), state);
+});
+
+test("round-trips streamed planner atlas topology and overlays", () => {
+  const state = parseTerrainLabState(
+    "?panes=atlas&atlasTopology=cylinder-x&atlasRegions=1"
+      + "&atlasSamples=0&atlasFeatures=1&atlasHierarchy=0"
+      + "&atlasFacets=1&atlasGraphBounds=0&atlasGraphEdges=1"
+      + "&atlasIdentity=0&atlasSeams=1",
+  );
+  assert.deepEqual(state.panes, ["atlas"]);
+  assert.equal(state.atlasTopology, "cylinder-x");
+  assert.equal(state.atlasRegionsVisible, true);
+  assert.equal(state.atlasFallbackSamplesVisible, false);
+  assert.equal(state.atlasFallbackFeaturesVisible, true);
+  assert.equal(state.atlasHierarchyVisible, false);
+  assert.equal(state.atlasFacetsVisible, true);
+  assert.equal(state.atlasGraphBoundsVisible, false);
+  assert.equal(state.atlasGraphEdgesVisible, true);
+  assert.equal(state.atlasIdentityVisible, false);
+  assert.equal(state.atlasSeamsVisible, true);
   assert.deepEqual(parseTerrainLabState(terrainLabSearch(state)), state);
 });
 

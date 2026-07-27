@@ -25,6 +25,12 @@ const LANDFORM_PLAN_WORKER: &str =
     include_str!("../../../../tools/terrain-lab/src/web/landform-plan-worker.ts");
 const LANDFORM_PLAN_RUST: &str =
     include_str!("../../../crates/mclone-worldgen/src/landform_plan.rs");
+const STREAMED_PLAN_ATLAS_CANVAS: &str =
+    include_str!("../../../../tools/terrain-lab/src/web/StreamedPlanAtlasCanvas.tsx");
+const STREAMED_PLAN_ATLAS_WORKER: &str =
+    include_str!("../../../../tools/terrain-lab/src/web/streamed-plan-atlas-worker.ts");
+const STREAMED_PLAN_ATLAS_RUST: &str =
+    include_str!("../../../crates/mclone-worldgen/src/streamed_plan_atlas.rs");
 
 #[test]
 fn browser_typescript_has_no_exact_worker_policy() {
@@ -231,4 +237,39 @@ fn landform_plan_semantics_stay_in_rust() {
     assert!(LANDFORM_PLAN_WORKER.contains("LandformPlanCompiler"));
     assert!(LANDFORM_PLAN_CANVAS.contains("useWorldViewNavigation"));
     assert_eq!(LANDFORM_PLAN_CANVAS.matches("new Worker(").count(), 1);
+}
+
+#[test]
+fn streamed_plan_atlas_semantics_and_cache_stay_in_rust() {
+    for required in [
+        "StreamedPlanAtlasCompiler",
+        "CandidateCache",
+        "lift_block",
+        "atlas_snapshot_sha256",
+        "CoordinatePureControl",
+        "HierarchicalSharedFactsControl",
+        "FeatureOwnedGraphControl",
+    ] {
+        assert!(
+            STREAMED_PLAN_ATLAS_RUST.contains(required),
+            "shared streamed-plan atlas lost required Rust owner {required:?}"
+        );
+    }
+    for forbidden in [
+        "FEATURE_GRAPH_MAXIMUM_REACH_BLOCKS",
+        "possible_owner_regions",
+        "shortest_block_displacement",
+        "canonicalize_block",
+        "typed_hash",
+        "StreamedPlanControl",
+    ] {
+        assert!(
+            !STREAMED_PLAN_ATLAS_CANVAS.contains(forbidden)
+                && !STREAMED_PLAN_ATLAS_WORKER.contains(forbidden),
+            "Terrain Lab browser code gained streamed-plan policy through {forbidden:?}"
+        );
+    }
+    assert!(STREAMED_PLAN_ATLAS_WORKER.contains("StreamedPlanAtlasCompiler"));
+    assert!(STREAMED_PLAN_ATLAS_CANVAS.contains("useWorldViewNavigation"));
+    assert_eq!(STREAMED_PLAN_ATLAS_CANVAS.matches("new Worker(").count(), 1);
 }

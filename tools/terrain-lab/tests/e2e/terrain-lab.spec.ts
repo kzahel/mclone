@@ -1081,6 +1081,90 @@ test("inspects the research landform plan without rebuilding overlays", async ({
   expect(pageErrors).toEqual([]);
 });
 
+test("pans the streamed planner atlas across a torus period", async ({
+  page,
+}, testInfo) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      pageErrors.push(message.text());
+    }
+  });
+  await page.goto(
+    "/terrain/?seed=-98765&x=0&z=0&blocks=6144&panes=atlas&view=map"
+      + "&atlasTopology=torus&atlasRegions=1&atlasSamples=1"
+      + "&atlasFeatures=1&atlasHierarchy=1&atlasFacets=1"
+      + "&atlasGraphBounds=1&atlasGraphEdges=1&atlasIdentity=0"
+      + "&atlasSeams=1",
+  );
+  const shell = page.locator(".appShell");
+  const stage = page.getByTestId("streamed-plan-atlas-stage");
+  await expect(shell).toHaveAttribute("data-atlas-ready", "true");
+  await expect(stage).toHaveAttribute("data-render-ready", "true");
+  await expect(page.getByTestId("lab-status")).toContainText("ready");
+  await expect(page.getByTestId("streamed-plan-atlas-evidence"))
+    .toContainText("Streamed planner atlas");
+  const original = {
+    fallback: await shell.getAttribute("data-atlas-fallback-checksum"),
+    hierarchy: await shell.getAttribute("data-atlas-hierarchy-checksum"),
+    graph: await shell.getAttribute("data-atlas-graph-checksum"),
+  };
+  for (const checksum of Object.values(original)) {
+    expect(checksum).toMatch(/^[0-9a-f]{64}$/u);
+  }
+  await stage.screenshot({
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-streamed-atlas-torus.png`,
+  });
+
+  await stage.focus();
+  for (let step = 1; step <= 8; step += 1) {
+    await stage.press("ArrowRight");
+    await expect(page).toHaveURL(new RegExp(`x=${step * 768}(?:&|$)`, "u"));
+    await expect(shell).toHaveAttribute("data-atlas-ready", "true");
+  }
+  await expect(shell).toHaveAttribute(
+    "data-atlas-fallback-checksum",
+    original.fallback ?? "",
+  );
+  await expect(shell).toHaveAttribute(
+    "data-atlas-hierarchy-checksum",
+    original.hierarchy ?? "",
+  );
+  await expect(shell).toHaveAttribute(
+    "data-atlas-graph-checksum",
+    original.graph ?? "",
+  );
+  expect(Number(await shell.getAttribute("data-atlas-fallback-hits")))
+    .toBeGreaterThan(0);
+  expect(Number(await shell.getAttribute("data-atlas-hierarchy-hits")))
+    .toBeGreaterThan(0);
+  expect(Number(await shell.getAttribute("data-atlas-graph-hits")))
+    .toBeGreaterThan(0);
+  await stage.screenshot({
+    path:
+      `/tmp/mclone-terrain-lab-${testInfo.project.name}-streamed-atlas-torus-repeat.png`,
+  });
+
+  await page.getByRole("button", { name: "Identities hidden", exact: true }).click();
+  await expect(page).toHaveURL(/atlasIdentity=1/u);
+  await expect(shell).toHaveAttribute(
+    "data-atlas-hierarchy-checksum",
+    original.hierarchy ?? "",
+  );
+  await page.getByRole("button", { name: "Identities shown", exact: true }).click();
+  await page.getByRole("button", {
+    name: "Cold rebuild planner atlas",
+    exact: true,
+  }).click();
+  await expect(shell).toHaveAttribute("data-atlas-ready", "true");
+  await expect(shell).toHaveAttribute(
+    "data-atlas-graph-checksum",
+    original.graph ?? "",
+  );
+  expect(pageErrors).toEqual([]);
+});
+
 async function waitForCanonical(
   page: import("@playwright/test").Page,
   requestedChunks: number,
