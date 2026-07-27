@@ -288,6 +288,7 @@ fn batch_dispatch(
                     .retained_dependency_chunks
                     .min(u32::MAX as usize) as u32,
                 packed_sections: admission.packed_sections,
+                natural_trees: Vec::new(),
             })
             .collect(),
     };

@@ -31,8 +31,8 @@ pub use canonical::{
     canonical_terrain_chunk_order, canonical_terrain_presentation_blocks,
 };
 pub use canonical_batch_codec::{
-    CanonicalEncodedAdmission, CanonicalEncodedBatch, decode_canonical_batch,
-    encode_canonical_batch, patch_canonical_batch_transfer_ms,
+    CanonicalEncodedAdmission, CanonicalEncodedBatch, CanonicalEncodedNaturalTree,
+    decode_canonical_batch, encode_canonical_batch, patch_canonical_batch_transfer_ms,
 };
 pub use canonical_mesh::{
     CanonicalMeshBatch, CanonicalMeshCoordinate, CanonicalMeshFrontier,

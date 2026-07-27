@@ -1,8 +1,21 @@
+use mclone_worldgen::levelgen::{
+    McloneTreeArchetype, McloneTreeBounds, McloneTreeFamily, McloneTreeId, McloneTreeOccurrence,
+    McloneTreeRecord,
+};
+use mclone_worldgen::placement::BlockPos;
+
 const CANONICAL_BATCH_MAGIC: [u8; 4] = *b"MCTB";
-const CANONICAL_BATCH_VERSION: u16 = 1;
+const CANONICAL_BATCH_VERSION: u16 = 2;
 const CANONICAL_BATCH_HEADER_BYTES: usize = 72;
-const CANONICAL_BATCH_ADMISSION_HEADER_BYTES: usize = 20;
+const CANONICAL_BATCH_ADMISSION_HEADER_BYTES: usize = 24;
+const CANONICAL_BATCH_NATURAL_TREE_HEADER_BYTES: usize = 101;
 const TRANSFER_MS_OFFSET: usize = 40;
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct CanonicalEncodedNaturalTree {
+    pub occurrence: McloneTreeOccurrence,
+    pub packed_sections: Vec<u8>,
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct CanonicalEncodedAdmission {
@@ -11,6 +24,7 @@ pub struct CanonicalEncodedAdmission {
     pub raw_cache_hit: bool,
     pub retained_dependency_chunks: u32,
     pub packed_sections: Vec<u8>,
+    pub natural_trees: Vec<CanonicalEncodedNaturalTree>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -39,9 +53,28 @@ pub fn encode_canonical_batch(batch: &CanonicalEncodedBatch) -> Result<Vec<u8>, 
                     u32::try_from(admission.packed_sections.len()).map_err(|_| {
                         "canonical packed admission exceeds the u32 byte-length contract".to_owned()
                     })?;
+                let natural_tree_bytes =
+                    admission
+                        .natural_trees
+                        .iter()
+                        .try_fold(0_usize, |bytes, tree| {
+                            let packed_bytes =
+                                u32::try_from(tree.packed_sections.len()).map_err(|_| {
+                                    "canonical packed natural tree exceeds the u32 byte-length \
+                                     contract"
+                                        .to_owned()
+                                })?;
+                            bytes
+                                .checked_add(CANONICAL_BATCH_NATURAL_TREE_HEADER_BYTES)
+                                .and_then(|bytes| bytes.checked_add(packed_bytes as usize))
+                                .ok_or_else(|| {
+                                    "canonical natural-tree byte length overflowed usize".to_owned()
+                                })
+                        })?;
                 bytes
                     .checked_add(CANONICAL_BATCH_ADMISSION_HEADER_BYTES)
                     .and_then(|bytes| bytes.checked_add(packed_bytes as usize))
+                    .and_then(|bytes| bytes.checked_add(natural_tree_bytes))
                     .ok_or_else(|| "canonical batch byte length overflowed usize".to_owned())
             })?;
     let mut encoded = Vec::with_capacity(capacity);
@@ -70,7 +103,25 @@ pub fn encode_canonical_batch(batch: &CanonicalEncodedBatch) -> Result<Vec<u8>, 
                 "canonical packed admission exceeds the u32 byte-length contract".to_owned()
             })?,
         );
+        push_u32(
+            &mut encoded,
+            admission
+                .natural_trees
+                .len()
+                .try_into()
+                .map_err(|_| "canonical admission has more than u32 natural trees".to_owned())?,
+        );
         encoded.extend_from_slice(&admission.packed_sections);
+        for tree in &admission.natural_trees {
+            encode_tree_occurrence(&mut encoded, tree.occurrence);
+            push_u32(
+                &mut encoded,
+                tree.packed_sections.len().try_into().map_err(|_| {
+                    "canonical packed natural tree exceeds the u32 byte-length contract".to_owned()
+                })?,
+            );
+            encoded.extend_from_slice(&tree.packed_sections);
+        }
     }
     debug_assert_eq!(encoded.len(), capacity);
     Ok(encoded)
@@ -131,13 +182,25 @@ pub fn decode_canonical_batch(bytes: &[u8]) -> Result<CanonicalEncodedBatch, Str
         let _reserved = decoder.read_exact(3)?;
         let retained_dependency_chunks = decoder.read_u32()?;
         let packed_byte_length = decoder.read_u32()? as usize;
+        let natural_tree_count = decoder.read_u32()? as usize;
         let packed_sections = decoder.read_exact(packed_byte_length)?.to_vec();
+        let mut natural_trees = Vec::with_capacity(natural_tree_count);
+        for _ in 0..natural_tree_count {
+            let occurrence = decoder.read_tree_occurrence()?;
+            let packed_byte_length = decoder.read_u32()? as usize;
+            let packed_sections = decoder.read_exact(packed_byte_length)?.to_vec();
+            natural_trees.push(CanonicalEncodedNaturalTree {
+                occurrence,
+                packed_sections,
+            });
+        }
         batch.admissions.push(CanonicalEncodedAdmission {
             chunk_x,
             chunk_z,
             raw_cache_hit,
             retained_dependency_chunks,
             packed_sections,
+            natural_trees,
         });
     }
     if decoder.remaining() != 0 {
@@ -179,12 +242,63 @@ fn push_i32(bytes: &mut Vec<u8>, value: i32) {
     bytes.extend_from_slice(&value.to_le_bytes());
 }
 
+fn push_i64(bytes: &mut Vec<u8>, value: i64) {
+    bytes.extend_from_slice(&value.to_le_bytes());
+}
+
 fn push_u64(bytes: &mut Vec<u8>, value: u64) {
     bytes.extend_from_slice(&value.to_le_bytes());
 }
 
 fn push_f64(bytes: &mut Vec<u8>, value: f64) {
     bytes.extend_from_slice(&value.to_le_bytes());
+}
+
+fn encode_tree_occurrence(bytes: &mut Vec<u8>, occurrence: McloneTreeOccurrence) {
+    let record = occurrence.record;
+    push_i32(bytes, record.id.planning_cell_x);
+    push_i32(bytes, record.id.planning_cell_z);
+    bytes.push(record.id.candidate_slot);
+    push_u16(bytes, record.id.vegetation_revision);
+    push_i32(bytes, record.canonical_base.x);
+    push_i32(bytes, record.canonical_base.y);
+    push_i32(bytes, record.canonical_base.z);
+    bytes.push(tree_family_tag(record.family));
+    bytes.push(tree_archetype_tag(record.archetype));
+    push_u16(bytes, record.trunk_height);
+    push_u16(bytes, record.crown_radius);
+    push_u16(bytes, record.crown_depth);
+    bytes.push(record.orientation);
+    bytes.push(record.landmark_rank);
+    push_u64(bytes, record.variant_seed);
+    encode_tree_bounds(bytes, record.bounds);
+    push_i64(bytes, occurrence.x_lift);
+    encode_tree_bounds(bytes, occurrence.working_bounds);
+}
+
+fn encode_tree_bounds(bytes: &mut Vec<u8>, bounds: McloneTreeBounds) {
+    push_i32(bytes, bounds.min_x);
+    push_i32(bytes, bounds.min_y);
+    push_i32(bytes, bounds.min_z);
+    push_i32(bytes, bounds.max_x);
+    push_i32(bytes, bounds.max_y);
+    push_i32(bytes, bounds.max_z);
+}
+
+const fn tree_family_tag(family: McloneTreeFamily) -> u8 {
+    match family {
+        McloneTreeFamily::TemperateBroadleaf => 0,
+        McloneTreeFamily::CoolWetConifer => 1,
+        McloneTreeFamily::WarmDryAcacia => 2,
+    }
+}
+
+const fn tree_archetype_tag(archetype: McloneTreeArchetype) -> u8 {
+    match archetype {
+        McloneTreeArchetype::RoundedBroadleaf => 0,
+        McloneTreeArchetype::LayeredConifer => 1,
+        McloneTreeArchetype::ForkedAcacia => 2,
+    }
 }
 
 struct Decoder<'a> {
@@ -232,6 +346,10 @@ impl<'a> Decoder<'a> {
         Ok(i32::from_le_bytes(self.read_exact(4)?.try_into().unwrap()))
     }
 
+    fn read_i64(&mut self) -> Result<i64, String> {
+        Ok(i64::from_le_bytes(self.read_exact(8)?.try_into().unwrap()))
+    }
+
     fn read_u64(&mut self) -> Result<u64, String> {
         Ok(u64::from_le_bytes(self.read_exact(8)?.try_into().unwrap()))
     }
@@ -239,11 +357,114 @@ impl<'a> Decoder<'a> {
     fn read_f64(&mut self) -> Result<f64, String> {
         Ok(f64::from_le_bytes(self.read_exact(8)?.try_into().unwrap()))
     }
+
+    fn read_tree_occurrence(&mut self) -> Result<McloneTreeOccurrence, String> {
+        let id = McloneTreeId {
+            planning_cell_x: self.read_i32()?,
+            planning_cell_z: self.read_i32()?,
+            candidate_slot: self.read_u8()?,
+            vegetation_revision: self.read_u16()?,
+        };
+        let canonical_base = BlockPos::new(self.read_i32()?, self.read_i32()?, self.read_i32()?);
+        let family = match self.read_u8()? {
+            0 => McloneTreeFamily::TemperateBroadleaf,
+            1 => McloneTreeFamily::CoolWetConifer,
+            2 => McloneTreeFamily::WarmDryAcacia,
+            other => {
+                return Err(format!(
+                    "canonical natural-tree family tag {other} is invalid"
+                ));
+            }
+        };
+        let archetype = match self.read_u8()? {
+            0 => McloneTreeArchetype::RoundedBroadleaf,
+            1 => McloneTreeArchetype::LayeredConifer,
+            2 => McloneTreeArchetype::ForkedAcacia,
+            other => {
+                return Err(format!(
+                    "canonical natural-tree archetype tag {other} is invalid"
+                ));
+            }
+        };
+        let trunk_height = self.read_u16()?;
+        let crown_radius = self.read_u16()?;
+        let crown_depth = self.read_u16()?;
+        let orientation = self.read_u8()?;
+        let landmark_rank = self.read_u8()?;
+        let variant_seed = self.read_u64()?;
+        let bounds = self.read_tree_bounds()?;
+        let x_lift = self.read_i64()?;
+        let working_bounds = self.read_tree_bounds()?;
+        Ok(McloneTreeOccurrence {
+            record: McloneTreeRecord {
+                id,
+                canonical_base,
+                family,
+                archetype,
+                trunk_height,
+                crown_radius,
+                crown_depth,
+                orientation,
+                landmark_rank,
+                variant_seed,
+                bounds,
+            },
+            x_lift,
+            working_bounds,
+        })
+    }
+
+    fn read_tree_bounds(&mut self) -> Result<McloneTreeBounds, String> {
+        McloneTreeBounds::new(
+            self.read_i32()?,
+            self.read_i32()?,
+            self.read_i32()?,
+            self.read_i32()?,
+            self.read_i32()?,
+            self.read_i32()?,
+        )
+        .map_err(|error| format!("canonical natural-tree bounds are invalid: {error}"))
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use mclone_worldgen::levelgen::{
+        McloneTreeArchetype, McloneTreeBounds, McloneTreeFamily, McloneTreeId, McloneTreeRecord,
+    };
+    use mclone_worldgen::placement::BlockPos;
+
     use super::*;
+
+    fn tree_fixture() -> CanonicalEncodedNaturalTree {
+        let bounds = McloneTreeBounds::new(-20, 63, 19, -15, 72, 24).unwrap();
+        CanonicalEncodedNaturalTree {
+            occurrence: McloneTreeOccurrence {
+                record: McloneTreeRecord {
+                    id: McloneTreeId {
+                        planning_cell_x: -3,
+                        planning_cell_z: 4,
+                        candidate_slot: 7,
+                        vegetation_revision: 2,
+                    },
+                    canonical_base: BlockPos::new(-18, 64, 21),
+                    family: McloneTreeFamily::CoolWetConifer,
+                    archetype: McloneTreeArchetype::LayeredConifer,
+                    trunk_height: 7,
+                    crown_radius: 3,
+                    crown_depth: 6,
+                    orientation: 2,
+                    landmark_rank: 1,
+                    variant_seed: 0xfedc_ba98_7654_3210,
+                    bounds,
+                },
+                x_lift: 1_i64 << 32,
+                working_bounds: McloneTreeBounds::new(i32::MAX - 5, 63, 19, i32::MAX, 72, 24)
+                    .unwrap(),
+            },
+            packed_sections: vec![9, 8, 7, 6, 5],
+        }
+    }
 
     fn fixture() -> CanonicalEncodedBatch {
         CanonicalEncodedBatch {
@@ -262,6 +483,7 @@ mod tests {
                     raw_cache_hit: false,
                     retained_dependency_chunks: 9,
                     packed_sections: vec![1, 2, 3, 4],
+                    natural_trees: vec![tree_fixture()],
                 },
                 CanonicalEncodedAdmission {
                     chunk_x: -18,
@@ -269,6 +491,7 @@ mod tests {
                     raw_cache_hit: true,
                     retained_dependency_chunks: 12,
                     packed_sections: vec![5; 257],
+                    natural_trees: Vec::new(),
                 },
             ],
         }
