@@ -83,7 +83,12 @@ defaults. The hosted desktop and Pixel 7 gates reach 25/25 exact chunks,
 non-empty whole-tree exact/proxy ownership, and all 160 horizon slots at the
 fixed low-angle review site. This is the PH-3 reusable-consumer checkpoint;
 hosted Human Review 1 accepted it on 2026-07-27. PH-3 is complete, PH-4
-full-game scene adoption is next, and Android/XR promotion remains later.
+shared terrain-view engine extraction plus full-game scene adoption is next,
+and Android/XR promotion remains later. PH-4 must make World Explorer and
+`mclone-scene` peer hosts of one terrain representation/composition owner,
+not preserve a proof renderer and a game renderer that merely exchange the
+same coverage DTO. Canonical exact generation and live authoritative render
+sections remain different truth-source adapters.
 Interactive review on 2026-07-26 diagnosed two remaining proof defects and
 activated Tactical
 [`252`](../tactical/252-procedural-horizon-seams-and-transition-admission.md):
@@ -316,6 +321,40 @@ thread or Worker. Exact chunk meshing and procedural vegetation have different
 resident state and failure lifecycles. A later measured pool may host multiple
 services behind unchanged domain coordinators, but Tactical 256 does not
 create a universal job enum or Worker framework.
+
+### One engine with multiple truth sources
+
+The reusable boundary is broader than sharing a clipmap scheduler or an
+exact-painted snapshot. Explorer, Terrain Lab runtime composition, the live
+game scene, and a future Universe overview should consume one logical terrain
+representation engine in `mclone-terrain-view`. That engine owns procedural
+residency and admission, exact/procedural coverage and frontier policy,
+bounded representation ownership, stale rejection, and immutable prepared
+terrain-frame products.
+
+The engine receives exact facts through narrow adapters:
+
+- Explorer and Terrain Lab use a detached canonical source reconstructed from
+  a qualified generator recipe and explicitly carry no edit authority.
+- `mclone-scene` adapts authoritative client-replica render sections,
+  readiness, edits, revisions, and topology while retaining live session and
+  frame orchestration.
+- A later bounded observer source may consume server-published facts without
+  assuming that a seed or generator recipe is available.
+
+The current `TerrainRuntimeExactRenderer` is a transitional proof aggregate.
+PH-4 should separate its canonical producer/residency responsibilities from
+the generally reusable coordination and draw-preparation path. It must not
+become a permanent Explorer-only terrain implementation beside a separate
+scene compositor. Equally, the shared-engine requirement does not justify
+running `McloneSceneHost`, an integrated server, persistence, or networking in
+the lightweight Explorer.
+
+This is logical runtime unification, not a requirement for one physical
+thread, Worker, or WGPU allocation. Hosts may choose different view policies,
+budgets, and platform executors while consuming the same source-qualified
+composition contract. Whether detached and live hosts can safely retain or
+transfer GPU resources is a later measured optimization.
 
 The first shared off-thread slice is individual vegetation record planning.
 Coarse continuous forest summaries remain part of terrain evaluation and do

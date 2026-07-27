@@ -2,9 +2,10 @@
 
 Topic: `universe-product-shell`
 
-Status: **concept and architecture direction recorded 2026-07-26;
-implementation has not started.** The current shipped behavior remains the
-session-free title shell from
+Status: **concept and architecture direction recorded 2026-07-26; shared
+terrain representation direction clarified 2026-07-27; implementation has not
+started.** The current shipped behavior remains the session-free title shell
+from
 [`client-entry-lifecycle.md`](client-entry-lifecycle.md), the bounded
 active-plus-optional-standby scene from
 [`embedded-worlds.md`](embedded-worlds.md), and the separate Terrain Lab and
@@ -103,6 +104,76 @@ every part to be invented:
 This reframing does not make every row share one renderer, runtime, UI toolkit,
 or physical Worker. It supplies common product language for selecting and
 moving between them.
+
+## Shared Terrain Representation Direction
+
+Universe should converge on **one shared terrain-view engine with multiple
+hosts and truth-aware sources**, not on parallel Explorer, Lab, game, and
+Universe compositors:
+
+```text
+detached canonical source --.
+live authoritative source ---+--> shared terrain-view engine
+bounded observer source -----'      clipmap and residency
+                                     exact/procedural coverage and frontier
+                                     representation ownership arbitration
+                                     immutable prepared terrain frame
+                                                  |
+                       .--------------------------+------------------.
+                       v                          v                  v
+               World Explorer               game scene          Universe
+              lightweight orbit host    embodied/live host    overview host
+```
+
+“One engine” means one logical owner for terrain representation,
+exact/procedural composition, and its prepared render products. It does not
+mean one universal world runtime, one physical Worker, or one permanently
+shared WGPU allocation.
+
+The shared `mclone-terrain-view` direction should own:
+
+- procedural clipmap scheduling, residency, admission, and diagnostics;
+- exact-painted coverage, frontier, collar, and composition-mask policy;
+- bounded-representation ownership arbitration, including natural-feature
+  replacement;
+- source, generation, freshness, topology, and provenance facts needed to
+  reject stale or semantically incompatible products; and
+- immutable prepared terrain-frame products consumed by target-neutral render
+  paths.
+
+Narrow source adapters should retain the facts that genuinely differ:
+
+- a **detached canonical source** may regenerate untouched terrain from a
+  qualified seed/profile recipe and must report that it is
+  non-authoritative;
+- a **live authoritative source** adapts the client replica's drawable
+  sections, edits, readiness, and revisions without asking the terrain-view
+  engine to own simulation, persistence, or networking; and
+- a future **bounded observer source** may consume server-published exact or
+  summary facts without requiring disclosure of private generator inputs.
+
+Hosts likewise retain view and lifecycle policy. World Explorer supplies a
+small orbit/map host and canonical source. `mclone-scene` supplies embodied,
+tabletop, stereo, and XR views plus the authoritative source adapter. A
+Universe surface may select a detached or observer-backed source and must
+present that truth honestly.
+
+The current `TerrainRuntimeExactRenderer` is therefore a transitional proof
+boundary, not a second permanent terrain system. It combines canonical exact
+generation, proof residency, coverage publication, and exact drawing because
+World Explorer was the first composition host. Full-game adoption should
+decompose that boundary: retain canonical production as the detached adapter,
+reuse its general admission and draw preparation where applicable, and have
+both Explorer and the live scene publish through the same terrain-view
+coordinator. Do not force the game through a canonical generator, and do not
+make Explorer instantiate `McloneSceneHost`, an integrated server, persistence,
+or network authority merely to claim runtime reuse.
+
+This boundary should stay narrower than a generic world-runtime trait.
+Acquiring authoritative facts and presenting terrain are related but distinct
+responsibilities. Sharing the latter is the architectural requirement; safely
+sharing GPU allocations between detached and live representations remains a
+measured optimization question.
 
 ## Representation And Authority Continuum
 
@@ -268,11 +339,14 @@ The current owners remain valid:
   preferences, activity demand, and product-level effects that do not require
   a live renderer;
 - `mclone-scene` owns the live scene/session, active physical authority,
-  exact/procedural composition, UI assembly, and its bounded optional standby;
+  authoritative exact-source adaptation, live frame orchestration, UI
+  assembly, and its bounded optional standby;
 - `mclone-server` owns realms, dimensions, players, observers, transfer,
   persistence, and authoritative readiness;
-- `mclone-terrain-view` owns reusable detached procedural terrain products and
-  streaming coordination;
+- `mclone-terrain-view` owns the shared terrain representation engine:
+  procedural products, streaming coordination, exact/procedural coverage and
+  composition, bounded representation arbitration, and prepared terrain-frame
+  contracts used by detached and live hosts;
 - `mclone-view-control` owns platform-neutral map/orbit/focus/zoom semantics;
 - `mclone-ui` owns cross-platform player-facing UI models;
 - render crates own target-neutral rendering contracts and mono, stereo, and
@@ -287,8 +361,11 @@ owner. Conversely, do not force a real cross-scene composition owner into an
 unrelated crate merely to avoid a new name.
 
 The standalone World Explorer should remain a small dependency-firewall and
-profiling proof. A future Universe entry point should consume the same shared
-view services rather than slowly importing the full game into that leaf app.
+profiling proof. It and `mclone-scene` should be peer hosts of the same shared
+terrain-view engine, with different source and lifecycle adapters. A future
+Universe entry point should consume those services rather than slowly
+importing the full game into that leaf app or creating another composition
+implementation.
 
 ## Invariants
 
@@ -317,6 +394,10 @@ view services rather than slowly importing the full game into that leaf app.
     player product crosses an explicit shared-contract boundary.
 12. A fresh entry point may compose public shared owners but may not copy
     policy from `mclone-native-client` or make one platform the product owner.
+13. Explorer, live scene, and future Universe terrain views share one logical
+    terrain representation/composition engine. Source authority and host
+    lifecycle remain explicit adapters rather than reasons to fork that
+    engine.
 
 ## Architectural Fitness Experiment
 
@@ -331,13 +412,16 @@ A bounded proof could:
 2. define a shared representation/transition vocabulary by composing existing
    identity and request types;
 3. construct a session-free shell through public shared APIs;
-4. open one local realm/dimension as a detached procedural view;
+4. open one local realm/dimension through the shared terrain-view engine with
+   a detached canonical source;
 5. turn an explicitly selected region into the existing authoritative
-   session-start and safe-arrival path;
-6. detach or return to the same Universe destination without treating LOD as
-   live truth; and
-7. prove the state machine through a cheap offscreen or desktop lane before
-   adding browser, Android, and XR presentation receipts.
+   session-start and safe-arrival path, then adapt the live replica into that
+   same terrain-view engine;
+6. detach or return to the same Universe destination by changing the explicit
+   representation/source role rather than treating LOD as live truth; and
+7. prove the state machine and shared composition boundary through a cheap
+   offscreen or desktop lane before adding browser, Android, and XR
+   presentation receipts.
 
 The controller/model must be shared from the start even if desktop or
 offscreen is the first mechanical proof. Success means the new composition is
