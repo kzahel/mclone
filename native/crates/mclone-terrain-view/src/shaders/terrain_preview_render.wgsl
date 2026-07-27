@@ -782,12 +782,12 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     if exact_coverage.mode_count_generation.x == 2u && exact_painted {
         let checker = (i32(floor(input.world_xz.x / 2.0))
             + i32(floor(input.world_xz.y / 2.0))) & 1;
-        let diagnostic = select(
+        let coverage_color = select(
             vec3<f32>(0.96, 0.05, 0.72),
             vec3<f32>(1.0, 0.72, 0.08),
             checker == 0,
         );
-        color = mix(color, diagnostic, 0.82);
+        color = mix(color, coverage_color, 0.82);
     }
     return mclone_apply_target_color_transform_rgba(
         vec4<f32>(color, 1.0),
