@@ -2,7 +2,7 @@ use super::*;
 use crate::{
     GameAuxiliarySplitMode, GameFlatPresentationState, GameGrassDetail, GameLeafDetail,
     GameLocalPlayControllerFamily, GameLocalPlayGuestInput, GameLocalPlayLayout,
-    GameLocalPlayState, GameWorldRenderScaleMode,
+    GameLocalPlayState, GameTerrainPresentation, GameWorldRenderScaleMode,
 };
 
 #[test]
@@ -501,6 +501,49 @@ fn graphics_options_show_and_cycle_grass_detail() {
     assert_eq!(
         surface.pointer_up(point_in(grass_detail.rect), state).1,
         Some(GameUiAction::SetGrassDetail(GameGrassDetail::Ultra))
+    );
+}
+
+#[test]
+fn graphics_options_show_and_cycle_distant_terrain() {
+    let mut surface = UiSurface::new();
+    surface.set_screen(Some(UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::Graphics,
+    }));
+    surface.set_scale(GuiScale::from_pixels(960, 540));
+    let state = GameUiRenderState {
+        terrain_presentation: GameTerrainPresentation::Experimental,
+        ..GameUiRenderState::default()
+    };
+    surface.set_render_state(state);
+
+    let distant_terrain = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_TERRAIN_PRESENTATION)
+        .expect("distant terrain row")
+        .clone();
+    assert_eq!(distant_terrain.value.as_deref(), Some("Experimental"));
+    assert!(distant_terrain.enabled);
+    assert!(surface.pointer_down(point_in(distant_terrain.rect), state));
+    assert_eq!(
+        surface.pointer_up(point_in(distant_terrain.rect), state).1,
+        Some(GameUiAction::SetTerrainPresentation(
+            GameTerrainPresentation::ExactOnly,
+        ))
+    );
+
+    let unavailable = GameUiRenderState {
+        terrain_presentation_available: false,
+        ..state
+    };
+    surface.set_render_state(unavailable);
+    assert_eq!(
+        surface
+            .layout()
+            .widget(UI_V2_OPTIONS_TERRAIN_PRESENTATION)
+            .and_then(|widget| widget.value.as_deref()),
+        Some("Experimental (Unavailable)")
     );
 }
 

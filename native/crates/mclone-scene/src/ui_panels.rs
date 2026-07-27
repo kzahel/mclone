@@ -608,6 +608,8 @@ impl McloneSceneHost {
             section_occlusion_culling: self.render_options.section_occlusion_culling,
             leaf_detail: game_leaf_detail(self.mesh_assets.catalog.leaf_detail()),
             grass_detail: game_grass_detail(self.render_options.grass_detail),
+            terrain_presentation: self.terrain_presentation_preference(),
+            terrain_presentation_available: self.terrain_presentation_supported(),
             force_fullbright: self.render_options.force_fullbright,
             player_collision_box_visible: self.player_collision_box_visible,
             first_person_player_visible: self.active_world.camera.first_person_player_visible(),

@@ -259,6 +259,14 @@ impl McloneSceneHost {
                     }
                 }
                 self.request_grass_detail(engine_grass_detail(preferences.grass_detail));
+                if !self
+                    .active_world
+                    .scene
+                    .startup
+                    .terrain_presentation_explicit
+                {
+                    self.request_terrain_presentation(preferences.terrain_presentation)?;
+                }
             }
             Ok(None) => {}
             Err(error) => {
@@ -544,10 +552,11 @@ impl McloneSceneHost {
         log::info!("grass detail set to {detail:?}");
     }
 
-    fn persist_graphics_preferences(&mut self) {
+    pub(crate) fn persist_graphics_preferences(&mut self) {
         let preferences = ClientGraphicsPreferences {
             leaf_detail: game_leaf_detail(self.active_assets.mesh.catalog.leaf_detail()),
             grass_detail: game_grass_detail(self.render_options.grass_detail),
+            terrain_presentation: self.terrain_presentation_preference(),
         };
         if let Some(storage) = self.graphics_preference_storage.as_ref() {
             if let Err(error) = storage.store(&preferences) {

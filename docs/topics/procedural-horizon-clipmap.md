@@ -19,6 +19,11 @@ Explorer and full game may both run in the browser, while the same terrain
 system remains usable on desktop, Android, and XR. Tactical
 [`245`](../tactical/245-retire-chunk-far-lod-runtime.md) remains the completed
 removal boundary for the rejected chunk-based Far LOD system. Tactical
+[`274`](../tactical/274-all-client-distant-terrain-control.md) now owns the
+experimental all-client Graphics control, runtime preference, and default
+per-eye XR projection reach. Full-frame multiview remains an explicitly
+unavailable optional mode and is not a blocker for exposing the experiment.
+Tactical
 [`247`](../tactical/247-standalone-world-explorer-foundation.md) supplied the
 small native proof host and shared navigation boundary for the first ring; it
 deliberately implemented no clipmap residency.
@@ -88,15 +93,21 @@ fixed low-angle review site. This is the PH-3 reusable-consumer checkpoint;
 hosted Human Review 1 accepted it on 2026-07-27. PH-3 is complete, PH-4
 shared terrain-view engine extraction plus full-game scene adoption is active
 in Tactical
-[`269`](../tactical/269-shared-terrain-engine-scene-adoption.md), and
-Android/XR promotion remains later. PH-4 now has an implemented ordinary
-scene path: a source-qualified live adapter derives exact coverage from the
-active draw store's traversal-ready columns, exact opaque/cutout terrain
-establishes the ordinary reversed-Z depth, and the shared procedural backdrop
+[`269`](../tactical/269-shared-terrain-engine-scene-adoption.md). Tactical
+[`274`](../tactical/274-all-client-distant-terrain-control.md) now owns
+Android/XR test promotion and remaining real-device evidence. PH-4 has an
+implemented ordinary scene path: a source-qualified live adapter derives exact
+coverage from the active draw store's traversal-ready columns, exact
+opaque/cutout terrain establishes the ordinary reversed-Z depth, and the
+shared procedural backdrop
 loads and extends the same target before actors and translucent terrain. The
-opt-in is `terrainPresentation=composed` /
-`--terrain-presentation composed`, currently restricted to local
-`mclone-overworld-v1`; exact-only remains allocation-free by default.
+player-facing opt-in is now `Graphics -> Distant Terrain -> Experimental`,
+with `terrainPresentation=composed` / `--terrain-presentation composed`
+retained as explicit developer inputs. Composition is currently restricted to
+local `mclone-overworld-v1`; exact-only remains allocation-free by default. A
+stored Experimental choice reads `Experimental (Unavailable)` while an
+incompatible world is active instead of silently pretending that composition
+is live.
 Native low-angle and elevated captures show the exact foreground silhouette
 correctly occluding the surrounding procedural terrain. Native thread and
 browser Worker executors now feed the same vegetation coordinator; exact
@@ -126,8 +137,14 @@ sky-colored ring crack or stable tile-lighting grid. The browser reaches the
 same ten-level/stride-one pixels but required roughly two minutes to settle on
 the validation host, so startup and frame cost remain a separate, now
 measurable follow-up rather than justification for an implicit quality fork.
-Browser multi-flat,
-full-frame multiview, Android, and headset promotion remain PH-7/PH-8 work.
+Tactical 274 promotes the control to every shared client menu, persists it
+through the native/Android/browser graphics adapters, extends the default
+per-eye XR projection to the same clipmap-derived reach, and adds a
+target-ready synthetic stereo capture. Flat Android and Android XR APKs,
+desktop XR compilation, native flat pixels, synthetic stereo pixels, and
+headed browser pixels pass. Physical Android/headset quality and performance
+remain follow-up evidence. Optional full-frame multiview still has no
+procedural-horizon pipeline and is not the default XR renderer.
 Canonical exact generation and live authoritative render sections remain
 different truth-source adapters.
 

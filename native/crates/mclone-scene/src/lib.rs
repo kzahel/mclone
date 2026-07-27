@@ -181,12 +181,12 @@ use mclone_ui::{
     FlatHudDebugOverlay, GameAuxiliarySplitMode, GameCollisionMode, GameDeathCause,
     GameFlatPresentationState, GameFramePacingMode, GameGrassDetail, GameLeafDetail,
     GameLocalPlayControllerFamily, GameLocalPlayGuestInput, GameLocalPlayState, GameMovementMode,
-    GamePlayerModel, GameScreen, GameSimulationCadence, GameTouchSettings, GameTravelAssistMode,
-    GameTurnMode, GameUiAction, GameUiHost, GameUiRenderState, GameWorldRenderScaleMode,
-    GameXrTurnMode, GamepadHudOverlay, GuiDrawList, GuiKey, GuiScale, LoadingProgressOverlay,
-    Point, Rect, StatusOverlay, StorageProfileBackend, StorageProfileUiState, TouchOverlay,
-    UiDebugSnapshot, UiDrawCacheStats, UiPanelRevision, WorldCatalogUiStatus,
-    render_loading_progress_overlay, render_status_overlay,
+    GamePlayerModel, GameScreen, GameSimulationCadence, GameTerrainPresentation, GameTouchSettings,
+    GameTravelAssistMode, GameTurnMode, GameUiAction, GameUiHost, GameUiRenderState,
+    GameWorldRenderScaleMode, GameXrTurnMode, GamepadHudOverlay, GuiDrawList, GuiKey, GuiScale,
+    LoadingProgressOverlay, Point, Rect, StatusOverlay, StorageProfileBackend,
+    StorageProfileUiState, TouchOverlay, UiDebugSnapshot, UiDrawCacheStats, UiPanelRevision,
+    WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
 };
 
 mod asset_replacement;
@@ -236,6 +236,32 @@ pub(crate) const fn game_grass_detail(detail: GrassQuality) -> GameGrassDetail {
         GrassQuality::Sparse => GameGrassDetail::Sparse,
         GrassQuality::Lush => GameGrassDetail::Lush,
         GrassQuality::Ultra => GameGrassDetail::Ultra,
+    }
+}
+
+pub(crate) const fn engine_terrain_presentation(
+    presentation: GameTerrainPresentation,
+) -> mclone_app_runtime::startup_args::TerrainPresentationMode {
+    match presentation {
+        GameTerrainPresentation::ExactOnly => {
+            mclone_app_runtime::startup_args::TerrainPresentationMode::ExactOnly
+        }
+        GameTerrainPresentation::Experimental => {
+            mclone_app_runtime::startup_args::TerrainPresentationMode::Composed
+        }
+    }
+}
+
+pub(crate) const fn game_terrain_presentation(
+    mode: mclone_app_runtime::startup_args::TerrainPresentationMode,
+) -> GameTerrainPresentation {
+    match mode {
+        mclone_app_runtime::startup_args::TerrainPresentationMode::ExactOnly => {
+            GameTerrainPresentation::ExactOnly
+        }
+        mclone_app_runtime::startup_args::TerrainPresentationMode::Composed => {
+            GameTerrainPresentation::Experimental
+        }
     }
 }
 
@@ -800,6 +826,7 @@ pub struct McloneSceneHost {
     asset_pack_preference_error: Option<String>,
     graphics_preference_storage: Option<Box<dyn ClientGraphicsPreferenceStorage>>,
     graphics_preference_error: Option<String>,
+    terrain_presentation_preference: GameTerrainPresentation,
     pending_leaf_detail: Option<mclone_mesh::LeafDetail>,
     pending_restored_asset_pack_selection:
         Option<(AssetPackSelection, mclone_assets::TexturePresentation)>,
@@ -1219,7 +1246,11 @@ impl McloneSceneHost {
         self.sync_player_lifecycle_ui();
         let mut timing = XrTerrainFrameTiming::default();
         let render_views_start = self.services.clock.now();
-        let render_views = fixed_startup_view_pose_render_views(view_pose, eye_fovs)?;
+        let render_views = fixed_startup_view_pose_render_views_with_far(
+            view_pose,
+            eye_fovs,
+            self.terrain_projection_far_distance(XR_FAR),
+        )?;
         timing.render_views_ms = elapsed_ms(self.services.clock.elapsed_since(render_views_start));
         self.render_prepared_frame(
             device,
@@ -1259,7 +1290,11 @@ impl McloneSceneHost {
         self.sync_player_lifecycle_ui();
         let mut timing = XrTerrainFrameTiming::default();
         let render_views_start = self.services.clock.now();
-        let render_views = fixed_startup_view_pose_render_views(view_pose, eye_fovs)?;
+        let render_views = fixed_startup_view_pose_render_views_with_far(
+            view_pose,
+            eye_fovs,
+            self.terrain_projection_far_distance(XR_FAR),
+        )?;
         timing.render_views_ms = elapsed_ms(self.services.clock.elapsed_since(render_views_start));
         self.render_prepared_frame_multiview(
             device,
@@ -6825,6 +6860,14 @@ mod tests {
         assert!((center - Vec3::from_array(view_pose.position)).length() < 1.0e-6);
         assert!((yaw_from_forward(forward).unwrap() - std::f32::consts::FRAC_PI_2).abs() < 1.0e-6);
         assert!(forward.y.abs() < 1.0e-6);
+        assert_eq!(render_views[0].z_far, XR_FAR);
+        assert_eq!(render_views[1].z_far, XR_FAR);
+
+        let extended =
+            fixed_startup_view_pose_render_views_with_far(view_pose, [fov, fov], 140_000.0)
+                .unwrap();
+        assert_eq!(extended[0].z_far, 140_000.0);
+        assert_eq!(extended[1].z_far, 140_000.0);
     }
 
     #[test]

@@ -458,6 +458,9 @@ impl McloneSceneHost {
             asset_pack_preference_error: None,
             graphics_preference_storage: None,
             graphics_preference_error: None,
+            terrain_presentation_preference: game_terrain_presentation(
+                scene.startup.terrain_presentation,
+            ),
             pending_leaf_detail: None,
             pending_restored_asset_pack_selection: None,
             external_asset_pack_preparation: false,
@@ -662,6 +665,9 @@ impl McloneSceneHost {
             asset_pack_preference_error: None,
             graphics_preference_storage: None,
             graphics_preference_error: None,
+            terrain_presentation_preference: game_terrain_presentation(
+                scene.startup.terrain_presentation,
+            ),
             pending_leaf_detail: None,
             pending_restored_asset_pack_selection: None,
             external_asset_pack_preparation: false,
@@ -948,6 +954,9 @@ impl McloneSceneHost {
             asset_pack_preference_error: None,
             graphics_preference_storage: None,
             graphics_preference_error: None,
+            terrain_presentation_preference: game_terrain_presentation(
+                scene.startup.terrain_presentation,
+            ),
             pending_leaf_detail: None,
             pending_restored_asset_pack_selection: None,
             external_asset_pack_preparation: false,
@@ -6212,6 +6221,10 @@ impl ClientExperienceSettingsHost for McloneSceneHost {
     fn set_grass_detail(&mut self, detail: GameGrassDetail) -> Result<()> {
         self.request_grass_detail(engine_grass_detail(detail));
         Ok(())
+    }
+
+    fn set_terrain_presentation(&mut self, presentation: GameTerrainPresentation) -> Result<()> {
+        self.request_terrain_presentation(presentation)
     }
 
     fn set_fullbright(&mut self, enabled: bool) -> Result<()> {

@@ -2,7 +2,7 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
-use mclone_ui::{GameGrassDetail, GameLeafDetail};
+use mclone_ui::{GameGrassDetail, GameLeafDetail, GameTerrainPresentation};
 use serde::{Deserialize, Serialize};
 
 use crate::input_preferences::PreferenceKeyValueStore;
@@ -15,6 +15,7 @@ pub const GRAPHICS_PREFERENCE_FILE_NAME: &str = "graphics-preferences.v1.json";
 pub struct ClientGraphicsPreferences {
     pub leaf_detail: GameLeafDetail,
     pub grass_detail: GameGrassDetail,
+    pub terrain_presentation: GameTerrainPresentation,
 }
 
 impl ClientGraphicsPreferences {
@@ -52,6 +53,7 @@ impl ClientGraphicsPreferences {
 struct StoredGraphicsPreferences {
     leaf_detail: StoredLeafDetail,
     grass_detail: StoredGrassDetail,
+    terrain_presentation: StoredTerrainPresentation,
 }
 
 impl From<ClientGraphicsPreferences> for StoredGraphicsPreferences {
@@ -66,6 +68,10 @@ impl From<ClientGraphicsPreferences> for StoredGraphicsPreferences {
                 GameGrassDetail::Sparse => StoredGrassDetail::Sparse,
                 GameGrassDetail::Lush => StoredGrassDetail::Lush,
                 GameGrassDetail::Ultra => StoredGrassDetail::Ultra,
+            },
+            terrain_presentation: match value.terrain_presentation {
+                GameTerrainPresentation::ExactOnly => StoredTerrainPresentation::ExactOnly,
+                GameTerrainPresentation::Experimental => StoredTerrainPresentation::Experimental,
             },
         }
     }
@@ -83,6 +89,10 @@ impl From<StoredGraphicsPreferences> for ClientGraphicsPreferences {
                 StoredGrassDetail::Sparse => GameGrassDetail::Sparse,
                 StoredGrassDetail::Lush => GameGrassDetail::Lush,
                 StoredGrassDetail::Ultra => GameGrassDetail::Ultra,
+            },
+            terrain_presentation: match value.terrain_presentation {
+                StoredTerrainPresentation::ExactOnly => GameTerrainPresentation::ExactOnly,
+                StoredTerrainPresentation::Experimental => GameTerrainPresentation::Experimental,
             },
         }
     }
@@ -104,6 +114,14 @@ enum StoredGrassDetail {
     Sparse,
     Lush,
     Ultra,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum StoredTerrainPresentation {
+    #[default]
+    ExactOnly,
+    Experimental,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -232,6 +250,10 @@ mod tests {
             ClientGraphicsPreferences::default().grass_detail,
             GameGrassDetail::Off
         );
+        assert_eq!(
+            ClientGraphicsPreferences::default().terrain_presentation,
+            GameTerrainPresentation::ExactOnly
+        );
     }
 
     #[test]
@@ -240,6 +262,7 @@ mod tests {
         let preferences = ClientGraphicsPreferences {
             leaf_detail: GameLeafDetail::Bushy,
             grass_detail: GameGrassDetail::Lush,
+            terrain_presentation: GameTerrainPresentation::Experimental,
         };
         preferences.store(&store).unwrap();
 
@@ -269,6 +292,12 @@ mod tests {
             )
             .is_err()
         );
+        assert!(
+            ClientGraphicsPreferences::from_json(
+                r#"{"schema":1,"preferences":{"terrainPresentation":"cinematic"}}"#
+            )
+            .is_err()
+        );
     }
 
     #[test]
@@ -292,6 +321,7 @@ mod tests {
         let preferences = ClientGraphicsPreferences {
             leaf_detail: GameLeafDetail::Bushy,
             grass_detail: GameGrassDetail::Ultra,
+            terrain_presentation: GameTerrainPresentation::Experimental,
         };
 
         storage.store(&preferences).unwrap();

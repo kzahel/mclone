@@ -2,6 +2,7 @@ use std::collections::BTreeSet;
 
 use anyhow::{Context, Result, bail};
 use mclone_app_runtime::frame_render::{TerrainBackdropRenderContext, TerrainBackdropRenderer};
+use mclone_app_runtime::host_mode::SingleViewHostMode;
 use mclone_app_runtime::render_asset_data::TexturedMeshAssets;
 use mclone_core::{BlockStateId, ChunkPos, HorizontalTopology};
 use mclone_render::color_profile::RenderColorProfile;
@@ -15,7 +16,9 @@ use mclone_terrain_view::{
 };
 use mclone_worldgen::terrain_preview::{TerrainPreviewContentStage, TerrainPreviewProfile};
 
-use crate::{McloneSceneHost, WorldInstanceId};
+use crate::{
+    GameTerrainPresentation, McloneSceneHost, WorldInstanceId, engine_terrain_presentation,
+};
 
 pub(crate) type SceneTerrainVegetationExecutorFactory =
     Box<dyn Fn() -> Result<Box<dyn TerrainVegetationExecutor>, String>>;
@@ -211,13 +214,61 @@ pub(crate) fn scene_terrain_projection_far_distance(
 }
 
 impl McloneSceneHost {
+    pub const fn terrain_presentation_preference(&self) -> GameTerrainPresentation {
+        self.terrain_presentation_preference
+    }
+
+    pub fn terrain_presentation_supported(&self) -> bool {
+        self.active_world.scene.world_generation_profile
+            == mclone_server::WorldGenerationProfile::McloneOverworldV1
+            && self.active_world.runtime.as_ref().map_or_else(
+                || self.active_world.scene.startup.remote_addr.is_none(),
+                |runtime| runtime.host_mode() == SingleViewHostMode::LocalIntegrated,
+            )
+    }
+
+    pub(crate) fn effective_terrain_presentation_mode(
+        &self,
+    ) -> mclone_app_runtime::startup_args::TerrainPresentationMode {
+        if self.terrain_presentation_supported() {
+            engine_terrain_presentation(self.terrain_presentation_preference)
+        } else {
+            mclone_app_runtime::startup_args::TerrainPresentationMode::ExactOnly
+        }
+    }
+
+    pub(crate) fn terrain_projection_far_distance(&self, ordinary_far_distance: f32) -> f32 {
+        scene_terrain_projection_far_distance(
+            self.effective_terrain_presentation_mode(),
+            ordinary_far_distance,
+        )
+    }
+
+    pub fn request_terrain_presentation(
+        &mut self,
+        presentation: GameTerrainPresentation,
+    ) -> Result<()> {
+        if presentation == self.terrain_presentation_preference {
+            return Ok(());
+        }
+        self.terrain_presentation_preference = presentation;
+        self.reset_terrain_view();
+        self.persist_graphics_preferences();
+        log::info!(
+            "distant terrain preference set to {}; active={}",
+            presentation.label(),
+            self.effective_terrain_presentation_mode().label(),
+        );
+        Ok(())
+    }
+
     pub(crate) fn prepare_terrain_view_for_frame(
         &mut self,
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         focus: [f64; 3],
     ) -> Result<bool> {
-        if self.active_world.scene.startup.terrain_presentation
+        if self.effective_terrain_presentation_mode()
             != mclone_app_runtime::startup_args::TerrainPresentationMode::Composed
         {
             self.reset_terrain_view();

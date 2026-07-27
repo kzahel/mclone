@@ -684,10 +684,7 @@ impl McloneSceneHost {
             self.active_world.camera.view_mode(),
             self.current_render_distance(),
         );
-        pose.z_far = crate::terrain_view::scene_terrain_projection_far_distance(
-            self.active_world.scene.startup.terrain_presentation,
-            pose.z_far,
-        );
+        pose.z_far = self.terrain_projection_far_distance(pose.z_far);
         pose.render_view(size[0].max(1), size[1].max(1))
     }
 
@@ -912,10 +909,7 @@ impl McloneSceneHost {
                 guest.camera.view_mode(),
                 self.current_render_distance(),
             );
-            pose.z_far = crate::terrain_view::scene_terrain_projection_far_distance(
-                self.active_world.scene.startup.terrain_presentation,
-                pose.z_far,
-            );
+            pose.z_far = self.terrain_projection_far_distance(pose.z_far);
             pose.render_view(auxiliary_size[0].max(1), auxiliary_size[1].max(1))?
         } else {
             auxiliary_follow_render_view(primary, auxiliary_size)

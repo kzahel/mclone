@@ -2873,6 +2873,7 @@ impl GameUiHost {
             GameUiAction::ToggleSectionOcclusion
             | GameUiAction::SetLeafDetail(_)
             | GameUiAction::SetGrassDetail(_)
+            | GameUiAction::SetTerrainPresentation(_)
             | GameUiAction::ToggleAssetPack(_)
             | GameUiAction::CycleTexturePresentation
             | GameUiAction::ApplyAssetPacks
@@ -3109,6 +3110,7 @@ const UI_V2_OPTIONS_WORLD_RESOLUTION: UiWidgetId = UiWidgetId(145);
 const UI_V2_OPTIONS_WORLD_RENDER_SCALE: UiWidgetId = UiWidgetId(146);
 const UI_V2_OPTIONS_LEAF_DETAIL: UiWidgetId = UiWidgetId(147);
 const UI_V2_OPTIONS_GRASS_DETAIL: UiWidgetId = UiWidgetId(154);
+const UI_V2_OPTIONS_TERRAIN_PRESENTATION: UiWidgetId = UiWidgetId(155);
 const UI_V2_STORAGE_PROFILE_NAME: UiWidgetId = UiWidgetId(133);
 const UI_V2_STORAGE_PROFILE_ID: UiWidgetId = UiWidgetId(134);
 const UI_V2_STORAGE_BACKEND: UiWidgetId = UiWidgetId(135);
@@ -3741,7 +3743,7 @@ const fn options_category_widget_id(category: GameOptionsCategory) -> UiWidgetId
 /// the row list twice.
 const fn options_category_row_count(category: GameOptionsCategory) -> usize {
     match category {
-        GameOptionsCategory::Graphics => 11,
+        GameOptionsCategory::Graphics => 12,
         GameOptionsCategory::Movement => 8,
         GameOptionsCategory::Display => 3,
         GameOptionsCategory::LocalPlay => 5,
@@ -3914,6 +3916,24 @@ fn options_category_rows(
                     state.grass_detail.label(),
                 )
                 .action(GameUiAction::SetGrassDetail(state.grass_detail.next())),
+            ),
+            (
+                20.0,
+                UiWidget::cycle(
+                    UI_V2_OPTIONS_TERRAIN_PRESENTATION,
+                    ph,
+                    "Distant Terrain",
+                    if state.terrain_presentation == crate::GameTerrainPresentation::Experimental
+                        && !state.terrain_presentation_available
+                    {
+                        "Experimental (Unavailable)"
+                    } else {
+                        state.terrain_presentation.label()
+                    },
+                )
+                .action(GameUiAction::SetTerrainPresentation(
+                    state.terrain_presentation.next(),
+                )),
             ),
             (
                 20.0,

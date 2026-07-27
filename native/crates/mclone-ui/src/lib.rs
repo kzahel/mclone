@@ -2017,6 +2017,7 @@ pub enum GameUiAction {
     ToggleSectionOcclusion,
     SetLeafDetail(GameLeafDetail),
     SetGrassDetail(GameGrassDetail),
+    SetTerrainPresentation(GameTerrainPresentation),
     ToggleFullbright,
     TogglePlayerCollisionBox,
     ToggleFirstPersonPlayer,
@@ -2092,6 +2093,33 @@ impl GameGrassDetail {
             Self::Sparse => "Sparse",
             Self::Lush => "Lush",
             Self::Ultra => "Ultra",
+        }
+    }
+}
+
+/// Player-facing selection for exact-only or composed distant terrain.
+///
+/// `Experimental` keeps the product language honest while the procedural
+/// horizon is being accepted across mobile and XR hardware.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameTerrainPresentation {
+    #[default]
+    ExactOnly,
+    Experimental,
+}
+
+impl GameTerrainPresentation {
+    pub const fn next(self) -> Self {
+        match self {
+            Self::ExactOnly => Self::Experimental,
+            Self::Experimental => Self::ExactOnly,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::ExactOnly => "Off",
+            Self::Experimental => "Experimental",
         }
     }
 }
@@ -2257,6 +2285,8 @@ pub struct GameUiRenderState {
     pub section_occlusion_culling: bool,
     pub leaf_detail: GameLeafDetail,
     pub grass_detail: GameGrassDetail,
+    pub terrain_presentation: GameTerrainPresentation,
+    pub terrain_presentation_available: bool,
     pub force_fullbright: bool,
     pub player_collision_box_visible: bool,
     pub first_person_player_visible: bool,
@@ -2302,6 +2332,8 @@ impl Default for GameUiRenderState {
             section_occlusion_culling: true,
             leaf_detail: GameLeafDetail::Blocky,
             grass_detail: GameGrassDetail::Off,
+            terrain_presentation: GameTerrainPresentation::ExactOnly,
+            terrain_presentation_available: true,
             force_fullbright: false,
             player_collision_box_visible: false,
             first_person_player_visible: false,
