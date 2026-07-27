@@ -4,7 +4,8 @@ Status: **Implementation complete at Human Review R1 as of 2026-07-27.
 Commits `fb1929c2`, `b0889375`, and `25111ddb` record the specification,
 shared reconstruction, and Terrain Lab diagnostic. Mclone Overworld,
 persisted generator profiles, block chunks, and selective 3D remain
-unchanged. Do not continue into production integration before review.**
+unchanged. Commit `7214e28a` records the Human Review R1 navigation
+correction. Do not continue into production integration before review.**
 
 Topic:
 
@@ -314,6 +315,42 @@ Validation completed:
 - the browser test proved a torus period lift preserves the exact terrain
   checksum; and
 - headed Chrome reported no page or console errors.
+
+### Human Review R1 navigation correction
+
+The first hosted review found that pan and zoom discarded the last completed
+reconstruction while a debounced replacement request was pending. All four
+panels therefore became black during the interaction, and continuous motion
+prevented the debounce from producing intermediate terrain frames.
+
+Commit `7214e28a` changes presentation scheduling without changing the
+reconstruction or its pinned suite:
+
+- the last completed response remains drawable until its replacement is
+  complete;
+- the visible canvas receives only completed frames from one reusable drawing
+  buffer, so an expensive 3D redraw cannot expose its initial black clear;
+- at most one Worker reconstruction is in flight while navigation coalesces
+  all newer states into the most recent pending request;
+- the next request starts as soon as the current response arrives, allowing
+  continuous pan and zoom to publish intermediate absolute-coordinate frames
+  without an unbounded Worker backlog; and
+- the badge distinguishes the initial reconstruction from an update whose
+  preceding frame remains visible.
+
+The desktop and Pixel 7 browser lanes now orbit the 3D surface and perform a
+continuous shift-drag pan. They prove that visible pixels change during orbit,
+new terrain checksums and pixels arrive before the pointer is released, and
+`data-render-ready` never drops during the pan. The retained frame and report
+keep their completed-response metadata; scheduling never manufactures a
+checksum for pending coordinates, and the completed replacement remains the
+same order-independent Rust reconstruction.
+
+The inspected phone frame remains outside the repository at:
+
+```text
+/tmp/mclone-semantic-terrain-interactive-phone.png
+```
 
 The review route is:
 
