@@ -198,6 +198,18 @@ impl SceneTerrainViewState {
     }
 }
 
+pub(crate) fn scene_terrain_projection_far_distance(
+    mode: mclone_app_runtime::startup_args::TerrainPresentationMode,
+    ordinary_far_distance: f32,
+) -> f32 {
+    if mode == mclone_app_runtime::startup_args::TerrainPresentationMode::Composed {
+        ordinary_far_distance
+            .max(scene_terrain_clipmap_config().conservative_view_distance_blocks())
+    } else {
+        ordinary_far_distance
+    }
+}
+
 impl McloneSceneHost {
     pub(crate) fn prepare_terrain_view_for_frame(
         &mut self,
@@ -395,5 +407,19 @@ mod tests {
         assert_eq!(floor_f64_to_i32(f64::INFINITY), i32::MAX);
         assert_eq!(floor_f64_to_i32(f64::NEG_INFINITY), i32::MIN);
         assert_eq!(floor_f64_to_i32(f64::NAN), 0);
+    }
+
+    #[test]
+    fn only_composed_terrain_extends_the_shared_projection_reach() {
+        use mclone_app_runtime::startup_args::TerrainPresentationMode;
+
+        assert_eq!(
+            scene_terrain_projection_far_distance(TerrainPresentationMode::ExactOnly, 1_084.0),
+            1_084.0
+        );
+        assert!(
+            scene_terrain_projection_far_distance(TerrainPresentationMode::Composed, 1_084.0)
+                > 139_000.0
+        );
     }
 }

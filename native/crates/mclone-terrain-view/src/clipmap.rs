@@ -121,6 +121,21 @@ impl TerrainClipmapConfig {
     pub fn sample_spacing(self, level: u32) -> u32 {
         self.base_sample_spacing << level
     }
+
+    /// Conservative eye-to-corner distance for the coarsest resident level.
+    ///
+    /// Four-tile levels are anchored around the tile containing the observer,
+    /// so an observer at the far side of that tile can be three tile
+    /// footprints from the opposite edge. Include both horizontal axes and a
+    /// fixed vertical allowance for the supported overworld height range.
+    pub fn conservative_view_distance_blocks(self) -> f32 {
+        let outer_level = self.level_count.saturating_sub(1);
+        let tile_footprint = f64::from(TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS)
+            * f64::from(self.sample_spacing(outer_level));
+        let maximum_axis_footprints = f64::from(self.tiles_per_axis / 2 + 1);
+        let maximum_axis_distance = tile_footprint * maximum_axis_footprints;
+        maximum_axis_distance.hypot(maximum_axis_distance) as f32 + 512.0
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -594,5 +609,13 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn default_projection_reach_contains_the_coarsest_resident_bounds() {
+        let config = TerrainClipmapConfig::default();
+        let reach = config.conservative_view_distance_blocks();
+        assert!(reach > 139_000.0);
+        assert!(reach < 141_000.0);
     }
 }

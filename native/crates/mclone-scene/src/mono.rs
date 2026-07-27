@@ -677,14 +677,18 @@ impl McloneSceneHost {
     }
 
     pub fn mono_render_view(&self, size: [u32; 2]) -> Result<ChunkRenderView> {
-        render_pose_from_snapshot_with_view_mode(
+        let mut pose = render_pose_from_snapshot_with_view_mode(
             self.active_world
                 .local_participant
                 .presentation_camera_snapshot(),
             self.active_world.camera.view_mode(),
             self.current_render_distance(),
-        )
-        .render_view(size[0].max(1), size[1].max(1))
+        );
+        pose.z_far = crate::terrain_view::scene_terrain_projection_far_distance(
+            self.active_world.scene.startup.terrain_presentation,
+            pose.z_far,
+        );
+        pose.render_view(size[0].max(1), size[1].max(1))
     }
 
     pub fn local_play_state(&self) -> GameLocalPlayState {
@@ -903,12 +907,16 @@ impl McloneSceneHost {
             .as_ref()
             .filter(|_| self.local_play_guest_active())
         {
-            render_pose_from_snapshot_with_view_mode(
+            let mut pose = render_pose_from_snapshot_with_view_mode(
                 guest.presentation_camera_snapshot(),
                 guest.camera.view_mode(),
                 self.current_render_distance(),
-            )
-            .render_view(auxiliary_size[0].max(1), auxiliary_size[1].max(1))?
+            );
+            pose.z_far = crate::terrain_view::scene_terrain_projection_far_distance(
+                self.active_world.scene.startup.terrain_presentation,
+                pose.z_far,
+            );
+            pose.render_view(auxiliary_size[0].max(1), auxiliary_size[1].max(1))?
         } else {
             auxiliary_follow_render_view(primary, auxiliary_size)
         };
