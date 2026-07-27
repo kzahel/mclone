@@ -9,8 +9,9 @@ landform-plan recenter canary, and discovery-state/last-writer canaries. The
 native and Wasm semantic witnesses agree. This proves the instrument can
 detect the known failure classes; it does not prove a streamed relational
 planner, boundary construction, geographic quality, or production cost.
-Candidates B, C, and D remain unimplemented and production terrain remains
-unchanged.**
+Minimal semantic trials for Candidate B and Candidate C were authorized on
+2026-07-27 and are in progress. Candidate D, terrain reconstruction, Terrain
+Lab integration, and production terrain changes remain out of scope.**
 
 ## Purpose
 

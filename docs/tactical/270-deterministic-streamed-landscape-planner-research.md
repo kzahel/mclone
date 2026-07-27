@@ -1,9 +1,10 @@
 # Tactical 270: Deterministic Streamed Landscape Planner Research
 
 Status: **Human Review R0 accepted 2026-07-27; Phase 1 neutral invariance
-harness and controls completed at `14d832b8`. Paused at the authorization
-boundary before Phase 2.** Research only; no Candidate B/C/D implementation,
-Terrain Lab integration, or production terrain integration is authorized.
+harness and controls completed at `14d832b8`; minimal Phase 2 Candidate B and
+Candidate C semantic trials authorized 2026-07-27 and in progress.** Research
+only; Candidate D, Terrain Lab integration, terrain reconstruction, and
+production integration remain unauthorized.
 
 Topics:
 
@@ -710,6 +711,12 @@ consumer was implemented.
 
 Candidates with nonzero semantic mismatches, undeclared traversal, or
 exploration-history growth do not advance.
+
+**Authorization 2026-07-27:** implement separate minimal trials for Candidate
+B's hierarchical shared-boundary facts and Candidate C's feature-owned bounded
+graphs. Run both through the Phase 1 harness and compare them with the
+fallback. Do not compose Candidate D, reconstruct terrain, add Terrain Lab
+presentation, or change production generation in this phase.
 
 ### Phase 3: streamed structural atlas
 
