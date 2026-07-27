@@ -555,6 +555,7 @@ struct HybridPlan {
     seed: i64,
     topology: StudyTopology,
     grid: StudyGrid,
+    sampler: McloneOverworldSampler,
     fields: RegionalFields,
     cells: Vec<PlanCell>,
     sinks: Vec<BasinSink>,
@@ -716,6 +717,7 @@ impl HybridPlan {
             seed,
             topology,
             grid,
+            sampler,
             fields,
             cells,
             sinks,
@@ -828,9 +830,7 @@ impl HybridPlan {
         let world_x = self.topology.canonical_world_x(world_x);
         let sample_x = world_x.round() as i32;
         let sample_z = world_z.round() as i32;
-        let control =
-            McloneOverworldSampler::new_with_topology(self.seed, self.topology.sampling_topology())
-                .sample(sample_x, sample_z);
+        let control = self.sampler.sample(sample_x, sample_z);
         let envelope = self.fields.sample(sample_x, sample_z, control);
         if control.continentalness <= 0.0 {
             return ReconstructionSample {
@@ -929,8 +929,6 @@ impl HybridPlan {
         let mut source_water_mismatches = 0;
         let mut envelope_max_error = 0.0_f64;
         let mut sample_count = 0;
-        let sampler =
-            McloneOverworldSampler::new_with_topology(self.seed, self.topology.sampling_topology());
         for grid_z in (0..CELLS).step_by(7) {
             let world_z = -STUDY_BLOCKS / 2 + grid_z as i32 * CELL_BLOCKS + CELL_BLOCKS / 2;
             let left = self.sample_reconstruction(0.0, f64::from(world_z), false);
@@ -942,8 +940,8 @@ impl HybridPlan {
                 self.sample_reconstruction(f64::from(STUDY_BLOCKS), f64::from(world_z), true);
             subordinate_detail_max_error =
                 subordinate_detail_max_error.max((left_detail.height - right_detail.height).abs());
-            let left_control = sampler.sample(0, world_z);
-            let right_control = sampler.sample(STUDY_BLOCKS, world_z);
+            let left_control = self.sampler.sample(0, world_z);
+            let right_control = self.sampler.sample(STUDY_BLOCKS, world_z);
             source_control_max_error = source_control_max_error
                 .max((left_control.continentalness - right_control.continentalness).abs())
                 .max((left_control.mountain_detail - right_control.mountain_detail).abs());
