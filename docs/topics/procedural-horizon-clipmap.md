@@ -113,6 +113,15 @@ are not an accepted quality baseline either. Corrective Tactical
 [`271`](../tactical/271-procedural-horizon-quality-baseline.md) now requires
 matched ten-level/stride-one Explorer, desktop-game, and browser-game
 evidence; shared seam closure and horizon reach precede any performance tier.
+Its implementation is now at Human Review: odd fine outer-edge vertices meet
+the adjacent coarse interpolation, normal derivatives consume that stitched
+surface, and composed flat views derive a roughly 140-kiloblock far plane from
+the resident clipmap while exact-only remains unchanged. Inspected native
+elevated, native low, Explorer, and headed-browser captures show no
+sky-colored ring crack or stable tile-lighting grid. The browser reaches the
+same ten-level/stride-one pixels but required roughly two minutes to settle on
+the validation host, so startup and frame cost remain a separate, now
+measurable follow-up rather than justification for an implicit quality fork.
 Browser multi-flat,
 full-frame multiview, Android, and headset promotion remain PH-7/PH-8 work.
 Canonical exact generation and live authoritative render sections remain

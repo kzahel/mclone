@@ -3,7 +3,8 @@
 ## Status
 
 Hosted Human Review rejected 2026-07-27; corrective quality Tactical
-[`271`](271-procedural-horizon-quality-baseline.md) is active. This is PH-4
+[`271`](271-procedural-horizon-quality-baseline.md) is implemented and awaiting
+its corrective Human Review. This is PH-4
 from parent Tactical
 [`261`](261-procedural-horizon-product-integration-roadmap.md), following the
 accepted World Explorer composition proof in Tactical

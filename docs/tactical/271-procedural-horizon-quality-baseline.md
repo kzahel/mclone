@@ -1,6 +1,7 @@
 # Tactical 271: Procedural Horizon Quality Baseline
 
-Status: active 2026-07-27. Corrective child of active PH-4 Tactical
+Status: implementation complete; Human Review checkpoint pending 2026-07-27.
+Corrective child of active PH-4 Tactical
 [`269`](269-shared-terrain-engine-scene-adoption.md) under coordinating
 Tactical [`261`](261-procedural-horizon-product-integration-roadmap.md).
 
@@ -104,6 +105,8 @@ silhouettes, and the distant horizon are simultaneously visible.
 
 ### Slice 0: status and executable comparison contract
 
+Status: complete 2026-07-27.
+
 - Mark the hosted PH-4 visual checkpoint rejected.
 - Add deterministic matched camera/configuration facts to the Explorer and
   game capture lanes.
@@ -113,6 +116,8 @@ silhouettes, and the distant horizon are simultaneously visible.
 
 ### Slice 1: shared geometric seam closure
 
+Status: complete 2026-07-27.
+
 - Make fine outer-edge vertices meet the adjacent coarse edge interpolation,
   including corners and negative coordinates.
 - Preserve exact absolute sample identity at coincident coarse vertices.
@@ -120,6 +125,8 @@ silhouettes, and the distant horizon are simultaneously visible.
 - Retain bounded clipmap work, toroidal residency, and atomic level admission.
 
 ### Slice 2: lighting and production composition
+
+Status: complete 2026-07-27.
 
 - Derive normal footprints from the stitched geometry and enforce the
   halo/stride invariant.
@@ -129,6 +136,8 @@ silhouettes, and the distant horizon are simultaneously visible.
 
 ### Slice 3: shared horizon reach
 
+Status: complete 2026-07-27.
+
 - Derive a composed-scene far distance from the resident clipmap bounds.
 - Apply it to the one shared exact/procedural projection.
 - Prove that exact-only retains its current camera reach and allocation-free
@@ -136,10 +145,78 @@ silhouettes, and the distant horizon are simultaneously visible.
 
 ### Slice 4: cross-host quality checkpoint
 
+Status: implementation and evidence complete; Human Review pending
+2026-07-27.
+
 - Use ten levels and stride one in the headed browser game even if it is slow.
 - Capture and inspect the complete evidence matrix.
 - Publish desktop images for phone-accessible human review.
 - Stop before performance tuning.
+
+## Implementation And Evidence
+
+The corrective series is:
+
+- `5b26107c` — record the rejected PH-4 checkpoint and bind one shared
+  quality tier;
+- `9846f2e8` — weld odd fine outer-edge vertices to the adjacent coarse
+  interpolation, restore every host to ten levels/stride one, and reject
+  unproven larger strides;
+- `ec8dfb66` — derive the composed flat-view far plane from the coarsest
+  resident ring while leaving exact-only projection unchanged;
+- `2aee0fef` — route narrow and wide normal derivative taps through the same
+  stitched height function used by vertex positions; and
+- `c3bbc0e9` — give only the explicit full-quality browser capture a longer
+  warmup/observation window.
+
+The binding game comparison uses profile `mclone-overworld-v1`, seed `12345`,
+viewport `1280x720`, eye `(8,105,8)`, target `(8,72,-300)`, render distance
+three, ten clipmap levels, render stride one, and settled vegetation. The
+elevated diagnostic uses eye `(8,220,8)` and target `(8,70,-300)`; its receipt
+reports zero drawn exact sections, so every visible surface defect belongs to
+the procedural renderer.
+
+Inspected native captures:
+
+- `/tmp/mclone-t271-native-quality-final-elevated.png` — isolated procedural
+  rings with the full resident reach, no sky-colored fine/coarse crack, and no
+  stable rectangular lighting boundary;
+- `/tmp/mclone-t271-native-quality-final-low.png` — 27 drawn exact sections
+  correctly occluding and joining the procedural background; and
+- `/tmp/mclone-t271-native-exact-only.png` — the same low camera with the
+  ordinary exact-only foreground and no procedural allocation/draw path.
+
+The comparable native Explorer capture is
+`/tmp/mclone-t271-explorer-quality-final.png`: seed `12345`, center
+`(8,-300)`, `1280x720`, ten levels, 160 ready slots, 48/48 vegetation
+products, `128,867,704` fixed resident bytes, and target-ready in `510.47 ms`.
+Its orbit inputs (`310` blocks, yaw `-pi/2`, pitch `0.453`) reproduce the game
+camera line. Explorer deliberately retains its 58-degree orbit FOV,
+sea-level target, and black clear color; those proof-host differences prevent
+a literal whole-image diff but do not change the shared terrain geometry,
+lighting, residency, or vegetation implementation.
+
+The final headed-Wayland browser capture is
+`/tmp/mclone-t271-browser-quality-final.png`. It uses the exact low game
+camera above and reports 49 exact columns, ten drawn levels, 160 drawn tiles,
+809 tree instances, target-ready true, and 48/48 completed vegetation jobs.
+The matching native and browser terrain is visually the same; the browser
+image retains the ordinary crosshair/HUD. The browser needed roughly two
+minutes to produce a fully settled correctness frame on this host. That is
+explicit evidence for the separate performance campaign, not an accepted
+shipping startup time.
+
+The phone-friendly four-image review sheet is
+`/tmp/mclone-t271-quality-review-sheet.png`.
+
+Known limitations at this checkpoint:
+
+- the previously accepted narrow exact/procedural frontier can still
+  z-fight on the outermost exact blocks; a later skirt/frontier treatment owns
+  that issue;
+- browser full-quality startup and frame cost are not yet acceptable; and
+- Explorer and game share the terrain representation engine but intentionally
+  retain different product cameras, backgrounds, and exact-world ownership.
 
 ## Separate Performance Follow-Up
 
