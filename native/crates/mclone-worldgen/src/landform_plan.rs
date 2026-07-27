@@ -135,7 +135,29 @@ pub struct McloneLandformPlanSummary {
 
 impl McloneLandformPlanSummary {
     pub fn build_plane(seed: i64) -> Self {
-        Planner::build(seed).summary()
+        Self::build_plane_window(
+            seed,
+            -MCLONE_LANDFORM_PLAN_STUDY_BLOCKS / 2,
+            -MCLONE_LANDFORM_PLAN_STUDY_BLOCKS / 2,
+        )
+    }
+
+    /// Builds the research planner over a caller-selected bounded window.
+    ///
+    /// This exists to falsify window independence. It does not turn the
+    /// bounded Tactical 267 solve into a streamed world planner.
+    pub fn build_plane_window(seed: i64, min_x: i32, min_z: i32) -> Self {
+        assert_eq!(
+            min_x.rem_euclid(MCLONE_LANDFORM_PLAN_CELL_BLOCKS),
+            0,
+            "landform-plan window X must align to semantic cells"
+        );
+        assert_eq!(
+            min_z.rem_euclid(MCLONE_LANDFORM_PLAN_CELL_BLOCKS),
+            0,
+            "landform-plan window Z must align to semantic cells"
+        );
+        Planner::build(seed, Grid { min_x, min_z }).summary()
     }
 
     pub fn point(&self, world_x: f64, world_z: f64) -> Option<McloneLandformPlanPoint> {
@@ -188,7 +210,10 @@ impl McloneLandformPlanSummary {
 }
 
 #[derive(Clone, Copy, Debug)]
-struct Grid;
+struct Grid {
+    min_x: i32,
+    min_z: i32,
+}
 
 impl Grid {
     const fn len(self) -> usize {
@@ -209,10 +234,10 @@ impl Grid {
     fn world(self, index: usize) -> (i32, i32) {
         let (grid_x, grid_z) = self.coords(index);
         (
-            -MCLONE_LANDFORM_PLAN_STUDY_BLOCKS / 2
+            self.min_x
                 + grid_x as i32 * MCLONE_LANDFORM_PLAN_CELL_BLOCKS
                 + MCLONE_LANDFORM_PLAN_CELL_BLOCKS / 2,
-            -MCLONE_LANDFORM_PLAN_STUDY_BLOCKS / 2
+            self.min_z
                 + grid_z as i32 * MCLONE_LANDFORM_PLAN_CELL_BLOCKS
                 + MCLONE_LANDFORM_PLAN_CELL_BLOCKS / 2,
         )
@@ -366,8 +391,7 @@ struct Planner {
 }
 
 impl Planner {
-    fn build(seed: i64) -> Self {
-        let grid = Grid;
+    fn build(seed: i64, grid: Grid) -> Self {
         let fields = RegionalFields::new(seed);
         let sampler = McloneOverworldSampler::new(seed);
         let mut cells = Vec::with_capacity(grid.len());
@@ -510,8 +534,8 @@ impl Planner {
         );
         McloneLandformPlanSummary {
             seed: self.seed,
-            min_x: -MCLONE_LANDFORM_PLAN_STUDY_BLOCKS / 2,
-            min_z: -MCLONE_LANDFORM_PLAN_STUDY_BLOCKS / 2,
+            min_x: self.grid.min_x,
+            min_z: self.grid.min_z,
             width_cells: MCLONE_LANDFORM_PLAN_CELLS as u16,
             depth_cells: MCLONE_LANDFORM_PLAN_CELLS as u16,
             basin_ids,
@@ -1102,6 +1126,18 @@ mod tests {
         assert!(center.receiver_id < u32::MAX);
         assert!(summary.point(-3_073.0, 0.0).is_none());
         assert!(summary.point(0.0, 3_072.0).is_none());
+    }
+
+    #[test]
+    fn caller_selected_windows_preserve_absolute_bounds() {
+        let summary = McloneLandformPlanSummary::build_plane_window(12_345, -2_048, 1_024);
+        assert_eq!(summary.min_x, -2_048);
+        assert_eq!(summary.min_z, 1_024);
+        let first = summary.point(-2_047.0, 1_025.0).expect("first cell");
+        assert_eq!(first.world_x, -2_032);
+        assert_eq!(first.world_z, 1_040);
+        assert!(summary.point(-2_049.0, 1_025.0).is_none());
+        assert!(summary.point(4_096.0, 1_025.0).is_none());
     }
 
     #[test]
