@@ -123,6 +123,11 @@ series implements the same concern, normally reuse the document slug in its
   and negative space through explicit scales, precedence, bounded plans,
   scale- and topology-aware sampling, selective volumetric terrain, and
   composite review evidence.
+- [`multiscale-terrain-representation.md`](multiscale-terrain-representation.md):
+  active research direction and tailored precedent survey for combining
+  deterministic semantic coarse-to-fine plans, direct generative LOD, and
+  selective 3D density without making camera scale part of terrain identity
+  or sacrificing cheap continental queries.
 - [`deterministic-streamed-landscape-planning.md`](deterministic-streamed-landscape-planning.md):
   active falsifiable research methodology for deciding whether relational
   macro plans can remain exactly independent of request, travel, scheduling,

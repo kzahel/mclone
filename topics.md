@@ -220,3 +220,7 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `universe-product-shell` — first-class product navigation across catalogs,
   detached previews, observers, live play, resume policy, and Lab workbenches
   while preserving current realm, scene, terrain-view, and platform owners
+- `multiscale-terrain-representation` — direct semantic coarse-to-fine
+  geography, cheap canonical surface queries, sparse implicit 3D terrain, and
+  conservative distant summaries under bounded random access and periodic
+  topology

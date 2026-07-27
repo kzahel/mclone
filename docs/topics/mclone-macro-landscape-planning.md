@@ -28,7 +28,10 @@ problem: an absolute location must not change when requested through another
 window, path, region order, cache state, Worker, or topology lift. The focused
 [`deterministic-streamed-landscape-planning`](deterministic-streamed-landscape-planning.md)
 topic and Tactical 270 now own that falsifiable feasibility research. No
-production planner or terrain change is authorized.**
+production planner or terrain change is authorized. The companion
+[`multiscale-terrain-representation`](multiscale-terrain-representation.md)
+topic owns the narrower composition of direct semantic LOD, the cheap
+heightfield spine, and sparse 3D terrain.**
 
 The motivating July 2026 visual review found four related regional-scale
 weaknesses:
@@ -78,6 +81,9 @@ It deliberately does not replace:
   which owns the feasibility method, exact invariants, candidate streamed
   representations, boundary experiments, reference ledger, and fallback for
   a relational planner;
+- [`multiscale-terrain-representation.md`](multiscale-terrain-representation.md),
+  which owns direct generative LOD, the tailored precedent survey, and
+  selective 3D composition;
 - [`mclone-overworld-generation.md`](mclone-overworld-generation.md), which
   owns current implementation truth, field revisions, mechanism boundaries,
   performance receipts, and tactical history;
