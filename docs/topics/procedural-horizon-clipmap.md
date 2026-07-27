@@ -83,8 +83,10 @@ defaults. The hosted desktop and Pixel 7 gates reach 25/25 exact chunks,
 non-empty whole-tree exact/proxy ownership, and all 160 horizon slots at the
 fixed low-angle review site. This is the PH-3 reusable-consumer checkpoint;
 hosted Human Review 1 accepted it on 2026-07-27. PH-3 is complete, PH-4
-shared terrain-view engine extraction plus full-game scene adoption is next,
-and Android/XR promotion remains later. PH-4 must make World Explorer and
+shared terrain-view engine extraction plus full-game scene adoption is active
+in Tactical
+[`269`](../tactical/269-shared-terrain-engine-scene-adoption.md), and
+Android/XR promotion remains later. PH-4 must make World Explorer and
 `mclone-scene` peer hosts of one terrain representation/composition owner,
 not preserve a proof renderer and a game renderer that merely exchange the
 same coverage DTO. Canonical exact generation and live authoritative render

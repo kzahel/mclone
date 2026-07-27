@@ -12,6 +12,7 @@ mod composition;
 mod horizon_admission;
 mod runtime_exact;
 mod runtime_session;
+mod source;
 mod terrain_vegetation_coordinator;
 mod tree_ownership;
 mod viewport;
@@ -72,6 +73,7 @@ pub use runtime_session::{
     TerrainRuntimeCompositionMode, TerrainRuntimeConfig, TerrainRuntimeExactAnchor,
     TerrainRuntimeExactView, TerrainRuntimeSession,
 };
+pub use source::{TerrainPreparedExactFrame, TerrainViewSourceIdentity, TerrainViewTruthRole};
 pub use terrain_vegetation_coordinator::{
     TerrainVegetationAdmission, TerrainVegetationCoordinator,
     TerrainVegetationCoordinatorDiagnostics, TerrainVegetationCoordinatorState,
