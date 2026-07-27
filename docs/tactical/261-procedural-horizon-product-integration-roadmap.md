@@ -8,11 +8,12 @@ Child Tactical
 Review 1B on 2026-07-27. The shared-projection correction, whole-tree
 ownership, native evidence, and hosted desktop/phone composition proof are
 accepted. Minor z-fighting limited to the outermost exact blocks remains a
-known frontier collar/skirt refinement. PH-3 Terrain Lab adoption is the next
-recommended proof slice before full-game rendering. A post-review Explorer
-correction now defaults exact composition to the orbit focus while preserving
-the prior camera-relative placement as an explicit diagnostic option. Hosted
-review accepted that usability correction on 2026-07-27, so PH-3 is ready.
+known frontier collar/skirt refinement. A post-review Explorer correction
+defaults exact composition to the orbit focus while preserving the prior
+camera-relative placement as an explicit diagnostic option. Child Tactical
+[`266`](266-terrain-lab-runtime-composition-adoption.md) completed PH-3 and
+hosted Human Review 1 accepted its reusable Terrain Lab consumer on
+2026-07-27. PH-4 full-game scene adoption is the next recommended child.
 
 Topics:
 
@@ -317,8 +318,8 @@ ready.
 |---|---|---|---|
 | **PH-1 Shared composition substrate** | **complete in Tactical 262** | Add the immutable exact-painted snapshot, source identity, bounded GPU mask, caller-owned color/depth target, explicit load/store behavior, and renderer-neutral draw ordering without importing a product scene. | Unit/offscreen tests prove coherent coverage, negative-coordinate packing, stale rejection, shared depth, and unchanged Horizon mode. |
 | **PH-2 World Explorer composition proof** | **complete in Tactical 262** | Extract the useful canonical exact-view source from Terrain Lab, then add `Horizon`, `Exact`, `Composed`, and `Coverage` modes over one World Explorer device/target. Correct the reviewed exact/proxy tree chimera through complete-record ownership before promotion. | Native movement and inspected four-angle pixels pass; desktop and Pixel 7 browser Workers match painted coverage and whole-tree ownership; hosted interactive Human Review 1B accepted the corrected shared-depth pixels. |
-| **PH-3 Terrain Lab adoption** | **next recommended child** | Add the runtime horizon/composed presentation as another consumer while preserving canonical, CPU LOD, fast CPU LOD, and GPU LOD research panes. | Fixed-anchor Lab comparison exercises the same compositor without moving policy into React or browser canvas code. |
-| **PH-4 Full-game scene adoption** | waiting on PH-3 proof | Have `mclone-scene` publish the same exact-painted facts from real client render sections, construct platform executors at the app rim, and render the ordinary native game with exact terrain near and procedural terrain beyond. | Native game window/offscreen movement proves the accepted compositor under real scene lifecycle while exact-only stays equivalent. |
+| **PH-3 Terrain Lab adoption** | **complete in Tactical 266** | Add the runtime horizon/composed presentation as another consumer while preserving canonical, CPU LOD, fast CPU LOD, and GPU LOD research panes. | Fixed-anchor Lab comparison exercises the same compositor without moving policy into React or browser canvas code; hosted Human Review 1 accepted the result. |
+| **PH-4 Full-game scene adoption** | **next recommended child** | Have `mclone-scene` publish the same exact-painted facts from real client render sections, construct platform executors at the app rim, and render the ordinary native game with exact terrain near and procedural terrain beyond. | Native game window/offscreen movement proves the accepted compositor under real scene lifecycle while exact-only stays equivalent. |
 | **PH-5 Vegetation and edit arbitration** | waiting on PH-4; reusable untouched-tree primitive starts in PH-2 | Consume the proven whole-record XOR in the game scene, then reject stale products and invalidate nearby natural proxy ownership when authoritative exact edits change the replacement facts. | No duplicate or disappearing trees at the frontier, including cross-chunk crowns, delayed exact compilation, edits, movement, and source switches. |
 | **PH-6 Lifecycle, recovery, and budgets** | waiting on PH-4/PH-5 | Integrate world/session replacement, active and bounded standby worlds, device loss/rebuild, dynamic exact-radius changes, cross-feature admission, diagnostics, and stable locomotion budgets. | Rebuild and world-switch smokes recover coarse-first without stale draws or unbounded work; exact-only remains protected. |
 | **PH-7 Flat-platform promotion** | waiting on stable native scene | Wire the same scene contracts through the full browser game and flat Android. Construct native-thread or browser-Worker executors only at platform rims; do not copy Explorer policy. Establish device-specific memory/work defaults from evidence. | Desktop web, representative phone browser, and flat Android render matching source/coverage identities and inspected pixels under movement and replacement. |
@@ -358,11 +359,12 @@ conservative bounds, readiness, generation, and selected owner. Trees retain
 their own record and render payload. Later bounded structures or route pieces
 may adapt different ownership units after their concrete needs are known.
 
-The hosted forest and low-angle anchors have passed Human Review 1B. PH-3 may
-now add the proven view to Terrain Lab and close the proof record. A separate
-child then owns `mclone-scene` integration; the proof boundary prevents that
-child from combining scene lifecycle, GPU masking, and first-pixel discovery
-in one cut.
+The hosted forest and low-angle anchors passed Human Review 1B. Tactical 266
+then extracted the runtime renderer, composition session, and browser
+executors into shared ownership and made Terrain Lab a second consumer.
+Hosted Human Review 1 accepted that PH-3 result on 2026-07-27. PH-4 now owns
+`mclone-scene` integration; the completed proof boundary prevents it from
+combining scene lifecycle, GPU masking, and first-pixel discovery in one cut.
 
 ## XR And Multiview Invariants
 

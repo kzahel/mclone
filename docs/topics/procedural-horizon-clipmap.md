@@ -3,7 +3,8 @@
 Topic: `procedural-horizon-clipmap`
 
 Status: the standalone cross-platform proof, transition hardening, and shared
-vegetation service are complete. Active coordinating parent Tactical
+vegetation service are complete. Terrain Lab runtime-composition adoption and
+its hosted human review are also complete. Active coordinating parent Tactical
 [`261`](../tactical/261-procedural-horizon-product-integration-roadmap.md)
 owns the global path into `mclone-scene`, exact/procedural arbitration,
 flat-platform promotion, and XR/multiview acceptance. The first
@@ -81,7 +82,8 @@ an optional `runtime` pane while retaining its four research panes and prior
 defaults. The hosted desktop and Pixel 7 gates reach 25/25 exact chunks,
 non-empty whole-tree exact/proxy ownership, and all 160 horizon slots at the
 fixed low-angle review site. This is the PH-3 reusable-consumer checkpoint;
-game-scene, Android, and XR adoption still have not started.
+hosted Human Review 1 accepted it on 2026-07-27. PH-3 is complete, PH-4
+full-game scene adoption is next, and Android/XR promotion remains later.
 Interactive review on 2026-07-26 diagnosed two remaining proof defects and
 activated Tactical
 [`252`](../tactical/252-procedural-horizon-seams-and-transition-admission.md):

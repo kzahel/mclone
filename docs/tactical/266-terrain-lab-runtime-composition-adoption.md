@@ -2,8 +2,8 @@
 
 ## Status
 
-Active; Slices 0-2 are complete and Slice 3 is at the hosted human-review
-gate. This is the bounded PH-3 child of
+Complete 2026-07-27; all four slices are complete and hosted Human Review 1
+accepted the runtime-composition checkpoint. This is the bounded PH-3 child of
 [Tactical 261](261-procedural-horizon-product-integration-roadmap.md),
 following the accepted runtime composition and focus-anchor work recorded by
 [Tactical 262](262-world-explorer-exact-procedural-composition.md).
@@ -128,7 +128,7 @@ subjective pixel gate.
 Production deployment `f5164466-2339-4285-8721-2b74bb1ae616` serves commit
 `afc44678`. Direct desktop and Pixel 7 hosted smokes both reproduce the local
 `25/25` exact completion, non-empty exact/proxy tree split, `160` ready horizon
-slots, and synchronized pan/rebuild. Human Review 1 is available at:
+slots, and synchronized pan/rebuild. Human Review 1 used:
 
 `https://mclone.kzahel.com/terrain/?profile=mclone-overworld-v1&visual=mclone-original&texture=textured&seed=12345&x=0&z=0&blocks=96&detail=auto&surface=inferred&panes=runtime&canonical=final&radius=2&water=1&vegetation=1&stage=cover&view=3d&projection=perspective&layer=terrain&reviewYaw=3.1415927&reviewPitch=0.12`
 
@@ -143,9 +143,18 @@ at a deterministic seed, focus, scale, and perspective. Review should verify:
 4. orbit, pan, and zoom remain synchronized with any adjacent Lab panes; and
 5. only the already-recorded outermost-block z-fighting is visible at the seam.
 
+Accepted 2026-07-27. Interactive hosted review found the result excellent,
+closing the subjective gate for focus placement, shared-depth composition,
+whole-tree ownership, and Lab navigation. The accepted minor z-fighting at the
+outermost exact blocks remains a known collar/skirt refinement and does not
+block the next child.
+
 ## Exit condition
 
 PH-3 is complete when Terrain Lab consumes the shared runtime composition
 owner, the existing pane set remains intact, automated browser evidence is
 green, and the hosted checkpoint is suitable for human acceptance before live
 game/XR integration.
+
+Met 2026-07-27. PH-4 full-game scene adoption is now the next child in the
+parent roadmap; this tactical does not begin that integration.
