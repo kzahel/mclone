@@ -28,6 +28,10 @@ const BINDGEN_JS_URL = new URL("./pkg/mclone_web_client.js", import.meta.url);
 const BINDGEN_WASM_URL = new URL("./pkg/mclone_web_client_bg.wasm", import.meta.url);
 const THREAD_WORKER_URL = new URL("./mclone-thread-smoke-worker.js", import.meta.url);
 const RENDER_COMPILER_WORKER_URL = new URL("./mclone-render-compiler-worker.js", import.meta.url);
+const TERRAIN_VEGETATION_WORKER_URL = new URL(
+  "./mclone-terrain-vegetation-worker.js",
+  import.meta.url,
+);
 const SERVER_WORKER_URL = new URL("./mclone-integrated-server-worker.js", import.meta.url);
 const SERVER_JOB_WORKER_URL = new URL("./mclone-server-job-worker.js", import.meta.url);
 const RUNTIME_SMOKE_EXPORT = "mclone_web_runtime_smoke_report";
@@ -412,6 +416,14 @@ async function renderCanvas() {
       RENDER_COMPILER_WORKER_URL,
       "mclone-render-compiler-smoke",
     );
+    const terrainVegetationTransportFactory = () => new PolledWorkerTransport(
+      TERRAIN_VEGETATION_WORKER_URL,
+      "mclone-terrain-vegetation-smoke",
+      {
+        bindgenJsUrl: BINDGEN_JS_URL.href,
+        bindgenWasmUrl: BINDGEN_WASM_URL.href,
+      },
+    );
     const startup = module.mclone_web_startup_options_from_query(
       "?startInWorld=true&renderDistance=1&movementMode=fly",
     );
@@ -426,6 +438,7 @@ async function renderCanvas() {
       BINDGEN_JS_URL.href,
       BINDGEN_WASM_URL.href,
       renderWorkerTransportFactory,
+      terrainVegetationTransportFactory,
     );
     if (
       typeof session.syncOverviewRenderFrame !== "function"
@@ -607,6 +620,14 @@ async function createIndexedDbSmokeSession(
     () => new PolledWorkerTransport(
       RENDER_COMPILER_WORKER_URL,
       "mclone-render-compiler-indexeddb-smoke",
+    ),
+    () => new PolledWorkerTransport(
+      TERRAIN_VEGETATION_WORKER_URL,
+      "mclone-terrain-vegetation-indexeddb-smoke",
+      {
+        bindgenJsUrl: BINDGEN_JS_URL.href,
+        bindgenWasmUrl: BINDGEN_WASM_URL.href,
+      },
     ),
   );
 }

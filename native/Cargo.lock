@@ -1963,6 +1963,7 @@ dependencies = [
  "mclone-render-session",
  "mclone-scene",
  "mclone-server",
+ "mclone-terrain-view",
  "mclone-ui",
  "wasm-bindgen",
  "wasm-bindgen-futures",

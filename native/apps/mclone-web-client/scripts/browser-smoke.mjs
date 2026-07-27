@@ -48,6 +48,44 @@ if (
     `--generation-profile requires overworld, flat-grass-v1, small-island-v1, mclone-overworld-v1, topology-probe-v1, or beta-v1; got ${generationProfile}`,
   );
 }
+const terrainPresentationArgIndex = process.argv.indexOf("--terrain-presentation");
+const terrainPresentation = terrainPresentationArgIndex >= 0
+  ? String(process.argv[terrainPresentationArgIndex + 1] ?? "")
+  : "";
+if (terrainPresentation && !["exact-only", "composed"].includes(terrainPresentation)) {
+  throw new Error(
+    `--terrain-presentation requires exact-only or composed; got ${terrainPresentation}`,
+  );
+}
+const terrainCompositionProbe = process.argv.includes("--terrain-composition-probe")
+  || process.env.MCLONE_NATIVE_WEB_TERRAIN_COMPOSITION_PROBE === "1";
+if (terrainCompositionProbe && terrainPresentation !== "composed") {
+  throw new Error("--terrain-composition-probe requires --terrain-presentation composed");
+}
+const screenshotEyeArgIndex = process.argv.indexOf("--screenshot-eye");
+const screenshotEye = screenshotEyeArgIndex >= 0
+  ? String(process.argv[screenshotEyeArgIndex + 1] ?? "")
+  : "";
+const screenshotTargetArgIndex = process.argv.indexOf("--screenshot-target");
+const screenshotTarget = screenshotTargetArgIndex >= 0
+  ? String(process.argv[screenshotTargetArgIndex + 1] ?? "")
+  : "";
+if (Boolean(screenshotEye) !== Boolean(screenshotTarget)) {
+  throw new Error("--screenshot-eye and --screenshot-target must be provided together");
+}
+if (terrainCompositionProbe && !screenshotEye) {
+  throw new Error(
+    "--terrain-composition-probe requires --screenshot-eye and --screenshot-target",
+  );
+}
+for (const [label, value] of [
+  ["--screenshot-eye", screenshotEye],
+  ["--screenshot-target", screenshotTarget],
+]) {
+  if (value && !/^-?[0-9]+(?:\.[0-9]+)?,-?[0-9]+(?:\.[0-9]+)?,-?[0-9]+(?:\.[0-9]+)?$/.test(value)) {
+    throw new Error(`${label} requires x,y,z; got ${value}`);
+  }
+}
 const worldTopologyArgIndex = process.argv.indexOf("--world-topology");
 const worldTopology = worldTopologyArgIndex >= 0
   ? String(process.argv[worldTopologyArgIndex + 1] ?? "")
@@ -344,6 +382,27 @@ async function run() {
         }
       : undefined);
     const page = await context.newPage();
+    await page.addInitScript(() => {
+      const adapterPrototype = globalThis.GPUAdapter?.prototype;
+      if (
+        !adapterPrototype
+        || Object.prototype.hasOwnProperty.call(
+          adapterPrototype,
+          "__mcloneRequestDeviceObserved",
+        )
+      ) return;
+      const requestDevice = adapterPrototype.requestDevice;
+      Object.defineProperty(adapterPrototype, "__mcloneRequestDeviceObserved", {
+        value: true,
+      });
+      adapterPrototype.requestDevice = async function (...args) {
+        const device = await requestDevice.apply(this, args);
+        device.lost.then((info) => {
+          console.error(`WebGPU device lost: ${info.reason}: ${info.message}`);
+        });
+        return device;
+      };
+    });
     if (initialLeafDetail || initialGrassDetail) {
       await page.addInitScript(({ leafDetail, grassDetail }) => {
         /** @type {{ leafDetail: string, grassDetail?: string }} */
@@ -562,6 +621,11 @@ async function run() {
       if (!menuEntryProbe) startupParameters.set("startInWorld", "1");
       if (mobileAppLoop) startupParameters.set("holdStartupProgress", "1");
       if (generationProfile) startupParameters.set("generationProfile", generationProfile);
+      if (terrainPresentation) {
+        startupParameters.set("terrainPresentation", terrainPresentation);
+      }
+      if (screenshotEye) startupParameters.set("screenshotEye", screenshotEye);
+      if (screenshotTarget) startupParameters.set("screenshotTarget", screenshotTarget);
       if (worldTopology) startupParameters.set("worldTopology", worldTopology);
       const appUrl = startupParameters.size > 0
         ? `${baseAppUrl}${baseAppUrl.includes("?") ? "&" : "?"}${startupParameters}`
@@ -629,6 +693,84 @@ async function run() {
         throw new Error(`native web app failed to boot:\n${JSON.stringify(bootState, null, 2)}`);
       }
       const canvas = page.locator("#mclone-canvas");
+      if (terrainCompositionProbe) {
+        await page.waitForFunction(
+          () => {
+            const state = globalThis.__mcloneWebApp?.state;
+            return state?.streamingSettled === true
+              && state.pendingCompileJobCount === 0
+              && state.terrainViewActive === true
+              && state.terrainViewTargetReady === true
+              && state.terrainViewExactColumnCount > 0
+              && state.terrainViewVegetationSubmittedJobs
+                === state.terrainViewVegetationCompletedJobs;
+          },
+          undefined,
+          { timeout: 60_000 },
+        );
+        const eye = /** @type {[number, number, number]} */ (
+          screenshotEye.split(",").map(Number)
+        );
+        const target = /** @type {[number, number, number]} */ (
+          screenshotTarget.split(",").map(Number)
+        );
+        await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
+        await page.waitForFunction(
+          () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
+          undefined,
+          { timeout: 10_000 },
+        );
+        await page.evaluate(
+          ({ eye, target }) => {
+            globalThis.__mcloneWebApp?.setDebugOverlay?.(false);
+            globalThis.__mcloneWebApp?.frameTerrainComposition?.(eye, target);
+          },
+          { eye, target },
+        );
+        const result = await page.evaluate(
+          async () => await globalThis.__mcloneWebApp?.renderOneFrameForSmoke?.() ?? null,
+        );
+        const pageScreenshotCaptured = await page.screenshot({
+          path: screenshotPath,
+          fullPage: false,
+          timeout: 60_000,
+        }).then(() => true, () => false);
+        const canvasPng = await canvas.screenshot({
+          path: canvasScreenshotPath,
+          timeout: 60_000,
+        });
+        const canvasPixels = analyzePng(canvasPng);
+        if (
+          pageErrors.length > 0
+          || canvasPixels.distinctInteriorColorCount < 2
+          || result?.terrainViewActive !== true
+          || result?.terrainViewTargetReady !== true
+          || result?.terrainViewDrawnTiles <= 0
+        ) {
+          throw new Error(`browser terrain-composition probe failed:\n${JSON.stringify({
+            pageErrors,
+            canvasPixels,
+            result,
+          }, null, 2)}`);
+        }
+        console.log(JSON.stringify({
+          url: appUrl,
+          screenshotPath,
+          pageScreenshotCaptured,
+          canvasScreenshotPath,
+          canvasPixels,
+          terrainView: {
+            exactColumnCount: result.terrainViewExactColumnCount,
+            drawnLevels: result.terrainViewDrawnLevels,
+            drawnTiles: result.terrainViewDrawnTiles,
+            targetReady: result.terrainViewTargetReady,
+            treeInstanceCount: result.terrainViewTreeInstanceCount,
+            vegetationSubmittedJobs: result.terrainViewVegetationSubmittedJobs,
+            vegetationCompletedJobs: result.terrainViewVegetationCompletedJobs,
+          },
+        }, null, 2));
+        return;
+      }
       if (menuEntryProbe) {
         await page.waitForFunction(
           () => {
@@ -1618,6 +1760,9 @@ async function run() {
       const canvasPng = await canvas.screenshot({ path: canvasScreenshotPath, timeout: 60_000 });
       const canvasPixels = analyzePng(canvasPng);
       const nativeUiProbe = await captureNativeUiProbe(page, canvas);
+      if (canvasPixels.distinctInteriorColorCount < 2 && pageLogs.length > 0) {
+        console.error(`browser logs before blank canvas assertion:\n${pageLogs.join("\n")}`);
+      }
 
       assertAppLoopResult(
         result,
@@ -7618,7 +7763,28 @@ function assertAppLoopResult(
     throw new Error(`native web app did not report a finite camera pose:\n${JSON.stringify(result, null, 2)}`);
   }
   if (canvasPixels.nonClearInteriorPixelCount < 128 || canvasPixels.distinctInteriorColorCount < 2) {
-    throw new Error(`app canvas screenshot did not contain generated chunk pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);
+    throw new Error(`app canvas screenshot did not contain generated chunk pixels:\n${JSON.stringify({
+      canvasPixels,
+      terrainView: {
+        active: result.terrainViewActive,
+        sourceGeneration: result.terrainViewSourceGeneration,
+        coverageGeneration: result.terrainViewCoverageGeneration,
+        exactColumnCount: result.terrainViewExactColumnCount,
+        frameRevision: result.terrainViewFrameRevision,
+        readySlots: result.terrainViewReadySlots,
+        drawnLevels: result.terrainViewDrawnLevels,
+        drawnTiles: result.terrainViewDrawnTiles,
+        targetReady: result.terrainViewTargetReady,
+        treeInstanceCount: result.terrainViewTreeInstanceCount,
+        pendingVegetationTiles: result.terrainViewPendingVegetationTiles,
+        vegetationEnabled: result.terrainViewVegetationEnabled,
+        vegetationResidentTiles: result.terrainViewVegetationResidentTiles,
+        vegetationSubmittedJobs: result.terrainViewVegetationSubmittedJobs,
+        vegetationCompletedJobs: result.terrainViewVegetationCompletedJobs,
+        vegetationTransportFailures: result.terrainViewVegetationTransportFailures,
+        vegetationJobFailures: result.terrainViewVegetationJobFailures,
+      },
+    }, null, 2)}`);
   }
   if (canvasPixels.skyLikePixelCount < 64) {
     throw new Error(`app canvas screenshot did not contain visible sky pixels:\n${JSON.stringify(canvasPixels, null, 2)}`);

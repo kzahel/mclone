@@ -6,9 +6,15 @@ export type PolledWorkerTransportEvent =
 export class PolledWorkerTransport {
   private worker: Worker | null;
   private readonly inbox: PolledWorkerTransportEvent[];
+  private readonly bootstrap: Record<string, unknown> | null;
 
-  constructor(workerOrUrl: Worker | URL | string, workerName?: string) {
+  constructor(
+    workerOrUrl: Worker | URL | string,
+    workerName?: string,
+    bootstrap?: Record<string, unknown>,
+  ) {
     this.inbox = [];
+    this.bootstrap = bootstrap ?? null;
     this.worker = workerOrUrl instanceof Worker
       ? workerOrUrl
       : new Worker(String(workerOrUrl), {
@@ -30,7 +36,10 @@ export class PolledWorkerTransport {
     if (this.worker === null) {
       throw new Error("browser Worker transport is terminated");
     }
-    this.worker.postMessage(message, transfer);
+    const payload = this.bootstrap === null
+      ? message
+      : Object.assign({}, message, this.bootstrap);
+    this.worker.postMessage(payload, transfer);
   }
 
   poll(): PolledWorkerTransportEvent | null {

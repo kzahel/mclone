@@ -1051,7 +1051,6 @@ impl WebSceneHost {
             .advance_held_frame(host, supplemental, delta_seconds)
             .map_err(js_error)?
             .camera_changed;
-
         let surface_texture = match self.context.surface.get_current_texture() {
             Ok(frame) => frame,
             Err(error) => {
@@ -1584,6 +1583,30 @@ impl WebSceneHost {
         let anchor = preview.placement.composition_anchor();
         let target = Vec3::new(anchor.x as f32, anchor.y as f32 + 0.25, anchor.z as f32);
         set_host_camera_look_at(host, target + Vec3::new(-4.0, 2.25, -6.0), target);
+        self.diagnostic_report(None, false, 0.0, false)
+            .map_err(JsValue::from)
+    }
+
+    /// Smoke/support camera helper for reproducible terrain-composition
+    /// captures after the active runtime has reconciled its player camera.
+    #[wasm_bindgen(js_name = frameTerrainComposition)]
+    pub fn frame_terrain_composition(
+        &mut self,
+        eye_x: f32,
+        eye_y: f32,
+        eye_z: f32,
+        target_x: f32,
+        target_y: f32,
+        target_z: f32,
+    ) -> Result<JsValue, JsValue> {
+        let eye = Vec3::new(eye_x, eye_y, eye_z);
+        let target = Vec3::new(target_x, target_y, target_z);
+        if !eye.is_finite() || !target.is_finite() || eye.distance_squared(target) <= f32::EPSILON {
+            return Err(JsValue::from_str(
+                "terrain composition camera requires finite distinct eye and target points",
+            ));
+        }
+        set_host_camera_look_at(self.host_mut()?, eye, target);
         self.diagnostic_report(None, false, 0.0, false)
             .map_err(JsValue::from)
     }
@@ -2163,11 +2186,13 @@ pub async fn mclone_web_create_scene_host_with_startup(
     bindgen_js_url: String,
     bindgen_wasm_url: String,
     render_worker_transport_factory: js_sys::Function,
+    terrain_vegetation_transport_factory: js_sys::Function,
 ) -> Result<WebSceneHost, JsValue> {
     let initial_asset_packs = resources.into_initial_asset_packs()?;
     let (options, storage, entry) = startup.into_parts();
     let scene_startup = options.scene;
     let render_options = options.render_options;
+    let startup_camera = options.camera;
     let _ = (server_worker_url, server_job_worker_url);
     let scene = McloneSceneHostOptions {
         startup: scene_startup,
@@ -2180,11 +2205,13 @@ pub async fn mclone_web_create_scene_host_with_startup(
         capabilities,
         scene,
         render_options,
+        startup_camera,
         entry,
         storage,
         bindgen_js_url,
         bindgen_wasm_url,
         render_worker_transport_factory,
+        terrain_vegetation_transport_factory,
     )
     .await
 }
@@ -2196,11 +2223,13 @@ async fn create_scene_host(
     capabilities: WebHostCapabilities,
     scene: McloneSceneHostOptions,
     render_options: TexturedSectionRenderOptions,
+    startup_camera: mclone_app_runtime::startup_args::StartupCameraOptions,
     entry: ClientEntryResolution,
     startup_storage: WebWorldStorageStartupOptions,
     bindgen_js_url: String,
     bindgen_wasm_url: String,
     render_worker_transport_factory: js_sys::Function,
+    terrain_vegetation_transport_factory: js_sys::Function,
 ) -> Result<WebSceneHost, JsValue> {
     let render_color_profile = render_options.color_profile.as_str().to_owned();
     let initial_center = scene.center();
@@ -2251,6 +2280,14 @@ async fn create_scene_host(
         None,
     )
     .map_err(js_error)?;
+    host.configure_terrain_vegetation_executor_factory(move || {
+        mclone_terrain_view::BrowserTerrainVegetationExecutor::new(
+            terrain_vegetation_transport_factory.clone().into(),
+        )
+        .map(|executor| {
+            Box::new(executor) as Box<dyn mclone_terrain_view::TerrainVegetationExecutor>
+        })
+    });
     host.set_mono_ui_context(MonoUiContext::default());
     host.set_mono_debug_diagnostics_visible(capabilities.initial_debug_overlay_visible());
     host.configure_external_asset_pack_catalog(
@@ -2266,16 +2303,26 @@ async fn create_scene_host(
     // with the camera's absolute fly speed. The shared host has already
     // applied both launch settings to their distinct camera fields.
     let initial_fly_speed = host.mono_camera_speed_blocks_per_second();
-    host.set_mono_player_camera(
-        Vec3d::new(
-            f64::from(initial_center.x) * 16.0 + 8.0,
-            112.0,
-            f64::from(initial_center.z) * 16.0 + 8.0,
+    match (startup_camera.eye, startup_camera.target) {
+        (Some(eye), Some(target)) => {
+            set_host_camera_look_at(&mut host, Vec3::from_array(eye), Vec3::from_array(target));
+        }
+        (None, None) => host.set_mono_player_camera(
+            Vec3d::new(
+                f64::from(initial_center.x) * 16.0 + 8.0,
+                112.0,
+                f64::from(initial_center.z) * 16.0 + 8.0,
+            ),
+            0.0,
+            -0.35,
+            initial_fly_speed,
         ),
-        0.0,
-        -0.35,
-        initial_fly_speed,
-    );
+        _ => {
+            return Err(JsValue::from_str(
+                "browser screenshotEye and screenshotTarget must be provided together",
+            ));
+        }
+    }
     let startup_requests_session = matches!(
         &entry.intent,
         mclone_app_runtime::client_entry::ClientEntryIntent::StartSession(_)
@@ -3142,6 +3189,79 @@ impl WebSceneHost {
                 "radiusChunks",
                 f64::from(host.current_render_distance()),
             )?;
+            if let Some(terrain) = host.terrain_view_diagnostics() {
+                report_set_bool(&object, "terrainViewActive", true)?;
+                report_set_number(
+                    &object,
+                    "terrainViewSourceGeneration",
+                    terrain.source_generation as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "terrainViewCoverageGeneration",
+                    terrain.coverage_generation as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "terrainViewExactColumnCount",
+                    terrain.exact_column_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "terrainViewFrameRevision",
+                    terrain.last_frame_revision as f64,
+                )?;
+                report_set_number(&object, "terrainViewReadySlots", terrain.ready_slots as f64)?;
+                report_set_number(
+                    &object,
+                    "terrainViewDrawnLevels",
+                    terrain.drawn_levels as f64,
+                )?;
+                report_set_number(&object, "terrainViewDrawnTiles", terrain.drawn_tiles as f64)?;
+                report_set_bool(&object, "terrainViewTargetReady", terrain.target_ready)?;
+                report_set_number(
+                    &object,
+                    "terrainViewTreeInstanceCount",
+                    terrain.tree_instance_count as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "terrainViewPendingVegetationTiles",
+                    terrain.pending_vegetation_tiles as f64,
+                )?;
+                report_set_bool(
+                    &object,
+                    "terrainViewVegetationEnabled",
+                    terrain.vegetation_enabled,
+                )?;
+                report_set_number(
+                    &object,
+                    "terrainViewVegetationResidentTiles",
+                    terrain.vegetation_resident_tiles as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "terrainViewVegetationSubmittedJobs",
+                    terrain.vegetation_submitted_jobs as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "terrainViewVegetationCompletedJobs",
+                    terrain.vegetation_completed_jobs as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "terrainViewVegetationTransportFailures",
+                    terrain.vegetation_transport_failures as f64,
+                )?;
+                report_set_number(
+                    &object,
+                    "terrainViewVegetationJobFailures",
+                    terrain.vegetation_job_failures as f64,
+                )?;
+            } else {
+                report_set_bool(&object, "terrainViewActive", false)?;
+            }
             report_set_number(&object, "timeOfDay", f64::from(host.mono_time_of_day()))?;
             report_set_number(
                 &object,

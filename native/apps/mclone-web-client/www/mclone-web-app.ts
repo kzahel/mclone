@@ -60,6 +60,7 @@ const DEPLOY_ASSET_VERSION = normalizedDeployAssetVersion();
 const BINDGEN_JS_URL = versionedUrl("./pkg/mclone_web_client.js");
 const BINDGEN_WASM_URL = versionedUrl("./pkg/mclone_web_client_bg.wasm");
 const RENDER_COMPILER_WORKER_URL = versionedUrl("./mclone-render-compiler-worker.js");
+const TERRAIN_VEGETATION_WORKER_URL = versionedUrl("./mclone-terrain-vegetation-worker.js");
 const SERVER_WORKER_URL = versionedUrl("./mclone-integrated-server-worker.js");
 const SERVER_JOB_WORKER_URL = versionedUrl("./mclone-server-job-worker.js");
 const MAX_FRAME_DT_SECONDS = 0.05;
@@ -186,6 +187,14 @@ class WebFrameDriver {
       RENDER_COMPILER_WORKER_URL,
       "mclone-render-compiler-app",
     );
+    const terrainVegetationTransportFactory = () => new PolledWorkerTransport(
+      TERRAIN_VEGETATION_WORKER_URL,
+      "mclone-terrain-vegetation-app",
+      {
+        bindgenJsUrl: BINDGEN_JS_URL.href,
+        bindgenWasmUrl: BINDGEN_WASM_URL.href,
+      },
+    );
     publishRuntimeState(runtime.state);
     const capabilities = new module.WebHostCapabilities(
       hasTouchInput(),
@@ -202,6 +211,7 @@ class WebFrameDriver {
       BINDGEN_JS_URL.href,
       BINDGEN_WASM_URL.href,
       renderWorkerTransportFactory,
+      terrainVegetationTransportFactory,
     );
     if (!this.session.renderCompilerSharedSupported()) {
       throw new Error(

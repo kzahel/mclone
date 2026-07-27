@@ -3118,6 +3118,8 @@ fn web_render_distance_limits() -> RenderDistanceLimits {
 pub(super) struct WebCanvasContext {
     pub(super) canvas: HtmlCanvasElement,
     pub(super) surface: wgpu::Surface<'static>,
+    // Keep the WebGPU instance alive until after its surface is dropped.
+    _instance: wgpu::Instance,
     pub(super) device: wgpu::Device,
     pub(super) queue: wgpu::Queue,
     pub(super) format: wgpu::TextureFormat,
@@ -3163,7 +3165,11 @@ impl WebCanvasContext {
             })
             .await
             .map_err(|error| format!("failed to request WebGPU device: {error}"))?;
-
+        device.on_uncaptured_error(Box::new(|error| {
+            web_sys::console::error_1(&JsValue::from_str(&format!(
+                "uncaptured WebGPU device error: {error}"
+            )));
+        }));
         let caps = surface.get_capabilities(&adapter);
         let Some(format) = RenderConfig::preferred_surface_format_for_profile(&caps, color_profile)
         else {
@@ -3192,6 +3198,7 @@ impl WebCanvasContext {
         Ok(Self {
             canvas,
             surface,
+            _instance: instance,
             device,
             queue,
             format,

@@ -25,6 +25,7 @@ mclone-render.workspace = true
 mclone-render-session.workspace = true
 mclone-scene.workspace = true
 mclone-server.workspace = true
+mclone-terrain-view.workspace = true
 mclone-ui.workspace = true
 js-sys.workspace = true
 wasm-bindgen.workspace = true
