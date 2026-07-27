@@ -599,6 +599,40 @@ three named journeys without surfaces or trees. If the skeleton still reads
 as a cellular flow raster, a curve stamp set, or a differently colored noise
 field, stop before production integration.
 
+### Tactical 267 follow-through
+
+Tactical
+[`267`](267-hybrid-macro-landform-plan-prototype.md) implements this exact
+comparison and is paused at Human Review B. The research-only diagnostic:
+
+- completes all fixed plane/cylinder drainage graphs without cycles or
+  unreachable cells;
+- retains two to four protected closed basins per case, each with a valid
+  spill;
+- distinguishes true divergent catchment boundaries from false
+  upstream/downstream receiver transitions before reconstructing divides;
+- evaluates only the production control, regional envelope, and nearby
+  indexed compact primitives during warm queries;
+- produces the required atlases, oblique pairs, typed journeys, topology and
+  contour alarms, memory/cost receipts, and a 128-block far summary; and
+- changes no production terrain, water, surface, profile, or compatibility
+  identity.
+
+Internal inspection finds a material reduction in scalar-ring noise and
+clearer persistent ridge, valley, basin, and quiet-space composition. It also
+retains review concerns: some local plans expose stepped or parallel raster
+tendencies, compact profiles can feel sculpted, subordinate detail is subtle
+at macro scale, and the small grammar does not yet prove fronts, plateaus,
+passes, bounded highlands, specialist water forms, or walking-scale
+realization.
+
+The final corpus lives under
+`/tmp/mclone-hybrid-landform-hr-b-f538a271`. This location is ephemeral
+review evidence, not a repository artifact. Human Review B now decides
+whether the representation should advance, be retuned in research, or be
+rejected. Nothing in this result authorizes shared extraction or production
+integration.
+
 ## Stop Condition
 
 Stop when the research can answer:
@@ -632,9 +666,9 @@ Research completed on the 2026-07-27 Linux host:
 - made no production terrain, water, surface, topology, profile, or generator
   identity change.
 
-No prototype pixels or performance receipts are claimed by this research
-tactical. They are explicit acceptance evidence for its next implementation
-slice.
+This research tactical itself claims no prototype pixels or performance
+receipts. Tactical 267 now owns that follow-through evidence and its Human
+Review B stop.
 
 ## Related
 

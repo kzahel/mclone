@@ -17,8 +17,10 @@ candidate. Human Review A found that candidate an improvement but rejected it
 as final: distant form still reads as repeated scalar hills, while rivers,
 ponds, and relief touch without shared geographic authority. Tactical 265
 therefore selects a bounded hybrid regional-plan, coarse-drainage, and
-analytic-reconstruction direction. No production planner or terrain change
-has landed yet.**
+analytic-reconstruction direction. Tactical 267 now implements that
+research-only comparison across three seeds and plane/cylinder topology and
+is paused at Human Review B. No production planner or terrain change has
+landed yet.**
 
 The motivating July 2026 visual review found four related regional-scale
 weaknesses:
@@ -339,12 +341,23 @@ watershed pass remains a consistency mechanism but is rejected as the sole
 terrain answer because it would inherit revision 21's contour language and
 ordinary depression filling would erase desired lakes.
 
-The first prototype remains research-first and smaller than the complete
-grammar. It compares current revision 21 with hybrid regional envelope,
-ridge/divide, drainage, basin, and quiet-space reconstruction, then restores
-subordinate local detail. It must stop for Human Review B on plan maps,
-contours, oblique relief, and named journeys before production integration,
-surface/ecology work, detailed fronts, compound water, geology, or 3D density.
+Tactical
+[`267`](../tactical/267-hybrid-macro-landform-plan-prototype.md) implements
+the first research-only prototype. It compares current revision 21 with
+regional envelope, ridge/divide, drainage, protected-basin, and quiet-space
+reconstruction, then restores subordinate local detail. All six fixed
+plane/cylinder cases complete without cycles or unreachable cells, retain
+valid protected-basin spills, and reconstruct the cylinder seam bit-exactly.
+
+Internal inspection finds a real structural move: persistent high and low
+axes, drainage hierarchy, broad counterform, and basin ownership replace much
+of revision 21's dense same-scale contour texture. The result is not silently
+accepted. Some divide groups retain stepped or parallel 32-block raster
+tendencies; compact profiles can feel smooth and sculpted; subordinate detail
+is subtle at macro scale; and the small grammar does not yet prove fronts,
+plateaus, passes, bounded highlands, specialist water forms, or walking-scale
+realization. The work is paused at Human Review B before production
+integration, surface/ecology work, compound water, geology, or 3D density.
 
 ### Hydrology
 
@@ -1076,6 +1089,25 @@ work; movement is 2.928 ms mean / 5.413 ms p95 in the native window and
 2.560 / 3.846 ms offscreen. The tactical retains the raw receipts because
 small-lane host noise does not support a more precise isolated cost claim.
 
+Tactical 267 adds a different, deliberately non-production workload. Its
+research planner constructs a complete 6,144-by-6,144-block, 32-block-cell
+domain in 46.364-66.782 ms and retains about 7.82-9.78 MiB of working plan
+state. Warm detailed reconstruction over 36,864 points sustains
+0.803-1.097 million points/s after one warmup, using an average 8.56-18.40
+nearby segment candidates. This query still evaluates the full production
+control sample, so it costs roughly two to three times the old
+production-only point baseline while adding the regional envelope and plan
+profiles. A 48-by-48, 128-block envelope raster plus the retained skeleton
+costs about 0.21-0.39 MiB and constructs in 0.109-0.235 ms.
+
+Those prototype numbers establish a useful shape, not a budget: cold graph
+work is amortizable, warm sampling remains local, and far products need not
+re-run drainage. They also show that plan quality is not free. Production
+promotion would need a shared cache/eviction owner, region-query batching,
+GPU/preview reconstruction decisions, and new exact/streaming controls rather
+than treating a roughly one-million-point/s research evaluator as already
+cheap enough.
+
 These are baselines, not budgets. Future 3D work must add ordinary-path,
 regional-hotspot, bounded-landmark-hotspot, and far-summary lanes. GPU
 execution, browser transfer, and presentation remain separate measurements;
@@ -1086,8 +1118,8 @@ none is inferred from CPU compile time.
 | Concern | Current capability | Planning gap |
 |---|---|---|
 | raw macro fields | continentalness, relief, ruggedness, ridges, mountain detail, climate, bathymetry, water morphology, and continuous quiet/rolling/ridge-valley/basin/mountain intent derived without a new noise field | no pass, plateau, escarpment, high-basin, or planned terrain-corridor intent |
-| terrain | field-revision-21 continuous heightfield with live ordinary hills, connected lows, ridge shoulders, broad basin tendency, accepted mountain detail, and derived slope/exposure; the nine-site median span is 25 blocks | Human Review A found it improved but still scalar, repetitive, and disconnected from water; Tactical 265 selects the research-only hybrid successor and Human Review B gate |
-| sampling/representation | cheap absolute-coordinate CPU/GPU heightfield preview, a fixed ten-level 131 km horizon, and normalized point receipts through roughly 500 km | no filtered spacing-2,048 review product or sparse volumetric near/far contract |
+| terrain | field-revision-21 remains production; Tactical 267 now proves research-only hybrid envelopes, divergent divides, drainage, protected basins, quiet space, and indexed reconstruction across the fixed plane/cylinder corpus | Human Review B must decide whether the structural gain outweighs remaining stepped/parallel raster tendencies, smooth profile stamps, limited grammar, and query cost before shared extraction |
+| sampling/representation | cheap production CPU/GPU heightfield preview plus normalized receipts through roughly 500 km; research hybrid queries are local and measured, and a 128-block far summary retains envelope plus skeleton facts | no production plan cache, batching/GPU reconstruction, filtered spacing-2,048 review product, or sparse volumetric near/far contract |
 | coast | shared sandy/gravel/ordinary/rocky/cold intent; bounded geometry, locally feathered realization, cross-substrate snow, mixed banks; incoming field-revision-21 landform relief reaches water and can reduce redundant rocky lift; exact CPU/GPU and periodic-seam evidence | Human Review 2 found substantial improvement, and the new inherited-relief coast examples now need review; no marsh, frozen-ocean morphology, dunes, deltas, reefs, or sea caves |
 | major rivers | warped zero-contour corridor with width/depth/bank morphology and receiving-outlet correction | no persistent macro drainage topology, tributary hierarchy, or named major reaches |
 | streams | bounded 91-96-block valley-following source-to-river plan | one peaceful family, not a general network |
@@ -1096,7 +1128,7 @@ none is inferred from CPU compile time.
 | geology | exposed stone response and reusable local/structure mechanisms | no regional formation intent or live 3D formation family |
 | ecology | climate-aware conifer, alpine, steppe, meadow, and woodland recipes | limited coordinated transitions and no shared regional formation permissions |
 | landmarks | bounded stream starts/pieces and generic structure architecture | no natural-landmark, route, claim, or cross-family arbitration layer |
-| review | production field maps, cards, receipts, fingerprints, Terrain Lab, and exact chunks | no concrete multi-system review contract yet; add facts only when selected consumers need them |
+| review | production field maps, cards, receipts, fingerprints, Terrain Lab, exact chunks, and Tactical 267 control/plan/reconstruction atlases, oblique pairs, typed journeys, and cost/topology receipts | Human Review B is pending; no production multi-system plan consumer exists |
 
 Do not hide these gaps by calling existing mechanisms “supported.” A shared
 lake feature does not make basin lakes live. A structure kernel does not make
@@ -1150,15 +1182,16 @@ every row before shipping any smaller improvement.
    - Tactical 265 selects the next representation without expanding surfaces,
      ecology, geology, or 3D density.
 4. **Prototype the selected hybrid landform plan**
-   - keep production output unchanged while a bounded diagnostic plan compares
-     current revision 21, graph-based reconstruction, and reconstruction with
-     subordinate local detail;
-   - prove regional envelopes, ridge/divide and drainage skeletons, basins,
-     quiet space, topology ownership, and far summaries on the same three
-     seeds and plane/cylinder bounds;
-   - record cold construction, cached point/region query, memory, and summary
-     cost separately from current field sampling; and
-   - stop at Human Review B before integrating the plan into production.
+   - Tactical 267 keeps production output unchanged while its bounded
+     diagnostic compares current revision 21, graph-based reconstruction, and
+     reconstruction with subordinate local detail;
+   - the fixed corpus proves regional envelopes, divergent divide and
+     drainage skeletons, protected basins/spills, quiet space, exact
+     reconstruction seams, and a measured 128-block far summary;
+   - cold construction, five-iteration cached point queries, memory, summary
+     bytes, contour alarms, and typed journeys are recorded separately; and
+   - the work is now stopped at Human Review B before any production
+     integration.
 5. **Compose basins and compound water forms**
    - add one broad shallow basin/lake family with spill semantics;
    - add one anabranch, braid, or delta family that deliberately creates

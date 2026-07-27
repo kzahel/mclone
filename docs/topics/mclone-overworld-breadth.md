@@ -19,8 +19,9 @@ water. Tactical 263 now owns the cross-era inland diagnosis and next landform
 plan. Tactical 264 has implemented the first ordinary inland fabric and
 passed its objective gates. Human Review A found it improved but still
 structurally scalar and disconnected from water. Tactical 265 selects a
-bounded hybrid landform planner for the next research-only prototype before
-new breadth families.
+bounded hybrid landform planner, and Tactical 267 now implements the fixed
+research-only comparison. It is paused at Human Review B before new breadth
+families or production integration.
 
 ## Scope
 
@@ -110,7 +111,12 @@ distant terrain still reads as similarly scaled scalar hills, with repeated
 closed contour rings and water features that lack shared basin/outlet
 authority. Tactical 265 therefore treats revision 21 as the production
 control for a research-only hybrid planner, not as final ordinary-land
-fabric.
+fabric. Tactical 267 now supplies that comparison: its fixed corpus has
+explicit drainage, divergent divides, protected basins/spills, quiet
+counterform, coast arrivals, and indexed reconstruction, while production
+biomes and terrain remain revision 21. Internal inspection sees a material
+structural improvement but retains raster-linearity, smooth-profile, limited
+grammar, and local-realization concerns for Human Review B.
 
 Twelve surface recipes are live: ocean floor, sandy coast, gravel coast,
 rocky coast, snow cover, river bed, wetland bed, river bank, grass/soil,
@@ -336,11 +342,13 @@ order:
    - Tactical 265 selects the hybrid plan grammar and Human Review B gate.
 4. Prototype regional envelopes, ridge/divide and drainage skeletons, basins,
    and quiet counterform outside production:
-   - compare revision 21, graph reconstruction, and reconstruction with
-     subordinate local detail on the same plane/cylinder seeds;
-   - record cold plan, cached query, memory, far-summary, topology, sink,
-     spill, and cycle evidence; and
-   - stop at Human Review B before production integration.
+   - Tactical 267 compares revision 21, graph reconstruction, and
+     reconstruction with subordinate local detail on the same plane/cylinder
+     seeds;
+   - cold plan, five-iteration cached query, memory, far-summary, topology,
+     sink, spill, cycle, contour, coast-arrival, and journey evidence is
+     complete; and
+   - the work is stopped at Human Review B before production integration.
 5. Add the first 3D-geology tactical before broad caves:
    - baseline and map the current heightfield limitation;
    - derive a small semantic formation-intent selector from existing macro,

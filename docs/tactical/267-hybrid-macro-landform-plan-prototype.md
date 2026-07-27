@@ -1,7 +1,8 @@
 # Tactical 267: Hybrid Macro Landform Plan Prototype
 
-Status: active implementation 2026-07-27. Research-only; production field
-revision 21 remains unchanged.
+Status: implementation and internal evidence complete 2026-07-27. Paused at
+Human Review B. Research-only; production field revision 21 remains
+unchanged.
 
 Topics:
 
@@ -150,8 +151,8 @@ Record:
 - warm graph-only and detailed point-query throughput and candidate counts;
 - plan bytes by major product and summary bytes;
 - stable checksums; and
-- exact `x` versus `x + 6144` cylinder reconstruction and source-sample
-  equality.
+- exact `x` versus `x + 6144` cylinder reconstruction, discrete source
+  equality, and source-scalar periodic tolerance.
 
 Metrics are alarms. Inspected maps and journeys retain veto authority.
 
@@ -170,32 +171,148 @@ Metrics are alarms. Inspected maps and journeys retain veto authority.
 - [x] Build a deterministic plane/cylinder drainage forest.
 - [x] Accumulate flow, detect cycles, classify basins, and derive spills.
 - [x] Extract drainage and divide skeletons with stable prototype IDs.
-- [ ] Add focused deterministic, sink, completion, and seam tests.
+- [x] Add focused deterministic, sink, completion, and seam tests.
 
 ### Slice 2: continuous reconstruction and summaries
 
-- [ ] Build a bounded spatial index over extracted skeletons.
-- [ ] Reconstruct graph-only height through compact-support profiles.
-- [ ] Add subordinate existing local detail as a separate candidate.
-- [ ] Add plan and reconstruction checksums and memory accounting.
-- [ ] Prove cached point queries do not perform drainage traversal.
+- [x] Build a bounded spatial index over extracted skeletons.
+- [x] Reconstruct graph-only height through compact-support profiles.
+- [x] Add subordinate existing local detail as a separate candidate.
+- [x] Add plan and reconstruction checksums and memory accounting.
+- [x] Build and measure a compact 128-block far-summary product.
+- [x] Prove cached point queries do not perform drainage traversal.
 
 ### Slice 3: evidence products
 
-- [ ] Add control, envelope, plan, reconstruction, atlas, oblique, and journey
+- [x] Add control, envelope, plan, reconstruction, atlas, oblique, and journey
   images.
-- [ ] Add contour/repetition, topology, water, coast-arrival, and performance
+- [x] Add contour/repetition, topology, water, coast-arrival, and performance
   receipts.
-- [ ] Run all three seeds on plane and cylinder.
-- [ ] Inspect every atlas and representative oblique/journey product.
+- [x] Run all three seeds on plane and cylinder.
+- [x] Inspect every atlas and representative oblique/journey product.
 
 ### Slice 4: Human Review B handoff
 
-- [ ] Update Tactical 265 and living topics with implementation truth.
-- [ ] Record exact commands, artifact paths, timings, limitations, and
+- [x] Update Tactical 265 and living topics with implementation truth.
+- [x] Record exact commands, artifact paths, timings, limitations, and
   subjective internal findings.
-- [ ] Commit the completed research prototype and documentation.
-- [ ] Stop before production integration.
+- [x] Commit the completed research prototype and documentation.
+- [x] Stop before production integration.
+
+## Prototype Result
+
+The contained diagnostic now implements the selected representation end to
+end:
+
+- one retained topology-aware context owns the production control sampler,
+  periodic regional fields, canonical study grid, drainage forest, typed
+  facts, spatial index, and reconstruction revision;
+- genuine ocean cells and up to four defensible protected closed sinks seed a
+  deterministic priority-grown drainage forest;
+- flow accumulation, stream order, confluences, basin ownership, and spill
+  facts complete with zero cycles or unreachable cells in the fixed corpus;
+- drainage segments follow accepted channel parents, while divide extraction
+  retains only sibling or otherwise divergent receiver ownership. Ancestor
+  versus descendant reach boundaries are not terrain divides;
+- compact-support profiles reconstruct ridge lift, drainage lows, protected
+  basin floors, and optional subordinate production detail without a
+  watershed traversal at query time; and
+- a 128-block far raster retains quantized uplift, quiet, broad-low, basin,
+  and base-level facts beside the already compact drainage/divide/sink
+  skeleton.
+
+The ancestor filter was a material research correction. The first literal
+receiver-boundary extraction emitted 6,250 plane divide segments for seed
+`12345` and produced obvious parallel hatching. Recognizing that an upstream
+reach and its downstream ancestor do not define a drainage divide reduced
+that case to 1,750 segments while retaining 219 distinct divergent
+catchment pairs. This is the candidate in the review corpus.
+
+## Fixed-Corpus Evidence
+
+Final release evidence was generated from `f538a271` on the 2026-07-27 Linux
+host under:
+
+```text
+/tmp/mclone-hybrid-landform-hr-b-f538a271
+```
+
+Across the six seed/topology cases:
+
+| Receipt | Range |
+|---|---:|
+| cold 6,144-by-6,144 plan construction | 46.364-66.782 ms |
+| detailed 36,864-point warm-query median | 33.589-45.910 ms |
+| detailed warm point throughput | 0.803-1.097 million points/s |
+| average / maximum indexed candidates | 8.56-18.40 / 68-116 |
+| approximate working plan state | 7.82-9.78 MiB |
+| 128-block far-summary construction | 0.109-0.235 ms |
+| approximate far-summary bytes | 0.21-0.40 MiB |
+| drainage cells | 963-1,783 |
+| divergent divide segments / owner pairs | 1,123-2,294 / 165-303 |
+| protected closed basins with valid spills | 2-4 / 2-4 |
+| quiet land coverage | 6.48-38.01% |
+| selected journey facts | 5-6 |
+
+The warm-query lane performs the full production control sample plus the
+regional envelope and nearby indexed primitives. It is therefore a stricter
+workload than Tactical 258's production-only 2.13-2.44 million-point/s
+baseline, and currently costs roughly two to three times as much per point.
+This is not yet a production budget or optimized evaluator. It does prove the
+important architectural distinction: plan construction is cold bounded work,
+while a warm point query is local and does not perform flow accumulation,
+depression handling, or upstream traversal.
+
+Every fixed case has:
+
+- zero drainage cycles and zero unreachable cells;
+- a valid spill for every selected protected closed basin;
+- nonzero drainage, divide, quiet, and broad-low coast arrivals;
+- stable plan and reconstruction checksums;
+- five measured query iterations after one warmup;
+- graph-only closed-contour components reduced from 1,741-3,206 in the
+  revision-21 control to 18-24, with subordinate detail ending at 47-82; and
+- no discrete source surface/water mismatch on the cylinder.
+
+Cylinder reconstruction is bit-exact at `x` and `x + 6144`: graph-only and
+detailed maximum height error are both zero. Direct source scalar sampling
+retains the production periodic-noise tolerance rather than bit identity,
+with maximum error `2.70e-14`; source surface and water decisions match
+exactly. The diagnostic canonicalizes continuous X before reconstruction,
+and no seam is treated as a sink, wall, or exclusion zone.
+
+## Internal Visual Findings
+
+All six atlases and journeys and all paired oblique views were inspected.
+The candidate makes a material structural move:
+
+- broad high and low axes persist across many former scalar-hill widths;
+- drainage branches, confluences, divides, basin lows, and quiet country read
+  as parts of one composition;
+- the control's dense same-scale contour noise becomes a smaller number of
+  legible ridge, valley, and basin systems;
+- coast approaches now carry typed drainage, divide, quiet, and broad-low
+  relationships; and
+- plane and cylinder cases share one visual language without a seam-specific
+  feature desert.
+
+The evidence is ready for Human Review B, not production acceptance. Retain
+these concerns during review:
+
+- a few tributary groups still expose parallel or stepped 32-block raster
+  tendencies in plan view, even though reconstruction softens them;
+- compact profiles can read as smooth, sculpted broad strokes or rounded
+  ribbons, particularly where several divides overlap;
+- graph-only and subordinate-detail maps are intentionally close at this
+  scale, but the present local realization may be too weak to prevent a
+  coarse planned surface from feeling sterile at walking scale;
+- the small grammar repeats ridge/valley/basin vocabulary across all seeds;
+  it does not yet prove fronts, plateaus, escarpments, passes, piedmont,
+  bounded highlands, or specialist water forms;
+- the software oblique view is a coarse diagnostic and exaggerates vertical
+  crop/coast faces; it is not an exact-chunk production capture; and
+- no result yet proves surface materials, ecology, block discretization,
+  navigation, or selective 3D density on the planned surface.
 
 ## Human Review B
 
@@ -218,7 +335,46 @@ terrain, or merely a different noise field.
 
 ## Validation Record
 
-Pending implementation.
+Passed on the 2026-07-27 Linux host:
+
+```bash
+cargo test --manifest-path native/Cargo.toml \
+  -p mclone-native-client \
+  --bin mclone-landform-planner-study
+
+cargo run --release --manifest-path native/Cargo.toml \
+  -p mclone-native-client \
+  --bin mclone-landform-planner-study -- \
+  --output /tmp/mclone-hybrid-landform-hr-b-f538a271
+```
+
+The focused test binary passes four tests covering:
+
+- the default fixed corpus;
+- cylinder X wrap without accidental Z periodicity;
+- deterministic complete acyclic drainage, protected sinks and spills, and
+  divergent divide ownership; and
+- bit-exact graph/detailed reconstruction seams with source scalar tolerance
+  and exact discrete surface/water decisions.
+
+The release command generated 55 primary files: one corpus receipt and eight
+images plus one plan receipt for each of six cases. Review contact sheets
+were composed in the same `/tmp` directory as `all-atlases.png`,
+`all-obliques.png`, and `all-journeys.png`. They are convenience views, not
+committed or receipt-owned primary artifacts.
+
+Implementation commits:
+
+- `b7d6bf1f` — bound the Tactical 267 contract;
+- `b886a46b` — build the topology-aware graph core;
+- `849e7e20` — add indexed reconstruction and evidence products;
+- `ebf11699` — retain and reuse the topology-aware sampler context;
+- `c80e383a` — stabilize warm-query timing; and
+- `f538a271` — add a measured far-summary product.
+
+Production field revision 21, exact chunks, water, surfaces, ecology,
+persistence, profile identity, Terrain Lab, and World Explorer remain
+unchanged.
 
 ## Related
 

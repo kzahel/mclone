@@ -131,10 +131,11 @@ objects; analytic profiles reconstruct a continuous heightfield and support
 indexed point queries. Analytic-only planning and current-height watershed
 carving are retained as useful mechanisms but rejected as complete answers.
 No production generator, field revision, water, surface, profile, or
-compatibility identity changed during that research. A diagnostic hybrid
-prototype and Human Review B now precede production integration, new surface
-or ecology interpretation, detailed fronts, compound water, geology, and 3D
-density.
+compatibility identity changed during that research. Tactical 267 now
+implements the diagnostic hybrid prototype across the fixed plane/cylinder
+corpus and is paused at Human Review B. It changes no production owner or
+output. Review now precedes production integration, new surface or ecology
+interpretation, detailed fronts, compound water, geology, and 3D density.
 
 ## Scope
 
@@ -1215,10 +1216,21 @@ hybrid landform plan:
 - indexed analytic reconstruction preserves continuous point sampling and
   far-summary use after cold planning.
 
-The next slice is a research-only comparison against revision 21 on seeds
-`12345`, `8675309`, and `-98765`, on the plane and exact cylinder. It stops
-at Human Review B on plan maps, contours, oblique relief, and named journeys.
-Do not begin new surface/ecology interpretation, detailed
+Tactical
+[`267`](../tactical/267-hybrid-macro-landform-plan-prototype.md) completes the
+research-only comparison against revision 21 on seeds `12345`, `8675309`,
+and `-98765`, on the plane and exact cylinder. All six graphs are complete
+and acyclic, all selected protected basins have valid spills, and indexed
+reconstruction is bit-exact across the cylinder seam. The evidence includes
+plan maps, contour alarms, oblique relief, typed journeys, five-iteration
+query timing, working bytes, and a 128-block far summary.
+
+Internal inspection finds a material reduction in scalar-ring noise and
+clearer regional axes and water relationships. It also retains stepped or
+parallel raster tendencies in some divide groups, smooth/sculpted compact
+profiles, subtle macro-scale local detail, and an intentionally incomplete
+landform grammar. The slice is stopped at Human Review B. Do not begin
+production extraction, surface/ecology interpretation, detailed
 plateaus/escarpments, basin-lake realization, compound water, geology, or
 broad 3D density before that review.
 
