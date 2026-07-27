@@ -7,11 +7,13 @@ Review R0 accepted bounded generative hydrography. Phase 1 now has a neutral
 exact-invariance harness, a coordinate-pure passing control, the real bounded
 landform-plan recenter canary, and discovery-state/last-writer canaries. The
 native and Wasm semantic witnesses agree. This proves the instrument can
-detect the known failure classes; it does not prove a streamed relational
-planner, boundary construction, geographic quality, or production cost.
-Minimal semantic trials for Candidate B and Candidate C were authorized on
-2026-07-27 and are in progress. Candidate D, terrain reconstruction, Terrain
-Lab integration, and production terrain changes remain out of scope.**
+detect the known failure classes. Phase 2 then proved exact semantic
+invariance for both a fixed three-level shared-boundary hierarchy and bounded
+feature-owned graphs across plane, cylinder, torus, cache, path, window, and
+schedule cases. Both mechanisms advance to structural experimentation; this
+does not yet prove geographic quality or production cost. Candidate D,
+terrain reconstruction, Terrain Lab integration, and production terrain
+changes remain out of scope.**
 
 ## Purpose
 
@@ -83,8 +85,8 @@ Those results establish a useful bounded representation. They do not prove:
 - request-, path-, cache-, or schedule-independent lazy construction;
 - a bounded dependency rule for upstream contributing area on an unbounded
   plane or cylinder;
-- native/Wasm cross-host checksum equivalence for a streamed representation;
-- torus planning; or
+- native/Wasm equivalence for reconstructed production terrain;
+- torus terrain reconstruction and hydrologic sink quality; or
 - an acceptable production cache, batching, summary, persistence, or
   compatibility policy.
 
@@ -132,6 +134,31 @@ geometry, timing, or memory. The fallback is currently a deterministic
 instrument control, not a fair terrain-quality finalist. No candidate can
 claim success merely by using the harness types; it must still publish its
 finite dependency and boundary facts and pass the complete candidate gates.
+
+### Phase 2 Bounded Mechanism Trials
+
+Commits `e7158125`, `4b1dce70`, and `473f071c` compare the fallback and two
+independent semantic candidates through 315 exact cases. All comparisons have
+zero mismatch and zero internal publication conflict, and native/Wasm agree
+on witness
+`d3dfa82df7de1a6c9e1d24f97b7f824b640c181cecd6295e86180344a2c081bd`.
+
+Candidate B shows that canonical 1,024-block base plans can read a fixed
+three-level DAG and share authoritative edge facts. Every expected facet is
+observed by exactly two participating plans, including periodic seams. It
+does not prove that hash-selected ports avoid a visible 1,024/3,072/6,144
+grid or form convincing drainage.
+
+Candidate C shows that a target can enumerate a fixed 25-owner neighborhood
+and reconstruct complete bounded graphs with shared identity and explicit
+sinks. Its 322 corpus graphs include cross-region and periodic-seam
+observations without discovery state. It does not promise global whole-river
+IDs, exact contributing area, or convincing network composition.
+
+Both are therefore eligible for Phase 3 structural atlases. They are not
+eligible for terrain or production integration. Candidate D must remain
+deferred until separate visualization shows that the two mechanisms provide
+complementary structure worth their combined complexity.
 
 ## Determinism Vocabulary
 
@@ -563,6 +590,7 @@ produce enough of the same geographic relationships to justify its cost?
 | 2026-07-27 | Post-review determinism discussion | Open a separate streamed-planner feasibility workstream before any production integration |
 | 2026-07-27 | Tactical 270 Phase 0 exact-hydrology and generator source review | Do not derive an allegedly exact unbounded watershed from independently solved tiles; test a bounded generative hydrography with a declared maximum scale |
 | 2026-07-27 | Tactical 270 Phase 1, commit `14d832b8`, 114 exact comparisons and native/Wasm witnesses | Accept the falsification instrument; retain recenter, discovery-state, and last-writer failures as permanent canaries; stop before candidate implementation |
+| 2026-07-27 | Tactical 270 Phase 2, commits `e7158125`, `4b1dce70`, and `473f071c`, 315 exact comparisons | Advance separate shared-hierarchy and bounded-graph mechanisms to structural atlases; do not infer quality, compose Candidate D, or integrate terrain |
 
 Add future experiment IDs, commits, commands, corpus locations, results, and
 decisions here or in the active tactical before relying on them.

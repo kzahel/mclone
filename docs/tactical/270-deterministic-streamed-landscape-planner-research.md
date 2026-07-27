@@ -1,10 +1,10 @@
 # Tactical 270: Deterministic Streamed Landscape Planner Research
 
-Status: **Human Review R0 accepted 2026-07-27; Phase 1 neutral invariance
-harness and controls completed at `14d832b8`; minimal Phase 2 Candidate B and
-Candidate C semantic trials authorized 2026-07-27 and in progress.** Research
-only; Candidate D, Terrain Lab integration, terrain reconstruction, and
-production integration remain unauthorized.
+Status: **Human Review R0 accepted 2026-07-27; Phase 1 completed at
+`14d832b8`; Phase 2 Candidate B/C semantic trials completed at `473f071c`.
+Paused before Phase 3 and Human Review R1 preparation.** Research only;
+Candidate D, Terrain Lab integration, terrain reconstruction, and production
+integration remain unauthorized.
 
 Topics:
 
@@ -702,12 +702,12 @@ consumer was implemented.
 
 ### Phase 2: minimal candidate trials
 
-- Implement the smallest semantic-only spike for every candidate that can
-  state a finite dependency rule.
-- Run rebuild, order, path, cache, window, boundary, cylinder, and torus
+- [x] Implement the smallest semantic-only spike for every authorized
+  candidate that can state a finite dependency rule.
+- [x] Run rebuild, order, path, cache, window, boundary, cylinder, and torus
   suites before terrain reconstruction.
-- Reject failures rather than smoothing their outputs.
-- Compare code/identity/cache complexity and bounded cost.
+- [x] Reject failures rather than smoothing their outputs.
+- [x] Compare code/identity/cache complexity and bounded structural cost.
 
 Candidates with nonzero semantic mismatches, undeclared traversal, or
 exploration-history growth do not advance.
@@ -717,6 +717,56 @@ B's hierarchical shared-boundary facts and Candidate C's feature-owned bounded
 graphs. Run both through the Phase 1 harness and compare them with the
 fallback. Do not compose Candidate D, reconstruct terrain, add Terrain Lab
 presentation, or change production generation in this phase.
+
+**Outcome 2026-07-27:** both mechanisms survive the semantic gate. Candidate
+B is commit `e7158125`, Candidate C is commit `4b1dce70`, and the combined
+native/Wasm receipt is commit `473f071c`. The inspected native receipt is
+`/tmp/mclone-streamed-plan-phase2/native-receipt.json` with file SHA-256
+`3c80c3a43ccd4574a6fe6c90d21340a43d7be01fe463345ad726706c7447fb3f`.
+It records source commit `473f071cdff5c6929add6ba62f92483e3fdd7437`,
+schema `mclone-streamed-plan-phase2-receipt-v1`, and a truthfully dirty
+working tree containing unrelated scene/clipmap work.
+
+The fallback, hierarchy, and feature-owned graph each passed the same 105
+rebuild, request, path, schedule, cache, window, partition, and topology-lift
+comparisons. Across all 315 comparisons there are zero semantic mismatches,
+zero conflicting same-key publications, and zero failed expectations. Native
+and Wasm agree on complete witness
+`d3dfa82df7de1a6c9e1d24f97b7f824b640c181cecd6295e86180344a2c081bd`.
+
+Candidate B publishes seven facts per base plan through a fixed three-level
+1,024/3,072/6,144-block dependency DAG. Across the three seeds, it observed
+exactly the expected 120 plane, 162 cylinder, and 216 torus shared-facet
+comparisons with no omissions, extra observers, or disagreement. Its fixed
+maximum provider fanout is six and point-query traversal is zero.
+
+Candidate C examines exactly 25 possible owner cells from target bounds
+expanded by the declared 1,536-block reach. The corpus contains 322 complete
+owned graphs, 188 observed by multiple target plans, 34 observed across a
+periodic seam, and 322 explicit sinks. It has zero cycles, incomplete graphs,
+or duplicate-observation mismatches. Actual reach is at most 576 blocks and
+the largest target receipt contains 37 facts.
+
+This is a mechanism result, not a landscape-quality result. Candidate B's
+ports and tendencies and Candidate C's short graphs are deliberately minimal
+semantic facts. No terrain, river geometry, basin surface, broad preview,
+timing distribution, memory footprint, or interactive atlas was produced.
+Candidate D remains deferred until separate structural evidence establishes
+that B and C contribute distinct visible value rather than merely composing
+two exact but sterile systems.
+
+Validation commands:
+
+```bash
+cargo run --manifest-path native/Cargo.toml -p mclone-worldgen \
+  --bin mclone_streamed_plan_phase2 -- \
+  --output /tmp/mclone-streamed-plan-phase2/native-receipt.json
+cargo test --manifest-path native/Cargo.toml -p mclone-worldgen
+STREAMED_PLAN_WASM_DIR="$PWD/native/target/wasm-bindgen-cli-0.2.125"
+CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$STREAMED_PLAN_WASM_DIR/bin/wasm-bindgen-test-runner" \
+  cargo test --manifest-path native/Cargo.toml -p mclone-worldgen \
+  --target wasm32-unknown-unknown --test streamed_plan_wasm
+```
 
 ### Phase 3: streamed structural atlas
 
@@ -807,9 +857,10 @@ execution.
 | recentered-window negative control | `14d832b8` | `cargo run --manifest-path native/Cargo.toml -p mclone-worldgen --bin mclone_streamed_plan_harness -- --output /tmp/mclone-streamed-plan-phase1/native-receipt.json` | shifted real solves mismatch 965, 1,024, and 1,024 of 1,024 cells; reversed publication also conflicts | retain as permanent failing window/last-writer canary |
 | discovery-state negative control | `14d832b8` | same 114-comparison receipt | all request, schedule, and cache canaries fail as intended for all three seeds | reject discovery-time mutable facts |
 | fallback invariant control | `14d832b8` | native runner plus `wasm-bindgen-test-runner` on `streamed_plan_wasm`; pinned comparison witness `2f7bd2...fc12` | 99 equality comparisons have zero mismatch/conflict; full native/Wasm witness agrees | accept as deterministic control, not yet a quality finalist |
-| canonical supertile trial | pending | pending | pending | pending |
-| hierarchical boundary trial | pending | pending | pending | pending |
-| feature-owned graph trial | pending | pending | pending | pending |
+| canonical supertile trial | not separately implemented | R0 audit plus the real recentered-plan canary | a halo may bound local realization but does not establish shared relational authority | retain only as a possible later realization mechanism |
+| hierarchical boundary trial | `e7158125`, `473f071c` | 105 comparison cases plus 498 shared-facet observations across three seeds/topologies | zero mismatch/conflict; fixed depth 3 and fanout 6 | advance Candidate B to structural atlas work |
+| feature-owned graph trial | `4b1dce70`, `473f071c` | 105 comparison cases; 322 graphs, 34 seam crossings, 25-owner bound | zero mismatch/conflict/cycle/incomplete graph; reach at most 576 blocks | advance Candidate C to structural atlas work |
+| Phase 2 combined receipt | `473f071c` | native receipt, three Wasm tests, and full `mclone-worldgen` suite | 315 comparison witness agrees; 382 passed, 1 ignored in the library suite | pause before Phase 3 atlas authorization |
 | streamed structural atlas | pending | pending | pending | pending |
 | reconstruction/performance finalist | pending | pending | pending | pending |
 
