@@ -55,14 +55,17 @@ procedural terrain uses linear reversed depth while exact chunks use the
 engine's nonlinear perspective reversed-Z projection, so the shared depth
 target contains incomparable values and procedural surfaces cut nearer exact
 trees and hills. Tactical 262 Slice 4B now owns the shared-projection
-correction and source-colored silhouette evidence. Its implementation
-candidate landed at `91fe9302`: terrain and proxy vegetation now consume the
-same `ChunkRenderView` matrix as exact chunks, and a magenta exact-source
+correction and source-colored silhouette evidence. Its correction landed at
+`91fe9302`: terrain and proxy vegetation now consume the same
+`ChunkRenderView` matrix as exact chunks, and a magenta exact-source
 diagnostic is available natively and through `sourceColors=1`. Matched native
 silhouette and hill captures preserve nearer exact geometry and allow nearer
 procedural geometry to occlude it. Desktop and phone browser semantic gates
-pass; hosted interactive pixel review remains open. No game-scene, Android, or
-XR adoption has started.
+pass, and hosted interactive Human Review 1B accepted the corrected
+composition on 2026-07-27. Minor z-fighting limited to the outermost exact
+blocks remains a known near-coincident frontier-overlap issue for later
+collar/skirt refinement; it does not reopen the shared-depth correction. No
+game-scene, Android, or XR adoption has started.
 Interactive review on 2026-07-26 diagnosed two remaining proof defects and
 activated Tactical
 [`252`](../tactical/252-procedural-horizon-seams-and-transition-admission.md):

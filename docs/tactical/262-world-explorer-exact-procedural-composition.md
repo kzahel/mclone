@@ -1,14 +1,13 @@
 # Tactical 262: World Explorer Exact/Procedural Composition
 
-Status: Human Review 1B rejected the composition on 2026-07-27. Slice 4B now
-has an implementation candidate at `91fe9302`: procedural terrain and proxy
-vegetation use the same chunk view-projection matrix and nonlinear reversed-Z
-encoding as exact chunks, and `sourceColors=1` renders exact geometry with a
-magenta diagnostic atlas. Matched native portrait captures preserve exact
+Status: Human Review 1B accepted the corrected composition on 2026-07-27.
+Slice 4B commit `91fe9302` makes procedural terrain and proxy vegetation use
+the same chunk view-projection matrix and nonlinear reversed-Z encoding as
+exact chunks. The hosted normal and magenta source-color views preserve exact
 tree and terrain silhouettes while still allowing nearer procedural geometry
-to win depth. Desktop and phone browser semantic gates pass the new diagnostic;
-hosted interactive pixel review remains the acceptance checkpoint. Terrain
-Lab and game-scene promotion remain blocked until that review.
+to win depth. PH-1 and PH-2 are complete. Minor z-fighting limited to the
+outermost exact blocks is accepted as a known frontier-overlap issue for later
+collar/skirt refinement; it does not reopen the shared-depth correction.
 
 Topics:
 
@@ -527,13 +526,14 @@ it does not complete Slice 4's composed exact-field Worker proof.
 - [x] Preserve the UI-less browser host and payload/dependency accounting.
 - [x] Content-version the browser module graph from the Explorer Wasm and
   pass hosted desktop `Composed`/`Coverage` plus Pixel 7 `Composed` gates.
-- [ ] Complete hosted interactive pixel review. Local Chrome presents WebGPU
+- [x] Complete hosted interactive pixel review. Local Chrome presents WebGPU
   and reports coherent draw work, but its page screenshot API returns a
-  solid-white canvas for this app; that image is rejected as pixel evidence.
+  solid-white canvas for this app; that image remains rejected as pixel
+  evidence. The hosted view passed direct human review on 2026-07-27.
 
 Gate: native and browser agree on source, painted chunks, mask generation,
 whole-tree ownership, and composition draw behavior. Human review of hosted
-pixels remains the final Slice 4 gate.
+pixels passed on 2026-07-27.
 
 ### Slice 4 browser evidence
 
@@ -623,7 +623,7 @@ Slice 4B must:
   exact/composed regression captures;
 - [x] prove nearer exact geometry wins while genuinely nearer procedural
   geometry still occludes it; and
-- [ ] repeat native and hosted browser pixel review before treating semantic
+- [x] repeat native and hosted browser pixel review before treating semantic
   receipts as acceptance evidence.
 
 Implementation commit `91fe9302` extends the shared terrain uniform from
@@ -684,7 +684,15 @@ canvas for the Explorer. An isolated A/B build of the rejected pre-fix commit
 `ff4363d2` returns the same white capture while the smaller host WebGPU probe
 still captures valid pixels. Therefore that local screenshot is invalid
 evidence for either candidate; it is not being counted as a pass or attributed
-to this depth change. Hosted interactive review remains required.
+to this depth change.
+
+Hosted Human Review 1B accepted the corrected composition on 2026-07-27:
+exact trees and hill silhouettes remain correctly depth-ordered against the
+procedural horizon. The reviewer observed minor z-fighting limited to the
+outermost exact blocks. This is a localized near-coincident frontier overlap,
+not a return of the incompatible projection-depth defect. It is accepted for
+this proof and remains a known collar/skirt/ownership refinement under the
+living `procedural-horizon-clipmap` topic.
 
 ### Slice 5: Terrain Lab adoption
 
