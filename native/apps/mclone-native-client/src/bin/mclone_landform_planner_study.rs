@@ -7,6 +7,7 @@
 use std::cmp::Ordering;
 use std::collections::{BTreeMap, BTreeSet, BinaryHeap, VecDeque};
 use std::fs;
+use std::hint::black_box;
 use std::mem::size_of;
 use std::path::PathBuf;
 use std::time::Instant;
@@ -33,6 +34,8 @@ const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x100_0000_01b3;
 const MAP_SCALE: u32 = 4;
 const MAP_PIXELS: u32 = CELLS as u32 * MAP_SCALE;
+const QUERY_WARMUP_ITERATIONS: usize = 1;
+const QUERY_MEASURED_ITERATIONS: usize = 5;
 
 const UPLIFT_LARGE_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6c70_7570_6c31);
 const UPLIFT_DETAIL_DOMAIN: SeedDomain = SeedDomain::new(0x6d63_6c70_7570_6c32);
@@ -811,14 +814,44 @@ impl HybridPlan {
             hash_u64(&mut checksum, sample.height.to_bits());
             hash_u64(&mut checksum, u64::from(sample.water));
         }
+        let materialization_ms = elapsed_ms(start);
+        let query_iteration_ms = self.benchmark_grid_queries(subordinate_detail, checksum);
         EvaluatedGrid {
             heights,
             water,
-            elapsed_ms: elapsed_ms(start),
+            materialization_ms,
+            query_iteration_ms,
             average_candidates: total_candidates as f64 / self.grid.len() as f64,
             maximum_candidates,
             checksum,
         }
+    }
+
+    fn benchmark_grid_queries(&self, subordinate_detail: bool, expected_checksum: u64) -> Vec<f64> {
+        let mut iteration_ms = Vec::with_capacity(QUERY_MEASURED_ITERATIONS);
+        for iteration in 0..QUERY_WARMUP_ITERATIONS + QUERY_MEASURED_ITERATIONS {
+            let start = Instant::now();
+            let mut checksum = FNV_OFFSET_BASIS;
+            for index in 0..self.grid.len() {
+                let (world_x, world_z) = self.grid.world(index);
+                let sample = self.sample_reconstruction(
+                    f64::from(world_x),
+                    f64::from(world_z),
+                    subordinate_detail,
+                );
+                hash_u64(&mut checksum, sample.height.to_bits());
+                hash_u64(&mut checksum, u64::from(sample.water));
+            }
+            black_box(checksum);
+            assert_eq!(
+                checksum, expected_checksum,
+                "warm point-query checksum must match materialized reconstruction"
+            );
+            if iteration >= QUERY_WARMUP_ITERATIONS {
+                iteration_ms.push(elapsed_ms(start));
+            }
+        }
+        iteration_ms
     }
 
     fn sample_reconstruction(
@@ -1006,7 +1039,8 @@ struct ReconstructionSample {
 struct EvaluatedGrid {
     heights: Vec<f64>,
     water: Vec<bool>,
-    elapsed_ms: f64,
+    materialization_ms: f64,
+    query_iteration_ms: Vec<f64>,
     average_candidates: f64,
     maximum_candidates: usize,
     checksum: u64,
@@ -1014,10 +1048,19 @@ struct EvaluatedGrid {
 
 impl EvaluatedGrid {
     fn query_receipt(&self) -> PointQueryReceipt {
+        let mut sorted = self.query_iteration_ms.clone();
+        sorted.sort_by(f64::total_cmp);
+        let median_elapsed_ms = median_f64(&sorted);
         PointQueryReceipt {
             point_count: self.heights.len(),
-            elapsed_ms: self.elapsed_ms,
-            points_per_second: self.heights.len() as f64 / (self.elapsed_ms / 1_000.0),
+            warmup_iterations: QUERY_WARMUP_ITERATIONS,
+            measured_iterations: QUERY_MEASURED_ITERATIONS,
+            materialization_ms: self.materialization_ms,
+            iteration_elapsed_ms: self.query_iteration_ms.clone(),
+            minimum_elapsed_ms: sorted.first().copied().unwrap_or(0.0),
+            median_elapsed_ms,
+            maximum_elapsed_ms: sorted.last().copied().unwrap_or(0.0),
+            points_per_second: self.heights.len() as f64 / (median_elapsed_ms / 1_000.0),
             average_segment_candidates: self.average_candidates,
             maximum_segment_candidates: self.maximum_candidates,
             checksum: format!("{:016x}", self.checksum),
@@ -1659,7 +1702,13 @@ struct ReconstructionReceipt {
 #[derive(Clone, Debug, Serialize)]
 struct PointQueryReceipt {
     point_count: usize,
-    elapsed_ms: f64,
+    warmup_iterations: usize,
+    measured_iterations: usize,
+    materialization_ms: f64,
+    iteration_elapsed_ms: Vec<f64>,
+    minimum_elapsed_ms: f64,
+    median_elapsed_ms: f64,
+    maximum_elapsed_ms: f64,
     points_per_second: f64,
     average_segment_candidates: f64,
     maximum_segment_candidates: usize,
@@ -2648,6 +2697,14 @@ fn median_usize(values: &[usize]) -> f64 {
         0 => 0.0,
         length if length % 2 == 1 => values[length / 2] as f64,
         length => (values[length / 2 - 1] + values[length / 2]) as f64 * 0.5,
+    }
+}
+
+fn median_f64(values: &[f64]) -> f64 {
+    match values.len() {
+        0 => 0.0,
+        length if length % 2 == 1 => values[length / 2],
+        length => (values[length / 2 - 1] + values[length / 2]) * 0.5,
     }
 }
 
