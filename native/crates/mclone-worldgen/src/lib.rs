@@ -6,6 +6,7 @@ pub mod carver;
 pub mod feature;
 pub mod landform_plan;
 pub mod levelgen;
+pub mod multiscale_terrain_witness;
 pub mod noise;
 pub mod placement;
 pub mod prng;

@@ -1,8 +1,12 @@
 #![cfg(target_arch = "wasm32")]
 
+use mclone_worldgen::multiscale_terrain_witness::{
+    MULTISCALE_WITNESS_SHA256, run_multiscale_witness_suite,
+};
 use mclone_worldgen::streamed_plan_atlas::{
     STREAMED_PLAN_ATLAS_FALLBACK_WITNESS_SHA256, STREAMED_PLAN_ATLAS_GRAPH_WITNESS_SHA256,
-    STREAMED_PLAN_ATLAS_HIERARCHY_WITNESS_SHA256, StreamedPlanAtlasCompiler,
+    STREAMED_PLAN_ATLAS_HIERARCHY_WITNESS_SHA256, STREAMED_PLAN_ATLAS_MULTISCALE_WITNESS_SHA256,
+    StreamedPlanAtlasCompiler,
 };
 use mclone_worldgen::streamed_plan_harness::{
     STREAMED_PLAN_PHASE_ONE_COMPARISON_SHA256, STREAMED_PLAN_PHASE_ONE_FALLBACK_SHA256,
@@ -57,5 +61,23 @@ fn streamed_plan_atlas_matches_native_witness() {
     assert_eq!(
         summary.feature_graph.receipt.semantic_sha256,
         STREAMED_PLAN_ATLAS_GRAPH_WITNESS_SHA256
+    );
+    assert_eq!(
+        summary.multiscale_witness.receipt.semantic_sha256,
+        STREAMED_PLAN_ATLAS_MULTISCALE_WITNESS_SHA256
+    );
+}
+
+#[wasm_bindgen_test]
+fn multiscale_semantic_refinement_matches_its_exact_corpus() {
+    let receipt = run_multiscale_witness_suite().expect("multiscale witness suite");
+    assert!(receipt.suite_passed);
+    assert_eq!(receipt.witness_sha256, MULTISCALE_WITNESS_SHA256);
+    assert_eq!(receipt.corpora.len(), 9);
+    assert!(
+        receipt
+            .corpora
+            .iter()
+            .all(|corpus| corpus.direct_parent_projection_mismatch_count == 0)
     );
 }

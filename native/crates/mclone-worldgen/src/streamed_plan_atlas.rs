@@ -9,6 +9,13 @@ use std::collections::{BTreeMap, VecDeque};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
+use crate::multiscale_terrain_witness::{
+    MULTISCALE_WITNESS_CANDIDATE_REVISION, MULTISCALE_WITNESS_SHA256,
+    MultiscaleSemanticRefinementControl, is_multiscale_feature_fact, multiscale_fact_identity,
+    multiscale_feature_family, multiscale_feature_offsets, multiscale_parent_identity,
+    multiscale_parent_projection_sha256, multiscale_regional_projection_sha256,
+    validate_local_snapshot,
+};
 use crate::streamed_plan_feature_graph_trial::{
     FEATURE_GRAPH_CANDIDATE_REVISION, FeatureOwnedGraphControl, GRAPH_EDGE_KIND, GRAPH_HEADER_KIND,
     GRAPH_NODE_KIND, GRAPH_QUERY_KIND, GRAPH_SINK_KIND,
@@ -26,15 +33,17 @@ use crate::streamed_plan_trials::{
     STREAMED_PLAN_PHASE_TWO_WITNESS_SHA256,
 };
 
-pub const STREAMED_PLAN_ATLAS_SCHEMA_REVISION: &str = "mclone-streamed-plan-atlas-v1";
+pub const STREAMED_PLAN_ATLAS_SCHEMA_REVISION: &str = "mclone-streamed-plan-atlas-v2";
 pub const STREAMED_PLAN_ATLAS_MAX_REGIONS_PER_AXIS: i32 = 16;
 pub const STREAMED_PLAN_ATLAS_CACHE_CAPACITY_PER_CANDIDATE: usize = 384;
 pub const STREAMED_PLAN_ATLAS_FALLBACK_WITNESS_SHA256: &str =
-    "7c098d833328fbd87b480f9f092536c815fb60ae66701f4278269185b1b7de7f";
+    "d2e33dd8cb93c5ac15546b4bd639550ee6fb033aca19809caf831828777651e1";
 pub const STREAMED_PLAN_ATLAS_HIERARCHY_WITNESS_SHA256: &str =
-    "3041cac9d531349e5f1fda1dbfe3849be8752693a8b3b397e81351b9f184d91f";
+    "eb7eeafdbb31765c6bd5da2f87fecda79c18d524b92db8ef0cdd05695c9e7744";
 pub const STREAMED_PLAN_ATLAS_GRAPH_WITNESS_SHA256: &str =
-    "c619dcf4bfd2108ff53d0a2712974f55073b601f1fc0ab9b770e7a9e59161558";
+    "6454698085bf76ac80161fd03c700c018da1c783b03272419dbb4e2992c53eb5";
+pub const STREAMED_PLAN_ATLAS_MULTISCALE_WITNESS_SHA256: &str =
+    "303a2e4d2e9a72eb0eb59c7a5b2c23d004fef7e1f0e37621c913527006e80d78";
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -55,6 +64,7 @@ pub struct StreamedPlanAtlasSummary {
     pub fallback: FallbackAtlas,
     pub hierarchy: HierarchyAtlas,
     pub feature_graph: FeatureGraphAtlas,
+    pub multiscale_witness: MultiscaleWitnessAtlas,
 }
 
 #[derive(Clone, Copy, Debug, Serialize)]
@@ -236,6 +246,47 @@ pub struct FeatureGraphAtlasEdge {
     pub width: u8,
 }
 
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MultiscaleWitnessAtlas {
+    #[serde(flatten)]
+    pub receipt: AtlasCandidateReceipt,
+    pub witness_sha256: &'static str,
+    pub parent_projection_sha256: String,
+    pub regional_projection_sha256: String,
+    pub parent_fact_count: u32,
+    pub regional_fact_count: u32,
+    pub local_fact_count: u32,
+    pub unresolved_parent_count: u32,
+    pub containment_failure_count: u32,
+    pub continuity_failure_count: u32,
+    pub terminal_failure_count: u32,
+    pub features: Vec<MultiscaleWitnessAtlasFeature>,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MultiscaleWitnessAtlasFeature {
+    pub canonical_id: String,
+    pub parent_id: Option<String>,
+    pub family: &'static str,
+    pub level: u8,
+    pub anchor_x: i32,
+    pub anchor_z: i32,
+    pub start_x: i32,
+    pub start_z: i32,
+    pub end_x: i32,
+    pub end_z: i32,
+    pub bounds_min_x: i32,
+    pub bounds_min_z: i32,
+    pub bounds_max_x: i32,
+    pub bounds_max_z: i32,
+    pub width: u32,
+    pub min_height: i32,
+    pub max_height: i32,
+    pub terminal_kind: u8,
+}
+
 #[derive(Clone, Debug)]
 struct CandidateCache {
     entries: BTreeMap<StreamedPlanKey, StreamedPlanSnapshot>,
@@ -327,6 +378,7 @@ pub struct StreamedPlanAtlasCompiler {
     fallback_cache: CandidateCache,
     hierarchy_cache: CandidateCache,
     graph_cache: CandidateCache,
+    multiscale_cache: CandidateCache,
 }
 
 impl StreamedPlanAtlasCompiler {
@@ -344,6 +396,7 @@ impl StreamedPlanAtlasCompiler {
             fallback_cache: CandidateCache::new(capacity),
             hierarchy_cache: CandidateCache::new(capacity),
             graph_cache: CandidateCache::new(capacity),
+            multiscale_cache: CandidateCache::new(capacity),
         }
     }
 
@@ -351,6 +404,7 @@ impl StreamedPlanAtlasCompiler {
         self.fallback_cache.clear();
         self.hierarchy_cache.clear();
         self.graph_cache.clear();
+        self.multiscale_cache.clear();
     }
 
     pub fn query(
@@ -390,6 +444,12 @@ impl StreamedPlanAtlasCompiler {
             center_region,
             &mut self.graph_cache,
         )?;
+        let multiscale_witness = build_multiscale_witness_atlas(
+            &self.descriptor,
+            &requested.regions,
+            center_region,
+            &mut self.multiscale_cache,
+        )?;
         Ok(StreamedPlanAtlasSummary {
             schema: STREAMED_PLAN_ATLAS_SCHEMA_REVISION,
             research_only: true,
@@ -409,6 +469,7 @@ impl StreamedPlanAtlasCompiler {
             fallback,
             hierarchy,
             feature_graph,
+            multiscale_witness,
         })
     }
 }
@@ -724,6 +785,109 @@ fn build_feature_graph_atlas(
     })
 }
 
+fn build_multiscale_witness_atlas(
+    descriptor: &StreamedPlanDescriptor,
+    requested_regions: &[PlanRegion],
+    center_region: PlanRegion,
+    cache: &mut CandidateCache,
+) -> Result<MultiscaleWitnessAtlas, String> {
+    let mut delta = CacheDelta::default();
+    let mut snapshots = BTreeMap::new();
+    let mut features = BTreeMap::new();
+    for requested in requested_regions {
+        let (snapshot, next_delta) = cache.resolve::<MultiscaleSemanticRefinementControl>(
+            descriptor,
+            *requested,
+            center_region,
+        )?;
+        delta.add(next_delta);
+        snapshots.insert(snapshot.key.clone(), snapshot.clone());
+        let observer = region_center(*requested)?;
+        for fact in snapshot
+            .facts
+            .iter()
+            .filter(|fact| is_multiscale_feature_fact(fact))
+        {
+            let canonical_id = multiscale_fact_identity(fact);
+            let offsets = multiscale_feature_offsets(fact)?;
+            let (anchor_x, anchor_z) =
+                lift_block(descriptor, observer, fact.world_x, fact.world_z)?;
+            let feature = MultiscaleWitnessAtlasFeature {
+                canonical_id: canonical_id.clone(),
+                parent_id: multiscale_parent_identity(fact),
+                family: multiscale_feature_family(fact)
+                    .ok_or_else(|| format!("{canonical_id} has no feature family"))?
+                    .label(),
+                level: fact.id.owner.level,
+                anchor_x,
+                anchor_z,
+                start_x: checked_atlas_offset(anchor_x, offsets.start_x)?,
+                start_z: checked_atlas_offset(anchor_z, offsets.start_z)?,
+                end_x: checked_atlas_offset(anchor_x, offsets.end_x)?,
+                end_z: checked_atlas_offset(anchor_z, offsets.end_z)?,
+                bounds_min_x: checked_atlas_offset(anchor_x, offsets.min_x)?,
+                bounds_min_z: checked_atlas_offset(anchor_z, offsets.min_z)?,
+                bounds_max_x: checked_atlas_offset(anchor_x, offsets.max_x)?,
+                bounds_max_z: checked_atlas_offset(anchor_z, offsets.max_z)?,
+                width: offsets.width,
+                min_height: offsets.min_height,
+                max_height: offsets.max_height,
+                terminal_kind: offsets.terminal_kind,
+            };
+            features
+                .entry((canonical_id, anchor_x, anchor_z))
+                .or_insert(feature);
+        }
+    }
+
+    let mut unresolved_parent_count = 0_u32;
+    let mut containment_failure_count = 0_u32;
+    let mut continuity_failure_count = 0_u32;
+    let mut terminal_failure_count = 0_u32;
+    for snapshot in snapshots.values() {
+        let validation = validate_local_snapshot(snapshot)?;
+        unresolved_parent_count =
+            unresolved_parent_count.saturating_add(validation.unresolved_parent_count);
+        containment_failure_count =
+            containment_failure_count.saturating_add(validation.containment_failure_count);
+        continuity_failure_count =
+            continuity_failure_count.saturating_add(validation.continuity_failure_count);
+        terminal_failure_count =
+            terminal_failure_count.saturating_add(validation.terminal_failure_count);
+    }
+    let features = features.into_values().collect::<Vec<_>>();
+    let parent_fact_count = features.iter().filter(|feature| feature.level == 2).count() as u32;
+    let regional_fact_count = features.iter().filter(|feature| feature.level == 1).count() as u32;
+    let local_fact_count = features.iter().filter(|feature| feature.level == 0).count() as u32;
+    Ok(MultiscaleWitnessAtlas {
+        receipt: candidate_receipt(
+            "multiscale semantic refinement witness",
+            MULTISCALE_WITNESS_CANDIDATE_REVISION,
+            requested_regions.len(),
+            &snapshots,
+            delta,
+            cache.entries.len(),
+        ),
+        witness_sha256: MULTISCALE_WITNESS_SHA256,
+        parent_projection_sha256: multiscale_parent_projection_sha256(&snapshots),
+        regional_projection_sha256: multiscale_regional_projection_sha256(&snapshots),
+        parent_fact_count,
+        regional_fact_count,
+        local_fact_count,
+        unresolved_parent_count,
+        containment_failure_count,
+        continuity_failure_count,
+        terminal_failure_count,
+        features,
+    })
+}
+
+fn checked_atlas_offset(anchor: i32, offset: i32) -> Result<i32, String> {
+    anchor
+        .checked_add(offset)
+        .ok_or_else(|| "multiscale atlas feature coordinate overflow".to_owned())
+}
+
 fn atlas_graph(
     descriptor: &StreamedPlanDescriptor,
     observer: (i32, i32),
@@ -880,6 +1044,7 @@ mod tests {
         assert!(second.fallback.receipt.cache_hits > 0);
         assert!(second.hierarchy.receipt.cache_hits > 0);
         assert!(second.feature_graph.receipt.cache_hits > 0);
+        assert!(second.multiscale_witness.receipt.cache_hits > 0);
         assert!(!second.coverage.clipped);
     }
 
@@ -910,6 +1075,10 @@ mod tests {
                 repeated.feature_graph.receipt.semantic_sha256
             );
             assert_eq!(
+                origin.multiscale_witness.receipt.semantic_sha256,
+                repeated.multiscale_witness.receipt.semantic_sha256
+            );
+            assert_eq!(
                 repeated.fallback.cells[0].region.world_min_x
                     - origin.fallback.cells[0].region.world_min_x,
                 STREAMED_PLAN_PERIOD_BLOCKS
@@ -935,6 +1104,10 @@ mod tests {
             warm.feature_graph.receipt.semantic_sha256,
             cold.feature_graph.receipt.semantic_sha256
         );
+        assert_eq!(
+            warm.multiscale_witness.receipt.semantic_sha256,
+            cold.multiscale_witness.receipt.semantic_sha256
+        );
         assert!(cold.fallback.receipt.cache_misses > 0);
         assert_eq!(
             cold.fallback.receipt.cache_misses,
@@ -957,6 +1130,7 @@ mod tests {
             STREAMED_PLAN_ATLAS_MAX_REGIONS_PER_AXIS as u32
         );
         assert!(broad.fallback.receipt.cache_evictions > 0);
+        assert!(broad.multiscale_witness.receipt.cache_evictions > 0);
         assert!(broad.fallback.receipt.retained_plans <= 8);
         assert!(broad.coverage.min_x > 80_000);
         assert!(broad.coverage.max_z < -180_000);
@@ -979,6 +1153,18 @@ mod tests {
             summary.feature_graph.receipt.semantic_sha256,
             STREAMED_PLAN_ATLAS_GRAPH_WITNESS_SHA256
         );
+        assert_eq!(
+            summary.multiscale_witness.receipt.semantic_sha256,
+            STREAMED_PLAN_ATLAS_MULTISCALE_WITNESS_SHA256
+        );
+        assert_eq!(
+            summary.multiscale_witness.witness_sha256,
+            MULTISCALE_WITNESS_SHA256
+        );
+        assert_eq!(summary.multiscale_witness.unresolved_parent_count, 0);
+        assert_eq!(summary.multiscale_witness.containment_failure_count, 0);
+        assert_eq!(summary.multiscale_witness.continuity_failure_count, 0);
+        assert_eq!(summary.multiscale_witness.terminal_failure_count, 0);
         assert_eq!(
             summary.phase_two_witness_sha256,
             STREAMED_PLAN_PHASE_TWO_WITNESS_SHA256
