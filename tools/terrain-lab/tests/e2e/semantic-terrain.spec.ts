@@ -37,6 +37,8 @@ test("semantic terrain is pannable, exact, and responsive", async ({
     "true",
   );
   await expect(stage).toHaveAttribute("data-render-ready", "true");
+  await expect(stage).toHaveAttribute("data-vertical-datum", "64");
+  await expect(stage).toHaveAttribute("data-vertical-span", "192");
   const initialChecksum = await shell.getAttribute("data-semantic-checksum");
   expect(initialChecksum).toMatch(/^[0-9a-f]{64}$/u);
 
@@ -79,12 +81,26 @@ test("semantic terrain is pannable, exact, and responsive", async ({
   expect(sawPannedVisual).toBe(true);
   await expect(stage).toHaveAttribute("data-render-updating", "false");
 
+  const beforeZoomBlocks = new URL(page.url()).searchParams.get("blocks");
+  const beforeZoomVisual = await canvasVisualSignature(canvas);
+  await page.mouse.move(pointerX, pointerY);
+  await page.mouse.wheel(0, -260);
+  expect(await stage.getAttribute("data-render-ready")).toBe("true");
+  await expect.poll(() =>
+    new URL(page.url()).searchParams.get("blocks")
+  ).not.toBe(beforeZoomBlocks);
+  await expect(stage).toHaveAttribute("data-render-updating", "false");
+  await expect.poll(() => canvasVisualSignature(canvas)).not.toBe(beforeZoomVisual);
+  await expect(stage).toHaveAttribute("data-vertical-datum", "64");
+  await expect(stage).toHaveAttribute("data-vertical-span", "192");
+
   await page.getByRole("button", { name: "Map", exact: true }).click();
   await expect(page).toHaveURL(/view=map/u);
 
   const lifted = new URL(page.url());
   lifted.searchParams.set("x", String(1024 + 6144));
   lifted.searchParams.set("z", String(-768 - 6144));
+  lifted.searchParams.set("blocks", "6144");
   await page.goto(lifted.href, { waitUntil: "networkidle" });
   await expect(shell).toHaveAttribute("data-semantic-ready", "true");
   await expect(shell).toHaveAttribute(

@@ -12,6 +12,11 @@ import type {
   SemanticTerrainWorkerResponse,
   SemanticTerrainWorkerSummary,
 } from "./semantic-terrain-worker-protocol";
+import {
+  SEMANTIC_TERRAIN_VERTICAL_DATUM,
+  SEMANTIC_TERRAIN_VERTICAL_SPAN,
+  semanticTerrainVerticalOffset,
+} from "./semantic-terrain-projection";
 import { initializeTerrainLab } from "./terrain-lab-wasm";
 import { useWorldViewNavigation } from "./use-world-view-navigation";
 
@@ -325,6 +330,8 @@ export function SemanticTerrainCanvas({
       data-testid="semantic-terrain-stage"
       data-render-ready={response ? "true" : "false"}
       data-render-updating={updating ? "true" : "false"}
+      data-vertical-datum={SEMANTIC_TERRAIN_VERTICAL_DATUM}
+      data-vertical-span={SEMANTIC_TERRAIN_VERTICAL_SPAN}
       tabIndex={0}
       aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
       onPointerDown={navigation.onPointerDown}
@@ -349,6 +356,11 @@ export function SemanticTerrainCanvas({
         </span>
         <span className="canvasBadge">research · production disconnected</span>
         <span className="canvasBadge">{state.semanticTopology}</span>
+        {state.view === "3d" ? (
+          <span className="canvasBadge">
+            fixed Y · {SEMANTIC_TERRAIN_VERTICAL_SPAN}-block span
+          </span>
+        ) : null}
       </div>
       <div className="canvasHint">
         Drag to {state.view === "3d" ? "orbit" : "pan"} · shift-drag to pan ·
@@ -574,7 +586,7 @@ function projectGridPoint(
   row: number,
   height: number,
 ): { x: number; y: number } {
-  const { columns, rows, minimumHeight, maximumHeight } = response.metadata;
+  const { columns, rows } = response.metadata;
   const normalizedX = column / Math.max(columns - 1, 1) * 2 - 1;
   const normalizedZ = row / Math.max(rows - 1, 1) * 2 - 1;
   const cosYaw = Math.cos(camera.yaw);
@@ -582,14 +594,11 @@ function projectGridPoint(
   const rotatedX = normalizedX * cosYaw - normalizedZ * sinYaw;
   const rotatedZ = normalizedX * sinYaw + normalizedZ * cosYaw;
   const scale = Math.min(panel.width * 0.4, panel.height * 0.42);
-  const heightSpan = Math.max(maximumHeight - minimumHeight, 40);
-  const normalizedHeight = (height - (minimumHeight + maximumHeight) * 0.5)
-    / heightSpan;
   return {
     x: panel.x + panel.width * 0.5 + rotatedX * scale,
     y: panel.y + panel.height * 0.56
       + rotatedZ * scale * Math.sin(camera.pitch)
-      - normalizedHeight * scale * 1.45 * Math.cos(camera.pitch),
+      - semanticTerrainVerticalOffset(height, camera.pitch, scale),
   };
 }
 
