@@ -66,6 +66,13 @@ composition on 2026-07-27. Minor z-fighting limited to the outermost exact
 blocks remains a known near-coincident frontier-overlap issue for later
 collar/skirt refinement; it does not reopen the shared-depth correction. No
 game-scene, Android, or XR adoption has started.
+Post-review Explorer evidence then showed that Slice 3B's viewer-forward
+anchor was useful for foreground diagnosis but confusing as the product
+default: it moves exact residency when yaw changes and can place exact terrain
+below the low-angle viewport. Commit `c75b488b` restores the orbit focus as
+the native/browser default composition anchor and retains the old placement
+through explicit `viewer-forward` options. This changes proof-host placement,
+not the accepted shared-depth or whole-record ownership contracts.
 Interactive review on 2026-07-26 diagnosed two remaining proof defects and
 activated Tactical
 [`252`](../tactical/252-procedural-horizon-seams-and-transition-admission.md):

@@ -8,11 +8,16 @@ tree and terrain silhouettes while still allowing nearer procedural geometry
 to win depth. PH-1 and PH-2 are complete. Minor z-fighting limited to the
 outermost exact blocks is accepted as a known frontier-overlap issue for later
 collar/skirt refinement; it does not reopen the shared-depth correction.
+Post-review commit `c75b488b` makes the orbit focus the default composition
+anchor so exact terrain remains beneath the screen's point of interest.
+The prior camera-relative placement remains available explicitly as
+`viewer-forward`; hosted review of the new default is the next checkpoint.
 
 Topics:
 
 - `procedural-horizon-clipmap`
 - `lod-native-vegetation`
+- `world-view-navigation`
 
 Parent:
 
@@ -693,6 +698,46 @@ outermost exact blocks. This is a localized near-coincident frontier overlap,
 not a return of the incompatible projection-depth defect. It is accepted for
 this proof and remains a known collar/skirt/ownership refinement under the
 living `procedural-horizon-clipmap` topic.
+
+### Post-review focus-anchor correction
+
+The accepted depth and ownership proof exposed a separate Explorer usability
+problem: Slice 3B's camera-relative anchor places the 5-by-5 exact footprint
+near the orbit eye rather than beneath the orbit focus. At the 96-block review
+scale and radius 2, the camera is about 150 blocks from the focus while the
+exact center is only 48 blocks ahead of the eye. The patch can therefore sit
+low in or outside the viewport, and changing yaw selects different exact
+chunks even though the point of interest did not move.
+
+Commit `c75b488b` introduces one explicit World Explorer exact-anchor policy:
+
+- `focus` is the default for native and browser composition. It floors the
+  shared `WorldViewState` focus and remains invariant across orbit yaw.
+- `viewer-forward` preserves the prior camera-relative review placement.
+  Native uses `--exact-anchor viewer-forward`; the browser uses
+  `exactAnchor=viewer-forward`.
+- map mode remains focus-centered under either policy because its eye has no
+  horizontal offset.
+- the selected anchor still drives exact compilation, procedural residency,
+  coverage, and vegetation ownership together. This is a proof-host policy,
+  not a new renderer or game-scene rule.
+
+Inspected native evidence:
+
+- `/tmp/mclone-exact-anchor-focus.png`
+- `/tmp/mclone-exact-anchor-focus-magenta.png`
+- `/tmp/mclone-exact-anchor-viewer-forward.png`
+- `/tmp/mclone-exact-anchor-smoke/window/3d.png`
+- `/tmp/mclone-exact-anchor-smoke/window/orbit.png`
+
+The focus and magenta frames place the exact block patch around the
+screen-center terrain. The viewer-forward frame reproduces the old foreground
+placement. Native window/offscreen composed smoke passes movement, orbit,
+map, negative coordinates, and teleport with `25/25` exact chunks. Local
+desktop source-color and Pixel 7 browser receipts report `exactAnchor=focus`
+at `(0, 0)`; the optional browser receipt reports `viewer-forward` at
+`(-102, 0)`. All retain coherent coverage and zero missing tree
+representations.
 
 ### Slice 5: Terrain Lab adoption
 
