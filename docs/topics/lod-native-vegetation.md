@@ -2,9 +2,12 @@
 
 Topic: `lod-native-vegetation`
 
-Status: Terrain Lab hierarchy proof active 2026-07-25. Exact records and the
-initial Lab proxy path are landed. The rejected in-game chunk-based adapter was
-removed by Tactical 245.
+Status: exact records, the Terrain Lab hierarchy, reusable native/browser
+vegetation execution, detached whole-record ownership, and the first live-game
+consumer are landed. The rejected in-game chunk-based adapter was removed by
+Tactical 245. PH-4 live-game composition was provisionally accepted on
+2026-07-27 with the exact/proxy overlap described below retained as a known
+limitation.
 
 Native World Explorer composition review on 2026-07-26 proved that the first
 chunk/fragment mask is not a valid exact/LOD tree handoff. One stable natural
@@ -66,6 +69,26 @@ commits the whole replacement level. Terrain has an independent complete
 presentation, so neither host exposes a forest-free transition frame and
 neither waits for platform-specific executor latency. Source changes still
 invalidate old vegetation immediately.
+
+Live-game review after the shared terrain quality correction found a narrower
+ownership gap that detached Explorer and Terrain Lab composition do not have.
+Their canonical exact renderer separates natural-tree meshes from base
+terrain, so the selected stable-record owner controls both sides of the
+handoff. The live game deliberately retains its ordinary authoritative chunk
+meshes; natural tree blocks in those meshes are not a separately suppressible
+draw. The shared owner can remove an exact-owned record's proxy, but a
+proxy-owned frontier record may still overlap the exact tree already present
+in a live chunk. The reviewed example visibly combines textured exact leaves
+with the solid proxy crown and produces localized z-fighting.
+
+This is accepted for the current PH-4 checkpoint. It does not redefine
+complete-record XOR as achieved in the live scene. The procedural vegetation
+represents the original generated natural world and is already allowed to be
+stale with respect to cutting, planting, or other persisted edits outside
+exact range. A later revisit may add record- or region-level invalidation or
+storage. A smaller proxy crown in X/Z is also a plausible rough visual
+mitigation, but it would reduce overlap rather than establish ownership and is
+not implemented.
 
 ## Scope
 
@@ -747,6 +770,37 @@ Transitions may cross-fade, dither, or morph only after overlap accounting is
 defined. Position, family, dimensions, and world-anchored variation remain
 stable throughout the transition.
 
+### Accepted live-scene exception
+
+The mechanism above is implemented end to end for detached canonical exact
+composition. The first live-game adapter currently implements only the proxy
+side of that decision because its exact tree blocks remain part of ordinary
+authoritative chunk meshes. It can therefore draw both representations for a
+stable record near the frontier.
+
+The 2026-07-27 hosted review accepted that overlap provisionally because:
+
+- terrain composition, depth, seam closure, lighting, and horizon reach are
+  otherwise believable;
+- the defect is localized to trees near the exact frontier;
+- the natural LOD is already an intentionally edit-unaware reconstruction of
+  the generated baseline; and
+- correcting persisted live geometry deserves a focused ownership design
+  rather than an unsafe block-material or bounding-box deletion rule.
+
+Future work should compare at least these paths:
+
+1. inset proxy crown width/depth slightly as a cheap cosmetic mitigation;
+2. partition precisely reconstructed generated-feature voxels from the live
+   exact mesh by stable record ID, leaving differing authoritative edits in
+   the ordinary mesh; and
+3. add sparse record/region invalidation or stored LOD overrides so distant
+   proxies can eventually reflect authoritative mutation.
+
+The first option is explicitly not a correctness fix. The second must account
+for generator revision and persisted chunks. The third is the durable route
+for a forest that has been cut down but remains visible in procedural LOD.
+
 ## Authority, Mutation, And Multiplayer
 
 The tree planner is canonical generation policy for untouched natural
@@ -995,8 +1049,9 @@ Their payloads and planners should remain family-specific.
   retained tree.
 - Coarse forest edges, clearings, dominant families, and canopy silhouette
   remain recognizable without individual enumeration.
-- Exact and approximate vegetation never co-render in the same admitted
-  representation footprint once integrated in-game.
+- Detached canonical composition never co-renders exact and approximate
+  vegetation in one admitted footprint. The current live-game exception is
+  recorded above and remains future correction work.
 - Parent summaries remain until the replacing child instances are drawable.
 
 ### Performance
@@ -1111,16 +1166,13 @@ pixels:
 ## Recommended Next Work
 
 Coordinating parent Tactical
-[`261`](../tactical/261-procedural-horizon-product-integration-roadmap.md) now
-sequences the focused integration campaign. Active child Tactical
-[`262`](../tactical/262-world-explorer-exact-procedural-composition.md)
-has established terrain coverage and corrected the reviewed exact/proxy tree
-chimera in native automation and inspected captures. Human Review 1A is the
-next gate. Later children construct the proven
-platform executor at the app rim, compose the unchanged
-coordinator/compiler under `mclone-scene`, and add authoritative edit
-invalidation, multiworld budgets, device rebuild, and mono/stereo/multiview
-admission.
+[`261`](../tactical/261-procedural-horizon-product-integration-roadmap.md)
+sequences the remaining integration campaign. PH-4 shared-engine and
+live-scene adoption is accepted with the live exact/proxy overlap above.
+Complete live-tree XOR and edit-aware proxy invalidation remain a deliberate
+PH-5-or-later revisit rather than an immediate blocker. Lifecycle recovery,
+flat-platform promotion, and mono/stereo/multiview admission remain separate
+parent phases.
 
 The active Terrain Lab hierarchy work remains an independent presentation
 quality track: retain its 65.5 km work receipts, footprint filtering, and

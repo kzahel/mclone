@@ -1,7 +1,7 @@
 # Tactical 271: Procedural Horizon Quality Baseline
 
-Status: implementation complete; Human Review checkpoint pending 2026-07-27.
-Corrective child of active PH-4 Tactical
+Status: complete; hosted Human Review accepted 2026-07-27 with the live-tree
+overlap and other limitations below. Corrective child of PH-4 Tactical
 [`269`](269-shared-terrain-engine-scene-adoption.md) under coordinating
 Tactical [`261`](261-procedural-horizon-product-integration-roadmap.md).
 
@@ -145,8 +145,7 @@ Status: complete 2026-07-27.
 
 ### Slice 4: cross-host quality checkpoint
 
-Status: implementation and evidence complete; Human Review pending
-2026-07-27.
+Status: complete; Human Review accepted 2026-07-27.
 
 - Use ten levels and stride one in the headed browser game even if it is slow.
 - Capture and inspect the complete evidence matrix.
@@ -214,9 +213,27 @@ Known limitations at this checkpoint:
 - the previously accepted narrow exact/procedural frontier can still
   z-fight on the outermost exact blocks; a later skirt/frontier treatment owns
   that issue;
+- a proxy-owned natural-tree record can overlap the same tree already present
+  in the live game's ordinary exact chunk mesh, producing localized
+  leaf/crown z-fighting. Detached canonical composition separates exact tree
+  meshes and does not have this gap. The live-game overlap is provisionally
+  accepted and recorded in
+  [`lod-native-vegetation.md`](../topics/lod-native-vegetation.md); slightly
+  shrinking proxy crown width/depth is a possible rough mitigation, while
+  generated-feature partitioning or edit-aware LOD invalidation are later
+  correctness work;
 - browser full-quality startup and frame cost are not yet acceptable; and
 - Explorer and game share the terrain representation engine but intentionally
   retain different product cameras, backgrounds, and exact-world ownership.
+
+## Human Review Result
+
+Hosted phone review accepted the corrected quality baseline on 2026-07-27.
+The reviewer found the terrain, collar, horizon reach, lighting, and shared
+quality tier convincing overall. The remaining visible tree defect is the
+known live-source limitation above: the procedural proxy and exact chunk tree
+can occupy the same stable occurrence at the frontier. No renderer workaround
+was added at closeout.
 
 ## Separate Performance Follow-Up
 

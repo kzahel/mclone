@@ -3,19 +3,20 @@
 Topic: `procedural-horizon-clipmap`
 
 Status: the standalone cross-platform proof, transition hardening, and shared
-vegetation service are complete. Terrain Lab runtime-composition adoption and
-its hosted human review are also complete. Active coordinating parent Tactical
+vegetation service are complete. Terrain Lab runtime-composition adoption,
+PH-4 live-game scene adoption, and their hosted human reviews are also
+complete. Active coordinating parent Tactical
 [`261`](../tactical/261-procedural-horizon-product-integration-roadmap.md)
 owns the global path into `mclone-scene`, exact/procedural arbitration,
 flat-platform promotion, and XR/multiview acceptance. The first
 cross-platform proof was completed and deployed on 2026-07-25 by Tactical
 [`249`](../tactical/249-cross-platform-procedural-horizon-proof.md). Shared
 toroidal planning, a ten-level fixed-budget renderer, native tree proxies, and
-one Rust Explorer session now run through native and browser adapters. This is
-not yet an in-game procedural-horizon replacement. Product scope and platform
-hosting are independent: the small Explorer and full game may both run in the
-browser, while the same terrain system remains usable on desktop, Android,
-and XR. Tactical
+one Rust terrain-view engine now run through Explorer, Terrain Lab, and the
+opt-in live game on native and browser hosts. Android and XR promotion remain
+later phases. Product scope and platform hosting are independent: the small
+Explorer and full game may both run in the browser, while the same terrain
+system remains usable on desktop, Android, and XR. Tactical
 [`245`](../tactical/245-retire-chunk-far-lod-runtime.md) remains the completed
 removal boundary for the rejected chunk-based Far LOD system. Tactical
 [`247`](../tactical/247-standalone-world-explorer-foundation.md) supplied the
@@ -113,10 +114,11 @@ are not an accepted quality baseline either. Corrective Tactical
 [`271`](../tactical/271-procedural-horizon-quality-baseline.md) now requires
 matched ten-level/stride-one Explorer, desktop-game, and browser-game
 evidence; shared seam closure and horizon reach precede any performance tier.
-Its implementation is now at Human Review: odd fine outer-edge vertices meet
-the adjacent coarse interpolation, normal derivatives consume that stitched
-surface, and composed flat views derive a roughly 140-kiloblock far plane from
-the resident clipmap while exact-only remains unchanged. Inspected native
+Its implementation passed Human Review on 2026-07-27: odd fine outer-edge
+vertices meet the adjacent coarse interpolation, normal derivatives consume
+that stitched surface, and composed flat views derive a roughly 140-kiloblock
+far plane from the resident clipmap while exact-only remains unchanged.
+Inspected native
 elevated, native low, Explorer, and headed-browser captures show no
 sky-colored ring crack or stable tile-lighting grid. The browser reaches the
 same ten-level/stride-one pixels but required roughly two minutes to settle on
@@ -126,6 +128,16 @@ Browser multi-flat,
 full-frame multiview, Android, and headset promotion remain PH-7/PH-8 work.
 Canonical exact generation and live authoritative render sections remain
 different truth-source adapters.
+
+That corrective review accepted one additional live-source limitation. The
+detached canonical renderer separates exact natural-tree meshes and enforces
+whole-record XOR. The game retains natural tree blocks inside ordinary
+authoritative chunk meshes, so a proxy-owned frontier record can overlap the
+same exact tree and z-fight locally. No renderer workaround landed at
+acceptance. The cheap natural LOD is already allowed to ignore persisted edits
+outside exact range; later work may compare a slightly inset proxy,
+generated-feature mesh partitioning, and sparse record/region invalidation or
+storage.
 Interactive review on 2026-07-26 diagnosed two remaining proof defects and
 activated Tactical
 [`252`](../tactical/252-procedural-horizon-seams-and-transition-admission.md):
@@ -602,6 +614,12 @@ Tree proxy removal and exact tree admission should be atomic from the
 observer's perspective. Later density or clustered representations may change
 by level, but their placement identity must remain stable enough to avoid
 sparkling during movement.
+
+Detached canonical composition implements that atomic handoff by separating
+exact tree meshes. The accepted PH-4 live adapter currently suppresses only
+the proxy side: its ordinary chunk mesh may retain exact tree blocks while the
+record remains proxy-owned. This localized exception is recorded rather than
+mistaken for completed live-tree XOR.
 
 ## Natural Terrain Only In The First System
 

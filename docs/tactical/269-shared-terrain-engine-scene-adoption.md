@@ -2,9 +2,10 @@
 
 ## Status
 
-Hosted Human Review rejected 2026-07-27; corrective quality Tactical
-[`271`](271-procedural-horizon-quality-baseline.md) is implemented and awaiting
-its corrective Human Review. This is PH-4
+Complete; corrective quality Tactical
+[`271`](271-procedural-horizon-quality-baseline.md) passed hosted Human Review
+on 2026-07-27. PH-4 is accepted with the documented live exact/proxy tree
+overlap retained as a provisional limitation. This is PH-4
 from parent Tactical
 [`261`](261-procedural-horizon-product-integration-roadmap.md), following the
 accepted World Explorer composition proof in Tactical
@@ -119,19 +120,28 @@ this first pixel milestone; Slice 4 subsequently supplied platform executors.
 
 ### Slice 4: ownership, lifecycle, and topology
 
-- [x] Feed authoritative readiness into complete-record natural-feature XOR.
-- [x] Invalidate or reselect ownership when edits, section readiness, source
+- [x] Feed authoritative readiness into stable-record proxy ownership.
+- [x] Invalidate or reselect proxy ownership when section readiness, source
   generation, topology, world, or device resources change.
 - [x] Exercise ordinary movement and source resets without stale products.
+- [ ] Separate or suppress live exact natural-tree geometry while a proxy owns
+  the same record; deferred with the accepted limitation.
 - [ ] Carry the same recovery through the dedicated PH-6 teleport,
   view-distance, session-replacement, and device-rebuild campaign.
 
-The live engine now treats exact-ready coverage as authoritative for a whole
-natural tree record: it owns both a present exact tree and an edited exact
-absence, while resident procedural products own complete proxies outside that
-coverage. Native uses the shared named-thread executor moved out of World
-Explorer. Browser construction supplies the same coordinator with a dedicated
-Wasm Worker at the app rim.
+The live engine uses exact-ready coverage to suppress procedural proxies for
+exact-owned natural-tree records. Unlike the detached canonical exact
+renderer, the live game does not separate natural tree blocks from its
+ordinary authoritative chunk meshes. A proxy-owned frontier record can
+therefore overlap exact tree geometry already drawn by that mesh. Hosted
+review exposed the result as localized leaf/crown z-fighting and accepted it
+provisionally. Complete live-tree XOR, generated-feature partitioning, and
+edit-aware LOD invalidation remain later work in the
+[`lod-native-vegetation`](../topics/lod-native-vegetation.md) topic.
+
+Native uses the shared named-thread executor moved out of World Explorer.
+Browser construction supplies the same coordinator with a dedicated Wasm
+Worker at the app rim.
 
 The browser initially lost its WebGPU device with `A valid external Instance
 reference no longer exists.` Retaining the `wgpu::Instance` for the surface
@@ -152,7 +162,7 @@ explicit device presentation budget, not a second terrain implementation.
 - [x] Run focused unit gates and native Wasm compilation.
 - [x] Capture and inspect low-angle tree and steep-hill silhouettes at the first
   drawable game milestone.
-- [ ] Compare exact-only and composed mode under matched inputs at the hosted
+- [x] Compare exact-only and composed mode under matched inputs at the hosted
   review site.
 - [x] Prove synthetic per-eye stereo shares residency while retaining
   per-view projection/depth correctness.
@@ -179,7 +189,7 @@ enabling it; the existing exact-only auxiliary path remains unchanged.
 - [x] Expose deterministic URL inputs for exact-only/composed mode and the review
   location without moving terrain policy into TypeScript.
 - [x] Validate headed desktop WebGPU pixels and semantic receipts.
-- [ ] Validate the representative phone browser after desktop review.
+- [x] Validate the representative phone browser after desktop review.
 - [x] Deploy the full web game and stop at the first subjective review checkpoint.
 
 Production deployment `f0cdc1e4-5d1d-4389-a3ff-2926e04ae69f` serves bundle
@@ -220,10 +230,26 @@ The checkpoint failed item 3 and overall visual believability. Tactical 271
 owns the corrected screenshot-based native/browser checkpoint; no desktop
 interaction is required from the reviewer.
 
+## Accepted corrective human review checkpoint
+
+Tactical 271 restored one ten-level, stride-one quality baseline, welded
+fine/coarse geometry and lighting, and exposed the full resident horizon
+through the shared projection. Hosted phone review accepted that corrected
+composition on 2026-07-27.
+
+The review also found that the game scene does not yet fulfill item 3 for
+natural trees: its ordinary exact chunk mesh can draw a tree while the stable
+record remains proxy-owned. The exact leaves and solid proxy crown overlap and
+z-fight. This is accepted as a localized provisional limitation rather than a
+claim that live complete-record XOR is finished. The natural LOD remains an
+edit-unaware reconstruction of original terrain; future generated-feature
+partitioning, record/region invalidation, or a rough inset proxy may revisit
+the handoff.
+
 ## Exit condition
 
-PH-4 is complete when Explorer, Terrain Lab runtime composition, and the live
-scene consume one shared terrain representation/composition owner through
-different qualified sources; exact-only remains equivalent; native, web, and
-synthetic-stereo evidence passes; and the hosted full-game checkpoint is ready
-for subjective acceptance.
+PH-4 is complete: Explorer, Terrain Lab runtime composition, and the live scene
+consume one shared terrain representation/composition owner through different
+qualified sources; exact-only remains equivalent; native, web, and
+synthetic-stereo evidence passes; and hosted review accepted the corrected
+full-game checkpoint with the explicit live-tree exception above.
