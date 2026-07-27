@@ -244,7 +244,7 @@ impl MultiscaleSemanticRefinementControl {
         let mut local_fact_count = 0_u32;
         for owner in owners {
             for family in MultiscaleWitnessFamily::ALL {
-                let hierarchy = build_feature_hierarchy(descriptor, owner, family)?;
+                let hierarchy = build_feature_hierarchy(descriptor, owner, family, self.detail)?;
                 if !fact_overlaps_target(descriptor, target, &hierarchy[0])? {
                     continue;
                 }
@@ -411,10 +411,11 @@ pub(crate) struct MultiscaleFeatureOffsets {
     pub terminal_kind: u8,
 }
 
-fn build_feature_hierarchy(
+pub(crate) fn build_feature_hierarchy(
     descriptor: &StreamedPlanDescriptor,
     root_owner: PlanRegion,
     family: MultiscaleWitnessFamily,
+    detail: MultiscaleWitnessDetail,
 ) -> Result<Vec<StreamedSemanticFact>, String> {
     let root_key = feature_owner_key(descriptor, root_owner, PARENT_LEVEL)?;
     let hash = typed_hash(
@@ -489,6 +490,9 @@ fn build_feature_hierarchy(
         height_center + 32,
         root_terminal,
     ));
+    if detail == MultiscaleWitnessDetail::Parent {
+        return Ok(facts);
+    }
 
     let root_midpoint = displaced_midpoint(
         start,
@@ -518,6 +522,9 @@ fn build_feature_hierarchy(
                 0
             },
         ));
+        if detail == MultiscaleWitnessDetail::Regional {
+            continue;
+        }
 
         let local_midpoint = displaced_midpoint(
             regional_start,
@@ -655,7 +662,7 @@ fn possible_parent_owners(
     Ok(owners.into_iter().collect())
 }
 
-fn canonical_parent_owner(
+pub(crate) fn canonical_parent_owner(
     descriptor: &StreamedPlanDescriptor,
     owner: PlanRegion,
 ) -> Result<PlanRegion, String> {

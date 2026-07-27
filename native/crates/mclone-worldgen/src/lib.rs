@@ -11,6 +11,7 @@ pub mod noise;
 pub mod placement;
 pub mod prng;
 pub mod procedural_structure;
+pub mod semantic_terrain_sandbox;
 pub mod streamed_plan_atlas;
 pub mod streamed_plan_feature_graph_trial;
 pub mod streamed_plan_harness;
