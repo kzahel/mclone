@@ -826,9 +826,11 @@ The three 64-character semantic checksums remain exact, all final requests
 are cache hits, and desktop and phone captures show the same repeated
 structure. Evidence images are written to
 `/tmp/mclone-terrain-lab-*-streamed-atlas-torus.png` and the corresponding
-`-repeat.png`; they are not repository artifacts. The observed browser query
-times in those captures are useful interaction diagnostics, not Phase 4
-performance baselines.
+`-repeat.png`; they are not repository artifacts. The image files are not
+byte-identical because their headers intentionally show cold/warm cache counts
+and query time; the structural geometry and semantic checksums repeat. The
+observed browser query times in those captures are useful interaction
+diagnostics, not Phase 4 performance baselines.
 
 Validation:
 
@@ -954,7 +956,7 @@ execution.
 | hierarchical boundary trial | `e7158125`, `473f071c` | 105 comparison cases plus 498 shared-facet observations across three seeds/topologies | zero mismatch/conflict; fixed depth 3 and fanout 6 | advance Candidate B to structural atlas work |
 | feature-owned graph trial | `4b1dce70`, `473f071c` | 105 comparison cases; 322 graphs, 34 seam crossings, 25-owner bound | zero mismatch/conflict/cycle/incomplete graph; reach at most 576 blocks | advance Candidate C to structural atlas work |
 | Phase 2 combined receipt | `473f071c` | native receipt, three Wasm tests, and full `mclone-worldgen` suite | 315 comparison witness agrees; 382 passed, 1 ignored in the library suite | pause before Phase 3 atlas authorization |
-| streamed structural atlas | `42bcbcd1`, `7e740278`, `edc18490`, `95069d20` | five native atlas tests; one pinned native/Wasm atlas witness; 23 URL/state tests; seven browser-ownership tests; headed desktop/phone torus-period pan | free pan and bounded caches preserve canonical facts; periodic repeated view is visually and semantically identical; production remains disconnected | wait at Human Review R1; do not reconstruct or compose D |
+| streamed structural atlas | `42bcbcd1`, `7e740278`, `edc18490`, `95069d20` | five native atlas tests; one pinned native/Wasm atlas witness; 23 URL/state tests; seven browser-ownership tests; headed desktop/phone torus-period pan | free pan and bounded caches preserve canonical facts; periodic structural geometry and semantics repeat while receipt text reports cold/warm cost; production remains disconnected | wait at Human Review R1; do not reconstruct or compose D |
 | reconstruction/performance finalist | pending | pending | pending | pending |
 
 ## Exit Condition
