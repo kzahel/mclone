@@ -9,6 +9,7 @@ mod canonical_batch_codec;
 mod canonical_mesh;
 mod clipmap;
 mod composition;
+mod engine;
 mod horizon_admission;
 mod runtime_exact;
 mod runtime_session;
@@ -65,6 +66,7 @@ pub use composition::{
     TERRAIN_EXACT_FRONTIER_COLLAR_BLOCKS, TerrainCompositionSourceIdentity,
     TerrainExactCoverageMask, TerrainExactCoverageMode,
 };
+pub use engine::{TerrainViewEngine, TerrainViewEngineConfig};
 pub use runtime_exact::{
     CanonicalExactExecutor, CanonicalExactRequest, CanonicalExactResult,
     TerrainRuntimeExactRenderer, TerrainRuntimeExactStats,
@@ -315,6 +317,7 @@ pub struct TerrainHorizonPresentation {
     pub view: TerrainPreviewView,
     pub camera: TerrainPreviewCamera,
     pub target_y: f32,
+    render_view_override: Option<mclone_render::chunk::ChunkRenderView>,
 }
 
 impl TerrainHorizonPresentation {
@@ -334,6 +337,7 @@ impl TerrainHorizonPresentation {
             view,
             camera,
             target_y: terrain_horizon_orbit_target_y(),
+            render_view_override: None,
         };
         presentation.uniform_facts()?;
         Ok(presentation)
@@ -344,6 +348,24 @@ impl TerrainHorizonPresentation {
             return Err("terrain horizon camera target height must be finite".to_owned());
         }
         self.target_y = target_y;
+        Ok(self)
+    }
+
+    /// Use a host-provided physical view/projection while retaining the
+    /// presentation center as the camera-relative precision anchor.
+    ///
+    /// Explorer and Terrain Lab normally use the orbit projection derived
+    /// from this presentation. Live scene, stereo, and multiview hosts use
+    /// this override so procedural and exact geometry write comparable
+    /// reversed-Z values into one depth target.
+    pub fn with_render_view(
+        mut self,
+        render_view: mclone_render::chunk::ChunkRenderView,
+    ) -> Result<Self, String> {
+        if !render_view.is_finite() {
+            return Err("terrain horizon render view must be finite".to_owned());
+        }
+        self.render_view_override = Some(render_view);
         Ok(self)
     }
 
@@ -1232,6 +1254,7 @@ fn viewport_uniform_bytes_for_request(
         ),
         focus_y,
         None,
+        None,
     )
 }
 
@@ -1245,6 +1268,7 @@ fn viewport_uniform_bytes_for_request_with_presentation(
     presentation: TerrainPreviewUniformPresentation,
     focus_y: f32,
     inner_hole: Option<clipmap::TerrainClipmapBounds>,
+    render_view_override: Option<mclone_render::chunk::ChunkRenderView>,
 ) -> Vec<u8> {
     let source = request.request();
     let seed = source.seed as u64;
@@ -1343,13 +1367,30 @@ fn viewport_uniform_bytes_for_request_with_presentation(
         });
         bytes.extend_from_slice(&value.to_le_bytes());
     }
-    let render_view =
-        terrain_preview_chunk_render_view(projection, 0.0, 0.0, panel_width, panel_height);
-    for value in render_view.view_projection.to_cols_array() {
+    let view_projection = render_view_override.map_or_else(
+        || {
+            terrain_preview_chunk_render_view(projection, 0.0, 0.0, panel_width, panel_height)
+                .view_projection
+        },
+        |render_view| terrain_relative_view_projection(render_view, presentation),
+    );
+    for value in view_projection.to_cols_array() {
         bytes.extend_from_slice(&value.to_le_bytes());
     }
     debug_assert_eq!(bytes.len(), TERRAIN_PREVIEW_UNIFORM_BYTES as usize);
     bytes
+}
+
+fn terrain_relative_view_projection(
+    render_view: mclone_render::chunk::ChunkRenderView,
+    presentation: TerrainPreviewUniformPresentation,
+) -> glam::Mat4 {
+    let world_from_relative = glam::Mat4::from_translation(glam::Vec3::new(
+        presentation.anchor_x as f32 + presentation.fraction_x,
+        0.0,
+        presentation.anchor_z as f32 + presentation.fraction_z,
+    ));
+    render_view.view_projection * world_from_relative
 }
 
 fn terrain_preview_panel_size(
@@ -1694,6 +1735,26 @@ mod tests {
             (raised_view.camera_position.y - default_view.camera_position.y - target_delta).abs()
                 < 1.0e-5
         );
+    }
+
+    #[test]
+    fn external_view_uses_the_presentation_center_as_a_precision_anchor() {
+        let presentation =
+            TerrainPreviewUniformPresentation::continuous(-32.25, 48.75, 96.0, 54.0).unwrap();
+        let render_view = mclone_render::chunk::ChunkCamera {
+            eye: [-18.0, 104.0, 92.0],
+            target: [-32.25, 70.0, 48.75],
+            up: [0.0, 1.0, 0.0],
+            fov_y_radians: 58.0_f32.to_radians(),
+            z_near: 0.1,
+            z_far: 2_000.0,
+        }
+        .render_view(1280, 720);
+        let relative = glam::Vec4::new(4.5, 77.0, -6.25, 1.0);
+        let world = glam::Vec4::new(-32.25 + 4.5, 77.0, 48.75 - 6.25, 1.0);
+        let anchored = terrain_relative_view_projection(render_view, presentation) * relative;
+        let direct = render_view.view_projection * world;
+        assert!((anchored - direct).abs().max_element() < 1.0e-4);
     }
 
     #[test]

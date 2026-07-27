@@ -198,13 +198,13 @@ impl ExplorerTerrain {
                 exact_view.residency_anchor[1],
             )?;
         }
-        let coverage = self.exact.coverage_snapshot().map_err(anyhow::Error::msg)?;
+        let prepared_exact = self.exact.prepared_frame().map_err(anyhow::Error::msg)?;
         let coverage_mode = match self.composition {
             WorldExplorerCompositionMode::Composed => {
-                Some((&coverage, TerrainExactCoverageMode::DiscardPainted))
+                Some((&prepared_exact, TerrainExactCoverageMode::DiscardPainted))
             }
             WorldExplorerCompositionMode::Coverage => {
-                Some((&coverage, TerrainExactCoverageMode::VisualizePainted))
+                Some((&prepared_exact, TerrainExactCoverageMode::VisualizePainted))
             }
             WorldExplorerCompositionMode::Horizon | WorldExplorerCompositionMode::Exact => None,
         };
@@ -217,7 +217,7 @@ impl ExplorerTerrain {
         let clear_color = self.exact.clear_color();
         let mut stats = self
             .session
-            .encode_to_target(
+            .encode_prepared_to_target(
                 device,
                 queue,
                 encoder,

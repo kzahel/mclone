@@ -10,8 +10,8 @@ use crate::{
     BoundedRepresentationOwnershipSnapshot, CanonicalMeshBatch, CanonicalMeshCoordinate,
     CanonicalPackedAdmission, ExactPaintedCoverageSnapshot, McloneTreeOccurrenceId,
     McloneTreeOwnershipCandidate, TERRAIN_EXACT_FRONTIER_COLLAR_BLOCKS,
-    TerrainCompositionSourceIdentity, canonical_terrain_chunk_order,
-    mclone_tree_ownership_snapshot,
+    TerrainCompositionSourceIdentity, TerrainPreparedExactFrame, TerrainViewSourceIdentity,
+    canonical_terrain_chunk_order, mclone_tree_ownership_snapshot,
 };
 #[cfg(not(target_arch = "wasm32"))]
 use crate::{
@@ -21,7 +21,7 @@ use crate::{
 #[cfg(not(target_arch = "wasm32"))]
 use anyhow::bail;
 use anyhow::{Context, Result};
-use mclone_core::ChunkPos;
+use mclone_core::{ChunkPos, HorizontalTopology};
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_mesh::TexturedMeshCatalog;
 use mclone_mesh::{
@@ -376,6 +376,12 @@ impl TerrainRuntimeExactRenderer {
             self.coverage_generation,
             self.painted.iter().copied(),
         )
+    }
+
+    pub fn prepared_frame(&self) -> Result<TerrainPreparedExactFrame, String> {
+        let source =
+            TerrainViewSourceIdentity::detached(self.source, HorizontalTopology::UNBOUNDED, 1, 1)?;
+        TerrainPreparedExactFrame::new(source, self.coverage_snapshot()?)
     }
 
     pub fn tree_ownership(

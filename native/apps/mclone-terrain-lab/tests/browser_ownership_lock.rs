@@ -168,6 +168,7 @@ fn runtime_composition_consumes_shared_rust_owners() {
         "BrowserCanonicalExactExecutor",
         "BrowserTerrainVegetationExecutor",
         "TerrainHorizonRenderTarget",
+        "encode_prepared_to_target",
         "TerrainExactCoverageMode::DiscardPainted",
         "TerrainRuntimeExactAnchor::Focus",
     ] {

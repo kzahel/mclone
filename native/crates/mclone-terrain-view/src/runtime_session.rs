@@ -2,11 +2,13 @@ use std::time::Duration;
 
 use crate::{
     BoundedRepresentationOwnershipSnapshot, ExactPaintedCoverageSnapshot, McloneTreeOccurrenceId,
-    TerrainClipmapConfig, TerrainExactCoverageMode, TerrainHorizonFrameStats,
-    TerrainHorizonPresentation, TerrainHorizonRenderTarget, TerrainHorizonRenderer,
-    TerrainPreviewCamera, TerrainPreviewMaterialAtlas, TerrainPreviewProjectionKind,
-    TerrainPreviewView, TerrainVegetationExecutor, terrain_preview_focus_y_for_profile,
+    TerrainClipmapConfig, TerrainCompositionSourceIdentity, TerrainExactCoverageMode,
+    TerrainHorizonFrameStats, TerrainHorizonPresentation, TerrainHorizonRenderTarget,
+    TerrainPreparedExactFrame, TerrainPreviewCamera, TerrainPreviewMaterialAtlas,
+    TerrainPreviewProjectionKind, TerrainPreviewView, TerrainVegetationExecutor, TerrainViewEngine,
+    TerrainViewEngineConfig, TerrainViewSourceIdentity, terrain_preview_focus_y_for_profile,
 };
+use mclone_core::HorizontalTopology;
 use mclone_render_color::{RenderColorProfile, RenderTargetColorTransform};
 use mclone_view_control::{
     ContactEvent, ContactGestureReducer, ViewPoint, ViewportMetrics, WorldViewHeldDirection,
@@ -99,7 +101,7 @@ impl TerrainRuntimeExactAnchor {
 }
 
 pub struct TerrainRuntimeSession {
-    renderer: TerrainHorizonRenderer,
+    engine: TerrainViewEngine,
     config: TerrainRuntimeConfig,
     color_format: wgpu::TextureFormat,
     target_color_transform: RenderTargetColorTransform,
@@ -135,19 +137,32 @@ impl TerrainRuntimeSession {
         let view_state = view_reducer.normalize(config.initial_view);
         let residency_anchor = [floor_i32(view_state.focus_x), floor_i32(view_state.focus_z)];
         let target_color_transform = config.color_profile.target_color_transform(color_format);
-        let renderer = TerrainHorizonRenderer::new_with_target_color_transform(
+        let source = TerrainViewSourceIdentity::detached(
+            TerrainCompositionSourceIdentity::new(
+                TerrainPreviewProfile::McloneOverworldV1,
+                config.seed,
+            ),
+            HorizontalTopology::UNBOUNDED,
+            1,
+            1,
+        )?;
+        let engine = TerrainViewEngine::new(
             device,
             queue,
             color_format,
-            config.width,
-            config.height,
+            TerrainViewEngineConfig {
+                width: config.width,
+                height: config.height,
+                source,
+                clipmap: config.clipmap,
+                vegetation_enabled: config.vegetation_enabled,
+                color_profile: config.color_profile,
+            },
             material_atlas,
-            config.clipmap,
             vegetation_executor,
-            target_color_transform,
         )?;
         let mut session = Self {
-            renderer,
+            engine,
             config,
             color_format,
             target_color_transform,
@@ -171,7 +186,7 @@ impl TerrainRuntimeSession {
     pub fn resize(&mut self, device: &wgpu::Device, width: u32, height: u32) {
         let width = width.max(1);
         let height = height.max(1);
-        self.renderer.resize(device, width, height);
+        self.engine.resize(device, width, height);
         if self.config.width != width || self.config.height != height {
             self.config.width = width;
             self.config.height = height;
@@ -276,6 +291,34 @@ impl TerrainRuntimeSession {
         exact_coverage: Option<(&ExactPaintedCoverageSnapshot, TerrainExactCoverageMode)>,
         tree_ownership: Option<&BoundedRepresentationOwnershipSnapshot<McloneTreeOccurrenceId>>,
     ) -> Result<TerrainHorizonFrameStats, String> {
+        let prepared_exact = exact_coverage
+            .map(|(snapshot, mode)| {
+                TerrainPreparedExactFrame::new(self.engine.source(), snapshot.clone())
+                    .map(|frame| (frame, mode))
+            })
+            .transpose()?;
+        self.encode_prepared_to_target(
+            device,
+            queue,
+            encoder,
+            target,
+            elapsed,
+            prepared_exact.as_ref().map(|(frame, mode)| (frame, *mode)),
+            tree_ownership,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn encode_prepared_to_target(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: TerrainHorizonRenderTarget<'_>,
+        elapsed: Duration,
+        exact: Option<(&TerrainPreparedExactFrame, TerrainExactCoverageMode)>,
+        tree_ownership: Option<&BoundedRepresentationOwnershipSnapshot<McloneTreeOccurrenceId>>,
+    ) -> Result<TerrainHorizonFrameStats, String> {
         self.encode_horizon(
             device,
             queue,
@@ -283,7 +326,7 @@ impl TerrainRuntimeSession {
             Some(target),
             target.color_view,
             elapsed,
-            exact_coverage,
+            exact,
             tree_ownership,
         )
     }
@@ -297,7 +340,7 @@ impl TerrainRuntimeSession {
         target: Option<TerrainHorizonRenderTarget<'_>>,
         color_view: &wgpu::TextureView,
         elapsed: Duration,
-        exact_coverage: Option<(&ExactPaintedCoverageSnapshot, TerrainExactCoverageMode)>,
+        prepared_exact: Option<(&TerrainPreparedExactFrame, TerrainExactCoverageMode)>,
         tree_ownership: Option<&BoundedRepresentationOwnershipSnapshot<McloneTreeOccurrenceId>>,
     ) -> Result<TerrainHorizonFrameStats, String> {
         let motion_state = self.view_state;
@@ -328,35 +371,24 @@ impl TerrainRuntimeSession {
             Some(target_y) => presentation.with_target_y(target_y)?,
             None => presentation,
         };
-        if let Some((snapshot, mode)) = exact_coverage {
-            self.renderer
-                .set_exact_painted_coverage(queue, snapshot, mode)?;
-        } else {
-            self.renderer.clear_exact_painted_coverage();
-        }
-        if let Some(snapshot) = tree_ownership {
-            self.renderer.set_tree_ownership(device, queue, snapshot)?;
-        } else {
-            self.renderer.clear_tree_ownership(device, queue)?;
-        }
         let stats = match target {
-            Some(target) => self.renderer.encode_to_target(
+            Some(target) => self.engine.encode_to_target(
                 device,
                 queue,
                 encoder,
                 target,
-                self.config.width,
-                self.config.height,
                 presentation,
+                prepared_exact,
+                tree_ownership,
             )?,
-            None => self.renderer.encode(
+            None => self.engine.encode(
                 device,
                 queue,
                 encoder,
                 color_view,
-                self.config.width,
-                self.config.height,
                 presentation,
+                prepared_exact,
+                tree_ownership,
             )?,
         };
         self.note_readiness(stats, elapsed);
@@ -405,21 +437,21 @@ impl TerrainRuntimeSession {
         destination: &wgpu::Buffer,
         bytes_per_row: u32,
     ) -> Result<(), String> {
-        self.renderer
+        self.engine
             .copy_depth_to_buffer(encoder, destination, bytes_per_row)
     }
 
     pub fn set_depth_capture_enabled(&mut self, enabled: bool) {
-        self.renderer.set_depth_capture_enabled(enabled);
+        self.engine.set_depth_capture_enabled(enabled);
     }
 
     pub fn shutdown(&mut self) {
         self.cancel_input();
-        self.renderer.shutdown_vegetation();
+        self.engine.shutdown();
     }
 
     pub fn shutdown_complete(&self) -> bool {
-        self.renderer.vegetation_shutdown_complete()
+        self.engine.shutdown_complete()
     }
 
     pub const fn last_stats(&self) -> Option<TerrainHorizonFrameStats> {
@@ -506,12 +538,8 @@ impl TerrainRuntimeSession {
     }
 
     fn replan_at(&mut self, anchor: [i32; 2]) {
-        self.renderer.set_view(
-            self.config.seed,
-            anchor[0],
-            anchor[1],
-            TerrainPreviewContentStage::Cover,
-        );
+        self.engine
+            .set_residency(anchor[0], anchor[1], TerrainPreviewContentStage::Cover);
         self.revision = self.revision.saturating_add(1);
         self.coarse_ready_at = None;
         self.target_ready_at = None;

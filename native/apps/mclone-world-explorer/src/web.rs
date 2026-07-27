@@ -571,13 +571,13 @@ impl WebWorldExplorer {
                 exact_view.residency_anchor[1],
             )
             .map_err(|error| error.to_string())?;
-        let coverage = exact.coverage_snapshot()?;
+        let prepared_exact = exact.prepared_frame()?;
         let coverage_mode = match self.composition {
             WorldExplorerCompositionMode::Composed => {
-                Some((&coverage, TerrainExactCoverageMode::DiscardPainted))
+                Some((&prepared_exact, TerrainExactCoverageMode::DiscardPainted))
             }
             WorldExplorerCompositionMode::Coverage => {
-                Some((&coverage, TerrainExactCoverageMode::VisualizePainted))
+                Some((&prepared_exact, TerrainExactCoverageMode::VisualizePainted))
             }
             WorldExplorerCompositionMode::Horizon | WorldExplorerCompositionMode::Exact => None,
         };
@@ -586,7 +586,7 @@ impl WebWorldExplorer {
             WorldExplorerCompositionMode::Composed | WorldExplorerCompositionMode::Coverage
         )
         .then_some(exact.tree_ownership());
-        let mut stats = self.session.encode_to_target(
+        let mut stats = self.session.encode_prepared_to_target(
             &self.device,
             &self.queue,
             encoder,

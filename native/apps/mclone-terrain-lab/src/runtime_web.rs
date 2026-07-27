@@ -165,10 +165,10 @@ impl TerrainRuntimeCompositionLab {
                 exact_view.residency_anchor[1],
             )
             .map_err(|error| js_error(error.to_string()))?;
-        let coverage = self.exact.coverage_snapshot().map_err(js_error)?;
+        let prepared_exact = self.exact.prepared_frame().map_err(js_error)?;
         let mut horizon = self
             .session
-            .encode_to_target(
+            .encode_prepared_to_target(
                 &self.device,
                 &self.queue,
                 &mut encoder,
@@ -181,7 +181,7 @@ impl TerrainRuntimeCompositionLab {
                     depth_store: wgpu::StoreOp::Store,
                 },
                 elapsed,
-                Some((&coverage, TerrainExactCoverageMode::DiscardPainted)),
+                Some((&prepared_exact, TerrainExactCoverageMode::DiscardPainted)),
                 Some(self.exact.tree_ownership()),
             )
             .map_err(js_error)?;

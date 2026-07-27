@@ -7,6 +7,7 @@ publish.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+glam.workspace = true
 mclone-core.workspace = true
 mclone-mesh.workspace = true
 mclone-render.workspace = true

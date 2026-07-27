@@ -7,6 +7,7 @@ const SHARED_BROWSER_EXACT: &str =
     include_str!("../../../crates/mclone-terrain-view/src/browser_exact.rs");
 const SHARED_SESSION: &str =
     include_str!("../../../crates/mclone-terrain-view/src/runtime_session.rs");
+const SHARED_ENGINE: &str = include_str!("../../../crates/mclone-terrain-view/src/engine.rs");
 const SHARED_LIB: &str = include_str!("../../../crates/mclone-terrain-view/src/lib.rs");
 
 #[test]
@@ -18,6 +19,9 @@ fn runtime_exact_renderer_is_shared_and_explorer_only_adapts_transport() {
     assert!(SHARED_EXACT.contains("pub trait CanonicalExactExecutor"));
     assert!(SHARED_BROWSER_EXACT.contains("pub struct BrowserCanonicalExactExecutor"));
     assert!(SHARED_SESSION.contains("pub struct TerrainRuntimeSession"));
+    assert!(SHARED_SESSION.contains("engine: TerrainViewEngine"));
+    assert!(SHARED_ENGINE.contains("pub struct TerrainViewEngine"));
+    assert!(SHARED_ENGINE.contains("TerrainPreparedExactFrame"));
     assert!(!EXPLORER_LIB.contains("mod session;"));
 
     for forbidden in [

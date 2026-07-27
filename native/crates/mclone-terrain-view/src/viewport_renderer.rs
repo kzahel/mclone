@@ -2564,6 +2564,19 @@ pub struct TerrainHorizonRenderer {
 }
 
 impl TerrainHorizonRenderer {
+    pub fn reset_source(&mut self) {
+        self.clipmap = TerrainClipmap::new(self.clipmap.config())
+            .expect("an already validated terrain clipmap config remains valid");
+        self.admission.source_reset();
+        self.pending.clear();
+        for slot in &mut self.slots {
+            slot.clear_vegetation();
+        }
+        self.renderer.exact_coverage.disable();
+        self.tree_ownership = None;
+        self.exact_owned_tree_ids.clear();
+    }
+
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -2674,16 +2687,7 @@ impl TerrainHorizonRenderer {
     ) {
         let source_changed = self.seed != seed || self.content_stage != content_stage;
         if source_changed {
-            self.clipmap = TerrainClipmap::new(self.clipmap.config())
-                .expect("an already validated terrain clipmap config remains valid");
-            self.admission.source_reset();
-            self.pending.clear();
-            for slot in &mut self.slots {
-                slot.clear_vegetation();
-            }
-            self.renderer.exact_coverage.disable();
-            self.tree_ownership = None;
-            self.exact_owned_tree_ids.clear();
+            self.reset_source();
         }
         self.seed = seed;
         self.requested_center_x = center_x;
@@ -2961,6 +2965,7 @@ impl TerrainHorizonRenderer {
                     focus_y,
                     None,
                     0,
+                    presentation.render_view_override,
                 ),
             );
             {
@@ -3052,6 +3057,7 @@ impl TerrainHorizonRenderer {
                             resource.tile,
                             self.clipmap.config().level_count,
                         ),
+                        presentation.render_view_override,
                     ),
                 );
             }
@@ -3077,6 +3083,7 @@ impl TerrainHorizonRenderer {
                         focus_y,
                         inner_hole,
                         0,
+                        presentation.render_view_override,
                     ),
                 );
             }
@@ -3504,6 +3511,7 @@ fn terrain_horizon_uniform_bytes(
     focus_y: f32,
     inner_hole: Option<super::TerrainClipmapBounds>,
     normal_edge_flags: u32,
+    render_view_override: Option<mclone_render::chunk::ChunkRenderView>,
 ) -> Vec<u8> {
     debug_assert_eq!(
         normal_edge_flags
@@ -3522,6 +3530,7 @@ fn terrain_horizon_uniform_bytes(
         presentation,
         focus_y,
         inner_hole,
+        render_view_override,
     );
     const CONTENT_STAGE_FLAGS_W_OFFSET: usize = 8 * 16 + 3 * 4;
     let flag_bytes = bytes
