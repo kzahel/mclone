@@ -11,8 +11,8 @@ accepted. Minor z-fighting limited to the outermost exact blocks remains a
 known frontier collar/skirt refinement. PH-3 Terrain Lab adoption is the next
 recommended proof slice before full-game rendering. A post-review Explorer
 correction now defaults exact composition to the orbit focus while preserving
-the prior camera-relative placement as an explicit diagnostic option; hosted
-review of that usability correction precedes PH-3.
+the prior camera-relative placement as an explicit diagnostic option. Hosted
+review accepted that usability correction on 2026-07-27, so PH-3 is ready.
 
 Topics:
 

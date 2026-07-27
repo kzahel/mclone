@@ -11,7 +11,8 @@ collar/skirt refinement; it does not reopen the shared-depth correction.
 Post-review commit `c75b488b` makes the orbit focus the default composition
 anchor so exact terrain remains beneath the screen's point of interest.
 The prior camera-relative placement remains available explicitly as
-`viewer-forward`; hosted review of the new default is the next checkpoint.
+`viewer-forward`. Hosted interactive review accepted the new default on
+2026-07-27. Tactical 262 is complete and PH-3 Terrain Lab adoption is ready.
 
 Topics:
 
@@ -747,7 +748,8 @@ Hosted desktop source-color and Pixel 7 smokes reproduce the focus anchor at
 `(0, 0)` with `25/25` exact chunks; a hosted desktop
 `exactAnchor=viewer-forward` smoke reproduces the optional `(-102, 0)`
 anchor. All three report coherent generation 27 coverage and zero missing
-tree representations. Interactive hosted placement review remains open.
+tree representations. Interactive hosted placement review accepted the
+focus-centered default and optional viewer-forward comparison on 2026-07-27.
 
 ### Slice 5: Terrain Lab adoption
 
