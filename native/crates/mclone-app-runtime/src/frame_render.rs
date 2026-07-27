@@ -2047,6 +2047,64 @@ where
 }
 
 #[allow(clippy::too_many_arguments)]
+pub fn render_full_frame_for_view_with_prepared_stereo_draw_terrain_backdrop_and_opaque_gate_in_slot<
+    BuildGuiDraw,
+>(
+    frame: RenderFrameContext<'_>,
+    depth: &ChunkDepthTarget,
+    sky: &SkyRenderer,
+    draw: &mut TexturedSectionDrawResources,
+    prepared_draw: &PreparedTexturedSectionStereoDraw,
+    terrain_backdrop: &mut dyn TerrainBackdropRenderer,
+    opaque_world_gate: Option<(&OpaqueWorldGateRenderer, OpaqueWorldGate)>,
+    actors: Option<&mut ActorDrawResources>,
+    screen_effects: Option<&mut ScreenEffectsRenderer>,
+    gui_renderer: Option<&mut GuiRenderer>,
+    render_view: ChunkRenderView,
+    actor_instances: &[ActorInstance],
+    underwater_overlay: Option<UnderwaterOverlay>,
+    sky_clear_color: wgpu::Color,
+    time_of_day: f32,
+    sun_angle: f32,
+    render_options: TexturedSectionRenderOptions,
+    gui: FullFrameGui,
+    build_gui_draw: BuildGuiDraw,
+    render_stats: &mut RenderStreamStats,
+    view_slot: PerViewSlot,
+) -> Result<FullFrameRenderSummary>
+where
+    BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+{
+    let render_view = render_view_with_underwater_effect(render_view, underwater_overlay);
+    render_full_frame_for_view_inner_with_backdrop(
+        frame,
+        depth,
+        sky,
+        draw,
+        actors,
+        screen_effects,
+        gui_renderer,
+        render_view,
+        actor_instances,
+        underwater_overlay,
+        sky_clear_color,
+        time_of_day,
+        sun_angle,
+        render_options,
+        gui,
+        build_gui_draw,
+        view_slot,
+        None,
+        Some(prepared_draw),
+        opaque_world_gate.map(|(renderer, gate)| OpaqueWorldInsertion::Gate(renderer, gate)),
+        Some(terrain_backdrop),
+        None,
+        None,
+        render_stats,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
 pub fn render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_in_slot<
     BuildGuiDraw,
 >(
@@ -2315,6 +2373,67 @@ where
         None,
         Some(prepared_draw),
         opaque_world_gate.map(|(renderer, gate)| OpaqueWorldInsertion::Gate(renderer, gate)),
+        Some(clock),
+        Some(&mut timing),
+        render_stats,
+    )?;
+    Ok((summary, timing))
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn render_full_frame_for_view_with_prepared_stereo_draw_terrain_backdrop_and_opaque_gate_timed_in_slot<
+    BuildGuiDraw,
+>(
+    frame: RenderFrameContext<'_>,
+    depth: &ChunkDepthTarget,
+    sky: &SkyRenderer,
+    draw: &mut TexturedSectionDrawResources,
+    prepared_draw: &PreparedTexturedSectionStereoDraw,
+    terrain_backdrop: &mut dyn TerrainBackdropRenderer,
+    opaque_world_gate: Option<(&OpaqueWorldGateRenderer, OpaqueWorldGate)>,
+    actors: Option<&mut ActorDrawResources>,
+    screen_effects: Option<&mut ScreenEffectsRenderer>,
+    gui_renderer: Option<&mut GuiRenderer>,
+    render_view: ChunkRenderView,
+    actor_instances: &[ActorInstance],
+    underwater_overlay: Option<UnderwaterOverlay>,
+    sky_clear_color: wgpu::Color,
+    time_of_day: f32,
+    sun_angle: f32,
+    render_options: TexturedSectionRenderOptions,
+    gui: FullFrameGui,
+    build_gui_draw: BuildGuiDraw,
+    clock: &MonotonicClockHandle,
+    render_stats: &mut RenderStreamStats,
+    view_slot: PerViewSlot,
+) -> Result<(FullFrameRenderSummary, FullFrameRenderTiming)>
+where
+    BuildGuiDraw: FnOnce(&RenderStreamStats) -> GuiDrawList,
+{
+    let mut timing = FullFrameRenderTiming::default();
+    let render_view = render_view_with_underwater_effect(render_view, underwater_overlay);
+    let summary = render_full_frame_for_view_inner_with_backdrop(
+        frame,
+        depth,
+        sky,
+        draw,
+        actors,
+        screen_effects,
+        gui_renderer,
+        render_view,
+        actor_instances,
+        underwater_overlay,
+        sky_clear_color,
+        time_of_day,
+        sun_angle,
+        render_options,
+        gui,
+        build_gui_draw,
+        view_slot,
+        None,
+        Some(prepared_draw),
+        opaque_world_gate.map(|(renderer, gate)| OpaqueWorldInsertion::Gate(renderer, gate)),
+        Some(terrain_backdrop),
         Some(clock),
         Some(&mut timing),
         render_stats,

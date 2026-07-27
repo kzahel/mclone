@@ -46,14 +46,17 @@ use mclone_app_runtime::frame_pacing::{
 use mclone_app_runtime::frame_render::{
     FlatSurfacePresentation, FrameActorPreparation, FullFrameGui, FullFrameRenderSummary,
     FullFrameRenderTiming, PlacedActorFrame, PlacedTerrainFrame, PlacedTerrainPrepared,
-    RenderStreamStats, TerrainCompositionFrame, TerrainCompositionSource,
-    TerrainTranslucentSubmission, render_full_frame_for_view_with_opaque_gate_timed,
+    RenderStreamStats, TerrainBackdropRenderContext, TerrainBackdropRenderer,
+    TerrainCompositionFrame, TerrainCompositionSource, TerrainTranslucentSubmission,
+    render_full_frame_for_view_with_opaque_gate_timed,
     render_full_frame_for_view_with_placed_terrain_timed,
     render_full_frame_for_view_with_prepared_records_and_opaque_gate_in_slot,
     render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_in_slot,
     render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_timed_in_slot,
     render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_in_slot,
     render_full_frame_for_view_with_prepared_stereo_draw_and_placed_terrain_timed_in_slot,
+    render_full_frame_for_view_with_prepared_stereo_draw_terrain_backdrop_and_opaque_gate_in_slot,
+    render_full_frame_for_view_with_prepared_stereo_draw_terrain_backdrop_and_opaque_gate_timed_in_slot,
     render_full_frame_for_view_with_terrain_backdrop_and_opaque_gate_timed,
     render_view_with_underwater_effect,
 };
@@ -1702,6 +1705,15 @@ impl McloneSceneHost {
         let preview_actor_instances = self.current_preview_actor_instances();
         let render_options =
             render_options_with_actor_grass_interactors(render_options, &actor_instances);
+        let terrain_view_enabled = self.prepare_terrain_view_for_frame(
+            device,
+            queue,
+            [
+                f64::from(center_position.x),
+                f64::from(center_position.y),
+                f64::from(center_position.z),
+            ],
+        )?;
         let collect_split_timing = self.render_split_timing_enabled;
         let records_start = collect_split_timing.then(|| self.services.clock.now());
         let (prepared_records, record_cache_prepare) =
@@ -1822,6 +1834,7 @@ impl McloneSceneHost {
             "left",
             left_view_slot,
             !defer_eye_waits,
+            terrain_view_enabled,
         )?;
         timing.left_eye_ms = elapsed_ms(self.services.clock.elapsed_since(left_eye_start));
         timing.left_eye_render = left_eye.timing;
@@ -1849,6 +1862,7 @@ impl McloneSceneHost {
             "right",
             right_view_slot,
             !defer_eye_waits,
+            terrain_view_enabled,
         )?;
         timing.right_eye_ms = elapsed_ms(self.services.clock.elapsed_since(right_eye_start));
         timing.right_eye_render = right_eye.timing;
@@ -2137,6 +2151,17 @@ impl McloneSceneHost {
         } else {
             Vec::new()
         };
+        let center_position =
+            (render_views[0].camera_position + render_views[1].camera_position) * 0.5;
+        let terrain_view_enabled = self.prepare_terrain_view_for_frame(
+            device,
+            queue,
+            [
+                f64::from(center_position.x),
+                f64::from(center_position.y),
+                f64::from(center_position.z),
+            ],
+        )?;
         terrain_options = terrain_options
             .map(|options| render_options_with_actor_grass_interactors(options, &actor_instances));
         let prepared_records = self.active_world.draw.prepare_render_records();
@@ -2160,6 +2185,7 @@ impl McloneSceneHost {
             left_view_slot,
             include_sky,
             include_actors,
+            terrain_view_enabled,
         )?;
         let right = self.render_terrain_eye_only_target(
             device,
@@ -2173,6 +2199,7 @@ impl McloneSceneHost {
             right_view_slot,
             include_sky,
             include_actors,
+            terrain_view_enabled,
         )?;
 
         self.active_world.render_stats.drawn_section_count = left.drawn_section_count;
@@ -2225,6 +2252,7 @@ impl McloneSceneHost {
         view_slot: PerViewSlot,
         include_sky: bool,
         include_actors: bool,
+        terrain_view_enabled: bool,
     ) -> Result<TexturedSectionRenderStats> {
         let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some(match label {
@@ -2262,8 +2290,9 @@ impl McloneSceneHost {
             &mclone_render::opaque_world_gate::OpaqueWorldGateRenderer,
             mclone_render::opaque_world_gate::OpaqueWorldGate,
         )> = None;
-        let split_translucent_terrain =
-            (include_actors && !actor_instances.is_empty()) || opaque_world_gate.is_some();
+        let split_translucent_terrain = (include_actors && !actor_instances.is_empty())
+            || opaque_world_gate.is_some()
+            || terrain_view_enabled;
         let terrain_phase = if split_translucent_terrain {
             TexturedSectionRenderPhase::Opaque
         } else {
@@ -2283,6 +2312,21 @@ impl McloneSceneHost {
                 terrain_phase,
             )
             .context("render XR terrain-only chunks")?;
+        if terrain_view_enabled {
+            self.terrain_view
+                .as_mut()
+                .expect("enabled scene terrain view remains initialized")
+                .render(TerrainBackdropRenderContext {
+                    device,
+                    queue,
+                    encoder: &mut encoder,
+                    color_view: target.color_view,
+                    depth_view: &target.depth.view,
+                    size: target.size,
+                    render_view,
+                    view_slot,
+                })?;
+        }
         if let Some((gate_renderer, gate)) = opaque_world_gate {
             gate_renderer.render_in_slot(
                 queue,
@@ -4179,6 +4223,7 @@ impl McloneSceneHost {
         label: &'static str,
         view_slot: PerViewSlot,
         wait_after_submit: bool,
+        terrain_view_enabled: bool,
     ) -> Result<XrRenderedEye> {
         let collect_split_timing = self.render_split_timing_enabled;
         let encode_start = collect_split_timing.then(|| self.services.clock.now());
@@ -4303,6 +4348,38 @@ impl McloneSceneHost {
                     &mut render_stats,
                     view_slot,
                 )
+            } else if terrain_view_enabled {
+                render_full_frame_for_view_with_prepared_stereo_draw_terrain_backdrop_and_opaque_gate_timed_in_slot(
+                    frame,
+                    target.depth,
+                    &self.sky,
+                    &mut self.active_world.draw,
+                    prepared_draw,
+                    self.terrain_view
+                        .as_mut()
+                        .expect("enabled scene terrain view remains initialized"),
+                    opaque_world_gate,
+                    Some(
+                        self.active_world
+                            .actors
+                            .as_mut()
+                            .expect("active world owns actor draw state"),
+                    ),
+                    Some(&mut self.screen_effects),
+                    None,
+                    render_view,
+                    actor_instances,
+                    underwater_overlay,
+                    sky_clear_color,
+                    time_of_day,
+                    sun_angle,
+                    render_options,
+                    FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
+                    |_| summary_ui_draw,
+                    &self.services.clock,
+                    &mut render_stats,
+                    view_slot,
+                )
             } else {
                 render_full_frame_for_view_with_prepared_stereo_draw_and_opaque_gate_timed_in_slot(
                     frame,
@@ -4342,6 +4419,38 @@ impl McloneSceneHost {
                     &mut self.active_world.draw,
                     prepared_draw,
                     terrain_composition,
+                    Some(
+                        self.active_world
+                            .actors
+                            .as_mut()
+                            .expect("active world owns actor draw state"),
+                    ),
+                    Some(&mut self.screen_effects),
+                    None,
+                    render_view,
+                    actor_instances,
+                    underwater_overlay,
+                    sky_clear_color,
+                    time_of_day,
+                    sun_angle,
+                    render_options,
+                    FullFrameGui::new(false, false, [gui_scale.width, gui_scale.height]),
+                    |_| summary_ui_draw,
+                    &mut render_stats,
+                    view_slot,
+                )
+                .map(|summary| (summary, Default::default()))
+            } else if terrain_view_enabled {
+                render_full_frame_for_view_with_prepared_stereo_draw_terrain_backdrop_and_opaque_gate_in_slot(
+                    frame,
+                    target.depth,
+                    &self.sky,
+                    &mut self.active_world.draw,
+                    prepared_draw,
+                    self.terrain_view
+                        .as_mut()
+                        .expect("enabled scene terrain view remains initialized"),
+                    opaque_world_gate,
                     Some(
                         self.active_world
                             .actors
