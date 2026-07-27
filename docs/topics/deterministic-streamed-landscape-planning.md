@@ -399,25 +399,117 @@ clear geographic or walking-scale defect.
 
 ## Reference Ledger
 
-The initial ledger records the sources already used by Tacticals 265 and 267.
-It is intentionally explicit about their limits.
+Phase 0 inspected papers, published framework documentation, selected
+implementation source, and real generator source. Its main result is a useful
+negative one: **tiling an exact drainage analysis does not make each tile an
+independently finalizable streamed plan.**
 
-| Source | Recorded contribution | Does not prove |
-|---|---|---|
-| [Alpha v1.1.2_01 `OverworldChunkGenerator`](../../reference/minecraft-a1.1.2_01/src/net/minecraft/world/gen/chunk/OverworldChunkGenerator.java) and [`ServerChunkCache`](../../reference/minecraft-a1.1.2_01/src/net/minecraft/server/world/chunk/ServerChunkCache.java) | coordinate-seeded target terrain contrasted with delayed cross-chunk population | a relational macro planner |
-| [Beta 1.7.3 `OverworldChunkGenerator`](../../reference/minecraft-b1.7.3/src/net/minecraft/world/gen/chunk/OverworldChunkGenerator.java) and [`ServerChunkCache`](../../reference/minecraft-b1.7.3/src/net/minecraft/server/world/chunk/ServerChunkCache.java) | the same terrain/population distinction with climate and lake-era content | order-independent historical population |
-| [Java 1.17.1 status and structure sources](../worldgen-deterministic-order.md) | target-local stages, canonical starts/references, fixed neighborhoods, clipped placement, and observable ordered writes | original Mclone landscape quality or a drainage graph |
-| [Génevaux et al. 2013, *Terrain Generation Using Procedural Models Based on Hydrology*](https://cs.purdue.edu/homes/bbenes/papers/Genevaux13ToG.pdf) | hierarchical river graphs, watersheds/crest lines, and terrain reconstruction from hydrologic primitives | unbounded tiled generation, Mclone topology, or our performance contract |
-| [Génevaux et al. 2015, *Terrain Modelling from Feature Primitives*](https://www.cs.purdue.edu/cgvlab/www/publications/Genevaux15CGF/) | compactly supported skeletal features, hierarchy, and bounding-volume-pruned queries | automatic hydrologic correctness or streamed ownership |
-| [Fischer, Boeckers, and Zachmann 2022, *Procedural Generation of Landscapes with Water Bodies Using Artificial Drainage Basins*](https://cgvr.cs.uni-bremen.de/papers/cgi22/CGI22.pdf) | rivers-and-lakes-first construction and a priority-grown surface | an infinite deterministic planner or Mclone-compatible authored-region policy |
-| [Barnes, Lehman, and Mulla, Priority-Flood](https://arxiv.org/abs/1511.04463) | efficient bounded depression filling/labeling foundation | desired intentional lakes or bounded unbounded-world accumulation |
-| [TauDEM documentation](https://hydrology.usu.edu/taudem/taudem5/help53/TauDEMToolboxOverview.htm) | separation of pit handling, flow direction, contributing area, channels, order, and watersheds | a procedural streaming architecture |
-| [USGS watershed and drainage-basin overview](https://www.usgs.gov/water-science-school/science/watersheds-and-drainage-basins) and [stream order](https://www.usgs.gov/media/images/streamorder) | geographic vocabulary for common outlets, divides, nested drainage, and hierarchy | literal game dimensions, algorithms, or tuning |
+### Exact Hydrology Retains A Global Meta-Problem
 
-Tactical 270 must expand this ledger before selecting a streamed candidate.
-Priority areas are tiled/parallel watershed work, deterministic hierarchical
-procedural networks, boundary-condition methods, and primary accounts from
-real shipped or maintained world generators.
+Barnes's parallel Priority-Flood divides a finite DEM into tiles. Consumers
+solve local watersheds and return edge labels plus a spillover graph. A
+producer makes labels globally unique, joins adjacent edge and corner facts,
+solves the global spillover graph, and returns corrections so consumers can
+finalize their tiles. The parallel flow-accumulation algorithm has the same
+shape: local accumulation and perimeter links are not final until a producer
+connects every tile's perimeter graph and returns global offsets.
+
+This is excellent evidence that exact finite hydrology can compress global
+coupling. It is also evidence against pretending a large halo solves the
+streaming problem:
+
+- the algorithms know the complete finite DEM and its real external edges;
+- all tile summaries participate in one global meta-problem;
+- no arbitrary tile is final before that global solve; and
+- an unbounded plane or cylinder does not provide a last tile at which the
+  meta-problem becomes complete.
+
+Depression hierarchies and Fill-Spill-Merge make nested sinks, spill saddles,
+and lake connectivity explicit and efficient after a finite DEM is known.
+They improve the representation vocabulary but do not remove the complete
+domain prerequisite.
+
+Mclone must therefore distinguish two goals:
+
+1. **analytical hydrology**, which derives the exact drainage of a complete
+   provisional surface; and
+2. **generative hydrography**, which creates a bounded, revisioned river,
+   basin, sink, and level grammar that terrain then realizes.
+
+The first is admissible for a finite whole-domain profile or offline authored
+atlas. The streamed plane/cylinder research must pursue the second unless a
+new source or proof overturns this conclusion.
+
+### Contextual Streaming Requires A Finite Effect Distance
+
+LayerProcGen is the strongest implementation precedent found for deterministic
+contextual generation in an on-demand infinite plane. Its contract separates
+each layer's inputs from outputs, declares provider dependencies before a user
+chunk runs, and forms a directed acyclic dependency graph. A viewport or
+player position creates a top-level residency request; it does not become
+geographic input.
+
+Its integrity rule is equally important: padding must cover the maximum
+distance at which lower-layer input can affect accepted output. Multiple
+iterations add their effect distances. If an operation such as pathfinding
+has no useful natural bound, the implementation must impose one, such as a
+fixed corridor around the endpoints. Insufficient padding may remain
+repeatable while ceasing to be seamless.
+
+The accompanying terrain sample also demonstrates two different spatial query
+contracts:
+
+- **owned within bounds** selects one stable anchor owner for an operation
+  that must happen once; and
+- **overlapping bounds** returns every bounded feature whose influence a
+  consumer must reconstruct.
+
+These mechanisms strongly support Mclone's candidate identity and dependency
+rules. LayerProcGen explicitly brings its own algorithms, however, and neither
+its documentation nor inspected sample proves exact watershed or unbounded
+network connectivity.
+
+### Generator Precedents Choose Different Bounds
+
+The inspected generators occupy three useful points in the design space:
+
+- Java 1.17.1 generates structure and carver starts from canonical chunks,
+  then scans a fixed possible-owner neighborhood and clips their realization
+  to the target. This is the strongest fallback precedent.
+- The Cluster uses finite spatial dependencies, larger planning layers, stable
+  ownership, and bounded paths in an on-demand world. This is the strongest
+  relational streaming precedent, but it plans game regions and paths rather
+  than hydrology.
+- Veloren stores a finite `WorldSim` over a power-of-two map, runs erosion and
+  drainage over its complete arrays, derives water/flux/rivers, and then
+  generates detailed chunks. This is the strongest open game precedent for
+  relational terrain and water, but whole-world precomputation is precisely
+  the boundary that Mclone's plane/cylinder experiment cannot assume.
+
+No inspected source demonstrates exact derived hydrology over an unbounded
+world with arbitrary random-access finalization. The novel question is
+therefore narrower and more honest: can a finite-scale generative hydrography
+produce enough of the same geographic relationships to justify its cost?
+
+### Detailed Source Ledger
+
+| Source | Inspection depth and reuse posture | Contribution | Limit for Mclone |
+|---|---|---|---|
+| [Alpha v1.1.2_01 `OverworldChunkGenerator`](../../reference/minecraft-a1.1.2_01/src/net/minecraft/world/gen/chunk/OverworldChunkGenerator.java) and [`ServerChunkCache`](../../reference/minecraft-a1.1.2_01/src/net/minecraft/server/world/chunk/ServerChunkCache.java) | local implementation source inspected; reference behavior only | coordinate-seeded target terrain contrasted with delayed cross-chunk population | delayed live-world writes are an order-dependence warning, not a relational planner |
+| [Beta 1.7.3 `OverworldChunkGenerator`](../../reference/minecraft-b1.7.3/src/net/minecraft/world/gen/chunk/OverworldChunkGenerator.java) and [`ServerChunkCache`](../../reference/minecraft-b1.7.3/src/net/minecraft/server/world/chunk/ServerChunkCache.java) | local implementation source inspected; reference behavior only | repeats the terrain/population distinction with climate and lake-era content | does not make historical population order-independent |
+| [Java 1.17.1 `ChunkGenerator`](../../reference/minecraft-1.17.1/src/net/minecraft/world/level/chunk/ChunkGenerator.java), [`StructureFeature`](../../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/feature/StructureFeature.java), and [`StructureStart`](../../reference/minecraft-1.17.1/src/net/minecraft/world/level/levelgen/structure/StructureStart.java) | local implementation source inspected under the existing reference-porting policy | canonical coordinate-seeded starts, fixed 17-by-17 carver and structure-reference searches, stable start identities, bounding boxes, and target-clipped placement | bounded features, not an exact drainage graph or evidence that every later ordered block write commutes |
+| [Barnes, Lehman, and Mulla 2014, *Priority-Flood*](https://arxiv.org/abs/1511.04463) | paper algorithm and pseudocode inspected; concepts only, no code copied | efficient finite-domain depression filling, watershed labels, and flow directions by flooding inward from real DEM edges | forces drainage to finite edges and does not preserve intentional lakes or solve unbounded accumulation |
+| [Barnes 2016, *Parallel Priority-Flood*](https://arxiv.org/abs/1606.06204) | complete paper algorithm inspected; concepts only, no code copied | exact tiled local solves, edge/corner reconciliation, compressed global spillover graph, then tile finalization | requires summaries from the complete finite DEM and one global graph solve; a tile is not independently final |
+| [Barnes 2017, *Parallel Non-divergent Flow Accumulation*](https://arxiv.org/abs/1608.04431) | complete paper algorithm inspected; concepts only, no code copied | local tile accumulation plus perimeter flow/link summaries, a global inter-tile graph and offsets, and fixed communication phases | assumes known flow directions and a complete finite tile set; exact upstream area remains globally coupled |
+| [Barnes, Callaghan, and Wickert 2020, *Depression Hierarchies*](https://doi.org/10.5194/esurf-8-431-2020) and [2021, *Fill-Spill-Merge*](https://doi.org/10.5194/esurf-9-105-2021) | open CC BY 4.0 papers and algorithms inspected; representation concepts only | binary depression forests, nested sinks, ocean links, spill saddles, and efficient fill/spill/merge routing without deleting lakes | builds topology from a complete finite raster and does not provide independent streamed construction |
+| [LayerProcGen 0.4.0](https://runevision.github.io/LayerProcGen/) documentation and [repository](https://github.com/runevision/LayerProcGen) at `c13d64e53f0068ea9b24d761996406d4228adbaf` | architecture, effect-distance, ownership, internal-level docs and selected dependency/sample code inspected; MPL-2.0; clean-room concepts only | deterministic contextual chunks through immutable lower-layer inputs, declared finite padding, a dependency DAG, stable ownership anchors, overlap queries, multiscale planning, and cache/residency separation; used by released game The Cluster | framework supplies no planner algorithm; pathfinding must be artificially bounded; padding mistakes can preserve determinism while breaking integrity; no periodic topology or hydrology proof |
+| Teinemaa, Riemer, and Shaker 2015, [*A Procedural Approach for Infinite Deterministic 2D Grid-Based World Generation*](https://pcgworkshop.com/archive/teinemaa2015procedurl.pdf) | full paper, Algorithm 1, and border method inspected; linked source license not established, so no code reuse | seeded layered chunks, adjacent candidate generation, bounded center/border/corner agents, and an explicit attempt to test different approach paths | proof-of-concept validation compared screenshots from starting locations; paper describes already-created partial chunks and a prescribed smoothing order, so cache, schedule, and exhaustive order independence are not established |
+| [Veloren `WorldSim` source](https://docs.veloren.net/src/veloren_world/sim/mod.rs.html) and [worldgen notes](https://book.veloren.net/internals/worldgen/worldgen.html) | generated current Rust source and project docs inspected; GPL-3.0-or-later; clean-room concepts only | finite power-of-two whole-map arrays, erosion, depression/water processing, flux and rivers, saved coarse world maps, then parallel detailed `SimChunk` generation | obtains relational hydrology by completing a finite world simulation first; map edges and out-of-bounds ocean are real boundaries, not periodic seams |
+| [Génevaux et al. 2013, *Terrain Generation Using Procedural Models Based on Hydrology*](https://cs.purdue.edu/homes/bbenes/papers/Genevaux13ToG.pdf) | paper pipeline and representations inspected; concepts only | hierarchical river graphs, watershed and crest construction, and terrain reconstruction from hydrologic primitives | not an unbounded tiled generator, topology contract, or production performance proof |
+| [Génevaux et al. 2015, *Terrain Modelling from Feature Primitives*](https://www.cs.purdue.edu/cgvlab/www/publications/Genevaux15CGF/) | paper representation and query structure inspected; concepts only | compactly supported skeletal features, construction hierarchy, bounding volumes, and pruned point queries | does not automatically create correct hydrology, ownership, or streamed cross-region identity |
+| [Fischer, Boeckers, and Zachmann 2022, *Procedural Generation of Landscapes with Water Bodies Using Artificial Drainage Basins*](https://cgvr.cs.uni-bremen.de/papers/cgi22/CGI22.pdf) | full paper pipeline inspected; concepts only | rivers-and-lakes-first construction, basin-aware water levels, and a priority-grown surface | finite generated domain with authored constraints, not an infinite deterministic planner or periodic contract |
+| [TauDEM documentation](https://hydrology.usu.edu/taudem/taudem5/help53/TauDEMToolboxOverview.htm) | public tool documentation inspected; vocabulary only | separates pit handling, flow direction, contributing area, channels, order, and watersheds | describes terrain-analysis products, not procedural streaming |
+| [USGS watershed and drainage-basin overview](https://www.usgs.gov/water-science-school/science/watersheds-and-drainage-basins) and [stream order](https://www.usgs.gov/media/images/streamorder) | public scientific vocabulary inspected | common outlets, divides, nested drainage, and stream hierarchy | does not specify game dimensions, algorithms, ownership, topology, or tuning |
 
 ## Decision And Experiment Ledger
 
@@ -427,6 +519,7 @@ real shipped or maintained world generators.
 | 2026-07-27 | Tactical 267 fixed-domain maps, reconstruction, topology, and cost receipts | Bounded relational structure merits human review; production remains unchanged |
 | 2026-07-27 | Tactical 268 interactive fixed-domain diagnostic | Preserve the boundary honestly; do not recenter and imply geographic stability |
 | 2026-07-27 | Post-review determinism discussion | Open a separate streamed-planner feasibility workstream before any production integration |
+| 2026-07-27 | Tactical 270 Phase 0 exact-hydrology and generator source review | Do not derive an allegedly exact unbounded watershed from independently solved tiles; test a bounded generative hydrography with a declared maximum scale |
 
 Add future experiment IDs, commits, commands, corpus locations, results, and
 decisions here or in the active tactical before relying on them.
