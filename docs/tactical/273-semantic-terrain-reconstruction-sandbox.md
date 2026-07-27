@@ -1,9 +1,10 @@
 # Tactical 273: Semantic Terrain Reconstruction Sandbox
 
-Status: **Active research implementation as of 2026-07-27. Authorized by the
-user's instruction to record this tactical and proceed end to end. Stop at
-Human Review R1. Mclone Overworld, persisted generator profiles, block chunks,
-and selective 3D remain unchanged.**
+Status: **Implementation complete at Human Review R1 as of 2026-07-27.
+Commits `fb1929c2`, `b0889375`, and `25111ddb` record the specification,
+shared reconstruction, and Terrain Lab diagnostic. Mclone Overworld,
+persisted generator profiles, block chunks, and selective 3D remain
+unchanged. Do not continue into production integration before review.**
 
 Topic:
 
@@ -234,6 +235,91 @@ discards children.
 
 These are fixed-output representation costs, not exact chunk throughput and
 not a 500 km claim.
+
+## Execution Result
+
+The shared sampler lives in
+`mclone-worldgen::semantic_terrain_sandbox`. It reconstructs all three
+courses over one 65-sample-wide lattice and exposes a separate direct-detail
+compiler for honest cost measurement. The first implementation also corrected
+Tactical 272's coarse path: parent requests now return before regional facts
+are constructed, and regional requests never construct local facts.
+
+The pinned native and Wasm suite is:
+
+```text
+14250ea1a92a72246abfd256d3ffb2caca021a5805a4be692299bfecc5017f8e
+```
+
+It covers three seeds by plane, X-cylinder, and torus. Raster, reverse,
+even/odd, and deterministically shuffled traversal agree exactly. Periodic
+lifts agree, adjacent viewports share exact edges, independently compiled
+half-viewports reassemble the same full surface, and native serial/parallel
+compilation agrees. The Wasm Worker recomputes this suite once at startup and
+fails closed if it differs from the native pin; it does not merely display a
+compiled constant.
+
+The release receipt is written outside the repository at:
+
+```text
+/tmp/mclone-semantic-terrain-sandbox/receipt.json
+```
+
+The 2026-07-27 release run produced a 7,608-byte receipt and these uncached
+fixed-output averages on the current Linux host:
+
+| Width | Parent | Regional | Local |
+|---:|---:|---:|---:|
+| 6,144 blocks | 0.538 ms · 8 facts · 33,800 distance evaluations | 0.756 ms · 16 facts · 67,600 evaluations | 1.267 ms · 32 facts · 135,200 evaluations |
+| 16,384 blocks | 1.174 ms · 32 facts · 135,200 evaluations | 2.040 ms · 64 facts · 270,400 evaluations | 3.788 ms · 128 facts · 540,800 evaluations |
+| 65,536 blocks | 7.939 ms · 288 facts · 1,216,800 evaluations | 16.314 ms · 576 facts · 2,433,600 evaluations | 34.993 ms · 1,152 facts · 4,867,200 evaluations |
+
+These times hold output samples fixed at 4,225. Physical extent increases the
+number of bounded feature owners intersecting the viewport; requested detail
+approximately doubles feature segments at each refinement. This is the
+intended measurable tradeoff, not constant work across arbitrary extent.
+
+One headed-Wayland browser run of the 6,144-block combined/quiet view measured
+5.21 ms Worker compilation and 37.51 ms Canvas drawing at desktop size, and
+4.66 ms compilation and 23.56 ms drawing in the stacked phone layout. These
+are interaction evidence, not normalized performance baselines.
+
+Terrain Lab now includes the Mclone-only `Semantic terrain` pane. Rust/Wasm
+returns typed arrays and metadata; TypeScript owns only Worker scheduling,
+navigation, and drawing. Desktop is 2-by-2 and phone stacks four full-width
+panels. The following controls round-trip through the URL:
+
+- `semanticSubstrate=flat|quiet`
+- `semanticFeatures=range|basin|combined`
+- `semanticTopology=plane|cylinder-x|torus`
+- `semanticCorrection=regional|local`
+- `semanticGuides=0|1`
+
+Map/3D, orbit, pan, and zoom remain synchronized across all panels. Inspected
+pixels are retained only under `/tmp`:
+
+```text
+/tmp/mclone-semantic-terrain-desktop-canvas.png
+/tmp/mclone-semantic-terrain-phone-canvas-3.png
+```
+
+Validation completed:
+
+- all 401 active `mclone-worldgen` library tests passed; one existing
+  gauntlet remains ignored;
+- all semantic sandbox and browser ownership-lock tests passed;
+- Terrain Lab Wasm build, TypeScript typecheck, state tests, and production
+  web build passed;
+- the dedicated desktop and Pixel 7 browser test passed;
+- the browser test proved a torus period lift preserves the exact terrain
+  checksum; and
+- headed Chrome reported no page or console errors.
+
+The review route is:
+
+```text
+/terrain/?profile=mclone-overworld-v1&panes=semantic&seed=12345&x=1024&z=-768&blocks=6144&view=3d&semanticSubstrate=quiet&semanticFeatures=combined&semanticTopology=plane&semanticCorrection=local&semanticGuides=1
+```
 
 ## Human Review R1
 

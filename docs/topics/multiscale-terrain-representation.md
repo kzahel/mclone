@@ -2,17 +2,17 @@
 
 Topic: `multiscale-terrain-representation`
 
-Status: **Active research direction at Human Review R1 as of 2026-07-27. The
-initial tailored precedent survey and Tactical 272's first semantic
-parent/child witness are complete. The witness proves direct coarse queries,
-stable cross-level identity, bounded ownership, and exact native/Wasm
-traversal and topology invariance for two schematic feature families. It is
-now the fourth freely pannable Terrain Lab Planner-atlas view. Production
-Mclone terrain remains a primarily two-dimensional heightfield at field
-revision 21; the witness has no terrain, water, chunk, or density influence.
-The unresolved question is whether the mechanism earns one research-only
-terrain reconstruction, followed later by selective 3D. This topic does not
-select a production planner or authorize production integration.**
+Status: **Active research direction at Human Review R1 as of 2026-07-27.
+Tactical 272's semantic parent/child witness and Tactical 273's first isolated
+terrain reconstruction are complete. Parent, regional, and local range/basin
+courses now produce exact continuous terrain over flat or quiet substrates in
+a permanent, pannable Terrain Lab view. The pinned suite passes native and
+Wasm traversal, partition, thread, tile-boundary, and periodic-topology
+checks. Production Mclone terrain remains a primarily two-dimensional
+heightfield at field revision 21 and consumes none of these facts, surfaces,
+or water masks. Human review must now decide whether either schematic family
+deserves another isolated revision or a frozen-foundation trial. This topic
+does not select a production planner or authorize production integration.**
 
 ## Scope
 
@@ -194,6 +194,54 @@ The permanent Planner-atlas panel is the review instrument. Parent, regional,
 local, and conservative bounds are independent presentation toggles over one
 Rust-owned fact set. It should remain available even if the geometry is
 rejected, because it makes future multiscale claims inspectable.
+
+### Revision 1 reconstruction result
+
+[`Tactical 273`](../tactical/273-semantic-terrain-reconstruction-sandbox.md)
+now turns the same facts into one deliberately small heightfield experiment:
+
+```text
+flat or quiet substrate
+    + compact-support range uplift
+    - compact-support basin-route carve
+    = isolated semantic terrain
+```
+
+Parent, regional, and local requests each select one course. Children replace
+their parent course rather than stacking on it. The sandbox publishes all
+three surfaces, both immediate corrections, simple visual water occupancy,
+feature and distance-evaluation counts, and quantized semantic/terrain
+checksums. It has no profile, chunk, biome, material, vegetation, coast, or
+production-terrain integration.
+
+The exact suite
+`14250ea1a92a72246abfd256d3ffb2caca021a5805a4be692299bfecc5017f8e`
+passes three seeds by all three topologies on native and Wasm. It covers
+raster, reverse, even/odd, and shuffled traversal; adjacent and independently
+partitioned viewports; serial/parallel compilation; and periodic lifts.
+Direct coarse construction was corrected to stop before hidden children.
+
+At 4,225 output samples, the recorded release run measured parent/regional/
+local at 0.538/0.756/1.267 ms across 6,144 blocks and
+7.939/16.314/34.993 ms across 65,536 blocks. The physical-extent cost grows
+with bounded owners in view; refinement cost grows with one, two, and four
+segments per feature. This is cheap enough for interactive research but is
+not a claim about exact chunks or 500 km generation.
+
+The permanent `Semantic terrain` Terrain Lab pane is now the review
+instrument. Desktop compares four panels in a 2-by-2 grid; phone stacks them.
+Map/3D navigation, flat/quiet substrate, range/basin/combined families,
+plane/cylinder/torus topology, immediate correction choice, and feature
+guides are independent URL state. The Wasm Worker recomputes the pinned suite
+at startup and Rust supplies typed surfaces; browser code does not own
+reconstruction semantics.
+
+The first inspected view establishes that the mechanism is legible: the broad
+parent corridor persists while regional and local bends move the ridge or
+carve within localized correction areas. It does not establish that the
+schematic corridors compose into natural geography. Independent stamp-like
+forms, basin meaning, owner-boundary character, and the value of the quiet
+substrate remain subjective review questions.
 
 ## Candidate Representation Stack
 
@@ -461,18 +509,18 @@ make a point query unbounded.
 
 ## Remaining Research Questions
 
-The first witness answers the narrow identity/boundedness portion of questions
-about one shared feature language, child reconstruction, and periodic seams
-for two simple segment families. It does not prove a complete torus base
-graph, arbitrary boundary-crossing geography, or reconstructed terrain. The
-next review and experiment should answer:
+The first witness and reconstruction answer the narrow identity,
+boundedness, and continuous-realization portions for two simple segment
+families. They do not prove a complete torus base graph, arbitrary
+boundary-crossing geography, useful hydrology, or production terrain. The
+next review should answer:
 
 1. Is the visible parent-to-child relationship clear and useful enough to
    justify reconstructing one influence family?
 2. What must a parent store so a coarse query can preserve major river,
    island, coast, range, and opening identity without generating its children?
-3. Can a research heightfield compile from the same canonical facts while a
-   distant query stops at a parent representation?
+3. Does the implemented parent terrain remain useful when it is judged as a
+   surface rather than colored line geometry?
 4. What scale-consistency metrics are practical for coasts, range axes,
    basin/outlet topology, water coverage, skyline, and openings?
 5. How should adjacent parent features cooperate so the result becomes
@@ -504,8 +552,8 @@ not prove.
 
 - Do not select Candidate B, C, or their composition from the structural atlas
   alone.
-- Do not promote the Revision 1 witness merely because its invariants pass;
-  its geometry is intentionally schematic.
+- Do not promote either reconstructed Revision 1 family merely because its
+  invariants pass; its geometry is intentionally schematic.
 - Do not add universal 3D noise to production terrain.
 - Do not call a sparse exact point sampler semantic LOD.
 - Do not allow camera scale to affect exact world generation.
@@ -534,16 +582,15 @@ not prove.
 | Transvoxel | no | local crack-free mesh transition | adaptive voxel meshing | bounded local neighborhoods | realization technique only |
 | Veloren | complete coarse geology/erosion stage | downstream local generation consumes saved facts | local caves and reshaping | finite precomputed world | production-style coarse-to-local precedent |
 | drainage-aware DEM generalization | no; simplifies complete fine data | preserves drainage better than filtering | none | finite source DEM | suggests topology metrics, not a generator |
-| Tactical 272 Revision 1 witness | yes; parent and regional queries stop directly | exact parent identity, containment, continuity, and explicit sink propagation | none | bounded owners on plane/cylinder; finite canonical torus | mechanism succeeds on native/Wasm; await human review before one terrain reconstruction |
+| Tactical 272 Revision 1 witness | yes; parent and regional queries stop directly | exact parent identity, containment, continuity, and explicit sink propagation | none | bounded owners on plane/cylinder; finite canonical torus | mechanism succeeds on native/Wasm and remains inspectable in Planner atlas |
+| Tactical 273 semantic terrain sandbox | yes; each requested course reconstructs directly and counts its work | exact identity plus bounded parent-to-regional and regional-to-local surface corrections | none; continuous heightfield only | pannable plane/cylinder/torus viewports | native/Wasm invariants and interactive cost pass; await subjective family/shape review |
 
 ## Recommended Next Work
 
-1. Use Terrain Lab Human Review R1 to accept, redirect, or stop the Revision 1
-   mechanism independently of its intentionally simple geometry.
-2. If accepted, write a new tactical for one research-only heightfield
-   influence family. A range-axis uplift/valley pair is smaller and easier to
-   evaluate than full hydrology; a basin route is more relevant but requires
-   stronger water and level semantics.
+1. Use the `Semantic terrain` Human Review R1 controls to judge flat and quiet
+   range, basin, and combined views independently of Mclone Overworld.
+2. Decide whether to advance range only, basin only, request another isolated
+   reconstruction, or stop while retaining the exact machinery.
 3. Keep production terrain disconnected. Compare the reconstructed influence
    against both unchanged Mclone terrain and sparse exact sampling at 65,536,
    131,072, and later 524,288 blocks.
@@ -553,7 +600,7 @@ not prove.
 5. Re-run randomized point, tile, and chunk traversal; cold and warm caches;
    serial and parallel schedules; alternate partitions; and plane, cylinder,
    and torus seam cases after reconstruction.
-6. Only after one heightfield family earns review, specify one bounded
+6. Only after one heightfield family earns this review, specify one bounded
    selective-density family with an ordinary zero-query path.
 7. Review topology, skyline, coast, drainage, journey, performance, and
    representation transitions before proposing any production integration.
