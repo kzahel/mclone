@@ -2,8 +2,10 @@
 
 Topic: `deterministic-streamed-landscape-planning`
 
-Status: **Active research direction as of 2026-07-27, paused at Tactical 270
-Human Review R0. Tactical 267 proved that a bounded hybrid landform plan can
+Status: **Active research direction as of 2026-07-27. Tactical 270 Human
+Review R0 accepted bounded generative hydrography and authorized only the
+Phase 1 neutral invariance harness and controls. Tactical 267 proved that a
+bounded hybrid landform plan can
 produce useful drainage, basin, divide, and quiet-space structure with
 deterministic reconstruction over one fixed study domain. Tactical 268 made
 that plan inspectable and exposed the unresolved production question: the

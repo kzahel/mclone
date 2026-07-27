@@ -1,8 +1,9 @@
 # Tactical 270: Deterministic Streamed Landscape Planner Research
 
-Status: **Phase 0 completed 2026-07-27 and paused at Human Review R0.**
-Research only; no production terrain, planner implementation, or invariance
-harness is authorized before that review.
+Status: **Human Review R0 accepted 2026-07-27; Phase 1 neutral invariance
+harness and controls are authorized and in progress.** Research only; no
+Candidate B/C/D implementation or production terrain integration is
+authorized by this review.
 
 Topics:
 
@@ -597,7 +598,9 @@ are not missing, and no candidate hides global mutable state or an undeclared
 infinite dependency. Stop or revise before implementation if the brief is
 weak.
 
-**State: paused for review.** No Phase 1 code has begun.
+**Decision 2026-07-27: accepted.** Proceed with Phase 1's neutral
+falsification harness and controls. Stop before implementing Candidates B, C,
+or D.
 
 The Phase 0 proposal is:
 
@@ -745,7 +748,7 @@ execution.
 | Experiment | Commit | Corpus/command | Result | Decision |
 |---|---|---|---|---|
 | source review | `0fa857db` | primary papers, public framework/source, local Minecraft source; docs only | exact tiled hydrology retains a finite global meta-problem; contextual streaming requires finite effect distance | reframe as bounded generative hydrography |
-| candidate and corpus review | this R0 handoff | architecture contract and receipt schema; docs only | B and C state finite claims; A is a control; D is deferred; fallback remains credible | paused at R0 |
+| candidate and corpus review | `d91ed5e4` | architecture contract and receipt schema; docs only | B and C state finite claims; A is a control; D is deferred; fallback remains credible | R0 accepted 2026-07-27; Phase 1 authorized |
 | recentered-window negative control | pending | pending | pending | pending |
 | fallback invariant control | pending | pending | pending | pending |
 | canonical supertile trial | pending | pending | pending | pending |
