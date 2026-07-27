@@ -2,7 +2,7 @@
 
 Topic: `mclone-overworld-breadth`
 
-Status: active 2026-07-26. This is the original Mclone Overworld breadth
+Status: active 2026-07-27. This is the original Mclone Overworld breadth
 ledger: vanilla Minecraft 1.17.1 supplies a measured reference vocabulary,
 while Mclone owns its regional recipes, distribution, terrain geometry, and
 visual identity. Tactical
@@ -17,7 +17,10 @@ water-edge collars. Human Review 2 found it substantially improved but
 deferred final coast acceptance until stronger inland terrain can reach the
 water. Tactical 263 now owns the cross-era inland diagnosis and next landform
 plan. Tactical 264 has implemented the first ordinary inland fabric and
-passed its objective gates; Human Review A now owns acceptance or retuning.
+passed its objective gates. Human Review A found it improved but still
+structurally scalar and disconnected from water. Tactical 265 selects a
+bounded hybrid landform planner for the next research-only prototype before
+new breadth families.
 
 ## Scope
 
@@ -101,8 +104,13 @@ assessment: those names did not imply a well-distributed inland vocabulary.
 Tactical 264 now makes continuous quiet, rolling, ridge/valley, broad-basin,
 and mountain intent live without adding another noise field. Across the same
 nine ordinary-land windows, median vertical span is now 25 blocks and
-radius-8 detrended roughness is 1.139 blocks. Objective validation passes,
-but Human Review A has not yet accepted the visual balance.
+radius-8 detrended roughness is 1.139 blocks. Objective validation passes.
+Human Review A accepts the increase as an improvement but finds that the
+distant terrain still reads as similarly scaled scalar hills, with repeated
+closed contour rings and water features that lack shared basin/outlet
+authority. Tactical 265 therefore treats revision 21 as the production
+control for a research-only hybrid planner, not as final ordinary-land
+fabric.
 
 Twelve surface recipes are live: ocean floor, sandy coast, gravel coast,
 rocky coast, snow cover, river bed, wetland bed, river bank, grass/soil,
@@ -122,7 +130,7 @@ decoration language but do not change terrain geometry.
 | temperate meadow and pastoral valley | plains, flower forest | existing lowland/valley geometry | grass, oak accents, grass, two flowers | `reviewed`, narrow palette |
 | temperate wooded upland | forest, wooded hills | sheltered moderate upland | oak woodland | `reviewed`, narrow palette |
 | rugged mountain and open shoulder | mountains, gravelly mountains, shattered savanna | ridges, ruggedness, slope, exposure | grass/stone response | `reviewed`, no alpine climate |
-| rolling upland, ridge/valley, and broad basin fabric | Alpha/Beta continuous terrain, 1.17 hills and plateaus, modern terrain slices | live continuous landform intent from existing periodic fields | existing regions currently interpret the candidate form; no new ecology was added | `live`, awaiting Human Review A, Tactical 264 |
+| rolling upland, ridge/valley, and broad basin fabric | Alpha/Beta continuous terrain, 1.17 hills and plateaus, modern terrain slices | live continuous landform intent from existing periodic fields; selected future ridge/divide, drainage, and basin plan | existing regions interpret revision 21; no new ecology was added | `live` control, Human Review A requests structural successor, Tacticals 264-265 |
 | ocean, shelf, and deep basin | ocean and deep-ocean families | bathymetry and coast | gravel/sand, no aquatic vegetation | `reviewed`, one climate |
 | beach and shore | beach, stone shore, snowy beach | shared coast intent plus bounded depositional/rocky geometry | locally mixed sand, gravel, ordinary soil, grass-topped rock, cross-substrate snow, and varied banks | `live`, substantially improved; final balance deferred until inland landforms reach water |
 | major river and wetland | rivers, swamps, lakes | flat Y63 corridor, banks, pools | gravel, sand/grass banks, clay pools | `reviewed`, no climate variants |
@@ -300,9 +308,10 @@ Cross-system order now lives in
 [`mclone-macro-landscape-planning.md`](mclone-macro-landscape-planning.md).
 That direction now places ordinary inland landform fabric between the first
 coast implementation and major-water/geology campaigns. Tactical 263 grounds
-the correction; Tactical 264 implements the first candidate without requiring
-a generic composite review product. Within the breadth ledger, retain this
-content order:
+the correction; Tactical 264 implements the first scalar candidate; Tactical
+265 selects the bounded hybrid successor without requiring a generic
+composite review product. Within the breadth ledger, retain this content
+order:
 
 1. Complete Human Review 2 for Tactical 223's bounded steppe-scale
    correction.
@@ -320,11 +329,19 @@ content order:
      existing mountain intent live from the current periodic fields;
    - connected 384/128/48-block form and selective 32/8-block detail now feed
      ordinary land and reach the coast;
-   - quiet negative space, water authority, exact topology, persistence,
+   - quiet coverage, retained water authority, exact topology, persistence,
      streaming completeness, and cheap previews pass objective validation;
-     and
-   - stop at Human Review A before ecological or geological expansion.
-4. Add the first 3D-geology tactical before broad caves:
+   - Human Review A finds it improved but rejects repeated scalar hills and
+     disconnected terrain/water planning as final; and
+   - Tactical 265 selects the hybrid plan grammar and Human Review B gate.
+4. Prototype regional envelopes, ridge/divide and drainage skeletons, basins,
+   and quiet counterform outside production:
+   - compare revision 21, graph reconstruction, and reconstruction with
+     subordinate local detail on the same plane/cylinder seeds;
+   - record cold plan, cached query, memory, far-summary, topology, sink,
+     spill, and cycle evidence; and
+   - stop at Human Review B before production integration.
+5. Add the first 3D-geology tactical before broad caves:
    - baseline and map the current heightfield limitation;
    - derive a small semantic formation-intent selector from existing macro,
      climate, ruggedness, ridge, and water facts;
@@ -333,12 +350,12 @@ content order:
    - compare a small regional density modifier for cliff shelves/overhangs;
    - select the reusable mechanism only after all three are rendered and
      measured.
-5. Expand hot/dry and wet/humid regional corners as coordinated surface,
+6. Expand hot/dry and wet/humid regional corners as coordinated surface,
    vegetation, clutter, and landmark bundles with explicit transition
    shoulders.
-6. Add ocean-climate families and climate-aware water treatment.
-7. Add independent caves, strata, ores, and underground landmarks.
-8. Grow authored and procedural structures on the resulting regional
+7. Add ocean-climate families and climate-aware water treatment.
+8. Add independent caves, strata, ores, and underground landmarks.
+9. Grow authored and procedural structures on the resulting regional
    vocabulary.
 
 ## Evidence Required Per Family
@@ -373,3 +390,4 @@ Every live family should eventually record:
 - [`../tactical/259-modern-and-historical-coast-reference-survey.md`](../tactical/259-modern-and-historical-coast-reference-survey.md)
 - [`../tactical/263-cross-era-inland-landform-survey.md`](../tactical/263-cross-era-inland-landform-survey.md)
 - [`../tactical/264-mclone-ordinary-inland-landform-fabric.md`](../tactical/264-mclone-ordinary-inland-landform-fabric.md)
+- [`../tactical/265-macro-landform-grammar-research.md`](../tactical/265-macro-landform-grammar-research.md)

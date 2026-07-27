@@ -2,7 +2,7 @@
 
 Topic: `mclone-macro-landscape-planning`
 
-Status: **Active design direction as of 2026-07-26. The original Mclone
+Status: **Active design direction as of 2026-07-27. The original Mclone
 Overworld has useful independent terrain, climate, bathymetry, river,
 wetland, surface, and bounded-stream facts, but it does not yet have a
 holistic macro landscape plan that coordinates their topology, precedence,
@@ -13,8 +13,12 @@ first coast implementation and its visual corrections; Human Review 2 found
 it substantially improved but redirected further work toward the sparse
 inland terrain feeding the coast. Tactical 263 supplies the cross-era
 inland survey, and Tactical 264 has implemented its first ordinary-landform
-candidate. Objective validation passes; the campaign is stopped at Human
-Review A before surface, ecology, geology, or 3D-density expansion.**
+candidate. Human Review A found that candidate an improvement but rejected it
+as final: distant form still reads as repeated scalar hills, while rivers,
+ponds, and relief touch without shared geographic authority. Tactical 265
+therefore selects a bounded hybrid regional-plan, coarse-drainage, and
+analytic-reconstruction direction. No production planner or terrain change
+has landed yet.**
 
 The motivating July 2026 visual review found four related regional-scale
 weaknesses:
@@ -299,12 +303,48 @@ roughness from 0.305 to 1.139, and radius-32 from 0.592 to 4.019. Three equal
 Exact CPU/GPU parity, the cylinder seam, persistence, streaming completeness,
 and the established performance controls pass.
 
-This is an objective implementation result, not subjective acceptance.
-Inspected production pixels show materially richer connected land, but also
-conspicuous block-contour shelves, overlap between rolling/ridge/mountain
-silhouettes, busy examples within the quiet family, and basin forms that
-existing forest and ponds can obscure. Human Review A must accept, retune, or
-reject the fabric before the sequence advances.
+This is an objective implementation result, not final subjective acceptance.
+Human Review A found the terrain materially improved, then identified the
+structural limit: repeated closed contour rings, similarly scaled scalar
+hills, weak persistent axes, disconnected sand/water accents, and water
+features that touch without catchment, spill, or outlet relationships.
+
+Tactical
+[`265`](../tactical/265-macro-landform-grammar-research.md) distinguishes this
+from insufficient roughness. Alpha, Beta, Java 1.17.1, Java 26.2, and Mclone
+all offer useful scalar or density shaping, but none of the inspected
+Minecraft systems exposes persistent ridge, drainage, or basin objects.
+Primary terrain and procedural research instead supports a small original
+2.5D grammar:
+
+- cheap regional envelopes establish land/ocean, quiet reservations,
+  highland opportunity, broad levels, orientation, and sink permissions;
+- ridge/divide and valley/drainage graphs own long axes, hierarchy, passes,
+  reaches, confluences, and outlets;
+- basin facts own rim, floor, lowest saddle, sink, water/spill level, and
+  open/closed state;
+- fronts distinguish plateau/escarpment or mountain-front transitions from
+  another rounded hill;
+- bounded highlands supply isolated massifs and hill groups; and
+- foothills, piedmont, coast arrivals, headlands/coves, and negative space
+  are relationships or derived counterforms rather than one specialist class
+  per noun.
+
+The selected representation is a hybrid: broad envelopes guide a bounded
+coarse drainage solve; that solve derives basins, divides, reaches, spills,
+and rejected cycles; compact analytic primitives reconstruct a continuous
+heightfield and support indexed point queries. Analytic skeletons remain the
+realization mechanism but are rejected as the sole first planner. A pure
+watershed pass remains a consistency mechanism but is rejected as the sole
+terrain answer because it would inherit revision 21's contour language and
+ordinary depression filling would erase desired lakes.
+
+The first prototype remains research-first and smaller than the complete
+grammar. It compares current revision 21 with hybrid regional envelope,
+ridge/divide, drainage, basin, and quiet-space reconstruction, then restores
+subordinate local detail. It must stop for Human Review B on plan maps,
+contours, oblique relief, and named journeys before production integration,
+surface/ecology work, detailed fronts, compound water, geology, or 3D density.
 
 ### Hydrology
 
@@ -519,33 +559,23 @@ continuing lines and closed loops, but not a hierarchy of tributaries,
 confluences, distributaries, and split/rejoin reaches. More edge noise can
 make the same topology rougher without solving the regional signature.
 
-Three macro skeletons deserve map-level comparison before another major river
-implementation:
+Tactical 265 selects the hybrid planner class after comparing three
+representation shapes:
 
-1. **Hierarchical boundary network**
-   - derive irregular connected boundaries from repeatedly refined seeded
-     region labels, inspired by the useful topology of Java 1.17.1 biome
-     layers without copying their rules;
-   - naturally creates junctions, loops, and fractal-like regional edges;
-   - still needs terrain and hydraulic coupling.
-2. **Terrain-derived drainage**
-   - evaluate provisional height on canonical coarse tiles, resolve
-     depressions, accumulate downhill flow, and promote sufficiently supplied
-     paths;
-   - gives the strongest basin, tributary, and terrain relationship;
-   - has the highest cross-tile, periodic, lake-spill, and performance design
-     cost.
-3. **Hybrid planned network**
-   - select bounded sources, sinks, and ocean outlets, then route a hierarchy
-     through a coarse cost field that prefers valleys and downhill progress;
-   - retain explicit reach levels, drops, confluences, identities, and
-     structure-compatible facts;
-   - fits the existing bounded stream planner and fixed-point water direction
-     most directly.
+1. analytic skeletons provide continuous, compact, indexed realization but do
+   not by themselves solve convincing automatic placement or drainage;
+2. a coarse watershed provides terrain/water consistency but inherits the
+   provisional surface's morphology and requires classified sinks so lake
+   opportunities survive; and
+3. a hybrid lets regional intent guide a bounded drainage product, then turns
+   its significant raster facts into compact ridge/divide, drainage, and
+   basin objects for analytic reconstruction.
 
-The hybrid is the leading architectural fit, but it is not selected until
-same-seed topology, terrain-alignment, cost, periodicity, and pixel evidence
-compare the alternatives.
+This is a representation selection, not acceptance of a generated landscape.
+The first same-seed plane/cylinder prototype must still prove hierarchy,
+terrain relation, valid sinks/spills, reduced repeated-ring character,
+ordinary seam behavior, cold construction cost, cached query cost, memory,
+and far summaries before the production major river changes.
 
 ### Inland shallow water
 
@@ -1056,7 +1086,7 @@ none is inferred from CPU compile time.
 | Concern | Current capability | Planning gap |
 |---|---|---|
 | raw macro fields | continentalness, relief, ruggedness, ridges, mountain detail, climate, bathymetry, water morphology, and continuous quiet/rolling/ridge-valley/basin/mountain intent derived without a new noise field | no pass, plateau, escarpment, high-basin, or planned terrain-corridor intent |
-| terrain | field-revision-21 continuous heightfield with live ordinary hills, connected lows, ridge shoulders, broad basin tendency, accepted mountain detail, and derived slope/exposure; the nine-site median span is 25 blocks | Human Review A is pending; repeated block-contour shelves and family silhouette overlap may require retuning before additional terrain families |
+| terrain | field-revision-21 continuous heightfield with live ordinary hills, connected lows, ridge shoulders, broad basin tendency, accepted mountain detail, and derived slope/exposure; the nine-site median span is 25 blocks | Human Review A found it improved but still scalar, repetitive, and disconnected from water; Tactical 265 selects the research-only hybrid successor and Human Review B gate |
 | sampling/representation | cheap absolute-coordinate CPU/GPU heightfield preview, a fixed ten-level 131 km horizon, and normalized point receipts through roughly 500 km | no filtered spacing-2,048 review product or sparse volumetric near/far contract |
 | coast | shared sandy/gravel/ordinary/rocky/cold intent; bounded geometry, locally feathered realization, cross-substrate snow, mixed banks; incoming field-revision-21 landform relief reaches water and can reduce redundant rocky lift; exact CPU/GPU and periodic-seam evidence | Human Review 2 found substantial improvement, and the new inherited-relief coast examples now need review; no marsh, frozen-ocean morphology, dunes, deltas, reefs, or sea caves |
 | major rivers | warped zero-contour corridor with width/depth/bank morphology and receiving-outlet correction | no persistent macro drainage topology, tributary hierarchy, or named major reaches |
@@ -1113,14 +1143,22 @@ every row before shipping any smaller improvement.
    - the result continues toward the coast while accepted water retains final
      carving authority;
    - objective geometry, parity, topology, persistence, performance, and
-     streaming gates pass; and
-   - the campaign is stopped at Human Review A before surfaces, ecology,
-     plateaus, geology, or broad 3D density expand the slice.
-4. **Select major-water topology**
-   - compare hierarchical boundary, terrain-derived drainage, and hybrid
-     planned-network maps on the same terrain;
-   - measure topology, terrain alignment, bounded cost, and periodic seams;
-   - select the smallest system that produces convincing connected geography.
+     streaming gates pass;
+   - Human Review A accepts the move as an improvement but rejects it as final
+     because scalar hill repetition and disconnected terrain/water authority
+     remain; and
+   - Tactical 265 selects the next representation without expanding surfaces,
+     ecology, geology, or 3D density.
+4. **Prototype the selected hybrid landform plan**
+   - keep production output unchanged while a bounded diagnostic plan compares
+     current revision 21, graph-based reconstruction, and reconstruction with
+     subordinate local detail;
+   - prove regional envelopes, ridge/divide and drainage skeletons, basins,
+     quiet space, topology ownership, and far summaries on the same three
+     seeds and plane/cylinder bounds;
+   - record cold construction, cached point/region query, memory, and summary
+     cost separately from current field sampling; and
+   - stop at Human Review B before integrating the plan into production.
 5. **Compose basins and compound water forms**
    - add one broad shallow basin/lake family with spill semantics;
    - add one anabranch, braid, or delta family that deliberately creates
@@ -1215,3 +1253,4 @@ advance.
 - [`../tactical/259-modern-and-historical-coast-reference-survey.md`](../tactical/259-modern-and-historical-coast-reference-survey.md)
 - [`../tactical/263-cross-era-inland-landform-survey.md`](../tactical/263-cross-era-inland-landform-survey.md)
 - [`../tactical/264-mclone-ordinary-inland-landform-fabric.md`](../tactical/264-mclone-ordinary-inland-landform-fabric.md)
+- [`../tactical/265-macro-landform-grammar-research.md`](../tactical/265-macro-landform-grammar-research.md)

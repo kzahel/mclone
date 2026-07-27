@@ -2,7 +2,7 @@
 
 Topic: `modern-minecraft-reference`
 
-Status: **Active comparative side reference as of 2026-07-26. Minecraft Java
+Status: **Active comparative side reference as of 2026-07-27. Minecraft Java
 26.2 is the pinned current-stable specimen. Its official unobfuscated client
 jar is SHA-1 verified and a focused 18-file worldgen source tree decompiles
 reproducibly. This does not change the reference-locked Java 1.17.1 Overworld
@@ -201,6 +201,40 @@ vegetation, coast, water, and selective 3D consumers. It does not justify
 copying the literal spline graph, modern world height, cave/aquifer stack, or
 biome parameter table.
 
+## Third Research Result: Scalar Semantics Versus Geographic Objects
+
+Tactical
+[`265`](../tactical/265-macro-landform-grammar-research.md) revisits the same
+source after Human Review A found Mclone field revision 21 materially rougher
+but still visibly “2D”: repeated closed contour rings, similarly scaled
+hills, and terrain/water systems that touch without sharing catchment or
+outlet authority.
+
+The modern source is important negative as well as positive evidence:
+
+- `TerrainProvider` gives meaningful names to low-erosion mountains,
+  mountains, wide and narrow plateaus, plains, extreme hills, swamps,
+  saddles, and locations that allow rivers below a ridge threshold;
+- those named cases remain spline values over continentalness, erosion,
+  weirdness, and folded-ridge coordinates;
+- `NoiseRouterData` turns the resulting offset, factor, and jaggedness into a
+  density function and adds base 3D noise; and
+- the inspected path does not persist a ridge polyline, divide graph,
+  drainage reach, catchment, basin rim, spill saddle, or outlet object.
+
+Modern Minecraft therefore demonstrates a strong scalar terrain grammar, not
+a hidden hydrologic planner. Mclone should retain its useful lesson—shared
+semantic coordinates route both terrain and ecology—without expecting more
+noise dimensions or a larger spline table to create explicit geographic
+relationships.
+
+Tactical 265 selects an original bounded hybrid for that missing layer:
+regional envelopes guide a coarse drainage solve, significant raster facts
+become compact ridge/divide, drainage, and basin objects, and analytic
+profiles reconstruct a continuous point-queryable heightfield. This remains
+Mclone design research, not a port, parity claim, or change to the Java 1.17.1
+target.
+
 ## Refresh Protocol
 
 When intentionally moving to a newer stable release:
@@ -224,3 +258,4 @@ When intentionally moving to a newer stable release:
 - [`mclone-overworld-generation.md`](mclone-overworld-generation.md)
 - [`../tactical/259-modern-and-historical-coast-reference-survey.md`](../tactical/259-modern-and-historical-coast-reference-survey.md)
 - [`../tactical/263-cross-era-inland-landform-survey.md`](../tactical/263-cross-era-inland-landform-survey.md)
+- [`../tactical/265-macro-landform-grammar-research.md`](../tactical/265-macro-landform-grammar-research.md)

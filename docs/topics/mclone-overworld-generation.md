@@ -115,6 +115,27 @@ fixtures, same-host generation comparison, a zero-fluid-work 3,600-frame
 movement soak, and internally inspected RD16 cards pass. Human Review 1 is
 pending.
 
+Field revision 21 is the current production terrain. Tactical 264 routes
+continuous quiet, rolling, ridge/valley, broad-basin, and mountain intent
+through the existing periodic fields. Objective geometry, parity, topology,
+persistence, performance, and streaming evidence passes. Human Review A found
+the result an improvement but not a final terrain language: at distance it
+still reads as similarly scaled scalar hills, while major rivers, ponds, and
+relief remain superposed systems rather than one drainage geography.
+
+Tactical
+[`265`](../tactical/265-macro-landform-grammar-research.md) now selects the
+next representation: cheap regional envelopes guide a bounded coarse drainage
+solve; significant products become compact ridge/divide, drainage, and basin
+objects; analytic profiles reconstruct a continuous heightfield and support
+indexed point queries. Analytic-only planning and current-height watershed
+carving are retained as useful mechanisms but rejected as complete answers.
+No production generator, field revision, water, surface, profile, or
+compatibility identity changed during that research. A diagnostic hybrid
+prototype and Human Review B now precede production integration, new surface
+or ecology interpretation, detailed fronts, compound water, geology, and 3D
+density.
+
 ## Scope
 
 This topic owns the creative and technical direction for mclone's original
@@ -1175,13 +1196,31 @@ cylinder seam, partition/order behavior, SQLite reopen, WebAssembly
 compilation, established macro/exact performance controls, and completed
 World Explorer streaming all pass.
 
-The implementation is awaiting Human Review A. Internal pixel review finds
-materially richer ordinary land, together with unresolved block-contour
-shelves, sometimes-overlapping rolling/ridge/mountain silhouettes, busy
-quiet-family examples, and basin forms obscured by existing decoration. Do
-not begin new surface/ecology interpretation, plateaus, escarpments, basin
-lakes, compound water, geology, or broad 3D density until that review decides
-whether to accept, retune, or reject the fabric.
+Human Review A found the implementation materially improved but not final.
+The decisive defects are repeated closed contour rings, similarly scaled
+scalar hills in the far view, disconnected sand and water accents, and rivers,
+ponds, and relief that meet without catchment, divide, spill, or outlet
+authority. This is a structural limit beyond another field-amplitude retune.
+
+Tactical
+[`265`](../tactical/265-macro-landform-grammar-research.md) selects a bounded
+hybrid landform plan:
+
+- regional envelopes retain cheap land/ocean, quiet-space, broad-level,
+  orientation, highland-opportunity, and sink-permission samples;
+- a canonical coarse solve derives drainage, basins, divides, spills, and
+  rejected cycles;
+- significant facts become compact ridge/divide, drainage, basin, front, and
+  bounded-highland records; and
+- indexed analytic reconstruction preserves continuous point sampling and
+  far-summary use after cold planning.
+
+The next slice is a research-only comparison against revision 21 on seeds
+`12345`, `8675309`, and `-98765`, on the plane and exact cylinder. It stops
+at Human Review B on plan maps, contours, oblique relief, and named journeys.
+Do not begin new surface/ecology interpretation, detailed
+plateaus/escarpments, basin-lake realization, compound water, geology, or
+broad 3D density before that review.
 
 The
 [`still-life-and-tectonic-reference.md`](still-life-and-tectonic-reference.md)
@@ -1211,3 +1250,4 @@ place of the existing stream contracts.
 - [`../tactical/259-modern-and-historical-coast-reference-survey.md`](../tactical/259-modern-and-historical-coast-reference-survey.md)
 - [`../tactical/263-cross-era-inland-landform-survey.md`](../tactical/263-cross-era-inland-landform-survey.md)
 - [`../tactical/264-mclone-ordinary-inland-landform-fabric.md`](../tactical/264-mclone-ordinary-inland-landform-fabric.md)
+- [`../tactical/265-macro-landform-grammar-research.md`](../tactical/265-macro-landform-grammar-research.md)
