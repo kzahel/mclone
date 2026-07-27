@@ -292,6 +292,7 @@ pub struct TerrainHorizonPresentation {
     pub height_blocks: f64,
     pub view: TerrainPreviewView,
     pub camera: TerrainPreviewCamera,
+    pub target_y: f32,
 }
 
 impl TerrainHorizonPresentation {
@@ -310,9 +311,18 @@ impl TerrainHorizonPresentation {
             height_blocks,
             view,
             camera,
+            target_y: terrain_horizon_orbit_target_y(),
         };
         presentation.uniform_facts()?;
         Ok(presentation)
+    }
+
+    pub fn with_target_y(mut self, target_y: f32) -> Result<Self, String> {
+        if !target_y.is_finite() {
+            return Err("terrain horizon camera target height must be finite".to_owned());
+        }
+        self.target_y = target_y;
+        Ok(self)
     }
 
     fn uniform_facts(self) -> Result<TerrainPreviewUniformPresentation, String> {
@@ -455,14 +465,13 @@ pub fn terrain_horizon_chunk_render_view(
     width: u32,
     height: u32,
 ) -> Result<mclone_render::chunk::ChunkRenderView, String> {
-    let target_y = terrain_horizon_orbit_target_y();
     let projection = terrain_preview_projection_for_extent(
         presentation.width_blocks as f32,
         presentation.view,
         presentation.camera,
         width,
         height,
-        target_y,
+        presentation.target_y,
     );
     let center_x = presentation.center_x as f32;
     let center_z = presentation.center_z as f32;
@@ -1612,6 +1621,37 @@ mod tests {
         assert_eq!(
             terrain_horizon_orbit_target_y(),
             MCLONE_OVERWORLD_SEA_LEVEL as f32
+        );
+    }
+
+    #[test]
+    fn horizon_target_override_moves_one_shared_camera_without_xz_drift() {
+        let presentation = TerrainHorizonPresentation::new(
+            -32.0,
+            48.0,
+            96.0,
+            54.0,
+            TerrainPreviewView::ThreeDimensional,
+            TerrainPreviewCamera::new(0.75, 0.12, TerrainPreviewProjectionKind::Perspective)
+                .unwrap(),
+        )
+        .unwrap();
+        let default_view = terrain_horizon_chunk_render_view(presentation, 1280, 720).unwrap();
+        let raised_view =
+            terrain_horizon_chunk_render_view(presentation.with_target_y(91.0).unwrap(), 1280, 720)
+                .unwrap();
+        let target_delta = 91.0 - terrain_horizon_orbit_target_y();
+
+        assert_eq!(
+            [
+                default_view.camera_position.x,
+                default_view.camera_position.z
+            ],
+            [raised_view.camera_position.x, raised_view.camera_position.z]
+        );
+        assert!(
+            (raised_view.camera_position.y - default_view.camera_position.y - target_delta).abs()
+                < 1.0e-5
         );
     }
 

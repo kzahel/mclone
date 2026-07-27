@@ -65,9 +65,9 @@ fn successful_browser_surface_hides_the_generic_startup_fallback() {
 }
 
 #[test]
-fn explorer_color_contract_stays_behind_the_lightweight_firewall() {
+fn explorer_shared_render_contract_stays_behind_the_lightweight_firewall() {
     assert!(EXPLORER_MANIFEST.contains("mclone-render-color.workspace = true"));
-    assert!(!EXPLORER_MANIFEST.contains("\nmclone-render.workspace = true"));
+    assert!(EXPLORER_MANIFEST.contains("\nmclone-render.workspace = true"));
     assert!(!EXPLORER_MANIFEST.contains("\nmclone-scene.workspace = true"));
     assert!(!EXPLORER_MANIFEST.contains("\nmclone-ui.workspace = true"));
 }

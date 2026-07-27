@@ -35,12 +35,17 @@ Tactical 262 Slice 3A now separates natural-tree admission from terrain and
 selects one complete exact-or-proxy representation from stable ID, complete
 bounds, exact-safe interior, and drawable readiness. Delayed native movement
 and inspected forest captures report zero missing, dual, or unowned records.
-Human Review 1A was nevertheless retracted on 2026-07-27: at low pitch the
-procedural collar can depth-occlude exact ground and complete exact-owned
-trees anywhere it overlaps the exact footprint. Slice 3B must replace this
-opaque overlap with complementary exact, transition, and procedural domains
-and prove the result in deterministic screenshots before browser composition.
-No game-scene, browser-exact, Android, or XR adoption has started.
+Human Review 1A was nevertheless retracted on 2026-07-27 when low pitch made
+the whole focus-centered exact patch appear behind procedural terrain.
+Deterministic exact/composed/coverage captures and a temporary full-footprint
+discard showed that the broad effect was not collar overlap: the orbit eye
+was outside the patch, with real procedural foreground between it and the
+focus. Slice 3B now uses one viewer-forward anchor for exact terrain,
+procedural residency, and vegetation, plus a terrain-safe composed target
+height when sea-level targeting would place the low orbit eye in resolved
+ground. Four-sided captures and delayed native window/offscreen movement pass
+with no missing exact or proxy trees. Browser composition is next; no
+game-scene, Android, or XR adoption has started.
 Interactive review on 2026-07-26 diagnosed two remaining proof defects and
 activated Tactical
 [`252`](../tactical/252-procedural-horizon-seams-and-transition-admission.md):

@@ -6,14 +6,19 @@ use mclone_terrain_view::{
     TerrainClipmapConfig, TerrainExactCoverageMode, TerrainHorizonFrameStats,
     TerrainHorizonPresentation, TerrainHorizonRenderTarget, TerrainHorizonRenderer,
     TerrainPreviewCamera, TerrainPreviewMaterialAtlas, TerrainPreviewProjectionKind,
-    TerrainPreviewView, TerrainVegetationExecutor,
+    TerrainPreviewView, TerrainVegetationExecutor, terrain_preview_focus_y_for_profile,
 };
 use mclone_view_control::{
     ContactEvent, ContactGestureReducer, ViewPoint, ViewportMetrics, WorldViewHeldDirection,
     WorldViewHeldMotion, WorldViewIntent, WorldViewMode, WorldViewProjection, WorldViewReducer,
     WorldViewSignal, WorldViewState,
 };
-use mclone_worldgen::terrain_preview::TerrainPreviewContentStage;
+use mclone_worldgen::{
+    levelgen::MCLONE_OVERWORLD_SEA_LEVEL,
+    terrain_preview::{TerrainPreviewContentStage, TerrainPreviewProfile},
+};
+
+const COMPOSED_ORBIT_VIEWER_CLEARANCE_BLOCKS: f32 = 32.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WorldExplorerConfig {
@@ -33,6 +38,13 @@ pub enum WorldExplorerCompositionMode {
     Exact,
     Composed,
     Coverage,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct WorldExplorerExactView {
+    pub render_view: mclone_render::chunk::ChunkRenderView,
+    pub residency_anchor: [i32; 2],
+    pub target_y: f32,
 }
 
 impl WorldExplorerCompositionMode {
@@ -68,6 +80,8 @@ pub struct WorldExplorerSession {
     view_reducer: WorldViewReducer,
     contacts: ContactGestureReducer,
     held_motion: WorldViewHeldMotion,
+    residency_anchor: [i32; 2],
+    target_y_override: Option<f32>,
     revision: u64,
     coarse_ready_at: Option<Duration>,
     target_ready_at: Option<Duration>,
@@ -92,6 +106,7 @@ impl WorldExplorerSession {
         }
         let view_reducer = WorldViewReducer::default();
         let view_state = view_reducer.normalize(config.initial_view);
+        let residency_anchor = [floor_i32(view_state.focus_x), floor_i32(view_state.focus_z)];
         let target_color_transform = config.color_profile.target_color_transform(color_format);
         let renderer = TerrainHorizonRenderer::new_with_target_color_transform(
             device,
@@ -113,6 +128,8 @@ impl WorldExplorerSession {
             view_reducer,
             contacts: ContactGestureReducer::default(),
             held_motion: WorldViewHeldMotion::default(),
+            residency_anchor,
+            target_y_override: None,
             revision: 0,
             coarse_ready_at: None,
             target_ready_at: None,
@@ -265,6 +282,10 @@ impl WorldExplorerSession {
                 },
             )?,
         )?;
+        let presentation = match self.target_y_override {
+            Some(target_y) => presentation.with_target_y(target_y)?,
+            None => presentation,
+        };
         if let Some((snapshot, mode)) = exact_coverage {
             self.renderer
                 .set_exact_painted_coverage(queue, snapshot, mode)?;
@@ -301,32 +322,37 @@ impl WorldExplorerSession {
         Ok(stats)
     }
 
-    pub fn exact_render_view(&self) -> Result<mclone_render::chunk::ChunkRenderView, String> {
-        let view_height_blocks = self.view_state.blocks_across * f64::from(self.config.height)
-            / f64::from(self.config.width);
-        let presentation = TerrainHorizonPresentation::new(
-            self.view_state.focus_x,
-            self.view_state.focus_z,
-            self.view_state.blocks_across,
-            view_height_blocks,
-            match self.view_state.mode {
-                WorldViewMode::Map => TerrainPreviewView::Map,
-                WorldViewMode::Orbit => TerrainPreviewView::ThreeDimensional,
-            },
-            TerrainPreviewCamera::new(
-                self.view_state.yaw_radians as f32,
-                self.view_state.pitch_radians as f32,
-                match self.view_state.projection {
-                    WorldViewProjection::Orthographic => TerrainPreviewProjectionKind::Orthographic,
-                    WorldViewProjection::Perspective => TerrainPreviewProjectionKind::Perspective,
-                },
-            )?,
-        )?;
-        mclone_terrain_view::terrain_horizon_chunk_render_view(
-            presentation,
+    pub fn exact_composition_view(
+        &self,
+        radius_chunks: u32,
+    ) -> Result<WorldExplorerExactView, String> {
+        world_explorer_exact_view(
+            self.config.seed,
+            self.view_state,
             self.config.width,
             self.config.height,
+            radius_chunks,
         )
+    }
+
+    pub fn apply_exact_composition_view(&mut self, view: WorldExplorerExactView) {
+        self.target_y_override = Some(view.target_y);
+        if self.residency_anchor != view.residency_anchor {
+            self.residency_anchor = view.residency_anchor;
+            self.replan_at(view.residency_anchor);
+        }
+    }
+
+    pub fn restore_horizon_view(&mut self) {
+        self.target_y_override = None;
+        let anchor = [
+            floor_i32(self.view_state.focus_x),
+            floor_i32(self.view_state.focus_z),
+        ];
+        if self.residency_anchor != anchor {
+            self.residency_anchor = anchor;
+            self.replan_at(anchor);
+        }
     }
 
     pub fn copy_depth_to_buffer(
@@ -367,7 +393,8 @@ impl WorldExplorerSession {
     pub fn diagnostics(&self) -> String {
         let stats = self.last_stats;
         format!(
-            "seed={} center=({}, {}) blocks={} view={} revision={} \
+            "seed={} center=({}, {}) residency_anchor=({}, {}) target_y={} \
+             blocks={} view={} revision={} \
              color_profile={} color_format={:?} color_transform={} \
              coarse_ready_ms={} target_ready_ms={} resident_bytes={} \
              fixed_resident_bytes={} halo_bytes={} normal_height_bytes={} \
@@ -380,6 +407,12 @@ impl WorldExplorerSession {
             self.config.seed,
             self.view_state.center_x_i32(),
             self.view_state.center_z_i32(),
+            self.residency_anchor[0],
+            self.residency_anchor[1],
+            self.target_y_override.map_or_else(
+                || "sea-level".to_owned(),
+                |target_y| format!("{target_y:.2}"),
+            ),
             self.view_state.blocks_across_u32(),
             view_label(self.view_state.mode),
             self.revision,
@@ -420,10 +453,19 @@ impl WorldExplorerSession {
     }
 
     fn replan(&mut self) {
-        self.renderer.set_view(
-            self.config.seed,
+        let anchor = [
             floor_i32(self.view_state.focus_x),
             floor_i32(self.view_state.focus_z),
+        ];
+        self.residency_anchor = anchor;
+        self.replan_at(anchor);
+    }
+
+    fn replan_at(&mut self, anchor: [i32; 2]) {
+        self.renderer.set_view(
+            self.config.seed,
+            anchor[0],
+            anchor[1],
             TerrainPreviewContentStage::Cover,
         );
         self.revision = self.revision.saturating_add(1);
@@ -491,6 +533,78 @@ fn floor_i32(value: f64) -> i32 {
     value
         .floor()
         .clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32
+}
+
+fn world_explorer_exact_view(
+    seed: i64,
+    state: WorldViewState,
+    width: u32,
+    height: u32,
+    radius_chunks: u32,
+) -> Result<WorldExplorerExactView, String> {
+    let view_height_blocks = state.blocks_across * f64::from(height) / f64::from(width);
+    let presentation = TerrainHorizonPresentation::new(
+        state.focus_x,
+        state.focus_z,
+        state.blocks_across,
+        view_height_blocks,
+        match state.mode {
+            WorldViewMode::Map => TerrainPreviewView::Map,
+            WorldViewMode::Orbit => TerrainPreviewView::ThreeDimensional,
+        },
+        TerrainPreviewCamera::new(
+            state.yaw_radians as f32,
+            state.pitch_radians as f32,
+            match state.projection {
+                WorldViewProjection::Orthographic => TerrainPreviewProjectionKind::Orthographic,
+                WorldViewProjection::Perspective => TerrainPreviewProjectionKind::Perspective,
+            },
+        )?,
+    )?;
+    let base_render_view =
+        mclone_terrain_view::terrain_horizon_chunk_render_view(presentation, width, height)?;
+    let target_y = if state.mode == WorldViewMode::Orbit {
+        let viewer_surface_y = terrain_preview_focus_y_for_profile(
+            TerrainPreviewProfile::McloneOverworldV1,
+            seed,
+            floor_i32(f64::from(base_render_view.camera_position.x)),
+            floor_i32(f64::from(base_render_view.camera_position.z)),
+        );
+        let eye_offset_y = base_render_view.camera_position.y - presentation.target_y;
+        presentation
+            .target_y
+            .max(viewer_surface_y + COMPOSED_ORBIT_VIEWER_CLEARANCE_BLOCKS - eye_offset_y)
+    } else {
+        MCLONE_OVERWORLD_SEA_LEVEL as f32
+    };
+    let presentation = presentation.with_target_y(target_y)?;
+    let render_view =
+        mclone_terrain_view::terrain_horizon_chunk_render_view(presentation, width, height)?;
+    let mut anchor_x = render_view.camera_position.x;
+    let mut anchor_z = render_view.camera_position.z;
+    if state.mode == WorldViewMode::Orbit {
+        let forward_length = render_view
+            .camera_forward
+            .x
+            .hypot(render_view.camera_forward.z);
+        if forward_length > f32::EPSILON {
+            // Put the viewer one half-chunk behind the odd-sized chunk square so
+            // the bounded exact proof occupies visible ground ahead of an orbit
+            // camera and its tree crowns remain inside the horizon's vegetation
+            // record domain.
+            let forward_blocks = radius_chunks.saturating_mul(16).saturating_add(16) as f32;
+            anchor_x += render_view.camera_forward.x / forward_length * forward_blocks;
+            anchor_z += render_view.camera_forward.z / forward_length * forward_blocks;
+        }
+    }
+    Ok(WorldExplorerExactView {
+        residency_anchor: [
+            floor_i32(f64::from(anchor_x)),
+            floor_i32(f64::from(anchor_z)),
+        ],
+        render_view,
+        target_y,
+    })
 }
 
 fn view_label(mode: WorldViewMode) -> &'static str {
@@ -582,5 +696,88 @@ mod tests {
         assert_eq!(residency_plan_key(state, config), (-1, -1));
         assert_eq!(floor_i32(-0.001), -1);
         assert_eq!(floor_i32(0.001), 0);
+    }
+
+    #[test]
+    fn orbit_exact_near_field_uses_the_viewer_not_the_distant_focus() {
+        let state = WorldViewState {
+            focus_x: 0.0,
+            focus_z: 0.0,
+            blocks_across: 96.0,
+            yaw_radians: 0.0,
+            pitch_radians: 0.12,
+            mode: WorldViewMode::Orbit,
+            projection: WorldViewProjection::Perspective,
+        };
+
+        let east = world_explorer_exact_view(12_345, state, 1280, 720, 2).unwrap();
+        let west = world_explorer_exact_view(
+            12_345,
+            WorldViewState {
+                yaw_radians: std::f64::consts::PI,
+                ..state
+            },
+            1280,
+            720,
+            2,
+        )
+        .unwrap();
+
+        assert!(east.residency_anchor[0] > 100);
+        assert_eq!(east.residency_anchor[1], 0);
+        assert!(west.residency_anchor[0] < -100);
+        assert!(
+            east.residency_anchor[0] < floor_i32(f64::from(east.render_view.camera_position.x))
+        );
+        assert!(
+            west.residency_anchor[0] > floor_i32(f64::from(west.render_view.camera_position.x))
+        );
+        for yaw_radians in [
+            0.0,
+            std::f64::consts::FRAC_PI_2,
+            std::f64::consts::PI,
+            std::f64::consts::PI * 1.5,
+        ] {
+            let view = world_explorer_exact_view(
+                12_345,
+                WorldViewState {
+                    yaw_radians,
+                    ..state
+                },
+                1280,
+                720,
+                2,
+            )
+            .unwrap();
+            let surface_y = terrain_preview_focus_y_for_profile(
+                TerrainPreviewProfile::McloneOverworldV1,
+                12_345,
+                floor_i32(f64::from(view.render_view.camera_position.x)),
+                floor_i32(f64::from(view.render_view.camera_position.z)),
+            );
+            assert!(
+                view.render_view.camera_position.y
+                    >= surface_y + COMPOSED_ORBIT_VIEWER_CLEARANCE_BLOCKS
+            );
+        }
+    }
+
+    #[test]
+    fn map_exact_near_field_remains_under_the_focus() {
+        let view = world_explorer_exact_view(
+            12_345,
+            WorldViewState {
+                focus_x: -0.25,
+                focus_z: 17.75,
+                mode: WorldViewMode::Map,
+                ..WorldViewState::default()
+            },
+            1280,
+            720,
+            2,
+        )
+        .unwrap();
+
+        assert_eq!(view.residency_anchor, [-1, 17]);
     }
 }

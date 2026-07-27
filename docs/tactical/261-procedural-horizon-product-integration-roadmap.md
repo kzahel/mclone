@@ -5,11 +5,12 @@ standalone Explorer, cross-host parity, transition hardening, reusable
 vegetation-service, and shared composition-substrate phases are complete.
 Child Tactical
 [`262`](262-world-explorer-exact-procedural-composition.md) reached Human
-Review 1 with native exact/procedural World Explorer pixels. Review accepted
-the terrain compositor and collar overall but found a blocking whole-tree
-ownership defect. The focused exact/proxy correction has passed automation
-and inspected native captures; Human Review 1A now precedes browser and
-full-game rendering.
+Review 1 with native exact/procedural World Explorer pixels. The whole-tree
+correction remains valid, while retracted low-angle review exposed a separate
+focus-versus-viewer anchor error in the orbit proof host. Slice 3B now aligns
+exact, procedural residency, vegetation, and a terrain-safe composed camera
+at one viewer-forward anchor. Native four-sided screenshots and delayed
+movement pass; browser composition now precedes full-game rendering.
 
 Topics:
 

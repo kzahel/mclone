@@ -33,6 +33,7 @@ pub struct ExplorerTerrain {
     exact: ExplorerExactTerrain,
     composition: WorldExplorerCompositionMode,
     last_exact_stats: ExplorerExactStats,
+    last_exact_anchor: [i32; 2],
 }
 
 impl ExplorerTerrain {
@@ -92,6 +93,7 @@ impl ExplorerTerrain {
             target_color_transform,
         )?;
         let composition = options.composition;
+        let initial_exact_anchor = [options.center_x, options.center_z];
         Ok(Self {
             session,
             options,
@@ -99,6 +101,7 @@ impl ExplorerTerrain {
             exact,
             composition,
             last_exact_stats: ExplorerExactStats::default(),
+            last_exact_anchor: initial_exact_anchor,
         })
     }
 
@@ -172,12 +175,27 @@ impl ExplorerTerrain {
         encoder: &mut wgpu::CommandEncoder,
         color_view: &wgpu::TextureView,
     ) -> Result<TerrainHorizonFrameStats> {
+        let exact_view = (self.composition != WorldExplorerCompositionMode::Horizon)
+            .then(|| {
+                self.session
+                    .exact_composition_view(self.options.exact_radius)
+            })
+            .transpose()
+            .map_err(anyhow::Error::msg)?;
+        if let Some(exact_view) = exact_view {
+            self.session.apply_exact_composition_view(exact_view);
+        } else {
+            self.session.restore_horizon_view();
+        }
         if self.composition != WorldExplorerCompositionMode::Horizon {
-            let state = self.session.view_state();
+            let exact_view = *exact_view
+                .as_ref()
+                .expect("non-horizon composition has an exact render view");
+            self.last_exact_anchor = exact_view.residency_anchor;
             self.exact.update_and_pump(
                 device,
-                state.focus_x.floor() as i32,
-                state.focus_z.floor() as i32,
+                exact_view.residency_anchor[0],
+                exact_view.residency_anchor[1],
             )?;
         }
         let coverage = self.exact.coverage_snapshot().map_err(anyhow::Error::msg)?;
@@ -220,10 +238,9 @@ impl ExplorerTerrain {
             self.composition,
             WorldExplorerCompositionMode::Exact | WorldExplorerCompositionMode::Composed
         ) {
-            let render_view = self
-                .session
-                .exact_render_view()
-                .map_err(anyhow::Error::msg)?;
+            let render_view = exact_view
+                .expect("drawn exact composition has an exact render view")
+                .render_view;
             self.exact.render(
                 queue,
                 encoder,
@@ -313,7 +330,7 @@ impl ExplorerTerrain {
              exact_vertices={} exact_indices={}/{} exact_bytes={} exact_trees={}:{}:{} \
              exact_tree_draw={}:{} exact_compile_ms={:.2} \
              exact_present_ms={:.2} exact_mesh_ms={:.2} exact_pack_ms={:.2} \
-             frontier=procedural-collar-1.5-blocks",
+             exact_anchor=viewer-forward({}, {}) frontier=procedural-collar-1.5-blocks",
             self.session.diagnostics(),
             self.composition.label(),
             exact.painted_chunks,
@@ -338,6 +355,8 @@ impl ExplorerTerrain {
             exact.presentation_ms,
             exact.mesh_ms,
             exact.pack_ms,
+            self.last_exact_anchor[0],
+            self.last_exact_anchor[1],
         )
     }
 }

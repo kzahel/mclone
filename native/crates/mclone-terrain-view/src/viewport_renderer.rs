@@ -34,9 +34,9 @@ use super::{
         TERRAIN_HORIZON_STAGING_SLOTS_PER_LEVEL, TerrainHorizonAdmission,
         TerrainHorizonBeginTransition, TerrainHorizonLevelPresentation, TerrainHorizonResourceTile,
     },
-    parse_samples, terrain_horizon_orbit_target_y, terrain_preview_compute_wgsl,
-    terrain_preview_focus_y_for_profile, terrain_preview_render_wgsl, terrain_preview_tree_wgsl,
-    viewport_uniform_bytes_for_request, viewport_uniform_bytes_for_request_with_presentation,
+    parse_samples, terrain_preview_compute_wgsl, terrain_preview_focus_y_for_profile,
+    terrain_preview_render_wgsl, terrain_preview_tree_wgsl, viewport_uniform_bytes_for_request,
+    viewport_uniform_bytes_for_request_with_presentation,
 };
 
 pub const TERRAIN_PREVIEW_MATERIAL_UV_COUNT: usize = 256;
@@ -2931,7 +2931,7 @@ impl TerrainHorizonRenderer {
             layer: TerrainPreviewLayer::Terrain,
             split_layout: TerrainPreviewSplitLayout::Columns,
         };
-        let focus_y = terrain_horizon_orbit_target_y();
+        let focus_y = presentation.target_y;
         let mut dispatched_refills = 0_u32;
         for _ in 0..TERRAIN_VIEWPORT_GPU_DISPATCHES_PER_FRAME {
             let Some(resource) = self.pending.pop_front() else {

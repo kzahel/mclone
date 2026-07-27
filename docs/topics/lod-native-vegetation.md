@@ -18,9 +18,11 @@ representation is selected from the record's full bounds and the actual
 exact-safe terrain interior. Delayed native window/offscreen movement has
 zero missing, dual, or unowned records at forest checkpoints. That identity
 proof remains valid, but Human Review 1A was retracted on 2026-07-27 because
-overlapping procedural terrain can still depth-occlude a complete
-exact-owned tree. Tactical 262 Slice 3B now owns the complementary terrain
-frontier; browser and game-scene promotion wait for its screenshot gate.
+the focus-centered exact patch sat behind procedural foreground at low orbit
+pitch. Tactical 262 Slice 3B now gives exact terrain, procedural residency,
+and vegetation one viewer-forward composition anchor. Its delayed native
+window/offscreen smoke again reports zero missing exact or proxy records;
+browser and game-scene promotion wait for the browser composition gate.
 
 World Explorer review on 2026-07-26 found that native enabled synchronous
 near-level vegetation compilation during frame encoding while browser disabled

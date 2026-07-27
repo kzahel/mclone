@@ -1,13 +1,14 @@
 # Tactical 262: World Explorer Exact/Procedural Composition
 
-Status: Slice 3B active 2026-07-27 after Human Review 1A was retracted.
-Slices 0 through 3A proved shared target/depth plumbing, exact-painted
-coverage, and whole-tree exact/proxy ownership, but not a believable terrain
-frontier. Low-angle review showed that the retained procedural collar can
-depth-occlude exact terrain and complete exact trees throughout the patch.
-Slice 3B must replace that overlap with complementary exact, transition, and
-procedural domains. Browser, Terrain Lab, and game-scene promotion remain
-gated.
+Status: Slice 3B native correction and screenshot gate complete 2026-07-27
+after Human Review 1A was retracted. Slices 0 through 3A proved shared
+target/depth plumbing, exact-painted coverage, and whole-tree exact/proxy
+ownership, but the orbit host still placed its focus-centered exact square
+behind procedural foreground terrain at low pitch. Slice 3B now gives the
+exact patch, procedural rings, vegetation, and camera one viewer-forward
+composition anchor while retaining the accepted collar as the explicit seam
+treatment. Browser composition is next; Terrain Lab and game-scene promotion
+remain gated.
 
 Topics:
 
@@ -433,37 +434,46 @@ reviewed exact/proxy chimera is not visible.
 ### Human Review 1A Retraction and Slice 3B
 
 The initial Human Review 1A acceptance was retracted on 2026-07-27 after
-lower camera perspectives exposed a broader defect. Whole-tree XOR remains
-mechanically correct, but the procedural terrain collar still occupies and
-writes depth inside the exact-painted footprint. It can therefore hide exact
-ground and complete exact-owned trees, not only make a split exact/proxy
-tree. Drawing exact second does not correct this: both presentations use the
-same reversed-Z depth buffer, so the geometrically closer approximate
-surface legitimately wins. Disabling depth or forcing exact on top would
-instead draw hidden exact geometry through true foreground terrain.
+lower camera perspectives exposed a broader apparent occlusion. Exact still
+draws second into the same reversed-Z depth buffer. Render order was not the
+defect: the orbit eye sat well outside the focus-centered 5-by-5 exact square,
+so procedural ground was geographically between the eye and the patch and
+correctly won depth.
 
-This reopens the terrain frontier rather than the tree identity work.
-Slice 3B will:
+A full exact-footprint procedural discard was tested at the same deterministic
+camera. It made no material change to the broad occlusion and exposed open
+boundary cracks when the collar was removed. That disproved the proposed
+full-mask/transition rewrite as the fix for this report. The 1.5-block collar
+remains the named seam treatment; whole-tree ownership continues to keep
+collar-crossing trees proxy-owned.
 
-- [ ] establish one deterministic low-angle exact/composed/coverage capture
-  where the overlap is plainly visible;
-- [ ] use a full exact-footprint procedural discard as a diagnostic, proving
-  the retained overlap is the occlusion source;
-- [ ] replace overlap with complementary exact, transition, and procedural
-  ownership, with no opaque terrain sample owned by two presentations;
-- [ ] preserve a continuous frontier without restoring full-height footprint
-  walls or hiding cracks with depth overlap;
-- [ ] inspect matched low-angle captures from multiple sides across land,
-  water, slopes, and forest; and
-- [ ] rerun delayed admission, movement, eviction, negative-coordinate, and
-  teleport evidence before presenting a corrected screenshot review.
+Slice 3B instead:
 
-Gate: a coverage diagnostic makes all three ownership domains unambiguous;
-the known low-angle camera no longer loses exact terrain or exact-owned trees;
-and inspected captures establish a credible screenshot review candidate.
-Browser Worker composition is the next slice only after this gate. It must
-provide the same review camera through query parameters because interactive
-human validation is browser-only.
+- [x] established matched exact/composed/coverage captures at
+  `blocksAcross=96`, `pitch=0.12`, and all four cardinal yaw directions;
+- [x] proved with a temporary full-footprint discard that collar overlap was
+  not the cause of the whole-patch behavior;
+- [x] added one shared viewer-forward composition anchor for exact terrain,
+  procedural ring residency, and vegetation records;
+- [x] kept map and ordinary Horizon behavior focus-centered;
+- [x] added a shared optional camera target height so composed low-angle
+  views retain their requested pitch but gain 32 blocks of viewer-side
+  terrain clearance when sea-level targeting would put the camera in ground;
+- [x] inspected exact/composed/coverage captures from all four sides across
+  land, water, slopes, and forest; and
+- [x] reran delayed admission, movement, eviction, negative-coordinate,
+  teleport, map, and orbit smoke in native-window and offscreen lanes.
+
+The delayed smoke completed with `25/25` exact chunks, `0` missing exact or
+proxy tree records at every checkpoint, `16` stale results rejected during
+movement, and bounded `160`-slot procedural residency. The known failing
+camera now places exact terrain in the foreground and procedural terrain
+behind it in all four directions while both still use one depth buffer.
+
+Gate: native screenshot evidence is now a credible Human Review 1B candidate.
+Browser Worker composition is the next slice and must expose the same seed,
+center, scale, yaw, pitch, composition, and exact-radius facts through query
+parameters because interactive human validation is browser-only.
 
 Focused validation passed:
 
