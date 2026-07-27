@@ -1,5 +1,5 @@
 import initModule, {
-  WorldExplorerWorkerActor,
+  TerrainVegetationWorkerActor,
 } from "./pkg/mclone_world_explorer.js?v=__MCLONE_WORLD_EXPLORER_ASSET_VERSION__";
 
 let modulePromise;
@@ -20,7 +20,7 @@ async function forward(message) {
     import.meta.url,
   ));
   await modulePromise;
-  actor ??= new WorldExplorerWorkerActor();
+  actor ??= new TerrainVegetationWorkerActor();
   const dispatch = actor.handleMessage(message);
   try {
     self.postMessage(dispatch.message);

@@ -1,5 +1,9 @@
 #![forbid(unsafe_code)]
 
+#[cfg(target_arch = "wasm32")]
+mod browser_exact;
+#[cfg(target_arch = "wasm32")]
+mod browser_vegetation;
 mod canonical;
 mod canonical_batch_codec;
 mod canonical_mesh;
@@ -27,6 +31,12 @@ use mclone_worldgen::terrain_preview::{
     TerrainPreviewSample, ValidatedTerrainPreviewRequest,
 };
 
+#[cfg(target_arch = "wasm32")]
+pub use browser_exact::{BrowserCanonicalExactExecutor, canonical_mesh_batch_encoded_bytes};
+#[cfg(target_arch = "wasm32")]
+pub use browser_vegetation::{
+    BrowserTerrainVegetationExecutor, TerrainVegetationWorkerActor, TerrainVegetationWorkerDispatch,
+};
 pub use canonical::{
     CANONICAL_TERRAIN_MAX_CHUNK_RADIUS, CanonicalTerrainChunk, CanonicalTerrainCompiler,
     CanonicalTerrainDependencyCacheReport, CanonicalTerrainStage, CanonicalTerrainVisibility,

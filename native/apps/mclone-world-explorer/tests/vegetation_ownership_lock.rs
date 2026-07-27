@@ -14,6 +14,8 @@ const SHARED_TRANSPORT: &str =
     include_str!("../../mclone-web-client/www/mclone-worker-transport.ts");
 const TERRAIN_VIEW_RENDERER: &str =
     include_str!("../../../crates/mclone-terrain-view/src/viewport_renderer.rs");
+const TERRAIN_VIEW_BROWSER_VEGETATION: &str =
+    include_str!("../../../crates/mclone-terrain-view/src/browser_vegetation.rs");
 const TERRAIN_VIEW_MANIFEST: &str = include_str!("../../../crates/mclone-terrain-view/Cargo.toml");
 const WORLDGEN_MANIFEST: &str = include_str!("../../../crates/mclone-worldgen/Cargo.toml");
 
@@ -86,6 +88,16 @@ fn explorer_session_does_not_own_vegetation_coordination_policy() {
             "exact Worker shell gained Rust domain policy through {forbidden:?}"
         );
     }
+}
+
+#[test]
+fn browser_vegetation_executor_and_actor_are_shared() {
+    assert!(
+        TERRAIN_VIEW_BROWSER_VEGETATION.contains("pub struct BrowserTerrainVegetationExecutor")
+    );
+    assert!(TERRAIN_VIEW_BROWSER_VEGETATION.contains("pub struct TerrainVegetationWorkerActor"));
+    assert!(!WEB_HOST.contains("struct BrowserTerrainVegetationExecutor"));
+    assert!(WEB_WORKER.contains("new TerrainVegetationWorkerActor()"));
 }
 
 #[test]

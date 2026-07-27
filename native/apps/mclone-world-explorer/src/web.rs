@@ -10,6 +10,7 @@ use mclone_mesh::load_first_party_textured_terrain_assets_with_presentation;
 use mclone_render::chunk::ChunkTextureAtlas;
 use mclone_render_color::{RenderColorProfile, RenderTargetColorTransform};
 use mclone_terrain_view::{
+    BrowserCanonicalExactExecutor, BrowserTerrainVegetationExecutor,
     TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainClipmapConfig, TerrainExactCoverageMode,
     TerrainHorizonFrameStats, TerrainHorizonRenderTarget, TerrainPreviewMaterialAtlas,
     TerrainVegetationCoordinatorState, TerrainVegetationExecutorKind,
@@ -24,8 +25,7 @@ use web_sys::{HtmlCanvasElement, UrlSearchParams};
 
 use crate::{
     ExplorerExactStats, ExplorerExactTerrain, WorldExplorerCompositionMode, WorldExplorerConfig,
-    WorldExplorerExactAnchor, WorldExplorerSession, web_exact::WebCanonicalExactExecutor,
-    web_vegetation::WebTerrainVegetationExecutor,
+    WorldExplorerExactAnchor, WorldExplorerSession,
 };
 
 const DEFAULT_SEED: i64 = 12_345;
@@ -634,12 +634,12 @@ impl WebWorldExplorer {
     ) -> Result<Self, String> {
         let options = WebExplorerOptions::parse(&search)?;
         let vegetation_executor = if options.worker_overflow_probe_enabled {
-            WebTerrainVegetationExecutor::with_initial_capacity(
+            BrowserTerrainVegetationExecutor::with_initial_capacity(
                 vegetation_worker_transport_factory,
                 1_024,
             )?
         } else {
-            WebTerrainVegetationExecutor::new(vegetation_worker_transport_factory)?
+            BrowserTerrainVegetationExecutor::new(vegetation_worker_transport_factory)?
         };
         let authored_asset_bytes = authored_bytes.to_vec();
         let provisional_asset_bytes = provisional_bytes.to_vec();
@@ -734,7 +734,7 @@ impl WebWorldExplorer {
         let exact = if options.composition == WorldExplorerCompositionMode::Horizon {
             None
         } else {
-            let executor = WebCanonicalExactExecutor::new(
+            let executor = BrowserCanonicalExactExecutor::new(
                 exact_worker_transport_factory,
                 options.seed,
                 authored_asset_bytes,

@@ -17,6 +17,8 @@ wgpu.workspace = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 js-sys.workspace = true
+serde_json.workspace = true
+wasm-bindgen.workspace = true
 
 [dev-dependencies]
 naga.workspace = true

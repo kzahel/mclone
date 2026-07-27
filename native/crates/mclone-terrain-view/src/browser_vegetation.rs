@@ -1,11 +1,11 @@
 use std::collections::VecDeque;
 
-use js_sys::{Array, Function, Int32Array, Object, Reflect, SharedArrayBuffer, Uint8Array};
-use mclone_terrain_view::{
+use crate::{
     TerrainVegetationExecutor, TerrainVegetationExecutorActor,
     TerrainVegetationExecutorDiagnostics, TerrainVegetationExecutorEvent,
     TerrainVegetationExecutorJob, TerrainVegetationExecutorKind, TerrainVegetationSubmitError,
 };
+use js_sys::{Array, Function, Int32Array, Object, Reflect, SharedArrayBuffer, Uint8Array};
 use mclone_worldgen::terrain_vegetation::{
     MCHV_MAX_RESULT_CAPACITY, MCHV_RESIDENT_RESULT_CAPACITY, MchvActorIdentity, MchvFailureKind,
     MchvFrame, MchvJobIdentity, TerrainVegetationCompileError, TerrainVegetationCompilerSession,
@@ -53,7 +53,7 @@ impl BrowserSharedResultArena {
     fn with_capacity(initial_capacity: usize) -> Result<Self, String> {
         if !shared_memory_supported() {
             return Err(
-                "World Explorer vegetation requires cross-origin isolation, SharedArrayBuffer, \
+                "runtime terrain vegetation requires cross-origin isolation, SharedArrayBuffer, \
                  and Atomics"
                     .to_owned(),
             );
@@ -249,7 +249,7 @@ impl BrowserPending {
     }
 }
 
-pub struct WebTerrainVegetationExecutor {
+pub struct BrowserTerrainVegetationExecutor {
     transport_factory: Function,
     transport: Option<JsValue>,
     arena: BrowserSharedResultArena,
@@ -261,7 +261,7 @@ pub struct WebTerrainVegetationExecutor {
     terminated: bool,
 }
 
-impl WebTerrainVegetationExecutor {
+impl BrowserTerrainVegetationExecutor {
     pub fn new(transport_factory: JsValue) -> Result<Self, String> {
         Self::with_initial_capacity(transport_factory, MCHV_RESIDENT_RESULT_CAPACITY)
     }
@@ -525,7 +525,7 @@ impl WebTerrainVegetationExecutor {
     }
 }
 
-impl TerrainVegetationExecutor for WebTerrainVegetationExecutor {
+impl TerrainVegetationExecutor for BrowserTerrainVegetationExecutor {
     fn kind(&self) -> TerrainVegetationExecutorKind {
         TerrainVegetationExecutorKind::BrowserWorker
     }
@@ -599,29 +599,29 @@ impl TerrainVegetationExecutor for WebTerrainVegetationExecutor {
     }
 }
 
-impl Drop for WebTerrainVegetationExecutor {
+impl Drop for BrowserTerrainVegetationExecutor {
     fn drop(&mut self) {
         self.terminate_transport();
     }
 }
 
-#[wasm_bindgen(js_name = WorldExplorerWorkerActor)]
+#[wasm_bindgen(js_name = TerrainVegetationWorkerActor)]
 #[derive(Default)]
-pub struct WorldExplorerWorkerActor {
+pub struct TerrainVegetationWorkerActor {
     actor: Option<MchvActorIdentity>,
     session: Option<TerrainVegetationCompilerSession>,
     terminated: bool,
 }
 
-#[wasm_bindgen(js_class = WorldExplorerWorkerActor)]
-impl WorldExplorerWorkerActor {
+#[wasm_bindgen(js_class = TerrainVegetationWorkerActor)]
+impl TerrainVegetationWorkerActor {
     #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
         Self::default()
     }
 
     #[wasm_bindgen(js_name = handleMessage)]
-    pub fn handle_message(&mut self, message: JsValue) -> WorldExplorerWorkerDispatch {
+    pub fn handle_message(&mut self, message: JsValue) -> TerrainVegetationWorkerDispatch {
         let response = self
             .handle_message_inner(&message)
             .or_else(|error| failure_from_message(&message, error));
@@ -635,7 +635,7 @@ impl WorldExplorerWorkerActor {
     }
 }
 
-impl WorldExplorerWorkerActor {
+impl TerrainVegetationWorkerActor {
     fn handle_message_inner(&mut self, message: &JsValue) -> Result<MchvFrame, String> {
         let encoded = uint8_array_property(message, FRAME_BYTES_PROPERTY)?.to_vec();
         let frame = decode_mchv_frame(&encoded)?;
@@ -725,13 +725,13 @@ impl WorldExplorerWorkerActor {
     }
 }
 
-#[wasm_bindgen(js_name = WorldExplorerWorkerDispatch)]
-pub struct WorldExplorerWorkerDispatch {
+#[wasm_bindgen(js_name = TerrainVegetationWorkerDispatch)]
+pub struct TerrainVegetationWorkerDispatch {
     message: Object,
 }
 
-#[wasm_bindgen(js_class = WorldExplorerWorkerDispatch)]
-impl WorldExplorerWorkerDispatch {
+#[wasm_bindgen(js_class = TerrainVegetationWorkerDispatch)]
+impl TerrainVegetationWorkerDispatch {
     #[wasm_bindgen(getter)]
     pub fn message(&self) -> JsValue {
         self.message.clone().into()
@@ -741,7 +741,7 @@ impl WorldExplorerWorkerDispatch {
 fn publish_frame(
     message: &JsValue,
     frame: &MchvFrame,
-) -> Result<WorldExplorerWorkerDispatch, String> {
+) -> Result<TerrainVegetationWorkerDispatch, String> {
     if !shared_memory_supported() {
         return Err("worker actor has no SharedArrayBuffer/Atomics capability".to_owned());
     }
@@ -807,7 +807,7 @@ fn publish_frame(
     if overflow {
         set_value(&dispatch, OVERFLOW_BUFFER_PROPERTY, buffer.as_ref())?;
     }
-    Ok(WorldExplorerWorkerDispatch { message: dispatch })
+    Ok(TerrainVegetationWorkerDispatch { message: dispatch })
 }
 
 fn failure_from_message(message: &JsValue, error: String) -> Result<MchvFrame, String> {
@@ -844,14 +844,14 @@ fn failed_frame(
     }
 }
 
-fn bootstrap_error_dispatch(error: String) -> WorldExplorerWorkerDispatch {
+fn bootstrap_error_dispatch(error: String) -> TerrainVegetationWorkerDispatch {
     let message = Object::new();
     let _ = set_value(
         &message,
         "error",
         &JsValue::from_str(&format!("worker bootstrap failed: {error}")),
     );
-    WorldExplorerWorkerDispatch { message }
+    TerrainVegetationWorkerDispatch { message }
 }
 
 fn mark_publication_failed(message: &JsValue) {

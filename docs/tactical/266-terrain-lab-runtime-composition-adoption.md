@@ -60,6 +60,9 @@ Completed in the first implementation commit:
   depend on World Explorer to obtain the accepted camera/depth alignment.
 - World Explorer keeps only its native/browser transport adapters and aliases
   the shared runtime types for compatibility.
+- The domain-neutral browser exact executor and vegetation executor/actor are
+  shared as well. Consumer packages retain asset loading, Worker construction,
+  and their thin exported exact Worker actor.
 - The shared crate's 73 non-GPU unit tests pass, the new Explorer ownership
   lock passes, and both the native Explorer and its Wasm library compile.
 

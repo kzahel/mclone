@@ -6,8 +6,6 @@ mod native_vegetation;
 mod web;
 #[cfg(target_arch = "wasm32")]
 mod web_exact;
-#[cfg(target_arch = "wasm32")]
-mod web_vegetation;
 
 pub use mclone_terrain_view::{
     TerrainRuntimeCompositionMode as WorldExplorerCompositionMode,

@@ -1923,6 +1923,8 @@ dependencies = [
  "mclone-worldgen",
  "naga",
  "pollster",
+ "serde_json",
+ "wasm-bindgen",
  "wgpu",
 ]
 
