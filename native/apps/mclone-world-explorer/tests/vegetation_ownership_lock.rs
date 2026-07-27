@@ -9,6 +9,7 @@ const NATIVE_TERRAIN: &str = include_str!("../src/terrain.rs");
 const WEB_HOST: &str = include_str!("../src/web.rs");
 const WEB_APP: &str = include_str!("../www/world-explorer-app.js");
 const WEB_WORKER: &str = include_str!("../www/world-explorer-worker.js");
+const WEB_EXACT_WORKER: &str = include_str!("../www/world-explorer-exact-worker.js");
 const SHARED_TRANSPORT: &str =
     include_str!("../../mclone-web-client/www/mclone-worker-transport.ts");
 const TERRAIN_VIEW_RENDERER: &str =
@@ -72,6 +73,19 @@ fn explorer_session_does_not_own_vegetation_coordination_policy() {
     assert!(WEB_APP.contains("new PolledWorkerTransport("));
     assert!(WEB_WORKER.contains("actor.handleMessage(message)"));
     assert!(WEB_WORKER.contains("self.postMessage(dispatch.message)"));
+    assert!(WEB_EXACT_WORKER.contains("actor.handleMessage(message)"));
+    for forbidden in [
+        "chunk_x",
+        "natural_trees",
+        "working_bounds",
+        "packed_sections",
+        "ownership",
+    ] {
+        assert!(
+            !WEB_EXACT_WORKER.contains(forbidden),
+            "exact Worker shell gained Rust domain policy through {forbidden:?}"
+        );
+    }
 }
 
 #[test]

@@ -12,9 +12,9 @@ use mclone_view_control::{
 use serde_json::{Map, Value, json};
 
 use crate::capture::{DepthStats, PixelStats};
-use crate::exact::ExplorerExactStats;
 use crate::options::ExplorerOptions;
 use crate::terrain::ExplorerTerrain;
+use mclone_world_explorer::ExplorerExactStats;
 use mclone_world_explorer::WorldExplorerCompositionMode;
 
 const MOVEMENT_FRAMES: u32 = 8;

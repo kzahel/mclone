@@ -490,12 +490,14 @@ async function assertNativeParity(browserInitial) {
 }
 
 function assertPresentationOnly(before, after, stage) {
-  if (after.revision !== before.revision
-      || after.totalRefills !== before.totalRefills
+  // A gesture may cross a finest-level residency key even while every
+  // physical slot remains retained. The revision is therefore not itself a
+  // fixed-allocation invariant.
+  if (after.totalRefills !== before.totalRefills
       || after.totalRebases !== before.totalRebases
       || after.allocationSlots !== before.allocationSlots) {
     throw new Error(
-      `${stage} changed residency:\n`
+      `${stage} changed fixed residency:\n`
         + `${JSON.stringify({ before, after }, null, 2)}`,
     );
   }

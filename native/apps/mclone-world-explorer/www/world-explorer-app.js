@@ -12,7 +12,8 @@ if (!(shell instanceof HTMLElement)
 
 const runtime = {
   session: null,
-  transport: null,
+  horizonTransport: null,
+  exactTransport: null,
 };
 let smokeObserver = null;
 
@@ -29,12 +30,19 @@ async function boot() {
     fetchBytes("./first-party-packs/mclone-generated-fallback.pbp"),
   ]);
   syncCanvasSize();
-  const transportFactory = () => {
-    runtime.transport = new PolledWorkerTransport(
+  const horizonTransportFactory = () => {
+    runtime.horizonTransport = new PolledWorkerTransport(
       new URL("./world-explorer-worker.js", import.meta.url),
       "mclone-world-explorer-worker",
     );
-    return runtime.transport;
+    return runtime.horizonTransport;
+  };
+  const exactTransportFactory = () => {
+    runtime.exactTransport = new PolledWorkerTransport(
+      new URL("./world-explorer-exact-worker.js", import.meta.url),
+      "mclone-world-explorer-exact-worker",
+    );
+    return runtime.exactTransport;
   };
   runtime.session = await module.mclone_world_explorer_create(
     canvas,
@@ -42,7 +50,8 @@ async function boot() {
     provisional,
     new Uint8Array(),
     globalThis.location.search,
-    transportFactory,
+    horizonTransportFactory,
+    exactTransportFactory,
   );
   await installSmokeObserverIfRequested();
   bindRawObservations();
@@ -76,7 +85,7 @@ async function installSmokeObserverIfRequested() {
   const observer = await import("./world-explorer-smoke-observer.js");
   smokeObserver = observer.installWorldExplorerSmokeObserver(
     runtime.session,
-    () => runtime.transport?.terminate(),
+    () => runtime.horizonTransport?.terminate(),
   );
 }
 

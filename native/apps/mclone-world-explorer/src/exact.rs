@@ -1,13 +1,20 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
+#[cfg(not(target_arch = "wasm32"))]
 use std::sync::mpsc::{Receiver, SyncSender, TryRecvError, TrySendError, sync_channel};
+#[cfg(not(target_arch = "wasm32"))]
 use std::thread;
+#[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
 
-use anyhow::{Context, Result, bail};
+#[cfg(not(target_arch = "wasm32"))]
+use anyhow::bail;
+use anyhow::{Context, Result};
 use mclone_core::ChunkPos;
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_mesh::TexturedMeshCatalog;
 use mclone_mesh::{
-    RenderSectionKey, TexturedMeshCatalog, TexturedRenderSectionMesh,
-    merge_textured_render_section_meshes, unpack_textured_render_sections,
+    RenderSectionKey, TexturedRenderSectionMesh, merge_textured_render_section_meshes,
+    unpack_textured_render_sections,
 };
 use mclone_render::chunk::{
     ChunkDepthTarget, ChunkRenderTarget, ChunkRenderView, ChunkTextureAtlas, ChunkTextureSampling,
@@ -16,41 +23,55 @@ use mclone_render::chunk::{
 use mclone_render_color::{RenderColorProfile, RenderTargetColorTransform, color_transform_wgpu};
 use mclone_terrain_view::{
     BoundedRepresentationOwnershipSnapshot, CanonicalMeshBatch, CanonicalMeshCoordinate,
+    CanonicalPackedAdmission, ExactPaintedCoverageSnapshot, McloneTreeOccurrenceId,
+    McloneTreeOwnershipCandidate, TERRAIN_EXACT_FRONTIER_COLLAR_BLOCKS,
+    TerrainCompositionSourceIdentity, canonical_terrain_chunk_order,
+    mclone_tree_ownership_snapshot,
+};
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_terrain_view::{
     CanonicalMeshFrontier, CanonicalMeshSession, CanonicalNaturalTreePresentation,
-    CanonicalPackedAdmission, CanonicalTerrainStage, CanonicalTerrainVisibility,
-    ExactPaintedCoverageSnapshot, McloneTreeOccurrenceId, McloneTreeOwnershipCandidate,
-    TERRAIN_EXACT_FRONTIER_COLLAR_BLOCKS, TerrainCompositionSourceIdentity,
-    canonical_terrain_chunk_order, mclone_tree_ownership_snapshot,
+    CanonicalTerrainStage, CanonicalTerrainVisibility,
 };
 use mclone_worldgen::levelgen::McloneTreeOccurrence;
 use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
 
 const EXACT_COMPILE_BATCH_CHUNKS: usize = 4;
+#[cfg(not(target_arch = "wasm32"))]
 const EXACT_COMMAND_CAPACITY: usize = 1;
+#[cfg(not(target_arch = "wasm32"))]
 const EXACT_RESULT_CAPACITY: usize = 2;
 
-struct NativeExactRequest {
-    generation: u64,
-    desired: Vec<CanonicalMeshCoordinate>,
-    requested: Vec<CanonicalMeshCoordinate>,
+pub(crate) struct CanonicalExactRequest {
+    pub generation: u64,
+    pub desired: Vec<CanonicalMeshCoordinate>,
+    pub requested: Vec<CanonicalMeshCoordinate>,
 }
 
-struct NativeExactResult {
-    generation: u64,
-    batch: Result<CanonicalMeshBatch, String>,
+pub(crate) struct CanonicalExactResult {
+    pub generation: u64,
+    pub batch: Result<CanonicalMeshBatch, String>,
 }
 
+pub(crate) trait CanonicalExactExecutor {
+    fn try_submit(&mut self, request: CanonicalExactRequest) -> Result<bool>;
+    fn poll(&mut self) -> Result<Option<CanonicalExactResult>>;
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 enum NativeExactCommand {
-    Compile(NativeExactRequest),
+    Compile(CanonicalExactRequest),
     Shutdown,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 struct NativeCanonicalExactExecutor {
     commands: SyncSender<NativeExactCommand>,
-    results: Receiver<NativeExactResult>,
+    results: Receiver<CanonicalExactResult>,
     worker: Option<thread::JoinHandle<()>>,
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 impl NativeCanonicalExactExecutor {
     fn new(seed: i64, catalog: TexturedMeshCatalog, compile_delay: Duration) -> Result<Self> {
         let (commands, command_receiver) = sync_channel(EXACT_COMMAND_CAPACITY);
@@ -79,7 +100,7 @@ impl NativeCanonicalExactExecutor {
                             }
                             let batch = session.compile_batch(&request.requested);
                             if result_sender
-                                .send(NativeExactResult {
+                                .send(CanonicalExactResult {
                                     generation: request.generation,
                                     batch,
                                 })
@@ -100,7 +121,7 @@ impl NativeCanonicalExactExecutor {
         })
     }
 
-    fn try_submit(&self, request: NativeExactRequest) -> Result<bool> {
+    fn try_submit_inner(&self, request: CanonicalExactRequest) -> Result<bool> {
         match self.commands.try_send(NativeExactCommand::Compile(request)) {
             Ok(()) => Ok(true),
             Err(TrySendError::Full(_)) => Ok(false),
@@ -110,7 +131,7 @@ impl NativeCanonicalExactExecutor {
         }
     }
 
-    fn poll(&self) -> Result<Option<NativeExactResult>> {
+    fn poll_inner(&self) -> Result<Option<CanonicalExactResult>> {
         match self.results.try_recv() {
             Ok(result) => Ok(Some(result)),
             Err(TryRecvError::Empty) => Ok(None),
@@ -121,6 +142,18 @@ impl NativeCanonicalExactExecutor {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+impl CanonicalExactExecutor for NativeCanonicalExactExecutor {
+    fn try_submit(&mut self, request: CanonicalExactRequest) -> Result<bool> {
+        self.try_submit_inner(request)
+    }
+
+    fn poll(&mut self) -> Result<Option<CanonicalExactResult>> {
+        self.poll_inner()
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 impl Drop for NativeCanonicalExactExecutor {
     fn drop(&mut self) {
         let _ = self.commands.try_send(NativeExactCommand::Shutdown);
@@ -166,7 +199,7 @@ pub struct ExplorerExactTerrain {
     draw: TexturedSectionDrawResources,
     tree_draw: TexturedSectionDrawResources,
     depth: ChunkDepthTarget,
-    executor: NativeCanonicalExactExecutor,
+    executor: Box<dyn CanonicalExactExecutor>,
     source: TerrainCompositionSourceIdentity,
     radius: u32,
     generation: u64,
@@ -195,6 +228,7 @@ pub struct ExplorerExactTerrain {
 
 impl ExplorerExactTerrain {
     #[allow(clippy::too_many_arguments)]
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
@@ -209,6 +243,33 @@ impl ExplorerExactTerrain {
         target_color_transform: RenderTargetColorTransform,
     ) -> Result<Self> {
         let executor = NativeCanonicalExactExecutor::new(seed, catalog.clone(), compile_delay)?;
+        Self::new_with_executor(
+            device,
+            queue,
+            color_format,
+            width,
+            height,
+            seed,
+            radius,
+            Box::new(executor),
+            atlas,
+            target_color_transform,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new_with_executor(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        color_format: wgpu::TextureFormat,
+        width: u32,
+        height: u32,
+        seed: i64,
+        radius: u32,
+        executor: Box<dyn CanonicalExactExecutor>,
+        atlas: ChunkTextureAtlas<'_>,
+        target_color_transform: RenderTargetColorTransform,
+    ) -> Result<Self> {
         let tree_atlas = ChunkTextureAtlas {
             width: atlas.width,
             height: atlas.height,
@@ -579,7 +640,7 @@ impl ExplorerExactTerrain {
             .iter()
             .map(|position| CanonicalMeshCoordinate::new(position.x, position.z))
             .collect();
-        let request = NativeExactRequest {
+        let request = CanonicalExactRequest {
             generation: self.generation,
             desired,
             requested,

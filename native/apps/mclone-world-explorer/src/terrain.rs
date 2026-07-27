@@ -19,11 +19,10 @@ use mclone_terrain_view::{
 };
 use mclone_view_control::{WorldViewHeldDirection, WorldViewIntent, WorldViewState};
 use mclone_world_explorer::{
-    NativeTerrainVegetationExecutor, WorldExplorerCompositionMode, WorldExplorerConfig,
-    WorldExplorerSession,
+    ExplorerExactStats, ExplorerExactTerrain, NativeTerrainVegetationExecutor,
+    WorldExplorerCompositionMode, WorldExplorerConfig, WorldExplorerSession,
 };
 
-use crate::exact::{ExplorerExactStats, ExplorerExactTerrain};
 use crate::options::{ExplorerAssetProfile, ExplorerOptions};
 
 pub struct ExplorerTerrain {

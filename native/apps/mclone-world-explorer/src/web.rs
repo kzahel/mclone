@@ -7,10 +7,12 @@ use mclone_assets::{
 };
 use mclone_core::BlockStateId;
 use mclone_mesh::load_first_party_textured_terrain_assets_with_presentation;
+use mclone_render::chunk::ChunkTextureAtlas;
 use mclone_render_color::{RenderColorProfile, RenderTargetColorTransform};
 use mclone_terrain_view::{
-    TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainClipmapConfig, TerrainHorizonFrameStats,
-    TerrainPreviewMaterialAtlas, TerrainVegetationCoordinatorState, TerrainVegetationExecutorKind,
+    TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainClipmapConfig, TerrainExactCoverageMode,
+    TerrainHorizonFrameStats, TerrainHorizonRenderTarget, TerrainPreviewMaterialAtlas,
+    TerrainVegetationCoordinatorState, TerrainVegetationExecutorKind,
 };
 use mclone_view_control::{
     ContactButton, ContactEvent, ViewPoint, ViewportMetrics, WorldViewHeldDirection,
@@ -21,11 +23,14 @@ use wasm_bindgen::{JsValue, prelude::wasm_bindgen};
 use web_sys::{HtmlCanvasElement, UrlSearchParams};
 
 use crate::{
-    WorldExplorerConfig, WorldExplorerSession, web_vegetation::WebTerrainVegetationExecutor,
+    ExplorerExactStats, ExplorerExactTerrain, WorldExplorerCompositionMode, WorldExplorerConfig,
+    WorldExplorerSession, web_exact::WebCanonicalExactExecutor,
+    web_vegetation::WebTerrainVegetationExecutor,
 };
 
 const DEFAULT_SEED: i64 = 12_345;
 const DEFAULT_BLOCKS_ACROSS: u32 = 4_096;
+const DEFAULT_EXACT_RADIUS: u32 = 2;
 
 #[derive(Clone, Copy, Debug)]
 struct WebExplorerOptions {
@@ -37,6 +42,8 @@ struct WebExplorerOptions {
     projection: WorldViewProjection,
     yaw_radians: f64,
     pitch_radians: f64,
+    composition: WorldExplorerCompositionMode,
+    exact_radius: u32,
     diagnostic_observer_enabled: bool,
     worker_overflow_probe_enabled: bool,
 }
@@ -52,6 +59,8 @@ impl Default for WebExplorerOptions {
             projection: WorldViewProjection::Perspective,
             yaw_radians: std::f64::consts::FRAC_PI_4,
             pitch_radians: 0.52,
+            composition: WorldExplorerCompositionMode::Horizon,
+            exact_radius: DEFAULT_EXACT_RADIUS,
             diagnostic_observer_enabled: false,
             worker_overflow_probe_enabled: false,
         }
@@ -70,6 +79,13 @@ impl WebExplorerOptions {
             parse_parameter(&parameters, "blocksAcross", options.blocks_across)?;
         options.yaw_radians = parse_parameter(&parameters, "yaw", options.yaw_radians)?;
         options.pitch_radians = parse_parameter(&parameters, "pitch", options.pitch_radians)?;
+        options.exact_radius = parse_parameter(&parameters, "exactRadius", options.exact_radius)?;
+        if options.exact_radius > 8 {
+            return Err("World Explorer exactRadius must be at most 8 chunks".to_owned());
+        }
+        if let Some(value) = parameters.get("composition") {
+            options.composition = WorldExplorerCompositionMode::parse_label(&value)?;
+        }
         options.diagnostic_observer_enabled =
             parameters.get("smokeObserver").as_deref() == Some("1");
         options.worker_overflow_probe_enabled =
@@ -127,6 +143,33 @@ struct WebExplorerReport {
     color_transform: &'static str,
     yaw_radians: f64,
     pitch_radians: f64,
+    composition: &'static str,
+    exact_radius: u32,
+    exact_anchor_x: i32,
+    exact_anchor_z: i32,
+    exact_desired_chunks: u32,
+    exact_painted_chunks: u32,
+    exact_queued_chunks: u32,
+    exact_pending_admissions: u32,
+    exact_in_flight: bool,
+    exact_coverage_generation: u64,
+    exact_admitted_chunks_total: u64,
+    exact_stale_chunks_total: u64,
+    exact_resident_mesh_bytes: u64,
+    exact_vertex_count: u32,
+    exact_index_count: u32,
+    exact_drawn_sections: u32,
+    exact_drawn_indices: u32,
+    exact_natural_tree_records: u32,
+    canonical_exact_owned_tree_records: u32,
+    canonical_proxy_owned_tree_records: u32,
+    exact_tree_sections: u32,
+    exact_tree_indices: u32,
+    exact_complete: bool,
+    exact_coverage_mode: &'static str,
+    procedural_coverage_generation: u64,
+    procedural_painted_chunks: u32,
+    exact_coverage_mask_bytes: u64,
     allocation_slots: u32,
     staging_slots: u32,
     normal_halo_radius: u32,
@@ -228,6 +271,11 @@ pub struct WebWorldExplorer {
     seed: i64,
     frame_epoch_ms: Option<f64>,
     session: WorldExplorerSession,
+    composition: WorldExplorerCompositionMode,
+    exact_radius: u32,
+    exact: Option<ExplorerExactTerrain>,
+    last_exact_stats: ExplorerExactStats,
+    last_exact_anchor: [i32; 2],
     diagnostic_observer_enabled: bool,
     last_diagnostic_report: Option<WebExplorerReport>,
 }
@@ -255,6 +303,9 @@ impl WebWorldExplorer {
             ),
         );
         self.session.resize(&self.device, width, height);
+        if let Some(exact) = &mut self.exact {
+            exact.resize(&self.device, width, height);
+        }
     }
 
     #[wasm_bindgen(js_name = renderFrame)]
@@ -280,16 +331,30 @@ impl WebWorldExplorer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("mclone_world_explorer_web_frame"),
             });
-        let stats = self
-            .session
-            .encode(
-                &self.device,
-                &self.queue,
-                &mut encoder,
-                &color_view,
-                elapsed,
-            )
-            .map_err(js_error)?;
+        let mut stats = if self.composition == WorldExplorerCompositionMode::Horizon {
+            self.session.restore_horizon_view();
+            self.session
+                .encode(
+                    &self.device,
+                    &self.queue,
+                    &mut encoder,
+                    &color_view,
+                    elapsed,
+                )
+                .map_err(js_error)?
+        } else {
+            self.encode_composed(&mut encoder, &color_view, elapsed)
+                .map_err(js_error)?
+        };
+        if self.composition != WorldExplorerCompositionMode::Horizon {
+            self.last_exact_stats = self
+                .exact
+                .as_ref()
+                .expect("non-horizon browser composition owns exact terrain")
+                .stats();
+            stats.target_ready &= self.last_exact_stats.complete;
+            stats.needs_redraw |= !self.last_exact_stats.complete;
+        }
         if self.diagnostic_observer_enabled {
             self.last_diagnostic_report = Some(explorer_report(
                 self.seed,
@@ -299,6 +364,10 @@ impl WebWorldExplorer {
                 self.session.color_profile(),
                 self.session.color_format(),
                 self.session.target_color_transform(),
+                self.composition,
+                self.exact_radius,
+                self.last_exact_anchor,
+                self.last_exact_stats,
             ));
         }
         self.queue.submit(std::iter::once(encoder.finish()));
@@ -392,6 +461,7 @@ impl WebWorldExplorer {
 
     pub fn shutdown(&mut self) {
         self.session.shutdown();
+        self.exact = None;
     }
 
     #[wasm_bindgen(js_name = shutdownComplete)]
@@ -459,24 +529,103 @@ impl WebWorldExplorer {
 }
 
 impl WebWorldExplorer {
+    fn encode_composed(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        color_view: &wgpu::TextureView,
+        elapsed: Duration,
+    ) -> Result<TerrainHorizonFrameStats, String> {
+        let exact_view = self.session.exact_composition_view(self.exact_radius)?;
+        self.session.apply_exact_composition_view(exact_view);
+        self.last_exact_anchor = exact_view.residency_anchor;
+        let exact = self
+            .exact
+            .as_mut()
+            .ok_or("non-horizon browser composition has no exact renderer")?;
+        exact
+            .update_and_pump(
+                &self.device,
+                exact_view.residency_anchor[0],
+                exact_view.residency_anchor[1],
+            )
+            .map_err(|error| error.to_string())?;
+        let coverage = exact.coverage_snapshot()?;
+        let coverage_mode = match self.composition {
+            WorldExplorerCompositionMode::Composed => {
+                Some((&coverage, TerrainExactCoverageMode::DiscardPainted))
+            }
+            WorldExplorerCompositionMode::Coverage => {
+                Some((&coverage, TerrainExactCoverageMode::VisualizePainted))
+            }
+            WorldExplorerCompositionMode::Horizon | WorldExplorerCompositionMode::Exact => None,
+        };
+        let tree_ownership = matches!(
+            self.composition,
+            WorldExplorerCompositionMode::Composed | WorldExplorerCompositionMode::Coverage
+        )
+        .then_some(exact.tree_ownership());
+        let mut stats = self.session.encode_to_target(
+            &self.device,
+            &self.queue,
+            encoder,
+            TerrainHorizonRenderTarget {
+                color_view,
+                depth_view: &exact.depth().view,
+                color_load: wgpu::LoadOp::Clear(exact.clear_color()),
+                color_store: wgpu::StoreOp::Store,
+                depth_load: wgpu::LoadOp::Clear(0.0),
+                depth_store: wgpu::StoreOp::Store,
+            },
+            elapsed,
+            coverage_mode,
+            tree_ownership,
+        )?;
+        if matches!(
+            self.composition,
+            WorldExplorerCompositionMode::Exact | WorldExplorerCompositionMode::Composed
+        ) {
+            exact
+                .render(
+                    &self.queue,
+                    encoder,
+                    color_view,
+                    exact_view.render_view,
+                    [self.width, self.height],
+                    self.composition == WorldExplorerCompositionMode::Composed,
+                )
+                .map_err(|error| error.to_string())?;
+        }
+        let exact_stats = exact.stats();
+        stats.target_ready &= exact_stats.complete;
+        stats.needs_redraw |= !exact_stats.complete;
+        Ok(stats)
+    }
+
     async fn new(
         canvas: HtmlCanvasElement,
         authored_bytes: js_sys::Uint8Array,
         provisional_bytes: js_sys::Uint8Array,
         diagnostic_bytes: js_sys::Uint8Array,
         search: String,
-        worker_transport_factory: JsValue,
+        vegetation_worker_transport_factory: JsValue,
+        exact_worker_transport_factory: JsValue,
     ) -> Result<Self, String> {
         let options = WebExplorerOptions::parse(&search)?;
         let vegetation_executor = if options.worker_overflow_probe_enabled {
-            WebTerrainVegetationExecutor::with_initial_capacity(worker_transport_factory, 1_024)?
+            WebTerrainVegetationExecutor::with_initial_capacity(
+                vegetation_worker_transport_factory,
+                1_024,
+            )?
         } else {
-            WebTerrainVegetationExecutor::new(worker_transport_factory)?
+            WebTerrainVegetationExecutor::new(vegetation_worker_transport_factory)?
         };
+        let authored_asset_bytes = authored_bytes.to_vec();
+        let provisional_asset_bytes = provisional_bytes.to_vec();
+        let diagnostic_asset_bytes = diagnostic_bytes.to_vec();
         let assets = load_web_assets(
-            authored_bytes.to_vec(),
-            provisional_bytes.to_vec(),
-            diagnostic_bytes.to_vec(),
+            authored_asset_bytes.clone(),
+            provisional_asset_bytes.clone(),
+            diagnostic_asset_bytes.clone(),
         )?;
         let mut material_uvs = [[0.0_f32, 0.0, 1.0, 1.0]; TERRAIN_PREVIEW_MATERIAL_UV_COUNT];
         for (raw_id, target) in material_uvs.iter_mut().enumerate() {
@@ -528,8 +677,10 @@ impl WebWorldExplorer {
             .unwrap_or(wgpu::PresentMode::Fifo);
         let alpha_mode = capabilities
             .alpha_modes
-            .first()
+            .iter()
             .copied()
+            .find(|mode| *mode == wgpu::CompositeAlphaMode::Opaque)
+            .or_else(|| capabilities.alpha_modes.first().copied())
             .unwrap_or(wgpu::CompositeAlphaMode::Auto);
         surface.configure(
             &device,
@@ -558,6 +709,36 @@ impl WebWorldExplorer {
             },
             Some(Box::new(vegetation_executor)),
         )?;
+        let exact = if options.composition == WorldExplorerCompositionMode::Horizon {
+            None
+        } else {
+            let executor = WebCanonicalExactExecutor::new(
+                exact_worker_transport_factory,
+                options.seed,
+                authored_asset_bytes,
+                provisional_asset_bytes,
+                diagnostic_asset_bytes,
+            )?;
+            Some(
+                ExplorerExactTerrain::new_with_executor(
+                    &device,
+                    &queue,
+                    format,
+                    width,
+                    height,
+                    options.seed,
+                    options.exact_radius,
+                    Box::new(executor),
+                    ChunkTextureAtlas {
+                        width: assets.atlas.width,
+                        height: assets.atlas.height,
+                        rgba: assets.atlas.rgba(),
+                    },
+                    RenderColorProfile::Vanilla.target_color_transform(format),
+                )
+                .map_err(|error| error.to_string())?,
+            )
+        };
         if let Some(error) = device.pop_error_scope().await {
             return Err(format!(
                 "failed to initialize World Explorer GPU pipelines: {error}"
@@ -577,6 +758,11 @@ impl WebWorldExplorer {
             seed: options.seed,
             frame_epoch_ms: None,
             session,
+            composition: options.composition,
+            exact_radius: options.exact_radius,
+            exact,
+            last_exact_stats: ExplorerExactStats::default(),
+            last_exact_anchor: [options.center_x, options.center_z],
             diagnostic_observer_enabled: options.diagnostic_observer_enabled,
             last_diagnostic_report: None,
         })
@@ -590,7 +776,8 @@ pub fn mclone_world_explorer_create(
     provisional_bytes: js_sys::Uint8Array,
     diagnostic_bytes: js_sys::Uint8Array,
     search: String,
-    worker_transport_factory: JsValue,
+    vegetation_worker_transport_factory: JsValue,
+    exact_worker_transport_factory: JsValue,
 ) -> js_sys::Promise {
     wasm_bindgen_futures::future_to_promise(async move {
         WebWorldExplorer::new(
@@ -599,7 +786,8 @@ pub fn mclone_world_explorer_create(
             provisional_bytes,
             diagnostic_bytes,
             search,
-            worker_transport_factory,
+            vegetation_worker_transport_factory,
+            exact_worker_transport_factory,
         )
         .await
         .map(JsValue::from)
@@ -614,7 +802,7 @@ pub fn start() {
     }));
 }
 
-fn load_web_assets(
+pub(crate) fn load_web_assets(
     authored_bytes: Vec<u8>,
     provisional_bytes: Vec<u8>,
     diagnostic_bytes: Vec<u8>,
@@ -655,6 +843,10 @@ fn explorer_report(
     color_profile: RenderColorProfile,
     color_format: wgpu::TextureFormat,
     color_transform: RenderTargetColorTransform,
+    composition: WorldExplorerCompositionMode,
+    exact_radius: u32,
+    exact_anchor: [i32; 2],
+    exact: ExplorerExactStats,
 ) -> WebExplorerReport {
     WebExplorerReport {
         revision: stats.revision,
@@ -678,6 +870,33 @@ fn explorer_report(
         color_transform: color_transform.as_str(),
         yaw_radians: state.yaw_radians,
         pitch_radians: state.pitch_radians,
+        composition: composition.label(),
+        exact_radius,
+        exact_anchor_x: exact_anchor[0],
+        exact_anchor_z: exact_anchor[1],
+        exact_desired_chunks: exact.desired_chunks,
+        exact_painted_chunks: exact.painted_chunks,
+        exact_queued_chunks: exact.queued_chunks,
+        exact_pending_admissions: exact.pending_admissions,
+        exact_in_flight: exact.in_flight,
+        exact_coverage_generation: exact.coverage_generation,
+        exact_admitted_chunks_total: exact.admitted_chunks_total,
+        exact_stale_chunks_total: exact.stale_chunks_total,
+        exact_resident_mesh_bytes: exact.resident_mesh_bytes,
+        exact_vertex_count: exact.vertex_count,
+        exact_index_count: exact.index_count,
+        exact_drawn_sections: exact.drawn_sections,
+        exact_drawn_indices: exact.drawn_indices,
+        exact_natural_tree_records: exact.natural_tree_records,
+        canonical_exact_owned_tree_records: exact.exact_owned_tree_records,
+        canonical_proxy_owned_tree_records: exact.proxy_owned_tree_records,
+        exact_tree_sections: exact.exact_tree_sections,
+        exact_tree_indices: exact.exact_tree_indices,
+        exact_complete: exact.complete,
+        exact_coverage_mode: coverage_mode_label(stats.exact_coverage_mode),
+        procedural_coverage_generation: stats.exact_coverage_generation,
+        procedural_painted_chunks: stats.exact_painted_chunks,
+        exact_coverage_mask_bytes: stats.exact_coverage_mask_bytes,
         allocation_slots: stats.allocation_slots,
         staging_slots: stats.staging_slots,
         normal_halo_radius: stats.normal_halo_radius,
@@ -795,6 +1014,14 @@ const fn executor_kind_label(kind: Option<TerrainVegetationExecutorKind>) -> &'s
         Some(TerrainVegetationExecutorKind::InlineTest) => "inline-test",
         Some(TerrainVegetationExecutorKind::NativeThread) => "native-thread",
         Some(TerrainVegetationExecutorKind::BrowserWorker) => "browser-worker",
+    }
+}
+
+const fn coverage_mode_label(mode: TerrainExactCoverageMode) -> &'static str {
+    match mode {
+        TerrainExactCoverageMode::Disabled => "disabled",
+        TerrainExactCoverageMode::DiscardPainted => "discard-painted",
+        TerrainExactCoverageMode::VisualizePainted => "visualize-painted",
     }
 }
 
