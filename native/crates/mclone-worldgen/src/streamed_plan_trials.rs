@@ -8,18 +8,22 @@ use std::collections::BTreeMap;
 
 use mclone_core::BlockPos;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 
+use crate::streamed_plan_feature_graph_trial::{FeatureGraphTrialReceipt, run_feature_graph_trial};
 use crate::streamed_plan_harness::{
-    HarnessCachePolicy, HarnessComparisonExpectation, HarnessComparisonReceipt,
-    HarnessDependencyClaim, HarnessRunSpec, PlanRegion, STREAMED_PLAN_BASE_REGION_BLOCKS,
-    STREAMED_PLAN_PHASE_ONE_SEEDS, StreamedFactId, StreamedPlanControl, StreamedPlanDescriptor,
-    StreamedPlanRequest, StreamedPlanSnapshot, StreamedPlanTopology, StreamedSemanticFact,
-    alternating_targets, canonical_targets, center_out_targets, comparison_corpus_sha256,
-    execute_harness_case, outside_in_targets, random_targets, requests_with_center,
-    reverse_targets, two_front_targets,
+    CoordinatePureControl, FALLBACK_CONTROL_REVISION, HarnessCachePolicy,
+    HarnessComparisonExpectation, HarnessComparisonReceipt, HarnessDependencyClaim, HarnessRunSpec,
+    PlanRegion, STREAMED_PLAN_BASE_REGION_BLOCKS, STREAMED_PLAN_PHASE_ONE_SEEDS, StreamedFactId,
+    StreamedPlanControl, StreamedPlanDescriptor, StreamedPlanRequest, StreamedPlanSnapshot,
+    StreamedPlanTopology, StreamedSemanticFact, alternating_targets, canonical_targets,
+    center_out_targets, comparison_corpus_sha256, execute_harness_case, outside_in_targets,
+    random_targets, requests_with_center, reverse_targets, two_front_targets,
 };
 
 pub const STREAMED_PLAN_PHASE_TWO_SCHEMA_REVISION: &str = "mclone-streamed-plan-phase2-receipt-v1";
+pub const STREAMED_PLAN_PHASE_TWO_WITNESS_SHA256: &str =
+    "d3dfa82df7de1a6c9e1d24f97b7f824b640c181cecd6295e86180344a2c081bd";
 pub const HIERARCHICAL_CANDIDATE_REVISION: &str = "hierarchical-shared-boundary-facts-trial-v1";
 
 const HIERARCHY_MID_BLOCKS: i32 = 3_072;
@@ -31,6 +35,158 @@ const HIERARCHY_MID_KIND: u16 = 301;
 const HIERARCHY_VERTICAL_FACET_KIND: u16 = 302;
 const HIERARCHY_HORIZONTAL_FACET_KIND: u16 = 303;
 const HIERARCHY_REGION_KIND: u16 = 304;
+
+#[derive(Clone, Debug, Serialize)]
+pub struct PhaseTwoFallbackReceipt {
+    pub candidate_revision: &'static str,
+    pub research_only: bool,
+    pub geography_quality_measured: bool,
+    pub dependency_claim: HarnessDependencyClaim,
+    pub comparisons: Vec<HarnessComparisonReceipt>,
+    pub comparison_corpus_sha256: String,
+    pub exact_comparison_count: u32,
+    pub suite_passed: bool,
+}
+
+#[derive(Clone, Debug, Serialize)]
+pub struct StreamedPlanPhaseTwoReceipt {
+    pub receipt_schema: &'static str,
+    pub research_only: bool,
+    pub production_terrain_unchanged: bool,
+    pub candidate_d_implemented: bool,
+    pub reconstruction_measured: bool,
+    pub cost_timing_measured: bool,
+    pub fallback: PhaseTwoFallbackReceipt,
+    pub hierarchical: HierarchicalTrialReceipt,
+    pub feature_graph: FeatureGraphTrialReceipt,
+    pub exact_comparison_count: u32,
+    pub phase_two_witness_sha256: String,
+    pub suite_passed: bool,
+    pub artifacts: Vec<String>,
+}
+
+pub fn run_streamed_plan_phase_two_suite() -> Result<StreamedPlanPhaseTwoReceipt, String> {
+    let fallback_comparisons = run_candidate_invariance_suite::<CoordinatePureControl>()?;
+    let fallback = PhaseTwoFallbackReceipt {
+        candidate_revision: FALLBACK_CONTROL_REVISION,
+        research_only: true,
+        geography_quality_measured: false,
+        dependency_claim: HarnessDependencyClaim {
+            control: FALLBACK_CONTROL_REVISION,
+            maximum_depth: 1,
+            maximum_provider_fanout: 1,
+            maximum_owner_radius_blocks: 8,
+            maximum_point_lookup_traversal_steps: 0,
+            undeclared_fetch_count: 0,
+            note: "coordinate-pure samples plus one bounded canonical feature owner",
+        },
+        comparison_corpus_sha256: comparison_corpus_sha256(&fallback_comparisons),
+        exact_comparison_count: fallback_comparisons.len() as u32,
+        suite_passed: fallback_comparisons
+            .iter()
+            .all(|comparison| comparison.passed),
+        comparisons: fallback_comparisons,
+    };
+    let hierarchical = run_hierarchical_trial()?;
+    let feature_graph = run_feature_graph_trial()?;
+    let exact_comparison_count = fallback
+        .exact_comparison_count
+        .saturating_add(hierarchical.exact_comparison_count)
+        .saturating_add(feature_graph.exact_comparison_count);
+    let phase_two_witness_sha256 =
+        phase_two_witness_sha256(&fallback, &hierarchical, &feature_graph);
+    let suite_passed =
+        fallback.suite_passed && hierarchical.suite_passed && feature_graph.suite_passed;
+    Ok(StreamedPlanPhaseTwoReceipt {
+        receipt_schema: STREAMED_PLAN_PHASE_TWO_SCHEMA_REVISION,
+        research_only: true,
+        production_terrain_unchanged: true,
+        candidate_d_implemented: false,
+        reconstruction_measured: false,
+        cost_timing_measured: false,
+        fallback,
+        hierarchical,
+        feature_graph,
+        exact_comparison_count,
+        phase_two_witness_sha256,
+        suite_passed,
+        artifacts: Vec::new(),
+    })
+}
+
+fn phase_two_witness_sha256(
+    fallback: &PhaseTwoFallbackReceipt,
+    hierarchical: &HierarchicalTrialReceipt,
+    feature_graph: &FeatureGraphTrialReceipt,
+) -> String {
+    let mut bytes = Vec::new();
+    write_string(&mut bytes, STREAMED_PLAN_PHASE_TWO_SCHEMA_REVISION);
+    write_string(&mut bytes, fallback.candidate_revision);
+    write_string(&mut bytes, &fallback.comparison_corpus_sha256);
+    write_u32(&mut bytes, fallback.exact_comparison_count);
+    bytes.push(fallback.suite_passed as u8);
+
+    write_string(&mut bytes, hierarchical.candidate_revision);
+    write_string(&mut bytes, &hierarchical.comparison_corpus_sha256);
+    write_u32(&mut bytes, hierarchical.exact_comparison_count);
+    for boundary in &hierarchical.boundaries {
+        write_i64(&mut bytes, boundary.seed);
+        bytes.push(topology_tag(boundary.topology));
+        write_u32(&mut bytes, boundary.expected_shared_facets);
+        write_u32(&mut bytes, boundary.observed_shared_facets);
+        write_u32(&mut bytes, boundary.exact_mismatch_count);
+        write_u32(&mut bytes, boundary.maximum_observers_per_fact);
+        bytes.push(boundary.passed as u8);
+    }
+    bytes.push(hierarchical.suite_passed as u8);
+
+    write_string(&mut bytes, feature_graph.candidate_revision);
+    write_string(&mut bytes, &feature_graph.comparison_corpus_sha256);
+    write_u32(&mut bytes, feature_graph.exact_comparison_count);
+    write_u32(
+        &mut bytes,
+        feature_graph.maximum_feature_reach_blocks as u32,
+    );
+    for corpus in &feature_graph.corpora {
+        write_i64(&mut bytes, corpus.seed);
+        bytes.push(topology_tag(corpus.topology));
+        write_u32(&mut bytes, corpus.unique_graph_count);
+        write_u32(&mut bytes, corpus.crossing_graph_count);
+        write_u32(&mut bytes, corpus.seam_crossing_graph_count);
+        write_u32(&mut bytes, corpus.explicit_sink_count);
+        write_u32(&mut bytes, corpus.cycle_count);
+        write_u32(&mut bytes, corpus.incomplete_graph_count);
+        write_u32(&mut bytes, corpus.exact_observation_mismatch_count);
+        write_u32(&mut bytes, corpus.maximum_actual_reach_blocks);
+        write_u32(&mut bytes, corpus.maximum_owner_cells_examined);
+        write_u32(&mut bytes, corpus.maximum_facts_per_plan);
+        bytes.push(corpus.passed as u8);
+    }
+    bytes.push(feature_graph.suite_passed as u8);
+    let digest = Sha256::digest(bytes);
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn write_string(bytes: &mut Vec<u8>, value: &str) {
+    write_u32(bytes, value.len() as u32);
+    bytes.extend_from_slice(value.as_bytes());
+}
+
+fn write_u32(bytes: &mut Vec<u8>, value: u32) {
+    bytes.extend_from_slice(&value.to_le_bytes());
+}
+
+fn write_i64(bytes: &mut Vec<u8>, value: i64) {
+    bytes.extend_from_slice(&value.to_le_bytes());
+}
+
+fn topology_tag(topology: StreamedPlanTopology) -> u8 {
+    match topology {
+        StreamedPlanTopology::Plane => 0,
+        StreamedPlanTopology::CylinderX => 1,
+        StreamedPlanTopology::Torus => 2,
+    }
+}
 
 #[derive(Clone, Debug, Serialize)]
 pub struct HierarchicalBoundaryReceipt {
@@ -613,5 +769,19 @@ mod tests {
                 && boundary.exact_mismatch_count == 0
                 && boundary.maximum_observers_per_fact == 2
         }));
+    }
+
+    #[test]
+    fn phase_two_suite_compares_both_candidates_with_the_fallback() {
+        let receipt = run_streamed_plan_phase_two_suite().expect("Phase 2 suite");
+        assert!(receipt.suite_passed);
+        assert_eq!(receipt.exact_comparison_count, 315);
+        assert_eq!(
+            receipt.phase_two_witness_sha256,
+            STREAMED_PLAN_PHASE_TWO_WITNESS_SHA256
+        );
+        assert!(!receipt.candidate_d_implemented);
+        assert!(!receipt.reconstruction_measured);
+        assert!(!receipt.cost_timing_measured);
     }
 }

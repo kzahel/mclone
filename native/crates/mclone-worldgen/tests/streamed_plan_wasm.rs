@@ -4,6 +4,9 @@ use mclone_worldgen::streamed_plan_harness::{
     STREAMED_PLAN_PHASE_ONE_COMPARISON_SHA256, STREAMED_PLAN_PHASE_ONE_FALLBACK_SHA256,
     coordinate_pure_corpus_sha256, run_streamed_plan_phase_one_suite,
 };
+use mclone_worldgen::streamed_plan_trials::{
+    STREAMED_PLAN_PHASE_TWO_WITNESS_SHA256, run_streamed_plan_phase_two_suite,
+};
 use wasm_bindgen_test::wasm_bindgen_test;
 
 #[wasm_bindgen_test]
@@ -21,5 +24,15 @@ fn full_phase_one_comparison_corpus_matches_native() {
     assert_eq!(
         receipt.comparison_corpus_sha256,
         STREAMED_PLAN_PHASE_ONE_COMPARISON_SHA256
+    );
+}
+
+#[wasm_bindgen_test]
+fn full_phase_two_candidate_corpus_matches_native() {
+    let receipt = run_streamed_plan_phase_two_suite().expect("Phase 2 suite");
+    assert!(receipt.suite_passed);
+    assert_eq!(
+        receipt.phase_two_witness_sha256,
+        STREAMED_PLAN_PHASE_TWO_WITNESS_SHA256
     );
 }

@@ -32,7 +32,7 @@ pub const STREAMED_PLAN_PHASE_ONE_FALLBACK_SHA256: &str =
 pub const STREAMED_PLAN_PHASE_ONE_COMPARISON_SHA256: &str =
     "2f7bd2f9fb3e54fe9cf66900e32ca985a5de7fbba1a6d0ca379678b9c5eafc12";
 
-const FALLBACK_CONTROL_REVISION: &str = "coordinate-pure-bounded-start-control-v1";
+pub(crate) const FALLBACK_CONTROL_REVISION: &str = "coordinate-pure-bounded-start-control-v1";
 const FIXED_WINDOW_CONTROL_REVISION: &str = "fixed-bounded-landform-control-v1";
 const RECENTER_CONTROL_REVISION: &str = "recentered-landform-negative-control-v1";
 const DISCOVERY_CONTROL_REVISION: &str = "discovery-state-negative-control-v1";
@@ -1112,8 +1112,8 @@ fn phase_one_dependency_claims() -> Vec<HarnessDependencyClaim> {
     ]
 }
 
-#[derive(Clone, Copy, Debug)]
-struct CoordinatePureControl;
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) struct CoordinatePureControl;
 
 impl StreamedPlanControl for CoordinatePureControl {
     fn candidate_revision(&self) -> &'static str {

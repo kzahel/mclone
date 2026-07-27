@@ -297,17 +297,17 @@ impl OwnedFeatureGraph {
         let target_min_z = i64::from(target.min_block_z());
         let target_max_x = target_min_x + i64::from(STREAMED_PLAN_BASE_REGION_BLOCKS);
         let target_max_z = target_min_z + i64::from(STREAMED_PLAN_BASE_REGION_BLOCKS);
-        let observer_x = target_min_x as f64 + f64::from(STREAMED_PLAN_BASE_REGION_BLOCKS) * 0.5;
-        let observer_z = target_min_z as f64 + f64::from(STREAMED_PLAN_BASE_REGION_BLOCKS) * 0.5;
+        let observer_x = target.min_block_x() + STREAMED_PLAN_BASE_REGION_BLOCKS / 2;
+        let observer_z = target.min_block_z() + STREAMED_PLAN_BASE_REGION_BLOCKS / 2;
         let topology = descriptor.topology.horizontal();
-        let anchor_x = topology
-            .x
-            .nearest_position_lift(f64::from(self.canonical_anchor.x), observer_x)
-            .round() as i64;
-        let anchor_z = topology
-            .z
-            .nearest_position_lift(f64::from(self.canonical_anchor.z), observer_z)
-            .round() as i64;
+        let anchor_x = i64::from(observer_x)
+            + topology
+                .x
+                .shortest_block_displacement(observer_x, self.canonical_anchor.x);
+        let anchor_z = i64::from(observer_z)
+            + topology
+                .z
+                .shortest_block_displacement(observer_z, self.canonical_anchor.z);
         let graph_min_x = anchor_x + i64::from(self.minimum_offset_x);
         let graph_max_x = anchor_x + i64::from(self.maximum_offset_x);
         let graph_min_z = anchor_z + i64::from(self.minimum_offset_z);
@@ -541,7 +541,8 @@ fn typed_hash(seed: i64, domain: u16, x: i64, z: i64) -> u64 {
 }
 
 fn signed_bucket(hash: u64, magnitude: i32) -> i32 {
-    (hash % (u64::try_from(magnitude).unwrap_or(0) * 2 + 1)) as i32 - magnitude
+    debug_assert!(magnitude >= 0);
+    (hash % (magnitude as u64 * 2 + 1)) as i32 - magnitude
 }
 
 fn stable_mix64(mut value: u64) -> u64 {
