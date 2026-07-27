@@ -8,6 +8,7 @@ import type {
   SemanticTerrainCorrectionMetrics,
   SemanticTerrainDetailMetrics,
   SemanticTerrainGuide,
+  SemanticTerrainWorkerQuery,
   SemanticTerrainWorkerResponse,
   SemanticTerrainWorkerSummary,
 } from "./semantic-terrain-worker-protocol";
@@ -73,10 +74,18 @@ export function SemanticTerrainCanvas({
   onError,
 }: SemanticTerrainCanvasProps): React.JSX.Element {
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const drawBufferRef = useRef<HTMLCanvasElement | undefined>(undefined);
   const stageRef = useRef<HTMLDivElement>(null);
   const workerRef = useRef<Worker | undefined>(undefined);
   const revisionRef = useRef(0);
+  const inFlightRevisionRef = useRef<number | undefined>(undefined);
+  const pendingQueryRef = useRef<SemanticTerrainWorkerQuery | undefined>(
+    undefined,
+  );
+  const pendingFrameRef = useRef(0);
+  const postPendingQueryRef = useRef<() => void>(() => undefined);
   const [response, setResponse] = useState<SemanticTerrainWorkerSummary>();
+  const [updating, setUpdating] = useState(false);
   const [navigationReady, setNavigationReady] = useState(false);
   const [canvasSize, setCanvasSize] = useState<CanvasSize>({
     width: 1_200,
@@ -85,6 +94,16 @@ export function SemanticTerrainCanvas({
     cssHeight: 820,
     dpr: 1,
   });
+  postPendingQueryRef.current = (): void => {
+    const worker = workerRef.current;
+    const query = pendingQueryRef.current;
+    if (!worker || !query || inFlightRevisionRef.current !== undefined) {
+      return;
+    }
+    pendingQueryRef.current = undefined;
+    inFlightRevisionRef.current = query.revision;
+    worker.postMessage(query);
+  };
   const navigation = useWorldViewNavigation({
     stageRef,
     enabled: navigationReady,
@@ -140,21 +159,38 @@ export function SemanticTerrainCanvas({
       event: MessageEvent<SemanticTerrainWorkerResponse>,
     ): void => {
       const next = event.data;
-      if (next.revision !== revisionRef.current) {
+      if (next.revision !== inFlightRevisionRef.current) {
         return;
       }
+      inFlightRevisionRef.current = undefined;
       if (next.type === "error") {
         onError(next.message);
-        return;
+      } else {
+        setResponse(next);
       }
-      setResponse(next);
+      const hasPendingQuery = pendingQueryRef.current !== undefined;
+      setUpdating(hasPendingQuery);
+      if (hasPendingQuery && pendingFrameRef.current === 0) {
+        pendingFrameRef.current = window.requestAnimationFrame(() => {
+          pendingFrameRef.current = 0;
+          postPendingQueryRef.current();
+        });
+      }
     };
     worker.onerror = (event): void => {
+      inFlightRevisionRef.current = undefined;
+      setUpdating(false);
       onError(event.message || "Semantic terrain Worker failed.");
     };
     return () => {
+      if (pendingFrameRef.current !== 0) {
+        window.cancelAnimationFrame(pendingFrameRef.current);
+        pendingFrameRef.current = 0;
+      }
       worker.terminate();
       workerRef.current = undefined;
+      inFlightRevisionRef.current = undefined;
+      pendingQueryRef.current = undefined;
     };
   }, [onError]);
 
@@ -192,27 +228,23 @@ export function SemanticTerrainCanvas({
     }
     revisionRef.current += 1;
     const revision = revisionRef.current;
-    onReport(undefined);
-    setResponse(undefined);
-    const timer = window.setTimeout(() => {
-      worker.postMessage({
-        type: "query",
-        revision,
-        seed: state.seed,
-        topology: state.semanticTopology,
-        substrate: state.semanticSubstrate,
-        features: state.semanticFeatures,
-        correction: state.semanticCorrection,
-        centerX: state.centerX,
-        centerZ: state.centerZ,
-        blocksAcross: state.blocksAcross,
-        aspectRatio: panelAspect,
-        samplesAcross: 65,
-      });
-    }, 35);
-    return () => window.clearTimeout(timer);
+    pendingQueryRef.current = {
+      type: "query",
+      revision,
+      seed: state.seed,
+      topology: state.semanticTopology,
+      substrate: state.semanticSubstrate,
+      features: state.semanticFeatures,
+      correction: state.semanticCorrection,
+      centerX: state.centerX,
+      centerZ: state.centerZ,
+      blocksAcross: state.blocksAcross,
+      aspectRatio: panelAspect,
+      samplesAcross: 65,
+    };
+    setUpdating(true);
+    postPendingQueryRef.current();
   }, [
-    onReport,
     panelAspect,
     state.blocksAcross,
     state.centerX,
@@ -234,8 +266,24 @@ export function SemanticTerrainCanvas({
       onError("This browser does not expose a 2D canvas context.");
       return;
     }
+    const drawBuffer = drawBufferRef.current ?? document.createElement("canvas");
+    drawBufferRef.current = drawBuffer;
+    if (
+      drawBuffer.width !== canvasSize.width
+      || drawBuffer.height !== canvasSize.height
+    ) {
+      drawBuffer.width = canvasSize.width;
+      drawBuffer.height = canvasSize.height;
+    }
+    const drawContext = drawBuffer.getContext("2d");
+    if (!drawContext) {
+      onError("This browser cannot allocate a terrain drawing buffer.");
+      return;
+    }
     const started = performance.now();
-    drawSemanticTerrain(context, canvasSize, state, camera, response);
+    drawSemanticTerrain(drawContext, canvasSize, state, camera, response);
+    context.setTransform(1, 0, 0, 1, 0, 0);
+    context.drawImage(drawBuffer, 0, 0);
     if (response) {
       const correction = state.semanticCorrection === "regional"
         ? response.metadata.regionalCorrection
@@ -276,6 +324,7 @@ export function SemanticTerrainCanvas({
       className="terrainStage semanticTerrainStage"
       data-testid="semantic-terrain-stage"
       data-render-ready={response ? "true" : "false"}
+      data-render-updating={updating ? "true" : "false"}
       tabIndex={0}
       aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
       onPointerDown={navigation.onPointerDown}
@@ -294,7 +343,9 @@ export function SemanticTerrainCanvas({
       />
       <div className="canvasTopline" aria-hidden="true">
         <span className="canvasBadge primary">
-          {response ? "semantic terrain ready" : "reconstructing terrain"}
+          {response
+            ? updating ? "updating terrain · frame retained" : "semantic terrain ready"
+            : "reconstructing terrain"}
         </span>
         <span className="canvasBadge">research · production disconnected</span>
         <span className="canvasBadge">{state.semanticTopology}</span>
