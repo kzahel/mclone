@@ -87,6 +87,24 @@ are independent URL-addressed presentation overlays. Desktop and phone headed
 captures pass. This does not make the hybrid plan a production terrain input
 or a GPU terrain evaluator.
 
+Terrain Lab canvas sizing was hardened on 2026-07-27 after wide high-density
+Runtime Composed review exposed an independently capped width and height. All
+WebGPU panes now apply one uniform scale when the two-device-pixel and
+2,048-pixel resource bounds meet, so their backing target always preserves
+the CSS viewport aspect and every resize continues to reach the shared camera
+projection. The headed desktop runtime smoke exercises the cap at a
+`1,306 x 780` CSS viewport, verifies the resulting `2,048 x 1,223` target,
+resizes to `1,003 x 780` / `2,006 x 1,560`, restores the wide target, and
+captures both aspect-correct frames.
+
+The 22-test TypeScript suite, Terrain Lab TypeScript/Wasm check, six browser
+ownership locks, focused runtime smoke, and ordinary desktop workspace pass.
+The broader Playwright matrix was not fully green during this pass: two
+specialized desktop cases hit WebGPU validation-buffer map failures, and the
+phone workspace reached its late 2 km stress refinement but exceeded the
+120-second test budget. Those readback and stress lanes are not claimed as
+green evidence for this sizing fix.
+
 ## Scope
 
 This topic owns the continuing direction for:

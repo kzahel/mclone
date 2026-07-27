@@ -18,6 +18,8 @@ const port = Number.parseInt(
 const externalBaseUrl = process.env.TERRAIN_LAB_SMOKE_BASE_URL
   ?.replace(/\/+$/u, "");
 const baseUrl = externalBaseUrl ?? `http://127.0.0.1:${port}`;
+const desktopWideViewport = { width: 1800, height: 1000 };
+const desktopNarrowViewport = { width: 1440, height: 1000 };
 const launch = resolveBrowserWebGpuLaunch();
 const pageErrors = [];
 let server;
@@ -38,7 +40,7 @@ try {
   const context = await browser.newContext(
     mobile
       ? { ...devices["Pixel 7"], isMobile: true }
-      : { viewport: { width: 1440, height: 1000 }, deviceScaleFactor: 1 },
+      : { viewport: desktopWideViewport, deviceScaleFactor: 2 },
   );
   const page = await context.newPage();
   page.on("pageerror", (error) => pageErrors.push(error.message));
@@ -90,12 +92,46 @@ try {
     requestAnimationFrame(() => requestAnimationFrame(resolve))
   ));
 
+  const canvas = page.locator(
+    "canvas[aria-label='Runtime composed exact and procedural terrain']",
+  );
+  const wideCanvas = await waitForAspectCorrectCanvas(page, canvas);
+  if (!mobile) {
+    if (wideCanvas.backingWidth !== 2048
+        || wideCanvas.cssWidth * wideCanvas.devicePixelRatio <= wideCanvas.backingWidth) {
+      throw new Error(
+        `Wide runtime canvas did not exercise its backing-size cap: ${
+          JSON.stringify(wideCanvas)
+        }`,
+      );
+    }
+  }
+
   const canvasCapture = `/tmp/mclone-terrain-lab-runtime-${label}-canvas.png`;
   const pageCapture = `/tmp/mclone-terrain-lab-runtime-${label}.png`;
-  await page.locator(
-    "canvas[aria-label='Runtime composed exact and procedural terrain']",
-  ).screenshot({ path: canvasCapture });
+  await canvas.screenshot({ path: canvasCapture });
   await page.screenshot({ path: pageCapture, fullPage: true });
+
+  let narrowCanvas;
+  let narrowCanvasCapture;
+  let restoredWideCanvas;
+  if (!mobile) {
+    await page.setViewportSize(desktopNarrowViewport);
+    narrowCanvas = await waitForAspectCorrectCanvas(page, canvas, wideCanvas);
+    narrowCanvasCapture =
+      `/tmp/mclone-terrain-lab-runtime-${label}-narrow-canvas.png`;
+    await canvas.screenshot({ path: narrowCanvasCapture });
+    await page.setViewportSize(desktopWideViewport);
+    restoredWideCanvas = await waitForAspectCorrectCanvas(page, canvas, narrowCanvas);
+    if (restoredWideCanvas.backingWidth !== wideCanvas.backingWidth
+        || restoredWideCanvas.backingHeight !== wideCanvas.backingHeight) {
+      throw new Error(
+        `Runtime canvas did not restore its wide backing size: ${
+          JSON.stringify({ wideCanvas, narrowCanvas, restoredWideCanvas })
+        }`,
+      );
+    }
+  }
 
   const beforePan = page.url();
   const bounds = await stage.boundingBox();
@@ -124,7 +160,10 @@ try {
   );
   console.log(
     `Terrain Lab runtime composition ${label} smoke passed\n`
-      + `Canvas: ${canvasCapture}\nPage: ${pageCapture}`,
+      + `Canvas sizing: ${JSON.stringify({ wideCanvas, narrowCanvas, restoredWideCanvas })}\n`
+      + `Canvas: ${canvasCapture}\n`
+      + `${narrowCanvasCapture ? `Narrow canvas: ${narrowCanvasCapture}\n` : ""}`
+      + `Page: ${pageCapture}`,
   );
 } finally {
   await browser?.close();
@@ -177,4 +216,36 @@ async function waitForPreview() {
     await new Promise((resolve) => setTimeout(resolve, 100));
   }
   throw new Error(`Timed out waiting for Terrain Lab preview at ${baseUrl}`);
+}
+
+async function waitForAspectCorrectCanvas(page, canvas, previous) {
+  const deadline = Date.now() + 10_000;
+  let latest;
+  while (Date.now() < deadline) {
+    latest = await canvas.evaluate((element) => {
+      const bounds = element.getBoundingClientRect();
+      return {
+        backingWidth: element.width,
+        backingHeight: element.height,
+        cssWidth: bounds.width,
+        cssHeight: bounds.height,
+        devicePixelRatio: window.devicePixelRatio,
+      };
+    });
+    const backingAspect = latest.backingWidth / latest.backingHeight;
+    const cssAspect = latest.cssWidth / latest.cssHeight;
+    const aspectError = Math.abs(backingAspect / cssAspect - 1);
+    const changed = previous === undefined
+      || latest.backingWidth !== previous.backingWidth
+      || latest.backingHeight !== previous.backingHeight;
+    if (changed && aspectError <= 0.002) {
+      return { ...latest, aspectError };
+    }
+    await page.waitForTimeout(50);
+  }
+  throw new Error(
+    `Runtime canvas did not publish an aspect-correct resize: ${
+      JSON.stringify({ latest, previous })
+    }`,
+  );
 }

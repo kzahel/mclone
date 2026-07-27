@@ -21,6 +21,7 @@ import {
   optionalReferenceBytes,
   type TerrainVisualAssetBytes,
 } from "./visual-assets";
+import { terrainCanvasBackingSize } from "./canvas-size";
 import { useWorldViewNavigation } from "./use-world-view-navigation";
 
 export interface CanonicalTerrainReport {
@@ -249,9 +250,11 @@ export function CanonicalTerrainCanvas({
     }
     const resize = (): void => {
       const rect = stage.getBoundingClientRect();
-      const ratio = Math.min(window.devicePixelRatio || 1, 2);
-      const width = Math.max(1, Math.min(2048, Math.round(rect.width * ratio)));
-      const height = Math.max(1, Math.min(2048, Math.round(rect.height * ratio)));
+      const { width, height } = terrainCanvasBackingSize(
+        rect.width,
+        rect.height,
+        window.devicePixelRatio,
+      );
       setCanvasSize((current) =>
         current.width === width && current.height === height ? current : { width, height }
       );
