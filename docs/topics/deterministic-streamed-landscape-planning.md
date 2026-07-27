@@ -2,16 +2,19 @@
 
 Topic: `deterministic-streamed-landscape-planning`
 
-Status: **Active research direction as of 2026-07-27. Tactical 267 proved
-that a bounded hybrid landform plan can produce useful drainage, basin,
-divide, and quiet-space structure with deterministic reconstruction over one
-fixed study domain. Tactical 268 made that plan inspectable and exposed the
-unresolved production question: the same absolute location must retain the
-same plan when reached through different windows, chunk requests, workers,
-caches, paths, and topology lifts. No streamed planner, adjacent-region
-contract, or production terrain consumer exists yet. Tactical 270 owns a
-falsifiable research campaign comparing canonical supertiles, hierarchical
-boundary facts, feature-owned graphs, and the coordinate-pure fallback.**
+Status: **Active research direction as of 2026-07-27, paused at Tactical 270
+Human Review R0. Tactical 267 proved that a bounded hybrid landform plan can
+produce useful drainage, basin, divide, and quiet-space structure with
+deterministic reconstruction over one fixed study domain. Tactical 268 made
+that plan inspectable and exposed the unresolved production question: the
+same absolute location must retain the same plan when reached through
+different windows, chunk requests, workers, caches, paths, and topology
+lifts. Tactical 270 Phase 0 found no precedent for exact unbounded on-demand
+hydrology: exact tiled methods retain a complete finite global meta-problem.
+It therefore proposes bounded generative hydrography with a fixed maximum
+scale, finite dependency DAG, stable feature/facet ownership, and the
+coordinate-pure fallback. No streamed planner, harness, adjacent-region
+implementation, or production terrain consumer exists yet.**
 
 ## Purpose
 

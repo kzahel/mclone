@@ -1,7 +1,8 @@
 # Tactical 270: Deterministic Streamed Landscape Planner Research
 
-Status: proposed and ready to begin 2026-07-27. Research only; no production
-terrain or planner integration is authorized.
+Status: **Phase 0 completed 2026-07-27 and paused at Human Review R0.**
+Research only; no production terrain, planner implementation, or invariance
+harness is authorized before that review.
 
 Topics:
 
@@ -166,6 +167,135 @@ starts and deterministic owner-neighborhood queries. Give it a fair quality
 pass for the same river, basin, ridge, and negative-space goals rather than
 comparing new candidates only with the current warped-river field.
 
+## Phase 0 Architecture Specification
+
+The source review changes the experiment from “stream an exact watershed” to
+“generate bounded hydrography.” Exact tiled Priority-Flood and flow
+accumulation still require a global meta-graph over the complete finite DEM.
+Mclone's plane and cylinder have no complete last tile. A candidate may create
+river, basin, divide, sink, and level relationships by rule, but it may not
+call those facts the exact drainage analysis of an unbounded provisional
+heightfield.
+
+### Shared Identity And Execution Rules
+
+Every candidate except the deliberate negative control uses the following
+conceptual keys:
+
+```text
+PlanKey {
+    stored_profile_revision,
+    world_seed,
+    dimension_id,
+    topology_descriptor_hash,
+    candidate_revision,
+    plan_family,
+    level,
+    canonical_region_coordinate,
+}
+
+FactId {
+    owner: PlanKey or canonical facet key,
+    fact_kind_domain,
+    stable_local_index,
+}
+```
+
+The viewport center, request window, requested chunk, Worker, thread,
+completion order, cache state, and prior exploration are never part of either
+key. Negative coordinates use Euclidean division. Periodic coordinates are
+canonicalized before identity is formed.
+
+The initial research descriptor fixes:
+
+- 32-block semantic cells;
+- 1,024-block base plan regions;
+- a maximum finite hierarchy of 1,024, 3,072, and 6,144 blocks for the
+  hierarchical candidate;
+- a maximum individual feature reach and graph-edge length of 1,536 blocks;
+- integer or fixed-point semantic facts before floating reconstruction;
+- stateless typed hashes from `FactId` and choice index rather than a mutable
+  random stream; and
+- canonical ascending `FactId` order for any conflict resolution or accepted
+  serialization.
+
+The numeric sizes are experiment revision 0, not production constants. They
+divide the 6,144-block periodic corpus, and individual feature reach is less
+than half its period. Changing them changes candidate identity and requires a
+new receipt.
+
+Dependencies form a finite directed acyclic graph declared by the descriptor.
+A level may read immutable coordinate fields, a fixed set of coarser provider
+regions, or a fixed owner neighborhood. It may not recursively discover
+same-rank plans, climb an unbounded ancestor chain, or follow a river until an
+outlet is found. Cache misses may reconstruct the same DAG; they may not add
+geographic facts.
+
+### Shared Boundary And Topology Rules
+
+Half-open base regions own cells whose canonical centers fall inside their
+owned extent. Cross-region semantics use either a feature owner or a canonical
+facet key:
+
+```text
+FacetKey {
+    topology_descriptor_hash,
+    level,
+    axis,
+    canonical_facet_coordinate,
+}
+```
+
+Both sides read the same facet fact. On a cylinder or torus, identified sides
+canonicalize to the same key even when a 6,144-block root region is adjacent
+to itself. Corners use a corresponding canonical vertex key. Ownership never
+depends on which side asks first.
+
+Every bounded feature records an anchor owner, stable bounds, and the maximum
+distance by which it can affect output. A consumer asks for all features
+overlapping its target extent expanded by that declared reach. Each individual
+segment uses one target-relative topology lift; half-period ties use the
+topology contract's stable rule. Revision 0 rejects an individual primitive
+whose span reaches half a periodic extent.
+
+Semantic facts do not blend at implementation boundaries. Residual scalar
+height may use compact support after all possible owners have been enumerated.
+On a torus, every directed water fact must reach an explicit ocean, lake,
+wetland, or closed-basin sink inside its declared bounded graph; an identified
+edge is not an outlet.
+
+### Candidate Contract Matrix
+
+| Candidate | Plan identity and ownership | Finite dependency claim | Boundary/topology construction | Expected failure or demotion |
+|---|---|---|---|---|
+| negative: recentered solve | window center and extent deliberately enter identity; publishes the current window interior | one bounded solve, but no world-indexed identity | overlap the same locations through shifted windows and compare full semantics | must fail window and partition independence; retained only to prove the harness can detect the original problem |
+| A: canonical supertile | 1,024-block `PlanKey`; half-open core owns accepted cells; halo owns nothing | solve core plus declared 256- and 512-block halo controls; correctness is claimed only for operations whose proven effect distance fits the halo | coordinate fields wrap correctly and cores are canonical, but independently derived receivers have no shared semantic authority | expected to move rather than solve drainage disagreement; may survive only as a local realization mechanism |
+| B: hierarchical boundary facts | `PlanKey` at 6,144-, 3,072-, and 1,024-block levels; canonical facets own ports; finer plans own interior elaboration | exactly three levels; root cell/facet facts are coordinate-pure and never request a parent; each child reads a fixed parent/facet neighborhood | root facets supply stable high/low tendency, sink/outlet permission, ports, and level intervals; children elaborate between the same shared facts; levels and facets wrap/deduplicate | may expose a square lattice, force implausible ports, or smuggle global drainage into root selection; it creates bounded hierarchy, not exact contributing area |
+| C: feature-owned graph | 1,024-block anchor cells own starts; each start owns one complete bounded graph; an unordered endpoint pair owns an edge; reaches and basin primitives have stable IDs and bounds | every graph lies within 1,536 blocks of its anchor; consumers enumerate owners in target bounds expanded by that reach; construction examines one fixed candidate stencil and never traverses another graph | all targets reconstruct the same overlapping edge or primitive; standalone graphs end at an explicit sink/outlet; direction derives from a coordinate-pure potential plus stable ties; topology chooses canonical endpoints and work lifts | networks may look fragmented or noise-directed; exact whole-river component IDs, global basin IDs, and exact stream order are disallowed because they require cross-graph traversal |
+| D: bounded hybrid atlas | B owns finite-scale ports/level permissions; C owns bounded features; A owns local raster realization | union of already-proved B and C DAGs plus compact-support reconstruction; no additional discovery step | shared hierarchy conditions feature graphs, and every target enumerates all overlapping owned primitives before realization | easiest place to hide complexity or an undeclared dependency; cannot be implemented until B and C pass separately |
+| fallback | coordinate-pure field revision plus canonical bounded starts with Minecraft-style possible-owner enumeration | one fixed owner stencil per feature family; no cross-feature graph or derived watershed | topology-aware starts cross seams through one owner and target-relative lift; effects clip/reconstruct per target | may retain an obvious field character and weaker river/basin composition, but is the determinism, speed, and maintenance control |
+
+### Candidate Audit At R0
+
+- Candidate A is not a plausible standalone hydrology solution. It remains a
+  measured control and possible fine realization tile.
+- Candidate B has a dependency proof only because its hierarchy stops at a
+  fixed 6,144-block level whose root facts are coordinate-pure. Adding a
+  generated parent on demand would reopen an infinite-ancestor problem.
+- Candidate C owns a complete graph inside one declared feature bound. A
+  standalone graph ends at its own typed sink/outlet; only Candidate D may
+  connect it to a B-owned port. It may not derive a globally stable
+  connected-component name or exact upstream area across feature owners.
+- Candidate D is a composition hypothesis, not the first implementation.
+- The fallback is credible because its owner and possible-influence search
+  match already inspected Minecraft structure/carver mechanisms and Mclone's
+  existing periodic bounded-feature contract.
+
+No candidate uses global mutable state, discovery-time reconciliation, or
+exploration history. B and C achieve that by intentionally limiting the
+semantic claim. Whether that limited claim still creates convincing geography
+is the central research question.
+
 ## Fixed Research Corpus
 
 The corpus begins with the Tactical 267 seeds:
@@ -198,10 +328,54 @@ quality/performance control. Streamed candidates must additionally cover:
   locations; and
 - journeys crossing several plan identities.
 
-The first candidate specification should use 32-block semantic cells for
-comparison. It may also test a second resolution when the dependency or
-boundary hypothesis requires it. Region and halo sizes are experiment
-parameters, not generator constants until selected.
+Revision 0 uses the 32-block cells and plan sizes specified above. A second
+resolution or extent is a separately identified experiment when a dependency
+or boundary hypothesis requires it. None of these research parameters is a
+production generator constant.
+
+### Revision 0 Canonical Target Set
+
+Base plan coordinates below index the fixed 1,024-block regions. The set is
+small enough for permutation tests and large enough to include ordinary
+interiors, every boundary orientation, corners, negative division, periodic
+identification, and multiple hierarchy parents.
+
+- Plane: every region in `[-2, 2] x [-2, 2]`, plus teleport targets
+  `(-23, 17)`, `(41, -29)`, `(-64, -64)`, and `(63, 63)`.
+- X-cylinder: canonical X regions `[0, 5]` at every Z in `[-2, 2]`, plus
+  equivalent X lifts `-6`, `6`, and `12` for the same canonical targets.
+- Flat torus: all 36 canonical regions in `[0, 5] x [0, 5]`, plus negative
+  and positive lifts of every edge and four corners.
+
+The canonical boundary cases are:
+
+- horizontal pair `(0, 0)` / `(1, 0)`;
+- vertical pair `(0, 0)` / `(0, 1)`;
+- four-region corner `(0, 0)`, `(1, 0)`, `(0, 1)`, `(1, 1)`;
+- negative-division corner `(-1, -1)`, `(0, -1)`, `(-1, 0)`, `(0, 0)`;
+- cylinder seam pair `(5, 0)` / `(0, 0)`;
+- torus X seam, Z seam, and the four lifted representations of canonical
+  corner `(0, 0)`; and
+- 3,072- and 6,144-block hierarchy boundaries containing each base case.
+
+Fixed journey request sequences are:
+
+1. row-major and reverse over the plane 5-by-5 core;
+2. center-out spiral and outside-in rings over the same core;
+3. one fixed-seed permutation of every topology's canonical set;
+4. alternating plane teleport targets and their adjacent regions;
+5. two fronts approaching the `(0, 0)` / `(1, 0)` boundary;
+6. cylinder regions `(-2, 0)` through `(8, 0)`, preserving lifted requests;
+   and
+7. torus diagonal `(0, 0)` through `(5, 5)`, then the same journey through
+   one X and one Z lift.
+
+Seed-dependent ocean, coast, highland, broad-low, quiet, sink, confluence, and
+crossing examples are selected only after the complete fixed target set is
+generated. Selection is deterministic: sort canonical facts by `(kind,
+FactId)` and retain the first present example of each requested role. Missing
+roles remain recorded as missing; a difficult seed is not replaced. These
+selectors choose review artifacts, not pass/fail targets.
 
 ## Evidence Schema
 
@@ -225,6 +399,86 @@ Every candidate run writes a schema-versioned receipt containing:
 
 The schema must distinguish exact comparison from toleranced geometric
 metrics. It must never summarize a nonzero semantic mismatch as “close.”
+
+### Revision 0 Receipt Contract
+
+The machine-readable receipt is small JSON. Large semantic arrays, timing
+samples, and images remain separate files under the run's `/tmp` directory.
+Paths may appear in the receipt but do not make those artifacts durable.
+
+Required top-level records are:
+
+```text
+receipt_schema
+run {
+    experiment_id, source_commit, command, started_utc
+    host, target, rustc, optimization, thread_count, worker_count
+}
+descriptor {
+    candidate_revision, stored_profile_revision, seed, dimension_id
+    topology, topology_descriptor_sha256
+    semantic_cell_blocks, base_region_blocks
+    hierarchy_blocks[], maximum_feature_reach_blocks
+    numeric_policy, tie_domains[], random_domains[]
+}
+dependency_claim {
+    layer_dag[], maximum_depth, maximum_provider_fanout
+    maximum_owner_radius, maximum_traversal_steps
+    undeclared_fetch_count
+}
+request_case {
+    case_id, canonical_targets[], lifted_requests[]
+    request_order[], completion_order[], cache_policy
+}
+plans[] {
+    PlanKey, owned_extent, construction_extent, provider_keys[]
+    semantic_record_count, semantic_sha256
+}
+boundaries[] {
+    facet_or_vertex_key, participating_plans[]
+    crossing_records_sha256, duplicate_count, omission_count
+}
+comparisons[] {
+    property, left_case, right_case, record_count
+    exact_mismatch_count, first_mismatch
+}
+geography {
+    reach_count, crossing_count, confluence_count
+    sink_count, cycle_count, basin_count, spill_count
+    missing_review_roles[]
+}
+reconstruction {
+    sample_descriptor, height_sha256, water_sha256
+    exact_boundary_mismatches, geometric_metrics
+}
+cost {
+    warmup_count, measured_iterations, timing_boundaries
+    cold_plan_ns[], warm_point_ns[], warm_batch_ns[]
+    summary_ns[], cache_rebuild_ns[]
+    retained_bytes, peak_transient_bytes, transferred_bytes
+}
+artifacts[] {
+    kind, path, byte_count, sha256, inspected
+}
+```
+
+Semantic checksums use SHA-256 over a canonical little-endian byte stream:
+records sorted by `FactId`; explicit type tags and lengths; fixed-width signed
+integers; UTF-8 strings with byte lengths; no hash-map iteration order; and no
+native padding. Exact semantic records do not contain unconstrained floating
+point. A numeric policy may use fixed-point integers or explicitly normalized
+IEEE bit patterns. Changing serialization changes `receipt_schema`.
+
+`maximum_traversal_steps` is zero for ordinary point lookup unless a candidate
+declares a small fixed loop over its own bounded primitive. A sentinel such as
+“until outlet,” “until convergence,” or “all upstream cells” is invalid.
+`undeclared_fetch_count` must be zero.
+
+Each exact comparison records the complete canonical record count and mismatch
+count. A checksum match is a fast equality witness, not a substitute for
+retaining the first structured mismatch when a comparison fails. Geometric
+metrics are labeled separately and cannot turn a semantic mismatch into a
+pass.
 
 ## Boundary Experiments
 
@@ -326,14 +580,14 @@ pass.
 
 ### Phase 0: source and architecture research
 
-- Expand the durable source ledger with primary work on tiled/parallel
+- [x] Expand the durable source ledger with primary work on tiled/parallel
   watershed processing, deterministic hierarchical procedural networks,
   boundary conditions, and maintained or shipped generator precedents.
-- Record exact contributions, limitations, implementation inspection depth,
+- [x] Record exact contributions, limitations, implementation inspection depth,
   and licensing/clean-room constraints.
-- Specify each candidate's plan identity, ownership, dependency proof,
+- [x] Specify each candidate's plan identity, ownership, dependency proof,
   boundary contract, topology behavior, and expected failure mode.
-- Define the initial corpus and receipt schema before implementation.
+- [x] Define the initial corpus and receipt schema before implementation.
 
 **Human Review R0 — research brief**
 
@@ -342,6 +596,45 @@ research question is fair, the fallback is credible, important precedents
 are not missing, and no candidate hides global mutable state or an undeclared
 infinite dependency. Stop or revise before implementation if the brief is
 weak.
+
+**State: paused for review.** No Phase 1 code has begun.
+
+The Phase 0 proposal is:
+
+1. Accept that exact analytical drainage over an unbounded provisional
+   surface is outside this streamed experiment. Finite whole-domain profiles
+   may still use it.
+2. Test bounded **generative hydrography**: stable reaches, bounded basin and
+   lake primitives, shared ports and levels, explicit sinks, and terrain
+   realization informed by those facts.
+3. Keep the recentered solve as the required failing canary and Candidate A
+   as a halo/control mechanism rather than a likely winner.
+4. Give minimal independent trials to Candidate B and Candidate C only after
+   the neutral Phase 1 harness catches the known failures.
+5. Compose Candidate D only if both mechanisms first prove exact invariance,
+   finite dependencies, and enough distinct structural value.
+6. Compare every survivor with the coordinate-pure plus bounded-start
+   fallback.
+
+R0 should explicitly answer:
+
+- Is “bounded generative hydrography” still the intended novel question, or
+  is exact derived watershed a requirement that should instead select a
+  finite/offline world architecture?
+- Are the three strongest precedent classes sufficient: exact finite tiled
+  hydrology, deterministic contextual dependency frameworks, and real game
+  generators at the finite-global and bounded-local extremes?
+- Is a fixed maximum planning scale of 6,144 blocks a fair first experiment,
+  with the understanding that it can fail quality review by exposing that
+  scale?
+- Is it acceptable that Candidate C promises stable reaches and bounded basin
+  primitives, not global whole-river IDs or exact contributing area?
+- Does the fallback receive a fair enough feature-quality pass to make
+  rejection of the relational candidates meaningful?
+
+An R0 acceptance authorizes only Phase 1's neutral falsification harness and
+controls. It does not authorize a candidate implementation, Terrain Lab
+integration, or production terrain change.
 
 ### Phase 1: neutral invariance harness and controls
 
@@ -451,7 +744,8 @@ execution.
 
 | Experiment | Commit | Corpus/command | Result | Decision |
 |---|---|---|---|---|
-| source and candidate review | pending | pending | pending | pending |
+| source review | `0fa857db` | primary papers, public framework/source, local Minecraft source; docs only | exact tiled hydrology retains a finite global meta-problem; contextual streaming requires finite effect distance | reframe as bounded generative hydrography |
+| candidate and corpus review | this R0 handoff | architecture contract and receipt schema; docs only | B and C state finite claims; A is a control; D is deferred; fallback remains credible | paused at R0 |
 | recentered-window negative control | pending | pending | pending | pending |
 | fallback invariant control | pending | pending | pending | pending |
 | canonical supertile trial | pending | pending | pending | pending |
