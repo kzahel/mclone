@@ -204,14 +204,14 @@ fn selected_grid_height(
 // Along that rectangle the parent surface is linear between every other fine
 // sample. Weld odd fine-edge vertices to that same interpolation so the two
 // independently drawn heightfields share one geometric boundary.
-fn terrain_horizon_stitched_height(
+fn terrain_horizon_geometry_height(
     sample_x: i32,
     sample_z: i32,
     cells: i32,
     cell_stride: i32,
     instance_index: u32,
-    original_height: f32,
 ) -> f32 {
+    let original_height = selected_grid_height(sample_x, sample_z, instance_index);
     if sample_halo_radius() == 0 {
         return original_height;
     }
@@ -619,13 +619,12 @@ fn vertex_main(
     let sample = selected_sample(index, instance_index);
     let reference = reference_samples[index];
     let gpu = gpu_samples[index];
-    let stitched_height = terrain_horizon_stitched_height(
+    let stitched_height = terrain_horizon_geometry_height(
         logical_x,
         logical_z,
         i32(cells),
         i32(cell_stride),
         instance_index,
-        sample.terrain.y,
     );
 
     let radius = sample_halo_radius();
@@ -635,10 +634,34 @@ fn vertex_main(
     let right_x = min(logical_x + cell_stride_i, cells_i + radius);
     let north_z = max(logical_z - cell_stride_i, -radius);
     let south_z = min(logical_z + cell_stride_i, cells_i + radius);
-    let left = selected_grid_height(left_x, logical_z, instance_index);
-    let right = selected_grid_height(right_x, logical_z, instance_index);
-    let north = selected_grid_height(logical_x, north_z, instance_index);
-    let south = selected_grid_height(logical_x, south_z, instance_index);
+    let left = terrain_horizon_geometry_height(
+        left_x,
+        logical_z,
+        cells_i,
+        cell_stride_i,
+        instance_index,
+    );
+    let right = terrain_horizon_geometry_height(
+        right_x,
+        logical_z,
+        cells_i,
+        cell_stride_i,
+        instance_index,
+    );
+    let north = terrain_horizon_geometry_height(
+        logical_x,
+        north_z,
+        cells_i,
+        cell_stride_i,
+        instance_index,
+    );
+    let south = terrain_horizon_geometry_height(
+        logical_x,
+        south_z,
+        cells_i,
+        cell_stride_i,
+        instance_index,
+    );
     let sample_spacing = max(f32(params.origin_spacing_cells.z), 1.0);
     let narrow_slope_x = (right - left)
         / max(f32(right_x - left_x) * sample_spacing, 1.0);
@@ -656,10 +679,34 @@ fn vertex_main(
         let wide_right_x = min(logical_x + 2 * cell_stride_i, cells_i + radius);
         let wide_north_z = max(logical_z - 2 * cell_stride_i, -radius);
         let wide_south_z = min(logical_z + 2 * cell_stride_i, cells_i + radius);
-        let wide_left = selected_grid_height(wide_left_x, logical_z, instance_index);
-        let wide_right = selected_grid_height(wide_right_x, logical_z, instance_index);
-        let wide_north = selected_grid_height(logical_x, wide_north_z, instance_index);
-        let wide_south = selected_grid_height(logical_x, wide_south_z, instance_index);
+        let wide_left = terrain_horizon_geometry_height(
+            wide_left_x,
+            logical_z,
+            cells_i,
+            cell_stride_i,
+            instance_index,
+        );
+        let wide_right = terrain_horizon_geometry_height(
+            wide_right_x,
+            logical_z,
+            cells_i,
+            cell_stride_i,
+            instance_index,
+        );
+        let wide_north = terrain_horizon_geometry_height(
+            logical_x,
+            wide_north_z,
+            cells_i,
+            cell_stride_i,
+            instance_index,
+        );
+        let wide_south = terrain_horizon_geometry_height(
+            logical_x,
+            wide_south_z,
+            cells_i,
+            cell_stride_i,
+            instance_index,
+        );
         let wide_slope_x = (wide_right - wide_left)
             / max(f32(wide_right_x - wide_left_x) * sample_spacing, 1.0);
         let wide_slope_z = (wide_south - wide_north)
