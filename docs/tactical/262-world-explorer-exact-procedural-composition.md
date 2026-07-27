@@ -1,14 +1,12 @@
 # Tactical 262: World Explorer Exact/Procedural Composition
 
-Status: Slice 3B native correction and screenshot gate complete 2026-07-27
-after Human Review 1A was retracted. Slices 0 through 3A proved shared
-target/depth plumbing, exact-painted coverage, and whole-tree exact/proxy
-ownership, but the orbit host still placed its focus-centered exact square
-behind procedural foreground terrain at low pitch. Slice 3B now gives the
-exact patch, procedural rings, vegetation, and camera one viewer-forward
-composition anchor while retaining the accepted collar as the explicit seam
-treatment. Browser composition is next; Terrain Lab and game-scene promotion
-remain gated.
+Status: Slice 4 browser implementation and semantic parity gate complete
+2026-07-27; hosted Human Review 1B is next. Slice 3B corrected the retracted
+native review by giving the exact patch, procedural rings, vegetation, and
+camera one viewer-forward composition anchor while retaining the collar as
+the explicit seam treatment. The same compositor now runs in browser World
+Explorer with canonical exact compilation in an isolated Worker. Terrain Lab
+and game-scene promotion remain gated on human browser pixel acceptance.
 
 Topics:
 
@@ -519,15 +517,47 @@ it does not complete Slice 4's composed exact-field Worker proof.
 
 ### Slice 4: browser proof
 
-- [ ] Reuse the shared canonical compiler/session behind an isolated browser
+- [x] Reuse the shared canonical compiler/session behind an isolated browser
   Worker and domain-blind transport.
-- [ ] Keep exact compilation off `requestAnimationFrame`.
-- [ ] Add desktop and Pixel 7 headed-Wayland `Composed`/`Coverage` receipts and
-  inspected captures.
-- [ ] Preserve the UI-less browser host and payload/dependency accounting.
+- [x] Keep exact compilation off `requestAnimationFrame`.
+- [x] Add desktop and Pixel 7 headed-Wayland `Composed`/`Coverage` semantic
+  receipts.
+- [x] Preserve the UI-less browser host and payload/dependency accounting.
+- [ ] Complete hosted interactive pixel review. Local Chrome presents WebGPU
+  and reports coherent draw work, but its page screenshot API returns a
+  solid-white canvas for this app; that image is rejected as pixel evidence.
 
 Gate: native and browser agree on source, painted chunks, mask generation,
-and composition behavior.
+whole-tree ownership, and composition draw behavior. Human review of hosted
+pixels remains the final Slice 4 gate.
+
+### Slice 4 browser evidence
+
+Commits `4ecf414c` and `d816681e` extend the versioned canonical batch with
+complete natural-tree records, move the exact renderer behind a native-thread
+or browser-Worker executor, and expose `composition` plus `exactRadius` query
+parameters. Ordinary Horizon still constructs neither the exact renderer nor
+the exact Worker.
+
+The fixed low-angle review camera uses seed `12345`, center `(0, 0)`,
+`blocksAcross=96`, yaw `3.1415927`, pitch `0.12`, and radius `2`. Desktop and
+Pixel 7 emulation passed both `Composed` and `Coverage` with:
+
+- `25/25` desired and painted exact chunks;
+- canonical and procedural coverage generation `27`;
+- `15` complete natural-tree records split into `8` exact-owned and `7`
+  proxy-owned records;
+- zero missing exact or proxy tree representations;
+- `6,958,200` resident exact mesh bytes; and
+- a ready fixed `160`-slot procedural allocation.
+
+The ordinary Horizon browser smoke also passed initialization, Worker
+overflow/recovery, raw input, negative coordinates, teleport, and shutdown
+with zero exact chunks or exact mesh allocation. The composition receipts are
+under `/tmp/mclone-world-explorer-web-{desktop,phone}-{composed,coverage}-receipt.json`.
+The four-sided native captures remain the accepted deterministic pixel
+evidence. Hosted browser review must now confirm those same pixels
+interactively; the rejected all-white local Chrome images are not evidence.
 
 ### Slice 5: Terrain Lab adoption
 

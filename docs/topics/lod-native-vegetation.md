@@ -22,7 +22,11 @@ the focus-centered exact patch sat behind procedural foreground at low orbit
 pitch. Tactical 262 Slice 3B now gives exact terrain, procedural residency,
 and vegetation one viewer-forward composition anchor. Its delayed native
 window/offscreen smoke again reports zero missing exact or proxy records;
-browser and game-scene promotion wait for the browser composition gate.
+Slice 4 now carries separated exact-tree records through the portable
+canonical batch codec and isolated browser Worker. Desktop and Pixel 7
+composition receipts reproduce all 15 records as 8 exact-owned and 7
+proxy-owned, with zero missing representations. Hosted browser pixel review
+is the remaining gate before Terrain Lab or game-scene promotion.
 
 World Explorer review on 2026-07-26 found that native enabled synchronous
 near-level vegetation compilation during frame encoding while browser disabled

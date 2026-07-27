@@ -44,8 +44,12 @@ focus. Slice 3B now uses one viewer-forward anchor for exact terrain,
 procedural residency, and vegetation, plus a terrain-safe composed target
 height when sea-level targeting would place the low orbit eye in resolved
 ground. Four-sided captures and delayed native window/offscreen movement pass
-with no missing exact or proxy trees. Browser composition is next; no
-game-scene, Android, or XR adoption has started.
+with no missing exact or proxy trees. Slice 4 now runs the same exact renderer
+through an isolated browser Worker and accepts deterministic
+`composition`/`exactRadius` URLs. Desktop and Pixel 7 semantic receipts match
+all 25 painted chunks, coverage generation 27, and the 8 exact/7 proxy split
+across 15 whole-tree records. Hosted browser pixel review is the active gate;
+no game-scene, Android, or XR adoption has started.
 Interactive review on 2026-07-26 diagnosed two remaining proof defects and
 activated Tactical
 [`252`](../tactical/252-procedural-horizon-seams-and-transition-admission.md):

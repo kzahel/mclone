@@ -10,7 +10,9 @@ correction remains valid, while retracted low-angle review exposed a separate
 focus-versus-viewer anchor error in the orbit proof host. Slice 3B now aligns
 exact, procedural residency, vegetation, and a terrain-safe composed camera
 at one viewer-forward anchor. Native four-sided screenshots and delayed
-movement pass; browser composition now precedes full-game rendering.
+movement pass. Slice 4 browser composition now matches the native coverage
+and whole-tree ownership receipts on desktop and Pixel 7; hosted interactive
+pixel review precedes Terrain Lab or full-game rendering.
 
 Topics:
 
@@ -314,7 +316,7 @@ ready.
 | Child | State | Scope | Exit gate |
 |---|---|---|---|
 | **PH-1 Shared composition substrate** | **complete in Tactical 262** | Add the immutable exact-painted snapshot, source identity, bounded GPU mask, caller-owned color/depth target, explicit load/store behavior, and renderer-neutral draw ordering without importing a product scene. | Unit/offscreen tests prove coherent coverage, negative-coordinate packing, stale rejection, shared depth, and unchanged Horizon mode. |
-| **PH-2 World Explorer composition proof** | **Human Review 1A candidate in Tactical 262** | Extract the useful canonical exact-view source from Terrain Lab, then add `Horizon`, `Exact`, `Composed`, and `Coverage` modes over one World Explorer device/target. Correct the reviewed exact/proxy tree chimera through complete-record ownership before promotion. | Native movement, delayed admission, eviction, negative, and teleport receipts plus inspected pixels reach Human Review 1A with exactly one complete representation per natural tree; browser and Terrain Lab promotion follow after review. |
+| **PH-2 World Explorer composition proof** | **hosted Human Review 1B pending in Tactical 262** | Extract the useful canonical exact-view source from Terrain Lab, then add `Horizon`, `Exact`, `Composed`, and `Coverage` modes over one World Explorer device/target. Correct the reviewed exact/proxy tree chimera through complete-record ownership before promotion. | Native movement and inspected four-angle pixels pass; desktop and Pixel 7 browser Workers match painted coverage and whole-tree ownership. Hosted interactive pixels are the remaining gate before Terrain Lab or game-scene promotion. |
 | **PH-3 Terrain Lab adoption** | waiting on PH-2 review | Add the runtime horizon/composed presentation as another consumer while preserving canonical, CPU LOD, fast CPU LOD, and GPU LOD research panes. | Fixed-anchor Lab comparison exercises the same compositor without moving policy into React or browser canvas code. |
 | **PH-4 Full-game scene adoption** | waiting on PH-2 acceptance | Have `mclone-scene` publish the same exact-painted facts from real client render sections, construct platform executors at the app rim, and render the ordinary native game with exact terrain near and procedural terrain beyond. | Native game window/offscreen movement proves the accepted compositor under real scene lifecycle while exact-only stays equivalent. |
 | **PH-5 Vegetation and edit arbitration** | waiting on PH-4; reusable untouched-tree primitive starts in PH-2 | Consume the proven whole-record XOR in the game scene, then reject stale products and invalidate nearby natural proxy ownership when authoritative exact edits change the replacement facts. | No duplicate or disappearing trees at the frontier, including cross-chunk crowns, delayed exact compilation, edits, movement, and source switches. |
@@ -334,7 +336,7 @@ a specific defect, but it must not block composition on speculative polish.
 Tactical
 [`262`](262-world-explorer-exact-procedural-composition.md) has completed
 **PH-1: Shared Composition Substrate** and implemented **PH-2: World Explorer
-Composition Proof** through its first native review.
+Composition Proof** through native and browser proof hosts.
 
 The terrain compositor and collar passed that review overall. Tactical 262
 Slice 3A has now added the small neutral bounded-representation ownership
@@ -342,7 +344,11 @@ envelope and made exact natural-tree geometry and its stable record-derived
 proxy the first whole-unit XOR decision against the actual exact-safe terrain
 interior. Delayed native window/offscreen receipts prove every resident copy
 of an exact-owned ID is suppressed, with zero missing, dual, or unowned
-records at the forest checkpoints. Human Review 1A is the active gate.
+records at the forest checkpoints. Slice 3B then corrected the low-angle
+focus/eye mismatch with one viewer-forward composition anchor. Slice 4 carries
+the same exact renderer and whole-tree records through an isolated browser
+Worker; desktop and Pixel 7 receipts match 25 painted chunks and all 15 tree
+ownership units. Hosted Human Review 1B is the active gate.
 
 Do not turn this correction into a universal natural-feature record or
 renderer. The reusable facts are source, stable ownership-unit ID,
@@ -350,11 +356,11 @@ conservative bounds, readiness, generation, and selected owner. Trees retain
 their own record and render payload. Later bounded structures or route pieces
 may adapt different ownership units after their concrete needs are known.
 
-After the same forest anchors pass Human Review 1A, Tactical 262 may continue
-with the browser proof and optional Terrain Lab adoption. A separate child
-then owns `mclone-scene` integration; the proof boundary prevents that child
-from combining scene lifecycle, GPU masking, and first-pixel discovery in one
-cut.
+After the hosted forest and low-angle anchors pass Human Review 1B, Tactical
+262 may optionally add the proven view to Terrain Lab and close its proof
+record. A separate child then owns `mclone-scene` integration; the proof
+boundary prevents that child from combining scene lifecycle, GPU masking, and
+first-pixel discovery in one cut.
 
 ## XR And Multiview Invariants
 
