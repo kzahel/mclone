@@ -81,7 +81,7 @@ impl StreamedPlanTopology {
         sha256_hex(descriptor.as_bytes())
     }
 
-    fn lifted_region(self, region: PlanRegion) -> PlanRegion {
+    pub(crate) fn lifted_region(self, region: PlanRegion) -> PlanRegion {
         match self {
             Self::Plane => region,
             Self::CylinderX => PlanRegion::new(region.x + STREAMED_PLAN_PERIOD_REGIONS, region.z),
@@ -290,7 +290,10 @@ pub struct HarnessRunSpec {
 }
 
 impl HarnessRunSpec {
-    fn in_request_order(case_id: impl Into<String>, requests: Vec<StreamedPlanRequest>) -> Self {
+    pub(crate) fn in_request_order(
+        case_id: impl Into<String>,
+        requests: Vec<StreamedPlanRequest>,
+    ) -> Self {
         let completion_order = (0..requests.len()).collect();
         let batch_size = requests.len().max(1);
         Self {
@@ -374,8 +377,7 @@ pub fn execute_harness_case<C: StreamedPlanControl>(
                 ));
             }
             construction_count = construction_count.saturating_add(built.len() as u32);
-            for ((slot, request), snapshot) in miss_slots.into_iter().zip(misses).zip(built)
-            {
+            for ((slot, request), snapshot) in miss_slots.into_iter().zip(misses).zip(built) {
                 let expected =
                     descriptor.plan_key(control.candidate_revision(), request.requested_region)?;
                 if snapshot.key != expected {
@@ -474,7 +476,7 @@ pub enum HarnessComparisonExpectation {
 }
 
 impl HarnessComparisonReceipt {
-    fn compare(
+    pub(crate) fn compare(
         property: impl Into<String>,
         control: &'static str,
         descriptor: &StreamedPlanDescriptor,
@@ -985,7 +987,7 @@ pub fn coordinate_pure_corpus_sha256() -> Result<String, String> {
     Ok(sha256_hex(&bytes))
 }
 
-fn comparison_corpus_sha256(comparisons: &[HarnessComparisonReceipt]) -> String {
+pub(crate) fn comparison_corpus_sha256(comparisons: &[HarnessComparisonReceipt]) -> String {
     let mut bytes = Vec::new();
     write_u32(&mut bytes, comparisons.len() as u32);
     for comparison in comparisons {
@@ -1397,7 +1399,7 @@ fn require_plane(descriptor: &StreamedPlanDescriptor, control: &'static str) -> 
     }
 }
 
-fn canonical_targets(topology: StreamedPlanTopology) -> Vec<PlanRegion> {
+pub(crate) fn canonical_targets(topology: StreamedPlanTopology) -> Vec<PlanRegion> {
     let mut targets = Vec::new();
     match topology {
         StreamedPlanTopology::Plane => {
@@ -1431,7 +1433,10 @@ fn canonical_targets(topology: StreamedPlanTopology) -> Vec<PlanRegion> {
     targets
 }
 
-fn requests_with_center(targets: &[PlanRegion], center: PlanRegion) -> Vec<StreamedPlanRequest> {
+pub(crate) fn requests_with_center(
+    targets: &[PlanRegion],
+    center: PlanRegion,
+) -> Vec<StreamedPlanRequest> {
     targets
         .iter()
         .copied()
@@ -1439,11 +1444,11 @@ fn requests_with_center(targets: &[PlanRegion], center: PlanRegion) -> Vec<Strea
         .collect()
 }
 
-fn reverse_targets(targets: &[PlanRegion]) -> Vec<PlanRegion> {
+pub(crate) fn reverse_targets(targets: &[PlanRegion]) -> Vec<PlanRegion> {
     targets.iter().copied().rev().collect()
 }
 
-fn center_out_targets(targets: &[PlanRegion]) -> Vec<PlanRegion> {
+pub(crate) fn center_out_targets(targets: &[PlanRegion]) -> Vec<PlanRegion> {
     let mut targets = targets.to_vec();
     targets.sort_by_key(|target| {
         (
@@ -1455,11 +1460,11 @@ fn center_out_targets(targets: &[PlanRegion]) -> Vec<PlanRegion> {
     targets
 }
 
-fn outside_in_targets(targets: &[PlanRegion]) -> Vec<PlanRegion> {
+pub(crate) fn outside_in_targets(targets: &[PlanRegion]) -> Vec<PlanRegion> {
     center_out_targets(targets).into_iter().rev().collect()
 }
 
-fn random_targets(seed: i64, targets: &[PlanRegion]) -> Vec<PlanRegion> {
+pub(crate) fn random_targets(seed: i64, targets: &[PlanRegion]) -> Vec<PlanRegion> {
     let mut targets = targets.to_vec();
     targets.sort_by_key(|target| {
         stable_mix64(
@@ -1471,7 +1476,7 @@ fn random_targets(seed: i64, targets: &[PlanRegion]) -> Vec<PlanRegion> {
     targets
 }
 
-fn alternating_targets(targets: &[PlanRegion]) -> Vec<PlanRegion> {
+pub(crate) fn alternating_targets(targets: &[PlanRegion]) -> Vec<PlanRegion> {
     let mut result = Vec::with_capacity(targets.len());
     let mut left = 0;
     let mut right = targets.len();
@@ -1486,7 +1491,7 @@ fn alternating_targets(targets: &[PlanRegion]) -> Vec<PlanRegion> {
     result
 }
 
-fn two_front_targets(targets: &[PlanRegion]) -> Vec<PlanRegion> {
+pub(crate) fn two_front_targets(targets: &[PlanRegion]) -> Vec<PlanRegion> {
     let mut sorted = targets.to_vec();
     sorted.sort_by_key(|target| (target.x, target.z));
     alternating_targets(&sorted)

@@ -11,6 +11,7 @@ pub mod placement;
 pub mod prng;
 pub mod procedural_structure;
 pub mod streamed_plan_harness;
+pub mod streamed_plan_trials;
 pub mod structure_json;
 pub mod structure_template;
 pub mod surface;
