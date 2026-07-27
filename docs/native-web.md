@@ -18,6 +18,16 @@ implies an explicit session request. `?startInWorld=false` forces title entry.
 The browser adapter normalizes those URL facts into the same shared
 `ClientEntryResolution` used by the other clients.
 
+The procedural-horizon game integration remains an explicit review option.
+For a local `mclone-overworld-v1` session, add
+`terrainPresentation=composed`; `exact-only` is the protected default and
+control. The hosted PH-4 review links are:
+
+```text
+https://mclone.kzahel.com/app?startInWorld=1&generationProfile=mclone-overworld-v1&terrainPresentation=composed
+https://mclone.kzahel.com/app?startInWorld=1&generationProfile=mclone-overworld-v1&terrainPresentation=exact-only
+```
+
 ## Runtime Ownership
 
 The production browser uses the same `mclone_scene::McloneSceneHost` policy

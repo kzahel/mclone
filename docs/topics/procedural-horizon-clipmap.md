@@ -99,13 +99,15 @@ correctly occluding the surrounding procedural terrain. Native thread and
 browser Worker executors now feed the same vegetation coordinator; exact
 readiness selects whole authoritative tree records, and ordinary mono plus
 preliminary per-eye stereo consume one committed presentation. The browser
-tier uses six levels and render stride eight to
-retain an approximately eight-kilometre horizon without constructing unused
-viewport pipeline families. Headed full-game WebGPU pixels pass. Hosted
-review remains open in Tactical 269; browser multi-flat, full-frame
-multiview, Android, and headset promotion remain PH-7/PH-8 work. Canonical
-exact generation and live authoritative render sections remain different
-truth-source adapters.
+tier uses six levels and render stride eight to retain an approximately
+eight-kilometre horizon without constructing unused viewport pipeline
+families. Headed full-game WebGPU pixels pass. The PH-4 full-game checkpoint
+is deployed at
+`https://mclone.kzahel.com/app?startInWorld=1&generationProfile=mclone-overworld-v1&terrainPresentation=composed`;
+hosted subjective review remains open in Tactical 269. Browser multi-flat,
+full-frame multiview, Android, and headset promotion remain PH-7/PH-8 work.
+Canonical exact generation and live authoritative render sections remain
+different truth-source adapters.
 Interactive review on 2026-07-26 diagnosed two remaining proof defects and
 activated Tactical
 [`252`](../tactical/252-procedural-horizon-seams-and-transition-admission.md):

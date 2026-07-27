@@ -2,7 +2,7 @@
 
 ## Status
 
-Active 2026-07-27. This is PH-4 from parent Tactical
+Human Review checkpoint ready 2026-07-27. This is PH-4 from parent Tactical
 [`261`](261-procedural-horizon-product-integration-roadmap.md), following the
 accepted World Explorer composition proof in Tactical
 [`262`](262-world-explorer-exact-procedural-composition.md) and Terrain Lab
@@ -177,13 +177,22 @@ enabling it; the existing exact-only auxiliary path remains unchanged.
   location without moving terrain policy into TypeScript.
 - [x] Validate headed desktop WebGPU pixels and semantic receipts.
 - [ ] Validate the representative phone browser after desktop review.
-- [ ] Deploy the full web game and stop at the first subjective review checkpoint.
+- [x] Deploy the full web game and stop at the first subjective review checkpoint.
+
+Production deployment `f0cdc1e4-5d1d-4389-a3ff-2926e04ae69f` serves bundle
+asset version `cdf56dceed78-20260727132018`. The public app and new vegetation
+Worker return the required COOP/COEP/CORP headers.
 
 ## Human review checkpoint
 
 The first required review is the hosted full web game after Slice 6. The fixed
 URL must make it possible to compare exact-only and composed presentation at
 one low-angle site. Review:
+
+- composed:
+  `https://mclone.kzahel.com/app?startInWorld=1&generationProfile=mclone-overworld-v1&terrainPresentation=composed`
+- exact-only control:
+  `https://mclone.kzahel.com/app?startInWorld=1&generationProfile=mclone-overworld-v1&terrainPresentation=exact-only`
 
 1. exact trees and steep hills correctly occlude farther procedural terrain;
 2. nearer procedural terrain correctly occludes exact geometry;
