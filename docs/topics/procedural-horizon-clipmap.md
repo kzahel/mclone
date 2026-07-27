@@ -104,7 +104,16 @@ eight-kilometre horizon without constructing unused viewport pipeline
 families. Headed full-game WebGPU pixels pass. The PH-4 full-game checkpoint
 is deployed at
 `https://mclone.kzahel.com/app?startInWorld=1&generationProfile=mclone-overworld-v1&terrainPresentation=composed`;
-hosted subjective review remains open in Tactical 269. Browser multi-flat,
+hosted subjective review rejected the overall result on 2026-07-27. The
+browser tier removed `63/64` of every tile's ground cells, invalidated the
+stride-one normal-halo assumptions, amplified unsown fine/coarse boundaries
+into sky-colored wedges, and remained clipped by the near-field game
+projection. Native stride-one captures contain smaller blue ring cracks and
+are not an accepted quality baseline either. Corrective Tactical
+[`271`](../tactical/271-procedural-horizon-quality-baseline.md) now requires
+matched ten-level/stride-one Explorer, desktop-game, and browser-game
+evidence; shared seam closure and horizon reach precede any performance tier.
+Browser multi-flat,
 full-frame multiview, Android, and headset promotion remain PH-7/PH-8 work.
 Canonical exact generation and live authoritative render sections remain
 different truth-source adapters.

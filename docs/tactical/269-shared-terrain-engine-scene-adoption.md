@@ -2,7 +2,9 @@
 
 ## Status
 
-Human Review checkpoint ready 2026-07-27. This is PH-4 from parent Tactical
+Hosted Human Review rejected 2026-07-27; corrective quality Tactical
+[`271`](271-procedural-horizon-quality-baseline.md) is active. This is PH-4
+from parent Tactical
 [`261`](261-procedural-horizon-product-integration-roadmap.md), following the
 accepted World Explorer composition proof in Tactical
 [`262`](262-world-explorer-exact-procedural-composition.md) and Terrain Lab
@@ -183,11 +185,21 @@ Production deployment `f0cdc1e4-5d1d-4389-a3ff-2926e04ae69f` serves bundle
 asset version `cdf56dceed78-20260727132018`. The public app and new vegetation
 Worker return the required COOP/COEP/CORP headers.
 
-## Human review checkpoint
+Hosted review rejected the overall visual result. The six-level,
+render-stride-eight browser budget reduced each terrain tile to `8x8` cells,
+invalidated the stride-one normal-halo proof, enlarged unsown fine/coarse
+boundaries into sky-colored wedges, and combined with the ordinary
+approximately one-kilometre camera far plane to hide most resident horizon
+reach. Reinspection found smaller blue positional cracks in the native
+stride-one captures as well. Tactical 271 therefore establishes and repairs a
+matched ten-level, stride-one quality baseline before any browser performance
+tuning.
 
-The first required review is the hosted full web game after Slice 6. The fixed
-URL must make it possible to compare exact-only and composed presentation at
-one low-angle site. Review:
+## Rejected human review checkpoint
+
+The hosted full web game after Slice 6 supplied the first required review. The
+fixed URL made it possible to compare exact-only and composed presentation at
+one low-angle site:
 
 - composed:
   `https://mclone.kzahel.com/app?startInWorld=1&generationProfile=mclone-overworld-v1&terrainPresentation=composed`
@@ -203,8 +215,9 @@ one low-angle site. Review:
 6. an authoritative edit near the frontier remains exact while covered; and
 7. only the already-recorded outermost-block z-fighting remains.
 
-No earlier human review is planned unless implementation evidence exposes a
-new authority or product decision.
+The checkpoint failed item 3 and overall visual believability. Tactical 271
+owns the corrected screenshot-based native/browser checkpoint; no desktop
+interaction is required from the reviewer.
 
 ## Exit condition
 
