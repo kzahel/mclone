@@ -62,7 +62,7 @@ export function App(): JSX.Element {
         </div>
         <div className="topActions">
           <span className="readOnlyBadge">Read-only recipes</span>
-          <a className="siteLink" href="/">Play Mclone</a>
+          <a className="siteLink" href="/">Mclone home</a>
           <button className="quietButton" type="button" onClick={state.toggleTheme}>
             {state.themeMode === "dark" ? "Light" : "Dark"}
           </button>

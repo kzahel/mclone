@@ -71,3 +71,11 @@ fn explorer_shared_render_contract_stays_behind_the_lightweight_firewall() {
     assert!(!EXPLORER_MANIFEST.contains("\nmclone-scene.workspace = true"));
     assert!(!EXPLORER_MANIFEST.contains("\nmclone-ui.workspace = true"));
 }
+
+#[test]
+fn ordinary_browser_explorer_defaults_to_composed_terrain() {
+    assert!(WEB_RUST_HOST.contains("composition: WorldExplorerCompositionMode::Composed,"));
+    assert!(WEB_RUST_HOST.contains(
+        "self.composition != WorldExplorerCompositionMode::Horizon && self.exact.is_some()"
+    ));
+}

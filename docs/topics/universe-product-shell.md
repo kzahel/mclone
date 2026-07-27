@@ -243,10 +243,13 @@ Preview truth must remain explicit:
 
 ## Startup, Resume, And Failure
 
-The implemented product currently defaults to the title and starts a session
-only from an explicit host-neutral request. Universe does not silently change
-that behavior. A future tactical may generalize the shared entry vocabulary so
-the ordinary root becomes Universe with an initial focus.
+The implemented game still defaults to the title and starts a session only
+from an explicit host-neutral request. On the hosted web product, `/` is now a
+small product hub linking play and the read-only exploration/workbench
+surfaces, while `/play/` owns the game entry. This navigation shell does not
+silently start a session or claim to implement the future live Universe
+runtime. A future tactical may generalize the shared entry vocabulary so the
+ordinary product entry becomes Universe with an initial focus.
 
 Prospective startup choices include:
 

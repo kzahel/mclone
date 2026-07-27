@@ -118,8 +118,8 @@ export const DEFAULT_TERRAIN_LAB_STATE: TerrainLabState = {
   blocksAcross: 512,
   detail: "auto",
   surfaceQuality: "inferred",
-  source: "split",
-  panes: ["canonical", "cpu", "gpu"],
+  source: "reference",
+  panes: ["runtime"],
   canonicalStage: "final",
   canonicalRadius: 2,
   waterVisible: true,
@@ -418,6 +418,23 @@ export function terrainLabSearch(
     params.set("reviewPitch", String(reviewCamera.pitch));
   }
   return `?${params.toString()}`;
+}
+
+export function terrainLabPlayHref(
+  state: Pick<TerrainLabState, "profile" | "seed" | "centerX" | "centerZ">,
+): string {
+  const params = new URLSearchParams();
+  params.set("startInWorld", "true");
+  params.set("seed", state.seed);
+  params.set("generationProfile", state.profile);
+  params.set("chunkX", String(canonicalTerrainCenterChunk(state.centerX)));
+  params.set("chunkZ", String(canonicalTerrainCenterChunk(state.centerZ)));
+  params.set("movementMode", "fly");
+  params.set(
+    "terrainPresentation",
+    state.profile === "mclone-overworld-v1" ? "composed" : "exact-only",
+  );
+  return `/play/?${params.toString()}`;
 }
 
 export function proceduralSourceForPanes(panes: readonly TerrainLabPane[]): TerrainLabSource {

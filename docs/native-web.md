@@ -1,18 +1,21 @@
 # Web/WASM
 
-The Rust/WASM web app is served from:
+The hosted product hub is served from:
 
 ```text
 https://mclone.kzahel.com/
 ```
 
-The live web client is the Rust/WASM target under
+The live Rust/WASM game is served at `/play/` (with `/Play/` retained as a
+compatibility alias). The root hub links it with World Explorer, Terrain Lab,
+the read-only Texture Lab catalog, Asset Lab, and Structure Lab. The game
+client is the Rust/WASM target under
 [`../native/apps/mclone-web-client/`](../native/apps/mclone-web-client/).
 
 ## Client Entry
 
-An ordinary browser URL opens the title menu without constructing a local or
-remote session. A product link can request immediate entry with
+An ordinary `/play/` browser URL opens the title menu without constructing a
+local or remote session. A product link can request immediate entry with
 `?startInWorld=true`; a remote address or IndexedDB world destination also
 implies an explicit session request. `?startInWorld=false` forces title entry.
 The browser adapter normalizes those URL facts into the same shared
@@ -24,8 +27,8 @@ For a local `mclone-overworld-v1` session, add
 control. The hosted PH-4 review links are:
 
 ```text
-https://mclone.kzahel.com/app?startInWorld=1&generationProfile=mclone-overworld-v1&terrainPresentation=composed
-https://mclone.kzahel.com/app?startInWorld=1&generationProfile=mclone-overworld-v1&terrainPresentation=exact-only
+https://mclone.kzahel.com/play/?startInWorld=1&generationProfile=mclone-overworld-v1&terrainPresentation=composed
+https://mclone.kzahel.com/play/?startInWorld=1&generationProfile=mclone-overworld-v1&terrainPresentation=exact-only
 ```
 
 ## Runtime Ownership
@@ -182,6 +185,9 @@ pnpm terrain-lab:web:test
 pnpm terrain-lab:web:smoke
 pnpm terrain-lab:web:smoke -- --mobile
 
+# Build the sanitized, read-only Texture Lab catalog served at /textures/.
+pnpm texture-lab:web:build
+
 # Build the native web bundle and deploy it with Cloudflare Workers Static
 # Assets at mclone.kzahel.com.
 pnpm run deploy
@@ -199,11 +205,14 @@ deployment command.
 
 The deploy path packages:
 
+- the product hub at `/` and the Rust/WASM game at `/play/`
 - `native/apps/mclone-web-client/www`
 - wasm-bindgen output under `/pkg/`
 - the validated Asset Lab animal catalogue under `/animals/`
 - the validated Structure Lab catalogue under `/structures/`
 - the dedicated Terrain Lab Rust/WASM workbench under `/terrain/`
+- the sanitized, read-only Texture Lab catalog under `/textures/`
+- World Explorer under `/explore/`
 - `reference/minecraft-1.17.1/extracted.zip`
 - deterministic authored/fallback packs and sidecars under
   `/first-party-packs/`
@@ -259,11 +268,11 @@ pushing.
 
 Local ignored inputs and caches such as `reference/minecraft-1.17.1` and the
 root `node_modules` are linked into that deploy worktree when present. The
-bundle command installs the separately locked Asset Lab, Structure Lab, and
-Terrain Lab packages with `--frozen-lockfile` when their local dependencies
-are absent, so a clean deploy worktree can build `/animals/`, `/structures/`,
-and `/terrain/` without depending on nested ignored files from the active
-checkout.
+bundle command installs the separately locked Asset Lab, Structure Lab,
+Terrain Lab, and Texture Lab packages with `--frozen-lockfile` when their
+local dependencies are absent, so a clean deploy worktree can build
+`/animals/`, `/structures/`, `/terrain/`, and `/textures/` without depending
+on nested ignored files from the active checkout.
 
 Status is available with:
 

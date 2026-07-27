@@ -8,6 +8,7 @@ const textureLabRoot = path.resolve(webRoot, "..", "..");
 
 export default defineConfig({
   root: webRoot,
+  base: "/textures/",
   publicDir: false,
   plugins: [react()],
   server: {

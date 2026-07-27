@@ -193,6 +193,8 @@ export interface TextureImageRef {
   path: string | null;
   exists: boolean;
   missingCommand: string | null;
+  publicUrl?: string;
+  tintUrls?: Record<string, string>;
 }
 
 export interface TextureFrozenRef {

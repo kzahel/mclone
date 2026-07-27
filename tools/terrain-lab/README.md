@@ -4,6 +4,13 @@ Terrain Lab is the browser-hosted terrain workspace at `/terrain/`. Its
 visible panes are independently configurable but coordinate-locked. One
 global terrain profile selects the terrain family for every visible pane:
 
+The ordinary URL opens one `Runtime composed` pane. Research and comparison
+panes remain available through the pane controls and shareable URL state.
+The header's **Play this seed** action opens `/play/` at the focused chunk,
+requests immediate world entry, and starts in fly movement. Mclone terrain
+uses composed presentation; vanilla-reference terrain falls back to exact-only
+because the procedural horizon is not defined for that profile.
+
 - `mclone-overworld-v1` (the default) provides exact Mclone terrain, a
   research landform plan, the streamed planner atlas, Mclone CPU LOD, and
   optional Mclone GPU LOD.

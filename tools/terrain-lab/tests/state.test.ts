@@ -10,6 +10,7 @@ import {
   parseTerrainLabState,
   parseTerrainLabReviewCamera,
   switchTerrainLabProfile,
+  terrainLabPlayHref,
   terrainLabSearch,
   validSeed,
   toggleTerrainLabPane,
@@ -126,16 +127,31 @@ test("accepts stepped exact footprints through 31 by 31 chunks", () => {
   assert.equal(parseTerrainLabState("?radius=16").canonicalRadius, 2);
 });
 
-test("defaults to the three-pane workspace and gives the review site a name", () => {
+test("defaults to the single runtime-composed workspace and gives the review site a name", () => {
   assert.equal(DEFAULT_TERRAIN_LAB_STATE.profile, "mclone-overworld-v1");
   assert.equal(DEFAULT_TERRAIN_LAB_STATE.visualProfile, "mclone-original");
   assert.equal(DEFAULT_TERRAIN_LAB_STATE.texturePresentation, "textured");
   assert.equal(DEFAULT_TERRAIN_LAB_STATE.compareVisualProfile, "off");
   assert.equal(DEFAULT_TERRAIN_LAB_STATE.surfaceQuality, "inferred");
-  assert.equal(DEFAULT_TERRAIN_LAB_STATE.source, "split");
-  assert.deepEqual(DEFAULT_TERRAIN_LAB_STATE.panes, ["canonical", "cpu", "gpu"]);
+  assert.equal(DEFAULT_TERRAIN_LAB_STATE.source, "reference");
+  assert.deepEqual(DEFAULT_TERRAIN_LAB_STATE.panes, ["runtime"]);
   assert.equal(REVIEW_TERRAIN_LAB_STATE.seed, "-98765");
-  assert.equal(REVIEW_TERRAIN_LAB_STATE.source, "split");
+  assert.equal(REVIEW_TERRAIN_LAB_STATE.source, "reference");
+});
+
+test("links the current seed and focus to composed fly-mode play", () => {
+  assert.equal(
+    terrainLabPlayHref(DEFAULT_TERRAIN_LAB_STATE),
+    "/play/?startInWorld=true&seed=-98765&generationProfile=mclone-overworld-v1"
+      + "&chunkX=-19&chunkZ=21&movementMode=fly&terrainPresentation=composed",
+  );
+  assert.match(
+    terrainLabPlayHref({
+      ...DEFAULT_TERRAIN_LAB_STATE,
+      profile: "overworld",
+    }),
+    /terrainPresentation=exact-only$/u,
+  );
 });
 
 test("maps legacy source links and keeps at least one pane visible", () => {
@@ -162,6 +178,8 @@ test("the vanilla profile replaces GPU with fast macro and excludes Mclone-only 
       ...DEFAULT_TERRAIN_LAB_STATE,
       layer: "streams",
       contentStage: "cover",
+      source: "split",
+      panes: ["canonical", "cpu", "gpu"],
     },
     "overworld",
   );
@@ -205,8 +223,8 @@ test("keeps camera state outside URL-addressed terrain state", () => {
     blocksAcross: 512,
     detail: "auto",
     surfaceQuality: "inferred",
-    source: "split",
-    panes: ["canonical", "cpu", "gpu"],
+    source: "reference",
+    panes: ["runtime"],
     canonicalStage: "final",
     canonicalRadius: 2,
     waterVisible: true,

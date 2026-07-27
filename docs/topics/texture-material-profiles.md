@@ -58,6 +58,13 @@ Lifecycle filter and **Use as Provisional**, **Accept as Curated**, and
 **Return to Candidate**. Its material comparison grid keeps Minecraft
 Reference explicitly local and read-only.
 
+Implementation update (2026-07-27): the aggregate web product publishes a
+read-only Texture Lab catalog at `/textures/`. Its build stages hashed
+first-party preview images and sanitized catalog metadata only. It does not
+publish local paths, mutation endpoints, generated review sheets, or
+Minecraft reference images. The full authoring and promotion workflow remains
+the local `texture-lab:web:dev` surface.
+
 Promotions validate image dimensions and tint-source policy, write a
 pack-local provisional or frozen PNG, and commit an explicit canonical runtime
 material binding. Exact inventory matches may be suggested, while ambiguous

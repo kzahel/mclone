@@ -17,7 +17,7 @@
     "runtime-compat:clean": "tsx src/export.ts packs/mclone-default/texture.ts --runtime-compat --no-reference --clean-runtime-pack",
     "sheet": "tsx src/export.ts packs/mclone-default/texture.ts --sheet-only",
     "web:dev": "tsx src/web-server/server.ts",
-    "web:build": "vite build --config src/web/vite.config.ts",
+    "web:build": "vite build --config src/web/vite.config.ts && tsx src/web/build-hosted-catalog.ts",
     "web:preview": "vite preview --host 127.0.0.1 --config src/web/vite.config.ts",
     "web:test": "playwright test -c playwright.config.ts"
   },

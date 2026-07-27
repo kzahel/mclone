@@ -10,6 +10,7 @@ import {
   parseTerrainLabReviewCamera,
   proceduralSourceForPanes,
   switchTerrainLabProfile,
+  terrainLabPlayHref,
   terrainLabSearch,
   toggleTerrainLabPane,
   validSeed,
@@ -270,6 +271,7 @@ export function App(): React.JSX.Element {
   const viewPaneVisible = terrainPaneVisible || semanticVisible;
   const diagnosticOnly = (planVisible || atlasVisible) && !viewPaneVisible;
   const proceduralSource = proceduralSourceForPanes(state.panes);
+  const playHref = terrainLabPlayHref(state);
   const primaryVisualUnavailable = visualAssetsReady
     && visualProfileUsesMinecraftReference(state.visualProfile)
     && minecraftReferenceAvailable === false;
@@ -513,7 +515,12 @@ export function App(): React.JSX.Element {
             <span className="statusDot" />
             {renderStatus}
           </div>
-          <a className="playLink" href="/">Play Mclone</a>
+          <a className="playLink" href={playHref}>
+            <span>Play this seed</span>
+            <small>
+              Fly at {formatInteger(state.centerX)}, {formatInteger(state.centerZ)}
+            </small>
+          </a>
         </div>
       </header>
 

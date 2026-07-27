@@ -292,11 +292,41 @@ h1 {
 }
 
 .playLink {
+  display: grid;
+  gap: 2px;
+  min-width: 150px;
+  padding: 10px 14px;
+  border: 1px solid rgba(183, 220, 108, 0.42);
+  border-radius: 8px;
+  background:
+    linear-gradient(135deg, rgba(183, 220, 108, 0.18), rgba(85, 182, 199, 0.08));
   color: var(--ink);
   text-decoration: none;
-  border-bottom: 1px solid var(--line-strong);
-  padding: 6px 0;
+  box-shadow: 0 8px 24px rgba(3, 10, 10, 0.2);
+  transition:
+    border-color 140ms ease,
+    transform 140ms ease,
+    background 140ms ease;
+}
+
+.playLink:hover {
+  border-color: var(--accent);
+  background:
+    linear-gradient(135deg, rgba(183, 220, 108, 0.26), rgba(85, 182, 199, 0.12));
+  transform: translateY(-1px);
+}
+
+.playLink span {
+  color: var(--accent);
   font-size: 13px;
+  font-weight: 700;
+}
+
+.playLink small {
+  color: var(--muted);
+  font-family: "DM Mono", monospace;
+  font-size: 9px;
+  letter-spacing: 0.02em;
 }
 
 .errorBanner {
@@ -1122,7 +1152,16 @@ button:hover {
     font-size: 18px;
   }
 
+  .headerMeta {
+    gap: 8px;
+  }
+
   .playLink {
+    min-width: 0;
+    padding: 8px 10px;
+  }
+
+  .playLink small {
     display: none;
   }
 
@@ -1204,6 +1243,7 @@ button:hover {
 @media (max-width: 560px) {
   .topBar {
     align-items: center;
+    gap: 8px;
   }
 
   .brandLockup {
@@ -1219,9 +1259,11 @@ button:hover {
   }
 
   .statusPill {
-    min-width: 0;
-    padding: 7px 9px;
-    font-size: 9px;
+    display: none;
+  }
+
+  .playLink span {
+    font-size: 11px;
   }
 
   .terrainStage {

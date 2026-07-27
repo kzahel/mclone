@@ -8,6 +8,7 @@ export type PreviewMode = "auto" | "detail" | "atlas" | "mc" | "blocks";
 export type QueueFilter = "all" | "noise-placeholder" | "authored-structure" | "frozen-asset" | "has-candidates" | "needs-candidates";
 export type LifecycleFilter = "all" | "candidate" | "provisional" | "curated";
 type ThemeSource = "system" | "manual";
+const HOSTED_READ_ONLY = import.meta.env.PROD;
 
 export interface TextureLabState {
   index: TextureLabIndex | null;
@@ -54,7 +55,7 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
   previewSelectionsByTexture: {},
   themeMode: systemThemeMode(),
   themeSource: "system",
-  previewMode: "auto",
+  previewMode: HOSTED_READ_ONLY ? "atlas" : "auto",
   search: "",
   materialFilter: "all",
   statusFilter: "all",
@@ -70,7 +71,9 @@ export const useTextureLabStore = create<TextureLabState>((set, get) => ({
     }
     set({ loadStatus: "loading", error: null });
     try {
-      const index = await fetchIndex("/api/index");
+      const index = await fetchIndex(
+        HOSTED_READ_ONLY ? "/textures/catalog/index.json" : "/api/index",
+      );
       const selectedTextureName = selectTextureAfterLoad(index, get().selectedTextureName);
       set({
         index,
@@ -398,11 +401,20 @@ export function imageUrl(texture: TextureIndexEntry, imageKind: keyof TextureInd
 }
 
 export function imageRefUrl(ref: TextureImageRef): string | null {
-  return ref.path && ref.exists ? `/api/image?path=${encodeURIComponent(ref.path)}` : null;
+  if (!ref.exists) {
+    return null;
+  }
+  return ref.publicUrl
+    ?? (ref.path ? `/api/image?path=${encodeURIComponent(ref.path)}` : null);
 }
 
 export function tintedImageRefUrl(ref: TextureImageRef, tint: string): string | null {
-  return ref.path && ref.exists
-    ? `/api/tinted-image?path=${encodeURIComponent(ref.path)}&tint=${encodeURIComponent(tint)}`
-    : null;
+  if (!ref.exists) {
+    return null;
+  }
+  return ref.tintUrls?.[tint]
+    ?? ref.publicUrl
+    ?? (ref.path
+      ? `/api/tinted-image?path=${encodeURIComponent(ref.path)}&tint=${encodeURIComponent(tint)}`
+      : null);
 }

@@ -76,7 +76,7 @@ impl Default for ExplorerOptions {
             yaw_radians: std::f32::consts::FRAC_PI_4,
             pitch_radians: 0.52,
             projection: WorldViewProjection::Perspective,
-            composition: WorldExplorerCompositionMode::Horizon,
+            composition: WorldExplorerCompositionMode::Composed,
             source_colors: false,
             exact_radius: DEFAULT_EXACT_RADIUS,
             exact_anchor: WorldExplorerExactAnchor::Focus,
@@ -304,7 +304,7 @@ Usage: mclone-world-explorer [options]
   --blocks-across N           horizontal footprint (default {DEFAULT_BLOCKS_ACROSS})
   --view map|3d               camera mode (default 3d)
   --projection TYPE           perspective or orthographic
-  --composition MODE          horizon, exact, composed, or coverage
+  --composition MODE          horizon, exact, composed (default), or coverage
   --source-colors             render exact geometry in diagnostic magenta
   --exact-radius N            exact near-field chunk radius (default {DEFAULT_EXACT_RADIUS})
   --exact-anchor MODE         focus (default) or viewer-forward
@@ -320,4 +320,17 @@ Usage: mclone-world-explorer [options]
   --smoke DIR                 run offscreen and native-surface movement smoke
   -h, --help                  show this help"
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explorer_defaults_to_composed_terrain() {
+        assert_eq!(
+            ExplorerOptions::default().composition,
+            WorldExplorerCompositionMode::Composed
+        );
+    }
 }

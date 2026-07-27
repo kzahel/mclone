@@ -158,7 +158,7 @@ export function App(): JSX.Element {
           <SummaryItem label="runtime" value={catalog?.summary.runtimePromotedFigures ?? 0} />
         </div>
         <div className="topActions">
-          <a className="siteLink" href="/">Play Mclone</a>
+          <a className="siteLink" href="/">Mclone home</a>
           <button type="button" className="themeButton" onClick={toggleTheme}>
             {themeMode === "dark" ? "Light" : "Dark"}
           </button>

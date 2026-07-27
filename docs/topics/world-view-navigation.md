@@ -50,12 +50,19 @@ This Explorer policy does not prescribe game behavior: embodied game and XR
 views will normally select exact terrain around the authoritative player.
 Tactical
 [`266`](../tactical/266-terrain-lab-runtime-composition-adoption.md) proved the
-same focus-centered runtime composition as an optional Terrain Lab pane, and
+same focus-centered runtime composition as a Terrain Lab pane, and
 hosted Human Review 1 accepted it on 2026-07-27. It follows the existing
 shared React navigation hook and shared Rust runtime session; it does not add
 pane-local camera math. Fixed hosted review links may provide static
 `reviewYaw`/`reviewPitch` initialization while ordinary orbit motion remains
 outside URL-addressed terrain state.
+The product defaults changed on 2026-07-27: World Explorer now opens in
+`composed` mode, and Terrain Lab opens with only the runtime-composed pane.
+Explorer's `composition=horizon` URL and native `--composition horizon`
+remain available for an explicit LOD-only diagnostic.
+The query-free browser smoke covers composed whole-tree suppression through
+movement and Worker recovery, then verifies that terminal frames fall back to
+the horizon renderer after the exact Worker is released during shutdown.
 
 ## Scope
 

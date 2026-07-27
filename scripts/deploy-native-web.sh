@@ -11,6 +11,7 @@ WEB_ROOT="$NATIVE_ROOT/target/mclone-web-client-www"
 ANIMAL_CATALOG_WEB_ROOT="$PROJECT_DIR/tools/asset-lab/dist/web"
 STRUCTURE_CATALOG_WEB_ROOT="$PROJECT_DIR/tools/structure-lab/dist/web"
 TERRAIN_LAB_WEB_ROOT="$PROJECT_DIR/tools/terrain-lab/dist/web"
+TEXTURE_LAB_WEB_ROOT="$PROJECT_DIR/tools/texture-lab/dist/web"
 WORLD_EXPLORER_WEB_ROOT="$NATIVE_ROOT/target/mclone-world-explorer-www"
 WORLD_EXPLORER_BUILD_SCRIPT="$PROJECT_DIR/native/apps/mclone-world-explorer/scripts/build-web.mjs"
 REFERENCE_DIR="$PROJECT_DIR/reference/minecraft-1.17.1"
@@ -96,6 +97,15 @@ ensure_terrain_lab_dependencies() {
   pnpm --dir "$PROJECT_DIR/tools/terrain-lab" install --frozen-lockfile
 }
 
+ensure_texture_lab_dependencies() {
+  if [ -x "$PROJECT_DIR/tools/texture-lab/node_modules/.bin/vite" ]; then
+    return
+  fi
+
+  echo "==> Installing Texture Lab web dependencies"
+  pnpm --dir "$PROJECT_DIR/tools/texture-lab" install --frozen-lockfile
+}
+
 echo "==> Building native web assets"
 cd "$PROJECT_DIR"
 pnpm assets:pack
@@ -121,15 +131,24 @@ ensure_structure_lab_dependencies
 pnpm structure-lab:web:build
 ensure_terrain_lab_dependencies
 pnpm terrain-lab:web:build
+ensure_texture_lab_dependencies
+pnpm texture-lab:web:build
 node "$WORLD_EXPLORER_BUILD_SCRIPT"
 rm -rf "$DEPLOY_DIR"
 mkdir -p "$DEPLOY_DIR/pkg"
 cp -R "$WEB_ROOT"/. "$DEPLOY_DIR"/
 cp "$WEB_ROOT/index.html" "$DEPLOY_DIR/smoke.html"
-cp "$WEB_ROOT/app.html" "$DEPLOY_DIR/index.html"
+cp "$WEB_ROOT/hub.html" "$DEPLOY_DIR/index.html"
+mkdir -p "$DEPLOY_DIR/play" "$DEPLOY_DIR/Play"
+cp "$WEB_ROOT/app.html" "$DEPLOY_DIR/play/index.html"
+cp "$WEB_ROOT/app.html" "$DEPLOY_DIR/Play/index.html"
+perl -0pi -e 's#src="\./mclone-web-app\.js#src="/mclone-web-app.js#g' \
+  "$DEPLOY_DIR/play/index.html" \
+  "$DEPLOY_DIR/Play/index.html"
 perl -0pi -e "s/__MCLONE_NATIVE_WEB_ASSET_VERSION__/$DEPLOY_VERSION/g" \
   "$DEPLOY_DIR/app.html" \
-  "$DEPLOY_DIR/index.html"
+  "$DEPLOY_DIR/play/index.html" \
+  "$DEPLOY_DIR/Play/index.html"
 cp "$BINDGEN_OUT_DIR/mclone_web_client.js" "$DEPLOY_DIR/pkg/mclone_web_client.js"
 cp "$BINDGEN_OUT_DIR/mclone_web_client_bg.wasm" "$DEPLOY_DIR/pkg/mclone_web_client_bg.wasm"
 mkdir -p "$DEPLOY_DIR/animals"
@@ -138,6 +157,8 @@ mkdir -p "$DEPLOY_DIR/structures"
 cp -R "$STRUCTURE_CATALOG_WEB_ROOT"/. "$DEPLOY_DIR/structures"/
 mkdir -p "$DEPLOY_DIR/terrain"
 cp -R "$TERRAIN_LAB_WEB_ROOT"/. "$DEPLOY_DIR/terrain"/
+mkdir -p "$DEPLOY_DIR/textures"
+cp -R "$TEXTURE_LAB_WEB_ROOT"/. "$DEPLOY_DIR/textures"/
 mkdir -p "$DEPLOY_DIR/explore"
 cp -R "$WORLD_EXPLORER_WEB_ROOT"/. "$DEPLOY_DIR/explore"/
 mkdir -p "$DEPLOY_DIR/reference/minecraft-1.17.1"

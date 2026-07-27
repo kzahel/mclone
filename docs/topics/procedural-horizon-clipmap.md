@@ -79,8 +79,10 @@ Tactical
 [`266`](../tactical/266-terrain-lab-runtime-composition-adoption.md) now
 extracts the exact renderer, composition session, and browser executors from
 World Explorer into `mclone-terrain-view`. Terrain Lab consumes them through
-an optional `runtime` pane while retaining its four research panes and prior
-defaults. The hosted desktop and Pixel 7 gates reach 25/25 exact chunks,
+the `runtime` pane while retaining its four opt-in research panes. Following
+the accepted review, Terrain Lab now defaults to only that composed pane and
+World Explorer defaults to composed exact-plus-horizon presentation; explicit
+LOD-only controls remain available. The hosted desktop and Pixel 7 gates reach 25/25 exact chunks,
 non-empty whole-tree exact/proxy ownership, and all 160 horizon slots at the
 fixed low-angle review site. This is the PH-3 reusable-consumer checkpoint;
 hosted Human Review 1 accepted it on 2026-07-27. PH-3 is complete, PH-4

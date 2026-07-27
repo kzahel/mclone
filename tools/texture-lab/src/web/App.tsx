@@ -33,6 +33,8 @@ type TextureLifecyclePromotionHandler = (
   state: "provisional" | "curated",
 ) => Promise<void>;
 
+const HOSTED_READ_ONLY = import.meta.env.PROD;
+
 export function App(): JSX.Element {
   const index = useTextureLabStore(selectIndex);
   const loadStatus = useTextureLabStore(selectLoadStatus);
@@ -95,6 +97,8 @@ export function App(): JSX.Element {
           <SummaryItem label="legacy LOD" value={index?.summary.legacyDerivedTextureCount ?? 0} />
         </div>
         <div className="toolbarActions">
+          <a className="toolbarButton toolbarLink" href="/">Home</a>
+          {HOSTED_READ_ONLY ? <span className="hostedBadge">Hosted · read-only</span> : null}
           <button
             className="toolbarButton"
             type="button"
@@ -103,9 +107,11 @@ export function App(): JSX.Element {
           >
             {themeMode === "dark" ? "Light" : "Dark"}
           </button>
-          <button className="toolbarButton" type="button" onClick={() => void reindex()} disabled={loadStatus === "loading"}>
-            {loadStatus === "loading" ? "Indexing" : "Reindex"}
-          </button>
+          {!HOSTED_READ_ONLY ? (
+            <button className="toolbarButton" type="button" onClick={() => void reindex()} disabled={loadStatus === "loading"}>
+              {loadStatus === "loading" ? "Indexing" : "Reindex"}
+            </button>
+          ) : null}
         </div>
       </header>
 
@@ -448,7 +454,11 @@ function LifecycleImageCard({
     <div className="imageCard lifecycleCard">
       <div className="imageCardHeader">
         <strong>{stage}</strong>
-        <span>{readOnly ? "local · read-only" : refInfo.exists ? "available" : "empty"}</span>
+        <span>
+          {readOnly
+            ? refInfo.exists ? "read-only" : "not hosted"
+            : refInfo.exists ? "available" : "empty"}
+        </span>
       </div>
       {url ? (
         <div className="imageFrame">
@@ -533,30 +543,34 @@ function CandidateSection({
           </p>
         </div>
         <div className="candidateActions">
-          <button
-            className="inlineButton"
-            type="button"
-            disabled={!canPromote}
-            title={canPromote ? "Promote the selected candidate or current recipe render" : texture.lifecycle.note}
-            onClick={() =>
-              void onPromote(texture.name, selectedCandidateIdForPromotion, "provisional")
-            }
-          >
-            Use as Provisional
-          </button>
-          <button
-            className="inlineButton primaryAction"
-            type="button"
-            disabled={!canPromote}
-            title={canPromote ? "Accept the selected candidate or current recipe render" : texture.lifecycle.note}
-            onClick={() => void onPromote(texture.name, selectedCandidateIdForPromotion, "curated")}
-          >
-            Accept as Curated
-          </button>
-          {texture.lifecycle.state === "provisional" || texture.lifecycle.state === "curated" ? (
-            <button className="inlineButton" type="button" onClick={() => void onReturnToCandidate(texture.name)}>
-              Return to Candidate
-            </button>
+          {!HOSTED_READ_ONLY ? (
+            <>
+              <button
+                className="inlineButton"
+                type="button"
+                disabled={!canPromote}
+                title={canPromote ? "Promote the selected candidate or current recipe render" : texture.lifecycle.note}
+                onClick={() =>
+                  void onPromote(texture.name, selectedCandidateIdForPromotion, "provisional")
+                }
+              >
+                Use as Provisional
+              </button>
+              <button
+                className="inlineButton primaryAction"
+                type="button"
+                disabled={!canPromote}
+                title={canPromote ? "Accept the selected candidate or current recipe render" : texture.lifecycle.note}
+                onClick={() => void onPromote(texture.name, selectedCandidateIdForPromotion, "curated")}
+              >
+                Accept as Curated
+              </button>
+              {texture.lifecycle.state === "provisional" || texture.lifecycle.state === "curated" ? (
+                <button className="inlineButton" type="button" onClick={() => void onReturnToCandidate(texture.name)}>
+                  Return to Candidate
+                </button>
+              ) : null}
+            </>
           ) : null}
           {previewCandidateId ? (
             <button className="inlineButton" type="button" onClick={() => onClearPreview(texture.name)}>

@@ -61,7 +61,7 @@ impl Default for WebExplorerOptions {
             projection: WorldViewProjection::Perspective,
             yaw_radians: std::f64::consts::FRAC_PI_4,
             pitch_radians: 0.52,
-            composition: WorldExplorerCompositionMode::Horizon,
+            composition: WorldExplorerCompositionMode::Composed,
             source_colors: false,
             exact_radius: DEFAULT_EXACT_RADIUS,
             exact_anchor: WorldExplorerExactAnchor::Focus,
@@ -349,7 +349,9 @@ impl WebWorldExplorer {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("mclone_world_explorer_web_frame"),
             });
-        let mut stats = if self.composition == WorldExplorerCompositionMode::Horizon {
+        let exact_active =
+            self.composition != WorldExplorerCompositionMode::Horizon && self.exact.is_some();
+        let mut stats = if !exact_active {
             self.session.restore_horizon_view();
             self.session
                 .encode(
@@ -364,11 +366,11 @@ impl WebWorldExplorer {
             self.encode_composed(&mut encoder, &color_view, elapsed)
                 .map_err(js_error)?
         };
-        if self.composition != WorldExplorerCompositionMode::Horizon {
+        if exact_active {
             self.last_exact_stats = self
                 .exact
                 .as_ref()
-                .expect("non-horizon browser composition owns exact terrain")
+                .expect("active browser exact composition owns exact terrain")
                 .stats();
             stats.target_ready &= self.last_exact_stats.complete;
             stats.needs_redraw |= !self.last_exact_stats.complete;

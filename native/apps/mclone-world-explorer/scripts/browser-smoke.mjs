@@ -412,6 +412,8 @@ function assertVegetationDiagnostics(value, stage) {
     (sum, count) => sum + count,
     0,
   );
+  const representedTreeCount =
+    value.treeInstanceCount + value.treeProxySuppressedInstances;
   if (value.vegetationCoordinatorState !== "running"
       || value.vegetationExecutorKind !== "browser-worker"
       || value.vegetationDesiredTiles !== 48
@@ -419,8 +421,8 @@ function assertVegetationDiagnostics(value, stage) {
       || value.vegetationResidentTiles !== 48
       || value.vegetationInFlight
       || value.vegetationProductCount !== 48
-      || value.vegetationRecordCount !== value.treeInstanceCount
-      || familyCount !== value.treeInstanceCount
+      || value.vegetationRecordCount !== representedTreeCount
+      || familyCount !== representedTreeCount
       || !/^[0-9a-f]{16}$/u.test(value.vegetationSourceFingerprint)
       || !/^[0-9a-f]{16}$/u.test(value.vegetationRecordHash)
       || value.vegetationCompileMicros <= 0

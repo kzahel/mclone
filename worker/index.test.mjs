@@ -31,10 +31,30 @@ test("static assets retain isolation and immutable hashed/runtime caching", asyn
     "/animals/assets/*",
     "/structures/assets/*",
     "/terrain/assets/*",
+    "/textures/assets/*",
+    "/textures/media/*",
     "/pkg/*",
     "/reference/minecraft-1.17.1/extracted.zip",
     "/first-party-packs/*",
   ]) {
     assert.ok(headers.includes(`${path}\n  Cache-Control: public, max-age=31536000, immutable`));
   }
+});
+
+test("the aggregate bundle exposes a root hub and dedicated play route", async () => {
+  const hub = await readFile(
+    new URL("../native/apps/mclone-web-client/www/hub.html", import.meta.url),
+    "utf8",
+  );
+  const bundle = await readFile(
+    new URL("../scripts/deploy-native-web.sh", import.meta.url),
+    "utf8",
+  );
+
+  for (const path of ["/play/", "/explore/", "/terrain/", "/textures/", "/animals/"]) {
+    assert.ok(hub.includes(`href="${path}"`), `hub is missing ${path}`);
+  }
+  assert.match(bundle, /cp "\$WEB_ROOT\/hub\.html" "\$DEPLOY_DIR\/index\.html"/);
+  assert.match(bundle, /"\$DEPLOY_DIR\/play\/index\.html"/);
+  assert.match(bundle, /cp -R "\$TEXTURE_LAB_WEB_ROOT"\/\. "\$DEPLOY_DIR\/textures"\//);
 });
