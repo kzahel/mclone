@@ -63,6 +63,7 @@ test("round-trips complete URL state", () => {
     semanticFeatures: "basin",
     semanticTopology: "torus",
     semanticCorrection: "regional",
+    semanticVerticalScale: "24x",
     semanticGuidesVisible: false,
   };
   assert.deepEqual(parseTerrainLabState(terrainLabSearch(state)), {
@@ -257,6 +258,7 @@ test("keeps camera state outside URL-addressed terrain state", () => {
     semanticFeatures: "combined",
     semanticTopology: "plane",
     semanticCorrection: "local",
+    semanticVerticalScale: "1x",
     semanticGuidesVisible: true,
   });
 });
@@ -307,13 +309,14 @@ test("round-trips semantic terrain reconstruction controls", () => {
   const state = parseTerrainLabState(
     "?panes=semantic&semanticSubstrate=flat&semanticFeatures=range"
       + "&semanticTopology=torus&semanticCorrection=regional"
-      + "&semanticGuides=0",
+      + "&semanticVertical=8x&semanticGuides=0",
   );
   assert.deepEqual(state.panes, ["semantic"]);
   assert.equal(state.semanticSubstrate, "flat");
   assert.equal(state.semanticFeatures, "range");
   assert.equal(state.semanticTopology, "torus");
   assert.equal(state.semanticCorrection, "regional");
+  assert.equal(state.semanticVerticalScale, "8x");
   assert.equal(state.semanticGuidesVisible, false);
   assert.deepEqual(parseTerrainLabState(terrainLabSearch(state)), state);
 });

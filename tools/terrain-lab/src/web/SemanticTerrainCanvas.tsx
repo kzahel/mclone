@@ -14,7 +14,7 @@ import type {
 } from "./semantic-terrain-worker-protocol";
 import {
   SEMANTIC_TERRAIN_VERTICAL_DATUM,
-  SEMANTIC_TERRAIN_VERTICAL_SPAN,
+  semanticTerrainVerticalExaggeration,
   semanticTerrainVerticalOffset,
 } from "./semantic-terrain-projection";
 import { initializeTerrainLab } from "./terrain-lab-wasm";
@@ -320,9 +320,13 @@ export function SemanticTerrainCanvas({
     response,
     state.semanticCorrection,
     state.semanticGuidesVisible,
+    state.semanticVerticalScale,
     state.view,
   ]);
 
+  const verticalExaggeration = semanticTerrainVerticalExaggeration(
+    state.semanticVerticalScale,
+  );
   return (
     <div
       ref={stageRef}
@@ -331,7 +335,7 @@ export function SemanticTerrainCanvas({
       data-render-ready={response ? "true" : "false"}
       data-render-updating={updating ? "true" : "false"}
       data-vertical-datum={SEMANTIC_TERRAIN_VERTICAL_DATUM}
-      data-vertical-span={SEMANTIC_TERRAIN_VERTICAL_SPAN}
+      data-vertical-exaggeration={verticalExaggeration}
       tabIndex={0}
       aria-keyshortcuts="ArrowUp ArrowDown ArrowLeft ArrowRight"
       onPointerDown={navigation.onPointerDown}
@@ -358,7 +362,9 @@ export function SemanticTerrainCanvas({
         <span className="canvasBadge">{state.semanticTopology}</span>
         {state.view === "3d" ? (
           <span className="canvasBadge">
-            fixed Y · {SEMANTIC_TERRAIN_VERTICAL_SPAN}-block span
+            {verticalExaggeration === 1
+              ? "physical world scale · 1× Y"
+              : `world scale · ${verticalExaggeration}× Y exaggeration`}
           </span>
         ) : null}
       </div>
@@ -387,6 +393,9 @@ function drawSemanticTerrain(
     }
     return;
   }
+  const verticalExaggeration = semanticTerrainVerticalExaggeration(
+    state.semanticVerticalScale,
+  );
   const surfaces: SurfacePanelData[] = [
     {
       heights: response.parentHeights,
@@ -419,6 +428,7 @@ function drawSemanticTerrain(
         response,
         surfaces[index]!,
         camera,
+        verticalExaggeration,
       );
     }
     if (state.semanticGuidesVisible) {
@@ -429,6 +439,7 @@ function drawSemanticTerrain(
         surfaces[index]!,
         camera,
         state.view,
+        verticalExaggeration,
       );
     }
     context.restore();
@@ -523,6 +534,7 @@ function drawThreeDimensionalSurface(
   response: SemanticTerrainWorkerSummary,
   data: SurfacePanelData,
   camera: TerrainLabCamera,
+  verticalExaggeration: number,
 ): void {
   const { columns, rows, minimumHeight, maximumHeight } = response.metadata;
   context.fillStyle = "#071113";
@@ -557,6 +569,7 @@ function drawThreeDimensionalSurface(
         index % columns,
         Math.floor(index / columns),
         data.heights[index]!,
+        verticalExaggeration,
       )
     );
     const height = indices.reduce((sum, index) => sum + data.heights[index]!, 0) / 4;
@@ -585,6 +598,7 @@ function projectGridPoint(
   column: number,
   row: number,
   height: number,
+  verticalExaggeration: number,
 ): { x: number; y: number } {
   const { columns, rows } = response.metadata;
   const normalizedX = column / Math.max(columns - 1, 1) * 2 - 1;
@@ -598,7 +612,13 @@ function projectGridPoint(
     x: panel.x + panel.width * 0.5 + rotatedX * scale,
     y: panel.y + panel.height * 0.56
       + rotatedZ * scale * Math.sin(camera.pitch)
-      - semanticTerrainVerticalOffset(height, camera.pitch, scale),
+      - semanticTerrainVerticalOffset(
+        height,
+        camera.pitch,
+        scale,
+        response.metadata.blocksAcross,
+        verticalExaggeration,
+      ),
   };
 }
 
@@ -657,13 +677,32 @@ function drawGuides(
   data: SurfacePanelData,
   camera: TerrainLabCamera,
   view: TerrainLabState["view"],
+  verticalExaggeration: number,
 ): void {
   const guides = response.metadata.guides.filter((guide) =>
     guide.detail === data.detail
   );
   for (const guide of guides) {
-    const start = guidePoint(panel, response, data, camera, guide, true, view);
-    const end = guidePoint(panel, response, data, camera, guide, false, view);
+    const start = guidePoint(
+      panel,
+      response,
+      data,
+      camera,
+      guide,
+      true,
+      view,
+      verticalExaggeration,
+    );
+    const end = guidePoint(
+      panel,
+      response,
+      data,
+      camera,
+      guide,
+      false,
+      view,
+      verticalExaggeration,
+    );
     context.strokeStyle = guide.family === "range-axis"
       ? "rgba(255, 205, 95, 0.86)"
       : "rgba(97, 211, 255, 0.9)";
@@ -687,6 +726,7 @@ function guidePoint(
   guide: SemanticTerrainGuide,
   start: boolean,
   view: TerrainLabState["view"],
+  verticalExaggeration: number,
 ): { x: number; y: number } {
   const worldX = start ? guide.startX : guide.endX;
   const worldZ = start ? guide.startZ : guide.endZ;
@@ -725,6 +765,7 @@ function guidePoint(
     column,
     row,
     data.heights[row * response.metadata.columns + column]!,
+    verticalExaggeration,
   );
 }
 
