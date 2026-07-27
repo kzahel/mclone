@@ -498,6 +498,7 @@ impl SmokeRecorder {
             "asset_profile": options.asset_profile.label(),
             "asset_bytes": options.asset_bytes()?,
             "composition": terrain.composition_mode().label(),
+            "exact_anchor": options.exact_anchor.label(),
             "exact": exact_stats_json(terrain.exact_stats()),
             "frontier": "procedural-collar-1.5-blocks",
             "viewport": {

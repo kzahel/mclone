@@ -40,6 +40,13 @@ pub enum WorldExplorerCompositionMode {
     Coverage,
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum WorldExplorerExactAnchor {
+    #[default]
+    Focus,
+    ViewerForward,
+}
+
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct WorldExplorerExactView {
     pub render_view: mclone_render::chunk::ChunkRenderView,
@@ -66,6 +73,26 @@ impl WorldExplorerCompositionMode {
             other => Err(format!(
                 "unsupported World Explorer composition mode {other:?}; expected horizon, exact, \
                  composed, or coverage"
+            )),
+        }
+    }
+}
+
+impl WorldExplorerExactAnchor {
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Focus => "focus",
+            Self::ViewerForward => "viewer-forward",
+        }
+    }
+
+    pub fn parse_label(value: &str) -> Result<Self, String> {
+        match value.trim().to_ascii_lowercase().as_str() {
+            "focus" | "target" | "orbit-target" => Ok(Self::Focus),
+            "viewer-forward" | "viewer" | "eye" => Ok(Self::ViewerForward),
+            other => Err(format!(
+                "unsupported World Explorer exact anchor {other:?}; expected focus or \
+                 viewer-forward"
             )),
         }
     }
@@ -325,6 +352,7 @@ impl WorldExplorerSession {
     pub fn exact_composition_view(
         &self,
         radius_chunks: u32,
+        anchor: WorldExplorerExactAnchor,
     ) -> Result<WorldExplorerExactView, String> {
         world_explorer_exact_view(
             self.config.seed,
@@ -332,6 +360,7 @@ impl WorldExplorerSession {
             self.config.width,
             self.config.height,
             radius_chunks,
+            anchor,
         )
     }
 
@@ -541,6 +570,7 @@ fn world_explorer_exact_view(
     width: u32,
     height: u32,
     radius_chunks: u32,
+    exact_anchor: WorldExplorerExactAnchor,
 ) -> Result<WorldExplorerExactView, String> {
     let view_height_blocks = state.blocks_across * f64::from(height) / f64::from(width);
     let presentation = TerrainHorizonPresentation::new(
@@ -580,9 +610,12 @@ fn world_explorer_exact_view(
     let presentation = presentation.with_target_y(target_y)?;
     let render_view =
         mclone_terrain_view::terrain_horizon_chunk_render_view(presentation, width, height)?;
-    let mut anchor_x = render_view.camera_position.x;
-    let mut anchor_z = render_view.camera_position.z;
-    if state.mode == WorldViewMode::Orbit {
+    let mut anchor_x = state.focus_x as f32;
+    let mut anchor_z = state.focus_z as f32;
+    if state.mode == WorldViewMode::Orbit && exact_anchor == WorldExplorerExactAnchor::ViewerForward
+    {
+        anchor_x = render_view.camera_position.x;
+        anchor_z = render_view.camera_position.z;
         let forward_length = render_view
             .camera_forward
             .x
@@ -638,6 +671,24 @@ mod tests {
                 mode
             );
         }
+    }
+
+    #[test]
+    fn exact_anchor_labels_round_trip() {
+        for anchor in [
+            WorldExplorerExactAnchor::Focus,
+            WorldExplorerExactAnchor::ViewerForward,
+        ] {
+            assert_eq!(
+                WorldExplorerExactAnchor::parse_label(anchor.label()).unwrap(),
+                anchor
+            );
+        }
+        assert_eq!(
+            WorldExplorerExactAnchor::parse_label("eye").unwrap(),
+            WorldExplorerExactAnchor::ViewerForward
+        );
+        assert!(WorldExplorerExactAnchor::parse_label("camera-target").is_err());
     }
 
     #[test]
@@ -699,7 +750,41 @@ mod tests {
     }
 
     #[test]
-    fn orbit_exact_near_field_uses_the_viewer_not_the_distant_focus() {
+    fn orbit_exact_near_field_uses_the_focus_by_default() {
+        let state = WorldViewState {
+            focus_x: -0.25,
+            focus_z: 17.75,
+            blocks_across: 96.0,
+            yaw_radians: 0.0,
+            pitch_radians: 0.12,
+            mode: WorldViewMode::Orbit,
+            projection: WorldViewProjection::Perspective,
+        };
+
+        for yaw_radians in [
+            0.0,
+            std::f64::consts::FRAC_PI_2,
+            std::f64::consts::PI,
+            std::f64::consts::PI * 1.5,
+        ] {
+            let view = world_explorer_exact_view(
+                12_345,
+                WorldViewState {
+                    yaw_radians,
+                    ..state
+                },
+                1280,
+                720,
+                2,
+                WorldExplorerExactAnchor::Focus,
+            )
+            .unwrap();
+            assert_eq!(view.residency_anchor, [-1, 17]);
+        }
+    }
+
+    #[test]
+    fn orbit_exact_near_field_can_use_the_viewer_forward_anchor() {
         let state = WorldViewState {
             focus_x: 0.0,
             focus_z: 0.0,
@@ -710,7 +795,15 @@ mod tests {
             projection: WorldViewProjection::Perspective,
         };
 
-        let east = world_explorer_exact_view(12_345, state, 1280, 720, 2).unwrap();
+        let east = world_explorer_exact_view(
+            12_345,
+            state,
+            1280,
+            720,
+            2,
+            WorldExplorerExactAnchor::ViewerForward,
+        )
+        .unwrap();
         let west = world_explorer_exact_view(
             12_345,
             WorldViewState {
@@ -720,6 +813,7 @@ mod tests {
             1280,
             720,
             2,
+            WorldExplorerExactAnchor::ViewerForward,
         )
         .unwrap();
 
@@ -747,6 +841,7 @@ mod tests {
                 1280,
                 720,
                 2,
+                WorldExplorerExactAnchor::ViewerForward,
             )
             .unwrap();
             let surface_y = terrain_preview_focus_y_for_profile(
@@ -775,6 +870,7 @@ mod tests {
             1280,
             720,
             2,
+            WorldExplorerExactAnchor::Focus,
         )
         .unwrap();
 

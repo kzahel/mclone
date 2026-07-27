@@ -178,7 +178,7 @@ impl ExplorerTerrain {
         let exact_view = (self.composition != WorldExplorerCompositionMode::Horizon)
             .then(|| {
                 self.session
-                    .exact_composition_view(self.options.exact_radius)
+                    .exact_composition_view(self.options.exact_radius, self.options.exact_anchor)
             })
             .transpose()
             .map_err(anyhow::Error::msg)?;
@@ -330,7 +330,7 @@ impl ExplorerTerrain {
              exact_vertices={} exact_indices={}/{} exact_bytes={} exact_trees={}:{}:{} \
              exact_tree_draw={}:{} exact_compile_ms={:.2} \
              exact_present_ms={:.2} exact_mesh_ms={:.2} exact_pack_ms={:.2} \
-             exact_anchor=viewer-forward({}, {}) frontier=procedural-collar-1.5-blocks",
+             exact_anchor={}({}, {}) frontier=procedural-collar-1.5-blocks",
             self.session.diagnostics(),
             self.composition.label(),
             exact.painted_chunks,
@@ -355,6 +355,7 @@ impl ExplorerTerrain {
             exact.presentation_ms,
             exact.mesh_ms,
             exact.pack_ms,
+            self.options.exact_anchor.label(),
             self.last_exact_anchor[0],
             self.last_exact_anchor[1],
         )

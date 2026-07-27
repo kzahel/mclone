@@ -18,12 +18,20 @@ const skipBuild = process.argv.includes("--skip-build");
 const semanticOnly = process.argv.includes("--semantic-only");
 const sourceColors = process.argv.includes("--source-colors");
 const composition = argumentValue("--composition") ?? "composed";
+const exactAnchor = argumentValue("--exact-anchor") ?? "focus";
 if (!["composed", "coverage", "exact"].includes(composition)) {
   throw new Error(`unsupported browser composition smoke mode ${composition}`);
 }
+if (!["focus", "viewer-forward"].includes(exactAnchor)) {
+  throw new Error(`unsupported browser exact anchor ${exactAnchor}`);
+}
 const externalBaseUrl = process.env.WORLD_EXPLORER_SMOKE_BASE_URL;
 const label = mobile ? "phone" : "desktop";
-const captureLabel = sourceColors ? `${composition}-source-colors` : composition;
+const captureLabel = [
+  composition,
+  sourceColors ? "source-colors" : null,
+  exactAnchor === "focus" ? null : exactAnchor,
+].filter(Boolean).join("-");
 const port = Number.parseInt(
   process.env.WORLD_EXPLORER_SMOKE_PORT ?? (mobile ? "4194" : "4193"),
   10,
@@ -63,6 +71,7 @@ try {
     "?seed=12345&centerX=0&centerZ=0&blocksAcross=96"
       + "&view=3d&projection=perspective&yaw=3.1415927&pitch=0.12"
       + `&composition=${composition}&exactRadius=2&smokeObserver=1`
+      + `&exactAnchor=${exactAnchor}`
       + (sourceColors ? "&sourceColors=1" : ""),
     normalizedBaseUrl(),
   );
@@ -145,6 +154,15 @@ function assertCompositionReport(report) {
   if (report.composition !== composition
       || report.sourceColors !== sourceColors
       || report.exactRadius !== 2
+      || report.exactAnchor !== exactAnchor
+      || (exactAnchor === "focus"
+        && (report.exactAnchorX !== report.centerX
+          || report.exactAnchorZ !== report.centerZ))
+      || (exactAnchor === "viewer-forward"
+        && Math.hypot(
+          report.exactAnchorX - report.centerX,
+          report.exactAnchorZ - report.centerZ,
+        ) < 64)
       || report.exactDesiredChunks !== 25
       || report.exactPaintedChunks !== 25
       || report.exactQueuedChunks !== 0

@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use mclone_view_control::{WorldViewMode, WorldViewProjection, WorldViewState};
-use mclone_world_explorer::WorldExplorerCompositionMode;
+use mclone_world_explorer::{WorldExplorerCompositionMode, WorldExplorerExactAnchor};
 
 pub const DEFAULT_WIDTH: u32 = 1280;
 pub const DEFAULT_HEIGHT: u32 = 720;
@@ -53,6 +53,7 @@ pub struct ExplorerOptions {
     pub composition: WorldExplorerCompositionMode,
     pub source_colors: bool,
     pub exact_radius: u32,
+    pub exact_anchor: WorldExplorerExactAnchor,
     pub exact_delay_ms: u64,
     pub asset_root: PathBuf,
     pub asset_profile: ExplorerAssetProfile,
@@ -78,6 +79,7 @@ impl Default for ExplorerOptions {
             composition: WorldExplorerCompositionMode::Horizon,
             source_colors: false,
             exact_radius: DEFAULT_EXACT_RADIUS,
+            exact_anchor: WorldExplorerExactAnchor::Focus,
             exact_delay_ms: 0,
             asset_root: default_asset_root(),
             asset_profile: ExplorerAssetProfile::Original,
@@ -154,6 +156,13 @@ impl ExplorerOptions {
                 "--source-colors" => options.source_colors = true,
                 "--exact-radius" => {
                     options.exact_radius = parse_value(value(&mut arguments)?, name)?
+                }
+                "--exact-anchor" => {
+                    options.exact_anchor = WorldExplorerExactAnchor::parse_label(&utf8_value(
+                        value(&mut arguments)?,
+                        name,
+                    )?)
+                    .map_err(anyhow::Error::msg)?
                 }
                 "--exact-delay-ms" => {
                     options.exact_delay_ms = parse_value(value(&mut arguments)?, name)?
@@ -298,6 +307,7 @@ Usage: mclone-world-explorer [options]
   --composition MODE          horizon, exact, composed, or coverage
   --source-colors             render exact geometry in diagnostic magenta
   --exact-radius N            exact near-field chunk radius (default {DEFAULT_EXACT_RADIUS})
+  --exact-anchor MODE         focus (default) or viewer-forward
   --exact-delay-ms N          diagnostic delay before each exact batch
   --yaw RADIANS               3D yaw
   --pitch RADIANS             3D pitch

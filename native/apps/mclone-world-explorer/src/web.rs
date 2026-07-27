@@ -24,7 +24,7 @@ use web_sys::{HtmlCanvasElement, UrlSearchParams};
 
 use crate::{
     ExplorerExactStats, ExplorerExactTerrain, WorldExplorerCompositionMode, WorldExplorerConfig,
-    WorldExplorerSession, web_exact::WebCanonicalExactExecutor,
+    WorldExplorerExactAnchor, WorldExplorerSession, web_exact::WebCanonicalExactExecutor,
     web_vegetation::WebTerrainVegetationExecutor,
 };
 
@@ -45,6 +45,7 @@ struct WebExplorerOptions {
     composition: WorldExplorerCompositionMode,
     source_colors: bool,
     exact_radius: u32,
+    exact_anchor: WorldExplorerExactAnchor,
     diagnostic_observer_enabled: bool,
     worker_overflow_probe_enabled: bool,
 }
@@ -63,6 +64,7 @@ impl Default for WebExplorerOptions {
             composition: WorldExplorerCompositionMode::Horizon,
             source_colors: false,
             exact_radius: DEFAULT_EXACT_RADIUS,
+            exact_anchor: WorldExplorerExactAnchor::Focus,
             diagnostic_observer_enabled: false,
             worker_overflow_probe_enabled: false,
         }
@@ -84,6 +86,9 @@ impl WebExplorerOptions {
         options.exact_radius = parse_parameter(&parameters, "exactRadius", options.exact_radius)?;
         if options.exact_radius > 8 {
             return Err("World Explorer exactRadius must be at most 8 chunks".to_owned());
+        }
+        if let Some(value) = parameters.get("exactAnchor") {
+            options.exact_anchor = WorldExplorerExactAnchor::parse_label(&value)?;
         }
         if let Some(value) = parameters.get("composition") {
             options.composition = WorldExplorerCompositionMode::parse_label(&value)?;
@@ -155,6 +160,7 @@ struct WebExplorerReport {
     composition: &'static str,
     source_colors: bool,
     exact_radius: u32,
+    exact_anchor: &'static str,
     exact_anchor_x: i32,
     exact_anchor_z: i32,
     exact_desired_chunks: u32,
@@ -284,6 +290,7 @@ pub struct WebWorldExplorer {
     composition: WorldExplorerCompositionMode,
     source_colors: bool,
     exact_radius: u32,
+    exact_anchor: WorldExplorerExactAnchor,
     exact: Option<ExplorerExactTerrain>,
     last_exact_stats: ExplorerExactStats,
     last_exact_anchor: [i32; 2],
@@ -378,6 +385,7 @@ impl WebWorldExplorer {
                 self.composition,
                 self.source_colors,
                 self.exact_radius,
+                self.exact_anchor,
                 self.last_exact_anchor,
                 self.last_exact_stats,
             ));
@@ -547,7 +555,9 @@ impl WebWorldExplorer {
         color_view: &wgpu::TextureView,
         elapsed: Duration,
     ) -> Result<TerrainHorizonFrameStats, String> {
-        let exact_view = self.session.exact_composition_view(self.exact_radius)?;
+        let exact_view = self
+            .session
+            .exact_composition_view(self.exact_radius, self.exact_anchor)?;
         self.session.apply_exact_composition_view(exact_view);
         self.last_exact_anchor = exact_view.residency_anchor;
         let exact = self
@@ -774,6 +784,7 @@ impl WebWorldExplorer {
             composition: options.composition,
             source_colors: options.source_colors,
             exact_radius: options.exact_radius,
+            exact_anchor: options.exact_anchor,
             exact,
             last_exact_stats: ExplorerExactStats::default(),
             last_exact_anchor: [options.center_x, options.center_z],
@@ -860,6 +871,7 @@ fn explorer_report(
     composition: WorldExplorerCompositionMode,
     source_colors: bool,
     exact_radius: u32,
+    exact_anchor_policy: WorldExplorerExactAnchor,
     exact_anchor: [i32; 2],
     exact: ExplorerExactStats,
 ) -> WebExplorerReport {
@@ -888,6 +900,7 @@ fn explorer_report(
         composition: composition.label(),
         source_colors,
         exact_radius,
+        exact_anchor: exact_anchor_policy.label(),
         exact_anchor_x: exact_anchor[0],
         exact_anchor_z: exact_anchor[1],
         exact_desired_chunks: exact.desired_chunks,
