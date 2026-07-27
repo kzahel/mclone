@@ -29,6 +29,12 @@ use crate::streamed_plan_trials::{
 pub const STREAMED_PLAN_ATLAS_SCHEMA_REVISION: &str = "mclone-streamed-plan-atlas-v1";
 pub const STREAMED_PLAN_ATLAS_MAX_REGIONS_PER_AXIS: i32 = 16;
 pub const STREAMED_PLAN_ATLAS_CACHE_CAPACITY_PER_CANDIDATE: usize = 384;
+pub const STREAMED_PLAN_ATLAS_FALLBACK_WITNESS_SHA256: &str =
+    "7c098d833328fbd87b480f9f092536c815fb60ae66701f4278269185b1b7de7f";
+pub const STREAMED_PLAN_ATLAS_HIERARCHY_WITNESS_SHA256: &str =
+    "3041cac9d531349e5f1fda1dbfe3849be8752693a8b3b397e81351b9f184d91f";
+pub const STREAMED_PLAN_ATLAS_GRAPH_WITNESS_SHA256: &str =
+    "c619dcf4bfd2108ff53d0a2712974f55073b601f1fc0ab9b770e7a9e59161558";
 
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -961,6 +967,18 @@ mod tests {
         let summary = StreamedPlanAtlasCompiler::new(12_345, StreamedPlanTopology::Plane)
             .query(0, 0, 1_024, 1.0)
             .unwrap();
+        assert_eq!(
+            summary.fallback.receipt.semantic_sha256,
+            STREAMED_PLAN_ATLAS_FALLBACK_WITNESS_SHA256
+        );
+        assert_eq!(
+            summary.hierarchy.receipt.semantic_sha256,
+            STREAMED_PLAN_ATLAS_HIERARCHY_WITNESS_SHA256
+        );
+        assert_eq!(
+            summary.feature_graph.receipt.semantic_sha256,
+            STREAMED_PLAN_ATLAS_GRAPH_WITNESS_SHA256
+        );
         assert_eq!(
             summary.phase_two_witness_sha256,
             STREAMED_PLAN_PHASE_TWO_WITNESS_SHA256
