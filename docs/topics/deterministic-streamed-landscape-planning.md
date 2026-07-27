@@ -13,8 +13,9 @@ feature-owned graphs across plane, cylinder, torus, cache, path, window, and
 schedule cases. Both mechanisms advance to structural experimentation; this
 does not yet prove geographic quality or production cost. Candidate D,
 terrain reconstruction, and production terrain changes remain out of scope.
-Phase 3 Terrain Lab structural-atlas work was authorized on 2026-07-27 and is
-in progress for Human Review R1.**
+Phase 3 now provides a freely pannable three-candidate Terrain Lab atlas with
+Rust-owned canonical queries, periodic lifts, caches, and native/Wasm
+witnesses. It is waiting at Human Review R1 before any reconstruction.**
 
 ## Purpose
 
@@ -160,6 +161,51 @@ Both are therefore eligible for Phase 3 structural atlases. They are not
 eligible for terrain or production integration. Candidate D must remain
 deferred until separate visualization shows that the two mechanisms provide
 complementary structure worth their combined complexity.
+
+### Phase 3 Streamed Structural Atlas
+
+Commits `42bcbcd1`, `7e740278`, `edc18490`, and `95069d20` add a
+research-only atlas without changing production terrain. Terrain Lab keeps
+the earlier fixed landform summary as an honest bounded artifact and exposes
+the new work as a separate `Planner atlas` pane.
+
+The atlas is a moving query over stable world identities, not a solve whose
+center moves:
+
+```text
+viewport -> lifted requested regions -> canonical PlanKeys
+         -> bounded retained snapshots -> typed drawing facts
+```
+
+The viewport determines residency and presentation only. Rust canonicalizes
+each requested 1,024-block region, reconstructs or reuses the fallback,
+hierarchy, and feature-graph snapshots, and lifts canonical facts back near
+the current observer. Plane, cylinder, and torus use the same mechanism.
+Canvas receives explicit cells, samples, provider extents, facets, graph
+bounds, nodes, edges, sinks, identities, coverage, and cache receipts. It
+does not interpret fact payloads or select geographic outcomes.
+
+The comparison intentionally makes each mechanism's limitations visible:
+
+- the fallback is a sparse coordinate-pure sample lattice plus bounded
+  independent starts;
+- B creates broad shared tendencies and exact ports but strongly reveals its
+  1,024/3,072/6,144-block planning lattice; and
+- C creates complete shared bounded graphs but strongly reveals their short,
+  independent, locally owned character.
+
+These are useful structural facts, not yet rivers, basins, quiet-country
+terrain, or a quality claim. R1 decides which mechanism, if any, merits
+continuous reconstruction beside the fallback. Candidate D remains
+unauthorized because putting B and C in adjacent panels is not evidence that
+their combined complexity is worthwhile.
+
+Each candidate cache retains at most 384 canonical plans. Queries wider than
+16 regions on either axis are visibly cost-capped around the current center;
+they never fall back to the fixed origin. Current-set checksums are
+cache-independent and lift-independent. A one-region plane query is pinned
+on native and Wasm for all three candidates, and the browser test preserves
+all three checksums while moving one complete torus period.
 
 ## Determinism Vocabulary
 
@@ -592,6 +638,7 @@ produce enough of the same geographic relationships to justify its cost?
 | 2026-07-27 | Tactical 270 Phase 0 exact-hydrology and generator source review | Do not derive an allegedly exact unbounded watershed from independently solved tiles; test a bounded generative hydrography with a declared maximum scale |
 | 2026-07-27 | Tactical 270 Phase 1, commit `14d832b8`, 114 exact comparisons and native/Wasm witnesses | Accept the falsification instrument; retain recenter, discovery-state, and last-writer failures as permanent canaries; stop before candidate implementation |
 | 2026-07-27 | Tactical 270 Phase 2, commits `e7158125`, `4b1dce70`, and `473f071c`, 315 exact comparisons | Advance separate shared-hierarchy and bounded-graph mechanisms to structural atlases; do not infer quality, compose Candidate D, or integrate terrain |
+| 2026-07-27 | Tactical 270 Phase 3, commits `42bcbcd1`, `7e740278`, `edc18490`, and `95069d20`, native/Wasm witnesses plus desktop/phone torus-period captures | Atlas mechanisms are ready for Human Review R1; keep Candidate D, reconstruction, performance budgets, and production integration unauthorized |
 
 Add future experiment IDs, commits, commands, corpus locations, results, and
 decisions here or in the active tactical before relying on them.
@@ -609,8 +656,12 @@ decisions here or in the active tactical before relying on them.
 - Can the plane, cylinder, and torus share one planner representation without
   hiding topology-specific sink semantics?
 - What is the smallest far summary that preserves accepted topology?
-- Will Candidate B or C preserve the exact native/Wasm agreement already
-  demonstrated by the Phase 1 integer receipt?
+- Is B's visible fixed hierarchy a useful geographic scaffold or an
+  unacceptable planning lattice?
+- Are C's complete bounded graphs structurally useful despite appearing
+  short and independent?
+- Does either survivor add enough distinct authority beyond the fallback to
+  justify continuous terrain reconstruction?
 - Does relational quality remain compelling once boundaries, boundedness, and
   speed constraints are enforced?
 - Is the resulting architecture easier to understand and evolve than a richer

@@ -2,8 +2,8 @@
 
 Status: **Human Review R0 accepted 2026-07-27; Phase 1 completed at
 `14d832b8`; Phase 2 Candidate B/C semantic trials completed at `473f071c`.
-Phase 3 streamed structural atlas and Human Review R1 preparation authorized
-2026-07-27 and in progress.** Research only; Candidate D, terrain
+Phase 3 streamed structural atlas completed through `95069d20` and is
+waiting at Human Review R1.** Research only; Candidate D, terrain
 reconstruction, and production integration remain unauthorized.
 
 Topics:
@@ -770,13 +770,13 @@ CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$STREAMED_PLAN_WASM_DIR/bin/wasm-bin
 
 ### Phase 3: streamed structural atlas
 
-- Select at most two exact-invariant candidates plus the fallback.
-- Add streamed pan over canonical plan identities in Terrain Lab.
-- Expose region, owner, halo, hierarchy, boundary-port, and cache diagnostics
+- [x] Select at most two exact-invariant candidates plus the fallback.
+- [x] Add streamed pan over canonical plan identities in Terrain Lab.
+- [x] Expose region, owner, hierarchy, boundary-port, graph, and cache diagnostics
   as independent overlays.
-- Preserve checksums while panning, evicting, rebuilding, and approaching the
+- [x] Preserve checksums while panning, evicting, rebuilding, and approaching the
   same area by different paths.
-- Generate the comparable structural and boundary corpus.
+- [x] Generate the comparable structural and boundary corpus.
 
 **Authorization 2026-07-27:** add Candidate B, Candidate C, and fallback
 structural views to Terrain Lab through shared Rust-owned semantic queries.
@@ -786,6 +786,77 @@ boundary overlays. Preserve exact Phase 2 witnesses. Stop with comparable
 browser evidence for Human Review R1; do not compose Candidate D or
 reconstruct terrain.
 
+**Outcome 2026-07-27:** commits `42bcbcd1`, `7e740278`, `edc18490`, and
+`95069d20` complete the authorized atlas and stop before reconstruction. The
+new Terrain Lab `Planner atlas` pane is separate from the Tactical 267 fixed
+landform pane. It keeps one Rust/Wasm compiler session while shared navigation
+moves and presents three synchronized panels:
+
+- the coordinate-pure fallback's 3-by-3 samples and bounded arch starts;
+- Candidate B's 1,024-block regions, 3,072/6,144-block providers, and
+  canonical open/closed facets; and
+- Candidate C's complete bounded four-node graphs, explicit sinks, owner
+  bounds, and target-region query counts.
+
+Rust owns plan construction, canonical identity, topology lifts, bounded
+cache retention, typed drawing facts, and semantic checksums. The dedicated
+browser Worker owns only Wasm invocation and transport; Canvas owns colors,
+visibility, and labels. Plane, 6,144-block X-cylinder, and
+6,144-by-6,144-block torus modes use the same query. The viewport may pan
+without an origin-centered domain. A query covers at most 16 base regions per
+axis; a broader viewport receives an explicit cost-capped coverage rectangle
+rather than an invented coarse plan.
+
+Each candidate retains at most 384 canonical plan snapshots in a
+session-local FIFO cache. Current-view checksums hash the unique canonical
+snapshots and therefore change when the canonical query set changes, but not
+when the same set is cold rebuilt, reached through a periodic lift, or drawn
+with different overlays. The pinned one-region native/Wasm witnesses are:
+
+- fallback:
+  `7c098d833328fbd87b480f9f092536c815fb60ae66701f4278269185b1b7de7f`;
+- hierarchy:
+  `3041cac9d531349e5f1fda1dbfe3849be8752693a8b3b397e81351b9f184d91f`;
+  and
+- feature graph:
+  `c619dcf4bfd2108ff53d0a2712974f55073b601f1fc0ab9b770e7a9e59161558`.
+
+The headed browser test pans a 6,144-block torus view from X=0 to X=6,144.
+The three 64-character semantic checksums remain exact, all final requests
+are cache hits, and desktop and phone captures show the same repeated
+structure. Evidence images are written to
+`/tmp/mclone-terrain-lab-*-streamed-atlas-torus.png` and the corresponding
+`-repeat.png`; they are not repository artifacts. The observed browser query
+times in those captures are useful interaction diagnostics, not Phase 4
+performance baselines.
+
+Validation:
+
+- `cargo test -p mclone-worldgen`: 387 passed, one ignored in the library,
+  with all binary tests passing;
+- the pinned atlas test through `wasm-bindgen-test-runner`: one passed;
+- `cargo test -p mclone-terrain-lab`: seven library and seven
+  browser-ownership tests passed;
+- Terrain Lab TypeScript compilation and 23 URL/state tests passed; and
+- the focused headed atlas test passed on desktop and phone, including cold
+  rebuild, overlay changes, and the full torus-period pan.
+
+The complete headed Terrain Lab suite also exposed a real integration issue:
+the added seventh pane button could wrap under the non-interactive workspace
+guide, whose text intercepted clicks. Commit `95069d20` makes the guide
+click-through, and the formerly blocked desktop control test passes. The
+suite's pre-existing phone stress race still exceeds its 120-second test
+budget while CPU LOD is refining at 1:8 and GPU LOD is at target 1:4. The
+atlas-only phone path completes in about two seconds. This is not accepted as
+a Phase 4 performance result or hidden as a green full-suite claim.
+
+Use the local review links:
+
+```text
+http://127.0.0.1:5180/terrain/?seed=-98765&x=0&z=0&blocks=6144&panes=atlas&view=map&atlasTopology=plane
+http://127.0.0.1:5180/terrain/?seed=-98765&x=0&z=0&blocks=6144&panes=atlas&view=map&atlasTopology=torus
+```
+
 **Human Review R1 — structural planner**
 
 Freely pan across ordinary boundaries, corners, cylinder seams, and torus
@@ -793,6 +864,20 @@ identifications. Judge hierarchy, long axes, basin/drainage relation, quiet
 space, repetition, planning-grid artifacts, and whether implementation
 boundaries become visible. Compare directly with the fallback. A candidate
 may be objectively exact and still fail this review.
+
+The current trials are deliberately minimal semantic mechanisms, not
+finished hydrography. Candidate B will visibly expose its square planning
+vocabulary and Candidate C will visibly expose many short independent
+graphs. Review whether either representation supplies enough useful,
+distinct structural authority to justify a reconstruction experiment:
+
+1. advance B alone;
+2. advance C alone;
+3. advance both as separate Phase 4 comparisons without yet composing D; or
+4. select the coordinate-pure fallback.
+
+Do not accept Candidate D, production integration, terrain quality, or a
+performance budget at R1.
 
 ### Phase 4: reconstruction, summaries, and speed
 
@@ -869,7 +954,7 @@ execution.
 | hierarchical boundary trial | `e7158125`, `473f071c` | 105 comparison cases plus 498 shared-facet observations across three seeds/topologies | zero mismatch/conflict; fixed depth 3 and fanout 6 | advance Candidate B to structural atlas work |
 | feature-owned graph trial | `4b1dce70`, `473f071c` | 105 comparison cases; 322 graphs, 34 seam crossings, 25-owner bound | zero mismatch/conflict/cycle/incomplete graph; reach at most 576 blocks | advance Candidate C to structural atlas work |
 | Phase 2 combined receipt | `473f071c` | native receipt, three Wasm tests, and full `mclone-worldgen` suite | 315 comparison witness agrees; 382 passed, 1 ignored in the library suite | pause before Phase 3 atlas authorization |
-| streamed structural atlas | pending | pending | pending | pending |
+| streamed structural atlas | `42bcbcd1`, `7e740278`, `edc18490`, `95069d20` | five native atlas tests; one pinned native/Wasm atlas witness; 23 URL/state tests; seven browser-ownership tests; headed desktop/phone torus-period pan | free pan and bounded caches preserve canonical facts; periodic repeated view is visually and semantically identical; production remains disconnected | wait at Human Review R1; do not reconstruct or compose D |
 | reconstruction/performance finalist | pending | pending | pending | pending |
 
 ## Exit Condition

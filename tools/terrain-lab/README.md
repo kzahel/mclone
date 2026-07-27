@@ -5,7 +5,8 @@ visible panes are independently configurable but coordinate-locked. One
 global terrain profile selects the terrain family for every visible pane:
 
 - `mclone-overworld-v1` (the default) provides exact Mclone terrain, a
-  research landform plan, Mclone CPU LOD, and optional Mclone GPU LOD.
+  research landform plan, the streamed planner atlas, Mclone CPU LOD, and
+  optional Mclone GPU LOD.
 - `overworld` provides exact Minecraft Java 1.17.1 terrain and a direct
   Worker-backed vanilla CPU LOD. It has no GPU LOD.
 
@@ -22,6 +23,11 @@ The profiles cannot be mixed in one workspace. Within the selected profile:
   Tactical 267 plane domain. It shows independently selectable basin, quiet
   space, drainage, divide, confluence, and protected-sink facts. Production
   terrain does not consume this plan.
+- `Planner atlas` is a research-only, freely pannable comparison of the
+  coordinate-pure fallback, hierarchical shared facts, and feature-owned
+  bounded graphs. Rust owns canonical region queries, plane/cylinder/torus
+  lifts, bounded caches, and semantic checksums. Production terrain consumes
+  none of the three candidates.
 - `CPU LOD` samples the selected production preview. Mclone uses its preview
   fields and near-detail structured records; vanilla directly samples density
   columns, water, biome, and approximate surface material without generating
@@ -74,8 +80,8 @@ The URL owns the review state:
 - `blocks`: continuous viewport width from 1 through 131,072 blocks
 - `detail`: `auto` or a power-of-two sample spacing from 1 through 1,024
   blocks
-- `panes`: comma-separated `runtime`, `canonical`, `plan`, `cpu`, `macro`,
-  and/or `gpu`; `runtime` and `plan` are Mclone-only
+- `panes`: comma-separated `runtime`, `canonical`, `plan`, `atlas`, `cpu`,
+  `macro`, and/or `gpu`; `runtime`, `plan`, and `atlas` are Mclone-only
 - `canonical`: `surface` or `final`
 - `radius`: one of `0`, `1`, `2`, `3`, `4`, `5`, `7`, `10`, or `15`,
   corresponding to centered footprints from `1x1` through `31x31 = 961`
@@ -94,6 +100,11 @@ The URL owns the review state:
 - `planBasins`, `planQuiet`, `planDrainage`, `planDivides`,
   `planConfluences`, and `planSinks`: `1` to show or `0` to hide each
   research-plan fact without rebuilding the plan
+- `atlasTopology`: `plane`, `cylinder-x`, or `torus`
+- `atlasRegions`, `atlasSamples`, `atlasFeatures`, `atlasHierarchy`,
+  `atlasFacets`, `atlasGraphBounds`, `atlasGraphEdges`, `atlasIdentity`, and
+  `atlasSeams`: `1` to show or `0` to hide each streamed-atlas overlay
+  without rebuilding canonical plans
 
 Legacy `spacing=` links still load with their original `spacing × 64`
 footprint and fixed detail. New links keep coverage and resolution independent.
@@ -214,6 +225,13 @@ For the accepted hybrid-plan review site, enable **Landform plan**, set the
 center to `0, 0`, and zoom to `6.1 km`, or use:
 
 <http://127.0.0.1:5180/terrain/?seed=-98765&x=0&z=0&blocks=6144&panes=plan&view=map>
+
+For Tactical 270 Human Review R1, use **Planner atlas** and compare all three
+panels while panning:
+
+<http://127.0.0.1:5180/terrain/?seed=-98765&x=0&z=0&blocks=6144&panes=atlas&view=map&atlasTopology=plane>
+
+Switch `atlasTopology` to `cylinder-x` or `torus` to inspect periodic seams.
 
 ## Validate
 
