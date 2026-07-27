@@ -34,6 +34,7 @@ const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
 const FNV_PRIME: u64 = 0x100_0000_01b3;
 const MAP_SCALE: u32 = 4;
 const MAP_PIXELS: u32 = CELLS as u32 * MAP_SCALE;
+const FAR_SUMMARY_STRIDE_CELLS: usize = 4;
 const QUERY_WARMUP_ITERATIONS: usize = 1;
 const QUERY_MEASURED_ITERATIONS: usize = 5;
 
@@ -740,6 +741,7 @@ impl HybridPlan {
     ) -> CoreReceipt {
         let checksum = self.checksum();
         let seam = self.seam_receipt();
+        let far_summary = self.far_summary_receipt();
         CoreReceipt {
             schema: "mclone-hybrid-landform-study-plan-v1",
             research_only: true,
@@ -758,6 +760,7 @@ impl HybridPlan {
             metrics: self.metrics,
             timings: self.timings,
             memory: self.memory_receipt(),
+            far_summary,
             reconstruction: ReconstructionReceipt {
                 graph_only: graph_only.query_receipt(),
                 subordinate_detail: detailed.query_receipt(),
@@ -1024,6 +1027,63 @@ impl HybridPlan {
             stored_index_references: self.segment_index.stored_references,
             approximate_plan_bytes: plan_bytes,
             approximate_summary_bytes: summary_bytes,
+        }
+    }
+
+    fn far_summary_receipt(&self) -> FarSummaryReceipt {
+        let start = Instant::now();
+        let width_cells = CELLS.div_ceil(FAR_SUMMARY_STRIDE_CELLS);
+        let depth_cells = CELLS.div_ceil(FAR_SUMMARY_STRIDE_CELLS);
+        let mut raster = Vec::with_capacity(width_cells * depth_cells);
+        let mut checksum = FNV_OFFSET_BASIS;
+        for grid_z in (0..CELLS).step_by(FAR_SUMMARY_STRIDE_CELLS) {
+            for grid_x in (0..CELLS).step_by(FAR_SUMMARY_STRIDE_CELLS) {
+                let cell = &self.cells[self.grid.index(grid_x, grid_z)];
+                let summary = FarSummaryCell {
+                    uplift: quantize_unit(cell.envelope.uplift),
+                    quiet: quantize_unit(cell.envelope.quiet),
+                    broad_low: quantize_unit(cell.envelope.broad_low),
+                    basin_id: u16::try_from(cell.basin_id).unwrap_or(u16::MAX),
+                    base_y: cell.envelope.base_y.round() as i16,
+                };
+                hash_u64(&mut checksum, u64::from(summary.uplift));
+                hash_u64(&mut checksum, u64::from(summary.quiet));
+                hash_u64(&mut checksum, u64::from(summary.broad_low));
+                hash_u64(&mut checksum, u64::from(summary.basin_id));
+                hash_i64(&mut checksum, i64::from(summary.base_y));
+                raster.push(summary);
+            }
+        }
+        for segment in &self.segments {
+            hash_u64(&mut checksum, segment.kind as u64);
+            hash_u64(&mut checksum, segment.a_x.to_bits());
+            hash_u64(&mut checksum, segment.a_z.to_bits());
+            hash_u64(&mut checksum, segment.b_x.to_bits());
+            hash_u64(&mut checksum, segment.b_z.to_bits());
+            hash_u64(&mut checksum, segment.influence_blocks.to_bits());
+        }
+        for sink in &self.sinks {
+            hash_u64(&mut checksum, sink.id as u64);
+            hash_u64(&mut checksum, sink.kind as u64);
+            hash_i64(&mut checksum, i64::from(sink.world_x));
+            hash_i64(&mut checksum, i64::from(sink.world_z));
+        }
+        let raster_bytes = raster.capacity() * size_of::<FarSummaryCell>();
+        let skeleton_bytes = self.segments.len() * size_of::<PlanSegment>();
+        let sink_bytes = self.sinks.len() * size_of::<BasinSink>();
+        FarSummaryReceipt {
+            cell_blocks: CELL_BLOCKS * FAR_SUMMARY_STRIDE_CELLS as i32,
+            width_cells,
+            depth_cells,
+            raster_bytes,
+            drainage_records: self.metrics.drainage_segments,
+            divide_records: self.metrics.divide_segments,
+            sink_records: self.sinks.len(),
+            skeleton_bytes,
+            sink_bytes,
+            approximate_total_bytes: raster_bytes + skeleton_bytes + sink_bytes,
+            build_elapsed_ms: elapsed_ms(start),
+            checksum: format!("{checksum:016x}"),
         }
     }
 }
@@ -1692,6 +1752,31 @@ struct MemoryReceipt {
     approximate_summary_bytes: usize,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct FarSummaryCell {
+    uplift: u8,
+    quiet: u8,
+    broad_low: u8,
+    basin_id: u16,
+    base_y: i16,
+}
+
+#[derive(Clone, Debug, Serialize)]
+struct FarSummaryReceipt {
+    cell_blocks: i32,
+    width_cells: usize,
+    depth_cells: usize,
+    raster_bytes: usize,
+    drainage_records: usize,
+    divide_records: usize,
+    sink_records: usize,
+    skeleton_bytes: usize,
+    sink_bytes: usize,
+    approximate_total_bytes: usize,
+    build_elapsed_ms: f64,
+    checksum: String,
+}
+
 #[derive(Clone, Debug, Serialize)]
 struct ReconstructionReceipt {
     graph_only: PointQueryReceipt,
@@ -1738,6 +1823,7 @@ struct CoreReceipt {
     metrics: CoreMetrics,
     timings: BuildTimings,
     memory: MemoryReceipt,
+    far_summary: FarSummaryReceipt,
     reconstruction: ReconstructionReceipt,
     analysis: AnalysisReceipt,
     journey: JourneyReceipt,
@@ -2714,6 +2800,10 @@ fn elapsed_ms(start: Instant) -> f64 {
 
 fn smoothstep(value: f64) -> f64 {
     value * value * (3.0 - 2.0 * value)
+}
+
+fn quantize_unit(value: f64) -> u8 {
+    (value.clamp(0.0, 1.0) * 255.0).round() as u8
 }
 
 fn hash_unit(seed: i64, left: u64, right: u64) -> f64 {
