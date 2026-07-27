@@ -1,6 +1,8 @@
 # Tactical 268: Terrain Lab Landform-Plan Diagnostic
 
-Status: complete; awaiting interactive human review
+Status: complete; interactive human review completed 2026-07-27. The
+fixed-domain diagnostic made the bounded plan understandable and redirected
+follow-up to Tactical 270's streamed determinism research.
 
 Topics: `mclone-macro-landscape-planning`, `gpu-procedural-terrain`
 
@@ -102,6 +104,22 @@ should answer:
    divide, sink, or quiet region?
 4. Which next diagnostic deserves promotion: envelope fields, coast arrivals,
    journey transects, or reconstructed terrain influence?
+
+### Review outcome
+
+The plan view successfully exposed the global drainage, basin, divide, sink,
+and quiet-space structure and retained interest in the planner direction.
+Panning beyond the dashed domain then surfaced the more important question:
+the current plan is one fixed solve centered at the origin, not a
+world-addressed atlas.
+
+Review accepted the decision not to rebuild invisibly around the viewport,
+because overlapping moving windows could disagree. It did not accept a fixed
+domain as the intended product behavior. The next work is therefore not
+another overlay family or production terrain integration. Tactical 270 must
+research and experimentally prove or reject canonical regional planning with
+exact path, request, cache, window, scheduling, boundary, and topology
+invariants.
 
 ## Implementation Record
 

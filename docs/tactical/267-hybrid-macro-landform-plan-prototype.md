@@ -1,8 +1,9 @@
 # Tactical 267: Hybrid Macro Landform Plan Prototype
 
-Status: implementation and internal evidence complete 2026-07-27. Paused at
-Human Review B. Research-only; production field revision 21 remains
-unchanged.
+Status: implementation and internal evidence complete 2026-07-27. Human
+Review B provisionally accepted the structural direction and requested its
+plan map as a durable interactive diagnostic. Research-only; production field
+revision 21 remains unchanged.
 
 Topics:
 
@@ -332,6 +333,21 @@ Review the six atlases first, then paired oblique relief, then the selected
 journey profiles. Reject or retune before shared extraction if the result
 looks like a cellular flow raster, a dendritic texture pasted into unrelated
 terrain, or merely a different noise field.
+
+### Review outcome
+
+Human review found the persistent global features and selected hybrid approach
+promising enough to continue, while reserving final judgment for interactive
+inspection. It specifically requested the structural map as a permanent,
+expandable Terrain Lab diagnostic. Tactical 268 implemented that diagnostic
+without promoting the reconstruction or changing production terrain.
+
+Subsequent interactive review of the explicit fixed boundary clarified a
+separate architectural gate: the bounded solve does not prove that one
+absolute location remains identical across plan windows, travel paths,
+request order, cache state, or Worker scheduling. Tactical 270 now owns that
+streamed determinism research. This tactical remains evidence for bounded
+quality and cost, not a production planner.
 
 ## Validation Record
 

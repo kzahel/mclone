@@ -27,8 +27,8 @@ the structural promise but exposed the unresolved world-indexed construction
 problem: an absolute location must not change when requested through another
 window, path, region order, cache state, Worker, or topology lift. The focused
 [`deterministic-streamed-landscape-planning`](deterministic-streamed-landscape-planning.md)
-topic and a follow-up tactical now own that falsifiable feasibility research.
-No production planner or terrain change is authorized.**
+topic and Tactical 270 now own that falsifiable feasibility research. No
+production planner or terrain change is authorized.**
 
 The motivating July 2026 visual review found four related regional-scale
 weaknesses:
@@ -1145,7 +1145,7 @@ none is inferred from CPU compile time.
 | Concern | Current capability | Planning gap |
 |---|---|---|
 | raw macro fields | continentalness, relief, ruggedness, ridges, mountain detail, climate, bathymetry, water morphology, and continuous quiet/rolling/ridge-valley/basin/mountain intent derived without a new noise field | no pass, plateau, escarpment, high-basin, or planned terrain-corridor intent |
-| terrain | field-revision-21 remains production; Tactical 267 proves research-only hybrid envelopes, divergent divides, drainage, protected basins, quiet space, and indexed reconstruction across the fixed plane/cylinder corpus; Tactical 268 exposes the compact plane summary interactively in Terrain Lab | interactive human review must decide whether the structural gain outweighs remaining stepped/parallel raster tendencies, smooth profile stamps, limited grammar, and query cost before any production integration |
+| terrain | field-revision-21 remains production; Tactical 267 proves research-only hybrid envelopes, divergent divides, drainage, protected basins, quiet space, and indexed reconstruction across the fixed plane/cylinder corpus; Tactical 268 exposes the compact plane summary interactively in Terrain Lab | review accepts the structural promise but not production; Tactical 270 must prove or reject a window/path/order-independent streamed representation while retaining stepped/parallel raster, smooth-profile, limited-grammar, and query-cost alarms |
 | sampling/representation | cheap production CPU/GPU heightfield preview plus normalized receipts through roughly 500 km; research hybrid queries are local and measured, and a 128-block far summary retains envelope plus skeleton facts | no window/path/order-independent streamed plan, production cache, batching/GPU reconstruction, filtered spacing-2,048 review product, or sparse volumetric near/far contract |
 | coast | shared sandy/gravel/ordinary/rocky/cold intent; bounded geometry, locally feathered realization, cross-substrate snow, mixed banks; incoming field-revision-21 landform relief reaches water and can reduce redundant rocky lift; exact CPU/GPU and periodic-seam evidence | Human Review 2 found substantial improvement, and the new inherited-relief coast examples now need review; no marsh, frozen-ocean morphology, dunes, deltas, reefs, or sea caves |
 | major rivers | warped zero-contour corridor with width/depth/bank morphology and receiving-outlet correction | no persistent macro drainage topology, tributary hierarchy, or named major reaches |
@@ -1155,7 +1155,7 @@ none is inferred from CPU compile time.
 | geology | exposed stone response and reusable local/structure mechanisms | no regional formation intent or live 3D formation family |
 | ecology | climate-aware conifer, alpine, steppe, meadow, and woodland recipes | limited coordinated transitions and no shared regional formation permissions |
 | landmarks | bounded stream starts/pieces and generic structure architecture | no natural-landmark, route, claim, or cross-family arbitration layer |
-| review | production field maps, cards, receipts, fingerprints, exact chunks, Tactical 267 atlases/obliques/journeys/cost receipts, and the Tactical 268 interactive Terrain Lab plan pane with independent overlays and cell inspection | interactive plan review is pending; cylinder/torus domains, envelope/coast-arrival/journey/reconstruction overlays, and a production multi-system plan consumer do not exist |
+| review | production field maps, cards, receipts, fingerprints, exact chunks, Tactical 267 atlases/obliques/journeys/cost receipts, and the reviewed Tactical 268 fixed-domain Terrain Lab plan pane with independent overlays and cell inspection | Tactical 270 Research Review R0 is next; no streamed atlas, cylinder/torus interactive domains, envelope/coast-arrival/journey/reconstruction overlays, or production multi-system plan consumer exists |
 
 Do not hide these gaps by calling existing mechanisms “supported.” A shared
 lake feature does not make basin lakes live. A structure kernel does not make
@@ -1228,8 +1228,8 @@ every row before shipping any smaller improvement.
    - the focused deterministic-streaming topic records exact invariants,
      reference discipline, candidate architectures, experiment methodology,
      human-review policy, and a coordinate-pure fallback; and
-   - the follow-up tactical must select, narrow, or reject a streamed
-     relational planner before any production integration.
+   - Tactical 270 must select, narrow, or reject a streamed relational planner
+     before any production integration.
 5. **Compose basins and compound water forms**
    - add one broad shallow basin/lake family with spill semantics;
    - add one anabranch, braid, or delta family that deliberately creates

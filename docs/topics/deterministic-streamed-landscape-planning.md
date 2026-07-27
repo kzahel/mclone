@@ -9,10 +9,9 @@ fixed study domain. Tactical 268 made that plan inspectable and exposed the
 unresolved production question: the same absolute location must retain the
 same plan when reached through different windows, chunk requests, workers,
 caches, paths, and topology lifts. No streamed planner, adjacent-region
-contract, or production terrain consumer exists yet. A follow-up tactical
-will own a falsifiable research campaign comparing canonical supertiles,
-hierarchical boundary facts, feature-owned graphs, and the coordinate-pure
-fallback.**
+contract, or production terrain consumer exists yet. Tactical 270 owns a
+falsifiable research campaign comparing canonical supertiles, hierarchical
+boundary facts, feature-owned graphs, and the coordinate-pure fallback.**
 
 ## Purpose
 
@@ -415,10 +414,10 @@ It is intentionally explicit about their limits.
 | [TauDEM documentation](https://hydrology.usu.edu/taudem/taudem5/help53/TauDEMToolboxOverview.htm) | separation of pit handling, flow direction, contributing area, channels, order, and watersheds | a procedural streaming architecture |
 | [USGS watershed and drainage-basin overview](https://www.usgs.gov/water-science-school/science/watersheds-and-drainage-basins) and [stream order](https://www.usgs.gov/media/images/streamorder) | geographic vocabulary for common outlets, divides, nested drainage, and hierarchy | literal game dimensions, algorithms, or tuning |
 
-The active research tactical must expand this ledger before selecting a
-streamed candidate. Priority areas are tiled/parallel watershed work,
-deterministic hierarchical procedural networks, boundary-condition methods,
-and primary accounts from real shipped or maintained world generators.
+Tactical 270 must expand this ledger before selecting a streamed candidate.
+Priority areas are tiled/parallel watershed work, deterministic hierarchical
+procedural networks, boundary-condition methods, and primary accounts from
+real shipped or maintained world generators.
 
 ## Decision And Experiment Ledger
 
@@ -464,3 +463,4 @@ decisions here or in the active tactical before relying on them.
 - [`../tactical/265-macro-landform-grammar-research.md`](../tactical/265-macro-landform-grammar-research.md)
 - [`../tactical/267-hybrid-macro-landform-plan-prototype.md`](../tactical/267-hybrid-macro-landform-plan-prototype.md)
 - [`../tactical/268-terrain-lab-landform-plan-diagnostic.md`](../tactical/268-terrain-lab-landform-plan-diagnostic.md)
+- [`../tactical/270-deterministic-streamed-landscape-planner-research.md`](../tactical/270-deterministic-streamed-landscape-planner-research.md)
