@@ -22,8 +22,13 @@ research-only comparison across three seeds and plane/cylinder topology.
 Human Review B provisionally accepted the planning direction and specifically
 requested its structural map as a durable interactive diagnostic. Tactical
 268 now provides that mclone-only Terrain Lab pane, independent overlays, and
-point receipts over the fixed plane study domain. The work is paused for
-interactive human review before any production planner or terrain change.**
+point receipts over the fixed plane study domain. Interactive review accepted
+the structural promise but exposed the unresolved world-indexed construction
+problem: an absolute location must not change when requested through another
+window, path, region order, cache state, Worker, or topology lift. The focused
+[`deterministic-streamed-landscape-planning`](deterministic-streamed-landscape-planning.md)
+topic and a follow-up tactical now own that falsifiable feasibility research.
+No production planner or terrain change is authorized.**
 
 The motivating July 2026 visual review found four related regional-scale
 weaknesses:
@@ -69,6 +74,10 @@ This topic owns:
 
 It deliberately does not replace:
 
+- [`deterministic-streamed-landscape-planning.md`](deterministic-streamed-landscape-planning.md),
+  which owns the feasibility method, exact invariants, candidate streamed
+  representations, boundary experiments, reference ledger, and fallback for
+  a relational planner;
 - [`mclone-overworld-generation.md`](mclone-overworld-generation.md), which
   owns current implementation truth, field revisions, mechanism boundaries,
   performance receipts, and tactical history;
@@ -371,9 +380,11 @@ The browser retains compact cell and skeleton arrays; pan, zoom, inspection,
 and overlay changes do not rerun the planner. A Rust-owned point receipt
 reports basin/receiver identity, accumulation/order, envelope values, and
 structural flags. The fixed 6,144-block plane boundary is explicit rather than
-silently tiled. Desktop and phone headed-browser review now pass, and the work
-is paused for interactive human review before production integration,
-surface/ecology work, compound water, geology, or 3D density.
+silently tiled. Desktop and phone headed-browser review now pass. The work has
+moved into a separate streamed-planner feasibility campaign before production
+integration, surface/ecology work, compound water, geology, or 3D density.
+The fixed map proves a bounded representation, not window- or
+path-independent geography.
 
 ### Hydrology
 
@@ -1135,7 +1146,7 @@ none is inferred from CPU compile time.
 |---|---|---|
 | raw macro fields | continentalness, relief, ruggedness, ridges, mountain detail, climate, bathymetry, water morphology, and continuous quiet/rolling/ridge-valley/basin/mountain intent derived without a new noise field | no pass, plateau, escarpment, high-basin, or planned terrain-corridor intent |
 | terrain | field-revision-21 remains production; Tactical 267 proves research-only hybrid envelopes, divergent divides, drainage, protected basins, quiet space, and indexed reconstruction across the fixed plane/cylinder corpus; Tactical 268 exposes the compact plane summary interactively in Terrain Lab | interactive human review must decide whether the structural gain outweighs remaining stepped/parallel raster tendencies, smooth profile stamps, limited grammar, and query cost before any production integration |
-| sampling/representation | cheap production CPU/GPU heightfield preview plus normalized receipts through roughly 500 km; research hybrid queries are local and measured, and a 128-block far summary retains envelope plus skeleton facts | no production plan cache, batching/GPU reconstruction, filtered spacing-2,048 review product, or sparse volumetric near/far contract |
+| sampling/representation | cheap production CPU/GPU heightfield preview plus normalized receipts through roughly 500 km; research hybrid queries are local and measured, and a 128-block far summary retains envelope plus skeleton facts | no window/path/order-independent streamed plan, production cache, batching/GPU reconstruction, filtered spacing-2,048 review product, or sparse volumetric near/far contract |
 | coast | shared sandy/gravel/ordinary/rocky/cold intent; bounded geometry, locally feathered realization, cross-substrate snow, mixed banks; incoming field-revision-21 landform relief reaches water and can reduce redundant rocky lift; exact CPU/GPU and periodic-seam evidence | Human Review 2 found substantial improvement, and the new inherited-relief coast examples now need review; no marsh, frozen-ocean morphology, dunes, deltas, reefs, or sea caves |
 | major rivers | warped zero-contour corridor with width/depth/bank morphology and receiving-outlet correction | no persistent macro drainage topology, tributary hierarchy, or named major reaches |
 | streams | bounded 91-96-block valley-following source-to-river plan | one peaceful family, not a general network |
@@ -1211,9 +1222,14 @@ every row before shipping any smaller improvement.
    - Tactical 268 promotes a compact Rust-owned summary into a mclone-only
      Terrain Lab pane with URL-addressed overlays, shared pan/zoom, Worker
      construction, point inspection, build/transfer evidence, and explicit
-     fixed-domain bounds; and
-   - the work is now stopped for interactive human review before production
-     integration or promotion of another diagnostic family.
+     fixed-domain bounds;
+   - interactive review accepts further investigation but identifies
+     window/path/order independence as a non-negotiable missing proof;
+   - the focused deterministic-streaming topic records exact invariants,
+     reference discipline, candidate architectures, experiment methodology,
+     human-review policy, and a coordinate-pure fallback; and
+   - the follow-up tactical must select, narrow, or reject a streamed
+     relational planner before any production integration.
 5. **Compose basins and compound water forms**
    - add one broad shallow basin/lake family with spill semantics;
    - add one anabranch, braid, or delta family that deliberately creates
@@ -1248,6 +1264,10 @@ enormous “finish terrain” change.
 
 - Which river skeleton supplies the best balance of convincing topology,
   terrain relation, deterministic bounded work, and stable water semantics?
+- Can any world-indexed relational planner satisfy the exact request, path,
+  cache, window, partition, schedule, and topology-lift invariants in
+  [`deterministic-streamed-landscape-planning.md`](deterministic-streamed-landscape-planning.md)
+  at an acceptable bounded cost?
 - What continuous coverage of quiet, rolling, ridge/valley, basin, and
   mountain intent creates varied journeys without replacing negative space
   with universal roughness?
@@ -1296,6 +1316,7 @@ advance.
 - [`procedural-horizon-clipmap.md`](procedural-horizon-clipmap.md)
 - [`vanilla-terrain-lod.md`](vanilla-terrain-lod.md)
 - [`bounded-world-topology.md`](bounded-world-topology.md)
+- [`deterministic-streamed-landscape-planning.md`](deterministic-streamed-landscape-planning.md)
 - [`../worldgen-status.md`](../worldgen-status.md)
 - [`../structures.md`](../structures.md)
 - [`../tactical/220-mclone-overworld-rivers-and-wetlands.md`](../tactical/220-mclone-overworld-rivers-and-wetlands.md)

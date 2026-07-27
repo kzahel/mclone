@@ -123,6 +123,12 @@ series implements the same concern, normally reuse the document slug in its
   and negative space through explicit scales, precedence, bounded plans,
   scale- and topology-aware sampling, selective volumetric terrain, and
   composite review evidence.
+- [`deterministic-streamed-landscape-planning.md`](deterministic-streamed-landscape-planning.md):
+  active falsifiable research methodology for deciding whether relational
+  macro plans can remain exactly independent of request, travel, scheduling,
+  cache, window, partition, and topology lift while retaining bounded cost,
+  semantic boundary agreement, cheap summaries, and a documented
+  coordinate-pure fallback.
 - [`mclone-overworld-breadth.md`](mclone-overworld-breadth.md): active
   original-profile breadth ledger measured against grouped Java 1.17.1
   families, with explicit mechanism/live/reviewed states, regional recipe

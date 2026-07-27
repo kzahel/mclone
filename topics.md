@@ -210,6 +210,10 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   hydrology, coasts, geology, ecology, landmarks, and negative space with
   bounded topology-aware plans, scale-aware previews, and selective
   volumetric terrain
+- `deterministic-streamed-landscape-planning` — falsifiable research into a
+  novel relational macro planner with exact request/path/cache/window/order
+  independence, semantic boundary agreement, topology-aware bounded work,
+  comparable performance evidence, and a coordinate-pure fallback
 - `modern-minecraft-reference` — pinned current-stable Java comparative
   source lane, official unobfuscated jar bootstrap, focused worldgen research,
   refresh policy, and post-1.18 findings without changing the 1.17.1 target
