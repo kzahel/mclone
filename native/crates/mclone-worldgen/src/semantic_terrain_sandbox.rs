@@ -135,6 +135,7 @@ impl SemanticTerrainSandboxRequest {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SemanticTerrainDetailMetrics {
     pub detail: MultiscaleWitnessDetail,
     pub owner_count: u32,
@@ -145,6 +146,7 @@ pub struct SemanticTerrainDetailMetrics {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SemanticTerrainCorrectionMetrics {
     pub minimum: f32,
     pub maximum: f32,
@@ -153,6 +155,7 @@ pub struct SemanticTerrainCorrectionMetrics {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SemanticTerrainGuide {
     pub detail: MultiscaleWitnessDetail,
     pub family: MultiscaleWitnessFamily,
@@ -163,12 +166,13 @@ pub struct SemanticTerrainGuide {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SemanticTerrainSandboxMetadata {
     pub receipt_schema: &'static str,
     pub revision: &'static str,
     pub research_only: bool,
     pub production_terrain_unchanged: bool,
-    pub seed: i64,
+    pub seed: String,
     pub topology: StreamedPlanTopology,
     pub substrate: SemanticTerrainSubstrate,
     pub features: SemanticTerrainFeatureMode,
@@ -213,6 +217,7 @@ pub struct SemanticTerrainDetailGrid {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SemanticTerrainSandboxCaseReceipt {
     pub seed: i64,
     pub topology: StreamedPlanTopology,
@@ -227,6 +232,7 @@ pub struct SemanticTerrainSandboxCaseReceipt {
 }
 
 #[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct SemanticTerrainSandboxSuiteReceipt {
     pub receipt_schema: &'static str,
     pub revision: &'static str,
@@ -242,6 +248,7 @@ enum SampleTraversal {
     Raster,
     Reverse,
     EvenOdd,
+    Shuffled,
 }
 
 #[derive(Clone, Debug)]
@@ -327,7 +334,11 @@ pub fn run_semantic_terrain_sandbox_suite() -> Result<SemanticTerrainSandboxSuit
             );
             let raster = compile_with_traversal(request, SampleTraversal::Raster)?;
             let mut traversal_mismatch_count = 0_u32;
-            for traversal in [SampleTraversal::Reverse, SampleTraversal::EvenOdd] {
+            for traversal in [
+                SampleTraversal::Reverse,
+                SampleTraversal::EvenOdd,
+                SampleTraversal::Shuffled,
+            ] {
                 let comparison = compile_with_traversal(request, traversal)?;
                 if raster.metadata.terrain_sha256 != comparison.metadata.terrain_sha256
                     || raster.local_heights != comparison.local_heights
@@ -445,13 +456,22 @@ fn compile_with_traversal(
     let guides = courses
         .iter()
         .flat_map(|course| {
-            course.features.iter().map(|feature| SemanticTerrainGuide {
-                detail: course.detail,
-                family: feature.family,
-                start_x: feature.anchor_x as f32 + feature.start_x as f32,
-                start_z: feature.anchor_z as f32 + feature.start_z as f32,
-                end_x: feature.anchor_x as f32 + feature.end_x as f32,
-                end_z: feature.anchor_z as f32 + feature.end_z as f32,
+            course.features.iter().map(|feature| {
+                let (anchor_x, anchor_z) = lifted_anchor(
+                    request,
+                    request.center_x,
+                    request.center_z,
+                    feature.anchor_x,
+                    feature.anchor_z,
+                );
+                SemanticTerrainGuide {
+                    detail: course.detail,
+                    family: feature.family,
+                    start_x: (anchor_x + f64::from(feature.start_x)) as f32,
+                    start_z: (anchor_z + f64::from(feature.start_z)) as f32,
+                    end_x: (anchor_x + f64::from(feature.end_x)) as f32,
+                    end_z: (anchor_z + f64::from(feature.end_z)) as f32,
+                }
             })
         })
         .collect();
@@ -471,7 +491,7 @@ fn compile_with_traversal(
             revision: SEMANTIC_TERRAIN_SANDBOX_REVISION,
             research_only: true,
             production_terrain_unchanged: true,
-            seed: request.seed,
+            seed: request.seed.to_string(),
             topology: request.topology,
             substrate: request.substrate,
             features: request.features,
@@ -606,23 +626,17 @@ fn reconstruct(
     world_x: f64,
     world_z: f64,
 ) -> f64 {
-    let topology = request.topology.horizontal();
     course
         .features
         .iter()
         .map(|feature| {
-            let observer_x = world_x.round() as i32;
-            let observer_z = world_z.round() as i32;
-            let anchor_x = f64::from(observer_x)
-                + topology
-                    .x
-                    .shortest_block_displacement(observer_x, feature.anchor_x)
-                    as f64;
-            let anchor_z = f64::from(observer_z)
-                + topology
-                    .z
-                    .shortest_block_displacement(observer_z, feature.anchor_z)
-                    as f64;
+            let (anchor_x, anchor_z) = lifted_anchor(
+                request,
+                world_x,
+                world_z,
+                feature.anchor_x,
+                feature.anchor_z,
+            );
             let start_x = anchor_x + f64::from(feature.start_x);
             let start_z = anchor_z + f64::from(feature.start_z);
             let end_x = anchor_x + f64::from(feature.end_x);
@@ -640,6 +654,28 @@ fn reconstruct(
             }
         })
         .sum()
+}
+
+fn lifted_anchor(
+    request: SemanticTerrainSandboxRequest,
+    observer_x: f64,
+    observer_z: f64,
+    canonical_x: i32,
+    canonical_z: i32,
+) -> (f64, f64) {
+    let topology = request.topology.horizontal();
+    let observer_x = observer_x.round() as i32;
+    let observer_z = observer_z.round() as i32;
+    (
+        f64::from(observer_x)
+            + topology
+                .x
+                .shortest_block_displacement(observer_x, canonical_x) as f64,
+        f64::from(observer_z)
+            + topology
+                .z
+                .shortest_block_displacement(observer_z, canonical_z) as f64,
+    )
 }
 
 fn substrate_height(request: SemanticTerrainSandboxRequest, world_x: f64, world_z: f64) -> f64 {
@@ -873,6 +909,15 @@ fn sample_order(sample_count: usize, traversal: SampleTraversal) -> Vec<usize> {
             .step_by(2)
             .chain((1..sample_count).step_by(2))
             .collect(),
+        SampleTraversal::Shuffled => {
+            let mut order = (0..sample_count).collect::<Vec<_>>();
+            let mut state = 0x61c8_8646_80b5_83ebu64;
+            for index in (1..order.len()).rev() {
+                state = mix64(state ^ index as u64);
+                order.swap(index, state as usize % (index + 1));
+            }
+            order
+        }
     }
 }
 
@@ -930,7 +975,11 @@ mod tests {
             SemanticTerrainFeatureMode::Combined,
         );
         let raster = compile_with_traversal(request, SampleTraversal::Raster).unwrap();
-        for traversal in [SampleTraversal::Reverse, SampleTraversal::EvenOdd] {
+        for traversal in [
+            SampleTraversal::Reverse,
+            SampleTraversal::EvenOdd,
+            SampleTraversal::Shuffled,
+        ] {
             let other = compile_with_traversal(request, traversal).unwrap();
             assert_eq!(
                 raster.metadata.terrain_sha256,
@@ -984,6 +1033,50 @@ mod tests {
                 left.local_heights[row * columns + columns - 1],
                 right.local_heights[row * columns]
             );
+        }
+    }
+
+    #[test]
+    fn independent_partitions_reassemble_the_same_surface() {
+        let whole_request = SemanticTerrainSandboxRequest::new(
+            12_345,
+            StreamedPlanTopology::Plane,
+            0.0,
+            0.0,
+            6_144.0,
+            1.0,
+            65,
+            SemanticTerrainSubstrate::Quiet,
+            SemanticTerrainFeatureMode::Combined,
+        );
+        let left_request = SemanticTerrainSandboxRequest {
+            center_x: -1_536.0,
+            blocks_across: 3_072.0,
+            aspect_ratio: 0.5,
+            samples_across: 33,
+            ..whole_request
+        };
+        let right_request = SemanticTerrainSandboxRequest {
+            center_x: 1_536.0,
+            ..left_request
+        };
+        let whole = compile_semantic_terrain_sandbox(whole_request).unwrap();
+        let left = compile_semantic_terrain_sandbox(left_request).unwrap();
+        let right = compile_semantic_terrain_sandbox(right_request).unwrap();
+        for row in 0..65 {
+            for column in 0..33 {
+                let whole_left = row * 65 + column;
+                let whole_right = row * 65 + column + 32;
+                let partition = row * 33 + column;
+                assert_eq!(
+                    whole.local_heights[whole_left],
+                    left.local_heights[partition]
+                );
+                assert_eq!(
+                    whole.local_heights[whole_right],
+                    right.local_heights[partition]
+                );
+            }
         }
     }
 

@@ -552,6 +552,14 @@ h1 {
   min-height: clamp(760px, calc(100vh - 140px), 1050px);
 }
 
+.semanticTerrainStage {
+  min-height: clamp(780px, calc(100vh - 120px), 1080px);
+}
+
+.semanticTerrainStage .canvasTopline {
+  top: 50px;
+}
+
 .terrainStage:active {
   cursor: grabbing;
 }
@@ -1149,6 +1157,11 @@ button:hover {
     max-height: none;
   }
 
+  .semanticTerrainStage {
+    min-height: 1520px;
+    max-height: none;
+  }
+
   .proceduralPaneFrame.twoLogicalPanes.splitRows .terrainStage {
     min-height: 104vh;
     max-height: 1160px;
@@ -1217,6 +1230,11 @@ button:hover {
 
   .streamedPlanAtlasStage {
     min-height: 920px;
+    max-height: none;
+  }
+
+  .semanticTerrainStage {
+    min-height: 1440px;
     max-height: none;
   }
 

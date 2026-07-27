@@ -58,6 +58,11 @@ test("round-trips complete URL state", () => {
     atlasWitnessBoundsVisible: false,
     atlasIdentityVisible: false,
     atlasSeamsVisible: false,
+    semanticSubstrate: "flat",
+    semanticFeatures: "basin",
+    semanticTopology: "torus",
+    semanticCorrection: "regional",
+    semanticGuidesVisible: false,
   };
   assert.deepEqual(parseTerrainLabState(terrainLabSearch(state)), {
     ...state,
@@ -169,6 +174,7 @@ test("the vanilla profile replaces GPU with fast macro and excludes Mclone-only 
   assert.equal(toggleTerrainLabPane(vanilla, "runtime"), vanilla);
   assert.equal(toggleTerrainLabPane(vanilla, "plan"), vanilla);
   assert.equal(toggleTerrainLabPane(vanilla, "atlas"), vanilla);
+  assert.equal(toggleTerrainLabPane(vanilla, "semantic"), vanilla);
   assert.deepEqual(
     toggleTerrainLabPane(vanilla, "cpu").panes,
     ["canonical", "macro"],
@@ -229,6 +235,11 @@ test("keeps camera state outside URL-addressed terrain state", () => {
     atlasWitnessBoundsVisible: false,
     atlasIdentityVisible: false,
     atlasSeamsVisible: true,
+    semanticSubstrate: "quiet",
+    semanticFeatures: "combined",
+    semanticTopology: "plane",
+    semanticCorrection: "local",
+    semanticGuidesVisible: true,
   });
 });
 
@@ -271,6 +282,21 @@ test("round-trips streamed planner atlas topology and overlays", () => {
   assert.equal(state.atlasWitnessBoundsVisible, true);
   assert.equal(state.atlasIdentityVisible, false);
   assert.equal(state.atlasSeamsVisible, true);
+  assert.deepEqual(parseTerrainLabState(terrainLabSearch(state)), state);
+});
+
+test("round-trips semantic terrain reconstruction controls", () => {
+  const state = parseTerrainLabState(
+    "?panes=semantic&semanticSubstrate=flat&semanticFeatures=range"
+      + "&semanticTopology=torus&semanticCorrection=regional"
+      + "&semanticGuides=0",
+  );
+  assert.deepEqual(state.panes, ["semantic"]);
+  assert.equal(state.semanticSubstrate, "flat");
+  assert.equal(state.semanticFeatures, "range");
+  assert.equal(state.semanticTopology, "torus");
+  assert.equal(state.semanticCorrection, "regional");
+  assert.equal(state.semanticGuidesVisible, false);
   assert.deepEqual(parseTerrainLabState(terrainLabSearch(state)), state);
 });
 

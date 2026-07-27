@@ -22,6 +22,9 @@ import {
   type TerrainLabProfile,
   type TerrainLabProjection,
   type StreamedPlanAtlasTopology,
+  type SemanticTerrainCorrection,
+  type SemanticTerrainFeatures,
+  type SemanticTerrainSubstrate,
   type TerrainLabComparisonVisualProfile,
   type TerrainLabState,
   type TerrainLabTexturePresentation,
@@ -44,6 +47,10 @@ import {
   StreamedPlanAtlasCanvas,
   type StreamedPlanAtlasReport,
 } from "./StreamedPlanAtlasCanvas";
+import {
+  SemanticTerrainCanvas,
+  type SemanticTerrainReport,
+} from "./SemanticTerrainCanvas";
 import type {
   LandformPlanPointReceipt,
 } from "./landform-plan-worker-protocol";
@@ -82,6 +89,11 @@ const PANE_OPTIONS: Array<{ value: TerrainLabPane; label: string; note: string }
     value: "atlas",
     label: "Planner atlas",
     note: "Pannable comparison including semantic multiscale refinement",
+  },
+  {
+    value: "semantic",
+    label: "Semantic terrain",
+    note: "Standalone parent, regional, local, and correction reconstruction",
   },
   { value: "cpu", label: "CPU LOD", note: "Production CPU preview evaluator" },
   {
@@ -165,6 +177,7 @@ export function App(): React.JSX.Element {
   const [planPointReceipt, setPlanPointReceipt] =
     useState<LandformPlanPointReceipt>();
   const [atlasReport, setAtlasReport] = useState<StreamedPlanAtlasReport>();
+  const [semanticReport, setSemanticReport] = useState<SemanticTerrainReport>();
   const [atlasCacheEpoch, setAtlasCacheEpoch] = useState(0);
   const [comparisonCanonicalReport, setComparisonCanonicalReport] =
     useState<CanonicalTerrainReport>();
@@ -247,13 +260,15 @@ export function App(): React.JSX.Element {
   const canonicalVisible = state.panes.includes("canonical");
   const planVisible = state.panes.includes("plan");
   const atlasVisible = state.panes.includes("atlas");
+  const semanticVisible = state.panes.includes("semantic");
   const cpuVisible = state.panes.includes("cpu");
   const macroVisible = state.panes.includes("macro");
   const gpuVisible = state.panes.includes("gpu");
   const proceduralVisible = cpuVisible || macroVisible || gpuVisible;
   const terrainPaneVisible =
     runtimeVisible || canonicalVisible || proceduralVisible;
-  const diagnosticOnly = (planVisible || atlasVisible) && !terrainPaneVisible;
+  const viewPaneVisible = terrainPaneVisible || semanticVisible;
+  const diagnosticOnly = (planVisible || atlasVisible) && !viewPaneVisible;
   const proceduralSource = proceduralSourceForPanes(state.panes);
   const primaryVisualUnavailable = visualAssetsReady
     && visualProfileUsesMinecraftReference(state.visualProfile)
@@ -291,6 +306,7 @@ export function App(): React.JSX.Element {
       && (!runtimeVisible || primaryVisualUnavailable || runtimeReport?.targetReady)
       && (!planVisible || planReport)
       && (!atlasVisible || atlasReport)
+      && (!semanticVisible || semanticReport)
       && (!visualComparisonVisible
         || comparisonVisualUnavailable
         || comparisonCanonicalReport?.complete)
@@ -370,6 +386,15 @@ export function App(): React.JSX.Element {
       data-atlas-graph-hits={atlasReport?.featureGraph.cacheHits ?? 0}
       data-atlas-multiscale-hits={
         atlasReport?.multiscaleWitness.cacheHits ?? 0
+      }
+      data-semantic-ready={semanticReport ? "true" : "false"}
+      data-semantic-compile-ms={semanticReport?.compileMs ?? ""}
+      data-semantic-draw-ms={semanticReport?.drawMs ?? ""}
+      data-semantic-suite={semanticReport?.suiteSha256 ?? ""}
+      data-semantic-checksum={semanticReport?.terrainSha256 ?? ""}
+      data-semantic-feature-checksum={semanticReport?.semanticSha256 ?? ""}
+      data-semantic-production-unchanged={
+        semanticReport?.productionTerrainUnchanged ? "true" : "false"
       }
       data-compare-visual-profile={state.compareVisualProfile}
       data-reference-textures-available={
@@ -542,6 +567,8 @@ export function App(): React.JSX.Element {
               ]}
               onChange={(view) => patchState({ view })}
             />
+            {terrainPaneVisible ? (
+              <>
             <SegmentedControl<TerrainLabProjection>
               label="3D projection"
               value={state.projection}
@@ -594,6 +621,8 @@ export function App(): React.JSX.Element {
               </select>
             </label>
               </>
+            ) : null}
+              </>
             )}
             <div className="mapZoom" aria-label="Viewport zoom controls">
               <button
@@ -628,6 +657,7 @@ export function App(): React.JSX.Element {
             className={`paneWorkspace logicalPanes${state.panes.length}${
               !planVisible
               && !atlasVisible
+              && !semanticVisible
               && canonicalVisible
               && cpuVisible
               && (macroVisible || gpuVisible)
@@ -762,6 +792,18 @@ export function App(): React.JSX.Element {
                 />
               </div>
             ) : null}
+            {semanticVisible ? (
+              <div className="paneFrame semanticTerrainPaneFrame">
+                <SemanticTerrainCanvas
+                  state={state}
+                  camera={camera}
+                  onStateChange={updateState}
+                  onCameraChange={setCamera}
+                  onReport={setSemanticReport}
+                  onError={setError}
+                />
+              </div>
+            ) : null}
             {proceduralVisible ? (
               <div
                 className={`paneFrame proceduralPaneFrame${
@@ -820,6 +862,8 @@ export function App(): React.JSX.Element {
               <strong>
                 {atlasVisible && !terrainPaneVisible
                   ? "1:1024 plan regions"
+                  : semanticVisible && !terrainPaneVisible
+                  ? "65 × adaptive lattice"
                   : planVisible && !proceduralVisible
                   ? "1:32 plan cells"
                   : (
@@ -1094,6 +1138,105 @@ export function App(): React.JSX.Element {
                 </p>
               </>
             ) : null}
+            {semanticVisible ? (
+              <>
+                <SegmentedControl<SemanticTerrainSubstrate>
+                  label="Semantic substrate"
+                  value={state.semanticSubstrate}
+                  options={[
+                    {
+                      value: "flat",
+                      label: "Flat",
+                      note: "Constant Y 64 attribution control",
+                    },
+                    {
+                      value: "quiet",
+                      label: "Quiet",
+                      note: "Low-amplitude coordinate-pure rolling foundation",
+                    },
+                  ]}
+                  onChange={(semanticSubstrate) =>
+                    patchState({ semanticSubstrate })}
+                />
+                <SegmentedControl<SemanticTerrainFeatures>
+                  label="Feature reconstruction"
+                  value={state.semanticFeatures}
+                  options={[
+                    {
+                      value: "range",
+                      label: "Range",
+                      note: "Positive compact-support range axes only",
+                    },
+                    {
+                      value: "basin",
+                      label: "Basin",
+                      note: "Negative basin routes and visual water only",
+                    },
+                    {
+                      value: "combined",
+                      label: "Combined",
+                      note: "Independent range and basin influences together",
+                    },
+                  ]}
+                  onChange={(semanticFeatures) =>
+                    patchState({ semanticFeatures })}
+                />
+                <SegmentedControl<StreamedPlanAtlasTopology>
+                  label="Semantic topology"
+                  value={state.semanticTopology}
+                  options={[
+                    {
+                      value: "plane",
+                      label: "Plane",
+                      note: "Unbounded coordinate-pure reconstruction",
+                    },
+                    {
+                      value: "cylinder-x",
+                      label: "Cylinder X",
+                      note: "6.144 km periodic X, unbounded Z",
+                    },
+                    {
+                      value: "torus",
+                      label: "Torus",
+                      note: "6.144 km periodic X and Z",
+                    },
+                  ]}
+                  onChange={(semanticTopology) =>
+                    patchState({ semanticTopology })}
+                />
+                <SegmentedControl<SemanticTerrainCorrection>
+                  label="Correction panel"
+                  value={state.semanticCorrection}
+                  options={[
+                    {
+                      value: "regional",
+                      label: "Regional − parent",
+                      note: "First bounded refinement correction",
+                    },
+                    {
+                      value: "local",
+                      label: "Local − regional",
+                      note: "Second bounded refinement correction",
+                    },
+                  ]}
+                  onChange={(semanticCorrection) =>
+                    patchState({ semanticCorrection })}
+                />
+                <div className="visibilityToggles">
+                  <ToggleButton
+                    label="Feature guides"
+                    pressed={state.semanticGuidesVisible}
+                    onChange={(semanticGuidesVisible) =>
+                      patchState({ semanticGuidesVisible })}
+                  />
+                </div>
+                <p className="controlNote">
+                  Each panel reconstructs one representation course; finer
+                  segments replace their parent rather than stacking on it.
+                  This sandbox remains disconnected from Mclone Overworld.
+                </p>
+              </>
+            ) : null}
             {canonicalVisible ? (
               <>
                 <SegmentedControl<CanonicalTerrainStage>
@@ -1258,7 +1401,7 @@ export function App(): React.JSX.Element {
                 </p>
               </>
             ) : null}
-            {terrainPaneVisible ? (
+            {viewPaneVisible ? (
               <button
                 type="button"
                 className="cameraResetButton"
@@ -1425,6 +1568,9 @@ export function App(): React.JSX.Element {
             ) : null}
             {atlasVisible ? (
               <StreamedPlanAtlasEvidence report={atlasReport} />
+            ) : null}
+            {semanticVisible ? (
+              <SemanticTerrainEvidence report={semanticReport} />
             ) : null}
             {proceduralVisible ? (
               <PointReceipt profile={state.profile} receipt={pointReceipt} />
@@ -1611,6 +1757,76 @@ function StreamedPlanAtlasEvidence({
   );
 }
 
+function SemanticTerrainEvidence({
+  report,
+}: {
+  report: SemanticTerrainReport | undefined;
+}): React.JSX.Element {
+  if (!report) {
+    return (
+      <div className="pointReceipt empty" data-testid="semantic-terrain-evidence">
+        <strong>Reconstructing semantic terrain</strong>
+        <span>
+          Rust is compiling parent, regional, local, and correction surfaces
+          off the main thread.
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="pointReceipt" data-testid="semantic-terrain-evidence">
+      <div className="pointReceiptHeading">
+        <strong>Semantic terrain sandbox</strong>
+        <span>
+          {report.compileMs.toFixed(2)} ms compile · {report.drawMs.toFixed(2)} ms draw
+        </span>
+      </div>
+      <dl className="pointReceiptGrid">
+        <div>
+          <dt>Height range</dt>
+          <dd>{report.minimumHeight.toFixed(2)}–{report.maximumHeight.toFixed(2)}</dd>
+        </div>
+        <div><dt>Samples</dt><dd>{formatInteger(report.sampleCount)}</dd></div>
+        <div>
+          <dt>Feature facts</dt>
+          <dd>
+            {report.parent.featureCount} parent · {report.regional.featureCount}
+            {" "}regional · {report.local.featureCount} local
+          </dd>
+        </div>
+        <div>
+          <dt>Distance evaluations</dt>
+          <dd>
+            {formatInteger(report.parent.distanceEvaluationCount)} /{" "}
+            {formatInteger(report.regional.distanceEvaluationCount)} /{" "}
+            {formatInteger(report.local.distanceEvaluationCount)}
+          </dd>
+        </div>
+        <div>
+          <dt>Correction RMS</dt>
+          <dd>{report.correction.rms.toFixed(3)} blocks</dd>
+        </div>
+        <div>
+          <dt>Changed samples</dt>
+          <dd>{(report.correction.changedSampleFraction * 100).toFixed(1)}%</dd>
+        </div>
+        <div>
+          <dt>Terrain checksum</dt>
+          <dd>{report.terrainSha256.slice(0, 16)}…</dd>
+        </div>
+        <div>
+          <dt>Pinned suite</dt>
+          <dd>{report.suiteSha256.slice(0, 16)}…</dd>
+        </div>
+      </dl>
+      <span className="pointReceiptPrompt">
+        Research only · production terrain unchanged. Checksums cover
+        quantized Rust surfaces, not canvas pixels.
+      </span>
+    </div>
+  );
+}
+
 function AtlasCandidateEvidence({
   label,
   receipt,
@@ -1764,6 +1980,7 @@ function PaneToggles({
               && option.value !== "runtime"
               && option.value !== "plan"
               && option.value !== "atlas"
+              && option.value !== "semantic"
             : option.value !== "macro"
         ).map((option) => {
           const visible = panes.includes(option.value);
@@ -1805,6 +2022,7 @@ function WorkspaceGuide({
   const exact = panes.includes("canonical");
   const plan = panes.includes("plan");
   const atlas = panes.includes("atlas");
+  const semantic = panes.includes("semantic");
   const cpu = panes.includes("cpu");
   const macro = panes.includes("macro");
   const gpu = panes.includes("gpu");
@@ -1839,6 +2057,9 @@ function WorkspaceGuide({
           : ""}
         {atlas
           ? "Planner atlas queries deterministic canonical regions around the freely pannable viewport and compares the Phase 2 fallback, hierarchy, bounded graphs, and multiscale refinement witness. "
+          : ""}
+        {semantic
+          ? "Semantic terrain independently reconstructs parent, regional, and local range/basin courses plus their bounded correction; Mclone Overworld does not consume it. "
           : ""}
         Every visible pane shares seed, center, scale, and navigation. Terrain
         panes also share camera state.
@@ -1885,6 +2106,16 @@ function SourceFootnote({
       </>
     );
   }
+  if (panes.length === 1 && panes[0] === "semantic") {
+    return (
+      <>
+        Research-only semantic reconstruction over flat or quiet substrate.
+        Rust owns feature identity, topology, sampling, surfaces, and exact
+        checksums; the browser only draws the four synchronized views.
+        Production terrain consumes none of it.
+      </>
+    );
+  }
   return (
     <>
       Real terrain is exact generated blocks with {visualProfileLabel(visualProfile)}
@@ -1896,6 +2127,7 @@ function SourceFootnote({
       records at near-detail checkpoints. The Landform plan pane is a
       research-only fixed 2D summary. The Planner atlas is a freely pannable
       structural comparison. Neither is consumed by production terrain.
+      {" "}Semantic terrain is likewise an isolated reconstruction sandbox.
     </>
   );
 }

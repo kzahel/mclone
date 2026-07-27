@@ -31,6 +31,12 @@ const STREAMED_PLAN_ATLAS_WORKER: &str =
     include_str!("../../../../tools/terrain-lab/src/web/streamed-plan-atlas-worker.ts");
 const STREAMED_PLAN_ATLAS_RUST: &str =
     include_str!("../../../crates/mclone-worldgen/src/streamed_plan_atlas.rs");
+const SEMANTIC_TERRAIN_CANVAS: &str =
+    include_str!("../../../../tools/terrain-lab/src/web/SemanticTerrainCanvas.tsx");
+const SEMANTIC_TERRAIN_WORKER: &str =
+    include_str!("../../../../tools/terrain-lab/src/web/semantic-terrain-worker.ts");
+const SEMANTIC_TERRAIN_RUST: &str =
+    include_str!("../../../crates/mclone-worldgen/src/semantic_terrain_sandbox.rs");
 
 #[test]
 fn browser_typescript_has_no_exact_worker_policy() {
@@ -273,4 +279,38 @@ fn streamed_plan_atlas_semantics_and_cache_stay_in_rust() {
     assert!(STREAMED_PLAN_ATLAS_WORKER.contains("StreamedPlanAtlasCompiler"));
     assert!(STREAMED_PLAN_ATLAS_CANVAS.contains("useWorldViewNavigation"));
     assert_eq!(STREAMED_PLAN_ATLAS_CANVAS.matches("new Worker(").count(), 1);
+}
+
+#[test]
+fn semantic_terrain_reconstruction_stays_in_rust() {
+    for required in [
+        "compile_semantic_terrain_sandbox",
+        "compile_course",
+        "compact_kernel",
+        "point_segment_distance",
+        "periodic_value_noise",
+        "terrain_sha256",
+    ] {
+        assert!(
+            SEMANTIC_TERRAIN_RUST.contains(required),
+            "shared semantic terrain sampler lost required Rust owner {required:?}"
+        );
+    }
+    for forbidden in [
+        "compact_kernel",
+        "point_segment_distance",
+        "periodic_value_noise",
+        "RANGE_AMPLITUDE",
+        "BASIN_AMPLITUDE",
+        "canonical_parent_owner",
+    ] {
+        assert!(
+            !SEMANTIC_TERRAIN_CANVAS.contains(forbidden)
+                && !SEMANTIC_TERRAIN_WORKER.contains(forbidden),
+            "Terrain Lab browser code gained semantic terrain policy through {forbidden:?}"
+        );
+    }
+    assert!(SEMANTIC_TERRAIN_WORKER.contains("SemanticTerrainSandboxCompiler"));
+    assert!(SEMANTIC_TERRAIN_CANVAS.contains("useWorldViewNavigation"));
+    assert_eq!(SEMANTIC_TERRAIN_CANVAS.matches("new Worker(").count(), 1);
 }

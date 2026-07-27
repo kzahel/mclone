@@ -99,11 +99,14 @@ fn run() -> Result<(), String> {
         encoded_receipt_bytes: 0,
         artifact_path: output.display().to_string(),
     };
-    let first_encoding = serde_json::to_vec_pretty(&receipt)
-        .map_err(|error| format!("serialize receipt: {error}"))?;
-    receipt.encoded_receipt_bytes = first_encoding.len();
-    let encoded = serde_json::to_vec_pretty(&receipt)
-        .map_err(|error| format!("serialize receipt: {error}"))?;
+    let encoded = loop {
+        let encoded = serde_json::to_vec_pretty(&receipt)
+            .map_err(|error| format!("serialize receipt: {error}"))?;
+        if receipt.encoded_receipt_bytes == encoded.len() {
+            break encoded;
+        }
+        receipt.encoded_receipt_bytes = encoded.len();
+    };
     let parent = output
         .parent()
         .ok_or_else(|| format!("output path {} has no parent", output.display()))?;

@@ -19,11 +19,15 @@ export type TerrainLabTexturePresentation = "textured" | "flat-colors";
 export type TerrainLabComparisonVisualProfile = "off" | TerrainLabVisualProfile;
 export type TerrainLabSource = "gpu" | "reference" | "macro" | "split";
 export type StreamedPlanAtlasTopology = "plane" | "cylinder-x" | "torus";
+export type SemanticTerrainSubstrate = "flat" | "quiet";
+export type SemanticTerrainFeatures = "range" | "basin" | "combined";
+export type SemanticTerrainCorrection = "regional" | "local";
 export type TerrainLabPane =
   | "runtime"
   | "canonical"
   | "plan"
   | "atlas"
+  | "semantic"
   | "cpu"
   | "macro"
   | "gpu";
@@ -91,6 +95,11 @@ export interface TerrainLabState {
   atlasWitnessBoundsVisible: boolean;
   atlasIdentityVisible: boolean;
   atlasSeamsVisible: boolean;
+  semanticSubstrate: SemanticTerrainSubstrate;
+  semanticFeatures: SemanticTerrainFeatures;
+  semanticTopology: StreamedPlanAtlasTopology;
+  semanticCorrection: SemanticTerrainCorrection;
+  semanticGuidesVisible: boolean;
 }
 
 export interface TerrainLabCamera {
@@ -139,6 +148,11 @@ export const DEFAULT_TERRAIN_LAB_STATE: TerrainLabState = {
   atlasWitnessBoundsVisible: false,
   atlasIdentityVisible: false,
   atlasSeamsVisible: true,
+  semanticSubstrate: "quiet",
+  semanticFeatures: "combined",
+  semanticTopology: "plane",
+  semanticCorrection: "local",
+  semanticGuidesVisible: true,
 };
 
 export const REVIEW_TERRAIN_LAB_STATE: TerrainLabState = {
@@ -187,12 +201,23 @@ const ATLAS_TOPOLOGIES = new Set<StreamedPlanAtlasTopology>([
   "cylinder-x",
   "torus",
 ]);
+const SEMANTIC_SUBSTRATES = new Set<SemanticTerrainSubstrate>(["flat", "quiet"]);
+const SEMANTIC_FEATURES = new Set<SemanticTerrainFeatures>([
+  "range",
+  "basin",
+  "combined",
+]);
+const SEMANTIC_CORRECTIONS = new Set<SemanticTerrainCorrection>([
+  "regional",
+  "local",
+]);
 const SURFACE_QUALITIES = new Set<TerrainLabSurfaceQuality>(["basic", "inferred"]);
 const PANES = new Set<TerrainLabPane>([
   "runtime",
   "canonical",
   "plan",
   "atlas",
+  "semantic",
   "cpu",
   "macro",
   "gpu",
@@ -320,6 +345,21 @@ export function parseTerrainLabState(
       ?? fallback.atlasIdentityVisible,
     atlasSeamsVisible:
       validBoolean(params.get("atlasSeams")) ?? fallback.atlasSeamsVisible,
+    semanticSubstrate:
+      validMember(params.get("semanticSubstrate"), SEMANTIC_SUBSTRATES)
+      ?? fallback.semanticSubstrate,
+    semanticFeatures:
+      validMember(params.get("semanticFeatures"), SEMANTIC_FEATURES)
+      ?? fallback.semanticFeatures,
+    semanticTopology:
+      validMember(params.get("semanticTopology"), ATLAS_TOPOLOGIES)
+      ?? fallback.semanticTopology,
+    semanticCorrection:
+      validMember(params.get("semanticCorrection"), SEMANTIC_CORRECTIONS)
+      ?? fallback.semanticCorrection,
+    semanticGuidesVisible:
+      validBoolean(params.get("semanticGuides"))
+      ?? fallback.semanticGuidesVisible,
   });
 }
 
@@ -368,6 +408,11 @@ export function terrainLabSearch(
   params.set("atlasWitnessBounds", state.atlasWitnessBoundsVisible ? "1" : "0");
   params.set("atlasIdentity", state.atlasIdentityVisible ? "1" : "0");
   params.set("atlasSeams", state.atlasSeamsVisible ? "1" : "0");
+  params.set("semanticSubstrate", state.semanticSubstrate);
+  params.set("semanticFeatures", state.semanticFeatures);
+  params.set("semanticTopology", state.semanticTopology);
+  params.set("semanticCorrection", state.semanticCorrection);
+  params.set("semanticGuides", state.semanticGuidesVisible ? "1" : "0");
   if (reviewCamera) {
     params.set("reviewYaw", String(reviewCamera.yaw));
     params.set("reviewPitch", String(reviewCamera.pitch));
@@ -407,6 +452,7 @@ export function toggleTerrainLabPane(
     || (state.profile === "overworld" && pane === "runtime")
     || (state.profile === "overworld" && pane === "plan")
     || (state.profile === "overworld" && pane === "atlas")
+    || (state.profile === "overworld" && pane === "semantic")
     || (state.profile !== "overworld" && pane === "macro")
   ) {
     return state;
@@ -433,7 +479,13 @@ export function switchTerrainLabProfile(
   const panes = state.panes.map((pane) => {
     if (
       profile === "overworld"
-      && (pane === "gpu" || pane === "runtime" || pane === "plan" || pane === "atlas")
+      && (
+        pane === "gpu"
+        || pane === "runtime"
+        || pane === "plan"
+        || pane === "atlas"
+        || pane === "semantic"
+      )
     ) {
       return "macro";
     }
@@ -454,7 +506,11 @@ export function normalizeTerrainLabProfileState(
 ): TerrainLabState {
   const panes = state.panes.filter((pane) =>
     state.profile === "overworld"
-      ? pane !== "gpu" && pane !== "runtime" && pane !== "plan" && pane !== "atlas"
+      ? pane !== "gpu"
+        && pane !== "runtime"
+        && pane !== "plan"
+        && pane !== "atlas"
+        && pane !== "semantic"
       : pane !== "macro"
   );
   if (panes.length === 0) {
@@ -579,7 +635,16 @@ function validFiniteNumber(value: string | null): number | undefined {
 }
 
 function paneOrder(pane: TerrainLabPane): number {
-  return ["runtime", "canonical", "plan", "atlas", "cpu", "macro", "gpu"].indexOf(pane);
+  return [
+    "runtime",
+    "canonical",
+    "plan",
+    "atlas",
+    "semantic",
+    "cpu",
+    "macro",
+    "gpu",
+  ].indexOf(pane);
 }
 
 function validMember<T extends string>(value: string | null, values: Set<T>): T | undefined {
