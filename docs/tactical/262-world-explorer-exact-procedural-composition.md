@@ -670,6 +670,15 @@ semantic receipts report `25/25` exact chunks, coverage generation `27`,
 `8` exact-owned plus `7` proxy-owned trees, zero missing representations,
 and fixed resident bytes `128,867,704`.
 
+The review candidate was deployed from `2893c3dd` on 2026-07-27 as
+Cloudflare production version `1f5b5861-1075-49cd-80d4-3f142574a199`.
+Production `/explore/` serves the same `e763583bf443efe7` Explorer asset.
+Direct hosted source-color composition smokes on desktop and the Pixel 7
+profile reproduce the local `25/25` chunk, generation `27`, `8/7` ownership,
+zero-missing, and `128,867,704`-byte receipts. These receipts establish
+deployment and semantic parity; they do not replace the open interactive
+pixel review.
+
 Playwright's headed Wayland screenshot currently returns a one-color white
 canvas for the Explorer. An isolated A/B build of the rejected pre-fix commit
 `ff4363d2` returns the same white capture while the smaller host WebGPU probe
