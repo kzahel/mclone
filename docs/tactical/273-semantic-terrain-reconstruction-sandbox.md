@@ -5,7 +5,8 @@ Commits `fb1929c2`, `b0889375`, and `25111ddb` record the specification,
 shared reconstruction, and Terrain Lab diagnostic. Mclone Overworld,
 persisted generator profiles, block chunks, and selective 3D remain
 unchanged. Commit `7214e28a` records the Human Review R1 navigation
-correction, and `5e138c23` records the stable vertical display scale. Do not
+correction. Commit `5e138c23` records the first stable-Y attempt, and
+`7e295bd1` supersedes it with physically coherent world-scale zoom. Do not
 continue into production integration before review.**
 
 Topic:
@@ -208,12 +209,16 @@ URL-addressed:
 - substrate: flat or quiet;
 - features: range, basin, or combined;
 - topology: plane, cylinder X, or torus;
-- correction: regional or local; and
+- correction: regional or local;
+- vertical scale: physical 1×, diagnostic 8×, or diagnostic 24×; and
 - feature guides: hidden or visible.
 
-The 3D comparison uses one explicit vertical datum and display span shared by
-all three terrain panels. It must not derive its Y origin or scale from the
-minimum and maximum height of each requested viewport.
+The 3D comparison uses one explicit vertical datum shared by all three
+terrain panels. It must not derive its Y origin or scale from the minimum and
+maximum height of each requested viewport. Physical 1× uses the same
+world-to-screen scale for X, Y, and Z; explicit diagnostic exaggeration
+multiplies that world-scale Y component rather than defining a screen-space
+Y axis.
 
 Panning and zooming recompile the same absolute terrain. Zoom chooses sample
 footprint and presentation only; it does not choose exact terrain identity.
@@ -299,6 +304,7 @@ panels. The following controls round-trip through the URL:
 - `semanticFeatures=range|basin|combined`
 - `semanticTopology=plane|cylinder-x|torus`
 - `semanticCorrection=regional|local`
+- `semanticVertical=1x|8x|24x`
 - `semanticGuides=0|1`
 
 Map/3D, orbit, pan, and zoom remain synchronized across all panels. Inspected
@@ -367,7 +373,7 @@ the sample window. The underlying absolute heights remained deterministic,
 but the same elevation moved vertically like a graph with automatic Y-axis
 fitting.
 
-Commit `5e138c23` replaces that fit with:
+Commit `5e138c23` first replaced that fit with:
 
 - a fixed Y=64 display datum, matching the sandbox's flat substrate;
 - a fixed 192-block vertical display span shared by Parent, Regional, and
@@ -376,27 +382,53 @@ Commit `5e138c23` replaces that fit with:
   vertical-offset function; and
 - a visible `fixed Y · 192-block span` badge in 3D mode.
 
-This is an explicit research-visualization scale, not a claim of one-to-one
-voxel aspect. Zoom still changes the horizontal footprint and publishes a new
-absolute terrain reconstruction, while pitch still projects the stable
-vertical offset continuously. Map colors, correction colors, semantic
-checksums, the pinned Rust suite, and production terrain are unchanged.
+That removed extrema-driven jumps, but the next Human Review R1 pass correctly
+rejected it: keeping Y at a fixed screen-space size while horizontal terrain
+shrinks still behaves like an independently scaled graph. Peaks did not get
+smaller when the camera zoomed out.
 
-Focused projection tests lock the datum, span, symmetry, and three-input Y
-contract. The desktop and Pixel 7 browser lane now zooms during the existing
-orbit/pan sequence, proves the last frame remains ready, waits for the new
-viewport pixels, and reasserts the fixed Y contract. The inspected before and
-after frames remain outside the repository at:
+Commit `7e295bd1` supersedes the 192-block screen span with a world-scale
+projection:
+
+- physical 1× is the default and maps one vertical block with the same scale
+  as one horizontal block;
+- doubling `blocksAcross` therefore halves the on-screen height of an
+  unchanged peak;
+- Y=64 remains the stable vertical datum, so viewport extrema still cannot
+  recenter the terrain;
+- explicit 8× and 24× diagnostic exaggeration multiply the world-scale
+  vertical component and therefore also shrink coherently with zoom; and
+- the URL-addressed control and canvas badge always disclose whether the view
+  is physical or exaggerated.
+
+Map colors, correction colors, semantic checksums, the pinned Rust suite, and
+production terrain remain unchanged. Focused projection tests lock 1× aspect,
+the inverse zoom-to-height relationship, datum symmetry, and explicit
+exaggeration. The desktop and Pixel 7 browser lane covers physical zoom and
+the 24× control.
+
+The fixed-screen-span captures below are retained only as evidence of the
+rejected intermediate:
 
 ```text
 /tmp/mclone-semantic-fixed-y-6144.png
 /tmp/mclone-semantic-fixed-y-zoom.png
 ```
 
+The inspected physical 1× sequence and optional coherent 24× diagnostic
+remain outside the repository at:
+
+```text
+/tmp/mclone-semantic-physical-3072.png
+/tmp/mclone-semantic-physical-6144.png
+/tmp/mclone-semantic-physical-12288.png
+/tmp/mclone-semantic-world-scale-24x.png
+```
+
 The review route is:
 
 ```text
-/terrain/?profile=mclone-overworld-v1&panes=semantic&seed=12345&x=1024&z=-768&blocks=6144&view=3d&semanticSubstrate=quiet&semanticFeatures=combined&semanticTopology=plane&semanticCorrection=local&semanticGuides=1
+/terrain/?profile=mclone-overworld-v1&panes=semantic&seed=12345&x=1024&z=-768&blocks=6144&view=3d&semanticSubstrate=quiet&semanticFeatures=combined&semanticTopology=plane&semanticCorrection=local&semanticVertical=1x&semanticGuides=1
 ```
 
 ## Human Review R1
