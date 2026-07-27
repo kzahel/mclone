@@ -200,6 +200,63 @@ fn selected_grid_height(
     return selected_sample(index, instance_index).terrain.y;
 }
 
+// A fine clipmap level owns the exact rectangular hole cut out of its parent.
+// Along that rectangle the parent surface is linear between every other fine
+// sample. Weld odd fine-edge vertices to that same interpolation so the two
+// independently drawn heightfields share one geometric boundary.
+fn terrain_horizon_stitched_height(
+    sample_x: i32,
+    sample_z: i32,
+    cells: i32,
+    cell_stride: i32,
+    instance_index: u32,
+    original_height: f32,
+) -> f32 {
+    if sample_halo_radius() == 0 {
+        return original_height;
+    }
+    let flags = params.content_stage_flags.w;
+    let west_or_east = (
+        ((flags & TERRAIN_HORIZON_NORMAL_EDGE_WEST) != 0u && sample_x == 0)
+        || ((flags & TERRAIN_HORIZON_NORMAL_EDGE_EAST) != 0u && sample_x == cells)
+    );
+    let north_or_south = (
+        ((flags & TERRAIN_HORIZON_NORMAL_EDGE_NORTH) != 0u && sample_z == 0)
+        || ((flags & TERRAIN_HORIZON_NORMAL_EDGE_SOUTH) != 0u && sample_z == cells)
+    );
+    let rendered_x = sample_x / cell_stride;
+    let rendered_z = sample_z / cell_stride;
+    if west_or_east && (rendered_z & 1) != 0 {
+        return 0.5 * (
+            selected_grid_height(
+                sample_x,
+                sample_z - cell_stride,
+                instance_index,
+            )
+            + selected_grid_height(
+                sample_x,
+                sample_z + cell_stride,
+                instance_index,
+            )
+        );
+    }
+    if north_or_south && (rendered_x & 1) != 0 {
+        return 0.5 * (
+            selected_grid_height(
+                sample_x - cell_stride,
+                sample_z,
+                instance_index,
+            )
+            + selected_grid_height(
+                sample_x + cell_stride,
+                sample_z,
+                instance_index,
+            )
+        );
+    }
+    return original_height;
+}
+
 fn terrain_horizon_coarse_footprint_weight(
     sample_x: i32,
     sample_z: i32,
@@ -562,6 +619,14 @@ fn vertex_main(
     let sample = selected_sample(index, instance_index);
     let reference = reference_samples[index];
     let gpu = gpu_samples[index];
+    let stitched_height = terrain_horizon_stitched_height(
+        logical_x,
+        logical_z,
+        i32(cells),
+        i32(cell_stride),
+        instance_index,
+        sample.terrain.y,
+    );
 
     let radius = sample_halo_radius();
     let cells_i = i32(cells);
@@ -618,7 +683,7 @@ fn vertex_main(
     var clip_position = params.view_projection * vec4<f32>(
         vec3<f32>(
             relative_x,
-            sample.terrain.y + 1.0,
+            stitched_height + 1.0,
             relative_z,
         ),
         1.0,
@@ -664,7 +729,7 @@ fn vertex_main(
     );
     out.world_position = vec3<f32>(
         f32(world_x),
-        sample.terrain.y + 1.0,
+        stitched_height + 1.0,
         f32(world_z),
     );
     out.biome = u32(round(sample.semantics.y));

@@ -99,6 +99,14 @@ pub use viewport::{
     TerrainViewportDetail, TerrainViewportLevel, TerrainViewportPlan, TerrainViewportRequest,
     TerrainViewportTileId, plan_terrain_viewport,
 };
+
+/// Largest horizon render stride with a currently proven geometry and normal
+/// transition contract.
+///
+/// A larger stride changes the mesh topology, fine/coarse edge interpolation,
+/// and required normal halo. It must not be treated as a presentation-only
+/// performance dial.
+pub const TERRAIN_HORIZON_MAX_PROVEN_RENDER_CELL_STRIDE: u32 = 1;
 pub use viewport_renderer::{
     TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainHorizonFrameStats, TerrainHorizonRenderTarget,
     TerrainHorizonRenderer, TerrainHorizonVegetationServiceStats, TerrainPreviewMaterialAtlas,
@@ -1970,7 +1978,7 @@ mod tests {
         assert!(TERRAIN_PREVIEW_TREE_WGSL.contains("params.view_projection * vec4<f32>"));
         assert!(!TERRAIN_PREVIEW_RENDER_WGSL.contains("clip_z = 1.0 - clamp"));
         assert!(!TERRAIN_PREVIEW_TREE_WGSL.contains("clip_z = 1.0 - clamp"));
-        assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("sample.terrain.y + 1.0"));
+        assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("stitched_height + 1.0"));
         assert!(
             TERRAIN_PREVIEW_RENDER_WGSL
                 .contains("let stacked_compare = compare && params.content_stage_flags.z == 1u")

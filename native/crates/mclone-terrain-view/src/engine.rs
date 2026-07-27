@@ -1,9 +1,9 @@
 use crate::{
-    BoundedRepresentationOwnershipSnapshot, McloneTreeOccurrenceId, TerrainClipmap,
-    TerrainClipmapConfig, TerrainExactCoverageMode, TerrainHorizonFrameStats,
-    TerrainHorizonPresentation, TerrainHorizonRenderTarget, TerrainHorizonRenderer,
-    TerrainPreparedExactFrame, TerrainPreviewMaterialAtlas, TerrainVegetationExecutor,
-    TerrainViewSourceIdentity,
+    BoundedRepresentationOwnershipSnapshot, McloneTreeOccurrenceId,
+    TERRAIN_HORIZON_MAX_PROVEN_RENDER_CELL_STRIDE, TerrainClipmap, TerrainClipmapConfig,
+    TerrainExactCoverageMode, TerrainHorizonFrameStats, TerrainHorizonPresentation,
+    TerrainHorizonRenderTarget, TerrainHorizonRenderer, TerrainPreparedExactFrame,
+    TerrainPreviewMaterialAtlas, TerrainVegetationExecutor, TerrainViewSourceIdentity,
 };
 use mclone_render_color::{RenderColorProfile, RenderTargetColorTransform};
 use mclone_worldgen::terrain_preview::{
@@ -44,6 +44,14 @@ impl TerrainViewEngineConfig {
                 "terrain render cell stride {} must be a nonzero power-of-two \
                  divisor of {}",
                 self.render_cell_stride, TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS,
+            ));
+        }
+        if self.render_cell_stride > TERRAIN_HORIZON_MAX_PROVEN_RENDER_CELL_STRIDE {
+            return Err(format!(
+                "terrain render cell stride {} exceeds the proven geometry/normal \
+                 transition contract {}; add stride-aware stitching and halo \
+                 evidence before enabling it",
+                self.render_cell_stride, TERRAIN_HORIZON_MAX_PROVEN_RENDER_CELL_STRIDE,
             ));
         }
         Ok(self)
@@ -337,7 +345,7 @@ mod tests {
     }
 
     #[test]
-    fn engine_config_requires_a_power_of_two_render_cell_stride() {
+    fn engine_config_rejects_unproven_render_cell_strides() {
         let config_for_stride = |render_cell_stride| TerrainViewEngineConfig {
             width: 1,
             height: 1,
@@ -347,12 +355,16 @@ mod tests {
             vegetation_enabled: false,
             color_profile: RenderColorProfile::Vanilla,
         };
-        for stride in [1, 2, 4, 8, 16, 32, 64] {
-            assert!(config_for_stride(stride).validated().is_ok());
-        }
-        for stride in [0, 3, 128] {
+        assert!(config_for_stride(1).validated().is_ok());
+        for stride in [0, 2, 3, 4, 8, 16, 32, 64, 128] {
             assert!(config_for_stride(stride).validated().is_err());
         }
+        assert!(
+            config_for_stride(8)
+                .validated()
+                .unwrap_err()
+                .contains("proven geometry/normal transition contract")
+        );
     }
 
     #[test]

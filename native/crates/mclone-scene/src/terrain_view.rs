@@ -330,29 +330,12 @@ impl SceneTerrainViewState {
     }
 }
 
-#[cfg(not(target_arch = "wasm32"))]
 const fn scene_terrain_render_cell_stride() -> u32 {
     1
 }
 
-#[cfg(target_arch = "wasm32")]
-const fn scene_terrain_render_cell_stride() -> u32 {
-    8
-}
-
-#[cfg(not(target_arch = "wasm32"))]
 fn scene_terrain_clipmap_config() -> TerrainClipmapConfig {
     TerrainClipmapConfig::default()
-}
-
-#[cfg(target_arch = "wasm32")]
-fn scene_terrain_clipmap_config() -> TerrainClipmapConfig {
-    TerrainClipmapConfig {
-        // Six levels preserve an approximately eight-kilometre procedural
-        // horizon while bounding live-game WebGPU submissions to 96 tiles.
-        level_count: 6,
-        ..TerrainClipmapConfig::default()
-    }
 }
 
 fn live_source(

@@ -2732,7 +2732,14 @@ impl TerrainHorizonRenderer {
         {
             return Err(format!(
                 "terrain horizon render cell stride {render_cell_stride} must divide \
-                 {TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS}"
+                {TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS}"
+            ));
+        }
+        if render_cell_stride > super::TERRAIN_HORIZON_MAX_PROVEN_RENDER_CELL_STRIDE {
+            return Err(format!(
+                "terrain horizon render cell stride {render_cell_stride} exceeds the proven \
+                 geometry/normal transition contract {}",
+                super::TERRAIN_HORIZON_MAX_PROVEN_RENDER_CELL_STRIDE,
             ));
         }
         let clipmap = TerrainClipmap::new(config)?;
@@ -4155,6 +4162,17 @@ mod tests {
             shared_boundary + coarse.snapshot.sample_spacing as i32,
         );
         assert_eq!(fine_wide_footprint, coarse_narrow_footprint);
+    }
+
+    #[test]
+    fn horizon_shader_welds_fine_outer_edges_to_coarse_interpolation() {
+        let shader = super::super::TERRAIN_PREVIEW_RENDER_WGSL;
+        assert!(shader.contains("fn terrain_horizon_stitched_height("));
+        assert!(shader.contains("let rendered_x = sample_x / cell_stride;"));
+        assert!(shader.contains("let rendered_z = sample_z / cell_stride;"));
+        assert!(shader.contains("west_or_east && (rendered_z & 1) != 0"));
+        assert!(shader.contains("north_or_south && (rendered_x & 1) != 0"));
+        assert!(shader.contains("stitched_height + 1.0"));
     }
 
     #[test]
