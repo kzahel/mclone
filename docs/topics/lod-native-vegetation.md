@@ -27,8 +27,12 @@ canonical batch codec and isolated browser Worker. Desktop and Pixel 7
 composition receipts reproduce all 15 records as 8 exact-owned and 7
 proxy-owned, with zero missing representations. The versioned production
 build passes hosted desktop composed/coverage and Pixel 7 composed gates with
-the same split and zero missing representations. Hosted browser pixel review
-is the remaining gate before Terrain Lab or game-scene promotion.
+the same split and zero missing representations. Human Review 1B nevertheless
+rejected the pixels because procedural and exact renderers write incompatible
+depth encodings; exact-owned trees and exact hills can both be cut by the
+procedural surface. That general projection defect is now Tactical 262 Slice
+4B's blocker before tree ownership can receive meaningful pixel acceptance
+or Terrain Lab/game-scene promotion.
 
 World Explorer review on 2026-07-26 found that native enabled synchronous
 near-level vegetation compilation during frame encoding while browser disabled

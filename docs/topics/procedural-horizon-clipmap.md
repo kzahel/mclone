@@ -50,8 +50,13 @@ through an isolated browser Worker and accepts deterministic
 all 25 painted chunks, coverage generation 27, and the 8 exact/7 proxy split
 across 15 whole-tree records. The content-versioned production build now also
 passes hosted desktop `Composed`/`Coverage` and Pixel 7 `Composed` gates with
-zero missing representations. Hosted browser pixel review is the active gate;
-no game-scene, Android, or XR adoption has started.
+zero missing representations. Human Review 1B rejected those pixels:
+procedural terrain uses linear reversed depth while exact chunks use the
+engine's nonlinear perspective reversed-Z projection, so the shared depth
+target contains incomparable values and procedural surfaces cut nearer exact
+trees and hills. Tactical 262 Slice 4B now owns the shared-projection
+correction and source-colored silhouette evidence. No game-scene, Android, or
+XR adoption has started.
 Interactive review on 2026-07-26 diagnosed two remaining proof defects and
 activated Tactical
 [`252`](../tactical/252-procedural-horizon-seams-and-transition-admission.md):

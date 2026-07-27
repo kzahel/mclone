@@ -1,13 +1,13 @@
 # Tactical 262: World Explorer Exact/Procedural Composition
 
-Status: Slice 4 browser implementation plus local and hosted semantic parity
-gates complete 2026-07-27. The versioned production build is ready for hosted
-Human Review 1B. Slice 3B corrected the retracted native review by giving the
-exact patch, procedural rings, vegetation, and camera one viewer-forward
-composition anchor while retaining the collar as the explicit seam treatment.
-The same compositor now runs in browser World Explorer with canonical exact
-compilation in an isolated Worker. Terrain Lab and game-scene promotion
-remain gated on human browser pixel acceptance.
+Status: Human Review 1B rejected the composition on 2026-07-27. Local and
+hosted semantic parity gates are valid execution receipts but did not prove
+believable occlusion. Close portrait pairs show procedural terrain cutting
+nearer exact trees and hilltops because the procedural shader writes linear
+reversed depth while exact chunks use the engine's nonlinear perspective
+reversed-Z projection. Slice 4B must unify that projection contract and add
+source-colored silhouette evidence before another hosted review. Terrain Lab
+and game-scene promotion remain blocked.
 
 Topics:
 
@@ -587,6 +587,43 @@ These gates prove that the public URL is executing the intended renderer,
 Worker, source, ownership, and coverage state. They do not replace subjective
 pixel review; Human Review 1B remains open until the hosted composed view is
 inspected interactively.
+
+### Human Review 1B rejection and Slice 4B
+
+Hosted portrait review rejected the composition on 2026-07-27. Exact-only
+frames contain complete foreground trees and hilltops, while matched composed
+frames let the procedural surface cut through those silhouettes. This is not
+limited to tree proxy ownership or the retained collar: ordinary exact terrain
+is affected as well.
+
+Source inspection and depth captures identify one renderer-contract defect:
+
+- exact chunks and trees multiply world positions by
+  `ChunkRenderView::view_projection`, which uses the engine's finite
+  perspective reversed-Z matrix;
+- procedural terrain manually projects X/Y, writes a linear
+  `1 - (depth - near) / (far - near)` value with clip `w = 1`, and therefore
+  does not produce the same depth distribution; and
+- both pipelines then use `GreaterEqual` against one `Depth32Float` target.
+
+The reviewed exact-only captures wrote maximum depths around `0.001` to
+`0.003`; composed captures included procedural values around `0.94`. Those
+numbers are not comparable even though the target, camera pose, clear value,
+and compare function are shared. Changing draw order cannot correct an
+incompatible depth coordinate.
+
+Slice 4B must:
+
+- [ ] make procedural terrain use the same shared view-projection and
+  reversed-Z encoding as exact chunks;
+- [ ] add a source-color diagnostic with exact geometry in bright magenta and
+  procedural geometry in normal colors;
+- [ ] retain a tall silhouette or synthetic tower plus steep hill as matched
+  exact/composed regression captures;
+- [ ] prove nearer exact geometry wins while genuinely nearer procedural
+  geometry still occludes it; and
+- [ ] repeat native and hosted browser pixel review before treating semantic
+  receipts as acceptance evidence.
 
 ### Slice 5: Terrain Lab adoption
 
