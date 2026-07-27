@@ -24,11 +24,11 @@ use crate::streamed_plan_trials::{
 pub const FEATURE_GRAPH_CANDIDATE_REVISION: &str = "feature-owned-bounded-graph-trial-v1";
 pub const FEATURE_GRAPH_MAXIMUM_REACH_BLOCKS: i32 = 1_536;
 
-const GRAPH_HEADER_KIND: u16 = 400;
-const GRAPH_NODE_KIND: u16 = 401;
-const GRAPH_EDGE_KIND: u16 = 402;
-const GRAPH_SINK_KIND: u16 = 403;
-const GRAPH_QUERY_KIND: u16 = 404;
+pub(crate) const GRAPH_HEADER_KIND: u16 = 400;
+pub(crate) const GRAPH_NODE_KIND: u16 = 401;
+pub(crate) const GRAPH_EDGE_KIND: u16 = 402;
+pub(crate) const GRAPH_SINK_KIND: u16 = 403;
+pub(crate) const GRAPH_QUERY_KIND: u16 = 404;
 const GRAPH_NODE_COUNT: usize = 4;
 const GRAPH_EDGE_COUNT: usize = GRAPH_NODE_COUNT - 1;
 const GRAPH_STEP_BLOCKS: i32 = 192;

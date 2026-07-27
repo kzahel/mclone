@@ -26,15 +26,15 @@ pub const STREAMED_PLAN_PHASE_TWO_WITNESS_SHA256: &str =
     "d3dfa82df7de1a6c9e1d24f97b7f824b640c181cecd6295e86180344a2c081bd";
 pub const HIERARCHICAL_CANDIDATE_REVISION: &str = "hierarchical-shared-boundary-facts-trial-v1";
 
-const HIERARCHY_MID_BLOCKS: i32 = 3_072;
-const HIERARCHY_ROOT_BLOCKS: i32 = 6_144;
-const HIERARCHY_ROOT_LEVEL: u8 = 2;
-const HIERARCHY_MID_LEVEL: u8 = 1;
-const HIERARCHY_ROOT_KIND: u16 = 300;
-const HIERARCHY_MID_KIND: u16 = 301;
-const HIERARCHY_VERTICAL_FACET_KIND: u16 = 302;
-const HIERARCHY_HORIZONTAL_FACET_KIND: u16 = 303;
-const HIERARCHY_REGION_KIND: u16 = 304;
+pub(crate) const HIERARCHY_MID_BLOCKS: i32 = 3_072;
+pub(crate) const HIERARCHY_ROOT_BLOCKS: i32 = 6_144;
+pub(crate) const HIERARCHY_ROOT_LEVEL: u8 = 2;
+pub(crate) const HIERARCHY_MID_LEVEL: u8 = 1;
+pub(crate) const HIERARCHY_ROOT_KIND: u16 = 300;
+pub(crate) const HIERARCHY_MID_KIND: u16 = 301;
+pub(crate) const HIERARCHY_VERTICAL_FACET_KIND: u16 = 302;
+pub(crate) const HIERARCHY_HORIZONTAL_FACET_KIND: u16 = 303;
+pub(crate) const HIERARCHY_REGION_KIND: u16 = 304;
 
 #[derive(Clone, Debug, Serialize)]
 pub struct PhaseTwoFallbackReceipt {
@@ -263,7 +263,7 @@ pub fn run_hierarchical_trial() -> Result<HierarchicalTrialReceipt, String> {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-struct HierarchicalSharedFactsControl;
+pub(crate) struct HierarchicalSharedFactsControl;
 
 impl StreamedPlanControl for HierarchicalSharedFactsControl {
     fn candidate_revision(&self) -> &'static str {

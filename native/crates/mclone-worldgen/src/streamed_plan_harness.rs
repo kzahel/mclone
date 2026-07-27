@@ -36,9 +36,9 @@ pub(crate) const FALLBACK_CONTROL_REVISION: &str = "coordinate-pure-bounded-star
 const FIXED_WINDOW_CONTROL_REVISION: &str = "fixed-bounded-landform-control-v1";
 const RECENTER_CONTROL_REVISION: &str = "recentered-landform-negative-control-v1";
 const DISCOVERY_CONTROL_REVISION: &str = "discovery-state-negative-control-v1";
-const FALLBACK_SAMPLE_KIND: u16 = 1;
-const FALLBACK_FEATURE_KIND: u16 = 2;
-const FALLBACK_REGION_KIND: u16 = 3;
+pub(crate) const FALLBACK_SAMPLE_KIND: u16 = 1;
+pub(crate) const FALLBACK_FEATURE_KIND: u16 = 2;
+pub(crate) const FALLBACK_REGION_KIND: u16 = 3;
 const LANDFORM_CELL_KIND: u16 = 100;
 const DISCOVERY_CELL_KIND: u16 = 200;
 

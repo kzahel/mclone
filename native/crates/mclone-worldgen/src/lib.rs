@@ -10,6 +10,7 @@ pub mod noise;
 pub mod placement;
 pub mod prng;
 pub mod procedural_structure;
+pub mod streamed_plan_atlas;
 pub mod streamed_plan_feature_graph_trial;
 pub mod streamed_plan_harness;
 pub mod streamed_plan_trials;
