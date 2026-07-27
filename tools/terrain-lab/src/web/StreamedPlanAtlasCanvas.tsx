@@ -10,6 +10,7 @@ import type {
   FeatureGraphAtlas,
   FallbackAtlas,
   HierarchyAtlas,
+  MultiscaleWitnessAtlas,
   StreamedPlanAtlasSummary,
   StreamedPlanAtlasWorkerResponse,
 } from "./streamed-plan-atlas-worker-protocol";
@@ -25,6 +26,7 @@ export interface StreamedPlanAtlasReport {
   fallback: AtlasCandidateReceipt;
   hierarchy: AtlasCandidateReceipt;
   featureGraph: AtlasCandidateReceipt;
+  multiscaleWitness: MultiscaleWitnessAtlas;
 }
 
 interface StreamedPlanAtlasCanvasProps {
@@ -248,6 +250,10 @@ export function StreamedPlanAtlasCanvas({
     state.atlasRegionsVisible,
     state.atlasSeamsVisible,
     state.atlasTopology,
+    state.atlasWitnessBoundsVisible,
+    state.atlasWitnessLocalVisible,
+    state.atlasWitnessParentVisible,
+    state.atlasWitnessRegionalVisible,
     state.blocksAcross,
     state.centerX,
     state.centerZ,
@@ -354,8 +360,25 @@ function drawAtlas(
       summary.featureGraph,
     ),
   );
+  drawPanel(
+    panels[3]!,
+    () => drawMultiscaleWitnessPanel(
+      context,
+      canvas,
+      panels[3]!,
+      state,
+      summary,
+      summary.multiscaleWitness,
+    ),
+  );
+  const receipts = [
+    summary.fallback,
+    summary.hierarchy,
+    summary.featureGraph,
+    summary.multiscaleWitness,
+  ];
   for (const [index, panel] of panels.entries()) {
-    const receipt = [summary.fallback, summary.hierarchy, summary.featureGraph][index]!;
+    const receipt = receipts[index]!;
     drawPanelChrome(context, canvas, panel, receipt, queryMs, summary.coverage.clipped);
   }
 }
@@ -568,6 +591,131 @@ function drawGraphPanel(
     }
   }
   drawSharedOverlays(context, canvas, panel, view, state, summary, atlas.cells);
+}
+
+function drawMultiscaleWitnessPanel(
+  context: CanvasRenderingContext2D,
+  canvas: CanvasSize,
+  panel: AtlasPanel,
+  state: TerrainLabState,
+  summary: StreamedPlanAtlasSummary,
+  atlas: MultiscaleWitnessAtlas,
+): void {
+  const view = panelView(panel, canvas, state);
+  drawPanelBackground(context, panel);
+  const visible = (level: number): boolean => {
+    switch (level) {
+      case 2:
+        return state.atlasWitnessParentVisible;
+      case 1:
+        return state.atlasWitnessRegionalVisible;
+      case 0:
+        return state.atlasWitnessLocalVisible;
+      default:
+        return false;
+    }
+  };
+  const ordered = [...atlas.features].sort((left, right) => right.level - left.level);
+  if (state.atlasWitnessBoundsVisible) {
+    for (const feature of ordered) {
+      if (!visible(feature.level)) {
+        continue;
+      }
+      const [left, top] = worldToPanel(
+        panel,
+        view,
+        feature.boundsMinX,
+        feature.boundsMinZ,
+      );
+      const [right, bottom] = worldToPanel(
+        panel,
+        view,
+        feature.boundsMaxX,
+        feature.boundsMaxZ,
+      );
+      context.save();
+      context.strokeStyle = witnessLevelColor(feature.level, 0.28);
+      context.lineWidth = Math.max(1, canvas.dpr);
+      context.setLineDash(witnessLevelDash(feature.level, canvas.dpr));
+      context.strokeRect(left, top, right - left, bottom - top);
+      context.restore();
+    }
+  }
+  for (const feature of ordered) {
+    if (!visible(feature.level)) {
+      continue;
+    }
+    const [startX, startY] = worldToPanel(
+      panel,
+      view,
+      feature.startX,
+      feature.startZ,
+    );
+    const [endX, endY] = worldToPanel(
+      panel,
+      view,
+      feature.endX,
+      feature.endZ,
+    );
+    context.save();
+    context.strokeStyle = witnessLevelColor(
+      feature.level,
+      feature.family === "basin-route" ? 0.94 : 0.78,
+    );
+    context.lineWidth = Math.max(
+      canvas.dpr,
+      Math.min(
+        6 * canvas.dpr,
+        feature.width / view.width * panel.width,
+      ),
+    );
+    context.lineCap = "round";
+    if (feature.family === "range-axis") {
+      context.setLineDash(witnessLevelDash(feature.level, canvas.dpr));
+    }
+    context.beginPath();
+    context.moveTo(startX, startY);
+    context.lineTo(endX, endY);
+    context.stroke();
+    context.restore();
+    if (feature.terminalKind !== 0) {
+      context.fillStyle = "#ff70d7";
+      context.beginPath();
+      context.arc(endX, endY, (feature.level + 2.4) * canvas.dpr, 0, Math.PI * 2);
+      context.fill();
+    }
+  }
+  drawSharedOverlays(
+    context,
+    canvas,
+    panel,
+    view,
+    state,
+    summary,
+    summary.fallback.cells,
+  );
+}
+
+function witnessLevelColor(level: number, alpha: number): string {
+  switch (level) {
+    case 2:
+      return `rgba(229, 137, 255, ${alpha})`;
+    case 1:
+      return `rgba(79, 220, 255, ${alpha})`;
+    default:
+      return `rgba(195, 239, 102, ${alpha})`;
+  }
+}
+
+function witnessLevelDash(level: number, dpr: number): number[] {
+  switch (level) {
+    case 2:
+      return [10 * dpr, 5 * dpr];
+    case 1:
+      return [5 * dpr, 3 * dpr];
+    default:
+      return [2 * dpr, 2 * dpr];
+  }
 }
 
 function drawSharedOverlays(
@@ -784,20 +932,22 @@ function atlasPanels(canvas: CanvasSize): AtlasPanel[] {
     "A · Coordinate-pure fallback",
     "B · Hierarchical shared facts",
     "C · Feature-owned bounded graphs",
+    "D · Semantic parent → child refinement",
   ];
   const top = 60 * canvas.dpr;
   const availableHeight = Math.max(canvas.dpr, canvas.height - top);
   if (canvas.cssWidth >= 840) {
-    const width = canvas.width / 3;
+    const width = canvas.width / 2;
+    const height = availableHeight / 2;
     return titles.map((title, index) => ({
-      x: index * width,
-      y: top,
+      x: (index % 2) * width,
+      y: top + Math.floor(index / 2) * height,
       width,
-      height: availableHeight,
+      height,
       title,
     }));
   }
-  const height = availableHeight / 3;
+  const height = availableHeight / 4;
   return titles.map((title, index) => ({
     x: 0,
     y: top + index * height,
@@ -862,6 +1012,7 @@ function reportFromSummary(
     fallback: summary.fallback,
     hierarchy: summary.hierarchy,
     featureGraph: summary.featureGraph,
+    multiscaleWitness: summary.multiscaleWitness,
   };
 }
 

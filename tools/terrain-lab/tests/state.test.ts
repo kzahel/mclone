@@ -52,6 +52,10 @@ test("round-trips complete URL state", () => {
     atlasFacetsVisible: false,
     atlasGraphBoundsVisible: true,
     atlasGraphEdgesVisible: false,
+    atlasWitnessParentVisible: true,
+    atlasWitnessRegionalVisible: false,
+    atlasWitnessLocalVisible: true,
+    atlasWitnessBoundsVisible: false,
     atlasIdentityVisible: false,
     atlasSeamsVisible: false,
   };
@@ -219,6 +223,10 @@ test("keeps camera state outside URL-addressed terrain state", () => {
     atlasFacetsVisible: true,
     atlasGraphBoundsVisible: true,
     atlasGraphEdgesVisible: true,
+    atlasWitnessParentVisible: true,
+    atlasWitnessRegionalVisible: true,
+    atlasWitnessLocalVisible: true,
+    atlasWitnessBoundsVisible: false,
     atlasIdentityVisible: false,
     atlasSeamsVisible: true,
   });
@@ -244,6 +252,8 @@ test("round-trips streamed planner atlas topology and overlays", () => {
     "?panes=atlas&atlasTopology=cylinder-x&atlasRegions=1"
       + "&atlasSamples=0&atlasFeatures=1&atlasHierarchy=0"
       + "&atlasFacets=1&atlasGraphBounds=0&atlasGraphEdges=1"
+      + "&atlasWitnessParent=1&atlasWitnessRegional=0"
+      + "&atlasWitnessLocal=1&atlasWitnessBounds=1"
       + "&atlasIdentity=0&atlasSeams=1",
   );
   assert.deepEqual(state.panes, ["atlas"]);
@@ -255,6 +265,10 @@ test("round-trips streamed planner atlas topology and overlays", () => {
   assert.equal(state.atlasFacetsVisible, true);
   assert.equal(state.atlasGraphBoundsVisible, false);
   assert.equal(state.atlasGraphEdgesVisible, true);
+  assert.equal(state.atlasWitnessParentVisible, true);
+  assert.equal(state.atlasWitnessRegionalVisible, false);
+  assert.equal(state.atlasWitnessLocalVisible, true);
+  assert.equal(state.atlasWitnessBoundsVisible, true);
   assert.equal(state.atlasIdentityVisible, false);
   assert.equal(state.atlasSeamsVisible, true);
   assert.deepEqual(parseTerrainLabState(terrainLabSearch(state)), state);

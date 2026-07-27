@@ -7,6 +7,7 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 use mclone_worldgen::multiscale_terrain_witness::{
     MULTISCALE_WITNESS_SCHEMA_REVISION, MultiscaleWitnessDetail, run_multiscale_witness_suite,
 };
+use mclone_worldgen::streamed_plan_atlas::StreamedPlanAtlasCompiler;
 use mclone_worldgen::streamed_plan_harness::{
     PlanRegion, StreamedPlanControl, StreamedPlanDescriptor, StreamedPlanRequest,
     StreamedPlanTopology,
@@ -39,11 +40,24 @@ struct DetailTiming {
 }
 
 #[derive(Debug, Serialize)]
+struct AtlasTiming {
+    blocks_across: i32,
+    aspect_ratio: f64,
+    cold_query_ns: u128,
+    warm_query_ns: u128,
+    canonical_plan_count: u32,
+    warm_cache_hits: u32,
+    feature_fact_count: u32,
+    coverage_clipped: bool,
+}
+
+#[derive(Debug, Serialize)]
 struct RunReceipt {
     receipt_schema: &'static str,
     run: RunMetadata,
     suite: mclone_worldgen::multiscale_terrain_witness::MultiscaleWitnessReceipt,
     direct_query_timings: Vec<DetailTiming>,
+    atlas_timings: Vec<AtlasTiming>,
     artifact_path: String,
 }
 
@@ -89,6 +103,7 @@ fn run() -> Result<(), String> {
                 .unwrap_or(1),
         },
         direct_query_timings: direct_query_timings()?,
+        atlas_timings: atlas_timings()?,
         suite,
         artifact_path: output.display().to_string(),
     };
@@ -112,6 +127,21 @@ fn run() -> Result<(), String> {
             timing.detail.label(),
             timing.facts_per_query,
             timing.average_ns
+        );
+    }
+    for timing in &receipt.atlas_timings {
+        println!(
+            "{}-block atlas: {} plans · {} facts · {} ns cold / {} ns warm{}",
+            timing.blocks_across,
+            timing.canonical_plan_count,
+            timing.feature_fact_count,
+            timing.cold_query_ns,
+            timing.warm_query_ns,
+            if timing.coverage_clipped {
+                " · coverage clipped"
+            } else {
+                ""
+            },
         );
     }
     Ok(())
@@ -139,6 +169,31 @@ fn direct_query_timings() -> Result<Vec<DetailTiming>, String> {
             elapsed_ns,
             average_ns: elapsed_ns / u128::from(ITERATIONS),
             facts_per_query: first.facts.len() as u32,
+        });
+    }
+    Ok(timings)
+}
+
+fn atlas_timings() -> Result<Vec<AtlasTiming>, String> {
+    const ASPECT_RATIO: f64 = 1.5;
+    let mut timings = Vec::new();
+    for blocks_across in [6_144, 65_536] {
+        let mut compiler = StreamedPlanAtlasCompiler::new(12_345, StreamedPlanTopology::Plane);
+        let cold_started = Instant::now();
+        let _cold = compiler.query(0, 0, blocks_across, ASPECT_RATIO)?;
+        let cold_query_ns = cold_started.elapsed().as_nanos();
+        let warm_started = Instant::now();
+        let warm = compiler.query(0, 0, blocks_across, ASPECT_RATIO)?;
+        let warm_query_ns = warm_started.elapsed().as_nanos();
+        timings.push(AtlasTiming {
+            blocks_across,
+            aspect_ratio: ASPECT_RATIO,
+            cold_query_ns,
+            warm_query_ns,
+            canonical_plan_count: warm.multiscale_witness.receipt.canonical_plan_count,
+            warm_cache_hits: warm.multiscale_witness.receipt.cache_hits,
+            feature_fact_count: warm.multiscale_witness.features.len() as u32,
+            coverage_clipped: warm.coverage.clipped,
         });
     }
     Ok(timings)

@@ -151,6 +151,41 @@ export interface FeatureGraphAtlas extends AtlasCandidateReceipt {
   graphs: FeatureGraphAtlasGraph[];
 }
 
+export interface MultiscaleWitnessAtlasFeature {
+  canonicalId: string;
+  parentId?: string;
+  family: "range-axis" | "basin-route";
+  level: number;
+  anchorX: number;
+  anchorZ: number;
+  startX: number;
+  startZ: number;
+  endX: number;
+  endZ: number;
+  boundsMinX: number;
+  boundsMinZ: number;
+  boundsMaxX: number;
+  boundsMaxZ: number;
+  width: number;
+  minHeight: number;
+  maxHeight: number;
+  terminalKind: number;
+}
+
+export interface MultiscaleWitnessAtlas extends AtlasCandidateReceipt {
+  witnessSha256: string;
+  parentProjectionSha256: string;
+  regionalProjectionSha256: string;
+  parentFactCount: number;
+  regionalFactCount: number;
+  localFactCount: number;
+  unresolvedParentCount: number;
+  containmentFailureCount: number;
+  continuityFailureCount: number;
+  terminalFailureCount: number;
+  features: MultiscaleWitnessAtlasFeature[];
+}
+
 export interface StreamedPlanAtlasSummary {
   schema: string;
   researchOnly: boolean;
@@ -168,6 +203,7 @@ export interface StreamedPlanAtlasSummary {
   fallback: FallbackAtlas;
   hierarchy: HierarchyAtlas;
   featureGraph: FeatureGraphAtlas;
+  multiscaleWitness: MultiscaleWitnessAtlas;
 }
 
 export interface StreamedPlanAtlasWorkerSummary {

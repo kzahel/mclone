@@ -1096,6 +1096,8 @@ test("pans the streamed planner atlas across a torus period", async ({
       + "&atlasTopology=torus&atlasRegions=1&atlasSamples=1"
       + "&atlasFeatures=1&atlasHierarchy=1&atlasFacets=1"
       + "&atlasGraphBounds=1&atlasGraphEdges=1&atlasIdentity=0"
+      + "&atlasWitnessParent=1&atlasWitnessRegional=1"
+      + "&atlasWitnessLocal=1&atlasWitnessBounds=0"
       + "&atlasSeams=1",
   );
   const shell = page.locator(".appShell");
@@ -1109,10 +1111,16 @@ test("pans the streamed planner atlas across a torus period", async ({
     fallback: await shell.getAttribute("data-atlas-fallback-checksum"),
     hierarchy: await shell.getAttribute("data-atlas-hierarchy-checksum"),
     graph: await shell.getAttribute("data-atlas-graph-checksum"),
+    multiscale: await shell.getAttribute("data-atlas-multiscale-checksum"),
   };
   for (const checksum of Object.values(original)) {
     expect(checksum).toMatch(/^[0-9a-f]{64}$/u);
   }
+  await expect(shell).toHaveAttribute("data-atlas-multiscale-failures", "0");
+  await expect(shell).toHaveAttribute(
+    "data-atlas-multiscale-witness",
+    /^[0-9a-f]{64}$/u,
+  );
   await stage.screenshot({
     path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-streamed-atlas-torus.png`,
   });
@@ -1135,11 +1143,17 @@ test("pans the streamed planner atlas across a torus period", async ({
     "data-atlas-graph-checksum",
     original.graph ?? "",
   );
+  await expect(shell).toHaveAttribute(
+    "data-atlas-multiscale-checksum",
+    original.multiscale ?? "",
+  );
   expect(Number(await shell.getAttribute("data-atlas-fallback-hits")))
     .toBeGreaterThan(0);
   expect(Number(await shell.getAttribute("data-atlas-hierarchy-hits")))
     .toBeGreaterThan(0);
   expect(Number(await shell.getAttribute("data-atlas-graph-hits")))
+    .toBeGreaterThan(0);
+  expect(Number(await shell.getAttribute("data-atlas-multiscale-hits")))
     .toBeGreaterThan(0);
   await stage.screenshot({
     path:
@@ -1153,6 +1167,12 @@ test("pans the streamed planner atlas across a torus period", async ({
     original.hierarchy ?? "",
   );
   await page.getByRole("button", { name: "Identities shown", exact: true }).click();
+  await page.getByRole("button", { name: "Refinement bounds hidden", exact: true })
+    .click();
+  await expect(page).toHaveURL(/atlasWitnessBounds=1/u);
+  await page.getByRole("button", { name: "Local level shown", exact: true }).click();
+  await expect(page).toHaveURL(/atlasWitnessLocal=0/u);
+  await page.getByRole("button", { name: "Local level hidden", exact: true }).click();
   await page.getByRole("button", {
     name: "Cold rebuild planner atlas",
     exact: true,
@@ -1162,6 +1182,51 @@ test("pans the streamed planner atlas across a torus period", async ({
     "data-atlas-graph-checksum",
     original.graph ?? "",
   );
+  expect(pageErrors).toEqual([]);
+});
+
+test("visualizes exact multiscale refinement at broad scale", async ({
+  page,
+}, testInfo) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      pageErrors.push(message.text());
+    }
+  });
+  await page.goto(
+    "/terrain/?seed=-98765&x=0&z=0&blocks=16384&panes=atlas&view=map"
+      + "&atlasTopology=plane&atlasRegions=1&atlasSamples=1"
+      + "&atlasFeatures=1&atlasHierarchy=1&atlasFacets=1"
+      + "&atlasGraphBounds=1&atlasGraphEdges=1&atlasIdentity=0"
+      + "&atlasWitnessParent=1&atlasWitnessRegional=1"
+      + "&atlasWitnessLocal=1&atlasWitnessBounds=1"
+      + "&atlasSeams=1",
+  );
+  const shell = page.locator(".appShell");
+  const canvas = page.getByTestId("streamed-plan-atlas-stage").locator("canvas");
+  await expect(shell).toHaveAttribute("data-atlas-ready", "true");
+  await expect(shell).toHaveAttribute("data-atlas-multiscale-failures", "0");
+  await expect(page.getByTestId("streamed-plan-atlas-evidence"))
+    .toContainText("exact · 0 failures");
+  const checksum = await shell.getAttribute("data-atlas-multiscale-checksum");
+  expect(checksum).toMatch(/^[0-9a-f]{64}$/u);
+  await canvas.screenshot({
+    path:
+      `/tmp/mclone-terrain-lab-${testInfo.project.name}-multiscale-refinement.png`,
+  });
+
+  await page.getByRole("button", { name: "Local level shown", exact: true }).click();
+  await page.getByRole("button", { name: "Regional level shown", exact: true }).click();
+  await expect(shell).toHaveAttribute(
+    "data-atlas-multiscale-checksum",
+    checksum ?? "",
+  );
+  await canvas.screenshot({
+    path:
+      `/tmp/mclone-terrain-lab-${testInfo.project.name}-multiscale-parent-only.png`,
+  });
   expect(pageErrors).toEqual([]);
 });
 

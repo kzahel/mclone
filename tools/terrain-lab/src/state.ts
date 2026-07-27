@@ -85,6 +85,10 @@ export interface TerrainLabState {
   atlasFacetsVisible: boolean;
   atlasGraphBoundsVisible: boolean;
   atlasGraphEdgesVisible: boolean;
+  atlasWitnessParentVisible: boolean;
+  atlasWitnessRegionalVisible: boolean;
+  atlasWitnessLocalVisible: boolean;
+  atlasWitnessBoundsVisible: boolean;
   atlasIdentityVisible: boolean;
   atlasSeamsVisible: boolean;
 }
@@ -129,6 +133,10 @@ export const DEFAULT_TERRAIN_LAB_STATE: TerrainLabState = {
   atlasFacetsVisible: true,
   atlasGraphBoundsVisible: true,
   atlasGraphEdgesVisible: true,
+  atlasWitnessParentVisible: true,
+  atlasWitnessRegionalVisible: true,
+  atlasWitnessLocalVisible: true,
+  atlasWitnessBoundsVisible: false,
   atlasIdentityVisible: false,
   atlasSeamsVisible: true,
 };
@@ -295,6 +303,18 @@ export function parseTerrainLabState(
     atlasGraphEdgesVisible:
       validBoolean(params.get("atlasGraphEdges"))
       ?? fallback.atlasGraphEdgesVisible,
+    atlasWitnessParentVisible:
+      validBoolean(params.get("atlasWitnessParent"))
+      ?? fallback.atlasWitnessParentVisible,
+    atlasWitnessRegionalVisible:
+      validBoolean(params.get("atlasWitnessRegional"))
+      ?? fallback.atlasWitnessRegionalVisible,
+    atlasWitnessLocalVisible:
+      validBoolean(params.get("atlasWitnessLocal"))
+      ?? fallback.atlasWitnessLocalVisible,
+    atlasWitnessBoundsVisible:
+      validBoolean(params.get("atlasWitnessBounds"))
+      ?? fallback.atlasWitnessBoundsVisible,
     atlasIdentityVisible:
       validBoolean(params.get("atlasIdentity"))
       ?? fallback.atlasIdentityVisible,
@@ -342,6 +362,10 @@ export function terrainLabSearch(
   params.set("atlasFacets", state.atlasFacetsVisible ? "1" : "0");
   params.set("atlasGraphBounds", state.atlasGraphBoundsVisible ? "1" : "0");
   params.set("atlasGraphEdges", state.atlasGraphEdgesVisible ? "1" : "0");
+  params.set("atlasWitnessParent", state.atlasWitnessParentVisible ? "1" : "0");
+  params.set("atlasWitnessRegional", state.atlasWitnessRegionalVisible ? "1" : "0");
+  params.set("atlasWitnessLocal", state.atlasWitnessLocalVisible ? "1" : "0");
+  params.set("atlasWitnessBounds", state.atlasWitnessBoundsVisible ? "1" : "0");
   params.set("atlasIdentity", state.atlasIdentityVisible ? "1" : "0");
   params.set("atlasSeams", state.atlasSeamsVisible ? "1" : "0");
   if (reviewCamera) {

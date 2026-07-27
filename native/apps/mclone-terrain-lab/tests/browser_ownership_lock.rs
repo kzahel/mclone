@@ -249,6 +249,7 @@ fn streamed_plan_atlas_semantics_and_cache_stay_in_rust() {
         "CoordinatePureControl",
         "HierarchicalSharedFactsControl",
         "FeatureOwnedGraphControl",
+        "MultiscaleSemanticRefinementControl",
     ] {
         assert!(
             STREAMED_PLAN_ATLAS_RUST.contains(required),

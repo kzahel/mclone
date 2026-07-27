@@ -81,7 +81,7 @@ const PANE_OPTIONS: Array<{ value: TerrainLabPane; label: string; note: string }
   {
     value: "atlas",
     label: "Planner atlas",
-    note: "Pannable comparison of fallback, hierarchy, and bounded graphs",
+    note: "Pannable comparison including semantic multiscale refinement",
   },
   { value: "cpu", label: "CPU LOD", note: "Production CPU preview evaluator" },
   {
@@ -345,9 +345,32 @@ export function App(): React.JSX.Element {
       data-atlas-fallback-checksum={atlasReport?.fallback.semanticSha256 ?? ""}
       data-atlas-hierarchy-checksum={atlasReport?.hierarchy.semanticSha256 ?? ""}
       data-atlas-graph-checksum={atlasReport?.featureGraph.semanticSha256 ?? ""}
+      data-atlas-multiscale-checksum={
+        atlasReport?.multiscaleWitness.semanticSha256 ?? ""
+      }
+      data-atlas-multiscale-witness={
+        atlasReport?.multiscaleWitness.witnessSha256 ?? ""
+      }
+      data-atlas-multiscale-parent-projection={
+        atlasReport?.multiscaleWitness.parentProjectionSha256 ?? ""
+      }
+      data-atlas-multiscale-regional-projection={
+        atlasReport?.multiscaleWitness.regionalProjectionSha256 ?? ""
+      }
+      data-atlas-multiscale-failures={
+        atlasReport
+          ? atlasReport.multiscaleWitness.unresolvedParentCount
+            + atlasReport.multiscaleWitness.containmentFailureCount
+            + atlasReport.multiscaleWitness.continuityFailureCount
+            + atlasReport.multiscaleWitness.terminalFailureCount
+          : ""
+      }
       data-atlas-fallback-hits={atlasReport?.fallback.cacheHits ?? 0}
       data-atlas-hierarchy-hits={atlasReport?.hierarchy.cacheHits ?? 0}
       data-atlas-graph-hits={atlasReport?.featureGraph.cacheHits ?? 0}
+      data-atlas-multiscale-hits={
+        atlasReport?.multiscaleWitness.cacheHits ?? 0
+      }
       data-compare-visual-profile={state.compareVisualProfile}
       data-reference-textures-available={
         minecraftReferenceAvailable === undefined
@@ -500,7 +523,7 @@ export function App(): React.JSX.Element {
                 <span>Research projection</span>
                 <strong>
                   {atlasVisible
-                    ? "2D streamed structural atlas · three synchronized candidates"
+                    ? "2D streamed structural atlas · four synchronized views"
                     : "2D structural map · fixed 32-block cells"}
                 </strong>
                 <small>
@@ -1028,6 +1051,30 @@ export function App(): React.JSX.Element {
                       patchState({ atlasGraphEdgesVisible })}
                   />
                   <ToggleButton
+                    label="Parent level"
+                    pressed={state.atlasWitnessParentVisible}
+                    onChange={(atlasWitnessParentVisible) =>
+                      patchState({ atlasWitnessParentVisible })}
+                  />
+                  <ToggleButton
+                    label="Regional level"
+                    pressed={state.atlasWitnessRegionalVisible}
+                    onChange={(atlasWitnessRegionalVisible) =>
+                      patchState({ atlasWitnessRegionalVisible })}
+                  />
+                  <ToggleButton
+                    label="Local level"
+                    pressed={state.atlasWitnessLocalVisible}
+                    onChange={(atlasWitnessLocalVisible) =>
+                      patchState({ atlasWitnessLocalVisible })}
+                  />
+                  <ToggleButton
+                    label="Refinement bounds"
+                    pressed={state.atlasWitnessBoundsVisible}
+                    onChange={(atlasWitnessBoundsVisible) =>
+                      patchState({ atlasWitnessBoundsVisible })}
+                  />
+                  <ToggleButton
                     label="Identities"
                     pressed={state.atlasIdentityVisible}
                     onChange={(atlasIdentityVisible) =>
@@ -1236,8 +1283,8 @@ export function App(): React.JSX.Element {
                   Cold rebuild planner atlas
                 </button>
                 <p className="controlNote">
-                  Atlas caches retain 384 canonical plans per candidate.
-                  Cold rebuild clears all three while preserving the same
+                  Atlas caches retain 384 canonical plans per view.
+                  Cold rebuild clears all four while preserving the same
                   semantic checksums for the current viewport.
                 </p>
               </>
@@ -1506,7 +1553,8 @@ function StreamedPlanAtlasEvidence({
       <div className="pointReceipt empty" data-testid="streamed-plan-atlas-evidence">
         <strong>Querying canonical plan regions</strong>
         <span>
-          Rust is resolving the three research candidates around this viewport.
+          Rust is resolving three prior candidates and the multiscale
+          refinement witness around this viewport.
         </span>
       </div>
     );
@@ -1523,6 +1571,29 @@ function StreamedPlanAtlasEvidence({
         <AtlasCandidateEvidence label="Fallback" receipt={report.fallback} />
         <AtlasCandidateEvidence label="Hierarchy" receipt={report.hierarchy} />
         <AtlasCandidateEvidence label="Graph" receipt={report.featureGraph} />
+        <AtlasCandidateEvidence
+          label="Refinement"
+          receipt={report.multiscaleWitness}
+        />
+        <div>
+          <dt>Refinement facts</dt>
+          <dd>
+            {report.multiscaleWitness.parentFactCount} parent ·{" "}
+            {report.multiscaleWitness.regionalFactCount} regional ·{" "}
+            {report.multiscaleWitness.localFactCount} local
+          </dd>
+        </div>
+        <div>
+          <dt>Refinement invariants</dt>
+          <dd>
+            {report.multiscaleWitness.unresolvedParentCount
+              + report.multiscaleWitness.containmentFailureCount
+              + report.multiscaleWitness.continuityFailureCount
+              + report.multiscaleWitness.terminalFailureCount === 0
+              ? "exact · 0 failures"
+              : "failed"}
+          </dd>
+        </div>
         <div>
           <dt>Coverage</dt>
           <dd>{report.coverageClipped ? "cost-capped" : "complete viewport"}</dd>
@@ -1767,7 +1838,7 @@ function WorkspaceGuide({
           ? "Landform plan is a research-only 2D structural diagnostic over the fixed 6.144 km study domain. "
           : ""}
         {atlas
-          ? "Planner atlas queries deterministic canonical regions around the freely pannable viewport and compares the Phase 2 fallback, hierarchy, and bounded graphs. "
+          ? "Planner atlas queries deterministic canonical regions around the freely pannable viewport and compares the Phase 2 fallback, hierarchy, bounded graphs, and multiscale refinement witness. "
           : ""}
         Every visible pane shares seed, center, scale, and navigation. Terrain
         panes also share camera state.

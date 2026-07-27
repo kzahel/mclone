@@ -548,6 +548,10 @@ h1 {
   background-size: 48px 48px;
 }
 
+.streamedPlanAtlasStage {
+  min-height: clamp(760px, calc(100vh - 140px), 1050px);
+}
+
 .terrainStage:active {
   cursor: grabbing;
 }
@@ -1140,6 +1144,11 @@ button:hover {
     max-height: 580px;
   }
 
+  .streamedPlanAtlasStage {
+    min-height: 920px;
+    max-height: none;
+  }
+
   .proceduralPaneFrame.twoLogicalPanes.splitRows .terrainStage {
     min-height: 104vh;
     max-height: 1160px;
@@ -1204,6 +1213,11 @@ button:hover {
 
   .terrainStage {
     min-height: 47vh;
+  }
+
+  .streamedPlanAtlasStage {
+    min-height: 920px;
+    max-height: none;
   }
 
   .terrainStage.compareMode {
