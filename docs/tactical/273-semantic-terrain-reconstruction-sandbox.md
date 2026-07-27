@@ -5,7 +5,8 @@ Commits `fb1929c2`, `b0889375`, and `25111ddb` record the specification,
 shared reconstruction, and Terrain Lab diagnostic. Mclone Overworld,
 persisted generator profiles, block chunks, and selective 3D remain
 unchanged. Commit `7214e28a` records the Human Review R1 navigation
-correction. Do not continue into production integration before review.**
+correction, and `5e138c23` records the stable vertical display scale. Do not
+continue into production integration before review.**
 
 Topic:
 
@@ -210,6 +211,10 @@ URL-addressed:
 - correction: regional or local; and
 - feature guides: hidden or visible.
 
+The 3D comparison uses one explicit vertical datum and display span shared by
+all three terrain panels. It must not derive its Y origin or scale from the
+minimum and maximum height of each requested viewport.
+
 Panning and zooming recompile the same absolute terrain. Zoom chooses sample
 footprint and presentation only; it does not choose exact terrain identity.
 The panels always remain side-by-side evidence rather than silently switching
@@ -350,6 +355,42 @@ The inspected phone frame remains outside the repository at:
 
 ```text
 /tmp/mclone-semantic-terrain-interactive-phone.png
+```
+
+### Human Review R1 vertical projection correction
+
+The next hosted review identified a second presentation ambiguity. The
+original 3D projection centered every completed viewport on
+`(minimum_height + maximum_height) / 2` and divided height by that viewport's
+observed range. Zooming changed both values whenever relief entered or left
+the sample window. The underlying absolute heights remained deterministic,
+but the same elevation moved vertically like a graph with automatic Y-axis
+fitting.
+
+Commit `5e138c23` replaces that fit with:
+
+- a fixed Y=64 display datum, matching the sandbox's flat substrate;
+- a fixed 192-block vertical display span shared by Parent, Regional, and
+  Local;
+- no viewport minimum, viewport maximum, or horizontal zoom input to the
+  vertical-offset function; and
+- a visible `fixed Y · 192-block span` badge in 3D mode.
+
+This is an explicit research-visualization scale, not a claim of one-to-one
+voxel aspect. Zoom still changes the horizontal footprint and publishes a new
+absolute terrain reconstruction, while pitch still projects the stable
+vertical offset continuously. Map colors, correction colors, semantic
+checksums, the pinned Rust suite, and production terrain are unchanged.
+
+Focused projection tests lock the datum, span, symmetry, and three-input Y
+contract. The desktop and Pixel 7 browser lane now zooms during the existing
+orbit/pan sequence, proves the last frame remains ready, waits for the new
+viewport pixels, and reasserts the fixed Y contract. The inspected before and
+after frames remain outside the repository at:
+
+```text
+/tmp/mclone-semantic-fixed-y-6144.png
+/tmp/mclone-semantic-fixed-y-zoom.png
 ```
 
 The review route is:
