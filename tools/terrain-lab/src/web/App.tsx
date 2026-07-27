@@ -36,6 +36,13 @@ import {
   type RuntimeCompositionReport,
 } from "./RuntimeCompositionCanvas";
 import {
+  LandformPlanCanvas,
+  type LandformPlanReport,
+} from "./LandformPlanCanvas";
+import type {
+  LandformPlanPointReceipt,
+} from "./landform-plan-worker-protocol";
+import {
   panTerrainLabByFraction,
   zoomTerrainLabByFactor,
 } from "./use-world-view-navigation";
@@ -61,6 +68,11 @@ const PANE_OPTIONS: Array<{ value: TerrainLabPane; label: string; note: string }
     note: "Production exact terrain and procedural horizon on one depth target",
   },
   { value: "canonical", label: "Real terrain", note: "Exact final chunks with textures" },
+  {
+    value: "plan",
+    label: "Landform plan",
+    note: "Research basins, divides, drainage, sinks, and quiet space",
+  },
   { value: "cpu", label: "CPU LOD", note: "Production CPU preview evaluator" },
   {
     value: "macro",
@@ -139,6 +151,9 @@ export function App(): React.JSX.Element {
   const [canonicalCacheEpoch, setCanonicalCacheEpoch] = useState(0);
   const [canonicalReport, setCanonicalReport] = useState<CanonicalTerrainReport>();
   const [runtimeReport, setRuntimeReport] = useState<RuntimeCompositionReport>();
+  const [planReport, setPlanReport] = useState<LandformPlanReport>();
+  const [planPointReceipt, setPlanPointReceipt] =
+    useState<LandformPlanPointReceipt>();
   const [comparisonCanonicalReport, setComparisonCanonicalReport] =
     useState<CanonicalTerrainReport>();
   const [visualAssetsReady, setVisualAssetsReady] = useState(false);
@@ -218,10 +233,14 @@ export function App(): React.JSX.Element {
   const chunkWidth = footprint / 16;
   const runtimeVisible = state.panes.includes("runtime");
   const canonicalVisible = state.panes.includes("canonical");
+  const planVisible = state.panes.includes("plan");
   const cpuVisible = state.panes.includes("cpu");
   const macroVisible = state.panes.includes("macro");
   const gpuVisible = state.panes.includes("gpu");
   const proceduralVisible = cpuVisible || macroVisible || gpuVisible;
+  const terrainPaneVisible =
+    runtimeVisible || canonicalVisible || proceduralVisible;
+  const planOnly = planVisible && !terrainPaneVisible;
   const proceduralSource = proceduralSourceForPanes(state.panes);
   const primaryVisualUnavailable = visualAssetsReady
     && visualProfileUsesMinecraftReference(state.visualProfile)
@@ -257,6 +276,7 @@ export function App(): React.JSX.Element {
       : (!proceduralVisible || primaryVisualUnavailable || status === "ready")
       && (!canonicalVisible || primaryVisualUnavailable || canonicalReport?.complete)
       && (!runtimeVisible || primaryVisualUnavailable || runtimeReport?.targetReady)
+      && (!planVisible || planReport)
       && (!visualComparisonVisible
         || comparisonVisualUnavailable
         || comparisonCanonicalReport?.complete)
@@ -299,6 +319,10 @@ export function App(): React.JSX.Element {
       data-texture-presentation={primaryTexturePresentation}
       data-runtime-target-ready={runtimeReport?.targetReady ? "true" : "false"}
       data-runtime-exact-complete={runtimeReport?.exactComplete ? "true" : "false"}
+      data-plan-ready={planReport ? "true" : "false"}
+      data-plan-build-ms={planReport?.buildMs ?? ""}
+      data-plan-transfer-bytes={planReport?.transferBytes ?? 0}
+      data-plan-checksum={planReport?.checksum ?? ""}
       data-compare-visual-profile={state.compareVisualProfile}
       data-reference-textures-available={
         minecraftReferenceAvailable === undefined
@@ -442,7 +466,21 @@ export function App(): React.JSX.Element {
               surfaceQuality={state.surfaceQuality}
             />
           </div>
-          <div className="mapToolbar" data-testid="viewport-controls">
+          <div
+            className={`mapToolbar${planOnly ? " planOnlyToolbar" : ""}`}
+            data-testid="viewport-controls"
+          >
+            {planOnly ? (
+              <div className="planToolbarNote">
+                <span>Plan projection</span>
+                <strong>2D structural map · fixed 32-block cells</strong>
+                <small>
+                  Terrain view, projection, and surface controls resume when a
+                  terrain pane is visible.
+                </small>
+              </div>
+            ) : (
+              <>
             <SegmentedControl<TerrainLabView>
               label="View"
               value={state.view}
@@ -503,6 +541,8 @@ export function App(): React.JSX.Element {
                 <option value="inferred">Inferred · surface builders</option>
               </select>
             </label>
+              </>
+            )}
             <div className="mapZoom" aria-label="Viewport zoom controls">
               <button
                 type="button"
@@ -534,7 +574,10 @@ export function App(): React.JSX.Element {
           </div>
           <div
             className={`paneWorkspace logicalPanes${state.panes.length}${
-              canonicalVisible && cpuVisible && (macroVisible || gpuVisible)
+              !planVisible
+              && canonicalVisible
+              && cpuVisible
+              && (macroVisible || gpuVisible)
                 ? " threePaneWorkspace"
                 : ""
             }`}
@@ -640,6 +683,19 @@ export function App(): React.JSX.Element {
                 <span aria-hidden="true">↕ scroll page</span>
               </div>
             ) : null}
+            {planVisible ? (
+              <div className="paneFrame landformPlanPaneFrame">
+                <LandformPlanCanvas
+                  state={state}
+                  camera={camera}
+                  onStateChange={updateState}
+                  onCameraChange={setCamera}
+                  onReport={setPlanReport}
+                  onInspect={setPlanPointReceipt}
+                  onError={setError}
+                />
+              </div>
+            ) : null}
             {proceduralVisible ? (
               <div
                 className={`paneFrame proceduralPaneFrame${
@@ -696,9 +752,15 @@ export function App(): React.JSX.Element {
             <div>
               <span className="footerLabel">resolution</span>
               <strong>
-                {state.detail === "auto" ? "Auto" : `1:${state.detail}`}
-                {" → "}
-                1:{renderReport?.effectiveSpacing ?? "—"}
+                {planVisible && !proceduralVisible
+                  ? "1:32 plan cells"
+                  : (
+                    <>
+                      {state.detail === "auto" ? "Auto" : `1:${state.detail}`}
+                      {" → "}
+                      1:{renderReport?.effectiveSpacing ?? "—"}
+                    </>
+                  )}
               </strong>
             </div>
             <div className="approximationNote">
@@ -770,6 +832,8 @@ export function App(): React.JSX.Element {
           </ControlSection>
 
           <ControlSection number="03" title="Presentation">
+            {terrainPaneVisible ? (
+              <>
             <label className="fieldLabel">
               <span>Visual material profile</span>
               <select
@@ -849,6 +913,8 @@ export function App(): React.JSX.Element {
               local extracted 1.17.1 pack. Comparison adds a synchronized exact
               pane; it does not change terrain generation.
             </p>
+              </>
+            ) : null}
             {canonicalVisible ? (
               <>
                 <SegmentedControl<CanonicalTerrainStage>
@@ -967,15 +1033,64 @@ export function App(): React.JSX.Element {
                 </label>
               </>
             ) : null}
-            <button
-              type="button"
-              className="cameraResetButton"
-              onClick={() => setCamera(DEFAULT_TERRAIN_LAB_CAMERA)}
-            >
-              Reset 3D camera
-            </button>
+            {planVisible ? (
+              <>
+                <div className="visibilityToggles planVisibilityToggles">
+                  <ToggleButton
+                    label="Basins"
+                    pressed={state.planBasinsVisible}
+                    onChange={(planBasinsVisible) =>
+                      patchState({ planBasinsVisible })}
+                  />
+                  <ToggleButton
+                    label="Quiet"
+                    pressed={state.planQuietVisible}
+                    onChange={(planQuietVisible) =>
+                      patchState({ planQuietVisible })}
+                  />
+                  <ToggleButton
+                    label="Drainage"
+                    pressed={state.planDrainageVisible}
+                    onChange={(planDrainageVisible) =>
+                      patchState({ planDrainageVisible })}
+                  />
+                  <ToggleButton
+                    label="Divides"
+                    pressed={state.planDividesVisible}
+                    onChange={(planDividesVisible) =>
+                      patchState({ planDividesVisible })}
+                  />
+                  <ToggleButton
+                    label="Confluences"
+                    pressed={state.planConfluencesVisible}
+                    onChange={(planConfluencesVisible) =>
+                      patchState({ planConfluencesVisible })}
+                  />
+                  <ToggleButton
+                    label="Sinks"
+                    pressed={state.planSinksVisible}
+                    onChange={(planSinksVisible) =>
+                      patchState({ planSinksVisible })}
+                  />
+                </div>
+                <p className="controlNote">
+                  Landform-plan facts are independent presentation overlays.
+                  Toggling them never rebuilds the plan or changes terrain.
+                </p>
+              </>
+            ) : null}
+            {terrainPaneVisible ? (
+              <button
+                type="button"
+                className="cameraResetButton"
+                onClick={() => setCamera(DEFAULT_TERRAIN_LAB_CAMERA)}
+              >
+                Reset 3D camera
+              </button>
+            ) : null}
           </ControlSection>
 
+          {terrainPaneVisible ? (
           <ControlSection number="04" title="Cache & benchmark">
             {canonicalVisible ? (
               <>
@@ -1096,15 +1211,26 @@ export function App(): React.JSX.Element {
                 : "Stress uses the fixed review seed/site, a cold 2 km Compare map at requested 1:2, and independent CPU/GPU publication."}
             </p>
           </ControlSection>
+          ) : null}
 
           <ControlSection number="05" title="Evidence" subdued>
-            <PointReceipt profile={state.profile} receipt={pointReceipt} />
-            <Diagnostics
-              adapter={adapter}
-              report={renderReport}
-              comparison={comparison}
-              canonical={canonicalReport}
-            />
+            {planVisible ? (
+              <LandformPlanPointEvidence
+                receipt={planPointReceipt}
+                report={planReport}
+              />
+            ) : null}
+            {proceduralVisible ? (
+              <PointReceipt profile={state.profile} receipt={pointReceipt} />
+            ) : null}
+            {terrainPaneVisible ? (
+              <Diagnostics
+                adapter={adapter}
+                report={renderReport}
+                comparison={comparison}
+                canonical={canonicalReport}
+              />
+            ) : null}
           </ControlSection>
         </aside>
       </main>
@@ -1125,6 +1251,90 @@ function useResponsiveSplitLayout(): "columns" | "rows" {
     return () => media.removeEventListener("change", update);
   }, []);
   return layout;
+}
+
+function LandformPlanPointEvidence({
+  receipt,
+  report,
+}: {
+  receipt: LandformPlanPointReceipt | undefined;
+  report: LandformPlanReport | undefined;
+}): React.JSX.Element {
+  if (!report) {
+    return (
+      <div className="pointReceipt empty" data-testid="landform-plan-receipt">
+        <strong>Building the landform plan</strong>
+        <span>
+          The bounded research summary is compiling off the main thread.
+        </span>
+      </div>
+    );
+  }
+  return (
+    <div className="pointReceipt" data-testid="landform-plan-receipt">
+      <div className="pointReceiptHeading">
+        <strong>
+          {receipt
+            ? `${receipt.worldX}, ${receipt.worldZ}`
+            : "Tap the plan to inspect it"}
+        </strong>
+        <span>{report.topology} · 1:32</span>
+      </div>
+      {receipt ? (
+        <dl className="pointReceiptGrid">
+          <div><dt>Cell</dt><dd>{receipt.gridX}, {receipt.gridZ}</dd></div>
+          <div><dt>Base Y</dt><dd>{receipt.baseY}</dd></div>
+          <div><dt>Basin</dt><dd>{receipt.basinId}</dd></div>
+          <div><dt>Receiver</dt><dd>{receipt.receiverId}</dd></div>
+          <div><dt>Accumulation</dt><dd>{receipt.accumulation}</dd></div>
+          <div><dt>Stream order</dt><dd>{receipt.streamOrder || "—"}</dd></div>
+          <div><dt>Uplift</dt><dd>{receipt.uplift.toFixed(3)}</dd></div>
+          <div><dt>Quiet</dt><dd>{receipt.quiet.toFixed(3)}</dd></div>
+          <div><dt>Broad low</dt><dd>{receipt.broadLow.toFixed(3)}</dd></div>
+          <div>
+            <dt>Structural flags</dt>
+            <dd>{planPointFlags(receipt).join(" · ") || "ordinary"}</dd>
+          </div>
+        </dl>
+      ) : (
+        <span className="pointReceiptPrompt">
+          Inspection reports basin ownership, receiver hierarchy, drainage
+          accumulation/order, envelope strengths, and structural flags.
+        </span>
+      )}
+      <details className="pointReceiptDetails">
+        <summary>Plan build evidence</summary>
+        <dl className="pointReceiptGrid">
+          <div><dt>Build</dt><dd>{report.buildMs.toFixed(2)} ms</dd></div>
+          <div><dt>Summary</dt><dd>{formatBytes(report.transferBytes)}</dd></div>
+          <div><dt>Channels</dt><dd>{formatInteger(report.channelCells)}</dd></div>
+          <div><dt>Confluences</dt><dd>{formatInteger(report.confluences)}</dd></div>
+          <div>
+            <dt>Drainage / divides</dt>
+            <dd>
+              {formatInteger(report.drainageSegments)}
+              {" / "}
+              {formatInteger(report.divideSegments)}
+            </dd>
+          </div>
+          <div><dt>Protected sinks</dt><dd>{report.protectedSinks}</dd></div>
+          <div><dt>Schema</dt><dd>{report.schema}</dd></div>
+          <div><dt>Checksum</dt><dd>{report.checksum}</dd></div>
+        </dl>
+      </details>
+    </div>
+  );
+}
+
+function planPointFlags(receipt: LandformPlanPointReceipt): string[] {
+  return [
+    receipt.ocean && "ocean",
+    receipt.channel && "channel",
+    receipt.confluence && "confluence",
+    receipt.protectedBasin && "protected basin",
+    receipt.quietCore && "quiet core",
+    receipt.cropEdge && "study edge",
+  ].filter((flag): flag is string => flag !== false);
 }
 
 function PointReceipt({
@@ -1252,7 +1462,9 @@ function PaneToggles({
       <div className="segmentedControl">
         {PANE_OPTIONS.filter((option) =>
           profile === "overworld"
-            ? option.value !== "gpu" && option.value !== "runtime"
+            ? option.value !== "gpu"
+              && option.value !== "runtime"
+              && option.value !== "plan"
             : option.value !== "macro"
         ).map((option) => {
           const visible = panes.includes(option.value);
@@ -1292,6 +1504,7 @@ function WorkspaceGuide({
   surfaceQuality: TerrainLabState["surfaceQuality"];
 }): React.JSX.Element {
   const exact = panes.includes("canonical");
+  const plan = panes.includes("plan");
   const cpu = panes.includes("cpu");
   const macro = panes.includes("macro");
   const gpu = panes.includes("gpu");
@@ -1316,10 +1529,16 @@ function WorkspaceGuide({
             : gpu
               ? "GPU LOD stays resident for broad visual coverage. "
               : ""}
-        {surfaceQuality === "inferred"
-          ? "Inferred surface detail adds one builder-noise lookup per retained vanilla point. "
-          : "Basic surface detail uses the already-selected biome top material only. "}
-        Every visible pane shares seed, center, scale, camera, and navigation.
+        {cpu || macro || gpu
+          ? surfaceQuality === "inferred"
+            ? "Inferred surface detail adds one builder-noise lookup per retained vanilla point. "
+            : "Basic surface detail uses the already-selected biome top material only. "
+          : ""}
+        {plan
+          ? "Landform plan is a research-only 2D structural diagnostic over the fixed 6.144 km study domain. "
+          : ""}
+        Every visible pane shares seed, center, scale, and navigation. Terrain
+        panes also share camera state.
       </span>
     </div>
   );
@@ -1345,6 +1564,15 @@ function SourceFootnote({
       </>
     );
   }
+  if (panes.length === 1 && panes[0] === "plan") {
+    return (
+      <>
+        Research-only hybrid structure over the fixed 6.144 km Tactical 267
+        plane domain. The 32-block cells and skeleton are diagnostic summaries;
+        production terrain does not consume this plan.
+      </>
+    );
+  }
   return (
     <>
       Real terrain is exact generated blocks with {visualProfileLabel(visualProfile)}
@@ -1353,7 +1581,8 @@ function SourceFootnote({
       numbered missing-texture view. LOD panes use the same material profile
       while remaining presentation-only. CPU and GPU LOD share natural rivers
       and wetlands; planned streams are reconstructed from production route
-      records at near-detail checkpoints.
+      records at near-detail checkpoints. The Landform plan pane is a
+      research-only 2D summary and is not consumed by production terrain.
     </>
   );
 }

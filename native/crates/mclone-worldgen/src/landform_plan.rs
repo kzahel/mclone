@@ -1103,4 +1103,12 @@ mod tests {
         assert!(summary.point(-3_073.0, 0.0).is_none());
         assert!(summary.point(0.0, 3_072.0).is_none());
     }
+
+    #[test]
+    fn diagnostic_wire_discriminants_are_stable() {
+        assert_eq!(McloneLandformPlanSegmentKind::Drainage as u8, 0);
+        assert_eq!(McloneLandformPlanSegmentKind::Divide as u8, 1);
+        assert_eq!(McloneLandformPlanSinkKind::Ocean as u8, 0);
+        assert_eq!(McloneLandformPlanSinkKind::ProtectedClosed as u8, 1);
+    }
 }

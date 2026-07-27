@@ -38,6 +38,12 @@ test("round-trips complete URL state", () => {
     view: "map" as const,
     projection: "perspective" as const,
     layer: "continentalness" as const,
+    planBasinsVisible: false,
+    planQuietVisible: true,
+    planDrainageVisible: false,
+    planDividesVisible: true,
+    planConfluencesVisible: false,
+    planSinksVisible: true,
   };
   assert.deepEqual(parseTerrainLabState(terrainLabSearch(state)), {
     ...state,
@@ -126,8 +132,8 @@ test("maps legacy source links and keeps at least one pane visible", () => {
   assert.equal(toggleTerrainLabPane(onlyCanonical, "canonical"), onlyCanonical);
   assert.deepEqual(toggleTerrainLabPane(onlyCanonical, "gpu").panes, ["canonical", "gpu"]);
   assert.deepEqual(
-    parseTerrainLabState("?panes=runtime,canonical,gpu").panes,
-    ["runtime", "canonical", "gpu"],
+    parseTerrainLabState("?panes=runtime,canonical,plan,gpu").panes,
+    ["runtime", "canonical", "plan", "gpu"],
   );
 });
 
@@ -147,6 +153,7 @@ test("the vanilla profile replaces GPU with fast macro and excludes Mclone-only 
   assert.equal(vanilla.layer, "terrain");
   assert.equal(toggleTerrainLabPane(vanilla, "gpu"), vanilla);
   assert.equal(toggleTerrainLabPane(vanilla, "runtime"), vanilla);
+  assert.equal(toggleTerrainLabPane(vanilla, "plan"), vanilla);
   assert.deepEqual(
     toggleTerrainLabPane(vanilla, "cpu").panes,
     ["canonical", "macro"],
@@ -187,7 +194,28 @@ test("keeps camera state outside URL-addressed terrain state", () => {
     view: "3d",
     projection: "orthographic",
     layer: "terrain",
+    planBasinsVisible: true,
+    planQuietVisible: true,
+    planDrainageVisible: true,
+    planDividesVisible: true,
+    planConfluencesVisible: true,
+    planSinksVisible: true,
   });
+});
+
+test("round-trips independent landform-plan overlays", () => {
+  const state = parseTerrainLabState(
+    "?panes=plan&planBasins=0&planQuiet=1&planDrainage=0"
+      + "&planDivides=1&planConfluences=0&planSinks=1",
+  );
+  assert.deepEqual(state.panes, ["plan"]);
+  assert.equal(state.planBasinsVisible, false);
+  assert.equal(state.planQuietVisible, true);
+  assert.equal(state.planDrainageVisible, false);
+  assert.equal(state.planDividesVisible, true);
+  assert.equal(state.planConfluencesVisible, false);
+  assert.equal(state.planSinksVisible, true);
+  assert.deepEqual(parseTerrainLabState(terrainLabSearch(state)), state);
 });
 
 test("accepts a static review camera without adding it to terrain state", () => {

@@ -34,6 +34,12 @@
   display: block;
 }
 
+.pointReceiptPrompt {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.45;
+}
+
 .pointReceipt.empty span {
   margin-top: 4px;
   font-size: 11px;
@@ -352,6 +358,35 @@ h1 {
   min-width: 0;
 }
 
+.mapToolbar.planOnlyToolbar {
+  grid-template-columns: minmax(260px, 1fr) 188px;
+  align-items: center;
+}
+
+.planToolbarNote {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.planToolbarNote > span {
+  color: var(--faint);
+  font-family: "DM Mono", monospace;
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.planToolbarNote > strong {
+  color: #dce7e1;
+  font-size: 12px;
+}
+
+.planToolbarNote > small {
+  color: var(--muted);
+  font-size: 9px;
+}
+
 .compactField select {
   min-height: 36px;
 }
@@ -558,6 +593,71 @@ h1 {
   display: flex;
   flex-wrap: wrap;
   gap: 7px;
+}
+
+.planLegend {
+  position: absolute;
+  z-index: 4;
+  bottom: 48px;
+  left: 16px;
+  display: grid;
+  grid-template-columns: repeat(2, max-content);
+  gap: 7px 16px;
+  padding: 10px 12px;
+  border: 1px solid rgba(235, 245, 238, 0.14);
+  border-radius: 3px;
+  background: rgba(5, 14, 15, 0.78);
+  backdrop-filter: blur(10px);
+  color: #b9c6c1;
+  font-family: "DM Mono", monospace;
+  font-size: 8px;
+  letter-spacing: 0.06em;
+  pointer-events: none;
+  text-transform: uppercase;
+}
+
+.planLegend > span {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.planLegendSwatch {
+  width: 13px;
+  height: 5px;
+  display: inline-block;
+  border-radius: 4px;
+  background: #5b6c53;
+}
+
+.planLegendSwatch.quiet {
+  background: #78947e;
+}
+
+.planLegendSwatch.divide {
+  height: 2px;
+  background: #f4c54e;
+}
+
+.planLegendSwatch.drainage {
+  height: 3px;
+  background: #3bbefa;
+}
+
+.planLegendSwatch.confluence {
+  width: 7px;
+  height: 7px;
+  margin: 0 3px;
+  border-radius: 50%;
+  background: #fff88a;
+}
+
+.planLegendSwatch.sink {
+  width: 8px;
+  height: 8px;
+  margin: 0 2px;
+  border-radius: 50%;
+  background: #ff4bca;
 }
 
 .canvasBadge {

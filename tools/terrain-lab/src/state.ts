@@ -18,7 +18,13 @@ export type TerrainLabVisualProfile =
 export type TerrainLabTexturePresentation = "textured" | "flat-colors";
 export type TerrainLabComparisonVisualProfile = "off" | TerrainLabVisualProfile;
 export type TerrainLabSource = "gpu" | "reference" | "macro" | "split";
-export type TerrainLabPane = "runtime" | "canonical" | "cpu" | "macro" | "gpu";
+export type TerrainLabPane =
+  | "runtime"
+  | "canonical"
+  | "plan"
+  | "cpu"
+  | "macro"
+  | "gpu";
 export type CanonicalTerrainStage = "surface" | "final";
 export type TerrainLabView = "map" | "3d";
 export type TerrainLabProjection = "orthographic" | "perspective";
@@ -63,6 +69,12 @@ export interface TerrainLabState {
   view: TerrainLabView;
   projection: TerrainLabProjection;
   layer: TerrainLabLayer;
+  planBasinsVisible: boolean;
+  planQuietVisible: boolean;
+  planDrainageVisible: boolean;
+  planDividesVisible: boolean;
+  planConfluencesVisible: boolean;
+  planSinksVisible: boolean;
 }
 
 export interface TerrainLabCamera {
@@ -91,6 +103,12 @@ export const DEFAULT_TERRAIN_LAB_STATE: TerrainLabState = {
   view: "3d",
   projection: "orthographic",
   layer: "terrain",
+  planBasinsVisible: true,
+  planQuietVisible: true,
+  planDrainageVisible: true,
+  planDividesVisible: true,
+  planConfluencesVisible: true,
+  planSinksVisible: true,
 };
 
 export const REVIEW_TERRAIN_LAB_STATE: TerrainLabState = {
@@ -135,7 +153,14 @@ const COMPARISON_VISUAL_PROFILES =
   new Set<TerrainLabComparisonVisualProfile>(["off", ...VISUAL_PROFILES]);
 const SOURCES = new Set<TerrainLabSource>(["gpu", "reference", "macro", "split"]);
 const SURFACE_QUALITIES = new Set<TerrainLabSurfaceQuality>(["basic", "inferred"]);
-const PANES = new Set<TerrainLabPane>(["runtime", "canonical", "cpu", "macro", "gpu"]);
+const PANES = new Set<TerrainLabPane>([
+  "runtime",
+  "canonical",
+  "plan",
+  "cpu",
+  "macro",
+  "gpu",
+]);
 const CANONICAL_STAGES = new Set<CanonicalTerrainStage>(["surface", "final"]);
 const VIEWS = new Set<TerrainLabView>(["map", "3d"]);
 const PROJECTIONS = new Set<TerrainLabProjection>(["orthographic", "perspective"]);
@@ -207,6 +232,19 @@ export function parseTerrainLabState(
     projection:
       validMember(params.get("projection"), PROJECTIONS) ?? fallback.projection,
     layer: validMember(params.get("layer"), LAYERS) ?? fallback.layer,
+    planBasinsVisible:
+      validBoolean(params.get("planBasins")) ?? fallback.planBasinsVisible,
+    planQuietVisible:
+      validBoolean(params.get("planQuiet")) ?? fallback.planQuietVisible,
+    planDrainageVisible:
+      validBoolean(params.get("planDrainage")) ?? fallback.planDrainageVisible,
+    planDividesVisible:
+      validBoolean(params.get("planDivides")) ?? fallback.planDividesVisible,
+    planConfluencesVisible:
+      validBoolean(params.get("planConfluences"))
+      ?? fallback.planConfluencesVisible,
+    planSinksVisible:
+      validBoolean(params.get("planSinks")) ?? fallback.planSinksVisible,
   });
 }
 
@@ -235,6 +273,12 @@ export function terrainLabSearch(
   params.set("view", state.view);
   params.set("projection", state.projection);
   params.set("layer", state.layer);
+  params.set("planBasins", state.planBasinsVisible ? "1" : "0");
+  params.set("planQuiet", state.planQuietVisible ? "1" : "0");
+  params.set("planDrainage", state.planDrainageVisible ? "1" : "0");
+  params.set("planDivides", state.planDividesVisible ? "1" : "0");
+  params.set("planConfluences", state.planConfluencesVisible ? "1" : "0");
+  params.set("planSinks", state.planSinksVisible ? "1" : "0");
   if (reviewCamera) {
     params.set("reviewYaw", String(reviewCamera.yaw));
     params.set("reviewPitch", String(reviewCamera.pitch));
@@ -272,6 +316,7 @@ export function toggleTerrainLabPane(
   if (
     (state.profile === "overworld" && pane === "gpu")
     || (state.profile === "overworld" && pane === "runtime")
+    || (state.profile === "overworld" && pane === "plan")
     || (state.profile !== "overworld" && pane === "macro")
   ) {
     return state;
@@ -296,7 +341,10 @@ export function switchTerrainLabProfile(
   profile: TerrainLabProfile,
 ): TerrainLabState {
   const panes = state.panes.map((pane) => {
-    if (profile === "overworld" && (pane === "gpu" || pane === "runtime")) {
+    if (
+      profile === "overworld"
+      && (pane === "gpu" || pane === "runtime" || pane === "plan")
+    ) {
       return "macro";
     }
     if (profile !== "overworld" && pane === "macro") {
@@ -316,7 +364,7 @@ export function normalizeTerrainLabProfileState(
 ): TerrainLabState {
   const panes = state.panes.filter((pane) =>
     state.profile === "overworld"
-      ? pane !== "gpu" && pane !== "runtime"
+      ? pane !== "gpu" && pane !== "runtime" && pane !== "plan"
       : pane !== "macro"
   );
   if (panes.length === 0) {
@@ -441,7 +489,7 @@ function validFiniteNumber(value: string | null): number | undefined {
 }
 
 function paneOrder(pane: TerrainLabPane): number {
-  return ["runtime", "canonical", "cpu", "macro", "gpu"].indexOf(pane);
+  return ["runtime", "canonical", "plan", "cpu", "macro", "gpu"].indexOf(pane);
 }
 
 function validMember<T extends string>(value: string | null, values: Set<T>): T | undefined {

@@ -15,6 +15,8 @@ mod canonical_mailbox_web;
 mod canonical_web;
 #[cfg(target_arch = "wasm32")]
 mod canonical_worker_web;
+#[cfg(target_arch = "wasm32")]
+mod landform_plan_web;
 #[cfg(any(target_arch = "wasm32", test))]
 mod navigation;
 #[cfg(target_arch = "wasm32")]
@@ -31,6 +33,8 @@ mod web;
 pub use canonical_web::{CanonicalTerrainLab, mclone_terrain_lab_create_canonical};
 #[cfg(target_arch = "wasm32")]
 pub use canonical_worker_web::{CanonicalTerrainWorkerActor, CanonicalTerrainWorkerDispatch};
+#[cfg(target_arch = "wasm32")]
+pub use landform_plan_web::TerrainLabLandformPlanCompiler;
 #[cfg(target_arch = "wasm32")]
 pub use navigation_web::{TerrainLabNavigationSession, TerrainLabNavigationUpdate};
 #[cfg(target_arch = "wasm32")]

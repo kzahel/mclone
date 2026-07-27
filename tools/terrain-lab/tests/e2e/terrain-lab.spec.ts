@@ -1018,6 +1018,69 @@ test("switches material profiles and compares Minecraft reference art", async ({
   await expect(page.getByLabel("Texture representation")).toBeDisabled();
 });
 
+test("inspects the research landform plan without rebuilding overlays", async ({
+  page,
+}, testInfo) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("console", (message) => {
+    if (message.type() === "error") {
+      pageErrors.push(message.text());
+    }
+  });
+  await page.goto(
+    "/terrain/?seed=-98765&x=0&z=0&blocks=6144&panes=plan&view=map"
+      + "&planBasins=1&planQuiet=1&planDrainage=1&planDivides=1"
+      + "&planConfluences=1&planSinks=1",
+  );
+  const shell = page.locator(".appShell");
+  await expect(shell).toHaveAttribute("data-plan-ready", "true");
+  await expect(page.getByTestId("lab-status")).toContainText("ready");
+  const plan = page.locator(
+    "canvas[aria-label='Research landform-plan diagnostic']",
+  );
+  await expect(plan).toBeVisible();
+  expect(Number(await shell.getAttribute("data-plan-transfer-bytes")))
+    .toBeGreaterThan(500_000);
+  const checksum = await shell.getAttribute("data-plan-checksum");
+  const buildMs = await shell.getAttribute("data-plan-build-ms");
+  expect(checksum).toMatch(/^[0-9a-f]{16}$/u);
+
+  await page.getByRole("button", { name: "Basins shown", exact: true }).click();
+  await expect(page).toHaveURL(/planBasins=0/u);
+  await expect(shell).toHaveAttribute("data-plan-checksum", checksum ?? "");
+  await expect(shell).toHaveAttribute("data-plan-build-ms", buildMs ?? "");
+  await page.getByRole("button", { name: "Basins hidden", exact: true }).click();
+
+  await page.getByTestId("landform-plan-stage").scrollIntoViewIfNeeded();
+  const bounds = await page.getByTestId("landform-plan-stage").boundingBox();
+  expect(bounds).not.toBeNull();
+  await page.mouse.click(
+    bounds!.x + bounds!.width * 0.5,
+    bounds!.y + Math.min(bounds!.height * 0.5, 350),
+  );
+  await expect(page.getByTestId("landform-plan-receipt"))
+    .not.toContainText("Tap the plan");
+  await expect(page.locator(".inspectionMarker")).toBeVisible();
+  await page.screenshot({
+    path:
+      `/tmp/mclone-terrain-lab-${testInfo.project.name}-landform-plan-ui.png`,
+    fullPage: true,
+  });
+
+  await plan.screenshot({
+    path: `/tmp/mclone-terrain-lab-${testInfo.project.name}-landform-plan.png`,
+  });
+  await page.getByRole("button", { name: "Zoom in", exact: true }).click();
+  await expect(page).toHaveURL(/blocks=3072/u);
+  await expect(shell).toHaveAttribute("data-plan-checksum", checksum ?? "");
+  await plan.screenshot({
+    path:
+      `/tmp/mclone-terrain-lab-${testInfo.project.name}-landform-plan-close.png`,
+  });
+  expect(pageErrors).toEqual([]);
+});
+
 async function waitForCanonical(
   page: import("@playwright/test").Page,
   requestedChunks: number,

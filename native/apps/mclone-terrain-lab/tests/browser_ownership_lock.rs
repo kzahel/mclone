@@ -19,6 +19,12 @@ const RUNTIME_EXACT_WORKER: &str =
 const RUNTIME_VEGETATION_WORKER: &str =
     include_str!("../../../../tools/terrain-lab/src/web/runtime-vegetation-worker.ts");
 const RUNTIME_WEB: &str = include_str!("../src/runtime_web.rs");
+const LANDFORM_PLAN_CANVAS: &str =
+    include_str!("../../../../tools/terrain-lab/src/web/LandformPlanCanvas.tsx");
+const LANDFORM_PLAN_WORKER: &str =
+    include_str!("../../../../tools/terrain-lab/src/web/landform-plan-worker.ts");
+const LANDFORM_PLAN_RUST: &str =
+    include_str!("../../../crates/mclone-worldgen/src/landform_plan.rs");
 
 #[test]
 fn browser_typescript_has_no_exact_worker_policy() {
@@ -192,4 +198,36 @@ fn runtime_composition_consumes_shared_rust_owners() {
             );
         }
     }
+}
+
+#[test]
+fn landform_plan_semantics_stay_in_rust() {
+    for required in [
+        "CHANNEL_ACCUMULATION_THRESHOLD",
+        "select_sinks",
+        "build_drainage_forest",
+        "classify_stream_order",
+        "receiver_owners_diverge",
+        "McloneLandformPlanSummary",
+    ] {
+        assert!(
+            LANDFORM_PLAN_RUST.contains(required),
+            "shared landform planner lost required semantic owner {required:?}"
+        );
+    }
+    for forbidden in [
+        "CHANNEL_ACCUMULATION_THRESHOLD",
+        "MIN_SINK_SEPARATION",
+        "GradientNoise2d",
+        "sink_permission",
+        "receiver_is_ancestor",
+    ] {
+        assert!(
+            !LANDFORM_PLAN_CANVAS.contains(forbidden) && !LANDFORM_PLAN_WORKER.contains(forbidden),
+            "Terrain Lab browser code gained planner policy through {forbidden:?}"
+        );
+    }
+    assert!(LANDFORM_PLAN_WORKER.contains("LandformPlanCompiler"));
+    assert!(LANDFORM_PLAN_CANVAS.contains("useWorldViewNavigation"));
+    assert_eq!(LANDFORM_PLAN_CANVAS.matches("new Worker(").count(), 1);
 }
