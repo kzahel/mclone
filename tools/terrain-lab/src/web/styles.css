@@ -435,6 +435,7 @@ h1 {
   min-width: 0;
   display: grid;
   gap: 4px;
+  pointer-events: none;
   color: var(--muted);
   font-size: 11px;
   line-height: 1.45;
