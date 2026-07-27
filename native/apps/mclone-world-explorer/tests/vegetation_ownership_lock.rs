@@ -4,7 +4,7 @@
 //! compilation is gone; the browser-disabled configuration remains the one
 //! named exception until Slice 4.
 
-const SESSION: &str = include_str!("../src/session.rs");
+const SESSION: &str = include_str!("../../../crates/mclone-terrain-view/src/runtime_session.rs");
 const NATIVE_TERRAIN: &str = include_str!("../src/terrain.rs");
 const WEB_HOST: &str = include_str!("../src/web.rs");
 const WEB_APP: &str = include_str!("../www/world-explorer-app.js");

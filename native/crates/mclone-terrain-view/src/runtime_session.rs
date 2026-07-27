@@ -1,13 +1,13 @@
 use std::time::Duration;
 
-use mclone_render_color::{RenderColorProfile, RenderTargetColorTransform};
-use mclone_terrain_view::{
+use crate::{
     BoundedRepresentationOwnershipSnapshot, ExactPaintedCoverageSnapshot, McloneTreeOccurrenceId,
     TerrainClipmapConfig, TerrainExactCoverageMode, TerrainHorizonFrameStats,
     TerrainHorizonPresentation, TerrainHorizonRenderTarget, TerrainHorizonRenderer,
     TerrainPreviewCamera, TerrainPreviewMaterialAtlas, TerrainPreviewProjectionKind,
     TerrainPreviewView, TerrainVegetationExecutor, terrain_preview_focus_y_for_profile,
 };
+use mclone_render_color::{RenderColorProfile, RenderTargetColorTransform};
 use mclone_view_control::{
     ContactEvent, ContactGestureReducer, ViewPoint, ViewportMetrics, WorldViewHeldDirection,
     WorldViewHeldMotion, WorldViewIntent, WorldViewMode, WorldViewProjection, WorldViewReducer,
@@ -21,7 +21,7 @@ use mclone_worldgen::{
 const COMPOSED_ORBIT_VIEWER_CLEARANCE_BLOCKS: f32 = 32.0;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct WorldExplorerConfig {
+pub struct TerrainRuntimeConfig {
     pub width: u32,
     pub height: u32,
     pub seed: i64,
@@ -32,7 +32,7 @@ pub struct WorldExplorerConfig {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum WorldExplorerCompositionMode {
+pub enum TerrainRuntimeCompositionMode {
     #[default]
     Horizon,
     Exact,
@@ -41,20 +41,20 @@ pub enum WorldExplorerCompositionMode {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum WorldExplorerExactAnchor {
+pub enum TerrainRuntimeExactAnchor {
     #[default]
     Focus,
     ViewerForward,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
-pub struct WorldExplorerExactView {
+pub struct TerrainRuntimeExactView {
     pub render_view: mclone_render::chunk::ChunkRenderView,
     pub residency_anchor: [i32; 2],
     pub target_y: f32,
 }
 
-impl WorldExplorerCompositionMode {
+impl TerrainRuntimeCompositionMode {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Horizon => "horizon",
@@ -71,14 +71,14 @@ impl WorldExplorerCompositionMode {
             "composed" | "composition" => Ok(Self::Composed),
             "coverage" | "mask" => Ok(Self::Coverage),
             other => Err(format!(
-                "unsupported World Explorer composition mode {other:?}; expected horizon, exact, \
+                "unsupported runtime terrain composition mode {other:?}; expected horizon, exact, \
                  composed, or coverage"
             )),
         }
     }
 }
 
-impl WorldExplorerExactAnchor {
+impl TerrainRuntimeExactAnchor {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Focus => "focus",
@@ -91,16 +91,16 @@ impl WorldExplorerExactAnchor {
             "focus" | "target" | "orbit-target" => Ok(Self::Focus),
             "viewer-forward" | "viewer" | "eye" => Ok(Self::ViewerForward),
             other => Err(format!(
-                "unsupported World Explorer exact anchor {other:?}; expected focus or \
+                "unsupported runtime terrain exact anchor {other:?}; expected focus or \
                  viewer-forward"
             )),
         }
     }
 }
 
-pub struct WorldExplorerSession {
+pub struct TerrainRuntimeSession {
     renderer: TerrainHorizonRenderer,
-    config: WorldExplorerConfig,
+    config: TerrainRuntimeConfig,
     color_format: wgpu::TextureFormat,
     target_color_transform: RenderTargetColorTransform,
     view_state: WorldViewState,
@@ -117,18 +117,18 @@ pub struct WorldExplorerSession {
     last_stats: Option<TerrainHorizonFrameStats>,
 }
 
-impl WorldExplorerSession {
+impl TerrainRuntimeSession {
     pub fn new(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         color_format: wgpu::TextureFormat,
-        config: WorldExplorerConfig,
+        config: TerrainRuntimeConfig,
         material_atlas: TerrainPreviewMaterialAtlas<'_>,
         vegetation_executor: Option<Box<dyn TerrainVegetationExecutor>>,
     ) -> Result<Self, String> {
         if config.vegetation_enabled != vegetation_executor.is_some() {
             return Err(
-                "World Explorer vegetation enablement must match executor availability".to_owned(),
+                "runtime terrain vegetation enablement must match executor availability".to_owned(),
             );
         }
         let view_reducer = WorldViewReducer::default();
@@ -352,9 +352,9 @@ impl WorldExplorerSession {
     pub fn exact_composition_view(
         &self,
         radius_chunks: u32,
-        anchor: WorldExplorerExactAnchor,
-    ) -> Result<WorldExplorerExactView, String> {
-        world_explorer_exact_view(
+        anchor: TerrainRuntimeExactAnchor,
+    ) -> Result<TerrainRuntimeExactView, String> {
+        terrain_runtime_exact_view(
             self.config.seed,
             self.view_state,
             self.config.width,
@@ -364,7 +364,7 @@ impl WorldExplorerSession {
         )
     }
 
-    pub fn apply_exact_composition_view(&mut self, view: WorldExplorerExactView) {
+    pub fn apply_exact_composition_view(&mut self, view: TerrainRuntimeExactView) {
         self.target_y_override = Some(view.target_y);
         if self.residency_anchor != view.residency_anchor {
             self.residency_anchor = view.residency_anchor;
@@ -564,14 +564,14 @@ fn floor_i32(value: f64) -> i32 {
         .clamp(f64::from(i32::MIN), f64::from(i32::MAX)) as i32
 }
 
-fn world_explorer_exact_view(
+fn terrain_runtime_exact_view(
     seed: i64,
     state: WorldViewState,
     width: u32,
     height: u32,
     radius_chunks: u32,
-    exact_anchor: WorldExplorerExactAnchor,
-) -> Result<WorldExplorerExactView, String> {
+    exact_anchor: TerrainRuntimeExactAnchor,
+) -> Result<TerrainRuntimeExactView, String> {
     let view_height_blocks = state.blocks_across * f64::from(height) / f64::from(width);
     let presentation = TerrainHorizonPresentation::new(
         state.focus_x,
@@ -591,8 +591,7 @@ fn world_explorer_exact_view(
             },
         )?,
     )?;
-    let base_render_view =
-        mclone_terrain_view::terrain_horizon_chunk_render_view(presentation, width, height)?;
+    let base_render_view = crate::terrain_horizon_chunk_render_view(presentation, width, height)?;
     let target_y = if state.mode == WorldViewMode::Orbit {
         let viewer_surface_y = terrain_preview_focus_y_for_profile(
             TerrainPreviewProfile::McloneOverworldV1,
@@ -608,11 +607,11 @@ fn world_explorer_exact_view(
         MCLONE_OVERWORLD_SEA_LEVEL as f32
     };
     let presentation = presentation.with_target_y(target_y)?;
-    let render_view =
-        mclone_terrain_view::terrain_horizon_chunk_render_view(presentation, width, height)?;
+    let render_view = crate::terrain_horizon_chunk_render_view(presentation, width, height)?;
     let mut anchor_x = state.focus_x as f32;
     let mut anchor_z = state.focus_z as f32;
-    if state.mode == WorldViewMode::Orbit && exact_anchor == WorldExplorerExactAnchor::ViewerForward
+    if state.mode == WorldViewMode::Orbit
+        && exact_anchor == TerrainRuntimeExactAnchor::ViewerForward
     {
         anchor_x = render_view.camera_position.x;
         anchor_z = render_view.camera_position.z;
@@ -630,7 +629,7 @@ fn world_explorer_exact_view(
             anchor_z += render_view.camera_forward.z / forward_length * forward_blocks;
         }
     }
-    Ok(WorldExplorerExactView {
+    Ok(TerrainRuntimeExactView {
         residency_anchor: [
             floor_i32(f64::from(anchor_x)),
             floor_i32(f64::from(anchor_z)),
@@ -661,13 +660,13 @@ mod tests {
     #[test]
     fn composition_mode_labels_round_trip() {
         for mode in [
-            WorldExplorerCompositionMode::Horizon,
-            WorldExplorerCompositionMode::Exact,
-            WorldExplorerCompositionMode::Composed,
-            WorldExplorerCompositionMode::Coverage,
+            TerrainRuntimeCompositionMode::Horizon,
+            TerrainRuntimeCompositionMode::Exact,
+            TerrainRuntimeCompositionMode::Composed,
+            TerrainRuntimeCompositionMode::Coverage,
         ] {
             assert_eq!(
-                WorldExplorerCompositionMode::parse_label(mode.label()).unwrap(),
+                TerrainRuntimeCompositionMode::parse_label(mode.label()).unwrap(),
                 mode
             );
         }
@@ -676,19 +675,19 @@ mod tests {
     #[test]
     fn exact_anchor_labels_round_trip() {
         for anchor in [
-            WorldExplorerExactAnchor::Focus,
-            WorldExplorerExactAnchor::ViewerForward,
+            TerrainRuntimeExactAnchor::Focus,
+            TerrainRuntimeExactAnchor::ViewerForward,
         ] {
             assert_eq!(
-                WorldExplorerExactAnchor::parse_label(anchor.label()).unwrap(),
+                TerrainRuntimeExactAnchor::parse_label(anchor.label()).unwrap(),
                 anchor
             );
         }
         assert_eq!(
-            WorldExplorerExactAnchor::parse_label("eye").unwrap(),
-            WorldExplorerExactAnchor::ViewerForward
+            TerrainRuntimeExactAnchor::parse_label("eye").unwrap(),
+            TerrainRuntimeExactAnchor::ViewerForward
         );
-        assert!(WorldExplorerExactAnchor::parse_label("camera-target").is_err());
+        assert!(TerrainRuntimeExactAnchor::parse_label("camera-target").is_err());
     }
 
     #[test]
@@ -767,7 +766,7 @@ mod tests {
             std::f64::consts::PI,
             std::f64::consts::PI * 1.5,
         ] {
-            let view = world_explorer_exact_view(
+            let view = terrain_runtime_exact_view(
                 12_345,
                 WorldViewState {
                     yaw_radians,
@@ -776,7 +775,7 @@ mod tests {
                 1280,
                 720,
                 2,
-                WorldExplorerExactAnchor::Focus,
+                TerrainRuntimeExactAnchor::Focus,
             )
             .unwrap();
             assert_eq!(view.residency_anchor, [-1, 17]);
@@ -795,16 +794,16 @@ mod tests {
             projection: WorldViewProjection::Perspective,
         };
 
-        let east = world_explorer_exact_view(
+        let east = terrain_runtime_exact_view(
             12_345,
             state,
             1280,
             720,
             2,
-            WorldExplorerExactAnchor::ViewerForward,
+            TerrainRuntimeExactAnchor::ViewerForward,
         )
         .unwrap();
-        let west = world_explorer_exact_view(
+        let west = terrain_runtime_exact_view(
             12_345,
             WorldViewState {
                 yaw_radians: std::f64::consts::PI,
@@ -813,7 +812,7 @@ mod tests {
             1280,
             720,
             2,
-            WorldExplorerExactAnchor::ViewerForward,
+            TerrainRuntimeExactAnchor::ViewerForward,
         )
         .unwrap();
 
@@ -832,7 +831,7 @@ mod tests {
             std::f64::consts::PI,
             std::f64::consts::PI * 1.5,
         ] {
-            let view = world_explorer_exact_view(
+            let view = terrain_runtime_exact_view(
                 12_345,
                 WorldViewState {
                     yaw_radians,
@@ -841,7 +840,7 @@ mod tests {
                 1280,
                 720,
                 2,
-                WorldExplorerExactAnchor::ViewerForward,
+                TerrainRuntimeExactAnchor::ViewerForward,
             )
             .unwrap();
             let surface_y = terrain_preview_focus_y_for_profile(
@@ -859,7 +858,7 @@ mod tests {
 
     #[test]
     fn map_exact_near_field_remains_under_the_focus() {
-        let view = world_explorer_exact_view(
+        let view = terrain_runtime_exact_view(
             12_345,
             WorldViewState {
                 focus_x: -0.25,
@@ -870,7 +869,7 @@ mod tests {
             1280,
             720,
             2,
-            WorldExplorerExactAnchor::Focus,
+            TerrainRuntimeExactAnchor::Focus,
         )
         .unwrap();
 

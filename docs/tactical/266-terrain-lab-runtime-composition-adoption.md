@@ -55,9 +55,12 @@ Completed in the first implementation commit:
 
 - `TerrainRuntimeExactRenderer`, its diagnostics, canonical request/result
   contract, and `CanonicalExactExecutor` now live in `mclone-terrain-view`.
+- `TerrainRuntimeSession` and its focus/viewer-forward composition projection
+  policy now live beside the shared horizon renderer, so consumers do not
+  depend on World Explorer to obtain the accepted camera/depth alignment.
 - World Explorer keeps only its native/browser transport adapters and aliases
-  the shared renderer for compatibility.
-- The shared crate's 66 non-GPU unit tests pass, the new Explorer ownership
+  the shared runtime types for compatibility.
+- The shared crate's 73 non-GPU unit tests pass, the new Explorer ownership
   lock passes, and both the native Explorer and its Wasm library compile.
 
 ### Slice 1: Terrain Lab runtime composition host

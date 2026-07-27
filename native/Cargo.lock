@@ -1919,6 +1919,7 @@ dependencies = [
  "mclone-mesh",
  "mclone-render",
  "mclone-render-color",
+ "mclone-view-control",
  "mclone-worldgen",
  "naga",
  "pollster",

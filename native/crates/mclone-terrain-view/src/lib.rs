@@ -7,6 +7,7 @@ mod clipmap;
 mod composition;
 mod horizon_admission;
 mod runtime_exact;
+mod runtime_session;
 mod terrain_vegetation_coordinator;
 mod tree_ownership;
 mod viewport;
@@ -56,6 +57,10 @@ pub use composition::{
 pub use runtime_exact::{
     CanonicalExactExecutor, CanonicalExactRequest, CanonicalExactResult,
     TerrainRuntimeExactRenderer, TerrainRuntimeExactStats,
+};
+pub use runtime_session::{
+    TerrainRuntimeCompositionMode, TerrainRuntimeConfig, TerrainRuntimeExactAnchor,
+    TerrainRuntimeExactView, TerrainRuntimeSession,
 };
 pub use terrain_vegetation_coordinator::{
     TerrainVegetationAdmission, TerrainVegetationCoordinator,
