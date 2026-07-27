@@ -46,9 +46,10 @@ detached canonical source       live authoritative source
 - `TerrainRuntimeExactRenderer` is a transitional compatibility name. Split
   its canonical production/residency from reusable frame preparation, then
   migrate Explorer and Terrain Lab before removing or narrowing the aggregate.
-- The procedural horizon renders after sky and before live exact opaque
-  terrain on the same reversed-Z depth target. Exact terrain, actors, and
-  translucent passes retain the ordinary frame order.
+- Live exact opaque/cutout terrain establishes the ordinary reversed-Z depth,
+  then the procedural horizon loads that same color/depth target before
+  actors and exact translucent terrain. This avoids a browser failure mode
+  where exact terrain recreated rather than loaded the procedural depth.
 - The game retains an exact-only mode with unchanged pixels and zero horizon
   scheduling. Composed mode is explicit during validation and becomes a
   product default only after the review gate accepts it.
@@ -56,9 +57,10 @@ detached canonical source       live authoritative source
   known, topology, authority/freshness role, and a non-zero generation.
 - Platform adapters construct native-thread or browser-Worker executors only.
   They do not copy terrain policy.
-- Mono, independent flat views, per-eye stereo, and full-frame multiview
-  consume one committed terrain presentation. View matrices differ; residency
-  and source generations do not.
+- Ordinary mono and per-eye stereo consume one committed terrain
+  presentation. Independent multi-flat and full-frame multiview remain PH-7
+  and PH-8 promotion work; view matrices may differ there, but residency and
+  source generations must not.
 
 ## Slices
 
@@ -90,52 +92,92 @@ detached canonical source       live authoritative source
 
 ### Slice 3: ordinary scene composition
 
-- [x] Insert the shared procedural terrain submission into the ordinary mono frame
-  after sky and before exact opaque terrain.
+- [x] Insert the shared procedural terrain submission into the ordinary mono
+  frame between exact opaque/cutout and actors/translucent terrain.
 - [x] Anchor residency to the authoritative player focus rather than a
   diagnostic camera target.
-- [ ] Allow auxiliary
-  and stereo views to reuse the committed presentation.
+- [x] Allow per-eye stereo views to reuse the committed presentation.
+- [ ] Promote the committed presentation through browser multi-flat and
+  full-frame multiview after their explicit capacity/pipeline work.
 - [x] Preserve actors, translucent terrain, water, effects, selection, and UI
   ordering.
 - [x] Add explicit exact-only/composed configuration and diagnostics.
 
 First drawable evidence on 2026-07-27 uses
 `--generation-profile mclone-overworld-v1 --terrain-presentation composed`.
-The ordinary scene now draws the procedural terrain after sky and exact terrain
-loads the resulting reversed-Z depth. An inspected `1024x576` low-angle native
+The ordinary scene now draws exact opaque terrain first, then lets procedural
+terrain load and extend the same reversed-Z depth. An inspected `1024x576`
+low-angle native
 capture preserves the exact foreground hill silhouette over the procedural
 horizon; an elevated capture exposes the bounded exact footprint surrounded by
 the fixed-budget horizon. `exact-only` remains the default and never creates
-the terrain-view engine. Procedural vegetation is intentionally still disabled
-until Slice 4 provides platform executors; this milestone is not a human
-checkpoint.
+the terrain-view engine. Procedural vegetation was intentionally disabled at
+this first pixel milestone; Slice 4 subsequently supplied platform executors.
 
 ### Slice 4: ownership, lifecycle, and topology
 
-- Feed authoritative readiness into complete-record natural-feature XOR.
-- Invalidate or reselect ownership when edits, section readiness, source
+- [x] Feed authoritative readiness into complete-record natural-feature XOR.
+- [x] Invalidate or reselect ownership when edits, section readiness, source
   generation, topology, world, or device resources change.
-- Exercise movement, teleport, view-distance changes, session replacement,
-  and device rebuild without stale horizon or proxy facts.
+- [x] Exercise ordinary movement and source resets without stale products.
+- [ ] Carry the same recovery through the dedicated PH-6 teleport,
+  view-distance, session-replacement, and device-rebuild campaign.
+
+The live engine now treats exact-ready coverage as authoritative for a whole
+natural tree record: it owns both a present exact tree and an edited exact
+absence, while resident procedural products own complete proxies outside that
+coverage. Native uses the shared named-thread executor moved out of World
+Explorer. Browser construction supplies the same coordinator with a dedicated
+Wasm Worker at the app rim.
+
+The browser initially lost its WebGPU device with `A valid external Instance
+reference no longer exists.` Retaining the `wgpu::Instance` for the surface
+lifetime is correct, but was not the root capacity failure.
+`TerrainViewportRenderer` was compiling both detached viewport and horizon
+pipeline families even though a live scene uses only the latter. On top of the
+game shader set this crossed Chrome's current WebGPU pipeline capacity and
+lost the device. Construction now selects exactly one pipeline family.
+
+The browser live-game tier uses six clipmap levels and an eight-sample
+presentation stride. It retains the same source, computed products, exact
+coverage, ownership, and roughly eight-kilometre horizon while drawing 96
+coarser mesh tiles. Native retains ten levels and stride one. This is an
+explicit device presentation budget, not a second terrain implementation.
 
 ### Slice 5: native and stereo evidence
 
-- Run focused unit/workspace gates and native Wasm compilation.
-- Capture and inspect low-angle tree and steep-hill silhouettes at the first
+- [x] Run focused unit gates and native Wasm compilation.
+- [x] Capture and inspect low-angle tree and steep-hill silhouettes at the first
   drawable game milestone.
-- Compare exact-only and composed mode under matched inputs.
-- Prove independent flat views and synthetic stereo share residency while
-  retaining per-view projection/depth correctness.
+- [ ] Compare exact-only and composed mode under matched inputs at the hosted
+  review site.
+- [x] Prove synthetic per-eye stereo shares residency while retaining
+  per-view projection/depth correctness.
+
+The preliminary `1280x640` synthetic per-eye capture (two `640x640` eyes)
+draws the exact foreground and procedural horizon in both eyes with 226,475
+differing pixels. It advances PH-8's first topology gate but does not complete
+PH-8: desktop OpenXR, Quest, and full-frame multiview remain their own later
+promotion. The current horizon render pipeline is single-view; composed mode
+is intentionally unavailable in full-frame multiview until that pipeline
+consumes `view_index` and a two-layer target. Exact-only multiview remains
+unchanged.
+
+The browser auxiliary-split probe was also run as a falsification check. Two
+horizon pane submissions currently lose Chrome's WebGPU device during the UI
+switch, so multi-flat composition is deliberately not claimed by PH-4. PH-7
+must batch or otherwise budget the repeated horizon submission before
+enabling it; the existing exact-only auxiliary path remains unchanged.
 
 ### Slice 6: full web game review surface
 
-- Carry the shared scene configuration and source adapter through the browser
+- [x] Carry the shared scene configuration and source adapter through the browser
   game.
-- Expose deterministic URL inputs for exact-only/composed mode and the review
+- [x] Expose deterministic URL inputs for exact-only/composed mode and the review
   location without moving terrain policy into TypeScript.
-- Validate headed desktop/phone WebGPU pixels and semantic receipts.
-- Deploy the full web game and stop at the first subjective review checkpoint.
+- [x] Validate headed desktop WebGPU pixels and semantic receipts.
+- [ ] Validate the representative phone browser after desktop review.
+- [ ] Deploy the full web game and stop at the first subjective review checkpoint.
 
 ## Human review checkpoint
 

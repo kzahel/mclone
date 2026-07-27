@@ -15,7 +15,9 @@ camera-relative placement as an explicit diagnostic option. Child Tactical
 hosted Human Review 1 accepted its reusable Terrain Lab consumer on
 2026-07-27. Child Tactical
 [`269`](269-shared-terrain-engine-scene-adoption.md) now implements PH-4
-shared terrain-view engine extraction and full-game scene adoption.
+shared terrain-view engine extraction and full-game scene adoption. Native,
+browser mono, and preliminary synthetic per-eye paths consume the same
+committed presentation; hosted full-game review is the remaining PH-4 gate.
 
 Topics:
 
@@ -98,10 +100,11 @@ The top, bottom, and right-hand proof boundaries exist. Tactical 262 now
 proves the missing composition center with a canonical exact near field and
 the procedural horizon on one World Explorer target. Tactical 266 moved that
 runtime proof into shared ownership and added Terrain Lab as a second host.
-PH-4 must finish the reusable center rather than merely pass its mask DTO to a
-parallel game implementation: `mclone-scene` will adapt real client render
-sections as an authoritative exact source and consume the same terrain-view
-coordinator while retaining live product lifecycle.
+PH-4 now supplies the reusable center rather than merely passing its mask DTO
+to a parallel game implementation: `mclone-scene` adapts real client render
+sections as an authoritative exact source and consumes the same terrain-view
+coordinator while retaining live product lifecycle. Hosted review remains
+before the child is accepted.
 
 ## Source-Of-Truth Rule
 
@@ -245,22 +248,17 @@ quality work must not invent a second LOD or platform execution policy.
 
 ## What Is Not Yet Proven
 
-- The procedural horizon has not rendered inside the ordinary
-  `mclone-scene::McloneSceneHost`.
-- Production exact chunk draws and procedural coverage do not yet come from
-  one immutable game-scene frame snapshot.
-- The ordinary game does not yet publish or consume the proven exact-painted
-  coverage mask.
+- The implemented scene frame derives exact coverage and committed procedural
+  presentation together, but the later lifecycle campaign must still prove
+  teleport, retained-world, and device-rebuild recovery.
 - The proof's explicit procedural collar is not yet a production game
   frontier, and visible exact/horizon surface and water differences remain.
-- Exact trees and procedural proxies are not yet atomically XORed across
-  cross-chunk crowns.
-- Authoritative edits do not yet invalidate nearby natural proxy ownership.
 - Full-game world replacement, active/standby worlds, device rebuild, and
   feature budgets do not yet own the horizon lifecycle.
-- The full browser game and flat Android game have not consumed the service.
-- Synthetic stereo, desktop OpenXR, per-eye Quest, and full-frame multiview
-  have not rendered the procedural horizon through the game scene.
+- The full browser game now consumes the service; flat Android has not.
+- Preliminary synthetic per-eye stereo renders the procedural horizon through
+  the game scene. Desktop OpenXR, Quest, and full-frame multiview remain
+  unproven.
 - Device-specific budgets and sustained locomotion costs are not yet accepted
   on phone or Quest.
 
@@ -309,8 +307,8 @@ exact resources participate in the current snapshot.
 The intended opaque order is:
 
 1. sky and background;
-2. masked procedural terrain;
-3. exact opaque and cutout terrain under the same depth convention;
+2. exact opaque and cutout terrain;
+3. masked procedural terrain loading the same reversed-Z depth;
 4. actors plus exactly one exact-or-proxy vegetation representation; and
 5. translucent terrain and water.
 
@@ -329,7 +327,7 @@ ready.
 | **PH-1 Shared composition substrate** | **complete in Tactical 262** | Add the immutable exact-painted snapshot, source identity, bounded GPU mask, caller-owned color/depth target, explicit load/store behavior, and renderer-neutral draw ordering without importing a product scene. | Unit/offscreen tests prove coherent coverage, negative-coordinate packing, stale rejection, shared depth, and unchanged Horizon mode. |
 | **PH-2 World Explorer composition proof** | **complete in Tactical 262** | Extract the useful canonical exact-view source from Terrain Lab, then add `Horizon`, `Exact`, `Composed`, and `Coverage` modes over one World Explorer device/target. Correct the reviewed exact/proxy tree chimera through complete-record ownership before promotion. | Native movement and inspected four-angle pixels pass; desktop and Pixel 7 browser Workers match painted coverage and whole-tree ownership; hosted interactive Human Review 1B accepted the corrected shared-depth pixels. |
 | **PH-3 Terrain Lab adoption** | **complete in Tactical 266** | Add the runtime horizon/composed presentation as another consumer while preserving canonical, CPU LOD, fast CPU LOD, and GPU LOD research panes. | Fixed-anchor Lab comparison exercises the same compositor without moving policy into React or browser canvas code; hosted Human Review 1 accepted the result. |
-| **PH-4 Shared engine and full-game scene adoption** | **active in Tactical 269** | Decompose the proof-shaped `TerrainRuntimeExactRenderer` boundary into a detached canonical source adapter and reusable terrain-view coordination/draw preparation. Make World Explorer and `mclone-scene` peer hosts of that engine; have the scene adapt real client render sections as its authoritative exact source, construct platform executors at the app rim, and render exact terrain near with procedural terrain beyond. Do not import the full scene/server into Explorer or route live truth through canonical generation. | Explorer and native game window/offscreen movement exercise one composition/residency/prepared-frame owner under different truth sources; real scene lifecycle and edits remain authoritative, Explorer remains a small dependency firewall, and exact-only stays equivalent. |
+| **PH-4 Shared engine and full-game scene adoption** | **implemented; hosted review pending in Tactical 269** | Decompose the proof-shaped `TerrainRuntimeExactRenderer` boundary into a detached canonical source adapter and reusable terrain-view coordination/draw preparation. Make World Explorer and `mclone-scene` peer hosts of that engine; have the scene adapt real client render sections as its authoritative exact source, construct platform executors at the app rim, and render exact terrain near with procedural terrain beyond. Do not import the full scene/server into Explorer or route live truth through canonical generation. | Explorer and native game window/offscreen movement exercise one composition/residency/prepared-frame owner under different truth sources; real scene lifecycle and edits remain authoritative, Explorer remains a small dependency firewall, and exact-only stays equivalent. |
 | **PH-5 Vegetation and edit arbitration** | waiting on PH-4; reusable untouched-tree primitive starts in PH-2 | Consume the proven whole-record XOR in the game scene, then reject stale products and invalidate nearby natural proxy ownership when authoritative exact edits change the replacement facts. | No duplicate or disappearing trees at the frontier, including cross-chunk crowns, delayed exact compilation, edits, movement, and source switches. |
 | **PH-6 Lifecycle, recovery, and budgets** | waiting on PH-4/PH-5 | Integrate world/session replacement, active and bounded standby worlds, device loss/rebuild, dynamic exact-radius changes, cross-feature admission, diagnostics, and stable locomotion budgets. | Rebuild and world-switch smokes recover coarse-first without stale draws or unbounded work; exact-only remains protected. |
 | **PH-7 Flat-platform promotion** | waiting on stable native scene | Wire the same scene contracts through the full browser game and flat Android. Construct native-thread or browser-Worker executors only at platform rims; do not copy Explorer policy. Establish device-specific memory/work defaults from evidence. | Desktop web, representative phone browser, and flat Android render matching source/coverage identities and inspected pixels under movement and replacement. |

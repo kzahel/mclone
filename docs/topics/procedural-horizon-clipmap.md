@@ -86,21 +86,26 @@ hosted Human Review 1 accepted it on 2026-07-27. PH-3 is complete, PH-4
 shared terrain-view engine extraction plus full-game scene adoption is active
 in Tactical
 [`269`](../tactical/269-shared-terrain-engine-scene-adoption.md), and
-Android/XR promotion remains later. PH-4 has now landed its first ordinary
-mono-scene pixels: a source-qualified live adapter derives exact coverage from
-the active draw store's traversal-ready columns, and the shared frame pipeline
-draws the procedural backdrop after sky while exact terrain loads the same
-reversed-Z depth target. The opt-in is `terrainPresentation=composed` /
+Android/XR promotion remains later. PH-4 now has an implemented ordinary
+scene path: a source-qualified live adapter derives exact coverage from the
+active draw store's traversal-ready columns, exact opaque/cutout terrain
+establishes the ordinary reversed-Z depth, and the shared procedural backdrop
+loads and extends the same target before actors and translucent terrain. The
+opt-in is `terrainPresentation=composed` /
 `--terrain-presentation composed`, currently restricted to local
 `mclone-overworld-v1`; exact-only remains allocation-free by default.
 Native low-angle and elevated captures show the exact foreground silhouette
-correctly occluding the surrounding procedural terrain. Procedural vegetation,
-multi-flat/stereo reuse, browser executor plumbing, and hosted review remain
-open in Tactical 269. PH-4 must make World Explorer and
-`mclone-scene` peer hosts of one terrain representation/composition owner,
-not preserve a proof renderer and a game renderer that merely exchange the
-same coverage DTO. Canonical exact generation and live authoritative render
-sections remain different truth-source adapters.
+correctly occluding the surrounding procedural terrain. Native thread and
+browser Worker executors now feed the same vegetation coordinator; exact
+readiness selects whole authoritative tree records, and ordinary mono plus
+preliminary per-eye stereo consume one committed presentation. The browser
+tier uses six levels and render stride eight to
+retain an approximately eight-kilometre horizon without constructing unused
+viewport pipeline families. Headed full-game WebGPU pixels pass. Hosted
+review remains open in Tactical 269; browser multi-flat, full-frame
+multiview, Android, and headset promotion remain PH-7/PH-8 work. Canonical
+exact generation and live authoritative render sections remain different
+truth-source adapters.
 Interactive review on 2026-07-26 diagnosed two remaining proof defects and
 activated Tactical
 [`252`](../tactical/252-procedural-horizon-seams-and-transition-admission.md):

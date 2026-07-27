@@ -727,6 +727,28 @@ async function run() {
           },
           { eye, target },
         );
+        await page.evaluate(() => globalThis.__mcloneWebApp?.resumeRendering?.());
+        await page.waitForFunction(
+          (eye) => {
+            const state = globalThis.__mcloneWebApp?.state;
+            return state?.streamingSettled === true
+              && state.pendingCompileJobCount === 0
+              && state.terrainViewTargetReady === true
+              && state.terrainViewVegetationSubmittedJobs
+                === state.terrainViewVegetationCompletedJobs
+              && Math.abs(state.cameraX - eye[0]) < 0.01
+              && Math.abs(state.cameraY - eye[1]) < 0.01
+              && Math.abs(state.cameraZ - eye[2]) < 0.01;
+          },
+          eye,
+          { timeout: 90_000 },
+        );
+        await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
+        await page.waitForFunction(
+          () => globalThis.__mcloneWebApp?.state?.tickFrameBusy === false,
+          undefined,
+          { timeout: 10_000 },
+        );
         const result = await page.evaluate(
           async () => await globalThis.__mcloneWebApp?.renderOneFrameForSmoke?.() ?? null,
         );
