@@ -498,6 +498,8 @@ impl McloneSceneHost {
             screen_effects: ScreenEffectsRenderer::new(device, queue, color_format, asset_source)
                 .context("initialize XR screen effects renderer")?,
             terrain_view: None,
+            terrain_vegetation_executor_factory:
+                terrain_view::default_scene_terrain_vegetation_executor_factory(),
             underwater_effects: XrUnderwaterEffectStates::default(),
             last_underwater_update: None,
             head_comfort: XrHeadComfortState::default(),
@@ -700,6 +702,8 @@ impl McloneSceneHost {
             screen_effects: ScreenEffectsRenderer::new(device, queue, color_format, asset_source)
                 .context("initialize XR screen effects renderer")?,
             terrain_view: None,
+            terrain_vegetation_executor_factory:
+                terrain_view::default_scene_terrain_vegetation_executor_factory(),
             underwater_effects: XrUnderwaterEffectStates::default(),
             last_underwater_update: None,
             head_comfort: XrHeadComfortState::default(),
@@ -982,6 +986,8 @@ impl McloneSceneHost {
             ),
             screen_effects,
             terrain_view: None,
+            terrain_vegetation_executor_factory:
+                terrain_view::default_scene_terrain_vegetation_executor_factory(),
             underwater_effects: XrUnderwaterEffectStates::default(),
             last_underwater_update: None,
             head_comfort: XrHeadComfortState::default(),

@@ -30,6 +30,7 @@ const TERRAIN_HORIZON_NORMAL_EDGE_EAST: u32 = 0x10000000u;
 const TERRAIN_HORIZON_NORMAL_EDGE_NORTH: u32 = 0x20000000u;
 const TERRAIN_HORIZON_NORMAL_EDGE_SOUTH: u32 = 0x40000000u;
 override terrain_sample_halo_radius: u32 = 0u;
+override terrain_render_cell_stride: u32 = 1u;
 
 @group(0) @binding(0)
 var<uniform> params: TerrainPreviewParams;
@@ -547,12 +548,14 @@ fn vertex_main(
     @builtin(instance_index) instance_index: u32,
 ) -> VertexOutput {
     let cells = u32(params.origin_spacing_cells.w);
+    let cell_stride = max(terrain_render_cell_stride, 1u);
+    let render_cells = cells / cell_stride;
     let cell_index = vertex_index / 6u;
-    let cell_x = cell_index % cells;
-    let cell_z = cell_index / cells;
+    let cell_x = (cell_index % render_cells) * cell_stride;
+    let cell_z = (cell_index / render_cells) * cell_stride;
     let corner = grid_corner(vertex_index % 6u);
-    let sample_x = cell_x + corner.x;
-    let sample_z = cell_z + corner.y;
+    let sample_x = cell_x + corner.x * cell_stride;
+    let sample_z = cell_z + corner.y * cell_stride;
     let logical_x = i32(sample_x);
     let logical_z = i32(sample_z);
     let index = sample_z * params.layer_samples_size.y + sample_x;
@@ -562,10 +565,11 @@ fn vertex_main(
 
     let radius = sample_halo_radius();
     let cells_i = i32(cells);
-    let left_x = max(logical_x - 1, -radius);
-    let right_x = min(logical_x + 1, cells_i + radius);
-    let north_z = max(logical_z - 1, -radius);
-    let south_z = min(logical_z + 1, cells_i + radius);
+    let cell_stride_i = i32(cell_stride);
+    let left_x = max(logical_x - cell_stride_i, -radius);
+    let right_x = min(logical_x + cell_stride_i, cells_i + radius);
+    let north_z = max(logical_z - cell_stride_i, -radius);
+    let south_z = min(logical_z + cell_stride_i, cells_i + radius);
     let left = selected_grid_height(left_x, logical_z, instance_index);
     let right = selected_grid_height(right_x, logical_z, instance_index);
     let north = selected_grid_height(logical_x, north_z, instance_index);
@@ -583,10 +587,10 @@ fn vertex_main(
     var slope_x = narrow_slope_x;
     var slope_z = narrow_slope_z;
     if coarse_footprint_weight > 0.0 {
-        let wide_left_x = max(logical_x - 2, -radius);
-        let wide_right_x = min(logical_x + 2, cells_i + radius);
-        let wide_north_z = max(logical_z - 2, -radius);
-        let wide_south_z = min(logical_z + 2, cells_i + radius);
+        let wide_left_x = max(logical_x - 2 * cell_stride_i, -radius);
+        let wide_right_x = min(logical_x + 2 * cell_stride_i, cells_i + radius);
+        let wide_north_z = max(logical_z - 2 * cell_stride_i, -radius);
+        let wide_south_z = min(logical_z + 2 * cell_stride_i, cells_i + radius);
         let wide_left = selected_grid_height(wide_left_x, logical_z, instance_index);
         let wide_right = selected_grid_height(wide_right_x, logical_z, instance_index);
         let wide_north = selected_grid_height(logical_x, wide_north_z, instance_index);

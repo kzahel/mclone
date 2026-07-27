@@ -155,6 +155,7 @@ impl TerrainRuntimeSession {
                 height: config.height,
                 source,
                 clipmap: config.clipmap,
+                render_cell_stride: 1,
                 vegetation_enabled: config.vegetation_enabled,
                 color_profile: config.color_profile,
             },

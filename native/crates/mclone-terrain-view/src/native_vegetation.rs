@@ -3,7 +3,7 @@ use std::sync::mpsc::{self, Receiver, SyncSender, TryRecvError, TrySendError};
 use std::thread::{self, JoinHandle};
 use std::time::Instant;
 
-use mclone_terrain_view::{
+use crate::{
     TerrainVegetationExecutor, TerrainVegetationExecutorActor,
     TerrainVegetationExecutorDiagnostics, TerrainVegetationExecutorEvent,
     TerrainVegetationExecutorJob, TerrainVegetationExecutorKind, TerrainVegetationSubmitError,
@@ -281,9 +281,10 @@ fn drain_worker_events(
 mod tests {
     use std::thread;
 
-    use mclone_terrain_view::{
+    use crate::{
         TerrainVegetationExecutor, TerrainVegetationExecutorActor, TerrainVegetationExecutorEvent,
         TerrainVegetationExecutorJob, TerrainVegetationJobIdentity, TerrainVegetationSlotToken,
+        TerrainViewportTileId,
     };
     use mclone_worldgen::terrain_preview::{
         TerrainPreviewContentStage, TerrainPreviewProfile, TerrainPreviewRequest,
@@ -317,7 +318,7 @@ mod tests {
         let identity = TerrainVegetationJobIdentity {
             actor,
             request_id: 1,
-            tile: mclone_terrain_view::TerrainViewportTileId {
+            tile: TerrainViewportTileId {
                 profile: request.profile,
                 seed: request.seed,
                 tile_x: 0,

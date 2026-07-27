@@ -11,6 +11,8 @@ mod clipmap;
 mod composition;
 mod engine;
 mod horizon_admission;
+#[cfg(not(target_arch = "wasm32"))]
+mod native_vegetation;
 mod runtime_exact;
 mod runtime_session;
 mod source;
@@ -67,6 +69,8 @@ pub use composition::{
     TerrainExactCoverageMask, TerrainExactCoverageMode,
 };
 pub use engine::{TerrainViewEngine, TerrainViewEngineConfig};
+#[cfg(not(target_arch = "wasm32"))]
+pub use native_vegetation::NativeTerrainVegetationExecutor;
 pub use runtime_exact::{
     CanonicalExactExecutor, CanonicalExactRequest, CanonicalExactResult,
     TerrainRuntimeExactRenderer, TerrainRuntimeExactStats,

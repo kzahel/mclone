@@ -240,12 +240,15 @@ pub struct TerrainCompositionFrame<'a> {
     pub translucent_order: &'a [TerrainTranslucentSubmission],
 }
 
-/// Scene-provided opaque terrain drawn after sky and before exact chunks.
+/// Scene-provided opaque terrain drawn after exact opaque/cutout chunks and
+/// before actors and exact translucent chunks.
 ///
 /// The callback deliberately receives the ordinary frame's color/depth
 /// attachments and physical render view without depending on a concrete
-/// distant-terrain implementation. Once it returns, exact terrain loads both
-/// attachments so the two representations compare values in one depth space.
+/// distant-terrain implementation. Exact opaque terrain prepares and stores
+/// the frame depth first; the callback loads that same attachment so both
+/// representations compare values in one depth space. Exact translucent
+/// terrain then loads the combined opaque depth.
 pub struct TerrainBackdropRenderContext<'a> {
     pub device: &'a wgpu::Device,
     pub queue: &'a wgpu::Queue,
@@ -2583,26 +2586,9 @@ where
             background_clear_color,
         )?
         .with_loaded_color();
-        let terrain_backdrop_drawn = terrain_backdrop.is_some();
-        if let Some(terrain_backdrop) = terrain_backdrop.as_deref_mut() {
-            terrain_backdrop.render(TerrainBackdropRenderContext {
-                device: frame.device,
-                queue: frame.queue,
-                encoder: frame.encoder,
-                color_view: frame.target.color_view,
-                depth_view: &depth.view,
-                size: frame.target.size,
-                render_view,
-                view_slot,
-            })?;
-        }
-        let render_target = if terrain_backdrop_drawn {
-            render_target.with_loaded_depth()
-        } else {
-            render_target
-        };
-        let split_translucent_terrain =
-            !actor_instances.is_empty() || opaque_world_insertion.is_some();
+        let split_translucent_terrain = !actor_instances.is_empty()
+            || opaque_world_insertion.is_some()
+            || terrain_backdrop.is_some();
         let terrain_phase = if split_translucent_terrain {
             TexturedSectionRenderPhase::Opaque
         } else {
@@ -2625,6 +2611,18 @@ where
         terrain_stats = frame_stats;
         if let (Some(timing), Some(start)) = (timing.as_deref_mut(), terrain_start) {
             timing.terrain_opaque_ms += composition_timing_elapsed_ms(timing_clock, Some(start));
+        }
+        if let Some(terrain_backdrop) = terrain_backdrop.as_deref_mut() {
+            terrain_backdrop.render(TerrainBackdropRenderContext {
+                device: frame.device,
+                queue: frame.queue,
+                encoder: frame.encoder,
+                color_view: frame.target.color_view,
+                depth_view: &depth.view,
+                size: frame.target.size,
+                render_view,
+                view_slot,
+            })?;
         }
         render_stats.drawn_section_count = frame_stats.drawn_section_count;
         render_stats.drawn_face_count = frame_stats.drawn_face_count();

@@ -6,7 +6,9 @@ use crate::{
     TerrainViewSourceIdentity,
 };
 use mclone_render_color::{RenderColorProfile, RenderTargetColorTransform};
-use mclone_worldgen::terrain_preview::{TerrainPreviewContentStage, TerrainPreviewProfile};
+use mclone_worldgen::terrain_preview::{
+    TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS, TerrainPreviewContentStage, TerrainPreviewProfile,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TerrainViewEngineConfig {
@@ -14,6 +16,11 @@ pub struct TerrainViewEngineConfig {
     pub height: u32,
     pub source: TerrainViewSourceIdentity,
     pub clipmap: TerrainClipmapConfig,
+    /// Number of computed sample cells covered by one rendered mesh cell.
+    ///
+    /// This changes presentation density only; residency, source identity,
+    /// exact coverage, and bounded feature ownership remain unchanged.
+    pub render_cell_stride: u32,
     pub vegetation_enabled: bool,
     pub color_profile: RenderColorProfile,
 }
@@ -29,6 +36,16 @@ impl TerrainViewEngineConfig {
             );
         }
         self.clipmap = TerrainClipmap::new(self.clipmap)?.config();
+        if self.render_cell_stride == 0
+            || !self.render_cell_stride.is_power_of_two()
+            || TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS % self.render_cell_stride != 0
+        {
+            return Err(format!(
+                "terrain render cell stride {} must be a nonzero power-of-two \
+                 divisor of {}",
+                self.render_cell_stride, TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS,
+            ));
+        }
         Ok(self)
     }
 }
@@ -65,7 +82,7 @@ impl TerrainViewEngine {
             );
         }
         let target_color_transform = config.color_profile.target_color_transform(color_format);
-        let renderer = TerrainHorizonRenderer::new_with_target_color_transform(
+        let renderer = TerrainHorizonRenderer::new_with_target_color_transform_and_cell_stride(
             device,
             queue,
             color_format,
@@ -73,6 +90,7 @@ impl TerrainViewEngine {
             config.height,
             material_atlas,
             config.clipmap,
+            config.render_cell_stride,
             vegetation_executor,
             target_color_transform,
         )?;
@@ -172,7 +190,7 @@ impl TerrainViewEngine {
         }
         if let Some(ownership) = tree_ownership {
             self.renderer.set_tree_ownership(device, queue, ownership)?;
-        } else {
+        } else if !self.renderer.authoritative_tree_ownership() {
             self.renderer.clear_tree_ownership(device, queue)?;
         }
         Ok(())
@@ -246,6 +264,15 @@ impl TerrainViewEngine {
         self.renderer.set_depth_capture_enabled(enabled);
     }
 
+    /// Let live exact coverage select complete natural-feature records.
+    ///
+    /// Exact-ready columns own both a present feature and an authoritative
+    /// edited absence. Detached hosts continue supplying their explicit
+    /// canonical ownership snapshot instead.
+    pub fn set_authoritative_tree_ownership(&mut self, enabled: bool) {
+        self.renderer.set_authoritative_tree_ownership(enabled);
+    }
+
     pub fn shutdown(&mut self) {
         self.renderer.shutdown_vegetation();
     }
@@ -300,12 +327,32 @@ mod tests {
             height: 0,
             source: hidden,
             clipmap: TerrainClipmapConfig::default(),
+            render_cell_stride: 1,
             vegetation_enabled: false,
             color_profile: RenderColorProfile::Vanilla,
         }
         .validated()
         .unwrap_err();
         assert!(error.contains("does not disclose"));
+    }
+
+    #[test]
+    fn engine_config_requires_a_power_of_two_render_cell_stride() {
+        let config_for_stride = |render_cell_stride| TerrainViewEngineConfig {
+            width: 1,
+            height: 1,
+            source: source(12_345, 1),
+            clipmap: TerrainClipmapConfig::default(),
+            render_cell_stride,
+            vegetation_enabled: false,
+            color_profile: RenderColorProfile::Vanilla,
+        };
+        for stride in [1, 2, 4, 8, 16, 32, 64] {
+            assert!(config_for_stride(stride).validated().is_ok());
+        }
+        for stride in [0, 3, 128] {
+            assert!(config_for_stride(stride).validated().is_err());
+        }
     }
 
     #[test]

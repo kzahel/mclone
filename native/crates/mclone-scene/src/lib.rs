@@ -834,6 +834,8 @@ pub struct McloneSceneHost {
     sky: SkyRenderer,
     screen_effects: ScreenEffectsRenderer,
     terrain_view: Option<terrain_view::SceneTerrainViewState>,
+    terrain_vegetation_executor_factory:
+        Option<terrain_view::SceneTerrainVegetationExecutorFactory>,
     underwater_effects: XrUnderwaterEffectStates,
     last_underwater_update: Option<MonotonicInstant>,
     head_comfort: XrHeadComfortState,

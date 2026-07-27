@@ -9,12 +9,32 @@ use mclone_terrain_view::{
     ExactPaintedCoverageSnapshot, TERRAIN_PREVIEW_MATERIAL_UV_COUNT, TerrainClipmapConfig,
     TerrainCompositionSourceIdentity, TerrainExactCoverageMode, TerrainHorizonFrameStats,
     TerrainHorizonPresentation, TerrainHorizonRenderTarget, TerrainPreparedExactFrame,
-    TerrainPreviewCamera, TerrainPreviewMaterialAtlas, TerrainPreviewView, TerrainViewEngine,
-    TerrainViewEngineConfig, TerrainViewSourceIdentity,
+    TerrainPreviewCamera, TerrainPreviewMaterialAtlas, TerrainPreviewView,
+    TerrainVegetationExecutor, TerrainViewEngine, TerrainViewEngineConfig,
+    TerrainViewSourceIdentity,
 };
 use mclone_worldgen::terrain_preview::{TerrainPreviewContentStage, TerrainPreviewProfile};
 
 use crate::{McloneSceneHost, WorldInstanceId};
+
+pub(crate) type SceneTerrainVegetationExecutorFactory =
+    Box<dyn Fn() -> Result<Box<dyn TerrainVegetationExecutor>, String>>;
+
+#[cfg(not(target_arch = "wasm32"))]
+pub(crate) fn default_scene_terrain_vegetation_executor_factory()
+-> Option<SceneTerrainVegetationExecutorFactory> {
+    Some(Box::new(|| {
+        Ok(Box::new(
+            mclone_terrain_view::NativeTerrainVegetationExecutor::new(),
+        ))
+    }))
+}
+
+#[cfg(target_arch = "wasm32")]
+pub(crate) fn default_scene_terrain_vegetation_executor_factory()
+-> Option<SceneTerrainVegetationExecutorFactory> {
+    None
+}
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct SceneTerrainViewDiagnostics {
@@ -22,6 +42,18 @@ pub struct SceneTerrainViewDiagnostics {
     pub coverage_generation: u64,
     pub exact_column_count: u32,
     pub last_frame_revision: u64,
+    pub ready_slots: u32,
+    pub drawn_levels: u32,
+    pub drawn_tiles: u32,
+    pub target_ready: bool,
+    pub tree_instance_count: u32,
+    pub pending_vegetation_tiles: u32,
+    pub vegetation_enabled: bool,
+    pub vegetation_resident_tiles: u32,
+    pub vegetation_submitted_jobs: u64,
+    pub vegetation_completed_jobs: u64,
+    pub vegetation_transport_failures: u64,
+    pub vegetation_job_failures: u64,
 }
 
 pub(crate) struct SceneTerrainViewState {
@@ -45,6 +77,7 @@ impl SceneTerrainViewState {
         world: WorldInstanceId,
         seed: i64,
         topology: HorizontalTopology,
+        vegetation_executor: Option<Box<dyn TerrainVegetationExecutor>>,
     ) -> Result<Self> {
         let source = live_source(world, seed, topology)?;
         let coverage_generation = 1;
@@ -62,7 +95,8 @@ impl SceneTerrainViewState {
             }
         }
         let atlas = mesh_assets.atlas.as_upload();
-        let engine = TerrainViewEngine::new(
+        let vegetation_enabled = vegetation_executor.is_some();
+        let mut engine = TerrainViewEngine::new(
             device,
             queue,
             color_format,
@@ -70,11 +104,9 @@ impl SceneTerrainViewState {
                 width: 1,
                 height: 1,
                 source,
-                clipmap: TerrainClipmapConfig::default(),
-                // Platform executor plumbing lands in Slice 4. Keeping this
-                // false is an explicit no-proxy mode, not a synchronous
-                // browser fallback or a second vegetation implementation.
-                vegetation_enabled: false,
+                clipmap: scene_terrain_clipmap_config(),
+                render_cell_stride: scene_terrain_render_cell_stride(),
+                vegetation_enabled,
                 color_profile,
             },
             TerrainPreviewMaterialAtlas {
@@ -83,10 +115,11 @@ impl SceneTerrainViewState {
                 rgba: atlas.rgba,
                 material_uvs: &material_uvs,
             },
-            None,
+            vegetation_executor,
         )
         .map_err(anyhow::Error::msg)
         .context("create shared live terrain-view engine")?;
+        engine.set_authoritative_tree_ownership(true);
         Ok(Self {
             engine,
             world,
@@ -189,6 +222,13 @@ impl McloneSceneHost {
             });
         let ready_columns = self.active_world.draw.traversal_ready_columns_snapshot();
         if self.terrain_view.is_none() {
+            let vegetation_executor = self
+                .terrain_vegetation_executor_factory
+                .as_ref()
+                .map(|factory| factory())
+                .transpose()
+                .map_err(anyhow::Error::msg)
+                .context("construct scene terrain vegetation executor")?;
             self.terrain_view = Some(SceneTerrainViewState::new(
                 device,
                 queue,
@@ -198,6 +238,7 @@ impl McloneSceneHost {
                 world,
                 seed,
                 topology,
+                vegetation_executor,
             )?);
         }
         self.terrain_view
@@ -217,6 +258,14 @@ impl McloneSceneHost {
         if let Some(mut terrain_view) = self.terrain_view.take() {
             terrain_view.shutdown();
         }
+    }
+
+    pub fn configure_terrain_vegetation_executor_factory(
+        &mut self,
+        factory: impl Fn() -> Result<Box<dyn TerrainVegetationExecutor>, String> + 'static,
+    ) {
+        self.reset_terrain_view();
+        self.terrain_vegetation_executor_factory = Some(Box::new(factory));
     }
 }
 
@@ -245,6 +294,9 @@ impl TerrainBackdropRenderer for SceneTerrainViewState {
                     depth_view: context.depth_view,
                     color_load: wgpu::LoadOp::Load,
                     color_store: wgpu::StoreOp::Store,
+                    // Exact opaque/cutout terrain has prepared the frame's
+                    // reversed-Z depth. The shared backdrop loads it so the
+                    // representations participate in one depth comparison.
                     depth_load: wgpu::LoadOp::Load,
                     depth_store: wgpu::StoreOp::Store,
                 },
@@ -262,6 +314,44 @@ impl TerrainBackdropRenderer for SceneTerrainViewState {
 impl SceneTerrainViewState {
     fn record_stats(&mut self, stats: TerrainHorizonFrameStats) {
         self.diagnostics.last_frame_revision = stats.revision;
+        self.diagnostics.ready_slots = stats.ready_slots;
+        self.diagnostics.drawn_levels = stats.drawn_levels;
+        self.diagnostics.drawn_tiles = stats.drawn_tiles;
+        self.diagnostics.target_ready = stats.target_ready;
+        self.diagnostics.tree_instance_count = stats.tree_instance_count;
+        self.diagnostics.pending_vegetation_tiles = stats.pending_vegetation_tiles;
+        self.diagnostics.vegetation_enabled = stats.vegetation_service.enabled;
+        self.diagnostics.vegetation_resident_tiles = stats.vegetation_service.resident_tiles;
+        self.diagnostics.vegetation_submitted_jobs = stats.vegetation_service.submitted_jobs;
+        self.diagnostics.vegetation_completed_jobs = stats.vegetation_service.completed_jobs;
+        self.diagnostics.vegetation_transport_failures =
+            stats.vegetation_service.transport_failures;
+        self.diagnostics.vegetation_job_failures = stats.vegetation_service.job_failures;
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+const fn scene_terrain_render_cell_stride() -> u32 {
+    1
+}
+
+#[cfg(target_arch = "wasm32")]
+const fn scene_terrain_render_cell_stride() -> u32 {
+    8
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn scene_terrain_clipmap_config() -> TerrainClipmapConfig {
+    TerrainClipmapConfig::default()
+}
+
+#[cfg(target_arch = "wasm32")]
+fn scene_terrain_clipmap_config() -> TerrainClipmapConfig {
+    TerrainClipmapConfig {
+        // Six levels preserve an approximately eight-kilometre procedural
+        // horizon while bounding live-game WebGPU submissions to 96 tiles.
+        level_count: 6,
+        ..TerrainClipmapConfig::default()
     }
 }
 
