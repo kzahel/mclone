@@ -1,4 +1,6 @@
-import { PolledWorkerTransport } from "./mclone-worker-transport.js";
+import {
+  PolledWorkerTransport,
+} from "./mclone-worker-transport.js?v=__MCLONE_WORLD_EXPLORER_ASSET_VERSION__";
 
 const shell = document.getElementById("world-explorer-shell");
 const canvas = document.getElementById("world-explorer-canvas");
@@ -20,9 +22,11 @@ let smokeObserver = null;
 void boot().catch(showFatalError);
 
 async function boot() {
-  const module = await import("./pkg/mclone_world_explorer.js");
+  const module = await import(
+    "./pkg/mclone_world_explorer.js?v=__MCLONE_WORLD_EXPLORER_ASSET_VERSION__"
+  );
   await module.default(new URL(
-    "./pkg/mclone_world_explorer_bg.wasm",
+    "./pkg/mclone_world_explorer_bg.wasm?v=__MCLONE_WORLD_EXPLORER_ASSET_VERSION__",
     globalThis.location.href,
   ));
   const [authored, provisional] = await Promise.all([
@@ -32,14 +36,20 @@ async function boot() {
   syncCanvasSize();
   const horizonTransportFactory = () => {
     runtime.horizonTransport = new PolledWorkerTransport(
-      new URL("./world-explorer-worker.js", import.meta.url),
+      new URL(
+        "./world-explorer-worker.js?v=__MCLONE_WORLD_EXPLORER_ASSET_VERSION__",
+        import.meta.url,
+      ),
       "mclone-world-explorer-worker",
     );
     return runtime.horizonTransport;
   };
   const exactTransportFactory = () => {
     runtime.exactTransport = new PolledWorkerTransport(
-      new URL("./world-explorer-exact-worker.js", import.meta.url),
+      new URL(
+        "./world-explorer-exact-worker.js?v=__MCLONE_WORLD_EXPLORER_ASSET_VERSION__",
+        import.meta.url,
+      ),
       "mclone-world-explorer-exact-worker",
     );
     return runtime.exactTransport;
@@ -82,7 +92,9 @@ async function installSmokeObserverIfRequested() {
   if (parameters.get("smokeObserver") !== "1") {
     return;
   }
-  const observer = await import("./world-explorer-smoke-observer.js");
+  const observer = await import(
+    "./world-explorer-smoke-observer.js?v=__MCLONE_WORLD_EXPLORER_ASSET_VERSION__"
+  );
   smokeObserver = observer.installWorldExplorerSmokeObserver(
     runtime.session,
     () => runtime.horizonTransport?.terminate(),

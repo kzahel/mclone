@@ -1,6 +1,6 @@
 import initModule, {
   WorldExplorerWorkerActor,
-} from "./pkg/mclone_world_explorer.js";
+} from "./pkg/mclone_world_explorer.js?v=__MCLONE_WORLD_EXPLORER_ASSET_VERSION__";
 
 let modulePromise;
 let actor;
@@ -15,7 +15,10 @@ self.onmessage = (event) => {
 };
 
 async function forward(message) {
-  modulePromise ??= initModule();
+  modulePromise ??= initModule(new URL(
+    "./pkg/mclone_world_explorer_bg.wasm?v=__MCLONE_WORLD_EXPLORER_ASSET_VERSION__",
+    import.meta.url,
+  ));
   await modulePromise;
   actor ??= new WorldExplorerWorkerActor();
   const dispatch = actor.handleMessage(message);

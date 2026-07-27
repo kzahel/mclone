@@ -36,7 +36,7 @@ fn ordinary_browser_host_contains_no_explorer_diagnostic_projection() {
     assert!(WEB_APP.contains("runtime.session.renderFrame(frameMillis);"));
     assert!(WEB_APP.contains("status.hidden = true;"));
     assert!(WEB_APP.contains("parameters.get(\"smokeObserver\")"));
-    assert!(WEB_APP.contains("import(\"./world-explorer-smoke-observer.js\")"));
+    assert!(WEB_APP.contains("\"./world-explorer-smoke-observer.js?v="));
 }
 
 #[test]

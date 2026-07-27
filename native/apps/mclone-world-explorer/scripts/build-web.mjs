@@ -1,5 +1,6 @@
 import { spawnSync } from "node:child_process";
-import { cp, mkdir, rm, stat } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { cp, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -96,11 +97,34 @@ run(bindgen, [
   wasm,
 ], repositoryRoot);
 
-const wasmBytes = (await stat(
-  path.join(pkg, "mclone_world_explorer_bg.wasm"),
-)).size;
+const wasmPath = path.join(pkg, "mclone_world_explorer_bg.wasm");
+const wasmContents = await readFile(wasmPath);
+const assetVersion = createHash("sha256")
+  .update(wasmContents)
+  .digest("hex")
+  .slice(0, 16);
+for (const relativePath of [
+  "index.html",
+  "world-explorer-app.js",
+  "world-explorer-worker.js",
+  "world-explorer-exact-worker.js",
+]) {
+  const file = path.join(output, relativePath);
+  const contents = await readFile(file, "utf8");
+  const versioned = contents.replaceAll(
+    "__MCLONE_WORLD_EXPLORER_ASSET_VERSION__",
+    assetVersion,
+  );
+  if (contents === versioned) {
+    throw new Error(`${relativePath} has no Explorer asset-version placeholder`);
+  }
+  await writeFile(file, versioned);
+}
+
+const wasmBytes = wasmContents.length;
 console.log(`World Explorer web root: ${output}`);
 console.log(`World Explorer Wasm: ${wasmBytes} bytes`);
+console.log(`World Explorer asset version: ${assetVersion}`);
 
 async function exists(file) {
   try {
