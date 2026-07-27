@@ -32,7 +32,12 @@ rejected the pixels because procedural and exact renderers write incompatible
 depth encodings; exact-owned trees and exact hills can both be cut by the
 procedural surface. That general projection defect is now Tactical 262 Slice
 4B's blocker before tree ownership can receive meaningful pixel acceptance
-or Terrain Lab/game-scene promotion.
+or Terrain Lab/game-scene promotion. The Slice 4B candidate at `91fe9302`
+replaces both procedural terrain and proxy-tree linear depth with the exact
+chunk view-projection matrix. Magenta exact-source native captures now show a
+complete exact canopy surviving over farther LOD while nearer green
+procedural geometry can still win. Browser semantic parity passes, but hosted
+interactive pixel acceptance is still required before promotion.
 
 World Explorer review on 2026-07-26 found that native enabled synchronous
 near-level vegetation compilation during frame encoding while browser disabled

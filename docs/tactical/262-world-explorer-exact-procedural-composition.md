@@ -1,13 +1,14 @@
 # Tactical 262: World Explorer Exact/Procedural Composition
 
-Status: Human Review 1B rejected the composition on 2026-07-27. Local and
-hosted semantic parity gates are valid execution receipts but did not prove
-believable occlusion. Close portrait pairs show procedural terrain cutting
-nearer exact trees and hilltops because the procedural shader writes linear
-reversed depth while exact chunks use the engine's nonlinear perspective
-reversed-Z projection. Slice 4B must unify that projection contract and add
-source-colored silhouette evidence before another hosted review. Terrain Lab
-and game-scene promotion remain blocked.
+Status: Human Review 1B rejected the composition on 2026-07-27. Slice 4B now
+has an implementation candidate at `91fe9302`: procedural terrain and proxy
+vegetation use the same chunk view-projection matrix and nonlinear reversed-Z
+encoding as exact chunks, and `sourceColors=1` renders exact geometry with a
+magenta diagnostic atlas. Matched native portrait captures preserve exact
+tree and terrain silhouettes while still allowing nearer procedural geometry
+to win depth. Desktop and phone browser semantic gates pass the new diagnostic;
+hosted interactive pixel review remains the acceptance checkpoint. Terrain
+Lab and game-scene promotion remain blocked until that review.
 
 Topics:
 
@@ -614,16 +615,67 @@ incompatible depth coordinate.
 
 Slice 4B must:
 
-- [ ] make procedural terrain use the same shared view-projection and
+- [x] make procedural terrain use the same shared view-projection and
   reversed-Z encoding as exact chunks;
-- [ ] add a source-color diagnostic with exact geometry in bright magenta and
+- [x] add a source-color diagnostic with exact geometry in bright magenta and
   procedural geometry in normal colors;
-- [ ] retain a tall silhouette or synthetic tower plus steep hill as matched
+- [x] retain a tall silhouette or synthetic tower plus steep hill as matched
   exact/composed regression captures;
-- [ ] prove nearer exact geometry wins while genuinely nearer procedural
+- [x] prove nearer exact geometry wins while genuinely nearer procedural
   geometry still occludes it; and
 - [ ] repeat native and hosted browser pixel review before treating semantic
   receipts as acceptance evidence.
+
+Implementation commit `91fe9302` extends the shared terrain uniform from
+`160` to `224` bytes with `ChunkRenderView::view_projection`. Both procedural
+terrain and proxy-tree vertex shaders now output that matrix's complete clip
+position; neither contains the retired linear `clip_z` expression. The fixed
+horizon budget rises by `29,440` bytes across the `230` allocation and staging
+resources, from `128,838,264` to `128,867,704` bytes including exact-coverage
+resources.
+
+The source-color diagnostic preserves texture alpha/cutouts and replaces
+non-transparent exact atlas RGB with magenta. It is available as
+`--source-colors` natively and `sourceColors=1` in the browser. Normal
+procedural shading is deliberately unchanged.
+
+Native inspected evidence:
+
+- `/tmp/mclone-depth-shared-silhouette-exact.png`
+- `/tmp/mclone-depth-shared-silhouette-composed.png`
+- `/tmp/mclone-depth-shared-silhouette-source.png`
+- `/tmp/mclone-depth-shared-hill-exact-portrait.png`
+- `/tmp/mclone-depth-shared-hill-composed-portrait.png`
+- `/tmp/mclone-depth-shared-hill-source-portrait.png`
+
+The source-colored silhouette shows magenta exact canopies and ground
+surviving in front of farther procedural hills. It also shows a nearer green
+procedural proxy correctly covering magenta exact ground at the projected
+frontier. The composed capture retains the exact-only foreground instead of
+the rejected rectangular LOD slab. Its depth capture is entirely in the
+shared nonlinear range (`0.0..0.002440` at the reviewed close view), rather
+than combining exact values near `0.002` with procedural values near `0.94`.
+
+Validation at this checkpoint:
+
+- `cargo test -p mclone-terrain-view --lib`
+- `cargo test -p mclone-world-explorer`
+- `pnpm native:world-explorer:smoke`
+- `pnpm host:check -- --probe-browser-webgpu`
+- desktop and Pixel 7
+  `native:world-explorer:web:composition-smoke --source-colors`
+
+The browser build is asset version `e763583bf443efe7`. Both source-color
+semantic receipts report `25/25` exact chunks, coverage generation `27`,
+`8` exact-owned plus `7` proxy-owned trees, zero missing representations,
+and fixed resident bytes `128,867,704`.
+
+Playwright's headed Wayland screenshot currently returns a one-color white
+canvas for the Explorer. An isolated A/B build of the rejected pre-fix commit
+`ff4363d2` returns the same white capture while the smaller host WebGPU probe
+still captures valid pixels. Therefore that local screenshot is invalid
+evidence for either candidate; it is not being counted as a pass or attributed
+to this depth change. Hosted interactive review remains required.
 
 ### Slice 5: Terrain Lab adoption
 
