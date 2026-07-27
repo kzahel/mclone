@@ -16,8 +16,11 @@ bounded-representation ownership envelope and stable-tree adapter. Exact
 natural-tree admission is separate, and one complete stable-ID
 representation is selected from the record's full bounds and the actual
 exact-safe terrain interior. Delayed native window/offscreen movement has
-zero missing, dual, or unowned records at forest checkpoints. Browser and
-game-scene promotion wait for Human Review 1A.
+zero missing, dual, or unowned records at forest checkpoints. That identity
+proof remains valid, but Human Review 1A was retracted on 2026-07-27 because
+overlapping procedural terrain can still depth-occlude a complete
+exact-owned tree. Tactical 262 Slice 3B now owns the complementary terrain
+frontier; browser and game-scene promotion wait for its screenshot gate.
 
 World Explorer review on 2026-07-26 found that native enabled synchronous
 near-level vegetation compilation during frame encoding while browser disabled

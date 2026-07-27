@@ -1,13 +1,13 @@
 # Tactical 262: World Explorer Exact/Procedural Composition
 
-Status: Human Review 1A candidate 2026-07-26. Slices 0 through 3
-proved the terrain compositor, shared target, exact-painted mask, and
-procedural collar. Human review accepted that terrain behavior overall but
-found one blocking natural-tree ownership defect: one stable tree can appear
-as an exact/proxy chimera while procedural terrain occludes its exact
-geometry. Slice 3A now selects one whole exact-or-proxy representation and
-has passed native window/offscreen automation plus inspected captures.
-Browser, Terrain Lab, and game-scene promotion wait for Human Review 1A.
+Status: Slice 3B active 2026-07-27 after Human Review 1A was retracted.
+Slices 0 through 3A proved shared target/depth plumbing, exact-painted
+coverage, and whole-tree exact/proxy ownership, but not a believable terrain
+frontier. Low-angle review showed that the retained procedural collar can
+depth-occlude exact terrain and complete exact trees throughout the patch.
+Slice 3B must replace that overlap with complementary exact, transition, and
+procedural domains. Browser, Terrain Lab, and game-scene promotion remain
+gated.
 
 Topics:
 
@@ -429,6 +429,41 @@ results, and admitted `175` current results. Stationary, closer 128-block,
 moved forest, and `Coverage` captures were inspected. They show complete
 exact trees in the safe interior and complete proxies at the collar; the
 reviewed exact/proxy chimera is not visible.
+
+### Human Review 1A Retraction and Slice 3B
+
+The initial Human Review 1A acceptance was retracted on 2026-07-27 after
+lower camera perspectives exposed a broader defect. Whole-tree XOR remains
+mechanically correct, but the procedural terrain collar still occupies and
+writes depth inside the exact-painted footprint. It can therefore hide exact
+ground and complete exact-owned trees, not only make a split exact/proxy
+tree. Drawing exact second does not correct this: both presentations use the
+same reversed-Z depth buffer, so the geometrically closer approximate
+surface legitimately wins. Disabling depth or forcing exact on top would
+instead draw hidden exact geometry through true foreground terrain.
+
+This reopens the terrain frontier rather than the tree identity work.
+Slice 3B will:
+
+- [ ] establish one deterministic low-angle exact/composed/coverage capture
+  where the overlap is plainly visible;
+- [ ] use a full exact-footprint procedural discard as a diagnostic, proving
+  the retained overlap is the occlusion source;
+- [ ] replace overlap with complementary exact, transition, and procedural
+  ownership, with no opaque terrain sample owned by two presentations;
+- [ ] preserve a continuous frontier without restoring full-height footprint
+  walls or hiding cracks with depth overlap;
+- [ ] inspect matched low-angle captures from multiple sides across land,
+  water, slopes, and forest; and
+- [ ] rerun delayed admission, movement, eviction, negative-coordinate, and
+  teleport evidence before presenting a corrected screenshot review.
+
+Gate: a coverage diagnostic makes all three ownership domains unambiguous;
+the known low-angle camera no longer loses exact terrain or exact-owned trees;
+and inspected captures establish a credible screenshot review candidate.
+Browser Worker composition is the next slice only after this gate. It must
+provide the same review camera through query parameters because interactive
+human validation is browser-only.
 
 Focused validation passed:
 

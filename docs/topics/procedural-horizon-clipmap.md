@@ -34,9 +34,13 @@ leaves the outside part of the same stable record's LOD proxy visible.
 Tactical 262 Slice 3A now separates natural-tree admission from terrain and
 selects one complete exact-or-proxy representation from stable ID, complete
 bounds, exact-safe interior, and drawable readiness. Delayed native movement
-and inspected forest captures report zero missing, dual, or unowned records;
-Human Review 1A is pending. No game-scene, browser-exact, Android, or XR
-adoption has started.
+and inspected forest captures report zero missing, dual, or unowned records.
+Human Review 1A was nevertheless retracted on 2026-07-27: at low pitch the
+procedural collar can depth-occlude exact ground and complete exact-owned
+trees anywhere it overlaps the exact footprint. Slice 3B must replace this
+opaque overlap with complementary exact, transition, and procedural domains
+and prove the result in deterministic screenshots before browser composition.
+No game-scene, browser-exact, Android, or XR adoption has started.
 Interactive review on 2026-07-26 diagnosed two remaining proof defects and
 activated Tactical
 [`252`](../tactical/252-procedural-horizon-seams-and-transition-admission.md):
