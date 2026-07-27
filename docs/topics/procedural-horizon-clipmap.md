@@ -73,6 +73,15 @@ below the low-angle viewport. Commit `c75b488b` restores the orbit focus as
 the native/browser default composition anchor and retains the old placement
 through explicit `viewer-forward` options. This changes proof-host placement,
 not the accepted shared-depth or whole-record ownership contracts.
+Tactical
+[`266`](../tactical/266-terrain-lab-runtime-composition-adoption.md) now
+extracts the exact renderer, composition session, and browser executors from
+World Explorer into `mclone-terrain-view`. Terrain Lab consumes them through
+an optional `runtime` pane while retaining its four research panes and prior
+defaults. The hosted desktop and Pixel 7 gates reach 25/25 exact chunks,
+non-empty whole-tree exact/proxy ownership, and all 160 horizon slots at the
+fixed low-angle review site. This is the PH-3 reusable-consumer checkpoint;
+game-scene, Android, and XR adoption still have not started.
 Interactive review on 2026-07-26 diagnosed two remaining proof defects and
 activated Tactical
 [`252`](../tactical/252-procedural-horizon-seams-and-transition-admission.md):

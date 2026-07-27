@@ -125,6 +125,13 @@ one-color white wgpu-canvas capture seen by World Explorer on this host. It is
 not counted as pixel evidence. The hosted interactive review below remains the
 subjective pixel gate.
 
+Production deployment `f5164466-2339-4285-8721-2b74bb1ae616` serves commit
+`afc44678`. Direct desktop and Pixel 7 hosted smokes both reproduce the local
+`25/25` exact completion, non-empty exact/proxy tree split, `160` ready horizon
+slots, and synchronized pan/rebuild. Human Review 1 is available at:
+
+`https://mclone.kzahel.com/terrain/?profile=mclone-overworld-v1&visual=mclone-original&texture=textured&seed=12345&x=0&z=0&blocks=96&detail=auto&surface=inferred&panes=runtime&canonical=final&radius=2&water=1&vegetation=1&stage=cover&view=3d&projection=perspective&layer=terrain&reviewYaw=3.1415927&reviewPitch=0.12`
+
 ## Human review checkpoint
 
 The checkpoint is ready when the hosted Terrain Lab can show the runtime pane

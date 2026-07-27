@@ -48,6 +48,13 @@ The prior camera-relative placement remains an explicit `viewer-forward`
 native/browser option for foreground diagnostics. Map remains focus-centered.
 This Explorer policy does not prescribe game behavior: embodied game and XR
 views will normally select exact terrain around the authoritative player.
+Tactical
+[`266`](../tactical/266-terrain-lab-runtime-composition-adoption.md) now proves
+the same focus-centered runtime composition as an optional Terrain Lab pane.
+It follows the existing shared React navigation hook and shared Rust runtime
+session; it does not add pane-local camera math. Fixed hosted review links may
+provide static `reviewYaw`/`reviewPitch` initialization while ordinary orbit
+motion remains outside URL-addressed terrain state.
 
 ## Scope
 
