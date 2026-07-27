@@ -159,17 +159,17 @@ Metrics are alarms. Inspected maps and journeys retain veto authority.
 
 ### Slice 0: contract and diagnostic shell
 
-- [ ] Land this tactical and index entry.
-- [ ] Add the standalone command and argument/receipt shell.
-- [ ] Prove the command cannot mutate production output.
+- [x] Land this tactical and index entry.
+- [x] Add the standalone command and argument/receipt shell.
+- [x] Prove the command cannot mutate production output.
 
 ### Slice 1: topology-aware coarse plan
 
-- [ ] Sample the control and regional envelopes.
-- [ ] Select receiving oceans and bounded protected sinks.
-- [ ] Build a deterministic plane/cylinder drainage forest.
-- [ ] Accumulate flow, detect cycles, classify basins, and derive spills.
-- [ ] Extract drainage and divide skeletons with stable prototype IDs.
+- [x] Sample the control and regional envelopes.
+- [x] Select receiving oceans and bounded protected sinks.
+- [x] Build a deterministic plane/cylinder drainage forest.
+- [x] Accumulate flow, detect cycles, classify basins, and derive spills.
+- [x] Extract drainage and divide skeletons with stable prototype IDs.
 - [ ] Add focused deterministic, sink, completion, and seam tests.
 
 ### Slice 2: continuous reconstruction and summaries

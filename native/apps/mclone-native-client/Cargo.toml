@@ -79,3 +79,7 @@ path = "src/bin/mesh_cpu_perf.rs"
 [[bin]]
 name = "mclone-overworld-review"
 path = "src/bin/mclone_overworld_review.rs"
+
+[[bin]]
+name = "mclone-landform-planner-study"
+path = "src/bin/mclone_landform_planner_study.rs"

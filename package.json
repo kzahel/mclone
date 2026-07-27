@@ -62,6 +62,7 @@
     "native:worldgen:find-biome-seed": "cargo run --manifest-path native/Cargo.toml -p mclone-worldgen --bin find_biome_seed --",
     "native:worldgen:card": "cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-native-client -- --worldgen-showcase-card /tmp/mclone-worldgen-showcase --generation-profile small-island-v1 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 16 --width 640 --height 400 --day-time 6000 --freeze-time --transient --debug-passive-showcase false --lighting false --fullbright true",
     "native:worldgen:fields": "cargo run --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-overworld-review --",
+    "native:worldgen:landform-study": "cargo run --release --manifest-path native/Cargo.toml -p mclone-native-client --bin mclone-landform-planner-study --",
     "native:worldgen:terrain-characteristics": "cargo run --release --manifest-path native/Cargo.toml -p mclone-worldgen --bin terrain_characteristics --",
     "native:world-explorer:check": "cargo check --manifest-path native/Cargo.toml -p mclone-world-explorer",
     "native:world-explorer:deps": "node ./scripts/check-world-explorer-deps.mjs",
