@@ -821,6 +821,14 @@ with different overlays. The pinned one-region native/Wasm witnesses are:
 - feature graph:
   `c619dcf4bfd2108ff53d0a2712974f55073b601f1fc0ab9b770e7a9e59161558`.
 
+Those are the completed atlas-v1 execution receipts. Tactical 272 later adds
+a fourth semantic-refinement view and advances the additive atlas hash domain
+to `mclone-streamed-plan-atlas-v2`. Its current four pins and unchanged Phase
+2 semantic anchor are recorded in
+[`272-multiscale-semantic-refinement-witness.md`](272-multiscale-semantic-refinement-witness.md);
+the v1 values above remain here as historical evidence rather than current
+API constants.
+
 The headed browser test pans a 6,144-block torus view from X=0 to X=6,144.
 The three 64-character semantic checksums remain exact, all final requests
 are cache hits, and desktop and phone captures show the same repeated

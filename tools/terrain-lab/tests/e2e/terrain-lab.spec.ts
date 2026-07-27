@@ -1216,6 +1216,14 @@ test("visualizes exact multiscale refinement at broad scale", async ({
     path:
       `/tmp/mclone-terrain-lab-${testInfo.project.name}-multiscale-refinement.png`,
   });
+  if (testInfo.project.name === "phone-chrome") {
+    await page.getByTestId("streamed-plan-atlas-stage").evaluate((stage) => {
+      stage.scrollIntoView({ block: "end" });
+    });
+    await page.screenshot({
+      path: "/tmp/mclone-terrain-lab-phone-chrome-multiscale-review-viewport.png",
+    });
+  }
 
   await page.getByRole("button", { name: "Local level shown", exact: true }).click();
   await page.getByRole("button", { name: "Regional level shown", exact: true }).click();

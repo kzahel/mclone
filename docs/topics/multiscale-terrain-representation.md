@@ -2,16 +2,17 @@
 
 Topic: `multiscale-terrain-representation`
 
-Status: **Active research direction as of 2026-07-27. The initial tailored
-precedent survey is complete. Production Mclone terrain remains a primarily
-two-dimensional heightfield at field revision 21, and the streamed structural
-atlas remains research-only and production-disconnected. Semantic
-coarse-to-fine terrain, hydrologically aware procedural amplification, and
-sparse implicit 3D terrain all have strong prior art. The unresolved Mclone
-question is their composition under bounded random access, exact block
-identity, unbounded and periodic topology, direct far summaries, and a cheap
-ordinary path. This topic does not select a planner or authorize production
-integration.**
+Status: **Active research direction at Human Review R1 as of 2026-07-27. The
+initial tailored precedent survey and Tactical 272's first semantic
+parent/child witness are complete. The witness proves direct coarse queries,
+stable cross-level identity, bounded ownership, and exact native/Wasm
+traversal and topology invariance for two schematic feature families. It is
+now the fourth freely pannable Terrain Lab Planner-atlas view. Production
+Mclone terrain remains a primarily two-dimensional heightfield at field
+revision 21; the witness has no terrain, water, chunk, or density influence.
+The unresolved question is whether the mechanism earns one research-only
+terrain reconstruction, followed later by selective 3D. This topic does not
+select a production planner or authorize production integration.**
 
 ## Scope
 
@@ -160,6 +161,39 @@ LOD is therefore not a world-generation input. Exact terrain remains a
 function of the stored profile, seed, dimension, topology, revision, and
 canonical location. A coarse query is a deterministic projection of those
 facts, not an alternate world that can later change exact chunk output.
+
+### Revision 1 mechanism result
+
+[`Tactical 272`](../tactical/272-multiscale-semantic-refinement-witness.md)
+now supplies the first executable Mclone answer. One canonical 6,144-block
+owner creates a range axis and an explicit-sink basin route. Parent facts
+split into two regional and four local segments. Direct parent and regional
+queries stop at their requested level; detailed queries include byte-identical
+parent facts rather than recomputing a different coarse picture.
+
+The exact witness
+`4ac9b52c6e04697378c6ff0dfc1b9bb25a3903f9138cf4f19e633bd54db6a78d`
+passes 105 traversal/cache/window comparisons and nine seed-by-topology
+cross-level corpora on native and Wasm. It reports zero projection,
+parent-resolution, containment, endpoint-continuity, terminal, and hidden
+detail failures. A target examines at most four parent owners; the fixed
+corpus observed no more than 22 facts against the declared 57-fact bound.
+
+This closes a mechanism question, not the landscape question:
+
+- top-down parent/child refinement can be canonical and directly queryable;
+- the same feature language and identities work on the plane, X-cylinder,
+  and torus without seam suppression;
+- viewport, cache, and presentation LOD need not become generation inputs;
+- coarse construction can omit children, although fixed overhead dominates
+  this tiny witness; and
+- schematic axes and routes do not establish useful terrain, drainage,
+  coastline, or volumetric quality.
+
+The permanent Planner-atlas panel is the review instrument. Parent, regional,
+local, and conservative bounds are independent presentation toggles over one
+Rust-owned fact set. It should remain available even if the geometry is
+rejected, because it makes future multiscale claims inspectable.
 
 ## Candidate Representation Stack
 
@@ -427,22 +461,24 @@ make a point query unbounded.
 
 ## Remaining Research Questions
 
-The next source and experiment pass should answer:
+The first witness answers the narrow identity/boundedness portion of questions
+about one shared feature language, child reconstruction, and periodic seams
+for two simple segment families. It does not prove a complete torus base
+graph, arbitrary boundary-crossing geography, or reconstructed terrain. The
+next review and experiment should answer:
 
-1. Can one finite semantic feature language use a complete torus base graph
-   and bounded plane/cylinder owners without changing the meaning of its
-   features?
-2. Can a child-refinement rule reconstruct all boundary-crossing facts from
-   canonical parent and edge identities without request-order state?
-3. What must a parent store so a coarse query can preserve major river,
+1. Is the visible parent-to-child relationship clear and useful enough to
+   justify reconstructing one influence family?
+2. What must a parent store so a coarse query can preserve major river,
    island, coast, range, and opening identity without generating its children?
-4. Can exact block chunks compile from the same canonical facts while a
+3. Can a research heightfield compile from the same canonical facts while a
    distant query stops at a parent representation?
-5. What scale-consistency metrics are practical for coasts, range axes,
+4. What scale-consistency metrics are practical for coasts, range axes,
    basin/outlet topology, water coverage, skyline, and openings?
-6. Can periodic cylinder and torus identities share the representation
-   without special seam content?
-7. What are the ordinary, hotspot, exact-chunk, and fixed-output continental
+5. How should adjacent parent features cooperate so the result becomes
+   geography rather than independent corridors without introducing unbounded
+   graph discovery?
+6. What are the ordinary, hotspot, exact-chunk, and fixed-output continental
    costs of one sparse implicit formation family?
 
 ## Evidence Standard
@@ -468,6 +504,8 @@ not prove.
 
 - Do not select Candidate B, C, or their composition from the structural atlas
   alone.
+- Do not promote the Revision 1 witness merely because its invariants pass;
+  its geometry is intentionally schematic.
 - Do not add universal 3D noise to production terrain.
 - Do not call a sparse exact point sampler semantic LOD.
 - Do not allow camera scale to affect exact world generation.
@@ -496,23 +534,26 @@ not prove.
 | Transvoxel | no | local crack-free mesh transition | adaptive voxel meshing | bounded local neighborhoods | realization technique only |
 | Veloren | complete coarse geology/erosion stage | downstream local generation consumes saved facts | local caves and reshaping | finite precomputed world | production-style coarse-to-local precedent |
 | drainage-aware DEM generalization | no; simplifies complete fine data | preserves drainage better than filtering | none | finite source DEM | suggests topology metrics, not a generator |
+| Tactical 272 Revision 1 witness | yes; parent and regional queries stop directly | exact parent identity, containment, continuity, and explicit sink propagation | none | bounded owners on plane/cylinder; finite canonical torus | mechanism succeeds on native/Wasm; await human review before one terrain reconstruction |
 
 ## Recommended Next Work
 
-1. Treat this initial source survey as the first human review point: accept,
-   redirect, or stop the narrower Mclone experiment.
-2. If accepted, specify a tiny top-down multiscale witness with parent identity,
-   child containment, direct coarse queries, and exact traversal/cache
-   invariance.
-3. Compare a direct semantic summary with sparse exact sampling at 65,536,
+1. Use Terrain Lab Human Review R1 to accept, redirect, or stop the Revision 1
+   mechanism independently of its intentionally simple geometry.
+2. If accepted, write a new tactical for one research-only heightfield
+   influence family. A range-axis uplift/valley pair is smaller and easier to
+   evaluate than full hydrology; a basin route is more relevant but requires
+   stronger water and level semantics.
+3. Keep production terrain disconnected. Compare the reconstructed influence
+   against both unchanged Mclone terrain and sparse exact sampling at 65,536,
    131,072, and later 524,288 blocks.
-4. Test randomized point, tile, and chunk traversal; cold and warm caches;
+4. Add semantic metrics beside height error: feature identity, skyline,
+   coverage, endpoint continuity, coast/water relationship, and boundary
+   leakage.
+5. Re-run randomized point, tile, and chunk traversal; cold and warm caches;
    serial and parallel schedules; alternate partitions; and plane, cylinder,
-   and torus seam cases.
-5. Pause for human review on an interactive diagnostic that overlays parent
-   identity, child facts, cross-level river/coast/range identity, direct
-   summaries, and boundary receipts.
-6. Only after the hierarchy earns that review, reconstruct one terrain
-   finalist and add one bounded selective-density family.
+   and torus seam cases after reconstruction.
+6. Only after one heightfield family earns review, specify one bounded
+   selective-density family with an ordinary zero-query path.
 7. Review topology, skyline, coast, drainage, journey, performance, and
-   representation transitions before proposing production integration.
+   representation transitions before proposing any production integration.
