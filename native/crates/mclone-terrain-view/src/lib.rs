@@ -6,6 +6,7 @@ mod canonical_mesh;
 mod clipmap;
 mod composition;
 mod horizon_admission;
+mod runtime_exact;
 mod terrain_vegetation_coordinator;
 mod tree_ownership;
 mod viewport;
@@ -51,6 +52,10 @@ pub use composition::{
     TERRAIN_EXACT_COVERAGE_MAX_CHUNKS_PER_AXIS, TERRAIN_EXACT_COVERAGE_WORD_COUNT,
     TERRAIN_EXACT_FRONTIER_COLLAR_BLOCKS, TerrainCompositionSourceIdentity,
     TerrainExactCoverageMask, TerrainExactCoverageMode,
+};
+pub use runtime_exact::{
+    CanonicalExactExecutor, CanonicalExactRequest, CanonicalExactResult,
+    TerrainRuntimeExactRenderer, TerrainRuntimeExactStats,
 };
 pub use terrain_vegetation_coordinator::{
     TerrainVegetationAdmission, TerrainVegetationCoordinator,

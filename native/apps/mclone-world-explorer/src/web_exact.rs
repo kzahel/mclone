@@ -3,18 +3,16 @@ use std::collections::VecDeque;
 use js_sys::{Array, Function, Object, Reflect, Uint8Array};
 use mclone_terrain_view::{
     CanonicalEncodedAdmission, CanonicalEncodedBatch, CanonicalEncodedNaturalTree,
-    CanonicalMeshBatch, CanonicalMeshCoordinate, CanonicalMeshFrontier,
-    CanonicalMeshRequestReceipt, CanonicalMeshSession, CanonicalNaturalTreePresentation,
-    CanonicalPackedAdmission, CanonicalPackedNaturalTree, CanonicalTerrainStage,
-    CanonicalTerrainVisibility, decode_canonical_batch, encode_canonical_batch,
+    CanonicalExactExecutor, CanonicalExactRequest, CanonicalExactResult, CanonicalMeshBatch,
+    CanonicalMeshCoordinate, CanonicalMeshFrontier, CanonicalMeshRequestReceipt,
+    CanonicalMeshSession, CanonicalNaturalTreePresentation, CanonicalPackedAdmission,
+    CanonicalPackedNaturalTree, CanonicalTerrainStage, CanonicalTerrainVisibility,
+    decode_canonical_batch, encode_canonical_batch,
 };
 use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
 use wasm_bindgen::{JsCast, JsValue, prelude::wasm_bindgen};
 
-use crate::{
-    exact::{CanonicalExactExecutor, CanonicalExactRequest, CanonicalExactResult},
-    web::load_web_assets,
-};
+use crate::web::load_web_assets;
 
 const FRAME_INIT: &str = "exact-init";
 const FRAME_COMPILE: &str = "exact-compile";

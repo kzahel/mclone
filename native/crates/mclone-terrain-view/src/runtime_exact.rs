@@ -6,6 +6,18 @@ use std::thread;
 #[cfg(not(target_arch = "wasm32"))]
 use std::time::Duration;
 
+use crate::{
+    BoundedRepresentationOwnershipSnapshot, CanonicalMeshBatch, CanonicalMeshCoordinate,
+    CanonicalPackedAdmission, ExactPaintedCoverageSnapshot, McloneTreeOccurrenceId,
+    McloneTreeOwnershipCandidate, TERRAIN_EXACT_FRONTIER_COLLAR_BLOCKS,
+    TerrainCompositionSourceIdentity, canonical_terrain_chunk_order,
+    mclone_tree_ownership_snapshot,
+};
+#[cfg(not(target_arch = "wasm32"))]
+use crate::{
+    CanonicalMeshFrontier, CanonicalMeshSession, CanonicalNaturalTreePresentation,
+    CanonicalTerrainStage, CanonicalTerrainVisibility,
+};
 #[cfg(not(target_arch = "wasm32"))]
 use anyhow::bail;
 use anyhow::{Context, Result};
@@ -21,18 +33,6 @@ use mclone_render::chunk::{
     TexturedSectionDrawResources, TexturedSectionRenderOptions, TexturedSectionRenderStats,
 };
 use mclone_render_color::{RenderColorProfile, RenderTargetColorTransform, color_transform_wgpu};
-use mclone_terrain_view::{
-    BoundedRepresentationOwnershipSnapshot, CanonicalMeshBatch, CanonicalMeshCoordinate,
-    CanonicalPackedAdmission, ExactPaintedCoverageSnapshot, McloneTreeOccurrenceId,
-    McloneTreeOwnershipCandidate, TERRAIN_EXACT_FRONTIER_COLLAR_BLOCKS,
-    TerrainCompositionSourceIdentity, canonical_terrain_chunk_order,
-    mclone_tree_ownership_snapshot,
-};
-#[cfg(not(target_arch = "wasm32"))]
-use mclone_terrain_view::{
-    CanonicalMeshFrontier, CanonicalMeshSession, CanonicalNaturalTreePresentation,
-    CanonicalTerrainStage, CanonicalTerrainVisibility,
-};
 use mclone_worldgen::levelgen::McloneTreeOccurrence;
 use mclone_worldgen::terrain_preview::TerrainPreviewProfile;
 
@@ -42,18 +42,18 @@ const EXACT_COMMAND_CAPACITY: usize = 1;
 #[cfg(not(target_arch = "wasm32"))]
 const EXACT_RESULT_CAPACITY: usize = 2;
 
-pub(crate) struct CanonicalExactRequest {
+pub struct CanonicalExactRequest {
     pub generation: u64,
     pub desired: Vec<CanonicalMeshCoordinate>,
     pub requested: Vec<CanonicalMeshCoordinate>,
 }
 
-pub(crate) struct CanonicalExactResult {
+pub struct CanonicalExactResult {
     pub generation: u64,
     pub batch: Result<CanonicalMeshBatch, String>,
 }
 
-pub(crate) trait CanonicalExactExecutor {
+pub trait CanonicalExactExecutor {
     fn try_submit(&mut self, request: CanonicalExactRequest) -> Result<bool>;
     fn poll(&mut self) -> Result<Option<CanonicalExactResult>>;
 }
@@ -77,7 +77,7 @@ impl NativeCanonicalExactExecutor {
         let (commands, command_receiver) = sync_channel(EXACT_COMMAND_CAPACITY);
         let (result_sender, results) = sync_channel(EXACT_RESULT_CAPACITY);
         let worker = thread::Builder::new()
-            .name("mclone-world-explorer-exact".to_owned())
+            .name("mclone-runtime-exact".to_owned())
             .spawn(move || {
                 let mut session = CanonicalMeshSession::new(
                     TerrainPreviewProfile::McloneOverworldV1,
@@ -113,7 +113,7 @@ impl NativeCanonicalExactExecutor {
                     }
                 }
             })
-            .context("failed to spawn World Explorer exact terrain thread")?;
+            .context("failed to spawn runtime exact terrain thread")?;
         Ok(Self {
             commands,
             results,
@@ -126,7 +126,7 @@ impl NativeCanonicalExactExecutor {
             Ok(()) => Ok(true),
             Err(TrySendError::Full(_)) => Ok(false),
             Err(TrySendError::Disconnected(_)) => {
-                bail!("World Explorer exact terrain thread disconnected")
+                bail!("runtime exact terrain thread disconnected")
             }
         }
     }
@@ -136,7 +136,7 @@ impl NativeCanonicalExactExecutor {
             Ok(result) => Ok(Some(result)),
             Err(TryRecvError::Empty) => Ok(None),
             Err(TryRecvError::Disconnected) => {
-                bail!("World Explorer exact terrain result channel disconnected")
+                bail!("runtime exact terrain result channel disconnected")
             }
         }
     }
@@ -169,7 +169,7 @@ struct PendingExactAdmission {
 }
 
 #[derive(Clone, Copy, Debug, Default)]
-pub struct ExplorerExactStats {
+pub struct TerrainRuntimeExactStats {
     pub desired_chunks: u32,
     pub painted_chunks: u32,
     pub queued_chunks: u32,
@@ -195,7 +195,7 @@ pub struct ExplorerExactStats {
     pub complete: bool,
 }
 
-pub struct ExplorerExactTerrain {
+pub struct TerrainRuntimeExactRenderer {
     draw: TexturedSectionDrawResources,
     tree_draw: TexturedSectionDrawResources,
     depth: ChunkDepthTarget,
@@ -226,7 +226,7 @@ pub struct ExplorerExactTerrain {
     last_tree_render: TexturedSectionRenderStats,
 }
 
-impl ExplorerExactTerrain {
+impl TerrainRuntimeExactRenderer {
     #[allow(clippy::too_many_arguments)]
     #[cfg(not(target_arch = "wasm32"))]
     pub fn new(
@@ -260,7 +260,7 @@ impl ExplorerExactTerrain {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new_with_executor(
+    pub fn new_with_executor(
         device: &wgpu::Device,
         queue: &wgpu::Queue,
         color_format: wgpu::TextureFormat,
@@ -293,7 +293,7 @@ impl ExplorerExactTerrain {
             atlas,
             ChunkTextureSampling::TerrainOverview,
         )
-        .context("failed to initialize World Explorer exact terrain renderer")?;
+        .context("failed to initialize runtime exact terrain renderer")?;
         let tree_draw = TexturedSectionDrawResources::new_with_texture_sampling(
             device,
             queue,
@@ -302,7 +302,7 @@ impl ExplorerExactTerrain {
             tree_atlas,
             ChunkTextureSampling::TerrainOverview,
         )
-        .context("failed to initialize World Explorer exact natural-tree renderer")?;
+        .context("failed to initialize runtime exact natural-tree renderer")?;
         let source =
             TerrainCompositionSourceIdentity::new(TerrainPreviewProfile::McloneOverworldV1, seed);
         Ok(Self {
@@ -412,7 +412,7 @@ impl ExplorerExactTerrain {
                     ..TexturedSectionRenderOptions::default()
                 },
             )
-            .context("failed to render World Explorer exact terrain")?;
+            .context("failed to render runtime exact terrain")?;
         self.last_render = stats;
         let tree_target =
             ChunkRenderTarget::new(color_view, &self.depth.view, size, self.clear_color)
@@ -432,12 +432,12 @@ impl ExplorerExactTerrain {
                     ..TexturedSectionRenderOptions::default()
                 },
             )
-            .context("failed to render World Explorer exact natural trees")?;
+            .context("failed to render runtime exact natural trees")?;
         Ok(stats)
     }
 
-    pub fn stats(&self) -> ExplorerExactStats {
-        ExplorerExactStats {
+    pub fn stats(&self) -> TerrainRuntimeExactStats {
+        TerrainRuntimeExactStats {
             desired_chunks: self.desired.len().try_into().unwrap_or(u32::MAX),
             painted_chunks: self.painted.len().try_into().unwrap_or(u32::MAX),
             queued_chunks: self.queued.len().try_into().unwrap_or(u32::MAX),
@@ -530,7 +530,7 @@ impl ExplorerExactTerrain {
         if !removed.is_empty() {
             self.draw
                 .apply_section_updates(device, &[], &removed)
-                .context("failed to evict departed World Explorer exact chunks")?;
+                .context("failed to evict departed runtime exact chunks")?;
         }
         for sections in self.tree_sections.values_mut() {
             sections.retain(|key, _| !departed.contains(&ChunkPos::new(key.chunk_x, key.chunk_z)));
@@ -559,7 +559,7 @@ impl ExplorerExactTerrain {
         let batch = result
             .batch
             .map_err(anyhow::Error::msg)
-            .context("World Explorer exact terrain compilation failed")?;
+            .context("runtime exact terrain compilation failed")?;
         if result.generation != self.generation {
             self.stale_chunks_total = self
                 .stale_chunks_total
@@ -593,7 +593,7 @@ impl ExplorerExactTerrain {
             return Ok(());
         }
         let sections = unpack_textured_render_sections(&pending.admission.packed_sections)
-            .context("invalid World Explorer canonical packed mesh")?;
+            .context("invalid runtime canonical packed mesh")?;
         let mut target_chunks = sections
             .iter()
             .map(|section| ChunkPos::new(section.key.chunk_x, section.key.chunk_z))
@@ -614,11 +614,11 @@ impl ExplorerExactTerrain {
         }
         self.draw
             .apply_section_updates(device, &sections, &removed)
-            .context("failed to upload World Explorer canonical packed mesh")?;
+            .context("failed to upload runtime canonical packed mesh")?;
         for tree in pending.admission.natural_trees {
             let id = McloneTreeOccurrenceId::from(tree.occurrence);
             let sections = unpack_textured_render_sections(&tree.packed_sections)
-                .context("invalid World Explorer canonical natural-tree mesh")?;
+                .context("invalid runtime canonical natural-tree mesh")?;
             self.tree_occurrences.insert(id, tree.occurrence);
             let resident = self.tree_sections.entry(id).or_default();
             for section in sections {
@@ -721,7 +721,7 @@ impl ExplorerExactTerrain {
             .collect::<BTreeSet<_>>();
         self.tree_draw
             .apply_section_updates(device, &merged, &removed)
-            .context("failed to upload World Explorer exact natural-tree ownership")?;
+            .context("failed to upload runtime exact natural-tree ownership")?;
         self.tree_gpu_sections = next;
         Ok(())
     }

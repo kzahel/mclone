@@ -1,6 +1,5 @@
 #![forbid(unsafe_code)]
 
-mod exact;
 #[cfg(not(target_arch = "wasm32"))]
 mod native_vegetation;
 mod session;
@@ -11,7 +10,10 @@ mod web_exact;
 #[cfg(target_arch = "wasm32")]
 mod web_vegetation;
 
-pub use exact::{ExplorerExactStats, ExplorerExactTerrain};
+pub use mclone_terrain_view::{
+    TerrainRuntimeExactRenderer as ExplorerExactTerrain,
+    TerrainRuntimeExactStats as ExplorerExactStats,
+};
 #[cfg(not(target_arch = "wasm32"))]
 pub use native_vegetation::NativeTerrainVegetationExecutor;
 pub use session::{

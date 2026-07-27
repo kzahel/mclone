@@ -2,7 +2,7 @@
 
 ## Status
 
-Active. This is the bounded PH-3 child of
+Active; Slice 0 is complete. This is the bounded PH-3 child of
 [Tactical 261](261-procedural-horizon-product-integration-roadmap.md),
 following the accepted runtime composition and focus-anchor work recorded by
 [Tactical 262](262-world-explorer-exact-procedural-composition.md).
@@ -50,6 +50,15 @@ dependency or replacing the Lab's existing research panes.
 - Keep native and browser transport construction at platform/app rims.
 - Adapt World Explorer to the shared owner with no user-observable change.
 - Lock the boundary with tests and validate native plus Wasm compilation.
+
+Completed in the first implementation commit:
+
+- `TerrainRuntimeExactRenderer`, its diagnostics, canonical request/result
+  contract, and `CanonicalExactExecutor` now live in `mclone-terrain-view`.
+- World Explorer keeps only its native/browser transport adapters and aliases
+  the shared renderer for compatibility.
+- The shared crate's 66 non-GPU unit tests pass, the new Explorer ownership
+  lock passes, and both the native Explorer and its Wasm library compile.
 
 ### Slice 1: Terrain Lab runtime composition host
 
