@@ -25,7 +25,9 @@ window/offscreen smoke again reports zero missing exact or proxy records;
 Slice 4 now carries separated exact-tree records through the portable
 canonical batch codec and isolated browser Worker. Desktop and Pixel 7
 composition receipts reproduce all 15 records as 8 exact-owned and 7
-proxy-owned, with zero missing representations. Hosted browser pixel review
+proxy-owned, with zero missing representations. The versioned production
+build passes hosted desktop composed/coverage and Pixel 7 composed gates with
+the same split and zero missing representations. Hosted browser pixel review
 is the remaining gate before Terrain Lab or game-scene promotion.
 
 World Explorer review on 2026-07-26 found that native enabled synchronous

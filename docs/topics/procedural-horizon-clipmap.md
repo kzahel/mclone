@@ -48,7 +48,9 @@ with no missing exact or proxy trees. Slice 4 now runs the same exact renderer
 through an isolated browser Worker and accepts deterministic
 `composition`/`exactRadius` URLs. Desktop and Pixel 7 semantic receipts match
 all 25 painted chunks, coverage generation 27, and the 8 exact/7 proxy split
-across 15 whole-tree records. Hosted browser pixel review is the active gate;
+across 15 whole-tree records. The content-versioned production build now also
+passes hosted desktop `Composed`/`Coverage` and Pixel 7 `Composed` gates with
+zero missing representations. Hosted browser pixel review is the active gate;
 no game-scene, Android, or XR adoption has started.
 Interactive review on 2026-07-26 diagnosed two remaining proof defects and
 activated Tactical

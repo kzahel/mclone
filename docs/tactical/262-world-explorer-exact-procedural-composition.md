@@ -1,12 +1,13 @@
 # Tactical 262: World Explorer Exact/Procedural Composition
 
-Status: Slice 4 browser implementation and semantic parity gate complete
-2026-07-27; hosted Human Review 1B is next. Slice 3B corrected the retracted
-native review by giving the exact patch, procedural rings, vegetation, and
-camera one viewer-forward composition anchor while retaining the collar as
-the explicit seam treatment. The same compositor now runs in browser World
-Explorer with canonical exact compilation in an isolated Worker. Terrain Lab
-and game-scene promotion remain gated on human browser pixel acceptance.
+Status: Slice 4 browser implementation plus local and hosted semantic parity
+gates complete 2026-07-27. The versioned production build is ready for hosted
+Human Review 1B. Slice 3B corrected the retracted native review by giving the
+exact patch, procedural rings, vegetation, and camera one viewer-forward
+composition anchor while retaining the collar as the explicit seam treatment.
+The same compositor now runs in browser World Explorer with canonical exact
+compilation in an isolated Worker. Terrain Lab and game-scene promotion
+remain gated on human browser pixel acceptance.
 
 Topics:
 
@@ -523,6 +524,8 @@ it does not complete Slice 4's composed exact-field Worker proof.
 - [x] Add desktop and Pixel 7 headed-Wayland `Composed`/`Coverage` semantic
   receipts.
 - [x] Preserve the UI-less browser host and payload/dependency accounting.
+- [x] Content-version the browser module graph from the Explorer Wasm and
+  pass hosted desktop `Composed`/`Coverage` plus Pixel 7 `Composed` gates.
 - [ ] Complete hosted interactive pixel review. Local Chrome presents WebGPU
   and reports coherent draw work, but its page screenshot API returns a
   solid-white canvas for this app; that image is rejected as pixel evidence.
@@ -558,6 +561,32 @@ under `/tmp/mclone-world-explorer-web-{desktop,phone}-{composed,coverage}-receip
 The four-sided native captures remain the accepted deterministic pixel
 evidence. Hosted browser review must now confirm those same pixels
 interactively; the rejected all-white local Chrome images are not evidence.
+
+### Slice 4 hosted review deployment
+
+The first production composition probe loaded an older browser module graph
+even though direct fetches returned the current Explorer Wasm. Commit
+`586c4607` closes that deployment boundary: the build derives one content
+version from the Wasm and stamps it through the HTML, main module, shared
+transport, smoke observer, both Workers, and explicit Wasm initialization
+URLs. A browser can no longer mix those pieces across deployment generations.
+
+Cloudflare production version `132e1eff-e324-4b7d-9878-fe6620f29629`
+serves Explorer asset version `8a9712a54cd0b9df`. The hosted and local
+Explorer Wasm SHA-256 is
+`8a9712a54cd0b9df2100a3562c944b04f45dc0414caaa2a4de23ff0584dad988`.
+Direct hosted validation passed:
+
+- desktop `Composed`: `25/25` exact chunks, coverage generation `27`,
+  `8` exact-owned plus `7` proxy-owned trees, and zero missing records;
+- desktop `Coverage`: the same coherent ownership and generation with
+  `visualize-painted` mask mode; and
+- Pixel 7 `Composed`: the same `25/25`, `8/7`, and zero-missing receipt.
+
+These gates prove that the public URL is executing the intended renderer,
+Worker, source, ownership, and coverage state. They do not replace subjective
+pixel review; Human Review 1B remains open until the hosted composed view is
+inspected interactively.
 
 ### Slice 5: Terrain Lab adoption
 
