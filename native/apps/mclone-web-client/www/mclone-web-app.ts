@@ -534,7 +534,9 @@ class WebFrameDriver {
     // A cold radius-four view can contain more than 200 visible sections, so leave
     // enough room for slower browser/CI worker scheduling while retaining a hard boot
     // failure bound.
-    const deadline = performance.now() + 60_000;
+    const qualityCapture =
+      new URLSearchParams(globalThis.location.search).get("qualityCapture") === "1";
+    const deadline = performance.now() + (qualityCapture ? 240_000 : 60_000);
     while (performance.now() < deadline) {
       if (await this.streamFrameOnce()) {
         return;

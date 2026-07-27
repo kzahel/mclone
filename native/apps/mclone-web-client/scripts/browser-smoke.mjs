@@ -62,6 +62,10 @@ const terrainCompositionProbe = process.argv.includes("--terrain-composition-pro
 if (terrainCompositionProbe && terrainPresentation !== "composed") {
   throw new Error("--terrain-composition-probe requires --terrain-presentation composed");
 }
+// The composition probe deliberately runs the full shared quality tier. Keep
+// its slow correctness capture separate from ordinary app-smoke timing so the
+// evidence lane does not reintroduce a lower-quality browser configuration.
+const terrainCompositionProbeTimeoutMs = 240_000;
 const screenshotEyeArgIndex = process.argv.indexOf("--screenshot-eye");
 const screenshotEye = screenshotEyeArgIndex >= 0
   ? String(process.argv[screenshotEyeArgIndex + 1] ?? "")
@@ -624,6 +628,7 @@ async function run() {
       if (terrainPresentation) {
         startupParameters.set("terrainPresentation", terrainPresentation);
       }
+      if (terrainCompositionProbe) startupParameters.set("qualityCapture", "1");
       if (screenshotEye) startupParameters.set("screenshotEye", screenshotEye);
       if (screenshotTarget) startupParameters.set("screenshotTarget", screenshotTarget);
       if (worldTopology) startupParameters.set("worldTopology", worldTopology);
@@ -682,7 +687,11 @@ async function run() {
             return app?.ready === true || app?.state?.failed === true;
           },
           undefined,
-          { timeout: 60_000 },
+          {
+            timeout: terrainCompositionProbe
+              ? terrainCompositionProbeTimeoutMs
+              : 60_000,
+          },
         );
       } catch (error) {
         const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
@@ -706,7 +715,7 @@ async function run() {
                 === state.terrainViewVegetationCompletedJobs;
           },
           undefined,
-          { timeout: 60_000 },
+          { timeout: terrainCompositionProbeTimeoutMs },
         );
         const eye = /** @type {[number, number, number]} */ (
           screenshotEye.split(",").map(Number)
@@ -741,7 +750,7 @@ async function run() {
               && Math.abs(state.cameraZ - eye[2]) < 0.01;
           },
           eye,
-          { timeout: 90_000 },
+          { timeout: terrainCompositionProbeTimeoutMs },
         );
         await page.evaluate(() => globalThis.__mcloneWebApp?.pauseRendering?.());
         await page.waitForFunction(
