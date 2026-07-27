@@ -12,8 +12,9 @@ invariance for both a fixed three-level shared-boundary hierarchy and bounded
 feature-owned graphs across plane, cylinder, torus, cache, path, window, and
 schedule cases. Both mechanisms advance to structural experimentation; this
 does not yet prove geographic quality or production cost. Candidate D,
-terrain reconstruction, Terrain Lab integration, and production terrain
-changes remain out of scope.**
+terrain reconstruction, and production terrain changes remain out of scope.
+Phase 3 Terrain Lab structural-atlas work was authorized on 2026-07-27 and is
+in progress for Human Review R1.**
 
 ## Purpose
 

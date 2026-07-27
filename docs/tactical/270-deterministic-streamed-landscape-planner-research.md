@@ -2,9 +2,9 @@
 
 Status: **Human Review R0 accepted 2026-07-27; Phase 1 completed at
 `14d832b8`; Phase 2 Candidate B/C semantic trials completed at `473f071c`.
-Paused before Phase 3 and Human Review R1 preparation.** Research only;
-Candidate D, Terrain Lab integration, terrain reconstruction, and production
-integration remain unauthorized.
+Phase 3 streamed structural atlas and Human Review R1 preparation authorized
+2026-07-27 and in progress.** Research only; Candidate D, terrain
+reconstruction, and production integration remain unauthorized.
 
 Topics:
 
@@ -777,6 +777,14 @@ CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$STREAMED_PLAN_WASM_DIR/bin/wasm-bin
 - Preserve checksums while panning, evicting, rebuilding, and approaching the
   same area by different paths.
 - Generate the comparable structural and boundary corpus.
+
+**Authorization 2026-07-27:** add Candidate B, Candidate C, and fallback
+structural views to Terrain Lab through shared Rust-owned semantic queries.
+Make the atlas freely pannable across canonical plan regions and periodic
+seams, with independent identity, hierarchy, facet, owner, graph, cache, and
+boundary overlays. Preserve exact Phase 2 witnesses. Stop with comparable
+browser evidence for Human Review R1; do not compose Candidate D or
+reconstruct terrain.
 
 **Human Review R1 — structural planner**
 
