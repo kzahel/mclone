@@ -739,6 +739,16 @@ at `(0, 0)`; the optional browser receipt reports `viewer-forward` at
 `(-102, 0)`. All retain coherent coverage and zero missing tree
 representations.
 
+The candidate was deployed from `5cc1c9ea` as Cloudflare production version
+`c89be118-a131-49c0-ac05-4b6cd3ab2b5d`. Production serves Explorer asset
+version `507010324209c066`, whose Wasm SHA-256 is
+`507010324209c066f4dad91fbc327eead578c5af69f0c550c31553c4b0c86b01`.
+Hosted desktop source-color and Pixel 7 smokes reproduce the focus anchor at
+`(0, 0)` with `25/25` exact chunks; a hosted desktop
+`exactAnchor=viewer-forward` smoke reproduces the optional `(-102, 0)`
+anchor. All three report coherent generation 27 coverage and zero missing
+tree representations. Interactive hosted placement review remains open.
+
 ### Slice 5: Terrain Lab adoption
 
 - [ ] Add the proven runtime horizon/composed presentation as a shared Lab
