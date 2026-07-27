@@ -1,9 +1,9 @@
 # Tactical 270: Deterministic Streamed Landscape Planner Research
 
 Status: **Human Review R0 accepted 2026-07-27; Phase 1 neutral invariance
-harness and controls are authorized and in progress.** Research only; no
-Candidate B/C/D implementation or production terrain integration is
-authorized by this review.
+harness and controls completed at `14d832b8`. Paused at the authorization
+boundary before Phase 2.** Research only; no Candidate B/C/D implementation,
+Terrain Lab integration, or production terrain integration is authorized.
 
 Topics:
 
@@ -641,16 +641,63 @@ integration, or production terrain change.
 
 ### Phase 1: neutral invariance harness and controls
 
-- Build candidate-neutral descriptor, semantic receipt, checksum, request
+- [x] Build candidate-neutral descriptor, semantic receipt, checksum, request
   permutation, cache, and topology test machinery.
-- Run the fixed bounded planner, recentered negative control, and
+- [x] Run the fixed bounded planner, recentered negative control, and
   coordinate-pure fallback.
-- Prove that the harness detects recenter disagreement and historical-style
+- [x] Prove that the harness detects recenter disagreement and historical-style
   last-writer/discovery-state canaries.
-- Record current native/Wasm agreement or mismatch before candidate tuning.
+- [x] Record current native/Wasm agreement or mismatch before candidate
+  tuning.
 
 No subjective review is required. The outcome is a trustworthy falsification
 instrument and quantified controls.
+
+**Outcome 2026-07-27:** accepted as an instrument. Commit `14d832b8`
+contains the research-only shared kernel, standalone receipt runner, and Wasm
+tests. The inspected native receipt is
+`/tmp/mclone-streamed-plan-phase1/native-receipt.json` with file SHA-256
+`e3d43b1deac7fb02dda65cdd2910c56eae667b8293b690fdd46cb88f441719a0`.
+It records source commit `14d832b8a7785e2e10e14d1408ae2abc02e7bf49`,
+schema `mclone-streamed-plan-phase1-receipt-v1`, three fixed seeds, and all
+three topologies. The working tree was truthfully marked dirty because
+unrelated vegetation/render work was present; only the named source commit
+owns this harness.
+
+Results:
+
+- 99 expected-equality comparisons passed with zero exact mismatches and zero
+  conflicting same-key publications;
+- 15 expected-failure comparisons caught every recentered-window,
+  recentered-last-writer, request-order discovery, schedule discovery, and
+  cache discovery canary;
+- recentering changed 965/1,024, 1,024/1,024, and 1,024/1,024 target-cell
+  records for seeds `12345`, `8675309`, and `-98765`;
+- each reversed recentered publication recorded one internal same-key
+  conflict per direction, preventing silent last-writer acceptance;
+- native and `wasm32-unknown-unknown` agree on coordinate-pure witness
+  `e5e329515e9638044db802f67433ba40b8b1f4aaf179e11e45c04fc2e03a1fde`;
+  and
+- native and Wasm agree on complete 114-comparison witness
+  `2f7bd2f9fb3e54fe9cf66900e32ca985a5de7fbba1a6d0ca379678b9c5eafc12`.
+
+Validation commands:
+
+```bash
+cargo run --manifest-path native/Cargo.toml -p mclone-worldgen \
+  --bin mclone_streamed_plan_harness -- \
+  --output /tmp/mclone-streamed-plan-phase1/native-receipt.json
+cargo test --manifest-path native/Cargo.toml -p mclone-worldgen
+STREAMED_PLAN_WASM_DIR="$PWD/native/target/wasm-bindgen-cli-0.2.125"
+CARGO_TARGET_WASM32_UNKNOWN_UNKNOWN_RUNNER="$STREAMED_PLAN_WASM_DIR/bin/wasm-bindgen-test-runner" \
+  cargo test --manifest-path native/Cargo.toml -p mclone-worldgen \
+  --target wasm32-unknown-unknown --test streamed_plan_wasm
+```
+
+The receipt explicitly marks geography, reconstruction, and cost as
+unmeasured. The coordinate-pure control is not yet the quality-comparable
+fallback promised for later phases. No candidate or production terrain
+consumer was implemented.
 
 ### Phase 2: minimal candidate trials
 
@@ -749,8 +796,10 @@ execution.
 |---|---|---|---|---|
 | source review | `0fa857db` | primary papers, public framework/source, local Minecraft source; docs only | exact tiled hydrology retains a finite global meta-problem; contextual streaming requires finite effect distance | reframe as bounded generative hydrography |
 | candidate and corpus review | `d91ed5e4` | architecture contract and receipt schema; docs only | B and C state finite claims; A is a control; D is deferred; fallback remains credible | R0 accepted 2026-07-27; Phase 1 authorized |
-| recentered-window negative control | pending | pending | pending | pending |
-| fallback invariant control | pending | pending | pending | pending |
+| neutral Phase 1 harness | `14d832b8` | `cargo test --manifest-path native/Cargo.toml -p mclone-worldgen`; 379 passed, 1 ignored, plus binary tests | canonical keys, exact integer facts, permutations, cache modes, topology lifts, and internal-publication conflict detection pass | accept the harness as the candidate-neutral instrument |
+| recentered-window negative control | `14d832b8` | `cargo run --manifest-path native/Cargo.toml -p mclone-worldgen --bin mclone_streamed_plan_harness -- --output /tmp/mclone-streamed-plan-phase1/native-receipt.json` | shifted real solves mismatch 965, 1,024, and 1,024 of 1,024 cells; reversed publication also conflicts | retain as permanent failing window/last-writer canary |
+| discovery-state negative control | `14d832b8` | same 114-comparison receipt | all request, schedule, and cache canaries fail as intended for all three seeds | reject discovery-time mutable facts |
+| fallback invariant control | `14d832b8` | native runner plus `wasm-bindgen-test-runner` on `streamed_plan_wasm`; pinned comparison witness `2f7bd2...fc12` | 99 equality comparisons have zero mismatch/conflict; full native/Wasm witness agrees | accept as deterministic control, not yet a quality finalist |
 | canonical supertile trial | pending | pending | pending | pending |
 | hierarchical boundary trial | pending | pending | pending | pending |
 | feature-owned graph trial | pending | pending | pending | pending |

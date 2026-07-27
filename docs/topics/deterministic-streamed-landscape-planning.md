@@ -3,20 +3,14 @@
 Topic: `deterministic-streamed-landscape-planning`
 
 Status: **Active research direction as of 2026-07-27. Tactical 270 Human
-Review R0 accepted bounded generative hydrography and authorized only the
-Phase 1 neutral invariance harness and controls. Tactical 267 proved that a
-bounded hybrid landform plan can
-produce useful drainage, basin, divide, and quiet-space structure with
-deterministic reconstruction over one fixed study domain. Tactical 268 made
-that plan inspectable and exposed the unresolved production question: the
-same absolute location must retain the same plan when reached through
-different windows, chunk requests, workers, caches, paths, and topology
-lifts. Tactical 270 Phase 0 found no precedent for exact unbounded on-demand
-hydrology: exact tiled methods retain a complete finite global meta-problem.
-It therefore proposes bounded generative hydrography with a fixed maximum
-scale, finite dependency DAG, stable feature/facet ownership, and the
-coordinate-pure fallback. No streamed planner, harness, adjacent-region
-implementation, or production terrain consumer exists yet.**
+Review R0 accepted bounded generative hydrography. Phase 1 now has a neutral
+exact-invariance harness, a coordinate-pure passing control, the real bounded
+landform-plan recenter canary, and discovery-state/last-writer canaries. The
+native and Wasm semantic witnesses agree. This proves the instrument can
+detect the known failure classes; it does not prove a streamed relational
+planner, boundary construction, geographic quality, or production cost.
+Candidates B, C, and D remain unimplemented and production terrain remains
+unchanged.**
 
 ## Purpose
 
@@ -95,6 +89,48 @@ Those results establish a useful bounded representation. They do not prove:
 
 The fixed Terrain Lab boundary is therefore honest evidence, not an
 implementation inconvenience to hide with automatic recentering.
+
+### Phase 1 Falsification Instrument
+
+Commit `14d832b8` adds a research-only harness under `mclone-worldgen` and a
+standalone `/tmp` receipt runner. Production generation does not call it.
+For seeds `12345`, `8675309`, and `-98765`, the suite executes the fixed
+plane, 6,144-block X-cylinder, and 6,144-by-6,144 torus corpus.
+
+The harness defines canonical `PlanKey` and `FactId` records containing the
+stored research profile, seed, dimension, topology-descriptor hash, candidate
+revision, plan family, level, and Euclidean/canonical region. It serializes
+sorted fixed-width integer facts to an explicit little-endian SHA-256 stream.
+Request order, completion order, batch size, cache policy, window center, and
+lifted request coordinates are evidence, never identity inputs.
+
+The Phase 1 receipt contains 114 exact comparisons:
+
+- all 99 expected-equality comparisons have zero semantic mismatches and zero
+  conflicting same-key publications;
+- the coordinate-pure plus bounded-start control is exact under reverse,
+  center-out, outside-in, fixed-random, teleport, two-front, reversed
+  completion, singleton batches, viewport recentering, warm/evicted cache,
+  and cylinder/torus lifts;
+- identical rebuilds of the fixed bounded plan agree;
+- naively moving that real 6,144-block solve changes 965, 1,024, and 1,024 of
+  the 1,024 target-cell records for the three seeds;
+- reversing two conflicting recentered publications changes the same target
+  and records one same-key conflict in each direction; and
+- the deliberately mutable discovery control changes 24 facts under request
+  and schedule reversal and one fact under cache eviction for every seed.
+
+The pinned coordinate-pure corpus witness is
+`e5e329515e9638044db802f67433ba40b8b1f4aaf179e11e45c04fc2e03a1fde`.
+The complete native/Wasm comparison witness is
+`2f7bd2f9fb3e54fe9cf66900e32ca985a5de7fbba1a6d0ca379678b9c5eafc12`.
+Both Wasm tests reproduced the native values exactly.
+
+This phase deliberately measures no geography, reconstruction, boundary
+geometry, timing, or memory. The fallback is currently a deterministic
+instrument control, not a fair terrain-quality finalist. No candidate can
+claim success merely by using the harness types; it must still publish its
+finite dependency and boundary facts and pass the complete candidate gates.
 
 ## Determinism Vocabulary
 
@@ -525,6 +561,7 @@ produce enough of the same geographic relationships to justify its cost?
 | 2026-07-27 | Tactical 268 interactive fixed-domain diagnostic | Preserve the boundary honestly; do not recenter and imply geographic stability |
 | 2026-07-27 | Post-review determinism discussion | Open a separate streamed-planner feasibility workstream before any production integration |
 | 2026-07-27 | Tactical 270 Phase 0 exact-hydrology and generator source review | Do not derive an allegedly exact unbounded watershed from independently solved tiles; test a bounded generative hydrography with a declared maximum scale |
+| 2026-07-27 | Tactical 270 Phase 1, commit `14d832b8`, 114 exact comparisons and native/Wasm witnesses | Accept the falsification instrument; retain recenter, discovery-state, and last-writer failures as permanent canaries; stop before candidate implementation |
 
 Add future experiment IDs, commits, commands, corpus locations, results, and
 decisions here or in the active tactical before relying on them.
@@ -542,8 +579,8 @@ decisions here or in the active tactical before relying on them.
 - Can the plane, cylinder, and torus share one planner representation without
   hiding topology-specific sink semantics?
 - What is the smallest far summary that preserves accepted topology?
-- Is exact native/Wasm agreement practical with the selected numeric and
-  sorting rules?
+- Will Candidate B or C preserve the exact native/Wasm agreement already
+  demonstrated by the Phase 1 integer receipt?
 - Does relational quality remain compelling once boundaries, boundedness, and
   speed constraints are enforced?
 - Is the resulting architecture easier to understand and evolve than a richer
