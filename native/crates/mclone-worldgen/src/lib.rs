@@ -4,6 +4,7 @@ pub mod biome;
 pub mod block;
 pub mod carver;
 pub mod feature;
+pub mod landform_plan;
 pub mod levelgen;
 pub mod noise;
 pub mod placement;
