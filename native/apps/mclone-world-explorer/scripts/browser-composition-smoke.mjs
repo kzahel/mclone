@@ -16,12 +16,14 @@ const webRoot = path.join(nativeRoot, "target", "mclone-world-explorer-www");
 const mobile = process.argv.includes("--mobile");
 const skipBuild = process.argv.includes("--skip-build");
 const semanticOnly = process.argv.includes("--semantic-only");
+const sourceColors = process.argv.includes("--source-colors");
 const composition = argumentValue("--composition") ?? "composed";
 if (!["composed", "coverage", "exact"].includes(composition)) {
   throw new Error(`unsupported browser composition smoke mode ${composition}`);
 }
 const externalBaseUrl = process.env.WORLD_EXPLORER_SMOKE_BASE_URL;
 const label = mobile ? "phone" : "desktop";
+const captureLabel = sourceColors ? `${composition}-source-colors` : composition;
 const port = Number.parseInt(
   process.env.WORLD_EXPLORER_SMOKE_PORT ?? (mobile ? "4194" : "4193"),
   10,
@@ -60,7 +62,8 @@ try {
   const target = new URL(
     "?seed=12345&centerX=0&centerZ=0&blocksAcross=96"
       + "&view=3d&projection=perspective&yaw=3.1415927&pitch=0.12"
-      + `&composition=${composition}&exactRadius=2&smokeObserver=1`,
+      + `&composition=${composition}&exactRadius=2&smokeObserver=1`
+      + (sourceColors ? "&sourceColors=1" : ""),
     normalizedBaseUrl(),
   );
   await page.goto(target.href, { waitUntil: "networkidle" });
@@ -83,7 +86,7 @@ try {
   assertCompositionReport(report);
   const capture = semanticOnly
     ? null
-    : `/tmp/mclone-world-explorer-web-${label}-${composition}-review.png`;
+    : `/tmp/mclone-world-explorer-web-${label}-${captureLabel}-review.png`;
   if (capture) {
     await page.locator("#world-explorer-canvas").screenshot({ path: capture });
   }
@@ -110,12 +113,12 @@ try {
     url: target.href,
   };
   const receiptPath =
-    `/tmp/mclone-world-explorer-web-${label}-${composition}-receipt.json`;
+    `/tmp/mclone-world-explorer-web-${label}-${captureLabel}-receipt.json`;
   await writeFile(receiptPath, `${JSON.stringify(receipt, null, 2)}\n`);
   console.log(JSON.stringify({ receipt: receiptPath, ...receipt }, null, 2));
 } catch (error) {
   const failureCapture =
-    `/tmp/mclone-world-explorer-web-${label}-${composition}-failure.png`;
+    `/tmp/mclone-world-explorer-web-${label}-${captureLabel}-failure.png`;
   await page?.screenshot({ path: failureCapture, fullPage: true }).catch(() => {});
   const runtime = await page?.evaluate(() => ({
     report:
@@ -140,6 +143,7 @@ function assertCompositionReport(report) {
       ? "discard-painted"
       : "disabled";
   if (report.composition !== composition
+      || report.sourceColors !== sourceColors
       || report.exactRadius !== 2
       || report.exactDesiredChunks !== 25
       || report.exactPaintedChunks !== 25
