@@ -443,6 +443,35 @@ cargo check --manifest-path native/Cargo.toml \
   -p mclone-terrain-lab --lib --target wasm32-unknown-unknown
 ```
 
+### 2026-07-26 to 2026-07-27 browser shader compatibility hotfix
+
+The shared coverage diagnostic initially declared a WGSL local named
+`diagnostic`. A mobile browser rejected that reserved language word while
+creating `mclone_terrain_viewport_render_shader`, so even the deployed
+Horizon-only browser profile could not initialize after the composition
+substrate landed. The local is now named `coverage_color`; this is a source
+compatibility correction with no rendering or composition change.
+
+The browser smoke's fixed-residency assertion now includes the composition
+coverage resource and expects `128,838,264` bytes. Local desktop and Pixel 7
+WebGPU smokes passed pipeline initialization, Worker recovery, continuous
+input, negative coordinates, and teleport. The native offscreen capture
+retained meaningful color and depth and was inspected. Chrome 150's local
+headed screenshot path returned a transparent canvas despite successful
+surface submissions, so that blank capture is not retained as pixel evidence.
+
+The first corrected deployment was Cloudflare Worker version
+`be63f9a9-acad-4a60-bfce-ea74e50a7ea6`. A later full-site deployment,
+`11eb0c10-e778-4ae6-92a7-d0be5d05c4b3`, restored an older World Explorer
+bundle and exposed the mobile shader failure again. The full current site was
+rebuilt and restored as version `154246b9-6331-4d51-981a-a7d170e99cff`.
+The hosted and local Explorer Wasm SHA-256 is
+`432f26547f0cd88cbf30047d3eb9f8aa586c58cae455615df12760bf2eee5c80`.
+Direct hosted desktop and Pixel 7 smokes then passed without page, shader, or
+console errors, including Worker recovery, movement, negative coordinates,
+teleport, and shutdown. This restores the existing Horizon browser product;
+it does not complete Slice 4's composed exact-field Worker proof.
+
 ### Slice 4: browser proof
 
 - [ ] Reuse the shared canonical compiler/session behind an isolated browser
