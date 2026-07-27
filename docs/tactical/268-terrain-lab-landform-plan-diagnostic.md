@@ -1,6 +1,6 @@
 # Tactical 268: Terrain Lab Landform-Plan Diagnostic
 
-Status: active
+Status: complete; awaiting interactive human review
 
 Topics: `mclone-macro-landscape-planning`, `gpu-procedural-terrain`
 
@@ -103,3 +103,43 @@ should answer:
 4. Which next diagnostic deserves promotion: envelope fields, coast arrivals,
    journey transects, or reconstructed terrain influence?
 
+## Implementation Record
+
+The completed slice adds:
+
+- `mclone-worldgen::landform_plan`, a deterministic research-only summary over
+  the Tactical 267 plane domain;
+- a Terrain Lab Wasm adapter and dedicated Worker that build once per seed and
+  transfer full cell, skeleton, and sink arrays;
+- an optional mclone-only **Landform plan** pane with shared pan/zoom,
+  independent URL-addressed overlays, a fixed-domain boundary, legend, and
+  Rust-owned point inspection;
+- exact transferred-byte, cold-build-time, checksum, graph-count, and sink
+  evidence in the UI;
+- plan-only controls and explanatory copy that do not imply terrain material,
+  projection, or benchmark settings affect the diagnostic; and
+- desktop and phone responsive layouts.
+
+The implementation is threaded through commits:
+
+- `aaa75b95` — tactical and ownership contract;
+- `86e12893` — shared research planner summary; and
+- `d05da009` — Wasm/Worker adapter, pane, controls, inspector, and validation.
+
+Validation completed:
+
+- `cargo test --manifest-path native/Cargo.toml -p mclone-worldgen
+  landform_plan --lib`;
+- both pinned production terrain and surface-chunk fingerprint tests;
+- `cargo check --manifest-path native/Cargo.toml -p mclone-terrain-lab
+  --target wasm32-unknown-unknown`;
+- the Terrain Lab browser ownership lock;
+- Terrain Lab state tests, TypeScript typecheck, Wasm build, and production web
+  build;
+- focused headed Chrome tests for desktop and phone; and
+- visual inspection of broad, closer, full-workspace, and responsive captures
+  under `/tmp`.
+
+The browser test proves that overlay changes and zoom preserve the same plan
+checksum and cold-build receipt. Production overworld output remains pinned
+and unchanged.

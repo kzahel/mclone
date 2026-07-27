@@ -4,8 +4,8 @@ Terrain Lab is the browser-hosted terrain workspace at `/terrain/`. Its
 visible panes are independently configurable but coordinate-locked. One
 global terrain profile selects the terrain family for every visible pane:
 
-- `mclone-overworld-v1` (the default) provides exact Mclone terrain, Mclone CPU
-  LOD, and optional Mclone GPU LOD.
+- `mclone-overworld-v1` (the default) provides exact Mclone terrain, a
+  research landform plan, Mclone CPU LOD, and optional Mclone GPU LOD.
 - `overworld` provides exact Minecraft Java 1.17.1 terrain and a direct
   Worker-backed vanilla CPU LOD. It has no GPU LOD.
 
@@ -18,6 +18,10 @@ The profiles cannot be mixed in one workspace. Within the selected profile:
 - `Real terrain` compiles exact first-party chunks through the production
   generator and renders their blocks, biomes, fluids, and final features with
   the production first-party texture atlas and cheap preview lighting.
+- `Landform plan` is a research-only 2D summary over the fixed 6,144-block
+  Tactical 267 plane domain. It shows independently selectable basin, quiet
+  space, drainage, divide, confluence, and protected-sink facts. Production
+  terrain does not consume this plan.
 - `CPU LOD` samples the selected production preview. Mclone uses its preview
   fields and near-detail structured records; vanilla directly samples density
   columns, water, biome, and approximate surface material without generating
@@ -59,7 +63,8 @@ same fixed 65.5 km anchor is captured in map view at `1:1024`, `1:512`, and
 The exact compiler runs in a replaceable Web Worker and publishes chunks
 center-first as they finish. The LOD panes use 64 × 64 cell / 65 × 65 sample
 tiles and may cover and progressively refine many tiles. Every visible pane
-shares seed, center, footprint, camera, and navigation.
+shares seed, center, footprint, and navigation; terrain panes also share the
+camera. The landform plan stays two-dimensional.
 
 The URL owns the review state:
 
@@ -69,8 +74,8 @@ The URL owns the review state:
 - `blocks`: continuous viewport width from 1 through 131,072 blocks
 - `detail`: `auto` or a power-of-two sample spacing from 1 through 1,024
   blocks
-- `panes`: comma-separated `runtime`, `canonical`, `cpu`, `macro`, and/or
-  `gpu`; `runtime` is Mclone-only
+- `panes`: comma-separated `runtime`, `canonical`, `plan`, `cpu`, `macro`,
+  and/or `gpu`; `runtime` and `plan` are Mclone-only
 - `canonical`: `surface` or `final`
 - `radius`: one of `0`, `1`, `2`, `3`, `4`, `5`, `7`, `10`, or `15`,
   corresponding to centered footprints from `1x1` through `31x31 = 961`
@@ -86,6 +91,9 @@ The URL owns the review state:
 - `stage`: `base`, `hydrology`, `structured`, `surface`, or `cover`
 - `layer`: `terrain`, `height`, `error`, `continentalness`, `climate`,
   `rivers`, `wetlands`, `landforms`, `biomes`, `surface`, or `streams`
+- `planBasins`, `planQuiet`, `planDrainage`, `planDivides`,
+  `planConfluences`, and `planSinks`: `1` to show or `0` to hide each
+  research-plan fact without rebuilding the plan
 
 Legacy `spacing=` links still load with their original `spacing × 64`
 footprint and fixed detail. New links keep coverage and resolution independent.
@@ -102,7 +110,9 @@ aligned terrain keeps one scale from the near edge to the far edge.
 A click or tap without a drag selects a Mclone production point receipt using
 analytic map picking or the shared 3D projection and a bounded heightfield
 ray. Vanilla point receipts are explicitly unavailable in the bounded first
-pass.
+pass. Tapping the landform plan instead requests a Rust-owned cell receipt
+with basin/receiver identity, drainage accumulation/order, envelope strengths,
+and structural flags.
 `Auto` selects approximately two CSS pixels per sample cell. A manual detail
 request remains visible even when the bounded eight-tile-per-axis interactive
 budget must raise its effective spacing; zooming in eventually admits every
@@ -199,6 +209,11 @@ pnpm terrain-lab:web
 
 Vite serves the lab at <http://127.0.0.1:5180/terrain/>. Rust/WASM bindings are
 regenerated before every development or production build.
+
+For the accepted hybrid-plan review site, enable **Landform plan**, set the
+center to `0, 0`, and zoom to `6.1 km`, or use:
+
+<http://127.0.0.1:5180/terrain/?seed=-98765&x=0&z=0&blocks=6144&panes=plan&view=map>
 
 ## Validate
 

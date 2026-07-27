@@ -76,6 +76,17 @@ that shared engine rather than becoming separate implementations. Optional
 GPU-backed authoritative chunk generation and volumetric terrain remain
 separate later experiments.
 
+Tactical
+[`268`](../tactical/268-terrain-lab-landform-plan-diagnostic.md) adds a
+different optional pane shape: a research-only 2D landform-plan diagnostic.
+Its planner and point semantics live in `mclone-worldgen`, a dedicated Worker
+constructs and transfers the summary once per seed, and a lightweight Canvas
+view follows Terrain Lab's shared center/scale navigation. Basin fill,
+quiet-space modulation, drainage, divides, confluences, and protected sinks
+are independent URL-addressed presentation overlays. Desktop and phone headed
+captures pass. This does not make the hybrid plan a production terrain input
+or a GPU terrain evaluator.
+
 ## Scope
 
 This topic owns the continuing direction for:
@@ -814,15 +825,17 @@ Terrain Lab is also the canonical generator review surface. Its workspace may
 show any unique subset of:
 
 - exact production terrain after final feature generation;
+- a research-only 2D structural landform plan;
 - the CPU LOD-style surface evaluator; and
 - the GPU-resident LOD-style surface evaluator.
 
-These are synchronized logical panes, not three unrelated viewers. They share
-seed, coordinates, viewport, map/3D camera, and navigation. The exact pane has
-its own bounded chunk radius because canonical coverage and visual horizon
-coverage are intentionally different readiness states. At continent scale,
-the exact footprint must remain honest rather than silently expanding into
-millions of generated chunks.
+These are synchronized logical panes, not unrelated viewers. They share seed,
+coordinates, viewport scale, and navigation; terrain panes additionally share
+the map/3D camera. The landform plan deliberately remains a 2D structural map.
+The exact pane has its own bounded chunk radius because canonical coverage and
+visual horizon coverage are intentionally different readiness states. At
+continent scale, the exact footprint must remain honest rather than silently
+expanding into millions of generated chunks.
 
 The canonical pane uses ordinary generated block/biome facts, the first-party
 asset packs, the shared textured section compiler, and the shared textured
@@ -842,6 +855,8 @@ High-value diagnostic views include:
 
 - rendered terrain, height, slope/roughness, water coverage, climate, material,
   field-band contribution, and feature masks;
+- regional-plan ownership, envelopes, drainage hierarchy, divides, sinks,
+  confluences, and other cross-system structural facts;
 - split or swipe A/B comparison between revisions or parameter sets;
 - CPU reference versus GPU result with numeric and visual error;
 - tile boundaries, selected levels, parent/child handoff, and cache residency;
