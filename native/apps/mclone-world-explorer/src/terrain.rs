@@ -89,6 +89,7 @@ impl ExplorerTerrain {
                 height: assets.atlas.height,
                 rgba: assets.atlas.rgba(),
             },
+            options.source_colors,
             target_color_transform,
         )?;
         let composition = options.composition;

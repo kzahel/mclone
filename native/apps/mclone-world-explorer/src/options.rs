@@ -51,6 +51,7 @@ pub struct ExplorerOptions {
     pub pitch_radians: f32,
     pub projection: WorldViewProjection,
     pub composition: WorldExplorerCompositionMode,
+    pub source_colors: bool,
     pub exact_radius: u32,
     pub exact_delay_ms: u64,
     pub asset_root: PathBuf,
@@ -75,6 +76,7 @@ impl Default for ExplorerOptions {
             pitch_radians: 0.52,
             projection: WorldViewProjection::Perspective,
             composition: WorldExplorerCompositionMode::Horizon,
+            source_colors: false,
             exact_radius: DEFAULT_EXACT_RADIUS,
             exact_delay_ms: 0,
             asset_root: default_asset_root(),
@@ -149,6 +151,7 @@ impl ExplorerOptions {
                     )?)
                     .map_err(anyhow::Error::msg)?
                 }
+                "--source-colors" => options.source_colors = true,
                 "--exact-radius" => {
                     options.exact_radius = parse_value(value(&mut arguments)?, name)?
                 }
@@ -184,6 +187,9 @@ impl ExplorerOptions {
         }
         if self.exact_radius > 8 {
             bail!("World Explorer exact radius must be at most 8 chunks");
+        }
+        if self.source_colors && self.composition == WorldExplorerCompositionMode::Horizon {
+            bail!("--source-colors requires exact, composed, or coverage composition");
         }
         if usize::from(self.capture.is_some())
             + usize::from(self.window_capture.is_some())
@@ -290,6 +296,7 @@ Usage: mclone-world-explorer [options]
   --view map|3d               camera mode (default 3d)
   --projection TYPE           perspective or orthographic
   --composition MODE          horizon, exact, composed, or coverage
+  --source-colors             render exact geometry in diagnostic magenta
   --exact-radius N            exact near-field chunk radius (default {DEFAULT_EXACT_RADIUS})
   --exact-delay-ms N          diagnostic delay before each exact batch
   --yaw RADIANS               3D yaw

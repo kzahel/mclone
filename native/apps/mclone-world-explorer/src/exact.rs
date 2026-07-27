@@ -240,6 +240,7 @@ impl ExplorerExactTerrain {
         compile_delay: Duration,
         catalog: TexturedMeshCatalog,
         atlas: ChunkTextureAtlas<'_>,
+        source_colors: bool,
         target_color_transform: RenderTargetColorTransform,
     ) -> Result<Self> {
         let executor = NativeCanonicalExactExecutor::new(seed, catalog.clone(), compile_delay)?;
@@ -253,6 +254,7 @@ impl ExplorerExactTerrain {
             radius,
             Box::new(executor),
             atlas,
+            source_colors,
             target_color_transform,
         )
     }
@@ -268,8 +270,16 @@ impl ExplorerExactTerrain {
         radius: u32,
         executor: Box<dyn CanonicalExactExecutor>,
         atlas: ChunkTextureAtlas<'_>,
+        source_colors: bool,
         target_color_transform: RenderTargetColorTransform,
     ) -> Result<Self> {
+        let source_color_rgba = source_colors.then(|| exact_source_color_rgba(atlas.rgba));
+        let atlas_rgba = source_color_rgba.as_deref().unwrap_or(atlas.rgba);
+        let atlas = ChunkTextureAtlas {
+            width: atlas.width,
+            height: atlas.height,
+            rgba: atlas_rgba,
+        };
         let tree_atlas = ChunkTextureAtlas {
             width: atlas.width,
             height: atlas.height,
@@ -722,4 +732,16 @@ impl ExplorerExactTerrain {
             && self.pending.is_empty()
             && !self.in_flight
     }
+}
+
+fn exact_source_color_rgba(rgba: &[u8]) -> Vec<u8> {
+    let mut diagnostic = rgba.to_vec();
+    for pixel in diagnostic.chunks_exact_mut(4) {
+        if pixel[3] != 0 {
+            pixel[0] = 255;
+            pixel[1] = 0;
+            pixel[2] = 255;
+        }
+    }
+    diagnostic
 }

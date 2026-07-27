@@ -43,6 +43,7 @@ struct WebExplorerOptions {
     yaw_radians: f64,
     pitch_radians: f64,
     composition: WorldExplorerCompositionMode,
+    source_colors: bool,
     exact_radius: u32,
     diagnostic_observer_enabled: bool,
     worker_overflow_probe_enabled: bool,
@@ -60,6 +61,7 @@ impl Default for WebExplorerOptions {
             yaw_radians: std::f64::consts::FRAC_PI_4,
             pitch_radians: 0.52,
             composition: WorldExplorerCompositionMode::Horizon,
+            source_colors: false,
             exact_radius: DEFAULT_EXACT_RADIUS,
             diagnostic_observer_enabled: false,
             worker_overflow_probe_enabled: false,
@@ -85,6 +87,13 @@ impl WebExplorerOptions {
         }
         if let Some(value) = parameters.get("composition") {
             options.composition = WorldExplorerCompositionMode::parse_label(&value)?;
+        }
+        options.source_colors = parameters.get("sourceColors").as_deref() == Some("1");
+        if options.source_colors && options.composition == WorldExplorerCompositionMode::Horizon {
+            return Err(
+                "World Explorer sourceColors=1 requires exact, composed, or coverage composition"
+                    .to_owned(),
+            );
         }
         options.diagnostic_observer_enabled =
             parameters.get("smokeObserver").as_deref() == Some("1");
@@ -144,6 +153,7 @@ struct WebExplorerReport {
     yaw_radians: f64,
     pitch_radians: f64,
     composition: &'static str,
+    source_colors: bool,
     exact_radius: u32,
     exact_anchor_x: i32,
     exact_anchor_z: i32,
@@ -272,6 +282,7 @@ pub struct WebWorldExplorer {
     frame_epoch_ms: Option<f64>,
     session: WorldExplorerSession,
     composition: WorldExplorerCompositionMode,
+    source_colors: bool,
     exact_radius: u32,
     exact: Option<ExplorerExactTerrain>,
     last_exact_stats: ExplorerExactStats,
@@ -365,6 +376,7 @@ impl WebWorldExplorer {
                 self.session.color_format(),
                 self.session.target_color_transform(),
                 self.composition,
+                self.source_colors,
                 self.exact_radius,
                 self.last_exact_anchor,
                 self.last_exact_stats,
@@ -734,6 +746,7 @@ impl WebWorldExplorer {
                         height: assets.atlas.height,
                         rgba: assets.atlas.rgba(),
                     },
+                    options.source_colors,
                     RenderColorProfile::Vanilla.target_color_transform(format),
                 )
                 .map_err(|error| error.to_string())?,
@@ -759,6 +772,7 @@ impl WebWorldExplorer {
             frame_epoch_ms: None,
             session,
             composition: options.composition,
+            source_colors: options.source_colors,
             exact_radius: options.exact_radius,
             exact,
             last_exact_stats: ExplorerExactStats::default(),
@@ -844,6 +858,7 @@ fn explorer_report(
     color_format: wgpu::TextureFormat,
     color_transform: RenderTargetColorTransform,
     composition: WorldExplorerCompositionMode,
+    source_colors: bool,
     exact_radius: u32,
     exact_anchor: [i32; 2],
     exact: ExplorerExactStats,
@@ -871,6 +886,7 @@ fn explorer_report(
         yaw_radians: state.yaw_radians,
         pitch_radians: state.pitch_radians,
         composition: composition.label(),
+        source_colors,
         exact_radius,
         exact_anchor_x: exact_anchor[0],
         exact_anchor_z: exact_anchor[1],

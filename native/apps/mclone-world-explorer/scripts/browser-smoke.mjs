@@ -400,7 +400,7 @@ function assertFixedReady(value, stage) {
       || value.vegetationCommittedLevels !== 3
       || value.pendingRefills !== 0
       || value.drawnLevels !== 10
-      || value.fixedResidentBytes !== 128_838_264
+      || value.fixedResidentBytes !== 128_867_704
       || value.pendingVegetationTiles !== 0
       || value.residentBytes <= 0) {
     throw new Error(`${stage} is not fixed and ready:\n${JSON.stringify(value, null, 2)}`);

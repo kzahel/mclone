@@ -84,7 +84,7 @@ pub const TERRAIN_PREVIEW_COMPUTE_WGSL_TEMPLATE: &str =
 pub const TERRAIN_PREVIEW_RENDER_WGSL: &str = include_str!("shaders/terrain_preview_render.wgsl");
 pub const TERRAIN_PREVIEW_TREE_WGSL: &str = include_str!("shaders/terrain_preview_tree.wgsl");
 
-const TERRAIN_PREVIEW_UNIFORM_BYTES: u64 = 160;
+const TERRAIN_PREVIEW_UNIFORM_BYTES: u64 = 224;
 const TERRAIN_PREVIEW_SAMPLE_BYTES: u64 =
     (TERRAIN_PREVIEW_SAMPLE_FLOATS * std::mem::size_of::<f32>()) as u64;
 const TERRAIN_PREVIEW_WORKGROUP_AXIS: u32 = 8;
@@ -473,8 +473,22 @@ pub fn terrain_horizon_chunk_render_view(
         height,
         presentation.target_y,
     );
-    let center_x = presentation.center_x as f32;
-    let center_z = presentation.center_z as f32;
+    Ok(terrain_preview_chunk_render_view(
+        projection,
+        presentation.center_x as f32,
+        presentation.center_z as f32,
+        width,
+        height,
+    ))
+}
+
+fn terrain_preview_chunk_render_view(
+    projection: TerrainPreviewProjection,
+    center_x: f32,
+    center_z: f32,
+    width: u32,
+    height: u32,
+) -> mclone_render::chunk::ChunkRenderView {
     let camera = mclone_render::chunk::ChunkCamera {
         eye: [
             center_x + projection.eye_offset[0],
@@ -487,12 +501,12 @@ pub fn terrain_horizon_chunk_render_view(
         z_near: projection.z_near,
         z_far: projection.z_far,
     };
-    Ok(match projection.kind {
+    match projection.kind {
         TerrainPreviewProjectionKind::Orthographic => {
             camera.render_orthographic_view(width, height, projection.vertical_half_extent * 2.0)
         }
         TerrainPreviewProjectionKind::Perspective => camera.render_view(width, height),
-    })
+    }
 }
 
 fn terrain_preview_projection_for_extent(
@@ -1307,6 +1321,11 @@ fn viewport_uniform_bytes_for_request_with_presentation(
         });
         bytes.extend_from_slice(&value.to_le_bytes());
     }
+    let render_view =
+        terrain_preview_chunk_render_view(projection, 0.0, 0.0, panel_width, panel_height);
+    for value in render_view.view_projection.to_cols_array() {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
     debug_assert_eq!(bytes.len(), TERRAIN_PREVIEW_UNIFORM_BYTES as usize);
     bytes
 }
@@ -1720,6 +1739,15 @@ mod tests {
             mclone_worldgen::terrain_preview::TerrainPreviewContentStage::Base as u32
         );
         assert_eq!(u32::from_le_bytes(bytes[132..136].try_into().unwrap()), 1);
+        let packed_view_projection = std::array::from_fn::<_, 16, _>(|index| {
+            let offset = 160 + index * std::mem::size_of::<f32>();
+            f32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap())
+        });
+        let expected_view_projection =
+            terrain_preview_chunk_render_view(projection, 0.0, 0.0, 1_280, 720)
+                .view_projection
+                .to_cols_array();
+        assert_eq!(packed_view_projection, expected_view_projection);
     }
 
     #[test]
@@ -1851,13 +1879,10 @@ mod tests {
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("@builtin(instance_index)"));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("fn base_sample"));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("visible_half_width"));
-        assert!(
-            TERRAIN_PREVIEW_RENDER_WGSL.contains("let forward = normalize(camera_target - eye)")
-        );
-        assert!(
-            TERRAIN_PREVIEW_RENDER_WGSL
-                .contains("params.camera_eye_target.y + params.camera_eye_target.w")
-        );
+        assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("params.view_projection * vec4<f32>"));
+        assert!(TERRAIN_PREVIEW_TREE_WGSL.contains("params.view_projection * vec4<f32>"));
+        assert!(!TERRAIN_PREVIEW_RENDER_WGSL.contains("clip_z = 1.0 - clamp"));
+        assert!(!TERRAIN_PREVIEW_TREE_WGSL.contains("clip_z = 1.0 - clamp"));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("sample.terrain.y + 1.0"));
         assert!(
             TERRAIN_PREVIEW_RENDER_WGSL

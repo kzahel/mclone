@@ -9,6 +9,7 @@ struct TerrainPreviewParams {
     presentation_center_extent: vec4<f32>,
     content_stage_flags: vec4<u32>,
     clipmap_inner_bounds: vec4<i32>,
+    view_projection: mat4x4<f32>,
 };
 
 struct TerrainPreviewSample {

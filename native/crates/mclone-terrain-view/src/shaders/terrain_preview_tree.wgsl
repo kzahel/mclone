@@ -9,6 +9,7 @@ struct TerrainPreviewParams {
     presentation_center_extent: vec4<f32>,
     content_stage_flags: vec4<u32>,
     clipmap_inner_bounds: vec4<i32>,
+    view_projection: mat4x4<f32>,
 };
 
 // __MCLONE_TARGET_COLOR_TRANSFER_WGSL__
@@ -146,60 +147,33 @@ fn vertex_main(
     }
 
     let world = center + corner * half_extent;
-    let viewport_width = max(params.presentation_center_extent.z, 0.0001);
-    let viewport_height = max(params.presentation_center_extent.w, 0.0001);
     let relative_x = world.x - f32(params.viewport_center_extent.x)
         - params.presentation_center_extent.x;
     let relative_z = world.z - f32(params.viewport_center_extent.y)
         - params.presentation_center_extent.y;
-    let grid_x = relative_x / (viewport_width * 0.5);
-    let grid_z = relative_z / (viewport_height * 0.5);
-    var clip_x = grid_x;
-    var clip_y = -grid_z;
-    var clip_z = 0.58;
-    if params.seed_source_view.w == 1u {
-        let eye = vec3<f32>(
-            params.camera_eye_target.x,
-            params.camera_eye_target.y + params.camera_eye_target.w,
-            params.camera_eye_target.z,
-        );
-        let camera_target = vec3<f32>(0.0, params.camera_eye_target.w, 0.0);
-        let forward = normalize(camera_target - eye);
-        let right = normalize(cross(forward, params.camera_up_fov.xyz));
-        let camera_up = normalize(cross(right, forward));
-        let position = vec3<f32>(
+    var clip_position = params.view_projection * vec4<f32>(
+        vec3<f32>(
             relative_x,
             world.y,
             relative_z,
-        );
-        let from_eye = position - eye;
-        let depth = max(dot(from_eye, forward), params.camera_projection.x);
-        var half_height = params.camera_projection.w;
-        if params.content_stage_flags.y == 1u {
-            half_height = depth * tan(params.camera_up_fov.w * 0.5);
-        }
-        clip_x = dot(from_eye, right) / max(half_height * params.camera_projection.z, 0.001);
-        clip_y = dot(from_eye, camera_up) / max(half_height, 0.001);
-        clip_z = 1.0 - clamp(
-            (depth - params.camera_projection.x)
-                / (params.camera_projection.y - params.camera_projection.x),
-            0.0,
-            1.0,
-        );
-    }
+        ),
+        1.0,
+    );
 
     if params.seed_source_view.z == 2u {
         if params.content_stage_flags.z == 1u {
             let panel_center = select(0.5, -0.5, input.panel_rank.x > 0.5);
-            clip_y = clip_y * 0.5 + panel_center;
+            clip_position.y = clip_position.y * 0.5
+                + panel_center * clip_position.w;
         } else {
             let panel_center = select(-0.5, 0.5, input.panel_rank.x > 0.5);
-            clip_x = clip_x * 0.5 + panel_center;
+            clip_position.x = clip_position.x * 0.5
+                + panel_center * clip_position.w;
         }
     }
 
     var out: VertexOutput;
-    out.position = vec4<f32>(clip_x, clip_y, clip_z, 1.0);
+    out.position = clip_position;
     let height_shade = clamp(0.78 + corner.y * 0.08, 0.62, 0.92);
     out.color = family_color(family, trunk) * height_shade;
     out.world_xz = world.xz;
