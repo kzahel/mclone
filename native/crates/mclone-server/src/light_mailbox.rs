@@ -24,7 +24,7 @@ use crate::job_codec::{
     ServerJobActorKind, decode_light_status_response, encode_light_status_request,
 };
 use crate::level_light_bridge::LevelLightComputationTiming;
-use crate::light_status::PendingLightStatusBatch;
+use crate::light_status::{LightRequestToken, PendingLightStatusBatch};
 use crate::light_world::RetainedInitialLightState;
 use crate::persistence::ScheduledTickRecord;
 use crate::timing::{TimingSample, timing_elapsed_us, timing_start};
@@ -34,6 +34,7 @@ use crate::{LightStatusMailboxKind, LightStatusMailboxMetrics, WorkerFrameMetric
 
 #[derive(Debug)]
 pub(crate) struct CompletedLightStatus {
+    pub(crate) token: LightRequestToken,
     pub(crate) pos: ChunkPos,
     pub(crate) feature_snapshot: ChunkSnapshot,
     pub(crate) scheduled_block_ticks: Vec<ScheduledTickRecord>,
@@ -58,6 +59,7 @@ impl CompletedLightStatus {
             .map(|(index, (pending, light_sections, timing))| {
                 let batch_compute_leader = index == 0;
                 Self {
+                    token: pending.token,
                     pos: pending.pos,
                     feature_snapshot: pending.feature_snapshot,
                     scheduled_block_ticks: pending.scheduled_block_ticks,

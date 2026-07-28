@@ -3,8 +3,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 
 use mclone_core::{
-    AxisTopology, BlockPos, ChunkPos, ChunkSnapshot, ChunkStatus, HorizontalTopology,
-    PackedLightSection,
+    AxisTopology, BlockPos, ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus,
+    HorizontalTopology, PackedLightSection,
 };
 use mclone_protocol::{ServerUpdate, decode_server_update, encode_server_update};
 use mclone_worldgen::feature::{DecorationStep, FeatureDecorationTiming};
@@ -20,7 +20,7 @@ use mclone_worldgen::levelgen::{
 
 use crate::level_light_bridge::LevelLightComputationTiming;
 use crate::light_mailbox::CompletedLightStatus;
-use crate::light_status::{PendingLightStatus, PendingLightStatusBatch};
+use crate::light_status::{LightRequestToken, PendingLightStatus, PendingLightStatusBatch};
 use crate::light_world::RetainedInitialLightState;
 use crate::lighting_seed::provisional_light_neighbor_lift;
 #[cfg(test)]
@@ -1081,6 +1081,7 @@ impl FrameWriter {
     }
 
     fn write_pending_light_status(&mut self, status: &PendingLightStatus) -> Result<(), String> {
+        self.write_u64(status.token.id);
         self.write_chunk_pos(status.pos);
         self.write_snapshot(&status.feature_snapshot)?;
         self.write_tick_records(
@@ -1107,6 +1108,7 @@ impl FrameWriter {
         &mut self,
         status: &CompletedLightStatus,
     ) -> Result<(), String> {
+        self.write_u64(status.token.id);
         self.write_chunk_pos(status.pos);
         self.write_snapshot(&status.feature_snapshot)?;
         self.write_tick_records(
@@ -1518,6 +1520,7 @@ impl<'a> FrameReader<'a> {
     }
 
     fn read_pending_light_status(&mut self) -> Result<PendingLightStatus, String> {
+        let token_id = self.read_u64()?;
         let pos = self.read_chunk_pos()?;
         let feature_snapshot = self.read_snapshot()?;
         let scheduled_block_ticks = self.read_tick_records("light status scheduled block ticks")?;
@@ -1528,8 +1531,8 @@ impl<'a> FrameReader<'a> {
             let blocks = reader.read_bytes("light status neighbor block data")?;
             Ok((pos, blocks))
         })?;
-        Ok(PendingLightStatus::from_parts(
-            pos,
+        Ok(PendingLightStatus::from_parts_with_token(
+            LightRequestToken::new(token_id, pos, feature_snapshot.revision),
             feature_snapshot,
             raw_blocks,
             neighbor_blocks,
@@ -1542,8 +1545,11 @@ impl<'a> FrameReader<'a> {
     }
 
     fn read_completed_light_status(&mut self) -> Result<CompletedLightStatus, String> {
+        let token_id = self.read_u64()?;
         let pos = self.read_chunk_pos()?;
         let feature_snapshot = self.read_snapshot()?;
+        let token =
+            LightRequestToken::new(token_id, pos, ChunkRevision(feature_snapshot.revision.0));
         let scheduled_block_ticks =
             self.read_tick_records("completed light status scheduled block ticks")?;
         let scheduled_fluid_ticks =
@@ -1554,6 +1560,7 @@ impl<'a> FrameReader<'a> {
         let compute_us = self.read_u128()?;
         let timing = self.read_level_light_timing()?;
         Ok(CompletedLightStatus {
+            token,
             pos,
             feature_snapshot,
             scheduled_block_ticks,

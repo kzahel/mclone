@@ -164,6 +164,7 @@ fn chunk_scheduler_records_holder_status_slots_in_order() {
             step: ChunkStatusStep::Ready,
             revision: None,
             job_id: None,
+            light_request_token: None,
         })
     );
     assert_eq!(
@@ -173,6 +174,7 @@ fn chunk_scheduler_records_holder_status_slots_in_order() {
             step: ChunkStatusStep::Ready,
             revision: None,
             job_id: None,
+            light_request_token: None,
         })
     );
     let features_slot = holder.status_slot(ChunkStatus::Features).unwrap();

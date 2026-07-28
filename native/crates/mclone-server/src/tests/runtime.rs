@@ -105,6 +105,13 @@ fn integrated_server_publishes_interested_chunks() {
     assert_eq!(
         server.scheduler().metrics(),
         ChunkSchedulerMetrics {
+            player_promotion_desired: 9,
+            player_promotion_queued: 0,
+            player_promotion_active: 0,
+            player_promotion_max_active: 4,
+            player_promotion_admitted_total: 9,
+            player_promotion_cancelled_before_admission: 0,
+            player_promotion_oldest_age_ticks: 0,
             direct_ticket_chunks: 9,
             active_ticket_chunks: 29 * 29,
             holder_chunks: 29 * 29,
@@ -120,19 +127,23 @@ fn integrated_server_publishes_interested_chunks() {
             ready_dependency_chunks: 9 * 9,
             dirty_chunks: 0,
             pending_jobs: 0,
-            completed_jobs: 1,
-            total_seeded_dependency_chunks: 0,
-            total_dependency_cache_hits: 0,
+            completed_jobs: 3,
+            total_seeded_dependency_chunks: 105,
+            total_dependency_cache_hits: 105,
             total_dependency_cache_misses: 9 * 9,
-            total_retained_dependency_chunks: 9 * 9,
-            max_feature_job_target_chunks: 25,
-            max_feature_job_feature_centers: 7 * 7,
+            total_retained_dependency_chunks: 186,
+            max_feature_job_target_chunks: 18,
+            max_feature_job_feature_centers: 40,
             max_feature_job_dependency_chunks: 9 * 9,
-            latest_feature_job_id: Some(ChunkJobId(1)),
-            latest_feature_job_target_chunks: 25,
-            latest_feature_job_feature_centers: 7 * 7,
+            latest_feature_job_id: Some(ChunkJobId(3)),
+            latest_feature_job_target_chunks: 4,
+            latest_feature_job_feature_centers: 36,
             latest_feature_job_dependency_chunks: 9 * 9,
-            latest_feature_job_first_target: Some(ChunkPos::new(0, 0)),
+            latest_feature_job_first_target: Some(ChunkPos::new(-2, -2)),
+            light_ticket_count: 0,
+            light_tickets_added: 25,
+            light_tickets_released: 25,
+            light_ticket_conservation_failures: 0,
             completed_light_statuses: 25,
             completed_light_batches: server.scheduler().metrics().completed_light_batches,
             total_light_status_compute_us: server
@@ -319,31 +330,31 @@ fn integrated_server_publishes_interested_chunks() {
                 .total_light_status_publication_units,
         }
     );
-    assert_eq!(server.scheduler().job_count(), 1);
-    let job = server.scheduler().jobs().next().unwrap();
-    assert_eq!(job.id, ChunkJobId(1));
-    assert_eq!(job.status, ChunkStatus::Features);
-    assert_eq!(job.state, ChunkJobState::Complete);
-    assert_eq!(job.target_chunks.len(), 25);
-    assert_eq!(job.feature_centers.len(), 7 * 7);
-    assert_eq!(job.dependency_chunks.len(), 9 * 9);
-    assert_eq!(job.seeded_dependency_chunks, 0);
-    assert_eq!(job.dependency_cache_hits, 0);
-    assert_eq!(job.dependency_cache_misses, 9 * 9);
-    assert_eq!(job.retained_dependency_chunks, 9 * 9);
-    assert!(job.dependency_chunks.contains(&ChunkPos::new(-4, -4)));
-    assert!(job.dependency_chunks.contains(&ChunkPos::new(4, 4)));
-    for target in &job.target_chunks {
-        assert_eq!(
-            server
-                .scheduler()
-                .holder(*target)
-                .unwrap()
-                .status_slot(ChunkStatus::Features)
-                .unwrap()
-                .job_id,
-            Some(job.id)
-        );
+    assert_eq!(server.scheduler().job_count(), 3);
+    let jobs = server.scheduler().jobs().collect::<Vec<_>>();
+    assert_eq!(
+        jobs.iter()
+            .map(|job| job.target_chunks.len())
+            .sum::<usize>(),
+        25
+    );
+    for job in jobs {
+        assert_eq!(job.status, ChunkStatus::Features);
+        assert_eq!(job.state, ChunkJobState::Complete);
+        assert!(job.target_chunks.len() <= 4 * 9);
+        assert!(job.dependency_chunks.len() <= 9 * 9);
+        for target in &job.target_chunks {
+            assert_eq!(
+                server
+                    .scheduler()
+                    .holder(*target)
+                    .unwrap()
+                    .status_slot(ChunkStatus::Features)
+                    .unwrap()
+                    .job_id,
+                Some(job.id)
+            );
+        }
     }
     assert!(updates.iter().skip(5).all(|update| {
         matches!(

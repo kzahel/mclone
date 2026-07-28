@@ -17,12 +17,31 @@ use crate::{
     PLAYER_TICKET_LEVEL, UNLOADED_CHUNK_LEVEL,
 };
 
+pub(crate) const DEFAULT_MAX_ACTIVE_PLAYER_PROMOTIONS: usize = 4;
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct PlayerPromotionDiagnostics {
+    pub desired: usize,
+    pub queued: usize,
+    pub active: usize,
+    pub max_active: usize,
+    pub admitted_total: u64,
+    pub cancelled_before_admission: u64,
+    pub oldest_queued_age_ticks: u64,
+}
+
 #[derive(Debug)]
 pub(crate) struct ChunkDistanceManager {
     topology: HorizontalTopology,
     tickets: BTreeMap<ChunkPos, BTreeSet<ChunkTicket>>,
     aggregate_resident_positions: BTreeSet<ChunkPos>,
-    aggregate_simulation_ticket_positions: BTreeSet<ChunkPos>,
+    aggregate_simulation_positions: BTreeSet<ChunkPos>,
+    player_ticket_positions: BTreeSet<ChunkPos>,
+    active_player_promotions: BTreeSet<ChunkPos>,
+    player_promotion_first_desired_tick: BTreeMap<ChunkPos, u64>,
+    max_active_player_promotions: usize,
+    player_promotions_admitted_total: u64,
+    player_promotions_cancelled_before_admission: u64,
     aggregate_interest_priority_centers: Vec<ChunkPos>,
     ticket_tick: u64,
     ticket_generation: u64,
@@ -35,7 +54,13 @@ impl ChunkDistanceManager {
             topology: HorizontalTopology::UNBOUNDED,
             tickets: BTreeMap::new(),
             aggregate_resident_positions: BTreeSet::new(),
-            aggregate_simulation_ticket_positions: BTreeSet::new(),
+            aggregate_simulation_positions: BTreeSet::new(),
+            player_ticket_positions: BTreeSet::new(),
+            active_player_promotions: BTreeSet::new(),
+            player_promotion_first_desired_tick: BTreeMap::new(),
+            max_active_player_promotions: DEFAULT_MAX_ACTIVE_PLAYER_PROMOTIONS,
+            player_promotions_admitted_total: 0,
+            player_promotions_cancelled_before_admission: 0,
             aggregate_interest_priority_centers: Vec::new(),
             ticket_tick: 0,
             ticket_generation: 0,
@@ -73,8 +98,7 @@ impl ChunkDistanceManager {
             .collect::<Vec<_>>();
         let priority_changed = self.aggregate_interest_priority_centers != priority_centers;
         let old_resident_positions = std::mem::take(&mut self.aggregate_resident_positions);
-        let old_simulation_positions =
-            std::mem::take(&mut self.aggregate_simulation_ticket_positions);
+        let old_simulation_positions = std::mem::take(&mut self.aggregate_simulation_positions);
         let old_residency_only = old_resident_positions
             .difference(&old_simulation_positions)
             .copied()
@@ -84,15 +108,26 @@ impl ChunkDistanceManager {
             .copied()
             .collect::<BTreeSet<_>>();
 
-        for pos in old_simulation_positions
+        let departed_simulation_positions = old_simulation_positions
             .difference(&new_simulation_positions)
             .copied()
-        {
+            .collect::<Vec<_>>();
+        for pos in &departed_simulation_positions {
+            if !self.player_ticket_positions.contains(pos) {
+                self.player_promotions_cancelled_before_admission = self
+                    .player_promotions_cancelled_before_admission
+                    .saturating_add(1);
+            }
+            self.active_player_promotions.remove(pos);
+            self.player_promotion_first_desired_tick.remove(pos);
+            if !self.player_ticket_positions.remove(pos) {
+                continue;
+            }
             self.remove_ticket(
                 ChunkTicketType::Player,
-                pos,
+                *pos,
                 PLAYER_TICKET_LEVEL,
-                ChunkTicketKey::Chunk(pos),
+                ChunkTicketKey::Chunk(*pos),
             );
         }
 
@@ -109,12 +144,8 @@ impl ChunkDistanceManager {
             .difference(&old_simulation_positions)
             .copied()
         {
-            self.add_ticket(
-                ChunkTicketType::Player,
-                pos,
-                PLAYER_TICKET_LEVEL,
-                ChunkTicketKey::Chunk(pos),
-            );
+            self.player_promotion_first_desired_tick
+                .insert(pos, self.ticket_tick);
         }
 
         for pos in new_residency_only.difference(&old_residency_only).copied() {
@@ -127,11 +158,73 @@ impl ChunkDistanceManager {
         }
 
         self.aggregate_resident_positions = new_resident_positions;
-        self.aggregate_simulation_ticket_positions = new_simulation_positions;
+        self.aggregate_simulation_positions = new_simulation_positions;
         self.aggregate_interest_priority_centers = priority_centers;
         if priority_changed {
             self.mark_tickets_changed();
         }
+        self.refill_player_promotions();
+    }
+
+    pub(crate) fn complete_player_promotion(&mut self, pos: ChunkPos) -> bool {
+        if !self.active_player_promotions.remove(&pos) {
+            return false;
+        }
+        self.refill_player_promotions();
+        true
+    }
+
+    fn refill_player_promotions(&mut self) {
+        let available = self
+            .max_active_player_promotions
+            .saturating_sub(self.active_player_promotions.len());
+        if available == 0 {
+            return;
+        }
+
+        let mut candidates = self
+            .aggregate_simulation_positions
+            .difference(&self.player_ticket_positions)
+            .copied()
+            .collect::<Vec<_>>();
+        candidates.sort_by_key(|pos| self.player_promotion_priority_key(*pos));
+
+        for pos in candidates.into_iter().take(available) {
+            self.player_ticket_positions.insert(pos);
+            self.active_player_promotions.insert(pos);
+            self.player_promotions_admitted_total =
+                self.player_promotions_admitted_total.saturating_add(1);
+            self.add_ticket(
+                ChunkTicketType::Player,
+                pos,
+                PLAYER_TICKET_LEVEL,
+                ChunkTicketKey::Chunk(pos),
+            );
+        }
+    }
+
+    fn player_promotion_priority_key(&self, pos: ChunkPos) -> (i64, i64, u64, i32, i32) {
+        let (chebyshev_distance, manhattan_distance) = self
+            .aggregate_interest_priority_centers
+            .iter()
+            .map(|center| {
+                let [dx, dz] = self.topology.shortest_chunk_displacement(*center, pos);
+                let dx = dx.abs();
+                let dz = dz.abs();
+                (dx.max(dz), dx + dz)
+            })
+            .min()
+            .unwrap_or((0, 0));
+        (
+            chebyshev_distance,
+            manhattan_distance,
+            self.player_promotion_first_desired_tick
+                .get(&pos)
+                .copied()
+                .unwrap_or(self.ticket_tick),
+            pos.z,
+            pos.x,
+        )
     }
 
     pub(crate) fn add_region_ticket(
@@ -262,6 +355,37 @@ impl ChunkDistanceManager {
         self.aggregate_resident_positions.clone()
     }
 
+    pub(crate) fn player_simulation_positions(&self) -> &BTreeSet<ChunkPos> {
+        &self.aggregate_simulation_positions
+    }
+
+    pub(crate) fn active_player_promotion_positions(&self) -> &BTreeSet<ChunkPos> {
+        &self.active_player_promotions
+    }
+
+    pub(crate) fn player_promotion_diagnostics(&self) -> PlayerPromotionDiagnostics {
+        let queued = self
+            .aggregate_simulation_positions
+            .difference(&self.player_ticket_positions)
+            .count();
+        let oldest_queued_age_ticks = self
+            .aggregate_simulation_positions
+            .difference(&self.player_ticket_positions)
+            .filter_map(|pos| self.player_promotion_first_desired_tick.get(pos))
+            .map(|first_tick| self.ticket_tick.saturating_sub(*first_tick))
+            .max()
+            .unwrap_or(0);
+        PlayerPromotionDiagnostics {
+            desired: self.aggregate_simulation_positions.len(),
+            queued,
+            active: self.active_player_promotions.len(),
+            max_active: self.max_active_player_promotions,
+            admitted_total: self.player_promotions_admitted_total,
+            cancelled_before_admission: self.player_promotions_cancelled_before_admission,
+            oldest_queued_age_ticks,
+        }
+    }
+
     pub(crate) fn player_interest_priority_centers(&self) -> &[ChunkPos] {
         &self.aggregate_interest_priority_centers
     }
@@ -386,5 +510,94 @@ mod tests {
         );
 
         assert_ne!(manager.ticket_generation(), first_generation);
+    }
+
+    #[test]
+    fn player_ticket_admission_keeps_only_four_cold_promotions_active() {
+        let mut manager = ChunkDistanceManager::new();
+        let center = ChunkPos::new(0, 0);
+        let positions = (-2..=2)
+            .flat_map(|z| (-2..=2).map(move |x| ChunkPos::new(x, z)))
+            .collect::<BTreeSet<_>>();
+
+        manager.set_aggregate_interest_positions_with_priority(
+            positions.clone(),
+            positions,
+            vec![center],
+        );
+
+        let diagnostics = manager.player_promotion_diagnostics();
+        assert_eq!(diagnostics.desired, 25);
+        assert_eq!(diagnostics.queued, 21);
+        assert_eq!(diagnostics.active, 4);
+        assert_eq!(diagnostics.max_active, 4);
+        assert_eq!(diagnostics.admitted_total, 4);
+        assert!(
+            manager
+                .active_player_promotion_positions()
+                .contains(&center)
+        );
+        assert_eq!(manager.player_ticket_positions.len(), 4);
+        assert_eq!(manager.ticketed_chunk_count(), 4);
+    }
+
+    #[test]
+    fn completed_player_promotion_refills_one_slot_without_dropping_ticket() {
+        let mut manager = ChunkDistanceManager::new();
+        let positions = (-2..=2)
+            .flat_map(|z| (-2..=2).map(move |x| ChunkPos::new(x, z)))
+            .collect::<BTreeSet<_>>();
+        manager.set_aggregate_interest_positions_with_priority(
+            positions.clone(),
+            positions,
+            vec![ChunkPos::new(0, 0)],
+        );
+        let completed = *manager
+            .active_player_promotion_positions()
+            .iter()
+            .next()
+            .unwrap();
+
+        assert!(manager.complete_player_promotion(completed));
+
+        let diagnostics = manager.player_promotion_diagnostics();
+        assert_eq!(diagnostics.active, 4);
+        assert_eq!(diagnostics.queued, 20);
+        assert_eq!(diagnostics.admitted_total, 5);
+        assert!(manager.player_ticket_positions.contains(&completed));
+        assert_eq!(manager.player_ticket_positions.len(), 5);
+    }
+
+    #[test]
+    fn interest_jump_clears_unadmitted_player_intent_before_ticketing() {
+        let mut manager = ChunkDistanceManager::new();
+        let old_positions = (-2..=2)
+            .flat_map(|z| (-2..=2).map(move |x| ChunkPos::new(x, z)))
+            .collect::<BTreeSet<_>>();
+        manager.set_aggregate_interest_positions_with_priority(
+            old_positions.clone(),
+            old_positions.clone(),
+            vec![ChunkPos::new(0, 0)],
+        );
+        let old_admitted = manager.player_ticket_positions.clone();
+        let new_positions = (9_998..=10_002)
+            .flat_map(|z| (9_998..=10_002).map(move |x| ChunkPos::new(x, z)))
+            .collect::<BTreeSet<_>>();
+
+        manager.set_aggregate_interest_positions_with_priority(
+            new_positions.clone(),
+            new_positions,
+            vec![ChunkPos::new(10_000, 10_000)],
+        );
+
+        let diagnostics = manager.player_promotion_diagnostics();
+        assert_eq!(diagnostics.cancelled_before_admission, 21);
+        assert_eq!(diagnostics.active, 4);
+        assert_eq!(diagnostics.queued, 21);
+        assert!(
+            old_admitted
+                .iter()
+                .all(|pos| manager.ticket_count_at(*pos) == 0)
+        );
     }
 }

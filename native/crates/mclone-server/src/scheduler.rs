@@ -47,7 +47,7 @@ use crate::job_codec::GenerationDiagnostics;
 use crate::level_light_bridge::LevelLightComputationTiming;
 use crate::light_mailbox::{CompletedLightStatus, LightStatusMailbox};
 use crate::light_status::{
-    PendingLightStatus, PendingLightStatusBatch, hydrate_loaded_light_snapshot,
+    LightRequestToken, PendingLightStatus, PendingLightStatusBatch, hydrate_loaded_light_snapshot,
 };
 use crate::light_world::RetainedInitialLightState;
 use crate::lighting_seed::provisional_light_neighbor_lift;
@@ -116,6 +116,13 @@ pub struct ChunkStatusJob {
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ChunkSchedulerMetrics {
+    pub player_promotion_desired: usize,
+    pub player_promotion_queued: usize,
+    pub player_promotion_active: usize,
+    pub player_promotion_max_active: usize,
+    pub player_promotion_admitted_total: u64,
+    pub player_promotion_cancelled_before_admission: u64,
+    pub player_promotion_oldest_age_ticks: u64,
     pub direct_ticket_chunks: usize,
     pub active_ticket_chunks: usize,
     pub holder_chunks: usize,
@@ -144,6 +151,10 @@ pub struct ChunkSchedulerMetrics {
     pub latest_feature_job_feature_centers: usize,
     pub latest_feature_job_dependency_chunks: usize,
     pub latest_feature_job_first_target: Option<ChunkPos>,
+    pub light_ticket_count: usize,
+    pub light_tickets_added: u64,
+    pub light_tickets_released: u64,
+    pub light_ticket_conservation_failures: u64,
     pub completed_light_statuses: usize,
     pub completed_light_batches: usize,
     pub total_light_status_compute_us: u128,
@@ -540,6 +551,10 @@ pub struct ChunkScheduler {
     light_mailbox: LightStatusMailbox,
     pending_light_status_batches: BTreeMap<ChunkJobId, Vec<PendingLightStatus>>,
     pending_light_publications: VecDeque<CompletedLightStatus>,
+    active_light_tickets: BTreeSet<LightRequestToken>,
+    light_tickets_added: u64,
+    light_tickets_released: u64,
+    light_ticket_conservation_failures: u64,
     completed_light_statuses: usize,
     completed_light_batches: usize,
     total_light_status_compute_us: u128,
@@ -552,6 +567,7 @@ pub struct ChunkScheduler {
     pending_runtime_light_snapshots: VecDeque<ChunkSnapshot>,
     dirty_chunks: BTreeSet<ChunkPos>,
     next_job_id: u64,
+    next_light_request_id: u64,
     next_revision: u64,
     store: PersistenceMailbox,
 }
@@ -810,6 +826,10 @@ impl ChunkScheduler {
             light_mailbox: LightStatusMailbox::new(),
             pending_light_status_batches: BTreeMap::new(),
             pending_light_publications: VecDeque::new(),
+            active_light_tickets: BTreeSet::new(),
+            light_tickets_added: 0,
+            light_tickets_released: 0,
+            light_ticket_conservation_failures: 0,
             completed_light_statuses: 0,
             completed_light_batches: 0,
             total_light_status_compute_us: 0,
@@ -822,6 +842,7 @@ impl ChunkScheduler {
             pending_runtime_light_snapshots: VecDeque::new(),
             dirty_chunks: BTreeSet::new(),
             next_job_id: 1,
+            next_light_request_id: 1,
             next_revision: 1,
             store,
         }
@@ -872,6 +893,10 @@ impl ChunkScheduler {
             light_mailbox: LightStatusMailbox::with_wasm_job_worker(config),
             pending_light_status_batches: BTreeMap::new(),
             pending_light_publications: VecDeque::new(),
+            active_light_tickets: BTreeSet::new(),
+            light_tickets_added: 0,
+            light_tickets_released: 0,
+            light_ticket_conservation_failures: 0,
             completed_light_statuses: 0,
             completed_light_batches: 0,
             total_light_status_compute_us: 0,
@@ -884,6 +909,7 @@ impl ChunkScheduler {
             pending_runtime_light_snapshots: VecDeque::new(),
             dirty_chunks: BTreeSet::new(),
             next_job_id: 1,
+            next_light_request_id: 1,
             next_revision: 1,
             store: PersistenceMailbox::new(Box::new(ChunkSnapshotWorldStore::new(store))),
         }
@@ -997,7 +1023,11 @@ impl ChunkScheduler {
         if self.lighting_enabled == enabled {
             return;
         }
+        if !enabled {
+            self.cancel_all_initial_light_requests();
+        }
         self.lighting_enabled = enabled;
+        self.release_ready_player_promotions();
         self.reconciled_ticket_generation = None;
     }
 
@@ -1078,6 +1108,9 @@ impl ChunkScheduler {
             .is_some()
         {
             events.extend(self.enqueue_next_pending_feature_job());
+        }
+        if self.reconciled_ticket_generation != Some(self.distance_manager.ticket_generation()) {
+            events.extend(self.reconcile_ticketed_holders()?);
         }
         publication.pending_worldgen_publication_jobs = self.pending_worldgen_publications.len();
         publication.pending_worldgen_publication_chunks =
@@ -1621,6 +1654,7 @@ impl ChunkScheduler {
     }
 
     pub fn pending_job_count(&self) -> usize {
+        let player_promotions = self.distance_manager.player_promotion_diagnostics();
         let pending_status_jobs = self
             .jobs
             .values()
@@ -1630,7 +1664,10 @@ impl ChunkScheduler {
             .world_generation_profile
             .authored_missing_chunk()
             .map_or(0, |_| self.stored_chunk_misses.len());
-        pending_status_jobs
+        player_promotions
+            .queued
+            .saturating_add(player_promotions.active)
+            .saturating_add(pending_status_jobs)
             + pending_authored_misses
             + self
                 .pending_light_status_batches
@@ -1690,7 +1727,16 @@ impl ChunkScheduler {
 
     pub fn metrics(&self) -> ChunkSchedulerMetrics {
         let latest_feature_job = self.jobs.values().max_by_key(|job| job.id);
+        let player_promotions = self.distance_manager.player_promotion_diagnostics();
         ChunkSchedulerMetrics {
+            player_promotion_desired: player_promotions.desired,
+            player_promotion_queued: player_promotions.queued,
+            player_promotion_active: player_promotions.active,
+            player_promotion_max_active: player_promotions.max_active,
+            player_promotion_admitted_total: player_promotions.admitted_total,
+            player_promotion_cancelled_before_admission: player_promotions
+                .cancelled_before_admission,
+            player_promotion_oldest_age_ticks: player_promotions.oldest_queued_age_ticks,
             direct_ticket_chunks: self.ticketed_chunk_count(),
             active_ticket_chunks: self.active_ticketed_chunk_count(),
             holder_chunks: self.holder_count(),
@@ -1759,6 +1805,10 @@ impl ChunkScheduler {
                 .map_or(0, |job| job.dependency_chunks.len()),
             latest_feature_job_first_target: latest_feature_job
                 .and_then(|job| job.target_chunks.first().copied()),
+            light_ticket_count: self.active_light_tickets.len(),
+            light_tickets_added: self.light_tickets_added,
+            light_tickets_released: self.light_tickets_released,
+            light_ticket_conservation_failures: self.light_ticket_conservation_failures,
             completed_light_statuses: self.completed_light_statuses,
             completed_light_batches: self.completed_light_batches,
             total_light_status_compute_us: self.total_light_status_compute_us,
@@ -2853,6 +2903,13 @@ impl ChunkScheduler {
             self.stored_chunk_misses.remove(&pos);
             self.loaded_entity_chunks.remove(&pos);
             self.entity_unload_saves.remove(&pos);
+            if let Some(token) = self
+                .holders
+                .get(&pos)
+                .and_then(ChunkHolder::light_request_token)
+            {
+                self.release_initial_light_request(token);
+            }
             self.holders.remove(&pos);
             self.store.release_cached_chunk(pos);
             self.store.release_cached_entity_chunk(pos);
@@ -2880,6 +2937,7 @@ impl ChunkScheduler {
     fn reconcile_ticketed_holders_with_timing(
         &mut self,
     ) -> ChunkStoreResult<(Vec<ChunkSchedulerEvent>, ReconcileHoldersTiming)> {
+        self.release_ready_player_promotions();
         let ticket_generation = self.distance_manager.ticket_generation();
         let priority_centers = self
             .distance_manager
@@ -2928,10 +2986,7 @@ impl ChunkScheduler {
                 let has_direct_feature_ticket =
                     self.distance_manager.ticket_level_at(pos) <= CHUNK_LEVEL_FULL + 1;
                 let should_run_block_ticks = full_status.is_or_after(FullChunkStatus::Ticking);
-                let target_status = if should_be_client_visible
-                    || has_direct_feature_ticket
-                    || should_run_block_ticks
-                {
+                let target_status = if has_direct_feature_ticket || should_run_block_ticks {
                     self.runtime_chunk_target_status()
                 } else {
                     ticket_level_dependency_status_target(ticket_level)
@@ -3232,8 +3287,9 @@ impl ChunkScheduler {
                     ChunkStatus::Light,
                     ChunkStatusStep::Scheduled,
                 ));
-                pending_light_statuses.push(PendingLightStatus::from_parts(
-                    pos,
+                let token = self.begin_initial_light_request(pos, snapshot.revision);
+                pending_light_statuses.push(PendingLightStatus::from_parts_with_token(
+                    token,
                     snapshot,
                     chunk.blocks().to_vec(),
                     Vec::new(),
@@ -3441,13 +3497,14 @@ impl ChunkScheduler {
                     ChunkStatus::Light,
                     ChunkStatusStep::Scheduled,
                 ));
+                let token = self.begin_initial_light_request(pos, snapshot.revision);
                 let ready_light_batch = {
                     let statuses = self
                         .pending_light_status_batches
                         .entry(publication.completed.job_id)
                         .or_default();
                     statuses.push(PendingLightStatus::from_feature_publication(
-                        pos,
+                        token,
                         snapshot,
                         chunk,
                         scheduled_block_ticks,
@@ -3531,6 +3588,83 @@ impl ChunkScheduler {
             .enqueue_batch(PendingLightStatusBatch::new(statuses));
     }
 
+    fn begin_initial_light_request(
+        &mut self,
+        pos: ChunkPos,
+        feature_revision: ChunkRevision,
+    ) -> LightRequestToken {
+        if let Some(existing) = self
+            .holders
+            .get(&pos)
+            .and_then(ChunkHolder::light_request_token)
+        {
+            if existing.feature_revision == feature_revision {
+                return existing;
+            }
+            self.release_initial_light_request(existing);
+        }
+
+        let token = LightRequestToken::new(self.next_light_request_id, pos, feature_revision);
+        self.next_light_request_id = self.next_light_request_id.saturating_add(1);
+        self.holders
+            .get_mut(&pos)
+            .expect("holder must exist before assigning a Light request")
+            .assign_light_request_token(token);
+        self.distance_manager.add_ticket(
+            ChunkTicketType::Light,
+            pos,
+            LIGHT_TICKET_LEVEL,
+            ChunkTicketKey::LightRequest(token.id),
+        );
+        assert!(
+            self.active_light_tickets.insert(token),
+            "Light request token must be unique"
+        );
+        self.light_tickets_added = self.light_tickets_added.saturating_add(1);
+        self.check_light_ticket_conservation();
+        token
+    }
+
+    fn release_initial_light_request(&mut self, token: LightRequestToken) -> bool {
+        if !self.active_light_tickets.remove(&token) {
+            return false;
+        }
+        if let Some(holder) = self.holders.get_mut(&token.pos) {
+            holder.clear_light_request_token(token);
+        }
+        self.distance_manager.remove_ticket(
+            ChunkTicketType::Light,
+            token.pos,
+            LIGHT_TICKET_LEVEL,
+            ChunkTicketKey::LightRequest(token.id),
+        );
+        self.light_tickets_released = self.light_tickets_released.saturating_add(1);
+        self.check_light_ticket_conservation();
+        true
+    }
+
+    fn cancel_all_initial_light_requests(&mut self) {
+        let tokens = self
+            .active_light_tickets
+            .iter()
+            .copied()
+            .collect::<Vec<_>>();
+        for token in tokens {
+            self.release_initial_light_request(token);
+        }
+    }
+
+    fn check_light_ticket_conservation(&mut self) {
+        let expected_live = self
+            .light_tickets_added
+            .saturating_sub(self.light_tickets_released);
+        if expected_live != self.active_light_tickets.len() as u64 {
+            self.light_ticket_conservation_failures =
+                self.light_ticket_conservation_failures.saturating_add(1);
+            debug_assert_eq!(expected_live, self.active_light_tickets.len() as u64);
+        }
+    }
+
     fn publish_pending_light_statuses(
         &mut self,
         diagnostics: &mut ChunkSchedulerPublicationDiagnostics,
@@ -3557,16 +3691,22 @@ impl ChunkScheduler {
             };
             remaining_budget -= 1;
 
-            let should_publish = self
-                .holders
-                .get(&completed.pos)
-                .and_then(|holder| holder.status_slot(ChunkStatus::Light))
-                .is_some_and(|slot| slot.step == ChunkStatusStep::Scheduled);
+            let should_publish = self.holders.get(&completed.pos).is_some_and(|holder| {
+                holder
+                    .status_slot(ChunkStatus::Light)
+                    .is_some_and(|slot| slot.step == ChunkStatusStep::Scheduled)
+                    && holder.light_request_token() == Some(completed.token)
+                    && holder.published_snapshot.as_ref().is_some_and(|snapshot| {
+                        snapshot.revision == completed.token.feature_revision
+                    })
+            });
             if !should_publish {
+                self.release_initial_light_request(completed.token);
                 diagnostics.light_statuses_skipped =
                     diagnostics.light_statuses_skipped.saturating_add(1);
                 continue;
             }
+            self.release_initial_light_request(completed.token);
             diagnostics.light_statuses_published =
                 diagnostics.light_statuses_published.saturating_add(1);
 
@@ -3770,6 +3910,11 @@ impl ChunkScheduler {
         residency: ChunkResidency,
         dirty: bool,
     ) {
+        let completes_player_promotion = self
+            .distance_manager
+            .player_simulation_positions()
+            .contains(&pos)
+            && self.snapshot_is_client_ready(&snapshot);
         let holder = self
             .holders
             .get_mut(&pos)
@@ -3779,6 +3924,37 @@ impl ChunkScheduler {
             self.dirty_chunks.insert(pos);
         } else {
             self.dirty_chunks.remove(&pos);
+        }
+        if completes_player_promotion {
+            self.distance_manager.complete_player_promotion(pos);
+        }
+    }
+
+    fn release_ready_player_promotions(&mut self) {
+        loop {
+            let ready = self
+                .distance_manager
+                .active_player_promotion_positions()
+                .iter()
+                .copied()
+                .filter(|pos| {
+                    self.holders
+                        .get(pos)
+                        .and_then(|holder| holder.published_snapshot.as_ref())
+                        .is_some_and(|snapshot| {
+                            snapshot_is_client_ready_for_lighting_mode(
+                                snapshot,
+                                self.lighting_enabled,
+                            )
+                        })
+                })
+                .collect::<Vec<_>>();
+            if ready.is_empty() {
+                break;
+            }
+            for pos in ready {
+                self.distance_manager.complete_player_promotion(pos);
+            }
         }
     }
 
@@ -4640,9 +4816,11 @@ mod tests {
     }
 
     fn test_completed_light_status(pos: ChunkPos) -> CompletedLightStatus {
+        let feature_snapshot = test_feature_snapshot(pos);
         CompletedLightStatus {
+            token: LightRequestToken::new(0, pos, feature_snapshot.revision),
             pos,
-            feature_snapshot: test_feature_snapshot(pos),
+            feature_snapshot,
             scheduled_block_ticks: Vec::new(),
             scheduled_fluid_ticks: Vec::new(),
             light_sections: Vec::new(),
@@ -4654,7 +4832,11 @@ mod tests {
 
     fn test_scheduled_light_holder(pos: ChunkPos) -> ChunkHolder {
         let mut holder = ChunkHolder::new(pos);
+        let snapshot = test_feature_snapshot(pos);
+        let token = LightRequestToken::new(0, pos, snapshot.revision);
+        holder.publish_snapshot(snapshot, ChunkResidency::Generated, false);
         holder.mark_scheduled(ChunkStatus::Light);
+        holder.assign_light_request_token(token);
         holder
     }
 
@@ -4751,7 +4933,12 @@ mod tests {
             })
             .unwrap();
 
-        assert_eq!(scheduler.metrics().direct_ticket_chunks, 25);
+        assert_eq!(
+            scheduler.metrics().direct_ticket_chunks,
+            crate::distance_manager::DEFAULT_MAX_ACTIVE_PLAYER_PROMOTIONS
+        );
+        assert_eq!(scheduler.metrics().player_promotion_active, 4);
+        assert_eq!(scheduler.metrics().player_promotion_queued, 21);
         assert!(
             scheduler
                 .distance_manager
@@ -5028,6 +5215,87 @@ mod tests {
     }
 
     #[test]
+    fn stale_light_request_token_cannot_publish_for_newer_feature_revision() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        let pos = ChunkPos::new(0, 0);
+        let first_snapshot = test_feature_snapshot(pos);
+        let mut holder = ChunkHolder::new(pos);
+        holder.publish_snapshot(first_snapshot.clone(), ChunkResidency::Generated, false);
+        holder.mark_scheduled(ChunkStatus::Light);
+        scheduler.holders.insert(pos, holder);
+        let first = scheduler.begin_initial_light_request(pos, first_snapshot.revision);
+
+        let mut second_snapshot = first_snapshot;
+        second_snapshot.revision = ChunkRevision(2);
+        scheduler.holders.get_mut(&pos).unwrap().publish_snapshot(
+            second_snapshot.clone(),
+            ChunkResidency::Generated,
+            false,
+        );
+        let second = scheduler.begin_initial_light_request(pos, second_snapshot.revision);
+        let mut stale = test_completed_light_status(pos);
+        stale.token = first;
+        scheduler.pending_light_publications.push_back(stale);
+
+        let mut diagnostics = ChunkSchedulerPublicationDiagnostics::default();
+        let events = scheduler
+            .publish_pending_light_statuses(&mut diagnostics, PublicationGrant::fixed(1))
+            .unwrap();
+
+        assert!(events.is_empty());
+        assert_eq!(diagnostics.light_statuses_skipped, 1);
+        assert_eq!(
+            scheduler
+                .holders
+                .get(&pos)
+                .and_then(ChunkHolder::light_request_token),
+            Some(second)
+        );
+        assert_eq!(scheduler.metrics().light_ticket_count, 1);
+        assert_eq!(scheduler.metrics().light_tickets_added, 2);
+        assert_eq!(scheduler.metrics().light_tickets_released, 1);
+        assert_eq!(scheduler.metrics().light_ticket_conservation_failures, 0);
+
+        assert!(scheduler.release_initial_light_request(second));
+        assert_eq!(scheduler.metrics().light_ticket_count, 0);
+        assert_eq!(scheduler.metrics().light_tickets_released, 2);
+    }
+
+    #[test]
+    fn matching_light_request_token_publishes_and_releases_ticket() {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        let pos = ChunkPos::new(0, 0);
+        let snapshot = test_feature_snapshot(pos);
+        let mut holder = ChunkHolder::new(pos);
+        holder.publish_snapshot(snapshot.clone(), ChunkResidency::Generated, false);
+        holder.mark_scheduled(ChunkStatus::Light);
+        scheduler.holders.insert(pos, holder);
+        let token = scheduler.begin_initial_light_request(pos, snapshot.revision);
+        let mut completed = test_completed_light_status(pos);
+        completed.token = token;
+        scheduler.pending_light_publications.push_back(completed);
+
+        let mut diagnostics = ChunkSchedulerPublicationDiagnostics::default();
+        let events = scheduler
+            .publish_pending_light_statuses(&mut diagnostics, PublicationGrant::fixed(1))
+            .unwrap();
+
+        assert_eq!(diagnostics.light_statuses_published, 1);
+        assert!(events.iter().any(|event| matches!(
+            event,
+            ChunkSchedulerEvent::StatusChanged {
+                pos: event_pos,
+                status: ChunkStatus::Light,
+                step: ChunkStatusStep::Ready,
+            } if *event_pos == pos
+        )));
+        assert_eq!(scheduler.metrics().light_ticket_count, 0);
+        assert_eq!(scheduler.metrics().light_tickets_added, 1);
+        assert_eq!(scheduler.metrics().light_tickets_released, 1);
+        assert_eq!(scheduler.metrics().light_ticket_conservation_failures, 0);
+    }
+
+    #[test]
     fn raw_high_render_distance_feature_job_shape_is_whole_view_sized() {
         let mut scheduler = ChunkScheduler::new(12_345);
         let targets = square(ChunkPos::new(0, 0), 33)
@@ -5073,10 +5341,11 @@ mod tests {
         assert_eq!(metrics.pending_jobs, 1);
         assert_eq!(scheduler.job_count(), 1);
         assert_eq!(metrics.latest_feature_job_first_target, Some(center));
-        assert_eq!(
-            metrics.latest_feature_job_target_chunks,
-            STARTUP_FEATURE_JOB_TARGET_CHUNK_LIMIT
+        assert!(
+            metrics.latest_feature_job_target_chunks
+                <= crate::distance_manager::DEFAULT_MAX_ACTIVE_PLAYER_PROMOTIONS * 9
         );
+        assert!(metrics.latest_feature_job_target_chunks > 0);
         assert_eq!(metrics.latest_feature_job_feature_centers, 5 * 5);
         assert_eq!(metrics.latest_feature_job_dependency_chunks, 7 * 7);
         assert_eq!(
@@ -5152,20 +5421,22 @@ mod tests {
             })
             .unwrap();
 
-        assert_eq!(
-            scheduler.pending_persistence_load_count(),
-            STARTUP_CHUNK_LOAD_REQUEST_LIMIT
+        assert!(
+            scheduler.pending_persistence_load_count()
+                <= crate::distance_manager::DEFAULT_MAX_ACTIVE_PLAYER_PROMOTIONS * 9
         );
-        assert_eq!(scheduler.pending_job_count(), 0);
+        assert_eq!(scheduler.metrics().player_promotion_active, 4);
+        assert_eq!(scheduler.metrics().player_promotion_queued, (67 * 67) - 4);
         assert_eq!(scheduler.metrics().latest_feature_job_id, None);
 
         scheduler.poll().unwrap();
 
         let metrics = scheduler.metrics();
-        assert_eq!(metrics.pending_jobs, 1);
-        assert_eq!(
-            metrics.latest_feature_job_target_chunks,
-            STARTUP_FEATURE_JOB_TARGET_CHUNK_LIMIT
+        assert!(metrics.pending_jobs > 1);
+        assert!(metrics.latest_feature_job_target_chunks > 0);
+        assert!(
+            metrics.latest_feature_job_target_chunks
+                <= crate::distance_manager::DEFAULT_MAX_ACTIVE_PLAYER_PROMOTIONS * 9
         );
         assert_eq!(metrics.latest_feature_job_first_target, Some(center));
         assert!(scheduler.pending_persistence_load_count() <= BACKGROUND_CHUNK_LOAD_REQUEST_LIMIT);
@@ -5843,6 +6114,7 @@ pub(crate) const DEFAULT_PENDING_UNLOAD_BUDGET: usize = 200;
 pub(crate) const DEFAULT_COMPLETED_CHUNK_PUBLISH_BUDGET: usize = 1;
 pub(crate) const DEFAULT_COMPLETED_LIGHT_PUBLISH_BUDGET: usize = 1;
 pub const DEFAULT_LIGHT_STATUS_BATCH_SIZE: usize = 9;
+const LIGHT_TICKET_LEVEL: i32 = CHUNK_LEVEL_FULL + 1;
 const STARTUP_CHUNK_LOAD_REQUEST_LIMIT: usize = 9;
 const BACKGROUND_CHUNK_LOAD_REQUEST_LIMIT: usize = 128;
 const STARTUP_FEATURE_JOB_TARGET_CHUNK_LIMIT: usize = 9;

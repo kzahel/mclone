@@ -18,8 +18,34 @@ use mclone_worldgen::levelgen::{GeneratedChunk, MutableChunkBlockBuffer};
 use crate::lighting_seed::provisional_light_neighbor_lift;
 use crate::persistence::{ChunkStoreError, ChunkStoreResult, ScheduledTickRecord};
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
+pub(crate) struct LightRequestToken {
+    pub(crate) id: u64,
+    pub(crate) pos: ChunkPos,
+    pub(crate) feature_revision: mclone_core::ChunkRevision,
+}
+
+impl LightRequestToken {
+    pub(crate) const fn new(
+        id: u64,
+        pos: ChunkPos,
+        feature_revision: mclone_core::ChunkRevision,
+    ) -> Self {
+        Self {
+            id,
+            pos,
+            feature_revision,
+        }
+    }
+
+    fn synthetic(pos: ChunkPos, feature_revision: mclone_core::ChunkRevision) -> Self {
+        Self::new(0, pos, feature_revision)
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PendingLightStatus {
+    pub(crate) token: LightRequestToken,
     pub(crate) pos: ChunkPos,
     pub(crate) feature_snapshot: ChunkSnapshot,
     pub(crate) scheduled_block_ticks: Vec<ScheduledTickRecord>,
@@ -35,8 +61,21 @@ impl PendingLightStatus {
         raw_blocks: Vec<RawBlockId>,
         neighbor_blocks: Vec<(ChunkPos, Vec<RawBlockId>)>,
     ) -> Self {
+        let token = LightRequestToken::synthetic(pos, feature_snapshot.revision);
+        Self::from_parts_with_token(token, feature_snapshot, raw_blocks, neighbor_blocks)
+    }
+
+    pub(crate) fn from_parts_with_token(
+        token: LightRequestToken,
+        feature_snapshot: ChunkSnapshot,
+        raw_blocks: Vec<RawBlockId>,
+        neighbor_blocks: Vec<(ChunkPos, Vec<RawBlockId>)>,
+    ) -> Self {
+        debug_assert_eq!(token.pos, feature_snapshot.pos);
+        debug_assert_eq!(token.feature_revision, feature_snapshot.revision);
         Self {
-            pos,
+            token,
+            pos: token.pos,
             feature_snapshot,
             scheduled_block_ticks: Vec::new(),
             scheduled_fluid_ticks: Vec::new(),
@@ -46,7 +85,7 @@ impl PendingLightStatus {
     }
 
     pub(crate) fn from_feature_publication<'a>(
-        pos: ChunkPos,
+        token: LightRequestToken,
         feature_snapshot: ChunkSnapshot,
         chunk: &GeneratedChunk,
         scheduled_block_ticks: Vec<ScheduledTickRecord>,
@@ -55,6 +94,8 @@ impl PendingLightStatus {
         generated_chunks: impl IntoIterator<Item = (&'a ChunkPos, &'a GeneratedChunk)>,
         retained_dependencies: impl IntoIterator<Item = (&'a ChunkPos, &'a MutableChunkBlockBuffer)>,
     ) -> Self {
+        let pos = token.pos;
+        debug_assert_eq!(token.feature_revision, feature_snapshot.revision);
         let neighbor_blocks = retained_dependencies
             .into_iter()
             .filter_map(|(neighbor_pos, buffer)| {
@@ -73,6 +114,7 @@ impl PendingLightStatus {
             .collect();
 
         Self {
+            token,
             pos,
             feature_snapshot,
             scheduled_block_ticks,
