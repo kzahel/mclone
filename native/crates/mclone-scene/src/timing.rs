@@ -304,6 +304,26 @@ pub struct XrTerrainUploadSummary {
     pub poll_scheduler_pending_light_publications: usize,
     pub poll_scheduler_worldgen_mailbox_pending_jobs: usize,
     pub poll_scheduler_light_mailbox_pending_statuses: usize,
+    pub poll_scheduler_player_promotion_desired: usize,
+    pub poll_scheduler_player_promotion_queued: usize,
+    pub poll_scheduler_player_promotion_active: usize,
+    pub poll_scheduler_player_promotion_max_active: usize,
+    pub poll_scheduler_player_promotion_cancelled_before_admission: u64,
+    pub poll_scheduler_light_demand_queued: usize,
+    pub poll_scheduler_light_demands_cancelled: u64,
+    pub poll_scheduler_light_statuses_stale: u64,
+    pub poll_scheduler_completed_job_records_retained: usize,
+    pub poll_scheduler_recent_job_summaries_retained: usize,
+    pub poll_light_mailbox_admitted_statuses: usize,
+    pub poll_light_mailbox_admitted_owned_bytes: usize,
+    pub poll_light_mailbox_max_admitted_owned_bytes: usize,
+    pub poll_light_mailbox_max_batch_unique_input_chunks: usize,
+    pub poll_light_mailbox_max_batch_input_bytes: usize,
+    pub poll_light_mailbox_max_completed_owned_bytes: usize,
+    pub poll_light_mailbox_admission_rejections: usize,
+    pub poll_light_mailbox_oversize_admissions: usize,
+    pub poll_light_mailbox_cancelled_statuses: usize,
+    pub poll_light_mailbox_retained_light_chunk_count: usize,
     pub poll_updates: usize,
     pub poll_snapshot_updates: usize,
     pub poll_section_block_updates: usize,
@@ -617,6 +637,50 @@ pub(crate) fn xr_poll_diagnostics_upload_summary(
             .scheduler_worldgen_mailbox_pending_jobs,
         poll_scheduler_light_mailbox_pending_statuses: diagnostics
             .scheduler_light_mailbox_pending_statuses,
+        poll_scheduler_player_promotion_desired: diagnostics.scheduler_player_promotion_desired,
+        poll_scheduler_player_promotion_queued: diagnostics.scheduler_player_promotion_queued,
+        poll_scheduler_player_promotion_active: diagnostics.scheduler_player_promotion_active,
+        poll_scheduler_player_promotion_max_active: diagnostics
+            .scheduler_player_promotion_max_active,
+        poll_scheduler_player_promotion_cancelled_before_admission: diagnostics
+            .scheduler_player_promotion_cancelled_before_admission,
+        poll_scheduler_light_demand_queued: diagnostics.scheduler_light_demand_queued,
+        poll_scheduler_light_demands_cancelled: diagnostics.scheduler_light_demands_cancelled,
+        poll_scheduler_light_statuses_stale: diagnostics.scheduler_light_statuses_stale,
+        poll_scheduler_completed_job_records_retained: diagnostics
+            .scheduler_completed_job_records_retained,
+        poll_scheduler_recent_job_summaries_retained: diagnostics
+            .scheduler_recent_job_summaries_retained,
+        poll_light_mailbox_admitted_statuses: diagnostics
+            .light_status_mailbox_metrics
+            .admitted_statuses,
+        poll_light_mailbox_admitted_owned_bytes: diagnostics
+            .light_status_mailbox_metrics
+            .admitted_owned_bytes,
+        poll_light_mailbox_max_admitted_owned_bytes: diagnostics
+            .light_status_mailbox_metrics
+            .max_admitted_owned_bytes,
+        poll_light_mailbox_max_batch_unique_input_chunks: diagnostics
+            .light_status_mailbox_metrics
+            .max_batch_unique_input_chunks,
+        poll_light_mailbox_max_batch_input_bytes: diagnostics
+            .light_status_mailbox_metrics
+            .max_batch_input_bytes,
+        poll_light_mailbox_max_completed_owned_bytes: diagnostics
+            .light_status_mailbox_metrics
+            .max_completed_owned_bytes,
+        poll_light_mailbox_admission_rejections: diagnostics
+            .light_status_mailbox_metrics
+            .admission_rejections,
+        poll_light_mailbox_oversize_admissions: diagnostics
+            .light_status_mailbox_metrics
+            .oversize_admissions,
+        poll_light_mailbox_cancelled_statuses: diagnostics
+            .light_status_mailbox_metrics
+            .cancelled_statuses,
+        poll_light_mailbox_retained_light_chunk_count: diagnostics
+            .light_status_mailbox_metrics
+            .retained_light_chunk_count,
         poll_updates: diagnostics.updates,
         poll_snapshot_updates: diagnostics.snapshot_updates,
         poll_section_block_updates: diagnostics.section_block_updates,

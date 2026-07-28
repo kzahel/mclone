@@ -5420,6 +5420,42 @@ mod android {
                     .poll_scheduler_light_mailbox_pending_statuses
             );
             log::info!(
+                "MCLONE_ANDROID_XR_PERF_LIGHT_OWNERSHIP max_player_promotion_desired={} max_player_promotion_queued={} max_player_promotion_active={} player_promotion_max_active={} player_promotion_cancelled_before_admission={} latest_player_promotion_desired={} latest_player_promotion_queued={} latest_player_promotion_active={} max_light_demand_queued={} light_demands_cancelled={} light_statuses_stale={} latest_light_demand_queued={} max_light_mailbox_admitted_statuses={} max_light_mailbox_admitted_owned_bytes={} light_mailbox_capacity_high_water_bytes={} max_light_batch_unique_input_chunks={} max_light_batch_input_bytes={} max_completed_light_owned_bytes={} light_admission_rejections={} light_oversize_admissions={} light_cancelled_statuses={} latest_light_mailbox_admitted_statuses={} latest_light_mailbox_admitted_owned_bytes={} max_retained_light_chunks={} latest_retained_light_chunks={} max_completed_job_records_retained={} latest_completed_job_records_retained={} max_recent_job_summaries_retained={} latest_recent_job_summaries_retained={}",
+                self.max_upload.poll_scheduler_player_promotion_desired,
+                self.max_upload.poll_scheduler_player_promotion_queued,
+                self.max_upload.poll_scheduler_player_promotion_active,
+                self.max_upload.poll_scheduler_player_promotion_max_active,
+                self.max_upload
+                    .poll_scheduler_player_promotion_cancelled_before_admission,
+                latest_upload.poll_scheduler_player_promotion_desired,
+                latest_upload.poll_scheduler_player_promotion_queued,
+                latest_upload.poll_scheduler_player_promotion_active,
+                self.max_upload.poll_scheduler_light_demand_queued,
+                self.max_upload.poll_scheduler_light_demands_cancelled,
+                self.max_upload.poll_scheduler_light_statuses_stale,
+                latest_upload.poll_scheduler_light_demand_queued,
+                self.max_upload.poll_light_mailbox_admitted_statuses,
+                self.max_upload.poll_light_mailbox_admitted_owned_bytes,
+                self.max_upload.poll_light_mailbox_max_admitted_owned_bytes,
+                self.max_upload
+                    .poll_light_mailbox_max_batch_unique_input_chunks,
+                self.max_upload.poll_light_mailbox_max_batch_input_bytes,
+                self.max_upload.poll_light_mailbox_max_completed_owned_bytes,
+                self.max_upload.poll_light_mailbox_admission_rejections,
+                self.max_upload.poll_light_mailbox_oversize_admissions,
+                self.max_upload.poll_light_mailbox_cancelled_statuses,
+                latest_upload.poll_light_mailbox_admitted_statuses,
+                latest_upload.poll_light_mailbox_admitted_owned_bytes,
+                self.max_upload
+                    .poll_light_mailbox_retained_light_chunk_count,
+                latest_upload.poll_light_mailbox_retained_light_chunk_count,
+                self.max_upload
+                    .poll_scheduler_completed_job_records_retained,
+                latest_upload.poll_scheduler_completed_job_records_retained,
+                self.max_upload.poll_scheduler_recent_job_summaries_retained,
+                latest_upload.poll_scheduler_recent_job_summaries_retained
+            );
+            log::info!(
                 "MCLONE_ANDROID_XR_PERF_COMPILE_MAX pending_chunks_before={} pending_chunks_after={} pending_jobs_before={} pending_jobs_after={} max_pending_jobs={} available_slots_before={} available_slots_after={} neighbor_ready_sections={} near_exception_sections={} deferred_sections={} submitted_sections={} deadline_skipped_requests={} accepted_results={} queued_completed_results={} completed_sections={} stale_sections={} visibility_graph_builds={} visibility_graph_total_ms={:.3} visibility_graph_worst_ms={:.3}",
                 self.max_upload.pending_render_chunks_before,
                 self.max_upload.pending_render_chunks_after,
@@ -6619,6 +6655,66 @@ mod android {
             poll_scheduler_light_mailbox_pending_statuses: a
                 .poll_scheduler_light_mailbox_pending_statuses
                 .max(b.poll_scheduler_light_mailbox_pending_statuses),
+            poll_scheduler_player_promotion_desired: a
+                .poll_scheduler_player_promotion_desired
+                .max(b.poll_scheduler_player_promotion_desired),
+            poll_scheduler_player_promotion_queued: a
+                .poll_scheduler_player_promotion_queued
+                .max(b.poll_scheduler_player_promotion_queued),
+            poll_scheduler_player_promotion_active: a
+                .poll_scheduler_player_promotion_active
+                .max(b.poll_scheduler_player_promotion_active),
+            poll_scheduler_player_promotion_max_active: a
+                .poll_scheduler_player_promotion_max_active
+                .max(b.poll_scheduler_player_promotion_max_active),
+            poll_scheduler_player_promotion_cancelled_before_admission: a
+                .poll_scheduler_player_promotion_cancelled_before_admission
+                .max(b.poll_scheduler_player_promotion_cancelled_before_admission),
+            poll_scheduler_light_demand_queued: a
+                .poll_scheduler_light_demand_queued
+                .max(b.poll_scheduler_light_demand_queued),
+            poll_scheduler_light_demands_cancelled: a
+                .poll_scheduler_light_demands_cancelled
+                .max(b.poll_scheduler_light_demands_cancelled),
+            poll_scheduler_light_statuses_stale: a
+                .poll_scheduler_light_statuses_stale
+                .max(b.poll_scheduler_light_statuses_stale),
+            poll_scheduler_completed_job_records_retained: a
+                .poll_scheduler_completed_job_records_retained
+                .max(b.poll_scheduler_completed_job_records_retained),
+            poll_scheduler_recent_job_summaries_retained: a
+                .poll_scheduler_recent_job_summaries_retained
+                .max(b.poll_scheduler_recent_job_summaries_retained),
+            poll_light_mailbox_admitted_statuses: a
+                .poll_light_mailbox_admitted_statuses
+                .max(b.poll_light_mailbox_admitted_statuses),
+            poll_light_mailbox_admitted_owned_bytes: a
+                .poll_light_mailbox_admitted_owned_bytes
+                .max(b.poll_light_mailbox_admitted_owned_bytes),
+            poll_light_mailbox_max_admitted_owned_bytes: a
+                .poll_light_mailbox_max_admitted_owned_bytes
+                .max(b.poll_light_mailbox_max_admitted_owned_bytes),
+            poll_light_mailbox_max_batch_unique_input_chunks: a
+                .poll_light_mailbox_max_batch_unique_input_chunks
+                .max(b.poll_light_mailbox_max_batch_unique_input_chunks),
+            poll_light_mailbox_max_batch_input_bytes: a
+                .poll_light_mailbox_max_batch_input_bytes
+                .max(b.poll_light_mailbox_max_batch_input_bytes),
+            poll_light_mailbox_max_completed_owned_bytes: a
+                .poll_light_mailbox_max_completed_owned_bytes
+                .max(b.poll_light_mailbox_max_completed_owned_bytes),
+            poll_light_mailbox_admission_rejections: a
+                .poll_light_mailbox_admission_rejections
+                .max(b.poll_light_mailbox_admission_rejections),
+            poll_light_mailbox_oversize_admissions: a
+                .poll_light_mailbox_oversize_admissions
+                .max(b.poll_light_mailbox_oversize_admissions),
+            poll_light_mailbox_cancelled_statuses: a
+                .poll_light_mailbox_cancelled_statuses
+                .max(b.poll_light_mailbox_cancelled_statuses),
+            poll_light_mailbox_retained_light_chunk_count: a
+                .poll_light_mailbox_retained_light_chunk_count
+                .max(b.poll_light_mailbox_retained_light_chunk_count),
             poll_updates: a.poll_updates.max(b.poll_updates),
             poll_snapshot_updates: a.poll_snapshot_updates.max(b.poll_snapshot_updates),
             poll_section_block_updates: a
