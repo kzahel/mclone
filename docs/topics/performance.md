@@ -90,7 +90,27 @@ Settled orbit still has the pre-existing presentation tail: the adjacent
 parent already missed RD5 p95 and RD7 p95/over-period limits, while the final
 candidate retains near-threshold RD5 work and one isolated over-2x RD7 frame.
 That gate is not waived, but it is no longer a reason to expand scheduler or
-Light ownership. The full execution and exception disposition are in
+Light ownership.
+
+The 2026-07-28 post-closeout A/B removed a dynamic-scene confound. Exact-only
+parent/final 45-second RD5 orbits with actors skipped measured
+`4.918/4.841ms` average app work, `8.127/8.005ms` app-work p95,
+`3.275/3.271ms` average thread CPU, and `4.888/4.887ms` thread-CPU p95.
+Stable foreground cost is unchanged even though final Light request count rose
+from 37 to 70. The final settle time also rose from `19.627s` to `33.186s`, so
+request fragmentation remains a useful-throughput/setup concern rather than a
+frame-time reason to relax memory bounds.
+
+The explicit LOD-on control clarifies the product problem. On
+`mclone-overworld-v1`, exact/composed actor-skipped orbits measured
+`4.068/10.723ms` average app work and `4.858/12.889ms` p95. The composed lane
+was horizon-active and target-ready and spent only `0.2%` of frames over the
+period. Restoring ten actors raised composed work to `12.252ms` average,
+`15.151ms` p95, and `16.3%` over-period. Earlier accepted composed rows had
+only six actors. Actor-skipped rows are attribution controls, never product
+acceptance; normal actors plus LOD remain binding.
+
+The full execution and exception disposition are in
 [`chunk-lighting-admission-and-backpressure.md`](chunk-lighting-admission-and-backpressure.md).
 
 The next bounded renderer experiment remains Tactical
@@ -189,6 +209,14 @@ queue growth, or feature-off regression. The risk is proportional CPU and
 upload work as visible actor count, animation cadence, browser load, or XR
 refresh rate grows.
 
+Physical Quest attribution now makes that risk release-relevant. In the same
+LOD-on RD5 orbit, suppressing ten actors reduced average app work from
+`12.252ms` to `10.723ms`, p95 from `15.151ms` to `12.889ms`, and average
+thread CPU from `9.363ms` to `8.258ms`. The no-actor row passes the main p95
+and over-period limits; the normal-actor row does not. This proves material
+actor-enabled cost, not yet that full-mesh invalidation is its only component.
+Add the counters below before assigning the entire delta to mesh rebuilds.
+
 The preferred bounded pickup order is:
 
 1. Introduce an actor topology key that excludes pose-only fields while
@@ -224,9 +252,12 @@ Acceptance evidence should include:
 - a fixture where one actor moves while multiple actors remain stationary;
 - unchanged direct actor pixels and actor ordering;
 - native flat, per-eye stereo, full-frame multiview where available, and
-  production browser WebGPU coverage; and
+  production browser WebGPU coverage;
 - release comparisons showing that the direct single-world path and idle
-  unchanged-actor frames remain allocation- and upload-free.
+  unchanged-actor frames remain allocation- and upload-free; and
+- physical Quest RD5 composed-orbit pairs with normal actors and
+  `--xr-skip-actors`, while treating the latter as attribution-only and
+  retaining the normal-actor absolute frame gate.
 
 Preserve Tactical 179's ownership contract: immutable atlas/figure/pipeline
 resources may be shared, but mutable actor caches remain per drawable world.

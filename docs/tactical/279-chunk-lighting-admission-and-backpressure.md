@@ -208,6 +208,27 @@ renderer baseline and Tactical
 [`278`](278-quest-procedural-horizon-multiview.md), not with another expansion
 of Light ownership.
 
+Post-closeout attribution strengthened that disposition. The original normal
+RD5 comparison rendered nine actors on the parent and ten on the candidate.
+With actors skipped and all other exact-only RD5 orbit settings matched, the
+parent/final app-work average was `4.918/4.841ms`, app-work p95 was
+`8.127/8.005ms`, thread-CPU average was `3.275/3.271ms`, and thread-CPU p95
+was `4.888/4.887ms`. Stable foreground cost is unchanged.
+
+That control also exposed a separate setup/throughput concern: parent/final
+settle time was `19.627/33.186s` and Light requests were `37/70`. A forced
+parent batch-size-four diagnostic produced 76 requests. Future Light batching
+work should reduce request fragmentation without widening the accepted
+promotion or mailbox lifetime bounds.
+
+An explicit `mclone-overworld-v1` LOD-on orbit reported the horizon active and
+target-ready throughout. With actors skipped it measured `10.723ms` average,
+`12.889ms` p95, and `0.2%` over-period. With ten normal actors it measured
+`12.252ms`, `15.151ms`, and `16.3%`. The latter is the binding product result;
+the former is attribution evidence only. This localizes the current
+presentation failure to the combined horizon/actor workload rather than the
+bounded Light scheduler.
+
 ## Reference Source
 
 Read and preserve the behavioral shape of:
@@ -263,7 +284,9 @@ server-update queue stayed at zero and render compilation remained bounded.
 - Do not make distant terrain, multiview, or XR rendering responsible for
   authoritative chunk admission.
 - Do not hide the issue by lowering a platform's configured render distance,
-  disabling actors, or disabling lighting.
+  disabling actors, or disabling lighting. `--xr-skip-actors` is permitted
+  only as a matched attribution control and never substitutes for the normal
+  actor product gate.
 - Do not parallelize overlapping light worlds before bounded ownership and
   request identity are correct.
 - Do not expose player-ticket or light-mailbox limits as ordinary graphics
@@ -715,6 +738,15 @@ pnpm native:android-xr:perf:orbit:rd5:metrics
 pnpm native:android-xr:perf:churn:rd5:metrics
 ```
 
+For changes to shared scheduling, publication, worker, or completion policy,
+also alternate a 45-second exact-only RD5 orbit on the parent and candidate
+with `--xr-skip-actors`. This lane normalizes dynamic scene composition and
+answers whether foreground app/thread CPU changed. It is attribution-only:
+normal-actor orbit, churn, and flight rows remain binding. Record
+`actors/drawn_actors`, horizon active/ready/draw facts, settle time, worldgen
+and Light request counts, app-work p50/p95/p99, thread-CPU p50/p95/p99, and
+over-period frames.
+
 Candidates changing shared admission, publication, worker, or completion
 policy must additionally run:
 
@@ -758,6 +790,12 @@ Quest streaming comparison additionally gates:
 - current-center readiness remains prioritized;
 - bounded Light ownership and completed history; and
 - a stable memory plateau rather than growth proportional to distance.
+
+Do not infer a scheduler frame regression from normal rows with different
+actor counts. Conversely, do not use a passing actor-skipped control to accept
+a normal-actor product failure. Report both and route the latter to the
+renderer/actor owner while retaining the scheduler's memory and useful-
+throughput gates.
 
 Quest results within `0.5ms` of a threshold get one thermally separated rerun.
 Do not run surprising rows back-to-back on a heat-soaked headset.

@@ -4,7 +4,8 @@ Topic: `chunk-lighting-admission-and-backpressure`
 
 Status: implemented and physically memory-accepted 2026-07-28. Tactical
 [`279`](../tactical/279-chunk-lighting-admission-and-backpressure.md) records
-the execution and the remaining pre-existing Quest orbit frame-tail exception.
+the execution, the post-closeout Quest frame-time attribution, and the
+remaining presentation-tail exception.
 
 ## Scope
 
@@ -138,6 +139,65 @@ the final RD7 row contains one isolated over-2x app-work frame. Those absolute
 presentation failures are not waived; they remain tracked separately from
 this scheduler's passing memory, useful-throughput, churn, flight, and
 convergence acceptance.
+
+### Post-closeout Quest frame-time attribution
+
+A follow-up review separated stable foreground frame cost from cold-load
+throughput and variable actor population. The original normal-actor RD5 rows
+were not composition-matched: the hot parent rendered nine actors at
+`8.240ms` average app work / `6.454ms` average thread CPU, while the final
+candidate rendered ten at `9.543ms` / `7.719ms`.
+
+The same exact-only 45-second RD5 orbit was therefore repeated with
+`--xr-skip-actors` on APKs built from the adjacent parent `01a221b8` and final
+runtime code `10ee9156`:
+
+| Runtime | Settle | Worldgen / Light requests | App avg / p95 | Thread CPU avg / p95 |
+|---|---:|---:|---:|---:|
+| parent `01a221b8` | `19.627s` | `10 / 37` | `4.918 / 8.127ms` | `3.275 / 4.888ms` |
+| final `10ee9156` | `33.186s` | `28 / 70` | `4.841 / 8.005ms` | `3.271 / 4.887ms` |
+
+Both rows rendered the same 1,936 ready sections, 593 submitted sections, 13
+drawn sections, and zero actors; both explicitly reported
+`horizon_active=false`. Average and p95 app work and thread CPU are therefore
+neutral to slightly better in the bounded candidate despite substantially more
+background requests. The apparent normal-row regression is not attributable
+to the scheduler.
+
+The request and settle differences are still useful evidence. Forcing the
+parent to Light batches of four raised its Light requests to 76, confirming
+that smaller ownership-safe batches can add worker dispatch overhead. This is
+a cold-load/useful-throughput follow-up, not a stable XR frame-time regression.
+Any batching improvement must preserve the four-promotion and total Light
+count/byte bounds and pass the existing desktop throughput and Quest
+frame-safety gates. The accepted limits must not be widened based on
+composition-confounded orbit rows.
+
+An explicit LOD-on control then used `mclone-overworld-v1`, the same fixed
+view, and production per-eye frame overlap:
+
+| RD5 orbit lane | Actors | App avg / p95 | Thread CPU avg / p95 | App GPU | Over-period |
+|---|---:|---:|---:|---:|---:|
+| exact attribution | `0` | `4.068 / 4.858ms` | `3.195 / 3.834ms` | `1.746ms` | `0.0%` |
+| composed attribution | `0` | `10.723 / 12.889ms` | `8.258 / 9.333ms` | `5.332ms` | `0.2%` |
+| composed product | `10` | `12.252 / 15.151ms` | `9.363 / 11.850ms` | `5.524ms` | `16.3%` |
+
+The composed rows reported the horizon active and target-ready throughout,
+ending at 10 drawn levels and 47 terrain tiles. The actor-skipped composed row
+is just an attribution control: it passes the main RD5 p95 and over-period
+limits but still contains the existing isolated long instrumentation/present
+outlier. The normal ten-actor row is the product-facing result and fails p95
+and over-period. Earlier accepted composed-orbit rows rendered six actors, so
+actor population is a material source of the baseline variance. The known
+whole-mesh actor invalidation in
+[`performance.md`](performance.md#hp-1-split-actor-pose-updates-from-whole-mesh-rebuilds)
+is the first owner to instrument, but this evidence does not yet claim it is
+the only actor-enabled cost.
+
+Future scheduler comparisons must include the actor-skipped exact lane as a
+paired attribution control and must also retain normal-actor RD5/RD7 product
+rows. Disabling actors is never an acceptance waiver. Every recorded row must
+include `actors`, `drawn_actors`, and the horizon active/ready/draw markers.
 
 ## Incident Finding Before The Fix
 

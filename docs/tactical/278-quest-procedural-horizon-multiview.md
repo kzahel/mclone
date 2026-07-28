@@ -18,6 +18,19 @@ horizon draw set for each eye. This is the first evidence that a true
 full-frame multiview horizon could improve the production workload. Older
 exact-only multiview results are context, not an answer.
 
+A 2026-07-28 follow-up found that dynamic actor population materially
+confounded the orbit comparison. The earlier composed rows rendered six
+actors. On final bounded-lighting runtime code, a 45-second composed orbit
+with ten actors measured `12.252ms` average app work, `15.151ms` p95, and
+`16.3%` over-period. The same lane with actors skipped measured
+`10.723ms`, `12.889ms`, and `0.2%`; exact-only with actors skipped measured
+`4.068ms` average and `4.858ms` p95. The horizon was active and target-ready
+throughout the composed rows.
+
+The actor-skipped lane is an attribution control, not a product workaround.
+The multiview experiment must improve the normal actor+LOD workload, and its
+analysis must not attribute actor-population variance to the horizon renderer.
+
 ## Objective
 
 Add the procedural terrain and vegetation backdrop to the existing optional
@@ -52,15 +65,20 @@ default. Unsupported runtimes retain the current per-eye frame-overlap path.
    accepted low-angle tree/hill composition.
 4. Release Quest 3 RD5 alternating stationary
    per-eye/multiview/per-eye samples.
-5. Release Quest 3 RD5 alternating settled-orbit samples.
-6. Compare app-work p50/p95/p99, over-period frames, app GPU, submission
-   cadence, horizon tile/tree counts, and render-stage CPU timings.
+5. Release Quest 3 RD5 alternating settled-orbit samples with normal actors.
+6. Repeat the alternating settled-orbit comparison with actors skipped to
+   isolate horizon/render-path cost.
+7. Compare app-work p50/p95/p99, thread-CPU p50/p95/p99, over-period frames,
+   app GPU, submission cadence, actor/drawn-actor counts, horizon
+   active/ready/tile/tree counts, and render-stage CPU timings.
 
 ## Decision Gate
 
 Promote multiview only if it materially improves moving 72-Hz tails without a
 stationary regression, visual/depth discrepancy, or unsupported-runtime
-product problem. If it is neutral, keep the implementation opt-in only if its
-maintenance cost is low and record the result. If it regresses, retain the
-per-eye path and use Tactical 277's remaining CPU attribution to choose the
-next bounded optimization.
+product problem. A gain confined to the actor-skipped control is insufficient;
+the normal-actor row remains the product gate. If it is neutral, keep the
+implementation opt-in only if its maintenance cost is low and record the
+result. If it regresses, retain the per-eye path and use Tactical 277's
+remaining CPU attribution plus the actor counters in the performance topic to
+choose the next bounded optimization.

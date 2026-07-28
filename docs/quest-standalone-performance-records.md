@@ -161,6 +161,34 @@ The stationary product gate is now clean. Moving presentation remains close
 to 72 Hz but has a reproducible CPU-side tail; app GPU remains well under the
 period. Tactical 278 owns the true horizon multiview experiment.
 
+Post-closeout frame attribution used final runtime code `10ee9156`, the same
+physical device and view, 45-second orbit samples, two render-compile workers,
+and bounded upload/accept/completion budgets `16/64/2`:
+
+| Lane | Actors | App avg | App p95 | Thread CPU avg / p95 | App GPU | Over-period |
+|---|---:|---:|---:|---:|---:|---:|
+| exact, actors skipped | `0` | `4.068ms` | `4.858ms` | `3.195 / 3.834ms` | `1.746ms` | `0.0%` |
+| composed, actors skipped | `0` | `10.723ms` | `12.889ms` | `8.258 / 9.333ms` | `5.332ms` | `0.2%` |
+| composed, product | `10` | `12.252ms` | `15.151ms` | `9.363 / 11.850ms` | `5.524ms` | `16.3%` |
+
+Both composed rows were horizon-active and target-ready throughout and ended
+with 10 drawn levels and 47 terrain tiles. The actor-skipped composed row is an
+attribution control and not a product acceptance waiver. The ten-actor row is
+the binding result and shows that dynamic actor cost consumes the remaining
+RD5 margin; the older composed rows above rendered six actors.
+
+The same investigation compared exact-only actor-skipped parent
+`01a221b8` and final `10ee9156` APKs:
+
+| Runtime | Settle | Worldgen / Light requests | App avg / p95 | Thread CPU avg / p95 |
+|---|---:|---:|---:|---:|
+| parent | `19.627s` | `10 / 37` | `4.918 / 8.127ms` | `3.275 / 4.888ms` |
+| final | `33.186s` | `28 / 70` | `4.841 / 8.005ms` | `3.271 / 4.887ms` |
+
+Foreground frame cost is unchanged. The higher request count and longer cold
+settle remain a throughput/setup follow-up; they do not support widening the
+accepted Light memory bounds.
+
 Persistent 8x travel (`34.4` blocks/second):
 
 | Sample | Distance | FPS | App p95 | Over-period | Exact-center misses | Foreground max | Cache max / high-water |
