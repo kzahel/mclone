@@ -1422,8 +1422,25 @@ impl<R: IntegratedServerRunner> LocalIntegratedSceneRuntime<R> {
             }
             if Instant::now() >= deadline {
                 bail!(
-                    "timed out waiting for local integrated worldgen jobs after {:.3}s",
-                    timeout.as_secs_f64()
+                    "timed out waiting for local integrated worldgen jobs after {:.3}s \
+                     (pending_jobs={}, pending_publications={}, promotion={}/{}/{}, \
+                     light_demand={}, light_mailbox={}, light_tickets={}, completed_light={}, \
+                     loaded={}, visible={}, cancelled={}, stale={}, worker_cancelled={})",
+                    timeout.as_secs_f64(),
+                    diagnostics.pending_jobs,
+                    diagnostics.pending_publications,
+                    diagnostics.scheduler_metrics.player_promotion_queued,
+                    diagnostics.scheduler_metrics.player_promotion_active,
+                    diagnostics.scheduler_metrics.player_promotion_desired,
+                    diagnostics.scheduler_metrics.light_demand_queued,
+                    diagnostics.light_status_mailbox_pending_statuses,
+                    diagnostics.scheduler_metrics.light_ticket_count,
+                    diagnostics.scheduler_metrics.completed_light_statuses,
+                    diagnostics.scheduler_metrics.loaded_snapshot_chunks,
+                    diagnostics.scheduler_metrics.client_visible_chunks,
+                    diagnostics.scheduler_metrics.light_demands_cancelled,
+                    diagnostics.scheduler_metrics.light_statuses_stale,
+                    diagnostics.light_status_mailbox_metrics.cancelled_statuses,
                 );
             }
             if diagnostics.update_queue_depth == 0

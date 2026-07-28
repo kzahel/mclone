@@ -1116,8 +1116,44 @@ fn print_light_status_mailbox_metrics_json(
         micros_to_ms(metrics.total_completion_drain_wait_us)
     );
     println!(
-        "{indent}  \"max_completion_drain_wait_ms\": {:.3}",
+        "{indent}  \"max_completion_drain_wait_ms\": {:.3},",
         micros_to_ms(metrics.max_completion_drain_wait_us)
+    );
+    println!(
+        "{indent}  \"admitted_statuses\": {},",
+        metrics.admitted_statuses
+    );
+    println!(
+        "{indent}  \"admitted_owned_bytes\": {},",
+        metrics.admitted_owned_bytes
+    );
+    println!(
+        "{indent}  \"max_admitted_owned_bytes\": {},",
+        metrics.max_admitted_owned_bytes
+    );
+    println!(
+        "{indent}  \"max_batch_unique_input_chunks\": {},",
+        metrics.max_batch_unique_input_chunks
+    );
+    println!(
+        "{indent}  \"max_batch_input_bytes\": {},",
+        metrics.max_batch_input_bytes
+    );
+    println!(
+        "{indent}  \"max_completed_owned_bytes\": {},",
+        metrics.max_completed_owned_bytes
+    );
+    println!(
+        "{indent}  \"admission_rejections\": {},",
+        metrics.admission_rejections
+    );
+    println!(
+        "{indent}  \"oversize_admissions\": {},",
+        metrics.oversize_admissions
+    );
+    println!(
+        "{indent}  \"cancelled_statuses\": {}",
+        metrics.cancelled_statuses
     );
     println!("{indent}}}{suffix}");
 }

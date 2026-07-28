@@ -412,6 +412,44 @@ impl ChunkDistanceManager {
             .map_or(UNLOADED_CHUNK_LEVEL, |ticket| ticket.level)
     }
 
+    pub(crate) fn ticket_level_at_excluding(
+        &self,
+        pos: ChunkPos,
+        excluded_type: ChunkTicketType,
+    ) -> i32 {
+        self.tickets
+            .get(&pos)
+            .into_iter()
+            .flatten()
+            .filter(|ticket| ticket.ticket_type != excluded_type)
+            .map(|ticket| ticket.level)
+            .min()
+            .unwrap_or(UNLOADED_CHUNK_LEVEL)
+    }
+
+    pub(crate) fn active_level_at_excluding(
+        &self,
+        pos: ChunkPos,
+        excluded_type: ChunkTicketType,
+    ) -> i32 {
+        self.tickets
+            .iter()
+            .flat_map(|(source_pos, tickets)| {
+                tickets
+                    .iter()
+                    .filter(move |ticket| ticket.ticket_type != excluded_type)
+                    .map(move |ticket| (*source_pos, ticket.level))
+            })
+            .filter_map(|(source_pos, level)| {
+                let [dx, dz] = self.topology.shortest_chunk_displacement(source_pos, pos);
+                let distance = i32::try_from(dx.abs().max(dz.abs())).ok()?;
+                let propagated = level.saturating_add(distance);
+                (propagated <= MAX_CHUNK_DISTANCE).then_some(propagated)
+            })
+            .min()
+            .unwrap_or(UNLOADED_CHUNK_LEVEL)
+    }
+
     pub(crate) fn active_level_at(&self, pos: ChunkPos) -> i32 {
         self.active_levels()
             .get(&pos)

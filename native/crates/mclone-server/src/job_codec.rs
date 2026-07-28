@@ -44,7 +44,7 @@ const WORLDGEN_RESPONSE_MAGIC: u32 = 0x5747_4A53;
 const WORLDGEN_DELTA_REQUEST_MAGIC: u32 = 0x5747_4A44;
 const LIGHT_REQUEST_MAGIC: u32 = 0x4C54_4A52;
 const LIGHT_RESPONSE_MAGIC: u32 = 0x4C54_4A53;
-const JOB_FRAME_VERSION: u32 = 6;
+const JOB_FRAME_VERSION: u32 = 7;
 const SERVER_JOB_ACTOR_INIT_MAGIC: u32 = 0x534A_4149;
 const SERVER_JOB_ACTOR_INIT_VERSION: u32 = 1;
 const SERVER_JOB_ACTOR_INIT_FRAME_BYTES: usize = 9;
@@ -1124,6 +1124,7 @@ impl FrameWriter {
             self.write_light_section(section)?;
         }
         self.write_bool(status.batch_compute_leader);
+        self.write_bool(status.cancelled);
         self.write_u128(status.compute_us);
         self.write_level_light_timing(status.timing);
         Ok(())
@@ -1557,6 +1558,7 @@ impl<'a> FrameReader<'a> {
         let light_sections =
             self.read_vec("completed light sections", FrameReader::read_light_section)?;
         let batch_compute_leader = self.read_bool()?;
+        let cancelled = self.read_bool()?;
         let compute_us = self.read_u128()?;
         let timing = self.read_level_light_timing()?;
         Ok(CompletedLightStatus {
@@ -1569,6 +1571,7 @@ impl<'a> FrameReader<'a> {
             batch_compute_leader,
             compute_us,
             timing,
+            cancelled,
         })
     }
 

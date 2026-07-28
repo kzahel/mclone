@@ -97,6 +97,17 @@ pub struct LightStatusMailboxMetrics {
     pub last_completion_drain_wait_us: u128,
     pub total_completion_drain_wait_us: u128,
     pub max_completion_drain_wait_us: u128,
+    /// Requests retain their capacity reservation until the scheduler drains
+    /// the corresponding terminal completion.
+    pub admitted_statuses: usize,
+    pub admitted_owned_bytes: usize,
+    pub max_admitted_owned_bytes: usize,
+    pub max_batch_unique_input_chunks: usize,
+    pub max_batch_input_bytes: usize,
+    pub max_completed_owned_bytes: usize,
+    pub admission_rejections: usize,
+    pub oversize_admissions: usize,
+    pub cancelled_statuses: usize,
     /// Live count of chunks currently retained in the light worker's
     /// `RetainedInitialLightState` (block snapshot + engine `DataLayer`s). Set by
     /// the worker after each compute batch and each unload eviction; the bounded

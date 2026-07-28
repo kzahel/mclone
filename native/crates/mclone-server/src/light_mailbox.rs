@@ -5,7 +5,7 @@
 //! keeps propagation work outside `ServerChunkCache`'s immediate tick body. WASM
 //! keeps an inline backend until worker plumbing exists there.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::fmt;
 use std::time::Duration;
 
@@ -24,13 +24,19 @@ use crate::job_codec::{
     ServerJobActorKind, decode_light_status_response, encode_light_status_request,
 };
 use crate::level_light_bridge::LevelLightComputationTiming;
-use crate::light_status::{LightRequestToken, PendingLightStatusBatch};
+use crate::light_status::{
+    LightRequestToken, PendingLightStatus, PendingLightStatusBatch, snapshot_heap_bytes_estimate,
+    ticks_heap_bytes_estimate,
+};
 use crate::light_world::RetainedInitialLightState;
 use crate::persistence::ScheduledTickRecord;
 use crate::timing::{TimingSample, timing_elapsed_us, timing_start};
 #[cfg(target_arch = "wasm32")]
 use crate::wasm_job_worker::WasmJobWorker;
 use crate::{LightStatusMailboxKind, LightStatusMailboxMetrics, WorkerFrameMetrics};
+
+pub(crate) const DEFAULT_MAX_ADMITTED_LIGHT_STATUSES: usize = 18;
+pub(crate) const DEFAULT_MAX_ADMITTED_LIGHT_OWNED_BYTES: usize = 64 * 1024 * 1024;
 
 #[derive(Debug)]
 pub(crate) struct CompletedLightStatus {
@@ -43,6 +49,7 @@ pub(crate) struct CompletedLightStatus {
     pub(crate) batch_compute_leader: bool,
     pub(crate) compute_us: u128,
     pub(crate) timing: LevelLightComputationTiming,
+    pub(crate) cancelled: bool,
 }
 
 impl CompletedLightStatus {
@@ -68,22 +75,83 @@ impl CompletedLightStatus {
                     batch_compute_leader,
                     compute_us: if batch_compute_leader { compute_us } else { 0 },
                     timing,
+                    cancelled: false,
                 }
             })
             .collect()
+    }
+
+    fn cancelled(pending: PendingLightStatus) -> Self {
+        Self {
+            token: pending.token,
+            pos: pending.pos,
+            feature_snapshot: pending.feature_snapshot,
+            scheduled_block_ticks: pending.scheduled_block_ticks,
+            scheduled_fluid_ticks: pending.scheduled_fluid_ticks,
+            light_sections: Vec::new(),
+            batch_compute_leader: false,
+            compute_us: 0,
+            timing: LevelLightComputationTiming::default(),
+            cancelled: true,
+        }
+    }
+
+    pub(crate) fn owned_bytes_estimate(&self) -> usize {
+        let light_bytes = self.light_sections.iter().fold(
+            self.light_sections
+                .capacity()
+                .saturating_mul(std::mem::size_of::<PackedLightSection>()),
+            |bytes, section| {
+                bytes
+                    .saturating_add(section.sky.as_ref().map_or(0, |values| values.capacity()))
+                    .saturating_add(section.block.as_ref().map_or(0, |values| values.capacity()))
+            },
+        );
+        std::mem::size_of_val(self)
+            .saturating_add(snapshot_heap_bytes_estimate(&self.feature_snapshot))
+            .saturating_add(ticks_heap_bytes_estimate(&self.scheduled_block_ticks))
+            .saturating_add(ticks_heap_bytes_estimate(&self.scheduled_fluid_ticks))
+            .saturating_add(light_bytes)
     }
 }
 
 pub(crate) struct LightStatusMailbox {
     backend: LightStatusMailboxBackend,
     pending_count: usize,
+    pending_owned_bytes: usize,
+    max_pending_owned_bytes: usize,
+    max_admitted_statuses: usize,
+    max_admitted_owned_bytes: usize,
+    reservations: BTreeMap<LightRequestToken, usize>,
+    max_batch_unique_input_chunks: usize,
+    max_batch_input_bytes: usize,
+    max_completed_owned_bytes: usize,
+    admission_rejections: usize,
+    oversize_admissions: usize,
 }
 
 impl LightStatusMailbox {
     pub(crate) fn new() -> Self {
+        Self::with_limits(
+            DEFAULT_MAX_ADMITTED_LIGHT_STATUSES,
+            DEFAULT_MAX_ADMITTED_LIGHT_OWNED_BYTES,
+        )
+    }
+
+    fn with_limits(max_admitted_statuses: usize, max_admitted_owned_bytes: usize) -> Self {
         Self {
             backend: LightStatusMailboxBackend::new(None),
             pending_count: 0,
+            pending_owned_bytes: 0,
+            max_pending_owned_bytes: 0,
+            max_admitted_statuses: max_admitted_statuses.max(1),
+            max_admitted_owned_bytes: max_admitted_owned_bytes.max(1),
+            reservations: BTreeMap::new(),
+            max_batch_unique_input_chunks: 0,
+            max_batch_input_bytes: 0,
+            max_completed_owned_bytes: 0,
+            admission_rejections: 0,
+            oversize_admissions: 0,
         }
     }
 
@@ -92,20 +160,78 @@ impl LightStatusMailbox {
         Self {
             backend: LightStatusMailboxBackend::new(Some(config)),
             pending_count: 0,
+            pending_owned_bytes: 0,
+            max_pending_owned_bytes: 0,
+            max_admitted_statuses: DEFAULT_MAX_ADMITTED_LIGHT_STATUSES,
+            max_admitted_owned_bytes: DEFAULT_MAX_ADMITTED_LIGHT_OWNED_BYTES,
+            reservations: BTreeMap::new(),
+            max_batch_unique_input_chunks: 0,
+            max_batch_input_bytes: 0,
+            max_completed_owned_bytes: 0,
+            admission_rejections: 0,
+            oversize_admissions: 0,
         }
     }
 
-    pub(crate) fn enqueue_batch(&mut self, batch: PendingLightStatusBatch) {
+    pub(crate) fn try_enqueue_batch(
+        &mut self,
+        batch: PendingLightStatusBatch,
+    ) -> Result<(), PendingLightStatusBatch> {
         if batch.is_empty() {
-            return;
+            return Ok(());
         }
-        self.pending_count = self.pending_count.saturating_add(batch.target_count());
+        let target_count = batch.target_count();
+        let owned_bytes = batch.lifecycle_owned_bytes_estimate();
+        let unique_input_chunks = batch.unique_input_count();
+        let input_bytes = batch.owned_input_bytes();
+        let fits_normal_limit = self.pending_count.saturating_add(target_count)
+            <= self.max_admitted_statuses
+            && self.pending_owned_bytes.saturating_add(owned_bytes)
+                <= self.max_admitted_owned_bytes;
+        let oversize = !fits_normal_limit
+            && self.pending_count == 0
+            && target_count == 1
+            && owned_bytes > self.max_admitted_owned_bytes;
+        if !fits_normal_limit && !oversize {
+            self.admission_rejections = self.admission_rejections.saturating_add(1);
+            return Err(batch);
+        }
+
+        let tokens = batch.tokens().collect::<Vec<_>>();
+        let base_reservation = owned_bytes / target_count;
+        let remainder = owned_bytes % target_count;
+        for (index, token) in tokens.into_iter().enumerate() {
+            let reservation = base_reservation + usize::from(index < remainder);
+            assert!(
+                self.reservations.insert(token, reservation).is_none(),
+                "Light request token was admitted twice"
+            );
+        }
+        self.pending_count = self.pending_count.saturating_add(target_count);
+        self.pending_owned_bytes = self.pending_owned_bytes.saturating_add(owned_bytes);
+        self.max_pending_owned_bytes = self.max_pending_owned_bytes.max(self.pending_owned_bytes);
+        self.max_batch_unique_input_chunks =
+            self.max_batch_unique_input_chunks.max(unique_input_chunks);
+        self.max_batch_input_bytes = self.max_batch_input_bytes.max(input_bytes);
+        if oversize {
+            self.oversize_admissions = self.oversize_admissions.saturating_add(1);
+        }
         self.backend.enqueue_batch(batch, self.pending_count);
+        Ok(())
     }
 
     pub(crate) fn drain_completed(&mut self) -> Vec<CompletedLightStatus> {
         let completed = self.backend.drain_completed();
-        self.pending_count = self.pending_count.saturating_sub(completed.len());
+        for status in &completed {
+            self.max_completed_owned_bytes = self
+                .max_completed_owned_bytes
+                .max(status.owned_bytes_estimate());
+            if let Some(owned_bytes) = self.reservations.remove(&status.token) {
+                self.pending_count = self.pending_count.saturating_sub(1);
+                self.pending_owned_bytes = self.pending_owned_bytes.saturating_sub(owned_bytes);
+            }
+            self.backend.acknowledge_terminal(status.token);
+        }
         completed
     }
 
@@ -118,6 +244,12 @@ impl LightStatusMailbox {
         self.backend.enqueue_unload(positions);
     }
 
+    pub(crate) fn cancel_token(&mut self, token: LightRequestToken) {
+        if self.reservations.contains_key(&token) {
+            self.backend.cancel_token(token);
+        }
+    }
+
     /// Block until the light worker has drained every request enqueued so far
     /// (including unloads), so the retained gauge reflects them. Returns `false`
     /// on timeout / dead worker.
@@ -127,6 +259,11 @@ impl LightStatusMailbox {
 
     pub(crate) const fn pending_count(&self) -> usize {
         self.pending_count
+    }
+
+    pub(crate) const fn remaining_status_capacity(&self) -> usize {
+        self.max_admitted_statuses
+            .saturating_sub(self.pending_count)
     }
 
     pub(crate) fn wait_for_completed(&mut self, timeout: Duration) -> bool {
@@ -142,7 +279,16 @@ impl LightStatusMailbox {
     }
 
     pub(crate) fn mailbox_metrics(&self) -> LightStatusMailboxMetrics {
-        self.backend.mailbox_metrics()
+        let mut metrics = self.backend.mailbox_metrics();
+        metrics.admitted_statuses = self.pending_count;
+        metrics.admitted_owned_bytes = self.pending_owned_bytes;
+        metrics.max_admitted_owned_bytes = self.max_pending_owned_bytes;
+        metrics.max_batch_unique_input_chunks = self.max_batch_unique_input_chunks;
+        metrics.max_batch_input_bytes = self.max_batch_input_bytes;
+        metrics.max_completed_owned_bytes = self.max_completed_owned_bytes;
+        metrics.admission_rejections = self.admission_rejections;
+        metrics.oversize_admissions = self.oversize_admissions;
+        metrics
     }
 }
 
@@ -151,6 +297,7 @@ impl fmt::Debug for LightStatusMailbox {
         f.debug_struct("LightStatusMailbox")
             .field("backend", &self.backend)
             .field("pending_count", &self.pending_count)
+            .field("pending_owned_bytes", &self.pending_owned_bytes)
             .finish()
     }
 }
@@ -242,6 +389,14 @@ impl LightStatusMailboxBackend {
         self.mailbox_metrics.retained_light_chunk_count = self.light_state.retained_chunk_count();
     }
 
+    fn cancel_token(&mut self, _token: LightRequestToken) {
+        // An inline job has already completed synchronously. A Web Worker
+        // completion is still token-checked by the scheduler; capacity remains
+        // reserved until that terminal frame is drained.
+    }
+
+    fn acknowledge_terminal(&mut self, _token: LightRequestToken) {}
+
     fn wait_for_light_idle(&mut self, _timeout: Duration) -> bool {
         // Inline compute + eviction are synchronous; the web worker retains no
         // cross-batch state, so there is never a pending eviction to await.
@@ -280,6 +435,14 @@ struct LightStatusMailboxBackend {
     worker: Option<thread::JoinHandle<()>>,
     metrics: Arc<Mutex<WorkerFrameMetrics>>,
     mailbox_metrics: Arc<Mutex<LightStatusMailboxMetrics>>,
+    control: Arc<Mutex<LightStatusControlState>>,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, Default)]
+struct LightStatusControlState {
+    cancelled_tokens: std::collections::BTreeSet<LightRequestToken>,
+    pending_unloads: std::collections::BTreeSet<ChunkPos>,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -302,6 +465,8 @@ impl LightStatusMailboxBackend {
         let worker_metrics = Arc::clone(&metrics);
         let mailbox_metrics = Arc::new(Mutex::new(LightStatusMailboxMetrics::default()));
         let worker_mailbox_metrics = Arc::clone(&mailbox_metrics);
+        let control = Arc::new(Mutex::new(LightStatusControlState::default()));
+        let worker_control = Arc::clone(&control);
         let worker = thread::Builder::new()
             .name("mclone-light-status".to_owned())
             .spawn(move || {
@@ -314,8 +479,30 @@ impl LightStatusMailboxBackend {
                                 metrics.record_worker_start(queue_wait_us);
                             }
                             let request_start = timing_start();
-                            let completed =
-                                CompletedLightStatus::from_batch(&mut light_state, request.batch);
+                            let mut completed = Vec::with_capacity(request.target_count);
+                            let mut cancelled_statuses = 0_usize;
+                            let mut active = Vec::with_capacity(request.target_count);
+                            for pending in request.batch.into_statuses() {
+                                apply_pending_light_unloads(&worker_control, &mut light_state);
+                                let cancelled = worker_control
+                                    .lock()
+                                    .map(|mut control| {
+                                        control.cancelled_tokens.remove(&pending.token)
+                                    })
+                                    .unwrap_or(false);
+                                if cancelled {
+                                    cancelled_statuses = cancelled_statuses.saturating_add(1);
+                                    completed.push(CompletedLightStatus::cancelled(pending));
+                                } else {
+                                    active.push(pending);
+                                }
+                            }
+                            if !active.is_empty() {
+                                completed.extend(CompletedLightStatus::from_batch(
+                                    &mut light_state,
+                                    PendingLightStatusBatch::new(active),
+                                ));
+                            }
                             let compute_us = timing_elapsed_us(request_start);
                             let completed_at = timing_start();
                             for completed in completed {
@@ -339,18 +526,19 @@ impl LightStatusMailboxBackend {
                             }
                             if let Ok(mut metrics) = worker_mailbox_metrics.lock() {
                                 metrics.record_compute(request.target_count, compute_us);
-                                metrics.retained_light_chunk_count =
-                                    light_state.retained_chunk_count();
-                            }
-                        }
-                        LightStatusRequest::Unload(positions) => {
-                            light_state.evict_chunks(&positions);
-                            if let Ok(mut metrics) = worker_mailbox_metrics.lock() {
+                                metrics.cancelled_statuses = metrics
+                                    .cancelled_statuses
+                                    .saturating_add(cancelled_statuses);
                                 metrics.retained_light_chunk_count =
                                     light_state.retained_chunk_count();
                             }
                         }
                         LightStatusRequest::Sync(ack) => {
+                            apply_pending_light_unloads(&worker_control, &mut light_state);
+                            if let Ok(mut metrics) = worker_mailbox_metrics.lock() {
+                                metrics.retained_light_chunk_count =
+                                    light_state.retained_chunk_count();
+                            }
                             let _ = ack.send(());
                         }
                         LightStatusRequest::Shutdown => break,
@@ -366,6 +554,7 @@ impl LightStatusMailboxBackend {
             worker: Some(worker),
             metrics,
             mailbox_metrics,
+            control,
         }
     }
 
@@ -412,9 +601,21 @@ impl LightStatusMailboxBackend {
     }
 
     fn enqueue_unload(&mut self, positions: Vec<ChunkPos>) {
-        // Best-effort memory cleanup: if the worker has already shut down there is
-        // nothing left to evict, so a failed send is not fatal.
-        let _ = self.sender.send(LightStatusRequest::Unload(positions));
+        if let Ok(mut control) = self.control.lock() {
+            control.pending_unloads.extend(positions);
+        }
+    }
+
+    fn cancel_token(&mut self, token: LightRequestToken) {
+        if let Ok(mut control) = self.control.lock() {
+            control.cancelled_tokens.insert(token);
+        }
+    }
+
+    fn acknowledge_terminal(&mut self, token: LightRequestToken) {
+        if let Ok(mut control) = self.control.lock() {
+            control.cancelled_tokens.remove(&token);
+        }
     }
 
     fn wait_for_light_idle(&mut self, timeout: Duration) -> bool {
@@ -474,16 +675,26 @@ impl Drop for LightStatusMailboxBackend {
 #[cfg(not(target_arch = "wasm32"))]
 enum LightStatusRequest {
     ComputeBatch(LightStatusComputeRequest),
-    /// Evict unloaded chunks from the retained light state (155 P0). Rides the
-    /// same FIFO request channel as `ComputeBatch`, so an unload always applies
-    /// after any earlier compute for the same chunk and before any later relight.
-    Unload(Vec<ChunkPos>),
     /// Round-trip barrier: the worker replies on the carried channel once it has
     /// drained every earlier request. Lets callers observe the post-unload
     /// retained gauge deterministically (unloads produce no completion to wait
     /// on).
     Sync(mpsc::Sender<()>),
     Shutdown,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn apply_pending_light_unloads(
+    control: &Arc<Mutex<LightStatusControlState>>,
+    light_state: &mut RetainedInitialLightState,
+) {
+    let positions = control
+        .lock()
+        .map(|mut control| std::mem::take(&mut control.pending_unloads))
+        .unwrap_or_default()
+        .into_iter()
+        .collect::<Vec<_>>();
+    light_state.evict_chunks(&positions);
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -497,4 +708,127 @@ struct LightStatusComputeRequest {
 struct CompletedLightStatusMessage {
     completed: CompletedLightStatus,
     completed_at: Option<TimingSample>,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::light_status::PendingLightStatus;
+    use mclone_core::{ChunkRevision, ChunkStatus};
+
+    fn test_batch(id: u64, pos: ChunkPos) -> PendingLightStatusBatch {
+        let snapshot = ChunkSnapshot {
+            pos,
+            status: ChunkStatus::Features,
+            revision: ChunkRevision(id),
+            min_y: 0,
+            height: 16,
+            biomes: Vec::new(),
+            sections: Vec::new(),
+            light_correct: false,
+            light_sections: Vec::new(),
+        };
+        PendingLightStatusBatch::new(vec![PendingLightStatus::from_parts_with_token(
+            LightRequestToken::new(id, pos, snapshot.revision),
+            snapshot,
+            vec![0; 16 * 16 * 16],
+            Vec::new(),
+        )])
+    }
+
+    fn two_status_batch() -> PendingLightStatusBatch {
+        let mut statuses = test_batch(1, ChunkPos::new(0, 0)).into_statuses();
+        statuses.extend(test_batch(2, ChunkPos::new(1, 0)).into_statuses());
+        PendingLightStatusBatch::new(statuses)
+    }
+
+    #[test]
+    fn admission_reservation_remains_until_completion_is_drained() {
+        let mut mailbox = LightStatusMailbox::with_limits(1, usize::MAX);
+        mailbox
+            .try_enqueue_batch(test_batch(1, ChunkPos::new(0, 0)))
+            .unwrap();
+        assert!(mailbox.wait_for_completed(Duration::from_secs(5)));
+
+        let rejected = mailbox
+            .try_enqueue_batch(test_batch(2, ChunkPos::new(1, 0)))
+            .unwrap_err();
+        assert_eq!(mailbox.pending_count(), 1);
+        assert_eq!(mailbox.mailbox_metrics().admission_rejections, 1);
+
+        assert_eq!(mailbox.drain_completed().len(), 1);
+        assert_eq!(mailbox.pending_count(), 0);
+        mailbox.try_enqueue_batch(rejected).unwrap();
+    }
+
+    #[test]
+    fn one_oversize_status_cannot_admit_a_second_status() {
+        let mut mailbox = LightStatusMailbox::with_limits(2, 1);
+        mailbox
+            .try_enqueue_batch(test_batch(1, ChunkPos::new(0, 0)))
+            .unwrap();
+        assert!(
+            mailbox
+                .try_enqueue_batch(test_batch(2, ChunkPos::new(1, 0)))
+                .is_err()
+        );
+
+        let metrics = mailbox.mailbox_metrics();
+        assert_eq!(metrics.admitted_statuses, 1);
+        assert!(metrics.admitted_owned_bytes > 1);
+        assert_eq!(metrics.oversize_admissions, 1);
+        assert_eq!(metrics.admission_rejections, 1);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_worker_skips_a_cancelled_token_before_its_target() {
+        let mut mailbox = LightStatusMailbox::with_limits(2, usize::MAX);
+        let cancelled = LightRequestToken::new(2, ChunkPos::new(1, 0), ChunkRevision(2));
+        mailbox
+            .backend
+            .control
+            .lock()
+            .unwrap()
+            .cancelled_tokens
+            .insert(cancelled);
+
+        mailbox.try_enqueue_batch(two_status_batch()).unwrap();
+        assert!(mailbox.wait_for_completed(Duration::from_secs(5)));
+        let mut observed_cancelled = false;
+        while mailbox.pending_count() > 0 {
+            assert!(mailbox.wait_for_completed(Duration::from_secs(5)));
+            let completed = mailbox.drain_completed();
+            for status in completed {
+                if status.token == cancelled {
+                    assert!(status.cancelled);
+                    observed_cancelled = true;
+                }
+            }
+        }
+
+        assert!(observed_cancelled);
+        assert_eq!(mailbox.mailbox_metrics().cancelled_statuses, 1);
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn native_worker_applies_pending_unload_before_next_target() {
+        let mut mailbox = LightStatusMailbox::with_limits(1, usize::MAX);
+        mailbox
+            .try_enqueue_batch(test_batch(1, ChunkPos::new(0, 0)))
+            .unwrap();
+        assert!(mailbox.wait_for_completed(Duration::from_secs(5)));
+        mailbox.drain_completed();
+
+        mailbox.enqueue_unload(vec![ChunkPos::new(0, 0)]);
+        mailbox
+            .try_enqueue_batch(test_batch(2, ChunkPos::new(10, 0)))
+            .unwrap();
+        assert!(mailbox.wait_for_completed(Duration::from_secs(5)));
+        mailbox.drain_completed();
+        assert!(mailbox.wait_for_light_idle(Duration::from_secs(5)));
+
+        assert_eq!(mailbox.mailbox_metrics().retained_light_chunk_count, 1);
+    }
 }

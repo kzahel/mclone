@@ -8,17 +8,16 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use mclone_core::{
-    ChunkPos, ChunkSnapshot, ChunkStatus, HorizontalTopology, PackedLightSection, SECTION_HEIGHT,
-    block_to_section_coord,
+    BlockStateId, ChunkPos, ChunkSnapshot, ChunkStatus, PackedChunkSection, PackedLightSection,
+    SECTION_HEIGHT, block_to_section_coord,
 };
 use mclone_light::{
     BlockLightWorld, BlockPosKey, DataLayer, LevelLightEngine, LightLayer, LightSectionRange,
     SkyLightWorld, section_as_long,
 };
 use mclone_worldgen::block::RawBlockId;
-use mclone_worldgen::levelgen::{GeneratedChunk, MutableChunkBlockBuffer};
 
-use crate::lighting_seed::provisional_light_neighbor_lift;
+use crate::ChunkJobId;
 use crate::persistence::{ChunkStoreError, ChunkStoreResult, ScheduledTickRecord};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Hash, Ord, PartialOrd)]
@@ -47,6 +46,35 @@ impl LightRequestToken {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) struct PendingLightDemand {
+    pub(crate) token: LightRequestToken,
+    pub(crate) feature_snapshot: ChunkSnapshot,
+    pub(crate) scheduled_block_ticks: Vec<ScheduledTickRecord>,
+    pub(crate) scheduled_fluid_ticks: Vec<ScheduledTickRecord>,
+    pub(crate) source_job: Option<ChunkJobId>,
+}
+
+impl PendingLightDemand {
+    pub(crate) fn new(
+        token: LightRequestToken,
+        feature_snapshot: ChunkSnapshot,
+        scheduled_block_ticks: Vec<ScheduledTickRecord>,
+        scheduled_fluid_ticks: Vec<ScheduledTickRecord>,
+        source_job: Option<ChunkJobId>,
+    ) -> Self {
+        debug_assert_eq!(token.pos, feature_snapshot.pos);
+        debug_assert_eq!(token.feature_revision, feature_snapshot.revision);
+        Self {
+            token,
+            feature_snapshot,
+            scheduled_block_ticks,
+            scheduled_fluid_ticks,
+            source_job,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct PendingLightStatus {
     pub(crate) token: LightRequestToken,
     pub(crate) pos: ChunkPos,
@@ -58,6 +86,22 @@ pub(crate) struct PendingLightStatus {
 }
 
 impl PendingLightStatus {
+    pub(crate) fn from_demand(
+        demand: PendingLightDemand,
+        raw_blocks: Vec<RawBlockId>,
+        neighbor_blocks: Vec<(ChunkPos, Vec<RawBlockId>)>,
+    ) -> Self {
+        let mut status = Self::from_parts_with_token(
+            demand.token,
+            demand.feature_snapshot,
+            raw_blocks,
+            neighbor_blocks,
+        );
+        status.scheduled_block_ticks = demand.scheduled_block_ticks;
+        status.scheduled_fluid_ticks = demand.scheduled_fluid_ticks;
+        status
+    }
+
     pub(crate) fn from_parts(
         pos: ChunkPos,
         feature_snapshot: ChunkSnapshot,
@@ -90,52 +134,34 @@ impl PendingLightStatus {
         }
     }
 
-    pub(crate) fn from_feature_publication<'a>(
-        token: LightRequestToken,
-        feature_snapshot: ChunkSnapshot,
-        chunk: &GeneratedChunk,
-        scheduled_block_ticks: Vec<ScheduledTickRecord>,
-        scheduled_fluid_ticks: Vec<ScheduledTickRecord>,
-        topology: HorizontalTopology,
-        generated_chunks: impl IntoIterator<Item = (&'a ChunkPos, &'a GeneratedChunk)>,
-        retained_dependencies: impl IntoIterator<Item = (&'a ChunkPos, &'a MutableChunkBlockBuffer)>,
-    ) -> Self {
-        let pos = token.pos;
-        debug_assert_eq!(token.feature_revision, feature_snapshot.revision);
-        let neighbor_blocks = retained_dependencies
-            .into_iter()
-            .filter_map(|(neighbor_pos, buffer)| {
-                provisional_light_neighbor_lift(topology, pos, *neighbor_pos)
-                    .map(|lifted| (lifted, buffer.blocks.as_slice()))
-            })
-            .chain(
-                generated_chunks
-                    .into_iter()
-                    .filter_map(|(neighbor_pos, chunk)| {
-                        provisional_light_neighbor_lift(topology, pos, *neighbor_pos)
-                            .map(|lifted| (lifted, chunk.blocks()))
-                    }),
-            )
-            .map(|(neighbor_pos, blocks)| (neighbor_pos, Arc::from(blocks)))
-            .collect();
-
-        Self {
-            token,
-            pos,
-            feature_snapshot,
-            scheduled_block_ticks,
-            scheduled_fluid_ticks,
-            raw_blocks: Arc::from(chunk.blocks()),
-            neighbor_blocks,
-        }
-    }
-
     pub(crate) fn raw_blocks(&self) -> &[RawBlockId] {
         &self.raw_blocks
     }
 
     pub(crate) fn neighbor_blocks(&self) -> &[(ChunkPos, Arc<[RawBlockId]>)] {
         &self.neighbor_blocks
+    }
+
+    fn owned_metadata_bytes_estimate(&self) -> usize {
+        std::mem::size_of_val(self)
+            .saturating_add(snapshot_heap_bytes_estimate(&self.feature_snapshot))
+            .saturating_add(ticks_heap_bytes_estimate(&self.scheduled_block_ticks))
+            .saturating_add(ticks_heap_bytes_estimate(&self.scheduled_fluid_ticks))
+            .saturating_add(
+                self.neighbor_blocks
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<(ChunkPos, Arc<[RawBlockId]>)>()),
+            )
+    }
+
+    fn maximum_light_output_bytes_estimate(&self) -> usize {
+        let section_count = usize::try_from(self.feature_snapshot.height / SECTION_HEIGHT)
+            .unwrap_or_default()
+            .saturating_add(2);
+        section_count.saturating_mul(
+            std::mem::size_of::<PackedLightSection>()
+                .saturating_add(2 * mclone_core::LIGHT_DATA_LAYER_BYTE_COUNT),
+        )
     }
 }
 
@@ -144,6 +170,7 @@ pub(crate) struct PendingLightStatusBatch {
     statuses: Vec<PendingLightStatus>,
     unique_input_chunks: BTreeMap<ChunkPos, Arc<[RawBlockId]>>,
     owned_input_bytes: usize,
+    lifecycle_owned_bytes_estimate: usize,
 }
 
 impl PendingLightStatusBatch {
@@ -169,10 +196,23 @@ impl PendingLightStatusBatch {
                     .saturating_mul(std::mem::size_of::<RawBlockId>()),
             )
         });
+        let lifecycle_owned_bytes_estimate = statuses
+            .iter()
+            .fold(owned_input_bytes, |bytes, status| {
+                bytes
+                    .saturating_add(status.owned_metadata_bytes_estimate())
+                    .saturating_add(status.maximum_light_output_bytes_estimate())
+            })
+            .saturating_add(
+                unique_input_chunks
+                    .len()
+                    .saturating_mul(std::mem::size_of::<(ChunkPos, Arc<[RawBlockId]>)>()),
+            );
         Self {
             statuses,
             unique_input_chunks,
             owned_input_bytes,
+            lifecycle_owned_bytes_estimate,
         }
     }
 
@@ -192,6 +232,14 @@ impl PendingLightStatusBatch {
         self.owned_input_bytes
     }
 
+    pub(crate) const fn lifecycle_owned_bytes_estimate(&self) -> usize {
+        self.lifecycle_owned_bytes_estimate
+    }
+
+    pub(crate) fn tokens(&self) -> impl ExactSizeIterator<Item = LightRequestToken> + '_ {
+        self.statuses.iter().map(|status| status.token)
+    }
+
     pub(crate) fn into_statuses(self) -> Vec<PendingLightStatus> {
         self.statuses
     }
@@ -204,6 +252,59 @@ impl PendingLightStatusBatch {
     ) {
         (self.statuses, self.unique_input_chunks)
     }
+}
+
+pub(crate) fn snapshot_heap_bytes_estimate(snapshot: &ChunkSnapshot) -> usize {
+    let section_bytes = snapshot.sections.iter().fold(0_usize, |bytes, section| {
+        bytes
+            .saturating_add(
+                section
+                    .palette_state_ids
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<BlockStateId>()),
+            )
+            .saturating_add(
+                section
+                    .packed_block_indices
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<u64>()),
+            )
+    });
+    let light_bytes = snapshot
+        .light_sections
+        .iter()
+        .fold(0_usize, |bytes, section| {
+            bytes
+                .saturating_add(section.sky.as_ref().map_or(0, |values| values.capacity()))
+                .saturating_add(section.block.as_ref().map_or(0, |values| values.capacity()))
+        });
+    snapshot
+        .biomes
+        .capacity()
+        .saturating_mul(std::mem::size_of::<i32>())
+        .saturating_add(
+            snapshot
+                .sections
+                .capacity()
+                .saturating_mul(std::mem::size_of::<PackedChunkSection>()),
+        )
+        .saturating_add(section_bytes)
+        .saturating_add(
+            snapshot
+                .light_sections
+                .capacity()
+                .saturating_mul(std::mem::size_of::<PackedLightSection>()),
+        )
+        .saturating_add(light_bytes)
+}
+
+pub(crate) fn ticks_heap_bytes_estimate(ticks: &Vec<ScheduledTickRecord>) -> usize {
+    ticks.iter().fold(
+        ticks
+            .capacity()
+            .saturating_mul(std::mem::size_of::<ScheduledTickRecord>()),
+        |bytes, tick| bytes.saturating_add(tick.target.capacity()),
+    )
 }
 
 fn canonical_light_input(
@@ -268,6 +369,7 @@ mod shared_input_tests {
         assert_eq!(batch.target_count(), 2);
         assert_eq!(batch.unique_input_count(), 2);
         assert_eq!(batch.owned_input_bytes(), 32);
+        assert!(batch.lifecycle_owned_bytes_estimate() > 32);
         let statuses = batch.into_statuses();
         assert!(Arc::ptr_eq(
             &statuses[0].raw_blocks,

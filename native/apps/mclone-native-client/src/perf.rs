@@ -599,6 +599,14 @@ struct StartupStreamingFrameReport {
     scheduler_pending_light_publications: usize,
     scheduler_worldgen_mailbox_pending_jobs: usize,
     scheduler_light_mailbox_pending_statuses: usize,
+    scheduler_player_promotion_desired: usize,
+    scheduler_player_promotion_queued: usize,
+    scheduler_player_promotion_active: usize,
+    scheduler_player_promotion_max_active: usize,
+    scheduler_player_promotion_cancelled_before_admission: u64,
+    scheduler_light_demand_queued: usize,
+    scheduler_light_demands_cancelled: u64,
+    scheduler_light_statuses_stale: u64,
     poll_fluid_due_ticks: usize,
     poll_fluid_executed_ticks: usize,
     poll_fluid_deferred_ticks: usize,
@@ -656,6 +664,14 @@ struct FrameBudgetProbeFrameReport {
     poll_scheduler_pending_light_publications: usize,
     poll_scheduler_worldgen_mailbox_pending_jobs: usize,
     poll_scheduler_light_mailbox_pending_statuses: usize,
+    poll_scheduler_player_promotion_desired: usize,
+    poll_scheduler_player_promotion_queued: usize,
+    poll_scheduler_player_promotion_active: usize,
+    poll_scheduler_player_promotion_max_active: usize,
+    poll_scheduler_player_promotion_cancelled_before_admission: u64,
+    poll_scheduler_light_demand_queued: usize,
+    poll_scheduler_light_demands_cancelled: u64,
+    poll_scheduler_light_statuses_stale: u64,
     poll_block_tick_ms: f64,
     poll_fluid_tick_ms: f64,
     poll_fluid_event_apply_ms: f64,
@@ -764,6 +780,14 @@ impl Default for FrameBudgetProbeFrameReport {
             poll_scheduler_pending_light_publications: 0,
             poll_scheduler_worldgen_mailbox_pending_jobs: 0,
             poll_scheduler_light_mailbox_pending_statuses: 0,
+            poll_scheduler_player_promotion_desired: 0,
+            poll_scheduler_player_promotion_queued: 0,
+            poll_scheduler_player_promotion_active: 0,
+            poll_scheduler_player_promotion_max_active: 0,
+            poll_scheduler_player_promotion_cancelled_before_admission: 0,
+            poll_scheduler_light_demand_queued: 0,
+            poll_scheduler_light_demands_cancelled: 0,
+            poll_scheduler_light_statuses_stale: 0,
             poll_block_tick_ms: 0.0,
             poll_fluid_tick_ms: 0.0,
             poll_fluid_event_apply_ms: 0.0,
@@ -1409,6 +1433,38 @@ impl FrameBudgetProbeReport {
             println!(
                 "      \"poll_scheduler_light_mailbox_pending_statuses\": {},",
                 frame.poll_scheduler_light_mailbox_pending_statuses
+            );
+            println!(
+                "      \"poll_scheduler_player_promotion_desired\": {},",
+                frame.poll_scheduler_player_promotion_desired
+            );
+            println!(
+                "      \"poll_scheduler_player_promotion_queued\": {},",
+                frame.poll_scheduler_player_promotion_queued
+            );
+            println!(
+                "      \"poll_scheduler_player_promotion_active\": {},",
+                frame.poll_scheduler_player_promotion_active
+            );
+            println!(
+                "      \"poll_scheduler_player_promotion_max_active\": {},",
+                frame.poll_scheduler_player_promotion_max_active
+            );
+            println!(
+                "      \"poll_scheduler_player_promotion_cancelled_before_admission\": {},",
+                frame.poll_scheduler_player_promotion_cancelled_before_admission
+            );
+            println!(
+                "      \"poll_scheduler_light_demand_queued\": {},",
+                frame.poll_scheduler_light_demand_queued
+            );
+            println!(
+                "      \"poll_scheduler_light_demands_cancelled\": {},",
+                frame.poll_scheduler_light_demands_cancelled
+            );
+            println!(
+                "      \"poll_scheduler_light_statuses_stale\": {},",
+                frame.poll_scheduler_light_statuses_stale
             );
             println!(
                 "      \"poll_scheduler_pending_unload_ms\": {:.3},",
@@ -2380,6 +2436,38 @@ impl StartupStreamingPerfReport {
                 frame.scheduler_light_mailbox_pending_statuses
             );
             println!(
+                "      \"scheduler_player_promotion_desired\": {},",
+                frame.scheduler_player_promotion_desired
+            );
+            println!(
+                "      \"scheduler_player_promotion_queued\": {},",
+                frame.scheduler_player_promotion_queued
+            );
+            println!(
+                "      \"scheduler_player_promotion_active\": {},",
+                frame.scheduler_player_promotion_active
+            );
+            println!(
+                "      \"scheduler_player_promotion_max_active\": {},",
+                frame.scheduler_player_promotion_max_active
+            );
+            println!(
+                "      \"scheduler_player_promotion_cancelled_before_admission\": {},",
+                frame.scheduler_player_promotion_cancelled_before_admission
+            );
+            println!(
+                "      \"scheduler_light_demand_queued\": {},",
+                frame.scheduler_light_demand_queued
+            );
+            println!(
+                "      \"scheduler_light_demands_cancelled\": {},",
+                frame.scheduler_light_demands_cancelled
+            );
+            println!(
+                "      \"scheduler_light_statuses_stale\": {},",
+                frame.scheduler_light_statuses_stale
+            );
+            println!(
                 "      \"server_update_queue_depth\": {},",
                 frame.server_update_queue_depth
             );
@@ -2622,6 +2710,38 @@ impl StartupStreamingPerfReport {
         println!(
             "    \"scheduler_light_mailbox_pending_statuses\": {},",
             final_frame.scheduler_light_mailbox_pending_statuses
+        );
+        println!(
+            "    \"scheduler_player_promotion_desired\": {},",
+            final_frame.scheduler_player_promotion_desired
+        );
+        println!(
+            "    \"scheduler_player_promotion_queued\": {},",
+            final_frame.scheduler_player_promotion_queued
+        );
+        println!(
+            "    \"scheduler_player_promotion_active\": {},",
+            final_frame.scheduler_player_promotion_active
+        );
+        println!(
+            "    \"scheduler_player_promotion_max_active\": {},",
+            final_frame.scheduler_player_promotion_max_active
+        );
+        println!(
+            "    \"scheduler_player_promotion_cancelled_before_admission\": {},",
+            final_frame.scheduler_player_promotion_cancelled_before_admission
+        );
+        println!(
+            "    \"scheduler_light_demand_queued\": {},",
+            final_frame.scheduler_light_demand_queued
+        );
+        println!(
+            "    \"scheduler_light_demands_cancelled\": {},",
+            final_frame.scheduler_light_demands_cancelled
+        );
+        println!(
+            "    \"scheduler_light_statuses_stale\": {},",
+            final_frame.scheduler_light_statuses_stale
         );
         print_light_status_mailbox_metrics_json(
             "    ",
@@ -3003,8 +3123,44 @@ fn print_light_status_mailbox_metrics_json(
         micros_to_ms(metrics.total_completion_drain_wait_us)
     );
     println!(
-        "{indent}  \"max_completion_drain_wait_ms\": {:.3}",
+        "{indent}  \"max_completion_drain_wait_ms\": {:.3},",
         micros_to_ms(metrics.max_completion_drain_wait_us)
+    );
+    println!(
+        "{indent}  \"admitted_statuses\": {},",
+        metrics.admitted_statuses
+    );
+    println!(
+        "{indent}  \"admitted_owned_bytes\": {},",
+        metrics.admitted_owned_bytes
+    );
+    println!(
+        "{indent}  \"max_admitted_owned_bytes\": {},",
+        metrics.max_admitted_owned_bytes
+    );
+    println!(
+        "{indent}  \"max_batch_unique_input_chunks\": {},",
+        metrics.max_batch_unique_input_chunks
+    );
+    println!(
+        "{indent}  \"max_batch_input_bytes\": {},",
+        metrics.max_batch_input_bytes
+    );
+    println!(
+        "{indent}  \"max_completed_owned_bytes\": {},",
+        metrics.max_completed_owned_bytes
+    );
+    println!(
+        "{indent}  \"admission_rejections\": {},",
+        metrics.admission_rejections
+    );
+    println!(
+        "{indent}  \"oversize_admissions\": {},",
+        metrics.oversize_admissions
+    );
+    println!(
+        "{indent}  \"cancelled_statuses\": {}",
+        metrics.cancelled_statuses
     );
     println!("{indent}}}{suffix}");
 }
@@ -3913,6 +4069,16 @@ fn fill_startup_streaming_poll_diagnostics(
         diagnostics.scheduler_worldgen_mailbox_pending_jobs;
     report.scheduler_light_mailbox_pending_statuses =
         diagnostics.scheduler_light_mailbox_pending_statuses;
+    report.scheduler_player_promotion_desired = diagnostics.scheduler_player_promotion_desired;
+    report.scheduler_player_promotion_queued = diagnostics.scheduler_player_promotion_queued;
+    report.scheduler_player_promotion_active = diagnostics.scheduler_player_promotion_active;
+    report.scheduler_player_promotion_max_active =
+        diagnostics.scheduler_player_promotion_max_active;
+    report.scheduler_player_promotion_cancelled_before_admission =
+        diagnostics.scheduler_player_promotion_cancelled_before_admission;
+    report.scheduler_light_demand_queued = diagnostics.scheduler_light_demand_queued;
+    report.scheduler_light_demands_cancelled = diagnostics.scheduler_light_demands_cancelled;
+    report.scheduler_light_statuses_stale = diagnostics.scheduler_light_statuses_stale;
     report.runner_frame_metrics = diagnostics.runner_frame_metrics;
     report.worldgen_job_frame_metrics = diagnostics.worldgen_job_frame_metrics;
     report.light_status_job_frame_metrics = diagnostics.light_status_job_frame_metrics;
@@ -4316,6 +4482,16 @@ fn fill_frame_budget_poll_diagnostics(
         diagnostics.scheduler_worldgen_mailbox_pending_jobs;
     report.poll_scheduler_light_mailbox_pending_statuses =
         diagnostics.scheduler_light_mailbox_pending_statuses;
+    report.poll_scheduler_player_promotion_desired = diagnostics.scheduler_player_promotion_desired;
+    report.poll_scheduler_player_promotion_queued = diagnostics.scheduler_player_promotion_queued;
+    report.poll_scheduler_player_promotion_active = diagnostics.scheduler_player_promotion_active;
+    report.poll_scheduler_player_promotion_max_active =
+        diagnostics.scheduler_player_promotion_max_active;
+    report.poll_scheduler_player_promotion_cancelled_before_admission =
+        diagnostics.scheduler_player_promotion_cancelled_before_admission;
+    report.poll_scheduler_light_demand_queued = diagnostics.scheduler_light_demand_queued;
+    report.poll_scheduler_light_demands_cancelled = diagnostics.scheduler_light_demands_cancelled;
+    report.poll_scheduler_light_statuses_stale = diagnostics.scheduler_light_statuses_stale;
     report.poll_block_tick_ms = diagnostics.block_tick_ms;
     report.poll_fluid_tick_ms = diagnostics.fluid_tick_ms;
     report.poll_fluid_event_apply_ms = diagnostics.fluid_event_apply_ms;
