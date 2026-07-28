@@ -4430,6 +4430,9 @@ mod android {
                 latest_camera: rendered.camera,
                 start_terrain_view: rendered.terrain_view,
                 latest_terrain_view: rendered.terrain_view,
+                horizon_sample_frames: 0,
+                exact_center_not_ready_frames: 0,
+                start_persistence: rendered.summary.upload.persistence_queue_metrics,
                 start_record_cache: rendered.summary.timing.record_cache_prepare.cache,
                 latest_record_cache: rendered.summary.timing.record_cache_prepare.cache,
                 record_rebuild_frames: 0,
@@ -4579,6 +4582,9 @@ mod android {
         latest_camera: EngineCameraSnapshot,
         start_terrain_view: Option<SceneTerrainViewDiagnostics>,
         latest_terrain_view: Option<SceneTerrainViewDiagnostics>,
+        horizon_sample_frames: u64,
+        exact_center_not_ready_frames: u64,
+        start_persistence: mclone_scene::PersistenceQueueMetrics,
         start_record_cache: TexturedSectionRecordCacheStats,
         latest_record_cache: TexturedSectionRecordCacheStats,
         record_rebuild_frames: u64,
@@ -4633,6 +4639,13 @@ mod android {
                 .max(timing.render_mclone_frame_ms);
             self.max_render = max_render_timing(self.max_render, timing.render);
             if let Some(rendered) = rendered {
+                if let Some(terrain_view) = rendered.terrain_view {
+                    self.horizon_sample_frames = self.horizon_sample_frames.saturating_add(1);
+                    if !terrain_view.exact_center_ready {
+                        self.exact_center_not_ready_frames =
+                            self.exact_center_not_ready_frames.saturating_add(1);
+                    }
+                }
                 let record_prepare = rendered.summary.timing.record_cache_prepare;
                 if record_prepare.rebuilt {
                     self.record_rebuild_frames += 1;
@@ -4885,10 +4898,12 @@ mod android {
             let start_horizon = self.start_terrain_view.unwrap_or_default();
             let latest_horizon = self.latest_terrain_view.unwrap_or_default();
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_HORIZON start_active={} start_target_ready={} start_ready_slots={} start_drawn_levels={} start_drawn_tiles={} start_inner_hole_culled_tiles={} start_frustum_culled_tiles={} start_far_culled_tiles={} start_tree_instances={} start_drawn_tree_tiles={} start_drawn_tree_instances={} start_pending_vegetation_tiles={} start_vegetation_submitted_jobs={} start_vegetation_completed_jobs={} latest_active={} latest_target_ready={} latest_ready_slots={} latest_drawn_levels={} latest_drawn_tiles={} latest_inner_hole_culled_tiles={} latest_frustum_culled_tiles={} latest_far_culled_tiles={} latest_tree_instances={} latest_drawn_tree_tiles={} latest_drawn_tree_instances={} latest_pending_vegetation_tiles={} latest_vegetation_submitted_jobs={} latest_vegetation_completed_jobs={} latest_vegetation_transport_failures={} latest_vegetation_job_failures={}",
+                "MCLONE_ANDROID_XR_PERF_HORIZON start_active={} start_target_ready={} start_ready_slots={} start_exact_columns={} start_exact_center_ready={} start_drawn_levels={} start_drawn_tiles={} start_inner_hole_culled_tiles={} start_frustum_culled_tiles={} start_far_culled_tiles={} start_tree_instances={} start_drawn_tree_tiles={} start_drawn_tree_instances={} start_pending_vegetation_tiles={} start_vegetation_submitted_jobs={} start_vegetation_completed_jobs={} latest_active={} latest_target_ready={} latest_ready_slots={} latest_exact_columns={} latest_exact_center_ready={} horizon_sample_frames={} exact_center_not_ready_frames={} latest_drawn_levels={} latest_drawn_tiles={} latest_inner_hole_culled_tiles={} latest_frustum_culled_tiles={} latest_far_culled_tiles={} latest_tree_instances={} latest_drawn_tree_tiles={} latest_drawn_tree_instances={} latest_pending_vegetation_tiles={} latest_vegetation_submitted_jobs={} latest_vegetation_completed_jobs={} latest_vegetation_transport_failures={} latest_vegetation_job_failures={}",
                 self.start_terrain_view.is_some(),
                 start_horizon.target_ready,
                 start_horizon.ready_slots,
+                start_horizon.exact_column_count,
+                start_horizon.exact_center_ready,
                 start_horizon.drawn_levels,
                 start_horizon.drawn_tiles,
                 start_horizon.inner_hole_culled_tiles,
@@ -4903,6 +4918,10 @@ mod android {
                 self.latest_terrain_view.is_some(),
                 latest_horizon.target_ready,
                 latest_horizon.ready_slots,
+                latest_horizon.exact_column_count,
+                latest_horizon.exact_center_ready,
+                self.horizon_sample_frames,
+                self.exact_center_not_ready_frames,
                 latest_horizon.drawn_levels,
                 latest_horizon.drawn_tiles,
                 latest_horizon.inner_hole_culled_tiles,
@@ -4916,6 +4935,35 @@ mod android {
                 latest_horizon.vegetation_completed_jobs,
                 latest_horizon.vegetation_transport_failures,
                 latest_horizon.vegetation_job_failures
+            );
+            let latest_persistence = latest_upload.persistence_queue_metrics;
+            let max_persistence = self.max_upload.persistence_queue_metrics;
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_PERSISTENCE start_foreground={} start_durable_requests={} start_durable_bytes={} start_cache_requests={} start_cache_bytes={} latest_foreground={} latest_durable_requests={} latest_durable_bytes={} latest_cache_requests={} latest_cache_bytes={} latest_retained_entries={} latest_retained_bytes={} max_foreground={} max_durable_requests={} max_durable_bytes={} max_cache_requests={} max_cache_bytes={} high_water_foreground={} high_water_durable_requests={} high_water_durable_bytes={} high_water_cache_requests={} high_water_cache_bytes={} cancelled_requests={} skipped_cache_writes={}",
+                self.start_persistence.foreground_requests,
+                self.start_persistence.durable_write_requests,
+                self.start_persistence.durable_write_bytes,
+                self.start_persistence.cache_write_requests,
+                self.start_persistence.cache_write_bytes,
+                latest_persistence.foreground_requests,
+                latest_persistence.durable_write_requests,
+                latest_persistence.durable_write_bytes,
+                latest_persistence.cache_write_requests,
+                latest_persistence.cache_write_bytes,
+                latest_persistence.retained_record_cache_entries,
+                latest_persistence.retained_record_cache_bytes,
+                max_persistence.foreground_requests,
+                max_persistence.durable_write_requests,
+                max_persistence.durable_write_bytes,
+                max_persistence.cache_write_requests,
+                max_persistence.cache_write_bytes,
+                latest_persistence.high_water_foreground_requests,
+                latest_persistence.high_water_durable_write_requests,
+                latest_persistence.high_water_durable_write_bytes,
+                latest_persistence.high_water_cache_write_requests,
+                latest_persistence.high_water_cache_write_bytes,
+                latest_persistence.cancelled_requests,
+                latest_persistence.skipped_cache_writes
             );
             if !self.detail.is_full() {
                 log::info!(
@@ -6595,6 +6643,10 @@ mod android {
             server_pending_publications: a
                 .server_pending_publications
                 .max(b.server_pending_publications),
+            persistence_queue_metrics: max_persistence_queue_metrics(
+                a.persistence_queue_metrics,
+                b.persistence_queue_metrics,
+            ),
             runner_frame_metrics: if a.runner_frame_metrics.total_request_us
                 >= b.runner_frame_metrics.total_request_us
             {
@@ -6762,6 +6814,42 @@ mod android {
             visibility_graph_total_ms: a.visibility_graph_total_ms.max(b.visibility_graph_total_ms),
             visibility_graph_worst_ms: a.visibility_graph_worst_ms.max(b.visibility_graph_worst_ms),
             record_cache: max_record_cache_stats(a.record_cache, b.record_cache),
+        }
+    }
+
+    fn max_persistence_queue_metrics(
+        a: mclone_scene::PersistenceQueueMetrics,
+        b: mclone_scene::PersistenceQueueMetrics,
+    ) -> mclone_scene::PersistenceQueueMetrics {
+        mclone_scene::PersistenceQueueMetrics {
+            foreground_requests: a.foreground_requests.max(b.foreground_requests),
+            durable_write_requests: a.durable_write_requests.max(b.durable_write_requests),
+            durable_write_bytes: a.durable_write_bytes.max(b.durable_write_bytes),
+            cache_write_requests: a.cache_write_requests.max(b.cache_write_requests),
+            cache_write_bytes: a.cache_write_bytes.max(b.cache_write_bytes),
+            retained_record_cache_entries: a
+                .retained_record_cache_entries
+                .max(b.retained_record_cache_entries),
+            retained_record_cache_bytes: a
+                .retained_record_cache_bytes
+                .max(b.retained_record_cache_bytes),
+            high_water_foreground_requests: a
+                .high_water_foreground_requests
+                .max(b.high_water_foreground_requests),
+            high_water_durable_write_requests: a
+                .high_water_durable_write_requests
+                .max(b.high_water_durable_write_requests),
+            high_water_durable_write_bytes: a
+                .high_water_durable_write_bytes
+                .max(b.high_water_durable_write_bytes),
+            high_water_cache_write_requests: a
+                .high_water_cache_write_requests
+                .max(b.high_water_cache_write_requests),
+            high_water_cache_write_bytes: a
+                .high_water_cache_write_bytes
+                .max(b.high_water_cache_write_bytes),
+            cancelled_requests: a.cancelled_requests.max(b.cancelled_requests),
+            skipped_cache_writes: a.skipped_cache_writes.max(b.skipped_cache_writes),
         }
     }
 

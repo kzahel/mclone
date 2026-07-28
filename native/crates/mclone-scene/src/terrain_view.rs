@@ -44,6 +44,7 @@ pub struct SceneTerrainViewDiagnostics {
     pub source_generation: u64,
     pub coverage_generation: u64,
     pub exact_column_count: u32,
+    pub exact_center_ready: bool,
     pub last_frame_revision: u64,
     pub ready_slots: u32,
     pub drawn_levels: u32,
@@ -194,6 +195,8 @@ impl SceneTerrainViewState {
         self.diagnostics.coverage_generation = self.coverage_generation;
         self.diagnostics.exact_column_count =
             u32::try_from(self.ready_columns.len()).unwrap_or(u32::MAX);
+        self.diagnostics.exact_center_ready =
+            terrain_exact_center_ready(&self.ready_columns, focus);
         Ok(())
     }
 
@@ -441,6 +444,12 @@ fn floor_f64_to_i32(value: f64) -> i32 {
     }
 }
 
+fn terrain_exact_center_ready(ready_columns: &BTreeSet<ChunkPos>, focus: [f64; 3]) -> bool {
+    let center =
+        ChunkPos::from_block_coords(floor_f64_to_i32(focus[0]), floor_f64_to_i32(focus[2]));
+    ready_columns.contains(&center)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -469,6 +478,13 @@ mod tests {
         assert_eq!(floor_f64_to_i32(f64::INFINITY), i32::MAX);
         assert_eq!(floor_f64_to_i32(f64::NEG_INFINITY), i32::MIN);
         assert_eq!(floor_f64_to_i32(f64::NAN), 0);
+    }
+
+    #[test]
+    fn exact_center_readiness_tracks_the_focus_chunk() {
+        let ready = BTreeSet::from([ChunkPos::new(-1, 2), ChunkPos::new(0, 2)]);
+        assert!(terrain_exact_center_ready(&ready, [-0.01, 90.0, 47.99]));
+        assert!(!terrain_exact_center_ready(&ready, [16.0, 90.0, 47.99]));
     }
 
     #[test]

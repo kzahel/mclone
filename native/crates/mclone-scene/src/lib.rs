@@ -8,6 +8,7 @@ pub use interactive_input::{
     MonoInputDisposition, MonoInteractiveInputRouter, XrControllerInputDisposition,
     XrControllerInputRouter,
 };
+pub use mclone_server::PersistenceQueueMetrics;
 pub use player_movement::{
     DEFAULT_PLAYER_MOVEMENT_MAX_CATCH_UP_STEPS, DEFAULT_PLAYER_MOVEMENT_RATE_HZ,
     PlayerMovementAdvance, PlayerMovementCadenceConfig, PlayerMovementCommand,

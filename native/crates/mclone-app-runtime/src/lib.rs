@@ -99,7 +99,7 @@ use mclone_render_session::{
 };
 use mclone_server::{
     ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats, LightStatusMailboxMetrics,
-    ServerRunnerDiagnostics, ServerRunnerKind, WorkerFrameMetrics,
+    PersistenceQueueMetrics, ServerRunnerDiagnostics, ServerRunnerKind, WorkerFrameMetrics,
 };
 use mclone_ui::{
     BlockPaletteEntry, BlockPaletteOverlay, DebugActorTool, EMPTY_BLOCK_PALETTE_ENTRIES,
@@ -1011,6 +1011,7 @@ pub struct RuntimePollDiagnostics {
     pub server_update_queue_bytes: usize,
     pub server_pending_jobs: usize,
     pub server_pending_publications: usize,
+    pub persistence_queue_metrics: PersistenceQueueMetrics,
     pub runner_frame_metrics: WorkerFrameMetrics,
     pub worldgen_job_frame_metrics: WorkerFrameMetrics,
     pub light_status_job_frame_metrics: WorkerFrameMetrics,
@@ -2927,6 +2928,7 @@ impl SingleViewRuntime {
         diagnostics.server_update_queue_bytes = runner_diagnostics.update_queue_bytes;
         diagnostics.server_pending_jobs = runner_diagnostics.pending_jobs;
         diagnostics.server_pending_publications = runner_diagnostics.pending_publications;
+        diagnostics.persistence_queue_metrics = runner_diagnostics.persistence_queue_metrics;
         diagnostics.runner_frame_metrics = runner_diagnostics.runner_frame_metrics;
         diagnostics.worldgen_job_frame_metrics = runner_diagnostics.worldgen_job_frame_metrics;
         diagnostics.light_status_job_frame_metrics =
