@@ -56,6 +56,11 @@ pub struct PreparedFigurePart {
     pub source_base_rotation_radians: [f32; 3],
     /// Semantic source-space pivot inherited by the part content and children.
     pub source_pivot: [f32; 3],
+    /// Engine-space values cached for presentation-rate pose evaluation.
+    engine_base_position: [f32; 3],
+    engine_base_rotation: [f32; 4],
+    engine_pivot: [f32; 3],
+    local_rest_matrix: [[f32; 4]; 4],
     /// Global rest-pose content transform in normalized actor-local space.
     pub rest_matrix: [[f32; 4]; 4],
 }
@@ -97,7 +102,21 @@ pub struct PreparedFigureClip {
     pub role: Option<FigureClipRole>,
     pub next_clip: Option<String>,
     pub tracks: BTreeMap<u16, Vec<PreparedFigureClipKey>>,
+    evaluation_tracks: BTreeMap<u16, PreparedFigureEvaluationTrack>,
     pub locomotion: Option<PreparedFigureClipLocomotion>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+struct PreparedFigureEvaluationTrack {
+    translations: Vec<PreparedFigureChannelKey<[f32; 3]>>,
+    rotations: Vec<PreparedFigureChannelKey<[f32; 4]>>,
+    scales: Vec<PreparedFigureChannelKey<[f32; 3]>>,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PreparedFigureChannelKey<T> {
+    time_seconds: f32,
+    value: T,
 }
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
@@ -378,7 +397,7 @@ fn evaluate_prepared_figure_pose_into(
                 figure.name, part_index
             ))
         })?;
-        let track = clip.and_then(|clip| clip.tracks.get(&part_id));
+        let track = clip.and_then(|clip| clip.evaluation_tracks.get(&part_id));
         let rotation_delta = rotation_overrides
             .iter()
             .find(|rotation_override| rotation_override.part_id == part_id)
@@ -420,77 +439,68 @@ fn evaluate_prepared_figure_pose_into(
 
 fn prepared_part_local_content_matrix(
     part: &PreparedFigurePart,
-    track: Option<&Vec<PreparedFigureClipKey>>,
+    track: Option<&PreparedFigureEvaluationTrack>,
     local_time: f32,
     rotation_delta: Vec3,
 ) -> Mat4 {
-    let sampled = track
-        .filter(|keys| !keys.is_empty())
-        .map(|keys| sample_prepared_track(part, keys, local_time));
-    let (translation, mut rotation, scale) = sampled.unwrap_or_else(|| {
-        (
-            Vec3::ZERO,
-            mirrored_source_rotation(Vec3::from_array(part.source_base_rotation_radians)),
-            Vec3::ONE,
-        )
-    });
+    if track.is_none() && rotation_delta == Vec3::ZERO {
+        return Mat4::from_cols_array_2d(&part.local_rest_matrix);
+    }
+    let (translation, mut rotation, scale) = sample_prepared_track(part, track, local_time);
     rotation *= mirrored_source_rotation(rotation_delta);
-    let base_position = Vec3::from_array(part.source_base_position);
-    let source_position = base_position + translation;
-    let engine_position = mirror_source_vector(source_position);
-    let engine_pivot = mirror_source_vector(Vec3::from_array(part.source_pivot));
+    let engine_position = Vec3::from_array(part.engine_base_position) + translation;
     Mat4::from_scale_rotation_translation(scale, rotation, engine_position)
-        * Mat4::from_translation(-engine_pivot)
+        * Mat4::from_translation(-Vec3::from_array(part.engine_pivot))
 }
 
 fn sample_prepared_track(
     part: &PreparedFigurePart,
-    keys: &[PreparedFigureClipKey],
+    track: Option<&PreparedFigureEvaluationTrack>,
     local_time: f32,
 ) -> (Vec3, Quat, Vec3) {
-    let translation = prepared_channel_span(keys, local_time, |key| key.translation)
-        .map_or(Vec3::ZERO, |(left, right, alpha)| left.lerp(right, alpha));
-    let base_rotation = Vec3::from_array(part.source_base_rotation_radians);
-    let rotation = prepared_channel_span(keys, local_time, |key| key.rotation_radians).map_or_else(
-        || mirrored_source_rotation(base_rotation),
-        |(left, right, alpha)| {
-            shortest_path_slerp(
-                mirrored_source_rotation(base_rotation + left),
-                mirrored_source_rotation(base_rotation + right),
-                alpha,
-            )
-        },
-    );
-    let scale = prepared_channel_span(keys, local_time, |key| key.scale)
-        .map_or(Vec3::ONE, |(left, right, alpha)| left.lerp(right, alpha));
+    let translation = track
+        .and_then(|track| prepared_channel_span(&track.translations, local_time))
+        .map_or(Vec3::ZERO, |(left, right, alpha)| {
+            Vec3::from_array(left).lerp(Vec3::from_array(right), alpha)
+        });
+    let rotation = track
+        .and_then(|track| prepared_channel_span(&track.rotations, local_time))
+        .map_or_else(
+            || Quat::from_array(part.engine_base_rotation),
+            |(left, right, alpha)| {
+                shortest_path_slerp(Quat::from_array(left), Quat::from_array(right), alpha)
+            },
+        );
+    let scale = track
+        .and_then(|track| prepared_channel_span(&track.scales, local_time))
+        .map_or(Vec3::ONE, |(left, right, alpha)| {
+            Vec3::from_array(left).lerp(Vec3::from_array(right), alpha)
+        });
     (translation, rotation, scale)
 }
 
-fn prepared_channel_span(
-    keys: &[PreparedFigureClipKey],
+fn prepared_channel_span<T: Copy>(
+    keys: &[PreparedFigureChannelKey<T>],
     local_time: f32,
-    channel: impl Fn(&PreparedFigureClipKey) -> Option<[f32; 3]>,
-) -> Option<(Vec3, Vec3, f32)> {
-    let mut keyed = keys
-        .iter()
-        .filter_map(|key| channel(key).map(|value| (key.time_seconds, Vec3::from_array(value))));
-    let first = keyed.next()?;
+) -> Option<(T, T, f32)> {
+    let first = keys.first()?;
     let mut left = first;
     let mut right = first;
-    for current in keyed {
-        if local_time < current.0 {
+    for current in &keys[1..] {
+        if local_time < current.time_seconds {
             right = current;
             break;
         }
         left = current;
         right = current;
     }
-    let alpha = if (right.0 - left.0).abs() <= f32::EPSILON {
+    let alpha = if (right.time_seconds - left.time_seconds).abs() <= f32::EPSILON {
         0.0
     } else {
-        ((local_time - left.0) / (right.0 - left.0)).clamp(0.0, 1.0)
+        ((local_time - left.time_seconds) / (right.time_seconds - left.time_seconds))
+            .clamp(0.0, 1.0)
     };
-    Some((left.1, right.1, alpha))
+    Some((left.value, right.value, alpha))
 }
 
 fn shortest_path_slerp(left: Quat, right: Quat, alpha: f32) -> Quat {
@@ -545,18 +555,32 @@ fn prepare_figure_asset_with_crc(
     let parts = raw_parts
         .iter()
         .zip(&content_matrices)
-        .map(|(part, content)| PreparedFigurePart {
-            name: part.name.clone(),
-            parent: part.parent.map(|index| index as u16),
-            first_person_visible: part.first_person_visible,
-            primitive_kind: part.primitive_kind,
-            source_base_position: part.base_position.to_array(),
-            source_base_rotation_radians: part.base_rotation.to_array(),
-            source_pivot: part.pivot.to_array(),
-            rest_matrix: (normalization * mirror * *content * mirror).to_cols_array_2d(),
+        .map(|(part, content)| {
+            let engine_base_position = mirror_source_vector(part.base_position);
+            let engine_base_rotation = mirrored_source_rotation(part.base_rotation);
+            let engine_pivot = mirror_source_vector(part.pivot);
+            let local_rest_matrix = Mat4::from_scale_rotation_translation(
+                Vec3::ONE,
+                engine_base_rotation,
+                engine_base_position,
+            ) * Mat4::from_translation(-engine_pivot);
+            PreparedFigurePart {
+                name: part.name.clone(),
+                parent: part.parent.map(|index| index as u16),
+                first_person_visible: part.first_person_visible,
+                primitive_kind: part.primitive_kind,
+                source_base_position: part.base_position.to_array(),
+                source_base_rotation_radians: part.base_rotation.to_array(),
+                source_pivot: part.pivot.to_array(),
+                engine_base_position: engine_base_position.to_array(),
+                engine_base_rotation: engine_base_rotation.to_array(),
+                engine_pivot: engine_pivot.to_array(),
+                local_rest_matrix: local_rest_matrix.to_cols_array_2d(),
+                rest_matrix: (normalization * mirror * *content * mirror).to_cols_array_2d(),
+            }
         })
         .collect::<Vec<_>>();
-    let clips = prepare_clips(asset, &part_names)?;
+    let clips = prepare_clips(asset, &part_names, &parts)?;
 
     let (atlas, atlas_regions, texture_transparency) = build_atlas(asset)?;
     let materials = material_properties(asset)?;
@@ -836,6 +860,7 @@ fn validate_clips(
 fn prepare_clips(
     asset: &FigureAsset,
     part_names: &HashMap<&str, usize>,
+    parts: &[PreparedFigurePart],
 ) -> Result<BTreeMap<String, PreparedFigureClip>, FigurePrepareError> {
     let mut prepared = BTreeMap::new();
     for (clip_name, clip) in &asset.clips {
@@ -865,6 +890,38 @@ fn prepare_clips(
         for keys in tracks.values_mut() {
             keys.sort_by(|left, right| left.time_seconds.total_cmp(&right.time_seconds));
         }
+        let evaluation_tracks = tracks
+            .iter()
+            .map(|(&part_id, keys)| {
+                let part = &parts[usize::from(part_id)];
+                let base_rotation = Vec3::from_array(part.source_base_rotation_radians);
+                let mut evaluation = PreparedFigureEvaluationTrack::default();
+                for key in keys {
+                    if let Some(translation) = key.translation {
+                        evaluation.translations.push(PreparedFigureChannelKey {
+                            time_seconds: key.time_seconds,
+                            value: mirror_source_vector(Vec3::from_array(translation)).to_array(),
+                        });
+                    }
+                    if let Some(rotation) = key.rotation_radians {
+                        evaluation.rotations.push(PreparedFigureChannelKey {
+                            time_seconds: key.time_seconds,
+                            value: mirrored_source_rotation(
+                                base_rotation + Vec3::from_array(rotation),
+                            )
+                            .to_array(),
+                        });
+                    }
+                    if let Some(scale) = key.scale {
+                        evaluation.scales.push(PreparedFigureChannelKey {
+                            time_seconds: key.time_seconds,
+                            value: scale,
+                        });
+                    }
+                }
+                (part_id, evaluation)
+            })
+            .collect();
         let locomotion = clip
             .locomotion
             .as_ref()
@@ -908,6 +965,7 @@ fn prepare_clips(
                 role: clip.role,
                 next_clip: clip.next_clip.clone(),
                 tracks,
+                evaluation_tracks,
                 locomotion,
             },
         );
@@ -927,6 +985,18 @@ fn prepared_clip_bytes(clips: &BTreeMap<String, PreparedFigureClip>) -> usize {
                     .tracks
                     .values()
                     .map(|keys| keys.len() * std::mem::size_of::<PreparedFigureClipKey>())
+                    .sum::<usize>()
+                + clip
+                    .evaluation_tracks
+                    .values()
+                    .map(|track| {
+                        track.translations.len()
+                            * std::mem::size_of::<PreparedFigureChannelKey<[f32; 3]>>()
+                            + track.rotations.len()
+                                * std::mem::size_of::<PreparedFigureChannelKey<[f32; 4]>>()
+                            + track.scales.len()
+                                * std::mem::size_of::<PreparedFigureChannelKey<[f32; 3]>>()
+                    })
                     .sum::<usize>()
                 + clip.locomotion.as_ref().map_or(0, |locomotion| {
                     locomotion.kind.len()

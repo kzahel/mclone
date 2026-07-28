@@ -141,6 +141,7 @@ fn run() -> Result<()> {
             indices_per_frame: last_stats.index_count,
             prepared_per_frame: measured_end.prepared_world.prepared_actor_count,
             legacy_per_frame: measured_end.prepared_world.legacy_actor_count,
+            instance_buckets_per_frame: measured_end.prepared_world.instance_bucket_count,
             unchanged_actor_reuses: measured_end
                 .prepared_world
                 .unchanged_actor_reuse_count
@@ -149,18 +150,43 @@ fn run() -> Result<()> {
                 .prepared_world
                 .draw_count
                 .saturating_sub(measured_start.prepared_world.draw_count),
+            drawn_instances: measured_end
+                .prepared_world
+                .drawn_instance_count
+                .saturating_sub(measured_start.prepared_world.drawn_instance_count),
+            max_instances_per_draw: measured_end.prepared_world.max_instances_per_draw,
             pose_evaluations: measured_end
                 .prepared_world
                 .pose_evaluation_count
                 .saturating_sub(measured_start.prepared_world.pose_evaluation_count),
+            palette_writes: measured_end
+                .prepared_world
+                .palette_write_count
+                .saturating_sub(measured_start.prepared_world.palette_write_count),
             palette_written_bytes: measured_end
                 .prepared_world
                 .palette_written_bytes
                 .saturating_sub(measured_start.prepared_world.palette_written_bytes),
+            actor_writes: measured_end
+                .prepared_world
+                .actor_write_count
+                .saturating_sub(measured_start.prepared_world.actor_write_count),
             actor_written_bytes: measured_end
                 .prepared_world
                 .actor_written_bytes
                 .saturating_sub(measured_start.prepared_world.actor_written_bytes),
+            average_prepare_evaluation_ms: average_prepare_stage_ms(
+                measured_start.prepared_world.prepare_count,
+                measured_end.prepared_world.prepare_count,
+                measured_start.prepared_world.prepare_evaluation_ns,
+                measured_end.prepared_world.prepare_evaluation_ns,
+            ),
+            average_prepare_upload_ms: average_prepare_stage_ms(
+                measured_start.prepared_world.prepare_count,
+                measured_end.prepared_world.prepare_count,
+                measured_start.prepared_world.prepare_upload_ns,
+                measured_end.prepared_world.prepare_upload_ns,
+            ),
             legacy_mesh_rebuilds: measured_end
                 .mesh
                 .rebuild_count
@@ -316,6 +342,7 @@ impl std::str::FromStr for RenderPath {
 #[derive(Clone, Copy, Debug)]
 struct FrameTiming {
     frame_ms: f64,
+    prepare_ms: f64,
     encode_ms: f64,
     submit_ms: f64,
     device_poll_ms: f64,
@@ -327,6 +354,7 @@ struct TimingReport {
     p50_frame_ms: f64,
     p95_frame_ms: f64,
     max_frame_ms: f64,
+    average_prepare_ms: f64,
     average_encode_ms: f64,
     average_submit_ms: f64,
     average_device_poll_ms: f64,
@@ -345,6 +373,7 @@ impl TimingReport {
             p50_frame_ms: percentile_sorted_ms(&sorted, 0.50, PercentileMethod::NearestRank),
             p95_frame_ms: percentile_sorted_ms(&sorted, 0.95, PercentileMethod::NearestRank),
             max_frame_ms: sorted.last().copied().unwrap_or(0.0),
+            average_prepare_ms: samples.iter().map(|sample| sample.prepare_ms).sum::<f64>() / count,
             average_encode_ms: samples.iter().map(|sample| sample.encode_ms).sum::<f64>() / count,
             average_submit_ms: samples.iter().map(|sample| sample.submit_ms).sum::<f64>() / count,
             average_device_poll_ms: samples
@@ -364,11 +393,18 @@ struct ActorReport {
     indices_per_frame: u32,
     prepared_per_frame: usize,
     legacy_per_frame: usize,
+    instance_buckets_per_frame: usize,
     unchanged_actor_reuses: u64,
     prepared_draws: u64,
+    drawn_instances: u64,
+    max_instances_per_draw: u32,
     pose_evaluations: u64,
+    palette_writes: u64,
     palette_written_bytes: u64,
+    actor_writes: u64,
     actor_written_bytes: u64,
+    average_prepare_evaluation_ms: f64,
+    average_prepare_upload_ms: f64,
     legacy_mesh_rebuilds: u64,
     legacy_mesh_uploads: u64,
     legacy_mesh_uploaded_bytes: u64,
@@ -495,6 +531,10 @@ fn render_frame(
     actors: &[ActorInstance],
 ) -> Result<(FrameTiming, mclone_render::entity::ActorRenderStats)> {
     let frame_start = Instant::now();
+    let prepare_start = Instant::now();
+    resources.prepare_for_frame(device, queue, actors);
+    let prepare_ms = elapsed_ms(prepare_start.elapsed());
+    let encode_start = Instant::now();
     let mut encoder = device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
         label: Some("mclone_actor_render_perf_encoder"),
     });
@@ -525,7 +565,7 @@ fn render_frame(
             ..Default::default()
         });
     }
-    let stats = resources.render(
+    let stats = resources.render_reusing_prepared_in_slot(
         device,
         queue,
         &mut encoder,
@@ -533,9 +573,10 @@ fn render_frame(
         render_view,
         render_options,
         actors,
+        mclone_render::uniform::SINGLE_VIEW_SLOT,
     )?;
     let command = encoder.finish();
-    let encode_ms = elapsed_ms(frame_start.elapsed());
+    let encode_ms = elapsed_ms(encode_start.elapsed());
     let submit_start = Instant::now();
     let submission = queue.submit(std::iter::once(command));
     let submit_ms = elapsed_ms(submit_start.elapsed());
@@ -547,6 +588,7 @@ fn render_frame(
     Ok((
         FrameTiming {
             frame_ms: elapsed_ms(frame_start.elapsed()),
+            prepare_ms,
             encode_ms,
             submit_ms,
             device_poll_ms,
@@ -595,6 +637,14 @@ fn usage() -> &'static str {
 
 fn elapsed_ms(duration: std::time::Duration) -> f64 {
     duration.as_secs_f64() * 1_000.0
+}
+
+fn average_prepare_stage_ms(start_count: u64, end_count: u64, start_ns: u64, end_ns: u64) -> f64 {
+    let count = end_count.saturating_sub(start_count);
+    if count == 0 {
+        return 0.0;
+    }
+    end_ns.saturating_sub(start_ns) as f64 / count as f64 / 1_000_000.0
 }
 
 fn current_unix_seconds() -> u64 {

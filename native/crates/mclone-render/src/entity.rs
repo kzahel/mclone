@@ -563,6 +563,19 @@ impl ActorDrawResources {
         )
     }
 
+    /// Prepare renderer-owned actor state once for a frame that may render
+    /// multiple views. Callers must pass the same actor slice to
+    /// `render_reusing_prepared_in_slot`; a count mismatch refreshes safely.
+    pub fn prepare_for_frame(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        actors: &[ActorInstance],
+    ) {
+        self.prepared
+            .prepare(device, queue, &self.shared.prepared, actors);
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn render_in_slot(
         &mut self,
