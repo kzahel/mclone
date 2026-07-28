@@ -110,10 +110,18 @@ period. Restoring ten actors raised composed work to `12.252ms` average,
 only six actors. Actor-skipped rows are attribution controls, never product
 acceptance; normal actors plus LOD remain binding.
 
+Commit `41fc9fae` addresses the discovered route defect: cow entities carried a
+prepared figure ID but were rejected by a stale player/chicken whitelist and
+fell through to whole-mesh CPU baking. Capability-driven admission is now
+landed, shows a `15.9x` isolated win at the same ten-cow count, and is packaged
+in a successful Android XR release APK. No headset was attached for this
+slice, so the normal-actor composed row remains pending and the Quest gate is
+not yet claimed.
+
 The full execution and exception disposition are in
 [`chunk-lighting-admission-and-backpressure.md`](chunk-lighting-admission-and-backpressure.md).
 
-The next bounded renderer experiment remains Tactical
+The independent horizon experiment remains Tactical
 [`278`](../tactical/278-quest-procedural-horizon-multiview.md): add a real
 two-layer horizon to the existing optional full-frame multiview path and
 alternate it against per-eye rendering on the same device. Do not assume the
@@ -181,17 +189,17 @@ live accounting after its one on-demand exact report.
 
 ### HP-1: Split Actor Pose Updates From Whole-Mesh Rebuilds
 
-**Priority: high. Status: CPU-baked fallback cleanup remains unclaimed; the
-startup-prepared static player proof is complete. Scope: general actor
-rendering, not embedded worlds. The first fallback index-reuse slice remains
-low-hanging.**
+**Priority: high. Status: stable entity figures are capability-routed through
+the prepared renderer as of 2026-07-28; physical Quest remeasurement is
+pending. Scope: general actor rendering, not embedded worlds. CPU-baked
+fallback cleanup is no longer the cow-path blocker.**
 
 Tactical 131 already fixed the old per-eye/per-frame GPU allocation defect.
 `ActorMeshCache` now owns reusable CPU scratch plus persistent, grow-only
 vertex and index buffers, and the second eye reuses the first eye's prepared
 geometry. Do not reopen or duplicate that completed resource-lifetime work.
 
-The remaining invalidation is too coarse. `ActorMeshCache::prepare` in
+The fallback invalidation remains too coarse. `ActorMeshCache::prepare` in
 `native/crates/mclone-render/src/entity.rs` compares the complete
 `[ActorInstance]` list. Any position, rotation, walk-distance, or figure-pose
 change then:
@@ -214,43 +222,63 @@ LOD-on RD5 orbit, suppressing ten actors reduced average app work from
 `12.252ms` to `10.723ms`, p95 from `15.151ms` to `12.889ms`, and average
 thread CPU from `9.363ms` to `8.258ms`. The no-actor row passes the main p95
 and over-period limits; the normal-actor row does not. This proves material
-actor-enabled cost, not yet that full-mesh invalidation is its only component.
-Add the counters below before assigning the entire delta to mesh rebuilds.
+actor-enabled cost. The 2026-07-28 investigation found the concrete cow-path
+cause: both prepared-resource creation and prepared-actor admission still had
+the original player/chicken whitelist. Cow joined render-session figure mapping
+on 2026-07-24, but that later promotion did not update either whitelist. Stable
+cow entities therefore fell through to the CPU-baked combined mesh, rebuilding
+and uploading all cow vertices and indices whenever any cow moved.
 
-The preferred bounded pickup order is:
+Commit `41fc9fae` removes figure-name admission. Every stable
+`ActorInstanceId::Entity` with a prepared `Figure` now uses immutable compiled
+geometry and world-local actor/palette records when that figure resource is
+available. Local and remote player identities deliberately remain on their
+player-specific legacy route; debug cubes, items, unsupported figures, and
+actors without stable entity identity also retain the fallback. Exact unchanged
+actor input now reuses its prepared actor and palette state without pose
+evaluation or queue writes.
 
-1. Introduce an actor topology key that excludes pose-only fields while
-   retaining roster, shape/figure, visibility-part, and vertex-layout facts.
-2. On a pose-only change, reuse the existing index data and index buffer;
-   rebuild and upload vertices only. Prove index rebuild/upload counts stay
-   unchanged across movement and walk animation.
-3. For the CPU-baked fallback, consider stable per-actor vertex spans so one
-   changed pose rebuilds and uploads only that actor's vertex range rather than
-   the combined mesh.
-4. Treat Asset Lab figures separately from that fallback. Their semantic source
-   already provides rigid hierarchical parts, pivots, primitive topology, and
-   clips suitable for static compiled geometry plus GPU part transforms. The
-   selected [`compiled-figure-rendering`](compiled-figure-rendering.md) topic
-   owns that broader direction, including real UV/texture compilation,
-   presentation-rate rigid-part animation, instancing, and generated figure
-   LODs. Tactical
-   [`181`](../tactical/181-compiled-figure-static-box-proof.md) now proves the
-   artifact and static mono/per-eye/browser renderer without adopting it in
-   production. The next prepared-path slice is continuously interpolated CPU
-   part palettes and a human-reviewed walk clip, still before crowd
-   optimization.
+The new deterministic headless `actor_render_perf` lane isolates actor
+rendering and can select prepared or legacy admission, animated or stationary
+input, cow/chicken/mixed figures, and arbitrary actor counts. Five clean release
+runs on `41fc9fae`, Linux/Radeon 880M, measured:
 
-Do not make a large CPU span-cache campaign a prerequisite for the compiled
-Asset Lab path. Index reuse remains the low-risk first fallback win;
-measurements from the prepared animation path should decide how much fallback
-range-update work is worthwhile now that static geometry is proven.
+| Workload | Prepared avg / p95 | Legacy avg / p95 | Legacy upload / frame | Relative avg |
+|---|---:|---:|---:|---:|
+| 10 animated cows | `0.208 / 0.262ms` | `3.302 / 3.525ms` | `7.84 MB` | `15.9x` faster |
+| 100 animated cows | `0.837 / 1.015ms` | `31.782 / 32.192ms` | `78.38 MB` | `38.0x` faster |
+
+Prepared mutable allocation was `1.39 MB` at ten cows and `1.77 MB` at 100,
+versus `36.43 MB` and `403.48 MB` in the legacy route. At 1,000 prepared cows,
+animated input measured `9.184 / 9.656ms` average/p95 and performed 120,000
+pose evaluations over 120 frames. Identical stationary input measured
+`1.290 / 1.369ms`, with 120,000 unchanged-record reuses and zero pose,
+palette, or actor writes. Both still issue one draw per actor, so instancing is
+the next credible high-count optimization. These numbers include a synchronous
+GPU wait and no terrain, scene simulation, or OpenXR presentation; they are
+path attribution and scaling evidence, not Quest acceptance.
+
+The preferred bounded pickup order is now:
+
+1. Install the rebuilt APK and repeat the exact physical Quest RD5 LOD-on
+   normal-actor and `--xr-skip-actors` pair. This decides whether removing the
+   cow fallback recovers the product gate.
+2. Carry prepared/legacy actor counts, pose/write counts, and draws into the
+   Quest receipt if the remaining delta is ambiguous.
+3. If moving prepared crowds remain material, implement per-figure compatible
+   instancing and measure draw-count, CPU, and GPU effects independently.
+4. Keep topology/index reuse as a bounded fallback improvement for player,
+   debug, item, and unsupported shapes. Do not make it a prerequisite for
+   prepared figures or assume it still controls the ordinary cow workload.
+5. Continue the procedural-horizon multiview experiment independently; the
+   actor fix does not answer horizon per-eye duplication.
 
 Acceptance evidence should include:
 
-- explicit topology-rebuild, vertex-update, index-update, changed-actor, and
-  uploaded-byte counters;
-- a fixture where one actor moves while multiple actors remain stationary;
-- unchanged direct actor pixels and actor ordering;
+- explicit prepared/legacy counts, pose/write/reuse counts, draw counts, legacy
+  rebuild/upload counts, and uploaded bytes;
+- animated and stationary high-count controls;
+- unchanged actor pixels and ordering;
 - native flat, per-eye stereo, full-frame multiview where available, and
   production browser WebGPU coverage;
 - release comparisons showing that the direct single-world path and idle

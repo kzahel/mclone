@@ -19,6 +19,7 @@ pnpm native:worldgen:smoke
 pnpm native:scheduler-loading:smoke
 pnpm native:mesh-cpu:smoke
 pnpm native:gpu-upload:smoke
+pnpm native:actor-render:smoke
 pnpm native:movement:smoke
 pnpm native:movement-frame:smoke
 pnpm native:startup-streaming:smoke
@@ -35,6 +36,7 @@ pnpm native:scheduler-loading:persisted-memory:perf
 pnpm native:scheduler-loading:persisted-sqlite:perf
 pnpm native:mesh-cpu:perf
 pnpm native:gpu-upload:perf
+pnpm native:actor-render:perf
 pnpm native:movement:perf
 pnpm native:movement-frame:perf
 pnpm native:startup-streaming:perf
@@ -74,6 +76,7 @@ pnpm native:runtime:perf
 - `native:scheduler-loading:*`: server-only loading ceiling probe. Applies one local chunk view to `ChunkScheduler`, hot-polls until the target view is client-visible and server queues drain, and reports target chunks/sec plus worldgen/light/publication counters. It includes current scheduler job admission, publication, light status work, and persistence queues, but no client update pump, mesh preparation, GPU upload, or frame pacing. `native:scheduler-loading:persisted-memory:perf` runs a prewarm pass into shared in-memory `ChunkRecord`s, then measures reload from already-generated/lit records with no disk. `native:scheduler-loading:persisted-sqlite:perf` repeats that shape through a temp SQLite world directory to price the normal record decode/load/storage path separately from generation/light.
 - `native:mesh-cpu:*`: CPU-only render-section mesh probe. The default source prewarms a temp SQLite world, reloads already-generated/lit snapshots through `ChunkScheduler`, then builds all target-column render sections with the shared `mclone-render-session` mesh path. It includes asset catalog load, persisted server reload, snapshot-to-mesh conversion, ambient occlusion, light/tint sampling, and visibility-graph build. It excludes `wgpu`, GPU upload, frame pacing, render draw, and the runtime admission budget.
 - `native:gpu-upload:*`: extends the mesh CPU probe with `--gpu-upload`. After CPU mesh build, it creates headless draw resources, uploads the atlas outside the measured section-upload phase, then times `TexturedSectionDrawResources::apply_section_updates_with_context_timed` for the prebuilt section meshes. It includes real `wgpu` buffer creation and renderer section bookkeeping, but no draw pass, frame loop, runtime upload budget, or Quest frame pacing.
+- `native:actor-render:*`: deterministic offscreen actor-render isolation. It builds a visible actor grid and measures real prepare, encode, submit, and synchronous GPU completion while reporting prepared/legacy actor counts, pose and queue-write work, fallback mesh rebuild/upload bytes, draw pressure, and mutable/immutable memory. Controls select prepared or legacy admission, cow/chicken/mixed figures, animated or stationary input, and actor count. It excludes simulation/spawning, terrain, OpenXR, and swapchain presentation, so use it for route attribution and scaling rather than Quest acceptance.
 - `native:movement:*`: integrated native client/server movement path. Reports chunk load/unload, scheduler polling, remesh time, dirty render-section rebuilds, and visible-vs-loaded face pressure.
 - `native:movement-frame:*`: headless live-frame walking probe. Moves at spectator speed without fully draining render work each step and reports frame-budget misses, poll/remesh/upload/render timing, and render compile queue counters.
 - `native:startup-streaming:*`: desktop-shaped local startup and streaming probe. The default perf lane uses RD10 at a 60 Hz budget for fast iteration; RD15 is the next stronger throughput signal before occasional RD20/RD30 long runs. Uses the same local startup pump to enter at the playable gate, then advances a paced headless frame loop that polls the runtime and syncs render sections under a frame deadline while the requested view fills in. Reports enter-playable time, first full-view-ready frame/time, stable first render-quiescent frame/time, frame-budget misses, runtime poll/remesh/upload/render timing, queue counters, and final readiness. `native:startup-streaming:persisted:*` first prewarms a temp SQLite world, reopens it through the same startup pump, and measures already-generated persisted startup/streaming without fresh generation/light noise. RD20 is an explicit long-run lane, not the default iteration target.
@@ -100,6 +103,61 @@ When adding a record, include:
 The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, `git_dirty`, and `debug_assertions`.
 
 ## Records
+
+### 2026-07-28 - Capability-Driven Prepared Actors And Crowd Lane
+
+Commit reported by benchmark JSON: `41fc9fae`, `git_dirty=false`,
+`debug_assertions=false`. Host: Linux 7.0 x86_64, AMD Ryzen AI 9 365
+(20 logical CPUs) with Radeon 880M. Each table cell is the mean of five clean
+release runs, 120 measured frames after 30 warmup frames at `640x360`.
+
+Code under test: stable entity figures are admitted by prepared-resource
+capability instead of the original player/chicken whitelist. Cow and upright
+bear therefore use immutable prepared geometry and world-local actor/palette
+records. Exact unchanged actor inputs reuse those records without pose
+evaluation or GPU writes. Local/remote player identities, anonymous actors,
+debug/item shapes, and unsupported figures retain the CPU-baked fallback.
+
+Prepared/legacy animated-cow A/B:
+
+| Actors | Path | Avg frame | Mean p95 | Mutable bytes | Legacy upload / frame |
+|---:|---|---:|---:|---:|---:|
+| 10 | prepared | `0.208ms` | `0.262ms` | `1,391,776` | `0` |
+| 10 | legacy | `3.302ms` | `3.525ms` | `36,425,472` | `7,838,400` |
+| 100 | prepared | `0.837ms` | `1.015ms` | `1,767,616` | `0` |
+| 100 | legacy | `31.782ms` | `32.192ms` | `403,484,800` | `78,384,000` |
+
+The prepared route is `15.9x` faster at 10 actors and `38.0x` faster at 100.
+The legacy totals over each 120-frame interval were `940,608,000` bytes and
+`9,406,080,000` bytes respectively; the prepared path rebuilt or uploaded no
+legacy mesh data.
+
+Prepared 1,000-cow motion control:
+
+| Motion | Avg frame | Mean p95 | Pose evaluations | Reuse hits | Palette / actor writes |
+|---|---:|---:|---:|---:|---:|
+| animated | `9.184ms` | `9.656ms` | `120,000` | `0` | `168,960,000 / 9,600,000 B` |
+| stationary | `1.290ms` | `1.369ms` | `0` | `120,000` | `0 / 0 B` |
+
+Both controls still issue 1,000 prepared draws per frame. The unchanged-state
+optimization removes pose and upload work, while the residual stationary
+slope identifies draw submission/GPU work as the next high-count target.
+Per-figure instancing is therefore a justified experiment for crowds, but this
+host lane does not show that ten prepared cows need it.
+
+Representative commands:
+
+```bash
+native/target/release/actor_render_perf --actors 10 --frames 120 --warmup-frames 30 --figure cow --path prepared --motion animated
+native/target/release/actor_render_perf --actors 10 --frames 120 --warmup-frames 30 --figure cow --path legacy --motion animated
+native/target/release/actor_render_perf --actors 1000 --frames 120 --warmup-frames 30 --figure cow --path prepared --motion stationary
+```
+
+Interpretation: the cow regression was route selection, not evidence that the
+prepared figure architecture is intrinsically slow. The remaining product gate
+is a physical Quest RD5 composed-orbit normal-actor/actor-skipped repeat with
+the rebuilt APK. This offscreen lane waits for each GPU submission and includes
+no terrain, simulation/spawn work, OpenXR runtime, or presentation overlap.
 
 ### 2026-07-08 - Tactical 155 P0 Fix A RD20 Free-Movement Retained-Light + RSS Soak
 
