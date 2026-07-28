@@ -34,8 +34,15 @@ writes. Native mono, synthetic stereo/full-frame multiview, Android XR build,
 and production browser WebGPU proofs pass. The new high-count benchmark shows
 the prepared route is `15.9x` faster for ten animated cows and `38.0x` faster
 for 100 on the current Linux/Radeon 880M host. Physical Quest remeasurement is
-pending. Instancing, box-part LOD, GPU pose evaluation, and a disk cache remain
-deferred.
+pending.
+
+Commit `32fcffaf` completed per-figure instancing on the same date. Compatible
+actors now share one draw while retaining independent actor transforms, light,
+opacity, and body-part palettes, so unrelated animation phases remain fully
+instanced. Affine palette/actor packing and startup-precomputed evaluation
+channels reduce upload and CPU pose work. The clean 1,000-animated-cow lane
+improved from `9.184ms` to `1.939ms` average and from 1,000 draws to one.
+Box-part LOD, GPU pose evaluation, and a disk cache remain deferred.
 
 The 2026-07-22 card follow-up deliberately broadens that completed policy to
 boxes plus fixed finite planes for genuinely planar details. Two-sided cards
@@ -1096,11 +1103,12 @@ large figure straddling a light gradient will shade slightly differently
 than the CPU-baked bridge; migration pixel comparisons must treat that as a
 deliberate lighting-model change, not a regression.
 
-Actors sharing a figure can later be instanced by indexing an actor record and
-that actor's part-palette base. Instancing is desirable, but a first prepared
-figure proof may issue one draw per actor or figure/material group while the
-static-geometry and transform contracts settle. Do not couple correctness of
-the prepared renderer contract to the first batching strategy.
+Actors sharing a compatible figure are instanced by indexing an actor record
+and that actor's part-palette base. The whole static vertex/index mesh is
+shared; every vertex's `part_id` selects the correct matrix inside that
+instance's palette. Figure, LOD, material/alpha pass, and pipeline state remain
+valid bucket boundaries. Animation phase is not a bucket boundary because each
+instance indexes an independently evaluated palette.
 
 ### Presentation-rate pose evaluation
 
@@ -1169,12 +1177,12 @@ Startup-prepared figures and LOD solve different costs:
 - LOD reduces the remaining GPU vertex processing, raster pressure, and
   potentially material cost for small projected actors.
 
-As an illustration only, the current actor vertex is 40 bytes. Re-uploading
-the canonical Chicken's 336 preview vertices would be about 13 KB before
-indices, while 14 rigid 3x4 `f32` part matrices are 672 bytes. Its archived
-rounded source would have required 2,209 preview vertices and 21 matrices.
-The future prepared vertex layout and actor payload will differ, but the order
-of magnitude explains both the prepared-path and box-only-authoring gains.
+The current prepared vertex is 56 bytes. Re-uploading the canonical Chicken's
+336 preview vertices would be about 18 KB before indices, while 14 rigid 3x4
+`f32` part matrices are 672 bytes and the affine actor record is 64 bytes.
+Its archived rounded source would have required 2,209 preview vertices and 21
+matrices. The order of magnitude explains both the prepared-path and
+box-only-authoring gains.
 
 GPU part transforms do not reduce the number of vertices the GPU executes.
 That is why LOD remains valuable after CPU/upload work is removed.
@@ -1216,6 +1224,31 @@ The remaining stationary slope is primarily renderer submission/GPU work from
 experiment, but does not establish that it is needed for the ordinary
 ten-actor Quest workload.
 
+Commit `32fcffaf` then ran that bounded experiment with the same host and
+five-run 120/30-frame protocol:
+
+| Animated cows | Instanced avg / p95 | Avg-run range | Pose evaluation | Upload | Device poll | Draws / frame |
+|---:|---:|---:|---:|---:|---:|---:|
+| 10 | `0.145 / 0.189ms` | `0.119–0.202ms` | `0.015ms` | `0.006ms` | `0.094ms` | `1` |
+| 100 | `0.373 / 0.428ms` | `0.362–0.397ms` | `0.146ms` | `0.026ms` | `0.170ms` | `1` |
+| 1,000 | `1.939 / 2.594ms` | `1.656–2.336ms` | `1.150ms` | `0.195ms` | `0.570ms` | `1` |
+| 2,000 | `4.135 / 4.659ms` | `3.942–4.430ms` | `2.137ms` | `0.332ms` | `1.640ms` | `1` |
+
+At 1,000 cows, instancing is `4.74x` faster on average than the immediately
+preceding prepared path. The matching stationary control is
+`0.531/0.569ms`, down from `1.290/1.369ms`, with zero pose or upload work and
+one draw. Independently phased animation remains valid because the vertex
+`part_id` combines with the per-instance palette base; actors do not need to
+share an exact animation step.
+
+One thousand animated cows now write one `1,056,768`-byte affine palette
+texture region plus one `64,000`-byte actor instance buffer per frame. The old
+route issued 1,000 writes of each kind totaling `1,408,000` and `80,000`
+bytes. Pose evaluation is now the largest stable preparation component at
+approximately `1.15ms/1,000` cows. The next high-count experiments should
+therefore isolate GPU palette expansion and projected-size actor LOD rather
+than revisiting draw-call batching.
+
 The isolated lane has no terrain, server/client simulation, OpenXR runtime, or
 swapchain presentation. Its synchronous GPU wait also differs from production
 frame overlap. Use it for route attribution, scaling, and optimization
@@ -1236,11 +1269,12 @@ workload examples, not supported-cadence limits. GPU pose expansion can remove
 most of that upload, while generated LODs, frustum/occlusion admission, and
 conservative distance policies reduce the much larger geometry cost.
 
-Instancing remains valuable despite animation because actors share immutable
+Implemented instancing works despite animation because actors share immutable
 geometry and clip data while indexing different actor records and palette
-bases. It only batches compatible figure, LOD, material, alpha/pass, and
-pipeline state, so the implementation should report bucket fragmentation
-rather than promising one literal draw for every crowd.
+bases. It batches compatible figure, LOD, material, alpha/pass, and pipeline
+state, and the implementation reports bucket fragmentation, real draw count,
+drawn instances, and maximum instances per draw rather than promising one
+literal draw for every heterogeneous crowd.
 
 The target is adaptive rather than GPU-only: CPU palettes should remain the
 simple exact path for ordinary populations and unsupported devices; shared
@@ -1283,6 +1317,11 @@ rendering subsystem:
 - **Batch fragmentation:** figures, LODs, materials, transparency, and passes
   split instance buckets. Diagnostics must expose real draws and instances;
   correctness must not depend on one-draw crowd assumptions.
+- **Sparse mutation:** the current all-animated fast path rewrites one
+  contiguous actor region and one contiguous palette region whenever any
+  instance in a figure bucket changes. Fully unchanged buckets write nothing.
+  A measured mostly-stationary crowd may justify bounded partial range writes,
+  but many tiny queue writes must not replace the two-write dense path.
 - **GPU overhead and limits:** compute dispatches, storage buffers, barriers,
   alignment, frames in flight, and browser/mobile limits can make a crowd path
   slower for small scenes. Capability checks and the CPU evaluator remain
@@ -1490,7 +1529,8 @@ optional quality tier. Neither choice changes the persistence decision.
 
 ### Phase 4: instancing and LOD
 
-- batch actors sharing compatible figure/material/LOD state;
+- completed: batch actors sharing compatible figure/material/pass state while
+  retaining independent per-actor palettes and report bucket fragmentation;
 - generate and review bounded primitive LOD variants;
 - implement projected-size selection, hysteresis, and bounded residency;
 - validate movement, animation, composition, and XR eye consistency through
@@ -1752,18 +1792,18 @@ Bat/Opossum/Sloth content batches extend the canonical authoring roster to 71
 without changing the promoted runtime set.
 
 The immediate next gate is not another desktop optimization: install the
-`41fc9fae` Android XR build and repeat the physical Quest RD5 composed-orbit
+`32fcffaf` Android XR build and repeat the physical Quest RD5 composed-orbit
 normal-actor/actor-skipped A/B that exposed the ten-actor problem. If prepared
 and legacy actor counters are needed to explain the result, add them to that
-receipt without changing admission policy.
+receipt without changing admission or batching policy.
 
-If the normal-actor row still misses after cows are confirmed prepared, use
-the reproducible crowd lane to implement compatible per-figure instancing and
-measure draw-count, CPU, GPU, and memory crossover at 10, 100, and 1,000
-actors. Box-part LOD and sampled/GPU pose evaluation remain separate
-follow-ups; neither should be bundled into the instancing experiment.
+If the normal-actor row still misses after cows are confirmed prepared and
+instanced, use the reproducible crowd lane to compare exact CPU pose evaluation
+with capability-gated GPU palette expansion. Box-part LOD remains an
+independent projected-size experiment. Neither should weaken ordinary exact
+CPU animation or the accepted box-animal silhouette merely to improve the
+1,000-actor stress point.
 
 Do not add a persisted compiled format or revive exact curved tessellation.
-The existing actor-record boundary keeps later instancing, LOD, and GPU crowd
-evaluation additive, while the real high-count fixture should establish their
-crossover.
+The actor-record and palette-texture boundaries keep later LOD and GPU crowd
+evaluation additive, while the high-count fixture establishes their crossover.

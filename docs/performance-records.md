@@ -104,6 +104,65 @@ The benchmark JSON includes `benchmark`, `recorded_unix_seconds`, `git_commit`, 
 
 ## Records
 
+### 2026-07-28 - Instanced Prepared Actor Crowds
+
+Commit reported by benchmark JSON: `32fcffaf`, `git_dirty=false`,
+`debug_assertions=false`. Host: Linux 7.0 x86_64, AMD Ryzen AI 9 365
+(20 logical CPUs) with Radeon 880M. Each table row is the mean of five clean
+release runs, 120 measured frames after 30 warmup frames at `640x360`.
+
+Code under test: actors with the same prepared figure share one immutable
+vertex/index buffer and one instanced draw per compatible material pass. Each
+instance supplies its own affine world transform, light, opacity, and
+body-palette base. Independently evaluated affine part palettes are packed in
+one texture per figure bucket, so unrelated animation phases do not split the
+batch. Engine-space clip channels and rest transforms are precomputed during
+figure preparation.
+
+Animated-cow scaling:
+
+| Actors | Avg frame | Mean p95 | Avg-run range | Prepare | Pose evaluation | Upload | Device poll | Draws / frame |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 10 | `0.145ms` | `0.189ms` | `0.119–0.202ms` | `0.022ms` | `0.015ms` | `0.006ms` | `0.094ms` | `1` |
+| 100 | `0.373ms` | `0.428ms` | `0.362–0.397ms` | `0.172ms` | `0.146ms` | `0.026ms` | `0.170ms` | `1` |
+| 1,000 | `1.939ms` | `2.594ms` | `1.656–2.336ms` | `1.345ms` | `1.150ms` | `0.195ms` | `0.570ms` | `1` |
+| 2,000 | `4.135ms` | `4.659ms` | `3.942–4.430ms` | `2.470ms` | `2.137ms` | `0.332ms` | `1.640ms` | `1` |
+
+Against the immediately preceding non-instanced prepared baseline, average
+frame time improved from `0.208ms` to `0.145ms` at 10 actors, `0.837ms` to
+`0.373ms` at 100, and `9.184ms` to `1.939ms` at 1,000. Those are `1.43x`,
+`2.24x`, and `4.74x` reductions respectively. One thousand cows now submit
+one draw containing 1,000 instances instead of 1,000 draws.
+
+The animated 1,000-cow frame performs one palette write of `1,056,768` bytes
+and one actor write of `64,000` bytes. The previous path wrote 1,000 palette
+buffers totaling `1,408,000` bytes and 1,000 actor buffers totaling `80,000`
+bytes. The affine layout therefore also removes 25% of matrix bytes and 20%
+of actor-record bytes.
+
+The matching stationary 1,000-cow control measured `0.531ms` average and
+`0.569ms` mean p95, down from `1.290/1.369ms`. It retained 120,000 exact-input
+reuse hits with no pose evaluation or actor/palette writes and issued one
+instanced draw per frame. Animated preparation is now the largest stable
+high-count component: pose evaluation averages about `1.15ms` per 1,000 cows,
+while synchronous device poll averages about `0.57ms`. GPU pose expansion or
+actor LOD are therefore separable next experiments rather than prerequisites
+for prepared instancing.
+
+Representative command:
+
+```bash
+native/target/release/actor_render_perf \
+  --actors 1000 --frames 120 --warmup-frames 30 \
+  --figure cow --path prepared --motion animated
+```
+
+Validation included the full `mclone-assets` and `mclone-render` library
+suites, explicit 1,000-instance residency, mono/stereo/full-frame multiview
+pixel proofs, headed production browser WebGPU actor composition, strict
+affected-crate Clippy, and a release Android XR APK build. Physical Quest
+frame pacing was not measured in this slice.
+
 ### 2026-07-28 - Capability-Driven Prepared Actors And Crowd Lane
 
 Commit reported by benchmark JSON: `41fc9fae`, `git_dirty=false`,

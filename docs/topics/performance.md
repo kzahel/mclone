@@ -189,10 +189,11 @@ live accounting after its one on-demand exact report.
 
 ### HP-1: Split Actor Pose Updates From Whole-Mesh Rebuilds
 
-**Priority: high. Status: stable entity figures are capability-routed through
-the prepared renderer as of 2026-07-28; physical Quest remeasurement is
+**Priority: high. Status: stable entity figures are capability-routed and
+per-figure instanced as of 2026-07-28; physical Quest remeasurement is
 pending. Scope: general actor rendering, not embedded worlds. CPU-baked
-fallback cleanup is no longer the cow-path blocker.**
+fallback cleanup and prepared draw submission are no longer cow-path
+blockers.**
 
 Tactical 131 already fixed the old per-eye/per-frame GPU allocation defect.
 `ActorMeshCache` now owns reusable CPU scratch plus persistent, grow-only
@@ -258,27 +259,66 @@ the next credible high-count optimization. These numbers include a synchronous
 GPU wait and no terrain, scene simulation, or OpenXR presentation; they are
 path attribution and scaling evidence, not Quest acceptance.
 
+Commit `32fcffaf` completes that instancing experiment. Actors sharing a
+prepared figure now use one instance bucket and one draw per compatible
+material pass. Every vertex still carries its rigid `part_id`; the instance
+selects its own actor transform and the base of its independently evaluated
+part-matrix palette in a shared texture. Actors can therefore have unrelated
+animation phases without splitting the batch. Affine 3x4 packing reduces both
+palette traffic and actor-record traffic, and startup-precomputed engine-space
+clip channels remove repeated coordinate and Euler-to-quaternion conversion
+from presentation-rate evaluation.
+
+Five clean release runs on the same Linux/Radeon 880M host and 120/30-frame
+protocol measured:
+
+| Animated cows | Instanced avg / p95 | Previous avg / p95 | Draws / frame | Pose / upload / poll |
+|---:|---:|---:|---:|---:|
+| 10 | `0.145 / 0.189ms` | `0.208 / 0.262ms` | `1` | `0.015 / 0.006 / 0.094ms` |
+| 100 | `0.373 / 0.428ms` | `0.837 / 1.015ms` | `1` | `0.146 / 0.026 / 0.170ms` |
+| 1,000 | `1.939 / 2.594ms` | `9.184 / 9.656ms` | `1` | `1.150 / 0.195 / 0.570ms` |
+| 2,000 | `4.135 / 4.659ms` | — | `1` | `2.137 / 0.332 / 1.640ms` |
+
+The 1,000-cow result is `4.74x` faster on average. Its five average-frame
+samples ranged from `1.656ms` to `2.336ms`, so the table does not hide host/GPU
+scheduling variance. The stationary 1,000-cow control improved from
+`1.290/1.369ms` to `0.531/0.569ms`, retained zero pose/upload work, and also
+used one draw. The remaining animated CPU cost is now approximately
+`1.15ms/1,000` cows for exact pose evaluation; the full-detail workload still
+executes 528,000 vertices and 792,000 indices. GPU pose expansion and actor LOD
+are the next distinct high-count levers, not further draw-call cleanup.
+
+The current upload invalidation grain is one figure bucket: a fully unchanged
+bucket performs no writes, while any changed actor rebuilds that bucket's two
+contiguous upload regions. This minimizes queue calls for the measured
+all-animated crowd. Before optimizing a mostly stationary crowd with only a
+few changing actors, measure a sparse-update control and add bounded range
+writes only where they beat the two-write full-bucket path.
+
 The preferred bounded pickup order is now:
 
-1. Install the rebuilt APK and repeat the exact physical Quest RD5 LOD-on
-   normal-actor and `--xr-skip-actors` pair. This decides whether removing the
-   cow fallback recovers the product gate.
+1. Install the `32fcffaf` APK and repeat the exact physical Quest RD5 LOD-on
+   normal-actor and `--xr-skip-actors` pair. This decides whether prepared
+   admission plus instancing recover the product gate.
 2. Carry prepared/legacy actor counts, pose/write counts, and draws into the
    Quest receipt if the remaining delta is ambiguous.
-3. If moving prepared crowds remain material, implement per-figure compatible
-   instancing and measure draw-count, CPU, and GPU effects independently.
+3. If moving prepared crowds remain material, compare exact CPU pose
+   evaluation with a capability-gated GPU palette-expansion experiment at
+   100/1,000 actors; keep the CPU path for ordinary populations.
 4. Keep topology/index reuse as a bounded fallback improvement for player,
    debug, item, and unsupported shapes. Do not make it a prerequisite for
    prepared figures or assume it still controls the ordinary cow workload.
-5. Continue the procedural-horizon multiview experiment independently; the
-   actor fix does not answer horizon per-eye duplication.
+5. Evaluate actor LOD independently at projected sizes that preserve the
+   accepted box-animal silhouette, then continue the procedural-horizon
+   multiview experiment independently.
 
 Acceptance evidence should include:
 
 - explicit prepared/legacy counts, pose/write/reuse counts, draw counts, legacy
   rebuild/upload counts, and uploaded bytes;
 - animated and stationary high-count controls;
-- unchanged actor pixels and ordering;
+- unchanged actor pixels and ordering, including mixed-figure bucket
+  fragmentation;
 - native flat, per-eye stereo, full-frame multiview where available, and
   production browser WebGPU coverage;
 - release comparisons showing that the direct single-world path and idle
