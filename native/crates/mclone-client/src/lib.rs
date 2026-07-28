@@ -86,6 +86,10 @@ pub enum ClientSessionPhase {
     Disconnected,
 }
 
+/// Hard item bound for old chunk payloads awaiting destruction outside
+/// immediate replica update application.
+pub const DEFAULT_DEFERRED_CHUNK_DROP_MAX_ITEMS: usize = 4_096;
+
 #[derive(Clone, Debug)]
 pub struct ClientRuntime {
     host: ClientHost,
@@ -100,6 +104,7 @@ pub struct ClientRuntime {
     loaded_chunk_generation: u64,
     deferred_chunk_drops: VecDeque<ChunkSnapshot>,
     deferred_chunk_drop_items: usize,
+    deferred_chunk_drop_inline_fallback_items: usize,
     game_time: u64,
     day_time: u64,
     daylight_cycle_running: bool,
@@ -131,6 +136,7 @@ impl ClientRuntime {
             loaded_chunk_generation: 0,
             deferred_chunk_drops: VecDeque::new(),
             deferred_chunk_drop_items: 0,
+            deferred_chunk_drop_inline_fallback_items: 0,
             game_time: 0,
             day_time: 0,
             daylight_cycle_running: true,
@@ -462,6 +468,10 @@ impl ClientRuntime {
         self.deferred_chunk_drop_items
     }
 
+    pub fn deferred_chunk_drop_inline_fallback_item_count(&self) -> usize {
+        self.deferred_chunk_drop_inline_fallback_items
+    }
+
     pub fn drain_deferred_chunk_drop_items(&mut self, budget: usize) -> usize {
         let mut drained = 0;
         while drained < budget && self.drain_deferred_chunk_drop_item() {
@@ -490,6 +500,7 @@ impl ClientRuntime {
         }
         self.deferred_chunk_drops.clear();
         self.deferred_chunk_drop_items = 0;
+        self.deferred_chunk_drop_inline_fallback_items = 0;
         self.player_position_updates.clear();
         self.remote_players.clear();
         self.remote_player_walk_distances.clear();
@@ -589,7 +600,21 @@ impl ClientRuntime {
         if item_count == 0 {
             return;
         }
-        self.deferred_chunk_drop_items += item_count;
+        let Some(next_items) = self.deferred_chunk_drop_items.checked_add(item_count) else {
+            self.deferred_chunk_drop_inline_fallback_items = self
+                .deferred_chunk_drop_inline_fallback_items
+                .saturating_add(item_count);
+            drop(snapshot);
+            return;
+        };
+        if next_items > DEFAULT_DEFERRED_CHUNK_DROP_MAX_ITEMS {
+            self.deferred_chunk_drop_inline_fallback_items = self
+                .deferred_chunk_drop_inline_fallback_items
+                .saturating_add(item_count);
+            drop(snapshot);
+            return;
+        }
+        self.deferred_chunk_drop_items = next_items;
         self.deferred_chunk_drops.push_back(snapshot);
     }
 
@@ -1006,6 +1031,38 @@ mod tests {
         assert_eq!(runtime.deferred_chunk_drop_item_count(), 1);
         assert_eq!(runtime.drain_deferred_chunk_drop_items(1), 1);
         assert_eq!(runtime.deferred_chunk_drop_item_count(), 0);
+    }
+
+    #[test]
+    fn client_runtime_bounds_deferred_chunk_payload_ownership() {
+        let mut runtime = ClientRuntime::local_integrated();
+        let mut blocks = vec![AIR_BLOCK_STATE_ID; CHUNK_SECTION_VOLUME];
+        blocks[0] = BlockStateId(1);
+        let template = ChunkSnapshot::from_block_state_ids(
+            ChunkPos::new(0, 0),
+            ChunkStatus::Surface,
+            ChunkRevision(1),
+            0,
+            16,
+            &blocks,
+        );
+        let snapshot_count = DEFAULT_DEFERRED_CHUNK_DROP_MAX_ITEMS / 2 + 1;
+
+        for chunk_x in 0..snapshot_count {
+            let mut snapshot = template.clone();
+            snapshot.pos = ChunkPos::new(chunk_x as i32, 0);
+            runtime.apply_update(ServerUpdate::ChunkSnapshot(snapshot));
+            runtime.apply_update(ServerUpdate::ChunkUnload {
+                pos: ChunkPos::new(chunk_x as i32, 0),
+            });
+        }
+
+        assert_eq!(
+            runtime.deferred_chunk_drop_item_count(),
+            DEFAULT_DEFERRED_CHUNK_DROP_MAX_ITEMS
+        );
+        assert_eq!(runtime.deferred_chunk_drop_inline_fallback_item_count(), 2);
+        assert_eq!(runtime.loaded_chunk_count(), 0);
     }
 
     #[test]

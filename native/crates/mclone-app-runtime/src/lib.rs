@@ -116,7 +116,12 @@ pub const DEFAULT_RENDER_CHUNK_MESH_BUDGET: usize = 1;
 pub const DEFAULT_RENDER_SECTION_COMPILE_WORKERS: usize = 1;
 pub const DEFAULT_RENDER_SECTION_COMPILE_MAX_PENDING_JOBS: usize = 4;
 pub const DEFAULT_RUNTIME_UPDATE_PUMP_BUDGET: Duration = Duration::from_millis(2);
-pub const DEFAULT_CLIENT_DEFERRED_CHUNK_DROP_ITEM_BUDGET: usize = 16;
+/// Drain enough client-owned snapshot payloads into the separately bounded
+/// destruction service to outpace one admitted unload burst. Keeping this
+/// equal to the service's item cap prevents the unbounded staging queue that a
+/// 16-item handoff created under repeated full-view churn.
+pub const DEFAULT_CLIENT_DEFERRED_CHUNK_DROP_ITEM_BUDGET: usize =
+    deferred_drop::DEFAULT_DEFERRED_DROP_MAX_ITEMS;
 // Count-cap unload bursts so many small ordered records cannot fit under the
 // elapsed frame budget and still create a large client-apply tail.
 pub const DEFAULT_RUNTIME_UPDATE_PUMP_UNLOAD_UPDATE_BUDGET: usize = 16;
