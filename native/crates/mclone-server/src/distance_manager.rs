@@ -43,6 +43,7 @@ pub(crate) struct ChunkDistanceManager {
     player_promotions_admitted_total: u64,
     player_promotions_cancelled_before_admission: u64,
     aggregate_interest_priority_centers: Vec<ChunkPos>,
+    non_propagating_ticket_additions: BTreeSet<(ChunkPos, ChunkTicketType, i32, ChunkTicketKey)>,
     ticket_tick: u64,
     ticket_generation: u64,
     active_levels_cache: RefCell<Option<(u64, Arc<BTreeMap<ChunkPos, i32>>)>>,
@@ -62,6 +63,7 @@ impl ChunkDistanceManager {
             player_promotions_admitted_total: 0,
             player_promotions_cancelled_before_admission: 0,
             aggregate_interest_priority_centers: Vec::new(),
+            non_propagating_ticket_additions: BTreeSet::new(),
             ticket_tick: 0,
             ticket_generation: 0,
             active_levels_cache: RefCell::new(None),
@@ -256,9 +258,25 @@ impl ChunkDistanceManager {
     ) {
         let mut ticket = ChunkTicket::new(ticket_type, level, key);
         ticket.created_tick = self.ticket_tick;
-        let tickets = self.tickets.entry(pos).or_default();
-        tickets.replace(ticket);
-        self.mark_tickets_changed();
+        let (before_level, after_level) = {
+            let tickets = self.tickets.entry(pos).or_default();
+            let before_level = tickets.first().map(|ticket| ticket.level);
+            tickets.replace(ticket.clone());
+            let after_level = tickets.first().map(|ticket| ticket.level);
+            (before_level, after_level)
+        };
+        if before_level == after_level {
+            return;
+        }
+
+        let identity = (pos, ticket.ticket_type, ticket.level, ticket.key.clone());
+        match self.apply_ticket_addition_to_active_levels(pos, after_level.unwrap_or(level)) {
+            Some(true) => {}
+            Some(false) => {
+                self.non_propagating_ticket_additions.insert(identity);
+            }
+            None => self.mark_tickets_changed(),
+        }
     }
 
     pub(crate) fn remove_ticket(
@@ -269,14 +287,22 @@ impl ChunkDistanceManager {
         key: ChunkTicketKey,
     ) {
         let ticket = ChunkTicket::new(ticket_type, level, key);
+        let identity = (pos, ticket.ticket_type, ticket.level, ticket.key.clone());
+        let mut before_level = None;
+        let mut after_level = None;
         let mut changed = false;
         if let Some(tickets) = self.tickets.get_mut(&pos) {
+            before_level = tickets.first().map(|ticket| ticket.level);
             changed = tickets.remove(&ticket);
+            after_level = tickets.first().map(|ticket| ticket.level);
             if tickets.is_empty() {
                 self.tickets.remove(&pos);
             }
         }
-        if changed {
+        if !changed || before_level == after_level {
+            return;
+        }
+        if !self.non_propagating_ticket_additions.remove(&identity) {
             self.mark_tickets_changed();
         }
     }
@@ -459,6 +485,56 @@ impl ChunkDistanceManager {
 
     fn mark_tickets_changed(&mut self) {
         self.ticket_generation = self.ticket_generation.wrapping_add(1);
+        self.non_propagating_ticket_additions.clear();
+    }
+
+    fn apply_ticket_addition_to_active_levels(
+        &mut self,
+        source_pos: ChunkPos,
+        source_level: i32,
+    ) -> Option<bool> {
+        if source_level > MAX_CHUNK_DISTANCE {
+            return Some(false);
+        }
+        let Some((cache_generation, cached_levels)) = self.active_levels_cache.get_mut().as_mut()
+        else {
+            return None;
+        };
+        if *cache_generation != self.ticket_generation {
+            return None;
+        }
+
+        let radius = MAX_CHUNK_DISTANCE - source_level;
+        let mut updates = Vec::new();
+        for dz in -radius..=radius {
+            for dx in -radius..=radius {
+                let distance = dx.abs().max(dz.abs());
+                let level = source_level + distance;
+                if level > MAX_CHUNK_DISTANCE {
+                    continue;
+                }
+                let Some(pos) = self.topology.neighbor_chunk(source_pos, dx, dz) else {
+                    continue;
+                };
+                if cached_levels
+                    .get(&pos)
+                    .is_none_or(|current| level < *current)
+                {
+                    updates.push((pos, level));
+                }
+            }
+        }
+        if updates.is_empty() {
+            return Some(false);
+        }
+
+        let levels = Arc::make_mut(cached_levels);
+        for (pos, level) in updates {
+            levels.insert(pos, level);
+        }
+        self.ticket_generation = self.ticket_generation.wrapping_add(1);
+        *cache_generation = self.ticket_generation;
+        Some(true)
     }
 }
 
@@ -492,7 +568,7 @@ mod tests {
             ChunkTicketKey::Chunk(east),
         );
         let (after_add, after_add_hit) = manager.active_levels_with_cache_status();
-        assert!(!after_add_hit);
+        assert!(after_add_hit);
         assert!(!Arc::ptr_eq(&first, &after_add));
         assert_eq!(after_add.get(&east), Some(&MAX_CHUNK_DISTANCE));
 
@@ -506,6 +582,64 @@ mod tests {
         assert!(!after_remove_hit);
         assert!(!Arc::ptr_eq(&after_add, &after_remove));
         assert!(!after_remove.contains_key(&east));
+    }
+
+    #[test]
+    fn stronger_ticket_addition_updates_the_live_distance_cache() {
+        let mut manager = ChunkDistanceManager::new();
+        manager.add_ticket(
+            ChunkTicketType::Player,
+            ChunkPos::new(0, 0),
+            PLAYER_TICKET_LEVEL,
+            ChunkTicketKey::Chunk(ChunkPos::new(0, 0)),
+        );
+        let first = manager.active_levels();
+        let generation = manager.ticket_generation();
+
+        manager.add_ticket(
+            ChunkTicketType::Player,
+            ChunkPos::new(20, 0),
+            PLAYER_TICKET_LEVEL,
+            ChunkTicketKey::Chunk(ChunkPos::new(20, 0)),
+        );
+
+        let (second, cache_hit) = manager.active_levels_with_cache_status();
+        assert!(cache_hit);
+        assert_ne!(manager.ticket_generation(), generation);
+        assert!(!Arc::ptr_eq(&first, &second));
+        assert_eq!(
+            second.get(&ChunkPos::new(20, 0)),
+            Some(&PLAYER_TICKET_LEVEL)
+        );
+    }
+
+    #[test]
+    fn covered_light_ticket_add_and_remove_do_not_invalidate_levels() {
+        let mut manager = ChunkDistanceManager::new();
+        let center = ChunkPos::new(0, 0);
+        let east = ChunkPos::new(1, 0);
+        manager.add_ticket(
+            ChunkTicketType::Player,
+            center,
+            PLAYER_TICKET_LEVEL,
+            ChunkTicketKey::Chunk(center),
+        );
+        let first = manager.active_levels();
+        let generation = manager.ticket_generation();
+        let key = ChunkTicketKey::LightRequest(7);
+
+        manager.add_ticket(
+            ChunkTicketType::Light,
+            east,
+            CHUNK_LEVEL_FULL + 1,
+            key.clone(),
+        );
+        assert_eq!(manager.ticket_generation(), generation);
+        assert!(Arc::ptr_eq(&first, &manager.active_levels()));
+
+        manager.remove_ticket(ChunkTicketType::Light, east, CHUNK_LEVEL_FULL + 1, key);
+        assert_eq!(manager.ticket_generation(), generation);
+        assert!(Arc::ptr_eq(&first, &manager.active_levels()));
     }
 
     #[test]

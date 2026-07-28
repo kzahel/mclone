@@ -4337,33 +4337,25 @@ impl ChunkScheduler {
     }
 
     fn prune_completed_job_history(&mut self) {
-        let referenced_by_publication = self
-            .pending_worldgen_publications
-            .iter()
-            .map(|publication| publication.completed.job_id)
-            .collect::<BTreeSet<_>>();
-        let referenced_by_light_demand = self
-            .pending_light_demands
-            .values()
-            .filter_map(|demand| demand.source_job)
-            .collect::<BTreeSet<_>>();
-        let referenced_by_holder = self
-            .holders
-            .values()
-            .flat_map(|holder| {
-                [ChunkStatus::Features]
-                    .into_iter()
-                    .filter_map(|status| holder.status_slot(status).and_then(|slot| slot.job_id))
-            })
-            .collect::<BTreeSet<_>>();
         let removable = self
             .jobs
             .values()
             .filter(|job| {
                 job.state == ChunkJobState::Complete
-                    && !referenced_by_publication.contains(&job.id)
-                    && !referenced_by_light_demand.contains(&job.id)
-                    && !referenced_by_holder.contains(&job.id)
+                    && !self
+                        .pending_worldgen_publications
+                        .iter()
+                        .any(|publication| publication.completed.job_id == job.id)
+                    && !self
+                        .pending_light_demands
+                        .values()
+                        .any(|demand| demand.source_job == Some(job.id))
+                    && job.target_chunks.iter().all(|pos| {
+                        self.holders
+                            .get(pos)
+                            .and_then(|holder| holder.status_slot(ChunkStatus::Features))
+                            .is_none_or(|slot| slot.job_id != Some(job.id))
+                    })
             })
             .map(|job| job.id)
             .collect::<Vec<_>>();
