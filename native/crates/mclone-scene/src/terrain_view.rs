@@ -48,6 +48,11 @@ pub struct SceneTerrainViewDiagnostics {
     pub ready_slots: u32,
     pub drawn_levels: u32,
     pub drawn_tiles: u32,
+    pub inner_hole_culled_tiles: u32,
+    pub frustum_culled_tiles: u32,
+    pub far_culled_tiles: u32,
+    pub drawn_tree_tiles: u32,
+    pub drawn_tree_instances: u32,
     pub target_ready: bool,
     pub tree_instance_count: u32,
     pub pending_vegetation_tiles: u32,
@@ -381,6 +386,11 @@ impl SceneTerrainViewState {
         self.diagnostics.ready_slots = stats.ready_slots;
         self.diagnostics.drawn_levels = stats.drawn_levels;
         self.diagnostics.drawn_tiles = stats.drawn_tiles;
+        self.diagnostics.inner_hole_culled_tiles = stats.inner_hole_culled_tiles;
+        self.diagnostics.frustum_culled_tiles = stats.frustum_culled_tiles;
+        self.diagnostics.far_culled_tiles = stats.far_culled_tiles;
+        self.diagnostics.drawn_tree_tiles = stats.drawn_tree_tiles;
+        self.diagnostics.drawn_tree_instances = stats.drawn_tree_instances;
         self.diagnostics.target_ready = stats.target_ready;
         self.diagnostics.tree_instance_count = stats.tree_instance_count;
         self.diagnostics.pending_vegetation_tiles = stats.pending_vegetation_tiles;

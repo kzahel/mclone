@@ -4314,7 +4314,7 @@ mod android {
             if needs_settle {
                 let horizon = rendered.terrain_view.unwrap_or_default();
                 log::info!(
-                    "MCLONE_ANDROID_XR_PERF_SETTLED mode={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} sections={} drawn_sections={} indices={} drawn_indices={} ready_sections={} horizon_active={} horizon_target_ready={} horizon_ready_slots={} horizon_drawn_levels={} horizon_drawn_tiles={} horizon_pending_vegetation_tiles={} horizon_vegetation_submitted_jobs={} horizon_vegetation_completed_jobs={} horizon_vegetation_transport_failures={} horizon_vegetation_job_failures={}",
+                    "MCLONE_ANDROID_XR_PERF_SETTLED mode={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} sections={} drawn_sections={} indices={} drawn_indices={} ready_sections={} horizon_active={} horizon_target_ready={} horizon_ready_slots={} horizon_drawn_levels={} horizon_drawn_tiles={} horizon_inner_hole_culled_tiles={} horizon_frustum_culled_tiles={} horizon_far_culled_tiles={} horizon_drawn_tree_tiles={} horizon_drawn_tree_instances={} horizon_pending_vegetation_tiles={} horizon_vegetation_submitted_jobs={} horizon_vegetation_completed_jobs={} horizon_vegetation_transport_failures={} horizon_vegetation_job_failures={}",
                     mode,
                     settle_seconds,
                     ANDROID_XR_PERF_SETTLE_MIN_SECONDS,
@@ -4330,6 +4330,11 @@ mod android {
                     horizon.ready_slots,
                     horizon.drawn_levels,
                     horizon.drawn_tiles,
+                    horizon.inner_hole_culled_tiles,
+                    horizon.frustum_culled_tiles,
+                    horizon.far_culled_tiles,
+                    horizon.drawn_tree_tiles,
+                    horizon.drawn_tree_instances,
                     horizon.pending_vegetation_tiles,
                     horizon.vegetation_submitted_jobs,
                     horizon.vegetation_completed_jobs,
@@ -4880,13 +4885,18 @@ mod android {
             let start_horizon = self.start_terrain_view.unwrap_or_default();
             let latest_horizon = self.latest_terrain_view.unwrap_or_default();
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_HORIZON start_active={} start_target_ready={} start_ready_slots={} start_drawn_levels={} start_drawn_tiles={} start_tree_instances={} start_pending_vegetation_tiles={} start_vegetation_submitted_jobs={} start_vegetation_completed_jobs={} latest_active={} latest_target_ready={} latest_ready_slots={} latest_drawn_levels={} latest_drawn_tiles={} latest_tree_instances={} latest_pending_vegetation_tiles={} latest_vegetation_submitted_jobs={} latest_vegetation_completed_jobs={} latest_vegetation_transport_failures={} latest_vegetation_job_failures={}",
+                "MCLONE_ANDROID_XR_PERF_HORIZON start_active={} start_target_ready={} start_ready_slots={} start_drawn_levels={} start_drawn_tiles={} start_inner_hole_culled_tiles={} start_frustum_culled_tiles={} start_far_culled_tiles={} start_tree_instances={} start_drawn_tree_tiles={} start_drawn_tree_instances={} start_pending_vegetation_tiles={} start_vegetation_submitted_jobs={} start_vegetation_completed_jobs={} latest_active={} latest_target_ready={} latest_ready_slots={} latest_drawn_levels={} latest_drawn_tiles={} latest_inner_hole_culled_tiles={} latest_frustum_culled_tiles={} latest_far_culled_tiles={} latest_tree_instances={} latest_drawn_tree_tiles={} latest_drawn_tree_instances={} latest_pending_vegetation_tiles={} latest_vegetation_submitted_jobs={} latest_vegetation_completed_jobs={} latest_vegetation_transport_failures={} latest_vegetation_job_failures={}",
                 self.start_terrain_view.is_some(),
                 start_horizon.target_ready,
                 start_horizon.ready_slots,
                 start_horizon.drawn_levels,
                 start_horizon.drawn_tiles,
+                start_horizon.inner_hole_culled_tiles,
+                start_horizon.frustum_culled_tiles,
+                start_horizon.far_culled_tiles,
                 start_horizon.tree_instance_count,
+                start_horizon.drawn_tree_tiles,
+                start_horizon.drawn_tree_instances,
                 start_horizon.pending_vegetation_tiles,
                 start_horizon.vegetation_submitted_jobs,
                 start_horizon.vegetation_completed_jobs,
@@ -4895,7 +4905,12 @@ mod android {
                 latest_horizon.ready_slots,
                 latest_horizon.drawn_levels,
                 latest_horizon.drawn_tiles,
+                latest_horizon.inner_hole_culled_tiles,
+                latest_horizon.frustum_culled_tiles,
+                latest_horizon.far_culled_tiles,
                 latest_horizon.tree_instance_count,
+                latest_horizon.drawn_tree_tiles,
+                latest_horizon.drawn_tree_instances,
                 latest_horizon.pending_vegetation_tiles,
                 latest_horizon.vegetation_submitted_jobs,
                 latest_horizon.vegetation_completed_jobs,

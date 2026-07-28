@@ -42,6 +42,9 @@ use super::{
 
 pub const TERRAIN_PREVIEW_MATERIAL_UV_COUNT: usize = 256;
 const TERRAIN_EXACT_COVERAGE_UNIFORM_BYTES: u64 = 32;
+const TERRAIN_HORIZON_TREE_CULL_MARGIN_BLOCKS: f32 = 16.0;
+const TERRAIN_HORIZON_CULL_MIN_Y: f32 = -64.0;
+const TERRAIN_HORIZON_CULL_MAX_Y: f32 = 512.0;
 
 #[derive(Clone, Copy, Debug)]
 pub struct TerrainHorizonRenderTarget<'a> {
@@ -180,6 +183,11 @@ pub struct TerrainHorizonFrameStats {
     pub dispatched_refills_total: u64,
     pub drawn_levels: u32,
     pub drawn_tiles: u32,
+    pub inner_hole_culled_tiles: u32,
+    pub frustum_culled_tiles: u32,
+    pub far_culled_tiles: u32,
+    pub drawn_tree_tiles: u32,
+    pub drawn_tree_instances: u32,
     pub vertex_count: u32,
     pub vegetation_ready_tiles: u32,
     pub pending_vegetation_tiles: u32,
@@ -2647,6 +2655,8 @@ pub struct TerrainHorizonRenderer {
     authoritative_tree_ownership: bool,
     tree_ownership: Option<BoundedRepresentationOwnershipSnapshot<McloneTreeOccurrenceId>>,
     exact_owned_tree_ids: BTreeSet<McloneTreeOccurrenceId>,
+    visible_terrain_slots: Vec<bool>,
+    visible_vegetation_slots: Vec<bool>,
 }
 
 impl TerrainHorizonRenderer {
@@ -2782,6 +2792,7 @@ impl TerrainHorizonRenderer {
             }
         }
         debug_assert_eq!(slots.len(), admission.resource_slots() as usize);
+        let resource_slot_count = slots.len();
         Ok(Self {
             renderer,
             clipmap,
@@ -2800,6 +2811,8 @@ impl TerrainHorizonRenderer {
             authoritative_tree_ownership: false,
             tree_ownership: None,
             exact_owned_tree_ids: BTreeSet::new(),
+            visible_terrain_slots: vec![false; resource_slot_count],
+            visible_vegetation_slots: vec![false; resource_slot_count],
         })
     }
 
@@ -3186,9 +3199,41 @@ impl TerrainHorizonRenderer {
         self.refresh_authoritative_tree_ownership(device, queue)?;
 
         let terrain_levels = self.admission.terrain_presentations();
+        let far_cull = presentation
+            .fog
+            .far_cull_distance()
+            .zip(presentation.render_view_override)
+            .map(|(distance, view)| (distance, view.camera_position));
+        self.visible_terrain_slots.fill(false);
+        let mut inner_hole_culled_tiles = 0_u32;
+        let mut frustum_culled_tiles = 0_u32;
+        let mut far_culled_tiles = 0_u32;
         for level in &terrain_levels {
             let inner_hole = finer_level_bounds(&terrain_levels, level.snapshot.level);
             for resource in &level.tiles {
+                match terrain_horizon_tile_visibility(
+                    resource.tile,
+                    inner_hole,
+                    0.0,
+                    far_cull,
+                    presentation.render_view_override,
+                    uniform_presentation,
+                ) {
+                    TerrainHorizonTileVisibility::Visible => {}
+                    TerrainHorizonTileVisibility::InnerHole => {
+                        inner_hole_culled_tiles = inner_hole_culled_tiles.saturating_add(1);
+                        continue;
+                    }
+                    TerrainHorizonTileVisibility::Frustum => {
+                        frustum_culled_tiles = frustum_culled_tiles.saturating_add(1);
+                        continue;
+                    }
+                    TerrainHorizonTileVisibility::Far => {
+                        far_culled_tiles = far_culled_tiles.saturating_add(1);
+                        continue;
+                    }
+                }
+                self.visible_terrain_slots[resource.resource_slot as usize] = true;
                 let slot_index = resource.resource_slot as usize;
                 let slot = &self.slots[slot_index];
                 queue.write_buffer(
@@ -3215,12 +3260,25 @@ impl TerrainHorizonRenderer {
             }
         }
         let vegetation_levels = self.admission.vegetation_presentations();
+        self.visible_vegetation_slots.fill(false);
         for level in &vegetation_levels {
             if level.snapshot.sample_spacing > TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING {
                 continue;
             }
             let inner_hole = finer_level_bounds(&vegetation_levels, level.snapshot.level);
             for resource in &level.tiles {
+                if terrain_horizon_tile_visibility(
+                    resource.tile,
+                    inner_hole,
+                    TERRAIN_HORIZON_TREE_CULL_MARGIN_BLOCKS,
+                    far_cull,
+                    presentation.render_view_override,
+                    uniform_presentation,
+                ) != TerrainHorizonTileVisibility::Visible
+                {
+                    continue;
+                }
+                self.visible_vegetation_slots[resource.resource_slot as usize] = true;
                 let slot = &self.slots[resource.resource_slot as usize];
                 queue.write_buffer(
                     &slot.tree_uniform_buffer,
@@ -3244,11 +3302,8 @@ impl TerrainHorizonRenderer {
 
         let mut drawn_levels = 0_u32;
         let mut drawn_tiles = 0_u32;
-        let far_cull = presentation
-            .fog
-            .far_cull_distance()
-            .zip(presentation.render_view_override)
-            .map(|(distance, view)| (distance, view.camera_position));
+        let mut drawn_tree_tiles = 0_u32;
+        let mut drawn_tree_instances = 0_u32;
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("mclone_terrain_horizon_render_pass"),
@@ -3283,11 +3338,9 @@ impl TerrainHorizonRenderer {
             pass.set_bind_group(1, &self.renderer._material_resources.bind_group, &[]);
             pass.set_bind_group(2, &self.renderer.exact_coverage.bind_group, &[]);
             for level in terrain_levels.iter().rev() {
-                drawn_levels = drawn_levels.saturating_add(1);
+                let mut level_drawn = false;
                 for resource in &level.tiles {
-                    if far_cull.is_some_and(|(distance, camera)| {
-                        terrain_horizon_tile_beyond_distance(resource.tile, camera, distance)
-                    }) {
+                    if !self.visible_terrain_slots[resource.resource_slot as usize] {
                         continue;
                     }
                     let slot_index = resource.resource_slot as usize;
@@ -3296,6 +3349,10 @@ impl TerrainHorizonRenderer {
                         / self.renderer.horizon_render_cell_stride;
                     pass.draw(0..render_cells.pow(2) * 6, 0..1);
                     drawn_tiles = drawn_tiles.saturating_add(1);
+                    level_drawn = true;
+                }
+                if level_drawn {
+                    drawn_levels = drawn_levels.saturating_add(1);
                 }
             }
             pass.set_pipeline(&self.renderer.tree_pipeline);
@@ -3305,9 +3362,7 @@ impl TerrainHorizonRenderer {
                     continue;
                 }
                 for resource in &level.tiles {
-                    if far_cull.is_some_and(|(distance, camera)| {
-                        terrain_horizon_tile_beyond_distance(resource.tile, camera, distance)
-                    }) {
+                    if !self.visible_vegetation_slots[resource.resource_slot as usize] {
                         continue;
                     }
                     let slot = &self.slots[resource.resource_slot as usize];
@@ -3320,6 +3375,9 @@ impl TerrainHorizonRenderer {
                         0..TERRAIN_PREVIEW_TREE_VERTICES_PER_INSTANCE,
                         0..slot.tree_instance_count,
                     );
+                    drawn_tree_tiles = drawn_tree_tiles.saturating_add(1);
+                    drawn_tree_instances =
+                        drawn_tree_instances.saturating_add(slot.tree_instance_count);
                 }
             }
         }
@@ -3387,7 +3445,9 @@ impl TerrainHorizonRenderer {
             TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS / self.renderer.horizon_render_cell_stride;
         let vertex_count = drawn_tiles
             .saturating_mul(render_cells.pow(2) * 6)
-            .saturating_add(tree_proxy_vertex_count);
+            .saturating_add(
+                drawn_tree_instances.saturating_mul(TERRAIN_PREVIEW_TREE_VERTICES_PER_INSTANCE),
+            );
         let normal_halo_samples_per_tile = terrain_horizon_normal_halo_samples_per_tile();
         let normal_halo_fixed_bytes = u64::from(self.admission.resource_slots())
             .saturating_mul(u64::from(normal_halo_samples_per_tile))
@@ -3489,6 +3549,11 @@ impl TerrainHorizonRenderer {
             dispatched_refills_total: self.dispatched_refills_total,
             drawn_levels,
             drawn_tiles,
+            inner_hole_culled_tiles,
+            frustum_culled_tiles,
+            far_culled_tiles,
+            drawn_tree_tiles,
+            drawn_tree_instances,
             vertex_count,
             vegetation_ready_tiles,
             pending_vegetation_tiles,
@@ -3797,6 +3862,101 @@ fn terrain_horizon_tile_beyond_distance(
     let nearest_x = camera_x.clamp(min_x, min_x + footprint);
     let nearest_z = camera_z.clamp(min_z, min_z + footprint);
     (camera_x - nearest_x).hypot(camera_z - nearest_z) > f64::from(max_distance)
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TerrainHorizonTileVisibility {
+    Visible,
+    InnerHole,
+    Frustum,
+    Far,
+}
+
+fn terrain_horizon_tile_visibility(
+    tile: TerrainClipmapTile,
+    inner_hole: Option<super::TerrainClipmapBounds>,
+    margin_blocks: f32,
+    far_cull: Option<(f32, glam::Vec3)>,
+    render_view: Option<mclone_render::chunk::ChunkRenderView>,
+    presentation: super::TerrainPreviewUniformPresentation,
+) -> TerrainHorizonTileVisibility {
+    let footprint = i64::from(tile.footprint_blocks());
+    let min_x = tile.min_x();
+    let min_z = tile.min_z();
+    let max_x = min_x + footprint;
+    let max_z = min_z + footprint;
+    let margin_i64 = margin_blocks.ceil() as i64;
+    if inner_hole.is_some_and(|hole| {
+        min_x - margin_i64 >= hole.min_x
+            && min_z - margin_i64 >= hole.min_z
+            && max_x + margin_i64 <= hole.max_x
+            && max_z + margin_i64 <= hole.max_z
+    }) {
+        return TerrainHorizonTileVisibility::InnerHole;
+    }
+    if far_cull.is_some_and(|(distance, camera)| {
+        terrain_horizon_tile_beyond_distance(tile, camera, distance + margin_blocks)
+    }) {
+        return TerrainHorizonTileVisibility::Far;
+    }
+    let Some(render_view) = render_view else {
+        return TerrainHorizonTileVisibility::Visible;
+    };
+    let anchor_x = i64::from(presentation.anchor_x);
+    let anchor_z = i64::from(presentation.anchor_z);
+    let relative_min = glam::Vec3::new(
+        (min_x - anchor_x) as f32 - presentation.fraction_x - margin_blocks,
+        TERRAIN_HORIZON_CULL_MIN_Y,
+        (min_z - anchor_z) as f32 - presentation.fraction_z - margin_blocks,
+    );
+    let relative_max = glam::Vec3::new(
+        (max_x - anchor_x) as f32 - presentation.fraction_x + margin_blocks,
+        TERRAIN_HORIZON_CULL_MAX_Y,
+        (max_z - anchor_z) as f32 - presentation.fraction_z + margin_blocks,
+    );
+    let relative_view_projection =
+        super::terrain_relative_view_projection(render_view, presentation);
+    if terrain_horizon_clip_aabb_visible(relative_view_projection, relative_min, relative_max) {
+        TerrainHorizonTileVisibility::Visible
+    } else {
+        TerrainHorizonTileVisibility::Frustum
+    }
+}
+
+fn terrain_horizon_clip_aabb_visible(
+    view_projection: glam::Mat4,
+    min: glam::Vec3,
+    max: glam::Vec3,
+) -> bool {
+    let corners = [
+        glam::Vec3::new(min.x, min.y, min.z),
+        glam::Vec3::new(max.x, min.y, min.z),
+        glam::Vec3::new(min.x, max.y, min.z),
+        glam::Vec3::new(max.x, max.y, min.z),
+        glam::Vec3::new(min.x, min.y, max.z),
+        glam::Vec3::new(max.x, min.y, max.z),
+        glam::Vec3::new(min.x, max.y, max.z),
+        glam::Vec3::new(max.x, max.y, max.z),
+    ];
+    let mut outside_left = true;
+    let mut outside_right = true;
+    let mut outside_bottom = true;
+    let mut outside_top = true;
+    let mut outside_near = true;
+    let mut outside_far = true;
+    for corner in corners {
+        let clip = view_projection * corner.extend(1.0);
+        outside_left &= clip.x < -clip.w;
+        outside_right &= clip.x > clip.w;
+        outside_bottom &= clip.y < -clip.w;
+        outside_top &= clip.y > clip.w;
+        // Preserve the renderer's conservative OpenGL-style near test. It is
+        // deliberately wider than WebGPU's zero-to-w clip volume and avoids
+        // dropping reversed-Z geometry at the near plane.
+        outside_near &= clip.z < -clip.w;
+        outside_far &= clip.z > clip.w;
+    }
+    !(outside_left || outside_right || outside_bottom || outside_top || outside_near || outside_far)
 }
 
 fn terrain_horizon_outer_edge_flags(
@@ -4414,5 +4574,86 @@ mod tests {
 
         assert!(!terrain_horizon_tile_beyond_distance(near, camera, 32.0));
         assert!(terrain_horizon_tile_beyond_distance(far, camera, 32.0));
+    }
+
+    #[test]
+    fn horizon_tile_culling_preserves_partial_hole_and_tree_margin() {
+        let tile = TerrainClipmapTile {
+            level: 0,
+            tile_x: 0,
+            tile_z: 0,
+            sample_spacing: 1,
+            physical_x: 0,
+            physical_z: 0,
+            physical_slot: 0,
+        };
+        let presentation = crate::TerrainPreviewUniformPresentation::integer(0, 0, 256, 256);
+        let exact_tile_hole = crate::TerrainClipmapBounds {
+            min_x: 0,
+            min_z: 0,
+            max_x: 64,
+            max_z: 64,
+        };
+        assert_eq!(
+            terrain_horizon_tile_visibility(
+                tile,
+                Some(exact_tile_hole),
+                0.0,
+                None,
+                None,
+                presentation,
+            ),
+            TerrainHorizonTileVisibility::InnerHole
+        );
+        assert_eq!(
+            terrain_horizon_tile_visibility(
+                tile,
+                Some(exact_tile_hole),
+                TERRAIN_HORIZON_TREE_CULL_MARGIN_BLOCKS,
+                None,
+                None,
+                presentation,
+            ),
+            TerrainHorizonTileVisibility::Visible,
+            "tree crowns crossing the hole edge must remain drawable"
+        );
+
+        let partial_hole = crate::TerrainClipmapBounds {
+            min_x: 16,
+            min_z: 16,
+            max_x: 64,
+            max_z: 64,
+        };
+        assert_eq!(
+            terrain_horizon_tile_visibility(
+                tile,
+                Some(partial_hole),
+                0.0,
+                None,
+                None,
+                presentation,
+            ),
+            TerrainHorizonTileVisibility::Visible
+        );
+    }
+
+    #[test]
+    fn horizon_clip_aabb_rejects_only_wholly_outside_boxes() {
+        let identity = glam::Mat4::IDENTITY;
+        assert!(terrain_horizon_clip_aabb_visible(
+            identity,
+            glam::Vec3::splat(-0.5),
+            glam::Vec3::splat(0.5),
+        ));
+        assert!(!terrain_horizon_clip_aabb_visible(
+            identity,
+            glam::Vec3::new(2.0, -0.5, -0.5),
+            glam::Vec3::new(3.0, 0.5, 0.5),
+        ));
+        assert!(terrain_horizon_clip_aabb_visible(
+            identity,
+            glam::Vec3::new(0.5, -0.5, -0.5),
+            glam::Vec3::new(1.5, 0.5, 0.5),
+        ));
     }
 }
