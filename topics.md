@@ -177,6 +177,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `graphics-video-settings` — player-facing graphics/video controls,
   platform-profile and stored-preference precedence, output/UI/world
   resolution policy, and the remaining production settings backlog
+- `fog-atmosphere` — shared open-air linear, exponential, and height-aware
+  distance atmosphere, interactive graphics controls, exact/procedural
+  coverage concealment, weather response, and conservative far culling
 - `game-title-and-brand-identity` — public-title research and decision record:
   repo-derived naming brief, Wilderfold recommendation, retained fallbacks,
   preliminary availability evidence, and clearance/adoption gates

@@ -208,6 +208,10 @@ series implements the same concern, normally reuse the document slug in its
   player-facing graphics/video contract — current live controls and SteamOS
   profile behavior, settings-persistence investigation, output/UI/world
   resolution policy, and the remaining production settings backlog.
+- [`fog-atmosphere.md`](fog-atmosphere.md): active shared open-air distance
+  atmosphere, Fog submenu, linear/exponential/height-aware evaluation modes,
+  exact/procedural coverage guard, weather inputs, conservative far culling,
+  and cross-platform performance and pixel decision gate.
 - [`release-distribution-and-updates.md`](release-distribution-and-updates.md):
   accepted first-party/store distribution architecture — a stable Tauri
   launcher for managed direct desktop installs, store-owned updates for
