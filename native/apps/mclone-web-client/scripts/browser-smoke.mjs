@@ -1161,8 +1161,15 @@ async function run() {
           || Number(actorCompositionProbeResult?.leftMeshUploads) !== 1
           || Number(actorCompositionProbeResult?.rightMeshRebuilds) !== 1
           || Number(actorCompositionProbeResult?.rightMeshUploads) !== 1
-          || Number(actorCompositionProbeResult?.preparedFigureCount) !== 2
-          || Number(actorCompositionProbeResult?.preparedImmutableUploads) !== 6
+          || Number(actorCompositionProbeResult?.preparedFigureCount) !== 4
+          || Number(actorCompositionProbeResult?.preparedImmutableUploads) !== 12
+          || Number(actorCompositionProbeResult?.leftPreparedRecords) !== 1
+          || Number(actorCompositionProbeResult?.leftPreparedActors) !== 1
+          || Number(actorCompositionProbeResult?.leftLegacyActors) !== 2
+          || Number(actorCompositionProbeResult?.leftPreparedPoseEvaluations) !== 1
+          || Number(actorCompositionProbeResult?.leftPreparedPaletteWrites) !== 1
+          || Number(actorCompositionProbeResult?.leftPreparedDraws) !== 2
+          || Number(actorCompositionProbeResult?.leftUnchangedActorReuses) !== 1
           || Number(actorCompositionProbeResult?.rightPreparedRecords) !== 2
           || Number(actorCompositionProbeResult?.rightPreparedActors) !== 2
           || Number(actorCompositionProbeResult?.rightLegacyActors) !== 1

@@ -1113,23 +1113,19 @@ mod tests {
     }
 
     #[test]
-    fn first_party_actor_figure_set_loads_default_player() {
+    fn first_party_actor_figure_set_loads_legacy_and_prepared_figures() {
         let source = mclone_assets::FilesystemAssetSource::new("../../..");
         let figures = load_first_party_actor_figures(&source).unwrap();
 
         assert_eq!(figures.len(), 4);
-        assert!(
-            figures
-                .get(mclone_assets::default_player_figure_id())
-                .is_some()
-        );
-        assert!(
-            figures
-                .get(mclone_assets::upright_bear_figure_id())
-                .is_some()
-        );
-        assert!(figures.get(mclone_assets::chicken_figure_id()).is_some());
-        assert!(figures.get(mclone_assets::cow_figure_id()).is_some());
+        for id in mclone_assets::FIRST_PARTY_ACTOR_FIGURE_IDS {
+            assert!(figures.get(id).is_some(), "legacy figure {}", id.as_str());
+            assert!(
+                figures.prepared(id).is_some(),
+                "prepared figure {}",
+                id.as_str()
+            );
+        }
     }
 
     #[test]

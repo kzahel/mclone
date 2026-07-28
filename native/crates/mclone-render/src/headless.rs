@@ -2283,19 +2283,36 @@ fn fs_main() -> @location(0) vec4<f32> {
         assert_eq!(report.left.frustum_rejected_actor_count, 1);
         assert_eq!(report.right.submitted_actor_count, 3);
         assert_eq!(report.right.drawn_actor_count, 3);
-        assert_eq!(report.left_resources.mesh.cached_actor_count, 3);
+        assert_eq!(report.left_resources.mesh.cached_actor_count, 2);
         assert_eq!(report.left_resources.mesh.rebuild_count, 1);
         assert_eq!(report.left_resources.mesh.upload_count, 1);
         assert_eq!(report.right_resources.mesh.cached_actor_count, 1);
         assert_eq!(report.right_resources.mesh.rebuild_count, 1);
         assert_eq!(report.right_resources.mesh.upload_count, 1);
-        assert_eq!(report.right_resources.prepared_shared.figure_count, 2);
+        assert_eq!(report.right_resources.prepared_shared.figure_count, 4);
         assert_eq!(
             report
                 .right_resources
                 .prepared_shared
                 .immutable_upload_count,
-            6
+            12
+        );
+        assert_eq!(report.left_resources.prepared_world.actor_record_count, 1);
+        assert_eq!(report.left_resources.prepared_world.prepared_actor_count, 1);
+        assert_eq!(report.left_resources.prepared_world.legacy_actor_count, 2);
+        assert_eq!(
+            report.left_resources.prepared_world.pose_evaluation_count,
+            1
+        );
+        assert_eq!(report.left_resources.prepared_world.palette_write_count, 1);
+        assert_eq!(report.left_resources.prepared_world.actor_write_count, 1);
+        assert_eq!(report.left_resources.prepared_world.draw_count, 2);
+        assert_eq!(
+            report
+                .left_resources
+                .prepared_world
+                .unchanged_actor_reuse_count,
+            1
         );
         assert_eq!(report.right_resources.prepared_world.actor_record_count, 2);
         assert_eq!(
@@ -2423,11 +2440,19 @@ fn fs_main() -> @location(0) vec4<f32> {
         let prepared_after_left = prepared_after_left.expect("left eye snapshot");
         assert_eq!(
             prepared_after_left.pose_evaluation_count,
-            prepared_before_stereo.pose_evaluation_count + 2
+            prepared_before_stereo.pose_evaluation_count
         );
         assert_eq!(
             prepared_after_left.palette_write_count,
-            prepared_before_stereo.palette_write_count + 2
+            prepared_before_stereo.palette_write_count
+        );
+        assert_eq!(
+            prepared_after_left.actor_write_count,
+            prepared_before_stereo.actor_write_count
+        );
+        assert_eq!(
+            prepared_after_left.unchanged_actor_reuse_count,
+            prepared_before_stereo.unchanged_actor_reuse_count + 2
         );
         queue.submit(std::iter::once(encoder.finish()));
         let left_pixels = read_rgba8(&device, &queue, &left_target.texture, 640, 640)?;

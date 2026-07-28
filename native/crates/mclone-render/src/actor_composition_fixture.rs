@@ -9,8 +9,8 @@ use std::sync::Arc;
 use anyhow::Result;
 use glam::{Vec3, vec3};
 use mclone_assets::{
-    MemoryAssetSource, chicken_figure_id, chicken_figure_path, default_player_figure_path,
-    upright_bear_figure_path,
+    MemoryAssetSource, chicken_figure_id, chicken_figure_path, cow_figure_id, cow_figure_path,
+    default_player_figure_path, upright_bear_figure_path,
 };
 use mclone_core::Vec3d;
 
@@ -121,7 +121,14 @@ impl ActorCompositionFixture {
             WorldCompositionContext::new(right_placement, Some(right_bounds), right_clip);
 
         let left_actors = vec![
-            ActorInstance::cow_model(vec3(997.5, 64.0, 1_000.0), 25.0, 0.9, 1.4),
+            ActorInstance::remote_player_with_figure(
+                vec3(997.5, 64.0, 1_000.0),
+                25.0,
+                cow_figure_id(),
+            )
+            .with_dimensions(0.9, 1.4)
+            .with_id(ActorInstanceId::Entity(9))
+            .with_walk_animation_distance(0.31),
             ActorInstance::item_egg(vec3(1_000.0, 64.0, 1_000.0), -20.0, 0.3, 0.3)
                 .with_packed_light(0),
             ActorInstance::remote_player(vec3(1_004.7, 64.0, 1_000.0), -35.0)
@@ -391,6 +398,10 @@ fn actor_fixture_figures() -> Result<crate::entity::ActorFigureSet> {
     source.insert_text(
         chicken_figure_path(),
         include_str!("../../../../assets/mclone/figures/chicken.figure.json"),
+    );
+    source.insert_text(
+        cow_figure_path(),
+        include_str!("../../../../assets/mclone/figures/cow.figure.json"),
     );
     load_first_party_actor_figures(&source)
 }

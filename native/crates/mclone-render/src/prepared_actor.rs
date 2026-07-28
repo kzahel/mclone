@@ -5,7 +5,7 @@ use anyhow::{Context, Result, bail};
 use glam::{Mat4, Quat, Vec3};
 use mclone_assets::{
     ActorFigureId, PreparedFigure, PreparedFigurePartRotationOverride, PreparedFigurePass,
-    PreparedFigurePassRange, PreparedFigureVertex, chicken_figure_id, default_player_figure_id,
+    PreparedFigurePassRange, PreparedFigureVertex, chicken_figure_id,
     evaluate_prepared_figure_clip_into,
     evaluate_prepared_figure_clip_with_part_rotation_overrides_into,
     evaluate_prepared_figure_rest_pose_into,
@@ -51,6 +51,7 @@ pub struct PreparedActorDrawSnapshot {
     pub actor_record_count: usize,
     pub prepared_actor_count: usize,
     pub legacy_actor_count: usize,
+    pub unchanged_actor_reuse_count: u64,
     pub pose_evaluation_count: u64,
     pub palette_write_count: u64,
     pub palette_written_bytes: u64,
@@ -105,6 +106,7 @@ struct PreparedActorMultiviewDrawResources {
 
 struct PreparedActorRecord {
     figure_id: ActorFigureId,
+    last_input: Option<ActorInstance>,
     palette: wgpu::Buffer,
     palette_bind_group: wgpu::BindGroup,
     actor: wgpu::Buffer,
@@ -205,10 +207,7 @@ impl PreparedActorSharedResources {
             multiview_pipeline_count: if multiview_pipelines.is_some() { 6 } else { 0 },
             ..PreparedActorSharedSnapshot::default()
         };
-        for (id, figure) in figures
-            .prepared_figures()
-            .filter(|(id, _)| *id == default_player_figure_id() || *id == chicken_figure_id())
-        {
+        for (id, figure) in figures.prepared_figures() {
             let resources = PreparedActorFigureResources::new(
                 device,
                 queue,
@@ -435,13 +434,19 @@ impl PreparedActorDrawResources {
                 *record =
                     PreparedActorRecord::new(device, shared, figure_id, figure.figure.parts.len());
             }
-            if record
-                .evaluate_and_write(queue, figure, *actor, &mut self.snapshot)
-                .is_err()
-            {
-                self.legacy_actors.push(*actor);
-                self.retained_ids.remove(&id);
-                continue;
+            if record.last_input == Some(*actor) {
+                self.snapshot.unchanged_actor_reuse_count =
+                    self.snapshot.unchanged_actor_reuse_count.saturating_add(1);
+            } else {
+                if record
+                    .evaluate_and_write(queue, figure, *actor, &mut self.snapshot)
+                    .is_err()
+                {
+                    self.legacy_actors.push(*actor);
+                    self.retained_ids.remove(&id);
+                    continue;
+                }
+                record.last_input = Some(*actor);
             }
             self.draw_order.push(id);
         }
@@ -655,6 +660,7 @@ impl PreparedActorRecord {
         });
         Self {
             figure_id,
+            last_input: None,
             palette,
             palette_bind_group,
             actor,
@@ -878,8 +884,7 @@ fn prepared_actor_key(actor: ActorInstance) -> Option<(ActorInstanceId, ActorFig
     let ActorInstanceShape::Figure(figure_id) = actor.shape else {
         return None;
     };
-    (figure_id == chicken_figure_id() || figure_id == default_player_figure_id())
-        .then_some((id, figure_id))
+    Some((id, figure_id))
 }
 
 fn actor_model_matrix(actor: ActorInstance) -> Option<Mat4> {
@@ -1325,6 +1330,10 @@ mod tests {
             mclone_assets::chicken_figure_path(),
             include_str!("../../../../assets/mclone/figures/chicken.figure.json"),
         );
+        source.insert_text(
+            mclone_assets::cow_figure_path(),
+            include_str!("../../../../assets/mclone/figures/cow.figure.json"),
+        );
         crate::asset_lab_figure::load_first_party_actor_figures(&source).unwrap()
     }
 
@@ -1351,9 +1360,38 @@ mod tests {
         let anonymous =
             ActorInstance::remote_player_with_figure(Vec3::ZERO, 0.0, chicken_figure_id());
         assert!(prepared_actor_key(anonymous).is_none());
+        assert!(prepared_actor_key(anonymous.with_id(ActorInstanceId::RemotePlayer(9))).is_none());
         assert_eq!(
             prepared_actor_key(anonymous.with_id(ActorInstanceId::Entity(9))),
             Some((ActorInstanceId::Entity(9), chicken_figure_id()))
+        );
+    }
+
+    #[test]
+    fn prepared_actor_selection_is_figure_capability_driven() {
+        let cow = ActorInstance::remote_player_with_figure(
+            Vec3::ZERO,
+            0.0,
+            mclone_assets::cow_figure_id(),
+        )
+        .with_id(ActorInstanceId::Entity(10));
+        let bear = ActorInstance::remote_player_with_figure(
+            Vec3::ZERO,
+            0.0,
+            mclone_assets::upright_bear_figure_id(),
+        )
+        .with_id(ActorInstanceId::Entity(11));
+
+        assert_eq!(
+            prepared_actor_key(cow),
+            Some((ActorInstanceId::Entity(10), mclone_assets::cow_figure_id()))
+        );
+        assert_eq!(
+            prepared_actor_key(bear),
+            Some((
+                ActorInstanceId::Entity(11),
+                mclone_assets::upright_bear_figure_id()
+            ))
         );
     }
 
@@ -1504,6 +1542,13 @@ mod tests {
         assert_eq!(first.actor_write_count, ACTOR_COUNT as u64);
         assert!(first.mutable_known_allocated_bytes >= ACTOR_COUNT as u64 * 4_176);
         assert_eq!(shared.snapshot(), immutable);
+
+        world.prepare(&device, &queue, &shared, &actors);
+        let unchanged = world.snapshot();
+        assert_eq!(unchanged.unchanged_actor_reuse_count, ACTOR_COUNT as u64);
+        assert_eq!(unchanged.pose_evaluation_count, first.pose_evaluation_count);
+        assert_eq!(unchanged.palette_write_count, first.palette_write_count);
+        assert_eq!(unchanged.actor_write_count, first.actor_write_count);
 
         for actor in &mut actors {
             actor.feet_position.x += 0.01;

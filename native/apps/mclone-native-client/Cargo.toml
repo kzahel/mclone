@@ -77,6 +77,10 @@ name = "mesh_cpu_perf"
 path = "src/bin/mesh_cpu_perf.rs"
 
 [[bin]]
+name = "actor_render_perf"
+path = "src/bin/actor_render_perf.rs"
+
+[[bin]]
 name = "mclone-overworld-review"
 path = "src/bin/mclone_overworld_review.rs"
 
