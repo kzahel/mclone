@@ -86,20 +86,25 @@ pub(crate) struct PendingLightStatus {
 }
 
 impl PendingLightStatus {
-    pub(crate) fn from_demand(
+    pub(crate) fn from_shared_demand(
         demand: PendingLightDemand,
-        raw_blocks: Vec<RawBlockId>,
-        neighbor_blocks: Vec<(ChunkPos, Vec<RawBlockId>)>,
+        raw_blocks: Arc<[RawBlockId]>,
+        neighbor_blocks: Vec<(ChunkPos, Arc<[RawBlockId]>)>,
     ) -> Self {
-        let mut status = Self::from_parts_with_token(
-            demand.token,
-            demand.feature_snapshot,
+        debug_assert_eq!(demand.token.pos, demand.feature_snapshot.pos);
+        debug_assert_eq!(
+            demand.token.feature_revision,
+            demand.feature_snapshot.revision
+        );
+        Self {
+            token: demand.token,
+            pos: demand.token.pos,
+            feature_snapshot: demand.feature_snapshot,
+            scheduled_block_ticks: demand.scheduled_block_ticks,
+            scheduled_fluid_ticks: demand.scheduled_fluid_ticks,
             raw_blocks,
             neighbor_blocks,
-        );
-        status.scheduled_block_ticks = demand.scheduled_block_ticks;
-        status.scheduled_fluid_ticks = demand.scheduled_fluid_ticks;
-        status
+        }
     }
 
     pub(crate) fn from_parts(
@@ -189,6 +194,23 @@ impl PendingLightStatusBatch {
                 };
             }
         }
+        Self::from_shared_parts(statuses, unique_input_chunks)
+    }
+
+    pub(crate) fn from_shared_parts(
+        statuses: Vec<PendingLightStatus>,
+        unique_input_chunks: BTreeMap<ChunkPos, Arc<[RawBlockId]>>,
+    ) -> Self {
+        debug_assert!(statuses.iter().all(|status| {
+            unique_input_chunks
+                .get(&status.pos)
+                .is_some_and(|blocks| Arc::ptr_eq(blocks, &status.raw_blocks))
+                && status.neighbor_blocks.iter().all(|(pos, blocks)| {
+                    unique_input_chunks
+                        .get(pos)
+                        .is_some_and(|shared| Arc::ptr_eq(shared, blocks))
+                })
+        }));
         let owned_input_bytes = unique_input_chunks.values().fold(0_usize, |bytes, blocks| {
             bytes.saturating_add(
                 blocks
@@ -313,7 +335,7 @@ fn canonical_light_input(
     blocks: &Arc<[RawBlockId]>,
 ) -> Arc<[RawBlockId]> {
     if let Some(existing) = unique_input_chunks.get(&pos) {
-        assert_eq!(
+        debug_assert_eq!(
             existing.as_ref(),
             blocks.as_ref(),
             "Light batch supplied conflicting raw blocks for ({}, {})",

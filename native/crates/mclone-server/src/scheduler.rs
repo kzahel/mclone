@@ -135,6 +135,26 @@ pub struct CompletedChunkJobSummary {
     pub overworld_timing: Option<OverworldFeatureBatchTiming>,
 }
 
+fn shared_light_input(
+    shared_inputs: &mut BTreeMap<ChunkPos, Arc<[RawBlockId]>>,
+    pos: ChunkPos,
+    blocks: &[RawBlockId],
+) -> Arc<[RawBlockId]> {
+    if let Some(existing) = shared_inputs.get(&pos) {
+        debug_assert_eq!(
+            existing.as_ref(),
+            blocks,
+            "Light batch supplied conflicting raw blocks for ({}, {})",
+            pos.x,
+            pos.z
+        );
+        return Arc::clone(existing);
+    }
+    let blocks: Arc<[RawBlockId]> = Arc::from(blocks);
+    shared_inputs.insert(pos, Arc::clone(&blocks));
+    blocks
+}
+
 impl CompletedChunkJobSummary {
     fn from_job(
         job: &ChunkStatusJob,
@@ -3764,6 +3784,7 @@ impl ChunkScheduler {
         };
         let mut statuses = Vec::new();
         let mut stale = Vec::new();
+        let mut shared_inputs = BTreeMap::new();
         for pos in positions
             .into_iter()
             .filter(|pos| {
@@ -3781,7 +3802,7 @@ impl ChunkScheduler {
                 stale.push((pos, demand.clone()));
                 continue;
             }
-            if let Some(status) = self.materialize_light_demand(demand) {
+            if let Some(status) = self.materialize_light_demand(demand, &mut shared_inputs) {
                 statuses.push(status);
             }
         }
@@ -3806,8 +3827,10 @@ impl ChunkScheduler {
             .collect::<Vec<_>>();
         match self
             .light_mailbox
-            .try_enqueue_batch(PendingLightStatusBatch::new(statuses))
-        {
+            .try_enqueue_batch(PendingLightStatusBatch::from_shared_parts(
+                statuses,
+                shared_inputs,
+            )) {
             Ok(()) => {
                 for token in tokens {
                     let removed = self.pending_light_demands.remove(&token.pos);
@@ -3835,15 +3858,20 @@ impl ChunkScheduler {
         })
     }
 
-    fn materialize_light_demand(&self, demand: &PendingLightDemand) -> Option<PendingLightStatus> {
+    fn materialize_light_demand(
+        &self,
+        demand: &PendingLightDemand,
+        shared_inputs: &mut BTreeMap<ChunkPos, Arc<[RawBlockId]>>,
+    ) -> Option<PendingLightStatus> {
         let target_pos = demand.token.pos;
         let target_holder = self.holders.get(&target_pos)?;
-        let raw_blocks = target_holder.live_blocks.as_ref()?;
-        if raw_blocks.min_y != demand.feature_snapshot.min_y
-            || raw_blocks.height != demand.feature_snapshot.height
+        let target_blocks = target_holder.live_blocks.as_ref()?;
+        if target_blocks.min_y != demand.feature_snapshot.min_y
+            || target_blocks.height != demand.feature_snapshot.height
         {
             return None;
         }
+        let raw_blocks = shared_light_input(shared_inputs, target_pos, &target_blocks.blocks);
 
         let mut neighbor_blocks = Vec::new();
         for dz in -1..=1 {
@@ -3875,14 +3903,17 @@ impl ChunkScheduler {
                 if let Some(lifted) =
                     provisional_light_neighbor_lift(self.topology, target_pos, neighbor_pos)
                 {
-                    neighbor_blocks.push((lifted, blocks.blocks.clone()));
+                    neighbor_blocks.push((
+                        lifted,
+                        shared_light_input(shared_inputs, lifted, &blocks.blocks),
+                    ));
                 }
             }
         }
 
-        Some(PendingLightStatus::from_demand(
+        Some(PendingLightStatus::from_shared_demand(
             demand.clone(),
-            raw_blocks.blocks.clone(),
+            raw_blocks,
             neighbor_blocks,
         ))
     }
