@@ -92,6 +92,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `generated-chunk-cache-policy` — authority-owned per-world choice to store or
   regenerate deterministic unedited terrain cache, with durable provenance and
   future reclamation boundaries
+- `chunk-lighting-admission-and-backpressure` — bounded current-interest Player
+  promotion, keyed Light demand, shared immutable Light inputs, cancellation,
+  ticket conservation, and long-travel memory/throughput gates
 - `platform-host-boundary` — one shared Rust input/context/action path across
   desktop, browser, flat Android, and XR interactive hosts; autonomous
   platform initialization and mechanics stay local; browser TS input

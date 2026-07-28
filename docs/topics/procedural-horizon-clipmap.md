@@ -168,6 +168,18 @@ exact-ready current center in every sampled frame, held transient persistence
 work below 30 foreground requests / 15 cache requests / about `0.61MiB`, and
 kept Quest RSS in a non-monotonic `1.03–1.22GiB` band.
 
+That closeout remains valid for bounded persistence and the RD5 five-minute
+lane, but it did not prove every shared exact-world owner under a longer RD7
+pressure test. A later planned 20-minute RD7 flight was killed after about
+12 minutes and 25 kiloblocks. The procedural horizon remained fixed-residency;
+a two-minute diagnostic isolated an unbounded copied-input initial-light
+backlog. The current incident and vanilla 1.17.1 comparison live in
+[`chunk-lighting-admission-and-backpressure.md`](chunk-lighting-admission-and-backpressure.md),
+and Tactical
+[`279`](../tactical/279-chunk-lighting-admission-and-backpressure.md) owns the
+shared scheduler/light fix. This does not invalidate Tactical 277's horizon
+render measurements or Tactical 278's optional multiview experiment.
+
 The same tactical found a concrete horizon render defect: the per-eye path
 submitted all 160 resident tiles, including tiles covered by finer levels and
 outside the eye frustum. At full quality it ran at `51.91 FPS`, with

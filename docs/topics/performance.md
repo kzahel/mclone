@@ -66,7 +66,18 @@ repeats measure `71.81 FPS`, `11.19–11.23ms` average app work,
 `34.4`-block/second composed flight measures `71.70 FPS`, `13.944ms` p95, and
 `5.6%` over-period frames while Meta app GPU is only `4.748ms`.
 
-The next bounded experiment is Tactical
+Those RD5 renderer and bounded-persistence results remain valid, but a later
+RD7 flight planned for 20 minutes reproduced low-memory termination after
+about 12 minutes and 25 kiloblocks. A two-minute diagnostic measured Features
+at `42.916/s`, Light at `20.266/s`, and 1,026 pending unbounded copied-input
+Light statuses while the server-update queue stayed empty. The current P0 is
+therefore Tactical
+[`279`](../tactical/279-chunk-lighting-admission-and-backpressure.md), which
+ports vanilla-shaped upstream promotion admission and Light lifecycle and adds
+hard Quest-safe ownership bounds. The full evidence is in
+[`chunk-lighting-admission-and-backpressure.md`](chunk-lighting-admission-and-backpressure.md).
+
+The next bounded renderer experiment remains Tactical
 [`278`](../tactical/278-quest-procedural-horizon-multiview.md): add a real
 two-layer horizon to the existing optional full-frame multiview path and
 alternate it against per-eye rendering on the same device. Do not assume the

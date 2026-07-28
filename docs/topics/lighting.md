@@ -10,6 +10,12 @@ the first concrete Rust slice is
 Presentation-side point lights and dynamic shadows are a separate concern in
 [`dynamic-point-lights.md`](dynamic-point-lights.md); they must not distort this
 stored-light parity contract.
+The sustained-travel admission, cancellation, Light-ticket, and memory-bound
+campaign is now a focused sibling topic in
+[`chunk-lighting-admission-and-backpressure.md`](chunk-lighting-admission-and-backpressure.md);
+Tactical
+[`279`](../tactical/279-chunk-lighting-admission-and-backpressure.md) owns its
+P0 implementation.
 This topic records where the subsystem stands now, how the next slices should
 compose, and which Java/Rust boundaries to preserve.
 
@@ -121,7 +127,10 @@ Known gaps:
 - The native `LightStatusMailbox` is a first threaded/batched boundary, not a
   full `ThreadedLevelLightEngine` port: no Java-shaped task prioritization,
   cancellation, light ticket release, unload/release policy, or live update
-  queue exists yet.
+  queue exists yet. An extended RD7 8x Quest soak now proves the unbounded
+  copied-input mailbox is a P0 memory failure rather than only a parity gap;
+  the focused topic and Tactical 279 supersede solver optimization as the next
+  lighting priority.
 - Desktop startup still waits for the initial light-ready view before opening
   the window in the current native path. This avoids a sky-only first frame but
   leaves launch latency high when lighting is enabled.

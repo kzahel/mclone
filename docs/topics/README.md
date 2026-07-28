@@ -327,6 +327,12 @@ series implements the same concern, normally reuse the document slug in its
   architecture; Tactical 245 removed the rejected chunk-Far-LOD adapter.
 - [`lighting.md`](lighting.md): native Java-shaped stored-light system,
   render handoff, solver/status/rendering gaps, and next slices.
+- [`chunk-lighting-admission-and-backpressure.md`](chunk-lighting-admission-and-backpressure.md):
+  accepted P0 shared scheduling direction after the extended RD7 Quest soak
+  exposed an unbounded copied-input light backlog; records the Java 1.17.1
+  ticket/status comparison, four-at-a-time promotion admission, keyed
+  cancellation, shared light inputs, hard lifecycle byte bounds, and Tactical
+  279 acceptance gate.
 - [`dynamic-point-lights.md`](dynamic-point-lights.md): presentation-side
   finite-radius point lights, many-light admission, voxel-DDA and entity-shadow
   options, cubemap/stencil comparisons, and shared mono/XR validation direction.
