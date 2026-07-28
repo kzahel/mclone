@@ -33,6 +33,46 @@ known SwiftShader black-region artifact remains. Physical Quest RD5
 orbit/churn is still pending and remains the final hardware gate; AVD numbers
 are relative Android/shared-path evidence, not standalone Quest evidence.
 
+## Quest Procedural-Horizon Baseline
+
+Tactical
+[`277`](../tactical/277-quest-procedural-horizon-performance.md) establishes
+the first full-quality procedural-horizon Quest 3 baseline at RD5, 72 Hz,
+`1680x1760` per eye, render scale 1, foveation off, and the production per-eye
+frame-overlap path.
+
+Before culling, stationary exact/composed/exact measured:
+
+| Lane | FPS | App work avg / p95 | App GPU | Headroom avg |
+|---|---:|---:|---:|---:|
+| exact A | `72.00` | `5.397 / 6.175ms` | `2.330ms` | `8.492ms` |
+| composed | `51.91` | `19.157 / 20.313ms` | `11.906ms` | `-5.268ms` |
+| exact repeat | `72.00` | `5.382 / 6.404ms` | `2.267ms` | `8.506ms` |
+
+The shared horizon renderer was submitting all 160 resident tiles to each eye,
+including tiles hidden by finer clipmap levels and outside the physical-eye
+frustum. Commit `99d6c5b6` conservatively culls those tiles and retains a
+16-block vegetation-crown margin. The synthetic stereo reference remains
+byte-identical.
+
+Post-change stationary composed repeats draw 27–28 terrain tiles and hold
+`72.01 FPS`, `10.65–10.78ms` average app work, `11.57–11.77ms` p95,
+`5.63–5.71ms` Meta app GPU, and zero over-period frames. This is the current
+stationary acceptance baseline.
+
+Continuous presentation is close but not locked. Settled composed orbit
+repeats measure `71.81 FPS`, `11.19–11.23ms` average app work,
+`13.46–13.73ms` p95, and `2.2–2.8%` over-period frames. A five-minute
+`34.4`-block/second composed flight measures `71.70 FPS`, `13.944ms` p95, and
+`5.6%` over-period frames while Meta app GPU is only `4.748ms`.
+
+The next bounded experiment is Tactical
+[`278`](../tactical/278-quest-procedural-horizon-multiview.md): add a real
+two-layer horizon to the existing optional full-frame multiview path and
+alternate it against per-eye rendering on the same device. Do not assume the
+old exact-only multiview result applies, and do not reduce accepted horizon
+quality to recover the remaining moving tails.
+
 ## High-Priority Known Performance Issues
 
 This is the first pickup list for measured, broadly applicable performance

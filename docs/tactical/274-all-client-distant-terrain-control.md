@@ -202,8 +202,8 @@ Sustained movement can therefore leave obsolete loads and full-record cache
 writes ahead of the current view. This matches both observed symptoms: the
 current-position persistence misses needed to admit generation stop catching
 up, while retained queued records grow until the platform kills the process.
-This remains a strong diagnosis rather than a closed attribution until a
-reproduction records request counts/owned bytes by operation family.
+This was a strong diagnosis rather than a closed attribution until a
+reproduction recorded request counts and owned bytes by operation family.
 
 Tactical
 [`275`](275-bounded-persistence-streaming.md) implemented the immediate shared
@@ -211,32 +211,35 @@ remediation on 2026-07-28: bounded foreground/durable/cache lanes, lossless
 durable backpressure, discardable cache-pressure skips, cancellation on
 interest loss, one-write-per-request fairness, browser record-cache eviction,
 and shared current/high-water owned-byte diagnostics. This removes the known
-unbounded mailbox mechanisms but does not by itself close the device incident;
-the same persistent-world Quest flight soak must still show exact-center
-reacquisition plus flat queue and process-memory plateaus.
+unbounded mailbox mechanisms. Tactical
+[`277`](277-quest-procedural-horizon-performance.md) now closes the device
+incident with consecutive composed-horizon 8x flights over `6,191` and
+`10,319` blocks. All `34,426` sampled horizon frames retained an exact-ready
+current center, persistence ownership stayed below 30 foreground requests /
+15 cache requests / about `0.61MiB`, Quest RSS oscillated around
+`1.03–1.22GiB`, and both runs completed normally.
 
 ## Explicit Follow-Ups
 
 Do not silently close these gaps:
 
-1. close Tactical 275's physical acceptance: run a persistent-world
-   8x-flight/churn soak that proves current-center exact terrain reacquires and
-   Quest RSS, queue counts, and owned-byte high-water marks plateau;
-2. decide the independent generated-clean storage policy or storage-optimized
+1. decide the independent generated-clean storage policy or storage-optimized
    mode so long-distance travel does not consume device storage merely because
    a chunk was generated;
-3. prune or separately bound completed scheduler job-history metadata during
+2. prune or separately bound completed scheduler job-history metadata during
    the same long-travel audit;
-4. add a true full-frame multiview horizon pipeline if that optional Quest
-   path becomes valuable;
-5. continue collecting in-headset quality, comfort, thermal, and frame-pacing
+3. implement and measure the true full-frame multiview horizon experiment in
+   Tactical
+   [`278`](278-quest-procedural-horizon-multiview.md); Tactical 277 shows
+   stationary 72 Hz is solved while moving CPU tails remain;
+4. continue collecting in-headset quality, comfort, thermal, and frame-pacing
    evidence on desktop OpenXR and Quest;
-6. choose device-specific work budgets only from measured evidence, without
+5. choose device-specific work budgets only from measured evidence, without
    changing terrain semantics;
-7. resolve live exact/proxy tree overlap;
-8. publish safe source identity for remote sessions or keep distant terrain
+6. resolve live exact/proxy tree overlap;
+7. publish safe source identity for remote sessions or keep distant terrain
    unavailable there; and
-9. decide after testing whether Experimental should become the default for
+8. decide after testing whether Experimental should become the default for
    compatible worlds.
 
 ## Acceptance

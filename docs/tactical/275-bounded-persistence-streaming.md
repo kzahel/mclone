@@ -1,6 +1,6 @@
 # Tactical 275: Bounded Persistence Streaming
 
-Status: implementation complete 2026-07-28; physical Quest travel soak pending.
+Status: complete 2026-07-28, including physical Quest travel soak.
 
 Topic: `unified-persistence-interface`
 
@@ -113,8 +113,24 @@ stale extracted-source and pack fingerprints. The successful rerun retained
 the previously staged headset assets rather than rewriting that unrelated
 lock.
 
-Still required is a persistent Quest 3 8x-flight/churn soak with queue metrics,
-exact-center reacquisition, RSS, and on-disk world growth recorded.
+Physical closeout landed through Tactical
+[`277`](277-quest-procedural-horizon-performance.md). The release Quest 3
+composed-horizon lane completed consecutive `180s` / `6,191`-block and `300s`
+/ `10,319`-block flights at `34.4` blocks/second:
+
+- all `12,916 + 21,510` sampled horizon frames retained an exact-ready current
+  center;
+- live foreground persistence ownership peaked at 30 requests;
+- live cache writes peaked at 15 requests and about `0.61MiB`;
+- durable writes peaked at two requests and 720 bytes;
+- late queues drained to zero except one `15KiB` cache write;
+- process RSS oscillated around `1.03–1.22GiB` in the longer run rather than
+  growing with distance; and
+- the app completed both samples normally without low-memory termination.
+
+The disposable guardrail world reached `504,496KiB` after the combined travel.
+That is evidence for the separate generated-clean storage-policy decision, not
+retained transient memory.
 
 ## Deliberately Separate Follow-Ups
 
@@ -128,9 +144,9 @@ clean chunk.
    mandatory in every mode.
 2. Prune or separately bound completed scheduler job-history metadata during
    the same long-distance audit.
-3. Run the physical Quest soak before claiming the observed low-memory kill is
-   closed. The clipmap is fixed-residency, but this change does not prove there
-   is no second distance-proportional owner.
+3. Keep the now-passing physical Quest soak reproducible when persistence or
+   streaming ownership changes. The clipmap is fixed-residency; the 2026-07-28
+   run found no second distance-proportional transient owner.
 4. Consider backend batching/region compaction only from measured write and
    storage evidence; it must not weaken the queue or durability invariants.
 
@@ -141,4 +157,5 @@ durable writes survive pressure, obsolete reads cannot repopulate caches, and
 native plus browser diagnostics report the live quantities. The device
 incident is accepted as closed only after sustained persistent-world travel
 keeps exact-center terrain reacquiring and both process memory and queue
-high-water marks plateau.
+high-water marks plateau. The Tactical 277 Quest evidence satisfies that
+device gate; generated-clean disk growth remains separate.

@@ -156,12 +156,34 @@ Tactical
 [`275`](../tactical/275-bounded-persistence-streaming.md) now removes those
 known unbounded mailbox mechanisms through lane bounds, cancellation, fair
 write progress, residency-linked browser cache eviction, and owned-byte
-diagnostics. The device incident remains open until the same persistent Quest
-travel pattern demonstrates exact-center reacquisition and memory/queue
-plateaus; completed scheduler job-history and physical world-file growth remain
-separate audit items.
-Optional full-frame multiview still has no procedural-horizon pipeline and is
-not the default XR renderer.
+diagnostics. At that point the device incident remained open pending the same
+persistent Quest travel pattern with exact-center reacquisition and
+memory/queue plateaus; completed scheduler job-history and physical world-file
+growth remained separate audit items.
+Tactical
+[`277`](../tactical/277-quest-procedural-horizon-performance.md) closes that
+device incident and the first headset performance pass. Consecutive
+composed-horizon 8x flights over `6,191` and `10,319` blocks retained an
+exact-ready current center in every sampled frame, held transient persistence
+work below 30 foreground requests / 15 cache requests / about `0.61MiB`, and
+kept Quest RSS in a non-monotonic `1.03–1.22GiB` band.
+
+The same tactical found a concrete horizon render defect: the per-eye path
+submitted all 160 resident tiles, including tiles covered by finer levels and
+outside the eye frustum. At full quality it ran at `51.91 FPS`, with
+`19.157ms` average app work and `11.906ms` Meta app GPU time. Shared
+covered/frustum culling reduced the stationary draw to 27–28 terrain tiles,
+preserved the accepted synthetic stereo capture byte-for-byte, and restored
+`72.01 FPS` with `3.1–3.2ms` average headroom.
+
+Moving tails remain slightly outside the target: composed RD5 orbit repeats
+run at `71.81 FPS` with `2.2–2.8%` over-period frames, while an 8x five-minute
+flight runs at `71.70 FPS` with `5.6%`. Meta app GPU time is only
+`4.75–5.63ms`; duplicate per-eye horizon encoding is therefore a plausible
+CPU-side next target. Optional full-frame multiview still has no
+procedural-horizon pipeline and is not the default XR renderer. Tactical
+[`278`](../tactical/278-quest-procedural-horizon-multiview.md) now owns the
+true two-layer experiment and its alternating Quest comparison.
 Canonical exact generation and live authoritative render sections remain
 different truth-source adapters.
 
