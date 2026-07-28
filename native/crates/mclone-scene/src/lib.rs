@@ -4810,6 +4810,7 @@ impl McloneSceneHost {
                 full_frame_ms,
                 sky_ms: frame_timing.sky_ms,
                 terrain_opaque_ms: frame_timing.terrain_opaque_ms,
+                terrain_backdrop_ms: frame_timing.terrain_backdrop_ms,
                 terrain_translucent_ms: frame_timing.terrain_translucent_ms,
                 prepare_ms,
                 cull_ms: frame_timing.terrain_cull_ms,

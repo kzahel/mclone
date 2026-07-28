@@ -203,6 +203,7 @@ pub struct XrTerrainEyeRenderTiming {
     pub full_frame_ms: f64,
     pub sky_ms: f64,
     pub terrain_opaque_ms: f64,
+    pub terrain_backdrop_ms: f64,
     pub terrain_translucent_ms: f64,
     pub prepare_ms: f64,
     pub cull_ms: f64,

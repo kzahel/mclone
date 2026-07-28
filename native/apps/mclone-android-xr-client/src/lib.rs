@@ -106,12 +106,13 @@ mod android {
     };
     use mclone_render_session::EngineCameraSnapshot;
     use mclone_scene::{
-        MAX_XR_RENDER_DISTANCE, McloneSceneHost, McloneSceneHostOptions, XrControllerInputRouter,
-        XrDebugUiScreen, XrFrameLocomotionAutomation, XrFramePipelineHostTiming,
-        XrSceneFrameTarget, XrStartupViewPose, XrTerrainEyeTarget, XrTerrainMultiviewTarget,
-        XrUnderwaterDetectionMode, record_xr_frame_pipeline,
-        record_xr_frame_pipeline_with_peer_threads, single_view_host_options,
-        xr_frame_pipeline_accounting_config, xr_frame_pipeline_peer_threads,
+        MAX_XR_RENDER_DISTANCE, McloneSceneHost, McloneSceneHostOptions,
+        SceneTerrainViewDiagnostics, XrControllerInputRouter, XrDebugUiScreen,
+        XrFrameLocomotionAutomation, XrFramePipelineHostTiming, XrSceneFrameTarget,
+        XrStartupViewPose, XrTerrainEyeTarget, XrTerrainMultiviewTarget, XrUnderwaterDetectionMode,
+        record_xr_frame_pipeline, record_xr_frame_pipeline_with_peer_threads,
+        single_view_host_options, xr_frame_pipeline_accounting_config,
+        xr_frame_pipeline_peer_threads,
     };
     use mclone_xr_host::{
         OpenXrControllerActions, OpenXrHostEvent, PRIMARY_STEREO_VIEW_TYPE,
@@ -3533,6 +3534,7 @@ mod android {
     struct AndroidXrRenderedFrame {
         summary: mclone_scene::XrTerrainFrameSummary,
         camera: EngineCameraSnapshot,
+        terrain_view: Option<SceneTerrainViewDiagnostics>,
         timing: AndroidXrRenderFrameTiming,
     }
 
@@ -4061,6 +4063,7 @@ mod android {
         terrain_left_eye_full_frame_ms: f64,
         terrain_left_eye_sky_ms: f64,
         terrain_left_eye_opaque_ms: f64,
+        terrain_left_eye_backdrop_ms: f64,
         terrain_left_eye_translucent_ms: f64,
         terrain_left_eye_actor_ms: f64,
         terrain_left_eye_screen_effect_ms: f64,
@@ -4082,6 +4085,7 @@ mod android {
         terrain_right_eye_full_frame_ms: f64,
         terrain_right_eye_sky_ms: f64,
         terrain_right_eye_opaque_ms: f64,
+        terrain_right_eye_backdrop_ms: f64,
         terrain_right_eye_translucent_ms: f64,
         terrain_right_eye_actor_ms: f64,
         terrain_right_eye_screen_effect_ms: f64,
@@ -4288,7 +4292,7 @@ mod android {
                 self.settled_stationary,
                 self.frozen_render,
             );
-            if needs_settle && !self.record_settle_frame(rendered.summary, mode) {
+            if needs_settle && !self.record_settle_frame(rendered, mode) {
                 return false;
             }
             let flight_speed = self
@@ -4308,8 +4312,9 @@ mod android {
                 .settle_started
                 .map_or(0.0, |started| started.elapsed().as_secs_f64());
             if needs_settle {
+                let horizon = rendered.terrain_view.unwrap_or_default();
                 log::info!(
-                    "MCLONE_ANDROID_XR_PERF_SETTLED mode={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} sections={} drawn_sections={} indices={} drawn_indices={} ready_sections={}",
+                    "MCLONE_ANDROID_XR_PERF_SETTLED mode={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} sections={} drawn_sections={} indices={} drawn_indices={} ready_sections={} horizon_active={} horizon_target_ready={} horizon_ready_slots={} horizon_drawn_levels={} horizon_drawn_tiles={} horizon_pending_vegetation_tiles={} horizon_vegetation_submitted_jobs={} horizon_vegetation_completed_jobs={} horizon_vegetation_transport_failures={} horizon_vegetation_job_failures={}",
                     mode,
                     settle_seconds,
                     ANDROID_XR_PERF_SETTLE_MIN_SECONDS,
@@ -4319,7 +4324,17 @@ mod android {
                     rendered.summary.drawn_section_count,
                     rendered.summary.index_count,
                     rendered.summary.drawn_index_count,
-                    rendered.summary.upload.traversal_ready_section_count
+                    rendered.summary.upload.traversal_ready_section_count,
+                    rendered.terrain_view.is_some(),
+                    horizon.target_ready,
+                    horizon.ready_slots,
+                    horizon.drawn_levels,
+                    horizon.drawn_tiles,
+                    horizon.pending_vegetation_tiles,
+                    horizon.vegetation_submitted_jobs,
+                    horizon.vegetation_completed_jobs,
+                    horizon.vegetation_transport_failures,
+                    horizon.vegetation_job_failures
                 );
             }
             log::info!(
@@ -4408,6 +4423,8 @@ mod android {
                 settle_quiet_frames: self.settle_quiet_frames,
                 start_camera: rendered.camera,
                 latest_camera: rendered.camera,
+                start_terrain_view: rendered.terrain_view,
+                latest_terrain_view: rendered.terrain_view,
                 start_record_cache: rendered.summary.timing.record_cache_prepare.cache,
                 latest_record_cache: rendered.summary.timing.record_cache_prepare.cache,
                 record_rebuild_frames: 0,
@@ -4430,12 +4447,12 @@ mod android {
 
         fn record_settle_frame(
             &mut self,
-            summary: mclone_scene::XrTerrainFrameSummary,
+            rendered: AndroidXrRenderedFrame,
             mode: &'static str,
         ) -> bool {
             let _ = self.settle_started.get_or_insert_with(Instant::now);
             self.settle_frames += 1;
-            let quiet = android_xr_perf_settle_frame_is_quiet(summary);
+            let quiet = android_xr_perf_settle_frame_is_quiet(rendered);
             if quiet {
                 self.settle_quiet_frames += 1;
             } else {
@@ -4447,9 +4464,11 @@ mod android {
             if self.settle_frames == 1
                 || self.settle_frames % ANDROID_XR_PERF_SETTLE_PROGRESS_FRAMES == 0
             {
+                let summary = rendered.summary;
                 let upload = summary.upload;
+                let horizon = rendered.terrain_view.unwrap_or_default();
                 log::info!(
-                    "MCLONE_ANDROID_XR_PERF_SETTLE_PROGRESS mode={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} quiet={} poll_changed={} server_cmd_q={} server_update_q={} pending_jobs_after={} pending_chunks_after={} deferred_sections={} submitted_sections={} deadline_skipped_requests={} completed_sections={} stale_sections={} uploaded_sections={} upload_removed_sections={} ready_sections={} ui_draw_rebuilds={} ui_draw_cache_hits={} ui_panel_repaints={} ui_panel_cache_hits={} ui_panel_texture_recreates={} ui_panel_composites={} sections={} drawn_sections={} drawn_indices={}",
+                    "MCLONE_ANDROID_XR_PERF_SETTLE_PROGRESS mode={} settle_seconds={:.3} settle_min_seconds={:.3} settle_frames={} settle_quiet_frames={} quiet={} poll_changed={} server_cmd_q={} server_update_q={} pending_jobs_after={} pending_chunks_after={} deferred_sections={} submitted_sections={} deadline_skipped_requests={} completed_sections={} stale_sections={} uploaded_sections={} upload_removed_sections={} ready_sections={} ui_draw_rebuilds={} ui_draw_cache_hits={} ui_panel_repaints={} ui_panel_cache_hits={} ui_panel_texture_recreates={} ui_panel_composites={} sections={} drawn_sections={} drawn_indices={} horizon_active={} horizon_target_ready={} horizon_ready_slots={} horizon_drawn_levels={} horizon_drawn_tiles={} horizon_pending_vegetation_tiles={} horizon_vegetation_submitted_jobs={} horizon_vegetation_completed_jobs={} horizon_vegetation_transport_failures={} horizon_vegetation_job_failures={}",
                     mode,
                     settle_seconds,
                     ANDROID_XR_PERF_SETTLE_MIN_SECONDS,
@@ -4477,7 +4496,17 @@ mod android {
                     summary.ui_panel.composite_count,
                     summary.section_count,
                     summary.drawn_section_count,
-                    summary.drawn_index_count
+                    summary.drawn_index_count,
+                    rendered.terrain_view.is_some(),
+                    horizon.target_ready,
+                    horizon.ready_slots,
+                    horizon.drawn_levels,
+                    horizon.drawn_tiles,
+                    horizon.pending_vegetation_tiles,
+                    horizon.vegetation_submitted_jobs,
+                    horizon.vegetation_completed_jobs,
+                    horizon.vegetation_transport_failures,
+                    horizon.vegetation_job_failures
                 );
             }
             self.settle_quiet_frames >= ANDROID_XR_PERF_SETTLE_QUIET_FRAMES
@@ -4543,6 +4572,8 @@ mod android {
         settle_quiet_frames: u64,
         start_camera: EngineCameraSnapshot,
         latest_camera: EngineCameraSnapshot,
+        start_terrain_view: Option<SceneTerrainViewDiagnostics>,
+        latest_terrain_view: Option<SceneTerrainViewDiagnostics>,
         start_record_cache: TexturedSectionRecordCacheStats,
         latest_record_cache: TexturedSectionRecordCacheStats,
         record_rebuild_frames: u64,
@@ -4614,6 +4645,7 @@ mod android {
                 self.max_upload = max_upload_summary(self.max_upload, rendered.summary.upload);
                 self.latest_summary = rendered.summary;
                 self.latest_camera = rendered.camera;
+                self.latest_terrain_view = rendered.terrain_view;
             }
         }
 
@@ -4844,6 +4876,31 @@ mod android {
                 blocked.p95_ms,
                 blocked.p99_ms,
                 blocked.max_ms
+            );
+            let start_horizon = self.start_terrain_view.unwrap_or_default();
+            let latest_horizon = self.latest_terrain_view.unwrap_or_default();
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_HORIZON start_active={} start_target_ready={} start_ready_slots={} start_drawn_levels={} start_drawn_tiles={} start_tree_instances={} start_pending_vegetation_tiles={} start_vegetation_submitted_jobs={} start_vegetation_completed_jobs={} latest_active={} latest_target_ready={} latest_ready_slots={} latest_drawn_levels={} latest_drawn_tiles={} latest_tree_instances={} latest_pending_vegetation_tiles={} latest_vegetation_submitted_jobs={} latest_vegetation_completed_jobs={} latest_vegetation_transport_failures={} latest_vegetation_job_failures={}",
+                self.start_terrain_view.is_some(),
+                start_horizon.target_ready,
+                start_horizon.ready_slots,
+                start_horizon.drawn_levels,
+                start_horizon.drawn_tiles,
+                start_horizon.tree_instance_count,
+                start_horizon.pending_vegetation_tiles,
+                start_horizon.vegetation_submitted_jobs,
+                start_horizon.vegetation_completed_jobs,
+                self.latest_terrain_view.is_some(),
+                latest_horizon.target_ready,
+                latest_horizon.ready_slots,
+                latest_horizon.drawn_levels,
+                latest_horizon.drawn_tiles,
+                latest_horizon.tree_instance_count,
+                latest_horizon.pending_vegetation_tiles,
+                latest_horizon.vegetation_submitted_jobs,
+                latest_horizon.vegetation_completed_jobs,
+                latest_horizon.vegetation_transport_failures,
+                latest_horizon.vegetation_job_failures
             );
             if !self.detail.is_full() {
                 log::info!(
@@ -5098,10 +5155,11 @@ mod android {
                 self.max_render.terrain_right_eye_translucent_sort_ms
             );
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_TERRAIN_EYE_SPLIT max_left_full_frame_ms={:.3} max_left_sky_ms={:.3} max_left_opaque_ms={:.3} max_left_translucent_ms={:.3} max_left_actor_ms={:.3} max_left_screen_effect_ms={:.3} max_left_gui_ms={:.3} max_left_xr_fade_ms={:.3} max_left_xr_selection_ms={:.3} max_left_xr_world_lines_ms={:.3} max_left_xr_world_panel_ms={:.3} max_left_encoder_finish_ms={:.3} max_right_full_frame_ms={:.3} max_right_sky_ms={:.3} max_right_opaque_ms={:.3} max_right_translucent_ms={:.3} max_right_actor_ms={:.3} max_right_screen_effect_ms={:.3} max_right_gui_ms={:.3} max_right_xr_fade_ms={:.3} max_right_xr_selection_ms={:.3} max_right_xr_world_lines_ms={:.3} max_right_xr_world_panel_ms={:.3} max_right_encoder_finish_ms={:.3}",
+                "MCLONE_ANDROID_XR_PERF_TERRAIN_EYE_SPLIT max_left_full_frame_ms={:.3} max_left_sky_ms={:.3} max_left_opaque_ms={:.3} max_left_backdrop_ms={:.3} max_left_translucent_ms={:.3} max_left_actor_ms={:.3} max_left_screen_effect_ms={:.3} max_left_gui_ms={:.3} max_left_xr_fade_ms={:.3} max_left_xr_selection_ms={:.3} max_left_xr_world_lines_ms={:.3} max_left_xr_world_panel_ms={:.3} max_left_encoder_finish_ms={:.3} max_right_full_frame_ms={:.3} max_right_sky_ms={:.3} max_right_opaque_ms={:.3} max_right_backdrop_ms={:.3} max_right_translucent_ms={:.3} max_right_actor_ms={:.3} max_right_screen_effect_ms={:.3} max_right_gui_ms={:.3} max_right_xr_fade_ms={:.3} max_right_xr_selection_ms={:.3} max_right_xr_world_lines_ms={:.3} max_right_xr_world_panel_ms={:.3} max_right_encoder_finish_ms={:.3}",
                 self.max_render.terrain_left_eye_full_frame_ms,
                 self.max_render.terrain_left_eye_sky_ms,
                 self.max_render.terrain_left_eye_opaque_ms,
+                self.max_render.terrain_left_eye_backdrop_ms,
                 self.max_render.terrain_left_eye_translucent_ms,
                 self.max_render.terrain_left_eye_actor_ms,
                 self.max_render.terrain_left_eye_screen_effect_ms,
@@ -5114,6 +5172,7 @@ mod android {
                 self.max_render.terrain_right_eye_full_frame_ms,
                 self.max_render.terrain_right_eye_sky_ms,
                 self.max_render.terrain_right_eye_opaque_ms,
+                self.max_render.terrain_right_eye_backdrop_ms,
                 self.max_render.terrain_right_eye_translucent_ms,
                 self.max_render.terrain_right_eye_actor_ms,
                 self.max_render.terrain_right_eye_screen_effect_ms,
@@ -6122,6 +6181,9 @@ mod android {
             terrain_left_eye_opaque_ms: a
                 .terrain_left_eye_opaque_ms
                 .max(b.terrain_left_eye_opaque_ms),
+            terrain_left_eye_backdrop_ms: a
+                .terrain_left_eye_backdrop_ms
+                .max(b.terrain_left_eye_backdrop_ms),
             terrain_left_eye_translucent_ms: a
                 .terrain_left_eye_translucent_ms
                 .max(b.terrain_left_eye_translucent_ms),
@@ -6177,6 +6239,9 @@ mod android {
             terrain_right_eye_opaque_ms: a
                 .terrain_right_eye_opaque_ms
                 .max(b.terrain_right_eye_opaque_ms),
+            terrain_right_eye_backdrop_ms: a
+                .terrain_right_eye_backdrop_ms
+                .max(b.terrain_right_eye_backdrop_ms),
             terrain_right_eye_translucent_ms: a
                 .terrain_right_eye_translucent_ms
                 .max(b.terrain_right_eye_translucent_ms),
@@ -6265,15 +6330,23 @@ mod android {
             || summary.upload_removed_section_count > 0
     }
 
-    fn android_xr_perf_settle_frame_is_quiet(summary: mclone_scene::XrTerrainFrameSummary) -> bool {
-        let upload = summary.upload;
+    fn android_xr_perf_settle_frame_is_quiet(rendered: AndroidXrRenderedFrame) -> bool {
+        let upload = rendered.summary.upload;
+        let horizon_ready = rendered.terrain_view.is_none_or(|horizon| {
+            horizon.target_ready
+                && horizon.pending_vegetation_tiles == 0
+                && horizon.vegetation_submitted_jobs == horizon.vegetation_completed_jobs
+                && horizon.vegetation_transport_failures == 0
+                && horizon.vegetation_job_failures == 0
+        });
         !terrain_upload_summary_has_work(upload)
             && upload.server_command_queue_depth == 0
             && upload.server_update_queue_depth == 0
             && upload.pending_compile_jobs_after == 0
-            && summary.ui_draw_cache.rebuild_count == 0
-            && summary.ui_panel.repaint_count == 0
-            && summary.ui_panel.texture_recreate_count == 0
+            && rendered.summary.ui_draw_cache.rebuild_count == 0
+            && rendered.summary.ui_panel.repaint_count == 0
+            && rendered.summary.ui_panel.texture_recreate_count == 0
+            && horizon_ready
     }
 
     fn max_upload_summary(
@@ -6846,6 +6919,7 @@ mod android {
         Ok(AndroidXrRenderedFrame {
             summary: frame_summary,
             camera: terrain.camera_snapshot(),
+            terrain_view: terrain.terrain_view_diagnostics(),
             timing,
         })
     }
@@ -6923,6 +6997,7 @@ mod android {
         Ok(AndroidXrRenderedFrame {
             summary: frame_summary,
             camera: terrain.camera_snapshot(),
+            terrain_view: terrain.terrain_view_diagnostics(),
             timing,
         })
     }
@@ -7078,6 +7153,7 @@ mod android {
         timing.terrain_left_eye_full_frame_ms = scene_timing.left_eye_render.full_frame_ms;
         timing.terrain_left_eye_sky_ms = scene_timing.left_eye_render.sky_ms;
         timing.terrain_left_eye_opaque_ms = scene_timing.left_eye_render.terrain_opaque_ms;
+        timing.terrain_left_eye_backdrop_ms = scene_timing.left_eye_render.terrain_backdrop_ms;
         timing.terrain_left_eye_translucent_ms =
             scene_timing.left_eye_render.terrain_translucent_ms;
         timing.terrain_left_eye_actor_ms = scene_timing.left_eye_render.actor_ms;
@@ -7103,6 +7179,7 @@ mod android {
         timing.terrain_right_eye_full_frame_ms = scene_timing.right_eye_render.full_frame_ms;
         timing.terrain_right_eye_sky_ms = scene_timing.right_eye_render.sky_ms;
         timing.terrain_right_eye_opaque_ms = scene_timing.right_eye_render.terrain_opaque_ms;
+        timing.terrain_right_eye_backdrop_ms = scene_timing.right_eye_render.terrain_backdrop_ms;
         timing.terrain_right_eye_translucent_ms =
             scene_timing.right_eye_render.terrain_translucent_ms;
         timing.terrain_right_eye_actor_ms = scene_timing.right_eye_render.actor_ms;

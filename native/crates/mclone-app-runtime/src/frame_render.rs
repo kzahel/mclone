@@ -274,6 +274,7 @@ enum OpaqueWorldInsertion<'a> {
 pub struct FullFrameRenderTiming {
     pub sky_ms: f64,
     pub terrain_opaque_ms: f64,
+    pub terrain_backdrop_ms: f64,
     pub terrain_translucent_ms: f64,
     pub terrain_records_ms: f64,
     pub terrain_cull_ms: f64,
@@ -2733,6 +2734,7 @@ where
             timing.terrain_opaque_ms += composition_timing_elapsed_ms(timing_clock, Some(start));
         }
         if let Some(terrain_backdrop) = terrain_backdrop.as_deref_mut() {
+            let backdrop_start = composition_timing_start(timing_clock, timing.is_some());
             terrain_backdrop.render(TerrainBackdropRenderContext {
                 device: frame.device,
                 queue: frame.queue,
@@ -2744,6 +2746,10 @@ where
                 fog,
                 view_slot,
             })?;
+            if let (Some(timing), Some(start)) = (timing.as_deref_mut(), backdrop_start) {
+                timing.terrain_backdrop_ms +=
+                    composition_timing_elapsed_ms(timing_clock, Some(start));
+            }
         }
         render_stats.drawn_section_count = frame_stats.drawn_section_count;
         render_stats.drawn_face_count = frame_stats.drawn_face_count();
