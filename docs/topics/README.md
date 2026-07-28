@@ -264,6 +264,10 @@ series implements the same concern, normally reuse the document slug in its
   executors, and world-scoped writer admission. Tactical
   [`199`](../tactical/199-unified-persistence-interface.md) records the
   implementation.
+- [`generated-chunk-cache-policy.md`](generated-chunk-cache-policy.md):
+  accepted server-owned per-world option for storing or regenerating
+  deterministic unedited terrain, with conservative durable-state boundaries,
+  all-client authority-aware UI, and provenance-gated cache reclamation.
 - [`world-dimension-storage-layout.md`](world-dimension-storage-layout.md):
   accepted physical-layout direction for a realm-global native database plus
   dimension SQLite shards, retained logical dimension keys and world-level
@@ -312,6 +316,10 @@ series implements the same concern, normally reuse the document slug in its
   [`261`](../tactical/261-procedural-horizon-product-integration-roadmap.md)
   inventories the completed proof stack and sequences real-game,
   flat-platform, and XR/multiview integration.
+- [`procedural-horizon-surface-appearance.md`](procedural-horizon-surface-appearance.md):
+  current material classification, block-atlas texture filtering, biome tint,
+  approximate lighting, interpolated inland-water presentation, performance
+  evidence, known limits, and the measured next-work boundary.
 - [`lod-native-vegetation.md`](lod-native-vegetation.md): accepted immediate
   migration of original-profile trees from vanilla-shaped chunk decoration to
   worldgen-owned forest intent and stable tree records shared by exact chunks,

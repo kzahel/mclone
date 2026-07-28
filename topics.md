@@ -89,6 +89,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `world-dimension-storage-layout` — realm-global native SQLite metadata plus
   dimension-local SQLite shards beneath one world persistence owner, while
   browser IndexedDB remains physically consolidated
+- `generated-chunk-cache-policy` — authority-owned per-world choice to store or
+  regenerate deterministic unedited terrain cache, with durable provenance and
+  future reclamation boundaries
 - `platform-host-boundary` — one shared Rust input/context/action path across
   desktop, browser, flat Android, and XR interactive hosts; autonomous
   platform initialization and mechanics stay local; browser TS input
@@ -206,6 +209,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `procedural-horizon-clipmap` — fixed-budget toroidal natural-terrain rings,
   skirts, exact-painted chunk masking, vegetation handoff, and predictable
   native/browser/XR frame admission
+- `procedural-horizon-surface-appearance` — block-atlas ground texture,
+  biome/material color, approximate lighting, interpolated inland water, and
+  measured fixed-budget quality improvements
 - `world-view-navigation` — shared map/orbit/focus/zoom control across Terrain
   Lab, standalone World Explorer, tabletop, and game consumers, plus the
   authoritative Explorer-to-play handoff

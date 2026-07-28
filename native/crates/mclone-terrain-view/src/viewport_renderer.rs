@@ -4247,6 +4247,31 @@ mod tests {
     }
 
     #[test]
+    fn horizon_shader_uses_biome_ground_color_and_interpolated_pool_water() {
+        let shader = super::super::TERRAIN_PREVIEW_RENDER_WGSL;
+        for mapping in [
+            "case 0u: { return 0u; }",  // ocean
+            "case 1u: { return 16u; }", // shore
+            "case 2u: { return 7u; }",  // river
+            "case 3u: { return 13u; }", // snowy alpine
+            "case 4u: { return 5u; }",  // conifer
+            "case 5u: { return 35u; }", // steppe
+            "case 6u: { return 4u; }",  // woodland
+            "default: { return 1u; }",  // meadow
+        ] {
+            assert!(shader.contains(mapping), "missing biome mapping {mapping}");
+        }
+        assert!(shader.contains("mclone_grass_biome(u32(round(sample.semantics.y)))"));
+        assert!(shader.contains("let pool_anti_alias = max(fwidth(input.semantics.y), 0.01);"));
+        assert!(shader.contains("&& input.material != 2u"));
+        assert!(shader.contains("let water_alpha = max(river_alpha, pool_alpha);"));
+        assert!(shader.contains("water_surface_color(input.river.w, input.light)"));
+        assert!(shader.contains("sample.terrain.x,"));
+        assert!(!shader.contains("63.0 - input.position.z"));
+        assert!(!shader.contains("let dry = vec3<f32>(0.63, 0.54, 0.29);"));
+    }
+
+    #[test]
     fn tree_instances_preserve_semantics_for_both_compare_panels() {
         let request = TerrainPreviewRequest::new(12_345, -80, 48, 4)
             .with_content_stage(TerrainPreviewContentStage::Cover);

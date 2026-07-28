@@ -851,6 +851,9 @@ and
 - [`far-lod.md`](far-lod.md) — rejected chunk system and removal boundary.
 - [`lod-native-vegetation.md`](lod-native-vegetation.md) — forest intent,
   stable tree records, exact realization, and procedural summaries.
+- [`procedural-horizon-surface-appearance.md`](procedural-horizon-surface-appearance.md)
+  — material classification, block-atlas texture, biome color, approximate
+  lighting, inland-water presentation, and measured quality boundaries.
 - [`world-view-navigation.md`](world-view-navigation.md) — shared map/orbit
   controls and Explorer-to-play product path.
 - [`tabletop-overview-mode.md`](tabletop-overview-mode.md) — active-world scale

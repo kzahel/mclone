@@ -343,6 +343,29 @@ fn vanilla_grass_color(biome: u32) -> vec3<f32> {
     }
     return rgb8(0x91bd59u);
 }
+fn mclone_grass_biome(recipe: u32) -> u32 {
+    switch recipe {
+        // Keep this mapping aligned with
+        // mclone_overworld_biome_id_for_sample.
+        case 0u: { return 0u; }  // ocean
+        case 1u: { return 16u; } // shore / beach
+        case 2u: { return 7u; }  // river
+        case 3u: { return 13u; } // snowy alpine
+        case 4u: { return 5u; }  // cool wet conifer / taiga
+        case 5u: { return 35u; } // warm dry steppe / savanna
+        case 6u: { return 4u; }  // temperate woodland / forest
+        default: { return 1u; }  // temperate meadow / plains
+    }
+}
+
+fn water_surface_color(ground_y: f32, light: f32) -> vec3<f32> {
+    let depth = clamp((63.0 - ground_y) / 52.0, 0.0, 1.0);
+    return mix(
+        vec3<f32>(0.16, 0.55, 0.68),
+        vec3<f32>(0.025, 0.17, 0.34),
+        depth,
+    ) * light;
+}
 
 fn vanilla_mountain_exposure_biome(biome: u32) -> bool {
     return biome == 3u || biome == 20u || biome == 34u
@@ -352,16 +375,13 @@ fn vanilla_mountain_exposure_biome(biome: u32) -> bool {
 
 fn terrain_color(sample: TerrainPreviewSample, light: f32) -> vec3<f32> {
     let surface_y = sample.terrain.x;
-    let temperature = sample.climate.x;
-    let moisture = sample.climate.y;
     let material = u32(round(select(
         sample.large_fields.w,
         sample.hydrology_detail.w,
         surface_quality() >= 1u,
     )));
     if material == 2u {
-        let depth = clamp((63.0 - surface_y) / 52.0, 0.0, 1.0);
-        return mix(vec3<f32>(0.16, 0.55, 0.68), vec3<f32>(0.025, 0.17, 0.34), depth) * light;
+        return water_surface_color(surface_y, light);
     }
     if material == 1u {
         return vec3<f32>(0.48, 0.49, 0.47) * light;
@@ -399,12 +419,9 @@ fn terrain_color(sample: TerrainPreviewSample, light: f32) -> vec3<f32> {
     if preview_profile() == 1u {
         return vanilla_grass_color(u32(round(sample.semantics.y))) * light;
     }
-    let dry = vec3<f32>(0.63, 0.54, 0.29);
-    let wet = vec3<f32>(0.17, 0.48, 0.25);
-    let cold = vec3<f32>(0.30, 0.49, 0.38);
-    let moisture_mix = clamp(moisture * 0.5 + 0.5, 0.0, 1.0);
-    let warmth = clamp(temperature * 0.5 + 0.5, 0.0, 1.0);
-    return mix(cold, mix(dry, wet, moisture_mix), warmth) * light;
+    return vanilla_grass_color(
+        mclone_grass_biome(u32(round(sample.semantics.y))),
+    ) * light;
 }
 
 fn height_color(height: f32) -> vec3<f32> {
@@ -772,7 +789,7 @@ fn vertex_main(
         sample.hydrology.x,
         sample.hydrology.w,
         sample.hydrology.y,
-        sample.terrain.z,
+        sample.terrain.x,
     );
     out.semantics = vec4<f32>(
         sample.hydrology_detail.x,
@@ -808,6 +825,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     let world_dy = dpdy(input.world_xz);
     let blocks_per_pixel = max(length(world_dx), length(world_dy));
     let river_anti_alias = max(fwidth(input.river.x), blocks_per_pixel * 0.35);
+    let pool_anti_alias = max(fwidth(input.semantics.y), 0.01);
     var color = input.color;
     let face_normal = normalize(cross(
         dpdx(input.world_position),
@@ -845,6 +863,7 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     }
     if input.textured != 0u
         && params.content_stage_flags.x >= 1u
+        && input.material != 2u
         && preview_profile() == 0u {
         let visible_half_width = max(input.river.y, blocks_per_pixel * 0.70);
         let river_alpha = 1.0 - smoothstep(
@@ -852,12 +871,17 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
             visible_half_width + river_anti_alias,
             abs(input.river.x),
         );
-        let river_color = mix(
-            vec3<f32>(0.11, 0.48, 0.69),
-            vec3<f32>(0.035, 0.22, 0.42),
-            clamp((63.0 - input.position.z) * 0.15, 0.0, 1.0),
+        let pool_alpha = smoothstep(
+            0.55 - pool_anti_alias,
+            0.55 + pool_anti_alias,
+            input.semantics.y,
         );
-        color = mix(color, river_color * input.light, river_alpha * 0.88);
+        let water_alpha = max(river_alpha, pool_alpha);
+        color = mix(
+            color,
+            water_surface_color(input.river.w, input.light),
+            water_alpha * 0.88,
+        );
         if params.content_stage_flags.x >= 4u {
             let cover = clamp(input.semantics.w, 0.0, 1.0);
             color = mix(color, color * vec3<f32>(0.57, 0.82, 0.58), cover * 0.36);
