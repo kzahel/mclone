@@ -4,6 +4,9 @@
 //! follow-up light status. This module keeps the raw input carriers and bridge
 //! call out of the already large scheduler module.
 
+use std::collections::BTreeMap;
+use std::sync::Arc;
+
 use mclone_core::{
     ChunkPos, ChunkSnapshot, ChunkStatus, HorizontalTopology, PackedLightSection, SECTION_HEIGHT,
     block_to_section_coord,
@@ -50,8 +53,8 @@ pub(crate) struct PendingLightStatus {
     pub(crate) feature_snapshot: ChunkSnapshot,
     pub(crate) scheduled_block_ticks: Vec<ScheduledTickRecord>,
     pub(crate) scheduled_fluid_ticks: Vec<ScheduledTickRecord>,
-    raw_blocks: Vec<RawBlockId>,
-    neighbor_blocks: Vec<(ChunkPos, Vec<RawBlockId>)>,
+    raw_blocks: Arc<[RawBlockId]>,
+    neighbor_blocks: Vec<(ChunkPos, Arc<[RawBlockId]>)>,
 }
 
 impl PendingLightStatus {
@@ -79,8 +82,11 @@ impl PendingLightStatus {
             feature_snapshot,
             scheduled_block_ticks: Vec::new(),
             scheduled_fluid_ticks: Vec::new(),
-            raw_blocks,
-            neighbor_blocks,
+            raw_blocks: raw_blocks.into(),
+            neighbor_blocks: neighbor_blocks
+                .into_iter()
+                .map(|(pos, blocks)| (pos, blocks.into()))
+                .collect(),
         }
     }
 
@@ -110,7 +116,7 @@ impl PendingLightStatus {
                             .map(|lifted| (lifted, chunk.blocks()))
                     }),
             )
-            .map(|(neighbor_pos, blocks)| (neighbor_pos, blocks.to_vec()))
+            .map(|(neighbor_pos, blocks)| (neighbor_pos, Arc::from(blocks)))
             .collect();
 
         Self {
@@ -119,7 +125,7 @@ impl PendingLightStatus {
             feature_snapshot,
             scheduled_block_ticks,
             scheduled_fluid_ticks,
-            raw_blocks: chunk.blocks().to_vec(),
+            raw_blocks: Arc::from(chunk.blocks()),
             neighbor_blocks,
         }
     }
@@ -128,7 +134,7 @@ impl PendingLightStatus {
         &self.raw_blocks
     }
 
-    pub(crate) fn neighbor_blocks(&self) -> &[(ChunkPos, Vec<RawBlockId>)] {
+    pub(crate) fn neighbor_blocks(&self) -> &[(ChunkPos, Arc<[RawBlockId]>)] {
         &self.neighbor_blocks
     }
 }
@@ -136,11 +142,38 @@ impl PendingLightStatus {
 #[derive(Debug)]
 pub(crate) struct PendingLightStatusBatch {
     statuses: Vec<PendingLightStatus>,
+    unique_input_chunks: BTreeMap<ChunkPos, Arc<[RawBlockId]>>,
+    owned_input_bytes: usize,
 }
 
 impl PendingLightStatusBatch {
-    pub(crate) fn new(statuses: Vec<PendingLightStatus>) -> Self {
-        Self { statuses }
+    pub(crate) fn new(mut statuses: Vec<PendingLightStatus>) -> Self {
+        let mut unique_input_chunks = BTreeMap::<ChunkPos, Arc<[RawBlockId]>>::new();
+        for status in &mut statuses {
+            status.raw_blocks =
+                canonical_light_input(&mut unique_input_chunks, status.pos, &status.raw_blocks);
+        }
+        for status in &mut statuses {
+            for (pos, blocks) in &mut status.neighbor_blocks {
+                *blocks = if let Some(target_or_neighbor) = unique_input_chunks.get(pos) {
+                    Arc::clone(target_or_neighbor)
+                } else {
+                    canonical_light_input(&mut unique_input_chunks, *pos, blocks)
+                };
+            }
+        }
+        let owned_input_bytes = unique_input_chunks.values().fold(0_usize, |bytes, blocks| {
+            bytes.saturating_add(
+                blocks
+                    .len()
+                    .saturating_mul(std::mem::size_of::<RawBlockId>()),
+            )
+        });
+        Self {
+            statuses,
+            unique_input_chunks,
+            owned_input_bytes,
+        }
     }
 
     pub(crate) fn is_empty(&self) -> bool {
@@ -151,8 +184,99 @@ impl PendingLightStatusBatch {
         self.statuses.len()
     }
 
+    pub(crate) fn unique_input_count(&self) -> usize {
+        self.unique_input_chunks.len()
+    }
+
+    pub(crate) const fn owned_input_bytes(&self) -> usize {
+        self.owned_input_bytes
+    }
+
     pub(crate) fn into_statuses(self) -> Vec<PendingLightStatus> {
         self.statuses
+    }
+
+    pub(crate) fn into_parts(
+        self,
+    ) -> (
+        Vec<PendingLightStatus>,
+        BTreeMap<ChunkPos, Arc<[RawBlockId]>>,
+    ) {
+        (self.statuses, self.unique_input_chunks)
+    }
+}
+
+fn canonical_light_input(
+    unique_input_chunks: &mut BTreeMap<ChunkPos, Arc<[RawBlockId]>>,
+    pos: ChunkPos,
+    blocks: &Arc<[RawBlockId]>,
+) -> Arc<[RawBlockId]> {
+    if let Some(existing) = unique_input_chunks.get(&pos) {
+        assert_eq!(
+            existing.as_ref(),
+            blocks.as_ref(),
+            "Light batch supplied conflicting raw blocks for ({}, {})",
+            pos.x,
+            pos.z
+        );
+        return Arc::clone(existing);
+    }
+    unique_input_chunks.insert(pos, Arc::clone(blocks));
+    Arc::clone(blocks)
+}
+
+#[cfg(test)]
+mod shared_input_tests {
+    use super::*;
+    use mclone_core::{ChunkRevision, ChunkStatus};
+
+    fn snapshot(pos: ChunkPos) -> ChunkSnapshot {
+        ChunkSnapshot {
+            pos,
+            status: ChunkStatus::Features,
+            revision: ChunkRevision(1),
+            min_y: 0,
+            height: 16,
+            biomes: Vec::new(),
+            sections: Vec::new(),
+            light_correct: false,
+            light_sections: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn overlapping_statuses_share_each_unique_raw_input_once() {
+        let center = ChunkPos::new(0, 0);
+        let east = ChunkPos::new(1, 0);
+        let center_blocks = vec![1_u8; 16];
+        let east_blocks = vec![2_u8; 16];
+        let center_status = PendingLightStatus::from_parts(
+            center,
+            snapshot(center),
+            center_blocks.clone(),
+            vec![(east, east_blocks.clone())],
+        );
+        let east_status = PendingLightStatus::from_parts(
+            east,
+            snapshot(east),
+            east_blocks,
+            vec![(center, center_blocks)],
+        );
+
+        let batch = PendingLightStatusBatch::new(vec![center_status, east_status]);
+
+        assert_eq!(batch.target_count(), 2);
+        assert_eq!(batch.unique_input_count(), 2);
+        assert_eq!(batch.owned_input_bytes(), 32);
+        let statuses = batch.into_statuses();
+        assert!(Arc::ptr_eq(
+            &statuses[0].raw_blocks,
+            &statuses[1].neighbor_blocks[0].1
+        ));
+        assert!(Arc::ptr_eq(
+            &statuses[1].raw_blocks,
+            &statuses[0].neighbor_blocks[0].1
+        ));
     }
 }
 
