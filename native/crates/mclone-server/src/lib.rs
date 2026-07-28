@@ -120,7 +120,8 @@ pub use runner::{
 pub(crate) use scheduler::FluidTickList;
 pub use scheduler::{
     ChunkPublicationBudgetConfig, ChunkScheduler, ChunkSchedulerEvent, ChunkSchedulerMetrics,
-    ChunkStatusJob, DEFAULT_LIGHT_STATUS_BATCH_SIZE, FluidTickPhaseReport, TopologyChunkState,
+    ChunkStatusJob, CompletedChunkJobSummary, DEFAULT_LIGHT_STATUS_BATCH_SIZE,
+    FluidTickPhaseReport, MAX_RECENT_COMPLETED_JOB_SUMMARIES, TopologyChunkState,
 };
 pub use spawn::{
     find_safe_surface_spawn_for_loaded_descriptor, find_safe_surface_spawn_for_loaded_profile,

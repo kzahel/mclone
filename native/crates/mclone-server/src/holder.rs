@@ -151,6 +151,17 @@ impl ChunkHolder {
             .job_id = Some(job_id);
     }
 
+    pub(crate) fn clear_status_job(&mut self, status: ChunkStatus, expected: ChunkJobId) -> bool {
+        let Some(slot) = self.status_slots.get_mut(&status) else {
+            return false;
+        };
+        if slot.job_id != Some(expected) {
+            return false;
+        }
+        slot.job_id = None;
+        true
+    }
+
     pub(crate) fn assign_light_request_token(&mut self, token: LightRequestToken) {
         debug_assert_eq!(token.pos, self.pos);
         self.status_slots

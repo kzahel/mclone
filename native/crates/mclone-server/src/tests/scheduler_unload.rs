@@ -180,7 +180,7 @@ fn chunk_scheduler_records_holder_status_slots_in_order() {
     let features_slot = holder.status_slot(ChunkStatus::Features).unwrap();
     assert_eq!(features_slot.status, ChunkStatus::Features);
     assert_eq!(features_slot.step, ChunkStatusStep::Ready);
-    assert_eq!(features_slot.job_id, Some(ChunkJobId(1)));
+    assert_eq!(features_slot.job_id, None);
     let feature_revision = features_slot
         .revision
         .expect("features should have revision");
@@ -202,27 +202,20 @@ fn chunk_scheduler_records_holder_status_slots_in_order() {
         Some(ChunkPos::new(0, 0))
     );
     assert_eq!(scheduler.job_count(), 1);
-    let job = scheduler.job(ChunkJobId(1)).unwrap();
-    assert_eq!(job.id, ChunkJobId(1));
-    assert_eq!(job.status, ChunkStatus::Features);
-    assert_eq!(job.state, ChunkJobState::Complete);
-    assert_eq!(job.target_chunks.first(), Some(&ChunkPos::new(0, 0)));
-    assert_eq!(
-        job.target_chunks.iter().copied().collect::<BTreeSet<_>>(),
-        {
-            (-1..=1)
-                .flat_map(|z| (-1..=1).map(move |x| ChunkPos::new(x, z)))
-                .collect()
-        }
-    );
-    assert_eq!(job.feature_centers.first(), Some(&ChunkPos::new(0, 0)));
-    assert_eq!(job.feature_centers.len(), 5 * 5);
-    assert_eq!(job.dependency_chunks.first(), Some(&ChunkPos::new(0, 0)));
-    assert_eq!(job.dependency_chunks.len(), 7 * 7);
-    assert_eq!(job.seeded_dependency_chunks, 0);
-    assert_eq!(job.dependency_cache_hits, 0);
-    assert_eq!(job.dependency_cache_misses, 7 * 7);
-    assert_eq!(job.retained_dependency_chunks, 7 * 7);
+    assert_eq!(scheduler.full_job_record_count(), 0);
+    let summary = scheduler
+        .completed_job_summary(ChunkJobId(1))
+        .expect("completed feature job summary");
+    assert_eq!(summary.id, ChunkJobId(1));
+    assert_eq!(summary.status, ChunkStatus::Features);
+    assert_eq!(summary.first_target_chunk, Some(ChunkPos::new(0, 0)));
+    assert_eq!(summary.target_chunk_count, 3 * 3);
+    assert_eq!(summary.feature_center_count, 5 * 5);
+    assert_eq!(summary.dependency_chunk_count, 7 * 7);
+    assert_eq!(summary.seeded_dependency_chunks, 0);
+    assert_eq!(summary.dependency_cache_hits, 0);
+    assert_eq!(summary.dependency_cache_misses, 7 * 7);
+    assert_eq!(summary.retained_dependency_chunks, 7 * 7);
 }
 
 #[test]

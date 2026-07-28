@@ -46,7 +46,7 @@ fn run() -> Result<(), String> {
     let mut peak_rss_kb: Option<u64> = None;
 
     for index in 0..config.steps {
-        let previous_job_count = scheduler.job_count();
+        let previous_completed_job_count = scheduler.metrics().completed_jobs;
         let center = ChunkPos::new(i32::try_from(index).expect("step index exceeded i32"), 0);
         let step_start = Instant::now();
         let apply_start = Instant::now();
@@ -175,7 +175,7 @@ fn run() -> Result<(), String> {
             .filter(|event| matches!(event, ChunkSchedulerEvent::StatusChanged { .. }))
             .count();
         let (feature_jobs, feature_timing) =
-            feature_timing_since_job_count(&scheduler, previous_job_count);
+            feature_timing_since_completed_count(&scheduler, previous_completed_job_count);
 
         steps.push(StepReport {
             index,
@@ -607,6 +607,14 @@ fn print_metrics_json(indent: &str, metrics: ChunkSchedulerMetrics, trailing_com
     println!("{indent}  \"pending_jobs\": {},", metrics.pending_jobs);
     println!("{indent}  \"completed_jobs\": {},", metrics.completed_jobs);
     println!(
+        "{indent}  \"completed_job_records_retained\": {},",
+        metrics.completed_job_records_retained
+    );
+    println!(
+        "{indent}  \"recent_job_summaries_retained\": {},",
+        metrics.recent_job_summaries_retained
+    );
+    println!(
         "{indent}  \"total_seeded_dependency_chunks\": {},",
         metrics.total_seeded_dependency_chunks
     );
@@ -997,14 +1005,21 @@ fn print_decoration_steps_json(
     println!("{indent}}}{suffix}");
 }
 
-fn feature_timing_since_job_count(
+fn feature_timing_since_completed_count(
     scheduler: &ChunkScheduler,
-    previous_job_count: usize,
+    previous_completed_job_count: usize,
 ) -> (usize, OverworldFeatureBatchTiming) {
+    let completed_job_count = scheduler.metrics().completed_jobs;
+    let new_job_count = completed_job_count.saturating_sub(previous_completed_job_count);
     let mut timing = OverworldFeatureBatchTiming::default();
     let mut jobs = 0;
-    for job in scheduler.jobs().skip(previous_job_count) {
-        if let Some(job_timing) = scheduler.job_timing(job.id) {
+    let summaries = scheduler
+        .completed_job_summaries()
+        .rev()
+        .take(new_job_count)
+        .collect::<Vec<_>>();
+    for summary in summaries.into_iter().rev() {
+        if let Some(job_timing) = summary.overworld_timing {
             timing.add_assign(job_timing);
             jobs += 1;
         }

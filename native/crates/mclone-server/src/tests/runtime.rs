@@ -118,6 +118,8 @@ fn integrated_server_publishes_interested_chunks() {
     scheduler_metrics.max_feature_job_target_chunks = 0;
     scheduler_metrics.max_feature_job_feature_centers = 0;
     scheduler_metrics.max_feature_job_dependency_chunks = 0;
+    scheduler_metrics.completed_job_records_retained = 0;
+    scheduler_metrics.recent_job_summaries_retained = 0;
     scheduler_metrics.latest_feature_job_id = None;
     scheduler_metrics.latest_feature_job_target_chunks = 0;
     scheduler_metrics.latest_feature_job_feature_centers = 0;
@@ -149,6 +151,8 @@ fn integrated_server_publishes_interested_chunks() {
             dirty_chunks: 0,
             pending_jobs: 0,
             completed_jobs: 0,
+            completed_job_records_retained: 0,
+            recent_job_summaries_retained: 0,
             total_seeded_dependency_chunks: 0,
             total_dependency_cache_hits: 0,
             total_dependency_cache_misses: 9 * 9,
@@ -354,32 +358,21 @@ fn integrated_server_publishes_interested_chunks() {
                 .total_light_status_publication_units,
         }
     );
-    let jobs = server.scheduler().jobs().collect::<Vec<_>>();
+    let jobs = server
+        .scheduler()
+        .completed_job_summaries()
+        .collect::<Vec<_>>();
     assert!((1..=9).contains(&jobs.len()));
     assert_eq!(
-        jobs.iter()
-            .map(|job| job.target_chunks.len())
-            .sum::<usize>(),
+        jobs.iter().map(|job| job.target_chunk_count).sum::<usize>(),
         25
     );
     for job in jobs {
         assert_eq!(job.status, ChunkStatus::Features);
-        assert_eq!(job.state, ChunkJobState::Complete);
-        assert!(job.target_chunks.len() <= 4 * 9);
-        assert!(job.dependency_chunks.len() <= 9 * 9);
-        for target in &job.target_chunks {
-            assert_eq!(
-                server
-                    .scheduler()
-                    .holder(*target)
-                    .unwrap()
-                    .status_slot(ChunkStatus::Features)
-                    .unwrap()
-                    .job_id,
-                Some(job.id)
-            );
-        }
+        assert!(job.target_chunk_count <= 4 * 9);
+        assert!(job.dependency_chunk_count <= 9 * 9);
     }
+    assert_eq!(server.scheduler().full_job_record_count(), 0);
     assert!(updates.iter().skip(5).all(|update| {
         matches!(
             update,

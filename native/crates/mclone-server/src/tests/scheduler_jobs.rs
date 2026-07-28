@@ -184,12 +184,15 @@ fn adjacent_interest_reuses_retained_dependency_chunks() {
     );
     assert!(snapshot_update_for(&first_updates, ChunkPos::new(0, 0)).is_some());
     assert_eq!(
-        server.scheduler().job(ChunkJobId(1)).map(|job| (
-            job.seeded_dependency_chunks,
-            job.dependency_cache_hits,
-            job.dependency_cache_misses,
-            job.retained_dependency_chunks
-        )),
+        server
+            .scheduler()
+            .completed_job_summary(ChunkJobId(1))
+            .map(|summary| (
+                summary.seeded_dependency_chunks,
+                summary.dependency_cache_hits,
+                summary.dependency_cache_misses,
+                summary.retained_dependency_chunks
+            )),
         Some((0, 0, 7 * 7, 7 * 7))
     );
 
@@ -203,12 +206,15 @@ fn adjacent_interest_reuses_retained_dependency_chunks() {
     );
     assert!(snapshot_update_for(&moved_updates, ChunkPos::new(1, 0)).is_some());
     assert_eq!(
-        server.scheduler().job(ChunkJobId(2)).map(|job| (
-            job.seeded_dependency_chunks,
-            job.dependency_cache_hits,
-            job.dependency_cache_misses,
-            job.retained_dependency_chunks
-        )),
+        server
+            .scheduler()
+            .completed_job_summary(ChunkJobId(2))
+            .map(|summary| (
+                summary.seeded_dependency_chunks,
+                summary.dependency_cache_hits,
+                summary.dependency_cache_misses,
+                summary.retained_dependency_chunks
+            )),
         Some((4 * 7, 4 * 7, 7, 5 * 7))
     );
 }

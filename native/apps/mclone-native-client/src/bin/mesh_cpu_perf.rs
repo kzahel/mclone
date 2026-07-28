@@ -865,6 +865,14 @@ fn print_metrics_json(indent: &str, metrics: ChunkSchedulerMetrics, trailing_com
     println!("{indent}  \"pending_jobs\": {},", metrics.pending_jobs);
     println!("{indent}  \"completed_jobs\": {},", metrics.completed_jobs);
     println!(
+        "{indent}  \"completed_job_records_retained\": {},",
+        metrics.completed_job_records_retained
+    );
+    println!(
+        "{indent}  \"recent_job_summaries_retained\": {},",
+        metrics.recent_job_summaries_retained
+    );
+    println!(
         "{indent}  \"completed_light_statuses\": {},",
         metrics.completed_light_statuses
     );

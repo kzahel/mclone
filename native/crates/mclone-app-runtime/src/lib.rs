@@ -1120,6 +1120,8 @@ pub struct RuntimePollDiagnostics {
     pub mixed_updates: usize,
     pub scheduler_pending_jobs: usize,
     pub scheduler_completed_jobs: usize,
+    pub scheduler_completed_job_records_retained: usize,
+    pub scheduler_recent_job_summaries_retained: usize,
     pub scheduler_dirty_chunks: usize,
     pub scheduler_loaded_snapshot_chunks: usize,
     pub scheduler_client_visible_chunks: usize,
@@ -3068,6 +3070,12 @@ impl SingleViewRuntime {
         diagnostics.entity_tick_ms = micros_to_ms(tick.timing.entity_tick_us);
         diagnostics.scheduler_pending_jobs = runner_diagnostics.scheduler_metrics.pending_jobs;
         diagnostics.scheduler_completed_jobs = runner_diagnostics.scheduler_metrics.completed_jobs;
+        diagnostics.scheduler_completed_job_records_retained = runner_diagnostics
+            .scheduler_metrics
+            .completed_job_records_retained;
+        diagnostics.scheduler_recent_job_summaries_retained = runner_diagnostics
+            .scheduler_metrics
+            .recent_job_summaries_retained;
         diagnostics.scheduler_dirty_chunks = runner_diagnostics.scheduler_metrics.dirty_chunks;
         diagnostics.scheduler_loaded_snapshot_chunks =
             runner_diagnostics.scheduler_metrics.loaded_snapshot_chunks;

@@ -607,6 +607,8 @@ struct StartupStreamingFrameReport {
     scheduler_light_demand_queued: usize,
     scheduler_light_demands_cancelled: u64,
     scheduler_light_statuses_stale: u64,
+    scheduler_completed_job_records_retained: usize,
+    scheduler_recent_job_summaries_retained: usize,
     poll_fluid_due_ticks: usize,
     poll_fluid_executed_ticks: usize,
     poll_fluid_deferred_ticks: usize,
@@ -672,6 +674,8 @@ struct FrameBudgetProbeFrameReport {
     poll_scheduler_light_demand_queued: usize,
     poll_scheduler_light_demands_cancelled: u64,
     poll_scheduler_light_statuses_stale: u64,
+    poll_scheduler_completed_job_records_retained: usize,
+    poll_scheduler_recent_job_summaries_retained: usize,
     poll_block_tick_ms: f64,
     poll_fluid_tick_ms: f64,
     poll_fluid_event_apply_ms: f64,
@@ -788,6 +792,8 @@ impl Default for FrameBudgetProbeFrameReport {
             poll_scheduler_light_demand_queued: 0,
             poll_scheduler_light_demands_cancelled: 0,
             poll_scheduler_light_statuses_stale: 0,
+            poll_scheduler_completed_job_records_retained: 0,
+            poll_scheduler_recent_job_summaries_retained: 0,
             poll_block_tick_ms: 0.0,
             poll_fluid_tick_ms: 0.0,
             poll_fluid_event_apply_ms: 0.0,
@@ -1465,6 +1471,14 @@ impl FrameBudgetProbeReport {
             println!(
                 "      \"poll_scheduler_light_statuses_stale\": {},",
                 frame.poll_scheduler_light_statuses_stale
+            );
+            println!(
+                "      \"poll_scheduler_completed_job_records_retained\": {},",
+                frame.poll_scheduler_completed_job_records_retained
+            );
+            println!(
+                "      \"poll_scheduler_recent_job_summaries_retained\": {},",
+                frame.poll_scheduler_recent_job_summaries_retained
             );
             println!(
                 "      \"poll_scheduler_pending_unload_ms\": {:.3},",
@@ -2468,6 +2482,14 @@ impl StartupStreamingPerfReport {
                 frame.scheduler_light_statuses_stale
             );
             println!(
+                "      \"scheduler_completed_job_records_retained\": {},",
+                frame.scheduler_completed_job_records_retained
+            );
+            println!(
+                "      \"scheduler_recent_job_summaries_retained\": {},",
+                frame.scheduler_recent_job_summaries_retained
+            );
+            println!(
                 "      \"server_update_queue_depth\": {},",
                 frame.server_update_queue_depth
             );
@@ -2742,6 +2764,14 @@ impl StartupStreamingPerfReport {
         println!(
             "    \"scheduler_light_statuses_stale\": {},",
             final_frame.scheduler_light_statuses_stale
+        );
+        println!(
+            "    \"scheduler_completed_job_records_retained\": {},",
+            final_frame.scheduler_completed_job_records_retained
+        );
+        println!(
+            "    \"scheduler_recent_job_summaries_retained\": {},",
+            final_frame.scheduler_recent_job_summaries_retained
         );
         print_light_status_mailbox_metrics_json(
             "    ",
@@ -4079,6 +4109,10 @@ fn fill_startup_streaming_poll_diagnostics(
     report.scheduler_light_demand_queued = diagnostics.scheduler_light_demand_queued;
     report.scheduler_light_demands_cancelled = diagnostics.scheduler_light_demands_cancelled;
     report.scheduler_light_statuses_stale = diagnostics.scheduler_light_statuses_stale;
+    report.scheduler_completed_job_records_retained =
+        diagnostics.scheduler_completed_job_records_retained;
+    report.scheduler_recent_job_summaries_retained =
+        diagnostics.scheduler_recent_job_summaries_retained;
     report.runner_frame_metrics = diagnostics.runner_frame_metrics;
     report.worldgen_job_frame_metrics = diagnostics.worldgen_job_frame_metrics;
     report.light_status_job_frame_metrics = diagnostics.light_status_job_frame_metrics;
@@ -4492,6 +4526,10 @@ fn fill_frame_budget_poll_diagnostics(
     report.poll_scheduler_light_demand_queued = diagnostics.scheduler_light_demand_queued;
     report.poll_scheduler_light_demands_cancelled = diagnostics.scheduler_light_demands_cancelled;
     report.poll_scheduler_light_statuses_stale = diagnostics.scheduler_light_statuses_stale;
+    report.poll_scheduler_completed_job_records_retained =
+        diagnostics.scheduler_completed_job_records_retained;
+    report.poll_scheduler_recent_job_summaries_retained =
+        diagnostics.scheduler_recent_job_summaries_retained;
     report.poll_block_tick_ms = diagnostics.block_tick_ms;
     report.poll_fluid_tick_ms = diagnostics.fluid_tick_ms;
     report.poll_fluid_event_apply_ms = diagnostics.fluid_event_apply_ms;

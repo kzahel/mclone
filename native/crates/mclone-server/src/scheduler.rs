@@ -115,6 +115,57 @@ pub struct ChunkStatusJob {
     pub retained_dependency_chunks: usize,
 }
 
+pub const MAX_RECENT_COMPLETED_JOB_SUMMARIES: usize = 64;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompletedChunkJobSummary {
+    pub id: ChunkJobId,
+    pub generation_descriptor: WorldGenerationDescriptor,
+    pub status: ChunkStatus,
+    pub target_chunk_count: usize,
+    pub first_target_chunk: Option<ChunkPos>,
+    pub feature_center_count: usize,
+    pub dependency_requirement_count: usize,
+    pub dependency_chunk_count: usize,
+    pub dependency_status_counts: BTreeMap<ChunkStatus, usize>,
+    pub seeded_dependency_chunks: usize,
+    pub dependency_cache_hits: usize,
+    pub dependency_cache_misses: usize,
+    pub retained_dependency_chunks: usize,
+    pub overworld_timing: Option<OverworldFeatureBatchTiming>,
+}
+
+impl CompletedChunkJobSummary {
+    fn from_job(
+        job: &ChunkStatusJob,
+        overworld_timing: Option<OverworldFeatureBatchTiming>,
+    ) -> Self {
+        let mut dependency_status_counts = BTreeMap::new();
+        for requirement in &job.dependency_requirements {
+            let count = dependency_status_counts
+                .entry(requirement.status)
+                .or_insert(0_usize);
+            *count = count.saturating_add(1);
+        }
+        Self {
+            id: job.id,
+            generation_descriptor: job.generation_descriptor,
+            status: job.status,
+            target_chunk_count: job.target_chunks.len(),
+            first_target_chunk: job.target_chunks.first().copied(),
+            feature_center_count: job.feature_centers.len(),
+            dependency_requirement_count: job.dependency_requirements.len(),
+            dependency_chunk_count: job.dependency_chunks.len(),
+            dependency_status_counts,
+            seeded_dependency_chunks: job.seeded_dependency_chunks,
+            dependency_cache_hits: job.dependency_cache_hits,
+            dependency_cache_misses: job.dependency_cache_misses,
+            retained_dependency_chunks: job.retained_dependency_chunks,
+            overworld_timing,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct ChunkSchedulerMetrics {
     pub player_promotion_desired: usize,
@@ -140,6 +191,8 @@ pub struct ChunkSchedulerMetrics {
     pub dirty_chunks: usize,
     pub pending_jobs: usize,
     pub completed_jobs: usize,
+    pub completed_job_records_retained: usize,
+    pub recent_job_summaries_retained: usize,
     pub total_seeded_dependency_chunks: usize,
     pub total_dependency_cache_hits: usize,
     pub total_dependency_cache_misses: usize,
@@ -549,6 +602,15 @@ pub struct ChunkScheduler {
     runtime_target_plan: Arc<[ChunkPos]>,
     jobs: BTreeMap<ChunkJobId, ChunkStatusJob>,
     job_timings: BTreeMap<ChunkJobId, OverworldFeatureBatchTiming>,
+    recent_completed_job_summaries: VecDeque<CompletedChunkJobSummary>,
+    completed_job_count: usize,
+    completed_seeded_dependency_chunks: usize,
+    completed_dependency_cache_hits: usize,
+    completed_dependency_cache_misses: usize,
+    completed_retained_dependency_chunks: usize,
+    completed_max_feature_job_target_chunks: usize,
+    completed_max_feature_job_feature_centers: usize,
+    completed_max_feature_job_dependency_chunks: usize,
     worldgen_mailbox: WorldgenMailbox,
     pending_worldgen_publications: VecDeque<PendingWorldgenPublication>,
     publication_budget: ChunkPublicationBudgetState,
@@ -826,6 +888,15 @@ impl ChunkScheduler {
             runtime_target_plan: Arc::from([]),
             jobs: BTreeMap::new(),
             job_timings: BTreeMap::new(),
+            recent_completed_job_summaries: VecDeque::new(),
+            completed_job_count: 0,
+            completed_seeded_dependency_chunks: 0,
+            completed_dependency_cache_hits: 0,
+            completed_dependency_cache_misses: 0,
+            completed_retained_dependency_chunks: 0,
+            completed_max_feature_job_target_chunks: 0,
+            completed_max_feature_job_feature_centers: 0,
+            completed_max_feature_job_dependency_chunks: 0,
             worldgen_mailbox: WorldgenMailbox::new(),
             pending_worldgen_publications: VecDeque::new(),
             publication_budget: ChunkPublicationBudgetState::default(),
@@ -895,6 +966,15 @@ impl ChunkScheduler {
             runtime_target_plan: Arc::from([]),
             jobs: BTreeMap::new(),
             job_timings: BTreeMap::new(),
+            recent_completed_job_summaries: VecDeque::new(),
+            completed_job_count: 0,
+            completed_seeded_dependency_chunks: 0,
+            completed_dependency_cache_hits: 0,
+            completed_dependency_cache_misses: 0,
+            completed_retained_dependency_chunks: 0,
+            completed_max_feature_job_target_chunks: 0,
+            completed_max_feature_job_feature_centers: 0,
+            completed_max_feature_job_dependency_chunks: 0,
             worldgen_mailbox: WorldgenMailbox::with_wasm_job_worker(config.clone()),
             pending_worldgen_publications: VecDeque::new(),
             publication_budget: ChunkPublicationBudgetState::default(),
@@ -1128,6 +1208,7 @@ impl ChunkScheduler {
         if self.reconciled_ticket_generation != Some(self.distance_manager.ticket_generation()) {
             events.extend(self.reconcile_ticketed_holders()?);
         }
+        self.prune_completed_job_history();
         publication.pending_worldgen_publication_jobs = self.pending_worldgen_publications.len();
         publication.pending_worldgen_publication_chunks =
             self.pending_worldgen_publication_target_count();
@@ -1661,12 +1742,40 @@ impl ChunkScheduler {
         self.jobs.values()
     }
 
+    pub fn completed_job_summary(&self, id: ChunkJobId) -> Option<&CompletedChunkJobSummary> {
+        self.recent_completed_job_summaries
+            .iter()
+            .find(|summary| summary.id == id)
+    }
+
+    pub fn completed_job_summaries(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = &CompletedChunkJobSummary> + ExactSizeIterator {
+        self.recent_completed_job_summaries.iter()
+    }
+
     pub fn job_timing(&self, id: ChunkJobId) -> Option<OverworldFeatureBatchTiming> {
-        self.job_timings.get(&id).copied()
+        self.job_timings.get(&id).copied().or_else(|| {
+            self.completed_job_summary(id)
+                .and_then(|summary| summary.overworld_timing)
+        })
     }
 
     pub fn job_count(&self) -> usize {
         self.jobs.len()
+            + self
+                .recent_completed_job_summaries
+                .iter()
+                .filter(|summary| !self.jobs.contains_key(&summary.id))
+                .count()
+    }
+
+    pub fn full_job_record_count(&self) -> usize {
+        self.jobs.len()
+    }
+
+    pub fn recent_completed_job_summary_count(&self) -> usize {
+        self.recent_completed_job_summaries.len()
     }
 
     pub fn pending_job_count(&self) -> usize {
@@ -1738,7 +1847,33 @@ impl ChunkScheduler {
     }
 
     pub fn metrics(&self) -> ChunkSchedulerMetrics {
-        let latest_feature_job = self.jobs.values().max_by_key(|job| job.id);
+        let latest_live_job = self.jobs.values().max_by_key(|job| job.id);
+        let latest_summary = self
+            .recent_completed_job_summaries
+            .iter()
+            .max_by_key(|summary| summary.id);
+        let latest_feature_job_shape =
+            if latest_live_job.map(|job| job.id) >= latest_summary.map(|summary| summary.id) {
+                latest_live_job.map(|job| {
+                    (
+                        job.id,
+                        job.target_chunks.len(),
+                        job.feature_centers.len(),
+                        job.dependency_chunks.len(),
+                        job.target_chunks.first().copied(),
+                    )
+                })
+            } else {
+                latest_summary.map(|summary| {
+                    (
+                        summary.id,
+                        summary.target_chunk_count,
+                        summary.feature_center_count,
+                        summary.dependency_chunk_count,
+                        summary.first_target_chunk,
+                    )
+                })
+            };
         let player_promotions = self.distance_manager.player_promotion_diagnostics();
         ChunkSchedulerMetrics {
             player_promotion_desired: player_promotions.desired,
@@ -1765,58 +1900,68 @@ impl ChunkScheduler {
             ready_dependency_chunks: self.ready_dependency_chunk_count(),
             dirty_chunks: self.dirty_chunk_count(),
             pending_jobs: self.pending_job_count(),
-            completed_jobs: self
+            completed_jobs: self.completed_job_count,
+            completed_job_records_retained: self
                 .jobs
                 .values()
                 .filter(|job| job.state == ChunkJobState::Complete)
                 .count(),
+            recent_job_summaries_retained: self.recent_completed_job_summaries.len(),
             total_seeded_dependency_chunks: self
                 .jobs
                 .values()
+                .filter(|job| job.state != ChunkJobState::Complete)
                 .map(|job| job.seeded_dependency_chunks)
-                .sum(),
+                .sum::<usize>()
+                .saturating_add(self.completed_seeded_dependency_chunks),
             total_dependency_cache_hits: self
                 .jobs
                 .values()
+                .filter(|job| job.state != ChunkJobState::Complete)
                 .map(|job| job.dependency_cache_hits)
-                .sum(),
+                .sum::<usize>()
+                .saturating_add(self.completed_dependency_cache_hits),
             total_dependency_cache_misses: self
                 .jobs
                 .values()
+                .filter(|job| job.state != ChunkJobState::Complete)
                 .map(|job| job.dependency_cache_misses)
-                .sum(),
+                .sum::<usize>()
+                .saturating_add(self.completed_dependency_cache_misses),
             total_retained_dependency_chunks: self
                 .jobs
                 .values()
+                .filter(|job| job.state != ChunkJobState::Complete)
                 .map(|job| job.retained_dependency_chunks)
-                .sum(),
+                .sum::<usize>()
+                .saturating_add(self.completed_retained_dependency_chunks),
             max_feature_job_target_chunks: self
                 .jobs
                 .values()
                 .map(|job| job.target_chunks.len())
                 .max()
-                .unwrap_or(0),
+                .unwrap_or(0)
+                .max(self.completed_max_feature_job_target_chunks),
             max_feature_job_feature_centers: self
                 .jobs
                 .values()
                 .map(|job| job.feature_centers.len())
                 .max()
-                .unwrap_or(0),
+                .unwrap_or(0)
+                .max(self.completed_max_feature_job_feature_centers),
             max_feature_job_dependency_chunks: self
                 .jobs
                 .values()
                 .map(|job| job.dependency_chunks.len())
                 .max()
-                .unwrap_or(0),
-            latest_feature_job_id: latest_feature_job.map(|job| job.id),
-            latest_feature_job_target_chunks: latest_feature_job
-                .map_or(0, |job| job.target_chunks.len()),
-            latest_feature_job_feature_centers: latest_feature_job
-                .map_or(0, |job| job.feature_centers.len()),
-            latest_feature_job_dependency_chunks: latest_feature_job
-                .map_or(0, |job| job.dependency_chunks.len()),
-            latest_feature_job_first_target: latest_feature_job
-                .and_then(|job| job.target_chunks.first().copied()),
+                .unwrap_or(0)
+                .max(self.completed_max_feature_job_dependency_chunks),
+            latest_feature_job_id: latest_feature_job_shape.map(|shape| shape.0),
+            latest_feature_job_target_chunks: latest_feature_job_shape.map_or(0, |shape| shape.1),
+            latest_feature_job_feature_centers: latest_feature_job_shape.map_or(0, |shape| shape.2),
+            latest_feature_job_dependency_chunks: latest_feature_job_shape
+                .map_or(0, |shape| shape.3),
+            latest_feature_job_first_target: latest_feature_job_shape.and_then(|shape| shape.4),
             light_ticket_count: self.active_light_tickets.len(),
             light_tickets_added: self.light_tickets_added,
             light_tickets_released: self.light_tickets_released,
@@ -3556,6 +3701,11 @@ impl ChunkScheduler {
         if !self.publication_budget.enabled() {
             self.mark_job_complete(completed.job_id, completed.diagnostics);
         }
+        for pos in &job.target_chunks {
+            if let Some(holder) = self.holders.get_mut(pos) {
+                holder.clear_status_job(ChunkStatus::Features, completed.job_id);
+            }
+        }
         diagnostics.feature_jobs_completed = diagnostics.feature_jobs_completed.saturating_add(1);
         if !self.publication_budget.enabled() {
             events.extend(self.enqueue_next_pending_feature_job());
@@ -4114,6 +4264,9 @@ impl ChunkScheduler {
             .jobs
             .get_mut(&id)
             .expect("job must exist before state transition");
+        if job.state == ChunkJobState::Complete {
+            return;
+        }
         if let Some(diagnostics) = diagnostics {
             job.dependency_cache_hits = diagnostics.cache_report.cache_hits;
             job.dependency_cache_misses = diagnostics.cache_report.generated_dependency_chunks;
@@ -4123,6 +4276,70 @@ impl ChunkScheduler {
             }
         }
         job.state = ChunkJobState::Complete;
+        self.completed_job_count = self.completed_job_count.saturating_add(1);
+        self.completed_seeded_dependency_chunks = self
+            .completed_seeded_dependency_chunks
+            .saturating_add(job.seeded_dependency_chunks);
+        self.completed_dependency_cache_hits = self
+            .completed_dependency_cache_hits
+            .saturating_add(job.dependency_cache_hits);
+        self.completed_dependency_cache_misses = self
+            .completed_dependency_cache_misses
+            .saturating_add(job.dependency_cache_misses);
+        self.completed_retained_dependency_chunks = self
+            .completed_retained_dependency_chunks
+            .saturating_add(job.retained_dependency_chunks);
+        self.completed_max_feature_job_target_chunks = self
+            .completed_max_feature_job_target_chunks
+            .max(job.target_chunks.len());
+        self.completed_max_feature_job_feature_centers = self
+            .completed_max_feature_job_feature_centers
+            .max(job.feature_centers.len());
+        self.completed_max_feature_job_dependency_chunks = self
+            .completed_max_feature_job_dependency_chunks
+            .max(job.dependency_chunks.len());
+        let summary = CompletedChunkJobSummary::from_job(job, self.job_timings.get(&id).copied());
+        self.recent_completed_job_summaries.push_back(summary);
+        while self.recent_completed_job_summaries.len() > MAX_RECENT_COMPLETED_JOB_SUMMARIES {
+            self.recent_completed_job_summaries.pop_front();
+        }
+    }
+
+    fn prune_completed_job_history(&mut self) {
+        let referenced_by_publication = self
+            .pending_worldgen_publications
+            .iter()
+            .map(|publication| publication.completed.job_id)
+            .collect::<BTreeSet<_>>();
+        let referenced_by_light_demand = self
+            .pending_light_demands
+            .values()
+            .filter_map(|demand| demand.source_job)
+            .collect::<BTreeSet<_>>();
+        let referenced_by_holder = self
+            .holders
+            .values()
+            .flat_map(|holder| {
+                [ChunkStatus::Features]
+                    .into_iter()
+                    .filter_map(|status| holder.status_slot(status).and_then(|slot| slot.job_id))
+            })
+            .collect::<BTreeSet<_>>();
+        let removable = self
+            .jobs
+            .values()
+            .filter(|job| {
+                job.state == ChunkJobState::Complete
+                    && !referenced_by_publication.contains(&job.id)
+                    && !referenced_by_light_demand.contains(&job.id)
+                    && !referenced_by_holder.contains(&job.id)
+            })
+            .map(|job| job.id)
+            .collect::<Vec<_>>();
+        for id in removable {
+            self.jobs.remove(&id);
+            self.job_timings.remove(&id);
+        }
     }
 
     fn runtime_chunk_target_status(&self) -> ChunkStatus {
