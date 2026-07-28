@@ -2,9 +2,9 @@
 
 Topic: `chunk-lighting-admission-and-backpressure`
 
-Status: accepted P0 direction 2026-07-28; Tactical
-[`279`](../tactical/279-chunk-lighting-admission-and-backpressure.md) planned,
-implementation not started.
+Status: implemented and physically memory-accepted 2026-07-28. Tactical
+[`279`](../tactical/279-chunk-lighting-admission-and-backpressure.md) records
+the execution and the remaining pre-existing Quest orbit frame-tail exception.
 
 ## Scope
 
@@ -29,10 +29,120 @@ light-status worker. The solution must apply to integrated native desktop,
 flat Android, Android XR, desktop XR, dedicated-server, test/headless, and
 browser authority paths through one host-neutral contract.
 
-## Current Finding
+## Implemented Contract
+
+The shared exact-world pipeline now has the accepted vanilla-shaped lifecycle
+plus explicit Mclone memory ceilings:
+
+- cold Player promotion keeps the complete desired set as compact keyed intent
+  and admits at most four active positions;
+- movement reprioritizes queued promotion and Light demand from current ticket
+  distance, while departed demand cancels before expensive materialization;
+- every Light request has a generation/revision token and temporary Light
+  ticket, and only the exact current token may publish;
+- overlapping Light targets share one immutable raw-block input per unique
+  source chunk during both batch construction and worker materialization;
+- the Light mailbox admits at most 18 statuses and 64 MiB across request,
+  active, and undrained completion ownership, with cancellation and unload
+  control observed ahead of later compute;
+- completed full scheduler jobs are pruned while cumulative counters and a
+  fixed 64-entry recent summary ring remain;
+- ticket-distance updates are incremental, preserving stationary desktop
+  throughput while centers move; and
+- native client publication staging has its own 4,096-item ceiling and drains
+  up to that same budget per poll.
+
+That last item was an adjacent owner discovered during physical acceptance.
+After the scheduler and Light queues were bounded, chunk-view churn could still
+retain millions of already-produced unload payloads because the client admitted
+only 16 records per poll. The queue was therefore distance-proportional even
+though the authority pipeline was bounded. The fixed client now either stages
+within 4,096 items or applies the remainder inline, so publication/destruction
+ownership cannot become a second low-memory-killer path.
+
+All limits are shared engine policy. They are not graphics settings and are not
+selected by XR, desktop, Android, or browser adapters.
+
+## Final Acceptance Evidence
+
+The final physical APK was built from `10ee9156`, SHA-256
+`1f68981866a1dda9b21d8a86c06630d0b939417e46d8ec42abbb40de203f7f48`,
+and installed on Quest 3 `2G0YC1ZF93041Z`.
+
+### Twenty-minute RD7 8x flight
+
+The exact reproduction lane completed normally:
+
+| Observation | Final result |
+|---|---:|
+| duration / travelled distance | `1,200.009s` / `41,277.132` blocks |
+| feature / Light publication | `31,752` / `31,746` (`26.460/s` / `26.455/s`) |
+| skipped frames | `0` |
+| app-work p95 / p99 / maximum | `8.021 / 8.868 / 19.947ms` |
+| app-work over display period | `5` frames, reported as `0.0%` |
+| Player promotions active | maximum `4` |
+| promotions cancelled before admission | `18,058` |
+| Light mailbox admitted | maximum `18` statuses |
+| Light ownership high-water | `10,690,118` bytes |
+| full completed jobs retained | maximum `3`, final `0` |
+| recent completed summaries | maximum/final `64` |
+| retained Light chunks | maximum `693`, final `297` |
+| client deferred-drop backlog | maximum `549`, drained to `0` after stop |
+
+Independent `/proc` sampling started near 510 MiB RSS, cycled through an
+approximately 700-900 MiB working band, briefly reached 1,299,424 KiB, then
+reclaimed to about 936 MiB at the next sample and ended near 1.04 GiB.
+`dumpsys meminfo` additionally reported the approximately 459 MiB fixed GL
+allocation; late total RSS was about 1.51 GiB with negligible swap. System
+available memory remained about 3.1-3.4 GiB late in the run, thermal status
+remained zero at roughly 60-63°C, and Android did not invoke the low-memory
+killer. This is an active-working-set plateau rather than the old
+distance-proportional climb past 6.6 GB.
+
+The same process then stopped at chunk `(3,-2587)`. The complete RD7 view,
+225 chunks / 3,600 sections, settled in `17.772s`. A following 60-second
+stationary sample published no additional Features or Light statuses and ended
+with zero server jobs, publications, Light demand, mailbox ownership,
+persistence requests, promotion work, or deferred client payloads.
+
+The pulled world passes SQLite `PRAGMA integrity_check` with schema version 2:
+
+- `31,960` chunk records and 42 entity-chunk records;
+- overworld chunk bounds `x=-6..13`, `z=-2592..-4`;
+- `1,573,417,146` bytes of chunk-record payload; and
+- a roughly 1.60 GB main database after convergence.
+
+This proves that durable storage remained valid across the full generated
+corridor and that exact terrain caught up after sustained overload.
+
+### Shared and short-lane evidence
+
+A 200-center non-XR authority movement lane completed in `20.774s`; process RSS
+rose from about 44.9 MiB to 62.9 MiB and plateaued, loaded snapshots settled at
+85, full completed jobs ended at zero, and recent summaries remained fixed at
+64. Native desktop, WebAssembly/browser, flat Android, and Android XR build
+boundaries all pass.
+
+The exact final RD5 churn row passes every inherited Quest limit: zero skipped,
+16 dropped, `12.594ms` app-work p95, `7.528ms` average headroom, `1.1%`
+over-period, and `22.744ms` maximum. The final RD7 flight row also passes with
+zero skipped, 15 dropped, `8.499ms` p95, `0.1%` over-period, and `16.003ms`
+maximum.
+
+Settled orbit still exposes the renderer baseline's known tail variability.
+The adjacent parent already missed the absolute RD5 p95 threshold
+(`13.154ms` versus `13.0ms`) and substantially missed the RD7 orbit p95 and
+over-period limits (`14.206ms`, `6.3%`). The final candidate does not regress
+that owner. The final RD5 repeat misses only p95 (`13.201ms` versus `13.0ms`);
+the final RD7 row contains one isolated over-2x app-work frame. Those absolute
+presentation failures are not waived; they remain tracked separately from
+this scheduler's passing memory, useful-throughput, churn, flight, and
+convergence acceptance.
+
+## Incident Finding Before The Fix
 
 Initial lighting is the measured bottleneck during sustained 8x travel, and
-the current overload behavior retains obsolete work without a bound.
+the pre-fix overload behavior retained obsolete work without a bound.
 
 World generation continues publishing `ChunkStatus::Features` snapshots and
 queuing cache persistence. A generated chunk becomes client-ready only after
@@ -163,10 +273,10 @@ about `20` statuses/second. Full RD7 exact convergence is therefore impossible
 at this stress speed without more light throughput. A safe scheduler must
 degrade gracefully instead of retaining the difference forever.
 
-## Current Mclone Ownership Defect
+## Pre-Fix Mclone Ownership Defect
 
-The active defect is a queueing and ownership problem rather than a lost-pointer
-allocator leak.
+The active incident was a queueing and ownership problem rather than a
+lost-pointer allocator leak.
 
 ### Eager, duplicated light inputs
 

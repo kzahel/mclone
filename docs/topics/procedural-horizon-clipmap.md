@@ -173,12 +173,20 @@ lane, but it did not prove every shared exact-world owner under a longer RD7
 pressure test. A later planned 20-minute RD7 flight was killed after about
 12 minutes and 25 kiloblocks. The procedural horizon remained fixed-residency;
 a two-minute diagnostic isolated an unbounded copied-input initial-light
-backlog. The current incident and vanilla 1.17.1 comparison live in
+backlog. The incident and vanilla 1.17.1 comparison live in
 [`chunk-lighting-admission-and-backpressure.md`](chunk-lighting-admission-and-backpressure.md),
 and Tactical
-[`279`](../tactical/279-chunk-lighting-admission-and-backpressure.md) owns the
-shared scheduler/light fix. This does not invalidate Tactical 277's horizon
-render measurements or Tactical 278's optional multiview experiment.
+[`279`](../tactical/279-chunk-lighting-admission-and-backpressure.md) now
+closes the shared scheduler/light failure and an adjacent unbounded client
+publication owner found during device acceptance. The final Quest 3 RD7 8x
+flight completed 20 minutes and 41,277 blocks normally, bounded Light
+ownership below 10.7 MiB, held the transient client payload backlog below 549
+items, and reclaimed memory throughout the run. The complete 225-chunk exact
+view converged in `17.772s` after movement stopped, and the pulled 31,960-chunk
+SQLite world passed integrity checking. This confirms that the procedural
+horizon was the feature that exposed the shared exact-world lifecycle defects,
+not their owner, and does not invalidate Tactical 277's horizon render
+measurements or Tactical 278's optional multiview experiment.
 
 The same tactical found a concrete horizon render defect: the per-eye path
 submitted all 160 resident tiles, including tiles covered by finer levels and

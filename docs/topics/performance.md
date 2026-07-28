@@ -70,11 +70,27 @@ Those RD5 renderer and bounded-persistence results remain valid, but a later
 RD7 flight planned for 20 minutes reproduced low-memory termination after
 about 12 minutes and 25 kiloblocks. A two-minute diagnostic measured Features
 at `42.916/s`, Light at `20.266/s`, and 1,026 pending unbounded copied-input
-Light statuses while the server-update queue stayed empty. The current P0 is
-therefore Tactical
-[`279`](../tactical/279-chunk-lighting-admission-and-backpressure.md), which
-ports vanilla-shaped upstream promotion admission and Light lifecycle and adds
-hard Quest-safe ownership bounds. The full evidence is in
+Light statuses while the server-update queue stayed empty.
+
+Tactical
+[`279`](../tactical/279-chunk-lighting-admission-and-backpressure.md) closes
+that P0 with four-at-a-time Player promotion, keyed/cancellable Light demand,
+request tokens and Light tickets, shared raw inputs, an 18-status / 64 MiB
+mailbox lifetime bound, fixed scheduler history, and a 4,096-item bound on the
+adjacent native-client deferred payload owner found during hardware
+acceptance. The final physical Quest 3 RD7 flight completed 20 minutes and
+41,277 blocks normally, kept admitted Light ownership below 10.7 MiB, published
+Features and Light at matching `26.46/s`, and showed a reclaiming
+working-set plateau rather than distance-proportional growth. The complete RD7
+view converged in `17.772s` after stopping, and the 1.60 GB pulled database
+passed integrity checking with 31,960 chunk records.
+
+The exact final RD5 churn and RD7 flight rows pass their absolute frame gates.
+Settled orbit still has the pre-existing presentation tail: the adjacent
+parent already missed RD5 p95 and RD7 p95/over-period limits, while the final
+candidate retains near-threshold RD5 work and one isolated over-2x RD7 frame.
+That gate is not waived, but it is no longer a reason to expand scheduler or
+Light ownership. The full execution and exception disposition are in
 [`chunk-lighting-admission-and-backpressure.md`](chunk-lighting-admission-and-backpressure.md).
 
 The next bounded renderer experiment remains Tactical

@@ -1,6 +1,8 @@
 # Tactical 279: Chunk Lighting Admission And Backpressure
 
-Status: planned 2026-07-28; P0 ready.
+Status: implementation complete and physical memory/convergence accepted
+2026-07-28. The inherited Quest settled-orbit presentation-tail gate remains
+open outside the scheduling owner and is not waived here.
 
 Topics: `chunk-lighting-admission-and-backpressure`, `lighting`, `performance`
 
@@ -40,6 +42,171 @@ working set, not the total distance travelled. Overload may delay or skip outer
 exact chunks, but it must prioritize the current center, recover after movement
 stops, and never retain obsolete copied neighborhoods until the platform kills
 the process.
+
+## Execution Record
+
+### Landed series
+
+The implementation was committed in reviewable slices under
+`Topic: chunk-lighting-admission-and-backpressure`:
+
+| Commit | Result |
+|---|---|
+| `ab7c8b21` | bound cold Player promotion to four and add Light request identity/tickets |
+| `12a70f66` | share overlapping raw Light batch inputs |
+| `f5ce7ac3` | add compact keyed Light demand, cancellation, and total mailbox ownership bounds |
+| `ef8b5acb` | prune full completed jobs and retain a 64-entry summary ring |
+| `cf07c84c` | preserve shared input ownership during worker materialization |
+| `5f20601b` | update ticket distances incrementally and recover stationary throughput |
+| `a56fa74d`, `1b69b23a`, `10ee9156` | expose and require complete Quest ownership evidence without log truncation |
+| `7c1c08eb` | bound adjacent native-client deferred chunk payload ownership |
+
+The mailbox defaults are the planned 18-status and 64 MiB limits. Capacity is
+charged from admission through terminal drain. Player promotion defaults to
+four active cold positions. Completed full jobs are removed once no live owner
+references them; the diagnostic ring is fixed at 64.
+
+Physical churn acceptance found one additional end-to-end owner after the
+authority queues were bounded. The native client accepted only 16 deferred
+unload records per poll but could receive far larger snapshots, retaining
+millions of payloads and causing another 6.78 GB low-memory kill. Commit
+`7c1c08eb` caps staging at 4,096 items, raises the normal handoff budget to the
+same value, and applies overflow inline. Focused 64-snapshot burst tests prove
+the cap and drain behavior.
+
+### Correctness and platform closure
+
+The final source passes:
+
+- all 583 `mclone-server` tests;
+- all 284 `mclone-app-runtime` tests;
+- all 139 `mclone-client` tests;
+- all 163 `mclone-scene` tests;
+- native-client all-target and full workspace checks;
+- the `wasm32-unknown-unknown` web-client check, browser build, and TypeScript
+  typecheck;
+- flat Android release APK;
+- Android XR release APK; and
+- focused promotion, demand, token, ticket, shared-input, mailbox-capacity,
+  cancellation/unload, history-pruning, and client-staging stress tests.
+
+No packed-light, mesh, shader, or rendered-pixel behavior changed, so this
+slice did not require a new screenshot.
+
+### Desktop throughput gates
+
+The adjacent parent source was `01a221b8`; the final server-performance source
+was `5f20601b`. Later commits only add diagnostics or bound downstream client
+staging.
+
+| Lane | Parent | Candidate | Disposition |
+|---|---:|---:|---|
+| RD10 scheduler first-view-ready | `8152.284ms` | `7511.308ms` | 7.9% faster |
+| RD10 scheduler settled | `9078.914ms` | `8462.837ms` | 6.8% faster |
+| RD10 view-ready throughput | `64.890/s` | `70.427/s` | 8.5% faster |
+| RD10 first full view | `7688.148ms` | `8303.843 / 8325.184ms` | 8.0-8.3% slower; within 10% |
+| RD10 render quiescent | `50424.710ms` | `47759.096 / 47948.029ms` | faster |
+| RD10 frame-work p95 | `6.493ms` | `6.843 / 6.650ms` | +5.4% / +2.4%; within 10% |
+| movement over-budget frames | `1` | `1` | unchanged |
+
+The candidate RD15 promotion row reached all 1,089 chunks, first full view in
+`17.348s`, and render quiescence in `52.926s`; all authority queues drained,
+full completed-job retention ended at zero, and the recent ring stopped at 64.
+A real 1280x900 Wayland/Vulkan/FIFO native window presented successfully.
+
+A non-XR 200-center moving-authority lane completed in `20.774s`. RSS rose
+from about 44.9 MiB to 62.9 MiB and plateaued, loaded snapshots settled at 85,
+completed full jobs ended at zero, and recent summaries stayed fixed at 64.
+This is the required proof that the correction is shared rather than XR-only.
+
+### Quest 3 acceptance
+
+The final Android XR APK contains code through `10ee9156`:
+
+```text
+SHA-256
+1f68981866a1dda9b21d8a86c06630d0b939417e46d8ec42abbb40de203f7f48
+```
+
+It was installed and tested on Quest 3 `2G0YC1ZF93041Z`, API 34,
+`arm64-v8a`.
+
+The parent RD5 churn lane was killed at a 6,719,976 KiB footprint. An
+intermediate candidate exposed the adjacent deferred-client owner and was
+killed at 6,779,612 KiB. With both owners fixed, the exact final RD5 churn
+rerun completed and passed every numeric guardrail:
+
+| Metric | Final RD5 churn |
+|---|---:|
+| skipped / dropped | `0 / 16` |
+| app-work p95 / p99 / max | `12.594 / 14.229 / 22.744ms` |
+| average headroom | `7.528ms` |
+| over-period | `1.1%` |
+| promotion active / cancelled before admission | `4 / 96,148` |
+| Light admitted / ownership high-water | `18 / 11,106,893 bytes` |
+| full completed jobs retained | maximum `1`, final `0` |
+| deferred client backlog / handoff | `2,043 / 4,096` |
+
+The exact final RD7 flight row also passes: zero skipped, 15 dropped,
+`8.499ms` app-work p95, `13.009ms` p99, `16.003ms` maximum, and `0.1%`
+over-period.
+
+The full fresh persisted-world reproduction then flew for `1,200.009s` at
+34.4 blocks/second, travelled `41,277.132` blocks, and exited normally:
+
+| Metric | Twenty-minute result |
+|---|---:|
+| Features / Light | `31,752 / 31,746` |
+| Features / Light per second | `26.460 / 26.455` |
+| skipped frames | `0` |
+| app-work p95 / p99 / maximum | `8.021 / 8.868 / 19.947ms` |
+| app-work over-period | `5` frames, `0.0%` |
+| active promotions | maximum `4` |
+| promotions cancelled before admission | `18,058` |
+| Light mailbox | maximum `18` statuses / `10,690,118` bytes |
+| full completed jobs | maximum `3`, final `0` |
+| recent summaries | maximum/final `64` |
+| retained Light chunks | maximum `693`, final `297` |
+| deferred client backlog | maximum `549`, final `0` after stop |
+
+Independent process RSS cycled rather than growing with distance: it started
+near 510 MiB, spent most samples around 700-900 MiB, briefly reached
+1,299,424 KiB, reclaimed to about 936 MiB at the next sample, and ended near
+1.04 GiB. Late `dumpsys meminfo` total RSS was about 1.51 GiB including an
+approximately 459 MiB fixed GL allocation. Available system memory remained
+about 3.1-3.4 GiB, thermal status stayed zero, and swap remained negligible.
+
+After the flight, a stopped-view run at chunk `(3,-2587)` reached all 225 RD7
+chunks / 3,600 sections in `17.772s`. A subsequent 60-second sample had zero
+Features or Light publications and ended with every promotion, scheduler,
+mailbox, persistence, and client-deferred queue at zero.
+
+The pulled database passes `PRAGMA integrity_check`, schema version 2, with
+31,960 chunk records across `x=-6..13`, `z=-2592..-4`, 42 entity-chunk
+records, and 1,573,417,146 bytes of chunk payload. This proves the full flight
+corridor persisted cleanly.
+
+### Remaining presentation-tail disposition
+
+The scheduler and memory acceptance is complete, but the inherited settled
+orbit absolute frame gate is not silently waived:
+
+- the adjacent parent RD5 orbit already missed its p95 limit at `13.154ms`
+  versus `13.0ms`;
+- the parent RD7 orbit measured `14.206ms` p95 and `6.3%` over-period;
+- the final cooled RD5 repeat passed every other limit but measured
+  `13.201ms` p95 versus `13.0ms`, with four dropped frames, `1.4%`
+  over-period, and a `20.991ms` maximum; and
+- the final cooled RD7 repeat passed p95, dropped, and over-period limits at
+  `13.131ms`, three frames, and `1.6%`, but one `33.763ms` app-work outlier
+  exceeded twice the display period.
+
+The passing churn, ordinary RD7 flight, and 20-minute 8x flight rows show no
+scheduler-attributable frame regression. The remaining settled-orbit tail is a
+pre-existing presentation/renderer release blocker and belongs with the Quest
+renderer baseline and Tactical
+[`278`](278-quest-procedural-horizon-multiview.md), not with another expansion
+of Light ownership.
 
 ## Reference Source
 
@@ -650,9 +817,14 @@ and `/tmp` for logs, summaries, monitors, database pulls, and screenshots.
 Record the exact APK checksum and commit. Do not delete retained forensic worlds
 until their size/integrity evidence is captured.
 
-## Acceptance
+## Acceptance Disposition
 
-The tactical is complete only when:
+All scheduler, ownership, platform, throughput, long-soak, integrity, and
+convergence criteria below pass. The settled-orbit portion of the inherited
+Quest presentation gate remains explicitly open as recorded above; closing
+this scheduling tactical does not waive that separate release blocker.
+
+The completed checklist is:
 
 - vanilla-shaped four-at-a-time Player promotion admission is live;
 - unadmitted stale travel positions create no downstream work;
@@ -665,7 +837,9 @@ The tactical is complete only when:
 - parent/candidate desktop scheduler-loading and startup-streaming gates pass;
 - the candidate RD10 result reproduces and movement-frame does not regress;
 - RD15 and one native-window desktop promotion check pass;
-- attached-Quest RD5 orbit/churn and RD7 pressure gates pass;
+- attached-Quest RD5 churn, RD7 flight, and long-pressure gates pass, while
+  the inherited RD5/RD7 settled-orbit exception remains recorded and owned by
+  the Quest presentation/renderer follow-up;
 - the two-minute diagnostic shows bounded Light ownership and center priority;
 - the physical 20-minute RD7 Quest flight completes without low-memory kill;
 - memory plateaus independently of distance travelled;
