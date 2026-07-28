@@ -42,7 +42,9 @@ opacity, and body-part palettes, so unrelated animation phases remain fully
 instanced. Affine palette/actor packing and startup-precomputed evaluation
 channels reduce upload and CPU pose work. The clean 1,000-animated-cow lane
 improved from `9.184ms` to `1.939ms` average and from 1,000 draws to one.
-Box-part LOD, GPU pose evaluation, and a disk cache remain deferred.
+Box-part LOD, GPU pose evaluation, and a disk cache remain deferred. Ongoing
+actor performance evidence and ordering live in
+[`actor-rendering-performance.md`](actor-rendering-performance.md).
 
 The 2026-07-22 card follow-up deliberately broadens that completed policy to
 boxes plus fixed finite planes for genuinely planar details. Two-sided cards
@@ -83,7 +85,10 @@ architecture.
 
 ## Motivation
 
-The immediate performance issue is documented as HP-1 in
+Actor-specific performance evidence, memory tradeoffs, and ordered future work
+live in
+[`actor-rendering-performance.md`](actor-rendering-performance.md). The
+cross-system priority remains HP-1 in
 [`performance.md`](performance.md#hp-1-split-actor-pose-updates-from-whole-mesh-rebuilds).
 The fallback `ActorMeshCache` compares the complete actor list. When any actor
 position, orientation, light, color, walk distance, or figure pose changes, it
@@ -1245,9 +1250,11 @@ One thousand animated cows now write one `1,056,768`-byte affine palette
 texture region plus one `64,000`-byte actor instance buffer per frame. The old
 route issued 1,000 writes of each kind totaling `1,408,000` and `80,000`
 bytes. Pose evaluation is now the largest stable preparation component at
-approximately `1.15ms/1,000` cows. The next high-count experiments should
-therefore isolate GPU palette expansion and projected-size actor LOD rather
-than revisiting draw-call batching.
+approximately `1.15ms/1,000` cows. The measured experiment order and acceptance
+gates now live in
+[`actor-rendering-performance.md`](actor-rendering-performance.md); this topic
+retains the architectural requirement that GPU palette expansion and
+projected-size actor LOD remain separate from draw-call batching.
 
 The isolated lane has no terrain, server/client simulation, OpenXR runtime, or
 swapchain presentation. Its synchronous GPU wait also differs from production
@@ -1791,18 +1798,11 @@ Porcupine/Echidna/Armadillo, Koala/Wombat/Tasmanian Devil, and
 Bat/Opossum/Sloth content batches extend the canonical authoring roster to 71
 without changing the promoted runtime set.
 
-The immediate next gate is not another desktop optimization: install the
-`32fcffaf` Android XR build and repeat the physical Quest RD5 composed-orbit
-normal-actor/actor-skipped A/B that exposed the ten-actor problem. If prepared
-and legacy actor counters are needed to explain the result, add them to that
-receipt without changing admission or batching policy.
-
-If the normal-actor row still misses after cows are confirmed prepared and
-instanced, use the reproducible crowd lane to compare exact CPU pose evaluation
-with capability-gated GPU palette expansion. Box-part LOD remains an
-independent projected-size experiment. Neither should weaken ordinary exact
-CPU animation or the accepted box-animal silhouette merely to improve the
-1,000-actor stress point.
+The immediate Quest gate, sparse/dense upload experiment, GPU palette-expansion
+criteria, actor LOD performance gate, and fallback cleanup order are owned by
+[`actor-rendering-performance.md`](actor-rendering-performance.md). Update that
+topic when measurements change the order; do not rebuild the actor performance
+queue in this compiler/architecture topic.
 
 Do not add a persisted compiled format or revive exact curved tessellation.
 The actor-record and palette-texture boundaries keep later LOD and GPU crowd

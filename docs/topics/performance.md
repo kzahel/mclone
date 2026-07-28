@@ -288,44 +288,13 @@ used one draw. The remaining animated CPU cost is now approximately
 executes 528,000 vertices and 792,000 indices. GPU pose expansion and actor LOD
 are the next distinct high-count levers, not further draw-call cleanup.
 
-The current upload invalidation grain is one figure bucket: a fully unchanged
-bucket performs no writes, while any changed actor rebuilds that bucket's two
-contiguous upload regions. This minimizes queue calls for the measured
-all-animated crowd. Before optimizing a mostly stationary crowd with only a
-few changing actors, measure a sparse-update control and add bounded range
-writes only where they beat the two-write full-bucket path.
-
-The preferred bounded pickup order is now:
-
-1. Install the `32fcffaf` APK and repeat the exact physical Quest RD5 LOD-on
-   normal-actor and `--xr-skip-actors` pair. This decides whether prepared
-   admission plus instancing recover the product gate.
-2. Carry prepared/legacy actor counts, pose/write counts, and draws into the
-   Quest receipt if the remaining delta is ambiguous.
-3. If moving prepared crowds remain material, compare exact CPU pose
-   evaluation with a capability-gated GPU palette-expansion experiment at
-   100/1,000 actors; keep the CPU path for ordinary populations.
-4. Keep topology/index reuse as a bounded fallback improvement for player,
-   debug, item, and unsupported shapes. Do not make it a prerequisite for
-   prepared figures or assume it still controls the ordinary cow workload.
-5. Evaluate actor LOD independently at projected sizes that preserve the
-   accepted box-animal silhouette, then continue the procedural-horizon
-   multiview experiment independently.
-
-Acceptance evidence should include:
-
-- explicit prepared/legacy counts, pose/write/reuse counts, draw counts, legacy
-  rebuild/upload counts, and uploaded bytes;
-- animated and stationary high-count controls;
-- unchanged actor pixels and ordering, including mixed-figure bucket
-  fragmentation;
-- native flat, per-eye stereo, full-frame multiview where available, and
-  production browser WebGPU coverage;
-- release comparisons showing that the direct single-world path and idle
-  unchanged-actor frames remain allocation- and upload-free; and
-- physical Quest RD5 composed-orbit pairs with normal actors and
-  `--xr-skip-actors`, while treating the latter as attribution-only and
-  retaining the normal-actor absolute frame gate.
+[`actor-rendering-performance.md`](actor-rendering-performance.md) now owns the
+actor-specific memory model, benchmark controls, ordered future work, and
+acceptance criteria. Its current order is physical Quest remeasurement,
+measured hybrid sparse/dense bucket uploads, capability-gated GPU palette
+expansion, projected-size actor LOD, and only then bounded CPU-baked fallback
+topology reuse. Update that topic rather than adding another actor TODO list
+here; this section retains only the cross-system priority and concise evidence.
 
 Preserve Tactical 179's ownership contract: immutable atlas/figure/pipeline
 resources may be shared, but mutable actor caches remain per drawable world.

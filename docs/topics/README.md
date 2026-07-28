@@ -344,6 +344,10 @@ series implements the same concern, normally reuse the document slug in its
   and Java-shaped render/scheduling follow-ups.
   The broader frame/terrain/host accounting model lives in
   [`../frame-pipeline-accounting.md`](../frame-pipeline-accounting.md).
+- [`actor-rendering-performance.md`](actor-rendering-performance.md): durable
+  prepared/legacy actor-rendering baselines, instancing and memory tradeoffs,
+  physical Quest gate, and the ordered sparse-upload, GPU palette-expansion,
+  actor-LOD, and fallback optimization queue.
 - [`lush-grass-rendering.md`](lush-grass-rendering.md): pinned Grassier Grass
   artifact/reconstruction research, observed section/wind/interaction/color
   architecture, attribution and license constraints, and the accepted

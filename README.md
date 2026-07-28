@@ -82,6 +82,7 @@ Worldgen, rendering, and subsystem docs:
 - [`docs/entity-architecture.md`](docs/entity-architecture.md) — entity/mob runtime boundaries
 - [`docs/creatures.md`](docs/creatures.md) — overworld creature spawning architecture
 - [`docs/topics/performance.md`](docs/topics/performance.md) — high-priority known performance issues and current pickup queue
+- [`docs/topics/actor-rendering-performance.md`](docs/topics/actor-rendering-performance.md) — actor rendering baselines, memory tradeoffs, and future optimization queue
 - [`docs/performance-records.md`](docs/performance-records.md) — native benchmark baselines
 - [`docs/assets-plan.md`](docs/assets-plan.md) — local Minecraft reference-asset extraction
 - [`docs/topics/asset-pack-profiles.md`](docs/topics/asset-pack-profiles.md) — first-party asset packs, provenance, and remaining distribution boundary

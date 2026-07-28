@@ -34,6 +34,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   passthrough, survival/multiplayer authority, and same-slot renderer reuse
 - `performance` — high-priority known performance issues, measured pickup
   queue, baselines, and cross-platform performance follow-ups
+- `actor-rendering-performance` — prepared/fallback actor render baselines,
+  instancing and memory tradeoffs, Quest acceptance, sparse upload, GPU pose,
+  and actor LOD follow-ups
 - `dynamic-point-lights` — presentation-side finite-radius point lights,
   many-light admission, voxel-DDA and entity-shadow experiments, shadow
   technique comparison, and shared mono/XR validation
