@@ -162,7 +162,9 @@ impl PreparedActorSharedResources {
         let texture_layout = texture_layout(device);
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("mclone_prepared_actor_shader"),
-            source: wgpu::ShaderSource::Wgsl(include_str!("shaders/prepared_actor.wgsl").into()),
+            source: wgpu::ShaderSource::Wgsl(
+                crate::fog::inject_fog_wgsl(include_str!("shaders/prepared_actor.wgsl")).into(),
+            ),
         });
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("mclone_prepared_actor_pipeline_layout"),
@@ -179,7 +181,10 @@ impl PreparedActorSharedResources {
             let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
                 label: Some("mclone_prepared_actor_multiview_shader"),
                 source: wgpu::ShaderSource::Wgsl(
-                    include_str!("shaders/prepared_actor_multiview.wgsl").into(),
+                    crate::fog::inject_fog_wgsl(include_str!(
+                        "shaders/prepared_actor_multiview.wgsl"
+                    ))
+                    .into(),
                 ),
             });
             let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
@@ -933,18 +938,24 @@ fn view_bytes(
             0.0
         },
         render_options.sky_darken.clamp(0.0, 1.0),
-        if render_options.fog.enabled { 1.0 } else { 0.0 },
+        render_options.fog.shader_options(),
         0.0,
     ]);
     let camera = render_view.camera_position;
-    values[20..24].copy_from_slice(&[camera.x, camera.y, camera.z, 0.0]);
+    values[20..24].copy_from_slice(&[
+        camera.x,
+        camera.y,
+        camera.z,
+        render_options.fog.ground_base_y,
+    ]);
     values[24..28].copy_from_slice(&[
         render_options.fog.color[0],
         render_options.fog.color[1],
         render_options.fog.color[2],
-        1.0,
+        render_options.fog.max_opacity,
     ]);
-    values[28..32].copy_from_slice(&[render_options.fog.start, render_options.fog.end, 0.0, 0.0]);
+    let fog_distances = render_options.fog.shader_distances();
+    values[28..32].copy_from_slice(&[fog_distances[0], fog_distances[1], 0.0, 0.0]);
     let (source_anchor_scale, composition_anchor, clip_plane, clip_enabled) =
         context.map_or(([0.0, 0.0, 0.0, 1.0], [0.0; 4], [0.0; 4], 0.0), |context| {
             let (source_anchor_scale, composition_anchor) = context.placement().shader_values();
@@ -1402,17 +1413,19 @@ mod tests {
 
     #[test]
     fn prepared_actor_shaders_validate_for_direct_and_multiview() {
-        let direct = naga::front::wgsl::parse_str(include_str!("shaders/prepared_actor.wgsl"))
-            .expect("direct WGSL parses");
+        let direct_source =
+            crate::fog::inject_fog_wgsl(include_str!("shaders/prepared_actor.wgsl"));
+        let direct = naga::front::wgsl::parse_str(&direct_source).expect("direct WGSL parses");
         naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),
             naga::valid::Capabilities::empty(),
         )
         .validate(&direct)
         .expect("direct WGSL validates");
+        let multiview_source =
+            crate::fog::inject_fog_wgsl(include_str!("shaders/prepared_actor_multiview.wgsl"));
         let multiview =
-            naga::front::wgsl::parse_str(include_str!("shaders/prepared_actor_multiview.wgsl"))
-                .expect("multiview WGSL parses");
+            naga::front::wgsl::parse_str(&multiview_source).expect("multiview WGSL parses");
         naga::valid::Validator::new(
             naga::valid::ValidationFlags::all(),
             naga::valid::Capabilities::MULTIVIEW,

@@ -10,6 +10,10 @@ struct TerrainPreviewParams {
     content_stage_flags: vec4<u32>,
     clipmap_inner_bounds: vec4<i32>,
     view_projection: mat4x4<f32>,
+    fog_camera_position: vec4<f32>,
+    fog_render_options: vec4<f32>,
+    fog_color: vec4<f32>,
+    fog_distances: vec4<f32>,
 };
 
 struct TerrainPreviewSample {
@@ -25,6 +29,8 @@ struct TerrainPreviewSample {
 
 // __MCLONE_TARGET_COLOR_TRANSFER_WGSL__
 const terrain_target_color_transform: f32 = __MCLONE_TARGET_COLOR_TRANSFORM__;
+// MCLONE_FOG_FUNCTION
+
 const TERRAIN_HORIZON_NORMAL_EDGE_WEST: u32 = 0x08000000u;
 const TERRAIN_HORIZON_NORMAL_EDGE_EAST: u32 = 0x10000000u;
 const TERRAIN_HORIZON_NORMAL_EDGE_NORTH: u32 = 0x20000000u;
@@ -867,6 +873,14 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         );
         color = mix(color, coverage_color, 0.82);
     }
+    let fog_factor = mclone_fog_factor(
+        input.world_position,
+        params.fog_camera_position,
+        params.fog_render_options,
+        params.fog_color,
+        params.fog_distances,
+    );
+    color = mix(color, params.fog_color.rgb, fog_factor);
     return mclone_apply_target_color_transform_rgba(
         vec4<f32>(color, 1.0),
         terrain_target_color_transform,

@@ -120,7 +120,7 @@ pub const TERRAIN_PREVIEW_COMPUTE_WGSL_TEMPLATE: &str =
 pub const TERRAIN_PREVIEW_RENDER_WGSL: &str = include_str!("shaders/terrain_preview_render.wgsl");
 pub const TERRAIN_PREVIEW_TREE_WGSL: &str = include_str!("shaders/terrain_preview_tree.wgsl");
 
-const TERRAIN_PREVIEW_UNIFORM_BYTES: u64 = 224;
+const TERRAIN_PREVIEW_UNIFORM_BYTES: u64 = 288;
 const TERRAIN_PREVIEW_SAMPLE_BYTES: u64 =
     (TERRAIN_PREVIEW_SAMPLE_FLOATS * std::mem::size_of::<f32>()) as u64;
 const TERRAIN_PREVIEW_WORKGROUP_AXIS: u32 = 8;
@@ -182,14 +182,16 @@ pub fn terrain_preview_compute_wgsl() -> String {
 pub fn terrain_preview_render_wgsl(
     transform: mclone_render_color::RenderTargetColorTransform,
 ) -> String {
-    mclone_render_color::inject_target_color_transform_wgsl(TERRAIN_PREVIEW_RENDER_WGSL, transform)
+    let source = mclone_render::fog::inject_fog_wgsl(TERRAIN_PREVIEW_RENDER_WGSL);
+    mclone_render_color::inject_target_color_transform_wgsl(&source, transform)
         .expect("terrain preview render WGSL has one color transfer and transform marker")
 }
 
 pub fn terrain_preview_tree_wgsl(
     transform: mclone_render_color::RenderTargetColorTransform,
 ) -> String {
-    mclone_render_color::inject_target_color_transform_wgsl(TERRAIN_PREVIEW_TREE_WGSL, transform)
+    let source = mclone_render::fog::inject_fog_wgsl(TERRAIN_PREVIEW_TREE_WGSL);
+    mclone_render_color::inject_target_color_transform_wgsl(&source, transform)
         .expect("terrain preview tree WGSL has one color transfer and transform marker")
 }
 
@@ -329,6 +331,7 @@ pub struct TerrainHorizonPresentation {
     pub view: TerrainPreviewView,
     pub camera: TerrainPreviewCamera,
     pub target_y: f32,
+    pub fog: mclone_render::fog::RenderFog,
     render_view_override: Option<mclone_render::chunk::ChunkRenderView>,
 }
 
@@ -349,6 +352,7 @@ impl TerrainHorizonPresentation {
             view,
             camera,
             target_y: terrain_horizon_orbit_target_y(),
+            fog: mclone_render::fog::RenderFog::none(),
             render_view_override: None,
         };
         presentation.uniform_facts()?;
@@ -379,6 +383,11 @@ impl TerrainHorizonPresentation {
         }
         self.render_view_override = Some(render_view);
         Ok(self)
+    }
+
+    pub fn with_fog(mut self, fog: mclone_render::fog::RenderFog) -> Self {
+        self.fog = fog;
+        self
     }
 
     fn uniform_facts(self) -> Result<TerrainPreviewUniformPresentation, String> {
@@ -1387,6 +1396,20 @@ fn viewport_uniform_bytes_for_request_with_presentation(
         |render_view| terrain_relative_view_projection(render_view, presentation),
     );
     for value in view_projection.to_cols_array() {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    let fog = mclone_render::fog::RenderFog::none();
+    let fog_distances = fog.shader_distances();
+    for value in [0.0, 0.0, 0.0, fog.ground_base_y] {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    for value in [0.0, 0.0, fog.shader_options(), 0.0] {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    for value in [fog.color[0], fog.color[1], fog.color[2], fog.max_opacity] {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    for value in [fog_distances[0], fog_distances[1], 0.0, 0.0] {
         bytes.extend_from_slice(&value.to_le_bytes());
     }
     debug_assert_eq!(bytes.len(), TERRAIN_PREVIEW_UNIFORM_BYTES as usize);

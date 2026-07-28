@@ -8,7 +8,8 @@ use crate::{
     Rect, Slider, WidgetId, WorldCatalogUiEntry, WorldCatalogUiState, WorldCatalogUiWorldId,
     block_palette_panel_rect, block_palette_slot_rect, centered_panel, fly_speed_from_slider_value,
     fly_speed_label, fly_speed_slider_value, fog_classic_start_from_slider_value,
-    fog_classic_start_label, fog_classic_start_slider_value, fog_ground_base_from_slider_value,
+    fog_classic_start_label, fog_classic_start_slider_value, fog_color_component_from_slider_value,
+    fog_color_component_label, fog_color_component_slider_value, fog_ground_base_from_slider_value,
     fog_ground_base_label, fog_ground_base_slider_value, fog_ground_falloff_from_slider_value,
     fog_ground_falloff_label, fog_ground_falloff_slider_value, fog_guard_start_from_slider_value,
     fog_guard_start_label, fog_guard_start_slider_value, fog_max_opacity_from_slider_value,
@@ -334,6 +335,9 @@ enum UiSliderAction {
     FogGroundBase,
     FogGroundFalloff,
     FogMaxOpacity,
+    FogColorRed,
+    FogColorGreen,
+    FogColorBlue,
     FlySpeed,
     MovementSpeed,
     TouchLook,
@@ -2181,6 +2185,15 @@ impl UiSurface {
                     UiSliderAction::FogMaxOpacity => GameUiAction::SetFogSettings(
                         fog_max_opacity_from_slider_value(value, self.render_state.fog),
                     ),
+                    UiSliderAction::FogColorRed => GameUiAction::SetFogSettings(
+                        fog_color_component_from_slider_value(value, self.render_state.fog, 0),
+                    ),
+                    UiSliderAction::FogColorGreen => GameUiAction::SetFogSettings(
+                        fog_color_component_from_slider_value(value, self.render_state.fog, 1),
+                    ),
+                    UiSliderAction::FogColorBlue => GameUiAction::SetFogSettings(
+                        fog_color_component_from_slider_value(value, self.render_state.fog, 2),
+                    ),
                     UiSliderAction::FlySpeed => GameUiAction::SetFlySpeed(
                         fly_speed_from_slider_value(value, self.render_state),
                     ),
@@ -3167,6 +3180,10 @@ const UI_V2_FOG_MAX_OPACITY: UiWidgetId = UiWidgetId(164);
 const UI_V2_FOG_EXPONENTIAL_SQUARED: UiWidgetId = UiWidgetId(165);
 const UI_V2_FOG_FAR_CULL: UiWidgetId = UiWidgetId(166);
 const UI_V2_FOG_WEATHER: UiWidgetId = UiWidgetId(167);
+const UI_V2_FOG_COLOR_MODE: UiWidgetId = UiWidgetId(168);
+const UI_V2_FOG_COLOR_RED: UiWidgetId = UiWidgetId(169);
+const UI_V2_FOG_COLOR_GREEN: UiWidgetId = UiWidgetId(170);
+const UI_V2_FOG_COLOR_BLUE: UiWidgetId = UiWidgetId(171);
 const UI_V2_STORAGE_PROFILE_NAME: UiWidgetId = UiWidgetId(133);
 const UI_V2_STORAGE_PROFILE_ID: UiWidgetId = UiWidgetId(134);
 const UI_V2_STORAGE_BACKEND: UiWidgetId = UiWidgetId(135);
@@ -3801,7 +3818,7 @@ const fn options_category_widget_id(category: GameOptionsCategory) -> UiWidgetId
 const fn options_category_row_count(category: GameOptionsCategory) -> usize {
     match category {
         GameOptionsCategory::Graphics => 12,
-        GameOptionsCategory::Fog => 11,
+        GameOptionsCategory::Fog => 15,
         GameOptionsCategory::Movement => 8,
         GameOptionsCategory::Display => 3,
         GameOptionsCategory::LocalPlay => 5,
@@ -4034,6 +4051,7 @@ fn options_category_rows(
             let fog = state.fog.normalized();
             let exponential = fog.mode.uses_exponential();
             let ground_haze = fog.mode == crate::GameFogMode::GroundHaze;
+            let custom_color = fog.color_mode == crate::GameFogColorMode::Custom;
             vec![
                 (
                     20.0,
@@ -4043,6 +4061,48 @@ fn options_category_rows(
                             ..fog
                         }),
                     ),
+                ),
+                (
+                    20.0,
+                    UiWidget::cycle(UI_V2_FOG_COLOR_MODE, ph, "Color", fog.color_mode.label())
+                        .enabled(fog.mode != crate::GameFogMode::Off)
+                        .action(GameUiAction::SetFogSettings(crate::GameFogSettings {
+                            color_mode: fog.color_mode.next(),
+                            ..fog
+                        })),
+                ),
+                (
+                    20.0,
+                    UiWidget::slider(
+                        UI_V2_FOG_COLOR_RED,
+                        ph,
+                        fog_color_component_label(fog, 0, "Red"),
+                        fog_color_component_slider_value(fog, 0),
+                    )
+                    .enabled(fog.mode != crate::GameFogMode::Off && custom_color)
+                    .slider_action(UiSliderAction::FogColorRed),
+                ),
+                (
+                    20.0,
+                    UiWidget::slider(
+                        UI_V2_FOG_COLOR_GREEN,
+                        ph,
+                        fog_color_component_label(fog, 1, "Green"),
+                        fog_color_component_slider_value(fog, 1),
+                    )
+                    .enabled(fog.mode != crate::GameFogMode::Off && custom_color)
+                    .slider_action(UiSliderAction::FogColorGreen),
+                ),
+                (
+                    20.0,
+                    UiWidget::slider(
+                        UI_V2_FOG_COLOR_BLUE,
+                        ph,
+                        fog_color_component_label(fog, 2, "Blue"),
+                        fog_color_component_slider_value(fog, 2),
+                    )
+                    .enabled(fog.mode != crate::GameFogMode::Off && custom_color)
+                    .slider_action(UiSliderAction::FogColorBlue),
                 ),
                 (
                     20.0,

@@ -114,14 +114,16 @@ fn vs_main(input: VertexInput, @builtin(view_index) builtin_view_index: i32) -> 
     return output;
 }
 
+// MCLONE_FOG_FUNCTION
+
 fn apply_fog(color: vec4<f32>, world_position: vec3<f32>, view: ViewUniform) -> vec4<f32> {
-    if (view.render_options.z <= 0.5) {
-        return color;
-    }
-    let fog_distance = distance(world_position, view.camera_position.xyz);
-    let fog_start = view.fog_distances.x;
-    let fog_end = max(view.fog_distances.y, fog_start + 0.001);
-    let fog_factor = clamp((fog_distance - fog_start) / (fog_end - fog_start), 0.0, 1.0);
+    let fog_factor = mclone_fog_factor(
+        world_position,
+        view.camera_position,
+        view.render_options,
+        view.fog_color,
+        view.fog_distances,
+    );
     return vec4<f32>(lerp_vec3(color.rgb, view.fog_color.rgb, fog_factor), color.a);
 }
 

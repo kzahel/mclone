@@ -257,6 +257,7 @@ pub struct TerrainBackdropRenderContext<'a> {
     pub depth_view: &'a wgpu::TextureView,
     pub size: [u32; 2],
     pub render_view: ChunkRenderView,
+    pub fog: RenderFog,
     pub view_slot: PerViewSlot,
 }
 
@@ -2655,7 +2656,7 @@ where
 {
     let fog = underwater_overlay
         .map(|overlay| RenderFog::underwater_with_water_vision(overlay.water_vision))
-        .unwrap_or_default();
+        .unwrap_or(render_options.fog);
     let render_options = render_options
         .with_sky_darken(mclone_render::light_texture::sky_darken(time_of_day))
         .with_fog(fog);
@@ -2666,7 +2667,7 @@ where
     let mut placed_terrain_stats = TexturedSectionRenderStats::default();
     if !gui.covers_world {
         let sky_start = composition_timing_start(timing_clock, timing.is_some());
-        let background_clear_color = if fog.enabled {
+        let background_clear_color = if fog.clears_background() {
             clear_frame_color(frame.encoder, frame.target, fog.clear_color());
             fog.clear_color()
         } else {
@@ -2740,6 +2741,7 @@ where
                 depth_view: &depth.view,
                 size: frame.target.size,
                 render_view,
+                fog,
                 view_slot,
             })?;
         }

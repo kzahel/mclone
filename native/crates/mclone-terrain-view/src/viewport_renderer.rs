@@ -3110,6 +3110,7 @@ impl TerrainHorizonRenderer {
                     None,
                     0,
                     presentation.render_view_override,
+                    presentation.fog,
                 ),
             );
             {
@@ -3208,6 +3209,7 @@ impl TerrainHorizonRenderer {
                             self.clipmap.config().level_count,
                         ),
                         presentation.render_view_override,
+                        presentation.fog,
                     ),
                 );
             }
@@ -3234,6 +3236,7 @@ impl TerrainHorizonRenderer {
                         inner_hole,
                         0,
                         presentation.render_view_override,
+                        presentation.fog,
                     ),
                 );
             }
@@ -3241,6 +3244,11 @@ impl TerrainHorizonRenderer {
 
         let mut drawn_levels = 0_u32;
         let mut drawn_tiles = 0_u32;
+        let far_cull = presentation
+            .fog
+            .far_cull_distance()
+            .zip(presentation.render_view_override)
+            .map(|(distance, view)| (distance, view.camera_position));
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: Some("mclone_terrain_horizon_render_pass"),
@@ -3277,6 +3285,11 @@ impl TerrainHorizonRenderer {
             for level in terrain_levels.iter().rev() {
                 drawn_levels = drawn_levels.saturating_add(1);
                 for resource in &level.tiles {
+                    if far_cull.is_some_and(|(distance, camera)| {
+                        terrain_horizon_tile_beyond_distance(resource.tile, camera, distance)
+                    }) {
+                        continue;
+                    }
                     let slot_index = resource.resource_slot as usize;
                     pass.set_bind_group(0, &self.slots[slot_index].render_bind_group, &[]);
                     let render_cells = TERRAIN_PREVIEW_DEFAULT_CELLS_PER_AXIS
@@ -3292,6 +3305,11 @@ impl TerrainHorizonRenderer {
                     continue;
                 }
                 for resource in &level.tiles {
+                    if far_cull.is_some_and(|(distance, camera)| {
+                        terrain_horizon_tile_beyond_distance(resource.tile, camera, distance)
+                    }) {
+                        continue;
+                    }
                     let slot = &self.slots[resource.resource_slot as usize];
                     let Some(instance_buffer) = slot.tree_instance_buffer.as_ref() else {
                         continue;
@@ -3707,6 +3725,7 @@ fn terrain_horizon_uniform_bytes(
     inner_hole: Option<super::TerrainClipmapBounds>,
     normal_edge_flags: u32,
     render_view_override: Option<mclone_render::chunk::ChunkRenderView>,
+    fog: mclone_render::fog::RenderFog,
 ) -> Vec<u8> {
     debug_assert_eq!(
         normal_edge_flags
@@ -3737,7 +3756,47 @@ fn terrain_horizon_uniform_bytes(
             .expect("terrain preview uniform flag word remains four bytes"),
     ) | normal_edge_flags;
     flag_bytes.copy_from_slice(&flags.to_le_bytes());
+    const FOG_CAMERA_OFFSET: usize = 14 * 16;
+    let camera = render_view_override.map_or(glam::Vec3::ZERO, |view| view.camera_position);
+    let fog_distances = fog.shader_distances();
+    let values = [
+        camera.x,
+        camera.y,
+        camera.z,
+        fog.ground_base_y,
+        0.0,
+        0.0,
+        fog.shader_options(),
+        0.0,
+        fog.color[0],
+        fog.color[1],
+        fog.color[2],
+        fog.max_opacity,
+        fog_distances[0],
+        fog_distances[1],
+        0.0,
+        0.0,
+    ];
+    for (index, value) in values.into_iter().enumerate() {
+        let start = FOG_CAMERA_OFFSET + index * size_of::<f32>();
+        bytes[start..start + size_of::<f32>()].copy_from_slice(&value.to_le_bytes());
+    }
     bytes
+}
+
+fn terrain_horizon_tile_beyond_distance(
+    tile: TerrainClipmapTile,
+    camera: glam::Vec3,
+    max_distance: f32,
+) -> bool {
+    let footprint = f64::from(tile.footprint_blocks());
+    let min_x = tile.min_x() as f64;
+    let min_z = tile.min_z() as f64;
+    let camera_x = f64::from(camera.x);
+    let camera_z = f64::from(camera.z);
+    let nearest_x = camera_x.clamp(min_x, min_x + footprint);
+    let nearest_z = camera_z.clamp(min_z, min_z + footprint);
+    (camera_x - nearest_x).hypot(camera_z - nearest_z) > f64::from(max_distance)
 }
 
 fn terrain_horizon_outer_edge_flags(
@@ -4312,5 +4371,23 @@ mod tests {
             TerrainPreviewContentStage::Cover,
             8,
         ));
+    }
+
+    #[test]
+    fn horizon_far_cull_rejects_only_tiles_wholly_beyond_the_radius() {
+        let near = TerrainClipmapTile {
+            level: 0,
+            tile_x: 0,
+            tile_z: 0,
+            sample_spacing: 1,
+            physical_x: 0,
+            physical_z: 0,
+            physical_slot: 0,
+        };
+        let far = TerrainClipmapTile { tile_x: 10, ..near };
+        let camera = glam::Vec3::new(16.0, 300.0, 16.0);
+
+        assert!(!terrain_horizon_tile_beyond_distance(near, camera, 32.0));
+        assert!(terrain_horizon_tile_beyond_distance(far, camera, 32.0));
     }
 }

@@ -139,7 +139,7 @@ use mclone_render::chunk::{
 use mclone_render::entity::{
     ActorDrawResources, ActorFigureSet, ActorInstance, ActorInstanceId, ActorRenderStats,
 };
-use mclone_render::fog::RenderFog;
+use mclone_render::fog::{RenderFog, RenderFogMode};
 use mclone_render::gui::{
     GuiRenderOptions, GuiRenderer, WorldGuiLine, WorldGuiPanel, WorldGuiPanelRenderStats,
     WorldGuiRenderer,
@@ -2144,7 +2144,7 @@ impl McloneSceneHost {
         let terrain_options = underwater_overlays.map(|overlay| {
             let fog = overlay
                 .map(|overlay| RenderFog::underwater_with_water_vision(overlay.water_vision))
-                .unwrap_or_default();
+                .unwrap_or(base_options.fog);
             base_options.with_fog(fog)
         });
         (terrain_views, terrain_options, underwater_overlays)
@@ -2360,6 +2360,7 @@ impl McloneSceneHost {
                     depth_view: &target.depth.view,
                     size: target.size,
                     render_view,
+                    fog: render_options.fog,
                     view_slot,
                 })?;
         }
@@ -4930,6 +4931,7 @@ impl McloneSceneHost {
 
     fn effective_render_options(&self, camera_position: Vec3) -> TexturedSectionRenderOptions {
         let mut options = self.render_options;
+        options.fog = self.open_air_fog();
         options.grass_time_seconds = grass_presentation_time_seconds(self.services.clock.now());
         options.grass_interactors =
             grass_interactors_from_actors(Some(self.active_world.camera.feet_position()), &[]);
@@ -4944,6 +4946,54 @@ impl McloneSceneHost {
             options.section_occlusion_culling = false;
         }
         options
+    }
+
+    fn open_air_fog(&self) -> RenderFog {
+        let settings = self.fog_settings.normalized();
+        let mode = match settings.mode {
+            mclone_ui::GameFogMode::Off => RenderFogMode::Off,
+            mclone_ui::GameFogMode::Classic => RenderFogMode::Linear,
+            mclone_ui::GameFogMode::Natural => RenderFogMode::Exponential,
+            mclone_ui::GameFogMode::GroundHaze => RenderFogMode::GroundHaze,
+        };
+        let clear = self.sky_clear_color();
+        let sky_color = [clear.r as f32, clear.g as f32, clear.b as f32];
+        let color = match settings.color_mode {
+            mclone_ui::GameFogColorMode::Sky => sky_color,
+            mclone_ui::GameFogColorMode::Neutral => {
+                let luminance =
+                    sky_color[0] * 0.2126 + sky_color[1] * 0.7152 + sky_color[2] * 0.0722;
+                [luminance; 3]
+            }
+            mclone_ui::GameFogColorMode::Warm => [
+                (sky_color[0] * 1.12).min(1.0),
+                sky_color[1] * 0.98,
+                sky_color[2] * 0.82,
+            ],
+            mclone_ui::GameFogColorMode::Cool => [
+                sky_color[0] * 0.85,
+                sky_color[1],
+                (sky_color[2] * 1.12).min(1.0),
+            ],
+            mclone_ui::GameFogColorMode::Custom => settings.custom_color,
+        };
+        let exact_corner_coverage =
+            self.active_world.scene.render_distance as f32 * 16.0 * std::f32::consts::SQRT_2;
+        let coverage_end = self.terrain_projection_far_distance(exact_corner_coverage.max(32.0));
+        RenderFog::open_air(
+            mode,
+            color,
+            settings.visibility_blocks,
+            settings.classic_start,
+            coverage_end,
+            settings.coverage_guard,
+            settings.guard_start,
+            settings.ground_base_y,
+            settings.ground_falloff_blocks,
+            settings.max_opacity,
+            settings.exponential_squared,
+            settings.far_cull,
+        )
     }
 }
 

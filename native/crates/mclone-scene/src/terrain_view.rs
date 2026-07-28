@@ -345,7 +345,8 @@ impl TerrainBackdropRenderer for SceneTerrainViewState {
             TerrainPreviewCamera::default(),
         )
         .and_then(|presentation| presentation.with_render_view(context.render_view))
-        .map_err(anyhow::Error::msg)?;
+        .map_err(anyhow::Error::msg)?
+        .with_fog(context.fog);
         let stats = self
             .engine
             .encode_to_target(

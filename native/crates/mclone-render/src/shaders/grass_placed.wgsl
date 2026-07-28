@@ -234,14 +234,16 @@ fn vs_main(input: GrassPatchInput, @builtin(vertex_index) vertex_index: u32) -> 
     return output;
 }
 
+// MCLONE_FOG_FUNCTION
+
 fn apply_fog(color: vec3<f32>, composition_position: vec3<f32>) -> vec3<f32> {
-    if (uniforms.render_options.z <= 0.5) {
-        return color;
-    }
-    let fog_distance = distance(composition_position, uniforms.camera_position.xyz);
-    let fog_start = uniforms.fog_distances.x;
-    let fog_end = max(uniforms.fog_distances.y, fog_start + 0.001);
-    let fog_factor = clamp((fog_distance - fog_start) / (fog_end - fog_start), 0.0, 1.0);
+    let fog_factor = mclone_fog_factor(
+        composition_position,
+        uniforms.camera_position,
+        uniforms.render_options,
+        uniforms.fog_color,
+        uniforms.fog_distances,
+    );
     return lerp_vec3(color, uniforms.fog_color.rgb, fog_factor);
 }
 

@@ -591,7 +591,21 @@ fn fog_options_expose_recommended_defaults_and_mode_specific_controls() {
             .and_then(|widget| widget.value.as_deref()),
         Some("Natural")
     );
-    assert_eq!(surface.layout().widgets().len(), 12);
+    assert_eq!(surface.layout().widgets().len(), 16);
+    assert_eq!(
+        surface
+            .layout()
+            .widget(UI_V2_FOG_COLOR_MODE)
+            .and_then(|widget| widget.value.as_deref()),
+        Some("Sky Adaptive")
+    );
+    assert!(
+        !surface
+            .layout()
+            .widget(UI_V2_FOG_COLOR_RED)
+            .expect("custom red")
+            .enabled
+    );
     assert!(
         !surface
             .layout()

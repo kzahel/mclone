@@ -479,6 +479,7 @@ fn grass_shader_source(variant: GrassPipelineVariant) -> String {
             clipped_placed_multiview_grass_shader_source()
         }
     };
+    let template = crate::fog::inject_fog_wgsl(&template);
     mclone_render_color::inject_target_color_transfer_wgsl(&template)
         .expect("grass WGSL has one target-color transfer marker")
 }

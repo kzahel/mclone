@@ -10,10 +10,15 @@ struct TerrainPreviewParams {
     content_stage_flags: vec4<u32>,
     clipmap_inner_bounds: vec4<i32>,
     view_projection: mat4x4<f32>,
+    fog_camera_position: vec4<f32>,
+    fog_render_options: vec4<f32>,
+    fog_color: vec4<f32>,
+    fog_distances: vec4<f32>,
 };
 
 // __MCLONE_TARGET_COLOR_TRANSFER_WGSL__
 const terrain_target_color_transform: f32 = __MCLONE_TARGET_COLOR_TRANSFORM__;
+// MCLONE_FOG_FUNCTION
 
 @group(0) @binding(0)
 var<uniform> params: TerrainPreviewParams;
@@ -39,6 +44,7 @@ struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec3<f32>,
     @location(1) world_xz: vec2<f32>,
+    @location(2) world_position: vec3<f32>,
 };
 
 fn exact_chunk_painted(world_xz: vec2<f32>) -> bool {
@@ -177,6 +183,7 @@ fn vertex_main(
     let height_shade = clamp(0.78 + corner.y * 0.08, 0.62, 0.92);
     out.color = family_color(family, trunk) * height_shade;
     out.world_xz = world.xz;
+    out.world_position = world;
     return out;
 }
 
@@ -195,6 +202,14 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     if exact_coverage.mode_count_generation.x == 2u && exact_painted {
         color = mix(color, vec3<f32>(1.0, 0.08, 0.72), 0.86);
     }
+    let fog_factor = mclone_fog_factor(
+        input.world_position,
+        params.fog_camera_position,
+        params.fog_render_options,
+        params.fog_color,
+        params.fog_distances,
+    );
+    color = mix(color, params.fog_color.rgb, fog_factor);
     return mclone_apply_target_color_transform_rgba(
         vec4<f32>(color, 1.0),
         terrain_target_color_transform,

@@ -137,6 +137,8 @@ Graphics receives a nested **Fog** page. Evaluation takes priority over a
 minimal final inventory, so the first page may be intentionally generous:
 
 - Mode: Off / Classic / Natural / Ground Haze;
+- Color: Sky Adaptive / Neutral / Warm / Cool / Custom RGB;
+- Custom Red / Green / Blue sliders, enabled for Custom RGB;
 - Visibility: logarithmic world-distance slider;
 - Classic Start: fraction of effective coverage;
 - Coverage Guard: Off / On;
@@ -304,6 +306,49 @@ feature.
 8. Record matched GPU/frame, CPU, draw-count, and resident-memory evidence
    before choosing a default or using fog to reduce prepared work.
 
+## Implemented Evaluation Pass
+
+The first evaluation pass landed on 2026-07-28:
+
+- Graphics > Fog exposes all modes, sky/neutral/warm/cool/custom RGB color
+  choices, custom channels, visibility, linear onset, coverage guard, ground
+  shaping, maximum opacity, exponential-squared, far cull, and weather policy.
+- Settings normalize and persist through the host-neutral graphics document.
+- One renderer-owned WGSL function evaluates linear, homogeneous
+  exponential, exponential-squared, and height-shaped ground haze for chunks,
+  grass, runtime and prepared actors, procedural terrain, and tree proxies.
+  Mono, stereo, placed-world, and multiview shaders use the same function.
+- Open-air fog keeps the sky pass and derives its recommended color from that
+  sky. Underwater fog remains an opaque linear media override.
+- Exact coverage uses the loaded chunk-corner distance. Composed coverage uses
+  the clipmap's conservative reach. The guard reaches full opacity only at that
+  boundary.
+- Far Cull is opt-in. Exact-section and procedural-tile submission rejects
+  geometry only after a conservative opaque boundary. A natural haze capped
+  below full opacity cannot authorize atmosphere-only culling, and
+  height-dependent Ground Haze can cull only behind its coverage guard.
+
+The weather choice is persisted but currently has no live density input:
+the client replica does not expose smooth rain/thunder levels yet. Keep the
+row as an explicit future policy rather than faking weather in the renderer.
+
+Validated evidence:
+
+- shared renderer, terrain-view, runtime, and UI unit/integration tests;
+- `/tmp/mclone-desktop-offscreen.png`, inspected recommended Natural
+  exact-only output;
+- `/tmp/mclone-fog-composed.png`, inspected recommended Natural composed
+  output;
+- `/tmp/mclone-fog-probe.png`, inspected aggressive custom-color low-visibility
+  output across exact terrain, procedural hills, and procedural tree proxies;
+  and
+- `/tmp/mclone-xr-emulation.png`, inspected distinct left/right output.
+
+No matched performance conclusion has been made. Existing section/tile draw
+counts make Far Cull observable, but the decision gate still requires matched
+timing with identical settings and geometry on representative desktop, mobile,
+browser, and XR targets.
+
 ## Validation Matrix
 
 The acceptance matrix crosses:
@@ -337,11 +382,11 @@ under `/tmp`.
 
 ## Initial Code Map
 
-- `native/crates/mclone-render/src/fog.rs` — current underwater-only linear
-  fog value; target home for the renderer-neutral atmosphere contract.
+- `native/crates/mclone-render/src/fog.rs` — renderer-neutral atmosphere/media
+  contract, safe cull boundary, and shared WGSL injection.
 - `native/crates/mclone-render/src/chunk.rs` and
   `native/crates/mclone-render/src/shaders/` — exact world, actor, grass,
-  mono/stereo/multiview uniforms and duplicated fog functions.
+  mono/stereo/multiview uniforms and the shared fog function.
 - `native/crates/mclone-app-runtime/src/frame_render.rs` — sky/background,
   media override, frame composition, and terrain-backdrop handoff.
 - `native/crates/mclone-scene/` — shared settings effects, coverage facts,

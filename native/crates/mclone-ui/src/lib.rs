@@ -2163,6 +2163,38 @@ impl GameFogMode {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameFogColorMode {
+    #[default]
+    Sky,
+    Neutral,
+    Warm,
+    Cool,
+    Custom,
+}
+
+impl GameFogColorMode {
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Sky => Self::Neutral,
+            Self::Neutral => Self::Warm,
+            Self::Warm => Self::Cool,
+            Self::Cool => Self::Custom,
+            Self::Custom => Self::Sky,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Sky => "Sky Adaptive",
+            Self::Neutral => "Neutral",
+            Self::Warm => "Warm",
+            Self::Cool => "Cool",
+            Self::Custom => "Custom RGB",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum GameFogWeatherInfluence {
     Off,
     #[default]
@@ -2196,6 +2228,8 @@ impl GameFogWeatherInfluence {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct GameFogSettings {
     pub mode: GameFogMode,
+    pub color_mode: GameFogColorMode,
+    pub custom_color: [f32; 3],
     pub visibility_blocks: f32,
     pub classic_start: f32,
     pub coverage_guard: bool,
@@ -2236,6 +2270,9 @@ impl GameFogSettings {
             ),
             max_opacity: finite_or(self.max_opacity, 0.98)
                 .clamp(Self::MIN_MAX_OPACITY, Self::MAX_MAX_OPACITY),
+            custom_color: self
+                .custom_color
+                .map(|channel| finite_or(channel, 0.7).clamp(0.0, 1.0)),
             ..self
         }
     }
@@ -2245,6 +2282,8 @@ impl Default for GameFogSettings {
     fn default() -> Self {
         Self {
             mode: GameFogMode::Natural,
+            color_mode: GameFogColorMode::Sky,
+            custom_color: [0.7, 0.75, 0.8],
             visibility_blocks: 32_768.0,
             classic_start: 0.75,
             coverage_guard: true,
@@ -3954,6 +3993,31 @@ fn fog_max_opacity_label(settings: GameFogSettings) -> String {
     format!(
         "Maximum Opacity: {:.0}%",
         settings.normalized().max_opacity * 100.0
+    )
+}
+
+fn fog_color_component_slider_value(settings: GameFogSettings, component: usize) -> f32 {
+    settings.normalized().custom_color[component.min(2)]
+}
+
+fn fog_color_component_from_slider_value(
+    value: f32,
+    settings: GameFogSettings,
+    component: usize,
+) -> GameFogSettings {
+    let mut custom_color = settings.normalized().custom_color;
+    custom_color[component.min(2)] = (value.clamp(0.0, 1.0) * 100.0).round() / 100.0;
+    GameFogSettings {
+        custom_color,
+        ..settings
+    }
+    .normalized()
+}
+
+fn fog_color_component_label(settings: GameFogSettings, component: usize, name: &str) -> String {
+    format!(
+        "Color {name}: {:.0}%",
+        settings.normalized().custom_color[component.min(2)] * 100.0
     )
 }
 

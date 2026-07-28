@@ -3,8 +3,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{Context, Result, bail};
 use mclone_ui::{
-    GameFogMode, GameFogSettings, GameFogWeatherInfluence, GameGrassDetail, GameLeafDetail,
-    GameTerrainPresentation,
+    GameFogColorMode, GameFogMode, GameFogSettings, GameFogWeatherInfluence, GameGrassDetail,
+    GameLeafDetail, GameTerrainPresentation,
 };
 use serde::{Deserialize, Serialize};
 
@@ -135,6 +135,8 @@ enum StoredTerrainPresentation {
 #[serde(default, rename_all = "camelCase")]
 struct StoredFogSettings {
     mode: StoredFogMode,
+    color_mode: StoredFogColorMode,
+    custom_color: [f32; 3],
     visibility_blocks: f32,
     classic_start: f32,
     coverage_guard: bool,
@@ -163,6 +165,14 @@ impl From<GameFogSettings> for StoredFogSettings {
                 GameFogMode::Natural => StoredFogMode::Natural,
                 GameFogMode::GroundHaze => StoredFogMode::GroundHaze,
             },
+            color_mode: match value.color_mode {
+                GameFogColorMode::Sky => StoredFogColorMode::Sky,
+                GameFogColorMode::Neutral => StoredFogColorMode::Neutral,
+                GameFogColorMode::Warm => StoredFogColorMode::Warm,
+                GameFogColorMode::Cool => StoredFogColorMode::Cool,
+                GameFogColorMode::Custom => StoredFogColorMode::Custom,
+            },
+            custom_color: value.custom_color,
             visibility_blocks: value.visibility_blocks,
             classic_start: value.classic_start,
             coverage_guard: value.coverage_guard,
@@ -190,6 +200,14 @@ impl From<StoredFogSettings> for GameFogSettings {
                 StoredFogMode::Natural => GameFogMode::Natural,
                 StoredFogMode::GroundHaze => GameFogMode::GroundHaze,
             },
+            color_mode: match value.color_mode {
+                StoredFogColorMode::Sky => GameFogColorMode::Sky,
+                StoredFogColorMode::Neutral => GameFogColorMode::Neutral,
+                StoredFogColorMode::Warm => GameFogColorMode::Warm,
+                StoredFogColorMode::Cool => GameFogColorMode::Cool,
+                StoredFogColorMode::Custom => GameFogColorMode::Custom,
+            },
+            custom_color: value.custom_color,
             visibility_blocks: value.visibility_blocks,
             classic_start: value.classic_start,
             coverage_guard: value.coverage_guard,
@@ -217,6 +235,17 @@ enum StoredFogMode {
     #[default]
     Natural,
     GroundHaze,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+enum StoredFogColorMode {
+    #[default]
+    Sky,
+    Neutral,
+    Warm,
+    Cool,
+    Custom,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Serialize)]
