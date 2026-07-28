@@ -142,9 +142,26 @@ through the native/Android/browser graphics adapters, extends the default
 per-eye XR projection to the same clipmap-derived reach, and adds a
 target-ready synthetic stereo capture. Flat Android and Android XR APKs,
 desktop XR compilation, native flat pixels, synthetic stereo pixels, and
-headed browser pixels pass. Physical Android/headset quality and performance
-remain follow-up evidence. Optional full-frame multiview still has no
-procedural-horizon pipeline and is not the default XR renderer.
+headed browser pixels pass. A physical Quest 3 per-eye session then confirmed
+that the full-reach horizon is unusually compelling at altitude and remains
+usable through extended 8x-speed travel. The same session exposed a new P0:
+after returning to ground level exact terrain stopped catching up, and Horizon
+OS killed the process at a `6,621,968 kB` footprint (about `3.86 GB` RSS plus
+`2.02 GB` swap). The clipmap remains fixed at 160 resident tiles; the strongest
+source-level candidate is unbounded stale load/full-record cache-save ownership
+in the persistent exact-world mailbox under continuous movement. Tactical 274
+records the device evidence, causal audit, required owned-byte diagnostics,
+and persistent-world Quest soak. Physical flat-Android evidence remains open.
+Tactical
+[`275`](../tactical/275-bounded-persistence-streaming.md) now removes those
+known unbounded mailbox mechanisms through lane bounds, cancellation, fair
+write progress, residency-linked browser cache eviction, and owned-byte
+diagnostics. The device incident remains open until the same persistent Quest
+travel pattern demonstrates exact-center reacquisition and memory/queue
+plateaus; completed scheduler job-history and physical world-file growth remain
+separate audit items.
+Optional full-frame multiview still has no procedural-horizon pipeline and is
+not the default XR renderer.
 Canonical exact generation and live authoritative render sections remain
 different truth-source adapters.
 
@@ -778,6 +795,8 @@ milestone. The eventual acceptance set includes:
 - source/profile/world switches with stale completion rejection;
 - ring seams across coast, mountain, water, and forest cases;
 - exact-chunk admission, eviction, edits, and vegetation crossing the mask;
+- persistent-world high-speed travel where stale load/save work is cancelled
+  or bounded, current-center exact terrain reacquires, and RSS plateaus;
 - device loss and surface rebuild;
 - desktop and headed-Wayland browser evidence;
 - flat Android and Android XR scripted build/validation lanes;

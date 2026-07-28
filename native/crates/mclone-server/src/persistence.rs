@@ -11,7 +11,7 @@ use std::{
     fs::{self, File, OpenOptions},
     io::{BufReader, BufWriter, Seek, SeekFrom},
     path::{Path, PathBuf},
-    sync::mpsc,
+    sync::{Arc, Mutex, mpsc},
     thread::{self, JoinHandle},
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -72,6 +72,17 @@ pub const WORLD_METADATA_VERSION: u32 = 2;
 pub const WORLD_METADATA_TARGET_MINECRAFT_VERSION: &str = "1.17.1";
 
 pub type PersistenceRequestId = u64;
+
+const MAX_PENDING_CACHE_WRITE_RECORDS: usize = 64;
+const MAX_PENDING_CACHE_WRITE_BYTES: usize = 32 * 1024 * 1024;
+#[cfg(not(target_arch = "wasm32"))]
+const THREADED_REQUEST_CHANNEL_CAPACITY: usize = 384;
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_THREADED_FOREGROUND_REQUESTS: usize = 256;
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_THREADED_DURABLE_WRITE_REQUESTS: usize = 64;
+#[cfg(not(target_arch = "wasm32"))]
+const MAX_THREADED_DURABLE_WRITE_BYTES: usize = 64 * 1024 * 1024;
 
 pub type ChunkStoreResult<T> = Result<T, ChunkStoreError>;
 
@@ -189,6 +200,13 @@ fn closed_error() -> ChunkStoreError {
     ChunkStoreError::Closed("persistence actor is closed".to_owned())
 }
 
+fn cancelled_error() -> ChunkStoreError {
+    ChunkStoreError::classified(
+        PersistenceErrorKind::Cancelled,
+        "persistence request was cancelled after its chunk left active interest",
+    )
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SaveDurability {
     Cache,
@@ -247,6 +265,66 @@ impl ChunkRecord {
     pub fn with_scheduled_fluid_ticks(mut self, ticks: Vec<ScheduledTickRecord>) -> Self {
         self.scheduled_fluid_ticks = ticks;
         self
+    }
+
+    pub fn owned_bytes_estimate(&self) -> usize {
+        let snapshot = &self.snapshot;
+        let section_bytes = snapshot.sections.iter().fold(0_usize, |bytes, section| {
+            bytes
+                .saturating_add(std::mem::size_of_val(section))
+                .saturating_add(
+                    section
+                        .palette_state_ids
+                        .capacity()
+                        .saturating_mul(std::mem::size_of::<BlockStateId>()),
+                )
+                .saturating_add(
+                    section
+                        .packed_block_indices
+                        .capacity()
+                        .saturating_mul(std::mem::size_of::<u64>()),
+                )
+        });
+        let light_bytes = snapshot
+            .light_sections
+            .iter()
+            .fold(0_usize, |bytes, section| {
+                bytes
+                    .saturating_add(std::mem::size_of_val(section))
+                    .saturating_add(section.sky.as_ref().map_or(0, |values| values.capacity()))
+                    .saturating_add(section.block.as_ref().map_or(0, |values| values.capacity()))
+            });
+        let tick_bytes = self
+            .scheduled_block_ticks
+            .iter()
+            .chain(self.scheduled_fluid_ticks.iter())
+            .fold(0_usize, |bytes, tick| {
+                bytes
+                    .saturating_add(std::mem::size_of_val(tick))
+                    .saturating_add(tick.target.capacity())
+            });
+        std::mem::size_of_val(self)
+            .saturating_add(
+                snapshot
+                    .biomes
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<i32>()),
+            )
+            .saturating_add(
+                snapshot
+                    .sections
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<PackedChunkSection>()),
+            )
+            .saturating_add(section_bytes)
+            .saturating_add(
+                snapshot
+                    .light_sections
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<PackedLightSection>()),
+            )
+            .saturating_add(light_bytes)
+            .saturating_add(tick_bytes)
     }
 }
 
@@ -735,6 +813,156 @@ impl WorldStoreRequest {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
+    fn owned_bytes_estimate(&self) -> usize {
+        match self {
+            Self::SaveChunk { record, .. } => record.owned_bytes_estimate(),
+            Self::SaveEntityChunk { record, .. } => std::mem::size_of_val(record).saturating_add(
+                record
+                    .entities
+                    .capacity()
+                    .saturating_mul(std::mem::size_of::<EntitySaveRecord>()),
+            ),
+            Self::SaveWorldMetadata { record, .. } => std::mem::size_of_val(record),
+            Self::SaveDimension { record, .. } => std::mem::size_of_val(record),
+            Self::SavePlayer { record, .. } => std::mem::size_of_val(record),
+            Self::LoadWorldMetadata { .. }
+            | Self::LoadDimension { .. }
+            | Self::LoadChunk { .. }
+            | Self::LoadEntityChunk { .. }
+            | Self::LoadPlayer { .. }
+            | Self::LoadSavedData { .. }
+            | Self::Flush { .. }
+            | Self::Close { .. } => std::mem::size_of_val(self),
+        }
+    }
+
+    fn into_cancelled_completion(self) -> WorldStoreCompletion {
+        let error = || {
+            ChunkStoreError::classified(
+                PersistenceErrorKind::Cancelled,
+                "persistence request was cancelled after its chunk left active interest",
+            )
+        };
+        match self {
+            Self::LoadWorldMetadata { request_id } => WorldStoreCompletion::WorldMetadataLoaded {
+                request_id,
+                result: Err(error()),
+            },
+            Self::SaveWorldMetadata { request_id, record } => {
+                WorldStoreCompletion::WorldMetadataSaved {
+                    request_id,
+                    revision: record.revision,
+                    result: Err(error()),
+                }
+            }
+            Self::LoadDimension { request_id, key } => WorldStoreCompletion::DimensionLoaded {
+                request_id,
+                key,
+                result: Err(error()),
+            },
+            Self::SaveDimension { request_id, record } => WorldStoreCompletion::DimensionSaved {
+                request_id,
+                key: record.key,
+                result: Err(error()),
+            },
+            Self::LoadChunk {
+                request_id,
+                dimension,
+                pos,
+            } => WorldStoreCompletion::ChunkLoaded {
+                request_id,
+                dimension,
+                pos,
+                result: Err(error()),
+            },
+            Self::SaveChunk {
+                request_id,
+                dimension,
+                record,
+                ..
+            } => WorldStoreCompletion::ChunkSaved {
+                request_id,
+                dimension,
+                pos: record.pos(),
+                result: Err(error()),
+            },
+            Self::LoadEntityChunk {
+                request_id,
+                dimension,
+                pos,
+            } => WorldStoreCompletion::EntityChunkLoaded {
+                request_id,
+                dimension,
+                pos,
+                result: Err(error()),
+            },
+            Self::SaveEntityChunk {
+                request_id,
+                dimension,
+                record,
+                ..
+            } => WorldStoreCompletion::EntityChunkSaved {
+                request_id,
+                dimension,
+                pos: record.pos,
+                result: Err(error()),
+            },
+            Self::LoadPlayer { request_id, player } => WorldStoreCompletion::PlayerLoaded {
+                request_id,
+                player,
+                result: Err(error()),
+            },
+            Self::SavePlayer { request_id, record } => WorldStoreCompletion::PlayerSaved {
+                request_id,
+                player: record.player,
+                result: Err(error()),
+            },
+            Self::LoadSavedData { request_id, key } => WorldStoreCompletion::RequestFailed {
+                request_id,
+                key: WorldRecordKey::SavedData(key),
+                result: Err(error()),
+            },
+            Self::Flush { request_id } => WorldStoreCompletion::FlushComplete {
+                request_id,
+                result: Err(error()),
+            },
+            Self::Close { request_id } => WorldStoreCompletion::CloseComplete {
+                request_id,
+                result: Err(error()),
+            },
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    fn into_cache_pressure_completion(self) -> WorldStoreCompletion {
+        match self {
+            Self::SaveChunk {
+                request_id,
+                dimension,
+                record,
+                durability: SaveDurability::Cache,
+            } => WorldStoreCompletion::ChunkSaved {
+                request_id,
+                dimension,
+                pos: record.pos(),
+                result: Ok(StoreWriteOutcome::SkippedCachePressure),
+            },
+            Self::SaveEntityChunk {
+                request_id,
+                dimension,
+                record,
+                durability: SaveDurability::Cache,
+            } => WorldStoreCompletion::EntityChunkSaved {
+                request_id,
+                dimension,
+                pos: record.pos,
+                result: Ok(StoreWriteOutcome::SkippedCachePressure),
+            },
+            other => other.into_cancelled_completion(),
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
     fn into_closed_completion(self) -> WorldStoreCompletion {
         match self {
             Self::LoadWorldMetadata { request_id } => WorldStoreCompletion::WorldMetadataLoaded {
@@ -831,7 +1059,26 @@ impl WorldStoreRequest {
 pub enum StoreWriteOutcome {
     Written,
     Superseded,
+    SkippedCachePressure,
     SkippedOnClose,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct PersistenceQueueMetrics {
+    pub foreground_requests: usize,
+    pub durable_write_requests: usize,
+    pub durable_write_bytes: usize,
+    pub cache_write_requests: usize,
+    pub cache_write_bytes: usize,
+    pub retained_record_cache_entries: usize,
+    pub retained_record_cache_bytes: usize,
+    pub high_water_foreground_requests: usize,
+    pub high_water_durable_write_requests: usize,
+    pub high_water_durable_write_bytes: usize,
+    pub high_water_cache_write_requests: usize,
+    pub high_water_cache_write_bytes: usize,
+    pub cancelled_requests: u64,
+    pub skipped_cache_writes: u64,
 }
 
 #[derive(Debug)]
@@ -966,6 +1213,8 @@ pub trait WorldStore: fmt::Debug {
         record: &ChunkRecord,
     ) -> ChunkStoreResult<()>;
 
+    fn release_cached_chunk(&mut self, _dimension: &DimensionKey, _pos: ChunkPos) {}
+
     fn load_entity_chunk(
         &mut self,
         dimension: &DimensionKey,
@@ -987,6 +1236,8 @@ pub trait WorldStore: fmt::Debug {
             record.pos.x, record.pos.z,
         )))
     }
+
+    fn release_cached_entity_chunk(&mut self, _dimension: &DimensionKey, _pos: ChunkPos) {}
 
     fn load_player(&mut self, _player: &PlayerRecordKey) -> ChunkStoreResult<Option<PlayerRecord>> {
         Ok(None)
@@ -1274,6 +1525,10 @@ impl PendingChunkWrite {
             _ => true,
         }
     }
+
+    fn owned_bytes_estimate(&self) -> usize {
+        self.record.owned_bytes_estimate()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -1294,6 +1549,15 @@ impl PendingEntityChunkWrite {
             (SaveDurability::Cache, SaveDurability::Durable) => false,
             _ => true,
         }
+    }
+
+    fn owned_bytes_estimate(&self) -> usize {
+        std::mem::size_of_val(&self.record).saturating_add(
+            self.record
+                .entities
+                .capacity()
+                .saturating_mul(std::mem::size_of::<EntitySaveRecord>()),
+        )
     }
 }
 
@@ -1316,6 +1580,10 @@ pub struct PersistenceActor {
     pending_chunk_writes: BTreeMap<DimensionChunkPos, PendingChunkWrite>,
     pending_entity_chunk_writes: BTreeMap<DimensionChunkPos, PendingEntityChunkWrite>,
     completions: VecDeque<WorldStoreCompletion>,
+    pending_cache_write_bytes: usize,
+    high_water_cache_write_requests: usize,
+    high_water_cache_write_bytes: usize,
+    skipped_cache_writes: u64,
     closed: bool,
 }
 
@@ -1326,6 +1594,10 @@ impl PersistenceActor {
             pending_chunk_writes: BTreeMap::new(),
             pending_entity_chunk_writes: BTreeMap::new(),
             completions: VecDeque::new(),
+            pending_cache_write_bytes: 0,
+            high_water_cache_write_requests: 0,
+            high_water_cache_write_bytes: 0,
+            skipped_cache_writes: 0,
             closed: false,
         }
     }
@@ -1450,10 +1722,42 @@ impl PersistenceActor {
             durability,
         };
         let address = DimensionChunkPos::new(dimension.clone(), pos);
-        if let Some(existing) = self.pending_chunk_writes.get_mut(&address) {
+        if let Some(existing) = self.pending_chunk_writes.get(&address) {
             if incoming.should_replace(existing) {
                 let superseded_id = existing.request_id;
-                *existing = incoming;
+                let old_cache_bytes = (!existing.durability.is_durable())
+                    .then(|| existing.owned_bytes_estimate())
+                    .unwrap_or(0);
+                let new_cache_bytes = (!incoming.durability.is_durable())
+                    .then(|| incoming.owned_bytes_estimate())
+                    .unwrap_or(0);
+                let projected_cache_count = self
+                    .pending_cache_write_count()
+                    .saturating_sub(usize::from(old_cache_bytes > 0))
+                    .saturating_add(usize::from(new_cache_bytes > 0));
+                let projected_cache_bytes = self
+                    .pending_cache_write_bytes
+                    .saturating_sub(old_cache_bytes)
+                    .saturating_add(new_cache_bytes);
+                if new_cache_bytes > 0
+                    && (projected_cache_count > MAX_PENDING_CACHE_WRITE_RECORDS
+                        || projected_cache_bytes > MAX_PENDING_CACHE_WRITE_BYTES)
+                {
+                    self.skipped_cache_writes = self.skipped_cache_writes.saturating_add(1);
+                    self.completions
+                        .push_back(WorldStoreCompletion::ChunkSaved {
+                            request_id,
+                            dimension,
+                            pos,
+                            result: Ok(StoreWriteOutcome::SkippedCachePressure),
+                        });
+                    return;
+                }
+                self.pending_cache_write_bytes = self
+                    .pending_cache_write_bytes
+                    .saturating_sub(old_cache_bytes)
+                    .saturating_add(new_cache_bytes);
+                self.pending_chunk_writes.insert(address, incoming);
                 self.completions
                     .push_back(WorldStoreCompletion::ChunkSaved {
                         request_id: superseded_id,
@@ -1461,6 +1765,7 @@ impl PersistenceActor {
                         pos,
                         result: Ok(StoreWriteOutcome::Superseded),
                     });
+                self.record_cache_write_high_water();
             } else {
                 self.completions
                     .push_back(WorldStoreCompletion::ChunkSaved {
@@ -1473,7 +1778,24 @@ impl PersistenceActor {
             return;
         }
 
+        if !durability.is_durable() && !self.cache_write_fits(incoming.owned_bytes_estimate()) {
+            self.skipped_cache_writes = self.skipped_cache_writes.saturating_add(1);
+            self.completions
+                .push_back(WorldStoreCompletion::ChunkSaved {
+                    request_id,
+                    dimension,
+                    pos,
+                    result: Ok(StoreWriteOutcome::SkippedCachePressure),
+                });
+            return;
+        }
+        if !durability.is_durable() {
+            self.pending_cache_write_bytes = self
+                .pending_cache_write_bytes
+                .saturating_add(incoming.owned_bytes_estimate());
+        }
         self.pending_chunk_writes.insert(address, incoming);
+        self.record_cache_write_high_water();
     }
 
     pub fn load_entity_chunk(
@@ -1534,10 +1856,42 @@ impl PersistenceActor {
             durability,
         };
         let address = DimensionChunkPos::new(dimension.clone(), pos);
-        if let Some(existing) = self.pending_entity_chunk_writes.get_mut(&address) {
+        if let Some(existing) = self.pending_entity_chunk_writes.get(&address) {
             if incoming.should_replace(existing) {
                 let superseded_id = existing.request_id;
-                *existing = incoming;
+                let old_cache_bytes = (!existing.durability.is_durable())
+                    .then(|| existing.owned_bytes_estimate())
+                    .unwrap_or(0);
+                let new_cache_bytes = (!incoming.durability.is_durable())
+                    .then(|| incoming.owned_bytes_estimate())
+                    .unwrap_or(0);
+                let projected_cache_count = self
+                    .pending_cache_write_count()
+                    .saturating_sub(usize::from(old_cache_bytes > 0))
+                    .saturating_add(usize::from(new_cache_bytes > 0));
+                let projected_cache_bytes = self
+                    .pending_cache_write_bytes
+                    .saturating_sub(old_cache_bytes)
+                    .saturating_add(new_cache_bytes);
+                if new_cache_bytes > 0
+                    && (projected_cache_count > MAX_PENDING_CACHE_WRITE_RECORDS
+                        || projected_cache_bytes > MAX_PENDING_CACHE_WRITE_BYTES)
+                {
+                    self.skipped_cache_writes = self.skipped_cache_writes.saturating_add(1);
+                    self.completions
+                        .push_back(WorldStoreCompletion::EntityChunkSaved {
+                            request_id,
+                            dimension,
+                            pos,
+                            result: Ok(StoreWriteOutcome::SkippedCachePressure),
+                        });
+                    return;
+                }
+                self.pending_cache_write_bytes = self
+                    .pending_cache_write_bytes
+                    .saturating_sub(old_cache_bytes)
+                    .saturating_add(new_cache_bytes);
+                self.pending_entity_chunk_writes.insert(address, incoming);
                 self.completions
                     .push_back(WorldStoreCompletion::EntityChunkSaved {
                         request_id: superseded_id,
@@ -1545,6 +1899,7 @@ impl PersistenceActor {
                         pos,
                         result: Ok(StoreWriteOutcome::Superseded),
                     });
+                self.record_cache_write_high_water();
             } else {
                 self.completions
                     .push_back(WorldStoreCompletion::EntityChunkSaved {
@@ -1557,7 +1912,24 @@ impl PersistenceActor {
             return;
         }
 
+        if !durability.is_durable() && !self.cache_write_fits(incoming.owned_bytes_estimate()) {
+            self.skipped_cache_writes = self.skipped_cache_writes.saturating_add(1);
+            self.completions
+                .push_back(WorldStoreCompletion::EntityChunkSaved {
+                    request_id,
+                    dimension,
+                    pos,
+                    result: Ok(StoreWriteOutcome::SkippedCachePressure),
+                });
+            return;
+        }
+        if !durability.is_durable() {
+            self.pending_cache_write_bytes = self
+                .pending_cache_write_bytes
+                .saturating_add(incoming.owned_bytes_estimate());
+        }
         self.pending_entity_chunk_writes.insert(address, incoming);
+        self.record_cache_write_high_water();
     }
 
     pub fn load_player(&mut self, request_id: PersistenceRequestId, player: PlayerRecordKey) {
@@ -1655,6 +2027,11 @@ impl PersistenceActor {
             .collect::<Vec<_>>()
         {
             if let Some(pending) = self.pending_chunk_writes.remove(&address) {
+                if !pending.durability.is_durable() {
+                    self.pending_cache_write_bytes = self
+                        .pending_cache_write_bytes
+                        .saturating_sub(pending.owned_bytes_estimate());
+                }
                 self.completions
                     .push_back(WorldStoreCompletion::ChunkSaved {
                         request_id: pending.request_id,
@@ -1671,6 +2048,11 @@ impl PersistenceActor {
             .collect::<Vec<_>>()
         {
             if let Some(pending) = self.pending_entity_chunk_writes.remove(&address) {
+                if !pending.durability.is_durable() {
+                    self.pending_cache_write_bytes = self
+                        .pending_cache_write_bytes
+                        .saturating_sub(pending.owned_bytes_estimate());
+                }
                 self.completions
                     .push_back(WorldStoreCompletion::EntityChunkSaved {
                         request_id: pending.request_id,
@@ -1712,6 +2094,81 @@ impl PersistenceActor {
 
     pub fn drain_completions(&mut self) -> Vec<WorldStoreCompletion> {
         self.completions.drain(..).collect()
+    }
+
+    fn release_cached_chunk(&mut self, dimension: &DimensionKey, pos: ChunkPos) {
+        self.store.release_cached_chunk(dimension, pos);
+    }
+
+    fn release_cached_entity_chunk(&mut self, dimension: &DimensionKey, pos: ChunkPos) {
+        self.store.release_cached_entity_chunk(dimension, pos);
+    }
+
+    fn queue_metrics(&self) -> PersistenceQueueMetrics {
+        let durable_write_requests = self
+            .pending_chunk_writes
+            .values()
+            .filter(|pending| pending.durability.is_durable())
+            .count()
+            + self
+                .pending_entity_chunk_writes
+                .values()
+                .filter(|pending| pending.durability.is_durable())
+                .count();
+        let durable_write_bytes = self
+            .pending_chunk_writes
+            .values()
+            .filter(|pending| pending.durability.is_durable())
+            .fold(0_usize, |bytes, pending| {
+                bytes.saturating_add(pending.owned_bytes_estimate())
+            })
+            .saturating_add(
+                self.pending_entity_chunk_writes
+                    .values()
+                    .filter(|pending| pending.durability.is_durable())
+                    .fold(0_usize, |bytes, pending| {
+                        bytes.saturating_add(pending.owned_bytes_estimate())
+                    }),
+            );
+        PersistenceQueueMetrics {
+            durable_write_requests,
+            durable_write_bytes,
+            cache_write_requests: self.pending_cache_write_count(),
+            cache_write_bytes: self.pending_cache_write_bytes,
+            high_water_durable_write_requests: durable_write_requests,
+            high_water_durable_write_bytes: durable_write_bytes,
+            high_water_cache_write_requests: self.high_water_cache_write_requests,
+            high_water_cache_write_bytes: self.high_water_cache_write_bytes,
+            skipped_cache_writes: self.skipped_cache_writes,
+            ..PersistenceQueueMetrics::default()
+        }
+    }
+
+    fn pending_cache_write_count(&self) -> usize {
+        self.pending_chunk_writes
+            .values()
+            .filter(|pending| !pending.durability.is_durable())
+            .count()
+            + self
+                .pending_entity_chunk_writes
+                .values()
+                .filter(|pending| !pending.durability.is_durable())
+                .count()
+    }
+
+    fn cache_write_fits(&self, owned_bytes: usize) -> bool {
+        self.pending_cache_write_count() < MAX_PENDING_CACHE_WRITE_RECORDS
+            && self.pending_cache_write_bytes.saturating_add(owned_bytes)
+                <= MAX_PENDING_CACHE_WRITE_BYTES
+    }
+
+    fn record_cache_write_high_water(&mut self) {
+        self.high_water_cache_write_requests = self
+            .high_water_cache_write_requests
+            .max(self.pending_cache_write_count());
+        self.high_water_cache_write_bytes = self
+            .high_water_cache_write_bytes
+            .max(self.pending_cache_write_bytes);
     }
 
     fn process_matching_pending_chunk_writes(
@@ -1797,6 +2254,11 @@ impl PersistenceActor {
         let Some(pending) = self.pending_chunk_writes.remove(&address) else {
             return Ok(());
         };
+        if !pending.durability.is_durable() {
+            self.pending_cache_write_bytes = self
+                .pending_cache_write_bytes
+                .saturating_sub(pending.owned_bytes_estimate());
+        }
         let result = self.store.save_chunk(&pending.dimension, &pending.record);
         let barrier_result = result.as_ref().map(|_| ()).map_err(duplicate_store_error);
         self.completions
@@ -1816,6 +2278,11 @@ impl PersistenceActor {
         let Some(pending) = self.pending_entity_chunk_writes.remove(&address) else {
             return Ok(());
         };
+        if !pending.durability.is_durable() {
+            self.pending_cache_write_bytes = self
+                .pending_cache_write_bytes
+                .saturating_sub(pending.owned_bytes_estimate());
+        }
         let result = self
             .store
             .save_entity_chunk(&pending.dimension, &pending.record);
@@ -1837,9 +2304,12 @@ struct ExternalLoadPersistenceActor {
     cached_chunk_records: BTreeMap<DimensionChunkPos, PendingChunkWrite>,
     cached_entity_chunk_records: BTreeMap<DimensionChunkPos, PendingEntityChunkWrite>,
     pending_external_loads: BTreeMap<PersistenceRequestId, ExternalLoadKey>,
+    cancelled_external_loads: BTreeSet<PersistenceRequestId>,
     external_requests: VecDeque<WorldStoreRequest>,
     completions: VecDeque<WorldStoreCompletion>,
     entity_chunks_supported: bool,
+    high_water_foreground_requests: usize,
+    cancelled_requests: u64,
     closed: bool,
 }
 
@@ -1851,9 +2321,12 @@ impl ExternalLoadPersistenceActor {
             cached_chunk_records: BTreeMap::new(),
             cached_entity_chunk_records: BTreeMap::new(),
             pending_external_loads: BTreeMap::new(),
+            cancelled_external_loads: BTreeSet::new(),
             external_requests: VecDeque::new(),
             completions: VecDeque::new(),
             entity_chunks_supported,
+            high_water_foreground_requests: 0,
+            cancelled_requests: 0,
             closed: false,
         }
     }
@@ -2035,6 +2508,9 @@ impl ExternalLoadPersistenceActor {
                     request_id,
                     ExternalLoadKey::Chunk(DimensionChunkPos::new(dimension.clone(), pos)),
                 );
+                self.high_water_foreground_requests = self
+                    .high_water_foreground_requests
+                    .max(self.pending_external_loads.len());
                 self.external_requests
                     .push_back(WorldStoreRequest::LoadChunk {
                         request_id,
@@ -2175,6 +2651,9 @@ impl ExternalLoadPersistenceActor {
                     request_id,
                     ExternalLoadKey::EntityChunk(DimensionChunkPos::new(dimension.clone(), pos)),
                 );
+                self.high_water_foreground_requests = self
+                    .high_water_foreground_requests
+                    .max(self.pending_external_loads.len());
                 self.external_requests
                     .push_back(WorldStoreRequest::LoadEntityChunk {
                         request_id,
@@ -2269,6 +2748,9 @@ impl ExternalLoadPersistenceActor {
             Ok(None) => {
                 self.pending_external_loads
                     .insert(request_id, ExternalLoadKey::Player(player.clone()));
+                self.high_water_foreground_requests = self
+                    .high_water_foreground_requests
+                    .max(self.pending_external_loads.len());
                 self.external_requests
                     .push_back(WorldStoreRequest::LoadPlayer { request_id, player });
             }
@@ -2352,6 +2834,64 @@ impl ExternalLoadPersistenceActor {
         self.pending_external_loads.len()
     }
 
+    fn cancel_request(&mut self, request_id: PersistenceRequestId) {
+        if let Some(index) = self
+            .external_requests
+            .iter()
+            .position(|request| request.request_id() == request_id)
+            && let Some(request) = self.external_requests.remove(index)
+        {
+            self.pending_external_loads.remove(&request_id);
+            self.cancelled_requests = self.cancelled_requests.saturating_add(1);
+            self.completions
+                .push_back(request.into_cancelled_completion());
+            return;
+        }
+        if self.pending_external_loads.contains_key(&request_id) {
+            self.cancelled_requests = self.cancelled_requests.saturating_add(1);
+            self.cancelled_external_loads.insert(request_id);
+        }
+    }
+
+    fn release_cached_chunk(&mut self, dimension: &DimensionKey, pos: ChunkPos) {
+        self.cached_chunk_records
+            .remove(&DimensionChunkPos::new(dimension.clone(), pos));
+        self.store.release_cached_chunk(dimension, pos);
+    }
+
+    fn release_cached_entity_chunk(&mut self, dimension: &DimensionKey, pos: ChunkPos) {
+        self.cached_entity_chunk_records
+            .remove(&DimensionChunkPos::new(dimension.clone(), pos));
+        self.store.release_cached_entity_chunk(dimension, pos);
+    }
+
+    fn queue_metrics(&self) -> PersistenceQueueMetrics {
+        let retained_record_cache_bytes = self
+            .cached_chunk_records
+            .values()
+            .fold(0_usize, |bytes, pending| {
+                bytes.saturating_add(pending.owned_bytes_estimate())
+            })
+            .saturating_add(
+                self.cached_entity_chunk_records
+                    .values()
+                    .fold(0_usize, |bytes, pending| {
+                        bytes.saturating_add(pending.owned_bytes_estimate())
+                    }),
+            );
+        PersistenceQueueMetrics {
+            foreground_requests: self.pending_external_loads.len(),
+            retained_record_cache_entries: self
+                .cached_chunk_records
+                .len()
+                .saturating_add(self.cached_entity_chunk_records.len()),
+            retained_record_cache_bytes,
+            high_water_foreground_requests: self.high_water_foreground_requests,
+            cancelled_requests: self.cancelled_requests,
+            ..PersistenceQueueMetrics::default()
+        }
+    }
+
     fn complete_external_request(
         &mut self,
         completion: WorldStoreCompletion,
@@ -2405,6 +2945,18 @@ impl ExternalLoadPersistenceActor {
                     "external chunk load request {request_id} was not pending"
                 )));
             }
+        }
+
+        if self.cancelled_external_loads.remove(&request_id) {
+            self.store.release_cached_chunk(&dimension, pos);
+            self.completions
+                .push_back(WorldStoreCompletion::ChunkLoaded {
+                    request_id,
+                    dimension,
+                    pos,
+                    result: Err(cancelled_error()),
+                });
+            return Ok(());
         }
 
         let result = result.and_then(|record| {
@@ -2463,6 +3015,18 @@ impl ExternalLoadPersistenceActor {
             }
         }
 
+        if self.cancelled_external_loads.remove(&request_id) {
+            self.store.release_cached_entity_chunk(&dimension, pos);
+            self.completions
+                .push_back(WorldStoreCompletion::EntityChunkLoaded {
+                    request_id,
+                    dimension,
+                    pos,
+                    result: Err(cancelled_error()),
+                });
+            return Ok(());
+        }
+
         let result = result.and_then(|record| {
             if let Some(record) = &record {
                 if record.pos != pos {
@@ -2511,6 +3075,15 @@ impl ExternalLoadPersistenceActor {
                     "external player load request {request_id} was not pending"
                 )));
             }
+        }
+        if self.cancelled_external_loads.remove(&request_id) {
+            self.completions
+                .push_back(WorldStoreCompletion::PlayerLoaded {
+                    request_id,
+                    player,
+                    result: Err(cancelled_error()),
+                });
+            return Ok(());
         }
         let result = result.and_then(|record| {
             if record
@@ -2596,13 +3169,36 @@ fn handle_world_store_request(actor: &mut PersistenceActor, request: WorldStoreR
 }
 
 #[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ThreadedRequestLane {
+    Foreground,
+    DurableWrite,
+    CacheWrite,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Clone, Copy, Debug)]
+struct ThreadedPendingRequest {
+    lane: ThreadedRequestLane,
+    owned_bytes: usize,
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 struct ThreadedPersistenceActor {
-    sender: Option<mpsc::Sender<WorldStoreRequest>>,
+    sender: Option<mpsc::SyncSender<WorldStoreRequest>>,
     completion_receiver: mpsc::Receiver<WorldStoreCompletion>,
     completion_buffer: VecDeque<WorldStoreCompletion>,
     worker: Option<JoinHandle<()>>,
+    cancellation_requests: Arc<Mutex<BTreeSet<PersistenceRequestId>>>,
     entity_chunks_supported: bool,
-    pending_requests: usize,
+    pending_requests: BTreeMap<PersistenceRequestId, ThreadedPendingRequest>,
+    high_water_foreground_requests: usize,
+    high_water_durable_write_requests: usize,
+    high_water_durable_write_bytes: usize,
+    high_water_cache_write_requests: usize,
+    high_water_cache_write_bytes: usize,
+    cancelled_requests: u64,
+    skipped_cache_writes: u64,
 }
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -2610,7 +3206,7 @@ impl fmt::Debug for ThreadedPersistenceActor {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.debug_struct("ThreadedPersistenceActor")
             .field("entity_chunks_supported", &self.entity_chunks_supported)
-            .field("pending_requests", &self.pending_requests)
+            .field("pending_requests", &self.pending_requests.len())
             .field("completion_buffer_len", &self.completion_buffer.len())
             .finish_non_exhaustive()
     }
@@ -2620,14 +3216,22 @@ impl fmt::Debug for ThreadedPersistenceActor {
 impl ThreadedPersistenceActor {
     fn new(store: Box<dyn WorldStore + Send>) -> ChunkStoreResult<Self> {
         let entity_chunks_supported = store.supports_entity_chunks();
-        let (sender, receiver) = mpsc::channel::<WorldStoreRequest>();
+        let (sender, receiver) =
+            mpsc::sync_channel::<WorldStoreRequest>(THREADED_REQUEST_CHANNEL_CAPACITY);
         let (completion_sender, completion_receiver) = mpsc::channel::<WorldStoreCompletion>();
+        let cancellation_requests = Arc::new(Mutex::new(BTreeSet::new()));
+        let worker_cancellation_requests = Arc::clone(&cancellation_requests);
         let worker = thread::Builder::new()
             .name("mclone-persistence".to_owned())
             .spawn(move || {
                 let store: Box<dyn WorldStore> = store;
                 let mut actor = PersistenceActor::new(store);
-                threaded_persistence_actor_loop(receiver, completion_sender, &mut actor);
+                threaded_persistence_actor_loop(
+                    receiver,
+                    completion_sender,
+                    worker_cancellation_requests,
+                    &mut actor,
+                );
             })?;
 
         Ok(Self {
@@ -2635,8 +3239,16 @@ impl ThreadedPersistenceActor {
             completion_receiver,
             completion_buffer: VecDeque::new(),
             worker: Some(worker),
+            cancellation_requests,
             entity_chunks_supported,
-            pending_requests: 0,
+            pending_requests: BTreeMap::new(),
+            high_water_foreground_requests: 0,
+            high_water_durable_write_requests: 0,
+            high_water_durable_write_bytes: 0,
+            high_water_cache_write_requests: 0,
+            high_water_cache_write_bytes: 0,
+            cancelled_requests: 0,
+            skipped_cache_writes: 0,
         })
     }
 
@@ -2645,20 +3257,83 @@ impl ThreadedPersistenceActor {
     }
 
     fn send_request(&mut self, request: WorldStoreRequest) {
-        let Some(sender) = &self.sender else {
+        self.drain_available_completions();
+        let Some(sender) = self.sender.clone() else {
             self.completion_buffer
                 .push_back(request.into_closed_completion());
             return;
         };
-        match sender.send(request) {
-            Ok(()) => {
-                self.pending_requests = self.pending_requests.saturating_add(1);
+
+        let lane = threaded_request_lane(&request);
+        let owned_bytes = request.owned_bytes_estimate();
+        match lane {
+            ThreadedRequestLane::Foreground => {
+                while self.pending_request_count(ThreadedRequestLane::Foreground)
+                    >= MAX_THREADED_FOREGROUND_REQUESTS
+                {
+                    if !self.wait_for_one_completion() {
+                        self.completion_buffer
+                            .push_back(request.into_closed_completion());
+                        return;
+                    }
+                }
             }
-            Err(error) => {
-                self.completion_buffer
-                    .push_back(error.0.into_closed_completion());
+            ThreadedRequestLane::DurableWrite => {
+                while self.pending_request_count(ThreadedRequestLane::DurableWrite)
+                    >= MAX_THREADED_DURABLE_WRITE_REQUESTS
+                    || (self.pending_request_bytes(ThreadedRequestLane::DurableWrite) > 0
+                        && self
+                            .pending_request_bytes(ThreadedRequestLane::DurableWrite)
+                            .saturating_add(owned_bytes)
+                            > MAX_THREADED_DURABLE_WRITE_BYTES)
+                {
+                    if !self.wait_for_one_completion() {
+                        self.completion_buffer
+                            .push_back(request.into_closed_completion());
+                        return;
+                    }
+                }
+            }
+            ThreadedRequestLane::CacheWrite => {
+                if self.pending_request_count(ThreadedRequestLane::CacheWrite)
+                    >= MAX_PENDING_CACHE_WRITE_RECORDS
+                    || self
+                        .pending_request_bytes(ThreadedRequestLane::CacheWrite)
+                        .saturating_add(owned_bytes)
+                        > MAX_PENDING_CACHE_WRITE_BYTES
+                {
+                    self.skipped_cache_writes = self.skipped_cache_writes.saturating_add(1);
+                    self.completion_buffer
+                        .push_back(request.into_cache_pressure_completion());
+                    return;
+                }
             }
         }
+
+        let request_id = request.request_id();
+        if lane == ThreadedRequestLane::CacheWrite {
+            match sender.try_send(request) {
+                Ok(()) => {}
+                Err(mpsc::TrySendError::Full(request)) => {
+                    self.skipped_cache_writes = self.skipped_cache_writes.saturating_add(1);
+                    self.completion_buffer
+                        .push_back(request.into_cache_pressure_completion());
+                    return;
+                }
+                Err(mpsc::TrySendError::Disconnected(request)) => {
+                    self.completion_buffer
+                        .push_back(request.into_closed_completion());
+                    return;
+                }
+            }
+        } else if let Err(error) = sender.send(request) {
+            self.completion_buffer
+                .push_back(error.0.into_closed_completion());
+            return;
+        }
+        self.pending_requests
+            .insert(request_id, ThreadedPendingRequest { lane, owned_bytes });
+        self.record_high_water();
     }
 
     fn close(&mut self, request_id: PersistenceRequestId) {
@@ -2670,7 +3345,7 @@ impl ThreadedPersistenceActor {
         if self.drain_available_completions() {
             return true;
         }
-        if self.pending_requests == 0 {
+        if self.pending_requests.is_empty() {
             return false;
         }
         match self
@@ -2683,7 +3358,7 @@ impl ThreadedPersistenceActor {
             }
             Err(mpsc::RecvTimeoutError::Timeout) => true,
             Err(mpsc::RecvTimeoutError::Disconnected) => {
-                self.pending_requests = 0;
+                self.pending_requests.clear();
                 false
             }
         }
@@ -2704,7 +3379,7 @@ impl ThreadedPersistenceActor {
                 }
                 Err(mpsc::TryRecvError::Empty) => break,
                 Err(mpsc::TryRecvError::Disconnected) => {
-                    self.pending_requests = 0;
+                    self.pending_requests.clear();
                     break;
                 }
             }
@@ -2713,8 +3388,89 @@ impl ThreadedPersistenceActor {
     }
 
     fn push_worker_completion(&mut self, completion: WorldStoreCompletion) {
-        self.pending_requests = self.pending_requests.saturating_sub(1);
+        let request_id = completion.request_id();
+        self.pending_requests.remove(&request_id);
+        self.cancellation_requests
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&request_id);
         self.completion_buffer.push_back(completion);
+    }
+
+    fn cancel_request(&mut self, request_id: PersistenceRequestId) {
+        if !self.pending_requests.contains_key(&request_id) {
+            return;
+        }
+        self.cancelled_requests = self.cancelled_requests.saturating_add(1);
+        self.cancellation_requests
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(request_id);
+    }
+
+    fn queue_metrics(&self) -> PersistenceQueueMetrics {
+        PersistenceQueueMetrics {
+            foreground_requests: self.pending_request_count(ThreadedRequestLane::Foreground),
+            durable_write_requests: self.pending_request_count(ThreadedRequestLane::DurableWrite),
+            durable_write_bytes: self.pending_request_bytes(ThreadedRequestLane::DurableWrite),
+            cache_write_requests: self.pending_request_count(ThreadedRequestLane::CacheWrite),
+            cache_write_bytes: self.pending_request_bytes(ThreadedRequestLane::CacheWrite),
+            high_water_foreground_requests: self.high_water_foreground_requests,
+            high_water_durable_write_requests: self.high_water_durable_write_requests,
+            high_water_durable_write_bytes: self.high_water_durable_write_bytes,
+            high_water_cache_write_requests: self.high_water_cache_write_requests,
+            high_water_cache_write_bytes: self.high_water_cache_write_bytes,
+            cancelled_requests: self.cancelled_requests,
+            skipped_cache_writes: self.skipped_cache_writes,
+            ..PersistenceQueueMetrics::default()
+        }
+    }
+
+    fn pending_request_count(&self, lane: ThreadedRequestLane) -> usize {
+        self.pending_requests
+            .values()
+            .filter(|pending| pending.lane == lane)
+            .count()
+    }
+
+    fn pending_request_bytes(&self, lane: ThreadedRequestLane) -> usize {
+        self.pending_requests
+            .values()
+            .filter(|pending| pending.lane == lane)
+            .fold(0_usize, |bytes, pending| {
+                bytes.saturating_add(pending.owned_bytes)
+            })
+    }
+
+    fn record_high_water(&mut self) {
+        self.high_water_foreground_requests = self
+            .high_water_foreground_requests
+            .max(self.pending_request_count(ThreadedRequestLane::Foreground));
+        self.high_water_durable_write_requests = self
+            .high_water_durable_write_requests
+            .max(self.pending_request_count(ThreadedRequestLane::DurableWrite));
+        self.high_water_durable_write_bytes = self
+            .high_water_durable_write_bytes
+            .max(self.pending_request_bytes(ThreadedRequestLane::DurableWrite));
+        self.high_water_cache_write_requests = self
+            .high_water_cache_write_requests
+            .max(self.pending_request_count(ThreadedRequestLane::CacheWrite));
+        self.high_water_cache_write_bytes = self
+            .high_water_cache_write_bytes
+            .max(self.pending_request_bytes(ThreadedRequestLane::CacheWrite));
+    }
+
+    fn wait_for_one_completion(&mut self) -> bool {
+        match self.completion_receiver.recv() {
+            Ok(completion) => {
+                self.push_worker_completion(completion);
+                true
+            }
+            Err(_) => {
+                self.pending_requests.clear();
+                false
+            }
+        }
     }
 }
 
@@ -2734,47 +3490,96 @@ impl Drop for ThreadedPersistenceActor {
 fn threaded_persistence_actor_loop(
     receiver: mpsc::Receiver<WorldStoreRequest>,
     completion_sender: mpsc::Sender<WorldStoreCompletion>,
+    cancellation_requests: Arc<Mutex<BTreeSet<PersistenceRequestId>>>,
     actor: &mut PersistenceActor,
 ) {
     loop {
-        if actor.has_pending_background_write() {
-            match receiver.recv_timeout(Duration::from_millis(1)) {
-                Ok(request) => {
-                    let should_close = matches!(request, WorldStoreRequest::Close { .. });
-                    handle_world_store_request(actor, request);
-                    if !forward_actor_completions(actor, &completion_sender) || should_close {
+        let request = if actor.has_pending_background_write() {
+            match receiver.try_recv() {
+                Ok(request) => Some(request),
+                Err(mpsc::TryRecvError::Empty) => {
+                    actor.process_one_background_write();
+                    if !forward_actor_completions(actor, &completion_sender) {
                         break;
                     }
+                    continue;
                 }
-                Err(mpsc::RecvTimeoutError::Timeout) => {
-                    if actor.process_one_background_write()
-                        && !forward_actor_completions(actor, &completion_sender)
-                    {
-                        break;
-                    }
-                }
-                Err(mpsc::RecvTimeoutError::Disconnected) => {
-                    actor.close(0);
-                    let _ = forward_actor_completions(actor, &completion_sender);
-                    break;
-                }
+                Err(mpsc::TryRecvError::Disconnected) => None,
             }
         } else {
             match receiver.recv() {
-                Ok(request) => {
-                    let should_close = matches!(request, WorldStoreRequest::Close { .. });
-                    handle_world_store_request(actor, request);
-                    if !forward_actor_completions(actor, &completion_sender) || should_close {
-                        break;
-                    }
-                }
-                Err(_) => {
-                    actor.close(0);
-                    let _ = forward_actor_completions(actor, &completion_sender);
-                    break;
-                }
+                Ok(request) => Some(request),
+                Err(_) => None,
             }
+        };
+        let Some(request) = request else {
+            actor.close(0);
+            let _ = forward_actor_completions(actor, &completion_sender);
+            break;
+        };
+        let request_id = request.request_id();
+        if cancellation_requests
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(&request_id)
+        {
+            if completion_sender
+                .send(request.into_cancelled_completion())
+                .is_err()
+            {
+                break;
+            }
+            if actor.process_one_background_write()
+                && !forward_actor_completions(actor, &completion_sender)
+            {
+                break;
+            }
+            continue;
         }
+
+        let should_close = matches!(request, WorldStoreRequest::Close { .. });
+        handle_world_store_request(actor, request);
+        if !forward_actor_completions(actor, &completion_sender) || should_close {
+            break;
+        }
+        if actor.process_one_background_write()
+            && !forward_actor_completions(actor, &completion_sender)
+        {
+            break;
+        }
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn threaded_request_lane(request: &WorldStoreRequest) -> ThreadedRequestLane {
+    match request {
+        WorldStoreRequest::LoadWorldMetadata { .. }
+        | WorldStoreRequest::LoadDimension { .. }
+        | WorldStoreRequest::LoadChunk { .. }
+        | WorldStoreRequest::LoadEntityChunk { .. }
+        | WorldStoreRequest::LoadPlayer { .. }
+        | WorldStoreRequest::LoadSavedData { .. } => ThreadedRequestLane::Foreground,
+        WorldStoreRequest::SaveChunk {
+            durability: SaveDurability::Cache,
+            ..
+        }
+        | WorldStoreRequest::SaveEntityChunk {
+            durability: SaveDurability::Cache,
+            ..
+        } => ThreadedRequestLane::CacheWrite,
+        WorldStoreRequest::SaveWorldMetadata { .. }
+        | WorldStoreRequest::SaveDimension { .. }
+        | WorldStoreRequest::SaveChunk {
+            durability: SaveDurability::Durable,
+            ..
+        }
+        | WorldStoreRequest::SaveEntityChunk {
+            durability: SaveDurability::Durable,
+            ..
+        }
+        | WorldStoreRequest::SavePlayer { .. }
+        | WorldStoreRequest::Flush { .. }
+        | WorldStoreRequest::Close { .. } => ThreadedRequestLane::DurableWrite,
     }
 }
 
@@ -2878,6 +3683,42 @@ impl PersistenceBackend {
             Self::Threaded(_) => 0,
         }
     }
+
+    fn cancel_request(&mut self, request_id: PersistenceRequestId) {
+        match self {
+            Self::Inline(_) => {}
+            Self::ExternalLoads(actor) => actor.cancel_request(request_id),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Threaded(actor) => actor.cancel_request(request_id),
+        }
+    }
+
+    fn release_cached_chunk(&mut self, dimension: &DimensionKey, pos: ChunkPos) {
+        match self {
+            Self::Inline(actor) => actor.release_cached_chunk(dimension, pos),
+            Self::ExternalLoads(actor) => actor.release_cached_chunk(dimension, pos),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Threaded(_) => {}
+        }
+    }
+
+    fn release_cached_entity_chunk(&mut self, dimension: &DimensionKey, pos: ChunkPos) {
+        match self {
+            Self::Inline(actor) => actor.release_cached_entity_chunk(dimension, pos),
+            Self::ExternalLoads(actor) => actor.release_cached_entity_chunk(dimension, pos),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Threaded(_) => {}
+        }
+    }
+
+    fn queue_metrics(&self) -> PersistenceQueueMetrics {
+        match self {
+            Self::Inline(actor) => actor.queue_metrics(),
+            Self::ExternalLoads(actor) => actor.queue_metrics(),
+            #[cfg(not(target_arch = "wasm32"))]
+            Self::Threaded(actor) => actor.queue_metrics(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -2885,6 +3726,7 @@ struct SharedPersistenceBackend {
     backend: PersistenceBackend,
     next_request_id: PersistenceRequestId,
     completions: VecDeque<WorldStoreCompletion>,
+    cancelled_requests: BTreeSet<PersistenceRequestId>,
 }
 
 #[derive(Debug)]
@@ -2906,6 +3748,7 @@ impl PersistenceMailbox {
                 backend: PersistenceBackend::Inline(PersistenceActor::new(store)),
                 next_request_id: 1,
                 completions: VecDeque::new(),
+                cancelled_requests: BTreeSet::new(),
             })),
             owned_requests: BTreeSet::new(),
         }
@@ -2927,6 +3770,7 @@ impl PersistenceMailbox {
                 )),
                 next_request_id: 1,
                 completions: VecDeque::new(),
+                cancelled_requests: BTreeSet::new(),
             })),
             owned_requests: BTreeSet::new(),
         }
@@ -2948,6 +3792,7 @@ impl PersistenceMailbox {
                 backend: PersistenceBackend::Threaded(ThreadedPersistenceActor::new(store)?),
                 next_request_id: 1,
                 completions: VecDeque::new(),
+                cancelled_requests: BTreeSet::new(),
             })),
             owned_requests: BTreeSet::new(),
         })
@@ -3130,6 +3975,44 @@ impl PersistenceMailbox {
             .pending_external_request_count()
     }
 
+    pub fn cancel_request(&mut self, request_id: PersistenceRequestId) -> bool {
+        if !self.owned_requests.remove(&request_id) {
+            return false;
+        }
+        let mut shared = self.shared.borrow_mut();
+        if let Some(index) = shared
+            .completions
+            .iter()
+            .position(|completion| completion.request_id() == request_id)
+        {
+            shared.completions.remove(index);
+            return true;
+        }
+        shared.cancelled_requests.insert(request_id);
+        shared.backend.cancel_request(request_id);
+        true
+    }
+
+    pub fn release_cached_chunk(&mut self, pos: ChunkPos) {
+        let dimension = self.dimension.clone();
+        self.shared
+            .borrow_mut()
+            .backend
+            .release_cached_chunk(&dimension, pos);
+    }
+
+    pub fn release_cached_entity_chunk(&mut self, pos: ChunkPos) {
+        let dimension = self.dimension.clone();
+        self.shared
+            .borrow_mut()
+            .backend
+            .release_cached_entity_chunk(&dimension, pos);
+    }
+
+    pub fn queue_metrics(&self) -> PersistenceQueueMetrics {
+        self.shared.borrow().backend.queue_metrics()
+    }
+
     pub fn load_chunk_blocking(&mut self, pos: ChunkPos) -> ChunkStoreResult<Option<ChunkRecord>> {
         let request_id = self.load_chunk(pos);
         match self.take_or_run_until_completion(request_id)? {
@@ -3299,7 +4182,12 @@ impl PersistenceMailbox {
     fn collect_shared_completions(&mut self) {
         let mut shared = self.shared.borrow_mut();
         let completions = shared.backend.drain_completions();
-        shared.completions.extend(completions);
+        for completion in completions {
+            if shared.cancelled_requests.remove(&completion.request_id()) {
+                continue;
+            }
+            shared.completions.push_back(completion);
+        }
     }
 
     fn take_or_run_until_completion(
@@ -3354,6 +4242,9 @@ impl SynchronousPersistenceFacade {
         )?;
         match outcome {
             StoreWriteOutcome::Written | StoreWriteOutcome::Superseded => Ok(()),
+            StoreWriteOutcome::SkippedCachePressure => Err(ChunkStoreError::InvalidData(
+                "durable synchronous chunk save hit cache-only pressure".to_owned(),
+            )),
             StoreWriteOutcome::SkippedOnClose => Err(closed_error()),
         }
     }
@@ -6090,6 +6981,139 @@ mod tests {
     }
 
     #[test]
+    fn actor_bounds_distinct_generated_cache_records() {
+        let mut mailbox = PersistenceMailbox::memory();
+        let request_ids = (0..MAX_PENDING_CACHE_WRITE_RECORDS + 16)
+            .map(|index| {
+                mailbox.save_chunk(
+                    test_record(ChunkPos::new(index as i32, 0), index as u64 + 1),
+                    SaveDurability::Cache,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let metrics = mailbox.queue_metrics();
+        assert!(metrics.cache_write_requests <= MAX_PENDING_CACHE_WRITE_RECORDS);
+        assert!(metrics.cache_write_bytes <= MAX_PENDING_CACHE_WRITE_BYTES);
+        assert_eq!(metrics.skipped_cache_writes, 16);
+
+        mailbox.process_all_background_writes();
+        let outcomes = request_ids
+            .into_iter()
+            .map(|request_id| take_saved_chunk(&mut mailbox, request_id))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|outcome| **outcome == StoreWriteOutcome::SkippedCachePressure)
+                .count(),
+            16
+        );
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|outcome| **outcome == StoreWriteOutcome::Written)
+                .count(),
+            MAX_PENDING_CACHE_WRITE_RECORDS
+        );
+    }
+
+    #[test]
+    fn actor_applies_cache_byte_bound_before_record_bound() {
+        let mut mailbox = PersistenceMailbox::memory();
+        let request_ids = (0..20)
+            .map(|index| {
+                let mut record = test_record(ChunkPos::new(100 + index, 0), index as u64 + 1);
+                record.snapshot.biomes = vec![0; 512 * 1024];
+                mailbox.save_chunk(record, SaveDurability::Cache)
+            })
+            .collect::<Vec<_>>();
+
+        let metrics = mailbox.queue_metrics();
+        assert!(metrics.cache_write_requests < request_ids.len());
+        assert!(metrics.cache_write_requests < MAX_PENDING_CACHE_WRITE_RECORDS);
+        assert!(metrics.cache_write_bytes <= MAX_PENDING_CACHE_WRITE_BYTES);
+        assert!(metrics.skipped_cache_writes > 0);
+
+        mailbox.process_all_background_writes();
+        let outcomes = request_ids
+            .into_iter()
+            .map(|request_id| take_saved_chunk(&mut mailbox, request_id))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|outcome| **outcome == StoreWriteOutcome::SkippedCachePressure)
+                .count() as u64,
+            metrics.skipped_cache_writes
+        );
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|outcome| **outcome == StoreWriteOutcome::Written)
+                .count(),
+            metrics.cache_write_requests
+        );
+    }
+
+    #[test]
+    fn external_load_cancellation_removes_queued_and_late_records() {
+        let mut mailbox = PersistenceMailbox::external_loads(Box::<MemoryWorldStore>::default());
+        let queued_pos = ChunkPos::new(30, 0);
+        let queued_id = mailbox.load_chunk(queued_pos);
+        assert!(mailbox.cancel_request(queued_id));
+        assert!(mailbox.drain_external_requests().is_empty());
+        assert!(mailbox.drain_completions().is_empty());
+
+        let late_pos = ChunkPos::new(31, 0);
+        let late_id = mailbox.load_chunk(late_pos);
+        let request = mailbox
+            .drain_external_requests()
+            .pop()
+            .expect("late external request");
+        assert_eq!(request.request_id(), late_id);
+        assert!(mailbox.cancel_request(late_id));
+        mailbox
+            .complete_external_request(WorldStoreCompletion::ChunkLoaded {
+                request_id: late_id,
+                dimension: DimensionKey::overworld(),
+                pos: late_pos,
+                result: Ok(Some(test_record(late_pos, 1))),
+            })
+            .unwrap();
+        assert!(mailbox.drain_completions().is_empty());
+
+        let metrics = mailbox.queue_metrics();
+        assert_eq!(metrics.foreground_requests, 0);
+        assert_eq!(metrics.retained_record_cache_entries, 0);
+        assert_eq!(metrics.cancelled_requests, 2);
+    }
+
+    #[test]
+    fn external_record_cache_releases_with_chunk_residency() {
+        let mut mailbox = PersistenceMailbox::external_loads(Box::<MemoryWorldStore>::default());
+        let pos = ChunkPos::new(32, 0);
+        let request_id = mailbox.load_chunk(pos);
+        assert_eq!(mailbox.drain_external_requests().len(), 1);
+        mailbox
+            .complete_external_request(WorldStoreCompletion::ChunkLoaded {
+                request_id,
+                dimension: DimensionKey::overworld(),
+                pos,
+                result: Ok(Some(test_record(pos, 1))),
+            })
+            .unwrap();
+        assert!(take_loaded_chunk(&mut mailbox, request_id).is_some());
+        assert_eq!(mailbox.queue_metrics().retained_record_cache_entries, 1);
+
+        mailbox.release_cached_chunk(pos);
+        assert_eq!(mailbox.queue_metrics().retained_record_cache_entries, 0);
+        let reload_id = mailbox.load_chunk(pos);
+        assert_eq!(mailbox.drain_external_requests().len(), 1);
+        assert!(mailbox.cancel_request(reload_id));
+    }
+
+    #[test]
     fn actor_flush_waits_for_pending_durable_writes() {
         let mut mailbox = PersistenceMailbox::memory();
         let durable_pos = ChunkPos::new(12, 0);
@@ -6261,6 +7285,211 @@ mod tests {
             take_saved_chunk_wait(&mut mailbox, save_id),
             StoreWriteOutcome::Written
         );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn threaded_worker_advances_a_write_before_the_next_foreground_read() {
+        let operations = Arc::new(Mutex::new(Vec::new()));
+        let store = OperationOrderWorldStore {
+            operations: Arc::clone(&operations),
+        };
+        let (request_sender, request_receiver) = mpsc::sync_channel(4);
+        request_sender
+            .send(WorldStoreRequest::SaveChunk {
+                request_id: 1,
+                dimension: DimensionKey::overworld(),
+                record: test_record(ChunkPos::new(21, 0), 1),
+                durability: SaveDurability::Cache,
+            })
+            .unwrap();
+        request_sender
+            .send(WorldStoreRequest::LoadChunk {
+                request_id: 2,
+                dimension: DimensionKey::overworld(),
+                pos: ChunkPos::new(22, 0),
+            })
+            .unwrap();
+        drop(request_sender);
+        let (completion_sender, _completion_receiver) = mpsc::channel();
+        let mut actor = PersistenceActor::new(Box::new(store));
+
+        threaded_persistence_actor_loop(
+            request_receiver,
+            completion_sender,
+            Arc::new(Mutex::new(BTreeSet::new())),
+            &mut actor,
+        );
+
+        assert_eq!(
+            operations
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .as_slice(),
+            ["save", "load"]
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn threaded_mailbox_bounds_cache_records_while_storage_is_blocked() {
+        let (save_started_sender, save_started_receiver) = mpsc::channel();
+        let (save_release_sender, save_release_receiver) = mpsc::channel();
+        let store = ReleasableWorldStore::new(save_started_sender, save_release_receiver);
+        let mut mailbox = PersistenceMailbox::threaded(Box::new(store)).unwrap();
+        let first_id =
+            mailbox.save_chunk(test_record(ChunkPos::new(40, 0), 1), SaveDurability::Cache);
+        save_started_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("first cache write should block in the test store");
+
+        let mut request_ids = vec![first_id];
+        request_ids.extend((1..MAX_PENDING_CACHE_WRITE_RECORDS + 16).map(|index| {
+            mailbox.save_chunk(
+                test_record(ChunkPos::new(40 + index as i32, 0), index as u64 + 1),
+                SaveDurability::Cache,
+            )
+        }));
+        let metrics = mailbox.queue_metrics();
+        assert!(metrics.cache_write_requests <= MAX_PENDING_CACHE_WRITE_RECORDS);
+        assert!(metrics.cache_write_bytes <= MAX_PENDING_CACHE_WRITE_BYTES);
+        assert!(metrics.skipped_cache_writes >= 16);
+
+        save_release_sender.send(()).unwrap();
+        let outcomes = request_ids
+            .into_iter()
+            .map(
+                |request_id| match take_completion_wait(&mut mailbox, request_id) {
+                    WorldStoreCompletion::ChunkSaved { result, .. } => result.unwrap(),
+                    completion => panic!("unexpected completion: {completion:?}"),
+                },
+            )
+            .collect::<Vec<_>>();
+        assert!(
+            outcomes
+                .iter()
+                .any(|outcome| *outcome == StoreWriteOutcome::SkippedCachePressure)
+        );
+        assert!(
+            outcomes
+                .iter()
+                .any(|outcome| *outcome == StoreWriteOutcome::Written)
+        );
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn threaded_mailbox_backpressures_durable_records_without_dropping_them() {
+        let (save_started_sender, _save_started_receiver) = mpsc::channel();
+        let (save_release_sender, save_release_receiver) = mpsc::channel();
+        let (ready_sender, ready_receiver) = mpsc::channel();
+        let (finished_sender, finished_receiver) = mpsc::channel();
+        let producer = thread::spawn(move || {
+            let store = ReleasableWorldStore::new(save_started_sender, save_release_receiver);
+            let mut mailbox = PersistenceMailbox::threaded(Box::new(store)).unwrap();
+            let mut request_ids = vec![mailbox.save_chunk(
+                test_record(ChunkPos::new(60, 0), 1),
+                SaveDurability::Durable,
+            )];
+            request_ids.extend((1..MAX_THREADED_DURABLE_WRITE_REQUESTS).map(|index| {
+                mailbox.save_chunk(
+                    test_record(ChunkPos::new(60 + index as i32, 0), index as u64 + 1),
+                    SaveDurability::Durable,
+                )
+            }));
+            ready_sender.send(mailbox.queue_metrics()).unwrap();
+
+            request_ids.push(mailbox.save_chunk(
+                test_record(
+                    ChunkPos::new(60 + MAX_THREADED_DURABLE_WRITE_REQUESTS as i32, 0),
+                    MAX_THREADED_DURABLE_WRITE_REQUESTS as u64 + 1,
+                ),
+                SaveDurability::Durable,
+            ));
+            let outcomes = request_ids
+                .into_iter()
+                .map(
+                    |request_id| match take_completion_wait(&mut mailbox, request_id) {
+                        WorldStoreCompletion::ChunkSaved { result, .. } => result.unwrap(),
+                        completion => panic!("unexpected completion: {completion:?}"),
+                    },
+                )
+                .collect::<Vec<_>>();
+            finished_sender.send(outcomes).unwrap();
+        });
+
+        let metrics = ready_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("producer should fill the durable lane");
+        assert_eq!(
+            metrics.durable_write_requests,
+            MAX_THREADED_DURABLE_WRITE_REQUESTS
+        );
+        assert_eq!(
+            metrics.high_water_durable_write_requests,
+            MAX_THREADED_DURABLE_WRITE_REQUESTS
+        );
+        assert_eq!(
+            finished_receiver.recv_timeout(Duration::from_millis(20)),
+            Err(mpsc::RecvTimeoutError::Timeout),
+            "the record beyond the durable bound should wait for capacity"
+        );
+
+        save_release_sender.send(()).unwrap();
+        let outcomes = finished_receiver
+            .recv_timeout(Duration::from_secs(2))
+            .expect("all durable writes should finish after storage resumes");
+        assert_eq!(
+            outcomes,
+            vec![StoreWriteOutcome::Written; MAX_THREADED_DURABLE_WRITE_REQUESTS + 1]
+        );
+        producer.join().unwrap();
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    #[test]
+    fn threaded_mailbox_cancels_a_queued_chunk_load_before_storage() {
+        let (save_started_sender, save_started_receiver) = mpsc::channel();
+        let (save_release_sender, save_release_receiver) = mpsc::channel();
+        let load_calls = Arc::new(Mutex::new(0_usize));
+        let store = ReleasableWorldStore::new(save_started_sender, save_release_receiver)
+            .with_load_calls(Arc::clone(&load_calls));
+        let mut mailbox = PersistenceMailbox::threaded(Box::new(store)).unwrap();
+        let save_id = mailbox.save_chunk(
+            test_record(ChunkPos::new(80, 0), 1),
+            SaveDurability::Durable,
+        );
+        save_started_receiver
+            .recv_timeout(Duration::from_secs(1))
+            .expect("first durable write should block in the test store");
+
+        let load_id = mailbox.load_chunk(ChunkPos::new(81, 0));
+        assert!(mailbox.cancel_request(load_id));
+        save_release_sender.send(()).unwrap();
+        assert!(matches!(
+            take_completion_wait(&mut mailbox, save_id),
+            WorldStoreCompletion::ChunkSaved {
+                result: Ok(StoreWriteOutcome::Written),
+                ..
+            }
+        ));
+
+        let deadline = std::time::Instant::now() + Duration::from_secs(1);
+        while mailbox.queue_metrics().foreground_requests != 0 {
+            assert!(
+                std::time::Instant::now() < deadline,
+                "cancelled load should leave the threaded foreground lane"
+            );
+            let _ = mailbox.process_one_background_write();
+        }
+        assert_eq!(
+            *load_calls
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+            0
+        );
+        assert!(mailbox.queue_metrics().cancelled_requests >= 1);
+        assert!(mailbox.take_completion(load_id).is_none());
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -6971,6 +8200,48 @@ mod tests {
         inner: MemoryWorldStore,
         save_started_sender: mpsc::Sender<()>,
         save_release_receiver: mpsc::Receiver<()>,
+        blocked_first_save: bool,
+        load_calls: Option<Arc<Mutex<usize>>>,
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    struct OperationOrderWorldStore {
+        operations: Arc<Mutex<Vec<&'static str>>>,
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    impl fmt::Debug for OperationOrderWorldStore {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            f.debug_struct("OperationOrderWorldStore")
+                .finish_non_exhaustive()
+        }
+    }
+
+    #[cfg(not(target_arch = "wasm32"))]
+    impl WorldStore for OperationOrderWorldStore {
+        fn load_chunk(
+            &mut self,
+            _dimension: &DimensionKey,
+            _pos: ChunkPos,
+        ) -> ChunkStoreResult<Option<ChunkRecord>> {
+            self.operations
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .push("load");
+            Ok(None)
+        }
+
+        fn save_chunk(
+            &mut self,
+            _dimension: &DimensionKey,
+            _record: &ChunkRecord,
+        ) -> ChunkStoreResult<()> {
+            self.operations
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .push("save");
+            Ok(())
+        }
     }
 
     #[cfg(not(target_arch = "wasm32"))]
@@ -6983,7 +8254,14 @@ mod tests {
                 inner: MemoryWorldStore::new(),
                 save_started_sender,
                 save_release_receiver,
+                blocked_first_save: false,
+                load_calls: None,
             }
+        }
+
+        fn with_load_calls(mut self, load_calls: Arc<Mutex<usize>>) -> Self {
+            self.load_calls = Some(load_calls);
+            self
         }
     }
 
@@ -7006,6 +8284,12 @@ mod tests {
             dimension: &DimensionKey,
             pos: ChunkPos,
         ) -> ChunkStoreResult<Option<ChunkRecord>> {
+            if let Some(load_calls) = &self.load_calls {
+                let mut count = load_calls
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                *count = count.saturating_add(1);
+            }
             self.inner.load_chunk(dimension, pos)
         }
 
@@ -7014,14 +8298,17 @@ mod tests {
             dimension: &DimensionKey,
             record: &ChunkRecord,
         ) -> ChunkStoreResult<()> {
-            let _ = self.save_started_sender.send(());
-            self.save_release_receiver
-                .recv_timeout(Duration::from_secs(1))
-                .map_err(|error| {
-                    ChunkStoreError::InvalidData(format!(
-                        "test store write was not released: {error}"
-                    ))
-                })?;
+            if !self.blocked_first_save {
+                self.blocked_first_save = true;
+                let _ = self.save_started_sender.send(());
+                self.save_release_receiver
+                    .recv_timeout(Duration::from_secs(1))
+                    .map_err(|error| {
+                        ChunkStoreError::InvalidData(format!(
+                            "test store write was not released: {error}"
+                        ))
+                    })?;
+            }
             self.inner.save_chunk(dimension, record)
         }
 

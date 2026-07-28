@@ -1426,6 +1426,10 @@ impl ChunkScheduler {
             + self.pending_player_saves.len()
     }
 
+    pub fn persistence_queue_metrics(&self) -> crate::PersistenceQueueMetrics {
+        self.store.queue_metrics()
+    }
+
     pub fn load_world_metadata_blocking(&mut self) -> ChunkStoreResult<WorldMetadataLoad> {
         self.store.load_world_metadata_blocking()
     }
@@ -2850,6 +2854,8 @@ impl ChunkScheduler {
             self.loaded_entity_chunks.remove(&pos);
             self.entity_unload_saves.remove(&pos);
             self.holders.remove(&pos);
+            self.store.release_cached_chunk(pos);
+            self.store.release_cached_entity_chunk(pos);
             self.pending_unloads.remove(&pos);
             processed += 1;
             if self.lighting_enabled {
@@ -2902,6 +2908,8 @@ impl ChunkScheduler {
                 .collect::<Vec<_>>()
             {
                 timing.holder_update_count = timing.holder_update_count.saturating_add(1);
+                self.clear_pending_chunk_load(pos);
+                self.clear_pending_entity_chunk_load(pos);
                 let holder = self.holders.get_mut(&pos).expect("holder key disappeared");
                 holder.set_ticket_level(UNLOADED_CHUNK_LEVEL);
                 if holder.client_visible {
@@ -2928,6 +2936,10 @@ impl ChunkScheduler {
                 } else {
                     ticket_level_dependency_status_target(ticket_level)
                 };
+                if target_status < ChunkStatus::Features {
+                    self.clear_pending_chunk_load(pos);
+                    self.clear_pending_entity_chunk_load(pos);
+                }
                 let mut snapshot_to_publish = None;
                 {
                     let holder = self
@@ -2994,6 +3006,10 @@ impl ChunkScheduler {
         let mut events = Vec::new();
         let mut to_generate = Vec::new();
         let load_request_limit = self.chunk_load_request_limit(desired_chunks.len());
+        let chunk_load_request_slots =
+            load_request_limit.saturating_sub(self.pending_chunk_loads.len());
+        let entity_load_request_slots =
+            load_request_limit.saturating_sub(self.pending_entity_chunk_loads.len());
         let mut scheduled_chunk_loads = 0_usize;
         let mut scheduled_entity_loads = 0_usize;
 
@@ -3002,7 +3018,9 @@ impl ChunkScheduler {
                 .entry(pos)
                 .or_insert_with(|| ChunkHolder::new(pos))
                 .target_status = Some(target_status);
-            if scheduled_entity_loads < load_request_limit && self.schedule_entity_chunk_load(pos) {
+            if scheduled_entity_loads < entity_load_request_slots
+                && self.schedule_entity_chunk_load(pos)
+            {
                 scheduled_entity_loads += 1;
             }
 
@@ -3019,7 +3037,7 @@ impl ChunkScheduler {
                     {
                         if self.stored_chunk_misses.contains(&pos) {
                             to_generate.push(pos);
-                        } else if scheduled_chunk_loads < load_request_limit
+                        } else if scheduled_chunk_loads < chunk_load_request_slots
                             && self.schedule_chunk_load(pos, target_status)
                         {
                             scheduled_chunk_loads += 1;
@@ -3046,7 +3064,7 @@ impl ChunkScheduler {
                 if status == ChunkStatus::Features {
                     if self.stored_chunk_misses.contains(&pos) {
                         to_generate.push(pos);
-                    } else if scheduled_chunk_loads < load_request_limit
+                    } else if scheduled_chunk_loads < chunk_load_request_slots
                         && self.schedule_chunk_load(pos, target_status)
                     {
                         scheduled_chunk_loads += 1;
@@ -3792,12 +3810,14 @@ impl ChunkScheduler {
     fn clear_pending_chunk_load(&mut self, pos: ChunkPos) {
         if let Some(request_id) = self.pending_chunk_load_by_pos.remove(&pos) {
             self.pending_chunk_loads.remove(&request_id);
+            self.store.cancel_request(request_id);
         }
     }
 
     fn clear_pending_entity_chunk_load(&mut self, pos: ChunkPos) {
         if let Some(request_id) = self.pending_entity_chunk_load_by_pos.remove(&pos) {
             self.pending_entity_chunk_loads.remove(&request_id);
+            self.store.cancel_request(request_id);
         }
     }
 
@@ -5149,6 +5169,50 @@ mod tests {
         );
         assert_eq!(metrics.latest_feature_job_first_target, Some(center));
         assert!(scheduler.pending_persistence_load_count() <= BACKGROUND_CHUNK_LOAD_REQUEST_LIMIT);
+    }
+
+    #[test]
+    fn moving_interest_cancels_obsolete_storage_probes_before_unload() {
+        let mut scheduler = ChunkScheduler::with_external_load_world_store(
+            12_345,
+            Box::<crate::MemoryWorldStore>::default(),
+        );
+        scheduler.set_lighting_enabled(false);
+        scheduler
+            .apply_interest(ChunkView {
+                center: ChunkPos::new(0, 0),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            })
+            .unwrap();
+        let obsolete_request_ids = scheduler
+            .pending_chunk_loads
+            .keys()
+            .chain(scheduler.pending_entity_chunk_loads.keys())
+            .copied()
+            .collect::<BTreeSet<_>>();
+        assert!(!obsolete_request_ids.is_empty());
+
+        scheduler
+            .apply_interest(ChunkView {
+                center: ChunkPos::new(10_000, 10_000),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            })
+            .unwrap();
+
+        let external_requests = scheduler.drain_external_persistence_requests();
+        assert!(
+            external_requests
+                .iter()
+                .all(|request| !obsolete_request_ids.contains(&request.request_id()))
+        );
+        assert!(
+            scheduler.persistence_queue_metrics().cancelled_requests
+                >= obsolete_request_ids.len() as u64
+        );
+        assert!(scheduler.pending_chunk_loads.len() <= BACKGROUND_CHUNK_LOAD_REQUEST_LIMIT);
+        assert!(scheduler.pending_entity_chunk_loads.len() <= BACKGROUND_CHUNK_LOAD_REQUEST_LIMIT);
     }
 
     #[test]

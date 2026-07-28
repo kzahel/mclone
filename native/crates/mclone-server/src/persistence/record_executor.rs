@@ -218,6 +218,8 @@ pub trait PersistenceRecordExecutor: fmt::Debug {
     /// Apply every mutation atomically or apply none of them.
     fn commit(&mut self, batch: &PersistenceRecordBatch) -> ChunkStoreResult<()>;
 
+    fn release_cached_record(&mut self, _address: &PersistenceRecordAddress) {}
+
     fn flush(&mut self) -> ChunkStoreResult<()> {
         Ok(())
     }
@@ -419,6 +421,14 @@ impl<E: PersistenceRecordExecutor> WorldStore for RecordExecutorWorldStore<E> {
         ))
     }
 
+    fn release_cached_chunk(&mut self, dimension: &DimensionKey, pos: ChunkPos) {
+        self.executor.release_cached_record(&chunk_record_address(
+            PersistenceRecordNamespace::Chunk,
+            dimension,
+            pos,
+        ));
+    }
+
     fn load_entity_chunk(
         &mut self,
         dimension: &DimensionKey,
@@ -464,6 +474,14 @@ impl<E: PersistenceRecordExecutor> WorldStore for RecordExecutorWorldStore<E> {
                 encode_entity_chunk_record(record)?,
             ),
         ))
+    }
+
+    fn release_cached_entity_chunk(&mut self, dimension: &DimensionKey, pos: ChunkPos) {
+        self.executor.release_cached_record(&chunk_record_address(
+            PersistenceRecordNamespace::EntityChunk,
+            dimension,
+            pos,
+        ));
     }
 
     fn load_player(&mut self, player: &PlayerRecordKey) -> ChunkStoreResult<Option<PlayerRecord>> {

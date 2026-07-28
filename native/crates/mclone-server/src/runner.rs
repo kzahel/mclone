@@ -25,9 +25,9 @@ use crate::SimulationCadence;
 use crate::{
     ChunkLoadingProgressSnapshot, ChunkLoadingProgressStats, ChunkSchedulerMetrics,
     ChunkSchedulerPublicationDiagnostics, ChunkStoreError, LightStatusMailboxKind,
-    NaturalSpawningDiagnostics, PlayerChunkTrackingDiagnostics, ServerPhysicsTickDiagnostics,
-    ServerSimulationTickReport, ServerSimulationTickTiming, SimulationCadenceConfig,
-    WorldgenMailboxKind,
+    NaturalSpawningDiagnostics, PersistenceQueueMetrics, PlayerChunkTrackingDiagnostics,
+    ServerPhysicsTickDiagnostics, ServerSimulationTickReport, ServerSimulationTickTiming,
+    SimulationCadenceConfig, WorldgenMailboxKind,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -340,6 +340,7 @@ pub struct ServerRunnerDiagnostics {
     pub pending_publications: usize,
     pub pending_persistence_loads: usize,
     pub pending_persistence_saves: usize,
+    pub persistence_queue_metrics: PersistenceQueueMetrics,
     pub worldgen_mailbox_kind: WorldgenMailboxKind,
     pub light_status_mailbox_kind: LightStatusMailboxKind,
     pub worldgen_mailbox_pending_jobs: usize,
@@ -382,6 +383,7 @@ impl ServerRunnerDiagnostics {
             pending_publications: 0,
             pending_persistence_loads: 0,
             pending_persistence_saves: 0,
+            persistence_queue_metrics: PersistenceQueueMetrics::default(),
             worldgen_mailbox_kind: WorldgenMailboxKind::Inline,
             light_status_mailbox_kind: LightStatusMailboxKind::Inline,
             worldgen_mailbox_pending_jobs: 0,
@@ -1726,6 +1728,7 @@ mod native {
         let pending_publications = server.pending_publication_count();
         let pending_persistence_loads = server.scheduler().pending_persistence_load_count();
         let pending_persistence_saves = server.scheduler().pending_persistence_save_count();
+        let persistence_queue_metrics = server.scheduler().persistence_queue_metrics();
         let detail_snapshot = diagnostics_detail_sampler
             .should_refresh(now, force_detail)
             .then(|| DiagnosticsDetailSnapshot::from_server(server));
@@ -1744,6 +1747,7 @@ mod native {
         diagnostics.pending_publications = pending_publications;
         diagnostics.pending_persistence_loads = pending_persistence_loads;
         diagnostics.pending_persistence_saves = pending_persistence_saves;
+        diagnostics.persistence_queue_metrics = persistence_queue_metrics;
         if let Some(detail_snapshot) = detail_snapshot {
             diagnostics.worldgen_mailbox_kind = detail_snapshot.worldgen_mailbox_kind;
             diagnostics.light_status_mailbox_kind = detail_snapshot.light_status_mailbox_kind;

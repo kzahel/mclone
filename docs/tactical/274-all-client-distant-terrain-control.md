@@ -55,9 +55,10 @@ The accepted PH-4 implementation has known limitations:
 
 - live exact natural-tree meshes can overlap proxy-owned frontier trees;
 - the full-quality browser path can settle slowly;
-- flat Android and real headset performance have not yet been characterized;
-- per-eye XR has preliminary composition plumbing but previously retained the
-  ordinary 700-block far plane;
+- flat Android performance has not yet been characterized;
+- the first real Quest 3 session confirmed the per-eye horizon and full
+  projection reach, but sustained high-speed persistent-world travel ended in
+  an exact-terrain starvation symptom and a platform low-memory kill;
 - full-frame multiview has no procedural-horizon pipeline; and
 - remote hosts do not yet publish generator/profile facts suitable for local
   procedural reconstruction.
@@ -106,7 +107,10 @@ These are experiment follow-ups, not reasons to keep the setting hidden.
   open.
 - [ ] Flat Android APK plus an AVD screenshot when the host is available.
 - [x] Synthetic stereo capture with horizon pixels in both eyes.
-- [ ] Desktop OpenXR and Quest per-eye build/runtime validation as available.
+- [ ] Desktop OpenXR per-eye runtime validation as available.
+- [x] Quest 3 per-eye interactive validation. The distant view was compelling
+  and remained visible during high-altitude, 8x-speed travel; the same session
+  exposed the exact-terrain starvation / low-memory failure recorded below.
 - [x] Android XR APK validation through the scripted NDK lane.
 
 ## Implementation And Evidence
@@ -161,20 +165,78 @@ the committed renderer now delegates through
 `render_full_frame_for_view_inner_with_backdrop`. This change does not touch
 that renderer file.
 
+### Quest 3 sustained-travel failure
+
+Interactive acceptance on Quest 3 `2G0YC1ZF93041Z` provided the first physical
+per-eye product evidence. The viewer could fly high enough to see an unusually
+large Minecraft-scale landscape and travel for an extended period at roughly
+8x flight speed. After returning to ground level, exact terrain stopped
+appearing under the current position. Continued travel ended when Horizon OS
+closed the app.
+
+The retained device log makes the terminal event exact. At
+`2026-07-27 13:45:49`, `lowmemorykiller` reported a `6,621,968 kB` process
+footprint above its `6,577,152 kB` threshold, then killed
+`com.kzahel.mclone.xr` to free `3,863,244 kB` RSS plus `2,015,228 kB` swap.
+`ApplicationExitInfo` records `reason=LOW_MEMORY`; there is no Rust panic,
+fatal signal, or graphics-driver exception.
+
+The horizon itself has fixed residency: the default ten levels by four-by-four
+tiles allocate 160 clipmap slots, with bounded transition and vegetation
+admission. It can raise Quest's baseline memory and therefore reduce available
+headroom, but it has no distance-travel-proportional tile store.
+
+At the incident revision, the strongest source-level causal candidate was the
+persistent exact-world mailbox rather than the clipmap:
+
+- native persistence uses unbounded request and completion channels;
+- a moving view may admit up to 128 new chunk-load requests per reconcile;
+- unloading a position clears scheduler bookkeeping but does not cancel the
+  already-enqueued persistence request;
+- every generated exact chunk queues a full `ChunkRecord` cache save; and
+- while pending writes exist, the persistence thread accepts incoming requests
+  first and advances one background write only after a one-millisecond receive
+  timeout.
+
+Sustained movement can therefore leave obsolete loads and full-record cache
+writes ahead of the current view. This matches both observed symptoms: the
+current-position persistence misses needed to admit generation stop catching
+up, while retained queued records grow until the platform kills the process.
+This remains a strong diagnosis rather than a closed attribution until a
+reproduction records request counts/owned bytes by operation family.
+
+Tactical
+[`275`](275-bounded-persistence-streaming.md) implemented the immediate shared
+remediation on 2026-07-28: bounded foreground/durable/cache lanes, lossless
+durable backpressure, discardable cache-pressure skips, cancellation on
+interest loss, one-write-per-request fairness, browser record-cache eviction,
+and shared current/high-water owned-byte diagnostics. This removes the known
+unbounded mailbox mechanisms but does not by itself close the device incident;
+the same persistent-world Quest flight soak must still show exact-center
+reacquisition plus flat queue and process-memory plateaus.
+
 ## Explicit Follow-Ups
 
 Do not silently close these gaps:
 
-1. add a true full-frame multiview horizon pipeline if that optional Quest
+1. close Tactical 275's physical acceptance: run a persistent-world
+   8x-flight/churn soak that proves current-center exact terrain reacquires and
+   Quest RSS, queue counts, and owned-byte high-water marks plateau;
+2. decide the independent generated-clean storage policy or storage-optimized
+   mode so long-distance travel does not consume device storage merely because
+   a chunk was generated;
+3. prune or separately bound completed scheduler job-history metadata during
+   the same long-travel audit;
+4. add a true full-frame multiview horizon pipeline if that optional Quest
    path becomes valuable;
-2. collect in-headset quality, comfort, memory, thermal, and frame-pacing
+5. continue collecting in-headset quality, comfort, thermal, and frame-pacing
    evidence on desktop OpenXR and Quest;
-3. choose device-specific work budgets only from measured evidence, without
+6. choose device-specific work budgets only from measured evidence, without
    changing terrain semantics;
-4. resolve live exact/proxy tree overlap;
-5. publish safe source identity for remote sessions or keep distant terrain
+7. resolve live exact/proxy tree overlap;
+8. publish safe source identity for remote sessions or keep distant terrain
    unavailable there; and
-6. decide after testing whether Experimental should become the default for
+9. decide after testing whether Experimental should become the default for
    compatible worlds.
 
 ## Acceptance

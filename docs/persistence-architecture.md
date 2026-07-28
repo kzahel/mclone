@@ -307,8 +307,10 @@ side channel.
 Actor lifetime equals world lifetime. Like vanilla's per-world `IOWorker`, the
 actor is created at world open and closed at world close; world replacement
 tears the actor down and builds a new one. This removes the need for a
-session-epoch protocol in the store. Dropping load results that complete after
-chunk interest goes away is host bookkeeping, not store protocol.
+session-epoch protocol in the store. A load whose interest disappears is
+cancelled through the mailbox when it has not started; unavoidable in-flight
+results are discarded by request identity and cannot repopulate a released
+record cache.
 
 The actor must provide these observable rules:
 
@@ -326,8 +328,22 @@ The actor must provide these observable rules:
   to flush if supported
 - close drains required durable writes; requests submitted after close fail
   explicitly instead of being silently dropped
+- foreground, durable, and discardable-cache lanes have separate count/byte
+  admission; durable work backpressures and is never discarded, while excess
+  generated-cache work may report `SkippedCachePressure`
+- the storage worker advances one pending write after at most one incoming
+  request, so continuous reads cannot starve writes
+- decoded record caches are released with authoritative holder residency
 - errors surface to the host and UI instead of silently switching to transient
   mode
+
+The implemented native limits are 256 foreground requests, 64 durable records
+or 64 MiB, and 64 cache records or 32 MiB. The physical request channel has 384
+slots. A single durable record larger than its byte budget is admitted alone
+to avoid deadlock. These are coordination limits, not an on-disk world quota.
+The browser Worker serializes each Rust persistence continuation through
+IndexedDB and uses the same cancellation/residency contract; its decoded
+record mirror is not a second permanent world cache.
 
 Suggested priority lanes:
 

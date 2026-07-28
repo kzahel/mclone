@@ -916,6 +916,11 @@ impl RealmServer {
                 .save_dimension_blocking(record)?
             {
                 StoreWriteOutcome::Written | StoreWriteOutcome::Superseded => {}
+                StoreWriteOutcome::SkippedCachePressure => {
+                    return Err(ChunkStoreError::InvalidData(format!(
+                        "durable dimension {key} registration hit cache-only pressure"
+                    )));
+                }
                 StoreWriteOutcome::SkippedOnClose => {
                     return Err(ChunkStoreError::Closed(format!(
                         "dimension {key} registration was skipped on close"
@@ -1128,6 +1133,11 @@ impl RealmServer {
                 .save_world_metadata_blocking(metadata.clone())?
             {
                 StoreWriteOutcome::Written | StoreWriteOutcome::Superseded => {}
+                StoreWriteOutcome::SkippedCachePressure => {
+                    return Err(ChunkStoreError::InvalidData(
+                        "durable world metadata initialization hit cache-only pressure".to_owned(),
+                    ));
+                }
                 StoreWriteOutcome::SkippedOnClose => {
                     return Err(ChunkStoreError::Closed(
                         "world metadata initialization was skipped on close".to_owned(),
@@ -1157,6 +1167,11 @@ impl RealmServer {
             Some(_) => {}
             None => match self.scheduler.save_dimension_blocking(overworld_record)? {
                 StoreWriteOutcome::Written | StoreWriteOutcome::Superseded => {}
+                StoreWriteOutcome::SkippedCachePressure => {
+                    return Err(ChunkStoreError::InvalidData(
+                        "durable Overworld initialization hit cache-only pressure".to_owned(),
+                    ));
+                }
                 StoreWriteOutcome::SkippedOnClose => {
                     return Err(ChunkStoreError::Closed(
                         "Overworld dimension initialization was skipped on close".to_owned(),
@@ -1206,6 +1221,11 @@ impl RealmServer {
             .save_world_metadata_blocking(metadata.clone())?
         {
             StoreWriteOutcome::Written | StoreWriteOutcome::Superseded => {}
+            StoreWriteOutcome::SkippedCachePressure => {
+                return Err(ChunkStoreError::InvalidData(
+                    "durable world metadata save hit cache-only pressure".to_owned(),
+                ));
+            }
             StoreWriteOutcome::SkippedOnClose => {
                 return Err(ChunkStoreError::Closed(
                     "world metadata save was skipped on close".to_owned(),

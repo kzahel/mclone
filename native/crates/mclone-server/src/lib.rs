@@ -90,7 +90,7 @@ pub use persistence::{
     DimensionRecord, EntityChunkRecord, EntitySavePayload, EntitySaveRecord, MemoryRecordExecutor,
     MemoryRecordExecutorFault, MemoryWorldStore, NullChunkSnapshotStore, NullRecordExecutor,
     NullWorldStore, PersistenceActor, PersistenceErrorKind, PersistenceExecutorFailureLatch,
-    PersistenceMailbox, PersistenceRecordAddress, PersistenceRecordBatch,
+    PersistenceMailbox, PersistenceQueueMetrics, PersistenceRecordAddress, PersistenceRecordBatch,
     PersistenceRecordExecutor, PersistenceRecordKeyPart, PersistenceRecordMutation,
     PersistenceRecordNamespace, PersistenceRecordPayload, PersistenceRecordRequest,
     PersistenceRecordRequestId, PersistenceRecordResponse, PersistenceRequestId, PlayerRecord,
