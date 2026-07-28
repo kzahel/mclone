@@ -461,6 +461,7 @@ impl McloneSceneHost {
             terrain_presentation_preference: game_terrain_presentation(
                 scene.startup.terrain_presentation,
             ),
+            fog_settings: GameFogSettings::default(),
             pending_leaf_detail: None,
             pending_restored_asset_pack_selection: None,
             external_asset_pack_preparation: false,
@@ -668,6 +669,7 @@ impl McloneSceneHost {
             terrain_presentation_preference: game_terrain_presentation(
                 scene.startup.terrain_presentation,
             ),
+            fog_settings: GameFogSettings::default(),
             pending_leaf_detail: None,
             pending_restored_asset_pack_selection: None,
             external_asset_pack_preparation: false,
@@ -957,6 +959,7 @@ impl McloneSceneHost {
             terrain_presentation_preference: game_terrain_presentation(
                 scene.startup.terrain_presentation,
             ),
+            fog_settings: GameFogSettings::default(),
             pending_leaf_detail: None,
             pending_restored_asset_pack_selection: None,
             external_asset_pack_preparation: false,
@@ -6225,6 +6228,13 @@ impl ClientExperienceSettingsHost for McloneSceneHost {
 
     fn set_terrain_presentation(&mut self, presentation: GameTerrainPresentation) -> Result<()> {
         self.request_terrain_presentation(presentation)
+    }
+
+    fn set_fog_settings(&mut self, settings: GameFogSettings) -> Result<()> {
+        self.fog_settings = settings.normalized();
+        self.persist_graphics_preferences();
+        log::info!("fog settings set to {:?}", self.fog_settings);
+        Ok(())
     }
 
     fn set_fullbright(&mut self, enabled: bool) -> Result<()> {

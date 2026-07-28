@@ -1355,6 +1355,8 @@ pub enum GameOptionsParent {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum GameOptionsCategory {
     Graphics,
+    /// Experimental open-air fog controls nested under Graphics.
+    Fog,
     Movement,
     Display,
     LocalPlay,
@@ -1376,6 +1378,7 @@ impl GameOptionsCategory {
     pub const fn label(self) -> &'static str {
         match self {
             Self::Graphics => "Graphics",
+            Self::Fog => "Fog",
             Self::Movement => "Movement",
             Self::Display => "Display",
             Self::LocalPlay => "Local Play",
@@ -1388,6 +1391,7 @@ impl GameOptionsCategory {
     pub const fn title(self) -> &'static str {
         match self {
             Self::Graphics => "GRAPHICS",
+            Self::Fog => "FOG",
             Self::Movement => "MOVEMENT",
             Self::Display => "DISPLAY",
             Self::LocalPlay => "LOCAL PLAY",
@@ -2018,6 +2022,7 @@ pub enum GameUiAction {
     SetLeafDetail(GameLeafDetail),
     SetGrassDetail(GameGrassDetail),
     SetTerrainPresentation(GameTerrainPresentation),
+    SetFogSettings(GameFogSettings),
     ToggleFullbright,
     TogglePlayerCollisionBox,
     ToggleFirstPersonPlayer,
@@ -2120,6 +2125,138 @@ impl GameTerrainPresentation {
         match self {
             Self::ExactOnly => "Off",
             Self::Experimental => "Experimental",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameFogMode {
+    Off,
+    Classic,
+    #[default]
+    Natural,
+    GroundHaze,
+}
+
+impl GameFogMode {
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Off => Self::Classic,
+            Self::Classic => Self::Natural,
+            Self::Natural => Self::GroundHaze,
+            Self::GroundHaze => Self::Off,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Classic => "Classic",
+            Self::Natural => "Natural",
+            Self::GroundHaze => "Ground Haze",
+        }
+    }
+
+    pub const fn uses_exponential(self) -> bool {
+        matches!(self, Self::Natural | Self::GroundHaze)
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameFogWeatherInfluence {
+    Off,
+    #[default]
+    Subtle,
+    Strong,
+}
+
+impl GameFogWeatherInfluence {
+    pub const fn next(self) -> Self {
+        match self {
+            Self::Off => Self::Subtle,
+            Self::Subtle => Self::Strong,
+            Self::Strong => Self::Off,
+        }
+    }
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Off => "Off",
+            Self::Subtle => "Subtle",
+            Self::Strong => "Strong",
+        }
+    }
+}
+
+/// Evaluation-facing open-air fog policy.
+///
+/// The intentionally broad first-pass controls let the player compare curves
+/// interactively. Media/gameplay fog such as underwater visibility is a
+/// stronger renderer override and is not represented here.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct GameFogSettings {
+    pub mode: GameFogMode,
+    pub visibility_blocks: f32,
+    pub classic_start: f32,
+    pub coverage_guard: bool,
+    pub guard_start: f32,
+    pub ground_base_y: f32,
+    pub ground_falloff_blocks: f32,
+    pub max_opacity: f32,
+    pub exponential_squared: bool,
+    pub far_cull: bool,
+    pub weather_influence: GameFogWeatherInfluence,
+}
+
+impl GameFogSettings {
+    pub const MIN_VISIBILITY_BLOCKS: f32 = 64.0;
+    pub const MAX_VISIBILITY_BLOCKS: f32 = 131_072.0;
+    pub const MIN_START_RATIO: f32 = 0.0;
+    pub const MAX_START_RATIO: f32 = 0.99;
+    pub const MIN_GROUND_BASE_Y: f32 = -64.0;
+    pub const MAX_GROUND_BASE_Y: f32 = 320.0;
+    pub const MIN_GROUND_FALLOFF_BLOCKS: f32 = 8.0;
+    pub const MAX_GROUND_FALLOFF_BLOCKS: f32 = 512.0;
+    pub const MIN_MAX_OPACITY: f32 = 0.5;
+    pub const MAX_MAX_OPACITY: f32 = 1.0;
+
+    pub fn normalized(self) -> Self {
+        Self {
+            visibility_blocks: finite_or(self.visibility_blocks, 32_768.0)
+                .clamp(Self::MIN_VISIBILITY_BLOCKS, Self::MAX_VISIBILITY_BLOCKS),
+            classic_start: finite_or(self.classic_start, 0.75)
+                .clamp(Self::MIN_START_RATIO, Self::MAX_START_RATIO),
+            guard_start: finite_or(self.guard_start, 0.9)
+                .clamp(Self::MIN_START_RATIO, Self::MAX_START_RATIO),
+            ground_base_y: finite_or(self.ground_base_y, 64.0)
+                .clamp(Self::MIN_GROUND_BASE_Y, Self::MAX_GROUND_BASE_Y),
+            ground_falloff_blocks: finite_or(self.ground_falloff_blocks, 64.0).clamp(
+                Self::MIN_GROUND_FALLOFF_BLOCKS,
+                Self::MAX_GROUND_FALLOFF_BLOCKS,
+            ),
+            max_opacity: finite_or(self.max_opacity, 0.98)
+                .clamp(Self::MIN_MAX_OPACITY, Self::MAX_MAX_OPACITY),
+            ..self
+        }
+    }
+}
+
+impl Default for GameFogSettings {
+    fn default() -> Self {
+        Self {
+            mode: GameFogMode::Natural,
+            visibility_blocks: 32_768.0,
+            classic_start: 0.75,
+            coverage_guard: true,
+            guard_start: 0.9,
+            ground_base_y: 64.0,
+            ground_falloff_blocks: 64.0,
+            max_opacity: 0.98,
+            exponential_squared: false,
+            // Preserve identical draw submission for the first visual
+            // comparison; the menu exposes culling as a measured opt-in.
+            far_cull: false,
+            weather_influence: GameFogWeatherInfluence::Subtle,
         }
     }
 }
@@ -2287,6 +2424,7 @@ pub struct GameUiRenderState {
     pub grass_detail: GameGrassDetail,
     pub terrain_presentation: GameTerrainPresentation,
     pub terrain_presentation_available: bool,
+    pub fog: GameFogSettings,
     pub force_fullbright: bool,
     pub player_collision_box_visible: bool,
     pub first_person_player_visible: bool,
@@ -2334,6 +2472,7 @@ impl Default for GameUiRenderState {
             grass_detail: GameGrassDetail::Off,
             terrain_presentation: GameTerrainPresentation::ExactOnly,
             terrain_presentation_available: true,
+            fog: GameFogSettings::default(),
             force_fullbright: false,
             player_collision_box_visible: false,
             first_person_player_visible: false,
@@ -3676,6 +3815,146 @@ fn render_distance_label(state: GameUiRenderState) -> String {
     let radius = state.clamped_render_distance();
     let suffix = if radius == 1 { "chunk" } else { "chunks" };
     format!("Render Distance: {radius} {suffix}")
+}
+
+fn fog_visibility_slider_value(settings: GameFogSettings) -> f32 {
+    let settings = settings.normalized();
+    let min = GameFogSettings::MIN_VISIBILITY_BLOCKS;
+    let max = GameFogSettings::MAX_VISIBILITY_BLOCKS;
+    (settings.visibility_blocks.ln() - min.ln()) / (max.ln() - min.ln())
+}
+
+fn fog_visibility_from_slider_value(value: f32, settings: GameFogSettings) -> GameFogSettings {
+    let min = GameFogSettings::MIN_VISIBILITY_BLOCKS;
+    let max = GameFogSettings::MAX_VISIBILITY_BLOCKS;
+    let raw = (min.ln() + value.clamp(0.0, 1.0) * (max.ln() - min.ln())).exp();
+    let rounded = if raw >= 1_024.0 {
+        (raw / 1_024.0).round() * 1_024.0
+    } else {
+        (raw / 16.0).round() * 16.0
+    };
+    GameFogSettings {
+        visibility_blocks: rounded,
+        ..settings
+    }
+    .normalized()
+}
+
+fn fog_visibility_label(settings: GameFogSettings) -> String {
+    let visibility = settings.normalized().visibility_blocks;
+    if visibility >= 1_000.0 {
+        format!("Visibility: {:.1} km", visibility / 1_000.0)
+    } else {
+        format!("Visibility: {visibility:.0} blocks")
+    }
+}
+
+fn fog_classic_start_slider_value(settings: GameFogSettings) -> f32 {
+    settings.normalized().classic_start
+}
+
+fn fog_classic_start_from_slider_value(value: f32, settings: GameFogSettings) -> GameFogSettings {
+    GameFogSettings {
+        classic_start: value,
+        ..settings
+    }
+    .normalized()
+}
+
+fn fog_classic_start_label(settings: GameFogSettings) -> String {
+    format!(
+        "Classic Start: {:.0}%",
+        settings.normalized().classic_start * 100.0
+    )
+}
+
+fn fog_guard_start_slider_value(settings: GameFogSettings) -> f32 {
+    settings.normalized().guard_start
+}
+
+fn fog_guard_start_from_slider_value(value: f32, settings: GameFogSettings) -> GameFogSettings {
+    GameFogSettings {
+        guard_start: value,
+        ..settings
+    }
+    .normalized()
+}
+
+fn fog_guard_start_label(settings: GameFogSettings) -> String {
+    format!(
+        "Guard Start: {:.0}%",
+        settings.normalized().guard_start * 100.0
+    )
+}
+
+fn fog_ground_base_slider_value(settings: GameFogSettings) -> f32 {
+    let settings = settings.normalized();
+    (settings.ground_base_y - GameFogSettings::MIN_GROUND_BASE_Y)
+        / (GameFogSettings::MAX_GROUND_BASE_Y - GameFogSettings::MIN_GROUND_BASE_Y)
+}
+
+fn fog_ground_base_from_slider_value(value: f32, settings: GameFogSettings) -> GameFogSettings {
+    let raw = GameFogSettings::MIN_GROUND_BASE_Y
+        + value.clamp(0.0, 1.0)
+            * (GameFogSettings::MAX_GROUND_BASE_Y - GameFogSettings::MIN_GROUND_BASE_Y);
+    GameFogSettings {
+        ground_base_y: raw.round(),
+        ..settings
+    }
+    .normalized()
+}
+
+fn fog_ground_base_label(settings: GameFogSettings) -> String {
+    format!("Ground Base: Y {:.0}", settings.normalized().ground_base_y)
+}
+
+fn fog_ground_falloff_slider_value(settings: GameFogSettings) -> f32 {
+    let settings = settings.normalized();
+    let min = GameFogSettings::MIN_GROUND_FALLOFF_BLOCKS;
+    let max = GameFogSettings::MAX_GROUND_FALLOFF_BLOCKS;
+    (settings.ground_falloff_blocks.ln() - min.ln()) / (max.ln() - min.ln())
+}
+
+fn fog_ground_falloff_from_slider_value(value: f32, settings: GameFogSettings) -> GameFogSettings {
+    let min = GameFogSettings::MIN_GROUND_FALLOFF_BLOCKS;
+    let max = GameFogSettings::MAX_GROUND_FALLOFF_BLOCKS;
+    let raw = (min.ln() + value.clamp(0.0, 1.0) * (max.ln() - min.ln())).exp();
+    GameFogSettings {
+        ground_falloff_blocks: (raw / 4.0).round() * 4.0,
+        ..settings
+    }
+    .normalized()
+}
+
+fn fog_ground_falloff_label(settings: GameFogSettings) -> String {
+    format!(
+        "Ground Falloff: {:.0} blocks",
+        settings.normalized().ground_falloff_blocks
+    )
+}
+
+fn fog_max_opacity_slider_value(settings: GameFogSettings) -> f32 {
+    let settings = settings.normalized();
+    (settings.max_opacity - GameFogSettings::MIN_MAX_OPACITY)
+        / (GameFogSettings::MAX_MAX_OPACITY - GameFogSettings::MIN_MAX_OPACITY)
+}
+
+fn fog_max_opacity_from_slider_value(value: f32, settings: GameFogSettings) -> GameFogSettings {
+    let raw = GameFogSettings::MIN_MAX_OPACITY
+        + value.clamp(0.0, 1.0)
+            * (GameFogSettings::MAX_MAX_OPACITY - GameFogSettings::MIN_MAX_OPACITY);
+    GameFogSettings {
+        max_opacity: (raw * 100.0).round() / 100.0,
+        ..settings
+    }
+    .normalized()
+}
+
+fn fog_max_opacity_label(settings: GameFogSettings) -> String {
+    format!(
+        "Maximum Opacity: {:.0}%",
+        settings.normalized().max_opacity * 100.0
+    )
 }
 
 fn fly_speed_slider_value(state: GameUiRenderState) -> f32 {

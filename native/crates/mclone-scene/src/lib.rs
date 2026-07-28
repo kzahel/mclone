@@ -179,12 +179,12 @@ use mclone_server::{SimulationCadenceConfig, WorkerFrameMetrics};
 use mclone_ui::{
     Color, DEFAULT_JOIN_REMOTE_ADDR, DebugActorTool, DebugOverlay, FlatHotbarOverlay, FlatHud,
     FlatHudDebugOverlay, GameAuxiliarySplitMode, GameCollisionMode, GameDeathCause,
-    GameFlatPresentationState, GameFramePacingMode, GameGrassDetail, GameLeafDetail,
-    GameLocalPlayControllerFamily, GameLocalPlayGuestInput, GameLocalPlayState, GameMovementMode,
-    GamePlayerModel, GameScreen, GameSimulationCadence, GameTerrainPresentation, GameTouchSettings,
-    GameTravelAssistMode, GameTurnMode, GameUiAction, GameUiHost, GameUiRenderState,
-    GameWorldRenderScaleMode, GameXrTurnMode, GamepadHudOverlay, GuiDrawList, GuiKey, GuiScale,
-    LoadingProgressOverlay, Point, Rect, StatusOverlay, StorageProfileBackend,
+    GameFlatPresentationState, GameFogSettings, GameFramePacingMode, GameGrassDetail,
+    GameLeafDetail, GameLocalPlayControllerFamily, GameLocalPlayGuestInput, GameLocalPlayState,
+    GameMovementMode, GamePlayerModel, GameScreen, GameSimulationCadence, GameTerrainPresentation,
+    GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameUiAction, GameUiHost,
+    GameUiRenderState, GameWorldRenderScaleMode, GameXrTurnMode, GamepadHudOverlay, GuiDrawList,
+    GuiKey, GuiScale, LoadingProgressOverlay, Point, Rect, StatusOverlay, StorageProfileBackend,
     StorageProfileUiState, TouchOverlay, UiDebugSnapshot, UiDrawCacheStats, UiPanelRevision,
     WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
 };
@@ -827,6 +827,7 @@ pub struct McloneSceneHost {
     graphics_preference_storage: Option<Box<dyn ClientGraphicsPreferenceStorage>>,
     graphics_preference_error: Option<String>,
     terrain_presentation_preference: GameTerrainPresentation,
+    fog_settings: GameFogSettings,
     pending_leaf_detail: Option<mclone_mesh::LeafDetail>,
     pending_restored_asset_pack_selection:
         Option<(AssetPackSelection, mclone_assets::TexturePresentation)>,

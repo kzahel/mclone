@@ -610,6 +610,7 @@ impl McloneSceneHost {
             grass_detail: game_grass_detail(self.render_options.grass_detail),
             terrain_presentation: self.terrain_presentation_preference(),
             terrain_presentation_available: self.terrain_presentation_supported(),
+            fog: self.fog_settings,
             force_fullbright: self.render_options.force_fullbright,
             player_collision_box_visible: self.player_collision_box_visible,
             first_person_player_visible: self.active_world.camera.first_person_player_visible(),

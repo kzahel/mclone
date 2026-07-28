@@ -1,8 +1,8 @@
 use super::*;
 use crate::{
-    GameAuxiliarySplitMode, GameFlatPresentationState, GameGrassDetail, GameLeafDetail,
-    GameLocalPlayControllerFamily, GameLocalPlayGuestInput, GameLocalPlayLayout,
-    GameLocalPlayState, GameTerrainPresentation, GameWorldRenderScaleMode,
+    GameAuxiliarySplitMode, GameFlatPresentationState, GameFogMode, GameFogSettings,
+    GameGrassDetail, GameLeafDetail, GameLocalPlayControllerFamily, GameLocalPlayGuestInput,
+    GameLocalPlayLayout, GameLocalPlayState, GameTerrainPresentation, GameWorldRenderScaleMode,
 };
 
 #[test]
@@ -544,6 +544,96 @@ fn graphics_options_show_and_cycle_distant_terrain() {
             .widget(UI_V2_OPTIONS_TERRAIN_PRESENTATION)
             .and_then(|widget| widget.value.as_deref()),
         Some("Experimental (Unavailable)")
+    );
+}
+
+#[test]
+fn graphics_options_open_the_fog_evaluation_submenu() {
+    let mut surface = UiSurface::new();
+    surface.set_screen(Some(UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::Graphics,
+    }));
+    surface.set_scale(GuiScale::from_pixels(960, 540));
+    let state = GameUiRenderState::default();
+    surface.set_render_state(state);
+
+    let fog = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_FOG_SUBMENU)
+        .expect("fog submenu row")
+        .clone();
+    assert!(surface.pointer_down(point_in(fog.rect), state));
+    assert_eq!(
+        surface.pointer_up(point_in(fog.rect), state).1,
+        Some(GameUiAction::OpenOptionsCategory(
+            GameOptionsParent::Pause,
+            GameOptionsCategory::Fog,
+        ))
+    );
+}
+
+#[test]
+fn fog_options_expose_recommended_defaults_and_mode_specific_controls() {
+    let mut surface = UiSurface::new();
+    surface.set_screen(Some(UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::Fog,
+    }));
+    surface.set_scale(GuiScale::from_pixels(960, 540));
+    let state = GameUiRenderState::default();
+    surface.set_render_state(state);
+
+    assert_eq!(
+        surface
+            .layout()
+            .widget(UI_V2_FOG_MODE)
+            .and_then(|widget| widget.value.as_deref()),
+        Some("Natural")
+    );
+    assert_eq!(surface.layout().widgets().len(), 12);
+    assert!(
+        !surface
+            .layout()
+            .widget(UI_V2_FOG_CLASSIC_START)
+            .expect("classic start")
+            .enabled
+    );
+    assert!(
+        !surface
+            .layout()
+            .widget(UI_V2_FOG_GROUND_BASE)
+            .expect("ground base")
+            .enabled
+    );
+    assert!(
+        surface
+            .layout()
+            .widget(UI_V2_FOG_MAX_OPACITY)
+            .expect("maximum opacity")
+            .enabled
+    );
+
+    let mode = surface
+        .layout()
+        .widget(UI_V2_FOG_MODE)
+        .expect("fog mode")
+        .clone();
+    assert!(surface.pointer_down(point_in(mode.rect), state));
+    assert_eq!(
+        surface.pointer_up(point_in(mode.rect), state).1,
+        Some(GameUiAction::SetFogSettings(GameFogSettings {
+            mode: GameFogMode::GroundHaze,
+            ..GameFogSettings::default()
+        }))
+    );
+
+    assert_eq!(
+        surface.key_pressed(GuiKey::Escape).1,
+        Some(GameUiAction::OpenOptionsCategory(
+            GameOptionsParent::Pause,
+            GameOptionsCategory::Graphics,
+        ))
     );
 }
 

@@ -267,6 +267,7 @@ impl McloneSceneHost {
                 {
                     self.request_terrain_presentation(preferences.terrain_presentation)?;
                 }
+                self.fog_settings = preferences.fog.normalized();
             }
             Ok(None) => {}
             Err(error) => {
@@ -557,6 +558,7 @@ impl McloneSceneHost {
             leaf_detail: game_leaf_detail(self.active_assets.mesh.catalog.leaf_detail()),
             grass_detail: game_grass_detail(self.render_options.grass_detail),
             terrain_presentation: self.terrain_presentation_preference(),
+            fog: self.fog_settings,
         };
         if let Some(storage) = self.graphics_preference_storage.as_ref() {
             if let Err(error) = storage.store(&preferences) {

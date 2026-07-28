@@ -6,11 +6,12 @@ use crate::client_session_policy::{
 };
 use mclone_input::TouchControlsMode;
 use mclone_ui::{
-    DebugActorTool, GameAuxiliarySplitMode, GameCollisionMode, GameFramePacingMode,
-    GameGrassDetail, GameLeafDetail, GameLocalPlayGuestInput, GameLocalPlayLayout,
-    GameLocalPlayState, GameMovementMode, GamePlayerModel, GameScenarioId, GameSimulationCadence,
-    GameStorageAction, GameTerrainPresentation, GameTouchSettings, GameTravelAssistMode,
-    GameTurnMode, GameUiAction, GameUiRenderState, GameWorldRenderScaleMode, GameXrTurnMode,
+    DebugActorTool, GameAuxiliarySplitMode, GameCollisionMode, GameFogSettings,
+    GameFramePacingMode, GameGrassDetail, GameLeafDetail, GameLocalPlayGuestInput,
+    GameLocalPlayLayout, GameLocalPlayState, GameMovementMode, GamePlayerModel, GameScenarioId,
+    GameSimulationCadence, GameStorageAction, GameTerrainPresentation, GameTouchSettings,
+    GameTravelAssistMode, GameTurnMode, GameUiAction, GameUiRenderState, GameWorldRenderScaleMode,
+    GameXrTurnMode,
 };
 
 use crate::asset_pack_ui::{ClientAssetPackController, ClientAssetPackEffect};
@@ -151,6 +152,7 @@ impl ClientExperienceController {
             | GameUiAction::SetLeafDetail(_)
             | GameUiAction::SetGrassDetail(_)
             | GameUiAction::SetTerrainPresentation(_)
+            | GameUiAction::SetFogSettings(_)
             | GameUiAction::ToggleFullbright
             | GameUiAction::TogglePlayerCollisionBox
             | GameUiAction::ToggleFirstPersonPlayer
@@ -354,6 +356,7 @@ pub struct ClientExperienceSettingsProfile {
     pub leaf_detail: ClientExperienceCapabilityStatus,
     pub grass_detail: ClientExperienceCapabilityStatus,
     pub terrain_presentation: ClientExperienceCapabilityStatus,
+    pub fog: ClientExperienceCapabilityStatus,
     pub fullbright: ClientExperienceCapabilityStatus,
     pub player_collision_box: ClientExperienceCapabilityStatus,
     pub first_person_player: ClientExperienceCapabilityStatus,
@@ -390,6 +393,7 @@ impl ClientExperienceSettingsProfile {
             leaf_detail: ClientExperienceCapabilityStatus::Supported,
             grass_detail: ClientExperienceCapabilityStatus::Supported,
             terrain_presentation: ClientExperienceCapabilityStatus::Supported,
+            fog: ClientExperienceCapabilityStatus::Supported,
             fullbright: ClientExperienceCapabilityStatus::Supported,
             player_collision_box: ClientExperienceCapabilityStatus::Supported,
             first_person_player: ClientExperienceCapabilityStatus::Supported,
@@ -423,6 +427,7 @@ impl ClientExperienceSettingsProfile {
             ClientExperienceActionKind::SetLeafDetail => self.leaf_detail,
             ClientExperienceActionKind::SetGrassDetail => self.grass_detail,
             ClientExperienceActionKind::SetTerrainPresentation => self.terrain_presentation,
+            ClientExperienceActionKind::SetFogSettings => self.fog,
             ClientExperienceActionKind::ToggleFullbright => self.fullbright,
             ClientExperienceActionKind::TogglePlayerCollisionBox => self.player_collision_box,
             ClientExperienceActionKind::ToggleFirstPersonPlayer => self.first_person_player,
@@ -465,13 +470,14 @@ impl ClientExperienceSettingsProfile {
     ) -> [(
         ClientExperienceFeatureCapability,
         ClientExperienceCapabilityStatus,
-    ); 17] {
+    ); 18] {
         use ClientExperienceFeatureCapability as F;
         [
             (F::SectionOcclusion, self.section_occlusion),
             (F::LeafDetail, self.leaf_detail),
             (F::GrassDetail, self.grass_detail),
             (F::TerrainPresentation, self.terrain_presentation),
+            (F::Fog, self.fog),
             (F::Fullbright, self.fullbright),
             (F::PlayerCollisionBox, self.player_collision_box),
             (F::FirstPersonPlayer, self.first_person_player),
@@ -497,6 +503,7 @@ pub enum ClientExperienceFeatureCapability {
     LeafDetail,
     GrassDetail,
     TerrainPresentation,
+    Fog,
     Fullbright,
     PlayerCollisionBox,
     FirstPersonPlayer,
@@ -769,6 +776,14 @@ impl ClientExperienceSettingsController {
                 effects.setting_effects.push(
                     ClientExperienceSettingEffect::SetTerrainPresentation(presentation),
                 );
+            }
+            GameUiAction::SetFogSettings(settings) => {
+                self.state.fog = settings.normalized();
+                effects
+                    .setting_effects
+                    .push(ClientExperienceSettingEffect::SetFogSettings(
+                        self.state.fog,
+                    ));
             }
             GameUiAction::ToggleFullbright => {
                 self.state.force_fullbright = !self.state.force_fullbright;
@@ -1053,6 +1068,7 @@ impl ClientExperienceSettingsController {
                 ClientExperienceActionKind::SetTerrainPresentation,
                 profile.terrain_presentation,
             ),
+            (ClientExperienceActionKind::SetFogSettings, profile.fog),
             (
                 ClientExperienceActionKind::ToggleFullbright,
                 profile.fullbright,
@@ -1227,6 +1243,7 @@ pub struct ClientExperienceSettingsState {
     pub leaf_detail: GameLeafDetail,
     pub grass_detail: GameGrassDetail,
     pub terrain_presentation: GameTerrainPresentation,
+    pub fog: GameFogSettings,
     pub force_fullbright: bool,
     pub player_collision_box_visible: bool,
     pub first_person_player_visible: bool,
@@ -1270,6 +1287,7 @@ impl From<GameUiRenderState> for ClientExperienceSettingsState {
             leaf_detail: state.leaf_detail,
             grass_detail: state.grass_detail,
             terrain_presentation: state.terrain_presentation,
+            fog: state.fog.normalized(),
             force_fullbright: state.force_fullbright,
             player_collision_box_visible: state.player_collision_box_visible,
             first_person_player_visible: state.first_person_player_visible,
@@ -1314,6 +1332,7 @@ impl ClientExperienceSettingsState {
         state.leaf_detail = self.leaf_detail;
         state.grass_detail = self.grass_detail;
         state.terrain_presentation = self.terrain_presentation;
+        state.fog = self.fog.normalized();
         state.force_fullbright = self.force_fullbright;
         state.player_collision_box_visible = self.player_collision_box_visible;
         state.first_person_player_visible = self.first_person_player_visible;
@@ -1521,6 +1540,7 @@ pub enum ClientExperienceSettingEffect {
     SetLeafDetail(GameLeafDetail),
     SetGrassDetail(GameGrassDetail),
     SetTerrainPresentation(GameTerrainPresentation),
+    SetFogSettings(GameFogSettings),
     SetFullbright(bool),
     SetPlayerCollisionBoxVisible(bool),
     SetFirstPersonPlayerVisible(bool),
@@ -1611,6 +1631,7 @@ pub enum ClientExperienceActionKind {
     SetLeafDetail,
     SetGrassDetail,
     SetTerrainPresentation,
+    SetFogSettings,
     ToggleFullbright,
     TogglePlayerCollisionBox,
     ToggleFirstPersonPlayer,
@@ -1693,6 +1714,7 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
         GameUiAction::SetTerrainPresentation(_) => {
             ClientExperienceActionKind::SetTerrainPresentation
         }
+        GameUiAction::SetFogSettings(_) => ClientExperienceActionKind::SetFogSettings,
         GameUiAction::ToggleFullbright => ClientExperienceActionKind::ToggleFullbright,
         GameUiAction::TogglePlayerCollisionBox => {
             ClientExperienceActionKind::TogglePlayerCollisionBox
@@ -1768,6 +1790,7 @@ pub const fn classify_client_experience_action_kind(
         | ClientExperienceActionKind::SetLeafDetail
         | ClientExperienceActionKind::SetGrassDetail
         | ClientExperienceActionKind::SetTerrainPresentation
+        | ClientExperienceActionKind::SetFogSettings
         | ClientExperienceActionKind::ToggleFullbright
         | ClientExperienceActionKind::TogglePlayerCollisionBox
         | ClientExperienceActionKind::ToggleFirstPersonPlayer
@@ -2300,6 +2323,23 @@ mod tests {
             vec![ClientExperienceSettingEffect::SetTerrainPresentation(
                 GameTerrainPresentation::Experimental
             )]
+        );
+
+        let requested_fog = GameFogSettings {
+            visibility_blocks: f32::INFINITY,
+            max_opacity: 0.25,
+            far_cull: true,
+            ..GameFogSettings::default()
+        };
+        let expected_fog = requested_fog.normalized();
+        let effects = settings.apply_ui_action(
+            GameUiAction::SetFogSettings(requested_fog),
+            ClientExperienceSettingsProfile::default(),
+        );
+        assert_eq!(settings.state().fog, expected_fog);
+        assert_eq!(
+            effects.setting_effects,
+            vec![ClientExperienceSettingEffect::SetFogSettings(expected_fog)]
         );
 
         let effects = settings.apply_ui_action(
