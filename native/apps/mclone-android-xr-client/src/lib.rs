@@ -5420,7 +5420,7 @@ mod android {
                     .poll_scheduler_light_mailbox_pending_statuses
             );
             log::info!(
-                "MCLONE_ANDROID_XR_PERF_LIGHT_OWNERSHIP max_player_promotion_desired={} max_player_promotion_queued={} max_player_promotion_active={} player_promotion_max_active={} player_promotion_cancelled_before_admission={} latest_player_promotion_desired={} latest_player_promotion_queued={} latest_player_promotion_active={} max_light_demand_queued={} light_demands_cancelled={} light_statuses_stale={} latest_light_demand_queued={} max_light_mailbox_admitted_statuses={} max_light_mailbox_admitted_owned_bytes={} light_mailbox_capacity_high_water_bytes={} max_light_batch_unique_input_chunks={} max_light_batch_input_bytes={} max_completed_light_owned_bytes={} light_admission_rejections={} light_oversize_admissions={} light_cancelled_statuses={} latest_light_mailbox_admitted_statuses={} latest_light_mailbox_admitted_owned_bytes={} max_retained_light_chunks={} latest_retained_light_chunks={} max_completed_job_records_retained={} latest_completed_job_records_retained={} max_recent_job_summaries_retained={} latest_recent_job_summaries_retained={}",
+                "MCLONE_ANDROID_XR_PERF_LIGHT_OWNERSHIP max_player_promotion_desired={} max_player_promotion_queued={} max_player_promotion_active={} player_promotion_max_active={} player_promotion_cancelled_before_admission={} latest_player_promotion_desired={} latest_player_promotion_queued={} latest_player_promotion_active={} max_light_demand_queued={} light_demands_cancelled={} light_statuses_stale={} latest_light_demand_queued={} max_completed_job_records_retained={} latest_completed_job_records_retained={} max_recent_job_summaries_retained={} latest_recent_job_summaries_retained={}",
                 self.max_upload.poll_scheduler_player_promotion_desired,
                 self.max_upload.poll_scheduler_player_promotion_queued,
                 self.max_upload.poll_scheduler_player_promotion_active,
@@ -5434,6 +5434,14 @@ mod android {
                 self.max_upload.poll_scheduler_light_demands_cancelled,
                 self.max_upload.poll_scheduler_light_statuses_stale,
                 latest_upload.poll_scheduler_light_demand_queued,
+                self.max_upload
+                    .poll_scheduler_completed_job_records_retained,
+                latest_upload.poll_scheduler_completed_job_records_retained,
+                self.max_upload.poll_scheduler_recent_job_summaries_retained,
+                latest_upload.poll_scheduler_recent_job_summaries_retained
+            );
+            log::info!(
+                "MCLONE_ANDROID_XR_PERF_LIGHT_MAILBOX max_admitted_statuses={} max_admitted_owned_bytes={} capacity_high_water_bytes={} max_batch_unique_input_chunks={} max_batch_input_bytes={} max_completed_owned_bytes={} admission_rejections={} oversize_admissions={} cancelled_statuses={} latest_admitted_statuses={} latest_admitted_owned_bytes={} max_retained_light_chunks={} latest_retained_light_chunks={}",
                 self.max_upload.poll_light_mailbox_admitted_statuses,
                 self.max_upload.poll_light_mailbox_admitted_owned_bytes,
                 self.max_upload.poll_light_mailbox_max_admitted_owned_bytes,
@@ -5448,12 +5456,7 @@ mod android {
                 latest_upload.poll_light_mailbox_admitted_owned_bytes,
                 self.max_upload
                     .poll_light_mailbox_retained_light_chunk_count,
-                latest_upload.poll_light_mailbox_retained_light_chunk_count,
-                self.max_upload
-                    .poll_scheduler_completed_job_records_retained,
-                latest_upload.poll_scheduler_completed_job_records_retained,
-                self.max_upload.poll_scheduler_recent_job_summaries_retained,
-                latest_upload.poll_scheduler_recent_job_summaries_retained
+                latest_upload.poll_light_mailbox_retained_light_chunk_count
             );
             log::info!(
                 "MCLONE_ANDROID_XR_PERF_COMPILE_MAX pending_chunks_before={} pending_chunks_after={} pending_jobs_before={} pending_jobs_after={} max_pending_jobs={} available_slots_before={} available_slots_after={} neighbor_ready_sections={} near_exception_sections={} deferred_sections={} submitted_sections={} deadline_skipped_requests={} accepted_results={} queued_completed_results={} completed_sections={} stale_sections={} visibility_graph_builds={} visibility_graph_total_ms={:.3} visibility_graph_worst_ms={:.3}",
