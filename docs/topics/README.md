@@ -348,6 +348,10 @@ series implements the same concern, normally reuse the document slug in its
   prepared/legacy actor-rendering baselines, instancing and memory tradeoffs,
   physical Quest gate, and the ordered sparse-upload, GPU palette-expansion,
   actor-LOD, and fallback optimization queue.
+- [`xr-render-path-switching.md`](xr-render-path-switching.md): accepted
+  three-mode live XR render-path contract across desktop and Android OpenXR,
+  with transactional frame-boundary topology replacement and exactly one
+  steady-state target family.
 - [`lush-grass-rendering.md`](lush-grass-rendering.md): pinned Grassier Grass
   artifact/reconstruction research, observed section/wind/interaction/color
   architecture, attribution and license constraints, and the accepted

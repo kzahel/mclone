@@ -37,6 +37,9 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
 - `actor-rendering-performance` — prepared/fallback actor render baselines,
   instancing and memory tradeoffs, Quest acceptance, sparse upload, GPU pose,
   and actor LOD follow-ups
+- `xr-render-path-switching` — live dual-eye, array per-eye, and array
+  multiview selection across desktop and Android OpenXR; transactional
+  frame-boundary target replacement with one steady-state swapchain family
 - `dynamic-point-lights` — presentation-side finite-radius point lights,
   many-light admission, voxel-DDA and entity-shadow experiments, shadow
   technique comparison, and shared mono/XR validation
