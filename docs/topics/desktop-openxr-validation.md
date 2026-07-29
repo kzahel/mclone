@@ -83,11 +83,18 @@ The product run verb also passed a bounded
 `--desktop-xr --no-window --frames 120` lifecycle check, including the shared
 title UI and graceful OpenXR shutdown.
 
+On 2026-07-29, a headset-worn persistent `--desktop-xr --no-window` run
+opened through the expected product-default title menu. The user opened a
+world from that menu and accepted the resulting stereo overworld composition
+and rendering on Quest 3. Turning off the headset display left the host
+running as expected; terminating the launcher afterward restored the Quest
+settings and removed the temporary USB tunnel.
+
 ## Remaining Acceptance
 
-- Validate the persistent companion-window verb and representative,
-  headset-worn scene composition in a real Linux desktop session. The bounded
-  no-window lifecycle and unattended stereo pixels already pass.
+- Validate the persistent companion-window verb in a real Linux desktop
+  session. The persistent windowless product flow and representative
+  headset-worn overworld composition pass.
 - Secure Wi-Fi pairing is a normal WiVRn dashboard workflow and is not covered
   by the no-encryption USB smoke.
 - Keep post-refactor tracked-controller and ordinary-gamepad hardware

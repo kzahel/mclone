@@ -242,3 +242,6 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   geography, cheap canonical surface queries, sparse implicit 3D terrain, and
   conservative distant summaries under bounded random access and periodic
   topology
+- `desktop-openxr-validation` — Windows VDXR and macOS/Linux WiVRn runtime
+  bootstrap, headset-backed smoke evidence, Vulkan interop, and remaining
+  desktop OpenXR hardware acceptance
