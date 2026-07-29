@@ -1133,6 +1133,25 @@ fn load_openxr_entry() -> Result<(xr::Entry, String)> {
             Err(loader_error) => {
                 let mut attempted = Vec::new();
                 let mut errors = Vec::new();
+                #[cfg(target_os = "linux")]
+                {
+                    let versioned_loader = Path::new("libopenxr_loader.so.1");
+                    attempted.push(versioned_loader.display().to_string());
+                    match xr::Entry::load_from(versioned_loader) {
+                        Ok(entry) => {
+                            return Ok((
+                                entry,
+                                format!(
+                                    "versioned system OpenXR loader {}",
+                                    versioned_loader.display()
+                                ),
+                            ));
+                        }
+                        Err(err) => {
+                            errors.push(format!("{} load_from: {err}", versioned_loader.display()));
+                        }
+                    }
+                }
                 for path in openxr_entry_fallback_candidates() {
                     if !path.exists() {
                         continue;

@@ -23,6 +23,12 @@ removal boundary for the rejected chunk-based Far LOD system. Tactical
 experimental all-client Graphics control, runtime preference, and default
 per-eye XR projection reach. Full-frame multiview remains an explicitly
 unavailable optional mode and is not a blocker for exposing the experiment.
+Focused coordinating Tactical
+[`280`](../tactical/280-xr-multiview-render-path-workstream.md) now owns
+procedural-horizon multiview, safe live XR path selection, interactive
+regression coverage, and the final disposition. Tactical
+[`278`](../tactical/278-quest-procedural-horizon-multiview.md) remains its
+renderer and Quest A/B child.
 Tactical
 [`247`](../tactical/247-standalone-world-explorer-foundation.md) supplied the
 small native proof host and shared navigation boundary for the first ring; it
@@ -202,8 +208,10 @@ flight runs at `71.70 FPS` with `5.6%`. Meta app GPU time is only
 `4.75–5.63ms`; duplicate per-eye horizon encoding is therefore a plausible
 CPU-side next target. Optional full-frame multiview still has no
 procedural-horizon pipeline and is not the default XR renderer. Tactical
-[`278`](../tactical/278-quest-procedural-horizon-multiview.md) now owns the
-true two-layer experiment and its alternating Quest comparison.
+[`280`](../tactical/280-xr-multiview-render-path-workstream.md) coordinates
+the complete renderer/live-switch/regression workstream. Child Tactical
+[`278`](../tactical/278-quest-procedural-horizon-multiview.md) owns the true
+two-layer renderer and its alternating Quest comparison.
 Canonical exact generation and live authoritative render sections remain
 different truth-source adapters.
 

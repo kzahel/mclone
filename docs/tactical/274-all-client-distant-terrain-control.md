@@ -228,10 +228,12 @@ Do not silently close these gaps:
    a chunk was generated;
 2. prune or separately bound completed scheduler job-history metadata during
    the same long-travel audit;
-3. implement and measure the true full-frame multiview horizon experiment in
-   Tactical
-   [`278`](278-quest-procedural-horizon-multiview.md); Tactical 277 shows
-   stationary 72 Hz is solved while moving CPU tails remain;
+3. complete the full-frame multiview and interactive XR render-path workstream
+   under coordinating Tactical
+   [`280`](280-xr-multiview-render-path-workstream.md); focused Tactical
+   [`278`](278-quest-procedural-horizon-multiview.md) owns the horizon renderer
+   and Quest A/B, while Tactical 277 shows stationary 72 Hz is solved and
+   moving CPU tails remain;
 4. continue collecting in-headset quality, comfort, thermal, and frame-pacing
    evidence on desktop OpenXR and Quest;
 5. choose device-specific work budgets only from measured evidence, without

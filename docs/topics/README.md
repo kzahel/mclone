@@ -185,6 +185,10 @@ series implements the same concern, normally reuse the document slug in its
   shared-contract × consumer reuse matrix, and the cross-cutting blockers that
   keep new features from re-forking across the client lanes and offscreen
   validation hosts.
+- [`desktop-openxr-validation.md`](desktop-openxr-validation.md): current
+  Windows VirtualDesktopXR and macOS/Linux WiVRn runtime lanes, Linux
+  native/Flatpak USB bootstrap, version-matched Quest client contract, Vulkan
+  interop guardrails, accepted headset evidence, and remaining hardware checks.
 - [`client-entry-lifecycle.md`](client-entry-lifecycle.md): accepted
   menu-first product entry and repeatable host-lifecycle contract — sessions
   require explicit host-neutral launch intent, platform presentation does not

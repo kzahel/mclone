@@ -204,6 +204,22 @@ Movement, controls, audio, accessibility, and gameplay presentation may use
 their own focused preference codecs rather than turning graphics preferences
 into a catch-all file.
 
+### Planned XR render-path experiment
+
+Coordinating Tactical
+[`280`](../tactical/280-xr-multiview-render-path-workstream.md) plans an
+XR-only `XR Render Path: Per-eye | Multiview (Experimental)` row once the
+procedural horizon and safe live target switching exist. The row is
+capability-gated, defaults to per-eye, and reports the host-confirmed active
+path rather than only the requested value.
+
+The first implementation is intentionally transient. It is an interactive
+renderer-regression and performance-comparison control, not yet a schema-1
+graphics preference. The existing launch flag may select its initial value
+for automation but must not save it. Persistence can be reconsidered only
+after failed-switch recovery and physical-device evidence make a stored
+experimental selection safe.
+
 ### Precedence
 
 Startup and live application should use this order:

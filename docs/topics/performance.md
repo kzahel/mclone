@@ -121,12 +121,14 @@ not yet claimed.
 The full execution and exception disposition are in
 [`chunk-lighting-admission-and-backpressure.md`](chunk-lighting-admission-and-backpressure.md).
 
-The independent horizon experiment remains Tactical
-[`278`](../tactical/278-quest-procedural-horizon-multiview.md): add a real
-two-layer horizon to the existing optional full-frame multiview path and
-alternate it against per-eye rendering on the same device. Do not assume the
-old exact-only multiview result applies, and do not reduce accepted horizon
-quality to recover the remaining moving tails.
+The independent horizon experiment now sits under coordinating Tactical
+[`280`](../tactical/280-xr-multiview-render-path-workstream.md), which also
+owns safe live XR path selection and the final keep/default/remove decision.
+Focused child Tactical
+[`278`](../tactical/278-quest-procedural-horizon-multiview.md) adds a real
+two-layer horizon and alternates it against per-eye rendering on the same
+device. Do not assume the old exact-only multiview result applies, and do not
+reduce accepted horizon quality to recover the remaining moving tails.
 
 ## High-Priority Known Performance Issues
 

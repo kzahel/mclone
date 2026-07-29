@@ -23,7 +23,8 @@ Script options:
   --smoke clear|mclone   Select the smoke mode. Default: clear.
   --runtime wivrn|active|json|environment
                          Select the OpenXR runtime bootstrap. Default: wivrn
-                         on macOS, environment elsewhere.
+                         on macOS, environment elsewhere. WiVRn supports the
+                         local macOS build and native/Flatpak Linux installs.
   --runtime-json PATH    Runtime manifest to use with --runtime json.
   --view-pose X,Y,Z,YAW  Map the first tracked headset pose to this mclone
                          world pose. Requires --smoke mclone.
@@ -33,8 +34,8 @@ Script options:
   --xr-debug-ui none|pause|controls
                          Hold an XR debug UI panel open after startup for
                          headset UI validation. Requires --smoke mclone.
-  --wivrn-usb            Start/reuse the local macOS WiVRn host, install an ADB
-                         reverse tunnel, and launch the Quest WiVRn client.
+  --wivrn-usb            Start/reuse the local WiVRn host, install an ADB
+                         reverse tunnel, and launch the matching Quest client.
   --frames N             Set the XR smoke frame budget (or bound a --desktop-xr
                          run). Default: 120 for smokes; unbounded for
                          --desktop-xr unless set.
@@ -55,6 +56,10 @@ On macOS, this follows the Playbox WiVRn defaults:
   XR_RUNTIME_JSON=$HOST_BUILD_DIR/openxr_wivrn-dev.json
   QUEST_WIVRN_PACKAGE=org.meumeu.wivrn.local
   QUEST_WIVRN_URI=wivrn+tcp://localhost:9757
+
+On Linux, --wivrn-usb prefers WIVRN_HOST_BIN or a native wivrn-server,
+then falls back to io.github.wivrn.wivrn from Flatpak. The default Quest
+client package is org.meumeu.wivrn.github.
 EOF
 }
 
@@ -71,6 +76,31 @@ need_cmd() {
         echo "Missing required command: $1" >&2
         exit 1
     fi
+}
+
+resolve_adb() {
+    if [ -n "${ADB:-}" ] && [ -x "${ADB}" ]; then
+        printf '%s\n' "${ADB}"
+        return
+    fi
+    if command -v adb >/dev/null 2>&1; then
+        command -v adb
+        return
+    fi
+
+    local candidate
+    for candidate in \
+        "${HOME}/Android/Sdk/platform-tools/adb" \
+        "${HOME}/Library/Android/sdk/platform-tools/adb" \
+        "${HOME}/AppData/Local/Android/Sdk/platform-tools/adb"
+    do
+        if [ -x "${candidate}" ]; then
+            printf '%s\n' "${candidate}"
+            return
+        fi
+    done
+
+    return 1
 }
 
 first_wivrn_listener_pid() {
@@ -101,7 +131,7 @@ read_android_setting() {
     local name="$2"
     local value
 
-    value="$(adb shell settings get "${namespace}" "${name}" 2>/dev/null | tr -d '\r' || true)"
+    value="$("${adb_bin}" shell settings get "${namespace}" "${name}" 2>/dev/null | tr -d '\r' || true)"
     if [ -z "${value}" ] || [ "${value}" = "null" ]; then
         printf '%s\n' "${android_unset_marker}"
     else
@@ -115,9 +145,9 @@ restore_android_setting() {
     local value="$3"
 
     if [ "${value}" = "${android_unset_marker}" ]; then
-        adb shell settings delete "${namespace}" "${name}" >/dev/null 2>&1 || true
+        "${adb_bin}" shell settings delete "${namespace}" "${name}" >/dev/null 2>&1 || true
     else
-        adb shell settings put "${namespace}" "${name}" "${value}" >/dev/null 2>&1 || true
+        "${adb_bin}" shell settings put "${namespace}" "${name}" "${value}" >/dev/null 2>&1 || true
     fi
 }
 
@@ -132,12 +162,12 @@ wake_headset_for_wivrn_usb() {
     if [ "${wivrn_headset_settings_saved}" -ne 1 ]; then
         save_wivrn_headset_settings
     fi
-    adb shell setprop debug.oculus.disableProximity 1 >/dev/null 2>&1 || true
-    adb shell settings put global stay_on_while_plugged_in 3 >/dev/null 2>&1 || true
-    adb shell settings put secure skip_launch_check_requires_controllers_enabled 1 >/dev/null 2>&1 || true
-    adb shell settings put global require_controllers_for_vr_apps 0 >/dev/null 2>&1 || true
-    adb shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
-    adb shell am broadcast -a com.oculus.vrpowermanager.prox_close --ei timeout 0 >/dev/null 2>&1 || true
+    "${adb_bin}" shell setprop debug.oculus.disableProximity 1 >/dev/null 2>&1 || true
+    "${adb_bin}" shell settings put global stay_on_while_plugged_in 3 >/dev/null 2>&1 || true
+    "${adb_bin}" shell settings put secure skip_launch_check_requires_controllers_enabled 1 >/dev/null 2>&1 || true
+    "${adb_bin}" shell settings put global require_controllers_for_vr_apps 0 >/dev/null 2>&1 || true
+    "${adb_bin}" shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
+    "${adb_bin}" shell am broadcast -a com.oculus.vrpowermanager.prox_close --ei timeout 0 >/dev/null 2>&1 || true
 }
 
 restore_wivrn_headset_settings() {
@@ -146,14 +176,14 @@ restore_wivrn_headset_settings() {
     fi
 
     if [ -n "${wivrn_quest_package}" ]; then
-        adb shell am force-stop "${wivrn_quest_package}" >/dev/null 2>&1 || true
+        "${adb_bin}" shell am force-stop "${wivrn_quest_package}" >/dev/null 2>&1 || true
     fi
     restore_android_setting global stay_on_while_plugged_in "${wivrn_previous_stay_on}"
     restore_android_setting secure skip_launch_check_requires_controllers_enabled "${wivrn_previous_skip_launch_check}"
     restore_android_setting global require_controllers_for_vr_apps "${wivrn_previous_require_controllers}"
-    adb shell setprop debug.oculus.disableProximity 0 >/dev/null 2>&1 || true
-    adb shell am broadcast -a com.oculus.vrpowermanager.prox_open --ei timeout 0 >/dev/null 2>&1 || true
-    adb shell input keyevent KEYCODE_SLEEP >/dev/null 2>&1 || true
+    "${adb_bin}" shell setprop debug.oculus.disableProximity 0 >/dev/null 2>&1 || true
+    "${adb_bin}" shell am broadcast -a com.oculus.vrpowermanager.prox_open --ei timeout 0 >/dev/null 2>&1 || true
+    "${adb_bin}" shell input keyevent KEYCODE_SLEEP >/dev/null 2>&1 || true
 }
 
 wait_for_wivrn_host_port() {
@@ -196,43 +226,125 @@ wait_for_wivrn_usb_connection() {
 }
 
 start_wivrn_usb_stack() {
-    if [ "${uname_s}" != "Darwin" ] && [[ "${uname_s}" != Darwin* ]]; then
-        echo "--wivrn-usb is only implemented for the local macOS WiVRn host path." >&2
+    adb_bin="$(resolve_adb || true)"
+    if [ -z "${adb_bin}" ]; then
+        echo "Missing adb. Set ADB or install Android SDK platform-tools." >&2
         exit 1
     fi
+    need_cmd lsof
 
-    need_cmd adb
-
-    local host_bin="${WIVRN_HOST_BIN:-${host_build_dir}/server/wivrn-server-headless}"
-    local quest_package="${QUEST_WIVRN_PACKAGE:-org.meumeu.wivrn.local}"
+    local quest_package
     local quest_uri="${QUEST_WIVRN_URI:-wivrn+tcp://localhost:9757}"
+    local server_version=""
+    local client_version=""
     local existing_pid
     local existing_cmd
+    local host_bin=""
+    local -a host_cmd
 
-    if [ ! -x "${host_bin}" ]; then
-        echo "WiVRn host binary not found or not executable: ${host_bin}" >&2
+    if [ "${uname_s}" = "Darwin" ] || [[ "${uname_s}" == Darwin* ]]; then
+        host_bin="${WIVRN_HOST_BIN:-${host_build_dir}/server/wivrn-server-headless}"
+        quest_package="${QUEST_WIVRN_PACKAGE:-org.meumeu.wivrn.local}"
+        if [ ! -x "${host_bin}" ]; then
+            echo "WiVRn host binary not found or not executable: ${host_bin}" >&2
+            exit 1
+        fi
+        host_cmd=("${host_bin}" --no-encrypt)
+        wivrn_host_kind=native
+    elif [ "${uname_s}" = "Linux" ] || [[ "${uname_s}" == Linux* ]]; then
+        quest_package="${QUEST_WIVRN_PACKAGE:-org.meumeu.wivrn.github}"
+        if [ -n "${WIVRN_HOST_BIN:-}" ]; then
+            host_bin="${WIVRN_HOST_BIN}"
+            if [ ! -x "${host_bin}" ]; then
+                echo "WiVRn host binary not found or not executable: ${host_bin}" >&2
+                exit 1
+            fi
+            host_cmd=(
+                "${host_bin}"
+                --no-fork
+                --no-encrypt
+                --early-active-runtime
+            )
+            wivrn_host_kind=native
+        elif command -v wivrn-server >/dev/null 2>&1; then
+            host_bin="$(command -v wivrn-server)"
+            host_cmd=(
+                "${host_bin}"
+                --no-fork
+                --no-encrypt
+                --early-active-runtime
+            )
+            wivrn_host_kind=native
+        elif command -v flatpak >/dev/null 2>&1 \
+            && flatpak info io.github.wivrn.wivrn >/dev/null 2>&1
+        then
+            server_version="$(flatpak run --command=wivrn-server \
+                io.github.wivrn.wivrn --version 2>/dev/null \
+                | sed -n 's/^WiVRn version //p' \
+                | sed -n '1p')"
+            host_cmd=(
+                flatpak run
+                --command=wivrn-server
+                io.github.wivrn.wivrn
+                --no-fork
+                --no-encrypt
+                --early-active-runtime
+            )
+            wivrn_host_kind=flatpak
+        else
+            echo "WiVRn is not installed." >&2
+            echo "Install a native wivrn-server or the io.github.wivrn.wivrn Flatpak." >&2
+            exit 1
+        fi
+    else
+        echo "--wivrn-usb is supported on macOS and Linux, not ${uname_s}." >&2
         exit 1
     fi
 
-    adb get-state >/dev/null
+    "${adb_bin}" get-state >/dev/null
+    if ! "${adb_bin}" shell pm path "${quest_package}" 2>/dev/null | grep -q '^package:'; then
+        echo "Quest WiVRn client is not installed: ${quest_package}" >&2
+        exit 1
+    fi
+    client_version="$("${adb_bin}" shell dumpsys package "${quest_package}" 2>/dev/null \
+        | sed -n 's/^[[:space:]]*versionName=//p' \
+        | tr -d '\r' \
+        | sed -n '1p')"
+    if [ -n "${server_version}" ] && [ -n "${client_version}" ] \
+        && [ "${server_version#v}" != "${client_version#v}" ]
+    then
+        echo "WiVRn version mismatch: host=${server_version} Quest=${client_version} (${quest_package})." >&2
+        echo "Install the matching Quest client before running the smoke." >&2
+        exit 1
+    fi
+    if [ -n "${server_version}" ] && [ -n "${client_version}" ]; then
+        echo "WiVRn version match: host=${server_version} Quest=${client_version}"
+    fi
+
     wivrn_quest_package="${quest_package}"
     echo "Preparing Quest power/proximity state for WiVRn USB smoke"
     wake_headset_for_wivrn_usb
 
     echo "Stopping Quest WiVRn client if it is already running: ${quest_package}"
-    adb shell am force-stop "${quest_package}" >/dev/null 2>&1 || true
+    "${adb_bin}" shell am force-stop "${quest_package}" >/dev/null 2>&1 || true
     sleep 1
 
+    if "${adb_bin}" reverse --list 2>/dev/null \
+        | grep -q 'tcp:9757[[:space:]]\+tcp:9757'
+    then
+        wivrn_reverse_preexisting=1
+    fi
     echo "Installing ADB reverse tunnel: tcp:9757 -> tcp:9757"
-    adb reverse tcp:9757 tcp:9757 >/dev/null
+    "${adb_bin}" reverse tcp:9757 tcp:9757 >/dev/null
+    wivrn_reverse_installed=1
 
     existing_pid="$(first_wivrn_listener_pid || true)"
     if [ -n "${existing_pid}" ]; then
         existing_cmd="$(ps -p "${existing_pid}" -o command= 2>/dev/null || true)"
         echo "Using existing WiVRn host on TCP 9757: pid ${existing_pid}"
         case "${existing_cmd}" in
-            *wivrn-server-headless*--no-encrypt*) ;;
-            *wivrn-server-headless*)
+            *wivrn-server*--no-encrypt*) ;;
+            *wivrn-server*)
                 echo "Warning: existing WiVRn host command does not include --no-encrypt." >&2
                 echo "The ADB USB URI omits a PIN, so pairing-mode hosts may not accept it." >&2
                 ;;
@@ -245,14 +357,15 @@ start_wivrn_usb_stack() {
         mkdir -p "${log_dir}"
         wivrn_host_log="${log_dir}/wivrn-host-${run_id}.log"
 
-        echo "Starting WiVRn host: ${host_bin} --no-encrypt"
-        "${host_bin}" --no-encrypt >"${wivrn_host_log}" 2>&1 &
+        printf 'Starting WiVRn host:'
+        quote_command "${host_cmd[@]}"
+        "${host_cmd[@]}" >"${wivrn_host_log}" 2>&1 &
         wivrn_host_pid="$!"
         wait_for_wivrn_host_port "${wivrn_host_pid}" "${wivrn_host_log}"
     fi
 
     echo "Launching Quest WiVRn client: ${quest_package} ${quest_uri}"
-    adb shell am start -W -a android.intent.action.VIEW -d "${quest_uri}" "${quest_package}" >/dev/null
+    "${adb_bin}" shell am start -W -a android.intent.action.VIEW -d "${quest_uri}" "${quest_package}" >/dev/null
 
     wait_for_wivrn_usb_connection "${wivrn_host_log}"
     sleep "${WIVRN_POST_CONNECT_SETTLE_SECONDS:-2}"
@@ -262,10 +375,20 @@ cleanup() {
     local status=$?
 
     if [ -n "${wivrn_host_pid}" ] && kill -0 "${wivrn_host_pid}" >/dev/null 2>&1; then
-        kill "${wivrn_host_pid}" >/dev/null 2>&1 || true
+        if [ "${wivrn_host_kind}" = "flatpak" ]; then
+            flatpak kill io.github.wivrn.wivrn >/dev/null 2>&1 || true
+        else
+            kill "${wivrn_host_pid}" >/dev/null 2>&1 || true
+        fi
         wait "${wivrn_host_pid}" >/dev/null 2>&1 || true
     fi
     restore_wivrn_headset_settings
+    if [ "${wivrn_reverse_installed}" -eq 1 ] \
+        && [ "${wivrn_reverse_preexisting}" -ne 1 ] \
+        && [ -n "${adb_bin}" ]
+    then
+        "${adb_bin}" reverse --remove tcp:9757 >/dev/null 2>&1 || true
+    fi
 
     return "${status}"
 }
@@ -283,8 +406,12 @@ runtime_json=""
 view_pose=""
 frames=120
 frames_explicit=0
+adb_bin=""
 wivrn_host_pid=""
+wivrn_host_kind=""
 wivrn_host_log=""
+wivrn_reverse_installed=0
+wivrn_reverse_preexisting=0
 mclone_args=()
 
 trap cleanup EXIT
@@ -443,29 +570,36 @@ case "${runtime}" in
 esac
 
 if [ "${runtime}" = "wivrn" ]; then
-    if [ "${uname_s}" != "Darwin" ] && [[ "${uname_s}" != Darwin* ]]; then
-        echo "--runtime wivrn is only implemented for the local macOS WiVRn host path." >&2
+    if [ "${uname_s}" = "Linux" ] || [[ "${uname_s}" == Linux* ]]; then
+        runtime_json="${XR_RUNTIME_JSON:-${XDG_CONFIG_HOME:-${HOME}/.config}/openxr/1/active_runtime.json}"
+        if [ -z "${XR_RUNTIME_JSON:-}" ]; then
+            export XR_RUNTIME_JSON="${runtime_json}"
+        fi
+        echo "Using Linux WiVRn runtime manifest: ${XR_RUNTIME_JSON}"
+    elif [ "${uname_s}" = "Darwin" ] || [[ "${uname_s}" == Darwin* ]]; then
+        runtime_dylib="${MONADO_OPENXR_RUNTIME_PATH:-${host_build_dir}/_deps/monado-build/src/xrt/targets/openxr/libopenxr_wivrn.dylib}"
+        runtime_json="${XR_RUNTIME_JSON:-${host_build_dir}/openxr_wivrn-dev.json}"
+
+        if [ -z "${MONADO_OPENXR_RUNTIME_PATH:-}" ] && [ -f "${runtime_dylib}" ]; then
+            export MONADO_OPENXR_RUNTIME_PATH="${runtime_dylib}"
+        fi
+        if [ -z "${XR_RUNTIME_JSON:-}" ] && [ -f "${runtime_json}" ]; then
+            export XR_RUNTIME_JSON="${runtime_json}"
+        fi
+
+        if [ -n "${MONADO_OPENXR_RUNTIME_PATH:-}" ]; then
+            echo "Using MONADO_OPENXR_RUNTIME_PATH=${MONADO_OPENXR_RUNTIME_PATH}"
+        else
+            echo "No MONADO_OPENXR_RUNTIME_PATH set and default not found: ${runtime_dylib}" >&2
+        fi
+        if [ -n "${XR_RUNTIME_JSON:-}" ]; then
+            echo "Using XR_RUNTIME_JSON=${XR_RUNTIME_JSON}"
+        else
+            echo "No XR_RUNTIME_JSON set and default not found: ${runtime_json}" >&2
+        fi
+    else
+        echo "--runtime wivrn is supported on macOS and Linux, not ${uname_s}." >&2
         exit 1
-    fi
-    runtime_dylib="${MONADO_OPENXR_RUNTIME_PATH:-${host_build_dir}/_deps/monado-build/src/xrt/targets/openxr/libopenxr_wivrn.dylib}"
-    runtime_json="${XR_RUNTIME_JSON:-${host_build_dir}/openxr_wivrn-dev.json}"
-
-    if [ -z "${MONADO_OPENXR_RUNTIME_PATH:-}" ] && [ -f "${runtime_dylib}" ]; then
-        export MONADO_OPENXR_RUNTIME_PATH="${runtime_dylib}"
-    fi
-    if [ -z "${XR_RUNTIME_JSON:-}" ] && [ -f "${runtime_json}" ]; then
-        export XR_RUNTIME_JSON="${runtime_json}"
-    fi
-
-    if [ -n "${MONADO_OPENXR_RUNTIME_PATH:-}" ]; then
-        echo "Using MONADO_OPENXR_RUNTIME_PATH=${MONADO_OPENXR_RUNTIME_PATH}"
-    else
-        echo "No MONADO_OPENXR_RUNTIME_PATH set and default not found: ${runtime_dylib}" >&2
-    fi
-    if [ -n "${XR_RUNTIME_JSON:-}" ]; then
-        echo "Using XR_RUNTIME_JSON=${XR_RUNTIME_JSON}"
-    else
-        echo "No XR_RUNTIME_JSON set and default not found: ${runtime_json}" >&2
     fi
 fi
 

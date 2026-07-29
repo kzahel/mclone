@@ -26,8 +26,11 @@ Tactical
 physical Quest performance campaign on 2026-07-28. Pixel-identical
 covered/frustum tile culling restores stationary RD5 to 72 Hz, composed
 8x travel keeps exact-center and persistence memory healthy, and the remaining
-moving CPU tail now justifies focused multiview Tactical
-[`278`](278-quest-procedural-horizon-multiview.md).
+moving CPU tail now justifies the focused XR multiview workstream coordinated
+by Tactical
+[`280`](280-xr-multiview-render-path-workstream.md). Tactical
+[`278`](278-quest-procedural-horizon-multiview.md) remains its renderer and
+Quest A/B child.
 
 Topics:
 
@@ -350,7 +353,7 @@ ready.
 | **PH-5 Vegetation and edit arbitration** | deferred after accepted PH-4; reusable untouched-tree primitive starts in PH-2 | Close the live exact/proxy tree gap, reject stale products, and optionally invalidate nearby natural proxy ownership when authoritative exact edits change replacement facts. Compare generated-feature mesh partitioning, sparse record/region invalidation or storage, and cheaper cosmetic mitigations without making edit-aware LOD a prerequisite. | A future accepted policy explicitly accounts for cross-chunk crowns, persisted edits, delayed exact compilation, movement, and source switches. |
 | **PH-6 Lifecycle, recovery, and budgets** | waiting on PH-4/PH-5 | Integrate world/session replacement, active and bounded standby worlds, device loss/rebuild, dynamic exact-radius changes, cross-feature admission, diagnostics, and stable locomotion budgets. | Rebuild and world-switch smokes recover coarse-first without stale draws or unbounded work; exact-only remains protected. |
 | **PH-7 Flat-platform promotion** | waiting on stable native scene | Wire the same scene contracts through the full browser game and flat Android. Construct native-thread or browser-Worker executors only at platform rims; do not copy Explorer policy. Establish device-specific memory/work defaults from evidence. | Desktop web, representative phone browser, and flat Android render matching source/coverage identities and inspected pixels under movement and replacement. |
-| **PH-8 Stereo and XR promotion** | **active; synthetic stereo and Quest per-eye accepted, multiview in Tactical 278** | Feed the same scene snapshot and committed horizon through synthetic stereo, desktop OpenXR, Quest per-eye rendering, and full-frame multiview. Share residency, compilation, masks, and admission across views; only view/projection/targets vary. | Headset-free stereo, desktop XR, Android XR, and capable-device multiview receipts show correct per-view geometry, no one-eye omissions, bounded work independent of view count where appropriate, and accepted headset pixels/performance. |
+| **PH-8 Stereo and XR promotion** | **active; synthetic stereo and Quest per-eye accepted, multiview coordinated by Tactical 280 with renderer child 278** | Feed the same scene snapshot and committed horizon through synthetic stereo, desktop OpenXR, Quest per-eye rendering, and full-frame multiview. Share residency, compilation, masks, and admission across views; only view/projection/targets vary. | Headset-free stereo, desktop XR, Android XR, and capable-device multiview receipts show correct per-view geometry, no one-eye omissions, bounded work independent of view count where appropriate, and accepted headset pixels/performance. |
 | **PH-9 Product view and handoff** | waiting on credible game composition | Reuse the same composition for the player-facing Explorer/map/tabletop direction, accessible navigation, URLs or source recipes, and validated “Enter Here” authority handoff. Preserve the option to load/navigate before attempting seamless GPU residency transfer. | A player can inspect a world broadly and enter an authoritative safe location without the preview claiming authority it does not own. |
 | **PH-10 Quality and scale closeout** | parallel after PH-2 measurements | Tune footprint summaries, coast/river/water transitions, fog, lighting handoff, forest silhouettes, horizon distance, and device tiers. Add an adaptive comparator only for a measured question. | Review fixtures across coast, mountain, water, forest, and large-coordinate cases meet selected desktop/phone/Quest visual and performance budgets. |
 
@@ -493,8 +496,12 @@ XR crates compile.
 Result so far: physical Quest 3 review accepted the per-eye horizon and
 composition in headset. Tactical 277 restored stationary 72 Hz and closed the
 long-travel memory incident, but repeated orbit and flight still retain a
-small moving frame-tail miss. Tactical 278 must measure the true multiview
-horizon before PH-8 closes; desktop OpenXR remains separate evidence.
+small moving frame-tail miss. Coordinating Tactical
+[`280`](280-xr-multiview-render-path-workstream.md) owns the complete
+multiview renderer, live-switch, and disposition workstream; child Tactical
+[`278`](278-quest-procedural-horizon-multiview.md) must measure the true
+multiview horizon before PH-8 closes. Desktop OpenXR remains separate
+evidence.
 
 ### Review 6: product completion
 

@@ -1,6 +1,8 @@
 # Tactical 278: Quest Procedural-Horizon Multiview
 
-Status: planned 2026-07-28; ready after Tactical 277.
+Status: planned 2026-07-28; ready after Tactical 277. Focused renderer and
+Quest A/B child of coordinating Tactical
+[`280`](280-xr-multiview-render-path-workstream.md).
 
 Topics: `procedural-horizon-clipmap`, `performance`
 
@@ -40,6 +42,11 @@ Then run an alternating per-eye/multiview/per-eye Quest comparison.
 
 This is an experiment until the device evidence supports making multiview the
 default. Unsupported runtimes retain the current per-eye frame-overlap path.
+
+This tactical does not own the live settings control or the render-target
+topology needed to switch paths without relaunching. Tactical 280 owns that
+cross-boundary work and the combined closeout. The existing startup flag is a
+sufficient host for this child's first renderer and Quest comparison.
 
 ## Required Renderer Contract
 
