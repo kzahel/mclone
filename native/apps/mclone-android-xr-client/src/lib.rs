@@ -343,7 +343,8 @@ mod android {
         sky_terrain_multiview_perf: bool,
         sky_terrain_actors_multiview_perf: bool,
         skip_actors: bool,
-        full_frame_multiview: bool,
+        xr_render_mode: mclone_xr_host::XrRenderMode,
+        xr_render_mode_cycle: bool,
         frame_overlap: bool,
         frame_overlap_mode: AndroidXrFrameOverlapMode,
         overlap_eye_submits: bool,
@@ -381,7 +382,8 @@ mod android {
                 sky_terrain_multiview_perf: false,
                 sky_terrain_actors_multiview_perf: false,
                 skip_actors: false,
-                full_frame_multiview: false,
+                xr_render_mode: mclone_xr_host::XrRenderMode::DualPerEye,
+                xr_render_mode_cycle: false,
                 frame_overlap: false,
                 frame_overlap_mode: AndroidXrFrameOverlapMode::default(),
                 overlap_eye_submits: false,
@@ -738,7 +740,17 @@ mod android {
                     options.skip_actors = true;
                 }
                 "--xr-full-frame-multiview" => {
-                    options.full_frame_multiview = true;
+                    options.xr_render_mode = mclone_xr_host::XrRenderMode::ArrayMultiview;
+                }
+                "--xr-render-mode" => {
+                    let mode = mclone_xr_host::XrRenderMode::parse_label(&parse_next_string(
+                        &mut argv,
+                        "--xr-render-mode",
+                    )?)?;
+                    options.xr_render_mode = mode;
+                }
+                "--xr-render-mode-cycle" => {
+                    options.xr_render_mode_cycle = true;
                 }
                 "--xr-frame-overlap" => {
                     if options.frame_overlap_mode == AndroidXrFrameOverlapMode::Serial {
@@ -898,7 +910,7 @@ mod android {
         {
             bail!("multiview perf modes cannot be combined with multiview proof modes");
         }
-        if options.full_frame_multiview
+        if options.xr_render_mode != mclone_xr_host::XrRenderMode::DualPerEye
             && (options.multiview_proof
                 || options.terrain_multiview_proof
                 || options.terrain_multiview_perf
@@ -910,7 +922,7 @@ mod android {
             );
         }
         if options.overlap_eye_submits
-            && (options.full_frame_multiview
+            && (options.xr_render_mode != mclone_xr_host::XrRenderMode::DualPerEye
                 || options.multiview_proof
                 || options.terrain_multiview_proof
                 || options.terrain_multiview_perf
@@ -920,7 +932,7 @@ mod android {
             bail!("--xr-overlap-eye-submits only applies to the per-eye full-frame path");
         }
         if options.overlap_runtime_prefetch
-            && (options.full_frame_multiview
+            && (options.xr_render_mode != mclone_xr_host::XrRenderMode::DualPerEye
                 || options.multiview_proof
                 || options.terrain_multiview_proof
                 || options.terrain_multiview_perf
@@ -931,6 +943,11 @@ mod android {
         }
         if options.overlap_runtime_prefetch && options.perf_frozen_render {
             bail!("--xr-overlap-runtime-prefetch cannot be combined with --perf-frozen-render");
+        }
+        if options.xr_render_mode_cycle
+            && options.xr_render_mode != mclone_xr_host::XrRenderMode::DualPerEye
+        {
+            bail!("--xr-render-mode-cycle must start in dual-per-eye mode");
         }
         if matches!(options.perf_detail, AndroidXrPerfDetail::Minimal)
             && !options.frame_accounting_enabled
@@ -1031,7 +1048,7 @@ mod android {
     }
 
     fn android_xr_uses_per_eye_full_frame_path(options: &AndroidXrStartupOptions) -> bool {
-        !(options.full_frame_multiview
+        !(options.xr_render_mode != mclone_xr_host::XrRenderMode::DualPerEye
             || options.multiview_proof
             || options.terrain_multiview_proof
             || options.terrain_multiview_perf
@@ -1421,8 +1438,9 @@ mod android {
         );
         log::info!("Android XR skip actors: {}", startup_options.skip_actors);
         log::info!(
-            "Android XR full-frame multiview: {}",
-            startup_options.full_frame_multiview
+            "Android XR render mode: {} cycle={}",
+            startup_options.xr_render_mode.label(),
+            startup_options.xr_render_mode_cycle
         );
         log::info!(
             "Android XR frame overlap mode: {}",
@@ -1520,7 +1538,8 @@ mod android {
             startup_options.terrain_multiview_perf,
             startup_options.sky_terrain_multiview_perf,
             startup_options.sky_terrain_actors_multiview_perf,
-            startup_options.full_frame_multiview,
+            startup_options.xr_render_mode,
+            startup_options.xr_render_mode_cycle,
             startup_options.frame_overlap,
             startup_options.overlap_eye_submits,
             startup_options.overlap_runtime_prefetch,
@@ -1559,7 +1578,8 @@ mod android {
         terrain_multiview_perf: bool,
         sky_terrain_multiview_perf: bool,
         sky_terrain_actors_multiview_perf: bool,
-        full_frame_multiview: bool,
+        xr_render_mode: mclone_xr_host::XrRenderMode,
+        xr_render_mode_cycle: bool,
         frame_overlap: bool,
         overlap_eye_submits: bool,
         overlap_runtime_prefetch: bool,
@@ -1845,6 +1865,24 @@ mod android {
             eye_height,
             xr_render_scale * xr_render_scale
         );
+        let target_spec = AndroidXrTargetSpec {
+            eye_width,
+            eye_height,
+            color_format: XR_COLOR_FORMAT,
+            depth_format: XR_DEPTH_FORMAT,
+            sample_count: XR_SAMPLE_COUNT,
+            foveation: xr_foveation,
+        };
+        let supported_render_modes = if graphics
+            .device
+            .features()
+            .contains(wgpu::Features::MULTIVIEW)
+        {
+            mclone_xr_host::XrRenderModeSet::ALL
+        } else {
+            mclone_xr_host::XrRenderModeSet::DUAL_PER_EYE
+                .union(mclone_xr_host::XrRenderModeSet::ARRAY_PER_EYE)
+        };
         if multiview_proof || terrain_multiview_proof {
             let mut stereo_target = graphics_vulkan::create_stereo(
                 &graphics.device,
@@ -1923,8 +1961,8 @@ mod android {
             );
         }
 
-        if full_frame_multiview {
-            let mut stereo_target = graphics_vulkan::create_stereo(
+        if xr_render_mode != mclone_xr_host::XrRenderMode::DualPerEye {
+            let stereo_target = graphics_vulkan::create_stereo(
                 &graphics.device,
                 &graphics.session,
                 eye_width,
@@ -1933,11 +1971,12 @@ mod android {
                 XR_SAMPLE_COUNT,
                 xr_foveation.level_profile(),
             )
-            .context("create OpenXR full-frame multiview stereo array swapchain")?;
-            let mut multiview_depth =
+            .context("create OpenXR stereo-array swapchain")?;
+            let multiview_depth =
                 ChunkMultiviewDepthTarget::new(&graphics.device, eye_width, eye_height);
             log::info!(
-                "OpenXR full-frame multiview swapchain: color_format={XR_COLOR_FORMAT:?} eye={}x{} images={} layers={}",
+                "OpenXR stereo-array swapchain: mode={} color_format={XR_COLOR_FORMAT:?} eye={}x{} images={} layers={}",
+                xr_render_mode.label(),
                 eye_width,
                 eye_height,
                 stereo_target.texture_count(),
@@ -1967,7 +2006,7 @@ mod android {
                 render_options,
                 client_entry.clone(),
             )
-            .context("initialize Android XR full-frame multiview terrain runtime")?;
+            .context("initialize Android XR stereo-array terrain runtime")?;
             let terrain_summary = terrain.frame_summary();
             terrain.set_display_refresh_hz(display_refresh.current_rate);
             terrain.set_render_split_timing_enabled(perf_seconds.is_some());
@@ -1975,6 +2014,15 @@ mod android {
             terrain.set_render_section_accept_budget(render_section_accept_budget);
             terrain
                 .set_render_completed_result_accept_budget(render_completed_result_accept_budget);
+            let target_manager = mclone_xr_host::XrTargetManager::new(
+                AndroidXrTargetFamily::StereoArray {
+                    stereo: stereo_target,
+                    depth: multiview_depth,
+                },
+                xr_render_mode,
+                supported_render_modes,
+            )
+            .context("initialize Android XR target manager")?;
             log::info!(
                 "MCLONE_ANDROID_XR_TERRAIN_READY sections={} indices={} actors={}",
                 terrain_summary.section_count,
@@ -1987,10 +2035,12 @@ mod android {
                 &mut graphics,
                 &stage,
                 environment_blend_mode,
-                AndroidXrFrameTargets::Multiview {
-                    stereo_target: &mut stereo_target,
-                    depth: &mut multiview_depth,
-                },
+                target_manager,
+                target_spec,
+                false,
+                false,
+                false,
+                xr_render_mode_cycle,
                 &mut terrain,
                 &mut controller_actions,
                 &controller_preferences,
@@ -2021,7 +2071,7 @@ mod android {
             );
         }
 
-        let mut left_eye = graphics_vulkan::create_eye(
+        let left_eye = graphics_vulkan::create_eye(
             &graphics.device,
             &graphics.session,
             eye_width,
@@ -2032,7 +2082,7 @@ mod android {
             xr_foveation.level_profile(),
         )
         .context("create OpenXR left-eye color swapchain")?;
-        let mut right_eye = graphics_vulkan::create_eye(
+        let right_eye = graphics_vulkan::create_eye(
             &graphics.device,
             &graphics.session,
             eye_width,
@@ -2085,6 +2135,15 @@ mod android {
         terrain.set_render_section_upload_budget(render_section_upload_budget);
         terrain.set_render_section_accept_budget(render_section_accept_budget);
         terrain.set_render_completed_result_accept_budget(render_completed_result_accept_budget);
+        let target_manager = mclone_xr_host::XrTargetManager::new(
+            AndroidXrTargetFamily::DualEye {
+                left: left_eye,
+                right: right_eye,
+            },
+            mclone_xr_host::XrRenderMode::DualPerEye,
+            supported_render_modes,
+        )
+        .context("initialize Android XR target manager")?;
         log::info!("Android XR frame overlap active: {}", frame_overlap);
         log::info!(
             "Android XR per-eye submit overlap active: {}",
@@ -2106,13 +2165,12 @@ mod android {
             &mut graphics,
             &stage,
             environment_blend_mode,
-            AndroidXrFrameTargets::PerEye {
-                left_eye: &mut left_eye,
-                right_eye: &mut right_eye,
-                frame_overlap,
-                overlap_eye_submits,
-                overlap_runtime_prefetch,
-            },
+            target_manager,
+            target_spec,
+            frame_overlap,
+            overlap_eye_submits,
+            overlap_runtime_prefetch,
+            xr_render_mode_cycle,
             &mut terrain,
             &mut controller_actions,
             &controller_preferences,
@@ -3381,7 +3439,12 @@ mod android {
         graphics: &mut graphics_vulkan::VulkanGraphicsSession,
         stage: &xr::Space,
         environment_blend_mode: xr::EnvironmentBlendMode,
-        frame_targets: AndroidXrFrameTargets<'_>,
+        target_manager: mclone_xr_host::XrTargetManager<AndroidXrTargetFamily>,
+        target_spec: AndroidXrTargetSpec,
+        frame_overlap: bool,
+        overlap_eye_submits: bool,
+        overlap_runtime_prefetch: bool,
+        xr_render_mode_cycle: bool,
         terrain: &mut AndroidXrTerrainState,
         controller_actions: &mut OpenXrControllerActions,
         controller_preferences: &ControllerInputPreferences,
@@ -3410,8 +3473,28 @@ mod android {
         xr_foveation: AndroidXrFoveation,
         xr_render_scale: f32,
     ) -> Result<()> {
-        let render_path = frame_targets.render_path();
-        let xr_eye_size = frame_targets.eye_size();
+        let render_path = android_xr_render_path(
+            target_manager.active_mode(),
+            frame_overlap,
+            overlap_eye_submits,
+            overlap_runtime_prefetch,
+        );
+        let xr_eye_size = target_manager.active_target().eye_size();
+        let target_snapshot = target_manager.snapshot();
+        log::info!(
+            "MCLONE_XR_RENDER_PATH_READY active={} topology={} supported={} color_images={} active_bytes={} outstanding={}",
+            target_snapshot.active_mode.label(),
+            target_snapshot.active_topology.label(),
+            target_snapshot
+                .supported_modes
+                .iter()
+                .map(mclone_xr_host::XrRenderMode::label)
+                .collect::<Vec<_>>()
+                .join(","),
+            target_manager.active_target().color_texture_count(),
+            target_snapshot.active_target_bytes,
+            target_snapshot.outstanding_images
+        );
         let frame_pipeline_accountant = FramePipelineAccountant::new_live(
             xr_frame_pipeline_accounting_config(display_refresh.current_rate.map(f64::from)),
         );
@@ -3473,8 +3556,14 @@ mod android {
             app,
             device: &graphics.device,
             queue: &graphics.queue,
+            session: &graphics.session,
             stage,
-            frame_targets,
+            target_manager,
+            target_spec,
+            frame_overlap,
+            overlap_eye_submits,
+            overlap_runtime_prefetch,
+            render_mode_cycle: xr_render_mode_cycle.then(AndroidXrRenderModeCycle::default),
             terrain,
             controller_actions,
             session_smoke,
@@ -3544,6 +3633,7 @@ mod android {
         PerEyeFrameOverlap,
         PerEyeOverlap,
         PerEyePrefetch,
+        ArrayPerEye,
         Multiview,
     }
 
@@ -3554,55 +3644,154 @@ mod android {
                 Self::PerEyeFrameOverlap => "per-eye-frame-overlap",
                 Self::PerEyeOverlap => "per-eye-overlap",
                 Self::PerEyePrefetch => "per-eye-prefetch",
+                Self::ArrayPerEye => "array-per-eye",
                 Self::Multiview => "multiview",
             }
         }
     }
 
-    enum AndroidXrFrameTargets<'a> {
-        PerEye {
-            left_eye: &'a mut graphics_vulkan::OpenXrEyeState,
-            right_eye: &'a mut graphics_vulkan::OpenXrEyeState,
-            frame_overlap: bool,
-            overlap_eye_submits: bool,
-            overlap_runtime_prefetch: bool,
+    #[derive(Clone, Copy)]
+    struct AndroidXrTargetSpec {
+        eye_width: u32,
+        eye_height: u32,
+        color_format: wgpu::TextureFormat,
+        depth_format: wgpu::TextureFormat,
+        sample_count: u32,
+        foveation: AndroidXrFoveation,
+    }
+
+    enum AndroidXrTargetFamily {
+        DualEye {
+            left: graphics_vulkan::OpenXrEyeState,
+            right: graphics_vulkan::OpenXrEyeState,
         },
-        Multiview {
-            stereo_target: &'a mut graphics_vulkan::OpenXrStereoState,
-            depth: &'a mut ChunkMultiviewDepthTarget,
+        StereoArray {
+            stereo: graphics_vulkan::OpenXrStereoState,
+            depth: ChunkMultiviewDepthTarget,
         },
     }
 
-    impl AndroidXrFrameTargets<'_> {
-        fn render_path(&self) -> AndroidXrRenderPath {
+    impl AndroidXrTargetFamily {
+        fn eye_size(&self) -> [u32; 2] {
             match self {
-                Self::PerEye {
-                    frame_overlap,
-                    overlap_eye_submits,
-                    overlap_runtime_prefetch,
-                    ..
-                } => {
-                    if *frame_overlap {
-                        AndroidXrRenderPath::PerEyeFrameOverlap
-                    } else if *overlap_runtime_prefetch {
-                        AndroidXrRenderPath::PerEyePrefetch
-                    } else if *overlap_eye_submits {
-                        AndroidXrRenderPath::PerEyeOverlap
-                    } else {
-                        AndroidXrRenderPath::PerEye
-                    }
-                }
-                Self::Multiview { .. } => AndroidXrRenderPath::Multiview,
+                Self::DualEye { left, .. } => [left.width, left.height],
+                Self::StereoArray { stereo, .. } => [stereo.width, stereo.height],
             }
         }
 
-        fn eye_size(&self) -> [u32; 2] {
+        fn color_texture_count(&self) -> usize {
             match self {
-                Self::PerEye { left_eye, .. } => [left_eye.width, left_eye.height],
-                Self::Multiview { stereo_target, .. } => {
-                    [stereo_target.width, stereo_target.height]
+                Self::DualEye { left, right } => {
+                    left.texture_count().saturating_add(right.texture_count())
                 }
+                Self::StereoArray { stereo, .. } => stereo.texture_count(),
             }
+        }
+    }
+
+    impl mclone_xr_host::XrTargetFamily for AndroidXrTargetFamily {
+        fn topology(&self) -> mclone_xr_host::XrTargetTopology {
+            match self {
+                Self::DualEye { .. } => mclone_xr_host::XrTargetTopology::DualEye,
+                Self::StereoArray { .. } => mclone_xr_host::XrTargetTopology::StereoArray,
+            }
+        }
+
+        fn estimated_owned_bytes(&self) -> u64 {
+            let [width, height] = self.eye_size();
+            let pixels = u64::from(width) * u64::from(height);
+            let color_layers = match self {
+                Self::DualEye { .. } => self.color_texture_count() as u64,
+                Self::StereoArray { stereo, .. } => {
+                    self.color_texture_count() as u64 * u64::from(stereo.array_size())
+                }
+            };
+            let depth_layers = 2_u64;
+            pixels
+                .saturating_mul(4)
+                .saturating_mul(color_layers.saturating_add(depth_layers))
+        }
+
+        fn outstanding_image_count(&self) -> u32 {
+            use mclone_xr_host::{XrEyeSwapchain, XrStereoSwapchain};
+
+            match self {
+                Self::DualEye { left, right } => left
+                    .outstanding_image_count()
+                    .saturating_add(right.outstanding_image_count()),
+                Self::StereoArray { stereo, .. } => stereo.outstanding_image_count(),
+            }
+        }
+    }
+
+    fn create_android_xr_target_family(
+        device: &wgpu::Device,
+        session: &xr::Session<graphics_vulkan::AppGraphics>,
+        spec: AndroidXrTargetSpec,
+        topology: mclone_xr_host::XrTargetTopology,
+    ) -> Result<AndroidXrTargetFamily> {
+        match topology {
+            mclone_xr_host::XrTargetTopology::DualEye => {
+                let left = graphics_vulkan::create_eye(
+                    device,
+                    session,
+                    spec.eye_width,
+                    spec.eye_height,
+                    spec.color_format,
+                    spec.depth_format,
+                    spec.sample_count,
+                    spec.foveation.level_profile(),
+                )
+                .context("create replacement OpenXR left-eye target")?;
+                let right = graphics_vulkan::create_eye(
+                    device,
+                    session,
+                    spec.eye_width,
+                    spec.eye_height,
+                    spec.color_format,
+                    spec.depth_format,
+                    spec.sample_count,
+                    spec.foveation.level_profile(),
+                )
+                .context("create replacement OpenXR right-eye target")?;
+                Ok(AndroidXrTargetFamily::DualEye { left, right })
+            }
+            mclone_xr_host::XrTargetTopology::StereoArray => {
+                let stereo = graphics_vulkan::create_stereo(
+                    device,
+                    session,
+                    spec.eye_width,
+                    spec.eye_height,
+                    spec.color_format,
+                    spec.sample_count,
+                    spec.foveation.level_profile(),
+                )
+                .context("create replacement OpenXR stereo-array target")?;
+                let depth = ChunkMultiviewDepthTarget::new(device, spec.eye_width, spec.eye_height);
+                Ok(AndroidXrTargetFamily::StereoArray { stereo, depth })
+            }
+        }
+    }
+
+    fn android_xr_render_path(
+        mode: mclone_xr_host::XrRenderMode,
+        frame_overlap: bool,
+        overlap_eye_submits: bool,
+        overlap_runtime_prefetch: bool,
+    ) -> AndroidXrRenderPath {
+        match mode {
+            mclone_xr_host::XrRenderMode::DualPerEye if frame_overlap => {
+                AndroidXrRenderPath::PerEyeFrameOverlap
+            }
+            mclone_xr_host::XrRenderMode::DualPerEye if overlap_runtime_prefetch => {
+                AndroidXrRenderPath::PerEyePrefetch
+            }
+            mclone_xr_host::XrRenderMode::DualPerEye if overlap_eye_submits => {
+                AndroidXrRenderPath::PerEyeOverlap
+            }
+            mclone_xr_host::XrRenderMode::DualPerEye => AndroidXrRenderPath::PerEye,
+            mclone_xr_host::XrRenderMode::ArrayPerEye => AndroidXrRenderPath::ArrayPerEye,
+            mclone_xr_host::XrRenderMode::ArrayMultiview => AndroidXrRenderPath::Multiview,
         }
     }
 
@@ -3612,12 +3801,32 @@ mod android {
         perf_started_after_ready: bool,
     }
 
+    const ANDROID_XR_RENDER_MODE_CYCLE_DWELL_FRAMES: u64 = 180;
+    const ANDROID_XR_RENDER_MODE_CYCLE: [mclone_xr_host::XrRenderMode; 4] = [
+        mclone_xr_host::XrRenderMode::ArrayPerEye,
+        mclone_xr_host::XrRenderMode::ArrayMultiview,
+        mclone_xr_host::XrRenderMode::ArrayPerEye,
+        mclone_xr_host::XrRenderMode::DualPerEye,
+    ];
+
+    #[derive(Default)]
+    struct AndroidXrRenderModeCycle {
+        next_mode_index: usize,
+        next_submitted_frame: u64,
+    }
+
     struct AndroidXrMainFrameLoop<'a> {
         app: &'a AndroidApp,
         device: &'a wgpu::Device,
         queue: &'a wgpu::Queue,
+        session: &'a xr::Session<graphics_vulkan::AppGraphics>,
         stage: &'a xr::Space,
-        frame_targets: AndroidXrFrameTargets<'a>,
+        target_manager: mclone_xr_host::XrTargetManager<AndroidXrTargetFamily>,
+        target_spec: AndroidXrTargetSpec,
+        frame_overlap: bool,
+        overlap_eye_submits: bool,
+        overlap_runtime_prefetch: bool,
+        render_mode_cycle: Option<AndroidXrRenderModeCycle>,
         terrain: &'a mut AndroidXrTerrainState,
         controller_actions: &'a mut OpenXrControllerActions,
         session_smoke: Option<AndroidXrSessionSmoke>,
@@ -3755,38 +3964,59 @@ mod android {
             }
 
             let render_start = Instant::now();
-            let rendered = match &mut self.frame_targets {
-                AndroidXrFrameTargets::PerEye {
-                    left_eye,
-                    right_eye,
-                    ..
-                } => render_android_xr_per_eye_frame(
+            let active_mode = self.target_manager.active_mode();
+            let rendered = match (active_mode, self.target_manager.active_target_mut()) {
+                (
+                    mclone_xr_host::XrRenderMode::DualPerEye,
+                    AndroidXrTargetFamily::DualEye { left, right },
+                ) => render_android_xr_per_eye_frame(
                     self.device,
                     self.queue,
                     frame,
                     self.stage,
-                    left_eye,
-                    right_eye,
+                    left,
+                    right,
                     self.terrain,
                     &input,
                     self.perf_probe.automation(),
                     self.fixed_render_view_pose,
                 ),
-                AndroidXrFrameTargets::Multiview {
-                    stereo_target,
-                    depth,
-                } => render_android_xr_multiview_frame(
+                (
+                    mclone_xr_host::XrRenderMode::ArrayPerEye,
+                    AndroidXrTargetFamily::StereoArray { stereo, depth },
+                ) => render_android_xr_array_per_eye_frame(
                     self.device,
                     self.queue,
                     frame,
                     self.stage,
-                    stereo_target,
+                    stereo,
                     depth,
                     self.terrain,
                     &input,
                     self.perf_probe.automation(),
                     self.fixed_render_view_pose,
                 ),
+                (
+                    mclone_xr_host::XrRenderMode::ArrayMultiview,
+                    AndroidXrTargetFamily::StereoArray { stereo, depth },
+                ) => render_android_xr_multiview_frame(
+                    self.device,
+                    self.queue,
+                    frame,
+                    self.stage,
+                    stereo,
+                    depth,
+                    self.terrain,
+                    &input,
+                    self.perf_probe.automation(),
+                    self.fixed_render_view_pose,
+                ),
+                (mode, family) => Err(anyhow::anyhow!(
+                    "Android XR render mode {} requires {} topology, active family is {}",
+                    mode.label(),
+                    mode.topology().label(),
+                    mclone_xr_host::XrTargetFamily::topology(family).label()
+                )),
             };
             self.frame_timing.render_mclone_frame_ms = elapsed_ms(render_start);
             let rendered = rendered?;
@@ -3935,6 +4165,77 @@ mod android {
                     outcome.stats.runtime_frames,
                     outcome.stats.skipped_frames
                 );
+            }
+            if self.logged_ready {
+                if let Some(cycle) = self.render_mode_cycle.as_mut() {
+                    if cycle.next_mode_index < ANDROID_XR_RENDER_MODE_CYCLE.len()
+                        && outcome.stats.submitted_frames >= cycle.next_submitted_frame
+                    {
+                        let mode = ANDROID_XR_RENDER_MODE_CYCLE[cycle.next_mode_index];
+                        let step = cycle.next_mode_index + 1;
+                        let request = self.target_manager.request_mode(mode);
+                        log::info!(
+                            "MCLONE_XR_RENDER_PATH_CYCLE_REQUEST step={step}/{} requested={} result={request:?}",
+                            ANDROID_XR_RENDER_MODE_CYCLE.len(),
+                            mode.label()
+                        );
+                        cycle.next_mode_index += 1;
+                        cycle.next_submitted_frame = outcome
+                            .stats
+                            .submitted_frames
+                            .saturating_add(ANDROID_XR_RENDER_MODE_CYCLE_DWELL_FRAMES);
+                    } else if cycle.next_mode_index == ANDROID_XR_RENDER_MODE_CYCLE.len()
+                        && outcome.stats.submitted_frames >= cycle.next_submitted_frame
+                    {
+                        log::info!(
+                            "MCLONE_XR_RENDER_PATH_CYCLE_COMPLETE active={} submitted={}",
+                            self.target_manager.active_mode().label(),
+                            outcome.stats.submitted_frames
+                        );
+                        self.render_mode_cycle = None;
+                    }
+                }
+            }
+            let transition_started = Instant::now();
+            match self.target_manager.apply_pending(|topology| {
+                create_android_xr_target_family(
+                    self.device,
+                    self.session,
+                    self.target_spec,
+                    topology,
+                )
+            }) {
+                Ok(Some(transition)) => {
+                    self.render_path = android_xr_render_path(
+                        transition.active_mode,
+                        self.frame_overlap,
+                        self.overlap_eye_submits,
+                        self.overlap_runtime_prefetch,
+                    );
+                    let snapshot = self.target_manager.snapshot();
+                    log::info!(
+                        "MCLONE_XR_RENDER_PATH_COMMITTED previous={} active={} topology={} recreated={} retired_bytes={} active_bytes={} peak_bytes={} outstanding={} transition_ms={:.3}",
+                        transition.previous_mode.label(),
+                        transition.active_mode.label(),
+                        snapshot.active_topology.label(),
+                        transition.topology_recreated,
+                        transition.retired_target_bytes,
+                        transition.active_target_bytes,
+                        transition.peak_transition_bytes,
+                        snapshot.outstanding_images,
+                        elapsed_ms(transition_started)
+                    );
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    let snapshot = self.target_manager.snapshot();
+                    log::warn!(
+                        "MCLONE_XR_RENDER_PATH_FAILED active={} topology={} outstanding={} error={error:#}",
+                        snapshot.active_mode.label(),
+                        snapshot.active_topology.label(),
+                        snapshot.outstanding_images
+                    );
+                }
             }
             Ok(mclone_xr_host::OpenXrFrameLoopControl::Continue)
         }
@@ -7195,6 +7496,90 @@ mod android {
 
         let end_frame_start = Instant::now();
         frame.submit_multiview_projection(stage, stereo_views, stereo_target)?;
+        timing.end_frame_ms = elapsed_ms(end_frame_start);
+        Ok(AndroidXrRenderedFrame {
+            summary: frame_summary,
+            camera: terrain.camera_snapshot(),
+            terrain_view: terrain.terrain_view_diagnostics(),
+            timing,
+        })
+    }
+
+    fn render_android_xr_array_per_eye_frame(
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        frame: &mut mclone_xr_host::OpenXrRenderFrame<'_, graphics_vulkan::AppGraphics>,
+        stage: &xr::Space,
+        stereo_target: &mut graphics_vulkan::OpenXrStereoState,
+        depth: &mut ChunkMultiviewDepthTarget,
+        terrain: &mut AndroidXrTerrainState,
+        input: &XrInputFrame,
+        automation: Option<XrFrameLocomotionAutomation>,
+        fixed_render_view_pose: Option<XrStartupViewPose>,
+    ) -> Result<AndroidXrRenderedFrame> {
+        let mut timing = AndroidXrRenderFrameTiming::default();
+        let locate_views_start = Instant::now();
+        let stereo_views = mclone_xr_host::locate_stereo_views(
+            frame.session(),
+            stage,
+            frame.predicted_display_time(),
+        )?;
+        timing.locate_views_ms = elapsed_ms(locate_views_start);
+        let scene_views = [
+            mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
+            mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
+        ];
+        let eye_fovs = [
+            mclone_xr_host::xr_fov_from_openxr(stereo_views.left.fov),
+            mclone_xr_host::xr_fov_from_openxr(stereo_views.right.fov),
+        ];
+        let locomotion_start = Instant::now();
+        let locomotion = terrain
+            .apply_frame_locomotion(input, scene_views, automation)
+            .context("apply Android XR array-per-eye frame locomotion")?;
+        timing.locomotion_ms = elapsed_ms(locomotion_start);
+        copy_locomotion_timing(&mut timing, locomotion.timing);
+
+        let target_width = stereo_target.width;
+        let target_height = stereo_target.height;
+        if depth.width != target_width || depth.height != target_height {
+            *depth = ChunkMultiviewDepthTarget::new(device, target_width, target_height);
+        }
+        let acquire_start = Instant::now();
+        let target =
+            acquire_stereo_target(stereo_target).context("acquire array-per-eye OpenXR image")?;
+        timing.acquire_left_ms = elapsed_ms(acquire_start);
+        let terrain_render_start = Instant::now();
+        let frame_summary = terrain.render_xr_scene_frame(
+            device,
+            queue,
+            scene_views,
+            eye_fovs,
+            locomotion.frozen_render,
+            fixed_render_view_pose,
+            XrSceneFrameTarget::PerEye {
+                left: XrTerrainEyeTarget {
+                    color_view: target.color_left_view(),
+                    depth: &depth.left,
+                    size: [target_width, target_height],
+                },
+                right: XrTerrainEyeTarget {
+                    color_view: target.color_right_view(),
+                    depth: &depth.right,
+                    size: [target_width, target_height],
+                },
+            },
+        );
+        timing.terrain_render_frame_ms = elapsed_ms(terrain_render_start);
+        let release_start = Instant::now();
+        let release_result = target.release();
+        timing.release_eyes_ms = elapsed_ms(release_start);
+        let frame_summary = frame_summary?;
+        copy_terrain_frame_timing(&mut timing, frame_summary.timing);
+        release_result?;
+
+        let end_frame_start = Instant::now();
+        frame.submit_stereo_array_projection(stage, stereo_views, stereo_target)?;
         timing.end_frame_ms = elapsed_ms(end_frame_start);
         Ok(AndroidXrRenderedFrame {
             summary: frame_summary,

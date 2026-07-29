@@ -2933,11 +2933,35 @@ impl ChunkDepthTarget {
     pub fn texture(&self) -> &wgpu::Texture {
         &self.texture
     }
+
+    fn from_texture_layer(
+        texture: &wgpu::Texture,
+        width: u32,
+        height: u32,
+        layer: u32,
+        label: &'static str,
+    ) -> Self {
+        let view = texture.create_view(&wgpu::TextureViewDescriptor {
+            label: Some(label),
+            dimension: Some(wgpu::TextureViewDimension::D2),
+            base_array_layer: layer,
+            array_layer_count: Some(1),
+            ..Default::default()
+        });
+        Self {
+            texture: texture.clone(),
+            view,
+            width,
+            height,
+        }
+    }
 }
 
 pub struct ChunkMultiviewDepthTarget {
     _texture: wgpu::Texture,
     pub view: wgpu::TextureView,
+    pub left: ChunkDepthTarget,
+    pub right: ChunkDepthTarget,
     pub width: u32,
     pub height: u32,
 }
@@ -2967,9 +2991,25 @@ impl ChunkMultiviewDepthTarget {
             array_layer_count: Some(2),
             ..Default::default()
         });
+        let left = ChunkDepthTarget::from_texture_layer(
+            &texture,
+            width,
+            height,
+            0,
+            "mclone_chunk_multiview_depth_left_view",
+        );
+        let right = ChunkDepthTarget::from_texture_layer(
+            &texture,
+            width,
+            height,
+            1,
+            "mclone_chunk_multiview_depth_right_view",
+        );
         Self {
             _texture: texture,
             view,
+            left,
+            right,
             width,
             height,
         }

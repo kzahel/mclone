@@ -2,6 +2,7 @@
 
 mod actions;
 mod frame_driver;
+mod render_path;
 
 use anyhow::{Context, Result};
 use glam::{Mat4, Quat, Vec3};
@@ -19,6 +20,7 @@ pub use mclone_render_session::{
     XrFov, XrRenderView, XrView, XrViewPose, render_view_from_world_pose, xr_fov_aspect,
     xr_fov_to_projection_rh,
 };
+pub use render_path::*;
 
 pub const PRIMARY_STEREO_VIEW_TYPE: xr::ViewConfigurationType =
     xr::ViewConfigurationType::PRIMARY_STEREO;
@@ -113,6 +115,14 @@ where
     fn textures(&self) -> &[wgpu::Texture];
     fn width(&self) -> u32;
     fn height(&self) -> u32;
+
+    fn outstanding_image_count(&self) -> u32 {
+        0
+    }
+
+    fn record_image_acquired(&mut self) {}
+
+    fn record_image_released(&mut self) {}
 }
 
 pub trait XrStereoSwapchain<G>
@@ -125,6 +135,14 @@ where
     fn width(&self) -> u32;
     fn height(&self) -> u32;
     fn array_size(&self) -> u32;
+
+    fn outstanding_image_count(&self) -> u32 {
+        0
+    }
+
+    fn record_image_acquired(&mut self) {}
+
+    fn record_image_released(&mut self) {}
 }
 
 pub struct XrAcquiredEyeTarget<'a, G, E>
@@ -154,7 +172,9 @@ where
         self.eye_state
             .swapchain_mut()
             .release_image()
-            .context("release OpenXR swapchain image")
+            .context("release OpenXR swapchain image")?;
+        self.eye_state.record_image_released();
+        Ok(())
     }
 }
 
@@ -166,6 +186,8 @@ where
     stereo_state: &'a mut S,
     image_index: u32,
     color_array_view: wgpu::TextureView,
+    color_left_view: wgpu::TextureView,
+    color_right_view: wgpu::TextureView,
     _graphics: PhantomData<G>,
 }
 
@@ -180,6 +202,14 @@ where
 
     pub fn color_array_view(&self) -> &wgpu::TextureView {
         &self.color_array_view
+    }
+
+    pub fn color_left_view(&self) -> &wgpu::TextureView {
+        &self.color_left_view
+    }
+
+    pub fn color_right_view(&self) -> &wgpu::TextureView {
+        &self.color_right_view
     }
 
     pub fn color_texture(&self) -> Result<&wgpu::Texture> {
@@ -198,7 +228,9 @@ where
         self.stereo_state
             .swapchain_mut()
             .release_image()
-            .context("release OpenXR stereo array swapchain image")
+            .context("release OpenXR stereo array swapchain image")?;
+        self.stereo_state.record_image_released();
+        Ok(())
     }
 }
 
@@ -446,6 +478,7 @@ where
             })?;
         texture.create_view(&Default::default())
     };
+    eye_state.record_image_acquired();
     Ok(XrAcquiredEyeTarget {
         eye_state,
         color_view,
@@ -475,7 +508,7 @@ where
         let _ = stereo_state.swapchain_mut().release_image();
         return Err(err).context("wait for OpenXR stereo array swapchain image");
     }
-    let color_array_view = {
+    let (color_array_view, color_left_view, color_right_view) = {
         let texture = stereo_state
             .textures()
             .get(image_index as usize)
@@ -484,18 +517,37 @@ where
                     "OpenXR returned out-of-range stereo array image index {image_index}"
                 )
             })?;
-        texture.create_view(&wgpu::TextureViewDescriptor {
-            label: Some("mclone_xr_stereo_array_swapchain_view"),
-            dimension: Some(wgpu::TextureViewDimension::D2Array),
-            base_array_layer: 0,
-            array_layer_count: Some(stereo_state.array_size()),
-            ..Default::default()
-        })
+        (
+            texture.create_view(&wgpu::TextureViewDescriptor {
+                label: Some("mclone_xr_stereo_array_swapchain_view"),
+                dimension: Some(wgpu::TextureViewDimension::D2Array),
+                base_array_layer: 0,
+                array_layer_count: Some(stereo_state.array_size()),
+                ..Default::default()
+            }),
+            texture.create_view(&wgpu::TextureViewDescriptor {
+                label: Some("mclone_xr_stereo_array_left_view"),
+                dimension: Some(wgpu::TextureViewDimension::D2),
+                base_array_layer: 0,
+                array_layer_count: Some(1),
+                ..Default::default()
+            }),
+            texture.create_view(&wgpu::TextureViewDescriptor {
+                label: Some("mclone_xr_stereo_array_right_view"),
+                dimension: Some(wgpu::TextureViewDimension::D2),
+                base_array_layer: 1,
+                array_layer_count: Some(1),
+                ..Default::default()
+            }),
+        )
     };
+    stereo_state.record_image_acquired();
     Ok(XrAcquiredStereoTarget {
         stereo_state,
         image_index,
         color_array_view,
+        color_left_view,
+        color_right_view,
         _graphics: PhantomData,
     })
 }
