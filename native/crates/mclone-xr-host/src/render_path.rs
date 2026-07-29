@@ -148,7 +148,7 @@ pub trait XrTargetFamily {
 }
 
 pub struct XrTargetManager<T> {
-    active_target: T,
+    active_target: Option<T>,
     supported_modes: XrRenderModeSet,
     requested_mode: XrRenderMode,
     pending_mode: Option<XrRenderMode>,
@@ -183,7 +183,7 @@ where
         }
         let peak_transition_bytes = active_target.estimated_owned_bytes();
         Ok(Self {
-            active_target,
+            active_target: Some(active_target),
             supported_modes,
             requested_mode: active_mode,
             pending_mode: None,
@@ -199,25 +199,34 @@ where
     }
 
     pub fn active_target(&self) -> &T {
-        &self.active_target
+        self.active_target
+            .as_ref()
+            .expect("XR target manager has no active target")
     }
 
     pub fn active_target_mut(&mut self) -> &mut T {
-        &mut self.active_target
+        self.active_target
+            .as_mut()
+            .expect("XR target manager has no active target")
+    }
+
+    pub fn has_active_target(&self) -> bool {
+        self.active_target.is_some()
     }
 
     pub fn snapshot(&self) -> XrRenderPathSnapshot {
+        let active_target = self.active_target();
         XrRenderPathSnapshot {
             supported_modes: self.supported_modes,
             requested_mode: self.requested_mode,
             pending_mode: self.pending_mode,
             active_mode: self.active_mode,
-            active_topology: self.active_target.topology(),
+            active_topology: active_target.topology(),
             transition_state: self.transition_state,
             counts: self.counts,
-            active_target_bytes: self.active_target.estimated_owned_bytes(),
+            active_target_bytes: active_target.estimated_owned_bytes(),
             peak_transition_bytes: self.peak_transition_bytes,
-            outstanding_images: self.active_target.outstanding_image_count(),
+            outstanding_images: active_target.outstanding_image_count(),
         }
     }
 
@@ -256,17 +265,17 @@ where
         };
         let previous_mode = self.active_mode;
         let requested_topology = requested_mode.topology();
-        let active_topology = self.active_target.topology();
-        if self.active_target.outstanding_image_count() != 0 {
+        let active_topology = self.active_target().topology();
+        if self.active_target().outstanding_image_count() != 0 {
             return self.fail_transition(anyhow::anyhow!(
                 "cannot switch XR render mode with {} outstanding target image(s)",
-                self.active_target.outstanding_image_count()
+                self.active_target().outstanding_image_count()
             ));
         }
 
         let mut topology_recreated = false;
         let mut retired_target_bytes = 0;
-        let mut transition_peak_bytes = self.active_target.estimated_owned_bytes();
+        let mut transition_peak_bytes = self.active_target().estimated_owned_bytes();
         if requested_topology != active_topology {
             let replacement = match create_target(requested_topology) {
                 Ok(target) => target,
@@ -285,10 +294,13 @@ where
                     replacement.outstanding_image_count()
                 ));
             }
-            retired_target_bytes = self.active_target.estimated_owned_bytes();
+            retired_target_bytes = self.active_target().estimated_owned_bytes();
             transition_peak_bytes =
                 retired_target_bytes.saturating_add(replacement.estimated_owned_bytes());
-            let retired = std::mem::replace(&mut self.active_target, replacement);
+            let retired = self
+                .active_target
+                .replace(replacement)
+                .expect("XR target manager replacement requires an active target");
             drop(retired);
             topology_recreated = true;
         }
@@ -304,9 +316,90 @@ where
             active_mode: requested_mode,
             topology_recreated,
             retired_target_bytes,
-            active_target_bytes: self.active_target.estimated_owned_bytes(),
+            active_target_bytes: self.active_target().estimated_owned_bytes(),
             peak_transition_bytes: transition_peak_bytes,
         }))
+    }
+
+    /// Apply a topology transition by retiring the current target before
+    /// creating its replacement.
+    ///
+    /// Some OpenXR runtimes cannot safely keep two swapchain families alive at
+    /// once. This path lowers peak residency and, if replacement creation
+    /// fails, recreates the previous topology before returning the error.
+    pub fn apply_pending_retire_first<F>(
+        &mut self,
+        mut create_target: F,
+    ) -> Result<Option<XrRenderTransition>>
+    where
+        F: FnMut(XrTargetTopology) -> Result<T>,
+    {
+        let Some(requested_mode) = self.pending_mode else {
+            return Ok(None);
+        };
+        let previous_mode = self.active_mode;
+        let previous_topology = self.active_target().topology();
+        let requested_topology = requested_mode.topology();
+        if requested_topology == previous_topology {
+            return self.apply_pending(create_target);
+        }
+        if self.active_target().outstanding_image_count() != 0 {
+            return self.fail_transition(anyhow::anyhow!(
+                "cannot retire XR target with {} outstanding image(s)",
+                self.active_target().outstanding_image_count()
+            ));
+        }
+
+        let retired = self
+            .active_target
+            .take()
+            .expect("retire-first XR transition requires an active target");
+        let retired_target_bytes = retired.estimated_owned_bytes();
+        drop(retired);
+
+        let replacement_result = create_target(requested_topology)
+            .and_then(|replacement| validate_replacement_target(replacement, requested_topology));
+        match replacement_result {
+            Ok(replacement) => {
+                let active_target_bytes = replacement.estimated_owned_bytes();
+                let transition_peak_bytes = retired_target_bytes.max(active_target_bytes);
+                self.active_target = Some(replacement);
+                self.active_mode = requested_mode;
+                self.requested_mode = requested_mode;
+                self.pending_mode = None;
+                self.transition_state = XrRenderTransitionState::Committed;
+                self.counts.committed += 1;
+                self.peak_transition_bytes = self.peak_transition_bytes.max(transition_peak_bytes);
+                Ok(Some(XrRenderTransition {
+                    previous_mode,
+                    active_mode: requested_mode,
+                    topology_recreated: true,
+                    retired_target_bytes,
+                    active_target_bytes,
+                    peak_transition_bytes: transition_peak_bytes,
+                }))
+            }
+            Err(replacement_error) => {
+                let recovery_result = create_target(previous_topology).and_then(|recovered| {
+                    validate_replacement_target(recovered, previous_topology)
+                });
+                self.requested_mode = previous_mode;
+                self.pending_mode = None;
+                self.transition_state = XrRenderTransitionState::Failed;
+                self.counts.failed += 1;
+                match recovery_result {
+                    Ok(recovered) => {
+                        self.active_target = Some(recovered);
+                        Err(replacement_error.context(
+                            "replacement creation failed; previous XR topology was recovered",
+                        ))
+                    }
+                    Err(recovery_error) => Err(anyhow::anyhow!(
+                        "replacement creation failed: {replacement_error:#}; previous XR topology recovery also failed: {recovery_error:#}"
+                    )),
+                }
+            }
+        }
     }
 
     fn fail_transition<R>(&mut self, error: anyhow::Error) -> Result<R> {
@@ -316,6 +409,26 @@ where
         self.counts.failed += 1;
         Err(error)
     }
+}
+
+fn validate_replacement_target<T>(replacement: T, requested_topology: XrTargetTopology) -> Result<T>
+where
+    T: XrTargetFamily,
+{
+    if replacement.topology() != requested_topology {
+        bail!(
+            "replacement XR target topology {} does not match requested {}",
+            replacement.topology().label(),
+            requested_topology.label()
+        );
+    }
+    if replacement.outstanding_image_count() != 0 {
+        bail!(
+            "replacement XR target begins with {} outstanding image(s)",
+            replacement.outstanding_image_count()
+        );
+    }
+    Ok(replacement)
 }
 
 #[cfg(test)]
@@ -469,5 +582,61 @@ mod tests {
         manager.request_mode(XrRenderMode::ArrayPerEye);
         assert!(manager.apply_pending(|_| unreachable!()).is_err());
         assert_eq!(manager.snapshot().counts.failed, 1);
+    }
+
+    #[test]
+    fn retire_first_drops_old_family_before_creating_replacement() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let target = FakeTarget::new(XrTargetTopology::DualEye, 90, drops.clone());
+        let mut manager =
+            XrTargetManager::new(target, XrRenderMode::DualPerEye, XrRenderModeSet::ALL).unwrap();
+        manager.request_mode(XrRenderMode::ArrayPerEye);
+        let transition = manager
+            .apply_pending_retire_first(|topology| {
+                assert_eq!(drops.load(Ordering::Relaxed), 1);
+                Ok(FakeTarget::new(topology, 92, drops.clone()))
+            })
+            .unwrap()
+            .unwrap();
+        assert!(transition.topology_recreated);
+        assert_eq!(transition.peak_transition_bytes, 92);
+        assert_eq!(manager.active_mode(), XrRenderMode::ArrayPerEye);
+    }
+
+    #[test]
+    fn retire_first_failure_recovers_previous_topology() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let target = FakeTarget::new(XrTargetTopology::DualEye, 90, drops.clone());
+        let mut manager =
+            XrTargetManager::new(target, XrRenderMode::DualPerEye, XrRenderModeSet::ALL).unwrap();
+        manager.request_mode(XrRenderMode::ArrayPerEye);
+        assert!(
+            manager
+                .apply_pending_retire_first(|topology| {
+                    if topology == XrTargetTopology::StereoArray {
+                        anyhow::bail!("injected replacement failure");
+                    }
+                    Ok(FakeTarget::new(topology, 90, drops.clone()))
+                })
+                .is_err()
+        );
+        assert!(manager.has_active_target());
+        assert_eq!(manager.active_mode(), XrRenderMode::DualPerEye);
+        assert_eq!(manager.snapshot().counts.failed, 1);
+    }
+
+    #[test]
+    fn retire_first_reports_unrecoverable_empty_state() {
+        let drops = Arc::new(AtomicUsize::new(0));
+        let target = FakeTarget::new(XrTargetTopology::DualEye, 90, drops);
+        let mut manager =
+            XrTargetManager::new(target, XrRenderMode::DualPerEye, XrRenderModeSet::ALL).unwrap();
+        manager.request_mode(XrRenderMode::ArrayPerEye);
+        assert!(
+            manager
+                .apply_pending_retire_first(|_| anyhow::bail!("injected creation failure"))
+                .is_err()
+        );
+        assert!(!manager.has_active_target());
     }
 }

@@ -28,6 +28,7 @@ mclone-render-session.workspace = true
 mclone-xr-graphics.workspace = true
 mclone-xr-host.workspace = true
 mclone-scene.workspace = true
+mclone-ui.workspace = true
 openxr.workspace = true
 serde_json.workspace = true
 wgpu.workspace = true

@@ -1,7 +1,7 @@
 use std::{ffi::c_void, ptr};
 
 use anyhow::{Context, Result, bail};
-use mclone_render::chunk::ChunkDepthTarget;
+use mclone_render::chunk::{ChunkDepthTarget, ChunkMultiviewDepthTarget};
 use metal::foreign_types::{ForeignType, ForeignTypeRef};
 use metal::{MTLPixelFormat, MTLTextureType};
 use openxr as xr;
@@ -36,11 +36,31 @@ pub(super) struct MetalGraphicsSession {
 }
 
 pub(super) struct OpenXrEyeState {
-    pub(super) swapchain: xr::Swapchain<AppGraphics>,
-    pub(super) textures: Vec<wgpu::Texture>,
     pub(super) depth: ChunkDepthTarget,
+    pub(super) textures: Vec<wgpu::Texture>,
+    pub(super) swapchain: xr::Swapchain<AppGraphics>,
     pub(super) width: u32,
     pub(super) height: u32,
+    outstanding_images: u32,
+}
+
+pub(super) struct OpenXrStereoState {
+    pub(super) depth: ChunkMultiviewDepthTarget,
+    pub(super) textures: Vec<wgpu::Texture>,
+    pub(super) swapchain: xr::Swapchain<AppGraphics>,
+    pub(super) width: u32,
+    pub(super) height: u32,
+    outstanding_images: u32,
+}
+
+impl OpenXrStereoState {
+    pub(super) fn texture_count(&self) -> usize {
+        self.textures.len()
+    }
+
+    pub(super) const fn array_size(&self) -> u32 {
+        2
+    }
 }
 
 impl OpenXrEyeState {
@@ -68,6 +88,56 @@ impl mclone_xr_host::XrEyeSwapchain<AppGraphics> for OpenXrEyeState {
 
     fn height(&self) -> u32 {
         self.height
+    }
+
+    fn outstanding_image_count(&self) -> u32 {
+        self.outstanding_images
+    }
+
+    fn record_image_acquired(&mut self) {
+        self.outstanding_images = self.outstanding_images.saturating_add(1);
+    }
+
+    fn record_image_released(&mut self) {
+        self.outstanding_images = self.outstanding_images.saturating_sub(1);
+    }
+}
+
+impl mclone_xr_host::XrStereoSwapchain<AppGraphics> for OpenXrStereoState {
+    fn swapchain(&self) -> &xr::Swapchain<AppGraphics> {
+        &self.swapchain
+    }
+
+    fn swapchain_mut(&mut self) -> &mut xr::Swapchain<AppGraphics> {
+        &mut self.swapchain
+    }
+
+    fn textures(&self) -> &[wgpu::Texture] {
+        &self.textures
+    }
+
+    fn width(&self) -> u32 {
+        self.width
+    }
+
+    fn height(&self) -> u32 {
+        self.height
+    }
+
+    fn array_size(&self) -> u32 {
+        self.array_size()
+    }
+
+    fn outstanding_image_count(&self) -> u32 {
+        self.outstanding_images
+    }
+
+    fn record_image_acquired(&mut self) {
+        self.outstanding_images = self.outstanding_images.saturating_add(1);
+    }
+
+    fn record_image_released(&mut self) {
+        self.outstanding_images = self.outstanding_images.saturating_sub(1);
     }
 }
 
@@ -234,7 +304,7 @@ pub(super) fn create_eye(
         .context("enumerate OpenXR Metal swapchain images")?
         .into_iter()
         .map(|texture| {
-            create_metal_swapchain_texture(device, texture, eye_width, eye_height, color_format)
+            create_metal_swapchain_texture(device, texture, eye_width, eye_height, 1, color_format)
         })
         .collect();
 
@@ -254,6 +324,75 @@ pub(super) fn create_eye(
         depth: ChunkDepthTarget::new(device, eye_width, eye_height),
         width: eye_width,
         height: eye_height,
+        outstanding_images: 0,
+    })
+}
+
+pub(super) fn create_stereo(
+    device: &wgpu::Device,
+    session: &xr::Session<AppGraphics>,
+    eye_width: u32,
+    eye_height: u32,
+    color_format: wgpu::TextureFormat,
+    depth_format: wgpu::TextureFormat,
+    sample_count: u32,
+) -> Result<OpenXrStereoState> {
+    if sample_count != 1 {
+        bail!("OpenXR stereo-array depth targets require sample_count=1, got {sample_count}");
+    }
+    if depth_format != mclone_render::chunk::DEPTH_FORMAT {
+        bail!(
+            "OpenXR stereo-array depth targets require {:?}, got {depth_format:?}",
+            mclone_render::chunk::DEPTH_FORMAT
+        );
+    }
+    let metal_format = wgpu_format_to_metal_pixel_format(color_format)
+        .ok_or_else(|| anyhow::anyhow!("unsupported XR color format {color_format:?}"))?;
+    let xr_format = metal_format as i64;
+    let supported_formats = session
+        .enumerate_swapchain_formats()
+        .context("enumerate OpenXR Metal swapchain formats")?;
+    if !supported_formats.contains(&xr_format) {
+        bail!("OpenXR runtime does not advertise {metal_format:?} swapchain images");
+    }
+    let array_size = 2;
+    let swapchain = session
+        .create_swapchain(&xr::SwapchainCreateInfo {
+            create_flags: xr::SwapchainCreateFlags::EMPTY,
+            usage_flags: xr::SwapchainUsageFlags::COLOR_ATTACHMENT
+                | xr::SwapchainUsageFlags::SAMPLED
+                | xr::SwapchainUsageFlags::TRANSFER_SRC,
+            format: xr_format,
+            sample_count,
+            width: eye_width,
+            height: eye_height,
+            face_count: 1,
+            array_size,
+            mip_count: 1,
+        })
+        .context("create OpenXR Metal stereo-array swapchain")?;
+    let textures = swapchain
+        .enumerate_images()
+        .context("enumerate OpenXR Metal stereo-array swapchain images")?
+        .into_iter()
+        .map(|texture| {
+            create_metal_swapchain_texture(
+                device,
+                texture,
+                eye_width,
+                eye_height,
+                array_size,
+                color_format,
+            )
+        })
+        .collect();
+    Ok(OpenXrStereoState {
+        swapchain,
+        textures,
+        depth: ChunkMultiviewDepthTarget::new(device, eye_width, eye_height),
+        width: eye_width,
+        height: eye_height,
+        outstanding_images: 0,
     })
 }
 
@@ -271,9 +410,10 @@ fn create_matching_metal_device_and_queue(
     for adapter in instance.enumerate_adapters(wgpu::Backends::METAL) {
         let info = adapter.get_info();
         let adapter_name = info.name.clone();
+        let required_features = adapter.features() & wgpu::Features::MULTIVIEW;
         match pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
             label: Some("mclone_xr_metal_device"),
-            required_features: wgpu::Features::empty(),
+            required_features,
             required_limits: wgpu::Limits::default(),
             ..Default::default()
         })) {
@@ -321,6 +461,7 @@ fn create_metal_swapchain_texture(
     texture_ptr: *mut c_void,
     width: u32,
     height: u32,
+    array_size: u32,
     color_format: wgpu::TextureFormat,
 ) -> wgpu::Texture {
     let texture_ref = unsafe { metal::TextureRef::from_ptr(texture_ptr.cast()) };
@@ -329,13 +470,17 @@ fn create_metal_swapchain_texture(
         wgpu::hal::metal::Device::texture_from_raw(
             texture,
             color_format,
-            MTLTextureType::D2,
-            1,
+            if array_size > 1 {
+                MTLTextureType::D2Array
+            } else {
+                MTLTextureType::D2
+            },
+            array_size,
             1,
             wgpu::hal::CopyExtent {
                 width,
                 height,
-                depth: 1,
+                depth: array_size,
             },
         )
     };
@@ -347,7 +492,7 @@ fn create_metal_swapchain_texture(
                 size: wgpu::Extent3d {
                     width,
                     height,
-                    depth_or_array_layers: 1,
+                    depth_or_array_layers: array_size,
                 },
                 mip_level_count: 1,
                 sample_count: 1,

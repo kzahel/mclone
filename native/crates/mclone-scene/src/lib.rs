@@ -184,8 +184,9 @@ use mclone_ui::{
     GameLeafDetail, GameLocalPlayControllerFamily, GameLocalPlayGuestInput, GameLocalPlayState,
     GameMovementMode, GamePlayerModel, GameScreen, GameSimulationCadence, GameTerrainPresentation,
     GameTouchSettings, GameTravelAssistMode, GameTurnMode, GameUiAction, GameUiHost,
-    GameUiRenderState, GameWorldRenderScaleMode, GameXrTurnMode, GamepadHudOverlay, GuiDrawList,
-    GuiKey, GuiScale, LoadingProgressOverlay, Point, Rect, StatusOverlay, StorageProfileBackend,
+    GameUiRenderState, GameWorldRenderScaleMode, GameXrRenderMode, GameXrRenderPathState,
+    GameXrRenderTransitionState, GameXrTurnMode, GamepadHudOverlay, GuiDrawList, GuiKey, GuiScale,
+    LoadingProgressOverlay, Point, Rect, StatusOverlay, StorageProfileBackend,
     StorageProfileUiState, TouchOverlay, UiDebugSnapshot, UiDrawCacheStats, UiPanelRevision,
     WorldCatalogUiStatus, render_loading_progress_overlay, render_status_overlay,
 };
@@ -863,6 +864,8 @@ pub struct McloneSceneHost {
     ui: GameUiHost,
     menu_overlay_cache: XrMenuPanelOverlayCache,
     status_overlay: StatusOverlay,
+    xr_render_path_state: Option<GameXrRenderPathState>,
+    pending_xr_render_mode_request: Option<GameXrRenderMode>,
     sky: SkyRenderer,
     screen_effects: ScreenEffectsRenderer,
     terrain_view: Option<terrain_view::SceneTerrainViewState>,
@@ -1696,6 +1699,15 @@ impl McloneSceneHost {
             frame_deadline,
             &mut timing,
         )?;
+        let terrain_view_enabled = self.prepare_terrain_view_for_frame(
+            device,
+            queue,
+            [
+                f64::from(center_position.x),
+                f64::from(center_position.y),
+                f64::from(center_position.z),
+            ],
+        )?;
         let multiview = self
             .render_prepared_terrain_multiview_frame_with_upload_inner(
                 device,
@@ -1706,6 +1718,7 @@ impl McloneSceneHost {
                 true,
                 true,
                 true,
+                terrain_view_enabled,
                 Some(&mut timing),
             )
             .context("render XR full-frame multiview")?;
@@ -2486,6 +2499,7 @@ impl McloneSceneHost {
             include_sky,
             include_actors,
             include_overlays,
+            false,
             None,
         )
     }
@@ -2507,6 +2521,7 @@ impl McloneSceneHost {
             false,
             false,
             false,
+            false,
             None,
         )
     }
@@ -2521,6 +2536,7 @@ impl McloneSceneHost {
         include_sky: bool,
         include_actors: bool,
         include_overlays: bool,
+        terrain_view_enabled: bool,
         mut timing: Option<&mut XrTerrainFrameTiming>,
     ) -> Result<XrTerrainMultiviewFrameSummary> {
         let (terrain_views, mut terrain_options, underwater_overlays) =
@@ -2640,7 +2656,8 @@ impl McloneSceneHost {
             });
         let split_translucent_terrain = (include_actors && !actor_instances.is_empty())
             || opaque_world_gate.is_some()
-            || preview_frame.is_some();
+            || preview_frame.is_some()
+            || terrain_view_enabled;
         let terrain_phase = if split_translucent_terrain {
             TexturedSectionRenderPhase::Opaque
         } else {
@@ -2660,6 +2677,22 @@ impl McloneSceneHost {
                 terrain_phase,
             )
             .context("render XR terrain multiview chunks")?;
+        if terrain_view_enabled {
+            self.terrain_view
+                .as_mut()
+                .expect("enabled scene terrain view remains initialized")
+                .render_multiview(
+                    device,
+                    queue,
+                    &mut encoder,
+                    target.color_view,
+                    &target.depth.view,
+                    target.size,
+                    terrain_views,
+                    terrain_options[0].fog,
+                )
+                .context("render XR procedural horizon multiview")?;
+        }
         if let Some(timing) = timing.as_deref_mut() {
             timing.multiview_terrain_ms =
                 elapsed_ms(self.services.clock.elapsed_since(terrain_start));

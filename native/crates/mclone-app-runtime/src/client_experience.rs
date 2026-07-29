@@ -11,7 +11,7 @@ use mclone_ui::{
     GameLocalPlayLayout, GameLocalPlayState, GameMovementMode, GamePlayerModel, GameScenarioId,
     GameSimulationCadence, GameStorageAction, GameTerrainPresentation, GameTouchSettings,
     GameTravelAssistMode, GameTurnMode, GameUiAction, GameUiRenderState, GameWorldRenderScaleMode,
-    GameXrTurnMode,
+    GameXrRenderMode, GameXrRenderPathState, GameXrRenderTransitionState, GameXrTurnMode,
 };
 
 use crate::asset_pack_ui::{ClientAssetPackController, ClientAssetPackEffect};
@@ -171,6 +171,7 @@ impl ClientExperienceController {
             | GameUiAction::CycleFramePacing
             | GameUiAction::CycleFpsCap
             | GameUiAction::SetWorldRenderScaleMode(_)
+            | GameUiAction::SetXrRenderMode(_)
             | GameUiAction::SetRenderDistance(_)
             | GameUiAction::SetFlySpeed(_)
             | GameUiAction::SetMovementSpeed(_)
@@ -372,6 +373,7 @@ pub struct ClientExperienceSettingsProfile {
     pub frame_pacing: ClientExperienceCapabilityStatus,
     pub fps_cap: ClientExperienceCapabilityStatus,
     pub world_render_scale: ClientExperienceCapabilityStatus,
+    pub xr_render_mode: ClientExperienceCapabilityStatus,
     pub render_distance: ClientExperienceCapabilityStatus,
     pub fly_speed: ClientExperienceCapabilityStatus,
     pub movement_speed: ClientExperienceCapabilityStatus,
@@ -409,6 +411,7 @@ impl ClientExperienceSettingsProfile {
             frame_pacing: ClientExperienceCapabilityStatus::Supported,
             fps_cap: ClientExperienceCapabilityStatus::Supported,
             world_render_scale: ClientExperienceCapabilityStatus::Supported,
+            xr_render_mode: ClientExperienceCapabilityStatus::Supported,
             render_distance: ClientExperienceCapabilityStatus::Supported,
             fly_speed: ClientExperienceCapabilityStatus::Supported,
             movement_speed: ClientExperienceCapabilityStatus::Supported,
@@ -443,6 +446,7 @@ impl ClientExperienceSettingsProfile {
             ClientExperienceActionKind::CycleFramePacing => self.frame_pacing,
             ClientExperienceActionKind::CycleFpsCap => self.fps_cap,
             ClientExperienceActionKind::SetWorldRenderScaleMode => self.world_render_scale,
+            ClientExperienceActionKind::SetXrRenderMode => self.xr_render_mode,
             ClientExperienceActionKind::SetRenderDistance => self.render_distance,
             ClientExperienceActionKind::SetFlySpeed => self.fly_speed,
             ClientExperienceActionKind::SetMovementSpeed => self.movement_speed,
@@ -545,6 +549,7 @@ pub fn desktop_native_client_experience_profile() -> ClientExperienceProfile {
     settings.xr_turn = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.touch_look = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.touch_controls = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.xr_render_mode = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     ClientExperienceProfile::new(settings)
 }
 
@@ -579,6 +584,9 @@ pub fn android_flat_native_client_experience_profile() -> ClientExperienceProfil
     settings.world_render_scale = ClientExperienceCapabilityStatus::Unsupported(
         "World render scale is fixed on flat Android",
     );
+    settings.xr_render_mode = ClientExperienceCapabilityStatus::Unsupported(
+        "XR render path is unavailable on flat Android",
+    );
     ClientExperienceProfile::new(settings)
 }
 
@@ -596,6 +604,7 @@ pub fn web_client_experience_profile() -> ClientExperienceProfile {
     settings.frame_pacing = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.fps_cap = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.world_render_scale = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
+    settings.xr_render_mode = ClientExperienceCapabilityStatus::PROFILE_UNSUPPORTED;
     settings.frame_pipeline_overlay =
         ClientExperienceCapabilityStatus::Unsupported(WEB_FRAME_PIPELINE_OVERLAY_REASON);
     settings.debug_diagnostics =
@@ -964,6 +973,37 @@ impl ClientExperienceSettingsController {
                     .setting_effects
                     .push(ClientExperienceSettingEffect::SetWorldRenderScaleMode(mode));
             }
+            GameUiAction::SetXrRenderMode(mode) => {
+                let Some(mut state) = self.state.xr_render_path else {
+                    effects.capability_projection.push(
+                        kind,
+                        ClientExperienceCapabilityStatus::Unsupported(
+                            "XR render path is unavailable for this profile",
+                        ),
+                    );
+                    return effects;
+                };
+                if !state.supported_modes.contains(mode) {
+                    effects
+                        .rejections
+                        .push(ClientExperienceActionRejection::invalid(
+                            kind,
+                            "The selected XR render path is unsupported",
+                        ));
+                    return effects;
+                }
+                state.requested_mode = mode;
+                state.pending_mode = (mode != state.active_mode).then_some(mode);
+                state.transition_state = if state.pending_mode.is_some() {
+                    GameXrRenderTransitionState::Pending
+                } else {
+                    GameXrRenderTransitionState::Idle
+                };
+                self.state.xr_render_path = Some(state);
+                effects
+                    .setting_effects
+                    .push(ClientExperienceSettingEffect::SetXrRenderMode(mode));
+            }
             GameUiAction::SetRenderDistance(render_distance) => {
                 self.state.render_distance = self.state.clamp_render_distance(render_distance);
                 effects
@@ -1121,6 +1161,10 @@ impl ClientExperienceSettingsController {
                 profile.world_render_scale,
             ),
             (
+                ClientExperienceActionKind::SetXrRenderMode,
+                profile.xr_render_mode,
+            ),
+            (
                 ClientExperienceActionKind::SetRenderDistance,
                 profile.render_distance,
             ),
@@ -1266,6 +1310,7 @@ pub struct ClientExperienceSettingsState {
     pub max_movement_speed_multiplier: f32,
     pub frame_pacing_mode: GameFramePacingMode,
     pub fps_cap: u32,
+    pub xr_render_path: Option<GameXrRenderPathState>,
     pub server_cadence: Option<GameSimulationCadence>,
     pub touch_controls_mode: Option<TouchControlsMode>,
     pub touch_settings: Option<GameTouchSettings>,
@@ -1316,6 +1361,7 @@ impl From<GameUiRenderState> for ClientExperienceSettingsState {
             max_movement_speed_multiplier: state.max_movement_speed_multiplier,
             frame_pacing_mode: state.frame_pacing_mode,
             fps_cap: state.fps_cap,
+            xr_render_path: state.xr_render_path,
             server_cadence: state.server_cadence,
             touch_controls_mode: state.touch_controls_mode,
             touch_settings: state.touch_settings,
@@ -1360,6 +1406,7 @@ impl ClientExperienceSettingsState {
         state.max_movement_speed_multiplier = self.max_movement_speed_multiplier;
         state.frame_pacing_mode = self.frame_pacing_mode;
         state.fps_cap = self.fps_cap;
+        state.xr_render_path = self.xr_render_path;
         state.server_cadence = self.server_cadence;
         state.touch_controls_mode = self.touch_controls_mode;
         state.touch_settings = self.touch_settings;
@@ -1560,6 +1607,7 @@ pub enum ClientExperienceSettingEffect {
     CycleFramePacing,
     CycleFpsCap,
     SetWorldRenderScaleMode(GameWorldRenderScaleMode),
+    SetXrRenderMode(GameXrRenderMode),
     SetRenderDistance(u32),
     SetFlySpeedMultiplier(f32),
     SetMovementSpeedMultiplier(f32),
@@ -1650,6 +1698,7 @@ pub enum ClientExperienceActionKind {
     CycleFramePacing,
     CycleFpsCap,
     SetWorldRenderScaleMode,
+    SetXrRenderMode,
     SetRenderDistance,
     SetFlySpeed,
     SetMovementSpeed,
@@ -1741,6 +1790,7 @@ pub fn client_experience_action_kind(action: GameUiAction) -> ClientExperienceAc
         GameUiAction::SetWorldRenderScaleMode(_) => {
             ClientExperienceActionKind::SetWorldRenderScaleMode
         }
+        GameUiAction::SetXrRenderMode(_) => ClientExperienceActionKind::SetXrRenderMode,
         GameUiAction::SetRenderDistance(_) => ClientExperienceActionKind::SetRenderDistance,
         GameUiAction::SetFlySpeed(_) => ClientExperienceActionKind::SetFlySpeed,
         GameUiAction::SetMovementSpeed(_) => ClientExperienceActionKind::SetMovementSpeed,
@@ -1813,6 +1863,7 @@ pub const fn classify_client_experience_action_kind(
         | ClientExperienceActionKind::CycleFramePacing
         | ClientExperienceActionKind::CycleFpsCap
         | ClientExperienceActionKind::SetWorldRenderScaleMode
+        | ClientExperienceActionKind::SetXrRenderMode
         | ClientExperienceActionKind::SetRenderDistance
         | ClientExperienceActionKind::SetTouchLookSensitivity
         | ClientExperienceActionKind::SetTouchControlsMode
@@ -2077,6 +2128,7 @@ mod tests {
             GameUiAction::CycleFramePacing,
             GameUiAction::CycleFpsCap,
             GameUiAction::SetWorldRenderScaleMode(GameWorldRenderScaleMode::Automatic),
+            GameUiAction::SetXrRenderMode(GameXrRenderMode::ArrayPerEye),
             GameUiAction::SetRenderDistance(8),
             GameUiAction::SetFlySpeed(2.0),
             GameUiAction::SetMovementSpeed(2.0),
@@ -2086,7 +2138,7 @@ mod tests {
             GameUiAction::Quit,
         ];
 
-        assert_eq!(samples.len(), 60);
+        assert_eq!(samples.len(), 61);
         for sample in samples {
             let _ = classify_game_ui_action(sample);
         }
@@ -2828,6 +2880,37 @@ mod tests {
                 ),
             }]
         );
+    }
+
+    #[test]
+    fn xr_render_mode_request_stays_pending_until_host_confirmation() {
+        let mut settings = ClientExperienceSettingsController::new(ClientExperienceSettingsState {
+            xr_render_path: Some(GameXrRenderPathState::new(
+                mclone_ui::GameXrRenderModeSet::ALL,
+                GameXrRenderMode::DualPerEye,
+                None,
+                GameXrRenderMode::DualPerEye,
+                GameXrRenderTransitionState::Idle,
+            )),
+            ..ClientExperienceSettingsState::default()
+        });
+
+        let effects = settings.apply_ui_action(
+            GameUiAction::SetXrRenderMode(GameXrRenderMode::ArrayPerEye),
+            xr_native_client_experience_profile().settings,
+        );
+
+        assert_eq!(
+            effects.setting_effects,
+            vec![ClientExperienceSettingEffect::SetXrRenderMode(
+                GameXrRenderMode::ArrayPerEye
+            )]
+        );
+        let state = settings.state().xr_render_path.expect("XR path state");
+        assert_eq!(state.active_mode, GameXrRenderMode::DualPerEye);
+        assert_eq!(state.requested_mode, GameXrRenderMode::ArrayPerEye);
+        assert_eq!(state.pending_mode, Some(GameXrRenderMode::ArrayPerEye));
+        assert_eq!(state.transition_state, GameXrRenderTransitionState::Pending);
     }
 
     #[test]

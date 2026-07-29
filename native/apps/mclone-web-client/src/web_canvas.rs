@@ -2654,6 +2654,7 @@ pub(super) fn ui_action_label(action: GameUiAction) -> &'static str {
         GameUiAction::SetTravelAssistMode(_) => "setTravelAssistMode",
         GameUiAction::SetTurnMode(_) => "setTurnMode",
         GameUiAction::SetXrTurnMode(_) => "setXrTurnMode",
+        GameUiAction::SetXrRenderMode(_) => "setXrRenderMode",
         GameUiAction::CycleFramePacing => "cycleFramePacing",
         GameUiAction::CycleFpsCap => "cycleFpsCap",
         GameUiAction::SetWorldRenderScaleMode(_) => "setWorldRenderScaleMode",

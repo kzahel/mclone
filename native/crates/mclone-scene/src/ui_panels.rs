@@ -557,6 +557,23 @@ pub(crate) fn xr_game_ui_panel_height_blocks() -> f32 {
 }
 
 impl McloneSceneHost {
+    pub fn set_xr_render_path_state(&mut self, state: Option<GameXrRenderPathState>) {
+        self.xr_render_path_state = state;
+    }
+
+    pub fn take_xr_render_mode_request(&mut self) -> Option<GameXrRenderMode> {
+        self.pending_xr_render_mode_request.take()
+    }
+
+    pub fn report_xr_render_path_failure(&mut self, message: &str) {
+        const MAX_STATUS_CHARS: usize = 160;
+        let mut bounded = message.chars().take(MAX_STATUS_CHARS).collect::<String>();
+        if message.chars().count() > MAX_STATUS_CHARS {
+            bounded.push('…');
+        }
+        self.status_overlay = StatusOverlay::new(bounded, false);
+    }
+
     pub(crate) fn current_ui_render_state(&self) -> GameUiRenderState {
         let render_distance = self.active_world.local_startup.as_ref().map_or_else(
             || {
@@ -639,6 +656,7 @@ impl McloneSceneHost {
                 .map(|hz| hz.round().clamp(1.0, 999.0) as u32)
                 .unwrap_or(XR_UI_FPS_CAP),
             flat_presentation: None,
+            xr_render_path: self.xr_render_path_state,
             server_cadence: None,
             touch_controls_mode: None,
             touch_settings: None,

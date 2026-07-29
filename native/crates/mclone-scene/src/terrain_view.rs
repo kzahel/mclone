@@ -207,6 +207,54 @@ impl SceneTerrainViewState {
     pub(crate) fn shutdown(&mut self) {
         self.engine.shutdown();
     }
+
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn render_multiview(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        color_view: &wgpu::TextureView,
+        depth_view: &wgpu::TextureView,
+        size: [u32; 2],
+        render_views: [mclone_render::chunk::ChunkRenderView; 2],
+        fog: mclone_render::fog::RenderFog,
+    ) -> Result<()> {
+        self.engine.resize(device, size[0], size[1]);
+        let presentation = TerrainHorizonPresentation::new(
+            self.anchor[0],
+            self.anchor[1],
+            1_048_576.0,
+            1_048_576.0,
+            TerrainPreviewView::ThreeDimensional,
+            TerrainPreviewCamera::default(),
+        )
+        .and_then(|presentation| presentation.with_multiview_render_views(render_views))
+        .map_err(anyhow::Error::msg)?
+        .with_fog(fog);
+        let stats = self
+            .engine
+            .encode_multiview_to_target(
+                device,
+                queue,
+                encoder,
+                TerrainHorizonRenderTarget {
+                    color_view,
+                    depth_view,
+                    color_load: wgpu::LoadOp::Load,
+                    color_store: wgpu::StoreOp::Store,
+                    depth_load: wgpu::LoadOp::Load,
+                    depth_store: wgpu::StoreOp::Store,
+                },
+                presentation,
+                Some((&self.exact, TerrainExactCoverageMode::DiscardPainted)),
+                None,
+            )
+            .map_err(anyhow::Error::msg)
+            .context("render shared live terrain backdrop multiview")?;
+        self.record_stats(stats);
+        Ok(())
+    }
 }
 
 pub(crate) fn scene_terrain_projection_far_distance(

@@ -1,6 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::mem::size_of;
-use std::num::NonZeroU64;
+use std::num::{NonZeroU32, NonZeroU64};
 use std::sync::mpsc;
 
 use mclone_render_color::{RenderTargetColorTransform, color_transform_wgpu};
@@ -917,8 +917,10 @@ pub struct TerrainViewportRenderer {
     horizon_compute_pipeline: Option<wgpu::ComputePipeline>,
     render_pipeline: Option<wgpu::RenderPipeline>,
     horizon_render_pipeline: Option<wgpu::RenderPipeline>,
+    horizon_multiview_render_pipeline: Option<wgpu::RenderPipeline>,
     horizon_render_cell_stride: u32,
     tree_pipeline: wgpu::RenderPipeline,
+    tree_multiview_pipeline: Option<wgpu::RenderPipeline>,
     clear_color: wgpu::Color,
     depth: TerrainViewportDepthTarget,
     depth_capture_enabled: bool,
@@ -1295,6 +1297,49 @@ impl TerrainViewportRenderer {
                     cache: None,
                 })
             });
+        let multiview_enabled = pipeline_set == TerrainViewportPipelineSet::Horizon
+            && device.features().contains(wgpu::Features::MULTIVIEW);
+        let horizon_multiview_render_pipeline = multiview_enabled.then(|| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("mclone_terrain_horizon_multiview_render_pipeline"),
+                layout: Some(&render_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &render_shader,
+                    entry_point: Some("vertex_multiview_main"),
+                    buffers: &[],
+                    compilation_options: wgpu::PipelineCompilationOptions {
+                        constants: &horizon_render_constants,
+                        ..Default::default()
+                    },
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &render_shader,
+                    entry_point: Some("fragment_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: color_format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: Some(wgpu::Face::Back),
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: TERRAIN_PREVIEW_DEPTH_FORMAT,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::GreaterEqual,
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                multiview: NonZeroU32::new(2),
+                cache: None,
+            })
+        });
         let tree_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: Some("mclone_terrain_viewport_tree_pipeline"),
             layout: Some(&tree_pipeline_layout),
@@ -1351,6 +1396,64 @@ impl TerrainViewportRenderer {
             multiview: None,
             cache: None,
         });
+        let tree_multiview_pipeline = multiview_enabled.then(|| {
+            device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+                label: Some("mclone_terrain_viewport_tree_multiview_pipeline"),
+                layout: Some(&tree_pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &tree_shader,
+                    entry_point: Some("vertex_multiview_main"),
+                    buffers: &[wgpu::VertexBufferLayout {
+                        array_stride: TERRAIN_PREVIEW_TREE_INSTANCE_BYTES,
+                        step_mode: wgpu::VertexStepMode::Instance,
+                        attributes: &[
+                            wgpu::VertexAttribute {
+                                format: wgpu::VertexFormat::Float32x4,
+                                offset: 0,
+                                shader_location: 0,
+                            },
+                            wgpu::VertexAttribute {
+                                format: wgpu::VertexFormat::Float32x4,
+                                offset: 16,
+                                shader_location: 1,
+                            },
+                            wgpu::VertexAttribute {
+                                format: wgpu::VertexFormat::Float32x4,
+                                offset: 32,
+                                shader_location: 2,
+                            },
+                        ],
+                    }],
+                    compilation_options: Default::default(),
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &tree_shader,
+                    entry_point: Some("fragment_main"),
+                    targets: &[Some(wgpu::ColorTargetState {
+                        format: color_format,
+                        blend: None,
+                        write_mask: wgpu::ColorWrites::ALL,
+                    })],
+                    compilation_options: Default::default(),
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    front_face: wgpu::FrontFace::Ccw,
+                    cull_mode: Some(wgpu::Face::Back),
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: TERRAIN_PREVIEW_DEPTH_FORMAT,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::GreaterEqual,
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
+                multisample: Default::default(),
+                multiview: NonZeroU32::new(2),
+                cache: None,
+            })
+        });
         Ok(Self {
             sample_count_per_tile,
             sample_byte_len,
@@ -1363,8 +1466,10 @@ impl TerrainViewportRenderer {
             horizon_compute_pipeline,
             render_pipeline,
             horizon_render_pipeline,
+            horizon_multiview_render_pipeline,
             horizon_render_cell_stride,
             tree_pipeline,
+            tree_multiview_pipeline,
             clear_color: color_transform_wgpu(
                 wgpu::Color {
                     r: 0.025,
@@ -3030,6 +3135,7 @@ impl TerrainHorizonRenderer {
             width,
             height,
             presentation,
+            false,
         )
     }
 
@@ -3057,6 +3163,43 @@ impl TerrainHorizonRenderer {
             width,
             height,
             presentation,
+            false,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn encode_multiview_to_target(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        encoder: &mut wgpu::CommandEncoder,
+        target: TerrainHorizonRenderTarget<'_>,
+        width: u32,
+        height: u32,
+        presentation: TerrainHorizonPresentation,
+    ) -> Result<TerrainHorizonFrameStats, String> {
+        if presentation.multiview_render_view_override.is_none() {
+            return Err("terrain horizon multiview requires two render views".to_owned());
+        }
+        if self.renderer.horizon_multiview_render_pipeline.is_none()
+            || self.renderer.tree_multiview_pipeline.is_none()
+        {
+            return Err("terrain horizon multiview pipelines are unavailable".to_owned());
+        }
+        self.encode_impl(
+            device,
+            queue,
+            encoder,
+            target.color_view,
+            Some(target.depth_view),
+            target.color_load,
+            target.color_store,
+            target.depth_load,
+            Some(target.depth_store),
+            width,
+            height,
+            presentation,
+            true,
         )
     }
 
@@ -3075,6 +3218,7 @@ impl TerrainHorizonRenderer {
         width: u32,
         height: u32,
         presentation: TerrainHorizonPresentation,
+        multiview: bool,
     ) -> Result<TerrainHorizonFrameStats, String> {
         self.resize(device, width, height);
         self.renderer.exact_coverage.sync(queue);
@@ -3086,6 +3230,14 @@ impl TerrainHorizonRenderer {
             self.vegetation_error = Some(error);
         }
         let uniform_presentation = presentation.uniform_facts()?;
+        let render_view_overrides = if multiview {
+            presentation
+                .multiview_render_view_override
+                .expect("multiview presentation was validated")
+                .map(Some)
+        } else {
+            [presentation.render_view_override, None]
+        };
         let options = TerrainPreviewDrawOptions {
             source: TerrainPreviewSource::Gpu,
             view: presentation.view,
@@ -3122,7 +3274,8 @@ impl TerrainHorizonRenderer {
                     focus_y,
                     None,
                     0,
-                    presentation.render_view_override,
+                    if multiview { 0b11 } else { 0b01 },
+                    render_view_overrides,
                     presentation.fog,
                 ),
             );
@@ -3199,11 +3352,13 @@ impl TerrainHorizonRenderer {
         self.refresh_authoritative_tree_ownership(device, queue)?;
 
         let terrain_levels = self.admission.terrain_presentations();
-        let far_cull = presentation
-            .fog
-            .far_cull_distance()
-            .zip(presentation.render_view_override)
-            .map(|(distance, view)| (distance, view.camera_position));
+        let far_culls = render_view_overrides.map(|view| {
+            presentation
+                .fog
+                .far_cull_distance()
+                .zip(view)
+                .map(|(distance, view)| (distance, view.camera_position))
+        });
         self.visible_terrain_slots.fill(false);
         let mut inner_hole_culled_tiles = 0_u32;
         let mut frustum_culled_tiles = 0_u32;
@@ -3211,12 +3366,12 @@ impl TerrainHorizonRenderer {
         for level in &terrain_levels {
             let inner_hole = finer_level_bounds(&terrain_levels, level.snapshot.level);
             for resource in &level.tiles {
-                match terrain_horizon_tile_visibility(
+                match terrain_horizon_tile_visibility_for_views(
                     resource.tile,
                     inner_hole,
                     0.0,
-                    far_cull,
-                    presentation.render_view_override,
+                    far_culls,
+                    render_view_overrides,
                     uniform_presentation,
                 ) {
                     TerrainHorizonTileVisibility::Visible => {}
@@ -3234,6 +3389,14 @@ impl TerrainHorizonRenderer {
                     }
                 }
                 self.visible_terrain_slots[resource.resource_slot as usize] = true;
+                let view_mask = terrain_horizon_tile_view_mask(
+                    resource.tile,
+                    inner_hole,
+                    0.0,
+                    far_culls,
+                    render_view_overrides,
+                    uniform_presentation,
+                );
                 let slot_index = resource.resource_slot as usize;
                 let slot = &self.slots[slot_index];
                 queue.write_buffer(
@@ -3253,7 +3416,8 @@ impl TerrainHorizonRenderer {
                             resource.tile,
                             self.clipmap.config().level_count,
                         ),
-                        presentation.render_view_override,
+                        view_mask,
+                        render_view_overrides,
                         presentation.fog,
                     ),
                 );
@@ -3267,18 +3431,26 @@ impl TerrainHorizonRenderer {
             }
             let inner_hole = finer_level_bounds(&vegetation_levels, level.snapshot.level);
             for resource in &level.tiles {
-                if terrain_horizon_tile_visibility(
+                if terrain_horizon_tile_visibility_for_views(
                     resource.tile,
                     inner_hole,
                     TERRAIN_HORIZON_TREE_CULL_MARGIN_BLOCKS,
-                    far_cull,
-                    presentation.render_view_override,
+                    far_culls,
+                    render_view_overrides,
                     uniform_presentation,
                 ) != TerrainHorizonTileVisibility::Visible
                 {
                     continue;
                 }
                 self.visible_vegetation_slots[resource.resource_slot as usize] = true;
+                let view_mask = terrain_horizon_tile_view_mask(
+                    resource.tile,
+                    inner_hole,
+                    TERRAIN_HORIZON_TREE_CULL_MARGIN_BLOCKS,
+                    far_culls,
+                    render_view_overrides,
+                    uniform_presentation,
+                );
                 let slot = &self.slots[resource.resource_slot as usize];
                 queue.write_buffer(
                     &slot.tree_uniform_buffer,
@@ -3293,7 +3465,8 @@ impl TerrainHorizonRenderer {
                         focus_y,
                         inner_hole,
                         0,
-                        presentation.render_view_override,
+                        view_mask,
+                        render_view_overrides,
                         presentation.fog,
                     ),
                 );
@@ -3329,12 +3502,18 @@ impl TerrainHorizonRenderer {
                 }),
                 ..Default::default()
             });
-            pass.set_pipeline(
+            let terrain_pipeline = if multiview {
+                self.renderer
+                    .horizon_multiview_render_pipeline
+                    .as_ref()
+                    .expect("validated horizon multiview pipeline remains available")
+            } else {
                 self.renderer
                     .horizon_render_pipeline
                     .as_ref()
-                    .expect("horizon renderer owns its render pipeline"),
-            );
+                    .expect("horizon renderer owns its render pipeline")
+            };
+            pass.set_pipeline(terrain_pipeline);
             pass.set_bind_group(1, &self.renderer._material_resources.bind_group, &[]);
             pass.set_bind_group(2, &self.renderer.exact_coverage.bind_group, &[]);
             for level in terrain_levels.iter().rev() {
@@ -3355,7 +3534,15 @@ impl TerrainHorizonRenderer {
                     drawn_levels = drawn_levels.saturating_add(1);
                 }
             }
-            pass.set_pipeline(&self.renderer.tree_pipeline);
+            let tree_pipeline = if multiview {
+                self.renderer
+                    .tree_multiview_pipeline
+                    .as_ref()
+                    .expect("validated tree multiview pipeline remains available")
+            } else {
+                &self.renderer.tree_pipeline
+            };
+            pass.set_pipeline(tree_pipeline);
             pass.set_bind_group(1, &self.renderer.exact_coverage.bind_group, &[]);
             for level in &vegetation_levels {
                 if level.snapshot.sample_spacing > TERRAIN_PREVIEW_MAX_TREE_RECORD_SAMPLE_SPACING {
@@ -3789,7 +3976,8 @@ fn terrain_horizon_uniform_bytes(
     focus_y: f32,
     inner_hole: Option<super::TerrainClipmapBounds>,
     normal_edge_flags: u32,
-    render_view_override: Option<mclone_render::chunk::ChunkRenderView>,
+    view_mask: u32,
+    render_view_overrides: [Option<mclone_render::chunk::ChunkRenderView>; 2],
     fog: mclone_render::fog::RenderFog,
 ) -> Vec<u8> {
     debug_assert_eq!(
@@ -3809,7 +3997,7 @@ fn terrain_horizon_uniform_bytes(
         presentation,
         focus_y,
         inner_hole,
-        render_view_override,
+        render_view_overrides[0],
     );
     const CONTENT_STAGE_FLAGS_W_OFFSET: usize = 8 * 16 + 3 * 4;
     let flag_bytes = bytes
@@ -3822,7 +4010,7 @@ fn terrain_horizon_uniform_bytes(
     ) | normal_edge_flags;
     flag_bytes.copy_from_slice(&flags.to_le_bytes());
     const FOG_CAMERA_OFFSET: usize = 14 * 16;
-    let camera = render_view_override.map_or(glam::Vec3::ZERO, |view| view.camera_position);
+    let camera = render_view_overrides[0].map_or(glam::Vec3::ZERO, |view| view.camera_position);
     let fog_distances = fog.shader_distances();
     let values = [
         camera.x,
@@ -3846,6 +4034,35 @@ fn terrain_horizon_uniform_bytes(
         let start = FOG_CAMERA_OFFSET + index * size_of::<f32>();
         bytes[start..start + size_of::<f32>()].copy_from_slice(&value.to_le_bytes());
     }
+    const RIGHT_VIEW_PROJECTION_OFFSET: usize = 18 * 16;
+    const RIGHT_FOG_CAMERA_OFFSET: usize = 22 * 16;
+    if let Some(right_view) = render_view_overrides[1] {
+        let right_view_projection =
+            super::terrain_relative_view_projection(right_view, presentation);
+        for (index, value) in right_view_projection
+            .to_cols_array()
+            .into_iter()
+            .enumerate()
+        {
+            let start = RIGHT_VIEW_PROJECTION_OFFSET + index * size_of::<f32>();
+            bytes[start..start + size_of::<f32>()].copy_from_slice(&value.to_le_bytes());
+        }
+        for (index, value) in [
+            right_view.camera_position.x,
+            right_view.camera_position.y,
+            right_view.camera_position.z,
+            fog.ground_base_y,
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let start = RIGHT_FOG_CAMERA_OFFSET + index * size_of::<f32>();
+            bytes[start..start + size_of::<f32>()].copy_from_slice(&value.to_le_bytes());
+        }
+    }
+    const MULTIVIEW_OPTIONS_OFFSET: usize = 23 * 16;
+    bytes[MULTIVIEW_OPTIONS_OFFSET..MULTIVIEW_OPTIONS_OFFSET + size_of::<u32>()]
+        .copy_from_slice(&view_mask.to_le_bytes());
     bytes
 }
 
@@ -3870,6 +4087,86 @@ enum TerrainHorizonTileVisibility {
     InnerHole,
     Frustum,
     Far,
+}
+
+fn terrain_horizon_tile_view_mask(
+    tile: TerrainClipmapTile,
+    inner_hole: Option<super::TerrainClipmapBounds>,
+    margin_blocks: f32,
+    far_culls: [Option<(f32, glam::Vec3)>; 2],
+    render_views: [Option<mclone_render::chunk::ChunkRenderView>; 2],
+    presentation: super::TerrainPreviewUniformPresentation,
+) -> u32 {
+    let mut mask = 0_u32;
+    let mut observed_view = false;
+    for index in 0..render_views.len() {
+        if render_views[index].is_none() && far_culls[index].is_none() {
+            continue;
+        }
+        observed_view = true;
+        if terrain_horizon_tile_visibility(
+            tile,
+            inner_hole,
+            margin_blocks,
+            far_culls[index],
+            render_views[index],
+            presentation,
+        ) == TerrainHorizonTileVisibility::Visible
+        {
+            mask |= 1 << index;
+        }
+    }
+    if observed_view { mask } else { 1 }
+}
+
+fn terrain_horizon_tile_visibility_for_views(
+    tile: TerrainClipmapTile,
+    inner_hole: Option<super::TerrainClipmapBounds>,
+    margin_blocks: f32,
+    far_culls: [Option<(f32, glam::Vec3)>; 2],
+    render_views: [Option<mclone_render::chunk::ChunkRenderView>; 2],
+    presentation: super::TerrainPreviewUniformPresentation,
+) -> TerrainHorizonTileVisibility {
+    let mut observed_view = false;
+    let mut all_far = true;
+    for index in 0..render_views.len() {
+        if render_views[index].is_none() && far_culls[index].is_none() {
+            continue;
+        }
+        observed_view = true;
+        match terrain_horizon_tile_visibility(
+            tile,
+            inner_hole,
+            margin_blocks,
+            far_culls[index],
+            render_views[index],
+            presentation,
+        ) {
+            TerrainHorizonTileVisibility::Visible => {
+                return TerrainHorizonTileVisibility::Visible;
+            }
+            TerrainHorizonTileVisibility::InnerHole => {
+                return TerrainHorizonTileVisibility::InnerHole;
+            }
+            TerrainHorizonTileVisibility::Frustum => all_far = false,
+            TerrainHorizonTileVisibility::Far => {}
+        }
+    }
+    if !observed_view {
+        return terrain_horizon_tile_visibility(
+            tile,
+            inner_hole,
+            margin_blocks,
+            None,
+            None,
+            presentation,
+        );
+    }
+    if all_far {
+        TerrainHorizonTileVisibility::Far
+    } else {
+        TerrainHorizonTileVisibility::Frustum
+    }
 }
 
 fn terrain_horizon_tile_visibility(
@@ -4574,6 +4871,68 @@ mod tests {
 
         assert!(!terrain_horizon_tile_beyond_distance(near, camera, 32.0));
         assert!(terrain_horizon_tile_beyond_distance(far, camera, 32.0));
+    }
+
+    #[test]
+    fn horizon_multiview_culling_keeps_union_but_masks_each_eye() {
+        let tile = TerrainClipmapTile {
+            level: 0,
+            tile_x: 0,
+            tile_z: 0,
+            sample_spacing: 1,
+            physical_x: 0,
+            physical_z: 0,
+            physical_slot: 0,
+        };
+        let presentation = crate::TerrainPreviewUniformPresentation::integer(0, 0, 256, 256);
+        let near = glam::Vec3::new(16.0, 300.0, 16.0);
+        let far = glam::Vec3::new(1_000.0, 300.0, 1_000.0);
+
+        assert_eq!(
+            terrain_horizon_tile_visibility_for_views(
+                tile,
+                None,
+                0.0,
+                [Some((32.0, near)), Some((32.0, far))],
+                [None, None],
+                presentation,
+            ),
+            TerrainHorizonTileVisibility::Visible,
+            "a tile visible to either eye remains admitted to the shared draw"
+        );
+        assert_eq!(
+            terrain_horizon_tile_view_mask(
+                tile,
+                None,
+                0.0,
+                [Some((32.0, near)), Some((32.0, far))],
+                [None, None],
+                presentation,
+            ),
+            0b01
+        );
+        assert_eq!(
+            terrain_horizon_tile_view_mask(
+                tile,
+                None,
+                0.0,
+                [Some((32.0, far)), Some((32.0, near))],
+                [None, None],
+                presentation,
+            ),
+            0b10
+        );
+        assert_eq!(
+            terrain_horizon_tile_visibility_for_views(
+                tile,
+                None,
+                0.0,
+                [Some((32.0, far)), Some((32.0, far))],
+                [None, None],
+                presentation,
+            ),
+            TerrainHorizonTileVisibility::Far
+        );
     }
 
     #[test]

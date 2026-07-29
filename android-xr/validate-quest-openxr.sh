@@ -26,6 +26,8 @@ SESSION_ONLY=0
 START_VIEW_POSE="${MCLONE_ANDROID_XR_VIEW_POSE:-0}"
 XR_UNDERWATER_MODE="${MCLONE_ANDROID_XR_UNDERWATER_MODE:-}"
 XR_DEBUG_UI="${MCLONE_ANDROID_XR_DEBUG_UI:-}"
+XR_RENDER_MODE="${MCLONE_ANDROID_XR_RENDER_MODE:-}"
+XR_RENDER_MODE_CYCLE="${MCLONE_ANDROID_XR_RENDER_MODE_CYCLE:-0}"
 REMOTE_ADDR="${MCLONE_ANDROID_XR_REMOTE_ADDR:-}"
 START_SERVER=0
 SERVER_LISTEN="${MCLONE_ANDROID_XR_SERVER_LISTEN:-0.0.0.0:25565}"
@@ -105,9 +107,14 @@ Options:
                      Set debug.mclone.xr_view_pose before launch.
   --xr-underwater-mode midpoint|per-eye
                      Add --xr-underwater-mode MODE to startup argv.
-  --xr-debug-ui none|pause|controls
+  --xr-debug-ui none|pause|controls|graphics
                      Hold an XR debug UI panel open after startup for headset
                      UI validation. Default: none.
+  --xr-render-mode dual-per-eye|array-per-eye|array-multiview
+                     Select the initial submitted XR render path.
+  --xr-render-mode-cycle
+                     Exercise all three modes and both target topologies in
+                     one live OpenXR/world session.
   --remote-addr ADDR
                      Add --remote-addr ADDR to mclone.startup.argv.
   --world-dir PATH   Add --world-dir PATH to mclone.startup.argv.
@@ -514,6 +521,11 @@ while [[ $# -gt 0 ]]; do
             XR_DEBUG_UI="$2"
             shift 2
             ;;
+        --xr-render-mode)
+            require_arg "$1" "${2:-}"
+            XR_RENDER_MODE="$2"
+            shift 2
+            ;;
         --remote-addr)
             require_arg "$1" "${2:-}"
             REMOTE_ADDR="$2"
@@ -562,6 +574,11 @@ while [[ $# -gt 0 ]]; do
             require_arg "$1" "${2:-}"
             STARTUP_ARGV+=("$1" "$2")
             shift 2
+            ;;
+        --xr-render-mode-cycle)
+            XR_RENDER_MODE_CYCLE=1
+            STARTUP_ARGV+=("$1")
+            shift
             ;;
         --freeze-time|--transient)
             STARTUP_ARGV+=("$1")
@@ -764,10 +781,17 @@ case "$XR_UNDERWATER_MODE" in
         ;;
 esac
 case "$XR_DEBUG_UI" in
-    ""|none|pause|controls)
+    ""|none|pause|controls|graphics)
         ;;
     *)
-        mclone_die "unsupported --xr-debug-ui '$XR_DEBUG_UI'; expected none, pause, or controls"
+        mclone_die "unsupported --xr-debug-ui '$XR_DEBUG_UI'; expected none, pause, controls, or graphics"
+        ;;
+esac
+case "$XR_RENDER_MODE" in
+    ""|dual-per-eye|array-per-eye|array-multiview)
+        ;;
+    *)
+        mclone_die "unsupported --xr-render-mode '$XR_RENDER_MODE'; expected dual-per-eye, array-per-eye, or array-multiview"
         ;;
 esac
 case "$FRAME_ACCOUNTING" in
@@ -1049,6 +1073,9 @@ fi
 if [[ -n "$XR_DEBUG_UI" ]]; then
     STARTUP_ARGV+=(--xr-debug-ui "$XR_DEBUG_UI")
 fi
+if [[ -n "$XR_RENDER_MODE" ]]; then
+    STARTUP_ARGV+=(--xr-render-mode "$XR_RENDER_MODE")
+fi
 if [[ -n "$SESSION_SMOKE" ]]; then
     STARTUP_ARGV+=(--session-smoke "$SESSION_SMOKE")
 fi
@@ -1179,6 +1206,10 @@ deadline=$((SECONDS + WAIT_SECONDS))
 success=0
 failure=0
 while (( SECONDS < deadline )); do
+    if [[ "$XR_RENDER_MODE_CYCLE" == "1" ]] && grep -F "MCLONE_XR_RENDER_PATH_CYCLE_COMPLETE" "$LOG_PATH" >/dev/null 2>&1; then
+        success=1
+        break
+    fi
     if [[ "$MULTIVIEW_PROOF" == "1" ]] && grep -F "MCLONE_ANDROID_XR_MULTIVIEW_PROOF_READY" "$LOG_PATH" >/dev/null 2>&1; then
         success=1
         break
@@ -1211,7 +1242,7 @@ while (( SECONDS < deadline )); do
         success=1
         break
     fi
-    if [[ "$MULTIVIEW_PROOF" != "1" && "$TERRAIN_MULTIVIEW_PROOF" != "1" && "$TERRAIN_MULTIVIEW_PERF" != "1" && "$SKY_TERRAIN_MULTIVIEW_PERF" != "1" && "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" != "1" && "$XR_FULL_FRAME_MULTIVIEW" != "1" && -z "$SESSION_SMOKE" && -z "$PERF_SECONDS" ]] && grep -F "MCLONE_ANDROID_XR_READY" "$LOG_PATH" >/dev/null 2>&1; then
+    if [[ "$XR_RENDER_MODE_CYCLE" != "1" && "$MULTIVIEW_PROOF" != "1" && "$TERRAIN_MULTIVIEW_PROOF" != "1" && "$TERRAIN_MULTIVIEW_PERF" != "1" && "$SKY_TERRAIN_MULTIVIEW_PERF" != "1" && "$SKY_TERRAIN_ACTORS_MULTIVIEW_PERF" != "1" && "$XR_FULL_FRAME_MULTIVIEW" != "1" && -z "$SESSION_SMOKE" && -z "$PERF_SECONDS" ]] && grep -F "MCLONE_ANDROID_XR_READY" "$LOG_PATH" >/dev/null 2>&1; then
         success=1
         break
     fi
@@ -1236,7 +1267,9 @@ if [[ "$success" != "1" ]]; then
     if grep -F "LaunchCheckControllerRequiredDialogActivity" "$ACTIVITY_PATH" >/dev/null 2>&1; then
         mclone_die "OpenXR launch was blocked by the Oculus controller-required launch check; activity dump: $ACTIVITY_PATH; logcat: $LOG_PATH"
     fi
-    if [[ "$MULTIVIEW_PROOF" == "1" ]]; then
+    if [[ "$XR_RENDER_MODE_CYCLE" == "1" ]]; then
+        mclone_die "Android XR render-mode cycle completion marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
+    elif [[ "$MULTIVIEW_PROOF" == "1" ]]; then
         mclone_die "Android XR multiview proof marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"
     elif [[ "$TERRAIN_MULTIVIEW_PROOF" == "1" ]]; then
         mclone_die "Android XR terrain multiview proof marker was not seen within ${WAIT_SECONDS}s; see $LOG_PATH"

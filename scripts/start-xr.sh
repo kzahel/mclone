@@ -31,9 +31,13 @@ Script options:
   --xr-underwater-mode midpoint|per-eye
                          Select XR underwater detection. Requires --smoke
                          mclone. Default: midpoint.
-  --xr-debug-ui none|pause|controls
+  --xr-debug-ui none|pause|controls|graphics
                          Hold an XR debug UI panel open after startup for
                          headset UI validation. Requires --smoke mclone.
+  --xr-render-mode dual-per-eye|array-per-eye|array-multiview
+                         Select the initial XR target/encoding mode.
+  --xr-render-mode-cycle Exercise all modes and both target topologies in one
+                         live OpenXR/world session.
   --wivrn-usb            Start/reuse the local WiVRn host, install an ADB
                          reverse tunnel, and launch the matching Quest client.
   --frames N             Set the XR smoke frame budget (or bound a --desktop-xr

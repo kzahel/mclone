@@ -15,8 +15,8 @@ use glam::Vec3;
 use mclone_scene::{
     McloneSceneHost, McloneSceneHostOptions, XrControllerInputRouter,
     XrDebugUiScreen as SceneXrDebugUiScreen, XrFramePipelineHostTiming, XrSceneFrameTarget,
-    XrStartupViewPose, XrTerrainEyeTarget, XrTerrainFrameSummary, XrUnderwaterDetectionMode,
-    record_xr_frame_pipeline, xr_frame_pipeline_accounting_config,
+    XrStartupViewPose, XrTerrainEyeTarget, XrTerrainFrameSummary, XrTerrainMultiviewTarget,
+    XrUnderwaterDetectionMode, record_xr_frame_pipeline, xr_frame_pipeline_accounting_config,
 };
 #[cfg(not(target_os = "android"))]
 use mclone_xr_host::{
@@ -28,7 +28,7 @@ use openxr as xr;
 
 use crate::cli::{
     SceneOptions, WindowStartIntent, XrClearSmokeOptions, XrDebugUiScreen as CliXrDebugUiScreen,
-    XrMcloneSmokeOptions,
+    XrMcloneSmokeOptions, XrRenderModeOption,
 };
 #[cfg(not(target_os = "android"))]
 use crate::render_cache::load_asset_source;
@@ -74,6 +74,13 @@ type AcquiredEyeTarget<'a> = mclone_xr_host::XrAcquiredEyeTarget<
     'a,
     platform_graphics::AppGraphics,
     platform_graphics::OpenXrEyeState,
+>;
+
+#[cfg(not(target_os = "android"))]
+type AcquiredStereoTarget<'a> = mclone_xr_host::XrAcquiredStereoTarget<
+    'a,
+    platform_graphics::AppGraphics,
+    platform_graphics::OpenXrStereoState,
 >;
 
 #[cfg(not(target_os = "android"))]
@@ -443,18 +450,231 @@ fn format_direction(direction: Option<Vec3>) -> String {
 }
 
 #[cfg(not(target_os = "android"))]
+const fn desktop_xr_render_mode(mode: XrRenderModeOption) -> mclone_xr_host::XrRenderMode {
+    match mode {
+        XrRenderModeOption::DualPerEye => mclone_xr_host::XrRenderMode::DualPerEye,
+        XrRenderModeOption::ArrayPerEye => mclone_xr_host::XrRenderMode::ArrayPerEye,
+        XrRenderModeOption::ArrayMultiview => mclone_xr_host::XrRenderMode::ArrayMultiview,
+    }
+}
+
+#[cfg(not(target_os = "android"))]
 struct DesktopXrFrameOutput {
     summary: Option<XrTerrainFrameSummary>,
     controller_poll_ms: f64,
 }
 
 #[cfg(not(target_os = "android"))]
+#[derive(Clone, Copy)]
+struct DesktopXrTargetSpec {
+    eye_width: u32,
+    eye_height: u32,
+    color_format: wgpu::TextureFormat,
+    depth_format: wgpu::TextureFormat,
+    sample_count: u32,
+}
+
+#[cfg(not(target_os = "android"))]
+enum DesktopXrTargetFamily {
+    DualEye {
+        left: platform_graphics::OpenXrEyeState,
+        right: platform_graphics::OpenXrEyeState,
+    },
+    StereoArray {
+        stereo: platform_graphics::OpenXrStereoState,
+    },
+}
+
+#[cfg(not(target_os = "android"))]
+impl DesktopXrTargetFamily {
+    fn eye_size(&self) -> [u32; 2] {
+        match self {
+            Self::DualEye { left, .. } => [left.width, left.height],
+            Self::StereoArray { stereo } => [stereo.width, stereo.height],
+        }
+    }
+
+    fn color_texture_count(&self) -> usize {
+        match self {
+            Self::DualEye { left, right } => {
+                left.texture_count().saturating_add(right.texture_count())
+            }
+            Self::StereoArray { stereo } => stereo.texture_count(),
+        }
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+impl mclone_xr_host::XrTargetFamily for DesktopXrTargetFamily {
+    fn topology(&self) -> mclone_xr_host::XrTargetTopology {
+        match self {
+            Self::DualEye { .. } => mclone_xr_host::XrTargetTopology::DualEye,
+            Self::StereoArray { .. } => mclone_xr_host::XrTargetTopology::StereoArray,
+        }
+    }
+
+    fn estimated_owned_bytes(&self) -> u64 {
+        let [width, height] = self.eye_size();
+        let pixels = u64::from(width) * u64::from(height);
+        let color_layers = match self {
+            Self::DualEye { .. } => self.color_texture_count() as u64,
+            Self::StereoArray { stereo } => {
+                self.color_texture_count() as u64 * u64::from(stereo.array_size())
+            }
+        };
+        pixels
+            .saturating_mul(4)
+            .saturating_mul(color_layers.saturating_add(2))
+    }
+
+    fn outstanding_image_count(&self) -> u32 {
+        use mclone_xr_host::{XrEyeSwapchain, XrStereoSwapchain};
+
+        match self {
+            Self::DualEye { left, right } => left
+                .outstanding_image_count()
+                .saturating_add(right.outstanding_image_count()),
+            Self::StereoArray { stereo } => stereo.outstanding_image_count(),
+        }
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+fn create_desktop_xr_target_family(
+    device: &wgpu::Device,
+    session: &xr::Session<platform_graphics::AppGraphics>,
+    spec: DesktopXrTargetSpec,
+    topology: mclone_xr_host::XrTargetTopology,
+) -> Result<DesktopXrTargetFamily> {
+    match topology {
+        mclone_xr_host::XrTargetTopology::DualEye => {
+            let left = platform_graphics::create_eye(
+                device,
+                session,
+                spec.eye_width,
+                spec.eye_height,
+                spec.color_format,
+                spec.depth_format,
+                spec.sample_count,
+            )
+            .context("create desktop OpenXR replacement left-eye target")?;
+            let right = platform_graphics::create_eye(
+                device,
+                session,
+                spec.eye_width,
+                spec.eye_height,
+                spec.color_format,
+                spec.depth_format,
+                spec.sample_count,
+            )
+            .context("create desktop OpenXR replacement right-eye target")?;
+            Ok(DesktopXrTargetFamily::DualEye { left, right })
+        }
+        mclone_xr_host::XrTargetTopology::StereoArray => {
+            let stereo = platform_graphics::create_stereo(
+                device,
+                session,
+                spec.eye_width,
+                spec.eye_height,
+                spec.color_format,
+                spec.depth_format,
+                spec.sample_count,
+            )
+            .context("create desktop OpenXR replacement stereo-array target")?;
+            Ok(DesktopXrTargetFamily::StereoArray { stereo })
+        }
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+const DESKTOP_XR_RENDER_MODE_CYCLE_DWELL_FRAMES: u64 = 180;
+#[cfg(not(target_os = "android"))]
+const DESKTOP_XR_RENDER_MODE_CYCLE: [mclone_xr_host::XrRenderMode; 4] = [
+    mclone_xr_host::XrRenderMode::ArrayPerEye,
+    mclone_xr_host::XrRenderMode::ArrayMultiview,
+    mclone_xr_host::XrRenderMode::ArrayPerEye,
+    mclone_xr_host::XrRenderMode::DualPerEye,
+];
+
+#[cfg(not(target_os = "android"))]
+const fn ui_xr_render_mode(mode: mclone_xr_host::XrRenderMode) -> mclone_ui::GameXrRenderMode {
+    match mode {
+        mclone_xr_host::XrRenderMode::DualPerEye => mclone_ui::GameXrRenderMode::DualPerEye,
+        mclone_xr_host::XrRenderMode::ArrayPerEye => mclone_ui::GameXrRenderMode::ArrayPerEye,
+        mclone_xr_host::XrRenderMode::ArrayMultiview => mclone_ui::GameXrRenderMode::ArrayMultiview,
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+const fn host_xr_render_mode(mode: mclone_ui::GameXrRenderMode) -> mclone_xr_host::XrRenderMode {
+    match mode {
+        mclone_ui::GameXrRenderMode::DualPerEye => mclone_xr_host::XrRenderMode::DualPerEye,
+        mclone_ui::GameXrRenderMode::ArrayPerEye => mclone_xr_host::XrRenderMode::ArrayPerEye,
+        mclone_ui::GameXrRenderMode::ArrayMultiview => mclone_xr_host::XrRenderMode::ArrayMultiview,
+    }
+}
+
+#[cfg(not(target_os = "android"))]
+fn ui_xr_render_path_state(
+    snapshot: mclone_xr_host::XrRenderPathSnapshot,
+) -> mclone_ui::GameXrRenderPathState {
+    let mut supported_modes = mclone_ui::GameXrRenderModeSet::NONE;
+    for mode in snapshot.supported_modes.iter() {
+        supported_modes = supported_modes.union(match mode {
+            mclone_xr_host::XrRenderMode::DualPerEye => {
+                mclone_ui::GameXrRenderModeSet::DUAL_PER_EYE
+            }
+            mclone_xr_host::XrRenderMode::ArrayPerEye => {
+                mclone_ui::GameXrRenderModeSet::ARRAY_PER_EYE
+            }
+            mclone_xr_host::XrRenderMode::ArrayMultiview => {
+                mclone_ui::GameXrRenderModeSet::ARRAY_MULTIVIEW
+            }
+        });
+    }
+    let transition_state = match snapshot.transition_state {
+        mclone_xr_host::XrRenderTransitionState::Idle => {
+            mclone_ui::GameXrRenderTransitionState::Idle
+        }
+        mclone_xr_host::XrRenderTransitionState::Pending => {
+            mclone_ui::GameXrRenderTransitionState::Pending
+        }
+        mclone_xr_host::XrRenderTransitionState::Committed => {
+            mclone_ui::GameXrRenderTransitionState::Committed
+        }
+        mclone_xr_host::XrRenderTransitionState::RejectedUnsupported => {
+            mclone_ui::GameXrRenderTransitionState::Rejected
+        }
+        mclone_xr_host::XrRenderTransitionState::Failed => {
+            mclone_ui::GameXrRenderTransitionState::Failed
+        }
+    };
+    mclone_ui::GameXrRenderPathState::new(
+        supported_modes,
+        ui_xr_render_mode(snapshot.requested_mode),
+        snapshot.pending_mode.map(ui_xr_render_mode),
+        ui_xr_render_mode(snapshot.active_mode),
+        transition_state,
+    )
+}
+
+#[cfg(not(target_os = "android"))]
+#[derive(Default)]
+struct DesktopXrRenderModeCycle {
+    next_mode_index: usize,
+    next_submitted_frame: u64,
+}
+
+#[cfg(not(target_os = "android"))]
 struct DesktopXrFrameLoop<'a> {
     device: &'a wgpu::Device,
     queue: &'a wgpu::Queue,
+    session: &'a xr::Session<platform_graphics::AppGraphics>,
     stage: &'a xr::Space,
-    left_eye: &'a mut platform_graphics::OpenXrEyeState,
-    right_eye: &'a mut platform_graphics::OpenXrEyeState,
+    target_manager: &'a mut mclone_xr_host::XrTargetManager<DesktopXrTargetFamily>,
+    target_spec: DesktopXrTargetSpec,
+    render_mode_cycle: Option<DesktopXrRenderModeCycle>,
+    render_mode_cycle_ready: bool,
     mclone: &'a mut Option<DesktopXrSceneHost>,
     controller_actions: &'a mut OpenXrControllerActions,
     ordinary_gamepad: Option<crate::desktop_gamepad::DesktopGamepadCollector>,
@@ -545,25 +765,65 @@ impl mclone_xr_host::OpenXrFrameLoopHandler<platform_graphics::AppGraphics>
                 )?;
             }
             self.ordinary_gamepad_input.merge_into_frame(&mut input);
-            Some(render_desktop_xr_frame(
-                self.device,
-                self.queue,
-                frame,
-                self.stage,
-                self.left_eye,
-                self.right_eye,
-                mclone,
-                &input,
-            )?)
+            let mode = self.target_manager.active_mode();
+            Some(match (mode, self.target_manager.active_target_mut()) {
+                (
+                    mclone_xr_host::XrRenderMode::DualPerEye,
+                    DesktopXrTargetFamily::DualEye { left, right },
+                ) => render_desktop_xr_frame(
+                    self.device,
+                    self.queue,
+                    frame,
+                    self.stage,
+                    left,
+                    right,
+                    mclone,
+                    &input,
+                )?,
+                (
+                    mclone_xr_host::XrRenderMode::ArrayPerEye,
+                    DesktopXrTargetFamily::StereoArray { stereo },
+                ) => render_desktop_xr_array_frame(
+                    self.device,
+                    self.queue,
+                    frame,
+                    self.stage,
+                    stereo,
+                    mclone,
+                    &input,
+                    false,
+                )?,
+                (
+                    mclone_xr_host::XrRenderMode::ArrayMultiview,
+                    DesktopXrTargetFamily::StereoArray { stereo },
+                ) => render_desktop_xr_array_frame(
+                    self.device,
+                    self.queue,
+                    frame,
+                    self.stage,
+                    stereo,
+                    mclone,
+                    &input,
+                    true,
+                )?,
+                (mode, family) => {
+                    bail!(
+                        "desktop XR mode {} requires {} topology, active family is {}",
+                        mode.label(),
+                        mode.topology().label(),
+                        mclone_xr_host::XrTargetFamily::topology(family).label()
+                    )
+                }
+            })
         } else {
-            render_clear_frame(
-                self.device,
-                self.queue,
-                frame,
-                self.stage,
-                self.left_eye,
-                self.right_eye,
-            )?;
+            match self.target_manager.active_target_mut() {
+                DesktopXrTargetFamily::DualEye { left, right } => {
+                    render_clear_frame(self.device, self.queue, frame, self.stage, left, right)?;
+                }
+                DesktopXrTargetFamily::StereoArray { .. } => {
+                    bail!("desktop OpenXR clear smoke requires dual-eye targets");
+                }
+            }
             None
         };
         Ok(DesktopXrFrameOutput {
@@ -581,6 +841,9 @@ impl mclone_xr_host::OpenXrFrameLoopHandler<platform_graphics::AppGraphics>
                 outcome.render_output.map_or((None, 0.0), |output| {
                     (output.summary, output.controller_poll_ms)
                 });
+            if rendered_summary.is_some_and(|summary| !summary.local_startup_active) {
+                self.render_mode_cycle_ready = true;
+            }
             let budget_decision_panel = mclone.latest_budget_decision_panel();
             let update = record_xr_frame_pipeline(
                 &mut self.frame_pipeline_accountant,
@@ -600,6 +863,117 @@ impl mclone_xr_host::OpenXrFrameLoopHandler<platform_graphics::AppGraphics>
             if let Some((report, revision)) = update.published_report {
                 mclone.set_frame_pipeline_report(report, revision);
             }
+        }
+        if self.render_mode_cycle_ready
+            && let Some(cycle) = self.render_mode_cycle.as_mut()
+        {
+            if cycle.next_mode_index < DESKTOP_XR_RENDER_MODE_CYCLE.len()
+                && outcome.stats.submitted_frames >= cycle.next_submitted_frame
+            {
+                let mode = DESKTOP_XR_RENDER_MODE_CYCLE[cycle.next_mode_index];
+                let step = cycle.next_mode_index + 1;
+                let Some(mclone) = self.mclone.as_mut() else {
+                    bail!("desktop XR render-mode cycle requires an mclone scene host");
+                };
+                mclone.apply_xr_ui_action(
+                    mclone_ui::GameUiAction::SetXrRenderMode(ui_xr_render_mode(mode)),
+                    self.device,
+                    self.queue,
+                )?;
+                println!(
+                    "MCLONE_XR_RENDER_PATH_CYCLE_REQUEST step={step}/{} requested={} result=SharedUiQueued",
+                    DESKTOP_XR_RENDER_MODE_CYCLE.len(),
+                    mode.label()
+                );
+                cycle.next_mode_index += 1;
+                cycle.next_submitted_frame = outcome
+                    .stats
+                    .submitted_frames
+                    .saturating_add(DESKTOP_XR_RENDER_MODE_CYCLE_DWELL_FRAMES);
+            } else if cycle.next_mode_index == DESKTOP_XR_RENDER_MODE_CYCLE.len()
+                && outcome.stats.submitted_frames >= cycle.next_submitted_frame
+            {
+                println!(
+                    "MCLONE_XR_RENDER_PATH_CYCLE_COMPLETE active={} submitted={}",
+                    self.target_manager.active_mode().label(),
+                    outcome.stats.submitted_frames
+                );
+                self.render_mode_cycle = None;
+            }
+        }
+        if let Some(requested_mode) = self
+            .mclone
+            .as_mut()
+            .and_then(DesktopXrSceneHost::take_xr_render_mode_request)
+        {
+            let requested_mode = host_xr_render_mode(requested_mode);
+            let result = self.target_manager.request_mode(requested_mode);
+            println!(
+                "MCLONE_XR_RENDER_PATH_UI_REQUEST requested={} result={result:?}",
+                requested_mode.label()
+            );
+            if result == mclone_xr_host::XrRenderModeRequest::RejectedUnsupported
+                && let Some(mclone) = self.mclone.as_mut()
+            {
+                mclone.report_xr_render_path_failure(
+                    "The selected XR render path is unsupported by this host",
+                );
+            }
+        }
+        if self.target_manager.snapshot().pending_mode.is_some() {
+            self.device
+                .poll(wgpu::PollType::Wait)
+                .context("quiesce desktop XR GPU work before target transition")?;
+            println!("MCLONE_XR_RENDER_PATH_QUIESCED");
+        }
+        let transition_started = Instant::now();
+        match self.target_manager.apply_pending_retire_first(|topology| {
+            println!(
+                "MCLONE_XR_RENDER_PATH_CREATING topology={}",
+                topology.label()
+            );
+            create_desktop_xr_target_family(self.device, self.session, self.target_spec, topology)
+        }) {
+            Ok(Some(transition)) => {
+                let snapshot = self.target_manager.snapshot();
+                println!(
+                    "MCLONE_XR_RENDER_PATH_COMMITTED previous={} active={} topology={} recreated={} retired_bytes={} active_bytes={} peak_bytes={} outstanding={} transition_ms={:.3}",
+                    transition.previous_mode.label(),
+                    transition.active_mode.label(),
+                    snapshot.active_topology.label(),
+                    transition.topology_recreated,
+                    transition.retired_target_bytes,
+                    transition.active_target_bytes,
+                    transition.peak_transition_bytes,
+                    snapshot.outstanding_images,
+                    elapsed_ms(transition_started.elapsed())
+                );
+            }
+            Ok(None) => {}
+            Err(error) => {
+                if !self.target_manager.has_active_target() {
+                    return Err(error).context(
+                        "desktop XR target replacement and previous-topology recovery failed",
+                    );
+                }
+                let snapshot = self.target_manager.snapshot();
+                println!(
+                    "MCLONE_XR_RENDER_PATH_FAILED active={} topology={} outstanding={} error={error:#}",
+                    snapshot.active_mode.label(),
+                    snapshot.active_topology.label(),
+                    snapshot.outstanding_images
+                );
+                if let Some(mclone) = self.mclone.as_mut() {
+                    mclone.report_xr_render_path_failure(&format!(
+                        "XR render-path switch failed: {error:#}"
+                    ));
+                }
+            }
+        }
+        if let Some(mclone) = self.mclone.as_mut() {
+            mclone.set_xr_render_path_state(Some(ui_xr_render_path_state(
+                self.target_manager.snapshot(),
+            )));
         }
         Ok(mclone_xr_host::OpenXrFrameLoopControl::Continue)
     }
@@ -632,6 +1006,18 @@ fn run_smoke_frames(
             options.frame_limit
         }
     };
+    let initial_render_mode = match &mode {
+        DesktopXrMode::Clear { .. } => mclone_xr_host::XrRenderMode::DualPerEye,
+        DesktopXrMode::Mclone { options } | DesktopXrMode::Real { options, .. } => {
+            desktop_xr_render_mode(options.render_mode)
+        }
+    };
+    let render_mode_cycle = match &mode {
+        DesktopXrMode::Clear { .. } => false,
+        DesktopXrMode::Mclone { options } | DesktopXrMode::Real { options, .. } => {
+            options.render_mode_cycle
+        }
+    };
     // Borrow-only classification captured before the `mode` match below moves
     // `options` out: whether to spawn the desktop companion window, and the
     // human label for the completion line.
@@ -645,32 +1031,52 @@ fn run_smoke_frames(
         .map(|frames| frames.to_string())
         .unwrap_or_else(|| "unbounded".to_owned());
     let (eye_width, eye_height) = stereo_config.primary_eye_size();
-    let mut left_eye = platform_graphics::create_eye(
-        &graphics.device,
-        &graphics.session,
+    let target_spec = DesktopXrTargetSpec {
         eye_width,
         eye_height,
-        XR_COLOR_FORMAT,
-        XR_DEPTH_FORMAT,
-        XR_SAMPLE_COUNT,
-    )
-    .context("create OpenXR left-eye color swapchain")?;
-    let mut right_eye = platform_graphics::create_eye(
+        color_format: XR_COLOR_FORMAT,
+        depth_format: XR_DEPTH_FORMAT,
+        sample_count: XR_SAMPLE_COUNT,
+    };
+    let supported_modes = if graphics
+        .device
+        .features()
+        .contains(wgpu::Features::MULTIVIEW)
+    {
+        mclone_xr_host::XrRenderModeSet::ALL
+    } else {
+        mclone_xr_host::XrRenderModeSet::DUAL_PER_EYE
+            .union(mclone_xr_host::XrRenderModeSet::ARRAY_PER_EYE)
+    };
+    let initial_target = create_desktop_xr_target_family(
         &graphics.device,
         &graphics.session,
-        eye_width,
-        eye_height,
-        XR_COLOR_FORMAT,
-        XR_DEPTH_FORMAT,
-        XR_SAMPLE_COUNT,
+        target_spec,
+        initial_render_mode.topology(),
     )
-    .context("create OpenXR right-eye color swapchain")?;
+    .with_context(|| {
+        format!(
+            "create desktop OpenXR {} target family",
+            initial_render_mode.label()
+        )
+    })?;
+    let mut target_manager =
+        mclone_xr_host::XrTargetManager::new(initial_target, initial_render_mode, supported_modes)
+            .context("initialize desktop XR target manager")?;
+    let target_snapshot = target_manager.snapshot();
     println!(
-        "OpenXR swapchains: format={XR_COLOR_FORMAT:?} eye={}x{} images={}/{}",
-        eye_width,
-        eye_height,
-        left_eye.texture_count(),
-        right_eye.texture_count()
+        "MCLONE_XR_RENDER_PATH_READY active={} topology={} supported={} color_images={} active_bytes={} outstanding={}",
+        target_snapshot.active_mode.label(),
+        target_snapshot.active_topology.label(),
+        target_snapshot
+            .supported_modes
+            .iter()
+            .map(mclone_xr_host::XrRenderMode::label)
+            .collect::<Vec<_>>()
+            .join(","),
+        target_manager.active_target().color_texture_count(),
+        target_snapshot.active_target_bytes,
+        target_snapshot.outstanding_images
     );
     println!("OpenXR frame limit: {frame_limit_label}");
     if frame_limit.is_none() {
@@ -717,6 +1123,7 @@ fn run_smoke_frames(
     };
     if let Some(mclone) = mclone.as_mut() {
         mclone.set_display_refresh_hz(display_refresh.current_rate);
+        mclone.set_xr_render_path_state(Some(ui_xr_render_path_state(target_manager.snapshot())));
     }
 
     // Real `--desktop-xr` run: give the operator a desktop presence and a
@@ -762,9 +1169,12 @@ fn run_smoke_frames(
     let mut handler = DesktopXrFrameLoop {
         device: &graphics.device,
         queue: &graphics.queue,
+        session: &graphics.session,
         stage: &stage,
-        left_eye: &mut left_eye,
-        right_eye: &mut right_eye,
+        target_manager: &mut target_manager,
+        target_spec,
+        render_mode_cycle: render_mode_cycle.then(DesktopXrRenderModeCycle::default),
+        render_mode_cycle_ready: false,
         mclone: &mut mclone,
         controller_actions: &mut controller_actions,
         ordinary_gamepad,
@@ -816,8 +1226,7 @@ fn run_smoke_frames(
     // per-handle teardown stays deferred until a runtime is validated safe to
     // drop post-EXITING; process exit reclaims the memory regardless. The
     // companion window is NOT forgotten — it drops normally below.
-    std::mem::forget(left_eye);
-    std::mem::forget(right_eye);
+    std::mem::forget(target_manager);
     std::mem::forget(stage);
     std::mem::forget(controller_actions);
     std::mem::forget(graphics);
@@ -948,6 +1357,7 @@ fn xr_debug_ui_screen_from_desktop(screen: CliXrDebugUiScreen) -> SceneXrDebugUi
     match screen {
         CliXrDebugUiScreen::Pause => SceneXrDebugUiScreen::Pause,
         CliXrDebugUiScreen::Controls => SceneXrDebugUiScreen::Controls,
+        CliXrDebugUiScreen::Graphics => SceneXrDebugUiScreen::Graphics,
     }
 }
 
@@ -1063,6 +1473,72 @@ fn render_desktop_xr_frame(
 }
 
 #[cfg(not(target_os = "android"))]
+#[allow(clippy::too_many_arguments)]
+fn render_desktop_xr_array_frame(
+    device: &wgpu::Device,
+    queue: &wgpu::Queue,
+    frame: &mut mclone_xr_host::OpenXrRenderFrame<'_, platform_graphics::AppGraphics>,
+    stage: &xr::Space,
+    stereo: &mut platform_graphics::OpenXrStereoState,
+    mclone: &mut DesktopXrSceneHost,
+    input: &XrInputFrame,
+    multiview: bool,
+) -> Result<XrTerrainFrameSummary> {
+    let stereo_views =
+        mclone_xr_host::locate_stereo_views(frame.session(), stage, frame.predicted_display_time())
+            .context("locate OpenXR stereo views for array frame")?;
+    let scene_views = [
+        mclone_xr_host::xr_view_from_openxr(&stereo_views.left)?,
+        mclone_xr_host::xr_view_from_openxr(&stereo_views.right)?,
+    ];
+    mclone.apply_frame_locomotion(input, scene_views, None)?;
+
+    let target =
+        acquire_stereo_target(stereo).context("acquire desktop OpenXR stereo-array image")?;
+    let render_result = if multiview {
+        mclone.render_xr_scene_frame(
+            device,
+            queue,
+            scene_views,
+            [scene_views[0].fov, scene_views[1].fov],
+            false,
+            None,
+            XrSceneFrameTarget::Multiview(XrTerrainMultiviewTarget {
+                color_view: target.color_array_view(),
+                depth: &target.stereo().depth,
+                size: [target.stereo().width, target.stereo().height],
+            }),
+        )
+    } else {
+        mclone.render_xr_scene_frame(
+            device,
+            queue,
+            scene_views,
+            [scene_views[0].fov, scene_views[1].fov],
+            false,
+            None,
+            XrSceneFrameTarget::PerEye {
+                left: XrTerrainEyeTarget {
+                    color_view: target.color_left_view(),
+                    depth: &target.stereo().depth.left,
+                    size: [target.stereo().width, target.stereo().height],
+                },
+                right: XrTerrainEyeTarget {
+                    color_view: target.color_right_view(),
+                    depth: &target.stereo().depth.right,
+                    size: [target.stereo().width, target.stereo().height],
+                },
+            },
+        )
+    };
+    let release_result = target.release();
+    let frame_summary = render_result?;
+    release_result?;
+    frame.submit_stereo_array_projection(stage, stereo_views, stereo)?;
+    Ok(frame_summary)
+}
+
+#[cfg(not(target_os = "android"))]
 fn render_clear_frame(
     device: &wgpu::Device,
     queue: &wgpu::Queue,
@@ -1102,6 +1578,13 @@ fn acquire_eye_target(
     eye_state: &mut platform_graphics::OpenXrEyeState,
 ) -> Result<AcquiredEyeTarget<'_>> {
     mclone_xr_host::acquire_eye_target(eye_state)
+}
+
+#[cfg(not(target_os = "android"))]
+fn acquire_stereo_target(
+    stereo_state: &mut platform_graphics::OpenXrStereoState,
+) -> Result<AcquiredStereoTarget<'_>> {
+    mclone_xr_host::acquire_stereo_target(stereo_state)
 }
 
 #[cfg(not(target_os = "android"))]

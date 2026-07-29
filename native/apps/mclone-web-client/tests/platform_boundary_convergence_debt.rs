@@ -199,10 +199,10 @@ fn test_only_coarse_operation_is_a_boundary_fixpoint() {
 
     // These exact pins make sibling ABI growth a deliberate review event.
     // Smoke-only hooks live on explicit smoke types, leaving the product host
-    // with 37 mechanical exports.
+    // with 38 mechanical exports.
     assert_eq!(
         wasm_export_count(WEB_SCENE_HOST, "#[wasm_bindgen]\nimpl WebSceneHost {"),
-        37
+        38
     );
     assert_eq!(
         wasm_export_count(WEB_SCENE_HOST, "#[wasm_bindgen]\nimpl WebSceneOperation {"),

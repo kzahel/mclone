@@ -14,6 +14,9 @@ struct TerrainPreviewParams {
     fog_render_options: vec4<f32>,
     fog_color: vec4<f32>,
     fog_distances: vec4<f32>,
+    view_projection_right: mat4x4<f32>,
+    fog_camera_position_right: vec4<f32>,
+    multiview_options: vec4<u32>,
 };
 
 // __MCLONE_TARGET_COLOR_TRANSFER_WGSL__
@@ -45,6 +48,7 @@ struct VertexOutput {
     @location(0) color: vec3<f32>,
     @location(1) world_xz: vec2<f32>,
     @location(2) world_position: vec3<f32>,
+    @location(3) @interpolate(flat) view_index: u32,
 };
 
 fn exact_chunk_painted(world_xz: vec2<f32>) -> bool {
@@ -95,10 +99,10 @@ fn family_color(family: u32, trunk: bool) -> vec3<f32> {
     return vec3<f32>(0.16, 0.45, 0.20);
 }
 
-@vertex
-fn vertex_main(
+fn tree_vertex(
     input: TreeInstance,
-    @builtin(vertex_index) vertex_index: u32,
+    vertex_index: u32,
+    view_index: u32,
 ) -> VertexOutput {
     let family = u32(round(input.crown_family.z));
     let orientation = u32(round(input.crown_family.w)) & 3u;
@@ -157,7 +161,11 @@ fn vertex_main(
         - params.presentation_center_extent.x;
     let relative_z = world.z - f32(params.viewport_center_extent.y)
         - params.presentation_center_extent.y;
-    var clip_position = params.view_projection * vec4<f32>(
+    var view_projection = params.view_projection;
+    if view_index != 0u {
+        view_projection = params.view_projection_right;
+    }
+    var clip_position = view_projection * vec4<f32>(
         vec3<f32>(
             relative_x,
             world.y,
@@ -165,6 +173,9 @@ fn vertex_main(
         ),
         1.0,
     );
+    if (params.multiview_options.x & (1u << view_index)) == 0u {
+        clip_position = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+    }
 
     if params.seed_source_view.z == 2u {
         if params.content_stage_flags.z == 1u {
@@ -184,7 +195,25 @@ fn vertex_main(
     out.color = family_color(family, trunk) * height_shade;
     out.world_xz = world.xz;
     out.world_position = world;
+    out.view_index = view_index;
     return out;
+}
+
+@vertex
+fn vertex_main(
+    input: TreeInstance,
+    @builtin(vertex_index) vertex_index: u32,
+) -> VertexOutput {
+    return tree_vertex(input, vertex_index, 0u);
+}
+
+@vertex
+fn vertex_multiview_main(
+    input: TreeInstance,
+    @builtin(vertex_index) vertex_index: u32,
+    @builtin(view_index) view_index: i32,
+) -> VertexOutput {
+    return tree_vertex(input, vertex_index, u32(view_index));
 }
 
 @fragment
@@ -202,9 +231,13 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
     if exact_coverage.mode_count_generation.x == 2u && exact_painted {
         color = mix(color, vec3<f32>(1.0, 0.08, 0.72), 0.86);
     }
+    var fog_camera_position = params.fog_camera_position;
+    if input.view_index != 0u {
+        fog_camera_position = params.fog_camera_position_right;
+    }
     let fog_factor = mclone_fog_factor(
         input.world_position,
-        params.fog_camera_position,
+        fog_camera_position,
         params.fog_render_options,
         params.fog_color,
         params.fog_distances,

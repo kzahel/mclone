@@ -494,6 +494,8 @@ impl McloneSceneHost {
             ui,
             menu_overlay_cache: XrMenuPanelOverlayCache::default(),
             status_overlay: StatusOverlay::hidden(),
+            xr_render_path_state: None,
+            pending_xr_render_mode_request: None,
             sky: SkyRenderer::new_with_color_profile(
                 device,
                 color_format,
@@ -702,6 +704,8 @@ impl McloneSceneHost {
             ui,
             menu_overlay_cache: XrMenuPanelOverlayCache::default(),
             status_overlay: StatusOverlay::hidden(),
+            xr_render_path_state: None,
+            pending_xr_render_mode_request: None,
             sky: SkyRenderer::new_with_color_profile(
                 device,
                 color_format,
@@ -991,6 +995,8 @@ impl McloneSceneHost {
             ui,
             menu_overlay_cache: XrMenuPanelOverlayCache::default(),
             status_overlay: StatusOverlay::hidden(),
+            xr_render_path_state: None,
+            pending_xr_render_mode_request: None,
             sky: SkyRenderer::new_with_color_profile(
                 device,
                 color_format,
@@ -5587,6 +5593,10 @@ impl McloneSceneHost {
             XrDebugUiScreen::Controls => GameScreen::Help {
                 parent: mclone_ui::GameHelpParent::OptionsPause,
             },
+            XrDebugUiScreen::Graphics => GameScreen::OptionsCategory {
+                parent: mclone_ui::GameOptionsParent::Pause,
+                category: mclone_ui::GameOptionsCategory::Graphics,
+            },
         };
         if self.ui.screen() != Some(desired_screen) {
             self.ui.set_screen(Some(desired_screen));
@@ -6346,6 +6356,30 @@ impl ClientExperienceSettingsHost for McloneSceneHost {
     fn set_xr_turn_mode(&mut self, mode: GameXrTurnMode) -> Result<()> {
         self.set_turn_policy(XrTurnPolicy::from_game_mode(mode));
         log::info!("XR turn mode {}", mode.label());
+        Ok(())
+    }
+
+    fn request_xr_render_mode(&mut self, mode: GameXrRenderMode) -> Result<()> {
+        let Some(mut state) = self.xr_render_path_state else {
+            self.status_overlay =
+                StatusOverlay::new("XR render path is unavailable for this host", false);
+            return Ok(());
+        };
+        if !state.supported_modes.contains(mode) {
+            self.status_overlay =
+                StatusOverlay::new("The selected XR render path is unsupported", false);
+            return Ok(());
+        }
+        state.requested_mode = mode;
+        state.pending_mode = (mode != state.active_mode).then_some(mode);
+        state.transition_state = if state.pending_mode.is_some() {
+            GameXrRenderTransitionState::Pending
+        } else {
+            GameXrRenderTransitionState::Idle
+        };
+        self.xr_render_path_state = Some(state);
+        self.pending_xr_render_mode_request = Some(mode);
+        log::info!("XR render-path request queued: {}", mode.label());
         Ok(())
     }
 

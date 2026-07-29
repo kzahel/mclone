@@ -14,6 +14,9 @@ struct TerrainPreviewParams {
     fog_render_options: vec4<f32>,
     fog_color: vec4<f32>,
     fog_distances: vec4<f32>,
+    view_projection_right: mat4x4<f32>,
+    fog_camera_position_right: vec4<f32>,
+    multiview_options: vec4<u32>,
 };
 
 struct TerrainPreviewSample {
@@ -85,6 +88,7 @@ struct VertexOutput {
     @location(6) semantics: vec4<f32>,
     @location(7) world_position: vec3<f32>,
     @location(8) @interpolate(flat) biome: u32,
+    @location(9) @interpolate(flat) view_index: u32,
 };
 
 fn exact_chunk_masked(chunk: vec2<i32>) -> bool {
@@ -622,10 +626,10 @@ fn sample_color(
     return terrain_color(sample, light);
 }
 
-@vertex
-fn vertex_main(
-    @builtin(vertex_index) vertex_index: u32,
-    @builtin(instance_index) instance_index: u32,
+fn terrain_vertex(
+    vertex_index: u32,
+    instance_index: u32,
+    view_index: u32,
 ) -> VertexOutput {
     let cells = u32(params.origin_spacing_cells.w);
     let cell_stride = max(terrain_render_cell_stride, 1u);
@@ -750,7 +754,11 @@ fn vertex_main(
         - params.presentation_center_extent.y;
     let compare = params.seed_source_view.z == 2u;
     let stacked_compare = compare && params.content_stage_flags.z == 1u;
-    var clip_position = params.view_projection * vec4<f32>(
+    var view_projection = params.view_projection;
+    if view_index != 0u {
+        view_projection = params.view_projection_right;
+    }
+    var clip_position = view_projection * vec4<f32>(
         vec3<f32>(
             relative_x,
             stitched_height + 1.0,
@@ -758,6 +766,9 @@ fn vertex_main(
         ),
         1.0,
     );
+    if (params.multiview_options.x & (1u << view_index)) == 0u {
+        clip_position = vec4<f32>(2.0, 2.0, 2.0, 1.0);
+    }
     if compare {
         if stacked_compare {
             let panel_center = select(0.5, -0.5, instance_index == 1u);
@@ -803,7 +814,25 @@ fn vertex_main(
         f32(world_z),
     );
     out.biome = u32(round(sample.semantics.y));
+    out.view_index = view_index;
     return out;
+}
+
+@vertex
+fn vertex_main(
+    @builtin(vertex_index) vertex_index: u32,
+    @builtin(instance_index) instance_index: u32,
+) -> VertexOutput {
+    return terrain_vertex(vertex_index, instance_index, 0u);
+}
+
+@vertex
+fn vertex_multiview_main(
+    @builtin(vertex_index) vertex_index: u32,
+    @builtin(instance_index) instance_index: u32,
+    @builtin(view_index) view_index: i32,
+) -> VertexOutput {
+    return terrain_vertex(vertex_index, instance_index, u32(view_index));
 }
 
 @fragment
@@ -897,9 +926,13 @@ fn fragment_main(input: VertexOutput) -> @location(0) vec4<f32> {
         );
         color = mix(color, coverage_color, 0.82);
     }
+    var fog_camera_position = params.fog_camera_position;
+    if input.view_index != 0u {
+        fog_camera_position = params.fog_camera_position_right;
+    }
     let fog_factor = mclone_fog_factor(
         input.world_position,
-        params.fog_camera_position,
+        fog_camera_position,
         params.fog_render_options,
         params.fog_color,
         params.fog_distances,

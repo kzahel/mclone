@@ -120,7 +120,7 @@ pub const TERRAIN_PREVIEW_COMPUTE_WGSL_TEMPLATE: &str =
 pub const TERRAIN_PREVIEW_RENDER_WGSL: &str = include_str!("shaders/terrain_preview_render.wgsl");
 pub const TERRAIN_PREVIEW_TREE_WGSL: &str = include_str!("shaders/terrain_preview_tree.wgsl");
 
-const TERRAIN_PREVIEW_UNIFORM_BYTES: u64 = 288;
+const TERRAIN_PREVIEW_UNIFORM_BYTES: u64 = 384;
 const TERRAIN_PREVIEW_SAMPLE_BYTES: u64 =
     (TERRAIN_PREVIEW_SAMPLE_FLOATS * std::mem::size_of::<f32>()) as u64;
 const TERRAIN_PREVIEW_WORKGROUP_AXIS: u32 = 8;
@@ -333,6 +333,7 @@ pub struct TerrainHorizonPresentation {
     pub target_y: f32,
     pub fog: mclone_render::fog::RenderFog,
     render_view_override: Option<mclone_render::chunk::ChunkRenderView>,
+    multiview_render_view_override: Option<[mclone_render::chunk::ChunkRenderView; 2]>,
 }
 
 impl TerrainHorizonPresentation {
@@ -354,6 +355,7 @@ impl TerrainHorizonPresentation {
             target_y: terrain_horizon_orbit_target_y(),
             fog: mclone_render::fog::RenderFog::none(),
             render_view_override: None,
+            multiview_render_view_override: None,
         };
         presentation.uniform_facts()?;
         Ok(presentation)
@@ -382,6 +384,21 @@ impl TerrainHorizonPresentation {
             return Err("terrain horizon render view must be finite".to_owned());
         }
         self.render_view_override = Some(render_view);
+        self.multiview_render_view_override = None;
+        Ok(self)
+    }
+
+    /// Use two immutable physical-eye views for one full-frame multiview
+    /// submission. Residency and presentation anchoring remain shared.
+    pub fn with_multiview_render_views(
+        mut self,
+        render_views: [mclone_render::chunk::ChunkRenderView; 2],
+    ) -> Result<Self, String> {
+        if !render_views.into_iter().all(|view| view.is_finite()) {
+            return Err("terrain horizon multiview render views must be finite".to_owned());
+        }
+        self.render_view_override = None;
+        self.multiview_render_view_override = Some(render_views);
         Ok(self)
     }
 
@@ -1412,6 +1429,18 @@ fn viewport_uniform_bytes_for_request_with_presentation(
     for value in [fog_distances[0], fog_distances[1], 0.0, 0.0] {
         bytes.extend_from_slice(&value.to_le_bytes());
     }
+    // Single-view consumers duplicate the first projection into the second
+    // slot. Full-frame multiview overwrites this suffix with the right-eye
+    // projection and camera when preparing its tile uniforms.
+    for value in view_projection.to_cols_array() {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    for value in [0.0_f32, 0.0, 0.0, fog.ground_base_y] {
+        bytes.extend_from_slice(&value.to_le_bytes());
+    }
+    for word in [1_u32, 0, 0, 0] {
+        bytes.extend_from_slice(&word.to_le_bytes());
+    }
     debug_assert_eq!(bytes.len(), TERRAIN_PREVIEW_UNIFORM_BYTES as usize);
     bytes
 }
@@ -1997,8 +2026,12 @@ mod tests {
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("@builtin(instance_index)"));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("fn base_sample"));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("visible_half_width"));
-        assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("params.view_projection * vec4<f32>"));
-        assert!(TERRAIN_PREVIEW_TREE_WGSL.contains("params.view_projection * vec4<f32>"));
+        assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("view_projection * vec4<f32>"));
+        assert!(TERRAIN_PREVIEW_TREE_WGSL.contains("view_projection * vec4<f32>"));
+        assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("@builtin(view_index) view_index: i32"));
+        assert!(TERRAIN_PREVIEW_TREE_WGSL.contains("@builtin(view_index) view_index: i32"));
+        assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("params.view_projection_right"));
+        assert!(TERRAIN_PREVIEW_TREE_WGSL.contains("params.view_projection_right"));
         assert!(!TERRAIN_PREVIEW_RENDER_WGSL.contains("clip_z = 1.0 - clamp"));
         assert!(!TERRAIN_PREVIEW_TREE_WGSL.contains("clip_z = 1.0 - clamp"));
         assert!(TERRAIN_PREVIEW_RENDER_WGSL.contains("stitched_height + 1.0"));

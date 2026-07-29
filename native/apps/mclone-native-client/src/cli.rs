@@ -157,6 +157,8 @@ pub(crate) const DESKTOP_LOCAL_ARG_FLAGS: &[&str] = &[
     "--xr-emulation-screenshot",
     "--xr-forever",
     "--xr-mclone-smoke",
+    "--xr-render-mode",
+    "--xr-render-mode-cycle",
     "--xr-underwater-mode",
 ];
 
@@ -441,6 +443,8 @@ pub(crate) struct XrMcloneSmokeOptions {
     pub(crate) view_pose: Option<XrViewPose>,
     pub(crate) underwater_mode: XrUnderwaterMode,
     pub(crate) debug_ui_screen: Option<XrDebugUiScreen>,
+    pub(crate) render_mode: XrRenderModeOption,
+    pub(crate) render_mode_cycle: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -453,6 +457,7 @@ pub(crate) struct XrViewPose {
 pub(crate) enum XrDebugUiScreen {
     Pause,
     Controls,
+    Graphics,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -460,6 +465,28 @@ pub(crate) enum XrUnderwaterMode {
     #[default]
     Midpoint,
     PerEye,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) enum XrRenderModeOption {
+    #[default]
+    DualPerEye,
+    ArrayPerEye,
+    ArrayMultiview,
+}
+
+impl XrRenderModeOption {
+    fn parse(flag: &str, value: Option<String>) -> Result<Self> {
+        let value = value.with_context(|| format!("{flag} requires a mode"))?;
+        match value.trim().to_ascii_lowercase().as_str() {
+            "dual" | "dual-eye" | "dual-per-eye" | "per-eye" => Ok(Self::DualPerEye),
+            "array" | "array-eye" | "array-per-eye" => Ok(Self::ArrayPerEye),
+            "multiview" | "array-multiview" => Ok(Self::ArrayMultiview),
+            _ => bail!(
+                "{flag} expected dual-per-eye, array-per-eye, or array-multiview, got `{value}`"
+            ),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -950,6 +977,9 @@ impl Cli {
         let mut xr_underwater_mode = XrUnderwaterMode::default();
         let mut xr_debug_ui_screen_explicit = false;
         let mut xr_debug_ui_screen = None;
+        let mut xr_render_mode_explicit = false;
+        let mut xr_render_mode = XrRenderModeOption::default();
+        let mut xr_render_mode_cycle = false;
         let mut rebuild_render_scale = None;
         let mut adaptive_chunk_publication_budget = None;
         let mut adaptive_render_admission_budget = None;
@@ -1638,6 +1668,13 @@ impl Cli {
                     xr_debug_ui_screen_explicit = true;
                     xr_debug_ui_screen = parse_xr_debug_ui_arg(&arg, args.next())?;
                 }
+                "--xr-render-mode" => {
+                    xr_render_mode_explicit = true;
+                    xr_render_mode = XrRenderModeOption::parse(&arg, args.next())?;
+                }
+                "--xr-render-mode-cycle" => {
+                    xr_render_mode_cycle = true;
+                }
                 "--help" | "-h" => {
                     print_help();
                     std::process::exit(0);
@@ -1761,6 +1798,12 @@ impl Cli {
         }
         if xr_debug_ui_screen_explicit && !xr_mclone_smoke && !desktop_xr {
             bail!("--xr-debug-ui requires --xr-mclone-smoke or --desktop-xr");
+        }
+        if (xr_render_mode_explicit || xr_render_mode_cycle) && !xr_mclone_smoke && !desktop_xr {
+            bail!("--xr-render-mode options require --xr-mclone-smoke or --desktop-xr");
+        }
+        if xr_render_mode_cycle && xr_render_mode != XrRenderModeOption::DualPerEye {
+            bail!("--xr-render-mode-cycle must start in dual-per-eye mode");
         }
         if rebuild_render_scale.is_some()
             && !matches!(mode, Some(HeadlessMode::RendererRebuildSmoke(_)))
@@ -2246,6 +2289,8 @@ impl Cli {
                     view_pose: xr_view_pose,
                     underwater_mode: xr_underwater_mode,
                     debug_ui_screen: xr_debug_ui_screen,
+                    render_mode: xr_render_mode,
+                    render_mode_cycle: xr_render_mode_cycle,
                 },
             }),
             None if desktop_xr => Ok(Self::DesktopXr {
@@ -2262,6 +2307,8 @@ impl Cli {
                     view_pose: xr_view_pose,
                     underwater_mode: xr_underwater_mode,
                     debug_ui_screen: xr_debug_ui_screen,
+                    render_mode: xr_render_mode,
+                    render_mode_cycle: xr_render_mode_cycle,
                 },
                 window: !no_window_explicit,
                 start_intent: window_start_intent,
@@ -2592,12 +2639,14 @@ fn parse_xr_underwater_mode_arg(flag: &str, value: Option<String>) -> Result<XrU
 }
 
 fn parse_xr_debug_ui_arg(flag: &str, value: Option<String>) -> Result<Option<XrDebugUiScreen>> {
-    let value = value.with_context(|| format!("{flag} requires none, pause, or controls"))?;
+    let value =
+        value.with_context(|| format!("{flag} requires none, pause, controls, or graphics"))?;
     match value.trim() {
         "none" | "off" | "false" => Ok(None),
         "pause" => Ok(Some(XrDebugUiScreen::Pause)),
         "controls" | "help" => Ok(Some(XrDebugUiScreen::Controls)),
-        value => bail!("{flag} must be none, pause, or controls, got `{value}`"),
+        "graphics" | "video" => Ok(Some(XrDebugUiScreen::Graphics)),
+        value => bail!("{flag} must be none, pause, controls, or graphics, got `{value}`"),
     }
 }
 
@@ -2884,7 +2933,7 @@ fn print_help() {
            mclone-native-client --loading-settle-perf [--seed 12345] [--loading-settle-distances 5,10,15,20] [--render-compile-workers 1] [--simulation-cadence 20/20/60] [--debug-passive-showcase true|false] [--lighting true|false]\n\n\
            mclone-native-client --xr-clear-smoke [--frames 120|--xr-forever]\n\
            mclone-native-client --xr-mclone-smoke [--frames 120|--xr-forever] [--view-pose X,Y,Z,YAW_DEGREES] [--xr-underwater-mode midpoint|per-eye] [--xr-debug-ui none|pause|controls] [--seed 12345] [--chunk-x 0] [--chunk-z 0] [--render-distance 5] [--movement-speed-multiplier 1.0] [--day-time 6000] [--freeze-time] [--adaptive-chunk-publication-budget true|false] [--debug-passive-showcase true|false] [--section-occlusion true|false] [--fullbright true|false]\n\
-           mclone-native-client --desktop-xr [--no-window] [--frames N|--xr-forever] [--view-pose X,Y,Z,YAW_DEGREES] [--xr-underwater-mode midpoint|per-eye] [--xr-debug-ui none|pause|controls] [scene/render options as --xr-mclone-smoke]\n\n\
+           mclone-native-client --desktop-xr [--no-window] [--frames N|--xr-forever] [--view-pose X,Y,Z,YAW_DEGREES] [--xr-underwater-mode midpoint|per-eye] [--xr-debug-ui none|pause|controls|graphics] [--xr-render-mode dual-per-eye|array-per-eye|array-multiview] [--xr-render-mode-cycle] [scene/render options as --xr-mclone-smoke]\n\n\
         --desktop-xr is the real desktop OpenXR run verb: it renders the same mclone world as --xr-mclone-smoke but is persistent by default (unbounded frames; pass --frames N only to bound a run) and spawns a desktop companion window unless --no-window is passed. Quit the run by closing the companion window (a non-headset quit) or from the headset system menu; both shut the OpenXR session down gracefully. --xr-clear-smoke and --xr-mclone-smoke remain the frame-bounded CI/liveness gates.\n\
          Window --width and --height select the initial physical extent. --platform-profile steamos requests borderless fullscreen and caps only the internal world render above a 1080p-class budget; screen-space UI remains at native output resolution.\n\
          Window mode streams chunks around a collision-backed local player with F1 controls, WASD walking, Space jump, Ctrl sprint, Shift crouch/sneak input, mouse-lock look, F5 camera view toggle, N no-clip debug toggle, X no-clip descend, mouse wheel no-clip speed, tilde debug pane and loading-progress toggle, F3 Mclone worldgen-lens toggle, F4 worldgen-lens layer cycle, O section-occlusion toggle, L fullbright toggle, F7 debug physics cube shot, F8 developer renderer-resource rebuild, and F9 developer render-scale rebuild cycle. Use --world-root to choose the menu-managed local world catalog directory. Use --world-dir to open a persistent SQLite-backed local world directory directly; with --transient, local worlds and the menu catalog use transient storage. Use --generation-profile authored-only for a persistence-backed world whose missing chunks are deterministic void instead of overworld terrain. Use --world-topology cylinder-x for the internal 32-chunk Flat Grass cylinder authority fixture; cylinder-x:PERIOD_CHUNKS overrides its period. Use --worldgen-showcase-card to capture top-down, coastline, and elevated views from one warmed transient world, write the labeled card and source PNGs, and record a JSON receipt for repeatable seed comparison. Use --warm-world-standby-seed to create one launch-only detached local standby and a runtime-only opaque gate near each world's accepted spawn; the gate stays closed while CPU/GPU state warms, then walking through selects the other retained world. Use --live-diorama-world-dir instead to open a persistent authored fixture as bounded, placed opaque/cutout geometry; source-region, source-anchor, composition-anchor, and scale flags override its provisional 0,0 radius-zero / sections 3..5 / 1:16 table placement. Gate and diorama presentations are mutually exclusive. Aim at a fully warmed diorama and use/right-click to select it through a short scene-owned blink; the old active world appears on the paired table and can be selected to return. --live-diorama-smoke writes A-only, front/side/behind A+B, synthetic-stereo, flat and stereo A-to-B-to-A activation, and before/after authoritative B-mutation PNGs plus a schema-versioned JSON receipt. --live-diorama-soak-seconds adds a capture-free post-mutation orbit/bounds soak. The tilde debug pane shows readiness/failure state. --warm-world-standby-cadence optionally slows only the retained standby and restores the authored active cadence before selection. --warm-world-swap-smoke performs the deterministic walking A-to-B-to-A proof; --warm-world-cost-sample-ms adds paired one-world/two-world process sampling to that lane. Use --movement-mode to choose the shared initial movement model; collision compatibility follows the shared settings reducer. Use --movement-speed-multiplier to scale local-player walking speed; no-clip fly speed remains a separate menu control. Use --first-person-player true to render the local player body in first-person while hiding head-authored figure parts. Use --startup-wait to select host startup readiness; desktop defaults to playable, screenshots default to view-settled, and frames:N adds offscreen warmup frames before saving the last capture. --xr-emulation-screenshot renders the shared stereo scene without initializing OpenXR; --width and --height are per-eye, and repeatable --xr-emulation-key physical codes feed the shared keyboard adapter into XR locomotion before capture. Use --window-frame-report with either --window-frame-report-frames or --window-frame-report-seconds to run the live winit/swapchain path to that bound, write surface acquire/encode/submit/present timing JSON, then exit. A paired --window-camera-eye/--window-camera-target fixes the diagnostic view; --window-camera-velocity translates both points at the requested world-space blocks per second while reconciling player/server interest for a live traversal test. Use --simulation-cadence HOST/GAMEPLAY/PHYSICS (alias --cadence) to pick a local integrated-server developer cadence such as 60/20/60; lower-rate lanes must divide the host rate, and higher-rate lanes must be integer substeps. The shared scheduler publication controller is the local-integrated default; use --adaptive-chunk-publication-budget false to force the fixed floor for comparison, and remote dedicated sessions keep it off. Use --adaptive-render-admission-budget true to test the shared render admission controller on the live local-integrated desktop path. Render compile in-flight capacity defaults to 4 jobs; use --render-compile-capacity derived to apply the shared host-derived worker/max-pending capacity before startup, or use --render-compile-workers and --render-compile-max-pending-jobs as manual overrides. Use --render-compile-worker-timing false only for meter-tax A/B perf captures; it disables render compile worker busy counters without changing queueing or compile work. Use --freeze-scheduled-fluid-ticks only in startup-streaming perf to isolate initial render-streaming from water/lava scheduled tick mutation. Use --debug-passive-showcase false to disable the default nearby passive-mob showcase for spawn-parity testing. Use --lighting false to bypass server-side ChunkStatus::Light promotion; lighting=false defaults to fullbright unless --fullbright false is also passed. Use --render-color-profile to select vanilla parity, stylized bright, or the reserved linear experimental lane. Headless modes write PNGs for GPU validation. Perf modes write JSON. Timedemo loads a static render distance large enough to contain its camera path. Frame-budget probe runs a deterministic offscreen streaming stress script. Movement-frame probe runs a speed-based offscreen walking script and counts work frames over an explicit target Hz budget. Startup-streaming perf runs the local startup pump to playable, then advances a paced desktop-shaped frame loop while the requested view streams in. With --startup-streaming-persisted-world it first prewarms a temp SQLite world, reopens it through the same startup pump, and measures already-generated persisted startup/streaming."

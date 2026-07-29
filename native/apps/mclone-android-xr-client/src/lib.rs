@@ -36,6 +36,8 @@ const ANDROID_XR_LOCAL_ARG_FLAGS: &[&str] = &[
     "--xr-overlap-eye-submits",
     "--xr-overlap-runtime-prefetch",
     "--xr-render-completed-result-accept-budget",
+    "--xr-render-mode",
+    "--xr-render-mode-cycle",
     "--xr-render-scale",
     "--xr-render-section-accept-budget",
     "--xr-render-section-upload-budget",
@@ -2010,6 +2012,11 @@ mod android {
             let terrain_summary = terrain.frame_summary();
             terrain.set_display_refresh_hz(display_refresh.current_rate);
             terrain.set_render_split_timing_enabled(perf_seconds.is_some());
+            // Array-backed per-eye rendering still submits two independent
+            // layer passes. Defer their waits exactly like the accepted
+            // dual-swapchain path; full-frame multiview ignores this policy.
+            terrain.set_defer_eye_waits_enabled(true);
+            terrain.set_overlap_runtime_prefetch_enabled(true);
             terrain.set_render_section_upload_budget(render_section_upload_budget);
             terrain.set_render_section_accept_budget(render_section_accept_budget);
             terrain
@@ -2037,9 +2044,9 @@ mod android {
                 environment_blend_mode,
                 target_manager,
                 target_spec,
+                true,
                 false,
-                false,
-                false,
+                true,
                 xr_render_mode_cycle,
                 &mut terrain,
                 &mut controller_actions,
@@ -3495,6 +3502,7 @@ mod android {
             target_snapshot.active_target_bytes,
             target_snapshot.outstanding_images
         );
+        terrain.set_xr_render_path_state(Some(ui_xr_render_path_state(target_snapshot)));
         let frame_pipeline_accountant = FramePipelineAccountant::new_live(
             xr_frame_pipeline_accounting_config(display_refresh.current_rate.map(f64::from)),
         );
@@ -3808,6 +3816,71 @@ mod android {
         mclone_xr_host::XrRenderMode::ArrayPerEye,
         mclone_xr_host::XrRenderMode::DualPerEye,
     ];
+
+    const fn ui_xr_render_mode(mode: mclone_xr_host::XrRenderMode) -> mclone_ui::GameXrRenderMode {
+        match mode {
+            mclone_xr_host::XrRenderMode::DualPerEye => mclone_ui::GameXrRenderMode::DualPerEye,
+            mclone_xr_host::XrRenderMode::ArrayPerEye => mclone_ui::GameXrRenderMode::ArrayPerEye,
+            mclone_xr_host::XrRenderMode::ArrayMultiview => {
+                mclone_ui::GameXrRenderMode::ArrayMultiview
+            }
+        }
+    }
+
+    const fn host_xr_render_mode(
+        mode: mclone_ui::GameXrRenderMode,
+    ) -> mclone_xr_host::XrRenderMode {
+        match mode {
+            mclone_ui::GameXrRenderMode::DualPerEye => mclone_xr_host::XrRenderMode::DualPerEye,
+            mclone_ui::GameXrRenderMode::ArrayPerEye => mclone_xr_host::XrRenderMode::ArrayPerEye,
+            mclone_ui::GameXrRenderMode::ArrayMultiview => {
+                mclone_xr_host::XrRenderMode::ArrayMultiview
+            }
+        }
+    }
+
+    fn ui_xr_render_path_state(
+        snapshot: mclone_xr_host::XrRenderPathSnapshot,
+    ) -> mclone_ui::GameXrRenderPathState {
+        let mut supported_modes = mclone_ui::GameXrRenderModeSet::NONE;
+        for mode in snapshot.supported_modes.iter() {
+            supported_modes = supported_modes.union(match mode {
+                mclone_xr_host::XrRenderMode::DualPerEye => {
+                    mclone_ui::GameXrRenderModeSet::DUAL_PER_EYE
+                }
+                mclone_xr_host::XrRenderMode::ArrayPerEye => {
+                    mclone_ui::GameXrRenderModeSet::ARRAY_PER_EYE
+                }
+                mclone_xr_host::XrRenderMode::ArrayMultiview => {
+                    mclone_ui::GameXrRenderModeSet::ARRAY_MULTIVIEW
+                }
+            });
+        }
+        let transition_state = match snapshot.transition_state {
+            mclone_xr_host::XrRenderTransitionState::Idle => {
+                mclone_ui::GameXrRenderTransitionState::Idle
+            }
+            mclone_xr_host::XrRenderTransitionState::Pending => {
+                mclone_ui::GameXrRenderTransitionState::Pending
+            }
+            mclone_xr_host::XrRenderTransitionState::Committed => {
+                mclone_ui::GameXrRenderTransitionState::Committed
+            }
+            mclone_xr_host::XrRenderTransitionState::RejectedUnsupported => {
+                mclone_ui::GameXrRenderTransitionState::Rejected
+            }
+            mclone_xr_host::XrRenderTransitionState::Failed => {
+                mclone_ui::GameXrRenderTransitionState::Failed
+            }
+        };
+        mclone_ui::GameXrRenderPathState::new(
+            supported_modes,
+            ui_xr_render_mode(snapshot.requested_mode),
+            snapshot.pending_mode.map(ui_xr_render_mode),
+            ui_xr_render_mode(snapshot.active_mode),
+            transition_state,
+        )
+    }
 
     #[derive(Default)]
     struct AndroidXrRenderModeCycle {
@@ -4173,9 +4246,13 @@ mod android {
                     {
                         let mode = ANDROID_XR_RENDER_MODE_CYCLE[cycle.next_mode_index];
                         let step = cycle.next_mode_index + 1;
-                        let request = self.target_manager.request_mode(mode);
+                        self.terrain.apply_xr_ui_action(
+                            mclone_ui::GameUiAction::SetXrRenderMode(ui_xr_render_mode(mode)),
+                            self.device,
+                            self.queue,
+                        )?;
                         log::info!(
-                            "MCLONE_XR_RENDER_PATH_CYCLE_REQUEST step={step}/{} requested={} result={request:?}",
+                            "MCLONE_XR_RENDER_PATH_CYCLE_REQUEST step={step}/{} requested={} result=SharedUiQueued",
                             ANDROID_XR_RENDER_MODE_CYCLE.len(),
                             mode.label()
                         );
@@ -4195,6 +4272,24 @@ mod android {
                         self.render_mode_cycle = None;
                     }
                 }
+            }
+            if let Some(requested_mode) = self.terrain.take_xr_render_mode_request() {
+                let requested_mode = host_xr_render_mode(requested_mode);
+                let result = self.target_manager.request_mode(requested_mode);
+                log::info!(
+                    "MCLONE_XR_RENDER_PATH_UI_REQUEST requested={} result={result:?}",
+                    requested_mode.label()
+                );
+                if result == mclone_xr_host::XrRenderModeRequest::RejectedUnsupported {
+                    self.terrain.report_xr_render_path_failure(
+                        "The selected XR render path is unsupported by this host",
+                    );
+                }
+            }
+            if self.target_manager.snapshot().pending_mode.is_some() {
+                self.device
+                    .poll(wgpu::PollType::Wait)
+                    .context("quiesce Android XR GPU work before target transition")?;
             }
             let transition_started = Instant::now();
             match self.target_manager.apply_pending(|topology| {
@@ -4235,8 +4330,15 @@ mod android {
                         snapshot.active_topology.label(),
                         snapshot.outstanding_images
                     );
+                    self.terrain.report_xr_render_path_failure(&format!(
+                        "XR render-path switch failed: {error:#}"
+                    ));
                 }
             }
+            self.terrain
+                .set_xr_render_path_state(Some(ui_xr_render_path_state(
+                    self.target_manager.snapshot(),
+                )));
             Ok(mclone_xr_host::OpenXrFrameLoopControl::Continue)
         }
     }

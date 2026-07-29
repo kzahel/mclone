@@ -2953,6 +2953,7 @@ impl GameUiHost {
             | GameUiAction::CycleFramePacing
             | GameUiAction::CycleFpsCap
             | GameUiAction::SetWorldRenderScaleMode(_)
+            | GameUiAction::SetXrRenderMode(_)
             | GameUiAction::SetRenderDistance(_)
             | GameUiAction::SetFlySpeed(_)
             | GameUiAction::SetMovementSpeed(_)
@@ -3184,6 +3185,7 @@ const UI_V2_FOG_COLOR_MODE: UiWidgetId = UiWidgetId(168);
 const UI_V2_FOG_COLOR_RED: UiWidgetId = UiWidgetId(169);
 const UI_V2_FOG_COLOR_GREEN: UiWidgetId = UiWidgetId(170);
 const UI_V2_FOG_COLOR_BLUE: UiWidgetId = UiWidgetId(171);
+const UI_V2_OPTIONS_XR_RENDER_PATH: UiWidgetId = UiWidgetId(172);
 const UI_V2_STORAGE_PROFILE_NAME: UiWidgetId = UiWidgetId(133);
 const UI_V2_STORAGE_PROFILE_ID: UiWidgetId = UiWidgetId(134);
 const UI_V2_STORAGE_BACKEND: UiWidgetId = UiWidgetId(135);
@@ -3811,13 +3813,13 @@ const fn options_category_widget_id(category: GameOptionsCategory) -> UiWidgetId
     }
 }
 
-/// Number of setting rows a category renders. Every row is always present (rows
-/// unavailable on the current platform render disabled rather than hidden), so
-/// the count is constant per category and can size the panel without building
-/// the row list twice.
+/// Maximum number of setting rows a category renders.
+///
+/// Most platform-shaped settings stay visible but disabled. The XR render path
+/// is intentionally omitted on flat clients, so Graphics may use one fewer row.
 const fn options_category_row_count(category: GameOptionsCategory) -> usize {
     match category {
-        GameOptionsCategory::Graphics => 12,
+        GameOptionsCategory::Graphics => 13,
         GameOptionsCategory::Fog => 15,
         GameOptionsCategory::Movement => 8,
         GameOptionsCategory::Display => 3,
@@ -3913,140 +3915,164 @@ fn options_category_rows(
 ) -> Vec<(f32, UiWidget)> {
     let ph = Rect::new(0.0, 0.0, 0.0, 0.0);
     match category {
-        GameOptionsCategory::Graphics => vec![
-            (
-                20.0,
-                UiWidget::cycle(
-                    UI_V2_OPTIONS_OUTPUT_RESOLUTION,
-                    ph,
-                    "Output Resolution",
-                    state
-                        .flat_presentation
-                        .map(GameFlatPresentationState::output_size_label)
-                        .unwrap_or_else(|| "N/A".to_owned()),
-                )
-                .enabled(false),
-            ),
-            (
-                20.0,
-                UiWidget::cycle(
-                    UI_V2_OPTIONS_WORLD_RESOLUTION,
-                    ph,
-                    "World Resolution",
-                    state
-                        .flat_presentation
-                        .map(GameFlatPresentationState::world_size_label)
-                        .unwrap_or_else(|| "N/A".to_owned()),
-                )
-                .enabled(false),
-            ),
-            (
-                20.0,
-                state.flat_presentation.map_or_else(
-                    || {
-                        UiWidget::cycle(UI_V2_OPTIONS_WORLD_RENDER_SCALE, ph, "World Scale", "N/A")
+        GameOptionsCategory::Graphics => {
+            let mut rows = vec![
+                (
+                    20.0,
+                    UiWidget::cycle(
+                        UI_V2_OPTIONS_OUTPUT_RESOLUTION,
+                        ph,
+                        "Output Resolution",
+                        state
+                            .flat_presentation
+                            .map(GameFlatPresentationState::output_size_label)
+                            .unwrap_or_else(|| "N/A".to_owned()),
+                    )
+                    .enabled(false),
+                ),
+                (
+                    20.0,
+                    UiWidget::cycle(
+                        UI_V2_OPTIONS_WORLD_RESOLUTION,
+                        ph,
+                        "World Resolution",
+                        state
+                            .flat_presentation
+                            .map(GameFlatPresentationState::world_size_label)
+                            .unwrap_or_else(|| "N/A".to_owned()),
+                    )
+                    .enabled(false),
+                ),
+                (
+                    20.0,
+                    state.flat_presentation.map_or_else(
+                        || {
+                            UiWidget::cycle(
+                                UI_V2_OPTIONS_WORLD_RENDER_SCALE,
+                                ph,
+                                "World Scale",
+                                "N/A",
+                            )
                             .enabled(false)
-                    },
-                    |presentation| {
-                        UiWidget::cycle(
-                            UI_V2_OPTIONS_WORLD_RENDER_SCALE,
-                            ph,
-                            "World Scale",
-                            presentation
-                                .world_render_scale_mode
-                                .label(presentation.world_render_scale),
-                        )
-                        .action(GameUiAction::SetWorldRenderScaleMode(
-                            presentation.world_render_scale_mode.next(),
-                        ))
-                    },
+                        },
+                        |presentation| {
+                            UiWidget::cycle(
+                                UI_V2_OPTIONS_WORLD_RENDER_SCALE,
+                                ph,
+                                "World Scale",
+                                presentation
+                                    .world_render_scale_mode
+                                    .label(presentation.world_render_scale),
+                            )
+                            .action(
+                                GameUiAction::SetWorldRenderScaleMode(
+                                    presentation.world_render_scale_mode.next(),
+                                ),
+                            )
+                        },
+                    ),
                 ),
-            ),
-            (
-                18.0,
-                UiWidget::checkbox(
-                    UI_V2_OPTIONS_OCCLUSION,
-                    ph,
-                    "Section Occlusion",
-                    state.section_occlusion_culling,
-                )
-                .action(GameUiAction::ToggleSectionOcclusion),
-            ),
-            (
-                20.0,
-                UiWidget::cycle(
-                    UI_V2_OPTIONS_LEAF_DETAIL,
-                    ph,
-                    "Leaf Detail",
-                    state.leaf_detail.label(),
-                )
-                .action(GameUiAction::SetLeafDetail(state.leaf_detail.next())),
-            ),
-            (
-                20.0,
-                UiWidget::cycle(
-                    UI_V2_OPTIONS_GRASS_DETAIL,
-                    ph,
-                    "Grass Detail",
-                    state.grass_detail.label(),
-                )
-                .action(GameUiAction::SetGrassDetail(state.grass_detail.next())),
-            ),
-            (
-                20.0,
-                UiWidget::cycle(
-                    UI_V2_OPTIONS_TERRAIN_PRESENTATION,
-                    ph,
-                    "Distant Terrain",
-                    if state.terrain_presentation == crate::GameTerrainPresentation::Experimental
-                        && !state.terrain_presentation_available
-                    {
-                        "Experimental (Unavailable)"
-                    } else {
-                        state.terrain_presentation.label()
-                    },
-                )
-                .action(GameUiAction::SetTerrainPresentation(
-                    state.terrain_presentation.next(),
-                )),
-            ),
-            (
-                20.0,
-                UiWidget::button(UI_V2_OPTIONS_FOG_SUBMENU, ph, "Fog...").action(
-                    GameUiAction::OpenOptionsCategory(parent, GameOptionsCategory::Fog),
+                (
+                    18.0,
+                    UiWidget::checkbox(
+                        UI_V2_OPTIONS_OCCLUSION,
+                        ph,
+                        "Section Occlusion",
+                        state.section_occlusion_culling,
+                    )
+                    .action(GameUiAction::ToggleSectionOcclusion),
                 ),
-            ),
-            (
-                20.0,
-                UiWidget::slider(
-                    UI_V2_OPTIONS_RADIUS,
-                    ph,
-                    render_distance_label(state),
-                    render_distance_slider_value(state),
-                )
-                .slider_action(UiSliderAction::RenderDistance),
-            ),
-            (
-                20.0,
-                UiWidget::cycle(
-                    UI_V2_OPTIONS_FRAME_PACING,
-                    ph,
-                    "Frame Pacing",
-                    state.frame_pacing_mode.label(),
-                )
-                .action(GameUiAction::CycleFramePacing),
-            ),
-            (
-                20.0,
-                UiWidget::cycle(
-                    UI_V2_OPTIONS_FPS_CAP,
-                    ph,
-                    "FPS Cap",
-                    state.fps_cap.to_string(),
-                )
-                .action(GameUiAction::CycleFpsCap),
-            ),
-        ],
+                (
+                    20.0,
+                    UiWidget::cycle(
+                        UI_V2_OPTIONS_LEAF_DETAIL,
+                        ph,
+                        "Leaf Detail",
+                        state.leaf_detail.label(),
+                    )
+                    .action(GameUiAction::SetLeafDetail(state.leaf_detail.next())),
+                ),
+                (
+                    20.0,
+                    UiWidget::cycle(
+                        UI_V2_OPTIONS_GRASS_DETAIL,
+                        ph,
+                        "Grass Detail",
+                        state.grass_detail.label(),
+                    )
+                    .action(GameUiAction::SetGrassDetail(state.grass_detail.next())),
+                ),
+                (
+                    20.0,
+                    UiWidget::cycle(
+                        UI_V2_OPTIONS_TERRAIN_PRESENTATION,
+                        ph,
+                        "Distant Terrain",
+                        if state.terrain_presentation
+                            == crate::GameTerrainPresentation::Experimental
+                            && !state.terrain_presentation_available
+                        {
+                            "Experimental (Unavailable)"
+                        } else {
+                            state.terrain_presentation.label()
+                        },
+                    )
+                    .action(GameUiAction::SetTerrainPresentation(
+                        state.terrain_presentation.next(),
+                    )),
+                ),
+                (
+                    20.0,
+                    UiWidget::button(UI_V2_OPTIONS_FOG_SUBMENU, ph, "Fog...").action(
+                        GameUiAction::OpenOptionsCategory(parent, GameOptionsCategory::Fog),
+                    ),
+                ),
+                (
+                    20.0,
+                    UiWidget::slider(
+                        UI_V2_OPTIONS_RADIUS,
+                        ph,
+                        render_distance_label(state),
+                        render_distance_slider_value(state),
+                    )
+                    .slider_action(UiSliderAction::RenderDistance),
+                ),
+                (
+                    20.0,
+                    UiWidget::cycle(
+                        UI_V2_OPTIONS_FRAME_PACING,
+                        ph,
+                        "Frame Pacing",
+                        state.frame_pacing_mode.label(),
+                    )
+                    .action(GameUiAction::CycleFramePacing),
+                ),
+                (
+                    20.0,
+                    UiWidget::cycle(
+                        UI_V2_OPTIONS_FPS_CAP,
+                        ph,
+                        "FPS Cap",
+                        state.fps_cap.to_string(),
+                    )
+                    .action(GameUiAction::CycleFpsCap),
+                ),
+            ];
+            if let Some(xr_render_path) = state.xr_render_path {
+                rows.push((
+                    20.0,
+                    UiWidget::cycle(
+                        UI_V2_OPTIONS_XR_RENDER_PATH,
+                        ph,
+                        "XR Render Path",
+                        xr_render_path.value_label(),
+                    )
+                    .enabled(xr_render_path.supported_modes != crate::GameXrRenderModeSet::NONE)
+                    .action(GameUiAction::SetXrRenderMode(xr_render_path.next_mode())),
+                ));
+            }
+            rows
+        }
         GameOptionsCategory::Fog => {
             let fog = state.fog.normalized();
             let exponential = fog.mode.uses_exponential();

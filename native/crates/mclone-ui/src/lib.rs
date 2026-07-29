@@ -2041,6 +2041,7 @@ pub enum GameUiAction {
     CycleFramePacing,
     CycleFpsCap,
     SetWorldRenderScaleMode(GameWorldRenderScaleMode),
+    SetXrRenderMode(GameXrRenderMode),
     SetRenderDistance(i32),
     SetFlySpeed(f32),
     SetMovementSpeed(f32),
@@ -2048,6 +2049,142 @@ pub enum GameUiAction {
     SetTouchControlsMode(TouchControlsMode),
     SetServerSimulationCadence(GameSimulationCadence),
     Quit,
+}
+
+/// Host-neutral selection for the way one XR frame is encoded and presented.
+///
+/// The two array modes deliberately remain distinct: `ArrayPerEye` isolates
+/// the OpenXR target topology from multiview command encoding.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameXrRenderMode {
+    #[default]
+    DualPerEye,
+    ArrayPerEye,
+    ArrayMultiview,
+}
+
+impl GameXrRenderMode {
+    pub const ALL: [Self; 3] = [Self::DualPerEye, Self::ArrayPerEye, Self::ArrayMultiview];
+
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::DualPerEye => "Dual per-eye",
+            Self::ArrayPerEye => "Array per-eye",
+            Self::ArrayMultiview => "Array multiview",
+        }
+    }
+
+    const fn bit(self) -> u8 {
+        match self {
+            Self::DualPerEye => 1 << 0,
+            Self::ArrayPerEye => 1 << 1,
+            Self::ArrayMultiview => 1 << 2,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct GameXrRenderModeSet(u8);
+
+impl GameXrRenderModeSet {
+    pub const NONE: Self = Self(0);
+    pub const DUAL_PER_EYE: Self = Self(GameXrRenderMode::DualPerEye.bit());
+    pub const ARRAY_PER_EYE: Self = Self(GameXrRenderMode::ArrayPerEye.bit());
+    pub const ARRAY_MULTIVIEW: Self = Self(GameXrRenderMode::ArrayMultiview.bit());
+    pub const ALL: Self = Self(
+        GameXrRenderMode::DualPerEye.bit()
+            | GameXrRenderMode::ArrayPerEye.bit()
+            | GameXrRenderMode::ArrayMultiview.bit(),
+    );
+
+    pub const fn contains(self, mode: GameXrRenderMode) -> bool {
+        self.0 & mode.bit() != 0
+    }
+
+    pub const fn union(self, other: Self) -> Self {
+        Self(self.0 | other.0)
+    }
+
+    pub fn next_after(self, current: GameXrRenderMode) -> GameXrRenderMode {
+        let current_index = match current {
+            GameXrRenderMode::DualPerEye => 0,
+            GameXrRenderMode::ArrayPerEye => 1,
+            GameXrRenderMode::ArrayMultiview => 2,
+        };
+        for offset in 1..=GameXrRenderMode::ALL.len() {
+            let candidate =
+                GameXrRenderMode::ALL[(current_index + offset) % GameXrRenderMode::ALL.len()];
+            if self.contains(candidate) {
+                return candidate;
+            }
+        }
+        current
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum GameXrRenderTransitionState {
+    #[default]
+    Idle,
+    Pending,
+    Committed,
+    Rejected,
+    Failed,
+}
+
+/// Host-confirmed XR render-path state projected into the shared menu.
+///
+/// `None` in [`GameUiRenderState::xr_render_path`] means the active client is
+/// not an XR host, so flat clients omit the setting instead of showing an inert
+/// row.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct GameXrRenderPathState {
+    pub supported_modes: GameXrRenderModeSet,
+    pub requested_mode: GameXrRenderMode,
+    pub pending_mode: Option<GameXrRenderMode>,
+    pub active_mode: GameXrRenderMode,
+    pub transition_state: GameXrRenderTransitionState,
+}
+
+impl GameXrRenderPathState {
+    pub const fn new(
+        supported_modes: GameXrRenderModeSet,
+        requested_mode: GameXrRenderMode,
+        pending_mode: Option<GameXrRenderMode>,
+        active_mode: GameXrRenderMode,
+        transition_state: GameXrRenderTransitionState,
+    ) -> Self {
+        Self {
+            supported_modes,
+            requested_mode,
+            pending_mode,
+            active_mode,
+            transition_state,
+        }
+    }
+
+    pub fn next_mode(self) -> GameXrRenderMode {
+        self.supported_modes.next_after(self.requested_mode)
+    }
+
+    pub fn value_label(self) -> String {
+        match self.transition_state {
+            GameXrRenderTransitionState::Pending => format!(
+                "{} -> {} (pending)",
+                self.active_mode.label(),
+                self.pending_mode.unwrap_or(self.requested_mode).label()
+            ),
+            GameXrRenderTransitionState::Rejected => {
+                format!("{} (rejected)", self.active_mode.label())
+            }
+            GameXrRenderTransitionState::Failed => {
+                format!("{} (switch failed)", self.active_mode.label())
+            }
+            GameXrRenderTransitionState::Idle | GameXrRenderTransitionState::Committed => {
+                self.active_mode.label().to_owned()
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -2490,6 +2627,8 @@ pub struct GameUiRenderState {
     pub fps_cap: u32,
     /// `None` when this projection does not own a conventional flat output.
     pub flat_presentation: Option<GameFlatPresentationState>,
+    /// `None` for flat clients; XR hosts publish requested/pending/active state.
+    pub xr_render_path: Option<GameXrRenderPathState>,
     pub server_cadence: Option<GameSimulationCadence>,
     pub touch_controls_mode: Option<TouchControlsMode>,
     pub touch_settings: Option<GameTouchSettings>,
@@ -2535,6 +2674,7 @@ impl Default for GameUiRenderState {
             frame_pacing_mode: GameFramePacingMode::Vsync,
             fps_cap: 120,
             flat_presentation: None,
+            xr_render_path: None,
             server_cadence: None,
             touch_controls_mode: None,
             touch_settings: None,

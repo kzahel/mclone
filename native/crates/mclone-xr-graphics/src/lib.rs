@@ -36,19 +36,19 @@ pub mod vulkan {
     }
 
     pub struct VulkanEyeSwapchain {
-        swapchain: xr::Swapchain<AppGraphics>,
+        textures: Vec<wgpu::Texture>,
         #[allow(dead_code)]
         foveation_profile: Option<xr::FoveationProfileFB>,
-        textures: Vec<wgpu::Texture>,
+        swapchain: xr::Swapchain<AppGraphics>,
         width: u32,
         height: u32,
     }
 
     pub struct VulkanStereoSwapchain {
-        swapchain: xr::Swapchain<AppGraphics>,
+        textures: Vec<wgpu::Texture>,
         #[allow(dead_code)]
         foveation_profile: Option<xr::FoveationProfileFB>,
-        textures: Vec<wgpu::Texture>,
+        swapchain: xr::Swapchain<AppGraphics>,
         width: u32,
         height: u32,
         array_size: u32,
@@ -677,7 +677,10 @@ pub mod vulkan {
                     memory_flags: wgpu::hal::MemoryFlags::empty(),
                     view_formats: vec![],
                 },
-                None,
+                // OpenXR owns the swapchain image. A drop guard tells wgpu-hal
+                // to retire only its wrapper instead of calling
+                // vkDestroyImage on the runtime-owned handle.
+                Some(Box::new(|| {})),
             )
         };
         unsafe {

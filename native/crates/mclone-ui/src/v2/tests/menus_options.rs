@@ -3,6 +3,7 @@ use crate::{
     GameAuxiliarySplitMode, GameFlatPresentationState, GameFogMode, GameFogSettings,
     GameGrassDetail, GameLeafDetail, GameLocalPlayControllerFamily, GameLocalPlayGuestInput,
     GameLocalPlayLayout, GameLocalPlayState, GameTerrainPresentation, GameWorldRenderScaleMode,
+    GameXrRenderMode, GameXrRenderModeSet, GameXrRenderPathState, GameXrRenderTransitionState,
 };
 
 #[test]
@@ -445,6 +446,60 @@ fn graphics_options_show_flat_resolution_and_cycle_world_scale_mode() {
         Some(GameUiAction::SetWorldRenderScaleMode(
             GameWorldRenderScaleMode::Half,
         ))
+    );
+}
+
+#[test]
+fn graphics_options_omit_xr_render_path_on_flat_clients() {
+    let mut surface = UiSurface::new();
+    surface.set_screen(Some(UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::Graphics,
+    }));
+    surface.set_scale(GuiScale::from_pixels(960, 540));
+    surface.set_render_state(GameUiRenderState::default());
+
+    assert!(
+        surface
+            .layout()
+            .widget(UI_V2_OPTIONS_XR_RENDER_PATH)
+            .is_none()
+    );
+}
+
+#[test]
+fn graphics_options_show_host_confirmed_xr_render_path_state() {
+    let mut surface = UiSurface::new();
+    surface.set_screen(Some(UiScreenId::OptionsCategory {
+        parent: GameOptionsParent::Pause,
+        category: GameOptionsCategory::Graphics,
+    }));
+    surface.set_scale(GuiScale::from_pixels(960, 540));
+    let state = GameUiRenderState {
+        xr_render_path: Some(GameXrRenderPathState::new(
+            GameXrRenderModeSet::ALL,
+            GameXrRenderMode::ArrayMultiview,
+            Some(GameXrRenderMode::ArrayMultiview),
+            GameXrRenderMode::ArrayPerEye,
+            GameXrRenderTransitionState::Pending,
+        )),
+        ..GameUiRenderState::default()
+    };
+    surface.set_render_state(state);
+
+    let row = surface
+        .layout()
+        .widget(UI_V2_OPTIONS_XR_RENDER_PATH)
+        .expect("XR render-path row")
+        .clone();
+    assert_eq!(
+        row.value.as_deref(),
+        Some("Array per-eye -> Array multiview (pending)")
+    );
+    assert!(surface.pointer_down(point_in(row.rect), state));
+    assert_eq!(
+        surface.pointer_up(point_in(row.rect), state).1,
+        Some(GameUiAction::SetXrRenderMode(GameXrRenderMode::DualPerEye))
     );
 }
 

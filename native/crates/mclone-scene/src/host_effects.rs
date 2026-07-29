@@ -8,7 +8,7 @@ use mclone_input::TouchControlsMode;
 use mclone_ui::{
     GameCollisionMode, GameFogSettings, GameGrassDetail, GameLeafDetail, GameMovementMode,
     GamePlayerModel, GameSimulationCadence, GameTerrainPresentation, GameTravelAssistMode,
-    GameTurnMode, GameWorldRenderScaleMode, GameXrTurnMode, StatusOverlay,
+    GameTurnMode, GameWorldRenderScaleMode, GameXrRenderMode, GameXrTurnMode, StatusOverlay,
 };
 
 /// Platform hooks emitted by shared client-experience policy.
@@ -47,6 +47,7 @@ pub trait ClientExperienceSettingsHost {
     fn set_travel_assist_mode(&mut self, mode: GameTravelAssistMode) -> Result<()>;
     fn set_turn_mode(&mut self, mode: GameTurnMode) -> Result<()>;
     fn set_xr_turn_mode(&mut self, mode: GameXrTurnMode) -> Result<()>;
+    fn request_xr_render_mode(&mut self, mode: GameXrRenderMode) -> Result<()>;
     fn set_render_distance(&mut self, render_distance: u32) -> Result<()>;
     fn set_fly_speed_multiplier(&mut self, multiplier: f32) -> Result<()>;
     fn set_movement_speed_multiplier(&mut self, multiplier: f32) -> Result<()>;
@@ -126,6 +127,9 @@ where
             ClientExperienceSettingEffect::SetTurnMode(mode) => target.set_turn_mode(mode)?,
             ClientExperienceSettingEffect::SetXrTurnMode(mode) => {
                 target.set_xr_turn_mode(mode)?;
+            }
+            ClientExperienceSettingEffect::SetXrRenderMode(mode) => {
+                target.request_xr_render_mode(mode)?;
             }
             ClientExperienceSettingEffect::CycleFramePacing => host.cycle_frame_pacing()?,
             ClientExperienceSettingEffect::CycleFpsCap => host.cycle_fps_cap()?,
@@ -236,6 +240,7 @@ mod tests {
         record_method!(set_travel_assist_mode(mode: GameTravelAssistMode));
         record_method!(set_turn_mode(mode: GameTurnMode));
         record_method!(set_xr_turn_mode(mode: GameXrTurnMode));
+        record_method!(request_xr_render_mode(mode: GameXrRenderMode));
         record_method!(set_render_distance(render_distance: u32));
         record_method!(set_fly_speed_multiplier(multiplier: f32));
         record_method!(set_movement_speed_multiplier(multiplier: f32));
@@ -280,6 +285,7 @@ mod tests {
                 ClientExperienceSettingEffect::SetWorldRenderScaleMode(
                     GameWorldRenderScaleMode::ThreeQuarters,
                 ),
+                ClientExperienceSettingEffect::SetXrRenderMode(GameXrRenderMode::ArrayPerEye),
                 ClientExperienceSettingEffect::SetTouchControlsMode(TouchControlsMode::On),
             ],
             ..ClientExperienceSettingsEffects::default()
@@ -294,7 +300,8 @@ mod tests {
                 "set_terrain_presentation",
                 "set_fog_settings",
                 "set_fullbright",
-                "set_travel_assist_mode"
+                "set_travel_assist_mode",
+                "request_xr_render_mode",
             ]
         );
         assert_eq!(
