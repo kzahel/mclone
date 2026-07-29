@@ -4,11 +4,12 @@ Topic: `actor-rendering-performance`
 
 Status: prepared-figure admission and per-figure instancing are implemented as
 of 2026-07-28. The isolated 1,000-animated-cow lane improved from
-`9.184ms` to `1.939ms` average and from 1,000 draws to one. The immediate
-product gate is a physical Quest RD5 actor-on/actor-skipped rerun. The next
-engine experiments are measured sparse bucket updates, capability-gated GPU
-palette expansion, and projected-size actor LOD, in that order unless headset
-attribution changes the priority.
+`9.184ms` to `1.939ms` average and from 1,000 draws to one. A matched physical
+Quest 3 RD5 composed-orbit gate on 2026-07-29 nevertheless attributes about
+`8.43ms` app work, `5.18ms` thread CPU, and `4.21ms` app GPU to the ten-actor
+workload. The immediate next step is actor-route CPU/GPU attribution on Quest,
+then the measured sparse-update, GPU-palette, and projected-size/geometry
+experiments below.
 
 ## Ownership And Scope
 
@@ -141,17 +142,30 @@ calls.
 
 ## Ordered Future Work
 
-### P0: Physical Quest Product Gate
+### P0: Physical Quest Product Gate — failed, attribution required
 
-Install the current Android XR build and repeat the exact RD5 composed-orbit
-normal-actor/`--xr-skip-actors` A/B that exposed the ten-cow cost. The
-actor-skipped row is attribution-only; the normal-actor row must pass the
-absolute product frame gates.
+The exact dual-per-eye RD5 composed-orbit normal-actor/
+`--xr-skip-actors` A/B was repeated on a Quest 3 on 2026-07-29. Both rows used
+the current prepared/instanced build, 10 drawn actors, 45-second samples,
+render scale 1.0, 72 Hz, lighting, the ready 160-slot procedural horizon, and
+the same bounded render/publication settings:
 
-If the delta remains ambiguous, carry prepared/legacy counts, instance bucket
-count, draws, pose evaluations, reuse hits, write counts/bytes, and actor GPU
-timestamps into the Quest receipt. Do not infer a headset win solely from the
-desktop offscreen lane.
+| Quest RD5 composed orbit | App avg / p95 / p99 | Thread CPU avg / p95 | App GPU | Over-period |
+|---|---:|---:|---:|---:|
+| 10 actors | `14.384 / 17.507 / 18.184ms` | `8.523 / 9.729ms` | `7.052ms` | `47.0%` |
+| actors skipped | `5.954 / 8.864 / 10.252ms` | `3.340 / 5.091ms` | `2.847ms` | `0.0%` |
+| actor-attributed delta | `+8.430 / +8.643 / +7.932ms` | `+5.183 / +4.638ms` | `+4.205ms` | `+47.0pp` |
+
+The normal row fails the absolute product gate. The existing per-eye actor
+stage recorded maxima of `0.891ms` left and `1.221ms` right, which is not
+enough to explain the full CPU and blocked-time delta. Before selecting a new
+renderer architecture, extend the physical receipt with prepared/legacy
+counts, instance buckets and real draws, pose evaluations/reuse, actor and
+palette write counts/bytes, average CPU stage timings, and actor-pass GPU
+timestamps. Include actor collection and actor-derived grass-interactor work
+as separate stages so the skip control does not misattribute them.
+
+Do not infer a headset product win solely from the desktop offscreen lane.
 
 ### P1: Hybrid Sparse And Dense Bucket Uploads
 
@@ -262,3 +276,8 @@ Quest composed orbit for headset acceptance.
 - **2026-07-28, `99ec3808`:** recorded clean scaling and selected physical
   Quest, sparse updates, GPU palette expansion, and actor LOD as distinct
   follow-ups.
+- **2026-07-29, `68b9b428`:** the matched Quest 3 RD5 composed-orbit
+  actor-on/actor-skipped gate failed the absolute frame target. Ten actors add
+  `8.430ms` average app work and `4.205ms` reported app GPU time. Route-level
+  CPU and actor-pass GPU attribution now precede the previously ordered
+  experiments.

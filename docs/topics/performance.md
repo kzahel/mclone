@@ -112,23 +112,34 @@ acceptance; normal actors plus LOD remain binding.
 
 Commit `41fc9fae` addresses the discovered route defect: cow entities carried a
 prepared figure ID but were rejected by a stale player/chicken whitelist and
-fell through to whole-mesh CPU baking. Capability-driven admission is now
-landed, shows a `15.9x` isolated win at the same ten-cow count, and is packaged
-in a successful Android XR release APK. No headset was attached for this
-slice, so the normal-actor composed row remains pending and the Quest gate is
-not yet claimed.
+fell through to whole-mesh CPU baking. Capability-driven admission landed,
+and `32fcffaf` subsequently instanced compatible prepared figures. The
+isolated lane improves ten cows by `15.9x` versus legacy and 1,000 animated
+cows from `9.184ms` to `1.939ms` versus the non-instanced prepared path.
+
+The physical Quest gate is now complete and fails the product target. In the
+same 45-second dual-per-eye RD5 composed orbit, ten actors measured
+`14.384/17.507ms` average/p95 app work, `8.523ms` average thread CPU, and
+`7.052ms` app GPU. Skipping actors measured `5.954/8.864ms`, `3.340ms`, and
+`2.847ms`, respectively, with zero over-period frames. The current prepared
+build therefore still attributes `8.430ms` app work, `5.183ms` thread CPU, and
+`4.205ms` reported app GPU to this actor-enabled workload. Actor route/stage
+and GPU-pass instrumentation now precede the previously ordered sparse upload,
+GPU palette, and LOD experiments.
 
 The full execution and exception disposition are in
 [`chunk-lighting-admission-and-backpressure.md`](chunk-lighting-admission-and-backpressure.md).
 
-The independent horizon experiment now sits under coordinating Tactical
+The independent horizon experiment is complete under coordinating Tactical
 [`280`](../tactical/280-xr-multiview-render-path-workstream.md), which also
 owns safe live XR path selection and the final keep/default/remove decision.
 Focused child Tactical
-[`278`](../tactical/278-quest-procedural-horizon-multiview.md) adds a real
-two-layer horizon and alternates it against per-eye rendering on the same
-device. Do not assume the old exact-only multiview result applies, and do not
-reduce accepted horizon quality to recover the remaining moving tails.
+[`278`](../tactical/278-quest-procedural-horizon-multiview.md) adds the real
+two-layer horizon and its matched device comparison. Multiview cuts average
+thread CPU from `8.523ms` to `5.771ms` versus dual per-eye but increases app
+GPU from `7.052ms` to `9.244ms` and app work from `14.384ms` to `17.053ms`.
+Dual per-eye remains the default; all three live modes remain available for
+future optimization without retaining an inactive target family.
 
 ## High-Priority Known Performance Issues
 
@@ -191,11 +202,11 @@ live accounting after its one on-demand exact report.
 
 ### HP-1: Split Actor Pose Updates From Whole-Mesh Rebuilds
 
-**Priority: high. Status: stable entity figures are capability-routed and
-per-figure instanced as of 2026-07-28; physical Quest remeasurement is
-pending. Scope: general actor rendering, not embedded worlds. CPU-baked
-fallback cleanup and prepared draw submission are no longer cow-path
-blockers.**
+**Priority: immediate. Status: stable entity figures are capability-routed and
+per-figure instanced as of 2026-07-28; the 2026-07-29 physical Quest gate
+still attributes a release-blocking CPU/GPU cost to ten actors. Scope: general
+actor rendering, not embedded worlds. CPU-baked fallback cleanup and prepared
+draw submission are no longer cow-path blockers.**
 
 Tactical 131 already fixed the old per-eye/per-frame GPU allocation defect.
 `ActorMeshCache` now owns reusable CPU scratch plus persistent, grow-only
@@ -292,11 +303,12 @@ are the next distinct high-count levers, not further draw-call cleanup.
 
 [`actor-rendering-performance.md`](actor-rendering-performance.md) now owns the
 actor-specific memory model, benchmark controls, ordered future work, and
-acceptance criteria. Its current order is physical Quest remeasurement,
-measured hybrid sparse/dense bucket uploads, capability-gated GPU palette
-expansion, projected-size actor LOD, and only then bounded CPU-baked fallback
-topology reuse. Update that topic rather than adding another actor TODO list
-here; this section retains only the cross-system priority and concise evidence.
+acceptance criteria. Its current order is Quest route/stage and actor-pass GPU
+attribution, measured hybrid sparse/dense bucket uploads, capability-gated GPU
+palette expansion, projected-size actor LOD, and only then bounded CPU-baked
+fallback topology reuse. Update that topic rather than adding another actor
+TODO list here; this section retains only the cross-system priority and concise
+evidence.
 
 Preserve Tactical 179's ownership contract: immutable atlas/figure/pipeline
 resources may be shared, but mutable actor caches remain per drawable world.

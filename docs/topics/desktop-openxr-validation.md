@@ -4,7 +4,8 @@ Topic: desktop-openxr-validation
 
 Status: active. Windows VirtualDesktopXR, macOS WiVRn, and Linux WiVRn now
 have headset-backed runtime receipts. Linux USB automation was accepted on
-Ubuntu 24.04 with WiVRn 26.6.2 and Quest 3 on 2026-07-28.
+Ubuntu 24.04 with WiVRn 26.6.2 and Quest 3 on 2026-07-28. Live three-mode
+target switching was accepted on the same Linux/Quest lane on 2026-07-29.
 
 ## Scope
 
@@ -89,6 +90,30 @@ world from that menu and accepted the resulting stereo overworld composition
 and rendering on Quest 3. Turning off the headset display left the host
 running as expected; terminating the launcher afterward restored the Quest
 settings and removed the temporary USB tunnel.
+
+The subsequent full-scene target-manager cycle submitted 1,000 frames and
+entered through the shared UI action seam:
+
+```text
+dual per-eye
+  -> array per-eye
+  -> array multiview
+  -> array per-eye
+  -> dual per-eye
+```
+
+The dual and stereo-array target families each reported `142,795,776` active
+bytes at the runtime's `2064x2162` eye extent. Desktop uses bounded
+retire-first recreation because WiVRn did not accept overlapping old and
+replacement swapchain families. Topology rebuilds took `3.475ms` and
+`5.054ms`; same-array encoding changes took `0.001ms`. Every commit reported
+zero outstanding acquired images, no inactive target family survived, and the
+world/OpenXR session remained continuous through frame 1,000.
+
+The shared Vulkan wrapper now treats OpenXR swapchain images as externally
+owned when constructing `wgpu` textures. Without the no-op external ownership
+handler, destruction of the retired wrapper could destroy a runtime-owned
+`VkImage` and crash WiVRn during topology changes.
 
 ## Remaining Acceptance
 

@@ -2,10 +2,13 @@
 
 Topic: `xr-render-path-switching`
 
-Status: accepted direction as of 2026-07-28; implementation has not started.
-All shipped OpenXR hosts must use one shared live-selection and target-lifecycle
-contract. Three modes remain independently selectable and measurable. Only one
-OpenXR target family may remain resident in steady state.
+Status: implemented and physically accepted on Quest 3 Android/Vulkan and
+Linux Vulkan/WiVRn as of 2026-07-29. All three modes remain live-selectable
+through one shared action and target manager, with one resident steady-state
+family. Dual per-eye remains the Quest RD5 and Linux/WiVRn default. The Metal
+adapter implements the same static topology construction and manager seam, but
+its physical live-switch acceptance remains open because this Linux host
+cannot run the Metal/OpenXR lane.
 
 ## Scope
 
@@ -275,10 +278,77 @@ The performance result chooses a platform default; it does not erase the other
 supported diagnostic modes. Any default change requires physical-device
 evidence and must remain recoverable through the same live control.
 
-## Next Work
+## Implemented State And 2026-07-29 Evidence
 
-Implement the contract through Tactical
-[`281`](../tactical/281-cross-platform-dynamic-xr-render-targets.md). Update
-this topic whenever implementation changes the mode inventory, lifecycle,
-memory policy, platform capability matrix, validation evidence, or recommended
-default.
+Commit `68b9b428` completes the first implementation:
+
+- one `mclone-xr-host` mode inventory, supported set, topology mapping,
+  transition state, snapshot, and generic owned target manager;
+- create-before-commit replacement on Quest, plus bounded retire-first
+  recreation and recovery for desktop runtimes whose old and replacement
+  swapchains cannot coexist;
+- one shared UI/action/effect path. The XR-only Graphics row shows requested,
+  pending, active, capability, and bounded failure state; flat clients omit
+  the row;
+- shared Vulkan dual-eye and stereo-array targets with a `D2Array` view and
+  independent layer-zero/layer-one `D2` views;
+- desktop Vulkan and Metal concrete target families behind the same manager;
+- full scene equivalence in multiview, including exact terrain, procedural
+  horizon and proxy trees, actors, translucent ordering, fog, overlays, and
+  world UI; and
+- launch selection plus a one-session automation cycle which enters through
+  the same typed UI action as player selection.
+
+The standalone Quest cycle completed 721 submitted frames and:
+
+| Transition | Recreated | Time | Active / peak bytes | Outstanding at commit |
+|---|---:|---:|---:|---:|
+| dual -> array per-eye | yes | `9.860ms` | `94,617,600 / 189,235,200` | `0` |
+| array per-eye -> multiview | no | `0.001ms` | `94,617,600 / 94,617,600` | `0` |
+| multiview -> array per-eye | no | `0.001ms` | `94,617,600 / 94,617,600` | `0` |
+| array per-eye -> dual | yes | `15.468ms` | `94,617,600 / 189,235,200` | `0` |
+
+A second 721-frame cycle with fixed foveation `high` exercised
+`XR_FB_foveation` resource creation, import, retirement, and recreation for
+both the dual and stereo-array families and completed the same four
+transitions.
+
+The Linux Vulkan/WiVRn cycle completed 1,000 submitted frames on the same
+Quest 3. Its dual and array families each reported `142,795,776` active bytes.
+Retire-first topology changes took `3.475ms` and `5.054ms`, retained no second
+family, and committed with zero outstanding images. Same-array encoding
+changes took `0.001ms`.
+
+One inspected standalone multiview capture showed distinct coherent physical
+eyes, correct exact-world geometry, and the shared Graphics panel reporting
+`Array Multiview`. A separate elevated composed capture showed the procedural
+terrain in both physical eyes with correct disparity. Its settled receipt
+reported the horizon active and target-ready with all 160 slots resident, 42
+stereo-union terrain tiles, and 523 proxy-tree instances drawn.
+
+The matched 45-second Quest 3 RD5 composed-orbit comparison used 10 actors,
+render scale 1.0, 72 Hz, no foveation, lighting, the same publication bounds,
+and a ready 160-slot horizon:
+
+| Mode | App avg / p95 / p99 | Thread CPU avg / p95 / p99 | App GPU | Over-period | Submitted FPS |
+|---|---:|---:|---:|---:|---:|
+| Dual per-eye | `14.384 / 17.507 / 18.184ms` | `8.523 / 9.729 / 10.784ms` | `7.052ms` | `47.0%` | `66.95` |
+| Array per-eye | `15.050 / 18.100 / 18.785ms` | `8.237 / 9.654 / 10.644ms` | `7.567ms` | `64.3%` | `65.42` |
+| Array multiview | `17.053 / 20.507 / 22.281ms` | `5.771 / 7.329 / 7.823ms` | `9.244ms` | `92.2%` | `58.15` |
+
+Multiview saves about `2.75ms` average thread CPU relative to dual per-eye but
+adds about `2.19ms` reported app GPU and substantially more GPU-blocked time.
+Its stereo-union horizon admitted 41 tiles versus 33 in each per-eye mode;
+per-layer visibility masks prevent tiles from shading an eye which rejected
+them, but the current one-pass horizon remains slower on this Quest workload.
+Dual per-eye therefore remains the product default while all three modes stay
+available for live testing.
+
+## Remaining Work
+
+Tactical [`281`](../tactical/281-cross-platform-dynamic-xr-render-targets.md)
+tracks the remaining physical Metal, lifecycle fault-injection, and broader
+capture matrix. The next performance experiment is reducing multiview horizon
+GPU work without weakening stereo-union correctness. Update this topic whenever
+implementation changes the mode inventory, lifecycle, memory policy, platform
+capability matrix, validation evidence, or recommended default.

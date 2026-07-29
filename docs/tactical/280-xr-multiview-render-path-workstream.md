@@ -1,7 +1,9 @@
 # Tactical 280: XR Multiview Render-Path Workstream
 
-Status: active coordinating parent, opened 2026-07-28. Investigation and
-roadmap are complete; implementation has not started.
+Status: implementation and physical Quest/Linux-WiVRn comparison complete
+2026-07-29. Multiview is retained as a live diagnostic mode; dual per-eye
+remains the default. The parent remains open only for the physical Metal,
+foveation, and lifecycle-recovery acceptance gaps owned by Tactical 281.
 
 Parent: Tactical
 [`261`](261-procedural-horizon-product-integration-roadmap.md), PH-8 stereo
@@ -405,11 +407,11 @@ launch flag or menu preference.
 
 ### Slice 0: baseline and target feasibility
 
-- [ ] Pin the current dual-eye per-eye and startup multiview source contracts.
-- [ ] Record current target image/layer/format/byte facts.
-- [ ] Add an isolated stereo-array per-layer render/submission proof.
-- [ ] Compare original and array-backed per-eye pixels and Quest cadence.
-- [ ] Select single-array or bounded target-manager topology from evidence.
+- [x] Pin the current dual-eye per-eye and startup multiview source contracts.
+- [x] Record current target image/layer/format/byte facts.
+- [x] Add an isolated stereo-array per-layer render/submission proof.
+- [x] Compare original and array-backed per-eye pixels and Quest cadence.
+- [x] Select single-array or bounded target-manager topology from evidence.
 
 This slice must finish before the UI promises a live switch.
 
@@ -418,11 +420,11 @@ This slice must finish before the UI promises a live switch.
 Owner: child Tactical
 [`278`](278-quest-procedural-horizon-multiview.md).
 
-- [ ] Add immutable two-view terrain uniforms and shaders.
-- [ ] Add the two-layer terrain pipeline and union visibility.
-- [ ] Add matching tree-proxy uniforms, shader, pipeline, and union
+- [x] Add immutable two-view terrain uniforms and shaders.
+- [x] Add the two-layer terrain pipeline and union visibility.
+- [x] Add matching tree-proxy uniforms, shader, pipeline, and union
   visibility.
-- [ ] Preserve coverage, fog, material, water, skirt, and reversed-Z
+- [x] Preserve coverage, fog, material, water, skirt, and reversed-Z
   semantics.
 - [ ] Add two-layer synthetic/readback evidence.
 
@@ -430,11 +432,11 @@ The existing startup flag is sufficient for this first renderer milestone.
 
 ### Slice 2: scene composition
 
-- [ ] Prepare the terrain-view presentation once for a multiview scene frame.
-- [ ] Encode the horizon after exact opaque/cutout depth and before actors /
+- [x] Prepare the terrain-view presentation once for a multiview scene frame.
+- [x] Encode the horizon after exact opaque/cutout depth and before actors /
   translucent work.
-- [ ] Preserve the exact/proxy tree ownership contract.
-- [ ] Account for horizon timings and stats in the multiview frame summary.
+- [x] Preserve the exact/proxy tree ownership contract.
+- [x] Account for horizon timings and stats in the multiview frame summary.
 - [ ] Cover device/resource rebuild and active asset-epoch replacement.
 
 ### Slice 3: live target manager and shared setting
@@ -442,35 +444,35 @@ The existing startup flag is sufficient for this first renderer milestone.
 Open a bounded child tactical before implementation so target lifecycle and UI
 effects do not turn Tactical 278 into an app-wide execution record.
 
-- [ ] Refactor borrowed startup-only target selection into the accepted
+- [x] Refactor borrowed startup-only target selection into the accepted
   safe-boundary target contract.
-- [ ] Add the neutral value, capability/status projection, and typed UI
+- [x] Add the neutral value, capability/status projection, and typed UI
   action.
-- [ ] Add the XR-only Graphics row.
-- [ ] Add the request/result handshake and next-frame application.
-- [ ] Keep per-eye as default and retain the CLI initial override.
-- [ ] Add failure fallback and automated `per-eye -> multiview -> per-eye`
+- [x] Add the XR-only Graphics row.
+- [x] Add the request/result handshake and next-frame application.
+- [x] Keep per-eye as default and retain the CLI initial override.
+- [x] Add failure fallback and automated `per-eye -> multiview -> per-eye`
   switching.
 
 ### Slice 4: regression and physical Quest acceptance
 
 - [ ] Inspect matched low-angle terrain/tree captures in both layers.
-- [ ] Switch both directions repeatedly in one live world and menu session.
+- [x] Switch both directions repeatedly in one live world and menu session.
 - [ ] Exercise pause/resume and OpenXR stop/ready recovery.
 - [ ] Alternate per-eye/multiview/per-eye stationary and settled-orbit rows
   with a fixed normal actor population.
 - [ ] Repeat actor-skipped rows only as attribution controls.
-- [ ] Re-run the selected comparison after any target-topology refactor.
-- [ ] Record inactive resource cost and memory behavior.
+- [x] Re-run the selected comparison after any target-topology refactor.
+- [x] Record inactive resource cost and memory behavior.
 
 ### Slice 5: decision and closeout
 
-- [ ] Choose default, experimental opt-in, diagnostic-only, or removal from
+- [x] Choose default, experimental opt-in, diagnostic-only, or removal from
   the decision matrix below.
-- [ ] Update Tactical 261 PH-8 and the living horizon/performance/settings
+- [x] Update Tactical 261 PH-8 and the living horizon/performance/settings
   topics.
-- [ ] Update the platform validation matrix and CLI documentation.
-- [ ] Close or explicitly assign every remaining renderer, host, or device
+- [x] Update the platform validation matrix and CLI documentation.
+- [x] Close or explicitly assign every remaining renderer, host, or device
   gap.
 
 ## Validation Matrix
@@ -582,6 +584,20 @@ not necessary to retain a safe experimental regression control.
   neutral values, effects, render preparation, and renderer behavior remain
   shared.
 
+## 2026-07-29 Disposition
+
+Tactical [`278`](278-quest-procedural-horizon-multiview.md#result) records the
+completed terrain/tree renderer and Quest A/B. Tactical
+[`281`](281-cross-platform-dynamic-xr-render-targets.md#implementation-evidence)
+records the shared three-mode target manager, UI control, Quest standalone
+cycle, and Linux Vulkan/WiVRn cycle.
+
+The matched Quest result is a deliberate non-promotion: multiview reduces
+average thread CPU from `8.523ms` to `5.771ms`, but increases reported app GPU
+from `7.052ms` to `9.244ms` and app work from `14.384ms` to `17.053ms`.
+It remains a live, transient diagnostic/optimization mode with no inactive
+swapchain-family residency. Dual per-eye remains the default.
+
 ## Master Checklist
 
 - [x] Investigate the current horizon, multiview, XR target, and settings
@@ -592,12 +608,12 @@ not necessary to retain a safe experimental regression control.
   gate.
 - [x] Define transient initial setting policy and keep/promote/remove decision
   rules.
-- [ ] Complete stereo-array per-eye feasibility and select the target design.
-- [ ] Complete Tactical 278's terrain/tree renderer and initial Quest A/B.
-- [ ] Integrate the horizon into the scene multiview pass.
-- [ ] Implement the shared live setting and safe-boundary XR target switch.
+- [x] Complete stereo-array per-eye feasibility and select the target design.
+- [x] Complete Tactical 278's terrain/tree renderer and initial Quest A/B.
+- [x] Integrate the horizon into the scene multiview pass.
+- [x] Implement the shared live setting and safe-boundary XR target switch.
 - [ ] Pass automated, visual, lifecycle, and physical Quest validation.
-- [ ] Make and document the final multiview disposition.
+- [x] Make and document the final multiview disposition.
 
 ## Closeout Rule
 

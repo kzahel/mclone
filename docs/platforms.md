@@ -44,12 +44,18 @@ Additional host lane:
 | Dedicated server | active | `native/apps/mclone-dedicated-server` owns listener/CLI/process lifecycle around the shared authoritative host. TCP and direct WebSocket peers share one registry, autonomous cadence, and per-peer 64-frame / 64 MiB outbound policy. Transient and persistent SQLite-backed worlds are supported. It is not one of the five client display platforms, but it is part of the shared runtime contract. |
 
 The shared warm-world diagnostic is validated in desktop flat and synthetic
-per-eye stereo, including A-to-B-to-A selection, no-request performance, paired
-process cost, persistence, and asset/device invalidation. Full-frame multiview
-pipelines are implemented and eagerly materialized when supported, but the
-current macOS adapter does not expose `wgpu::Features::MULTIVIEW` and no Quest
-is attached. That execution receipt remains open; it is not replaced by the
-headset-free stereo lane.
+per-eye stereo, including A-to-B-to-A selection, no-request performance,
+paired process cost, persistence, and asset/device invalidation. Both OpenXR
+hosts now expose the shared transient
+`Dual per-eye | Array per-eye | Array multiview` Graphics control when their
+graphics/runtime capabilities support it. Quest standalone and Linux
+Vulkan/WiVRn completed
+`dual -> array-per-eye -> multiview -> array-per-eye -> dual` in one live
+world/session with one steady-state target family and zero outstanding images
+at every topology commit. Dual per-eye remains the default from the matched
+Quest RD5 result. Physical Metal, foveation, and lifecycle-recovery acceptance
+remain open in
+[`topics/xr-render-path-switching.md`](topics/xr-render-path-switching.md).
 
 The first live-diorama composition uses the same offscreen flat and synthetic
 stereo hosts. `pnpm native:live-diorama:smoke` rebuilds persistent authored A/B
@@ -402,6 +408,9 @@ pnpm native:xr:linux:wivrn:mclone
 # Real persistent desktop XR run (companion window; quit via window Close or headset menu)
 pnpm native:xr:mac:wivrn:desktop     # macOS WiVRn USB
 pnpm native:xr:linux:wivrn:desktop   # Linux WiVRn USB
+# Live target-family/mode cycle on WiVRn
+scripts/start-xr.sh --release --wivrn-usb --smoke mclone \
+  --xr-debug-ui graphics --xr-render-mode-cycle --frames 1000
 # scripts\start-desktop-xr.bat        # Windows VDXR (pnpm native:xr:windows:interactive)
 
 # Flat Android, SDK/AVD required
@@ -414,6 +423,7 @@ pnpm native:android:avd-session-smoke -- --skip-build
 # Android XR / Quest, attached authorized Quest required
 pnpm native:android-xr:apk
 pnpm native:android-xr:validate --skip-build --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
+pnpm native:android-xr:validate --skip-build --xr-debug-ui graphics --xr-render-mode-cycle
 MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:session-smoke
 pnpm native:android-xr:terrain-multiview-proof
 MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:validate --debug --skip-build --adb-reverse --start-server --view-pose 0,120,-96,180

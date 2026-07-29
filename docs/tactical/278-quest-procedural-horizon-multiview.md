@@ -1,7 +1,9 @@
 # Tactical 278: Quest Procedural-Horizon Multiview
 
-Status: planned 2026-07-28; ready after Tactical 277. Focused renderer and
-Quest A/B child of coordinating Tactical
+Status: renderer and physical Quest A/B complete 2026-07-29. Full-frame
+multiview is retained as a live diagnostic mode, but dual per-eye remains the
+default because multiview's CPU gain is outweighed by a larger GPU regression.
+Focused renderer and Quest A/B child of coordinating Tactical
 [`280`](280-xr-multiview-render-path-workstream.md).
 
 Topics: `procedural-horizon-clipmap`, `performance`
@@ -89,3 +91,41 @@ implementation opt-in only if its maintenance cost is low and record the
 result. If it regresses, retain the per-eye path and use Tactical 277's
 remaining CPU attribution plus the actor counters in the performance topic to
 choose the next bounded optimization.
+
+## Result
+
+The shared terrain-view renderer now:
+
+- carries immutable left/right view-projection and fog-camera facts in each
+  fixed terrain and tree uniform;
+- uses two-layer terrain and proxy-tree pipelines with
+  `@builtin(view_index)`;
+- admits the conservative stereo union while passing a per-layer visibility
+  mask which collapses geometry rejected by that physical eye; and
+- composes the procedural backdrop after exact opaque depth and before actors
+  and translucent terrain in the ordinary scene multiview frame.
+
+An inspected Quest Graphics capture showed coherent distinct physical-eye
+exact geometry and the shared panel reporting `Array Multiview`. A separate
+elevated composed capture showed procedural terrain with physical-eye
+disparity in both layers. Its settled receipt reported
+`horizon_active=true`, `horizon_target_ready=true`, 160 ready slots, 42
+multiview-union terrain tiles, and 523 drawn proxy-tree instances.
+
+The final matched 45-second Quest 3 RD5 composed-orbit rows used 10 actors,
+render scale 1.0, 72 Hz, no foveation, and identical world/publication bounds:
+
+| Mode | App avg / p95 / p99 | Thread CPU avg / p95 / p99 | App GPU | Over-period |
+|---|---:|---:|---:|---:|
+| Dual per-eye | `14.384 / 17.507 / 18.184ms` | `8.523 / 9.729 / 10.784ms` | `7.052ms` | `47.0%` |
+| Array per-eye | `15.050 / 18.100 / 18.785ms` | `8.237 / 9.654 / 10.644ms` | `7.567ms` | `64.3%` |
+| Array multiview | `17.053 / 20.507 / 22.281ms` | `5.771 / 7.329 / 7.823ms` | `9.244ms` | `92.2%` |
+
+The experiment meets the renderer and correctness objective but fails the
+promotion gate. Multiview saves about `2.75ms` average thread CPU relative to
+dual per-eye, while adding about `2.19ms` app GPU and enough blocked time to
+raise average app work by about `2.67ms`. It remains useful as a low-cost live
+regression/optimization control because the array family is not retained when
+inactive and changing between array encodings requires no target recreation.
+The next bounded experiment is reducing horizon multiview GPU work; it must
+preserve stereo-union correctness and the accepted per-layer visibility.

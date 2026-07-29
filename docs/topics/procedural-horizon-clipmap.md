@@ -13,16 +13,20 @@ cross-platform proof was completed and deployed on 2026-07-25 by Tactical
 [`249`](../tactical/249-cross-platform-procedural-horizon-proof.md). Shared
 toroidal planning, a ten-level fixed-budget renderer, native tree proxies, and
 one Rust terrain-view engine now run through Explorer, Terrain Lab, and the
-opt-in live game on native and browser hosts. Android and XR promotion remain
-later phases. Product scope and platform hosting are independent: the small
+opt-in live game on native and browser hosts. Android and XR promotion are now
+implemented; physical flat-Android evidence remains open. Product scope and
+platform hosting are independent: the small
 Explorer and full game may both run in the browser, while the same terrain
 system remains usable on desktop, Android, and XR. Tactical
 [`245`](../tactical/245-retire-chunk-far-lod-runtime.md) remains the completed
 removal boundary for the rejected chunk-based Far LOD system. Tactical
 [`274`](../tactical/274-all-client-distant-terrain-control.md) now owns the
 experimental all-client Graphics control, runtime preference, and default
-per-eye XR projection reach. Full-frame multiview remains an explicitly
-unavailable optional mode and is not a blocker for exposing the experiment.
+per-eye XR projection reach. Full-frame multiview terrain and vegetation are
+now implemented and physically accepted on Quest 3 standalone plus Linux
+Vulkan/WiVRn. The live mode remains an experimental diagnostic choice rather
+than the default because the matched Quest RD5 composed workload regresses on
+GPU.
 Focused coordinating Tactical
 [`280`](../tactical/280-xr-multiview-render-path-workstream.md) now owns
 procedural-horizon multiview, safe live XR path selection, interactive
@@ -205,9 +209,14 @@ preserved the accepted synthetic stereo capture byte-for-byte, and restored
 Moving tails remain slightly outside the target: composed RD5 orbit repeats
 run at `71.81 FPS` with `2.2–2.8%` over-period frames, while an 8x five-minute
 flight runs at `71.70 FPS` with `5.6%`. Meta app GPU time is only
-`4.75–5.63ms`; duplicate per-eye horizon encoding is therefore a plausible
-CPU-side next target. Optional full-frame multiview still has no
-procedural-horizon pipeline and is not the default XR renderer. Tactical
+`4.75–5.63ms`; duplicate per-eye horizon encoding was therefore a plausible
+CPU-side target. The completed experiment now gives the procedural horizon
+and proxy vegetation immutable two-eye uniforms, multiview terrain/tree
+pipelines, stereo-union admission, and per-layer visibility masks. In the
+matched ten-actor Quest RD5 orbit, multiview saves about `2.75ms` average
+thread CPU versus dual per-eye but increases app GPU from `7.052ms` to
+`9.244ms` and app work from `14.384ms` to `17.053ms`. It remains available
+for live diagnostics but is not the default XR renderer. Tactical
 [`280`](../tactical/280-xr-multiview-render-path-workstream.md) coordinates
 the complete renderer/live-switch/regression workstream. Child Tactical
 [`278`](../tactical/278-quest-procedural-horizon-multiview.md) owns the true
@@ -240,8 +249,9 @@ at their shared edge. A dedicated scalar `69x69` normal-height field keeps the
 semantic sample grid at `65x65`; the combined fixed allocation is
 `128,837,720` bytes and does not rely on a larger per-frame dispatch budget.
 The later shared-projection matrix adds `29,440` bytes across fixed terrain and
-tree uniforms; the current World Explorer reports `128,867,704` fixed bytes
-including the exact-coverage resources.
+tree uniforms. The two-eye multiview suffix adds another `44,160` bytes across
+the same fixed terrain and tree uniform set; the current allocation is
+`128,911,864` fixed bytes including the exact-coverage resources.
 Native/offscreen plus headed desktop and Pixel 7 browser closeout passed.
 Side-by-side native/browser review also found three proof-host parity gaps.
 Completed parent Tactical

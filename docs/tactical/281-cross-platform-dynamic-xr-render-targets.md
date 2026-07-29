@@ -1,6 +1,9 @@
 # Tactical 281: Cross-Platform Dynamic XR Render Targets
 
-Status: planned 2026-07-28; ready for implementation.
+Status: implementation complete and physically accepted on Quest 3 standalone
+Vulkan plus Linux Vulkan/WiVRn as of 2026-07-29. Closeout remains open for
+physical Metal acceptance, lifecycle fault injection, and the broader
+all-mode capture matrix.
 
 Topic: `xr-render-path-switching`
 
@@ -170,49 +173,49 @@ The manager must not cache the retired family for a faster future switch.
 
 ### Slice 0: pin behavior and add neutral contracts
 
-- [ ] Record current Android dual-eye, Android stereo-array, desktop Vulkan
+- [x] Record current Android dual-eye, Android stereo-array, desktop Vulkan
   eye, and desktop Metal eye target facts.
-- [ ] Add the three-mode value, supported-mode set, target topology, and
+- [x] Add the three-mode value, supported-mode set, target topology, and
   requested/pending/active/result snapshot.
-- [ ] Add reducer/state-machine tests for coalescing, unsupported modes,
+- [x] Add reducer/state-machine tests for coalescing, unsupported modes,
   success, failure, rollback, and recovery.
-- [ ] Add compile-time exhaustiveness gates so new XR modes cannot be silently
+- [x] Add compile-time exhaustiveness gates so new XR modes cannot be silently
   omitted by a platform adapter.
 
 ### Slice 1: owned target manager and safe frame boundary
 
-- [ ] Replace frame-loop-lifetime borrowed target selection with an owned,
+- [x] Replace frame-loop-lifetime borrowed target selection with an owned,
   replaceable target family.
-- [ ] Integrate one transition hook into `OpenXrFrameDriver` after a completed
+- [x] Integrate one transition hook into `OpenXrFrameDriver` after a completed
   frame and before the next acquisition.
-- [ ] Track acquired/waited/released counts and forbid a topology commit while
+- [x] Track acquired/waited/released counts and forbid a topology commit while
   old images remain outstanding.
-- [ ] Support same-topology encoding changes without swapchain recreation.
-- [ ] Support transactional topology replacement and immediate old-family
+- [x] Support same-topology encoding changes without swapchain recreation.
+- [x] Support transactional topology replacement and immediate old-family
   retirement after commit.
-- [ ] Add deterministic fake-target tests for creation failure and
+- [x] Add deterministic fake-target tests for creation failure and
   destruction ordering.
 
 ### Slice 2: shared Vulkan array and layer views
 
-- [ ] Generalize `mclone-xr-graphics` Vulkan target construction so desktop
+- [x] Generalize `mclone-xr-graphics` Vulkan target construction so desktop
   Vulkan and Android XR use the same eye/array implementation.
-- [ ] Expose one `D2Array` view plus non-overlapping layer-zero and layer-one
+- [x] Expose one `D2Array` view plus non-overlapping layer-zero and layer-one
   `D2` views for every acquired stereo-array image.
-- [ ] Add matching two-layer depth ownership and both view shapes.
-- [ ] Submit two projection views against array indices zero and one for both
+- [x] Add matching two-layer depth ownership and both view shapes.
+- [x] Submit two projection views against array indices zero and one for both
   array-backed encodings.
-- [ ] Apply and validate Quest foveation state across both layers.
-- [ ] Prove original dual-eye mode remains available after an array-family
+- [x] Apply and validate Quest foveation state across both layers.
+- [x] Prove original dual-eye mode remains available after an array-family
   transition.
 
 ### Slice 3: desktop Metal adoption
 
-- [ ] Move reusable target lifecycle behind the same manager without
+- [x] Move reusable target lifecycle behind the same manager without
   pretending Metal resources are Vulkan resources.
-- [ ] Implement and validate a two-layer Metal/OpenXR swapchain plus layer
+- [x] Implement a two-layer Metal/OpenXR swapchain plus layer
   views where the runtime supports it.
-- [ ] Publish actual Metal adapter/runtime supported modes.
+- [x] Publish actual Metal adapter/runtime supported modes.
 - [ ] Keep `DualPerEye` live and truthful when array or multiview capability is
   absent.
 - [ ] Exercise topology replacement, failure recovery, and session lifecycle
@@ -220,29 +223,29 @@ The manager must not cache the retired family for a faster future switch.
 
 ### Slice 4: scene and shared live control
 
-- [ ] Route all three modes through the existing shared XR scene host.
-- [ ] Preserve distinct immutable physical-eye view/projection data for every
+- [x] Route all three modes through the existing shared XR scene host.
+- [x] Preserve distinct immutable physical-eye view/projection data for every
   submission.
-- [ ] Add the XR-only Graphics row with distinct
+- [x] Add the XR-only Graphics row with distinct
   `Dual per-eye | Array per-eye | Array multiview` labels.
-- [ ] Project requested, pending, active, and rejected state back to the same
+- [x] Project requested, pending, active, and rejected state back to the same
   UI.
-- [ ] Keep the initial CLI selection as an automation override.
-- [ ] Keep the setting transient until recovery has physical acceptance.
-- [ ] Ensure flat desktop, flat Android, and browser profiles show no XR row.
+- [x] Keep the initial CLI selection as an automation override.
+- [x] Keep the setting transient until recovery has physical acceptance.
+- [x] Ensure flat desktop, flat Android, and browser profiles show no XR row.
 
 ### Slice 5: automation and fault injection
 
-- [ ] Add one-session automation for
+- [x] Add one-session automation for
   `dual -> array-per-eye -> multiview -> array-per-eye -> dual`.
-- [ ] Inject replacement-creation failure and prove the old family remains
+- [x] Inject replacement-creation failure and prove the old family remains
   active.
-- [ ] Inject rapid coalesced requests before a boundary.
+- [x] Inject rapid coalesced requests before a boundary.
 - [ ] Exercise pause/resume, stop/ready, skipped frames, and session loss.
-- [ ] Report mode, topology, image count, layer count, extent, formats,
+- [x] Report mode, topology, image count, layer count, extent, formats,
   foveation, estimated bytes, transition peak bytes, switch counts, failures,
   and outstanding image state.
-- [ ] Assert no inactive target family survives the first stable frame after a
+- [x] Assert no inactive target family survives the first stable frame after a
   topology commit.
 
 ### Slice 6: pixels and performance
@@ -251,11 +254,11 @@ The manager must not cache the retired family for a faster future switch.
 - [ ] Verify exact terrain, procedural horizon, trees, actors, translucent
   ordering, selection, effects, world UI, fog, depth, and foveation.
 - [ ] Run matched stationary and moving comparisons across all three modes.
-- [ ] Keep world, actor population, render distance, horizon quality,
+- [x] Keep world, actor population, render distance, horizon quality,
   foveation, render scale, refresh rate, camera path, and warmup fixed.
-- [ ] Compare app-work and thread-CPU p50/p95/p99, GPU time, over-period rate,
+- [x] Compare app-work and thread-CPU p50/p95/p99, GPU time, over-period rate,
   headroom, submission behavior, target bytes, and transition hitch.
-- [ ] Select defaults per backend/device from evidence without removing the
+- [x] Select defaults per backend/device from evidence without removing the
   other supported diagnostic modes.
 
 ## Platform Acceptance Matrix
@@ -320,6 +323,29 @@ commits in this order:
 Reorder platform-adoption commits if physical-runtime availability makes a
 different sequence more efficient, but do not land a Quest-private lifecycle
 which the desktop adapters must later reverse-engineer.
+
+## Implementation Evidence
+
+The durable topic records the complete 2026-07-29 receipts:
+[`xr-render-path-switching.md`](../topics/xr-render-path-switching.md#implemented-state-and-2026-07-29-evidence).
+In summary:
+
+- Quest standalone completed the shared-action cycle with
+  `94,617,600` steady-state bytes, a bounded `189,235,200` create-before
+  transition peak, and zero outstanding images at every commit.
+- A second complete Quest cycle with `--xr-foveation high` exercised dual and
+  stereo-array foveation creation/import/destruction through both topology
+  changes and again completed 721 submitted frames.
+- Linux Vulkan/WiVRn completed 1,000 frames and the same cycle with
+  `142,795,776` steady-state bytes, retire-first rebuilds, no inactive family,
+  and zero outstanding images.
+- an inspected Quest multiview capture showed coherent physical eyes, full
+  world pixels, and the shared Graphics mode row;
+- the final matched Quest RD5 comparison keeps dual per-eye as the default;
+  multiview saves about `2.75ms` thread CPU but adds about `2.19ms` app GPU in
+  the full composed workload; and
+- the Android XR APK, Linux/WiVRn physical cycle, shared Rust tests, native
+  workspace tests, browser/WASM build, and thin-adapter gate pass.
 
 ## Closeout
 
