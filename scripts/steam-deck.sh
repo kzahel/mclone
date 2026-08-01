@@ -275,7 +275,7 @@ write_title_manifest()
                     MCLONE_DECK_RESULT_ROOT: $resultRoot,
                     MCLONE_DECK_RESULT_ID: $runId
                 },
-                runtime: if $runtime == "none" then null else $runtime end,
+                runtime: (if $runtime == "none" then null else $runtime end),
                 force_appid: ""
             }' >"$manifest"
     else
@@ -292,7 +292,7 @@ write_title_manifest()
                 payload: $payload,
                 argv: ["./run.sh", $mode],
                 env: {MCLONE_DECK_RESULT_ROOT: $resultRoot},
-                runtime: if $runtime == "none" then null else $runtime end,
+                runtime: (if $runtime == "none" then null else $runtime end),
                 force_appid: ""
             }' >"$manifest"
     fi
