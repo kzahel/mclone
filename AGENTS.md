@@ -14,6 +14,11 @@ The Android SDK/NDK, `cargo-ndk`, and the Rust android targets are provisioned o
 
 - Flat APK: `pnpm native:android:apk` · AVD smoke: `pnpm native:android:avd-smoke -- --skip-build`
 - Quest XR: `pnpm native:android-xr:apk` · validate: `pnpm native:android-xr:validate --skip-build ...`
+- Physical Quest selection, ADB authorization diagnostics, wake/proximity
+  leases, interrupted-run recovery, and sleep-after-use belong to the sibling
+  public `~/code/quest-testbed` provider. Project scripts own builds, assets,
+  app launch arguments, host XR runtimes, and acceptance assertions. Do not
+  add another local copy of Quest power-setting helpers.
 - The build scripts (`android/build-common.sh`) auto-discover the SDK/NDK across hosts and read the required NDK version out of `build.gradle.kts`. Anything genuinely missing dies with the exact fix (`sdkmanager "ndk;<ver>"`, `rustup target add <target>`, `cargo install cargo-ndk`).
 - A bare `echo $ANDROID_NDK_HOME` or an `ls` of a guessed SDK path is **not** a reliable check — env vars can read empty in a non-login shell and the SDK location differs per host. The scripts resolve it regardless. **If a command fails, run the script and read its error before inferring the environment is broken.** The full lane matrix lives in [`docs/platforms.md`](docs/platforms.md#validation-policy).
 

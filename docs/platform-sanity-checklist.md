@@ -73,11 +73,12 @@ pnpm native:xr:mac:wivrn:mclone
 Use the platform/runtime lane that matches the machine being validated. For
 session-replacement work, the `mclone` smoke is the important one because it
 loads the real terrain session path instead of only proving OpenXR startup.
-The macOS WiVRn launcher prepares an attached Quest for USB validation by
-saving/restoring headset power settings, disabling proximity during the smoke,
-waking the headset, installing `adb reverse tcp:9757 tcp:9757`, and waiting
-briefly after the WiVRn handshake before launching Mclone. If connection still
-fails before Mclone launch, inspect the printed WiVRn host log,
+The macOS WiVRn launcher asks `~/code/quest-testbed` for a recoverable physical
+headset lease. The provider saves/restores headset power settings, disables
+proximity during the smoke, wakes and later sleeps the headset, and owns the
+`adb reverse tcp:9757 tcp:9757` mapping. The project waits briefly after the
+WiVRn handshake before launching Mclone. If connection still fails before
+Mclone launch, inspect the printed WiVRn host log,
 `adb devices -l`, `adb reverse --list`, and Quest logcat for
 `org.meumeu.wivrn.local`.
 
@@ -105,6 +106,7 @@ leave visual evidence.
 ## Android XR / Quest
 
 ```bash
+~/code/quest-testbed/bin/quest doctor
 pnpm native:android-xr:apk
 pnpm native:android-xr:validate --skip-build --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
 MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:session-smoke
@@ -115,6 +117,14 @@ from [`platforms.md`](platforms.md#validation-policy). For local session
 replacement, `native:android-xr:session-smoke` is the sentinel. Do not insert
 an extra `--` after `native:android-xr:validate`; the package script already
 forwards arguments to `validate-quest-openxr.sh`.
+
+The flat-Quest and standalone-XR validators run inside a transactional
+`quest-testbed session`. On every ordinary success, failure, interrupt, or
+termination, the provider force-stops only the declared Mclone package,
+restores the saved Android settings, clears the Meta proximity override,
+removes owned reverse ports, and sends `KEYCODE_SLEEP`. A hard-killed process
+leaves an on-device recovery journal that `quest doctor` reports and the same
+controller repairs before its next lease.
 
 ## Web/WASM
 

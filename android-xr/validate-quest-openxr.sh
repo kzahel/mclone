@@ -20,6 +20,7 @@ BOOT_TIMEOUT_SECONDS="${MCLONE_ANDROID_BOOT_TIMEOUT:-60}"
 STAGE_ASSETS="${MCLONE_ANDROID_XR_STAGE_ASSETS:-1}"
 ADB=""
 SERIAL=""
+MCLONE_QUEST_VALIDATOR_ARGS=("$@")
 LOGCAT_PID=""
 SKIP_BUILD=0
 SESSION_ONLY=0
@@ -445,7 +446,6 @@ cleanup() {
     remove_adb_reverse
     if [[ -n "$SERIAL" ]]; then
         mclone_xr_clear_all_startup_properties "$SERIAL" >/dev/null 2>&1 || true
-        mclone_restore_headset_after_test "$SERIAL" "$MCLONE_ANDROID_XR_APP_ID"
     fi
     exit "$status"
 }
@@ -999,6 +999,17 @@ fi
 cd "$REPO_ROOT"
 ADB="$(mclone_android_tool adb platform-tools/adb)"
 
+if [[ "${QUEST_TESTBED_SESSION_ACTIVE:-0}" != "1" ]]; then
+    QUEST_TESTBED="$(mclone_quest_testbed_cli)"
+    quest_command=("$QUEST_TESTBED" --adb "$ADB")
+    if [[ -n "$SERIAL" ]]; then
+        quest_command+=(--serial "$SERIAL")
+    fi
+    exec "${quest_command[@]}" session \
+        --stop-package "$MCLONE_ANDROID_XR_APP_ID" \
+        -- bash "$ANDROID_XR_DIR/validate-quest-openxr.sh" "${MCLONE_QUEST_VALIDATOR_ARGS[@]}"
+fi
+
 if [[ "$SKIP_BUILD" == "1" ]]; then
     mclone_note "Skipping Android XR APK build"
 else
@@ -1009,15 +1020,11 @@ fi
 
 "$ADB" start-server >/dev/null
 if [[ -z "$SERIAL" ]]; then
-    SERIAL="$(mclone_detect_quest_serial || true)"
-fi
-if [[ -z "$SERIAL" ]]; then
-    mclone_report_no_quest_found
+    SERIAL="$(mclone_quest_serial "$ADB" "${QUEST_TESTBED_SERIAL:-}")"
 fi
 
 mclone_wait_for_boot "$SERIAL" "$BOOT_TIMEOUT_SECONDS"
 mclone_note "Using $(mclone_device_summary "$SERIAL")"
-mclone_wake_headset_for_test "$SERIAL"
 
 mclone_note "Installing $APK_PATH"
 "$ADB" -s "$SERIAL" install -r "$APK_PATH"
@@ -1030,7 +1037,6 @@ else
     mclone_note "Skipping Android XR asset-pack staging"
 fi
 "$ADB" -s "$SERIAL" shell am force-stop "$MCLONE_ANDROID_XR_APP_ID" >/dev/null 2>&1 || true
-mclone_dismiss_vr_system_dialogs "$SERIAL"
 "$ADB" -s "$SERIAL" logcat -c || true
 
 configure_adb_reverse_defaults

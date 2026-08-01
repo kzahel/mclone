@@ -317,8 +317,10 @@ OpenXR runtime/actions/swapchains
 
 Desktop XR and Android XR should continue to share OpenXR host/session/action
 and terrain-scene behavior where possible. They should diverge only at runtime
-discovery, Android loader/activity glue, packaging, headset wake/restore, and
-other true platform concerns.
+discovery, Android loader/activity glue, packaging, and other true platform
+concerns. Physical Quest selection, wake/proximity leases, recovery, and
+sleep-after-use are operational testbed concerns delegated to the public
+`~/code/quest-testbed` provider rather than either XR adapter.
 
 Both XR adapters query compositor refresh through `mclone-xr-host` and pass the
 result to the shared `mclone-scene` render-admission policy. Static Quest upload
@@ -409,6 +411,7 @@ pnpm native:android:avd-touch-smoke -- --skip-build
 pnpm native:android:avd-session-smoke -- --skip-build
 
 # Android XR / Quest, attached authorized Quest required
+~/code/quest-testbed/bin/quest doctor
 pnpm native:android-xr:apk
 pnpm native:android-xr:validate --skip-build --view-pose 0,120,-96,180 --seed 12345 --chunk-x 0 --chunk-z 0 --render-distance 2 --day-time 6000 --freeze-time
 MCLONE_ANDROID_XR_WAIT_SECONDS=60 pnpm native:android-xr:session-smoke

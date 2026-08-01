@@ -45,6 +45,9 @@ Current status:
   validation, depending on the AVD image ABI.
 - Packed assets at `reference/minecraft-1.17.1/extracted.zip`; rebuild with
   `pnpm assets:pack` if needed.
+- The public `quest-testbed` checkout beside this repository for physical
+  Quest selection, lifecycle, recovery, and sleep-after-use:
+  `git clone https://github.com/kzahel/quest-testbed ../quest-testbed`.
 
 The scripts discover Android tools through `ANDROID_HOME`, `ANDROID_SDK_ROOT`,
 or `~/Android/Sdk`.
@@ -221,7 +224,7 @@ pnpm native:android:quest-flat -- --skip-build --remote-addr HOST:25565 --smoke-
 On a machine without an attached authorized Quest, the expected blocker is:
 
 ```text
-error: no attached Quest headset was found
+error: no attached, authorized Quest headset was found
 ```
 
 Keep OpenXR, stereo swapchains, controller actions, hand tracking, passthrough,

@@ -89,71 +89,27 @@ has_wivrn_established_connection() {
     lsof -nP -iTCP:9757 2>/dev/null | grep -q ESTABLISHED
 }
 
-android_unset_marker="__mclone_unset__"
-wivrn_headset_settings_saved=0
-wivrn_previous_stay_on=""
-wivrn_previous_skip_launch_check=""
-wivrn_previous_require_controllers=""
+wivrn_quest_lease_active=0
+wivrn_quest_serial=""
 wivrn_quest_package=""
 
-read_android_setting() {
-    local namespace="$1"
-    local name="$2"
-    local value
-
-    value="$(adb shell settings get "${namespace}" "${name}" 2>/dev/null | tr -d '\r' || true)"
-    if [ -z "${value}" ] || [ "${value}" = "null" ]; then
-        printf '%s\n' "${android_unset_marker}"
-    else
-        printf '%s\n' "${value}"
+quest_testbed_cli() {
+    local candidate
+    if [ -n "${QUEST_TESTBED_CLI:-}" ] && [ -x "${QUEST_TESTBED_CLI}" ]; then
+        printf '%s\n' "${QUEST_TESTBED_CLI}"
+        return 0
     fi
-}
-
-restore_android_setting() {
-    local namespace="$1"
-    local name="$2"
-    local value="$3"
-
-    if [ "${value}" = "${android_unset_marker}" ]; then
-        adb shell settings delete "${namespace}" "${name}" >/dev/null 2>&1 || true
-    else
-        adb shell settings put "${namespace}" "${name}" "${value}" >/dev/null 2>&1 || true
-    fi
-}
-
-save_wivrn_headset_settings() {
-    wivrn_previous_stay_on="$(read_android_setting global stay_on_while_plugged_in)"
-    wivrn_previous_skip_launch_check="$(read_android_setting secure skip_launch_check_requires_controllers_enabled)"
-    wivrn_previous_require_controllers="$(read_android_setting global require_controllers_for_vr_apps)"
-    wivrn_headset_settings_saved=1
-}
-
-wake_headset_for_wivrn_usb() {
-    if [ "${wivrn_headset_settings_saved}" -ne 1 ]; then
-        save_wivrn_headset_settings
-    fi
-    adb shell setprop debug.oculus.disableProximity 1 >/dev/null 2>&1 || true
-    adb shell settings put global stay_on_while_plugged_in 3 >/dev/null 2>&1 || true
-    adb shell settings put secure skip_launch_check_requires_controllers_enabled 1 >/dev/null 2>&1 || true
-    adb shell settings put global require_controllers_for_vr_apps 0 >/dev/null 2>&1 || true
-    adb shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
-    adb shell am broadcast -a com.oculus.vrpowermanager.prox_close --ei timeout 0 >/dev/null 2>&1 || true
-}
-
-restore_wivrn_headset_settings() {
-    if [ "${wivrn_headset_settings_saved}" -ne 1 ]; then
-        return
-    fi
-
-    if [ -n "${wivrn_quest_package}" ]; then
-        adb shell am force-stop "${wivrn_quest_package}" >/dev/null 2>&1 || true
-    fi
-    restore_android_setting global stay_on_while_plugged_in "${wivrn_previous_stay_on}"
-    restore_android_setting secure skip_launch_check_requires_controllers_enabled "${wivrn_previous_skip_launch_check}"
-    restore_android_setting global require_controllers_for_vr_apps "${wivrn_previous_require_controllers}"
-    adb shell setprop debug.oculus.disableProximity 0 >/dev/null 2>&1 || true
-    adb shell am broadcast -a com.oculus.vrpowermanager.prox_open --ei timeout 0 >/dev/null 2>&1 || true
-    adb shell input keyevent KEYCODE_SLEEP >/dev/null 2>&1 || true
+    for candidate in \
+        "${repo_root}/../quest-testbed/bin/quest" \
+        "${HOME}/code/quest-testbed/bin/quest" \
+        "${HOME}/Documents/code/quest-testbed/bin/quest"; do
+        if [ -x "${candidate}" ]; then
+            printf '%s\n' "${candidate}"
+            return 0
+        fi
+    done
+    echo "quest-testbed was not found; clone https://github.com/kzahel/quest-testbed beside mclone or set QUEST_TESTBED_CLI" >&2
+    return 1
 }
 
 wait_for_wivrn_host_port() {
@@ -202,6 +158,8 @@ start_wivrn_usb_stack() {
     fi
 
     need_cmd adb
+    local quest_cli
+    local adb_path
 
     local host_bin="${WIVRN_HOST_BIN:-${host_build_dir}/server/wivrn-server-headless}"
     local quest_package="${QUEST_WIVRN_PACKAGE:-org.meumeu.wivrn.local}"
@@ -214,17 +172,21 @@ start_wivrn_usb_stack() {
         exit 1
     fi
 
-    adb get-state >/dev/null
+    quest_cli="$(quest_testbed_cli)"
+    adb_path="$(command -v adb)"
+    wivrn_quest_serial="$("${quest_cli}" --adb "${adb_path}" serial)"
+    export ANDROID_SERIAL="${wivrn_quest_serial}"
     wivrn_quest_package="${quest_package}"
-    echo "Preparing Quest power/proximity state for WiVRn USB smoke"
-    wake_headset_for_wivrn_usb
+    echo "Starting recoverable Quest lease for WiVRn USB smoke"
+    "${quest_cli}" --adb "${adb_path}" --serial "${wivrn_quest_serial}" begin \
+        --owner-pid "$$" \
+        --stop-package "${quest_package}" \
+        --reverse tcp:9757=tcp:9757
+    wivrn_quest_lease_active=1
 
     echo "Stopping Quest WiVRn client if it is already running: ${quest_package}"
     adb shell am force-stop "${quest_package}" >/dev/null 2>&1 || true
     sleep 1
-
-    echo "Installing ADB reverse tunnel: tcp:9757 -> tcp:9757"
-    adb reverse tcp:9757 tcp:9757 >/dev/null
 
     existing_pid="$(first_wivrn_listener_pid || true)"
     if [ -n "${existing_pid}" ]; then
@@ -265,7 +227,14 @@ cleanup() {
         kill "${wivrn_host_pid}" >/dev/null 2>&1 || true
         wait "${wivrn_host_pid}" >/dev/null 2>&1 || true
     fi
-    restore_wivrn_headset_settings
+    if [ "${wivrn_quest_lease_active}" -eq 1 ]; then
+        local quest_cli
+        quest_cli="$(quest_testbed_cli || true)"
+        if [ -n "${quest_cli}" ]; then
+            "${quest_cli}" --serial "${wivrn_quest_serial}" end || true
+        fi
+        wivrn_quest_lease_active=0
+    fi
 
     return "${status}"
 }

@@ -17,12 +17,10 @@ STAGE_ASSETS="${MCLONE_ANDROID_STAGE_ASSETS:-1}"
 MCLONE_ANDROID_STAGE_INTERNAL_ASSETS="${MCLONE_ANDROID_STAGE_INTERNAL_ASSETS:-1}"
 SKIP_BUILD=0
 SERIAL=""
+MCLONE_QUEST_VALIDATOR_ARGS=("$@")
 
 cleanup() {
     local status=$?
-    if [[ -n "$SERIAL" ]]; then
-        mclone_restore_headset_after_test "$SERIAL" "$MCLONE_ANDROID_APP_ID"
-    fi
     exit "$status"
 }
 trap cleanup EXIT INT TERM
@@ -157,17 +155,23 @@ done
 cd "$REPO_ROOT"
 ADB="$(mclone_android_tool adb platform-tools/adb)"
 
+if [[ "${QUEST_TESTBED_SESSION_ACTIVE:-0}" != "1" ]]; then
+    QUEST_TESTBED="$(mclone_quest_testbed_cli)"
+    quest_command=("$QUEST_TESTBED" --adb "$ADB")
+    if [[ -n "$SERIAL" ]]; then
+        quest_command+=(--serial "$SERIAL")
+    fi
+    exec "${quest_command[@]}" session \
+        --stop-package "$MCLONE_ANDROID_APP_ID" \
+        -- bash "$ANDROID_DIR/validate-quest-flat.sh" "${MCLONE_QUEST_VALIDATOR_ARGS[@]}"
+fi
+
 mclone_build_apk
 "$ADB" start-server >/dev/null
 
 if [[ -z "$SERIAL" ]]; then
-    SERIAL="$(mclone_detect_quest_serial || true)"
-fi
-
-if [[ -z "$SERIAL" ]]; then
-    mclone_report_no_quest_found
+    SERIAL="$(mclone_quest_serial "$ADB" "${QUEST_TESTBED_SERIAL:-}")"
 fi
 
 mclone_wait_for_boot "$SERIAL" "$BOOT_TIMEOUT_SECONDS"
-mclone_wake_headset_for_test "$SERIAL"
 mclone_install_launch_smoke "$SERIAL" "$SCREENSHOT_PATH" "$LOG_PATH" "$SMOKE_SECONDS"

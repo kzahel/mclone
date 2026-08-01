@@ -214,10 +214,7 @@ cd "$REPO_ROOT"
 ADB="$(mclone_android_tool adb platform-tools/adb)"
 "$ADB" start-server >/dev/null
 if [[ -z "$SERIAL" ]]; then
-    SERIAL="$(mclone_detect_quest_serial || true)"
-fi
-if [[ -z "$SERIAL" ]]; then
-    mclone_report_no_quest_found
+    SERIAL="$(mclone_quest_serial "$ADB" "${QUEST_TESTBED_SERIAL:-}")"
 fi
 mclone_wait_for_boot "$SERIAL" "$BOOT_TIMEOUT_SECONDS"
 mclone_note "Using $(mclone_device_summary "$SERIAL")"

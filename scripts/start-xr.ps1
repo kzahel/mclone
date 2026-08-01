@@ -27,7 +27,7 @@ param(
 $ErrorActionPreference = "Stop"
 
 $RepoRoot = Resolve-Path (Join-Path $PSScriptRoot "..")
-$QuestStartupStatePath = Join-Path ([System.IO.Path]::GetTempPath()) "mclone-start-xr-quest-vd-state.json"
+$QuestStartupStatePath = "/data/local/tmp/quest-testbed-session.json"
 
 Import-Module (Join-Path $PSScriptRoot "xr-quest-virtual-desktop.psm1") -Force
 

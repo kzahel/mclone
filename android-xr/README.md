@@ -6,8 +6,8 @@ This package is separate from the flat Android `NativeActivity` app under
 `android/`. It follows the Playbox Android XR shape: a Quest VR activity,
 Khronos' Android OpenXR loader package, a Rust `cdylib`, launch-scoped startup
 argv through an intent extra, Android debug properties for wrapper settings,
-validation scripts that wake/restore the headset, and packed asset staging into
-the XR package external files directory.
+transactional `quest-testbed` validation sessions, and packed asset staging
+into the XR package external files directory.
 
 Current status: Android OpenXR terrain-frame smoke with shared controller
 actions wired. The app loads the staged Minecraft asset pack through
@@ -92,8 +92,10 @@ scripts\start-android-xr.bat
 That refreshes `reference/minecraft-1.17.1/extracted.zip`, builds and installs
 the release APK, stages the packed assets and any local sound assets to the
 Quest, wakes the headset, and launches Mclone XR. The app keeps running until
-you exit it in-headset. Pass normal install options through the wrapper, for
-example:
+you exit it in-headset. Because this is an interactive launch, finish its
+recoverable headset lease afterward with
+`~/code/quest-testbed/bin/quest end`. Pass normal install options through the
+wrapper, for example:
 
 ```powershell
 scripts\start-android-xr.bat --debug --view-pose 0,120,-96,180
@@ -198,9 +200,10 @@ For the first Quest performance probe:
 pnpm native:android-xr:perf
 ```
 
-This runs the normal validator cleanup path. On success or failure it
-force-stops Mclone XR, restores the headset wake/proximity settings changed for
-the test, and sends `KEYCODE_SLEEP` so the headset screen turns off. The last
+This runs inside the sibling public `~/code/quest-testbed` transactional
+session. On success or failure the provider force-stops Mclone XR, restores
+the headset settings changed for the test, re-enables proximity, and sends
+`KEYCODE_SLEEP` so the headset screen turns off. The last
 compact `MCLONE_ANDROID_XR_PERF_*` marker block is written to:
 
 ```text

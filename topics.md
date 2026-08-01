@@ -224,3 +224,5 @@ series so `git log --grep "Topic: ..."` finds the whole chain.
   geography, cheap canonical surface queries, sparse implicit 3D terrain, and
   conservative distant summaries under bounded random access and periodic
   topology
+- `quest-testbed` — public physical Quest ADB provider, recoverable headset
+  leases, and removal of project-local wake/proximity/restore implementations

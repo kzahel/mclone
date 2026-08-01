@@ -91,11 +91,12 @@ require_arg() {
 
 wake_headset_for_interactive_launch() {
     local serial="$1"
+    local quest_cli
 
-    mclone_note "Waking Quest headset for interactive Android XR launch"
-    "$ADB" -s "$serial" shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
-    "$ADB" -s "$serial" shell am broadcast -a com.oculus.vrpowermanager.prox_close --ei timeout 0 >/dev/null 2>&1 || true
-    mclone_dismiss_vr_system_dialogs "$serial"
+    quest_cli="$(mclone_quest_testbed_cli)"
+    mclone_note "Starting recoverable Quest lease for interactive Android XR launch"
+    "$quest_cli" --adb "$ADB" --serial "$serial" begin \
+        --stop-package "$MCLONE_ANDROID_XR_APP_ID"
 }
 
 check_interactive_launch_result() {
@@ -261,10 +262,7 @@ fi
 
 "$ADB" start-server >/dev/null
 if [[ -z "$SERIAL" ]]; then
-    SERIAL="$(mclone_detect_quest_serial || true)"
-fi
-if [[ -z "$SERIAL" ]]; then
-    mclone_report_no_quest_found
+    SERIAL="$(mclone_quest_serial "$ADB" "${QUEST_TESTBED_SERIAL:-}")"
 fi
 
 mclone_wait_for_boot "$SERIAL" "$BOOT_TIMEOUT_SECONDS"
@@ -324,6 +322,9 @@ if [[ "$LAUNCH_APP" == "1" ]]; then
         mclone_die "activity launch command did not start an intent"
     fi
     check_interactive_launch_result "$SERIAL"
+    if [[ "$WAKE_HEADSET" == "1" ]]; then
+        mclone_note "End the interactive lease and sleep with: $(mclone_quest_testbed_cli) --serial $SERIAL end"
+    fi
 else
     mclone_note "Launch from the headset as Mclone XR, or run:"
     printf '%q ' "${launch_command[@]}"
