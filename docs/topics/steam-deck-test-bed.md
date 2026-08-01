@@ -414,6 +414,18 @@ The 2026-07-23 bounded-smoke check completed all 300 presentation frames,
 pulled a valid 1280x800 PNG and status-zero result, then left
 `card0-eDP-1=disabled`, SSH reachable, and the Deck-button wake service active.
 
+The 2026-08-01 shared-testbed refactor was revalidated from the optional Linux
+builder using its own checkout of the public helper. A production SteamRT4
+install verified the asset lock, reused the pinned SDK image, built with Rust
+1.97.0, staged 39 MiB, uploaded incrementally through the generic manifest,
+and registered both `mclone` and `screenoff` without launching or waking the
+panel. Bounded smoke run
+`20260801T150938Z-bdfdd7e266a3-smoke-967411` then presented 300 of 300 frames,
+returned status zero, and pulled a 1280x800 PNG. Visual inspection showed the
+expected textured forest and terrain scene with valid geometry rather than a
+black or transparent capture. Cleanup restored `card0-eDP-1=disabled`, kept
+SSH reachable, and armed local Deck-button wake.
+
 The `:steamrt4` commands build the client inside the pinned SDK rather than on
 the Ubuntu host. The build-only command leaves the artifact and provenance
 receipt under `native/target/steamrt4`; the stage/deploy/smoke/perf commands
