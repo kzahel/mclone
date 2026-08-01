@@ -2,26 +2,30 @@
 
 Topic: steam-deck-test-bed
 
-Status: active test lane. As of 2026-07-25, the first retail Steam Deck is
-paired with the Linux deployment host. Automated staging, incremental upload,
-SteamRT4 launch, screenshot smoke, and bounded performance collection pass on
-the device. A Gaming Mode panel-sleep shortcut is installed; its registered
-launch, compositor sleep, helper exit, and armed local wake watcher pass on
-device. Manual launch-button release/wake, controller, persistence,
-suspend/resume, and dock/undock acceptance remain open. The pinned
-production-style Steam Runtime SDK builder is implemented and its clean-source
-artifact passes device smoke and perf.
+Status: active test lane. As of 2026-08-01, the first retail Steam Deck is a
+direct physical Wi-Fi testbed reachable from the MacBook and registered in the
+private dotfiles inventory. Project-neutral status, doctor, Devkit transport,
+game upload/registration/launch, file transfer, and panel control live in the
+public `kzahel/steamdeck-testbed` repository. Mclone's SteamRT4 staging,
+screenshot smoke, and bounded performance collection pass through that shared
+helper. Manual launch-button release/wake, controller, persistence,
+suspend/resume, and dock/undock acceptance remain open.
 
 ## Scope
 
-This topic owns the repeatable physical Steam Deck build, deploy, playtest, and
-performance-validation lane. It does not make Steam Deck a separate gameplay
-implementation target: the Deck consumes the shared desktop-flat Linux host,
-ordinary controller contracts, renderer, assets, scene, and persistence paths.
+This topic owns mclone's repeatable Steam Deck build, payload, playtest, and
+performance-validation policy. The public
+[`steamdeck-testbed`](https://github.com/kzahel/steamdeck-testbed) repository
+owns project-neutral physical-device operation. It does not build mclone or
+know about its asset pack, world roots, launch modes, results, or assertions.
+
+Steam Deck remains an ordinary shared desktop-flat Linux target. It consumes
+the ordinary controller contracts, renderer, assets, scene, and persistence
+paths rather than a separate gameplay implementation.
 
 Long-lived machine addresses, local account state, package inventories, and
-other private host facts do not belong here. Keep them in the relevant private
-machine ledger.
+other private host facts do not belong here. Keep them in the private dotfiles
+`machines/steamdeck` record and its provisioning history.
 
 ## Deployment Direction
 
@@ -36,17 +40,19 @@ Use Valve's SteamOS Devkit Client as the normal deployment path:
 5. Upload a staged native Linux build and launch the resulting
    `Devkit Game: mclone` entry from Gaming Mode.
 
-The Devkit Client already performs incremental `rsync` over SSH and provisions
-the host key during pairing. Do not enable the Deck's general-purpose SSH
+The Devkit Client provisions Valve's managed SSH listener, host key, and
+utility scripts during pairing. The public testbed helper uses that listener
+directly with strict host-key checking and each authorized development
+machine's ordinary SSH key. Do not enable a separate general-purpose SSH
 service, set a password, or unlock SteamOS's read-only root solely for this
-workflow. Direct SSH/rsync remains a fallback for command-line automation, not
-the first provisioning step.
+workflow.
 
 The first pairing was verified on 2026-07-23 by authenticating with the
 Devkit-generated key, synchronizing Valve's utility scripts, and completing a
 machine-readable `steamos-get-status` query while the Deck was in its Gamescope
-session. Keep the device address, exact host paths, and local account state in
-the private laptop ledger.
+session. The laptop was a one-time pairing/bootstrap path, not an ongoing
+controller or relay. Keep the device address, exact host paths, and local
+account state in private dotfiles.
 
 Valve's current reference instructions are:
 
@@ -112,8 +118,12 @@ must never delete playtest worlds or preferences.
 
 ## Implemented Command Line
 
-The repository wrapper is [`scripts/steam-deck.sh`](../../scripts/steam-deck.sh).
-Its package commands are:
+The mclone adapter is
+[`scripts/steam-deck.sh`](../../scripts/steam-deck.sh). It builds and stages
+mclone, emits a `steamdeck-testbed.game.v1` manifest, owns safe mclone process
+replacement and bounded-result policy, and delegates all physical-device
+operations to `~/code/steamdeck-testbed/bin/steamdeck`. Its package commands
+are:
 
 ```bash
 pnpm steamdeck:status
@@ -145,12 +155,14 @@ pnpm steamdeck:auto-deploy:status
 pnpm steamdeck:auto-deploy:log
 ```
 
-The wrapper defaults to the paired device's mDNS name and the Devkit-managed
-SSH key. Override discovery without recording a private address in the
-repository:
+The wrapper defaults to the private `steamdeck` SSH alias. On a machine with a
+Devkit Client key it preserves that key as a compatibility default; otherwise
+the SSH alias selects the development machine's normal authorized key.
+Override either boundary without recording private state in this repository:
 
 ```bash
 MCLONE_STEAM_DECK=HOST pnpm steamdeck:status
+MCLONE_STEAM_DECK_TESTBED=PATH pnpm steamdeck:status
 ```
 
 ### Unattended AC power and screen control
@@ -161,7 +173,8 @@ timer remains 900 seconds. This is the desired unattended-test-bed policy:
 losing AC still has a bounded battery safeguard, while an AC-powered Deck
 retains SSH and Devkit reachability without a long-running inhibitor process.
 
-Use the wrapper to inspect that state and sleep only the built-in panel:
+Use the wrapper, which delegates to the shared physical testbed helper, to
+inspect that state and sleep only the built-in panel:
 
 ```bash
 MCLONE_STEAM_DECK=HOST pnpm steamdeck:power-status
@@ -199,13 +212,13 @@ zero, and the system fan was stopped; an old interactive-owner file referred to
 a dead process and was not evidence of background game work.
 
 The Gamescope convar is a forced state: Gamescope does not clear it merely
-because ordinary input arrives. Before disabling the connector, the wrapper
-therefore deploys and arms a one-shot, non-grabbing user service that watches
-the built-in Deck controller's read-only HID reports. The next mapped Deck
-button press clears the convar and exits the watcher. Touch and motion alone
-are deliberately ignored, while the physical power button retains its system
-suspend semantics. If the watcher cannot arm, `screen-off` refuses to blank
-the panel. The byte masks follow the upstream Linux
+because ordinary input arrives. Before disabling the connector, the public
+testbed helper deploys and arms a one-shot, non-grabbing user service that
+watches the built-in Deck controller's read-only HID reports. The next mapped
+Deck button press clears the convar and exits the watcher. Touch and motion
+alone are deliberately ignored, while the physical power button retains its
+system suspend semantics. If the watcher cannot arm, `screen-off` refuses to
+blank the panel. The byte masks follow the upstream Linux
 [`hid-steam`](https://github.com/torvalds/linux/blob/master/drivers/hid/hid-steam.c)
 Deck report layout. `screen-on` over SSH remains the fallback recovery path.
 The end-to-end 2026-07-23 hardware check disabled `card0-eDP-1`, retained SSH,
@@ -219,11 +232,12 @@ offscreen work, but it is not representative live-presentation evidence. An
 ordinary Gamescope restart resets this session-scoped forced-sleep state.
 
 `stage` builds the release client, verifies the checked-in asset-pack lock,
-and assembles `dist/steamdeck` with a SHA-256 build receipt. `upload` performs
-Valve's upload preparation, an incremental clean `rsync`, and registration as
-`Devkit Game: mclone`. `deploy` also launches interactive play. `launch`
-restarts an already uploaded interactive build. `stop` terminates only the
-interactive process recorded by the staged payload.
+and assembles `dist/steamdeck` with a SHA-256 build receipt. `upload` passes
+that directory and the generated generic manifest to the public testbed for
+validated Devkit upload and registration as `Devkit Game: mclone`. `deploy`
+also launches interactive play. `launch` restarts an already uploaded
+interactive build. `stop` invokes only the ownership-aware stop command in the
+staged mclone payload; the public helper never performs a process-name sweep.
 
 The payload owns one interactive Devkit process through a lifetime file lock
 and a PID plus Linux process-start identity. `launch` and `deploy` stop that
@@ -253,9 +267,8 @@ source/tool changes still require inspection and an explicit
 `pnpm assets:pack:write-lock`. Once assets pass, both build the ordinary
 `x86_64` client inside the pinned SteamRT4 SDK, stage the binary/pack/receipt,
 upload incrementally, and register `Devkit Game: mclone`. The upload also
-registers `Devkit Game: screenoff` against a small sibling payload
-directory without a compatibility runtime; the shortcut runs only the
-host-side Gamescope panel-control helper.
+asks the public testbed to register `Devkit Game: screenoff` against its own
+small project-neutral helper payload without a compatibility runtime.
 
 `steamdeck:install:production` stops there, leaving the title ready for the
 user to launch and refreshing the screen-off shortcut without changing the
@@ -281,8 +294,8 @@ pnpm steamdeck:auto-deploy:off
 
 Scheduling never blocks or determines the success of `git push`. The
 background worker first waits until the remote really reports the pushed
-`main` SHA, coalesces quick successive pushes, and probes Devkit-managed SSH
-for only a few seconds. An unavailable Deck is an explicit logged skip. A
+`main` SHA, coalesces quick successive pushes, and asks the shared testbed for
+a bounded read-only probe. An unavailable Deck is an explicit logged skip. A
 reachable Deck is built and deployed from a clean reusable sibling worktree at
 the exact pushed commit, independently of the web deploy worker. Push
 automation uses `steamdeck:install:production`: it uploads and registers the

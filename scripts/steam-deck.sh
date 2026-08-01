@@ -7,9 +7,8 @@ STAGE_DIR="$REPO_ROOT/dist/steamdeck"
 PAYLOAD_RUN="$REPO_ROOT/scripts/steam-deck/payload-run.sh"
 ASSET_PACK="$REPO_ROOT/reference/minecraft-1.17.1/extracted.zip"
 STEAMRT4_BUILD_SCRIPT="$REPO_ROOT/scripts/steam-deck-build-steamrt4.sh"
-SCREEN_WAKE_HELPER="$REPO_ROOT/scripts/steam-deck/screen-wake.py"
-SCREEN_CONTROL="$REPO_ROOT/scripts/steam-deck/screen-control.sh"
 MATRIX_SUMMARIZER="$REPO_ROOT/scripts/steam-deck/summarize-perf-matrix.mjs"
+STEAMDECK_TESTBED=${MCLONE_STEAM_DECK_TESTBED:-"$HOME/code/steamdeck-testbed/bin/steamdeck"}
 
 DECK_BUILDER=${MCLONE_STEAM_DECK_BUILDER:-host}
 case "$DECK_BUILDER" in
@@ -31,21 +30,18 @@ esac
 
 CONFIGURED_DECK_HOST=$(git -C "$REPO_ROOT" config --local --get \
     mclone.steamDeckHost 2>/dev/null || true)
-DECK_HOST=${MCLONE_STEAM_DECK:-${CONFIGURED_DECK_HOST:-steamdeck.local}}
+DECK_HOST=${MCLONE_STEAM_DECK:-${CONFIGURED_DECK_HOST:-steamdeck}}
 DECK_USER=${MCLONE_STEAM_DECK_USER:-deck}
-DECK_KEY=${MCLONE_STEAM_DECK_KEY:-"$HOME/.config/steamos-devkit/devkit_rsa"}
+DEFAULT_DECK_KEY=
+if [[ -f $HOME/.config/steamos-devkit/devkit_rsa ]]; then
+    DEFAULT_DECK_KEY="$HOME/.config/steamos-devkit/devkit_rsa"
+fi
+DECK_KEY=${MCLONE_STEAM_DECK_KEY:-$DEFAULT_DECK_KEY}
 DECK_TITLE=${MCLONE_STEAM_DECK_TITLE:-mclone}
 DECK_SCREEN_OFF_TITLE=${MCLONE_STEAM_DECK_SCREEN_OFF_TITLE:-screenoff}
 DECK_RUNTIME=${MCLONE_STEAM_DECK_RUNTIME:-SteamLinuxRuntime_4}
 REMOTE_RESULT_ROOT=${MCLONE_STEAM_DECK_REMOTE_RESULTS:-"/home/$DECK_USER/.local/state/mclone-deck/results"}
 LOCAL_RESULT_ROOT=${MCLONE_STEAM_DECK_RESULTS_ROOT:-/tmp/mclone-steam-deck-results}
-
-SSH_OPTIONS=(
-    -o BatchMode=yes
-    -o ConnectTimeout=10
-    -o StrictHostKeyChecking=yes
-    -i "$DECK_KEY"
-)
 
 usage()
 {
@@ -80,7 +76,10 @@ Commands:
 
 Environment:
   MCLONE_STEAM_DECK=HOST
-      Deck hostname or address. Defaults to steamdeck.local.
+      Deck SSH alias, hostname, or address. Defaults to steamdeck.
+  MCLONE_STEAM_DECK_TESTBED=PATH
+      Shared physical-device CLI. Defaults to
+      ~/code/steamdeck-testbed/bin/steamdeck.
   MCLONE_STEAM_DECK_SKIP_BUILD=1
       Reuse the selected builder's existing binary while staging.
   MCLONE_STEAM_DECK_BUILDER=host|steamrt4
@@ -111,93 +110,35 @@ require_command()
     command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
 }
 
-ssh_deck()
+steamdeck_cli()
 {
-    ssh "${SSH_OPTIONS[@]}" "$DECK_USER@$DECK_HOST" "$@"
+    STEAMDECK_HOST="$DECK_HOST" \
+    STEAMDECK_USER="$DECK_USER" \
+    STEAMDECK_REMOTE_USER="$DECK_USER" \
+    STEAMDECK_KEY="$DECK_KEY" \
+        "$STEAMDECK_TESTBED" "$@"
 }
 
 require_deck()
 {
-    require_command ssh
-    require_command rsync
-    require_command jq
-    test -f "$DECK_KEY" || die "Devkit key not found: $DECK_KEY"
-    ssh_deck "/usr/bin/true" >/dev/null
+    test -x "$STEAMDECK_TESTBED" ||
+        die "Steam Deck testbed CLI not found: $STEAMDECK_TESTBED"
+    steamdeck_cli probe >/dev/null
 }
 
 deck_power_status()
 {
     require_deck
-    ssh_deck "/usr/bin/bash -s" <<'REMOTE'
-set -euo pipefail
-
-ac_online=unknown
-for supply in /sys/class/power_supply/*; do
-    [[ -e $supply ]] || continue
-    [[ $(cat "$supply/type" 2>/dev/null || true) == Mains ]] || continue
-    ac_online=$(cat "$supply/online" 2>/dev/null || echo unknown)
-    break
-done
-
-config="$HOME/.local/share/Steam/config/config.vdf"
-ac_suspend=$(sed -n \
-    's/.*"IdleSuspendACSeconds"[[:space:]]*"\([0-9]*\)".*/\1/p' \
-    "$config" 2>/dev/null | tail -1)
-battery_suspend=$(sed -n \
-    's/.*"IdleSuspendBatterySeconds"[[:space:]]*"\([0-9]*\)".*/\1/p' \
-    "$config" 2>/dev/null | tail -1)
-
-connector=unavailable
-connector_state=unknown
-for path in /sys/class/drm/card*-eDP-*; do
-    [[ -e $path ]] || continue
-    connector=${path##*/}
-    connector_state=$(cat "$path/enabled" 2>/dev/null || echo unknown)
-    break
-done
-
-if pgrep -f '(^|/)gamescope( |$)' >/dev/null 2>&1; then
-    gamescope_state=running
-else
-    gamescope_state=stopped
-fi
-
-printf 'AC online: %s\n' "$ac_online"
-printf 'AC idle suspend: %s seconds%s\n' \
-    "${ac_suspend:-unknown}" \
-    "$([[ ${ac_suspend:-} == 0 ]] && printf ' (disabled)' || true)"
-printf 'Battery idle suspend: %s seconds%s\n' \
-    "${battery_suspend:-unknown}" \
-    "$([[ ${battery_suspend:-} == 0 ]] && printf ' (disabled)' || true)"
-printf 'Gamescope: %s\n' "$gamescope_state"
-printf 'Internal connector: %s (%s)\n' "$connector" "$connector_state"
-printf 'SSH: reachable\n'
-REMOTE
+    steamdeck_cli power-status
 }
 
 set_deck_internal_screen_sleep()
 {
     local requested=$1
     local mode=on
-    local remote_control_dir="/home/$DECK_USER/.local/state/mclone-deck/screen-control"
-    local remote_control="$remote_control_dir/screen-control.sh"
     require_deck
     [[ $requested == true ]] && mode=off
-    test -f "$SCREEN_CONTROL" ||
-        die "screen control not found: $SCREEN_CONTROL"
-    test -f "$SCREEN_WAKE_HELPER" ||
-        die "screen wake helper not found: $SCREEN_WAKE_HELPER"
-    ssh_deck \
-        "/usr/bin/install -d -m 700 $(printf '%q' "$remote_control_dir")"
-    rsync \
-        -a \
-        --chmod=Fu=rwx,Fgo= \
-        -e "ssh ${SSH_OPTIONS[*]}" \
-        "$SCREEN_CONTROL" \
-        "$SCREEN_WAKE_HELPER" \
-        "$DECK_USER@$DECK_HOST:$remote_control_dir/"
-    ssh_deck \
-        "$(printf '%q' "$remote_control") $(printf '%q' "$mode")"
+    steamdeck_cli "screen-$mode"
 }
 
 stage_payload()
@@ -254,8 +195,6 @@ stage_payload()
     trap 'rm -rf -- "$temp_stage"' RETURN
     install -Dm755 "$CLIENT_BINARY" "$temp_stage/mclone-native-client"
     install -Dm755 "$PAYLOAD_RUN" "$temp_stage/run.sh"
-    install -Dm755 "$SCREEN_CONTROL" "$temp_stage/screen-control.sh"
-    install -Dm755 "$SCREEN_WAKE_HELPER" "$temp_stage/screen-wake.py"
     install -Dm644 "$ASSET_PACK" "$temp_stage/assets/extracted.zip"
 
     local commit dirty binary_sha asset_sha builder_receipt
@@ -309,140 +248,93 @@ stage_payload()
 prepare_remote_directory()
 {
     local gameid=${1:-$DECK_TITLE}
-    local output remote_user remote_dir
-    output=$(ssh_deck \
-        "python3 ~/devkit-utils/steamos-prepare-upload --gameid $(printf '%q' "$gameid")")
-    remote_user=$(jq -r '.user // empty' <<<"$output")
-    remote_dir=$(jq -r '.directory // empty' <<<"$output")
-
-    [[ $remote_user == "$DECK_USER" ]] ||
-        die "unexpected upload user from Deck: ${remote_user:-missing}"
-    case "$remote_dir" in
-        "/home/$DECK_USER/"*"/$gameid"|"/home/$DECK_USER/"*"/$gameid/")
-            ;;
-        *)
-            die "refusing unexpected upload directory: ${remote_dir:-missing}"
-            ;;
-    esac
-    printf '%s\n' "$remote_dir"
+    steamdeck_cli prepare-upload "$gameid"
 }
 
-register_title()
+write_title_manifest()
 {
-    local remote_dir=$1
+    local manifest=$1
     local mode=$2
     local run_id=${3:-}
-    local parms response quoted
 
     if [[ -n $run_id ]]; then
-        parms=$(jq -cn \
+        jq -n \
+            --arg schema "steamdeck-testbed.game.v1" \
             --arg gameid "$DECK_TITLE" \
-            --arg directory "$remote_dir" \
+            --arg payload "$STAGE_DIR" \
             --arg mode "$mode" \
             --arg resultRoot "$REMOTE_RESULT_ROOT" \
             --arg runId "$run_id" \
             --arg runtime "$DECK_RUNTIME" \
             '{
-                gameid: $gameid,
-                directory: $directory,
+                schema: $schema,
+                game_id: $gameid,
+                payload: $payload,
                 argv: ["./run.sh", $mode, $runId, $resultRoot],
                 env: {
                     MCLONE_DECK_RESULT_ROOT: $resultRoot,
                     MCLONE_DECK_RESULT_ID: $runId
                 },
-                settings: (
-                    {steam_play: "0"} +
-                    if $runtime == "none" then {} else {compat_tool: $runtime} end
-                ),
+                runtime: if $runtime == "none" then null else $runtime end,
                 force_appid: ""
-            }')
+            }' >"$manifest"
     else
-        parms=$(jq -cn \
+        jq -n \
+            --arg schema "steamdeck-testbed.game.v1" \
             --arg gameid "$DECK_TITLE" \
-            --arg directory "$remote_dir" \
+            --arg payload "$STAGE_DIR" \
             --arg mode "$mode" \
             --arg resultRoot "$REMOTE_RESULT_ROOT" \
             --arg runtime "$DECK_RUNTIME" \
             '{
-                gameid: $gameid,
-                directory: $directory,
+                schema: $schema,
+                game_id: $gameid,
+                payload: $payload,
                 argv: ["./run.sh", $mode],
                 env: {MCLONE_DECK_RESULT_ROOT: $resultRoot},
-                settings: (
-                    {steam_play: "0"} +
-                    if $runtime == "none" then {} else {compat_tool: $runtime} end
-                ),
+                runtime: if $runtime == "none" then null else $runtime end,
                 force_appid: ""
-            }')
+            }' >"$manifest"
     fi
-
-    register_shortcut "$parms"
 }
 
-register_screen_off_title()
+run_title_manifest()
 {
-    local remote_dir=$1
-    local parms
-
-    parms=$(jq -cn \
-        --arg gameid "$DECK_SCREEN_OFF_TITLE" \
-        --arg directory "$remote_dir" \
-        '{
-            gameid: $gameid,
-            directory: $directory,
-            argv: ["./screen-control.sh", "off"],
-            env: {},
-            settings: {steam_play: "0"},
-            force_appid: ""
-        }')
-    register_shortcut "$parms"
+    local action=$1
+    local mode=$2
+    local run_id=${3:-}
+    local manifest output status
+    manifest=$(mktemp)
+    write_title_manifest "$manifest" "$mode" "$run_id"
+    set +e
+    output=$(steamdeck_cli "$action" "$manifest")
+    status=$?
+    set -e
+    unlink "$manifest"
+    (( status == 0 )) || return "$status"
+    printf '%s\n' "$output"
 }
 
-register_shortcut()
+register_title()
 {
-    local parms=$1
-    local response quoted
-
-    printf -v quoted '%q' "$parms"
-    response=$(ssh_deck \
-        "python3 ~/devkit-utils/steam-client-create-shortcut --parms $quoted")
-    if jq -e '.error' >/dev/null 2>&1 <<<"$response"; then
-        die "Deck shortcut registration failed: $(jq -r '.error' <<<"$response")"
-    fi
-    jq -e '.success' >/dev/null 2>&1 <<<"$response" ||
-        die "Deck shortcut registration returned an unexpected response: $response"
+    local expected_remote_dir=$1
+    local mode=$2
+    local run_id=${3:-}
+    local remote_dir
+    remote_dir=$(run_title_manifest register "$mode" "$run_id")
+    [[ $remote_dir == "$expected_remote_dir" ]] ||
+        die "testbed registered unexpected directory: $remote_dir"
 }
 
 upload_payload()
 {
     require_deck
     test -x "$STAGE_DIR/run.sh" || die "staged payload is missing; run stage first"
-    [[ $DECK_SCREEN_OFF_TITLE =~ ^[a-z0-9_]+$ ]] ||
-        die \
-            "screen-off Devkit game id must contain only lowercase letters, digits, or underscores"
-
-    local remote_dir screen_remote_dir
-    remote_dir=$(prepare_remote_directory "$DECK_TITLE")
-    screen_remote_dir=$(prepare_remote_directory "$DECK_SCREEN_OFF_TITLE")
-    echo "Uploading payload to $DECK_HOST:$remote_dir"
-    rsync \
-        -av \
-        --delete \
-        --chmod=Du=rwx,Dgo=rx,Fu=rwx,Fog=rx \
-        -e "ssh ${SSH_OPTIONS[*]}" \
-        "$STAGE_DIR/" \
-        "$DECK_USER@$DECK_HOST:$remote_dir/"
-    echo "Uploading screen-off tile to $DECK_HOST:$screen_remote_dir"
-    rsync \
-        -av \
-        --delete \
-        --chmod=Du=rwx,Dgo=rx,Fu=rwx,Fog=rx \
-        -e "ssh ${SSH_OPTIONS[*]}" \
-        "$STAGE_DIR/screen-control.sh" \
-        "$STAGE_DIR/screen-wake.py" \
-        "$DECK_USER@$DECK_HOST:$screen_remote_dir/"
-    register_title "$remote_dir" play
-    register_screen_off_title "$screen_remote_dir"
+    local remote_dir
+    remote_dir=$(run_title_manifest install play)
+    steamdeck_cli screen-shortcut install \
+        --game-id "$DECK_SCREEN_OFF_TITLE" \
+        >/dev/null
     printf '%s\n' "$remote_dir"
 }
 
@@ -450,15 +342,14 @@ launch_title()
 {
     require_deck
     stop_title
-    ssh_deck \
-        "python3 ~/devkit-utils/steam-devkit-rpc run-game gameid=$(printf '%q' "$DECK_TITLE")"
+    steamdeck_cli launch "$DECK_TITLE"
 }
 
 stop_title()
 {
     local remote_dir
     remote_dir=$(prepare_remote_directory "$DECK_TITLE")
-    ssh_deck "$(printf '%q' "$remote_dir/run.sh") stop"
+    steamdeck_cli exec -- "$remote_dir/run.sh" stop
 }
 
 new_run_id()
@@ -481,7 +372,8 @@ wait_for_result()
 
     echo "Waiting for Deck result $run_id"
     while (( SECONDS < deadline )); do
-        status=$(ssh_deck \
+        status=$(steamdeck_cli exec -- \
+            /usr/bin/bash -lc \
             "if /usr/bin/test -f $(printf '%q' "$status_path"); then /usr/bin/cat $(printf '%q' "$status_path"); fi")
         if [[ -n $status ]]; then
             if [[ ! $status =~ ^[0-9]+$ ]]; then
@@ -506,7 +398,8 @@ pull_result()
     require_deck
     local run_id=${1:-}
     if [[ -z $run_id ]]; then
-        run_id=$(ssh_deck \
+        run_id=$(steamdeck_cli exec -- \
+            /usr/bin/bash -lc \
             "/usr/bin/find $(printf '%q' "$REMOTE_RESULT_ROOT") -mindepth 1 -maxdepth 1 -type d -printf '%T@ %f\\n' 2>/dev/null | /usr/bin/sort -nr | /usr/bin/head -1 | /usr/bin/cut -d' ' -f2-")
     fi
     [[ $run_id =~ ^[A-Za-z0-9._-]+$ ]] ||
@@ -514,10 +407,8 @@ pull_result()
 
     local destination="$LOCAL_RESULT_ROOT/$run_id"
     mkdir -p "$destination"
-    rsync \
-        -av \
-        -e "ssh ${SSH_OPTIONS[*]}" \
-        "$DECK_USER@$DECK_HOST:$REMOTE_RESULT_ROOT/$run_id/" \
+    steamdeck_cli pull \
+        "$REMOTE_RESULT_ROOT/$run_id/" \
         "$destination/" \
         >&2
     echo "$destination"
@@ -587,7 +478,7 @@ case "$command" in
         ;;
     status)
         require_deck
-        ssh_deck "python3 ~/devkit-utils/steamos-get-status --json"
+        steamdeck_cli status --json
         ;;
     power-status)
         [[ $# == 0 ]] || die "power-status takes no arguments"

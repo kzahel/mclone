@@ -86,7 +86,7 @@ configured_host() {
   if [ -z "$host" ]; then
     host="$(git -C "$PROJECT_DIR" config --local --get "$HOST_KEY" 2>/dev/null || true)"
   fi
-  printf '%s' "${host:-steamdeck.local}"
+  printf '%s' "${host:-steamdeck}"
 }
 
 auto_deploy_enabled() {
@@ -334,10 +334,22 @@ wait_for_settle_window() {
 probe_deck() {
   local host="$1"
   local user="${MCLONE_STEAM_DECK_USER:-deck}"
-  local key="${MCLONE_STEAM_DECK_KEY:-$HOME/.config/steamos-devkit/devkit_rsa}"
+  local key="${MCLONE_STEAM_DECK_KEY:-}"
+  local testbed="${MCLONE_STEAM_DECK_TESTBED:-$HOME/code/steamdeck-testbed/bin/steamdeck}"
+  local -a environment=(
+    env
+    "STEAMDECK_HOST=$host"
+    "STEAMDECK_USER=$user"
+    "STEAMDECK_REMOTE_USER=$user"
+    "STEAMDECK_CONNECT_TIMEOUT=$PROBE_SECONDS"
+  )
 
-  [ -f "$key" ] || {
-    echo "Devkit key not found: $key" >&2
+  if [ -z "$key" ] && [ -f "$HOME/.config/steamos-devkit/devkit_rsa" ]; then
+    key="$HOME/.config/steamos-devkit/devkit_rsa"
+  fi
+  [ -n "$key" ] && environment+=("STEAMDECK_KEY=$key")
+  [ -x "$testbed" ] || {
+    echo "Steam Deck testbed CLI not found: $testbed" >&2
     return 1
   }
   command -v timeout >/dev/null 2>&1 || {
@@ -346,13 +358,10 @@ probe_deck() {
   }
 
   timeout "$PROBE_SECONDS" \
-    ssh \
-      -o BatchMode=yes \
-      -o ConnectTimeout="$PROBE_SECONDS" \
-      -o StrictHostKeyChecking=yes \
-      -i "$key" \
-      "$user@$host" \
-      /usr/bin/true
+    "${environment[@]}" \
+    "$testbed" \
+    probe \
+    >/dev/null
 }
 
 clear_desired_if_current() {
@@ -493,9 +502,9 @@ run_worker() {
       "$sha" \
       "$remote" \
       "$branch" \
-      "checking Devkit-managed SSH reachability"
+      "checking shared Steam Deck testbed reachability"
     if ! probe_deck "$host"; then
-      local detail="Devkit-managed SSH was not reachable within ${PROBE_SECONDS}s"
+      local detail="Steam Deck testbed was not reachable within ${PROBE_SECONDS}s"
       log "$detail; skipping this push"
       record_skip \
         "$sha" \

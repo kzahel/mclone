@@ -41,14 +41,15 @@ The Deck lane uses:
 .git/mclone-steam-deck-after-main-push/
 ```
 
-It waits for the same remote confirmation, briefly probes the Devkit-managed
-SSH connection, and skips without blocking the push when the Deck is
-unreachable. A reachable Deck is deployed from a separate reusable sibling
-worktree at the exact pushed commit. The production command checks the asset
-lock first, rebuilds the ignored archive only when necessary, rechecks without
-ever rewriting the tracked lock, builds in the pinned SteamRT4 SDK, uploads
-incrementally, and registers the shortcut without launching it or waking the
-panel. Launching remains an explicit interactive command.
+It waits for the same remote confirmation, asks the standalone
+`steamdeck-testbed` helper for a bounded read-only probe, and skips without
+blocking the push when the Deck is unreachable. A reachable Deck is deployed
+from a separate reusable sibling worktree at the exact pushed commit. The
+production command checks the asset lock first, rebuilds the ignored archive
+only when necessary, rechecks without ever rewriting the tracked lock, builds
+in the pinned SteamRT4 SDK, and delegates validated incremental upload and
+registration without launching the game or waking the panel. Launching remains
+an explicit interactive command.
 
 Deploys run from a reusable sibling worktree:
 
@@ -130,6 +131,8 @@ Environment variables:
 
 The Deck lane shares the branch/remote settings and has:
 
+- `MCLONE_STEAM_DECK_TESTBED`: path to the public physical-device CLI,
+  default `~/code/steamdeck-testbed/bin/steamdeck`.
 - `MCLONE_STEAM_DECK_DEPLOY_AFTER_PUSH_WORKTREE`: reusable Deck worktree.
 - `MCLONE_STEAM_DECK_DEPLOY_AFTER_PUSH_POLL_SECONDS`: polling interval.
 - `MCLONE_STEAM_DECK_DEPLOY_AFTER_PUSH_SETTLE_SECONDS`: settle window.
