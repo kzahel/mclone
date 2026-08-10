@@ -3609,6 +3609,8 @@ const fn chunk_status_code(status: ChunkStatus) -> u8 {
         ChunkStatus::Features => 2,
         ChunkStatus::Light => 3,
         ChunkStatus::Full => 4,
+        ChunkStatus::StructureStarts => 5,
+        ChunkStatus::StructureReferences => 6,
     }
 }
 
@@ -3619,6 +3621,8 @@ const fn chunk_status_from_code(code: i32) -> Option<ChunkStatus> {
         2 => Some(ChunkStatus::Features),
         3 => Some(ChunkStatus::Light),
         4 => Some(ChunkStatus::Full),
+        5 => Some(ChunkStatus::StructureStarts),
+        6 => Some(ChunkStatus::StructureReferences),
         _ => None,
     }
 }

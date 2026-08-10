@@ -71,8 +71,9 @@ use crate::{
     ChunkResidency, ChunkStatusStep, ChunkTicketKey, ChunkTicketType, DEFAULT_GAMEPLAY_RATE_HZ,
     FORCED_TICKET_LEVEL, FluidKind, FullChunkStatus, GenerationExecutionRequest, GenerationInput,
     GenerationPlanRequest, LightStatusMailboxKind, LightStatusMailboxMetrics, MAX_CHUNK_DISTANCE,
-    UNLOADED_CHUNK_LEVEL, WorkerFrameMetrics, WorldBlockPos, WorldGenerationDescriptor,
-    WorldGenerationProfile, WorldgenMailboxKind, full_chunk_status_for_ticket_level,
+    StructureOverlay, UNLOADED_CHUNK_LEVEL, WorkerFrameMetrics, WorldBlockPos,
+    WorldGenerationDescriptor, WorldGenerationProfile, WorldgenMailboxKind,
+    full_chunk_status_for_ticket_level,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -511,6 +512,7 @@ struct PendingEntityChunkSave {
 pub struct ChunkScheduler {
     seed: i64,
     world_generation_profile: WorldGenerationProfile,
+    structure_overlay: StructureOverlay,
     topology: HorizontalTopology,
     lighting_enabled: bool,
     light_status_batch_size: usize,
@@ -781,6 +783,7 @@ impl ChunkScheduler {
         Self {
             seed,
             world_generation_profile: WorldGenerationProfile::default(),
+            structure_overlay: StructureOverlay::None,
             topology: HorizontalTopology::UNBOUNDED,
             lighting_enabled: true,
             light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
@@ -843,6 +846,7 @@ impl ChunkScheduler {
         Self {
             seed,
             world_generation_profile: WorldGenerationProfile::default(),
+            structure_overlay: StructureOverlay::None,
             topology: HorizontalTopology::UNBOUNDED,
             lighting_enabled: true,
             light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
@@ -895,6 +899,20 @@ impl ChunkScheduler {
 
     pub const fn world_generation_profile(&self) -> WorldGenerationProfile {
         self.world_generation_profile
+    }
+
+    pub const fn structure_overlay(&self) -> StructureOverlay {
+        self.structure_overlay
+    }
+
+    pub fn set_structure_overlay(&mut self, overlay: StructureOverlay) -> ChunkStoreResult<()> {
+        if !self.holders.is_empty() || !self.jobs.is_empty() {
+            return Err(ChunkStoreError::InvalidData(
+                "structure overlay must be selected before chunk scheduling".to_owned(),
+            ));
+        }
+        self.structure_overlay = overlay;
+        Ok(())
     }
 
     pub const fn topology(&self) -> HorizontalTopology {
@@ -3052,6 +3070,24 @@ impl ChunkScheduler {
                         scheduled_chunk_loads += 1;
                     }
                 } else if status < ChunkStatus::Features {
+                    if status == ChunkStatus::StructureStarts {
+                        let starts = self.structure_overlay.starts_owned_by(pos);
+                        self.holders
+                            .get_mut(&pos)
+                            .expect("holder must exist before recording structure starts")
+                            .structure_data_mut()
+                            .starts = starts;
+                    } else if status == ChunkStatus::StructureReferences {
+                        let references = self
+                            .structure_overlay
+                            .references_for(pos, self.topology)
+                            .map_err(ChunkStoreError::InvalidData)?;
+                        self.holders
+                            .get_mut(&pos)
+                            .expect("holder must exist before recording structure references")
+                            .structure_data_mut()
+                            .references = references;
+                    }
                     let holder = self
                         .holders
                         .get_mut(&pos)
@@ -3182,18 +3218,27 @@ impl ChunkScheduler {
                 ChunkStatusStep::Scheduled,
             ));
 
-            let chunk = GeneratedChunk::from_mutable_buffer(MutableChunkBlockBuffer::new(
+            let mut chunk = GeneratedChunk::from_mutable_buffer(MutableChunkBlockBuffer::new(
                 pos.x,
                 pos.z,
                 AUTHORED_WORLD_MIN_Y,
                 AUTHORED_WORLD_HEIGHT,
             ));
+            let structure_data = self
+                .holders
+                .get(&pos)
+                .expect("holder must exist before authored structure placement")
+                .structure_data()
+                .clone();
+            self.structure_overlay
+                .materialize_chunk(pos, self.topology, &structure_data.references, &mut chunk)
+                .expect("scheduled authored structure references must remain resolvable");
             let revision = ChunkRevision(self.next_revision);
             self.next_revision = self.next_revision.saturating_add(1);
             let snapshot = chunk.to_chunk_snapshot(revision, ChunkStatus::Features);
             self.mark_snapshot_ready(pos, snapshot.clone(), ChunkResidency::Generated, false);
             self.queue_record_save(
-                ChunkRecord::from_snapshot(snapshot.clone()),
+                ChunkRecord::from_snapshot(snapshot.clone()).with_structure_data(structure_data),
                 SaveDurability::Cache,
             );
             events.push(status_changed_event(
@@ -3387,12 +3432,21 @@ impl ChunkScheduler {
             let revision = ChunkRevision(self.next_revision);
             self.next_revision += 1;
 
-            let chunk = generated.get(&pos).unwrap_or_else(|| {
+            let mut chunk = generated.get(&pos).cloned().unwrap_or_else(|| {
                 panic!(
                     "feature batch did not return scheduler target chunk ({}, {})",
                     pos.x, pos.z
                 )
             });
+            let structure_data = self
+                .holders
+                .get(&pos)
+                .expect("holder must exist before structure placement")
+                .structure_data()
+                .clone();
+            self.structure_overlay
+                .materialize_chunk(pos, self.topology, &structure_data.references, &mut chunk)
+                .map_err(ChunkStoreError::InvalidData)?;
             let scheduled_block_ticks = scheduled_block_tick_records_from_generated_chunk(&chunk);
             let scheduled_fluid_ticks = scheduled_fluid_tick_records_from_generated_chunk(&chunk);
             events.extend(block_tick_events_from_records(&scheduled_block_ticks)?);
@@ -3402,7 +3456,8 @@ impl ChunkScheduler {
             self.queue_record_save(
                 ChunkRecord::from_snapshot(snapshot.clone())
                     .with_scheduled_block_ticks(scheduled_block_ticks.clone())
-                    .with_scheduled_fluid_ticks(scheduled_fluid_ticks.clone()),
+                    .with_scheduled_fluid_ticks(scheduled_fluid_ticks.clone())
+                    .with_structure_data(structure_data),
                 SaveDurability::Cache,
             );
             events.push(ChunkSchedulerEvent::StatusChanged {
@@ -3423,21 +3478,37 @@ impl ChunkScheduler {
                     ChunkStatus::Light,
                     ChunkStatusStep::Scheduled,
                 ));
-                let ready_light_batch = {
-                    let statuses = self
-                        .pending_light_status_batches
-                        .entry(publication.completed.job_id)
-                        .or_default();
-                    statuses.push(PendingLightStatus::from_feature_publication(
+                let pending_light_status = if self.structure_overlay == StructureOverlay::None {
+                    PendingLightStatus::from_feature_publication(
                         pos,
                         snapshot,
-                        chunk,
+                        &chunk,
                         scheduled_block_ticks,
                         scheduled_fluid_ticks,
                         self.topology,
                         generated.iter(),
                         retained_dependencies.iter(),
-                    ));
+                    )
+                } else {
+                    let materialized_neighbors =
+                        self.materialized_generated_chunks_for_light(generated)?;
+                    PendingLightStatus::from_feature_publication(
+                        pos,
+                        snapshot,
+                        &chunk,
+                        scheduled_block_ticks,
+                        scheduled_fluid_ticks,
+                        self.topology,
+                        materialized_neighbors.iter(),
+                        retained_dependencies.iter(),
+                    )
+                };
+                let ready_light_batch = {
+                    let statuses = self
+                        .pending_light_status_batches
+                        .entry(publication.completed.job_id)
+                        .or_default();
+                    statuses.push(pending_light_status);
                     (statuses.len() >= self.light_status_batch_size)
                         .then(|| std::mem::take(statuses))
                 };
@@ -3500,6 +3571,26 @@ impl ChunkScheduler {
             events.extend(self.enqueue_next_pending_feature_job());
         }
         Ok((events, None))
+    }
+
+    fn materialized_generated_chunks_for_light(
+        &self,
+        generated: &BTreeMap<ChunkPos, GeneratedChunk>,
+    ) -> ChunkStoreResult<BTreeMap<ChunkPos, GeneratedChunk>> {
+        let mut materialized = generated.clone();
+        for (pos, chunk) in &mut materialized {
+            let references = if let Some(holder) = self.holders.get(pos) {
+                holder.structure_data().references.clone()
+            } else {
+                self.structure_overlay
+                    .references_for(*pos, self.topology)
+                    .map_err(ChunkStoreError::InvalidData)?
+            };
+            self.structure_overlay
+                .materialize_chunk(*pos, self.topology, &references, chunk)
+                .map_err(ChunkStoreError::InvalidData)?;
+        }
+        Ok(materialized)
     }
 
     fn enqueue_light_status_batch(&mut self, statuses: Vec<PendingLightStatus>) {
@@ -3571,10 +3662,17 @@ impl ChunkScheduler {
             let pos = snapshot.pos;
 
             self.mark_snapshot_ready(pos, snapshot.clone(), ChunkResidency::Generated, false);
+            let structure_data = self
+                .holders
+                .get(&pos)
+                .expect("holder must exist before saving lit structure data")
+                .structure_data()
+                .clone();
             self.queue_record_save(
                 ChunkRecord::from_snapshot(snapshot.clone())
                     .with_scheduled_block_ticks(completed.scheduled_block_ticks)
-                    .with_scheduled_fluid_ticks(completed.scheduled_fluid_ticks),
+                    .with_scheduled_fluid_ticks(completed.scheduled_fluid_ticks)
+                    .with_structure_data(structure_data),
                 SaveDurability::Cache,
             );
             events.push(ChunkSchedulerEvent::StatusChanged {
@@ -4011,6 +4109,7 @@ impl ChunkScheduler {
     ) -> ChunkStoreResult<Vec<ChunkSchedulerEvent>> {
         let scheduled_block_ticks = record.scheduled_block_ticks.clone();
         let scheduled_fluid_ticks = record.scheduled_fluid_ticks.clone();
+        let structure_data = record.structures.clone();
         let snapshot = record.snapshot;
         let snapshot = if self.lighting_enabled {
             hydrate_loaded_light_snapshot(snapshot)?
@@ -4037,6 +4136,7 @@ impl ChunkScheduler {
                 .holders
                 .get_mut(&pos)
                 .expect("holder must exist before marking loaded features ready");
+            holder.set_structure_data(structure_data);
             holder.mark_ready(ChunkStatus::Features, Some(revision));
         }
         events.push(ChunkSchedulerEvent::StatusChanged {
@@ -4104,7 +4204,10 @@ impl ChunkScheduler {
         let Some(snapshot) = holder.snapshot() else {
             return false;
         };
-        self.queue_record_save(record_builder(snapshot), durability)
+        self.queue_record_save(
+            record_builder(snapshot).with_structure_data(holder.structure_data().clone()),
+            durability,
+        )
     }
 
     fn queue_record_save(&mut self, record: ChunkRecord, durability: SaveDurability) -> bool {
@@ -4585,7 +4688,9 @@ fn dedupe_chunk_positions_preserving_order(chunks: Vec<ChunkPos>) -> Vec<ChunkPo
 mod tests {
     use super::*;
     use mclone_core::BlockPos;
-    use mclone_worldgen::block::{AIR, BEDROCK, DIRT, GRASS_BLOCK};
+    use mclone_worldgen::block::{
+        AIR, BEDROCK, COBBLESTONE, DIRT, GRASS_BLOCK, OAK_LOG_X, STONE_BRICKS,
+    };
 
     fn light_layer_with_value(index: usize, value: u8) -> Vec<u8> {
         debug_assert!(value <= 15);
@@ -4630,6 +4735,142 @@ mod tests {
             compute_us: 0,
             timing: LevelLightComputationTiming::default(),
         }
+    }
+
+    fn generate_cross_chunk_canary(
+        desired_chunks: Vec<ChunkPos>,
+    ) -> Vec<(ChunkPos, ChunkSnapshot, crate::ChunkStructureData)> {
+        let mut scheduler = ChunkScheduler::new(12_345);
+        scheduler
+            .set_world_generation_profile(WorldGenerationProfile::FlatGrassV1)
+            .unwrap();
+        scheduler
+            .set_structure_overlay(StructureOverlay::CrossChunkCanaryV1)
+            .unwrap();
+        scheduler.set_lighting_enabled(false);
+        scheduler
+            .stored_chunk_misses
+            .extend(desired_chunks.iter().copied());
+        scheduler
+            .enqueue_runtime_chunks(&desired_chunks, ChunkStatus::Features, &[])
+            .unwrap();
+
+        for _ in 0..100 {
+            scheduler.poll().unwrap();
+            if desired_chunks.iter().all(|pos| {
+                scheduler
+                    .holder(*pos)
+                    .and_then(ChunkHolder::highest_ready_status)
+                    >= Some(ChunkStatus::Features)
+            }) {
+                break;
+            }
+            if scheduler.worldgen_mailbox_pending_count() > 0 {
+                assert!(scheduler.wait_for_worldgen_completion(Duration::from_secs(5)));
+            }
+            std::thread::yield_now();
+        }
+
+        let left = ChunkPos::new(0, 0);
+        let right = ChunkPos::new(1, 0);
+        let far = ChunkPos::new(2, 0);
+        assert_eq!(
+            scheduler.block_at_world(WorldBlockPos::new(14, 4, 8)),
+            Some(STONE_BRICKS)
+        );
+        assert_eq!(
+            scheduler.block_at_world(WorldBlockPos::new(14, 5, 8)),
+            Some(COBBLESTONE)
+        );
+        assert_eq!(
+            scheduler.block_at_world(WorldBlockPos::new(17, 6, 8)),
+            Some(OAK_LOG_X)
+        );
+        assert_eq!(
+            scheduler.block_at_world(WorldBlockPos::new(32, 4, 8)),
+            Some(AIR)
+        );
+        assert_eq!(
+            scheduler
+                .holder(left)
+                .unwrap()
+                .structure_data()
+                .starts
+                .len(),
+            1
+        );
+        assert!(
+            scheduler
+                .holder(right)
+                .unwrap()
+                .structure_data()
+                .starts
+                .is_empty()
+        );
+        assert!(
+            scheduler
+                .holder(far)
+                .unwrap()
+                .structure_data()
+                .starts
+                .is_empty()
+        );
+        assert_eq!(
+            scheduler
+                .holder(left)
+                .unwrap()
+                .structure_data()
+                .references
+                .len(),
+            1
+        );
+        assert_eq!(
+            scheduler
+                .holder(right)
+                .unwrap()
+                .structure_data()
+                .references
+                .len(),
+            1
+        );
+        assert!(
+            scheduler
+                .holder(far)
+                .unwrap()
+                .structure_data()
+                .references
+                .is_empty()
+        );
+
+        let mut result = desired_chunks
+            .into_iter()
+            .map(|pos| {
+                let holder = scheduler.holder(pos).unwrap();
+                (
+                    pos,
+                    holder.snapshot().unwrap().clone(),
+                    holder.structure_data().clone(),
+                )
+            })
+            .collect::<Vec<_>>();
+        result.sort_by_key(|(pos, _, _)| (pos.z, pos.x));
+        result
+    }
+
+    #[test]
+    fn cross_chunk_structure_lifecycle_is_request_order_independent() {
+        let raster = generate_cross_chunk_canary(vec![
+            ChunkPos::new(0, 0),
+            ChunkPos::new(1, 0),
+            ChunkPos::new(2, 0),
+        ]);
+        let reverse = generate_cross_chunk_canary(vec![
+            ChunkPos::new(2, 0),
+            ChunkPos::new(1, 0),
+            ChunkPos::new(0, 0),
+        ]);
+
+        assert_eq!(raster, reverse);
     }
 
     fn test_scheduled_light_holder(pos: ChunkPos) -> ChunkHolder {
@@ -5965,9 +6206,11 @@ fn ticket_level_dependency_status_target(_ticket_level: i32) -> ChunkStatus {
     ChunkStatus::Surface
 }
 
-const ALL_STATUSES: [ChunkStatus; 5] = [
+const ALL_STATUSES: [ChunkStatus; 7] = [
     ChunkStatus::Terrain,
     ChunkStatus::Surface,
+    ChunkStatus::StructureStarts,
+    ChunkStatus::StructureReferences,
     ChunkStatus::Features,
     ChunkStatus::Light,
     ChunkStatus::Full,

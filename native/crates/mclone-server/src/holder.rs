@@ -12,8 +12,8 @@ use mclone_core::{ChunkPos, ChunkRevision, ChunkSnapshot, ChunkStatus};
 use mclone_worldgen::levelgen::MutableChunkBlockBuffer;
 
 use crate::{
-    ChunkJobId, ChunkResidency, ChunkStatusStep, FullChunkStatus, UNLOADED_CHUNK_LEVEL,
-    full_chunk_status_for_ticket_level, mutable_buffer_from_snapshot,
+    ChunkJobId, ChunkResidency, ChunkStatusStep, ChunkStructureData, FullChunkStatus,
+    UNLOADED_CHUNK_LEVEL, full_chunk_status_for_ticket_level, mutable_buffer_from_snapshot,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -33,6 +33,7 @@ pub struct ChunkHolder {
     pub(crate) published_snapshot: Option<ChunkSnapshot>,
     pub(crate) live_blocks: Option<MutableChunkBlockBuffer>,
     pub(crate) dependency_buffer: Option<MutableChunkBlockBuffer>,
+    structure_data: ChunkStructureData,
     pub(crate) client_visible: bool,
     residency: ChunkResidency,
     pub(crate) dirty: bool,
@@ -48,6 +49,7 @@ impl ChunkHolder {
             published_snapshot: None,
             live_blocks: None,
             dependency_buffer: None,
+            structure_data: ChunkStructureData::default(),
             client_visible: false,
             residency: ChunkResidency::NotResident,
             dirty: false,
@@ -107,6 +109,14 @@ impl ChunkHolder {
 
     pub fn is_client_visible(&self) -> bool {
         self.client_visible
+    }
+
+    pub fn structure_data(&self) -> &ChunkStructureData {
+        &self.structure_data
+    }
+
+    pub(crate) fn structure_data_mut(&mut self) -> &mut ChunkStructureData {
+        &mut self.structure_data
     }
 
     pub(crate) fn mark_scheduled(&mut self, status: ChunkStatus) {
@@ -179,6 +189,10 @@ impl ChunkHolder {
 
     pub(crate) fn set_dependency_buffer(&mut self, buffer: MutableChunkBlockBuffer) {
         self.dependency_buffer = Some(buffer);
+    }
+
+    pub(crate) fn set_structure_data(&mut self, structure_data: ChunkStructureData) {
+        self.structure_data = structure_data;
     }
 
     pub(crate) fn dependency_buffer(&self) -> Option<&MutableChunkBlockBuffer> {

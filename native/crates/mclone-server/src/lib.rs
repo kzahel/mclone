@@ -38,6 +38,7 @@ mod scheduler;
 mod sky_light_bridge;
 mod spawn;
 mod starter_content;
+mod structure;
 mod structure_lab;
 mod timing;
 mod types;
@@ -129,6 +130,11 @@ pub use spawn::{
     initial_spawn_center_for_seed,
 };
 pub use starter_content::{RealizedStarterPlanIdentity, StarterContentDescriptor};
+pub use structure::{
+    CROSS_CHUNK_CANARY_PIECE_ID, CROSS_CHUNK_CANARY_START_CHUNK, CROSS_CHUNK_CANARY_STRUCTURE_ID,
+    ChunkStructureData, StructureBlockPlacement, StructureBoundingBox, StructureOverlay,
+    StructurePieceRecord, StructurePlacementReceipt, StructureReference, StructureStartRecord,
+};
 pub use structure_lab::{
     BarnLength, BarnTemplateSet, BarnVariant, CottageDepth, CottageEntry, CottageVariant,
     STRUCTURE_FAMILY_LAB_GALLERY_ID, STRUCTURE_FAMILY_LAB_MARKER_FILE, STRUCTURE_FAMILY_LAB_SEED,

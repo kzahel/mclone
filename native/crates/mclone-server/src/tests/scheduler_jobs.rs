@@ -234,7 +234,7 @@ fn chunk_scheduler_apply_interest_enqueues_features_before_poll() {
             .iter()
             .all(|event| !matches!(event, ChunkSchedulerEvent::SnapshotReady(_)))
     );
-    assert_eq!(events.len(), 9 * 4);
+    assert_eq!(events.len(), 9 * 8);
     assert_eq!(
         status_event_count(&events, ChunkStatus::Features, ChunkStatusStep::Scheduled),
         0
@@ -407,7 +407,7 @@ fn chunk_interest_updates_player_tickets_and_holder_levels() {
     assert_eq!(holder.ticket_level(), PLAYER_TICKET_LEVEL);
     assert_eq!(holder.full_status(), FullChunkStatus::EntityTicking);
     assert!(holder.full_status().is_or_after(FullChunkStatus::Ticking));
-    assert_eq!(events.len(), 9 * 4);
+    assert_eq!(events.len(), 9 * 8);
 
     let moved_events = scheduler
         .apply_interest(ChunkView {
@@ -452,7 +452,7 @@ fn duplicate_interest_while_job_running_does_not_enqueue_second_job() {
     };
 
     let first_events = scheduler.apply_interest(interest.clone()).unwrap();
-    assert_eq!(first_events.len(), 9 * 4);
+    assert_eq!(first_events.len(), 9 * 8);
     assert_eq!(scheduler.pending_persistence_load_count(), 9);
     let scheduled_events = scheduler.poll().unwrap();
     assert_eq!(

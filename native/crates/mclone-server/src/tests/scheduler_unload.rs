@@ -7,7 +7,7 @@ fn stale_unknown_ticket_expires_on_scheduler_tick() {
     let events = scheduler
         .add_region_ticket(ChunkTicketType::Unknown, ChunkPos::new(0, 0), 0)
         .unwrap();
-    assert_eq!(events.len(), 4);
+    assert_eq!(events.len(), 8);
     assert_eq!(scheduler.ticketed_chunk_count(), 1);
     assert_eq!(scheduler.ticket_level_at(ChunkPos::new(0, 0)), 33);
     assert_eq!(
@@ -156,7 +156,7 @@ fn chunk_scheduler_records_holder_status_slots_in_order() {
 
     let holder = scheduler.holder(ChunkPos::new(0, 0)).unwrap();
     assert_eq!(holder.target_status(), Some(ChunkStatus::Light));
-    assert_eq!(holder.ready_status_count(), 4);
+    assert_eq!(holder.ready_status_count(), 6);
     assert_eq!(
         holder.status_slot(ChunkStatus::Terrain),
         Some(&ChunkStatusSlot {
@@ -170,6 +170,24 @@ fn chunk_scheduler_records_holder_status_slots_in_order() {
         holder.status_slot(ChunkStatus::Surface),
         Some(&ChunkStatusSlot {
             status: ChunkStatus::Surface,
+            step: ChunkStatusStep::Ready,
+            revision: None,
+            job_id: None,
+        })
+    );
+    assert_eq!(
+        holder.status_slot(ChunkStatus::StructureStarts),
+        Some(&ChunkStatusSlot {
+            status: ChunkStatus::StructureStarts,
+            step: ChunkStatusStep::Ready,
+            revision: None,
+            job_id: None,
+        })
+    );
+    assert_eq!(
+        holder.status_slot(ChunkStatus::StructureReferences),
+        Some(&ChunkStatusSlot {
+            status: ChunkStatus::StructureReferences,
             step: ChunkStatusStep::Ready,
             revision: None,
             job_id: None,
@@ -234,7 +252,7 @@ fn chunk_scheduler_coalesces_duplicate_status_requests() {
 
     assert_eq!(
         without_fluid_tick_events(&apply_interest_and_poll(&mut scheduler, interest.clone())).len(),
-        73
+        109
     );
     assert_eq!(
         apply_interest_and_poll(&mut scheduler, interest),

@@ -1614,6 +1614,8 @@ impl ByteWriter {
             ChunkStatus::Features => 2,
             ChunkStatus::Light => 3,
             ChunkStatus::Full => 4,
+            ChunkStatus::StructureStarts => 5,
+            ChunkStatus::StructureReferences => 6,
         });
     }
 
@@ -2137,6 +2139,8 @@ impl<'a> ByteReader<'a> {
             2 => Ok(ChunkStatus::Features),
             3 => Ok(ChunkStatus::Light),
             4 => Ok(ChunkStatus::Full),
+            5 => Ok(ChunkStatus::StructureStarts),
+            6 => Ok(ChunkStatus::StructureReferences),
             status => Err(ProtocolCodecError::UnknownChunkStatus(status)),
         }
     }

@@ -29,9 +29,12 @@ use mclone_protocol::{
     PlayerStatistics, PlayerVitals, RealmId, StatisticKey,
 };
 
+#[cfg(test)]
+use crate::StructureOverlay;
 use crate::{
-    RealizedStarterPlanIdentity, StarterContentDescriptor, WorldBehaviorProfile,
-    WorldGenerationProfile,
+    ChunkStructureData, RealizedStarterPlanIdentity, StarterContentDescriptor,
+    StructureBlockPlacement, StructureBoundingBox, StructurePieceRecord, StructureReference,
+    StructureStartRecord, WorldBehaviorProfile, WorldGenerationProfile,
 };
 
 mod record_executor;
@@ -51,7 +54,7 @@ use mclone_core::{
 };
 
 const SNAPSHOT_MAGIC: &[u8; 12] = b"MCLONESNAP\0\0";
-const SNAPSHOT_FORMAT_VERSION: u32 = 5;
+const SNAPSHOT_FORMAT_VERSION: u32 = 6;
 const ENTITY_CHUNK_MAGIC: &[u8; 12] = b"MCLONEENT\0\0\0";
 const PLAYER_RECORD_MAGIC: &[u8; 12] = b"MCLONEPLYR\0\0";
 const WORLD_METADATA_MAGIC: &[u8; 12] = b"MCLONEWRLD\0\0";
@@ -210,6 +213,7 @@ pub struct ChunkRecord {
     pub light_algorithm_version: Option<u32>,
     pub scheduled_block_ticks: Vec<ScheduledTickRecord>,
     pub scheduled_fluid_ticks: Vec<ScheduledTickRecord>,
+    pub structures: ChunkStructureData,
 }
 
 impl ChunkRecord {
@@ -222,6 +226,7 @@ impl ChunkRecord {
             light_algorithm_version,
             scheduled_block_ticks: Vec::new(),
             scheduled_fluid_ticks: Vec::new(),
+            structures: ChunkStructureData::default(),
         }
     }
 
@@ -231,6 +236,7 @@ impl ChunkRecord {
             light_algorithm_version: None,
             scheduled_block_ticks: Vec::new(),
             scheduled_fluid_ticks: Vec::new(),
+            structures: ChunkStructureData::default(),
         }
     }
 
@@ -249,6 +255,11 @@ impl ChunkRecord {
 
     pub fn with_scheduled_fluid_ticks(mut self, ticks: Vec<ScheduledTickRecord>) -> Self {
         self.scheduled_fluid_ticks = ticks;
+        self
+    }
+
+    pub fn with_structure_data(mut self, structures: ChunkStructureData) -> Self {
+        self.structures = structures;
         self
     }
 }
@@ -4373,6 +4384,7 @@ fn write_chunk_record(writer: &mut impl Write, record: &ChunkRecord) -> ChunkSto
         &record.scheduled_fluid_ticks,
         "scheduled fluid tick count",
     )?;
+    write_chunk_structure_data(writer, &record.structures)?;
     writer.flush()?;
     Ok(())
 }
@@ -4441,6 +4453,11 @@ fn read_chunk_record(reader: &mut impl Read) -> ChunkStoreResult<ChunkRecord> {
     } else {
         (Vec::new(), Vec::new())
     };
+    let structures = if version >= 6 {
+        read_chunk_structure_data(reader)?
+    } else {
+        ChunkStructureData::default()
+    };
 
     Ok(ChunkRecord {
         snapshot: ChunkSnapshot {
@@ -4457,7 +4474,104 @@ fn read_chunk_record(reader: &mut impl Read) -> ChunkStoreResult<ChunkRecord> {
         light_algorithm_version,
         scheduled_block_ticks,
         scheduled_fluid_ticks,
+        structures,
     })
+}
+
+fn write_structure_bounds(
+    writer: &mut impl Write,
+    bounds: StructureBoundingBox,
+) -> ChunkStoreResult<()> {
+    write_block_pos(writer, bounds.min)?;
+    write_block_pos(writer, bounds.max)
+}
+
+fn read_structure_bounds(reader: &mut impl Read) -> ChunkStoreResult<StructureBoundingBox> {
+    let min = read_block_pos(reader)?;
+    let max = read_block_pos(reader)?;
+    StructureBoundingBox::new(min, max).map_err(ChunkStoreError::InvalidData)
+}
+
+fn write_chunk_structure_data(
+    writer: &mut impl Write,
+    data: &ChunkStructureData,
+) -> ChunkStoreResult<()> {
+    write_len(writer, data.starts.len(), "structure start count")?;
+    for start in &data.starts {
+        write_string(writer, &start.structure_id, "structure id length")?;
+        write_i32(writer, start.start_chunk.x)?;
+        write_i32(writer, start.start_chunk.z)?;
+        write_u32(writer, start.references)?;
+        write_structure_bounds(writer, start.bounds)?;
+        write_len(writer, start.pieces.len(), "structure piece count")?;
+        for piece in &start.pieces {
+            write_string(writer, &piece.piece_id, "structure piece id length")?;
+            write_structure_bounds(writer, piece.bounds)?;
+            write_len(writer, piece.blocks.len(), "structure block count")?;
+            for placement in &piece.blocks {
+                write_block_pos(writer, placement.pos)?;
+                write_u8(writer, placement.block)?;
+            }
+        }
+    }
+    write_len(writer, data.references.len(), "structure reference count")?;
+    for reference in &data.references {
+        write_string(
+            writer,
+            &reference.structure_id,
+            "structure reference id length",
+        )?;
+        write_i32(writer, reference.start_chunk.x)?;
+        write_i32(writer, reference.start_chunk.z)?;
+    }
+    Ok(())
+}
+
+fn read_chunk_structure_data(reader: &mut impl Read) -> ChunkStoreResult<ChunkStructureData> {
+    let start_count = read_len(reader)?;
+    let mut starts = Vec::with_capacity(start_count);
+    for _ in 0..start_count {
+        let structure_id = read_bounded_string(reader, 256, "structure id")?;
+        let start_chunk = ChunkPos::new(read_i32(reader)?, read_i32(reader)?);
+        let references = read_u32(reader)?;
+        let bounds = read_structure_bounds(reader)?;
+        let piece_count = read_len(reader)?;
+        let mut pieces = Vec::with_capacity(piece_count);
+        for _ in 0..piece_count {
+            let piece_id = read_bounded_string(reader, 256, "structure piece id")?;
+            let piece_bounds = read_structure_bounds(reader)?;
+            let block_count = read_len(reader)?;
+            let mut blocks = Vec::with_capacity(block_count);
+            for _ in 0..block_count {
+                blocks.push(StructureBlockPlacement {
+                    pos: read_block_pos(reader)?,
+                    block: read_u8(reader)?,
+                });
+            }
+            pieces.push(StructurePieceRecord {
+                piece_id,
+                bounds: piece_bounds,
+                blocks,
+            });
+        }
+        starts.push(StructureStartRecord {
+            structure_id,
+            start_chunk,
+            references,
+            bounds,
+            pieces,
+        });
+    }
+
+    let reference_count = read_len(reader)?;
+    let mut references = Vec::with_capacity(reference_count);
+    for _ in 0..reference_count {
+        references.push(StructureReference {
+            structure_id: read_bounded_string(reader, 256, "structure reference id")?,
+            start_chunk: ChunkPos::new(read_i32(reader)?, read_i32(reader)?),
+        });
+    }
+    Ok(ChunkStructureData { starts, references })
 }
 
 fn write_entity_chunk_record(
@@ -5368,6 +5482,8 @@ fn status_to_u8(status: ChunkStatus) -> u8 {
         ChunkStatus::Features => 2,
         ChunkStatus::Light => 3,
         ChunkStatus::Full => 4,
+        ChunkStatus::StructureStarts => 5,
+        ChunkStatus::StructureReferences => 6,
     }
 }
 
@@ -5378,6 +5494,8 @@ fn status_from_u8(value: u8) -> ChunkStoreResult<ChunkStatus> {
         2 => Ok(ChunkStatus::Features),
         3 => Ok(ChunkStatus::Light),
         4 => Ok(ChunkStatus::Full),
+        5 => Ok(ChunkStatus::StructureStarts),
+        6 => Ok(ChunkStatus::StructureReferences),
         _ => Err(ChunkStoreError::InvalidData(format!(
             "unknown chunk status id {value}"
         ))),
@@ -5513,6 +5631,7 @@ mod tests {
 
     #[test]
     fn binary_chunk_record_format_roundtrips_light_algorithm_version() {
+        let overlay = StructureOverlay::CrossChunkCanaryV1;
         let record = ChunkRecord {
             snapshot: test_snapshot(ChunkPos::new(0, 0), 7).with_light_sections(
                 true,
@@ -5533,6 +5652,12 @@ mod tests {
                 "minecraft:water",
                 5,
             )],
+            structures: ChunkStructureData {
+                starts: overlay.starts_owned_by(ChunkPos::new(0, 0)),
+                references: overlay
+                    .references_for(ChunkPos::new(0, 0), HorizontalTopology::UNBOUNDED)
+                    .unwrap(),
+            },
         };
         let mut bytes = Vec::new();
 
@@ -5540,6 +5665,20 @@ mod tests {
         let decoded = read_chunk_record(&mut bytes.as_slice()).unwrap();
 
         assert_eq!(decoded, record);
+    }
+
+    #[test]
+    fn version_five_chunk_record_defaults_to_no_structure_data() {
+        let record = ChunkRecord::from_snapshot(test_snapshot(ChunkPos::new(0, 0), 7));
+        let mut bytes = Vec::new();
+        write_chunk_record(&mut bytes, &record).unwrap();
+
+        bytes[SNAPSHOT_MAGIC.len()..SNAPSHOT_MAGIC.len() + 4].copy_from_slice(&5_u32.to_le_bytes());
+        bytes.truncate(bytes.len() - 8);
+        let decoded = read_chunk_record(&mut bytes.as_slice()).unwrap();
+
+        assert_eq!(decoded.snapshot, record.snapshot);
+        assert_eq!(decoded.structures, ChunkStructureData::default());
     }
 
     #[test]
@@ -6495,9 +6634,15 @@ mod tests {
     fn sqlite_world_store_roundtrips_world_records_across_reopen() {
         let root = unique_temp_dir("sqlite_world_store_roundtrips_records");
         let path = root.join("world.sqlite3");
-        let chunk_pos = ChunkPos::new(21, -3);
+        let chunk_pos = ChunkPos::new(0, 0);
         let entity_pos = ChunkPos::new(21, -2);
-        let chunk = test_record(chunk_pos, 14);
+        let overlay = StructureOverlay::CrossChunkCanaryV1;
+        let chunk = test_record(chunk_pos, 14).with_structure_data(ChunkStructureData {
+            starts: overlay.starts_owned_by(chunk_pos),
+            references: overlay
+                .references_for(chunk_pos, HorizontalTopology::UNBOUNDED)
+                .unwrap(),
+        });
         let entity_chunk = test_entity_chunk_record(entity_pos, 15);
         let player = test_player_record(16);
         let metadata = test_world_metadata(17);

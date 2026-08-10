@@ -54,6 +54,8 @@ pub struct ChunkRevision(pub u64);
 pub enum ChunkStatus {
     Terrain,
     Surface,
+    StructureStarts,
+    StructureReferences,
     Features,
     Light,
     Full,

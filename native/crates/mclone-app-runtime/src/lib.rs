@@ -737,6 +737,9 @@ fn loading_progress_cell_status(
         None => LoadingProgressCellStatus::None,
         Some(ChunkStatus::Terrain) => LoadingProgressCellStatus::Terrain,
         Some(ChunkStatus::Surface) => LoadingProgressCellStatus::Surface,
+        Some(ChunkStatus::StructureStarts | ChunkStatus::StructureReferences) => {
+            LoadingProgressCellStatus::Surface
+        }
         Some(ChunkStatus::Features) => LoadingProgressCellStatus::Features,
         Some(ChunkStatus::Light) => LoadingProgressCellStatus::Light,
         Some(ChunkStatus::Full) => LoadingProgressCellStatus::TargetReady,

@@ -409,6 +409,11 @@ impl GeneratedChunk {
             .count()
     }
 
+    pub fn set_block_at_y(&mut self, local_x: i32, y: i32, local_z: i32, block_id: RawBlockId) {
+        self.assert_local_position(local_x, y - self.min_y, local_z);
+        self.blocks[chunk_block_index(local_x, y - self.min_y, local_z)] = block_id;
+    }
+
     pub fn to_chunk_snapshot(&self, revision: ChunkRevision, status: ChunkStatus) -> ChunkSnapshot {
         let block_state_ids = self
             .blocks
