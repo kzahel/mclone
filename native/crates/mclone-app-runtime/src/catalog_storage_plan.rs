@@ -19,6 +19,7 @@ pub enum StorageStore {
     DimensionEntityChunks,
     Dimensions,
     Players,
+    SavedData,
     WorldMetadata,
     ManagedWorldMetadata,
 }
@@ -31,26 +32,29 @@ impl StorageStore {
             Self::DimensionEntityChunks => "dimension-entity-chunks",
             Self::Dimensions => "dimensions",
             Self::Players => "players",
+            Self::SavedData => "saved-data",
             Self::WorldMetadata => "world-metadata",
             Self::ManagedWorldMetadata => "managed-world-metadata",
         }
     }
 }
 
-const ORDINARY_WORLD_RECORD_STORES: [StorageStore; 5] = [
+const ORDINARY_WORLD_RECORD_STORES: [StorageStore; 6] = [
     StorageStore::DimensionChunks,
     StorageStore::DimensionEntityChunks,
     StorageStore::Dimensions,
     StorageStore::Players,
+    StorageStore::SavedData,
     StorageStore::WorldMetadata,
 ];
 
-const FACTORY_RESET_STORES: [StorageStore; 6] = [
+const FACTORY_RESET_STORES: [StorageStore; 7] = [
     StorageStore::ManagedWorldMetadata,
     StorageStore::DimensionChunks,
     StorageStore::DimensionEntityChunks,
     StorageStore::Dimensions,
     StorageStore::Players,
+    StorageStore::SavedData,
     StorageStore::WorldMetadata,
 ];
 

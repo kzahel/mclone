@@ -23,6 +23,7 @@ use mclone_app_runtime::input_preferences::{
 use mclone_app_runtime::platform_operation::{PlatformOperationCompletion, PlatformOperationToken};
 use mclone_app_runtime::prepared_assets::{
     AUTHORED_FIRST_PARTY_PACK_ID, MINECRAFT_REFERENCE_PACK_ID, PreparedSceneAssets,
+    reference_asset_pack_selection,
 };
 use mclone_app_runtime::scene_session_runtime::RuntimeRenderPriority;
 #[cfg(all(test, target_arch = "wasm32"))]
@@ -32,7 +33,8 @@ use mclone_app_runtime::world_catalog::{
     WorldCatalogError, WorldCatalogErrorKind, WorldCatalogResponse,
 };
 use mclone_assets::{
-    MemoryAssetSource, PackedAssetSource, default_player_figure_path, load_prepared_figure,
+    MemoryAssetSource, PackedAssetSource, TexturePresentation, default_player_figure_path,
+    load_prepared_figure,
 };
 use mclone_client::BlockInteractionTarget;
 use mclone_core::{BlockPos, ChunkPos, Direction, Vec3d};
@@ -67,8 +69,8 @@ use web_sys::HtmlCanvasElement;
 use crate::web_bootstrap::{InitialAssetPacks, WebBootstrapResources, WebHostCapabilities};
 use crate::web_canvas::{
     WebCanvasContext, WebSceneRuntimeService, WebStartupConfig, WebWorldStorageStartupOptions,
-    gui_key_from_label, prepare_web_scene_assets_from_pack,
-    prepare_web_scene_assets_from_selection, ui_action_label, web_asset_pack_catalog,
+    gui_key_from_label, prepare_web_scene_assets_from_selection, ui_action_label,
+    web_asset_pack_catalog,
 };
 use crate::web_catalog_execution::WebCatalogExecution;
 use crate::web_gamepad::BrowserGamepadCollector;
@@ -554,6 +556,7 @@ pub struct WebSceneHost {
     mesh_build_count: usize,
     render_color_profile: String,
     last_runner_kind: String,
+    last_runtime_start_error: Option<String>,
 }
 
 impl WebSceneHost {
@@ -1966,6 +1969,7 @@ impl WebSceneHost {
                 let report = match outcome {
                     Ok(runtime) => self.complete_started_runtime(pending, runtime)?,
                     Err(error) => {
+                        self.last_runtime_start_error = Some(error.clone());
                         self.host_mut()?.fail_external_session_start(pending, error);
                         self.ui_report(false, None).map_err(JsValue::from)?
                     }
@@ -2264,8 +2268,16 @@ async fn create_scene_host(
         initial_asset_packs.diagnostic.clone(),
     )
     .map_err(JsValue::from)?;
-    let active_assets = prepare_web_scene_assets_from_pack(initial_asset_packs.reference.clone())
-        .map_err(JsValue::from)?;
+    let active_assets = prepare_web_scene_assets_from_selection(
+        0,
+        initial_asset_packs.authored.clone(),
+        initial_asset_packs.reference.clone(),
+        initial_asset_packs.fallback.clone(),
+        initial_asset_packs.diagnostic.clone(),
+        reference_asset_pack_selection(),
+        TexturePresentation::Textured,
+    )
+    .map_err(JsValue::from)?;
     let context = WebCanvasContext::new_with_color_profile(canvas, render_options.color_profile)
         .await
         .map_err(JsValue::from)?;
@@ -2426,6 +2438,7 @@ async fn create_scene_host(
         mesh_build_count: 0,
         render_color_profile,
         last_runner_kind: "none".to_owned(),
+        last_runtime_start_error: None,
     };
     web_host.refresh_touch_overlay_from_input()?;
     Ok(web_host)
@@ -2708,6 +2721,7 @@ impl WebSceneHost {
         pending: ExternalSceneSessionStart,
         runtime: crate::WebRuntime,
     ) -> Result<JsValue, JsValue> {
+        self.last_runtime_start_error = None;
         let descriptor = pending.descriptor.clone();
         let active_assets = self
             .host_ref()?
@@ -3154,6 +3168,11 @@ impl WebSceneHost {
         )?;
         report_set_number(&object, "renderCount", self.rendered_frame_count as f64)?;
         report_set_number(&object, "interactionCount", self.interaction_count as f64)?;
+        report_set_string(
+            &object,
+            "lastRuntimeStartError",
+            self.last_runtime_start_error.as_deref().unwrap_or(""),
+        )?;
         self.write_common_counts(&object)?;
 
         if let Some(host) = self.host.as_ref() {

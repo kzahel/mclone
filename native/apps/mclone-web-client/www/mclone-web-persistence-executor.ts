@@ -5,6 +5,7 @@ import {
   WORLD_ID_INDEX,
   WORLD_METADATA_STORE,
   WORLD_PLAYER_STORE,
+  WORLD_SAVED_DATA_STORE,
   openWorldDb,
 } from "./mclone-web-world-catalog.js";
 
@@ -94,6 +95,7 @@ const NAMESPACE_SPECS = new Map<number, NamespaceSpec>([
     valueFields: ["dimensionKey", "x", "z"],
   }],
   [4, { store: WORLD_PLAYER_STORE, keyKinds: ["text"], valueFields: ["playerKey"] }],
+  [5, { store: WORLD_SAVED_DATA_STORE, keyKinds: ["text"], valueFields: ["savedDataKey"] }],
 ]);
 
 export async function executeIndexedDbRecordRequests(

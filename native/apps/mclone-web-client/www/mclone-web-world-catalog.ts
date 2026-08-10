@@ -1,10 +1,11 @@
 export const WORLD_DB_NAME = "mclone-web-worlds";
-export const WORLD_DB_VERSION = 6;
+export const WORLD_DB_VERSION = 7;
 export const WORLD_CATALOG_STORE = "worlds";
 export const WORLD_CHUNK_STORE = "dimensionChunks";
 export const WORLD_ENTITY_CHUNK_STORE = "dimensionEntityChunks";
 export const WORLD_DIMENSION_STORE = "dimensions";
 export const WORLD_PLAYER_STORE = "players";
+export const WORLD_SAVED_DATA_STORE = "savedData";
 export const WORLD_METADATA_STORE = "worldMetadata";
 export const MANAGED_WORLD_METADATA_STORE = "managedWorlds";
 export const WORLD_ID_INDEX = "worldId";
@@ -64,6 +65,7 @@ export function openWorldDb(): Promise<IDBDatabase> {
       ensureDimensionWorldRecordStore(db, request.transaction, WORLD_ENTITY_CHUNK_STORE);
       ensureWorldDimensionStore(db, request.transaction);
       ensureWorldPlayerStore(db, request.transaction);
+      ensureWorldSavedDataStore(db, request.transaction);
       ensureWorldMetadataStore(db, request.transaction);
       ensureWorldCatalogStore(db);
       ensureManagedWorldMetadataStore(db);
@@ -246,6 +248,7 @@ function catalogBrowserStoreName(stableName: string): string {
     case "dimension-entity-chunks": return WORLD_ENTITY_CHUNK_STORE;
     case "dimensions": return WORLD_DIMENSION_STORE;
     case "players": return WORLD_PLAYER_STORE;
+    case "saved-data": return WORLD_SAVED_DATA_STORE;
     case "world-metadata": return WORLD_METADATA_STORE;
     case "managed-world-metadata": return MANAGED_WORLD_METADATA_STORE;
     default: throw new Error(`unsupported Rust catalog store ${JSON.stringify(stableName)}`);
@@ -266,6 +269,7 @@ export async function clearIndexedDbWorldRecords(
     clearIndexedDbStoreForWorld(db, WORLD_ENTITY_CHUNK_STORE, worldId),
     clearIndexedDbStoreForWorld(db, WORLD_DIMENSION_STORE, worldId),
     clearIndexedDbStoreForWorld(db, WORLD_PLAYER_STORE, worldId),
+    clearIndexedDbStoreForWorld(db, WORLD_SAVED_DATA_STORE, worldId),
     clearIndexedDbStoreForWorld(db, WORLD_METADATA_STORE, worldId),
   ]);
 }
@@ -318,6 +322,23 @@ function ensureWorldPlayerStore(
   }
   const store = db.createObjectStore(WORLD_PLAYER_STORE, {
     keyPath: ["worldId", "playerKey"],
+  });
+  store.createIndex(WORLD_ID_INDEX, "worldId", { unique: false });
+}
+
+function ensureWorldSavedDataStore(
+  db: IDBDatabase,
+  transaction: IDBTransaction | null,
+): void {
+  if (db.objectStoreNames.contains(WORLD_SAVED_DATA_STORE)) {
+    const store = transaction?.objectStore(WORLD_SAVED_DATA_STORE);
+    if (store && !store.indexNames.contains(WORLD_ID_INDEX)) {
+      store.createIndex(WORLD_ID_INDEX, "worldId", { unique: false });
+    }
+    return;
+  }
+  const store = db.createObjectStore(WORLD_SAVED_DATA_STORE, {
+    keyPath: ["worldId", "savedDataKey"],
   });
   store.createIndex(WORLD_ID_INDEX, "worldId", { unique: false });
 }

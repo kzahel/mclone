@@ -5476,19 +5476,19 @@ function worldListRowPoint(geometry, index) {
 
 /** @param {{ width: number, height: number }} geometry */
 function worldCreateCreatePoint(geometry) {
-  const panel = centeredPanel(geometry, 320.0, 202.0);
+  const panel = centeredPanel(geometry, 320.0, 264.0);
   return {
     x: panel.x + panel.width * 0.5,
-    y: panel.y + 149.0,
+    y: panel.y + 212.0,
   };
 }
 
 /** @param {{ width: number, height: number }} geometry */
 function worldCreateProfilePoint(geometry) {
-  const panel = centeredPanel(geometry, 320.0, 202.0);
+  const panel = centeredPanel(geometry, 320.0, 264.0);
   return {
     x: panel.x + panel.width * 0.5,
-    y: panel.y + 125.0,
+    y: panel.y + 140.0,
   };
 }
 
@@ -5639,7 +5639,8 @@ async function waitForSessionWorldId(page, options) {
       ({ worldId, notWorldId }) => {
         const state = globalThis.__mcloneWebApp?.state;
         const sessionWorldId = String(state?.sessionWorldId ?? "");
-        return state?.ok === true
+        return state?.sessionState === "failed"
+          || state?.ok === true
           && state.ready === true
           && state.sessionState === "active"
           && state.sessionKind === "localWorld"
@@ -5657,7 +5658,7 @@ async function waitForSessionWorldId(page, options) {
     const state = await page.evaluate(() => globalThis.__mcloneWebApp?.state ?? null);
     throw new Error(`timed out waiting for catalog session ${JSON.stringify(options)}: ${String(error)}\n${JSON.stringify(state, null, 2)}`);
   }
-  return page.evaluate(() => {
+  const session = await page.evaluate(() => {
     const state = globalThis.__mcloneWebApp.state;
     return {
       sessionState: state.sessionState,
@@ -5667,8 +5668,15 @@ async function waitForSessionWorldId(page, options) {
       status: state.status,
       clientHost: state.clientHost,
       nativeUiScreen: state.nativeUiScreen,
+      sessionFailureMessage: state.sessionFailureMessage,
+      statusOverlayMessage: state.statusOverlayMessage,
+      lastRuntimeStartError: state.lastRuntimeStartError,
     };
   });
+  if (session.sessionState === "failed") {
+    throw new Error(`catalog session failed:\n${JSON.stringify(session, null, 2)}`);
+  }
+  return session;
 }
 
 /**
@@ -5745,6 +5753,10 @@ async function installIndexedDbCatalogHelper(page) {
           catalog.WORLD_CATALOG_STORE,
           catalog.WORLD_CHUNK_STORE,
           catalog.WORLD_ENTITY_CHUNK_STORE,
+          catalog.WORLD_DIMENSION_STORE,
+          catalog.WORLD_PLAYER_STORE,
+          catalog.WORLD_SAVED_DATA_STORE,
+          catalog.WORLD_METADATA_STORE,
         ].filter((storeName) => db.objectStoreNames.contains(storeName));
         if (stores.length === 0) {
           return;
@@ -5771,6 +5783,7 @@ async function installIndexedDbCatalogHelper(page) {
           const stores = [
             catalog.WORLD_CHUNK_STORE,
             catalog.WORLD_ENTITY_CHUNK_STORE,
+            catalog.WORLD_SAVED_DATA_STORE,
           ];
           const transaction = db.transaction(stores, "readwrite");
           transaction.oncomplete = () => resolve(undefined);
@@ -5789,6 +5802,11 @@ async function installIndexedDbCatalogHelper(page) {
             x: 991,
             z: 991,
             record: { smoke: "catalog-delete-entity-chunk" },
+          });
+          transaction.objectStore(catalog.WORLD_SAVED_DATA_STORE).put({
+            worldId,
+            savedDataKey: "mclone:catalog-delete-smoke",
+            record: new Uint8Array([1, 2, 3]),
           });
         });
       } finally {
@@ -6022,7 +6040,7 @@ async function waitForBrowserIndexedDbRecordsAtLeast(page, worldId, minRecords) 
 async function installIndexedDbCountHelper(page) {
   await page.evaluate(() => {
     const global = /** @type {any} */ (globalThis);
-    /** @type {(worldId: string) => Promise<{ chunks: number, entityChunks: number, dimensions: number, worldMetadata: number, worldMetadataBytes: number[] | null, total: number }>} */
+    /** @type {(worldId: string) => Promise<{ chunks: number, entityChunks: number, dimensions: number, players: number, savedData: number, worldMetadata: number, worldMetadataBytes: number[] | null, total: number }>} */
     const countIndexedDbRecords = async (worldId) => {
       const db = await /** @type {Promise<IDBDatabase>} */ (new Promise((resolve, reject) => {
         const request = indexedDB.open("mclone-web-worlds");
@@ -6044,10 +6062,12 @@ async function installIndexedDbCountHelper(page) {
           request.onsuccess = () => resolve(Number(request.result) || 0);
           request.onerror = () => reject(request.error ?? new Error(`failed to count ${storeName}`));
         });
-        const [chunks, entityChunks, dimensions, worldMetadataRecord] = await Promise.all([
+        const [chunks, entityChunks, dimensions, players, savedData, worldMetadataRecord] = await Promise.all([
           countStore("dimensionChunks"),
           countStore("dimensionEntityChunks"),
           countStore("dimensions"),
+          countStore("players"),
+          countStore("savedData"),
           new Promise((resolve, reject) => {
             if (!db.objectStoreNames.contains("worldMetadata")) {
               resolve(null);
@@ -6069,11 +6089,16 @@ async function installIndexedDbCountHelper(page) {
           chunks: Number(chunks) || 0,
           entityChunks: Number(entityChunks) || 0,
           dimensions: Number(dimensions) || 0,
+          players: Number(players) || 0,
+          savedData: Number(savedData) || 0,
           worldMetadata: metadataBytes ? 1 : 0,
           worldMetadataBytes: metadataBytes,
           total: (Number(chunks) || 0)
             + (Number(entityChunks) || 0)
-            + (Number(dimensions) || 0),
+            + (Number(dimensions) || 0)
+            + (Number(players) || 0)
+            + (Number(savedData) || 0)
+            + (metadataBytes ? 1 : 0),
         };
       } finally {
         db.close();
@@ -7617,8 +7642,9 @@ function crossOriginIsolationHeaders() {
   };
 }
 
+/** @param {Page} page @param {string} baseUrl */
 async function probeHomesteadScoutWorker(page, baseUrl) {
-  const witness = await page.evaluate(async ({ baseUrl }) => {
+  const witness = await page.evaluate(async (/** @type {{ baseUrl: string }} */ { baseUrl }) => {
     return await new Promise((resolve, reject) => {
       const worker = new Worker(`${baseUrl}/mclone-server-job-worker.js`, { type: "module" });
       const timeout = setTimeout(() => {

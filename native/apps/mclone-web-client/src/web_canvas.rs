@@ -50,7 +50,6 @@ use mclone_assets::{
     AssetPackSelection, PackedAssetSource, SharedAssetSource, TexturePresentation,
     TextureVisualProfile,
 };
-use mclone_audio::PreparedAudioAssets;
 use mclone_client::ClientRuntime;
 #[cfg(test)]
 use mclone_core::{
@@ -65,10 +64,8 @@ use mclone_mesh::{
 use mclone_protocol::{
     ClientCommand, ClientEphemeralMessage, ServerUpdate, decode_server_update, encode_server_update,
 };
-use mclone_render::actor_assets::load_actor_texture_assets;
 use mclone_render::chunk::TexturedSectionRenderOptions;
 use mclone_render::color_profile::{RenderColorProfile, RenderConfig};
-use mclone_render::screen_effect::load_screen_effect_texture_assets;
 use mclone_render_session::{
     RenderSectionCacheUpdate, RenderSectionCompileQueueHealth, RenderSectionCompileRequest,
     RenderSectionCompileResult, RenderSectionCompiler, build_client_textured_sections,
@@ -2455,32 +2452,6 @@ fn load_textured_mesh_assets_from_pack(bytes: Vec<u8>) -> Result<WebTexturedMesh
         catalog: assets.catalog,
         asset_pack_file_count,
     })
-}
-
-/// CPU-side browser asset preparation for the neutral scene-host seam.
-///
-/// The caller runs this in the existing asset/worker lifecycle before handing
-/// the result to `McloneSceneHost::with_scene_runtime`. GPU upload remains in
-/// the browser driver, and browser audio stays explicitly absent.
-pub fn prepare_web_scene_assets_from_pack(bytes: Vec<u8>) -> Result<PreparedSceneAssets, String> {
-    let source = PackedAssetSource::from_bytes(bytes)
-        .map_err(|error| format!("failed to parse packed scene assets: {error}"))?;
-    let terrain = load_textured_terrain_assets(&source)
-        .map_err(|error| format!("failed to prepare browser terrain assets: {error}"))?;
-    let actors = load_actor_texture_assets(&source)
-        .map_err(|error| format!("failed to prepare browser actor assets: {error}"))?;
-    let screen_effects = load_screen_effect_texture_assets(&source)
-        .map_err(|error| format!("failed to prepare browser screen-effect assets: {error}"))?;
-    Ok(PreparedSceneAssets::startup(
-        0,
-        TexturedMeshAssets {
-            catalog: terrain.catalog,
-            atlas: terrain.atlas.into(),
-        },
-        actors,
-        screen_effects,
-        PreparedAudioAssets::silent(),
-    ))
 }
 
 pub fn prepare_web_scene_assets_from_selection(
