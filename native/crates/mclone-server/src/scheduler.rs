@@ -70,10 +70,11 @@ use crate::{
     AUTHORED_WORLD_HEIGHT, AUTHORED_WORLD_MIN_Y, CHUNK_LEVEL_FULL, ChunkJobId, ChunkJobState,
     ChunkResidency, ChunkStatusStep, ChunkTicketKey, ChunkTicketType, DEFAULT_GAMEPLAY_RATE_HZ,
     FORCED_TICKET_LEVEL, FluidKind, FullChunkStatus, GenerationExecutionRequest, GenerationInput,
-    GenerationPlanRequest, IntroHomesteadTerrainOverlay, LightStatusMailboxKind,
-    LightStatusMailboxMetrics, MAX_CHUNK_DISTANCE, StructureOverlay, UNLOADED_CHUNK_LEVEL,
-    WorkerFrameMetrics, WorldBlockPos, WorldGenerationDescriptor, WorldGenerationProfile,
-    WorldgenMailboxKind, full_chunk_status_for_ticket_level,
+    GenerationPlanRequest, INTRO_HOMESTEAD_STRUCTURE_ID, IntroHomesteadStructureOverlay,
+    IntroHomesteadTerrainOverlay, LightStatusMailboxKind, LightStatusMailboxMetrics,
+    MAX_CHUNK_DISTANCE, StructureOverlay, UNLOADED_CHUNK_LEVEL, WorkerFrameMetrics, WorldBlockPos,
+    WorldGenerationDescriptor, WorldGenerationProfile, WorldgenMailboxKind,
+    full_chunk_status_for_ticket_level,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -513,6 +514,7 @@ pub struct ChunkScheduler {
     seed: i64,
     world_generation_profile: WorldGenerationProfile,
     structure_overlay: StructureOverlay,
+    intro_homestead_structure_overlay: Option<IntroHomesteadStructureOverlay>,
     intro_homestead_terrain_overlay: Option<IntroHomesteadTerrainOverlay>,
     topology: HorizontalTopology,
     lighting_enabled: bool,
@@ -785,6 +787,7 @@ impl ChunkScheduler {
             seed,
             world_generation_profile: WorldGenerationProfile::default(),
             structure_overlay: StructureOverlay::None,
+            intro_homestead_structure_overlay: None,
             intro_homestead_terrain_overlay: None,
             topology: HorizontalTopology::UNBOUNDED,
             lighting_enabled: true,
@@ -849,6 +852,7 @@ impl ChunkScheduler {
             seed,
             world_generation_profile: WorldGenerationProfile::default(),
             structure_overlay: StructureOverlay::None,
+            intro_homestead_structure_overlay: None,
             intro_homestead_terrain_overlay: None,
             topology: HorizontalTopology::UNBOUNDED,
             lighting_enabled: true,
@@ -929,6 +933,23 @@ impl ChunkScheduler {
         }
         self.intro_homestead_terrain_overlay = overlay;
         Ok(())
+    }
+
+    pub fn set_intro_homestead_structure_overlay(
+        &mut self,
+        overlay: Option<IntroHomesteadStructureOverlay>,
+    ) -> ChunkStoreResult<()> {
+        if !self.holders.is_empty() || !self.jobs.is_empty() {
+            return Err(ChunkStoreError::InvalidData(
+                "homestead structure overlay must be selected before chunk scheduling".to_owned(),
+            ));
+        }
+        self.intro_homestead_structure_overlay = overlay;
+        Ok(())
+    }
+
+    pub fn intro_homestead_structure_overlay(&self) -> Option<&IntroHomesteadStructureOverlay> {
+        self.intro_homestead_structure_overlay.as_ref()
     }
 
     pub fn intro_homestead_terrain_overlay(&self) -> Option<&IntroHomesteadTerrainOverlay> {
@@ -3105,17 +3126,14 @@ impl ChunkScheduler {
                     }
                 } else if status < ChunkStatus::Features {
                     if status == ChunkStatus::StructureStarts {
-                        let starts = self.structure_overlay.starts_owned_by(pos);
+                        let starts = self.structure_starts_owned_by(pos);
                         self.holders
                             .get_mut(&pos)
                             .expect("holder must exist before recording structure starts")
                             .structure_data_mut()
                             .starts = starts;
                     } else if status == ChunkStatus::StructureReferences {
-                        let references = self
-                            .structure_overlay
-                            .references_for(pos, self.topology)
-                            .map_err(ChunkStoreError::InvalidData)?;
+                        let references = self.structure_references_for(pos)?;
                         self.holders
                             .get_mut(&pos)
                             .expect("holder must exist before recording structure references")
@@ -3613,9 +3631,7 @@ impl ChunkScheduler {
             let references = if let Some(holder) = self.holders.get(pos) {
                 holder.structure_data().references.clone()
             } else {
-                self.structure_overlay
-                    .references_for(*pos, self.topology)
-                    .map_err(ChunkStoreError::InvalidData)?
+                self.structure_references_for(*pos)?
             };
             self.materialize_generation_overlays(*pos, &references, chunk)?;
         }
@@ -3624,6 +3640,7 @@ impl ChunkScheduler {
 
     fn has_generation_overlay(&self) -> bool {
         self.structure_overlay != StructureOverlay::None
+            || self.intro_homestead_structure_overlay.is_some()
             || self.intro_homestead_terrain_overlay.is_some()
     }
 
@@ -3638,10 +3655,53 @@ impl ChunkScheduler {
                 .materialize_chunk(pos, chunk)
                 .map_err(ChunkStoreError::InvalidData)?;
         }
+        let built_in_references = structure_references
+            .iter()
+            .filter(|reference| reference.structure_id != INTRO_HOMESTEAD_STRUCTURE_ID)
+            .cloned()
+            .collect::<Vec<_>>();
         self.structure_overlay
-            .materialize_chunk(pos, self.topology, structure_references, chunk)
+            .materialize_chunk(pos, self.topology, &built_in_references, chunk)
             .map_err(ChunkStoreError::InvalidData)?;
+        if let Some(overlay) = &self.intro_homestead_structure_overlay {
+            overlay
+                .materialize_chunk(pos, structure_references, chunk)
+                .map_err(ChunkStoreError::InvalidData)?;
+        }
         Ok(())
+    }
+
+    fn structure_starts_owned_by(&self, pos: ChunkPos) -> Vec<crate::StructureStartRecord> {
+        let mut starts = self.structure_overlay.starts_owned_by(pos);
+        if let Some(overlay) = &self.intro_homestead_structure_overlay {
+            starts.extend(overlay.starts_owned_by(pos));
+        }
+        starts.sort_by(|left, right| {
+            left.structure_id
+                .cmp(&right.structure_id)
+                .then(left.start_chunk.cmp(&right.start_chunk))
+        });
+        starts
+    }
+
+    fn structure_references_for(
+        &self,
+        pos: ChunkPos,
+    ) -> ChunkStoreResult<Vec<crate::StructureReference>> {
+        let mut references = self
+            .structure_overlay
+            .references_for(pos, self.topology)
+            .map_err(ChunkStoreError::InvalidData)?;
+        if let Some(overlay) = &self.intro_homestead_structure_overlay {
+            references.extend(
+                overlay
+                    .references_for(pos)
+                    .map_err(ChunkStoreError::InvalidData)?,
+            );
+        }
+        references.sort();
+        references.dedup();
+        Ok(references)
     }
 
     fn enqueue_light_status_batch(&mut self, statuses: Vec<PendingLightStatus>) {

@@ -498,6 +498,85 @@ fn homestead_grade_cache_reopens_and_player_edit_wins() {
 }
 
 #[test]
+fn homestead_cottage_cache_reopens_and_player_edit_wins() {
+    let store = SharedMemoryWorldStore::new();
+    let seed = 8_675_309;
+    let plan = crate::realize_intro_homestead_plan(
+        seed,
+        WorldGenerationProfile::FlatGrassV1,
+        HorizontalTopology::UNBOUNDED,
+    )
+    .unwrap();
+    let terrain = crate::IntroHomesteadTerrainOverlay::new(plan.clone()).unwrap();
+    let structure =
+        crate::IntroHomesteadStructureOverlay::first_cottage(plan, HorizontalTopology::UNBOUNDED)
+            .unwrap();
+    let authored = structure.start().pieces[0]
+        .blocks
+        .iter()
+        .filter(|placement| placement.block != AIR)
+        .max_by_key(|placement| placement.pos.y)
+        .copied()
+        .unwrap();
+    let center = authored.pos.chunk_pos();
+    let interest = ChunkView {
+        center,
+        render_distance: 0,
+        chunk_tracking_radius: 0,
+    };
+
+    let configure = |scheduler: &mut ChunkScheduler| {
+        scheduler
+            .set_world_generation_profile(WorldGenerationProfile::FlatGrassV1)
+            .unwrap();
+        scheduler
+            .set_intro_homestead_terrain_overlay(Some(terrain.clone()))
+            .unwrap();
+        scheduler
+            .set_intro_homestead_structure_overlay(Some(structure.clone()))
+            .unwrap();
+        scheduler.set_lighting_enabled(false);
+    };
+
+    {
+        let mut scheduler = ChunkScheduler::with_world_store(seed, Box::new(store.clone()));
+        configure(&mut scheduler);
+        apply_interest_and_poll(&mut scheduler, interest.clone());
+        assert_eq!(scheduler.block_at_world(authored.pos), Some(authored.block));
+        poll_scheduler_until_persistence_idle(&mut scheduler);
+    }
+
+    {
+        let mut reopened = ChunkScheduler::with_world_store(seed, Box::new(store.clone()));
+        configure(&mut reopened);
+        apply_interest_and_poll(&mut reopened, interest.clone());
+        assert_eq!(reopened.block_at_world(authored.pos), Some(authored.block));
+        assert_eq!(
+            reopened.holder(center).map(ChunkHolder::residency),
+            Some(ChunkResidency::LoadedFromStore)
+        );
+        assert_eq!(reopened.job_count(), 0);
+        assert!(reopened.set_block_at_world(authored.pos, STONE));
+        reopened
+            .apply_interest(ChunkView {
+                center: ChunkPos::new(center.x + 100, center.z + 100),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            })
+            .unwrap();
+        reopened.process_pending_unloads(usize::MAX).unwrap();
+        poll_scheduler_until_persistence_idle(&mut reopened);
+        reopened.process_pending_unloads(usize::MAX).unwrap();
+    }
+
+    let mut edited = ChunkScheduler::with_world_store(seed, Box::new(store));
+    configure(&mut edited);
+    apply_interest_and_poll(&mut edited, interest);
+    assert_eq!(edited.block_at_world(authored.pos), Some(STONE));
+    assert_eq!(edited.job_count(), 0);
+}
+
+#[test]
 fn small_island_persistence_hit_wins_and_survives_reopen() {
     let store = SharedMemoryWorldStore::new();
     let center = ChunkPos::new(0, 0);

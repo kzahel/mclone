@@ -75,9 +75,10 @@ use crate::spawn::{
 };
 use crate::timing::{simulation_timing_elapsed_us, simulation_timing_start};
 use crate::{
-    IntroHomesteadPlanRecord, IntroHomesteadTerrainOverlay, NaturalSpawningDiagnostics,
-    REALIZED_STARTER_PLAN_SAVED_DATA_KEY, StarterContentDescriptor, decode_intro_homestead_plan,
-    realize_intro_homestead_plan, validate_intro_homestead_plan_for_world,
+    IntroHomesteadPlanRecord, IntroHomesteadStructureOverlay, IntroHomesteadTerrainOverlay,
+    NaturalSpawningDiagnostics, REALIZED_STARTER_PLAN_SAVED_DATA_KEY, StarterContentDescriptor,
+    decode_intro_homestead_plan, realize_intro_homestead_plan,
+    validate_intro_homestead_plan_for_world,
 };
 
 fn move_player_command_with_position(
@@ -1205,6 +1206,7 @@ impl RealmServer {
                 ));
             }
             self.intro_homestead_plan = None;
+            self.scheduler.set_intro_homestead_structure_overlay(None)?;
             self.scheduler.set_intro_homestead_terrain_overlay(None)?;
             return Ok(());
         }
@@ -1259,8 +1261,15 @@ impl RealmServer {
         };
         let terrain_overlay = IntroHomesteadTerrainOverlay::new(plan.clone())
             .map_err(ChunkStoreError::InvalidData)?;
+        let structure_overlay = IntroHomesteadStructureOverlay::first_cottage(
+            plan.clone(),
+            self.active_dimension.definition.topology,
+        )
+        .map_err(ChunkStoreError::InvalidData)?;
         self.scheduler
             .set_intro_homestead_terrain_overlay(Some(terrain_overlay))?;
+        self.scheduler
+            .set_intro_homestead_structure_overlay(Some(structure_overlay))?;
         self.intro_homestead_plan = Some(plan);
         Ok(())
     }

@@ -59,6 +59,22 @@ const COOP_JSON: &str = include_str!(concat!(
     "/../../../assets/mclone/structures/farmstead-rosehip-chicken-coop-v1.structure.json"
 ));
 
+pub(crate) fn load_homestead_structure_record(
+    content_id: &str,
+) -> Result<CanonicalStructureRecord, String> {
+    let json = match content_id {
+        "farmstead-cottage-a-v2" => COTTAGE_STANDARD_JSON,
+        "farmstead-cottage-snug-canopy-porch-v1" => COTTAGE_SNUG_JSON,
+        "farmstead-barn-core-a-v2" => BARN_STANDARD_JSON,
+        "farmstead-barn-core-short-v1" => BARN_SHORT_JSON,
+        "farmstead-barn-lean-to-a-v2" => LEAN_TO_STANDARD_JSON,
+        "farmstead-barn-lean-to-short-v1" => LEAN_TO_SHORT_JSON,
+        "farmstead-rosehip-chicken-coop-v1" => COOP_JSON,
+        _ => return Err(format!("unknown intro homestead content `{content_id}`")),
+    };
+    load_canonical_structure_json(json).map_err(|error| error.to_string())
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum HomesteadPlanAxisTopology {

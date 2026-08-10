@@ -1951,6 +1951,25 @@ mod native {
                     || path_surface == BlockStateId(u32::from(mclone_worldgen::block::COARSE_DIRT)),
                 "expected authored path surface at {target:?}, got {path_surface:?}"
             );
+
+            let cottage = crate::IntroHomesteadStructureOverlay::first_cottage(
+                plan,
+                HorizontalTopology::UNBOUNDED,
+            )
+            .unwrap();
+            let roof_block = cottage.start().pieces[0]
+                .blocks
+                .iter()
+                .filter(|placement| placement.block != mclone_worldgen::block::AIR)
+                .max_by_key(|placement| placement.pos.y)
+                .unwrap();
+            let (snapshot, _) = load_chunk_snapshot(&mut runner, roof_block.pos.chunk_pos());
+            assert_eq!(
+                snapshot_block_state(&snapshot, roof_block.pos),
+                BlockStateId(u32::from(roof_block.block)),
+                "expected authored cottage roof block at {:?}",
+                roof_block.pos
+            );
             runner.join_shutdown().unwrap();
         }
 
