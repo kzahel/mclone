@@ -1,16 +1,13 @@
 # Tactical 274: Playable Intro Homestead
 
-Status: **Human Review R3 accepted on 2026-08-10; Slice 6 is active at the
-new-player arrival milestone.
-Commit `b74cf73b` proved terrain materialization but its seed-`8675309` site
-failed visual review in shallow water. After the requested retry, commit
-`10329418` adds exact footprint validation and proposes a dry seed-`0`
-`compact-v1` rolling-meadow site with a tier-correct arrival and curved farm
-track. Its aerial, approach, and exact-arrival pixels were inspected and the
-human accepted the replacement. Commits `7ad8fbe3`, `da444ecf`, and
-`b481c53a` now materialize and visually validate the cottage, remaining
-buildings, circulation, pond, garden, open hedged yard, and focal oak through
-one clipped persistent structure start.**
+Status: **Human Review R4 handoff prepared on 2026-08-10. Slices 6 and 7 now
+publish the accepted new-player arrival, realize all five persistent residents,
+expose Homestead Start through shared world creation, and prove headed browser
+create/edit/switch/reopen durability. Desktop offscreen, synthetic stereo,
+WebGPU, flat Android/AVD, strict first-party provenance, and Android XR build
+gates pass. A live 20-minute human desktop session and physical Quest run were
+not completed; R4 must not call the result shareable or Quest-ready without
+reviewing those explicit gaps.**
 
 Topic:
 
@@ -611,6 +608,97 @@ browser pixel or create/reopen proof.
 to Slice 6, first publishing the accepted arrival through the shared player
 lifecycle and then realizing residents through the persistent entity path.
 
+## Human Review R4 Handoff
+
+Slices 6 and 7 are implemented through the automated cross-host closeout:
+
+- `a71ab724` routes only a new player without a persisted pose to the accepted
+  homestead arrival, while returning players keep their saved pose and death
+  uses the safe shared-spawn path;
+- `f1133b31` consumes the three chicken and two cow markers into stable
+  persistent entity identities without duplication across chunk churn,
+  partial materialization, reopen, or cache reuse;
+- `7046ad1e` adds the independent shared `Homestead Start` / `Wild Start`
+  selection and the showcase preset to world creation;
+- `f199e0ff` drives title, create, showcase, creation, catalog return, and
+  reopen through the shared rendered UI/action contract;
+- `f2ff40e4` restores browser world creation with the complete selected asset
+  set and adds IndexedDB saved-data ownership;
+- `7bcaea35` carries starter identity through the browser catalog and scene
+  boundary, preserves opaque persistence codec/revision metadata, and adds the
+  headed create/edit/switch/reopen proof;
+- `fa5a08d0` synchronizes the packed-asset lock with the authored cow figure;
+  and
+- `f291f76d` updates flat-Android create-screen targeting and requires a second
+  creation marker so the initial session cannot mask a stale tap.
+
+The headed Chromium proof uses the rendered **Use Homestead Showcase** control,
+not a test-only world mutation. It creates seed `0` with
+`mclone-overworld-v1 + intro-homestead-v1`, admits the exact five stable
+resident ids, places dirt at `(-200,89,-1353)` through ordinary gameplay,
+creates and enters a second Wild Start world, reopens the first world, and
+observes the same dirt block. The first world has 248 IndexedDB records,
+including one realized-plan saved-data record and two entity chunks. Deleting
+the second world removes all of its records. The same report separately
+round-trips opaque codec `7` and revision `9007199254740993`, proving the
+browser does not truncate a revision to JavaScript number precision.
+
+Inspected R4 pixels outside the repository:
+
+- native arrival/residents:
+  `/tmp/mclone-homestead-residents-yard-v1.png`,
+  `/tmp/mclone-homestead-residents-overhead-v1.png`, and
+  `/tmp/mclone-homestead-residents-coop-north-v1.png`;
+- deterministic shared create flow:
+  `/tmp/mclone-homestead-create-flow-v1.png`;
+- headed browser create, arrival, and ordinary edit:
+  `/tmp/mclone-native-web-homestead-create.png`,
+  `/tmp/mclone-native-web-homestead-playable.png`, and
+  `/tmp/mclone-native-web-homestead-edit.png`;
+- native offscreen and synthetic stereo boundaries:
+  `/tmp/mclone-desktop-offscreen.png` and
+  `/tmp/mclone-xr-emulation.png`; and
+- flat Android gameplay after the second creation marker:
+  `/tmp/mclone-android-avd-session.png`.
+
+R4 validation:
+
+- the focused server, UI, app-runtime, web-client, scene, arrival, resident,
+  persistence, and catalog suites pass; the sequential server library run
+  passes all 589 tests;
+- `pnpm native:web:typecheck`, the generic headed catalog smoke, and the
+  homestead-specific headed catalog smoke pass;
+- strict first-party validation is proprietary-free with no Minecraft
+  reference or unknown provenance: four actor figures, 149 atlas sprites, and
+  221 block states resolve with no missing registry entries;
+- native offscreen and synthetic stereo captures pass and were inspected;
+- the dual-ABI flat Android debug APK builds, the API-34 arm64 AVD creates a
+  second local world, renders gameplay, and passes log/focus/fatal checks; and
+- the Android XR release APK builds successfully.
+
+Two acceptance gaps remain explicit. The raw macOS `winit` executable could
+not be attached as an app-bundle/accessibility target, so the requested clean
+20-minute interactive desktop session was not honestly completed; the
+deterministic shared flow and headed browser flow cover its automated steps but
+do not substitute for human playtime. `quest doctor` also reports that no
+authorized Quest headset is attached, so no physical Quest pixel or comfort
+claim is made.
+
+Broad unrelated gates retain their existing failures: thin-adapter purity
+finds the unregistered terrain-vegetation Worker module, one scene source-shape
+lock expects the renderer call before its current wrapper, and the concurrent
+full server run can reproduce the known periodic-topology SQLite race while
+the sequential and isolated tests pass. The generic IndexedDB reload lane also
+timed out in its later writer-admission probe once during R4; the opaque-record
+sub-probe and the actual homestead IndexedDB reopen both pass in the focused
+headed flow.
+
+Human Review R4 must decide whether this is the first shareable playable alpha
+despite the unperformed manual/physical checks, reject it with a bounded fix
+list, or require those checks before product acceptance. No maximal-settlement,
+survival-breadth, LOD, or worlds-within-worlds work should resume before that
+decision.
+
 ## Implementation Slices
 
 ### Slice 0 — baseline and contract locks
@@ -729,7 +817,7 @@ assets.
 
 ### Slice 6 — arrival, residents, and durability
 
-Result: **active; Human Review R3 accepted the composition on 2026-08-10.**
+Result: **complete in `a71ab724` and `f1133b31`.**
 
 - Publish the accepted arrival as first-spawn/shared-spawn intent without
   moving returning players.
@@ -740,6 +828,11 @@ Result: **active; Human Review R3 accepted the composition on 2026-08-10.**
   repeated first-arrival teleport.
 
 ### Slice 7 — product flow and cross-host closeout
+
+Result: **implemented through automated closeout in `7046ad1e`, `f199e0ff`,
+`f2ff40e4`, `7bcaea35`, `fa5a08d0`, and `f291f76d`; Human Review R4 is
+pending. The live 20-minute desktop and physical Quest checks remain
+unperformed and are not claimed.**
 
 - Add the shared world-start selection and typed planning progress/failure to
   the existing create-world flow.
