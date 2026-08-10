@@ -1469,6 +1469,20 @@ impl ChunkScheduler {
         self.store.save_dimension_blocking(record)
     }
 
+    pub fn load_saved_data_blocking(
+        &mut self,
+        key: String,
+    ) -> ChunkStoreResult<Option<crate::SavedDataRecord>> {
+        self.store.load_saved_data_blocking(key)
+    }
+
+    pub fn save_saved_data_blocking(
+        &mut self,
+        record: crate::SavedDataRecord,
+    ) -> ChunkStoreResult<StoreWriteOutcome> {
+        self.store.save_saved_data_blocking(record)
+    }
+
     pub fn load_player_record(&mut self, player: PlayerRecordKey) -> PersistenceRequestId {
         let request_id = self.store.load_player(player.clone());
         self.pending_player_loads.insert(request_id, player);
@@ -3998,6 +4012,14 @@ impl ChunkScheduler {
                         "player save request {request_id} completed for an unexpected key"
                     )));
                 }
+                Ok(Vec::new())
+            }
+            WorldStoreCompletion::SavedDataLoaded { result, .. } => {
+                result?;
+                Ok(Vec::new())
+            }
+            WorldStoreCompletion::SavedDataSaved { result, .. } => {
+                result?;
                 Ok(Vec::new())
             }
             WorldStoreCompletion::RequestFailed { result, .. }

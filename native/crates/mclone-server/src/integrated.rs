@@ -74,7 +74,11 @@ use crate::spawn::{
     initial_spawn_center_for_descriptor,
 };
 use crate::timing::{simulation_timing_elapsed_us, simulation_timing_start};
-use crate::{NaturalSpawningDiagnostics, StarterContentDescriptor};
+use crate::{
+    IntroHomesteadPlanRecord, NaturalSpawningDiagnostics, REALIZED_STARTER_PLAN_SAVED_DATA_KEY,
+    StarterContentDescriptor, decode_intro_homestead_plan, realize_intro_homestead_plan,
+    validate_intro_homestead_plan_for_world,
+};
 
 fn move_player_command_with_position(
     command: MovePlayerCommand,
@@ -286,6 +290,7 @@ pub struct RealmServer {
     day_time_debug_override: bool,
     world_metadata: Option<WorldMetadata>,
     world_metadata_dirty: bool,
+    intro_homestead_plan: Option<IntroHomesteadPlanRecord>,
     scheduled_fluid_ticks_frozen: bool,
     debug_passive_showcase_enabled: bool,
     volatile_natural_spawning_enabled: bool,
@@ -757,6 +762,7 @@ impl RealmServer {
             day_time_debug_override: false,
             world_metadata: None,
             world_metadata_dirty: false,
+            intro_homestead_plan: None,
             scheduled_fluid_ticks_frozen: false,
             debug_passive_showcase_enabled: true,
             volatile_natural_spawning_enabled: true,
@@ -1175,6 +1181,7 @@ impl RealmServer {
                 }
             },
         }
+        self.initialize_intro_homestead_plan(&mut metadata)?;
         self.simulation_tick = metadata.game_time;
         self.day_time = metadata.day_time;
         self.do_daylight_cycle = metadata.do_daylight_cycle;
@@ -1187,8 +1194,96 @@ impl RealmServer {
         Ok(metadata)
     }
 
+    fn initialize_intro_homestead_plan(
+        &mut self,
+        metadata: &mut WorldMetadata,
+    ) -> ChunkStoreResult<()> {
+        if metadata.starter_content == StarterContentDescriptor::Wild {
+            if metadata.realized_starter_plan.is_some() {
+                return Err(ChunkStoreError::InvalidData(
+                    "Wild Start world metadata cannot bind a realized starter plan".to_owned(),
+                ));
+            }
+            self.intro_homestead_plan = None;
+            return Ok(());
+        }
+
+        let stored = self
+            .scheduler
+            .load_saved_data_blocking(REALIZED_STARTER_PLAN_SAVED_DATA_KEY.to_owned())?;
+        let plan = match (metadata.realized_starter_plan, stored) {
+            (Some(_), None) => {
+                return Err(ChunkStoreError::InvalidData(
+                    "world metadata binds a realized starter plan whose body is missing".to_owned(),
+                ));
+            }
+            (identity, Some(record)) => {
+                let plan =
+                    decode_intro_homestead_plan(&record).map_err(ChunkStoreError::InvalidData)?;
+                validate_intro_homestead_plan_for_world(
+                    &plan,
+                    self.seed,
+                    metadata.world_generation_profile,
+                    self.active_dimension.definition.topology,
+                )
+                .map_err(ChunkStoreError::InvalidData)?;
+                let plan_identity = plan.identity().map_err(ChunkStoreError::InvalidData)?;
+                if let Some(identity) = identity {
+                    if identity != plan_identity {
+                        return Err(ChunkStoreError::InvalidData(
+                            "world metadata realized-plan identity does not match its body"
+                                .to_owned(),
+                        ));
+                    }
+                } else {
+                    self.bind_intro_homestead_plan_metadata(metadata, plan_identity)?;
+                }
+                plan
+            }
+            (None, None) => {
+                let plan = realize_intro_homestead_plan(
+                    self.seed,
+                    metadata.world_generation_profile,
+                    self.active_dimension.definition.topology,
+                )
+                .map_err(ChunkStoreError::InvalidData)?;
+                let identity = plan.identity().map_err(ChunkStoreError::InvalidData)?;
+                let record = plan
+                    .saved_data_record()
+                    .map_err(ChunkStoreError::InvalidData)?;
+                self.scheduler.save_saved_data_blocking(record)?;
+                self.bind_intro_homestead_plan_metadata(metadata, identity)?;
+                plan
+            }
+        };
+        self.intro_homestead_plan = Some(plan);
+        Ok(())
+    }
+
+    fn bind_intro_homestead_plan_metadata(
+        &mut self,
+        metadata: &mut WorldMetadata,
+        identity: crate::RealizedStarterPlanIdentity,
+    ) -> ChunkStoreResult<()> {
+        metadata.realized_starter_plan = Some(identity);
+        metadata.revision = metadata.revision.saturating_add(1);
+        match self
+            .scheduler
+            .save_world_metadata_blocking(metadata.clone())?
+        {
+            StoreWriteOutcome::Written | StoreWriteOutcome::Superseded => Ok(()),
+            StoreWriteOutcome::SkippedOnClose => Err(ChunkStoreError::Closed(
+                "realized starter-plan identity save was skipped on close".to_owned(),
+            )),
+        }
+    }
+
     pub fn world_metadata(&self) -> Option<&WorldMetadata> {
         self.world_metadata.as_ref()
+    }
+
+    pub fn intro_homestead_plan(&self) -> Option<&IntroHomesteadPlanRecord> {
+        self.intro_homestead_plan.as_ref()
     }
 
     pub fn save_world_metadata_blocking(&mut self) -> ChunkStoreResult<usize> {

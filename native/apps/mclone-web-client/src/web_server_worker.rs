@@ -24,11 +24,12 @@ use mclone_server::{
     PersistenceRecordAddress, PersistenceRecordBatch, PersistenceRecordExecutor,
     PersistenceRecordKeyPart, PersistenceRecordMutation, PersistenceRecordNamespace,
     PersistenceRecordPayload, PersistenceRecordRequest, PersistenceRecordResponse,
-    RecordExecutorWorldStore, ServerJobActor, ServerRunnerDiagnostics, ServerRunnerError,
-    ServerRunnerKind, ServerRunnerResult, ServerRunnerTickDiagnostics, ServerUpdateEnvelope,
-    WasmServerJobWorkerConfig, WorkerFrameMetrics, WorkerFrameTransportKind,
-    WorldGenerationProfile, WorldMetadata, WorldStore, WorldStoreRequest, WorldgenMailboxKind,
-    dimension_record_address, record_read_for_world_store_request, world_metadata_record_address,
+    REALIZED_STARTER_PLAN_SAVED_DATA_KEY, RecordExecutorWorldStore, ServerJobActor,
+    ServerRunnerDiagnostics, ServerRunnerError, ServerRunnerKind, ServerRunnerResult,
+    ServerRunnerTickDiagnostics, ServerUpdateEnvelope, WasmServerJobWorkerConfig,
+    WorkerFrameMetrics, WorkerFrameTransportKind, WorldGenerationProfile, WorldMetadata,
+    WorldStore, WorldStoreRequest, WorldgenMailboxKind, dimension_record_address,
+    record_read_for_world_store_request, saved_data_record_address, world_metadata_record_address,
     world_store_completion_from_record_read,
 };
 use wasm_bindgen::JsCast;
@@ -2160,11 +2161,11 @@ fn web_persistence_state_from_bootstrap(
                 request_id,
                 address,
                 result,
-            } if request_id == 1 || request_id == 2 => {
+            } if request_id == 1 || request_id == 2 || request_id == 3 => {
                 records.insert(address, result?);
             }
             PersistenceRecordResponse::ProbeAny {
-                request_id: 3,
+                request_id: 4,
                 result,
             } => {
                 legacy_records_present = Some(result?);
@@ -2179,6 +2180,7 @@ fn web_persistence_state_from_bootstrap(
     for address in [
         world_metadata_record_address(),
         dimension_record_address(&DimensionKey::overworld()),
+        saved_data_record_address(REALIZED_STARTER_PLAN_SAVED_DATA_KEY),
     ] {
         if !records.contains_key(&address) {
             return Err(ChunkStoreError::InvalidData(format!(
@@ -2254,8 +2256,12 @@ impl WebIntegratedServerStartup {
                 request_id: 2,
                 address: dimension_record_address(&DimensionKey::overworld()),
             },
-            PersistenceRecordRequest::ProbeAny {
+            PersistenceRecordRequest::Read {
                 request_id: 3,
+                address: saved_data_record_address(REALIZED_STARTER_PLAN_SAVED_DATA_KEY),
+            },
+            PersistenceRecordRequest::ProbeAny {
+                request_id: 4,
                 namespaces: vec![
                     PersistenceRecordNamespace::Dimension,
                     PersistenceRecordNamespace::Chunk,

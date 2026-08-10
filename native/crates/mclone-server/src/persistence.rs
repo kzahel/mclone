@@ -45,7 +45,7 @@ pub use record_executor::{
     PersistenceRecordNamespace, PersistenceRecordPayload, PersistenceRecordRequest,
     PersistenceRecordRequestId, PersistenceRecordResponse, RecordExecutorWorldStore,
     chunk_record_address, dimension_record_address, player_record_address,
-    record_read_for_world_store_request, world_metadata_record_address,
+    record_read_for_world_store_request, saved_data_record_address, world_metadata_record_address,
     world_store_completion_from_record_read,
 };
 
@@ -677,6 +677,40 @@ pub struct WorldMetadataLoad {
     pub legacy_records_present: bool,
 }
 
+/// Opaque versioned world-owned data stored outside chunk and world metadata.
+///
+/// Higher-level systems own the bytes and codec. The persistence layer owns
+/// the stable key, monotonic revision, and cross-backend durability semantics.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SavedDataRecord {
+    pub key: String,
+    pub codec_version: u32,
+    pub revision: u64,
+    pub bytes: Vec<u8>,
+}
+
+impl SavedDataRecord {
+    pub fn new(
+        key: impl Into<String>,
+        codec_version: u32,
+        revision: u64,
+        bytes: Vec<u8>,
+    ) -> ChunkStoreResult<Self> {
+        let key = key.into();
+        if key.is_empty() {
+            return Err(ChunkStoreError::InvalidData(
+                "saved-data key must not be empty".to_owned(),
+            ));
+        }
+        Ok(Self {
+            key,
+            codec_version,
+            revision,
+            bytes,
+        })
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum WorldRecordKey {
     WorldMetadata,
@@ -738,6 +772,10 @@ pub enum WorldStoreRequest {
         request_id: PersistenceRequestId,
         key: String,
     },
+    SaveSavedData {
+        request_id: PersistenceRequestId,
+        record: SavedDataRecord,
+    },
     Flush {
         request_id: PersistenceRequestId,
     },
@@ -760,6 +798,7 @@ impl WorldStoreRequest {
             | Self::LoadPlayer { request_id, .. }
             | Self::SavePlayer { request_id, .. }
             | Self::LoadSavedData { request_id, .. }
+            | Self::SaveSavedData { request_id, .. }
             | Self::Flush { request_id }
             | Self::Close { request_id } => *request_id,
         }
@@ -841,9 +880,14 @@ impl WorldStoreRequest {
                 player: record.player,
                 result: Err(closed_error()),
             },
-            Self::LoadSavedData { request_id, key } => WorldStoreCompletion::RequestFailed {
+            Self::LoadSavedData { request_id, key } => WorldStoreCompletion::SavedDataLoaded {
                 request_id,
-                key: WorldRecordKey::SavedData(key),
+                key,
+                result: Err(closed_error()),
+            },
+            Self::SaveSavedData { request_id, record } => WorldStoreCompletion::SavedDataSaved {
+                request_id,
+                key: record.key,
                 result: Err(closed_error()),
             },
             Self::Flush { request_id } => WorldStoreCompletion::FlushComplete {
@@ -920,6 +964,16 @@ pub enum WorldStoreCompletion {
         player: PlayerRecordKey,
         result: ChunkStoreResult<StoreWriteOutcome>,
     },
+    SavedDataLoaded {
+        request_id: PersistenceRequestId,
+        key: String,
+        result: ChunkStoreResult<Option<SavedDataRecord>>,
+    },
+    SavedDataSaved {
+        request_id: PersistenceRequestId,
+        key: String,
+        result: ChunkStoreResult<StoreWriteOutcome>,
+    },
     RequestFailed {
         request_id: PersistenceRequestId,
         key: WorldRecordKey,
@@ -948,6 +1002,8 @@ impl WorldStoreCompletion {
             | Self::EntityChunkSaved { request_id, .. }
             | Self::PlayerLoaded { request_id, .. }
             | Self::PlayerSaved { request_id, .. }
+            | Self::SavedDataLoaded { request_id, .. }
+            | Self::SavedDataSaved { request_id, .. }
             | Self::RequestFailed { request_id, .. }
             | Self::FlushComplete { request_id, .. }
             | Self::CloseComplete { request_id, .. } => *request_id,
@@ -1030,6 +1086,17 @@ pub trait WorldStore: fmt::Debug {
         )))
     }
 
+    fn load_saved_data(&mut self, _key: &str) -> ChunkStoreResult<Option<SavedDataRecord>> {
+        Ok(None)
+    }
+
+    fn save_saved_data(&mut self, record: &SavedDataRecord) -> ChunkStoreResult<()> {
+        Err(ChunkStoreError::InvalidData(format!(
+            "saved-data storage is not supported for {}",
+            record.key
+        )))
+    }
+
     fn flush(&mut self) -> ChunkStoreResult<()> {
         Ok(())
     }
@@ -1099,6 +1166,10 @@ impl WorldStore for NullWorldStore {
     fn save_player(&mut self, _record: &PlayerRecord) -> ChunkStoreResult<()> {
         Ok(())
     }
+
+    fn save_saved_data(&mut self, _record: &SavedDataRecord) -> ChunkStoreResult<()> {
+        Ok(())
+    }
 }
 
 #[derive(Debug, Default)]
@@ -1108,6 +1179,7 @@ pub struct MemoryWorldStore {
     chunks: BTreeMap<DimensionChunkPos, ChunkRecord>,
     entity_chunks: BTreeMap<DimensionChunkPos, EntityChunkRecord>,
     players: BTreeMap<PlayerRecordKey, PlayerRecord>,
+    saved_data: BTreeMap<String, SavedDataRecord>,
 }
 
 impl MemoryWorldStore {
@@ -1149,6 +1221,10 @@ impl MemoryWorldStore {
         self.world_metadata.as_ref()
     }
 
+    pub fn saved_data(&self, key: &str) -> Option<&SavedDataRecord> {
+        self.saved_data.get(key)
+    }
+
     pub fn dimension(&self, key: &DimensionKey) -> Option<&DimensionRecord> {
         self.dimensions.get(key)
     }
@@ -1161,6 +1237,7 @@ impl WorldStore for MemoryWorldStore {
             legacy_records_present: !self.chunks.is_empty()
                 || !self.entity_chunks.is_empty()
                 || !self.players.is_empty()
+                || !self.saved_data.is_empty()
                 || !self.dimensions.is_empty(),
         })
     }
@@ -1249,6 +1326,22 @@ impl WorldStore for MemoryWorldStore {
 
     fn save_player(&mut self, record: &PlayerRecord) -> ChunkStoreResult<()> {
         self.players.insert(record.player.clone(), record.clone());
+        Ok(())
+    }
+
+    fn load_saved_data(&mut self, key: &str) -> ChunkStoreResult<Option<SavedDataRecord>> {
+        Ok(self.saved_data.get(key).cloned())
+    }
+
+    fn save_saved_data(&mut self, record: &SavedDataRecord) -> ChunkStoreResult<()> {
+        if self
+            .saved_data
+            .get(&record.key)
+            .is_some_and(|stored| stored.revision > record.revision)
+        {
+            return Ok(());
+        }
+        self.saved_data.insert(record.key.clone(), record.clone());
         Ok(())
     }
 }
@@ -1622,16 +1715,31 @@ impl PersistenceActor {
             });
     }
 
-    pub fn fail_reserved_request(&mut self, request_id: PersistenceRequestId, key: WorldRecordKey) {
+    pub fn load_saved_data(&mut self, request_id: PersistenceRequestId, key: String) {
         let result = if self.closed {
             Err(closed_error())
         } else {
-            Err(ChunkStoreError::InvalidData(format!(
-                "persistence record family {key:?} is reserved but not implemented"
-            )))
+            self.store.load_saved_data(&key)
         };
         self.completions
-            .push_back(WorldStoreCompletion::RequestFailed {
+            .push_back(WorldStoreCompletion::SavedDataLoaded {
+                request_id,
+                key,
+                result,
+            });
+    }
+
+    pub fn save_saved_data(&mut self, request_id: PersistenceRequestId, record: SavedDataRecord) {
+        let key = record.key.clone();
+        let result = if self.closed {
+            Err(closed_error())
+        } else {
+            self.store
+                .save_saved_data(&record)
+                .map(|_| StoreWriteOutcome::Written)
+        };
+        self.completions
+            .push_back(WorldStoreCompletion::SavedDataSaved {
                 request_id,
                 key,
                 result,
@@ -1944,7 +2052,10 @@ impl ExternalLoadPersistenceActor {
                 self.save_player(request_id, record);
             }
             WorldStoreRequest::LoadSavedData { request_id, key } => {
-                self.fail_reserved_request(request_id, WorldRecordKey::SavedData(key));
+                self.load_saved_data(request_id, key);
+            }
+            WorldStoreRequest::SaveSavedData { request_id, record } => {
+                self.save_saved_data(request_id, record);
             }
             WorldStoreRequest::Flush { request_id } => {
                 self.flush(request_id);
@@ -2330,16 +2441,31 @@ impl ExternalLoadPersistenceActor {
             });
     }
 
-    fn fail_reserved_request(&mut self, request_id: PersistenceRequestId, key: WorldRecordKey) {
+    fn load_saved_data(&mut self, request_id: PersistenceRequestId, key: String) {
         let result = if self.closed {
             Err(closed_error())
         } else {
-            Err(ChunkStoreError::InvalidData(format!(
-                "persistence record family {key:?} is reserved but not implemented"
-            )))
+            self.store.load_saved_data(&key)
         };
         self.completions
-            .push_back(WorldStoreCompletion::RequestFailed {
+            .push_back(WorldStoreCompletion::SavedDataLoaded {
+                request_id,
+                key,
+                result,
+            });
+    }
+
+    fn save_saved_data(&mut self, request_id: PersistenceRequestId, record: SavedDataRecord) {
+        let key = record.key.clone();
+        let result = if self.closed {
+            Err(closed_error())
+        } else {
+            self.store
+                .save_saved_data(&record)
+                .map(|_| StoreWriteOutcome::Written)
+        };
+        self.completions
+            .push_back(WorldStoreCompletion::SavedDataSaved {
                 request_id,
                 key,
                 result,
@@ -2615,7 +2741,10 @@ fn handle_world_store_request(actor: &mut PersistenceActor, request: WorldStoreR
             actor.save_player(request_id, record);
         }
         WorldStoreRequest::LoadSavedData { request_id, key } => {
-            actor.fail_reserved_request(request_id, WorldRecordKey::SavedData(key));
+            actor.load_saved_data(request_id, key);
+        }
+        WorldStoreRequest::SaveSavedData { request_id, record } => {
+            actor.save_saved_data(request_id, record);
         }
         WorldStoreRequest::Flush { request_id } => {
             actor.flush(request_id);
@@ -3085,6 +3214,10 @@ impl PersistenceMailbox {
         self.send_request(|request_id| WorldStoreRequest::LoadSavedData { request_id, key })
     }
 
+    pub fn save_saved_data(&mut self, record: SavedDataRecord) -> PersistenceRequestId {
+        self.send_request(|request_id| WorldStoreRequest::SaveSavedData { request_id, record })
+    }
+
     pub fn flush(&mut self) -> PersistenceRequestId {
         self.send_request(|request_id| WorldStoreRequest::Flush { request_id })
     }
@@ -3216,6 +3349,32 @@ impl PersistenceMailbox {
             WorldStoreCompletion::DimensionSaved { result, .. } => result,
             completion => Err(ChunkStoreError::InvalidData(format!(
                 "save_dimension completed with unexpected persistence completion {completion:?}"
+            ))),
+        }
+    }
+
+    pub fn load_saved_data_blocking(
+        &mut self,
+        key: String,
+    ) -> ChunkStoreResult<Option<SavedDataRecord>> {
+        let request_id = self.load_saved_data(key);
+        match self.take_or_run_until_completion(request_id)? {
+            WorldStoreCompletion::SavedDataLoaded { result, .. } => result,
+            completion => Err(ChunkStoreError::InvalidData(format!(
+                "load_saved_data completed with unexpected persistence completion {completion:?}"
+            ))),
+        }
+    }
+
+    pub fn save_saved_data_blocking(
+        &mut self,
+        record: SavedDataRecord,
+    ) -> ChunkStoreResult<StoreWriteOutcome> {
+        let request_id = self.save_saved_data(record);
+        match self.take_or_run_until_completion(request_id)? {
+            WorldStoreCompletion::SavedDataSaved { result, .. } => result,
+            completion => Err(ChunkStoreError::InvalidData(format!(
+                "save_saved_data completed with unexpected persistence completion {completion:?}"
             ))),
         }
     }
@@ -3629,6 +3788,14 @@ impl WorldStore for SqliteWorldStore {
 
     fn save_player(&mut self, record: &PlayerRecord) -> ChunkStoreResult<()> {
         self.inner.save_player(record)
+    }
+
+    fn load_saved_data(&mut self, key: &str) -> ChunkStoreResult<Option<SavedDataRecord>> {
+        self.inner.load_saved_data(key)
+    }
+
+    fn save_saved_data(&mut self, record: &SavedDataRecord) -> ChunkStoreResult<()> {
+        self.inner.save_saved_data(record)
     }
 
     fn flush(&mut self) -> ChunkStoreResult<()> {

@@ -6,9 +6,9 @@ use mclone_protocol::DimensionKey;
 
 use super::{
     ChunkRecord, ChunkStoreError, ChunkStoreResult, DimensionRecord, EntityChunkRecord,
-    PersistenceErrorKind, PlayerRecord, PlayerRecordKey, SNAPSHOT_FORMAT_VERSION, WorldMetadata,
-    WorldMetadataLoad, WorldStore, WorldStoreCompletion, WorldStoreRequest, decode_chunk_record,
-    decode_dimension_record, decode_entity_chunk_record, decode_player_record,
+    PersistenceErrorKind, PlayerRecord, PlayerRecordKey, SNAPSHOT_FORMAT_VERSION, SavedDataRecord,
+    WorldMetadata, WorldMetadataLoad, WorldStore, WorldStoreCompletion, WorldStoreRequest,
+    decode_chunk_record, decode_dimension_record, decode_entity_chunk_record, decode_player_record,
     decode_world_metadata, encode_chunk_record, encode_dimension_record,
     encode_entity_chunk_record, encode_player_record, encode_world_metadata,
 };
@@ -498,6 +498,33 @@ impl<E: PersistenceRecordExecutor> WorldStore for RecordExecutorWorldStore<E> {
         ))
     }
 
+    fn load_saved_data(&mut self, key: &str) -> ChunkStoreResult<Option<SavedDataRecord>> {
+        let address = saved_data_record_address(key);
+        self.executor
+            .read(&address)?
+            .map(|payload| {
+                SavedDataRecord::new(key, payload.codec_version, payload.revision, payload.bytes)
+            })
+            .transpose()
+    }
+
+    fn save_saved_data(&mut self, record: &SavedDataRecord) -> ChunkStoreResult<()> {
+        if self
+            .load_saved_data(&record.key)?
+            .is_some_and(|stored| stored.revision > record.revision)
+        {
+            return Ok(());
+        }
+        self.executor.commit(&PersistenceRecordBatch::put(
+            saved_data_record_address(&record.key),
+            PersistenceRecordPayload::new(
+                record.codec_version,
+                record.revision,
+                record.bytes.clone(),
+            ),
+        ))
+    }
+
     fn flush(&mut self) -> ChunkStoreResult<()> {
         self.executor.flush()
     }
@@ -544,6 +571,13 @@ pub fn player_record_address(player: &PlayerRecordKey) -> PersistenceRecordAddre
     )
 }
 
+pub fn saved_data_record_address(key: &str) -> PersistenceRecordAddress {
+    PersistenceRecordAddress::new(
+        PersistenceRecordNamespace::SavedData,
+        vec![PersistenceRecordKeyPart::Text(key.to_owned())],
+    )
+}
+
 /// Translate an engine load into the generic record read served by an
 /// asynchronous platform executor. Save policy and decoding remain in Rust;
 /// browser adapters only see this physical address.
@@ -569,6 +603,9 @@ pub fn record_read_for_world_store_request(
         ),
         WorldStoreRequest::LoadPlayer { request_id, player } => {
             (*request_id, player_record_address(player))
+        }
+        WorldStoreRequest::LoadSavedData { request_id, key } => {
+            (*request_id, saved_data_record_address(key))
         }
         other => {
             return Err(ChunkStoreError::InvalidData(format!(
@@ -656,6 +693,25 @@ pub fn world_store_completion_from_record_read(
             Ok(WorldStoreCompletion::PlayerLoaded {
                 request_id,
                 player,
+                result: decoded,
+            })
+        }
+        WorldStoreRequest::LoadSavedData { key, .. } => {
+            let decoded = result.and_then(|payload| {
+                payload
+                    .map(|payload| {
+                        SavedDataRecord::new(
+                            key.clone(),
+                            payload.codec_version,
+                            payload.revision,
+                            payload.bytes,
+                        )
+                    })
+                    .transpose()
+            });
+            Ok(WorldStoreCompletion::SavedDataLoaded {
+                request_id,
+                key,
                 result: decoded,
             })
         }
@@ -996,6 +1052,7 @@ mod tests {
         let chunk = chunk_record(ChunkPos::new(-2, 5), 8);
         let entities = EntityChunkRecord::empty(ChunkPos::new(-2, 5), 9);
         let player = player_record(10);
+        let saved_data = SavedDataRecord::new("mclone:test-data", 3, 11, vec![1, 4, 9]).unwrap();
         let mut store = RecordExecutorWorldStore::memory();
 
         assert_eq!(
@@ -1009,12 +1066,14 @@ mod tests {
             None
         );
         assert_eq!(store.load_player(&player.player).unwrap(), None);
+        assert_eq!(store.load_saved_data(&saved_data.key).unwrap(), None);
 
         store.save_world_metadata(&metadata).unwrap();
         store.save_dimension(&dimension).unwrap();
         store.save_chunk(&overworld, &chunk).unwrap();
         store.save_entity_chunk(&overworld, &entities).unwrap();
         store.save_player(&player).unwrap();
+        store.save_saved_data(&saved_data).unwrap();
         store.flush().unwrap();
         store.close().unwrap();
 
@@ -1038,6 +1097,10 @@ mod tests {
             Some(entities)
         );
         assert_eq!(reopened.load_player(&player.player).unwrap(), Some(player));
+        assert_eq!(
+            reopened.load_saved_data(&saved_data.key).unwrap(),
+            Some(saved_data)
+        );
     }
 
     #[test]
@@ -1052,6 +1115,12 @@ mod tests {
         store
             .save_chunk(&overworld, &chunk_record(pos, 11))
             .unwrap();
+        store
+            .save_saved_data(&SavedDataRecord::new("mclone:test", 1, 12, vec![12]).unwrap())
+            .unwrap();
+        store
+            .save_saved_data(&SavedDataRecord::new("mclone:test", 1, 11, vec![11]).unwrap())
+            .unwrap();
 
         assert_eq!(
             store
@@ -1060,6 +1129,10 @@ mod tests {
                 .unwrap()
                 .revision(),
             ChunkRevision(12)
+        );
+        assert_eq!(
+            store.load_saved_data("mclone:test").unwrap().unwrap().bytes,
+            vec![12]
         );
     }
 
@@ -1131,6 +1204,40 @@ mod tests {
             }
             other => panic!("unexpected completion {other:?}"),
         }
+
+        let saved_request = WorldStoreRequest::LoadSavedData {
+            request_id: 42,
+            key: "mclone:test-data".to_owned(),
+        };
+        let saved_address = saved_data_record_address("mclone:test-data");
+        assert_eq!(
+            record_read_for_world_store_request(&saved_request).unwrap(),
+            PersistenceRecordRequest::Read {
+                request_id: 42,
+                address: saved_address.clone(),
+            }
+        );
+        let completion = world_store_completion_from_record_read(
+            saved_request,
+            PersistenceRecordResponse::Read {
+                request_id: 42,
+                address: saved_address,
+                result: Ok(Some(PersistenceRecordPayload::new(7, 8, vec![2, 3]))),
+            },
+        )
+        .unwrap();
+        assert!(matches!(
+            completion,
+            WorldStoreCompletion::SavedDataLoaded {
+                result: Ok(Some(SavedDataRecord {
+                    codec_version: 7,
+                    revision: 8,
+                    bytes,
+                    ..
+                })),
+                ..
+            } if bytes == vec![2, 3]
+        ));
     }
 
     #[test]

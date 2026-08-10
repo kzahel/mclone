@@ -104,8 +104,13 @@ fn stored_world_metadata_rejects_seed_profile_and_starter_mismatches() {
 }
 
 #[test]
-fn new_world_metadata_persists_starter_content_orthogonally() {
-    let mut server = LocalRealmSession::with_world_store(77, Box::new(MemoryWorldStore::new()));
+fn new_world_metadata_persists_realized_starter_plan_orthogonally() {
+    let definition =
+        crate::DimensionDefinition::overworld(8_675_309, WorldGenerationProfile::McloneOverworldV1);
+    let mut server = LocalRealmSession::local_integrated_with_world_store_and_dimension_definition(
+        definition,
+        Box::new(MemoryWorldStore::new()),
+    );
     server.set_starter_content(StarterContentDescriptor::IntroHomesteadV1);
 
     let initialized = server
@@ -114,13 +119,20 @@ fn new_world_metadata_persists_starter_content_orthogonally() {
 
     assert_eq!(
         initialized.world_generation_profile,
-        WorldGenerationProfile::Overworld
+        WorldGenerationProfile::McloneOverworldV1
     );
     assert_eq!(
         initialized.starter_content,
         StarterContentDescriptor::IntroHomesteadV1
     );
-    assert_eq!(initialized.realized_starter_plan, None);
+    assert_eq!(
+        initialized.realized_starter_plan,
+        Some(server.intro_homestead_plan().unwrap().identity().unwrap())
+    );
+    assert_eq!(
+        server.intro_homestead_plan().unwrap().checksum_sha256,
+        "d6fa4657806865193d688dfba6d743895e630ef60b34eb75cfac2711a7faa8ec"
+    );
 }
 
 #[test]

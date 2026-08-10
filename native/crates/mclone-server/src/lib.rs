@@ -11,6 +11,7 @@ mod falling_block;
 mod fluid;
 mod game_mode;
 mod holder;
+mod homestead_plan;
 mod integrated;
 mod inventory;
 mod item_stack;
@@ -71,6 +72,16 @@ pub use cadence::{
 };
 pub use dimension::DimensionRegistry;
 pub use holder::{ChunkHolder, ChunkStatusSlot};
+pub use homestead_plan::{
+    HomesteadContentFingerprint, HomesteadGradeRegion, HomesteadPathControl, HomesteadPathPlan,
+    HomesteadPlanAxisTopology, HomesteadPlanBaseDescriptor, HomesteadPlanBounds3d,
+    HomesteadPlanPiece, HomesteadPlanPieceKind, HomesteadPlanTemplateRotation,
+    HomesteadPlanTopology, HomesteadPlantingPlan, HomesteadResidentMarkerPlan, HomesteadWaterPlan,
+    INTRO_HOMESTEAD_COMPOSITION_REVISION, INTRO_HOMESTEAD_PLAN_RECORD_REVISION,
+    INTRO_HOMESTEAD_PLAN_SCHEMA_VERSION, INTRO_HOMESTEAD_PLANNER_REVISION,
+    IntroHomesteadPlanRecord, compile_intro_homestead_plan, decode_intro_homestead_plan,
+    realize_intro_homestead_plan, validate_intro_homestead_plan_for_world,
+};
 pub use integrated::{
     DimensionInterestDiagnostics, DimensionRuntime, INITIAL_DAY_TIME, LocalRealmSession,
     LocalRealmSessionRole, PlayerDimensionTransferDiagnostics, PlayerDimensionTransferPhase,
@@ -96,14 +107,15 @@ pub use persistence::{
     PersistenceRecordExecutor, PersistenceRecordKeyPart, PersistenceRecordMutation,
     PersistenceRecordNamespace, PersistenceRecordPayload, PersistenceRecordRequest,
     PersistenceRecordRequestId, PersistenceRecordResponse, PersistenceRequestId, PlayerRecord,
-    PlayerRecordKey, RecordExecutorWorldStore, SaveDurability, ScheduledTickRecord,
-    StoreWriteOutcome, SynchronousPersistenceFacade, WORLD_METADATA_TARGET_MINECRAFT_VERSION,
-    WORLD_METADATA_VERSION, WorldMetadata, WorldMetadataLoad, WorldRecordKey, WorldStore,
-    WorldStoreCompletion, WorldStoreRequest, chunk_record_address, decode_chunk_record,
-    decode_dimension_record, decode_entity_chunk_record, decode_player_record,
-    decode_world_metadata, dimension_record_address, encode_chunk_record, encode_dimension_record,
-    encode_entity_chunk_record, encode_player_record, encode_world_metadata, player_record_address,
-    record_read_for_world_store_request, world_metadata_record_address,
+    PlayerRecordKey, RecordExecutorWorldStore, SaveDurability, SavedDataRecord,
+    ScheduledTickRecord, StoreWriteOutcome, SynchronousPersistenceFacade,
+    WORLD_METADATA_TARGET_MINECRAFT_VERSION, WORLD_METADATA_VERSION, WorldMetadata,
+    WorldMetadataLoad, WorldRecordKey, WorldStore, WorldStoreCompletion, WorldStoreRequest,
+    chunk_record_address, decode_chunk_record, decode_dimension_record, decode_entity_chunk_record,
+    decode_player_record, decode_world_metadata, dimension_record_address, encode_chunk_record,
+    encode_dimension_record, encode_entity_chunk_record, encode_player_record,
+    encode_world_metadata, player_record_address, record_read_for_world_store_request,
+    saved_data_record_address, world_metadata_record_address,
     world_store_completion_from_record_read,
 };
 #[cfg(not(target_arch = "wasm32"))]
@@ -129,7 +141,9 @@ pub use spawn::{
     initial_spawn_center_for_descriptor, initial_spawn_center_for_profile,
     initial_spawn_center_for_seed,
 };
-pub use starter_content::{RealizedStarterPlanIdentity, StarterContentDescriptor};
+pub use starter_content::{
+    REALIZED_STARTER_PLAN_SAVED_DATA_KEY, RealizedStarterPlanIdentity, StarterContentDescriptor,
+};
 pub use structure::{
     CROSS_CHUNK_CANARY_PIECE_ID, CROSS_CHUNK_CANARY_START_CHUNK, CROSS_CHUNK_CANARY_STRUCTURE_ID,
     ChunkStructureData, StructureBlockPlacement, StructureBoundingBox, StructureOverlay,

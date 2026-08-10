@@ -1,5 +1,7 @@
 use serde::{Deserialize, Serialize};
 
+pub const REALIZED_STARTER_PLAN_SAVED_DATA_KEY: &str = "mclone:realized-starter-plan";
+
 /// Versioned content layered over a world's base generation descriptor.
 ///
 /// This identity is deliberately orthogonal to terrain generation. `Wild`
