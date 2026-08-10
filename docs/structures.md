@@ -1,9 +1,12 @@
 # Structures
 
-Status: reference architecture and future native plan. No true structure
-runtime is implemented in the live Rust tree. Earlier claims that
-structure starts/references and buried treasure were landed described the
-retired TypeScript engine and are retained only in Git history.
+Status: reference architecture plus a minimal live native foundation. Tactical
+[`274`](tactical/274-playable-intro-homestead.md) Slice 1 added shared
+`StructureStarts` and `StructureReferences` statuses, start-owned persisted
+pieces/bounds, touched-chunk references, and per-target clipped placement. Its
+opt-in original wayside-arch canary passes request-order, no-far-write, and
+SQLite reopen proofs. This is not yet a general structure registry, template
+runtime, jigsaw system, Beardifier, or vanilla structure-family port.
 
 Tactical
 [`222`](tactical/222-bounded-valley-stream-structures.md) is the first active
@@ -14,8 +17,9 @@ is its first live plan-only content consumer. That consumer now proves
 random-spread candidates, a capped multi-chunk route, monotonic typed pieces,
 aggregate boxes, continuous column queries, positive/negative plan caching,
 and production diagnostics without changing generated blocks. It does not by
-itself claim the full persisted vanilla status pipeline, templates, jigsaw,
-or structure-family parity.
+itself claim the live status pipeline, templates, jigsaw, or structure-family
+parity. The later Tactical 274 canary supplies the first narrow persisted
+status consumer; both remain well short of vanilla family parity.
 
 Durable architecture notes for Minecraft Java 1.17.1 overworld structures in `mclone`.
 
@@ -161,19 +165,21 @@ Do not start with villages. They combine jigsaw pools, templates, processors, te
      foundation.
 
 2. **Status and metadata foundation**
-   - Add native `STRUCTURE_STARTS`, `STRUCTURE_REFERENCES`, `StructureStart`,
-     `StructurePiece`, `BoundingBox`, starts-by-feature, and
-     references-by-feature ownership.
-   - Include metadata persistence/resume compatibility and focused fixtures in
-     the foundation rather than treating durability as a distant tail.
+   - **Minimal foundation landed in Tactical 274 Slice 1:** native
+     `StructureStarts`, `StructureReferences`, start-owned pieces/bounds, and
+     references on touched chunks, with snapshot persistence and focused
+     fixtures.
+   - Extend that narrow shared data model only as concrete structure callers
+     require registries, processors, block entities, or family-specific state.
    - Keep future structure work on this status-aware path instead of
      introducing decoration shortcuts.
 
 3. **Per-chunk clipped placement skeleton**
-   - Place referenced structures before ordinary configured features, and make
-     each target chunk emit only its intersecting piece slice.
-   - Prove cross-chunk deterministic placement and save/reopen before adding
-     templates or jigsaw.
+   - **Skeleton landed in Tactical 274 Slice 1:** the wayside arch is applied
+     through the target chunk's own status work and emits only intersecting
+     piece slices.
+   - Preserve its cross-chunk determinism, save/reopen, and no-far-write gates
+     while integrating the first accepted farmstead plan.
 
 4. **First original and vanilla proof structures**
    - Start with a small original mclone ruin, shrine, campsite, or tower. This

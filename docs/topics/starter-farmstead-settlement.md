@@ -4,19 +4,17 @@ Topic: `starter-farmstead-settlement`
 
 Status: **vision and staged direction accepted 2026-07-21. Tacticals 208–210
 prove the standalone building loop, human-directed charm iteration, and first
-bounded building families: named cottage depth/entry plans and barn
-length/lean-to compositions over shared templates, themes, transforms, a small
-full-cube plus glass/stair/slab palette, normal persisted chunks, SQLite reopen,
-and inspected production renders. Tactical 214 externalizes those families
-through the completed Structure Lab and adds a Lab-native coop. On 2026-08-10,
-the selected project focus shifted from open-ended terrain/LOD research to the
-first playable intro homestead. Active Tactical
-[`274`](../tactical/274-playable-intro-homestead.md) owns the deterministic
-random-seed near-spawn scout, true structure lifecycle, persisted overlay and
-plan identity, terrain-adaptive first composition, safe arrival, residents,
-and shareable desktop/web acceptance. The existing original terrain and
-procedural horizon remain foundations; further speculative expansion is
-paused unless the playable opening exposes a concrete blocker.**
+bounded building families; Tactical 214 externalizes them through the
+completed Structure Lab and adds a Lab-native coop. Tactical
+[`274`](../tactical/274-playable-intro-homestead.md) is paused at Human Review
+R1 as of 2026-08-10. Its first three slices landed orthogonal starter/plan
+identity, the first live status-owned and persisted cross-chunk structure
+canary, and a deterministic production-backed near-spawn scout. No farmstead
+blocks have been placed. Human selection of the showcase seed, site, and
+arrival direction now gates realized-plan persistence and materialization.
+The existing original terrain and procedural horizon remain foundations;
+further speculative expansion is paused unless the playable opening exposes
+a concrete blocker.**
 
 Last reconciled: **2026-08-10**.
 
@@ -134,12 +132,13 @@ The direction is accepted before all of its consumers are ready:
   demo seed should not be treated as stable while the relevant macro fields are
   still moving.
 - The live Rust engine now has a small pure template/transform/material-role
-  kernel, persisted standalone Structure Lab, and bounded cottage/barn families
-  from Tacticals 208–210. Tactical 214 has since externalized and promoted all
-  bounded members through canonical TypeScript-authored records, and added the
-  first Lab-native chicken coop, but no true structure-start/reference/piece runtime.
-  [`../structures.md`](../structures.md) explicitly requires that foundation
-  before large cross-chunk structures.
+  kernel, persisted standalone Structure Lab, and bounded cottage/barn
+  families from Tacticals 208–210. Tactical 214 externalized and promoted all
+  bounded members through canonical TypeScript-authored records and added the
+  first Lab-native chicken coop. Tactical 274 Slice 1 has since landed the
+  minimal true structure-start/reference/piece runtime and proved it with an
+  opt-in cross-chunk wayside arch. The farmstead is deliberately not yet a
+  caller: Human Review R1 precedes its first persisted plan or block.
 - The generated block-state lane now includes oak/spruce planks, cobblestone,
   stone bricks, vertical hay, glass, and straight spruce stairs/slabs. The
   extracted and repo-owned asset paths, transforms, light facts, and
@@ -187,9 +186,9 @@ not.
 
 ## Cross-Profile Composition Contract
 
-The farmstead should be a starter-content overlay consumed by a generation
-profile, not a new terrain profile and not an unconditional mutation of every
-world. The persisted identity will eventually need to distinguish, in concept:
+The farmstead is a starter-content overlay consumed by a generation profile,
+not a new terrain profile and not an unconditional mutation of every world.
+The live persisted identity now distinguishes:
 
 ```text
 base generation profile + seed + topology
@@ -197,10 +196,11 @@ starter-content/structure set + version
 realized settlement instance plan
 ```
 
-The current `WorldGenerationDescriptor` contains only profile, seed, and
-topology, so this overlay identity is a future contract rather than a live
-field. It must remain separate from the mutable/protected-lobby behavior
-profile, which answers a different question.
+`WorldGenerationDescriptor` continues to own only profile, seed, and topology.
+`StarterContentDescriptor` and `RealizedStarterPlanIdentity` are separate live
+world-metadata fields and remain distinct from the mutable/protected-lobby
+behavior profile, which answers a different question. R1 has not selected or
+persisted an actual realized plan yet.
 
 This separation is especially important for the reference `overworld` profile.
 Pure `overworld` must remain Minecraft Java 1.17.1 seed-parity output.
@@ -725,9 +725,9 @@ approved; do not reserve a block of numbers in advance.
 | `FS-01` | standalone structure-authoring lab | `proven` | Tactical 214: strict TypeScript source graph, generated JSON drift gate, Rust loader/compiler, twelve promoted family members, Lab-native coop, and inspected read-only catalogue | add buildings through finite source-first recipes; do not broaden into arbitrary dimensions or browser editing |
 | `FS-02` | coherent farm block/material/collision kit | `ready` | fourteen original farmstead materials now cover cottage, barn, and coop presentation; glass and transform/collision-aware stairs/slabs are proven; doors, fences/gates, farmland, crops, and props remain | resume with the next composition-driven family after the terrain campaign or when an active terrain review needs it |
 | `FS-03` | template records, semantic roles, transforms, markers, bounds, and touched chunks | `proven` | Tactical 208 pure kernel tests and persisted cross-chunk lab receipts | extend only when a caller needs processors, codecs, alternate palettes, entities, or block data |
-| `FS-04` | true structure statuses, starts, references, pieces, clipping, and persistence | `active` | Tactical 274 Slice 1 first proves a tiny original cross-chunk canary before the farmstead becomes the larger caller | exact clipped placement, metadata persistence, Worker parity, and no-far-write gates pass |
-| `FS-05` | starter-content overlay and realized-instance identity | `waiting on FS-04 in Tactical 274` | conceptual identity accepted; Tactical 274 Slice 0 adds the codec seam and Slice 3 persists the selected plan | persisted overlay/blueprint/instance identity lands without changing pure Overworld output |
-| `FS-06` | site survey, scoring, grading, water fallback, reservation, and safe arrival | `waiting on FS-04 in Tactical 274` | Revision 1 search bounds, score facts, full/compact tiers, fallback, and review gates are specified in Tactical 274 | arbitrary-seed corpus and Human Review R1 accept one showcase site before materialization |
+| `FS-04` | true structure statuses, starts, references, pieces, clipping, and persistence | `foundation proven` | Tactical 274 Slice 1: opt-in wayside arch owns starts and touched-chunk references, persists pieces/bounds, clips placement per target, reopens from SQLite, and passes request-order/no-far-write gates | reuse the same lifecycle for the first accepted farmstead plan; general registries and vanilla families remain later work |
+| `FS-05` | starter-content overlay and realized-instance identity | `identity seam proven; plan pending R1` | Tactical 274 Slice 0 persists starter content and realized-plan identity orthogonally to base generation; legacy worlds decode unchanged | after R1, persist the selected plan before publishing or materializing it |
+| `FS-06` | site survey, scoring, grading, water fallback, reservation, and safe arrival | `Human Review R1` | Tactical 274 Slice 2 evaluates the fixed 4,096-candidate budget through exact Mclone metadata, stable full/compact scoring, native/Wasm/browser equality, a 16-seed corpus, and three reviewed maps | accept seed/site/arrival, reject the set, or request a tuning pass before materialization |
 | `FS-07` | first fixed farmhouse/barn/garden/pond/oak composition | `waiting on FS-04 through FS-06 in Tactical 274` | promoted cottage/barn families and a Lab-native coop are reusable; Tactical 274 bounds the first full and compact compositions | selected-site chunks render, persist, reopen, and retain player edits |
 | `FS-08` | resident and player marker realization | `waiting on FS-07 in Tactical 274` | cow/chicken persistence and player respawn are proven separately; Tactical 274 owns settlement marker idempotence and arrival | no duplicate residents and safe first arrival/respawn across reopen and partial materialization |
 | `FS-09` | cross-profile and topology adaptation | `deferred` | same engine contract accepted; first composition must land before breadth | Flat Grass, Small Island, Mclone, and explicit Overworld-overlay cases prove fit/fallback/rejection; admitted topology cases pass |
@@ -770,26 +770,25 @@ series actually begins, not for this documentation-only planning phase.
 ## Next Work
 
 Active Tactical
-[`274`](../tactical/274-playable-intro-homestead.md) is the selected next
-product slice. The terrain campaign has reached a sufficient stopping point
-for a first intro: current Mclone terrain, climates, coasts, rivers, wetlands,
-and bounded streams can supply neutral survey facts, while authored pond or
-runnel water remains an accepted fallback. Richer waterfalls, drainage, and
-mill-compatible reaches are later quality work rather than prerequisites.
+[`274`](../tactical/274-playable-intro-homestead.md) is paused at Human Review
+R1. The terrain campaign has reached a sufficient stopping point for a first
+intro: current Mclone terrain, climates, coasts, rivers, wetlands, and bounded
+streams now supply neutral survey facts, while authored pond or runnel water
+remains an accepted fallback. Richer waterfalls, drainage, and mill-compatible
+reaches are later quality work rather than prerequisites.
 
-Tactical 274 deliberately starts with `FS-04`, the true cross-chunk structure
-lifecycle. A tiny original cross-chunk canary must prove status metadata,
-references, clipped per-chunk placement, persistence, Worker parity, and no far
-writes before the farmstead becomes the larger caller. It then sequences:
+Tactical 274's `FS-04` canary and `FS-06` scout are complete. The current
+human gate compares three production-backed full-tier sites. Seed `8675309` is
+recommended because its selected coastal-meadow site needs only 3,072 blocks
+of estimated earthwork and substantially less tree clearing than the other
+reviewed options. The tactical resumes only after the site and east-facing
+arrival are accepted or a tuning/re-scout direction is given. The remaining
+sequence is:
 
-1. separate persisted `intro-homestead-v1` overlay and realized-plan identity;
-2. deterministic random-seed site scouting near provisional spawn, with full
-   and compact tiers plus typed rejection;
-3. Human Review R1 of candidate maps, grading, arrival, and a showcase seed
-   selected by the same arbitrary-seed algorithm;
-4. bounded terrain adaptation, reservation, buildings, authored water,
+1. persist and reopen the accepted realized plan before block placement;
+2. bounded terrain adaptation, reservation, buildings, authored water,
    planting, and one-time residents; and
-5. safe arrival, save/reopen, player-edit precedence, and shareable
+3. safe arrival, save/reopen, player-edit precedence, and shareable
    desktop/browser product-flow acceptance.
 
 Do not resume open-ended terrain representation, worlds-within-worlds, or

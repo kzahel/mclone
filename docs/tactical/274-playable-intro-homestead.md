@@ -1,9 +1,11 @@
 # Tactical 274: Playable Intro Homestead
 
-Status: **active 2026-08-10; implementation has not started. This tactical
-replaces open-ended terrain/LOD research as the selected product-integration
-slice. Human Review R1 is the first stop after deterministic site scouting and
-before farmstead materialization.**
+Status: **paused at Human Review R1 on 2026-08-10. Slices 0–2 are complete:
+starter identity is orthogonal to base world generation, the first live
+status-owned cross-chunk structure canary is durable, and the bounded
+deterministic scout has produced review candidates. No farmstead blocks have
+been placed. Human acceptance of one showcase seed, site, and arrival
+direction is required before Slice 3 persists a realized plan.**
 
 Topic:
 
@@ -316,9 +318,78 @@ determinism. Record cold and warm times, candidates by rejection stage, survey
 sample count, full/compact outcome, grade volume, piece count, touched chunks,
 and materialization time.
 
+## Human Review R1 Handoff
+
+Slices 0–2 landed in this commit chain:
+
+- `7f790fe0` repaired the forced-Original capture validation;
+- `db754c2a` persisted starter content and realized-plan identity separately
+  from the base generation descriptor;
+- `6d62b0bc` added the status-owned cross-chunk wayside-arch canary, starts,
+  references, clipped placement, and snapshot persistence;
+- `fc17aec9` added the profile-neutral bounded site survey, selector,
+  receipts, and native/Wasm/browser determinism witnesses; and
+- `41f672d6` made the review maps expose cut/fill cells, core/reservation
+  bounds, and the arrival sightline.
+
+The R1 selector evaluates exactly 4,096 candidate/rotation combinations over
+1,024 anchors: 2,500 primary evaluations and 1,596 fallback evaluations. Each
+anchor requests a fixed 49-point core and eight-point scenic survey. The
+production Mclone adapter reads metadata from the exact terrain and planned
+stream samplers; it does not generate rejected full chunks.
+
+The fixed 16-seed Mclone corpus produced 14 safe selections and two typed
+`NoSafeSite` results. Five selections used `full-v1`, nine used `compact-v1`,
+12 came from the primary pass, and two came from fallback. Successful native
+release scouts took 81.832–159.722 ms, with a 122.263 ms mean. Selected
+earthwork estimates ranged from 512 to 24,832 blocks; the maximum grade depth
+was seven blocks and the maximum selected surface span was 11 blocks. The
+Flat Grass canary selected a full zero-earthwork site and pinned checksum
+`6a876dfba76200d18daa42aebb3687dbfc22397096c56c12c5d321c8ff728ead`.
+
+Three Mclone sites are retained for human review:
+
+| Seed | Selection | Arrival/facing | Site character | Checksum prefix |
+|---:|---|---|---|---|
+| `8675309` | primary, `full-v1`, anchor `(744,-376)` | `(696,63,-376)`, east | 3-block span, 3,072 earthwork, meadow-forward coastal peninsula, least clearing | `127c1066b699` |
+| `42` | primary, `full-v1`, anchor `(344,-376)` | `(296,64,-376)`, east | 4-block span, 8,448 earthwork, more wooded coast and stream context | `02164e32e8dd` |
+| `-98765` | primary, `full-v1`, anchor `(296,-8)` | `(296,64,40)`, north | 7-block span, 20,480 earthwork, stronger terrain adaptation near water | `0c5f9e65ccd2` |
+
+Seed `8675309` is the implementation recommendation: it preserves visible
+terrain character while requiring substantially less earthwork and tree
+clearing than the other reviewed full-tier sites. R1 acceptance may choose
+another retained site or reject all three without changing the arbitrary-seed
+algorithm.
+
+Validation at the gate:
+
+- all 406 non-ignored `mclone-worldgen` library tests pass;
+- all 567 `mclone-server` library tests pass, including request-order,
+  no-far-write, snapshot reopen, and status canary coverage;
+- the `wasm32-unknown-unknown` scout witness passes under the actual
+  `wasm-bindgen-test-runner`;
+- the production seed and Flat Grass checksums match inside the real browser
+  server-job Worker in 239.695 ms, below the 750 ms budget;
+- `cargo check --workspace --manifest-path native/Cargo.toml` passes; and
+- all three regenerated R1 grading maps were rendered to PNG and inspected.
+
+The workspace-wide test command was also run. It reached the pre-existing
+`mclone-scene` composable-presentation source lock with 12 of 13 tests passing,
+then stopped because one assertion still expects the direct
+`render_full_frame_for_view_inner_with_actor_preparation` call that the earlier
+terrain-backdrop wrapper now mediates. No file in the homestead series changes
+that scene contract; the focused worldgen, server, Wasm, and browser gates
+above are green.
+
+The review artifacts are intentionally outside the repository under `/tmp`:
+`mclone-homestead-r1-seed-{8675309,42,-98765}.{json,svg,png}` and
+`mclone-homestead-r1-corpus-summary.json`.
+
 ## Implementation Slices
 
 ### Slice 0 — baseline and contract locks
+
+Result: **complete** in `7f790fe0` and `db754c2a`.
 
 - Capture the present Wild Start creation, Mclone Overworld fingerprints,
   original-assets provenance, save/reopen, and player-arrival behavior.
@@ -333,6 +404,9 @@ profile and topology.
 
 ### Slice 1 — true structure lifecycle canary
 
+Result: **complete** in `6d62b0bc`; the canary remains opt-in and is not the
+farmstead.
+
 - Add the minimal status/metadata/persistence path described above.
 - Place one tiny original cross-chunk canary by exact per-chunk clipping.
 - Prove start ownership, references, touched chunks, request-order equality,
@@ -344,6 +418,9 @@ Stop before farmstead placement if any target chunk job can mutate another
 already-final chunk.
 
 ### Slice 2 — neutral survey and deterministic selector
+
+Result: **complete** in `fc17aec9`; paused at Human Review R1 before any
+materialization.
 
 - Expose production-backed neutral survey facts through the shared worldgen
   owner.

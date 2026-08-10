@@ -154,10 +154,12 @@ The generic `NoiseBiomeSource` used by terrain sampling is only a partial seam.
 Flat grass and seeded island intentionally bypass that machinery. Authored
 island/table fixtures remain a separate persistence-backed content path.
 
-There is also no live native true-structure system. The old buried treasure,
-desert well, monster room, and fossil history belonged to the retired
-TypeScript engine; current structure docs must distinguish that history from
-native status.
+There is now a minimal live native true-structure foundation: Tactical 274
+Slice 1 added status-owned starts, references, persisted pieces/bounds, and
+target-clipped placement for one opt-in original canary. It is not a vanilla
+structure-family port. The old buried treasure, desert well, monster room, and
+fossil history belonged to the retired TypeScript engine; current structure
+docs must continue to distinguish that history from native status.
 
 ## Compatibility Safety Ledger
 
@@ -166,8 +168,8 @@ world-generation change is safe. Review it before preserving an algorithm,
 adding a new versioned profile, changing a fixture, or migrating a stored
 world.
 
-- **Reviewed:** 2026-07-26 after the hidden topology probe closeout; no freeze
-  trigger or preservation consumer was added
+- **Reviewed:** 2026-08-10 at Tactical 274 Human Review R1; no freeze trigger
+  or preservation consumer was added
 - **Project release state:** `internal-unshipped`
 - **Known external world/save consumers:** none
 - **Default fixture meaning:** refactor and determinism regression guard, not a
@@ -192,6 +194,7 @@ Dispositions mean:
 | `small-island-v1` | `internal-mutable` | Noise, terrain shape, materials, biomes, spawn, decoration, dependencies, label, tag, and implementation may change in place | It is an internal proving ground; current fingerprints protect accidental drift but do not prohibit intentional improvement | Update fingerprints, seam/order tests, captures, docs, and discard or migrate affected internal worlds |
 | `authored-only` missing-void behavior | `internal-mutable` | Missing-chunk semantics and identity may change after auditing authored scenarios | No shipped consumer exists, although lobby/preview fixtures rely on the current void contract | Update persistence, embedded-world, catalog, and no-worldgen scenario coverage together |
 | `mclone-overworld-v1` | `internal-mutable` | Identity, tag, fields, seed domains, terrain, biome/surface/decoration rules, spawn, dependency plan, fixtures, and implementation may change in place | It is live only in internal builds; no shipped or named retained world requires current output | Update fingerprints, field maps, cards, tests, docs, and discard or explicitly migrate affected internal worlds |
+| `intro-homestead-v1` starter overlay | `internal-mutable` | Starter descriptor, scout revision, fit thresholds, score ordering, plan schema, and eventual materialization may change before a release freeze | It is an explicit identity orthogonal to the base profile. At Human Review R1 no realized plan has been accepted or retained, and no farmstead blocks have been placed | Keep pure-base fingerprints unchanged; update scout witnesses, arbitrary-seed corpus, review maps, starter/plan codecs, and discard or explicitly migrate affected internal overlay worlds |
 | `topology-probe-v1` | `internal-mutable` | Identity, binary tag 8, minimum period, diagnostic terrain, plan geometry, materials, and fixtures may change in place | It is a hidden executable conformance instrument with no shipped or named retained world | Update exact conformance fixtures, worker/persistence tests, tactical evidence, and discard affected internal probe worlds |
 | `alpha-v1` | `internal-mutable` | Profile shape, winter option, feature subset, planning shape, fixtures, and output may change while preserving or explicitly revising the documented Alpha flavor/parity boundary | It is live only in internal builds; no shipped or named retained world requires current output. Alpha v1.1.2_01 stage receipts constrain the close-parity core but do not make the whole profile a historical compatibility promise | Re-run the Alpha oracle hashes, mapping/order tests, scheduler/worker/persistence tests, temperate and winter captures, workspace tests, and web build; update fixtures/docs and discard or explicitly migrate affected internal worlds |
 | `beta-v1` | `internal-mutable` | Identity, binary tag 7, parity boundary, population subset, planning shape, fixtures, and output may change while preserving or explicitly revising the documented Beta flavor/parity boundary | It is live only in internal builds; no shipped or named retained world requires current output. Beta 1.7.3 staged receipts constrain the close-parity climate/terrain/surface/cave core but do not make the whole profile a historical compatibility promise | Re-run the Beta oracle hashes, mapping/order tests, scheduler/worker/persistence tests, captures, workspace tests, and web build; update fixtures/docs and discard or explicitly migrate affected internal worlds |
