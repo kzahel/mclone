@@ -1,10 +1,11 @@
 # Tactical 274: Playable Intro Homestead
 
-Status: **Human Review R1 accepted seed `8675309`, the `full-v1` site anchored
-at `(744,-376)`, and its east-facing arrival on 2026-08-10. Slices 0–3 are
-complete and Slice 4 is active. The accepted realized plan is persisted and
-reopens before world startup continues. No homestead terrain or building
-blocks have been placed yet.**
+Status: **Human Review R2 reached and paused on 2026-08-10. Commit `b74cf73b`
+materializes the persisted terrain-only plan, but the inspected capture fails
+the gate's own presentation bar: dry scout samples conceal shallow-water
+columns between them, and grading exposes three rectangular foundation pads
+that read as pasted platforms. No building blocks have been placed. Human
+direction is required before revising the accepted site or realized plan.**
 
 Topic:
 
@@ -392,6 +393,63 @@ The review artifacts are intentionally outside the repository under `/tmp`:
 `mclone-homestead-r1-seed-{8675309,42,-98765}.{json,svg,png}` and
 `mclone-homestead-r1-corpus-summary.json`.
 
+## Human Review R2 Handoff
+
+Slice 4 landed in `b74cf73b` and stopped before every building piece. The
+shared server applies plan-owned terrain after base FEATURES and before
+structure placement, clipped to each target chunk. It grades the three
+foundation regions and five-block arrival path, carves the closed authored
+pond, and suppresses generic trees and large decoration only inside the
+persisted reservation. Transient Homestead Start worlds now initialize their
+metadata and realized plan before any chunk generation; without that fix the
+review flag produced byte-identical Wild Start pixels and never exercised the
+overlay.
+
+The deterministic accepted-seed receipt covers 49 grading chunks inside the
+121-chunk reservation:
+
+- 2,726 graded columns, 366 cut blocks, no fill, and maximum cut depth two;
+- 253 path-surface blocks;
+- 242 pond excavation blocks, 172 water blocks, 108 bottom blocks, and no bank
+  fill;
+- 3,813 removed decoration blocks in the generated grading footprint; and
+- 7,519 changed blocks, with 608 total cut/excavation earthwork blocks.
+
+Forward and reverse chunk orders are byte-identical, pond-surface neighbors
+are water or solid, and a generated cache reopens without regeneration while
+a later player block edit remains authoritative. The exact production path
+also passes through the native transient runner, closing the startup gap that
+the first capture exposed.
+
+The inspected terrain-only capture is
+`/tmp/mclone-homestead-r2-topdown-fixed.png`. It must **not** be accepted as the
+unbuilt site. The fixed 16-block scout lattice happened to sample dry support
+while the exact foundation footprints include shallow-water columns between
+those samples. The current grader finds the solid bed below that water and
+clears the overlying fluid to the requested height. Its bounded numerical
+receipt is therefore correct while its visual result is still three large,
+rectangular exposed pads and an isolated straight approach.
+
+The recommended recovery is to return to Slices 2–3 and add exact
+footprint-aware dry-support checks before selecting and persisting a new
+showcase plan. A smaller or relocated composition inside the accepted
+reservation is possible, but it is also a new realized plan and should be
+reviewed as such. Do not mask this result with broader fill, retaining walls,
+or buildings before the site decision is revisited.
+
+Validation at the gate:
+
+- all 578 server library tests ran; 577 passed in the full concurrent run and
+  the single unrelated topology/SQLite assertion passed immediately in
+  isolation;
+- all 284 `mclone-app-runtime` and 42 native `mclone-web-client` library tests
+  pass;
+- the web client checks for `wasm32-unknown-unknown`;
+- `cargo check --workspace` passes; and
+- Wild and Homestead captures were initially byte-identical, then diverged
+  after transient-plan initialization was repaired and the resulting R2 image
+  was inspected.
+
 ## Implementation Slices
 
 ### Slice 0 — baseline and contract locks
@@ -472,6 +530,9 @@ native web-client tests pass, and the web client checks for
 `wasm32-unknown-unknown`.
 
 ### Slice 4 — grading, reservation, and first drawable milestone
+
+Result: **implemented in `b74cf73b`; paused at Human Review R2 because the
+rendered accepted site reads as pasted shallow-water platforms.**
 
 - Apply bounded foundations/terraces, path grading, authored water, and
   decoration reservation through ordinary chunk materialization.
