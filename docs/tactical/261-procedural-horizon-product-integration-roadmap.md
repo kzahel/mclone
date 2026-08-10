@@ -1,6 +1,7 @@
 # Tactical 261: Procedural Horizon Product Integration Roadmap
 
-Status: active coordinating parent, opened 2026-07-26. The research,
+Status: **coordinating parent paused behind Tactical
+[`274`](274-playable-intro-homestead.md) as of 2026-08-10.** The research,
 standalone Explorer, cross-host parity, transition hardening, reusable
 vegetation-service, and shared composition-substrate phases are complete.
 Child Tactical
@@ -21,6 +22,12 @@ Human Review on 2026-07-27. Native, browser mono, and preliminary synthetic
 per-eye paths consume the same committed presentation. Localized overlap
 between a live exact tree and its procedural proxy is provisionally accepted
 and deferred to the vegetation/edit-arbitration work.
+
+The accepted implementation remains a foundation and the browser product
+default. Do not advance Android/XR promotion, broader lifecycle arbitration,
+or another terrain-representation campaign until the playable intro homestead
+exposes a concrete requirement or Tactical 274 reaches its product-review
+gate.
 
 Topics:
 

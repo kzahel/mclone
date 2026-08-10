@@ -5,10 +5,12 @@ Topic: `procedural-horizon-clipmap`
 Status: the standalone cross-platform proof, transition hardening, and shared
 vegetation service are complete. Terrain Lab runtime-composition adoption,
 PH-4 live-game scene adoption, and their hosted human reviews are also
-complete. Active coordinating parent Tactical
+complete. Coordinating parent Tactical
 [`261`](../tactical/261-procedural-horizon-product-integration-roadmap.md)
 owns the global path into `mclone-scene`, exact/procedural arbitration,
-flat-platform promotion, and XR/multiview acceptance. The first
+flat-platform promotion, and XR/multiview acceptance, but further execution is
+paused behind the playable intro homestead in Tactical
+[`274`](../tactical/274-playable-intro-homestead.md) as of 2026-08-10. The first
 cross-platform proof was completed and deployed on 2026-07-25 by Tactical
 [`249`](../tactical/249-cross-platform-procedural-horizon-proof.md). Shared
 toroidal planning, a ten-level fixed-budget renderer, native tree proxies, and
@@ -185,8 +187,8 @@ completed in Tactical
 [`254`](../tactical/254-ui-less-world-explorer-host.md) and remains owned by
 the platform-host topic rather than terrain rendering.
 
-Tactical 261 is the macro source of truth for past and future work. Active
-child Tactical
+Tactical 261 is the macro source of truth for past and future work. Its
+remaining children are paused behind Tactical 274. Tactical
 [`262`](../tactical/262-world-explorer-exact-procedural-composition.md)
 defines one renderer-neutral exact-painted snapshot, caller-owned shared
 target, coverage-mask lifecycle, and true World Explorer composition before

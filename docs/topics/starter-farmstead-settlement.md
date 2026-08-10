@@ -8,15 +8,17 @@ bounded building families: named cottage depth/entry plans and barn
 length/lean-to compositions over shared templates, themes, transforms, a small
 full-cube plus glass/stair/slab palette, normal persisted chunks, SQLite reopen,
 and inspected production renders. Tactical 214 externalizes those families
-through the completed Structure Lab and adds a Lab-native coop. Full settlement
-placement remains staged behind its own structure, overlay, site-plan, and
-content work. As of 2026-07-22, the selected project focus is original terrain:
-mountains and valleys, the periodic-field seam, then rivers, wetlands, streams,
-and coherent waterfall reaches. The ready structure-lifecycle work remains the
-first farmstead materialization blocker, but is intentionally paused while this
-terrain campaign advances.**
+through the completed Structure Lab and adds a Lab-native coop. On 2026-08-10,
+the selected project focus shifted from open-ended terrain/LOD research to the
+first playable intro homestead. Active Tactical
+[`274`](../tactical/274-playable-intro-homestead.md) owns the deterministic
+random-seed near-spawn scout, true structure lifecycle, persisted overlay and
+plan identity, terrain-adaptive first composition, safe arrival, residents,
+and shareable desktop/web acceptance. The existing original terrain and
+procedural horizon remain foundations; further speculative expansion is
+paused unless the playable opening exposes a concrete blocker.**
 
-Last reconciled: **2026-07-22**.
+Last reconciled: **2026-08-10**.
 
 ## Scope
 
@@ -202,7 +204,7 @@ profile, which answers a different question.
 
 This separation is especially important for the reference `overworld` profile.
 Pure `overworld` must remain Minecraft Java 1.17.1 seed-parity output.
-`overworld` plus an explicitly selected `demo-farmstead-v1` overlay is a
+`overworld` plus an explicitly selected `intro-homestead-v1` overlay is a
 different world identity whose terrain delta is intentional and persisted.
 Flat Grass, Small Island, Mclone Overworld, Alpha, and Beta can consume the
 same overlay engine without pretending that their terrain generators are the
@@ -706,10 +708,10 @@ standalone building iteration:
 
 | Upstream ID | Capability | State | Farmstead effect |
 |---|---|---|---|
-| `UP-WG-192` | original mountains and valleys | `ready`, selected next | creates the macro relief and traversable valley language that later water consumes |
-| `UP-WG-196` | periodic original terrain fields | `waiting` on `UP-WG-192` | prevents rivers and later terrain fields from baking in another planar-only assumption |
-| `UP-HYDROLOGY` | original rivers and wetlands | `waiting` on `UP-WG-196` | adds continuous corridors, water levels, banks, downstream direction, and natural-water attachment facts |
-| `UP-WATER-REACHES` | streams, cascades, and waterfalls | `waiting` on `UP-HYDROLOGY` | classifies and realizes coherent descending reaches for scenery and later mill-site selection |
+| `UP-WG-192` | original mountains and valleys | `proven` | supplies the current macro relief and traversable valley language consumed by the intro scout |
+| `UP-WG-196` | periodic original terrain fields | `proven` | gives accepted terrain fields explicit plane/cylinder behavior; additional topology breadth is not an intro blocker |
+| `UP-HYDROLOGY` | original rivers, wetlands, and bounded streams | `proven for the first intro` | existing rivers, wetlands, and bounded valley streams supply optional survey facts; Revision 1 may still use authored pond/runnel water |
+| `UP-WATER-REACHES` | richer cascades, waterfalls, and mill-compatible reaches | `deferred` | improves later scenery and mill selection but does not block the first playable composition |
 
 ### Progress Ledger
 
@@ -723,11 +725,11 @@ approved; do not reserve a block of numbers in advance.
 | `FS-01` | standalone structure-authoring lab | `proven` | Tactical 214: strict TypeScript source graph, generated JSON drift gate, Rust loader/compiler, twelve promoted family members, Lab-native coop, and inspected read-only catalogue | add buildings through finite source-first recipes; do not broaden into arbitrary dimensions or browser editing |
 | `FS-02` | coherent farm block/material/collision kit | `ready` | fourteen original farmstead materials now cover cottage, barn, and coop presentation; glass and transform/collision-aware stairs/slabs are proven; doors, fences/gates, farmland, crops, and props remain | resume with the next composition-driven family after the terrain campaign or when an active terrain review needs it |
 | `FS-03` | template records, semantic roles, transforms, markers, bounds, and touched chunks | `proven` | Tactical 208 pure kernel tests and persisted cross-chunk lab receipts | extend only when a caller needs processors, codecs, alternate palettes, entities, or block data |
-| `FS-04` | true structure statuses, starts, references, pieces, clipping, and persistence | `ready` | architecture and vanilla reference map exist; standalone templates deliberately do not claim this lifecycle | bounded structure-foundation tactical proves a small original cross-chunk structure |
-| `FS-05` | starter-content overlay and realized-instance identity | `waiting` | conceptual identity accepted; live descriptor has only profile, seed, and topology | persisted overlay/blueprint/instance version contract lands without changing pure Overworld output |
-| `FS-06` | site survey, scoring, grading, water fallback, reservation, and safe arrival | `waiting` | neutral survey contract accepted; depends on structure/overlay placement seams, not final original terrain | deterministic plan receipt and Flat Grass grading canary pass |
-| `FS-07` | first fixed farmhouse/barn/garden/pen/pond/oak composition | `waiting` | promoted cottage/barn families and a Lab-native coop are reusable; settlement lifecycle and site plan remain absent | selected-site chunks render, persist, reopen, and regenerate from source identity |
-| `FS-08` | resident and player marker realization | `waiting` | cow/chicken persistence is proven separately; settlement marker idempotence is absent | no duplicate residents and safe player arrival across reopen/regeneration |
+| `FS-04` | true structure statuses, starts, references, pieces, clipping, and persistence | `active` | Tactical 274 Slice 1 first proves a tiny original cross-chunk canary before the farmstead becomes the larger caller | exact clipped placement, metadata persistence, Worker parity, and no-far-write gates pass |
+| `FS-05` | starter-content overlay and realized-instance identity | `waiting on FS-04 in Tactical 274` | conceptual identity accepted; Tactical 274 Slice 0 adds the codec seam and Slice 3 persists the selected plan | persisted overlay/blueprint/instance identity lands without changing pure Overworld output |
+| `FS-06` | site survey, scoring, grading, water fallback, reservation, and safe arrival | `waiting on FS-04 in Tactical 274` | Revision 1 search bounds, score facts, full/compact tiers, fallback, and review gates are specified in Tactical 274 | arbitrary-seed corpus and Human Review R1 accept one showcase site before materialization |
+| `FS-07` | first fixed farmhouse/barn/garden/pond/oak composition | `waiting on FS-04 through FS-06 in Tactical 274` | promoted cottage/barn families and a Lab-native coop are reusable; Tactical 274 bounds the first full and compact compositions | selected-site chunks render, persist, reopen, and retain player edits |
+| `FS-08` | resident and player marker realization | `waiting on FS-07 in Tactical 274` | cow/chicken persistence and player respawn are proven separately; Tactical 274 owns settlement marker idempotence and arrival | no duplicate residents and safe first arrival/respawn across reopen and partial materialization |
 | `FS-09` | cross-profile and topology adaptation | `deferred` | same engine contract accepted; first composition must land before breadth | Flat Grass, Small Island, Mclone, and explicit Overworld-overlay cases prove fit/fallback/rejection; admitted topology cases pass |
 | `FS-10` | maximal parcels, church, outbuildings, richer animals, and visual mill | `deferred` | named destination and optional parcels are preserved | additions pass composition, persistence, and performance reviews without replacing the first hierarchy |
 | `FS-11` | functional farm simulation and machinery | `deferred` | deliberately outside first visual/worldgen acceptance | shared gameplay contracts own crops, roles, power, inputs, and outputs |
@@ -767,76 +769,56 @@ series actually begins, not for this documentation-only planning phase.
 
 ## Next Work
 
-Tactical 214 is complete. The accepted cottage and barn now sit inside
-source-first, bounded authored families rather than arbitrary numeric extrusions:
-cottages select `snug`, `standard`, or `deep` plans plus a stoop or canopy
-porch; barns select `short`, `standard`, or `long` structural bays and compose
-the east lean-to independently. [`structure-lab.md`](structure-lab.md) now owns
-the proven authoring path: agent-authored TypeScript DSL sources generate
-drift-checked canonical JSON and Rust-baked static preview meshes for a polished
-read-only catalogue. The Rosehip coop proves new content needs no Rust authoring
-body. In-browser editing is indefinitely deferred. Standalone building and
-farm-kit work now pause unless a terrain review exposes a specific content
-need.
+Active Tactical
+[`274`](../tactical/274-playable-intro-homestead.md) is the selected next
+product slice. The terrain campaign has reached a sufficient stopping point
+for a first intro: current Mclone terrain, climates, coasts, rivers, wetlands,
+and bounded streams can supply neutral survey facts, while authored pond or
+runnel water remains an accepted fallback. Richer waterfalls, drainage, and
+mill-compatible reaches are later quality work rather than prerequisites.
 
-The selected next work is the original-terrain campaign owned by
-[`mclone-overworld-generation.md`](mclone-overworld-generation.md):
+Tactical 274 deliberately starts with `FS-04`, the true cross-chunk structure
+lifecycle. A tiny original cross-chunk canary must prove status metadata,
+references, clipped per-chunk placement, persistence, Worker parity, and no far
+writes before the farmstead becomes the larger caller. It then sequences:
 
-1. execute Tactical 192 and visually accept coherent mountain ranges,
-   shoulders, foothills, and traversable valleys;
-2. execute Tactical 196 so every accepted terrain field and decoration caller
-   has an explicit periodic sampling and work-lift contract before more planar
-   field ownership accumulates;
-3. open a bounded river/wetland tactical that adds one production river
-   influence shared by terrain, biome, surface, and neutral site-survey facts;
-4. follow with coherent stream/reach realization, including downstream grade,
-   cascades, and waterfalls that connect valid upstream and downstream water;
-   and
-5. only then treat a natural-water farmstead or mill site as scoutable.
+1. separate persisted `intro-homestead-v1` overlay and realized-plan identity;
+2. deterministic random-seed site scouting near provisional spawn, with full
+   and compact tiers plus typed rejection;
+3. Human Review R1 of candidate maps, grading, arrival, and a showcase seed
+   selected by the same arbitrary-seed algorithm;
+4. bounded terrain adaptation, reservation, buildings, authored water,
+   planting, and one-time residents; and
+5. safe arrival, save/reopen, player-edit precedence, and shareable
+   desktop/browser product-flow acceptance.
 
-Rivers need not begin with rainfall simulation. The first accepted slice may
-use a deterministic inspectable corridor field, but it must establish water
-surface, width/depth, banks, downstream direction, continuity, and wetland or
-outlet classification before waterfalls are added. A waterfall is a reach of a
-continuous watercourse crossing meaningful terrain drop, not an isolated cliff
-decoration.
-
-`FS-04`, the true cross-chunk structure lifecycle, remains `ready` and remains
-the first hard blocker for materializing the eventual settlement during normal
-generation. It is paused by priority, not by missing prerequisites. When the
-terrain campaign reaches an accepted stopping point, it should follow
-[`../structures.md`](../structures.md): status and persisted metadata
-foundation, per-chunk clipped placement, and one small original proof
-structure. It should not begin by making the maximal farmstead its test case.
-
-Do not select a durable showcase seed during this campaign. Production-backed
-maps and landscape cards should drive human review at the mountain/valley,
-river/wetland, and waterfall-reach milestones; seed scouting for the farmstead
-begins only after the relevant macro fields are accepted.
+Do not resume open-ended terrain representation, worlds-within-worlds, or
+procedural-horizon expansion during this tactical unless the playable intro
+exposes a specific correctness or presentation blocker. Do not make the
+maximal settlement the structure-foundation canary.
 
 ## Staged Direction
 
 ### Stage 0 — research and readiness
 
-- Treat the terrain campaign above as the current Stage 0 implementation
-  priority; `FS-04` and the composed settlement remain deliberately parked.
-- Keep this topic current while original mountains/valleys, periodic fields,
-  rivers, structure foundations, block content, and entities advance.
-- Re-audit the concrete tree, terrain, structure, and persistence owners before
-  opening an implementation tactical.
-- Keep authored-water fallback and optional natural-hydrology facts explicit
-  while valleys, periodic fields, rivers, and waterfall presentation advance.
-- Do not select a supposedly permanent demo seed prematurely.
+- Tactical 274 owns the current readiness audit and baseline locks.
+- Treat current original terrain and procedural-horizon behavior as sufficient
+  foundations unless the intro exposes a concrete blocker.
+- Repair the forced-Original capture path before relying on visual acceptance.
+- Prove the true structure-lifecycle canary before composing the farmstead.
+- Keep authored-water fallback and optional natural-hydrology facts explicit.
+- Select a showcase seed through the accepted scout; do not hard-code
+  seed-specific behavior or imply a release compatibility freeze.
 
 ### Stage 1 — basic fixed blueprint on a selected site
 
-- Consume a proven native structure start/reference/piece and template
-  foundation. If it has not landed yet, its own tactical should first prove
-  status metadata, clipped placement, persistence, and a small original
-  structure before the farmstead becomes the large content caller.
-- Build the production-backed seed/site scout and retain metric receipts.
-- Author one fixed `demo-farmstead-v1` composition with semantic roles,
-  reservations, a focal tree, basic water, spawn, cows, and chickens.
+- Execute Tactical 274's structure canary, then consume that same shared
+  start/reference/piece and template foundation.
+- Build the production-backed random-seed site scout near provisional spawn,
+  retain metric receipts, and select one showcase site through the same path.
+- Author fixed `intro-homestead-full-v1` and compact fallback compositions
+  with semantic roles, reservations, a focal tree, basic water, spawn, cows,
+  and chickens.
 - Keep starter-content identity separate from the base terrain profile and use
   Flat Grass as a simple cross-profile placement canary without changing pure
   reference Overworld output.
@@ -959,8 +941,8 @@ each composition expansion before moving on.
   reach, and which waterfall visuals belong in the first natural-water slice?
 - How large may cut/fill and the site reservation become before a candidate is
   rejected?
-- What maximum piece count, touched-chunk footprint, and planning-sample budget
-  should `demo-farmstead-v1` declare?
+- What maximum piece count and touched-chunk footprint should the accepted full
+  and compact intro compositions declare after the Tactical 274 survey?
 - Should starter-content identity live directly in persisted world metadata or
   in a more general ordered structure/content-overlay list?
 - Which compact composition tier is the intended Small Island fallback?

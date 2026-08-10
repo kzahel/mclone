@@ -83,14 +83,14 @@ and query-gated Rust diagnostic observer on 2026-07-26. Focused children
 completed dark color-output parity and the shared threaded/Worker vegetation
 topology with exact native/offscreen/desktop-browser/phone-browser semantic
 receipts.
-Active coordinating parent Tactical
+Coordinating parent Tactical
 [`261`](261-procedural-horizon-product-integration-roadmap.md) is now the
 global procedural-horizon entry point. It records the completed proof stack
 and sequences reusable World Explorer composition, later scene-owned
 lifecycle and vegetation arbitration, flat-platform promotion, XR/multiview
-validation, product handoff, and quality closeout. Active child Tactical 262
-owns the shared exact-painted contract and first true composed proof before
-game adoption.
+validation, product handoff, and quality closeout. Its further execution is
+paused behind Tactical 274's playable intro. Tactical 262 owns the shared
+exact-painted contract and first true composed proof before game adoption.
 Historical render-worker architecture remains in
 [`067-shared-render-worker-architecture.md`](067-shared-render-worker-architecture.md),
 with the parent thread/Web-Worker topology in
@@ -361,7 +361,7 @@ with the parent thread/Web-Worker topology in
 | [`258-mclone-macro-terrain-performance-baseline.md`](258-mclone-macro-terrain-performance-baseline.md) | complete 2026-07-26 | Normalized production Mclone point sampling through explicit 500 km grids, preview compilation/packing, plane/cylinder exact surface/decorated generation, and completed-frame World Explorer streaming receipts without changing terrain output. |
 | [`259-modern-and-historical-coast-reference-survey.md`](259-modern-and-historical-coast-reference-survey.md) | complete 2026-07-26 | Pinned a focused modern Java reference lane, compared Alpha/Beta/1.17.1/26.2 coast mechanisms, measured current Mclone coasts, and selected the first evidence-backed coast-family contract without changing terrain output. |
 | [`260-mclone-coast-intent-and-shore-terrain.md`](260-mclone-coast-intent-and-shore-terrain.md) | complete 2026-07-26; substantially improved, final balance deferred behind inland terrain | Implemented the first shared topology-aware Mclone coast intent, distinct sandy/gravel/rocky/ordinary geometry and surfaces, locally feathered realization, cross-substrate snow, varied banks, exact/preview parity, and two explicit human visual-review gates. |
-| [`261-procedural-horizon-product-integration-roadmap.md`](261-procedural-horizon-product-integration-roadmap.md) | active coordinating parent 2026-07-26 | Global roadmap from the retired chunk Far LOD through reusable World Explorer composition to later scene-owned adoption, native/web/Android promotion, XR/multiview acceptance, product handoff, and quality closeout. |
+| [`261-procedural-horizon-product-integration-roadmap.md`](261-procedural-horizon-product-integration-roadmap.md) | coordinating parent paused behind Tactical 274 on 2026-08-10 | Global roadmap from the retired chunk Far LOD through reusable World Explorer composition to later scene-owned adoption, native/web/Android promotion, XR/multiview acceptance, product handoff, and quality closeout. |
 | [`262-world-explorer-exact-procedural-composition.md`](262-world-explorer-exact-procedural-composition.md) | Slice 4 browser semantic gate complete; hosted Human Review 1B pending 2026-07-27 | Corrected the low-angle orbit proof with one viewer-forward anchor, then reused the exact renderer and whole-tree ownership through an isolated browser Worker. Native four-angle pixels and desktop/Pixel 7 semantic receipts pass; hosted interactive pixel review is next. |
 | [`263-cross-era-inland-landform-survey.md`](263-cross-era-inland-landform-survey.md) | complete 2026-07-26 | Compared Alpha, Beta, Java 1.17.1, Java 26.2, and current Mclone inland mechanisms; added runnable cross-era terrain measurements, proved ordinary Mclone land is under-structured, and selected a quiet/rolling/ridge-valley/basin/mountain plan with an undecorated review gate. |
 | [`264-mclone-ordinary-inland-landform-fabric.md`](264-mclone-ordinary-inland-landform-fabric.md) | objective validation complete 2026-07-26; Human Review A found an improved but still noise-legible 2D fabric | Reused existing periodic fields to make ordinary relief, ridge/valley, basin, mountain, and coast-arrival intent live, then stopped before ecology or geology after exact topology, parity, persistence, performance, streaming, and subjective review. |
@@ -374,3 +374,4 @@ with the parent thread/Web-Worker topology in
 | [`271-procedural-horizon-quality-baseline.md`](271-procedural-horizon-quality-baseline.md) | implementation complete; Human Review pending 2026-07-27 | Repaired PH-4 visual quality before performance tuning through ten-level/stride-one Explorer, desktop-game, and browser-game captures, shared geometric and lighting seam closure, composed resident-ring reach, and a phone-reviewable screenshot checkpoint. |
 | [`272-multiscale-semantic-refinement-witness.md`](272-multiscale-semantic-refinement-witness.md) | Human Review R1 ready 2026-07-27 | Proves one canonical parent feature can answer direct coarse queries and retain exact identity while bounded regional/local children elaborate it across plane, cylinder, and torus topologies; the hierarchy is now the fourth freely pannable Planner-atlas panel, with production terrain still disconnected. |
 | [`273-semantic-terrain-reconstruction-sandbox.md`](273-semantic-terrain-reconstruction-sandbox.md) | Human Review R1 ready 2026-07-27 | Reconstructs flat/quiet standalone heightfields from exact parent/regional/local range and basin courses, pins native/Wasm topology and partition evidence plus fixed-output costs, and exposes a responsive four-panel Terrain Lab review without changing Mclone Overworld. |
+| [`274-playable-intro-homestead.md`](274-playable-intro-homestead.md) | active; implementation not started 2026-08-10 | Shifts the selected product slice to a deterministic random-seed Homestead Start: bounded near-spawn site scouting, persisted overlay/plan identity, true cross-chunk structure lifecycle, terrain-adaptive first composition, safe arrival, residents, reopen, and shareable desktop/web acceptance. |
