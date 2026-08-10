@@ -1261,7 +1261,7 @@ impl RealmServer {
         };
         let terrain_overlay = IntroHomesteadTerrainOverlay::new(plan.clone())
             .map_err(ChunkStoreError::InvalidData)?;
-        let structure_overlay = IntroHomesteadStructureOverlay::first_cottage(
+        let structure_overlay = IntroHomesteadStructureOverlay::farmstead_buildings(
             plan.clone(),
             self.active_dimension.definition.topology,
         )

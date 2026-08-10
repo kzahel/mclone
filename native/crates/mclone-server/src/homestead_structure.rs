@@ -33,24 +33,53 @@ impl IntroHomesteadStructureOverlay {
         plan: IntroHomesteadPlanRecord,
         topology: HorizontalTopology,
     ) -> Result<Self, String> {
-        validate_intro_homestead_plan_for_world(
+        Self::from_piece_kinds(&plan, topology, &[HomesteadPlanPieceKind::Cottage])
+    }
+
+    pub fn farmstead_buildings(
+        plan: IntroHomesteadPlanRecord,
+        topology: HorizontalTopology,
+    ) -> Result<Self, String> {
+        Self::from_piece_kinds(
             &plan,
+            topology,
+            &[
+                HomesteadPlanPieceKind::Cottage,
+                HomesteadPlanPieceKind::Barn,
+                HomesteadPlanPieceKind::BarnLeanTo,
+                HomesteadPlanPieceKind::ChickenCoop,
+            ],
+        )
+    }
+
+    fn from_piece_kinds(
+        plan: &IntroHomesteadPlanRecord,
+        topology: HorizontalTopology,
+        kinds: &[HomesteadPlanPieceKind],
+    ) -> Result<Self, String> {
+        validate_intro_homestead_plan_for_world(
+            plan,
             plan.base_descriptor.seed,
             plan.base_descriptor.generation_profile,
             topology,
         )?;
-        let cottage = plan
-            .pieces
-            .iter()
-            .filter(|piece| piece.kind == HomesteadPlanPieceKind::Cottage)
-            .collect::<Vec<_>>();
-        if cottage.len() != 1 {
-            return Err(format!(
-                "intro homestead plan must contain exactly one cottage, found {}",
-                cottage.len()
-            ));
+        let mut pieces = Vec::with_capacity(kinds.len());
+        for kind in kinds {
+            let matching = plan
+                .pieces
+                .iter()
+                .filter(|piece| piece.kind == *kind)
+                .collect::<Vec<_>>();
+            if matching.len() != 1 {
+                return Err(format!(
+                    "intro homestead plan must contain exactly one {kind:?}, found {}",
+                    matching.len()
+                ));
+            }
+            pieces.push(compile_piece(matching[0], topology)?);
         }
-        let piece = compile_piece(cottage[0], topology)?;
+        pieces.sort_by(|left, right| left.piece_id.cmp(&right.piece_id));
+        let bounds = encompassing_bounds(&pieces)?;
         let start_chunk = topology
             .canonicalize_chunk(ChunkPos::from_block_coords(
                 plan.selected_site.candidate.anchor_x,
@@ -63,8 +92,8 @@ impl IntroHomesteadStructureOverlay {
                 structure_id: INTRO_HOMESTEAD_STRUCTURE_ID.to_owned(),
                 start_chunk,
                 references: 0,
-                bounds: piece.bounds,
-                pieces: vec![piece],
+                bounds,
+                pieces,
             },
         })
     }
@@ -160,6 +189,23 @@ impl IntroHomesteadStructureOverlay {
     pub fn start(&self) -> &StructureStartRecord {
         &self.start
     }
+}
+
+fn encompassing_bounds(pieces: &[StructurePieceRecord]) -> Result<StructureBoundingBox, String> {
+    let first = pieces
+        .first()
+        .ok_or_else(|| "homestead structure requires at least one piece".to_owned())?;
+    let mut min = first.bounds.min;
+    let mut max = first.bounds.max;
+    for piece in &pieces[1..] {
+        min.x = min.x.min(piece.bounds.min.x);
+        min.y = min.y.min(piece.bounds.min.y);
+        min.z = min.z.min(piece.bounds.min.z);
+        max.x = max.x.max(piece.bounds.max.x);
+        max.y = max.y.max(piece.bounds.max.y);
+        max.z = max.z.max(piece.bounds.max.z);
+    }
+    StructureBoundingBox::new(min, max)
 }
 
 fn compile_piece(
@@ -315,5 +361,57 @@ mod tests {
         assert_eq!(forward, reverse);
         assert_eq!(receipt, reverse_receipt);
         assert_eq!(receipt.placed_blocks, start.pieces[0].blocks.len());
+    }
+
+    #[test]
+    fn accepted_farmstead_buildings_share_one_clipped_structure_start() {
+        let plan = realize_intro_homestead_plan(
+            0,
+            WorldGenerationProfile::McloneOverworldV1,
+            HorizontalTopology::UNBOUNDED,
+        )
+        .unwrap();
+        let overlay = IntroHomesteadStructureOverlay::farmstead_buildings(
+            plan,
+            HorizontalTopology::UNBOUNDED,
+        )
+        .unwrap();
+        let start = overlay.start();
+
+        assert_eq!(start.start_chunk, ChunkPos::new(-13, -87));
+        assert_eq!(start.pieces.len(), 4);
+        assert_eq!(
+            start
+                .pieces
+                .iter()
+                .map(|piece| piece.piece_id.as_str())
+                .collect::<Vec<_>>(),
+            vec![
+                "building-barn-lean-to-v1",
+                "building-barn-v1",
+                "building-chicken-coop-v1",
+                "building-cottage-v1",
+            ]
+        );
+
+        let touched = start.touched_chunks(HorizontalTopology::UNBOUNDED).unwrap();
+        let expected_blocks = start
+            .pieces
+            .iter()
+            .map(|piece| piece.blocks.len())
+            .sum::<usize>();
+        let placed_blocks = touched
+            .into_iter()
+            .map(|pos| {
+                let mut chunk =
+                    GeneratedChunk::from_raw_parts(pos.x, pos.z, 0, 256, vec![AIR; 16 * 256 * 16]);
+                let references = overlay.references_for(pos).unwrap();
+                overlay
+                    .materialize_chunk(pos, &references, &mut chunk)
+                    .unwrap()
+                    .placed_blocks
+            })
+            .sum::<usize>();
+        assert_eq!(placed_blocks, expected_blocks);
     }
 }
