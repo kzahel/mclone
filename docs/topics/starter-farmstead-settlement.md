@@ -6,17 +6,16 @@ Status: **vision and staged direction accepted 2026-07-21. Tacticals 208–210
 prove the standalone building loop, human-directed charm iteration, and first
 bounded building families; Tactical 214 externalizes them through the
 completed Structure Lab and adds a Lab-native coop. Tactical
-[`274`](../tactical/274-playable-intro-homestead.md) reached Human Review R2 on
-2026-08-10 after R1 accepted seed `8675309`, its `full-v1` site at
-`(744,-376)`, and the east-facing arrival. Its first three slices landed
-orthogonal starter/plan identity, the first live status-owned and persisted
-cross-chunk structure canary, a deterministic production-backed near-spawn
-scout, and plan-before-startup persistence. Commit `b74cf73b` materializes the
-terrain-only plan, but the inspected output does not pass R2: coarse dry scout
-samples conceal shallow water inside the exact foundation footprints, which
-appear as pasted rectangular pads after grading. No building blocks have been
-placed. The accepted site or its realized composition must now be revised
-through an explicit human decision.
+[`274`](../tactical/274-playable-intro-homestead.md) is paused at a replacement
+Human Review R2 on 2026-08-10. The original seed-`8675309` site materialized in
+`b74cf73b` failed review because coarse dry samples concealed shallow water
+inside its exact foundations. Commit `10329418` responds to the requested
+retry with scout revision 2, exact footprint validation, a tier-correct
+arrival, natural no-op foundation preservation, and a narrower curved farm
+track. It proposes seed `0`, `compact-v1`, anchor `(-200,-1384)`, facing north,
+as the new terrain-only review site. The inspected rolling-meadow captures no
+longer read as pasted pads or a gravel runway, but this is not yet a human R2
+acceptance. No building blocks have been placed.
 The existing original terrain and procedural horizon remain foundations;
 further speculative expansion is paused unless the playable opening exposes
 a concrete blocker.**
@@ -731,8 +730,8 @@ approved; do not reserve a block of numbers in advance.
 | `FS-02` | coherent farm block/material/collision kit | `ready` | fourteen original farmstead materials now cover cottage, barn, and coop presentation; glass and transform/collision-aware stairs/slabs are proven; doors, fences/gates, farmland, crops, and props remain | resume with the next composition-driven family after the terrain campaign or when an active terrain review needs it |
 | `FS-03` | template records, semantic roles, transforms, markers, bounds, and touched chunks | `proven` | Tactical 208 pure kernel tests and persisted cross-chunk lab receipts | extend only when a caller needs processors, codecs, alternate palettes, entities, or block data |
 | `FS-04` | true structure statuses, starts, references, pieces, clipping, and persistence | `foundation proven` | Tactical 274 Slice 1: opt-in wayside arch owns starts and touched-chunk references, persists pieces/bounds, clips placement per target, reopens from SQLite, and passes request-order/no-far-write gates | reuse the same lifecycle for the first accepted farmstead plan; general registries and vanilla families remain later work |
-| `FS-05` | starter-content overlay and realized-instance identity | `plan persistence proven` | Tactical 274 Slices 0 and 3 persist starter content and the exact realized plan orthogonally to base generation, reopen it through SQLite and browser preload, and attach it before transient chunk generation | replace the internal plan intentionally if R2 selects a new site or composition; never rescore on ordinary reopen |
-| `FS-06` | site survey, scoring, grading, water fallback, reservation, and safe arrival | `R2 revision required` | `b74cf73b` proves bounded terrain materialization, order equality, pond closure, cache reopen, and edit precedence; the inspected R2 output exposes shallow water between the 16-block dry scout samples and fails the pasted-platform criterion | choose footprint-aware rescouting (recommended) or a smaller relocated plan, then regenerate and review the terrain-only result |
+| `FS-05` | starter-content overlay and realized-instance identity | `plan persistence proven` | Tactical 274 Slices 0 and 3 persist starter content and the exact realized plan orthogonally to base generation; `10329418` intentionally replaces the internal review plan with checksum `5daca45d...` | accept or reject the replacement at R2; never rescore on ordinary reopen |
+| `FS-06` | site survey, scoring, grading, water fallback, reservation, and safe arrival | `Human Review R2` | `10329418` checks exact foundation/path/pond footprints, treats sub-sea support as wet, fixes compact arrival, and proves the replacement terrain receipt across native, Wasm, and browser Worker paths; three inspected seed-`0` views show rolling dry terrain without pasted pads | human accepts or rejects the replacement terrain-only site before any buildings |
 | `FS-07` | first fixed farmhouse/barn/garden/pond/oak composition | `waiting on FS-04 through FS-06 in Tactical 274` | promoted cottage/barn families and a Lab-native coop are reusable; Tactical 274 bounds the first full and compact compositions | selected-site chunks render, persist, reopen, and retain player edits |
 | `FS-08` | resident and player marker realization | `waiting on FS-07 in Tactical 274` | cow/chicken persistence and player respawn are proven separately; Tactical 274 owns settlement marker idempotence and arrival | no duplicate residents and safe first arrival/respawn across reopen and partial materialization |
 | `FS-09` | cross-profile and topology adaptation | `deferred` | same engine contract accepted; first composition must land before breadth | Flat Grass, Small Island, Mclone, and explicit Overworld-overlay cases prove fit/fallback/rejection; admitted topology cases pass |
@@ -775,20 +774,19 @@ series actually begins, not for this documentation-only planning phase.
 ## Next Work
 
 Active Tactical
-[`274`](../tactical/274-playable-intro-homestead.md) is paused at Human Review
-R2. Commit `b74cf73b` materializes the terrain-only plan and proves its shared
-startup, persistence, clipping, order, and water contracts. The inspected
-capture shows three rectangular pads exposed through shallow water, so the
-current output fails the explicit pasted-stamp criterion. Buildings,
-planting, residents, and player arrival have not begun.
+[`274`](../tactical/274-playable-intro-homestead.md) is paused at the repeated
+Human Review R2. Commit `10329418` completed the requested footprint-aware
+rescout and proposes seed `0`, `compact-v1`, anchor `(-200,-1384)`, facing
+north. Its exact arrival is `(-200,89,-1352)`, the scout checksum is
+`d3c80987...`, and the persisted plan checksum is `5daca45d...`. Native aerial,
+approach, and exact-arrival captures were inspected after narrowing, curving,
+and warming the path material. Buildings, planting, residents, and player
+arrival publication have not begun.
 
-The recommended next move is footprint-aware rescouting: validate exact
-building and path footprints for fluid and support instead of relying only on
-the 16-block site lattice, select and persist a new internal showcase plan,
-then repeat R2. The alternate choice is to keep the accepted reservation but
-author a smaller or relocated composition on its real land; that also changes
-the realized plan and needs a new terrain-only review. Do not cover the
-problem with buildings or broad terrain fill.
+The next move is a human accept/reject decision on this replacement unbuilt
+site. Acceptance resumes Slice 5 with the first cottage and another immediate
+pixel review. Rejection returns only to bounded site/path composition work;
+do not hide an unsuitable site with buildings or broad terrain fill.
 
 Do not resume open-ended terrain representation, worlds-within-worlds, or
 procedural-horizon expansion during this tactical unless the playable intro

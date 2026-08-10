@@ -1,11 +1,13 @@
 # Tactical 274: Playable Intro Homestead
 
-Status: **Human Review R2 reached and paused on 2026-08-10. Commit `b74cf73b`
-materializes the persisted terrain-only plan, but the inspected capture fails
-the gate's own presentation bar: dry scout samples conceal shallow-water
-columns between them, and grading exposes three rectangular foundation pads
-that read as pasted platforms. No building blocks have been placed. Human
-direction is required before revising the accepted site or realized plan.**
+Status: **Replacement Human Review R2 reached and paused on 2026-08-10.
+Commit `b74cf73b` proved terrain materialization but its seed-`8675309` site
+failed visual review in shallow water. After the requested retry, commit
+`10329418` adds exact footprint validation and proposes a dry seed-`0`
+`compact-v1` rolling-meadow site with a tier-correct arrival and curved farm
+track. Its aerial, approach, and exact-arrival pixels have been inspected. No
+building blocks have been placed; human acceptance or rejection of this
+replacement remains the gate.**
 
 Topic:
 
@@ -430,7 +432,8 @@ clears the overlying fluid to the requested height. Its bounded numerical
 receipt is therefore correct while its visual result is still three large,
 rectangular exposed pads and an isolated straight approach.
 
-The recommended recovery is to return to Slices 2–3 and add exact
+The recommended recovery at that first gate was to return to Slices 2–3 and
+add exact
 footprint-aware dry-support checks before selecting and persisting a new
 showcase plan. A smaller or relocated composition inside the accepted
 reservation is possible, but it is also a new realized plan and should be
@@ -449,6 +452,78 @@ Validation at the gate:
 - Wild and Homestead captures were initially byte-identical, then diverged
   after transient-plan initialization was repaired and the resulting R2 image
   was inspected.
+
+### Replacement R2 candidate
+
+The human requested another attempt after seeing the bad water site. Commit
+`10329418` implements scout revision `intro-homestead-scout-v2` and stops again
+before buildings. Shared layout facts now describe the exact full/compact
+foundation pads, path corridor, pond bank, and tier-specific arrival. The
+scout evaluates the original bounded 4,096 coarse candidate/rotation cases,
+then exact-samples candidate footprints in score order until the first safe
+site survives. Sub-sea terrain is classified as fluid because the production
+generator fills it to sea level, closing the mismatch that admitted the first
+site.
+
+The replacement plan is:
+
+- seed `0`, provisional spawn `(-328,0,-1032)`;
+- primary `compact-v1`, anchor `(-200,-1384)`, facing north;
+- exact arrival `(-200,89,-1352)`, equal to the first path control;
+- 5-block sampled surface span (`84..89`), target surface `87`, maximum
+  estimated grade depth three, and low expected tree clearing;
+- scout checksum
+  `d3c809872b73fdac422137e43dbd4599232ce72df17dfa604d81ae8a8b22a4af`;
+  and
+- persisted plan checksum
+  `5daca45d879b28e72a7781e3c0e473264071660e817a34b6dfeeaa83543509ee`.
+
+The release scout completed in 99.001 ms. It retained the fixed 4,096
+evaluations and 1,024 anchors, then admitted its first exact candidate after
+2,599 footprint samples. The real browser Worker returned the same flat and
+Mclone checksums in 366.770 ms, below the 750 ms browser budget.
+
+The replacement materialization covers 25 grading chunks inside the same
+121-chunk reservation shape:
+
+- 1,313 graded columns, 754 cut blocks, 732 fill blocks, maximum cut depth
+  three, and maximum fill depth two;
+- 75 path-surface blocks on a three-block, gently curved track whose surface
+  is predominantly coarse dirt rather than gravel;
+- 76 pond excavation blocks, 118 water blocks, 78 bottom blocks, and 24 bank
+  fill blocks;
+- 2,439 removed decoration blocks; and
+- 4,838 changed blocks.
+
+Foundation columns already at their selected regional height now retain the
+natural surface and small vegetation instead of being rewritten into visible
+rectangles. The inspected terrain reads as an open rolling meadow bordered by
+savanna woodland, with the authored pond to one side and a legible approach.
+The remaining one-block path steps are ordinary traversable voxel contours,
+not broad retaining walls or hidden water fill.
+
+Review artifacts remain outside the repository:
+
+- `/tmp/mclone-homestead-r2-replacement-seed0.{json,svg}`;
+- `/tmp/mclone-homestead-r2-seed0-topdown-v3.png`;
+- `/tmp/mclone-homestead-r2-seed0-approach-v3.png`; and
+- `/tmp/mclone-homestead-r2-seed0-arrival-v3.png`.
+
+Validation for the replacement:
+
+- all 578 `mclone-server` and 409 non-ignored `mclone-worldgen` library tests
+  pass; the single worldgen gauntlet remains intentionally ignored;
+- all 284 `mclone-app-runtime` and 42 native `mclone-web-client` library tests
+  pass;
+- the focused selector passes through `wasm-bindgen-test-runner`, and the web
+  client checks for `wasm32-unknown-unknown`;
+- the actual browser Worker scout probe passes with the checksums above; and
+- all three production-backed terrain captures were rendered and inspected.
+
+The broad native web-client integration command still reaches the unrelated
+platform-boundary source lock with 3 of 4 tests passing: the current
+`WebSceneHost` has 38 mechanical exports while that pre-existing lock expects
+37. The homestead diff changes neither that host nor its exports.
 
 ## Implementation Slices
 
@@ -501,9 +576,10 @@ farmstead blocks are placed before the site and arrival direction are accepted.
 
 ### Slice 3 — showcase seed and realized plan
 
-Result: **complete** in `db4e0966`; the accepted production-selected plan has
+Result: **complete** in `db4e0966` for the original R1 plan, then intentionally
+replaced for the repeated R2 in `10329418`. The current review plan has
 checksum
-`d6fa4657806865193d688dfba6d743895e630ef60b34eb75cfac2711a7faa8ec`.
+`5daca45d879b28e72a7781e3c0e473264071660e817a34b6dfeeaa83543509ee`.
 
 - Select a showcase seed from the accepted scout output rather than hand
   editing a preferred seed into the planner.
@@ -531,8 +607,9 @@ native web-client tests pass, and the web client checks for
 
 ### Slice 4 — grading, reservation, and first drawable milestone
 
-Result: **implemented in `b74cf73b`; paused at Human Review R2 because the
-rendered accepted site reads as pasted shallow-water platforms.**
+Result: **implemented in `b74cf73b`, rejected at the first Human Review R2,
+and revised in `10329418`; the dry rolling-meadow replacement is paused at
+the repeated Human Review R2 before buildings.**
 
 - Apply bounded foundations/terraces, path grading, authored water, and
   decoration reservation through ordinary chunk materialization.

@@ -145,7 +145,9 @@ series implements the same concern, normally reuse the document slug in its
   structure vocabulary, hydrology and authored-water fallbacks, site grading,
   exact touched-chunk scheduling, authored-tree reservation, persistent
   residents, an `FS-*` dependency/proof ledger, tactical completion gates, and
-  deliberately deferred distant-presentation proxies.
+  deliberately deferred distant-presentation proxies; Tactical 274 is paused
+  at replacement Human Review R2 on a dry seed-`0` compact meadow before any
+  building materialization.
 - [`structure-lab.md`](structure-lab.md): accepted source-first Structure Lab
   direction—agent-authored TypeScript DSL, mandatory generated-JSON drift
   gates, Rust build-time baked meshes, a polished read-only
