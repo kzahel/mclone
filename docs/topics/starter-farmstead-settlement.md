@@ -17,8 +17,9 @@ as the new terrain-only review site. The inspected rolling-meadow captures no
 longer read as pasted pads or a gravel runway, and the human accepted that site
 for Slice 5. Commits `7ad8fbe3`, `da444ecf`, and `b481c53a` now materialize the
 complete first cottage/barn/coop, path, pond, visual garden, open hedged yard,
-and focal-oak composition through one persistent clipped start. Tactical 274
-is paused at Human Review R3 before arrival and residents.
+and focal-oak composition through one persistent clipped start. The human
+accepted that composition at Review R3 on 2026-08-10, and Tactical 274 Slice 6
+is active at the new-player arrival milestone.
 The existing original terrain and procedural horizon remain foundations;
 further speculative expansion is paused unless the playable opening exposes
 a concrete blocker.**
@@ -737,8 +738,8 @@ approved; do not reserve a block of numbers in advance.
 | `FS-04` | true structure statuses, starts, references, pieces, clipping, and persistence | `foundation proven` | Tactical 274 Slice 1: opt-in wayside arch owns starts and touched-chunk references, persists pieces/bounds, clips placement per target, reopens from SQLite, and passes request-order/no-far-write gates | reuse the same lifecycle for the first accepted farmstead plan; general registries and vanilla families remain later work |
 | `FS-05` | starter-content overlay and realized-instance identity | `plan persistence proven` | Tactical 274 Slices 0 and 3 persist starter content and the exact realized plan orthogonally to base generation; `10329418` intentionally replaces the internal review plan with accepted checksum `5daca45d...` | never rescore on ordinary reopen |
 | `FS-06` | site survey, scoring, grading, water fallback, reservation, and safe arrival | `proven for first composition` | `10329418` checks exact foundation/path/pond footprints, treats sub-sea support as wet, fixes compact arrival, and proves the accepted seed-`0` replacement across native, Wasm, browser Worker, and inspected terrain views | preserve these contracts while building on the accepted site |
-| `FS-07` | first fixed farmhouse/barn/garden/pond/oak composition | `Human Review R3` | `7ad8fbe3`, `da444ecf`, and `b481c53a` materialize and inspect the nine-piece compact start; order, reopen, edits, day/low-light, and stereo evidence pass | accept the fixed composition or request one concrete visual correction before residents/arrival |
-| `FS-08` | resident and player marker realization | `waiting on FS-07 in Tactical 274` | cow/chicken persistence and player respawn are proven separately; Tactical 274 owns settlement marker idempotence and arrival | no duplicate residents and safe first arrival/respawn across reopen and partial materialization |
+| `FS-07` | first fixed farmhouse/barn/garden/pond/oak composition | `proven` | Human Review R3 accepted the inspected nine-piece compact start on 2026-08-10 after order, reopen, edit, day/low-light, and stereo evidence | preserve the accepted composition while arrival and residents land |
+| `FS-08` | resident and player marker realization | `active in Tactical 274 Slice 6` | cow/chicken persistence and player respawn are proven separately; R3 unblocked settlement marker idempotence and arrival | no duplicate residents and safe first arrival/respawn across reopen and partial materialization |
 | `FS-09` | cross-profile and topology adaptation | `deferred` | same engine contract accepted; first composition must land before breadth | Flat Grass, Small Island, Mclone, and explicit Overworld-overlay cases prove fit/fallback/rejection; admitted topology cases pass |
 | `FS-10` | maximal parcels, church, outbuildings, richer animals, and visual mill | `deferred` | named destination and optional parcels are preserved | additions pass composition, persistence, and performance reviews without replacing the first hierarchy |
 | `FS-11` | functional farm simulation and machinery | `deferred` | deliberately outside first visual/worldgen acceptance | shared gameplay contracts own crops, roles, power, inputs, and outputs |
@@ -779,8 +780,8 @@ series actually begins, not for this documentation-only planning phase.
 ## Next Work
 
 Active Tactical
-[`274`](../tactical/274-playable-intro-homestead.md) passed the repeated Human
-Review R2. Commit `10329418` completed the requested footprint-aware rescout
+[`274`](../tactical/274-playable-intro-homestead.md) passed Human Review R3 on
+2026-08-10. Commit `10329418` completed the requested footprint-aware rescout
 for seed `0`, `compact-v1`, anchor `(-200,-1384)`, facing
 north. Its exact arrival is `(-200,89,-1352)`, the scout checksum is
 `d3c80987...`, and the persisted plan checksum is `5daca45d...`. Native aerial,
@@ -790,10 +791,9 @@ circulation, visual garden, open hedged yard, hay accents, and focal oak are now
 materialized and inspected through the persisted structure lifecycle.
 Residents and player-arrival publication have not begun.
 
-The active move is Human Review R3. If accepted, Slice 6 should publish the
-accepted arrival for new players only and realize the cow/chicken markers once
-through the existing persistent entity path. Do not start those changes before
-the composition decision.
+The active move is Slice 6: publish the accepted arrival for new players only,
+prove returning-player and respawn behavior, then realize the cow/chicken
+markers once through the existing persistent entity path.
 
 Do not resume open-ended terrain representation, worlds-within-worlds, or
 procedural-horizon expansion during this tactical unless the playable intro

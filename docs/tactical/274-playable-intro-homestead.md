@@ -1,7 +1,7 @@
 # Tactical 274: Playable Intro Homestead
 
-Status: **Human Review R3 ready on 2026-08-10; Slice 5 is implemented and
-paused before arrival/resident realization.
+Status: **Human Review R3 accepted on 2026-08-10; Slice 6 is active at the
+new-player arrival milestone.
 Commit `b74cf73b` proved terrain materialization but its seed-`8675309` site
 failed visual review in shallow water. After the requested retry, commit
 `10329418` adds exact footprint validation and proposes a dry seed-`0`
@@ -607,9 +607,9 @@ fails while preparing `assets/mclone/figures/cow.figure.json`. The Wasm build,
 browser Worker scout, and pack provenance gates pass, but R3 does not claim a
 browser pixel or create/reopen proof.
 
-**Human Review R3 decision required:** accept this first fixed composition and
-proceed to Slice 6, or reject it with a concrete arrival, scale, center, or
-content-direction correction.
+**Human decision, 2026-08-10:** accepted the first fixed composition. Proceed
+to Slice 6, first publishing the accepted arrival through the shared player
+lifecycle and then realizing residents through the persistent entity path.
 
 ## Implementation Slices
 
@@ -710,8 +710,8 @@ stamp, or a drainage hazard.
 
 ### Slice 5 — first composition materialization
 
-Result: **implemented in `7ad8fbe3`, `da444ecf`, and `b481c53a`; paused at
-Human Review R3.**
+Result: **implemented in `7ad8fbe3`, `da444ecf`, and `b481c53a`; accepted at
+Human Review R3 on 2026-08-10.**
 
 - Load the accepted source-first cottage/barn/coop records through their
   canonical Rust boundary.
@@ -728,6 +728,8 @@ the farmstead lacks a coherent center, or visible content relies on diagnostic
 assets.
 
 ### Slice 6 — arrival, residents, and durability
+
+Result: **active; Human Review R3 accepted the composition on 2026-08-10.**
 
 - Publish the accepted arrival as first-spawn/shared-spawn intent without
   moving returning players.
