@@ -48,6 +48,22 @@ if (
     `--generation-profile requires overworld, flat-grass-v1, small-island-v1, mclone-overworld-v1, topology-probe-v1, or beta-v1; got ${generationProfile}`,
   );
 }
+const seedArgIndex = process.argv.indexOf("--seed");
+const seed = seedArgIndex >= 0
+  ? String(process.argv[seedArgIndex + 1] ?? "")
+  : "";
+if (seed && !/^-?[0-9]+$/.test(seed)) {
+  throw new Error(`--seed requires a signed integer; got ${seed}`);
+}
+const starterContentArgIndex = process.argv.indexOf("--starter-content");
+const starterContent = starterContentArgIndex >= 0
+  ? String(process.argv[starterContentArgIndex + 1] ?? "")
+  : "";
+if (starterContent && !["wild", "intro-homestead-v1"].includes(starterContent)) {
+  throw new Error(
+    `--starter-content requires wild or intro-homestead-v1; got ${starterContent}`,
+  );
+}
 const terrainPresentationArgIndex = process.argv.indexOf("--terrain-presentation");
 const terrainPresentation = terrainPresentationArgIndex >= 0
   ? String(process.argv[terrainPresentationArgIndex + 1] ?? "")
@@ -626,7 +642,9 @@ async function run() {
       startupParameters.set("smokeObserver", "1");
       if (!menuEntryProbe) startupParameters.set("startInWorld", "1");
       if (mobileAppLoop) startupParameters.set("holdStartupProgress", "1");
+      if (seed) startupParameters.set("seed", seed);
       if (generationProfile) startupParameters.set("generationProfile", generationProfile);
+      if (starterContent) startupParameters.set("starterContent", starterContent);
       if (terrainPresentation) {
         startupParameters.set("terrainPresentation", terrainPresentation);
       }
