@@ -15,7 +15,10 @@ arrival, natural no-op foundation preservation, and a narrower curved farm
 track. It proposes seed `0`, `compact-v1`, anchor `(-200,-1384)`, facing north,
 as the new terrain-only review site. The inspected rolling-meadow captures no
 longer read as pasted pads or a gravel runway, and the human accepted that site
-for Slice 5. No building blocks have been placed yet.
+for Slice 5. Commits `7ad8fbe3`, `da444ecf`, and `b481c53a` now materialize the
+complete first cottage/barn/coop, path, pond, visual garden, open hedged yard,
+and focal-oak composition through one persistent clipped start. Tactical 274
+is paused at Human Review R3 before arrival and residents.
 The existing original terrain and procedural horizon remain foundations;
 further speculative expansion is paused unless the playable opening exposes
 a concrete blocker.**
@@ -141,8 +144,9 @@ The direction is accepted before all of its consumers are ready:
   bounded members through canonical TypeScript-authored records and added the
   first Lab-native chicken coop. Tactical 274 Slice 1 has since landed the
   minimal true structure-start/reference/piece runtime and proved it with an
-  opt-in cross-chunk wayside arch. The farmstead is deliberately not yet a
-  caller: Human Review R1 precedes its first persisted plan or block.
+  opt-in cross-chunk wayside arch. The accepted farmstead is now a caller: one
+  owner start holds four canonical buildings plus clipped landscape roles, and
+  its generated cache reopens without replacing later player edits.
 - The generated block-state lane now includes oak/spruce planks, cobblestone,
   stone bricks, vertical hay, glass, and straight spruce stairs/slabs. The
   extracted and repo-owned asset paths, transforms, light facts, and
@@ -203,8 +207,9 @@ realized settlement instance plan
 `WorldGenerationDescriptor` continues to own only profile, seed, and topology.
 `StarterContentDescriptor` and `RealizedStarterPlanIdentity` are separate live
 world-metadata fields and remain distinct from the mutable/protected-lobby
-behavior profile, which answers a different question. R1 has not selected or
-persisted an actual realized plan yet.
+behavior profile, which answers a different question. The accepted seed-`0`
+review world persists realized plan checksum `5daca45d...` before any
+plan-owned chunk can be published.
 
 This separation is especially important for the reference `overworld` profile.
 Pure `overworld` must remain Minecraft Java 1.17.1 seed-parity output.
@@ -732,7 +737,7 @@ approved; do not reserve a block of numbers in advance.
 | `FS-04` | true structure statuses, starts, references, pieces, clipping, and persistence | `foundation proven` | Tactical 274 Slice 1: opt-in wayside arch owns starts and touched-chunk references, persists pieces/bounds, clips placement per target, reopens from SQLite, and passes request-order/no-far-write gates | reuse the same lifecycle for the first accepted farmstead plan; general registries and vanilla families remain later work |
 | `FS-05` | starter-content overlay and realized-instance identity | `plan persistence proven` | Tactical 274 Slices 0 and 3 persist starter content and the exact realized plan orthogonally to base generation; `10329418` intentionally replaces the internal review plan with accepted checksum `5daca45d...` | never rescore on ordinary reopen |
 | `FS-06` | site survey, scoring, grading, water fallback, reservation, and safe arrival | `proven for first composition` | `10329418` checks exact foundation/path/pond footprints, treats sub-sea support as wet, fixes compact arrival, and proves the accepted seed-`0` replacement across native, Wasm, browser Worker, and inspected terrain views | preserve these contracts while building on the accepted site |
-| `FS-07` | first fixed farmhouse/barn/garden/pond/oak composition | `active in Tactical 274 Slice 5` | promoted cottage/barn families and a Lab-native coop are reusable; replacement R2 accepted the compact terrain plan | materialize and inspect the cottage first, then add the remaining compact layers before R3 |
+| `FS-07` | first fixed farmhouse/barn/garden/pond/oak composition | `Human Review R3` | `7ad8fbe3`, `da444ecf`, and `b481c53a` materialize and inspect the nine-piece compact start; order, reopen, edits, day/low-light, and stereo evidence pass | accept the fixed composition or request one concrete visual correction before residents/arrival |
 | `FS-08` | resident and player marker realization | `waiting on FS-07 in Tactical 274` | cow/chicken persistence and player respawn are proven separately; Tactical 274 owns settlement marker idempotence and arrival | no duplicate residents and safe first arrival/respawn across reopen and partial materialization |
 | `FS-09` | cross-profile and topology adaptation | `deferred` | same engine contract accepted; first composition must land before breadth | Flat Grass, Small Island, Mclone, and explicit Overworld-overlay cases prove fit/fallback/rejection; admitted topology cases pass |
 | `FS-10` | maximal parcels, church, outbuildings, richer animals, and visual mill | `deferred` | named destination and optional parcels are preserved | additions pass composition, persistence, and performance reviews without replacing the first hierarchy |
@@ -780,13 +785,15 @@ for seed `0`, `compact-v1`, anchor `(-200,-1384)`, facing
 north. Its exact arrival is `(-200,89,-1352)`, the scout checksum is
 `d3c80987...`, and the persisted plan checksum is `5daca45d...`. Native aerial,
 approach, and exact-arrival captures were inspected after narrowing, curving,
-and warming the path material. Buildings, planting, residents, and player
-arrival publication have not begun.
+and warming the path material. The cottage, barn, lean-to, coop, pond,
+circulation, visual garden, open hedged yard, hay accents, and focal oak are now
+materialized and inspected through the persisted structure lifecycle.
+Residents and player-arrival publication have not begun.
 
-The active move is Slice 5's first cottage through the persisted structure
-lifecycle, followed immediately by arrival and elevated pixel review. Only
-after that checkpoint should the barn, coop, garden, enclosure, focal oak, and
-restrained planting complete the compact composition for Human Review R3.
+The active move is Human Review R3. If accepted, Slice 6 should publish the
+accepted arrival for new players only and realize the cow/chicken markers once
+through the existing persistent entity path. Do not start those changes before
+the composition decision.
 
 Do not resume open-ended terrain representation, worlds-within-worlds, or
 procedural-horizon expansion during this tactical unless the playable intro

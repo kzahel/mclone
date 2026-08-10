@@ -1,13 +1,16 @@
 # Tactical 274: Playable Intro Homestead
 
-Status: **Replacement Human Review R2 accepted on 2026-08-10; Slice 5 is
-active at the first-cottage milestone.
+Status: **Human Review R3 ready on 2026-08-10; Slice 5 is implemented and
+paused before arrival/resident realization.
 Commit `b74cf73b` proved terrain materialization but its seed-`8675309` site
 failed visual review in shallow water. After the requested retry, commit
 `10329418` adds exact footprint validation and proposes a dry seed-`0`
 `compact-v1` rolling-meadow site with a tier-correct arrival and curved farm
 track. Its aerial, approach, and exact-arrival pixels were inspected and the
-human accepted the replacement. No building blocks have been placed yet.**
+human accepted the replacement. Commits `7ad8fbe3`, `da444ecf`, and
+`b481c53a` now materialize and visually validate the cottage, remaining
+buildings, circulation, pond, garden, open hedged yard, and focal oak through
+one clipped persistent structure start.**
 
 Topic:
 
@@ -529,6 +532,85 @@ platform-boundary source lock with 3 of 4 tests passing: the current
 `compact-v1` terrain plan. Proceed with Slice 5, committing the first cottage
 and its rendered review before adding the remaining composition layers.
 
+## Human Review R3 Handoff
+
+Slice 5 is implemented and stops before player-arrival publication or resident
+realization:
+
+- `7ad8fbe3` resolves the canonical compact cottage into one owner start,
+  touched-chunk references, and clipped FEATURES placement after terrain;
+- `da444ecf` adds the persisted barn, lean-to, and Rosehip coop transforms to
+  that same start;
+- `b481c53a` adds five semantic landscape pieces: the already-authored pond,
+  three short circulation branches, a visual soil-and-flower garden, an open
+  hedged coop yard with hay accents, and an irregular focal oak; and
+- `dbcbf01e` lets the browser smoke runner forward the existing shared seed and
+  starter-content startup inputs for direct homestead capture attempts.
+
+The complete compact start has nine pieces: four canonical source-first
+building pieces, four plan-owned landscape roles, and one derived circulation
+role. Dynamic surface matching happens inside the target chunk before static
+building/tree blocks, so it never writes into another chunk. Forward and
+reverse target orders are byte-identical. The production integrated runner
+observes the cottage and focal oak, and the generated composition cache
+reopens without worldgen while a later player edit remains authoritative.
+
+The inspected Original-asset captures are outside the repository:
+
+- first cottage ground and elevated:
+  `/tmp/mclone-homestead-cottage-arrival-v1.png` and
+  `/tmp/mclone-homestead-cottage-elevated-v1.png`;
+- building-only comparison:
+  `/tmp/mclone-homestead-buildings-oblique-v1.png`;
+- complete composition:
+  `/tmp/mclone-homestead-composition-oblique-v2.png` and
+  `/tmp/mclone-homestead-composition-arrival-v1.png`;
+- low light:
+  `/tmp/mclone-homestead-composition-low-light-v1.png`; and
+- synthetic stereo:
+  `/tmp/mclone-homestead-composition-stereo-v2.png`.
+
+Agent inspection finds a coherent center: the arrival track forks visibly to
+the cottage, barn, and coop; the oak anchors the open green; the pond and
+garden balance the coop yard; and each building retains a distinct role. The
+accepted one-block arrival step still occupies much of the lower foreground in
+the exact ground camera, so arrival readability remains an explicit human
+review point rather than an assumed pass. Low light retains readable torch-lit
+doors and silhouettes. Stereo contains the same geometry in both eyes, though
+the existing XR emulation capture also composites its pause UI.
+
+No diagnostic textures or reference structure content are used. The visual
+garden is intentionally soil and flowers rather than fake crop gameplay, and
+the low hedge is not claimed as a functional fenced enclosure. Doors,
+fences/gates, farmland, crops, resident spawning, and the actual player-arrival
+transaction remain later work.
+
+Validation at R3:
+
+- all 582 `mclone-server` tests pass;
+- all 284 `mclone-app-runtime` tests and its integration locks pass;
+- all 42 native `mclone-web-client` library tests pass;
+- the web client and full workspace check successfully, including
+  `wasm32-unknown-unknown`;
+- the real browser Worker repeats the accepted scout checksum
+  `d3c80987...` in 370.710 ms;
+- first-party validation resolves 221 block states, 149 atlas sprites, and four
+  actor figures with no missing registry entries; and
+- forced-Original desktop captures report proprietary-free provenance and the
+  complete day, low-light, and stereo images were inspected.
+
+The broader native web-client integration command still has the unrelated
+source-shape lock recorded at R2: 3 of 4 tests pass, with 38 current mechanical
+exports versus an expected 37. A headed browser homestead capture also remains
+blocked after fresh first-party pack hydration because current app startup
+fails while preparing `assets/mclone/figures/cow.figure.json`. The Wasm build,
+browser Worker scout, and pack provenance gates pass, but R3 does not claim a
+browser pixel or create/reopen proof.
+
+**Human Review R3 decision required:** accept this first fixed composition and
+proceed to Slice 6, or reject it with a concrete arrival, scale, center, or
+content-direction correction.
+
 ## Implementation Slices
 
 ### Slice 0 — baseline and contract locks
@@ -627,6 +709,9 @@ Stop at Human Review R2 if the site reads as a flattened platform, a pasted
 stamp, or a drainage hazard.
 
 ### Slice 5 — first composition materialization
+
+Result: **implemented in `7ad8fbe3`, `da444ecf`, and `b481c53a`; paused at
+Human Review R3.**
 
 - Load the accepted source-first cottage/barn/coop records through their
   canonical Rust boundary.
