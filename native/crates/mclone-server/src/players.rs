@@ -13,6 +13,13 @@ use crate::player::ServerPlayerState;
 
 const FIRST_PLAYER_ID: u64 = 0;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum InitialSpawnRoute {
+    RequestedView,
+    AwaitingPlayerRecord,
+    RealmPrimary,
+}
+
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct ServerPlayerId(u64);
 
@@ -40,6 +47,7 @@ pub(crate) struct ServerPlayerEntry {
     pub(crate) inventory: ServerInventory,
     pub(crate) appearance: PlayerAppearance,
     pub(crate) initial_spawn_center: Option<ChunkPos>,
+    pub(crate) initial_spawn_route: InitialSpawnRoute,
     pub(crate) identity: Option<ClientIdentity>,
     pub(crate) resume_record: Option<PlayerRecord>,
     pub(crate) total_experience: u64,
@@ -62,6 +70,7 @@ impl Default for ServerPlayerEntry {
             inventory: ServerInventory::default(),
             appearance: PlayerAppearance::default(),
             initial_spawn_center: None,
+            initial_spawn_route: InitialSpawnRoute::RequestedView,
             identity: None,
             resume_record: None,
             total_experience: 0,

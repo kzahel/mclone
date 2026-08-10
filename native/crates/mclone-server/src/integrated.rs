@@ -67,7 +67,7 @@ use crate::player_chunk_tracking::{
     PlayerChunkTrackingPolicy,
 };
 use crate::player_lifecycle::player_body_touches_lava;
-use crate::players::{ServerPlayerId, ServerPlayerList};
+use crate::players::{InitialSpawnRoute, ServerPlayerId, ServerPlayerList};
 use crate::remote_players::{RemotePlayerState, RemotePlayerTracking, RoutedRemotePlayerUpdate};
 use crate::spawn::{
     SpawnColumnOrder, find_safe_surface_spawn_with_column_order,
@@ -270,11 +270,22 @@ struct PendingDimensionTransfer {
     phase: PlayerDimensionTransferPhase,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 struct PendingPlayerRespawn {
     destination: DimensionKey,
     spawn_center: ChunkPos,
+    preferred_position: Option<Vec3d>,
+    y_rot_degrees: f32,
+    x_rot_degrees: f32,
     phase: PlayerDimensionTransferPhase,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct RealmPrimarySpawnIntent {
+    center: ChunkPos,
+    preferred_position: Option<Vec3d>,
+    y_rot_degrees: f32,
+    x_rot_degrees: f32,
 }
 
 #[derive(Debug)]
@@ -1300,6 +1311,49 @@ impl RealmServer {
         self.intro_homestead_plan.as_ref()
     }
 
+    fn realm_primary_spawn_intent(&self) -> ChunkStoreResult<RealmPrimarySpawnIntent> {
+        let destination = DimensionKey::overworld();
+        let definition = self.dimensions.get(&destination).ok_or_else(|| {
+            ChunkStoreError::InvalidData(
+                "realm primary Overworld dimension is not registered".to_owned(),
+            )
+        })?;
+        if let Some(plan) = self.intro_homestead_plan.as_ref() {
+            let [x, y, z] = plan.selected_site.arrival;
+            let preferred_position =
+                Vec3d::new(f64::from(x) + 0.5, f64::from(y), f64::from(z) + 0.5);
+            let look_target = plan
+                .arrival_path
+                .controls
+                .get(1)
+                .map(|control| control.pos)
+                .unwrap_or([
+                    plan.selected_site.candidate.anchor_x,
+                    y,
+                    plan.selected_site.candidate.anchor_z,
+                ]);
+            let dx = f64::from(look_target[0]) + 0.5 - preferred_position.x;
+            let dz = f64::from(look_target[2]) + 0.5 - preferred_position.z;
+            let y_rot_degrees = (-dx).atan2(dz).to_degrees() as f32;
+            return Ok(RealmPrimarySpawnIntent {
+                center: chunk_pos_for_player_position(preferred_position),
+                preferred_position: Some(preferred_position),
+                y_rot_degrees,
+                x_rot_degrees: 0.0,
+            });
+        }
+        Ok(RealmPrimarySpawnIntent {
+            center: initial_spawn_center_for_descriptor(
+                definition.seed,
+                definition.generation_profile,
+                definition.topology,
+            ),
+            preferred_position: None,
+            y_rot_degrees: 0.0,
+            x_rot_degrees: 0.0,
+        })
+    }
+
     pub fn save_world_metadata_blocking(&mut self) -> ChunkStoreResult<usize> {
         self.save_world_metadata_at_unix_millis(current_unix_millis())
     }
@@ -1845,6 +1899,11 @@ impl RealmServer {
             capabilities,
             pose_transport,
         )?;
+        let primary_spawn = if record.is_none() && self.intro_homestead_plan.is_some() {
+            Some(self.realm_primary_spawn_intent()?)
+        } else {
+            None
+        };
         let player = self
             .players
             .get_mut(player_id)
@@ -1868,6 +1927,9 @@ impl RealmServer {
             player.pending_death_cause = record.pending_death_cause;
             player.player_record_revision = record.revision;
             player.resume_record = Some(record);
+        } else if let Some(primary_spawn) = primary_spawn {
+            player.initial_spawn_center = Some(primary_spawn.center);
+            player.initial_spawn_route = InitialSpawnRoute::RealmPrimary;
         }
         let total_experience = player.total_experience;
         let statistics = player.statistics.clone();
@@ -1900,6 +1962,7 @@ impl RealmServer {
         };
         let key = player_record_key(identity.profile_id);
         player.identity = Some(identity);
+        player.initial_spawn_route = InitialSpawnRoute::AwaitingPlayerRecord;
         self.scheduler.load_player_record(key);
         Ok(())
     }
@@ -1916,6 +1979,7 @@ impl RealmServer {
             return Err(unknown_player_error(player_id));
         };
         player.identity = Some(identity);
+        player.initial_spawn_route = InitialSpawnRoute::AwaitingPlayerRecord;
         self.apply_loaded_player_record(&key, record)
     }
 
@@ -2801,6 +2865,12 @@ impl RealmServer {
         self.ensure_target_exists(target)?;
         if let Some(record) = self.resume_record_for_target(target)? {
             view.center = chunk_pos_for_player_position(record.position);
+        } else if self
+            .players
+            .get(target.player_id())
+            .is_some_and(|player| player.initial_spawn_route == InitialSpawnRoute::RealmPrimary)
+        {
+            view.center = self.realm_primary_spawn_intent()?.center;
         }
         let topology = self.active_dimension.definition.topology;
         view.center = topology.canonicalize_chunk(view.center).ok_or_else(|| {
@@ -3200,20 +3270,29 @@ impl RealmServer {
     ) -> ChunkStoreResult<Vec<ServerUpdate>> {
         let accepted = self.player_mut_for_target(target)?.accept_teleport(id);
         if accepted {
-            self.pending_dimension_transfers.remove(&target.player_id());
-            if self
-                .pending_player_respawns
-                .remove(&target.player_id())
-                .is_some()
-            {
+            let player_id = target.player_id();
+            self.pending_dimension_transfers.remove(&player_id);
+            let accepted_respawn = self.pending_player_respawns.remove(&player_id).is_some();
+            let accepted_primary_spawn = self.players.get(player_id).is_some_and(|player| {
+                player.initial_spawn_route == InitialSpawnRoute::RealmPrimary
+            });
+            if accepted_respawn {
                 self.players
-                    .get_mut(target.player_id())
-                    .ok_or_else(|| unknown_player_error(target.player_id()))?
+                    .get_mut(player_id)
+                    .ok_or_else(|| unknown_player_error(player_id))?
                     .resume_record = None;
-                self.save_player_record(target.player_id())?;
+            }
+            if accepted_primary_spawn {
+                self.players
+                    .get_mut(player_id)
+                    .ok_or_else(|| unknown_player_error(player_id))?
+                    .initial_spawn_route = InitialSpawnRoute::RequestedView;
+            }
+            if accepted_respawn || accepted_primary_spawn {
+                self.save_player_record(player_id)?;
             }
             let updates = self.kill_player_if_touching_lava(target)?;
-            self.reconcile_remote_player_subject(target.player_id(), true);
+            self.reconcile_remote_player_subject(player_id, true);
             return Ok(updates);
         }
         Ok(Vec::new())
@@ -3240,11 +3319,8 @@ impl RealmServer {
                     "realm primary Overworld dimension is not registered".to_owned(),
                 )
             })?;
-        let spawn_center = initial_spawn_center_for_descriptor(
-            destination_definition.seed,
-            destination_definition.generation_profile,
-            destination_definition.topology,
-        );
+        let spawn_intent = self.realm_primary_spawn_intent()?;
+        let spawn_center = spawn_intent.center;
         // Match the ordinary dimension-transfer invariant: prove the
         // destination runtime can be activated before detaching source
         // membership, then return to the source to read its current view.
@@ -3300,11 +3376,13 @@ impl RealmServer {
                 PendingDimensionTransfer {
                     source,
                     destination: destination.clone(),
-                    preferred_position: Vec3d::new(
-                        f64::from(spawn_center.x) * 16.0 + 0.5,
-                        0.0,
-                        f64::from(spawn_center.z) * 16.0 + 0.5,
-                    ),
+                    preferred_position: spawn_intent.preferred_position.unwrap_or_else(|| {
+                        Vec3d::new(
+                            f64::from(spawn_center.x) * 16.0 + 0.5,
+                            0.0,
+                            f64::from(spawn_center.z) * 16.0 + 0.5,
+                        )
+                    }),
                     y_rot_degrees,
                     x_rot_degrees,
                     phase: PlayerDimensionTransferPhase::LoadingDestination,
@@ -3353,6 +3431,9 @@ impl RealmServer {
             PendingPlayerRespawn {
                 destination,
                 spawn_center,
+                preferred_position: spawn_intent.preferred_position,
+                y_rot_degrees: spawn_intent.y_rot_degrees,
+                x_rot_degrees: spawn_intent.x_rot_degrees,
                 phase: PlayerDimensionTransferPhase::LoadingDestination,
             },
         );
@@ -4060,6 +4141,14 @@ impl RealmServer {
         if !player.needs_initial_position_sync() {
             return Ok(None);
         }
+        let initial_spawn_route = self
+            .players
+            .get(player_id)
+            .ok_or_else(|| unknown_player_error(player_id))?
+            .initial_spawn_route;
+        if initial_spawn_route == InitialSpawnRoute::AwaitingPlayerRecord {
+            return Ok(None);
+        }
         let Some(center) = self.initial_spawn_center_for_target(target)? else {
             return Ok(None);
         };
@@ -4068,6 +4157,9 @@ impl RealmServer {
         }
         let resume = self.resume_record_for_target(target)?.cloned();
         let transfer = self.pending_dimension_transfers.get(&player_id).cloned();
+        let primary_spawn = (initial_spawn_route == InitialSpawnRoute::RealmPrimary)
+            .then(|| self.realm_primary_spawn_intent())
+            .transpose()?;
         if let Some(record) = resume.as_ref()
             && !self
                 .scheduler
@@ -4080,6 +4172,16 @@ impl RealmServer {
             && self
                 .scheduler
                 .client_visible_snapshot(chunk_pos_for_player_position(transfer.preferred_position))
+                .is_none()
+        {
+            return Ok(None);
+        }
+        if let Some(preferred_position) = primary_spawn
+            .as_ref()
+            .and_then(|intent| intent.preferred_position)
+            && self
+                .scheduler
+                .client_visible_snapshot(chunk_pos_for_player_position(preferred_position))
                 .is_none()
         {
             return Ok(None);
@@ -4098,10 +4200,22 @@ impl RealmServer {
         let exact_transfer = transfer
             .as_ref()
             .filter(|transfer| self.player_pose_has_clearance(transfer.preferred_position));
+        let exact_primary_spawn = primary_spawn
+            .as_ref()
+            .and_then(|intent| intent.preferred_position)
+            .filter(|position| self.player_pose_is_safe_spawn(*position));
+        let nearby_primary_spawn = primary_spawn
+            .as_ref()
+            .and_then(|intent| intent.preferred_position)
+            .and_then(|position| self.find_safe_spawn_near_preferred(position));
         let position = if let Some(transfer) = exact_transfer {
             transfer.preferred_position
         } else if let Some(record) = exact_resume {
             record.position
+        } else if let Some(position) = exact_primary_spawn {
+            position
+        } else if let Some(position) = nearby_primary_spawn {
+            position
         } else {
             let Some(position) = find_safe_surface_spawn_with_column_order(
                 center,
@@ -4143,6 +4257,13 @@ impl RealmServer {
                     record.on_ground,
                     simulation_tick,
                 )
+        } else if let Some(primary_spawn) = primary_spawn {
+            self.player_mut_for_target(target)?.initial_position_update(
+                position,
+                primary_spawn.y_rot_degrees,
+                primary_spawn.x_rot_degrees,
+                simulation_tick,
+            )
         } else {
             self.player_mut_for_target(target)?.initial_position_update(
                 position,
@@ -4183,14 +4304,27 @@ impl RealmServer {
         } else {
             SpawnColumnOrder::Scan
         };
-        let Some(position) = find_safe_surface_spawn_with_column_order(
-            respawn.spawn_center,
-            |pos| self.scheduler.block_at_world(pos),
-            |x, z| self.biome_source.block_position_biome_definition(x, z),
-            |chunk| self.scheduler.client_visible_snapshot(chunk).is_some(),
-            column_order,
-        ) else {
-            return Ok(None);
+        let position = if let Some(position) = respawn
+            .preferred_position
+            .filter(|position| self.player_pose_is_safe_spawn(*position))
+        {
+            position
+        } else if let Some(position) = respawn
+            .preferred_position
+            .and_then(|position| self.find_safe_spawn_near_preferred(position))
+        {
+            position
+        } else {
+            let Some(position) = find_safe_surface_spawn_with_column_order(
+                respawn.spawn_center,
+                |pos| self.scheduler.block_at_world(pos),
+                |x, z| self.biome_source.block_position_biome_definition(x, z),
+                |chunk| self.scheduler.client_visible_snapshot(chunk).is_some(),
+                column_order,
+            ) else {
+                return Ok(None);
+            };
+            position
         };
 
         let simulation_tick = self.simulation_tick;
@@ -4199,10 +4333,12 @@ impl RealmServer {
                 .players
                 .get_mut(player_id)
                 .ok_or_else(|| unknown_player_error(player_id))?;
-            let position_update =
-                player
-                    .state
-                    .initial_position_update(position, 0.0, 0.0, simulation_tick);
+            let position_update = player.state.initial_position_update(
+                position,
+                respawn.y_rot_degrees,
+                respawn.x_rot_degrees,
+                simulation_tick,
+            );
             player.vitals = mclone_protocol::PlayerVitals::default();
             player.pending_death_cause = None;
             player.life_epoch = player.life_epoch.saturating_add(1);
@@ -4279,16 +4415,60 @@ impl RealmServer {
         body_clear && solid_support
     }
 
+    fn player_pose_is_safe_spawn(&self, position: Vec3d) -> bool {
+        if !self.player_pose_has_clearance(position) {
+            return false;
+        }
+        let feet = BlockPos::containing(position);
+        [feet.below(), feet, feet.offset(0, 1, 0)]
+            .into_iter()
+            .all(|pos| {
+                self.scheduler
+                    .block_at_world(pos)
+                    .is_some_and(|block| !mclone_worldgen::block::has_fluid(block))
+            })
+    }
+
+    fn find_safe_spawn_near_preferred(&self, preferred: Vec3d) -> Option<Vec3d> {
+        const HORIZONTAL_RADIUS: i32 = 8;
+        const VERTICAL_RADIUS: i32 = 8;
+        let base_x = preferred.x.floor() as i32;
+        let base_y = preferred.y.floor() as i32;
+        let base_z = preferred.z.floor() as i32;
+        for radius in 0..=HORIZONTAL_RADIUS {
+            for z_offset in -radius..=radius {
+                for x_offset in -radius..=radius {
+                    if x_offset.abs().max(z_offset.abs()) != radius {
+                        continue;
+                    }
+                    for vertical_step in 0..=VERTICAL_RADIUS * 2 {
+                        let y_offset = if vertical_step == 0 {
+                            0
+                        } else if vertical_step % 2 == 1 {
+                            (vertical_step + 1) / 2
+                        } else {
+                            -(vertical_step / 2)
+                        };
+                        let candidate = Vec3d::new(
+                            f64::from(base_x + x_offset) + 0.5,
+                            f64::from(base_y + y_offset),
+                            f64::from(base_z + z_offset) + 0.5,
+                        );
+                        if self.player_pose_is_safe_spawn(candidate) {
+                            return Some(candidate);
+                        }
+                    }
+                }
+            }
+        }
+        None
+    }
+
     fn apply_loaded_player_record(
         &mut self,
         key: &PlayerRecordKey,
         record: Option<PlayerRecord>,
     ) -> ChunkStoreResult<()> {
-        let Some(record) = record.filter(|record| {
-            player_record_is_usable(record) && self.dimensions.get(&record.dimension).is_some()
-        }) else {
-            return Ok(());
-        };
         let matched = self.players.iter().find_map(|(player_id, candidate)| {
             candidate
                 .identity
@@ -4296,12 +4476,19 @@ impl RealmServer {
                 .is_some_and(|identity| player_record_key(identity.profile_id) == *key)
                 .then_some(player_id)
         });
-        if let Some(player_id) = matched {
+        let Some(player_id) = matched else {
+            return Ok(());
+        };
+        let record = record.filter(|record| {
+            player_record_is_usable(record) && self.dimensions.get(&record.dimension).is_some()
+        });
+        if let Some(record) = record {
             self.relocate_player_membership_for_resume(player_id, record.dimension.clone())?;
             let player = self
                 .players
                 .get_mut(player_id)
                 .expect("matched realm player must exist");
+            player.initial_spawn_route = InitialSpawnRoute::RequestedView;
             player.initial_spawn_center = Some(chunk_pos_for_player_position(record.position));
             player
                 .inventory
@@ -4337,6 +4524,32 @@ impl RealmServer {
                 .and_then(|player| player.initial_spawn_center)
                 .expect("loaded realm resume has a spawn center");
             self.retarget_player_view_for_resume(CommandTarget::Player(player_id), center)?;
+        } else {
+            let primary_spawn = self
+                .intro_homestead_plan
+                .is_some()
+                .then(|| self.realm_primary_spawn_intent())
+                .transpose()?;
+            let should_retarget = {
+                let player = self
+                    .players
+                    .get_mut(player_id)
+                    .expect("matched realm player must exist");
+                if player.state.needs_initial_position_sync() && primary_spawn.is_some() {
+                    player.initial_spawn_route = InitialSpawnRoute::RealmPrimary;
+                    player.initial_spawn_center = primary_spawn.map(|spawn| spawn.center);
+                    true
+                } else {
+                    player.initial_spawn_route = InitialSpawnRoute::RequestedView;
+                    false
+                }
+            };
+            if let Some(primary_spawn) = primary_spawn.filter(|_| should_retarget) {
+                self.retarget_player_view_for_resume(
+                    CommandTarget::Player(player_id),
+                    primary_spawn.center,
+                )?;
+            }
         }
         Ok(())
     }

@@ -136,6 +136,225 @@ fn new_world_metadata_persists_realized_starter_plan_orthogonally() {
 }
 
 #[test]
+fn new_identified_player_arrives_at_the_persisted_homestead_spawn() {
+    let definition =
+        crate::DimensionDefinition::overworld(0, WorldGenerationProfile::McloneOverworldV1);
+    let mut server = LocalRealmSession::local_integrated_with_world_store_and_dimension_definition(
+        definition,
+        Box::new(MemoryWorldStore::new()),
+    );
+    server.set_starter_content(StarterContentDescriptor::IntroHomesteadV1);
+    server.initialize_world_metadata_blocking().unwrap();
+    server.set_debug_passive_showcase_enabled(false);
+    let identity = ClientIdentity::new(PlayerProfileId::new([0x71; 16]), "Newcomer").unwrap();
+    let key = player_record_key(identity.profile_id);
+    server
+        .configure_local_player_identity_blocking(identity)
+        .unwrap();
+
+    let intent = server.realm_primary_spawn_intent().unwrap();
+    request_initial_chunk_view(&mut server);
+    assert_eq!(
+        server
+            .chunk_tracking
+            .accepted_view(server.player_id())
+            .unwrap()
+            .center,
+        intent.center,
+        "the client-requested provisional view must be retargeted before publication"
+    );
+    let arrival = wait_for_initial_spawn_update(&mut server);
+
+    assert_eq!(arrival.position, intent.preferred_position.unwrap());
+    assert_eq!(arrival.y_rot_degrees, intent.y_rot_degrees);
+    assert_eq!(arrival.x_rot_degrees, 0.0);
+    assert!(server.player_pose_is_safe_spawn(arrival.position));
+
+    server
+        .try_handle_command(ClientCommand::AcceptTeleport(AcceptTeleportCommand {
+            id: arrival.teleport_id,
+        }))
+        .unwrap();
+    let persisted = server
+        .scheduler_mut()
+        .load_player_record_blocking(key)
+        .unwrap()
+        .expect("accepted first arrival must immediately create a player record");
+    assert_eq!(persisted.position, arrival.position);
+    assert_eq!(persisted.y_rot_degrees, arrival.y_rot_degrees);
+}
+
+#[test]
+fn asynchronous_returning_player_load_wins_over_homestead_arrival() {
+    let definition =
+        crate::DimensionDefinition::overworld(0, WorldGenerationProfile::McloneOverworldV1);
+    let mut server = LocalRealmSession::local_integrated_with_world_store_and_dimension_definition(
+        definition,
+        Box::new(MemoryWorldStore::new()),
+    );
+    server.set_starter_content(StarterContentDescriptor::IntroHomesteadV1);
+    server.initialize_world_metadata_blocking().unwrap();
+    server.set_debug_passive_showcase_enabled(false);
+    let identity = ClientIdentity::new(PlayerProfileId::new([0x72; 16]), "Returner").unwrap();
+    let control = server.intro_homestead_plan().unwrap().arrival_path.controls[1].pos;
+    let returned_position = Vec3d::new(
+        f64::from(control[0]) + 0.5,
+        f64::from(control[1]),
+        f64::from(control[2]) + 0.5,
+    );
+    let mut record = PlayerRecord::new(
+        player_record_key(identity.profile_id),
+        9,
+        identity.display_name.clone(),
+        returned_position,
+    );
+    record.y_rot_degrees = 37.0;
+    record.x_rot_degrees = -12.0;
+    record.on_ground = true;
+    server.scheduler_mut().save_player_record(record.clone());
+
+    server.configure_local_player_identity(identity).unwrap();
+    request_initial_chunk_view(&mut server);
+    let resumed = wait_for_initial_spawn_update(&mut server);
+
+    assert_eq!(resumed.position, returned_position);
+    assert_eq!(resumed.y_rot_degrees, 37.0);
+    assert_eq!(resumed.x_rot_degrees, -12.0);
+    assert!(server.player().on_ground());
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn sqlite_reopen_retains_post_arrival_pose_instead_of_teleporting_again() {
+    let root = world_time_temp_dir("sqlite-homestead-arrival-reopen");
+    let identity = ClientIdentity::new(PlayerProfileId::new([0x74; 16]), "Settler").unwrap();
+    let returned_position;
+    {
+        let definition =
+            crate::DimensionDefinition::overworld(0, WorldGenerationProfile::McloneOverworldV1);
+        let mut realm =
+            RealmServer::try_with_threaded_sqlite_world_dir_dimension_definition(definition, &root)
+                .unwrap();
+        realm.set_starter_content(StarterContentDescriptor::IntroHomesteadV1);
+        realm.initialize_world_metadata_blocking().unwrap();
+        let mut server = LocalRealmSession::from_server(realm);
+        server.set_debug_passive_showcase_enabled(false);
+        server
+            .configure_local_player_identity_blocking(identity.clone())
+            .unwrap();
+        request_initial_chunk_view(&mut server);
+        let arrival = wait_for_initial_spawn_update(&mut server);
+        server
+            .try_handle_command(ClientCommand::AcceptTeleport(AcceptTeleportCommand {
+                id: arrival.teleport_id,
+            }))
+            .unwrap();
+        let control = server.intro_homestead_plan().unwrap().arrival_path.controls[1].pos;
+        returned_position = Vec3d::new(
+            f64::from(control[0]) + 0.5,
+            f64::from(control[1]),
+            f64::from(control[2]) + 0.5,
+        );
+        assert!(server.player_pose_is_safe_spawn(returned_position));
+        server
+            .try_handle_command(ClientCommand::move_player(MovePlayerCommand::PosRot {
+                position: returned_position,
+                y_rot_degrees: 37.0,
+                x_rot_degrees: -12.0,
+                on_ground: true,
+            }))
+            .unwrap();
+        server.shutdown_persistence().unwrap();
+    }
+
+    {
+        let definition =
+            crate::DimensionDefinition::overworld(0, WorldGenerationProfile::McloneOverworldV1);
+        let mut realm =
+            RealmServer::try_with_threaded_sqlite_world_dir_dimension_definition(definition, &root)
+                .unwrap();
+        realm.set_starter_content(StarterContentDescriptor::IntroHomesteadV1);
+        realm.initialize_world_metadata_blocking().unwrap();
+        let mut reopened = LocalRealmSession::from_server(realm);
+        reopened.set_debug_passive_showcase_enabled(false);
+        reopened
+            .configure_local_player_identity_blocking(identity)
+            .unwrap();
+        request_initial_chunk_view(&mut reopened);
+        let resumed = wait_for_initial_spawn_update(&mut reopened);
+
+        assert_eq!(resumed.position, returned_position);
+        assert_eq!(resumed.y_rot_degrees, 37.0);
+        assert_eq!(resumed.x_rot_degrees, -12.0);
+        reopened.shutdown_persistence().unwrap();
+    }
+
+    std::fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn blocked_homestead_spawn_respawns_safely_without_using_death_pose() {
+    let definition =
+        crate::DimensionDefinition::overworld(0, WorldGenerationProfile::McloneOverworldV1);
+    let mut server = LocalRealmSession::local_integrated_with_world_store_and_dimension_definition(
+        definition,
+        Box::new(MemoryWorldStore::new()),
+    );
+    server.set_starter_content(StarterContentDescriptor::IntroHomesteadV1);
+    server.initialize_world_metadata_blocking().unwrap();
+    server.set_debug_passive_showcase_enabled(false);
+    let identity = ClientIdentity::new(PlayerProfileId::new([0x73; 16]), "Respawner").unwrap();
+    server
+        .configure_local_player_identity_blocking(identity)
+        .unwrap();
+    request_initial_chunk_view(&mut server);
+    let arrival = wait_for_initial_spawn_update(&mut server);
+    server
+        .try_handle_command(ClientCommand::AcceptTeleport(AcceptTeleportCommand {
+            id: arrival.teleport_id,
+        }))
+        .unwrap();
+
+    let death_pose = arrival.position;
+    assert!(
+        server
+            .scheduler_mut()
+            .set_block_at_world(BlockPos::containing(death_pose), LAVA)
+    );
+    server.try_simulation_tick_report().unwrap();
+    assert!(server.player_vitals().is_dead());
+
+    let player_id = server.player_id();
+    let mut updates = server.try_handle_command(ClientCommand::Respawn).unwrap();
+    let mut respawn = None;
+    for _ in 0..60_000 {
+        respawn = respawn.or_else(|| {
+            updates.iter().find_map(|update| match update {
+                ServerUpdate::PlayerPosition(update) => Some(*update),
+                _ => None,
+            })
+        });
+        if respawn.is_some() {
+            break;
+        }
+        server.try_tick_report_global().unwrap();
+        updates.extend(server.try_drain_updates_for_player(player_id).unwrap());
+        if server.pending_job_count() > 0 && server.pending_publication_count() == 0 {
+            server.wait_for_worldgen_completion(Duration::from_secs(1));
+        }
+    }
+    let respawn = respawn.expect("blocked homestead respawn must find a safe nearby column");
+
+    assert_ne!(respawn.position, death_pose);
+    assert!(server.player_pose_is_safe_spawn(respawn.position));
+    assert_eq!(
+        chunk_pos_for_player_position(respawn.position),
+        server.realm_primary_spawn_intent().unwrap().center
+    );
+    assert!(!server.player_vitals().is_dead());
+}
+
+#[test]
 fn daylight_rule_and_debug_freeze_keep_distinct_durable_semantics() {
     let mut server = LocalRealmSession::with_world_store(99, Box::new(MemoryWorldStore::new()));
     server
