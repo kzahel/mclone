@@ -30,6 +30,16 @@ impl StarterContentDescriptor {
         }
     }
 
+    pub fn parse_label(value: &str) -> Result<Self, String> {
+        match value.trim() {
+            "wild" | "wild-start" => Ok(Self::Wild),
+            "intro-homestead-v1" | "homestead" | "homestead-start" => Ok(Self::IntroHomesteadV1),
+            other => Err(format!(
+                "unsupported starter content '{other}'; expected wild or intro-homestead-v1"
+            )),
+        }
+    }
+
     pub(crate) const fn codec_tag(self) -> u8 {
         match self {
             Self::Wild => 0,
@@ -82,6 +92,10 @@ mod tests {
         assert_eq!(
             serde_json::to_string(&StarterContentDescriptor::IntroHomesteadV1).unwrap(),
             "\"intro-homestead-v1\""
+        );
+        assert_eq!(
+            StarterContentDescriptor::parse_label("homestead").unwrap(),
+            StarterContentDescriptor::IntroHomesteadV1
         );
     }
 }

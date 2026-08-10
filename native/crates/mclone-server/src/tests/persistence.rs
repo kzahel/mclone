@@ -1,5 +1,6 @@
 use super::support::*;
 use crate::player_chunk_tracking::PlayerChunkTrackingPolicy;
+use mclone_core::HorizontalTopology;
 
 #[test]
 fn stored_light_chunks_satisfy_interest_without_worldgen() {
@@ -421,6 +422,79 @@ fn flat_grass_persistence_hit_wins_and_survives_reopen() {
         0,
         "stored flat chunk must bypass worldgen"
     );
+}
+
+#[test]
+fn homestead_grade_cache_reopens_and_player_edit_wins() {
+    let store = SharedMemoryWorldStore::new();
+    let plan = crate::realize_intro_homestead_plan(
+        8_675_309,
+        WorldGenerationProfile::FlatGrassV1,
+        HorizontalTopology::UNBOUNDED,
+    )
+    .unwrap();
+    let overlay = crate::IntroHomesteadTerrainOverlay::new(plan.clone()).unwrap();
+    let control = plan.arrival_path.controls[plan.arrival_path.controls.len() / 2].pos;
+    let path_surface = WorldBlockPos::new(control[0], control[1] - 1, control[2]);
+    let center = path_surface.chunk_pos();
+    let interest = ChunkView {
+        center,
+        render_distance: 0,
+        chunk_tracking_radius: 0,
+    };
+
+    let configure = |scheduler: &mut ChunkScheduler| {
+        scheduler
+            .set_world_generation_profile(WorldGenerationProfile::FlatGrassV1)
+            .unwrap();
+        scheduler
+            .set_intro_homestead_terrain_overlay(Some(overlay.clone()))
+            .unwrap();
+        scheduler.set_lighting_enabled(false);
+    };
+
+    {
+        let mut scheduler = ChunkScheduler::with_world_store(8_675_309, Box::new(store.clone()));
+        configure(&mut scheduler);
+        apply_interest_and_poll(&mut scheduler, interest.clone());
+        assert!(matches!(
+            scheduler.block_at_world(path_surface),
+            Some(mclone_worldgen::block::GRAVEL | mclone_worldgen::block::COARSE_DIRT)
+        ));
+        poll_scheduler_until_persistence_idle(&mut scheduler);
+    }
+
+    {
+        let mut reopened = ChunkScheduler::with_world_store(8_675_309, Box::new(store.clone()));
+        configure(&mut reopened);
+        apply_interest_and_poll(&mut reopened, interest.clone());
+        assert!(matches!(
+            reopened.block_at_world(path_surface),
+            Some(mclone_worldgen::block::GRAVEL | mclone_worldgen::block::COARSE_DIRT)
+        ));
+        assert_eq!(
+            reopened.holder(center).map(ChunkHolder::residency),
+            Some(ChunkResidency::LoadedFromStore)
+        );
+        assert_eq!(reopened.job_count(), 0);
+        assert!(reopened.set_block_at_world(path_surface, STONE));
+        reopened
+            .apply_interest(ChunkView {
+                center: ChunkPos::new(center.x + 100, center.z + 100),
+                render_distance: 0,
+                chunk_tracking_radius: 0,
+            })
+            .unwrap();
+        reopened.process_pending_unloads(usize::MAX).unwrap();
+        poll_scheduler_until_persistence_idle(&mut reopened);
+        reopened.process_pending_unloads(usize::MAX).unwrap();
+    }
+
+    let mut edited = ChunkScheduler::with_world_store(8_675_309, Box::new(store));
+    configure(&mut edited);
+    apply_interest_and_poll(&mut edited, interest);
+    assert_eq!(edited.block_at_world(path_surface), Some(STONE));
+    assert_eq!(edited.job_count(), 0);
 }
 
 #[test]

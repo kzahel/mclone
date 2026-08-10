@@ -2192,11 +2192,13 @@ pub async fn mclone_web_create_scene_host_with_startup(
     let initial_asset_packs = resources.into_initial_asset_packs()?;
     let (options, storage, entry) = startup.into_parts();
     let scene_startup = options.scene;
+    let starter_content = scene_startup.starter_content;
     let render_options = options.render_options;
     let startup_camera = options.camera;
     let _ = (server_worker_url, server_job_worker_url);
     let scene = McloneSceneHostOptions {
         startup: scene_startup,
+        starter_content,
         use_initial_spawn_center: false,
         ..McloneSceneHostOptions::default()
     };

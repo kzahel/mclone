@@ -90,13 +90,14 @@ impl McloneSceneHostOptions {
         world_root: Option<PathBuf>,
         world_dir: Option<PathBuf>,
     ) -> Self {
+        let starter_content = scene.starter_content;
         Self {
             startup: scene,
             render_compile_worker_timing_enabled: true,
             simulation_cadence: SimulationCadenceConfig::default(),
             player_movement_cadence: PlayerMovementCadenceConfig::default(),
             world_behavior_profile: mclone_server::WorldBehaviorProfile::Mutable,
-            starter_content: mclone_server::StarterContentDescriptor::Wild,
+            starter_content,
             first_person_player_visible: false,
             use_initial_spawn_center: true,
             freeze_scheduled_fluid_ticks: false,

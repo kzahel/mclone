@@ -232,13 +232,14 @@ pub(crate) fn scene_host_options_from_desktop(
     scene: &SceneOptions,
 ) -> Result<McloneSceneHostOptions> {
     let startup = scene.startup_for_host();
+    let starter_content = startup.starter_content;
     McloneSceneHostOptions {
         startup,
         render_compile_worker_timing_enabled: scene.render_compile_worker_timing_enabled,
         simulation_cadence: scene.simulation_cadence,
         player_movement_cadence: mclone_scene::PlayerMovementCadenceConfig::default(),
         world_behavior_profile: mclone_server::WorldBehaviorProfile::Mutable,
-        starter_content: mclone_server::StarterContentDescriptor::Wild,
+        starter_content,
         first_person_player_visible: scene.first_person_player_visible,
         use_initial_spawn_center: false,
         freeze_scheduled_fluid_ticks: false,
@@ -286,6 +287,7 @@ mod tests {
         SceneOptions {
             startup: StartupSceneOptions {
                 seed: -42,
+                starter_content: mclone_server::StarterContentDescriptor::IntroHomesteadV1,
                 chunk_x: 7,
                 chunk_z: -9,
                 render_distance: 6,
@@ -317,6 +319,7 @@ mod tests {
         let mono = scene_host_options_from_desktop(&scene).expect("valid Mono scene");
 
         assert_eq!(mono.startup, scene.startup);
+        assert_eq!(mono.starter_content, scene.starter_content);
         assert_eq!(mono.seed, scene.seed);
         assert_eq!(mono.chunk_x, scene.chunk_x);
         assert_eq!(mono.chunk_z, scene.chunk_z);

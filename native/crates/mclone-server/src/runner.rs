@@ -9,7 +9,9 @@
 use std::error::Error;
 use std::fmt;
 
-use mclone_core::{BlockPos, HorizontalTopology};
+use mclone_core::BlockPos;
+#[cfg(not(target_arch = "wasm32"))]
+use mclone_core::HorizontalTopology;
 #[cfg(not(target_arch = "wasm32"))]
 use mclone_protocol::{
     ChunkView, DimensionKey, decode_client_command, encode_client_command, encode_server_update,
@@ -1257,10 +1259,11 @@ mod native {
         }
         server.set_world_behavior_profile(config.world_behavior_profile);
         server.set_starter_content(config.starter_content);
-        if !matches!(
+        if (!matches!(
             &config.world_storage,
             NativeIntegratedServerWorldStorage::Transient
-        ) && let Err(error) = server.initialize_world_metadata_blocking()
+        ) || config.starter_content != crate::StarterContentDescriptor::Wild)
+            && let Err(error) = server.initialize_world_metadata_blocking()
         {
             let _ = ready_tx.send(Err(error.to_string()));
             return Ok(());
@@ -1918,6 +1921,36 @@ mod native {
             assert!(updates.iter().any(|update| {
                 matches!(update, ServerUpdate::WorldInfo { topology: actual, .. } if *actual == topology)
             }));
+            runner.join_shutdown().unwrap();
+        }
+
+        #[test]
+        fn transient_homestead_runner_initializes_plan_before_generation() {
+            let seed = 8_675_309;
+            let plan = crate::realize_intro_homestead_plan(
+                seed,
+                WorldGenerationProfile::McloneOverworldV1,
+                HorizontalTopology::UNBOUNDED,
+            )
+            .unwrap();
+            let control = plan.arrival_path.controls.last().unwrap().pos;
+            let target = BlockPos::new(control[0], control[1] - 1, control[2]);
+            let center = ChunkPos::from_block_coords(target.x, target.z);
+            let mut runner = NativeIntegratedServerRunner::new(
+                test_runner_config(seed)
+                    .with_world_generation_profile(WorldGenerationProfile::McloneOverworldV1)
+                    .with_starter_content(crate::StarterContentDescriptor::IntroHomesteadV1)
+                    .with_local_integrated_chunk_tracking(),
+            )
+            .unwrap();
+
+            let (snapshot, _) = load_chunk_snapshot(&mut runner, center);
+            let path_surface = snapshot_block_state(&snapshot, target);
+            assert!(
+                path_surface == BlockStateId(u32::from(mclone_worldgen::block::GRAVEL))
+                    || path_surface == BlockStateId(u32::from(mclone_worldgen::block::COARSE_DIRT)),
+                "expected authored path surface at {target:?}, got {path_surface:?}"
+            );
             runner.join_shutdown().unwrap();
         }
 

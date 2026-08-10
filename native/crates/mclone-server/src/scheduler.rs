@@ -70,10 +70,10 @@ use crate::{
     AUTHORED_WORLD_HEIGHT, AUTHORED_WORLD_MIN_Y, CHUNK_LEVEL_FULL, ChunkJobId, ChunkJobState,
     ChunkResidency, ChunkStatusStep, ChunkTicketKey, ChunkTicketType, DEFAULT_GAMEPLAY_RATE_HZ,
     FORCED_TICKET_LEVEL, FluidKind, FullChunkStatus, GenerationExecutionRequest, GenerationInput,
-    GenerationPlanRequest, LightStatusMailboxKind, LightStatusMailboxMetrics, MAX_CHUNK_DISTANCE,
-    StructureOverlay, UNLOADED_CHUNK_LEVEL, WorkerFrameMetrics, WorldBlockPos,
-    WorldGenerationDescriptor, WorldGenerationProfile, WorldgenMailboxKind,
-    full_chunk_status_for_ticket_level,
+    GenerationPlanRequest, IntroHomesteadTerrainOverlay, LightStatusMailboxKind,
+    LightStatusMailboxMetrics, MAX_CHUNK_DISTANCE, StructureOverlay, UNLOADED_CHUNK_LEVEL,
+    WorkerFrameMetrics, WorldBlockPos, WorldGenerationDescriptor, WorldGenerationProfile,
+    WorldgenMailboxKind, full_chunk_status_for_ticket_level,
 };
 
 #[cfg(not(target_arch = "wasm32"))]
@@ -513,6 +513,7 @@ pub struct ChunkScheduler {
     seed: i64,
     world_generation_profile: WorldGenerationProfile,
     structure_overlay: StructureOverlay,
+    intro_homestead_terrain_overlay: Option<IntroHomesteadTerrainOverlay>,
     topology: HorizontalTopology,
     lighting_enabled: bool,
     light_status_batch_size: usize,
@@ -784,6 +785,7 @@ impl ChunkScheduler {
             seed,
             world_generation_profile: WorldGenerationProfile::default(),
             structure_overlay: StructureOverlay::None,
+            intro_homestead_terrain_overlay: None,
             topology: HorizontalTopology::UNBOUNDED,
             lighting_enabled: true,
             light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
@@ -847,6 +849,7 @@ impl ChunkScheduler {
             seed,
             world_generation_profile: WorldGenerationProfile::default(),
             structure_overlay: StructureOverlay::None,
+            intro_homestead_terrain_overlay: None,
             topology: HorizontalTopology::UNBOUNDED,
             lighting_enabled: true,
             light_status_batch_size: DEFAULT_LIGHT_STATUS_BATCH_SIZE,
@@ -913,6 +916,23 @@ impl ChunkScheduler {
         }
         self.structure_overlay = overlay;
         Ok(())
+    }
+
+    pub fn set_intro_homestead_terrain_overlay(
+        &mut self,
+        overlay: Option<IntroHomesteadTerrainOverlay>,
+    ) -> ChunkStoreResult<()> {
+        if !self.holders.is_empty() || !self.jobs.is_empty() {
+            return Err(ChunkStoreError::InvalidData(
+                "homestead terrain overlay must be selected before chunk scheduling".to_owned(),
+            ));
+        }
+        self.intro_homestead_terrain_overlay = overlay;
+        Ok(())
+    }
+
+    pub fn intro_homestead_terrain_overlay(&self) -> Option<&IntroHomesteadTerrainOverlay> {
+        self.intro_homestead_terrain_overlay.as_ref()
     }
 
     pub const fn topology(&self) -> HorizontalTopology {
@@ -3244,9 +3264,8 @@ impl ChunkScheduler {
                 .expect("holder must exist before authored structure placement")
                 .structure_data()
                 .clone();
-            self.structure_overlay
-                .materialize_chunk(pos, self.topology, &structure_data.references, &mut chunk)
-                .expect("scheduled authored structure references must remain resolvable");
+            self.materialize_generation_overlays(pos, &structure_data.references, &mut chunk)
+                .expect("scheduled authored overlays must remain resolvable");
             let revision = ChunkRevision(self.next_revision);
             self.next_revision = self.next_revision.saturating_add(1);
             let snapshot = chunk.to_chunk_snapshot(revision, ChunkStatus::Features);
@@ -3458,9 +3477,7 @@ impl ChunkScheduler {
                 .expect("holder must exist before structure placement")
                 .structure_data()
                 .clone();
-            self.structure_overlay
-                .materialize_chunk(pos, self.topology, &structure_data.references, &mut chunk)
-                .map_err(ChunkStoreError::InvalidData)?;
+            self.materialize_generation_overlays(pos, &structure_data.references, &mut chunk)?;
             let scheduled_block_ticks = scheduled_block_tick_records_from_generated_chunk(&chunk);
             let scheduled_fluid_ticks = scheduled_fluid_tick_records_from_generated_chunk(&chunk);
             events.extend(block_tick_events_from_records(&scheduled_block_ticks)?);
@@ -3492,7 +3509,7 @@ impl ChunkScheduler {
                     ChunkStatus::Light,
                     ChunkStatusStep::Scheduled,
                 ));
-                let pending_light_status = if self.structure_overlay == StructureOverlay::None {
+                let pending_light_status = if !self.has_generation_overlay() {
                     PendingLightStatus::from_feature_publication(
                         pos,
                         snapshot,
@@ -3600,11 +3617,31 @@ impl ChunkScheduler {
                     .references_for(*pos, self.topology)
                     .map_err(ChunkStoreError::InvalidData)?
             };
-            self.structure_overlay
-                .materialize_chunk(*pos, self.topology, &references, chunk)
-                .map_err(ChunkStoreError::InvalidData)?;
+            self.materialize_generation_overlays(*pos, &references, chunk)?;
         }
         Ok(materialized)
+    }
+
+    fn has_generation_overlay(&self) -> bool {
+        self.structure_overlay != StructureOverlay::None
+            || self.intro_homestead_terrain_overlay.is_some()
+    }
+
+    fn materialize_generation_overlays(
+        &self,
+        pos: ChunkPos,
+        structure_references: &[crate::StructureReference],
+        chunk: &mut GeneratedChunk,
+    ) -> ChunkStoreResult<()> {
+        if let Some(overlay) = &self.intro_homestead_terrain_overlay {
+            overlay
+                .materialize_chunk(pos, chunk)
+                .map_err(ChunkStoreError::InvalidData)?;
+        }
+        self.structure_overlay
+            .materialize_chunk(pos, self.topology, structure_references, chunk)
+            .map_err(ChunkStoreError::InvalidData)?;
+        Ok(())
     }
 
     fn enqueue_light_status_batch(&mut self, statuses: Vec<PendingLightStatus>) {

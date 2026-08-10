@@ -12,6 +12,7 @@ mod fluid;
 mod game_mode;
 mod holder;
 mod homestead_plan;
+mod homestead_terrain;
 mod integrated;
 mod inventory;
 mod item_stack;
@@ -82,6 +83,7 @@ pub use homestead_plan::{
     IntroHomesteadPlanRecord, compile_intro_homestead_plan, decode_intro_homestead_plan,
     realize_intro_homestead_plan, validate_intro_homestead_plan_for_world,
 };
+pub use homestead_terrain::{HomesteadTerrainPlacementReceipt, IntroHomesteadTerrainOverlay};
 pub use integrated::{
     DimensionInterestDiagnostics, DimensionRuntime, INITIAL_DAY_TIME, LocalRealmSession,
     LocalRealmSessionRole, PlayerDimensionTransferDiagnostics, PlayerDimensionTransferPhase,

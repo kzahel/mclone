@@ -9,7 +9,9 @@ use mclone_render_session::{
     ENGINE_CAMERA_BASE_MOVEMENT_SPEED_MULTIPLIER, ENGINE_CAMERA_MAX_MOVEMENT_SPEED_MULTIPLIER,
     ENGINE_CAMERA_MIN_MOVEMENT_SPEED_MULTIPLIER,
 };
-use mclone_server::{DEFAULT_LIGHT_STATUS_BATCH_SIZE, WorldGenerationProfile};
+use mclone_server::{
+    DEFAULT_LIGHT_STATUS_BATCH_SIZE, StarterContentDescriptor, WorldGenerationProfile,
+};
 use mclone_ui::GameMovementMode;
 
 use crate::{
@@ -18,6 +20,7 @@ use crate::{
 
 pub const ARG_SEED: &str = "--seed";
 pub const ARG_GENERATION_PROFILE: &str = "--generation-profile";
+pub const ARG_STARTER_CONTENT: &str = "--starter-content";
 pub const ARG_WORLD_TOPOLOGY: &str = "--world-topology";
 pub const ARG_ALPHA_WINTER: &str = "--alpha-winter";
 pub const ARG_CHUNK_X: &str = "--chunk-x";
@@ -50,6 +53,7 @@ pub const ARG_SCREENSHOT_TARGET: &str = "--screenshot-target";
 pub const STARTUP_ARG_FLAGS: &[&str] = &[
     ARG_SEED,
     ARG_GENERATION_PROFILE,
+    ARG_STARTER_CONTENT,
     ARG_WORLD_TOPOLOGY,
     ARG_ALPHA_WINTER,
     ARG_CHUNK_X,
@@ -79,6 +83,7 @@ pub const STARTUP_ARG_FLAGS: &[&str] = &[
 
 pub const QUERY_SEED: &str = "seed";
 pub const QUERY_GENERATION_PROFILE: &str = "generationProfile";
+pub const QUERY_STARTER_CONTENT: &str = "starterContent";
 pub const QUERY_WORLD_TOPOLOGY: &str = "worldTopology";
 pub const QUERY_ALPHA_WINTER: &str = "alphaWinter";
 pub const QUERY_CHUNK_X: &str = "chunkX";
@@ -106,6 +111,7 @@ pub const QUERY_SCREENSHOT_TARGET: &str = "screenshotTarget";
 pub const STARTUP_QUERY_KEYS: &[&str] = &[
     QUERY_SEED,
     QUERY_GENERATION_PROFILE,
+    QUERY_STARTER_CONTENT,
     QUERY_WORLD_TOPOLOGY,
     QUERY_ALPHA_WINTER,
     QUERY_CHUNK_X,
@@ -168,6 +174,7 @@ impl RenderDistanceLimits {
 pub struct StartupSceneOptions {
     pub seed: i64,
     pub world_generation_profile: WorldGenerationProfile,
+    pub starter_content: StarterContentDescriptor,
     pub world_topology: HorizontalTopology,
     pub chunk_x: i32,
     pub chunk_z: i32,
@@ -192,6 +199,7 @@ impl Default for StartupSceneOptions {
         Self {
             seed: DEFAULT_STARTUP_SEED,
             world_generation_profile: WorldGenerationProfile::default(),
+            starter_content: StarterContentDescriptor::Wild,
             world_topology: HorizontalTopology::UNBOUNDED,
             chunk_x: DEFAULT_STARTUP_CHUNK_X,
             chunk_z: DEFAULT_STARTUP_CHUNK_Z,
@@ -391,6 +399,12 @@ impl StartupArgState {
                 .map_err(anyhow::Error::msg)?;
                 self.apply_alpha_winter_override();
             }
+            ARG_STARTER_CONTENT => {
+                self.scene.starter_content = StarterContentDescriptor::parse_label(
+                    &parse_string_arg(ARG_STARTER_CONTENT, args.next())?,
+                )
+                .map_err(anyhow::Error::msg)?;
+            }
             ARG_WORLD_TOPOLOGY => {
                 self.scene.world_topology = parse_world_topology_arg(
                     ARG_WORLD_TOPOLOGY,
@@ -534,6 +548,12 @@ impl StartupArgState {
                 )
                 .map_err(anyhow::Error::msg)?;
                 self.apply_alpha_winter_override();
+            }
+            QUERY_STARTER_CONTENT => {
+                self.scene.starter_content = StarterContentDescriptor::parse_label(
+                    &parse_string_arg(QUERY_STARTER_CONTENT, value)?,
+                )
+                .map_err(anyhow::Error::msg)?;
             }
             QUERY_WORLD_TOPOLOGY => {
                 self.scene.world_topology = parse_world_topology_arg(
@@ -894,6 +914,7 @@ mod tests {
             StartupSceneOptions {
                 seed: 12_345,
                 world_generation_profile: WorldGenerationProfile::Overworld,
+                starter_content: StarterContentDescriptor::Wild,
                 world_topology: HorizontalTopology::UNBOUNDED,
                 chunk_x: 0,
                 chunk_z: 0,
@@ -953,6 +974,8 @@ mod tests {
             "-77",
             ARG_GENERATION_PROFILE,
             "authored-only",
+            ARG_STARTER_CONTENT,
+            "intro-homestead-v1",
             ARG_WORLD_TOPOLOGY,
             "cylinder-x:32",
             ARG_RENDER_DISTANCE,
@@ -973,6 +996,7 @@ mod tests {
         for (key, value) in [
             (QUERY_SEED, "-77"),
             (QUERY_GENERATION_PROFILE, "authored-only"),
+            (QUERY_STARTER_CONTENT, "intro-homestead-v1"),
             (QUERY_WORLD_TOPOLOGY, "cylinder-x:32"),
             (QUERY_RENDER_DISTANCE, "6"),
             (QUERY_REMOTE_WS_URL, "example.test:25565"),
@@ -1003,6 +1027,8 @@ mod tests {
             "-77",
             ARG_GENERATION_PROFILE,
             "authored-only",
+            ARG_STARTER_CONTENT,
+            "intro-homestead-v1",
             ARG_WORLD_TOPOLOGY,
             "cylinder-x:32",
             ARG_CHUNK_X,
@@ -1040,6 +1066,7 @@ mod tests {
             StartupSceneOptions {
                 seed: -77,
                 world_generation_profile: WorldGenerationProfile::authored_only(),
+                starter_content: StarterContentDescriptor::IntroHomesteadV1,
                 world_topology: HorizontalTopology::new(
                     AxisTopology::periodic(0, 32),
                     AxisTopology::Unbounded,
@@ -1330,6 +1357,7 @@ mod tests {
         for (key, value) in [
             (QUERY_SEED, "-77"),
             (QUERY_GENERATION_PROFILE, "authored-only"),
+            (QUERY_STARTER_CONTENT, "intro-homestead-v1"),
             (QUERY_CHUNK_X, "4"),
             (QUERY_CHUNK_Z, "-3"),
             (QUERY_RENDER_DISTANCE, "6"),
@@ -1369,6 +1397,7 @@ mod tests {
             StartupSceneOptions {
                 seed: -77,
                 world_generation_profile: WorldGenerationProfile::authored_only(),
+                starter_content: StarterContentDescriptor::IntroHomesteadV1,
                 world_topology: HorizontalTopology::new(
                     AxisTopology::periodic(0, 32),
                     AxisTopology::Unbounded,
