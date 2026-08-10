@@ -524,14 +524,14 @@ mclone_run_session_smoke() {
             mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 36 * scale)) "pause Quit To Title"
             mclone_android_tap_pixel "$serial" "$center_x" $((center_y - 12 * scale)) "title Singleplayer"
             mclone_android_tap_pixel "$serial" $((center_x - 46 * scale)) $((center_y + 125 * scale)) "world-list Create"
-            mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 48 * scale)) "new-world Create World"
+            mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 80 * scale)) "new-world Create World"
             ;;
         persist-restart)
             mclone_android_tap_pixel "$serial" $((30 * scale)) $((30 * scale)) "touch menu"
             mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 36 * scale)) "pause Quit To Title"
             mclone_android_tap_pixel "$serial" "$center_x" $((center_y - 12 * scale)) "title Singleplayer"
             mclone_android_tap_pixel "$serial" $((center_x - 46 * scale)) $((center_y + 125 * scale)) "world-list Create"
-            mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 48 * scale)) "new-world Create World"
+            mclone_android_tap_pixel "$serial" "$center_x" $((center_y + 80 * scale)) "new-world Create World"
             sleep "${MCLONE_ANDROID_PERSIST_CREATE_SETTLE_SECONDS:-6}"
             mclone_android_tap_pixel "$serial" $(((width / scale - 117) * scale)) $(((height / scale - 56) * scale)) "touch Use/place block"
             sleep "${MCLONE_ANDROID_PERSIST_AFTER_PLACE_SECONDS:-2}"
@@ -569,8 +569,9 @@ mclone_check_session_smoke_log() {
     [[ -n "$smoke" ]] || return 0
     case "$smoke" in
         new-world)
-            grep -F "Mclone Android created local world seed=" "$log_path" >/dev/null 2>&1 \
-                || mclone_die "Android new-world session smoke marker was not found in $log_path"
+            if [[ "$(grep -F "Mclone Android created local world seed=" "$log_path" | wc -l | tr -d ' ')" -lt 2 ]]; then
+                mclone_die "Android new-world session smoke did not create a second local world in $log_path"
+            fi
             ;;
         persist-restart)
             grep -F "Android gameplay interaction Use submitted at" "$log_path" >/dev/null 2>&1 \
