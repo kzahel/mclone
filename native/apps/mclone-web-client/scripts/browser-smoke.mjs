@@ -7624,8 +7624,8 @@ async function probeHomesteadScoutWorker(page, baseUrl) {
       });
     });
   }, { baseUrl });
-  const expectedFlat = "6a876dfba76200d18daa42aebb3687dbfc22397096c56c12c5d321c8ff728ead";
-  const expectedMclone = "127c1066b6994cfc5a056882511bd6e26addb455c9fa75298f523217e62d3c32";
+  const expectedFlat = "b3a5541432ca00a743d92d1c9f69d94f572bbee3666736e9ad5e0c826c45db89";
+  const expectedMclone = "d3c809872b73fdac422137e43dbd4599232ce72df17dfa604d81ae8a8b22a4af";
   if (
     !witness?.ok
     || witness.kind !== "homestead-scout-witness"

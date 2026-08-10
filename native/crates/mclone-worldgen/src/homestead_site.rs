@@ -11,13 +11,13 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
 use crate::levelgen::{
-    McloneOverworldBiomeRecipe, McloneOverworldSamplingTopology, McloneOverworldSurveySampler,
-    mclone_overworld_biome_recipe,
+    MCLONE_OVERWORLD_SEA_LEVEL, McloneOverworldBiomeRecipe, McloneOverworldSamplingTopology,
+    McloneOverworldSurveySampler, mclone_overworld_biome_recipe,
 };
 
-pub const HOMESTEAD_SCOUT_REVISION: &str = "intro-homestead-scout-v1";
+pub const HOMESTEAD_SCOUT_REVISION: &str = "intro-homestead-scout-v2";
 pub const HOMESTEAD_FLAT_WASM_WITNESS_SHA256: &str =
-    "6a876dfba76200d18daa42aebb3687dbfc22397096c56c12c5d321c8ff728ead";
+    "b3a5541432ca00a743d92d1c9f69d94f572bbee3666736e9ad5e0c826c45db89";
 pub const PRIMARY_SEARCH_RADIUS: i32 = 384;
 pub const PRIMARY_LATTICE_SPACING: i32 = 32;
 pub const FALLBACK_SEARCH_RADIUS: i32 = 768;
@@ -30,6 +30,112 @@ pub const MAX_CANDIDATE_ROTATION_EVALUATIONS: usize = 4_096;
 const CORE_SAMPLE_STEP: i32 = 16;
 const RETAINED_CANDIDATES: usize = 24;
 const TIE_DOMAIN: u64 = 0x686f_6d65_7374_6561;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct HomesteadFoundationGradeSpec {
+    pub region_id: &'static str,
+    pub forward_min: i32,
+    pub forward_max: i32,
+    pub right_min: i32,
+    pub right_max: i32,
+    pub feather_blocks: u8,
+}
+
+const FULL_FOUNDATION_GRADES: [HomesteadFoundationGradeSpec; 3] = [
+    HomesteadFoundationGradeSpec {
+        region_id: "cottage-foundation-v1",
+        forward_min: -36,
+        forward_max: -16,
+        right_min: -45,
+        right_max: -25,
+        feather_blocks: 3,
+    },
+    HomesteadFoundationGradeSpec {
+        region_id: "barn-foundation-v1",
+        forward_min: 3,
+        forward_max: 33,
+        right_min: -46,
+        right_max: -25,
+        feather_blocks: 3,
+    },
+    HomesteadFoundationGradeSpec {
+        region_id: "coop-foundation-v1",
+        forward_min: 10,
+        forward_max: 29,
+        right_min: 17,
+        right_max: 32,
+        feather_blocks: 2,
+    },
+];
+
+const COMPACT_FOUNDATION_GRADES: [HomesteadFoundationGradeSpec; 3] = [
+    HomesteadFoundationGradeSpec {
+        region_id: "cottage-foundation-v1",
+        forward_min: -31,
+        forward_max: -13,
+        right_min: -32,
+        right_max: -14,
+        feather_blocks: 3,
+    },
+    HomesteadFoundationGradeSpec {
+        region_id: "barn-foundation-v1",
+        forward_min: 3,
+        forward_max: 31,
+        right_min: -32,
+        right_max: -15,
+        feather_blocks: 3,
+    },
+    HomesteadFoundationGradeSpec {
+        region_id: "coop-foundation-v1",
+        forward_min: 10,
+        forward_max: 29,
+        right_min: 13,
+        right_max: 28,
+        feather_blocks: 2,
+    },
+];
+
+const FULL_PATH_CONTROL_RIGHT_OFFSETS: [i32; 7] = [0, -1, -3, -4, -2, 1, 0];
+const COMPACT_PATH_CONTROL_RIGHT_OFFSETS: [i32; 5] = [0, -2, -3, -1, 0];
+
+pub const fn homestead_foundation_grade_specs(
+    tier: HomesteadCompositionTier,
+) -> &'static [HomesteadFoundationGradeSpec] {
+    match tier {
+        HomesteadCompositionTier::FullV1 => &FULL_FOUNDATION_GRADES,
+        HomesteadCompositionTier::CompactV1 => &COMPACT_FOUNDATION_GRADES,
+    }
+}
+
+pub const fn homestead_path_min_forward(tier: HomesteadCompositionTier) -> i32 {
+    match tier {
+        HomesteadCompositionTier::FullV1 => -48,
+        HomesteadCompositionTier::CompactV1 => -32,
+    }
+}
+
+pub const fn homestead_path_control_right_offsets(
+    tier: HomesteadCompositionTier,
+) -> &'static [i32] {
+    match tier {
+        HomesteadCompositionTier::FullV1 => &FULL_PATH_CONTROL_RIGHT_OFFSETS,
+        HomesteadCompositionTier::CompactV1 => &COMPACT_PATH_CONTROL_RIGHT_OFFSETS,
+    }
+}
+
+pub const fn homestead_path_right_bounds(tier: HomesteadCompositionTier) -> (i32, i32) {
+    match tier {
+        HomesteadCompositionTier::FullV1 => (-8, 5),
+        HomesteadCompositionTier::CompactV1 => (-7, 4),
+    }
+}
+
+pub const fn homestead_pond_right_bounds(tier: HomesteadCompositionTier) -> (i32, i32) {
+    match tier {
+        HomesteadCompositionTier::FullV1 => (22, 35),
+        HomesteadCompositionTier::CompactV1 => (18, 28),
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
@@ -144,7 +250,9 @@ impl HomesteadSurveySource for McloneOverworldHomesteadSurveySource {
         let sample = HomesteadSurveyColumn {
             surface_y: terrain.surface_y,
             slope_milli: quantize_unit(landform.slope),
-            fluid: terrain.watercourse.is_water() || terrain.continentalness <= 0.0,
+            fluid: terrain.watercourse.is_water()
+                || terrain.continentalness <= 0.0
+                || terrain.surface_y < MCLONE_OVERWORLD_SEA_LEVEL,
             protected_content: planned_stream_start.is_some(),
             meadow_milli,
             woodland_milli,
@@ -266,6 +374,8 @@ pub struct HomesteadScoutReceipt {
     pub evaluation_count: usize,
     pub unique_anchor_count: usize,
     pub survey_sample_count: usize,
+    pub footprint_refinement_count: usize,
+    pub footprint_sample_count: usize,
     pub primary_evaluations: usize,
     pub fallback_evaluations: usize,
     pub full_fit_count: usize,
@@ -428,8 +538,158 @@ pub fn scout_homestead_site(
     request: HomesteadScoutRequest,
 ) -> Result<HomesteadScoutReceipt, HomesteadScoutError> {
     let candidates = compile_homestead_candidates(request)?;
-    let evaluations = evaluate_homestead_candidates(source, request, candidates)?;
-    finalize_homestead_evaluations(request, evaluations)
+    let mut evaluations = evaluate_homestead_candidates(source, request, candidates)?;
+    let refinement = refine_homestead_footprints(source, request, &mut evaluations)?;
+    let mut receipt = finalize_homestead_evaluations(request, evaluations)?;
+    receipt.footprint_refinement_count = refinement.candidate_count;
+    receipt.footprint_sample_count = refinement.sample_count;
+    Ok(receipt)
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+struct HomesteadFootprintRefinementStats {
+    candidate_count: usize,
+    sample_count: usize,
+}
+
+fn refine_homestead_footprints(
+    source: &mut impl HomesteadSurveySource,
+    request: HomesteadScoutRequest,
+    evaluations: &mut [HomesteadCandidateEvaluation],
+) -> Result<HomesteadFootprintRefinementStats, HomesteadScoutError> {
+    let mut stats = HomesteadFootprintRefinementStats::default();
+    for (pass, tier) in [
+        (
+            HomesteadScoutPass::Primary,
+            HomesteadCompositionTier::FullV1,
+        ),
+        (
+            HomesteadScoutPass::Primary,
+            HomesteadCompositionTier::CompactV1,
+        ),
+        (
+            HomesteadScoutPass::Fallback,
+            HomesteadCompositionTier::FullV1,
+        ),
+        (
+            HomesteadScoutPass::Fallback,
+            HomesteadCompositionTier::CompactV1,
+        ),
+    ] {
+        let mut candidates = evaluations
+            .iter()
+            .enumerate()
+            .filter(|(_, evaluation)| evaluation.candidate.pass == pass)
+            .filter(|(_, evaluation)| score_for_tier(evaluation, tier).is_some())
+            .map(|(index, evaluation)| {
+                (
+                    index,
+                    *score_for_tier(evaluation, tier).unwrap(),
+                    evaluation.candidate,
+                )
+            })
+            .collect::<Vec<_>>();
+        candidates.sort_by_key(|(_, score, candidate)| (*score, *candidate));
+
+        for (index, _, candidate) in candidates {
+            stats.candidate_count += 1;
+            let (rejection, sample_count) =
+                exact_footprint_rejection(source, request.topology, candidate, tier)?;
+            stats.sample_count = stats.sample_count.saturating_add(sample_count);
+            let Some(rejection) = rejection else {
+                return Ok(stats);
+            };
+            let evaluation = &mut evaluations[index];
+            match tier {
+                HomesteadCompositionTier::FullV1 => {
+                    evaluation.full_rejection = Some(rejection);
+                    evaluation.full_score = None;
+                }
+                HomesteadCompositionTier::CompactV1 => {
+                    evaluation.compact_rejection = Some(rejection);
+                    evaluation.compact_score = None;
+                }
+            }
+        }
+    }
+    Ok(stats)
+}
+
+fn exact_footprint_rejection(
+    source: &mut impl HomesteadSurveySource,
+    topology: HorizontalTopology,
+    candidate: HomesteadCandidate,
+    tier: HomesteadCompositionTier,
+) -> Result<(Option<HomesteadSiteRejection>, usize), HomesteadScoutError> {
+    let mut local_columns = BTreeSet::new();
+    for grade in homestead_foundation_grade_specs(tier) {
+        let feather = i32::from(grade.feather_blocks);
+        append_local_bounds(
+            &mut local_columns,
+            grade.forward_min - feather,
+            grade.forward_max + feather,
+            grade.right_min - feather,
+            grade.right_max + feather,
+        );
+    }
+    let (path_right_min, path_right_max) = homestead_path_right_bounds(tier);
+    append_local_bounds(
+        &mut local_columns,
+        homestead_path_min_forward(tier),
+        2,
+        path_right_min,
+        path_right_max,
+    );
+    let (pond_right_min, pond_right_max) = homestead_pond_right_bounds(tier);
+    append_local_bounds(
+        &mut local_columns,
+        -13,
+        4,
+        pond_right_min - 1,
+        pond_right_max + 1,
+    );
+
+    let mut sampled = 0;
+    for (forward, right) in local_columns {
+        let (raw_x, raw_z) = local_to_world(candidate, forward, right);
+        let Some(pos) = topology.canonicalize_block(BlockPos::new(raw_x, 0, raw_z)) else {
+            return Ok((Some(HomesteadSiteRejection::OutsideTopology), sampled));
+        };
+        let sample = source
+            .sample_column(pos.x, pos.z)
+            .map_err(HomesteadScoutError::Survey)?;
+        sampled += 1;
+        if sample.protected_content {
+            return Ok((Some(HomesteadSiteRejection::ProtectedContent), sampled));
+        }
+        if sample.fluid {
+            return Ok((Some(HomesteadSiteRejection::BuildingCoreWater), sampled));
+        }
+    }
+    Ok((None, sampled))
+}
+
+fn append_local_bounds(
+    columns: &mut BTreeSet<(i32, i32)>,
+    forward_min: i32,
+    forward_max: i32,
+    right_min: i32,
+    right_max: i32,
+) {
+    for forward in forward_min..=forward_max {
+        for right in right_min..=right_max {
+            columns.insert((forward, right));
+        }
+    }
+}
+
+const fn local_to_world(candidate: HomesteadCandidate, forward: i32, right: i32) -> (i32, i32) {
+    match candidate.rotation {
+        HomesteadRotation::East => (candidate.anchor_x + forward, candidate.anchor_z + right),
+        HomesteadRotation::South => (candidate.anchor_x - right, candidate.anchor_z + forward),
+        HomesteadRotation::West => (candidate.anchor_x - forward, candidate.anchor_z - right),
+        HomesteadRotation::North => (candidate.anchor_x + right, candidate.anchor_z - forward),
+    }
 }
 
 pub fn finalize_homestead_evaluations(
@@ -495,6 +755,8 @@ pub fn finalize_homestead_evaluations(
         evaluation_count: evaluations.len(),
         unique_anchor_count: anchors.len(),
         survey_sample_count: anchors.len() * 57,
+        footprint_refinement_count: 0,
+        footprint_sample_count: 0,
         primary_evaluations: evaluations
             .iter()
             .filter(|value| value.candidate.pass == HomesteadScoutPass::Primary)
@@ -656,7 +918,7 @@ fn measure_site(
         target_surface_y: target,
         arrival_surface_y: samples
             .core
-            .get(&arrival_offset(candidate.rotation))
+            .get(&arrival_offset(candidate.rotation, half_extent))
             .map_or(target, |sample| sample.surface_y),
         estimated_cut_blocks: columns
             .iter()
@@ -715,7 +977,12 @@ fn reject_site(
     if metrics.fluid_samples > 0 {
         return Some(HomesteadSiteRejection::BuildingCoreWater);
     }
-    let arrival_offset = arrival_offset(candidate.rotation);
+    let half_extent = if full {
+        FULL_CORE_HALF_EXTENT
+    } else {
+        COMPACT_CORE_HALF_EXTENT
+    };
+    let arrival_offset = arrival_offset(candidate.rotation, half_extent);
     let Some(arrival) = samples.core.get(&arrival_offset) else {
         return Some(HomesteadSiteRejection::UnsafeArrival);
     };
@@ -813,7 +1080,7 @@ fn selected_site(
         HomesteadCompositionTier::FullV1 => FULL_CORE_HALF_EXTENT,
         HomesteadCompositionTier::CompactV1 => COMPACT_CORE_HALF_EXTENT,
     };
-    let (arrival_dx, arrival_dz) = arrival_offset(evaluation.candidate.rotation);
+    let (arrival_dx, arrival_dz) = arrival_offset(evaluation.candidate.rotation, half_extent);
     SelectedHomesteadSite {
         candidate: evaluation.candidate,
         tier,
@@ -832,12 +1099,12 @@ fn selected_site(
     }
 }
 
-const fn arrival_offset(rotation: HomesteadRotation) -> (i32, i32) {
+const fn arrival_offset(rotation: HomesteadRotation, half_extent: i32) -> (i32, i32) {
     match rotation {
-        HomesteadRotation::North => (0, FULL_CORE_HALF_EXTENT),
-        HomesteadRotation::East => (-FULL_CORE_HALF_EXTENT, 0),
-        HomesteadRotation::South => (0, -FULL_CORE_HALF_EXTENT),
-        HomesteadRotation::West => (FULL_CORE_HALF_EXTENT, 0),
+        HomesteadRotation::North => (0, half_extent),
+        HomesteadRotation::East => (-half_extent, 0),
+        HomesteadRotation::South => (0, -half_extent),
+        HomesteadRotation::West => (half_extent, 0),
     }
 }
 
@@ -929,6 +1196,31 @@ mod tests {
     }
 
     #[test]
+    fn compact_arrival_starts_at_the_compact_path_edge() {
+        for rotation in HomesteadRotation::ALL {
+            let candidate = HomesteadCandidate {
+                anchor_x: 123,
+                anchor_z: -456,
+                offset_x: 0,
+                offset_z: 0,
+                rotation,
+                pass: HomesteadScoutPass::Primary,
+            };
+            let local_path_start = local_to_world(
+                candidate,
+                homestead_path_min_forward(HomesteadCompositionTier::CompactV1),
+                0,
+            );
+            let (dx, dz) = arrival_offset(rotation, COMPACT_CORE_HALF_EXTENT);
+
+            assert_eq!(
+                local_path_start,
+                (candidate.anchor_x + dx, candidate.anchor_z + dz)
+            );
+        }
+    }
+
+    #[test]
     fn flat_canary_selects_identically_across_orders_and_partitions() {
         let request = request(8_675_309);
         let candidates = compile_homestead_candidates(request).unwrap();
@@ -1000,9 +1292,94 @@ mod tests {
             .into_iter()
             .flat_map(|handle| handle.join().unwrap())
             .collect::<Vec<_>>();
-        let threaded = finalize_homestead_evaluations(request, threaded).unwrap();
+        let mut threaded = threaded;
+        let refinement = refine_homestead_footprints(
+            &mut FlatGrassHomesteadSurveySource,
+            request,
+            &mut threaded,
+        )
+        .unwrap();
+        let mut threaded = finalize_homestead_evaluations(request, threaded).unwrap();
+        threaded.footprint_refinement_count = refinement.candidate_count;
+        threaded.footprint_sample_count = refinement.sample_count;
         let serial = scout_homestead_site(&mut FlatGrassHomesteadSurveySource, request).unwrap();
         assert_eq!(threaded, serial);
+    }
+
+    #[test]
+    fn exact_footprint_refinement_rejects_water_between_coarse_samples() {
+        #[derive(Clone, Copy)]
+        struct SingleFluidColumn {
+            x: i32,
+            z: i32,
+        }
+
+        impl HomesteadSurveySource for SingleFluidColumn {
+            fn sample_column(
+                &mut self,
+                world_x: i32,
+                world_z: i32,
+            ) -> Result<HomesteadSurveyColumn, String> {
+                Ok(HomesteadSurveyColumn {
+                    surface_y: 3,
+                    fluid: world_x == self.x && world_z == self.z,
+                    meadow_milli: 1_000,
+                    ..HomesteadSurveyColumn::default()
+                })
+            }
+        }
+
+        let request = request(8_675_309);
+        let coarse = scout_homestead_site(&mut FlatGrassHomesteadSurveySource, request).unwrap();
+        let coarse_candidate = coarse.selected.unwrap().candidate;
+        let (x, z) = local_to_world(
+            coarse_candidate,
+            homestead_path_min_forward(HomesteadCompositionTier::FullV1) + 1,
+            0,
+        );
+        assert_ne!(
+            x.rem_euclid(CORE_SAMPLE_STEP),
+            request.provisional_spawn.x.rem_euclid(CORE_SAMPLE_STEP)
+        );
+        let refined = scout_homestead_site(&mut SingleFluidColumn { x, z }, request).unwrap();
+
+        assert_ne!(refined.selected.unwrap().candidate, coarse_candidate);
+        assert!(refined.footprint_refinement_count >= 2);
+        assert!(refined.footprint_sample_count > 0);
+    }
+
+    #[test]
+    fn production_survey_marks_sub_sea_foundation_columns_as_fluid() {
+        let candidate = HomesteadCandidate {
+            pass: HomesteadScoutPass::Primary,
+            offset_x: 0,
+            offset_z: 0,
+            anchor_x: 744,
+            anchor_z: -376,
+            rotation: HomesteadRotation::East,
+        };
+        let mut source = McloneOverworldHomesteadSurveySource::new(
+            8_675_309,
+            McloneOverworldSamplingTopology::Unbounded,
+        );
+        let mut submerged_columns = 0;
+        for grade in homestead_foundation_grade_specs(HomesteadCompositionTier::FullV1) {
+            for forward in grade.forward_min..=grade.forward_max {
+                for right in grade.right_min..=grade.right_max {
+                    let (x, z) = local_to_world(candidate, forward, right);
+                    let sample = source.sample_column(x, z).unwrap();
+                    if sample.surface_y < MCLONE_OVERWORLD_SEA_LEVEL {
+                        submerged_columns += 1;
+                        assert!(sample.fluid, "sub-sea column ({x}, {z}) must be wet");
+                    }
+                }
+            }
+        }
+
+        assert!(
+            submerged_columns > 0,
+            "fixture must cover the rejected wet site"
+        );
     }
 
     #[cfg(not(target_arch = "wasm32"))]

@@ -11,7 +11,9 @@ use mclone_core::{AxisTopology, BlockPos, ChunkPos, HorizontalTopology};
 use mclone_worldgen::homestead_site::{
     FlatGrassHomesteadSurveySource, HomesteadBounds2d, HomesteadCompositionTier, HomesteadRotation,
     HomesteadScoutReceipt, HomesteadScoutRequest, HomesteadSurveySource,
-    McloneOverworldHomesteadSurveySource, SelectedHomesteadSite, scout_homestead_site,
+    McloneOverworldHomesteadSurveySource, SelectedHomesteadSite, homestead_foundation_grade_specs,
+    homestead_path_control_right_offsets, homestead_path_min_forward, homestead_path_right_bounds,
+    homestead_pond_right_bounds, scout_homestead_site,
 };
 use mclone_worldgen::levelgen::McloneOverworldSamplingTopology;
 use mclone_worldgen::structure_json::{CanonicalStructureRecord, load_canonical_structure_json};
@@ -24,8 +26,8 @@ use crate::{
 };
 
 pub const INTRO_HOMESTEAD_PLAN_SCHEMA_VERSION: u32 = 1;
-pub const INTRO_HOMESTEAD_PLANNER_REVISION: u32 = 1;
-pub const INTRO_HOMESTEAD_COMPOSITION_REVISION: u32 = 1;
+pub const INTRO_HOMESTEAD_PLANNER_REVISION: u32 = 2;
+pub const INTRO_HOMESTEAD_COMPOSITION_REVISION: u32 = 2;
 pub const INTRO_HOMESTEAD_PLAN_RECORD_REVISION: u64 = 1;
 
 const COTTAGE_STANDARD_JSON: &str = include_str!(concat!(
@@ -420,6 +422,7 @@ pub fn compile_intro_homestead_plan(
         HomesteadCompositionTier::CompactV1 => 32,
     };
 
+    let (path_right_min, path_right_max) = homestead_path_right_bounds(selected.tier);
     pieces.push(semantic_piece(
         "grade-v1",
         HomesteadPlanPieceKind::Grading,
@@ -433,7 +436,13 @@ pub fn compile_intro_homestead_plan(
         "arrival-path-v1",
         HomesteadPlanPieceKind::ArrivalPath,
         "mclone:intro-homestead-arrival-path-v1",
-        local_bounds(&selected, tier_min_forward(selected.tier), 2, -5, 5),
+        local_bounds(
+            &selected,
+            homestead_path_min_forward(selected.tier),
+            2,
+            path_right_min,
+            path_right_max,
+        ),
         surface_y - 2,
         surface_y + 1,
         topology,
@@ -477,11 +486,7 @@ pub fn compile_intro_homestead_plan(
     pieces.sort_by(|left, right| left.piece_id.cmp(&right.piece_id));
 
     let arrival_path = arrival_path(source, &selected, selected.tier)?;
-    let (pond_right_min, pond_right_max) = if selected.tier == HomesteadCompositionTier::FullV1 {
-        (22, 35)
-    } else {
-        (18, 28)
-    };
+    let (pond_right_min, pond_right_max) = homestead_pond_right_bounds(selected.tier);
     let pond_bounds = local_bounds(&selected, -12, 3, pond_right_min, pond_right_max);
     let pond_center = local_pos(&selected, -4, (pond_right_min + pond_right_max) / 2);
     let pond_surface = source
@@ -736,42 +741,21 @@ fn grade_regions(
     selected: &SelectedHomesteadSite,
     tier: HomesteadCompositionTier,
 ) -> Result<Vec<HomesteadGradeRegion>, String> {
-    let compact = tier == HomesteadCompositionTier::CompactV1;
-    let layouts = [
-        (
-            "cottage-foundation-v1",
-            if compact { -31 } else { -36 },
-            if compact { -13 } else { -16 },
-            if compact { -32 } else { -45 },
-            if compact { -14 } else { -25 },
-            3,
-        ),
-        (
-            "barn-foundation-v1",
-            3,
-            if compact { 31 } else { 33 },
-            if compact { -32 } else { -46 },
-            if compact { -15 } else { -25 },
-            3,
-        ),
-        (
-            "coop-foundation-v1",
-            10,
-            if compact { 29 } else { 29 },
-            if compact { 13 } else { 17 },
-            if compact { 28 } else { 32 },
-            2,
-        ),
-    ];
-    layouts
-        .into_iter()
-        .map(|(id, f0, f1, r0, r1, feather)| {
-            let bounds = local_bounds(selected, f0, f1, r0, r1);
+    homestead_foundation_grade_specs(tier)
+        .iter()
+        .map(|spec| {
+            let bounds = local_bounds(
+                selected,
+                spec.forward_min,
+                spec.forward_max,
+                spec.right_min,
+                spec.right_max,
+            );
             Ok(HomesteadGradeRegion {
-                region_id: id.to_owned(),
+                region_id: spec.region_id.to_owned(),
                 target_surface_y: median_surface(source, bounds)?,
                 bounds,
-                feather_blocks: feather,
+                feather_blocks: spec.feather_blocks,
             })
         })
         .collect()
@@ -799,11 +783,12 @@ fn arrival_path(
     selected: &SelectedHomesteadSite,
     tier: HomesteadCompositionTier,
 ) -> Result<HomesteadPathPlan, String> {
-    let start = tier_min_forward(tier);
+    let start = homestead_path_min_forward(tier);
+    let right_offsets = homestead_path_control_right_offsets(tier);
     let mut controls = Vec::new();
     let mut previous = None;
-    for forward in (start..=0).step_by(8) {
-        let point = local_pos(selected, forward, 0);
+    for (index, forward) in (start..=0).step_by(8).enumerate() {
+        let point = local_pos(selected, forward, right_offsets[index]);
         let natural = source.sample_column(point.x, point.z)?.surface_y;
         let target = previous.map_or(natural, |previous: i32| {
             natural.clamp(previous - 1, previous + 1)
@@ -815,7 +800,7 @@ fn arrival_path(
     }
     Ok(HomesteadPathPlan {
         path_id: "arrival-path-v1".to_owned(),
-        width_blocks: 5,
+        width_blocks: 3,
         feather_blocks: 2,
         controls,
     })
@@ -882,13 +867,6 @@ fn layout_rotation(facing: HomesteadRotation) -> HomesteadPlanTemplateRotation {
         HomesteadRotation::South => HomesteadPlanTemplateRotation::Clockwise90,
         HomesteadRotation::West => HomesteadPlanTemplateRotation::Clockwise180,
         HomesteadRotation::North => HomesteadPlanTemplateRotation::CounterClockwise90,
-    }
-}
-
-fn tier_min_forward(tier: HomesteadCompositionTier) -> i32 {
-    match tier {
-        HomesteadCompositionTier::FullV1 => -48,
-        HomesteadCompositionTier::CompactV1 => -32,
     }
 }
 
@@ -976,6 +954,22 @@ mod tests {
         assert_eq!(plan.pieces.len(), 10);
         assert_eq!(plan.grade_regions.len(), 3);
         assert_eq!(plan.resident_markers.len(), 2);
+        assert_eq!(plan.arrival_path.width_blocks, 3);
+        assert_eq!(
+            plan.arrival_path.controls.first().unwrap().pos,
+            plan.selected_site.arrival
+        );
+        let first = plan.arrival_path.controls.first().unwrap().pos;
+        let last = plan.arrival_path.controls.last().unwrap().pos;
+        assert!(
+            plan.arrival_path.controls[1..plan.arrival_path.controls.len() - 1]
+                .iter()
+                .any(|control| {
+                    let point = control.pos;
+                    (point[0] - first[0]) * (last[2] - first[2])
+                        != (point[2] - first[2]) * (last[0] - first[0])
+                })
+        );
         assert!(plan.saved_data_record().unwrap().bytes.len() < 64 * 1024);
         let decoded = decode_intro_homestead_plan(&plan.saved_data_record().unwrap()).unwrap();
         assert_eq!(decoded, plan);
@@ -993,23 +987,27 @@ mod tests {
     #[test]
     fn accepted_mclone_showcase_compiles_through_the_production_scout() {
         let plan = realize_intro_homestead_plan(
-            8_675_309,
+            0,
             WorldGenerationProfile::McloneOverworldV1,
             HorizontalTopology::UNBOUNDED,
         )
         .unwrap();
-        assert_eq!(plan.selected_site.candidate.anchor_x, 744);
-        assert_eq!(plan.selected_site.candidate.anchor_z, -376);
-        assert_eq!(plan.selected_site.facing, HomesteadRotation::East);
-        assert_eq!(plan.selected_site.arrival, [696, 63, -376]);
+        assert_eq!(plan.selected_site.candidate.anchor_x, -200);
+        assert_eq!(plan.selected_site.candidate.anchor_z, -1384);
+        assert_eq!(plan.selected_site.facing, HomesteadRotation::North);
+        assert_eq!(plan.selected_site.arrival, [-200, 89, -1352]);
+        assert_eq!(
+            plan.arrival_path.controls.first().unwrap().pos,
+            plan.selected_site.arrival
+        );
         assert_eq!(
             plan.scout_checksum_sha256,
-            "127c1066b6994cfc5a056882511bd6e26addb455c9fa75298f523217e62d3c32"
+            "d3c809872b73fdac422137e43dbd4599232ce72df17dfa604d81ae8a8b22a4af"
         );
         assert_eq!(
             plan,
             realize_intro_homestead_plan(
-                8_675_309,
+                0,
                 WorldGenerationProfile::McloneOverworldV1,
                 HorizontalTopology::UNBOUNDED,
             )
@@ -1017,7 +1015,7 @@ mod tests {
         );
         assert_eq!(
             plan.checksum_sha256,
-            "d6fa4657806865193d688dfba6d743895e630ef60b34eb75cfac2711a7faa8ec"
+            "5daca45d879b28e72a7781e3c0e473264071660e817a34b6dfeeaa83543509ee"
         );
     }
 
@@ -1033,7 +1031,7 @@ mod tests {
                 .as_nanos()
         ));
         let definition =
-            DimensionDefinition::overworld(8_675_309, WorldGenerationProfile::McloneOverworldV1);
+            DimensionDefinition::overworld(0, WorldGenerationProfile::McloneOverworldV1);
 
         let first_checksum = {
             let store = SqliteWorldStore::open_world_dir(&root).unwrap();

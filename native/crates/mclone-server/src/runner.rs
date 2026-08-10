@@ -1926,7 +1926,7 @@ mod native {
 
         #[test]
         fn transient_homestead_runner_initializes_plan_before_generation() {
-            let seed = 8_675_309;
+            let seed = 0;
             let plan = crate::realize_intro_homestead_plan(
                 seed,
                 WorldGenerationProfile::McloneOverworldV1,

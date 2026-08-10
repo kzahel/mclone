@@ -51,7 +51,7 @@ pub fn mclone_web_homestead_flat_witness() -> Result<String, JsValue> {
         .checksum_sha256)
 }
 
-/// Run the production Mclone scout receipt used for the R1 browser budget.
+/// Run the production Mclone scout receipt used for the current browser budget.
 #[cfg(target_arch = "wasm32")]
 #[wasm_bindgen::prelude::wasm_bindgen]
 pub fn mclone_web_homestead_mclone_witness() -> Result<String, JsValue> {
@@ -63,7 +63,7 @@ pub fn mclone_web_homestead_mclone_witness() -> Result<String, JsValue> {
         McloneOverworldSamplingTopology, mclone_overworld_spawn_chunk,
     };
 
-    let seed = 8_675_309;
+    let seed = 0;
     let spawn = mclone_overworld_spawn_chunk(seed);
     let receipt = scout_homestead_site(
         &mut McloneOverworldHomesteadSurveySource::new(

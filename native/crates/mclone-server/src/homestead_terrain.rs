@@ -187,6 +187,9 @@ impl IntroHomesteadTerrainOverlay {
                 let Some(grade) = selected else {
                     continue;
                 };
+                if !grade.path_surface && grade.desired_surface_y == natural_surface_y {
+                    continue;
+                }
                 let depth = natural_surface_y.abs_diff(grade.desired_surface_y) as u16;
                 let declared_limit = self.plan.selected_site.metrics.max_cut_or_fill_depth.max(1);
                 if depth > declared_limit {
@@ -575,10 +578,10 @@ fn pond_depth(bounds: HomesteadBounds2d, x: i32, z: i32, maximum_depth: u8) -> u
 }
 
 fn path_surface_block(x: i32, z: i32) -> u8 {
-    if (x.wrapping_mul(31) ^ z.wrapping_mul(17)).rem_euclid(7) == 0 {
-        COARSE_DIRT
-    } else {
+    if (x.wrapping_mul(31) ^ z.wrapping_mul(17)).rem_euclid(5) == 0 {
         GRAVEL
+    } else {
+        COARSE_DIRT
     }
 }
 
@@ -760,7 +763,7 @@ mod tests {
     #[test]
     fn accepted_mclone_grade_is_order_independent_bounded_and_water_closed() {
         let plan = crate::realize_intro_homestead_plan(
-            8_675_309,
+            0,
             crate::WorldGenerationProfile::McloneOverworldV1,
             HorizontalTopology::UNBOUNDED,
         )
@@ -768,8 +771,8 @@ mod tests {
         let overlay = IntroHomesteadTerrainOverlay::new(plan.clone()).unwrap();
         let reservation_chunks = overlay.touched_chunks().collect::<Vec<_>>();
         assert_eq!(reservation_chunks.len(), 121);
-        assert_eq!(reservation_chunks.first(), Some(&ChunkPos::new(41, -29)));
-        assert_eq!(reservation_chunks.last(), Some(&ChunkPos::new(51, -19)));
+        assert_eq!(reservation_chunks.first(), Some(&ChunkPos::new(-18, -92)));
+        assert_eq!(reservation_chunks.last(), Some(&ChunkPos::new(-8, -82)));
         let targets = plan
             .pieces
             .iter()
@@ -779,11 +782,11 @@ mod tests {
             .iter()
             .map(|chunk| ChunkPos::new(chunk[0], chunk[1]))
             .collect::<Vec<_>>();
-        assert_eq!(targets.len(), 49);
-        assert_eq!(targets.first(), Some(&ChunkPos::new(43, -27)));
-        assert_eq!(targets.last(), Some(&ChunkPos::new(49, -21)));
+        assert_eq!(targets.len(), 25);
+        assert_eq!(targets.first(), Some(&ChunkPos::new(-15, -89)));
+        assert_eq!(targets.last(), Some(&ChunkPos::new(-11, -85)));
         let generated = McloneOverworldFeatureDependencyCache::new()
-            .generate_features_chunks(8_675_309, targets.iter().copied())
+            .generate_features_chunks(0, targets.iter().copied())
             .chunks;
 
         let apply = |order: Vec<ChunkPos>| {
@@ -808,18 +811,18 @@ mod tests {
             receipt,
             HomesteadTerrainPlacementReceipt {
                 affected: true,
-                graded_columns: 2_726,
-                cut_blocks: 366,
-                fill_blocks: 0,
-                maximum_cut_depth: 2,
-                maximum_fill_depth: 0,
-                cleared_reserved_decorations: 3_813,
-                path_surface_blocks: 253,
-                pond_excavated_blocks: 242,
-                pond_water_blocks: 172,
-                pond_bottom_blocks: 108,
-                pond_bank_fill_blocks: 0,
-                changed_blocks: 7_519,
+                graded_columns: 1_313,
+                cut_blocks: 754,
+                fill_blocks: 732,
+                maximum_cut_depth: 3,
+                maximum_fill_depth: 2,
+                cleared_reserved_decorations: 2_439,
+                path_surface_blocks: 75,
+                pond_excavated_blocks: 76,
+                pond_water_blocks: 118,
+                pond_bottom_blocks: 78,
+                pond_bank_fill_blocks: 24,
+                changed_blocks: 4_838,
             }
         );
 
