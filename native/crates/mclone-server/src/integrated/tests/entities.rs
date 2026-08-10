@@ -1,4 +1,274 @@
 use super::*;
+use crate::MemoryWorldStore;
+
+#[test]
+fn homestead_residents_realize_by_entity_chunk_once_with_stable_ids() {
+    let definition =
+        crate::DimensionDefinition::overworld(0, WorldGenerationProfile::McloneOverworldV1);
+    let mut server = LocalRealmSession::local_integrated_with_world_store_and_dimension_definition(
+        definition,
+        Box::new(MemoryWorldStore::new()),
+    );
+    server.set_starter_content(StarterContentDescriptor::IntroHomesteadV1);
+    server.initialize_world_metadata_blocking().unwrap();
+    server.set_debug_passive_showcase_enabled(true);
+    server.set_volatile_natural_spawning_enabled(false);
+    let plan = server.intro_homestead_plan().unwrap();
+    let cow_chunk = BlockPos::new(
+        plan.resident_markers[0].pos[0],
+        plan.resident_markers[0].pos[1],
+        plan.resident_markers[0].pos[2],
+    )
+    .chunk_pos();
+    let chicken_chunk = BlockPos::new(
+        plan.resident_markers[1].pos[0],
+        plan.resident_markers[1].pos[1],
+        plan.resident_markers[1].pos[2],
+    )
+    .chunk_pos();
+
+    load_chunk_view(&mut server, cow_chunk);
+    let cows = server
+        .entities
+        .states()
+        .into_iter()
+        .filter(|entity| entity.kind == EntityKind::Cow)
+        .collect::<Vec<_>>();
+    assert_eq!(cows.len(), 2);
+    assert!(
+        server
+            .entities
+            .states()
+            .iter()
+            .all(|entity| entity.kind != EntityKind::Chicken),
+        "loading only the cow marker chunk must not realize chickens"
+    );
+    assert_eq!(
+        cows.iter()
+            .map(|entity| entity.persistent_id)
+            .collect::<Vec<_>>(),
+        vec![
+            EntityPersistentId::new(0x434f_5701_0000_0000, 1),
+            EntityPersistentId::new(0x434f_5701_0000_0000, 2),
+        ]
+    );
+
+    load_chunk_view(&mut server, chicken_chunk);
+    load_chunk_view(&mut server, cow_chunk);
+    let states = server.entities.states();
+    assert_eq!(
+        states
+            .iter()
+            .map(|entity| (entity.kind, entity.position))
+            .collect::<Vec<_>>(),
+        vec![
+            (EntityKind::Cow, Vec3d::new(-174.5, 90.0, -1412.5)),
+            (EntityKind::Cow, Vec3d::new(-174.5, 90.0, -1411.5)),
+            (EntityKind::Chicken, Vec3d::new(-177.5, 90.0, -1402.5)),
+            (EntityKind::Chicken, Vec3d::new(-176.5, 90.0, -1402.5)),
+            (EntityKind::Chicken, Vec3d::new(-176.5, 90.0, -1401.5)),
+        ],
+        "the accepted yard composition should resolve to readable safe positions"
+    );
+    assert_eq!(
+        states
+            .iter()
+            .filter(|entity| entity.kind == EntityKind::Cow)
+            .count(),
+        2
+    );
+    assert_eq!(
+        states
+            .iter()
+            .filter(|entity| entity.kind == EntityKind::Chicken)
+            .count(),
+        3
+    );
+    assert_eq!(states.len(), 5, "the debug showcase must stay suppressed");
+    assert_eq!(
+        states
+            .iter()
+            .filter(|entity| entity.kind == EntityKind::Chicken)
+            .map(|entity| entity.persistent_id)
+            .collect::<Vec<_>>(),
+        vec![
+            EntityPersistentId::new(0x4348_4943_4b01_0000, 1),
+            EntityPersistentId::new(0x4348_4943_4b01_0000, 2),
+            EntityPersistentId::new(0x4348_4943_4b01_0000, 3),
+        ]
+    );
+
+    let first_runtime_ids = states.iter().map(|entity| entity.id).collect::<Vec<_>>();
+    load_chunk_view(&mut server, ChunkPos::new(cow_chunk.x + 64, cow_chunk.z));
+    for _ in 0..256 {
+        server.try_simulation_tick_report().unwrap();
+        if server.entities.states().is_empty() {
+            break;
+        }
+    }
+    assert!(
+        server.entities.states().is_empty(),
+        "ticket-driven unload must retire the resident runtime instances"
+    );
+
+    load_chunk_view(&mut server, cow_chunk);
+    load_chunk_view(&mut server, chicken_chunk);
+    let reloaded = server.entities.states();
+    assert_eq!(reloaded.len(), 5);
+    assert!(
+        reloaded
+            .iter()
+            .all(|entity| !first_runtime_ids.contains(&entity.id))
+    );
+    assert!(
+        cow_ids_for_states(&reloaded).iter().eq([
+            EntityPersistentId::new(0x434f_5701_0000_0000, 1),
+            EntityPersistentId::new(0x434f_5701_0000_0000, 2),
+        ]
+        .iter())
+    );
+}
+
+fn cow_ids_for_states(states: &[ServerEntityState]) -> Vec<EntityPersistentId> {
+    states
+        .iter()
+        .filter(|entity| entity.kind == EntityKind::Cow)
+        .map(|entity| entity.persistent_id)
+        .collect()
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+#[test]
+fn homestead_residents_reopen_once_and_removed_residents_stay_removed() {
+    let root = std::env::temp_dir().join(format!(
+        "mclone-homestead-residents-{}-{}",
+        std::process::id(),
+        current_unix_millis()
+    ));
+    std::fs::create_dir_all(&root).unwrap();
+    let definition =
+        crate::DimensionDefinition::overworld(0, WorldGenerationProfile::McloneOverworldV1);
+    let cow_ids = [
+        EntityPersistentId::new(0x434f_5701_0000_0000, 1),
+        EntityPersistentId::new(0x434f_5701_0000_0000, 2),
+    ];
+    let chicken_ids = [
+        EntityPersistentId::new(0x4348_4943_4b01_0000, 1),
+        EntityPersistentId::new(0x4348_4943_4b01_0000, 2),
+        EntityPersistentId::new(0x4348_4943_4b01_0000, 3),
+    ];
+    let cow_chunk;
+    let chicken_chunk;
+    let edit_pos;
+
+    {
+        let mut realm = RealmServer::try_with_threaded_sqlite_world_dir_dimension_definition(
+            definition.clone(),
+            &root,
+        )
+        .unwrap();
+        realm.set_starter_content(StarterContentDescriptor::IntroHomesteadV1);
+        realm.initialize_world_metadata_blocking().unwrap();
+        let plan = realm.intro_homestead_plan().unwrap();
+        cow_chunk = BlockPos::new(
+            plan.resident_markers[0].pos[0],
+            plan.resident_markers[0].pos[1],
+            plan.resident_markers[0].pos[2],
+        )
+        .chunk_pos();
+        chicken_chunk = BlockPos::new(
+            plan.resident_markers[1].pos[0],
+            plan.resident_markers[1].pos[1],
+            plan.resident_markers[1].pos[2],
+        )
+        .chunk_pos();
+        edit_pos = BlockPos::new(
+            cow_chunk.min_block_x() + 1,
+            110,
+            cow_chunk.min_block_z() + 1,
+        );
+        let mut server = LocalRealmSession::from_server(realm);
+        server.set_debug_passive_showcase_enabled(false);
+        server.set_volatile_natural_spawning_enabled(false);
+        load_chunk_view(&mut server, cow_chunk);
+        load_chunk_view(&mut server, chicken_chunk);
+        assert!(server.scheduler_mut().set_block_at_world(edit_pos, BRICKS));
+        assert_eq!(server.entities.states().len(), 5);
+        server.shutdown_persistence().unwrap();
+    }
+
+    {
+        let mut realm = RealmServer::try_with_threaded_sqlite_world_dir_dimension_definition(
+            definition.clone(),
+            &root,
+        )
+        .unwrap();
+        realm.set_starter_content(StarterContentDescriptor::IntroHomesteadV1);
+        realm.initialize_world_metadata_blocking().unwrap();
+        let mut reopened = LocalRealmSession::from_server(realm);
+        reopened.set_debug_passive_showcase_enabled(false);
+        reopened.set_volatile_natural_spawning_enabled(false);
+        load_chunk_view(&mut reopened, cow_chunk);
+        load_chunk_view(&mut reopened, chicken_chunk);
+        let states = reopened.entities.states();
+        assert_eq!(states.len(), 5);
+        assert!(cow_ids.iter().all(|persistent_id| {
+            states
+                .iter()
+                .any(|entity| entity.persistent_id == *persistent_id)
+        }));
+        assert!(chicken_ids.iter().all(|persistent_id| {
+            states
+                .iter()
+                .any(|entity| entity.persistent_id == *persistent_id)
+        }));
+        assert_eq!(reopened.scheduler().block_at_world(edit_pos), Some(BRICKS));
+
+        let before = reopened.entities.persistent_entity_chunk_positions();
+        for persistent_id in chicken_ids {
+            reopened
+                .entities
+                .remove_persistent_entity_for_test(persistent_id)
+                .expect("persisted chicken must be removable");
+        }
+        let after = reopened.entities.persistent_entity_chunk_positions();
+        reopened.mark_entity_chunk_index_changes(before, after);
+        reopened.shutdown_persistence().unwrap();
+    }
+
+    {
+        let mut realm =
+            RealmServer::try_with_threaded_sqlite_world_dir_dimension_definition(definition, &root)
+                .unwrap();
+        realm.set_starter_content(StarterContentDescriptor::IntroHomesteadV1);
+        realm.initialize_world_metadata_blocking().unwrap();
+        let mut reopened = LocalRealmSession::from_server(realm);
+        reopened.set_debug_passive_showcase_enabled(false);
+        reopened.set_volatile_natural_spawning_enabled(false);
+        load_chunk_view(&mut reopened, chicken_chunk);
+        assert!(
+            reopened
+                .entities
+                .states()
+                .iter()
+                .all(|entity| entity.kind != EntityKind::Chicken)
+        );
+        load_chunk_view(&mut reopened, cow_chunk);
+        assert_eq!(
+            reopened
+                .entities
+                .states()
+                .iter()
+                .filter(|entity| entity.kind == EntityKind::Cow)
+                .count(),
+            2
+        );
+        assert_eq!(reopened.scheduler().block_at_world(edit_pos), Some(BRICKS));
+        reopened.shutdown_persistence().unwrap();
+    }
+
+    std::fs::remove_dir_all(root).unwrap();
+}
 
 #[test]
 fn local_and_dedicated_players_pair_symmetrically() {

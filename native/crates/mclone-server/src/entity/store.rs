@@ -441,6 +441,55 @@ impl ServerEntityStore {
         self.insert_passive_mob(id, kind, position, y_rot_degrees)
     }
 
+    pub(crate) fn ensure_persistent_passive_mob(
+        &mut self,
+        persistent_id: EntityPersistentId,
+        kind: EntityKind,
+        position: Vec3d,
+        y_rot_degrees: f32,
+    ) -> ChunkStoreResult<Option<ServerEntityState>> {
+        if let Some(existing) = self.entities.values().find(|entity| {
+            entity.alive
+                && self
+                    .persistent_ids
+                    .get(&entity.id)
+                    .is_some_and(|candidate| *candidate == persistent_id)
+        }) {
+            if existing.kind != kind {
+                return Err(ChunkStoreError::InvalidData(format!(
+                    "persistent entity {persistent_id} is {:?}, marker requested {kind:?}",
+                    existing.kind
+                )));
+            }
+            return Ok(None);
+        }
+        if self
+            .persistent_ids
+            .values()
+            .any(|candidate| *candidate == persistent_id)
+        {
+            return Err(ChunkStoreError::InvalidData(format!(
+                "persistent entity {persistent_id} has no live entity state"
+            )));
+        }
+        let position = self
+            .topology
+            .canonicalize_position(position)
+            .ok_or_else(|| {
+                ChunkStoreError::InvalidData(format!(
+                    "persistent entity {persistent_id} lies outside the dimension topology"
+                ))
+            })?;
+        let id = self.allocate_entity_id();
+        Ok(Some(self.insert_passive_mob_with_persistent_id(
+            id,
+            persistent_id,
+            kind,
+            position,
+            y_rot_degrees,
+        )))
+    }
+
     pub(crate) fn discard_volatile_entities_in_chunk(
         &mut self,
         pos: ChunkPos,
@@ -787,6 +836,17 @@ impl ServerEntityStore {
         y_rot_degrees: f32,
     ) -> ServerEntityState {
         let persistent_id = self.allocate_persistent_id();
+        self.insert_passive_mob_with_persistent_id(id, persistent_id, kind, position, y_rot_degrees)
+    }
+
+    fn insert_passive_mob_with_persistent_id(
+        &mut self,
+        id: EntityId,
+        persistent_id: EntityPersistentId,
+        kind: EntityKind,
+        position: Vec3d,
+        y_rot_degrees: f32,
+    ) -> ServerEntityState {
         let position = self
             .topology
             .canonicalize_position(position)
@@ -810,6 +870,18 @@ impl ServerEntityStore {
         self.entities.insert(id, state);
         self.persistent_ids.insert(id, persistent_id);
         state
+    }
+
+    #[cfg(test)]
+    pub(crate) fn remove_persistent_entity_for_test(
+        &mut self,
+        persistent_id: EntityPersistentId,
+    ) -> Option<ServerEntityState> {
+        let id = self
+            .persistent_ids
+            .iter()
+            .find_map(|(id, candidate)| (*candidate == persistent_id).then_some(*id))?;
+        self.remove_entity(id)
     }
 
     fn insert_item_entity(
@@ -1256,6 +1328,36 @@ mod tests {
             .mob_state(first[1])
             .expect("starter chicken mob state");
         assert_eq!(chicken_mob.available_goal_count(), 3);
+    }
+
+    #[test]
+    fn persistent_marker_identity_is_idempotent_and_kind_checked() {
+        let mut store = ServerEntityStore::default();
+        let persistent_id = EntityPersistentId::new(0x434f_5701_0000_0000, 1);
+        let position = Vec3d::new(4.5, 64.0, 4.5);
+
+        let first = store
+            .ensure_persistent_passive_mob(persistent_id, EntityKind::Cow, position, 0.0)
+            .unwrap()
+            .expect("first marker realization must insert the cow");
+        let repeated = store
+            .ensure_persistent_passive_mob(
+                persistent_id,
+                EntityKind::Cow,
+                Vec3d::new(9.5, 64.0, 9.5),
+                180.0,
+            )
+            .unwrap();
+
+        assert!(repeated.is_none());
+        assert_eq!(store.states(), vec![first]);
+        assert!(
+            store
+                .ensure_persistent_passive_mob(persistent_id, EntityKind::Chicken, position, 0.0,)
+                .unwrap_err()
+                .to_string()
+                .contains("marker requested Chicken")
+        );
     }
 
     #[test]

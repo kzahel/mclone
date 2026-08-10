@@ -166,6 +166,8 @@ pub struct DimensionRuntime {
     entities: ServerEntityStore,
     entity_tracking: EntityTracking,
     dirty_entity_chunks: BTreeSet<ChunkPos>,
+    intro_homestead_resident_chunks_seen: BTreeSet<ChunkPos>,
+    pending_intro_homestead_resident_chunks: BTreeSet<ChunkPos>,
     #[cfg(feature = "physics-engine")]
     physics: ServerPhysicsRuntime,
     #[cfg(feature = "physics-engine")]
@@ -201,6 +203,8 @@ impl DimensionRuntime {
             entities: ServerEntityStore::with_topology(topology),
             entity_tracking: EntityTracking::default(),
             dirty_entity_chunks: BTreeSet::new(),
+            intro_homestead_resident_chunks_seen: BTreeSet::new(),
+            pending_intro_homestead_resident_chunks: BTreeSet::new(),
             #[cfg(feature = "physics-engine")]
             physics: ServerPhysicsRuntime::new(),
             #[cfg(feature = "physics-engine")]
@@ -286,6 +290,14 @@ struct RealmPrimarySpawnIntent {
     preferred_position: Option<Vec3d>,
     y_rot_degrees: f32,
     x_rot_degrees: f32,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct IntroHomesteadResidentSpawn {
+    persistent_id: EntityPersistentId,
+    kind: EntityKind,
+    position: Vec3d,
+    y_rot_degrees: f32,
 }
 
 #[derive(Debug)]
@@ -3780,6 +3792,15 @@ impl RealmServer {
         for event in events {
             match event {
                 ChunkSchedulerEvent::SnapshotReady(snapshot) => {
+                    if !self.scheduler.entity_chunks_supported()
+                        && self.intro_homestead_has_residents_in_chunk(snapshot.pos)?
+                        && self
+                            .intro_homestead_resident_chunks_seen
+                            .insert(snapshot.pos)
+                    {
+                        self.pending_intro_homestead_resident_chunks
+                            .insert(snapshot.pos);
+                    }
                     self.chunk_tracking
                         .queue_snapshot_for_tracking_sources(snapshot);
                 }
@@ -3800,6 +3821,14 @@ impl RealmServer {
                 }
                 ChunkSchedulerEvent::EntityChunkLoaded { pos, record } => {
                     self.dirty_entity_chunks.remove(&pos);
+                    let realizes_homestead_residents =
+                        self.intro_homestead_has_residents_in_chunk(pos)?;
+                    if realizes_homestead_residents {
+                        self.intro_homestead_resident_chunks_seen.insert(pos);
+                        if record.is_none() {
+                            self.pending_intro_homestead_resident_chunks.insert(pos);
+                        }
+                    }
                     if let Some(record) = record {
                         let loaded = self.entities.hydrate_entity_chunk_record(&record)?;
                         let removed = self.entities.adopt_hydrated_debug_passive_showcase(&loaded);
@@ -3834,7 +3863,153 @@ impl RealmServer {
                 }
             }
         }
+        let residents = self.realize_pending_intro_homestead_residents()?;
+        self.reconcile_entity_subjects(residents, true);
         Ok(())
+    }
+
+    fn intro_homestead_has_residents_in_chunk(&self, pos: ChunkPos) -> ChunkStoreResult<bool> {
+        Ok(!self
+            .intro_homestead_resident_spawns_for_chunk(pos)?
+            .is_empty())
+    }
+
+    fn intro_homestead_resident_spawns_for_chunk(
+        &self,
+        pos: ChunkPos,
+    ) -> ChunkStoreResult<Vec<IntroHomesteadResidentSpawn>> {
+        if self.active_dimension.key != DimensionKey::overworld() {
+            return Ok(Vec::new());
+        }
+        let Some(plan) = self.intro_homestead_plan.as_ref() else {
+            return Ok(Vec::new());
+        };
+        let mut spawns = Vec::new();
+        for marker in &plan.resident_markers {
+            let kind = match marker.entity_kind.as_str() {
+                "minecraft:cow" => EntityKind::Cow,
+                "minecraft:chicken" => EntityKind::Chicken,
+                other => {
+                    return Err(ChunkStoreError::InvalidData(format!(
+                        "intro homestead resident marker {} has unsupported entity kind {other}",
+                        marker.marker_id
+                    )));
+                }
+            };
+            for index in 0..marker.count {
+                let position = Vec3d::new(
+                    f64::from(marker.pos[0]) + 0.5,
+                    f64::from(marker.pos[1]),
+                    f64::from(marker.pos[2] + i32::from(index)) + 0.5,
+                );
+                let position = self
+                    .active_dimension
+                    .definition
+                    .topology
+                    .canonicalize_position(position)
+                    .ok_or_else(|| {
+                        ChunkStoreError::InvalidData(format!(
+                            "intro homestead resident marker {} lies outside the world topology",
+                            marker.marker_id
+                        ))
+                    })?;
+                if chunk_pos_for_player_position(position) != pos {
+                    continue;
+                }
+                spawns.push(IntroHomesteadResidentSpawn {
+                    persistent_id: homestead_marker_persistent_id(marker.persistent_id, index)?,
+                    kind,
+                    position,
+                    y_rot_degrees: homestead_resident_y_rot_degrees(index),
+                });
+            }
+        }
+        Ok(spawns)
+    }
+
+    fn realize_pending_intro_homestead_residents(
+        &mut self,
+    ) -> ChunkStoreResult<Vec<ServerEntityState>> {
+        let ready_chunks = self
+            .pending_intro_homestead_resident_chunks
+            .iter()
+            .copied()
+            .filter(|pos| self.scheduler.client_visible_snapshot(*pos).is_some())
+            .collect::<Vec<_>>();
+        let mut realized = Vec::new();
+        for pos in ready_chunks {
+            let spawns = self.intro_homestead_resident_spawns_for_chunk(pos)?;
+            for spawn in spawns {
+                let position = self
+                    .find_safe_intro_homestead_resident_spawn(spawn.kind, spawn.position)
+                    .ok_or_else(|| {
+                        ChunkStoreError::InvalidData(format!(
+                            "intro homestead resident {} has no safe placement near {:?}",
+                            spawn.persistent_id,
+                            BlockPos::containing(spawn.position)
+                        ))
+                    })?;
+                if let Some(state) = self.entities.ensure_persistent_passive_mob(
+                    spawn.persistent_id,
+                    spawn.kind,
+                    position,
+                    spawn.y_rot_degrees,
+                )? {
+                    self.dirty_entity_chunks.insert(state.chunk_pos());
+                    realized.push(state);
+                }
+            }
+            self.pending_intro_homestead_resident_chunks.remove(&pos);
+        }
+        Ok(realized)
+    }
+
+    fn find_safe_intro_homestead_resident_spawn(
+        &self,
+        kind: EntityKind,
+        preferred: Vec3d,
+    ) -> Option<Vec3d> {
+        const HORIZONTAL_RADIUS: i32 = 4;
+        const VERTICAL_RADIUS: i32 = 4;
+        let intended_chunk = chunk_pos_for_player_position(preferred);
+        let base_x = preferred.x.floor() as i32;
+        let base_y = preferred.y.floor() as i32;
+        let base_z = preferred.z.floor() as i32;
+        for radius in 0..=HORIZONTAL_RADIUS {
+            for z_offset in -radius..=radius {
+                for x_offset in -radius..=radius {
+                    if x_offset.abs().max(z_offset.abs()) != radius {
+                        continue;
+                    }
+                    for vertical_step in 0..=VERTICAL_RADIUS * 2 {
+                        let y_offset = if vertical_step == 0 {
+                            0
+                        } else if vertical_step % 2 == 1 {
+                            (vertical_step + 1) / 2
+                        } else {
+                            -(vertical_step / 2)
+                        };
+                        let feet =
+                            BlockPos::new(base_x + x_offset, base_y + y_offset, base_z + z_offset);
+                        if feet.chunk_pos() != intended_chunk {
+                            continue;
+                        }
+                        if check_debug_actor_placement(kind, feet, |block| {
+                            self.scheduler.block_at_world(block)
+                        })
+                        .is_ok()
+                        {
+                            return Some(Vec3d::new(
+                                f64::from(feet.x) + 0.5,
+                                f64::from(feet.y),
+                                f64::from(feet.z) + 0.5,
+                            ));
+                        }
+                    }
+                }
+            }
+        }
+        None
     }
 
     fn route_remote_player_updates(&mut self, routes: Vec<RoutedRemotePlayerUpdate>) {
@@ -4228,7 +4403,8 @@ impl RealmServer {
             };
             position
         };
-        let showcase_enabled = self.debug_passive_showcase_enabled
+        let showcase_enabled = self.intro_homestead_plan.is_none()
+            && self.debug_passive_showcase_enabled
             && self
                 .debug_auxiliary_player_script
                 .is_none_or(|script| script.player_id != player_id);
@@ -5614,6 +5790,23 @@ fn chunk_pos_for_player_position(position: Vec3d) -> ChunkPos {
         block_to_chunk_coord(position.x.floor() as i32),
         block_to_chunk_coord(position.z.floor() as i32),
     )
+}
+
+fn homestead_marker_persistent_id(
+    bytes: [u8; 16],
+    index: u8,
+) -> ChunkStoreResult<EntityPersistentId> {
+    let most = u64::from_be_bytes(bytes[..8].try_into().expect("fixed persistent id prefix"));
+    let base_least = u64::from_be_bytes(bytes[8..].try_into().expect("fixed persistent id suffix"));
+    let least = base_least.checked_add(u64::from(index)).ok_or_else(|| {
+        ChunkStoreError::InvalidData("intro homestead resident persistent id overflow".to_owned())
+    })?;
+    Ok(EntityPersistentId::new(most, least))
+}
+
+fn homestead_resident_y_rot_degrees(index: u8) -> f32 {
+    const ROTATIONS: [f32; 4] = [0.0, 180.0, -90.0, 90.0];
+    ROTATIONS[usize::from(index) % ROTATIONS.len()]
 }
 
 fn player_record_is_usable(record: &PlayerRecord) -> bool {
