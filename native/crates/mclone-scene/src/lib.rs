@@ -6179,6 +6179,15 @@ mod tests {
         assert_eq!(harness.ui.new_world_seed(), EMULATED_XR_CREATE_SEED);
 
         assert_eq!(
+            harness.click_widget("Use Homestead Showcase"),
+            GameUiAction::ApplyHomesteadShowcasePreset
+        );
+        harness.route_emulated_ui_action(GameUiAction::ApplyHomesteadShowcasePreset);
+        assert_eq!(harness.ui.new_world_seed(), 0);
+        assert!(harness.has_widget("World: Mclone Overworld"));
+        assert!(harness.has_widget("Start: Homestead Start"));
+
+        assert_eq!(
             harness.click_widget("Create World"),
             GameUiAction::CreateCatalogWorld
         );
@@ -6190,12 +6199,32 @@ mod tests {
             .expect("catalog create queued a session start");
         match created {
             SessionStartRequest::CreateLocalWorld { options } => {
-                assert_eq!(options.seed, EMULATED_XR_CREATE_SEED);
+                assert_eq!(options.seed, 0);
                 assert_eq!(options.display_name, "New World");
                 assert!(options.requested_id.is_some());
+                assert_eq!(
+                    options.world_generation_profile,
+                    mclone_server::WorldGenerationProfile::McloneOverworldV1
+                );
+                assert_eq!(
+                    options.starter_content,
+                    mclone_server::StarterContentDescriptor::IntroHomesteadV1
+                );
             }
             other => panic!("expected local world creation start, got {other:?}"),
         }
+
+        harness.ui.set_screen(Some(GameScreen::Title));
+        harness.route_emulated_ui_action(GameUiAction::OpenWorldList);
+        let created_ui_id = harness.ui_id_for_world("New World");
+        harness.route_emulated_ui_action(GameUiAction::SelectWorld(created_ui_id));
+        harness.route_emulated_ui_action(GameUiAction::OpenWorld(created_ui_id));
+        assert_eq!(
+            harness.started_sessions.pop(),
+            Some(SessionStartRequest::open_local_world(
+                LocalWorldId::new("new-world").unwrap()
+            ))
+        );
 
         harness.ui.set_screen(Some(GameScreen::Title));
         harness.route_emulated_ui_action(GameUiAction::OpenWorldList);
@@ -6273,14 +6302,18 @@ mod tests {
         }
 
         fn existing_ui_id(&self) -> mclone_ui::WorldCatalogUiWorldId {
+            self.ui_id_for_world("Existing World")
+        }
+
+        fn ui_id_for_world(&self, display_name: &str) -> mclone_ui::WorldCatalogUiWorldId {
             self.client_experience
                 .catalog()
                 .ui_state()
                 .entries
                 .iter()
                 .flatten()
-                .find(|entry| entry.display_name.as_str() == "Existing World")
-                .expect("existing world catalog row")
+                .find(|entry| entry.display_name.as_str() == display_name)
+                .unwrap_or_else(|| panic!("{display_name} world catalog row"))
                 .id
         }
 
@@ -6478,13 +6511,15 @@ mod tests {
                             self.worlds.iter().map(|world| &world.id),
                         )
                     });
-                    let summary = LocalWorldSummary::new(
+                    let mut summary = LocalWorldSummary::new(
                         id,
                         options.display_name.clone(),
                         options.seed,
                         2_000 + self.worlds.len() as u64,
                     )
                     .unwrap();
+                    summary.world_generation_profile = options.world_generation_profile;
+                    summary.starter_content = options.starter_content;
                     self.worlds.push(summary.clone());
                     WorldCatalogResponse::WorldCreated { summary }
                 }
