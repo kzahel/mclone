@@ -10,9 +10,11 @@ completed Structure Lab and adds a Lab-native coop. Tactical
 2026-08-10. Seed `8675309`, its `full-v1` site at `(744,-376)`, and the
 east-facing arrival were accepted. Its first three slices landed orthogonal
 starter/plan identity, the first live status-owned and persisted cross-chunk
-structure canary, and a deterministic production-backed near-spawn scout. No
-farmstead blocks have been placed; Slice 3 must persist and reopen the accepted
-realized plan before grading begins.
+structure canary, and a deterministic production-backed near-spawn scout.
+Slice 3 then persisted the accepted exact plan before startup and proved
+SQLite reopen plus browser preload. No homestead blocks have been placed;
+Slice 4 owns bounded grading, arrival path, authored water, and decoration
+reservation before Human Review R2.
 The existing original terrain and procedural horizon remain foundations;
 further speculative expansion is paused unless the playable opening exposes
 a concrete blocker.**
@@ -771,26 +773,18 @@ series actually begins, not for this documentation-only planning phase.
 ## Next Work
 
 Active Tactical
-[`274`](../tactical/274-playable-intro-homestead.md) is paused at Human Review
-R1. The terrain campaign has reached a sufficient stopping point for a first
-intro: current Mclone terrain, climates, coasts, rivers, wetlands, and bounded
-streams now supply neutral survey facts, while authored pond or runnel water
-remains an accepted fallback. Richer waterfalls, drainage, and mill-compatible
-reaches are later quality work rather than prerequisites.
+[`274`](../tactical/274-playable-intro-homestead.md) is active in Slice 4 after
+Human Review R1 accepted seed `8675309`, its full coastal-meadow site, and the
+east-facing arrival. Commit `db4e0966` persists and reopens the exact accepted
+plan before startup continues. Its checksum is
+`d6fa4657806865193d688dfba6d743895e630ef60b34eb75cfac2711a7faa8ec`.
 
-Tactical 274's `FS-04` canary and `FS-06` scout are complete. The current
-human gate compares three production-backed full-tier sites. Seed `8675309` is
-recommended because its selected coastal-meadow site needs only 3,072 blocks
-of estimated earthwork and substantially less tree clearing than the other
-reviewed options. The tactical resumes only after the site and east-facing
-arrival are accepted or a tuning/re-scout direction is given. The remaining
-sequence is:
-
-1. persist and reopen the accepted realized plan before block placement;
-2. bounded terrain adaptation, reservation, buildings, authored water,
-   planting, and one-time residents; and
-3. safe arrival, save/reopen, player-edit precedence, and shareable
-   desktop/browser product-flow acceptance.
+The immediate work is bounded foundation and path grading, authored pond
+closure, and generic-decoration reservation through ordinary chunk
+materialization. Capture and inspect the unbuilt graded site before adding a
+building. Human Review R2 must reject a flattened platform, pasted stamp, or
+drainage hazard. Buildings, planting, residents, and player arrival remain
+later slices.
 
 Do not resume open-ended terrain representation, worlds-within-worlds, or
 procedural-horizon expansion during this tactical unless the playable intro

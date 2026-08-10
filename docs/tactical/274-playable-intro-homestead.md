@@ -1,10 +1,10 @@
 # Tactical 274: Playable Intro Homestead
 
 Status: **Human Review R1 accepted seed `8675309`, the `full-v1` site anchored
-at `(744,-376)`, and its east-facing arrival on 2026-08-10. Slices 0–2 are
-complete and Slice 3 is active. No farmstead blocks have been placed; the
-accepted realized plan must be persisted and reopened before grading or
-materialization begins.**
+at `(744,-376)`, and its east-facing arrival on 2026-08-10. Slices 0–3 are
+complete and Slice 4 is active. The accepted realized plan is persisted and
+reopens before world startup continues. No homestead terrain or building
+blocks have been placed yet.**
 
 Topic:
 
@@ -443,6 +443,10 @@ farmstead blocks are placed before the site and arrival direction are accepted.
 
 ### Slice 3 — showcase seed and realized plan
 
+Result: **complete** in `db4e0966`; the accepted production-selected plan has
+checksum
+`d6fa4657806865193d688dfba6d743895e630ef60b34eb75cfac2711a7faa8ec`.
+
 - Select a showcase seed from the accepted scout output rather than hand
   editing a preferred seed into the planner.
 - Review aerial terrain, site bounds, grading map, arrival sightline, scenic
@@ -453,6 +457,19 @@ farmstead blocks are placed before the site and arrival direction are accepted.
 
 Human Review R1 acceptance selects the showcase seed and site; it does not
 freeze arbitrary-seed support or create a release compatibility promise.
+
+The realized plan records the base/starter identities, planner and composition
+revisions, provisional spawn, selected score and bounds, exact pieces,
+transforms and touched chunks, foundation grades, arrival controls, authored
+water, planting reservation, resident markers, source fingerprints, fallback
+facts, scout checksum, and plan checksum. Startup saves the plan body before
+binding its identity into world metadata. SQLite create/reopen reads that
+persisted body; interrupted body-before-metadata saves recover by binding the
+valid body rather than rescoring. Fresh source instances reconstruct the same
+checksum. The shared saved-data seam is live through memory, SQLite, generic
+record executors, and browser preload. All 572 server library tests and the 42
+native web-client tests pass, and the web client checks for
+`wasm32-unknown-unknown`.
 
 ### Slice 4 — grading, reservation, and first drawable milestone
 
